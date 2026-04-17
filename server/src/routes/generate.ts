@@ -137,15 +137,23 @@ async function runGeneration(job: GenerationJob): Promise<void> {
   try {
     // Determine if we need the LM phase
     const skipLm = job.params.skipLm === true;
-    const needsLm = !skipLm && !aceReq.audio_codes &&
-      !['cover', 'cover-nofsq', 'repaint', 'lego', 'extract'].includes(aceReq.task_type || '');
+    const isCoverTask = ['cover', 'cover-nofsq', 'repaint', 'lego', 'extract'].includes(aceReq.task_type || '');
+
+    // Even when LM is "disabled", we still need it if metadata is set to Auto
+    // The LM fills in BPM, duration, key, and time signature
+    const hasAutoMetadata = !aceReq.bpm || (aceReq.duration !== undefined && aceReq.duration <= 0)
+      || !aceReq.keyscale || !aceReq.timesignature;
+    const needsMetadataOnly = skipLm && hasAutoMetadata && !isCoverTask;
+    const needsFullLm = !skipLm && !aceReq.audio_codes && !isCoverTask;
 
     let lmResults: AceRequest[] = [aceReq];
 
-    if (needsLm) {
+    if (needsFullLm || needsMetadataOnly) {
       // Phase 1: LM generation
       job.status = 'lm_running';
-      job.stage = 'Generating lyrics & metadata...';
+      job.stage = needsMetadataOnly
+        ? 'Resolving auto metadata (BPM, duration, key)...'
+        : 'Generating lyrics & metadata...';
       job.progress = 10;
 
       const lmJobId = await aceClient.submitLm(aceReq);
@@ -158,8 +166,19 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       lmResults = await resultRes.json() as AceRequest[];
       job.lmResults = lmResults;
 
+      // If user disabled LM thinking but we ran it for metadata only,
+      // strip audio_codes so synth doesn't use them
+      if (needsMetadataOnly) {
+        lmResults = lmResults.map(r => {
+          const { audio_codes, ...rest } = r;
+          return rest;
+        });
+      }
+
       job.progress = 40;
-      job.stage = 'LM complete, starting synthesis...';
+      job.stage = needsMetadataOnly
+        ? 'Metadata resolved, starting synthesis...'
+        : 'LM complete, starting synthesis...';
     }
 
     // Phase 2: Synth generation
