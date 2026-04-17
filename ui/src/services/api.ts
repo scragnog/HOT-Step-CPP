@@ -105,3 +105,9 @@ export const healthApi = {
     server: { port: number; uptime: number };
   }>('/health'),
 };
+
+// ── Shutdown ────────────────────────────────────────────────
+export const shutdownApi = {
+  quit: () => post<{ success: boolean; message: string }>('/shutdown'),
+};
+

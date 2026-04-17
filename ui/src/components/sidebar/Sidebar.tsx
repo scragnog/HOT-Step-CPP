@@ -1,10 +1,9 @@
 // Sidebar.tsx — Navigation sidebar
 //
-// Shows: logo, nav links, connection status, model info.
-// ~80 lines — one responsibility.
+// Shows: logo, nav links, connection status, model info, quit button.
 
 import React, { useEffect, useState } from 'react';
-import { modelApi } from '../../services/api';
+import { modelApi, shutdownApi } from '../../services/api';
 import type { AceModels } from '../../types';
 import './Sidebar.css';
 
@@ -31,6 +30,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onViewChange }) =>
     const timer = setInterval(check, 15000);
     return () => clearInterval(timer);
   }, []);
+
+  const handleQuit = async () => {
+    if (!confirm('Shut down HOT-Step and ace-server?')) return;
+    try {
+      await shutdownApi.quit();
+    } catch {
+      // Server is shutting down, connection will drop — that's expected
+    }
+  };
 
   const navItems = [
     { id: 'create', label: '✨ Create', icon: '🎵' },
@@ -85,6 +93,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onViewChange }) =>
           )}
         </div>
       )}
+
+      {/* Quit button */}
+      <div className="sidebar-quit">
+        <button className="btn btn-danger btn-sm w-full" onClick={handleQuit}>
+          ⏻ Quit
+        </button>
+      </div>
     </aside>
   );
 };
+

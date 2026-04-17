@@ -135,7 +135,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         <button
           className="btn btn-generate btn-lg w-full"
           onClick={handleGenerate}
-          disabled={isGenerating || !caption.trim()}
+          disabled={isGenerating || (!caption.trim() && !lyrics.trim() && !instrumental)}
         >
           {isGenerating ? (
             <>
