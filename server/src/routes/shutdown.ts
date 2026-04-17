@@ -49,14 +49,12 @@ router.post('/', (_req, res) => {
     console.log('[Server] Killing all processes...');
 
     if (process.platform === 'win32') {
-      // Kill ace-server (8085), Vite dev server (3000), then ourselves (3001)
+      // Kill ace-server and Vite by port, then exit ourselves
       killPort(8085);
       killPort(3000);
-      killPort(3001);  // This kills us — should be last
-    } else {
-      // On Linux/Mac, just exit and let the process manager handle it
-      process.exit(0);
     }
+    // Exit our own process cleanly (can't taskkill yourself)
+    process.exit(0);
   }, 300);
 });
 
