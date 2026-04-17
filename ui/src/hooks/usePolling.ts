@@ -2,7 +2,7 @@
 //
 // Automatically starts/stops based on a condition.
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 
 export function usePolling(
   fn: () => Promise<void>,

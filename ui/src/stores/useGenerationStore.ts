@@ -21,13 +21,13 @@ export function useGenerationStore(
   onSongCreated?: (song: Song) => void,
 ): GenerationStore {
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
-  const pollTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
 
   const updateJob = useCallback((jobId: string, update: Partial<GenerationJob>) => {
     setJobs(prev => prev.map(j => j.jobId === jobId ? { ...j, ...update } : j));
   }, []);
 
-  const pollJob = useCallback(async (jobId: string, token: string) => {
+  const pollJob = useCallback(async (jobId: string, _token: string) => {
     try {
       const status = await generateApi.status(jobId);
       updateJob(jobId, status);
@@ -83,7 +83,7 @@ export function useGenerationStore(
 
   const cancelAll = useCallback(async () => {
     await generateApi.cancelAll();
-    for (const [id, timer] of pollTimers.current) {
+    for (const [_id, timer] of pollTimers.current) {
       clearInterval(timer);
     }
     pollTimers.current.clear();

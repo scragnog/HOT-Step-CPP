@@ -2,7 +2,7 @@
 //
 // Drop-in replacement for useState that survives page refreshes.
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: T | ((prev: T) => T)) => void] {
   const [state, setState] = useState<T>(() => {
