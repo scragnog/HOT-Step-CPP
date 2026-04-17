@@ -38,6 +38,37 @@ function killPort(port: number): void {
   }
 }
 
+/** Walk up the process tree from our PID and kill the top-level parent.
+ *  Chain: cmd.exe → npx → tsx watch → node (us)
+ *  Killing the parent tsx/npx with /T kills everything, and
+ *  cmd.exe /c exits because its command finished. */
+function killSelf(): void {
+  try {
+    // Find our parent PID (tsx watch or npx)
+    const output = execSync(
+      `wmic process where processid=${process.pid} get parentprocessid /value`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    const match = output.match(/ParentProcessId=(\d+)/i);
+    if (match) {
+      const parentPid = match[1];
+      console.log(`[Shutdown] Killing parent PID ${parentPid} (our process tree)`);
+
+      // Spawn detached killer to kill parent after we start exiting
+      const killer = spawn('cmd.exe', [
+        '/c', `ping -n 2 127.0.0.1 > nul & taskkill /PID ${parentPid} /T /F`
+      ], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      killer.unref();
+    }
+  } catch {
+    // Fallback: just exit
+  }
+}
+
 // POST /api/shutdown — terminate everything
 router.post('/', (_req, res) => {
   console.log('[Server] Shutdown requested via API');
@@ -52,22 +83,12 @@ router.post('/', (_req, res) => {
       killPort(8085);
       killPort(3000);
 
-      // Spawn a detached process to kill US from outside after a brief delay.
-      // We can't reliably kill ourselves — process.exit() doesn't close the
-      // cmd.exe window, and taskkill on yourself deadlocks.
-      // This spawns a background cmd that waits 1 second then kills our PID.
-      const killer = spawn('cmd.exe', [
-        '/c', `ping -n 2 127.0.0.1 > nul & taskkill /PID ${process.pid} /T /F`
-      ], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      killer.unref();
+      // Kill our own process tree from outside
+      killSelf();
     }
 
-    // Also try process.exit as a fallback
-    process.exit(0);
+    // Fallback in case killSelf doesn't work
+    setTimeout(() => process.exit(0), 3000);
   }, 300);
 });
 
