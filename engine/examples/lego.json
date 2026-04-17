@@ -1,0 +1,9 @@
+{
+    "caption": "electric guitar riff, funk guitar, house music, instrumental",
+    "lyrics": "[Instrumental]",
+    "task_type": "lego",
+    "track": "guitar",
+    "inference_steps": 50,
+    "guidance_scale": 1.0,
+    "shift": 1.0
+}

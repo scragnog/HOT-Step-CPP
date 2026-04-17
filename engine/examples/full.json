@@ -1,0 +1,12 @@
+{
+    "caption": "Upbeat French house with infectious disco-inspired bassline, crisp four-on-the-floor kick pattern, wah-wah filtered guitar riffs, retro synth stabs, soulful male lead vocals with gospel-style backing harmonies, smooth saxophone accents, warm vinyl crackle texture, bright summer vibe, polished modern mix with vintage analog warmth, driving yet laid-back energy perfect for rooftop parties and sunset drives",
+    "lyrics": "[Intro - Ligne de Basse Funk & Beat House]\n\n[Verse 1]\nSous le soleil de Paris, on danse sans fin\nLa nuit s'allume, le beat nous guide\nLes étoiles scintillent au rythme du kick\nUn sourire léger, tout est si vivant\n\n[Pre-Chorus]\nLaisse-toi porter par la musique qui chante\n\n[Chorus]\nOn danse sous le ciel étoilé\nLe monde s'arrête, on s'envole\nAvec ce groove qui nous emporte\nJusqu'au matin, on ne s'arrête pas\n\n[Verse 2]\nLa ville respire au son des cuivres légers\nLes mains en l'air, on oublie le temps\nLa basse funk nous secoue les pieds\nUn été éternel, rien ne peut nous briser\n\n[Chorus]\nOn danse sous le ciel étoilé\nLe monde s'arrête, on s'envole\nAvec ce groove qui nous emporte\nJusqu'au matin, on ne s'arrête pas\n\n[Guitar Solo - Wah-Wah Funk]\n\n[Bridge - Saxophone & Cordes]\nRespire profondément, l'univers t'appelle\n\n[Outro - Synth Fade avec Craquement Vinyle]",
+    "duration": 240,
+    "bpm": 124,
+    "vocal_language": "fr",
+    "keyscale": "F# major",
+    "timesignature": "4",
+    "inference_steps": 8,
+    "guidance_scale": 1.0,
+    "shift": 3.0
+}

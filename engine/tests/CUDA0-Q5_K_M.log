@@ -1,0 +1,1353 @@
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 97247 MiB):
+  Device 0: NVIDIA RTX PRO 6000 Blackwell Workstation Edition, compute capability 12.0, VMM: yes, VRAM: 97247 MiB
+load_backend: loaded CUDA backend from /mnt/workspace/acestep.cpp/build/libggml-cuda.so
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = NVIDIA RTX PRO 6000 Blackwell Workstation Edition (NVIDIA) | uma: 0 | fp16: 1 | bf16: 0 | warp size: 32 | shared memory: 49152 | int dot: 1 | matrix cores: NV_coopmat2
+load_backend: loaded Vulkan backend from /mnt/workspace/acestep.cpp/build/libggml-vulkan.so
+load_backend: loaded CPU backend from /mnt/workspace/acestep.cpp/build/libggml-cpu-zen4.so
+[Load] DiT backend: CUDA0 (CPU threads: 16)
+[Synth-Load] Backend init: 94.1 ms
+[GGUF] ../models/acestep-v15-turbo-Q5_K_M.gguf: 678 tensors, data at offset 56864
+[DiT] Self-attn: Q+K fused, V separate
+[DiT] Cross-attn: all separate
+[DiT] MLP: gate+up fused
+[Load] null_condition_emb found (CFG available)
+[WeightCtx] Loaded 478 tensors, 1061.2 MB into backend
+[Load] DiT: 24 layers, H=2048, Nh=16/8, D=128
+[Synth-Load] DiT weight load: 454.3 ms
+[GGUF] ../models/acestep-v15-turbo-Q5_K_M.gguf: 678 tensors, data at offset 56864
+[Synth-Load] silence_latent: [15000, 64] from GGUF
+[GGUF] ../models/vae-BF16.gguf: 365 tensors, data at offset 30048
+[Load] VAE backend: CUDA0 (shared)
+[VAE] Backend: CUDA0, Weight buffer: 161.1 MB
+[VAE] Loaded: 5 blocks, upsample=1920x, F32 activations
+[Synth-Load] VAE weights: 662.3 ms
+[BPE] Loaded from GGUF: 151643 vocab, 151387 merges
+[Synth-Load] BPE tokenizer: 33.5 ms
+[Load] TextEncoder backend: CUDA0 (shared)
+[GGUF] ../models/Qwen3-Embedding-0.6B-BF16.gguf: 310 tensors, data at offset 5337568
+[Load] TextEncoder: 28L, H=1024, Nh=16/8
+[Qwen3] Attn: Q+K+V fused
+[Qwen3] MLP: gate+up fused
+[WeightCtx] Loaded 310 tensors, 1136.5 MB into backend
+[Synth-Load] TextEncoder: 133.2 ms
+[Load] CondEncoder backend: CUDA0 (shared)
+[GGUF] ../models/acestep-v15-turbo-Q5_K_M.gguf: 678 tensors, data at offset 56864
+[Load] LyricEncoder: 8L
+[Qwen3] Attn: Q+K fused, V separate
+[Qwen3] MLP: gate+up fused
+[Load] TimbreEncoder: 4L
+[Qwen3] Attn: Q+K fused, V separate
+[Qwen3] MLP: gate+up fused
+[WeightCtx] Loaded 140 tensors, 412.5 MB into backend
+[Load] CondEncoder: lyric(8L), timbre(4L), text_proj, null_cond
+[Synth-Load] ConditionEncoder: 145.5 ms
+[GGUF] ../models/acestep-v15-turbo-Q5_K_M.gguf: 678 tensors, data at offset 56864
+[WeightCtx] Loaded 30 tensors, 73.2 MB into backend
+[Load] Detokenizer: FSQ(6->2048) + 2L encoder(S=5, 2048->64)
+[Synth-Load] Detokenizer: 24.8 ms
+[GGUF] ../models/acestep-v15-turbo-Q5_K_M.gguf: 678 tensors, data at offset 56864
+[WeightCtx] Loaded 30 tensors, 73.3 MB into backend
+[Tok] Loaded: 2 layers, H=2048, pool_window=5
+[Synth-Load] Tokenizer: 24.8 ms
+[Ace-Synth] All models loaded, turbo=yes
+[Request] Parsed ggml-turbo/request0.json
+[Request] seed=42 lm_batch=1 synth_batch=1
+[Request] caption: An upbeat and anthemic pop-rock track driven by bright, slig...
+[Request] lyrics: 490 bytes
+[Request] bpm=83 dur=88 key=G major ts=4 lang=fr
+[Request] lm: temp=0.85 cfg=2.0 top_p=0.90 top_k=0
+[Request] dit: steps=8 guidance=0.0 shift=3.0
+[Request] audio_codes: (present)
+[Ace-Synth] Batch: 1 request(s)
+[Resolve-Params] max audio codes across batch: 434 (86.8s @ 5Hz)
+[Resolve-T] T=2170, S=1085
+[Resolve-T] seed=42, steps=8, guidance=1.0, shift=3.0, duration=88.0s
+[CondEnc] Lyric sliding mask: 167x167, window=128
+[CondEnc] Timbre sliding mask: 1x1, window=128
+[Encode] Packed: lyric=167 + timbre=1 + text=70 = 238 tokens
+[Encode-Text Batch0] 70+167 tokens -> enc_S=238, 19.3 ms
+[Debug] text_hidden: [70, 1024] first4: 3.652014 1.047935 0.228532 -12.907304
+[Debug] lyric_embed: [167, 1024] first4: 0.029175 0.032227 -0.022339 -0.028809
+[Debug] enc_hidden: [238, 2048] first4: 1.760389 -0.050879 -0.130835 0.059141
+[Context] Decoded: 434 codes -> 2170 frames (86.8s @ 25Hz)
+[Build-Context Batch0] Detokenizer: 106.5 ms, 434 codes
+[Debug] detok_output: [2170, 64] first4: -0.125017 1.460327 0.292545 -0.654237
+[Init-Noise Batch0] Philox noise seed=42, [2170, 64]
+[Debug] noise: [2170, 64] first4: 0.194336 2.156250 -0.171875 0.847656
+[Debug] context: [2170, 128] first4: -0.125017 1.460327 0.292545 -0.654237
+[Init-Noise] Starting: T=2170, S=1085, enc_S=238, steps=8, batch=1 (cover)
+[DiT] Batch N=1, T=2170, S=1085, enc_S=238
+[DiT] Graph: 1775 nodes
+[Debug] tproj: [12288] first4: 0.260130 -0.161413 -0.102271 0.051211
+[Debug] temb: [2048] first4: -0.000033 -0.132307 -0.035515 0.064775
+[Debug] temb_t: [2048] first4: 0.000653 0.026699 -0.052806 0.063542
+[Debug] temb_r: [2048] first4: -0.000685 -0.159005 0.017290 0.001234
+[Debug] sinusoidal_t: [256] first4: 0.562486 0.789701 0.439822 -0.023583
+[Debug] sinusoidal_r: [256] first4: 1.000000 1.000000 1.000000 1.000000
+[Debug] temb_lin1_t: [2048] first4: -0.051436 -0.053873 -0.011918 -0.038393
+[Debug] temb_lin1_r: [2048] first4: -0.016164 -0.021120 -0.015800 -0.000525
+[Debug] hidden_after_proj_in: [2048, 1085] first4: -1.043269 -0.943395 0.541080 0.455623
+[Debug] proj_in_input: [192, 2170] first4: -0.125017 1.460327 0.292545 -0.654237
+[Debug] enc_after_cond_emb: [2048, 238] first4: -0.158078 0.738352 0.324930 -0.519564
+[Debug] layer0_sa_input: [2048, 1085] first4: -0.721699 -0.748479 -0.051910 0.264453
+[Debug] layer0_q_after_rope: [128, 16] first4: -26.700098 -0.191763 0.241664 0.327243
+[Debug] layer0_k_after_rope: [128, 8] first4: -3.876794 0.412444 0.096899 0.724944
+[Debug] layer0_sa_output: [2048, 1085] first4: -1.497476 0.145466 -0.380354 0.485316
+[Debug] layer0_attn_out: [2048, 1085] first4: -27.034288 -0.127008 0.402173 0.331459
+[Debug] layer0_after_self_attn: [2048, 1085] first4: -1.540176 -1.007621 0.171218 0.466798
+[Debug] layer0_after_cross_attn: [2048, 1085] first4: -1.600916 -0.809584 -0.301690 0.494257
+[Debug] hidden_after_layer0: [2048, 1085] first4: -9.076107 0.549663 50.050392 -0.847889
+[Debug] hidden_after_layer6: [2048, 1085] first4: -20.163422 0.744906 28.379856 -4.913701
+[Debug] hidden_after_layer12: [2048, 1085] first4: -18.902534 -18.109772 67.663124 24.335327
+[Debug] hidden_after_layer18: [2048, 1085] first4: -24.546459 10.085831 60.225910 18.550278
+[Debug] hidden_after_layer23: [2048, 1085] first4: 0.238567 35.958275 194.224518 155.270752
+[Debug] dit_step0_vt: [2170, 64] first4: 0.009212 1.149334 0.305411 2.363264
+[Debug] dit_step0_xt: [2170, 64] first4: 0.193917 2.104007 -0.185757 0.740235
+[DiT] Step 1/8 t=1.000
+[Debug] dit_step1_vt: [2170, 64] first4: -0.266312 1.352245 -0.116608 1.852750
+[Debug] dit_step1_xt: [2170, 64] first4: 0.208443 2.030249 -0.179397 0.639176
+[DiT] Step 2/8 t=0.955
+[Debug] dit_step2_vt: [2170, 64] first4: -0.024486 1.265168 0.121255 2.399334
+[Debug] dit_step2_xt: [2170, 64] first4: 0.210076 1.945904 -0.187481 0.479220
+[DiT] Step 3/8 t=0.900
+[Debug] dit_step3_vt: [2170, 64] first4: 0.277363 1.119607 0.263782 2.638588
+[Debug] dit_step3_xt: [2170, 64] first4: 0.186962 1.852604 -0.209462 0.259338
+[DiT] Step 4/8 t=0.833
+[Debug] dit_step4_vt: [2170, 64] first4: 0.363272 0.932203 0.102584 2.730453
+[Debug] dit_step4_xt: [2170, 64] first4: 0.148040 1.752725 -0.220453 -0.033210
+[DiT] Step 5/8 t=0.750
+[Debug] dit_step5_vt: [2170, 64] first4: 0.408620 0.775967 -0.418184 2.705225
+[Debug] dit_step5_xt: [2170, 64] first4: 0.089666 1.641872 -0.160713 -0.419671
+[DiT] Step 6/8 t=0.643
+[Debug] dit_step6_vt: [2170, 64] first4: 0.239811 0.544997 -0.944595 2.783935
+[Debug] dit_step6_xt: [2170, 64] first4: 0.041704 1.532873 0.028206 -0.976458
+[DiT] Step 7/8 t=0.500
+[Debug] dit_step7_vt: [2170, 64] first4: 0.010834 0.362249 -1.386238 3.132467
+[Debug] dit_x0: [2170, 64] first4: 0.038454 1.424198 0.444078 -1.916198
+[DiT] Step 8/8 t=0.300
+[DiT-Generate] Total: 257.5 ms (257.5 ms/sample)
+[Debug] dit_output: [2170, 64] first4: 0.038454 1.424198 0.444078 -1.916198
+[VAE] Tiled decode: 17 tiles (chunk=256, overlap=64, stride=128)
+[VAE] Graph: 335 nodes, T_latent=192
+[VAE] Upsample factor: 1920.00 (expected ~1920)
+[VAE] Graph: 335 nodes, T_latent=256
+[VAE] Graph: 335 nodes, T_latent=186
+[VAE] Tiled decode done: 17 tiles -> T_audio=4166400 (86.80s @ 48kHz)
+[VAE-Decode Batch0] Decode: 638.2 ms
+[Debug] vae_audio: [2, 4166400] first4: 0.000879 0.001607 0.001377 0.001797
+[MP3] Encoding 86.8s @ 128 kbps, 48000 Hz stereo
+[MP3] 1388928 bytes (12.0:1), 434 ms (200.03x realtime), 32 threads
+[MP3] Wrote ggml-turbo/request00.mp3
+[Ace-Synth] All done
+2026-04-07 10:56:30.463 | DEBUG    | acestep.core.generation.handler.init_service_memory_basic:_apply_malloc_mmap_threshold:50 - [memory] Set M_MMAP_THRESHOLD=131072 for immediate OS reclaim of large frees
+2026-04-07 10:56:30.490 | WARNING  | acestep.training.lora_injection:<module>:74 - PEFT library not installed. LoRA training will not be available.
+2026-04-07 10:56:30.490 | WARNING  | acestep.training.lora_utils:<module>:17 - PEFT library not installed. LoRA training will not be available.
+2026-04-07 10:56:30.490 | WARNING  | acestep.training.lokr_utils:<module>:24 - LyCORIS library not installed. LoKr training/inference unavailable. Install with: pip install lycoris-lora
+2026-04-07 10:56:30.490 | WARNING  | acestep.training.data_module:<module>:25 - Lightning not installed. Training module will not be available.
+2026-04-07 10:56:30.491 | WARNING  | acestep.training.trainer:<module>:29 - Lightning Fabric not installed. Training will use basic training loop.
+2026-04-07 10:56:30.491 | WARNING  | acestep.training.trainer:<module>:40 - bitsandbytes not installed. Using standard AdamW.
+2026-04-07 10:56:31.545 | INFO     | acestep.core.generation.handler.init_service_loader:_load_main_model_from_checkpoint:174 - [initialize_service] Attempting to load model with attention implementation: sdpa
+2026-04-07 10:56:33.292 | INFO     | acestep.core.generation.handler.generate_music:generate_music:263 - [generate_music] Turbo model detected: overriding guidance_scale 0.0 -> 1.0 (turbo does not use CFG).
+2026-04-07 10:56:33.292 | INFO     | acestep.core.generation.handler.generate_music:generate_music:278 - [generate_music] Starting generation...
+2026-04-07 10:56:33.292 | INFO     | acestep.core.generation.handler.generate_music:generate_music:281 - [generate_music] Preparing inputs...
+2026-04-07 10:56:33.293 | INFO     | acestep.core.generation.handler.generate_music_request:_prepare_reference_and_source_audio:138 - [generate_music] %s task: no src_audio but audio codes provided, proceeding with codes
+2026-04-07 10:56:33.296 | INFO     | acestep.core.generation.handler.generate_music:_vram_preflight_check:156 - [generate_music] VRAM pre-flight: 87.84 GB free, ~0.94 GB needed (batch=1, duration=88s, mode=turbo).
+2026-04-07 10:56:33.301 | INFO     | acestep.core.generation.handler.conditioning_target:_prepare_target_latents_and_wavs:58 - [generate_music] Decoding audio codes for item 0...
+2026-04-07 10:56:33.508 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_precomputed_lm_hints:31 - [generate_music] Decoding audio codes for LM hints for item 0...
+2026-04-07 10:56:33.511 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:119 - 
+======================================================================
+2026-04-07 10:56:33.511 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:120 - 🔍 [DEBUG] DiT TEXT ENCODER INPUT (Inference)
+2026-04-07 10:56:33.511 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:121 - ======================================================================
+2026-04-07 10:56:33.511 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:122 - text_prompt:
+# Instruction
+Generate audio semantic tokens based on the given conditions:
+
+# Caption
+An upbeat and anthemic pop-rock track driven by bright, slightly overdriven
+
+# Metas
+- bpm: 83
+- timesignature: 4
+- keyscale: G major
+- duration: 88 seconds
+<|endoftext|>
+
+2026-04-07 10:56:33.511 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:123 - ======================================================================
+2026-04-07 10:56:33.511 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:124 - lyrics_text:
+# Languages
+fr
+
+# Lyric
+# Lyric
+[Intro - Guitar Riff]
+[Verse 1]
+Dans le monde des tutos virtuels
+G ta toise en nouvelle passion
+Avec Ggendoline et Pumbé à midi
+La communauté, c'est l'unité
+Quel joie, une clé
+
+[Chorus]
+Dans le monde des tutos virtuels
+Gândoline et Pumbé à midi
+Une famille à connecter, c'est vrai
+D'un enfant qui voit toi fusionner
+
+[Guitar Solo]
+
+[Verse 2]
+Dans le monde des tutos virtuels
+Gândoline, Pumbé à midi
+Une famille à connecter, c'est vrai
+D'un enfant qui voit toi fusionner<|endoftext|>
+2026-04-07 10:56:33.511 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:125 - ======================================================================
+
+2026-04-07 10:56:33.528 | INFO     | acestep.core.generation.handler.conditioning_embed:preprocess_batch:110 - [preprocess_batch] Inferring prompt embeddings...
+2026-04-07 10:56:33.543 | INFO     | acestep.core.generation.handler.conditioning_embed:preprocess_batch:113 - [preprocess_batch] Inferring lyric embeddings...
+2026-04-07 10:56:33.543 | INFO     | acestep.core.generation.handler.service_generate_execute:_execute_service_generate_diffusion:137 - [service_generate] Generating audio... (DiT backend: PyTorch (cuda))
+2026-04-07 10:56:33.567 | INFO     | acestep.core.generation.handler.service_generate_execute:_execute_service_generate_diffusion:220 - [service_generate] DiT diffusion via PyTorch (cuda)...
+2026-04-07 10:56:33.894 | INFO     | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:42 - [generate_music] Model generation completed. Decoding latents...
+2026-04-07 10:56:33.895 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:64 - [generate_music] pred_latents: torch.Size([1, 2170, 64]), dtype=torch.bfloat16
+2026-04-07 10:56:33.895 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:65 - [generate_music] time_costs: {'encoder_time_cost': 0.00684809684753418, 'diffusion_time_cost': 0.3201611042022705, 'diffusion_per_step_time_cost': 0.040020138025283813, 'total_time_cost': 0.3270092010498047, 'offload_time_cost': 0.0}
+2026-04-07 10:56:33.909 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:127 - [generate_music] Decoding latents with VAE...
+2026-04-07 10:56:33.911 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:136 - [generate_music] Before VAE decode: allocated=5.98GB, max=7.29GB
+2026-04-07 10:56:33.912 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:154 - [generate_music] Effective free VRAM before VAE decode: 87.73 GB
+2026-04-07 10:56:33.912 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:172 - [generate_music] Using tiled VAE decode to reduce VRAM usage...
+2026-04-07 10:56:33.912 | DEBUG    | acestep.core.generation.handler.memory_utils:_get_auto_decode_chunk_size:108 - [_get_auto_decode_chunk_size] Effective free VRAM: 87.73 GB
+2026-04-07 10:56:33.912 | DEBUG    | acestep.core.generation.handler.memory_utils:_should_offload_wav_to_cpu:131 - [_should_offload_wav_to_cpu] Effective free VRAM: 87.73 GB
+2026-04-07 10:56:33.912 | INFO     | acestep.core.generation.handler.vae_decode:tiled_decode:56 - [tiled_decode] chunk_size=512, offload_wav_to_cpu=False, latents_shape=torch.Size([1, 64, 2170])
+2026-04-07 10:56:34.189 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:193 - [generate_music] After VAE decode: allocated=6.15GB, max=7.44GB
+2026-04-07 10:56:34.303 | INFO     | acestep.core.generation.handler.generate_music_payload:_build_generate_music_success_payload:36 - [generate_music] VAE decode completed. Preparing audio tensors...
+2026-04-07 10:56:34.306 | INFO     | acestep.core.generation.handler.generate_music_payload:_build_generate_music_success_payload:48 - [generate_music] Done! Generated 1 audio tensors.
+2026-04-07 10:56:34.306 | INFO     | acestep.gpu_config:get_gpu_memory_gb:571 - CUDA GPU detected: NVIDIA RTX PRO 6000 Blackwell Workstation Edition (95.0 GB)
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 97247 MiB):
+  Device 0: NVIDIA RTX PRO 6000 Blackwell Workstation Edition, compute capability 12.0, VMM: yes, VRAM: 97247 MiB
+load_backend: loaded CUDA backend from /mnt/workspace/acestep.cpp/build/libggml-cuda.so
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = NVIDIA RTX PRO 6000 Blackwell Workstation Edition (NVIDIA) | uma: 0 | fp16: 1 | bf16: 0 | warp size: 32 | shared memory: 49152 | int dot: 1 | matrix cores: NV_coopmat2
+load_backend: loaded Vulkan backend from /mnt/workspace/acestep.cpp/build/libggml-vulkan.so
+load_backend: loaded CPU backend from /mnt/workspace/acestep.cpp/build/libggml-cpu-zen4.so
+[Load] DiT backend: CUDA0 (CPU threads: 16)
+[Synth-Load] Backend init: 98.2 ms
+[GGUF] ../models/acestep-v15-sft-Q5_K_M.gguf: 678 tensors, data at offset 56800
+[DiT] Self-attn: Q+K fused, V separate
+[DiT] Cross-attn: all separate
+[DiT] MLP: gate+up fused
+[Load] null_condition_emb found (CFG available)
+[WeightCtx] Loaded 478 tensors, 1061.2 MB into backend
+[Load] DiT: 24 layers, H=2048, Nh=16/8, D=128
+[Synth-Load] DiT weight load: 451.2 ms
+[GGUF] ../models/acestep-v15-sft-Q5_K_M.gguf: 678 tensors, data at offset 56800
+[Synth-Load] silence_latent: [15000, 64] from GGUF
+[GGUF] ../models/vae-BF16.gguf: 365 tensors, data at offset 30048
+[Load] VAE backend: CUDA0 (shared)
+[VAE] Backend: CUDA0, Weight buffer: 161.1 MB
+[VAE] Loaded: 5 blocks, upsample=1920x, F32 activations
+[Synth-Load] VAE weights: 664.2 ms
+[BPE] Loaded from GGUF: 151643 vocab, 151387 merges
+[Synth-Load] BPE tokenizer: 32.1 ms
+[Load] TextEncoder backend: CUDA0 (shared)
+[GGUF] ../models/Qwen3-Embedding-0.6B-BF16.gguf: 310 tensors, data at offset 5337568
+[Load] TextEncoder: 28L, H=1024, Nh=16/8
+[Qwen3] Attn: Q+K+V fused
+[Qwen3] MLP: gate+up fused
+[WeightCtx] Loaded 310 tensors, 1136.5 MB into backend
+[Synth-Load] TextEncoder: 131.8 ms
+[Load] CondEncoder backend: CUDA0 (shared)
+[GGUF] ../models/acestep-v15-sft-Q5_K_M.gguf: 678 tensors, data at offset 56800
+[Load] LyricEncoder: 8L
+[Qwen3] Attn: Q+K fused, V separate
+[Qwen3] MLP: gate+up fused
+[Load] TimbreEncoder: 4L
+[Qwen3] Attn: Q+K fused, V separate
+[Qwen3] MLP: gate+up fused
+[WeightCtx] Loaded 140 tensors, 412.5 MB into backend
+[Load] CondEncoder: lyric(8L), timbre(4L), text_proj, null_cond
+[Synth-Load] ConditionEncoder: 143.2 ms
+[GGUF] ../models/acestep-v15-sft-Q5_K_M.gguf: 678 tensors, data at offset 56800
+[WeightCtx] Loaded 30 tensors, 73.2 MB into backend
+[Load] Detokenizer: FSQ(6->2048) + 2L encoder(S=5, 2048->64)
+[Synth-Load] Detokenizer: 23.6 ms
+[GGUF] ../models/acestep-v15-sft-Q5_K_M.gguf: 678 tensors, data at offset 56800
+[WeightCtx] Loaded 30 tensors, 73.3 MB into backend
+[Tok] Loaded: 2 layers, H=2048, pool_window=5
+[Synth-Load] Tokenizer: 23.7 ms
+[Ace-Synth] All models loaded, turbo=no
+[Request] Parsed ggml-sft/request0.json
+[Request] seed=42 lm_batch=1 synth_batch=1
+[Request] caption: An upbeat and anthemic pop-rock track driven by bright, slig...
+[Request] lyrics: 490 bytes
+[Request] bpm=83 dur=88 key=G major ts=4 lang=fr
+[Request] lm: temp=0.85 cfg=2.0 top_p=0.90 top_k=0
+[Request] dit: steps=50 guidance=1.0 shift=1.0
+[Request] audio_codes: (present)
+[Ace-Synth] Batch: 1 request(s)
+[Resolve-Params] max audio codes across batch: 434 (86.8s @ 5Hz)
+[Resolve-T] T=2170, S=1085
+[Resolve-T] seed=42, steps=50, guidance=1.0, shift=1.0, duration=88.0s
+[CondEnc] Lyric sliding mask: 167x167, window=128
+[CondEnc] Timbre sliding mask: 1x1, window=128
+[Encode] Packed: lyric=167 + timbre=1 + text=70 = 238 tokens
+[Encode-Text Batch0] 70+167 tokens -> enc_S=238, 17.8 ms
+[Debug] text_hidden: [70, 1024] first4: 3.652014 1.047935 0.228532 -12.907304
+[Debug] lyric_embed: [167, 1024] first4: 0.029175 0.032227 -0.022339 -0.028809
+[Debug] enc_hidden: [238, 2048] first4: 1.760389 -0.050879 -0.130835 0.059141
+[Context] Decoded: 434 codes -> 2170 frames (86.8s @ 25Hz)
+[Build-Context Batch0] Detokenizer: 105.2 ms, 434 codes
+[Debug] detok_output: [2170, 64] first4: -0.125017 1.460327 0.292545 -0.654237
+[Init-Noise Batch0] Philox noise seed=42, [2170, 64]
+[Debug] noise: [2170, 64] first4: 0.194336 2.156250 -0.171875 0.847656
+[Debug] context: [2170, 128] first4: -0.125017 1.460327 0.292545 -0.654237
+[Init-Noise] Starting: T=2170, S=1085, enc_S=238, steps=50, batch=1 (cover)
+[DiT] Batch N=1, T=2170, S=1085, enc_S=238
+[DiT] Graph: 1775 nodes
+[Debug] tproj: [12288] first4: 0.155849 -0.117613 -0.084447 0.082327
+[Debug] temb: [2048] first4: -0.002771 -0.176872 0.004783 -0.001896
+[Debug] temb_t: [2048] first4: -0.001252 0.002996 -0.012525 -0.001720
+[Debug] temb_r: [2048] first4: -0.001519 -0.179868 0.017307 -0.000176
+[Debug] sinusoidal_t: [256] first4: 0.562486 0.789701 0.439822 -0.023583
+[Debug] sinusoidal_r: [256] first4: 1.000000 1.000000 1.000000 1.000000
+[Debug] temb_lin1_t: [2048] first4: -0.034977 0.028613 0.027414 -0.031142
+[Debug] temb_lin1_r: [2048] first4: -0.002680 0.004202 0.000655 -0.002088
+[Debug] hidden_after_proj_in: [2048, 1085] first4: -1.093899 -0.900324 0.503460 0.449244
+[Debug] proj_in_input: [192, 2170] first4: -0.125017 1.460327 0.292545 -0.654237
+[Debug] enc_after_cond_emb: [2048, 238] first4: -0.178843 0.827355 0.357330 -0.559874
+[Debug] layer0_sa_input: [2048, 1085] first4: -0.917912 -0.701705 -0.034436 0.298659
+[Debug] layer0_q_after_rope: [128, 16] first4: -26.542196 -0.211563 0.248211 0.316672
+[Debug] layer0_k_after_rope: [128, 8] first4: -3.348818 0.312601 0.288112 0.355407
+[Debug] layer0_sa_output: [2048, 1085] first4: -1.652176 0.748931 -0.574065 0.523807
+[Debug] layer0_attn_out: [2048, 1085] first4: -26.219639 -0.013537 0.403202 0.353651
+[Debug] layer0_after_self_attn: [2048, 1085] first4: -1.808410 -1.325840 -0.142574 0.391156
+[Debug] layer0_after_cross_attn: [2048, 1085] first4: -1.988290 -0.984316 -0.422407 0.394328
+[Debug] hidden_after_layer0: [2048, 1085] first4: -9.680482 1.387701 59.559776 -1.692598
+[Debug] hidden_after_layer6: [2048, 1085] first4: -14.912243 3.233762 58.446789 -0.205907
+[Debug] hidden_after_layer12: [2048, 1085] first4: -13.111828 -0.647247 -20.901295 -1.029646
+[Debug] hidden_after_layer18: [2048, 1085] first4: -5.926239 16.054150 -42.644878 -10.539935
+[Debug] hidden_after_layer23: [2048, 1085] first4: 35.545933 65.145531 48.288528 -13.544433
+[Debug] dit_step0_vt: [2170, 64] first4: -0.641374 2.517015 -0.190886 1.435759
+[Debug] dit_step0_xt: [2170, 64] first4: 0.207163 2.105910 -0.168057 0.818941
+[DiT] Step 1/50 t=1.000
+[Debug] dit_step1_vt: [2170, 64] first4: -0.715868 2.543520 -0.033758 1.259029
+[Debug] dit_step1_xt: [2170, 64] first4: 0.221481 2.055039 -0.167382 0.793760
+[DiT] Step 2/50 t=0.980
+[Debug] dit_step2_vt: [2170, 64] first4: -0.675319 2.501651 -0.001568 1.294942
+[Debug] dit_step2_xt: [2170, 64] first4: 0.234987 2.005006 -0.167351 0.767862
+[DiT] Step 3/50 t=0.960
+[Debug] dit_step3_vt: [2170, 64] first4: -0.720238 2.464866 0.033252 1.293514
+[Debug] dit_step3_xt: [2170, 64] first4: 0.249392 1.955709 -0.168016 0.741991
+[DiT] Step 4/50 t=0.940
+[Debug] dit_step4_vt: [2170, 64] first4: -0.686561 2.338569 0.025078 1.305554
+[Debug] dit_step4_xt: [2170, 64] first4: 0.263123 1.908937 -0.168517 0.715880
+[DiT] Step 5/50 t=0.920
+[Debug] dit_step5_vt: [2170, 64] first4: -0.576749 2.269944 -0.007593 1.271546
+[Debug] dit_step5_xt: [2170, 64] first4: 0.274658 1.863539 -0.168365 0.690449
+[DiT] Step 6/50 t=0.900
+[Debug] dit_step6_vt: [2170, 64] first4: -0.525895 2.208675 -0.013914 1.256705
+[Debug] dit_step6_xt: [2170, 64] first4: 0.285176 1.819365 -0.168087 0.665315
+[DiT] Step 7/50 t=0.880
+[Debug] dit_step7_vt: [2170, 64] first4: -0.462562 2.146618 -0.057713 1.263159
+[Debug] dit_step7_xt: [2170, 64] first4: 0.294427 1.776433 -0.166933 0.640052
+[DiT] Step 8/50 t=0.860
+[Debug] dit_step8_vt: [2170, 64] first4: -0.478959 2.119218 -0.011389 1.281223
+[Debug] dit_step8_xt: [2170, 64] first4: 0.304006 1.734048 -0.166705 0.614428
+[DiT] Step 9/50 t=0.840
+[Debug] dit_step9_vt: [2170, 64] first4: -0.363955 1.958878 -0.016014 1.278148
+[Debug] dit_step9_xt: [2170, 64] first4: 0.311286 1.694871 -0.166385 0.588865
+[DiT] Step 10/50 t=0.820
+[Debug] dit_step10_vt: [2170, 64] first4: -0.340228 1.881712 0.011550 1.262988
+[Debug] dit_step10_xt: [2170, 64] first4: 0.318090 1.657237 -0.166616 0.563605
+[DiT] Step 11/50 t=0.800
+[Debug] dit_step11_vt: [2170, 64] first4: -0.358423 1.842678 0.009430 1.231954
+[Debug] dit_step11_xt: [2170, 64] first4: 0.325259 1.620383 -0.166805 0.538966
+[DiT] Step 12/50 t=0.780
+[Debug] dit_step12_vt: [2170, 64] first4: -0.298536 1.786935 0.030354 1.225306
+[Debug] dit_step12_xt: [2170, 64] first4: 0.331229 1.584644 -0.167412 0.514460
+[DiT] Step 13/50 t=0.760
+[Debug] dit_step13_vt: [2170, 64] first4: -0.302817 1.713025 0.022609 1.197643
+[Debug] dit_step13_xt: [2170, 64] first4: 0.337286 1.550384 -0.167864 0.490507
+[DiT] Step 14/50 t=0.740
+[Debug] dit_step14_vt: [2170, 64] first4: -0.277567 1.616109 -0.047370 1.167883
+[Debug] dit_step14_xt: [2170, 64] first4: 0.342837 1.518062 -0.166916 0.467149
+[DiT] Step 15/50 t=0.720
+[Debug] dit_step15_vt: [2170, 64] first4: -0.277275 1.541537 -0.086605 1.167490
+[Debug] dit_step15_xt: [2170, 64] first4: 0.348382 1.487231 -0.165184 0.443799
+[DiT] Step 16/50 t=0.700
+[Debug] dit_step16_vt: [2170, 64] first4: -0.243207 1.430283 -0.053160 1.174503
+[Debug] dit_step16_xt: [2170, 64] first4: 0.353247 1.458625 -0.164121 0.420309
+[DiT] Step 17/50 t=0.680
+[Debug] dit_step17_vt: [2170, 64] first4: -0.218635 1.386494 -0.099818 1.119061
+[Debug] dit_step17_xt: [2170, 64] first4: 0.357619 1.430895 -0.162125 0.397928
+[DiT] Step 18/50 t=0.660
+[Debug] dit_step18_vt: [2170, 64] first4: -0.288262 1.274383 -0.093361 1.140360
+[Debug] dit_step18_xt: [2170, 64] first4: 0.363385 1.405408 -0.160258 0.375121
+[DiT] Step 19/50 t=0.640
+[Debug] dit_step19_vt: [2170, 64] first4: -0.296745 1.229211 -0.129816 1.128924
+[Debug] dit_step19_xt: [2170, 64] first4: 0.369319 1.380823 -0.157661 0.352542
+[DiT] Step 20/50 t=0.620
+[Debug] dit_step20_vt: [2170, 64] first4: -0.269299 1.093102 -0.110523 1.083390
+[Debug] dit_step20_xt: [2170, 64] first4: 0.374705 1.358961 -0.155451 0.330875
+[DiT] Step 21/50 t=0.600
+[Debug] dit_step21_vt: [2170, 64] first4: -0.334416 1.060181 -0.140307 1.088047
+[Debug] dit_step21_xt: [2170, 64] first4: 0.381394 1.337758 -0.152645 0.309114
+[DiT] Step 22/50 t=0.580
+[Debug] dit_step22_vt: [2170, 64] first4: -0.357039 0.960451 -0.151016 1.040221
+[Debug] dit_step22_xt: [2170, 64] first4: 0.388535 1.318549 -0.149624 0.288309
+[DiT] Step 23/50 t=0.560
+[Debug] dit_step23_vt: [2170, 64] first4: -0.331587 0.831054 -0.129479 1.009147
+[Debug] dit_step23_xt: [2170, 64] first4: 0.395166 1.301928 -0.147035 0.268126
+[DiT] Step 24/50 t=0.540
+[Debug] dit_step24_vt: [2170, 64] first4: -0.357465 0.762539 -0.160388 1.011262
+[Debug] dit_step24_xt: [2170, 64] first4: 0.402316 1.286677 -0.143827 0.247901
+[DiT] Step 25/50 t=0.520
+[Debug] dit_step25_vt: [2170, 64] first4: -0.407772 0.659319 -0.126655 1.021884
+[Debug] dit_step25_xt: [2170, 64] first4: 0.410471 1.273491 -0.141294 0.227463
+[DiT] Step 26/50 t=0.500
+[Debug] dit_step26_vt: [2170, 64] first4: -0.453539 0.586675 -0.143549 0.942296
+[Debug] dit_step26_xt: [2170, 64] first4: 0.419542 1.261757 -0.138423 0.208617
+[DiT] Step 27/50 t=0.480
+[Debug] dit_step27_vt: [2170, 64] first4: -0.457834 0.416423 -0.182420 0.896161
+[Debug] dit_step27_xt: [2170, 64] first4: 0.428698 1.253429 -0.134774 0.190694
+[DiT] Step 28/50 t=0.460
+[Debug] dit_step28_vt: [2170, 64] first4: -0.552928 0.314815 -0.159157 0.909070
+[Debug] dit_step28_xt: [2170, 64] first4: 0.439757 1.247132 -0.131591 0.172513
+[DiT] Step 29/50 t=0.440
+[Debug] dit_step29_vt: [2170, 64] first4: -0.569823 0.219377 -0.105619 0.851365
+[Debug] dit_step29_xt: [2170, 64] first4: 0.451153 1.242745 -0.129479 0.155486
+[DiT] Step 30/50 t=0.420
+[Debug] dit_step30_vt: [2170, 64] first4: -0.525816 0.091230 -0.094021 0.865290
+[Debug] dit_step30_xt: [2170, 64] first4: 0.461670 1.240920 -0.127598 0.138180
+[DiT] Step 31/50 t=0.400
+[Debug] dit_step31_vt: [2170, 64] first4: -0.506972 -0.009009 -0.057006 0.843338
+[Debug] dit_step31_xt: [2170, 64] first4: 0.471809 1.241100 -0.126458 0.121313
+[DiT] Step 32/50 t=0.380
+[Debug] dit_step32_vt: [2170, 64] first4: -0.589207 -0.096306 -0.101821 0.838405
+[Debug] dit_step32_xt: [2170, 64] first4: 0.483593 1.243026 -0.124422 0.104545
+[DiT] Step 33/50 t=0.360
+[Debug] dit_step33_vt: [2170, 64] first4: -0.594409 -0.208988 -0.045190 0.775591
+[Debug] dit_step33_xt: [2170, 64] first4: 0.495482 1.247206 -0.123518 0.089033
+[DiT] Step 34/50 t=0.340
+[Debug] dit_step34_vt: [2170, 64] first4: -0.569633 -0.390043 -0.052179 0.713603
+[Debug] dit_step34_xt: [2170, 64] first4: 0.506874 1.255007 -0.122475 0.074761
+[DiT] Step 35/50 t=0.320
+[Debug] dit_step35_vt: [2170, 64] first4: -0.580225 -0.399981 -0.048136 0.748678
+[Debug] dit_step35_xt: [2170, 64] first4: 0.518479 1.263006 -0.121512 0.059787
+[DiT] Step 36/50 t=0.300
+[Debug] dit_step36_vt: [2170, 64] first4: -0.588395 -0.509156 -0.024260 0.728169
+[Debug] dit_step36_xt: [2170, 64] first4: 0.530247 1.273190 -0.121027 0.045224
+[DiT] Step 37/50 t=0.280
+[Debug] dit_step37_vt: [2170, 64] first4: -0.566032 -0.648148 0.053932 0.710640
+[Debug] dit_step37_xt: [2170, 64] first4: 0.541567 1.286152 -0.122105 0.031011
+[DiT] Step 38/50 t=0.260
+[Debug] dit_step38_vt: [2170, 64] first4: -0.611901 -0.689515 0.072384 0.641680
+[Debug] dit_step38_xt: [2170, 64] first4: 0.553805 1.299943 -0.123553 0.018178
+[DiT] Step 39/50 t=0.240
+[Debug] dit_step39_vt: [2170, 64] first4: -0.569758 -0.802676 0.097199 0.642145
+[Debug] dit_step39_xt: [2170, 64] first4: 0.565200 1.315996 -0.125497 0.005335
+[DiT] Step 40/50 t=0.220
+[Debug] dit_step40_vt: [2170, 64] first4: -0.589130 -0.847894 0.092676 0.611426
+[Debug] dit_step40_xt: [2170, 64] first4: 0.576983 1.332954 -0.127350 -0.006894
+[DiT] Step 41/50 t=0.200
+[Debug] dit_step41_vt: [2170, 64] first4: -0.536525 -0.919122 0.128394 0.533034
+[Debug] dit_step41_xt: [2170, 64] first4: 0.587714 1.351337 -0.129918 -0.017554
+[DiT] Step 42/50 t=0.180
+[Debug] dit_step42_vt: [2170, 64] first4: -0.562052 -0.994827 0.183615 0.476716
+[Debug] dit_step42_xt: [2170, 64] first4: 0.598955 1.371233 -0.133591 -0.027089
+[DiT] Step 43/50 t=0.160
+[Debug] dit_step43_vt: [2170, 64] first4: -0.523163 -1.042737 0.285863 0.452415
+[Debug] dit_step43_xt: [2170, 64] first4: 0.609418 1.392088 -0.139308 -0.036137
+[DiT] Step 44/50 t=0.140
+[Debug] dit_step44_vt: [2170, 64] first4: -0.504957 -1.122343 0.304740 0.385073
+[Debug] dit_step44_xt: [2170, 64] first4: 0.619517 1.414535 -0.145403 -0.043838
+[DiT] Step 45/50 t=0.120
+[Debug] dit_step45_vt: [2170, 64] first4: -0.486188 -1.154110 0.390522 0.326378
+[Debug] dit_step45_xt: [2170, 64] first4: 0.629241 1.437617 -0.153213 -0.050366
+[DiT] Step 46/50 t=0.100
+[Debug] dit_step46_vt: [2170, 64] first4: -0.461404 -1.219960 0.330278 0.256261
+[Debug] dit_step46_xt: [2170, 64] first4: 0.638469 1.462016 -0.159819 -0.055491
+[DiT] Step 47/50 t=0.080
+[Debug] dit_step47_vt: [2170, 64] first4: -0.462856 -1.277198 0.325489 0.226307
+[Debug] dit_step47_xt: [2170, 64] first4: 0.647726 1.487560 -0.166329 -0.060017
+[DiT] Step 48/50 t=0.060
+[Debug] dit_step48_vt: [2170, 64] first4: -0.425974 -1.330233 0.334514 0.193597
+[Debug] dit_step48_xt: [2170, 64] first4: 0.656245 1.514165 -0.173019 -0.063889
+[DiT] Step 49/50 t=0.040
+[Debug] dit_step49_vt: [2170, 64] first4: -0.460009 -1.320108 0.268180 0.201846
+[Debug] dit_x0: [2170, 64] first4: 0.665446 1.540567 -0.178382 -0.067926
+[DiT] Step 50/50 t=0.020
+[DiT-Generate] Total: 1339.6 ms (1339.6 ms/sample)
+[Debug] dit_output: [2170, 64] first4: 0.665446 1.540567 -0.178382 -0.067926
+[VAE] Tiled decode: 17 tiles (chunk=256, overlap=64, stride=128)
+[VAE] Graph: 335 nodes, T_latent=192
+[VAE] Upsample factor: 1920.00 (expected ~1920)
+[VAE] Graph: 335 nodes, T_latent=256
+[VAE] Graph: 335 nodes, T_latent=186
+[VAE] Tiled decode done: 17 tiles -> T_audio=4166400 (86.80s @ 48kHz)
+[VAE-Decode Batch0] Decode: 626.8 ms
+[Debug] vae_audio: [2, 4166400] first4: -0.001534 -0.000865 -0.001130 -0.000598
+[MP3] Encoding 86.8s @ 128 kbps, 48000 Hz stereo
+[MP3] 1388928 bytes (12.0:1), 381 ms (227.61x realtime), 32 threads
+[MP3] Wrote ggml-sft/request00.mp3
+[Ace-Synth] All done
+2026-04-07 10:56:39.148 | INFO     | acestep.core.generation.handler.init_service_loader:_load_main_model_from_checkpoint:174 - [initialize_service] Attempting to load model with attention implementation: sdpa
+2026-04-07 10:56:40.285 | INFO     | acestep.core.generation.handler.generate_music:generate_music:278 - [generate_music] Starting generation...
+2026-04-07 10:56:40.285 | INFO     | acestep.core.generation.handler.generate_music:generate_music:281 - [generate_music] Preparing inputs...
+2026-04-07 10:56:40.286 | INFO     | acestep.core.generation.handler.generate_music_request:_prepare_reference_and_source_audio:138 - [generate_music] %s task: no src_audio but audio codes provided, proceeding with codes
+2026-04-07 10:56:40.288 | INFO     | acestep.core.generation.handler.generate_music:_vram_preflight_check:156 - [generate_music] VRAM pre-flight: 81.69 GB free, ~0.94 GB needed (batch=1, duration=88s, mode=turbo).
+2026-04-07 10:56:40.293 | INFO     | acestep.core.generation.handler.conditioning_target:_prepare_target_latents_and_wavs:58 - [generate_music] Decoding audio codes for item 0...
+2026-04-07 10:56:40.297 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_precomputed_lm_hints:31 - [generate_music] Decoding audio codes for LM hints for item 0...
+2026-04-07 10:56:40.299 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:119 - 
+======================================================================
+2026-04-07 10:56:40.299 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:120 - 🔍 [DEBUG] DiT TEXT ENCODER INPUT (Inference)
+2026-04-07 10:56:40.299 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:121 - ======================================================================
+2026-04-07 10:56:40.299 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:122 - text_prompt:
+# Instruction
+Generate audio semantic tokens based on the given conditions:
+
+# Caption
+An upbeat and anthemic pop-rock track driven by bright, slightly overdriven
+
+# Metas
+- bpm: 83
+- timesignature: 4
+- keyscale: G major
+- duration: 88 seconds
+<|endoftext|>
+
+2026-04-07 10:56:40.299 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:123 - ======================================================================
+2026-04-07 10:56:40.299 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:124 - lyrics_text:
+# Languages
+fr
+
+# Lyric
+# Lyric
+[Intro - Guitar Riff]
+[Verse 1]
+Dans le monde des tutos virtuels
+G ta toise en nouvelle passion
+Avec Ggendoline et Pumbé à midi
+La communauté, c'est l'unité
+Quel joie, une clé
+
+[Chorus]
+Dans le monde des tutos virtuels
+Gândoline et Pumbé à midi
+Une famille à connecter, c'est vrai
+D'un enfant qui voit toi fusionner
+
+[Guitar Solo]
+
+[Verse 2]
+Dans le monde des tutos virtuels
+Gândoline, Pumbé à midi
+Une famille à connecter, c'est vrai
+D'un enfant qui voit toi fusionner<|endoftext|>
+2026-04-07 10:56:40.299 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:125 - ======================================================================
+
+2026-04-07 10:56:40.302 | INFO     | acestep.core.generation.handler.conditioning_embed:preprocess_batch:110 - [preprocess_batch] Inferring prompt embeddings...
+2026-04-07 10:56:40.311 | INFO     | acestep.core.generation.handler.conditioning_embed:preprocess_batch:113 - [preprocess_batch] Inferring lyric embeddings...
+2026-04-07 10:56:40.311 | INFO     | acestep.core.generation.handler.service_generate_execute:_execute_service_generate_diffusion:137 - [service_generate] Generating audio... (DiT backend: PyTorch (cuda))
+2026-04-07 10:56:40.317 | INFO     | acestep.core.generation.handler.service_generate_execute:_execute_service_generate_diffusion:220 - [service_generate] DiT diffusion via PyTorch (cuda)...
+[Request] Loaded request0.json
+[Turbo] steps=8, shift=3.0 | acestep-v15-turbo-Q5_K_M.gguf
+[GGML] Running acestep-v15-turbo-Q5_K_M.gguf...
+[GGML] Done, 47 dump files
+[Python] Initializing acestep-v15-turbo...
+[Python] Generating (acestep-v15-turbo, 8 steps)...
+Using precomputed LM hints
+Using precomputed LM hints
+[Python] Wrote python-turbo/output.wav: 4166400 samples (86.80s @ 48kHz stereo)
+[Python] Done, 40 dump files
+[Turbo] Cosine similarities GGML vs Python
+  stage                          GGML vs Python
+  text_hidden                          0.999805
+  lyric_embed                          1.000000
+  enc_hidden                           0.999038
+  detok_output                         0.999875
+  context                              0.999920
+  noise                                1.000000
+  temb_t                               0.999972
+  hidden_after_proj_in                 0.999960
+  enc_after_cond_emb                   0.999148
+  layer0_sa_output                     0.999386
+  hidden_after_layer0                  0.999830
+  hidden_after_layer6                  0.999743
+  hidden_after_layer12                 0.998668
+  hidden_after_layer18                 0.995572
+  hidden_after_layer23                 0.991598
+  dit_step0_vt                         0.969192
+  dit_step0_xt                         0.999932
+  dit_step1_vt                         0.972233
+  dit_step1_xt                         0.999791
+  dit_step2_vt                         0.971476
+  dit_step2_xt                         0.999407
+  dit_step3_vt                         0.975002
+  dit_step3_xt                         0.998609
+  dit_step4_vt                         0.973266
+  dit_step4_xt                         0.996802
+  dit_step5_vt                         0.967606
+  dit_step5_xt                         0.992487
+  dit_step6_vt                         0.963033
+  dit_step6_xt                         0.983923
+  dit_step7_vt                         0.954285
+  dit_x0                               0.970870
+  vae_audio                            0.887510
+  vae_audio (STFT cosine)              0.968903
+[Turbo] Error growth GGML vs Python
+  stage                         cos    max_err   mean_err     mean_A      std_A     mean_B      std_B
+  dit_step0_xt             0.999932   0.136188   0.007737  -0.002298   0.973029  -0.002342   0.972003
+  dit_step1_xt             0.999791   0.266595   0.013270  -0.005285   0.942887  -0.005313   0.941730
+  dit_step2_xt             0.999407   0.454501   0.021025  -0.009259   0.909476  -0.009311   0.908527
+  dit_step3_xt             0.998609   0.627441   0.030941  -0.014640   0.874192  -0.014577   0.873624
+  dit_step4_xt             0.996802   0.971719   0.044874  -0.021870   0.842368  -0.021660   0.841995
+  dit_step5_xt             0.992487   1.445249   0.066641  -0.032270   0.825870  -0.032109   0.824593
+  dit_step6_xt             0.983923   2.090824   0.100128  -0.046860   0.857081  -0.046482   0.855546
+[SFT] steps=50, shift=1.0 | acestep-v15-sft-Q5_K_M.gguf
+[GGML] Running acestep-v15-sft-Q5_K_M.gguf...
+[GGML] Done, 131 dump files
+[Python] Initializing acestep-v15-sft...
+[Python] Generating (acestep-v15-sft, 50 steps)...
+Using precomputed LM hints
+Using precomputed LM hints
+  0%|          | 0/50 [00:00<?, ?it/s]  6%|▌         | 3/50 [00:00<00:01, 27.77it/s] 12%|█▏        | 6/50 [00:00<00:01, 28.57it/s] 18%|█▊        | 9/50 [00:00<00:01, 26.51it/s] 24%|██▍       | 12/50 [00:00<00:01, 27.49it/s] 30%|███       | 15/50 [00:00<00:01, 28.07it/s] 36%|███▌      | 18/50 [00:00<00:01, 28.42it/s] 42%|████▏     | 21/50 [00:00<00:01, 28.66it/s] 48%|████▊     | 24/50 [00:00<00:00, 28.80it/s] 54%|█████▍    | 27/50 [00:00<00:00, 28.83it/s] 60%|██████    | 30/50 [00:01<00:00, 28.93it/s] 66%|██████▌   | 33/50 [00:01<00:00, 28.98it/s] 72%|███████▏  | 36/50 [00:01<00:00, 29.03it/s] 78%|███████▊  | 39/50 [00:01<00:00, 29.05it/s] 84%|████████▍ | 42/50 [00:01<00:00, 29.07it/s] 90%|█████████ | 45/50 [00:01<00:00, 29.08it/s] 96%|█████████▌| 48/50 [00:01<00:00, 29.09it/s]100%|██████████| 50/50 [00:01<00:00, 28.70it/s]
+2026-04-07 10:56:42.066 | INFO     | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:42 - [generate_music] Model generation completed. Decoding latents...
+2026-04-07 10:56:42.067 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:64 - [generate_music] pred_latents: torch.Size([1, 2170, 64]), dtype=torch.bfloat16
+2026-04-07 10:56:42.067 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:65 - [generate_music] time_costs: {'encoder_time_cost': 0.006083965301513672, 'diffusion_time_cost': 1.7426178455352783, 'diffusion_per_step_time_cost': 0.03485235691070557, 'total_time_cost': 1.748701810836792, 'offload_time_cost': 0.0}
+2026-04-07 10:56:42.068 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:127 - [generate_music] Decoding latents with VAE...
+2026-04-07 10:56:42.070 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:136 - [generate_music] Before VAE decode: allocated=12.13GB, max=13.41GB
+2026-04-07 10:56:42.070 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:154 - [generate_music] Effective free VRAM before VAE decode: 81.57 GB
+2026-04-07 10:56:42.070 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:172 - [generate_music] Using tiled VAE decode to reduce VRAM usage...
+2026-04-07 10:56:42.070 | DEBUG    | acestep.core.generation.handler.memory_utils:_get_auto_decode_chunk_size:108 - [_get_auto_decode_chunk_size] Effective free VRAM: 81.57 GB
+2026-04-07 10:56:42.070 | DEBUG    | acestep.core.generation.handler.memory_utils:_should_offload_wav_to_cpu:131 - [_should_offload_wav_to_cpu] Effective free VRAM: 81.57 GB
+2026-04-07 10:56:42.070 | INFO     | acestep.core.generation.handler.vae_decode:tiled_decode:56 - [tiled_decode] chunk_size=512, offload_wav_to_cpu=False, latents_shape=torch.Size([1, 64, 2170])
+2026-04-07 10:56:42.345 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:193 - [generate_music] After VAE decode: allocated=12.30GB, max=13.59GB
+2026-04-07 10:56:42.509 | INFO     | acestep.core.generation.handler.generate_music_payload:_build_generate_music_success_payload:36 - [generate_music] VAE decode completed. Preparing audio tensors...
+2026-04-07 10:56:42.512 | INFO     | acestep.core.generation.handler.generate_music_payload:_build_generate_music_success_payload:48 - [generate_music] Done! Generated 1 audio tensors.
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 97247 MiB):
+  Device 0: NVIDIA RTX PRO 6000 Blackwell Workstation Edition, compute capability 12.0, VMM: yes, VRAM: 97247 MiB
+load_backend: loaded CUDA backend from /mnt/workspace/acestep.cpp/build/libggml-cuda.so
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = NVIDIA RTX PRO 6000 Blackwell Workstation Edition (NVIDIA) | uma: 0 | fp16: 1 | bf16: 0 | warp size: 32 | shared memory: 49152 | int dot: 1 | matrix cores: NV_coopmat2
+load_backend: loaded Vulkan backend from /mnt/workspace/acestep.cpp/build/libggml-vulkan.so
+load_backend: loaded CPU backend from /mnt/workspace/acestep.cpp/build/libggml-cpu-zen4.so
+[Load] DiT backend: CUDA0 (CPU threads: 16)
+[Synth-Load] Backend init: 97.1 ms
+[GGUF] ../models/acestep-v15-xl-turbo-Q5_K_M.gguf: 830 tensors, data at offset 69088
+[DiT] Self-attn: Q+K fused, V separate
+[DiT] Cross-attn: all separate
+[DiT] MLP: gate+up fused
+[Load] null_condition_emb found (CFG available)
+[WeightCtx] Loaded 630 tensors, 2801.1 MB into backend
+[Load] DiT: 32 layers, H=2560, Nh=32/8, D=128
+[Synth-Load] DiT weight load: 719.2 ms
+[GGUF] ../models/acestep-v15-xl-turbo-Q5_K_M.gguf: 830 tensors, data at offset 69088
+[Synth-Load] silence_latent: [15000, 64] from GGUF
+[GGUF] ../models/vae-BF16.gguf: 365 tensors, data at offset 30048
+[Load] VAE backend: CUDA0 (shared)
+[VAE] Backend: CUDA0, Weight buffer: 161.1 MB
+[VAE] Loaded: 5 blocks, upsample=1920x, F32 activations
+[Synth-Load] VAE weights: 663.7 ms
+[BPE] Loaded from GGUF: 151643 vocab, 151387 merges
+[Synth-Load] BPE tokenizer: 31.7 ms
+[Load] TextEncoder backend: CUDA0 (shared)
+[GGUF] ../models/Qwen3-Embedding-0.6B-BF16.gguf: 310 tensors, data at offset 5337568
+[Load] TextEncoder: 28L, H=1024, Nh=16/8
+[Qwen3] Attn: Q+K+V fused
+[Qwen3] MLP: gate+up fused
+[WeightCtx] Loaded 310 tensors, 1136.5 MB into backend
+[Synth-Load] TextEncoder: 132.0 ms
+[Load] CondEncoder backend: CUDA0 (shared)
+[GGUF] ../models/acestep-v15-xl-turbo-Q5_K_M.gguf: 830 tensors, data at offset 69088
+[Load] LyricEncoder: 8L
+[Qwen3] Attn: Q+K fused, V separate
+[Qwen3] MLP: gate+up fused
+[Load] TimbreEncoder: 4L
+[Qwen3] Attn: Q+K fused, V separate
+[Qwen3] MLP: gate+up fused
+[WeightCtx] Loaded 141 tensors, 416.2 MB into backend
+[Load] CondEncoder: lyric(8L), timbre(4L, CLS), text_proj, null_cond
+[Synth-Load] ConditionEncoder: 115.4 ms
+[GGUF] ../models/acestep-v15-xl-turbo-Q5_K_M.gguf: 830 tensors, data at offset 69088
+[WeightCtx] Loaded 30 tensors, 73.2 MB into backend
+[Load] Detokenizer: FSQ(6->2048) + 2L encoder(S=5, 2048->64)
+[Synth-Load] Detokenizer: 19.5 ms
+[GGUF] ../models/acestep-v15-xl-turbo-Q5_K_M.gguf: 830 tensors, data at offset 69088
+[WeightCtx] Loaded 30 tensors, 73.3 MB into backend
+[Tok] Loaded: 2 layers, H=2048, pool_window=5
+[Synth-Load] Tokenizer: 19.2 ms
+[Ace-Synth] All models loaded, turbo=yes
+[Request] Parsed ggml-xl-turbo/request0.json
+[Request] seed=42 lm_batch=1 synth_batch=1
+[Request] caption: An upbeat and anthemic pop-rock track driven by bright, slig...
+[Request] lyrics: 490 bytes
+[Request] bpm=83 dur=88 key=G major ts=4 lang=fr
+[Request] lm: temp=0.85 cfg=2.0 top_p=0.90 top_k=0
+[Request] dit: steps=8 guidance=0.0 shift=3.0
+[Request] audio_codes: (present)
+[Ace-Synth] Batch: 1 request(s)
+[Resolve-Params] max audio codes across batch: 434 (86.8s @ 5Hz)
+[Resolve-T] T=2170, S=1085
+[Resolve-T] seed=42, steps=8, guidance=1.0, shift=3.0, duration=88.0s
+[CondEnc] Lyric sliding mask: 167x167, window=128
+[CondEnc] Timbre sliding mask: 2x2, window=128 (CLS)
+[Encode] Packed: lyric=167 + timbre=1 + text=70 = 238 tokens
+[Encode-Text Batch0] 70+167 tokens -> enc_S=238, 17.4 ms
+[Debug] text_hidden: [70, 1024] first4: 3.652014 1.047935 0.228532 -12.907304
+[Debug] lyric_embed: [167, 1024] first4: 0.029175 0.032227 -0.022339 -0.028809
+[Debug] enc_hidden: [238, 2048] first4: 0.687465 -0.019594 -0.050987 0.022706
+[Context] Decoded: 434 codes -> 2170 frames (86.8s @ 25Hz)
+[Build-Context Batch0] Detokenizer: 107.0 ms, 434 codes
+[Debug] detok_output: [2170, 64] first4: -0.125017 1.460327 0.292545 -0.654237
+[Init-Noise Batch0] Philox noise seed=42, [2170, 64]
+[Debug] noise: [2170, 64] first4: 0.194336 2.156250 -0.171875 0.847656
+[Debug] context: [2170, 128] first4: -0.125017 1.460327 0.292545 -0.654237
+[Init-Noise] Starting: T=2170, S=1085, enc_S=238, steps=8, batch=1 (cover)
+[DiT] Batch N=1, T=2170, S=1085, enc_S=238
+[DiT] Graph: 2345 nodes
+[Debug] tproj: [15360] first4: 0.007712 0.102719 0.074757 -0.076147
+[Debug] temb: [2560] first4: 0.026508 -0.023413 -0.016350 0.047091
+[Debug] temb_t: [2560] first4: 0.014671 -0.022221 -0.020670 0.048385
+[Debug] temb_r: [2560] first4: 0.011837 -0.001192 0.004320 -0.001294
+[Debug] sinusoidal_t: [256] first4: 0.562486 0.789701 0.439822 -0.023583
+[Debug] sinusoidal_r: [256] first4: 1.000000 1.000000 1.000000 1.000000
+[Debug] temb_lin1_t: [2560] first4: 0.063001 -0.019660 0.138829 -0.115781
+[Debug] temb_lin1_r: [2560] first4: -0.008961 0.017831 -0.016913 0.012843
+[Debug] hidden_after_proj_in: [2560, 1085] first4: 0.347396 -0.579519 0.250656 -0.175640
+[Debug] proj_in_input: [192, 2170] first4: -0.125017 1.460327 0.292545 -0.654237
+[Debug] enc_after_cond_emb: [2560, 238] first4: 0.045300 0.659259 0.112147 0.871656
+[Debug] layer0_sa_input: [2560, 1085] first4: 0.032064 -0.052452 0.104109 -0.132064
+[Debug] layer0_q_after_rope: [128, 32] first4: 0.045300 0.659259 0.112147 0.871656
+[Debug] layer0_k_after_rope: [128, 8] first4: 0.437946 3.513077 -3.196306 4.182689
+[Debug] layer0_sa_output: [2560, 1085] first4: 1.657029 4.287230 -0.500205 5.381145
+[Debug] layer0_attn_out: [4096, 1085] first4: -10.736523 -19.580536 0.496082 0.876633
+[Debug] layer0_after_self_attn: [2560, 1085] first4: 0.477102 -2.245400 -0.115628 -2.747041
+[Debug] layer0_after_cross_attn: [2560, 1085] first4: 0.351922 -1.978610 0.033905 -3.544643
+[Debug] hidden_after_layer0: [2560, 1085] first4: 2.081884 -2.359463 235.712387 -3.522645
+[Debug] hidden_after_layer6: [2560, 1085] first4: -6.062328 -2.207850 312.074738 -12.221794
+[Debug] hidden_after_layer12: [2560, 1085] first4: -12.317384 27.482216 259.157959 27.582161
+[Debug] hidden_after_layer18: [2560, 1085] first4: 46.512642 20.871336 256.305695 9.715300
+[Debug] hidden_after_layer31: [2560, 1085] first4: -177.345200 -205.568115 -82.132805 24.481956
+[Debug] dit_step0_vt: [2170, 64] first4: -1.512164 1.982791 0.641499 1.371846
+[Debug] dit_step0_xt: [2170, 64] first4: 0.263071 2.066123 -0.201034 0.785300
+[DiT] Step 1/8 t=1.000
+[Debug] dit_step1_vt: [2170, 64] first4: -0.909250 2.454686 0.733189 1.366075
+[Debug] dit_step1_xt: [2170, 64] first4: 0.312666 1.932231 -0.241026 0.710786
+[DiT] Step 2/8 t=0.955
+[Debug] dit_step2_vt: [2170, 64] first4: -0.659872 2.163734 1.252816 1.111372
+[Debug] dit_step2_xt: [2170, 64] first4: 0.356658 1.787982 -0.324547 0.636695
+[DiT] Step 3/8 t=0.900
+[Debug] dit_step3_vt: [2170, 64] first4: -1.509442 2.029191 1.543144 1.109047
+[Debug] dit_step3_xt: [2170, 64] first4: 0.482444 1.618883 -0.453143 0.544274
+[DiT] Step 4/8 t=0.833
+[Debug] dit_step4_vt: [2170, 64] first4: -1.260725 2.352707 1.202333 0.319353
+[Debug] dit_step4_xt: [2170, 64] first4: 0.617522 1.366807 -0.581964 0.510058
+[DiT] Step 5/8 t=0.750
+[Debug] dit_step5_vt: [2170, 64] first4: -1.231577 2.307220 1.308769 1.468935
+[Debug] dit_step5_xt: [2170, 64] first4: 0.793462 1.037204 -0.768931 0.300210
+[DiT] Step 6/8 t=0.643
+[Debug] dit_step6_vt: [2170, 64] first4: -1.147998 2.304061 0.691995 0.805105
+[Debug] dit_step6_xt: [2170, 64] first4: 1.023061 0.576392 -0.907330 0.139189
+[DiT] Step 7/8 t=0.500
+[Debug] dit_step7_vt: [2170, 64] first4: -0.982318 1.463974 0.553782 0.335784
+[Debug] dit_x0: [2170, 64] first4: 1.317757 0.137200 -1.073465 0.038454
+[DiT] Step 8/8 t=0.300
+[DiT-Generate] Total: 509.8 ms (509.8 ms/sample)
+[Debug] dit_output: [2170, 64] first4: 1.317757 0.137200 -1.073465 0.038454
+[VAE] Tiled decode: 17 tiles (chunk=256, overlap=64, stride=128)
+[VAE] Graph: 335 nodes, T_latent=192
+[VAE] Upsample factor: 1920.00 (expected ~1920)
+[VAE] Graph: 335 nodes, T_latent=256
+[VAE] Graph: 335 nodes, T_latent=186
+[VAE] Tiled decode done: 17 tiles -> T_audio=4166400 (86.80s @ 48kHz)
+[VAE-Decode Batch0] Decode: 628.4 ms
+[Debug] vae_audio: [2, 4166400] first4: 0.000357 0.003513 0.003906 0.002892
+[MP3] Encoding 86.8s @ 128 kbps, 48000 Hz stereo
+[MP3] 1388928 bytes (12.0:1), 466 ms (186.45x realtime), 32 threads
+[MP3] Wrote ggml-xl-turbo/request00.mp3
+[Ace-Synth] All done
+2026-04-07 10:56:46.869 | INFO     | acestep.core.generation.handler.init_service_loader:_load_main_model_from_checkpoint:174 - [initialize_service] Attempting to load model with attention implementation: sdpa
+[Python] Wrote python-sft/output.wav: 4166400 samples (86.80s @ 48kHz stereo)
+[Python] Done, 166 dump files
+[SFT] Cosine similarities GGML vs Python
+  stage                          GGML vs Python
+  text_hidden                          0.999805
+  lyric_embed                          1.000000
+  enc_hidden                           0.999038
+  detok_output                         0.999875
+  context                              0.999920
+  noise                                1.000000
+  temb_t                               0.999900
+  hidden_after_proj_in                 0.999961
+  enc_after_cond_emb                   0.999146
+  layer0_sa_output                     0.999450
+  hidden_after_layer0                  0.999863
+  hidden_after_layer6                  0.999575
+  hidden_after_layer12                 0.998993
+  hidden_after_layer18                 0.997930
+  hidden_after_layer23                 0.998436
+  dit_step0_vt                         0.998369
+  dit_step0_xt                         1.000000
+  dit_step5_vt                         0.998335
+  dit_step5_xt                         0.999964
+  dit_step10_vt                        0.997279
+  dit_step10_xt                        0.999865
+  dit_step15_vt                        0.994299
+  dit_step15_xt                        0.999590
+  dit_step20_vt                        0.990368
+  dit_step20_xt                        0.998897
+  dit_step25_vt                        0.984490
+  dit_step25_xt                        0.997591
+  dit_step30_vt                        0.977263
+  dit_step30_xt                        0.995481
+  dit_step35_vt                        0.969812
+  dit_step35_xt                        0.992824
+  dit_step40_vt                        0.965260
+  dit_step40_xt                        0.990175
+  dit_step45_vt                        0.970571
+  dit_step45_xt                        0.988319
+  dit_step49_vt                        0.979494
+  dit_x0                               0.987700
+  vae_audio                            0.947511
+  vae_audio (STFT cosine)              0.975809
+[SFT] Error growth GGML vs Python
+  stage                         cos    max_err   mean_err     mean_A      std_A     mean_B      std_B
+  dit_step0_xt             1.000000   0.017024   0.001594  -0.001642   0.978526  -0.001619   0.978872
+  dit_step5_xt             0.999964   0.069462   0.005908  -0.008335   0.885211  -0.008480   0.883811
+  dit_step10_xt            0.999865   0.148857   0.009889  -0.015203   0.801547  -0.015075   0.802324
+  dit_step15_xt            0.999590   0.263871   0.014937  -0.022157   0.731313  -0.021933   0.731304
+  dit_step20_xt            0.998897   0.445893   0.021880  -0.029199   0.678773  -0.028882   0.679066
+  dit_step25_xt            0.997591   0.699761   0.030432  -0.036361   0.648176  -0.035643   0.650780
+  dit_step30_xt            0.995481   0.969611   0.041291  -0.043557   0.642866  -0.042577   0.647107
+  dit_step35_xt            0.992824   1.267840   0.053938  -0.050734   0.663647  -0.049471   0.669256
+  dit_step40_xt            0.990175   1.551659   0.067873  -0.057891   0.708277  -0.056532   0.715783
+  dit_step45_xt            0.988319   1.800745   0.081126  -0.065095   0.772452  -0.063533   0.780575
+[Xl-turbo] steps=8, shift=3.0 | acestep-v15-xl-turbo-Q5_K_M.gguf
+[GGML] Running acestep-v15-xl-turbo-Q5_K_M.gguf...
+[GGML] Done, 47 dump files
+[Python] Initializing acestep-v15-xl-turbo...
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  2.78it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:00<00:00,  2.80it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  3.04it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:01<00:00,  3.21it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:01<00:00,  3.09it/s]
+2026-04-07 10:56:49.607 | INFO     | acestep.core.generation.handler.generate_music:generate_music:263 - [generate_music] Turbo model detected: overriding guidance_scale 0.0 -> 1.0 (turbo does not use CFG).
+2026-04-07 10:56:49.607 | INFO     | acestep.core.generation.handler.generate_music:generate_music:278 - [generate_music] Starting generation...
+2026-04-07 10:56:49.607 | INFO     | acestep.core.generation.handler.generate_music:generate_music:281 - [generate_music] Preparing inputs...
+2026-04-07 10:56:49.608 | INFO     | acestep.core.generation.handler.generate_music_request:_prepare_reference_and_source_audio:138 - [generate_music] %s task: no src_audio but audio codes provided, proceeding with codes
+2026-04-07 10:56:49.611 | INFO     | acestep.core.generation.handler.generate_music:_vram_preflight_check:156 - [generate_music] VRAM pre-flight: 76.75 GB free, ~1.23 GB needed (batch=1, duration=88s, mode=xl_turbo).
+2026-04-07 10:56:49.616 | INFO     | acestep.core.generation.handler.conditioning_target:_prepare_target_latents_and_wavs:58 - [generate_music] Decoding audio codes for item 0...
+2026-04-07 10:56:49.621 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_precomputed_lm_hints:31 - [generate_music] Decoding audio codes for LM hints for item 0...
+2026-04-07 10:56:49.623 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:119 - 
+======================================================================
+2026-04-07 10:56:49.623 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:120 - 🔍 [DEBUG] DiT TEXT ENCODER INPUT (Inference)
+2026-04-07 10:56:49.623 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:121 - ======================================================================
+2026-04-07 10:56:49.623 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:122 - text_prompt:
+# Instruction
+Generate audio semantic tokens based on the given conditions:
+
+# Caption
+An upbeat and anthemic pop-rock track driven by bright, slightly overdriven
+
+# Metas
+- bpm: 83
+- timesignature: 4
+- keyscale: G major
+- duration: 88 seconds
+<|endoftext|>
+
+2026-04-07 10:56:49.623 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:123 - ======================================================================
+2026-04-07 10:56:49.623 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:124 - lyrics_text:
+# Languages
+fr
+
+# Lyric
+# Lyric
+[Intro - Guitar Riff]
+[Verse 1]
+Dans le monde des tutos virtuels
+G ta toise en nouvelle passion
+Avec Ggendoline et Pumbé à midi
+La communauté, c'est l'unité
+Quel joie, une clé
+
+[Chorus]
+Dans le monde des tutos virtuels
+Gândoline et Pumbé à midi
+Une famille à connecter, c'est vrai
+D'un enfant qui voit toi fusionner
+
+[Guitar Solo]
+
+[Verse 2]
+Dans le monde des tutos virtuels
+Gândoline, Pumbé à midi
+Une famille à connecter, c'est vrai
+D'un enfant qui voit toi fusionner<|endoftext|>
+2026-04-07 10:56:49.623 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:125 - ======================================================================
+
+2026-04-07 10:56:49.627 | INFO     | acestep.core.generation.handler.conditioning_embed:preprocess_batch:110 - [preprocess_batch] Inferring prompt embeddings...
+2026-04-07 10:56:49.634 | INFO     | acestep.core.generation.handler.conditioning_embed:preprocess_batch:113 - [preprocess_batch] Inferring lyric embeddings...
+2026-04-07 10:56:49.634 | INFO     | acestep.core.generation.handler.service_generate_execute:_execute_service_generate_diffusion:137 - [service_generate] Generating audio... (DiT backend: PyTorch (cuda))
+2026-04-07 10:56:49.641 | INFO     | acestep.core.generation.handler.service_generate_execute:_execute_service_generate_diffusion:220 - [service_generate] DiT diffusion via PyTorch (cuda)...
+2026-04-07 10:56:50.200 | INFO     | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:42 - [generate_music] Model generation completed. Decoding latents...
+2026-04-07 10:56:50.201 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:64 - [generate_music] pred_latents: torch.Size([1, 2170, 64]), dtype=torch.bfloat16
+2026-04-07 10:56:50.201 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:65 - [generate_music] time_costs: {'encoder_time_cost': 0.006403923034667969, 'diffusion_time_cost': 0.552504301071167, 'diffusion_per_step_time_cost': 0.06906303763389587, 'total_time_cost': 0.558908224105835, 'offload_time_cost': 0.0}
+2026-04-07 10:56:50.224 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:127 - [generate_music] Decoding latents with VAE...
+2026-04-07 10:56:50.227 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:136 - [generate_music] Before VAE decode: allocated=17.04GB, max=18.34GB
+2026-04-07 10:56:50.227 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:154 - [generate_music] Effective free VRAM before VAE decode: 76.66 GB
+2026-04-07 10:56:50.227 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:172 - [generate_music] Using tiled VAE decode to reduce VRAM usage...
+2026-04-07 10:56:50.227 | DEBUG    | acestep.core.generation.handler.memory_utils:_get_auto_decode_chunk_size:108 - [_get_auto_decode_chunk_size] Effective free VRAM: 76.66 GB
+2026-04-07 10:56:50.227 | DEBUG    | acestep.core.generation.handler.memory_utils:_should_offload_wav_to_cpu:131 - [_should_offload_wav_to_cpu] Effective free VRAM: 76.66 GB
+2026-04-07 10:56:50.227 | INFO     | acestep.core.generation.handler.vae_decode:tiled_decode:56 - [tiled_decode] chunk_size=512, offload_wav_to_cpu=False, latents_shape=torch.Size([1, 64, 2170])
+2026-04-07 10:56:50.502 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:193 - [generate_music] After VAE decode: allocated=17.21GB, max=18.50GB
+2026-04-07 10:56:50.662 | INFO     | acestep.core.generation.handler.generate_music_payload:_build_generate_music_success_payload:36 - [generate_music] VAE decode completed. Preparing audio tensors...
+2026-04-07 10:56:50.666 | INFO     | acestep.core.generation.handler.generate_music_payload:_build_generate_music_success_payload:48 - [generate_music] Done! Generated 1 audio tensors.
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 97247 MiB):
+  Device 0: NVIDIA RTX PRO 6000 Blackwell Workstation Edition, compute capability 12.0, VMM: yes, VRAM: 97247 MiB
+load_backend: loaded CUDA backend from /mnt/workspace/acestep.cpp/build/libggml-cuda.so
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = NVIDIA RTX PRO 6000 Blackwell Workstation Edition (NVIDIA) | uma: 0 | fp16: 1 | bf16: 0 | warp size: 32 | shared memory: 49152 | int dot: 1 | matrix cores: NV_coopmat2
+load_backend: loaded Vulkan backend from /mnt/workspace/acestep.cpp/build/libggml-vulkan.so
+load_backend: loaded CPU backend from /mnt/workspace/acestep.cpp/build/libggml-cpu-zen4.so
+[Load] DiT backend: CUDA0 (CPU threads: 16)
+[Synth-Load] Backend init: 97.4 ms
+[GGUF] ../models/acestep-v15-xl-sft-Q5_K_M.gguf: 830 tensors, data at offset 69056
+[DiT] Self-attn: Q+K fused, V separate
+[DiT] Cross-attn: all separate
+[DiT] MLP: gate+up fused
+[Load] null_condition_emb found (CFG available)
+[WeightCtx] Loaded 630 tensors, 2801.1 MB into backend
+[Load] DiT: 32 layers, H=2560, Nh=32/8, D=128
+[Synth-Load] DiT weight load: 858.7 ms
+[GGUF] ../models/acestep-v15-xl-sft-Q5_K_M.gguf: 830 tensors, data at offset 69056
+[Synth-Load] silence_latent: [15000, 64] from GGUF
+[GGUF] ../models/vae-BF16.gguf: 365 tensors, data at offset 30048
+[Load] VAE backend: CUDA0 (shared)
+[VAE] Backend: CUDA0, Weight buffer: 161.1 MB
+[VAE] Loaded: 5 blocks, upsample=1920x, F32 activations
+[Synth-Load] VAE weights: 663.6 ms
+[BPE] Loaded from GGUF: 151643 vocab, 151387 merges
+[Synth-Load] BPE tokenizer: 31.4 ms
+[Load] TextEncoder backend: CUDA0 (shared)
+[GGUF] ../models/Qwen3-Embedding-0.6B-BF16.gguf: 310 tensors, data at offset 5337568
+[Load] TextEncoder: 28L, H=1024, Nh=16/8
+[Qwen3] Attn: Q+K+V fused
+[Qwen3] MLP: gate+up fused
+[WeightCtx] Loaded 310 tensors, 1136.5 MB into backend
+[Synth-Load] TextEncoder: 132.5 ms
+[Load] CondEncoder backend: CUDA0 (shared)
+[GGUF] ../models/acestep-v15-xl-sft-Q5_K_M.gguf: 830 tensors, data at offset 69056
+[Load] LyricEncoder: 8L
+[Qwen3] Attn: Q+K fused, V separate
+[Qwen3] MLP: gate+up fused
+[Load] TimbreEncoder: 4L
+[Qwen3] Attn: Q+K fused, V separate
+[Qwen3] MLP: gate+up fused
+[WeightCtx] Loaded 141 tensors, 416.2 MB into backend
+[Load] CondEncoder: lyric(8L), timbre(4L, CLS), text_proj, null_cond
+[Synth-Load] ConditionEncoder: 127.6 ms
+[GGUF] ../models/acestep-v15-xl-sft-Q5_K_M.gguf: 830 tensors, data at offset 69056
+[WeightCtx] Loaded 30 tensors, 73.2 MB into backend
+[Load] Detokenizer: FSQ(6->2048) + 2L encoder(S=5, 2048->64)
+[Synth-Load] Detokenizer: 20.8 ms
+[GGUF] ../models/acestep-v15-xl-sft-Q5_K_M.gguf: 830 tensors, data at offset 69056
+[WeightCtx] Loaded 30 tensors, 73.3 MB into backend
+[Tok] Loaded: 2 layers, H=2048, pool_window=5
+[Synth-Load] Tokenizer: 20.8 ms
+[Ace-Synth] All models loaded, turbo=no
+[Request] Parsed ggml-xl-sft/request0.json
+[Request] seed=42 lm_batch=1 synth_batch=1
+[Request] caption: An upbeat and anthemic pop-rock track driven by bright, slig...
+[Request] lyrics: 490 bytes
+[Request] bpm=83 dur=88 key=G major ts=4 lang=fr
+[Request] lm: temp=0.85 cfg=2.0 top_p=0.90 top_k=0
+[Request] dit: steps=50 guidance=1.0 shift=1.0
+[Request] audio_codes: (present)
+[Ace-Synth] Batch: 1 request(s)
+[Resolve-Params] max audio codes across batch: 434 (86.8s @ 5Hz)
+[Resolve-T] T=2170, S=1085
+[Resolve-T] seed=42, steps=50, guidance=1.0, shift=1.0, duration=88.0s
+[CondEnc] Lyric sliding mask: 167x167, window=128
+[CondEnc] Timbre sliding mask: 2x2, window=128 (CLS)
+[Encode] Packed: lyric=167 + timbre=1 + text=70 = 238 tokens
+[Encode-Text Batch0] 70+167 tokens -> enc_S=238, 17.9 ms
+[Debug] text_hidden: [70, 1024] first4: 3.652014 1.047935 0.228532 -12.907304
+[Debug] lyric_embed: [167, 1024] first4: 0.029175 0.032227 -0.022339 -0.028809
+[Debug] enc_hidden: [238, 2048] first4: 0.687465 -0.019594 -0.050987 0.022706
+[Context] Decoded: 434 codes -> 2170 frames (86.8s @ 25Hz)
+[Build-Context Batch0] Detokenizer: 106.5 ms, 434 codes
+[Debug] detok_output: [2170, 64] first4: -0.125017 1.460327 0.292545 -0.654237
+[Init-Noise Batch0] Philox noise seed=42, [2170, 64]
+[Debug] noise: [2170, 64] first4: 0.194336 2.156250 -0.171875 0.847656
+[Debug] context: [2170, 128] first4: -0.125017 1.460327 0.292545 -0.654237
+[Init-Noise] Starting: T=2170, S=1085, enc_S=238, steps=50, batch=1 (cover)
+[DiT] Batch N=1, T=2170, S=1085, enc_S=238
+[DiT] Graph: 2345 nodes
+[Debug] tproj: [15360] first4: 0.004657 0.088920 0.077683 -0.035812
+[Debug] temb: [2560] first4: 0.009920 -0.007980 -0.006100 0.004947
+[Debug] temb_t: [2560] first4: 0.008431 -0.008081 -0.006747 0.003949
+[Debug] temb_r: [2560] first4: 0.001489 0.000101 0.000647 0.000998
+[Debug] sinusoidal_t: [256] first4: 0.562486 0.789701 0.439822 -0.023583
+[Debug] sinusoidal_r: [256] first4: 1.000000 1.000000 1.000000 1.000000
+[Debug] temb_lin1_t: [2560] first4: 0.028321 -0.080133 0.086678 -0.070687
+[Debug] temb_lin1_r: [2560] first4: 0.006506 -0.006322 -0.000918 -0.013459
+[Debug] hidden_after_proj_in: [2560, 1085] first4: 0.336729 -0.495173 0.122021 -0.198960
+[Debug] proj_in_input: [192, 2170] first4: -0.125017 1.460327 0.292545 -0.654237
+[Debug] enc_after_cond_emb: [2560, 238] first4: 0.056389 0.651479 0.119463 0.867004
+[Debug] layer0_sa_input: [2560, 1085] first4: 0.029272 -0.036284 0.103742 -0.096782
+[Debug] layer0_q_after_rope: [128, 32] first4: 0.056389 0.651479 0.119463 0.867004
+[Debug] layer0_k_after_rope: [128, 8] first4: 0.512752 3.462034 -3.519868 6.075539
+[Debug] layer0_sa_output: [2560, 1085] first4: 1.997300 4.385876 -0.786809 7.766632
+[Debug] layer0_attn_out: [4096, 1085] first4: -1.056389 -9.822507 -6.037553 0.638925
+[Debug] layer0_after_self_attn: [2560, 1085] first4: 0.462308 -2.183839 -0.459198 -4.113430
+[Debug] layer0_after_cross_attn: [2560, 1085] first4: 0.292218 -1.903488 -0.382403 -4.180512
+[Debug] hidden_after_layer0: [2560, 1085] first4: -1.414049 -1.254634 243.448700 -4.058301
+[Debug] hidden_after_layer6: [2560, 1085] first4: -7.429916 3.308808 302.203003 -21.595173
+[Debug] hidden_after_layer12: [2560, 1085] first4: -20.854591 36.144028 221.376038 16.195156
+[Debug] hidden_after_layer18: [2560, 1085] first4: 12.145933 -15.111744 228.663834 19.169701
+[Debug] hidden_after_layer31: [2560, 1085] first4: 65.552612 -114.086006 -3.251629 81.818596
+[Debug] dit_step0_vt: [2170, 64] first4: -0.341842 2.247111 0.060826 1.708641
+[Debug] dit_step0_xt: [2170, 64] first4: 0.201173 2.111308 -0.173092 0.813483
+[DiT] Step 1/50 t=1.000
+[Debug] dit_step1_vt: [2170, 64] first4: -0.380469 2.180749 0.092394 1.555531
+[Debug] dit_step1_xt: [2170, 64] first4: 0.208782 2.067693 -0.174939 0.782373
+[DiT] Step 2/50 t=0.980
+[Debug] dit_step2_vt: [2170, 64] first4: -0.359910 2.196255 0.110602 1.563201
+[Debug] dit_step2_xt: [2170, 64] first4: 0.215980 2.023768 -0.177151 0.751109
+[DiT] Step 3/50 t=0.960
+[Debug] dit_step3_vt: [2170, 64] first4: -0.290773 2.158576 0.092952 1.570626
+[Debug] dit_step3_xt: [2170, 64] first4: 0.221796 1.980596 -0.179010 0.719696
+[DiT] Step 4/50 t=0.940
+[Debug] dit_step4_vt: [2170, 64] first4: -0.307471 2.096884 0.077082 1.585275
+[Debug] dit_step4_xt: [2170, 64] first4: 0.227945 1.938658 -0.180552 0.687991
+[DiT] Step 5/50 t=0.920
+[Debug] dit_step5_vt: [2170, 64] first4: -0.316651 2.048175 0.104784 1.592644
+[Debug] dit_step5_xt: [2170, 64] first4: 0.234278 1.897695 -0.182648 0.656138
+[DiT] Step 6/50 t=0.900
+[Debug] dit_step6_vt: [2170, 64] first4: -0.299228 2.010917 0.107908 1.591907
+[Debug] dit_step6_xt: [2170, 64] first4: 0.240263 1.857477 -0.184806 0.624300
+[DiT] Step 7/50 t=0.880
+[Debug] dit_step7_vt: [2170, 64] first4: -0.278829 1.997014 0.153258 1.598933
+[Debug] dit_step7_xt: [2170, 64] first4: 0.245839 1.817536 -0.187871 0.592321
+[DiT] Step 8/50 t=0.860
+[Debug] dit_step8_vt: [2170, 64] first4: -0.310061 1.922453 0.181537 1.598436
+[Debug] dit_step8_xt: [2170, 64] first4: 0.252041 1.779087 -0.191502 0.560352
+[DiT] Step 9/50 t=0.840
+[Debug] dit_step9_vt: [2170, 64] first4: -0.342742 1.863883 0.156528 1.560784
+[Debug] dit_step9_xt: [2170, 64] first4: 0.258895 1.741810 -0.194632 0.529137
+[DiT] Step 10/50 t=0.820
+[Debug] dit_step10_vt: [2170, 64] first4: -0.353711 1.803516 0.126206 1.544420
+[Debug] dit_step10_xt: [2170, 64] first4: 0.265970 1.705739 -0.197157 0.498248
+[DiT] Step 11/50 t=0.800
+[Debug] dit_step11_vt: [2170, 64] first4: -0.361716 1.774581 0.162955 1.559335
+[Debug] dit_step11_xt: [2170, 64] first4: 0.273204 1.670248 -0.200416 0.467062
+[DiT] Step 12/50 t=0.780
+[Debug] dit_step12_vt: [2170, 64] first4: -0.338457 1.723942 0.143063 1.536485
+[Debug] dit_step12_xt: [2170, 64] first4: 0.279973 1.635769 -0.203277 0.436332
+[DiT] Step 13/50 t=0.760
+[Debug] dit_step13_vt: [2170, 64] first4: -0.329451 1.664998 0.104712 1.538924
+[Debug] dit_step13_xt: [2170, 64] first4: 0.286562 1.602469 -0.205371 0.405553
+[DiT] Step 14/50 t=0.740
+[Debug] dit_step14_vt: [2170, 64] first4: -0.322288 1.627568 0.088451 1.518883
+[Debug] dit_step14_xt: [2170, 64] first4: 0.293008 1.569918 -0.207140 0.375176
+[DiT] Step 15/50 t=0.720
+[Debug] dit_step15_vt: [2170, 64] first4: -0.316259 1.576218 0.067309 1.534041
+[Debug] dit_step15_xt: [2170, 64] first4: 0.299333 1.538393 -0.208486 0.344495
+[DiT] Step 16/50 t=0.700
+[Debug] dit_step16_vt: [2170, 64] first4: -0.280959 1.524252 0.043858 1.510026
+[Debug] dit_step16_xt: [2170, 64] first4: 0.304952 1.507908 -0.209364 0.314294
+[DiT] Step 17/50 t=0.680
+[Debug] dit_step17_vt: [2170, 64] first4: -0.239520 1.479220 0.008375 1.500932
+[Debug] dit_step17_xt: [2170, 64] first4: 0.309743 1.478324 -0.209531 0.284276
+[DiT] Step 18/50 t=0.660
+[Debug] dit_step18_vt: [2170, 64] first4: -0.200727 1.419029 0.004770 1.488895
+[Debug] dit_step18_xt: [2170, 64] first4: 0.313757 1.449943 -0.209626 0.254498
+[DiT] Step 19/50 t=0.640
+[Debug] dit_step19_vt: [2170, 64] first4: -0.198528 1.391259 -0.015207 1.477156
+[Debug] dit_step19_xt: [2170, 64] first4: 0.317728 1.422118 -0.209322 0.224955
+[DiT] Step 20/50 t=0.620
+[Debug] dit_step20_vt: [2170, 64] first4: -0.144197 1.331959 -0.001331 1.463068
+[Debug] dit_step20_xt: [2170, 64] first4: 0.320612 1.395479 -0.209296 0.195693
+[DiT] Step 21/50 t=0.600
+[Debug] dit_step21_vt: [2170, 64] first4: -0.104679 1.270011 -0.005028 1.472510
+[Debug] dit_step21_xt: [2170, 64] first4: 0.322705 1.370079 -0.209195 0.166243
+[DiT] Step 22/50 t=0.580
+[Debug] dit_step22_vt: [2170, 64] first4: -0.094933 1.239678 -0.042806 1.449106
+[Debug] dit_step22_xt: [2170, 64] first4: 0.324604 1.345285 -0.208339 0.137261
+[DiT] Step 23/50 t=0.560
+[Debug] dit_step23_vt: [2170, 64] first4: -0.055561 1.190447 -0.063880 1.423355
+[Debug] dit_step23_xt: [2170, 64] first4: 0.325715 1.321476 -0.207061 0.108794
+[DiT] Step 24/50 t=0.540
+[Debug] dit_step24_vt: [2170, 64] first4: -0.032953 1.137018 -0.057807 1.425577
+[Debug] dit_step24_xt: [2170, 64] first4: 0.326374 1.298736 -0.205905 0.080282
+[DiT] Step 25/50 t=0.520
+[Debug] dit_step25_vt: [2170, 64] first4: -0.031599 1.095074 -0.068393 1.381167
+[Debug] dit_step25_xt: [2170, 64] first4: 0.327006 1.276834 -0.204537 0.052659
+[DiT] Step 26/50 t=0.500
+[Debug] dit_step26_vt: [2170, 64] first4: 0.008751 1.005451 -0.113477 1.341352
+[Debug] dit_step26_xt: [2170, 64] first4: 0.326831 1.256725 -0.202268 0.025832
+[DiT] Step 27/50 t=0.480
+[Debug] dit_step27_vt: [2170, 64] first4: 0.020561 0.953395 -0.120980 1.358863
+[Debug] dit_step27_xt: [2170, 64] first4: 0.326420 1.237657 -0.199848 -0.001345
+[DiT] Step 28/50 t=0.460
+[Debug] dit_step28_vt: [2170, 64] first4: 0.005422 0.891629 -0.150489 1.301727
+[Debug] dit_step28_xt: [2170, 64] first4: 0.326312 1.219825 -0.196838 -0.027380
+[DiT] Step 29/50 t=0.440
+[Debug] dit_step29_vt: [2170, 64] first4: 0.003728 0.846526 -0.147136 1.307155
+[Debug] dit_step29_xt: [2170, 64] first4: 0.326237 1.202894 -0.193896 -0.053523
+[DiT] Step 30/50 t=0.420
+[Debug] dit_step30_vt: [2170, 64] first4: -0.040219 0.741120 -0.148722 1.282119
+[Debug] dit_step30_xt: [2170, 64] first4: 0.327041 1.188072 -0.190921 -0.079165
+[DiT] Step 31/50 t=0.400
+[Debug] dit_step31_vt: [2170, 64] first4: -0.024163 0.659774 -0.183430 1.254895
+[Debug] dit_step31_xt: [2170, 64] first4: 0.327525 1.174876 -0.187253 -0.104263
+[DiT] Step 32/50 t=0.380
+[Debug] dit_step32_vt: [2170, 64] first4: -0.046093 0.588647 -0.170945 1.235921
+[Debug] dit_step32_xt: [2170, 64] first4: 0.328447 1.163103 -0.183834 -0.128982
+[DiT] Step 33/50 t=0.360
+[Debug] dit_step33_vt: [2170, 64] first4: -0.005139 0.498270 -0.170803 1.195608
+[Debug] dit_step33_xt: [2170, 64] first4: 0.328549 1.153138 -0.180418 -0.152894
+[DiT] Step 34/50 t=0.340
+[Debug] dit_step34_vt: [2170, 64] first4: -0.069285 0.431246 -0.165109 1.181368
+[Debug] dit_step34_xt: [2170, 64] first4: 0.329935 1.144513 -0.177116 -0.176521
+[DiT] Step 35/50 t=0.320
+[Debug] dit_step35_vt: [2170, 64] first4: -0.040695 0.345405 -0.196324 1.126955
+[Debug] dit_step35_xt: [2170, 64] first4: 0.330749 1.137605 -0.173189 -0.199060
+[DiT] Step 36/50 t=0.300
+[Debug] dit_step36_vt: [2170, 64] first4: -0.063256 0.216834 -0.178406 1.126502
+[Debug] dit_step36_xt: [2170, 64] first4: 0.332014 1.133268 -0.169621 -0.221590
+[DiT] Step 37/50 t=0.280
+[Debug] dit_step37_vt: [2170, 64] first4: -0.070013 0.096498 -0.212055 0.996318
+[Debug] dit_step37_xt: [2170, 64] first4: 0.333414 1.131338 -0.165380 -0.241517
+[DiT] Step 38/50 t=0.260
+[Debug] dit_step38_vt: [2170, 64] first4: -0.153399 -0.013497 -0.138452 0.994446
+[Debug] dit_step38_xt: [2170, 64] first4: 0.336482 1.131608 -0.162611 -0.261406
+[DiT] Step 39/50 t=0.240
+[Debug] dit_step39_vt: [2170, 64] first4: -0.119280 -0.115691 -0.146037 0.976058
+[Debug] dit_step39_xt: [2170, 64] first4: 0.338868 1.133922 -0.159690 -0.280927
+[DiT] Step 40/50 t=0.220
+[Debug] dit_step40_vt: [2170, 64] first4: -0.157656 -0.216640 -0.110803 0.934895
+[Debug] dit_step40_xt: [2170, 64] first4: 0.342021 1.138255 -0.157474 -0.299625
+[DiT] Step 41/50 t=0.200
+[Debug] dit_step41_vt: [2170, 64] first4: -0.227388 -0.303875 -0.104806 0.851086
+[Debug] dit_step41_xt: [2170, 64] first4: 0.346569 1.144332 -0.155378 -0.316646
+[DiT] Step 42/50 t=0.180
+[Debug] dit_step42_vt: [2170, 64] first4: -0.235912 -0.380477 -0.110822 0.825382
+[Debug] dit_step42_xt: [2170, 64] first4: 0.351287 1.151942 -0.153161 -0.333154
+[DiT] Step 43/50 t=0.160
+[Debug] dit_step43_vt: [2170, 64] first4: -0.292629 -0.472491 -0.117512 0.775306
+[Debug] dit_step43_xt: [2170, 64] first4: 0.357140 1.161392 -0.150811 -0.348660
+[DiT] Step 44/50 t=0.140
+[Debug] dit_step44_vt: [2170, 64] first4: -0.259598 -0.596700 -0.014838 0.702112
+[Debug] dit_step44_xt: [2170, 64] first4: 0.362332 1.173326 -0.150514 -0.362702
+[DiT] Step 45/50 t=0.120
+[Debug] dit_step45_vt: [2170, 64] first4: -0.301540 -0.660340 0.029938 0.663586
+[Debug] dit_step45_xt: [2170, 64] first4: 0.368362 1.186533 -0.151113 -0.375974
+[DiT] Step 46/50 t=0.100
+[Debug] dit_step46_vt: [2170, 64] first4: -0.331615 -0.726642 0.116725 0.630041
+[Debug] dit_step46_xt: [2170, 64] first4: 0.374995 1.201065 -0.153448 -0.388575
+[DiT] Step 47/50 t=0.080
+[Debug] dit_step47_vt: [2170, 64] first4: -0.393003 -0.796277 0.155957 0.571223
+[Debug] dit_step47_xt: [2170, 64] first4: 0.382855 1.216991 -0.156567 -0.399999
+[DiT] Step 48/50 t=0.060
+[Debug] dit_step48_vt: [2170, 64] first4: -0.461623 -0.872003 0.232426 0.565689
+[Debug] dit_step48_xt: [2170, 64] first4: 0.392087 1.234431 -0.161215 -0.411313
+[DiT] Step 49/50 t=0.040
+[Debug] dit_step49_vt: [2170, 64] first4: -0.422876 -0.859651 0.157224 0.591012
+[Debug] dit_x0: [2170, 64] first4: 0.400545 1.251624 -0.164360 -0.423133
+[DiT] Step 50/50 t=0.020
+[DiT-Generate] Total: 2919.7 ms (2919.7 ms/sample)
+[Debug] dit_output: [2170, 64] first4: 0.400545 1.251624 -0.164360 -0.423133
+[VAE] Tiled decode: 17 tiles (chunk=256, overlap=64, stride=128)
+[VAE] Graph: 335 nodes, T_latent=192
+[VAE] Upsample factor: 1920.00 (expected ~1920)
+[VAE] Graph: 335 nodes, T_latent=256
+[VAE] Graph: 335 nodes, T_latent=186
+[VAE] Tiled decode done: 17 tiles -> T_audio=4166400 (86.80s @ 48kHz)
+[VAE-Decode Batch0] Decode: 629.0 ms
+[Debug] vae_audio: [2, 4166400] first4: -0.001462 -0.000818 -0.000815 -0.000365
+[MP3] Encoding 86.8s @ 128 kbps, 48000 Hz stereo
+[MP3] 1388928 bytes (12.0:1), 392 ms (221.29x realtime), 32 threads
+[MP3] Wrote ggml-xl-sft/request00.mp3
+[Ace-Synth] All done
+2026-04-07 10:56:57.537 | INFO     | acestep.core.generation.handler.init_service_loader:_load_main_model_from_checkpoint:174 - [initialize_service] Attempting to load model with attention implementation: sdpa
+[Python] Generating (acestep-v15-xl-turbo, 8 steps)...
+Using precomputed LM hints
+Using precomputed LM hints
+[Python] Wrote python-xl-turbo/output.wav: 4166400 samples (86.80s @ 48kHz stereo)
+[Python] Done, 40 dump files
+[Xl-turbo] Cosine similarities GGML vs Python
+  stage                          GGML vs Python
+  text_hidden                          0.999805
+  lyric_embed                          1.000000
+  enc_hidden                           0.998799
+  detok_output                         0.999875
+  context                              0.999920
+  noise                                1.000000
+  temb_t                               0.999914
+  hidden_after_proj_in                 0.999941
+  enc_after_cond_emb                   0.998692
+  layer0_sa_output                     0.998932
+  hidden_after_layer0                  0.999349
+  hidden_after_layer6                  0.999689
+  hidden_after_layer12                 0.996839
+  hidden_after_layer18                 0.995776
+  hidden_after_layer31                 0.987920
+  dit_step0_vt                         0.912434
+  dit_step0_xt                         0.999842
+  dit_step1_vt                         0.926071
+  dit_step1_xt                         0.999521
+  dit_step2_vt                         0.926378
+  dit_step2_xt                         0.998725
+  dit_step3_vt                         0.925070
+  dit_step3_xt                         0.996851
+  dit_step4_vt                         0.916797
+  dit_step4_xt                         0.992141
+  dit_step5_vt                         0.906735
+  dit_step5_xt                         0.980815
+  dit_step6_vt                         0.899108
+  dit_step6_xt                         0.958356
+  dit_step7_vt                         0.878187
+  dit_x0                               0.922169
+  vae_audio                            0.714890
+  vae_audio (STFT cosine)              0.920027
+[Xl-turbo] Error growth GGML vs Python
+  stage                         cos    max_err   mean_err     mean_A      std_A     mean_B      std_B
+  dit_step0_xt             0.999842   0.160931   0.012613  -0.002926   0.978274  -0.002721   0.976534
+  dit_step1_xt             0.999521   0.284616   0.021676  -0.005811   0.952011  -0.005567   0.949004
+  dit_step2_xt             0.998725   0.452021   0.033967  -0.009556   0.922992  -0.009330   0.918931
+  dit_step3_xt             0.996851   0.684125   0.050696  -0.015103   0.891923  -0.014418   0.887241
+  dit_step4_xt             0.992141   1.128093   0.076540  -0.022648   0.863221  -0.021453   0.857796
+  dit_step5_xt             0.980815   1.736186   0.116954  -0.033868   0.847889  -0.032240   0.840033
+  dit_step6_xt             0.958356   2.506332   0.177985  -0.050685   0.873953  -0.049194   0.863964
+[Xl-sft] steps=50, shift=1.0 | acestep-v15-xl-sft-Q5_K_M.gguf
+[GGML] Running acestep-v15-xl-sft-Q5_K_M.gguf...
+[GGML] Done, 131 dump files
+[Python] Initializing acestep-v15-xl-sft...
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:00,  3.01it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:00<00:00,  2.38it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:01<00:00,  1.85it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.85it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.96it/s]
+2026-04-07 10:57:01.029 | INFO     | acestep.core.generation.handler.generate_music:generate_music:278 - [generate_music] Starting generation...
+2026-04-07 10:57:01.030 | INFO     | acestep.core.generation.handler.generate_music:generate_music:281 - [generate_music] Preparing inputs...
+2026-04-07 10:57:01.030 | INFO     | acestep.core.generation.handler.generate_music_request:_prepare_reference_and_source_audio:138 - [generate_music] %s task: no src_audio but audio codes provided, proceeding with codes
+2026-04-07 10:57:01.033 | INFO     | acestep.core.generation.handler.generate_music:_vram_preflight_check:156 - [generate_music] VRAM pre-flight: 71.87 GB free, ~1.23 GB needed (batch=1, duration=88s, mode=xl_turbo).
+2026-04-07 10:57:01.038 | INFO     | acestep.core.generation.handler.conditioning_target:_prepare_target_latents_and_wavs:58 - [generate_music] Decoding audio codes for item 0...
+2026-04-07 10:57:01.043 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_precomputed_lm_hints:31 - [generate_music] Decoding audio codes for LM hints for item 0...
+2026-04-07 10:57:01.046 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:119 - 
+======================================================================
+2026-04-07 10:57:01.046 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:120 - 🔍 [DEBUG] DiT TEXT ENCODER INPUT (Inference)
+2026-04-07 10:57:01.046 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:121 - ======================================================================
+2026-04-07 10:57:01.046 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:122 - text_prompt:
+# Instruction
+Generate audio semantic tokens based on the given conditions:
+
+# Caption
+An upbeat and anthemic pop-rock track driven by bright, slightly overdriven
+
+# Metas
+- bpm: 83
+- timesignature: 4
+- keyscale: G major
+- duration: 88 seconds
+<|endoftext|>
+
+2026-04-07 10:57:01.046 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:123 - ======================================================================
+2026-04-07 10:57:01.046 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:124 - lyrics_text:
+# Languages
+fr
+
+# Lyric
+# Lyric
+[Intro - Guitar Riff]
+[Verse 1]
+Dans le monde des tutos virtuels
+G ta toise en nouvelle passion
+Avec Ggendoline et Pumbé à midi
+La communauté, c'est l'unité
+Quel joie, une clé
+
+[Chorus]
+Dans le monde des tutos virtuels
+Gândoline et Pumbé à midi
+Une famille à connecter, c'est vrai
+D'un enfant qui voit toi fusionner
+
+[Guitar Solo]
+
+[Verse 2]
+Dans le monde des tutos virtuels
+Gândoline, Pumbé à midi
+Une famille à connecter, c'est vrai
+D'un enfant qui voit toi fusionner<|endoftext|>
+2026-04-07 10:57:01.046 | INFO     | acestep.core.generation.handler.conditioning_text:_prepare_text_conditioning_inputs:125 - ======================================================================
+
+2026-04-07 10:57:01.049 | INFO     | acestep.core.generation.handler.conditioning_embed:preprocess_batch:110 - [preprocess_batch] Inferring prompt embeddings...
+2026-04-07 10:57:01.057 | INFO     | acestep.core.generation.handler.conditioning_embed:preprocess_batch:113 - [preprocess_batch] Inferring lyric embeddings...
+2026-04-07 10:57:01.057 | INFO     | acestep.core.generation.handler.service_generate_execute:_execute_service_generate_diffusion:137 - [service_generate] Generating audio... (DiT backend: PyTorch (cuda))
+2026-04-07 10:57:01.063 | INFO     | acestep.core.generation.handler.service_generate_execute:_execute_service_generate_diffusion:220 - [service_generate] DiT diffusion via PyTorch (cuda)...
+[Python] Generating (acestep-v15-xl-sft, 50 steps)...
+Using precomputed LM hints
+Using precomputed LM hints
+  0%|          | 0/50 [00:00<?, ?it/s]  4%|▍         | 2/50 [00:00<00:03, 13.78it/s]  8%|▊         | 4/50 [00:00<00:03, 13.88it/s] 12%|█▏        | 6/50 [00:00<00:03, 13.89it/s] 16%|█▌        | 8/50 [00:00<00:03, 13.89it/s] 20%|██        | 10/50 [00:00<00:02, 13.87it/s] 24%|██▍       | 12/50 [00:00<00:02, 13.87it/s] 28%|██▊       | 14/50 [00:01<00:02, 13.86it/s] 32%|███▏      | 16/50 [00:01<00:02, 13.85it/s] 36%|███▌      | 18/50 [00:01<00:02, 13.84it/s] 40%|████      | 20/50 [00:01<00:02, 13.83it/s] 44%|████▍     | 22/50 [00:01<00:02, 13.83it/s] 48%|████▊     | 24/50 [00:01<00:01, 13.82it/s] 52%|█████▏    | 26/50 [00:01<00:01, 13.82it/s] 56%|█████▌    | 28/50 [00:02<00:01, 13.82it/s] 60%|██████    | 30/50 [00:02<00:01, 13.82it/s] 64%|██████▍   | 32/50 [00:02<00:01, 13.82it/s] 68%|██████▊   | 34/50 [00:02<00:01, 13.81it/s] 72%|███████▏  | 36/50 [00:02<00:01, 13.80it/s] 76%|███████▌  | 38/50 [00:02<00:00, 13.80it/s] 80%|████████  | 40/50 [00:02<00:00, 13.80it/s] 84%|████████▍ | 42/50 [00:03<00:00, 13.80it/s] 88%|████████▊ | 44/50 [00:03<00:00, 13.80it/s] 92%|█████████▏| 46/50 [00:03<00:00, 13.79it/s] 96%|█████████▌| 48/50 [00:03<00:00, 13.79it/s]100%|██████████| 50/50 [00:03<00:00, 13.79it/s]100%|██████████| 50/50 [00:03<00:00, 13.82it/s]
+2026-04-07 10:57:04.688 | INFO     | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:42 - [generate_music] Model generation completed. Decoding latents...
+2026-04-07 10:57:04.689 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:64 - [generate_music] pred_latents: torch.Size([1, 2170, 64]), dtype=torch.bfloat16
+2026-04-07 10:57:04.689 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_prepare_generate_music_decode_state:65 - [generate_music] time_costs: {'encoder_time_cost': 0.006124734878540039, 'diffusion_time_cost': 3.617786169052124, 'diffusion_per_step_time_cost': 0.07235572338104249, 'total_time_cost': 3.623910903930664, 'offload_time_cost': 0.0}
+2026-04-07 10:57:04.689 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:127 - [generate_music] Decoding latents with VAE...
+2026-04-07 10:57:04.692 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:136 - [generate_music] Before VAE decode: allocated=21.96GB, max=23.22GB
+2026-04-07 10:57:04.692 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:154 - [generate_music] Effective free VRAM before VAE decode: 71.74 GB
+2026-04-07 10:57:04.692 | INFO     | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:172 - [generate_music] Using tiled VAE decode to reduce VRAM usage...
+2026-04-07 10:57:04.692 | DEBUG    | acestep.core.generation.handler.memory_utils:_get_auto_decode_chunk_size:108 - [_get_auto_decode_chunk_size] Effective free VRAM: 71.74 GB
+2026-04-07 10:57:04.692 | DEBUG    | acestep.core.generation.handler.memory_utils:_should_offload_wav_to_cpu:131 - [_should_offload_wav_to_cpu] Effective free VRAM: 71.74 GB
+2026-04-07 10:57:04.692 | INFO     | acestep.core.generation.handler.vae_decode:tiled_decode:56 - [tiled_decode] chunk_size=512, offload_wav_to_cpu=False, latents_shape=torch.Size([1, 64, 2170])
+2026-04-07 10:57:04.967 | DEBUG    | acestep.core.generation.handler.generate_music_decode:_decode_generate_music_pred_latents:193 - [generate_music] After VAE decode: allocated=22.13GB, max=23.42GB
+2026-04-07 10:57:05.144 | INFO     | acestep.core.generation.handler.generate_music_payload:_build_generate_music_success_payload:36 - [generate_music] VAE decode completed. Preparing audio tensors...
+2026-04-07 10:57:05.148 | INFO     | acestep.core.generation.handler.generate_music_payload:_build_generate_music_success_payload:48 - [generate_music] Done! Generated 1 audio tensors.
+[Python] Wrote python-xl-sft/output.wav: 4166400 samples (86.80s @ 48kHz stereo)
+[Python] Done, 166 dump files
+[Xl-sft] Cosine similarities GGML vs Python
+  stage                          GGML vs Python
+  text_hidden                          0.999805
+  lyric_embed                          1.000000
+  enc_hidden                           0.998799
+  detok_output                         0.999875
+  context                              0.999920
+  noise                                1.000000
+  temb_t                               0.999743
+  hidden_after_proj_in                 0.999940
+  enc_after_cond_emb                   0.998700
+  layer0_sa_output                     0.998024
+  hidden_after_layer0                  0.999599
+  hidden_after_layer6                  0.999664
+  hidden_after_layer12                 0.999161
+  hidden_after_layer18                 0.999595
+  hidden_after_layer31                 0.998238
+  dit_step0_vt                         0.996730
+  dit_step0_xt                         0.999999
+  dit_step5_vt                         0.996530
+  dit_step5_xt                         0.999927
+  dit_step10_vt                        0.994894
+  dit_step10_xt                        0.999700
+  dit_step15_vt                        0.990888
+  dit_step15_xt                        0.999158
+  dit_step20_vt                        0.984466
+  dit_step20_xt                        0.997975
+  dit_step25_vt                        0.975650
+  dit_step25_xt                        0.995814
+  dit_step30_vt                        0.964636
+  dit_step30_xt                        0.992541
+  dit_step35_vt                        0.955055
+  dit_step35_xt                        0.988617
+  dit_step40_vt                        0.948573
+  dit_step40_xt                        0.984800
+  dit_step45_vt                        0.956263
+  dit_step45_xt                        0.982107
+  dit_step49_vt                        0.969078
+  dit_x0                               0.981164
+  vae_audio                            0.942180
+  vae_audio (STFT cosine)              0.970443
+[Xl-sft] Error growth GGML vs Python
+  stage                         cos    max_err   mean_err     mean_A      std_A     mean_B      std_B
+  dit_step0_xt             0.999999   0.020006   0.001918  -0.001535   0.978678  -0.001270   0.979094
+  dit_step5_xt             0.999927   0.080255   0.008486  -0.006656   0.883957  -0.005547   0.882390
+  dit_step10_xt            0.999700   0.147951   0.015255  -0.012014   0.799662  -0.010046   0.799411
+  dit_step15_xt            0.999158   0.298662   0.023189  -0.017584   0.729930  -0.014862   0.727209
+  dit_step20_xt            0.997975   0.519695   0.033147  -0.023385   0.678926  -0.019815   0.673935
+  dit_step25_xt            0.995814   0.732105   0.045139  -0.029337   0.650947  -0.024654   0.644865
+  dit_step30_xt            0.992541   0.930001   0.059538  -0.035381   0.648784  -0.029700   0.640495
+  dit_step35_xt            0.988617   1.103882   0.075814  -0.041483   0.672578  -0.034784   0.661847
+  dit_step40_xt            0.984800   1.262799   0.093421  -0.047618   0.719259  -0.039940   0.707433
+  dit_step45_xt            0.982107   1.401245   0.110414  -0.053798   0.784273  -0.044996   0.770835
