@@ -18,5 +18,4 @@ echo   UI Dev: http://localhost:3000
 echo.
 echo   Open http://localhost:3000 for development
 echo   Press Ctrl+C in each window to stop
-echo.
-pause
+
