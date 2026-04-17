@@ -38,6 +38,7 @@ export interface GenerationParams {
   vocalLanguage: string;
 
   // LM settings
+  skipLm: boolean;
   lmTemperature: number;
   lmCfgScale: number;
   lmTopK: number;

@@ -136,7 +136,8 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
   try {
     // Determine if we need the LM phase
-    const needsLm = !aceReq.audio_codes &&
+    const skipLm = job.params.skipLm === true;
+    const needsLm = !skipLm && !aceReq.audio_codes &&
       !['cover', 'cover-nofsq', 'repaint', 'lego', 'extract'].includes(aceReq.task_type || '');
 
     let lmResults: AceRequest[] = [aceReq];

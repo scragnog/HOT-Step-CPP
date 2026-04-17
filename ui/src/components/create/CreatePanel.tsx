@@ -40,6 +40,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [batchSize, setBatchSize] = usePersistedState('hs-batchSize', 1);
   const [useCotCaption, setUseCotCaption] = usePersistedState('hs-useCotCaption', true);
 
+  // LM toggle
+  const [skipLm, setSkipLm] = usePersistedState('hs-skipLm', false);
+
   // LM settings
   const [lmTemperature, setLmTemperature] = usePersistedState('hs-lmTemperature', 0.8);
   const [lmCfgScale, setLmCfgScale] = usePersistedState('hs-lmCfgScale', 2.2);
@@ -76,6 +79,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       lmTopP,
       lmNegativePrompt,
       useCotCaption,
+      skipLm,
       ditModel,
       lmModel,
       loraPath: adapter,
@@ -121,6 +125,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
           seed={seed} onSeedChange={setSeed}
           randomSeed={randomSeed} onRandomSeedChange={setRandomSeed}
           batchSize={batchSize} onBatchSizeChange={setBatchSize}
+          skipLm={skipLm} onSkipLmChange={setSkipLm}
           lmTemperature={lmTemperature} onLmTemperatureChange={setLmTemperature}
           lmCfgScale={lmCfgScale} onLmCfgScaleChange={setLmCfgScale}
           lmTopK={lmTopK} onLmTopKChange={setLmTopK}

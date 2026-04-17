@@ -18,6 +18,7 @@ interface GenerationSettingsProps {
   // Batch
   batchSize: number; onBatchSizeChange: (v: number) => void;
   // LM
+  skipLm: boolean; onSkipLmChange: (v: boolean) => void;
   lmTemperature: number; onLmTemperatureChange: (v: number) => void;
   lmCfgScale: number; onLmCfgScaleChange: (v: number) => void;
   lmTopK: number; onLmTopKChange: (v: number) => void;
@@ -69,38 +70,51 @@ export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => 
       <Slider label="Batch Size" value={props.batchSize}
         onChange={props.onBatchSizeChange} min={1} max={9} step={1} />
 
-      {/* CoT Caption */}
-      <label className="toggle-row">
-        <input type="checkbox" checked={props.useCotCaption}
-          onChange={e => props.onUseCotCaptionChange(e.target.checked)} />
-        <span>Chain-of-Thought Caption</span>
-      </label>
-
       <div className="divider" />
 
-      {/* LM Settings */}
-      <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-        LM Parameters
+      {/* LM Toggle — the big switch */}
+      <div className="flex items-center justify-between">
+        <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+          LM / Thinking
+        </div>
+        <label className="toggle-row" style={{ fontSize: 'var(--text-xs)' }}>
+          <input type="checkbox" checked={!props.skipLm}
+            onChange={e => props.onSkipLmChange(!e.target.checked)} />
+          <span>{props.skipLm ? 'Disabled' : 'Enabled'}</span>
+        </label>
       </div>
 
-      <Slider label="Temperature" value={props.lmTemperature}
-        onChange={props.onLmTemperatureChange} min={0} max={2} step={0.01} showInput />
+      {/* LM Settings — dimmed when skipped */}
+      {!props.skipLm && (
+        <>
+          {/* CoT Caption */}
+          <label className="toggle-row">
+            <input type="checkbox" checked={props.useCotCaption}
+              onChange={e => props.onUseCotCaptionChange(e.target.checked)} />
+            <span>Chain-of-Thought Caption</span>
+          </label>
 
-      <Slider label="CFG Scale" value={props.lmCfgScale}
-        onChange={props.onLmCfgScaleChange} min={0} max={10} step={0.1} showInput />
+          <Slider label="Temperature" value={props.lmTemperature}
+            onChange={props.onLmTemperatureChange} min={0} max={2} step={0.01} showInput />
 
-      <Slider label="Top-K" value={props.lmTopK}
-        onChange={props.onLmTopKChange} min={0} max={200} step={1} showInput />
+          <Slider label="CFG Scale" value={props.lmCfgScale}
+            onChange={props.onLmCfgScaleChange} min={0} max={10} step={0.1} showInput />
 
-      <Slider label="Top-P" value={props.lmTopP}
-        onChange={props.onLmTopPChange} min={0} max={1} step={0.01} showInput />
+          <Slider label="Top-K" value={props.lmTopK}
+            onChange={props.onLmTopKChange} min={0} max={200} step={1} showInput />
 
-      <div>
-        <label className="label">Negative Prompt</label>
-        <input className="input" value={props.lmNegativePrompt}
-          onChange={e => props.onLmNegativePromptChange(e.target.value)}
-          placeholder="NO USER INPUT" />
-      </div>
+          <Slider label="Top-P" value={props.lmTopP}
+            onChange={props.onLmTopPChange} min={0} max={1} step={0.01} showInput />
+
+          <div>
+            <label className="label">Negative Prompt</label>
+            <input className="input" value={props.lmNegativePrompt}
+              onChange={e => props.onLmNegativePromptChange(e.target.value)}
+              placeholder="NO USER INPUT" />
+          </div>
+        </>
+      )}
     </Accordion>
   );
 };
+
