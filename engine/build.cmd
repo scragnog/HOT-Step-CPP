@@ -4,6 +4,7 @@ REM Compiles ONLY for the local GPU — fast dev builds.
 
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 
+cd /d "%~dp0"
 mkdir build 2>nul
 cd build
 
