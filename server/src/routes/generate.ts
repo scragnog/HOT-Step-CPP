@@ -168,6 +168,17 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       lmResults = await resultRes.json() as AceRequest[];
       job.lmResults = lmResults;
 
+      // Re-inject server routing fields that the LM response strips out.
+      // The C++ LM serializes only AceRequest fields — adapter, adapter_scale,
+      // and synth_model are ServerFields parsed separately by ace-server, so
+      // they're absent from the enriched JSON. Without this, /synth never
+      // sees the adapter and runs without it.
+      for (const result of lmResults) {
+        if (aceReq.synth_model) result.synth_model = aceReq.synth_model;
+        if (aceReq.adapter) result.adapter = aceReq.adapter;
+        if (aceReq.adapter_scale !== undefined) result.adapter_scale = aceReq.adapter_scale;
+      }
+
       job.progress = 40;
       job.stage = 'LM complete, starting synthesis...';
     }
