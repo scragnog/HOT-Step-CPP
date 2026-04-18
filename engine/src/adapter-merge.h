@@ -54,14 +54,8 @@
 #include <unordered_map>
 #include <vector>
 
-// Per-group scale multipliers for selective adapter application.
-// Each float defaults to 1.0 (full adapter effect). 0.0 = no adapter for that group.
-struct AdapterGroupScales {
-    float self_attn  = 1.0f;  // self-attention projections (q/k/v/o_proj)
-    float cross_attn = 1.0f;  // cross-attention projections
-    float mlp        = 1.0f;  // feed-forward / SwiGLU projections
-    float cond_embed = 1.0f;  // condition_embedder linear
-};
+// AdapterGroupScales is defined in pipeline-synth.h (included before this header
+// via dit.h → adapter-merge.h chain and by ace-server.cpp directly).
 
 // Classify a GGUF tensor name into its adapter group.
 // Returns "self_attn", "cross_attn", "mlp", "cond_embed", or "" for unclassified.

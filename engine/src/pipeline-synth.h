@@ -13,6 +13,15 @@
 struct AceSynth;
 struct AceSynthJob;
 
+// Per-group scale multipliers for selective adapter application.
+// Each float defaults to 1.0 (full adapter effect). 0.0 = no adapter for that group.
+struct AdapterGroupScales {
+    float self_attn  = 1.0f;  // self-attention projections (q/k/v/o_proj)
+    float cross_attn = 1.0f;  // cross-attention projections
+    float mlp        = 1.0f;  // feed-forward / SwiGLU projections
+    float cond_embed = 1.0f;  // condition_embedder linear
+};
+
 struct AceSynthParams {
     const char * text_encoder_path;  // Qwen3 text encoder GGUF (required)
     const char * dit_path;           // DiT GGUF (required)
