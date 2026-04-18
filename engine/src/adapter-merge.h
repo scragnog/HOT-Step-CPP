@@ -323,27 +323,41 @@ static bool adapter_backend_can_decode(ggml_backend_t backend, enum ggml_type ty
     return ok;
 }
 
-// Dequantize a native-type buffer to F32 on the CPU. Used as a fallback when
-// the backend can't cast native -> F32 (K-quants on CUDA).
-static void adapter_dequant_cpu(const void * src, float * dst, int64_t nel, int64_t n_per_row, enum ggml_type type) {
+// Dequantize a native-type buffer to F32 on the CPU using the ggml CPU backend.
+// Uses all available threads + SIMD (AVX512/NEON). The CPU backend supports
+// ggml_cast for ALL quantized types, unlike CUDA which lacks K-quant cpy kernels.
+static bool adapter_dequant_cpu(const void * src, float * dst, int64_t ne0, int64_t ne1, enum ggml_type type) {
     if (type == GGML_TYPE_F32) {
-        memcpy(dst, src, (size_t) nel * sizeof(float));
-        return;
+        memcpy(dst, src, (size_t)(ne0 * ne1) * sizeof(float));
+        return true;
     }
-    const struct ggml_type_traits * traits = ggml_get_type_traits(type);
-    if (traits->to_float) {
-        // K-quants: process row by row since to_float operates on contiguous blocks
-        int64_t nrows    = nel / n_per_row;
-        size_t  row_nb   = ggml_row_size(type, n_per_row);
-        const uint8_t * sptr = (const uint8_t *) src;
-        for (int64_t r = 0; r < nrows; r++) {
-            traits->to_float(sptr + r * row_nb, dst + r * n_per_row, n_per_row);
-        }
-    } else if (type == GGML_TYPE_BF16) {
-        ggml_bf16_to_fp32_row((const ggml_bf16_t *) src, dst, nel);
-    } else if (type == GGML_TYPE_F16) {
-        ggml_fp16_to_fp32_row((const ggml_fp16_t *) src, dst, nel);
-    }
+
+    size_t  base_nb = ggml_row_size(type, ne0) * (size_t) ne1;
+    size_t  meta    = ggml_tensor_overhead() * 4 + ggml_graph_overhead() + 4096;
+    struct ggml_init_params params = { meta, NULL, true };
+    struct ggml_context *   ctx   = ggml_init(params);
+    if (!ctx) return false;
+
+    struct ggml_tensor * tsrc = ggml_new_tensor_2d(ctx, type, ne0, ne1);
+    struct ggml_tensor * tdst = ggml_cast(ctx, tsrc, GGML_TYPE_F32);
+
+    struct ggml_cgraph * graph = ggml_new_graph(ctx);
+    ggml_build_forward_expand(graph, tdst);
+
+    ggml_backend_t cpu = ggml_backend_cpu_init();
+    if (!cpu) { ggml_free(ctx); return false; }
+
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, cpu);
+    if (!buf) { ggml_backend_free(cpu); ggml_free(ctx); return false; }
+
+    ggml_backend_tensor_set(tsrc, src, 0, base_nb);
+    ggml_backend_graph_compute(cpu, graph);
+    ggml_backend_tensor_get(tdst, dst, 0, (size_t)(ne0 * ne1) * sizeof(float));
+
+    ggml_backend_buffer_free(buf);
+    ggml_backend_free(cpu);
+    ggml_free(ctx);
+    return true;
 }
 
 // Build the reverse map from LyCORIS key prefix to GGUF tensor name.
@@ -470,26 +484,23 @@ static bool adapter_merge_on_backend(WeightCtx *                                
     }
 
     // base weight upload strategy:
-    //   decode_ok=true  → upload native, cast to F32 on backend (fast, ggml_cast)
-    //   decode_ok=false → upload native, dequant to F32 via mul_mat(I, base) on backend
-    //                     (K-quants on CUDA: ggml_cast/get_rows lack K-quant kernels,
-    //                      but mul_mat has optimized dequant for all quant types — it's
-    //                      the fundamental inference op. Multiplying by identity gives
-    //                      exact dequant with zero numerical error.)
+    //   decode_ok=true  → upload native, cast to F32 on CUDA backend (fast, ggml_cast)
+    //   decode_ok=false → dequant via ggml CPU backend (multi-threaded, AVX512) then
+    //                     upload the F32 result to CUDA. The CPU backend supports
+    //                     ggml_cast for ALL quant types. O(n) compute, uses all cores.
     bool                    decode_ok = adapter_backend_can_decode(backend, ttype);
-    struct ggml_tensor *    tbase_native = ggml_new_tensor_2d(ctx, ttype, ne0, ne1);
     struct ggml_tensor *    tbase_f32;
-    struct ggml_tensor *    teye = nullptr;  // identity matrix for mul_mat fallback
+    struct ggml_tensor *    tbase_native = nullptr;
+    std::vector<float>      base_f32_cpu;  // only allocated when !decode_ok
 
     if (decode_ok) {
-        // cast to F32 on backend (BF16, Q8_0)
-        tbase_f32 = ggml_cast(ctx, tbase_native, GGML_TYPE_F32);
+        // upload in native type, cast to F32 on CUDA
+        tbase_native = ggml_new_tensor_2d(ctx, ttype, ne0, ne1);
+        tbase_f32    = ggml_cast(ctx, tbase_native, GGML_TYPE_F32);
     } else {
-        // GPU dequant via mul_mat(I, base): I is F32 identity (ne0 × ne0),
-        // contraction on ne0 produces F32 output of shape (ne0, ne1).
-        // ggml_mul_mat(a,b) computes a^T @ b, so with a=I: I^T @ base = base.
-        teye      = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, ne0);
-        tbase_f32 = ggml_mul_mat(ctx, teye, tbase_native);
+        // CPU dequant: multi-threaded cast via ggml CPU backend, then upload F32 to CUDA
+        tbase_f32 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, ne1);
+        base_f32_cpu.resize((size_t) nel);
     }
 
     // DoRA scale vector, one F32 per output row when dora_scale is set
@@ -534,13 +545,14 @@ static bool adapter_merge_on_backend(WeightCtx *                                
         return false;
     }
 
-    // helper-owned uploads: base weight (always native) + DoRA scale + identity matrix
-    ggml_backend_tensor_set(tbase_native, base_ptr, 0, base_nb);
-    if (teye) {
-        // fill identity matrix for mul_mat GPU dequant
-        std::vector<float> eye((size_t)(ne0 * ne0), 0.0f);
-        for (int64_t i = 0; i < ne0; i++) { eye[(size_t)(i * ne0 + i)] = 1.0f; }
-        ggml_backend_tensor_set(teye, eye.data(), 0, (size_t)(ne0 * ne0) * sizeof(float));
+    // helper-owned uploads
+    if (decode_ok) {
+        // upload native from mmap, CUDA will cast to F32
+        ggml_backend_tensor_set(tbase_native, base_ptr, 0, base_nb);
+    } else {
+        // multi-threaded CPU dequant then upload F32
+        adapter_dequant_cpu(base_ptr, base_f32_cpu.data(), ne0, ne1, ttype);
+        ggml_backend_tensor_set(tbase_f32, base_f32_cpu.data(), 0, (size_t) nel * sizeof(float));
     }
     if (tds) {
         ggml_backend_tensor_set(tds, ds, 0, (size_t) ne1 * sizeof(float));
