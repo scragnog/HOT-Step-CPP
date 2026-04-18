@@ -321,6 +321,7 @@ static bool adapter_backend_can_decode(ggml_backend_t backend, enum ggml_type ty
     struct ggml_tensor *    src     = ggml_new_tensor_1d(ctx, type, probe_n);
     struct ggml_tensor *    dst     = ggml_cast(ctx, src, GGML_TYPE_F32);
     bool                    ok      = ggml_backend_supports_op(backend, dst);
+    fprintf(stderr, "[Adapter] can_decode(%s → F32): %s\n", ggml_type_name(type), ok ? "GPU" : "CPU fallback");
     ggml_free(ctx);
     return ok;
 }

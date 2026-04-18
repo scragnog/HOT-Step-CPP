@@ -4821,9 +4821,12 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                 if (src0_type == src1_type && ggml_is_contiguous(op->src[0]) && ggml_is_contiguous(op->src[1])) {
                     return true;
                 }
-                // K-quant -> F32: contiguous dequant via convert.cu GPU kernels
-                if (src1_type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[0]) && ggml_is_contiguous(op->src[1])
-                    && ggml_get_to_fp32_cuda(src0_type) != nullptr) {
+                // K-quant -> F32: GPU dequant via convert.cu kernels
+                // We check ggml_get_to_fp32_cuda here but NOT contiguity, because
+                // the supports_op probe from adapter_backend_can_decode uses
+                // no_alloc tensors with no buffer, where ggml_is_contiguous may
+                // not be reliable. Contiguity is enforced at runtime in cpy.cu.
+                if (src1_type == GGML_TYPE_F32 && ggml_get_to_fp32_cuda(src0_type) != nullptr) {
                     return true;
                 }
                 return false;
