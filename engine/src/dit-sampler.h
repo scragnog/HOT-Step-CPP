@@ -393,24 +393,6 @@ static int dit_ggml_generate(DiTGGML *           model,
         fprintf(stderr, "[DiT] RK4 solver active (4 NFE per step, %d total evaluations)\n", num_steps * 4);
     }
 
-    // ── Perf opt 1: constant upload tracking ─────────────────────────────────
-    // The scheduler may alias input tensor buffers as scratch, clobbering
-    // constants between graph computes. Rather than re-uploading every call,
-    // we track dirtiness: upload on first eval, and again only when cover-mode
-    // switches context/encoder mid-run. Saves ~47 redundant PCIe transfers
-    // for a typical RK4×12 run.
-    bool constants_dirty = true;
-
-    // ── Perf opt 2: pre-allocated RK4 temporaries ────────────────────────────
-    // Avoids heap alloc/dealloc inside the per-step loop.
-    std::vector<float> rk4_k1, rk4_k2, rk4_k3, rk4_xt_tmp;
-    if (use_rk4) {
-        rk4_k1.resize(n_total);
-        rk4_k2.resize(n_total);
-        rk4_k3.resize(n_total);
-        rk4_xt_tmp.resize(n_total);
-    }
-
     // ── evaluate_velocity lambda ─────────────────────────────────────────────
     // Evaluates the DiT model at an arbitrary (xt_in, t_val) point and writes
     // the CFG-processed velocity into `vt`. This is the "model_fn" that
@@ -431,19 +413,12 @@ static int dit_ggml_generate(DiTGGML *           model,
             ggml_backend_tensor_set(t_tr, &t_val, 0, sizeof(float));
         }
 
-        // Re-upload constants only when dirty (first call, or after cover-switch).
-        // The scheduler may alias input buffers as scratch, so after each
-        // graph_compute these could be clobbered. We re-upload once per step
-        // (before the first eval) and mark clean. The flag is set dirty again
-        // by the cover-mode context switch in the main loop.
-        if (constants_dirty) {
-            ggml_backend_tensor_set(t_enc, enc_buf.data(), 0, enc_buf.size() * sizeof(float));
-            ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N_graph * sizeof(int32_t));
-            ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
-            ggml_backend_tensor_set(t_sa_mask_pad, sa_pad_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
-            ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N_graph * sizeof(uint16_t));
-            constants_dirty = false;
-        }
+        // Re-upload constants (scheduler may reuse input buffers as scratch)
+        ggml_backend_tensor_set(t_enc, enc_buf.data(), 0, enc_buf.size() * sizeof(float));
+        ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N_graph * sizeof(int32_t));
+        ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
+        ggml_backend_tensor_set(t_sa_mask_pad, sa_pad_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
+        ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N_graph * sizeof(uint16_t));
 
         // Pack xt into input tensor (cond + uncond slots)
         for (int b = 0; b < N; b++) {
@@ -534,16 +509,8 @@ static int dit_ggml_generate(DiTGGML *           model,
                     }
                 }
             }
-            constants_dirty = true;  // force re-upload of modified enc_buf/ca_mask
             fprintf(stderr, "[DiT] Cover: switched to non-cover context at step %d/%d\n", step, num_steps);
         }
-
-        // Mark constants dirty at the start of each step (before first eval).
-        // The scheduler clobbers input buffers after graph_compute, so the
-        // first eval of each step must re-upload. Subsequent evals within
-        // the same step (RK4 k2/k3/k4) can skip re-upload since the
-        // constants haven't been modified between evals.
-        constants_dirty = true;
 
         // Evaluate velocity at (xt, t_curr) — first evaluation (k1 for RK4, only eval for Euler)
         evaluate_velocity(xt.data(), t_curr);
@@ -610,38 +577,38 @@ static int dit_ggml_generate(DiTGGML *           model,
             if (use_rk4) {
                 // RK4: 4th-order Runge-Kutta (3 extra model evaluations per step)
                 // Matches Python acestep/core/generation/solvers.py rk4_step()
-                // Uses pre-allocated buffers (rk4_k1, rk4_k2, rk4_k3, rk4_xt_tmp)
                 float dt    = t_curr - t_next;
                 float t_mid = (t_curr + t_next) / 2.0f;
 
                 // k1 = vt (already computed above)
-                memcpy(rk4_k1.data(), vt.data(), n_total * sizeof(float));
+                std::vector<float> k1(vt.begin(), vt.end());
 
                 // k2 = evaluate(xt - 0.5*dt*k1, t_mid)
+                std::vector<float> xt_tmp(n_total);
                 for (int i = 0; i < n_total; i++) {
-                    rk4_xt_tmp[i] = xt[i] - 0.5f * dt * rk4_k1[i];
+                    xt_tmp[i] = xt[i] - 0.5f * dt * k1[i];
                 }
-                evaluate_velocity(rk4_xt_tmp.data(), t_mid);
-                memcpy(rk4_k2.data(), vt.data(), n_total * sizeof(float));
+                evaluate_velocity(xt_tmp.data(), t_mid);
+                std::vector<float> k2(vt.begin(), vt.end());
 
                 // k3 = evaluate(xt - 0.5*dt*k2, t_mid)
                 for (int i = 0; i < n_total; i++) {
-                    rk4_xt_tmp[i] = xt[i] - 0.5f * dt * rk4_k2[i];
+                    xt_tmp[i] = xt[i] - 0.5f * dt * k2[i];
                 }
-                evaluate_velocity(rk4_xt_tmp.data(), t_mid);
-                memcpy(rk4_k3.data(), vt.data(), n_total * sizeof(float));
+                evaluate_velocity(xt_tmp.data(), t_mid);
+                std::vector<float> k3(vt.begin(), vt.end());
 
                 // k4 = evaluate(xt - dt*k3, t_next)
                 for (int i = 0; i < n_total; i++) {
-                    rk4_xt_tmp[i] = xt[i] - dt * rk4_k3[i];
+                    xt_tmp[i] = xt[i] - dt * k3[i];
                 }
-                evaluate_velocity(rk4_xt_tmp.data(), t_next);
+                evaluate_velocity(xt_tmp.data(), t_next);
                 // k4 = vt (current contents after evaluate_velocity)
 
                 // Weighted average: xt_next = xt - (dt/6)*(k1 + 2*k2 + 2*k3 + k4)
                 float w = dt / 6.0f;
                 for (int i = 0; i < n_total; i++) {
-                    xt[i] -= w * (rk4_k1[i] + 2.0f * rk4_k2[i] + 2.0f * rk4_k3[i] + vt[i]);
+                    xt[i] -= w * (k1[i] + 2.0f * k2[i] + 2.0f * k3[i] + vt[i]);
                 }
             } else if (use_sde && seeds) {
                 // SDE: predict x0, re-noise with fresh Philox noise.
