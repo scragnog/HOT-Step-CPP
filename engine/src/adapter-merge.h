@@ -325,51 +325,34 @@ static bool adapter_backend_can_decode(ggml_backend_t backend, enum ggml_type ty
     return ok;
 }
 
-// Dequantize a native-type buffer to F32 using direct threaded to_float calls.
-// Zero overhead: no ggml graph, no backend init, no buffer alloc — just raw
-// AVX512 dequant across all cores. Each thread processes a contiguous chunk
-// of rows for cache-friendly access.
+// Dequantize a native-type buffer to F32 using ggml's to_float trait (AVX512 SIMD).
+// Single-threaded — individual adapter tensors are small (rank × dim) so thread
+// spawn overhead on Windows (~100µs × 32 threads) dwarfs the actual dequant (~1µs).
+// Called ~200-400 times during adapter merge; total time is negligible.
 static bool adapter_dequant_cpu(const void * src, float * dst, int64_t ne0, int64_t ne1, enum ggml_type type) {
     if (type == GGML_TYPE_F32) {
         memcpy(dst, src, (size_t)(ne0 * ne1) * sizeof(float));
         return true;
     }
+    if (type == GGML_TYPE_BF16) {
+        ggml_bf16_to_fp32_row((const ggml_bf16_t *) src, dst, ne0 * ne1);
+        return true;
+    }
+    if (type == GGML_TYPE_F16) {
+        ggml_fp16_to_fp32_row((const ggml_fp16_t *) src, dst, ne0 * ne1);
+        return true;
+    }
 
     const struct ggml_type_traits * traits = ggml_get_type_traits(type);
     if (!traits || !traits->to_float) {
-        // fallback for BF16/F16 which may not have to_float
-        if (type == GGML_TYPE_BF16) {
-            ggml_bf16_to_fp32_row((const ggml_bf16_t *) src, dst, ne0 * ne1);
-        } else if (type == GGML_TYPE_F16) {
-            ggml_fp16_to_fp32_row((const ggml_fp16_t *) src, dst, ne0 * ne1);
-        } else {
-            return false;
-        }
-        return true;
+        return false;
     }
 
     const size_t    row_nb = ggml_row_size(type, ne0);
     const uint8_t * sptr   = (const uint8_t *) src;
-
-    int n_threads = (int) std::thread::hardware_concurrency();
-    if (n_threads < 1) n_threads = 1;
-    if (ne1 < n_threads) n_threads = (int) ne1;  // don't overshoot for small tensors
-
-    std::vector<std::thread> threads;
-    threads.reserve(n_threads);
-    int64_t rows_per = (ne1 + n_threads - 1) / n_threads;
-
-    for (int t = 0; t < n_threads; t++) {
-        int64_t r0 = t * rows_per;
-        int64_t r1 = std::min(r0 + rows_per, ne1);
-        if (r0 >= ne1) break;
-        threads.emplace_back([=]() {
-            for (int64_t r = r0; r < r1; r++) {
-                traits->to_float(sptr + r * row_nb, dst + r * ne0, ne0);
-            }
-        });
+    for (int64_t r = 0; r < ne1; r++) {
+        traits->to_float(sptr + r * row_nb, dst + r * ne0, ne0);
     }
-    for (auto & th : threads) th.join();
     return true;
 }
 
