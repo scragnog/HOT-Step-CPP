@@ -95,11 +95,12 @@ struct SynthState {
     // diffusion schedule
     std::vector<float> schedule;
 
-    // SDE mode: inject fresh noise at each denoising step (vs ODE pure integration)
-    bool use_sde;
-
-    // RK4 mode: 4th-order Runge-Kutta solver (4 model evaluations per step)
-    bool use_rk4;
+    // Solver name: dispatched via solver_lookup() in solvers/solver-registry.h
+    // Valid values: "euler", "heun", "rk4", "rk5", "dopri5", "dop853",
+    //              "dpm2m", "dpm3m", "dpm2m_ada", "jkass_quality", "jkass_fast",
+    //              "stork2", "stork4", "sde"
+    // Legacy alias: "ode" -> "euler"
+    std::string solver;
 
     // per-batch seeds (for reproducible SDE re-noising: seed + step offset)
     std::vector<int64_t> seeds;

@@ -1,13 +1,15 @@
 #pragma once
 // dit-sampler.h: DiT sampling loop with APG (Adaptive Projected Guidance)
 //
-// Flow matching sampler with Euler, SDE, and RK4 solvers.
+// Flow matching sampler with modular solver dispatch.
+// Solvers are resolved by name via the solver registry (solvers/solver-registry.h).
 // CFG via APG momentum. Matches Python ACE-Step-1.5 acestep/models/base/apg_guidance.py
 
 #include "debug.h"
 #include "dit-graph.h"
 #include "dit.h"
 #include "philox.h"
+#include "solvers/solver-registry.h"
 
 #include <cmath>
 #include <cstdio>
@@ -153,10 +155,9 @@ static int dit_ggml_generate(DiTGGML *           model,
                              int             repaint_t1               = 0,
                              float           repaint_injection_ratio  = 0.5f,
                              int             repaint_crossfade_frames = 0,
-                             bool            use_sde                  = false,
+                             const char *    solver_name              = "euler",
                              const int64_t * seeds                    = nullptr,
-                             bool            use_batch_cfg            = true,
-                             bool            use_rk4                  = false) {
+                             bool            use_batch_cfg            = true) {
     DiTGGMLConfig & c       = model->cfg;
     int             Oc      = c.out_channels;      // 64
     int             ctx_ch  = c.in_channels - Oc;  // 128
@@ -389,9 +390,22 @@ static int dit_ggml_generate(DiTGGML *           model,
 
     struct ggml_tensor * t_t = ggml_graph_get_tensor(gf, "t");
 
-    if (use_rk4) {
-        fprintf(stderr, "[DiT] RK4 solver active (4 NFE per step, %d total evaluations)\n", num_steps * 4);
+    // ── Solver dispatch setup ─────────────────────────────────────────────
+    const SolverInfo * solver_info = solver_lookup(solver_name);
+    if (!solver_info) {
+        fprintf(stderr, "[DiT] ERROR: unknown solver '%s', falling back to euler\n", solver_name);
+        solver_info = solver_lookup("euler");
     }
+    fprintf(stderr, "[DiT] Solver: %s (%s, %d NFE/step, order %d)\n",
+            solver_info->display_name, solver_info->name,
+            solver_info->nfe, solver_info->order);
+
+    // Initialize solver state
+    SolverState solver_state;
+    solver_state.seeds   = seeds;
+    solver_state.batch_n = N;
+    solver_state.n_per   = n_per;
+    solver_state.xt_scratch.resize(n_total);
 
     // ── evaluate_velocity lambda ─────────────────────────────────────────────
     // Evaluates the DiT model at an arbitrary (xt_in, t_val) point and writes
@@ -574,60 +588,15 @@ static int dit_ggml_generate(DiTGGML *           model,
         } else {
             float t_next = schedule[step + 1];
 
-            if (use_rk4) {
-                // RK4: 4th-order Runge-Kutta (3 extra model evaluations per step)
-                // Matches Python acestep/core/generation/solvers.py rk4_step()
-                float dt    = t_curr - t_next;
-                float t_mid = (t_curr + t_next) / 2.0f;
-
-                // k1 = vt (already computed above)
-                std::vector<float> k1(vt.begin(), vt.end());
-
-                // k2 = evaluate(xt - 0.5*dt*k1, t_mid)
-                std::vector<float> xt_tmp(n_total);
-                for (int i = 0; i < n_total; i++) {
-                    xt_tmp[i] = xt[i] - 0.5f * dt * k1[i];
-                }
-                evaluate_velocity(xt_tmp.data(), t_mid);
-                std::vector<float> k2(vt.begin(), vt.end());
-
-                // k3 = evaluate(xt - 0.5*dt*k2, t_mid)
-                for (int i = 0; i < n_total; i++) {
-                    xt_tmp[i] = xt[i] - 0.5f * dt * k2[i];
-                }
-                evaluate_velocity(xt_tmp.data(), t_mid);
-                std::vector<float> k3(vt.begin(), vt.end());
-
-                // k4 = evaluate(xt - dt*k3, t_next)
-                for (int i = 0; i < n_total; i++) {
-                    xt_tmp[i] = xt[i] - dt * k3[i];
-                }
-                evaluate_velocity(xt_tmp.data(), t_next);
-                // k4 = vt (current contents after evaluate_velocity)
-
-                // Weighted average: xt_next = xt - (dt/6)*(k1 + 2*k2 + 2*k3 + k4)
-                float w = dt / 6.0f;
-                for (int i = 0; i < n_total; i++) {
-                    xt[i] -= w * (k1[i] + 2.0f * k2[i] + 2.0f * k3[i] + vt[i]);
-                }
-            } else if (use_sde && seeds) {
-                // SDE: predict x0, re-noise with fresh Philox noise.
-                for (int b = 0; b < N; b++) {
-                    std::vector<float> fresh(n_per);
-                    philox_randn(seeds[b] + step + 1, fresh.data(), n_per, true);
-                    for (int i = 0; i < n_per; i++) {
-                        int   idx = b * n_per + i;
-                        float x0  = xt[idx] - vt[idx] * t_curr;
-                        xt[idx]   = t_next * fresh[i] + (1.0f - t_next) * x0;
-                    }
-                }
-            } else {
-                // ODE Euler: x_{t+1} = x_t - v_t * dt
-                float dt = t_curr - t_next;
-                for (int i = 0; i < n_total; i++) {
-                    xt[i] -= vt[i] * dt;
-                }
-            }
+            // ── Modular solver dispatch ──────────────────────────────────
+            // The solver step function modifies xt[] in-place.
+            // Multi-eval solvers call evaluate_velocity() via the model_fn
+            // callback; single-eval solvers ignore it.
+            solver_state.step_index = step;
+            solver_info->step_fn(
+                xt.data(), vt.data(), t_curr, t_next, n_total,
+                solver_state, evaluate_velocity, vt.data()
+            );
 
             // repaint injection: replace preserved regions with noised source.
             if (repaint_src && repaint_t1 > repaint_t0) {
@@ -659,8 +628,8 @@ static int dit_ggml_generate(DiTGGML *           model,
             }
         }
 
-        fprintf(stderr, "[DiT] Step %d/%d t=%.3f%s\n", step + 1, num_steps, t_curr,
-                use_rk4 ? " (RK4: 4 NFE)" : "");
+        fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]\n", step + 1, num_steps, t_curr,
+                solver_info->display_name);
     }
 
     // Boundary blend: smooth repaint zone edges in latent space.

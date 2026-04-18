@@ -60,9 +60,24 @@ export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => 
             <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Solver</label>
             <select className={selectClasses} value={props.inferMethod}
               onChange={e => props.onInferMethodChange(e.target.value)}>
-              <option value="ode">ODE (Euler)</option>
-              <option value="rk4">RK4 (4th Order)</option>
-              <option value="sde">SDE (Stochastic)</option>
+              <optgroup label="── Single Evaluation (1 NFE) ──">
+                <option value="euler">Euler (ODE)</option>
+                <option value="dpm2m">DPM++ 2M</option>
+                <option value="dpm3m">DPM++ 3M</option>
+                <option value="dpm2m_ada">DPM++ 2M Adaptive</option>
+                <option value="jkass_fast">JKASS Fast</option>
+                <option value="stork2">STORK 2</option>
+                <option value="stork4">STORK 4</option>
+                <option value="sde">SDE (Stochastic)</option>
+              </optgroup>
+              <optgroup label="── Multi Evaluation ──">
+                <option value="heun">Heun (2 NFE)</option>
+                <option value="jkass_quality">JKASS Quality (2 NFE)</option>
+                <option value="rk4">RK4 (4 NFE)</option>
+                <option value="rk5">RK5 (6 NFE)</option>
+                <option value="dopri5">DOPRI5 Adaptive (7+ NFE)</option>
+                <option value="dop853">DOP853 (13 NFE)</option>
+              </optgroup>
             </select>
           </div>
 

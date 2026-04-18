@@ -379,11 +379,9 @@ AceSynthJob * ace_synth_job_run_dit(AceSynth *         ctx,
     // Timestep schedule
     ops_build_schedule(s);
 
-    // SDE mode: "sde" = stochastic re-noising at each step
-    s.use_sde = (s.rr.infer_method == "sde");
-
-    // RK4 mode: 4th-order Runge-Kutta (4 DiT evaluations per step)
-    s.use_rk4 = (s.rr.infer_method == "rk4");
+    // Solver selection: resolve from infer_method, default to "euler"
+    s.solver = s.rr.infer_method.empty() ? "euler" : s.rr.infer_method;
+    if (s.solver == "ode") s.solver = "euler";  // legacy alias
 
     // Resolve latent frame count T
     if (ops_resolve_T(ctx, s) != 0) {

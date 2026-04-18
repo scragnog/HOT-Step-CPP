@@ -544,8 +544,8 @@ void ops_init_noise_and_repaint(const AceSynth * ctx, const AceRequest * reqs, i
         float * dst = s.noise.data() + b * s.Oc * s.T;
         s.seeds[b]  = reqs[b].seed;
         philox_randn(reqs[b].seed, dst, s.Oc * s.T, /*bf16_round=*/true);
-        fprintf(stderr, "[Init-Noise Batch%d] Philox noise seed=%lld, [%d, %d]%s\n", b, (long long) reqs[b].seed, s.T,
-                s.Oc, s.use_sde ? " (SDE)" : (s.use_rk4 ? " (RK4)" : ""));
+        fprintf(stderr, "[Init-Noise Batch%d] Philox noise seed=%lld, [%d, %d] solver=%s\n", b, (long long) reqs[b].seed, s.T,
+                s.Oc, s.solver.c_str());
     }
 
     // cover_noise_strength: blend initial noise with clean source latents.
@@ -630,7 +630,7 @@ int ops_dit_generate(AceSynth * ctx, int batch_n, SynthState & s, bool (*cancel)
         s.per_S.data(), s.per_enc_S.data(), s.enc_hidden_nc.empty() ? nullptr : s.enc_hidden_nc.data(),
         s.per_enc_S_nc_final.empty() ? nullptr : s.per_enc_S_nc_final.data(),
         s.repaint_src.empty() ? nullptr : s.repaint_src.data(), s.repaint_t0, s.repaint_t1, s.repaint_injection_ratio,
-        s.repaint_crossfade_frames, s.use_sde, s.seeds.data(), ctx->params.use_batch_cfg, s.use_rk4);
+        s.repaint_crossfade_frames, s.solver.c_str(), s.seeds.data(), ctx->params.use_batch_cfg);
     if (dit_rc != 0) {
         return -1;
     }
