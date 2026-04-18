@@ -471,21 +471,25 @@ static bool adapter_merge_on_backend(WeightCtx *                                
 
     // base weight upload strategy:
     //   decode_ok=true  → upload native, cast to F32 on backend (fast, ggml_cast)
-    //   decode_ok=false → upload native, dequant to F32 via ggml_get_rows on backend
-    //                     (K-quants on CUDA: ggml_cast lacks cpy kernels, but get_rows
-    //                      has optimized per-type dequant kernels for all quant types)
+    //   decode_ok=false → upload native, dequant to F32 via mul_mat(I, base) on backend
+    //                     (K-quants on CUDA: ggml_cast/get_rows lack K-quant kernels,
+    //                      but mul_mat has optimized dequant for all quant types — it's
+    //                      the fundamental inference op. Multiplying by identity gives
+    //                      exact dequant with zero numerical error.)
     bool                    decode_ok = adapter_backend_can_decode(backend, ttype);
     struct ggml_tensor *    tbase_native = ggml_new_tensor_2d(ctx, ttype, ne0, ne1);
     struct ggml_tensor *    tbase_f32;
-    struct ggml_tensor *    tidx = nullptr;  // row indices for get_rows fallback
+    struct ggml_tensor *    teye = nullptr;  // identity matrix for mul_mat fallback
 
     if (decode_ok) {
         // cast to F32 on backend (BF16, Q8_0)
         tbase_f32 = ggml_cast(ctx, tbase_native, GGML_TYPE_F32);
     } else {
-        // GPU dequant via get_rows: extract all rows, outputs F32
-        tidx      = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, ne1);
-        tbase_f32 = ggml_get_rows(ctx, tbase_native, tidx);
+        // GPU dequant via mul_mat(I, base): I is F32 identity (ne0 × ne0),
+        // contraction on ne0 produces F32 output of shape (ne0, ne1).
+        // ggml_mul_mat(a,b) computes a^T @ b, so with a=I: I^T @ base = base.
+        teye      = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, ne0);
+        tbase_f32 = ggml_mul_mat(ctx, teye, tbase_native);
     }
 
     // DoRA scale vector, one F32 per output row when dora_scale is set
@@ -530,13 +534,13 @@ static bool adapter_merge_on_backend(WeightCtx *                                
         return false;
     }
 
-    // helper-owned uploads: base weight (always native) + DoRA scale + row indices
+    // helper-owned uploads: base weight (always native) + DoRA scale + identity matrix
     ggml_backend_tensor_set(tbase_native, base_ptr, 0, base_nb);
-    if (tidx) {
-        // fill row index vector [0, 1, 2, ..., ne1-1] for get_rows GPU dequant
-        std::vector<int32_t> idx((size_t) ne1);
-        for (int32_t i = 0; i < (int32_t) ne1; i++) { idx[i] = i; }
-        ggml_backend_tensor_set(tidx, idx.data(), 0, (size_t) ne1 * sizeof(int32_t));
+    if (teye) {
+        // fill identity matrix for mul_mat GPU dequant
+        std::vector<float> eye((size_t)(ne0 * ne0), 0.0f);
+        for (int64_t i = 0; i < ne0; i++) { eye[(size_t)(i * ne0 + i)] = 1.0f; }
+        ggml_backend_tensor_set(teye, eye.data(), 0, (size_t)(ne0 * ne0) * sizeof(float));
     }
     if (tds) {
         ggml_backend_tensor_set(tds, ds, 0, (size_t) ne1 * sizeof(float));
