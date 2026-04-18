@@ -614,6 +614,9 @@ static bool adapter_merge_lora(WeightCtx *                wctx,
         }
         float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
         float scaling = (alpha / (float) rank) * scale * g_scale;
+        fprintf(stderr, "[Adapter]   %s → group=%s, alpha=%.0f, rank=%lld, base_scale=%.2f, g_scale=%.2f, effective=%.4f\n",
+                gguf_name.c_str(), adapter_determine_group(gguf_name).c_str(),
+                alpha, (long long) rank, scale, g_scale, scaling);
 
         // load A and B to F32, PEFT rounds them through BF16 before the GEMM
         int64_t            a_nel = rank * in_feat;
@@ -661,6 +664,8 @@ static bool adapter_merge_lora(WeightCtx *                wctx,
     }
 
     fprintf(stderr, "[Adapter] LoRA merged %d pairs (skipped %d), scale=%.2f\n", merged, skipped, scale);
+    fprintf(stderr, "[Adapter] Group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
+            gs.self_attn, gs.cross_attn, gs.mlp, gs.cond_embed);
     return merged > 0;
 }
 
@@ -913,6 +918,9 @@ static bool adapter_merge_lokr(WeightCtx *                wctx,
 
         float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
         float scaling = (alpha / (float) r) * g_scale;
+        fprintf(stderr, "[Adapter]   %s → group=%s, alpha=%.0f, rank=%lld, g_scale=%.2f, effective=%.4f\n",
+                gguf_name.c_str(), adapter_determine_group(gguf_name).c_str(),
+                alpha, (long long) r, g_scale, scaling);
 
         auto build = [&](struct ggml_context * ctx) {
             struct ggml_tensor * tw1 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, b, a);
@@ -976,6 +984,8 @@ static bool adapter_merge_lokr(WeightCtx *                wctx,
     fprintf(stderr,
             "[Adapter] LoKr merged %d modules (%d factorized, %d monolithic, %d with DoRA, skipped %d), scale=%.2f\n",
             merged, merged - mono_count, mono_count, dora_count, skipped, user_scale);
+    fprintf(stderr, "[Adapter] Group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
+            gs.self_attn, gs.cross_attn, gs.mlp, gs.cond_embed);
     return merged > 0;
 }
 
@@ -1032,6 +1042,10 @@ static bool adapter_merge(WeightCtx *                wctx,
     if (!st_open(&st, sf_path.c_str())) {
         return false;
     }
+
+    fprintf(stderr, "[Adapter] Merging adapter: %s (scale=%.2f)\n", adapter_path, scale);
+    fprintf(stderr, "[Adapter] Group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
+            gs.self_attn, gs.cross_attn, gs.mlp, gs.cond_embed);
 
     bool ok;
     if (adapter_detect_lokr(st)) {

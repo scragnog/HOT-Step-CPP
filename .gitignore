@@ -9,6 +9,9 @@ server/dist/
 server/data/
 *.db
 
+# Session logs (generated per-run)
+logs/
+
 # Environment
 .env
 

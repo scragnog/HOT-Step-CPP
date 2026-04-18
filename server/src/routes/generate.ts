@@ -15,6 +15,7 @@ import { aceClient, type AceRequest } from '../services/aceClient.js';
 import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
+import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
 
 const router = Router();
 
@@ -140,6 +141,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     const skipLm = job.params.skipLm === true;
     const isCoverTask = ['cover', 'cover-nofsq', 'repaint', 'lego', 'extract'].includes(aceReq.task_type || '');
     const needsLm = !skipLm && !aceReq.audio_codes && !isCoverTask;
+    const taskType = aceReq.task_type || 'text2music';
+
+    // Start per-generation log
+    startGenerationLog(job.id, taskType);
+    logGenerationParams(job.id, aceReq);
 
     let lmResults: AceRequest[] = [aceReq];
 
@@ -158,6 +164,8 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       job.status = 'lm_running';
       job.stage = 'Generating lyrics & metadata...';
       job.progress = 10;
+
+      logGeneration(job.id, 'INFO', '[LM Phase] Submitting to ace-server...');
 
       const lmJobId = await aceClient.submitLm(aceReq);
       job.aceJobId = lmJobId;
@@ -183,12 +191,21 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
       job.progress = 40;
       job.stage = 'LM complete, starting synthesis...';
+      logGeneration(job.id, 'INFO', `[LM Phase] Complete. ${lmResults.length} result(s), bpm=${lmResults[0]?.bpm}, duration=${lmResults[0]?.duration}`);
     }
 
     // Phase 2: Synth generation
     job.status = 'synth_running';
     job.stage = 'Synthesizing audio...';
     job.progress = 50;
+
+    logGeneration(job.id, 'INFO', `[Synth Phase] Submitting ${lmResults.length} item(s) to ace-server...`);
+    if (aceReq.adapter) {
+      logGeneration(job.id, 'INFO', `[Synth Phase] Adapter: ${aceReq.adapter} (scale=${aceReq.adapter_scale ?? 1.0})`);
+      if (aceReq.adapter_group_scales) {
+        logGeneration(job.id, 'INFO', `[Synth Phase] Group scales: ${JSON.stringify(aceReq.adapter_group_scales)}`);
+      }
+    }
 
     // Submit all LM results for synthesis
     const synthJobId = await aceClient.submitSynth(lmResults);
@@ -262,15 +279,21 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       timeSignature,
     };
 
+    logGeneration(job.id, 'INFO', `[Result] ${audioUrls.length} audio file(s) saved, ${songIds.length} song(s) created`);
+    logGeneration(job.id, 'INFO', `[Result] Duration: ${duration}s, BPM: ${bpm}, Key: ${keyScale}`);
+    finishGenerationLog(job.id, aceReq.task_type || 'text2music');
+
   } catch (err: any) {
     if (err.message === 'Cancelled') {
       job.status = 'cancelled';
       job.stage = 'Cancelled';
+      failGenerationLog(job.id, 'Cancelled by user', aceReq.task_type || 'text2music');
     } else {
       job.status = 'failed';
       job.error = err.message || 'Unknown error';
       job.stage = 'Failed';
       console.error(`[Generate] Job ${job.id} failed:`, err.message);
+      failGenerationLog(job.id, err.message || 'Unknown error', aceReq.task_type || 'text2music');
     }
   }
 }

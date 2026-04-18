@@ -15,6 +15,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { execSync } from 'child_process';
 
 import { config } from './config.js';
+import { initLogger, logEngine, closeLogger } from './services/logger.js';
 import { initDb, closeDb } from './db/database.js';
 import authRoutes from './routes/auth.js';
 import songRoutes from './routes/songs.js';
@@ -25,12 +26,16 @@ import shutdownRoutes from './routes/shutdown.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Initialize file-based logging BEFORE any console output
+const logDir = initLogger();
+
 console.log(`
 ╔══════════════════════════════════════════╗
 ║         HOT-Step 9000 ⚡ CPP            ║
 ║    High-Performance Music Generation     ║
 ╚══════════════════════════════════════════╝
 `);
+console.log(`[Logger] Session logs: ${logDir}`);
 
 // Initialize database
 initDb();
@@ -110,6 +115,7 @@ function startAceServer(): ChildProcess | null {
     const lines = data.toString().split('\n').filter(Boolean);
     for (const line of lines) {
       console.log(`[ace-server] ${line}`);
+      logEngine(line);
     }
   });
 
@@ -117,6 +123,7 @@ function startAceServer(): ChildProcess | null {
     const lines = data.toString().split('\n').filter(Boolean);
     for (const line of lines) {
       console.log(`[ace-server] ${line}`);
+      logEngine(line);
     }
   });
 
@@ -177,8 +184,9 @@ function shutdown() {
     console.log('[Server] HTTP server closed');
   });
 
-  // Close DB
+  // Close DB and logger
   closeDb();
+  closeLogger();
   console.log('[Server] Goodbye!');
 
   // Force exit after a short delay to let response flush
