@@ -325,48 +325,51 @@ static bool adapter_backend_can_decode(ggml_backend_t backend, enum ggml_type ty
     return ok;
 }
 
-// Dequantize a native-type buffer to F32 on the CPU using the ggml CPU backend.
-// Uses all available threads + SIMD (AVX512/NEON). The CPU backend supports
-// ggml_cast for ALL quantized types, unlike CUDA which lacks K-quant cpy kernels.
-// The CPU backend is cached as a static to avoid per-tensor init overhead.
+// Dequantize a native-type buffer to F32 using direct threaded to_float calls.
+// Zero overhead: no ggml graph, no backend init, no buffer alloc — just raw
+// AVX512 dequant across all cores. Each thread processes a contiguous chunk
+// of rows for cache-friendly access.
 static bool adapter_dequant_cpu(const void * src, float * dst, int64_t ne0, int64_t ne1, enum ggml_type type) {
     if (type == GGML_TYPE_F32) {
         memcpy(dst, src, (size_t)(ne0 * ne1) * sizeof(float));
         return true;
     }
 
-    // cached CPU backend — created once, reused for all tensor merges
-    static ggml_backend_t cpu = nullptr;
-    if (!cpu) {
-        cpu = ggml_backend_cpu_init();
-        if (!cpu) return false;
-        int n_threads = (int) std::thread::hardware_concurrency();
-        if (n_threads < 1) n_threads = 4;
-        ggml_backend_cpu_set_n_threads(cpu, n_threads);
-        fprintf(stderr, "[Adapter] CPU dequant backend: %d threads\n", n_threads);
+    const struct ggml_type_traits * traits = ggml_get_type_traits(type);
+    if (!traits || !traits->to_float) {
+        // fallback for BF16/F16 which may not have to_float
+        if (type == GGML_TYPE_BF16) {
+            ggml_bf16_to_fp32_row((const ggml_bf16_t *) src, dst, ne0 * ne1);
+        } else if (type == GGML_TYPE_F16) {
+            ggml_fp16_to_fp32_row((const ggml_fp16_t *) src, dst, ne0 * ne1);
+        } else {
+            return false;
+        }
+        return true;
     }
 
-    size_t  base_nb = ggml_row_size(type, ne0) * (size_t) ne1;
-    size_t  meta    = ggml_tensor_overhead() * 4 + ggml_graph_overhead() + 4096;
-    struct ggml_init_params params = { meta, NULL, true };
-    struct ggml_context *   ctx   = ggml_init(params);
-    if (!ctx) return false;
+    const size_t    row_nb = ggml_row_size(type, ne0);
+    const uint8_t * sptr   = (const uint8_t *) src;
 
-    struct ggml_tensor * tsrc = ggml_new_tensor_2d(ctx, type, ne0, ne1);
-    struct ggml_tensor * tdst = ggml_cast(ctx, tsrc, GGML_TYPE_F32);
+    int n_threads = (int) std::thread::hardware_concurrency();
+    if (n_threads < 1) n_threads = 1;
+    if (ne1 < n_threads) n_threads = (int) ne1;  // don't overshoot for small tensors
 
-    struct ggml_cgraph * graph = ggml_new_graph(ctx);
-    ggml_build_forward_expand(graph, tdst);
+    std::vector<std::thread> threads;
+    threads.reserve(n_threads);
+    int64_t rows_per = (ne1 + n_threads - 1) / n_threads;
 
-    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, cpu);
-    if (!buf) { ggml_free(ctx); return false; }
-
-    ggml_backend_tensor_set(tsrc, src, 0, base_nb);
-    ggml_backend_graph_compute(cpu, graph);
-    ggml_backend_tensor_get(tdst, dst, 0, (size_t)(ne0 * ne1) * sizeof(float));
-
-    ggml_backend_buffer_free(buf);
-    ggml_free(ctx);
+    for (int t = 0; t < n_threads; t++) {
+        int64_t r0 = t * rows_per;
+        int64_t r1 = std::min(r0 + rows_per, ne1);
+        if (r0 >= ne1) break;
+        threads.emplace_back([=]() {
+            for (int64_t r = r0; r < r1; r++) {
+                traits->to_float(sptr + r * row_nb, dst + r * ne0, ne0);
+            }
+        });
+    }
+    for (auto & th : threads) th.join();
     return true;
 }
 
