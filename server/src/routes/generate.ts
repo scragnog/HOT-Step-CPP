@@ -18,6 +18,7 @@ import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
+import { runMastering } from './mastering.js';
 
 const router = Router();
 
@@ -331,17 +332,50 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     const keyScale = firstResult.keyscale || '';
     const timeSignature = firstResult.timesignature || '';
 
+    // ── Post-generation mastering ──
+    let masteredAudioUrl = '';
+    const masteringRef = job.params.masteringReference;
+    if (masteringRef && job.params.masteringEnabled) {
+      try {
+        job.stage = 'Mastering...';
+        job.progress = 92;
+        logGeneration(job.id, 'INFO', `[Mastering] Applying reference mastering: ${masteringRef}`);
+
+        const refsDir = path.join(config.data.dir, 'references');
+        const refPath = path.join(refsDir, masteringRef);
+
+        for (const audioUrl of audioUrls) {
+          const audioFilename = path.basename(audioUrl);
+          const targetPath = path.join(config.data.audioDir, audioFilename);
+          const ext2 = path.extname(audioFilename);
+          const base2 = path.basename(audioFilename, ext2);
+          const masteredFilename = `${base2}_mastered${ext2}`;
+          const masteredPath = path.join(config.data.audioDir, masteredFilename);
+
+          await runMastering(targetPath, refPath, masteredPath);
+          masteredAudioUrl = `/audio/${masteredFilename}`;
+          logGeneration(job.id, 'INFO', `[Mastering] Done → ${masteredAudioUrl}`);
+        }
+      } catch (masterErr: any) {
+        logGeneration(job.id, 'WARNING', `[Mastering] Failed (non-fatal): ${masterErr.message}`);
+        console.warn(`[Mastering] Non-fatal mastering error:`, masterErr.message);
+        // Don't fail the whole generation
+      }
+    }
+
     // Create song entries in DB
     for (const audioUrl of audioUrls) {
       const songId = uuidv4();
       getDb().prepare(`
         INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
-                           duration, bpm, key_scale, time_signature, tags, dit_model, generation_params)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           duration, bpm, key_scale, time_signature, tags, dit_model,
+                           generation_params, mastered_audio_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         songId, job.userId, title, lyrics, style, firstResult.caption || '',
         audioUrl, duration, bpm, keyScale, timeSignature,
         JSON.stringify([]), aceReq.synth_model || '', JSON.stringify(job.params),
+        masteredAudioUrl,
       );
       songIds.push(songId);
     }

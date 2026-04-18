@@ -61,6 +61,7 @@ export function initDb(): void {
       view_count INTEGER DEFAULT 0,
       dit_model TEXT DEFAULT '',
       generation_params TEXT DEFAULT '{}',
+      mastered_audio_url TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now'))
     );
 

@@ -129,6 +129,14 @@ router.delete('/:id', (req, res) => {
       fs.unlinkSync(filepath);
     }
   }
+  // Delete mastered audio file if it exists
+  if (song.mastered_audio_url) {
+    const masteredFilename = path.basename(song.mastered_audio_url);
+    const masteredFilepath = path.join(config.data.audioDir, masteredFilename);
+    if (fs.existsSync(masteredFilepath)) {
+      fs.unlinkSync(masteredFilepath);
+    }
+  }
 
   getDb().prepare('DELETE FROM songs WHERE id = ?').run(req.params.id);
   res.json({ success: true });

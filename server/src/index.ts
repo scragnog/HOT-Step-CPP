@@ -23,6 +23,7 @@ import generateRoutes from './routes/generate.js';
 import modelRoutes from './routes/models.js';
 import healthRoutes from './routes/health.js';
 import shutdownRoutes from './routes/shutdown.js';
+import masteringRoutes from './routes/mastering.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +56,7 @@ app.use('/api/generate', generateRoutes);
 app.use('/api/models', modelRoutes);
 app.use('/api/health', healthRoutes);
 app.use('/api/shutdown', shutdownRoutes);
+app.use('/api/mastering', masteringRoutes);
 
 // Serve audio files from data/audio/
 app.use('/audio', express.static(config.data.audioDir, {
@@ -67,6 +69,20 @@ app.use('/audio', express.static(config.data.audioDir, {
   },
 }));
 
+// Serve reference audio files from data/references/
+const refsDir = path.join(config.data.dir, 'references');
+fs.mkdirSync(refsDir, { recursive: true });
+app.use('/references', express.static(refsDir, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.mp3')) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+    } else if (filePath.endsWith('.wav')) {
+      res.setHeader('Content-Type', 'audio/wav');
+    } else if (filePath.endsWith('.flac')) {
+      res.setHeader('Content-Type', 'audio/flac');
+    }
+  },
+}));
 // Serve React frontend (production only — in dev, Vite handles this)
 const uiDistPath = path.resolve(__dirname, '../../ui/dist');
 if (fs.existsSync(uiDistPath)) {
