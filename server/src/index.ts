@@ -24,6 +24,7 @@ import modelRoutes from './routes/models.js';
 import healthRoutes from './routes/health.js';
 import shutdownRoutes from './routes/shutdown.js';
 import masteringRoutes from './routes/mastering.js';
+import downloadRoutes from './routes/download.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -57,6 +58,7 @@ app.use('/api/models', modelRoutes);
 app.use('/api/health', healthRoutes);
 app.use('/api/shutdown', shutdownRoutes);
 app.use('/api/mastering', masteringRoutes);
+app.use('/api/download', downloadRoutes);
 
 // Serve audio files from data/audio/
 app.use('/audio', express.static(config.data.audioDir, {

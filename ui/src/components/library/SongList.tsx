@@ -2,7 +2,7 @@
 // Ported from hot-step-9000 visual design with Tailwind.
 
 import React from 'react';
-import { Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal } from 'lucide-react';
+import { Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal, Download } from 'lucide-react';
 import type { Song } from '../../types';
 
 interface SongListProps {
@@ -12,10 +12,11 @@ interface SongListProps {
   onDelete: (song: Song) => void;
   onSelect?: (song: Song) => void;
   onReuse?: (song: Song) => void;
+  onDownload?: (song: Song) => void;
 }
 
 export const SongList: React.FC<SongListProps> = ({
-  songs, currentSongId, onPlay, onDelete, onSelect, onReuse,
+  songs, currentSongId, onPlay, onDelete, onSelect, onReuse, onDownload,
 }) => {
   if (songs.length === 0) {
     return (
@@ -48,6 +49,7 @@ export const SongList: React.FC<SongListProps> = ({
             onSelect={() => onSelect?.(song)}
             onDelete={() => onDelete(song)}
             onReuse={() => onReuse?.(song)}
+            onDownload={() => onDownload?.(song)}
           />
         ))}
       </div>
@@ -62,10 +64,11 @@ interface SongItemProps {
   onSelect?: () => void;
   onDelete: () => void;
   onReuse?: () => void;
+  onDownload?: () => void;
 }
 
 const SongItem: React.FC<SongItemProps> = ({
-  song, isActive, onPlay, onSelect, onDelete, onReuse,
+  song, isActive, onPlay, onSelect, onDelete, onReuse, onDownload,
 }) => {
   const [showMenu, setShowMenu] = React.useState(false);
 
@@ -155,6 +158,14 @@ const SongItem: React.FC<SongItemProps> = ({
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
                 >
                   <RotateCcw size={14} /> Reuse Prompt
+                </button>
+              )}
+              {onDownload && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDownload(); setShowMenu(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
+                >
+                  <Download size={14} /> Download
                 </button>
               )}
               <button

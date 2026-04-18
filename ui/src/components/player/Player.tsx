@@ -6,7 +6,7 @@ import {
   Play, Pause, SkipBack, SkipForward,
   Shuffle, Repeat, Repeat1,
   Volume2, VolumeX,
-  RotateCcw, Trash2,
+  RotateCcw, Trash2, Download,
   Music, Sparkles,
 } from 'lucide-react';
 import type { Song } from '../../types';
@@ -31,6 +31,7 @@ interface PlayerProps {
   onToggleRepeat: () => void;
   onReusePrompt?: () => void;
   onDelete?: () => void;
+  onDownload?: () => void;
   playMastered: boolean;
   onToggleMastered: () => void;
 }
@@ -61,6 +62,7 @@ export const Player: React.FC<PlayerProps> = ({
   onToggleRepeat,
   onReusePrompt,
   onDelete,
+  onDownload,
   playMastered,
   onToggleMastered,
 }) => {
@@ -207,6 +209,15 @@ export const Player: React.FC<PlayerProps> = ({
             title="Reuse Prompt"
           >
             <RotateCcw size={14} />
+          </button>
+        )}
+        {onDownload && (
+          <button
+            onClick={onDownload}
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+            title="Download"
+          >
+            <Download size={14} />
           </button>
         )}
         {onDelete && (

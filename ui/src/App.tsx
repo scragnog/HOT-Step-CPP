@@ -16,6 +16,7 @@ import { Player } from './components/player/Player';
 import { RightSidebar } from './components/details/RightSidebar';
 import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
+import { DownloadModal } from './components/shared/DownloadModal';
 import { SettingsPanel, type AppSettings } from './components/settings/SettingsPanel';
 import type { Song, GenerationParams } from './types';
 
@@ -63,6 +64,9 @@ const App: React.FC = () => {
   } | null>(null);
 
   const [isShutdown, setIsShutdown] = useState(false);
+
+  // Download modal state
+  const [downloadSong, setDownloadSong] = useState<Song | null>(null);
 
   const showToast = (message: string, type: ToastType = 'success') => {
     setToast({ message, type, isVisible: true });
@@ -299,6 +303,7 @@ const App: React.FC = () => {
             onDelete={handleDelete}
             onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
             onReuse={handleReuse}
+            onDownload={setDownloadSong}
           />
         </div>
       );
@@ -359,6 +364,7 @@ const App: React.FC = () => {
             onDelete={handleDelete}
             onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
             onReuse={handleReuse}
+            onDownload={setDownloadSong}
           />
         </div>
 
@@ -401,6 +407,7 @@ const App: React.FC = () => {
                 onDelete={handleDelete}
                 onPlay={playSong}
                 isPlaying={isPlaying && currentSong?.id === selectedSong?.id}
+                onDownload={setDownloadSong}
               />
             </div>
           </>
@@ -455,6 +462,7 @@ const App: React.FC = () => {
         onToggleRepeat={() => setRepeatMode(prev => prev === 'none' ? 'all' : prev === 'all' ? 'one' : 'none')}
         onReusePrompt={() => currentSong && handleReuse(currentSong)}
         onDelete={() => currentSong && handleDelete(currentSong)}
+        onDownload={() => currentSong && setDownloadSong(currentSong)}
         playMastered={playMastered}
         onToggleMastered={toggleMastered}
       />
@@ -478,6 +486,13 @@ const App: React.FC = () => {
         onConfirm={() => confirmDialog?.onConfirm()}
         onCancel={() => setConfirmDialog(null)}
       />
+      {downloadSong && (
+        <DownloadModal
+          song={downloadSong}
+          isOpen={true}
+          onClose={() => setDownloadSong(null)}
+        />
+      )}
     </div>
   );
 };

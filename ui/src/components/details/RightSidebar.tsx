@@ -2,7 +2,7 @@
 // Ported from hot-step-9000's RightSidebar, simplified for current feature set.
 
 import React from 'react';
-import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download } from 'lucide-react';
 import type { Song } from '../../types';
 
 interface RightSidebarProps {
@@ -12,6 +12,7 @@ interface RightSidebarProps {
   onDelete: (song: Song) => void;
   onPlay: (song: Song) => void;
   isPlaying: boolean;
+  onDownload?: (song: Song) => void;
 }
 
 export const RightSidebar: React.FC<RightSidebarProps> = ({
@@ -21,6 +22,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   onDelete,
   onPlay,
   isPlaying,
+  onDownload,
 }) => {
   const gp = song.generationParams;
 
@@ -79,6 +81,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           >
             <Trash2 size={16} />
           </button>
+          {onDownload && (
+            <button
+              onClick={() => onDownload(song)}
+              className="p-2.5 rounded-xl bg-zinc-800 hover:bg-emerald-900/50 text-zinc-300 hover:text-emerald-400 transition-colors"
+              title="Download"
+            >
+              <Download size={16} />
+            </button>
+          )}
         </div>
 
         {/* Metadata Badges */}
