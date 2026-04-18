@@ -18,6 +18,8 @@ interface ModelSelectorProps {
   onDitModelChange: (v: string) => void;
   lmModel: string;
   onLmModelChange: (v: string) => void;
+  vaeModel: string;
+  onVaeModelChange: (v: string) => void;
   adapter: string;
   onAdapterChange: (v: string) => void;
   adapterScale: number;
@@ -39,6 +41,7 @@ const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-900 border border-whi
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
   ditModel, onDitModelChange, lmModel, onLmModelChange,
+  vaeModel, onVaeModelChange,
   adapter, onAdapterChange, adapterScale, onAdapterScaleChange,
   adapterGroupScales, onAdapterGroupScalesChange,
   adapterMode, onAdapterModeChange,
@@ -55,6 +58,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
   const ditModels = models?.models?.dit || [];
   const lmModels = models?.models?.lm || [];
+  const vaeModels = models?.models?.vae || [];
   const adapters = models?.adapters || [];
 
   const handleGroupScaleChange = (key: keyof AdapterGroupScales, value: number) => {
@@ -99,6 +103,19 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
               ))}
             </select>
           </div>
+
+          {/* VAE Model — only show when multiple VAEs are available */}
+          {vaeModels.length > 1 && (
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">VAE Decoder</label>
+              <select className={selectClasses} value={vaeModel}
+                onChange={e => onVaeModelChange(e.target.value)}>
+                {vaeModels.map(m => (
+                  <option key={m} value={m}>{m.replace(/-BF16\.gguf$/, '')}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Adapter */}
           {adapters.length > 0 && (

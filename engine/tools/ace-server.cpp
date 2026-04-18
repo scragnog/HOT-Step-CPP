@@ -186,6 +186,7 @@ static float       g_loaded_adapter_scale = 1.0f;
 static AdapterGroupScales g_loaded_adapter_gs;
 static std::string g_loaded_adapter_mode;
 static std::string g_loaded_und_dit;
+static std::string g_loaded_vae;
 
 // pipeline params (rebuilt from registry paths on each load)
 static AceLmParams         g_lm_params;
@@ -445,6 +446,7 @@ static std::string resolve_name(const std::vector<ModelEntry> & bucket,
 struct ServerFields {
     std::string        synth_model;
     std::string        lm_model;
+    std::string        vae_model;
     std::string        adapter;
     float              adapter_scale;
     AdapterGroupScales adapter_gs;
@@ -454,6 +456,7 @@ struct ServerFields {
 static void parse_server_fields(const char * json, ServerFields * sf) {
     sf->synth_model   = "";
     sf->lm_model      = "";
+    sf->vae_model     = "";
     sf->adapter       = "";
     sf->adapter_scale = 1.0f;
     sf->adapter_mode  = "";
@@ -484,6 +487,9 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     }
     if ((v = yyjson_obj_get(obj, "lm_model")) && yyjson_is_str(v)) {
         sf->lm_model = yyjson_get_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "vae_model")) && yyjson_is_str(v)) {
+        sf->vae_model = yyjson_get_str(v);
     }
     if ((v = yyjson_obj_get(obj, "adapter")) && yyjson_is_str(v)) {
         sf->adapter = yyjson_get_str(v);
@@ -591,15 +597,20 @@ static bool ensure_synth(const std::string &        dit_name,
                          const std::string &        adapter_name,
                          float                      adapter_scale,
                          const AdapterGroupScales & adapter_gs = {},
-                         const std::string &        adapter_mode = "") {
-    // cache key: reload only when model, adapter, overall scale, OR group scales change
+                         const std::string &        adapter_mode = "",
+                         const std::string &        vae_name = "") {
+    // Resolve VAE name for cache comparison
+    std::string resolved_vae = resolve_name(g_registry.vae, vae_name, g_loaded_vae);
+
+    // cache key: reload only when model, adapter, overall scale, group scales, OR VAE change
     if (g_ctx_synth && g_loaded_dit == dit_name && g_loaded_adapter == adapter_name &&
         g_loaded_adapter_scale == adapter_scale &&
         g_loaded_adapter_gs.self_attn  == adapter_gs.self_attn &&
         g_loaded_adapter_gs.cross_attn == adapter_gs.cross_attn &&
         g_loaded_adapter_gs.mlp        == adapter_gs.mlp &&
         g_loaded_adapter_gs.cond_embed == adapter_gs.cond_embed &&
-        g_loaded_adapter_mode          == adapter_mode) {
+        g_loaded_adapter_mode          == adapter_mode &&
+        g_loaded_vae                   == resolved_vae) {
         return true;
     }
 
@@ -622,7 +633,19 @@ static bool ensure_synth(const std::string &        dit_name,
     // set paths
     g_synth_params.text_encoder_path = g_registry.text_enc[0].path.c_str();
     g_synth_params.dit_path          = dit->path.c_str();
-    g_synth_params.vae_path          = g_registry.vae[0].path.c_str();
+
+    // resolve VAE: use requested name, or fall back to first available
+    const ModelEntry * vae_entry = registry_find(g_registry.vae, resolved_vae.c_str());
+    if (!vae_entry && !g_registry.vae.empty()) {
+        vae_entry = &g_registry.vae[0];
+    }
+    if (!vae_entry) {
+        fprintf(stderr, "[Server] No VAE available\n");
+        g_loaded_dit.clear();
+        return false;
+    }
+    g_synth_params.vae_path = vae_entry->path.c_str();
+    fprintf(stderr, "[Server] VAE: %s\n", vae_entry->name.c_str());
 
     // resolve adapter
     if (!adapter_name.empty()) {
@@ -665,6 +688,7 @@ static bool ensure_synth(const std::string &        dit_name,
     g_loaded_adapter_scale = adapter_scale;
     g_loaded_adapter_gs    = adapter_gs;
     g_loaded_adapter_mode  = adapter_mode;
+    g_loaded_vae           = vae_entry->name;
     return true;
 }
 
@@ -810,7 +834,8 @@ static void synth_worker(std::shared_ptr<Job>    job,
 
     // Load resident modules (TextEnc, CondEnc, FSQ). DiT and VAE are phased.
     std::string dit_name = resolve_name(g_registry.dit, sf.synth_model, g_loaded_dit);
-    if (!ensure_synth(dit_name, sf.adapter, sf.adapter_scale, sf.adapter_gs, sf.adapter_mode)) {
+    std::string vae_name = resolve_name(g_registry.vae, sf.vae_model, g_loaded_vae);
+    if (!ensure_synth(dit_name, sf.adapter, sf.adapter_scale, sf.adapter_gs, sf.adapter_mode, vae_name)) {
         free(src_interleaved);
         free(ref_interleaved);
         job->status.store(2);
@@ -848,6 +873,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
             g_ctx_synth = nullptr;
             g_loaded_dit.clear();
             g_loaded_adapter.clear();
+            g_loaded_vae.clear();
         }
         free(src_interleaved);
         free(ref_interleaved);
@@ -864,6 +890,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
         g_ctx_synth = nullptr;
         g_loaded_dit.clear();
         g_loaded_adapter.clear();
+        g_loaded_vae.clear();
     }
     free(src_interleaved);
     free(ref_interleaved);

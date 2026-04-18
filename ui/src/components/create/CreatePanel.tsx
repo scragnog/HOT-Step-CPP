@@ -57,6 +57,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   // Models
   const [ditModel, setDitModel] = usePersistedState('hs-ditModel', '');
   const [lmModel, setLmModel] = usePersistedState('hs-lmModel', '');
+  const [vaeModel, setVaeModel] = usePersistedState('hs-vaeModel', '');
   const [adapter, setAdapter] = usePersistedState('hs-adapter', '');
   const [adapterScale, setAdapterScale] = usePersistedState('hs-adapterScale', 1.0);
   const [adapterGroupScales, setAdapterGroupScales] = usePersistedState('hs-adapterGroupScales', {
@@ -114,6 +115,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       skipLm,
       ditModel,
       lmModel,
+      vaeModel,
       loraPath: adapter,
       loraScale: adapterScale,
       adapterGroupScales: adapter ? adapterGroupScales : undefined,
@@ -152,6 +154,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         <ModelSelector
           ditModel={ditModel} onDitModelChange={setDitModel}
           lmModel={lmModel} onLmModelChange={setLmModel}
+          vaeModel={vaeModel} onVaeModelChange={setVaeModel}
           adapter={adapter} onAdapterChange={setAdapter}
           adapterScale={adapterScale} onAdapterScaleChange={setAdapterScale}
           adapterGroupScales={adapterGroupScales} onAdapterGroupScalesChange={setAdapterGroupScales}

@@ -146,6 +146,7 @@ function translateParams(params: any): AceRequest {
   // Model routing
   if (params.ditModel) req.synth_model = params.ditModel;
   if (params.lmModel) req.lm_model = params.lmModel;
+  if (params.vaeModel) req.vae_model = params.vaeModel;
   if (params.loraPath) req.adapter = params.loraPath;
   if (params.loraScale !== undefined) req.adapter_scale = params.loraScale;
   if (params.adapterGroupScales) req.adapter_group_scales = params.adapterGroupScales;
@@ -267,6 +268,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
         // Routing fields (adapter, model selection)
         if (aceReq.synth_model) result.synth_model = aceReq.synth_model;
+        if (aceReq.vae_model) result.vae_model = aceReq.vae_model;
         if (aceReq.adapter) result.adapter = aceReq.adapter;
         if (aceReq.adapter_scale !== undefined) result.adapter_scale = aceReq.adapter_scale;
         if (aceReq.adapter_group_scales) result.adapter_group_scales = aceReq.adapter_group_scales;

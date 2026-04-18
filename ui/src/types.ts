@@ -78,6 +78,7 @@ export interface GenerationParams {
   // Model selection
   ditModel: string;
   lmModel: string;
+  vaeModel: string;
 
   // Adapter
   loraPath: string;
