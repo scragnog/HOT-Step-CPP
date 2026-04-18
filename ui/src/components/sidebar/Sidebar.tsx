@@ -2,7 +2,7 @@
 // Ported from hot-step-9000, simplified for current cpp feature set.
 
 import React from 'react';
-import { Disc, Library, Power } from 'lucide-react';
+import { Disc, Library, Settings, Power } from 'lucide-react';
 
 interface SidebarProps {
   activeView: string;
@@ -56,6 +56,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label="Library"
           active={activeView === 'library'}
           onClick={() => onViewChange('library')}
+          isExpanded={isOpen}
+        />
+
+        <NavItem
+          icon={<Settings size={20} />}
+          label="Settings"
+          active={activeView === 'settings'}
+          onClick={() => onViewChange('settings')}
           isExpanded={isOpen}
         />
 

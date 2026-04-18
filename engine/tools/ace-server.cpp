@@ -777,7 +777,8 @@ static void synth_worker(std::shared_ptr<Job>    job,
                          int                     ref_len,
                          bool                    output_wav,
                          WavFormat               wav_fmt,
-                         int                     peak_clip) {
+                         int                     peak_clip,
+                         bool                    req_keep_loaded) {
     // One group per original request: same codes = same T per group, so the
     // synth_batch_size copies inside a group stack into a single GPU batch.
     // Different requests can have different T and become separate groups.
@@ -826,11 +827,12 @@ static void synth_worker(std::shared_ptr<Job>    job,
         }
     }
 
-    // Two-phase run: DiT resident for all groups, unload, then VAE for all jobs.
+    // Two-phase run: DiT resident for all groups, optionally co-resident with VAE.
+    const bool keep = g_keep_loaded || req_keep_loaded;
     const int rc = synth_batch_run(g_ctx_synth, groups, src_interleaved, src_len, ref_interleaved, ref_len,
-                                   audio.data(), server_cancel_job, (void *) &job->cancel);
+                                   audio.data(), keep, server_cancel_job, (void *) &job->cancel);
     if (rc != 0) {
-        if (!g_keep_loaded) {
+        if (!keep) {
             ace_synth_free(g_ctx_synth);
             g_ctx_synth = nullptr;
             g_loaded_dit.clear();
@@ -845,8 +847,8 @@ static void synth_worker(std::shared_ptr<Job>    job,
         return;
     }
 
-    // Drop the pipeline unless --keep-loaded asks to keep it around.
-    if (!g_keep_loaded) {
+    // Drop the pipeline unless --keep-loaded or per-request keep_loaded asks to keep it.
+    if (!keep) {
         ace_synth_free(g_ctx_synth);
         g_ctx_synth = nullptr;
         g_loaded_dit.clear();
@@ -1015,14 +1017,17 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
     }
     int peak_clip = ace_reqs[0].peak_clip;
 
+    // per-request co-resident mode: ?keep_loaded=1
+    const bool req_keep_loaded = req.has_param("keep_loaded") && req.get_param_value("keep_loaded") == "1";
+
     // create job, spawn worker, return ID
     auto job = job_create();
     fprintf(stderr, "[Server] Job %s created (%d requests)\n", job->id.c_str(), (int) ace_reqs.size());
 
     work_push([job, reqs = std::move(ace_reqs), sf, src_interleaved, src_len, ref_interleaved, ref_len, output_wav,
-               wav_fmt, peak_clip]() mutable {
+               wav_fmt, peak_clip, req_keep_loaded]() mutable {
         synth_worker(job, std::move(reqs), sf, src_interleaved, src_len, ref_interleaved, ref_len, output_wav, wav_fmt,
-                     peak_clip);
+                     peak_clip, req_keep_loaded);
     });
 
     // return job ID immediately

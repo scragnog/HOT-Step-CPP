@@ -6,8 +6,10 @@
 //   3. Save audio + metadata to SQLite
 //
 // Maintains an in-memory job map for frontend polling.
+// LM results are cached by seed+params to skip the LM phase on repeats.
 
 import { Router } from 'express';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -42,6 +44,49 @@ interface GenerationJob {
 }
 
 const jobs = new Map<string, GenerationJob>();
+
+// ── LM Audio Code Cache ─────────────────────────────────────
+// Caches LM results keyed by seed + all LM-affecting params.
+// Same seed + same params = deterministic output = safe to cache.
+const LM_CACHE_MAX = 20;
+const lmCache = new Map<string, { results: AceRequest[]; timestamp: number }>();
+
+/** Compute a stable hash key from LM-affecting parameters */
+function computeLmCacheKey(req: AceRequest): string {
+  const keyObj = {
+    seed: req.seed,
+    caption: req.caption,
+    lyrics: req.lyrics,
+    bpm: req.bpm,
+    duration: req.duration,
+    keyscale: req.keyscale,
+    timesignature: req.timesignature,
+    vocal_language: req.vocal_language,
+    lm_model: req.lm_model,
+    lm_batch_size: req.lm_batch_size,
+    lm_temperature: req.lm_temperature,
+    lm_cfg_scale: req.lm_cfg_scale,
+    lm_top_p: req.lm_top_p,
+    lm_top_k: req.lm_top_k,
+    lm_negative_prompt: req.lm_negative_prompt,
+    use_cot_caption: req.use_cot_caption,
+  };
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(keyObj))
+    .digest('hex')
+    .substring(0, 16);
+}
+
+/** Evict oldest entries when cache exceeds max size */
+function evictLmCache(): void {
+  if (lmCache.size <= LM_CACHE_MAX) return;
+  // Sort by timestamp, evict oldest
+  const entries = [...lmCache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+  const toRemove = entries.slice(0, lmCache.size - LM_CACHE_MAX);
+  for (const [key] of toRemove) {
+    lmCache.delete(key);
+  }
+}
 
 /** Translate frontend params to AceRequest format */
 function translateParams(params: any): AceRequest {
@@ -160,22 +205,48 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     }
 
     if (needsLm) {
-      // Phase 1: LM generation (full thinking — metadata + audio codes)
-      job.status = 'lm_running';
-      job.stage = 'Generating lyrics & metadata...';
-      job.progress = 10;
+      const cacheKey = computeLmCacheKey(aceReq);
+      const useLmCache = job.params.cacheLmCodes !== false; // default true
+      const cached = useLmCache ? lmCache.get(cacheKey) : undefined;
 
-      logGeneration(job.id, 'INFO', '[LM Phase] Submitting to ace-server...');
+      if (cached) {
+        // Cache hit — skip LM entirely
+        lmResults = cached.results;
+        job.lmResults = lmResults;
+        cached.timestamp = Date.now(); // refresh LRU
 
-      const lmJobId = await aceClient.submitLm(aceReq);
-      job.aceJobId = lmJobId;
+        logGeneration(job.id, 'INFO', `[LM Phase] Cache HIT (key=${cacheKey}), skipping LM. ${lmResults.length} cached result(s)`);
+        job.progress = 40;
+        job.stage = 'LM cached, starting synthesis...';
+      } else {
+        // Cache miss — run LM
+        job.status = 'lm_running';
+        job.stage = 'Generating lyrics & metadata...';
+        job.progress = 10;
 
-      await pollUntilDone(lmJobId, job, abortController.signal);
+        logGeneration(job.id, 'INFO', `[LM Phase] Submitting to ace-server... (cache key=${cacheKey})`);
 
-      // Fetch LM results (array of enriched AceRequests)
-      const resultRes = await aceClient.getJobResult(lmJobId);
-      lmResults = await resultRes.json() as AceRequest[];
-      job.lmResults = lmResults;
+        const lmJobId = await aceClient.submitLm(aceReq);
+        job.aceJobId = lmJobId;
+
+        await pollUntilDone(lmJobId, job, abortController.signal);
+
+        // Fetch LM results (array of enriched AceRequests)
+        const resultRes = await aceClient.getJobResult(lmJobId);
+        lmResults = await resultRes.json() as AceRequest[];
+        job.lmResults = lmResults;
+
+        // Store in cache
+        if (useLmCache) {
+          lmCache.set(cacheKey, { results: lmResults, timestamp: Date.now() });
+          evictLmCache();
+          logGeneration(job.id, 'INFO', `[LM Phase] Cached results (key=${cacheKey}, cache size=${lmCache.size})`);
+        }
+
+        job.progress = 40;
+        job.stage = 'LM complete, starting synthesis...';
+        logGeneration(job.id, 'INFO', `[LM Phase] Complete. ${lmResults.length} result(s), bpm=${lmResults[0]?.bpm}, duration=${lmResults[0]?.duration}`);
+      }
 
       // Re-inject server routing fields that the LM response strips out.
       // The C++ LM serializes only AceRequest fields — adapter, adapter_scale,
@@ -188,10 +259,6 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         if (aceReq.adapter_scale !== undefined) result.adapter_scale = aceReq.adapter_scale;
         if (aceReq.adapter_group_scales) result.adapter_group_scales = aceReq.adapter_group_scales;
       }
-
-      job.progress = 40;
-      job.stage = 'LM complete, starting synthesis...';
-      logGeneration(job.id, 'INFO', `[LM Phase] Complete. ${lmResults.length} result(s), bpm=${lmResults[0]?.bpm}, duration=${lmResults[0]?.duration}`);
     }
 
     // Phase 2: Synth generation
@@ -208,8 +275,12 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     }
 
     // Submit all LM results for synthesis
-    const synthJobId = await aceClient.submitSynth(lmResults);
+    const coResident = job.params.coResident === true;
+    const synthJobId = await aceClient.submitSynth(lmResults, false, coResident);
     job.aceJobId = synthJobId;
+    if (coResident) {
+      logGeneration(job.id, 'INFO', '[Synth Phase] Co-resident mode: DiT+VAE will stay in VRAM');
+    }
 
     await pollUntilDone(synthJobId, job, abortController.signal);
 

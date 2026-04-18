@@ -138,8 +138,12 @@ export const aceClient = {
   },
 
   /** POST /synth — submit synth job, returns job ID */
-  async submitSynth(request: AceRequest | AceRequest[], wav = false): Promise<string> {
-    const path = wav ? '/synth?wav=1' : '/synth';
+  async submitSynth(request: AceRequest | AceRequest[], wav = false, keepLoaded = false): Promise<string> {
+    const params = new URLSearchParams();
+    if (wav) params.set('wav', '1');
+    if (keepLoaded) params.set('keep_loaded', '1');
+    const qs = params.toString();
+    const path = qs ? `/synth?${qs}` : '/synth';
     const res = await acePost(path, request);
     const data = await res.json() as { id: string };
     return data.id;

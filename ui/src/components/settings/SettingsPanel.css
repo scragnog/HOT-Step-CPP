@@ -1,0 +1,206 @@
+/* SettingsPanel.css — Settings page styles */
+
+.settings-panel {
+  height: 100%;
+  overflow-y: auto;
+  padding: 2rem 2.5rem;
+}
+
+.settings-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.settings-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.settings-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Section */
+.settings-section {
+  margin-bottom: 2rem;
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.settings-section-icon {
+  color: #ec4899;
+}
+
+.settings-section-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Setting Row */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  margin-bottom: 0.625rem;
+  transition: background 200ms ease, border-color 200ms ease;
+}
+
+.setting-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.setting-info {
+  flex: 1;
+  margin-right: 1.5rem;
+}
+
+.setting-label {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 0.25rem;
+}
+
+.setting-description {
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1.5;
+}
+
+.setting-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.setting-badge--speed {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.setting-badge--vram {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.setting-badge--rebuild {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.1);
+  transition: background 200ms ease;
+}
+
+.toggle-switch input:checked + .toggle-track {
+  background: #ec4899;
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: white;
+  transition: transform 200ms ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.toggle-switch input:checked ~ .toggle-thumb {
+  transform: translateX(20px);
+}
+
+.toggle-switch:hover .toggle-track {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.toggle-switch:hover input:checked + .toggle-track {
+  background: #db2777;
+}
+
+/* Page Header */
+.settings-header {
+  margin-bottom: 2rem;
+}
+
+.settings-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 0.25rem;
+}
+
+.settings-subtitle {
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Stats bar */
+.settings-stats {
+  display: flex;
+  gap: 1.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  margin-bottom: 2rem;
+}
+
+.settings-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.settings-stat-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #ec4899;
+}
+
+.settings-stat-label {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
+}

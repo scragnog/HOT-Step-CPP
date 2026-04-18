@@ -16,6 +16,7 @@ import { Player } from './components/player/Player';
 import { RightSidebar } from './components/details/RightSidebar';
 import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
+import { SettingsPanel, type AppSettings } from './components/settings/SettingsPanel';
 import type { Song, GenerationParams } from './types';
 
 const App: React.FC = () => {
@@ -29,6 +30,12 @@ const App: React.FC = () => {
   const [createPanelWidth, setCreatePanelWidth] = usePersistedState('ace-createPanelWidth', 490);
   const [rightSidebarWidth, setRightSidebarWidth] = usePersistedState('ace-rightSidebarWidth', 360);
   const [showRightSidebar, setShowRightSidebar] = useState(true);
+
+  // Settings state (persisted)
+  const [settings, setSettings] = usePersistedState<AppSettings>('ace-settings', {
+    coResident: false,
+    cacheLmCodes: true,
+  });
 
   // Player state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -87,10 +94,16 @@ const App: React.FC = () => {
   // Handle generation
   const handleGenerate = useCallback((params: GenerationParams) => {
     if (!token) return;
-    genStore.submit(params, token).catch(err => {
+    // Inject settings into generation params
+    const enrichedParams = {
+      ...params,
+      coResident: settings.coResident,
+      cacheLmCodes: settings.cacheLmCodes,
+    };
+    genStore.submit(enrichedParams, token).catch(err => {
       console.error('[App] Generation failed:', err);
     });
-  }, [token, genStore]);
+  }, [token, genStore, settings]);
 
   // Handle delete
   const handleDelete = useCallback(async (song: Song) => {
@@ -242,6 +255,17 @@ const App: React.FC = () => {
 
   // Main content renderer
   const renderContent = () => {
+    if (activeView === 'settings') {
+      return (
+        <div className="flex-1 overflow-y-auto">
+          <SettingsPanel
+            settings={settings}
+            onSettingsChange={setSettings}
+          />
+        </div>
+      );
+    }
+
     if (activeView === 'library') {
       return (
         <div className="flex-1 overflow-y-auto">

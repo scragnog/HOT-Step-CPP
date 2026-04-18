@@ -33,6 +33,7 @@ static int synth_batch_run(AceSynth *                             ctx,
                            const float *                          ref_audio,
                            int                                    ref_len,
                            AceAudio *                             audio_out,
+                           bool                                   keep_loaded = false,
                            bool (*cancel)(void *) = nullptr,
                            void * cancel_data     = nullptr) {
     const int                  n_groups = (int) groups.size();
@@ -59,8 +60,10 @@ static int synth_batch_run(AceSynth *                             ctx,
         off += gn;
     }
 
-    // DiT out, VAE in: the decoder sees the full VRAM budget.
-    ace_synth_dit_unload(ctx);
+    // DiT out (unless co-resident), VAE in.
+    if (!keep_loaded) {
+        ace_synth_dit_unload(ctx);
+    }
     if (!ace_synth_vae_load(ctx)) {
         for (int g = 0; g < n_groups; g++) {
             ace_synth_job_free(jobs[g]);
