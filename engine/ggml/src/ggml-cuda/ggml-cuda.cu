@@ -4821,6 +4821,11 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                 if (src0_type == src1_type && ggml_is_contiguous(op->src[0]) && ggml_is_contiguous(op->src[1])) {
                     return true;
                 }
+                // K-quant -> F32: contiguous dequant via convert.cu GPU kernels
+                if (src1_type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[0]) && ggml_is_contiguous(op->src[1])
+                    && ggml_get_to_fp32_cuda(src0_type) != nullptr) {
+                    return true;
+                }
                 return false;
             } break;
         case GGML_OP_DUP:
