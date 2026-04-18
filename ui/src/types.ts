@@ -65,6 +65,7 @@ export interface GenerationParams {
   guidanceScale: number;
   shift: number;
   inferMethod: string;
+  scheduler: string;
 
   // Seed
   seed: number;

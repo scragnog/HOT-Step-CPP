@@ -376,7 +376,10 @@ AceSynthJob * ace_synth_job_run_dit(AceSynth *         ctx,
         s.use_source_context = true;
     }
 
-    // Timestep schedule
+    // Scheduler selection: resolve from request, default to "linear"
+    s.scheduler = s.rr.scheduler.empty() ? "linear" : s.rr.scheduler;
+
+    // Timestep schedule (dispatched via scheduler registry)
     ops_build_schedule(s);
 
     // Solver selection: resolve from infer_method, default to "euler"

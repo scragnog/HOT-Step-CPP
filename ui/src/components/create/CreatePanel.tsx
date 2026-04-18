@@ -37,6 +37,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [guidanceScale, setGuidanceScale] = usePersistedState('hs-guidanceScale', 9.0);
   const [shift, setShift] = usePersistedState('hs-shift', 3.0);
   const [inferMethod, setInferMethod] = usePersistedState('hs-inferMethod', 'euler');
+  const [scheduler, setScheduler] = usePersistedState('hs-scheduler', 'linear');
   const [seed, setSeed] = usePersistedState('hs-seed', -1);
   const [randomSeed, setRandomSeed] = usePersistedState('hs-randomSeed', true);
   const [batchSize, setBatchSize] = usePersistedState('hs-batchSize', 1);
@@ -98,6 +99,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       guidanceScale,
       shift,
       inferMethod,
+      scheduler,
       seed,
       randomSeed,
       batchSize,
@@ -159,6 +161,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
           guidanceScale={guidanceScale} onGuidanceScaleChange={setGuidanceScale}
           shift={shift} onShiftChange={setShift}
           inferMethod={inferMethod} onInferMethodChange={setInferMethod}
+          scheduler={scheduler} onSchedulerChange={setScheduler}
           seed={seed} onSeedChange={setSeed}
           randomSeed={randomSeed} onRandomSeedChange={setRandomSeed}
           batchSize={batchSize} onBatchSizeChange={setBatchSize}

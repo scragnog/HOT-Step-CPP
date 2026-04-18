@@ -14,6 +14,7 @@ interface GenerationSettingsProps {
   guidanceScale: number; onGuidanceScaleChange: (v: number) => void;
   shift: number; onShiftChange: (v: number) => void;
   inferMethod: string; onInferMethodChange: (v: string) => void;
+  scheduler: string; onSchedulerChange: (v: string) => void;
   // Seed
   seed: number; onSeedChange: (v: number) => void;
   randomSeed: boolean; onRandomSeedChange: (v: boolean) => void;
@@ -78,6 +79,22 @@ export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => 
                 <option value="dopri5">DOPRI5 Adaptive (7+ NFE)</option>
                 <option value="dop853">DOP853 (13 NFE)</option>
               </optgroup>
+            </select>
+          </div>
+
+          {/* Scheduler */}
+          <div>
+            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Schedule</label>
+            <select className={selectClasses} value={props.scheduler}
+              onChange={e => props.onSchedulerChange(e.target.value)}>
+              <option value="linear">Linear (Default)</option>
+              <option value="beta57">Beta 57 (RES4LYF)</option>
+              <option value="cosine">Cosine</option>
+              <option value="ddim_uniform">DDIM Uniform (Log-SNR)</option>
+              <option value="sgm_uniform">SGM / Karras (ρ=7)</option>
+              <option value="bong_tangent">Tangent (Front-loaded)</option>
+              <option value="linear_quadratic">Linear-Quadratic</option>
+              <option value="power">Power (p=2)</option>
             </select>
           </div>
 

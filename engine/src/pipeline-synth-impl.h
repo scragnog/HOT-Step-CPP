@@ -102,6 +102,12 @@ struct SynthState {
     // Legacy alias: "ode" -> "euler"
     std::string solver;
 
+    // Scheduler name: dispatched via scheduler_lookup() in schedulers/scheduler-registry.h
+    // Valid values: "linear", "ddim_uniform", "sgm_uniform", "bong_tangent",
+    //              "linear_quadratic", "cosine", "power", "beta57"
+    // Alias: "karras" -> "sgm_uniform"
+    std::string scheduler;
+
     // per-batch seeds (for reproducible SDE re-noising: seed + step offset)
     std::vector<int64_t> seeds;
 

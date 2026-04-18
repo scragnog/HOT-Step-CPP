@@ -9,6 +9,7 @@
 #include "dit-sampler.h"
 #include "philox.h"
 #include "pipeline-synth-impl.h"
+#include "schedulers/scheduler-registry.h"
 #include "vae-enc.h"
 
 #include <cctype>
@@ -160,14 +161,18 @@ int ops_resolve_params(const AceSynth * ctx, const AceRequest * reqs, int batch_
     return 0;
 }
 
-// ops_build_schedule
+// ops_build_schedule — dispatches via scheduler registry
 void ops_build_schedule(SynthState & s) {
-    // Build s.schedule: t_i = s.shift * t / (1 + (s.shift-1)*t) where t = 1 - i/steps
-    s.schedule.resize(s.num_steps);
-    for (int i = 0; i < s.num_steps; i++) {
-        float t       = 1.0f - (float) i / (float) s.num_steps;
-        s.schedule[i] = s.shift * t / (1.0f + (s.shift - 1.0f) * t);
+    const SchedulerInfo * sched = scheduler_lookup(s.scheduler.c_str());
+    if (!sched) {
+        fprintf(stderr, "[Build-Schedule] WARNING: unknown scheduler '%s', falling back to linear\n",
+                s.scheduler.c_str());
+        sched = scheduler_lookup("linear");
     }
+    s.schedule.resize(s.num_steps);
+    sched->fn(s.schedule.data(), s.num_steps, s.shift);
+    fprintf(stderr, "[Build-Schedule] %s (%s), %d steps, shift=%.2f\n",
+            sched->display_name, sched->name, s.num_steps, s.shift);
 }
 
 // ops_resolve_T

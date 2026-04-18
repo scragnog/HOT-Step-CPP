@@ -44,6 +44,7 @@ void request_init(AceRequest * r) {
     r->task_type            = "";
     r->track                = "";
     r->infer_method         = "";
+    r->scheduler             = "";
     r->peak_clip            = 10;
 }
 
@@ -86,6 +87,9 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
     }
     if ((v = yyjson_obj_get(obj, "infer_method")) && yyjson_is_str(v)) {
         r->infer_method = yy_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "scheduler")) && yyjson_is_str(v)) {
+        r->scheduler = yy_str(v);
     }
 
     // ints
@@ -333,6 +337,9 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     if (all || r->infer_method != def.infer_method) {
         yyjson_mut_obj_add_str(doc, root, "infer_method", r->infer_method.c_str());
     }
+    if (all || r->scheduler != def.scheduler) {
+        yyjson_mut_obj_add_str(doc, root, "scheduler", r->scheduler.c_str());
+    }
 
     // batch
     if (all || r->synth_batch_size != def.synth_batch_size) {
@@ -425,6 +432,9 @@ void request_dump(const AceRequest * r, FILE * f) {
     }
     if (!r->infer_method.empty()) {
         fprintf(f, "[Request] infer_method: %s\n", r->infer_method.c_str());
+    }
+    if (!r->scheduler.empty()) {
+        fprintf(f, "[Request] scheduler: %s\n", r->scheduler.c_str());
     }
     if (r->peak_clip != 10) {
         fprintf(f, "[Request] peak_clip: %d\n", r->peak_clip);
