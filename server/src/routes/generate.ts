@@ -146,6 +146,7 @@ function translateParams(params: any): AceRequest {
   if (params.loraPath) req.adapter = params.loraPath;
   if (params.loraScale !== undefined) req.adapter_scale = params.loraScale;
   if (params.adapterGroupScales) req.adapter_group_scales = params.adapterGroupScales;
+  if (params.adapterMode) req.adapter_mode = params.adapterMode;
 
   return req;
 }
@@ -258,6 +259,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         if (aceReq.adapter) result.adapter = aceReq.adapter;
         if (aceReq.adapter_scale !== undefined) result.adapter_scale = aceReq.adapter_scale;
         if (aceReq.adapter_group_scales) result.adapter_group_scales = aceReq.adapter_group_scales;
+        if (aceReq.adapter_mode) result.adapter_mode = aceReq.adapter_mode;
       }
     }
 

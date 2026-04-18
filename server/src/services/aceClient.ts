@@ -75,6 +75,7 @@ export interface AceRequest {
     mlp: number;
     cond_embed: number;
   };
+  adapter_mode?: string;  // "merge" (default) or "runtime" (fast, for K-quant models)
 }
 
 /** Job status from ace-server */

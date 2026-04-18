@@ -83,6 +83,7 @@ export interface GenerationParams {
     mlp: number;
     cond_embed: number;
   };
+  adapterMode: string;  // "merge" or "runtime"
 
   // Task type
   taskType: string;

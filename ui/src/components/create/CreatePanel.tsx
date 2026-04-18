@@ -59,6 +59,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [adapterGroupScales, setAdapterGroupScales] = usePersistedState('hs-adapterGroupScales', {
     self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0,
   });
+  const [adapterMode, setAdapterMode] = usePersistedState('hs-adapterMode', 'runtime');
 
   // Reuse data
   useEffect(() => {
@@ -107,6 +108,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       loraPath: adapter,
       loraScale: adapterScale,
       adapterGroupScales: adapter ? adapterGroupScales : undefined,
+      adapterMode: adapter ? adapterMode : 'merge',
       taskType: 'text2music',
     };
     onGenerate(params);
@@ -142,6 +144,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
           adapter={adapter} onAdapterChange={setAdapter}
           adapterScale={adapterScale} onAdapterScaleChange={setAdapterScale}
           adapterGroupScales={adapterGroupScales} onAdapterGroupScalesChange={setAdapterGroupScales}
+          adapterMode={adapterMode} onAdapterModeChange={setAdapterMode}
         />
 
         <GenerationSettings

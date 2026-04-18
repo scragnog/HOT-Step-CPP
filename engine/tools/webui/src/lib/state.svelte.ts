@@ -77,6 +77,7 @@ export function setRequest(incoming: AceRequest) {
 	if (!incoming.lm_model) incoming.lm_model = app.request.lm_model;
 	if (!incoming.adapter) incoming.adapter = app.request.adapter;
 	if (incoming.adapter_scale == null) incoming.adapter_scale = app.request.adapter_scale;
+	if (!incoming.adapter_mode) incoming.adapter_mode = app.request.adapter_mode;
 	app.request = incoming;
 	app.srcRangeStart = incoming.repainting_start ?? null;
 	app.srcRangeEnd = incoming.repainting_end ?? null;

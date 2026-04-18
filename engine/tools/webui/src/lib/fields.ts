@@ -59,7 +59,8 @@ export const FIELDS: readonly FieldDef[] = [
 	{ key: 'synth_model', section: 'routing', type: 'str' },
 	{ key: 'lm_model', section: 'routing', type: 'str' },
 	{ key: 'adapter', section: 'routing', type: 'str' },
-	{ key: 'adapter_scale', section: 'routing', type: 'num' }
+	{ key: 'adapter_scale', section: 'routing', type: 'num' },
+	{ key: 'adapter_mode', section: 'routing', type: 'str' }
 ];
 
 // convert to number, undefined if empty/NaN

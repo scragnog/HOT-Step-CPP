@@ -24,6 +24,8 @@ interface ModelSelectorProps {
   onAdapterScaleChange: (v: number) => void;
   adapterGroupScales: AdapterGroupScales;
   onAdapterGroupScalesChange: (v: AdapterGroupScales) => void;
+  adapterMode: string;
+  onAdapterModeChange: (v: string) => void;
 }
 
 const GROUP_INFO = [
@@ -39,6 +41,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   ditModel, onDitModelChange, lmModel, onLmModelChange,
   adapter, onAdapterChange, adapterScale, onAdapterScaleChange,
   adapterGroupScales, onAdapterGroupScalesChange,
+  adapterMode, onAdapterModeChange,
 }) => {
   const [models, setModels] = useState<AceModels | null>(null);
   const [showGroupScales, setShowGroupScales] = useState(false);
@@ -122,6 +125,38 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     <input type="range" value={adapterScale}
                       onChange={e => onAdapterScaleChange(parseFloat(e.target.value))}
                       min={0} max={2} step={0.05} className="w-full" />
+                  </div>
+
+                  {/* Adapter Loading Mode */}
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Loading Mode</label>
+                    <div className="flex rounded-xl overflow-hidden border border-white/10">
+                      <button
+                        onClick={() => onAdapterModeChange('merge')}
+                        className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+                          adapterMode === 'merge'
+                            ? 'bg-zinc-700 text-white'
+                            : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        Merge
+                      </button>
+                      <button
+                        onClick={() => onAdapterModeChange('runtime')}
+                        className={`flex-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+                          adapterMode === 'runtime'
+                            ? 'bg-pink-600 text-white'
+                            : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        Runtime LoRA ⚡
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-zinc-600 mt-1">
+                      {adapterMode === 'runtime'
+                        ? 'Fast: keeps base weights quantized, applies adapter at inference (~5s load)'
+                        : 'Classic: merges adapter into weights (slow for K-quant models, ~127s)'}
+                    </p>
                   </div>
 
                   {/* Group Scales Toggle */}
