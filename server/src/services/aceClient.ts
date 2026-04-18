@@ -2,10 +2,21 @@
 //
 // Wraps all ace-server endpoints with typed methods.
 // Used by the generation orchestrator and model routes.
+//
+// IMPORTANT: ace-server uses single-threaded httplib. During heavy compute
+// (DiT generation, adapter merge, VAE decode) it cannot respond to HTTP
+// requests. All fetch calls need generous timeouts to survive these stalls.
 
 import { config } from '../config.js';
 
 const BASE = config.aceServer.url;
+
+// Timeouts (ms) — ace-server is single-threaded httplib, so during heavy
+// compute (DiT steps, adapter merge) it can't respond. These must be
+// generous enough to survive the longest possible stall.
+const TIMEOUT_QUICK  =  15_000;   // health checks, props, job submit
+const TIMEOUT_POLL   = 120_000;   // job polling (ace-server may be busy with a DiT step)
+const TIMEOUT_RESULT = 300_000;   // fetching large audio results (encode + transfer)
 
 /** Props response from GET /props */
 export interface AceProps {
@@ -71,8 +82,10 @@ export interface AceJobStatus {
   status: 'running' | 'done' | 'failed' | 'cancelled';
 }
 
-async function aceGet(path: string): Promise<Response> {
-  const res = await fetch(`${BASE}${path}`);
+async function aceGet(path: string, timeoutMs = TIMEOUT_QUICK): Promise<Response> {
+  const res = await fetch(`${BASE}${path}`, {
+    signal: AbortSignal.timeout(timeoutMs),
+  });
   if (!res.ok) {
     const body = await res.text().catch(() => 'Unknown error');
     throw new Error(`ace-server ${path} failed (${res.status}): ${body}`);
@@ -80,7 +93,7 @@ async function aceGet(path: string): Promise<Response> {
   return res;
 }
 
-async function acePost(path: string, body?: unknown, contentType = 'application/json'): Promise<Response> {
+async function acePost(path: string, body?: unknown, contentType = 'application/json', timeoutMs = TIMEOUT_QUICK): Promise<Response> {
   const headers: Record<string, string> = {};
   let reqBody: string | undefined;
 
@@ -93,6 +106,7 @@ async function acePost(path: string, body?: unknown, contentType = 'application/
     method: 'POST',
     headers,
     body: reqBody,
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) {
@@ -177,6 +191,7 @@ export const aceClient = {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
       },
       body,
+      signal: AbortSignal.timeout(TIMEOUT_RESULT),
     });
 
     if (!res.ok) {
@@ -199,6 +214,7 @@ export const aceClient = {
       method: 'POST',
       headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
       body,
+      signal: AbortSignal.timeout(TIMEOUT_RESULT),
     });
 
     if (!res.ok) {
@@ -210,20 +226,28 @@ export const aceClient = {
     return data.id;
   },
 
-  /** GET /job?id=N — poll job status */
+  /** GET /job?id=N — poll job status.
+   *  Uses TIMEOUT_POLL because ace-server is single-threaded and may be
+   *  mid-DiT-step when we poll, so the response can stall for several seconds. */
   async pollJob(jobId: string): Promise<AceJobStatus> {
-    const res = await aceGet(`/job?id=${jobId}`);
+    const res = await aceGet(`/job?id=${jobId}`, TIMEOUT_POLL);
     return res.json();
   },
 
-  /** GET /job?id=N&result=1 — fetch completed job result */
+  /** GET /job?id=N&result=1 — fetch completed job result.
+   *  Uses TIMEOUT_RESULT because the response contains the full MP3/WAV audio. */
   async getJobResult(jobId: string): Promise<Response> {
-    return fetch(`${BASE}/job?id=${jobId}&result=1`);
+    return fetch(`${BASE}/job?id=${jobId}&result=1`, {
+      signal: AbortSignal.timeout(TIMEOUT_RESULT),
+    });
   },
 
   /** POST /job?id=N&cancel=1 — cancel a running job */
   async cancelJob(jobId: string): Promise<void> {
-    await fetch(`${BASE}/job?id=${jobId}&cancel=1`, { method: 'POST' });
+    await fetch(`${BASE}/job?id=${jobId}&cancel=1`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(TIMEOUT_POLL),
+    });
   },
 
   /** Check if ace-server is reachable */
