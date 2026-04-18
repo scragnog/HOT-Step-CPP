@@ -470,20 +470,22 @@ static bool adapter_merge_on_backend(WeightCtx *                                
     }
 
     // base weight upload strategy:
-    //   decode_ok=true  → upload native, cast to F32 on backend (fast, zero host work)
-    //   decode_ok=false → dequant on CPU, upload as F32 (K-quants on CUDA: Q4_K_M/Q5_K_M/Q6_K)
+    //   decode_ok=true  → upload native, cast to F32 on backend (fast, ggml_cast)
+    //   decode_ok=false → upload native, dequant to F32 via ggml_get_rows on backend
+    //                     (K-quants on CUDA: ggml_cast lacks cpy kernels, but get_rows
+    //                      has optimized per-type dequant kernels for all quant types)
     bool                    decode_ok = adapter_backend_can_decode(backend, ttype);
+    struct ggml_tensor *    tbase_native = ggml_new_tensor_2d(ctx, ttype, ne0, ne1);
     struct ggml_tensor *    tbase_f32;
-    struct ggml_tensor *    tbase_native = nullptr;
-    std::vector<float>      base_f32_cpu;  // only used when !decode_ok
+    struct ggml_tensor *    tidx = nullptr;  // row indices for get_rows fallback
 
     if (decode_ok) {
-        // upload in native type, cast to F32 on backend
-        tbase_native = ggml_new_tensor_2d(ctx, ttype, ne0, ne1);
-        tbase_f32    = ggml_cast(ctx, tbase_native, GGML_TYPE_F32);
+        // cast to F32 on backend (BF16, Q8_0)
+        tbase_f32 = ggml_cast(ctx, tbase_native, GGML_TYPE_F32);
     } else {
-        // will dequant on CPU and upload as F32
-        tbase_f32 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, ne1);
+        // GPU dequant via get_rows: extract all rows, outputs F32
+        tidx      = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, ne1);
+        tbase_f32 = ggml_get_rows(ctx, tbase_native, tidx);
     }
 
     // DoRA scale vector, one F32 per output row when dora_scale is set
@@ -528,15 +530,13 @@ static bool adapter_merge_on_backend(WeightCtx *                                
         return false;
     }
 
-    // helper-owned uploads: base weight + DoRA scale
-    if (decode_ok) {
-        // upload native from mmap
-        ggml_backend_tensor_set(tbase_native, base_ptr, 0, base_nb);
-    } else {
-        // dequant on CPU, upload as F32
-        base_f32_cpu.resize((size_t) nel);
-        adapter_dequant_cpu(base_ptr, base_f32_cpu.data(), nel, ne0, ttype);
-        ggml_backend_tensor_set(tbase_f32, base_f32_cpu.data(), 0, (size_t) nel * sizeof(float));
+    // helper-owned uploads: base weight (always native) + DoRA scale + row indices
+    ggml_backend_tensor_set(tbase_native, base_ptr, 0, base_nb);
+    if (tidx) {
+        // fill row index vector [0, 1, 2, ..., ne1-1] for get_rows GPU dequant
+        std::vector<int32_t> idx((size_t) ne1);
+        for (int32_t i = 0; i < (int32_t) ne1; i++) { idx[i] = i; }
+        ggml_backend_tensor_set(tidx, idx.data(), 0, (size_t) ne1 * sizeof(int32_t));
     }
     if (tds) {
         ggml_backend_tensor_set(tds, ds, 0, (size_t) ne1 * sizeof(float));
