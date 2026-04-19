@@ -54,19 +54,47 @@ function readPersisted(key: string): any {
 }
 
 function mergeCreatePanelSettings(params: Record<string, any>): void {
+  // Read ALL generation params from Create panel's hs-* localStorage keys.
+  // Only content fields (lyrics/caption/bpm/key/duration) and adapter/reference
+  // are excluded — those come from the album preset + written song.
   const map: [string, string][] = [
-    ['ace-inferenceSteps', 'inferenceSteps'],
-    ['ace-inferMethod', 'inferMethod'],
-    ['ace-scheduler', 'scheduler'],
-    ['ace-guidanceScale', 'guidanceScale'],
-    ['ace-shift', 'shift'],
-    ['ace-guidanceMode', 'guidanceMode'],
-    ['ace-randomSeed', 'randomSeed'],
-    ['ace-vocalLanguage', 'vocalLanguage'],
+    // DiT settings
+    ['hs-inferenceSteps', 'inferenceSteps'],
+    ['hs-guidanceScale', 'guidanceScale'],
+    ['hs-shift', 'shift'],
+    ['hs-inferMethod', 'inferMethod'],
+    ['hs-scheduler', 'scheduler'],
+    ['hs-guidanceMode', 'guidanceMode'],
+    // Seed
+    ['hs-seed', 'seed'],
+    ['hs-randomSeed', 'randomSeed'],
+    ['hs-batchSize', 'batchSize'],
+    // LM
+    ['hs-skipLm', 'skipLm'],
+    ['hs-useCotCaption', 'useCotCaption'],
+    ['hs-lmTemperature', 'lmTemperature'],
+    ['hs-lmCfgScale', 'lmCfgScale'],
+    ['hs-lmTopK', 'lmTopK'],
+    ['hs-lmTopP', 'lmTopP'],
+    ['hs-lmNegativePrompt', 'lmNegativePrompt'],
+    // Models
+    ['hs-ditModel', 'ditModel'],
+    ['hs-lmModel', 'lmModel'],
+    ['hs-vaeModel', 'vaeModel'],
+    // Solver sub-params
+    ['hs-storkSubsteps', 'storkSubsteps'],
+    ['hs-beatStability', 'beatStability'],
+    ['hs-frequencyDamping', 'frequencyDamping'],
+    ['hs-temporalSmoothing', 'temporalSmoothing'],
+    // Guidance sub-params
+    ['hs-apgMomentum', 'apgMomentum'],
+    ['hs-apgNormThreshold', 'apgNormThreshold'],
+    // Language
+    ['hs-vocalLanguage', 'vocalLanguage'],
   ];
   for (const [storageKey, paramKey] of map) {
     const val = readPersisted(storageKey);
-    if (val !== undefined && val !== null && val !== '') {
+    if (val !== undefined && val !== null) {
       params[paramKey] = val;
     }
   }
