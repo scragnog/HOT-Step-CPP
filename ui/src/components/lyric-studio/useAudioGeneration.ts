@@ -66,6 +66,8 @@ function mergeCreatePanelSettings(params: Record<string, any>): void {
     ['hs-apgNormThreshold', 'apgNormThreshold'],
     // Language
     ['hs-vocalLanguage', 'vocalLanguage'],
+    // Adapter mode (runtime vs merge — engine setting, not preset)
+    ['hs-adapterMode', 'adapterMode'],
   ];
   for (const [storageKey, paramKey] of map) {
     const val = readPersisted(storageKey);
