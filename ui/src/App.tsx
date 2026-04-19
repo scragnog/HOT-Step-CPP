@@ -25,9 +25,25 @@ import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { LyricStudioV2 } from './components/lyric-studio/LyricStudioV2';
 import type { Song, GenerationParams } from './types';
 
+/** Derive top-level view from the browser URL */
+function viewFromUrl(path = window.location.pathname): string {
+  if (path.startsWith('/lyric-studio')) return 'lyric-studio';
+  if (path.startsWith('/library')) return 'library';
+  if (path.startsWith('/settings')) return 'settings';
+  return 'create';
+}
+
+/** Map view names to URL paths */
+function urlForView(view: string): string {
+  if (view === 'lyric-studio') return '/lyric-studio';
+  if (view === 'library') return '/library';
+  if (view === 'settings') return '/settings';
+  return '/';
+}
+
 const App: React.FC = () => {
   const { token, isLoading } = useAuth();
-  const [activeView, setActiveView] = useState('create');
+  const [activeView, setActiveView] = useState(() => viewFromUrl());
   const [songs, setSongs] = useState<Song[]>([]);
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
@@ -76,6 +92,22 @@ const App: React.FC = () => {
   } | null>(null);
 
   const [isShutdown, setIsShutdown] = useState(false);
+
+  // ── URL-based routing ──────────────────────────────────────
+  const navigateTo = useCallback((view: string) => {
+    setActiveView(view);
+    const url = urlForView(view);
+    if (window.location.pathname !== url) {
+      window.history.pushState(null, '', url);
+    }
+  }, []);
+
+  // Handle browser back/forward
+  useEffect(() => {
+    const handlePopState = () => setActiveView(viewFromUrl());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Download modal state
   const [downloadSong, setDownloadSong] = useState<Song | null>(null);
@@ -160,8 +192,8 @@ const App: React.FC = () => {
   const [reuseData, setReuseData] = useState<{ song: Song; timestamp: number } | null>(null);
   const handleReuse = useCallback((song: Song) => {
     setReuseData({ song, timestamp: Date.now() });
-    setActiveView('create');
-  }, []);
+    navigateTo('create');
+  }, [navigateTo]);
 
   // Song update handler
   const handleSongUpdate = useCallback((updatedSong: Song) => {
@@ -536,7 +568,7 @@ const App: React.FC = () => {
       <div className="flex-1 flex overflow-hidden">
         <Sidebar
           activeView={activeView}
-          onViewChange={setActiveView}
+          onViewChange={navigateTo}
           onQuit={() => {
             setConfirmDialog({
               title: 'Quit HOT-Step CPP',

@@ -140,7 +140,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
       ) : (
         <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {albums.map((album, idx) => {
-            const songs = parseSongs(album.songs);
+            const songCount = album.total_songs ?? (album.songs ? parseSongs(album.songs).length : 0);
             return (
               <div
                 key={album.id}
@@ -179,7 +179,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                   <div className="flex items-center gap-3 text-xs text-zinc-300/70">
                     <span className="flex items-center gap-1">
                       <FileText className="w-3 h-3" />
-                      {songs.length} songs
+                      {songCount} songs
                     </span>
                   </div>
                 </div>
