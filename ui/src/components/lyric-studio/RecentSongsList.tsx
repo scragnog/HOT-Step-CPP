@@ -40,6 +40,7 @@ export const RecentSongsList: React.FC<RecentSongsListProps> = ({ onPlaySong, sh
   const [loading, setLoading] = useState(_cachedSongs.length === 0);
   const mountedRef = useRef(true);
   const [downloadSong, setDownloadSong] = useState<Song | null>(null);
+  const [downloadArtist, setDownloadArtist] = useState('');
 
   useEffect(() => {
     mountedRef.current = true;
@@ -116,6 +117,7 @@ export const RecentSongsList: React.FC<RecentSongsListProps> = ({ onPlaySong, sh
       masteredAudioUrl: rs.mastered_audio_url || '',
     };
     setDownloadSong(song);
+    setDownloadArtist(rs.artist_name || '');
   }, []);
 
   if (loading && songs.length === 0) {
@@ -192,6 +194,7 @@ export const RecentSongsList: React.FC<RecentSongsListProps> = ({ onPlaySong, sh
           song={downloadSong}
           isOpen={!!downloadSong}
           onClose={() => setDownloadSong(null)}
+          artistName={downloadArtist}
         />
       )}
     </>

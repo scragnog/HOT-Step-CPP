@@ -23,6 +23,7 @@ import { DownloadModal } from './components/shared/DownloadModal';
 import { SettingsPanel, type AppSettings, DEFAULT_SETTINGS } from './components/settings/SettingsPanel';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { LyricStudioV2 } from './components/lyric-studio/LyricStudioV2';
+import { getPlaylist } from './components/lyric-studio/playlistStore';
 import type { Song, GenerationParams } from './types';
 
 /** Derive top-level view from the browser URL */
@@ -353,7 +354,21 @@ const App: React.FC = () => {
   }, []);
 
   const playNext = useCallback(() => {
-    if (!currentSong || songs.length === 0) return;
+    if (!currentSong) return;
+    // Check playlist first
+    const pl = getPlaylist();
+    const plIdx = pl.findIndex(p => p.id === currentSong.id);
+    if (plIdx >= 0 && pl.length > 1) {
+      const nextPl = isShuffle
+        ? pl[Math.floor(Math.random() * pl.length)]
+        : pl[(plIdx + 1) % pl.length];
+      if (nextPl) {
+        playSong({ id: nextPl.id, title: nextPl.title, audioUrl: nextPl.audioUrl, coverUrl: nextPl.coverUrl || '', duration: nextPl.duration || 0, tags: [], style: nextPl.style || '', lyrics: '', caption: '' });
+        return;
+      }
+    }
+    // Fall back to song library
+    if (songs.length === 0) return;
     const idx = songs.findIndex(s => s.id === currentSong.id);
     const next = isShuffle
       ? songs[Math.floor(Math.random() * songs.length)]
@@ -362,7 +377,19 @@ const App: React.FC = () => {
   }, [currentSong, songs, isShuffle, playSong]);
 
   const playPrevious = useCallback(() => {
-    if (!currentSong || songs.length === 0) return;
+    if (!currentSong) return;
+    // Check playlist first
+    const pl = getPlaylist();
+    const plIdx = pl.findIndex(p => p.id === currentSong.id);
+    if (plIdx >= 0 && pl.length > 1) {
+      const prevPl = pl[(plIdx - 1 + pl.length) % pl.length];
+      if (prevPl) {
+        playSong({ id: prevPl.id, title: prevPl.title, audioUrl: prevPl.audioUrl, coverUrl: prevPl.coverUrl || '', duration: prevPl.duration || 0, tags: [], style: prevPl.style || '', lyrics: '', caption: '' });
+        return;
+      }
+    }
+    // Fall back to song library
+    if (songs.length === 0) return;
     const idx = songs.findIndex(s => s.id === currentSong.id);
     const prev = songs[(idx - 1 + songs.length) % songs.length];
     if (prev) playSong(prev);

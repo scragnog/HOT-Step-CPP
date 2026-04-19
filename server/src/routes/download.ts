@@ -82,12 +82,14 @@ const mimeTypes: Record<string, string> = {
   opus: 'audio/ogg',
 };
 
-// GET /api/download/:id?format=wav&bitrate=192&version=original
+// GET /api/download/:id?format=wav&bitrate=192&version=original&artist=Name&prepend=Prefix
 router.get('/:id', async (req, res) => {
   const { id } = req.params;
   const format = (req.query.format as string || 'wav').toLowerCase();
   const bitrate = parseInt(req.query.bitrate as string) || 192;
   const version = (req.query.version as string || 'original').toLowerCase();
+  const artistName = (req.query.artist as string || '').trim();
+  const prepend = (req.query.prepend as string || '').trim();
 
   // Validate format
   if (!['wav', 'mp3', 'flac', 'opus'].includes(format)) {
@@ -95,9 +97,47 @@ router.get('/:id', async (req, res) => {
     return;
   }
 
-  // Get song from DB
-  const song = getDb().prepare('SELECT * FROM songs WHERE id = ?').get(id) as any;
+  // Get song from DB — try by ID first, then by audio_url
+  let song = getDb().prepare('SELECT * FROM songs WHERE id = ?').get(id) as any;
   if (!song) {
+    // Fallback: try looking up by audio_url (for Lyric Studio queue items)
+    const audioUrlParam = req.query.audioUrl as string;
+    if (audioUrlParam) {
+      song = getDb().prepare('SELECT * FROM songs WHERE audio_url = ?').get(audioUrlParam) as any;
+    }
+  }
+  if (!song) {
+    // Last resort: serve the audio file directly without DB metadata
+    const audioUrlParam = req.query.audioUrl as string;
+    if (audioUrlParam) {
+      const filename = path.basename(audioUrlParam);
+      const sourcePath = path.join(config.data.audioDir, filename);
+      if (fs.existsSync(sourcePath)) {
+        // Build filename from query params
+        const titleParts = [prepend, artistName, 'Untitled'].filter(Boolean);
+        const downloadFilename = `${titleParts.join(' - ')}.${format}`;
+        if (format === 'wav' && sourcePath.endsWith('.wav')) {
+          res.setHeader('Content-Type', mimeTypes.wav);
+          res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
+          res.setHeader('Content-Length', fs.statSync(sourcePath).size);
+          fs.createReadStream(sourcePath).pipe(res);
+          return;
+        }
+        // Convert
+        const tempDir = path.join(config.data.dir, 'download_temp');
+        fs.mkdirSync(tempDir, { recursive: true });
+        const tempFile = path.join(tempDir, `dl_${Date.now().toString(36)}.${format}`);
+        await convertAudio(sourcePath, format, bitrate, tempFile);
+        const stat = fs.statSync(tempFile);
+        res.setHeader('Content-Type', mimeTypes[format] || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
+        res.setHeader('Content-Length', stat.size);
+        const stream = fs.createReadStream(tempFile);
+        stream.pipe(res);
+        stream.on('end', () => { try { fs.unlinkSync(tempFile); } catch {} });
+        return;
+      }
+    }
     res.status(404).json({ error: 'Song not found' });
     return;
   }
@@ -124,10 +164,12 @@ router.get('/:id', async (req, res) => {
     return;
   }
 
-  // Build download filename
+  // Build download filename: Prepend - Artist - Title_suffix.format
   const songTitle = (song.title || 'Untitled').replace(/[^a-zA-Z0-9 _-]/g, '');
   const suffix = version === 'mastered' ? '_mastered' : '';
-  const downloadFilename = `${songTitle}${suffix}.${format}`;
+  const resolvedArtist = artistName || (song.artist || '').replace(/[^a-zA-Z0-9 _-]/g, '');
+  const parts = [prepend, resolvedArtist, `${songTitle}${suffix}`].filter(Boolean);
+  const downloadFilename = `${parts.join(' - ')}.${format}`;
 
   try {
     if (format === 'wav' && sourcePath.endsWith('.wav')) {

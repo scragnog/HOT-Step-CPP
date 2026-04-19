@@ -211,18 +211,19 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
 
 const QueueAddToPlaylistBtn: React.FC<{ item: AudioQueueItem }> = ({ item }) => {
   const playlist = usePlaylist();
-  const inPlaylist = playlist.isIn(item.id);
+  const inPlaylist = playlist.isIn(item.songId || item.id);
 
   const toggle = () => {
-    if (inPlaylist) { playlist.remove(item.id); }
+    const resolvedId = item.songId || item.id;
+    if (inPlaylist) { playlist.remove(resolvedId); }
     else {
       playlist.add({
-        id: item.id,
+        id: resolvedId,
         title: item.generation.title || 'Untitled',
         audioUrl: item.audioUrl || '',
         artistName: item.artistName || '',
         coverUrl: '',
-        duration: 0,
+        duration: item.audioDuration || 0,
       });
     }
   };

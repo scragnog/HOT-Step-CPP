@@ -14,6 +14,8 @@ interface DownloadModalProps {
   defaultFormat?: 'wav' | 'flac' | 'opus' | 'mp3';
   defaultMp3Bitrate?: number;
   defaultOpusBitrate?: number;
+  artistName?: string;
+  prepend?: string;
 }
 
 type AudioFormat = 'wav' | 'flac' | 'opus' | 'mp3';
@@ -33,6 +35,8 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   defaultFormat = 'flac',
   defaultMp3Bitrate = 192,
   defaultOpusBitrate = 192,
+  artistName = '',
+  prepend = '',
 }) => {
   const [format, setFormat] = useState<AudioFormat>(defaultFormat);
   const [bitrate, setBitrate] = useState(
@@ -49,6 +53,9 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
       format,
       version: dlVersion,
       ...(isLossy ? { bitrate: String(bitrate) } : {}),
+      ...(song.audioUrl ? { audioUrl: song.audioUrl } : {}),
+      ...(artistName ? { artist: artistName } : {}),
+      ...(prepend ? { prepend } : {}),
     });
     const url = `/api/download/${song.id}?${params}`;
 
