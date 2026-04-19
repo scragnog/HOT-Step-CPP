@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback } from 'react';
-import { Loader2, CheckCircle2, XCircle, X, Music, Clock, Play, Square, ListPlus, Check } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, X, Music, Clock, Play, Square, ListPlus, Check, Download } from 'lucide-react';
 import {
   useAudioGenQueue,
   removeFromAudioQueue,
@@ -17,6 +17,7 @@ import {
 import type { AudioQueueItem } from '../../stores/audioGenQueueStore';
 import { usePlaylist } from './playlistStore';
 import type { Song } from '../../types';
+import { DownloadModal } from '../shared/DownloadModal';
 
 interface InlineAudioQueueProps {
   onPlaySong?: (song: Song) => void;
@@ -25,6 +26,7 @@ interface InlineAudioQueueProps {
 
 export const InlineAudioQueue: React.FC<InlineAudioQueueProps> = ({ onPlaySong, currentSongId }) => {
   const { items } = useAudioGenQueue();
+  const [downloadSong, setDownloadSong] = React.useState<Song | null>(null);
 
   const active = items.filter(i => i.status === 'loading-adapter' || i.status === 'generating');
   const queued = items.filter(i => i.status === 'pending');
@@ -45,12 +47,30 @@ export const InlineAudioQueue: React.FC<InlineAudioQueueProps> = ({ onPlaySong, 
       caption: item.generation.caption || '',
       audioUrl: item.audioUrl,
       masteredAudioUrl: item.masteredAudioUrl || '',
-      coverUrl: '',
+      coverUrl: item.artistImageUrl || '',
       duration: item.audioDuration || 0,
       tags: [],
     };
     onPlaySong(song);
   }, [onPlaySong]);
+
+  const handleDownload = useCallback((item: AudioQueueItem) => {
+    if (!item.audioUrl) return;
+    const song: Song = {
+      id: item.songId || item.id,
+      title: item.generation.title || 'Untitled',
+      lyrics: '',
+      style: item.generation.caption || '',
+      caption: item.generation.caption || '',
+      audioUrl: item.audioUrl,
+      masteredAudioUrl: item.masteredAudioUrl || '',
+      coverUrl: item.artistImageUrl || '',
+      duration: item.audioDuration || 0,
+      artistName: item.artistName || '',
+      tags: [],
+    };
+    setDownloadSong(song);
+  }, []);
 
   if (items.length === 0) {
     return (
@@ -99,9 +119,17 @@ export const InlineAudioQueue: React.FC<InlineAudioQueueProps> = ({ onPlaySong, 
         <>
           <GroupLabel label="Completed" color="text-green-400" />
           {finished.map(item => (
-            <QueueItemRow key={item.id} item={item} isPlayingInMain={currentSongId === item.id} onPlay={handlePlay} />
+            <QueueItemRow key={item.id} item={item} isPlayingInMain={currentSongId === item.id} onPlay={handlePlay} onDownload={handleDownload} />
           ))}
         </>
+      )}
+
+      {downloadSong && (
+        <DownloadModal
+          song={downloadSong}
+          isOpen={!!downloadSong}
+          onClose={() => setDownloadSong(null)}
+        />
       )}
     </div>
   );
@@ -117,9 +145,10 @@ interface QueueItemRowProps {
   item: AudioQueueItem;
   isPlayingInMain: boolean;
   onPlay: (item: AudioQueueItem) => void;
+  onDownload: (item: AudioQueueItem) => void;
 }
 
-const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPlay }) => {
+const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPlay, onDownload }) => {
   const isRunning = item.status === 'loading-adapter' || item.status === 'generating';
   const isSucceeded = item.status === 'succeeded';
   const isFailed = item.status === 'failed';
@@ -183,7 +212,16 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
               <X className="w-3 h-3" />
             </button>
           )}
-          {isSucceeded && item.audioUrl && <QueueAddToPlaylistBtn item={item} />}
+          {isSucceeded && item.audioUrl && (
+            <>
+              <button onClick={() => onDownload(item)}
+                className="p-0.5 rounded hover:bg-emerald-500/20 text-zinc-500 hover:text-emerald-400 transition-colors"
+                title="Download Audio">
+                <Download className="w-3 h-3" />
+              </button>
+              <QueueAddToPlaylistBtn item={item} />
+            </>
+          )}
         </div>
       </div>
 
@@ -222,7 +260,7 @@ const QueueAddToPlaylistBtn: React.FC<{ item: AudioQueueItem }> = ({ item }) => 
         title: item.generation.title || 'Untitled',
         audioUrl: item.audioUrl || '',
         artistName: item.artistName || '',
-        coverUrl: '',
+        coverUrl: item.artistImageUrl || '',
         duration: item.audioDuration || 0,
       });
     }

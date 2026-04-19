@@ -449,6 +449,7 @@ export const LyricStudioV2: React.FC<LyricStudioV2Props> = ({ onPlaySong, isPlay
     await enqueueAudioGen(gen, {
       artistId: nav.selectedArtist?.id || 0,
       artistName: nav.selectedArtist?.name || 'Unknown',
+      artistImageUrl: nav.selectedArtist?.image_url || '',
       profileId: profile.id,
       lyricsSetId: profile.lyrics_set_id,
     }, token);

@@ -21,6 +21,7 @@ export interface Song {
   key_scale?: string;
   time_signature?: string;
   tags: string[];
+  artistName?: string;
   is_public?: boolean;
   isPublic?: boolean;
   dit_model?: string;

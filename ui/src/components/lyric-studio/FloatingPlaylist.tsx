@@ -129,6 +129,7 @@ export const FloatingPlaylist: React.FC<FloatingPlaylistProps> = ({ onPlaySong, 
       caption: i.style || '',
       audioUrl: i.audioUrl,
       coverUrl: i.coverUrl || '',
+      artistName: i.artistName || '',
       duration: i.duration ? `${Math.floor(i.duration / 60)}:${String(Math.floor(i.duration % 60)).padStart(2, '0')}` : '0:00',
       tags: [],
     }));

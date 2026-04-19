@@ -363,7 +363,7 @@ const App: React.FC = () => {
         ? pl[Math.floor(Math.random() * pl.length)]
         : pl[(plIdx + 1) % pl.length];
       if (nextPl) {
-        playSong({ id: nextPl.id, title: nextPl.title, audioUrl: nextPl.audioUrl, coverUrl: nextPl.coverUrl || '', duration: nextPl.duration || 0, tags: [], style: nextPl.style || '', lyrics: '', caption: '' });
+        playSong({ id: nextPl.id, title: nextPl.title, audioUrl: nextPl.audioUrl, coverUrl: nextPl.coverUrl || '', artistName: nextPl.artistName || '', duration: nextPl.duration || 0, tags: [], style: nextPl.style || '', lyrics: '', caption: '' });
         return;
       }
     }
@@ -384,7 +384,7 @@ const App: React.FC = () => {
     if (plIdx >= 0 && pl.length > 1) {
       const prevPl = pl[(plIdx - 1 + pl.length) % pl.length];
       if (prevPl) {
-        playSong({ id: prevPl.id, title: prevPl.title, audioUrl: prevPl.audioUrl, coverUrl: prevPl.coverUrl || '', duration: prevPl.duration || 0, tags: [], style: prevPl.style || '', lyrics: '', caption: '' });
+        playSong({ id: prevPl.id, title: prevPl.title, audioUrl: prevPl.audioUrl, coverUrl: prevPl.coverUrl || '', artistName: prevPl.artistName || '', duration: prevPl.duration || 0, tags: [], style: prevPl.style || '', lyrics: '', caption: '' });
         return;
       }
     }
@@ -402,7 +402,7 @@ const App: React.FC = () => {
       wavesurferRef.current?.play();
       wavesurferAltRef.current?.seekTo(0);
       wavesurferAltRef.current?.play();
-    } else if (repeatMode === 'all' || songs.length > 1) {
+    } else if (repeatMode === 'all' || songs.length > 1 || getPlaylist().length > 1) {
       playNext();
     } else {
       setIsPlaying(false);

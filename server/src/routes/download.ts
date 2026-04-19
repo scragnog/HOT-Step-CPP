@@ -113,9 +113,13 @@ router.get('/:id', async (req, res) => {
       const filename = path.basename(audioUrlParam);
       const sourcePath = path.join(config.data.audioDir, filename);
       if (fs.existsSync(sourcePath)) {
-        // Build filename from query params
-        const titleParts = [prepend, artistName, 'Untitled'].filter(Boolean);
-        const downloadFilename = `${titleParts.join(' - ')}.${format}`;
+        // Clean up parsed parameters just in case DB doesn't have standard naming
+        const badPrefixes = /^_(XL|STD)(\s*\(CPP\))?(\s*-\s*_)?\s*-?\s*/i;
+        const cleanPrepend = prepend.replace(badPrefixes, '').trim();
+        const cleanArtist = artistName.replace(badPrefixes, '').trim();
+        const titleSuffix = version === 'original' ? ' - Unmastered' : '';
+        const titleParts = [cleanPrepend, cleanArtist, 'Untitled'].filter(Boolean);
+        const downloadFilename = `${titleParts.join(' - ')}${titleSuffix}.${format}`;
         if (format === 'wav' && sourcePath.endsWith('.wav')) {
           res.setHeader('Content-Type', mimeTypes.wav);
           res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
@@ -165,10 +169,18 @@ router.get('/:id', async (req, res) => {
   }
 
   // Build download filename: Prepend - Artist - Title_suffix.format
-  const songTitle = (song.title || 'Untitled').replace(/[^a-zA-Z0-9 _-]/g, '');
-  const suffix = version === 'mastered' ? '_mastered' : '';
-  const resolvedArtist = artistName || (song.artist || '').replace(/[^a-zA-Z0-9 _-]/g, '');
-  const parts = [prepend, resolvedArtist, `${songTitle}${suffix}`].filter(Boolean);
+  const badPrefixes = /^_(XL|STD)(\s*\(CPP\))?(\s*-\s*_)?\s*-?\s*/i;
+  
+  let rawTitle = song.title || 'Untitled';
+  // Strip backend-generated prefix strings if they accidentally got committed to the DB
+  rawTitle = rawTitle.replace(badPrefixes, '');
+  rawTitle = rawTitle.replace(/_mastered/g, ''); // User wants mastered as default, so explicitly strip it out just in case
+  const songTitle = rawTitle.replace(/[^a-zA-Z0-9 _-]/g, '');
+
+  const suffix = version === 'original' ? ' - Unmastered' : '';
+  const resolvedArtist = artistName || (song.artist || '').replace(badPrefixes, '').replace(/[^a-zA-Z0-9 _-]/g, '');
+  const cleanPrepend = prepend.replace(badPrefixes, '').trim();
+  const parts = [cleanPrepend, resolvedArtist, `${songTitle}${suffix}`].filter(Boolean);
   const downloadFilename = `${parts.join(' - ')}.${format}`;
 
   try {

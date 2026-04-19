@@ -42,20 +42,29 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   const [bitrate, setBitrate] = useState(
     defaultFormat === 'opus' ? defaultOpusBitrate : defaultMp3Bitrate
   );
-  const [version, setVersion] = useState<DownloadVersion>('original');
+  const hasMastered = !!(song.masteredAudioUrl);
+  const [version, setVersion] = useState<DownloadVersion>(hasMastered ? 'mastered' : 'original');
   const [downloading, setDownloading] = useState(false);
 
-  const hasMastered = !!(song.masteredAudioUrl);
+  React.useEffect(() => {
+    if (isOpen) {
+      setVersion(!!song.masteredAudioUrl ? 'mastered' : 'original');
+    }
+  }, [isOpen, song.masteredAudioUrl]);
+
   const isLossy = FORMAT_INFO[format].lossy;
 
   const triggerDownload = async (dlVersion: 'original' | 'mastered') => {
+    const finalArtist = artistName || song.artistName || '';
+    const finalPrepend = prepend || localStorage.getItem('lireek-downloadFilenamePrepend') || '';
+    
     const params = new URLSearchParams({
       format,
       version: dlVersion,
       ...(isLossy ? { bitrate: String(bitrate) } : {}),
       ...(song.audioUrl ? { audioUrl: song.audioUrl } : {}),
-      ...(artistName ? { artist: artistName } : {}),
-      ...(prepend ? { prepend } : {}),
+      ...(finalArtist ? { artist: finalArtist } : {}),
+      ...(finalPrepend ? { prepend: finalPrepend } : {}),
     });
     const url = `/api/download/${song.id}?${params}`;
 

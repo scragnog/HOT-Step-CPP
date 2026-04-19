@@ -27,6 +27,7 @@ export interface AudioQueueItem {
   generation: Generation;
   artistId: number;
   artistName: string;
+  artistImageUrl?: string;
   preset: AlbumPreset | null;
   profileId: number;
   lyricsSetId: number;
@@ -190,7 +191,7 @@ let _resumeCalled = false;
 
 export async function enqueueAudioGen(
   gen: Generation,
-  opts: { artistId: number; artistName: string; profileId: number; lyricsSetId: number },
+  opts: { artistId: number; artistName: string; artistImageUrl?: string; profileId: number; lyricsSetId: number },
   token: string,
 ): Promise<void> {
   let preset: AlbumPreset | null = null;
@@ -204,6 +205,7 @@ export async function enqueueAudioGen(
     generation: gen,
     artistId: opts.artistId,
     artistName: opts.artistName,
+    artistImageUrl: opts.artistImageUrl,
     preset,
     profileId: opts.profileId,
     lyricsSetId: opts.lyricsSetId,
