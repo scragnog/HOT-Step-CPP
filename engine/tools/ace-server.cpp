@@ -651,6 +651,23 @@ static bool ensure_synth(const std::string &        dit_name,
     if (!adapter_name.empty()) {
         const AdapterEntry * adapter = registry_find_adapter(g_registry, adapter_name.c_str());
         if (!adapter) {
+            // Fallback: treat adapter_name as an absolute path if the file exists on disk.
+            // This supports the file browser UI which sends full paths for adapters outside
+            // the pre-scanned --adapters directory.
+            static AdapterEntry dynamic_adapter;
+            if (registry_is_file(adapter_name.c_str())) {
+                // extract just the filename for the name field
+                std::string fname = adapter_name;
+                auto sep = fname.find_last_of("/\\");
+                if (sep != std::string::npos) {
+                    fname = fname.substr(sep + 1);
+                }
+                dynamic_adapter = { fname, adapter_name };
+                adapter = &dynamic_adapter;
+                fprintf(stderr, "[Server] Adapter resolved from absolute path: %s\n", adapter_name.c_str());
+            }
+        }
+        if (!adapter) {
             fprintf(stderr, "[Server] Adapter not found: %s\n", adapter_name.c_str());
             g_loaded_dit.clear();
             g_loaded_adapter.clear();
