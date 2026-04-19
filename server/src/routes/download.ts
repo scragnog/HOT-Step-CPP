@@ -115,7 +115,7 @@ router.get('/:id', async (req, res) => {
       if (fs.existsSync(sourcePath)) {
         // Clean up parsed parameters just in case DB doesn't have standard naming
         const badPrefixes = /^_?(XL|STD)(\s*\(CPP\))?_?\s*-?\s*/i;
-        const cleanPrepend = prepend.replace(/^_+|_+$/g, '').replace(badPrefixes, '').trim();
+        const cleanPrepend = prepend.trim();
         const cleanArtist = artistName.replace(badPrefixes, '').trim();
         const titleSuffix = version === 'original' ? ' - Unmastered' : '';
         const titleParts = [cleanPrepend, cleanArtist, 'Untitled'].filter(Boolean);
@@ -180,8 +180,8 @@ router.get('/:id', async (req, res) => {
 
   const suffix = version === 'original' ? ' - Unmastered' : '';
   const resolvedArtist = artistName || (song.artist || '').replace(badPrefixes, '').replace(/[^a-zA-Z0-9 _()-]/g, '').trim();
-  // Clean prepend: strip wrapping underscores, collapse internal whitespace
-  const cleanPrepend = prepend.replace(/^_+|_+$/g, '').replace(badPrefixes, '').trim();
+  // Clean prepend: the user typed this, just trim whitespace
+  const cleanPrepend = prepend.trim();
   const parts = [cleanPrepend, resolvedArtist, `${songTitle}${suffix}`].filter(Boolean);
   const downloadFilename = `${parts.join(' - ')}.${format}`;
 
