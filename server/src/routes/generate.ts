@@ -297,22 +297,16 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
         // Re-inject trigger word — CoT caption replaces the original so the
         // trigger word that was injected into aceReq.caption gets lost.
-        const tw = job.params.triggerWord;
-        const tp = job.params.triggerPlacement;
-        const lp = job.params.loraPath;
-        logGeneration(job.id, 'INFO', `[Trigger] tw="${tw}" tp="${tp}" lp="${lp ? '✓' : '✗'}"`);
-        if (tw && tp && lp) {
+        if (job.params.triggerWord && job.params.triggerPlacement && job.params.loraPath) {
+          const tw = job.params.triggerWord;
           const caption = result.caption || '';
           // Only inject if it's not already present (cache hits may already have it)
           if (!caption.includes(tw)) {
-            switch (tp) {
+            switch (job.params.triggerPlacement) {
               case 'prepend': result.caption = caption ? `${tw}, ${caption}` : tw; break;
               case 'append':  result.caption = caption ? `${caption}, ${tw}` : tw; break;
               case 'replace': result.caption = tw; break;
             }
-            logGeneration(job.id, 'INFO', `[Trigger] Injected "${tw}" (${tp}) → caption starts with: "${result.caption.substring(0, 80)}..."`);
-          } else {
-            logGeneration(job.id, 'INFO', `[Trigger] Already present in caption, skipping`);
           }
         }
       }
