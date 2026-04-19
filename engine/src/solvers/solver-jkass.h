@@ -92,6 +92,13 @@ static void solver_jkass_quality_step(float *       xt,
     }
     float * x_pred = state.xt_scratch.data();
 
+    // Save k1 — vt and vt_buf alias the same memory, so model_fn will
+    // overwrite k1 when it writes k2.
+    if ((int) state.prev_vt.size() < n) {
+        state.prev_vt.resize(n);
+    }
+    memcpy(state.prev_vt.data(), vt, n * sizeof(float));
+
     // Euler predictor
     for (int i = 0; i < n; i++) {
         x_pred[i] = xt[i] - vt[i] * dt;
@@ -102,7 +109,7 @@ static void solver_jkass_quality_step(float *       xt,
 
     // Average the two derivatives (Heun's method)
     for (int i = 0; i < n; i++) {
-        xt[i] -= 0.5f * (vt[i] + vt_buf[i]) * dt;
+        xt[i] -= 0.5f * (state.prev_vt[i] + vt_buf[i]) * dt;
     }
 }
 
