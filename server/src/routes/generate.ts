@@ -396,9 +396,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     // Timbre reference: if enabled, read the mastering reference WAV and pass
     // it as ref_audio to the C++ engine's timbre conditioning pipeline.
     let refAudioBuf: Buffer | undefined;
+    logGeneration(job.id, 'DEBUG', `[Synth Phase] timbreReference=${job.params.timbreReference}, masteringReference=${job.params.masteringReference}`);
     if (job.params.timbreReference && job.params.masteringReference) {
       const refsDir = path.join(config.data.dir, 'references');
       const refPath = path.join(refsDir, job.params.masteringReference);
+      logGeneration(job.id, 'DEBUG', `[Synth Phase] Looking for timbre ref at: ${refPath}`);
       if (fs.existsSync(refPath)) {
         refAudioBuf = fs.readFileSync(refPath);
         logGeneration(job.id, 'INFO', `[Synth Phase] Timbre reference: ${job.params.masteringReference} (${(refAudioBuf.length / 1024 / 1024).toFixed(1)} MB)`);
@@ -409,8 +411,10 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
     let synthJobId: string;
     if (refAudioBuf) {
+      logGeneration(job.id, 'INFO', `[Synth Phase] Using MULTIPART submission with timbre ref (${refAudioBuf.length} bytes)`);
       synthJobId = await aceClient.submitSynthMultipart(lmResults, undefined, refAudioBuf, 'wav16');
     } else {
+      logGeneration(job.id, 'INFO', `[Synth Phase] Using plain JSON submission (no timbre ref)`);
       synthJobId = await aceClient.submitSynth(lmResults, 'wav16', coResident);
     }
     job.aceJobId = synthJobId;

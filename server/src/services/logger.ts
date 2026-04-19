@@ -10,6 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { pushLog } from '../routes/logs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '../../..');
@@ -112,8 +113,10 @@ export function startGenerationLog(jobId: string, taskType: string = 'text2music
  */
 export function logGeneration(jobId: string, level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', message: string): void {
   const buf = generationBuffers.get(jobId);
-  if (!buf) return;
-  buf.push(`${isoTimestamp()} | ${level.padEnd(7)} | ${message}`);
+  const line = `${isoTimestamp()} | ${level.padEnd(7)} | ${message}`;
+  if (buf) buf.push(line);
+  // Push to terminal SSE stream
+  pushLog(`[Gen:${jobId.substring(0, 8)}] ${message}`, 'server');
 }
 
 /**
