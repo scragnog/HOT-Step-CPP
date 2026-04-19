@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { Disc, Library, Settings, Power, Terminal } from 'lucide-react';
+import { usePersistedState } from '../../hooks/usePersistedState';
 
 interface SidebarProps {
   activeView: string;
@@ -19,7 +20,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   showTerminal = false,
   onToggleTerminal,
 }) => {
-  const [isOpen, setIsOpen] = React.useState(true);
+  const [isOpen, setIsOpen] = usePersistedState('hs-sidebar-open', true);
 
   return (
     <div className={`
