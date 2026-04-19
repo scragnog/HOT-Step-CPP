@@ -589,10 +589,10 @@ const App: React.FC = () => {
               ref={wavesurferRef}
               volume={playMastered ? 0 : volume}
               playbackRate={playbackRate}
-              onTimeUpdate={!playMastered ? setCurrentTime : undefined}
-              onDurationChange={!playMastered ? setDuration : undefined}
-              onPlayChange={!playMastered ? setIsPlaying : undefined}
-              onFinish={!playMastered ? handleWaveformFinish : undefined}
+              onTimeUpdate={setCurrentTime}
+              onDurationChange={setDuration}
+              onPlayChange={setIsPlaying}
+              onFinish={handleWaveformFinish}
               onReady={(dur) => {
                 handleWaveformReady(dur);
                 if (!playMastered) {
@@ -611,10 +611,10 @@ const App: React.FC = () => {
               ref={wavesurferAltRef}
               volume={playMastered ? volume : 0}
               playbackRate={playbackRate}
-              onTimeUpdate={playMastered ? setCurrentTime : undefined}
-              onDurationChange={playMastered ? setDuration : undefined}
-              onPlayChange={playMastered ? setIsPlaying : undefined}
-              onFinish={playMastered ? handleWaveformFinish : undefined}
+              onTimeUpdate={setCurrentTime}
+              onDurationChange={setDuration}
+              onPlayChange={setIsPlaying}
+              onFinish={handleWaveformFinish}
               onReady={(dur) => {
                 handleAltReady(dur);
                 if (playMastered) {
