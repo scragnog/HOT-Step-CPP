@@ -95,6 +95,7 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
                     duration: ag.duration || 0,
                     tags: [],
                     audioUrl: ag.audio_url,
+                    masteredAudioUrl: ag.mastered_audio_url || '',
                     created_at: ag.created_at,
                   });
                 } else {
@@ -113,6 +114,7 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
                           duration: status.result.duration || 0,
                           tags: [],
                           audioUrl,
+                          masteredAudioUrl: status.result.masteredAudioUrl || '',
                           created_at: ag.created_at,
                         });
                       }

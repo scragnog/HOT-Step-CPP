@@ -482,8 +482,8 @@ export function deleteAudioGeneration(id: number): boolean {
 
 export function getRecentGenerationsWithAudio(limit = 50): Record<string, any>[] {
   return db.prepare(
-    `SELECT g.*, a.name AS artist_name, ls.album,
-       ag.audio_url, ag.cover_url, ag.hotstep_job_id
+    `SELECT g.*, a.name AS artist_name, a.image_url AS artist_image, ls.album,
+       ag.audio_url, ag.cover_url, ag.hotstep_job_id, ag.duration
      FROM generations g
      JOIN profiles p ON p.id = g.profile_id
      JOIN lyrics_sets ls ON ls.id = p.lyrics_set_id

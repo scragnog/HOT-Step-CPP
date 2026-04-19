@@ -75,6 +75,7 @@ export const RecentSongsList: React.FC<RecentSongsListProps> = ({ onPlaySong, sh
       duration: rs.duration || 0,
       tags: [],
       audioUrl: rs.audio_url || '',
+      masteredAudioUrl: rs.mastered_audio_url || '',
     };
     onPlaySong(song);
   }, [onPlaySong]);
@@ -112,6 +113,7 @@ export const RecentSongsList: React.FC<RecentSongsListProps> = ({ onPlaySong, sh
       coverUrl: rs.cover_url || '',
       duration: rs.duration || 0,
       tags: [],
+      masteredAudioUrl: rs.mastered_audio_url || '',
     };
     setDownloadSong(song);
   }, []);

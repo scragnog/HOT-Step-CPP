@@ -39,6 +39,7 @@ interface GenerationJob {
     duration?: number;
     keyScale?: string;
     timeSignature?: string;
+    masteredAudioUrl?: string;
   };
   error?: string;
   params: any;
@@ -541,6 +542,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       duration,
       keyScale,
       timeSignature,
+      masteredAudioUrl: masteredAudioUrl || undefined,
     };
 
     logGeneration(job.id, 'INFO', `[Result] ${audioUrls.length} audio file(s) saved, ${songIds.length} song(s) created`);

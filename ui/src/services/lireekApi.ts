@@ -135,6 +135,7 @@ export interface RecentSong {
   artist_id: number;
   artist_name: string;
   artist_image?: string;
+  mastered_audio_url?: string;
 }
 
 // ── API ─────────────────────────────────────────────────────────────────────

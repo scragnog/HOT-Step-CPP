@@ -5,6 +5,7 @@
 // Phase 2: LLM-powered routes (build-profile, generate, refine) — TODO
 
 import { Router, type Request, type Response } from 'express';
+import { getDb } from '../db/database.js';
 import * as db from '../db/lireekDb.js';
 import * as genius from '../services/lireek/geniusService.js';
 import { exportGeneration } from '../services/lireek/exportService.js';
@@ -13,6 +14,25 @@ import * as llmService from '../services/lireek/llmService.js';
 import * as profilerService from '../services/lireek/profilerService.js';
 
 const router = Router();
+
+// ── Helper: enrich rows with mastered_audio_url from the main songs DB ──────
+function enrichWithMasteredUrls(rows: Record<string, any>[]): Record<string, any>[] {
+  const audioUrls = rows.map(r => r.audio_url).filter(Boolean);
+  if (audioUrls.length === 0) return rows;
+  try {
+    const placeholders = audioUrls.map(() => '?').join(',');
+    const songs = getDb().prepare(
+      `SELECT audio_url, mastered_audio_url FROM songs WHERE audio_url IN (${placeholders})`
+    ).all(...audioUrls) as any[];
+    const map = new Map(songs.map((s: any) => [s.audio_url, s.mastered_audio_url]));
+    return rows.map(r => ({
+      ...r,
+      mastered_audio_url: map.get(r.audio_url) || '',
+    }));
+  } catch {
+    return rows;
+  }
+}
 
 /** Safely extract a route param as string (Express 5 types params as string | string[]) */
 function param(req: Request, name: string): string {
@@ -424,7 +444,8 @@ router.post('/generations/:id/audio', (req: Request, res: Response) => {
 router.get('/generations/:id/audio', (req: Request, res: Response) => {
   try {
     const id = intParam(req, 'id');
-    res.json(db.getAudioGenerations(id));
+    const rows = db.getAudioGenerations(id);
+    res.json({ audio_generations: enrichWithMasteredUrls(rows) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -573,7 +594,8 @@ router.delete('/prompts/:name', (req: Request, res: Response) => {
 router.get('/recent-songs', (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string, 10) || 50;
-    res.json(db.getRecentGenerationsWithAudio(limit));
+    const rows = db.getRecentGenerationsWithAudio(limit);
+    res.json({ songs: enrichWithMasteredUrls(rows) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
