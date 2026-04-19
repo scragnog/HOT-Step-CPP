@@ -3,7 +3,7 @@
 // Thin wrapper around fetch() for all server endpoints.
 // Each method is standalone — import only what you need.
 
-import type { Song, GenerationParams, GenerationJob, AuthState, AceModels } from '../types';
+import type { Song, GenerationParams, GenerationJob, AuthState, AceModels, BrowseEntry, AdapterFile } from '../types';
 
 const BASE = '/api';
 
@@ -177,4 +177,16 @@ export const masteringApi = {
   /** Run mastering on an existing song */
   run: (songId: string, referenceName: string, token: string) =>
     post<{ ok: boolean; masteredUrl: string; songId: string }>('/mastering/run', { songId, referenceName }, token),
+};
+
+// ── Adapters ────────────────────────────────────────────────
+export const adapterApi = {
+  /** Browse directory — returns entries (dirs + filtered files) */
+  browse: (dirPath: string, filter?: string) =>
+    get<{ current: string; entries: BrowseEntry[] }>(
+      `/adapters/browse?path=${encodeURIComponent(dirPath)}${filter ? `&filter=${encodeURIComponent(filter)}` : ''}`
+    ),
+  /** Scan folder for .safetensors files */
+  scan: (folder: string) =>
+    post<{ files: AdapterFile[] }>('/adapters/scan', { folder }),
 };

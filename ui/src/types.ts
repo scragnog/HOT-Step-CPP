@@ -91,6 +91,10 @@ export interface GenerationParams {
   };
   adapterMode: string;  // "merge" or "runtime"
 
+  // Trigger word (applied server-side to caption)
+  triggerWord?: string;
+  triggerPlacement?: 'prepend' | 'append' | 'replace';
+
   // Task type
   taskType: string;
   trackName?: string;
@@ -154,4 +158,19 @@ export interface AceModels {
     mp3_bitrate: number;
   };
   defaults: Record<string, unknown>;
+}
+
+/** File or directory entry from the adapter browser */
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  type: 'dir' | 'file';
+  size?: number;
+}
+
+/** Adapter file from folder scan */
+export interface AdapterFile {
+  name: string;
+  path: string;
+  size: number;
 }

@@ -152,6 +152,17 @@ function translateParams(params: any): AceRequest {
   if (params.adapterGroupScales) req.adapter_group_scales = params.adapterGroupScales;
   if (params.adapterMode) req.adapter_mode = params.adapterMode;
 
+  // Trigger word — inject adapter filename into caption
+  if (params.triggerWord && params.triggerPlacement && params.loraPath) {
+    const tw = params.triggerWord;
+    const caption = req.caption || '';
+    switch (params.triggerPlacement) {
+      case 'prepend': req.caption = caption ? `${tw}, ${caption}` : tw; break;
+      case 'append':  req.caption = caption ? `${caption}, ${tw}` : tw; break;
+      case 'replace': req.caption = tw; break;
+    }
+  }
+
   return req;
 }
 
