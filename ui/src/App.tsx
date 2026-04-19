@@ -466,9 +466,7 @@ const App: React.FC = () => {
       {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}
       <div className="flex-shrink-0 bg-zinc-950 border-t border-white/5">
         <SectionMarkers audioUrl={currentAudioUrl ?? undefined} duration={duration} />
-        {spectrumEnabled && (
-          <SpectrumAnalyzer mediaElement={spectrumMediaEl} isPlaying={isPlaying} />
-        )}
+        <SpectrumAnalyzer mediaElement={spectrumMediaEl} visible={spectrumEnabled} isPlaying={isPlaying} />
         <WaveformPlayer
           ref={wavesurferRef}
           volume={volume}

@@ -2,6 +2,12 @@
 //
 // Uses the "roundBars + bar-level colorMode" preset from audioMotion demos.
 // Connects to the audio source via an HTMLMediaElement from wavesurfer.
+//
+// IMPORTANT: This component must stay mounted once created — never conditionally
+// render it. audioMotion calls createMediaElementSource() which permanently
+// redirects the audio element through the Web Audio API graph. Unmounting
+// would call destroy(), disconnecting that graph and breaking audio playback.
+// Use the `visible` prop to show/hide instead.
 
 import { useEffect, useRef } from 'react';
 import AudioMotionAnalyzer from 'audiomotion-analyzer';
@@ -9,33 +15,41 @@ import AudioMotionAnalyzer from 'audiomotion-analyzer';
 interface SpectrumAnalyzerProps {
   /** The HTMLMediaElement to analyze (from wavesurfer's getMediaElement) */
   mediaElement: HTMLMediaElement | null;
+  /** Whether the analyzer is visible */
+  visible: boolean;
   /** Whether audio is currently playing */
   isPlaying: boolean;
 }
 
 export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
   mediaElement,
+  visible,
   isPlaying,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const analyzerRef = useRef<AudioMotionAnalyzer | null>(null);
   const connectedElementRef = useRef<HTMLMediaElement | null>(null);
 
-  // Initialize analyzer
+  // Initialize analyzer — only once per media element, never destroy
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || !mediaElement) return;
 
-    // Don't create until we have a media element
-    if (!mediaElement) return;
-
-    // Already connected to this element
+    // Already connected to this element — nothing to do
     if (analyzerRef.current && connectedElementRef.current === mediaElement) return;
 
-    // Destroy previous instance if media element changed
+    // Media element changed — we need to reconnect.
+    // Note: we do NOT destroy the old instance here because that would
+    // disconnect the MediaElementSourceNode and break audio.
+    // audioMotion can handle reconnecting via connectInput.
     if (analyzerRef.current) {
-      try { analyzerRef.current.destroy(); } catch { /* ignore */ }
-      analyzerRef.current = null;
-      connectedElementRef.current = null;
+      try {
+        analyzerRef.current.connectInput(mediaElement);
+      } catch {
+        // If reconnect fails, try creating fresh
+        // (this shouldn't normally happen)
+      }
+      connectedElementRef.current = mediaElement;
+      return;
     }
 
     try {
@@ -50,12 +64,11 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
         overlay: true,
         showPeaks: true,
         smoothing: 0.7,
-        reflexRatio: 0.3,    // subtle reflection
+        reflexRatio: 0.3,     // subtle reflection
         reflexAlpha: 0.2,
         reflexBright: 0.8,
         showScaleX: false,
         showScaleY: false,
-        // Performance
         maxFPS: 60,
       });
 
@@ -65,29 +78,30 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
       console.error('[SpectrumAnalyzer] Failed to initialize:', err);
     }
 
-    return () => {
-      if (analyzerRef.current) {
-        try { analyzerRef.current.destroy(); } catch { /* ignore */ }
-        analyzerRef.current = null;
-        connectedElementRef.current = null;
-      }
-    };
+    // Intentionally NO cleanup — we never destroy the audioMotion instance
+    // because that would disconnect the MediaElementSourceNode permanently.
   }, [mediaElement]);
 
-  // Toggle animation based on play state
+  // Toggle animation based on visibility + play state
   useEffect(() => {
     if (!analyzerRef.current) return;
-    if (isPlaying) {
+    if (visible && isPlaying) {
       analyzerRef.current.start();
+    } else if (!visible) {
+      // Stop animation loop when hidden for performance
+      analyzerRef.current.stop();
     }
-    // Don't stop — let bars decay naturally when paused
-  }, [isPlaying]);
+  }, [visible, isPlaying]);
 
   return (
     <div
       ref={containerRef}
       className="w-full flex-shrink-0 bg-zinc-950"
-      style={{ height: 80 }}
+      style={{
+        height: visible ? 80 : 0,
+        overflow: 'hidden',
+        transition: 'height 0.2s ease-in-out',
+      }}
     />
   );
 };
