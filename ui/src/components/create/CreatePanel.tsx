@@ -265,11 +265,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         <div className="flex items-center gap-1.5">
           <button onClick={handleExport} title="Export preset"
             className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-emerald-400 transition-colors">
-            <Download size={14} />
+            <Upload size={14} />
           </button>
           <button onClick={() => fileInputRef.current?.click()} title="Import preset"
             className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-sky-400 transition-colors">
-            <Upload size={14} />
+            <Download size={14} />
           </button>
           <input ref={fileInputRef} type="file" accept=".json" className="hidden"
             onChange={handleImport} />
