@@ -4,20 +4,62 @@ node_modules/
 # Build output
 ui/dist/
 server/dist/
+build/
 
 # Data (local, not committed)
 server/data/
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 
 # Session logs (generated per-run)
 logs/
 
-# Environment
+# Environment (contains local paths)
 .env
 
 # Engine build artifacts
 engine/acestep.cpp/
 engine/build/
+
+# Binaries & compiled objects
+*.exe
+*.dll
+*.lib
+*.obj
+*.o
+*.a
+*.so
+*.dylib
+*.pdb
+*.ilk
+*.exp
+
+# Audio files
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.aac
+*.wma
+*.m4a
+*.bf16
+
+# Model weights
+*.gguf
+*.safetensors
+*.pt
+*.pth
+*.onnx
+
+# Test output logs
+engine/tests/*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
 
 # OS
 Thumbs.db
@@ -27,7 +69,7 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Agents
+# Agents & dev tooling (local only)
 .agents/
 .agent/
 .claude/
