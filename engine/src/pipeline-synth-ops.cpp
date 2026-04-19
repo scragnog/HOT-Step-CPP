@@ -198,20 +198,121 @@ int ops_resolve_params(const AceSynth * ctx, const AceRequest * reqs, int batch_
 
 // ops_build_schedule — dispatches via scheduler registry
 void ops_build_schedule(SynthState & s) {
-    const SchedulerInfo * sched = scheduler_lookup(s.scheduler.c_str());
+    const std::string & ss = s.scheduler;
+    s.schedule.resize(s.num_steps);
+
+    // ── Composite scheduler: "composite:<A>+<B>:<crossover>:<split>" ─────
+    // Generates both sub-schedules independently, then blends them.
+    //   split:     fraction of steps where we transition from A to B (0.0–1.0)
+    //   crossover: width of the blend zone as a fraction of total steps (0.0–1.0)
+    // crossover=0 is a hard switch; crossover=1 blends across all steps.
+    if (ss.rfind("composite:", 0) == 0) {
+        // Parse: "composite:bong_tangent+linear:0.50:0.50"
+        const char * body = ss.c_str() + 10;  // skip "composite:"
+        const char * plus = strchr(body, '+');
+        if (!plus) {
+            fprintf(stderr, "[Build-Schedule] WARNING: malformed composite '%s' (no '+'), falling back to linear\n",
+                    ss.c_str());
+            scheduler_linear(s.schedule.data(), s.num_steps, s.shift);
+            return;
+        }
+
+        std::string name_a(body, plus - body);
+        const char * after_plus = plus + 1;
+
+        // Find first ':' after the B name to separate B from crossover param
+        const char * colon1 = strchr(after_plus, ':');
+        std::string  name_b;
+        float        crossover = 0.0f;
+        float        split     = 0.5f;
+
+        if (colon1) {
+            name_b = std::string(after_plus, colon1 - after_plus);
+            crossover = (float) atof(colon1 + 1);
+            const char * colon2 = strchr(colon1 + 1, ':');
+            if (colon2) {
+                split = (float) atof(colon2 + 1);
+            }
+        } else {
+            name_b = std::string(after_plus);
+        }
+
+        // Clamp params
+        if (crossover < 0.0f) crossover = 0.0f;
+        if (crossover > 1.0f) crossover = 1.0f;
+        if (split < 0.0f) split = 0.0f;
+        if (split > 1.0f) split = 1.0f;
+
+        // Look up sub-schedulers
+        const SchedulerInfo * sched_a = scheduler_lookup(name_a.c_str());
+        const SchedulerInfo * sched_b = scheduler_lookup(name_b.c_str());
+        if (!sched_a) {
+            fprintf(stderr, "[Build-Schedule] WARNING: composite sub-scheduler '%s' unknown, using linear\n",
+                    name_a.c_str());
+            sched_a = scheduler_lookup("linear");
+        }
+        if (!sched_b) {
+            fprintf(stderr, "[Build-Schedule] WARNING: composite sub-scheduler '%s' unknown, using linear\n",
+                    name_b.c_str());
+            sched_b = scheduler_lookup("linear");
+        }
+
+        // Generate both full schedules
+        std::vector<float> sched_a_vals(s.num_steps);
+        std::vector<float> sched_b_vals(s.num_steps);
+        sched_a->fn(sched_a_vals.data(), s.num_steps, s.shift);
+        sched_b->fn(sched_b_vals.data(), s.num_steps, s.shift);
+
+        // Composite blend:
+        //   pure A for steps before (split - crossover/2)
+        //   pure B for steps after  (split + crossover/2)
+        //   linear interpolation in the crossover zone
+        float zone_lo = split - crossover * 0.5f;
+        float zone_hi = split + crossover * 0.5f;
+
+        for (int i = 0; i < s.num_steps; i++) {
+            float frac = (float) i / (float) s.num_steps;
+            float w;  // weight for schedule B (0.0 = pure A, 1.0 = pure B)
+
+            if (crossover < 1e-6f || frac <= zone_lo) {
+                w = (frac < split) ? 0.0f : 1.0f;
+            } else if (frac >= zone_hi) {
+                w = 1.0f;
+            } else {
+                w = (frac - zone_lo) / (zone_hi - zone_lo);
+            }
+
+            s.schedule[i] = (1.0f - w) * sched_a_vals[i] + w * sched_b_vals[i];
+        }
+
+        // Enforce monotonicity: schedule must be non-increasing
+        for (int i = 1; i < s.num_steps; i++) {
+            if (s.schedule[i] > s.schedule[i - 1]) {
+                s.schedule[i] = s.schedule[i - 1];
+            }
+        }
+        scheduler_clamp(s.schedule.data(), s.num_steps);
+
+        fprintf(stderr, "[Build-Schedule] Composite: %s + %s (crossover=%.2f, split=%.2f), %d steps, shift=%.2f\n",
+                sched_a->display_name, sched_b->display_name, crossover, split, s.num_steps, s.shift);
+        fprintf(stderr, "[Build-Schedule]   t[0]=%.4f  t[%d]=%.4f  t[%d]=%.4f\n",
+                s.schedule[0], s.num_steps / 2, s.schedule[s.num_steps / 2],
+                s.num_steps - 1, s.schedule[s.num_steps - 1]);
+        return;
+    }
+
+    // ── Standard lookup with fallback ────────────────────────────────────
+    const SchedulerInfo * sched = scheduler_lookup(ss.c_str());
     if (!sched) {
         fprintf(stderr, "[Build-Schedule] WARNING: unknown scheduler '%s', falling back to linear\n",
-                s.scheduler.c_str());
+                ss.c_str());
         sched = scheduler_lookup("linear");
     }
-    s.schedule.resize(s.num_steps);
 
     // ── Handle parameterized scheduler strings ───────────────────────────
     // "power:<exp>"  → power-law with custom exponent
     // "beta:<a>:<b>" → beta distribution with custom alpha/beta
     // Otherwise: use the base scheduler function as-is.
-    const std::string & ss = s.scheduler;
-
     if (ss.rfind("power:", 0) == 0 && ss.size() > 6) {
         // Custom power exponent
         float p = (float) atof(ss.c_str() + 6);
@@ -235,13 +336,6 @@ void ops_build_schedule(SynthState & s) {
         scheduler_beta_custom(s.schedule.data(), s.num_steps, s.shift, alpha, beta);
         fprintf(stderr, "[Build-Schedule] Beta (α=%.2f, β=%.2f), %d steps, shift=%.2f\n",
                 alpha, beta, s.num_steps, s.shift);
-    } else if (ss.rfind("composite:", 0) == 0) {
-        // Composite: "composite:<A>+<B>:<crossover>:<split>"
-        // For now, fall through to the base scheduler (linear) with a note.
-        // Full composite support would require compositing two scheduler outputs.
-        sched->fn(s.schedule.data(), s.num_steps, s.shift);
-        fprintf(stderr, "[Build-Schedule] %s (%s), %d steps, shift=%.2f [composite params parsed]\n",
-                sched->display_name, sched->name, s.num_steps, s.shift);
     } else {
         sched->fn(s.schedule.data(), s.num_steps, s.shift);
         fprintf(stderr, "[Build-Schedule] %s (%s), %d steps, shift=%.2f\n",
