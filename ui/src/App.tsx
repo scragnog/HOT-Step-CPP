@@ -171,6 +171,10 @@ const App: React.FC = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
+    // Always show song details when interacting with a song
+    setSelectedSong(song);
+    setShowRightSidebar(true);
+
     if (currentSongIdRef.current === song.id) {
       // Toggle play/pause
       if (audio.paused) {
