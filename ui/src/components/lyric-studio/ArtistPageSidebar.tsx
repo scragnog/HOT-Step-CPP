@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, ListOrdered, Code2, Download } from 'lucide-react';
+import { ChevronDown, ChevronRight, ListOrdered, Code2, Download, Zap } from 'lucide-react';
 import type { Artist } from '../../services/lireekApi';
 import { TripleProviderSelector, type ModelSelections, loadSelections, saveSelections } from './ProviderSelector';
+import { EditableSlider } from '../shared/EditableSlider';
+import { ScaleOverridePresets } from '../shared/ScaleOverridePresets';
 
 // ── Persisted state hook ────────────────────────────────────────────────────
 function useLocalPersistedState<T>(key: string, defaultValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
@@ -18,6 +20,17 @@ function useLocalPersistedState<T>(key: string, defaultValue: T): [T, React.Disp
 
   return [state, setState];
 }
+
+// ── Toggle ──────────────────────────────────────────────────────────────────
+const Toggle: React.FC<{ on: boolean; onClick: () => void }> = ({ on, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`w-9 h-[18px] rounded-full flex items-center transition-colors duration-200 px-0.5 border border-white/10 ${on ? 'bg-pink-600' : 'bg-black/40'} cursor-pointer`}
+  >
+    <div className={`w-3.5 h-3.5 rounded-full bg-white transform transition-transform duration-200 shadow-sm ${on ? 'translate-x-[18px]' : 'translate-x-0'}`} />
+  </button>
+);
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +52,12 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
 
   // ── Download filename prepend ──
   const [filenamePrepend, setFilenamePrepend] = useLocalPersistedState<string>('lireek-downloadFilenamePrepend', '');
+
+  // ── Adapter Scale Override — same localStorage keys read by audioGenQueueStore ──
+  const [overrideExpanded, setOverrideExpanded] = useState(false);
+  const [globalScaleOverrideEnabled, setGlobalScaleOverrideEnabled] = useLocalPersistedState('hs-globalScaleOverride', false);
+  const [globalOverallScale, setGlobalOverallScale] = useLocalPersistedState('hs-globalOverallScale', 1.0);
+  const [globalGroupScales, setGlobalGroupScales] = useLocalPersistedState<{ self_attn: number; cross_attn: number; mlp: number; cond_embed: number }>('hs-globalGroupScales', { self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0 });
 
   const gradient = (name: string) => {
     const hash = name.split('').reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0);
@@ -94,6 +113,97 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
 
       {/* Scrollable settings area */}
       <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-4 space-y-3">
+        {/* ── Adapter Scale Override ───────────────────────────────── */}
+        <div>
+          <button
+            onClick={() => setOverrideExpanded(!overrideExpanded)}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 text-[11px] text-zinc-500 uppercase tracking-wider font-semibold transition-colors"
+          >
+            <span className="flex items-center gap-1.5">
+              <Zap className="w-3 h-3" />
+              Scale Overrides
+              {globalScaleOverrideEnabled && (
+                <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 normal-case tracking-normal animate-pulse">
+                  ON
+                </span>
+              )}
+            </span>
+            {overrideExpanded
+              ? <ChevronDown className="w-3.5 h-3.5" />
+              : <ChevronRight className="w-3.5 h-3.5" />
+            }
+          </button>
+          {overrideExpanded && (
+            <div className="mt-2 space-y-3 animate-in slide-in-from-top-1 duration-150">
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-medium text-zinc-300">Enable Override</span>
+                  <p className="text-[10px] text-zinc-600 leading-tight">
+                    Overrides all per-album adapter scales
+                  </p>
+                </div>
+                <Toggle on={globalScaleOverrideEnabled} onClick={() => setGlobalScaleOverrideEnabled(!globalScaleOverrideEnabled)} />
+              </div>
+
+              {/* Sliders — always visible (greyed when disabled) */}
+              <div className={!globalScaleOverrideEnabled ? 'opacity-40 pointer-events-none' : ''}>
+                {/* Scale Override Presets */}
+                <ScaleOverridePresets
+                  currentOverallScale={globalOverallScale}
+                  currentGroupScales={globalGroupScales}
+                  onLoad={(overall, groups) => {
+                    setGlobalOverallScale(overall);
+                    setGlobalGroupScales(groups);
+                  }}
+                  compact
+                />
+                <EditableSlider
+                  label="Overall Scale"
+                  value={globalOverallScale}
+                  min={0} max={4} step={0.05}
+                  onChange={setGlobalOverallScale}
+                  formatDisplay={(v) => v.toFixed(2)}
+                />
+                <div className="space-y-1 mt-2 pl-2 border-l-2 border-amber-500/20">
+                  <EditableSlider
+                    label="Self-Attn"
+                    value={globalGroupScales.self_attn}
+                    min={0} max={4} step={0.05}
+                    onChange={(v) => setGlobalGroupScales(prev => ({ ...prev, self_attn: v }))}
+                    formatDisplay={(v) => v.toFixed(2)}
+                    helpText="Controls how audio frames relate to each other over time"
+                  />
+                  <EditableSlider
+                    label="Cross-Attn"
+                    value={globalGroupScales.cross_attn}
+                    min={0} max={4} step={0.05}
+                    onChange={(v) => setGlobalGroupScales(prev => ({ ...prev, cross_attn: v }))}
+                    formatDisplay={(v) => v.toFixed(2)}
+                    helpText="How strongly the text prompt shapes the output vs. the adapter"
+                  />
+                  <EditableSlider
+                    label="MLP"
+                    value={globalGroupScales.mlp}
+                    min={0} max={4} step={0.05}
+                    onChange={(v) => setGlobalGroupScales(prev => ({ ...prev, mlp: v }))}
+                    formatDisplay={(v) => v.toFixed(2)}
+                    helpText="Controls the adapter's stored timbre, tonal texture, and sonic character"
+                  />
+                  <EditableSlider
+                    label="Cond"
+                    value={globalGroupScales.cond_embed}
+                    min={0} max={4} step={0.05}
+                    onChange={(v) => setGlobalGroupScales(prev => ({ ...prev, cond_embed: v }))}
+                    formatDisplay={(v) => v.toFixed(2)}
+                    helpText="Controls how the adapter reshapes text/style prompt interpretation"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* ── Download Filename Prepend ─────────────────────────── */}
         <div>
           <div

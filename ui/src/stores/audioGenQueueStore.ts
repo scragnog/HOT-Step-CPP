@@ -102,6 +102,17 @@ function mergeCreatePanelSettings(params: Record<string, any>): void {
   }
 }
 
+function getGlobalScaleOverride() {
+  try {
+    const enabled = JSON.parse(localStorage.getItem('hs-globalScaleOverride') || 'false');
+    const overallScale = JSON.parse(localStorage.getItem('hs-globalOverallScale') || '1.0');
+    const groupScales = JSON.parse(localStorage.getItem('hs-globalGroupScales') || 'null') || { self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0 };
+    return { enabled: !!enabled, overallScale, groupScales };
+  } catch {
+    return { enabled: false, overallScale: 1.0, groupScales: { self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0 } };
+  }
+}
+
 function applyTriggerWord(params: Record<string, any>, adapterPath: string): void {
   const useFilename = localStorage.getItem('ace-globalTriggerUseFilename') === 'true';
   const placement = (localStorage.getItem('ace-globalTriggerPlacement') as 'prepend' | 'append' | 'replace') || 'prepend';
@@ -298,10 +309,15 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     item.stage = `Preparing adapter for ${item.artistName}…`;
     _emit();
 
+    // Apply scale override if enabled (overrides per-preset scales)
+    const scaleOverride = getGlobalScaleOverride();
+    const effectiveScale = scaleOverride.enabled ? scaleOverride.overallScale : (preset.adapter_scale ?? 1.0);
+    const effectiveGroupScales = scaleOverride.enabled ? scaleOverride.groupScales : preset.adapter_group_scales;
+
     params.loraPath = preset.adapter_path;
-    params.loraScale = preset.adapter_scale ?? 1.0;
-    if (preset.adapter_group_scales) {
-      params.adapterGroupScales = preset.adapter_group_scales;
+    params.loraScale = effectiveScale;
+    if (effectiveGroupScales) {
+      params.adapterGroupScales = effectiveGroupScales;
     }
 
     // Trigger word
