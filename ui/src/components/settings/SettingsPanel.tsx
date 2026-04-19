@@ -3,7 +3,7 @@
 // All settings use localStorage via usePersistedState and survive page refreshes.
 
 import React from 'react';
-import { Zap, Download, Settings } from 'lucide-react';
+import { Zap, Download, Tag } from 'lucide-react';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import './SettingsPanel.css';
 
@@ -14,6 +14,9 @@ export interface AppSettings {
   downloadFormat: 'wav' | 'flac' | 'opus' | 'mp3';
   downloadMp3Bitrate: number;
   downloadOpusBitrate: number;
+  // Adapter trigger word
+  triggerUseFilename: boolean;
+  triggerPlacement: 'prepend' | 'append' | 'replace';
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -22,6 +25,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   downloadFormat: 'flac',
   downloadMp3Bitrate: 192,
   downloadOpusBitrate: 192,
+  triggerUseFilename: false,
+  triggerPlacement: 'prepend',
 };
 
 interface SettingsPanelProps {
@@ -195,6 +200,46 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           ]}
           onChange={(v) => update('downloadOpusBitrate', parseInt(v))}
         />
+      </div>
+
+      {/* Adapters Section */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <Tag size={16} className="settings-section-icon" />
+          <span className="settings-section-title">Adapters</span>
+        </div>
+
+        <SettingRow
+          id="setting-trigger-filename"
+          label="Use filename as trigger word"
+          description="Auto-inject the adapter filename into the style description at generation time. The trigger word is derived from the adapter filename (without .safetensors extension)."
+          checked={settings.triggerUseFilename}
+          onChange={(v) => update('triggerUseFilename', v)}
+        />
+
+        {settings.triggerUseFilename && (
+          <div className="setting-row">
+            <div className="setting-info">
+              <div className="setting-label">Trigger word placement</div>
+              <div className="setting-description">
+                {settings.triggerPlacement === 'prepend' && 'Trigger word is added before your style description.'}
+                {settings.triggerPlacement === 'append' && 'Trigger word is added after your style description.'}
+                {settings.triggerPlacement === 'replace' && 'Trigger word replaces your entire style description.'}
+              </div>
+            </div>
+            <div className="placement-button-group">
+              {(['prepend', 'append', 'replace'] as const).map((p) => (
+                <button
+                  key={p}
+                  className={`placement-button ${settings.triggerPlacement === p ? 'placement-button--active' : ''}`}
+                  onClick={() => update('triggerPlacement', p)}
+                >
+                  {p.charAt(0).toUpperCase() + p.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -204,3 +204,43 @@
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.4);
 }
+
+/* Placement Button Group (segmented control) */
+.placement-button-group {
+  display: flex;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.placement-button {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.03);
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: background 200ms ease, color 200ms ease;
+}
+
+.placement-button:last-child {
+  border-right: none;
+}
+
+.placement-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.placement-button--active {
+  background: #ec4899;
+  color: white;
+}
+
+.placement-button--active:hover {
+  background: #db2777;
+  color: white;
+}
