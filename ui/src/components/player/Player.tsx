@@ -49,7 +49,7 @@ export const Player: React.FC<PlayerProps> = ({
   onTogglePlay,
   currentTime,
   duration,
-  onSeek,
+  onSeek: _onSeek,
   onNext,
   onPrevious,
   volume,
@@ -66,18 +66,18 @@ export const Player: React.FC<PlayerProps> = ({
   playMastered,
   onToggleMastered,
 }) => {
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
 
   if (!currentSong) {
     return (
-      <div className="h-20 flex-shrink-0 bg-zinc-950 border-t border-white/5 flex items-center justify-center">
+      <div className="h-14 flex-shrink-0 bg-zinc-950 flex items-center justify-center">
         <span className="text-sm text-zinc-600">Select a song to play</span>
       </div>
     );
   }
 
   return (
-    <div className="h-20 flex-shrink-0 bg-zinc-950 border-t border-white/5 flex items-center px-4 gap-4">
+    <div className="h-14 flex-shrink-0 bg-zinc-950 flex items-center px-4 gap-4">
       {/* Left: Song Info */}
       <div className="flex items-center gap-3 w-[240px] flex-shrink-0">
         <div className="w-12 h-12 rounded-lg bg-zinc-800 flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -95,61 +95,39 @@ export const Player: React.FC<PlayerProps> = ({
         </div>
       </div>
 
-      {/* Center: Transport Controls + Seekbar */}
-      <div className="flex-1 flex flex-col items-center gap-1 max-w-[700px] mx-auto">
-        {/* Transport buttons */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onToggleShuffle}
-            className={`p-1.5 rounded-lg transition-colors ${isShuffle ? 'text-pink-400' : 'text-zinc-500 hover:text-white'}`}
-            title="Shuffle"
-          >
-            <Shuffle size={16} />
-          </button>
-          <button onClick={onPrevious} className="p-1.5 rounded-lg text-zinc-400 hover:text-white transition-colors">
-            <SkipBack size={18} />
-          </button>
-          <button
-            onClick={onTogglePlay}
-            className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 transition-transform"
-          >
-            {isPlaying
-              ? <Pause size={18} className="text-black" fill="black" />
-              : <Play size={18} className="text-black ml-0.5" fill="black" />
-            }
-          </button>
-          <button onClick={onNext} className="p-1.5 rounded-lg text-zinc-400 hover:text-white transition-colors">
-            <SkipForward size={18} />
-          </button>
-          <button
-            onClick={onToggleRepeat}
-            className={`p-1.5 rounded-lg transition-colors ${repeatMode !== 'none' ? 'text-pink-400' : 'text-zinc-500 hover:text-white'}`}
-            title={repeatMode === 'one' ? 'Repeat One' : repeatMode === 'all' ? 'Repeat All' : 'Repeat Off'}
-          >
-            {repeatMode === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
-          </button>
-        </div>
-
-        {/* Seekbar */}
-        <div className="flex items-center gap-2 w-full">
-          <span className="text-[10px] text-zinc-500 font-mono w-10 text-right">{formatTime(currentTime)}</span>
-          <div
-            className="flex-1 h-1 bg-zinc-700 rounded-full cursor-pointer group relative"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-              onSeek(pct * duration);
-            }}
-          >
-            <div
-              className="h-full bg-white group-hover:bg-pink-400 rounded-full transition-colors relative"
-              style={{ width: `${progress}%` }}
-            >
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md" />
-            </div>
-          </div>
-          <span className="text-[10px] text-zinc-500 font-mono w-10">{formatTime(duration)}</span>
-        </div>
+      {/* Center: Transport Controls */}
+      <div className="flex-1 flex items-center justify-center gap-3 max-w-[500px] mx-auto">
+        <span className="text-[10px] text-zinc-500 font-mono w-10 text-right flex-shrink-0">{formatTime(currentTime)}</span>
+        <button
+          onClick={onToggleShuffle}
+          className={`p-1.5 rounded-lg transition-colors ${isShuffle ? 'text-pink-400' : 'text-zinc-500 hover:text-white'}`}
+          title="Shuffle"
+        >
+          <Shuffle size={16} />
+        </button>
+        <button onClick={onPrevious} className="p-1.5 rounded-lg text-zinc-400 hover:text-white transition-colors">
+          <SkipBack size={18} />
+        </button>
+        <button
+          onClick={onTogglePlay}
+          className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 transition-transform"
+        >
+          {isPlaying
+            ? <Pause size={18} className="text-black" fill="black" />
+            : <Play size={18} className="text-black ml-0.5" fill="black" />
+          }
+        </button>
+        <button onClick={onNext} className="p-1.5 rounded-lg text-zinc-400 hover:text-white transition-colors">
+          <SkipForward size={18} />
+        </button>
+        <button
+          onClick={onToggleRepeat}
+          className={`p-1.5 rounded-lg transition-colors ${repeatMode !== 'none' ? 'text-pink-400' : 'text-zinc-500 hover:text-white'}`}
+          title={repeatMode === 'one' ? 'Repeat One' : repeatMode === 'all' ? 'Repeat All' : 'Repeat Off'}
+        >
+          {repeatMode === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
+        </button>
+        <span className="text-[10px] text-zinc-500 font-mono w-10 flex-shrink-0">{formatTime(duration)}</span>
       </div>
 
       {/* Right: Volume + Actions */}

@@ -13,6 +13,8 @@ import { CreatePanel } from './components/create/CreatePanel';
 import { SongList } from './components/library/SongList';
 import { JobQueue } from './components/queue/JobQueue';
 import { Player } from './components/player/Player';
+import { WaveformPlayer, type WaveformPlayerHandle } from './components/player/WaveformPlayer';
+import { SectionMarkers } from './components/player/SectionMarkers';
 import { RightSidebar } from './components/details/RightSidebar';
 import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
@@ -46,9 +48,10 @@ const App: React.FC = () => {
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [isShuffle, setIsShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState<'none' | 'all' | 'one'>('none');
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const wavesurferRef = useRef<WaveformPlayerHandle>(null);
   const currentSongIdRef = useRef<string | null>(null);
   const [playMastered, setPlayMastered] = useState(false);
+  const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: ToastType; isVisible: boolean }>({
@@ -85,13 +88,13 @@ const App: React.FC = () => {
       .catch(err => console.error('[App] Failed to load songs:', err));
   }, [token]);
 
-  // Refresh songs
-  const refreshSongsList = useCallback(() => {
-    if (!token) return;
-    songApi.list(token)
-      .then(({ songs }) => setSongs(songs))
-      .catch(err => console.error('[App] Refresh failed:', err));
-  }, [token]);
+  // Refresh songs (kept for future use — e.g. after external DB changes)
+  // const refreshSongsList = useCallback(() => {
+  //   if (!token) return;
+  //   songApi.list(token)
+  //     .then(({ songs }) => setSongs(songs))
+  //     .catch(err => console.error('[App] Refresh failed:', err));
+  // }, [token]);
 
   // Handle generation
   const handleGenerate = useCallback((params: GenerationParams) => {
@@ -159,31 +162,25 @@ const App: React.FC = () => {
   const handleRename = useCallback(async (song: Song, newTitle: string) => {
     try {
       const { song: updated } = await songApi.update(song.id, { title: newTitle }, token!);
-      const normalized = { ...song, title: newTitle, ...updated };
+      const normalized = { ...song, ...updated, title: newTitle };
       handleSongUpdate(normalized);
     } catch (err: any) {
       showToast(`Rename failed: ${err.message}`, 'error');
     }
   }, [token, handleSongUpdate]);
 
-  // ── Player Logic ──────────────────────────────────────────
+  // ── Player Logic (wavesurfer-based) ─────────────────────────
   const playSong = useCallback((song: Song) => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    const ws = wavesurferRef.current;
+    if (!ws) return;
 
     // Always show song details when interacting with a song
     setSelectedSong(song);
     setShowRightSidebar(true);
 
     if (currentSongIdRef.current === song.id) {
-      // Toggle play/pause
-      if (audio.paused) {
-        audio.play().catch(() => {});
-        setIsPlaying(true);
-      } else {
-        audio.pause();
-        setIsPlaying(false);
-      }
+      // Toggle play/pause for same song
+      ws.playPause();
       return;
     }
 
@@ -193,46 +190,50 @@ const App: React.FC = () => {
     // Auto-select mastered if available
     const useMastered = !!(song.masteredAudioUrl);
     setPlayMastered(useMastered);
-    audio.src = useMastered ? song.masteredAudioUrl! : song.audioUrl;
-    audio.load();
-    audio.play().catch(() => {});
-    setIsPlaying(true);
+    const url = useMastered ? song.masteredAudioUrl! : song.audioUrl;
+    setCurrentAudioUrl(url);
+    ws.loadUrl(url);
+  }, []);
+
+  // Auto-play when wavesurfer finishes loading the new URL
+  const handleWaveformReady = useCallback((_dur: number) => {
+    wavesurferRef.current?.play();
   }, []);
 
   const toggleMastered = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio || !currentSong) return;
+    const ws = wavesurferRef.current;
+    if (!ws || !currentSong) return;
 
     const wantMastered = !playMastered;
     setPlayMastered(wantMastered);
 
-    const newSrc = wantMastered && currentSong.masteredAudioUrl
+    const newUrl = wantMastered && currentSong.masteredAudioUrl
       ? currentSong.masteredAudioUrl
       : currentSong.audioUrl;
 
-    const wasPlaying = !audio.paused;
-    const pos = audio.currentTime;
-    audio.src = newSrc;
-    audio.load();
-    audio.currentTime = pos;
-    if (wasPlaying) audio.play().catch(() => {});
+    // Save position, load new URL, restore position after ready
+    const pos = ws.getCurrentTime();
+    const dur = ws.getDuration();
+    setCurrentAudioUrl(newUrl);
+    ws.loadUrl(newUrl);
+    // Seek back after load — wavesurfer 'ready' event fires before our onReady callback
+    const seekBack = () => {
+      if (dur > 0) ws.seekTo(pos / dur);
+      ws.play();
+    };
+    // Use a one-shot listener approach via timeout — wavesurfer re-decodes on load
+    setTimeout(seekBack, 300);
   }, [currentSong, playMastered]);
 
   const togglePlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio || !currentSong) return;
-    if (audio.paused) {
-      audio.play().catch(() => {});
-      setIsPlaying(true);
-    } else {
-      audio.pause();
-      setIsPlaying(false);
-    }
+    if (!currentSong) return;
+    wavesurferRef.current?.playPause();
   }, [currentSong]);
 
   const handleSeek = useCallback((time: number) => {
-    const audio = audioRef.current;
-    if (audio) audio.currentTime = time;
+    const ws = wavesurferRef.current;
+    const dur = ws?.getDuration() ?? 0;
+    if (ws && dur > 0) ws.seekTo(time / dur);
   }, []);
 
   const playNext = useCallback(() => {
@@ -251,47 +252,22 @@ const App: React.FC = () => {
     if (prev) playSong(prev);
   }, [currentSong, songs, playSong]);
 
-  // Audio element effects
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const onTime = () => setCurrentTime(audio.currentTime);
-    const onDuration = () => setDuration(audio.duration || 0);
-    const onEnded = () => {
-      if (repeatMode === 'one') {
-        audio.currentTime = 0;
-        audio.play().catch(() => {});
-      } else if (repeatMode === 'all' || songs.length > 1) {
-        playNext();
-      } else {
-        setIsPlaying(false);
-      }
-    };
-
-    audio.addEventListener('timeupdate', onTime);
-    audio.addEventListener('loadedmetadata', onDuration);
-    audio.addEventListener('ended', onEnded);
-
-    return () => {
-      audio.removeEventListener('timeupdate', onTime);
-      audio.removeEventListener('loadedmetadata', onDuration);
-      audio.removeEventListener('ended', onEnded);
-    };
+  // Handle wavesurfer finish (replaces 'ended' event)
+  const handleWaveformFinish = useCallback(() => {
+    if (repeatMode === 'one') {
+      wavesurferRef.current?.seekTo(0);
+      wavesurferRef.current?.play();
+    } else if (repeatMode === 'all' || songs.length > 1) {
+      playNext();
+    } else {
+      setIsPlaying(false);
+    }
   }, [repeatMode, playNext, songs.length]);
 
-  // Sync volume
+  // Sync volume to localStorage
   useEffect(() => {
-    const audio = audioRef.current;
-    if (audio) audio.volume = volume;
     localStorage.setItem('volume', String(volume));
   }, [volume]);
-
-  // Sync playback rate
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (audio) audio.playbackRate = playbackRate;
-  }, [playbackRate]);
 
   // ── Render ────────────────────────────────────────────────
 
@@ -482,33 +458,44 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      <Player
-        currentSong={currentSong}
-        isPlaying={isPlaying}
-        onTogglePlay={togglePlay}
-        currentTime={currentTime}
-        duration={duration}
-        onSeek={handleSeek}
-        onNext={playNext}
-        onPrevious={playPrevious}
-        volume={volume}
-        onVolumeChange={setVolume}
-        playbackRate={playbackRate}
-        onPlaybackRateChange={setPlaybackRate}
-        audioRef={audioRef}
-        isShuffle={isShuffle}
-        onToggleShuffle={() => setIsShuffle(!isShuffle)}
-        repeatMode={repeatMode}
-        onToggleRepeat={() => setRepeatMode(prev => prev === 'none' ? 'all' : prev === 'all' ? 'one' : 'none')}
-        onReusePrompt={() => currentSong && handleReuse(currentSong)}
-        onDelete={() => currentSong && handleDelete(currentSong)}
-        onDownload={() => currentSong && setDownloadSong(currentSong)}
-        playMastered={playMastered}
-        onToggleMastered={toggleMastered}
-      />
-
-      {/* Hidden audio element */}
-      <audio ref={audioRef} crossOrigin="anonymous" />
+      {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}
+      <div className="flex-shrink-0 bg-zinc-950 border-t border-white/5">
+        <SectionMarkers audioUrl={currentAudioUrl ?? undefined} duration={duration} />
+        <WaveformPlayer
+          ref={wavesurferRef}
+          volume={volume}
+          playbackRate={playbackRate}
+          onTimeUpdate={setCurrentTime}
+          onDurationChange={setDuration}
+          onPlayChange={setIsPlaying}
+          onFinish={handleWaveformFinish}
+          onReady={handleWaveformReady}
+        />
+        <Player
+          currentSong={currentSong}
+          isPlaying={isPlaying}
+          onTogglePlay={togglePlay}
+          currentTime={currentTime}
+          duration={duration}
+          onSeek={handleSeek}
+          onNext={playNext}
+          onPrevious={playPrevious}
+          volume={volume}
+          onVolumeChange={setVolume}
+          playbackRate={playbackRate}
+          onPlaybackRateChange={setPlaybackRate}
+          audioRef={wavesurferRef as any}
+          isShuffle={isShuffle}
+          onToggleShuffle={() => setIsShuffle(!isShuffle)}
+          repeatMode={repeatMode}
+          onToggleRepeat={() => setRepeatMode(prev => prev === 'none' ? 'all' : prev === 'all' ? 'one' : 'none')}
+          onReusePrompt={() => currentSong && handleReuse(currentSong)}
+          onDelete={() => currentSong && handleDelete(currentSong)}
+          onDownload={() => currentSong && setDownloadSong(currentSong)}
+          playMastered={playMastered}
+          onToggleMastered={toggleMastered}
+        />
+      </div>
 
       {/* Modals */}
       <Toast

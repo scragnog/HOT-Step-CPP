@@ -95,7 +95,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
         {/* Metadata Badges */}
         <div className="grid grid-cols-2 gap-2">
           {song.duration && (
-            <MetaBadge icon={<Clock size={14} />} label="Duration" value={song.duration} />
+            <MetaBadge icon={<Clock size={14} />} label="Duration" value={String(song.duration)} />
           )}
           {gp?.bpm && (
             <MetaBadge icon={<Gauge size={14} />} label="BPM" value={String(gp.bpm)} />

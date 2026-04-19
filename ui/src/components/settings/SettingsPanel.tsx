@@ -4,7 +4,6 @@
 
 import React from 'react';
 import { Zap, Download, Tag } from 'lucide-react';
-import { usePersistedState } from '../../hooks/usePersistedState';
 import './SettingsPanel.css';
 
 export interface AppSettings {
