@@ -15,6 +15,7 @@ import { JobQueue } from './components/queue/JobQueue';
 import { Player } from './components/player/Player';
 import { WaveformPlayer, type WaveformPlayerHandle } from './components/player/WaveformPlayer';
 import { SectionMarkers } from './components/player/SectionMarkers';
+import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
 import { RightSidebar } from './components/details/RightSidebar';
 import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
@@ -52,6 +53,10 @@ const App: React.FC = () => {
   const currentSongIdRef = useRef<string | null>(null);
   const [playMastered, setPlayMastered] = useState(false);
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
+
+  // Spectrum analyzer state (persisted)
+  const [spectrumEnabled, setSpectrumEnabled] = usePersistedState('ace-spectrum-enabled', false);
+  const [spectrumMediaEl, setSpectrumMediaEl] = useState<HTMLMediaElement | null>(null);
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: ToastType; isVisible: boolean }>({
@@ -461,6 +466,9 @@ const App: React.FC = () => {
       {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}
       <div className="flex-shrink-0 bg-zinc-950 border-t border-white/5">
         <SectionMarkers audioUrl={currentAudioUrl ?? undefined} duration={duration} />
+        {spectrumEnabled && (
+          <SpectrumAnalyzer mediaElement={spectrumMediaEl} isPlaying={isPlaying} />
+        )}
         <WaveformPlayer
           ref={wavesurferRef}
           volume={volume}
@@ -469,7 +477,11 @@ const App: React.FC = () => {
           onDurationChange={setDuration}
           onPlayChange={setIsPlaying}
           onFinish={handleWaveformFinish}
-          onReady={handleWaveformReady}
+          onReady={(dur) => {
+            handleWaveformReady(dur);
+            // Capture the media element for the spectrum analyzer
+            setSpectrumMediaEl(wavesurferRef.current?.getMediaElement() ?? null);
+          }}
         />
         <Player
           currentSong={currentSong}
@@ -494,6 +506,8 @@ const App: React.FC = () => {
           onDownload={() => currentSong && setDownloadSong(currentSong)}
           playMastered={playMastered}
           onToggleMastered={toggleMastered}
+          spectrumEnabled={spectrumEnabled}
+          onToggleSpectrum={() => setSpectrumEnabled(!spectrumEnabled)}
         />
       </div>
 

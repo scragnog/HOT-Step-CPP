@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "audiomotion-analyzer": "^4.5.4",
     "lucide-react": "^1.8.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

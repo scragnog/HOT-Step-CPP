@@ -7,7 +7,7 @@ import {
   Shuffle, Repeat, Repeat1,
   Volume2, VolumeX,
   RotateCcw, Trash2, Download,
-  Music, Sparkles,
+  Music, Sparkles, Activity,
 } from 'lucide-react';
 import type { Song } from '../../types';
 
@@ -34,6 +34,8 @@ interface PlayerProps {
   onDownload?: () => void;
   playMastered: boolean;
   onToggleMastered: () => void;
+  spectrumEnabled: boolean;
+  onToggleSpectrum: () => void;
 }
 
 const formatTime = (s: number) => {
@@ -65,6 +67,8 @@ export const Player: React.FC<PlayerProps> = ({
   onDownload,
   playMastered,
   onToggleMastered,
+  spectrumEnabled,
+  onToggleSpectrum,
 }) => {
 
 
@@ -126,6 +130,13 @@ export const Player: React.FC<PlayerProps> = ({
           title={repeatMode === 'one' ? 'Repeat One' : repeatMode === 'all' ? 'Repeat All' : 'Repeat Off'}
         >
           {repeatMode === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
+        </button>
+        <button
+          onClick={onToggleSpectrum}
+          className={`p-1.5 rounded-lg transition-colors ${spectrumEnabled ? 'text-purple-400' : 'text-zinc-500 hover:text-white'}`}
+          title={spectrumEnabled ? 'Spectrum Analyzer On' : 'Spectrum Analyzer Off'}
+        >
+          <Activity size={16} />
         </button>
         <span className="text-[10px] text-zinc-500 font-mono w-10 flex-shrink-0">{formatTime(duration)}</span>
       </div>
