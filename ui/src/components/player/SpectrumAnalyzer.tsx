@@ -60,6 +60,7 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
         colorMode: 'bar-level',
         gradient: 'prism',
         barSpace: 0.25,       // tight spacing between bars
+        mirror: 1,            // mirror bars from center (up + down)
         bgAlpha: 0,           // transparent — dark bg shows through
         overlay: true,
         showPeaks: false,
