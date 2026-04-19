@@ -55,18 +55,15 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
     try {
       const analyzer = new AudioMotionAnalyzer(containerRef.current, {
         source: mediaElement,
-        mode: 6,              // 1/6th octave bands
+        mode: 2,              // 1/24th octave bands — dense thin bars
         roundBars: true,
         colorMode: 'bar-level',
         gradient: 'prism',
-        barSpace: 0.4,
+        barSpace: 0.25,       // tight spacing between bars
         bgAlpha: 0,           // transparent — dark bg shows through
         overlay: true,
-        showPeaks: true,
+        showPeaks: false,
         smoothing: 0.7,
-        reflexRatio: 0.3,     // subtle reflection
-        reflexAlpha: 0.2,
-        reflexBright: 0.8,
         showScaleX: false,
         showScaleY: false,
         maxFPS: 60,
@@ -98,7 +95,7 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
       ref={containerRef}
       className="w-full flex-shrink-0 bg-zinc-950"
       style={{
-        height: visible ? 80 : 0,
+        height: visible ? 100 : 0,
         overflow: 'hidden',
         transition: 'height 0.2s ease-in-out',
       }}
