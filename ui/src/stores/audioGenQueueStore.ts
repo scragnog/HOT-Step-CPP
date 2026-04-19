@@ -37,6 +37,8 @@ export interface AudioQueueItem {
   elapsed?: number;
   error?: string;
   audioUrl?: string;
+  songId?: string;
+  masteredAudioUrl?: string;
 }
 
 export interface AudioGenQueueState {
@@ -384,8 +386,12 @@ async function _pollUntilDone(item: AudioQueueItem, token: string): Promise<void
 
       if (status.status === 'succeeded') {
         const audioUrl = status.result?.audioUrls?.[0];
+        const songId = status.result?.songIds?.[0];
+        const masteredUrl = status.result?.masteredAudioUrl;
         if (audioUrl) {
           item.audioUrl = audioUrl;
+          if (songId) item.songId = songId;
+          if (masteredUrl) item.masteredAudioUrl = masteredUrl;
           _emit();
         }
         // Resolve audio generation in Lireek DB

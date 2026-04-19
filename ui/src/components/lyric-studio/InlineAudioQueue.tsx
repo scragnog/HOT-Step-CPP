@@ -38,12 +38,13 @@ export const InlineAudioQueue: React.FC<InlineAudioQueueProps> = ({ onPlaySong, 
   const handlePlay = useCallback((item: AudioQueueItem) => {
     if (!item.audioUrl || !onPlaySong) return;
     const song: Song = {
-      id: item.id,
+      id: item.songId || item.id,
       title: item.generation.title || 'Untitled',
       lyrics: '',
       style: item.generation.caption || '',
       caption: item.generation.caption || '',
       audioUrl: item.audioUrl,
+      masteredAudioUrl: item.masteredAudioUrl || '',
       coverUrl: '',
       duration: 0,
       tags: [],
