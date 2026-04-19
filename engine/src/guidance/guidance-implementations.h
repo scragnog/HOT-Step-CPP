@@ -78,26 +78,7 @@ static void guidance_dynamic_cfg(const float *       pred_cond,
     // powf(negative, 0.5) = NaN, so clamp to 0.
     float decay    = powf(fmaxf(cosf((float) M_PI / 2.0f * progress), 0.0f), power);
     float effective_scale = 1.0f + (guidance_scale - 1.0f) * decay;
-
-    // ── Diagnostic: input magnitudes before APG ──
-    int n = Oc * T;
-    double mag_cond = 0.0, mag_uncond = 0.0;
-    for (int i = 0; i < n; i++) {
-        mag_cond   += (double) pred_cond[i]   * (double) pred_cond[i];
-        mag_uncond += (double) pred_uncond[i] * (double) pred_uncond[i];
-    }
-
     apg_forward(pred_cond, pred_uncond, effective_scale, mbuf, result, Oc, T, norm_threshold);
-
-    // ── Diagnostic: output magnitude after APG ──
-    double mag_result = 0.0;
-    for (int i = 0; i < n; i++) {
-        mag_result += (double) result[i] * (double) result[i];
-    }
-    fprintf(stderr, "[DynCFG] step=%d/%d prog=%.3f decay=%.4f eff_scale=%.2f | "
-                    "cond_rms=%.4f uncond_rms=%.4f result_rms=%.4f\n",
-            ctx.step_idx, ctx.total_steps, progress, decay, effective_scale,
-            sqrt(mag_cond / n), sqrt(mag_uncond / n), sqrt(mag_result / n));
 }
 
 
