@@ -56,7 +56,12 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
 
   const triggerDownload = async (dlVersion: 'original' | 'mastered') => {
     const finalArtist = artistName || song.artistName || '';
-    const finalPrepend = prepend || localStorage.getItem('lireek-downloadFilenamePrepend') || '';
+    let storedPrepend = '';
+    try {
+      const raw = localStorage.getItem('lireek-downloadFilenamePrepend');
+      storedPrepend = raw ? JSON.parse(raw) : '';
+    } catch { /* ignore malformed */ }
+    const finalPrepend = prepend || storedPrepend;
     
     const params = new URLSearchParams({
       format,
