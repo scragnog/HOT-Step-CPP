@@ -68,6 +68,10 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef GGML_USE_CUDA
+#    include <cuda_runtime_api.h>
+#endif
+
 #ifdef _WIN32
 #    include <fcntl.h>
 #    include <io.h>
@@ -1501,6 +1505,28 @@ int main(int argc, char ** argv) {
     });
     svr.Get("/props", handle_props);
     svr.Get("/logs", handle_logs);
+
+    // GET /vram: return GPU memory usage (CUDA only)
+    svr.Get("/vram", [](const httplib::Request &, httplib::Response & res) {
+#ifdef GGML_USE_CUDA
+        size_t free_bytes = 0, total_bytes = 0;
+        cudaError_t err = cudaMemGetInfo(&free_bytes, &total_bytes);
+        if (err != cudaSuccess) {
+            json_error(res, 500, cudaGetErrorString(err));
+            return;
+        }
+        size_t used_bytes = total_bytes - free_bytes;
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+                 "{\"used_mb\":%.0f,\"total_mb\":%.0f,\"free_mb\":%.0f}",
+                 (double) used_bytes / (1024.0 * 1024.0),
+                 (double) total_bytes / (1024.0 * 1024.0),
+                 (double) free_bytes / (1024.0 * 1024.0));
+        res.set_content(buf, "application/json");
+#else
+        res.set_content("{\"used_mb\":0,\"total_mb\":0,\"free_mb\":0}", "application/json");
+#endif
+    });
 
     // job system endpoints
     svr.Get("/job", [](const httplib::Request & req, httplib::Response & res) {

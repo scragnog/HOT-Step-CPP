@@ -19,6 +19,7 @@ import { config } from '../config.js';
 import { getUserId } from './auth.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
 import { runMastering } from './mastering.js';
+import { subscribeLines, pushLog } from './logs.js';
 
 const router = Router();
 
@@ -247,8 +248,32 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       } else {
         // Cache miss — run LM
         job.status = 'lm_running';
-        job.stage = 'Generating lyrics & metadata...';
+        job.stage = 'Generating lyrics & audio codes...';
         job.progress = 10;
+
+        // Subscribe to engine logs for LM progress
+        const unsubLm = subscribeLines((line) => {
+          if (line.source !== 'engine') return;
+          const lm1 = line.text.match(/\[LM-Phase1\] Step (\d+).*?([\d.]+) tok\/s/);
+          if (lm1) {
+            job.stage = `LM Phase 1: Step ${lm1[1]} (${lm1[2]} tok/s)`;
+            return;
+          }
+          const lm2 = line.text.match(/\[LM-Phase2\] Step (\d+).*?(\d+) total codes.*?([\d.]+) tok\/s/);
+          if (lm2) {
+            job.stage = `Audio codes: Step ${lm2[1]} (${lm2[2]} codes, ${lm2[3]} tok/s)`;
+            job.progress = 20;
+            return;
+          }
+          if (line.text.includes('[LM-Phase1] Prefill')) {
+            job.stage = 'LM: Prefilling prompt...';
+          } else if (line.text.includes('[LM-Phase2] Prefill')) {
+            job.stage = 'LM: Generating audio codes...';
+            job.progress = 15;
+          } else if (line.text.includes('[Adapter]') && line.text.includes('Merge')) {
+            job.stage = 'Loading adapter...';
+          }
+        });
 
         logGeneration(job.id, 'INFO', `[LM Phase] Submitting to ace-server... (cache key=${cacheKey})`);
 
@@ -270,8 +295,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         }
 
         job.progress = 40;
-        job.stage = 'LM complete, starting synthesis...';
+        job.stage = 'LM complete, preparing synthesis...';
         logGeneration(job.id, 'INFO', `[LM Phase] Complete. ${lmResults.length} result(s), bpm=${lmResults[0]?.bpm}, duration=${lmResults[0]?.duration}`);
+
+        // Unsubscribe LM progress watcher
+        unsubLm();
       }
 
       // Re-inject fields that the user can change between LM cache hits.
@@ -314,8 +342,45 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
     // Phase 2: Synth generation
     job.status = 'synth_running';
-    job.stage = 'Synthesizing audio...';
-    job.progress = 50;
+    job.stage = 'Loading models for synthesis...';
+    job.progress = 45;
+
+    // Subscribe to engine logs for synth progress (DiT steps, VAE, etc.)
+    const totalSteps = aceReq.inference_steps || 20;
+    const unsubSynth = subscribeLines((line) => {
+      if (line.source !== 'engine') return;
+      const dit = line.text.match(/\[DiT\] Step (\d+)\/(\d+)\s+t=[\d.]+\s+\[(.+?)\]/);
+      if (dit) {
+        const step = parseInt(dit[1], 10);
+        const total = parseInt(dit[2], 10);
+        job.stage = `DiT: Step ${step}/${total} (${dit[3]})`;
+        job.progress = 50 + Math.round((step / total) * 35);
+        return;
+      }
+      // Fallback DiT pattern without solver info
+      const ditSimple = line.text.match(/\[DiT\] Step (\d+)\/(\d+)/);
+      if (ditSimple) {
+        const step = parseInt(ditSimple[1], 10);
+        const total = parseInt(ditSimple[2], 10);
+        job.stage = `DiT: Step ${step}/${total}`;
+        job.progress = 50 + Math.round((step / total) * 35);
+        return;
+      }
+      if (line.text.includes('[VAE]') || line.text.includes('vae_decode')) {
+        job.stage = 'Decoding audio (VAE)...';
+        job.progress = 87;
+      } else if (line.text.includes('[Adapter]') && line.text.includes('Merge')) {
+        job.stage = 'Loading adapter...';
+      } else if (line.text.includes('Loading synth') || line.text.includes('ensure_synth')) {
+        job.stage = 'Loading DiT model...';
+      } else if (line.text.includes('[FSQ]') || line.text.includes('fsq_detokenize')) {
+        job.stage = 'Decoding audio tokens (FSQ)...';
+        job.progress = 86;
+      } else if (line.text.includes('[DiT]') && line.text.includes('batch')) {
+        job.stage = 'Preparing DiT batch...';
+        job.progress = 48;
+      }
+    });
 
     logGeneration(job.id, 'INFO', `[Synth Phase] Submitting ${lmResults.length} item(s) to ace-server...`);
     if (aceReq.adapter) {
@@ -354,6 +419,9 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     }
 
     await pollUntilDone(synthJobId, job, abortController.signal);
+
+    // Unsubscribe synth progress watcher
+    unsubSynth();
 
     job.progress = 90;
     job.stage = 'Saving audio...';

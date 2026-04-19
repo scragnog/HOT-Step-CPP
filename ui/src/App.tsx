@@ -21,6 +21,7 @@ import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
 import { DownloadModal } from './components/shared/DownloadModal';
 import { SettingsPanel, type AppSettings, DEFAULT_SETTINGS } from './components/settings/SettingsPanel';
+import { TerminalPanel } from './components/terminal/TerminalPanel';
 import type { Song, GenerationParams } from './types';
 
 const App: React.FC = () => {
@@ -34,6 +35,10 @@ const App: React.FC = () => {
   const [createPanelWidth, setCreatePanelWidth] = usePersistedState('ace-createPanelWidth', 490);
   const [rightSidebarWidth, setRightSidebarWidth] = usePersistedState('ace-rightSidebarWidth', 360);
   const [showRightSidebar, setShowRightSidebar] = useState(true);
+
+  // Terminal panel state (persisted)
+  const [showTerminal, setShowTerminal] = usePersistedState('ace-showTerminal', false);
+  const [terminalWidth, setTerminalWidth] = usePersistedState('ace-terminalWidth', 450);
 
   // Settings state (persisted)
   const [settings, setSettings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
@@ -456,11 +461,49 @@ const App: React.FC = () => {
               },
             });
           }}
+          showTerminal={showTerminal}
+          onToggleTerminal={() => setShowTerminal(prev => !prev)}
         />
 
         <main className="flex-1 flex overflow-hidden relative">
           {renderContent()}
         </main>
+
+        {/* Terminal Panel — far right, resizable */}
+        {showTerminal && (
+          <>
+            <div
+              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-emerald-500/20 active:bg-emerald-500/30 transition-colors"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startW = terminalWidth;
+                const onMove = (ev: MouseEvent) => {
+                  const newW = Math.min(900, Math.max(300, startW + startX - ev.clientX));
+                  setTerminalWidth(newW);
+                };
+                const onUp = () => {
+                  document.removeEventListener('mousemove', onMove);
+                  document.removeEventListener('mouseup', onUp);
+                  document.body.style.cursor = '';
+                  document.body.style.userSelect = '';
+                };
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+              }}
+            >
+              <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-emerald-400 transition-colors" />
+            </div>
+            <div
+              className="flex-shrink-0 h-full border-l border-white/5"
+              style={{ width: terminalWidth }}
+            >
+              <TerminalPanel onClose={() => setShowTerminal(false)} />
+            </div>
+          </>
+        )}
       </div>
 
       {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}

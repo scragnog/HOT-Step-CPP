@@ -26,6 +26,7 @@ import shutdownRoutes from './routes/shutdown.js';
 import masteringRoutes from './routes/mastering.js';
 import downloadRoutes from './routes/download.js';
 import adapterRoutes from './routes/adapters.js';
+import logsRoutes, { pushLog } from './routes/logs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,6 +62,7 @@ app.use('/api/shutdown', shutdownRoutes);
 app.use('/api/mastering', masteringRoutes);
 app.use('/api/download', downloadRoutes);
 app.use('/api/adapters', adapterRoutes);
+app.use('/api/logs', logsRoutes);
 
 // Serve audio files from data/audio/
 app.use('/audio', express.static(config.data.audioDir, {
@@ -136,6 +138,7 @@ function startAceServer(): ChildProcess | null {
     for (const line of lines) {
       console.log(`[ace-server] ${line}`);
       logEngine(line);
+      pushLog(line, 'engine');
     }
   });
 
@@ -144,6 +147,7 @@ function startAceServer(): ChildProcess | null {
     for (const line of lines) {
       console.log(`[ace-server] ${line}`);
       logEngine(line);
+      pushLog(line, 'engine');
     }
   });
 
