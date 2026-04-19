@@ -53,7 +53,7 @@ async function convertAudio(
 
   switch (format) {
     case 'flac':
-      args.push('-c:a', 'flac', '-compression_level', '8');
+      args.push('-c:a', 'flac', '-sample_fmt', 's32', '-compression_level', '8');
       break;
     case 'opus':
       args.push('-c:a', 'libopus', '-b:a', `${bitrate}k`);
