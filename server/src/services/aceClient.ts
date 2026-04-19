@@ -185,8 +185,10 @@ export const aceClient = {
       parts.push(Buffer.from('\r\n'));
     };
 
-    // Request JSON part
-    const reqJson = JSON.stringify(Array.isArray(request) ? request : [request]);
+    // Request JSON part — ace-server multipart expects a single JSON object
+    // (uses request_parse_json, not request_parse_json_array)
+    const singleReq = Array.isArray(request) ? request[0] : request;
+    const reqJson = JSON.stringify(singleReq);
     addPart('request', Buffer.from(reqJson), 'application/json');
 
     // Source audio part
