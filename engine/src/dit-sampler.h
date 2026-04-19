@@ -57,7 +57,13 @@ static int dit_ggml_generate(DiTGGML *           model,
                              const char *    solver_name              = "euler",
                              const int64_t * seeds                    = nullptr,
                              bool            use_batch_cfg            = true,
-                             const char *    guidance_mode            = "apg") {
+                             const char *    guidance_mode            = "apg",
+                              float           apg_momentum             = 0.75f,
+                              float           apg_norm_threshold       = 2.5f,
+                              int             stork_substeps           = 10,
+                              float           beat_stability           = 0.25f,
+                              float           frequency_damping        = 0.4f,
+                              float           temporal_smoothing       = 0.13f) {
     DiTGGMLConfig & c       = model->cfg;
     int             Oc      = c.out_channels;      // 64
     int             ctx_ch  = c.in_channels - Oc;  // 128
@@ -205,14 +211,20 @@ static int dit_ggml_generate(DiTGGML *           model,
     }
     ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N_graph * sizeof(uint16_t));
 
-    // CFG: prepare null encoder states and APG buffers
     std::vector<APGMomentumBuffer> apg_mbufs;
     std::vector<float>             null_enc_buf;
 
     if (do_cfg) {
-        apg_mbufs.resize(N);
-        fprintf(stderr, "[DiT] CFG enabled: guidance_scale=%.1f, %s, N_graph=%d\n", guidance_scale,
-                batch_cfg ? "batched" : "2-pass", N_graph);
+        apg_mbufs.reserve(N);
+        for (int i = 0; i < N; i++) {
+            apg_mbufs.emplace_back((double) -apg_momentum);  // configurable momentum
+        }
+        fprintf(stderr, "[DiT] CFG enabled: guidance_scale=%.1f, %s, N_graph=%d",
+                guidance_scale, batch_cfg ? "batched" : "2-pass", N_graph);
+        if (apg_momentum != 0.75f || apg_norm_threshold != 2.5f) {
+            fprintf(stderr, ", apg_momentum=%.2f, norm_threshold=%.1f", apg_momentum, apg_norm_threshold);
+        }
+        fprintf(stderr, "\n");
     }
 
     // Prepare host buffers (all N real samples contiguous)
@@ -302,10 +314,14 @@ static int dit_ggml_generate(DiTGGML *           model,
 
     // Initialize solver state
     SolverState solver_state;
-    solver_state.seeds   = seeds;
-    solver_state.batch_n = N;
-    solver_state.n_per   = n_per;
+    solver_state.seeds            = seeds;
+    solver_state.batch_n          = N;
+    solver_state.n_per            = n_per;
     solver_state.xt_scratch.resize(n_total);
+    solver_state.stork_substeps   = stork_substeps;
+    solver_state.beat_stability   = beat_stability;
+    solver_state.frequency_damping = frequency_damping;
+    solver_state.temporal_smoothing = temporal_smoothing;
 
     // ── Guidance mode dispatch setup ─────────────────────────────────────
     const GuidanceInfo * guidance_info = guidance_lookup(guidance_mode);
@@ -370,7 +386,8 @@ static int dit_ggml_generate(DiTGGML *           model,
             memcpy(vt_uncond.data(), full_output.data() + n_total, n_total * sizeof(float));
             for (int b = 0; b < N; b++) {
                 guidance_info->fn(vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per, guidance_scale,
-                                  apg_mbufs[b], vt.data() + b * n_per, Oc, T, g_ctx);
+                                  apg_mbufs[b], vt.data() + b * n_per, Oc, T, g_ctx,
+                                  apg_norm_threshold);
             }
         } else if (do_cfg) {
             ggml_backend_tensor_get(t_output, vt_cond.data(), 0, n_total * sizeof(float));
@@ -391,7 +408,8 @@ static int dit_ggml_generate(DiTGGML *           model,
             ggml_backend_tensor_get(t_output, vt_uncond.data(), 0, n_total * sizeof(float));
             for (int b = 0; b < N; b++) {
                 guidance_info->fn(vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per, guidance_scale,
-                                  apg_mbufs[b], vt.data() + b * n_per, Oc, T, g_ctx);
+                                  apg_mbufs[b], vt.data() + b * n_per, Oc, T, g_ctx,
+                                  apg_norm_threshold);
             }
         } else {
             ggml_backend_tensor_get(t_output, vt.data(), 0, n_total * sizeof(float));

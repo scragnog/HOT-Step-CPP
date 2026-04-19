@@ -47,6 +47,12 @@ void request_init(AceRequest * r) {
     r->scheduler             = "";
     r->guidance_mode         = "";
     r->peak_clip            = 10;
+    r->stork_substeps       = 0;     // 0 = default (10)
+    r->beat_stability       = -1.0f; // -1 = default (0.25)
+    r->frequency_damping    = -1.0f; // -1 = default (0.4)
+    r->temporal_smoothing   = -1.0f; // -1 = default (0.13)
+    r->apg_momentum         = 0.0f;  // 0 = default (0.75)
+    r->apg_norm_threshold   = 0.0f;  // 0 = default (2.5)
 }
 
 // helper: get yyjson string as std::string
@@ -152,6 +158,24 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
     }
     if ((v = yyjson_obj_get(obj, "peak_clip")) && yyjson_is_num(v)) {
         r->peak_clip = (int) yyjson_get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "stork_substeps")) && yyjson_is_num(v)) {
+        r->stork_substeps = (int) yyjson_get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "beat_stability")) && yyjson_is_num(v)) {
+        r->beat_stability = (float) yyjson_get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "frequency_damping")) && yyjson_is_num(v)) {
+        r->frequency_damping = (float) yyjson_get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "temporal_smoothing")) && yyjson_is_num(v)) {
+        r->temporal_smoothing = (float) yyjson_get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "apg_momentum")) && yyjson_is_num(v)) {
+        r->apg_momentum = (float) yyjson_get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "apg_norm_threshold")) && yyjson_is_num(v)) {
+        r->apg_norm_threshold = (float) yyjson_get_num(v);
     }
 
     // bool
@@ -377,6 +401,24 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     }
     if (all || r->peak_clip != def.peak_clip) {
         yyjson_mut_obj_add_int(doc, root, "peak_clip", r->peak_clip);
+    }
+    if (all || r->stork_substeps != def.stork_substeps) {
+        yyjson_mut_obj_add_int(doc, root, "stork_substeps", r->stork_substeps);
+    }
+    if (all || r->beat_stability != def.beat_stability) {
+        yyjson_mut_obj_add_real(doc, root, "beat_stability", r->beat_stability);
+    }
+    if (all || r->frequency_damping != def.frequency_damping) {
+        yyjson_mut_obj_add_real(doc, root, "frequency_damping", r->frequency_damping);
+    }
+    if (all || r->temporal_smoothing != def.temporal_smoothing) {
+        yyjson_mut_obj_add_real(doc, root, "temporal_smoothing", r->temporal_smoothing);
+    }
+    if (all || r->apg_momentum != def.apg_momentum) {
+        yyjson_mut_obj_add_real(doc, root, "apg_momentum", r->apg_momentum);
+    }
+    if (all || r->apg_norm_threshold != def.apg_norm_threshold) {
+        yyjson_mut_obj_add_real(doc, root, "apg_norm_threshold", r->apg_norm_threshold);
     }
 
     return doc;

@@ -160,6 +160,28 @@ int ops_resolve_params(const AceSynth * ctx, const AceRequest * reqs, int batch_
         return -1;
     }
 
+    // ── Solver sub-parameters ────────────────────────────────────────────
+    s.stork_substeps    = s.rr.stork_substeps > 0    ? s.rr.stork_substeps    : 10;
+    s.beat_stability    = s.rr.beat_stability >= 0.0f ? s.rr.beat_stability    : 0.25f;
+    s.frequency_damping = s.rr.frequency_damping >= 0.0f ? s.rr.frequency_damping : 0.4f;
+    s.temporal_smoothing = s.rr.temporal_smoothing >= 0.0f ? s.rr.temporal_smoothing : 0.13f;
+
+    // ── Guidance sub-parameters ──────────────────────────────────────────
+    s.apg_momentum       = s.rr.apg_momentum > 0.0f       ? s.rr.apg_momentum       : 0.75f;
+    s.apg_norm_threshold = s.rr.apg_norm_threshold > 0.0f ? s.rr.apg_norm_threshold : 2.5f;
+
+    if (s.stork_substeps != 10) {
+        fprintf(stderr, "[Resolve-Params] stork_substeps: %d\n", s.stork_substeps);
+    }
+    if (s.beat_stability != 0.25f || s.frequency_damping != 0.4f || s.temporal_smoothing != 0.13f) {
+        fprintf(stderr, "[Resolve-Params] jkass: beat=%.2f freq_damp=%.1f temporal=%.2f\n",
+                s.beat_stability, s.frequency_damping, s.temporal_smoothing);
+    }
+    if (s.apg_momentum != 0.75f || s.apg_norm_threshold != 2.5f) {
+        fprintf(stderr, "[Resolve-Params] apg: momentum=%.2f norm_threshold=%.1f\n",
+                s.apg_momentum, s.apg_norm_threshold);
+    }
+
     return 0;
 }
 
@@ -638,7 +660,8 @@ int ops_dit_generate(AceSynth * ctx, int batch_n, SynthState & s, bool (*cancel)
         s.per_enc_S_nc_final.empty() ? nullptr : s.per_enc_S_nc_final.data(),
         s.repaint_src.empty() ? nullptr : s.repaint_src.data(), s.repaint_t0, s.repaint_t1, s.repaint_injection_ratio,
         s.repaint_crossfade_frames, s.solver.c_str(), s.seeds.data(), ctx->params.use_batch_cfg,
-        s.guidance_mode.c_str());
+        s.guidance_mode.c_str(), s.apg_momentum, s.apg_norm_threshold,
+        s.stork_substeps, s.beat_stability, s.frequency_damping, s.temporal_smoothing);
     if (dit_rc != 0) {
         return -1;
     }

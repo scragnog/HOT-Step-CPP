@@ -79,6 +79,14 @@ export interface AceRequest {
     cond_embed: number;
   };
   adapter_mode?: string;  // "merge" (default) or "runtime" (fast, for K-quant models)
+  // Solver sub-parameters
+  stork_substeps?: number;
+  beat_stability?: number;
+  frequency_damping?: number;
+  temporal_smoothing?: number;
+  // Guidance sub-parameters
+  apg_momentum?: number;
+  apg_norm_threshold?: number;
 }
 
 /** Job status from ace-server */

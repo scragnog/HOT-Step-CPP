@@ -80,6 +80,16 @@ struct AceRequest {
     // 10 = default (99.9990th percentile, clips top 0.001%).
     // 999 = max (99.9001th percentile, clips top 0.1%).
     int peak_clip;  // 10
+
+    // solver sub-parameters (0 = use defaults)
+    int   stork_substeps;      // 0 = default (10)
+    float beat_stability;      // -1 = default (0.25)
+    float frequency_damping;   // -1 = default (0.4)
+    float temporal_smoothing;  // -1 = default (0.13)
+
+    // guidance sub-parameters (0 = use defaults)
+    float apg_momentum;        // 0 = default (0.75)
+    float apg_norm_threshold;  // 0 = default (2.5)
 };
 
 // Initialize all fields to defaults (matches Python GenerationParams defaults)

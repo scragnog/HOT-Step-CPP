@@ -25,6 +25,7 @@ struct GuidanceCtx {
 // result: output [n_per] — the guided velocity
 // Oc, T: channel count and time frames
 // ctx: step context for modes that use it
+// norm_threshold: APG norm clipping threshold (default 2.5)
 using GuidanceFn = void (*)(const float *       pred_cond,
                             const float *       pred_uncond,
                             float               guidance_scale,
@@ -32,4 +33,5 @@ using GuidanceFn = void (*)(const float *       pred_cond,
                             float *             result,
                             int                 Oc,
                             int                 T,
-                            const GuidanceCtx & ctx);
+                            const GuidanceCtx & ctx,
+                            float               norm_threshold);

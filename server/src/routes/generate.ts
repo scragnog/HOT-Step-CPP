@@ -163,6 +163,16 @@ function translateParams(params: any): AceRequest {
     }
   }
 
+  // Solver sub-parameters
+  if (params.storkSubsteps !== undefined) req.stork_substeps = params.storkSubsteps;
+  if (params.beatStability !== undefined) req.beat_stability = params.beatStability;
+  if (params.frequencyDamping !== undefined) req.frequency_damping = params.frequencyDamping;
+  if (params.temporalSmoothing !== undefined) req.temporal_smoothing = params.temporalSmoothing;
+
+  // Guidance sub-parameters
+  if (params.apgMomentum !== undefined) req.apg_momentum = params.apgMomentum;
+  if (params.apgNormThreshold !== undefined) req.apg_norm_threshold = params.apgNormThreshold;
+
   return req;
 }
 

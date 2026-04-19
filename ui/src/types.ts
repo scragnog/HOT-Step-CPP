@@ -109,6 +109,16 @@ export interface GenerationParams {
   // Mastering
   masteringEnabled?: boolean;
   masteringReference?: string;
+
+  // Solver sub-parameters (conditional on selected solver)
+  storkSubsteps?: number;
+  beatStability?: number;
+  frequencyDamping?: number;
+  temporalSmoothing?: number;
+
+  // Guidance sub-parameters (conditional on guidance mode)
+  apgMomentum?: number;
+  apgNormThreshold?: number;
 }
 
 /** Generation job status from the server */

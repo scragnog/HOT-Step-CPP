@@ -46,6 +46,16 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [batchSize, setBatchSize] = usePersistedState('hs-batchSize', 1);
   const [useCotCaption, setUseCotCaption] = usePersistedState('hs-useCotCaption', true);
 
+  // Solver sub-params
+  const [storkSubsteps, setStorkSubsteps] = usePersistedState('hs-storkSubsteps', 10);
+  const [beatStability, setBeatStability] = usePersistedState('hs-beatStability', 0.25);
+  const [frequencyDamping, setFrequencyDamping] = usePersistedState('hs-frequencyDamping', 0.4);
+  const [temporalSmoothing, setTemporalSmoothing] = usePersistedState('hs-temporalSmoothing', 0.13);
+
+  // Guidance sub-params
+  const [apgMomentum, setApgMomentum] = usePersistedState('hs-apgMomentum', 0.75);
+  const [apgNormThreshold, setApgNormThreshold] = usePersistedState('hs-apgNormThreshold', 2.5);
+
   // LM toggle
   const [skipLm, setSkipLm] = usePersistedState('hs-skipLm', false);
 
@@ -140,6 +150,14 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       taskType: 'text2music',
       masteringEnabled,
       masteringReference: masteringEnabled ? masteringReference : undefined,
+      // Solver sub-params (only when relevant solver is active)
+      storkSubsteps: (inferMethod === 'stork2' || inferMethod === 'stork4') ? storkSubsteps : undefined,
+      beatStability: inferMethod === 'jkass_fast' ? beatStability : undefined,
+      frequencyDamping: inferMethod === 'jkass_fast' ? frequencyDamping : undefined,
+      temporalSmoothing: inferMethod === 'jkass_fast' ? temporalSmoothing : undefined,
+      // Guidance sub-params (only when APG is active)
+      apgMomentum: guidanceMode === 'apg' ? apgMomentum : undefined,
+      apgNormThreshold: guidanceMode === 'apg' ? apgNormThreshold : undefined,
     };
     onGenerate(params);
   };
@@ -210,6 +228,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
           lmTopP={lmTopP} onLmTopPChange={setLmTopP}
           lmNegativePrompt={lmNegativePrompt} onLmNegativePromptChange={setLmNegativePrompt}
           useCotCaption={useCotCaption} onUseCotCaptionChange={setUseCotCaption}
+          storkSubsteps={storkSubsteps} onStorkSubstepsChange={setStorkSubsteps}
+          beatStability={beatStability} onBeatStabilityChange={setBeatStability}
+          frequencyDamping={frequencyDamping} onFrequencyDampingChange={setFrequencyDamping}
+          temporalSmoothing={temporalSmoothing} onTemporalSmoothingChange={setTemporalSmoothing}
+          apgMomentum={apgMomentum} onApgMomentumChange={setApgMomentum}
+          apgNormThreshold={apgNormThreshold} onApgNormThresholdChange={setApgNormThreshold}
         />
 
         <MasteringSection

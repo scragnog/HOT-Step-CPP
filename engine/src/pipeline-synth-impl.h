@@ -112,6 +112,16 @@ struct SynthState {
     // Valid values: "apg", "cfg_pp", "dynamic_cfg", "rescaled_cfg"
     std::string guidance_mode;
 
+    // solver sub-parameters (from request, 0/-1 = use defaults)
+    int   stork_substeps;      // 0 = default (10)
+    float beat_stability;      // -1 = default (0.25)
+    float frequency_damping;   // -1 = default (0.4)
+    float temporal_smoothing;  // -1 = default (0.13)
+
+    // guidance sub-parameters (from request, 0 = use defaults)
+    float apg_momentum;        // 0 = default (0.75)
+    float apg_norm_threshold;  // 0 = default (2.5)
+
     // per-batch seeds (for reproducible SDE re-noising: seed + step offset)
     std::vector<int64_t> seeds;
 

@@ -27,8 +27,9 @@ static void guidance_apg(const float *       pred_cond,
                          float *             result,
                          int                 Oc,
                          int                 T,
-                         const GuidanceCtx & /*ctx*/) {
-    apg_forward(pred_cond, pred_uncond, guidance_scale, mbuf, result, Oc, T);
+                         const GuidanceCtx & /*ctx*/,
+                         float               norm_threshold) {
+    apg_forward(pred_cond, pred_uncond, guidance_scale, mbuf, result, Oc, T, norm_threshold);
 }
 
 
@@ -45,13 +46,14 @@ static void guidance_cfg_pp(const float *       pred_cond,
                             float *             result,
                             int                 Oc,
                             int                 T,
-                            const GuidanceCtx & ctx) {
+                            const GuidanceCtx & ctx,
+                            float               norm_threshold) {
     float effective_scale = guidance_scale;
     if (ctx.t_curr > 1e-6f) {
         float step_scale = fabsf(ctx.dt) / ctx.t_curr;
         effective_scale  = 1.0f + (guidance_scale - 1.0f) * step_scale;
     }
-    apg_forward(pred_cond, pred_uncond, effective_scale, mbuf, result, Oc, T);
+    apg_forward(pred_cond, pred_uncond, effective_scale, mbuf, result, Oc, T, norm_threshold);
 }
 
 
@@ -68,12 +70,13 @@ static void guidance_dynamic_cfg(const float *       pred_cond,
                                  float *             result,
                                  int                 Oc,
                                  int                 T,
-                                 const GuidanceCtx & ctx) {
+                                 const GuidanceCtx & ctx,
+                                 float               norm_threshold) {
     const float power = 0.5f;
     float progress = (float) ctx.step_idx / fmaxf((float) (ctx.total_steps - 1), 1.0f);
     float decay    = powf(cosf((float) M_PI / 2.0f * progress), power);
     float effective_scale = 1.0f + (guidance_scale - 1.0f) * decay;
-    apg_forward(pred_cond, pred_uncond, effective_scale, mbuf, result, Oc, T);
+    apg_forward(pred_cond, pred_uncond, effective_scale, mbuf, result, Oc, T, norm_threshold);
 }
 
 
@@ -91,12 +94,13 @@ static void guidance_rescaled_cfg(const float *       pred_cond,
                                   float *             result,
                                   int                 Oc,
                                   int                 T,
-                                  const GuidanceCtx & /*ctx*/) {
+                                  const GuidanceCtx & /*ctx*/,
+                                  float               norm_threshold) {
     int n = Oc * T;
     float phi = (guidance_scale > 4.0f) ? 0.95f : 0.7f;
 
     // Run standard APG
-    apg_forward(pred_cond, pred_uncond, guidance_scale, mbuf, result, Oc, T);
+    apg_forward(pred_cond, pred_uncond, guidance_scale, mbuf, result, Oc, T, norm_threshold);
 
     // Compute std of conditional prediction (over all elements)
     double sum_cond = 0.0, sum2_cond = 0.0;
