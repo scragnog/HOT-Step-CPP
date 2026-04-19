@@ -55,7 +55,7 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
     try {
       const analyzer = new AudioMotionAnalyzer(containerRef.current, {
         source: mediaElement,
-        mode: 2,              // 1/24th octave bands — dense thin bars
+        mode: 1,              // 1/48th octave bands — very dense thin bars
         roundBars: true,
         colorMode: 'bar-level',
         gradient: 'prism',
@@ -98,6 +98,7 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
         height: visible ? 100 : 0,
         overflow: 'hidden',
         transition: 'height 0.2s ease-in-out',
+        borderBottom: visible ? '1px solid rgba(168, 85, 247, 0.25)' : 'none',
       }}
     />
   );
