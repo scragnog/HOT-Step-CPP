@@ -216,28 +216,40 @@ const App: React.FC = () => {
     setCurrentAudioUrl(useMastered ? song.masteredAudioUrl! : song.audioUrl);
   }, []);
 
-  // Original track ready — set volumes, start both
-  const handleWaveformReady = useCallback((_dur: number) => {
+  // Either track became ready — start both (whichever is loaded)
+  const startBothPlayers = useCallback(() => {
     const wsOrig = wavesurferRef.current;
-    if (!wsOrig) return;
-    wsOrig.play();
-    setIsPlaying(true); // Always mark as playing — don't rely on onPlayChange which may be undefined
+    const wsAlt = wavesurferAltRef.current;
+
+    // Start original if loaded
+    if (wsOrig) {
+      const m = wsOrig.getMediaElement();
+      if (m && m.readyState >= 2 && m.paused) wsOrig.play();
+    }
+    // Start alt if loaded
+    if (wsAlt) {
+      const m = wsAlt.getMediaElement();
+      if (m && m.readyState >= 2 && m.paused) wsAlt.play();
+    }
+    setIsPlaying(true);
   }, []);
 
-  // Mastered track ready — sync to original and start muted
+  // Original track ready
+  const handleWaveformReady = useCallback((_dur: number) => {
+    startBothPlayers();
+  }, [startBothPlayers]);
+
+  // Mastered track ready — sync position then start
   const handleAltReady = useCallback((_dur: number) => {
     const wsAlt = wavesurferAltRef.current;
     const wsOrig = wavesurferRef.current;
-    if (!wsAlt || !wsOrig) return;
-    const dur = wsOrig.getDuration();
-    const pos = wsOrig.getCurrentTime();
-    if (dur > 0) wsAlt.seekTo(pos / dur);
-    // Start playing if original is already playing
-    const origMedia = wsOrig.getMediaElement();
-    if (origMedia && !origMedia.paused) {
-      wsAlt.play();
+    if (wsAlt && wsOrig) {
+      const dur = wsOrig.getDuration();
+      const pos = wsOrig.getCurrentTime();
+      if (dur > 0) wsAlt.seekTo(pos / dur);
     }
-  }, []);
+    startBothPlayers();
+  }, [startBothPlayers]);
 
   // Keep volumes in sync with playMastered state
   useEffect(() => {
