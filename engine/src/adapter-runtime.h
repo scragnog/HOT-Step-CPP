@@ -223,7 +223,8 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
         float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
         float scaling = (alpha / (float) rank) * scale * g_scale;
 
-        fprintf(stderr, "[Adapter-RT]   %s → scaling=%.4f\n", gguf_name.c_str(), scaling);
+        // Per-tensor detail suppressed (uncomment for debugging)
+        // fprintf(stderr, "[Adapter-RT]   %s → scaling=%.4f\n", gguf_name.c_str(), scaling);
 
         int64_t a_nel = rank * in_feat, b_nel = out_feat * rank;
         std::vector<float> a_f32((size_t) a_nel), b_f32((size_t) b_nel);
@@ -349,7 +350,8 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
 
         float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
         float scaling = (alpha_val / (float) r) * g_scale;
-        fprintf(stderr, "[Adapter-RT]   %s → scaling=%.4f\n", gguf_name.c_str(), scaling);
+        // Per-tensor detail suppressed (uncomment for debugging)
+        // fprintf(stderr, "[Adapter-RT]   %s → scaling=%.4f\n", gguf_name.c_str(), scaling);
 
         // Build the same Kronecker product graph as adapter_merge_lokr
         auto build = [&](struct ggml_context * ctx) {

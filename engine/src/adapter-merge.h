@@ -325,7 +325,7 @@ static bool adapter_backend_can_decode(ggml_backend_t backend, enum ggml_type ty
     struct ggml_tensor *    src     = ggml_new_tensor_1d(ctx, type, probe_n);
     struct ggml_tensor *    dst     = ggml_cast(ctx, src, GGML_TYPE_F32);
     bool                    ok      = ggml_backend_supports_op(backend, dst);
-    fprintf(stderr, "[Adapter] can_decode(%s → F32): %s\n", ggml_type_name(type), ok ? "GPU" : "CPU fallback");
+    // fprintf(stderr, "[Adapter] can_decode(%s → F32): %s\n", ggml_type_name(type), ok ? "GPU" : "CPU fallback");
     ggml_free(ctx);
     cache[(int) type] = ok;
     return ok;
@@ -706,9 +706,10 @@ static bool adapter_merge_lora(WeightCtx *                wctx,
         }
         float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
         float scaling = (alpha / (float) rank) * scale * g_scale;
-        fprintf(stderr, "[Adapter]   %s → group=%s, alpha=%.0f, rank=%lld, base_scale=%.2f, g_scale=%.2f, effective=%.4f\n",
-                gguf_name.c_str(), adapter_determine_group(gguf_name).c_str(),
-                alpha, (long long) rank, scale, g_scale, scaling);
+        // Per-tensor detail suppressed (uncomment for debugging adapter issues)
+        // fprintf(stderr, "[Adapter]   %s → group=%s, alpha=%.0f, rank=%lld, base_scale=%.2f, g_scale=%.2f, effective=%.4f\n",
+        //         gguf_name.c_str(), adapter_determine_group(gguf_name).c_str(),
+        //         alpha, (long long) rank, scale, g_scale, scaling);
 
         // load A and B to F32, PEFT rounds them through BF16 before the GEMM
         int64_t            a_nel = rank * in_feat;
@@ -1010,9 +1011,10 @@ static bool adapter_merge_lokr(WeightCtx *                wctx,
 
         float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
         float scaling = (alpha / (float) r) * g_scale;
-        fprintf(stderr, "[Adapter]   %s → group=%s, alpha=%.0f, rank=%lld, g_scale=%.2f, effective=%.4f\n",
-                gguf_name.c_str(), adapter_determine_group(gguf_name).c_str(),
-                alpha, (long long) r, g_scale, scaling);
+        // Per-tensor detail suppressed (uncomment for debugging adapter issues)
+        // fprintf(stderr, "[Adapter]   %s → group=%s, alpha=%.0f, rank=%lld, g_scale=%.2f, effective=%.4f\n",
+        //         gguf_name.c_str(), adapter_determine_group(gguf_name).c_str(),
+        //         alpha, (long long) r, g_scale, scaling);
 
         auto build = [&](struct ggml_context * ctx) {
             struct ggml_tensor * tw1 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, b, a);
