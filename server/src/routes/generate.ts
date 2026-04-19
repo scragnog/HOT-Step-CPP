@@ -203,6 +203,7 @@ async function pollUntilDone(aceJobId: string, job: GenerationJob, signal: Abort
 /** Run the full generation pipeline */
 async function runGeneration(job: GenerationJob): Promise<void> {
   const aceReq = translateParams(job.params);
+  console.log(`[Generate] Job ${job.id} — ditModel=${job.params.ditModel || '(none)'}, synth_model=${aceReq.synth_model || '(none)'}, source=${job.params.source || 'create'}`);
   const abortController = new AbortController();
 
   // Store abort controller for cancellation
