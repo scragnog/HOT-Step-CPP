@@ -128,6 +128,10 @@ export const songApi = {
   deleteAll: (token: string) => del<{ success: boolean; deletedCount: number }>('/songs', token),
   bulkDelete: (ids: string[], token: string) =>
     post<{ success: boolean; deletedCount: number }>('/songs/bulk-delete', { ids }, token),
+  nukeGenerations: (token: string) =>
+    post<{ success: boolean; songsDeleted: number; filesDeleted: number; lireekAudioGensDeleted: number }>(
+      '/songs/nuke-generations', {}, token
+    ),
 };
 
 // ── Generation ──────────────────────────────────────────────

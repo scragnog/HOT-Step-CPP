@@ -219,4 +219,56 @@ router.post('/bulk-delete', (req, res) => {
   res.json({ success: true, deletedCount: result.changes });
 });
 
+// POST /api/songs/nuke-generations — delete ALL generated audio across both databases + disk
+router.post('/nuke-generations', (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  // 1. Collect all audio file paths from songs table
+  const songs = getDb()
+    .prepare('SELECT id, audio_url, mastered_audio_url FROM songs WHERE user_id = ?')
+    .all(userId) as any[];
+
+  // 2. Delete audio files from disk
+  let filesDeleted = 0;
+  for (const song of songs) {
+    for (const urlField of ['audio_url', 'mastered_audio_url']) {
+      const url = song[urlField];
+      if (url) {
+        const filepath = path.join(config.data.audioDir, path.basename(url));
+        if (fs.existsSync(filepath)) {
+          try { fs.unlinkSync(filepath); filesDeleted++; } catch { /* best effort */ }
+        }
+      }
+    }
+  }
+
+  // 3. Delete all songs from main DB
+  const songIds = songs.map((s: any) => s.id);
+  const songResult = getDb().prepare('DELETE FROM songs WHERE user_id = ?').run(userId);
+
+  // 4. Delete all audio_generations from Lireek DB
+  let lireekDeleted = 0;
+  try {
+    // Delete by matching job IDs first (precise)
+    if (songIds.length > 0) {
+      lireekDeleted += deleteAudioGenerationsByJobIds(songIds);
+    }
+    // Also nuke ALL audio_generations (catches any orphans)
+    const { getLireekDb } = require('../db/lireekDb.js');
+    const ldb = getLireekDb();
+    const allResult = ldb.prepare('DELETE FROM audio_generations').run();
+    lireekDeleted = Math.max(lireekDeleted, allResult.changes);
+  } catch { /* Lireek DB may not be initialized */ }
+
+  console.log(`[Songs] NUKE: ${songResult.changes} songs, ${filesDeleted} files, ${lireekDeleted} lireek audio_gens deleted`);
+
+  res.json({
+    success: true,
+    songsDeleted: songResult.changes,
+    filesDeleted,
+    lireekAudioGensDeleted: lireekDeleted,
+  });
+});
+
 export default router;
