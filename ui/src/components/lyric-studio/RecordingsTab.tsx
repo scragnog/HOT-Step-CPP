@@ -34,10 +34,11 @@ interface RecordingsTabProps {
   onSongCountChange?: (count: number) => void;
   refreshKey?: number;
   artistName?: string;
+  onDeleteComplete?: () => void;
 }
 
 export const RecordingsTab: React.FC<RecordingsTabProps> = ({
-  generations, showToast, filterGenerationId, onClearFilter, onSongCountChange, refreshKey = 0, artistName,
+  generations, showToast, filterGenerationId, onClearFilter, onSongCountChange, refreshKey = 0, artistName, onDeleteComplete,
 }) => {
   const { token } = useAuth();
   const [groups, setGroups] = useState<SongGroup[]>([]);
@@ -166,10 +167,11 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
       await lireekApi.deleteAudioGeneration(ag.id);
       showToast('Audio generation deleted');
       setLocalRefreshKey(k => k + 1);
+      onDeleteComplete?.();
     } catch (err: any) {
       showToast(`Failed to delete: ${err.message}`);
     }
-  }, [showToast]);
+  }, [showToast, onDeleteComplete]);
 
   if (loading) {
     return (

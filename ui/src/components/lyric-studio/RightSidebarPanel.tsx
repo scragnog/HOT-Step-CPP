@@ -74,7 +74,8 @@ export const RightSidebarPanel: React.FC<RightSidebarPanelProps> = ({
 }) => {
   const queue = useAudioGenQueue();
   const queueCount = queue.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length;
-  const recentRefreshKey = queue.completionCounter + recordingsRefreshKey;
+  const [deleteCounter, setDeleteCounter] = useState(0);
+  const recentRefreshKey = queue.completionCounter + recordingsRefreshKey + deleteCounter;
 
   const showRecordings = navLevel === 'album-detail' && generations;
 
@@ -93,6 +94,7 @@ export const RightSidebarPanel: React.FC<RightSidebarPanelProps> = ({
             onSongCountChange={onSongCountChange}
             refreshKey={recordingsRefreshKey}
             artistName={artistName}
+            onDeleteComplete={() => setDeleteCounter(c => c + 1)}
           />
         </Section>
       )}
