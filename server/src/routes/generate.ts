@@ -400,8 +400,15 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     // sourceAudioUrl can be an absolute path (from album presets) or a relative
     // reference name (from the Create panel's uploaded references).
     let refAudioBuf: Buffer | undefined;
-    const timbreRef = job.params.sourceAudioUrl || job.params.timbreReference;
     const masteringRef = job.params.masteringReference;
+    // timbreReference can be:
+    //   - a string path (from Lyric Studio / queue with album presets)
+    //   - boolean true  (from Create panel checkbox — "also use mastering ref as timbre")
+    // When it's boolean true, resolve to the mastering reference path.
+    const rawTimbre = job.params.sourceAudioUrl || job.params.timbreReference;
+    const timbreRef = (rawTimbre === true && typeof masteringRef === 'string')
+      ? masteringRef
+      : (typeof rawTimbre === 'string' ? rawTimbre : undefined);
     logGeneration(job.id, 'DEBUG', `[Synth Phase] timbreRef=${timbreRef}, masteringRef=${masteringRef}`);
     if (timbreRef) {
       // Resolve path: absolute paths used directly, relative names looked up in references dir
