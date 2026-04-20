@@ -44,7 +44,12 @@ export const RecentSongsList: React.FC<RecentSongsListProps> = ({ showToast, ref
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      // Invalidate cache on unmount so returning to Lyric Studio fetches fresh data
+      // (handles cross-page deletions, e.g. deleting songs from the Create page)
+      _cachedRefreshKey = -1;
+    };
   }, []);
 
   useEffect(() => {

@@ -8,6 +8,7 @@ import path from 'path';
 import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
+import { deleteAudioGenerationsByJobIds } from '../db/lireekDb.js';
 
 const router = Router();
 
@@ -139,6 +140,10 @@ router.delete('/:id', (req, res) => {
   }
 
   getDb().prepare('DELETE FROM songs WHERE id = ?').run(req.params.id);
+
+  // Cascade to Lireek DB — remove matching audio_generation records
+  try { deleteAudioGenerationsByJobIds([req.params.id]); } catch { /* lireek DB may not be initialized */ }
+
   res.json({ success: true });
 });
 
@@ -160,7 +165,15 @@ router.delete('/', (req, res) => {
     }
   }
 
+  // Get all song IDs before deleting (for Lireek cascade)
+  const allSongs = getDb().prepare('SELECT id FROM songs WHERE user_id = ?').all(userId) as any[];
+  const allIds = allSongs.map((s: any) => s.id);
+
   const result = getDb().prepare('DELETE FROM songs WHERE user_id = ?').run(userId);
+
+  // Cascade to Lireek DB
+  try { deleteAudioGenerationsByJobIds(allIds); } catch { /* lireek DB may not be initialized */ }
+
   res.json({ success: true, deletedCount: result.changes });
 });
 
@@ -199,6 +212,10 @@ router.post('/bulk-delete', (req, res) => {
     .run(...ids, userId);
 
   console.log(`[Songs] Bulk deleted ${result.changes}/${ids.length} songs`);
+
+  // Cascade to Lireek DB
+  try { deleteAudioGenerationsByJobIds(ids); } catch { /* lireek DB may not be initialized */ }
+
   res.json({ success: true, deletedCount: result.changes });
 });
 

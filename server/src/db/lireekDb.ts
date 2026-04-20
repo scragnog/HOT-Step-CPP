@@ -480,6 +480,13 @@ export function deleteAudioGeneration(id: number): boolean {
   return db.prepare('DELETE FROM audio_generations WHERE id = ?').run(id).changes > 0;
 }
 
+/** Delete audio_generations rows matching the given hotstep job IDs (used when songs are deleted from the main library). */
+export function deleteAudioGenerationsByJobIds(jobIds: string[]): number {
+  if (jobIds.length === 0) return 0;
+  const placeholders = jobIds.map(() => '?').join(',');
+  return db.prepare(`DELETE FROM audio_generations WHERE hotstep_job_id IN (${placeholders})`).run(...jobIds).changes;
+}
+
 export function getRecentGenerationsWithAudio(limit = 50): Record<string, any>[] {
   return db.prepare(
     `SELECT g.title AS song_title, g.subject, g.caption, g.lyrics, g.duration,
