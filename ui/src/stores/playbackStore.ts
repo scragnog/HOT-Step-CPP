@@ -316,36 +316,44 @@ let _retryCount = 0;
 const MAX_RETRIES = 30;
 const RETRY_INTERVAL = 150;
 
-/** Attempt to start both players. Retries if media isn't ready. */
+/** Attempt to start both players. Retries if the AUDIBLE track isn't ready. */
 function startBothPlayers(): void {
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
 
-  let started = false;
   const wsOrig = _wsOriginalRef.current;
   const wsAlt = _wsAltRef.current;
 
+  // Start original if ready
+  let origReady = false;
   if (wsOrig) {
     const m = wsOrig.getMediaElement();
     if (m && m.readyState >= 2) {
       if (m.paused) wsOrig.play();
-      started = true;
+      origReady = true;
     }
   }
 
+  // Start alt if ready (mastered track)
+  let altReady = false;
   if (wsAlt && _state.hasMastered) {
     const m = wsAlt.getMediaElement();
-    if (m && m.readyState >= 2 && m.paused) {
-      wsAlt.play();
+    if (m && m.readyState >= 2) {
+      if (m.paused) wsAlt.play();
+      altReady = true;
     }
   }
 
-  if (started) {
+  // The AUDIBLE track must be ready before we declare success.
+  // playMastered=true → alt is audible, playMastered=false → original is audible.
+  const audibleReady = _state.playMastered ? altReady : origReady;
+
+  if (audibleReady) {
     _retryCount = 0;
     setState({ isPlaying: true, isLoading: false, loadError: null });
     return;
   }
 
-  // Media not ready — retry
+  // Audible track not ready — retry
   _retryCount++;
   if (_retryCount <= MAX_RETRIES) {
     _retryTimer = setTimeout(startBothPlayers, RETRY_INTERVAL);
