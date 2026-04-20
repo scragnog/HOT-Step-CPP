@@ -14,9 +14,9 @@ import { useAuth } from '../../context/AuthContext';
 import type { Song } from '../../types';
 import { DownloadModal } from '../shared/DownloadModal';
 import { usePlaylist } from './playlistStore';
+import { playFromList, recentSongToTrack } from '../../stores/playbackStore';
 
 interface RecentSongsListProps {
-  onPlaySong: (song: Song) => void;
   showToast: (msg: string, type?: 'success' | 'error') => void;
   refreshKey?: number;
 }
@@ -34,7 +34,7 @@ async function _loadRecentSongs(): Promise<RecentSong[]> {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export const RecentSongsList: React.FC<RecentSongsListProps> = ({ onPlaySong, showToast, refreshKey = 0 }) => {
+export const RecentSongsList: React.FC<RecentSongsListProps> = ({ showToast, refreshKey = 0 }) => {
   const { token } = useAuth();
   const [songs, setSongs] = useState<RecentSong[]>(_cachedSongs);
   const [loading, setLoading] = useState(_cachedSongs.length === 0);
@@ -66,20 +66,10 @@ export const RecentSongsList: React.FC<RecentSongsListProps> = ({ onPlaySong, sh
   }, [refreshKey, token]);
 
   const handlePlay = useCallback(async (rs: RecentSong) => {
-    const song: Song = {
-      id: rs.hotstep_job_id || `recent-${rs.ag_id}`,
-      title: rs.song_title || 'Untitled',
-      style: rs.caption || '',
-      caption: rs.caption || '',
-      lyrics: rs.lyrics || '',
-      coverUrl: rs.cover_url || rs.album_image || rs.artist_image || '',
-      duration: rs.duration || 0,
-      tags: [],
-      audioUrl: rs.audio_url || '',
-      masteredAudioUrl: rs.mastered_audio_url || '',
-    };
-    onPlaySong(song);
-  }, [onPlaySong]);
+    const track = recentSongToTrack(rs);
+    const allTracks = songs.map(recentSongToTrack);
+    playFromList(track, allTracks, 'lireek-recent');
+  }, [songs]);
 
   const handleDelete = useCallback(async (e: React.MouseEvent, rs: RecentSong) => {
     e.stopPropagation();

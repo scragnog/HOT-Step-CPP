@@ -12,8 +12,8 @@ import {
   Music, ListMusic, Square,
 } from 'lucide-react';
 import type { Song } from '../../types';
-import { usePlaylist } from './playlistStore';
-import type { PlaylistItem } from './playlistStore';
+import { usePlaylist, type PlaylistItem } from './playlistStore';
+import { playFromList, playlistItemToTrack, usePlayback } from '../../stores/playbackStore';
 
 // ── Window state persistence ─────────────────────────────────────────────────
 
@@ -41,13 +41,10 @@ function saveWindowState(state: WindowState): void {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-interface FloatingPlaylistProps {
-  onPlaySong: (song: Song, list?: Song[]) => void;
-  currentSongId?: string | null;
-}
-
-export const FloatingPlaylist: React.FC<FloatingPlaylistProps> = ({ onPlaySong, currentSongId }) => {
+export const FloatingPlaylist: React.FC = () => {
   const playlist = usePlaylist();
+  const pb = usePlayback();
+  const currentSongId = pb.currentTrack?.id ?? null;
   const [windowState, setWindowState] = useState<WindowState>(loadWindowState);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -121,22 +118,10 @@ export const FloatingPlaylist: React.FC<FloatingPlaylistProps> = ({ onPlaySong, 
 
   // ── Play via main player ─────────────────────────────────────────────────
   const handlePlayMain = useCallback((item: PlaylistItem) => {
-    const songList: Song[] = playlist.items.map(i => ({
-      id: i.id,
-      title: i.title,
-      lyrics: '',
-      style: i.style || '',
-      caption: i.style || '',
-      audioUrl: i.audioUrl,
-      masteredAudioUrl: i.masteredAudioUrl || '',
-      coverUrl: i.coverUrl || '',
-      artistName: i.artistName || '',
-      duration: i.duration ? `${Math.floor(i.duration / 60)}:${String(Math.floor(i.duration % 60)).padStart(2, '0')}` : '0:00',
-      tags: [],
-    }));
-    const clickedSong = songList.find(s => s.id === item.id);
-    if (clickedSong) onPlaySong(clickedSong, songList);
-  }, [playlist.items, onPlaySong]);
+    const allTracks = playlist.items.map(playlistItemToTrack);
+    const clickedTrack = playlistItemToTrack(item);
+    playFromList(clickedTrack, allTracks, 'playlist');
+  }, [playlist.items]);
 
   const totalDuration = useMemo(() => {
     const total = playlist.items.reduce((sum, i) => sum + (i.duration || 0), 0);

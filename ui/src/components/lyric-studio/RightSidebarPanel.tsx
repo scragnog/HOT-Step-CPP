@@ -16,21 +16,18 @@ import { RecordingsTab } from './RecordingsTab';
 import { RecentSongsList } from './RecentSongsList';
 import { InlineAudioQueue } from './InlineAudioQueue';
 import { useAudioGenQueue } from '../../stores/audioGenQueueStore';
-import type { Song } from '../../types';
 
 type NavLevel = 'artists' | 'albums' | 'album-detail';
 
 interface RightSidebarPanelProps {
   navLevel: NavLevel;
   generations?: Generation[];
-  onPlaySong: (song: Song) => void;
   showToast: (msg: string) => void;
   recordingsFilter?: number | null;
   onClearRecordingsFilter?: () => void;
   onSongCountChange?: (count: number) => void;
   recordingsRefreshKey?: number;
   artistName?: string;
-  currentSongId?: string | null;
 }
 
 interface SectionProps {
@@ -71,9 +68,9 @@ const Section: React.FC<SectionProps> = ({
 };
 
 export const RightSidebarPanel: React.FC<RightSidebarPanelProps> = ({
-  navLevel, generations, onPlaySong, showToast,
+  navLevel, generations, showToast,
   recordingsFilter, onClearRecordingsFilter, onSongCountChange,
-  recordingsRefreshKey = 0, artistName, currentSongId,
+  recordingsRefreshKey = 0, artistName,
 }) => {
   const queue = useAudioGenQueue();
   const queueCount = queue.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length;
@@ -90,7 +87,6 @@ export const RightSidebarPanel: React.FC<RightSidebarPanelProps> = ({
           defaultOpen={true}>
           <RecordingsTab
             generations={generations}
-            onPlaySong={onPlaySong}
             showToast={showToast}
             filterGenerationId={recordingsFilter}
             onClearFilter={onClearRecordingsFilter}
@@ -105,7 +101,6 @@ export const RightSidebarPanel: React.FC<RightSidebarPanelProps> = ({
         icon={<Clock className="w-3 h-3" />}
         defaultOpen={true}>
         <RecentSongsList
-          onPlaySong={onPlaySong}
           showToast={showToast}
           refreshKey={recentRefreshKey}
         />
@@ -116,7 +111,7 @@ export const RightSidebarPanel: React.FC<RightSidebarPanelProps> = ({
         count={queueCount}
         countColor="bg-pink-500/20 text-pink-300"
         defaultOpen={true}>
-        <InlineAudioQueue onPlaySong={onPlaySong} currentSongId={currentSongId} />
+        <InlineAudioQueue />
       </Section>
     </div>
   );

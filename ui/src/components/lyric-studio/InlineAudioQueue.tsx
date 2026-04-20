@@ -18,15 +18,13 @@ import type { AudioQueueItem } from '../../stores/audioGenQueueStore';
 import { usePlaylist } from './playlistStore';
 import type { Song } from '../../types';
 import { DownloadModal } from '../shared/DownloadModal';
+import { play as pbPlay, audioQueueItemToTrack, usePlayback } from '../../stores/playbackStore';
 
-interface InlineAudioQueueProps {
-  onPlaySong?: (song: Song) => void;
-  currentSongId?: string | null;
-}
-
-export const InlineAudioQueue: React.FC<InlineAudioQueueProps> = ({ onPlaySong, currentSongId }) => {
+export const InlineAudioQueue: React.FC = () => {
   const { items } = useAudioGenQueue();
   const [downloadSong, setDownloadSong] = React.useState<Song | null>(null);
+  const pb = usePlayback();
+  const currentSongId = pb.currentTrack?.id ?? null;
 
   const active = items.filter(i => i.status === 'loading-adapter' || i.status === 'generating');
   const queued = items.filter(i => i.status === 'pending');
@@ -38,21 +36,9 @@ export const InlineAudioQueue: React.FC<InlineAudioQueueProps> = ({ onPlaySong, 
   const finishedCount = finished.length;
 
   const handlePlay = useCallback((item: AudioQueueItem) => {
-    if (!item.audioUrl || !onPlaySong) return;
-    const song: Song = {
-      id: item.songId || item.id,
-      title: item.generation.title || 'Untitled',
-      lyrics: '',
-      style: item.generation.caption || '',
-      caption: item.generation.caption || '',
-      audioUrl: item.audioUrl,
-      masteredAudioUrl: item.masteredAudioUrl || '',
-      coverUrl: item.artistImageUrl || '',
-      duration: item.audioDuration || 0,
-      tags: [],
-    };
-    onPlaySong(song);
-  }, [onPlaySong]);
+    if (!item.audioUrl) return;
+    pbPlay(audioQueueItemToTrack(item));
+  }, []);
 
   const handleDownload = useCallback((item: AudioQueueItem) => {
     if (!item.audioUrl) return;

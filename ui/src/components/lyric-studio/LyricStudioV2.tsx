@@ -34,7 +34,6 @@ import { WrittenSongsTab } from './WrittenSongsTab';
 import { RightSidebarPanel } from './RightSidebarPanel';
 import { useAudioGeneration } from './useAudioGeneration';
 import { enqueueAudioGen, useAudioGenQueue } from '../../stores/audioGenQueueStore';
-import type { Song } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { QueuePanel } from './QueuePanel';
 import { PromptEditor } from './PromptEditor';
@@ -82,14 +81,7 @@ interface NavState {
 
 // ── Main Component ──────────────────────────────────────────────────────────
 
-interface LyricStudioV2Props {
-  onPlaySong?: (song: Song, list?: Song[]) => void;
-  isPlaying?: boolean;
-  currentSong?: Song | null;
-  currentTime?: number;
-}
-
-export const LyricStudioV2: React.FC<LyricStudioV2Props> = ({ onPlaySong, isPlaying = false, currentSong = null, currentTime = 0 }) => {
+export const LyricStudioV2: React.FC = () => {
   const { token } = useAuth();
 
   // ── Navigation ──
@@ -468,10 +460,6 @@ export const LyricStudioV2: React.FC<LyricStudioV2Props> = ({ onPlaySong, isPlay
     await sendToCreate(gen);
   }, [sendToCreate]);
 
-  const handlePlaySong = useCallback((song: Song, list?: Song[]) => {
-    onPlaySong?.(song, list);
-  }, [onPlaySong]);
-
   const openFetchForArtist = useCallback(() => {
     setFetchModalPrefill(nav.selectedArtist?.name);
     setFetchModalOpen(true);
@@ -578,8 +566,8 @@ export const LyricStudioV2: React.FC<LyricStudioV2Props> = ({ onPlaySong, isPlay
               />
             </div>
             <div className="w-[28%] min-w-[260px] h-full flex-shrink-0 border-l border-white/5 overflow-hidden">
-              <RightSidebarPanel navLevel="artists" onPlaySong={handlePlaySong} showToast={showToast}
-                recordingsRefreshKey={recordingsRefreshKey} currentSongId={currentSong?.id} />
+              <RightSidebarPanel navLevel="artists" showToast={showToast}
+                recordingsRefreshKey={recordingsRefreshKey} />
             </div>
           </div>
         )}
@@ -604,8 +592,8 @@ export const LyricStudioV2: React.FC<LyricStudioV2Props> = ({ onPlaySong, isPlay
               />
             </div>
             <div className="w-[28%] min-w-[260px] h-full flex-shrink-0 border-l border-white/5 overflow-hidden">
-              <RightSidebarPanel navLevel="albums" onPlaySong={handlePlaySong} showToast={showToast}
-                recordingsRefreshKey={recordingsRefreshKey} currentSongId={currentSong?.id} />
+              <RightSidebarPanel navLevel="albums" showToast={showToast}
+                recordingsRefreshKey={recordingsRefreshKey} />
             </div>
           </div>
         )}
@@ -668,10 +656,10 @@ export const LyricStudioV2: React.FC<LyricStudioV2Props> = ({ onPlaySong, isPlay
               <div className="w-[30%] min-w-[280px] flex-shrink-0 border-l border-white/5 overflow-hidden flex flex-col relative">
                 <div className="relative z-[1] flex-1 min-h-0 overflow-hidden">
                   <RightSidebarPanel navLevel="album-detail" generations={generations}
-                    onPlaySong={handlePlaySong} showToast={showToast}
+                    showToast={showToast}
                     recordingsFilter={recordingsFilter} onClearRecordingsFilter={() => setRecordingsFilter(null)}
                     onSongCountChange={setSongCount} recordingsRefreshKey={recordingsRefreshKey}
-                    artistName={nav.selectedArtist?.name} currentSongId={currentSong?.id} />
+                    artistName={nav.selectedArtist?.name} />
                 </div>
               </div>
             </div>
@@ -725,7 +713,7 @@ export const LyricStudioV2: React.FC<LyricStudioV2Props> = ({ onPlaySong, isPlay
       )}
 
       {/* Floating Winamp-style playlist */}
-      <FloatingPlaylist onPlaySong={handlePlaySong} currentSongId={currentSong?.id} />
+      <FloatingPlaylist />
     </div>
   );
 };

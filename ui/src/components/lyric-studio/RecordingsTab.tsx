@@ -18,6 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import type { Song } from '../../types';
 import { DownloadModal } from '../shared/DownloadModal';
 import { usePlaylist } from './playlistStore';
+import { playFromList, songToTrack } from '../../stores/playbackStore';
 
 interface SongGroup {
   generation: Generation;
@@ -27,7 +28,6 @@ interface SongGroup {
 
 interface RecordingsTabProps {
   generations: Generation[];
-  onPlaySong: (song: Song) => void;
   showToast: (msg: string) => void;
   filterGenerationId?: number | null;
   onClearFilter?: () => void;
@@ -37,7 +37,7 @@ interface RecordingsTabProps {
 }
 
 export const RecordingsTab: React.FC<RecordingsTabProps> = ({
-  generations, onPlaySong, showToast, filterGenerationId, onClearFilter, onSongCountChange, refreshKey = 0, artistName,
+  generations, showToast, filterGenerationId, onClearFilter, onSongCountChange, refreshKey = 0, artistName,
 }) => {
   const { token } = useAuth();
   const [groups, setGroups] = useState<SongGroup[]>([]);
@@ -243,7 +243,9 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
                           const ag = group.audioGens[idx];
                           return (
                             <div key={idx} className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.02] transition-colors">
-                              <button onClick={() => onPlaySong(song)}
+                              <button onClick={() => {
+                                playFromList(songToTrack(song), group.songs.map(songToTrack), 'lireek-recordings');
+                              }}
                                 className="w-8 h-8 rounded-full bg-pink-600/20 hover:bg-pink-600/30 flex items-center justify-center flex-shrink-0 transition-colors">
                                 <Play className="w-3.5 h-3.5 text-pink-400 ml-0.5" />
                               </button>
