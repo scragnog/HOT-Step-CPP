@@ -8,7 +8,7 @@ import path from 'path';
 import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
-import { deleteAudioGenerationsByJobIds } from '../db/lireekDb.js';
+import { deleteAudioGenerationsByJobIds, getLireekDb } from '../db/lireekDb.js';
 
 const router = Router();
 
@@ -255,11 +255,12 @@ router.post('/nuke-generations', (req, res) => {
       lireekDeleted += deleteAudioGenerationsByJobIds(songIds);
     }
     // Also nuke ALL audio_generations (catches any orphans)
-    const { getLireekDb } = require('../db/lireekDb.js');
     const ldb = getLireekDb();
     const allResult = ldb.prepare('DELETE FROM audio_generations').run();
     lireekDeleted = Math.max(lireekDeleted, allResult.changes);
-  } catch { /* Lireek DB may not be initialized */ }
+  } catch (err) {
+    console.error('[Songs] NUKE lireek cleanup error:', err);
+  }
 
   console.log(`[Songs] NUKE: ${songResult.changes} songs, ${filesDeleted} files, ${lireekDeleted} lireek audio_gens deleted`);
 
