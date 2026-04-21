@@ -80,6 +80,11 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   const [mode, setMode] = useState<QueueMode>('profile');
   const [genCount, setGenCount] = useState(4);
 
+  // Generation counts for the "generate" tab
+  const [genCountsMap, setGenCountsMap] = useState<Map<number, number>>(new Map());
+  const [genCountsLoading, setGenCountsLoading] = useState(false);
+  const [genFilterThreshold, setGenFilterThreshold] = useState('');
+
   // Presets state
   const [presetMap, setPresetMap] = useState<Map<number, AlbumPreset>>(new Map());
   const [presetsLoading, setPresetsLoading] = useState(false);
@@ -116,6 +121,22 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
       console.error('[QueuePanel] Failed to load presets:', err);
     } finally {
       setPresetsLoading(false);
+    }
+  }, []);
+
+  const loadGenerationCounts = useCallback(async () => {
+    setGenCountsLoading(true);
+    try {
+      const res = await lireekApi.listAllGenerations();
+      const counts = new Map<number, number>();
+      for (const g of res.generations) {
+        counts.set(g.profile_id, (counts.get(g.profile_id) || 0) + 1);
+      }
+      setGenCountsMap(counts);
+    } catch (err) {
+      console.error('[QueuePanel] Failed to load generation counts:', err);
+    } finally {
+      setGenCountsLoading(false);
     }
   }, []);
 
@@ -197,7 +218,12 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
       const profiledSetIds = new Set(profiles.map(p => p.lyrics_set_id));
       setSelected(new Set(lyricsSets.filter(ls => !profiledSetIds.has(ls.id)).map(ls => ls.id)));
     } else if (mode === 'generate') {
-      setSelected(new Set(profiles.map(p => p.id)));
+      const threshold = genFilterThreshold.trim() !== '' ? parseInt(genFilterThreshold) : null;
+      const visible = profiles.filter(p => {
+        if (threshold == null || isNaN(threshold)) return true;
+        return (genCountsMap.get(p.id) || 0) < threshold;
+      });
+      setSelected(new Set(visible.map(p => p.id)));
     } else {
       setSelected(new Set(lyricsSets.map(ls => ls.id)));
     }
@@ -296,7 +322,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'profile' ? 'bg-amber-500/20 text-amber-300' : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'}`}>
               <Sparkles className="w-3.5 h-3.5" /> Build Profiles
             </button>
-            <button onClick={() => { setMode('generate'); setSelected(new Set()); }}
+            <button onClick={() => { setMode('generate'); setSelected(new Set()); loadGenerationCounts(); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'generate' ? 'bg-green-500/20 text-green-300' : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'}`}>
               <Wand2 className="w-3.5 h-3.5" /> Generate Lyrics
             </button>
@@ -464,20 +490,36 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
             })() : mode === 'generate' ? (
               profiles.length === 0 ? (
                 <p className="text-zinc-500 text-sm text-center py-4">No profiles available — build profiles first</p>
-              ) : (
-                profiles.map(profile => {
+              ) : (() => {
+                const threshold = genFilterThreshold.trim() !== '' ? parseInt(genFilterThreshold) : null;
+                const filtered = profiles.filter(profile => {
+                  if (threshold == null || isNaN(threshold)) return true;
+                  const count = genCountsMap.get(profile.id) || 0;
+                  return count < threshold;
+                });
+                return filtered.length === 0 ? (
+                  <p className="text-zinc-500 text-sm text-center py-4">
+                    {threshold != null ? `All ${profiles.length} profiles have ≥ ${threshold} generation${threshold !== 1 ? 's' : ''} — try a higher threshold` : 'No profiles match'}
+                  </p>
+                ) : (<>{filtered.map(profile => {
                   const ls = lyricsSets.find(l => l.id === profile.lyrics_set_id);
+                  const genCt = genCountsMap.get(profile.id) || 0;
                   return (
                     <label key={profile.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${selected.has(profile.id) ? 'bg-green-500/10 border border-green-500/20' : 'bg-white/5 border border-transparent hover:bg-white/10'}`}>
                       <input type="checkbox" checked={selected.has(profile.id)} onChange={() => toggleItem(profile.id)} className="accent-green-500" />
                       <div className="flex-1 min-w-0">
-                        <span className="text-sm text-white truncate block">{ls?.album || 'Unknown Album'} — {ls?.artist_name || '?'}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-white truncate">{ls?.album || 'Unknown Album'} — {ls?.artist_name || '?'}</span>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${genCt === 0 ? 'bg-red-900/30 text-red-400' : genCt < 3 ? 'bg-amber-900/30 text-amber-400' : 'bg-green-900/30 text-green-400'}`}>
+                            {genCt} gen{genCt !== 1 ? 's' : ''}
+                          </span>
+                        </div>
                         <span className="text-[10px] text-zinc-500">{profile.provider}/{profile.model} · {new Date(profile.created_at).toLocaleDateString()}</span>
                       </div>
                     </label>
                   );
-                })
-              )
+                })}</>);
+              })()
             ) : mode === 'presets' ? (
               presetsLoading ? (
                 <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 text-zinc-500 animate-spin" /></div>
@@ -540,13 +582,28 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
             )}
           </div>
 
-          {/* Generation count */}
+          {/* Generation count + filter */}
           {mode === 'generate' && (
-            <div className="px-6 py-2 flex items-center gap-3">
-              <span className="text-xs text-zinc-400">Generations per profile:</span>
-              <input type="number" min={1} max={20} value={genCount}
-                onChange={e => setGenCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
-                className="w-16 px-2 py-1 rounded-lg bg-zinc-800 border border-white/10 text-sm text-white text-center focus:outline-none focus:border-green-500/50" />
+            <div className="px-6 py-2 space-y-2">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-zinc-400">Generations per profile:</span>
+                <input type="number" min={1} max={20} value={genCount}
+                  onChange={e => setGenCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+                  className="w-16 px-2 py-1 rounded-lg bg-zinc-800 border border-white/10 text-sm text-white text-center focus:outline-none focus:border-green-500/50" />
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-zinc-400">Hide profiles with ≥</span>
+                <input type="number" min={0} value={genFilterThreshold}
+                  onChange={e => setGenFilterThreshold(e.target.value)}
+                  placeholder="—"
+                  className="w-16 px-2 py-1 rounded-lg bg-zinc-800 border border-white/10 text-sm text-white text-center focus:outline-none focus:border-green-500/50 placeholder-zinc-600" />
+                <span className="text-xs text-zinc-400">existing gens</span>
+                {genFilterThreshold.trim() !== '' && (
+                  <button onClick={() => setGenFilterThreshold('')}
+                    className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors">clear</button>
+                )}
+                {genCountsLoading && <Loader2 className="w-3 h-3 animate-spin text-zinc-500" />}
+              </div>
             </div>
           )}
 
