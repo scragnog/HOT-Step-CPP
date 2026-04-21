@@ -529,16 +529,21 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
         sf->temporal_smoothing = (float) yyjson_get_real(v);
     }
     // Per-group adapter scales: {"adapter_group_scales": {"self_attn": 1.0, ...}}
+    // NOTE: JSON integer 1 vs float 1.0 — yyjson_get_real returns 0 for ints.
+    // Use a lambda that handles both.
+    auto get_num = [](yyjson_val * val) -> float {
+        return yyjson_is_real(val) ? (float) yyjson_get_real(val) : (float) yyjson_get_int(val);
+    };
     yyjson_val * gs_obj = yyjson_obj_get(obj, "adapter_group_scales");
     if (gs_obj && yyjson_is_obj(gs_obj)) {
         if ((v = yyjson_obj_get(gs_obj, "self_attn")) && yyjson_is_num(v))
-            sf->group_scales.self_attn = (float) yyjson_get_real(v);
+            sf->group_scales.self_attn = get_num(v);
         if ((v = yyjson_obj_get(gs_obj, "cross_attn")) && yyjson_is_num(v))
-            sf->group_scales.cross_attn = (float) yyjson_get_real(v);
+            sf->group_scales.cross_attn = get_num(v);
         if ((v = yyjson_obj_get(gs_obj, "mlp")) && yyjson_is_num(v))
-            sf->group_scales.mlp = (float) yyjson_get_real(v);
+            sf->group_scales.mlp = get_num(v);
         if ((v = yyjson_obj_get(gs_obj, "cond_embed")) && yyjson_is_num(v))
-            sf->group_scales.cond_embed = (float) yyjson_get_real(v);
+            sf->group_scales.cond_embed = get_num(v);
     }
     yyjson_doc_free(doc);
 }
