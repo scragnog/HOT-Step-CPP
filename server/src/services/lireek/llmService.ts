@@ -548,8 +548,12 @@ async function planSongMetadata(
 ): Promise<any> {
   const provider = getProvider(providerName);
   const prompt = `
+Artist Style Summary:
+${profile.raw_summary || 'No summary available'}
+
 Themes to explore: ${(profile.themes || []).join(', ')}
 Typical subjects: ${(profile.subject_categories || []).join(', ')}
+${profile.song_subjects ? `Song subjects from their catalogue: ${profile.song_subjects}` : ''}
   
 Already used subjects (DO NOT REPEAT): ${(usedSubjects || []).join(' || ')}
 Already used BPMs: ${(usedBpms || []).join(', ')}
