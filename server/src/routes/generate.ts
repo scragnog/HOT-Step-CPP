@@ -309,6 +309,14 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       // stale values for DiT params and routing fields. Override them
       // from the current request so the synth phase uses current settings.
       for (const result of lmResults) {
+        // Seed: if randomSeed, set seed=-1 so the engine randomizes.
+        // Cached LM results carry the original fixed seed otherwise.
+        if (job.params.randomSeed) {
+          result.seed = -1;
+        } else if (aceReq.seed !== undefined) {
+          result.seed = aceReq.seed;
+        }
+
         // DiT params (user can change solver, steps, etc. between runs)
         if (aceReq.inference_steps !== undefined) result.inference_steps = aceReq.inference_steps;
         if (aceReq.guidance_scale !== undefined) result.guidance_scale = aceReq.guidance_scale;

@@ -102,20 +102,20 @@ static int dit_ggml_generate(DiTGGML *           model,
         // PRAGMATIC: pass shift=1.0 and let our scheduler handle it,
         // since the upstream schedule was already shift-warped and we're replacing it entirely.
         // The shift value from ops_resolve_params is in SynthState.shift,
-        // but we can back-calculate: if schedule has uniform spacing with shift warp,
-        // the second value gives us: t_1 = shift*(1-1/N) / (1+(shift-1)*(1-1/N))
-        // For now, trust that our scheduler_* functions apply shift internally.
+        // but we can back-calculate if schedule was built with shifted-linear:
+        //   t_1 = shift * u / (1 + (shift-1)*u)  where u = 1 - 1/N
+        //   solving: shift = t1*(1-u) / (u*(1-t1))
         float shift_val = 1.0f; // default
         if (num_steps >= 2 && schedule[0] > 0.0f) {
-            // Back-calculate shift from the upstream schedule:
-            // t_0 = 1.0, t_1 = shift * u / (1 + (shift-1)*u) where u = 1 - 1/N
-            // This gives: shift = t_1 / (u - t_1*u + t_1) 
             float u = 1.0f - 1.0f / (float) num_steps;
             float t1 = schedule[1];
-            if (t1 > 0.0f && t1 < 1.0f) {
-                shift_val = t1 / (u - t1 * u + t1);
-                if (shift_val < 0.5f) shift_val = 1.0f;
-                if (shift_val > 10.0f) shift_val = 3.0f;
+            if (t1 > 0.0f && t1 < 1.0f && u > 0.0f) {
+                float denom = u * (1.0f - t1);
+                if (denom > 1e-8f) {
+                    shift_val = t1 * (1.0f - u) / denom;
+                    if (shift_val < 0.5f) shift_val = 1.0f;
+                    if (shift_val > 10.0f) shift_val = 3.0f;
+                }
             }
         }
 
