@@ -3,8 +3,8 @@
 // Adapted from the DiT section of create/GenerationSettings.tsx.
 // Reads from GlobalParamsContext instead of props.
 
-import React from 'react';
-import { RotateCcw } from 'lucide-react';
+import React, { useState } from 'react';
+import { RotateCcw, ChevronDown } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
 
@@ -13,6 +13,8 @@ const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-whit
 
 export const GenerationDropdown: React.FC = () => {
   const gp = useGlobalParams();
+  const [compositeOpen, setCompositeOpen] = useState(false);
+  const [dcwOpen, setDcwOpen] = useState(false);
 
   // Resolve scheduler dropdown value from the composite string representation
   const schedulerKey = gp.scheduler.startsWith('composite') ? 'composite'
@@ -192,7 +194,7 @@ export const GenerationDropdown: React.FC = () => {
         );
       })()}
 
-      {/* ── Composite Sub-Controls ── */}
+      {/* ── Composite Sub-Controls (Accordion) ── */}
       {gp.scheduler.startsWith('composite') && (() => {
         const parts = gp.scheduler.split(':');
         const schedulerPair = (parts[1] || 'bong_tangent+linear').split('+');
@@ -204,46 +206,57 @@ export const GenerationDropdown: React.FC = () => {
           gp.setScheduler(`composite:${a}+${b}:${c.toFixed(2)}:${s.toFixed(2)}`);
         };
         return (
-          <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-3 space-y-3 transition-all">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-purple-400 uppercase tracking-wider">Composite (2-Stage)</span>
-              <button type="button" onClick={() => update('bong_tangent', 'linear', 0.5, 0.5)}
+          <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 transition-all overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setCompositeOpen(!compositeOpen)}
+              className="w-full flex items-center justify-between px-3 py-2 hover:bg-purple-500/5 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <ChevronDown size={12} className={`text-purple-400 transition-transform duration-200 ${compositeOpen ? 'rotate-180' : ''}`} />
+                <span className="text-[10px] font-semibold text-purple-400 uppercase tracking-wider">Composite (2-Stage)</span>
+              </div>
+              <button type="button" onClick={(e) => { e.stopPropagation(); update('bong_tangent', 'linear', 0.5, 0.5); }}
                 className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 transition-colors">
                 <RotateCcw size={10} /> Reset
               </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] text-purple-400 mb-1">Stage A</label>
-                <select className={selectClasses} value={stageA}
-                  onChange={e => update(e.target.value, stageB, crossover, split)}>
-                  <option value="linear">Linear</option>
-                  <option value="beta57">Beta 57</option>
-                  <option value="cosine">Cosine</option>
-                  <option value="ddim_uniform">DDIM</option>
-                  <option value="sgm_uniform">SGM</option>
-                  <option value="bong_tangent">Tangent</option>
-                  <option value="linear_quadratic">Lin-Quad</option>
-                </select>
+            </button>
+            {compositeOpen && (
+              <div className="px-3 pb-3 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] text-purple-400 mb-1">Stage A</label>
+                    <select className={selectClasses} value={stageA}
+                      onChange={e => update(e.target.value, stageB, crossover, split)}>
+                      <option value="linear">Linear</option>
+                      <option value="beta57">Beta 57</option>
+                      <option value="cosine">Cosine</option>
+                      <option value="ddim_uniform">DDIM</option>
+                      <option value="sgm_uniform">SGM</option>
+                      <option value="bong_tangent">Tangent</option>
+                      <option value="linear_quadratic">Lin-Quad</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-purple-400 mb-1">Stage B</label>
+                    <select className={selectClasses} value={stageB}
+                      onChange={e => update(stageA, e.target.value, crossover, split)}>
+                      <option value="linear">Linear</option>
+                      <option value="beta57">Beta 57</option>
+                      <option value="cosine">Cosine</option>
+                      <option value="ddim_uniform">DDIM</option>
+                      <option value="sgm_uniform">SGM</option>
+                      <option value="bong_tangent">Tangent</option>
+                      <option value="linear_quadratic">Lin-Quad</option>
+                    </select>
+                  </div>
+                </div>
+                <Slider label="Crossover" value={crossover}
+                  onChange={v => update(stageA, stageB, v, split)} min={0.1} max={0.9} step={0.05} showInput />
+                <Slider label="Split" value={split}
+                  onChange={v => update(stageA, stageB, crossover, v)} min={0.1} max={0.9} step={0.05} showInput />
               </div>
-              <div>
-                <label className="block text-[10px] text-purple-400 mb-1">Stage B</label>
-                <select className={selectClasses} value={stageB}
-                  onChange={e => update(stageA, e.target.value, crossover, split)}>
-                  <option value="linear">Linear</option>
-                  <option value="beta57">Beta 57</option>
-                  <option value="cosine">Cosine</option>
-                  <option value="ddim_uniform">DDIM</option>
-                  <option value="sgm_uniform">SGM</option>
-                  <option value="bong_tangent">Tangent</option>
-                  <option value="linear_quadratic">Lin-Quad</option>
-                </select>
-              </div>
-            </div>
-            <Slider label="Crossover" value={crossover}
-              onChange={v => update(stageA, stageB, v, split)} min={0.1} max={0.9} step={0.05} showInput />
-            <Slider label="Split" value={split}
-              onChange={v => update(stageA, stageB, crossover, v)} min={0.1} max={0.9} step={0.05} showInput />
+            )}
           </div>
         );
       })()}
@@ -280,11 +293,16 @@ export const GenerationDropdown: React.FC = () => {
         </div>
       )}
 
-      {/* ── DCW (Differential Correction in Wavelet domain) ── */}
-      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-3 transition-all">
-        <div className="flex items-center justify-between">
+      {/* ── DCW Correction (Accordion with checkbox in title) ── */}
+      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 transition-all overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setDcwOpen(!dcwOpen)}
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-emerald-500/5 transition-colors"
+        >
           <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1.5 cursor-pointer">
+            <ChevronDown size={12} className={`text-emerald-400 transition-transform duration-200 ${dcwOpen ? 'rotate-180' : ''}`} />
+            <label className="flex items-center gap-1.5 cursor-pointer" onClick={e => e.stopPropagation()}>
               <input type="checkbox" checked={gp.dcwEnabled}
                 onChange={e => gp.setDcwEnabled(e.target.checked)}
                 className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500/20" />
@@ -297,17 +315,18 @@ export const GenerationDropdown: React.FC = () => {
             </span>
           </div>
           {gp.dcwEnabled && (
-            <button type="button" onClick={() => {
+            <span type="button" onClick={(e) => {
+              e.stopPropagation();
               gp.setDcwMode('low');
               gp.setDcwScaler(0.1);
               gp.setDcwHighScaler(0.0);
-            }} className="flex items-center gap-1 text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors">
+            }} className="flex items-center gap-1 text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer">
               <RotateCcw size={10} /> Reset
-            </button>
+            </span>
           )}
-        </div>
-        {gp.dcwEnabled && (
-          <>
+        </button>
+        {dcwOpen && gp.dcwEnabled && (
+          <div className="px-3 pb-3 space-y-3">
             <div>
               <label className="block text-[10px] text-emerald-400 mb-1">Correction Mode</label>
               <select className={selectClasses} value={gp.dcwMode}
@@ -327,7 +346,7 @@ export const GenerationDropdown: React.FC = () => {
             <p className="text-[10px] text-zinc-500">
               Wavelet-domain SNR-t bias correction (CVPR 2026). Scaler is dynamically modulated by timestep.
             </p>
-          </>
+          </div>
         )}
       </div>
 

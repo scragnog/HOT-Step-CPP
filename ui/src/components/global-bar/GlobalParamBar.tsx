@@ -6,7 +6,8 @@
 
 import React, { useState, useCallback } from 'react';
 import { Cpu, Plug, Sliders, Brain, AudioWaveform } from 'lucide-react';
-import { BarSection } from './BarSection';
+import { BarSection, ToggleSwitch } from './BarSection';
+import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { ModelsDropdown, ModelsBadge } from './ModelsDropdown';
 import { AdaptersDropdown, AdaptersBadge } from './AdaptersDropdown';
 import { GenerationDropdown, GenerationBadge } from './GenerationDropdown';
@@ -18,6 +19,7 @@ type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'mastering' | nul
 
 export const GlobalParamBar: React.FC = () => {
   const [openSection, setOpenSection] = useState<SectionId>(null);
+  const gp = useGlobalParams();
 
   const handleOpen = useCallback((id: SectionId) => {
     setOpenSection(id);
@@ -93,6 +95,13 @@ export const GlobalParamBar: React.FC = () => {
             isOpen={openSection === 'lm'}
             onOpen={() => handleOpen('lm')}
             onClose={() => handleClose('lm')}
+            headerToggle={
+              <ToggleSwitch
+                checked={!gp.skipLm}
+                onChange={(on) => gp.setSkipLm(!on)}
+                accentColor="purple"
+              />
+            }
           >
             <LmThinkingDropdown />
           </BarSection>
@@ -106,6 +115,13 @@ export const GlobalParamBar: React.FC = () => {
             isOpen={openSection === 'mastering'}
             onOpen={() => handleOpen('mastering')}
             onClose={() => handleClose('mastering')}
+            headerToggle={
+              <ToggleSwitch
+                checked={gp.masteringEnabled}
+                onChange={gp.setMasteringEnabled}
+                accentColor="amber"
+              />
+            }
           >
             <MasteringDropdown />
           </BarSection>

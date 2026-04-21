@@ -1,7 +1,7 @@
 // LmThinkingDropdown.tsx — LM / Thinking settings for the global param bar
 //
-// Adapted from the LM section of create/GenerationSettings.tsx.
-// Reads from GlobalParamsContext instead of props.
+// The on/off toggle is in the bar header (ToggleSwitch).
+// This dropdown only shows the detailed LM parameters when LM is enabled.
 
 import React from 'react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
@@ -12,46 +12,42 @@ const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-whit
 export const LmThinkingDropdown: React.FC = () => {
   const gp = useGlobalParams();
 
+  if (gp.skipLm) {
+    return (
+      <div className="text-xs text-zinc-500 italic text-center py-2">
+        LM conditioning is disabled. Toggle it on in the bar above.
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
-      {/* LM Toggle */}
+      {/* CoT Caption */}
       <label className="flex items-center gap-2.5 cursor-pointer">
-        <input type="checkbox" checked={!gp.skipLm}
-          onChange={e => gp.setSkipLm(!e.target.checked)}
+        <input type="checkbox" checked={gp.useCotCaption}
+          onChange={e => gp.setUseCotCaption(e.target.checked)}
           className="rounded border-zinc-600 bg-zinc-800 text-pink-500 focus:ring-pink-500/20" />
-        <span className="text-sm text-zinc-400">Enable LM Conditioning</span>
+        <span className="text-sm text-zinc-400">Chain-of-Thought Caption</span>
       </label>
 
-      {!gp.skipLm && (
-        <>
-          {/* CoT Caption */}
-          <label className="flex items-center gap-2.5 cursor-pointer">
-            <input type="checkbox" checked={gp.useCotCaption}
-              onChange={e => gp.setUseCotCaption(e.target.checked)}
-              className="rounded border-zinc-600 bg-zinc-800 text-pink-500 focus:ring-pink-500/20" />
-            <span className="text-sm text-zinc-400">Chain-of-Thought Caption</span>
-          </label>
+      <Slider label="Temperature" value={gp.lmTemperature}
+        onChange={gp.setLmTemperature} min={0} max={2} step={0.01} showInput />
 
-          <Slider label="Temperature" value={gp.lmTemperature}
-            onChange={gp.setLmTemperature} min={0} max={2} step={0.01} showInput />
+      <Slider label="CFG Scale" value={gp.lmCfgScale}
+        onChange={gp.setLmCfgScale} min={0} max={10} step={0.1} showInput />
 
-          <Slider label="CFG Scale" value={gp.lmCfgScale}
-            onChange={gp.setLmCfgScale} min={0} max={10} step={0.1} showInput />
+      <Slider label="Top-K" value={gp.lmTopK}
+        onChange={gp.setLmTopK} min={0} max={200} step={1} showInput />
 
-          <Slider label="Top-K" value={gp.lmTopK}
-            onChange={gp.setLmTopK} min={0} max={200} step={1} showInput />
+      <Slider label="Top-P" value={gp.lmTopP}
+        onChange={gp.setLmTopP} min={0} max={1} step={0.01} showInput />
 
-          <Slider label="Top-P" value={gp.lmTopP}
-            onChange={gp.setLmTopP} min={0} max={1} step={0.01} showInput />
-
-          <div>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Negative Prompt</label>
-            <input className={inputClasses} value={gp.lmNegativePrompt}
-              onChange={e => gp.setLmNegativePrompt(e.target.value)}
-              placeholder="NO USER INPUT" />
-          </div>
-        </>
-      )}
+      <div>
+        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Negative Prompt</label>
+        <input className={inputClasses} value={gp.lmNegativePrompt}
+          onChange={e => gp.setLmNegativePrompt(e.target.value)}
+          placeholder="NO USER INPUT" />
+      </div>
     </div>
   );
 };
@@ -62,11 +58,6 @@ export const LmThinkingBadge: React.FC = () => {
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-        skipLm ? 'bg-zinc-700 text-zinc-400' : 'bg-purple-500/20 text-purple-400'
-      }`}>
-        {skipLm ? 'OFF' : 'ON'}
-      </span>
       {!skipLm && useCotCaption && (
         <span className="text-[10px] text-purple-400/60">CoT</span>
       )}
