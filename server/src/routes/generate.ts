@@ -345,6 +345,15 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         if (aceReq.dcw_scaler !== undefined) result.dcw_scaler = aceReq.dcw_scaler;
         if (aceReq.dcw_high_scaler !== undefined) result.dcw_high_scaler = aceReq.dcw_high_scaler;
 
+        // Cover/repaint params — ALWAYS override. Cached LM results may carry
+        // stale audio_cover_strength from previous runs (e.g. 0.5 from old Lyric
+        // Studio code), causing the engine to enter cover mode unexpectedly.
+        // When undefined in the current request, delete from result so the
+        // engine uses its default (1.0 = no cover switching).
+        result.audio_cover_strength = aceReq.audio_cover_strength;
+        result.cover_noise_strength = aceReq.cover_noise_strength;
+        result.task_type = aceReq.task_type;
+
         // Re-inject trigger word — CoT caption replaces the original so the
         // trigger word that was injected into aceReq.caption gets lost.
         if (job.params.triggerWord && job.params.triggerPlacement && job.params.loraPath) {
@@ -456,7 +465,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     let synthJobId: string;
     if (refAudioBuf) {
       logGeneration(job.id, 'INFO', `[Synth Phase] Using MULTIPART submission with timbre ref (${refAudioBuf.length} bytes)`);
-      synthJobId = await aceClient.submitSynthMultipart(lmResults, undefined, refAudioBuf, synthFormat);
+      synthJobId = await aceClient.submitSynthMultipart(lmResults, undefined, refAudioBuf, synthFormat, coResident);
     } else {
       logGeneration(job.id, 'INFO', `[Synth Phase] Using plain JSON submission (no timbre ref)`);
       synthJobId = await aceClient.submitSynth(lmResults, synthFormat, coResident);
