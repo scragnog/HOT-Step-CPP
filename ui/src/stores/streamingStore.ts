@@ -110,6 +110,7 @@ async function consumeSSE(url: string, body: any, callbacks: StreamCallbacks): P
   if (!reader) throw new Error('No response body');
   const decoder = new TextDecoder();
   let buffer = '';
+  let currentEventType = '';
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -117,17 +118,47 @@ async function consumeSSE(url: string, body: any, callbacks: StreamCallbacks): P
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
     for (const line of lines) {
-      if (line.startsWith('data: ')) {
+      const trimmed = line.trim();
+
+      // Track named event types: "event: chunk", "event: phase", "event: complete"
+      if (trimmed.startsWith('event: ')) {
+        currentEventType = trimmed.slice(7).trim();
+        continue;
+      }
+
+      if (trimmed.startsWith('data: ')) {
         try {
-          const data = JSON.parse(line.slice(6));
+          const data = JSON.parse(trimmed.slice(6));
+          const eventType = currentEventType || '';
+          currentEventType = ''; // Reset after use
+
           if (data.error) {
-            // Server-side errors must surface — throw so the queue item fails visibly.
             callbacks.onError?.(data.error);
             throw new Error(data.error);
           }
-          if (data.phase) callbacks.onPhase(data.phase);
-          else if (data.text || data.chunk) callbacks.onChunk(data.text || data.chunk);
-          else if (data.result) callbacks.onResult?.(data.result);
+
+          // Dispatch by named event type first, then fall back to inline field detection
+          switch (eventType) {
+            case 'phase':
+              callbacks.onPhase(data.phase || data.text || '');
+              break;
+            case 'chunk':
+              callbacks.onChunk(data.text || data.chunk || '');
+              break;
+            case 'complete':
+            case 'result':
+              callbacks.onResult?.(data);
+              break;
+            case 'error':
+              callbacks.onError?.(data.error || data.message || 'Unknown error');
+              break;
+            default:
+              // Fallback: detect by inline fields (for servers that don't send event: lines)
+              if (data.phase) callbacks.onPhase(data.phase);
+              else if (data.text || data.chunk) callbacks.onChunk(data.text || data.chunk);
+              else if (data.result) callbacks.onResult?.(data.result);
+              break;
+          }
         } catch (e) {
           // Re-throw server errors, only swallow JSON parse failures
           if (e instanceof Error && !e.message.includes('JSON')) throw e;
