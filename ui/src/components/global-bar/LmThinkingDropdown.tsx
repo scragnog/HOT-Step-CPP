@@ -53,13 +53,13 @@ export const LmThinkingDropdown: React.FC = () => {
 
 /** Summary badge for the LM / Thinking section */
 export const LmThinkingBadge: React.FC = () => {
-  const { skipLm, useCotCaption } = useGlobalParams();
+  const { skipLm, useCotCaption, lmTemperature, lmCfgScale } = useGlobalParams();
+
+  if (skipLm) return null;
 
   return (
-    <div className="flex items-center gap-1.5">
-      {!skipLm && useCotCaption && (
-        <span className="text-[10px] text-purple-400/60">CoT</span>
-      )}
-    </div>
+    <span className="text-[10px] text-zinc-500 font-mono truncate">
+      {useCotCaption ? 'CoT · ' : ''}T{lmTemperature.toFixed(2)} · CFG {lmCfgScale.toFixed(1)}
+    </span>
   );
 };

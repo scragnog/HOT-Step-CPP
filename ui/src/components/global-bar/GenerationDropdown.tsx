@@ -8,6 +8,7 @@ import { RotateCcw, ChevronDown } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
 import { ToggleSwitch } from './BarSection';
+import { formatScheduler } from './modelLabels';
 
 const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
@@ -382,10 +383,13 @@ export const GenerationBadge: React.FC = () => {
 
   const solver = solverLabels[gp.inferMethod] || gp.inferMethod;
   const guidance = guidanceLabels[gp.guidanceMode] || gp.guidanceMode;
+  const schedule = formatScheduler(gp.scheduler);
+  const shiftLabel = gp.shift === -1 ? 'Auto' : gp.shift.toFixed(1);
+  const seedLabel = gp.randomSeed ? 'Rnd' : 'Fix';
 
   return (
     <span className="text-[10px] text-zinc-500 font-mono truncate">
-      {gp.inferenceSteps}s · {solver} · {guidance} · {gp.guidanceScale.toFixed(1)}
+      {gp.inferenceSteps}s · {solver} · {schedule} · {guidance} {gp.guidanceScale.toFixed(1)} · σ{shiftLabel} · {seedLabel}
     </span>
   );
 };

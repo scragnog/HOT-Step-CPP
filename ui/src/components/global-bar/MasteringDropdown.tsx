@@ -9,6 +9,7 @@ import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { masteringApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { ToggleSwitch } from './BarSection';
+import { formatReferenceName } from './modelLabels';
 
 interface ReferenceTrack {
   name: string;
@@ -168,9 +169,10 @@ export const MasteringDropdown: React.FC = () => {
 export const MasteringBadge: React.FC = () => {
   const { masteringEnabled, masteringReference } = useGlobalParams();
   if (!masteringEnabled) return null;
+  const refName = formatReferenceName(masteringReference);
   return (
-    <span className="text-[10px] text-amber-400/60 truncate max-w-[80px]">
-      {masteringReference || 'No ref'}
+    <span className="text-[10px] text-amber-400/60 font-mono truncate">
+      {refName || 'No ref'}
     </span>
   );
 };

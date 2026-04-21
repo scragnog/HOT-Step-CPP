@@ -347,7 +347,7 @@ export const AdaptersDropdown: React.FC = () => {
 
 /** Summary badge for the Adapters section */
 export const AdaptersBadge: React.FC = () => {
-  const { adapter } = useGlobalParams();
+  const { adapter, adapterScale } = useGlobalParams();
   const filename = adapter ? adapter.split(/[\\/]/).pop()?.replace(/\.safetensors$/i, '') || '' : '';
 
   return (
@@ -355,7 +355,8 @@ export const AdaptersBadge: React.FC = () => {
       {adapter ? (
         <>
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-          <span className="text-[10px] text-emerald-400 font-mono truncate max-w-[100px]">{filename}</span>
+          <span className="text-[10px] text-emerald-400 font-mono">{filename}</span>
+          <span className="text-[10px] text-zinc-600">×{adapterScale.toFixed(2)}</span>
         </>
       ) : (
         <span className="text-[10px] text-zinc-600">None</span>
