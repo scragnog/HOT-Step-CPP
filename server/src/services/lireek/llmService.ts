@@ -534,7 +534,7 @@ Already used BPMs: ${(usedBpms || []).join(', ')}
 Already used Keys: ${(usedKeys || []).join(', ')}
 `;
 
-  const responseJsonStr = await provider.call(SONG_METADATA_SYSTEM_PROMPT, prompt, modelName);
+  const responseJsonStr = await provider.call(SONG_METADATA_SYSTEM_PROMPT, prompt, modelName, onChunk);
   const cleanJson = stripThinkingBlocks(responseJsonStr).replace(/```json/g, '').replace(/```/g, '').trim();
   try {
     return JSON.parse(cleanJson);
@@ -583,7 +583,7 @@ export async function generateLyricsStreaming(
   
   if (profile.song_subjects || (profile.themes && profile.themes.length)) {
     try {
-      metadata = await planSongMetadata(profile, usedSubjects, usedBpms, usedKeys, providerName, effectiveModel);
+      metadata = await planSongMetadata(profile, usedSubjects, usedBpms, usedKeys, providerName, effectiveModel, onChunk);
       console.log("Planned metadata:", metadata);
     } catch(e) {
       console.warn("Failed to plan metadata", e);
