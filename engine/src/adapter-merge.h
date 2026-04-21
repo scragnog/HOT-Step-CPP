@@ -637,7 +637,10 @@ static bool adapter_merge_lora(WeightCtx *         wctx,
         merged++;
     }
 
+    const auto & gs = g_hotstep_params.adapter_group_scales;
     fprintf(stderr, "[Adapter] LoRA merged %d pairs (skipped %d), scale=%.2f\n", merged, skipped, scale);
+    fprintf(stderr, "[Adapter] Group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
+            gs.self_attn, gs.cross_attn, gs.mlp, gs.cond_embed);
     return merged > 0;
 }
 
@@ -953,9 +956,12 @@ static bool adapter_merge_lokr(WeightCtx *       wctx,
         merged++;
     }
 
+    const auto & gs2 = g_hotstep_params.adapter_group_scales;
     fprintf(stderr,
             "[Adapter] LoKr merged %d modules (%d factorized, %d monolithic, %d with DoRA, skipped %d), scale=%.2f\n",
             merged, merged - mono_count, mono_count, dora_count, skipped, user_scale);
+    fprintf(stderr, "[Adapter] Group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
+            gs2.self_attn, gs2.cross_attn, gs2.mlp, gs2.cond_embed);
     return merged > 0;
 }
 
