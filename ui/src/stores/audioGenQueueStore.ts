@@ -347,12 +347,12 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     applyTriggerWord(params, preset.adapter_path);
   }
 
-  // 4) Reference Track — timbre conditioning + mastering
+  // 4) Reference Track — mastering + optional timbre conditioning
   if (preset?.reference_track_path) {
-    params.sourceAudioUrl = preset.reference_track_path;
-    params.audioCoverStrength = preset.audio_cover_strength ?? 0.5;
     params.masteringEnabled = true;
     params.masteringReference = preset.reference_track_path;
+    // Use as timbre reference (resolved in generate route) — NOT audio cover
+    params.timbreReference = true;
   }
 
   // 5) Submit generation
