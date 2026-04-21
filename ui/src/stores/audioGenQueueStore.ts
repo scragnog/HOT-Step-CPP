@@ -109,6 +109,13 @@ function mergeCreatePanelSettings(params: Record<string, any>): void {
       params[paramKey] = val;
     }
   }
+
+  // DCW scaler remapping: localStorage stores the UI slider value (0–1),
+  // but the engine expects the actual scaler (0–0.02). The Create page
+  // applies this mapping at submission time (CreatePanel.tsx:275-276);
+  // we must do the same here so both paths produce identical values.
+  if (params.dcwScaler !== undefined) params.dcwScaler = params.dcwScaler * 0.02;
+  if (params.dcwHighScaler !== undefined) params.dcwHighScaler = params.dcwHighScaler * 0.02;
 }
 
 function getGlobalScaleOverride() {
