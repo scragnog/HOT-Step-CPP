@@ -745,9 +745,9 @@ router.post('/profiles/:id/generate-stream', async (req: Request, res: Response)
     const pastGenerations = artistId
       ? db.getAllGenerationsWithContext().filter((g: any) => g.artist_id === artistId)
       : [];
-    const usedSubjects = pastGenerations.map((g: any) => g.song_subject).filter(Boolean);
+    const usedSubjects = pastGenerations.map((g: any) => g.subject).filter(Boolean);
     const usedBpms = pastGenerations.map((g: any) => g.bpm).filter((b: any): b is number => b !== null && b > 0);
-    const usedKeys = pastGenerations.map((g: any) => g.song_key).filter(Boolean);
+    const usedKeys = pastGenerations.map((g: any) => g.key).filter(Boolean);
     const usedTitles = pastGenerations.map((g: any) => g.title).filter(Boolean);
 
     const generated = await llmService.generateLyricsStreaming(

@@ -342,7 +342,7 @@ export function getGenerations(profileId?: number, lyricsSetId?: number): Record
 
 export function getAllGenerationsWithContext(): Record<string, any>[] {
   return db.prepare(
-    `SELECT g.*, a.name AS artist_name, ls.album
+    `SELECT g.*, a.name AS artist_name, ls.album, ls.artist_id
      FROM generations g
      JOIN profiles p ON p.id = g.profile_id
      JOIN lyrics_sets ls ON ls.id = p.lyrics_set_id
