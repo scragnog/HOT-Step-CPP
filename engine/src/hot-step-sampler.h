@@ -10,7 +10,9 @@
 #include "dit-graph.h"
 #include "dit.h"
 #include "guidance/guidance-registry.h"
+#include "hot-step-params.h"
 #include "philox.h"
+#include "schedulers/scheduler-registry.h"
 #include "solvers/solver-registry.h"
 
 #include <cmath>
@@ -67,6 +69,126 @@ static int dit_ggml_generate(DiTGGML *           model,
                               float           beat_stability           = 0.25f,
                               float           frequency_damping        = 0.4f,
                               float           temporal_smoothing       = 0.13f) {
+    // ── HOT-Step sideband override ─────────────────────────────────────
+    // The upstream pipeline-synth-ops.cpp calls us with default params.
+    // Read the real values from the global set by hot-step-server.cpp.
+    solver_name        = g_hotstep_params.solver_name.c_str();
+    guidance_mode      = g_hotstep_params.guidance_mode.c_str();
+    apg_momentum       = g_hotstep_params.apg_momentum;
+    apg_norm_threshold = g_hotstep_params.apg_norm_threshold;
+    stork_substeps     = g_hotstep_params.stork_substeps;
+    beat_stability     = g_hotstep_params.beat_stability;
+    frequency_damping  = g_hotstep_params.frequency_damping;
+    temporal_smoothing = g_hotstep_params.temporal_smoothing;
+
+    // ── Scheduler override ────────────────────────────────────────────────
+    // The upstream ops_build_schedule() creates a shifted-linear schedule.
+    // If a custom scheduler is configured, rebuild the schedule here.
+    // We create a local vector and swap the const pointer.
+    std::vector<float> custom_schedule;
+    if (!g_hotstep_params.scheduler.empty()) {
+        custom_schedule.resize(num_steps);
+        // Extract shift from the existing schedule (shift warp was already applied
+        // by upstream, but we need the raw shift for our scheduler functions).
+        // We get it from the SynthState via the global — but the sampler doesn't
+        // have access to SynthState. Instead, just recompute from schedule[0]:
+        //   schedule[0] = shift*1/(1+(shift-1)*1) = 1.0 regardless of shift.
+        // So we can't extract shift from the schedule. Use the upstream value.
+        // The shift is embedded in the schedule already; our schedulers apply
+        // their own shift, so we need the raw shift value. We'll read it from
+        // the first schedule value: if schedule[0] != 1.0, it was shifted.
+        // Actually, for shifted-linear: t_0 = shift*1/(1+(shift-1)) = 1.0 always.
+        // We need to infer shift or just use a reasonable default.
+        // PRAGMATIC: pass shift=1.0 and let our scheduler handle it,
+        // since the upstream schedule was already shift-warped and we're replacing it entirely.
+        // The shift value from ops_resolve_params is in SynthState.shift,
+        // but we can back-calculate: if schedule has uniform spacing with shift warp,
+        // the second value gives us: t_1 = shift*(1-1/N) / (1+(shift-1)*(1-1/N))
+        // For now, trust that our scheduler_* functions apply shift internally.
+        float shift_val = 1.0f; // default
+        if (num_steps >= 2 && schedule[0] > 0.0f) {
+            // Back-calculate shift from the upstream schedule:
+            // t_0 = 1.0, t_1 = shift * u / (1 + (shift-1)*u) where u = 1 - 1/N
+            // This gives: shift = t_1 / (u - t_1*u + t_1) 
+            float u = 1.0f - 1.0f / (float) num_steps;
+            float t1 = schedule[1];
+            if (t1 > 0.0f && t1 < 1.0f) {
+                shift_val = t1 / (u - t1 * u + t1);
+                if (shift_val < 0.5f) shift_val = 1.0f;
+                if (shift_val > 10.0f) shift_val = 3.0f;
+            }
+        }
+
+        const std::string & ss = g_hotstep_params.scheduler;
+
+        // Composite scheduler dispatch (ported from old ops_build_schedule)
+        if (ss.rfind("composite:", 0) == 0) {
+            const char * body = ss.c_str() + 10;
+            const char * plus = strchr(body, '+');
+            if (plus) {
+                std::string name_a(body, plus - body);
+                const char * after_plus = plus + 1;
+                const char * colon1 = strchr(after_plus, ':');
+                std::string name_b;
+                float crossover = 0.0f, split = 0.5f;
+                if (colon1) {
+                    name_b = std::string(after_plus, colon1 - after_plus);
+                    crossover = (float) atof(colon1 + 1);
+                    const char * colon2 = strchr(colon1 + 1, ':');
+                    if (colon2) split = (float) atof(colon2 + 1);
+                } else {
+                    name_b = std::string(after_plus);
+                }
+                if (crossover < 0.0f) crossover = 0.0f;
+                if (crossover > 1.0f) crossover = 1.0f;
+                if (split < 0.0f) split = 0.0f;
+                if (split > 1.0f) split = 1.0f;
+
+                const SchedulerInfo * sa = scheduler_lookup(name_a.c_str());
+                const SchedulerInfo * sb = scheduler_lookup(name_b.c_str());
+                if (!sa) sa = scheduler_lookup("linear");
+                if (!sb) sb = scheduler_lookup("linear");
+
+                std::vector<float> va(num_steps), vb(num_steps);
+                sa->fn(va.data(), num_steps, shift_val);
+                sb->fn(vb.data(), num_steps, shift_val);
+
+                float zone_lo = split - crossover * 0.5f;
+                float zone_hi = split + crossover * 0.5f;
+                for (int i = 0; i < num_steps; i++) {
+                    float frac = (float) i / (float) num_steps;
+                    float w;
+                    if (crossover < 1e-6f || frac <= zone_lo) {
+                        w = (frac < split) ? 0.0f : 1.0f;
+                    } else if (frac >= zone_hi) {
+                        w = 1.0f;
+                    } else {
+                        w = (frac - zone_lo) / (zone_hi - zone_lo);
+                    }
+                    custom_schedule[i] = (1.0f - w) * va[i] + w * vb[i];
+                }
+                for (int i = 1; i < num_steps; i++) {
+                    if (custom_schedule[i] > custom_schedule[i-1])
+                        custom_schedule[i] = custom_schedule[i-1];
+                }
+                scheduler_clamp(custom_schedule.data(), num_steps);
+                fprintf(stderr, "[DiT] Custom schedule: composite %s+%s (cross=%.2f, split=%.2f), shift=%.2f\n",
+                        sa->display_name, sb->display_name, crossover, split, shift_val);
+            }
+        } else {
+            // Standard scheduler lookup
+            const SchedulerInfo * sched = scheduler_lookup(ss.c_str());
+            if (!sched) {
+                fprintf(stderr, "[DiT] WARNING: unknown scheduler '%s', using linear\n", ss.c_str());
+                sched = scheduler_lookup("linear");
+            }
+            sched->fn(custom_schedule.data(), num_steps, shift_val);
+            fprintf(stderr, "[DiT] Custom schedule: %s (%s), shift=%.2f\n",
+                    sched->display_name, sched->name, shift_val);
+        }
+        schedule = custom_schedule.data();
+    }
+
     DiTGGMLConfig & c       = model->cfg;
     int             Oc      = c.out_channels;      // 64
     int             ctx_ch  = c.in_channels - Oc;  // 128

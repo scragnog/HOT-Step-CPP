@@ -35,6 +35,7 @@
 //   /understand LM + DiT + VAE
 
 #include "audio-io.h"
+#include "hot-step-params.h"
 #include "model-registry.h"
 #include "model-store.h"
 #include "pipeline-lm.h"
@@ -458,11 +459,30 @@ static std::string resolve_name(const std::vector<ModelEntry> & bucket,
 // server-side routing fields parsed from JSON (not part of AceRequest).
 // these are HOT-Step additions that travel alongside the upstream request.
 struct ServerFields {
-    std::string vae_model;  // explicit VAE selection ("": use first in registry)
+    std::string vae_model;       // explicit VAE selection ("": use first in registry)
+    std::string solver_name;     // "euler", "rk4", "heun", etc.
+    std::string scheduler;       // "composite:...", "bong_tangent", etc.
+    std::string guidance_mode;   // "apg", "dynamic_cfg", etc.
+    float       apg_momentum       = 0.75f;
+    float       apg_norm_threshold = 2.5f;
+    int         stork_substeps     = 10;
+    float       beat_stability     = 0.25f;
+    float       frequency_damping  = 0.4f;
+    float       temporal_smoothing = 0.13f;
 };
 
 static void parse_server_fields(const char * json, ServerFields * sf) {
-    sf->vae_model = "";
+    sf->vae_model       = "";
+    sf->solver_name     = "euler";
+    sf->scheduler       = "";
+    sf->guidance_mode   = "apg";
+    sf->apg_momentum       = 0.75f;
+    sf->apg_norm_threshold = 2.5f;
+    sf->stork_substeps     = 10;
+    sf->beat_stability     = 0.25f;
+    sf->frequency_damping  = 0.4f;
+    sf->temporal_smoothing = 0.13f;
+
     yyjson_doc * doc = yyjson_read(json, strlen(json), 0);
     if (!doc) return;
     yyjson_val * root = yyjson_doc_get_root(doc);
@@ -476,6 +496,36 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     yyjson_val * v;
     if ((v = yyjson_obj_get(obj, "vae_model")) && yyjson_is_str(v)) {
         sf->vae_model = yyjson_get_str(v);
+    }
+    // Solver / scheduler / guidance
+    if ((v = yyjson_obj_get(obj, "infer_method")) && yyjson_is_str(v)) {
+        sf->solver_name = yyjson_get_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "scheduler")) && yyjson_is_str(v)) {
+        sf->scheduler = yyjson_get_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "guidance_mode")) && yyjson_is_str(v)) {
+        sf->guidance_mode = yyjson_get_str(v);
+    }
+    // APG tuning
+    if ((v = yyjson_obj_get(obj, "apg_momentum")) && yyjson_is_num(v)) {
+        sf->apg_momentum = (float) yyjson_get_real(v);
+    }
+    if ((v = yyjson_obj_get(obj, "apg_norm_threshold")) && yyjson_is_num(v)) {
+        sf->apg_norm_threshold = (float) yyjson_get_real(v);
+    }
+    // STORK solver params
+    if ((v = yyjson_obj_get(obj, "stork_substeps")) && yyjson_is_int(v)) {
+        sf->stork_substeps = (int) yyjson_get_int(v);
+    }
+    if ((v = yyjson_obj_get(obj, "beat_stability")) && yyjson_is_num(v)) {
+        sf->beat_stability = (float) yyjson_get_real(v);
+    }
+    if ((v = yyjson_obj_get(obj, "frequency_damping")) && yyjson_is_num(v)) {
+        sf->frequency_damping = (float) yyjson_get_real(v);
+    }
+    if ((v = yyjson_obj_get(obj, "temporal_smoothing")) && yyjson_is_num(v)) {
+        sf->temporal_smoothing = (float) yyjson_get_real(v);
     }
     yyjson_doc_free(doc);
 }
@@ -736,6 +786,21 @@ static void synth_worker(std::shared_ptr<Job>    job,
     if (total_alloc > 1) {
         fprintf(stderr, "[Server] Batch: %d track(s) from %d request(s)\n", total_alloc, batch_n);
     }
+
+    // HOT-Step sideband: push custom params to global before synth.
+    // The sampler reads these inside dit_ggml_generate().
+    g_hotstep_params.solver_name       = sf.solver_name;
+    g_hotstep_params.scheduler         = sf.scheduler;
+    g_hotstep_params.guidance_mode     = sf.guidance_mode;
+    g_hotstep_params.apg_momentum      = sf.apg_momentum;
+    g_hotstep_params.apg_norm_threshold = sf.apg_norm_threshold;
+    g_hotstep_params.stork_substeps    = sf.stork_substeps;
+    g_hotstep_params.beat_stability    = sf.beat_stability;
+    g_hotstep_params.frequency_damping = sf.frequency_damping;
+    g_hotstep_params.temporal_smoothing = sf.temporal_smoothing;
+    fprintf(stderr, "[Server] HOT-Step params: solver=%s, guidance=%s, scheduler=%s\n",
+            sf.solver_name.c_str(), sf.guidance_mode.c_str(),
+            sf.scheduler.empty() ? "(default)" : sf.scheduler.c_str());
 
     // Two-phase run. The store acquires and releases GPU modules around each
     // op (STRICT) or keeps them across ops (NEVER). The synth ctx is always
