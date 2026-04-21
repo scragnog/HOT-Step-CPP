@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <memory>
 #include <vector>
 
 struct WeightCtx {
@@ -30,8 +31,10 @@ struct WeightCtx {
 
     std::vector<PendingCopy> pending;
 
-    // Staging buffers for type-converted data (kept alive until wctx_alloc)
-    std::vector<std::vector<float>> staging;
+    // Staging buffers for type-converted data, kept alive until wctx_alloc.
+    // unique_ptr keeps the data address stable even when the outer vector grows,
+    // so src pointers stored in pending stay valid across staging.push_back().
+    std::vector<std::unique_ptr<float[]>> staging;
 };
 
 static void wctx_init(WeightCtx * wctx, int n_tensors) {

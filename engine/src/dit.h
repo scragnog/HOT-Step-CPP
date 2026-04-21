@@ -9,7 +9,6 @@
 //                conv_transpose_1d, add, mul, scale, view, reshape, permute.
 
 #include "adapter-merge.h"
-#include "adapter-runtime.h"
 #include "backend.h"
 #include "ggml-backend.h"
 #include "ggml.h"
@@ -123,9 +122,6 @@ struct DiTGGML {
 
     // Pre-allocated constant for AdaLN (1+scale) fusion
     struct ggml_tensor * scalar_one;  // [1] = 1.0f, broadcast in ggml_add
-
-    // Runtime LoRA: precomputed deltas stored in VRAM
-    DiTLoRA lora;
 };
 
 // Load timestep embedding weights
@@ -165,17 +161,17 @@ static struct ggml_tensor * dit_load_proj_in_w(WeightCtx *         wctx,
     struct ggml_tensor * dst = ggml_new_tensor_2d(wctx->ctx, GGML_TYPE_F32, in_ch * P, H);
     ggml_set_name(dst, name.c_str());
 
-    size_t n = (size_t) in_ch * P * H;
-    wctx->staging.emplace_back(n);
-    auto & buf = wctx->staging.back();
+    size_t  n    = (size_t) in_ch * P * H;
+    auto    buf  = std::make_unique<float[]>(n);
+    float * data = buf.get();
 
     // src ggml [P, in_ch, H]: elem(p, ic, h) = raw[h*P*in_ch + ic*P + p]
-    // dst ggml [in_ch*P, H]:  elem(j, h)     = buf[h*in_ch*P + j]  where j = p*in_ch + ic
+    // dst ggml [in_ch*P, H]:  elem(j, h)     = data[h*in_ch*P + j]  where j = p*in_ch + ic
     auto cvt = [&](auto read_fn) {
         for (int h = 0; h < H; h++) {
             for (int ic = 0; ic < in_ch; ic++) {
                 for (int p = 0; p < P; p++) {
-                    buf[h * in_ch * P + p * in_ch + ic] = read_fn(h * P * in_ch + ic * P + p);
+                    data[h * in_ch * P + p * in_ch + ic] = read_fn(h * P * in_ch + ic * P + p);
                 }
             }
         }
@@ -193,7 +189,8 @@ static struct ggml_tensor * dit_load_proj_in_w(WeightCtx *         wctx,
         fprintf(stderr, "[GGUF] FATAL: unsupported type %d for '%s' in proj_in pre-permute\n", src->type, name.c_str());
         exit(1);
     }
-    wctx->pending.push_back({ dst, buf.data(), n * sizeof(float), 0 });
+    wctx->pending.push_back({ dst, data, n * sizeof(float), 0 });
+    wctx->staging.push_back(std::move(buf));
     return dst;
 }
 
@@ -221,17 +218,17 @@ static struct ggml_tensor * dit_load_proj_out_w(WeightCtx *         wctx,
     struct ggml_tensor * dst = ggml_new_tensor_2d(wctx->ctx, GGML_TYPE_F32, H, out_ch * P);
     ggml_set_name(dst, name.c_str());
 
-    size_t n = (size_t) out_ch * P * H;
-    wctx->staging.emplace_back(n);
-    auto & buf = wctx->staging.back();
+    size_t  n    = (size_t) out_ch * P * H;
+    auto    buf  = std::make_unique<float[]>(n);
+    float * data = buf.get();
 
     // src ggml [P, out_ch, H]: elem(p, oc, h) = raw[h*P*out_ch + oc*P + p]
-    // dst ggml [H, out_ch*P]:  elem(h, j)     = buf[j*H + h]  where j = p*out_ch + oc
+    // dst ggml [H, out_ch*P]:  elem(h, j)     = data[j*H + h]  where j = p*out_ch + oc
     auto cvt = [&](auto read_fn) {
         for (int h = 0; h < H; h++) {
             for (int oc = 0; oc < out_ch; oc++) {
                 for (int p = 0; p < P; p++) {
-                    buf[(p * out_ch + oc) * H + h] = read_fn(h * P * out_ch + oc * P + p);
+                    data[(p * out_ch + oc) * H + h] = read_fn(h * P * out_ch + oc * P + p);
                 }
             }
         }
@@ -250,17 +247,24 @@ static struct ggml_tensor * dit_load_proj_out_w(WeightCtx *         wctx,
                 name.c_str());
         exit(1);
     }
-    wctx->pending.push_back({ dst, buf.data(), n * sizeof(float), 0 });
+    wctx->pending.push_back({ dst, data, n * sizeof(float), 0 });
+    wctx->staging.push_back(std::move(buf));
     return dst;
 }
 
 // Load full DiT model from GGUF
-static bool dit_ggml_load(DiTGGML *                m,
-                          const char *             gguf_path,
-                          const char *             adapter_path  = nullptr,
-                          float                    adapter_scale = 1.0f,
-                          AdapterGroupScales       adapter_gs    = {},
-                          const char *             adapter_mode  = nullptr) {
+static bool dit_ggml_load(DiTGGML *    m,
+                          const char * gguf_path,
+                          const char * adapter_path  = nullptr,
+                          float        adapter_scale = 1.0f) {
+    // Backend init. flash_attn_ext accumulates in F16 on CPU, causing audible
+    // drift over 24 layers x 8 steps: use F32 manual attention on CPU instead.
+    BackendPair bp    = backend_init("DiT");
+    m->backend        = bp.backend;
+    m->cpu_backend    = bp.cpu_backend;
+    m->sched          = backend_sched_new(bp, 8192);
+    m->use_flash_attn = bp.has_gpu;
+
     GGUFModel gf;
     if (!gf_load(&gf, gguf_path)) {
         fprintf(stderr, "[Load] FATAL: cannot load %s\n", gguf_path);
@@ -308,15 +312,6 @@ static bool dit_ggml_load(DiTGGML *                m,
     m->cond_emb_w = gf_load_tensor(&m->wctx, gf, "decoder.condition_embedder.weight");
     m->cond_emb_b = gf_load_tensor_f32(&m->wctx, gf, "decoder.condition_embedder.bias");
 
-    // Runtime LoRA requires un-fused projections so per-projection deltas
-    // can be applied. In merge mode, deltas are baked into weights BEFORE
-    // fusion, so fused matmuls already include the adapter effect.
-    bool skip_fusion = (adapter_mode && strcmp(adapter_mode, "runtime") == 0
-                        && adapter_path != nullptr);
-    if (skip_fusion) {
-        fprintf(stderr, "[DiT] Skipping QKV/gate_up fusion (runtime LoRA needs individual projections)\n");
-    }
-
     // Layers
     for (int i = 0; i < cfg.n_layers; i++) {
         char prefix[128];
@@ -326,15 +321,11 @@ static bool dit_ggml_load(DiTGGML *                m,
 
         // Self-attention: try full QKV, partial QK, separate
         ly.self_attn_norm = gf_load_tensor_f32(&m->wctx, gf, p + ".self_attn_norm.weight");
-        if (!skip_fusion) {
-            ly.sa_qkv = gf_load_qkv_fused(&m->wctx, gf, p + ".self_attn.q_proj.weight", p + ".self_attn.k_proj.weight",
-                                          p + ".self_attn.v_proj.weight");
-        }
+        ly.sa_qkv = gf_load_qkv_fused(&m->wctx, gf, p + ".self_attn.q_proj.weight", p + ".self_attn.k_proj.weight",
+                                      p + ".self_attn.v_proj.weight");
         if (!ly.sa_qkv) {
-            if (!skip_fusion) {
-                // Try Q+K fusion (same input, often same type in K-quants)
-                ly.sa_qk = gf_load_pair_fused(&m->wctx, gf, p + ".self_attn.q_proj.weight", p + ".self_attn.k_proj.weight");
-            }
+            // Try Q+K fusion (same input, often same type in K-quants)
+            ly.sa_qk = gf_load_pair_fused(&m->wctx, gf, p + ".self_attn.q_proj.weight", p + ".self_attn.k_proj.weight");
             if (ly.sa_qk) {
                 ly.sa_v_proj = gf_load_tensor(&m->wctx, gf, p + ".self_attn.v_proj.weight");
                 if (i == 0) {
@@ -345,7 +336,7 @@ static bool dit_ggml_load(DiTGGML *                m,
                 ly.sa_k_proj = gf_load_tensor(&m->wctx, gf, p + ".self_attn.k_proj.weight");
                 ly.sa_v_proj = gf_load_tensor(&m->wctx, gf, p + ".self_attn.v_proj.weight");
                 if (i == 0) {
-                    fprintf(stderr, "[DiT] Self-attn: all separate%s\n", skip_fusion ? " (runtime LoRA)" : " (3 types differ)");
+                    fprintf(stderr, "[DiT] Self-attn: all separate (3 types differ)\n");
                 }
             }
         } else {
@@ -359,17 +350,13 @@ static bool dit_ggml_load(DiTGGML *                m,
 
         // Cross-attention: try full QKV, K+V fused, separate
         ly.cross_attn_norm = gf_load_tensor_f32(&m->wctx, gf, p + ".cross_attn_norm.weight");
-        if (!skip_fusion) {
-            ly.ca_qkv = gf_load_qkv_fused(&m->wctx, gf, p + ".cross_attn.q_proj.weight", p + ".cross_attn.k_proj.weight",
-                                          p + ".cross_attn.v_proj.weight");
-        }
+        ly.ca_qkv = gf_load_qkv_fused(&m->wctx, gf, p + ".cross_attn.q_proj.weight", p + ".cross_attn.k_proj.weight",
+                                      p + ".cross_attn.v_proj.weight");
         if (!ly.ca_qkv) {
             ly.ca_q_proj = gf_load_tensor(&m->wctx, gf, p + ".cross_attn.q_proj.weight");
-            if (!skip_fusion) {
-                // Try K+V fusion (same input enc, may share type)
-                ly.ca_kv =
-                    gf_load_pair_fused(&m->wctx, gf, p + ".cross_attn.k_proj.weight", p + ".cross_attn.v_proj.weight");
-            }
+            // Try K+V fusion (same input enc, may share type)
+            ly.ca_kv =
+                gf_load_pair_fused(&m->wctx, gf, p + ".cross_attn.k_proj.weight", p + ".cross_attn.v_proj.weight");
             if (ly.ca_kv) {
                 if (i == 0) {
                     fprintf(stderr, "[DiT] Cross-attn: Q separate, K+V fused\n");
@@ -378,7 +365,7 @@ static bool dit_ggml_load(DiTGGML *                m,
                 ly.ca_k_proj = gf_load_tensor(&m->wctx, gf, p + ".cross_attn.k_proj.weight");
                 ly.ca_v_proj = gf_load_tensor(&m->wctx, gf, p + ".cross_attn.v_proj.weight");
                 if (i == 0) {
-                    fprintf(stderr, "[DiT] Cross-attn: all separate%s\n", skip_fusion ? " (runtime LoRA)" : "");
+                    fprintf(stderr, "[DiT] Cross-attn: all separate\n");
                 }
             }
         } else {
@@ -392,9 +379,7 @@ static bool dit_ggml_load(DiTGGML *                m,
 
         // MLP: try gate+up fusion (same input, same pattern as QKV)
         ly.mlp_norm = gf_load_tensor_f32(&m->wctx, gf, p + ".mlp_norm.weight");
-        if (!skip_fusion) {
-            ly.gate_up  = gf_load_pair_fused(&m->wctx, gf, p + ".mlp.gate_proj.weight", p + ".mlp.up_proj.weight");
-        }
+        ly.gate_up  = gf_load_pair_fused(&m->wctx, gf, p + ".mlp.gate_proj.weight", p + ".mlp.up_proj.weight");
         if (ly.gate_up) {
             if (i == 0) {
                 fprintf(stderr, "[DiT] MLP: gate+up fused\n");
@@ -403,7 +388,7 @@ static bool dit_ggml_load(DiTGGML *                m,
             ly.gate_proj = gf_load_tensor(&m->wctx, gf, p + ".mlp.gate_proj.weight");
             ly.up_proj   = gf_load_tensor(&m->wctx, gf, p + ".mlp.up_proj.weight");
             if (i == 0) {
-                fprintf(stderr, "[DiT] MLP: gate+up separate%s\n", skip_fusion ? " (runtime LoRA)" : " (types differ)");
+                fprintf(stderr, "[DiT] MLP: gate+up separate (types differ)\n");
             }
         }
         ly.down_proj = gf_load_tensor(&m->wctx, gf, p + ".mlp.down_proj.weight");
@@ -435,20 +420,12 @@ static bool dit_ggml_load(DiTGGML *                m,
     // Merge adapter deltas into projection weights (before GPU upload and QKV fusion)
     if (adapter_path) {
         Timer adapter_timer;
-        if (adapter_mode && strcmp(adapter_mode, "runtime") == 0) {
-            // Runtime LoRA: precompute deltas on GPU, store as BF16
-            // Must happen AFTER wctx_alloc (base weights live in VRAM)
-            // so we defer to after the alloc below
-            fprintf(stderr, "[Adapter] mode=runtime, deferring delta precompute\n");
-        } else {
-            // Classic merge: modify base weights in-place
-            if (!adapter_merge(&m->wctx, gf, adapter_path, adapter_scale, adapter_gs, m->backend)) {
-                fprintf(stderr, "[Adapter] FATAL: no tensors merged (model mismatch)\n");
-                gf_close(&gf);
-                return false;
-            }
-            fprintf(stderr, "[Adapter] Merge time: %.1f ms\n", adapter_timer.ms());
+        if (!adapter_merge(&m->wctx, gf, adapter_path, adapter_scale, m->backend)) {
+            fprintf(stderr, "[Adapter] FATAL: no tensors merged (model mismatch)\n");
+            gf_close(&gf);
+            return false;
         }
+        fprintf(stderr, "[Adapter] Merge time: %.1f ms\n", adapter_timer.ms());
     }
 
     // Allocate backend buffer and copy weights
@@ -458,39 +435,12 @@ static bool dit_ggml_load(DiTGGML *                m,
     }
     gf_close(&gf);
 
-    // Runtime LoRA: precompute deltas now that base weights are in VRAM
-    if (adapter_path && adapter_mode && strcmp(adapter_mode, "runtime") == 0) {
-        Timer rt_timer;
-        GGUFModel gf_rt;
-        if (!gf_load(&gf_rt, gguf_path)) {
-            fprintf(stderr, "[Adapter-RT] FATAL: cannot reopen GGUF for runtime adapter\n");
-            return false;
-        }
-        if (!adapter_load_runtime(&m->lora, gf_rt, adapter_path, adapter_scale, adapter_gs, m->backend)) {
-            fprintf(stderr, "[Adapter-RT] WARNING: runtime adapter load failed, continuing without adapter\n");
-        }
-        gf_close(&gf_rt);
-        fprintf(stderr, "[Adapter-RT] Total time: %.1f ms\n", rt_timer.ms());
-    }
-
     fprintf(stderr, "[Load] DiT: %d layers, H=%d, Nh=%d/%d, D=%d\n", cfg.n_layers, cfg.hidden_size, cfg.n_heads,
             cfg.n_kv_heads, cfg.head_dim);
     return true;
 }
 
-// Backend init
-static void dit_ggml_init_backend(DiTGGML * m) {
-    BackendPair bp    = backend_init("DiT");
-    m->backend        = bp.backend;
-    m->cpu_backend    = bp.cpu_backend;
-    m->sched          = backend_sched_new(bp, 8192);
-    // flash_attn_ext accumulates in F16 on CPU, causing audible drift over
-    // 24 layers x 8 steps. Use F32 manual attention on CPU instead.
-    m->use_flash_attn = bp.has_gpu;
-}
-
 static void dit_ggml_free(DiTGGML * m) {
-    dit_lora_free(&m->lora);
     if (m->sched) {
         ggml_backend_sched_free(m->sched);
     }

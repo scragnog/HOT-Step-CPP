@@ -9,7 +9,6 @@
 //   [Nh, S, D] in math = ne[0]=D, ne[1]=S, ne[2]=Nh in ggml
 
 #include "dit.h"
-#include "adapter-runtime.h"
 
 #include <cmath>
 
@@ -38,20 +37,6 @@ static struct ggml_tensor * dit_ggml_linear(struct ggml_context * ctx,
                                             struct ggml_tensor *  weight,
                                             struct ggml_tensor *  input) {
     return ggml_mul_mat(ctx, weight, input);
-}
-
-// Helper: Linear layer with runtime LoRA delta
-// y = W@x + delta@x  (delta is precomputed BF16 in VRAM, or NULL)
-static struct ggml_tensor * dit_ggml_linear_lora(struct ggml_context * ctx,
-                                                 struct ggml_tensor *  weight,
-                                                 struct ggml_tensor *  delta,
-                                                 struct ggml_tensor *  input) {
-    struct ggml_tensor * y = ggml_mul_mat(ctx, weight, input);
-    if (delta) {
-        struct ggml_tensor * dy = ggml_mul_mat(ctx, delta, input);
-        y = ggml_add(ctx, y, dy);
-    }
-    return y;
 }
 
 // Helper: Linear layer with bias
@@ -160,8 +145,7 @@ static struct ggml_tensor * dit_ggml_build_self_attn(
     struct ggml_tensor *  mask,       // [S, S] or NULL (sliding window mask)
     int                   S,
     int                   N,
-    int                   layer_idx = -1,
-    DiTLoRALayer *        lora      = nullptr) {
+    int                   layer_idx = -1) {
     DiTGGMLConfig & c   = m->cfg;
     int             D   = c.head_dim;
     int             Nh  = c.n_heads;
@@ -181,11 +165,11 @@ static struct ggml_tensor * dit_ggml_build_self_attn(
         struct ggml_tensor * qk = dit_ggml_linear(ctx, ly->sa_qk, norm_sa);
         q                       = ggml_cont(ctx, ggml_view_3d(ctx, qk, q_dim, S, N, qk->nb[1], qk->nb[2], 0));
         k = ggml_cont(ctx, ggml_view_3d(ctx, qk, kv_dim, S, N, qk->nb[1], qk->nb[2], (size_t) q_dim * qk->nb[0]));
-        v = dit_ggml_linear_lora(ctx, ly->sa_v_proj, lora ? lora->sa_v.delta : nullptr, norm_sa);
+        v = dit_ggml_linear(ctx, ly->sa_v_proj, norm_sa);
     } else {
-        q = dit_ggml_linear_lora(ctx, ly->sa_q_proj, lora ? lora->sa_q.delta : nullptr, norm_sa);
-        k = dit_ggml_linear_lora(ctx, ly->sa_k_proj, lora ? lora->sa_k.delta : nullptr, norm_sa);
-        v = dit_ggml_linear_lora(ctx, ly->sa_v_proj, lora ? lora->sa_v.delta : nullptr, norm_sa);
+        q = dit_ggml_linear(ctx, ly->sa_q_proj, norm_sa);
+        k = dit_ggml_linear(ctx, ly->sa_k_proj, norm_sa);
+        v = dit_ggml_linear(ctx, ly->sa_v_proj, norm_sa);
     }
 
     // 2) Reshape to heads: [Nh*D, S, N] -> [D, Nh, S, N]
@@ -244,7 +228,7 @@ static struct ggml_tensor * dit_ggml_build_self_attn(
     }
 
     // 8) O projection: [Nh*D, S, N] -> [H, S, N]
-    struct ggml_tensor * out = dit_ggml_linear_lora(ctx, ly->sa_o_proj, lora ? lora->sa_o.delta : nullptr, attn);
+    struct ggml_tensor * out = dit_ggml_linear(ctx, ly->sa_o_proj, attn);
     return out;
 }
 
@@ -255,8 +239,7 @@ static struct ggml_tensor * dit_ggml_build_mlp(struct ggml_context * ctx,
                                                DiTGGML *             m,
                                                DiTGGMLLayer *        ly,
                                                struct ggml_tensor *  norm_ffn,
-                                               int                   S,
-                                               DiTLoRALayer *        lora = nullptr) {
+                                               int                   S) {
     struct ggml_tensor * ff;
     if (ly->gate_up) {
         // Fused: single matmul [H, 2*I] x [H, S, N] -> [2*I, S, N], then swiglu splits ne[0]
@@ -264,13 +247,13 @@ static struct ggml_tensor * dit_ggml_build_mlp(struct ggml_context * ctx,
         ff                      = ggml_swiglu(ctx, gu);
     } else {
         // Separate: two matmuls + split swiglu
-        struct ggml_tensor * gate = dit_ggml_linear_lora(ctx, ly->gate_proj, lora ? lora->gate.delta : nullptr, norm_ffn);
-        struct ggml_tensor * up   = dit_ggml_linear_lora(ctx, ly->up_proj, lora ? lora->up.delta : nullptr, norm_ffn);
+        struct ggml_tensor * gate = dit_ggml_linear(ctx, ly->gate_proj, norm_ffn);
+        struct ggml_tensor * up   = dit_ggml_linear(ctx, ly->up_proj, norm_ffn);
         ff                        = ggml_swiglu_split(ctx, gate, up);
     }
 
     // Down projection: [I, S] -> [H, S]
-    return dit_ggml_linear_lora(ctx, ly->down_proj, lora ? lora->down.delta : nullptr, ff);
+    return dit_ggml_linear(ctx, ly->down_proj, ff);
 }
 
 // Build cross-attention sub-graph for a single layer.
@@ -286,8 +269,7 @@ static struct ggml_tensor * dit_ggml_build_cross_attn(struct ggml_context * ctx,
                                                       struct ggml_tensor *  mask,       // [enc_S, S, 1, N] F16 or NULL
                                                       int                   S,
                                                       int                   enc_S,
-                                                      int                   N,
-                                                      DiTLoRALayer *        lora = nullptr) {
+                                                      int                   N) {
     DiTGGMLConfig & c   = m->cfg;
     int             D   = c.head_dim;
     int             Nh  = c.n_heads;
@@ -310,14 +292,14 @@ static struct ggml_tensor * dit_ggml_build_cross_attn(struct ggml_context * ctx,
         v = ggml_cont(ctx, ggml_view_3d(ctx, kv, kv_dim, enc_S, N, kv->nb[1], kv->nb[2], (size_t) kv_dim * kv->nb[0]));
     } else if (ly->ca_kv) {
         // Q separate, K+V fused
-        q                       = dit_ggml_linear_lora(ctx, ly->ca_q_proj, lora ? lora->ca_q.delta : nullptr, norm_ca);
+        q                       = dit_ggml_linear(ctx, ly->ca_q_proj, norm_ca);
         struct ggml_tensor * kv = ggml_mul_mat(ctx, ly->ca_kv, enc);
         k                       = ggml_cont(ctx, ggml_view_3d(ctx, kv, kv_dim, enc_S, N, kv->nb[1], kv->nb[2], 0));
         v = ggml_cont(ctx, ggml_view_3d(ctx, kv, kv_dim, enc_S, N, kv->nb[1], kv->nb[2], (size_t) kv_dim * kv->nb[0]));
     } else {
-        q = dit_ggml_linear_lora(ctx, ly->ca_q_proj, lora ? lora->ca_q.delta : nullptr, norm_ca);
-        k = dit_ggml_linear_lora(ctx, ly->ca_k_proj, lora ? lora->ca_k.delta : nullptr, enc);
-        v = dit_ggml_linear_lora(ctx, ly->ca_v_proj, lora ? lora->ca_v.delta : nullptr, enc);
+        q = dit_ggml_linear(ctx, ly->ca_q_proj, norm_ca);
+        k = dit_ggml_linear(ctx, ly->ca_k_proj, enc);
+        v = dit_ggml_linear(ctx, ly->ca_v_proj, enc);
     }
 
     // reshape to [D, heads, seq, N] then permute to [D, seq, heads, N]
@@ -349,7 +331,7 @@ static struct ggml_tensor * dit_ggml_build_cross_attn(struct ggml_context * ctx,
     attn = ggml_reshape_3d(ctx, attn, Nh * D, S, N);
 
     // O projection
-    return dit_ggml_linear_lora(ctx, ly->ca_o_proj, lora ? lora->ca_o.delta : nullptr, attn);
+    return dit_ggml_linear(ctx, ly->ca_o_proj, attn);
 }
 
 // Build one full DiT layer (AdaLN + self-attn + cross-attn + FFN + gated residuals)
@@ -369,8 +351,7 @@ static struct ggml_tensor * dit_ggml_build_layer(struct ggml_context * ctx,
                                                  struct ggml_tensor *  ca_mask,    // [enc_S, S, 1, N] or NULL
                                                  int                   S,
                                                  int                   enc_S,
-                                                 int                   N,
-                                                 DiTLoRALayer *        lora = nullptr) {
+                                                 int                   N) {
     DiTGGMLConfig & c  = m->cfg;
     DiTGGMLLayer *  ly = &m->layers[layer_idx];
     int             H  = c.hidden_size;
@@ -405,7 +386,7 @@ static struct ggml_tensor * dit_ggml_build_layer(struct ggml_context * ctx,
     }
 
     // sa_mask is pre-selected by the caller (sw+padding for layer_type=0, padding-only for layer_type=1)
-    struct ggml_tensor * sa_out = dit_ggml_build_self_attn(ctx, m, ly, norm_sa, positions, sa_mask, S, N, layer_idx, lora);
+    struct ggml_tensor * sa_out = dit_ggml_build_self_attn(ctx, m, ly, norm_sa, positions, sa_mask, S, N, layer_idx);
 
     if (layer_idx == 0) {
         ggml_set_name(sa_out, "layer0_sa_output");
@@ -423,7 +404,7 @@ static struct ggml_tensor * dit_ggml_build_layer(struct ggml_context * ctx,
     if (enc) {
         struct ggml_tensor * norm_ca = dit_ggml_rms_norm_weighted(ctx, hidden, ly->cross_attn_norm, c.rms_norm_eps);
         struct ggml_tensor * ca_out =
-            dit_ggml_build_cross_attn(ctx, m, ly, norm_ca, enc, positions, ca_mask, S, enc_S, N, lora);
+            dit_ggml_build_cross_attn(ctx, m, ly, norm_ca, enc, positions, ca_mask, S, enc_S, N);
         hidden = ggml_add(ctx, hidden, ca_out);
     }
 
@@ -436,7 +417,7 @@ static struct ggml_tensor * dit_ggml_build_layer(struct ggml_context * ctx,
     residual                      = hidden;
     struct ggml_tensor * norm_ffn = dit_ggml_rms_norm_weighted(ctx, hidden, ly->mlp_norm, c.rms_norm_eps);
     norm_ffn                      = dit_ggml_adaln(ctx, norm_ffn, scale_ffn, shift_ffn, m->scalar_one);
-    struct ggml_tensor * ffn_out  = dit_ggml_build_mlp(ctx, m, ly, norm_ffn, S, lora);
+    struct ggml_tensor * ffn_out  = dit_ggml_build_mlp(ctx, m, ly, norm_ffn, S);
     hidden                        = dit_ggml_gated_add(ctx, residual, ffn_out, gate_ffn);
 
     return hidden;
@@ -573,8 +554,7 @@ static struct ggml_cgraph * dit_ggml_build_graph(DiTGGML *             m,
     for (int i = 0; i < c.n_layers; i++) {
         // layer_type=0 (sliding window): sa_mask_sw, layer_type=1 (full): sa_mask_pad
         struct ggml_tensor * sa_mask = (m->layers[i].layer_type == 0) ? sa_mask_sw : sa_mask_pad;
-        DiTLoRALayer * lora_ly = (m->lora.active && i < DIT_LORA_MAX_LAYERS) ? &m->lora.layers[i] : nullptr;
-        hidden = dit_ggml_build_layer(ctx, m, i, hidden, tproj, enc, positions, sa_mask, ca_mask, S, enc_S, N, lora_ly);
+        hidden = dit_ggml_build_layer(ctx, m, i, hidden, tproj, enc, positions, sa_mask, ca_mask, S, enc_S, N);
         // Debug dumps at key layers: 0, 6, 12, 18, last
         if (i == 0 || i == 6 || i == 12 || i == 18 || i == c.n_layers - 1) {
             char lname[64];

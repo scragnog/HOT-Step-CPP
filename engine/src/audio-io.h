@@ -1,9 +1,11 @@
 #pragma once
-// audio-io.h: unified audio read/write for WAV, MP3, and FLAC.
-// Reads any WAV (PCM16/float32, mono/stereo, any rate), MP3, or FLAC.
+// audio-io.h: unified audio read/write for WAV and MP3.
+// Reads any WAV (PCM16/float32, mono/stereo, any rate) or MP3.
 // Writes WAV (16-bit PCM) or MP3 (via mp3enc).
 // All functions use planar stereo float: [L: T samples][R: T samples].
 // Part of acestep.cpp. MIT license.
+
+#include "task-types.h"
 
 #include <algorithm>
 #include <chrono>
@@ -43,27 +45,6 @@
 
 // mp3enc: MP3 encoder
 #include "mp3/mp3enc.h"
-
-// dr_flac (Unlicense/MIT-0): FLAC decoder. Guard against double-implementation.
-#ifndef AUDIO_IO_FLAC_IMPL
-#    define AUDIO_IO_FLAC_IMPL
-#    define DR_FLAC_IMPLEMENTATION
-#    define DR_FLAC_NO_STDIO
-#    ifdef _MSC_VER
-#        pragma warning(push, 0)
-#    elif defined(__GNUC__)
-#        pragma GCC diagnostic push
-#        pragma GCC diagnostic ignored "-Wconversion"
-#        pragma GCC diagnostic ignored "-Wsign-conversion"
-#    endif
-#    include "vendor/dr_flac/dr_flac.h"
-#    ifdef _MSC_VER
-#        pragma warning(pop)
-#    elif defined(__GNUC__)
-#        pragma GCC diagnostic pop
-#    endif
-#    undef DR_FLAC_IMPLEMENTATION
-#endif
 
 // case-insensitive extension check
 static bool audio_io_ends_with(const char * str, const char * suffix) {
@@ -147,8 +128,14 @@ static float * audio_io_read_mp3_buf(const uint8_t * data, size_t size, int * T_
             }
             int need = pcm_count + samples * out_nch;
             if (need > pcm_cap) {
-                pcm_cap = (need < 65536) ? 65536 : need * 2;
-                pcm_buf = (short *) realloc(pcm_buf, (size_t) pcm_cap * sizeof(short));
+                pcm_cap         = (need < 65536) ? 65536 : need * 2;
+                short * new_buf = (short *) realloc(pcm_buf, (size_t) pcm_cap * sizeof(short));
+                if (!new_buf) {
+                    fprintf(stderr, "[Audio] OOM while decoding MP3 frames\n");
+                    free(pcm_buf);
+                    return NULL;
+                }
+                pcm_buf = new_buf;
             }
             memcpy(pcm_buf + pcm_count, pcm, (size_t) samples * (size_t) out_nch * sizeof(short));
             pcm_count += samples * out_nch;
@@ -209,49 +196,11 @@ static float * audio_io_read_wav_buf(const uint8_t * data, size_t size, int * T_
     return planar;
 }
 
-// Decode FLAC from memory buffer. Returns planar stereo float [L:T][R:T].
-static float * audio_io_read_flac_buf(const uint8_t * data, size_t size, int * T_out, int * sr_out) {
-    *T_out  = 0;
-    *sr_out = 0;
-
-    unsigned int channels = 0, sampleRate = 0;
-    drflac_uint64 totalPCMFrameCount = 0;
-    float * interleaved = drflac_open_memory_and_read_pcm_frames_f32(
-        data, size, &channels, &sampleRate, &totalPCMFrameCount, NULL);
-    if (!interleaved || totalPCMFrameCount == 0) {
-        fprintf(stderr, "[Audio] FLAC: failed to decode buffer\n");
-        if (interleaved) drflac_free(interleaved, NULL);
-        return NULL;
-    }
-
-    int T   = (int) totalPCMFrameCount;
-    int nch = (int) channels;
-
-    float * planar = (float *) malloc((size_t) T * 2 * sizeof(float));
-    if (!planar) {
-        drflac_free(interleaved, NULL);
-        return NULL;
-    }
-    for (int t = 0; t < T; t++) {
-        planar[t]     = interleaved[t * nch + 0];
-        planar[T + t] = (nch >= 2) ? interleaved[t * nch + 1] : interleaved[t * nch + 0];
-    }
-    drflac_free(interleaved, NULL);
-
-    *T_out  = T;
-    *sr_out = (int) sampleRate;
-    fprintf(stderr, "[FLAC] Read buffer: %d samples, %d Hz, %d ch\n", T, (int) sampleRate, nch);
-    return planar;
-}
-
-// Decode WAV, MP3, or FLAC from memory buffer (auto-detect from magic bytes).
+// Decode WAV or MP3 from memory buffer (auto-detect from magic bytes).
 // Returns planar stereo float [L:T][R:T]. Caller frees.
 static float * audio_read_buf(const uint8_t * data, size_t size, int * T_out, int * sr_out) {
     if (size >= 4 && memcmp(data, "RIFF", 4) == 0) {
         return audio_io_read_wav_buf(data, size, T_out, sr_out);
-    }
-    if (size >= 4 && memcmp(data, "fLaC", 4) == 0) {
-        return audio_io_read_flac_buf(data, size, T_out, sr_out);
     }
     return audio_io_read_mp3_buf(data, size, T_out, sr_out);
 }
@@ -313,17 +262,13 @@ static float * audio_io_read_wav(const char * path, int * T_out, int * sr_out) {
     return result;
 }
 
-// Read WAV, MP3, or FLAC (auto-detect from magic bytes).
+// Read WAV or MP3 (auto-detect from extension).
 // Returns planar stereo float [L: T][R: T]. Caller frees.
 static float * audio_read(const char * path, int * T_out, int * sr_out) {
-    size_t    size = 0;
-    uint8_t * buf  = audio_io_load_file(path, &size);
-    if (!buf) {
-        return NULL;
+    if (audio_io_ends_with(path, ".mp3")) {
+        return audio_io_read_mp3(path, T_out, sr_out);
     }
-    float * result = audio_read_buf(buf, size, T_out, sr_out);
-    free(buf);
-    return result;
+    return audio_io_read_wav(path, T_out, sr_out);
 }
 
 // Read WAV or MP3 and resample to 48000 Hz stereo.
@@ -408,9 +353,13 @@ static void audio_normalize(float * audio, int n_total, int peak_clip = 10) {
 }
 
 // convert planar [L:T][R:T] to interleaved [L0,R0,L1,R1,...].
-// returns malloc'd buffer of 2*T floats. caller must free().
+// returns malloc'd buffer of 2*T floats. caller must free(). returns NULL on OOM.
 static float * audio_planar_to_interleaved(const float * planar, int T) {
     float * out = (float *) malloc((size_t) T * 2 * sizeof(float));
+    if (!out) {
+        fprintf(stderr, "[Audio] OOM allocating interleaved buffer for %d samples\n", T);
+        return NULL;
+    }
     for (int t = 0; t < T; t++) {
         out[t * 2 + 0] = planar[t];
         out[t * 2 + 1] = planar[T + t];
@@ -425,24 +374,25 @@ enum WavFormat {
     WAV_F32,  // 32-bit IEEE 754 float (classic RIFF, fmt_tag=3)
 };
 
-// Parse --format value into container type and WAV subformat.
-// Accepts: mp3, wav, wav16, wav24, wav32. Returns false on unknown format.
+// Parse the JSON output_format string into container type and WAV subformat.
+// Accepts: mp3, wav16, wav24, wav32. Returns false on unknown format.
+// Also accepts NULL and "mp3" as default (is_mp3 = true).
 static bool audio_parse_format(const char * s, bool & is_mp3, WavFormat & wav_fmt) {
-    if (!s || !strcmp(s, "mp3")) {
+    if (!s || !strcmp(s, OUTPUT_FORMAT_MP3)) {
         is_mp3 = true;
         return true;
     }
-    if (!strcmp(s, "wav16")) {
+    if (!strcmp(s, OUTPUT_FORMAT_WAV16)) {
         is_mp3  = false;
         wav_fmt = WAV_S16;
         return true;
     }
-    if (!strcmp(s, "wav24")) {
+    if (!strcmp(s, OUTPUT_FORMAT_WAV24)) {
         is_mp3  = false;
         wav_fmt = WAV_S24;
         return true;
     }
-    if (!strcmp(s, "wav32")) {
+    if (!strcmp(s, OUTPUT_FORMAT_WAV32)) {
         is_mp3  = false;
         wav_fmt = WAV_F32;
         return true;
@@ -773,6 +723,11 @@ static std::string audio_encode_mp3(const float * audio,
                 int warm_start = chunk_start - warm_len;
 
                 float * buf = (float *) malloc((size_t) warm_len * 2 * sizeof(float));
+                if (!buf) {
+                    fprintf(stderr, "[MP3] OOM allocating warmup buffer, skipping tid=%d\n", tid);
+                    mp3enc_free(e);
+                    return;
+                }
                 memcpy(buf, enc_audio + warm_start, (size_t) warm_len * sizeof(float));
                 memcpy(buf + warm_len, enc_audio + enc_T + warm_start, (size_t) warm_len * sizeof(float));
 
@@ -799,6 +754,10 @@ static std::string audio_encode_mp3(const float * audio,
             int len = (p + sub <= chunk_len) ? sub : (chunk_len - p);
 
             float * buf = (float *) malloc((size_t) len * 2 * sizeof(float));
+            if (!buf) {
+                fprintf(stderr, "[MP3] OOM allocating chunk buffer tid=%d, aborting this chunk\n", tid);
+                break;
+            }
             memcpy(buf, enc_audio + chunk_start + p, (size_t) len * sizeof(float));
             memcpy(buf + len, enc_audio + enc_T + chunk_start + p, (size_t) len * sizeof(float));
 

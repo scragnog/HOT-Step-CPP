@@ -53,43 +53,39 @@ struct AceRequest {
     float repainting_start;  // 0
     float repainting_end;    // -1
 
-    // repaint/lego region quality (Python _resolve_repaint_config).
-    // 0.0 = conservative (max source preservation).
-    // 0.5 = balanced (default).
-    // 1.0 = aggressive (pure diffusion, no injection).
-    float repaint_strength;  // 0.5
-
-    // task type: "" = auto-detect from data, or one of:
-    // text2music, cover, cover-nofsq, repaint, lego, extract, complete
-    std::string task_type;  // ""
+    // task type: one of text2music, cover, cover-nofsq, repaint, lego, extract, complete.
+    // Default: text2music.
+    std::string task_type;  // "text2music"
 
     // track name for lego/extract/complete (e.g. "vocals", "drums", "guitar")
     std::string track;  // ""
 
-    // inference method: "" or "ode" = ODE Euler, "sde" = SDE Stochastic
-    std::string infer_method;  // ""
+    // inference method: "ode" = ODE Euler, "sde" = SDE Stochastic. Default: ode.
+    std::string infer_method;  // "ode"
 
-    // scheduler: "" = linear (default), or one of the registered schedulers
-    std::string scheduler;  // ""
+    // LM mode: "generate" (full: metadata + lyrics + codes),
+    // "inspire" (short query -> metadata + lyrics, no codes),
+    // "format" (caption + lyrics -> metadata + lyrics, no codes). Default: generate.
+    std::string lm_mode;  // "generate"
 
-    // guidance mode: "" = apg (default), or one of the registered guidance modes
-    std::string guidance_mode;  // ""
+    // Audio output format: "mp3", "wav16", "wav24", "wav32". Default: mp3.
+    std::string output_format;  // "mp3"
+
+    // model selection. synth_model and lm_model are resolved through the
+    // registry scanned from --models <dir>, by both the HTTP server and the
+    // CLI binaries. An empty value falls to the first matching entry of the
+    // registry. adapter and adapter_scale are read by server and ace-synth
+    // and resolved against --adapters <dir> when set.
+    std::string synth_model;    // ""
+    std::string lm_model;       // ""
+    std::string adapter;        // ""
+    float       adapter_scale;  // 1.0
 
     // audio output: peak clip via percentile normalization.
     // 0 = peak normalization (100.0000th percentile, no clipping).
     // 10 = default (99.9990th percentile, clips top 0.001%).
     // 999 = max (99.9001th percentile, clips top 0.1%).
     int peak_clip;  // 10
-
-    // solver sub-parameters (0 = use defaults)
-    int   stork_substeps;      // 0 = default (10)
-    float beat_stability;      // -1 = default (0.25)
-    float frequency_damping;   // -1 = default (0.4)
-    float temporal_smoothing;  // -1 = default (0.13)
-
-    // guidance sub-parameters (0 = use defaults)
-    float apg_momentum;        // 0 = default (0.75)
-    float apg_norm_threshold;  // 0 = default (2.5)
 };
 
 // Initialize all fields to defaults (matches Python GenerationParams defaults)

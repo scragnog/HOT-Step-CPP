@@ -377,8 +377,13 @@ static int vae_ggml_compute(VAEGGML *     m,
         }
 
         // Graph context (generous fixed allocation)
-        size_t ctx_size             = ggml_tensor_overhead() * 1024 + ggml_graph_overhead_custom(8192, false);
-        m->graph_buf                = (uint8_t *) malloc(ctx_size);
+        size_t ctx_size = ggml_tensor_overhead() * 1024 + ggml_graph_overhead_custom(8192, false);
+        m->graph_buf    = (uint8_t *) malloc(ctx_size);
+        if (!m->graph_buf) {
+            fprintf(stderr, "[VAE] FATAL: OOM allocating graph context (%zu bytes) for T=%d\n", ctx_size, T_latent);
+            m->graph_T = 0;
+            return -1;
+        }
         struct ggml_init_params p   = { ctx_size, m->graph_buf, true };
         struct ggml_context *   ctx = ggml_init(p);
 

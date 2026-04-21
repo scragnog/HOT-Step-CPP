@@ -128,6 +128,27 @@ static bool gf_load(GGUFModel * gf, const char * path) {
     gf->data_offset = gguf_get_data_offset(gf->gguf);
 
     int64_t n = gguf_get_n_tensors(gf->gguf);
+
+    // Verify every tensor fits inside the mapped file. Catches truncated
+    // downloads early with a clear message instead of a segfault deep in
+    // cuMemcpyHtoDAsync when the backend reads past the mmap.
+    for (int64_t i = 0; i < n; i++) {
+        const char *         tname = gguf_get_tensor_name(gf->gguf, i);
+        struct ggml_tensor * t     = ggml_get_tensor(gf->meta, tname);
+        size_t               toff  = gguf_get_tensor_offset(gf->gguf, i);
+        size_t               tsize = ggml_nbytes(t);
+        size_t               end   = gf->data_offset + toff + tsize;
+        if (end > gf->file_size) {
+            fprintf(stderr,
+                    "[GGUF] FATAL: '%s' is truncated or corrupt.\n"
+                    "       tensor '%s' needs bytes [%zu..%zu) but file is only %zu bytes.\n"
+                    "       Re-download the file and verify its size or checksum.\n",
+                    path, tname, gf->data_offset + toff, end, gf->file_size);
+            gf_close(gf);
+            return false;
+        }
+    }
+
     fprintf(stderr, "[GGUF] %s: %lld tensors, data at offset %zu\n", path, (long long) n, gf->data_offset);
     return true;
 }
@@ -219,10 +240,11 @@ static struct ggml_tensor * gf_load_tensor_f32(WeightCtx * wctx, const GGUFModel
     struct ggml_tensor * tensor = ggml_new_tensor(wctx->ctx, GGML_TYPE_F32, n_dims, ne);
     ggml_set_name(tensor, name.c_str());
 
-    // Convert data into staging buffer
-    size_t n = ggml_nelements(src);
-    wctx->staging.emplace_back(n);
-    std::vector<float> & buf = wctx->staging.back();
+    // Convert data into staging buffer. unique_ptr keeps .get() stable even
+    // when wctx->staging grows on subsequent calls.
+    size_t  n    = ggml_nelements(src);
+    auto    buf  = std::make_unique<float[]>(n);
+    float * data = buf.get();
 
     size_t       offset = gguf_get_tensor_offset(gf.gguf, idx);
     const void * raw    = gf.mapping + gf.data_offset + offset;
@@ -230,13 +252,14 @@ static struct ggml_tensor * gf_load_tensor_f32(WeightCtx * wctx, const GGUFModel
     if (src->type == GGML_TYPE_BF16) {
         const uint16_t * p = (const uint16_t *) raw;
         for (size_t i = 0; i < n; i++) {
-            buf[i] = ggml_bf16_to_fp32(*(const ggml_bf16_t *) &p[i]);
+            data[i] = ggml_bf16_to_fp32(*(const ggml_bf16_t *) &p[i]);
         }
     } else {
-        ggml_fp16_to_fp32_row((const ggml_fp16_t *) raw, buf.data(), (int) n);
+        ggml_fp16_to_fp32_row((const ggml_fp16_t *) raw, data, (int) n);
     }
 
-    wctx->pending.push_back({ tensor, buf.data(), n * sizeof(float), 0 });
+    wctx->pending.push_back({ tensor, data, n * sizeof(float), 0 });
+    wctx->staging.push_back(std::move(buf));
     return tensor;
 }
 

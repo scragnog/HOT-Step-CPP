@@ -81,8 +81,12 @@ static float * read_wav_buf(const uint8_t * data, size_t size, int * T_audio, in
             size_t data_bytes = (size_t) chunk_size;
 
             if (audio_format == 1 && bits_per_sample == 16) {
-                n_samples         = (int) (data_bytes / ((size_t) n_channels * 2));
-                audio             = (float *) malloc((size_t) n_samples * 2 * sizeof(float));
+                n_samples = (int) (data_bytes / ((size_t) n_channels * 2));
+                audio     = (float *) malloc((size_t) n_samples * 2 * sizeof(float));
+                if (!audio) {
+                    fprintf(stderr, "[WAV] OOM allocating PCM16 buffer for %d samples\n", n_samples);
+                    return NULL;
+                }
                 const uint8_t * p = data + pos;
 
                 for (int t = 0; t < n_samples; t++) {
@@ -100,8 +104,12 @@ static float * read_wav_buf(const uint8_t * data, size_t size, int * T_audio, in
                     }
                 }
             } else if (audio_format == 0xfffe && bits_per_sample == 24 && extensible_subformat == 1) {
-                n_samples         = (int) (data_bytes / ((size_t) n_channels * 3));
-                audio             = (float *) malloc((size_t) n_samples * 2 * sizeof(float));
+                n_samples = (int) (data_bytes / ((size_t) n_channels * 3));
+                audio     = (float *) malloc((size_t) n_samples * 2 * sizeof(float));
+                if (!audio) {
+                    fprintf(stderr, "[WAV] OOM allocating PCM24 buffer for %d samples\n", n_samples);
+                    return NULL;
+                }
                 const uint8_t * p = data + pos;
 
                 for (int t = 0; t < n_samples; t++) {
@@ -119,8 +127,12 @@ static float * read_wav_buf(const uint8_t * data, size_t size, int * T_audio, in
                     }
                 }
             } else if (audio_format == 3 && bits_per_sample == 32) {
-                n_samples         = (int) (data_bytes / ((size_t) n_channels * 4));
-                audio             = (float *) malloc((size_t) n_samples * 2 * sizeof(float));
+                n_samples = (int) (data_bytes / ((size_t) n_channels * 4));
+                audio     = (float *) malloc((size_t) n_samples * 2 * sizeof(float));
+                if (!audio) {
+                    fprintf(stderr, "[WAV] OOM allocating F32 buffer for %d samples\n", n_samples);
+                    return NULL;
+                }
                 const uint8_t * p = data + pos;
 
                 for (int t = 0; t < n_samples; t++) {

@@ -32,7 +32,6 @@
 
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
-#include "ggml-cpu.h"
 #include "ggml.h"
 #include "gguf-weights.h"
 #include "safetensors.h"
@@ -52,47 +51,8 @@
 #include <functional>
 #include <map>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <vector>
-
-// AdapterGroupScales is defined in pipeline-synth.h (included before this header
-// via dit.h → adapter-merge.h chain and by ace-server.cpp directly).
-
-// Classify a GGUF tensor name into its adapter group.
-// Returns "self_attn", "cross_attn", "mlp", "cond_embed", or "" for unclassified.
-//
-// IMPORTANT: These patterns intentionally match the Python hot-step-9000
-// _determine_group() behaviour.  The Python uses ".attn." / ".ff." which do
-// NOT match the ACE-Step model's actual ".self_attn." / ".mlp." naming, so
-// self_attn and mlp tensors fall through to "" (unclassified) and receive the
-// average of all group scales.  This is the behaviour the user has been
-// tuning against for months, so we replicate it here for parity.
-//
-// See ADAPTER_GROUP_SCALES_INVESTIGATION.md for the full write-up.
-// TODO: once Python is fixed, update these patterns to the correct ones:
-//         ".self_attn." → "self_attn",  ".mlp." → "mlp"
-static std::string adapter_determine_group(const std::string & gguf_name) {
-    // cross_attn checked first because it also contains "attn"
-    if (gguf_name.find("cross_attn")      != std::string::npos) return "cross_attn";
-    if (gguf_name.find(".attn.")          != std::string::npos) return "self_attn";
-    if (gguf_name.find(".ff.")            != std::string::npos) return "mlp";
-    if (gguf_name.find("condition_embed") != std::string::npos) return "cond_embed";
-    return "";
-}
-
-// Look up the group scale for a given group name.
-// Unclassified tensors (norms, final_layer, scale_shift_table) get the
-// average of all group scales so they respect the user's intent when groups
-// are zeroed out.
-static float adapter_group_scale_for(const AdapterGroupScales & gs, const std::string & group) {
-    if (group == "self_attn")   return gs.self_attn;
-    if (group == "cross_attn") return gs.cross_attn;
-    if (group == "mlp")        return gs.mlp;
-    if (group == "cond_embed") return gs.cond_embed;
-    // unclassified: average
-    return (gs.self_attn + gs.cross_attn + gs.mlp + gs.cond_embed) / 4.0f;
-}
 
 // Convert safetensors tensor data to F32 based on dtype string.
 // Handles "F32", "BF16", "F16". Returns false for unknown dtypes.
@@ -305,63 +265,6 @@ static bool adapter_backend_can_encode(ggml_backend_t backend, enum ggml_type ty
     return ok;
 }
 
-// True when the backend has a native -> F32 decode cast kernel for this type.
-// Results are cached per type — the probe involves creating a ggml context
-// and calling supports_op, so we don't want to do it 600 times.
-static bool adapter_backend_can_decode(ggml_backend_t backend, enum ggml_type type) {
-    if (type == GGML_TYPE_F32 || type == GGML_TYPE_F16 || type == GGML_TYPE_BF16) {
-        return true;
-    }
-    // cache per type
-    static std::unordered_map<int, bool> cache;
-    auto it = cache.find((int) type);
-    if (it != cache.end()) return it->second;
-
-    // quantized types need a block-aligned element count for the probe tensor
-    int64_t                 probe_n = (int64_t) ggml_blck_size(type) * 4;
-    size_t                  meta    = ggml_tensor_overhead() * 4 + 1024;
-    struct ggml_init_params params  = { meta, NULL, true };
-    struct ggml_context *   ctx     = ggml_init(params);
-    struct ggml_tensor *    src     = ggml_new_tensor_1d(ctx, type, probe_n);
-    struct ggml_tensor *    dst     = ggml_cast(ctx, src, GGML_TYPE_F32);
-    bool                    ok      = ggml_backend_supports_op(backend, dst);
-    // fprintf(stderr, "[Adapter] can_decode(%s → F32): %s\n", ggml_type_name(type), ok ? "GPU" : "CPU fallback");
-    ggml_free(ctx);
-    cache[(int) type] = ok;
-    return ok;
-}
-
-// Dequantize a native-type buffer to F32 using ggml's to_float trait (AVX512 SIMD).
-// Single-threaded — individual adapter tensors are small (rank × dim) so thread
-// spawn overhead on Windows (~100µs × 32 threads) dwarfs the actual dequant (~1µs).
-// Called ~200-400 times during adapter merge; total time is negligible.
-static bool adapter_dequant_cpu(const void * src, float * dst, int64_t ne0, int64_t ne1, enum ggml_type type) {
-    if (type == GGML_TYPE_F32) {
-        memcpy(dst, src, (size_t)(ne0 * ne1) * sizeof(float));
-        return true;
-    }
-    if (type == GGML_TYPE_BF16) {
-        ggml_bf16_to_fp32_row((const ggml_bf16_t *) src, dst, ne0 * ne1);
-        return true;
-    }
-    if (type == GGML_TYPE_F16) {
-        ggml_fp16_to_fp32_row((const ggml_fp16_t *) src, dst, ne0 * ne1);
-        return true;
-    }
-
-    const struct ggml_type_traits * traits = ggml_get_type_traits(type);
-    if (!traits || !traits->to_float) {
-        return false;
-    }
-
-    const size_t    row_nb = ggml_row_size(type, ne0);
-    const uint8_t * sptr   = (const uint8_t *) src;
-    for (int64_t r = 0; r < ne1; r++) {
-        traits->to_float(sptr + r * row_nb, dst + r * ne0, ne0);
-    }
-    return true;
-}
-
 // Build the reverse map from LyCORIS key prefix to GGUF tensor name.
 // LyCORIS stores adapter tensors as "lycoris_<path_with_underscores>.<suffix>",
 // where the torch module path has all dots flattened to underscores. We cannot
@@ -485,25 +388,9 @@ static bool adapter_merge_on_backend(WeightCtx *                                
         return false;
     }
 
-    // base weight upload strategy:
-    //   decode_ok=true  → upload native, cast to F32 on CUDA backend (fast, ggml_cast)
-    //   decode_ok=false → dequant via ggml CPU backend (multi-threaded, AVX512) then
-    //                     upload the F32 result to CUDA. The CPU backend supports
-    //                     ggml_cast for ALL quant types. O(n) compute, uses all cores.
-    bool                    decode_ok = adapter_backend_can_decode(backend, ttype);
-    struct ggml_tensor *    tbase_f32;
-    struct ggml_tensor *    tbase_native = nullptr;
-    std::vector<float>      base_f32_cpu;  // only allocated when !decode_ok
-
-    if (decode_ok) {
-        // upload in native type, cast to F32 on CUDA
-        tbase_native = ggml_new_tensor_2d(ctx, ttype, ne0, ne1);
-        tbase_f32    = ggml_cast(ctx, tbase_native, GGML_TYPE_F32);
-    } else {
-        // CPU dequant: multi-threaded cast via ggml CPU backend, then upload F32 to CUDA
-        tbase_f32 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, ne0, ne1);
-        base_f32_cpu.resize((size_t) nel);
-    }
+    // base uploaded in native type, dequant to F32 on backend via ggml_cast
+    struct ggml_tensor * tbase_native = ggml_new_tensor_2d(ctx, ttype, ne0, ne1);
+    struct ggml_tensor * tbase_f32    = ggml_cast(ctx, tbase_native, GGML_TYPE_F32);
 
     // DoRA scale vector, one F32 per output row when dora_scale is set
     struct ggml_tensor * tds = ds ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1, ne1) : NULL;
@@ -547,15 +434,8 @@ static bool adapter_merge_on_backend(WeightCtx *                                
         return false;
     }
 
-    // helper-owned uploads
-    if (decode_ok) {
-        // upload native from mmap, CUDA will cast to F32
-        ggml_backend_tensor_set(tbase_native, base_ptr, 0, base_nb);
-    } else {
-        // multi-threaded CPU dequant then upload F32
-        adapter_dequant_cpu(base_ptr, base_f32_cpu.data(), ne0, ne1, ttype);
-        ggml_backend_tensor_set(tbase_f32, base_f32_cpu.data(), 0, (size_t) nel * sizeof(float));
-    }
+    // helper-owned uploads: base in native type from mmap, ds if DoRA
+    ggml_backend_tensor_set(tbase_native, base_ptr, 0, base_nb);
     if (tds) {
         ggml_backend_tensor_set(tds, ds, 0, (size_t) ne1 * sizeof(float));
     }
@@ -565,9 +445,9 @@ static bool adapter_merge_on_backend(WeightCtx *                                
     ggml_backend_graph_compute(backend, graph);
 
     // allocate a staging slot sized for the native encoded weight, then download
-    size_t n_floats = (base_nb + sizeof(float) - 1) / sizeof(float);
-    wctx->staging.emplace_back(n_floats);
-    void * merged_buf = wctx->staging.back().data();
+    size_t n_floats    = (base_nb + sizeof(float) - 1) / sizeof(float);
+    auto   staging_buf = std::make_unique<float[]>(n_floats);
+    void * merged_buf  = staging_buf.get();
 
     if (encode_ok) {
         // download straight into staging in native type, zero host postprocess
@@ -587,6 +467,7 @@ static bool adapter_merge_on_backend(WeightCtx *                                
         pc->src    = merged_buf;
         pc->nbytes = merged_bytes;
     }
+    wctx->staging.push_back(std::move(staging_buf));
 
     ggml_backend_buffer_free(buf);
     ggml_free(ctx);
@@ -598,13 +479,12 @@ static bool adapter_merge_on_backend(WeightCtx *                                
 //   delta = (alpha / rank) * scale * B @ A
 // Applied to base weights in place. Alpha is read per tensor if present
 // (ComfyUI baked), else from adapter_config.json, else defaults to rank.
-static bool adapter_merge_lora(WeightCtx *                wctx,
-                               const GGUFModel &          gf,
-                               const STFile &             st,
-                               const std::string &        cfg_dir,
-                               float                      scale,
-                               const AdapterGroupScales & gs,
-                               ggml_backend_t             backend) {
+static bool adapter_merge_lora(WeightCtx *         wctx,
+                               const GGUFModel &   gf,
+                               const STFile &      st,
+                               const std::string & cfg_dir,
+                               float               scale,
+                               ggml_backend_t      backend) {
     int alpha_cfg = adapter_read_alpha(cfg_dir.c_str());
 
     // group lora_A and lora_B entries by their GGUF base tensor name.
@@ -704,12 +584,7 @@ static bool adapter_merge_lora(WeightCtx *                wctx,
         } else {
             alpha = (float) rank;
         }
-        float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
-        float scaling = (alpha / (float) rank) * scale * g_scale;
-        // Per-tensor detail suppressed (uncomment for debugging adapter issues)
-        // fprintf(stderr, "[Adapter]   %s → group=%s, alpha=%.0f, rank=%lld, base_scale=%.2f, g_scale=%.2f, effective=%.4f\n",
-        //         gguf_name.c_str(), adapter_determine_group(gguf_name).c_str(),
-        //         alpha, (long long) rank, scale, g_scale, scaling);
+        float scaling = (alpha / (float) rank) * scale;
 
         // load A and B to F32, PEFT rounds them through BF16 before the GEMM
         int64_t            a_nel = rank * in_feat;
@@ -757,8 +632,6 @@ static bool adapter_merge_lora(WeightCtx *                wctx,
     }
 
     fprintf(stderr, "[Adapter] LoRA merged %d pairs (skipped %d), scale=%.2f\n", merged, skipped, scale);
-    fprintf(stderr, "[Adapter] Group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
-            gs.self_attn, gs.cross_attn, gs.mlp, gs.cond_embed);
     return merged > 0;
 }
 
@@ -798,12 +671,11 @@ static bool adapter_merge_lora(WeightCtx *                wctx,
 // (1, 3, 0, 2). The fast pair (d, b) then collapses into in_feat and the
 // slow pair (c, a) into out_feat under reshape_2d. Net effect:
 //   delta_rm[aa*c + cc, bb*d + dd] = W1[aa, bb] * W2[cc, dd]
-static bool adapter_merge_lokr(WeightCtx *                wctx,
-                               const GGUFModel &          gf,
-                               const STFile &             st,
-                               float                      user_scale,
-                               const AdapterGroupScales & gs,
-                               ggml_backend_t             backend) {
+static bool adapter_merge_lokr(WeightCtx *       wctx,
+                               const GGUFModel & gf,
+                               const STFile &    st,
+                               float             user_scale,
+                               ggml_backend_t    backend) {
     // group the per module tensors by LyCORIS prefix. Each module has either
     // w2 alone (monolithic) or w2_a + w2_b (factorized), never both.
     struct LoKrEntry {
@@ -1009,12 +881,7 @@ static bool adapter_merge_lokr(WeightCtx *                wctx,
             ds_ptr = ds_f32.data();
         }
 
-        float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
-        float scaling = (alpha / (float) r) * g_scale;
-        // Per-tensor detail suppressed (uncomment for debugging adapter issues)
-        // fprintf(stderr, "[Adapter]   %s → group=%s, alpha=%.0f, rank=%lld, g_scale=%.2f, effective=%.4f\n",
-        //         gguf_name.c_str(), adapter_determine_group(gguf_name).c_str(),
-        //         alpha, (long long) r, g_scale, scaling);
+        float scaling = alpha / (float) r;
 
         auto build = [&](struct ggml_context * ctx) {
             struct ggml_tensor * tw1 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, b, a);
@@ -1078,8 +945,6 @@ static bool adapter_merge_lokr(WeightCtx *                wctx,
     fprintf(stderr,
             "[Adapter] LoKr merged %d modules (%d factorized, %d monolithic, %d with DoRA, skipped %d), scale=%.2f\n",
             merged, merged - mono_count, mono_count, dora_count, skipped, user_scale);
-    fprintf(stderr, "[Adapter] Group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
-            gs.self_attn, gs.cross_attn, gs.mlp, gs.cond_embed);
     return merged > 0;
 }
 
@@ -1092,12 +957,11 @@ static bool adapter_merge_lokr(WeightCtx *                wctx,
 //   LyCORIS file    : a flat .safetensors file (LoRA ComfyUI or LoKr)
 // Directories exist only for PEFT. LyCORIS ships as a single file for both LoRA
 // and LoKr payloads.
-static bool adapter_merge(WeightCtx *                wctx,
-                          const GGUFModel &          gf,
-                          const char *               adapter_path,
-                          float                      scale,
-                          const AdapterGroupScales & gs,
-                          ggml_backend_t             backend) {
+static bool adapter_merge(WeightCtx *       wctx,
+                          const GGUFModel & gf,
+                          const char *      adapter_path,
+                          float             scale,
+                          ggml_backend_t    backend) {
     std::string sf_path;
     std::string cfg_dir;
 
@@ -1137,15 +1001,11 @@ static bool adapter_merge(WeightCtx *                wctx,
         return false;
     }
 
-    fprintf(stderr, "[Adapter] Merging adapter: %s (scale=%.2f)\n", adapter_path, scale);
-    fprintf(stderr, "[Adapter] Group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
-            gs.self_attn, gs.cross_attn, gs.mlp, gs.cond_embed);
-
     bool ok;
     if (adapter_detect_lokr(st)) {
-        ok = adapter_merge_lokr(wctx, gf, st, scale, gs, backend);
+        ok = adapter_merge_lokr(wctx, gf, st, scale, backend);
     } else {
-        ok = adapter_merge_lora(wctx, gf, st, cfg_dir, scale, gs, backend);
+        ok = adapter_merge_lora(wctx, gf, st, cfg_dir, scale, backend);
     }
 
     st_close(&st);

@@ -2,6 +2,7 @@
 
 #include "request.h"
 
+#include "task-types.h"
 #include "yyjson.h"
 
 #include <cstdlib>
@@ -40,19 +41,16 @@ void request_init(AceRequest * r) {
     r->cover_noise_strength = 0.0f;
     r->repainting_start     = 0.0f;
     r->repainting_end       = -1.0f;
-    r->repaint_strength     = 0.5f;
-    r->task_type            = "";
+    r->task_type            = TASK_TEXT2MUSIC;
     r->track                = "";
-    r->infer_method         = "";
-    r->scheduler             = "";
-    r->guidance_mode         = "";
+    r->infer_method         = INFER_ODE;
+    r->lm_mode              = LM_MODE_NAME_GENERATE;
+    r->output_format        = OUTPUT_FORMAT_MP3;
+    r->synth_model          = "";
+    r->lm_model             = "";
+    r->adapter              = "";
+    r->adapter_scale        = 1.0f;
     r->peak_clip            = 10;
-    r->stork_substeps       = 0;     // 0 = default (10)
-    r->beat_stability       = -1.0f; // -1 = default (0.25)
-    r->frequency_damping    = -1.0f; // -1 = default (0.4)
-    r->temporal_smoothing   = -1.0f; // -1 = default (0.13)
-    r->apg_momentum         = 0.0f;  // 0 = default (0.75)
-    r->apg_norm_threshold   = 0.0f;  // 0 = default (2.5)
 }
 
 // helper: get yyjson string as std::string
@@ -86,20 +84,29 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
     if ((v = yyjson_obj_get(obj, "lm_negative_prompt")) && yyjson_is_str(v)) {
         r->lm_negative_prompt = yy_str(v);
     }
-    if ((v = yyjson_obj_get(obj, "task_type")) && yyjson_is_str(v)) {
+    if ((v = yyjson_obj_get(obj, "task_type")) && yyjson_is_str(v) && yyjson_get_len(v) > 0) {
         r->task_type = yy_str(v);
     }
     if ((v = yyjson_obj_get(obj, "track")) && yyjson_is_str(v)) {
         r->track = yy_str(v);
     }
-    if ((v = yyjson_obj_get(obj, "infer_method")) && yyjson_is_str(v)) {
+    if ((v = yyjson_obj_get(obj, "infer_method")) && yyjson_is_str(v) && yyjson_get_len(v) > 0) {
         r->infer_method = yy_str(v);
     }
-    if ((v = yyjson_obj_get(obj, "scheduler")) && yyjson_is_str(v)) {
-        r->scheduler = yy_str(v);
+    if ((v = yyjson_obj_get(obj, "lm_mode")) && yyjson_is_str(v) && yyjson_get_len(v) > 0) {
+        r->lm_mode = yy_str(v);
     }
-    if ((v = yyjson_obj_get(obj, "guidance_mode")) && yyjson_is_str(v)) {
-        r->guidance_mode = yy_str(v);
+    if ((v = yyjson_obj_get(obj, "output_format")) && yyjson_is_str(v) && yyjson_get_len(v) > 0) {
+        r->output_format = yy_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "synth_model")) && yyjson_is_str(v)) {
+        r->synth_model = yy_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "lm_model")) && yyjson_is_str(v)) {
+        r->lm_model = yy_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "adapter")) && yyjson_is_str(v)) {
+        r->adapter = yy_str(v);
     }
 
     // ints
@@ -153,29 +160,11 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
     if ((v = yyjson_obj_get(obj, "repainting_end")) && yyjson_is_num(v)) {
         r->repainting_end = (float) yyjson_get_num(v);
     }
-    if ((v = yyjson_obj_get(obj, "repaint_strength")) && yyjson_is_num(v)) {
-        r->repaint_strength = (float) yyjson_get_num(v);
-    }
     if ((v = yyjson_obj_get(obj, "peak_clip")) && yyjson_is_num(v)) {
         r->peak_clip = (int) yyjson_get_num(v);
     }
-    if ((v = yyjson_obj_get(obj, "stork_substeps")) && yyjson_is_num(v)) {
-        r->stork_substeps = (int) yyjson_get_num(v);
-    }
-    if ((v = yyjson_obj_get(obj, "beat_stability")) && yyjson_is_num(v)) {
-        r->beat_stability = (float) yyjson_get_num(v);
-    }
-    if ((v = yyjson_obj_get(obj, "frequency_damping")) && yyjson_is_num(v)) {
-        r->frequency_damping = (float) yyjson_get_num(v);
-    }
-    if ((v = yyjson_obj_get(obj, "temporal_smoothing")) && yyjson_is_num(v)) {
-        r->temporal_smoothing = (float) yyjson_get_num(v);
-    }
-    if ((v = yyjson_obj_get(obj, "apg_momentum")) && yyjson_is_num(v)) {
-        r->apg_momentum = (float) yyjson_get_num(v);
-    }
-    if ((v = yyjson_obj_get(obj, "apg_norm_threshold")) && yyjson_is_num(v)) {
-        r->apg_norm_threshold = (float) yyjson_get_num(v);
+    if ((v = yyjson_obj_get(obj, "adapter_scale")) && yyjson_is_num(v)) {
+        r->adapter_scale = (float) yyjson_get_num(v);
     }
 
     // bool
@@ -362,15 +351,13 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     if (all || r->shift != def.shift) {
         yyjson_mut_obj_add_real(doc, root, "shift", r->shift);
     }
-    if (all || r->infer_method != def.infer_method) {
-        yyjson_mut_obj_add_str(doc, root, "infer_method", r->infer_method.c_str());
-    }
-    if (all || r->scheduler != def.scheduler) {
-        yyjson_mut_obj_add_str(doc, root, "scheduler", r->scheduler.c_str());
-    }
-    if (all || r->guidance_mode != def.guidance_mode) {
-        yyjson_mut_obj_add_str(doc, root, "guidance_mode", r->guidance_mode.c_str());
-    }
+    // infer_method is always emitted for the same reason as task_type: the
+    // request is explicit about its solver choice in any round trip.
+    yyjson_mut_obj_add_str(doc, root, "infer_method", r->infer_method.c_str());
+    // lm_mode and output_format follow the same rule: enumerations with a
+    // guaranteed non-empty value, always explicit in serialized output.
+    yyjson_mut_obj_add_str(doc, root, "lm_mode", r->lm_mode.c_str());
+    yyjson_mut_obj_add_str(doc, root, "output_format", r->output_format.c_str());
 
     // batch
     if (all || r->synth_batch_size != def.synth_batch_size) {
@@ -390,35 +377,26 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     if (all || r->repainting_end != def.repainting_end) {
         yyjson_mut_obj_add_real(doc, root, "repainting_end", r->repainting_end);
     }
-    if (all || r->repaint_strength != def.repaint_strength) {
-        yyjson_mut_obj_add_real(doc, root, "repaint_strength", r->repaint_strength);
-    }
-    if (all || r->task_type != def.task_type) {
-        yyjson_mut_obj_add_str(doc, root, "task_type", r->task_type.c_str());
-    }
+    // task_type is always emitted: it is the single source of truth for the
+    // request and must be explicit in any round trip.
+    yyjson_mut_obj_add_str(doc, root, "task_type", r->task_type.c_str());
     if (all || r->track != def.track) {
         yyjson_mut_obj_add_str(doc, root, "track", r->track.c_str());
     }
     if (all || r->peak_clip != def.peak_clip) {
         yyjson_mut_obj_add_int(doc, root, "peak_clip", r->peak_clip);
     }
-    if (all || r->stork_substeps != def.stork_substeps) {
-        yyjson_mut_obj_add_int(doc, root, "stork_substeps", r->stork_substeps);
+    if (all || r->synth_model != def.synth_model) {
+        yyjson_mut_obj_add_str(doc, root, "synth_model", r->synth_model.c_str());
     }
-    if (all || r->beat_stability != def.beat_stability) {
-        yyjson_mut_obj_add_real(doc, root, "beat_stability", r->beat_stability);
+    if (all || r->lm_model != def.lm_model) {
+        yyjson_mut_obj_add_str(doc, root, "lm_model", r->lm_model.c_str());
     }
-    if (all || r->frequency_damping != def.frequency_damping) {
-        yyjson_mut_obj_add_real(doc, root, "frequency_damping", r->frequency_damping);
+    if (all || r->adapter != def.adapter) {
+        yyjson_mut_obj_add_str(doc, root, "adapter", r->adapter.c_str());
     }
-    if (all || r->temporal_smoothing != def.temporal_smoothing) {
-        yyjson_mut_obj_add_real(doc, root, "temporal_smoothing", r->temporal_smoothing);
-    }
-    if (all || r->apg_momentum != def.apg_momentum) {
-        yyjson_mut_obj_add_real(doc, root, "apg_momentum", r->apg_momentum);
-    }
-    if (all || r->apg_norm_threshold != def.apg_norm_threshold) {
-        yyjson_mut_obj_add_real(doc, root, "apg_norm_threshold", r->apg_norm_threshold);
+    if (all || r->adapter_scale != def.adapter_scale) {
+        yyjson_mut_obj_add_real(doc, root, "adapter_scale", r->adapter_scale);
     }
 
     return doc;
@@ -470,26 +448,26 @@ void request_dump(const AceRequest * r, FILE * f) {
                 r->cover_noise_strength);
     }
     if (r->repainting_start != 0.0f || r->repainting_end >= 0.0f) {
-        fprintf(f, "[Request] repaint: start=%.1f end=%.1f strength=%.2f\n", r->repainting_start, r->repainting_end,
-                r->repaint_strength);
+        fprintf(f, "[Request] repaint: start=%.1f end=%.1f\n", r->repainting_start, r->repainting_end);
     }
-    if (!r->task_type.empty()) {
-        fprintf(f, "[Request] task_type: %s\n", r->task_type.c_str());
-    }
+    fprintf(f, "[Request] task_type: %s\n", r->task_type.c_str());
     if (!r->track.empty()) {
         fprintf(f, "[Request] track: %s\n", r->track.c_str());
     }
-    if (!r->infer_method.empty()) {
-        fprintf(f, "[Request] infer_method: %s\n", r->infer_method.c_str());
-    }
-    if (!r->scheduler.empty()) {
-        fprintf(f, "[Request] scheduler: %s\n", r->scheduler.c_str());
-    }
-    if (!r->guidance_mode.empty()) {
-        fprintf(f, "[Request] guidance_mode: %s\n", r->guidance_mode.c_str());
-    }
+    fprintf(f, "[Request] infer_method: %s\n", r->infer_method.c_str());
+    fprintf(f, "[Request] lm_mode: %s\n", r->lm_mode.c_str());
+    fprintf(f, "[Request] output_format: %s\n", r->output_format.c_str());
     if (r->peak_clip != 10) {
         fprintf(f, "[Request] peak_clip: %d\n", r->peak_clip);
+    }
+    if (!r->synth_model.empty()) {
+        fprintf(f, "[Request] synth_model: %s\n", r->synth_model.c_str());
+    }
+    if (!r->lm_model.empty()) {
+        fprintf(f, "[Request] lm_model: %s\n", r->lm_model.c_str());
+    }
+    if (!r->adapter.empty()) {
+        fprintf(f, "[Request] adapter: %s (scale=%.2f)\n", r->adapter.c_str(), r->adapter_scale);
     }
     fprintf(f, "[Request] audio_codes: %s\n", r->audio_codes.empty() ? "(none)" : "(present)");
 }

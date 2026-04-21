@@ -9,53 +9,40 @@
 //   pipeline-synth.cpp      orchestrator: load, phases, free
 //   pipeline-synth-ops.cpp  primitives:   encode, context, noise, dit, vae
 
-#include "bpe.h"
-#include "cond-enc.h"
 #include "debug.h"
-#include "dit.h"
-#include "fsq-detok.h"
-#include "fsq-tok.h"
+#include "model-store.h"
 #include "pipeline-synth.h"
-#include "qwen3-enc.h"
 #include "request.h"
 #include "timer.h"
-#include "vae.h"
 
 #include <string>
 #include <vector>
 
-// AceSynth carries the resident modules, the CPU-side DiT metadata cached at
-// load time, and the slots for the on-demand DiT and VAE decoder. have_dit
-// and have_vae track VRAM residency and gate the phase entry points.
+// AceSynth is a thin handle over a ModelStore. It carries the ModelKeys the
+// ops use to acquire modules and a pointer to the DiT metadata owned by the
+// store (silence_latent, null_cond, config, is_turbo). No GPU module is ever
+// owned here: each op performs its own require/release against the store.
 struct AceSynth {
-    // Resident modules (loaded once at ace_synth_load)
-    Qwen3GGML    text_enc;
-    CondGGML     cond_enc;
-    DetokGGML    detok;
-    TokGGML      tok;
-    BPETokenizer bpe;
-
-    // On-demand modules (loaded via ace_synth_dit_load / ace_synth_vae_load)
-    DiTGGML dit;
-    VAEGGML vae;
-    bool    have_dit;
-    bool    have_vae;
-
-    // CPU-side DiT state, populated at ace_synth_load from the GGUF metadata.
-    // Lets text encoding and T resolution run without the DiT in VRAM.
-    DiTGGMLConfig      dit_cfg;
-    std::vector<float> silence_full;   // [15000, 64] f32, from silence_latent tensor
-    std::vector<float> null_cond_cpu;  // [hidden_size] f32, from null_condition_emb (empty when the model has none)
-    bool               is_turbo;
-
-    // Config
+    ModelStore *   store;
     AceSynthParams params;
-    bool           have_detok;
-    bool           have_tok;
 
-    // Derived constants
+    // CPU metadata pointer. Owned by the store, valid for the store lifetime
+    // (always longer than AceSynth). Gives ops access to silence_full,
+    // null_cond_cpu, is_turbo and the DiT config without loading the DiT.
+    const DiTMeta * meta;
+
+    // Derived constants mirrored for inline use in ops.
     int Oc;      // out_channels (64)
     int ctx_ch;  // in_channels - Oc (128)
+
+    // ModelKeys for the seven GPU modules the pipeline touches.
+    ModelKey text_enc_key;   // Qwen3 text encoder, from text_encoder_path
+    ModelKey cond_enc_key;   // condition encoder, from dit_path
+    ModelKey fsq_tok_key;    // FSQ tokenizer, from dit_path
+    ModelKey fsq_detok_key;  // FSQ detokenizer, from dit_path
+    ModelKey dit_key;        // DiT, from dit_path (+ adapter_path, adapter_scale)
+    ModelKey vae_enc_key;    // VAE encoder, from vae_path
+    ModelKey vae_dec_key;    // VAE decoder, from vae_path
 };
 
 // Transient state for a single job, shared by reference across the primitive
@@ -76,14 +63,17 @@ struct SynthState {
     std::vector<float> padded_src;    // interleaved stereo buffer with silence padding
 
     // mode flags
-    std::string task;
-    bool        is_repaint;
-    bool        is_lego_region;
-    float       rs;
-    float       re;
-    bool        use_source_context;
-    bool        have_codes;
-    int         max_codes_len;
+    bool  is_repaint;
+    bool  is_lego_region;
+    float rs;
+    float re;
+    bool  use_source_context;
+    bool  have_codes;
+    int   max_codes_len;
+
+    // audio_codes parsed once per request in ops_resolve_params, reused by
+    // ops_build_context. Indexed [0..batch_n). Empty entries mean no codes.
+    std::vector<std::vector<int>> per_codes;
 
     // shared params (from reqs[0])
     AceRequest rr;
@@ -95,32 +85,8 @@ struct SynthState {
     // diffusion schedule
     std::vector<float> schedule;
 
-    // Solver name: dispatched via solver_lookup() in solvers/solver-registry.h
-    // Valid values: "euler", "heun", "rk4", "rk5", "dopri5", "dop853",
-    //              "dpm2m", "dpm3m", "dpm2m_ada", "jkass_quality", "jkass_fast",
-    //              "stork2", "stork4", "sde"
-    // Legacy alias: "ode" -> "euler"
-    std::string solver;
-
-    // Scheduler name: dispatched via scheduler_lookup() in schedulers/scheduler-registry.h
-    // Valid values: "linear", "ddim_uniform", "sgm_uniform", "bong_tangent",
-    //              "linear_quadratic", "cosine", "power", "beta57"
-    // Alias: "karras" -> "sgm_uniform"
-    std::string scheduler;
-
-    // Guidance mode: dispatched via guidance_lookup() in guidance/guidance-registry.h
-    // Valid values: "apg", "cfg_pp", "dynamic_cfg", "rescaled_cfg"
-    std::string guidance_mode;
-
-    // solver sub-parameters (from request, 0/-1 = use defaults)
-    int   stork_substeps;      // 0 = default (10)
-    float beat_stability;      // -1 = default (0.25)
-    float frequency_damping;   // -1 = default (0.4)
-    float temporal_smoothing;  // -1 = default (0.13)
-
-    // guidance sub-parameters (from request, 0 = use defaults)
-    float apg_momentum;        // 0 = default (0.75)
-    float apg_norm_threshold;  // 0 = default (2.5)
+    // SDE mode: inject fresh noise at each denoising step (vs ODE pure integration)
+    bool use_sde;
 
     // per-batch seeds (for reproducible SDE re-noising: seed + step offset)
     std::vector<int64_t> seeds;
@@ -134,14 +100,8 @@ struct SynthState {
     int repaint_t0;
     int repaint_t1;
 
-    // repaint quality (resolved from repaint_strength via _resolve_repaint_config)
-    float repaint_injection_ratio;
-    int   repaint_crossfade_frames;
-    float repaint_wav_cf_sec;
-
     // DiT instruction
-    std::string instruction_str;     // main DiT instruction (set by orchestrator)
-    std::string nc_instruction_str;  // non-cover pass instruction (for cover_steps < 1.0 switching)
+    std::string instruction_str;  // main DiT instruction (set by orchestrator)
 
     // conditioning tensors
     std::vector<float> timbre_feats;
@@ -169,7 +129,6 @@ struct SynthState {
     // noise + output
     std::vector<float> noise;
     std::vector<float> output;
-    std::vector<float> repaint_src;
     std::vector<int>   per_S;
 
     // debug / timing

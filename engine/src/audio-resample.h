@@ -100,12 +100,15 @@ static float * audio_resample(const float * in, int n_in, int sr_in, int sr_out,
 
     // passthrough: no conversion needed
     if (sr_in == sr_out) {
-        *n_out      = n_in;
         size_t  sz  = (size_t) n_in * (size_t) nch * sizeof(float);
         float * out = (float *) malloc(sz);
-        if (out) {
-            memcpy(out, in, sz);
+        if (!out) {
+            fprintf(stderr, "[Audio-Resample] OOM passthrough buffer (%zu bytes)\n", sz);
+            *n_out = 0;
+            return NULL;
         }
+        *n_out = n_in;
+        memcpy(out, in, sz);
         return out;
     }
 

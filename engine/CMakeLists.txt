@@ -101,6 +101,7 @@ endif()
 # Core library (shared between binaries)
 add_library(acestep-core STATIC
     src/request.cpp
+    src/model-store.cpp
     src/pipeline-lm.cpp
     src/pipeline-synth.cpp
     src/pipeline-synth-ops.cpp

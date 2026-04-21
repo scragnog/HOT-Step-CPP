@@ -1,28 +1,31 @@
 #pragma once
 // pipeline-lm.h: ACE-Step LM pipeline
 //
-// Loads Qwen3 causal LM once, then enriches requests:
-// text caption -> metadata + lyrics + audio codes.
+// A lightweight context bound to a ModelStore. On each generate call the
+// pipeline acquires the Qwen3 LM, BPE tokenizer and FSM template from the
+// store and releases the LM through RAII before returning.
 
 #include "request.h"
 #include "task-types.h"
 
 struct AceLm;
+struct ModelStore;
 
 struct AceLmParams {
     const char * model_path;     // LM GGUF (required)
-    int          max_seq;        // KV cache length (default: 8192)
-    int          max_batch;      // max lm_batch_size for generate (default: 4)
-    bool         use_fsm;        // constrained decoding (default: true)
-    bool         use_fa;         // flash attention (default: true)
-    bool         use_batch_cfg;  // batch cond+uncond in one forward (default: true)
-    bool         clamp_fp16;     // clamp hidden states to FP16 range (default: false)
+    int          max_seq;        // KV cache length
+    int          max_batch;      // max lm_batch_size for generate
+    bool         use_fsm;        // constrained decoding
+    bool         use_fa;         // flash attention
+    bool         use_batch_cfg;  // batch cond+uncond in one forward
+    bool         clamp_fp16;     // clamp hidden states to FP16 range
 };
 
 void ace_lm_default_params(AceLmParams * p);
 
-// Load model, tokenizer, FSM. NULL on failure.
-AceLm * ace_lm_load(const AceLmParams * params);
+// Build a lightweight LM context bound to a ModelStore. The GPU model is
+// acquired per request, never owned by the context. NULL on invalid input.
+AceLm * ace_lm_load(ModelStore * store, const AceLmParams * params);
 
 // Enrich request with metadata, lyrics, audio codes.
 // out[lm_batch_size] allocated by caller, filled with enriched copies of req.
@@ -42,9 +45,8 @@ int ace_lm_generate(AceLm *            ctx,
 
 void ace_lm_free(AceLm * ctx);
 
-// Accessors for sharing the internal LM with other pipelines (e.g. understand).
-// Pointers are valid for the lifetime of the AceLm context.
-struct Qwen3LM;
-struct BPETokenizer;
-Qwen3LM *      ace_lm_get_model(AceLm * ctx);
-BPETokenizer * ace_lm_get_bpe(AceLm * ctx);
+// Read the LM ModelKey the context builds for store_require_lm. Used by
+// test-model-store to verify both ace_lm and ace_understand resolve to the
+// same LM instance when their params are propagated consistently.
+struct ModelKey;
+const ModelKey * ace_lm_lm_key(const AceLm * ctx);

@@ -1,14 +1,12 @@
 #pragma once
 // synth-batch-runner.h: two-phase orchestration shared by the synth binaries
 //
-// Runs phase 1 (DiT) on every group while the DiT is resident, unloads the
-// DiT, then runs phase 2 (VAE) on every job with the widest tiles the GPU
-// can hold. DiT and VAE loads are idempotent, so calling this repeatedly
-// with --keep-loaded paths simply reuses what is already in VRAM.
-//
-// The helper does NOT unload at the end: the caller decides that based on
-// --keep-loaded and picks either ace_synth_free (drop everything) or just
-// letting the context live on for the next call.
+// Phase 1 (all groups) runs ace_synth_job_run_dit. Each call acquires the DiT
+// from the store for the duration of its denoising loop and releases it on
+// scope exit. Under EVICT_STRICT this means the VAE encoder, text encoder,
+// cond encoder and DiT never coexist in VRAM; under EVICT_NEVER they all
+// accumulate across calls. Phase 2 (all jobs) runs ace_synth_job_run_vae,
+// which acquires the VAE decoder on entry and releases it on exit.
 
 #include "pipeline-synth.h"
 
@@ -33,18 +31,14 @@ static int synth_batch_run(AceSynth *                             ctx,
                            const float *                          ref_audio,
                            int                                    ref_len,
                            AceAudio *                             audio_out,
-                           bool                                   keep_loaded = false,
                            bool (*cancel)(void *) = nullptr,
                            void * cancel_data     = nullptr) {
     const int                  n_groups = (int) groups.size();
     std::vector<AceSynthJob *> jobs(n_groups, nullptr);
     std::vector<int>           audio_off(n_groups, 0);
 
-    // Phase 1: DiT resident, iterate all groups and carry latents in RAM.
-    if (!ace_synth_dit_load(ctx)) {
-        return -1;
-    }
-
+    // Phase 1: denoising loop for each group. The DiT is acquired and released
+    // by ops_dit_generate inside ace_synth_job_run_dit.
     int off = 0;
     for (int g = 0; g < n_groups; g++) {
         const int gn = (int) groups[g].size();
@@ -60,18 +54,8 @@ static int synth_batch_run(AceSynth *                             ctx,
         off += gn;
     }
 
-    // DiT out (unless co-resident), VAE in.
-    if (!keep_loaded) {
-        ace_synth_dit_unload(ctx);
-    }
-    if (!ace_synth_vae_load(ctx)) {
-        for (int g = 0; g < n_groups; g++) {
-            ace_synth_job_free(jobs[g]);
-        }
-        return -1;
-    }
-
-    // Phase 2: VAE decode + splice on every job.
+    // Phase 2: VAE decode for each job. The decoder is acquired and released
+    // by ops_vae_decode_and_splice inside ace_synth_job_run_vae.
     for (int g = 0; g < n_groups; g++) {
         const int rc =
             ace_synth_job_run_vae(ctx, jobs[g], src_audio, src_len, audio_out + audio_off[g], cancel, cancel_data);
