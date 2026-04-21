@@ -140,12 +140,12 @@ export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudi
         applyTriggerWord(params, preset.adapter_path);
       }
 
-      // 6) Reference Track — timbre conditioning + mastering
+      // 6) Reference Track — mastering + optional timbre conditioning
       if (preset?.reference_track_path) {
-        params.sourceAudioUrl = preset.reference_track_path;
-        params.audioCoverStrength = preset.audio_cover_strength ?? 0.5;
         params.masteringEnabled = true;
         params.masteringReference = preset.reference_track_path;
+        // Use as timbre reference (resolved in generate route) — NOT audio cover
+        params.timbreReference = true;
       }
 
       // 7) Mark as Lyric Studio generation
