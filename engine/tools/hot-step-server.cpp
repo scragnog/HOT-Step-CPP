@@ -469,6 +469,7 @@ struct ServerFields {
     float       beat_stability     = 0.25f;
     float       frequency_damping  = 0.4f;
     float       temporal_smoothing = 0.13f;
+    AdapterGroupScales group_scales;  // per-group adapter scale multipliers
 };
 
 static void parse_server_fields(const char * json, ServerFields * sf) {
@@ -526,6 +527,18 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     }
     if ((v = yyjson_obj_get(obj, "temporal_smoothing")) && yyjson_is_num(v)) {
         sf->temporal_smoothing = (float) yyjson_get_real(v);
+    }
+    // Per-group adapter scales: {"adapter_group_scales": {"self_attn": 1.0, ...}}
+    yyjson_val * gs_obj = yyjson_obj_get(obj, "adapter_group_scales");
+    if (gs_obj && yyjson_is_obj(gs_obj)) {
+        if ((v = yyjson_obj_get(gs_obj, "self_attn")) && yyjson_is_num(v))
+            sf->group_scales.self_attn = (float) yyjson_get_real(v);
+        if ((v = yyjson_obj_get(gs_obj, "cross_attn")) && yyjson_is_num(v))
+            sf->group_scales.cross_attn = (float) yyjson_get_real(v);
+        if ((v = yyjson_obj_get(gs_obj, "mlp")) && yyjson_is_num(v))
+            sf->group_scales.mlp = (float) yyjson_get_real(v);
+        if ((v = yyjson_obj_get(gs_obj, "cond_embed")) && yyjson_is_num(v))
+            sf->group_scales.cond_embed = (float) yyjson_get_real(v);
     }
     yyjson_doc_free(doc);
 }
@@ -809,18 +822,22 @@ static void synth_worker(std::shared_ptr<Job>    job,
 
     // HOT-Step sideband: push custom params to global before synth.
     // The sampler reads these inside dit_ggml_generate().
-    g_hotstep_params.solver_name       = sf.solver_name;
-    g_hotstep_params.scheduler         = sf.scheduler;
-    g_hotstep_params.guidance_mode     = sf.guidance_mode;
-    g_hotstep_params.apg_momentum      = sf.apg_momentum;
-    g_hotstep_params.apg_norm_threshold = sf.apg_norm_threshold;
-    g_hotstep_params.stork_substeps    = sf.stork_substeps;
-    g_hotstep_params.beat_stability    = sf.beat_stability;
-    g_hotstep_params.frequency_damping = sf.frequency_damping;
-    g_hotstep_params.temporal_smoothing = sf.temporal_smoothing;
+    g_hotstep_params.solver_name         = sf.solver_name;
+    g_hotstep_params.scheduler           = sf.scheduler;
+    g_hotstep_params.guidance_mode       = sf.guidance_mode;
+    g_hotstep_params.apg_momentum        = sf.apg_momentum;
+    g_hotstep_params.apg_norm_threshold  = sf.apg_norm_threshold;
+    g_hotstep_params.stork_substeps      = sf.stork_substeps;
+    g_hotstep_params.beat_stability      = sf.beat_stability;
+    g_hotstep_params.frequency_damping   = sf.frequency_damping;
+    g_hotstep_params.temporal_smoothing  = sf.temporal_smoothing;
+    g_hotstep_params.adapter_group_scales = sf.group_scales;
     fprintf(stderr, "[Server] HOT-Step params: solver=%s, guidance=%s, scheduler=%s\n",
             sf.solver_name.c_str(), sf.guidance_mode.c_str(),
             sf.scheduler.empty() ? "(default)" : sf.scheduler.c_str());
+    fprintf(stderr, "[Server] Adapter group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
+            sf.group_scales.self_attn, sf.group_scales.cross_attn,
+            sf.group_scales.mlp, sf.group_scales.cond_embed);
 
     // Two-phase run. The store acquires and releases GPU modules around each
     // op (STRICT) or keeps them across ops (NEVER). The synth ctx is always

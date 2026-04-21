@@ -37,6 +37,7 @@
 #include "safetensors.h"
 #include "weight-ctx.h"
 #include "yyjson.h"
+#include "hot-step-params.h"  // HOT-Step: per-group adapter scales via sideband
 
 #include <sys/stat.h>
 #ifdef _WIN32
@@ -586,6 +587,11 @@ static bool adapter_merge_lora(WeightCtx *         wctx,
         }
         float scaling = (alpha / (float) rank) * scale;
 
+        // HOT-Step: apply per-group adapter scale from sideband
+        float g_scale = adapter_group_scale_for(g_hotstep_params.adapter_group_scales,
+                                                 adapter_determine_group(gguf_name));
+        scaling *= g_scale;
+
         // load A and B to F32, PEFT rounds them through BF16 before the GEMM
         int64_t            a_nel = rank * in_feat;
         int64_t            b_nel = out_feat * rank;
@@ -883,6 +889,11 @@ static bool adapter_merge_lokr(WeightCtx *       wctx,
 
         float scaling = alpha / (float) r;
 
+        // HOT-Step: apply per-group adapter scale from sideband
+        float g_scale = adapter_group_scale_for(g_hotstep_params.adapter_group_scales,
+                                                 adapter_determine_group(gguf_name));
+        float effective_user_scale = user_scale * g_scale;
+
         auto build = [&](struct ggml_context * ctx) {
             struct ggml_tensor * tw1 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, b, a);
 
@@ -928,7 +939,7 @@ static bool adapter_merge_lokr(WeightCtx *       wctx,
             return db;
         };
 
-        if (!adapter_merge_on_backend(wctx, pending_idx, base_ptr, ttype, ne0, ne1, ds_ptr, user_scale, backend,
+        if (!adapter_merge_on_backend(wctx, pending_idx, base_ptr, ttype, ne0, ne1, ds_ptr, effective_user_scale, backend,
                                       gguf_name.c_str(), build)) {
             skipped++;
             continue;
