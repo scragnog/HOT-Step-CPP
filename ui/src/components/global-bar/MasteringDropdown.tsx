@@ -8,6 +8,7 @@ import { Upload, Trash2, Music2 } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { masteringApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { ToggleSwitch } from './BarSection';
 
 interface ReferenceTrack {
   name: string;
@@ -139,16 +140,13 @@ export const MasteringDropdown: React.FC = () => {
 
       {/* Timbre reference toggle */}
       {gp.masteringReference && (
-        <label className="flex items-center gap-2.5 cursor-pointer mt-1">
-          <input
-            type="checkbox"
-            checked={gp.timbreReference}
-            onChange={e => gp.setTimbreReference(e.target.checked)}
-            className="rounded border-zinc-600 bg-zinc-800 text-teal-500 focus:ring-teal-500/20"
-          />
-          <span className="text-sm text-zinc-400">Also use as timbre reference</span>
-          <Music2 size={14} className="text-teal-400 ml-auto" />
-        </label>
+        <div className="flex items-center justify-between mt-1">
+          <div className="flex items-center gap-1.5">
+            <Music2 size={14} className="text-teal-400" />
+            <span className="text-sm text-zinc-400">Also use as timbre reference</span>
+          </div>
+          <ToggleSwitch checked={gp.timbreReference} onChange={gp.setTimbreReference} accentColor="amber" />
+        </div>
       )}
       {gp.timbreReference && gp.masteringReference && (
         <p className="text-[10px] text-zinc-600 leading-relaxed">

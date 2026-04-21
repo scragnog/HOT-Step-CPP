@@ -6,6 +6,7 @@
 import React from 'react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
+import { ToggleSwitch } from './BarSection';
 
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
 
@@ -23,12 +24,10 @@ export const LmThinkingDropdown: React.FC = () => {
   return (
     <div className="space-y-3">
       {/* CoT Caption */}
-      <label className="flex items-center gap-2.5 cursor-pointer">
-        <input type="checkbox" checked={gp.useCotCaption}
-          onChange={e => gp.setUseCotCaption(e.target.checked)}
-          className="rounded border-zinc-600 bg-zinc-800 text-pink-500 focus:ring-pink-500/20" />
+      <div className="flex items-center justify-between">
         <span className="text-sm text-zinc-400">Chain-of-Thought Caption</span>
-      </label>
+        <ToggleSwitch checked={gp.useCotCaption} onChange={gp.setUseCotCaption} accentColor="purple" />
+      </div>
 
       <Slider label="Temperature" value={gp.lmTemperature}
         onChange={gp.setLmTemperature} min={0} max={2} step={0.01} showInput />

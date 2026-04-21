@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { RotateCcw, ChevronDown } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
+import { ToggleSwitch } from './BarSection';
 
 const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
@@ -302,17 +303,10 @@ export const GenerationDropdown: React.FC = () => {
         >
           <div className="flex items-center gap-2">
             <ChevronDown size={12} className={`text-emerald-400 transition-transform duration-200 ${dcwOpen ? 'rotate-180' : ''}`} />
-            <label className="flex items-center gap-1.5 cursor-pointer" onClick={e => e.stopPropagation()}>
-              <input type="checkbox" checked={gp.dcwEnabled}
-                onChange={e => gp.setDcwEnabled(e.target.checked)}
-                className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500/20" />
+            <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+              <ToggleSwitch checked={gp.dcwEnabled} onChange={gp.setDcwEnabled} accentColor="emerald" />
               <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">DCW Correction</span>
-            </label>
-            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
-              gp.dcwEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-500'
-            }`}>
-              {gp.dcwEnabled ? 'ON' : 'OFF'}
-            </span>
+            </div>
           </div>
           {gp.dcwEnabled && (
             <span type="button" onClick={(e) => {
@@ -354,12 +348,10 @@ export const GenerationDropdown: React.FC = () => {
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Seed</label>
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <input type="checkbox" checked={gp.randomSeed}
-              onChange={e => gp.setRandomSeed(e.target.checked)}
-              className="rounded border-zinc-600 bg-zinc-800 text-pink-500 focus:ring-pink-500/20" />
+          <div className="flex items-center gap-1.5">
             <span className="text-xs text-zinc-500">Random</span>
-          </label>
+            <ToggleSwitch checked={gp.randomSeed} onChange={gp.setRandomSeed} accentColor="sky" />
+          </div>
         </div>
         {!gp.randomSeed && (
           <input type="number" className={inputClasses} value={gp.seed}
