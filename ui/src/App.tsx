@@ -493,15 +493,18 @@ const AppContent: React.FC = () => {
 
       {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}
       <div className="flex-shrink-0 bg-zinc-950 border-t border-white/5">
-        {/* Collapsible visualisation area — animates up when playing, down when paused/stopped */}
+        {/* Collapsible visualisation area — animates up when playing, down when paused/stopped.
+            Uses CSS Grid 0fr→1fr trick so the transition tracks actual content height perfectly,
+            unlike max-height which over-shoots and makes the expand feel instant. */}
         <div
           style={{
-            maxHeight: pb.isPlaying ? 200 : 0,
+            display: 'grid',
+            gridTemplateRows: pb.isPlaying ? '1fr' : '0fr',
             opacity: pb.isPlaying ? 1 : 0,
-            overflow: 'hidden',
-            transition: 'max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease',
+            transition: 'grid-template-rows 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
           }}
         >
+          <div style={{ overflow: 'hidden', minHeight: 0 }}>
           <SectionMarkers audioUrl={pb.currentAudioUrl ?? undefined} duration={pb.duration} />
           <SpectrumAnalyzer
             mediaElement={spectrumMediaEl}
@@ -555,6 +558,8 @@ const AppContent: React.FC = () => {
               />
             </div>
           </div>
+          </div>
+          {/* /inner overflow wrapper */}
         </div>
         <Player
           currentSong={currentSong}
