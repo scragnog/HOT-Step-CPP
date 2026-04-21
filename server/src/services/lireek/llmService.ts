@@ -574,6 +574,21 @@ function buildGenerationPrompt(profile: LyricsProfile, extraInstructions?: strin
   let prompt = '';
   if (profile.raw_summary) prompt += `Artist Summary:\n${profile.raw_summary}\n\n`;
   
+  // Include live computed stats (overrides any stale values baked into raw_summary)
+  const vs = profile.vocabulary_stats;
+  if (vs) {
+    prompt += `=== COMPUTED STATS ===\n`;
+    prompt += `Vocabulary: ${vs.total_words} total words, ${vs.unique_words} unique, TTR=${vs.type_token_ratio}\n`;
+    prompt += `Contractions: ${vs.contraction_pct}% of words\n`;
+    prompt += `Profanity: ${vs.profanity_pct}% of words\n`;
+    prompt += `Distinctive words: ${(vs.distinctive_words || []).join(', ')}\n\n`;
+  }
+  const ms = profile.meter_stats;
+  if (ms) {
+    prompt += `Meter: avg ${ms.avg_syllables_per_line} syllables/line (σ=${ms.syllable_std_dev}), ${ms.avg_words_per_line} words/line, range ${ms.line_length_range}\n`;
+  }
+  if (profile.perspective) prompt += `Perspective: ${profile.perspective}\n\n`;
+
   if (profile.rhyme_schemes?.length) prompt += `Preferred Rhyme Schemes: ${profile.rhyme_schemes.join(', ')}\n`;
   if (profile.repetition_stats?.hook_examples?.length) {
     prompt += `Hook Examples:\n${profile.repetition_stats.hook_examples.join('\n')}\n\n`;
