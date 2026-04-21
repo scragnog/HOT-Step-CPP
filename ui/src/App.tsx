@@ -493,57 +493,67 @@ const AppContent: React.FC = () => {
 
       {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}
       <div className="flex-shrink-0 bg-zinc-950 border-t border-white/5">
-        <SectionMarkers audioUrl={pb.currentAudioUrl ?? undefined} duration={pb.duration} />
-        <SpectrumAnalyzer
-          mediaElement={spectrumMediaEl}
-          visible={pb.spectrumEnabled}
-          isPlaying={pb.isPlaying}
-        />
-        {/* Dual waveform: original + mastered stacked, opacity-switched */}
-        <div className="relative" style={{ height: 56 }}>
-          <div style={{
-            position: 'absolute', inset: 0,
-            opacity: pb.playMastered ? 0 : 1,
-            pointerEvents: pb.playMastered ? 'none' : 'auto',
-            transition: 'opacity 0.15s ease',
-          }}>
-            <WaveformPlayer
-              ref={wavesurferRef}
-              volume={pb.playMastered ? 0 : pb.volume}
-              playbackRate={pb.playbackRate}
-              onTimeUpdate={pbSetCurrentTime}
-              onDurationChange={() => {}}
-              onPlayChange={pbSetIsPlaying}
-              onFinish={pbHandleFinish}
-              onReady={(dur) => {
-                handleOriginalReady(dur);
-                if (!pb.playMastered) {
-                  setSpectrumMediaEl(wavesurferRef.current?.getMediaElement() ?? null);
-                }
-              }}
-            />
-          </div>
-          <div style={{
-            position: 'absolute', inset: 0,
-            opacity: pb.playMastered ? 1 : 0,
-            pointerEvents: pb.playMastered ? 'auto' : 'none',
-            transition: 'opacity 0.15s ease',
-          }}>
-            <WaveformPlayer
-              ref={wavesurferAltRef}
-              volume={pb.playMastered ? pb.volume : 0}
-              playbackRate={pb.playbackRate}
-              onTimeUpdate={pbSetCurrentTime}
-              onDurationChange={() => {}}
-              onPlayChange={pbSetIsPlaying}
-              onFinish={pbHandleFinish}
-              onReady={(dur) => {
-                handleAltReady(dur);
-                if (pb.playMastered) {
-                  setSpectrumMediaEl(wavesurferAltRef.current?.getMediaElement() ?? null);
-                }
-              }}
-            />
+        {/* Collapsible visualisation area — animates up when playing, down when paused/stopped */}
+        <div
+          style={{
+            maxHeight: pb.isPlaying ? 200 : 0,
+            opacity: pb.isPlaying ? 1 : 0,
+            overflow: 'hidden',
+            transition: 'max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease',
+          }}
+        >
+          <SectionMarkers audioUrl={pb.currentAudioUrl ?? undefined} duration={pb.duration} />
+          <SpectrumAnalyzer
+            mediaElement={spectrumMediaEl}
+            visible={pb.spectrumEnabled && pb.isPlaying}
+            isPlaying={pb.isPlaying}
+          />
+          {/* Dual waveform: original + mastered stacked, opacity-switched */}
+          <div className="relative" style={{ height: 56 }}>
+            <div style={{
+              position: 'absolute', inset: 0,
+              opacity: pb.playMastered ? 0 : 1,
+              pointerEvents: pb.playMastered ? 'none' : 'auto',
+              transition: 'opacity 0.15s ease',
+            }}>
+              <WaveformPlayer
+                ref={wavesurferRef}
+                volume={pb.playMastered ? 0 : pb.volume}
+                playbackRate={pb.playbackRate}
+                onTimeUpdate={pbSetCurrentTime}
+                onDurationChange={() => {}}
+                onPlayChange={pbSetIsPlaying}
+                onFinish={pbHandleFinish}
+                onReady={(dur) => {
+                  handleOriginalReady(dur);
+                  if (!pb.playMastered) {
+                    setSpectrumMediaEl(wavesurferRef.current?.getMediaElement() ?? null);
+                  }
+                }}
+              />
+            </div>
+            <div style={{
+              position: 'absolute', inset: 0,
+              opacity: pb.playMastered ? 1 : 0,
+              pointerEvents: pb.playMastered ? 'auto' : 'none',
+              transition: 'opacity 0.15s ease',
+            }}>
+              <WaveformPlayer
+                ref={wavesurferAltRef}
+                volume={pb.playMastered ? pb.volume : 0}
+                playbackRate={pb.playbackRate}
+                onTimeUpdate={pbSetCurrentTime}
+                onDurationChange={() => {}}
+                onPlayChange={pbSetIsPlaying}
+                onFinish={pbHandleFinish}
+                onReady={(dur) => {
+                  handleAltReady(dur);
+                  if (pb.playMastered) {
+                    setSpectrumMediaEl(wavesurferAltRef.current?.getMediaElement() ?? null);
+                  }
+                }}
+              />
+            </div>
           </div>
         </div>
         <Player
