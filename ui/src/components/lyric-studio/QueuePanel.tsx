@@ -128,8 +128,10 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
     setGenCountsLoading(true);
     try {
       const res = await lireekApi.listAllGenerations();
+      // API returns raw array (server) but type says { generations }, handle both
+      const gens = Array.isArray(res) ? res : (res.generations || []);
       const counts = new Map<number, number>();
-      for (const g of res.generations) {
+      for (const g of gens) {
         counts.set(g.profile_id, (counts.get(g.profile_id) || 0) + 1);
       }
       setGenCountsMap(counts);
