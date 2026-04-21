@@ -753,6 +753,28 @@ static void synth_worker(std::shared_ptr<Job>    job,
         return;
     }
 
+    // HOT-Step: restore auto-shift that upstream removed.
+    // When shift == -1, compute adaptive shift from duration + step count.
+    // base_shift=3.0 always — merge/turbo models need high shift.
+    // Upstream treats shift <= 0 as "default" (1.0 for non-turbo), which is wrong for our models.
+    // Must run BEFORE groups are built (copies are taken below).
+    for (int ri = 0; ri < batch_n; ri++) {
+        if (ace_reqs[ri].shift == -1.0f) {
+            float dur    = ace_reqs[ri].duration > 0.0f ? (float) ace_reqs[ri].duration : 60.0f;
+            int   steps  = ace_reqs[ri].inference_steps > 0 ? ace_reqs[ri].inference_steps : 20;
+            float dur_f  = 1.0f + 0.15f * ((dur - 60.0f) / 60.0f);
+            dur_f        = fmaxf(0.8f, fminf(1.4f, dur_f));
+            float step_f = 1.0f + 0.1f * ((30.0f - (float) steps) / 30.0f);
+            step_f       = fmaxf(0.8f, fminf(1.4f, step_f));
+            float computed = fmaxf(1.0f, fminf(6.0f, 3.0f * dur_f * step_f));
+            ace_reqs[ri].shift = computed;
+            if (ri == 0) {
+                fprintf(stderr, "[Server] Auto shift: duration=%.0fs, steps=%d → shift=%.3f\n",
+                        dur, steps, computed);
+            }
+        }
+    }
+
     // Build the flat batch. Seeds are resolved per original request, then
     // synth_batch_size is expanded into per-seed variants in groups[0].
     std::vector<std::vector<AceRequest>> groups(1);
@@ -783,27 +805,6 @@ static void synth_worker(std::shared_ptr<Job>    job,
 
     if (total_alloc > 1) {
         fprintf(stderr, "[Server] Batch: %d track(s) from %d request(s)\n", total_alloc, batch_n);
-    }
-
-    // HOT-Step: restore auto-shift that upstream removed.
-    // When shift == -1, compute adaptive shift from duration + step count.
-    // base_shift=3.0 always — merge/turbo models need high shift.
-    // Upstream treats shift <= 0 as "default" (1.0 for non-turbo), which is wrong for our models.
-    for (int ri = 0; ri < batch_n; ri++) {
-        if (ace_reqs[ri].shift == -1.0f) {
-            float dur    = ace_reqs[ri].duration > 0.0f ? (float) ace_reqs[ri].duration : 60.0f;
-            int   steps  = ace_reqs[ri].inference_steps > 0 ? ace_reqs[ri].inference_steps : 20;
-            float dur_f  = 1.0f + 0.15f * ((dur - 60.0f) / 60.0f);
-            dur_f        = fmaxf(0.8f, fminf(1.4f, dur_f));
-            float step_f = 1.0f + 0.1f * ((30.0f - (float) steps) / 30.0f);
-            step_f       = fmaxf(0.8f, fminf(1.4f, step_f));
-            float computed = fmaxf(1.0f, fminf(6.0f, 3.0f * dur_f * step_f));
-            ace_reqs[ri].shift = computed;
-            if (ri == 0) {
-                fprintf(stderr, "[Server] Auto shift: duration=%.0fs, steps=%d → shift=%.3f\n",
-                        dur, steps, computed);
-            }
-        }
     }
 
     // HOT-Step sideband: push custom params to global before synth.
