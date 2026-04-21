@@ -5,7 +5,6 @@ import { FileBrowserModal } from '../shared/FileBrowserModal';
 
 interface PresetForm {
   adapter_path: string;
-  adapter_scale: number;
   self_attn: number;
   cross_attn: number;
   mlp: number;
@@ -16,7 +15,6 @@ interface PresetForm {
 
 const DEFAULT_FORM: PresetForm = {
   adapter_path: '',
-  adapter_scale: 1.0,
   self_attn: 1.0,
   cross_attn: 1.0,
   mlp: 1.0,
@@ -70,7 +68,6 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
         if (res.preset) {
           setForm({
             adapter_path: res.preset.adapter_path || '',
-            adapter_scale: res.preset.adapter_scale ?? 1.0,
             self_attn: res.preset.adapter_group_scales?.self_attn ?? 1.0,
             cross_attn: res.preset.adapter_group_scales?.cross_attn ?? 1.0,
             mlp: res.preset.adapter_group_scales?.mlp ?? 1.0,
@@ -91,7 +88,6 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
     try {
       await lireekApi.upsertPreset(lyricsSetId, {
         adapter_path: form.adapter_path || undefined,
-        adapter_scale: form.adapter_scale,
         adapter_group_scales: { self_attn: form.self_attn, cross_attn: form.cross_attn, mlp: form.mlp, cond_embed: form.cond_embed },
         reference_track_path: form.reference_track_path || undefined,
         audio_cover_strength: form.audio_cover_strength,
@@ -171,10 +167,6 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
                       <span className="text-[10px] text-zinc-500 truncate block" title={form.adapter_path}>{adapterFileName}</span>
                     )}
                   </div>
-                  <Slider label="Adapter Scale" value={form.adapter_scale} min={0} max={4} step={0.05}
-                    onChange={v => setForm(p => ({ ...p, adapter_scale: v }))}
-                    help="Overall strength of the adapter's influence on the output"
-                  />
                   {/* Group Scales */}
                   <div className="space-y-2">
                     <button onClick={() => setGroupsExpanded(!groupsExpanded)}

@@ -1,8 +1,7 @@
 import React from 'react';
-import { ChevronLeft, ChevronDown, ChevronRight, Settings2, FileText, Users, Music2, Headphones, Brain } from 'lucide-react';
+import { ChevronLeft, ChevronDown, ChevronRight, Settings2, FileText, Users, Music2, Headphones } from 'lucide-react';
 import type { Artist, LyricsSet, SongLyric } from '../../services/lireekApi';
 import { TripleProviderSelector, type ModelSelections, loadSelections, saveSelections } from './ProviderSelector';
-import { usePersistedState } from '../../hooks/usePersistedState';
 
 function parseSongs(songs: SongLyric[] | string): SongLyric[] {
   if (typeof songs === 'string') {
@@ -27,10 +26,6 @@ export const AlbumHeader: React.FC<AlbumHeaderProps> = ({
   const [imageError, setImageError] = React.useState(false);
   const [modelSelections, setModelSelections] = React.useState<ModelSelections>(loadSelections);
   const [llmExpanded, setLlmExpanded] = React.useState(false);
-  // Synced with CreatePanel — same localStorage key, inverted (skipLm=false → thinking=true)
-  const [skipLm, setSkipLm] = usePersistedState('hs-skipLm', false);
-  const thinking = !skipLm;
-  const setThinking = (val: boolean) => setSkipLm(!val);
   const songs = parseSongs(album.songs);
 
   const gradient = (name: string) => {
@@ -103,36 +98,6 @@ export const AlbumHeader: React.FC<AlbumHeaderProps> = ({
 
       {/* Spacer pushes Preset + LLM to bottom */}
       <div className="flex-1" />
-
-      {/* Thinking (CoT) Toggle */}
-      <div className="px-4 pb-2">
-        <button
-          onClick={() => setThinking(!thinking)}
-          className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-sm font-medium transition-all duration-200 ${
-            thinking
-              ? 'bg-gradient-to-r from-purple-500/15 to-pink-500/15 border-purple-500/30 text-purple-300 hover:from-purple-500/20 hover:to-pink-500/20'
-              : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-300'
-          }`}
-          title="Chain-of-Thought: Let the AI reason about your prompt before generating music. Synced with Create page."
-        >
-          <div className="flex items-center gap-2.5">
-            <Brain className={`w-4 h-4 transition-colors duration-200 ${thinking ? 'text-purple-400' : 'text-zinc-500'}`} />
-            <span>Thinking</span>
-          </div>
-          {/* Toggle switch */}
-          <div
-            className={`w-9 h-5 rounded-full flex items-center transition-colors duration-200 px-0.5 ${
-              thinking ? 'bg-purple-600' : 'bg-zinc-700'
-            }`}
-          >
-            <div
-              className={`w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform duration-200 ${
-                thinking ? 'translate-x-4' : 'translate-x-0'
-              }`}
-            />
-          </div>
-        </button>
-      </div>
 
       {/* Preset button */}
       <div className="px-4 pb-2">

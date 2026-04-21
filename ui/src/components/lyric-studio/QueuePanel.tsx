@@ -93,7 +93,6 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   const [applying, setApplying] = useState(false);
   const [adapterPath, setAdapterPath] = useState('');
   const [matcheringPath, setMatcheringPath] = useState('');
-  const [adapterScale, setAdapterScale] = useState(1.0);
   const [selfAttn, setSelfAttn] = useState(1.0);
   const [crossAttn, setCrossAttn] = useState(1.0);
   const [mlp, setMlp] = useState(1.0);
@@ -278,7 +277,6 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
         const params: any = {};
         if (hasAdapter) {
           params.adapter_path = adapterPath.trim();
-          params.adapter_scale = adapterScale;
           params.adapter_group_scales = { self_attn: selfAttn, cross_attn: crossAttn, mlp, cond_embed: condEmbed };
         }
         if (hasRef) params.reference_track_path = matcheringPath.trim();
@@ -384,10 +382,9 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                   </div>
                 )}
               </div>
-              {/* Adapter scale */}
+              {/* Group scales for bulk preset assignment */}
               {adapterPath && (
                 <div className="space-y-1">
-                  <EditableSlider label="Adapter Scale" value={adapterScale} min={0} max={4} step={0.05} onChange={setAdapterScale} formatDisplay={v => v.toFixed(2)} />
                   <button onClick={() => setGroupsExpanded(!groupsExpanded)}
                     className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-500 hover:text-zinc-300 transition-colors uppercase tracking-wider">
                     {groupsExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}

@@ -205,14 +205,10 @@ export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudi
     if (gen.key) write('hs-keyScale', gen.key);
     if (gen.duration) write('hs-duration', gen.duration);
 
-    // Adapter from album preset
+    // Adapter from album preset — only set the path, scales are global
     if (preset?.adapter_path) {
       write('hs-adapter', preset.adapter_path);
-      write('hs-adapterScale', preset.adapter_scale ?? 1.0);
       write('hs-adaptersOpen', true);
-      if (preset.adapter_group_scales) {
-        write('hs-adapterGroupScales', preset.adapter_group_scales);
-      }
     }
 
     // Mastering from album preset

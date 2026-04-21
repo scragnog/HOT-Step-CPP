@@ -16,6 +16,7 @@
 import { useSyncExternalStore, useEffect } from 'react';
 import { lireekApi } from '../services/lireekApi';
 import { generateApi, songApi } from '../services/api';
+import { writePersistedState } from '../hooks/usePersistedState';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -118,17 +119,6 @@ function mergeCreatePanelSettings(params: Record<string, any>): void {
   // we must do the same here so both paths produce identical values.
   if (params.dcwScaler !== undefined) params.dcwScaler = params.dcwScaler * 0.02;
   if (params.dcwHighScaler !== undefined) params.dcwHighScaler = params.dcwHighScaler * 0.02;
-}
-
-function getGlobalScaleOverride() {
-  try {
-    const enabled = JSON.parse(localStorage.getItem('hs-globalScaleOverride') || 'false');
-    const overallScale = JSON.parse(localStorage.getItem('hs-globalOverallScale') || '1.0');
-    const groupScales = JSON.parse(localStorage.getItem('hs-globalGroupScales') || 'null') || { self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0 };
-    return { enabled: !!enabled, overallScale, groupScales };
-  } catch {
-    return { enabled: false, overallScale: 1.0, groupScales: { self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0 } };
-  }
 }
 
 function applyTriggerWord(params: Record<string, any>, adapterPath: string): void {
@@ -341,16 +331,16 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     item.stage = `Preparing adapter for ${item.artistName}…`;
     _emit();
 
-    // Apply scale override if enabled (overrides per-preset scales)
-    const scaleOverride = getGlobalScaleOverride();
-    const effectiveScale = scaleOverride.enabled ? scaleOverride.overallScale : (preset.adapter_scale ?? 1.0);
-    const effectiveGroupScales = scaleOverride.enabled ? scaleOverride.groupScales : preset.adapter_group_scales;
+    // Update the top bar to reflect the adapter being used
+    writePersistedState('hs-adapter', preset.adapter_path);
+
+    // Use global adapter scale & group scales (not per-preset)
+    const globalScale = readPersisted('hs-adapterScale') ?? 1.0;
+    const globalGroupScales = readPersisted('hs-adapterGroupScales') ?? { self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0 };
 
     params.loraPath = preset.adapter_path;
-    params.loraScale = effectiveScale;
-    if (effectiveGroupScales) {
-      params.adapterGroupScales = effectiveGroupScales;
-    }
+    params.loraScale = globalScale;
+    params.adapterGroupScales = globalGroupScales;
 
     // Trigger word — send as params so the server injects it AFTER CoT
     // rewrites the caption (matching CreatePanel's approach).
@@ -369,6 +359,11 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
 
   // 4) Reference Track — mastering + optional timbre conditioning
   if (preset?.reference_track_path) {
+    // Update the top bar to reflect the mastering reference
+    writePersistedState('hs-masteringEnabled', true);
+    writePersistedState('hs-masteringReference', preset.reference_track_path);
+    writePersistedState('hs-timbreReference', true);
+
     params.masteringEnabled = true;
     params.masteringReference = preset.reference_track_path;
     // Use as timbre reference (resolved in generate route) — NOT audio cover
