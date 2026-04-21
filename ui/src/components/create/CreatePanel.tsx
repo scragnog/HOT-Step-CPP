@@ -1,117 +1,55 @@
-// CreatePanel.tsx — The composition panel that wires sections together
+// CreatePanel.tsx — The composition panel (Content + Metadata only)
 //
-// Ported to Tailwind styling, matching hot-step-9000's panel layout.
-// Each section is a separate module.
+// Global engine parameters (Models, Adapters, Generation Settings, LM, Mastering)
+// have been moved to the GlobalParamBar. This panel now only handles
+// per-song content and metadata.
 
 import React, { useEffect, useRef } from 'react';
 import { Zap, Loader2, Download, Upload } from 'lucide-react';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { ContentSection } from './ContentSection';
 import { MetadataSection } from './MetadataSection';
-import { GenerationSettings } from './GenerationSettings';
-import { ModelSelector } from './ModelSelector';
-import { AdaptersAccordion } from './AdaptersAccordion';
-import { MasteringSection } from './MasteringSection';
-import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
 import type { GenerationParams, Song } from '../../types';
 
 interface CreatePanelProps {
-  onGenerate: (params: GenerationParams) => void;
+  onGenerate: (params: Partial<GenerationParams>) => void;
   isGenerating: boolean;
   reuseData?: { song: Song; timestamp: number } | null;
 }
 
 export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerating, reuseData }) => {
-  // Content
+  // ── Content (per-song) ──
   const [caption, setCaption] = usePersistedState('hs-caption', '');
   const [lyrics, setLyrics] = usePersistedState('hs-lyrics', '');
   const [instrumental, setInstrumental] = usePersistedState('hs-instrumental', false);
 
-  // Metadata
+  // ── Metadata (per-song) ──
   const [bpm, setBpm] = usePersistedState('hs-bpm', 0);
   const [keyScale, setKeyScale] = usePersistedState('hs-keyScale', '');
   const [timeSignature, setTimeSignature] = usePersistedState('hs-timeSignature', '');
   const [duration, setDuration] = usePersistedState('hs-duration', -1);
   const [vocalLanguage, setVocalLanguage] = usePersistedState('hs-vocalLanguage', 'en');
 
-  // Generation settings
-  const [inferenceSteps, setInferenceSteps] = usePersistedState('hs-inferenceSteps', 12);
-  const [guidanceScale, setGuidanceScale] = usePersistedState('hs-guidanceScale', 9.0);
-  const [shift, setShift] = usePersistedState('hs-shift', 3.0);
-  const [inferMethod, setInferMethod] = usePersistedState('hs-inferMethod', 'euler');
-  const [scheduler, setScheduler] = usePersistedState('hs-scheduler', 'linear');
-  const [guidanceMode, setGuidanceMode] = usePersistedState('hs-guidanceMode', 'apg');
-  const [seed, setSeed] = usePersistedState('hs-seed', -1);
-  const [randomSeed, setRandomSeed] = usePersistedState('hs-randomSeed', true);
-  const [batchSize, setBatchSize] = usePersistedState('hs-batchSize', 1);
-  const [useCotCaption, setUseCotCaption] = usePersistedState('hs-useCotCaption', true);
+  // Global params context — for preset import/export
+  const gp = useGlobalParams();
 
-  // Solver sub-params
-  const [storkSubsteps, setStorkSubsteps] = usePersistedState('hs-storkSubsteps', 10);
-  const [beatStability, setBeatStability] = usePersistedState('hs-beatStability', 0.25);
-  const [frequencyDamping, setFrequencyDamping] = usePersistedState('hs-frequencyDamping', 0.4);
-  const [temporalSmoothing, setTemporalSmoothing] = usePersistedState('hs-temporalSmoothing', 0.13);
-
-  // Guidance sub-params
-  const [apgMomentum, setApgMomentum] = usePersistedState('hs-apgMomentum', 0.75);
-  const [apgNormThreshold, setApgNormThreshold] = usePersistedState('hs-apgNormThreshold', 2.5);
-
-  // DCW (Differential Correction in Wavelet domain)
-  const [dcwEnabled, setDcwEnabled] = usePersistedState('hs-dcwEnabled', false);
-  const [dcwMode, setDcwMode] = usePersistedState('hs-dcwMode', 'low');
-  const [dcwScaler, setDcwScaler] = usePersistedState('hs-dcwScaler', 1.0);
-  const [dcwHighScaler, setDcwHighScaler] = usePersistedState('hs-dcwHighScaler', 0.0);
-
-  // LM toggle
-  const [skipLm, setSkipLm] = usePersistedState('hs-skipLm', false);
-
-  // LM settings
-  const [lmTemperature, setLmTemperature] = usePersistedState('hs-lmTemperature', 0.8);
-  const [lmCfgScale, setLmCfgScale] = usePersistedState('hs-lmCfgScale', 2.2);
-  const [lmTopK, setLmTopK] = usePersistedState('hs-lmTopK', 0);
-  const [lmTopP, setLmTopP] = usePersistedState('hs-lmTopP', 0.92);
-  const [lmNegativePrompt, setLmNegativePrompt] = usePersistedState('hs-lmNegativePrompt', 'NO USER INPUT');
-
-  // Models
-  const [ditModel, setDitModel] = usePersistedState('hs-ditModel', '');
-  const [lmModel, setLmModel] = usePersistedState('hs-lmModel', '');
-  const [vaeModel, setVaeModel] = usePersistedState('hs-vaeModel', '');
-  const [adapter, setAdapter] = usePersistedState('hs-adapter', '');
-  const [adapterScale, setAdapterScale] = usePersistedState('hs-adapterScale', 1.0);
-  const [adapterGroupScales, setAdapterGroupScales] = usePersistedState('hs-adapterGroupScales', {
-    self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0,
-  });
-  const [adapterMode, setAdapterMode] = usePersistedState('hs-adapterMode', 'runtime');
-
-  // Adapter accordion state
-  const [advancedAdapters, setAdvancedAdapters] = usePersistedState('hs-advancedAdapters', false);
-  const [adapterFolder, setAdapterFolder] = usePersistedState('hs-adapterFolder', '');
-  const [adaptersOpen, setAdaptersOpen] = usePersistedState('hs-adaptersOpen', false);
-
-  // Trigger word settings — read from shared settings (same key as App.tsx)
-  const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
-
-  // Mastering
-  const [masteringEnabled, setMasteringEnabled] = usePersistedState('hs-masteringEnabled', false);
-  const [masteringReference, setMasteringReference] = usePersistedState('hs-masteringReference', '');
-  const [timbreReference, setTimbreReference] = usePersistedState('hs-timbreReference', false);
-
-  // Reuse data
+  // ── Reuse data ──
   useEffect(() => {
     if (!reuseData) return;
-    const gp = reuseData.song.generationParams;
-    if (!gp) return;
+    const gpData = reuseData.song.generationParams;
+    if (!gpData) return;
 
-    if (reuseData.song.caption || gp.caption) setCaption(reuseData.song.caption || gp.caption || '');
-    if (reuseData.song.lyrics || gp.lyrics) setLyrics(reuseData.song.lyrics || gp.lyrics || '');
-    if (reuseData.song.style || gp.style) setCaption(reuseData.song.style || gp.style || '');
-    if (gp.bpm) setBpm(gp.bpm);
-    if (gp.keyScale) setKeyScale(gp.keyScale);
-    if (gp.timeSignature) setTimeSignature(gp.timeSignature);
-    if (gp.duration) setDuration(typeof gp.duration === 'string' ? parseFloat(gp.duration) : gp.duration);
-    if (gp.inferenceSteps) setInferenceSteps(gp.inferenceSteps);
-    if (gp.guidanceScale !== undefined) setGuidanceScale(gp.guidanceScale);
-    if (gp.seed !== undefined) setSeed(gp.seed);
+    if (reuseData.song.caption || gpData.caption) setCaption(reuseData.song.caption || gpData.caption || '');
+    if (reuseData.song.lyrics || gpData.lyrics) setLyrics(reuseData.song.lyrics || gpData.lyrics || '');
+    if (reuseData.song.style || gpData.style) setCaption(reuseData.song.style || gpData.style || '');
+    if (gpData.bpm) setBpm(gpData.bpm);
+    if (gpData.keyScale) setKeyScale(gpData.keyScale);
+    if (gpData.timeSignature) setTimeSignature(gpData.timeSignature);
+    if (gpData.duration) setDuration(typeof gpData.duration === 'string' ? parseFloat(gpData.duration) : gpData.duration);
+    if (gpData.inferenceSteps) gp.setInferenceSteps(gpData.inferenceSteps);
+    if (gpData.guidanceScale !== undefined) gp.setGuidanceScale(gpData.guidanceScale);
+    if (gpData.seed !== undefined) gp.setSeed(gpData.seed);
   }, [reuseData?.timestamp]);
 
   // ── JSON Import / Export ────────────────────────────────────────────────
@@ -121,22 +59,30 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     const preset: Record<string, unknown> = {
       _format: 'hot-step-preset',
       _version: 1,
+      // Content
       caption, lyrics, instrumental,
+      // Metadata
       bpm, duration, keyScale, timeSignature, vocalLanguage,
-      inferenceSteps, guidanceScale, shift,
-      inferMethod, scheduler, guidanceMode,
-      seed, randomSeed, batchSize,
-      useCotCaption, skipLm,
-      lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt,
-      ditModel, lmModel, vaeModel,
-      adapter, adapterScale, adapterGroupScales, adapterMode,
-      masteringEnabled, masteringReference, timbreReference,
+      // Global engine params
+      inferenceSteps: gp.inferenceSteps, guidanceScale: gp.guidanceScale, shift: gp.shift,
+      inferMethod: gp.inferMethod, scheduler: gp.scheduler, guidanceMode: gp.guidanceMode,
+      seed: gp.seed, randomSeed: gp.randomSeed, batchSize: gp.batchSize,
+      useCotCaption: gp.useCotCaption, skipLm: gp.skipLm,
+      lmTemperature: gp.lmTemperature, lmCfgScale: gp.lmCfgScale,
+      lmTopK: gp.lmTopK, lmTopP: gp.lmTopP, lmNegativePrompt: gp.lmNegativePrompt,
+      ditModel: gp.ditModel, lmModel: gp.lmModel, vaeModel: gp.vaeModel,
+      adapter: gp.adapter, adapterScale: gp.adapterScale,
+      adapterGroupScales: gp.adapterGroupScales, adapterMode: gp.adapterMode,
+      masteringEnabled: gp.masteringEnabled, masteringReference: gp.masteringReference,
+      timbreReference: gp.timbreReference,
       // Solver sub-params
-      storkSubsteps, beatStability, frequencyDamping, temporalSmoothing,
+      storkSubsteps: gp.storkSubsteps, beatStability: gp.beatStability,
+      frequencyDamping: gp.frequencyDamping, temporalSmoothing: gp.temporalSmoothing,
       // Guidance sub-params
-      apgMomentum, apgNormThreshold,
+      apgMomentum: gp.apgMomentum, apgNormThreshold: gp.apgNormThreshold,
       // DCW
-      dcwEnabled, dcwMode, dcwScaler, dcwHighScaler,
+      dcwEnabled: gp.dcwEnabled, dcwMode: gp.dcwMode,
+      dcwScaler: gp.dcwScaler, dcwHighScaler: gp.dcwHighScaler,
     };
     const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -165,65 +111,60 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         if (p.keyScale !== undefined) setKeyScale(p.keyScale);
         if (p.timeSignature !== undefined) setTimeSignature(p.timeSignature);
         if (p.vocalLanguage !== undefined) setVocalLanguage(p.vocalLanguage);
-        // Generation
-        if (p.inferenceSteps !== undefined) setInferenceSteps(p.inferenceSteps);
-        if (p.guidanceScale !== undefined) setGuidanceScale(p.guidanceScale);
-        if (p.shift !== undefined) setShift(p.shift);
-        if (p.inferMethod !== undefined) setInferMethod(p.inferMethod);
-        if (p.scheduler !== undefined) setScheduler(p.scheduler);
-        if (p.guidanceMode !== undefined) setGuidanceMode(p.guidanceMode);
-        if (p.seed !== undefined) setSeed(p.seed);
-        if (p.randomSeed !== undefined) setRandomSeed(p.randomSeed);
-        if (p.batchSize !== undefined) setBatchSize(p.batchSize);
-        if (p.useCotCaption !== undefined) setUseCotCaption(p.useCotCaption);
-        if (p.skipLm !== undefined) setSkipLm(p.skipLm);
+        // Global engine params → write to context
+        if (p.inferenceSteps !== undefined) gp.setInferenceSteps(p.inferenceSteps);
+        if (p.guidanceScale !== undefined) gp.setGuidanceScale(p.guidanceScale);
+        if (p.shift !== undefined) gp.setShift(p.shift);
+        if (p.inferMethod !== undefined) gp.setInferMethod(p.inferMethod);
+        if (p.scheduler !== undefined) gp.setScheduler(p.scheduler);
+        if (p.guidanceMode !== undefined) gp.setGuidanceMode(p.guidanceMode);
+        if (p.seed !== undefined) gp.setSeed(p.seed);
+        if (p.randomSeed !== undefined) gp.setRandomSeed(p.randomSeed);
+        if (p.batchSize !== undefined) gp.setBatchSize(p.batchSize);
+        if (p.useCotCaption !== undefined) gp.setUseCotCaption(p.useCotCaption);
+        if (p.skipLm !== undefined) gp.setSkipLm(p.skipLm);
         // LM
-        if (p.lmTemperature !== undefined) setLmTemperature(p.lmTemperature);
-        if (p.lmCfgScale !== undefined) setLmCfgScale(p.lmCfgScale);
-        if (p.lmTopK !== undefined) setLmTopK(p.lmTopK);
-        if (p.lmTopP !== undefined) setLmTopP(p.lmTopP);
-        if (p.lmNegativePrompt !== undefined) setLmNegativePrompt(p.lmNegativePrompt);
+        if (p.lmTemperature !== undefined) gp.setLmTemperature(p.lmTemperature);
+        if (p.lmCfgScale !== undefined) gp.setLmCfgScale(p.lmCfgScale);
+        if (p.lmTopK !== undefined) gp.setLmTopK(p.lmTopK);
+        if (p.lmTopP !== undefined) gp.setLmTopP(p.lmTopP);
+        if (p.lmNegativePrompt !== undefined) gp.setLmNegativePrompt(p.lmNegativePrompt);
         // Models
-        if (p.ditModel !== undefined) setDitModel(p.ditModel);
-        if (p.lmModel !== undefined) setLmModel(p.lmModel);
-        if (p.vaeModel !== undefined) setVaeModel(p.vaeModel);
-        if (p.adapter !== undefined) setAdapter(p.adapter);
-        if (p.adapterScale !== undefined) setAdapterScale(p.adapterScale);
-        if (p.adapterGroupScales !== undefined) setAdapterGroupScales(p.adapterGroupScales);
-        if (p.adapterMode !== undefined) setAdapterMode(p.adapterMode);
+        if (p.ditModel !== undefined) gp.setDitModel(p.ditModel);
+        if (p.lmModel !== undefined) gp.setLmModel(p.lmModel);
+        if (p.vaeModel !== undefined) gp.setVaeModel(p.vaeModel);
+        if (p.adapter !== undefined) gp.setAdapter(p.adapter);
+        if (p.adapterScale !== undefined) gp.setAdapterScale(p.adapterScale);
+        if (p.adapterGroupScales !== undefined) gp.setAdapterGroupScales(p.adapterGroupScales);
+        if (p.adapterMode !== undefined) gp.setAdapterMode(p.adapterMode);
         // Mastering
-        if (p.masteringEnabled !== undefined) setMasteringEnabled(p.masteringEnabled);
-        if (p.masteringReference !== undefined) setMasteringReference(p.masteringReference);
-        if (p.timbreReference !== undefined) setTimbreReference(p.timbreReference);
+        if (p.masteringEnabled !== undefined) gp.setMasteringEnabled(p.masteringEnabled);
+        if (p.masteringReference !== undefined) gp.setMasteringReference(p.masteringReference);
+        if (p.timbreReference !== undefined) gp.setTimbreReference(p.timbreReference);
         // Solver sub-params
-        if (p.storkSubsteps !== undefined) setStorkSubsteps(p.storkSubsteps);
-        if (p.beatStability !== undefined) setBeatStability(p.beatStability);
-        if (p.frequencyDamping !== undefined) setFrequencyDamping(p.frequencyDamping);
-        if (p.temporalSmoothing !== undefined) setTemporalSmoothing(p.temporalSmoothing);
+        if (p.storkSubsteps !== undefined) gp.setStorkSubsteps(p.storkSubsteps);
+        if (p.beatStability !== undefined) gp.setBeatStability(p.beatStability);
+        if (p.frequencyDamping !== undefined) gp.setFrequencyDamping(p.frequencyDamping);
+        if (p.temporalSmoothing !== undefined) gp.setTemporalSmoothing(p.temporalSmoothing);
         // Guidance sub-params
-        if (p.apgMomentum !== undefined) setApgMomentum(p.apgMomentum);
-        if (p.apgNormThreshold !== undefined) setApgNormThreshold(p.apgNormThreshold);
+        if (p.apgMomentum !== undefined) gp.setApgMomentum(p.apgMomentum);
+        if (p.apgNormThreshold !== undefined) gp.setApgNormThreshold(p.apgNormThreshold);
         // DCW
-        if (p.dcwEnabled !== undefined) setDcwEnabled(p.dcwEnabled);
-        if (p.dcwMode !== undefined) setDcwMode(p.dcwMode);
-        if (p.dcwScaler !== undefined) setDcwScaler(p.dcwScaler / 0.02);
-        if (p.dcwHighScaler !== undefined) setDcwHighScaler(p.dcwHighScaler / 0.02);
+        if (p.dcwEnabled !== undefined) gp.setDcwEnabled(p.dcwEnabled);
+        if (p.dcwMode !== undefined) gp.setDcwMode(p.dcwMode);
+        if (p.dcwScaler !== undefined) gp.setDcwScaler(p.dcwScaler / 0.02);
+        if (p.dcwHighScaler !== undefined) gp.setDcwHighScaler(p.dcwHighScaler / 0.02);
       } catch (err) {
         console.error('[Preset Import] Invalid JSON:', err);
       }
     };
     reader.readAsText(file);
-    // Reset input so re-importing the same file works
     e.target.value = '';
   };
 
   const handleGenerate = () => {
-    // Compute trigger word from adapter filename
-    const triggerWord = settings.triggerUseFilename && adapter
-      ? (adapter.split(/[\\/]/).pop()?.replace(/\.safetensors$/i, '') || '')
-      : '';
-
-    const params: GenerationParams = {
+    // Send only content + metadata params — global engine params are merged in App.tsx
+    const params: Partial<GenerationParams> = {
       caption,
       lyrics: instrumental ? '[Instrumental]' : lyrics,
       instrumental,
@@ -232,48 +173,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       keyScale,
       timeSignature,
       vocalLanguage,
-      inferenceSteps,
-      guidanceScale,
-      shift,
-      inferMethod,
-      scheduler,
-      guidanceMode,
-      seed,
-      randomSeed,
-      batchSize,
-      lmTemperature,
-      lmCfgScale,
-      lmTopK,
-      lmTopP,
-      lmNegativePrompt,
-      useCotCaption,
-      skipLm,
-      ditModel,
-      lmModel,
-      vaeModel,
-      loraPath: adapter,
-      loraScale: adapterScale,
-      adapterGroupScales: adapter ? adapterGroupScales : undefined,
-      adapterMode: adapter ? adapterMode : 'merge',
-      triggerWord: triggerWord || undefined,
-      triggerPlacement: triggerWord ? settings.triggerPlacement : undefined,
       taskType: 'text2music',
-      masteringEnabled,
-      masteringReference: masteringEnabled ? masteringReference : undefined,
-      timbreReference: (masteringEnabled && timbreReference && masteringReference) ? true : undefined,
-      // Solver sub-params (only when relevant solver is active)
-      storkSubsteps: (inferMethod === 'stork2' || inferMethod === 'stork4') ? storkSubsteps : undefined,
-      beatStability: inferMethod === 'jkass_fast' ? beatStability : undefined,
-      frequencyDamping: inferMethod === 'jkass_fast' ? frequencyDamping : undefined,
-      temporalSmoothing: inferMethod === 'jkass_fast' ? temporalSmoothing : undefined,
-      // Guidance sub-params (only when APG is active)
-      apgMomentum: guidanceMode === 'apg' ? apgMomentum : undefined,
-      apgNormThreshold: guidanceMode === 'apg' ? apgNormThreshold : undefined,
-      // DCW params
-      dcwEnabled,
-      dcwMode: dcwEnabled ? dcwMode : undefined,
-      dcwScaler: dcwEnabled ? dcwScaler * 0.02 : undefined,
-      dcwHighScaler: (dcwEnabled && dcwMode === 'double') ? dcwHighScaler * 0.02 : undefined,
     };
     onGenerate(params);
   };
@@ -298,7 +198,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         </div>
       </div>
 
-      {/* Scrollable body */}
+      {/* Scrollable body — now much slimmer */}
       <div className="flex-1 overflow-y-auto hide-scrollbar px-4 py-3 space-y-1">
         <ContentSection
           caption={caption} onCaptionChange={setCaption}
@@ -312,69 +212,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
           timeSignature={timeSignature} onTimeSignatureChange={setTimeSignature}
           duration={duration} onDurationChange={setDuration}
           vocalLanguage={vocalLanguage} onVocalLanguageChange={setVocalLanguage}
-        />
-
-        <ModelSelector
-          ditModel={ditModel} onDitModelChange={setDitModel}
-          lmModel={lmModel} onLmModelChange={setLmModel}
-          vaeModel={vaeModel} onVaeModelChange={setVaeModel}
-        />
-
-        <AdaptersAccordion
-          isOpen={adaptersOpen}
-          onToggle={() => setAdaptersOpen(!adaptersOpen)}
-          advancedAdapters={advancedAdapters}
-          onAdvancedAdaptersChange={setAdvancedAdapters}
-          adapter={adapter}
-          onAdapterChange={setAdapter}
-          adapterScale={adapterScale}
-          onAdapterScaleChange={setAdapterScale}
-          adapterMode={adapterMode}
-          onAdapterModeChange={setAdapterMode}
-          adapterGroupScales={adapterGroupScales}
-          onAdapterGroupScalesChange={setAdapterGroupScales}
-          adapterFolder={adapterFolder}
-          onAdapterFolderChange={setAdapterFolder}
-          triggerUseFilename={settings.triggerUseFilename}
-          triggerPlacement={settings.triggerPlacement}
-        />
-
-        <GenerationSettings
-          inferenceSteps={inferenceSteps} onInferenceStepsChange={setInferenceSteps}
-          guidanceScale={guidanceScale} onGuidanceScaleChange={setGuidanceScale}
-          shift={shift} onShiftChange={setShift}
-          inferMethod={inferMethod} onInferMethodChange={setInferMethod}
-          scheduler={scheduler} onSchedulerChange={setScheduler}
-          guidanceMode={guidanceMode} onGuidanceModeChange={setGuidanceMode}
-          seed={seed} onSeedChange={setSeed}
-          randomSeed={randomSeed} onRandomSeedChange={setRandomSeed}
-          batchSize={batchSize} onBatchSizeChange={setBatchSize}
-          skipLm={skipLm} onSkipLmChange={setSkipLm}
-          lmTemperature={lmTemperature} onLmTemperatureChange={setLmTemperature}
-          lmCfgScale={lmCfgScale} onLmCfgScaleChange={setLmCfgScale}
-          lmTopK={lmTopK} onLmTopKChange={setLmTopK}
-          lmTopP={lmTopP} onLmTopPChange={setLmTopP}
-          lmNegativePrompt={lmNegativePrompt} onLmNegativePromptChange={setLmNegativePrompt}
-          useCotCaption={useCotCaption} onUseCotCaptionChange={setUseCotCaption}
-          storkSubsteps={storkSubsteps} onStorkSubstepsChange={setStorkSubsteps}
-          beatStability={beatStability} onBeatStabilityChange={setBeatStability}
-          frequencyDamping={frequencyDamping} onFrequencyDampingChange={setFrequencyDamping}
-          temporalSmoothing={temporalSmoothing} onTemporalSmoothingChange={setTemporalSmoothing}
-          apgMomentum={apgMomentum} onApgMomentumChange={setApgMomentum}
-          apgNormThreshold={apgNormThreshold} onApgNormThresholdChange={setApgNormThreshold}
-          dcwEnabled={dcwEnabled} onDcwEnabledChange={setDcwEnabled}
-          dcwMode={dcwMode} onDcwModeChange={setDcwMode}
-          dcwScaler={dcwScaler} onDcwScalerChange={setDcwScaler}
-          dcwHighScaler={dcwHighScaler} onDcwHighScalerChange={setDcwHighScaler}
-        />
-
-        <MasteringSection
-          masteringEnabled={masteringEnabled}
-          onMasteringEnabledChange={setMasteringEnabled}
-          masteringReference={masteringReference}
-          onMasteringReferenceChange={setMasteringReference}
-          timbreReference={timbreReference}
-          onTimbreReferenceChange={setTimbreReference}
         />
       </div>
 

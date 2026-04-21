@@ -8,6 +8,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './context/AuthContext';
+import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
 import { useGenerationStore } from './stores/useGenerationStore';
 import { usePersistedState } from './hooks/usePersistedState';
 import { songApi } from './services/api';
@@ -26,6 +27,7 @@ import { DownloadModal } from './components/shared/DownloadModal';
 import { SettingsPanel, type AppSettings, DEFAULT_SETTINGS } from './components/settings/SettingsPanel';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { LyricStudioV2 } from './components/lyric-studio/LyricStudioV2';
+import { GlobalParamBar } from './components/global-bar/GlobalParamBar';
 import {
   usePlayback,
   registerPlayers,
@@ -66,7 +68,8 @@ function urlForView(view: string): string {
   return '/';
 }
 
-const App: React.FC = () => {
+/** Inner app content — must be rendered inside GlobalParamsProvider */
+const AppContent: React.FC = () => {
   const { token, isLoading } = useAuth();
   const [activeView, setActiveView] = useState(() => viewFromUrl());
   const [songs, setSongs] = useState<Song[]>([]);
@@ -170,19 +173,24 @@ const App: React.FC = () => {
   //     .catch(err => console.error('[App] Refresh failed:', err));
   // }, [token]);
 
-  // Handle generation
-  const handleGenerate = useCallback((params: GenerationParams) => {
+  // Global params from context
+  const globalParams = useGlobalParams();
+
+  // Handle generation — merges content params (from CreatePanel) with global engine params (from context)
+  const handleGenerate = useCallback((contentParams: Partial<GenerationParams>) => {
     if (!token) return;
-    // Inject settings into generation params
+    // Merge: global engine params + content-specific params + settings
+    const engineParams = globalParams.getGlobalParams();
     const enrichedParams = {
-      ...params,
+      ...engineParams,
+      ...contentParams,
       coResident: settings.coResident,
       cacheLmCodes: settings.cacheLmCodes,
     };
-    genStore.submit(enrichedParams, token).catch(err => {
+    genStore.submit(enrichedParams as GenerationParams, token).catch(err => {
       console.error('[App] Generation failed:', err);
     });
-  }, [token, genStore, settings]);
+  }, [token, genStore, settings, globalParams]);
 
   // Handle delete
   const handleDelete = useCallback(async (song: Song) => {
@@ -418,6 +426,9 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen bg-white dark:bg-suno text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-all duration-300">
+      {/* Global Parameter Bar — full width, above everything */}
+      <GlobalParamBar />
+
       <div className="flex-1 flex overflow-hidden">
         <Sidebar
           activeView={activeView}
@@ -592,5 +603,12 @@ const App: React.FC = () => {
     </div>
   );
 };
+
+/** Root App — wraps content in GlobalParamsProvider */
+const App: React.FC = () => (
+  <GlobalParamsProvider>
+    <AppContent />
+  </GlobalParamsProvider>
+);
 
 export default App;
