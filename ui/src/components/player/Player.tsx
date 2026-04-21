@@ -72,29 +72,23 @@ export const Player: React.FC<PlayerProps> = ({
 }) => {
 
 
-  if (!currentSong) {
-    return (
-      <div className="h-14 flex-shrink-0 bg-zinc-950 flex items-center justify-center">
-        <span className="text-sm text-zinc-600">Select a song to play</span>
-      </div>
-    );
-  }
-
   return (
     <div className="h-14 flex-shrink-0 bg-zinc-950 flex items-center px-4 gap-4">
       {/* Left: Song Info */}
       <div className="flex items-center gap-3 w-[240px] flex-shrink-0">
         <div className="w-12 h-12 rounded-lg bg-zinc-800 flex items-center justify-center overflow-hidden flex-shrink-0">
-          {currentSong.coverUrl ? (
+          {currentSong?.coverUrl ? (
             <img src={currentSong.coverUrl} alt="" className="w-full h-full object-cover" />
           ) : (
             <Music size={20} className="text-zinc-600" />
           )}
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-medium text-white truncate">{currentSong.title || 'Untitled'}</div>
+          <div className="text-sm font-medium text-white truncate">
+            {currentSong?.title || (currentSong === null ? 'Select a song' : 'Untitled')}
+          </div>
           <div className="text-xs text-zinc-500 truncate">
-            {currentSong.caption || currentSong.style || ''}
+            {currentSong?.caption || currentSong?.style || (currentSong === null ? '---' : '')}
           </div>
         </div>
       </div>
@@ -104,36 +98,48 @@ export const Player: React.FC<PlayerProps> = ({
         <span className="text-[10px] text-zinc-500 font-mono w-10 text-right flex-shrink-0">{formatTime(currentTime)}</span>
         <button
           onClick={onToggleShuffle}
-          className={`p-1.5 rounded-lg transition-colors ${isShuffle ? 'text-pink-400' : 'text-zinc-500 hover:text-white'}`}
+          disabled={!currentSong}
+          className={`p-1.5 rounded-lg transition-colors ${isShuffle ? 'text-pink-400' : 'text-zinc-500 hover:text-white'} ${!currentSong ? 'opacity-30 cursor-not-allowed' : ''}`}
           title="Shuffle"
         >
           <Shuffle size={16} />
         </button>
-        <button onClick={onPrevious} className="p-1.5 rounded-lg text-zinc-400 hover:text-white transition-colors">
+        <button 
+          onClick={onPrevious} 
+          disabled={!currentSong}
+          className={`p-1.5 rounded-lg text-zinc-400 hover:text-white transition-colors ${!currentSong ? 'opacity-30 cursor-not-allowed' : ''}`}
+        >
           <SkipBack size={18} />
         </button>
         <button
           onClick={onTogglePlay}
-          className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 transition-transform"
+          disabled={!currentSong}
+          className={`w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 transition-transform ${!currentSong ? 'opacity-30 cursor-not-allowed' : ''}`}
         >
           {isPlaying
             ? <Pause size={18} className="text-black" fill="black" />
             : <Play size={18} className="text-black ml-0.5" fill="black" />
           }
         </button>
-        <button onClick={onNext} className="p-1.5 rounded-lg text-zinc-400 hover:text-white transition-colors">
+        <button 
+          onClick={onNext} 
+          disabled={!currentSong}
+          className={`p-1.5 rounded-lg text-zinc-400 hover:text-white transition-colors ${!currentSong ? 'opacity-30 cursor-not-allowed' : ''}`}
+        >
           <SkipForward size={18} />
         </button>
         <button
           onClick={onToggleRepeat}
-          className={`p-1.5 rounded-lg transition-colors ${repeatMode !== 'none' ? 'text-pink-400' : 'text-zinc-500 hover:text-white'}`}
+          disabled={!currentSong}
+          className={`p-1.5 rounded-lg transition-colors ${repeatMode !== 'none' ? 'text-pink-400' : 'text-zinc-500 hover:text-white'} ${!currentSong ? 'opacity-30 cursor-not-allowed' : ''}`}
           title={repeatMode === 'one' ? 'Repeat One' : repeatMode === 'all' ? 'Repeat All' : 'Repeat Off'}
         >
           {repeatMode === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
         </button>
         <button
           onClick={onToggleSpectrum}
-          className={`p-1.5 rounded-lg transition-colors ${spectrumEnabled ? 'text-purple-400' : 'text-zinc-500 hover:text-white'}`}
+          disabled={!currentSong}
+          className={`p-1.5 rounded-lg transition-colors ${spectrumEnabled ? 'text-purple-400' : 'text-zinc-500 hover:text-white'} ${!currentSong ? 'opacity-30 cursor-not-allowed' : ''}`}
           title={spectrumEnabled ? 'Spectrum Analyzer On' : 'Spectrum Analyzer Off'}
         >
           <Activity size={16} />
@@ -157,7 +163,7 @@ export const Player: React.FC<PlayerProps> = ({
         </button>
 
         {/* Mastered toggle — only when song has mastered version */}
-        {currentSong.masteredAudioUrl && (
+        {currentSong?.masteredAudioUrl && (
           <button
             onClick={onToggleMastered}
             className={`p-1.5 rounded-lg transition-all ${
@@ -194,7 +200,8 @@ export const Player: React.FC<PlayerProps> = ({
         {onReusePrompt && (
           <button
             onClick={onReusePrompt}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
+            disabled={!currentSong}
+            className={`p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-colors ${!currentSong ? 'opacity-30 cursor-not-allowed' : ''}`}
             title="Reuse Prompt"
           >
             <RotateCcw size={14} />
@@ -203,7 +210,8 @@ export const Player: React.FC<PlayerProps> = ({
         {onDownload && (
           <button
             onClick={onDownload}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+            disabled={!currentSong}
+            className={`p-1.5 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors ${!currentSong ? 'opacity-30 cursor-not-allowed' : ''}`}
             title="Download"
           >
             <Download size={14} />
@@ -212,7 +220,8 @@ export const Player: React.FC<PlayerProps> = ({
         {onDelete && (
           <button
             onClick={onDelete}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            disabled={!currentSong}
+            className={`p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors ${!currentSong ? 'opacity-30 cursor-not-allowed' : ''}`}
             title="Delete"
           >
             <Trash2 size={14} />

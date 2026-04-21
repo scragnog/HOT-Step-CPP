@@ -2,8 +2,9 @@
 // Ported from hot-step-9000, simplified for current cpp feature set.
 
 import React from 'react';
-import { Disc, Library, Mic, Settings, Power, Terminal } from 'lucide-react';
+import { Disc, Library, Mic, Settings, Power, Terminal, Languages } from 'lucide-react';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { useLanguage } from '../../context/LanguageContext';
 
 interface SidebarProps {
   activeView: string;
@@ -21,6 +22,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleTerminal,
 }) => {
   const [isOpen, setIsOpen] = usePersistedState('hs-sidebar-open', true);
+  const { language, setLanguage, t } = useLanguage();
 
   return (
     <div className={`
@@ -51,21 +53,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <nav className="flex-1 flex flex-col gap-2 w-full px-3">
         <NavItem
           icon={<Disc size={20} />}
-          label="Create"
+          label={t('nav_create')}
           active={activeView === 'create'}
           onClick={() => onViewChange('create')}
           isExpanded={isOpen}
         />
         <NavItem
           icon={<Library size={20} />}
-          label="Library"
+          label={t('nav_library')}
           active={activeView === 'library'}
           onClick={() => onViewChange('library')}
           isExpanded={isOpen}
         />
         <NavItem
           icon={<Mic size={20} />}
-          label="Lyric Studio"
+          label={t('nav_lyric_studio')}
           active={activeView === 'lyric-studio'}
           onClick={() => onViewChange('lyric-studio')}
           isExpanded={isOpen}
@@ -73,13 +75,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <NavItem
           icon={<Settings size={20} />}
-          label="Settings"
+          label={t('nav_settings')}
           active={activeView === 'settings'}
           onClick={() => onViewChange('settings')}
           isExpanded={isOpen}
         />
 
         <div className="mt-auto flex flex-col gap-2">
+          {/* Language Toggle */}
+          <button
+            onClick={() => setLanguage(language === 'en' ? 'vi' : 'en')}
+            className={`
+              w-full rounded-xl flex items-center gap-3 transition-all duration-200 text-zinc-500 hover:text-zinc-300 hover:bg-white/5
+              ${isOpen ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+            `}
+            title={language === 'en' ? 'Tiếng Việt' : 'English'}
+          >
+            <div className="flex-shrink-0"><Languages size={20} /></div>
+            {isOpen && (
+              <span className="text-sm font-medium whitespace-nowrap">{language === 'en' ? 'Tiếng Việt' : 'English'}</span>
+            )}
+          </button>
+
           {/* Terminal toggle */}
           {onToggleTerminal && (
             <button
@@ -95,7 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <div className="flex-shrink-0"><Terminal size={20} /></div>
               {isOpen && (
-                <span className="text-sm font-medium whitespace-nowrap">Terminal</span>
+                <span className="text-sm font-medium whitespace-nowrap">{t('nav_terminal')}</span>
               )}
             </button>
           )}
@@ -107,11 +124,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               w-full rounded-xl flex items-center gap-3 transition-all duration-200 text-red-400 hover:text-red-300 hover:bg-red-500/10
               ${isOpen ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
             `}
-            title="Quit HOT-Step CPP"
+            title={t('nav_quit')}
           >
             <div className="flex-shrink-0"><Power size={20} /></div>
             {isOpen && (
-              <span className="text-sm font-medium whitespace-nowrap">Quit</span>
+              <span className="text-sm font-medium whitespace-nowrap">{t('nav_quit')}</span>
             )}
           </button>
         </div>

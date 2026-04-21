@@ -2,8 +2,9 @@
 // Ported from hot-step-9000's RightSidebar, simplified for current feature set.
 
 import React from 'react';
-import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Gauge, Download } from 'lucide-react';
 import type { Song } from '../../types';
+import { useLanguage } from '../../context/LanguageContext';
 
 interface RightSidebarProps {
   song: Song;
@@ -24,7 +25,16 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   isPlaying,
   onDownload,
 }) => {
+  const { t } = useLanguage();
   const gp = song.generationParams;
+
+  const formatDuration = (val: string | number | undefined) => {
+    if (!val) return '--:--';
+    if (typeof val === 'string') return val;
+    const m = Math.floor(val / 60);
+    const s = Math.floor(val % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -42,9 +52,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto hide-scrollbar p-4 space-y-4">
         {/* Cover Art Placeholder */}
-        <div className="aspect-square w-full rounded-xl bg-gradient-to-br from-pink-500/20 to-purple-600/20 border border-white/5 flex items-center justify-center">
+        <div className="aspect-square w-48 h-48 mx-auto rounded-xl bg-gradient-to-br from-pink-500/20 to-purple-600/20 border border-white/5 flex items-center justify-center overflow-hidden">
           {song.coverUrl ? (
-            <img src={song.coverUrl} alt={song.title} className="w-full h-full object-cover rounded-xl" />
+            <img src={song.coverUrl} alt={song.title} className="w-full h-full object-cover" />
           ) : (
             <Music size={48} className="text-zinc-600" />
           )}
@@ -92,20 +102,19 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           )}
         </div>
 
-        {/* Metadata Badges */}
-        <div className="grid grid-cols-2 gap-2">
-          {song.duration && (
-            <MetaBadge icon={<Clock size={14} />} label="Duration" value={String(song.duration)} />
-          )}
-          {gp?.bpm && (
-            <MetaBadge icon={<Gauge size={14} />} label="BPM" value={String(gp.bpm)} />
-          )}
-          {gp?.keyScale && (
-            <MetaBadge icon={<Hash size={14} />} label="Key" value={gp.keyScale} />
-          )}
-          {gp?.timeSignature && (
-            <MetaBadge icon={<Music size={14} />} label="Time Sig" value={gp.timeSignature} />
-          )}
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <MetaBadge icon={<Clock size={16} />} label={t('meta_duration')} value={formatDuration(song.duration)} />
+          <MetaBadge icon={<Gauge size={16} />} label={t('meta_bpm')} value={String(song.bpm || gp?.bpm || '---')} />
+          <MetaBadge 
+            icon={<Music size={16} />} 
+            label={t('meta_key').split(' / ')[0]} 
+            value={String(gp?.keyScale || song.key_scale || t('meta_random'))} 
+          />
+          <MetaBadge 
+            icon={<Music size={16} />} 
+            label={t('meta_time_sig').split(' (')[0]} 
+            value={String(gp?.timeSignature || song.time_signature || t('meta_random'))} 
+          />
         </div>
 
         {/* Generation Info */}

@@ -28,12 +28,15 @@ const borderColors: Record<ToastType, string> = {
   info: 'border-blue-500/30',
 };
 
-export const Toast: React.FC<ToastProps> = ({ message, type, isVisible, onClose, duration = 4000 }) => {
+export const Toast: React.FC<ToastProps> = ({ message, type, isVisible, onClose, duration = 2500 }) => {
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!isVisible) return;
-    const timer = setTimeout(onClose, duration);
+    const timer = setTimeout(() => onCloseRef.current(), duration);
     return () => clearTimeout(timer);
-  }, [isVisible, duration, onClose]);
+  }, [isVisible, duration]);
 
   if (!isVisible) return null;
 

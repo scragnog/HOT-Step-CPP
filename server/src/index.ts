@@ -119,6 +119,8 @@ if (fs.existsSync(uiDistPath)) {
 
 // Start ace-server as a child process if configured
 let aceProcess: ChildProcess | null = null;
+let aceRestartCount = 0;
+const ACE_MAX_RESTARTS = 3;
 
 function startAceServer(): ChildProcess | null {
   const exe = config.aceServer.exe;
@@ -168,10 +170,19 @@ function startAceServer(): ChildProcess | null {
   child.on('exit', (code, signal) => {
     if (signal !== 'SIGTERM' && signal !== 'SIGINT' && code !== 0) {
       console.error(`[ace-server] Process exited with code ${code}, signal ${signal}`);
-      console.log('[ace-server] Restarting in 3 seconds...');
-      setTimeout(() => {
-        aceProcess = startAceServer();
-      }, 3000);
+      if (aceRestartCount < ACE_MAX_RESTARTS) {
+        aceRestartCount++;
+        console.log(`[ace-server] Restarting in 3 seconds... (attempt ${aceRestartCount}/${ACE_MAX_RESTARTS})`);
+        setTimeout(() => {
+          aceProcess = startAceServer();
+        }, 3000);
+      } else {
+        console.error(`[ace-server] Max restarts (${ACE_MAX_RESTARTS}) reached — not restarting.`);
+        console.error(`[ace-server] Check that --models directory exists and contains GGUF files.`);
+      }
+    } else {
+      // Clean exit — reset counter so manual restarts work normally
+      aceRestartCount = 0;
     }
   });
 
@@ -184,6 +195,7 @@ function startAceServer(): ChildProcess | null {
 
 // Start ace-server
 aceProcess = startAceServer();
+
 
 // Start Express server
 const server = app.listen(config.server.port, config.server.host, () => {

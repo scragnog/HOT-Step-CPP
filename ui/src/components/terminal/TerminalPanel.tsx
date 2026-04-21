@@ -8,8 +8,9 @@
 // useEventSource, this keeps the UI responsive even during heavy logging.
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, X, Trash2, Cpu, ArrowDown, Wifi, WifiOff } from 'lucide-react';
+import { Search, X, Trash2, Cpu, ArrowDown, Wifi, WifiOff, Languages } from 'lucide-react';
 import { useEventSource, type LogLine } from '../../hooks/useEventSource';
+import { useLanguage } from '../../context/LanguageContext';
 
 interface VramInfo {
   used_mb: number;
@@ -81,6 +82,7 @@ const LogLineItem = React.memo<{
 LogLineItem.displayName = 'LogLineItem';
 
 export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
+  const { language, setLanguage, t } = useLanguage();
   const { lines, connected, clear } = useEventSource('/api/logs', true);
   const [search, setSearch] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
@@ -142,7 +144,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
             {connected
               ? <Wifi size={12} className="text-green-400" />
               : <WifiOff size={12} className="text-red-400" />}
-            <span className="text-xs font-semibold text-zinc-400">Terminal</span>
+            <span className="text-xs font-semibold text-zinc-400">{t('nav_terminal')}</span>
           </div>
 
           {/* VRAM badge */}
@@ -179,6 +181,16 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Language Toggle */}
+          <button
+            onClick={() => setLanguage(language === 'en' ? 'vi' : 'en')}
+            className="flex items-center gap-1.5 px-2 py-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors"
+            title={language === 'en' ? 'Tiếng Việt' : 'English'}
+          >
+            <Languages size={13} />
+            <span className="text-[10px] font-medium">{language === 'en' ? 'VI' : 'EN'}</span>
+          </button>
+
           {!autoScroll && (
             <button
               onClick={() => {

@@ -1,9 +1,10 @@
 // GenerationSettings.tsx — DiT + LM inference parameters
 // Ported to Tailwind accordion styling matching hot-step-9000.
 
-import React, { useState } from 'react';
-import { ChevronDown, RotateCcw } from 'lucide-react';
+import React from 'react';
+import { RotateCcw } from 'lucide-react';
 import { Slider } from '../shared/Slider';
+import { ToggleSwitch } from '../shared/ToggleSwitch';
 
 const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-900 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-900 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
@@ -40,9 +41,6 @@ interface GenerationSettingsProps {
 }
 
 export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => {
-  const [ditOpen, setDitOpen] = useState(false);
-  const [lmOpen, setLmOpen] = useState(false);
-
   // Resolve scheduler dropdown value from the composite string representation
   const schedulerKey = props.scheduler.startsWith('composite') ? 'composite'
     : props.scheduler.startsWith('beta:') ? 'beta'
@@ -50,17 +48,13 @@ export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => 
     : props.scheduler;
 
   return (
-    <div className="space-y-1 pt-3 border-t border-white/5">
-      {/* DiT Settings Accordion */}
-      <button
-        onClick={() => setDitOpen(!ditOpen)}
-        className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors"
-      >
-        <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Generation Settings</span>
-        <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${ditOpen ? 'rotate-180' : ''}`} />
-      </button>
+    <div className="space-y-1">
+      {/* DiT Settings Section */}
+      <div className="pt-3 border-t border-white/5">
+        <div className="px-3 py-2.5">
+          <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider">Generation Settings</span>
+        </div>
 
-      {ditOpen && (
         <div className="px-3 pb-3 space-y-3">
           <Slider label="Inference Steps" value={props.inferenceSteps}
             onChange={props.onInferenceStepsChange} min={1} max={100} step={1} showInput />
@@ -187,107 +181,6 @@ export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => 
             </select>
           </div>
 
-          {/* ── Beta (Custom) Sub-Controls ── */}
-          {props.scheduler.startsWith('beta:') && (() => {
-            const parts = props.scheduler.split(':');
-            const alpha = parseFloat(parts[1] || '0.5');
-            const betaParam = parseFloat(parts[2] || '0.7');
-            const updateBeta = (a: number, b: number) => {
-              props.onSchedulerChange(`beta:${a.toFixed(2)}:${b.toFixed(2)}`);
-            };
-            return (
-              <div className="rounded-xl border border-teal-500/20 bg-teal-500/5 p-3 space-y-3 transition-all">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider">Beta Distribution</span>
-                  <button type="button" onClick={() => updateBeta(0.5, 0.7)}
-                    className="flex items-center gap-1 text-[10px] text-teal-400 hover:text-teal-300 transition-colors">
-                    <RotateCcw size={10} /> Reset
-                  </button>
-                </div>
-                <Slider label="Alpha (α)" value={alpha}
-                  onChange={v => updateBeta(v, betaParam)} min={0.1} max={2.0} step={0.05} showInput />
-                <Slider label="Beta (β)" value={betaParam}
-                  onChange={v => updateBeta(alpha, v)} min={0.1} max={2.0} step={0.05} showInput />
-                <p className="text-[10px] text-zinc-500">Lower α = more density at edges. Lower β = front-loaded (structural focus).</p>
-              </div>
-            );
-          })()}
-
-          {/* ── Power Sub-Controls ── */}
-          {props.scheduler.startsWith('power:') && (() => {
-            const exponent = parseFloat(props.scheduler.split(':')[1] || '2.0');
-            return (
-              <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-3 space-y-3 transition-all">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold text-orange-400 uppercase tracking-wider">Power Law</span>
-                  <button type="button" onClick={() => props.onSchedulerChange('power:2.00')}
-                    className="flex items-center gap-1 text-[10px] text-orange-400 hover:text-orange-300 transition-colors">
-                    <RotateCcw size={10} /> Reset
-                  </button>
-                </div>
-                <Slider label="Exponent" value={exponent}
-                  onChange={v => props.onSchedulerChange(`power:${v.toFixed(2)}`)} min={0.25} max={4.0} step={0.05} showInput />
-                <p className="text-[10px] text-zinc-500">p&gt;1 = front-loaded (structure), p=1 = linear, p&lt;1 = back-loaded (detail).</p>
-              </div>
-            );
-          })()}
-
-          {/* ── Composite Sub-Controls ── */}
-          {props.scheduler.startsWith('composite') && (() => {
-            const parts = props.scheduler.split(':');
-            const schedulerPair = (parts[1] || 'bong_tangent+linear').split('+');
-            const stageA = schedulerPair[0] || 'bong_tangent';
-            const stageB = schedulerPair[1] || 'linear';
-            const crossover = parseFloat(parts[2] || '0.5');
-            const split = parseFloat(parts[3] || '0.5');
-            const update = (a: string, b: string, c: number, s: number) => {
-              props.onSchedulerChange(`composite:${a}+${b}:${c.toFixed(2)}:${s.toFixed(2)}`);
-            };
-            return (
-              <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-3 space-y-3 transition-all">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold text-purple-400 uppercase tracking-wider">Composite (2-Stage)</span>
-                  <button type="button" onClick={() => update('bong_tangent', 'linear', 0.5, 0.5)}
-                    className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 transition-colors">
-                    <RotateCcw size={10} /> Reset
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] text-purple-400 mb-1">Stage A</label>
-                    <select className={selectClasses} value={stageA}
-                      onChange={e => update(e.target.value, stageB, crossover, split)}>
-                      <option value="linear">Linear</option>
-                      <option value="beta57">Beta 57</option>
-                      <option value="cosine">Cosine</option>
-                      <option value="ddim_uniform">DDIM</option>
-                      <option value="sgm_uniform">SGM</option>
-                      <option value="bong_tangent">Tangent</option>
-                      <option value="linear_quadratic">Lin-Quad</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-purple-400 mb-1">Stage B</label>
-                    <select className={selectClasses} value={stageB}
-                      onChange={e => update(stageA, e.target.value, crossover, split)}>
-                      <option value="linear">Linear</option>
-                      <option value="beta57">Beta 57</option>
-                      <option value="cosine">Cosine</option>
-                      <option value="ddim_uniform">DDIM</option>
-                      <option value="sgm_uniform">SGM</option>
-                      <option value="bong_tangent">Tangent</option>
-                      <option value="linear_quadratic">Lin-Quad</option>
-                    </select>
-                  </div>
-                </div>
-                <Slider label="Crossover" value={crossover}
-                  onChange={v => update(stageA, stageB, v, split)} min={0.1} max={0.9} step={0.05} showInput />
-                <Slider label="Split" value={split}
-                  onChange={v => update(stageA, stageB, crossover, v)} min={0.1} max={0.9} step={0.05} showInput />
-              </div>
-            );
-          })()}
-
           {/* Guidance Mode */}
           <div>
             <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Guidance</label>
@@ -299,26 +192,6 @@ export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => 
               <option value="rescaled_cfg">Rescaled CFG</option>
             </select>
           </div>
-
-          {/* ── APG Sub-Controls ── */}
-          {props.guidanceMode === 'apg' && (
-            <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 space-y-3 transition-all">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider">APG Parameters</span>
-                <button type="button" onClick={() => {
-                  props.onApgMomentumChange(0.75);
-                  props.onApgNormThresholdChange(2.5);
-                }} className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors">
-                  <RotateCcw size={10} /> Reset
-                </button>
-              </div>
-              <Slider label="Momentum" value={props.apgMomentum}
-                onChange={props.onApgMomentumChange} min={0} max={1} step={0.01} showInput />
-              <Slider label="Norm Threshold" value={props.apgNormThreshold}
-                onChange={props.onApgNormThresholdChange} min={0} max={10} step={0.1} showInput />
-              <p className="text-[10px] text-zinc-500">Momentum smooths guidance across steps. Norm threshold clips gradient magnitude per channel.</p>
-            </div>
-          )}
 
           {/* Seed */}
           <div>
@@ -341,43 +214,37 @@ export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => 
           <Slider label="Batch Size" value={props.batchSize}
             onChange={props.onBatchSizeChange} min={1} max={9} step={1} />
         </div>
-      )}
+      </div>
 
-      {/* LM Settings Accordion */}
-      <button
-        onClick={() => setLmOpen(!lmOpen)}
-        className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">LM / Thinking</span>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-            props.skipLm ? 'bg-zinc-700 text-zinc-400' : 'bg-purple-500/20 text-purple-400'
-          }`}>
-            {props.skipLm ? 'OFF' : 'ON'}
-          </span>
+      {/* LM Settings Section */}
+      <div className="pt-3 border-t border-white/5">
+        <div className="flex items-center justify-between px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider">LM / Thinking</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+              props.skipLm ? 'bg-zinc-700 text-zinc-400' : 'bg-purple-500/20 text-purple-400'
+            }`}>
+              {props.skipLm ? 'OFF' : 'ON'}
+            </span>
+          </div>
         </div>
-        <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 ${lmOpen ? 'rotate-180' : ''}`} />
-      </button>
 
-      {lmOpen && (
         <div className="px-3 pb-3 space-y-3">
           {/* LM Toggle */}
-          <label className="flex items-center gap-2.5 cursor-pointer">
-            <input type="checkbox" checked={!props.skipLm}
-              onChange={e => props.onSkipLmChange(!e.target.checked)}
-              className="rounded border-zinc-600 bg-zinc-800 text-pink-500 focus:ring-pink-500/20" />
-            <span className="text-sm text-zinc-400">Enable LM Conditioning</span>
-          </label>
+          <ToggleSwitch
+            checked={!props.skipLm}
+            onChange={v => props.onSkipLmChange(!v)}
+            label="Enable LM Conditioning"
+          />
 
           {!props.skipLm && (
             <>
               {/* CoT Caption */}
-              <label className="flex items-center gap-2.5 cursor-pointer">
-                <input type="checkbox" checked={props.useCotCaption}
-                  onChange={e => props.onUseCotCaptionChange(e.target.checked)}
-                  className="rounded border-zinc-600 bg-zinc-800 text-pink-500 focus:ring-pink-500/20" />
-                <span className="text-sm text-zinc-400">Chain-of-Thought Caption</span>
-              </label>
+              <ToggleSwitch
+                checked={props.useCotCaption}
+                onChange={props.onUseCotCaptionChange}
+                label="Chain-of-Thought Caption"
+              />
 
               <Slider label="Temperature" value={props.lmTemperature}
                 onChange={props.onLmTemperatureChange} min={0} max={2} step={0.01} showInput />
@@ -400,7 +267,7 @@ export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => 
             </>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 };

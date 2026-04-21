@@ -9,6 +9,7 @@ interface JobQueueProps {
   jobs: GenerationJob[];
   onCancel: (jobId: string) => void;
   onClearCompleted: () => void;
+  onRemove: (jobId: string) => void;
 }
 
 const statusIcons: Record<string, React.ReactNode> = {
@@ -20,7 +21,7 @@ const statusIcons: Record<string, React.ReactNode> = {
   cancelled: <AlertTriangle size={14} className="text-yellow-400" />,
 };
 
-export const JobQueue: React.FC<JobQueueProps> = ({ jobs, onCancel, onClearCompleted }) => {
+export const JobQueue: React.FC<JobQueueProps> = ({ jobs, onCancel, onClearCompleted, onRemove }) => {
   if (jobs.length === 0) return null;
 
   const hasCompleted = jobs.some(j =>
@@ -59,14 +60,18 @@ export const JobQueue: React.FC<JobQueueProps> = ({ jobs, onCancel, onClearCompl
                   {job.stage || job.status.replace('_', ' ')}
                 </span>
               </div>
-              {['pending', 'lm_running', 'synth_running'].includes(job.status) && (
-                <button
-                  className="p-1 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                  onClick={() => onCancel(job.jobId)}
-                >
-                  <X size={14} />
-                </button>
-              )}
+              <button
+                className="p-1 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                onClick={() => {
+                  if (['pending', 'lm_running', 'synth_running'].includes(job.status)) {
+                    onCancel(job.jobId);
+                  } else {
+                    onRemove(job.jobId);
+                  }
+                }}
+              >
+                <X size={14} />
+              </button>
             </div>
 
             {job.progress !== undefined && job.progress > 0 && job.progress < 100 && (

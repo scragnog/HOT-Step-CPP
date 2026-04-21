@@ -22,6 +22,7 @@ find_package(Threads REQUIRED)
 # Suppress MSVC fopen/sprintf deprecation warnings
 if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+    add_compile_definitions(NOMINMAX)
 endif()
 
 # Put executables and backend .so in the same directory (build root).

@@ -14,6 +14,7 @@ interface GenerationStore {
   cancel: (jobId: string) => Promise<void>;
   cancelAll: () => Promise<void>;
   clearCompleted: () => void;
+  removeJob: (jobId: string) => void;
   onSongCreated?: (song: Song) => void;
 }
 
@@ -134,10 +135,25 @@ export function useGenerationStore(
     ));
   }, []);
 
+  const removeJob = useCallback((jobId: string) => {
+    setJobs(prev => prev.filter(j => j.jobId !== jobId));
+    stopPolling(jobId);
+  }, [stopPolling]);
+
   const isGenerating = jobs.some(j =>
     ['pending', 'lm_running', 'synth_running', 'saving'].includes(j.status)
   );
 
-  return { jobs, isGenerating, submit, cancel, cancelAll, clearCompleted };
-}
+  // Auto-clear completed jobs after 5 seconds
+  useEffect(() => {
+    const hasCompleted = jobs.some(j => ['succeeded', 'failed', 'cancelled'].includes(j.status));
+    if (hasCompleted) {
+      const timer = setTimeout(() => {
+        clearCompleted();
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [jobs, clearCompleted]);
 
+  return { jobs, isGenerating, submit, cancel, cancelAll, clearCompleted, removeJob };
+}

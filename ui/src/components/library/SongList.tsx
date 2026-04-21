@@ -11,6 +11,8 @@ import type { Song } from '../../types';
 interface SongListProps {
   songs: Song[];
   currentSongId?: string;
+  selectedSongId?: string;
+  isPlaying?: boolean;
   onPlay: (song: Song) => void;
   onDelete: (song: Song) => void;
   onBulkDelete?: (ids: string[]) => void;
@@ -21,7 +23,7 @@ interface SongListProps {
 }
 
 export const SongList: React.FC<SongListProps> = ({
-  songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename,
+  songs, currentSongId, selectedSongId, isPlaying, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename,
 }) => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -138,8 +140,10 @@ export const SongList: React.FC<SongListProps> = ({
             key={song.id}
             song={song}
             isActive={currentSongId === song.id}
+            isSelected={selectedSongId === song.id}
+            isActuallyPlaying={currentSongId === song.id && !!isPlaying}
             selectionMode={selectionMode}
-            isSelected={selectedIds.has(song.id)}
+            isBulkSelected={selectedIds.has(song.id)}
             onToggleSelect={() => toggleSelection(song.id)}
             onPlay={() => onPlay(song)}
             onSelect={() => onSelect?.(song)}
@@ -156,9 +160,11 @@ export const SongList: React.FC<SongListProps> = ({
 
 interface SongItemProps {
   song: Song;
-  isActive: boolean;
+  isActive: boolean; // Currently loaded in player
+  isSelected: boolean; // Selected for sidebar
+  isActuallyPlaying: boolean; // Audio is actively playing
   selectionMode: boolean;
-  isSelected: boolean;
+  isBulkSelected: boolean;
   onToggleSelect: () => void;
   onPlay: () => void;
   onSelect?: () => void;
@@ -169,7 +175,7 @@ interface SongItemProps {
 }
 
 const SongItem: React.FC<SongItemProps> = ({
-  song, isActive, selectionMode, isSelected, onToggleSelect,
+  song, isActive, isSelected, isActuallyPlaying, selectionMode, isBulkSelected, onToggleSelect,
   onPlay, onSelect, onDelete, onReuse, onDownload, onRename,
 }) => {
   const [showMenu, setShowMenu] = React.useState(false);
@@ -214,10 +220,10 @@ const SongItem: React.FC<SongItemProps> = ({
     <div
       className={`
         group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200
-        ${isSelected && selectionMode
+        ${(isBulkSelected && selectionMode) || isSelected
           ? 'bg-pink-500/10 border border-pink-500/20'
           : isActive
-            ? 'bg-pink-500/10 border border-pink-500/20'
+            ? 'bg-zinc-800/40 border border-white/5'
             : 'hover:bg-white/5 border border-transparent'
         }
       `}
@@ -226,7 +232,7 @@ const SongItem: React.FC<SongItemProps> = ({
       {/* Selection Checkbox */}
       {selectionMode && (
         <div className="flex-shrink-0">
-          {isSelected
+          {isBulkSelected
             ? <CheckSquare size={18} className="text-pink-400" />
             : <Square size={18} className="text-zinc-600" />
           }
@@ -238,10 +244,23 @@ const SongItem: React.FC<SongItemProps> = ({
         {song.coverUrl ? (
           <img src={song.coverUrl} alt="" className="w-full h-full object-cover" />
         ) : (
-          <Music size={18} className="text-zinc-600" />
+          <Music size={18} className={`${isActive ? 'text-pink-400' : 'text-zinc-600'}`} />
         )}
+        
+        {/* Spectrum visualizer overlay when playing */}
+        {isActuallyPlaying && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+            <div className="flex items-end gap-[1px] h-3 text-pink-400">
+              <div className="w-[2px] bg-current animate-music-bar-1" />
+              <div className="w-[2px] bg-current animate-music-bar-2 mx-[1px]" />
+              <div className="w-[2px] bg-current animate-music-bar-3" />
+              <div className="w-[2px] bg-current animate-music-bar-4 mx-[1px]" />
+            </div>
+          </div>
+        )}
+
         {/* Play overlay on hover (not in selection mode) */}
-        {!selectionMode && (
+        {!selectionMode && !isActuallyPlaying && (
           <button
             onClick={(e) => { e.stopPropagation(); onPlay(); }}
             className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -289,14 +308,19 @@ const SongItem: React.FC<SongItemProps> = ({
 
       {/* Metadata Badges */}
       <div className="hidden xl:flex items-center gap-2 flex-shrink-0">
-        {gp?.bpm && (
+        {song.bpm !== undefined && song.bpm > 0 && (
           <span className="text-[10px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-800/50">
-            {gp.bpm} BPM
+            {song.bpm} BPM
           </span>
         )}
         {gp?.keyScale && (
           <span className="text-[10px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-800/50">
             {gp.keyScale}
+          </span>
+        )}
+        {gp?.timeSignature && (
+          <span className="text-[10px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-800/50">
+            {gp.timeSignature}
           </span>
         )}
       </div>

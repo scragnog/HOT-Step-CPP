@@ -204,7 +204,7 @@ async function pollUntilDone(aceJobId: string, job: GenerationJob, signal: Abort
 /** Run the full generation pipeline */
 async function runGeneration(job: GenerationJob): Promise<void> {
   const aceReq = translateParams(job.params);
-  console.log(`[Generate] Job ${job.id} — ditModel=${job.params.ditModel || '(none)'}, synth_model=${aceReq.synth_model || '(none)'}, source=${job.params.source || 'create'}`);
+  console.log(`[Generate] Job ${job.id} — infer_method=${aceReq.infer_method}, steps=${aceReq.inference_steps}, scheduler=${aceReq.scheduler}, guidance=${aceReq.guidance_mode}`);
   const abortController = new AbortController();
 
   // Store abort controller for cancellation
@@ -317,6 +317,16 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         if (aceReq.scheduler !== undefined) result.scheduler = aceReq.scheduler;
         if (aceReq.guidance_mode !== undefined) result.guidance_mode = aceReq.guidance_mode;
 
+        // Solver sub-parameters
+        if (aceReq.stork_substeps !== undefined) result.stork_substeps = aceReq.stork_substeps;
+        if (aceReq.beat_stability !== undefined) result.beat_stability = aceReq.beat_stability;
+        if (aceReq.frequency_damping !== undefined) result.frequency_damping = aceReq.frequency_damping;
+        if (aceReq.temporal_smoothing !== undefined) result.temporal_smoothing = aceReq.temporal_smoothing;
+
+        // Guidance sub-parameters
+        if (aceReq.apg_momentum !== undefined) result.apg_momentum = aceReq.apg_momentum;
+        if (aceReq.apg_norm_threshold !== undefined) result.apg_norm_threshold = aceReq.apg_norm_threshold;
+
         // Routing fields (adapter, model selection)
         if (aceReq.synth_model) result.synth_model = aceReq.synth_model;
         if (aceReq.vae_model) result.vae_model = aceReq.vae_model;
@@ -395,6 +405,29 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     // Submit all LM results for synthesis
     const coResident = job.params.coResident === true;
 
+    const actualSeeds: number[] = [];
+    const batchSizePerResult = (lmResults.length === 1 && job.params.batchSize > 1)
+      ? job.params.batchSize
+      : 1;
+
+    // Determine base seed
+    let currentSeed = (lmResults[0].seed && lmResults[0].seed > 0)
+      ? lmResults[0].seed
+      : (job.params.seed && job.params.seed > 0)
+        ? job.params.seed
+        : Math.floor(Math.random() * 2147483647) + 1;
+
+    for (const result of lmResults) {
+      result.synth_batch_size = batchSizePerResult;
+      result.seed = currentSeed;
+      
+      for (let i = 0; i < batchSizePerResult; i++) {
+        actualSeeds.push(currentSeed + i);
+      }
+      currentSeed += batchSizePerResult;
+    }
+    logGeneration(job.id, 'INFO', `[Synth Phase] synth_batch_size=${batchSizePerResult}, total_tracks=${actualSeeds.length}, seeds=[${actualSeeds.join(', ')}]`);
+
     // Timbre reference: if enabled, read the source audio and pass
     // it as ref_audio to the C++ engine's timbre conditioning pipeline.
     // sourceAudioUrl can be an absolute path (from album presets) or a relative
@@ -460,12 +493,29 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
     // Check if multipart (batch) or single track
     if (contentType.includes('multipart')) {
-      // TODO: Parse multipart response for batch mode
-      // For now, handle as single track
-      const filename = `${uuidv4()}.${ext}`;
-      const filepath = path.join(config.data.audioDir, filename);
-      fs.writeFileSync(filepath, audioBuffer);
-      audioUrls.push(`/audio/${filename}`);
+      const boundaryMatch = contentType.match(/boundary=(.+)/);
+      const boundary = boundaryMatch ? boundaryMatch[1].replace(/['"]/g, '') : 'ace-batch-boundary';
+      const boundaryBuffer = Buffer.from(`--${boundary}\r\n`);
+      
+      let start = audioBuffer.indexOf(boundaryBuffer);
+      while (start !== -1) {
+        const partStart = start + boundaryBuffer.length;
+        const nextBoundary = audioBuffer.indexOf(Buffer.from(`\r\n--${boundary}`), partStart);
+        if (nextBoundary === -1) break;
+        
+        const partBuffer = audioBuffer.subarray(partStart, nextBoundary);
+        const headerEnd = partBuffer.indexOf(Buffer.from('\r\n\r\n'));
+        
+        if (headerEnd !== -1) {
+          const body = partBuffer.subarray(headerEnd + 4);
+          const filename = `${uuidv4()}.${ext}`;
+          const filepath = path.join(config.data.audioDir, filename);
+          fs.writeFileSync(filepath, body);
+          audioUrls.push(`/audio/${filename}`);
+        }
+        
+        start = audioBuffer.indexOf(boundaryBuffer, nextBoundary + 2);
+      }
     } else {
       const filename = `${uuidv4()}.${ext}`;
       const filepath = path.join(config.data.audioDir, filename);
@@ -473,15 +523,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       audioUrls.push(`/audio/${filename}`);
     }
 
-    // Get metadata from LM results
-    const firstResult = lmResults[0];
-    const title = job.params.title || firstResult.caption?.substring(0, 60) || 'Untitled';
-    const lyrics = firstResult.lyrics || job.params.lyrics || '';
-    const style = firstResult.caption || job.params.style || '';
-    const bpm = firstResult.bpm || 0;
-    const duration = firstResult.duration || 0;
-    const keyScale = firstResult.keyscale || '';
-    const timeSignature = firstResult.timesignature || '';
+    // Metadata loop for saving songs
 
     // ── Post-generation mastering ──
     let masteredAudioUrl = '';
@@ -515,18 +557,58 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       }
     }
 
-    // Create song entries in DB
-    for (const audioUrl of audioUrls) {
+    console.log(`[Generate] Saving ${audioUrls.length} tracks for job ${job.id}. actualSeeds=[${actualSeeds.join(', ')}]`);
+
+    for (let i = 0; i < audioUrls.length; i++) {
+      const audioUrl = audioUrls[i];
       const songId = uuidv4();
+      
+      // Map this track back to its corresponding LM result
+      const resultIdx = Math.floor(i / batchSizePerResult);
+      const result = lmResults[resultIdx] || lmResults[0];
+      
+      // Store the actual seed used for this specific track
+      // If actualSeeds[i] is missing, we use result.seed + offset
+      const trackSeed = actualSeeds[i] !== undefined 
+        ? actualSeeds[i] 
+        : ((result.seed || 0) + (i % batchSizePerResult));
+      
+      // Determine metadata for this track
+      const trackLyrics = result.lyrics || job.params.lyrics || '';
+      const trackStyle = result.caption || job.params.style || '';
+      const trackBpm = result.bpm || job.params.bpm || 0;
+      const trackDuration = result.duration || job.params.duration || 0;
+      const trackKeyScale = result.keyscale || job.params.keyScale || '';
+      const trackTimeSignature = result.timesignature || job.params.timeSignature || '';
+
+      // Determine title: use provided title or derive from caption
+      // Ensure we don't double-append seeds if they are already in the base title
+      let baseTitle = job.params.title || result.caption?.substring(0, 60) || 'Untitled';
+      baseTitle = baseTitle.replace(/\s*\[\d+\]\s*$/, '').trim();
+      const trackTitle = `${baseTitle} [${trackSeed}]`;
+
+      console.log(`[Generate] Track ${i}: seed=${trackSeed}, title="${trackTitle}"`);
+
+      // Update songParams with actual detected values
+      const songParams = { 
+        ...job.params, 
+        seed: trackSeed, 
+        randomSeed: false,
+        bpm: trackBpm,
+        duration: trackDuration,
+        keyScale: trackKeyScale,
+        timeSignature: trackTimeSignature
+      };
+
       getDb().prepare(`
         INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
                            duration, bpm, key_scale, time_signature, tags, dit_model,
                            generation_params, mastered_audio_url)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        songId, job.userId, title, lyrics, style, firstResult.caption || '',
-        audioUrl, duration, bpm, keyScale, timeSignature,
-        JSON.stringify([]), aceReq.synth_model || '', JSON.stringify(job.params),
+        songId, job.userId, trackTitle, trackLyrics, trackStyle, result.caption || '',
+        audioUrl, trackDuration, trackBpm, trackKeyScale, trackTimeSignature,
+        JSON.stringify([]), aceReq.synth_model || '', JSON.stringify(songParams),
         masteredAudioUrl,
       );
       songIds.push(songId);
@@ -538,15 +620,15 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     job.result = {
       audioUrls,
       songIds,
-      bpm,
-      duration,
-      keyScale,
-      timeSignature,
+      bpm: lmResults[0]?.bpm || 0,
+      duration: lmResults[0]?.duration || 0,
+      keyScale: lmResults[0]?.keyscale || '',
+      timeSignature: lmResults[0]?.timesignature || '',
       masteredAudioUrl: masteredAudioUrl || undefined,
     };
 
     logGeneration(job.id, 'INFO', `[Result] ${audioUrls.length} audio file(s) saved, ${songIds.length} song(s) created`);
-    logGeneration(job.id, 'INFO', `[Result] Duration: ${duration}s, BPM: ${bpm}, Key: ${keyScale}`);
+    logGeneration(job.id, 'INFO', `[Result] Duration: ${job.result.duration}s, BPM: ${job.result.bpm}, Key: ${job.result.keyScale}`);
     finishGenerationLog(job.id, aceReq.task_type || 'text2music');
 
   } catch (err: any) {

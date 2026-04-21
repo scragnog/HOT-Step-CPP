@@ -1,0 +1,9 @@
+CompileFlags:
+  Add:
+    - -ID:\Tools\HOT-Step-CPP\engine\ggml\include
+    - -ID:\Tools\HOT-Step-CPP\engine\src
+    - -ID:\Tools\HOT-Step-CPP\engine
+    - -DGGML_MAX_NAME=128
+    - -DNOMINMAX
+    - -D_CRT_SECURE_NO_WARNINGS
+    - -std=c++17

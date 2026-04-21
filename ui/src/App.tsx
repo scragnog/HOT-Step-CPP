@@ -8,8 +8,11 @@ import { useAuth } from './context/AuthContext';
 import { useGenerationStore } from './stores/useGenerationStore';
 import { usePersistedState } from './hooks/usePersistedState';
 import { songApi } from './services/api';
+import { useLanguage } from './context/LanguageContext';
+import { useCreateState } from './hooks/useCreateState';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
+import { AdvancedPanel } from './components/advanced/AdvancedPanel';
 import { SongList } from './components/library/SongList';
 import { JobQueue } from './components/queue/JobQueue';
 import { Player } from './components/player/Player';
@@ -20,7 +23,7 @@ import { RightSidebar } from './components/details/RightSidebar';
 import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
 import { DownloadModal } from './components/shared/DownloadModal';
-import { SettingsPanel, type AppSettings, DEFAULT_SETTINGS } from './components/settings/SettingsPanel';
+import { SettingsPanel } from './components/settings/SettingsPanel';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { LyricStudioV2 } from './components/lyric-studio/LyricStudioV2';
 import { getPlaylist } from './components/lyric-studio/playlistStore';
@@ -44,6 +47,7 @@ function urlForView(view: string): string {
 
 const App: React.FC = () => {
   const { token, isLoading } = useAuth();
+  const { t } = useLanguage();
   const [activeView, setActiveView] = useState(() => viewFromUrl());
   const [songs, setSongs] = useState<Song[]>([]);
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
@@ -56,10 +60,13 @@ const App: React.FC = () => {
 
   // Terminal panel state (persisted)
   const [showTerminal, setShowTerminal] = usePersistedState('ace-showTerminal', false);
-  const [terminalWidth, setTerminalWidth] = usePersistedState('ace-terminalWidth', 450);
+  const [terminalHeight, setTerminalHeight] = usePersistedState('ace-terminalHeight', 200);
 
-  // Settings state (persisted)
-  const [settings, setSettings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
+  // Advanced panel state (persisted)
+  const [showAdvanced, setShowAdvanced] = usePersistedState('ace-showAdvanced', false);
+  const [advancedPanelWidth, setAdvancedPanelWidth] = usePersistedState('ace-advancedPanelWidth', 400);
+
+  const { settings, setLocalSettings: setSettings } = useCreateState();
 
   // Player state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -109,6 +116,17 @@ const App: React.FC = () => {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  // Reset player state when currentSong is cleared
+  useEffect(() => {
+    if (!currentSong) {
+      setCurrentTime(0);
+      setDuration(0);
+      setCurrentAudioUrl(null);
+      setIsPlaying(false);
+      currentSongIdRef.current = null;
+    }
+  }, [currentSong]);
 
   // Download modal state
   const [downloadSong, setDownloadSong] = useState<Song | null>(null);
@@ -421,7 +439,7 @@ const App: React.FC = () => {
       <div className="flex h-screen items-center justify-center bg-suno text-zinc-400">
         <div className="text-center">
           <div className="text-4xl mb-4">⚡</div>
-          <div className="text-lg font-medium">Loading HOT-Step...</div>
+          <div className="text-lg font-medium">{t('create_generating')}</div>
         </div>
       </div>
     );
@@ -454,7 +472,7 @@ const App: React.FC = () => {
       return (
         <div className="flex-1 overflow-hidden">
           <LyricStudioV2
-            onPlaySong={(song, list) => playSong(song)}
+            onPlaySong={(song, _list) => playSong(song)}
             isPlaying={isPlaying}
             currentSong={currentSong}
             currentTime={currentTime}
@@ -469,10 +487,19 @@ const App: React.FC = () => {
           <SongList
             songs={songs}
             currentSongId={currentSong?.id}
+            selectedSongId={selectedSong?.id}
+            isPlaying={isPlaying}
             onPlay={playSong}
             onDelete={handleDelete}
             onBulkDelete={handleBulkDelete}
-            onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
+            onSelect={(s) => { 
+              if (selectedSong?.id === s.id && showRightSidebar) {
+                setShowRightSidebar(false);
+              } else {
+                setSelectedSong(s); 
+                setShowRightSidebar(true);
+              }
+            }}
             onReuse={handleReuse}
             onDownload={setDownloadSong}
             onRename={handleRename}
@@ -491,8 +518,11 @@ const App: React.FC = () => {
         >
           <CreatePanel
             onGenerate={handleGenerate}
+            onCancel={() => { const activeJob = genStore.jobs.find(j => j.status === 'lm_running' || j.status === 'synth_running' || j.status === 'pending'); if (activeJob) genStore.cancel(activeJob.jobId); }}
             isGenerating={genStore.isGenerating}
             reuseData={reuseData}
+            showAdvanced={showAdvanced}
+            onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
           />
         </div>
 
@@ -522,20 +552,67 @@ const App: React.FC = () => {
           <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
         </div>
 
+        {/* Advanced Panel — resizable column */}
+        {showAdvanced && (
+          <>
+            <div
+              className="flex-shrink-0 h-full border-r border-zinc-200 dark:border-white/5"
+              style={{ width: advancedPanelWidth }}
+            >
+              <AdvancedPanel onClose={() => setShowAdvanced(false)} />
+            </div>
+            {/* Middle resize handle */}
+            <div
+              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-sky-500/20 active:bg-sky-500/30 transition-colors"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startW = advancedPanelWidth;
+                const onMove = (ev: MouseEvent) => {
+                  const newW = Math.min(600, Math.max(300, startW + (ev.clientX - startX)));
+                  setAdvancedPanelWidth(newW);
+                };
+                const onUp = () => {
+                  document.removeEventListener('mousemove', onMove);
+                  document.removeEventListener('mouseup', onUp);
+                  document.body.style.cursor = '';
+                  document.body.style.userSelect = '';
+                };
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+              }}
+            >
+              <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-sky-400 transition-colors" />
+            </div>
+          </>
+        )}
+
         {/* Song List + Queue */}
         <div className="flex-1 min-w-0 overflow-y-auto">
           <JobQueue
             jobs={genStore.jobs}
             onCancel={genStore.cancel}
             onClearCompleted={genStore.clearCompleted}
+            onRemove={genStore.removeJob}
           />
           <SongList
             songs={songs}
             currentSongId={currentSong?.id}
+            selectedSongId={selectedSong?.id}
+            isPlaying={isPlaying}
             onPlay={playSong}
             onDelete={handleDelete}
             onBulkDelete={handleBulkDelete}
-            onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
+            onSelect={(s) => { 
+              if (selectedSong?.id === s.id && showRightSidebar) {
+                setShowRightSidebar(false);
+              } else {
+                setSelectedSong(s); 
+                setShowRightSidebar(true);
+              }
+            }}
             onReuse={handleReuse}
             onDownload={setDownloadSong}
             onRename={handleRename}
@@ -598,9 +675,9 @@ const App: React.FC = () => {
           onViewChange={navigateTo}
           onQuit={() => {
             setConfirmDialog({
-              title: 'Quit HOT-Step CPP',
-              message: 'Are you sure you wish to shut down HOT-Step CPP? This will stop the engine and all servers.',
-              confirmLabel: 'Shut Down',
+              title: t('nav_quit'),
+              message: t('nav_quit') + '?',
+              confirmLabel: t('nav_quit'),
               danger: true,
               onConfirm: async () => {
                 setConfirmDialog(null);
@@ -616,43 +693,41 @@ const App: React.FC = () => {
         <main className="flex-1 flex overflow-hidden relative">
           {renderContent()}
         </main>
-
-        {/* Terminal Panel — far right, resizable */}
-        {showTerminal && (
-          <>
-            <div
-              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-emerald-500/20 active:bg-emerald-500/30 transition-colors"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                const startX = e.clientX;
-                const startW = terminalWidth;
-                const onMove = (ev: MouseEvent) => {
-                  const newW = Math.min(900, Math.max(300, startW + startX - ev.clientX));
-                  setTerminalWidth(newW);
-                };
-                const onUp = () => {
-                  document.removeEventListener('mousemove', onMove);
-                  document.removeEventListener('mouseup', onUp);
-                  document.body.style.cursor = '';
-                  document.body.style.userSelect = '';
-                };
-                document.body.style.cursor = 'col-resize';
-                document.body.style.userSelect = 'none';
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-              }}
-            >
-              <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-emerald-400 transition-colors" />
-            </div>
-            <div
-              className="flex-shrink-0 h-full border-l border-white/5"
-              style={{ width: terminalWidth }}
-            >
-              <TerminalPanel onClose={() => setShowTerminal(false)} />
-            </div>
-          </>
-        )}
       </div>
+
+      {/* Terminal Panel — horizontal, above player, resizable vertically */}
+      {showTerminal && (
+        <div className="flex-shrink-0 flex flex-col border-t border-white/5" style={{ height: terminalHeight }}>
+          {/* Top resize handle */}
+          <div
+            className="flex-shrink-0 h-1.5 w-full cursor-row-resize group z-20 flex justify-center hover:bg-emerald-500/20 active:bg-emerald-500/30 transition-colors"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startY = e.clientY;
+              const startH = terminalHeight;
+              const onMove = (ev: MouseEvent) => {
+                const newH = Math.min(600, Math.max(100, startH + startY - ev.clientY));
+                setTerminalHeight(newH);
+              };
+              const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+              };
+              document.body.style.cursor = 'row-resize';
+              document.body.style.userSelect = 'none';
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
+          >
+            <div className="h-0.5 w-8 rounded-full bg-zinc-600 group-hover:bg-emerald-400 transition-colors" />
+          </div>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <TerminalPanel onClose={() => setShowTerminal(false)} />
+          </div>
+        </div>
+      )}
 
       {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}
       <div className="flex-shrink-0 bg-zinc-950 border-t border-white/5">

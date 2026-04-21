@@ -23,6 +23,9 @@
 #    ifndef WIN32_LEAN_AND_MEAN
 #        define WIN32_LEAN_AND_MEAN
 #    endif
+#    ifndef NOMINMAX
+#        define NOMINMAX
+#    endif
 #    include <windows.h>
 #else
 #    include <dirent.h>
@@ -63,6 +66,15 @@ static const AdapterEntry * registry_find_adapter(const ModelRegistry & reg, con
         if (e.name == name) {
             return &e;
         }
+#ifdef _WIN32
+        if (_stricmp(e.path.c_str(), name) == 0) {
+            return &e;
+        }
+#else
+        if (strcasecmp(e.path.c_str(), name) == 0) {
+            return &e;
+        }
+#endif
     }
     return nullptr;
 }
