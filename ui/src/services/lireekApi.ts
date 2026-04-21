@@ -439,21 +439,27 @@ export const streamBuildProfile = (
   req: { provider: string; model?: string },
   callbacks: StreamCallbacks,
 ): Promise<void> =>
-  consumeSSE(`/api/lireek/lyrics-sets/${lyricsSetId}/build-profile-stream`, req, callbacks);
+  consumeSSE(`/api/lireek/lyrics-sets/${lyricsSetId}/build-profile-stream`, {
+    provider_name: req.provider, model: req.model,
+  }, callbacks);
 
 export const streamGenerate = (
   profileId: number,
   req: { profile_id: number; provider: string; model?: string; extra_instructions?: string },
   callbacks: StreamCallbacks,
 ): Promise<void> =>
-  consumeSSE(`/api/lireek/profiles/${profileId}/generate-stream`, req, callbacks);
+  consumeSSE(`/api/lireek/profiles/${profileId}/generate-stream`, {
+    provider_name: req.provider, model: req.model, extra_instructions: req.extra_instructions,
+  }, callbacks);
 
 export const streamRefine = (
   generationId: number,
   req: { provider: string; model?: string },
   callbacks: StreamCallbacks,
 ): Promise<void> =>
-  consumeSSE(`/api/lireek/generations/${generationId}/refine-stream`, req, callbacks);
+  consumeSSE(`/api/lireek/generations/${generationId}/refine-stream`, {
+    provider_name: req.provider, model: req.model,
+  }, callbacks);
 
 export const skipThinking = (): Promise<void> =>
   api('/api/lireek/skip-thinking', { method: 'POST' });
@@ -467,4 +473,6 @@ export const streamBuildCuratedProfile = (
   },
   callbacks: StreamCallbacks,
 ): Promise<void> =>
-  consumeSSE(`/api/lireek/artists/${artistId}/curated-profile-stream`, req, callbacks);
+  consumeSSE(`/api/lireek/artists/${artistId}/curated-profile-stream`, {
+    ...req, provider_name: req.provider,
+  }, callbacks);
