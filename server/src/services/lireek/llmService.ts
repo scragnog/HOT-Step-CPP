@@ -526,12 +526,12 @@ async function planSongMetadata(
 ): Promise<any> {
   const provider = getProvider(providerName);
   const prompt = `
-Themes to explore: ${profile.themes.join(', ')}
+Themes to explore: ${(profile.themes || []).join(', ')}
 Typical subjects: ${(profile.subject_categories || []).join(', ')}
   
-Already used subjects (DO NOT REPEAT): ${usedSubjects.join(' || ')}
-Already used BPMs: ${usedBpms.join(', ')}
-Already used Keys: ${usedKeys.join(', ')}
+Already used subjects (DO NOT REPEAT): ${(usedSubjects || []).join(' || ')}
+Already used BPMs: ${(usedBpms || []).join(', ')}
+Already used Keys: ${(usedKeys || []).join(', ')}
 `;
 
   const responseJsonStr = await provider.call(SONG_METADATA_SYSTEM_PROMPT, prompt, modelName);
@@ -554,10 +554,10 @@ function buildGenerationPrompt(profile: LyricsProfile, extraInstructions?: strin
   }
   if (profile.structural_patterns) prompt += `Structural Patterns:\n${profile.structural_patterns}\n\n`;
   
-  if (usedTitles.length) prompt += `DO NOT USE THESE TITLES:\n${usedTitles.join('\n')}\n\n`;
+  if (usedTitles?.length) prompt += `DO NOT USE THESE TITLES:\n${usedTitles.join('\n')}\n\n`;
   
   if (extraInstructions) prompt += `=== EXTRA INSTRUCTIONS ===\n${extraInstructions}\n\n`;
-  if (profile.examples?.length) {
+  if (profile.examples?.length && profile.representative_excerpts?.length) {
     prompt += `=== LYRIC EXCERPTS ===\n${profile.representative_excerpts.slice(0, 10).join('\n---\n')}\n`;
   }
   return prompt;
@@ -581,7 +581,7 @@ export async function generateLyricsStreaming(
   if (onPhase) onPhase("Planning song metadata…");
   let metadata = { subject: '', bpm: 0, key: '', caption: '', duration: 0 };
   
-  if (profile.song_subjects || profile.themes.length) {
+  if (profile.song_subjects || (profile.themes && profile.themes.length)) {
     try {
       metadata = await planSongMetadata(profile, usedSubjects, usedBpms, usedKeys, providerName, effectiveModel);
       console.log("Planned metadata:", metadata);

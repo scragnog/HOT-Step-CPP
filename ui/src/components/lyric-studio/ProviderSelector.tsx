@@ -39,15 +39,24 @@ export interface ModelSelections {
 }
 
 export function loadSelections(): ModelSelections {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return {
+  const defaults: ModelSelections = {
     profiling: { provider: '', model: '' },
     generation: { provider: '', model: '' },
     refinement: { provider: '', model: '' },
   };
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Merge defensively — localStorage might contain '{}' or partial data
+      return {
+        profiling: { ...defaults.profiling, ...parsed.profiling },
+        generation: { ...defaults.generation, ...parsed.generation },
+        refinement: { ...defaults.refinement, ...parsed.refinement },
+      };
+    }
+  } catch { /* ignore */ }
+  return defaults;
 }
 
 export function saveSelections(sel: ModelSelections) {
