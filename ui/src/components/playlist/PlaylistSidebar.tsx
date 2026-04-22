@@ -50,15 +50,15 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
         <div className="flex items-center gap-1">
           {playlist.items.length > 0 && (
             <button onClick={playlist.clear}
-              className="p-1.5 rounded-md text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              className="p-1 rounded-md text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
               title="Clear playlist">
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 className="w-3 h-3" />
             </button>
           )}
           <button onClick={onClose}
-            className="p-1.5 rounded-md text-zinc-500 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-1 rounded-md text-zinc-500 hover:text-white hover:bg-white/10 transition-colors"
             title="Close playlist">
-            <X className="w-3.5 h-3.5" />
+            <X className="w-3 h-3" />
           </button>
         </div>
       </div>

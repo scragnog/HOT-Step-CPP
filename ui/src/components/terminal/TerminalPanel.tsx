@@ -190,7 +190,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
               className="p-1 rounded text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
               title="Scroll to bottom"
             >
-              <ArrowDown size={13} />
+              <ArrowDown size={12} />
             </button>
           )}
           <button
@@ -198,14 +198,14 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
             className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors"
             title="Clear"
           >
-            <Trash2 size={13} />
+            <Trash2 size={12} />
           </button>
           <button
             onClick={onClose}
             className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
             title="Close terminal"
           >
-            <X size={14} />
+            <X size={12} />
           </button>
         </div>
       </div>
