@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import type { Artist } from '../../services/lireekApi';
 
@@ -9,10 +9,35 @@ interface ArtistSidebarProps {
   onBack: () => void;
 }
 
+const SCROLL_KEY = 'ls-artist-sidebar-scroll';
+
 export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
   artists, selectedArtistId, onSelectArtist, onBack,
 }) => {
   const [imageErrors, setImageErrors] = React.useState<Set<number>>(new Set());
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  // Restore scroll position on mount
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    try {
+      const saved = sessionStorage.getItem(SCROLL_KEY);
+      if (saved) el.scrollTop = Number(saved);
+    } catch { /* ignore */ }
+  }, []);
+
+  // Debounced save on scroll
+  const handleScroll = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      try {
+        const el = scrollRef.current;
+        if (el) sessionStorage.setItem(SCROLL_KEY, String(el.scrollTop));
+      } catch { /* ignore */ }
+    }, 150);
+  }, []);
 
   const gradient = (name: string) => {
     const hash = name.split('').reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0);
@@ -32,7 +57,7 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
       </button>
 
       {/* Artist list */}
-      <div className="flex-1 overflow-y-auto py-2">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-2">
         {artists.map((artist) => {
           const isSelected = artist.id === selectedArtistId;
           return (
