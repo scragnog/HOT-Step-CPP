@@ -235,7 +235,8 @@ export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudi
 
     console.log(`[LyricStudioV2] Send to Create: "${gen.title}" (adapter: ${preset?.adapter_path || 'none'}, mastering: ${preset?.reference_track_path || 'none'})`);
 
-    // Navigate to Create page
+    // Navigate to Create page — save current LS URL first so sidebar can restore it
+    try { localStorage.setItem('hs-lastLyricStudioUrl', window.location.pathname); } catch { /* ignore */ }
     window.history.pushState({}, '', '/');
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, [profiles]);

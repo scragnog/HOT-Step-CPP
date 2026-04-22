@@ -62,7 +62,14 @@ function viewFromUrl(path = window.location.pathname): string {
 
 /** Map view names to URL paths */
 function urlForView(view: string): string {
-  if (view === 'lyric-studio') return '/lyric-studio';
+  if (view === 'lyric-studio') {
+    // Restore the last deep URL (artist/album/tab) if we have one
+    try {
+      const saved = localStorage.getItem('hs-lastLyricStudioUrl');
+      if (saved) return saved;
+    } catch { /* ignore */ }
+    return '/lyric-studio';
+  }
   if (view === 'library') return '/library';
   if (view === 'settings') return '/settings';
   return '/';
@@ -121,12 +128,16 @@ const AppContent: React.FC = () => {
 
   // ── URL-based routing ──────────────────────────────────────
   const navigateTo = useCallback((view: string) => {
+    // Save deep Lyric Studio URL before leaving so we can restore it
+    if (activeView === 'lyric-studio' && view !== 'lyric-studio') {
+      try { localStorage.setItem('hs-lastLyricStudioUrl', window.location.pathname); } catch { /* ignore */ }
+    }
     setActiveView(view);
     const url = urlForView(view);
     if (window.location.pathname !== url) {
       window.history.pushState(null, '', url);
     }
-  }, []);
+  }, [activeView]);
 
   // Handle browser back/forward
   useEffect(() => {
