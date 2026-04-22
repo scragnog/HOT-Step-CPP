@@ -5,7 +5,7 @@
 // per-song content and metadata.
 
 import React, { useEffect } from 'react';
-import { Zap, Loader2 } from 'lucide-react';
+import { Zap, ListPlus } from 'lucide-react';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { ContentSection } from './ContentSection';
@@ -14,11 +14,11 @@ import type { GenerationParams, Song } from '../../types';
 
 interface CreatePanelProps {
   onGenerate: (params: Partial<GenerationParams>) => void;
-  isGenerating: boolean;
+  activeJobCount: number;
   reuseData?: { song: Song; timestamp: number } | null;
 }
 
-export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerating, reuseData }) => {
+export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData }) => {
   // ── Content (per-song) ──
   const [caption, setCaption] = usePersistedState('hs-caption', '');
   const [lyrics, setLyrics] = usePersistedState('hs-lyrics', '');
@@ -105,12 +105,15 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         <button
           className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-semibold text-sm transition-all duration-200 hover:shadow-lg hover:shadow-pink-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={handleGenerate}
-          disabled={isGenerating || (!caption.trim() && !lyrics.trim() && !instrumental)}
+          disabled={!caption.trim() && !lyrics.trim() && !instrumental}
         >
-          {isGenerating ? (
+          {activeJobCount > 0 ? (
             <>
-              <Loader2 size={18} className="spinner" />
-              Generating...
+              <ListPlus size={18} />
+              Queue Generation
+              <span className="ml-1 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-white/20 text-xs font-bold tabular-nums">
+                {activeJobCount}
+              </span>
             </>
           ) : (
             <>

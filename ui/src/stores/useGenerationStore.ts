@@ -10,6 +10,7 @@ import type { GenerationParams, GenerationJob, Song } from '../types';
 interface GenerationStore {
   jobs: GenerationJob[];
   isGenerating: boolean;
+  activeJobCount: number;
   submit: (params: GenerationParams, token: string) => Promise<void>;
   cancel: (jobId: string) => Promise<void>;
   cancelAll: () => Promise<void>;
@@ -134,10 +135,12 @@ export function useGenerationStore(
     ));
   }, []);
 
-  const isGenerating = jobs.some(j =>
+  const activeJobs = jobs.filter(j =>
     ['pending', 'lm_running', 'synth_running', 'saving'].includes(j.status)
   );
+  const isGenerating = activeJobs.length > 0;
+  const activeJobCount = activeJobs.length;
 
-  return { jobs, isGenerating, submit, cancel, cancelAll, clearCompleted };
+  return { jobs, isGenerating, activeJobCount, submit, cancel, cancelAll, clearCompleted };
 }
 

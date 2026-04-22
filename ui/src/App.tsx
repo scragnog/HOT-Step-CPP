@@ -343,7 +343,7 @@ const AppContent: React.FC = () => {
         >
           <CreatePanel
             onGenerate={handleGenerate}
-            isGenerating={genStore.isGenerating}
+            activeJobCount={genStore.activeJobCount}
             reuseData={reuseData}
           />
         </div>
