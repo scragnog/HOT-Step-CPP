@@ -52,7 +52,7 @@ import {
   playFromList,
 } from './stores/playbackStore';
 import type { Song, GenerationParams } from './types';
-import { usePlaylist } from './components/lyric-studio/playlistStore';
+import { usePlaylist, addToPlaylist, type PlaylistItem } from './components/lyric-studio/playlistStore';
 
 /** Derive top-level view from the browser URL */
 function viewFromUrl(path = window.location.pathname): string {
@@ -328,6 +328,19 @@ const AppContent: React.FC = () => {
             onReuse={handleReuse}
             onDownload={setDownloadSong}
             onRename={handleRename}
+            onAddToPlaylist={(song) => {
+              addToPlaylist({
+                id: song.id,
+                title: song.title || 'Untitled',
+                audioUrl: song.audioUrl || song.audio_url || '',
+                masteredAudioUrl: song.masteredAudioUrl || song.mastered_audio_url || '',
+                artistName: song.artistName || '',
+                coverUrl: song.coverUrl || song.cover_url || '',
+                duration: typeof song.duration === 'number' ? song.duration : undefined,
+                style: song.style || '',
+              });
+              showToast('Added to playlist', 'success');
+            }}
           />
         </div>
       );
@@ -391,6 +404,19 @@ const AppContent: React.FC = () => {
             onReuse={handleReuse}
             onDownload={setDownloadSong}
             onRename={handleRename}
+            onAddToPlaylist={(song) => {
+              addToPlaylist({
+                id: song.id,
+                title: song.title || 'Untitled',
+                audioUrl: song.audioUrl || song.audio_url || '',
+                masteredAudioUrl: song.masteredAudioUrl || song.mastered_audio_url || '',
+                artistName: song.artistName || '',
+                coverUrl: song.coverUrl || song.cover_url || '',
+                duration: typeof song.duration === 'number' ? song.duration : undefined,
+                style: song.style || '',
+              });
+              showToast('Added to playlist', 'success');
+            }}
           />
         </div>
 

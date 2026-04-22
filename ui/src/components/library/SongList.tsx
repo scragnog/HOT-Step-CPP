@@ -4,9 +4,10 @@
 import React, { useState, useCallback } from 'react';
 import {
   Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
-  Download, CheckSquare, Square, MinusSquare, X, Pencil,
+  Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus,
 } from 'lucide-react';
 import type { Song } from '../../types';
+import { togglePlay, usePlayback } from '../../stores/playbackStore';
 
 interface SongListProps {
   songs: Song[];
@@ -18,11 +19,13 @@ interface SongListProps {
   onReuse?: (song: Song) => void;
   onDownload?: (song: Song) => void;
   onRename?: (song: Song, newTitle: string) => void;
+  onAddToPlaylist?: (song: Song) => void;
 }
 
 export const SongList: React.FC<SongListProps> = ({
-  songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename,
+  songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename, onAddToPlaylist,
 }) => {
+  const playback = usePlayback();
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -138,6 +141,7 @@ export const SongList: React.FC<SongListProps> = ({
             key={song.id}
             song={song}
             isActive={currentSongId === song.id}
+            isPlaying={currentSongId === song.id && playback.isPlaying}
             selectionMode={selectionMode}
             isSelected={selectedIds.has(song.id)}
             onToggleSelect={() => toggleSelection(song.id)}
@@ -147,6 +151,7 @@ export const SongList: React.FC<SongListProps> = ({
             onReuse={() => onReuse?.(song)}
             onDownload={() => onDownload?.(song)}
             onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined}
+            onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(song) : undefined}
           />
         ))}
       </div>
@@ -157,6 +162,7 @@ export const SongList: React.FC<SongListProps> = ({
 interface SongItemProps {
   song: Song;
   isActive: boolean;
+  isPlaying: boolean;
   selectionMode: boolean;
   isSelected: boolean;
   onToggleSelect: () => void;
@@ -166,11 +172,12 @@ interface SongItemProps {
   onReuse?: () => void;
   onDownload?: () => void;
   onRename?: (newTitle: string) => void;
+  onAddToPlaylist?: () => void;
 }
 
 const SongItem: React.FC<SongItemProps> = ({
-  song, isActive, selectionMode, isSelected, onToggleSelect,
-  onPlay, onSelect, onDelete, onReuse, onDownload, onRename,
+  song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
+  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist,
 }) => {
   const [showMenu, setShowMenu] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
@@ -243,10 +250,18 @@ const SongItem: React.FC<SongItemProps> = ({
         {/* Play overlay on hover (not in selection mode) */}
         {!selectionMode && (
           <button
-            onClick={(e) => { e.stopPropagation(); onPlay(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isActive) {
+                // Toggle play/pause via playback store — don't reload the track
+                togglePlay();
+              } else {
+                onPlay();
+              }
+            }}
             className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
           >
-            {isActive ? <Pause size={16} className="text-white" /> : <Play size={16} className="text-white ml-0.5" />}
+            {isPlaying ? <Pause size={16} className="text-white" /> : <Play size={16} className="text-white ml-0.5" />}
           </button>
         )}
       </div>
@@ -283,7 +298,7 @@ const SongItem: React.FC<SongItemProps> = ({
           </div>
         )}
         <div className="text-xs text-zinc-500 truncate mt-0.5">
-          {song.caption || song.style || 'No description'}
+          {song.style || song.caption || 'No description'}
         </div>
       </div>
 
@@ -321,6 +336,14 @@ const SongItem: React.FC<SongItemProps> = ({
             <>
               <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
               <div className="absolute right-0 top-full mt-1 z-50 bg-zinc-900 border border-white/10 rounded-xl shadow-xl py-1 min-w-[160px]">
+                {onAddToPlaylist && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
+                  >
+                    <ListPlus size={14} /> Add to Playlist
+                  </button>
+                )}
                 {onReuse && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
