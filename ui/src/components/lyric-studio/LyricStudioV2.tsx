@@ -589,11 +589,8 @@ export const LyricStudioV2: React.FC = () => {
               <ArtistSidebar artists={artists} selectedArtistId={-1}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists} />
             </div>
-            <div className="w-60 flex-shrink-0 border-r border-white/5 overflow-hidden">
-              <ArtistPageSidebar onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)} />
-            </div>
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Header bar — matches ContentTabs height for visual consistency */}
+              {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
               <div className="flex-shrink-0 flex items-center px-5 py-3 border-b border-white/5 bg-zinc-950/30">
                 <span className="text-sm font-medium text-zinc-400">All Artists</span>
                 {artists.length > 0 && (
@@ -602,13 +599,18 @@ export const LyricStudioV2: React.FC = () => {
                   </span>
                 )}
               </div>
-              <div className="flex-1 overflow-y-auto">
-                <ArtistGrid
-                  artists={artists} loading={artistsLoading}
-                  onSelectArtist={handleSelectArtist} onAddNew={openFetchNew}
-                  onAddManual={() => setAddArtistModalOpen(true)}
-                  onDelete={handleDeleteArtist} onRefreshImage={handleRefreshImage} onSetImage={handleSetImage}
-                />
+              <div className="flex-1 flex min-h-0">
+                <div className="w-60 flex-shrink-0 border-r border-white/5 overflow-hidden">
+                  <ArtistPageSidebar onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)} />
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <ArtistGrid
+                    artists={artists} loading={artistsLoading}
+                    onSelectArtist={handleSelectArtist} onAddNew={openFetchNew}
+                    onAddManual={() => setAddArtistModalOpen(true)}
+                    onDelete={handleDeleteArtist} onRefreshImage={handleRefreshImage} onSetImage={handleSetImage}
+                  />
+                </div>
               </div>
             </div>
             {/* Resize handle */}
@@ -631,12 +633,8 @@ export const LyricStudioV2: React.FC = () => {
               <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists} />
             </div>
-            <div className="w-60 flex-shrink-0 border-r border-white/5 overflow-hidden">
-              <ArtistPageSidebar artist={nav.selectedArtist} albumCount={albums.length}
-                onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)} />
-            </div>
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Header bar — matches ContentTabs height for visual consistency */}
+              {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
               <div className="flex-shrink-0 flex items-center px-5 py-3 border-b border-white/5 bg-zinc-950/30">
                 <span className="text-sm font-medium text-zinc-400">{nav.selectedArtist.name}</span>
                 {albums.length > 0 && (
@@ -645,14 +643,20 @@ export const LyricStudioV2: React.FC = () => {
                   </span>
                 )}
               </div>
-              <div className="flex-1 overflow-y-auto">
-                <AlbumGrid
-                  albums={albums} loading={albumsLoading} artistName={nav.selectedArtist.name}
-                  onSelectAlbum={handleSelectAlbum} onAddAlbum={openFetchForArtist}
-                  onAddManual={() => setAddAlbumModalOpen(true)}
-                  onDeleteAlbum={handleDeleteAlbum} onRefreshImage={handleRefreshAlbumImage}
-                  onSetImage={handleSetAlbumImage} onCuratedProfile={() => setCuratedModalOpen(true)}
-                />
+              <div className="flex-1 flex min-h-0">
+                <div className="w-60 flex-shrink-0 border-r border-white/5 overflow-hidden">
+                  <ArtistPageSidebar artist={nav.selectedArtist} albumCount={albums.length}
+                    onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)} />
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <AlbumGrid
+                    albums={albums} loading={albumsLoading} artistName={nav.selectedArtist.name}
+                    onSelectAlbum={handleSelectAlbum} onAddAlbum={openFetchForArtist}
+                    onAddManual={() => setAddAlbumModalOpen(true)}
+                    onDeleteAlbum={handleDeleteAlbum} onRefreshImage={handleRefreshAlbumImage}
+                    onSetImage={handleSetAlbumImage} onCuratedProfile={() => setCuratedModalOpen(true)}
+                  />
+                </div>
               </div>
             </div>
             {/* Resize handle */}
