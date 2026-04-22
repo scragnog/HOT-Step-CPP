@@ -12,6 +12,7 @@ import { useCallback } from 'react';
 import { lireekApi } from '../../services/lireekApi';
 import { generateApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { writePersistedState } from '../../hooks/usePersistedState';
 import type { Generation, Profile, AlbumPreset } from '../../services/lireekApi';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -193,11 +194,9 @@ export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudi
       } catch { /* ignore */ }
     }
 
-    // Write directly to the hs-* localStorage keys that CreatePanel reads via usePersistedState.
-    // On navigation, CreatePanel remounts and picks up the fresh values.
-    const write = (key: string, value: any) => {
-      localStorage.setItem(key, JSON.stringify(value));
-    };
+    // Write to hs-* localStorage keys AND fire same-tab StorageEvent so
+    // usePersistedState hooks in the top bar update immediately.
+    const write = (key: string, value: any) => writePersistedState(key, value);
 
     // Content
     write('hs-caption', gen.caption || '');
