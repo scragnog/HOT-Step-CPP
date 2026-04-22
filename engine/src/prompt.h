@@ -265,6 +265,9 @@ static std::string build_cot_yaml(const AcePrompt & prompt) {
 }
 
 // Prompt with injected CoT (Phase 2: all metas known)
+// Assistant turn is left OPEN: training layout is
+//   <|im_start|>assistant\n<think>\n{cot}\n</think>\n\n{codes}<|im_end|>\n
+// so the model generates codes from the position right after \n\n.
 static std::vector<int> build_lm_prompt_with_cot(BPETokenizer &      bpe,
                                                  const AcePrompt &   prompt,
                                                  const std::string & cot_yaml) {
@@ -287,12 +290,16 @@ static std::vector<int> build_lm_prompt_with_cot(BPETokenizer &      bpe,
     append("\n" + cot_yaml);
     ids.push_back(TOKEN_THINK_END);
     append("\n\n");
-    ids.push_back(TOKEN_IM_END);
-    append("\n");
     return ids;
 }
 
 // Unconditional prompt with empty CoT for CFG (Phase 2)
+// Training-aligned: user message is the bare negative prompt (or "NO USER INPUT"
+// when none supplied), matching the training-time CFG dropout format where the
+// uncond branch carries no caption/lyrics structure.  Assistant turn is left
+// OPEN (same reasoning as the cond prompt above).
+// Empty reasoning is "<think>\n\n</think>" (two newlines between tags) because
+// Qwen3 renders empty reasoning_content.strip('\n') as '\n\n' between tags.
 static std::vector<int> build_lm_prompt_uncond_with_cot(BPETokenizer &    bpe,
                                                         const AcePrompt & prompt,
                                                         const char *      negative_prompt) {
@@ -307,8 +314,8 @@ static std::vector<int> build_lm_prompt_uncond_with_cot(BPETokenizer &    bpe,
     append("\n");
     ids.push_back(TOKEN_IM_START);
     bool        has_neg = negative_prompt && strlen(negative_prompt) > 0;
-    std::string cap     = has_neg ? std::string(negative_prompt) : prompt.caption;
-    append("user\n# Caption\n" + cap + "\n\n# Lyric\n" + prompt.lyrics + "\n");
+    std::string user_content = has_neg ? std::string(negative_prompt) : "NO USER INPUT";
+    append("user\n" + user_content + "\n");
     ids.push_back(TOKEN_IM_END);
     append("\n");
     ids.push_back(TOKEN_IM_START);
@@ -317,8 +324,6 @@ static std::vector<int> build_lm_prompt_uncond_with_cot(BPETokenizer &    bpe,
     append("\n\n");
     ids.push_back(TOKEN_THINK_END);
     append("\n\n");
-    ids.push_back(TOKEN_IM_END);
-    append("\n");
     return ids;
 }
 
