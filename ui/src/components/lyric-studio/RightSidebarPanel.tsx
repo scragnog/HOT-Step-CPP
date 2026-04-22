@@ -48,7 +48,7 @@ const Section: React.FC<SectionProps> = ({
     <div className="flex flex-col overflow-hidden"
       style={{ flex: open ? '1 1 0%' : '0 0 auto', minHeight: open ? 0 : 'auto' }}>
       <button onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-4 py-3 border-b border-white/5 bg-zinc-950/50 hover:bg-zinc-950/80 transition-colors flex-shrink-0">
+        className="flex items-center gap-2 px-4 py-3 min-h-[44px] border-b border-white/5 bg-zinc-950/50 hover:bg-zinc-950/80 transition-colors flex-shrink-0">
         {open ? <ChevronDown className="w-3 h-3 text-zinc-500" /> : <ChevronRight className="w-3 h-3 text-zinc-500" />}
         <span className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400 uppercase tracking-wider">
           {icon} {title}
