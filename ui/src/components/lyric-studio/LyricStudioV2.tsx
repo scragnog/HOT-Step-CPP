@@ -461,8 +461,10 @@ export const LyricStudioV2: React.FC = () => {
   }, [audioQueue.completionCounter]);
 
   const handleSendToCreate = useCallback(async (gen: Generation) => {
-    await sendToCreate(gen);
-  }, [sendToCreate]);
+    // Inject artist name — gen from getAlbumFullDetail doesn't include it
+    const enriched = { ...gen, artist_name: gen.artist_name || nav.selectedArtist?.name || '' };
+    await sendToCreate(enriched);
+  }, [sendToCreate, nav.selectedArtist]);
 
   const openFetchForArtist = useCallback(() => {
     setFetchModalPrefill(nav.selectedArtist?.name);
