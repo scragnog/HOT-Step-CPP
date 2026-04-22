@@ -2,6 +2,9 @@
   "name": "hot-step-cpp-server",
   "private": true,
   "version": "1.0.0",
+  "engines": {
+    "node": ">=18.0.0 <24.0.0"
+  },
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",

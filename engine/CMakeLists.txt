@@ -19,9 +19,12 @@ add_custom_target(version ALL
 # and older x86_64 toolchains need the explicit dependency.
 find_package(Threads REQUIRED)
 
-# Suppress MSVC fopen/sprintf deprecation warnings
+# Suppress MSVC fopen/sprintf deprecation warnings and Windows.h macro pollution.
+# NOMINMAX: prevents Windows.h from defining min/max macros that collide with
+#           std::min/std::max (causes C2589 errors in solvers/schedulers).
+# WIN32_LEAN_AND_MEAN: reduces Windows.h header bloat.
 if(MSVC)
-    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
 # Put executables and backend .so in the same directory (build root).

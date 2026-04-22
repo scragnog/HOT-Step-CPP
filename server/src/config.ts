@@ -1,5 +1,6 @@
 // config.ts — Environment-based configuration for HOT-Step CPP server
 import { config as dotenvConfig } from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -13,7 +14,18 @@ dotenvConfig({ path: path.join(PROJECT_ROOT, '.env') });
 
 // Smart defaults: resolve paths relative to project root so users can
 // build the engine and drop models in place without editing any config.
-const DEFAULT_EXE = path.join(PROJECT_ROOT, 'engine', 'build', 'Release', 'ace-server.exe');
+//
+// Binary location depends on the CMake generator used:
+//   - Visual Studio (multi-config): engine/build/Release/ace-server.exe
+//   - Ninja / Makefiles (single-config): engine/build/ace-server.exe
+// We check both and use whichever exists.
+const BUILD_DIR = path.join(PROJECT_ROOT, 'engine', 'build');
+const EXE_CANDIDATES = [
+  path.join(BUILD_DIR, 'Release', 'ace-server.exe'),  // Visual Studio
+  path.join(BUILD_DIR, 'ace-server.exe'),              // Ninja / Makefiles
+  path.join(BUILD_DIR, 'Debug', 'ace-server.exe'),     // VS Debug build
+];
+const DEFAULT_EXE = EXE_CANDIDATES.find(p => fs.existsSync(p)) || EXE_CANDIDATES[0];
 const DEFAULT_MODELS = path.join(PROJECT_ROOT, 'models');
 const DEFAULT_ADAPTERS = path.join(PROJECT_ROOT, 'adapters');
 
