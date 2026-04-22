@@ -210,7 +210,14 @@ export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudi
 
     // Metadata
     if (gen.bpm) write('hs-bpm', gen.bpm);
-    if (gen.key) write('hs-keyScale', gen.key);
+    if (gen.key) {
+      // Normalize casing: LLM may produce "B Major" but dropdown expects "B major"
+      const parts = gen.key.trim().split(/\s+/);
+      const normalized = parts.length === 2
+        ? `${parts[0]} ${parts[1].toLowerCase()}`
+        : gen.key;
+      write('hs-keyScale', normalized);
+    }
     if (gen.duration) write('hs-duration', gen.duration);
 
     // Adapter from album preset — only set the path, scales are global
