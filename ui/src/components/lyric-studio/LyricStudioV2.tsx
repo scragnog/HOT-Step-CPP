@@ -560,6 +560,10 @@ export const LyricStudioV2: React.FC = () => {
       <div className="flex-1 overflow-hidden">
         {nav.level === 'artists' && (
           <div className="h-full flex ls2-fade-in">
+            <div className="w-48 flex-shrink-0 border-r border-white/5 overflow-hidden">
+              <ArtistSidebar artists={artists} selectedArtistId={-1}
+                onSelectArtist={handleSelectArtist} onBack={handleBackToArtists} />
+            </div>
             <div className="w-60 flex-shrink-0 border-r border-white/5 overflow-hidden">
               <ArtistPageSidebar onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)} />
             </div>
@@ -607,7 +611,11 @@ export const LyricStudioV2: React.FC = () => {
         {nav.level === 'album-detail' && nav.selectedArtist && nav.selectedAlbum && (
           <div className="h-full flex flex-col ls2-fade-in">
             <div className="flex-1 flex min-h-0">
-              {/* Left: album header */}
+              {/* Left: artist sidebar + album header */}
+              <div className="w-48 flex-shrink-0 border-r border-white/5 overflow-hidden">
+                <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
+                  onSelectArtist={handleSelectArtist} onBack={handleBackToArtists} />
+              </div>
               <div className="w-64 flex-shrink-0 border-r border-white/5 overflow-hidden relative">
                 <div className="relative z-[1] h-full">
                   <AlbumHeader
