@@ -37,6 +37,7 @@ import { useAudioGeneration } from './useAudioGeneration';
 import { enqueueAudioGen, useAudioGenQueue } from '../../stores/audioGenQueueStore';
 import { usePlayback } from '../../stores/playbackStore';
 import { useAuth } from '../../context/AuthContext';
+import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { QueuePanel } from './QueuePanel';
 import { PromptEditor } from './PromptEditor';
 import { useStreamingStore } from '../../stores/streamingStore';
@@ -462,20 +463,25 @@ export const LyricStudioV2: React.FC = () => {
 
   // ── Audio generation ──
   const { sendToCreate } = useAudioGeneration({ profiles, showToast });
+  const globalParams = useGlobalParams();
 
   const handleGenerateAudio = useCallback(async (gen: Generation) => {
     if (!token) { showToast('Not authenticated'); return; }
     const profile = profiles.find(p => p.id === gen.profile_id);
     if (!profile) { showToast('Profile not found'); return; }
+    // Capture globalParams snapshot NOW — same as Create page's getGlobalParams().
+    // This ensures every engine param (solver, guidance, DCW, latent, LM, etc.)
+    // flows through identically to the Create page path.
+    const paramsSnapshot = globalParams.getGlobalParams();
     await enqueueAudioGen(gen, {
       artistId: nav.selectedArtist?.id || 0,
       artistName: nav.selectedArtist?.name || 'Unknown',
       artistImageUrl: nav.selectedArtist?.image_url || '',
       profileId: profile.id,
       lyricsSetId: profile.lyrics_set_id,
-    }, token);
+    }, paramsSnapshot, token);
     showToast(`Queued: ${gen.title || 'Untitled'}`);
-  }, [token, profiles, nav.selectedArtist, showToast]);
+  }, [token, profiles, nav.selectedArtist, globalParams, showToast]);
 
   // Refresh album data on audio queue completions
   useEffect(() => {

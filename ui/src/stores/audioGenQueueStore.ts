@@ -18,6 +18,7 @@ import { lireekApi } from '../services/lireekApi';
 import { generateApi, songApi } from '../services/api';
 import { writePersistedState } from '../hooks/usePersistedState';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
+import type { GenerationParams } from '../types';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ export interface AudioQueueItem {
   preset: AlbumPreset | null;
   profileId: number;
   lyricsSetId: number;
+  /** Snapshot of getGlobalParams() captured at enqueue time — same as Create page */
+  globalParams: Partial<GenerationParams>;
   status: AudioQueueStatus;
   jobId?: string;
   progress?: number;
@@ -50,94 +53,8 @@ export interface AudioGenQueueState {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function readPersisted(key: string): any {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw !== null ? JSON.parse(raw) : undefined;
-  } catch { return undefined; }
-}
-
-function mergeCreatePanelSettings(params: Record<string, any>): void {
-  // Read ALL generation params from Create panel's hs-* localStorage keys.
-  // Only content fields (lyrics/caption/bpm/key/duration) and adapter/reference
-  // are excluded — those come from the album preset + written song.
-  const map: [string, string][] = [
-    // DiT settings
-    ['hs-inferenceSteps', 'inferenceSteps'],
-    ['hs-guidanceScale', 'guidanceScale'],
-    ['hs-shift', 'shift'],
-    ['hs-inferMethod', 'inferMethod'],
-    ['hs-scheduler', 'scheduler'],
-    ['hs-guidanceMode', 'guidanceMode'],
-    // Seed
-    ['hs-seed', 'seed'],
-    ['hs-randomSeed', 'randomSeed'],
-    ['hs-batchSize', 'batchSize'],
-    // LM
-    ['hs-skipLm', 'skipLm'],
-    ['hs-useCotCaption', 'useCotCaption'],
-    ['hs-lmTemperature', 'lmTemperature'],
-    ['hs-lmCfgScale', 'lmCfgScale'],
-    ['hs-lmTopK', 'lmTopK'],
-    ['hs-lmTopP', 'lmTopP'],
-    ['hs-lmNegativePrompt', 'lmNegativePrompt'],
-    // Models
-    ['hs-ditModel', 'ditModel'],
-    ['hs-lmModel', 'lmModel'],
-    ['hs-vaeModel', 'vaeModel'],
-    // Solver sub-params
-    ['hs-storkSubsteps', 'storkSubsteps'],
-    ['hs-beatStability', 'beatStability'],
-    ['hs-frequencyDamping', 'frequencyDamping'],
-    ['hs-temporalSmoothing', 'temporalSmoothing'],
-    // Guidance sub-params
-    ['hs-apgMomentum', 'apgMomentum'],
-    ['hs-apgNormThreshold', 'apgNormThreshold'],
-    // Language
-    ['hs-vocalLanguage', 'vocalLanguage'],
-    // Time signature
-    ['hs-timeSignature', 'timeSignature'],
-    // Adapter mode (runtime vs merge — engine setting, not preset)
-    ['hs-adapterMode', 'adapterMode'],
-    // DCW (Differential Correction in Wavelet domain)
-    ['hs-dcwEnabled', 'dcwEnabled'],
-    ['hs-dcwMode', 'dcwMode'],
-    ['hs-dcwScaler', 'dcwScaler'],
-    ['hs-dcwHighScaler', 'dcwHighScaler'],
-    // Latent post-processing
-    ['hs-latentShift', 'latentShift'],
-    ['hs-latentRescale', 'latentRescale'],
-    ['hs-customTimesteps', 'customTimesteps'],
-  ];
-  for (const [storageKey, paramKey] of map) {
-    const val = readPersisted(storageKey);
-    if (val !== undefined && val !== null) {
-      params[paramKey] = val;
-    }
-  }
-
-  // DCW scaler remapping: localStorage stores the UI slider value (0–1),
-  // but the engine expects the actual scaler (0–0.02). The Create page
-  // applies this mapping at submission time (CreatePanel.tsx:275-276);
-  // we must do the same here so both paths produce identical values.
-  if (params.dcwScaler !== undefined) params.dcwScaler = params.dcwScaler * 0.02;
-  if (params.dcwHighScaler !== undefined) params.dcwHighScaler = params.dcwHighScaler * 0.02;
-}
-
-function applyTriggerWord(params: Record<string, any>, adapterPath: string): void {
-  const useFilename = localStorage.getItem('ace-globalTriggerUseFilename') === 'true';
-  const placement = (localStorage.getItem('ace-globalTriggerPlacement') as 'prepend' | 'append' | 'replace') || 'prepend';
-  if (!useFilename) return;
-  const fileName = adapterPath.replace(/\\/g, '/').split('/').pop() || '';
-  const triggerWord = fileName.replace(/\.safetensors$/i, '');
-  if (!triggerWord) return;
-  const current = ((params.caption as string) || '').trim();
-  if (current.toLowerCase().includes(triggerWord.toLowerCase())) return;
-  if (placement === 'replace') { params.caption = triggerWord; }
-  else if (placement === 'append') { params.caption = current ? `${current}, ${triggerWord}` : triggerWord; }
-  else { params.caption = current ? `${triggerWord}, ${current}` : triggerWord; }
-}
+// (mergeCreatePanelSettings removed — we now use getGlobalParams() snapshot
+// passed in at enqueue time, identical to the Create page path.)
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 
@@ -200,6 +117,7 @@ let _resumeCalled = false;
 export async function enqueueAudioGen(
   gen: Generation,
   opts: { artistId: number; artistName: string; artistImageUrl?: string; profileId: number; lyricsSetId: number },
+  globalParams: Partial<GenerationParams>,
   token: string,
 ): Promise<void> {
   let preset: AlbumPreset | null = null;
@@ -217,6 +135,7 @@ export async function enqueueAudioGen(
     preset,
     profileId: opts.profileId,
     lyricsSetId: opts.lyricsSetId,
+    globalParams,
     status: 'pending',
   };
 
@@ -315,25 +234,23 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   const gen = item.generation;
   const preset = item.preset;
 
-  // 1) Build base params
-  const params: Record<string, any> = {
-    lyrics: gen.lyrics || '',
-    caption: gen.caption || '',
-    title: gen.title || '',
-    instrumental: false,
-    duration: gen.duration || 180,
-  };
+  // 1) Start with globalParams snapshot — identical to Create page's getGlobalParams().
+  //    This includes ALL engine params: inference, guidance, solver, DCW, latent,
+  //    LM, adapter (global), mastering, trigger word, etc.
+  const params: Record<string, any> = { ...item.globalParams };
+
+  // 2) Overlay content fields from the written song
+  params.lyrics = gen.lyrics || '';
+  params.caption = gen.caption || '';
+  params.title = gen.title || '';
+  params.instrumental = false;
+  params.duration = gen.duration || 180;
   if (gen.bpm) params.bpm = gen.bpm;
   if (gen.key) params.keyScale = gen.key;
-
-  // Pass artist name and subject for proper title/description formatting
   if (item.artistName) params.artist = item.artistName;
   if (gen.subject) params.subject = gen.subject;
 
-  // 2) Merge persisted CreatePanel settings
-  mergeCreatePanelSettings(params);
-
-  // 3) Adapter — in cpp engine, we pass directly to generate
+  // 3) Adapter override from album preset (path from preset, scale/groups from globalParams)
   if (preset?.adapter_path) {
     item.status = 'loading-adapter';
     item.stage = `Preparing adapter for ${item.artistName}…`;
@@ -342,17 +259,12 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     // Update the top bar to reflect the adapter being used
     writePersistedState('hs-adapter', preset.adapter_path);
 
-    // Use global adapter scale & group scales (not per-preset)
-    const globalScale = readPersisted('hs-adapterScale') ?? 1.0;
-    const globalGroupScales = readPersisted('hs-adapterGroupScales') ?? { self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0 };
-
+    // Override adapter path from preset; scale, group scales, mode, and
+    // trigger word settings are already correct from globalParams.
     params.loraPath = preset.adapter_path;
-    params.loraScale = globalScale;
-    params.adapterGroupScales = globalGroupScales;
 
-    // Trigger word — send as params so the server injects it AFTER CoT
-    // rewrites the caption (matching CreatePanel's approach).
-    // Client-side injection via applyTriggerWord gets lost when CoT replaces the caption.
+    // Re-derive trigger word from the PRESET adapter filename (globalParams
+    // has the trigger word for the GLOBAL adapter, which may differ).
     const useFilename = localStorage.getItem('ace-globalTriggerUseFilename') === 'true';
     const placement = (localStorage.getItem('ace-globalTriggerPlacement') as 'prepend' | 'append' | 'replace') || 'prepend';
     if (useFilename) {
@@ -362,10 +274,14 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
         params.triggerWord = triggerWord;
         params.triggerPlacement = placement;
       }
+    } else {
+      // Preset adapter but no filename trigger — clear any global trigger word
+      delete params.triggerWord;
+      delete params.triggerPlacement;
     }
   }
 
-  // 4) Reference Track — mastering + optional timbre conditioning
+  // 4) Mastering override from album preset
   if (preset?.reference_track_path) {
     // Update the top bar to reflect the mastering reference
     writePersistedState('hs-masteringEnabled', true);
@@ -374,7 +290,6 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
 
     params.masteringEnabled = true;
     params.masteringReference = preset.reference_track_path;
-    // Use as timbre reference (resolved in generate route) — NOT audio cover
     params.timbreReference = true;
   }
 
