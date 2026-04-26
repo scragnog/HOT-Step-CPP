@@ -139,6 +139,12 @@ function startAceServer(): ChildProcess | null {
     args.push('--adapters', config.aceServer.adapters);
   }
 
+  // Add noise profile if available
+  if (config.aceServer.noiseProfile && fs.existsSync(config.aceServer.noiseProfile)) {
+    args.push('--noise-profile', config.aceServer.noiseProfile);
+    console.log(`[Server] Noise profile: ${config.aceServer.noiseProfile}`);
+  }
+
   console.log(`[Server] Starting ace-server: ${path.basename(exe)}`);
   console.log(`[Server] Models: ${config.aceServer.models}`);
   console.log(`[Server] Port: ${config.aceServer.port}`);

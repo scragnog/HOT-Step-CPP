@@ -209,6 +209,10 @@ static int  g_max_batch   = 1;
 static int  g_mp3_kbps    = 128;
 static bool g_keep_loaded = false;
 
+// HOT-Step: pre-computed noise profile for spectral denoiser.
+// Loaded once at startup from a reference noise sample WAV.
+static NoiseProfile g_noise_profile;
+
 // job system: all compute endpoints create a job and return its ID
 // immediately. the worker thread processes jobs in FIFO order, stores
 // the result. the client polls GET /job?id=N until done, then fetches
@@ -971,7 +975,8 @@ static void synth_worker(std::shared_ptr<Job>    job,
         // stereo buffer before normalization to remove VAE fuzz/fizz.
         if (sf.denoise_strength > 0.0f) {
             audio_denoise(audio[b].samples, audio[b].n_samples, 48000,
-                          sf.denoise_strength, sf.denoise_smoothing, sf.denoise_mix);
+                          sf.denoise_strength, sf.denoise_smoothing, sf.denoise_mix,
+                          g_noise_profile.valid ? &g_noise_profile : nullptr);
         }
         if (!output_wav || wav_fmt != WAV_F32) {
             audio_normalize(audio[b].samples, audio[b].n_samples * 2, peak_clip);
@@ -1407,8 +1412,9 @@ int main(int argc, char ** argv) {
 
     const char * host         = "127.0.0.1";
     int          port         = 8080;
-    const char * models_dir   = nullptr;
-    const char * adapters_dir = nullptr;
+    const char * models_dir         = nullptr;
+    const char * adapters_dir       = nullptr;
+    const char * noise_profile_path = nullptr;
 
     if (argc < 2) {
         usage(argv[0]);
@@ -1420,6 +1426,8 @@ int main(int argc, char ** argv) {
             models_dir = argv[++i];
         } else if (!strcmp(argv[i], "--adapters") && i + 1 < argc) {
             adapters_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--noise-profile") && i + 1 < argc) {
+            noise_profile_path = argv[++i];
         } else if (!strcmp(argv[i], "--max-seq") && i + 1 < argc) {
             g_lm_params.max_seq = atoi(argv[++i]);
 
@@ -1487,6 +1495,31 @@ int main(int argc, char ** argv) {
     if (adapters_dir) {
         fprintf(stderr, "[Server] Scanning adapters in %s\n", adapters_dir);
         registry_scan_adapters(&g_registry, adapters_dir);
+    }
+
+    // HOT-Step: load noise profile for spectral denoiser (optional)
+    if (noise_profile_path) {
+        fprintf(stderr, "[Server] Loading noise profile: %s\n", noise_profile_path);
+        int     np_T  = 0;
+        int     np_sr = 0;
+        float * np_audio = audio_io_read_wav(noise_profile_path, &np_T, &np_sr);
+        if (np_audio && np_T > 0) {
+            // audio_io_read_wav returns planar stereo [L: T][R: T] — average to mono
+            std::vector<float> mono(np_T);
+            for (int i = 0; i < np_T; i++) {
+                mono[i] = (np_audio[i] + np_audio[np_T + i]) * 0.5f;
+            }
+            free(np_audio);
+
+            if (audio_denoise_compute_profile(mono.data(), np_T, np_sr, &g_noise_profile) == 0) {
+                fprintf(stderr, "[Server] Noise profile loaded successfully (%d frames, %d Hz)\n",
+                        g_noise_profile.n_frames, g_noise_profile.sample_rate);
+            } else {
+                fprintf(stderr, "[Server] WARNING: failed to compute noise profile\n");
+            }
+        } else {
+            fprintf(stderr, "[Server] WARNING: could not read noise profile WAV: %s\n", noise_profile_path);
+        }
     }
 
     // validate pipeline

@@ -28,6 +28,7 @@ const EXE_CANDIDATES = [
 const DEFAULT_EXE = EXE_CANDIDATES.find(p => fs.existsSync(p)) || EXE_CANDIDATES[0];
 const DEFAULT_MODELS = path.join(PROJECT_ROOT, 'models');
 const DEFAULT_ADAPTERS = path.join(PROJECT_ROOT, 'adapters');
+const DEFAULT_NOISE_SAMPLES = path.join(PROJECT_ROOT, 'noise_samples');
 
 export const config = {
   // ace-server configuration
@@ -37,6 +38,15 @@ export const config = {
     adapters: process.env.ACESTEPCPP_ADAPTERS || DEFAULT_ADAPTERS,
     port: parseInt(process.env.ACESTEPCPP_PORT || '8085', 10),
     host: process.env.ACESTEPCPP_HOST || '127.0.0.1',
+    noiseProfile: process.env.ACESTEPCPP_NOISE_PROFILE || (() => {
+      // Auto-detect: find first .wav in noise_samples/
+      const dir = DEFAULT_NOISE_SAMPLES;
+      if (fs.existsSync(dir)) {
+        const wavs = fs.readdirSync(dir).filter(f => f.endsWith('.wav'));
+        if (wavs.length > 0) return path.join(dir, wavs[0]);
+      }
+      return '';
+    })(),
     get url() {
       return `http://${this.host}:${this.port}`;
     },
