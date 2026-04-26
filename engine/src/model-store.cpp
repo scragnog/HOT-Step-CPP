@@ -555,14 +555,17 @@ const DiTMeta * store_dit_meta(ModelStore * s, const char * dit_path) {
     }
     meta->is_turbo = gf_get_bool(gf, "acestep.is_turbo");
 
-    // Detect merge models from filename (e.g. "acestep-v15-merge-base-turbo-xl-...")
-    // Merge models have is_turbo=true in GGUF but should NOT be restricted.
+    // Detect blend/merge models from filename:
+    //   - "merge" in name (e.g. "acestep-v15-merge-base-turbo-xl-ta-0.5")
+    //   - "sftturbo" in name (e.g. "acestep-v15-xl-sftturbo50")
+    // These have is_turbo=true in GGUF but should NOT have guidance forced to 1.0.
     {
         std::string basename = dit_path;
         auto slash = basename.find_last_of("/\\");
         if (slash != std::string::npos) basename = basename.substr(slash + 1);
         for (auto & c : basename) c = (char)tolower((unsigned char)c);
-        meta->is_merge = (basename.find("merge") != std::string::npos);
+        meta->is_merge = (basename.find("merge") != std::string::npos ||
+                          basename.find("sftturbo") != std::string::npos);
     }
 
     // silence_latent: [15000, 64] f32, also accessible via store_silence for
