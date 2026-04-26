@@ -9,6 +9,7 @@ import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { adapterApi } from '../../services/api';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
+import { Slider } from '../shared/Slider';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
 import type { AdapterFile } from '../../types';
 
@@ -248,15 +249,8 @@ export const AdaptersDropdown: React.FC = () => {
       {gp.adapter && (
         <>
           {/* Adapter Scale */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Adapter Scale</label>
-              <span className="text-xs text-zinc-400 font-mono">{gp.adapterScale.toFixed(2)}</span>
-            </div>
-            <input type="range" value={gp.adapterScale}
-              onChange={e => gp.setAdapterScale(parseFloat(e.target.value))}
-              min={0} max={4} step={0.05} className="w-full" />
-          </div>
+          <Slider label="Adapter Scale" value={gp.adapterScale}
+            onChange={gp.setAdapterScale} min={0} max={4} step={0.05} showInput />
 
           {/* Loading Mode */}
           <div>
@@ -308,23 +302,8 @@ export const AdaptersDropdown: React.FC = () => {
                 </button>
               </div>
               {GROUP_INFO.map(({ key, label, help }) => (
-                <div key={key}>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs text-zinc-500" title={help}>{label}</label>
-                    <span className={`text-xs font-mono ${
-                      gp.adapterGroupScales[key] === 1.0 ? 'text-zinc-600' : 'text-pink-400'
-                    }`}>
-                      {gp.adapterGroupScales[key].toFixed(2)}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    value={gp.adapterGroupScales[key]}
-                    onChange={e => handleGroupScaleChange(key, parseFloat(e.target.value))}
-                    min={0} max={4} step={0.05}
-                    className="w-full"
-                  />
-                </div>
+                <Slider key={key} label={label} value={gp.adapterGroupScales[key]}
+                  onChange={v => handleGroupScaleChange(key, v)} min={0} max={4} step={0.05} showInput />
               ))}
             </div>
           )}
