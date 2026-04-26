@@ -231,4 +231,16 @@ export const vstApi = {
   /** Launch plugin GUI */
   openGui: (pluginPath: string, uid?: string) =>
     post<{ ok: boolean; pid: number }>('/vst/gui', { pluginPath, uid }),
+  /** Start real-time monitor */
+  monitorStart: (trackPath: string) =>
+    post<{ ok: boolean; pid: number; plugins: number }>('/vst/monitor/start', { trackPath }),
+  /** Stop monitor */
+  monitorStop: () =>
+    post<{ ok: boolean; wasRunning: boolean }>('/vst/monitor/stop', {}),
+  /** Switch monitor to a different track */
+  monitorSwitch: (trackPath: string) =>
+    post<{ ok: boolean }>('/vst/monitor/switch', { trackPath }),
+  /** Get monitor status */
+  monitorStatus: () =>
+    get<{ running: boolean; pid: number | null }>('/vst/monitor/status'),
 };

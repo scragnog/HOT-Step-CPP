@@ -16,6 +16,9 @@ interface VstChainState {
   chain: VstChainEntry[];
   chainLoaded: boolean;
 
+  // Monitor (real-time playback)
+  monitoring: boolean;
+
   // Actions
   scanPlugins: () => Promise<void>;
   loadChain: () => Promise<void>;
@@ -25,6 +28,10 @@ interface VstChainState {
   reorderChain: (fromIndex: number, toIndex: number) => Promise<void>;
   openGui: (plugin: VstChainEntry) => Promise<void>;
   chainEnabled: () => boolean;
+  startMonitor: (trackPath: string) => Promise<void>;
+  stopMonitor: () => Promise<void>;
+  switchMonitorTrack: (trackPath: string) => Promise<void>;
+  pollMonitorStatus: () => Promise<void>;
 }
 
 export const useVstChainStore = create<VstChainState>((set, get) => ({
@@ -33,6 +40,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
   scanError: null,
   chain: [],
   chainLoaded: false,
+  monitoring: false,
 
   scanPlugins: async () => {
     set({ scanning: true, scanError: null });
@@ -130,5 +138,40 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
 
   chainEnabled: () => {
     return get().chain.some(p => p.enabled);
+  },
+
+  startMonitor: async (trackPath: string) => {
+    try {
+      await vstApi.monitorStart(trackPath);
+      set({ monitoring: true });
+    } catch (err) {
+      console.error('[VST] Failed to start monitor:', err);
+    }
+  },
+
+  stopMonitor: async () => {
+    try {
+      await vstApi.monitorStop();
+      set({ monitoring: false });
+    } catch (err) {
+      console.error('[VST] Failed to stop monitor:', err);
+    }
+  },
+
+  switchMonitorTrack: async (trackPath: string) => {
+    try {
+      await vstApi.monitorSwitch(trackPath);
+    } catch (err) {
+      console.error('[VST] Failed to switch monitor track:', err);
+    }
+  },
+
+  pollMonitorStatus: async () => {
+    try {
+      const { running } = await vstApi.monitorStatus();
+      set({ monitoring: running });
+    } catch {
+      set({ monitoring: false });
+    }
   },
 }));

@@ -6,9 +6,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import {
   Plus, Trash2, GripVertical, ExternalLink, Search,
-  ChevronUp, ChevronDown, Power,
+  ChevronUp, ChevronDown, Power, Headphones, Square,
 } from 'lucide-react';
 import { useVstChainStore } from '../../stores/vstChainStore';
+import { usePlayback, togglePlay } from '../../stores/playbackStore';
 import type { VstPlugin } from '../../services/api';
 
 // ── Plugin Search Dropdown ──────────────────────────────────
@@ -182,14 +183,33 @@ const ChainRow: React.FC<{
 // ── Main Dropdown ───────────────────────────────────────────
 
 export const VstChainDropdown: React.FC = () => {
-  const { chain, chainLoaded, loadChain } = useVstChainStore();
+  const { chain, chainLoaded, loadChain, monitoring, startMonitor, stopMonitor, pollMonitorStatus } = useVstChainStore();
+  const { currentTrack, isPlaying } = usePlayback();
   const [showSearch, setShowSearch] = useState(false);
 
   useEffect(() => {
     if (!chainLoaded) loadChain();
   }, [chainLoaded, loadChain]);
 
+  // Poll monitor status while monitoring
+  useEffect(() => {
+    if (!monitoring) return;
+    const id = setInterval(() => pollMonitorStatus(), 2000);
+    return () => clearInterval(id);
+  }, [monitoring, pollMonitorStatus]);
+
   const enabledCount = chain.filter(p => p.enabled).length;
+  const hasTrack = !!currentTrack?.audioUrl;
+
+  const handleMonitorToggle = async () => {
+    if (monitoring) {
+      await stopMonitor();
+    } else if (hasTrack) {
+      // Pause browser playback to avoid double audio
+      if (isPlaying) togglePlay();
+      await startMonitor(currentTrack!.audioUrl);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -207,6 +227,37 @@ export const VstChainDropdown: React.FC = () => {
         <div className="text-xs text-zinc-500 italic text-center py-2">
           No plugins in chain. Add one below.
         </div>
+      )}
+
+      {/* Monitor button */}
+      {enabledCount > 0 && (
+        <button
+          onClick={handleMonitorToggle}
+          disabled={!monitoring && !hasTrack}
+          className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 text-xs font-semibold rounded-xl border transition-all ${
+            monitoring
+              ? 'bg-violet-500/15 border-violet-500/40 text-violet-300 hover:bg-violet-500/25'
+              : hasTrack
+                ? 'bg-zinc-800 border-white/10 text-zinc-400 hover:border-violet-500/30 hover:text-violet-400'
+                : 'bg-zinc-800/50 border-white/5 text-zinc-600 cursor-not-allowed'
+          }`}
+        >
+          {monitoring ? (
+            <>
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-violet-500" />
+              </span>
+              <Square size={12} />
+              Stop Monitor
+            </>
+          ) : (
+            <>
+              <Headphones size={14} />
+              {hasTrack ? 'Monitor with VST Chain' : 'Play a track first'}
+            </>
+          )}
+        </button>
       )}
 
       {/* Add plugin */}
@@ -236,13 +287,20 @@ export const VstChainDropdown: React.FC = () => {
 // ── Badge ───────────────────────────────────────────────────
 
 export const VstChainBadge: React.FC = () => {
-  const { chain } = useVstChainStore();
+  const { chain, monitoring } = useVstChainStore();
   const enabled = chain.filter(p => p.enabled);
-  if (enabled.length === 0) return null;
+
+  if (enabled.length === 0 && !monitoring) return null;
 
   return (
-    <span className="text-[10px] text-violet-400/60 font-mono truncate">
-      {enabled.length} plugin{enabled.length !== 1 ? 's' : ''}
+    <span className="flex items-center gap-1.5 text-[10px] text-violet-400/60 font-mono truncate">
+      {monitoring && (
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-violet-500" />
+        </span>
+      )}
+      {monitoring ? 'monitoring' : `${enabled.length} plugin${enabled.length !== 1 ? 's' : ''}`}
     </span>
   );
 };

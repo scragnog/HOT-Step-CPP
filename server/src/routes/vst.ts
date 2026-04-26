@@ -10,7 +10,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { execFile, spawn } from 'child_process';
+import { execFile, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { config } from '../config.js';
 
@@ -253,7 +253,168 @@ router.post('/process', async (req, res) => {
   }
 });
 
-// ── Exported for use by generation pipeline ─────────────────
+// ── Monitor — Real-time playback through VST chain ──────────
+
+let monitorProcess: ChildProcess | null = null;
+const monitorControlFile = () => path.join(config.vst.statesDir, 'monitor_control.json');
+
+function writeMonitorControl(data: Record<string, unknown>): void {
+  fs.writeFileSync(monitorControlFile(), JSON.stringify(data), 'utf-8');
+}
+
+function isMonitorAlive(): boolean {
+  if (!monitorProcess) return false;
+  try {
+    // Sending signal 0 tests if the process is alive (throws if dead)
+    process.kill(monitorProcess.pid!, 0);
+    return true;
+  } catch {
+    monitorProcess = null;
+    return false;
+  }
+}
+
+// POST /monitor/start — Start real-time monitoring
+router.post('/monitor/start', (req, res) => {
+  const { trackPath } = req.body;
+  if (!trackPath) {
+    res.status(400).json({ error: 'trackPath required' });
+    return;
+  }
+
+  // Resolve to absolute path
+  let absTrackPath: string;
+  if (path.isAbsolute(trackPath)) {
+    absTrackPath = trackPath;
+  } else {
+    // Relative to audio dir (e.g. "/audio/uuid.wav" → data/audio/uuid.wav)
+    const filename = path.basename(trackPath);
+    absTrackPath = path.join(config.data.audioDir, filename);
+  }
+
+  if (!fs.existsSync(absTrackPath)) {
+    res.status(404).json({ error: `Track not found: ${absTrackPath}` });
+    return;
+  }
+
+  const exe = config.vst.exe;
+  if (!fs.existsSync(exe)) {
+    res.status(503).json({ error: 'vst-host.exe not found' });
+    return;
+  }
+
+  // Kill existing monitor if running
+  if (isMonitorAlive()) {
+    writeMonitorControl({ action: 'stop' });
+    setTimeout(() => {
+      try { monitorProcess?.kill(); } catch {}
+      monitorProcess = null;
+    }, 1000);
+  }
+
+  // Write temp chain JSON for the monitor (uses statePath for state files)
+  const chain = loadChain();
+  const enabled = chain.plugins.filter(p => p.enabled);
+  if (enabled.length === 0) {
+    res.status(400).json({ error: 'No enabled plugins in chain' });
+    return;
+  }
+
+  const tempChainFile = path.join(config.vst.statesDir, '_monitor_chain.json');
+  const chainData = {
+    plugins: enabled.map(p => ({
+      path: p.path,
+      state: fs.existsSync(p.statePath) ? p.statePath : '',
+      enabled: true,
+    })),
+  };
+  fs.writeFileSync(tempChainFile, JSON.stringify(chainData), 'utf-8');
+
+  // Write initial control file
+  writeMonitorControl({ track: absTrackPath, action: 'play' });
+
+  console.log(`[VST] Starting monitor: ${enabled.length} plugin(s), track=${path.basename(absTrackPath)}`);
+
+  const child = spawn(exe, [
+    '--monitor',
+    '--chain', tempChainFile,
+    '--input', absTrackPath,
+    '--control', monitorControlFile(),
+  ], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+
+  monitorProcess = child;
+
+  // Log stderr
+  child.stderr?.on('data', (data: Buffer) => {
+    for (const line of data.toString().split('\n')) {
+      if (line.trim()) console.log(`[VST] ${line.trim()}`);
+    }
+  });
+
+  child.on('exit', (code) => {
+    console.log(`[VST] Monitor exited (code ${code})`);
+    monitorProcess = null;
+    // Clean up temp chain
+    try { fs.unlinkSync(tempChainFile); } catch {}
+  });
+
+  res.json({ ok: true, pid: child.pid, plugins: enabled.length });
+});
+
+// POST /monitor/stop — Stop monitoring
+router.post('/monitor/stop', (_req, res) => {
+  if (!isMonitorAlive()) {
+    res.json({ ok: true, wasRunning: false });
+    return;
+  }
+  writeMonitorControl({ action: 'stop' });
+  // Give it a moment to save state gracefully, then force-kill
+  setTimeout(() => {
+    if (isMonitorAlive()) {
+      try { monitorProcess?.kill(); } catch {}
+      monitorProcess = null;
+    }
+  }, 3000);
+  res.json({ ok: true, wasRunning: true });
+});
+
+// POST /monitor/switch — Switch to a different track
+router.post('/monitor/switch', (req, res) => {
+  const { trackPath } = req.body;
+  if (!trackPath) {
+    res.status(400).json({ error: 'trackPath required' });
+    return;
+  }
+  if (!isMonitorAlive()) {
+    res.status(400).json({ error: 'Monitor is not running' });
+    return;
+  }
+
+  let absTrackPath: string;
+  if (path.isAbsolute(trackPath)) {
+    absTrackPath = trackPath;
+  } else {
+    const filename = path.basename(trackPath);
+    absTrackPath = path.join(config.data.audioDir, filename);
+  }
+
+  if (!fs.existsSync(absTrackPath)) {
+    res.status(404).json({ error: `Track not found: ${absTrackPath}` });
+    return;
+  }
+
+  console.log(`[VST] Monitor switching track → ${path.basename(absTrackPath)}`);
+  writeMonitorControl({ track: absTrackPath, action: 'play' });
+  res.json({ ok: true });
+});
+
+// GET /monitor/status — Is the monitor running?
+router.get('/monitor/status', (_req, res) => {
+  res.json({ running: isMonitorAlive(), pid: monitorProcess?.pid || null });
+});
+
 
 /**
  * Apply the VST chain to a WAV file in-place.
