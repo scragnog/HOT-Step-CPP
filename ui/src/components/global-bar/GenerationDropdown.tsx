@@ -18,6 +18,7 @@ export const GenerationDropdown: React.FC = () => {
   const [compositeOpen, setCompositeOpen] = useState(false);
   const [dcwOpen, setDcwOpen] = useState(false);
   const [latentOpen, setLatentOpen] = useState(false);
+  const [denoiserOpen, setDenoiserOpen] = useState(false);
 
   // Resolve scheduler dropdown value from the composite string representation
   const schedulerKey = gp.scheduler.startsWith('composite') ? 'composite'
@@ -381,6 +382,46 @@ export const GenerationDropdown: React.FC = () => {
                 placeholder="0.97,0.76,0.615,0.5,0.395,0.28,0.18,0.085,0" />
               <p className="text-[10px] text-zinc-500 mt-1">CSV of descending floats. Overrides schedule + step count when set.</p>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Post-VAE Spectral Denoiser (Accordion with toggle) ── */}
+      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 transition-all overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setDenoiserOpen(!denoiserOpen)}
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-amber-500/5 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <ChevronDown size={12} className={`text-amber-400 transition-transform duration-200 ${denoiserOpen ? 'rotate-180' : ''}`} />
+            <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+              <ToggleSwitch checked={gp.denoiseStrength > 0} onChange={(on) => gp.setDenoiseStrength(on ? 0.5 : 0)} accentColor="amber" />
+              <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Denoiser</span>
+            </div>
+          </div>
+          {gp.denoiseStrength > 0 && (
+            <span onClick={(e) => {
+              e.stopPropagation();
+              gp.setDenoiseStrength(0.0);
+              gp.setDenoiseSmoothing(0.7);
+              gp.setDenoiseMix(0.25);
+            }} className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 transition-colors cursor-pointer">
+              <RotateCcw size={10} /> Reset
+            </span>
+          )}
+        </button>
+        {denoiserOpen && gp.denoiseStrength > 0 && (
+          <div className="px-3 pb-3 space-y-3">
+            <Slider label="Strength" value={gp.denoiseStrength}
+              onChange={gp.setDenoiseStrength} min={0.01} max={1} step={0.01} showInput />
+            <Slider label="Smoothing" value={gp.denoiseSmoothing}
+              onChange={gp.setDenoiseSmoothing} min={0} max={1} step={0.01} showInput />
+            <Slider label="Mix" value={gp.denoiseMix}
+              onChange={gp.setDenoiseMix} min={0} max={1} step={0.01} showInput />
+            <p className="text-[10px] text-zinc-500">
+              Spectral gate removes VAE fuzz after decode. Higher strength = more aggressive noise suppression.
+            </p>
           </div>
         )}
       </div>

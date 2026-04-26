@@ -96,6 +96,10 @@ export interface AceRequest {
   latent_shift?: number;       // 0.0 = no bias
   latent_rescale?: number;     // 1.0 = no scaling
   custom_timesteps?: string;   // CSV of descending floats, overrides scheduler
+  // Post-VAE spectral denoiser (HOT-Step)
+  denoise_strength?: number;   // 0.0 = off, 1.0 = max suppression
+  denoise_smoothing?: number;  // 0.0 = sharp gate, 1.0 = very smooth
+  denoise_mix?: number;        // 0.0 = all dry, 1.0 = all denoised
 }
 
 /** Job status from ace-server */

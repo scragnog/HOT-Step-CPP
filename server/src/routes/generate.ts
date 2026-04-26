@@ -186,6 +186,11 @@ function translateParams(params: any): AceRequest {
   if (params.latentRescale !== undefined) req.latent_rescale = params.latentRescale;
   if (params.customTimesteps) req.custom_timesteps = params.customTimesteps;
 
+  // Post-VAE spectral denoiser (HOT-Step)
+  if (params.denoiseStrength !== undefined) req.denoise_strength = params.denoiseStrength;
+  if (params.denoiseSmoothing !== undefined) req.denoise_smoothing = params.denoiseSmoothing;
+  if (params.denoiseMix !== undefined) req.denoise_mix = params.denoiseMix;
+
   return req;
 }
 
@@ -357,6 +362,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         if (aceReq.latent_shift !== undefined) result.latent_shift = aceReq.latent_shift;
         if (aceReq.latent_rescale !== undefined) result.latent_rescale = aceReq.latent_rescale;
         if (aceReq.custom_timesteps !== undefined) result.custom_timesteps = aceReq.custom_timesteps;
+
+        // Denoise params (user can change between runs)
+        if (aceReq.denoise_strength !== undefined) result.denoise_strength = aceReq.denoise_strength;
+        if (aceReq.denoise_smoothing !== undefined) result.denoise_smoothing = aceReq.denoise_smoothing;
+        if (aceReq.denoise_mix !== undefined) result.denoise_mix = aceReq.denoise_mix;
 
         // Cover/repaint params — ALWAYS override. Cached LM results may carry
         // stale audio_cover_strength from previous runs (e.g. 0.5 from old Lyric

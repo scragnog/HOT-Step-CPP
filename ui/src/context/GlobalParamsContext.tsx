@@ -99,6 +99,14 @@ export interface GlobalParams {
   customTimesteps: string;
   setCustomTimesteps: (v: string) => void;
 
+  // Post-VAE spectral denoiser
+  denoiseStrength: number;
+  setDenoiseStrength: (v: number) => void;
+  denoiseSmoothing: number;
+  setDenoiseSmoothing: (v: number) => void;
+  denoiseMix: number;
+  setDenoiseMix: (v: number) => void;
+
   // ── LM / Thinking ──
   skipLm: boolean;
   setSkipLm: (v: boolean) => void;
@@ -191,6 +199,11 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [latentRescale, setLatentRescale] = usePersistedState('hs-latentRescale', 1.0);
   const [customTimesteps, setCustomTimesteps] = usePersistedState('hs-customTimesteps', '');
 
+  // Post-VAE spectral denoiser
+  const [denoiseStrength, setDenoiseStrength] = usePersistedState('hs-denoiseStrength', 0.0);
+  const [denoiseSmoothing, setDenoiseSmoothing] = usePersistedState('hs-denoiseSmoothing', 0.7);
+  const [denoiseMix, setDenoiseMix] = usePersistedState('hs-denoiseMix', 0.25);
+
   // LM / Thinking
   const [skipLm, setSkipLm] = usePersistedState('hs-skipLm', false);
   const [useCotCaption, setUseCotCaption] = usePersistedState('hs-useCotCaption', true);
@@ -280,6 +293,11 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       latentShift: latentShift !== 0 ? latentShift : undefined,
       latentRescale: latentRescale !== 1 ? latentRescale : undefined,
       customTimesteps: customTimesteps || undefined,
+
+      // Post-VAE spectral denoiser
+      denoiseStrength: denoiseStrength > 0 ? denoiseStrength : undefined,
+      denoiseSmoothing: denoiseStrength > 0 ? denoiseSmoothing : undefined,
+      denoiseMix: denoiseStrength > 0 ? denoiseMix : undefined,
     };
   }, [
     ditModel, lmModel, vaeModel,
@@ -290,6 +308,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     apgMomentum, apgNormThreshold,
     dcwEnabled, dcwMode, dcwScaler, dcwHighScaler,
     latentShift, latentRescale, customTimesteps,
+    denoiseStrength, denoiseSmoothing, denoiseMix,
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
     masteringEnabled, masteringReference, timbreReference,
     settings,
@@ -319,6 +338,9 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     // Latent post-processing
     latentShift, setLatentShift, latentRescale, setLatentRescale,
     customTimesteps, setCustomTimesteps,
+    // Denoiser
+    denoiseStrength, setDenoiseStrength, denoiseSmoothing, setDenoiseSmoothing,
+    denoiseMix, setDenoiseMix,
     // LM
     skipLm, setSkipLm, useCotCaption, setUseCotCaption,
     lmTemperature, setLmTemperature, lmCfgScale, setLmCfgScale,
@@ -348,6 +370,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     dcwScaler, setDcwScaler, dcwHighScaler, setDcwHighScaler,
     latentShift, setLatentShift, latentRescale, setLatentRescale,
     customTimesteps, setCustomTimesteps,
+    denoiseStrength, setDenoiseStrength, denoiseSmoothing, setDenoiseSmoothing,
+    denoiseMix, setDenoiseMix,
     skipLm, setSkipLm, useCotCaption, setUseCotCaption,
     lmTemperature, setLmTemperature, lmCfgScale, setLmCfgScale,
     lmTopK, setLmTopK, lmTopP, setLmTopP,

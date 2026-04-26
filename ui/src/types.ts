@@ -128,6 +128,11 @@ export interface GenerationParams {
   latentShift?: number;         // 0.0 = no bias
   latentRescale?: number;       // 1.0 = no scaling
   customTimesteps?: string;     // CSV of descending floats, overrides scheduler
+
+  // Post-VAE spectral denoiser
+  denoiseStrength?: number;     // 0.0 = off, 1.0 = max suppression
+  denoiseSmoothing?: number;    // 0.0 = sharp gate, 1.0 = very smooth
+  denoiseMix?: number;          // 0.0 = all dry, 1.0 = all denoised
 }
 
 /** Generation job status from the server */

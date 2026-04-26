@@ -35,6 +35,7 @@
 //   /understand LM + DiT + VAE
 
 #include "audio-io.h"
+#include "denoiser.h"
 #include "hot-step-params.h"
 #include "model-registry.h"
 #include "model-store.h"
@@ -480,6 +481,10 @@ struct ServerFields {
     float       latent_shift     = 0.0f;
     float       latent_rescale   = 1.0f;
     std::string custom_timesteps = "";
+    // Post-VAE spectral denoiser (HOT-Step)
+    float       denoise_strength  = 0.0f;   // 0 = off, 1 = max
+    float       denoise_smoothing = 0.7f;
+    float       denoise_mix       = 0.25f;
 };
 
 static void parse_server_fields(const char * json, ServerFields * sf) {
@@ -585,6 +590,16 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     }
     if ((v = yyjson_obj_get(obj, "custom_timesteps")) && yyjson_is_str(v)) {
         sf->custom_timesteps = yyjson_get_str(v);
+    }
+    // Post-VAE spectral denoiser (HOT-Step)
+    if ((v = yyjson_obj_get(obj, "denoise_strength")) && yyjson_is_num(v)) {
+        sf->denoise_strength = (float) yyjson_get_real(v);
+    }
+    if ((v = yyjson_obj_get(obj, "denoise_smoothing")) && yyjson_is_num(v)) {
+        sf->denoise_smoothing = (float) yyjson_get_real(v);
+    }
+    if ((v = yyjson_obj_get(obj, "denoise_mix")) && yyjson_is_num(v)) {
+        sf->denoise_mix = (float) yyjson_get_real(v);
     }
     yyjson_doc_free(doc);
 }
@@ -950,6 +965,12 @@ static void synth_worker(std::shared_ptr<Job>    job,
     for (int b = 0; b < total_tracks; b++) {
         if (!audio[b].samples) {
             continue;
+        }
+        // HOT-Step: Post-VAE spectral denoiser. Runs on the raw planar
+        // stereo buffer before normalization to remove VAE fuzz/fizz.
+        if (sf.denoise_strength > 0.0f) {
+            audio_denoise(audio[b].samples, audio[b].n_samples, 48000,
+                          sf.denoise_strength, sf.denoise_smoothing, sf.denoise_mix);
         }
         if (!output_wav || wav_fmt != WAV_F32) {
             audio_normalize(audio[b].samples, audio[b].n_samples * 2, peak_clip);
