@@ -290,7 +290,7 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
         }
         prompts[i] = build_lm_prompt_with_cot(bpe, a, cot);
         if (use_cfg) {
-            unconds[i] = build_lm_prompt_uncond_with_cot(bpe, negative_prompt);
+            unconds[i] = build_lm_prompt_uncond_with_cot(bpe, a, negative_prompt);
         }
         int mt = (int) (a.duration * 5) + 100;
         if (mt > max_tokens) {
