@@ -274,6 +274,25 @@ function isMonitorAlive(): boolean {
   }
 }
 
+/** Resolve a trackPath (from the UI) to an absolute filesystem path.
+ *  Handles: "/audio/uuid.wav", "http://localhost:3001/audio/uuid.wav",
+ *  "D:\\...\\uuid.wav", and bare "uuid.wav". */
+function resolveTrackPath(trackPath: string): string {
+  // Strip URL origin if present
+  let p = trackPath;
+  try {
+    const url = new URL(p);
+    p = url.pathname; // "/audio/uuid.wav"
+  } catch { /* not a full URL */ }
+
+  // If it's a Windows absolute path with drive letter, keep it
+  if (/^[A-Za-z]:[\\/]/.test(p)) return p;
+
+  // Otherwise extract just the filename and resolve from audioDir
+  const filename = path.basename(p);
+  return path.join(config.data.audioDir, filename);
+}
+
 // POST /monitor/start — Start real-time monitoring
 router.post('/monitor/start', (req, res) => {
   const { trackPath } = req.body;
@@ -282,15 +301,7 @@ router.post('/monitor/start', (req, res) => {
     return;
   }
 
-  // Resolve to absolute path
-  let absTrackPath: string;
-  if (path.isAbsolute(trackPath)) {
-    absTrackPath = trackPath;
-  } else {
-    // Relative to audio dir (e.g. "/audio/uuid.wav" → data/audio/uuid.wav)
-    const filename = path.basename(trackPath);
-    absTrackPath = path.join(config.data.audioDir, filename);
-  }
+  const absTrackPath = resolveTrackPath(trackPath);
 
   if (!fs.existsSync(absTrackPath)) {
     res.status(404).json({ error: `Track not found: ${absTrackPath}` });
@@ -392,13 +403,7 @@ router.post('/monitor/switch', (req, res) => {
     return;
   }
 
-  let absTrackPath: string;
-  if (path.isAbsolute(trackPath)) {
-    absTrackPath = trackPath;
-  } else {
-    const filename = path.basename(trackPath);
-    absTrackPath = path.join(config.data.audioDir, filename);
-  }
+  const absTrackPath = resolveTrackPath(trackPath);
 
   if (!fs.existsSync(absTrackPath)) {
     res.status(404).json({ error: `Track not found: ${absTrackPath}` });
