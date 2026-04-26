@@ -760,6 +760,7 @@ export function recalculateProfileStats(songs: SongLyrics[], profileData: any): 
   const vocab = analyseVocabulary(songs);
   const meter = analyseMeter(songs);
   const rhyme = analyseRhymes(songs);
+  const struct = analyseStructure(songs);
   const rep = analyseRepetition(songs);
   const lineVar = analyseLineLengthVariation(songs);
   const perspective = analysePerspective(songs);
@@ -771,8 +772,8 @@ export function recalculateProfileStats(songs: SongLyrics[], profileData: any): 
     meter_stats: meter,
     rhyme_schemes: rhyme.schemes,
     rhyme_quality: rhyme.quality as any,
-    avg_verse_lines: rhyme.avg_verse_lines,
-    avg_chorus_lines: rhyme.avg_chorus_lines,
+    avg_verse_lines: struct.v,
+    avg_chorus_lines: struct.c,
     repetition_stats: rep as any,
     line_length_variation: lineVar,
     perspective,
