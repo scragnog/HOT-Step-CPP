@@ -621,6 +621,8 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
 
     // Execute and always free the ctx, success or failure: the store decides
     // whether the underlying GPU module stays resident.
+    // Tie LM seed to DiT seed: locked seed → both deterministic, random → both random.
+    ace_req.lm_seed = ace_req.seed;
     request_resolve_lm_seed(&ace_req);
     std::vector<AceRequest> out(lm_batch_size);
     int rc = ace_lm_generate(ctx, &ace_req, lm_batch_size, out.data(), NULL, NULL, server_cancel_job,
