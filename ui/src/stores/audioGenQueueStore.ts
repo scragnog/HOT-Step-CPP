@@ -281,14 +281,12 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     }
   }
 
-  // 4) Mastering override from album preset
+  // 4) Mastering reference from album preset (does NOT force-enable — respects global toggle)
   if (preset?.reference_track_path) {
     // Update the top bar to reflect the mastering reference
-    writePersistedState('hs-masteringEnabled', true);
     writePersistedState('hs-masteringReference', preset.reference_track_path);
     writePersistedState('hs-timbreReference', true);
 
-    params.masteringEnabled = true;
     params.masteringReference = preset.reference_track_path;
     params.timbreReference = true;
   }

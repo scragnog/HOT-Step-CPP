@@ -155,8 +155,8 @@ export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudi
       }
 
       // 6) Reference Track — mastering + optional timbre conditioning
+      //     Only apply if the global mastering toggle is ON (hs-masteringEnabled)
       if (preset?.reference_track_path) {
-        params.masteringEnabled = true;
         params.masteringReference = preset.reference_track_path;
         // Use as timbre reference (resolved in generate route) — NOT audio cover
         params.timbreReference = true;
@@ -226,9 +226,8 @@ export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudi
       write('hs-adaptersOpen', true);
     }
 
-    // Mastering from album preset
+    // Mastering reference from album preset (does NOT force-enable — respects global toggle)
     if (preset?.reference_track_path) {
-      write('hs-masteringEnabled', true);
       write('hs-masteringReference', preset.reference_track_path);
       write('hs-timbreReference', true);
     }
