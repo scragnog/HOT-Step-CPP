@@ -253,18 +253,48 @@ static void denoise_mono(float * samples, int T, int sr,
         }
     }
 
-    // ── Build soft masks ──
+    // ── Build gain masks ──
+    // Two approaches:
+    //   Profile mode: Wiener-filter spectral subtraction — subtracts noise
+    //     power from every bin. Works even when signal >> noise.
+    //   Fallback mode: Sigmoid spectral gating — only suppresses bins where
+    //     noise dominates. Less effective for dense mixes.
     std::vector<float> masks((size_t) n_frames * n_bins);
-    const float softness_scale = 0.3f;
 
-    for (int f = 0; f < n_frames; f++) {
-        for (int b = 0; b < n_bins; b++) {
-            float mag = magnitudes[(size_t) f * n_bins + b];
-            float thr = threshold[b];
-            float softness = fmaxf(thr * softness_scale, 1e-8f);
-            float x = (mag - thr) / softness;
-            float s = 1.0f / (1.0f + expf(-x));
-            masks[(size_t) f * n_bins + b] = s;
+    if (profile && profile->valid && (int) profile->median_mag.size() == n_bins) {
+        // ── Wiener-filter spectral subtraction ──
+        // gain[b] = max(1 - (noise_power * over_sub) / signal_power, floor)
+        //
+        // This subtracts noise energy from EVERY bin, even where the signal
+        // is much louder. The key insight: even in a loud bass bin with
+        // mag=68 and noise=1.5, this produces gain ≈ 0.9997 — a tiny
+        // reduction. But in the air band with mag=0.2 and noise=0.03,
+        // gain ≈ 0.1 — heavy suppression. The effect accumulates to
+        // produce a noticeably cleaner output.
+        const float floor = 0.02f;  // -34 dB minimum, prevents musical noise
+
+        for (int f = 0; f < n_frames; f++) {
+            for (int b = 0; b < n_bins; b++) {
+                float mag   = magnitudes[(size_t) f * n_bins + b];
+                float noise = profile->median_mag[b] * over_sub;
+                float mag2  = mag * mag;
+                float noi2  = noise * noise;
+                float gain  = (mag2 > 1e-10f) ? fmaxf(1.0f - noi2 / mag2, floor) : floor;
+                masks[(size_t) f * n_bins + b] = gain;
+            }
+        }
+    } else {
+        // ── Sigmoid spectral gating (self-estimation fallback) ──
+        const float softness_scale = 0.3f;
+        for (int f = 0; f < n_frames; f++) {
+            for (int b = 0; b < n_bins; b++) {
+                float mag = magnitudes[(size_t) f * n_bins + b];
+                float thr = threshold[b];
+                float softness = fmaxf(thr * softness_scale, 1e-8f);
+                float x = (mag - thr) / softness;
+                float s = 1.0f / (1.0f + expf(-x));
+                masks[(size_t) f * n_bins + b] = s;
+            }
         }
     }
 
