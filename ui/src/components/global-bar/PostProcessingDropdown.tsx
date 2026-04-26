@@ -9,9 +9,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Sparkles, AudioWaveform, Zap,
   Upload, Trash2, Music2,
-  ChevronDown,
+  ChevronDown, RotateCcw,
 } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { usePersistedState } from '../../hooks/usePersistedState';
 import { masteringApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useVstChainStore } from '../../stores/vstChainStore';
@@ -28,14 +29,14 @@ interface AccordionProps {
   badge?: React.ReactNode;
   accentColor: string;
   toggle?: { checked: boolean; onChange: (v: boolean) => void };
-  defaultOpen?: boolean;
+  persistKey: string;  // localStorage key for remembering open/closed state
   children: React.ReactNode;
 }
 
 const Accordion: React.FC<AccordionProps> = ({
-  icon, label, badge, accentColor, toggle, defaultOpen, children,
+  icon, label, badge, accentColor, toggle, persistKey, children,
 }) => {
-  const [open, setOpen] = useState(defaultOpen ?? false);
+  const [open, setOpen] = usePersistedState(persistKey, false);
 
   const accentMap: Record<string, string> = {
     cyan: 'border-cyan-500/20 bg-cyan-500/5',
@@ -247,6 +248,7 @@ export const PostProcessingDropdown: React.FC = () => {
         icon={<Zap size={14} />}
         label="Spectral Lifter"
         accentColor="cyan"
+        persistKey="hs-ppAccordion-sl"
         toggle={{ checked: gp.spectralLifterEnabled, onChange: gp.setSpectralLifterEnabled }}
       >
         <div className="space-y-3 mt-2">
@@ -257,6 +259,23 @@ export const PostProcessingDropdown: React.FC = () => {
 
           {gp.spectralLifterEnabled && (
             <div className="space-y-2 pt-1">
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    gp.setSlDenoisePasses(2);
+                    gp.setSlDenoiseThreshold(1.5);
+                    gp.setSlHfMix(0.25);
+                    gp.setSlTransientBoost(0.5);
+                    gp.setSlShimmerReduction(6.0);
+                  }}
+                  className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-cyan-400 transition-colors"
+                  title="Reset Spectral Lifter parameters to defaults"
+                >
+                  <RotateCcw size={11} />
+                  Reset
+                </button>
+              </div>
               <EditableSlider
                 label="Denoise Passes"
                 value={gp.slDenoisePasses}
@@ -306,6 +325,7 @@ export const PostProcessingDropdown: React.FC = () => {
         icon={<Sparkles size={14} />}
         label="VST Chain"
         accentColor="violet"
+        persistKey="hs-ppAccordion-vst"
         badge={vstEnabled > 0 ? (
           <span className="text-[10px] text-violet-400/60 font-mono">
             {vstEnabled} active
@@ -322,6 +342,7 @@ export const PostProcessingDropdown: React.FC = () => {
         icon={<AudioWaveform size={14} />}
         label="Mastering"
         accentColor="amber"
+        persistKey="hs-ppAccordion-master"
         toggle={{ checked: gp.masteringEnabled, onChange: gp.setMasteringEnabled }}
         badge={gp.masteringEnabled && gp.masteringReference ? (
           <span className="text-[10px] text-amber-400/60 font-mono truncate max-w-[100px]">

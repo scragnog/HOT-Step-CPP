@@ -40,7 +40,7 @@ export const AdaptersDropdown: React.FC = () => {
 
   // Internal state
   const [adapterFiles, setAdapterFiles] = useState<AdapterFile[]>([]);
-  const [showGroupScales, setShowGroupScales] = useState(false);
+  const [showGroupScales, setShowGroupScales] = usePersistedState('hs-adapterAccordion-groupScales', false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);

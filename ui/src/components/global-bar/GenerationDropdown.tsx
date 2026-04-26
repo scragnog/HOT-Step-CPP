@@ -3,22 +3,23 @@
 // Adapted from the DiT section of create/GenerationSettings.tsx.
 // Reads from GlobalParamsContext instead of props.
 
-import React, { useState } from 'react';
+import React from 'react';
 import { RotateCcw, ChevronDown } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
 import { ToggleSwitch } from './BarSection';
 import { formatScheduler } from './modelLabels';
+import { usePersistedState } from '../../hooks/usePersistedState';
 
 const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
 
 export const GenerationDropdown: React.FC = () => {
   const gp = useGlobalParams();
-  const [compositeOpen, setCompositeOpen] = useState(false);
-  const [dcwOpen, setDcwOpen] = useState(false);
-  const [latentOpen, setLatentOpen] = useState(false);
-  const [denoiserOpen, setDenoiserOpen] = useState(false);
+  const [compositeOpen, setCompositeOpen] = usePersistedState('hs-genAccordion-composite', false);
+  const [dcwOpen, setDcwOpen] = usePersistedState('hs-genAccordion-dcw', false);
+  const [latentOpen, setLatentOpen] = usePersistedState('hs-genAccordion-latent', false);
+  const [denoiserOpen, setDenoiserOpen] = usePersistedState('hs-genAccordion-denoiser', false);
 
   // Resolve scheduler dropdown value from the composite string representation
   const schedulerKey = gp.scheduler.startsWith('composite') ? 'composite'
