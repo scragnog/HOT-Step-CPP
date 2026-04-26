@@ -1,0 +1,1 @@
+[vst-host] Plugin GUI opened (800x600). Close window to save state.

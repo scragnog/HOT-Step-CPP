@@ -1,0 +1,1 @@
+[vst-host] Scan found 40 module path(s)

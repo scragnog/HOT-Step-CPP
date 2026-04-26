@@ -198,3 +198,93 @@ else()
     target_link_libraries(mastering PRIVATE m)
 endif()
 target_link_libraries(mastering PRIVATE Threads::Threads)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VST3 Hosting Library + vst-host tool
+# ─────────────────────────────────────────────────────────────────────────────
+# We compile only the necessary VST3 SDK source files for hosting (loading
+# plugins, processing audio, state save/restore). We do NOT use the SDK's
+# own CMakeLists.txt because it requires cmake 3.25+ and pulls in the full
+# build system including plugin examples and VSTGUI.
+
+set(VST3SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vst3sdk")
+
+# Static library: vst3-hosting
+add_library(vst3-hosting STATIC
+    # Base library
+    ${VST3SDK_ROOT}/base/source/baseiids.cpp
+    ${VST3SDK_ROOT}/base/source/fobject.cpp
+    ${VST3SDK_ROOT}/base/source/fdebug.cpp
+    ${VST3SDK_ROOT}/base/source/fstreamer.cpp
+    ${VST3SDK_ROOT}/base/source/fbuffer.cpp
+    ${VST3SDK_ROOT}/base/source/updatehandler.cpp
+    ${VST3SDK_ROOT}/base/source/timer.cpp
+    ${VST3SDK_ROOT}/base/source/fstring.cpp
+
+    # Pluginterfaces
+    ${VST3SDK_ROOT}/pluginterfaces/base/funknown.cpp
+    ${VST3SDK_ROOT}/pluginterfaces/base/ustring.cpp
+    ${VST3SDK_ROOT}/pluginterfaces/base/coreiids.cpp
+    ${VST3SDK_ROOT}/pluginterfaces/base/conststringtable.cpp
+
+    # Public SDK hosting
+    ${VST3SDK_ROOT}/public.sdk/source/vst/hosting/module.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/vst/hosting/module_win32.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/vst/hosting/hostclasses.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/vst/hosting/plugprovider.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/vst/hosting/processdata.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/vst/hosting/parameterchanges.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/vst/hosting/eventlist.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/vst/hosting/connectionproxy.cpp
+
+    # Public SDK common (memory streams for state I/O)
+    ${VST3SDK_ROOT}/public.sdk/source/common/memorystream.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/common/commoniids.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/common/pluginview.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/common/threadchecker_win32.cpp
+    ${VST3SDK_ROOT}/public.sdk/source/common/commonstringconvert.cpp
+
+    # VST interface ID definitions (all DEF_CLASS_IID symbols)
+    ${VST3SDK_ROOT}/public.sdk/source/vst/vstinitiids.cpp
+
+    # VST utilities
+    ${VST3SDK_ROOT}/public.sdk/source/vst/utility/stringconvert.cpp
+)
+
+target_include_directories(vst3-hosting PUBLIC
+    ${VST3SDK_ROOT}
+    ${VST3SDK_ROOT}/pluginterfaces
+    ${VST3SDK_ROOT}/public.sdk
+)
+
+# The SDK defines DEVELOPMENT=1 for debug builds
+target_compile_definitions(vst3-hosting PRIVATE
+    $<$<CONFIG:Debug>:DEVELOPMENT=1>
+    $<$<CONFIG:Release>:RELEASE=1>
+)
+
+if(MSVC)
+    # Suppress noisy SDK warnings
+    target_compile_options(vst3-hosting PRIVATE /W0)
+else()
+    target_compile_options(vst3-hosting PRIVATE -w)
+endif()
+
+# vst-host: standalone VST3 host tool (GUI + offline processing + chain)
+add_executable(vst-host tools/vst-host.cpp)
+target_include_directories(vst-host PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${VST3SDK_ROOT}
+)
+target_link_libraries(vst-host PRIVATE vst3-hosting yyjson Threads::Threads)
+if(MSVC)
+    target_compile_options(vst-host PRIVATE /W4 /wd4100 /wd4505)
+    target_compile_definitions(vst-host PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
+else()
+    target_compile_options(vst-host PRIVATE -Wall -Wextra -Wconversion
+                          -Wno-unused-parameter -Wno-unused-function -Wno-sign-conversion)
+endif()
+add_dependencies(vst-host version)
