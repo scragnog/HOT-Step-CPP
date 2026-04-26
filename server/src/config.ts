@@ -52,6 +52,11 @@ export const config = {
     },
   },
 
+  // Essentia audio analysis
+  essentia: {
+    bin: process.env.ESSENTIA_BIN || path.join(PROJECT_ROOT, 'Essentia', 'essentia_streaming_extractor_music.exe'),
+  },
+
   // Node.js server
   server: {
     port: parseInt(process.env.SERVER_PORT || '3001', 10),

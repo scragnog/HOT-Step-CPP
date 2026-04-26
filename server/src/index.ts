@@ -30,6 +30,8 @@ import adapterRoutes from './routes/adapters.js';
 import logsRoutes, { pushLog } from './routes/logs.js';
 import lireekRoutes from './routes/lireek.js';
 import vstRoutes from './routes/vst.js';
+import analyzeRoutes from './routes/analyze.js';
+import uploadRoutes from './routes/upload.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,6 +71,8 @@ app.use('/api/adapters', adapterRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/lireek', lireekRoutes);
 app.use('/api/vst', vstRoutes);
+app.use('/api/analyze', analyzeRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Serve audio files from data/audio/
 app.use('/audio', express.static(config.data.audioDir, {

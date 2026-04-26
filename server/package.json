@@ -13,7 +13,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@types/multer": "^2.1.0",
     "better-sqlite3": "^11.8.1",
     "cheerio": "^1.2.0",
     "cmu-pronouncing-dictionary": "^3.0.0",
@@ -21,12 +20,14 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "multer": "^2.1.1",
+    "music-metadata": "^11.12.3",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.2",
+    "@types/multer": "^2.1.0",
     "@types/node": "^22.14.0",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.3",

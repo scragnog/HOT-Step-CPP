@@ -17,9 +17,17 @@ router.get('/', (req, res) => {
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
 
-  const songs = getDb()
-    .prepare('SELECT * FROM songs WHERE user_id = ? ORDER BY created_at DESC')
-    .all(userId);
+  // Optional source filter — filters by generation_params JSON field
+  const source = req.query.source as string | undefined;
+  let query = 'SELECT * FROM songs WHERE user_id = ?';
+  const params: any[] = [userId];
+  if (source) {
+    query += ` AND json_extract(generation_params, '$.source') = ?`;
+    params.push(source);
+  }
+  query += ' ORDER BY created_at DESC';
+
+  const songs = getDb().prepare(query).all(...params);
 
   // Parse tags JSON string
   const parsed = songs.map((s: any) => ({
