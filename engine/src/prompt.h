@@ -265,9 +265,8 @@ static std::string build_cot_yaml(const AcePrompt & prompt) {
 }
 
 // Prompt with injected CoT (Phase 2: all metas known)
-// Assistant turn is left OPEN: training layout is
-//   <|im_start|>assistant\n<think>\n{cot}\n</think>\n\n{codes}<|im_end|>\n
-// so the model generates codes from the position right after \n\n.
+// Assistant turn stays open so the LM generates audio codes inside it
+// and emits im_end itself as stop.
 static std::vector<int> build_lm_prompt_with_cot(BPETokenizer &      bpe,
                                                  const AcePrompt &   prompt,
                                                  const std::string & cot_yaml) {
@@ -294,15 +293,11 @@ static std::vector<int> build_lm_prompt_with_cot(BPETokenizer &      bpe,
 }
 
 // Unconditional prompt with empty CoT for CFG (Phase 2)
-// Training-aligned: user message is the bare negative prompt (or "NO USER INPUT"
-// when none supplied), matching the training-time CFG dropout format where the
-// uncond branch carries no caption/lyrics structure.  Assistant turn is left
-// OPEN (same reasoning as the cond prompt above).
-// Empty reasoning is "<think>\n\n</think>" (two newlines between tags) because
-// Qwen3 renders empty reasoning_content.strip('\n') as '\n\n' between tags.
-static std::vector<int> build_lm_prompt_uncond_with_cot(BPETokenizer &    bpe,
-                                                        const AcePrompt & prompt,
-                                                        const char *      negative_prompt) {
+// Bare user content (no Caption/Lyric wrapper) matches the training CFG dropout.
+// Assistant turn stays open so the LM generates audio codes inside it.
+// Empty CoT uses two inner newlines because Qwen's chat template renders
+// reasoning via `<think>\n{reasoning.strip('\n')}\n</think>`.
+static std::vector<int> build_lm_prompt_uncond_with_cot(BPETokenizer & bpe, const char * negative_prompt) {
     std::vector<int> ids;
     auto             append = [&](const std::string & text) {
         auto t = bpe_encode(&bpe, text, false);
@@ -313,9 +308,8 @@ static std::vector<int> build_lm_prompt_uncond_with_cot(BPETokenizer &    bpe,
     ids.push_back(TOKEN_IM_END);
     append("\n");
     ids.push_back(TOKEN_IM_START);
-    bool        has_neg = negative_prompt && strlen(negative_prompt) > 0;
-    std::string user_content = has_neg ? std::string(negative_prompt) : "NO USER INPUT";
-    append("user\n" + user_content + "\n");
+    const char * neg = (negative_prompt && *negative_prompt) ? negative_prompt : "";
+    append(std::string("user\n") + neg);
     ids.push_back(TOKEN_IM_END);
     append("\n");
     ids.push_back(TOKEN_IM_START);

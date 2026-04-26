@@ -1,4 +1,4 @@
 UPSTREAM_REPO=acestep.cpp
-UPSTREAM_COMMIT=3222db7c255971c71e8441108584b85fdf448445
-SYNC_DATE=2026-04-21
-SYNC_NOTES=Full model-store API migration. Extension layer architecture established.
+UPSTREAM_COMMIT=31cc9ea3a4b21030249ce9e4794ea2df8de46627
+SYNC_DATE=2026-04-26
+SYNC_NOTES=Full sync: lm_seed, VAE latent I/O, repaint/splice, caption lock, LM CFG fix, DCW, custom scheduler, mp3_bitrate, vae selection, JobStatus enum.

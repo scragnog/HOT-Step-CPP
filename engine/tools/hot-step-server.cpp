@@ -621,6 +621,7 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
 
     // Execute and always free the ctx, success or failure: the store decides
     // whether the underlying GPU module stays resident.
+    request_resolve_lm_seed(&ace_req);
     std::vector<AceRequest> out(lm_batch_size);
     int rc = ace_lm_generate(ctx, &ace_req, lm_batch_size, out.data(), NULL, NULL, server_cancel_job,
                              (void *) &job->cancel, mode);
@@ -1160,8 +1161,11 @@ static void understand_worker(std::shared_ptr<Job> job, AceRequest ace_req, floa
     }
 
     AceRequest out;
-    int        rc = ace_understand_generate(ctx, src_interleaved, src_len, &ace_req, &out, server_cancel_job,
-                                            (void *) &job->cancel);
+    int        rc = ace_understand_generate(ctx, src_interleaved, src_len,
+                                            nullptr, 0,  // src_latents (audio path)
+                                            &ace_req, &out,
+                                            nullptr, nullptr,  // latent_out, T_latent_out
+                                            server_cancel_job, (void *) &job->cancel);
     ace_understand_free(ctx);
     free(src_interleaved);
 

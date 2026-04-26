@@ -55,6 +55,10 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params);
 //   The first request (reqs[0]) is used for shared params (mode, duration, DiT settings).
 //   seed must be resolved (non-negative) before calling this function.
 // src_audio / ref_audio: interleaved stereo 48kHz buffers, NULL when not applicable.
+// src_latents / ref_latents: pre-encoded latents [T_latent * 64] f32 alternative
+//   to the matching audio buffer. When non-NULL, the corresponding VAE encoder
+//   pass is skipped. Mutually exclusive per side: when both audio and latents
+//   are provided for the same side, latents win and audio is ignored.
 // batch_n: number of requests (1..9).
 // cancel/cancel_data: abort callback, polled between DiT steps. NULL = never cancel.
 // Returns NULL on error or cancellation.
@@ -62,23 +66,30 @@ AceSynthJob * ace_synth_job_run_dit(AceSynth *         ctx,
                                     const AceRequest * reqs,
                                     const float *      src_audio,
                                     int                src_len,
+                                    const float *      src_latents,
+                                    int                src_T_latent,
                                     const float *      ref_audio,
                                     int                ref_len,
+                                    const float *      ref_latents,
+                                    int                ref_T_latent,
                                     int                batch_n,
                                     bool (*cancel)(void *) = nullptr,
                                     void * cancel_data     = nullptr);
 
-// Phase 2: VAE decode and waveform splice. Acquires the VAE decoder and FSQ
-// detokenizer from the store; in STRICT this evicts the DiT from phase 1
-// transparently.
-// splice_src / splice_len: interleaved stereo source reused for repaint/lego wave splicing.
-//   Pass NULL when the job did not carry a source audio.
+// Access the post-DiT denoised latent for one track of the job, owned by the
+// job and valid until ace_synth_job_free. Layout is flat [T_latent * 64] f32
+// time-major, identical to the /vae wire format: feeding it to /vae decode
+// reproduces the track's output audio. *T_out is set to T_latent.
+const float * ace_synth_job_get_latent(const AceSynthJob * job, int track_idx, int * T_out);
+
+// Phase 2: latent splice (for repaint/lego) + VAE decode. Acquires the VAE
+// decoder from the store; in STRICT this evicts the DiT from phase 1
+// transparently. The splice happens in latent space using s.cover_latents
+// captured during phase 1, no source audio is needed.
 // out[batch_n] allocated by caller, filled with audio buffers.
 // Returns 0 on success, -1 on error or cancellation.
 int ace_synth_job_run_vae(AceSynth *    ctx,
                           AceSynthJob * job,
-                          const float * splice_src,
-                          int           splice_len,
                           AceAudio *    out,
                           bool (*cancel)(void *) = nullptr,
                           void * cancel_data     = nullptr);

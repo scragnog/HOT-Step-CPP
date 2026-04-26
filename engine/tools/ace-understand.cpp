@@ -181,7 +181,11 @@ int main(int argc, char ** argv) {
 
     // run understand pipeline
     AceRequest out;
-    int        rc = ace_understand_generate(ctx, src_interleaved, src_len, &req, &out, NULL, NULL);
+    int        rc = ace_understand_generate(ctx, src_interleaved, src_len,
+                                            nullptr, 0,  // src_latents (audio path)
+                                            &req, &out,
+                                            nullptr, nullptr,  // latent_out, T_latent_out
+                                            NULL, NULL);
     free(src_interleaved);
     ace_understand_free(ctx);
     store_free(store);

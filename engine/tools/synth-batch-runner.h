@@ -39,11 +39,16 @@ static int synth_batch_run(AceSynth *                             ctx,
 
     // Phase 1: denoising loop for each group. The DiT is acquired and released
     // by ops_dit_generate inside ace_synth_job_run_dit.
+    // src_latents / ref_latents: NULL = use audio path (VAE encode).
+    // When we add /vae latent I/O, callers can pass pre-encoded latents here.
     int off = 0;
     for (int g = 0; g < n_groups; g++) {
         const int gn = (int) groups[g].size();
-        jobs[g]      = ace_synth_job_run_dit(ctx, groups[g].data(), src_audio, src_len, ref_audio, ref_len, gn, cancel,
-                                             cancel_data);
+        jobs[g]      = ace_synth_job_run_dit(ctx, groups[g].data(), src_audio, src_len,
+                                             nullptr, 0,  // src_latents
+                                             ref_audio, ref_len,
+                                             nullptr, 0,  // ref_latents
+                                             gn, cancel, cancel_data);
         if (!jobs[g]) {
             for (int j = 0; j < g; j++) {
                 ace_synth_job_free(jobs[j]);
@@ -58,7 +63,7 @@ static int synth_batch_run(AceSynth *                             ctx,
     // by ops_vae_decode_and_splice inside ace_synth_job_run_vae.
     for (int g = 0; g < n_groups; g++) {
         const int rc =
-            ace_synth_job_run_vae(ctx, jobs[g], src_audio, src_len, audio_out + audio_off[g], cancel, cancel_data);
+            ace_synth_job_run_vae(ctx, jobs[g], audio_out + audio_off[g], cancel, cancel_data);
         ace_synth_job_free(jobs[g]);
         jobs[g] = nullptr;
         if (rc != 0) {

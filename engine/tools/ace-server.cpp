@@ -37,6 +37,7 @@
 #include "request.h"
 #include "synth-batch-runner.h"
 #include "task-types.h"
+#include "vae.h"
 #include "version.h"
 #include "yyjson.h"
 
@@ -185,6 +186,7 @@ static std::string g_loaded_dit;
 static std::string g_loaded_adapter;
 static float       g_loaded_adapter_scale = 1.0f;
 static std::string g_loaded_und_dit;
+static std::string g_loaded_vae;
 
 // pipeline params (rebuilt from registry paths on each load)
 static AceLmParams         g_lm_params;
@@ -193,7 +195,6 @@ static AceUnderstandParams g_und_params;
 
 // limits
 static int  g_max_batch   = 1;
-static int  g_mp3_kbps    = 128;
 static bool g_keep_loaded = false;
 
 // job system: all compute endpoints create a job and return its ID
@@ -201,12 +202,19 @@ static bool g_keep_loaded = false;
 // the result. the client polls GET /job?id=N until done, then fetches
 // the result with GET /job?id=N&result=1.
 // cancel: POST /job?id=N&cancel=1 sets the per-job flag.
+enum class JobStatus : int {
+    RUNNING   = 0,
+    DONE      = 1,
+    FAILED    = 2,
+    CANCELLED = 3,
+};
+
 struct Job {
-    std::string       id;
-    std::atomic<int>  status{ 0 };  // 0=running 1=done 2=failed 3=cancelled
-    std::string       result_body;
-    std::string       result_mime;
-    std::atomic<bool> cancel{ false };
+    std::string            id;
+    std::atomic<JobStatus> status{ JobStatus::RUNNING };
+    std::string            result_body;
+    std::string            result_mime;
+    std::atomic<bool>      cancel{ false };
 
     // memory ordering contract: result_body and result_mime are written
     // before status is stored (seq_cst). the client loads status (seq_cst)
@@ -218,6 +226,105 @@ static std::mutex                                            mtx_jobs;
 static std::unordered_map<std::string, std::shared_ptr<Job>> g_jobs;
 static std::deque<std::string>                               g_job_order;
 static const int                                             MAX_JOBS = 32;
+
+// Source latent cap: matches the silence_latent tensor baked into the DiT
+// GGUF, which is fixed at [15000, 64] f32. The pipeline indexes into it
+// directly when padding context, so any T_latent above 15000 would walk
+// past the buffer. Same hard limit ops_resolve_T enforces on s.T.
+static const int MAX_T_LATENT = 15000;
+
+// Latent payload format: raw f32 [T * 64] little-endian, no header. Same
+// layout neural-codec emits in --encode -f f32 mode and what /synth,
+// /understand, /vae return as the latent multipart part or raw body.
+static const int LATENT_CHANNELS    = 64;
+static const int LATENT_FRAME_BYTES = LATENT_CHANNELS * (int) sizeof(float);
+
+// Validate a latent payload coming from the wire: size must be a strict
+// multiple of one frame, T must be in (0, MAX_T_LATENT]. Returns the frame
+// count or -1 on failure (with the HTTP code the caller should reply).
+static int latent_payload_validate(size_t size, int * http_code_out) {
+    if (size == 0 || (size % LATENT_FRAME_BYTES) != 0) {
+        if (http_code_out) {
+            *http_code_out = 400;
+        }
+        return -1;
+    }
+    int T = (int) (size / (size_t) LATENT_FRAME_BYTES);
+    if (T <= 0) {
+        if (http_code_out) {
+            *http_code_out = 400;
+        }
+        return -1;
+    }
+    if (T > MAX_T_LATENT) {
+        if (http_code_out) {
+            *http_code_out = 413;
+        }
+        return -1;
+    }
+    return T;
+}
+
+// Build a multipart/mixed body that bundles the primary payload with its
+// latents. The audio variant pairs one audio part with one latent part per
+// track, the JSON variant carries a single payload and one optional latent.
+// The boundary is fixed and matches the existing batch format; the client
+// splits on it the same way for every endpoint.
+static const char * MULTIPART_BOUNDARY = "ace-batch-boundary";
+
+static std::string multipart_build_audio_latent(const std::vector<std::string> &        audio_parts,
+                                                const char *                            audio_mime,
+                                                const std::vector<std::vector<float>> & latents) {
+    std::string body;
+    for (size_t i = 0; i < audio_parts.size(); i++) {
+        if (audio_parts[i].empty()) {
+            continue;
+        }
+        body += "--";
+        body += MULTIPART_BOUNDARY;
+        body += "\r\nContent-Type: ";
+        body += audio_mime;
+        body += "\r\n\r\n";
+        body += audio_parts[i];
+        body += "\r\n";
+        body += "--";
+        body += MULTIPART_BOUNDARY;
+        body += "\r\nContent-Type: application/octet-stream\r\n";
+        body += "Content-Disposition: form-data; name=\"latent\"\r\n\r\n";
+        body.append(reinterpret_cast<const char *>(latents[i].data()), latents[i].size() * sizeof(float));
+        body += "\r\n";
+    }
+    body += "--";
+    body += MULTIPART_BOUNDARY;
+    body += "--\r\n";
+    return body;
+}
+
+// Same shape, JSON primary instead of audio. Used by /understand.
+static std::string multipart_build_json_latent(const std::string &        json_part,
+                                               const std::vector<float> & latent,
+                                               int                        T_latent) {
+    std::string body;
+    body += "--";
+    body += MULTIPART_BOUNDARY;
+    body += "\r\nContent-Type: application/json\r\n\r\n";
+    body += json_part;
+    body += "\r\n";
+    if (T_latent > 0 && !latent.empty()) {
+        body += "--";
+        body += MULTIPART_BOUNDARY;
+        body += "\r\nContent-Type: application/octet-stream\r\n";
+        body += "Content-Disposition: form-data; name=\"latent\"\r\n\r\n";
+        body.append(reinterpret_cast<const char *>(latent.data()), (size_t) T_latent * LATENT_FRAME_BYTES);
+        body += "\r\n";
+    }
+    body += "--";
+    body += MULTIPART_BOUNDARY;
+    body += "--\r\n";
+    return body;
+}
+
+static const std::string MULTIPART_MIME = std::string("multipart/mixed; boundary=") + MULTIPART_BOUNDARY;
 
 // generate a random hex ID (64 bits of entropy, non-predictable)
 static std::string job_make_id() {
@@ -242,7 +349,7 @@ static std::shared_ptr<Job> job_create() {
         bool evicted = false;
         for (auto it = g_job_order.begin(); it != g_job_order.end(); ++it) {
             auto jit = g_jobs.find(*it);
-            if (jit == g_jobs.end() || jit->second->status.load() != 0) {
+            if (jit == g_jobs.end() || jit->second->status.load() != JobStatus::RUNNING) {
                 if (jit != g_jobs.end()) {
                     g_jobs.erase(jit);
                 }
@@ -264,19 +371,18 @@ static std::shared_ptr<Job> job_find(const std::string & id) {
     return it != g_jobs.end() ? it->second : nullptr;
 }
 
-static const char * job_status_str(int s) {
+static const char * job_status_str(JobStatus s) {
     switch (s) {
-        case 0:
+        case JobStatus::RUNNING:
             return "running";
-        case 1:
+        case JobStatus::DONE:
             return "done";
-        case 2:
+        case JobStatus::FAILED:
             return "failed";
-        case 3:
+        case JobStatus::CANCELLED:
             return "cancelled";
-        default:
-            return "unknown";
     }
+    return "unknown";
 }
 
 // log capture: intercept stderr via pipe, forward to terminal + ring buffer.
@@ -443,7 +549,7 @@ static std::string resolve_name(const std::vector<ModelEntry> & bucket,
 // LM worker: generates metadata + lyrics + codes, stores JSON result in job.
 static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch_size, int mode) {
     if (job->cancel.load()) {
-        job->status.store(3);
+        job->status.store(JobStatus::CANCELLED);
         return;
     }
 
@@ -452,7 +558,7 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     const ModelEntry * entry   = registry_find(g_registry.lm, lm_name.c_str());
     if (!entry) {
         fprintf(stderr, "[Server] LM not found: %s\n", lm_name.c_str());
-        job->status.store(2);
+        job->status.store(JobStatus::FAILED);
         return;
     }
     AceLmParams p = g_lm_params;
@@ -464,7 +570,7 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     AceLm * ctx = ace_lm_load(g_store, &p);
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: LM load failed\n");
-        job->status.store(2);
+        job->status.store(JobStatus::FAILED);
         return;
     }
 
@@ -476,7 +582,7 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     ace_lm_free(ctx);
 
     if (rc != 0) {
-        job->status.store(job->cancel.load() ? 3 : 2);
+        job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::FAILED);
         return;
     }
 
@@ -500,7 +606,7 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
 
     job->result_body = std::move(body);
     job->result_mime = "application/json";
-    job->status.store(1);
+    job->status.store(JobStatus::DONE);
     fprintf(stderr, "[Server] Job %s done (LM, %d results)\n", job->id.c_str(), lm_batch_size);
 }
 
@@ -554,6 +660,8 @@ static void handle_lm(const httplib::Request & req, httplib::Response & res) {
     auto job = job_create();
     fprintf(stderr, "[Server] Job %s created (LM, mode=%d)\n", job->id.c_str(), mode);
 
+    request_resolve_lm_seed(&ace_req);
+
     work_push([job, ace_req, lm_batch_size, mode]() { lm_worker(job, ace_req, lm_batch_size, mode); });
 
     std::string body = "{\"id\":\"" + job->id + "\"}";
@@ -565,8 +673,12 @@ static void synth_worker(std::shared_ptr<Job>    job,
                          std::vector<AceRequest> ace_reqs,
                          float *                 src_interleaved,
                          int                     src_len,
+                         std::vector<float>      src_latents,
+                         int                     src_T_latent,
                          float *                 ref_interleaved,
                          int                     ref_len,
+                         std::vector<float>      ref_latents,
+                         int                     ref_T_latent,
                          bool                    output_wav,
                          WavFormat               wav_fmt,
                          int                     peak_clip) {
@@ -587,32 +699,41 @@ static void synth_worker(std::shared_ptr<Job>    job,
     if (job->cancel.load()) {
         free(src_interleaved);
         free(ref_interleaved);
-        job->status.store(3);
+        job->status.store(JobStatus::CANCELLED);
         return;
     }
 
-    // Resolve DiT, adapter and the text-encoder / VAE singletons.
+    // Resolve DiT, adapter, VAE and the text-encoder singleton.
     std::string        dit_name = resolve_name(g_registry.dit, ace_reqs[0].synth_model, g_loaded_dit);
     const ModelEntry * dit      = registry_find(g_registry.dit, dit_name.c_str());
     if (!dit) {
         fprintf(stderr, "[Server] DiT not found: %s\n", dit_name.c_str());
         free(src_interleaved);
         free(ref_interleaved);
-        job->status.store(2);
+        job->status.store(JobStatus::FAILED);
         return;
     }
     if (g_registry.text_enc.empty() || g_registry.vae.empty()) {
         fprintf(stderr, "[Server] Missing Text-Enc or VAE in registry\n");
         free(src_interleaved);
         free(ref_interleaved);
-        job->status.store(2);
+        job->status.store(JobStatus::FAILED);
+        return;
+    }
+    std::string        vae_name = resolve_name(g_registry.vae, ace_reqs[0].vae, g_loaded_vae);
+    const ModelEntry * vae      = registry_find(g_registry.vae, vae_name.c_str());
+    if (!vae) {
+        fprintf(stderr, "[Server] VAE not found: %s\n", vae_name.c_str());
+        free(src_interleaved);
+        free(ref_interleaved);
+        job->status.store(JobStatus::FAILED);
         return;
     }
 
     AceSynthParams p    = g_synth_params;
     p.text_encoder_path = g_registry.text_enc[0].path.c_str();
     p.dit_path          = dit->path.c_str();
-    p.vae_path          = g_registry.vae[0].path.c_str();
+    p.vae_path          = vae->path.c_str();
     p.adapter_path      = nullptr;
     p.adapter_scale     = 1.0f;
     if (!ace_reqs[0].adapter.empty()) {
@@ -621,13 +742,13 @@ static void synth_worker(std::shared_ptr<Job>    job,
             fprintf(stderr, "[Server] Adapter not found: %s\n", ace_reqs[0].adapter.c_str());
             free(src_interleaved);
             free(ref_interleaved);
-            job->status.store(2);
+            job->status.store(JobStatus::FAILED);
             return;
         }
         p.adapter_path  = adapter->path.c_str();
         p.adapter_scale = ace_reqs[0].adapter_scale;
     }
-    fprintf(stderr, "[Server] Loading synth: DiT=%s%s%s\n", dit_name.c_str(),
+    fprintf(stderr, "[Server] Loading synth: DiT=%s VAE=%s%s%s\n", dit_name.c_str(), vae_name.c_str(),
             ace_reqs[0].adapter.empty() ? "" : " Adapter=", ace_reqs[0].adapter.c_str());
 
     AceSynth * ctx = ace_synth_load(g_store, &p);
@@ -635,7 +756,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
         fprintf(stderr, "[Server] FATAL: synth load failed\n");
         free(src_interleaved);
         free(ref_interleaved);
-        job->status.store(2);
+        job->status.store(JobStatus::FAILED);
         return;
     }
 
@@ -673,8 +794,15 @@ static void synth_worker(std::shared_ptr<Job>    job,
 
     // Two-phase run. The store acquires and releases GPU modules around each
     // op (STRICT) or keeps them across ops (NEVER). The synth ctx is always
-    // freed at the end of this handler.
-    const int rc = synth_batch_run(ctx, groups, src_interleaved, src_len, ref_interleaved, ref_len, audio.data(),
+    // freed at the end of this handler. The runner ingests src and ref as
+    // either audio or latents (latents win when both are set per side) and
+    // captures one post-DiT latent per generated track for the multipart
+    // response.
+    const float *                   src_lat_ptr = src_latents.empty() ? nullptr : src_latents.data();
+    const float *                   ref_lat_ptr = ref_latents.empty() ? nullptr : ref_latents.data();
+    std::vector<std::vector<float>> captured_latents;
+    const int rc = synth_batch_run(ctx, groups, src_interleaved, src_len, src_lat_ptr, src_T_latent, ref_interleaved,
+                                   ref_len, ref_lat_ptr, ref_T_latent, audio.data(), &captured_latents,
                                    server_cancel_job, (void *) &job->cancel);
     ace_synth_free(ctx);
     free(src_interleaved);
@@ -684,7 +812,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
         for (auto & a : audio) {
             ace_audio_free(&a);
         }
-        job->status.store(job->cancel.load() ? 3 : 2);
+        job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::FAILED);
         return;
     }
 
@@ -694,10 +822,12 @@ static void synth_worker(std::shared_ptr<Job>    job,
         g_loaded_dit           = dit_name;
         g_loaded_adapter       = ace_reqs[0].adapter;
         g_loaded_adapter_scale = ace_reqs[0].adapter_scale;
+        g_loaded_vae           = vae_name;
     } else {
         g_loaded_dit.clear();
         g_loaded_adapter.clear();
         g_loaded_adapter_scale = 1.0f;
+        g_loaded_vae.clear();
     }
 
     const int total_tracks = total_alloc;
@@ -716,49 +846,38 @@ static void synth_worker(std::shared_ptr<Job>    job,
         if (output_wav) {
             encoded[b] = audio_encode_wav(audio[b].samples, audio[b].n_samples, 48000, wav_fmt);
         } else {
-            encoded[b] = audio_encode_mp3(audio[b].samples, audio[b].n_samples, 48000, g_mp3_kbps, server_cancel_job,
-                                          (void *) &job->cancel);
+            encoded[b] = audio_encode_mp3(audio[b].samples, audio[b].n_samples, 48000, groups[0][b].mp3_bitrate,
+                                          server_cancel_job, (void *) &job->cancel);
         }
         ace_audio_free(&audio[b]);
     }
 
-    // store result in job
-    // single track: raw audio body
-    if (total_tracks == 1) {
-        job->result_body = std::move(encoded[0]);
-        job->result_mime = mime;
-    } else {
-        // multiple tracks: multipart/mixed, each part is raw audio
-        std::string boundary = "ace-batch-boundary";
-        std::string body;
-        for (int b = 0; b < total_tracks; b++) {
-            body += "--" + boundary + "\r\n";
-            body += "Content-Type: ";
-            body += mime;
-            body += "\r\n\r\n";
-            body += encoded[b];
-            body += "\r\n";
-        }
-        body += "--" + boundary + "--\r\n";
-        job->result_body = std::move(body);
-        job->result_mime = "multipart/mixed; boundary=" + boundary;
-    }
+    // store result in job: every synth response is multipart, with one audio
+    // part and one latent part per generated track, paired in wire order.
+    // The audio mime is per-part so the client knows wav vs mp3 without a
+    // query. The latent reproduces its track's audio when fed back to /vae.
+    job->result_body = multipart_build_audio_latent(encoded, mime, captured_latents);
+    job->result_mime = MULTIPART_MIME;
 
-    job->status.store(job->cancel.load() ? 3 : 1);
+    job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::DONE);
     fprintf(stderr, "[Server] Job %s done (%d tracks)\n", job->id.c_str(), total_tracks);
 }
 
-// POST /synth[?format=wav16|wav24|wav32]
+// POST /synth
 // returns JSON {"id":"N"} immediately.
 // input:
 //   application/json body        -> single request {} or batch [{req0}, {req1}, ...]
-//   multipart/form-data          -> single request + audio file(s)
-//     part "request":   JSON text
-//     part "audio":     source audio (WAV or MP3)
-//     part "ref_audio": timbre reference audio (WAV or MP3), optional
-// output: audio/mpeg (default) or audio/wav (?format=wav16|wav24|wav32)
-//   batch == 1: raw audio body
-//   batch >  1: multipart/mixed, each part is raw audio
+//   multipart/form-data          -> single request + optional audio or latents
+//     part "request":     JSON text (model selection, output_format, etc.)
+//     part "audio":       source audio (WAV or MP3)
+//     part "src_latents": pre-encoded source latents (raw f32, [T*64]), wins over "audio"
+//     part "ref_audio":   timbre reference audio (WAV or MP3), optional
+//     part "ref_latents": pre-encoded timbre latents (raw f32, [T*64]), wins over "ref_audio"
+// output: multipart/mixed
+//   one audio part (audio/mpeg or audio/wav per request output_format) and
+//   one latent part (application/octet-stream, raw f32 [T*64]) per generated
+//   track, paired in wire order. The latent reproduces its track's audio when
+//   fed back to /vae decode.
 // Batch size = number of JSON objects (after synth_batch_size expansion, clamped to 9).
 // Metadata (seed, duration, etc) is already in the request JSON from /lm.
 static void handle_synth(const httplib::Request & req, httplib::Response & res) {
@@ -767,16 +886,20 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
         return;
     }
 
-    // parse request: plain JSON (single or array) or multipart (JSON + audio file).
+    // parse request: plain JSON (single or array) or multipart (JSON + audio file or src_latents).
     // synth_model, lm_model, adapter, adapter_scale travel inside AceRequest now.
     std::vector<AceRequest> ace_reqs;
     float *                 src_interleaved = nullptr;
     int                     src_len         = 0;
+    std::vector<float>      src_latents;
+    int                     src_T_latent    = 0;
     float *                 ref_interleaved = nullptr;
     int                     ref_len         = 0;
+    std::vector<float>      ref_latents;
+    int                     ref_T_latent = 0;
 
     if (req.is_multipart_form_data()) {
-        // multipart mode: single request + optional audio files
+        // multipart mode: single request + optional audio files or src_latents
         AceRequest ace_req;
 
         std::string json_body;
@@ -791,6 +914,26 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
         if (!request_parse_json(&ace_req, json_body.c_str())) {
             json_error(res, 400, "Multipart: invalid JSON in 'request' part");
             return;
+        }
+
+        // src_latents wins over audio when both are sent: a client that
+        // already cached the latent skips the VAE encode regardless of
+        // whether it also attached the original audio for fallback.
+        if (req.form.has_file("src_latents")) {
+            const auto & file      = req.form.get_file("src_latents");
+            int          http_code = 0;
+            int          T         = latent_payload_validate(file.content.size(), &http_code);
+            if (T < 0) {
+                json_error(res, http_code,
+                           http_code == 413 ? "src_latents exceeds max frames" :
+                                              "src_latents size not a multiple of 64*4 bytes");
+                return;
+            }
+            src_latents.assign(reinterpret_cast<const float *>(file.content.data()),
+                               reinterpret_cast<const float *>(file.content.data()) + (size_t) T * LATENT_CHANNELS);
+            src_T_latent = T;
+            fprintf(stderr, "[Server] Source latents: %d frames (%.2fs), VAE encode skipped\n", T,
+                    (float) T * 1920.0f / 48000.0f);
         }
 
         if (req.form.has_file("audio")) {
@@ -809,6 +952,23 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
             src_interleaved = audio_planar_to_interleaved(planar, T_audio);
             free(planar);
             src_len = T_audio;
+        }
+
+        if (req.form.has_file("ref_latents")) {
+            const auto & file      = req.form.get_file("ref_latents");
+            int          http_code = 0;
+            int          T         = latent_payload_validate(file.content.size(), &http_code);
+            if (T < 0) {
+                json_error(res, http_code,
+                           http_code == 413 ? "ref_latents exceeds max frames" :
+                                              "ref_latents size not a multiple of 64*4 bytes");
+                return;
+            }
+            ref_latents.assign(reinterpret_cast<const float *>(file.content.data()),
+                               reinterpret_cast<const float *>(file.content.data()) + (size_t) T * LATENT_CHANNELS);
+            ref_T_latent = T;
+            fprintf(stderr, "[Server] Reference latents: %d frames (%.2fs), VAE encode skipped\n", T,
+                    (float) T * 1920.0f / 48000.0f);
         }
 
         if (req.form.has_file("ref_audio")) {
@@ -864,10 +1024,11 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
     auto job = job_create();
     fprintf(stderr, "[Server] Job %s created (%d requests)\n", job->id.c_str(), (int) ace_reqs.size());
 
-    work_push([job, reqs = std::move(ace_reqs), src_interleaved, src_len, ref_interleaved, ref_len, output_wav, wav_fmt,
-               peak_clip]() mutable {
-        synth_worker(job, std::move(reqs), src_interleaved, src_len, ref_interleaved, ref_len, output_wav, wav_fmt,
-                     peak_clip);
+    work_push([job, reqs = std::move(ace_reqs), src_interleaved, src_len, src_lat = std::move(src_latents),
+               src_T_latent, ref_interleaved, ref_len, ref_lat = std::move(ref_latents), ref_T_latent, output_wav,
+               wav_fmt, peak_clip]() mutable {
+        synth_worker(job, std::move(reqs), src_interleaved, src_len, std::move(src_lat), src_T_latent, ref_interleaved,
+                     ref_len, std::move(ref_lat), ref_T_latent, output_wav, wav_fmt, peak_clip);
     });
 
     // return job ID immediately
@@ -875,46 +1036,58 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
     res.set_content(body, "application/json");
 }
 
-// understand worker: load LM + tokenizer, run understand, store JSON result in job.
-static void understand_worker(std::shared_ptr<Job> job, AceRequest ace_req, float * src_interleaved, int src_len) {
+// understand worker: load LM + tokenizer, run understand, store JSON result + latent in job.
+static void understand_worker(std::shared_ptr<Job> job,
+                              AceRequest           ace_req,
+                              float *              src_interleaved,
+                              int                  src_len,
+                              std::vector<float>   src_latents,
+                              int                  src_T_latent) {
     if (job->cancel.load()) {
         free(src_interleaved);
-        job->status.store(3);
+        job->status.store(JobStatus::CANCELLED);
         return;
     }
 
-    // Resolve LM + DiT (the DiT path carries the tokenizer weights).
-    std::string        lm_name  = resolve_name(g_registry.lm, ace_req.lm_model, g_loaded_lm);
-    std::string        dit_name = resolve_name(g_registry.dit, ace_req.synth_model, g_loaded_dit);
-    const ModelEntry * lm_entry = registry_find(g_registry.lm, lm_name.c_str());
-    const ModelEntry * dit      = registry_find(g_registry.dit, dit_name.c_str());
-    if (!lm_entry || !dit) {
-        fprintf(stderr, "[Server] LM or DiT not found: lm=%s dit=%s\n", lm_name.c_str(), dit_name.c_str());
+    // Resolve LM + DiT (the DiT path carries the tokenizer weights) + VAE.
+    std::string        lm_name   = resolve_name(g_registry.lm, ace_req.lm_model, g_loaded_lm);
+    std::string        dit_name  = resolve_name(g_registry.dit, ace_req.synth_model, g_loaded_dit);
+    std::string        vae_name  = resolve_name(g_registry.vae, ace_req.vae, g_loaded_vae);
+    const ModelEntry * lm_entry  = registry_find(g_registry.lm, lm_name.c_str());
+    const ModelEntry * dit       = registry_find(g_registry.dit, dit_name.c_str());
+    const ModelEntry * vae_entry = registry_find(g_registry.vae, vae_name.c_str());
+    if (!lm_entry || !dit || !vae_entry) {
+        fprintf(stderr, "[Server] LM, DiT or VAE not found: lm=%s dit=%s vae=%s\n", lm_name.c_str(), dit_name.c_str(),
+                vae_name.c_str());
         free(src_interleaved);
-        job->status.store(2);
+        job->status.store(JobStatus::FAILED);
         return;
     }
 
     AceUnderstandParams p = g_und_params;
     p.model_path          = lm_entry->path.c_str();
     p.dit_path            = dit->path.c_str();
+    p.vae_path            = vae_entry->path.c_str();
 
     AceUnderstand * ctx = ace_understand_load(g_store, &p);
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: understand load failed\n");
         free(src_interleaved);
-        job->status.store(2);
+        job->status.store(JobStatus::FAILED);
         return;
     }
 
-    AceRequest out;
-    int        rc = ace_understand_generate(ctx, src_interleaved, src_len, &ace_req, &out, server_cancel_job,
-                                            (void *) &job->cancel);
+    AceRequest         out;
+    std::vector<float> captured_latent;
+    int                captured_T_latent = 0;
+    const float *      src_lat_ptr       = src_latents.empty() ? nullptr : src_latents.data();
+    int rc = ace_understand_generate(ctx, src_interleaved, src_len, src_lat_ptr, src_T_latent, &ace_req, &out,
+                                     &captured_latent, &captured_T_latent, server_cancel_job, (void *) &job->cancel);
     ace_understand_free(ctx);
     free(src_interleaved);
 
     if (rc != 0) {
-        job->status.store(job->cancel.load() ? 3 : 2);
+        job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::FAILED);
         return;
     }
 
@@ -923,22 +1096,27 @@ static void understand_worker(std::shared_ptr<Job> job, AceRequest ace_req, floa
     if (g_keep_loaded) {
         g_loaded_lm      = lm_name;
         g_loaded_und_dit = dit_name;
+        g_loaded_vae     = vae_name;
     } else {
         g_loaded_lm.clear();
         g_loaded_und_dit.clear();
+        g_loaded_vae.clear();
     }
 
-    job->result_body = "[" + request_to_json(&out) + "]";
-    job->result_mime = "application/json";
-    job->status.store(1);
+    std::string json_part = "[" + request_to_json(&out) + "]";
+    job->result_body      = multipart_build_json_latent(json_part, captured_latent, captured_T_latent);
+    job->result_mime      = MULTIPART_MIME;
+    job->status.store(JobStatus::DONE);
     fprintf(stderr, "[Server] Job %s done (understand)\n", job->id.c_str());
 }
 
 // POST /understand
 // multipart/form-data: full pipeline (audio + optional JSON params)
-//   part "audio":   WAV or MP3 file (required)
-//   part "request": JSON text (optional, for model selection and sampling params)
-// returns: JSON {"id":"N"} immediately.
+//   part "request":     JSON text (optional, for model selection and sampling params)
+//   part "audio":       WAV or MP3 file (required unless src_latents provided)
+//   part "src_latents": pre-encoded latent bytes (raw f32, [T*64])
+// returns: JSON {"id":"N"} immediately. Result is multipart/mixed of one
+// JSON part and one optional latent part.
 static void handle_understand(const httplib::Request & req, httplib::Response & res) {
     if (g_registry.lm.empty() || g_registry.dit.empty() || g_registry.vae.empty()) {
         json_error(res, 501, "Understand requires LM, DiT and VAE models");
@@ -950,7 +1128,7 @@ static void handle_understand(const httplib::Request & req, httplib::Response & 
         return;
     }
 
-    // parse multipart: required "audio" part, optional "request" part for sampling params.
+    // parse multipart: required "audio" or "src_latents" part, optional "request" part for sampling params.
     // synth_model, lm_model, adapter, adapter_scale travel inside AceRequest.
     AceRequest ace_req;
     request_init(&ace_req);
@@ -971,36 +1149,339 @@ static void handle_understand(const httplib::Request & req, httplib::Response & 
         }
     }
 
-    if (!req.form.has_file("audio")) {
-        json_error(res, 400, "Multipart: missing 'audio' part");
-        return;
-    }
-    auto file = req.form.get_file("audio");
-    if (file.content.empty()) {
-        json_error(res, 400, "Multipart: empty 'audio' part");
-        return;
+    std::vector<float> src_latents;
+    int                src_T_latent = 0;
+    if (req.form.has_file("src_latents")) {
+        const auto & file      = req.form.get_file("src_latents");
+        int          http_code = 0;
+        int          T         = latent_payload_validate(file.content.size(), &http_code);
+        if (T < 0) {
+            json_error(
+                res, http_code,
+                http_code == 413 ? "src_latents exceeds max frames" : "src_latents size not a multiple of 64*4 bytes");
+            return;
+        }
+        src_latents.assign(reinterpret_cast<const float *>(file.content.data()),
+                           reinterpret_cast<const float *>(file.content.data()) + (size_t) T * LATENT_CHANNELS);
+        src_T_latent = T;
+        fprintf(stderr, "[Server] Understand source: %d latent frames (%.2fs)\n", T, (float) T * 1920.0f / 48000.0f);
     }
 
-    // decode directly from multipart buffer (WAV/MP3 auto-detected)
-    int     T_audio = 0;
-    float * planar  = audio_read_48k_buf((const uint8_t *) file.content.data(), file.content.size(), &T_audio);
-    if (!planar || T_audio <= 0) {
-        json_error(res, 400, "Failed to decode audio");
-        return;
+    float * src_interleaved = nullptr;
+    int     src_len         = 0;
+    if (req.form.has_file("audio")) {
+        auto file = req.form.get_file("audio");
+        if (file.content.empty()) {
+            json_error(res, 400, "Multipart: empty 'audio' part");
+            return;
+        }
+        // decode directly from multipart buffer (WAV/MP3 auto-detected)
+        int     T_audio = 0;
+        float * planar  = audio_read_48k_buf((const uint8_t *) file.content.data(), file.content.size(), &T_audio);
+        if (!planar || T_audio <= 0) {
+            json_error(res, 400, "Failed to decode audio");
+            return;
+        }
+        fprintf(stderr, "[Server] Understand source: %.2fs @ 48kHz\n", (float) T_audio / 48000.0f);
+        // convert planar [L:T][R:T] to interleaved [L0,R0,L1,R1,...] for pipeline
+        src_interleaved = audio_planar_to_interleaved(planar, T_audio);
+        free(planar);
+        src_len = T_audio;
     }
 
-    fprintf(stderr, "[Server] Understand source: %.2fs @ 48kHz\n", (float) T_audio / 48000.0f);
-
-    // convert planar [L:T][R:T] to interleaved [L0,R0,L1,R1,...] for pipeline
-    float * src_interleaved = audio_planar_to_interleaved(planar, T_audio);
-    free(planar);
-    int src_len = T_audio;
+    if (!src_interleaved && src_T_latent == 0) {
+        json_error(res, 400, "Multipart: missing 'audio' or 'src_latents' part");
+        return;
+    }
 
     auto job = job_create();
     fprintf(stderr, "[Server] Job %s created (understand)\n", job->id.c_str());
 
-    work_push(
-        [job, ace_req, src_interleaved, src_len]() { understand_worker(job, ace_req, src_interleaved, src_len); });
+    request_resolve_lm_seed(&ace_req);
+
+    work_push([job, ace_req, src_interleaved, src_len, latents = std::move(src_latents), src_T_latent]() mutable {
+        understand_worker(job, ace_req, src_interleaved, src_len, std::move(latents), src_T_latent);
+    });
+
+    std::string body = "{\"id\":\"" + job->id + "\"}";
+    res.set_content(body, "application/json");
+}
+
+// decode worker: VAE decode only. Loads the requested VAE from the store,
+// decodes the supplied latents to 48kHz stereo audio, encodes to the
+// requested output format and stores the audio body in the job. The client
+// already holds the latent it just uploaded, so the response carries audio
+// only; no need to echo the input back.
+static void decode_worker(std::shared_ptr<Job> job,
+                          AceRequest           ace_req,
+                          std::vector<float>   src_latents,
+                          int                  src_T_latent,
+                          bool                 output_wav,
+                          WavFormat            wav_fmt,
+                          int                  peak_clip) {
+    if (job->cancel.load()) {
+        job->status.store(JobStatus::CANCELLED);
+        return;
+    }
+
+    std::string        vae_name  = resolve_name(g_registry.vae, ace_req.vae, g_loaded_vae);
+    const ModelEntry * vae_entry = registry_find(g_registry.vae, vae_name.c_str());
+    if (!vae_entry) {
+        fprintf(stderr, "[Server] decode: VAE not found: %s\n", vae_name.c_str());
+        job->status.store(JobStatus::FAILED);
+        return;
+    }
+
+    ModelKey vae_key;
+    vae_key.kind          = MODEL_VAE_DEC;
+    vae_key.path          = vae_entry->path;
+    vae_key.adapter_scale = 1.0f;
+
+    Timer     t_dec;
+    VAEGGML * vae = store_require_vae_dec(g_store, vae_key);
+    if (!vae) {
+        fprintf(stderr, "[Server] decode: store_require_vae_dec failed\n");
+        job->status.store(JobStatus::FAILED);
+        return;
+    }
+    ModelHandle vae_guard(g_store, vae);
+
+    int                T_audio_max = (src_T_latent + 64) * 1920;
+    std::vector<float> audio_buf((size_t) T_audio_max * 2);
+    int T_audio = vae_ggml_decode_tiled(vae, src_latents.data(), src_T_latent, audio_buf.data(), T_audio_max,
+                                        g_synth_params.vae_chunk, g_synth_params.vae_overlap);
+    if (T_audio < 0) {
+        fprintf(stderr, "[Server] decode: vae_ggml_decode_tiled failed\n");
+        job->status.store(JobStatus::FAILED);
+        return;
+    }
+    fprintf(stderr, "[Server] decode: %d latent frames -> %d audio samples (%.2fs), %.0fms\n", src_T_latent, T_audio,
+            (float) T_audio / 48000.0f, t_dec.ms());
+
+    if (g_keep_loaded) {
+        g_loaded_vae = vae_name;
+    } else {
+        g_loaded_vae.clear();
+    }
+
+    // Encode the audio (peak normalize then mp3 or wav). vae_ggml_decode_tiled
+    // writes interleaved stereo, audio_normalize and the encoders consume
+    // the same layout the synth path uses.
+    if (!output_wav || wav_fmt != WAV_F32) {
+        audio_normalize(audio_buf.data(), T_audio * 2, peak_clip);
+    }
+    std::string  encoded;
+    const char * mime = output_wav ? "audio/wav" : "audio/mpeg";
+    if (output_wav) {
+        encoded = audio_encode_wav(audio_buf.data(), T_audio, 48000, wav_fmt);
+    } else {
+        encoded = audio_encode_mp3(audio_buf.data(), T_audio, 48000, ace_req.mp3_bitrate, server_cancel_job,
+                                   (void *) &job->cancel);
+    }
+
+    // Response: raw audio, single Content-Type. No latent in the body: the
+    // client just uploaded it, echoing it back would only burn bandwidth.
+    job->result_body = std::move(encoded);
+    job->result_mime = mime;
+    job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::DONE);
+    fprintf(stderr, "[Server] Job %s done (decode)\n", job->id.c_str());
+}
+
+// encode worker: VAE encode only. Loads the requested VAE encoder, encodes
+// the 48kHz interleaved stereo audio into latents [T_25Hz, 64] time-major
+// and stores the raw f32 buffer in the job. No LM, no FSQ. Mirrors
+// decode_worker, minus the audio codec at the output: the body is raw
+// latent bytes the client caches alongside its source card.
+static void encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, float * src_interleaved, int src_len) {
+    struct buf_guard {
+        float * p;
+
+        ~buf_guard() {
+            if (p) {
+                free(p);
+            }
+        }
+    } buf{ src_interleaved };
+
+    if (job->cancel.load()) {
+        job->status.store(JobStatus::CANCELLED);
+        return;
+    }
+
+    std::string        vae_name  = resolve_name(g_registry.vae, ace_req.vae, g_loaded_vae);
+    const ModelEntry * vae_entry = registry_find(g_registry.vae, vae_name.c_str());
+    if (!vae_entry) {
+        fprintf(stderr, "[Server] encode: VAE not found: %s\n", vae_name.c_str());
+        job->status.store(JobStatus::FAILED);
+        return;
+    }
+
+    ModelKey vae_key;
+    vae_key.kind          = MODEL_VAE_ENC;
+    vae_key.path          = vae_entry->path;
+    vae_key.adapter_scale = 1.0f;
+
+    Timer        t_enc;
+    VAEEncoder * vae = store_require_vae_enc(g_store, vae_key);
+    if (!vae) {
+        fprintf(stderr, "[Server] encode: store_require_vae_enc failed\n");
+        job->status.store(JobStatus::FAILED);
+        return;
+    }
+    ModelHandle vae_guard(g_store, vae);
+
+    // 1 latent frame covers 1920 audio samples, plus a safety tile for the
+    // tiled encoder boundary rounding. Capped at MAX_T_LATENT so oversized
+    // audio never sneaks past the handler-side pre-check.
+    int T_latent_max = src_len / 1920 + 64;
+    if (T_latent_max > MAX_T_LATENT) {
+        T_latent_max = MAX_T_LATENT;
+    }
+    std::vector<float> latent((size_t) T_latent_max * LATENT_CHANNELS);
+    int                T_latent = vae_enc_encode_tiled(vae, src_interleaved, src_len, latent.data(), T_latent_max,
+                                                       g_synth_params.vae_chunk, g_synth_params.vae_overlap);
+    if (T_latent < 0) {
+        fprintf(stderr, "[Server] encode: vae_enc_encode_tiled failed\n");
+        job->status.store(JobStatus::FAILED);
+        return;
+    }
+    fprintf(stderr, "[Server] encode: %d audio samples (%.2fs) -> %d latent frames, %.0fms\n", src_len,
+            (float) src_len / 48000.0f, T_latent, t_enc.ms());
+
+    if (g_keep_loaded) {
+        g_loaded_vae = vae_name;
+    } else {
+        g_loaded_vae.clear();
+    }
+
+    // Response: raw f32 [T_latent, 64] time-major, no header. Single
+    // Content-Type, no multipart: the client still holds the source audio
+    // it just uploaded, only the fresh latents need to travel back.
+    std::string body;
+    body.resize((size_t) T_latent * LATENT_FRAME_BYTES);
+    std::memcpy(body.data(), latent.data(), body.size());
+    job->result_body = std::move(body);
+    job->result_mime = "application/octet-stream";
+    job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::DONE);
+    fprintf(stderr, "[Server] Job %s done (encode)\n", job->id.c_str());
+}
+
+// POST /vae
+// multipart/form-data: single VAE entrypoint, dispatches on which side is
+// supplied in the request body. Symmetric with /synth and /understand on
+// the 'audio or src_latents' input contract, except here they are mutually
+// exclusive (the direction of travel depends on which one you send).
+//   part "audio":       WAV or MP3 source audio -> encode path, latents out.
+//   part "src_latents": pre-encoded latent bytes -> decode path, audio out.
+//   part "request":     JSON text (optional, for VAE selection, output
+//                       format and peak_clip on the decode path).
+// returns: JSON {"id":"N"} immediately. Result body is either raw .vae
+// bytes (application/octet-stream, f32 [T*64] time-major, no header) when
+// audio was sent, or audio/mpeg|audio/wav when src_latents was sent. No
+// echo of the uploaded side: the client already holds it.
+static void handle_vae(const httplib::Request & req, httplib::Response & res) {
+    if (g_registry.vae.empty()) {
+        json_error(res, 501, "VAE endpoint requires a VAE in the registry");
+        return;
+    }
+    if (!req.is_multipart_form_data()) {
+        json_error(res, 400, "VAE endpoint requires multipart/form-data");
+        return;
+    }
+
+    AceRequest ace_req;
+    request_init(&ace_req);
+
+    if (req.form.has_file("request")) {
+        const std::string & json = req.form.get_file("request").content;
+        if (!request_parse_json(&ace_req, json.c_str())) {
+            json_error(res, 400, "Multipart: invalid JSON in 'request' part");
+            return;
+        }
+    } else if (req.form.has_field("request")) {
+        const std::string & json = req.form.get_field("request");
+        if (!request_parse_json(&ace_req, json.c_str())) {
+            json_error(res, 400, "Multipart: invalid JSON in 'request' part");
+            return;
+        }
+    }
+
+    bool has_audio   = req.form.has_file("audio");
+    bool has_latents = req.form.has_file("src_latents");
+    if (has_audio == has_latents) {
+        json_error(res, 400, "Multipart: provide exactly one of 'audio' (encode) or 'src_latents' (decode)");
+        return;
+    }
+
+    if (has_audio) {
+        // encode path: audio in -> raw latents out
+        const auto & file = req.form.get_file("audio");
+        if (file.content.empty()) {
+            json_error(res, 400, "Multipart: empty 'audio' part");
+            return;
+        }
+        int     T_audio = 0;
+        float * planar  = audio_read_48k_buf((const uint8_t *) file.content.data(), file.content.size(), &T_audio);
+        if (!planar || T_audio <= 0) {
+            if (planar) {
+                free(planar);
+            }
+            json_error(res, 400, "Failed to decode audio");
+            return;
+        }
+        if ((int64_t) T_audio / 1920 >= (int64_t) MAX_T_LATENT) {
+            free(planar);
+            json_error(res, 413, "audio exceeds max duration (10 min)");
+            return;
+        }
+        float * src_interleaved = audio_planar_to_interleaved(planar, T_audio);
+        free(planar);
+        int src_len = T_audio;
+
+        auto job = job_create();
+        fprintf(stderr, "[Server] Job %s created (vae encode, %.2fs audio)\n", job->id.c_str(),
+                (float) src_len / 48000.0f);
+
+        work_push([job, ace_req, src_interleaved, src_len]() mutable {
+            encode_worker(job, ace_req, src_interleaved, src_len);
+        });
+
+        std::string body = "{\"id\":\"" + job->id + "\"}";
+        res.set_content(body, "application/json");
+        return;
+    }
+
+    // decode path: raw latents in -> audio out
+    const auto & file      = req.form.get_file("src_latents");
+    int          http_code = 0;
+    int          T         = latent_payload_validate(file.content.size(), &http_code);
+    if (T < 0) {
+        json_error(
+            res, http_code,
+            http_code == 413 ? "src_latents exceeds max frames" : "src_latents size not a multiple of 64*4 bytes");
+        return;
+    }
+    std::vector<float> src_latents(reinterpret_cast<const float *>(file.content.data()),
+                                   reinterpret_cast<const float *>(file.content.data()) + (size_t) T * LATENT_CHANNELS);
+
+    bool      output_wav = false;
+    WavFormat wav_fmt    = WAV_S16;
+    {
+        bool is_mp3 = true;
+        if (!audio_parse_format(ace_req.output_format.c_str(), is_mp3, wav_fmt)) {
+            json_error(res, 400, "Invalid output_format (use: mp3, wav16, wav24, wav32)");
+            return;
+        }
+        output_wav = !is_mp3;
+    }
+    int peak_clip = ace_req.peak_clip;
+
+    auto job = job_create();
+    fprintf(stderr, "[Server] Job %s created (vae decode, %d latent frames)\n", job->id.c_str(), T);
+
+    work_push([job, ace_req, latents = std::move(src_latents), T, output_wav, wav_fmt, peak_clip]() mutable {
+        decode_worker(job, ace_req, std::move(latents), T, output_wav, wav_fmt, peak_clip);
+    });
 
     std::string body = "{\"id\":\"" + job->id + "\"}";
     res.set_content(body, "application/json");
@@ -1044,7 +1525,6 @@ static void handle_props(const httplib::Request &, httplib::Response & res) {
     yyjson_mut_val * cli = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_val(doc, root, "cli", cli);
     yyjson_mut_obj_add_int(doc, cli, "max_batch", g_max_batch);
-    yyjson_mut_obj_add_int(doc, cli, "mp3_bitrate", g_mp3_kbps);
 
     // default: full AceRequest with all defaults from request_init().
     // the webui reads this to populate LM placeholders.
@@ -1104,9 +1584,6 @@ static void usage(const char * prog) {
             "  --vae-chunk <N>         Latent frames per tile (default: %d)\n"
             "  --vae-overlap <N>       Overlap frames per side (default: %d)\n"
             "\n"
-            "Output:\n"
-            "  --mp3-bitrate <kbps>    MP3 bitrate (default: %d)\n"
-            "\n"
             "Server:\n"
             "  --host <addr>           Listen address (default: 127.0.0.1)\n"
             "  --port <N>              Listen port (default: 8080)\n"
@@ -1118,7 +1595,7 @@ static void usage(const char * prog) {
             "  --no-fa                 Disable flash attention\n"
             "  --no-batch-cfg          Split CFG into two separate forwards (LM + DiT)\n"
             "  --clamp-fp16            Clamp hidden states to FP16 range\n",
-            prog, synth_d.vae_chunk, synth_d.vae_overlap, g_mp3_kbps, g_max_batch, lm_d.max_seq);
+            prog, synth_d.vae_chunk, synth_d.vae_overlap, g_max_batch, lm_d.max_seq);
 }
 
 int main(int argc, char ** argv) {
@@ -1150,10 +1627,6 @@ int main(int argc, char ** argv) {
             g_synth_params.vae_overlap = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--keep-loaded")) {
             g_keep_loaded = true;
-
-            // output
-        } else if (!strcmp(argv[i], "--mp3-bitrate") && i + 1 < argc) {
-            g_mp3_kbps = atoi(argv[++i]);
 
             // server
         } else if (!strcmp(argv[i], "--host") && i + 1 < argc) {
@@ -1246,7 +1719,7 @@ int main(int argc, char ** argv) {
     }
     g_lm_params.max_batch = g_max_batch;
 
-    // init understand params (vae for audio encoding, dit resolved per-request)
+    // init understand params (dit + vae resolved per-request)
     ace_understand_default_params(&g_und_params);
     g_und_params.use_fa      = g_lm_params.use_fa;
     g_und_params.use_fsm     = g_lm_params.use_fsm;
@@ -1254,9 +1727,6 @@ int main(int argc, char ** argv) {
     g_und_params.max_batch   = g_lm_params.max_batch;       // must match ace_lm: part of the LM ModelKey
     g_und_params.vae_chunk   = g_synth_params.vae_chunk;    // share --vae-chunk with /synth
     g_und_params.vae_overlap = g_synth_params.vae_overlap;  // share --vae-overlap with /synth
-    if (have_vae) {
-        g_und_params.vae_path = g_registry.vae[0].path.c_str();
-    }
 
     bool have_understand = have_lm && have_dit && have_vae;
 
@@ -1293,6 +1763,7 @@ int main(int argc, char ** argv) {
     svr.Post("/lm", handle_lm);
     svr.Post("/synth", handle_synth);
     svr.Post("/understand", handle_understand);
+    svr.Post("/vae", handle_vae);
     svr.Get("/health", [](const httplib::Request &, httplib::Response & res) {
         res.set_content("{\"status\":\"ok\"}", "application/json");
     });
@@ -1312,7 +1783,7 @@ int main(int argc, char ** argv) {
         }
         // ?result=1: return result body
         if (req.has_param("result") && req.get_param_value("result") == "1") {
-            if (job->status.load() != 1) {
+            if (job->status.load() != JobStatus::DONE) {
                 json_error(res, 404, "Result not ready");
                 return;
             }
@@ -1337,9 +1808,16 @@ int main(int argc, char ** argv) {
         }
         // ?cancel=1: cancel the job
         if (req.has_param("cancel") && req.get_param_value("cancel") == "1") {
-            job->cancel.store(true);
-            fprintf(stderr, "[Server] Cancel requested for job %s\n", job->id.c_str());
-            res.set_content("{\"status\":\"cancelled\"}", "application/json");
+            JobStatus status = job->status.load();
+            if (status == JobStatus::RUNNING) {
+                job->cancel.store(true);
+                fprintf(stderr, "[Server] Cancel requested for job %s\n", job->id.c_str());
+                status = JobStatus::CANCELLED;
+            }
+            std::string body = "{\"status\":\"";
+            body += job_status_str(status);
+            body += "\"}";
+            res.set_content(body, "application/json");
             return;
         }
         json_error(res, 400, "Unknown action");
