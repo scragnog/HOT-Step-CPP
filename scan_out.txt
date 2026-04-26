@@ -1,0 +1,322 @@
+[
+    {
+        "name": "Ample Bass P",
+        "vendor": "Ample Sound",
+        "version": "3.6.0",
+        "path": "C:/Program Files/Common Files/VST3/ABP.vst3",
+        "uid": "56535441627074616D706C6520626173",
+        "subcategories": "Instrument|Synth"
+    },
+    {
+        "name": "Guitar Rig 7",
+        "vendor": "Native Instruments",
+        "version": "7.0.2 (R0)",
+        "path": "C:/Program Files/Common Files/VST3/Guitar Rig 7.vst3",
+        "uid": "5653544E692454677569746172207269",
+        "subcategories": "Fx"
+    },
+    {
+        "name": "RipLink",
+        "vendor": "Hit'n'Mix",
+        "version": "4.9.4.0",
+        "path": "C:/Program Files/Common Files/VST3/Hit'n'Mix/RipX/RipLink.vst/Contents/x86_64-win/RipLink.vst3",
+        "uid": "13C96798847B493EA30E1752B8D98484",
+        "subcategories": "Fx|OnlyARA"
+    },
+    {
+        "name": "Ozone 10 Dynamic EQ",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Dynamic EQ.vst3",
+        "uid": "5653545A6E595A4F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 10 Dynamics",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Dynamics.vst3",
+        "uid": "5653545A6E445A4F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 10 Equalizer",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Equalizer.vst3",
+        "uid": "5653545A4F5A554F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 10 Exciter",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Exciter.vst3",
+        "uid": "5653545A4F5A584F7A6F6E652050726F",
+        "subcategories": "Fx|Distortion"
+    },
+    {
+        "name": "Ozone 10 Imager",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Imager.vst3",
+        "uid": "5653545A6E495A4F7A6F6E652050726F",
+        "subcategories": "Fx|Spatial"
+    },
+    {
+        "name": "Ozone 10 Impact",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Impact.vst3",
+        "uid": "5653545A6E4F494F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 10 Low End Focus",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Low End Focus.vst3",
+        "uid": "5653545A4F5A4C4F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 10 Master Rebalance",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Master Rebalance.vst3",
+        "uid": "5653545A4F5A524F7A6F6E652050726F",
+        "subcategories": "Fx|Mastering"
+    },
+    {
+        "name": "Ozone 10 Match EQ",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Match EQ.vst3",
+        "uid": "5653545A4F5A484F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 10 Maximizer",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Maximizer.vst3",
+        "uid": "5653545A4F5A4D4F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 10 Spectral Shaper",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Spectral Shaper.vst3",
+        "uid": "5653545A4F5A534F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 10 Stabilizer",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Stabilizer.vst3",
+        "uid": "5653545A6E4F534F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 10 Vintage Compressor",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Vintage Compressor.vst3",
+        "uid": "5653545A4F5A434F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 10 Vintage EQ",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Vintage EQ.vst3",
+        "uid": "5653545A4F5A514F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 10 Vintage Limiter",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Vintage Limiter.vst3",
+        "uid": "5653545A4F5A564F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 10 Vintage Tape",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10 Vintage Tape.vst3",
+        "uid": "5653545A4F5A544F7A6F6E652050726F",
+        "subcategories": "Fx|Distortion|Dynamics"
+    },
+    {
+        "name": "Ozone 10",
+        "vendor": "iZotope",
+        "version": "10.1.1",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 10.vst3",
+        "uid": "5653545A6E4F5A4F7A6F6E652050726F",
+        "subcategories": "Fx|Mastering"
+    },
+    {
+        "name": "Ozone 11 Clarity",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Clarity.vst3",
+        "uid": "5653545A41434C4F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 11 Dynamic EQ",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Dynamic EQ.vst3",
+        "uid": "5653545A41595A4F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 11 Dynamics",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Dynamics.vst3",
+        "uid": "5653545A41445A4F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 11 Equalizer",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Equalizer.vst3",
+        "uid": "5653545A415A554F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 11 Exciter",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Exciter.vst3",
+        "uid": "5653545A415A584F7A6F6E652050726F",
+        "subcategories": "Fx|Distortion"
+    },
+    {
+        "name": "Ozone 11 Imager",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Imager.vst3",
+        "uid": "5653545A41495A4F7A6F6E652050726F",
+        "subcategories": "Fx|Spatial"
+    },
+    {
+        "name": "Ozone 11 Impact",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Impact.vst3",
+        "uid": "5653545A414F494F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 11 Low End Focus",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Low End Focus.vst3",
+        "uid": "5653545A415A4C4F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 11 Master Rebalance",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Master Rebalance.vst3",
+        "uid": "5653545A415A524F7A6F6E652050726F",
+        "subcategories": "Fx|Mastering"
+    },
+    {
+        "name": "Ozone 11 Match EQ",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Match EQ.vst3",
+        "uid": "5653545A415A484F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 11 Maximizer",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Maximizer.vst3",
+        "uid": "5653545A415A4D4F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 11 Spectral Shaper",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Spectral Shaper.vst3",
+        "uid": "5653545A415A534F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 11 Stabilizer",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Stabilizer.vst3",
+        "uid": "5653545A414F534F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 11 Vintage Compressor",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Vintage Compressor.vst3",
+        "uid": "5653545A415A434F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 11 Vintage EQ",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Vintage EQ.vst3",
+        "uid": "5653545A415A514F7A6F6E652050726F",
+        "subcategories": "Fx|EQ"
+    },
+    {
+        "name": "Ozone 11 Vintage Limiter",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Vintage Limiter.vst3",
+        "uid": "5653545A415A564F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 11 Vintage Tape",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11 Vintage Tape.vst3",
+        "uid": "5653545A415A544F7A6F6E652050726F",
+        "subcategories": "Fx|Dynamics"
+    },
+    {
+        "name": "Ozone 11",
+        "vendor": "iZotope",
+        "version": "11.2.0",
+        "path": "C:/Program Files/Common Files/VST3/iZotope/Ozone 11.vst3",
+        "uid": "5653545A414F5A4F7A6F6E6500000000",
+        "subcategories": "Fx|Mastering"
+    },
+    {
+        "name": "Stems",
+        "vendor": "Moises",
+        "version": "1.0.5",
+        "path": "C:/Program Files/Common Files/VST3/Stems.vst3",
+        "uid": "ABCDEF019182FAEB4D7379694D303031",
+        "subcategories": "Instrument"
+    },
+    {
+        "name": "VocalRider",
+        "vendor": "casa occidente",
+        "version": "0.0.1",
+        "path": "C:/Program Files/Common Files/VST3/VocalRider.vst3",
+        "uid": "ABCDEF019182FAEB4D616E754E647579",
+        "subcategories": "Fx"
+    }
+]

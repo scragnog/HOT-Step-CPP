@@ -54,6 +54,8 @@ static FUnknown* gHostContext = nullptr;
 static void init_host_context() {
     if (!gHostContext) {
         gHostContext = new HostApplication();
+        // Set the global plugin context so PlugProvider passes it to IComponent::initialize()
+        PluginContextFactory::instance().setPluginContext(gHostContext);
 #ifdef _WIN32
         // Suppress crash/error dialogs during plugin loading
         SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
@@ -76,23 +78,17 @@ static int cmd_scan() {
     yyjson_mut_doc_set_root(doc, root);
 
     for (const auto & path : paths) {
-        fprintf(stderr, "[vst-host]   Probing: %s ... ", path.c_str());
-        fflush(stderr);
-
         std::string error;
         VST3::Hosting::Module::Ptr module;
 
         try {
             module = VST3::Hosting::Module::create(path, error);
         } catch (...) {
-            fprintf(stderr, "EXCEPTION\n");
             continue;
         }
 
-        if (!module) {
-            fprintf(stderr, "FAIL (%s)\n", error.c_str());
-            continue;
-        }
+        if (!module) continue;
+
 
         auto & factory = module->getFactory();
         auto classInfos = factory.classInfos();
@@ -115,23 +111,21 @@ static int cmd_scan() {
         fprintf(stderr, "OK (%d effects)\n", audio_effects);
     }
 
-    fprintf(stderr, "[vst-host] JSON array has %zu entries\n",
-            yyjson_mut_arr_size(root));
-
     size_t json_len = 0;
     char * json = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, &json_len);
-    fprintf(stderr, "[vst-host] JSON write: ptr=%p len=%zu\n", (void*)json, json_len);
     if (json && json_len > 0) {
-        // Write directly using low-level I/O to avoid plugin stdout corruption
+#ifdef _WIN32
         HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
         DWORD written = 0;
         WriteFile(hStdout, json, (DWORD)json_len, &written, nullptr);
         WriteFile(hStdout, "\n", 1, &written, nullptr);
         FlushFileBuffers(hStdout);
-        fprintf(stderr, "[vst-host] Wrote %lu bytes to stdout\n", written);
+#else
+        fputs(json, stdout);
+        fputs("\n", stdout);
+        fflush(stdout);
+#endif
         free(json);
-    } else {
-        fprintf(stderr, "[vst-host] ERROR: yyjson_mut_write returned null!\n");
     }
     yyjson_mut_doc_free(doc);
     return 0;

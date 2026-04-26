@@ -1,0 +1,3 @@
+[WAV] Read buffer: 12288000 samples, 48000 Hz, 2 ch, 32 bit
+[vst-host] Input: 12288000 samples @ 48000 Hz (256.0 sec)
+[vst-host] Output written: d:\Ace-Step-Latest\hot-step-cpp\test_vst_output.wav
