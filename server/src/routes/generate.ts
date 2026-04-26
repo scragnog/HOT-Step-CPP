@@ -19,6 +19,7 @@ import { config } from '../config.js';
 import { getUserId } from './auth.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
 import { runMastering } from './mastering.js';
+import { applyVstChain } from './vst.js';
 import { subscribeLines, pushLog } from './logs.js';
 
 const router = Router();
@@ -546,6 +547,28 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     const duration = firstResult.duration || 0;
     const keyScale = firstResult.keyscale || '';
     const timeSignature = firstResult.timesignature || '';
+
+    // ── Post-generation VST chain ──
+    const vstChainEnabled = true; // VST chain applies if any plugins are active (checked inside)
+    if (vstChainEnabled) {
+      try {
+        job.stage = 'Applying VST effects...';
+        job.progress = 91;
+        for (const audioUrl of audioUrls) {
+          const audioFilename = path.basename(audioUrl);
+          const wavPath = path.join(config.data.audioDir, audioFilename);
+          if (wavPath.endsWith('.wav')) {
+            const applied = await applyVstChain(wavPath);
+            if (applied) {
+              logGeneration(job.id, 'INFO', `[VST] Chain applied to ${audioFilename}`);
+            }
+          }
+        }
+      } catch (vstErr: any) {
+        logGeneration(job.id, 'WARNING', `[VST] Chain failed (non-fatal): ${vstErr.message}`);
+        console.warn(`[VST] Non-fatal chain error:`, vstErr.message);
+      }
+    }
 
     // ── Post-generation mastering ──
     let masteredAudioUrl = '';
