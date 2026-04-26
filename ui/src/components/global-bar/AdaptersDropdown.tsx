@@ -302,8 +302,11 @@ export const AdaptersDropdown: React.FC = () => {
                 </button>
               </div>
               {GROUP_INFO.map(({ key, label, help }) => (
-                <Slider key={key} label={label} value={gp.adapterGroupScales[key]}
-                  onChange={v => handleGroupScaleChange(key, v)} min={0} max={4} step={0.05} showInput />
+                <div key={key}>
+                  <Slider label={label} value={gp.adapterGroupScales[key]}
+                    onChange={v => handleGroupScaleChange(key, v)} min={0} max={4} step={0.05} showInput />
+                  <p className="text-[10px] text-zinc-600 mt-0.5 -mb-1">{help}</p>
+                </div>
               ))}
             </div>
           )}
