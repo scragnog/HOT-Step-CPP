@@ -257,6 +257,7 @@ router.post('/process', async (req, res) => {
 
 let monitorProcess: ChildProcess | null = null;
 const monitorControlFile = () => path.join(config.vst.statesDir, 'monitor_control.json');
+const monitorStatusFile  = () => path.join(config.vst.statesDir, 'monitor_status.json');
 
 function writeMonitorControl(data: Record<string, unknown>): void {
   fs.writeFileSync(monitorControlFile(), JSON.stringify(data), 'utf-8');
@@ -351,6 +352,7 @@ router.post('/monitor/start', (req, res) => {
     '--chain', tempChainFile,
     '--input', absTrackPath,
     '--control', monitorControlFile(),
+    '--status', monitorStatusFile(),
   ], {
     stdio: ['ignore', 'ignore', 'pipe'],
   });
@@ -415,9 +417,47 @@ router.post('/monitor/switch', (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /monitor/status — Is the monitor running?
+// GET /monitor/status — Is the monitor running? Returns position too.
 router.get('/monitor/status', (_req, res) => {
-  res.json({ running: isMonitorAlive(), pid: monitorProcess?.pid || null });
+  const running = isMonitorAlive();
+  let position = 0;
+  let duration = 0;
+  if (running) {
+    try {
+      const statusPath = monitorStatusFile();
+      if (fs.existsSync(statusPath)) {
+        const raw = fs.readFileSync(statusPath, 'utf-8');
+        const data = JSON.parse(raw);
+        position = data.position || 0;
+        duration = data.duration || 0;
+      }
+    } catch { /* ignore parse errors */ }
+  }
+  res.json({ running, pid: monitorProcess?.pid || null, position, duration });
+});
+
+// POST /monitor/seek — Seek to a position in seconds
+router.post('/monitor/seek', (req, res) => {
+  const { position } = req.body;
+  if (typeof position !== 'number') {
+    res.status(400).json({ error: 'position (number) required' });
+    return;
+  }
+  if (!isMonitorAlive()) {
+    res.status(400).json({ error: 'Monitor is not running' });
+    return;
+  }
+
+  // Read current control file and add seek field
+  let controlData: Record<string, unknown> = { action: 'play' };
+  try {
+    const raw = fs.readFileSync(monitorControlFile(), 'utf-8');
+    controlData = JSON.parse(raw);
+  } catch { /* start fresh */ }
+  controlData.seek = position;
+  writeMonitorControl(controlData);
+
+  res.json({ ok: true, position });
 });
 
 

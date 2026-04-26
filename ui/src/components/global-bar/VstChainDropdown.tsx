@@ -12,6 +12,13 @@ import { useVstChainStore } from '../../stores/vstChainStore';
 import { usePlayback, togglePlay } from '../../stores/playbackStore';
 import type { VstPlugin } from '../../services/api';
 
+// Format seconds as mm:ss
+function formatTime(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
 // ── Plugin Search Dropdown ──────────────────────────────────
 
 const PluginSearch: React.FC<{ onClose: () => void }> = ({ onClose }) => {
@@ -183,7 +190,11 @@ const ChainRow: React.FC<{
 // ── Main Dropdown ───────────────────────────────────────────
 
 export const VstChainDropdown: React.FC = () => {
-  const { chain, chainLoaded, loadChain, monitoring, startMonitor, stopMonitor, pollMonitorStatus } = useVstChainStore();
+  const {
+    chain, chainLoaded, loadChain, monitoring,
+    startMonitor, stopMonitor, pollMonitorStatus,
+    monitorPosition, monitorDuration, seekMonitor,
+  } = useVstChainStore();
   const { currentTrack, isPlaying } = usePlayback();
   const [showSearch, setShowSearch] = useState(false);
 
@@ -191,10 +202,10 @@ export const VstChainDropdown: React.FC = () => {
     if (!chainLoaded) loadChain();
   }, [chainLoaded, loadChain]);
 
-  // Poll monitor status while monitoring
+  // Poll monitor status while monitoring (300ms for smooth transport)
   useEffect(() => {
     if (!monitoring) return;
-    const id = setInterval(() => pollMonitorStatus(), 2000);
+    const id = setInterval(() => pollMonitorStatus(), 300);
     return () => clearInterval(id);
   }, [monitoring, pollMonitorStatus]);
 
@@ -258,6 +269,28 @@ export const VstChainDropdown: React.FC = () => {
             </>
           )}
         </button>
+      )}
+
+      {/* Transport bar during monitoring */}
+      {monitoring && monitorDuration > 0 && (
+        <div className="space-y-1">
+          <input
+            type="range"
+            min={0}
+            max={monitorDuration}
+            step={0.5}
+            value={monitorPosition}
+            onChange={e => seekMonitor(parseFloat(e.target.value))}
+            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+            style={{
+              background: `linear-gradient(to right, rgb(139 92 246) ${(monitorPosition / monitorDuration) * 100}%, rgb(63 63 70) ${(monitorPosition / monitorDuration) * 100}%)`,
+            }}
+          />
+          <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
+            <span>{formatTime(monitorPosition)}</span>
+            <span>{formatTime(monitorDuration)}</span>
+          </div>
+        </div>
       )}
 
       {/* Add plugin */}

@@ -242,5 +242,8 @@ export const vstApi = {
     post<{ ok: boolean }>('/vst/monitor/switch', { trackPath }),
   /** Get monitor status */
   monitorStatus: () =>
-    get<{ running: boolean; pid: number | null }>('/vst/monitor/status'),
+    get<{ running: boolean; pid: number | null; position: number; duration: number }>('/vst/monitor/status'),
+  /** Seek monitor to a position */
+  monitorSeek: (position: number) =>
+    post<{ ok: boolean }>('/vst/monitor/seek', { position }),
 };

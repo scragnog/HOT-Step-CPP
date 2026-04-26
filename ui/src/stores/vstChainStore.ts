@@ -18,6 +18,8 @@ interface VstChainState {
 
   // Monitor (real-time playback)
   monitoring: boolean;
+  monitorPosition: number;
+  monitorDuration: number;
 
   // Actions
   scanPlugins: () => Promise<void>;
@@ -31,6 +33,7 @@ interface VstChainState {
   startMonitor: (trackPath: string) => Promise<void>;
   stopMonitor: () => Promise<void>;
   switchMonitorTrack: (trackPath: string) => Promise<void>;
+  seekMonitor: (position: number) => Promise<void>;
   pollMonitorStatus: () => Promise<void>;
 }
 
@@ -41,6 +44,8 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
   chain: [],
   chainLoaded: false,
   monitoring: false,
+  monitorPosition: 0,
+  monitorDuration: 0,
 
   scanPlugins: async () => {
     set({ scanning: true, scanError: null });
@@ -166,12 +171,20 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
     }
   },
 
+  seekMonitor: async (position: number) => {
+    try {
+      await vstApi.monitorSeek(position);
+    } catch (err) {
+      console.error('[VST] Failed to seek monitor:', err);
+    }
+  },
+
   pollMonitorStatus: async () => {
     try {
-      const { running } = await vstApi.monitorStatus();
-      set({ monitoring: running });
+      const { running, position, duration } = await vstApi.monitorStatus();
+      set({ monitoring: running, monitorPosition: position, monitorDuration: duration });
     } catch {
-      set({ monitoring: false });
+      set({ monitoring: false, monitorPosition: 0, monitorDuration: 0 });
     }
   },
 }));

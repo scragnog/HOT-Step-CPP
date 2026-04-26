@@ -601,6 +601,7 @@ struct MonitorState {
 
     // Control
     std::string control_file;
+    std::string status_file;
     std::string current_track;
     FILETIME    control_mtime = {};
     bool        running = true;
@@ -669,6 +670,17 @@ static void monitor_check_control(MonitorState & ms) {
             monitor_load_track(ms, track);
         }
     }
+
+    // Seek support: { "seek": 42.5 } = jump to 42.5 seconds
+    yyjson_val * seek_val = yyjson_obj_get(root, "seek");
+    if (seek_val && yyjson_is_num(seek_val)) {
+        double seek_sec = yyjson_get_real(seek_val);
+        int new_pos = (int)(seek_sec * ms.sr);
+        if (new_pos < 0) new_pos = 0;
+        if (new_pos >= ms.T) new_pos = ms.T - 1;
+        ms.pos = new_pos;
+    }
+
     yyjson_doc_free(doc);
 }
 
@@ -749,7 +761,7 @@ static LRESULT CALLBACK MonitorWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
 }
 
 static int cmd_monitor(const char * chain_json_path, const char * input_path,
-                        const char * control_path) {
+                        const char * control_path, const char * status_path) {
     init_host_context();
 
     // Parse chain JSON
@@ -783,6 +795,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
     // Setup monitor state
     MonitorState ms;
     ms.control_file = control_path ? control_path : "";
+    ms.status_file  = status_path  ? status_path  : "";
 
     // Load initial track
     if (!monitor_load_track(ms, input_path)) return 1;
@@ -935,6 +948,26 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
             controlCheckTick = now;
             monitor_check_control(ms);
         }
+
+        // Write status file periodically (~200ms) for UI position display
+        static DWORD statusTick = 0;
+        if (!ms.status_file.empty() && now - statusTick > 200) {
+            statusTick = now;
+            double pos_sec = (ms.sr > 0) ? (double)ms.pos / ms.sr : 0;
+            double dur_sec = (ms.sr > 0) ? (double)ms.T / ms.sr : 0;
+            char sbuf[256];
+            snprintf(sbuf, sizeof(sbuf),
+                     "{\"position\":%.2f,\"duration\":%.2f,\"loop\":%s}",
+                     pos_sec, dur_sec, ms.loop ? "true" : "false");
+            HANDLE hStatus = CreateFileA(ms.status_file.c_str(), GENERIC_WRITE,
+                                         FILE_SHARE_READ, nullptr,
+                                         CREATE_ALWAYS, 0, nullptr);
+            if (hStatus != INVALID_HANDLE_VALUE) {
+                DWORD written;
+                WriteFile(hStatus, sbuf, (DWORD)strlen(sbuf), &written, nullptr);
+                CloseHandle(hStatus);
+            }
+        }
     }
 
     // ── Cleanup ──
@@ -973,7 +1006,7 @@ static void usage(const char * prog) {
     fprintf(stderr, "  %s --gui --plugin <path.vst3> [--state <file>]\n", prog);
     fprintf(stderr, "  %s --process --plugin <path.vst3> --input <in.wav> --output <out.wav> [--state <file>]\n", prog);
     fprintf(stderr, "  %s --process-chain --chain <chain.json> --input <in.wav> --output <out.wav>\n", prog);
-    fprintf(stderr, "  %s --monitor --chain <chain.json> --input <in.wav> [--control <file>]\n", prog);
+    fprintf(stderr, "  %s --monitor --chain <chain.json> --input <in.wav> [--control <file>] [--status <file>]\n", prog);
 }
 
 int main(int argc, char * argv[]) {
@@ -986,6 +1019,7 @@ int main(int argc, char * argv[]) {
     const char * state   = nullptr;
     const char * chain   = nullptr;
     const char * control = nullptr;
+    const char * status  = nullptr;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--scan"))          mode = "scan";
@@ -999,6 +1033,7 @@ int main(int argc, char * argv[]) {
         else if (!strcmp(argv[i], "--state")   && i+1 < argc)  state   = argv[++i];
         else if (!strcmp(argv[i], "--chain")   && i+1 < argc)  chain   = argv[++i];
         else if (!strcmp(argv[i], "--control") && i+1 < argc)  control = argv[++i];
+        else if (!strcmp(argv[i], "--status")  && i+1 < argc)  status  = argv[++i];
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage(argv[0]); return 0;
         }
@@ -1038,7 +1073,7 @@ int main(int argc, char * argv[]) {
             fprintf(stderr, "Error: --chain, --input required for monitor\n");
             return 1;
         }
-        return cmd_monitor(chain, input, control);
+        return cmd_monitor(chain, input, control, status);
 #else
         fprintf(stderr, "Error: Monitor mode only supported on Windows\n");
         return 1;
