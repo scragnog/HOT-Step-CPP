@@ -24,12 +24,18 @@ struct AdapterGroupScales {
 // Classify a GGUF tensor name into its adapter group.
 // Returns "self_attn", "cross_attn", "mlp", "cond_embed", or "" for unclassified.
 //
-// NOTE: These patterns intentionally replicate the Python hot-step-9000
-// _determine_group() behaviour (.attn. / .ff. patterns) for parity with
-// the settings users have been tuning against.
+// ACE-Step v1.5 GGUF tensor naming:
+//   decoder.layers.N.self_attn.{q,k,v,o}_proj.weight  → self_attn
+//   decoder.layers.N.cross_attn.{q,k,v,o}_proj.weight → cross_attn
+//   decoder.layers.N.mlp.{gate,up,down}_proj.weight    → mlp
+//   decoder.condition_embedder.weight                  → cond_embed
+//
+// NOTE: cross_attn must be checked BEFORE the generic .attn. pattern.
+// .ff. is kept alongside .mlp. for backward compat with older model variants.
 static inline std::string adapter_determine_group(const std::string & name) {
     if (name.find("cross_attn")      != std::string::npos) return "cross_attn";
     if (name.find(".attn.")          != std::string::npos) return "self_attn";
+    if (name.find(".mlp.")           != std::string::npos) return "mlp";
     if (name.find(".ff.")            != std::string::npos) return "mlp";
     if (name.find("condition_embed") != std::string::npos) return "cond_embed";
     return "";
