@@ -179,7 +179,7 @@ int ops_resolve_params(const AceSynth * ctx, const AceRequest * reqs, int batch_
 
     if (s.guidance_scale <= 0.0f) {
         s.guidance_scale = 1.0f;
-    } else if (ctx->meta->is_turbo && s.guidance_scale > 1.0f) {
+    } else if (ctx->meta->is_turbo && !ctx->meta->is_merge && s.guidance_scale > 1.0f) {
         fprintf(stderr, "[Resolve-Params] WARNING: turbo model, forcing guidance_scale=1.0 (was %.1f)\n",
                 s.guidance_scale);
         s.guidance_scale = 1.0f;

@@ -94,7 +94,9 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
     ctx->vae_dec_key.kind = MODEL_VAE_DEC;
     ctx->vae_dec_key.path = params->vae_path;
 
-    fprintf(stderr, "[Synth-Load] Ready: turbo=%s, fa=%s, batch_cfg=%s\n", ctx->meta->is_turbo ? "yes" : "no",
+    fprintf(stderr, "[Synth-Load] Ready: turbo=%s, merge=%s, fa=%s, batch_cfg=%s\n",
+            ctx->meta->is_turbo ? "yes" : "no",
+            ctx->meta->is_merge ? "yes" : "no",
             params->use_fa ? "yes" : "no", params->use_batch_cfg ? "yes" : "no");
     if (params->clamp_fp16) {
         fprintf(stderr, "[Synth-Load] FP16 clamp enabled\n");
