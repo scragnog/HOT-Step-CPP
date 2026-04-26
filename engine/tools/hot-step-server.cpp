@@ -971,15 +971,17 @@ static void synth_worker(std::shared_ptr<Job>    job,
         if (!audio[b].samples) {
             continue;
         }
-        // HOT-Step: Post-VAE spectral denoiser. Runs on the raw planar
-        // stereo buffer before normalization to remove VAE fuzz/fizz.
+        // Normalize first: the noise profile was computed from normalized audio
+        // (peak ≈ 1.0), so the denoiser must run at normalized levels to match.
+        if (!output_wav || wav_fmt != WAV_F32) {
+            audio_normalize(audio[b].samples, audio[b].n_samples * 2, peak_clip);
+        }
+        // HOT-Step: Post-VAE spectral denoiser. Runs on the normalized planar
+        // stereo buffer to remove VAE fuzz/fizz using the noise profile.
         if (sf.denoise_strength > 0.0f) {
             audio_denoise(audio[b].samples, audio[b].n_samples, 48000,
                           sf.denoise_strength, sf.denoise_smoothing, sf.denoise_mix,
                           g_noise_profile.valid ? &g_noise_profile : nullptr);
-        }
-        if (!output_wav || wav_fmt != WAV_F32) {
-            audio_normalize(audio[b].samples, audio[b].n_samples * 2, peak_clip);
         }
         if (output_wav) {
             encoded[b] = audio_encode_wav(audio[b].samples, audio[b].n_samples, 48000, wav_fmt);
