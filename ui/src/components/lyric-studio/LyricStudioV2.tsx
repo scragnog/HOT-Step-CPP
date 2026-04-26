@@ -32,6 +32,7 @@ import type { TabId } from './ContentTabs';
 import { SourceLyricsTab } from './SourceLyricsTab';
 import { ProfilesTab } from './ProfilesTab';
 import { WrittenSongsTab } from './WrittenSongsTab';
+import { RecordingsTab } from './RecordingsTab';
 import { RightSidebarPanel } from './RightSidebarPanel';
 import { useAudioGeneration } from './useAudioGeneration';
 import { enqueueAudioGen, useAudioGenQueue } from '../../stores/audioGenQueueStore';
@@ -56,7 +57,7 @@ function buildUrl(artistId?: number, albumId?: number, tab?: TabId): string {
 }
 
 function parseUrl(path: string): { artistId?: number; albumId?: number; tab?: TabId } {
-  const m = path.match(/\/lyric-studio\/artist\/(\d+)(?:\/album\/(\d+)(?:\/(source-lyrics|profiles|written-songs))?)?/);
+  const m = path.match(/\/lyric-studio\/artist\/(\d+)(?:\/album\/(\d+)(?:\/(source-lyrics|profiles|written-songs|recordings))?)?/);
   if (!m) return {};
   return {
     artistId: Number(m[1]),
@@ -715,7 +716,7 @@ export const LyricStudioV2: React.FC = () => {
                 <div className="relative z-[1] h-full">
                   <ContentTabs activeTab={activeTab} onTabChange={handleTabChange}
                     sourceLyricsCount={sourceLyricsCount} profilesCount={profiles.length}
-                    writtenSongsCount={generations.length}>
+                    writtenSongsCount={generations.length} recordingsCount={songCount}>
                     {activeTab === 'source-lyrics' && (
                       <SourceLyricsTab album={nav.selectedAlbum} onDeleteSong={handleDeleteSong}
                         onEditSong={handleEditSong} onAddSong={() => setAddSongModalOpen(true)} />
@@ -729,9 +730,25 @@ export const LyricStudioV2: React.FC = () => {
                       <WrittenSongsTab generations={generations} profiles={profiles}
                         onRefresh={refreshAlbumData} onGenerateAudio={handleGenerateAudio}
                         onSendToCreate={handleSendToCreate}
-                        onViewRecordings={(genId) => setRecordingsFilter(genId)}
+                        onViewRecordings={(genId) => {
+                          setRecordingsFilter(genId);
+                          setActiveTab('recordings');
+                          pushUrl(nav.selectedArtist?.id, nav.selectedAlbum?.id, 'recordings');
+                        }}
                         showToast={showToast} generationModel={loadSelections().generation}
                         refinementModel={loadSelections().refinement} />
+                    )}
+                    {activeTab === 'recordings' && (
+                      <RecordingsTab
+                        generations={generations}
+                        showToast={showToast}
+                        filterGenerationId={recordingsFilter}
+                        onClearFilter={() => setRecordingsFilter(null)}
+                        onSongCountChange={setSongCount}
+                        refreshKey={recordingsRefreshKey}
+                        artistName={nav.selectedArtist?.name}
+                        onDeleteComplete={() => setRecordingsRefreshKey(k => k + 1)}
+                      />
                     )}
                   </ContentTabs>
                 </div>
@@ -748,11 +765,9 @@ export const LyricStudioV2: React.FC = () => {
               {/* Right: sidebar panel */}
               <div className="flex-shrink-0 border-l border-white/5 overflow-hidden flex flex-col relative" style={{ width: lsRightPanelWidth }}>
                 <div className="relative z-[1] flex-1 min-h-0 overflow-hidden">
-                  <RightSidebarPanel navLevel="album-detail" generations={generations}
+                  <RightSidebarPanel navLevel="album-detail"
                     showToast={showToast}
-                    recordingsFilter={recordingsFilter} onClearRecordingsFilter={() => setRecordingsFilter(null)}
-                    onSongCountChange={setSongCount} recordingsRefreshKey={recordingsRefreshKey}
-                    artistName={nav.selectedArtist?.name} compact={compactRight} />
+                    recordingsRefreshKey={recordingsRefreshKey} compact={compactRight} />
                 </div>
               </div>
             </div>

@@ -1,7 +1,7 @@
 import React from 'react';
-import { FileText, Users, Music2 } from 'lucide-react';
+import { FileText, Users, Music2, Headphones } from 'lucide-react';
 
-export type TabId = 'source-lyrics' | 'profiles' | 'written-songs';
+export type TabId = 'source-lyrics' | 'profiles' | 'written-songs' | 'recordings';
 
 interface Tab {
   id: TabId;
@@ -16,16 +16,18 @@ interface ContentTabsProps {
   sourceLyricsCount?: number;
   profilesCount?: number;
   writtenSongsCount?: number;
+  recordingsCount?: number;
   children: React.ReactNode;
 }
 
 export const ContentTabs: React.FC<ContentTabsProps> = ({
-  activeTab, onTabChange, sourceLyricsCount, profilesCount, writtenSongsCount, children,
+  activeTab, onTabChange, sourceLyricsCount, profilesCount, writtenSongsCount, recordingsCount, children,
 }) => {
   const tabs: Tab[] = [
     { id: 'source-lyrics', label: 'Source Lyrics', icon: <FileText className="w-4 h-4" />, badge: sourceLyricsCount },
     { id: 'profiles', label: 'Profiles', icon: <Users className="w-4 h-4" />, badge: profilesCount },
     { id: 'written-songs', label: 'Generated Lyrics', icon: <Music2 className="w-4 h-4" />, badge: writtenSongsCount },
+    { id: 'recordings', label: 'Generated Songs', icon: <Headphones className="w-4 h-4" />, badge: recordingsCount },
   ];
 
   return (

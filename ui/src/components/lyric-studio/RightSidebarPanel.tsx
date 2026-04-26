@@ -1,18 +1,15 @@
 /**
  * RightSidebarPanel.tsx — Persistent right-side panel for Lyric Studio V2.
  *
- * Layout varies by navigation level:
- *   album-detail: Generated Songs (1/3) + Recent Songs (1/3) + Queue (1/3)
- *   artists/albums: Recent Songs (1/2) + Queue (1/2)
+ * Layout: Recent Songs (1/2) + Queue (1/2)
+ * Generated Songs are now a main content tab (see ContentTabs).
  */
 
 import React, { useState } from 'react';
 import {
-  Headphones, Clock, ListOrdered,
+  Clock, ListOrdered,
   ChevronDown, ChevronRight,
 } from 'lucide-react';
-import type { Generation } from '../../services/lireekApi';
-import { RecordingsTab } from './RecordingsTab';
 import { RecentSongsList } from './RecentSongsList';
 import { InlineAudioQueue } from './InlineAudioQueue';
 import { useAudioGenQueue } from '../../stores/audioGenQueueStore';
@@ -21,13 +18,8 @@ type NavLevel = 'artists' | 'albums' | 'album-detail';
 
 interface RightSidebarPanelProps {
   navLevel: NavLevel;
-  generations?: Generation[];
   showToast: (msg: string) => void;
-  recordingsFilter?: number | null;
-  onClearRecordingsFilter?: () => void;
-  onSongCountChange?: (count: number) => void;
   recordingsRefreshKey?: number;
-  artistName?: string;
   compact?: boolean;
 }
 
@@ -69,36 +61,16 @@ const Section: React.FC<SectionProps> = ({
 };
 
 export const RightSidebarPanel: React.FC<RightSidebarPanelProps> = ({
-  navLevel, generations, showToast,
-  recordingsFilter, onClearRecordingsFilter, onSongCountChange,
-  recordingsRefreshKey = 0, artistName, compact = false,
+  navLevel, showToast,
+  recordingsRefreshKey = 0, compact = false,
 }) => {
   const queue = useAudioGenQueue();
   const queueCount = queue.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length;
   const [deleteCounter, setDeleteCounter] = useState(0);
   const recentRefreshKey = queue.completionCounter + recordingsRefreshKey + deleteCounter;
 
-  const showRecordings = navLevel === 'album-detail' && generations;
-
   return (
     <div className="h-full flex flex-col">
-      {showRecordings && (
-        <Section title="Generated Songs"
-          icon={<Headphones className="w-3 h-3" />}
-          countColor="bg-pink-500/20 text-pink-300"
-          defaultOpen={true}>
-          <RecordingsTab
-            generations={generations}
-            showToast={showToast}
-            filterGenerationId={recordingsFilter}
-            onClearFilter={onClearRecordingsFilter}
-            onSongCountChange={onSongCountChange}
-            refreshKey={recordingsRefreshKey}
-            artistName={artistName}
-            onDeleteComplete={() => setDeleteCounter(c => c + 1)}
-          />
-        </Section>
-      )}
 
       <Section title="Recent Songs"
         icon={<Clock className="w-3 h-3" />}
