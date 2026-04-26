@@ -16,6 +16,15 @@
 #include <fstream>
 #include <algorithm>
 
+// Windows headers MUST come before VST3 SDK to avoid IConnectionPoint collision
+// (ocidl.h defines COM IConnectionPoint, VST3 has Steinberg::Vst::IConnectionPoint)
+#ifdef _WIN32
+#include <windows.h>
+#include <objbase.h>
+#include <mmdeviceapi.h>
+#include <audioclient.h>
+#endif
+
 // VST3 SDK hosting
 #include "public.sdk/source/vst/hosting/module.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
@@ -37,11 +46,6 @@
 
 // WAV I/O (our existing header)
 #include "audio-io.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#include <objbase.h>
-#endif
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
@@ -231,9 +235,10 @@ static bool save_state(PluginInstance & inst, const std::string & state_path) {
     return true;
 }
 
-static bool setup_processing(PluginInstance & inst, int sample_rate, int block_size) {
+static bool setup_processing(PluginInstance & inst, int sample_rate, int block_size,
+                              int32 process_mode = kOffline) {
     ProcessSetup setup;
-    setup.processMode       = kOffline;
+    setup.processMode       = process_mode;
     setup.symbolicSampleSize = kSample32;
     setup.maxSamplesPerBlock = block_size;
     setup.sampleRate         = (double)sample_rate;
@@ -578,6 +583,387 @@ static int cmd_process_chain(const char * chain_json_path, const char * input_pa
     return 0;
 }
 
+// ── Monitor Mode (Windows WASAPI) ────────────────────────────────────────────
+
+#ifdef _WIN32
+
+struct MonitorState {
+    // Audio data (planar [L:T][R:T])
+    float * audio = nullptr;
+    int     T     = 0;
+    int     sr    = 0;
+    int     pos   = 0;
+    bool    loop  = true;
+
+    // Chain
+    std::vector<PluginInstance> plugins;
+    std::vector<std::string>   state_paths;
+
+    // Control
+    std::string control_file;
+    std::string current_track;
+    FILETIME    control_mtime = {};
+    bool        running = true;
+
+    // Processing buffers (reused per block)
+    std::vector<float> buf_a_L, buf_a_R, buf_b_L, buf_b_R;
+};
+
+static bool monitor_load_track(MonitorState & ms, const std::string & path) {
+    int T = 0, sr = 0;
+    float * audio = audio_io_read_wav(path.c_str(), &T, &sr);
+    if (!audio || T <= 0) {
+        fprintf(stderr, "[monitor] Failed to load: %s\n", path.c_str());
+        return false;
+    }
+    if (ms.audio) free(ms.audio);
+    ms.audio = audio;
+    ms.T = T;
+    ms.sr = sr;
+    ms.pos = 0;
+    ms.current_track = path;
+    fprintf(stderr, "[monitor] Loaded: %s (%d frames, %d Hz, %.1fs)\n",
+            path.c_str(), T, sr, (float)T / sr);
+    return true;
+}
+
+static void monitor_check_control(MonitorState & ms) {
+    if (ms.control_file.empty()) return;
+    HANDLE hFile = CreateFileA(ms.control_file.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) return;
+
+    FILETIME ft;
+    GetFileTime(hFile, nullptr, nullptr, &ft);
+    bool changed = (ft.dwHighDateTime != ms.control_mtime.dwHighDateTime ||
+                    ft.dwLowDateTime  != ms.control_mtime.dwLowDateTime);
+    if (!changed) { CloseHandle(hFile); return; }
+    ms.control_mtime = ft;
+
+    DWORD size = GetFileSize(hFile, nullptr);
+    if (size == 0 || size == INVALID_FILE_SIZE) { CloseHandle(hFile); return; }
+    std::vector<char> buf(size + 1, 0);
+    DWORD bytesRead = 0;
+    ReadFile(hFile, buf.data(), size, &bytesRead, nullptr);
+    CloseHandle(hFile);
+
+    yyjson_doc * doc = yyjson_read(buf.data(), bytesRead, 0);
+    if (!doc) return;
+    yyjson_val * root = yyjson_doc_get_root(doc);
+
+    yyjson_val * action_val = yyjson_obj_get(root, "action");
+    if (action_val) {
+        const char * action = yyjson_get_str(action_val);
+        if (action && !strcmp(action, "stop")) {
+            ms.running = false;
+            yyjson_doc_free(doc);
+            return;
+        }
+    }
+
+    yyjson_val * track_val = yyjson_obj_get(root, "track");
+    if (track_val) {
+        const char * track = yyjson_get_str(track_val);
+        if (track && ms.current_track != track) {
+            monitor_load_track(ms, track);
+        }
+    }
+    yyjson_doc_free(doc);
+}
+
+static void monitor_process_block(MonitorState & ms, float * out_L, float * out_R, int n) {
+    if (!ms.audio || ms.T <= 0) {
+        memset(out_L, 0, n * sizeof(float));
+        memset(out_R, 0, n * sizeof(float));
+        return;
+    }
+
+    // Ensure buffers are large enough
+    if ((int)ms.buf_a_L.size() < n) {
+        ms.buf_a_L.resize(n); ms.buf_a_R.resize(n);
+        ms.buf_b_L.resize(n); ms.buf_b_R.resize(n);
+    }
+
+    // Read from WAV (with loop)
+    float * src_L = ms.buf_a_L.data();
+    float * src_R = ms.buf_a_R.data();
+    for (int i = 0; i < n; i++) {
+        int p = ms.pos + i;
+        if (p >= ms.T) {
+            if (ms.loop) { p = p % ms.T; }
+            else         { src_L[i] = 0; src_R[i] = 0; continue; }
+        }
+        src_L[i] = ms.audio[p];
+        src_R[i] = ms.audio[ms.T + p];
+    }
+    ms.pos += n;
+    if (ms.loop && ms.pos >= ms.T) ms.pos = ms.pos % ms.T;
+
+    // Process through each plugin
+    float * cur_L = src_L, * cur_R = src_R;
+    float * dst_L = ms.buf_b_L.data(), * dst_R = ms.buf_b_R.data();
+
+    for (size_t pi = 0; pi < ms.plugins.size(); pi++) {
+        float * in_bufs[2]  = { cur_L, cur_R };
+        float * ob[2]       = { dst_L, dst_R };
+        AudioBusBuffers ib; ib.numChannels = 2; ib.silenceFlags = 0; ib.channelBuffers32 = in_bufs;
+        AudioBusBuffers ob_bus; ob_bus.numChannels = 2; ob_bus.silenceFlags = 0; ob_bus.channelBuffers32 = ob;
+
+        ProcessData pd;
+        pd.processMode = kRealtime; pd.symbolicSampleSize = kSample32;
+        pd.numSamples = n; pd.numInputs = 1; pd.numOutputs = 1;
+        pd.inputs = &ib; pd.outputs = &ob_bus;
+        pd.inputParameterChanges = nullptr; pd.outputParameterChanges = nullptr;
+        pd.inputEvents = nullptr; pd.outputEvents = nullptr; pd.processContext = nullptr;
+
+        ms.plugins[pi].processor->process(pd);
+
+        // Swap buffers for next plugin
+        std::swap(cur_L, dst_L); std::swap(cur_R, dst_R);
+    }
+
+    memcpy(out_L, cur_L, n * sizeof(float));
+    memcpy(out_R, cur_R, n * sizeof(float));
+}
+
+// Window proc for plugin GUIs in monitor mode
+static MonitorState * g_monitorState = nullptr;
+static int g_monitorWindowCount = 0;
+
+static LRESULT CALLBACK MonitorWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            g_monitorWindowCount--;
+            if (g_monitorWindowCount <= 0 && g_monitorState) {
+                g_monitorState->running = false;
+                PostQuitMessage(0);
+            }
+            return 0;
+        default:
+            return DefWindowProcA(hwnd, msg, wp, lp);
+    }
+}
+
+static int cmd_monitor(const char * chain_json_path, const char * input_path,
+                        const char * control_path) {
+    init_host_context();
+
+    // Parse chain JSON
+    std::ifstream cf(chain_json_path);
+    if (!cf.is_open()) { fprintf(stderr, "[monitor] Failed to read chain: %s\n", chain_json_path); return 1; }
+    std::string json_str((std::istreambuf_iterator<char>(cf)), std::istreambuf_iterator<char>());
+    cf.close();
+
+    yyjson_doc * doc = yyjson_read(json_str.c_str(), json_str.size(), 0);
+    if (!doc) { fprintf(stderr, "[monitor] Failed to parse chain JSON\n"); return 1; }
+    yyjson_val * root = yyjson_doc_get_root(doc);
+    yyjson_val * plugins_arr = yyjson_obj_get(root, "plugins");
+
+    struct ChainDef { std::string path, state; };
+    std::vector<ChainDef> defs;
+    if (plugins_arr && yyjson_is_arr(plugins_arr)) {
+        size_t idx, max; yyjson_val * val;
+        yyjson_arr_foreach(plugins_arr, idx, max, val) {
+            yyjson_val * ev = yyjson_obj_get(val, "enabled");
+            if (ev && !yyjson_get_bool(ev)) continue;
+            yyjson_val * pv = yyjson_obj_get(val, "path");
+            yyjson_val * sv = yyjson_obj_get(val, "state");
+            if (!pv) continue;
+            defs.push_back({ yyjson_get_str(pv), sv ? yyjson_get_str(sv) : "" });
+        }
+    }
+    yyjson_doc_free(doc);
+
+    if (defs.empty()) { fprintf(stderr, "[monitor] No enabled plugins\n"); return 1; }
+
+    // Setup monitor state
+    MonitorState ms;
+    ms.control_file = control_path ? control_path : "";
+
+    // Load initial track
+    if (!monitor_load_track(ms, input_path)) return 1;
+
+    // Load plugins
+    ms.plugins.resize(defs.size());
+    ms.state_paths.resize(defs.size());
+    const int block_size = 512;  // Low latency for real-time
+
+    for (size_t i = 0; i < defs.size(); i++) {
+        ms.state_paths[i] = defs[i].state;
+        if (!load_plugin(defs[i].path, ms.plugins[i])) {
+            fprintf(stderr, "[monitor] Failed to load plugin %zu: %s\n", i, defs[i].path.c_str());
+            return 1;
+        }
+        if (!defs[i].state.empty()) load_state(ms.plugins[i], defs[i].state);
+        if (!setup_processing(ms.plugins[i], ms.sr, block_size, kRealtime)) {
+            fprintf(stderr, "[monitor] Failed to setup plugin %zu\n", i);
+            return 1;
+        }
+    }
+
+    // Register window class for plugin GUIs
+    WNDCLASSA wc = {};
+    wc.lpfnWndProc  = MonitorWndProc;
+    wc.hInstance     = GetModuleHandleA(nullptr);
+    wc.lpszClassName = "VstMonitorWindow";
+    wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    RegisterClassA(&wc);
+
+    g_monitorState = &ms;
+    g_monitorWindowCount = 0;
+
+    // Open GUI for each plugin
+    std::vector<IPlugView*> views;
+    for (size_t i = 0; i < ms.plugins.size(); i++) {
+        auto ctrl = ms.plugins[i].provider->getController();
+        if (!ctrl) continue;
+        IPlugView * view = ctrl->createView(ViewType::kEditor);
+        if (!view) continue;
+
+        ViewRect rect;
+        if (view->getSize(&rect) != kResultOk) { rect = {0, 0, 800, 600}; }
+        int w = rect.right - rect.left, h = rect.bottom - rect.top;
+        RECT wr = { 0, 0, w, h };
+        AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX), FALSE);
+
+        std::string title = "Monitor: " + defs[i].path.substr(defs[i].path.find_last_of("/\\") + 1);
+        HWND hwnd = CreateWindowA("VstMonitorWindow", title.c_str(),
+                                   WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX),
+                                   CW_USEDEFAULT, CW_USEDEFAULT,
+                                   wr.right - wr.left, wr.bottom - wr.top,
+                                   nullptr, nullptr, GetModuleHandleA(nullptr), nullptr);
+        if (!hwnd) { view->release(); continue; }
+        if (view->attached(hwnd, kPlatformTypeHWND) != kResultOk) {
+            view->release(); DestroyWindow(hwnd); continue;
+        }
+        ShowWindow(hwnd, SW_SHOW);
+        g_monitorWindowCount++;
+        views.push_back(view);
+    }
+
+    fprintf(stderr, "[monitor] %d plugin GUI(s) opened\n", g_monitorWindowCount);
+
+    // ── WASAPI init ──
+    IMMDeviceEnumerator * pEnum = nullptr;
+    IMMDevice * pDevice = nullptr;
+    IAudioClient * pAudioClient = nullptr;
+    IAudioRenderClient * pRenderClient = nullptr;
+    WAVEFORMATEX * pwfx = nullptr;
+    HANDLE hAudioEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    UINT32 bufferFrames = 0;
+
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
+                                  CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnum);
+    if (FAILED(hr)) { fprintf(stderr, "[monitor] Failed to create device enumerator\n"); return 1; }
+    hr = pEnum->GetDefaultAudioEndpoint(eRender, eConsole, &pDevice);
+    if (FAILED(hr)) { fprintf(stderr, "[monitor] No default audio device\n"); return 1; }
+    hr = pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&pAudioClient);
+    if (FAILED(hr)) { fprintf(stderr, "[monitor] Failed to activate audio client\n"); return 1; }
+    hr = pAudioClient->GetMixFormat(&pwfx);
+    if (FAILED(hr)) { fprintf(stderr, "[monitor] Failed to get mix format\n"); return 1; }
+
+    fprintf(stderr, "[monitor] WASAPI: %d Hz, %d ch, %d bits\n",
+            (int)pwfx->nSamplesPerSec, (int)pwfx->nChannels, (int)pwfx->wBitsPerSample);
+
+    REFERENCE_TIME bufDuration = 200000; // 20ms buffer
+    hr = pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                   AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                   bufDuration, 0, pwfx, nullptr);
+    if (FAILED(hr)) { fprintf(stderr, "[monitor] WASAPI Initialize failed: 0x%08X\n", (unsigned)hr); return 1; }
+    pAudioClient->SetEventHandle(hAudioEvent);
+    pAudioClient->GetBufferSize(&bufferFrames);
+    hr = pAudioClient->GetService(__uuidof(IAudioRenderClient), (void**)&pRenderClient);
+    if (FAILED(hr)) { fprintf(stderr, "[monitor] Failed to get render client\n"); return 1; }
+
+    fprintf(stderr, "[monitor] Buffer: %u frames (%.1f ms)\n",
+            bufferFrames, 1000.0f * bufferFrames / pwfx->nSamplesPerSec);
+
+    // Pre-fill buffer
+    {   BYTE * data; pRenderClient->GetBuffer(bufferFrames, &data);
+        memset(data, 0, bufferFrames * pwfx->nBlockAlign);
+        pRenderClient->ReleaseBuffer(bufferFrames, 0); }
+
+    pAudioClient->Start();
+    fprintf(stderr, "[monitor] Playing... Close all plugin windows to stop.\n");
+
+    // Temp buffers for processed audio
+    std::vector<float> proc_L(bufferFrames), proc_R(bufferFrames);
+    DWORD controlCheckTick = GetTickCount();
+
+    // ── Main loop: WASAPI + Win32 messages ──
+    while (ms.running) {
+        DWORD wait = MsgWaitForMultipleObjects(1, &hAudioEvent, FALSE, 100, QS_ALLINPUT);
+
+        if (wait == WAIT_OBJECT_0) {
+            // WASAPI wants data
+            UINT32 padding = 0;
+            pAudioClient->GetCurrentPadding(&padding);
+            UINT32 available = bufferFrames - padding;
+            if (available > 0) {
+                BYTE * data = nullptr;
+                if (SUCCEEDED(pRenderClient->GetBuffer(available, &data))) {
+                    monitor_process_block(ms, proc_L.data(), proc_R.data(), (int)available);
+                    // Interleave into WASAPI buffer (float32, potentially >2 channels)
+                    float * fdata = (float *)data;
+                    int ch = pwfx->nChannels;
+                    for (UINT32 i = 0; i < available; i++) {
+                        fdata[i * ch + 0] = proc_L[i];
+                        fdata[i * ch + 1] = (ch >= 2) ? proc_R[i] : 0;
+                        for (int c = 2; c < ch; c++) fdata[i * ch + c] = 0;
+                    }
+                    pRenderClient->ReleaseBuffer(available, 0);
+                }
+            }
+        } else if (wait == WAIT_OBJECT_0 + 1) {
+            // Win32 messages
+            MSG msg;
+            while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                if (msg.message == WM_QUIT) { ms.running = false; break; }
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
+
+        // Check control file periodically (~500ms)
+        DWORD now = GetTickCount();
+        if (now - controlCheckTick > 500) {
+            controlCheckTick = now;
+            monitor_check_control(ms);
+        }
+    }
+
+    // ── Cleanup ──
+    pAudioClient->Stop();
+    if (pRenderClient) pRenderClient->Release();
+    if (pAudioClient)  pAudioClient->Release();
+    if (pDevice)       pDevice->Release();
+    if (pEnum)         pEnum->Release();
+    if (pwfx)          CoTaskMemFree(pwfx);
+    CloseHandle(hAudioEvent);
+
+    // Detach and release views
+    for (auto * v : views) { v->removed(); v->release(); }
+
+    // Save all plugin states
+    for (size_t i = 0; i < ms.plugins.size(); i++) {
+        if (!ms.state_paths[i].empty()) {
+            if (save_state(ms.plugins[i], ms.state_paths[i])) {
+                fprintf(stderr, "[monitor] State saved: %s\n", ms.state_paths[i].c_str());
+            }
+        }
+    }
+
+    if (ms.audio) free(ms.audio);
+    fprintf(stderr, "[monitor] Done.\n");
+    return 0;
+}
+#endif // _WIN32
+
 // ── Usage + Main ─────────────────────────────────────────────────────────────
 
 static void usage(const char * prog) {
@@ -587,6 +973,7 @@ static void usage(const char * prog) {
     fprintf(stderr, "  %s --gui --plugin <path.vst3> [--state <file>]\n", prog);
     fprintf(stderr, "  %s --process --plugin <path.vst3> --input <in.wav> --output <out.wav> [--state <file>]\n", prog);
     fprintf(stderr, "  %s --process-chain --chain <chain.json> --input <in.wav> --output <out.wav>\n", prog);
+    fprintf(stderr, "  %s --monitor --chain <chain.json> --input <in.wav> [--control <file>]\n", prog);
 }
 
 int main(int argc, char * argv[]) {
@@ -598,17 +985,20 @@ int main(int argc, char * argv[]) {
     const char * output  = nullptr;
     const char * state   = nullptr;
     const char * chain   = nullptr;
+    const char * control = nullptr;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--scan"))          mode = "scan";
         else if (!strcmp(argv[i], "--gui"))      mode = "gui";
         else if (!strcmp(argv[i], "--process"))  mode = "process";
         else if (!strcmp(argv[i], "--process-chain")) mode = "chain";
-        else if (!strcmp(argv[i], "--plugin") && i+1 < argc)  plugin = argv[++i];
-        else if (!strcmp(argv[i], "--input")  && i+1 < argc)  input  = argv[++i];
-        else if (!strcmp(argv[i], "--output") && i+1 < argc)  output = argv[++i];
-        else if (!strcmp(argv[i], "--state")  && i+1 < argc)  state  = argv[++i];
-        else if (!strcmp(argv[i], "--chain")  && i+1 < argc)  chain  = argv[++i];
+        else if (!strcmp(argv[i], "--monitor"))  mode = "monitor";
+        else if (!strcmp(argv[i], "--plugin")  && i+1 < argc)  plugin  = argv[++i];
+        else if (!strcmp(argv[i], "--input")   && i+1 < argc)  input   = argv[++i];
+        else if (!strcmp(argv[i], "--output")  && i+1 < argc)  output  = argv[++i];
+        else if (!strcmp(argv[i], "--state")   && i+1 < argc)  state   = argv[++i];
+        else if (!strcmp(argv[i], "--chain")   && i+1 < argc)  chain   = argv[++i];
+        else if (!strcmp(argv[i], "--control") && i+1 < argc)  control = argv[++i];
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage(argv[0]); return 0;
         }
@@ -642,7 +1032,20 @@ int main(int argc, char * argv[]) {
         }
         return cmd_process_chain(chain, input, output);
     }
+    else if (!strcmp(mode, "monitor")) {
+#ifdef _WIN32
+        if (!chain || !input) {
+            fprintf(stderr, "Error: --chain, --input required for monitor\n");
+            return 1;
+        }
+        return cmd_monitor(chain, input, control);
+#else
+        fprintf(stderr, "Error: Monitor mode only supported on Windows\n");
+        return 1;
+#endif
+    }
 
     usage(argv[0]);
     return 1;
 }
+
