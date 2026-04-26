@@ -592,14 +592,15 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
         sf->custom_timesteps = yyjson_get_str(v);
     }
     // Post-VAE spectral denoiser (HOT-Step)
+    // NOTE: use get_num — JS may serialize whole numbers as integers (1 not 1.0)
     if ((v = yyjson_obj_get(obj, "denoise_strength")) && yyjson_is_num(v)) {
-        sf->denoise_strength = (float) yyjson_get_real(v);
+        sf->denoise_strength = get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "denoise_smoothing")) && yyjson_is_num(v)) {
-        sf->denoise_smoothing = (float) yyjson_get_real(v);
+        sf->denoise_smoothing = get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "denoise_mix")) && yyjson_is_num(v)) {
-        sf->denoise_mix = (float) yyjson_get_real(v);
+        sf->denoise_mix = get_num(v);
     }
     yyjson_doc_free(doc);
 }
