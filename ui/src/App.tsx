@@ -27,6 +27,7 @@ import { DownloadModal } from './components/shared/DownloadModal';
 import { SettingsPanel, type AppSettings, DEFAULT_SETTINGS } from './components/settings/SettingsPanel';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { LyricStudioV2 } from './components/lyric-studio/LyricStudioV2';
+import { CoverStudio } from './components/cover-studio/CoverStudio';
 import { GlobalParamBar } from './components/global-bar/GlobalParamBar';
 import { PlaylistSidebar } from './components/playlist/PlaylistSidebar';
 import {
@@ -57,6 +58,7 @@ import { usePlaylist, addToPlaylist, type PlaylistItem } from './components/lyri
 /** Derive top-level view from the browser URL */
 function viewFromUrl(path = window.location.pathname): string {
   if (path.startsWith('/lyric-studio')) return 'lyric-studio';
+  if (path.startsWith('/cover-studio')) return 'cover-studio';
   if (path.startsWith('/library')) return 'library';
   if (path.startsWith('/settings')) return 'settings';
   return 'create';
@@ -72,6 +74,7 @@ function urlForView(view: string): string {
     } catch { /* ignore */ }
     return '/lyric-studio';
   }
+  if (view === 'cover-studio') return '/cover-studio';
   if (view === 'library') return '/library';
   if (view === 'settings') return '/settings';
   return '/';
@@ -311,6 +314,14 @@ const AppContent: React.FC = () => {
       return (
         <div className="flex-1 overflow-hidden">
           <LyricStudioV2 />
+        </div>
+      );
+    }
+
+    if (activeView === 'cover-studio') {
+      return (
+        <div className="flex-1 overflow-hidden">
+          <CoverStudio />
         </div>
       );
     }
