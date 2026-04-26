@@ -51,10 +51,22 @@ interface GenerationJob {
 const jobs = new Map<string, GenerationJob>();
 
 // ── LM Audio Code Cache ─────────────────────────────────────
-// Caches LM results keyed by seed + all LM-affecting params.
-// Same seed + same params = deterministic output = safe to cache.
+// Caches ONLY LM-generated output fields (audio_codes, caption, lyrics,
+// metadata) keyed by seed + LM-affecting params. Non-LM parameters
+// (DiT, adapter, DCW, latent, denoise, etc.) are NEVER cached — they
+// always come from the current request. This prevents stale parameter
+// leakage when users change generation settings between runs.
+interface LmCacheEntry {
+  audio_codes: string;
+  caption: string;
+  lyrics: string;
+  bpm: number;
+  duration: number;
+  keyscale: string;
+  timesignature: string;
+}
 const LM_CACHE_MAX = 20;
-const lmCache = new Map<string, { results: AceRequest[]; timestamp: number }>();
+const lmCache = new Map<string, { lmOutputs: LmCacheEntry[]; timestamp: number }>();
 
 /** Compute a stable hash key from LM-affecting parameters */
 function computeLmCacheKey(req: AceRequest): string {
@@ -260,8 +272,19 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       const cached = useLmCache ? lmCache.get(cacheKey) : undefined;
 
       if (cached) {
-        // Cache hit — skip LM entirely
-        lmResults = cached.results;
+        // Cache hit — reconstruct full AceRequests from current params
+        // + cached LM output. Only LM-generated fields come from cache;
+        // everything else (DiT, adapter, DCW, etc.) uses current aceReq.
+        lmResults = cached.lmOutputs.map(lmOut => ({
+          ...aceReq,
+          audio_codes: lmOut.audio_codes,
+          caption: lmOut.caption,
+          lyrics: lmOut.lyrics,
+          bpm: lmOut.bpm,
+          duration: lmOut.duration,
+          keyscale: lmOut.keyscale,
+          timesignature: lmOut.timesignature,
+        }));
         job.lmResults = lmResults;
         cached.timestamp = Date.now(); // refresh LRU
 
@@ -310,11 +333,20 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         lmResults = await resultRes.json() as AceRequest[];
         job.lmResults = lmResults;
 
-        // Store in cache
+        // Store only LM-generated fields in cache (never DiT/adapter/DCW/etc.)
         if (useLmCache) {
-          lmCache.set(cacheKey, { results: lmResults, timestamp: Date.now() });
+          const lmOutputs: LmCacheEntry[] = lmResults.map(r => ({
+            audio_codes: r.audio_codes || '',
+            caption: r.caption || '',
+            lyrics: r.lyrics || '',
+            bpm: r.bpm || 0,
+            duration: r.duration || 0,
+            keyscale: r.keyscale || '',
+            timesignature: r.timesignature || '',
+          }));
+          lmCache.set(cacheKey, { lmOutputs, timestamp: Date.now() });
           evictLmCache();
-          logGeneration(job.id, 'INFO', `[LM Phase] Cached results (key=${cacheKey}, cache size=${lmCache.size})`);
+          logGeneration(job.id, 'INFO', `[LM Phase] Cached LM outputs (key=${cacheKey}, cache size=${lmCache.size})`);
         }
 
         job.progress = 40;
@@ -325,66 +357,14 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         unsubLm();
       }
 
-      // Re-inject fields that the user can change between LM cache hits.
-      // The C++ LM serializes full AceRequest — so cached results carry
-      // stale values for DiT params and routing fields. Override them
-      // from the current request so the synth phase uses current settings.
-      for (const result of lmResults) {
-        // Seed: if randomSeed, set seed=-1 so the engine randomizes.
-        // Cached LM results carry the original fixed seed otherwise.
-        if (job.params.randomSeed) {
-          result.seed = -1;
-        } else if (aceReq.seed !== undefined) {
-          result.seed = aceReq.seed;
-        }
-
-        // DiT params (user can change solver, steps, etc. between runs)
-        if (aceReq.inference_steps !== undefined) result.inference_steps = aceReq.inference_steps;
-        if (aceReq.guidance_scale !== undefined) result.guidance_scale = aceReq.guidance_scale;
-        if (aceReq.shift !== undefined) result.shift = aceReq.shift;
-        if (aceReq.infer_method !== undefined) result.infer_method = aceReq.infer_method;
-        if (aceReq.scheduler !== undefined) result.scheduler = aceReq.scheduler;
-        if (aceReq.guidance_mode !== undefined) result.guidance_mode = aceReq.guidance_mode;
-
-        // Routing fields (adapter, model selection)
-        if (aceReq.synth_model) result.synth_model = aceReq.synth_model;
-        if (aceReq.vae_model) result.vae_model = aceReq.vae_model;
-        if (aceReq.adapter) result.adapter = aceReq.adapter;
-        if (aceReq.adapter_scale !== undefined) result.adapter_scale = aceReq.adapter_scale;
-        if (aceReq.adapter_group_scales) result.adapter_group_scales = aceReq.adapter_group_scales;
-        if (aceReq.adapter_mode) result.adapter_mode = aceReq.adapter_mode;
-
-        // DCW params (user can toggle between runs)
-        if (aceReq.dcw_enabled !== undefined) result.dcw_enabled = aceReq.dcw_enabled;
-        if (aceReq.dcw_mode) result.dcw_mode = aceReq.dcw_mode;
-        if (aceReq.dcw_scaler !== undefined) result.dcw_scaler = aceReq.dcw_scaler;
-        if (aceReq.dcw_high_scaler !== undefined) result.dcw_high_scaler = aceReq.dcw_high_scaler;
-
-        // Latent post-processing params (user can change between runs)
-        if (aceReq.latent_shift !== undefined) result.latent_shift = aceReq.latent_shift;
-        if (aceReq.latent_rescale !== undefined) result.latent_rescale = aceReq.latent_rescale;
-        if (aceReq.custom_timesteps !== undefined) result.custom_timesteps = aceReq.custom_timesteps;
-
-        // Denoise params (user can change between runs)
-        if (aceReq.denoise_strength !== undefined) result.denoise_strength = aceReq.denoise_strength;
-        if (aceReq.denoise_smoothing !== undefined) result.denoise_smoothing = aceReq.denoise_smoothing;
-        if (aceReq.denoise_mix !== undefined) result.denoise_mix = aceReq.denoise_mix;
-
-        // Cover/repaint params — ALWAYS override. Cached LM results may carry
-        // stale audio_cover_strength from previous runs (e.g. 0.5 from old Lyric
-        // Studio code), causing the engine to enter cover mode unexpectedly.
-        // When undefined in the current request, delete from result so the
-        // engine uses its default (1.0 = no cover switching).
-        result.audio_cover_strength = aceReq.audio_cover_strength;
-        result.cover_noise_strength = aceReq.cover_noise_strength;
-        result.task_type = aceReq.task_type;
-
-        // Re-inject trigger word — CoT caption replaces the original so the
-        // trigger word that was injected into aceReq.caption gets lost.
-        if (job.params.triggerWord && job.params.triggerPlacement && job.params.loraPath) {
+      // Re-inject trigger word into LM results — CoT caption replaces the
+      // original, so the trigger word injected by translateParams gets lost.
+      // This applies to both cache hits (CoT caption from cache) and fresh
+      // LM results (CoT caption from engine).
+      if (job.params.triggerWord && job.params.triggerPlacement && job.params.loraPath) {
+        for (const result of lmResults) {
           const tw = job.params.triggerWord;
           const caption = result.caption || '';
-          // Only inject if it's not already present (cache hits may already have it)
           if (!caption.includes(tw)) {
             switch (job.params.triggerPlacement) {
               case 'prepend': result.caption = caption ? `${tw}, ${caption}` : tw; break;
