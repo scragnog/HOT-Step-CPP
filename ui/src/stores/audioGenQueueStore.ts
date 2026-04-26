@@ -265,8 +265,10 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
 
     // Re-derive trigger word from the PRESET adapter filename (globalParams
     // has the trigger word for the GLOBAL adapter, which may differ).
-    const useFilename = localStorage.getItem('ace-globalTriggerUseFilename') === 'true';
-    const placement = (localStorage.getItem('ace-globalTriggerPlacement') as 'prepend' | 'append' | 'replace') || 'prepend';
+    const settingsRaw = localStorage.getItem('ace-settings');
+    const triggerSettings = settingsRaw ? JSON.parse(settingsRaw) : {};
+    const useFilename = triggerSettings.triggerUseFilename === true;
+    const placement = (triggerSettings.triggerPlacement as 'prepend' | 'append' | 'replace') || 'prepend';
     if (useFilename) {
       const fileName = preset.adapter_path.replace(/\\/g, '/').split('/').pop() || '';
       const triggerWord = fileName.replace(/\.safetensors$/i, '');

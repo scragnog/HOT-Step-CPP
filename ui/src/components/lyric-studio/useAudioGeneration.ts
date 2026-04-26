@@ -79,8 +79,10 @@ function mergeCreatePanelSettings(params: Record<string, any>): void {
 }
 
 function applyTriggerWord(params: Record<string, any>, adapterPath: string): void {
-  const useFilename = localStorage.getItem('ace-globalTriggerUseFilename') === 'true';
-  const placement = (localStorage.getItem('ace-globalTriggerPlacement') as 'prepend' | 'append' | 'replace') || 'prepend';
+  const settingsRaw = localStorage.getItem('ace-settings');
+  const triggerSettings = settingsRaw ? JSON.parse(settingsRaw) : {};
+  const useFilename = triggerSettings.triggerUseFilename === true;
+  const placement = (triggerSettings.triggerPlacement as 'prepend' | 'append' | 'replace') || 'prepend';
   if (!useFilename) return;
   const fileName = adapterPath.replace(/\\/g, '/').split('/').pop() || '';
   const triggerWord = fileName.replace(/\.safetensors$/i, '');
@@ -142,8 +144,10 @@ export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudi
           params.adapterGroupScales = preset.adapter_group_scales;
         }
         // Trigger word — send as server-side params so it's injected AFTER CoT
-        const useFilename = localStorage.getItem('ace-globalTriggerUseFilename') === 'true';
-        const placement = (localStorage.getItem('ace-globalTriggerPlacement') as 'prepend' | 'append' | 'replace') || 'prepend';
+        const settingsRaw2 = localStorage.getItem('ace-settings');
+        const triggerSettings2 = settingsRaw2 ? JSON.parse(settingsRaw2) : {};
+        const useFilename = triggerSettings2.triggerUseFilename === true;
+        const placement = (triggerSettings2.triggerPlacement as 'prepend' | 'append' | 'replace') || 'prepend';
         if (useFilename) {
           const fileName = preset.adapter_path.replace(/\\/g, '/').split('/').pop() || '';
           const triggerWord = fileName.replace(/\.safetensors$/i, '');
