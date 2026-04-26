@@ -1,7 +1,7 @@
 // PostProcessingDropdown.tsx — Unified post-processing panel for the global bar
 //
 // Three collapsible accordion sections:
-//   1. Spectral Lifter — AI artifact removal (toggle only, no config)
+//   1. Spectral Lifter — AI artifact removal with tunable parameters
 //   2. VST Chain       — Plugin chain management (existing VstChainDropdown content)
 //   3. Mastering       — Reference-based mastering (existing MasteringDropdown content)
 
@@ -18,6 +18,7 @@ import { useVstChainStore } from '../../stores/vstChainStore';
 import { ToggleSwitch } from './BarSection';
 import { formatReferenceName } from './modelLabels';
 import { VstChainDropdown } from './VstChainDropdown';
+import { EditableSlider } from '../shared/EditableSlider';
 
 // ── Accordion Section ───────────────────────────────────────────
 
@@ -248,11 +249,56 @@ export const PostProcessingDropdown: React.FC = () => {
         accentColor="cyan"
         toggle={{ checked: gp.spectralLifterEnabled, onChange: gp.setSpectralLifterEnabled }}
       >
-        <p className="text-[10px] text-zinc-500 leading-relaxed mt-2">
-          Removes AI shimmer artifacts, reduces spectral noise, and extends
-          high-frequency content above 16kHz. Runs as a Python subprocess
-          after generation.
-        </p>
+        <div className="space-y-3 mt-2">
+          <p className="text-[10px] text-zinc-500 leading-relaxed">
+            Removes AI shimmer artifacts, reduces spectral noise, and extends
+            high-frequency content. Runs as a Python subprocess after generation.
+          </p>
+
+          {gp.spectralLifterEnabled && (
+            <div className="space-y-2 pt-1">
+              <EditableSlider
+                label="Denoise Passes"
+                value={gp.slDenoisePasses}
+                min={0} max={4} step={1}
+                onChange={gp.setSlDenoisePasses}
+                tooltip="Number of spectral gating passes. 0 = skip denoising entirely. Higher = more aggressive noise removal but may thin the sound."
+              />
+              <EditableSlider
+                label="Denoise Threshold"
+                value={gp.slDenoiseThreshold}
+                min={0.5} max={4.0} step={0.1}
+                onChange={gp.setSlDenoiseThreshold}
+                formatDisplay={v => v.toFixed(1)}
+                tooltip="Noise gate multiplier. Lower = more aggressive gating. Higher = gentler, preserves more detail."
+              />
+              <EditableSlider
+                label="HF Extension"
+                value={gp.slHfMix}
+                min={0} max={0.5} step={0.01}
+                onChange={gp.setSlHfMix}
+                formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
+                tooltip="Blend amount for synthesized high-frequency content above 16kHz. This is the most likely source of warble artifacts — try reducing or disabling."
+              />
+              <EditableSlider
+                label="Transient Boost"
+                value={gp.slTransientBoost}
+                min={0} max={1.0} step={0.01}
+                onChange={gp.setSlTransientBoost}
+                formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
+                tooltip="Percussive enhancement via harmonic-percussive separation. Adds punch to drums and transients."
+              />
+              <EditableSlider
+                label="Shimmer Reduction"
+                value={gp.slShimmerReduction}
+                min={0} max={12} step={0.5}
+                onChange={gp.setSlShimmerReduction}
+                formatDisplay={v => v === 0 ? 'Off' : v.toFixed(1) + ' dB'}
+                tooltip="dB reduction applied to the 10–14kHz shimmer band. Higher = more aggressive shimmer suppression."
+              />
+            </div>
+          )}
+        </div>
       </Accordion>
 
       {/* 2. VST Chain */}

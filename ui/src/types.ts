@@ -111,6 +111,11 @@ export interface GenerationParams {
 
   // Post-processing
   spectralLifterEnabled?: boolean;
+  slDenoisePasses?: number;
+  slDenoiseThreshold?: number;
+  slHfMix?: number;
+  slTransientBoost?: number;
+  slShimmerReduction?: number;
   masteringEnabled?: boolean;
   masteringReference?: string;
   timbreReference?: boolean;  // Also use mastering ref as timbre conditioner

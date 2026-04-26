@@ -128,6 +128,16 @@ export interface GlobalParams {
   // ── Post-Processing ──
   spectralLifterEnabled: boolean;
   setSpectralLifterEnabled: (v: boolean) => void;
+  slDenoisePasses: number;
+  setSlDenoisePasses: (v: number) => void;
+  slDenoiseThreshold: number;
+  setSlDenoiseThreshold: (v: number) => void;
+  slHfMix: number;
+  setSlHfMix: (v: number) => void;
+  slTransientBoost: number;
+  setSlTransientBoost: (v: number) => void;
+  slShimmerReduction: number;
+  setSlShimmerReduction: (v: number) => void;
   masteringEnabled: boolean;
   setMasteringEnabled: (v: boolean) => void;
   masteringReference: string;
@@ -218,6 +228,11 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // Post-processing
   const [spectralLifterEnabled, setSpectralLifterEnabled] = usePersistedState('hs-spectralLifterEnabled', false);
+  const [slDenoisePasses, setSlDenoisePasses] = usePersistedState('hs-slDenoisePasses', 2);
+  const [slDenoiseThreshold, setSlDenoiseThreshold] = usePersistedState('hs-slDenoiseThreshold', 1.5);
+  const [slHfMix, setSlHfMix] = usePersistedState('hs-slHfMix', 0.25);
+  const [slTransientBoost, setSlTransientBoost] = usePersistedState('hs-slTransientBoost', 0.5);
+  const [slShimmerReduction, setSlShimmerReduction] = usePersistedState('hs-slShimmerReduction', 6.0);
   const [masteringEnabled, setMasteringEnabled] = usePersistedState('hs-masteringEnabled', false);
   const [masteringReference, setMasteringReference] = usePersistedState('hs-masteringReference', '');
   const [timbreReference, setTimbreReference] = usePersistedState('hs-timbreReference', false);
@@ -283,6 +298,11 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       // Post-processing
       spectralLifterEnabled,
+      slDenoisePasses: spectralLifterEnabled ? slDenoisePasses : undefined,
+      slDenoiseThreshold: spectralLifterEnabled ? slDenoiseThreshold : undefined,
+      slHfMix: spectralLifterEnabled ? slHfMix : undefined,
+      slTransientBoost: spectralLifterEnabled ? slTransientBoost : undefined,
+      slShimmerReduction: spectralLifterEnabled ? slShimmerReduction : undefined,
       masteringEnabled,
       masteringReference: masteringEnabled ? masteringReference : undefined,
       timbreReference: (masteringEnabled && timbreReference && masteringReference) ? true : undefined,
@@ -314,7 +334,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     latentShift, latentRescale, customTimesteps,
     denoiseStrength, denoiseSmoothing, denoiseMix,
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
-    spectralLifterEnabled, masteringEnabled, masteringReference, timbreReference,
+    spectralLifterEnabled, slDenoisePasses, slDenoiseThreshold, slHfMix, slTransientBoost, slShimmerReduction,
+    masteringEnabled, masteringReference, timbreReference,
     settings,
   ]);
 
@@ -353,6 +374,11 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     lmCodesStrength, setLmCodesStrength,
     // Post-processing
     spectralLifterEnabled, setSpectralLifterEnabled,
+    slDenoisePasses, setSlDenoisePasses,
+    slDenoiseThreshold, setSlDenoiseThreshold,
+    slHfMix, setSlHfMix,
+    slTransientBoost, setSlTransientBoost,
+    slShimmerReduction, setSlShimmerReduction,
     masteringEnabled, setMasteringEnabled,
     masteringReference, setMasteringReference,
     timbreReference, setTimbreReference,
@@ -382,6 +408,11 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     lmTopK, setLmTopK, lmTopP, setLmTopP,
     lmNegativePrompt, setLmNegativePrompt, lmCodesStrength, setLmCodesStrength,
     spectralLifterEnabled, setSpectralLifterEnabled,
+    slDenoisePasses, setSlDenoisePasses,
+    slDenoiseThreshold, setSlDenoiseThreshold,
+    slHfMix, setSlHfMix,
+    slTransientBoost, setSlTransientBoost,
+    slShimmerReduction, setSlShimmerReduction,
     masteringEnabled, setMasteringEnabled,
     masteringReference, setMasteringReference,
     timbreReference, setTimbreReference,

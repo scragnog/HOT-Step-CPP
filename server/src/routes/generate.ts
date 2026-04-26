@@ -580,7 +580,14 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           job.progress = 91;
           try {
             const tempLifted = processedPath + '.lifted.wav';
-            await runSpectralLifter(processedPath, tempLifted);
+            const slParams = {
+              denoise_passes: job.params.slDenoisePasses ?? 2,
+              denoise_threshold: job.params.slDenoiseThreshold ?? 1.5,
+              hf_mix: job.params.slHfMix ?? 0.25,
+              transient_boost: job.params.slTransientBoost ?? 0.5,
+              shimmer_reduction: job.params.slShimmerReduction ?? 6.0,
+            };
+            await runSpectralLifter(processedPath, tempLifted, slParams);
             fs.renameSync(tempLifted, processedPath);
             anyStageRan = true;
             logGeneration(job.id, 'INFO', `[Spectral Lifter] Applied to ${audioFilename}`);
