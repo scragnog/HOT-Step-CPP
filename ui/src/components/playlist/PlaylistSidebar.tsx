@@ -5,13 +5,15 @@
  * Track list rendering adapted from the original FloatingPlaylist.
  */
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Play, X, Trash2, ChevronUp, ChevronDown,
-  Music, ListPlus, ListMusic, Square,
+  Music, ListPlus, ListMusic, Square, Download,
 } from 'lucide-react';
 import { usePlaylist, type PlaylistItem } from '../lyric-studio/playlistStore';
 import { playFromList, playlistItemToTrack, usePlayback } from '../../stores/playbackStore';
+import { DownloadModal } from '../shared/DownloadModal';
+import type { Song } from '../../types';
 
 interface PlaylistSidebarProps {
   onClose: () => void;
@@ -21,6 +23,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
   const playlist = usePlaylist();
   const pb = usePlayback();
   const currentSongId = pb.currentTrack?.id ?? null;
+  const [downloadSong, setDownloadSong] = useState<Song | null>(null);
 
   const handlePlay = useCallback((item: PlaylistItem) => {
     const allTracks = playlist.items.map(playlistItemToTrack);
@@ -128,6 +131,25 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
 
                   {/* Actions */}
                   <div className="flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <button onClick={(e) => {
+                        e.stopPropagation();
+                        setDownloadSong({
+                          id: item.id,
+                          title: item.title || 'Untitled',
+                          style: item.style || '',
+                          caption: item.style || '',
+                          lyrics: '',
+                          audioUrl: item.audioUrl,
+                          masteredAudioUrl: item.masteredAudioUrl || '',
+                          coverUrl: item.coverUrl || '',
+                          duration: item.duration || 0,
+                          artistName: item.artistName || '',
+                          tags: [],
+                        });
+                      }}
+                      className="p-0.5 text-zinc-600 hover:text-emerald-400 transition-colors" title="Download">
+                      <Download className="w-3 h-3" />
+                    </button>
                     <button onClick={() => playlist.move(item.id, 'up')} disabled={idx === 0}
                       className="p-0.5 text-zinc-600 hover:text-white transition-colors disabled:opacity-20" title="Move up">
                       <ChevronUp className="w-3 h-3" />
@@ -157,6 +179,16 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
           </button>
           <span className="text-[9px] text-zinc-600 font-mono">{totalDuration}</span>
         </div>
+      )}
+
+      {/* Download Modal */}
+      {downloadSong && (
+        <DownloadModal
+          song={downloadSong}
+          isOpen={!!downloadSong}
+          onClose={() => setDownloadSong(null)}
+          artistName={downloadSong.artistName}
+        />
       )}
     </div>
   );

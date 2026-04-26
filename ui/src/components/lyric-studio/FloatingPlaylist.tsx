@@ -9,11 +9,12 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Play, X, Minus, Maximize2,
   ListPlus, Trash2, ChevronUp, ChevronDown,
-  Music, ListMusic, Square,
+  Music, ListMusic, Square, Download,
 } from 'lucide-react';
 import type { Song } from '../../types';
 import { usePlaylist, type PlaylistItem } from './playlistStore';
 import { playFromList, playlistItemToTrack, usePlayback } from '../../stores/playbackStore';
+import { DownloadModal } from '../shared/DownloadModal';
 
 // ── Window state persistence ─────────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ export const FloatingPlaylist: React.FC = () => {
   const pb = usePlayback();
   const currentSongId = pb.currentTrack?.id ?? null;
   const [windowState, setWindowState] = useState<WindowState>(loadWindowState);
+  const [downloadSong, setDownloadSong] = useState<Song | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const windowRef = useRef<HTMLDivElement>(null);
@@ -258,6 +260,25 @@ export const FloatingPlaylist: React.FC = () => {
                   )}
 
                   <div className="flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <button onClick={(e) => {
+                        e.stopPropagation();
+                        setDownloadSong({
+                          id: item.id,
+                          title: item.title || 'Untitled',
+                          style: item.style || '',
+                          caption: item.style || '',
+                          lyrics: '',
+                          audioUrl: item.audioUrl,
+                          masteredAudioUrl: item.masteredAudioUrl || '',
+                          coverUrl: item.coverUrl || '',
+                          duration: item.duration || 0,
+                          artistName: item.artistName || '',
+                          tags: [],
+                        });
+                      }}
+                      className="p-0.5 text-zinc-600 hover:text-emerald-400 transition-colors" title="Download">
+                      <Download className="w-3 h-3" />
+                    </button>
                     <button onClick={() => playlist.move(item.id, 'up')} disabled={idx === 0}
                       className="p-0.5 text-zinc-600 hover:text-white transition-colors disabled:opacity-20" title="Move up">
                       <ChevronUp className="w-3 h-3" />
@@ -297,6 +318,16 @@ export const FloatingPlaylist: React.FC = () => {
           <path d="M9 1L1 9M9 5L5 9M9 9L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       </div>
+
+      {/* Download Modal */}
+      {downloadSong && (
+        <DownloadModal
+          song={downloadSong}
+          isOpen={!!downloadSong}
+          onClose={() => setDownloadSong(null)}
+          artistName={downloadSong.artistName}
+        />
+      )}
     </div>
   );
 };
