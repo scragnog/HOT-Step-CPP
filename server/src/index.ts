@@ -29,6 +29,7 @@ import downloadRoutes from './routes/download.js';
 import adapterRoutes from './routes/adapters.js';
 import logsRoutes, { pushLog } from './routes/logs.js';
 import lireekRoutes from './routes/lireek.js';
+import vstRoutes from './routes/vst.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -67,6 +68,7 @@ app.use('/api/download', downloadRoutes);
 app.use('/api/adapters', adapterRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/lireek', lireekRoutes);
+app.use('/api/vst', vstRoutes);
 
 // Serve audio files from data/audio/
 app.use('/audio', express.static(config.data.audioDir, {

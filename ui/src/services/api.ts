@@ -196,3 +196,39 @@ export const adapterApi = {
   scan: (folder: string) =>
     post<{ files: AdapterFile[] }>('/adapters/scan', { folder }),
 };
+
+// ── VST3 Post-Processing ────────────────────────────────────
+export interface VstPlugin {
+  name: string;
+  vendor: string;
+  version: string;
+  path: string;
+  uid: string;
+  subcategories: string;
+}
+
+export interface VstChainEntry {
+  uid: string;
+  name: string;
+  vendor: string;
+  path: string;
+  enabled: boolean;
+  statePath: string;
+}
+
+export const vstApi = {
+  /** Scan for installed VST3 plugins */
+  scan: () => get<{ plugins: VstPlugin[] }>('/vst/scan'),
+  /** Get current chain config */
+  getChain: () => get<{ plugins: VstChainEntry[] }>('/vst/chain'),
+  /** Update chain config */
+  updateChain: (plugins: VstChainEntry[]) =>
+    fetch(`${BASE}/vst/chain`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plugins }),
+    }).then(r => r.json()) as Promise<{ plugins: VstChainEntry[] }>,
+  /** Launch plugin GUI */
+  openGui: (pluginPath: string, uid?: string) =>
+    post<{ ok: boolean; pid: number }>('/vst/gui', { pluginPath, uid }),
+};

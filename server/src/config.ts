@@ -94,4 +94,23 @@ export const config = {
       return process.env.LYRICS_EXPORT_DIR || path.join(config.data.dir, 'lyrics');
     },
   },
+
+  // VST3 Post-Processing
+  vst: {
+    /** Path to vst-host.exe — lives in same dir as ace-server.exe */
+    get exe() {
+      const aceExe = config.aceServer.exe;
+      return aceExe
+        ? path.join(path.dirname(aceExe), 'vst-host.exe')
+        : path.join(BUILD_DIR, 'Release', 'vst-host.exe');
+    },
+    /** Directory for .vststate binary blobs */
+    get statesDir() {
+      return path.join(config.data.dir, 'vst', 'states');
+    },
+    /** Persistent chain config file */
+    get chainFile() {
+      return path.join(config.data.dir, 'vst', 'chain.json');
+    },
+  },
 };

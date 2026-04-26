@@ -22,6 +22,7 @@ const ACCENT_STYLES: Record<string, {
   sky:     { bg: 'bg-sky-500/5',     bgHover: 'bg-sky-500/10',     border: 'border-sky-500',     iconColor: 'text-sky-400' },
   purple:  { bg: 'bg-purple-500/5',  bgHover: 'bg-purple-500/10',  border: 'border-purple-500',  iconColor: 'text-purple-400' },
   amber:   { bg: 'bg-amber-500/5',   bgHover: 'bg-amber-500/10',   border: 'border-amber-500',   iconColor: 'text-amber-400' },
+  violet:  { bg: 'bg-violet-500/5',  bgHover: 'bg-violet-500/10',  border: 'border-violet-500',  iconColor: 'text-violet-400' },
 };
 
 interface BarSectionProps {

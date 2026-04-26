@@ -5,7 +5,7 @@
 // Sits full-width at the top of the entire window (above sidebar).
 
 import React, { useState, useCallback, useRef } from 'react';
-import { Cpu, Plug, Sliders, Brain, AudioWaveform, Upload, Download } from 'lucide-react';
+import { Cpu, Plug, Sliders, Brain, AudioWaveform, Upload, Download, Sparkles } from 'lucide-react';
 import { BarSection, ToggleSwitch } from './BarSection';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { ModelsDropdown, ModelsBadge } from './ModelsDropdown';
@@ -13,9 +13,10 @@ import { AdaptersDropdown, AdaptersBadge } from './AdaptersDropdown';
 import { GenerationDropdown, GenerationBadge } from './GenerationDropdown';
 import { LmThinkingDropdown, LmThinkingBadge } from './LmThinkingDropdown';
 import { MasteringDropdown, MasteringBadge } from './MasteringDropdown';
+import { VstChainDropdown, VstChainBadge } from './VstChainDropdown';
 import { VramIndicator } from '../shared/VramIndicator';
 
-type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'mastering' | null;
+type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'mastering' | 'vst' | null;
 
 export const GlobalParamBar: React.FC = () => {
   const [openSection, setOpenSection] = useState<SectionId>(null);
@@ -219,6 +220,19 @@ export const GlobalParamBar: React.FC = () => {
             }
           >
             <MasteringDropdown />
+          </BarSection>
+
+          <BarSection
+            id="vst"
+            label="VST Chain"
+            icon={<Sparkles size={14} />}
+            badge={<VstChainBadge />}
+            accentColor="violet"
+            isOpen={openSection === 'vst'}
+            onOpen={() => handleOpen('vst')}
+            onClose={() => handleClose('vst')}
+          >
+            <VstChainDropdown />
           </BarSection>
         </div>
 
