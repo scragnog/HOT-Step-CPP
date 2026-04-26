@@ -40,6 +40,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <objbase.h>
 #endif
 
 using namespace Steinberg;
@@ -53,14 +54,21 @@ static FUnknown* gHostContext = nullptr;
 static void init_host_context() {
     if (!gHostContext) {
         gHostContext = new HostApplication();
+#ifdef _WIN32
+        // Suppress crash/error dialogs during plugin loading
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+        // COM is needed by some plugins and by the module scanner (shell links)
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+#endif
     }
 }
 
 // ── Scan Mode ────────────────────────────────────────────────────────────────
 
+// Flush stderr before each module load attempt so crash diagnosis is possible
 static int cmd_scan() {
+    init_host_context();
     auto paths = VST3::Hosting::Module::getModulePaths();
-
     fprintf(stderr, "[vst-host] Scan found %zu module path(s)\n", paths.size());
 
     yyjson_mut_doc * doc = yyjson_mut_doc_new(nullptr);
@@ -68,44 +76,62 @@ static int cmd_scan() {
     yyjson_mut_doc_set_root(doc, root);
 
     for (const auto & path : paths) {
+        fprintf(stderr, "[vst-host]   Probing: %s ... ", path.c_str());
+        fflush(stderr);
+
         std::string error;
         VST3::Hosting::Module::Ptr module;
+
         try {
             module = VST3::Hosting::Module::create(path, error);
-        } catch (const std::exception & e) {
-            fprintf(stderr, "[vst-host]   EXCEPTION: %s\n    %s\n", path.c_str(), e.what());
-            continue;
         } catch (...) {
-            fprintf(stderr, "[vst-host]   EXCEPTION: %s (unknown)\n", path.c_str());
+            fprintf(stderr, "EXCEPTION\n");
             continue;
         }
+
         if (!module) {
-            fprintf(stderr, "[vst-host]   FAIL: %s\n    %s\n", path.c_str(), error.c_str());
+            fprintf(stderr, "FAIL (%s)\n", error.c_str());
             continue;
         }
 
         auto & factory = module->getFactory();
         auto classInfos = factory.classInfos();
-        fprintf(stderr, "[vst-host]   OK: %s (%zu classes)\n", path.c_str(), classInfos.size());
+        int audio_effects = 0;
+
         for (auto & classInfo : classInfos) {
             if (classInfo.category() != kVstAudioEffectClass) continue;
+            audio_effects++;
 
             yyjson_mut_val * obj = yyjson_mut_obj(doc);
-            yyjson_mut_obj_add_str(doc, obj, "name", classInfo.name().c_str());
-            yyjson_mut_obj_add_str(doc, obj, "vendor", classInfo.vendor().c_str());
-            yyjson_mut_obj_add_str(doc, obj, "version", classInfo.version().c_str());
-            yyjson_mut_obj_add_str(doc, obj, "path", path.c_str());
-            yyjson_mut_obj_add_str(doc, obj, "uid", classInfo.ID().toString().c_str());
-            yyjson_mut_obj_add_str(doc, obj, "subcategories",
+            yyjson_mut_obj_add_strcpy(doc, obj, "name", classInfo.name().c_str());
+            yyjson_mut_obj_add_strcpy(doc, obj, "vendor", classInfo.vendor().c_str());
+            yyjson_mut_obj_add_strcpy(doc, obj, "version", classInfo.version().c_str());
+            yyjson_mut_obj_add_strcpy(doc, obj, "path", path.c_str());
+            yyjson_mut_obj_add_strcpy(doc, obj, "uid", classInfo.ID().toString().c_str());
+            yyjson_mut_obj_add_strcpy(doc, obj, "subcategories",
                                    classInfo.subCategoriesString().c_str());
             yyjson_mut_arr_append(root, obj);
         }
+        fprintf(stderr, "OK (%d effects)\n", audio_effects);
     }
 
-    char * json = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, nullptr);
-    if (json) {
-        printf("%s\n", json);
+    fprintf(stderr, "[vst-host] JSON array has %zu entries\n",
+            yyjson_mut_arr_size(root));
+
+    size_t json_len = 0;
+    char * json = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, &json_len);
+    fprintf(stderr, "[vst-host] JSON write: ptr=%p len=%zu\n", (void*)json, json_len);
+    if (json && json_len > 0) {
+        // Write directly using low-level I/O to avoid plugin stdout corruption
+        HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD written = 0;
+        WriteFile(hStdout, json, (DWORD)json_len, &written, nullptr);
+        WriteFile(hStdout, "\n", 1, &written, nullptr);
+        FlushFileBuffers(hStdout);
+        fprintf(stderr, "[vst-host] Wrote %lu bytes to stdout\n", written);
         free(json);
+    } else {
+        fprintf(stderr, "[vst-host] ERROR: yyjson_mut_write returned null!\n");
     }
     yyjson_mut_doc_free(doc);
     return 0;
