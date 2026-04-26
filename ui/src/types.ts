@@ -109,7 +109,8 @@ export interface GenerationParams {
   repaintingStart?: number;
   repaintingEnd?: number;
 
-  // Mastering
+  // Post-processing
+  spectralLifterEnabled?: boolean;
   masteringEnabled?: boolean;
   masteringReference?: string;
   timbreReference?: boolean;  // Also use mastering ref as timbre conditioner

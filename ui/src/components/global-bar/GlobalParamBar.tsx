@@ -1,22 +1,21 @@
 // GlobalParamBar.tsx — Horizontal top bar with hover-to-expand engine config sections
 //
-// Renders 5 sections: Models, Adapters, Generation, LM/Thinking, Mastering.
+// Renders 5 sections: Models, Adapters, Generation, LM/Thinking, Post-Processing.
 // Each section shows a summary badge and expands on hover to reveal controls.
 // Sits full-width at the top of the entire window (above sidebar).
 
 import React, { useState, useCallback, useRef } from 'react';
-import { Cpu, Plug, Sliders, Brain, AudioWaveform, Upload, Download, Sparkles } from 'lucide-react';
+import { Cpu, Plug, Sliders, Brain, AudioWaveform, Upload, Download } from 'lucide-react';
 import { BarSection, ToggleSwitch } from './BarSection';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { ModelsDropdown, ModelsBadge } from './ModelsDropdown';
 import { AdaptersDropdown, AdaptersBadge } from './AdaptersDropdown';
 import { GenerationDropdown, GenerationBadge } from './GenerationDropdown';
 import { LmThinkingDropdown, LmThinkingBadge } from './LmThinkingDropdown';
-import { MasteringDropdown, MasteringBadge } from './MasteringDropdown';
-import { VstChainDropdown, VstChainBadge } from './VstChainDropdown';
+import { PostProcessingDropdown, PostProcessingBadge } from './PostProcessingDropdown';
 import { VramIndicator } from '../shared/VramIndicator';
 
-type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'mastering' | 'vst' | null;
+type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'postprocessing' | null;
 
 export const GlobalParamBar: React.FC = () => {
   const [openSection, setOpenSection] = useState<SectionId>(null);
@@ -91,6 +90,7 @@ export const GlobalParamBar: React.FC = () => {
         if (p.adapterScale !== undefined) gp.setAdapterScale(p.adapterScale);
         if (p.adapterGroupScales !== undefined) gp.setAdapterGroupScales(p.adapterGroupScales);
         if (p.adapterMode !== undefined) gp.setAdapterMode(p.adapterMode);
+        if (p.spectralLifterEnabled !== undefined) gp.setSpectralLifterEnabled(p.spectralLifterEnabled);
         if (p.masteringEnabled !== undefined) gp.setMasteringEnabled(p.masteringEnabled);
         if (p.masteringReference !== undefined) gp.setMasteringReference(p.masteringReference);
         if (p.timbreReference !== undefined) gp.setTimbreReference(p.timbreReference);
@@ -203,36 +203,16 @@ export const GlobalParamBar: React.FC = () => {
           </BarSection>
 
           <BarSection
-            id="mastering"
-            label="Mastering"
+            id="postprocessing"
+            label="Post-Processing"
             icon={<AudioWaveform size={14} />}
-            badge={<MasteringBadge />}
+            badge={<PostProcessingBadge />}
             accentColor="amber"
-            isOpen={openSection === 'mastering'}
-            onOpen={() => handleOpen('mastering')}
-            onClose={() => handleClose('mastering')}
-            headerToggle={
-              <ToggleSwitch
-                checked={gp.masteringEnabled}
-                onChange={gp.setMasteringEnabled}
-                accentColor="amber"
-              />
-            }
+            isOpen={openSection === 'postprocessing'}
+            onOpen={() => handleOpen('postprocessing')}
+            onClose={() => handleClose('postprocessing')}
           >
-            <MasteringDropdown />
-          </BarSection>
-
-          <BarSection
-            id="vst"
-            label="VST Chain"
-            icon={<Sparkles size={14} />}
-            badge={<VstChainBadge />}
-            accentColor="violet"
-            isOpen={openSection === 'vst'}
-            onOpen={() => handleOpen('vst')}
-            onClose={() => handleClose('vst')}
-          >
-            <VstChainDropdown />
+            <PostProcessingDropdown />
           </BarSection>
         </div>
 

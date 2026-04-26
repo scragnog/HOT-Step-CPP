@@ -125,7 +125,9 @@ export interface GlobalParams {
   lmCodesStrength: number;
   setLmCodesStrength: (v: number) => void;
 
-  // ── Mastering ──
+  // ── Post-Processing ──
+  spectralLifterEnabled: boolean;
+  setSpectralLifterEnabled: (v: boolean) => void;
   masteringEnabled: boolean;
   setMasteringEnabled: (v: boolean) => void;
   masteringReference: string;
@@ -214,7 +216,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [lmNegativePrompt, setLmNegativePrompt] = usePersistedState('hs-lmNegativePrompt', 'NO USER INPUT');
   const [lmCodesStrength, setLmCodesStrength] = usePersistedState('hs-lmCodesStrength', 1.0);
 
-  // Mastering
+  // Post-processing
+  const [spectralLifterEnabled, setSpectralLifterEnabled] = usePersistedState('hs-spectralLifterEnabled', false);
   const [masteringEnabled, setMasteringEnabled] = usePersistedState('hs-masteringEnabled', false);
   const [masteringReference, setMasteringReference] = usePersistedState('hs-masteringReference', '');
   const [timbreReference, setTimbreReference] = usePersistedState('hs-timbreReference', false);
@@ -278,7 +281,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // LM Codes Strength — fraction of DiT steps guided by LM codes
       audioCoverStrength: (!skipLm && lmCodesStrength < 1.0) ? lmCodesStrength : undefined,
 
-      // Mastering
+      // Post-processing
+      spectralLifterEnabled,
       masteringEnabled,
       masteringReference: masteringEnabled ? masteringReference : undefined,
       timbreReference: (masteringEnabled && timbreReference && masteringReference) ? true : undefined,
@@ -310,7 +314,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     latentShift, latentRescale, customTimesteps,
     denoiseStrength, denoiseSmoothing, denoiseMix,
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
-    masteringEnabled, masteringReference, timbreReference,
+    spectralLifterEnabled, masteringEnabled, masteringReference, timbreReference,
     settings,
   ]);
 
@@ -347,7 +351,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     lmTopK, setLmTopK, lmTopP, setLmTopP,
     lmNegativePrompt, setLmNegativePrompt,
     lmCodesStrength, setLmCodesStrength,
-    // Mastering
+    // Post-processing
+    spectralLifterEnabled, setSpectralLifterEnabled,
     masteringEnabled, setMasteringEnabled,
     masteringReference, setMasteringReference,
     timbreReference, setTimbreReference,
@@ -376,6 +381,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     lmTemperature, setLmTemperature, lmCfgScale, setLmCfgScale,
     lmTopK, setLmTopK, lmTopP, setLmTopP,
     lmNegativePrompt, setLmNegativePrompt, lmCodesStrength, setLmCodesStrength,
+    spectralLifterEnabled, setSpectralLifterEnabled,
     masteringEnabled, setMasteringEnabled,
     masteringReference, setMasteringReference,
     timbreReference, setTimbreReference,

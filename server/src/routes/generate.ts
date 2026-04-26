@@ -20,6 +20,7 @@ import { getUserId } from './auth.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
 import { runMastering } from './mastering.js';
 import { applyVstChain } from './vst.js';
+import { runSpectralLifter } from '../services/spectralLifter.js';
 import { subscribeLines, pushLog } from './logs.js';
 
 const router = Router();
@@ -548,58 +549,90 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     const keyScale = firstResult.keyscale || '';
     const timeSignature = firstResult.timesignature || '';
 
-    // ── Post-generation VST chain ──
-    const vstChainEnabled = true; // VST chain applies if any plugins are active (checked inside)
-    if (vstChainEnabled) {
-      try {
-        job.stage = 'Applying VST effects...';
-        job.progress = 91;
-        for (const audioUrl of audioUrls) {
-          const audioFilename = path.basename(audioUrl);
-          const wavPath = path.join(config.data.audioDir, audioFilename);
-          if (wavPath.endsWith('.wav')) {
-            const applied = await applyVstChain(wavPath);
-            if (applied) {
-              logGeneration(job.id, 'INFO', `[VST] Chain applied to ${audioFilename}`);
-            }
+    // ── Post-processing chain ─────────────────────────────────
+    // Raw WAV (audio_url) is NEVER modified. Post-processing runs on a copy.
+    // "mastered" = any/all of: Spectral Lifter, VST Chain, Matchering Mastering.
+    const spectralLifterOn = !!job.params.spectralLifterEnabled;
+    // VST chain self-gates via applyVstChain() — returns false if no plugins active
+    const masteringOn = !!masteringRef && !!job.params.masteringEnabled;
+
+    let masteredAudioUrl = '';
+
+    try {
+      for (const audioUrl of audioUrls) {
+        const audioFilename = path.basename(audioUrl);
+        const rawWavPath = path.join(config.data.audioDir, audioFilename);
+
+        if (!rawWavPath.endsWith('.wav')) continue; // Post-processing only on WAV
+
+        const ext2 = path.extname(audioFilename);
+        const base2 = path.basename(audioFilename, ext2);
+        const processedFilename = `${base2}_mastered${ext2}`;
+        const processedPath = path.join(config.data.audioDir, processedFilename);
+
+        // Start with a copy of the raw WAV — original stays pristine
+        fs.copyFileSync(rawWavPath, processedPath);
+        let anyStageRan = false;
+
+        // Stage 1: Spectral Lifter
+        if (spectralLifterOn) {
+          job.stage = 'Spectral Lifter...';
+          job.progress = 91;
+          try {
+            const tempLifted = processedPath + '.lifted.wav';
+            await runSpectralLifter(processedPath, tempLifted);
+            fs.renameSync(tempLifted, processedPath);
+            anyStageRan = true;
+            logGeneration(job.id, 'INFO', `[Spectral Lifter] Applied to ${audioFilename}`);
+          } catch (slErr: any) {
+            logGeneration(job.id, 'WARNING', `[Spectral Lifter] Failed (non-fatal): ${slErr.message}`);
+            console.warn(`[Spectral Lifter] Non-fatal error:`, slErr.message);
           }
         }
-      } catch (vstErr: any) {
-        logGeneration(job.id, 'WARNING', `[VST] Chain failed (non-fatal): ${vstErr.message}`);
-        console.warn(`[VST] Non-fatal chain error:`, vstErr.message);
-      }
-    }
 
-    // ── Post-generation mastering ──
-    let masteredAudioUrl = '';
-    if (masteringRef && job.params.masteringEnabled) {
-      try {
-        job.stage = 'Mastering...';
-        job.progress = 92;
-        logGeneration(job.id, 'INFO', `[Mastering] Applying reference mastering: ${masteringRef}`);
-
-        // Resolve path: absolute paths used directly, relative names looked up in references dir
-        const refPath = path.isAbsolute(masteringRef)
-          ? masteringRef
-          : path.join(config.data.dir, 'references', masteringRef);
-
-        for (const audioUrl of audioUrls) {
-          const audioFilename = path.basename(audioUrl);
-          const targetPath = path.join(config.data.audioDir, audioFilename);
-          const ext2 = path.extname(audioFilename);
-          const base2 = path.basename(audioFilename, ext2);
-          const masteredFilename = `${base2}_mastered${ext2}`;
-          const masteredPath = path.join(config.data.audioDir, masteredFilename);
-
-          await runMastering(targetPath, refPath, masteredPath);
-          masteredAudioUrl = `/audio/${masteredFilename}`;
-          logGeneration(job.id, 'INFO', `[Mastering] Done → ${masteredAudioUrl}`);
+        // Stage 2: VST Chain
+        job.stage = 'Applying VST effects...';
+        job.progress = 93;
+        try {
+          const applied = await applyVstChain(processedPath);
+          if (applied) {
+            anyStageRan = true;
+            logGeneration(job.id, 'INFO', `[VST] Chain applied to ${processedFilename}`);
+          }
+        } catch (vstErr: any) {
+          logGeneration(job.id, 'WARNING', `[VST] Chain failed (non-fatal): ${vstErr.message}`);
+          console.warn(`[VST] Non-fatal chain error:`, vstErr.message);
         }
-      } catch (masterErr: any) {
-        logGeneration(job.id, 'WARNING', `[Mastering] Failed (non-fatal): ${masterErr.message}`);
-        console.warn(`[Mastering] Non-fatal mastering error:`, masterErr.message);
-        // Don't fail the whole generation
+
+        // Stage 3: Matchering Mastering
+        if (masteringOn) {
+          job.stage = 'Mastering...';
+          job.progress = 95;
+          try {
+            const refPath = path.isAbsolute(masteringRef)
+              ? masteringRef
+              : path.join(config.data.dir, 'references', masteringRef);
+            const tempMastered = processedPath + '.mastered.wav';
+            await runMastering(processedPath, refPath, tempMastered);
+            fs.renameSync(tempMastered, processedPath);
+            anyStageRan = true;
+            logGeneration(job.id, 'INFO', `[Mastering] Applied to ${processedFilename}`);
+          } catch (masterErr: any) {
+            logGeneration(job.id, 'WARNING', `[Mastering] Failed (non-fatal): ${masterErr.message}`);
+            console.warn(`[Mastering] Non-fatal mastering error:`, masterErr.message);
+          }
+        }
+
+        // Only set mastered URL if at least one stage actually ran
+        if (anyStageRan) {
+          masteredAudioUrl = `/audio/${processedFilename}`;
+        } else {
+          // No post-processing ran — clean up the copy
+          try { fs.unlinkSync(processedPath); } catch {}
+        }
       }
+    } catch (err: any) {
+      logGeneration(job.id, 'WARNING', `[Post-Processing] Chain failed: ${err.message}`);
     }
 
     // Create song entries in DB
