@@ -77,9 +77,9 @@ struct HotStepParams {
     // DCW (Differential Correction in Wavelet domain) — CVPR 2026
     // Training-free sampler-side correction that mitigates SNR-t bias.
     bool        dcw_enabled      = false;
-    std::string dcw_mode         = "low";     // "pix", "low", "high", "double"
-    float       dcw_scaler       = 0.1f;
-    float       dcw_high_scaler  = 0.0f;      // only used in "double" mode
+    std::string dcw_mode         = "double";   // "pix", "low", "high", "double"
+    float       dcw_scaler       = 0.05f;      // upstream default: 0.05
+    float       dcw_high_scaler  = 0.02f;      // upstream default: 0.02 (only used in "double" mode)
 
     // Latent post-processing (applied after DiT output, before VAE decode)
     // Formula: output[i] = output[i] * latent_rescale + latent_shift

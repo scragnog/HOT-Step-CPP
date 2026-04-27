@@ -678,6 +678,15 @@ static int dit_ggml_generate(DiTGGML *           model,
         } else {
             float t_next = schedule[step + 1];
 
+            // ── Cache pre-step latent for DCW ─────────────────────────────
+            // The predicted clean sample denoised = x - v*t must use the
+            // PRE-step latent and raw velocity (matching upstream Python).
+            // The solver modifies xt[] in-place, so we must snapshot first.
+            std::vector<float> xt_pre;
+            if (g_hotstep_params.dcw_enabled) {
+                xt_pre.assign(xt.begin(), xt.end());
+            }
+
             // ── Modular solver dispatch ──────────────────────────────────
             // The solver step function modifies xt[] in-place.
             // Multi-eval solvers call evaluate_velocity() via the model_fn
@@ -690,25 +699,24 @@ static int dit_ggml_generate(DiTGGML *           model,
 
             // ── DCW correction (Differential Correction in Wavelet domain) ──
             // Apply frequency-domain correction after the solver step.
-            // Scaler is modulated by t_curr: larger corrections early, decaying.
+            // Scaler follows upstream Eq. 20/21: low = t * scaler,
+            // high = (1-t) * scaler. No step-count normalization.
             if (g_hotstep_params.dcw_enabled) {
-                // Compute denoised (predicted x0) = xt - vt * t_curr
-                // We use vt from the last model evaluation (still valid after solver step).
+                // Compute denoised (predicted x0) from PRE-step latent:
+                //   denoised = xt_before_step - vt * t_curr
+                // Using post-step xt here would be incorrect (it has already
+                // been moved by the solver toward x0).
                 std::vector<float> denoised(n_total);
                 for (int i = 0; i < n_total; i++) {
-                    denoised[i] = xt[i] - vt[i] * t_curr;
+                    denoised[i] = xt_pre[i] - vt[i] * t_curr;
                 }
 
                 const std::string & dcw_mode = g_hotstep_params.dcw_mode;
-                
-                // Normalization: DCW correction applies an absolute shift per-step.
-                // If num_steps increases (dt shrinks), we MUST scale down the per-step
-                // application to maintain an identical cumulative correction integral.
-                // We normalize dt against the baseline tuning of 20 steps (dt = 0.05).
-                float dt = t_curr - t_next;
-                float step_norm = dt * 20.0f;
 
-                float eff_scaler = t_curr * g_hotstep_params.dcw_scaler * step_norm;
+                // Effective scaler: matches upstream Python exactly.
+                // low  = t_curr * scaler
+                // high = (1 - t_curr) * high_scaler
+                float eff_scaler = t_curr * g_hotstep_params.dcw_scaler;
 
                 if (dcw_mode == "pix") {
                     dcw_correct_pix(xt.data(), denoised.data(), eff_scaler, n_total);
@@ -717,13 +725,14 @@ static int dit_ggml_generate(DiTGGML *           model,
                 } else if (dcw_mode == "high") {
                     dcw_correct_high(xt.data(), denoised.data(), eff_scaler, T, Oc, N);
                 } else if (dcw_mode == "double") {
-                    float eff_high = (1.0f - t_curr) * g_hotstep_params.dcw_high_scaler * step_norm;
+                    float eff_high = (1.0f - t_curr) * g_hotstep_params.dcw_high_scaler;
                     dcw_correct_double(xt.data(), denoised.data(), eff_scaler, eff_high, T, Oc, N);
                 }
 
                 if (step == 0) {
-                    fprintf(stderr, "[DCW] mode=%s scaler=%.3f (eff=%.4f at t=%.3f)\n",
-                            dcw_mode.c_str(), g_hotstep_params.dcw_scaler, eff_scaler, t_curr);
+                    fprintf(stderr, "[DCW] mode=%s scaler=%.4f high_scaler=%.4f (eff_low=%.4f eff_high=%.4f at t=%.3f)\n",
+                            dcw_mode.c_str(), g_hotstep_params.dcw_scaler, g_hotstep_params.dcw_high_scaler,
+                            eff_scaler, (1.0f - t_curr) * g_hotstep_params.dcw_high_scaler, t_curr);
                 }
             }
 
