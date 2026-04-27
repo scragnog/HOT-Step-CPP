@@ -1,186 +1,176 @@
 #pragma once
-// dcw.h: Differential Correction in Wavelet domain (DCW)
+// dcw.h: Haar DWT/IDWT 1D + DCW low-band correction.
 //
-// Training-free sampler-side quality enhancer based on:
-//   "Elucidating the SNR-t Bias of Diffusion Probabilistic Models"
-//   Yu, Sun, Zeng, Chu, Zhan — CVPR 2026 (arXiv:2604.16044)
-//   https://github.com/AMAP-ML/DCW
+// Implements the sampler-side Differential Correction in Wavelet domain
+// from: Meng Yu, Lei Sun, Jianhao Zeng, Xiangxiang Chu, Kun Zhan.
+// "Elucidating the SNR-t Bias of Diffusion Probabilistic Models",
+// CVPR 2026. arXiv:2604.16044. https://github.com/AMAP-ML/DCW
 //
-// Decomposes the denoising latent into frequency bands via 1-D Haar DWT,
-// applies per-band differential correction, then reconstructs.
-// Counteracts the SNR-t drift that accumulates during reverse-process inference.
+// Recipe (mode "low", wavelet "haar"):
+//   denoised = xt_after - vt * t_next        (predicted clean sample)
+//   xL, xH = DWT(xt)
+//   yL, _  = DWT(denoised)
+//   xL    += (t_curr * scaler) * (xL - yL)
+//   xt     = IDWT(xL, xH)
 //
-// Operates on flat [N * T * Oc] audio latents where:
-//   N  = batch size
-//   T  = temporal frames (25 Hz latent rate)
-//   Oc = latent channels (64 for ACE-Step)
-// DWT is applied along the T axis independently per (batch, channel) pair.
+// Haar 1D orthonormal kernels:
+//   low-pass  h = [ 1/sqrt(2),  1/sqrt(2) ]
+//   high-pass g = [ 1/sqrt(2), -1/sqrt(2) ]
+// Zero-pad on odd T, trim on reconstruction (matches pytorch_wavelets mode='zero').
+//
+// Ported from acestepcpp/acestep.cpp/src/dwt-haar.h (upstream reference C++ impl).
 
-#include <algorithm>
 #include <cmath>
-#include <cstring>
-#include <string>
 #include <vector>
 
-static constexpr float HAAR_NORM = 0.70710678118f; // 1/sqrt(2)
-
-// ── 1-D Haar Discrete Wavelet Transform ──────────────────────────────────
-// Forward: decomposes signal of even length into low-freq and high-freq halves.
-//   low[i]  = (in[2i] + in[2i+1]) / sqrt(2)
-//   high[i] = (in[2i] - in[2i+1]) / sqrt(2)
-static inline void haar_dwt_1d(const float * in, float * low, float * high, int len) {
-    const int half = len / 2;
-    for (int i = 0; i < half; i++) {
-        float a = in[2 * i];
-        float b = in[2 * i + 1];
-        low[i]  = (a + b) * HAAR_NORM;
-        high[i] = (a - b) * HAAR_NORM;
-    }
-}
-
-// Inverse: reconstructs signal from low-freq and high-freq halves.
-//   out[2i]   = (low[i] + high[i]) / sqrt(2)
-//   out[2i+1] = (low[i] - high[i]) / sqrt(2)
-static inline void haar_idwt_1d(const float * low, const float * high, float * out, int len) {
-    const int half = len / 2;
-    for (int i = 0; i < half; i++) {
-        float l = low[i];
-        float h = high[i];
-        out[2 * i]     = (l + h) * HAAR_NORM;
-        out[2 * i + 1] = (l - h) * HAAR_NORM;
-    }
-}
-
-// ── DCW Correction Functions ─────────────────────────────────────────────
-// These operate on flat [N * T * Oc] latents, applying Haar DWT along T.
-// For each (batch, channel), we extract T values at stride Oc, transform,
-// correct, inverse-transform, and write back.
-
-// Pixel-space correction (Eq. 17 from the paper — no wavelets):
-//   x_next[i] += scaler * (x_next[i] - denoised[i])
-static inline void dcw_correct_pix(float * x_next, const float * denoised,
-                                    float scaler, int n_total) {
-    for (int i = 0; i < n_total; i++) {
-        x_next[i] += scaler * (x_next[i] - denoised[i]);
-    }
-}
-
-// Low-frequency wavelet correction (Eq. 18/20):
-// Correct only the low-frequency (approximation) coefficients.
-static inline void dcw_correct_low(float * x_next, const float * denoised,
-                                    float scaler, int T, int Oc, int N) {
-    if (T < 2) return; // need at least 2 frames for DWT
-    const int T_even = (T / 2) * 2; // round down to even
-    const int half_T = T_even / 2;
-
-    // Scratch buffers for one (batch, channel) 1-D signal
-    std::vector<float> sig_x(T_even), sig_y(T_even);
-    std::vector<float> xl(half_T), xh(half_T), yl(half_T);
-    std::vector<float> out(T_even);
-
-    for (int b = 0; b < N; b++) {
-        for (int ch = 0; ch < Oc; ch++) {
-            // Extract T values at stride Oc for this (batch, channel)
-            const int base = b * T * Oc + ch;
-            for (int t = 0; t < T_even; t++) {
-                sig_x[t] = x_next[base + t * Oc];
-                sig_y[t] = denoised[base + t * Oc];
+// Forward Haar DWT along the T axis of a [T, C] buffer.
+// out_L and out_H each hold Tl = (T + 1) / 2 frames of C channels.
+// src layout: src[t * C + c]. out layout: out_{L,H}[tl * C + c].
+static inline void dwt_haar_fwd_tc(const float * src, int T, int C, float * out_L, float * out_H) {
+    const float inv_sqrt2 = 0.70710678118654752440f;
+    int         Tl        = (T + 1) / 2;
+    for (int tl = 0; tl < Tl; tl++) {
+        int           i0    = 2 * tl;
+        int           i1    = 2 * tl + 1;
+        const float * a     = src + i0 * C;
+        // Zero-padded high index on odd T: pretend src[i1] = 0.
+        bool          has_b = (i1 < T);
+        float *       L     = out_L + tl * C;
+        float *       H     = out_H + tl * C;
+        if (has_b) {
+            const float * b = src + i1 * C;
+            for (int c = 0; c < C; c++) {
+                L[c] = (a[c] + b[c]) * inv_sqrt2;
+                H[c] = (a[c] - b[c]) * inv_sqrt2;
             }
-
-            // Forward DWT
-            haar_dwt_1d(sig_x.data(), xl.data(), xh.data(), T_even);
-            // We only need yl for low-freq correction, but haar_dwt_1d requires valid pointers.
-            std::vector<float> yh_tmp(half_T);
-            haar_dwt_1d(sig_y.data(), yl.data(), yh_tmp.data(), T_even);
-
-            // Correct low-frequency band
-            for (int i = 0; i < half_T; i++) {
-                xl[i] += scaler * (xl[i] - yl[i]);
-            }
-
-            // Inverse DWT (keep original high-freq)
-            haar_idwt_1d(xl.data(), xh.data(), out.data(), T_even);
-
-            // Write back
-            for (int t = 0; t < T_even; t++) {
-                x_next[base + t * Oc] = out[t];
+        } else {
+            for (int c = 0; c < C; c++) {
+                L[c] = a[c] * inv_sqrt2;
+                H[c] = a[c] * inv_sqrt2;
             }
         }
     }
 }
 
-// High-frequency wavelet correction:
-// Correct only the high-frequency (detail) coefficients.
-static inline void dcw_correct_high(float * x_next, const float * denoised,
-                                     float scaler, int T, int Oc, int N) {
-    if (T < 2) return;
-    const int T_even = (T / 2) * 2;
-    const int half_T = T_even / 2;
-
-    std::vector<float> sig_x(T_even), sig_y(T_even);
-    std::vector<float> xl(half_T), xh(half_T), yh(half_T);
-    std::vector<float> yl_tmp(half_T);
-    std::vector<float> out(T_even);
-
-    for (int b = 0; b < N; b++) {
-        for (int ch = 0; ch < Oc; ch++) {
-            const int base = b * T * Oc + ch;
-            for (int t = 0; t < T_even; t++) {
-                sig_x[t] = x_next[base + t * Oc];
-                sig_y[t] = denoised[base + t * Oc];
-            }
-
-            haar_dwt_1d(sig_x.data(), xl.data(), xh.data(), T_even);
-            haar_dwt_1d(sig_y.data(), yl_tmp.data(), yh.data(), T_even);
-
-            // Correct high-frequency band
-            for (int i = 0; i < half_T; i++) {
-                xh[i] += scaler * (xh[i] - yh[i]);
-            }
-
-            haar_idwt_1d(xl.data(), xh.data(), out.data(), T_even);
-
-            for (int t = 0; t < T_even; t++) {
-                x_next[base + t * Oc] = out[t];
+// Inverse Haar IDWT along the T axis, reconstructing exactly T frames.
+// L and H must each hold Tl = (T + 1) / 2 frames of C channels.
+static inline void dwt_haar_inv_tc(const float * L, const float * H, int T, int C, float * out) {
+    const float inv_sqrt2 = 0.70710678118654752440f;
+    int         Tl        = (T + 1) / 2;
+    for (int tl = 0; tl < Tl; tl++) {
+        int           i0 = 2 * tl;
+        int           i1 = 2 * tl + 1;
+        const float * Lc = L + tl * C;
+        const float * Hc = H + tl * C;
+        float *       a  = out + i0 * C;
+        for (int c = 0; c < C; c++) {
+            a[c] = (Lc[c] + Hc[c]) * inv_sqrt2;
+        }
+        if (i1 < T) {
+            float * b = out + i1 * C;
+            for (int c = 0; c < C; c++) {
+                b[c] = (Lc[c] - Hc[c]) * inv_sqrt2;
             }
         }
+        // i1 >= T: odd T, last destination frame doesn't exist, discard.
     }
 }
 
-// Double correction: correct both low and high bands with independent scalers.
-static inline void dcw_correct_double(float * x_next, const float * denoised,
-                                       float low_scaler, float high_scaler,
-                                       int T, int Oc, int N) {
-    if (T < 2) return;
-    const int T_even = (T / 2) * 2;
-    const int half_T = T_even / 2;
+// DCW mode "low" correction on xt using Haar wavelet, in place.
+// Pushes xt's low-frequency band away from denoised's low-frequency band.
+// Formula: xL += effective_scaler * (xL - yL), then xt = IDWT(xL, xH).
+// xt and denoised are [T, C] single-sample buffers.
+// Tmp buffers must each provide Tl * C floats, Tl = (T + 1) / 2.
+static inline void dcw_haar_low_inplace(float *       xt,
+                                        const float * denoised,
+                                        int           T,
+                                        int           C,
+                                        float         effective_scaler,
+                                        float *       tmp_xL,
+                                        float *       tmp_xH,
+                                        float *       tmp_yL,
+                                        float *       tmp_yH) {
+    if (effective_scaler == 0.0f) {
+        return;
+    }
+    int Tl = (T + 1) / 2;
+    dwt_haar_fwd_tc(xt, T, C, tmp_xL, tmp_xH);
+    dwt_haar_fwd_tc(denoised, T, C, tmp_yL, tmp_yH);
+    int n_L = Tl * C;
+    for (int i = 0; i < n_L; i++) {
+        tmp_xL[i] = tmp_xL[i] + effective_scaler * (tmp_xL[i] - tmp_yL[i]);
+    }
+    dwt_haar_inv_tc(tmp_xL, tmp_xH, T, C, xt);
+}
 
-    std::vector<float> sig_x(T_even), sig_y(T_even);
-    std::vector<float> xl(half_T), xh(half_T), yl(half_T), yh(half_T);
-    std::vector<float> out(T_even);
+// DCW mode "high" correction on xt using Haar wavelet, in place.
+// Pushes xt's high-frequency band away from denoised's high-frequency band.
+// Formula: xH += effective_scaler * (xH - yH), then xt = IDWT(xL, xH).
+static inline void dcw_haar_high_inplace(float *       xt,
+                                         const float * denoised,
+                                         int           T,
+                                         int           C,
+                                         float         effective_scaler,
+                                         float *       tmp_xL,
+                                         float *       tmp_xH,
+                                         float *       tmp_yL,
+                                         float *       tmp_yH) {
+    if (effective_scaler == 0.0f) {
+        return;
+    }
+    int Tl  = (T + 1) / 2;
+    int n_H = Tl * C;
+    dwt_haar_fwd_tc(xt, T, C, tmp_xL, tmp_xH);
+    dwt_haar_fwd_tc(denoised, T, C, tmp_yL, tmp_yH);
+    for (int i = 0; i < n_H; i++) {
+        tmp_xH[i] = tmp_xH[i] + effective_scaler * (tmp_xH[i] - tmp_yH[i]);
+    }
+    dwt_haar_inv_tc(tmp_xL, tmp_xH, T, C, xt);
+}
 
-    for (int b = 0; b < N; b++) {
-        for (int ch = 0; ch < Oc; ch++) {
-            const int base = b * T * Oc + ch;
-            for (int t = 0; t < T_even; t++) {
-                sig_x[t] = x_next[base + t * Oc];
-                sig_y[t] = denoised[base + t * Oc];
-            }
-
-            haar_dwt_1d(sig_x.data(), xl.data(), xh.data(), T_even);
-            haar_dwt_1d(sig_y.data(), yl.data(), yh.data(), T_even);
-
-            // Correct both bands
-            for (int i = 0; i < half_T; i++) {
-                xl[i] += low_scaler  * (xl[i] - yl[i]);
-                xh[i] += high_scaler * (xh[i] - yh[i]);
-            }
-
-            haar_idwt_1d(xl.data(), xh.data(), out.data(), T_even);
-
-            for (int t = 0; t < T_even; t++) {
-                x_next[base + t * Oc] = out[t];
-            }
+// DCW mode "double" correction on xt using Haar wavelet, in place.
+// Applies independent correction to both bands with distinct scalers.
+// Formula: xL += low_s * (xL - yL);  xH += high_s * (xH - yH).
+static inline void dcw_haar_double_inplace(float *       xt,
+                                           const float * denoised,
+                                           int           T,
+                                           int           C,
+                                           float         low_scaler,
+                                           float         high_scaler,
+                                           float *       tmp_xL,
+                                           float *       tmp_xH,
+                                           float *       tmp_yL,
+                                           float *       tmp_yH) {
+    if (low_scaler == 0.0f && high_scaler == 0.0f) {
+        return;
+    }
+    int Tl  = (T + 1) / 2;
+    int n_L = Tl * C;
+    int n_H = Tl * C;
+    dwt_haar_fwd_tc(xt, T, C, tmp_xL, tmp_xH);
+    dwt_haar_fwd_tc(denoised, T, C, tmp_yL, tmp_yH);
+    if (low_scaler != 0.0f) {
+        for (int i = 0; i < n_L; i++) {
+            tmp_xL[i] = tmp_xL[i] + low_scaler * (tmp_xL[i] - tmp_yL[i]);
         }
+    }
+    if (high_scaler != 0.0f) {
+        for (int i = 0; i < n_H; i++) {
+            tmp_xH[i] = tmp_xH[i] + high_scaler * (tmp_xH[i] - tmp_yH[i]);
+        }
+    }
+    dwt_haar_inv_tc(tmp_xL, tmp_xH, T, C, xt);
+}
+
+// DCW mode "pix" correction on xt, in place. No wavelet transform.
+// Pixel/latent-space differential correction, ablation baseline.
+// Formula: xt += effective_scaler * (xt - denoised).
+static inline void dcw_pix_inplace(float * xt, const float * denoised, int T, int C, float effective_scaler) {
+    if (effective_scaler == 0.0f) {
+        return;
+    }
+    int n = T * C;
+    for (int i = 0; i < n; i++) {
+        xt[i] = xt[i] + effective_scaler * (xt[i] - denoised[i]);
     }
 }

@@ -678,19 +678,6 @@ static int dit_ggml_generate(DiTGGML *           model,
         } else {
             float t_next = schedule[step + 1];
 
-            // ── Cache pre-step state for DCW ─────────────────────────────
-            // The predicted clean sample denoised = x - v*t must use the
-            // PRE-step latent AND the raw velocity from the first model
-            // evaluation (matching upstream Python's xt_before_step and
-            // vt_for_denoise).  Multi-eval solvers (RF-Solver, Heun, RK4)
-            // overwrite both xt[] and vt[] during their step, so we must
-            // snapshot both before the solver runs.
-            std::vector<float> xt_pre;
-            std::vector<float> vt_pre;
-            if (g_hotstep_params.dcw_enabled) {
-                xt_pre.assign(xt.begin(), xt.end());
-                vt_pre.assign(vt.begin(), vt.end());
-            }
 
             // ── Modular solver dispatch ──────────────────────────────────
             // The solver step function modifies xt[] in-place.
@@ -703,41 +690,72 @@ static int dit_ggml_generate(DiTGGML *           model,
             );
 
             // ── DCW correction (Differential Correction in Wavelet domain) ──
-            // Apply frequency-domain correction after the solver step.
-            // Scaler follows upstream Eq. 20/21: low = t * scaler,
-            // high = (1-t) * scaler. No step-count normalization.
+            // Sampler-side correction for SNR-t bias in flow matching.
+            // Matches upstream acestepcpp reference (dwt-haar.h + dit-sampler.h).
+            //
+            // 4 modes with per-mode t-modulation:
+            //   low:    s = t_curr * dcw_scaler          (strong at high noise)
+            //   high:   s = (1 - t_curr) * dcw_scaler    (strong near clean)
+            //   double: low = t_curr * scaler, high = (1 - t_curr) * high_scaler
+            //   pix:    s = dcw_scaler                    (constant, no modulation)
+            //
+            // ODE-only: denoised = xt_after - vt * t_next (reconstructed from
+            // post-step xt, since xt_before = xt + vt * dt for Euler ODE so
+            // denoised = xt_before - vt * t_curr = xt_after - vt * t_next).
             if (g_hotstep_params.dcw_enabled) {
-                // Compute denoised (predicted x0) from PRE-step state:
-                //   denoised = xt_before_step - vt_for_denoise * t_curr
-                // Both xt and vt may have been overwritten by the solver
-                // (e.g. RF-Solver writes v_mid into vt_buf).
-                std::vector<float> denoised(n_total);
-                for (int i = 0; i < n_total; i++) {
-                    denoised[i] = xt_pre[i] - vt_pre[i] * t_curr;
+                const std::string & dcw_mode = g_hotstep_params.dcw_mode;
+                bool is_low    = (dcw_mode == "low");
+                bool is_high   = (dcw_mode == "high");
+                bool is_double = (dcw_mode == "double");
+                bool is_pix    = (dcw_mode == "pix");
+                if (!is_low && !is_high && !is_double && !is_pix) {
+                    is_low = true;  // fallback to safest mode
                 }
 
-                const std::string & dcw_mode = g_hotstep_params.dcw_mode;
+                // Per-mode effective scaler, modulated as the paper prescribes
+                float s_low      = t_curr * g_hotstep_params.dcw_scaler;
+                float s_high     = (1.0f - t_curr) * g_hotstep_params.dcw_scaler;
+                float s_double_h = (1.0f - t_curr) * g_hotstep_params.dcw_high_scaler;
+                float s_pix      = g_hotstep_params.dcw_scaler;  // constant per paper
 
-                // Effective scaler: matches upstream Python exactly.
-                // low  = t_curr * scaler
-                // high = (1 - t_curr) * high_scaler
-                float eff_scaler = t_curr * g_hotstep_params.dcw_scaler;
+                // Scratch buffers for DWT (allocated once, reused per batch)
+                int Tl = (T + 1) / 2;
+                std::vector<float> denoised(n_per);
+                std::vector<float> tmp_xL(Tl * Oc), tmp_xH(Tl * Oc);
+                std::vector<float> tmp_yL(Tl * Oc), tmp_yH(Tl * Oc);
 
-                if (dcw_mode == "pix") {
-                    dcw_correct_pix(xt.data(), denoised.data(), eff_scaler, n_total);
-                } else if (dcw_mode == "low") {
-                    dcw_correct_low(xt.data(), denoised.data(), eff_scaler, T, Oc, N);
-                } else if (dcw_mode == "high") {
-                    dcw_correct_high(xt.data(), denoised.data(), eff_scaler, T, Oc, N);
-                } else if (dcw_mode == "double") {
-                    float eff_high = (1.0f - t_curr) * g_hotstep_params.dcw_high_scaler;
-                    dcw_correct_double(xt.data(), denoised.data(), eff_scaler, eff_high, T, Oc, N);
+                for (int b = 0; b < N; b++) {
+                    float * xt_b       = xt.data() + b * n_per;
+                    const float * vt_b = vt.data() + b * n_per;
+
+                    // Denoised from POST-step xt (matches upstream C++ exactly)
+                    for (int i = 0; i < n_per; i++) {
+                        denoised[i] = xt_b[i] - vt_b[i] * t_next;
+                    }
+
+                    if (is_low) {
+                        dcw_haar_low_inplace(xt_b, denoised.data(), T, Oc, s_low,
+                                             tmp_xL.data(), tmp_xH.data(),
+                                             tmp_yL.data(), tmp_yH.data());
+                    } else if (is_high) {
+                        dcw_haar_high_inplace(xt_b, denoised.data(), T, Oc, s_high,
+                                              tmp_xL.data(), tmp_xH.data(),
+                                              tmp_yL.data(), tmp_yH.data());
+                    } else if (is_double) {
+                        dcw_haar_double_inplace(xt_b, denoised.data(), T, Oc, s_low, s_double_h,
+                                                tmp_xL.data(), tmp_xH.data(),
+                                                tmp_yL.data(), tmp_yH.data());
+                    } else {  // is_pix
+                        dcw_pix_inplace(xt_b, denoised.data(), T, Oc, s_pix);
+                    }
                 }
 
                 if (step == 0) {
-                    fprintf(stderr, "[DCW] mode=%s scaler=%.4f high_scaler=%.4f (eff_low=%.4f eff_high=%.4f at t=%.3f)\n",
-                            dcw_mode.c_str(), g_hotstep_params.dcw_scaler, g_hotstep_params.dcw_high_scaler,
-                            eff_scaler, (1.0f - t_curr) * g_hotstep_params.dcw_high_scaler, t_curr);
+                    fprintf(stderr, "[DCW] mode=%s scaler=%.4f high_scaler=%.4f "
+                            "(eff_low=%.4f eff_high=%.4f at t=%.3f)\n",
+                            dcw_mode.c_str(), g_hotstep_params.dcw_scaler,
+                            g_hotstep_params.dcw_high_scaler,
+                            s_low, s_double_h, t_curr);
                 }
             }
 
