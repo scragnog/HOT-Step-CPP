@@ -250,6 +250,33 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   if (item.artistName) params.artist = item.artistName;
   if (gen.subject) params.subject = gen.subject;
 
+  // 2b) Per-song params that the Create page sends from its local state.
+  //     Read from the same localStorage keys to maintain parity.
+  //     Fallbacks match CreatePanel defaults: '' (auto) for timesig, 'en' for language.
+  if (!params.timeSignature) {
+    try {
+      const stored = localStorage.getItem('hs-timeSignature');
+      params.timeSignature = stored ? JSON.parse(stored) : '';
+    } catch { params.timeSignature = ''; }
+  }
+  if (!params.vocalLanguage) {
+    try {
+      const stored = localStorage.getItem('hs-vocalLanguage');
+      params.vocalLanguage = stored ? JSON.parse(stored) : 'en';
+    } catch { params.vocalLanguage = 'en'; }
+  }
+
+  // 2c) Settings flags — Create page adds these from App settings.
+  //     Read from localStorage (same key as App.tsx / SettingsPanel).
+  try {
+    const settingsRaw = localStorage.getItem('ace-settings');
+    if (settingsRaw) {
+      const appSettings = JSON.parse(settingsRaw);
+      params.coResident = appSettings.coResident;
+      params.cacheLmCodes = appSettings.cacheLmCodes;
+    }
+  } catch { /* ignore parse errors */ }
+
   // 3) Adapter override from album preset (path from preset, scale/groups from globalParams)
   if (preset?.adapter_path) {
     item.status = 'loading-adapter';

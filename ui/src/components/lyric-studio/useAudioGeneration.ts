@@ -1,192 +1,27 @@
 /**
- * useAudioGeneration.ts — Encapsulates the full audio generation flow
- * for Lyric Studio V2.
+ * useAudioGeneration.ts — Send-to-Create flow for Lyric Studio V2.
  *
- * Handles: preset loading → param merging → adapter params →
- * trigger word → mastering → generation → audio linking.
+ * Handles: preset loading → localStorage writes → page navigation.
  *
- * Adapted for the C++ engine which accepts adapter params directly in generate call.
+ * NOTE: The generateAudio function and mergeCreatePanelSettings helper
+ * were removed — all audio generation now flows through
+ * audioGenQueueStore.enqueueAudioGen() which takes a getGlobalParams()
+ * snapshot, ensuring 100% parity with the Create page path.
  */
 
 import { useCallback } from 'react';
 import { lireekApi } from '../../services/lireekApi';
-import { generateApi } from '../../services/api';
-import { useAuth } from '../../context/AuthContext';
 import { writePersistedState } from '../../hooks/usePersistedState';
 import type { Generation, Profile, AlbumPreset } from '../../services/lireekApi';
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function readPersisted(key: string): any {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw !== null ? JSON.parse(raw) : undefined;
-  } catch { return undefined; }
-}
-
-/**
- * Read ALL generation params from the Create panel's localStorage.
- * These use the 'hs-' prefix and match the keys in CreatePanel.tsx.
- * We skip content fields (lyrics, caption, title, bpm, key, duration, timeSignature)
- * and adapter/mastering settings — those come from the album preset.
- */
-function mergeCreatePanelSettings(params: Record<string, any>): void {
-  // Every generation-affecting key from CreatePanel, mapped to the param name
-  // that generateApi / translateParams expects.
-  const map: [string, string][] = [
-    // DiT settings
-    ['hs-inferenceSteps', 'inferenceSteps'],
-    ['hs-guidanceScale', 'guidanceScale'],
-    ['hs-shift', 'shift'],
-    ['hs-inferMethod', 'inferMethod'],
-    ['hs-scheduler', 'scheduler'],
-    ['hs-guidanceMode', 'guidanceMode'],
-    // Seed
-    ['hs-seed', 'seed'],
-    ['hs-randomSeed', 'randomSeed'],
-    ['hs-batchSize', 'batchSize'],
-    // LM
-    ['hs-skipLm', 'skipLm'],
-    ['hs-useCotCaption', 'useCotCaption'],
-    ['hs-lmTemperature', 'lmTemperature'],
-    ['hs-lmCfgScale', 'lmCfgScale'],
-    ['hs-lmTopK', 'lmTopK'],
-    ['hs-lmTopP', 'lmTopP'],
-    ['hs-lmNegativePrompt', 'lmNegativePrompt'],
-    // Models
-    ['hs-ditModel', 'ditModel'],
-    ['hs-lmModel', 'lmModel'],
-    ['hs-vaeModel', 'vaeModel'],
-    // Solver sub-params
-    ['hs-storkSubsteps', 'storkSubsteps'],
-    ['hs-beatStability', 'beatStability'],
-    ['hs-frequencyDamping', 'frequencyDamping'],
-    ['hs-temporalSmoothing', 'temporalSmoothing'],
-    // Guidance sub-params
-    ['hs-apgMomentum', 'apgMomentum'],
-    ['hs-apgNormThreshold', 'apgNormThreshold'],
-    // Language
-    ['hs-vocalLanguage', 'vocalLanguage'],
-    // Adapter mode (runtime vs merge — engine setting, not preset)
-    ['hs-adapterMode', 'adapterMode'],
-  ];
-  for (const [storageKey, paramKey] of map) {
-    const val = readPersisted(storageKey);
-    if (val !== undefined && val !== null) {
-      params[paramKey] = val;
-    }
-  }
-}
-
-function applyTriggerWord(params: Record<string, any>, adapterPath: string): void {
-  const settingsRaw = localStorage.getItem('ace-settings');
-  const triggerSettings = settingsRaw ? JSON.parse(settingsRaw) : {};
-  const useFilename = triggerSettings.triggerUseFilename === true;
-  const placement = (triggerSettings.triggerPlacement as 'prepend' | 'append' | 'replace') || 'prepend';
-  if (!useFilename) return;
-  const fileName = adapterPath.replace(/\\/g, '/').split('/').pop() || '';
-  const triggerWord = fileName.replace(/\.safetensors$/i, '');
-  if (!triggerWord) return;
-  const current = ((params.caption as string) || '').trim();
-  if (current.toLowerCase().includes(triggerWord.toLowerCase())) return;
-  if (placement === 'replace') { params.caption = triggerWord; }
-  else if (placement === 'append') { params.caption = current ? `${current}, ${triggerWord}` : triggerWord; }
-  else { params.caption = current ? `${triggerWord}, ${current}` : triggerWord; }
-  console.log(`[LyricStudioV2] Trigger word '${triggerWord}' ${placement}ed → '${params.caption}'`);
-}
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 interface UseAudioGenerationOptions {
   profiles: Profile[];
   showToast: (msg: string) => void;
-  onJobLinked?: (generationId: number, jobId: string) => void;
 }
 
-export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudioGenerationOptions) {
-  const { token } = useAuth();
-
-  const generateAudio = useCallback(async (gen: Generation): Promise<string | null> => {
-    if (!token) { showToast('Not authenticated'); return null; }
-
-    try {
-      // 1) Find album preset for this generation
-      const profile = profiles.find(p => p.id === gen.profile_id);
-      let preset: AlbumPreset | null = null;
-      if (profile) {
-        const res = await lireekApi.getPreset(profile.lyrics_set_id);
-        preset = res.preset;
-      }
-
-      // 2) Build base params
-      const params: Record<string, any> = {
-        lyrics: gen.lyrics || '',
-        caption: gen.caption || '',
-        title: gen.title || '',
-        instrumental: false,
-        duration: gen.duration || 180,
-      };
-      if (gen.bpm) params.bpm = gen.bpm;
-      if (gen.key) params.keyScale = gen.key;
-
-      // Pass artist name and subject for proper title/description formatting
-      if (gen.artist_name) params.artist = gen.artist_name;
-      if (gen.subject) params.subject = gen.subject;
-
-      // 3) Merge persisted CreatePanel settings
-      mergeCreatePanelSettings(params);
-
-      // 4) Adapter — pass directly to generate in cpp engine
-      if (preset?.adapter_path) {
-        params.loraPath = preset.adapter_path;
-        params.loraScale = preset.adapter_scale ?? 1.0;
-        if (preset.adapter_group_scales) {
-          params.adapterGroupScales = preset.adapter_group_scales;
-        }
-        // Trigger word — send as server-side params so it's injected AFTER CoT
-        const settingsRaw2 = localStorage.getItem('ace-settings');
-        const triggerSettings2 = settingsRaw2 ? JSON.parse(settingsRaw2) : {};
-        const useFilename = triggerSettings2.triggerUseFilename === true;
-        const placement = (triggerSettings2.triggerPlacement as 'prepend' | 'append' | 'replace') || 'prepend';
-        if (useFilename) {
-          const fileName = preset.adapter_path.replace(/\\/g, '/').split('/').pop() || '';
-          const triggerWord = fileName.replace(/\.safetensors$/i, '');
-          if (triggerWord) {
-            params.triggerWord = triggerWord;
-            params.triggerPlacement = placement;
-          }
-        }
-      }
-
-      // 6) Reference Track — mastering + optional timbre conditioning
-      //     Only apply if the global mastering toggle is ON (hs-masteringEnabled)
-      if (preset?.reference_track_path) {
-        params.masteringReference = preset.reference_track_path;
-        // Use as timbre reference (resolved in generate route) — NOT audio cover
-        params.timbreReference = true;
-      }
-
-      // 7) Mark as Lyric Studio generation
-      params.source = 'lyric-studio';
-
-      // 8) Start generation
-      console.log(`[LyricStudioV2] Starting generation — title: "${params.title}"`);
-      const res = await generateApi.submit(params as any, token);
-      const jobId = res.jobId;
-      showToast(`Audio job queued: ${jobId}`);
-
-      // 9) Link audio to lyric generation
-      if (jobId) {
-        await lireekApi.linkAudio(gen.id, jobId);
-        onJobLinked?.(gen.id, jobId);
-      }
-
-      return jobId;
-    } catch (err) {
-      showToast(`Audio generation failed: ${(err as Error).message}`);
-      return null;
-    }
-  }, [token, profiles, showToast, onJobLinked]);
+export function useAudioGeneration({ profiles, showToast }: UseAudioGenerationOptions) {
 
   const sendToCreate = useCallback(async (gen: Generation): Promise<void> => {
     const profile = profiles.find(p => p.id === gen.profile_id);
@@ -244,5 +79,5 @@ export function useAudioGeneration({ profiles, showToast, onJobLinked }: UseAudi
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, [profiles]);
 
-  return { generateAudio, sendToCreate };
+  return { sendToCreate };
 }
