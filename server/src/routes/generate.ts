@@ -125,8 +125,13 @@ function translateParams(params: any): AceRequest {
   if (params.timeSignature) req.timesignature = params.timeSignature;
   if (params.vocalLanguage) req.vocal_language = params.vocalLanguage;
 
-  // Seed
-  if (params.seed !== undefined && !params.randomSeed) {
+  // Seed — always resolve to a concrete value.
+  // When randomSeed is true, generate a random seed here so the engine gets a
+  // deterministic (but random) seed that we can record in the DB for
+  // reproducibility.  When false, use the user's explicit seed.
+  if (params.randomSeed) {
+    req.seed = Math.floor(Math.random() * 2_147_483_647);
+  } else if (params.seed !== undefined) {
     req.seed = params.seed;
   }
 
@@ -237,7 +242,14 @@ async function runGeneration(job: GenerationJob): Promise<void> {
   if (job.status === 'cancelled') return;
 
   const aceReq = translateParams(job.params);
-  console.log(`[Generate] Job ${job.id} — ditModel=${job.params.ditModel || '(none)'}, synth_model=${aceReq.synth_model || '(none)'}, source=${job.params.source || 'create'}`);
+
+  // Write the resolved seed back into job.params so the DB stores the actual
+  // seed used — critical for reproducibility when randomSeed is true.
+  if (aceReq.seed !== undefined) {
+    job.params.seed = aceReq.seed;
+  }
+
+  console.log(`[Generate] Job ${job.id} — ditModel=${job.params.ditModel || '(none)'}, synth_model=${aceReq.synth_model || '(none)'}, seed=${aceReq.seed ?? '(engine default)'}, source=${job.params.source || 'create'}`);
   const abortController = new AbortController();
 
   // Store abort controller for cancellation
