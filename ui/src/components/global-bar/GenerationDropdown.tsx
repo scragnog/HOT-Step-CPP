@@ -318,8 +318,8 @@ export const GenerationDropdown: React.FC = () => {
             <span type="button" onClick={(e) => {
               e.stopPropagation();
               gp.setDcwMode('double');
-              gp.setDcwScaler(1.0);
-              gp.setDcwHighScaler(1.0);
+              gp.setDcwScaler(0.2);
+              gp.setDcwHighScaler(0.2);
             }} className="flex items-center gap-1 text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer">
               <RotateCcw size={10} /> Reset
             </span>

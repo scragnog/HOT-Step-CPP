@@ -203,8 +203,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // DCW
   const [dcwEnabled, setDcwEnabled] = usePersistedState('hs-dcwEnabled', false);
   const [dcwMode, setDcwMode] = usePersistedState('hs-dcwMode', 'double');
-  const [dcwScaler, setDcwScaler] = usePersistedState('hs-dcwScaler', 1.0);
-  const [dcwHighScaler, setDcwHighScaler] = usePersistedState('hs-dcwHighScaler', 1.0);
+  const [dcwScaler, setDcwScaler] = usePersistedState('hs-dcwScaler', 0.2);
+  const [dcwHighScaler, setDcwHighScaler] = usePersistedState('hs-dcwHighScaler', 0.2);
 
   // Latent post-processing
   const [latentShift, setLatentShift] = usePersistedState('hs-latentShift', 0.0);
