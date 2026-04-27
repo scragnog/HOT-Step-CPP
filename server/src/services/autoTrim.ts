@@ -208,14 +208,16 @@ export function autoTrimSilence(
         trimPointSec: totalDurationSec,
       };
     }
-    // Audio fills the entire buffer — trim at effective end
-    // (strip trailing silence only, respect the song's natural length)
-    trimSample = Math.min(effectiveEndSample, totalSamples);
+    // Audio fills the entire buffer with no silence gap — the model
+    // never naturally ended. Force-trim at originalDuration with a
+    // longer fade-out (2 seconds) so it doesn't sound jarring.
+    trimSample = Math.floor(originalDuration * info.sampleRate);
+    fadeMs = 2000;  // override: longer fade for forced trims
   }
 
   const trimTimeSec = trimSample / info.sampleRate;
 
-  // Don't trim if the trim point is essentially at the end already (within 0.5s)
+  // Don't trim if the trim point is essentially at the file end (within 0.5s)
   if (totalDurationSec - trimTimeSec < 0.5) {
     return {
       trimmed: false,

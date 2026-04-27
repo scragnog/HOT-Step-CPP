@@ -552,8 +552,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     // natural song ending and trim there. This must happen BEFORE post-
     // processing so Spectral Lifter and mastering operate on the trimmed audio.
     const autoTrimOn = !!job.params.autoTrimEnabled && !!job.params.durationBuffer;
-    const originalDuration = autoTrimOn && job.params.duration
-      ? job.params.duration - job.params.durationBuffer
+    // job.params.duration is the user's ORIGINAL requested duration (e.g., 215s).
+    // The buffer was added only to the engine request (req.duration = 215 + 15 = 230),
+    // NOT to job.params.duration. So no subtraction needed.
+    const originalDuration = (autoTrimOn && job.params.duration)
+      ? job.params.duration
       : 0;
 
     if (autoTrimOn && originalDuration > 0) {
