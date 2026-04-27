@@ -21,6 +21,7 @@ import { startGenerationLog, logGeneration, logGenerationParams, finishGeneratio
 import { runMastering } from './mastering.js';
 import { applyVstChain } from './vst.js';
 import { runSpectralLifter } from '../services/spectralLifter.js';
+import { autoTrimSilence } from '../services/autoTrim.js';
 import { subscribeLines, pushLog } from './logs.js';
 
 const router = Router();
@@ -120,7 +121,12 @@ function translateParams(params: any): AceRequest {
 
   // Metadata
   if (params.bpm) req.bpm = params.bpm;
-  if (params.duration) req.duration = params.duration;
+  if (params.duration) {
+    // If auto-trim is enabled, add the buffer to the generation duration.
+    // The server will trim back to the natural ending after generation.
+    const buffer = (params.autoTrimEnabled && params.durationBuffer) ? params.durationBuffer : 0;
+    req.duration = params.duration + buffer;
+  }
   if (params.keyScale) req.keyscale = params.keyScale;
   if (params.timeSignature) req.timesignature = params.timeSignature;
   if (params.vocalLanguage) req.vocal_language = params.vocalLanguage;
@@ -540,6 +546,36 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     const duration = firstResult.duration || 0;
     const keyScale = firstResult.keyscale || '';
     const timeSignature = firstResult.timesignature || '';
+
+    // ── Auto-trim (silence detection) ─────────────────────────
+    // If the user enabled auto-trim, scan the WAV from the end for the
+    // natural song ending and trim there. This must happen BEFORE post-
+    // processing so Spectral Lifter and mastering operate on the trimmed audio.
+    const autoTrimOn = !!job.params.autoTrimEnabled && !!job.params.durationBuffer;
+    const originalDuration = autoTrimOn && job.params.duration
+      ? job.params.duration - job.params.durationBuffer
+      : 0;
+
+    if (autoTrimOn && originalDuration > 0) {
+      for (const audioUrl of audioUrls) {
+        const audioFilename = path.basename(audioUrl);
+        const rawWavPath = path.join(config.data.audioDir, audioFilename);
+        if (!rawWavPath.endsWith('.wav')) continue;
+        try {
+          const result = autoTrimSilence(rawWavPath, originalDuration);
+          if (result.trimmed) {
+            logGeneration(job.id, 'INFO',
+              `[Auto-Trim] Trimmed ${audioFilename}: ${result.originalDurationSec.toFixed(1)}s → ${result.trimmedDurationSec.toFixed(1)}s (trim at ${result.trimPointSec.toFixed(1)}s)`);
+          } else {
+            logGeneration(job.id, 'INFO',
+              `[Auto-Trim] No trim needed for ${audioFilename} (${result.originalDurationSec.toFixed(1)}s)`);
+          }
+        } catch (trimErr: any) {
+          logGeneration(job.id, 'WARNING', `[Auto-Trim] Failed (non-fatal): ${trimErr.message}`);
+          console.warn('[Auto-Trim] Non-fatal error:', trimErr.message);
+        }
+      }
+    }
 
     // ── Post-processing chain ─────────────────────────────────
     // Raw WAV (audio_url) is NEVER modified. Post-processing runs on a copy.

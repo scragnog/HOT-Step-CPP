@@ -20,6 +20,7 @@ export const GenerationDropdown: React.FC = () => {
   const [dcwOpen, setDcwOpen] = usePersistedState('hs-genAccordion-dcw', false);
   const [latentOpen, setLatentOpen] = usePersistedState('hs-genAccordion-latent', false);
   const [denoiserOpen, setDenoiserOpen] = usePersistedState('hs-genAccordion-denoiser', false);
+  const [autoTrimOpen, setAutoTrimOpen] = usePersistedState('hs-genAccordion-autotrim', false);
 
   // Resolve scheduler dropdown value from the composite string representation
   const schedulerKey = gp.scheduler.startsWith('composite') ? 'composite'
@@ -345,6 +346,41 @@ export const GenerationDropdown: React.FC = () => {
             )}
             <p className="text-[10px] text-zinc-500">
               Wavelet-domain SNR-t bias correction (CVPR 2026). Scaler is dynamically modulated by timestep.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Duration Buffer / Auto-Trim (Accordion with toggle) ── */}
+      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 transition-all overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setAutoTrimOpen(!autoTrimOpen)}
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-amber-500/5 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <ChevronDown size={12} className={`text-amber-400 transition-transform duration-200 ${autoTrimOpen ? 'rotate-180' : ''}`} />
+            <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+              <ToggleSwitch checked={gp.autoTrimEnabled} onChange={gp.setAutoTrimEnabled} accentColor="amber" />
+              <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Auto-Trim Endings</span>
+            </div>
+          </div>
+          {gp.autoTrimEnabled && (
+            <span onClick={(e) => {
+              e.stopPropagation();
+              gp.setDurationBuffer(15);
+            }} className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 transition-colors cursor-pointer">
+              <RotateCcw size={10} /> Reset
+            </span>
+          )}
+        </button>
+        {autoTrimOpen && gp.autoTrimEnabled && (
+          <div className="px-3 pb-3 space-y-3">
+            <Slider label="Duration Buffer (seconds)" value={gp.durationBuffer}
+              onChange={gp.setDurationBuffer} min={5} max={30} step={1} showInput />
+            <p className="text-[10px] text-zinc-500">
+              Generates extra audio beyond the requested duration, then trims at the natural song ending.
+              Prevents abrupt cut-offs by giving the model breathing room to conclude.
             </p>
           </div>
         )}

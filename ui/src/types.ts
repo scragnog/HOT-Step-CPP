@@ -139,6 +139,10 @@ export interface GenerationParams {
   denoiseStrength?: number;     // 0.0 = off, 1.0 = max suppression
   denoiseSmoothing?: number;    // 0.0 = sharp gate, 1.0 = very smooth
   denoiseMix?: number;          // 0.0 = all dry, 1.0 = all denoised
+
+  // Duration buffer + auto-trim
+  autoTrimEnabled?: boolean;    // Enable silence-detection trimming
+  durationBuffer?: number;      // Extra seconds added to generation duration (default 15)
 }
 
 /** Generation job status from the server */

@@ -107,6 +107,12 @@ export interface GlobalParams {
   denoiseMix: number;
   setDenoiseMix: (v: number) => void;
 
+  // ── Duration Buffer / Auto-Trim ──
+  autoTrimEnabled: boolean;
+  setAutoTrimEnabled: (v: boolean) => void;
+  durationBuffer: number;
+  setDurationBuffer: (v: number) => void;
+
   // ── LM / Thinking ──
   skipLm: boolean;
   setSkipLm: (v: boolean) => void;
@@ -216,6 +222,10 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [denoiseSmoothing, setDenoiseSmoothing] = usePersistedState('hs-denoiseSmoothing', 0.7);
   const [denoiseMix, setDenoiseMix] = usePersistedState('hs-denoiseMix', 0.25);
 
+  // Duration buffer / Auto-trim (disabled by default)
+  const [autoTrimEnabled, setAutoTrimEnabled] = usePersistedState('hs-autoTrimEnabled', false);
+  const [durationBuffer, setDurationBuffer] = usePersistedState('hs-durationBuffer', 15);
+
   // LM / Thinking
   const [skipLm, setSkipLm] = usePersistedState('hs-skipLm', false);
   const [useCotCaption, setUseCotCaption] = usePersistedState('hs-useCotCaption', true);
@@ -322,6 +332,10 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       denoiseStrength: denoiseStrength > 0 ? denoiseStrength : undefined,
       denoiseSmoothing: denoiseStrength > 0 ? denoiseSmoothing : undefined,
       denoiseMix: denoiseStrength > 0 ? denoiseMix : undefined,
+
+      // Duration buffer / auto-trim
+      autoTrimEnabled: autoTrimEnabled || undefined,
+      durationBuffer: autoTrimEnabled ? durationBuffer : undefined,
     };
   }, [
     ditModel, lmModel, vaeModel,
@@ -333,6 +347,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     dcwEnabled, dcwMode, dcwScaler, dcwHighScaler,
     latentShift, latentRescale, customTimesteps,
     denoiseStrength, denoiseSmoothing, denoiseMix,
+    autoTrimEnabled, durationBuffer,
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
     spectralLifterEnabled, slDenoisePasses, slDenoiseThreshold, slHfMix, slTransientBoost, slShimmerReduction,
     masteringEnabled, masteringReference, timbreReference,
@@ -366,6 +381,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     // Denoiser
     denoiseStrength, setDenoiseStrength, denoiseSmoothing, setDenoiseSmoothing,
     denoiseMix, setDenoiseMix,
+    // Duration buffer / auto-trim
+    autoTrimEnabled, setAutoTrimEnabled, durationBuffer, setDurationBuffer,
     // LM
     skipLm, setSkipLm, useCotCaption, setUseCotCaption,
     lmTemperature, setLmTemperature, lmCfgScale, setLmCfgScale,
@@ -403,6 +420,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     customTimesteps, setCustomTimesteps,
     denoiseStrength, setDenoiseStrength, denoiseSmoothing, setDenoiseSmoothing,
     denoiseMix, setDenoiseMix,
+    autoTrimEnabled, setAutoTrimEnabled, durationBuffer, setDurationBuffer,
     skipLm, setSkipLm, useCotCaption, setUseCotCaption,
     lmTemperature, setLmTemperature, lmCfgScale, setLmCfgScale,
     lmTopK, setLmTopK, lmTopP, setLmTopP,
