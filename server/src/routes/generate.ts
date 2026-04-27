@@ -129,7 +129,12 @@ function translateParams(params: any): AceRequest {
     req.duration = params.duration + buffer;
   }
   if (params.keyScale) req.keyscale = params.keyScale;
-  if (params.timeSignature) req.timesignature = params.timeSignature;
+  if (params.timeSignature) {
+    // Engine FSM expects beat count only ('2','3','4','6'), not 'X/Y' format.
+    // Strip denominator: '6/8' → '6', '3/4' → '3', '4' → '4'.
+    const ts = String(params.timeSignature);
+    req.timesignature = ts.includes('/') ? ts.split('/')[0] : ts;
+  }
   if (params.vocalLanguage) req.vocal_language = params.vocalLanguage;
 
   // Seed — always resolve to a concrete value.
