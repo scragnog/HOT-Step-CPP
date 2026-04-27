@@ -13,7 +13,7 @@ const KEY_SIGNATURES = [
   'A# major', 'A# minor', 'B major', 'B minor',
 ];
 
-const TIME_SIGNATURES = ['', '4/4', '3/4', '6/8', '2/4', '5/4', '7/8'];
+const TIME_SIGNATURES = ['', '4/4', '3/4', '6/8', '2/4'];
 const LANGUAGES = [
   { value: 'en', label: 'English' },
   { value: 'zh', label: '中文' },
