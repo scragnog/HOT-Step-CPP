@@ -565,7 +565,8 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         const rawWavPath = path.join(config.data.audioDir, audioFilename);
         if (!rawWavPath.endsWith('.wav')) continue;
         try {
-          const result = autoTrimSilence(rawWavPath, originalDuration);
+          const fadeMs = job.params.autoTrimFadeMs || 2000;
+          const result = autoTrimSilence(rawWavPath, originalDuration, fadeMs);
           if (result.trimmed) {
             // Update the duration metadata to reflect the trimmed length
             duration = Math.round(result.trimmedDurationSec);

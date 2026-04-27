@@ -369,6 +369,7 @@ export const GenerationDropdown: React.FC = () => {
             <span onClick={(e) => {
               e.stopPropagation();
               gp.setDurationBuffer(15);
+              gp.setAutoTrimFadeMs(2000);
             }} className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 transition-colors cursor-pointer">
               <RotateCcw size={10} /> Reset
             </span>
@@ -378,9 +379,11 @@ export const GenerationDropdown: React.FC = () => {
           <div className="px-3 pb-3 space-y-3">
             <Slider label="Duration Buffer (seconds)" value={gp.durationBuffer}
               onChange={gp.setDurationBuffer} min={5} max={30} step={1} showInput />
+            <Slider label="Fade-Out (seconds)" value={gp.autoTrimFadeMs / 1000}
+              onChange={(v: number) => gp.setAutoTrimFadeMs(Math.round(v * 1000))} min={0.5} max={5} step={0.1} showInput />
             <p className="text-[10px] text-zinc-500">
               Generates extra audio beyond the requested duration, then trims at the natural song ending.
-              Prevents abrupt cut-offs by giving the model breathing room to conclude.
+              Fade-out only applies when no clean ending is detected (forced trim at original duration).
             </p>
           </div>
         )}

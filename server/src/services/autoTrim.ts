@@ -2,18 +2,13 @@
  * autoTrim.ts — Silence-detection auto-trimming for generated audio.
  *
  * After generating audio with a duration buffer, this service scans the WAV
- * from the end backwards to find the first sustained silence gap (≥1 second).
- * It trims at the start of that gap and applies a short fade-out, producing
- * a clean song ending even when the model would otherwise cut off mid-phrase
- * or restart after a natural ending.
+ * from the end backwards to find natural song endings (sustained silence gaps).
  *
- * Algorithm:
- * 1. Parse WAV PCM data (16-bit or 32-bit float)
- * 2. Compute RMS energy in 100ms windows from the end backwards
- * 3. Find first sustained silence gap (≥1s below -40dB threshold)
- * 4. Only accept trim points after originalDuration * 0.8
- * 5. Trim at the start of the gap + apply fade-out
- * 6. If no qualifying gap: trim at originalDuration + fade-out
+ * Two outcomes:
+ * - Clean ending found (silence gap ≥2s in buffer zone): Trims at the gap
+ *   boundary. No fade applied — the song already ended naturally.
+ * - No clean ending (model played through entire buffer): Force-trims at
+ *   the original requested duration with a user-configurable fade-out.
  */
 
 import fs from 'fs';
@@ -175,6 +170,7 @@ export function autoTrimSilence(
 
   let trimSample = -1;
   let consecutiveSilent = 0;
+  let forcedTrim = false;  // true when no clean ending found
 
   // Scan backwards from effective end to find a gap in the buffer zone
   const effectiveEndWindow = Math.min(lastAudioWindow + 1, totalWindows);
@@ -209,10 +205,9 @@ export function autoTrimSilence(
       };
     }
     // Audio fills the entire buffer with no silence gap — the model
-    // never naturally ended. Force-trim at originalDuration with a
-    // longer fade-out (2 seconds) so it doesn't sound jarring.
+    // never naturally ended. Force-trim at originalDuration with fade.
     trimSample = Math.floor(originalDuration * info.sampleRate);
-    fadeMs = 2000;  // override: longer fade for forced trims
+    forcedTrim = true;
   }
 
   const trimTimeSec = trimSample / info.sampleRate;
@@ -227,8 +222,10 @@ export function autoTrimSilence(
     };
   }
 
-  // Apply fade-out before the trim point
-  const fadeSamples = Math.floor((fadeMs / 1000) * info.sampleRate);
+  // Fade-out only on forced trims (no clean ending detected).
+  // Clean endings already have natural silence — no fade needed.
+  const actualFadeMs = forcedTrim ? fadeMs : 0;
+  const fadeSamples = Math.floor((actualFadeMs / 1000) * info.sampleRate);
   const fadeStart = Math.max(0, trimSample - fadeSamples);
 
   // Create new buffer with trimmed data

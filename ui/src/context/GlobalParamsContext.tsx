@@ -112,6 +112,8 @@ export interface GlobalParams {
   setAutoTrimEnabled: (v: boolean) => void;
   durationBuffer: number;
   setDurationBuffer: (v: number) => void;
+  autoTrimFadeMs: number;
+  setAutoTrimFadeMs: (v: number) => void;
 
   // ── LM / Thinking ──
   skipLm: boolean;
@@ -225,6 +227,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // Duration buffer / Auto-trim (disabled by default)
   const [autoTrimEnabled, setAutoTrimEnabled] = usePersistedState('hs-autoTrimEnabled', false);
   const [durationBuffer, setDurationBuffer] = usePersistedState('hs-durationBuffer', 15);
+  const [autoTrimFadeMs, setAutoTrimFadeMs] = usePersistedState('hs-autoTrimFadeMs', 2000);
 
   // LM / Thinking
   const [skipLm, setSkipLm] = usePersistedState('hs-skipLm', false);
@@ -336,6 +339,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // Duration buffer / auto-trim
       autoTrimEnabled: autoTrimEnabled || undefined,
       durationBuffer: autoTrimEnabled ? durationBuffer : undefined,
+      autoTrimFadeMs: autoTrimEnabled ? autoTrimFadeMs : undefined,
     };
   }, [
     ditModel, lmModel, vaeModel,
@@ -347,7 +351,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     dcwEnabled, dcwMode, dcwScaler, dcwHighScaler,
     latentShift, latentRescale, customTimesteps,
     denoiseStrength, denoiseSmoothing, denoiseMix,
-    autoTrimEnabled, durationBuffer,
+    autoTrimEnabled, durationBuffer, autoTrimFadeMs,
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
     spectralLifterEnabled, slDenoisePasses, slDenoiseThreshold, slHfMix, slTransientBoost, slShimmerReduction,
     masteringEnabled, masteringReference, timbreReference,
@@ -383,6 +387,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     denoiseMix, setDenoiseMix,
     // Duration buffer / auto-trim
     autoTrimEnabled, setAutoTrimEnabled, durationBuffer, setDurationBuffer,
+    autoTrimFadeMs, setAutoTrimFadeMs,
     // LM
     skipLm, setSkipLm, useCotCaption, setUseCotCaption,
     lmTemperature, setLmTemperature, lmCfgScale, setLmCfgScale,
@@ -421,6 +426,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     denoiseStrength, setDenoiseStrength, denoiseSmoothing, setDenoiseSmoothing,
     denoiseMix, setDenoiseMix,
     autoTrimEnabled, setAutoTrimEnabled, durationBuffer, setDurationBuffer,
+    autoTrimFadeMs, setAutoTrimFadeMs,
     skipLm, setSkipLm, useCotCaption, setUseCotCaption,
     lmTemperature, setLmTemperature, lmCfgScale, setLmCfgScale,
     lmTopK, setLmTopK, lmTopP, setLmTopP,

@@ -143,6 +143,7 @@ export interface GenerationParams {
   // Duration buffer + auto-trim
   autoTrimEnabled?: boolean;    // Enable silence-detection trimming
   durationBuffer?: number;      // Extra seconds added to generation duration (default 15)
+  autoTrimFadeMs?: number;      // Fade-out length in ms (default 2000 for forced, 500 for gap-detected)
 }
 
 /** Generation job status from the server */
