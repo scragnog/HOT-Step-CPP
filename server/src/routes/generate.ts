@@ -20,7 +20,8 @@ import { getUserId } from './auth.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
 import { runMastering } from './mastering.js';
 import { applyVstChain } from './vst.js';
-import { runSpectralLifter } from '../services/spectralLifter.js';
+// NOTE: Spectral Lifter is now native C++ in the engine (spectral-lifter.h).
+// The Python subprocess wrapper (spectralLifter.ts) is deprecated.
 import { autoTrimSilence } from '../services/autoTrim.js';
 import { subscribeLines, pushLog } from './logs.js';
 
@@ -215,6 +216,16 @@ function translateParams(params: any): AceRequest {
   if (params.denoiseStrength !== undefined) req.denoise_strength = params.denoiseStrength;
   if (params.denoiseSmoothing !== undefined) req.denoise_smoothing = params.denoiseSmoothing;
   if (params.denoiseMix !== undefined) req.denoise_mix = params.denoiseMix;
+
+  // Spectral Lifter (native C++ in engine, replaces Python subprocess)
+  if (params.spectralLifterEnabled) {
+    req.sl_enabled = true;
+    if (params.slDenoiseStrength !== undefined) req.sl_denoise_strength = params.slDenoiseStrength;
+    if (params.slNoiseFloor !== undefined) req.sl_noise_floor = params.slNoiseFloor;
+    if (params.slHfMix !== undefined) req.sl_hf_mix = params.slHfMix;
+    if (params.slTransientBoost !== undefined) req.sl_transient_boost = params.slTransientBoost;
+    if (params.slShimmerReduction !== undefined) req.sl_shimmer_reduction = params.slShimmerReduction;
+  }
 
   return req;
 }
@@ -588,9 +599,9 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     }
 
     // ── Post-processing chain ─────────────────────────────────
-    // Raw WAV (audio_url) is NEVER modified. Post-processing runs on a copy.
-    // "mastered" = any/all of: Spectral Lifter, VST Chain, Matchering Mastering.
-    const spectralLifterOn = !!job.params.spectralLifterEnabled;
+    // Raw WAV (audio_url) already includes Spectral Lifter processing
+    // (runs natively in the C++ engine post-VAE pipeline when enabled).
+    // "mastered" = any/all of: VST Chain, Matchering Mastering.
     // VST chain self-gates via applyVstChain() — returns false if no plugins active
     const masteringOn = !!masteringRef && !!job.params.masteringEnabled;
 
@@ -612,28 +623,9 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         fs.copyFileSync(rawWavPath, processedPath);
         let anyStageRan = false;
 
-        // Stage 1: Spectral Lifter
-        if (spectralLifterOn) {
-          job.stage = 'Spectral Lifter...';
-          job.progress = 91;
-          try {
-            const tempLifted = processedPath + '.lifted.wav';
-            const slParams = {
-              denoise_passes: job.params.slDenoisePasses ?? 2,
-              denoise_threshold: job.params.slDenoiseThreshold ?? 1.5,
-              hf_mix: job.params.slHfMix ?? 0.25,
-              transient_boost: job.params.slTransientBoost ?? 0.5,
-              shimmer_reduction: job.params.slShimmerReduction ?? 6.0,
-            };
-            await runSpectralLifter(processedPath, tempLifted, slParams);
-            fs.renameSync(tempLifted, processedPath);
-            anyStageRan = true;
-            logGeneration(job.id, 'INFO', `[Spectral Lifter] Applied to ${audioFilename}`);
-          } catch (slErr: any) {
-            logGeneration(job.id, 'WARNING', `[Spectral Lifter] Failed (non-fatal): ${slErr.message}`);
-            console.warn(`[Spectral Lifter] Non-fatal error:`, slErr.message);
-          }
-        }
+        // Stage 1: Spectral Lifter — now handled natively by the C++ engine.
+        // (sl_* params are routed via the AceRequest to the engine's post-VAE pipeline)
+        // The Python subprocess is no longer used.
 
         // Stage 2: VST Chain
         job.stage = 'Applying VST effects...';

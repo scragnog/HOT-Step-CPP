@@ -133,13 +133,13 @@ export interface GlobalParams {
   lmCodesStrength: number;
   setLmCodesStrength: (v: number) => void;
 
-  // ── Post-Processing ──
+  // ── Post-Processing (Spectral Lifter — native C++) ──
   spectralLifterEnabled: boolean;
   setSpectralLifterEnabled: (v: boolean) => void;
-  slDenoisePasses: number;
-  setSlDenoisePasses: (v: number) => void;
-  slDenoiseThreshold: number;
-  setSlDenoiseThreshold: (v: number) => void;
+  slDenoiseStrength: number;
+  setSlDenoiseStrength: (v: number) => void;
+  slNoiseFloor: number;
+  setSlNoiseFloor: (v: number) => void;
   slHfMix: number;
   setSlHfMix: (v: number) => void;
   slTransientBoost: number;
@@ -239,12 +239,12 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [lmNegativePrompt, setLmNegativePrompt] = usePersistedState('hs-lmNegativePrompt', 'NO USER INPUT');
   const [lmCodesStrength, setLmCodesStrength] = usePersistedState('hs-lmCodesStrength', 1.0);
 
-  // Post-processing
+  // Post-processing — Spectral Lifter (native C++)
   const [spectralLifterEnabled, setSpectralLifterEnabled] = usePersistedState('hs-spectralLifterEnabled', false);
-  const [slDenoisePasses, setSlDenoisePasses] = usePersistedState('hs-slDenoisePasses', 2);
-  const [slDenoiseThreshold, setSlDenoiseThreshold] = usePersistedState('hs-slDenoiseThreshold', 1.5);
-  const [slHfMix, setSlHfMix] = usePersistedState('hs-slHfMix', 0.25);
-  const [slTransientBoost, setSlTransientBoost] = usePersistedState('hs-slTransientBoost', 0.5);
+  const [slDenoiseStrength, setSlDenoiseStrength] = usePersistedState('hs-slDenoiseStrength', 0.3);
+  const [slNoiseFloor, setSlNoiseFloor] = usePersistedState('hs-slNoiseFloor', 0.1);
+  const [slHfMix, setSlHfMix] = usePersistedState('hs-slHfMix', 0.0);
+  const [slTransientBoost, setSlTransientBoost] = usePersistedState('hs-slTransientBoost', 0.0);
   const [slShimmerReduction, setSlShimmerReduction] = usePersistedState('hs-slShimmerReduction', 6.0);
   const [masteringEnabled, setMasteringEnabled] = usePersistedState('hs-masteringEnabled', false);
   const [masteringReference, setMasteringReference] = usePersistedState('hs-masteringReference', '');
@@ -309,10 +309,10 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // LM Codes Strength — fraction of DiT steps guided by LM codes
       audioCoverStrength: (!skipLm && lmCodesStrength < 1.0) ? lmCodesStrength : undefined,
 
-      // Post-processing
+      // Post-processing — Spectral Lifter (native C++ in engine)
       spectralLifterEnabled,
-      slDenoisePasses: spectralLifterEnabled ? slDenoisePasses : undefined,
-      slDenoiseThreshold: spectralLifterEnabled ? slDenoiseThreshold : undefined,
+      slDenoiseStrength: spectralLifterEnabled ? slDenoiseStrength : undefined,
+      slNoiseFloor: spectralLifterEnabled ? slNoiseFloor : undefined,
       slHfMix: spectralLifterEnabled ? slHfMix : undefined,
       slTransientBoost: spectralLifterEnabled ? slTransientBoost : undefined,
       slShimmerReduction: spectralLifterEnabled ? slShimmerReduction : undefined,
@@ -353,7 +353,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     denoiseStrength, denoiseSmoothing, denoiseMix,
     autoTrimEnabled, durationBuffer, autoTrimFadeMs,
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
-    spectralLifterEnabled, slDenoisePasses, slDenoiseThreshold, slHfMix, slTransientBoost, slShimmerReduction,
+    spectralLifterEnabled, slDenoiseStrength, slNoiseFloor, slHfMix, slTransientBoost, slShimmerReduction,
     masteringEnabled, masteringReference, timbreReference,
     settings,
   ]);
@@ -394,10 +394,10 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     lmTopK, setLmTopK, lmTopP, setLmTopP,
     lmNegativePrompt, setLmNegativePrompt,
     lmCodesStrength, setLmCodesStrength,
-    // Post-processing
+    // Post-processing — Spectral Lifter (native C++)
     spectralLifterEnabled, setSpectralLifterEnabled,
-    slDenoisePasses, setSlDenoisePasses,
-    slDenoiseThreshold, setSlDenoiseThreshold,
+    slDenoiseStrength, setSlDenoiseStrength,
+    slNoiseFloor, setSlNoiseFloor,
     slHfMix, setSlHfMix,
     slTransientBoost, setSlTransientBoost,
     slShimmerReduction, setSlShimmerReduction,
@@ -432,8 +432,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     lmTopK, setLmTopK, lmTopP, setLmTopP,
     lmNegativePrompt, setLmNegativePrompt, lmCodesStrength, setLmCodesStrength,
     spectralLifterEnabled, setSpectralLifterEnabled,
-    slDenoisePasses, setSlDenoisePasses,
-    slDenoiseThreshold, setSlDenoiseThreshold,
+    slDenoiseStrength, setSlDenoiseStrength,
+    slNoiseFloor, setSlNoiseFloor,
     slHfMix, setSlHfMix,
     slTransientBoost, setSlTransientBoost,
     slShimmerReduction, setSlShimmerReduction,

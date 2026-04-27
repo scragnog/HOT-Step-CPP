@@ -100,6 +100,13 @@ export interface AceRequest {
   denoise_strength?: number;   // 0.0 = off, 1.0 = max suppression
   denoise_smoothing?: number;  // 0.0 = sharp gate, 1.0 = very smooth
   denoise_mix?: number;        // 0.0 = all dry, 1.0 = all denoised
+  // Spectral Lifter (native C++ post-VAE pipeline)
+  sl_enabled?: boolean;           // master toggle
+  sl_denoise_strength?: number;   // 0.0–1.0, gate aggressiveness
+  sl_noise_floor?: number;        // 0.01–0.5, residual leakage
+  sl_hf_mix?: number;             // 0.0–0.5, HF extension blend
+  sl_transient_boost?: number;    // 0.0–1.0, percussive enhancement
+  sl_shimmer_reduction?: number;  // 0.0–12.0 dB, shimmer attenuation
 }
 
 /** Job status from ace-server */

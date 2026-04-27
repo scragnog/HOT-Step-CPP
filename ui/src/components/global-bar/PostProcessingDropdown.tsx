@@ -254,7 +254,8 @@ export const PostProcessingDropdown: React.FC = () => {
         <div className="space-y-3 mt-2">
           <p className="text-[10px] text-zinc-500 leading-relaxed">
             Removes AI shimmer artifacts, reduces spectral noise, and extends
-            high-frequency content. Runs as a Python subprocess after generation.
+            high-frequency content. Native C++ processing — runs in the engine
+            post-VAE pipeline.
           </p>
 
           {gp.spectralLifterEnabled && (
@@ -263,10 +264,10 @@ export const PostProcessingDropdown: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    gp.setSlDenoisePasses(2);
-                    gp.setSlDenoiseThreshold(1.5);
-                    gp.setSlHfMix(0.25);
-                    gp.setSlTransientBoost(0.5);
+                    gp.setSlDenoiseStrength(0.3);
+                    gp.setSlNoiseFloor(0.1);
+                    gp.setSlHfMix(0.0);
+                    gp.setSlTransientBoost(0.0);
                     gp.setSlShimmerReduction(6.0);
                   }}
                   className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-cyan-400 transition-colors"
@@ -277,19 +278,20 @@ export const PostProcessingDropdown: React.FC = () => {
                 </button>
               </div>
               <EditableSlider
-                label="Denoise Passes"
-                value={gp.slDenoisePasses}
-                min={0} max={4} step={1}
-                onChange={gp.setSlDenoisePasses}
-                tooltip="Number of spectral gating passes. 0 = skip denoising entirely. Higher = more aggressive noise removal but may thin the sound."
+                label="Denoise Strength"
+                value={gp.slDenoiseStrength}
+                min={0} max={1.0} step={0.01}
+                onChange={gp.setSlDenoiseStrength}
+                formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
+                tooltip="Spectral gate aggressiveness. Higher = more noise removal. 0 = skip denoising entirely."
               />
               <EditableSlider
-                label="Denoise Threshold"
-                value={gp.slDenoiseThreshold}
-                min={0.5} max={4.0} step={0.1}
-                onChange={gp.setSlDenoiseThreshold}
-                formatDisplay={v => v.toFixed(1)}
-                tooltip="Noise gate multiplier. Lower = more aggressive gating. Higher = gentler, preserves more detail."
+                label="Noise Floor"
+                value={gp.slNoiseFloor}
+                min={0.01} max={0.5} step={0.01}
+                onChange={gp.setSlNoiseFloor}
+                formatDisplay={v => (v * 100).toFixed(0) + '%'}
+                tooltip="Minimum signal that passes through the gate. Higher = gentler, less musical noise artifacts."
               />
               <EditableSlider
                 label="HF Extension"
@@ -297,7 +299,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 min={0} max={0.5} step={0.01}
                 onChange={gp.setSlHfMix}
                 formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
-                tooltip="Blend amount for synthesized high-frequency content above 16kHz. This is the most likely source of warble artifacts — try reducing or disabling."
+                tooltip="Blend amount for synthesized high-frequency content above 16kHz via spectral mirroring."
               />
               <EditableSlider
                 label="Transient Boost"

@@ -36,6 +36,7 @@
 
 #include "audio-io.h"
 #include "denoiser.h"
+#include "spectral-lifter.h"
 #include "hot-step-params.h"
 #include "model-registry.h"
 #include "model-store.h"
@@ -489,6 +490,13 @@ struct ServerFields {
     float       denoise_strength  = 0.0f;   // 0 = off, 1 = max
     float       denoise_smoothing = 0.7f;
     float       denoise_mix       = 0.25f;
+    // Spectral Lifter (native C++ post-VAE pipeline)
+    bool        sl_enabled           = false;
+    float       sl_denoise_strength  = 0.3f;
+    float       sl_noise_floor       = 0.1f;
+    float       sl_hf_mix            = 0.0f;
+    float       sl_transient_boost   = 0.0f;
+    float       sl_shimmer_reduction = 6.0f;
 };
 
 static void parse_server_fields(const char * json, ServerFields * sf) {
@@ -605,6 +613,25 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     }
     if ((v = yyjson_obj_get(obj, "denoise_mix")) && yyjson_is_num(v)) {
         sf->denoise_mix = get_num(v);
+    }
+    // Spectral Lifter (native C++ post-VAE pipeline)
+    if ((v = yyjson_obj_get(obj, "sl_enabled")) && yyjson_is_bool(v)) {
+        sf->sl_enabled = yyjson_get_bool(v);
+    }
+    if ((v = yyjson_obj_get(obj, "sl_denoise_strength")) && yyjson_is_num(v)) {
+        sf->sl_denoise_strength = get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "sl_noise_floor")) && yyjson_is_num(v)) {
+        sf->sl_noise_floor = get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "sl_hf_mix")) && yyjson_is_num(v)) {
+        sf->sl_hf_mix = get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "sl_transient_boost")) && yyjson_is_num(v)) {
+        sf->sl_transient_boost = get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "sl_shimmer_reduction")) && yyjson_is_num(v)) {
+        sf->sl_shimmer_reduction = get_num(v);
     }
     yyjson_doc_free(doc);
 }
@@ -982,6 +1009,17 @@ static void synth_worker(std::shared_ptr<Job>    job,
             audio_denoise(audio[b].samples, audio[b].n_samples, 48000,
                           sf.denoise_strength, sf.denoise_smoothing, sf.denoise_mix,
                           g_noise_profile.valid ? &g_noise_profile : nullptr);
+        }
+        // Spectral Lifter: native C++ post-VAE pipeline (analysis, denoise,
+        // HF extension, transient shaping, multiband dynamics).
+        if (sf.sl_enabled) {
+            SpectralLifterParams slp;
+            slp.denoise_strength   = sf.sl_denoise_strength;
+            slp.noise_floor        = sf.sl_noise_floor;
+            slp.hf_mix             = sf.sl_hf_mix;
+            slp.transient_boost    = sf.sl_transient_boost;
+            slp.shimmer_reduction  = sf.sl_shimmer_reduction;
+            spectral_lifter_process(audio[b].samples, audio[b].n_samples, 48000, &slp);
         }
         if (output_wav) {
             encoded[b] = audio_encode_wav(audio[b].samples, audio[b].n_samples, 48000, wav_fmt);
