@@ -678,13 +678,18 @@ static int dit_ggml_generate(DiTGGML *           model,
         } else {
             float t_next = schedule[step + 1];
 
-            // ── Cache pre-step latent for DCW ─────────────────────────────
+            // ── Cache pre-step state for DCW ─────────────────────────────
             // The predicted clean sample denoised = x - v*t must use the
-            // PRE-step latent and raw velocity (matching upstream Python).
-            // The solver modifies xt[] in-place, so we must snapshot first.
+            // PRE-step latent AND the raw velocity from the first model
+            // evaluation (matching upstream Python's xt_before_step and
+            // vt_for_denoise).  Multi-eval solvers (RF-Solver, Heun, RK4)
+            // overwrite both xt[] and vt[] during their step, so we must
+            // snapshot both before the solver runs.
             std::vector<float> xt_pre;
+            std::vector<float> vt_pre;
             if (g_hotstep_params.dcw_enabled) {
                 xt_pre.assign(xt.begin(), xt.end());
+                vt_pre.assign(vt.begin(), vt.end());
             }
 
             // ── Modular solver dispatch ──────────────────────────────────
@@ -702,13 +707,13 @@ static int dit_ggml_generate(DiTGGML *           model,
             // Scaler follows upstream Eq. 20/21: low = t * scaler,
             // high = (1-t) * scaler. No step-count normalization.
             if (g_hotstep_params.dcw_enabled) {
-                // Compute denoised (predicted x0) from PRE-step latent:
-                //   denoised = xt_before_step - vt * t_curr
-                // Using post-step xt here would be incorrect (it has already
-                // been moved by the solver toward x0).
+                // Compute denoised (predicted x0) from PRE-step state:
+                //   denoised = xt_before_step - vt_for_denoise * t_curr
+                // Both xt and vt may have been overwritten by the solver
+                // (e.g. RF-Solver writes v_mid into vt_buf).
                 std::vector<float> denoised(n_total);
                 for (int i = 0; i < n_total; i++) {
-                    denoised[i] = xt_pre[i] - vt[i] * t_curr;
+                    denoised[i] = xt_pre[i] - vt_pre[i] * t_curr;
                 }
 
                 const std::string & dcw_mode = g_hotstep_params.dcw_mode;
