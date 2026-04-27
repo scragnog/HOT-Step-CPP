@@ -543,7 +543,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     // Use subject for style/description when available, otherwise fall back to caption
     const style = job.params.subject || firstResult.caption || job.params.style || '';
     const bpm = firstResult.bpm || 0;
-    const duration = firstResult.duration || 0;
+    let duration = firstResult.duration || 0;
     const keyScale = firstResult.keyscale || '';
     const timeSignature = firstResult.timesignature || '';
 
@@ -564,13 +564,19 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         try {
           const result = autoTrimSilence(rawWavPath, originalDuration);
           if (result.trimmed) {
+            // Update the duration metadata to reflect the trimmed length
+            duration = Math.round(result.trimmedDurationSec);
             logGeneration(job.id, 'INFO',
               `[Auto-Trim] Trimmed ${audioFilename}: ${result.originalDurationSec.toFixed(1)}s → ${result.trimmedDurationSec.toFixed(1)}s (trim at ${result.trimPointSec.toFixed(1)}s)`);
           } else {
+            // No trim — but still correct the duration to the original (un-buffered) value
+            duration = originalDuration;
             logGeneration(job.id, 'INFO',
               `[Auto-Trim] No trim needed for ${audioFilename} (${result.originalDurationSec.toFixed(1)}s)`);
           }
         } catch (trimErr: any) {
+          // Trim failed — fall back to original duration
+          duration = originalDuration;
           logGeneration(job.id, 'WARNING', `[Auto-Trim] Failed (non-fatal): ${trimErr.message}`);
           console.warn('[Auto-Trim] Non-fatal error:', trimErr.message);
         }

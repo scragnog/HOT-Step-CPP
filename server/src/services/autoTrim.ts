@@ -119,19 +119,23 @@ export interface AutoTrimResult {
 /**
  * Auto-trim silence from the end of a WAV file, in place.
  *
+ * Strategy (two-pass):
+ * 1. Strip trailing silence from the very end of the file.
+ * 2. Scan the buffer zone (originalDuration ± margin) for a sustained
+ *    silence gap (≥2 seconds) — this catches the "ends, pauses, restarts"
+ *    pattern by trimming at the gap before the restart.
+ * 3. If no gap found in the buffer zone, trim at the last meaningful audio
+ *    or fall back to originalDuration with a fade.
+ *
  * @param wavPath         Path to the WAV file (will be overwritten if trimmed)
  * @param originalDuration The user's requested duration in seconds (before buffer)
  * @param fadeMs          Fade-out duration in milliseconds (default 500)
- * @param silenceThresholdDb  Silence threshold in dB (default -40)
- * @param minGapSec       Minimum silence gap to qualify for trimming (default 1.0)
  * @returns               Info about what was trimmed
  */
 export function autoTrimSilence(
   wavPath: string,
   originalDuration: number,
   fadeMs: number = 500,
-  silenceThresholdDb: number = -40,
-  minGapSec: number = 1.0,
 ): AutoTrimResult {
   const buf = fs.readFileSync(wavPath);
   const info = parseWavHeader(buf);
@@ -142,52 +146,71 @@ export function autoTrimSilence(
 
   // Window size: 100ms
   const windowSamples = Math.floor(info.sampleRate * 0.1);
-  const silenceThresholdLinear = Math.pow(10, silenceThresholdDb / 20);
-
-  // Only consider trim points after this time
-  const minTrimTimeSec = originalDuration * 0.8;
-  const minTrimSample = Math.floor(minTrimTimeSec * info.sampleRate);
-
-  // Minimum gap in windows
-  const minGapWindows = Math.ceil(minGapSec / 0.1);
-
-  // Scan backwards from the end
   const totalWindows = Math.floor(totalSamples / windowSamples);
-  let consecutiveSilent = 0;
-  let gapEndSample = totalSamples; // end of the current silent region
-  let trimSample = -1;
 
+  // Silence threshold: -50dB (stricter than -40dB to avoid catching quiet passages)
+  const silenceThresholdLinear = Math.pow(10, -50 / 20);  // ≈ 0.00316
+
+  // ── Pass 1: Find the last window with meaningful audio ─────────────────
+  // This strips any trailing silence/noise at the very end of the file.
+  let lastAudioWindow = totalWindows - 1;
   for (let w = totalWindows - 1; w >= 0; w--) {
+    const windowStart = w * windowSamples;
+    const rms = computeWindowRms(buf, info, windowStart, windowSamples, totalSamples);
+    if (rms >= silenceThresholdLinear) {
+      lastAudioWindow = w;
+      break;
+    }
+  }
+  // "Effective end" is where audio content actually stops
+  const effectiveEndSample = (lastAudioWindow + 1) * windowSamples;
+  const effectiveEndSec = effectiveEndSample / info.sampleRate;
+
+  // ── Pass 2: Scan the buffer zone for a sustained silence gap ───────────
+  // Only consider gaps that START after (originalDuration - 5s) to avoid
+  // trimming musical breaks deep within the song.
+  const bufferZoneStartSec = Math.max(0, originalDuration - 5);
+  const bufferZoneStartWindow = Math.floor(bufferZoneStartSec / 0.1);
+  const minGapWindows = 20;  // 2 seconds at 100ms windows
+
+  let trimSample = -1;
+  let consecutiveSilent = 0;
+
+  // Scan backwards from effective end to find a gap in the buffer zone
+  const effectiveEndWindow = Math.min(lastAudioWindow + 1, totalWindows);
+  for (let w = effectiveEndWindow - 1; w >= bufferZoneStartWindow; w--) {
     const windowStart = w * windowSamples;
     const rms = computeWindowRms(buf, info, windowStart, windowSamples, totalSamples);
 
     if (rms < silenceThresholdLinear) {
-      if (consecutiveSilent === 0) {
-        gapEndSample = windowStart + windowSamples;
-      }
       consecutiveSilent++;
     } else {
-      // We just hit audio content — the silence gap was from this window's end to gapEndSample
       if (consecutiveSilent >= minGapWindows) {
-        // The silence gap starts at the next window
-        const gapStartSample = (w + 1) * windowSamples;
-        if (gapStartSample >= minTrimSample) {
-          trimSample = gapStartSample;
-          break;
-        }
+        // Found a qualifying gap — trim at this audio content's end
+        // (w is the last window with audio, trim after it)
+        trimSample = (w + 1) * windowSamples;
+        break;
       }
       consecutiveSilent = 0;
     }
   }
 
-  // If we scanned all the way back and found a qualifying gap at the very start
-  // (unlikely but defensive), or no gap was found
+  // ── Decide final trim point ────────────────────────────────────────────
   if (trimSample < 0) {
-    // Fallback: trim at original duration
-    trimSample = Math.min(
-      Math.floor(originalDuration * info.sampleRate),
-      totalSamples,
-    );
+    // No silence gap found in the buffer zone.
+    if (effectiveEndSec <= originalDuration + 1) {
+      // Audio ends at or before original duration — no trim needed
+      // (or the model ran out of content naturally)
+      return {
+        trimmed: false,
+        originalDurationSec: totalDurationSec,
+        trimmedDurationSec: totalDurationSec,
+        trimPointSec: totalDurationSec,
+      };
+    }
+    // Audio fills the entire buffer — trim at effective end
+    // (strip trailing silence only, respect the song's natural length)
+    trimSample = Math.min(effectiveEndSample, totalSamples);
   }
 
   const trimTimeSec = trimSample / info.sampleRate;
@@ -242,8 +265,7 @@ export function autoTrimSilence(
   // Update RIFF chunk size (file size - 8)
   newBuf.writeUInt32LE(newBuf.length - 8, 4);
 
-  // Update data chunk size — find the data chunk header
-  // It's at dataOffset - 4 (the size field is 4 bytes before data start)
+  // Update data chunk size
   newBuf.writeUInt32LE(newDataSize, info.dataOffset - 4);
 
   // Write back
@@ -256,3 +278,4 @@ export function autoTrimSilence(
     trimPointSec: trimTimeSec,
   };
 }
+
