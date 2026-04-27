@@ -349,9 +349,9 @@ export const GenerationSettings: React.FC<GenerationSettingsProps> = (props) => 
               </div>
               {props.dcwEnabled && (
                 <button type="button" onClick={() => {
-                  props.onDcwModeChange('low');
-                  props.onDcwScalerChange(0.1);
-                  props.onDcwHighScalerChange(0.0);
+                  props.onDcwModeChange('double');
+                  props.onDcwScalerChange(1.0);
+                  props.onDcwHighScalerChange(1.0);
                 }} className="flex items-center gap-1 text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors">
                   <RotateCcw size={10} /> Reset
                 </button>
