@@ -100,13 +100,6 @@ export interface AceRequest {
   denoise_strength?: number;   // 0.0 = off, 1.0 = max suppression
   denoise_smoothing?: number;  // 0.0 = sharp gate, 1.0 = very smooth
   denoise_mix?: number;        // 0.0 = all dry, 1.0 = all denoised
-  // Spectral Lifter (native C++ post-VAE pipeline)
-  sl_enabled?: boolean;           // master toggle
-  sl_denoise_strength?: number;   // 0.0–1.0, gate aggressiveness
-  sl_noise_floor?: number;        // 0.01–0.5, residual leakage
-  sl_hf_mix?: number;             // 0.0–0.5, HF extension blend
-  sl_transient_boost?: number;    // 0.0–1.0, percussive enhancement
-  sl_shimmer_reduction?: number;  // 0.0–12.0 dB, shimmer attenuation
 }
 
 /** Job status from ace-server */
@@ -302,5 +295,41 @@ export const aceClient = {
     } catch {
       return false;
     }
+  },
+
+  /** POST /spectral-lifter — synchronous C++ Spectral Lifter processing.
+   *  Sends WAV audio body with SL params as query string.
+   *  Returns processed WAV buffer. */
+  async submitSpectralLifter(
+    wavBuffer: Buffer,
+    params: {
+      denoise_strength?: number;
+      noise_floor?: number;
+      hf_mix?: number;
+      transient_boost?: number;
+      shimmer_reduction?: number;
+    },
+  ): Promise<Buffer> {
+    const qs = new URLSearchParams();
+    if (params.denoise_strength !== undefined) qs.set('denoise_strength', String(params.denoise_strength));
+    if (params.noise_floor !== undefined) qs.set('noise_floor', String(params.noise_floor));
+    if (params.hf_mix !== undefined) qs.set('hf_mix', String(params.hf_mix));
+    if (params.transient_boost !== undefined) qs.set('transient_boost', String(params.transient_boost));
+    if (params.shimmer_reduction !== undefined) qs.set('shimmer_reduction', String(params.shimmer_reduction));
+    const qsStr = qs.toString();
+    const path = qsStr ? `/spectral-lifter?${qsStr}` : '/spectral-lifter';
+
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/wav' },
+      body: wavBuffer,
+      signal: AbortSignal.timeout(TIMEOUT_RESULT),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => 'Unknown error');
+      throw new Error(`ace-server POST /spectral-lifter failed (${res.status}): ${errBody}`);
+    }
+    const arrayBuf = await res.arrayBuffer();
+    return Buffer.from(arrayBuf);
   },
 };

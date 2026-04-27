@@ -490,13 +490,6 @@ struct ServerFields {
     float       denoise_strength  = 0.0f;   // 0 = off, 1 = max
     float       denoise_smoothing = 0.7f;
     float       denoise_mix       = 0.25f;
-    // Spectral Lifter (native C++ post-VAE pipeline)
-    bool        sl_enabled           = false;
-    float       sl_denoise_strength  = 0.3f;
-    float       sl_noise_floor       = 0.1f;
-    float       sl_hf_mix            = 0.0f;
-    float       sl_transient_boost   = 0.0f;
-    float       sl_shimmer_reduction = 6.0f;
 };
 
 static void parse_server_fields(const char * json, ServerFields * sf) {
@@ -613,25 +606,6 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     }
     if ((v = yyjson_obj_get(obj, "denoise_mix")) && yyjson_is_num(v)) {
         sf->denoise_mix = get_num(v);
-    }
-    // Spectral Lifter (native C++ post-VAE pipeline)
-    if ((v = yyjson_obj_get(obj, "sl_enabled")) && yyjson_is_bool(v)) {
-        sf->sl_enabled = yyjson_get_bool(v);
-    }
-    if ((v = yyjson_obj_get(obj, "sl_denoise_strength")) && yyjson_is_num(v)) {
-        sf->sl_denoise_strength = get_num(v);
-    }
-    if ((v = yyjson_obj_get(obj, "sl_noise_floor")) && yyjson_is_num(v)) {
-        sf->sl_noise_floor = get_num(v);
-    }
-    if ((v = yyjson_obj_get(obj, "sl_hf_mix")) && yyjson_is_num(v)) {
-        sf->sl_hf_mix = get_num(v);
-    }
-    if ((v = yyjson_obj_get(obj, "sl_transient_boost")) && yyjson_is_num(v)) {
-        sf->sl_transient_boost = get_num(v);
-    }
-    if ((v = yyjson_obj_get(obj, "sl_shimmer_reduction")) && yyjson_is_num(v)) {
-        sf->sl_shimmer_reduction = get_num(v);
     }
     yyjson_doc_free(doc);
 }
@@ -1009,17 +983,6 @@ static void synth_worker(std::shared_ptr<Job>    job,
             audio_denoise(audio[b].samples, audio[b].n_samples, 48000,
                           sf.denoise_strength, sf.denoise_smoothing, sf.denoise_mix,
                           g_noise_profile.valid ? &g_noise_profile : nullptr);
-        }
-        // Spectral Lifter: native C++ post-VAE pipeline (analysis, denoise,
-        // HF extension, transient shaping, multiband dynamics).
-        if (sf.sl_enabled) {
-            SpectralLifterParams slp;
-            slp.denoise_strength   = sf.sl_denoise_strength;
-            slp.noise_floor        = sf.sl_noise_floor;
-            slp.hf_mix             = sf.sl_hf_mix;
-            slp.transient_boost    = sf.sl_transient_boost;
-            slp.shimmer_reduction  = sf.sl_shimmer_reduction;
-            spectral_lifter_process(audio[b].samples, audio[b].n_samples, 48000, &slp);
         }
         if (output_wav) {
             encoded[b] = audio_encode_wav(audio[b].samples, audio[b].n_samples, 48000, wav_fmt);
@@ -1717,6 +1680,48 @@ int main(int argc, char ** argv) {
             return;
         }
         json_error(res, 400, "Unknown action");
+    });
+
+    // POST /spectral-lifter — synchronous Spectral Lifter processing.
+    // Accepts WAV audio body. SL params are in query string:
+    //   ?denoise_strength=0.3&noise_floor=0.1&hf_mix=0&transient_boost=0&shimmer_reduction=6
+    // Returns processed WAV audio body (same sample rate, format).
+    // Runs synchronously (no job queue) — it's pure CPU DSP, typically <1s.
+    svr.Post("/spectral-lifter", [](const httplib::Request & req, httplib::Response & res) {
+        if (req.body.empty()) {
+            json_error(res, 400, "Empty body (expected WAV audio)");
+            return;
+        }
+
+        // Parse SL params from query string (with defaults)
+        SpectralLifterParams slp;
+        spectral_lifter_default(&slp);
+        if (req.has_param("denoise_strength")) slp.denoise_strength = strtof(req.get_param_value("denoise_strength").c_str(), nullptr);
+        if (req.has_param("noise_floor"))      slp.noise_floor      = strtof(req.get_param_value("noise_floor").c_str(), nullptr);
+        if (req.has_param("hf_mix"))           slp.hf_mix           = strtof(req.get_param_value("hf_mix").c_str(), nullptr);
+        if (req.has_param("transient_boost"))  slp.transient_boost  = strtof(req.get_param_value("transient_boost").c_str(), nullptr);
+        if (req.has_param("shimmer_reduction")) slp.shimmer_reduction = strtof(req.get_param_value("shimmer_reduction").c_str(), nullptr);
+
+        // Decode WAV from body
+        int     T_audio = 0;
+        float * planar  = audio_read_48k_buf((const uint8_t *) req.body.data(), req.body.size(), &T_audio);
+        if (!planar || T_audio <= 0) {
+            json_error(res, 400, "Failed to decode WAV audio");
+            return;
+        }
+
+        fprintf(stderr, "[Server] Spectral Lifter: %.2fs @ 48kHz (denoise=%.2f, floor=%.2f, hf=%.2f, transient=%.2f, shimmer=%.1fdB)\n",
+                (float) T_audio / 48000.0f, slp.denoise_strength, slp.noise_floor,
+                slp.hf_mix, slp.transient_boost, slp.shimmer_reduction);
+
+        // Process in-place
+        spectral_lifter_process(planar, T_audio, 48000, &slp);
+
+        // Encode back to WAV16
+        std::string wav = audio_encode_wav(planar, T_audio, 48000, WAV_S16);
+        free(planar);
+
+        res.set_content(wav, "audio/wav");
     });
 
     // embedded webui: gzipped single-page app (built by tools/webui/).

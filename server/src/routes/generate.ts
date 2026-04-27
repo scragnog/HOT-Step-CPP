@@ -217,15 +217,9 @@ function translateParams(params: any): AceRequest {
   if (params.denoiseSmoothing !== undefined) req.denoise_smoothing = params.denoiseSmoothing;
   if (params.denoiseMix !== undefined) req.denoise_mix = params.denoiseMix;
 
-  // Spectral Lifter (native C++ in engine, replaces Python subprocess)
-  if (params.spectralLifterEnabled) {
-    req.sl_enabled = true;
-    if (params.slDenoiseStrength !== undefined) req.sl_denoise_strength = params.slDenoiseStrength;
-    if (params.slNoiseFloor !== undefined) req.sl_noise_floor = params.slNoiseFloor;
-    if (params.slHfMix !== undefined) req.sl_hf_mix = params.slHfMix;
-    if (params.slTransientBoost !== undefined) req.sl_transient_boost = params.slTransientBoost;
-    if (params.slShimmerReduction !== undefined) req.sl_shimmer_reduction = params.slShimmerReduction;
-  }
+  // NOTE: Spectral Lifter params (sl_*) are NOT sent to /synth.
+  // SL runs as a separate post-processing step via POST /spectral-lifter
+  // on the mastered copy only — raw generation stays pristine.
 
   return req;
 }
@@ -599,9 +593,9 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     }
 
     // ── Post-processing chain ─────────────────────────────────
-    // Raw WAV (audio_url) already includes Spectral Lifter processing
-    // (runs natively in the C++ engine post-VAE pipeline when enabled).
-    // "mastered" = any/all of: VST Chain, Matchering Mastering.
+    // Raw WAV (audio_url) is NEVER modified. Post-processing runs on a copy.
+    // "mastered" = any/all of: Spectral Lifter, VST Chain, Matchering Mastering.
+    const spectralLifterOn = !!job.params.spectralLifterEnabled;
     // VST chain self-gates via applyVstChain() — returns false if no plugins active
     const masteringOn = !!masteringRef && !!job.params.masteringEnabled;
 
@@ -623,9 +617,28 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         fs.copyFileSync(rawWavPath, processedPath);
         let anyStageRan = false;
 
-        // Stage 1: Spectral Lifter — now handled natively by the C++ engine.
-        // (sl_* params are routed via the AceRequest to the engine's post-VAE pipeline)
-        // The Python subprocess is no longer used.
+        // Stage 1: Spectral Lifter (native C++ via /spectral-lifter endpoint)
+        if (spectralLifterOn) {
+          job.stage = 'Spectral Lifter...';
+          job.progress = 91;
+          try {
+            const wavBuf = fs.readFileSync(processedPath);
+            const slParams = {
+              denoise_strength: job.params.slDenoiseStrength ?? 0.3,
+              noise_floor: job.params.slNoiseFloor ?? 0.1,
+              hf_mix: job.params.slHfMix ?? 0.0,
+              transient_boost: job.params.slTransientBoost ?? 0.0,
+              shimmer_reduction: job.params.slShimmerReduction ?? 6.0,
+            };
+            const processed = await aceClient.submitSpectralLifter(wavBuf, slParams);
+            fs.writeFileSync(processedPath, processed);
+            anyStageRan = true;
+            logGeneration(job.id, 'INFO', `[Spectral Lifter] Applied to ${audioFilename}`);
+          } catch (slErr: any) {
+            logGeneration(job.id, 'WARNING', `[Spectral Lifter] Failed (non-fatal): ${slErr.message}`);
+            console.warn(`[Spectral Lifter] Non-fatal error:`, slErr.message);
+          }
+        }
 
         // Stage 2: VST Chain
         job.stage = 'Applying VST effects...';
