@@ -330,13 +330,21 @@ export const GenerationDropdown: React.FC = () => {
           <div className="px-3 pb-3 space-y-3">
             <div>
               <label className="block text-[10px] text-emerald-400 mb-1">Correction Mode</label>
-              <select className={selectClasses} value={gp.dcwMode}
-                onChange={e => gp.setDcwMode(e.target.value)}>
-                <option value="low">Low-Frequency (Recommended)</option>
-                <option value="high">High-Frequency</option>
-                <option value="double">Both (Low + High)</option>
-                <option value="pix">Pixel-Space (No Wavelets)</option>
-              </select>
+              <div className="relative group/dcw">
+                <select className={selectClasses} value={gp.dcwMode}
+                  onChange={e => gp.setDcwMode(e.target.value)}>
+                  <option value="low">Low-Frequency</option>
+                  <option value="high">High-Frequency</option>
+                  <option value="double">Both (Low + High)</option>
+                  <option value="pix">Pixel-Space (No Wavelets)</option>
+                </select>
+                <div className="mt-1.5 text-[10px] text-zinc-500 leading-relaxed">
+                  {gp.dcwMode === 'low' && '🎵 Corrects low-frequency wavelet bands — tightens bass, kick and rhythm without touching treble.'}
+                  {gp.dcwMode === 'high' && '✨ Corrects high-frequency wavelet bands — sharpens hi-hats, vocals and presence.'}
+                  {gp.dcwMode === 'double' && '🎛️ Independent correction on both low and high bands with separate scalers.'}
+                  {gp.dcwMode === 'pix' && '📐 Applies correction directly in latent space, bypassing wavelet decomposition. More uniform but less targeted.'}
+                </div>
+              </div>
             </div>
             <Slider label="Correction Scaler" value={gp.dcwScaler}
               onChange={gp.setDcwScaler} min={0} max={1} step={0.01} showInput />
