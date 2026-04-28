@@ -44,6 +44,7 @@ struct ModelRegistry {
     std::vector<ModelEntry>   dit;
     std::vector<ModelEntry>   text_enc;
     std::vector<ModelEntry>   vae;
+    std::vector<ModelEntry>   pp_vae;  // PP-VAE (post-processing VAE, auto-detected)
     std::vector<AdapterEntry> adapters;
 };
 
@@ -95,6 +96,9 @@ static std::string registry_classify_gguf(const char * path) {
     }
     if (arch == "acestep-vae") {
         return "VAE";
+    }
+    if (arch == "pp-vae") {
+        return "PP-VAE";
     }
     return "";
 }
@@ -228,6 +232,8 @@ static bool registry_scan(ModelRegistry * reg, const char * models_dir) {
             reg->text_enc.push_back(entry);
         } else if (type == "VAE") {
             reg->vae.push_back(entry);
+        } else if (type == "PP-VAE") {
+            reg->pp_vae.push_back(entry);
         }
 
         fprintf(stderr, "[Registry] %s -> %s\n", fname.c_str(), type.c_str());

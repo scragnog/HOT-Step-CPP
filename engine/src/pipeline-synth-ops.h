@@ -68,3 +68,8 @@ int ops_vae_decode(const AceSynth * ctx,
                    SynthState &     s,
                    bool (*cancel)(void *),
                    void * cancel_data);
+
+// PP-VAE re-encode: encode→decode round-trip through the post-processing VAE
+// with RMS gain matching. Operates on the already-decoded PCM audio in out[].
+// Returns 0 on success, -1 on error.
+int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, SynthState & s);

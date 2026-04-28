@@ -112,6 +112,10 @@ struct AceRequest {
     float       adapter_scale;  // 1.0
     std::string vae;            // ""
 
+    // PP-VAE re-encode: round-trip audio through the post-processing VAE
+    // for spectral cleanup. Only applies when a PP-VAE GGUF is available.
+    bool pp_vae_reencode;  // false
+
     // audio output: peak clip via percentile normalization.
     // 0 = peak normalization (100.0000th percentile, no clipping).
     // 10 = default (99.9990th percentile, clips top 0.001%).

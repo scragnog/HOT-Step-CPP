@@ -33,6 +33,7 @@ void ace_synth_default_params(AceSynthParams * p) {
     p->vae_chunk         = 1024;
     p->vae_overlap       = 64;
     p->dump_dir          = NULL;
+    p->pp_vae_path       = NULL;
 }
 
 AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
@@ -93,6 +94,17 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
 
     ctx->vae_dec_key.kind = MODEL_VAE_DEC;
     ctx->vae_dec_key.path = params->vae_path;
+
+    // PP-VAE: optional post-processing VAE
+    ctx->have_pp_vae = false;
+    if (params->pp_vae_path && params->pp_vae_path[0]) {
+        ctx->pp_vae_enc_key.kind = MODEL_VAE_ENC;
+        ctx->pp_vae_enc_key.path = params->pp_vae_path;
+        ctx->pp_vae_dec_key.kind = MODEL_VAE_DEC;
+        ctx->pp_vae_dec_key.path = params->pp_vae_path;
+        ctx->have_pp_vae         = true;
+        fprintf(stderr, "[Synth-Load] PP-VAE: %s\n", params->pp_vae_path);
+    }
 
     fprintf(stderr, "[Synth-Load] Ready: turbo=%s, merge=%s, fa=%s, batch_cfg=%s\n",
             ctx->meta->is_turbo ? "yes" : "no",
@@ -677,7 +689,15 @@ int ace_synth_job_run_vae(AceSynth *    ctx,
     if (!ctx || !job || !out) {
         return -1;
     }
-    return ops_vae_decode(ctx, job->batch_n, out, job->state, cancel, cancel_data);
+    int rc = ops_vae_decode(ctx, job->batch_n, out, job->state, cancel, cancel_data);
+    if (rc != 0) {
+        return rc;
+    }
+    // PP-VAE re-encode: optional spectral cleanup pass
+    if (ctx->have_pp_vae && job->state.rr.pp_vae_reencode) {
+        rc = ops_pp_vae_reencode(ctx, job->batch_n, out, job->state);
+    }
+    return rc;
 }
 
 void ace_synth_job_free(AceSynthJob * job) {

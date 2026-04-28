@@ -60,6 +60,7 @@ void request_init(AceRequest * r) {
     r->vae                  = "";
     r->peak_clip            = 10;
     r->mp3_bitrate          = 128;
+    r->pp_vae_reencode      = false;
 }
 
 // helper: get yyjson string as std::string
@@ -203,13 +204,21 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
         r->adapter_scale = (float) yyjson_get_num(v);
     }
 
-    // bool
+    // bools
     if ((v = yyjson_obj_get(obj, "use_cot_caption"))) {
         if (yyjson_is_bool(v)) {
             r->use_cot_caption = yyjson_get_bool(v);
         } else if (yyjson_is_str(v)) {
             const char * s     = yyjson_get_str(v);
             r->use_cot_caption = (strcmp(s, "true") == 0 || strcmp(s, "1") == 0);
+        }
+    }
+    if ((v = yyjson_obj_get(obj, "pp_vae_reencode"))) {
+        if (yyjson_is_bool(v)) {
+            r->pp_vae_reencode = yyjson_get_bool(v);
+        } else if (yyjson_is_str(v)) {
+            const char * s       = yyjson_get_str(v);
+            r->pp_vae_reencode   = (strcmp(s, "true") == 0 || strcmp(s, "1") == 0);
         }
     }
 
@@ -460,6 +469,9 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     }
     if (all || r->vae != def.vae) {
         yyjson_mut_obj_add_str(doc, root, "vae", r->vae.c_str());
+    }
+    if (all || r->pp_vae_reencode != def.pp_vae_reencode) {
+        yyjson_mut_obj_add_bool(doc, root, "pp_vae_reencode", r->pp_vae_reencode);
     }
 
     return doc;
