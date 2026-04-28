@@ -10,6 +10,30 @@ A feature-rich UI for [acestep.cpp](https://github.com/ServeurpersoCom/acestep.c
 
 Describe a song with a text caption and lyrics, and get stereo 48kHz audio generated entirely on your local hardware. No cloud, no API keys, no subscriptions.
 
+## Highlights
+
+HOT-Step CPP extends the base acestep.cpp engine with 80+ features across inference, audio processing, and creative tooling. Here are the big ones:
+
+🎛️ **14 Solvers, 8 Schedulers, 4 Guidance Modes** — Modular plugin systems for ODE/SDE solvers (Euler, RK4, Gauss-Legendre, RF-Solver, and more), noise schedulers (with composite 2-stage blending), and guidance modes (including Dynamic CFG). Each exposes its own sub-parameters.
+
+🎸 **LoRA Adapters with Runtime Mode** — Per-group scale controls (self_attn, cross_attn, mlp, cond_embed), K-quant GPU support via custom CUDA kernels, and a runtime LoRA mode that applies deltas in the forward pass without permanently merging weights.
+
+🎚️ **Matchering Mastering Engine** — Loudness, EQ, and dynamics matching to a reference track with instant mastered/unmastered A/B toggle. Operates at native 48kHz — no resample round-trip.
+
+🔌 **VST3 Host** — Scan, load, and run your existing VST3 plugins directly in the generation pipeline. Offline processing and real-time WASAPI monitor mode with transport controls.
+
+✍️ **Lyric Studio** — A complete AI-powered lyrics and music workspace. 6 LLM providers (Gemini, LM Studio, OpenAI-compatible), artist profiles with adapter presets, statistical lyric analysis, bulk generation with "Fill to N" mode, and full parameter parity with the Create page.
+
+🎤 **Cover Studio** — Upload a reference track, get Essentia-based analysis (BPM, key, energy, timbre), and generate style-matched covers with artist-specific settings.
+
+🔊 **Audio Post-Processing** — Spectral denoiser (Wiener-filter), Spectral Lifter (native C++), duration buffer with auto-trim for clean endings, and configurable fade-out.
+
+🧪 **Latent Space Controls** — Latent shift, latent rescale, custom timestep scheduling, DCW (Differential Correction in Wavelet domain) sampling, and auto-shift for adaptive noise scaling.
+
+📦 **Lossless Pipeline** — WAV32 throughout the processing chain, with export to WAV, MP3, or FLAC.
+
+👉 **[See the full feature list →](FEATURES.md)**
+
 ## Architecture
 
 HOT-Step CPP is three components working together:
