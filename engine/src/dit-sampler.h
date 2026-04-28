@@ -394,6 +394,24 @@ static int dit_ggml_generate(DiTGGML *           model,
 
     struct ggml_tensor * t_t = ggml_graph_get_tensor(gf, "t");
 
+    // DIAG: checksum weight buffer BEFORE denoising loop
+    {
+        size_t wbuf_size = ggml_backend_buffer_get_size(model->wctx.buffer);
+        size_t sample_n  = (wbuf_size < 4096) ? wbuf_size : 4096;
+        // Checksum first weight tensor as a proxy for weight integrity
+        struct ggml_tensor * first_w = ggml_get_first_tensor(model->wctx.ctx);
+        if (first_w) {
+            size_t nb = ggml_nbytes(first_w);
+            size_t check_n = (nb < sample_n) ? nb : sample_n;
+            std::vector<uint8_t> wsnap(check_n);
+            ggml_backend_tensor_get(first_w, wsnap.data(), 0, check_n);
+            uint64_t wsum = 0;
+            for (size_t i = 0; i < check_n; i++) { wsum += (uint64_t)wsnap[i] * (i + 1); }
+            fprintf(stderr, "[DIAG] weight_pre: tensor=%s bytes=%zu checksum=%llu\n",
+                    first_w->name, nb, (unsigned long long)wsum);
+        }
+    }
+
     // Flow matching loop
     bool switched_cover = false;
     for (int step = 0; step < num_steps; step++) {
@@ -693,6 +711,21 @@ static int dit_ggml_generate(DiTGGML *           model,
             for (int i = 0; i < n_total; i++) { dsum += (double) buf[i]; }
             fprintf(stderr, "[DIAG] dit_step%d_%s: sum=%.10f\n",
                     step, (step == num_steps - 1) ? "x0" : "xt", dsum);
+        }
+    }
+
+    // DIAG: checksum weight buffer AFTER denoising loop
+    {
+        struct ggml_tensor * first_w = ggml_get_first_tensor(model->wctx.ctx);
+        if (first_w) {
+            size_t nb = ggml_nbytes(first_w);
+            size_t check_n = (nb < 4096) ? nb : 4096;
+            std::vector<uint8_t> wsnap(check_n);
+            ggml_backend_tensor_get(first_w, wsnap.data(), 0, check_n);
+            uint64_t wsum = 0;
+            for (size_t i = 0; i < check_n; i++) { wsum += (uint64_t)wsnap[i] * (i + 1); }
+            fprintf(stderr, "[DIAG] weight_post: tensor=%s bytes=%zu checksum=%llu\n",
+                    first_w->name, nb, (unsigned long long)wsum);
         }
     }
 
