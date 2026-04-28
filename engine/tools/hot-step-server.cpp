@@ -854,6 +854,39 @@ static void synth_worker(std::shared_ptr<Job>    job,
         store_set_policy(g_store, EVICT_NEVER);
     }
 
+    // HOT-Step sideband: push custom params to global BEFORE synth load.
+    // Critical: adapter_group_scales must be set before ace_synth_load()
+    // because the adapter merge (inside dit_ggml_load) reads them from the
+    // global at merge time. Setting them after load uses stale scales.
+    g_hotstep_params.solver_name         = sf.solver_name;
+    g_hotstep_params.scheduler           = sf.scheduler;
+    g_hotstep_params.guidance_mode       = sf.guidance_mode;
+    g_hotstep_params.apg_momentum        = sf.apg_momentum;
+    g_hotstep_params.apg_norm_threshold  = sf.apg_norm_threshold;
+    g_hotstep_params.stork_substeps      = sf.stork_substeps;
+    g_hotstep_params.beat_stability      = sf.beat_stability;
+    g_hotstep_params.frequency_damping   = sf.frequency_damping;
+    g_hotstep_params.temporal_smoothing  = sf.temporal_smoothing;
+    g_hotstep_params.adapter_group_scales = sf.group_scales;
+    g_hotstep_params.adapter_mode         = sf.adapter_mode;
+    g_hotstep_params.dcw_enabled          = sf.dcw_enabled;
+    g_hotstep_params.dcw_mode             = sf.dcw_mode;
+    g_hotstep_params.dcw_scaler           = sf.dcw_scaler;
+    g_hotstep_params.dcw_high_scaler      = sf.dcw_high_scaler;
+    g_hotstep_params.latent_shift          = sf.latent_shift;
+    g_hotstep_params.latent_rescale        = sf.latent_rescale;
+    g_hotstep_params.custom_timesteps      = sf.custom_timesteps;
+    fprintf(stderr, "[Server] HOT-Step params: solver=%s, guidance=%s, scheduler=%s\n",
+            sf.solver_name.c_str(), sf.guidance_mode.c_str(),
+            sf.scheduler.empty() ? "(default)" : sf.scheduler.c_str());
+    fprintf(stderr, "[Server] Adapter group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
+            sf.group_scales.self_attn, sf.group_scales.cross_attn,
+            sf.group_scales.mlp, sf.group_scales.cond_embed);
+    if (sf.dcw_enabled) {
+        fprintf(stderr, "[Server] DCW: mode=%s scaler=%.3f high_scaler=%.3f\n",
+                sf.dcw_mode.c_str(), sf.dcw_scaler, sf.dcw_high_scaler);
+    }
+
     AceSynth * ctx = ace_synth_load(g_store, &p);
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: synth load failed\n");
@@ -915,37 +948,6 @@ static void synth_worker(std::shared_ptr<Job>    job,
 
     if (total_alloc > 1) {
         fprintf(stderr, "[Server] Batch: %d track(s) from %d request(s)\n", total_alloc, batch_n);
-    }
-
-    // HOT-Step sideband: push custom params to global before synth.
-    // The sampler reads these inside dit_ggml_generate().
-    g_hotstep_params.solver_name         = sf.solver_name;
-    g_hotstep_params.scheduler           = sf.scheduler;
-    g_hotstep_params.guidance_mode       = sf.guidance_mode;
-    g_hotstep_params.apg_momentum        = sf.apg_momentum;
-    g_hotstep_params.apg_norm_threshold  = sf.apg_norm_threshold;
-    g_hotstep_params.stork_substeps      = sf.stork_substeps;
-    g_hotstep_params.beat_stability      = sf.beat_stability;
-    g_hotstep_params.frequency_damping   = sf.frequency_damping;
-    g_hotstep_params.temporal_smoothing  = sf.temporal_smoothing;
-    g_hotstep_params.adapter_group_scales = sf.group_scales;
-    g_hotstep_params.adapter_mode         = sf.adapter_mode;
-    g_hotstep_params.dcw_enabled          = sf.dcw_enabled;
-    g_hotstep_params.dcw_mode             = sf.dcw_mode;
-    g_hotstep_params.dcw_scaler           = sf.dcw_scaler;
-    g_hotstep_params.dcw_high_scaler      = sf.dcw_high_scaler;
-    g_hotstep_params.latent_shift          = sf.latent_shift;
-    g_hotstep_params.latent_rescale        = sf.latent_rescale;
-    g_hotstep_params.custom_timesteps      = sf.custom_timesteps;
-    fprintf(stderr, "[Server] HOT-Step params: solver=%s, guidance=%s, scheduler=%s\n",
-            sf.solver_name.c_str(), sf.guidance_mode.c_str(),
-            sf.scheduler.empty() ? "(default)" : sf.scheduler.c_str());
-    fprintf(stderr, "[Server] Adapter group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f\n",
-            sf.group_scales.self_attn, sf.group_scales.cross_attn,
-            sf.group_scales.mlp, sf.group_scales.cond_embed);
-    if (sf.dcw_enabled) {
-        fprintf(stderr, "[Server] DCW: mode=%s scaler=%.3f high_scaler=%.3f\n",
-                sf.dcw_mode.c_str(), sf.dcw_scaler, sf.dcw_high_scaler);
     }
 
     // Two-phase run. The store acquires and releases GPU modules around each
