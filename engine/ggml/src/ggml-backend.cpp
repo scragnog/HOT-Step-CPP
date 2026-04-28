@@ -1734,6 +1734,11 @@ void ggml_backend_sched_reset(ggml_backend_sched_t sched) {
     sched->is_alloc = false;
 }
 
+void ggml_backend_sched_clear_compute_buffers(ggml_backend_sched_t sched) {
+    GGML_ASSERT(sched);
+    ggml_gallocr_clear_buffers(sched->galloc);
+}
+
 void ggml_backend_sched_reserve_size(ggml_backend_sched_t sched, struct ggml_cgraph * measure_graph, size_t * sizes) {
     GGML_ASSERT(sched);
     GGML_ASSERT((int)sched->hash_set.size >= measure_graph->n_nodes + measure_graph->n_leafs);

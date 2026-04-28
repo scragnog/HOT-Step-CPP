@@ -223,6 +223,13 @@ static int dit_ggml_generate(DiTGGML *           model,
         return -1;
     }
 
+    // CRITICAL: zero all compute buffers AFTER allocation but BEFORE setting
+    // inputs. Without this, the GPU buffer retains stale data from the
+    // previous generation (ggml aliases tensor lifetimes within the same
+    // physical buffer). When the model store keeps the DiT resident between
+    // runs (LM cache hit), stale intermediate values corrupt the computation.
+    ggml_backend_sched_clear_compute_buffers(model->sched);
+
     // Encoder hidden states: re-uploaded per step (scheduler clobbers input buffers).
     // When CFG batched, slots [0,N) hold real encoder states, [N,2N) hold null.
     // t_enc was declared above for backend forcing

@@ -73,6 +73,10 @@ GGML_API bool ggml_gallocr_alloc_graph(ggml_gallocr_t galloc, struct ggml_cgraph
 
 GGML_API size_t ggml_gallocr_get_buffer_size(ggml_gallocr_t galloc, int buffer_id);
 
+// Zero all allocated compute buffers in the graph allocator.
+// Prevents stale data from previous graph computations from affecting the next run.
+GGML_API void ggml_gallocr_clear_buffers(ggml_gallocr_t galloc);
+
 // Utils
 // Create a buffer and allocate all the tensors in a ggml_context
 // ggml_backend_alloc_ctx_tensors_from_buft_size returns the size of the buffer that would be allocated by ggml_backend_alloc_ctx_tensors_from_buft

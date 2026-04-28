@@ -337,6 +337,11 @@ extern "C" {
     // The correct way to use this API is to discard the deallocated tensors and create new ones.
     GGML_API void                 ggml_backend_sched_reset(ggml_backend_sched_t sched);
 
+    // Zero all compute buffers in the scheduler's graph allocator.
+    // Call after alloc_graph and before setting inputs / graph_compute to prevent
+    // stale data from previous runs from affecting the current computation.
+    GGML_API void                 ggml_backend_sched_clear_compute_buffers(ggml_backend_sched_t sched);
+
     // Set a callback to be called for each resulting node during graph compute
     GGML_API void                 ggml_backend_sched_set_eval_callback(ggml_backend_sched_t sched, ggml_backend_sched_eval_callback callback, void * user_data);
 

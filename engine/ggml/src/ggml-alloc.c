@@ -1113,6 +1113,29 @@ size_t ggml_gallocr_get_buffer_size(ggml_gallocr_t galloc, int buffer_id) {
     return ggml_vbuffer_size(galloc->buffers[buffer_id]);
 }
 
+void ggml_gallocr_clear_buffers(ggml_gallocr_t galloc) {
+    for (int i = 0; i < galloc->n_buffers; i++) {
+        struct vbuffer * vbuf = galloc->buffers[i];
+        if (!vbuf) {
+            continue;
+        }
+        // skip duplicates (same vbuffer shared across buffer indices)
+        bool dup = false;
+        for (int j = 0; j < i; j++) {
+            if (galloc->buffers[j] == vbuf) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) {
+            continue;
+        }
+        for (int c = 0; c < GGML_VBUFFER_MAX_CHUNKS && vbuf->chunks[c]; c++) {
+            ggml_backend_buffer_clear(vbuf->chunks[c], 0);
+        }
+    }
+}
+
 // utils
 
 static void free_buffers(ggml_backend_buffer_t ** buffers, const size_t * n_buffers) {
