@@ -15,6 +15,7 @@
 #include "task-types.h"
 
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -290,6 +291,27 @@ static bool pinned_encode_src_and_timbre(AceSynth *    ctx,
     return true;
 }
 
+// ─── Determinism diagnostic ─────────────────────────────────────────────────
+// Print per-buffer statistics for comparing identical generation runs.
+// The exact sum is sensitive to single-bit differences, so if the sum
+// matches across runs, the buffers are bit-identical.
+static void diag_stats_f32(const char * label, const float * data, size_t n) {
+    if (!data || n == 0) { return; }
+    double sum = 0.0, sum_sq = 0.0;
+    float  mn = data[0], mx = data[0];
+    for (size_t i = 0; i < n; i++) {
+        double v = (double) data[i];
+        sum += v;
+        sum_sq += v * v;
+        if (data[i] < mn) { mn = data[i]; }
+        if (data[i] > mx) { mx = data[i]; }
+    }
+    double mean = sum / (double) n;
+    double rms  = sqrt(sum_sq / (double) n);
+    fprintf(stderr, "[DIAG] %s: n=%zu mean=%.8f rms=%.8f min=%.6f max=%.6f sum=%.10f\n",
+            label, n, mean, rms, mn, mx, sum);
+}
+
 // Common tail every task ends with once its inputs are encoded and flags are
 // posed: resolve params, resolve T, build schedule, encode text, build
 // context, init noise, run DiT. Returns 0 on success, -1 on error/cancel.
@@ -309,14 +331,22 @@ static int run_tail(AceSynth *         ctx,
     if (ops_encode_text(ctx, reqs, batch_n, s) != 0) {
         return -1;
     }
+    diag_stats_f32("enc_hidden", s.enc_hidden.data(), s.enc_hidden.size());
+
     if (ops_build_context(ctx, reqs, batch_n, s) != 0) {
         return -1;
     }
+    diag_stats_f32("context", s.context.data(), s.context.size());
+
     ops_build_context_silence(ctx, batch_n, s);
     ops_init_noise(ctx, reqs, batch_n, s);
+    diag_stats_f32("noise", s.noise.data(), s.noise.size());
+
     if (ops_dit_generate(ctx, batch_n, s, cancel, cancel_data) != 0) {
         return -1;
     }
+    diag_stats_f32("dit_output", s.output.data(), s.output.size());
+
     return 0;
 }
 

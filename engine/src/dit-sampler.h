@@ -678,6 +678,15 @@ static int dit_ggml_generate(DiTGGML *           model,
         }
 
         fprintf(stderr, "[DiT] Step %d/%d t=%.3f\n", step + 1, num_steps, t_curr);
+
+        // Determinism diagnostic: print xt/output checksum at key steps
+        if (step == 0 || step == num_steps / 2 || step == num_steps - 1) {
+            const float * buf = (step == num_steps - 1) ? output : xt.data();
+            double dsum = 0.0;
+            for (int i = 0; i < n_total; i++) { dsum += (double) buf[i]; }
+            fprintf(stderr, "[DIAG] dit_step%d_%s: sum=%.10f\n",
+                    step, (step == num_steps - 1) ? "x0" : "xt", dsum);
+        }
     }
 
     // Batch diagnostic: report per-sample stats to catch corruption

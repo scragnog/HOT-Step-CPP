@@ -22,6 +22,24 @@
 
 static const int FRAMES_PER_SECOND = 25;
 
+// ─── Determinism diagnostic ─────────────────────────────────────────────────
+static void diag_stats_f32(const char * label, const float * data, size_t n) {
+    if (!data || n == 0) { return; }
+    double sum = 0.0, sum_sq = 0.0;
+    float  mn = data[0], mx = data[0];
+    for (size_t i = 0; i < n; i++) {
+        double v = (double) data[i];
+        sum += v;
+        sum_sq += v * v;
+        if (data[i] < mn) { mn = data[i]; }
+        if (data[i] > mx) { mx = data[i]; }
+    }
+    double mean = sum / (double) n;
+    double rms  = sqrt(sum_sq / (double) n);
+    fprintf(stderr, "[DIAG] %s: n=%zu mean=%.8f rms=%.8f min=%.6f max=%.6f sum=%.10f\n",
+            label, n, mean, rms, mn, mx, sum);
+}
+
 // CSV list parser tolerant to any whitespace around commas. Locale-immune via
 // std::from_chars (C++17 charconv, overloaded on the numeric type). Used for
 // audio_codes (int) and custom_timesteps (float). Bails on first parse error
@@ -868,6 +886,12 @@ int ops_vae_decode(const AceSynth * ctx,
         memcpy(out[b].samples, audio.data(), (size_t) n_total * sizeof(float));
         out[b].n_samples   = T_audio;
         out[b].sample_rate = 48000;
+
+        {
+            char dlabel[64];
+            snprintf(dlabel, sizeof(dlabel), "vae_audio_b%d", b);
+            diag_stats_f32(dlabel, out[b].samples, (size_t) n_total);
+        }
 
         // Waveform hard splice (audio path only): replace out-of-zone samples
         // with the original source PCM. The VAE roundtrip is lossy, so this
