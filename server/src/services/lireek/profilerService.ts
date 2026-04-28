@@ -1,4 +1,5 @@
 import * as cmuDictRaw from 'cmu-pronouncing-dictionary';
+import type { ChunkCallback } from './llmService.js';
 
 export interface SongLyrics {
   title: string;
@@ -613,12 +614,12 @@ function selectRepresentativeExcerpts(allSongs: SongLyrics[], maxExcerpts = 5): 
 
 const MAX_RETRIES = 2;
 
-async function llmCallWithRetry(providerName: string, modelName: string, sysPrompt: string, usrPrompt: string, label: string, onPhase?: (p:string)=>void): Promise<{ raw: string, data: any }> {
+async function llmCallWithRetry(providerName: string, modelName: string, sysPrompt: string, usrPrompt: string, label: string, onPhase?: (p:string)=>void, onChunk?: ChunkCallback): Promise<{ raw: string, data: any }> {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 1 && onPhase) onPhase(`${label} (retry ${attempt}/${MAX_RETRIES})…`);
     try {
       const provider = llmService.getProvider(providerName);
-      const raw = await provider.call(sysPrompt, usrPrompt, modelName);
+      const raw = await provider.call(sysPrompt, usrPrompt, modelName, onChunk);
       const data = extractJson(raw);
       if (data) return { raw, data };
     } catch (e) {
@@ -681,13 +682,13 @@ Return JSON in exactly this format:
 
 Be specific and concrete. Do NOT include any text outside the JSON object.`;
 
-async function analyseSongSubjects(songs: SongLyrics[], providerName: string, modelName: string): Promise<{song_subjects: Record<string, string>, subject_categories: string[]}> {
+async function analyseSongSubjects(songs: SongLyrics[], providerName: string, modelName: string, onChunk?: ChunkCallback): Promise<{song_subjects: Record<string, string>, subject_categories: string[]}> {
   const songList = songs.map(s => `--- ${s.title} ---\n${s.lyrics.substring(0, 500)}`).join('\n\n');
   const usrPrompt = `Analyse the subjects of these ${songs.length} songs:\n\n${songList}`;
   
   const provider = llmService.getProvider(providerName);
   try {
-    const raw = await provider.call(SUBJECT_SYSTEM_PROMPT, usrPrompt, modelName);
+    const raw = await provider.call(SUBJECT_SYSTEM_PROMPT, usrPrompt, modelName, onChunk);
     const data = extractJson(raw);
     if (data) return { song_subjects: data.song_subjects || {}, subject_categories: data.subject_categories || [] };
   } catch (e) {
@@ -709,7 +710,8 @@ export async function buildProfile(
   songs: SongLyrics[],
   providerName: string,
   modelName?: string,
-  onPhase?: (phase: string) => void
+  onPhase?: (phase: string) => void,
+  onChunk?: ChunkCallback
 ): Promise<Partial<LyricsProfile>> {
   const effModel = modelName || llmService.getProvider(providerName).defaultModel;
 
@@ -741,19 +743,19 @@ export async function buildProfile(
   const raws: string[] = [];
 
   if (onPhase) onPhase("Analysing themes & vocabulary… (1/4)");
-  const res1 = await llmCallWithRetry(providerName, effModel, PROFILE_PROMPT_1, usrPrompt, "Call 1/4", onPhase);
+  const res1 = await llmCallWithRetry(providerName, effModel, PROFILE_PROMPT_1, usrPrompt, "Call 1/4", onPhase, onChunk);
   raws.push(res1.raw); Object.assign(merged, res1.data);
 
   if (onPhase) onPhase("Analysing tone & structure… (2/4)");
-  const res2 = await llmCallWithRetry(providerName, effModel, PROFILE_PROMPT_2, usrPrompt, "Call 2/4", onPhase);
+  const res2 = await llmCallWithRetry(providerName, effModel, PROFILE_PROMPT_2, usrPrompt, "Call 2/4", onPhase, onChunk);
   raws.push(res2.raw); Object.assign(merged, res2.data);
 
   if (onPhase) onPhase("Analysing imagery & signature… (3/4)");
-  const res3 = await llmCallWithRetry(providerName, effModel, PROFILE_PROMPT_3, usrPrompt, "Call 3/4", onPhase);
+  const res3 = await llmCallWithRetry(providerName, effModel, PROFILE_PROMPT_3, usrPrompt, "Call 3/4", onPhase, onChunk);
   raws.push(res3.raw); Object.assign(merged, res3.data);
 
   if (onPhase) onPhase("Analysing song subjects… (4/4)");
-  const subjects = await analyseSongSubjects(songs, providerName, effModel);
+  const subjects = await analyseSongSubjects(songs, providerName, effModel, onChunk);
 
   const rawCombined = raws.join('\n\n---\n\n');
 

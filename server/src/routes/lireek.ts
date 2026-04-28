@@ -649,6 +649,8 @@ router.post('/lyrics-sets/:id/build-profile-stream', async (req: Request, res: R
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
 
     const sendSse = (type: string, data: any) => {
       res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -660,7 +662,8 @@ router.post('/lyrics-sets/:id/build-profile-stream', async (req: Request, res: R
       lyricsSet.songs, 
       provider_name, 
       model,
-      (phase) => sendSse('phase', { phase })
+      (phase) => sendSse('phase', { phase }),
+      (chunk) => sendSse('chunk', { text: chunk })
     );
     const profile = db.saveProfile(lyricsSet.id, provider_name, model || '', profileData);
     sendSse('complete', profile);
@@ -754,6 +757,8 @@ router.post('/profiles/:id/generate-stream', async (req: Request, res: Response)
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
 
     const sendSse = (type: string, data: any) => {
       res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -862,6 +867,8 @@ router.post('/generations/:id/refine-stream', async (req: Request, res: Response
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
 
     const sendSse = (type: string, data: any) => {
       res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
