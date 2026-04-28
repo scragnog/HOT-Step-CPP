@@ -712,10 +712,11 @@ router.post('/profiles/:id/generate', async (req: Request, res: Response) => {
     const usedBpms = pastGenerations.map((g: any) => g.bpm).filter((b: any): b is number => b !== null && b > 0);
     const usedKeys = pastGenerations.map((g: any) => g.song_key).filter(Boolean);
     const usedTitles = pastGenerations.map((g: any) => g.title).filter(Boolean);
+    const usedDurations = pastGenerations.map((g: any) => g.duration).filter((d: any): d is number => d !== null && d > 0);
 
     const generated = await llmService.generateLyricsStreaming(
       profile.profile_data, provider_name, model, extra_instructions, 
-      usedSubjects as string[], usedBpms as number[], usedKeys as string[], usedTitles as string[]
+      usedSubjects as string[], usedBpms as number[], usedKeys as string[], usedTitles as string[], usedDurations as number[]
     );
     
     if (auto_save) {
@@ -770,10 +771,11 @@ router.post('/profiles/:id/generate-stream', async (req: Request, res: Response)
     const usedBpms = pastGenerations.map((g: any) => g.bpm).filter((b: any): b is number => b !== null && b > 0);
     const usedKeys = pastGenerations.map((g: any) => g.key).filter(Boolean);
     const usedTitles = pastGenerations.map((g: any) => g.title).filter(Boolean);
+    const usedDurations = pastGenerations.map((g: any) => g.duration).filter((d: any): d is number => d !== null && d > 0);
 
     const generated = await llmService.generateLyricsStreaming(
       profile.profile_data, provider_name, model, extra_instructions,
-      usedSubjects as string[], usedBpms as number[], usedKeys as string[], usedTitles as string[],
+      usedSubjects as string[], usedBpms as number[], usedKeys as string[], usedTitles as string[], usedDurations as number[],
       (chunk) => sendSse('chunk', { text: chunk }),
       (phase) => sendSse('phase', { phase })
     );

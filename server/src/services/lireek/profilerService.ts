@@ -22,7 +22,42 @@ export interface LyricsProfile {
   raw_summary?: string;
   song_subjects?: Record<string, string>;
   subject_categories?: string[];
-  repetition_stats?: any;
+  repetition_stats?: {
+    chorus_repetition_pct?: number;
+    verse_repetition_pct?: number;
+    cross_section_repeats?: number;
+    pattern?: string;
+    hook_examples?: string[];
+  };
+  structure_blueprints?: string[];
+  perspective?: string;
+  meter_stats?: {
+    avg_syllables_per_line?: number;
+    syllable_std_dev?: number;
+    avg_words_per_line?: number;
+    line_length_range?: string;
+    line_length_variation?: {
+      histogram?: Record<string, number>;
+      per_section?: Record<string, any>;
+      short_line_examples?: string[];
+      long_line_examples?: string[];
+    };
+  };
+  vocabulary_stats?: {
+    type_token_ratio?: number;
+    total_words?: number;
+    unique_words?: number;
+    contraction_pct?: number;
+    profanity_pct?: number;
+    distinctive_words?: string[];
+  };
+  representative_excerpts?: string[];
+  narrative_techniques?: string;
+  imagery_patterns?: string;
+  signature_devices?: string;
+  emotional_arc?: string;
+  rhyme_quality?: Record<string, number>;
+  examples?: any[];
   [key: string]: any;
 }
 

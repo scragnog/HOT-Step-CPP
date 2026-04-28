@@ -601,12 +601,212 @@ export async function listProviders(): Promise<ProviderInfo[]> {
 export function stripThinkingBlocks(text: string): string {
   // Remove standard <think>...</think> blocks
   let result = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+  // Remove other reasoning model tags
+  result = result.replace(/<analysis>[\s\S]*?<\/analysis>/g, '');
+  result = result.replace(/<reasoning>[\s\S]*?<\/reasoning>/g, '');
+  result = result.replace(/<reflection>[\s\S]*?<\/reflection>/g, '');
+  result = result.replace(/<thought>[\s\S]*?<\/thought>/g, '');
   // Remove LM Studio channel-based thinking: <|channel>thought...<channel|>
   result = result.replace(/<\|channel>thought[\s\S]*?<channel\|>/g, '');
   // Handle unclosed thinking blocks (model stopped mid-thought)
-  result = result.replace(/<think>[\s\S]*/g, '');
+  result = result.replace(/<(?:think|analysis|reasoning|reflection|thought)>[\s\S]*/g, '');
   result = result.replace(/<\|channel>thought[\s\S]*/g, '');
+  // Plain text CoT (LM Studio GGUF quirks)
+  const cotMatch = result.match(/^(?:\s*\*+\s*)?(?:Thinking Process|Thought Process|Thinking|Reasoning):\s*[\s\S]*?(?:---|[*]{3,}|={3,})\s*/i);
+  if (cotMatch) {
+    result = result.slice(cotMatch[0].length);
+  }
   return result.trim();
+}
+
+// ── Post-processing pipeline (ported from HOT-Step 9000) ────────────────────
+
+const SECTION_KEYWORDS = [
+  'Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Post-Chorus',
+  'Bridge', 'Interlude', 'Outro', 'Hook', 'Refrain',
+];
+
+const SECTION_LINE_RE = new RegExp(
+  '^\\[?(' + SECTION_KEYWORDS.map(k => k.replace(/[-/]/g, '\\$&')).join('|') + ')\\s*(\\d*)\\]?\\s*$',
+  'i'
+);
+
+const PUNCTUATION_ENDINGS = new Set('.,!?;:-…)"\'');
+
+/** Wrap section headers in brackets, add missing punctuation to lyric lines. */
+function postprocessLyrics(text: string): string {
+  const resultLines: string[] = [];
+  for (const line of text.split('\n')) {
+    const stripped = line.trim();
+    if (!stripped) { resultLines.push(''); continue; }
+    const m = SECTION_LINE_RE.exec(stripped);
+    if (m) {
+      const sectionName = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase();
+      const sectionNum = m[2];
+      resultLines.push(sectionNum ? `[${sectionName} ${sectionNum}]` : `[${sectionName}]`);
+      continue;
+    }
+    if (/^\[.+\]$/.test(stripped)) { resultLines.push(stripped); continue; }
+    if (stripped && !PUNCTUATION_ENDINGS.has(stripped[stripped.length - 1])) {
+      resultLines.push(stripped + ',');
+    } else {
+      resultLines.push(stripped);
+    }
+  }
+  return resultLines.join('\n');
+}
+
+/** Rename invalid section labels to valid ACE-Step ones. */
+function fixSectionLabels(text: string): string {
+  const INVALID_TO_VALID: Record<string, string> = {
+    'x': 'Interlude', 'breakdown': 'Bridge', 'drop': 'Chorus',
+    'solo': 'Interlude', 'hook': 'Chorus', 'rap': 'Verse', 'spoken': 'Verse',
+  };
+
+  const lines = text.split('\n');
+  const result: string[] = [];
+  const sectionHeaders: { lineIdx: number; header: string }[] = [];
+
+  for (const line of lines) {
+    const stripped = line.trim();
+    const m = stripped.match(/^\[(.+?)(?:\s+\d+)?\]$/);
+    if (m) {
+      let label = m[1].trim().toLowerCase();
+      let newStripped = stripped;
+      if (INVALID_TO_VALID[label]) {
+        const newLabel = INVALID_TO_VALID[label];
+        const numMatch = stripped.match(/\d+/);
+        newStripped = numMatch ? `[${newLabel} ${numMatch[0]}]` : `[${newLabel}]`;
+      }
+      sectionHeaders.push({ lineIdx: result.length, header: newStripped });
+      result.push(newStripped);
+    } else {
+      result.push(stripped.startsWith('[') && stripped.endsWith(']') ? stripped : line);
+    }
+  }
+
+  // If no Chorus exists but Bridge appears multiple times, fix it
+  const bridgeIndices = sectionHeaders
+    .map((h, i) => ({ i, h }))
+    .filter(x => x.h.header.toLowerCase().includes('bridge'));
+  const chorusExists = sectionHeaders.some(h => h.header.toLowerCase().includes('chorus'));
+
+  if (!chorusExists && bridgeIndices.length >= 2) {
+    for (const bi of bridgeIndices.slice(0, -1)) {
+      result[sectionHeaders[bi.i].lineIdx] = '[Chorus]';
+    }
+  }
+
+  return result.join('\n');
+}
+
+/** Enforce valid line counts: verses=4|8, choruses=4|6|8. */
+function enforceLineCounts(text: string): string {
+  const VERSE_VALID = new Set([4, 8]);
+  const CHORUS_VALID = new Set([4, 6, 8]);
+  const sections: { header: string; lines: string[] }[] = [];
+  let currentHeader = '';
+  let currentLines: string[] = [];
+
+  for (const line of text.split('\n')) {
+    const stripped = line.trim();
+    if (/^\[.+\]$/.test(stripped)) {
+      if (currentHeader || currentLines.length) {
+        sections.push({ header: currentHeader, lines: currentLines });
+      }
+      currentHeader = stripped;
+      currentLines = [];
+    } else {
+      currentLines.push(line);
+    }
+  }
+  if (currentHeader || currentLines.length) {
+    sections.push({ header: currentHeader, lines: currentLines });
+  }
+
+  const resultParts: string[] = [];
+  for (const { header, lines } of sections) {
+    const lyricLines = lines.filter(l => l.trim());
+    const count = lyricLines.length;
+    const headerLower = header.toLowerCase();
+    const isVerse = headerLower.includes('verse');
+    const isChorus = headerLower.includes('chorus') || headerLower.includes('hook');
+    let target: number | null = null;
+
+    if (isVerse && !VERSE_VALID.has(count)) {
+      target = count <= 6 ? 4 : 8;
+    } else if (isChorus && !CHORUS_VALID.has(count)) {
+      if (count <= 5) target = 4;
+      else if (count <= 7) target = 6;
+      else target = 8;
+    }
+
+    let finalLines = lines;
+    if (target !== null && target < count) {
+      let kept = 0;
+      finalLines = [];
+      for (const l of lines) {
+        if (l.trim()) {
+          if (kept < target) { finalLines.push(l); kept++; }
+        } else {
+          if (kept < target) finalLines.push(l);
+        }
+      }
+    }
+
+    if (header) resultParts.push(header);
+    resultParts.push(...finalLines);
+  }
+  return resultParts.join('\n');
+}
+
+/** Remove 'a-' prefix from non-gerund words. */
+const BAD_A_PREFIX_RE = /\ba-(?!\w+ing\b)(?!\w+in'\b)/gi;
+function fixAPrefix(text: string): string {
+  return text.replace(BAD_A_PREFIX_RE, '');
+}
+
+/** Remove quoted lyric fragments from profile text to prevent copying. */
+function stripLyricQuotes(text: string): string {
+  return text.replace(/'[^']{4,}'/g, '[quote removed]');
+}
+
+/** Estimate track duration in seconds from lyrics content and BPM. */
+function estimateDuration(lyrics: string, bpm: number): number {
+  if (!lyrics.trim() || bpm <= 0) return 0;
+  const barDuration = 240.0 / Math.max(bpm, 40);
+  const lines = lyrics.trim().split('\n');
+  let sectionCount = 0;
+  let lyricLineCount = 0;
+  for (const line of lines) {
+    const stripped = line.trim();
+    if (!stripped) continue;
+    if (SECTION_LINE_RE.test(stripped) || (stripped.startsWith('[') && stripped.endsWith(']'))) {
+      sectionCount++;
+    } else {
+      lyricLineCount++;
+    }
+  }
+  const vocalSeconds = lyricLineCount * 3.5;
+  const breakSeconds = Math.max(sectionCount - 1, 0) * 4 * barDuration;
+  const estimated = Math.floor(vocalSeconds + breakSeconds);
+  return Math.max(90, Math.min(estimated, 360));
+}
+
+/** Pick the most interesting blueprint from a list. */
+function selectBestBlueprint(blueprints: string[]): string {
+  if (!blueprints.length) return 'V-C-V-C-B-C';
+  return blueprints.reduce((best, bp) => {
+    const parts = bp.split('-');
+    const unique = new Set(parts).size;
+    const hasBridge = parts.includes('B') ? 1 : 0;
+    const score = unique * 10 + hasBridge * 100 + parts.length;
+    const bestParts = best.split('-');
+    const bestUnique = new Set(bestParts).size;
+    const bestBridge = bestParts.includes('B') ? 1 : 0;
+    const bestScore = bestUnique * 10 + bestBridge * 100 + bestParts.length;
+    return score > bestScore ? bp : best;
+  });
 }
 
 /**
@@ -617,66 +817,188 @@ async function planSongMetadata(
   usedSubjects: string[],
   usedBpms: number[],
   usedKeys: string[],
+  usedDurations: number[],
   providerName: string,
   modelName: string,
   onChunk?: ChunkCallback
 ): Promise<any> {
   const provider = getProvider(providerName);
-  const prompt = `
-Artist Style Summary:
-${profile.raw_summary || 'No summary available'}
+  const lines: string[] = [`Artist: ${profile.artist}`];
+  if (profile.album) lines.push(`Album style: ${profile.album}`);
+  if (profile.themes?.length) lines.push(`Themes: ${profile.themes.join(', ')}`);
+  if (profile.tone_and_mood) lines.push(`Tone & mood: ${profile.tone_and_mood}`);
+  if (profile.additional_notes) lines.push(`Additional notes: ${profile.additional_notes}`);
+  if (profile.perspective) lines.push(`Perspective / voice: ${profile.perspective}`);
 
-Themes to explore: ${(profile.themes || []).join(', ')}
-Typical subjects: ${(profile.subject_categories || []).join(', ')}
-${profile.song_subjects ? `Song subjects from their catalogue: ${profile.song_subjects}` : ''}
-  
-Already used subjects (DO NOT REPEAT): ${(usedSubjects || []).join(' || ')}
-Already used BPMs: ${(usedBpms || []).join(', ')}
-Already used Keys: ${(usedKeys || []).join(', ')}
-`;
+  if (profile.song_subjects && typeof profile.song_subjects === 'object') {
+    lines.push('\nOriginal song subjects (for reference):');
+    for (const [songTitle, subject] of Object.entries(profile.song_subjects)) {
+      lines.push(`  • ${songTitle}: ${subject}`);
+    }
+  }
+  if (profile.subject_categories?.length) {
+    lines.push(`\nThematic categories: ${profile.subject_categories.join(', ')}`);
+  }
+  if (usedSubjects?.length) {
+    lines.push('\nSubjects ALREADY USED (do NOT repeat these):');
+    for (const s of usedSubjects) lines.push(`  ✗ ${s}`);
+  }
+  if (usedBpms?.length) lines.push(`\nBPMs ALREADY USED (avoid ±5 of these): ${usedBpms.join(', ')}`);
+  if (usedKeys?.length) lines.push(`\nKeys ALREADY USED (try different ones): ${usedKeys.join(', ')}`);
+  if (usedDurations?.length) lines.push(`\nDurations ALREADY USED (avoid ±10 of these): ${usedDurations.join(', ')}`);
+  lines.push('\nPlan the metadata for the next song:');
 
+  const prompt = lines.join('\n');
+  console.log('[LLM] Planning song metadata via', providerName, modelName);
   const responseJsonStr = await provider.call(SONG_METADATA_SYSTEM_PROMPT, prompt, modelName, onChunk);
-  const cleanJson = stripThinkingBlocks(responseJsonStr).replace(/```json/g, '').replace(/```/g, '').trim();
+  const cleaned = stripThinkingBlocks(responseJsonStr);
+  const cleanJson = cleaned.replace(/^```(?:json)?\s*|\s*```$/gm, '').trim();
   try {
     return JSON.parse(cleanJson);
   } catch (err) {
-    console.error("Failed to parse metadata JSON:", cleanJson);
+    // Try extracting JSON object with depth tracking
+    const start = cleanJson.indexOf('{');
+    if (start !== -1) {
+      let depth = 0;
+      for (let i = start; i < cleanJson.length; i++) {
+        if (cleanJson[i] === '{') depth++;
+        else if (cleanJson[i] === '}') { depth--; if (depth === 0) { try { return JSON.parse(cleanJson.slice(start, i + 1)); } catch {} break; } }
+      }
+    }
+    console.error("Failed to parse metadata JSON:", cleanJson.slice(0, 300));
     return { subject: '', bpm: 0, key: '', caption: '', duration: 0 };
   }
 }
 
+const BLUEPRINT_LABEL_NAMES: Record<string, string> = {
+  V: 'Verse', C: 'Chorus', B: 'Bridge', PC: 'Pre-Chorus',
+  POC: 'Post-Chorus', I: 'Intro', O: 'Outro', IL: 'Interlude',
+};
+
 function buildGenerationPrompt(profile: LyricsProfile, extraInstructions?: string, usedTitles: string[] = []): string {
-  let prompt = '';
-  if (profile.raw_summary) prompt += `Artist Summary:\n${profile.raw_summary}\n\n`;
-  
-  // Include live computed stats (overrides any stale values baked into raw_summary)
-  const vs = profile.vocabulary_stats;
-  if (vs) {
-    prompt += `=== COMPUTED STATS ===\n`;
-    prompt += `Vocabulary: ${vs.total_words} total words, ${vs.unique_words} unique, TTR=${vs.type_token_ratio}\n`;
-    prompt += `Contractions: ${vs.contraction_pct}% of words\n`;
-    prompt += `Profanity: ${vs.profanity_pct}% of words\n`;
-    prompt += `Distinctive words: ${(vs.distinctive_words || []).join(', ')}\n\n`;
+  const lines: string[] = [`Artist: ${profile.artist}`];
+  if (profile.album) lines.push(`Album style: ${profile.album}`);
+
+  // === STYLISTIC PROFILE ===
+  lines.push('', '=== STYLISTIC PROFILE ===', '');
+  lines.push(`Themes: ${(profile.themes || []).join(', ')}`);
+  lines.push(`Common subjects / motifs: ${(profile.common_subjects || []).join(', ')}`);
+  lines.push(`Rhyme schemes: ${(profile.rhyme_schemes || []).join(', ')}`);
+  lines.push(`Average verse length: ${profile.avg_verse_lines} lines`);
+  lines.push(`Average chorus length: ${profile.avg_chorus_lines} lines`);
+  if (profile.vocabulary_notes) lines.push(`Vocabulary: ${stripLyricQuotes(profile.vocabulary_notes)}`);
+  if (profile.tone_and_mood) lines.push(`Tone & mood: ${stripLyricQuotes(profile.tone_and_mood)}`);
+  if (profile.structural_patterns) lines.push(`Structural patterns: ${stripLyricQuotes(profile.structural_patterns)}`);
+
+  // === SONG STRUCTURE (MANDATORY) ===
+  if (profile.structure_blueprints?.length) {
+    const bp = selectBestBlueprint(profile.structure_blueprints);
+    lines.push('', '=== SONG STRUCTURE (MANDATORY) ===');
+    lines.push(`Blueprint: ${bp}`);
+    const parts = bp.split('-');
+    let verseNum = 0;
+    const sectionList: string[] = [];
+    for (const part of parts) {
+      let name = BLUEPRINT_LABEL_NAMES[part] || part;
+      if (part === 'V') { verseNum++; name = `Verse ${verseNum}`; }
+      sectionList.push(`[${name}]`);
+    }
+    lines.push(`You MUST write these sections in this exact order: ${sectionList.join(' → ')}`);
+    if (parts.includes('B')) lines.push("This artist uses bridges — you MUST include a [Bridge] section.");
   }
+
+  if (profile.perspective) lines.push(`Perspective / voice: ${profile.perspective}`);
+
+  // === LINE LENGTH & METER ===
   const ms = profile.meter_stats;
   if (ms) {
-    prompt += `Meter: avg ${ms.avg_syllables_per_line} syllables/line (σ=${ms.syllable_std_dev}), ${ms.avg_words_per_line} words/line, range ${ms.line_length_range}\n`;
+    lines.push('', '=== LINE LENGTH & METER ===');
+    lines.push(`Average: ~${ms.avg_syllables_per_line ?? '?'} syllables/line, ~${ms.avg_words_per_line ?? '?'} words/line`);
+    lines.push(`Standard deviation: ±${ms.syllable_std_dev ?? '?'} syllables (VARY your line lengths!)`);
+    const llv = ms.line_length_variation;
+    if (llv?.histogram) {
+      const histStr = Object.entries(llv.histogram).map(([k, v]) => `${k} syl: ${v}%`).join(', ');
+      lines.push(`Syllable distribution: ${histStr}`);
+      lines.push('Match this distribution — NOT all lines the same length!');
+    }
   }
-  if (profile.perspective) prompt += `Perspective: ${profile.perspective}\n\n`;
 
-  if (profile.rhyme_schemes?.length) prompt += `Preferred Rhyme Schemes: ${profile.rhyme_schemes.join(', ')}\n`;
-  if (profile.repetition_stats?.hook_examples?.length) {
-    prompt += `Hook Examples:\n${profile.repetition_stats.hook_examples.join('\n')}\n\n`;
+  // === REPETITION & HOOKS ===
+  const rs = profile.repetition_stats;
+  if (rs) {
+    lines.push('', '=== REPETITION & HOOKS ===');
+    lines.push(`Chorus repetition: ${rs.chorus_repetition_pct ?? 0}% of chorus lines are repeats`);
+    lines.push(`Pattern: ${rs.pattern || 'unknown'}`);
+    if ((rs.chorus_repetition_pct ?? 0) >= 20) {
+      lines.push('You MUST use repeated lines in your chorus to create a hook effect.');
+    }
+    if (rs.hook_examples?.length) {
+      lines.push(`Hook examples: ${rs.hook_examples.slice(0, 3).join('; ')}`);
+    }
   }
-  if (profile.structural_patterns) prompt += `Structural Patterns:\n${profile.structural_patterns}\n\n`;
-  
-  if (usedTitles?.length) prompt += `DO NOT USE THESE TITLES:\n${usedTitles.join('\n')}\n\n`;
-  
-  if (extraInstructions) prompt += `=== EXTRA INSTRUCTIONS ===\n${extraInstructions}\n\n`;
-  if (profile.examples?.length && profile.representative_excerpts?.length) {
-    prompt += `=== LYRIC EXCERPTS ===\n${profile.representative_excerpts.slice(0, 10).join('\n---\n')}\n`;
+
+  // === VOCABULARY ===
+  const vs = profile.vocabulary_stats;
+  if (vs) {
+    lines.push('', '=== VOCABULARY ===');
+    lines.push(`Level: ${vs.contraction_pct ?? 0}% contractions, ${vs.profanity_pct ?? 0}% profanity`);
+    lines.push(`Type-token ratio: ${vs.type_token_ratio ?? '?'} (${vs.unique_words ?? '?'} unique / ${vs.total_words ?? '?'} total)`);
+    if (vs.distinctive_words?.length) {
+      lines.push(`Use words like: ${vs.distinctive_words.slice(0, 10).join(', ')}`);
+    }
   }
-  return prompt;
+
+  // === RHYME QUALITY ===
+  if (profile.rhyme_quality) {
+    const rq = profile.rhyme_quality;
+    const total = Object.values(rq).reduce((a, b) => a + b, 0);
+    if (total > 0) {
+      lines.push(`Rhyme mix: ${Math.round(100 * (rq.perfect || 0) / total)}% perfect, ${Math.round(100 * (rq.slant || 0) / total)}% slant, ${Math.round(100 * (rq.assonance || 0) / total)}% assonance`);
+    }
+  }
+
+  // Deep stylistic fields
+  if (profile.narrative_techniques) lines.push(`Narrative techniques: ${stripLyricQuotes(profile.narrative_techniques)}`);
+  if (profile.imagery_patterns) lines.push(`Imagery patterns: ${stripLyricQuotes(profile.imagery_patterns)}`);
+  if (profile.signature_devices) lines.push(`Signature devices: ${stripLyricQuotes(profile.signature_devices)}`);
+  if (profile.emotional_arc) lines.push(`Emotional arc: ${stripLyricQuotes(profile.emotional_arc)}`);
+
+  // === PROSE SUMMARY ===
+  if (profile.raw_summary) {
+    lines.push('', '=== PROSE SUMMARY ===', '', stripLyricQuotes(profile.raw_summary));
+  }
+
+  // === EXTRA INSTRUCTIONS ===
+  if (extraInstructions) {
+    lines.push('', '=== EXTRA INSTRUCTIONS ===', '', extraInstructions);
+  }
+
+  // === TITLES ALREADY USED ===
+  if (usedTitles?.length) {
+    lines.push('', '=== TITLES ALREADY USED (DO NOT REUSE) ===');
+    for (const t of usedTitles) lines.push(`  ✗ ${t}`);
+    lines.push('You MUST choose a COMPLETELY DIFFERENT title.');
+    lines.push("Do NOT reuse ANY significant word from these titles. If 'Glass' appears in a used title, do NOT put 'Glass' in your new title. Same for all nouns, adjectives, and evocative words. Only common words like 'the', 'a', 'of', 'in' may overlap.");
+  }
+
+  // === LYRIC EXCERPTS ===
+  if (profile.representative_excerpts?.length) {
+    lines.push('', '=== REPRESENTATIVE EXCERPTS (STYLE REFERENCE ONLY — DO NOT COPY) ===');
+    lines.push(...profile.representative_excerpts.slice(0, 10).flatMap(e => [e, '---']));
+  }
+
+  // === FINAL REMINDERS ===
+  lines.push(
+    '', '=== FINAL REMINDERS ===',
+    '1. VERSE LINE COUNT: Exactly 4 or 8 lines per verse.',
+    '2. CHORUS LINE COUNT: Exactly 4, 6, or 8 lines per chorus. Each chorus MUST have a hook line that repeats.',
+    '3. *** ZERO TOLERANCE FOR COPYING ***',
+    '4. NO SLOP: Do not use neon, fluorescent, embers, silhouette, static, void, ethereal, or any AI cliché.',
+    '5. UNIQUE TITLE: The title must be fresh and surprising.',
+    '',
+    'Now write the new song (Title line first, then lyrics with [Section] headers and proper punctuation):',
+  );
+  return lines.join('\n');
 }
 
 export async function generateLyricsStreaming(
@@ -688,6 +1010,7 @@ export async function generateLyricsStreaming(
   usedBpms: number[] = [],
   usedKeys: string[] = [],
   usedTitles: string[] = [],
+  usedDurations: number[] = [],
   onChunk?: ChunkCallback,
   onPhase?: (phase: string) => void
 ): Promise<GenerationResponse> {
@@ -699,7 +1022,7 @@ export async function generateLyricsStreaming(
   
   if (profile.song_subjects || (profile.themes && profile.themes.length)) {
     try {
-      metadata = await planSongMetadata(profile, usedSubjects, usedBpms, usedKeys, providerName, effectiveModel, onChunk);
+      metadata = await planSongMetadata(profile, usedSubjects, usedBpms, usedKeys, usedDurations, providerName, effectiveModel, onChunk);
       console.log("Planned metadata:", metadata);
     } catch(e) {
       console.warn("Failed to plan metadata", e);
@@ -715,26 +1038,45 @@ export async function generateLyricsStreaming(
 
   let raw = await provider.call(GENERATION_SYSTEM_PROMPT, userPrompt, effectiveModel, onChunk);
   
-  // Post process
+  // Post-process: strip reasoning, tokens, role markers
   raw = stripThinkingBlocks(raw);
-  raw = raw.replace(/<\\|im_end\\|>/g, '');
-  raw = raw.replace(/\\[?(System|User|Assistant)\\]?:.*/gi, '');
+  raw = raw.replace(/<\|[a-z_]+\|>/g, '');
+  raw = raw.replace(/\[?(System|User|Assistant)\]?:.*/gi, '');
+  raw = raw.replace(/\s*\((?:Hook|You|Repeat|x\d|Refrain|Spoken|Whispered|Ad[- ]?lib|Echo)\)\s*/gi, '');
+  raw = raw.replace(/ +$/gm, '');
 
+  // Extract title
   let title = '';
   const lines = raw.trim().split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(/^Title:\s*(.+)/i);
+    const match = lines[i].match(/^(?:Title:\s*|#\s*)(.*)/i);
     if (match) {
       title = match[1].trim().replace(/^['"]|['"]$/g, '');
-      raw = lines.slice(i + 1).join('\n').trim();
+      const rest = lines.slice(i + 1);
+      while (rest.length && !rest[0].trim()) rest.shift();
+      raw = rest.join('\n');
       break;
     }
   }
 
+  // Full post-processing pipeline
+  raw = postprocessLyrics(raw);
+  raw = fixSectionLabels(raw);
+  raw = fixAPrefix(raw);
+  raw = enforceLineCounts(raw);
+
   // Slop check
   const slopResult = slopDetector.scanForSlop(raw);
   if (slopResult.ai_score > 0) {
-    console.warn(`Generation slop scan: score=${slopResult.ai_score}`);
+    console.warn(`Generation slop scan: score=${slopResult.ai_score} severity=${slopResult.severity}`,
+      'words:', slopResult.layers.blacklisted_words.found,
+      'phrases:', slopResult.layers.blacklisted_phrases.found);
+  }
+
+  // Duration estimation fallback
+  let duration = metadata.duration || 0;
+  if (metadata.bpm > 0 && !duration) {
+    duration = estimateDuration(raw, metadata.bpm);
   }
 
   return {
@@ -746,26 +1088,76 @@ export async function generateLyricsStreaming(
     bpm: metadata.bpm,
     key: metadata.key,
     caption: metadata.caption,
-    duration: metadata.duration,
+    duration,
     system_prompt: GENERATION_SYSTEM_PROMPT,
     user_prompt: userPrompt
   };
 }
 
 function buildRefinementPrompt(originalLyrics: string, artistName: string, title: string, profile?: LyricsProfile, originalSlop?: string[]): string {
-  let lines = [`Artist: ${artistName}`, `Original Title: ${title}`, ''];
+  const lines = [`Artist: ${artistName}`, `Original Title: ${title}`, ''];
 
   if (profile) {
-    lines.push('=== ARTIST STYLE CONTEXT (MATCH THIS) ===');
-    lines.push(`Themes: ${profile.themes.slice(0, 8).join(', ')}`);
-    if (profile.tone_and_mood) lines.push(`Tone/Mood: ${profile.tone_and_mood}`);
-    if (profile.vocabulary_notes) lines.push(`Vocabulary Notes: ${profile.vocabulary_notes}`);
+    lines.push('=== INTENDED LANE PROFILE (match this style) ===');
+    lines.push(`Themes: ${(profile.themes || []).slice(0, 8).join(', ')}`);
+    if (profile.tone_and_mood) lines.push(`Tone & mood: ${profile.tone_and_mood}`);
+    if (profile.vocabulary_notes) lines.push(`Vocabulary: ${profile.vocabulary_notes}`);
+    if (profile.imagery_patterns) lines.push(`Imagery patterns: ${profile.imagery_patterns}`);
+    if (profile.signature_devices) lines.push(`Signature devices: ${profile.signature_devices}`);
+    if (profile.narrative_techniques) lines.push(`Narrative techniques: ${profile.narrative_techniques}`);
+    if (profile.emotional_arc) lines.push(`Emotional arc: ${profile.emotional_arc}`);
+    if (profile.structural_patterns) lines.push(`Structure: ${profile.structural_patterns}`);
+    if (profile.perspective) lines.push(`Perspective / voice: ${profile.perspective}`);
+
+    // Rhyme behavior
+    if (profile.rhyme_schemes?.length) {
+      lines.push(`Rhyme schemes: ${profile.rhyme_schemes.join(', ')}`);
+    }
+    if (profile.rhyme_quality) {
+      const rq = profile.rhyme_quality;
+      const total = Object.values(rq).reduce((a, b) => a + b, 0);
+      if (total > 0) {
+        lines.push(`Rhyme mix: ${Math.round(100 * (rq.perfect || 0) / total)}% perfect, ${Math.round(100 * (rq.slant || 0) / total)}% slant, ${Math.round(100 * (rq.assonance || 0) / total)}% assonance`);
+      }
+    }
+
+    // Line density / meter
+    const ms = profile.meter_stats;
+    if (ms) {
+      lines.push(`Line density: ~${ms.avg_syllables_per_line ?? '?'} syl/line (σ=${ms.syllable_std_dev ?? '?'}), ~${ms.avg_words_per_line ?? '?'} words/line`);
+    }
+
+    // Repetition / hook behavior
+    const rs = profile.repetition_stats;
+    if (rs) {
+      lines.push(`Hook behavior: ${rs.pattern || 'unknown'} (${rs.chorus_repetition_pct ?? 0}% chorus repetition)`);
+      if ((rs.chorus_repetition_pct ?? 0) >= 20) {
+        lines.push('Calibration: This artist uses heavy chorus repetition — ensure hook lines repeat.');
+      } else if ((rs.chorus_repetition_pct ?? 0) < 15) {
+        lines.push('Calibration: This artist uses light repetition — be subtle with hooks.');
+      }
+    }
+
+    // Verse/chorus contrast stats
+    if (profile.avg_verse_lines || profile.avg_chorus_lines) {
+      lines.push(`Verse/chorus: avg ${profile.avg_verse_lines} verse lines, avg ${profile.avg_chorus_lines} chorus lines`);
+    }
+
+    // Original song titles for plagiarism checking
+    if (profile.song_subjects && typeof profile.song_subjects === 'object') {
+      const titles = Object.keys(profile.song_subjects);
+      if (titles.length) {
+        lines.push('');
+        lines.push('=== ORIGINAL SONG TITLES (check for plagiarism) ===');
+        for (const t of titles) lines.push(`  • ${t}`);
+      }
+    }
     lines.push('');
   }
 
   if (originalSlop?.length) {
     lines.push('=== KNOWN ISSUES TO FIX ===');
-    lines.push('The original lyrics contain the following AI-cliches or circular phrases that MUST be replaced:');
+    lines.push('The original lyrics contain the following AI-clichés or circular phrases that MUST be replaced:');
     lines.push(`Words/Phrases to Remove: ${originalSlop.join(', ')}`);
     lines.push('');
   }
@@ -798,19 +1190,38 @@ export async function refineLyricsStreaming(
 
   let raw = await provider.call(REFINEMENT_SYSTEM_PROMPT, userPrompt, effectiveModel, onChunk);
 
+  // Post-process: strip reasoning, tokens, performance notes
   raw = stripThinkingBlocks(raw);
-  raw = raw.replace(/<\\|im_end\\|>/g, '');
-  raw = raw.replace(/\\s*\\((?:Hook|You|Repeat|x\\d|Refrain|Spoken|Whispered|Ad[- ]?lib|Echo)\\)\\s*/gi, '');
+  raw = raw.replace(/<\|[a-z_]+\|>/g, '');
+  raw = raw.replace(/\s*\((?:Hook|You|Repeat|x\d|Refrain|Spoken|Whispered|Ad[- ]?lib|Echo)\)\s*/gi, '');
+  raw = raw.replace(/ +$/gm, '');
   
+  // Extract title
   let refinedTitle = title;
   const lines = raw.trim().split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(/^Title:\s*(.+)/i);
+    const match = lines[i].match(/^(?:Title:\s*|#\s*)(.*)/i);
     if (match) {
       refinedTitle = match[1].trim().replace(/^['"]|['"]$/g, '');
-      raw = lines.slice(i + 1).join('\n').trim();
+      const rest = lines.slice(i + 1);
+      while (rest.length && !rest[0].trim()) rest.shift();
+      raw = rest.join('\n');
       break;
     }
+  }
+
+  // Full post-processing pipeline
+  raw = postprocessLyrics(raw);
+  raw = fixSectionLabels(raw);
+  raw = fixAPrefix(raw);
+  raw = enforceLineCounts(raw);
+
+  // Slop check on refined output
+  const slopResult = slopDetector.scanForSlop(raw);
+  if (slopResult.ai_score > 0) {
+    console.warn(`Refinement slop scan: score=${slopResult.ai_score} severity=${slopResult.severity}`,
+      'words:', slopResult.layers.blacklisted_words.found,
+      'phrases:', slopResult.layers.blacklisted_phrases.found);
   }
 
   return {
