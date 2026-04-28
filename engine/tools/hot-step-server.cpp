@@ -798,8 +798,21 @@ static void synth_worker(std::shared_ptr<Job>    job,
         }
     }
     p.vae_path          = vae_entry ? vae_entry->path.c_str() : g_registry.vae[0].path.c_str();
-    // PP-VAE: auto-detect from registry (first entry in pp_vae bucket)
-    p.pp_vae_path       = g_registry.pp_vae.empty() ? nullptr : g_registry.pp_vae[0].path.c_str();
+    // PP-VAE: auto-detect from registry, prefer highest precision: F32 > BF16 > F16
+    p.pp_vae_path = nullptr;
+    if (!g_registry.pp_vae.empty()) {
+        const char * pref[] = { "F32", "BF16", "F16" };
+        for (const char * tag : pref) {
+            for (const auto & e : g_registry.pp_vae) {
+                if (e.name.find(tag) != std::string::npos) {
+                    p.pp_vae_path = e.path.c_str();
+                    break;
+                }
+            }
+            if (p.pp_vae_path) break;
+        }
+        if (!p.pp_vae_path) p.pp_vae_path = g_registry.pp_vae[0].path.c_str();
+    }
     p.adapter_path      = nullptr;
     p.adapter_scale     = 1.0f;
     if (!ace_reqs[0].adapter.empty()) {
