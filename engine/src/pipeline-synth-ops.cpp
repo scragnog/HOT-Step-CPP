@@ -415,6 +415,20 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
             std::string lyric_str;
             build_prompt_strings(reqs[b], s.instruction_str, s.duration, text_str, lyric_str);
 
+            // Determinism diagnostic: hash the text inputs to detect caption/lyrics/instruction changes
+            {
+                auto str_hash = [](const std::string & s) -> uint64_t {
+                    uint64_t h = 14695981039346656037ULL;
+                    for (char c : s) { h ^= (uint8_t)c; h *= 1099511628211ULL; }
+                    return h;
+                };
+                fprintf(stderr, "[DIAG] enc_input_b%d: instr=\"%s\" caption_hash=%016llx lyrics_hash=%016llx text_len=%zu lyric_len=%zu\n",
+                        b, s.instruction_str.c_str(),
+                        (unsigned long long)str_hash(reqs[b].caption),
+                        (unsigned long long)str_hash(reqs[b].lyrics),
+                        text_str.size(), lyric_str.size());
+            }
+
             auto text_ids  = bpe_encode(bpe, text_str.c_str(), true);
             auto lyric_ids = bpe_encode(bpe, lyric_str.c_str(), true);
             int  S_text    = (int) text_ids.size();
@@ -424,6 +438,11 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
             main_fwd[b].S_lyric = S_lyric;
             main_fwd[b].text_hidden.resize((size_t) H_text * S_text);
             qwen3_forward(te, text_ids.data(), S_text, main_fwd[b].text_hidden.data());
+
+            // Determinism diagnostic: text_hidden stats after qwen3_forward
+            diag_stats_f32("text_hidden_b0", main_fwd[b].text_hidden.data(),
+                           main_fwd[b].text_hidden.size());
+
             main_fwd[b].lyric_embed.resize((size_t) H_text * S_lyric);
             qwen3_embed_lookup(te, lyric_ids.data(), S_lyric, main_fwd[b].lyric_embed.data());
         }
