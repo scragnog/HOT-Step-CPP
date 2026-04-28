@@ -1,6 +1,7 @@
 // PostProcessingDropdown.tsx — Unified post-processing panel for the global bar
 //
-// Three collapsible accordion sections:
+// Four collapsible accordion sections:
+//   0. PP-VAE          — Neural VAE re-encode for spectral cleanup (auto-detected)
 //   1. Spectral Lifter — AI artifact removal with tunable parameters
 //   2. VST Chain       — Plugin chain management (existing VstChainDropdown content)
 //   3. Mastering       — Reference-based mastering (existing MasteringDropdown content)
@@ -241,8 +242,42 @@ export const PostProcessingDropdown: React.FC = () => {
   const { chain } = useVstChainStore();
   const vstEnabled = chain.filter(p => p.enabled).length;
 
+  // PP-VAE availability — auto-detect from models directory
+  const [ppVaeAvailable, setPpVaeAvailable] = useState(false);
+  useEffect(() => {
+    fetch('/api/models/pp-vae')
+      .then(r => r.json())
+      .then(data => setPpVaeAvailable(!!data.available))
+      .catch(() => setPpVaeAvailable(false));
+  }, []);
+
   return (
     <div className="space-y-2">
+      {/* 0. PP-VAE Re-encode (only visible when PP-VAE model is available) */}
+      {ppVaeAvailable && (
+        <Accordion
+          icon={<AudioWaveform size={14} />}
+          label="PP-VAE Re-encode"
+          accentColor="emerald"
+          persistKey="hs-ppAccordion-ppvae"
+          toggle={{ checked: gp.ppVaeReencode, onChange: gp.setPpVaeReencode }}
+        >
+          <div className="space-y-2 mt-2">
+            <p className="text-[10px] text-zinc-500 leading-relaxed">
+              Neural VAE re-encode pass. Runs the decoded audio through a
+              higher-fidelity autoencoder to clean up spectral artifacts,
+              fizz, and high-frequency noise from the primary VAE.
+              Adds ~1–2s processing time.
+            </p>
+            {gp.ppVaeReencode && (
+              <p className="text-[10px] text-emerald-400/60 leading-relaxed">
+                ✓ PP-VAE model detected — will re-encode after VAE decode.
+              </p>
+            )}
+          </div>
+        </Accordion>
+      )}
+
       {/* 1. Spectral Lifter */}
       <Accordion
         icon={<Zap size={14} />}
@@ -361,11 +396,12 @@ export const PostProcessingDropdown: React.FC = () => {
 // ── Badge ───────────────────────────────────────────────────────
 
 export const PostProcessingBadge: React.FC = () => {
-  const { masteringEnabled, masteringReference, spectralLifterEnabled } = useGlobalParams();
+  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode } = useGlobalParams();
   const { chain } = useVstChainStore();
   const vstEnabled = chain.filter(p => p.enabled).length;
 
   const parts: string[] = [];
+  if (ppVaeReencode) parts.push('PP-VAE');
   if (spectralLifterEnabled) parts.push('SL');
   if (vstEnabled > 0) parts.push(`${vstEnabled} VST${vstEnabled !== 1 ? 's' : ''}`);
   if (masteringEnabled && masteringReference) parts.push('Master');

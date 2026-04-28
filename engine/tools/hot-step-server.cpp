@@ -798,6 +798,8 @@ static void synth_worker(std::shared_ptr<Job>    job,
         }
     }
     p.vae_path          = vae_entry ? vae_entry->path.c_str() : g_registry.vae[0].path.c_str();
+    // PP-VAE: auto-detect from registry (first entry in pp_vae bucket)
+    p.pp_vae_path       = g_registry.pp_vae.empty() ? nullptr : g_registry.pp_vae[0].path.c_str();
     p.adapter_path      = nullptr;
     p.adapter_scale     = 1.0f;
     if (!ace_reqs[0].adapter.empty()) {

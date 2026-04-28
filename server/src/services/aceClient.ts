@@ -100,6 +100,8 @@ export interface AceRequest {
   denoise_strength?: number;   // 0.0 = off, 1.0 = max suppression
   denoise_smoothing?: number;  // 0.0 = sharp gate, 1.0 = very smooth
   denoise_mix?: number;        // 0.0 = all dry, 1.0 = all denoised
+  // PP-VAE re-encode (spectral cleanup via post-processing VAE)
+  pp_vae_reencode?: boolean;
 }
 
 /** Job status from ace-server */

@@ -144,6 +144,9 @@ export interface GenerationParams {
   autoTrimEnabled?: boolean;    // Enable silence-detection trimming
   durationBuffer?: number;      // Extra seconds added to generation duration (default 15)
   autoTrimFadeMs?: number;      // Fade-out length in ms (default 2000 for forced, 500 for gap-detected)
+
+  // PP-VAE re-encode (spectral cleanup via post-processing VAE)
+  ppVaeReencode?: boolean;
 }
 
 /** Generation job status from the server */

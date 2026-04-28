@@ -222,6 +222,9 @@ function translateParams(params: any): AceRequest {
   if (params.denoiseSmoothing !== undefined) req.denoise_smoothing = params.denoiseSmoothing;
   if (params.denoiseMix !== undefined) req.denoise_mix = params.denoiseMix;
 
+  // PP-VAE re-encode (spectral cleanup via post-processing VAE)
+  if (params.ppVaeReencode) req.pp_vae_reencode = true;
+
   // NOTE: Spectral Lifter params (sl_*) are NOT sent to /synth.
   // SL runs as a separate post-processing step via POST /spectral-lifter
   // on the mastered copy only — raw generation stays pristine.

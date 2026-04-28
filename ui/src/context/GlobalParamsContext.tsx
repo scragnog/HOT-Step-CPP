@@ -153,6 +153,10 @@ export interface GlobalParams {
   timbreReference: boolean;
   setTimbreReference: (v: boolean) => void;
 
+  // PP-VAE re-encode
+  ppVaeReencode: boolean;
+  setPpVaeReencode: (v: boolean) => void;
+
   // ── Derived ──
   /** Assemble all engine params for a generation request */
   getGlobalParams: () => Partial<GenerationParams>;
@@ -250,6 +254,9 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [masteringReference, setMasteringReference] = usePersistedState('hs-masteringReference', '');
   const [timbreReference, setTimbreReference] = usePersistedState('hs-timbreReference', false);
 
+  // PP-VAE re-encode (spectral cleanup via post-processing VAE)
+  const [ppVaeReencode, setPpVaeReencode] = usePersistedState('hs-ppVaeReencode', false);
+
   // Trigger word settings — read from shared settings (same key as App.tsx)
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
 
@@ -340,6 +347,9 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       autoTrimEnabled: autoTrimEnabled || undefined,
       durationBuffer: autoTrimEnabled ? durationBuffer : undefined,
       autoTrimFadeMs: autoTrimEnabled ? autoTrimFadeMs : undefined,
+
+      // PP-VAE re-encode
+      ppVaeReencode: ppVaeReencode || undefined,
     };
   }, [
     ditModel, lmModel, vaeModel,
@@ -355,6 +365,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
     spectralLifterEnabled, slDenoiseStrength, slNoiseFloor, slHfMix, slTransientBoost, slShimmerReduction,
     masteringEnabled, masteringReference, timbreReference,
+    ppVaeReencode,
     settings,
   ]);
 
@@ -404,6 +415,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     masteringEnabled, setMasteringEnabled,
     masteringReference, setMasteringReference,
     timbreReference, setTimbreReference,
+    // PP-VAE
+    ppVaeReencode, setPpVaeReencode,
     // Derived
     getGlobalParams,
   }), [
@@ -440,6 +453,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     masteringEnabled, setMasteringEnabled,
     masteringReference, setMasteringReference,
     timbreReference, setTimbreReference,
+    ppVaeReencode, setPpVaeReencode,
     getGlobalParams,
   ]);
 
