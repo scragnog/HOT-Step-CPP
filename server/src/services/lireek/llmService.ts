@@ -276,7 +276,7 @@ export class OpenAIProvider extends LLMProvider {
     if (!resp.ok) throw new Error(`OpenAI error: ${resp.status} ${await resp.text()}`);
 
     if (onChunk) {
-      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null);
+      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.reasoning_content || data.choices?.[0]?.delta?.content || null);
     } else {
       const data = await resp.json();
       return data.choices?.[0]?.message?.content || '';
@@ -389,7 +389,7 @@ export class OllamaProvider extends LLMProvider {
             if (!line.trim()) continue;
             try {
               const parsed = JSON.parse(line);
-              const content = parsed.message?.content;
+              const content = parsed.message?.content || parsed.message?.reasoning_content;
               if (content) {
                 fullText += content;
                 onChunk(content);
@@ -461,7 +461,7 @@ export class LMStudioProvider extends LLMProvider {
     if (!resp.ok) throw new Error(`LM Studio error: ${resp.status} ${await resp.text()}`);
 
     if (onChunk) {
-      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null);
+      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.reasoning_content || data.choices?.[0]?.delta?.content || null);
     } else {
       const data = await resp.json();
       return data.choices?.[0]?.message?.content || '';
@@ -563,7 +563,7 @@ export class UnslothProvider extends LLMProvider {
 
     if (!resp.ok) throw new Error(`Unsloth error: ${resp.status} ${await resp.text()}`);
 
-    return await readSSE(resp, onChunk || (() => {}), (data) => data.choices?.[0]?.delta?.content || null);
+    return await readSSE(resp, onChunk || (() => {}), (data) => data.choices?.[0]?.delta?.reasoning_content || data.choices?.[0]?.delta?.content || null);
   }
 }
 
