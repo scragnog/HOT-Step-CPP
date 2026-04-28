@@ -74,9 +74,12 @@ export abstract class LLMProvider {
   }
 }
 
-// ── Shared SSE Utility ──────────────────────────────────────────────────────
-
-async function readSSE(response: Response, onChunk: ChunkCallback, extractText: (data: any) => string | null): Promise<string> {
+async function readSSE(
+  response: Response,
+  onChunk: ChunkCallback,
+  extractText: (data: any) => string | null,
+  extractDisplayOnly?: (data: any) => string | null
+): Promise<string> {
   if (!response.body) return '';
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
@@ -105,14 +108,29 @@ async function readSSE(response: Response, onChunk: ChunkCallback, extractText: 
 
             // Break on finish_reason (OpenAI-compatible sentinel)
             if (parsed.choices?.[0]?.finish_reason) {
-              // There might still be final content in this chunk
               const lastText = extractText(parsed);
               if (lastText) {
                 fullText += lastText;
                 onChunk(lastText);
               }
-              // Don't return yet — wait for [DONE] or stream close
               continue;
+            }
+
+            // Display-only content (e.g. reasoning/thinking) — stream to UI but don't keep
+            if (extractDisplayOnly) {
+              const displayText = extractDisplayOnly(parsed);
+              if (displayText) {
+                onChunk(displayText);
+                // Track for skip-thinking detection but don't add to returned text
+                if (skipThinkingSignal) {
+                  const thinkCheck = fullText + displayText;
+                  if (thinkCheck.includes('<think>') && !thinkCheck.includes('</think>')) {
+                    reader.cancel();
+                    return fullText;
+                  }
+                }
+                continue;
+              }
             }
 
             const text = extractText(parsed);
@@ -276,7 +294,7 @@ export class OpenAIProvider extends LLMProvider {
     if (!resp.ok) throw new Error(`OpenAI error: ${resp.status} ${await resp.text()}`);
 
     if (onChunk) {
-      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.reasoning_content || data.choices?.[0]?.delta?.content || null);
+      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
     } else {
       const data = await resp.json();
       return data.choices?.[0]?.message?.content || '';
@@ -389,7 +407,13 @@ export class OllamaProvider extends LLMProvider {
             if (!line.trim()) continue;
             try {
               const parsed = JSON.parse(line);
-              const content = parsed.message?.content || parsed.message?.reasoning_content;
+              // Display-only: stream reasoning to UI but don't keep in result
+              const reasoning = parsed.message?.reasoning_content;
+              if (reasoning) {
+                onChunk(reasoning);
+                continue;
+              }
+              const content = parsed.message?.content;
               if (content) {
                 fullText += content;
                 onChunk(content);
@@ -461,7 +485,7 @@ export class LMStudioProvider extends LLMProvider {
     if (!resp.ok) throw new Error(`LM Studio error: ${resp.status} ${await resp.text()}`);
 
     if (onChunk) {
-      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.reasoning_content || data.choices?.[0]?.delta?.content || null);
+      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
     } else {
       const data = await resp.json();
       return data.choices?.[0]?.message?.content || '';
@@ -563,7 +587,7 @@ export class UnslothProvider extends LLMProvider {
 
     if (!resp.ok) throw new Error(`Unsloth error: ${resp.status} ${await resp.text()}`);
 
-    return await readSSE(resp, onChunk || (() => {}), (data) => data.choices?.[0]?.delta?.reasoning_content || data.choices?.[0]?.delta?.content || null);
+    return await readSSE(resp, onChunk || (() => {}), (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
   }
 }
 
