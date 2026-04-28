@@ -15,7 +15,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { lireekApi } from '../../services/lireekApi';
-import type { Artist, LyricsSet, Profile, Generation, SongLyric } from '../../services/lireekApi';
+import type { Artist, LyricsSet, Profile, Generation, SongLyric, AlbumPreset } from '../../services/lireekApi';
 import { ArtistGrid } from './ArtistGrid';
 import { ArtistSidebar } from './ArtistSidebar';
 import { ArtistPageSidebar } from './ArtistPageSidebar';
@@ -153,6 +153,7 @@ export const LyricStudioV2: React.FC = () => {
   const [allLyricsSets, setAllLyricsSets] = useState<LyricsSet[]>([]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const stream = useStreamingStore();
+  const [artistIdsWithAdapters, setArtistIdsWithAdapters] = useState<Set<number>>(new Set());
 
   // ── Playback (for backdrop effect) ──
   const { isPlaying, currentTrack: currentPlaybackTrack } = usePlayback();
@@ -208,6 +209,14 @@ export const LyricStudioV2: React.FC = () => {
   useEffect(() => {
     const init = async () => {
       const artistsList = await loadArtists();
+      // Background: load adapter mapping
+      lireekApi.listAllPresets().then(({ presets }) => {
+        const ids = new Set<number>();
+        for (const p of presets as any[]) {
+          if (p.adapter_path && p.artist_id) ids.add(p.artist_id);
+        }
+        setArtistIdsWithAdapters(ids);
+      }).catch(() => {});
       const parsed = parseUrl(window.location.pathname);
       if (parsed.artistId) {
         isRestoringUrl.current = true;
@@ -594,7 +603,8 @@ export const LyricStudioV2: React.FC = () => {
           <div className="h-full flex ls2-fade-in">
             <div className="w-48 flex-shrink-0 border-r border-white/5 overflow-hidden">
               <ArtistSidebar artists={artists} selectedArtistId={-1}
-                onSelectArtist={handleSelectArtist} onBack={handleBackToArtists} />
+                onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
+                artistIdsWithAdapters={artistIdsWithAdapters} />
             </div>
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
@@ -638,7 +648,8 @@ export const LyricStudioV2: React.FC = () => {
           <div className="h-full flex ls2-fade-in">
             <div className="w-48 flex-shrink-0 border-r border-white/5 overflow-hidden">
               <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
-                onSelectArtist={handleSelectArtist} onBack={handleBackToArtists} />
+                onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
+                artistIdsWithAdapters={artistIdsWithAdapters} />
             </div>
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
@@ -686,7 +697,8 @@ export const LyricStudioV2: React.FC = () => {
               {/* Left: artist sidebar + album header */}
               <div className="w-48 flex-shrink-0 border-r border-white/5 overflow-hidden">
                 <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
-                  onSelectArtist={handleSelectArtist} onBack={handleBackToArtists} />
+                  onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
+                  artistIdsWithAdapters={artistIdsWithAdapters} />
               </div>
               <div className="w-64 flex-shrink-0 border-r border-white/5 overflow-hidden relative">
                 <div className="relative z-[1] h-full">

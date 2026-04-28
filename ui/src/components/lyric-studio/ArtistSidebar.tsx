@@ -7,12 +7,14 @@ interface ArtistSidebarProps {
   selectedArtistId: number;
   onSelectArtist: (artist: Artist) => void;
   onBack: () => void;
+  artistIdsWithAdapters?: Set<number>;
 }
 
 const SCROLL_KEY = 'ls-artist-sidebar-scroll';
 
 export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
   artists, selectedArtistId, onSelectArtist, onBack,
+  artistIdsWithAdapters,
 }) => {
   const [imageErrors, setImageErrors] = React.useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -60,6 +62,7 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-2">
         {artists.map((artist) => {
           const isSelected = artist.id === selectedArtistId;
+          const hasAdapter = !artistIdsWithAdapters || artistIdsWithAdapters.size === 0 || artistIdsWithAdapters.has(artist.id);
           return (
             <button
               key={artist.id}
@@ -68,6 +71,7 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
                   ? 'bg-pink-500/10 border-l-2 border-pink-500'
                   : 'hover:bg-white/5 border-l-2 border-transparent'
               }`}
+              style={!isSelected && !hasAdapter ? { backgroundColor: 'rgba(220, 38, 38, 0.08)' } : undefined}
               onClick={() => onSelectArtist(artist)}
             >
               {/* Mini avatar */}

@@ -415,7 +415,7 @@ export function getPreset(lyricsSetId: number): Record<string, any> | null {
 
 export function getAllPresets(): Record<string, any>[] {
   return db.prepare(
-    `SELECT ap.*, a.name as artist_name, ls.album
+    `SELECT ap.*, a.name as artist_name, ls.album, ls.artist_id
      FROM album_presets ap
      JOIN lyrics_sets ls ON ls.id = ap.lyrics_set_id
      JOIN artists a ON a.id = ls.artist_id
