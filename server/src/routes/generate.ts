@@ -222,8 +222,10 @@ function translateParams(params: any): AceRequest {
   if (params.denoiseSmoothing !== undefined) req.denoise_smoothing = params.denoiseSmoothing;
   if (params.denoiseMix !== undefined) req.denoise_mix = params.denoiseMix;
 
-  // PP-VAE re-encode (spectral cleanup via post-processing VAE)
-  if (params.ppVaeReencode) req.pp_vae_reencode = true;
+
+  // NOTE: PP-VAE re-encode (ppVaeReencode) is NOT sent to /synth.
+  // It runs as a separate post-processing step via POST /pp-vae-reencode
+  // on the mastered copy only — raw generation stays pristine.
 
   // NOTE: Spectral Lifter params (sl_*) are NOT sent to /synth.
   // SL runs as a separate post-processing step via POST /spectral-lifter
@@ -602,7 +604,8 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
     // ── Post-processing chain ─────────────────────────────────
     // Raw WAV (audio_url) is NEVER modified. Post-processing runs on a copy.
-    // "mastered" = any/all of: Spectral Lifter, VST Chain, Matchering Mastering.
+    // "mastered" = any/all of: PP-VAE, Spectral Lifter, VST Chain, Matchering Mastering.
+    const ppVaeOn = !!job.params.ppVaeReencode;
     const spectralLifterOn = !!job.params.spectralLifterEnabled;
     // VST chain self-gates via applyVstChain() — returns false if no plugins active
     const masteringOn = !!masteringRef && !!job.params.masteringEnabled;
@@ -624,6 +627,22 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         // Start with a copy of the raw WAV — original stays pristine
         fs.copyFileSync(rawWavPath, processedPath);
         let anyStageRan = false;
+
+        // Stage 0: PP-VAE Re-encode (native C++ via /pp-vae-reencode endpoint)
+        if (ppVaeOn) {
+          job.stage = 'PP-VAE Re-encode...';
+          job.progress = 89;
+          try {
+            const wavBuf = fs.readFileSync(processedPath);
+            const processed = await aceClient.submitPpVaeReencode(wavBuf);
+            fs.writeFileSync(processedPath, processed);
+            anyStageRan = true;
+            logGeneration(job.id, 'INFO', `[PP-VAE] Re-encoded ${audioFilename}`);
+          } catch (ppErr: any) {
+            logGeneration(job.id, 'WARNING', `[PP-VAE] Failed (non-fatal): ${ppErr.message}`);
+            console.warn(`[PP-VAE] Non-fatal error:`, ppErr.message);
+          }
+        }
 
         // Stage 1: Spectral Lifter (native C++ via /spectral-lifter endpoint)
         if (spectralLifterOn) {

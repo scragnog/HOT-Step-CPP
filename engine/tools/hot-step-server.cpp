@@ -40,6 +40,8 @@
 #include "hot-step-params.h"
 #include "model-registry.h"
 #include "model-store.h"
+#include "vae.h"
+#include "vae-enc.h"
 #include "pipeline-lm.h"
 #include "pipeline-synth.h"
 #include "pipeline-understand.h"
@@ -1695,6 +1697,163 @@ int main(int argc, char ** argv) {
             return;
         }
         json_error(res, 400, "Unknown action");
+    });
+
+    // POST /pp-vae-reencode — synchronous PP-VAE re-encode processing.
+    // Accepts WAV audio body. Runs PP-VAE encode→decode round-trip with
+    // RMS gain matching. Returns processed WAV (same sample rate, 16-bit).
+    // Requires PP-VAE models in registry. Non-fatal: returns 501 if unavailable.
+    svr.Post("/pp-vae-reencode", [](const httplib::Request & req, httplib::Response & res) {
+        if (req.body.empty()) {
+            json_error(res, 400, "Empty body (expected WAV audio)");
+            return;
+        }
+
+        // Resolve PP-VAE model path from registry (prefer F32 > BF16 > F16)
+        if (g_registry.pp_vae.empty()) {
+            json_error(res, 501, "No PP-VAE model in registry");
+            return;
+        }
+        const char * pp_vae_path = nullptr;
+        const char * pref[] = { "F32", "BF16", "F16" };
+        for (const char * tag : pref) {
+            for (const auto & e : g_registry.pp_vae) {
+                if (e.name.find(tag) != std::string::npos) {
+                    pp_vae_path = e.path.c_str();
+                    break;
+                }
+            }
+            if (pp_vae_path) break;
+        }
+        if (!pp_vae_path) pp_vae_path = g_registry.pp_vae[0].path.c_str();
+
+        // Decode WAV from body → planar stereo [L:T][R:T]
+        int     T_audio = 0;
+        float * planar  = audio_read_48k_buf((const uint8_t *) req.body.data(), req.body.size(), &T_audio);
+        if (!planar || T_audio <= 0) {
+            json_error(res, 400, "Failed to decode WAV audio");
+            return;
+        }
+
+        fprintf(stderr, "[Server] PP-VAE re-encode: %.2fs @ 48kHz, model=%s\n",
+                (float) T_audio / 48000.0f, pp_vae_path);
+
+        // Measure input RMS + peak
+        double in_sum_sq = 0.0;
+        float  in_peak = 0.0f;
+        int    n_total = T_audio * 2;
+        for (int i = 0; i < n_total; i++) {
+            float v = planar[i];
+            in_sum_sq += (double) v * v;
+            float av = fabsf(v);
+            if (av > in_peak) in_peak = av;
+        }
+        float in_rms = (float) sqrt(in_sum_sq / (double) n_total);
+
+        // Phase 1: Encode (planar → interleaved → VAE encoder → latents)
+        ModelKey enc_key;
+        enc_key.kind = MODEL_VAE_ENC;
+        enc_key.path = pp_vae_path;
+
+        // Default VAE tiling params
+        int vae_chunk   = 256;
+        int vae_overlap = 64;
+
+        std::vector<float> latents;
+        int T_latent = 0;
+
+        {
+            VAEEncoder * enc = store_require_vae_enc(g_store, enc_key);
+            if (!enc) {
+                free(planar);
+                json_error(res, 500, "Failed to load PP-VAE encoder");
+                return;
+            }
+            ModelHandle enc_guard(g_store, enc);
+
+            // Convert planar → interleaved for encoder
+            std::vector<float> interleaved(T_audio * 2);
+            const float * L = planar;
+            const float * R = planar + T_audio;
+            for (int i = 0; i < T_audio; i++) {
+                interleaved[i * 2 + 0] = L[i];
+                interleaved[i * 2 + 1] = R[i];
+            }
+
+            int max_T = (T_audio / 1920) + 64;
+            latents.resize((size_t) max_T * 64);
+
+            T_latent = vae_enc_encode_tiled(enc, interleaved.data(), T_audio, latents.data(), max_T,
+                                            vae_chunk, vae_overlap);
+            if (T_latent <= 0) {
+                free(planar);
+                json_error(res, 500, "PP-VAE encode failed");
+                return;
+            }
+        }
+        fprintf(stderr, "[Server] PP-VAE encode: T_latent=%d\n", T_latent);
+
+        // Phase 2: Decode (latents → VAE decoder → planar PCM)
+        ModelKey dec_key;
+        dec_key.kind = MODEL_VAE_DEC;
+        dec_key.path = pp_vae_path;
+
+        std::vector<float> decoded;
+        int T_decoded = 0;
+
+        {
+            VAEGGML * dec = store_require_vae_dec(g_store, dec_key);
+            if (!dec) {
+                free(planar);
+                json_error(res, 500, "Failed to load PP-VAE decoder");
+                return;
+            }
+            ModelHandle dec_guard(g_store, dec);
+
+            int T_audio_max = T_latent * 1920;
+            decoded.resize(2 * T_audio_max);
+
+            T_decoded = vae_ggml_decode_tiled(dec, latents.data(), T_latent, decoded.data(), T_audio_max,
+                                              vae_chunk, vae_overlap, NULL, NULL);
+            if (T_decoded <= 0) {
+                free(planar);
+                json_error(res, 500, "PP-VAE decode failed");
+                return;
+            }
+        }
+        fprintf(stderr, "[Server] PP-VAE decode: T_decoded=%d\n", T_decoded);
+
+        // Phase 3: RMS gain match (scale output to match input RMS, cap at input peak)
+        double out_sum_sq = 0.0;
+        float  out_peak = 0.0f;
+        int    dec_total = T_decoded * 2;
+        for (int i = 0; i < dec_total; i++) {
+            float v = decoded[i];
+            out_sum_sq += (double) v * v;
+            float av = fabsf(v);
+            if (av > out_peak) out_peak = av;
+        }
+        float out_rms = (float) sqrt(out_sum_sq / (double) dec_total);
+
+        float gain = 1.0f;
+        if (out_rms > 1e-8f) {
+            gain = in_rms / out_rms;
+            if (out_peak * gain > in_peak + 0.01f) {
+                gain = in_peak / (out_peak + 1e-8f);
+            }
+        }
+        for (int i = 0; i < dec_total; i++) {
+            decoded[i] *= gain;
+        }
+
+        fprintf(stderr, "[Server] PP-VAE done: gain=%.3f (in_rms=%.4f, out_rms=%.4f)\n",
+                gain, in_rms, out_rms);
+
+        free(planar);
+
+        // Encode to WAV16 and return
+        std::string wav = audio_encode_wav(decoded.data(), T_decoded, 48000, WAV_S16);
+        res.set_content(wav, "audio/wav");
     });
 
     // POST /spectral-lifter — synchronous Spectral Lifter processing.

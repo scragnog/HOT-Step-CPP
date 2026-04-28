@@ -690,13 +690,6 @@ int ace_synth_job_run_vae(AceSynth *    ctx,
         return -1;
     }
     int rc = ops_vae_decode(ctx, job->batch_n, out, job->state, cancel, cancel_data);
-    if (rc != 0) {
-        return rc;
-    }
-    // PP-VAE re-encode: optional spectral cleanup pass
-    if (ctx->have_pp_vae && job->state.rr.pp_vae_reencode) {
-        rc = ops_pp_vae_reencode(ctx, job->batch_n, out, job->state);
-    }
     return rc;
 }
 

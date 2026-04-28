@@ -334,4 +334,21 @@ export const aceClient = {
     const arrayBuf = await res.arrayBuffer();
     return Buffer.from(arrayBuf);
   },
+
+  /** POST /pp-vae-reencode — synchronous PP-VAE re-encode processing.
+   *  Sends WAV audio body. Returns processed WAV buffer with RMS-matched gain. */
+  async submitPpVaeReencode(wavBuffer: Buffer): Promise<Buffer> {
+    const res = await fetch(`${BASE}/pp-vae-reencode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/wav' },
+      body: wavBuffer,
+      signal: AbortSignal.timeout(TIMEOUT_RESULT),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => 'Unknown error');
+      throw new Error(`ace-server POST /pp-vae-reencode failed (${res.status}): ${errBody}`);
+    }
+    const arrayBuf = await res.arrayBuffer();
+    return Buffer.from(arrayBuf);
+  },
 };
