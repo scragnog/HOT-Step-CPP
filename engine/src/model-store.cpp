@@ -43,6 +43,15 @@ struct ModelKeyHash {
             uint32_t bits;
             memcpy(&bits, &k.adapter_scale, sizeof(bits));
             h ^= std::hash<uint32_t>{}(bits) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+            // group scales: baked into merged weights, must invalidate on change.
+            auto hash_f = [&](float v) {
+                uint32_t b; memcpy(&b, &v, sizeof(b));
+                h ^= std::hash<uint32_t>{}(b) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+            };
+            hash_f(k.adapter_group_scales.self_attn);
+            hash_f(k.adapter_group_scales.cross_attn);
+            hash_f(k.adapter_group_scales.mlp);
+            hash_f(k.adapter_group_scales.cond_embed);
         }
         return h;
     }
@@ -57,7 +66,12 @@ struct ModelKeyEq {
             return a.max_seq == b.max_seq && a.n_kv_sets == b.n_kv_sets;
         }
         if (a.kind == MODEL_DIT) {
-            return a.adapter_path == b.adapter_path && a.adapter_scale == b.adapter_scale;
+            return a.adapter_path == b.adapter_path
+                && a.adapter_scale == b.adapter_scale
+                && a.adapter_group_scales.self_attn  == b.adapter_group_scales.self_attn
+                && a.adapter_group_scales.cross_attn == b.adapter_group_scales.cross_attn
+                && a.adapter_group_scales.mlp        == b.adapter_group_scales.mlp
+                && a.adapter_group_scales.cond_embed == b.adapter_group_scales.cond_embed;
         }
         return true;
     }

@@ -49,6 +49,7 @@
 #include "dit.h"
 #include "fsq-detok.h"
 #include "fsq-tok.h"
+#include "hot-step-params.h"  // AdapterGroupScales
 #include "metadata-fsm.h"
 #include "qwen3-enc.h"
 #include "qwen3-lm.h"
@@ -80,6 +81,7 @@ struct ModelKey {
     // DiT-only extras (ignored for other kinds):
     std::string adapter_path;   // "" when no adapter
     float       adapter_scale;  // 1.0f default, significant when adapter_path is set
+    AdapterGroupScales adapter_group_scales;  // per-group scale multipliers baked into merged weights
 };
 
 enum EvictPolicy {

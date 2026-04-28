@@ -85,10 +85,11 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
     ctx->fsq_detok_key.kind = MODEL_FSQ_DETOK;
     ctx->fsq_detok_key.path = params->dit_path;
 
-    ctx->dit_key.kind          = MODEL_DIT;
-    ctx->dit_key.path          = params->dit_path;
-    ctx->dit_key.adapter_path  = params->adapter_path ? params->adapter_path : "";
-    ctx->dit_key.adapter_scale = params->adapter_scale;
+    ctx->dit_key.kind                 = MODEL_DIT;
+    ctx->dit_key.path                 = params->dit_path;
+    ctx->dit_key.adapter_path         = params->adapter_path ? params->adapter_path : "";
+    ctx->dit_key.adapter_scale        = params->adapter_scale;
+    ctx->dit_key.adapter_group_scales = g_hotstep_params.adapter_group_scales;
 
     ctx->vae_enc_key.kind = MODEL_VAE_ENC;
     ctx->vae_enc_key.path = params->vae_path;
