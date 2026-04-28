@@ -364,6 +364,36 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         // Fetch LM results (array of enriched AceRequests)
         const resultRes = await aceClient.getJobResult(lmJobId);
         lmResults = await resultRes.json() as AceRequest[];
+
+        // The LM engine response only contains LM-relevant fields (caption,
+        // lyrics, audio_codes, bpm, etc.). Synth-side sideband fields
+        // (adapter, group scales, DCW, solver, scheduler, etc.) must be
+        // re-injected from the current request so they reach the /synth
+        // endpoint. Without this, adapter_group_scales is missing from the
+        // synth JSON, causing the C++ engine to use default scales.
+        const synthFields: Partial<AceRequest> = {
+          synth_model: aceReq.synth_model,
+          vae_model: aceReq.vae_model,
+          adapter: aceReq.adapter,
+          adapter_scale: aceReq.adapter_scale,
+          adapter_group_scales: aceReq.adapter_group_scales,
+          adapter_mode: aceReq.adapter_mode,
+          infer_method: aceReq.infer_method,
+          scheduler: aceReq.scheduler,
+          guidance_mode: aceReq.guidance_mode,
+          guidance_scale: aceReq.guidance_scale,
+          dcw_enabled: aceReq.dcw_enabled,
+          dcw_mode: aceReq.dcw_mode,
+          dcw_scaler: aceReq.dcw_scaler,
+          dcw_high_scaler: aceReq.dcw_high_scaler,
+          latent_shift: aceReq.latent_shift,
+          latent_rescale: aceReq.latent_rescale,
+          custom_timesteps: aceReq.custom_timesteps,
+          use_cot_caption: aceReq.use_cot_caption,
+        };
+        for (const result of lmResults) {
+          Object.assign(result, synthFields);
+        }
         job.lmResults = lmResults;
 
         // Store only LM-generated fields in cache (never DiT/adapter/DCW/etc.)
