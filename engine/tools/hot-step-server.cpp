@@ -1130,6 +1130,7 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
         ace_reqs.push_back(ace_req);
     } else {
         // plain JSON body: single object {} or array [{}, ...]
+        fprintf(stderr, "[DIAG] /synth body (first 300 chars): %.300s\n", req.body.c_str());
         parse_server_fields(req.body.c_str(), &sf);
         if (!request_parse_json_array(req.body.c_str(), &ace_reqs)) {
             json_error(res, 400, "Invalid JSON");
