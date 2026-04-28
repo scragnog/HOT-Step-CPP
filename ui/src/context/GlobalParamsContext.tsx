@@ -156,6 +156,8 @@ export interface GlobalParams {
   // PP-VAE re-encode
   ppVaeReencode: boolean;
   setPpVaeReencode: (v: boolean) => void;
+  ppVaeBlend: number;
+  setPpVaeBlend: (v: number) => void;
 
   // ── Derived ──
   /** Assemble all engine params for a generation request */
@@ -256,6 +258,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // PP-VAE re-encode (spectral cleanup via post-processing VAE)
   const [ppVaeReencode, setPpVaeReencode] = usePersistedState('hs-ppVaeReencode', false);
+  const [ppVaeBlend, setPpVaeBlend] = usePersistedState('hs-ppVaeBlend', 0.0);
 
   // Trigger word settings — read from shared settings (same key as App.tsx)
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
@@ -350,6 +353,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       // PP-VAE re-encode
       ppVaeReencode: ppVaeReencode || undefined,
+      ppVaeBlend: (ppVaeReencode && ppVaeBlend > 0) ? ppVaeBlend : undefined,
     };
   }, [
     ditModel, lmModel, vaeModel,
@@ -365,7 +369,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
     spectralLifterEnabled, slDenoiseStrength, slNoiseFloor, slHfMix, slTransientBoost, slShimmerReduction,
     masteringEnabled, masteringReference, timbreReference,
-    ppVaeReencode,
+    ppVaeReencode, ppVaeBlend,
     settings,
   ]);
 
@@ -417,6 +421,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     timbreReference, setTimbreReference,
     // PP-VAE
     ppVaeReencode, setPpVaeReencode,
+    ppVaeBlend, setPpVaeBlend,
     // Derived
     getGlobalParams,
   }), [
@@ -454,6 +459,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     masteringReference, setMasteringReference,
     timbreReference, setTimbreReference,
     ppVaeReencode, setPpVaeReencode,
+    ppVaeBlend, setPpVaeBlend,
     getGlobalParams,
   ]);
 

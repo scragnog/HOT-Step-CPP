@@ -664,7 +664,8 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           job.progress = 89;
           try {
             const wavBuf = fs.readFileSync(processedPath);
-            const processed = await aceClient.submitPpVaeReencode(wavBuf);
+            const blend = job.params.ppVaeBlend ?? 0;
+            const processed = await aceClient.submitPpVaeReencode(wavBuf, blend);
             fs.writeFileSync(processedPath, processed);
             anyStageRan = true;
             logGeneration(job.id, 'INFO', `[PP-VAE] Re-encoded ${audioFilename}`);

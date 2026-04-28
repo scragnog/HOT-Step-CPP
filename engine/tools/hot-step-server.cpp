@@ -1718,6 +1718,14 @@ int main(int argc, char ** argv) {
             return;
         }
 
+        // Parse blend from query string (0.0 = fully PP-VAE, 1.0 = fully original)
+        float blend = 0.0f;
+        if (req.has_param("blend")) {
+            blend = std::strtof(req.get_param_value("blend").c_str(), nullptr);
+            if (blend < 0.0f) blend = 0.0f;
+            if (blend > 1.0f) blend = 1.0f;
+        }
+
         // Resolve PP-VAE model path from registry (prefer F32 > BF16 > F16)
         if (g_registry.pp_vae.empty()) {
             json_error(res, 501, "No PP-VAE model in registry");
@@ -1744,8 +1752,17 @@ int main(int argc, char ** argv) {
             return;
         }
 
-        fprintf(stderr, "[Server] PP-VAE re-encode: %.2fs @ 48kHz, model=%s\n",
-                (float) T_audio / 48000.0f, pp_vae_path);
+        fprintf(stderr, "[Server] PP-VAE re-encode: %.2fs @ 48kHz, model=%s, blend=%.2f\n",
+                (float) T_audio / 48000.0f, pp_vae_path, blend);
+
+        // If blend is 1.0 (fully original), skip processing entirely
+        if (blend >= 1.0f) {
+            fprintf(stderr, "[Server] PP-VAE: blend=1.0, returning original audio\n");
+            std::string wav = audio_encode_wav(planar, T_audio, 48000, WAV_S16);
+            free(planar);
+            res.set_content(wav, "audio/wav");
+            return;
+        }
 
         // Measure input RMS + peak
         double in_sum_sq = 0.0;
@@ -1853,6 +1870,18 @@ int main(int argc, char ** argv) {
         }
         for (int i = 0; i < dec_total; i++) {
             decoded[i] *= gain;
+        }
+
+        // Phase 4: Blend original audio into PP-VAE output
+        // blend=0 → fully PP-VAE, blend=1 → fully original
+        if (blend > 0.0f) {
+            int blend_len = std::min(n_total, dec_total);
+            float wet = 1.0f - blend;
+            for (int i = 0; i < blend_len; i++) {
+                decoded[i] = decoded[i] * wet + planar[i] * blend;
+            }
+            fprintf(stderr, "[Server] PP-VAE blend: %.0f%% PP-VAE + %.0f%% original\n",
+                    wet * 100.0f, blend * 100.0f);
         }
 
         fprintf(stderr, "[Server] PP-VAE done: gain=%.3f (in_rms=%.4f, out_rms=%.4f)\n",

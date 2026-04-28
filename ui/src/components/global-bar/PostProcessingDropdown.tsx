@@ -270,9 +270,19 @@ export const PostProcessingDropdown: React.FC = () => {
               Adds ~1–2s processing time.
             </p>
             {gp.ppVaeReencode && (
-              <p className="text-[10px] text-emerald-400/60 leading-relaxed">
-                ✓ PP-VAE model detected — will re-encode after VAE decode.
-              </p>
+              <div className="space-y-2 pt-1">
+                <EditableSlider
+                  label="Original Blend"
+                  value={gp.ppVaeBlend}
+                  min={0} max={1.0} step={0.01}
+                  onChange={gp.setPpVaeBlend}
+                  formatDisplay={v => v === 0 ? 'Full PP-VAE' : v >= 1 ? 'Original' : (v * 100).toFixed(0) + '% original'}
+                  tooltip="Blend original audio back into the PP-VAE output. 0% = fully processed, 100% = fully original."
+                />
+                <p className="text-[10px] text-emerald-400/60 leading-relaxed">
+                  ✓ PP-VAE model detected — will re-encode after VAE decode.
+                </p>
+              </div>
             )}
           </div>
         </Accordion>
