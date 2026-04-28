@@ -935,6 +935,20 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
             continue;
         }
         pp_vae_rms(out[b].samples, out[b].n_samples, &in_rms[b], &in_peak[b]);
+        // DEBUG: input audio stats
+        {
+            float mn = out[b].samples[0], mx = out[b].samples[0];
+            double sum = 0;
+            int n_total = out[b].n_samples * 2;
+            for (int i = 0; i < n_total; i++) {
+                float v = out[b].samples[i];
+                sum += v;
+                if (v < mn) mn = v;
+                if (v > mx) mx = v;
+            }
+            fprintf(stderr, "[PP-VAE Batch%d] Input: n=%d, rms=%.5f, peak=%.5f, min=%.5f, max=%.5f, mean=%.6f\n",
+                    b, out[b].n_samples, in_rms[b], in_peak[b], mn, mx, (float)(sum / n_total));
+        }
     }
 
     // Phase 1: Encode all batch items through PP-VAE encoder → latents
@@ -974,6 +988,22 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
             if (T_latent[b] <= 0) {
                 fprintf(stderr, "[PP-VAE Batch%d] WARNING: encode failed\n", b);
                 T_latent[b] = 0;
+            } else {
+                // DEBUG: latent stats after encode
+                float mn = latents[b][0], mx = latents[b][0];
+                double sum = 0, sum_sq = 0;
+                int n_el = T_latent[b] * 64;
+                for (int i = 0; i < n_el; i++) {
+                    float v = latents[b][i];
+                    sum += v;
+                    sum_sq += (double)v * v;
+                    if (v < mn) mn = v;
+                    if (v > mx) mx = v;
+                }
+                float lat_mean = (float)(sum / n_el);
+                float lat_rms  = (float)sqrt(sum_sq / n_el);
+                fprintf(stderr, "[PP-VAE Batch%d] Latent: T=%d, dim=64, n_el=%d, mean=%.5f, rms=%.5f, min=%.5f, max=%.5f\n",
+                        b, T_latent[b], n_el, lat_mean, lat_rms, mn, mx);
             }
         }
     }
@@ -1002,6 +1032,23 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
             if (T_audio <= 0) {
                 fprintf(stderr, "[PP-VAE Batch%d] WARNING: decode failed\n", b);
                 continue;
+            }
+
+            // DEBUG: raw decode output stats (before gain)
+            {
+                float mn = audio[0], mx = audio[0];
+                double sum = 0;
+                int n_total = 2 * T_audio;
+                for (int i = 0; i < n_total; i++) {
+                    float v = audio[i];
+                    sum += v;
+                    if (v < mn) mn = v;
+                    if (v > mx) mx = v;
+                }
+                float raw_rms, raw_peak;
+                pp_vae_rms(audio.data(), T_audio, &raw_rms, &raw_peak);
+                fprintf(stderr, "[PP-VAE Batch%d] Decode: T=%d, rms=%.5f, peak=%.5f, min=%.5f, max=%.5f, mean=%.6f\n",
+                        b, T_audio, raw_rms, raw_peak, mn, mx, (float)(sum / n_total));
             }
 
             // RMS gain match: scale output to match input RMS, cap at input peak
@@ -1034,11 +1081,12 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
             memcpy(out[b].samples, audio.data(), (size_t) n_total * sizeof(float));
             out[b].n_samples = T_audio;
 
-            fprintf(stderr, "[PP-VAE Batch%d] OK: gain=%.3f (rms %.4f→%.4f)\n", b, gain, in_rms[b],
-                    in_rms[b]);
+            fprintf(stderr, "[PP-VAE Batch%d] OK: gain=%.3f (in_rms=%.4f, out_rms=%.4f, in_peak=%.4f, out_peak=%.4f)\n",
+                    b, gain, in_rms[b], out_rms, in_peak[b], out_peak);
         }
     }
     fprintf(stderr, "[PP-VAE] Decode done: %.1f ms total\n", s.timer.ms());
 
     return 0;
 }
+
