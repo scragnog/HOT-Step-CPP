@@ -201,12 +201,14 @@ static int dit_ggml_generate(DiTGGML *           model,
     int                  H_enc = (int) t_enc->ne[0];  // encoder hidden size (from condition_embedder)
 
     // Allocate compute buffers.
-    // Critical: reset FIRST (clears old state), THEN force inputs to GPU, THEN alloc.
-    // Without GPU forcing, inputs default to CPU where the scheduler aliases their
-    // buffers with intermediates. enc_hidden is read at every cross-attn layer (24x),
-    // so CPU aliasing corrupts it mid-graph. With N>1 the larger buffers trigger
-    // more aggressive aliasing, causing batch sample 1+ to produce noise.
+    // CRITICAL FIX: force a full buffer re-reservation via ggml_backend_sched_reserve
+    // before each generation. Without this, the gallocr reuses its existing buffer
+    // pool from the previous call, and stale intermediate data from Run N corrupts
+    // Run N+1's computation even though all inputs are bit-identical.
+    // The reserve call deallocates old GPU buffers and allocates fresh ones.
+    // Sequence: reset → reserve (splits + reserves + resets) → set backends → alloc
     ggml_backend_sched_reset(model->sched);
+    ggml_backend_sched_reserve(model->sched, gf);
     if (model->backend != model->cpu_backend) {
         const char * input_names[] = { "enc_hidden", "input_latents", "t",           "t_r",
                                        "positions",  "sa_mask_sw",    "sa_mask_pad", "ca_mask" };
