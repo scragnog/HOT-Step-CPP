@@ -201,14 +201,27 @@ static int dit_ggml_generate(DiTGGML *           model,
     int                  H_enc = (int) t_enc->ne[0];  // encoder hidden size (from condition_embedder)
 
     // Allocate compute buffers.
-    // CRITICAL FIX: force a full buffer re-reservation via ggml_backend_sched_reserve
-    // before each generation. Without this, the gallocr reuses its existing buffer
-    // pool from the previous call, and stale intermediate data from Run N corrupts
-    // Run N+1's computation even though all inputs are bit-identical.
-    // The reserve call deallocates old GPU buffers and allocates fresh ones.
-    // Sequence: reset → reserve (splits + reserves + resets) → set backends → alloc
-    ggml_backend_sched_reset(model->sched);
-    ggml_backend_sched_reserve(model->sched, gf);
+    // CRITICAL FIX: recreate the scheduler before each generation to guarantee
+    // a completely fresh gallocr with new GPU buffers. Without this, the gallocr
+    // reuses its existing buffer pool from the previous call, and stale intermediate
+    // data from Run N corrupts Run N+1's computation even though all inputs
+    // (noise, context, enc_hidden) are bit-identical between runs.
+    // The root cause is that ggml's buffer aliasing reuses memory regions for
+    // non-overlapping tensor lifetimes, and the stale values at those offsets
+    // are consumed by the next run before being overwritten.
+    {
+        ggml_backend_sched_free(model->sched);
+        int                        n_be      = (model->backend == model->cpu_backend) ? 1 : 2;
+        ggml_backend_t             backends[2] = { model->backend, model->cpu_backend };
+        ggml_backend_buffer_type_t bufts[2]    = { NULL, NULL };
+        bufts[0] = ggml_backend_get_default_buffer_type(model->backend);
+        if (n_be == 2) {
+            ggml_backend_dev_t         gpu_dev   = ggml_backend_get_device(model->backend);
+            ggml_backend_buffer_type_t host_buft = gpu_dev ? ggml_backend_dev_host_buffer_type(gpu_dev) : NULL;
+            bufts[1] = host_buft ? host_buft : ggml_backend_get_default_buffer_type(model->cpu_backend);
+        }
+        model->sched = ggml_backend_sched_new(backends, bufts, n_be, 8192, false, true);
+    }
     if (model->backend != model->cpu_backend) {
         const char * input_names[] = { "enc_hidden", "input_latents", "t",           "t_r",
                                        "positions",  "sa_mask_sw",    "sa_mask_pad", "ca_mask" };
