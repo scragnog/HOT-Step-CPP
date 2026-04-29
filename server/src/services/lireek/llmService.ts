@@ -3,7 +3,8 @@ import * as slopDetector from './slopDetector.js';
 import { 
   GENERATION_SYSTEM_PROMPT, 
   SONG_METADATA_SYSTEM_PROMPT, 
-  REFINEMENT_SYSTEM_PROMPT 
+  REFINEMENT_SYSTEM_PROMPT,
+  TITLE_DERIVATION_PROMPT 
 } from './prompts.js';
 import { LyricsProfile } from './profilerService.js';
 
@@ -906,7 +907,7 @@ const BLUEPRINT_LABEL_NAMES: Record<string, string> = {
   POC: 'Post-Chorus', I: 'Intro', O: 'Outro', IL: 'Interlude',
 };
 
-function buildGenerationPrompt(profile: LyricsProfile, extraInstructions?: string, usedTitles: string[] = []): string {
+function buildGenerationPrompt(profile: LyricsProfile, extraInstructions?: string): string {
   const lines: string[] = [`Artist: ${profile.artist}`];
   if (profile.album) lines.push(`Album style: ${profile.album}`);
 
@@ -1004,14 +1005,6 @@ function buildGenerationPrompt(profile: LyricsProfile, extraInstructions?: strin
     lines.push('', '=== EXTRA INSTRUCTIONS ===', '', extraInstructions);
   }
 
-  // === TITLES ALREADY USED ===
-  if (usedTitles?.length) {
-    lines.push('', '=== TITLES ALREADY USED (DO NOT REUSE) ===');
-    for (const t of usedTitles) lines.push(`  ✗ ${t}`);
-    lines.push('You MUST choose a COMPLETELY DIFFERENT title.');
-    lines.push("Do NOT reuse ANY significant word from these titles. If 'Glass' appears in a used title, do NOT put 'Glass' in your new title. Same for all nouns, adjectives, and evocative words. Only common words like 'the', 'a', 'of', 'in' may overlap.");
-  }
-
   // === LYRIC EXCERPTS ===
   if (profile.representative_excerpts?.length) {
     lines.push('', '=== REPRESENTATIVE EXCERPTS (STYLE REFERENCE ONLY — DO NOT COPY) ===');
@@ -1025,9 +1018,8 @@ function buildGenerationPrompt(profile: LyricsProfile, extraInstructions?: strin
     '2. CHORUS LINE COUNT: Exactly 4, 6, or 8 lines per chorus. Each chorus MUST have a hook line that repeats.',
     '3. *** ZERO TOLERANCE FOR COPYING ***',
     '4. NO SLOP: Do not use neon, fluorescent, embers, silhouette, static, void, ethereal, or any AI cliché.',
-    '5. UNIQUE TITLE: The title must be fresh and surprising.',
     '',
-    'Now write the new song (Title line first, then lyrics with [Section] headers and proper punctuation):',
+    'Now write the song (lyrics only, starting with [Intro] or [Verse 1] — no title line):',
   );
   return lines.join('\n');
 }
@@ -1065,7 +1057,7 @@ export async function generateLyricsStreaming(
   }
 
   if (onPhase) onPhase("Writing lyrics…");
-  const userPrompt = buildGenerationPrompt(profile, extraInstructions, usedTitles);
+  const userPrompt = buildGenerationPrompt(profile, extraInstructions);
 
   let raw = await provider.call(GENERATION_SYSTEM_PROMPT, userPrompt, effectiveModel, onChunk);
   
@@ -1076,18 +1068,18 @@ export async function generateLyricsStreaming(
   raw = raw.replace(/\s*\((?:Hook|You|Repeat|x\d|Refrain|Spoken|Whispered|Ad[- ]?lib|Echo)\)\s*/gi, '');
   raw = raw.replace(/ +$/gm, '');
 
-  // Extract title
-  let title = '';
-  const lines = raw.trim().split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(/^(?:Title:\s*|#\s*)(.*)/i);
+  // Strip any Title: line the LLM might still emit (old habit)
+  const rawLines = raw.trim().split('\n');
+  for (let i = 0; i < rawLines.length; i++) {
+    const match = rawLines[i].match(/^(?:Title:\s*|#\s*)(.*)/i);
     if (match) {
-      title = match[1].trim().replace(/^['"]|['"]$/g, '');
-      const rest = lines.slice(i + 1);
+      const rest = rawLines.slice(i + 1);
       while (rest.length && !rest[0].trim()) rest.shift();
       raw = rest.join('\n');
       break;
     }
+    // Stop looking once we hit a section header or lyric content
+    if (rawLines[i].trim().startsWith('[') || (rawLines[i].trim() && i > 2)) break;
   }
 
   // Full post-processing pipeline
@@ -1102,6 +1094,31 @@ export async function generateLyricsStreaming(
     console.warn(`Generation slop scan: score=${slopResult.ai_score} severity=${slopResult.severity}`,
       'words:', slopResult.layers.blacklisted_words.found,
       'phrases:', slopResult.layers.blacklisted_phrases.found);
+  }
+
+  // === POST-HOC TITLE DERIVATION ===
+  if (onPhase) onPhase("Choosing title…");
+  let title = '';
+  try {
+    // Build a focused prompt: artist context + the lyrics + used titles to avoid
+    const titleLines: string[] = [`Artist: ${profile.artist}`];
+    if (profile.album) titleLines.push(`Album style: ${profile.album}`);
+    if (usedTitles?.length) {
+      titleLines.push('\nTitles already used (avoid these and their key words):');
+      for (const t of usedTitles) titleLines.push(`  ✗ ${t}`);
+    }
+    titleLines.push('\n--- LYRICS ---', raw, '--- END LYRICS ---');
+    titleLines.push('\nChoose the best title for this song:');
+
+    let titleRaw = await provider.call(TITLE_DERIVATION_PROMPT, titleLines.join('\n'), effectiveModel, onChunk);
+    titleRaw = stripThinkingBlocks(titleRaw).trim();
+    // Clean up: remove quotes, "Title:" prefix, markdown
+    titleRaw = titleRaw.replace(/^(?:Title:\s*|#\s*)/i, '').replace(/^["'`]|["'`]$/g, '').trim();
+    // Take only the first line if multi-line
+    title = titleRaw.split('\n')[0].trim();
+    console.log('[LLM] Derived title:', title);
+  } catch (err) {
+    console.warn('[LLM] Title derivation failed, falling back to empty:', err);
   }
 
   // Duration estimation fallback

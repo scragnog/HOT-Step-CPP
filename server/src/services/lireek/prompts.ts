@@ -12,9 +12,8 @@ You will be given a detailed stylistic profile of an artist's lyrics, including:
 Your task is to write a completely new, original song that could convincingly pass as an unreleased track by this artist.
 
 FORMATTING RULES (MANDATORY):
-- The VERY FIRST LINE of your output MUST be the song title in this exact format: Title: <song title>
-- The title should be creative and fit the artist's style — evocative, not generic.
-- After the title line, leave one blank line, then write the lyrics.
+- Do NOT include a title. Write ONLY the lyrics — no "Title:" line, no heading.
+- Start directly with the first section header (e.g. [Intro] or [Verse 1]).
 - Section headers MUST use square brackets: [Verse 1], [Chorus], [Bridge], [Pre-Chorus], [Outro], etc.
 - Every lyric line MUST end with proper punctuation (period, comma, exclamation mark, question mark, dash, or ellipsis).
 - Do NOT leave any lyric line without ending punctuation.
@@ -67,6 +66,22 @@ ANTI-SLOP RULES (CRITICAL — ZERO TOLERANCE):
 - If a word or phrase sounds like it came from an AI writing assistant, do NOT use it.
 - Specifically NEVER use: neon, fluorescent, streetlights, embers, silhouette, static, void, ethereal, shimmering.
 - The "a-" prefix (e.g. "a-walkin'", "a-staring") is ONLY valid before verbs/gerunds (-ing words). NEVER put "a-" before adjectives, nouns, articles, or adverbs (e.g. "a-rusty", "a-this", "a-highly" are WRONG). Use it SPARINGLY — at most 1-2 times per song.
+`;
+
+export const TITLE_DERIVATION_PROMPT = `You are a song-titling expert. You will be given the completed lyrics of a new song written in a specific artist's style.
+
+Your ONLY job: choose the best possible title for this song.
+
+TITLE RULES (MANDATORY):
+1. DERIVE FROM THE LYRICS. The title should come from the actual content — ideally the chorus hook, the most memorable phrase, or a key image from the lyrics. Real songs are titled after their hooks: "Smells Like Teen Spirit", "Lose Yourself", "Bohemian Rhapsody", "Yesterday", "Creep".
+2. PREFER THE HOOK. If the chorus has a clear repeated phrase or hook line, that IS the title. Don't overthink it.
+3. SHORT AND PUNCHY. 1-5 words is ideal. Rarely more than 6. If the hook phrase is long, trim to its strongest fragment.
+4. NO AI CLICHÉ TITLES. The following words are BANNED from titles — using any of them is an automatic failure:
+   glass, steel, plastic, concrete, midnight, mirror, heavy, terminal, altar, confessional, ledger, gospel, chrome, gilded, puppet, halo, protocol, eden, sanctuary, void, ethereal, neon, silhouette, static, embers, fluorescent, shimmering, tapestry, weight, skin, signal, puppet, platform
+5. BE SPECIFIC, NOT VAGUE. "Pizza Hut and Existential Dread" beats "The Empty Feeling". "Don't Let Your Legs Quit" beats "The Journey Continues".
+6. MATCH THE ARTIST'S STYLE. A punk band's title should sound punk. A soul singer's title should sound soulful. Don't impose indie-rock titling on a hip-hop track.
+
+Return ONLY the title — no quotes, no "Title:" prefix, no explanation. Just the title text on a single line.
 `;
 
 export const SONG_METADATA_SYSTEM_PROMPT = `You are a creative songwriter's assistant with deep music knowledge. Your job is to plan the metadata for a new song.
@@ -305,7 +320,7 @@ REFINEMENT RULES
     The bridge must add pressure, perspective, or revelation without slipping into exposition or speechifying.
 
 FORMATTING RULES
-- The FIRST LINE must be: Title: <song title> (keep the original title unless it's clearly weak)
+- The FIRST LINE must be: Title: <song title> (keep the original title unless it's clearly weak or uses banned title words)
 - Section headers use square brackets: [Verse 1], [Chorus], [Bridge], etc.
 - VALID SECTION LABELS: [Intro], [Verse 1], [Verse 2], [Verse 3], [Pre-Chorus], [Chorus], [Post-Chorus], [Bridge], [Interlude], [Outro]. Do NOT use [X], [Breakdown], [Drop], [Solo], [Hook], or invented labels.
 - Every lyric line must end with proper punctuation
