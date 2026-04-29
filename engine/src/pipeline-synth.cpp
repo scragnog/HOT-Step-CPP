@@ -761,7 +761,8 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
     // Resolve alignment config from model metadata
     AlignmentConfig align_cfg = alignment_config_resolve(
         "",  // TODO: read from DiTMeta when GGUF field is available
-        ctx->meta->cfg.n_layers);
+        ctx->meta->cfg.n_layers,
+        ctx->meta->cfg.n_heads);
     if (!align_cfg.valid) {
         fprintf(stderr, "[LRC] WARNING: no valid alignment config, skipping\n");
         return 0;
@@ -851,8 +852,8 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
     }
 
     // ── DEBUG: Score diagnostics ──────────────────────────────────────────
-    fprintf(stderr, "[LRC-Diag] num_steps=%d, t_last=%.4f, lyric_range=[%d,%d), pure_n=%d, S=%d, enc_S=%d\n",
-            s.num_steps, 1.0f / s.num_steps, s.lyric_start_idx, s.lyric_end_idx, pure_n, s.S, s.enc_S);
+    fprintf(stderr, "[LRC-Diag] align_steps=%d, t_last=%.4f, lyric_range=[%d,%d), pure_n=%d, S=%d, enc_S=%d\n",
+            align_steps, 1.0f / align_steps, s.lyric_start_idx, s.lyric_end_idx, pure_n, s.S, s.enc_S);
     for (int h = 0; h < align_cfg.total_heads; h++) {
         const float * hd = sliced_scores.data() + h * pure_n * s.S;
         int n = pure_n * s.S;

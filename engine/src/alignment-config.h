@@ -38,6 +38,24 @@ static AlignmentConfig alignment_config_default_2b() {
     return cfg;
 }
 
+// Default config for the XL (4B) DiT model (32 layers, 32 heads per layer).
+// From the XL model's config.json lyric_alignment_layers_config.
+// The alignment-relevant heads are completely different from the 2B model.
+static AlignmentConfig alignment_config_default_xl() {
+    AlignmentConfig cfg;
+    cfg.targets = {
+        {3, {18, 27}},
+        {4, {22}},
+        {5, {5, 6, 7}},
+        {6, {2, 12, 13}},
+        {7, {20, 21}},
+    };
+    cfg.max_layer   = 7;
+    cfg.total_heads = 11;
+    cfg.valid       = true;
+    return cfg;
+}
+
 // Parse alignment config from a JSON string (from GGUF metadata).
 // Format: {"2": [6], "3": [10, 11], "4": [3], ...}
 // Returns invalid config on parse failure.
@@ -145,7 +163,7 @@ static AlignmentConfig alignment_config_parse_json(const std::string & json) {
 }
 
 // Resolve alignment config: use GGUF config if available, else fall back
-// to 2B default (safe for any model with ≥7 layers and ≥12 heads per layer).
+// to model-specific defaults based on architecture.
 static AlignmentConfig alignment_config_resolve(const std::string & gguf_json, int n_layers, int n_heads = 0) {
     // Try GGUF config first
     if (!gguf_json.empty()) {
@@ -156,12 +174,15 @@ static AlignmentConfig alignment_config_resolve(const std::string & gguf_json, i
         fprintf(stderr, "[AlignConfig] WARNING: failed to parse GGUF alignment config, trying default\n");
     }
 
-    // Fall back to 2B default for any model with enough layers.
-    // The default targets layers 2-6 (max_layer=6) with head indices up to 11.
-    // This is safe for:
-    //   - 2B models: 24 layers, 16 heads ✓
-    //   - XL models: 32 layers, 32 heads ✓
-    // We only reject models that are too small to contain the target layers/heads.
+    // Detect XL model: 32 layers + 32 heads (vs 2B: 24 layers, 16 heads).
+    // XL models have completely different alignment-relevant cross-attention heads.
+    // Using the 2B config on XL produces flat/uninformative attention scores.
+    if (n_layers >= 32 && n_heads >= 28) {
+        fprintf(stderr, "[AlignConfig] Using default XL config (%d layers, %d heads)\n", n_layers, n_heads);
+        return alignment_config_default_xl();
+    }
+
+    // Fall back to 2B default for models with enough layers/heads.
     const int required_layers = 7;   // need layers 0..6
     const int required_heads  = 12;  // max head index is 11
 
