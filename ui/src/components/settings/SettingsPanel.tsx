@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { Zap, Download, Tag, AlertTriangle, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { songApi } from '../../services/api';
+import { lireekApi } from '../../services/lireekApi';
 import './SettingsPanel.css';
 
 export interface AppSettings {
@@ -113,6 +114,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [nukeConfirm, setNukeConfirm] = useState(false);
   const [nukeRunning, setNukeRunning] = useState(false);
   const [nukeResult, setNukeResult] = useState<string | null>(null);
+  const [nukeLyricsConfirm, setNukeLyricsConfirm] = useState(false);
+  const [nukeLyricsRunning, setNukeLyricsRunning] = useState(false);
+  const [nukeProfilesConfirm, setNukeProfilesConfirm] = useState(false);
+  const [nukeProfilesRunning, setNukeProfilesRunning] = useState(false);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     onSettingsChange({ ...settings, [key]: value });
@@ -132,6 +137,34 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setNukeResult(`Failed: ${err.message}`);
     } finally {
       setNukeRunning(false);
+    }
+  };
+
+  const handleNukeLyrics = async () => {
+    setNukeLyricsRunning(true);
+    setNukeResult(null);
+    try {
+      const res = await lireekApi.purgeGenerations();
+      setNukeResult(`Deleted ${res.generations_deleted} generated lyrics.`);
+      setNukeLyricsConfirm(false);
+    } catch (err: any) {
+      setNukeResult(`Failed: ${err.message}`);
+    } finally {
+      setNukeLyricsRunning(false);
+    }
+  };
+
+  const handleNukeProfiles = async () => {
+    setNukeProfilesRunning(true);
+    setNukeResult(null);
+    try {
+      const res = await lireekApi.purgeProfiles();
+      setNukeResult(`Deleted ${res.profiles_deleted} profiles and ${res.generations_deleted} dependent lyrics.`);
+      setNukeProfilesConfirm(false);
+    } catch (err: any) {
+      setNukeResult(`Failed: ${err.message}`);
+    } finally {
+      setNukeProfilesRunning(false);
     }
   };
 
@@ -325,6 +358,134 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <button
                   onClick={() => setNukeConfirm(false)}
                   disabled={nukeRunning}
+                  className="px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white transition-colors"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Nuke Lyrics */}
+        <div className="setting-row">
+          <div className="setting-info">
+            <div className="setting-label" style={{ color: '#fca5a5' }}>Nuke Written Lyrics</div>
+            <div className="setting-description">
+              Permanently delete <strong>all</strong> generated/written song lyrics across all artists.
+              Profiles and source lyrics are preserved.
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
+            {!nukeLyricsConfirm ? (
+              <button
+                id="nuke-lyrics-btn"
+                onClick={() => setNukeLyricsConfirm(true)}
+                disabled={nukeLyricsRunning}
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#fca5a5',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)'; e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'; e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.3)'; }}
+              >
+                🗑️ Nuke Lyrics
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span className="text-xs text-red-400" style={{ whiteSpace: 'nowrap' }}>Are you sure?</span>
+                <button
+                  id="nuke-lyrics-confirm-btn"
+                  onClick={handleNukeLyrics}
+                  disabled={nukeLyricsRunning}
+                  className="px-4 py-2 rounded-lg text-sm font-bold transition-all duration-200"
+                  style={{
+                    background: '#dc2626',
+                    border: '1px solid #ef4444',
+                    color: 'white',
+                    cursor: nukeLyricsRunning ? 'wait' : 'pointer',
+                    opacity: nukeLyricsRunning ? 0.6 : 1,
+                  }}
+                >
+                  {nukeLyricsRunning ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Loader2 size={14} className="animate-spin" /> Nuking...
+                    </span>
+                  ) : (
+                    '🗑️ Confirm Nuke'
+                  )}
+                </button>
+                <button
+                  onClick={() => setNukeLyricsConfirm(false)}
+                  disabled={nukeLyricsRunning}
+                  className="px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white transition-colors"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Nuke Profiles */}
+        <div className="setting-row">
+          <div className="setting-info">
+            <div className="setting-label" style={{ color: '#fca5a5' }}>Nuke Profiles</div>
+            <div className="setting-description">
+              Permanently delete <strong>all</strong> artist profiles and their dependent written lyrics.
+              Source lyrics and artist data are preserved.
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
+            {!nukeProfilesConfirm ? (
+              <button
+                id="nuke-profiles-btn"
+                onClick={() => setNukeProfilesConfirm(true)}
+                disabled={nukeProfilesRunning}
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#fca5a5',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)'; e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'; e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.3)'; }}
+              >
+                🧬 Nuke Profiles
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span className="text-xs text-red-400" style={{ whiteSpace: 'nowrap' }}>Lyrics will also be deleted!</span>
+                <button
+                  id="nuke-profiles-confirm-btn"
+                  onClick={handleNukeProfiles}
+                  disabled={nukeProfilesRunning}
+                  className="px-4 py-2 rounded-lg text-sm font-bold transition-all duration-200"
+                  style={{
+                    background: '#dc2626',
+                    border: '1px solid #ef4444',
+                    color: 'white',
+                    cursor: nukeProfilesRunning ? 'wait' : 'pointer',
+                    opacity: nukeProfilesRunning ? 0.6 : 1,
+                  }}
+                >
+                  {nukeProfilesRunning ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Loader2 size={14} className="animate-spin" /> Nuking...
+                    </span>
+                  ) : (
+                    '🧬 Confirm Nuke'
+                  )}
+                </button>
+                <button
+                  onClick={() => setNukeProfilesConfirm(false)}
+                  disabled={nukeProfilesRunning}
                   className="px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white transition-colors"
                   style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}
                 >

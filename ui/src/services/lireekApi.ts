@@ -306,6 +306,10 @@ export const lireekApi = {
   // ── Bulk Operations ─────────────────────────────────────────────────────
   purgeAll: (): Promise<any> =>
     api('/api/lireek/purge', { method: 'POST' }),
+  purgeGenerations: (): Promise<{ generations_deleted: number }> =>
+    api('/api/lireek/purge-generations', { method: 'POST' }),
+  purgeProfiles: (): Promise<{ profiles_deleted: number; generations_deleted: number }> =>
+    api('/api/lireek/purge-profiles', { method: 'POST' }),
 
   // ── Audio Generations ───────────────────────────────────────────────────
   linkAudio: (generationId: number, jobId: string): Promise<any> =>

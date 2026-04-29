@@ -392,6 +392,18 @@ export function purgeProfilesAndGenerations(): { generations_deleted: number; pr
   return { generations_deleted: genResult.changes, profiles_deleted: profResult.changes };
 }
 
+export function purgeGenerationsOnly(): { generations_deleted: number } {
+  const result = db.prepare('DELETE FROM generations').run();
+  return { generations_deleted: result.changes };
+}
+
+export function purgeProfilesOnly(): { profiles_deleted: number; generations_deleted: number } {
+  // Generations depend on profiles via FK, so delete generations first
+  const genResult = db.prepare('DELETE FROM generations').run();
+  const profResult = db.prepare('DELETE FROM profiles').run();
+  return { profiles_deleted: profResult.changes, generations_deleted: genResult.changes };
+}
+
 
 // ── Settings ────────────────────────────────────────────────────────────────
 

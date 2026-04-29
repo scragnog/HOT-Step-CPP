@@ -555,6 +555,24 @@ router.post('/purge', (_req: Request, res: Response) => {
   }
 });
 
+router.post('/purge-generations', (_req: Request, res: Response) => {
+  try {
+    const result = db.purgeGenerationsOnly();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/purge-profiles', (_req: Request, res: Response) => {
+  try {
+    const result = db.purgeProfilesOnly();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Settings / Prompts ──────────────────────────────────────────────────────
 
 router.get('/prompts', (_req: Request, res: Response) => {
