@@ -329,10 +329,25 @@ static int dit_alignment_extract(
     for (int i = 0; i < S; i++) pos_data[i] = i;
     ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * sizeof(int));
 
-    // Masks: all zeros (no padding for single sample)
+    // Self-attention masks (single sample, no padding):
+    // sa_mask_sw:  sliding window — -INFINITY outside c.sliding_window distance
+    // sa_mask_pad: full attention  — all zeros (no padding positions)
+    // Layout: [ne0=S (KV), ne1=S (Q), 1, N], offset = ki + qi * S
+    int win = dit->cfg.sliding_window;
+    std::vector<uint16_t> sa_sw_data(S * S);
+    for (int qi = 0; qi < S; qi++) {
+        for (int ki = 0; ki < S; ki++) {
+            int  dist  = (qi > ki) ? (qi - ki) : (ki - qi);
+            bool in_win = (win <= 0) || (S <= win) || (dist <= win);
+            float val = in_win ? 0.0f : -INFINITY;
+            sa_sw_data[qi * S + ki] = ggml_fp32_to_fp16(val);
+        }
+    }
+    ggml_backend_tensor_set(sa_mask_sw, sa_sw_data.data(), 0, S * S * sizeof(uint16_t));
     std::vector<uint16_t> zero_sa(S * S, 0);
-    ggml_backend_tensor_set(sa_mask_sw, zero_sa.data(), 0, S * S * sizeof(uint16_t));
     ggml_backend_tensor_set(sa_mask_pad, zero_sa.data(), 0, S * S * sizeof(uint16_t));
+
+    // Cross-attention mask: no padding, all zeros
     std::vector<uint16_t> zero_ca(enc_S * S, 0);
     ggml_backend_tensor_set(ca_mask, zero_ca.data(), 0, enc_S * S * sizeof(uint16_t));
 

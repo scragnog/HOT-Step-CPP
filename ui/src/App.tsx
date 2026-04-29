@@ -598,7 +598,7 @@ const AppContent: React.FC = () => {
           }}
         >
           <div style={{ overflow: 'hidden', minHeight: 0 }}>
-          <SectionMarkers audioUrl={pb.currentAudioUrl ?? undefined} duration={pb.duration} />
+          <SectionMarkers audioUrl={pb.currentTrack?.audioUrl ?? undefined} duration={pb.duration} />
           <SpectrumAnalyzer
             mediaElement={spectrumMediaEl}
             visible={pb.spectrumEnabled && pb.isPlaying}
@@ -655,7 +655,7 @@ const AppContent: React.FC = () => {
           {/* /inner overflow wrapper */}
         </div>
         <LyricsBar
-          audioUrl={pb.currentAudioUrl ?? undefined}
+          audioUrl={pb.currentTrack?.audioUrl ?? undefined}
           currentTime={pb.currentTime}
           isPlaying={pb.isPlaying}
         />
