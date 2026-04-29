@@ -799,11 +799,10 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
         return 0;
     }
 
-    // Transpose scores from [heads, enc_S, S] to [heads, S, enc_S]
-    // Python convention: calc_matrix is [Tokens, Frames] = [enc_S_range, S]
-    // The attention scores are [enc_S, S] per head (KV × Q)
-    // For DTW we need [n_tokens, n_frames] = [pure_n, S]
-    // Slice to pure lyric range and transpose
+    // Transpose scores from GGML column-major [enc_S, S] to C row-major [pure_n, S]
+    // GGML stores ne[0]=enc_S as the contiguous/innermost dimension.
+    // Element (e, s) in GGML is at linear offset: s * enc_S + e
+    // We need C row-major [pure_n_tokens, S_frames]: dst[t * S + f]
     std::vector<float> sliced_scores(align_cfg.total_heads * pure_n * s.S);
     for (int h = 0; h < align_cfg.total_heads; h++) {
         const float * src = scores.data() + h * s.enc_S * s.S;
@@ -811,8 +810,8 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
         for (int t = 0; t < pure_n; t++) {
             int enc_idx = s.lyric_start_idx + t;
             for (int f = 0; f < s.S; f++) {
-                // src layout: [enc_S, S] (row=enc_idx, col=frame)
-                dst[t * s.S + f] = src[enc_idx * s.S + f];
+                // GGML column-major: element (enc_idx, f) = src[f * enc_S + enc_idx]
+                dst[t * s.S + f] = src[f * s.enc_S + enc_idx];
             }
         }
     }

@@ -19,6 +19,7 @@ import { JobQueue } from './components/queue/JobQueue';
 import { Player } from './components/player/Player';
 import { WaveformPlayer, type WaveformPlayerHandle } from './components/player/WaveformPlayer';
 import { SectionMarkers } from './components/player/SectionMarkers';
+import { LyricsBar } from './components/player/LyricsBar';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
 import { RightSidebar } from './components/details/RightSidebar';
 import { Toast, type ToastType } from './components/shared/Toast';
@@ -653,6 +654,11 @@ const AppContent: React.FC = () => {
           </div>
           {/* /inner overflow wrapper */}
         </div>
+        <LyricsBar
+          audioUrl={pb.currentAudioUrl ?? undefined}
+          currentTime={pb.currentTime}
+          isPlaying={pb.isPlaying}
+        />
         <Player
           currentSong={currentSong}
           isPlaying={pb.isPlaying}
