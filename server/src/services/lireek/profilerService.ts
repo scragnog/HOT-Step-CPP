@@ -355,7 +355,15 @@ function analyseStructure(allSongs: SongLyrics[]): { v: number, c: number, bluep
   const topBps = Object.entries(blueprintsFreq)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
-    .map(x => x[0]);
+    .map(x => x[0])
+    // Sanitise medley/multi-part songs: truncate at Outro
+    .map(bp => {
+      const parts = bp.split('-');
+      const outroIdx = parts.indexOf('O');
+      return outroIdx >= 0 ? parts.slice(0, outroIdx + 1).join('-') : bp;
+    })
+    // Dedupe after truncation
+    .filter((bp, i, arr) => arr.indexOf(bp) === i);
 
   return { 
     v: vCount ? parseFloat((vSum / vCount).toFixed(1)) : 0, 

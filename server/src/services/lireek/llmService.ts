@@ -820,17 +820,24 @@ function estimateDuration(lyrics: string, bpm: number): number {
 /** Pick the most interesting blueprint from a list. */
 function selectBestBlueprint(blueprints: string[]): string {
   if (!blueprints.length) return 'V-C-V-C-B-C';
-  return blueprints.reduce((best, bp) => {
-    const parts = bp.split('-');
-    const unique = new Set(parts).size;
-    const hasBridge = parts.includes('B') ? 1 : 0;
-    const score = unique * 10 + hasBridge * 100 + parts.length;
-    const bestParts = best.split('-');
-    const bestUnique = new Set(bestParts).size;
-    const bestBridge = bestParts.includes('B') ? 1 : 0;
-    const bestScore = bestUnique * 10 + bestBridge * 100 + bestParts.length;
-    return score > bestScore ? bp : best;
-  });
+  return blueprints
+    .map(bp => {
+      // Safety: truncate anything after an Outro (medley artefacts)
+      const parts = bp.split('-');
+      const outroIdx = parts.indexOf('O');
+      return outroIdx >= 0 ? parts.slice(0, outroIdx + 1).join('-') : bp;
+    })
+    .reduce((best, bp) => {
+      const parts = bp.split('-');
+      const unique = new Set(parts).size;
+      const hasBridge = parts.includes('B') ? 1 : 0;
+      const score = unique * 10 + hasBridge * 100 + parts.length;
+      const bestParts = best.split('-');
+      const bestUnique = new Set(bestParts).size;
+      const bestBridge = bestParts.includes('B') ? 1 : 0;
+      const bestScore = bestUnique * 10 + bestBridge * 100 + bestParts.length;
+      return score > bestScore ? bp : best;
+    });
 }
 
 /**
