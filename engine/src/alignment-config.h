@@ -145,8 +145,8 @@ static AlignmentConfig alignment_config_parse_json(const std::string & json) {
 }
 
 // Resolve alignment config: use GGUF config if available, else fall back
-// to 2B default (only safe for 24-layer models).
-static AlignmentConfig alignment_config_resolve(const std::string & gguf_json, int n_layers) {
+// to 2B default (safe for any model with ≥7 layers and ≥12 heads per layer).
+static AlignmentConfig alignment_config_resolve(const std::string & gguf_json, int n_layers, int n_heads = 0) {
     // Try GGUF config first
     if (!gguf_json.empty()) {
         AlignmentConfig cfg = alignment_config_parse_json(gguf_json);
@@ -156,14 +156,22 @@ static AlignmentConfig alignment_config_resolve(const std::string & gguf_json, i
         fprintf(stderr, "[AlignConfig] WARNING: failed to parse GGUF alignment config, trying default\n");
     }
 
-    // Fall back to 2B default only for 24-layer models
-    if (n_layers == 24) {
-        fprintf(stderr, "[AlignConfig] Using default 2B config (24 layers)\n");
+    // Fall back to 2B default for any model with enough layers.
+    // The default targets layers 2-6 (max_layer=6) with head indices up to 11.
+    // This is safe for:
+    //   - 2B models: 24 layers, 16 heads ✓
+    //   - XL models: 32 layers, 32 heads ✓
+    // We only reject models that are too small to contain the target layers/heads.
+    const int required_layers = 7;   // need layers 0..6
+    const int required_heads  = 12;  // max head index is 11
+
+    if (n_layers >= required_layers && (n_heads == 0 || n_heads >= required_heads)) {
+        fprintf(stderr, "[AlignConfig] Using default 2B config (%d layers, %d heads)\n", n_layers, n_heads);
         return alignment_config_default_2b();
     }
 
     // Unknown model — can't guess
-    fprintf(stderr, "[AlignConfig] WARNING: no alignment config for %d-layer model\n", n_layers);
+    fprintf(stderr, "[AlignConfig] WARNING: no alignment config for %d-layer / %d-head model\n", n_layers, n_heads);
     AlignmentConfig invalid;
     invalid.max_layer   = -1;
     invalid.total_heads = 0;
