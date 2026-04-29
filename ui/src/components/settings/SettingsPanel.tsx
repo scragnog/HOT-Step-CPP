@@ -34,6 +34,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 interface SettingsPanelProps {
   settings: AppSettings;
   onSettingsChange: (settings: AppSettings) => void;
+  onNukeComplete?: () => void;
 }
 
 /** Toggle switch component */
@@ -109,6 +110,7 @@ const SelectRow: React.FC<{
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   onSettingsChange,
+  onNukeComplete,
 }) => {
   const { token } = useAuth();
   const [nukeConfirm, setNukeConfirm] = useState(false);
@@ -133,6 +135,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         `Nuked ${res.songsDeleted} songs, ${res.filesDeleted} audio files, ${res.lireekAudioGensDeleted} Lyric Studio entries.`
       );
       setNukeConfirm(false);
+      onNukeComplete?.();
     } catch (err: any) {
       setNukeResult(`Failed: ${err.message}`);
     } finally {

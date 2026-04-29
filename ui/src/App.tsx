@@ -305,6 +305,7 @@ const AppContent: React.FC = () => {
           <SettingsPanel
             settings={settings}
             onSettingsChange={setSettings}
+            onNukeComplete={() => { setSongs([]); setSelectedSong(null); }}
           />
         </div>
       );
