@@ -783,13 +783,20 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
     int total_scores = align_cfg.total_heads * s.enc_S * s.S;
     std::vector<float> scores(total_scores);
 
+    // Use fixed alignment step count (not the generation step count).
+    // With many steps (e.g. 50), t_last = 1/50 = 0.02 makes the input 98% clean,
+    // producing flat/uninformative cross-attention.  With 8 steps, t_last = 0.125
+    // adds enough noise for the model to produce meaningful alignment signal.
+    // Python default: inference_steps=8.
+    const int align_steps = 8;
+
     int rc = dit_alignment_extract(
         dit, align_cfg,
         s.output.data(),           // pred_latent [T, Oc]
         s.context.data(),          // context [T, ctx_ch]
         s.enc_hidden.data(),       // enc_hidden [enc_S, H_cond]
         s.T, s.S, s.enc_S,
-        s.num_steps,
+        align_steps,
         scores.data());
 
     dit->use_flash_attn = saved_fa;
@@ -798,6 +805,33 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
         fprintf(stderr, "[LRC] WARNING: alignment extraction failed\n");
         return 0;
     }
+
+    // ── DEBUG: Raw score stats ───────────────────────────────────────────
+    {
+        int per_head = s.enc_S * s.S;
+        for (int h = 0; h < align_cfg.total_heads; h++) {
+            const float * hd = scores.data() + h * per_head;
+            float mn = hd[0], mx = hd[0];
+            double sm = 0;
+            int nz = 0;
+            for (int i = 0; i < per_head; i++) {
+                mn = std::min(mn, hd[i]); mx = std::max(mx, hd[i]); sm += hd[i];
+                if (hd[i] > 1e-6f) nz++;
+            }
+            fprintf(stderr, "[LRC-Raw] head=%d: min=%.6f max=%.6f mean=%.8f nonzero=%.1f%%\n",
+                    h, mn, mx, (float)(sm/per_head), 100.0f * nz / per_head);
+            // Check sum along enc_S for a few frames (should sum to 1.0 if softmax was along enc_S)
+            float sum_f0 = 0, sum_fmid = 0, sum_flast = 0;
+            for (int e = 0; e < s.enc_S; e++) {
+                sum_f0    += hd[0 * s.enc_S + e];                    // GGML col-major: frame 0
+                sum_fmid  += hd[(s.S/2) * s.enc_S + e];             // frame S/2
+                sum_flast += hd[(s.S-1) * s.enc_S + e];             // last frame
+            }
+            fprintf(stderr, "[LRC-Raw]   sum_tokens@frame[0]=%.4f @frame[%d]=%.4f @frame[%d]=%.4f\n",
+                    sum_f0, s.S/2, sum_fmid, s.S-1, sum_flast);
+        }
+    }
+    // ── END RAW DEBUG ────────────────────────────────────────────────────
 
     // Transpose scores from GGML column-major [enc_S, S] to C row-major [pure_n, S]
     // GGML stores ne[0]=enc_S as the contiguous/innermost dimension.
@@ -815,6 +849,33 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
             }
         }
     }
+
+    // ── DEBUG: Score diagnostics ──────────────────────────────────────────
+    fprintf(stderr, "[LRC-Diag] num_steps=%d, t_last=%.4f, lyric_range=[%d,%d), pure_n=%d, S=%d, enc_S=%d\n",
+            s.num_steps, 1.0f / s.num_steps, s.lyric_start_idx, s.lyric_end_idx, pure_n, s.S, s.enc_S);
+    for (int h = 0; h < align_cfg.total_heads; h++) {
+        const float * hd = sliced_scores.data() + h * pure_n * s.S;
+        int n = pure_n * s.S;
+        float mn = hd[0], mx = hd[0];
+        double sm = 0;
+        for (int i = 0; i < n; i++) { mn = std::min(mn, hd[i]); mx = std::max(mx, hd[i]); sm += hd[i]; }
+        fprintf(stderr, "[LRC-Diag] head=%d min=%.6f max=%.6f mean=%.6f\n", h, mn, mx, (float)(sm/n));
+        // Check where the argmax is per token (first, middle, last tokens)
+        int check_tokens[] = {0, pure_n/4, pure_n/2, 3*pure_n/4, pure_n-1};
+        for (int ti = 0; ti < 5; ti++) {
+            int t = check_tokens[ti];
+            if (t < 0 || t >= pure_n) continue;
+            int best_f = 0;
+            float best_v = hd[t * s.S];
+            for (int f = 1; f < s.S; f++) {
+                if (hd[t * s.S + f] > best_v) { best_v = hd[t * s.S + f]; best_f = f; }
+            }
+            float time_at_best = (float)best_f * s.duration / s.S;
+            fprintf(stderr, "[LRC-Diag]   tok[%d] argmax_frame=%d (%.1fs) val=%.6f\n",
+                    t, best_f, time_at_best, best_v);
+        }
+    }
+    // ── END DEBUG ─────────────────────────────────────────────────────────
 
     // Build pure lyric token IDs and texts
     std::vector<int> pure_ids(s.lyric_token_ids.begin() + s.lyric_start_idx,
