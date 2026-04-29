@@ -226,6 +226,7 @@ struct Job {
     std::atomic<int>  status{ 0 };  // 0=running 1=done 2=failed 3=cancelled
     std::string       result_body;
     std::string       result_mime;
+    std::string       result_lrc;   // LRC timestamp text (base64), empty if not generated
     std::atomic<bool> cancel{ false };
 
     // memory ordering contract: result_body and result_mime are written
@@ -956,14 +957,33 @@ static void synth_worker(std::shared_ptr<Job>    job,
         fprintf(stderr, "[Server] Batch: %d track(s) from %d request(s)\n", total_alloc, batch_n);
     }
 
-    // Two-phase run. The store acquires and releases GPU modules around each
-    // op (STRICT) or keeps them across ops (NEVER). The synth ctx is always
-    // freed at the end of this handler.
+    // Two-phase run (+ optional Phase 3 LRC).
+    std::vector<std::string> lrc_results(total_alloc);
     const int rc = synth_batch_run(ctx, groups, src_interleaved, src_len, ref_interleaved, ref_len, audio.data(),
-                                   server_cancel_job, (void *) &job->cancel);
+                                   lrc_results.data(), server_cancel_job, (void *) &job->cancel);
     ace_synth_free(ctx);
     free(src_interleaved);
     free(ref_interleaved);
+
+    // Store LRC for the first track (used by the Node server)
+    if (!lrc_results.empty() && !lrc_results[0].empty()) {
+        // Base64 encode the LRC text for safe transport in HTTP header
+        const std::string & lrc = lrc_results[0];
+        static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string encoded_lrc;
+        encoded_lrc.reserve((lrc.size() + 2) / 3 * 4);
+        for (size_t i = 0; i < lrc.size(); i += 3) {
+            uint32_t v = ((uint8_t)lrc[i]) << 16;
+            if (i + 1 < lrc.size()) v |= ((uint8_t)lrc[i + 1]) << 8;
+            if (i + 2 < lrc.size()) v |= ((uint8_t)lrc[i + 2]);
+            encoded_lrc += b64[(v >> 18) & 0x3F];
+            encoded_lrc += b64[(v >> 12) & 0x3F];
+            encoded_lrc += (i + 1 < lrc.size()) ? b64[(v >> 6) & 0x3F] : '=';
+            encoded_lrc += (i + 2 < lrc.size()) ? b64[v & 0x3F] : '=';
+        }
+        job->result_lrc = encoded_lrc;
+        fprintf(stderr, "[Server] LRC: %zu bytes raw, %zu base64\n", lrc.size(), encoded_lrc.size());
+    }
 
     if (rc != 0) {
         for (auto & a : audio) {
@@ -1680,6 +1700,9 @@ int main(int argc, char ** argv) {
                 return;
             }
             res.set_content(job->result_body, job->result_mime);
+            if (!job->result_lrc.empty()) {
+                res.set_header("X-LRC-Text", job->result_lrc);
+            }
             return;
         }
         // default: return status JSON

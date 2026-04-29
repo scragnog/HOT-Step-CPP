@@ -61,6 +61,7 @@ void request_init(AceRequest * r) {
     r->peak_clip            = 10;
     r->mp3_bitrate          = 128;
     r->pp_vae_reencode      = false;
+    r->get_lrc              = false;
 }
 
 // helper: get yyjson string as std::string
@@ -219,6 +220,14 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
         } else if (yyjson_is_str(v)) {
             const char * s       = yyjson_get_str(v);
             r->pp_vae_reencode   = (strcmp(s, "true") == 0 || strcmp(s, "1") == 0);
+        }
+    }
+    if ((v = yyjson_obj_get(obj, "get_lrc"))) {
+        if (yyjson_is_bool(v)) {
+            r->get_lrc = yyjson_get_bool(v);
+        } else if (yyjson_is_str(v)) {
+            const char * s = yyjson_get_str(v);
+            r->get_lrc     = (strcmp(s, "true") == 0 || strcmp(s, "1") == 0);
         }
     }
 
@@ -472,6 +481,9 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     }
     if (all || r->pp_vae_reencode != def.pp_vae_reencode) {
         yyjson_mut_obj_add_bool(doc, root, "pp_vae_reencode", r->pp_vae_reencode);
+    }
+    if (all || r->get_lrc != def.get_lrc) {
+        yyjson_mut_obj_add_bool(doc, root, "get_lrc", r->get_lrc);
     }
 
     return doc;

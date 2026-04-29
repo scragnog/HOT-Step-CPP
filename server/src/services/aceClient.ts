@@ -102,6 +102,8 @@ export interface AceRequest {
   denoise_mix?: number;        // 0.0 = all dry, 1.0 = all denoised
   // PP-VAE re-encode (spectral cleanup via post-processing VAE)
   pp_vae_reencode?: boolean;
+  // LRC timestamp generation (synchronized lyrics)
+  get_lrc?: boolean;
 }
 
 /** Job status from ace-server */

@@ -14,6 +14,11 @@
 #include "pipeline-synth-ops.h"
 #include "task-types.h"
 
+// LRC alignment (Phase 3)
+#include "alignment-config.h"
+#include "dit-alignment-graph.h"
+#include "lrc-alignment.h"
+
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -722,6 +727,123 @@ int ace_synth_job_run_vae(AceSynth *    ctx,
     }
     int rc = ops_vae_decode(ctx, job->batch_n, out, job->state, cancel, cancel_data);
     return rc;
+}
+
+// Phase 3: LRC timestamp generation
+int ace_synth_job_run_lrc(AceSynth *    ctx,
+                          AceSynthJob * job,
+                          std::string * lrc_out,
+                          int           batch_n) {
+    if (!ctx || !job || !lrc_out) {
+        return -1;
+    }
+
+    SynthState & s = job->state;
+
+    // Initialize all outputs to empty
+    for (int b = 0; b < batch_n; b++) {
+        lrc_out[b].clear();
+    }
+
+    // Skip if LRC not requested or no lyric tokens captured
+    if (!s.get_lrc) {
+        fprintf(stderr, "[LRC] Skipped: get_lrc=false\n");
+        return 0;
+    }
+    int pure_n = s.lyric_end_idx - s.lyric_start_idx;
+    if (pure_n <= 0 || s.lyric_token_ids.empty()) {
+        fprintf(stderr, "[LRC] Skipped: no lyric tokens (pure_n=%d)\n", pure_n);
+        return 0;
+    }
+
+    Timer lrc_timer;
+
+    // Resolve alignment config from model metadata
+    AlignmentConfig align_cfg = alignment_config_resolve(
+        "",  // TODO: read from DiTMeta when GGUF field is available
+        ctx->meta->cfg.n_layers);
+    if (!align_cfg.valid) {
+        fprintf(stderr, "[LRC] WARNING: no valid alignment config, skipping\n");
+        return 0;
+    }
+
+    // Acquire DiT
+    DiTGGML * dit = store_require_dit(ctx->store, ctx->dit_key);
+    if (!dit) {
+        fprintf(stderr, "[LRC] WARNING: store_require_dit failed, skipping\n");
+        return 0;
+    }
+    ModelHandle dit_guard(ctx->store, dit);
+
+    // Force f32 attention for alignment (no flash_attn)
+    bool saved_fa = dit->use_flash_attn;
+    dit->use_flash_attn = false;
+
+    // Extract attention scores (batch 0 only — LRC is per-song, not per-variation)
+    int total_scores = align_cfg.total_heads * s.enc_S * s.S;
+    std::vector<float> scores(total_scores);
+
+    int rc = dit_alignment_extract(
+        dit, align_cfg,
+        s.output.data(),           // pred_latent [T, Oc]
+        s.context.data(),          // context [T, ctx_ch]
+        s.enc_hidden.data(),       // enc_hidden [enc_S, H_cond]
+        s.T, s.S, s.enc_S,
+        s.num_steps,
+        scores.data());
+
+    dit->use_flash_attn = saved_fa;
+
+    if (rc != 0) {
+        fprintf(stderr, "[LRC] WARNING: alignment extraction failed\n");
+        return 0;
+    }
+
+    // Transpose scores from [heads, enc_S, S] to [heads, S, enc_S]
+    // Python convention: calc_matrix is [Tokens, Frames] = [enc_S_range, S]
+    // The attention scores are [enc_S, S] per head (KV × Q)
+    // For DTW we need [n_tokens, n_frames] = [pure_n, S]
+    // Slice to pure lyric range and transpose
+    std::vector<float> sliced_scores(align_cfg.total_heads * pure_n * s.S);
+    for (int h = 0; h < align_cfg.total_heads; h++) {
+        const float * src = scores.data() + h * s.enc_S * s.S;
+        float *       dst = sliced_scores.data() + h * pure_n * s.S;
+        for (int t = 0; t < pure_n; t++) {
+            int enc_idx = s.lyric_start_idx + t;
+            for (int f = 0; f < s.S; f++) {
+                // src layout: [enc_S, S] (row=enc_idx, col=frame)
+                dst[t * s.S + f] = src[enc_idx * s.S + f];
+            }
+        }
+    }
+
+    // Build pure lyric token IDs and texts
+    std::vector<int> pure_ids(s.lyric_token_ids.begin() + s.lyric_start_idx,
+                               s.lyric_token_ids.begin() + s.lyric_end_idx);
+
+    // Run LRC alignment
+    LrcResult result = lrc_align(
+        sliced_scores.data(),
+        align_cfg.total_heads, pure_n, s.S,
+        pure_ids, s.lyric_token_texts,
+        s.duration,
+        2.0f,  // violence_level
+        1);    // medfilt_width
+
+    if (result.success && !result.lrc_text.empty()) {
+        // Copy to all batch outputs (same lyrics for all variations)
+        for (int b = 0; b < batch_n; b++) {
+            lrc_out[b] = result.lrc_text;
+        }
+        fprintf(stderr, "[LRC] Generated %zu bytes in %.1f ms\n",
+                result.lrc_text.size(), lrc_timer.ms());
+    } else {
+        fprintf(stderr, "[LRC] Alignment %s: %s (%.1f ms)\n",
+                result.success ? "empty" : "failed",
+                result.error.c_str(), lrc_timer.ms());
+    }
+
+    return 0;
 }
 
 void ace_synth_job_free(AceSynthJob * job) {

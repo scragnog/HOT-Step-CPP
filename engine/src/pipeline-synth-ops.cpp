@@ -434,6 +434,77 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
             int  S_text    = (int) text_ids.size();
             int  S_lyric   = (int) lyric_ids.size();
 
+            // Capture lyric token IDs for LRC alignment (batch 0 only)
+            if (b == 0 && reqs[0].get_lrc) {
+                s.get_lrc         = true;
+                s.lyric_token_ids = lyric_ids;
+                s.vocal_language  = reqs[0].vocal_language.empty() ? "en" : reqs[0].vocal_language;
+
+                // Build header to find pure lyric boundary
+                const char * lang_b = s.vocal_language.c_str();
+                std::string  hdr    = std::string("# Languages\n") + lang_b + "\n\n# Lyric\n";
+                auto         hdr_ids = bpe_encode(bpe, hdr.c_str(), false);
+                s.lyric_start_idx = (int) hdr_ids.size();
+
+                // Find <|endoftext|> (151643) for end boundary
+                s.lyric_end_idx = (int) lyric_ids.size();
+                for (int ti = 0; ti < (int) lyric_ids.size(); ti++) {
+                    if (lyric_ids[ti] == 151643) { s.lyric_end_idx = ti; break; }
+                }
+
+                // Incremental per-token text decode (matches Python _decode_tokens_incrementally)
+                int pure_n = s.lyric_end_idx - s.lyric_start_idx;
+                s.lyric_token_texts.resize(pure_n);
+                if (pure_n > 0) {
+                    // Use byte-level BPE reverse: each token's id_to_str gives its BPE-encoded
+                    // string. The GPT-2 byte encoder maps bytes→unicode codepoints; we must reverse
+                    // that to get raw UTF-8 bytes. For the alignment, the key is just whether a
+                    // token contains a newline — so we do a simpler decode via id_to_str.
+                    std::string prev_full;
+                    for (int ti = s.lyric_start_idx; ti < s.lyric_end_idx; ti++) {
+                        // Decode all tokens from start to current position
+                        std::vector<int> prefix(lyric_ids.begin() + s.lyric_start_idx,
+                                                lyric_ids.begin() + ti + 1);
+                        // Use byte-level reverse to get text
+                        std::string full;
+                        for (int pid : prefix) {
+                            if (pid >= 0 && pid < bpe->n_vocab) {
+                                const std::string & bpe_str = bpe->id_to_str[pid];
+                                // Reverse GPT-2 byte encoding: each BPE char → original byte
+                                for (size_t ci = 0; ci < bpe_str.size(); ) {
+                                    int adv;
+                                    int cp = utf8_codepoint(bpe_str.c_str() + ci, &adv);
+                                    // Find which byte maps to this codepoint
+                                    bool found = false;
+                                    for (int by = 0; by < 256; by++) {
+                                        int a2;
+                                        int cp2 = utf8_codepoint(bpe->byte2str[by].c_str(), &a2);
+                                        if (cp2 == cp && (int) bpe->byte2str[by].size() == adv) {
+                                            full += (char)(unsigned char) by;
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!found) full += '?';
+                                    ci += adv;
+                                }
+                            }
+                        }
+                        // Token contribution = new bytes since last prefix
+                        int idx = ti - s.lyric_start_idx;
+                        if (full.size() > prev_full.size()) {
+                            s.lyric_token_texts[idx] = full.substr(prev_full.size());
+                        } else {
+                            s.lyric_token_texts[idx] = "";
+                        }
+                        prev_full = full;
+                    }
+                }
+
+                fprintf(stderr, "[Encode-Text] LRC: captured %d lyric tokens [%d..%d) of %d total\n",
+                        pure_n, s.lyric_start_idx, s.lyric_end_idx, (int) lyric_ids.size());
+            }
+
             main_fwd[b].S_text  = S_text;
             main_fwd[b].S_lyric = S_lyric;
             main_fwd[b].text_hidden.resize((size_t) H_text * S_text);

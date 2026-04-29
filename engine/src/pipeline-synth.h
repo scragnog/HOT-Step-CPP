@@ -95,6 +95,18 @@ int ace_synth_job_run_vae(AceSynth *    ctx,
                           bool (*cancel)(void *) = nullptr,
                           void * cancel_data     = nullptr);
 
+// Phase 3: LRC timestamp generation. Acquires the DiT for a single alignment
+// forward pass through the first max(target_layers) layers with manual
+// cross-attention to extract attention scores. Runs DTW + bidirectional
+// consensus on CPU to produce LRC-format synchronized lyrics.
+// lrc_out[batch_n] filled with LRC text (empty string on skip/error).
+// Must be called BEFORE ace_synth_job_free (needs SynthState data).
+// Returns 0 on success.
+int ace_synth_job_run_lrc(AceSynth *    ctx,
+                          AceSynthJob * job,
+                          std::string * lrc_out,
+                          int           batch_n);
+
 void ace_synth_job_free(AceSynthJob * job);
 
 void ace_audio_free(AceAudio * audio);

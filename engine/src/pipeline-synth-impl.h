@@ -137,6 +137,14 @@ struct SynthState {
     std::vector<float> output;
     std::vector<int>   per_S;
 
+    // LRC alignment data (captured during text encoding, consumed by Phase 3)
+    std::vector<int>         lyric_token_ids;    // raw tokenized lyric IDs (full lyric prompt)
+    std::vector<std::string> lyric_token_texts;  // per-token decoded text (incremental)
+    int                      lyric_start_idx;    // pure lyric start (after header tokens)
+    int                      lyric_end_idx;      // pure lyric end (before <|endoftext|>)
+    std::string              vocal_language;     // "en", "zh", etc. (from request)
+    bool                     get_lrc;            // whether LRC was requested
+
     // debug / timing
     DebugDumper dbg;
     Timer       timer;

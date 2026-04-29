@@ -531,6 +531,18 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     }
 
     let synthJobId: string;
+
+    // LRC: auto-enable synchronized lyric timestamps for non-instrumental tracks
+    const hasLyrics = lmResults.some(r => r.lyrics && r.lyrics !== '[Instrumental]');
+    if (hasLyrics) {
+      for (const r of lmResults) {
+        if (r.lyrics && r.lyrics !== '[Instrumental]') {
+          (r as any).get_lrc = true;
+        }
+      }
+      logGeneration(job.id, 'INFO', '[Synth Phase] LRC generation enabled (non-instrumental lyrics detected)');
+    }
+
     if (refAudioBuf) {
       logGeneration(job.id, 'INFO', `[Synth Phase] Using MULTIPART submission with timbre ref (${refAudioBuf.length} bytes)`);
       synthJobId = await aceClient.submitSynthMultipart(lmResults, undefined, refAudioBuf, synthFormat, coResident);
@@ -575,6 +587,22 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       const filepath = path.join(config.data.audioDir, filename);
       fs.writeFileSync(filepath, audioBuffer);
       audioUrls.push(`/audio/${filename}`);
+    }
+
+    // Save companion LRC file if engine returned alignment data
+    const lrcHeader = audioRes.headers.get('x-lrc-text');
+    if (lrcHeader && audioUrls.length > 0) {
+      try {
+        const lrcDecoded = Buffer.from(lrcHeader, 'base64').toString('utf-8');
+        // Derive .lrc filename from the first audio file
+        const audioFilename = audioUrls[0].replace('/audio/', '');
+        const lrcFilename = audioFilename.replace(/\.[^.]+$/, '.lrc');
+        const lrcPath = path.join(config.data.audioDir, lrcFilename);
+        fs.writeFileSync(lrcPath, lrcDecoded);
+        logGeneration(job.id, 'INFO', `[LRC] Saved ${lrcFilename} (${lrcDecoded.length} bytes)`);
+      } catch (err) {
+        logGeneration(job.id, 'WARNING', `[LRC] Failed to save LRC: ${err}`);
+      }
     }
 
     // Get metadata from LM results

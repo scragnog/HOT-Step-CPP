@@ -31,6 +31,7 @@ static int synth_batch_run(AceSynth *                             ctx,
                            const float *                          ref_audio,
                            int                                    ref_len,
                            AceAudio *                             audio_out,
+                           std::string *                          lrc_out = nullptr,
                            bool (*cancel)(void *) = nullptr,
                            void * cancel_data     = nullptr) {
     const int                  n_groups = (int) groups.size();
@@ -61,17 +62,28 @@ static int synth_batch_run(AceSynth *                             ctx,
 
     // Phase 2: VAE decode for each job. The decoder is acquired and released
     // by ops_vae_decode_and_splice inside ace_synth_job_run_vae.
+    // Phase 3 (LRC) runs after VAE but before job free — SynthState carries
+    // the encoder hidden states and lyric tokens needed by the alignment graph.
     for (int g = 0; g < n_groups; g++) {
+        const int gn = (int) groups[g].size();
         const int rc =
             ace_synth_job_run_vae(ctx, jobs[g], audio_out + audio_off[g], cancel, cancel_data);
-        ace_synth_job_free(jobs[g]);
-        jobs[g] = nullptr;
         if (rc != 0) {
+            ace_synth_job_free(jobs[g]);
+            jobs[g] = nullptr;
             for (int j = g + 1; j < n_groups; j++) {
                 ace_synth_job_free(jobs[j]);
             }
             return -1;
         }
+
+        // Phase 3: LRC alignment (optional)
+        if (lrc_out && groups[g][0].get_lrc) {
+            ace_synth_job_run_lrc(ctx, jobs[g], lrc_out + audio_off[g], gn);
+        }
+
+        ace_synth_job_free(jobs[g]);
+        jobs[g] = nullptr;
     }
 
     return 0;
