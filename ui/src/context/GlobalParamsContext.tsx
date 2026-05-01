@@ -322,8 +322,9 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // LM Codes Strength — fraction of DiT steps guided by LM codes
       audioCoverStrength: (!skipLm && lmCodesStrength < 1.0) ? lmCodesStrength : undefined,
 
-      // Post-processing — Spectral Lifter (native C++ in engine)
-      // All PP stages gated by master toggle
+      // Post-processing — master toggle sent to server to gate the entire chain
+      // All PP stages also gated client-side per field below
+      postProcessingEnabled,
       spectralLifterEnabled: postProcessingEnabled ? spectralLifterEnabled : false,
       slDenoiseStrength: (postProcessingEnabled && spectralLifterEnabled) ? slDenoiseStrength : undefined,
       slNoiseFloor: (postProcessingEnabled && spectralLifterEnabled) ? slNoiseFloor : undefined,

@@ -109,6 +109,9 @@ export interface GenerationParams {
   repaintingStart?: number;
   repaintingEnd?: number;
 
+  // Post-processing master toggle
+  postProcessingEnabled?: boolean;
+
   // Post-processing — Spectral Lifter (native C++ in engine)
   spectralLifterEnabled?: boolean;
   slDenoiseStrength?: number;    // 0.0–1.0, gate aggressiveness

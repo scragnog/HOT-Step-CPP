@@ -663,10 +663,12 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     // ── Post-processing chain ─────────────────────────────────
     // Raw WAV (audio_url) is NEVER modified. Post-processing runs on a copy.
     // "mastered" = any/all of: PP-VAE, Spectral Lifter, VST Chain, Matchering Mastering.
-    const ppVaeOn = !!job.params.ppVaeReencode;
-    const spectralLifterOn = !!job.params.spectralLifterEnabled;
+    // The master toggle (postProcessingEnabled) gates the entire chain server-side.
+    const ppMasterOn = job.params.postProcessingEnabled !== false; // default true for backwards compat
+    const ppVaeOn = ppMasterOn && !!job.params.ppVaeReencode;
+    const spectralLifterOn = ppMasterOn && !!job.params.spectralLifterEnabled;
     // VST chain self-gates via applyVstChain() — returns false if no plugins active
-    const masteringOn = !!masteringRef && !!job.params.masteringEnabled;
+    const masteringOn = ppMasterOn && !!masteringRef && !!job.params.masteringEnabled;
 
     let masteredAudioUrl = '';
 
@@ -726,18 +728,20 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           }
         }
 
-        // Stage 2: VST Chain
-        job.stage = 'Applying VST effects...';
-        job.progress = 93;
-        try {
-          const applied = await applyVstChain(processedPath);
-          if (applied) {
-            anyStageRan = true;
-            logGeneration(job.id, 'INFO', `[VST] Chain applied to ${processedFilename}`);
+        // Stage 2: VST Chain (also gated by master toggle)
+        if (ppMasterOn) {
+          job.stage = 'Applying VST effects...';
+          job.progress = 93;
+          try {
+            const applied = await applyVstChain(processedPath);
+            if (applied) {
+              anyStageRan = true;
+              logGeneration(job.id, 'INFO', `[VST] Chain applied to ${processedFilename}`);
+            }
+          } catch (vstErr: any) {
+            logGeneration(job.id, 'WARNING', `[VST] Chain failed (non-fatal): ${vstErr.message}`);
+            console.warn(`[VST] Non-fatal chain error:`, vstErr.message);
           }
-        } catch (vstErr: any) {
-          logGeneration(job.id, 'WARNING', `[VST] Chain failed (non-fatal): ${vstErr.message}`);
-          console.warn(`[VST] Non-fatal chain error:`, vstErr.message);
         }
 
         // Stage 3: Matchering Mastering
