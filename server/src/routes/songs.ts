@@ -295,8 +295,8 @@ router.post('/:id/crop', (req, res) => {
   // Auto-swap if reversed
   if (inPoint > outPoint) [inPoint, outPoint] = [outPoint, inPoint];
 
-  const song = getDb().prepare('SELECT * FROM songs WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId) as any;
+  const song = getDb().prepare('SELECT * FROM songs WHERE id = ?')
+    .get(req.params.id) as any;
   if (!song) { res.status(404).json({ error: 'Song not found' }); return; }
 
   try {
