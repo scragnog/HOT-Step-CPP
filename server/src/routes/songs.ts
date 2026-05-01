@@ -9,6 +9,7 @@ import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
 import { deleteAudioGenerationsByJobIds, getLireekDb } from '../db/lireekDb.js';
+import { cropWavFile, cropLrcFile } from '../services/audioCrop.js';
 
 const router = Router();
 
@@ -278,6 +279,62 @@ router.post('/nuke-generations', (req, res) => {
     filesDeleted,
     lireekAudioGensDeleted: lireekDeleted,
   });
+});
+
+// POST /api/songs/:id/crop — crop audio to IN/OUT range (destructive)
+router.post('/:id/crop', (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  let { inPoint, outPoint } = req.body;
+  if (inPoint == null || outPoint == null) {
+    res.status(400).json({ error: 'inPoint and outPoint are required' });
+    return;
+  }
+
+  // Auto-swap if reversed
+  if (inPoint > outPoint) [inPoint, outPoint] = [outPoint, inPoint];
+
+  const song = getDb().prepare('SELECT * FROM songs WHERE id = ? AND user_id = ?')
+    .get(req.params.id, userId) as any;
+  if (!song) { res.status(404).json({ error: 'Song not found' }); return; }
+
+  try {
+    // 1. Crop original audio
+    const audioFilename = path.basename(song.audio_url);
+    const audioPath = path.join(config.data.audioDir, audioFilename);
+    if (!fs.existsSync(audioPath)) {
+      res.status(404).json({ error: 'Audio file not found' });
+      return;
+    }
+    const result = cropWavFile(audioPath, inPoint, outPoint);
+
+    // 2. Crop mastered audio (if exists)
+    if (song.mastered_audio_url) {
+      const masteredFilename = path.basename(song.mastered_audio_url);
+      const masteredPath = path.join(config.data.audioDir, masteredFilename);
+      if (fs.existsSync(masteredPath)) {
+        cropWavFile(masteredPath, inPoint, outPoint);
+      }
+    }
+
+    // 3. Crop companion LRC file (if exists)
+    const lrcFilename = audioFilename.replace(/\.[^.]+$/, '.lrc');
+    const lrcPath = path.join(config.data.audioDir, lrcFilename);
+    if (fs.existsSync(lrcPath)) {
+      cropLrcFile(lrcPath, inPoint, outPoint);
+    }
+
+    // 4. Update duration in DB
+    getDb().prepare('UPDATE songs SET duration = ? WHERE id = ?')
+      .run(result.newDurationSec, req.params.id);
+
+    console.log(`[Songs] Cropped ${req.params.id}: ${inPoint.toFixed(1)}s–${outPoint.toFixed(1)}s → ${result.newDurationSec.toFixed(1)}s`);
+    res.json({ cropped: true, newDuration: result.newDurationSec });
+  } catch (err: any) {
+    console.error(`[Songs] Crop failed:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;
