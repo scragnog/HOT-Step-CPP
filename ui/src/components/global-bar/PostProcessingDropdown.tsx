@@ -61,7 +61,7 @@ const Accordion: React.FC<AccordionProps> = ({
         {badge && <span className="flex-shrink-0">{badge}</span>}
         {toggle && (
           <span onClick={e => e.stopPropagation()}>
-            <ToggleSwitch checked={toggle.checked} onChange={toggle.onChange} accentColor={accentColor} />
+            <ToggleSwitch checked={toggle.checked} onChange={toggle.onChange} accentColor={accentColor as 'pink' | 'emerald' | 'sky' | 'purple' | 'amber'} />
           </span>
         )}
         <ChevronDown

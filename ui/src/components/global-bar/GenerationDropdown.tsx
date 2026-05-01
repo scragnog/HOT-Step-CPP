@@ -316,7 +316,7 @@ export const GenerationDropdown: React.FC = () => {
             </div>
           </div>
           {gp.dcwEnabled && (
-            <span type="button" onClick={(e) => {
+            <span onClick={(e) => {
               e.stopPropagation();
               gp.setDcwMode('double');
               gp.setDcwScaler(0.2);

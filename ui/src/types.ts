@@ -151,6 +151,15 @@ export interface GenerationParams {
   // PP-VAE re-encode (spectral cleanup via post-processing VAE)
   ppVaeReencode?: boolean;
   ppVaeBlend?: number;         // 0.0 = fully PP-VAE, 1.0 = fully original
+
+  // DCW (Dynamic CFG Weighting)
+  dcwEnabled?: boolean;
+  dcwMode?: string;            // 'single' | 'double'
+  dcwScaler?: number;
+  dcwHighScaler?: number;
+
+  // Cover/style caption (used by Cover Studio)
+  style?: string;
 }
 
 /** Generation job status from the server */
@@ -166,6 +175,7 @@ export interface GenerationJob {
     duration?: number;
     keyScale?: string;
     timeSignature?: string;
+    masteredAudioUrl?: string;
   };
   error?: string;
 }

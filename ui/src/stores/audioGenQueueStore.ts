@@ -15,7 +15,7 @@
 
 import { useSyncExternalStore, useEffect } from 'react';
 import { lireekApi } from '../services/lireekApi';
-import { generateApi, songApi } from '../services/api';
+import { generateApi } from '../services/api';
 import { writePersistedState } from '../hooks/usePersistedState';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
 import type { GenerationParams } from '../types';
@@ -342,7 +342,7 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   await _pollUntilDone(item, token);
 }
 
-async function _pollUntilDone(item: AudioQueueItem, token: string): Promise<void> {
+async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<void> {
   const jobId = item.jobId!;
   item.stage = 'Generating audio…';
   const startTime = item.elapsed ? Date.now() - item.elapsed * 1000 : Date.now();

@@ -22,7 +22,7 @@ interface UseAudioGenerationOptions {
   showToast: (msg: string) => void;
 }
 
-export function useAudioGeneration({ profiles, showToast }: UseAudioGenerationOptions) {
+export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudioGenerationOptions) {
 
   const sendToCreate = useCallback(async (gen: Generation): Promise<void> => {
     const profile = profiles.find(p => p.id === gen.profile_id);

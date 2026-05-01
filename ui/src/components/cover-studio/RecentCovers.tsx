@@ -1,6 +1,6 @@
 // RecentCovers.tsx — Recent covers sub-component for Cover Studio
 import React, { useState, useEffect } from 'react';
-import { Music, Play, Pause, Loader2, Trash2, Download } from 'lucide-react';
+import { Music, Play, Pause, Loader2, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { songApi } from '../../services/api';
 import type { Song } from '../../types';

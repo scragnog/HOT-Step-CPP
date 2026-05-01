@@ -15,7 +15,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { lireekApi } from '../../services/lireekApi';
-import type { Artist, LyricsSet, Profile, Generation, SongLyric, AlbumPreset } from '../../services/lireekApi';
+import type { Artist, LyricsSet, Profile, Generation, SongLyric } from '../../services/lireekApi';
 import { ArtistGrid } from './ArtistGrid';
 import { ArtistSidebar } from './ArtistSidebar';
 import { ArtistPageSidebar } from './ArtistPageSidebar';
@@ -41,7 +41,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { QueuePanel } from './QueuePanel';
 import { PromptEditor } from './PromptEditor';
-import { useStreamingStore } from '../../stores/streamingStore';
+// streamingStore used via queue panel
 import { loadSelections } from './ProviderSelector';
 
 
@@ -152,7 +152,7 @@ export const LyricStudioV2: React.FC = () => {
   // ── Bulk queue data ──
   const [allLyricsSets, setAllLyricsSets] = useState<LyricsSet[]>([]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
-  const stream = useStreamingStore();
+
   const [artistIdsWithAdapters, setArtistIdsWithAdapters] = useState<Set<number>>(new Set());
 
   // ── Playback (for backdrop effect) ──

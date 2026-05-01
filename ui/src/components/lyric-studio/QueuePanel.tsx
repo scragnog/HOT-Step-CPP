@@ -10,7 +10,7 @@
  * Adapted for C++ engine: removed adapter type detection (not needed).
  */
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   X, Loader2, CheckCircle, AlertCircle, ListOrdered, Sparkles,
   Wand2, Settings2, FolderSearch, ChevronDown, ChevronRight,
@@ -23,7 +23,7 @@ import {
   removeFromQueue,
   clearQueue,
 } from '../../stores/streamingStore';
-import type { QueueItem, QueueItemType } from '../../stores/streamingStore';
+import type { QueueItemType } from '../../stores/streamingStore';
 import { lireekApi } from '../../services/lireekApi';
 import type { Artist, LyricsSet, Profile, AlbumPreset } from '../../services/lireekApi';
 import { useAuth } from '../../context/AuthContext';
@@ -70,12 +70,12 @@ const STATUS_BADGE: Record<PresetStatus, { label: string; color: string; icon: s
 };
 
 export const QueuePanel: React.FC<QueuePanelProps> = ({
-  open, onClose, artists, lyricsSets, profiles,
-  profilingModel, generationModel, refinementModel, showToast,
+  open, onClose, artists: _artists, lyricsSets, profiles,
+  profilingModel, generationModel, refinementModel: _refinementModel, showToast,
   onFetchComplete,
 }) => {
   const stream = useStreamingStore();
-  const { token } = useAuth();
+  const { token: _token } = useAuth();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [mode, setMode] = useState<QueueMode>('profile');
   const [genCount, setGenCount] = useState(4);

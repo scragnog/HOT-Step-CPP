@@ -13,7 +13,7 @@ import { Slider } from '../shared/Slider';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
 import type { AdapterFile } from '../../types';
 
-const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
+// Select styling applied inline where needed
 
 const GROUP_INFO = [
   { key: 'self_attn' as const,  label: 'Self-Attn',    help: 'How audio frames relate to each other over time' },

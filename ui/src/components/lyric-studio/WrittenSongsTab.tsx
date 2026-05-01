@@ -267,7 +267,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                           defaultValue={gen.title || 'Untitled'}
                           onBlur={(e) => { if (e.target.value !== gen.title) handleSaveField(gen.id, 'title', e.target.value); }}
                         />
-                        <Pencil className="w-3.5 h-3.5 text-zinc-600" title="All fields are editable" />
+                        <Pencil className="w-3.5 h-3.5 text-zinc-600" />
                       </div>
 
                       {/* Metadata grid */}

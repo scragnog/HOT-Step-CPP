@@ -8,7 +8,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import { lireekApi } from '../services/lireekApi';
+import { skipThinking } from '../services/lireekApi';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -287,7 +287,7 @@ export async function startStreamBuildProfile(
 }
 
 export async function startStreamGenerate(
-  profileId: number,
+  _profileId: number,
   req: { profile_id: number; provider: string; model?: string; extra_instructions?: string },
   onComplete?: () => void,
 ): Promise<void> {
@@ -327,7 +327,7 @@ export async function startStreamRefine(
 }
 
 export function doSkipThinking(): void {
-  lireekApi.skipThinking().catch(() => {});
+  skipThinking().catch(() => {});
 }
 
 // ── React hook ───────────────────────────────────────────────────────────────

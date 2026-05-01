@@ -25,7 +25,7 @@ export const GlobalParamBar: React.FC = () => {
   // ── Preset Export ────────────────────────────────────────────────
   const handleExport = useCallback(() => {
     // Read content params from localStorage (same keys CreatePanel uses)
-    const readLS = (key: string, fallback: string) => {
+    const readLS = <T,>(key: string, fallback: T): T => {
       try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
     };
     const preset: Record<string, unknown> = {

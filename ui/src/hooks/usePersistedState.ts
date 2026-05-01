@@ -4,7 +4,7 @@
 // Also listens for external storage writes (e.g. from queue stores)
 // so the top bar stays in sync with Lyric Studio's adapter changes.
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: T | ((prev: T) => T)) => void] {
   const [state, setState] = useState<T>(() => {

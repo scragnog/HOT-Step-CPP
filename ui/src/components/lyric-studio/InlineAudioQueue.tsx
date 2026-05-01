@@ -131,7 +131,7 @@ interface QueueItemRowProps {
   item: AudioQueueItem;
   isPlayingInMain: boolean;
   onPlay: (item: AudioQueueItem) => void;
-  onDownload: (item: AudioQueueItem) => void;
+  onDownload?: (item: AudioQueueItem) => void;
 }
 
 const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPlay, onDownload }) => {
@@ -200,7 +200,7 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
           )}
           {isSucceeded && item.audioUrl && (
             <>
-              <button onClick={() => onDownload(item)}
+              <button onClick={() => onDownload?.(item)}
                 className="p-0.5 rounded hover:bg-emerald-500/20 text-zinc-500 hover:text-emerald-400 transition-colors"
                 title="Download Audio">
                 <Download className="w-3 h-3" />

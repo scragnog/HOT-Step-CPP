@@ -12,7 +12,7 @@
  * Persists preferences + track list to localStorage.
  */
 
-import { useCallback, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { WaveformPlayerHandle } from '../components/player/WaveformPlayer';
 import type { Song } from '../types';
 import type { PlaylistItem } from '../components/lyric-studio/playlistStore';
@@ -40,6 +40,7 @@ export type PlaybackSource =
   | 'lireek-recent'
   | 'lireek-recordings'
   | 'lireek-queue'
+  | 'cover-studio'
   | 'direct';
 
 export interface PlaybackState {

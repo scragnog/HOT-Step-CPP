@@ -18,7 +18,7 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
 }) => {
   const [imageErrors, setImageErrors] = React.useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Restore scroll position on mount
   useEffect(() => {

@@ -113,6 +113,7 @@ export interface AudioGeneration {
   hotstep_job_id: string;
   audio_url?: string;
   cover_url?: string;
+  mastered_audio_url?: string;
   duration?: number;
   created_at: string;
 }

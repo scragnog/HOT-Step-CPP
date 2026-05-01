@@ -22,9 +22,9 @@ export function useEventSource(url: string, enabled: boolean) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [connected, setConnected] = useState(false);
   const esRef = useRef<EventSource | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const batchRef = useRef<LogLine[]>([]);
-  const flushTimer = useRef<ReturnType<typeof setTimeout>>();
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Flush batched lines into React state
   const flush = useCallback(() => {

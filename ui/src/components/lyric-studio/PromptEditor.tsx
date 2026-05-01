@@ -40,7 +40,13 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
   const loadPrompts = async () => {
     setLoading(true);
     try {
-      const { prompts: data } = await lireekApi.listPrompts();
+      const { prompts: rawData } = await lireekApi.listPrompts();
+      const data: PromptData[] = rawData.map(p => ({
+        name: p.name,
+        source: p.custom != null ? 'custom' : 'default',
+        content: p.custom ?? '',
+        has_default: true,
+      }));
       setPrompts(data);
       if (data.length > 0 && !selected) {
         setSelected(data[0].name);

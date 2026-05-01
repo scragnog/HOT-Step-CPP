@@ -58,7 +58,7 @@ import {
   playFromList,
 } from './stores/playbackStore';
 import type { Song, GenerationParams } from './types';
-import { usePlaylist, addToPlaylist, type PlaylistItem } from './components/lyric-studio/playlistStore';
+import { usePlaylist, addToPlaylist } from './components/lyric-studio/playlistStore';
 
 /** Derive top-level view from the browser URL */
 function viewFromUrl(path = window.location.pathname): string {

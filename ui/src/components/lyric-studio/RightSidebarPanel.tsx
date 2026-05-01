@@ -61,12 +61,12 @@ const Section: React.FC<SectionProps> = ({
 };
 
 export const RightSidebarPanel: React.FC<RightSidebarPanelProps> = ({
-  navLevel, showToast,
+  navLevel: _navLevel, showToast,
   recordingsRefreshKey = 0, compact = false,
 }) => {
   const queue = useAudioGenQueue();
   const queueCount = queue.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length;
-  const [deleteCounter, setDeleteCounter] = useState(0);
+  const [deleteCounter, _setDeleteCounter] = useState(0);
   const recentRefreshKey = queue.completionCounter + recordingsRefreshKey + deleteCounter;
 
   return (

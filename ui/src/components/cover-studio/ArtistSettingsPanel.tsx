@@ -3,7 +3,7 @@ import React from 'react';
 import { Guitar, Disc3, Zap, Music, ChevronDown, Loader2 } from 'lucide-react';
 import { EditableSlider } from './EditableSlider';
 import { transposeKey, type AudioAnalysis } from './coverStudioUtils';
-import type { Artist, AlbumPreset, LyricsSet } from '../../services/lireekApi';
+import type { Artist, AlbumPreset } from '../../services/lireekApi';
 
 interface ArtistSettingsPanelProps {
   artists: Artist[];

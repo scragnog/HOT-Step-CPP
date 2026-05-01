@@ -9,7 +9,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Play, Loader2, Music, Download, Trash2, ListPlus, Check } from 'lucide-react';
 import { lireekApi } from '../../services/lireekApi';
 import type { RecentSong } from '../../services/lireekApi';
-import { songApi } from '../../services/api';
+// songApi removed — not used in this component
 import { useAuth } from '../../context/AuthContext';
 import type { Song } from '../../types';
 import { DownloadModal } from '../shared/DownloadModal';

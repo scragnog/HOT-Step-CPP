@@ -5,12 +5,13 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import {
-  Plus, Trash2, GripVertical, ExternalLink, Search,
+  Plus, Trash2, ExternalLink, Search,
   ChevronUp, ChevronDown, Power, Headphones, Square,
 } from 'lucide-react';
 import { useVstChainStore } from '../../stores/vstChainStore';
 import { usePlayback, togglePlay } from '../../stores/playbackStore';
-import type { VstPlugin } from '../../services/api';
+// VstPlugin type reserved for future use
+// import type { VstPlugin } from '../../services/api';
 
 // Format seconds as mm:ss
 function formatTime(s: number): string {
@@ -105,11 +106,7 @@ const PluginSearch: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
 // ── Chain Entry Row ─────────────────────────────────────────
 
-interface ChainRowProps {
-  entry: typeof useVstChainStore extends (s: infer S) => any ? never : any;
-  index: number;
-  total: number;
-}
+// ChainRow uses inline type annotation below
 
 const ChainRow: React.FC<{
   entry: { uid: string; name: string; vendor: string; path: string; enabled: boolean; statePath: string };
