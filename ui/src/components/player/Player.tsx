@@ -7,7 +7,7 @@ import {
   Shuffle, Repeat, Repeat1,
   Volume2, VolumeX,
   RotateCcw, Trash2, Download,
-  Music, Sparkles, Activity, ListMusic,
+  Music, Sparkles, Activity, ListMusic, Scissors,
 } from 'lucide-react';
 import type { Song } from '../../types';
 
@@ -39,6 +39,8 @@ interface PlayerProps {
   showPlaylist: boolean;
   playlistCount: number;
   onTogglePlaylist: () => void;
+  trimMode: boolean;
+  onToggleTrimMode: () => void;
 }
 
 const formatTime = (s: number) => {
@@ -75,6 +77,8 @@ export const Player: React.FC<PlayerProps> = ({
   showPlaylist,
   playlistCount,
   onTogglePlaylist,
+  trimMode,
+  onToggleTrimMode,
 }) => {
 
 
@@ -176,6 +180,19 @@ export const Player: React.FC<PlayerProps> = ({
             <Sparkles size={15} />
           </button>
         )}
+
+        {/* Trim / Crop toggle */}
+        <button
+          onClick={onToggleTrimMode}
+          className={`p-1.5 rounded-lg transition-all ${
+            trimMode
+              ? 'text-cyan-400 bg-cyan-500/10 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+              : 'text-zinc-500 hover:text-cyan-400 hover:bg-cyan-500/5'
+          }`}
+          title={trimMode ? 'Exit Trim Mode' : 'Trim / Crop Audio'}
+        >
+          <Scissors size={15} />
+        </button>
 
         {/* Playlist toggle */}
         <button
