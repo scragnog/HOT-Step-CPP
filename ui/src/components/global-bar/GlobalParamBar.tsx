@@ -90,6 +90,7 @@ export const GlobalParamBar: React.FC = () => {
         if (p.adapterScale !== undefined) gp.setAdapterScale(p.adapterScale);
         if (p.adapterGroupScales !== undefined) gp.setAdapterGroupScales(p.adapterGroupScales);
         if (p.adapterMode !== undefined) gp.setAdapterMode(p.adapterMode);
+        if (p.postProcessingEnabled !== undefined) gp.setPostProcessingEnabled(p.postProcessingEnabled);
         if (p.spectralLifterEnabled !== undefined) gp.setSpectralLifterEnabled(p.spectralLifterEnabled);
         if (p.masteringEnabled !== undefined) gp.setMasteringEnabled(p.masteringEnabled);
         if (p.masteringReference !== undefined) gp.setMasteringReference(p.masteringReference);
@@ -211,6 +212,13 @@ export const GlobalParamBar: React.FC = () => {
             isOpen={openSection === 'postprocessing'}
             onOpen={() => handleOpen('postprocessing')}
             onClose={() => handleClose('postprocessing')}
+            headerToggle={
+              <ToggleSwitch
+                checked={gp.postProcessingEnabled}
+                onChange={(on) => gp.setPostProcessingEnabled(on)}
+                accentColor="amber"
+              />
+            }
           >
             <PostProcessingDropdown />
           </BarSection>

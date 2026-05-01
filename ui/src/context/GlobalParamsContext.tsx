@@ -133,7 +133,9 @@ export interface GlobalParams {
   lmCodesStrength: number;
   setLmCodesStrength: (v: number) => void;
 
-  // ── Post-Processing (Spectral Lifter — native C++) ──
+  // ── Post-Processing (master toggle + individual stages) ──
+  postProcessingEnabled: boolean;
+  setPostProcessingEnabled: (v: boolean) => void;
   spectralLifterEnabled: boolean;
   setSpectralLifterEnabled: (v: boolean) => void;
   slDenoiseStrength: number;
@@ -245,7 +247,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [lmNegativePrompt, setLmNegativePrompt] = usePersistedState('hs-lmNegativePrompt', 'NO USER INPUT');
   const [lmCodesStrength, setLmCodesStrength] = usePersistedState('hs-lmCodesStrength', 1.0);
 
-  // Post-processing — Spectral Lifter (native C++)
+  // Post-processing — master toggle + individual stages
+  const [postProcessingEnabled, setPostProcessingEnabled] = usePersistedState('hs-postProcessingEnabled', true);
   const [spectralLifterEnabled, setSpectralLifterEnabled] = usePersistedState('hs-spectralLifterEnabled', false);
   const [slDenoiseStrength, setSlDenoiseStrength] = usePersistedState('hs-slDenoiseStrength', 0.3);
   const [slNoiseFloor, setSlNoiseFloor] = usePersistedState('hs-slNoiseFloor', 0.1);
@@ -320,15 +323,16 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       audioCoverStrength: (!skipLm && lmCodesStrength < 1.0) ? lmCodesStrength : undefined,
 
       // Post-processing — Spectral Lifter (native C++ in engine)
-      spectralLifterEnabled,
-      slDenoiseStrength: spectralLifterEnabled ? slDenoiseStrength : undefined,
-      slNoiseFloor: spectralLifterEnabled ? slNoiseFloor : undefined,
-      slHfMix: spectralLifterEnabled ? slHfMix : undefined,
-      slTransientBoost: spectralLifterEnabled ? slTransientBoost : undefined,
-      slShimmerReduction: spectralLifterEnabled ? slShimmerReduction : undefined,
-      masteringEnabled,
-      masteringReference: masteringEnabled ? masteringReference : undefined,
-      timbreReference: (masteringEnabled && timbreReference && masteringReference) ? true : undefined,
+      // All PP stages gated by master toggle
+      spectralLifterEnabled: postProcessingEnabled ? spectralLifterEnabled : false,
+      slDenoiseStrength: (postProcessingEnabled && spectralLifterEnabled) ? slDenoiseStrength : undefined,
+      slNoiseFloor: (postProcessingEnabled && spectralLifterEnabled) ? slNoiseFloor : undefined,
+      slHfMix: (postProcessingEnabled && spectralLifterEnabled) ? slHfMix : undefined,
+      slTransientBoost: (postProcessingEnabled && spectralLifterEnabled) ? slTransientBoost : undefined,
+      slShimmerReduction: (postProcessingEnabled && spectralLifterEnabled) ? slShimmerReduction : undefined,
+      masteringEnabled: postProcessingEnabled ? masteringEnabled : false,
+      masteringReference: (postProcessingEnabled && masteringEnabled) ? masteringReference : undefined,
+      timbreReference: (postProcessingEnabled && masteringEnabled && timbreReference && masteringReference) ? true : undefined,
 
       // DCW
       dcwEnabled,
@@ -352,8 +356,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       autoTrimFadeMs: autoTrimEnabled ? autoTrimFadeMs : undefined,
 
       // PP-VAE re-encode
-      ppVaeReencode: ppVaeReencode || undefined,
-      ppVaeBlend: (ppVaeReencode && ppVaeBlend > 0) ? ppVaeBlend : undefined,
+      ppVaeReencode: (postProcessingEnabled && ppVaeReencode) || undefined,
+      ppVaeBlend: (postProcessingEnabled && ppVaeReencode && ppVaeBlend > 0) ? ppVaeBlend : undefined,
     };
   }, [
     ditModel, lmModel, vaeModel,
@@ -367,9 +371,10 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     denoiseStrength, denoiseSmoothing, denoiseMix,
     autoTrimEnabled, durationBuffer, autoTrimFadeMs,
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
-    spectralLifterEnabled, slDenoiseStrength, slNoiseFloor, slHfMix, slTransientBoost, slShimmerReduction,
+     spectralLifterEnabled, slDenoiseStrength, slNoiseFloor, slHfMix, slTransientBoost, slShimmerReduction,
     masteringEnabled, masteringReference, timbreReference,
     ppVaeReencode, ppVaeBlend,
+    postProcessingEnabled,
     settings,
   ]);
 
@@ -409,7 +414,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     lmTopK, setLmTopK, lmTopP, setLmTopP,
     lmNegativePrompt, setLmNegativePrompt,
     lmCodesStrength, setLmCodesStrength,
-    // Post-processing — Spectral Lifter (native C++)
+    // Post-processing — master toggle + Spectral Lifter (native C++)
+    postProcessingEnabled, setPostProcessingEnabled,
     spectralLifterEnabled, setSpectralLifterEnabled,
     slDenoiseStrength, setSlDenoiseStrength,
     slNoiseFloor, setSlNoiseFloor,
@@ -450,6 +456,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     lmTopK, setLmTopK, lmTopP, setLmTopP,
     lmNegativePrompt, setLmNegativePrompt, lmCodesStrength, setLmCodesStrength,
     spectralLifterEnabled, setSpectralLifterEnabled,
+    postProcessingEnabled, setPostProcessingEnabled,
     slDenoiseStrength, setSlDenoiseStrength,
     slNoiseFloor, setSlNoiseFloor,
     slHfMix, setSlHfMix,
