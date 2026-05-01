@@ -67,6 +67,12 @@ export interface PlaybackState {
   repeat: 'none' | 'all' | 'one';
   playbackRate: number;
   spectrumEnabled: boolean;
+
+  // ── Trim Mode ──
+  trimMode: boolean;
+  trimInPoint: number | null;
+  trimOutPoint: number | null;
+  trimClickCount: number;  // 0 = waiting for IN, 1 = waiting for OUT, 2 = both set
 }
 
 // ── Conversion Helpers ───────────────────────────────────────────────────────
@@ -280,6 +286,11 @@ let _state: PlaybackState = {
   playMastered: false,
   hasMastered: false,
   currentAudioUrl: null,
+
+  trimMode: false,
+  trimInPoint: null,
+  trimOutPoint: null,
+  trimClickCount: 0,
 
   ...prefs,
 };
@@ -695,6 +706,70 @@ export function cycleRepeat(): void {
 export function setSpectrumEnabled(v: boolean): void {
   setState({ spectrumEnabled: v });
   persistPrefs();
+}
+
+// ── Trim Mode ────────────────────────────────────────────────────────────────
+
+/** Toggle trim mode on/off */
+export function setTrimMode(on: boolean): void {
+  setState({
+    trimMode: on,
+    trimInPoint: null,
+    trimOutPoint: null,
+    trimClickCount: 0,
+  });
+}
+
+/** Handle a click on the waveform during trim mode */
+export function handleTrimClick(timeSec: number): void {
+  const { trimClickCount, trimInPoint, trimOutPoint, duration } = _state;
+  if (trimClickCount === 0) {
+    // First click = set IN point
+    setState({ trimInPoint: timeSec, trimClickCount: 1 });
+  } else if (trimClickCount === 1) {
+    // Second click = set OUT point (swap if needed)
+    let inP = _state.trimInPoint ?? 0;
+    let outP = timeSec;
+    if (inP > outP) [inP, outP] = [outP, inP];
+    setState({ trimInPoint: inP, trimOutPoint: outP, trimClickCount: 2 });
+  } else {
+    // Subsequent clicks: move nearest marker
+    const inP = trimInPoint ?? 0;
+    const outP = trimOutPoint ?? duration;
+    const distToIn = Math.abs(timeSec - inP);
+    const distToOut = Math.abs(timeSec - outP);
+    if (distToIn <= distToOut) {
+      let newIn = timeSec;
+      let newOut = outP;
+      if (newIn > newOut) [newIn, newOut] = [newOut, newIn];
+      setState({ trimInPoint: newIn, trimOutPoint: newOut });
+    } else {
+      let newIn = inP;
+      let newOut = timeSec;
+      if (newIn > newOut) [newIn, newOut] = [newOut, newIn];
+      setState({ trimInPoint: newIn, trimOutPoint: newOut });
+    }
+  }
+}
+
+/** Reload the current track's audio (after crop) */
+export function reloadCurrentTrack(newDuration?: number): void {
+  const track = _state.currentTrack;
+  if (!track) return;
+  // Force cache-bust by appending timestamp
+  const bustCache = (url: string) => {
+    const base = url.split('?')[0];
+    return `${base}?_t=${Date.now()}`;
+  };
+  _wsOriginalRef.current?.loadUrl(bustCache(track.audioUrl));
+  if (_wsAltRef.current && track.masteredAudioUrl) {
+    _wsAltRef.current.loadUrl(bustCache(track.masteredAudioUrl));
+  }
+  if (newDuration !== undefined) {
+    setState({ duration: newDuration });
+  }
+  // Exit trim mode
+  setTrimMode(false);
 }
 
 // ── React Hook ───────────────────────────────────────────────────────────────
