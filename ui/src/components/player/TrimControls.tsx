@@ -16,6 +16,7 @@ interface TrimControlsProps {
   trimClickCount: number;
   duration: number;
   songId: string | null;
+  audioUrl: string | null;
   wavesurferRef: React.RefObject<WaveformPlayerHandle | null>;
   wavesurferAltRef: React.RefObject<WaveformPlayerHandle | null>;
   onReload: (newDuration?: number) => void;
@@ -36,6 +37,7 @@ export const TrimControls: React.FC<TrimControlsProps> = ({
   trimClickCount,
   duration,
   songId,
+  audioUrl,
   wavesurferRef,
   wavesurferAltRef,
   onReload,
@@ -69,10 +71,11 @@ export const TrimControls: React.FC<TrimControlsProps> = ({
 
   const handleCrop = async () => {
     if (!canCrop || !token) return;
+    console.log('[TrimControls] Cropping:', { songId, trimInPoint, trimOutPoint, token: token?.slice(0, 8) + '...' });
     setIsCropping(true);
     setError(null);
     try {
-      const result = await songApi.crop(songId!, trimInPoint!, trimOutPoint!, token);
+      const result = await songApi.crop(songId!, trimInPoint!, trimOutPoint!, token, audioUrl ?? undefined);
       if (result.cropped) {
         onReload(result.newDuration);
       }

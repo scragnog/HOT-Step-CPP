@@ -286,7 +286,7 @@ router.post('/:id/crop', (req, res) => {
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
 
-  let { inPoint, outPoint } = req.body;
+  let { inPoint, outPoint, audioUrl } = req.body;
   if (inPoint == null || outPoint == null) {
     res.status(400).json({ error: 'inPoint and outPoint are required' });
     return;
@@ -295,8 +295,15 @@ router.post('/:id/crop', (req, res) => {
   // Auto-swap if reversed
   if (inPoint > outPoint) [inPoint, outPoint] = [outPoint, inPoint];
 
-  const song = getDb().prepare('SELECT * FROM songs WHERE id = ?')
+  // Look up song by ID first, then fall back to audio_url match
+  // (Lireek/Lyric Studio tracks use hotstep_job_id as their ID, which
+  // doesn't match the songs.id column — but the audio_url is the same)
+  let song = getDb().prepare('SELECT * FROM songs WHERE id = ?')
     .get(req.params.id) as any;
+  if (!song && audioUrl) {
+    song = getDb().prepare('SELECT * FROM songs WHERE audio_url = ?')
+      .get(audioUrl) as any;
+  }
   if (!song) { res.status(404).json({ error: 'Song not found' }); return; }
 
   try {

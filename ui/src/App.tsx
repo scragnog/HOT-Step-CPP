@@ -622,6 +622,7 @@ const AppContent: React.FC = () => {
               trimClickCount={pb.trimClickCount}
               duration={pb.duration}
               songId={pb.currentTrack?.id ?? null}
+              audioUrl={pb.currentTrack?.audioUrl ?? null}
               wavesurferRef={wavesurferRef}
               wavesurferAltRef={wavesurferAltRef}
               onReload={pbReloadCurrentTrack}
