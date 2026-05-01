@@ -195,12 +195,18 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
         const STEntry *     ea        = kv.second;
 
         auto it = b_map.find(gguf_name);
-        if (it == b_map.end()) { skipped++; continue; }
+        if (it == b_map.end()) {
+            fprintf(stderr, "[Adapter-RT] WARNING: no lora_B for %s, skipping\n", gguf_name.c_str());
+            skipped++; continue;
+        }
         const STEntry * eb = it->second;
 
         // Check GGUF tensor exists
         int64_t tidx = gguf_find_tensor(gf.gguf, gguf_name.c_str());
-        if (tidx < 0) { skipped++; continue; }
+        if (tidx < 0) {
+            fprintf(stderr, "[Adapter-RT] WARNING: tensor %s not found in GGUF model, skipping\n", gguf_name.c_str());
+            skipped++; continue;
+        }
         struct ggml_tensor * tmeta = ggml_get_tensor(gf.meta, gguf_name.c_str());
         int64_t ne0 = tmeta->ne[0], ne1 = tmeta->ne[1];
 
@@ -212,7 +218,12 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
         }
 
         int64_t rank = ea->shape[0], in_feat = ea->shape[1], out_feat = eb->shape[0];
-        if (eb->shape[1] != rank || in_feat != ne0 || out_feat != ne1) { skipped++; continue; }
+        if (eb->shape[1] != rank || in_feat != ne0 || out_feat != ne1) {
+            fprintf(stderr, "[Adapter-RT] WARNING: shape mismatch for %s: adapter [%lld,%lld] (rank=%lld) vs GGUF [%lld,%lld]\n",
+                    gguf_name.c_str(), (long long) out_feat, (long long) in_feat, (long long) rank,
+                    (long long) ne1, (long long) ne0);
+            skipped++; continue;
+        }
 
         float alpha;
         auto alpha_it = alpha_map.find(gguf_name);
@@ -230,6 +241,8 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
         std::vector<float> a_f32((size_t) a_nel), b_f32((size_t) b_nel);
         if (!adapter_to_f32(st_data(st, *ea), a_f32.data(), a_nel, ea->dtype) ||
             !adapter_to_f32(st_data(st, *eb), b_f32.data(), b_nel, eb->dtype)) {
+            fprintf(stderr, "[Adapter-RT] WARNING: unsupported dtype (A=%s, B=%s) for %s, skipping\n",
+                    ea->dtype.c_str(), eb->dtype.c_str(), gguf_name.c_str());
             skipped++; continue;
         }
 
@@ -251,6 +264,7 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
 
         std::vector<float> delta_f32;
         if (!adapter_compute_delta(build, ne0, ne1, backend, delta_f32)) {
+            fprintf(stderr, "[Adapter-RT] WARNING: GPU delta compute failed for %s, skipping\n", gguf_name.c_str());
             skipped++; continue;
         }
 
@@ -299,14 +313,24 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
 
         bool has_factor = (m.w2_a && m.w2_b);
         bool has_mono   = (m.w2 != nullptr);
-        if (!m.w1 || !m.alpha || has_factor == has_mono) { skipped++; continue; }
+        if (!m.w1 || !m.alpha || has_factor == has_mono) {
+            fprintf(stderr, "[Adapter-RT] WARNING: incomplete/ambiguous LoKr module %s (w1=%d alpha=%d factor=%d mono=%d), skipping\n",
+                    lyc_prefix.c_str(), !!m.w1, !!m.alpha, has_factor, has_mono);
+            skipped++; continue;
+        }
 
         auto nm_it = name_map.find(lyc_prefix);
-        if (nm_it == name_map.end()) { skipped++; continue; }
+        if (nm_it == name_map.end()) {
+            fprintf(stderr, "[Adapter-RT] WARNING: no GGUF tensor mapping for %s, skipping\n", lyc_prefix.c_str());
+            skipped++; continue;
+        }
         const std::string & gguf_name = nm_it->second;
 
         int64_t tidx = gguf_find_tensor(gf.gguf, gguf_name.c_str());
-        if (tidx < 0) { skipped++; continue; }
+        if (tidx < 0) {
+            fprintf(stderr, "[Adapter-RT] WARNING: tensor %s not found in GGUF model, skipping\n", gguf_name.c_str());
+            skipped++; continue;
+        }
         struct ggml_tensor * tmeta = ggml_get_tensor(gf.meta, gguf_name.c_str());
         int64_t ne0 = tmeta->ne[0], ne1 = tmeta->ne[1];
 
@@ -321,20 +345,41 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
         int64_t a = m.w1->shape[0], b = m.w1->shape[1], c, d, r;
         if (has_factor) {
             c = m.w2_a->shape[0]; r = m.w2_a->shape[1]; d = m.w2_b->shape[1];
-            if (r != m.w2_b->shape[0]) { skipped++; continue; }
+            if (r != m.w2_b->shape[0]) {
+                fprintf(stderr, "[Adapter-RT] WARNING: LoKr rank mismatch w2_a=%lld vs w2_b=%lld for %s\n",
+                        (long long) r, (long long) m.w2_b->shape[0], lyc_prefix.c_str());
+                skipped++; continue;
+            }
         } else {
             c = m.w2->shape[0]; d = m.w2->shape[1];
-            if (lokr_dim <= 0) { skipped++; continue; }
+            if (lokr_dim <= 0) {
+                fprintf(stderr, "[Adapter-RT] WARNING: monolithic LoKr %s needs __metadata__.lokr_config.linear_dim, skipping\n",
+                        lyc_prefix.c_str());
+                skipped++; continue;
+            }
             r = lokr_dim;
         }
-        if (a * c != ne1 || b * d != ne0) { skipped++; continue; }
+        if (a * c != ne1 || b * d != ne0) {
+            fprintf(stderr, "[Adapter-RT] WARNING: LoKr shape mismatch for %s: kron(%lldx%lld, %lldx%lld) = %lldx%lld vs GGUF [%lld,%lld]\n",
+                    gguf_name.c_str(), (long long) a, (long long) b, (long long) c, (long long) d,
+                    (long long)(a*c), (long long)(b*d), (long long) ne1, (long long) ne0);
+            skipped++; continue;
+        }
 
         float alpha_val = 0.0f;
-        if (!adapter_to_f32(st_data(st, *m.alpha), &alpha_val, 1, m.alpha->dtype)) { skipped++; continue; }
+        if (!adapter_to_f32(st_data(st, *m.alpha), &alpha_val, 1, m.alpha->dtype)) {
+            fprintf(stderr, "[Adapter-RT] WARNING: unsupported alpha dtype %s for %s, skipping\n",
+                    m.alpha->dtype.c_str(), lyc_prefix.c_str());
+            skipped++; continue;
+        }
 
         int64_t w1_nel = a * b;
         std::vector<float> w1_f32((size_t) w1_nel);
-        if (!adapter_to_f32(st_data(st, *m.w1), w1_f32.data(), w1_nel, m.w1->dtype)) { skipped++; continue; }
+        if (!adapter_to_f32(st_data(st, *m.w1), w1_f32.data(), w1_nel, m.w1->dtype)) {
+            fprintf(stderr, "[Adapter-RT] WARNING: unsupported w1 dtype %s for %s, skipping\n",
+                    m.w1->dtype.c_str(), lyc_prefix.c_str());
+            skipped++; continue;
+        }
 
         int64_t w2_nel = 0, w2a_nel = 0, w2b_nel = 0;
         std::vector<float> w2_f32, w2a_f32, w2b_f32;
@@ -342,10 +387,17 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
             w2a_nel = c * r; w2b_nel = r * d;
             w2a_f32.resize((size_t) w2a_nel); w2b_f32.resize((size_t) w2b_nel);
             if (!adapter_to_f32(st_data(st, *m.w2_a), w2a_f32.data(), w2a_nel, m.w2_a->dtype) ||
-                !adapter_to_f32(st_data(st, *m.w2_b), w2b_f32.data(), w2b_nel, m.w2_b->dtype)) { skipped++; continue; }
+                !adapter_to_f32(st_data(st, *m.w2_b), w2b_f32.data(), w2b_nel, m.w2_b->dtype)) {
+                fprintf(stderr, "[Adapter-RT] WARNING: unsupported w2 factor dtype for %s, skipping\n", lyc_prefix.c_str());
+                skipped++; continue;
+            }
         } else {
             w2_nel = c * d; w2_f32.resize((size_t) w2_nel);
-            if (!adapter_to_f32(st_data(st, *m.w2), w2_f32.data(), w2_nel, m.w2->dtype)) { skipped++; continue; }
+            if (!adapter_to_f32(st_data(st, *m.w2), w2_f32.data(), w2_nel, m.w2->dtype)) {
+                fprintf(stderr, "[Adapter-RT] WARNING: unsupported w2 dtype %s for %s, skipping\n",
+                        m.w2->dtype.c_str(), lyc_prefix.c_str());
+                skipped++; continue;
+            }
         }
 
         float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
@@ -389,7 +441,10 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
         };
 
         std::vector<float> delta_f32;
-        if (!adapter_compute_delta(build, ne0, ne1, backend, delta_f32)) { skipped++; continue; }
+        if (!adapter_compute_delta(build, ne0, ne1, backend, delta_f32)) {
+            fprintf(stderr, "[Adapter-RT] WARNING: GPU delta compute failed for %s, skipping\n", gguf_name.c_str());
+            skipped++; continue;
+        }
 
         adapter_stage_delta(lora, slot, gguf_name, ne0, ne1, std::move(delta_f32));
         merged++;
