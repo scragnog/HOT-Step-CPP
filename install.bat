@@ -27,7 +27,7 @@ echo.
 echo =============================================
 echo   Installation complete!
 echo.
-echo   Edit .env to configure your ace-server path
-echo   Then run LAUNCH.bat or dev.bat
+echo   Run LAUNCH.bat to start, or dev.bat for development mode.
+echo   No .env file needed for standard setups.
 echo =============================================
 pause

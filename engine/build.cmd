@@ -30,8 +30,13 @@ if not defined VCVARS (
     exit /b 1
 )
 
-echo Using: %VCVARS%
-call "%VCVARS%"
+REM Skip vcvars if already sourced (prevents PATH overflow on repeated runs)
+if defined VSCMD_VER (
+    echo Using cached VS environment ^(VSCMD_VER=%VSCMD_VER%^)
+) else (
+    echo Using: %VCVARS%
+    call "%VCVARS%"
+)
 
 cd /d "%~dp0"
 mkdir build 2>nul

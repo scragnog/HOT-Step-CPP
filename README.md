@@ -51,7 +51,7 @@ You'll need these installed before building:
 | Requirement | Version | Notes |
 |-------------|---------|-------|
 | [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) | 2022 | Select "Desktop development with C++" workload |
-| [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) | 12.x+ | For NVIDIA GPU acceleration |
+| [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) | 12.x+ | For NVIDIA GPU acceleration. **Select "Visual Studio Integration" during install.** |
 | [CMake](https://cmake.org/download/) | 3.14+ | Usually included with VS Build Tools |
 | [Node.js](https://nodejs.org/) | 18–22 LTS | **Node 24+ is not supported** — use nvm to install 22 LTS if needed |
 | [Git](https://git-scm.com/) | Any | For cloning |
@@ -61,9 +61,11 @@ You'll need these installed before building:
 ### 1. Clone the repo
 
 ```cmd
-git clone https://github.com/scragnog/HOT-Step-CPP.git
+git clone --recursive https://github.com/scragnog/HOT-Step-CPP.git
 cd HOT-Step-CPP
 ```
+
+> **Already cloned without `--recursive`?** Run `git submodule update --init --recursive` to fetch the ggml and vst3sdk submodules.
 
 ### 2. Build the engine
 
@@ -186,6 +188,37 @@ The build script uses `vswhere.exe` to find Visual Studio automatically. If it f
 <summary><b>"ace-server.exe not found" after building with Ninja</b></summary>
 
 Ninja is a single-config generator — binaries go directly in `engine/build/` instead of `engine/build/Release/`. The server auto-detects both locations. If you still see this error, pull the latest version or set `ACESTEPCPP_EXE` in your `.env` file to point to the binary.
+</details>
+
+<details>
+<summary><b>CUDA error: "The CUDA Toolkit directory does not exist"</b></summary>
+
+MSBuild can't find the CUDA Toolkit. Check:
+
+1. The `CUDA_PATH` environment variable is set (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.x`)
+2. You selected **"Visual Studio Integration"** during the CUDA Toolkit install — without this, MSBuild has no `$(CudaToolkitDir)` macro
+3. Restart your terminal after installing or modifying CUDA paths
+</details>
+
+<details>
+<summary><b>"The input line is too long" when running build.cmd</b></summary>
+
+Running `build.cmd` multiple times in the same terminal causes `vcvars64.bat` to append duplicate entries to `%PATH%` until it exceeds the Windows 8,192-character limit.
+
+**Fix:** Close the terminal and open a fresh one. The build scripts now guard against this, but older versions don't — pull latest.
+</details>
+
+<details>
+<summary><b>Build errors persist after fixing environment</b></summary>
+
+If you changed CUDA versions, VS editions, or environment variables, the CMake cache may contain stale configuration:
+
+```cmd
+rd /s /q engine\build
+engine\build.cmd
+```
+
+The `CMakeCache.txt` is only generated once — `build.cmd` skips reconfiguration if it already exists.
 </details>
 
 ## Credits
