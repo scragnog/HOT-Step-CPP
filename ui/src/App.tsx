@@ -20,6 +20,7 @@ import { Player } from './components/player/Player';
 import { WaveformPlayer, type WaveformPlayerHandle } from './components/player/WaveformPlayer';
 import { SectionMarkers } from './components/player/SectionMarkers';
 import { LyricsBar } from './components/player/LyricsBar';
+import { TrimControls } from './components/player/TrimControls';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
 import { RightSidebar } from './components/details/RightSidebar';
 import { Toast, type ToastType } from './components/shared/Toast';
@@ -50,6 +51,9 @@ import {
   cycleRepeat as pbCycleRepeat,
   setSpectrumEnabled as pbSetSpectrumEnabled,
   toggleMastered as pbToggleMastered,
+  setTrimMode as pbSetTrimMode,
+  handleTrimClick as pbHandleTrimClick,
+  reloadCurrentTrack as pbReloadCurrentTrack,
   songToTrack,
   playFromList,
 } from './stores/playbackStore';
@@ -124,6 +128,13 @@ const AppContent: React.FC = () => {
     const el = getActiveMediaElement();
     if (el) setSpectrumMediaEl(el);
   }, [pb.playMastered, pb.currentTrack]);
+
+  // ── Trim mode waveform click handler ──
+  const handleWaveformClick = useCallback((timeSec: number) => {
+    if (pb.trimMode) {
+      pbHandleTrimClick(timeSec);
+    }
+  }, [pb.trimMode]);
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: ToastType; isVisible: boolean }>({
@@ -592,8 +603,8 @@ const AppContent: React.FC = () => {
         <div
           style={{
             display: 'grid',
-            gridTemplateRows: pb.isPlaying ? '1fr' : '0fr',
-            opacity: pb.isPlaying ? 1 : 0,
+            gridTemplateRows: (pb.isPlaying || pb.trimMode) ? '1fr' : '0fr',
+            opacity: (pb.isPlaying || pb.trimMode) ? 1 : 0,
             transition: 'grid-template-rows 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
           }}
         >
@@ -604,6 +615,19 @@ const AppContent: React.FC = () => {
             visible={pb.spectrumEnabled && pb.isPlaying}
             isPlaying={pb.isPlaying}
           />
+          {pb.trimMode && (
+            <TrimControls
+              trimInPoint={pb.trimInPoint}
+              trimOutPoint={pb.trimOutPoint}
+              trimClickCount={pb.trimClickCount}
+              duration={pb.duration}
+              songId={pb.currentTrack?.id ?? null}
+              wavesurferRef={wavesurferRef}
+              wavesurferAltRef={wavesurferAltRef}
+              onReload={pbReloadCurrentTrack}
+              onCancel={() => pbSetTrimMode(false)}
+            />
+          )}
           {/* Dual waveform: original + mastered stacked, opacity-switched */}
           <div className="relative" style={{ height: 56 }}>
             <div style={{
@@ -620,6 +644,7 @@ const AppContent: React.FC = () => {
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
                 onFinish={pbHandleFinish}
+                onWaveformClick={handleWaveformClick}
                 onReady={(dur) => {
                   handleOriginalReady(dur);
                   if (!pb.playMastered) {
@@ -642,6 +667,7 @@ const AppContent: React.FC = () => {
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
                 onFinish={pbHandleFinish}
+                onWaveformClick={handleWaveformClick}
                 onReady={(dur) => {
                   handleAltReady(dur);
                   if (pb.playMastered) {
@@ -687,6 +713,8 @@ const AppContent: React.FC = () => {
           showPlaylist={showPlaylist}
           playlistCount={playlistData.items.length}
           onTogglePlaylist={() => setShowPlaylist(prev => !prev)}
+          trimMode={pb.trimMode}
+          onToggleTrimMode={() => pbSetTrimMode(!pb.trimMode)}
         />
       </div>
 
