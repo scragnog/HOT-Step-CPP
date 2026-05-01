@@ -439,49 +439,16 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       }
     }
 
-    // Phase 2: Synth generation
+    // Phase 2: Synth generation — one track at a time
+    // When batchSize > 1, lmResults has N items. We synth each individually
+    // so we get N clean audio files (avoids multipart parsing).
     job.status = 'synth_running';
     job.stage = 'Loading models for synthesis...';
     job.progress = 45;
 
-    // Subscribe to engine logs for synth progress (DiT steps, VAE, etc.)
-    const totalSteps = aceReq.inference_steps || 20;
-    const unsubSynth = subscribeLines((line) => {
-      if (line.source !== 'engine') return;
-      const dit = line.text.match(/\[DiT\] Step (\d+)\/(\d+)\s+t=[\d.]+\s+\[(.+?)\]/);
-      if (dit) {
-        const step = parseInt(dit[1], 10);
-        const total = parseInt(dit[2], 10);
-        job.stage = `DiT: Step ${step}/${total} (${dit[3]})`;
-        job.progress = 50 + Math.round((step / total) * 35);
-        return;
-      }
-      // Fallback DiT pattern without solver info
-      const ditSimple = line.text.match(/\[DiT\] Step (\d+)\/(\d+)/);
-      if (ditSimple) {
-        const step = parseInt(ditSimple[1], 10);
-        const total = parseInt(ditSimple[2], 10);
-        job.stage = `DiT: Step ${step}/${total}`;
-        job.progress = 50 + Math.round((step / total) * 35);
-        return;
-      }
-      if (line.text.includes('[VAE]') || line.text.includes('vae_decode')) {
-        job.stage = 'Decoding audio (VAE)...';
-        job.progress = 87;
-      } else if (line.text.includes('[Adapter]') && line.text.includes('Merge')) {
-        job.stage = 'Loading adapter...';
-      } else if (line.text.includes('Loading synth') || line.text.includes('ensure_synth')) {
-        job.stage = 'Loading DiT model...';
-      } else if (line.text.includes('[FSQ]') || line.text.includes('fsq_detokenize')) {
-        job.stage = 'Decoding audio tokens (FSQ)...';
-        job.progress = 86;
-      } else if (line.text.includes('[DiT]') && line.text.includes('batch')) {
-        job.stage = 'Preparing DiT batch...';
-        job.progress = 48;
-      }
-    });
+    const totalTracks = lmResults.length;
 
-    logGeneration(job.id, 'INFO', `[Synth Phase] Submitting ${lmResults.length} item(s) to ace-server...`);
+    logGeneration(job.id, 'INFO', `[Synth Phase] Synthesizing ${totalTracks} track(s)...`);
     if (aceReq.adapter) {
       logGeneration(job.id, 'INFO', `[Synth Phase] Adapter: ${aceReq.adapter} (scale=${aceReq.adapter_scale ?? 1.0})`);
       if (aceReq.adapter_group_scales) {
@@ -489,26 +456,18 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       }
     }
 
-    // Submit all LM results for synthesis
     const coResident = job.params.coResident === true;
 
     // Timbre reference: if enabled, read the source audio and pass
     // it as ref_audio to the C++ engine's timbre conditioning pipeline.
-    // sourceAudioUrl can be an absolute path (from album presets) or a relative
-    // reference name (from the Create panel's uploaded references).
     let refAudioBuf: Buffer | undefined;
     const masteringRef = job.params.masteringReference;
-    // timbreReference can be:
-    //   - a string path (from Lyric Studio / queue with album presets)
-    //   - boolean true  (from Create panel checkbox — "also use mastering ref as timbre")
-    // When it's boolean true, resolve to the mastering reference path.
     const rawTimbre = job.params.sourceAudioUrl || job.params.timbreReference;
     const timbreRef = (rawTimbre === true && typeof masteringRef === 'string')
       ? masteringRef
       : (typeof rawTimbre === 'string' ? rawTimbre : undefined);
     logGeneration(job.id, 'DEBUG', `[Synth Phase] timbreRef=${timbreRef}, masteringRef=${masteringRef}`);
     if (timbreRef) {
-      // Resolve path: absolute paths used directly, relative names looked up in references dir
       const refPath = path.isAbsolute(timbreRef)
         ? timbreRef
         : path.join(config.data.dir, 'references', timbreRef);
@@ -522,15 +481,10 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     }
 
     // When mastering is enabled, request wav32 (float) from the engine.
-    // wav32 skips audio_normalize() which would push the audio to ~0dBFS
-    // BEFORE mastering — causing "overcooking" (double normalization).
-    // The mastering algorithm handles its own internal level matching.
     const synthFormat = (job.params.masteringEnabled && job.params.masteringReference) ? 'wav32' : 'wav16';
     if (synthFormat === 'wav32') {
       logGeneration(job.id, 'INFO', '[Synth Phase] Using wav32 (raw float) for mastering input — normalization deferred to mastering');
     }
-
-    let synthJobId: string;
 
     // LRC: auto-enable synchronized lyric timestamps for non-instrumental tracks
     const hasLyrics = lmResults.some(r => r.lyrics && r.lyrics !== '[Instrumental]');
@@ -543,65 +497,108 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       logGeneration(job.id, 'INFO', '[Synth Phase] LRC generation enabled (non-instrumental lyrics detected)');
     }
 
-    if (refAudioBuf) {
-      logGeneration(job.id, 'INFO', `[Synth Phase] Using MULTIPART submission with timbre ref (${refAudioBuf.length} bytes)`);
-      synthJobId = await aceClient.submitSynthMultipart(lmResults, undefined, refAudioBuf, synthFormat, coResident);
-    } else {
-      logGeneration(job.id, 'INFO', `[Synth Phase] Using plain JSON submission (no timbre ref)`);
-      synthJobId = await aceClient.submitSynth(lmResults, synthFormat, coResident);
-    }
-    job.aceJobId = synthJobId;
     if (coResident) {
       logGeneration(job.id, 'INFO', '[Synth Phase] Co-resident mode: DiT+VAE will stay in VRAM');
     }
 
-    await pollUntilDone(synthJobId, job, abortController.signal);
-
-    // Unsubscribe synth progress watcher
-    unsubSynth();
-
-    job.progress = 90;
-    job.stage = 'Saving audio...';
-    job.status = 'saving';
-
-    // Fetch audio result
-    const audioRes = await aceClient.getJobResult(synthJobId);
-    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-    const contentType = audioRes.headers.get('content-type') || 'audio/mpeg';
-    const ext = contentType.includes('wav') ? 'wav' : 'mp3';
-
     // Save audio files and create DB entries
     const audioUrls: string[] = [];
     const songIds: string[] = [];
+    // Per-track mastered URLs (parallel array to audioUrls)
+    const masteredUrls: string[] = [];
 
-    // Check if multipart (batch) or single track
-    if (contentType.includes('multipart')) {
-      // TODO: Parse multipart response for batch mode
-      // For now, handle as single track
+    // ── Per-track synth loop ──────────────────────────────────
+    // Each lmResult becomes a separate /synth call → separate audio file.
+    // Progress: each track gets an equal share of the 45→88% range.
+    const SYNTH_PROGRESS_START = 45;
+    const SYNTH_PROGRESS_END = 88;
+    const progressPerTrack = (SYNTH_PROGRESS_END - SYNTH_PROGRESS_START) / totalTracks;
+
+    for (let trackIdx = 0; trackIdx < totalTracks; trackIdx++) {
+      const synthReq = lmResults[trackIdx];
+      const trackLabel = totalTracks > 1 ? ` (track ${trackIdx + 1}/${totalTracks})` : '';
+      const trackProgressBase = SYNTH_PROGRESS_START + trackIdx * progressPerTrack;
+
+      // Vary DiT seed per track for additional variation
+      if (job.params.randomSeed && trackIdx > 0) {
+        synthReq.seed = Math.floor(Math.random() * 2_147_483_647);
+      }
+
+      job.stage = `Synthesizing${trackLabel}...`;
+      job.progress = Math.round(trackProgressBase);
+
+      // Subscribe to engine logs for this track's DiT progress
+      const unsubSynth = subscribeLines((line) => {
+        if (line.source !== 'engine') return;
+        const dit = line.text.match(/\[DiT\] Step (\d+)\/(\d+)\s+t=[\d.]+\s+\[(.+?)\]/);
+        if (dit) {
+          const step = parseInt(dit[1], 10);
+          const total = parseInt(dit[2], 10);
+          job.stage = `DiT${trackLabel}: Step ${step}/${total} (${dit[3]})`;
+          job.progress = Math.round(trackProgressBase + (step / total) * progressPerTrack * 0.8);
+          return;
+        }
+        const ditSimple = line.text.match(/\[DiT\] Step (\d+)\/(\d+)/);
+        if (ditSimple) {
+          const step = parseInt(ditSimple[1], 10);
+          const total = parseInt(ditSimple[2], 10);
+          job.stage = `DiT${trackLabel}: Step ${step}/${total}`;
+          job.progress = Math.round(trackProgressBase + (step / total) * progressPerTrack * 0.8);
+          return;
+        }
+        if (line.text.includes('[VAE]') || line.text.includes('vae_decode')) {
+          job.stage = `Decoding audio (VAE)${trackLabel}...`;
+          job.progress = Math.round(trackProgressBase + progressPerTrack * 0.9);
+        } else if (line.text.includes('[Adapter]') && line.text.includes('Merge')) {
+          job.stage = `Loading adapter${trackLabel}...`;
+        } else if (line.text.includes('Loading synth') || line.text.includes('ensure_synth')) {
+          job.stage = `Loading DiT model${trackLabel}...`;
+        } else if (line.text.includes('[FSQ]') || line.text.includes('fsq_detokenize')) {
+          job.stage = `Decoding audio tokens (FSQ)${trackLabel}...`;
+        } else if (line.text.includes('[DiT]') && line.text.includes('batch')) {
+          job.stage = `Preparing DiT${trackLabel}...`;
+        }
+      });
+
+      // Submit single request to /synth
+      let synthJobId: string;
+      if (refAudioBuf) {
+        logGeneration(job.id, 'INFO', `[Synth Phase] Track ${trackIdx + 1}: MULTIPART submission with timbre ref`);
+        synthJobId = await aceClient.submitSynthMultipart(synthReq, undefined, refAudioBuf, synthFormat, coResident);
+      } else {
+        logGeneration(job.id, 'INFO', `[Synth Phase] Track ${trackIdx + 1}: plain JSON submission`);
+        synthJobId = await aceClient.submitSynth(synthReq, synthFormat, coResident);
+      }
+      job.aceJobId = synthJobId;
+
+      await pollUntilDone(synthJobId, job, abortController.signal);
+      unsubSynth();
+
+      // Fetch single-track audio result
+      const audioRes = await aceClient.getJobResult(synthJobId);
+      const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+      const contentType = audioRes.headers.get('content-type') || 'audio/mpeg';
+      const ext = contentType.includes('wav') ? 'wav' : 'mp3';
+
       const filename = `${uuidv4()}.${ext}`;
       const filepath = path.join(config.data.audioDir, filename);
       fs.writeFileSync(filepath, audioBuffer);
       audioUrls.push(`/audio/${filename}`);
-    } else {
-      const filename = `${uuidv4()}.${ext}`;
-      const filepath = path.join(config.data.audioDir, filename);
-      fs.writeFileSync(filepath, audioBuffer);
-      audioUrls.push(`/audio/${filename}`);
-    }
 
-    // Save companion LRC file if engine returned alignment data
-    const lrcHeader = audioRes.headers.get('x-lrc-text');
-    if (lrcHeader && audioUrls.length > 0) {
-      try {
-        const lrcDecoded = Buffer.from(lrcHeader, 'base64').toString('utf-8');
-        // Derive .lrc filename from the first audio file
-        const audioFilename = audioUrls[0].replace('/audio/', '');
-        const lrcFilename = audioFilename.replace(/\.[^.]+$/, '.lrc');
-        const lrcPath = path.join(config.data.audioDir, lrcFilename);
-        fs.writeFileSync(lrcPath, lrcDecoded);
-        logGeneration(job.id, 'INFO', `[LRC] Saved ${lrcFilename} (${lrcDecoded.length} bytes)`);
-      } catch (err) {
-        logGeneration(job.id, 'WARNING', `[LRC] Failed to save LRC: ${err}`);
+      logGeneration(job.id, 'INFO', `[Synth Phase] Track ${trackIdx + 1}: saved ${filename} (${(audioBuffer.length / 1024).toFixed(0)} KB)`);
+
+      // Save companion LRC file if engine returned alignment data
+      const lrcHeader = audioRes.headers.get('x-lrc-text');
+      if (lrcHeader) {
+        try {
+          const lrcDecoded = Buffer.from(lrcHeader, 'base64').toString('utf-8');
+          const lrcFilename = filename.replace(/\.[^.]+$/, '.lrc');
+          const lrcPath = path.join(config.data.audioDir, lrcFilename);
+          fs.writeFileSync(lrcPath, lrcDecoded);
+          logGeneration(job.id, 'INFO', `[LRC] Track ${trackIdx + 1}: saved ${lrcFilename} (${lrcDecoded.length} bytes)`);
+        } catch (err) {
+          logGeneration(job.id, 'WARNING', `[LRC] Track ${trackIdx + 1}: failed to save LRC: ${err}`);
+        }
       }
     }
 
@@ -662,36 +659,33 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
     // ── Post-processing chain ─────────────────────────────────
     // Raw WAV (audio_url) is NEVER modified. Post-processing runs on a copy.
-    // "mastered" = any/all of: PP-VAE, Spectral Lifter, VST Chain, Matchering Mastering.
     // The master toggle (postProcessingEnabled) gates the entire chain server-side.
-    const ppMasterOn = job.params.postProcessingEnabled !== false; // default true for backwards compat
+    const ppMasterOn = job.params.postProcessingEnabled !== false;
     const ppVaeOn = ppMasterOn && !!job.params.ppVaeReencode;
     const spectralLifterOn = ppMasterOn && !!job.params.spectralLifterEnabled;
-    // VST chain self-gates via applyVstChain() — returns false if no plugins active
     const masteringOn = ppMasterOn && !!masteringRef && !!job.params.masteringEnabled;
 
-    let masteredAudioUrl = '';
+    job.progress = 89;
+    job.stage = 'Post-processing...';
 
     try {
-      for (const audioUrl of audioUrls) {
+      for (let i = 0; i < audioUrls.length; i++) {
+        const audioUrl = audioUrls[i];
         const audioFilename = path.basename(audioUrl);
         const rawWavPath = path.join(config.data.audioDir, audioFilename);
 
-        if (!rawWavPath.endsWith('.wav')) continue; // Post-processing only on WAV
+        if (!rawWavPath.endsWith('.wav')) { masteredUrls.push(''); continue; }
 
         const ext2 = path.extname(audioFilename);
         const base2 = path.basename(audioFilename, ext2);
         const processedFilename = `${base2}_mastered${ext2}`;
         const processedPath = path.join(config.data.audioDir, processedFilename);
 
-        // Start with a copy of the raw WAV — original stays pristine
         fs.copyFileSync(rawWavPath, processedPath);
         let anyStageRan = false;
 
-        // Stage 0: PP-VAE Re-encode (native C++ via /pp-vae-reencode endpoint)
         if (ppVaeOn) {
-          job.stage = 'PP-VAE Re-encode...';
-          job.progress = 89;
+          job.stage = `PP-VAE Re-encode${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`;
           try {
             const wavBuf = fs.readFileSync(processedPath);
             const blend = job.params.ppVaeBlend ?? 0;
@@ -701,14 +695,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
             logGeneration(job.id, 'INFO', `[PP-VAE] Re-encoded ${audioFilename}`);
           } catch (ppErr: any) {
             logGeneration(job.id, 'WARNING', `[PP-VAE] Failed (non-fatal): ${ppErr.message}`);
-            console.warn(`[PP-VAE] Non-fatal error:`, ppErr.message);
           }
         }
 
-        // Stage 1: Spectral Lifter (native C++ via /spectral-lifter endpoint)
         if (spectralLifterOn) {
-          job.stage = 'Spectral Lifter...';
-          job.progress = 91;
+          job.stage = `Spectral Lifter${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`;
           try {
             const wavBuf = fs.readFileSync(processedPath);
             const slParams = {
@@ -724,14 +715,10 @@ async function runGeneration(job: GenerationJob): Promise<void> {
             logGeneration(job.id, 'INFO', `[Spectral Lifter] Applied to ${audioFilename}`);
           } catch (slErr: any) {
             logGeneration(job.id, 'WARNING', `[Spectral Lifter] Failed (non-fatal): ${slErr.message}`);
-            console.warn(`[Spectral Lifter] Non-fatal error:`, slErr.message);
           }
         }
 
-        // Stage 2: VST Chain (also gated by master toggle)
         if (ppMasterOn) {
-          job.stage = 'Applying VST effects...';
-          job.progress = 93;
           try {
             const applied = await applyVstChain(processedPath);
             if (applied) {
@@ -740,13 +727,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
             }
           } catch (vstErr: any) {
             logGeneration(job.id, 'WARNING', `[VST] Chain failed (non-fatal): ${vstErr.message}`);
-            console.warn(`[VST] Non-fatal chain error:`, vstErr.message);
           }
         }
 
-        // Stage 3: Matchering Mastering
         if (masteringOn) {
-          job.stage = 'Mastering...';
+          job.stage = `Mastering${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`;
           job.progress = 95;
           try {
             const refPath = path.isAbsolute(masteringRef)
@@ -759,24 +744,29 @@ async function runGeneration(job: GenerationJob): Promise<void> {
             logGeneration(job.id, 'INFO', `[Mastering] Applied to ${processedFilename}`);
           } catch (masterErr: any) {
             logGeneration(job.id, 'WARNING', `[Mastering] Failed (non-fatal): ${masterErr.message}`);
-            console.warn(`[Mastering] Non-fatal mastering error:`, masterErr.message);
           }
         }
 
-        // Only set mastered URL if at least one stage actually ran
         if (anyStageRan) {
-          masteredAudioUrl = `/audio/${processedFilename}`;
+          masteredUrls.push(`/audio/${processedFilename}`);
         } else {
-          // No post-processing ran — clean up the copy
           try { fs.unlinkSync(processedPath); } catch {}
+          masteredUrls.push('');
         }
       }
     } catch (err: any) {
       logGeneration(job.id, 'WARNING', `[Post-Processing] Chain failed: ${err.message}`);
     }
 
-    // Create song entries in DB
-    for (const audioUrl of audioUrls) {
+    // Create song entries in DB — one per track
+    for (let i = 0; i < audioUrls.length; i++) {
+      const audioUrl = audioUrls[i];
+      const trackMastered = masteredUrls[i] || '';
+      // Use per-track LM result for metadata when available
+      const trackResult = lmResults[i] || firstResult;
+      const trackLyrics = trackResult.lyrics || job.params.lyrics || '';
+      const trackCaption = trackResult.caption || '';
+
       const songId = uuidv4();
       getDb().prepare(`
         INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
@@ -784,10 +774,10 @@ async function runGeneration(job: GenerationJob): Promise<void> {
                            generation_params, mastered_audio_url)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        songId, job.userId, title, lyrics, style, firstResult.caption || '',
+        songId, job.userId, title, trackLyrics, style, trackCaption,
         audioUrl, duration, bpm, keyScale, timeSignature,
         JSON.stringify([]), aceReq.synth_model || '', JSON.stringify(job.params),
-        masteredAudioUrl,
+        trackMastered,
       );
       songIds.push(songId);
     }
@@ -802,7 +792,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       duration,
       keyScale,
       timeSignature,
-      masteredAudioUrl: masteredAudioUrl || undefined,
+      masteredAudioUrl: masteredUrls.find(u => !!u) || undefined,
     };
 
     logGeneration(job.id, 'INFO', `[Result] ${audioUrls.length} audio file(s) saved, ${songIds.length} song(s) created`);
