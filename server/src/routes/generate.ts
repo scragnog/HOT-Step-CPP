@@ -439,6 +439,24 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       }
     }
 
+    // ── Batch expansion ──────────────────────────────────────
+    // When the LM was skipped (skipLm, audio_codes pre-filled, cover task),
+    // lmResults has only 1 entry. If the user requested batchSize > 1 we
+    // clone the template with unique seeds so the DiT produces N distinct
+    // tracks from the same audio codes.
+    const requestedBatch = job.params.batchSize || 1;
+    if (lmResults.length < requestedBatch) {
+      const template = lmResults[0];
+      while (lmResults.length < requestedBatch) {
+        lmResults.push({
+          ...template,
+          seed: Math.floor(Math.random() * 2_147_483_647),
+        });
+      }
+      logGeneration(job.id, 'INFO',
+        `[Batch] Expanded to ${lmResults.length} track(s) (LM skipped, varying DiT seed)`);
+    }
+
     // Phase 2: Synth generation — one track at a time
     // When batchSize > 1, lmResults has N items. We synth each individually
     // so we get N clean audio files (avoids multipart parsing).
