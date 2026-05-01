@@ -213,7 +213,7 @@ export const Player: React.FC<PlayerProps> = ({
         </button>
 
         {/* Volume */}
-        <div className="flex items-center gap-1.5 group">
+        <div className="flex items-center gap-1.5 group flex-shrink-0">
           <button
             onClick={() => onVolumeChange(volume > 0 ? 0 : 0.8)}
             className="text-zinc-400 hover:text-white transition-colors"
@@ -227,7 +227,7 @@ export const Player: React.FC<PlayerProps> = ({
             step={0.01}
             value={volume}
             onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-            className="w-20"
+            className="w-20 min-w-[80px]"
           />
         </div>
 
