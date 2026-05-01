@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, ListOrdered, Code2, Download } from 'lucide-react';
+import { ChevronDown, ChevronRight, ListOrdered, Code2, Download, Clock } from 'lucide-react';
 import type { Artist } from '../../services/lireekApi';
 import { TripleProviderSelector, type ModelSelections, loadSelections, saveSelections } from './ProviderSelector';
+import { LLM_DURATION_KEY } from '../../utils/estimateDuration';
 
 // ── Persisted state hook ────────────────────────────────────────────────────
 function useLocalPersistedState<T>(key: string, defaultValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
@@ -40,6 +41,9 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
 
   // ── Download filename prepend ──
   const [filenamePrepend, setFilenamePrepend] = useLocalPersistedState<string>('lireek-downloadFilenamePrepend', '');
+
+  // ── LLM Duration toggle ──
+  const [useLlmDuration, setUseLlmDuration] = useLocalPersistedState<boolean>(LLM_DURATION_KEY, true);
 
   const gradient = (name: string) => {
     const hash = name.split('').reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0);
@@ -118,6 +122,30 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
               Prepended to download filenames, e.g. <span className="text-zinc-500">{filenamePrepend || '...'}</span>Artist - Song.flac
             </p>
           </div>
+        </div>
+
+        {/* ── LLM Duration Override ───────────────────────────── */}
+        <div>
+          <label
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5 cursor-pointer hover:bg-white/[0.06] transition-colors"
+          >
+            <span className="flex items-center gap-1.5 text-[11px] text-zinc-500 uppercase tracking-wider font-semibold">
+              <Clock className="w-3 h-3" />
+              LLM Duration
+            </span>
+            <input
+              type="checkbox"
+              checked={useLlmDuration}
+              onChange={e => setUseLlmDuration(e.target.checked)}
+              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-800 text-pink-500 focus:ring-pink-500 focus:ring-offset-0 cursor-pointer"
+            />
+          </label>
+          <p className="text-[10px] text-zinc-600 mt-1 px-1 leading-tight">
+            {useLlmDuration
+              ? <>Uses the LLM's estimated duration — may overshoot, causing "double song" artifacts.</>
+              : <>Uses calculated duration from lyrics + BPM — tighter fit, less wasted generation.</>
+            }
+          </p>
         </div>
 
         {/* ── LLM Models ──────────────────────────────────────────── */}

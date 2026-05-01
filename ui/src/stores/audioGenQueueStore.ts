@@ -19,6 +19,7 @@ import { generateApi, songApi } from '../services/api';
 import { writePersistedState } from '../hooks/usePersistedState';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
 import type { GenerationParams } from '../types';
+import { resolveDuration } from '../utils/estimateDuration';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   params.caption = gen.caption || '';
   params.title = gen.title || '';
   params.instrumental = false;
-  params.duration = gen.duration || 180;
+  params.duration = resolveDuration(gen.duration, gen.lyrics || '', gen.bpm || 120);
   if (gen.bpm) params.bpm = gen.bpm;
   if (gen.key) params.keyScale = gen.key;
   if (item.artistName) params.artist = item.artistName;

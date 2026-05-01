@@ -13,6 +13,7 @@ import { useCallback } from 'react';
 import { lireekApi } from '../../services/lireekApi';
 import { writePersistedState } from '../../hooks/usePersistedState';
 import type { Generation, Profile, AlbumPreset } from '../../services/lireekApi';
+import { resolveDuration } from '../../utils/estimateDuration';
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
@@ -57,7 +58,9 @@ export function useAudioGeneration({ profiles, showToast }: UseAudioGenerationOp
         : gen.key;
       write('hs-keyScale', normalized);
     }
-    if (gen.duration) write('hs-duration', gen.duration);
+    if (gen.duration || gen.bpm) {
+      write('hs-duration', resolveDuration(gen.duration, gen.lyrics || '', gen.bpm || 120));
+    }
 
     // Adapter from album preset — only set the path, scales are global
     if (preset?.adapter_path) {
