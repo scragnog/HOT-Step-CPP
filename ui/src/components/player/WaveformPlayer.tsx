@@ -32,6 +32,10 @@ export interface WaveformPlayerHandle {
   /** Add section markers via the Regions plugin */
   clearRegions: () => void;
   addMarker: (time: number, label: string, color?: string) => void;
+  /** Render trim regions: dimmed zones + IN/OUT markers */
+  setTrimRegions: (inPoint: number | null, outPoint: number | null, duration: number) => void;
+  /** Clear trim-specific regions */
+  clearTrimRegions: () => void;
 }
 
 interface WaveformPlayerProps {
@@ -45,6 +49,8 @@ interface WaveformPlayerProps {
   onFinish?: () => void;
   /** Called when audio is ready to play */
   onReady?: (duration: number) => void;
+  /** Called when user clicks on the waveform (reports time in seconds) */
+  onWaveformClick?: (timeSec: number) => void;
   /** Initial volume 0–1 */
   volume?: number;
   /** Initial playback rate */
@@ -59,6 +65,7 @@ export const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerPro
       onPlayChange,
       onFinish,
       onReady,
+      onWaveformClick,
       volume = 0.8,
       playbackRate = 1.0,
     },
@@ -80,6 +87,8 @@ export const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerPro
     onFinishRef.current = onFinish;
     const onReadyRef = useRef(onReady);
     onReadyRef.current = onReady;
+    const onWaveformClickRef = useRef(onWaveformClick);
+    onWaveformClickRef.current = onWaveformClick;
 
     // Initialize wavesurfer once
     useEffect(() => {
@@ -151,6 +160,12 @@ export const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerPro
       ws.on('play', () => onPlayChangeRef.current?.(true));
       ws.on('pause', () => onPlayChangeRef.current?.(false));
       ws.on('finish', () => onFinishRef.current?.());
+      ws.on('click', (relativeX: number) => {
+        const dur = ws.getDuration();
+        if (dur > 0 && onWaveformClickRef.current) {
+          onWaveformClickRef.current(relativeX * dur);
+        }
+      });
 
       wsRef.current = ws;
 
@@ -209,6 +224,63 @@ export const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerPro
             color: color ?? 'rgba(168, 85, 247, 0.4)',
             drag: false,
             resize: false,
+          });
+        },
+        setTrimRegions: (inPoint: number | null, outPoint: number | null, duration: number) => {
+          const regions = regionsRef.current;
+          if (!regions) return;
+          // Clear previous trim regions (identified by id prefix)
+          regions.getRegions().forEach((r: any) => {
+            if (r.id.startsWith('trim-')) r.remove();
+          });
+          // Dimmed zone before IN
+          if (inPoint !== null && inPoint > 0.01) {
+            regions.addRegion({
+              id: 'trim-before',
+              start: 0,
+              end: inPoint,
+              color: 'rgba(0, 0, 0, 0.55)',
+              drag: false,
+              resize: false,
+            });
+          }
+          // Dimmed zone after OUT
+          if (outPoint !== null && outPoint < duration - 0.01) {
+            regions.addRegion({
+              id: 'trim-after',
+              start: outPoint,
+              end: duration,
+              color: 'rgba(0, 0, 0, 0.55)',
+              drag: false,
+              resize: false,
+            });
+          }
+          // IN marker (green point region)
+          if (inPoint !== null) {
+            regions.addRegion({
+              id: 'trim-in',
+              start: inPoint,
+              content: 'IN',
+              color: 'rgba(34, 197, 94, 0.8)',
+              drag: false,
+              resize: false,
+            });
+          }
+          // OUT marker (red point region)
+          if (outPoint !== null) {
+            regions.addRegion({
+              id: 'trim-out',
+              start: outPoint,
+              content: 'OUT',
+              color: 'rgba(239, 68, 68, 0.8)',
+              drag: false,
+              resize: false,
+            });
+          }
+        },
+        clearTrimRegions: () => {
+          regionsRef.current?.getRegions().forEach((r: any) => {
+            if (r.id.startsWith('trim-')) r.remove();
           });
         },
       }),
