@@ -132,6 +132,8 @@ export const songApi = {
     post<{ success: boolean; songsDeleted: number; filesDeleted: number; lireekAudioGensDeleted: number }>(
       '/songs/nuke-generations', {}, token
     ),
+  crop: (id: string, inPoint: number, outPoint: number, token: string) =>
+    post<{ cropped: boolean; newDuration: number }>(`/songs/${id}/crop`, { inPoint, outPoint }, token),
 };
 
 // ── Generation ──────────────────────────────────────────────
