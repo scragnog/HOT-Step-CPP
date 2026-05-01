@@ -1,12 +1,13 @@
 #pragma once
-// synth-batch-runner.h: two-phase orchestration shared by the synth binaries
+// synth-batch-runner.h: three-phase orchestration shared by the synth binaries
 //
 // Phase 1 (all groups) runs ace_synth_job_run_dit. Each call acquires the DiT
 // from the store for the duration of its denoising loop and releases it on
-// scope exit. Under EVICT_STRICT this means the VAE encoder, text encoder,
-// cond encoder and DiT never coexist in VRAM; under EVICT_NEVER they all
-// accumulate across calls. Phase 2 (all jobs) runs ace_synth_job_run_vae,
-// which acquires the VAE decoder on entry and releases it on exit.
+// scope exit. Phase 2 (LRC alignment) runs while the DiT is still cached
+// from phase 1, avoiding a redundant adapter merge+reload. Phase 3 (all jobs)
+// runs ace_synth_job_run_vae, which acquires the VAE decoder on entry and
+// releases it on exit. Under EVICT_STRICT, at most one GPU module is resident
+// at a time; under EVICT_NEVER they all accumulate across calls.
 
 #include "pipeline-synth.h"
 
@@ -60,12 +61,20 @@ static int synth_batch_run(AceSynth *                             ctx,
         off += gn;
     }
 
-    // Phase 2: VAE decode for each job. The decoder is acquired and released
-    // by ops_vae_decode_and_splice inside ace_synth_job_run_vae.
-    // Phase 3 (LRC) runs after VAE but before job free — SynthState carries
-    // the encoder hidden states and lyric tokens needed by the alignment graph.
+    // Phase 2: LRC alignment (before VAE — the DiT is still cached from phase 1,
+    // so this avoids a redundant adapter merge+reload under EVICT_STRICT).
+    // LRC only reads SynthState data captured during phase 1 (latents, encoder
+    // hidden states, lyric tokens) and does NOT depend on decoded audio.
     for (int g = 0; g < n_groups; g++) {
         const int gn = (int) groups[g].size();
+        if (lrc_out && groups[g][0].get_lrc) {
+            ace_synth_job_run_lrc(ctx, jobs[g], lrc_out + audio_off[g], gn);
+        }
+    }
+
+    // Phase 3: VAE decode for each job. The decoder is acquired and released
+    // by ops_vae_decode_and_splice inside ace_synth_job_run_vae.
+    for (int g = 0; g < n_groups; g++) {
         const int rc =
             ace_synth_job_run_vae(ctx, jobs[g], audio_out + audio_off[g], cancel, cancel_data);
         if (rc != 0) {
@@ -75,11 +84,6 @@ static int synth_batch_run(AceSynth *                             ctx,
                 ace_synth_job_free(jobs[j]);
             }
             return -1;
-        }
-
-        // Phase 3: LRC alignment (optional)
-        if (lrc_out && groups[g][0].get_lrc) {
-            ace_synth_job_run_lrc(ctx, jobs[g], lrc_out + audio_off[g], gn);
         }
 
         ace_synth_job_free(jobs[g]);
