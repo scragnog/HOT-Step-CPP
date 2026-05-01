@@ -904,6 +904,14 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
     }
 
     debug_dump_2d(&s.dbg, "dit_output", s.output.data(), s.T, s.Oc);
+
+    // LRC alignment: run while the DiT is still held (dit_guard in scope).
+    // This avoids a full DiT eviction + reload + adapter merge that would
+    // happen if we ran LRC as a separate phase under EVICT_STRICT.
+    if (s.get_lrc) {
+        ops_lrc_extract(ctx, dit, batch_n, s);
+    }
+
     return 0;
 }
 

@@ -729,23 +729,13 @@ int ace_synth_job_run_vae(AceSynth *    ctx,
     return rc;
 }
 
-// Phase 3: LRC timestamp generation
-int ace_synth_job_run_lrc(AceSynth *    ctx,
-                          AceSynthJob * job,
-                          std::string * lrc_out,
-                          int           batch_n) {
-    if (!ctx || !job || !lrc_out) {
-        return -1;
-    }
+// ── LRC core: run alignment with an already-held DiT ─────────────────────
+// Called from ops_dit_generate while the DiT is still in scope, so no
+// redundant acquire/merge. Results stored in s.lrc_results[].
+int ops_lrc_extract(const AceSynth * ctx, DiTGGML * dit, int batch_n, SynthState & s) {
+    s.lrc_done = true;
+    s.lrc_results.assign(batch_n, std::string());
 
-    SynthState & s = job->state;
-
-    // Initialize all outputs to empty
-    for (int b = 0; b < batch_n; b++) {
-        lrc_out[b].clear();
-    }
-
-    // Skip if LRC not requested or no lyric tokens captured
     if (!s.get_lrc) {
         fprintf(stderr, "[LRC] Skipped: get_lrc=false\n");
         return 0;
@@ -768,14 +758,6 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
         return 0;
     }
 
-    // Acquire DiT
-    DiTGGML * dit = store_require_dit(ctx->store, ctx->dit_key);
-    if (!dit) {
-        fprintf(stderr, "[LRC] WARNING: store_require_dit failed, skipping\n");
-        return 0;
-    }
-    ModelHandle dit_guard(ctx->store, dit);
-
     // Force f32 attention for alignment (no flash_attn)
     bool saved_fa = dit->use_flash_attn;
     dit->use_flash_attn = false;
@@ -784,18 +766,13 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
     int total_scores = align_cfg.total_heads * s.enc_S * s.S;
     std::vector<float> scores(total_scores);
 
-    // Use fixed alignment step count (not the generation step count).
-    // With many steps (e.g. 50), t_last = 1/50 = 0.02 makes the input 98% clean,
-    // producing flat/uninformative cross-attention.  With 8 steps, t_last = 0.125
-    // adds enough noise for the model to produce meaningful alignment signal.
-    // Python default: inference_steps=8.
     const int align_steps = 8;
 
     int rc = dit_alignment_extract(
         dit, align_cfg,
-        s.output.data(),           // pred_latent [T, Oc]
-        s.context.data(),          // context [T, ctx_ch]
-        s.enc_hidden.data(),       // enc_hidden [enc_S, H_cond]
+        s.output.data(),
+        s.context.data(),
+        s.enc_hidden.data(),
         s.T, s.S, s.enc_S,
         align_steps,
         scores.data());
@@ -807,11 +784,7 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
         return 0;
     }
 
-
     // Transpose scores from GGML column-major [enc_S, S] to C row-major [pure_n, S]
-    // GGML stores ne[0]=enc_S as the contiguous/innermost dimension.
-    // Element (e, s) in GGML is at linear offset: s * enc_S + e
-    // We need C row-major [pure_n_tokens, S_frames]: dst[t * S + f]
     std::vector<float> sliced_scores(align_cfg.total_heads * pure_n * s.S);
     for (int h = 0; h < align_cfg.total_heads; h++) {
         const float * src = scores.data() + h * s.enc_S * s.S;
@@ -819,7 +792,6 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
         for (int t = 0; t < pure_n; t++) {
             int enc_idx = s.lyric_start_idx + t;
             for (int f = 0; f < s.S; f++) {
-                // GGML column-major: element (enc_idx, f) = src[f * enc_S + enc_idx]
                 dst[t * s.S + f] = src[f * s.enc_S + enc_idx];
             }
         }
@@ -839,9 +811,8 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
         1);    // medfilt_width
 
     if (result.success && !result.lrc_text.empty()) {
-        // Copy to all batch outputs (same lyrics for all variations)
         for (int b = 0; b < batch_n; b++) {
-            lrc_out[b] = result.lrc_text;
+            s.lrc_results[b] = result.lrc_text;
         }
         fprintf(stderr, "[LRC] Generated %zu bytes in %.1f ms\n",
                 result.lrc_text.size(), lrc_timer.ms());
@@ -852,6 +823,51 @@ int ace_synth_job_run_lrc(AceSynth *    ctx,
     }
 
     return 0;
+}
+
+// Phase 3: LRC timestamp generation (thin wrapper).
+// If ops_lrc_extract already ran during Phase 1 (inside ops_dit_generate),
+// just copy the pre-computed results — no DiT re-acquisition needed.
+int ace_synth_job_run_lrc(AceSynth *    ctx,
+                          AceSynthJob * job,
+                          std::string * lrc_out,
+                          int           batch_n) {
+    if (!ctx || !job || !lrc_out) {
+        return -1;
+    }
+
+    SynthState & s = job->state;
+
+    // Initialize all outputs to empty
+    for (int b = 0; b < batch_n; b++) {
+        lrc_out[b].clear();
+    }
+
+    // If LRC was already computed inline during DiT phase, just copy results
+    if (s.lrc_done) {
+        int n = (int) s.lrc_results.size();
+        if (n > batch_n) n = batch_n;
+        for (int b = 0; b < n; b++) {
+            lrc_out[b] = s.lrc_results[b];
+        }
+        return 0;
+    }
+
+    // Fallback: compute now (acquires DiT — will trigger adapter reload)
+    fprintf(stderr, "[LRC] WARNING: running standalone LRC pass (DiT will be re-acquired)\n");
+
+    if (!s.get_lrc) {
+        return 0;
+    }
+
+    DiTGGML * dit = store_require_dit(ctx->store, ctx->dit_key);
+    if (!dit) {
+        fprintf(stderr, "[LRC] WARNING: store_require_dit failed, skipping\n");
+        return 0;
+    }
+    ModelHandle dit_guard(ctx->store, dit);
+
+    return ops_lrc_extract(ctx, dit, batch_n, s);
 }
 
 void ace_synth_job_free(AceSynthJob * job) {

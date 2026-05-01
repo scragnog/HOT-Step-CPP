@@ -1,20 +1,20 @@
 #pragma once
 // synth-batch-runner.h: three-phase orchestration shared by the synth binaries
 //
-// Phase 1 (all groups) runs ace_synth_job_run_dit. Each call acquires the DiT
-// from the store for the duration of its denoising loop and releases it on
-// scope exit. Phase 2 (LRC alignment) runs while the DiT is still cached
-// from phase 1, avoiding a redundant adapter merge+reload. Phase 3 (all jobs)
-// runs ace_synth_job_run_vae, which acquires the VAE decoder on entry and
-// releases it on exit. Under EVICT_STRICT, at most one GPU module is resident
-// at a time; under EVICT_NEVER they all accumulate across calls.
+// Phase 1 (all groups) runs ace_synth_job_run_dit.  Each call acquires the DiT,
+// runs the denoising loop AND LRC alignment (via ops_lrc_extract, while the DiT
+// is still held), then releases it.  Phase 2 (all groups) runs
+// ace_synth_job_run_vae, which acquires the VAE decoder on entry and releases it
+// on exit.  Phase 3 (LRC) simply copies the pre-computed alignment from
+// SynthState — no DiT acquisition needed.
+// Under EVICT_STRICT, at most one GPU module is resident at a time.
 
 #include "pipeline-synth.h"
 
 #include <cstdio>
 #include <vector>
 
-// Run a batch of request groups through the two synthesis phases.
+// Run a batch of request groups through the synthesis phases.
 //
 // groups[g][i]: request i of group g. All requests in a group must share
 //   the same T (same audio_codes or same duration), which the ops assume
@@ -39,10 +39,10 @@ static int synth_batch_run(AceSynth *                             ctx,
     std::vector<AceSynthJob *> jobs(n_groups, nullptr);
     std::vector<int>           audio_off(n_groups, 0);
 
-    // Phase 1: denoising loop for each group. The DiT is acquired and released
-    // by ops_dit_generate inside ace_synth_job_run_dit.
-    // src_latents / ref_latents: NULL = use audio path (VAE encode).
-    // When we add /vae latent I/O, callers can pass pre-encoded latents here.
+    // Phase 1: denoising + inline LRC for each group. ops_dit_generate
+    // acquires the DiT, runs the denoising loop, then calls ops_lrc_extract
+    // while the DiT is still held — avoiding a redundant adapter merge+reload
+    // under EVICT_STRICT.  Results are cached in SynthState.lrc_results[].
     int off = 0;
     for (int g = 0; g < n_groups; g++) {
         const int gn = (int) groups[g].size();
@@ -61,20 +61,10 @@ static int synth_batch_run(AceSynth *                             ctx,
         off += gn;
     }
 
-    // Phase 2: LRC alignment (before VAE — the DiT is still cached from phase 1,
-    // so this avoids a redundant adapter merge+reload under EVICT_STRICT).
-    // LRC only reads SynthState data captured during phase 1 (latents, encoder
-    // hidden states, lyric tokens) and does NOT depend on decoded audio.
+    // Phase 2: VAE decode for each job. The decoder is acquired and released
+    // by ops_vae_decode inside ace_synth_job_run_vae.
     for (int g = 0; g < n_groups; g++) {
         const int gn = (int) groups[g].size();
-        if (lrc_out && groups[g][0].get_lrc) {
-            ace_synth_job_run_lrc(ctx, jobs[g], lrc_out + audio_off[g], gn);
-        }
-    }
-
-    // Phase 3: VAE decode for each job. The decoder is acquired and released
-    // by ops_vae_decode_and_splice inside ace_synth_job_run_vae.
-    for (int g = 0; g < n_groups; g++) {
         const int rc =
             ace_synth_job_run_vae(ctx, jobs[g], audio_out + audio_off[g], cancel, cancel_data);
         if (rc != 0) {
@@ -84,6 +74,11 @@ static int synth_batch_run(AceSynth *                             ctx,
                 ace_synth_job_free(jobs[j]);
             }
             return -1;
+        }
+
+        // Phase 3: LRC — copy pre-computed alignment (no DiT acquisition)
+        if (lrc_out && groups[g][0].get_lrc) {
+            ace_synth_job_run_lrc(ctx, jobs[g], lrc_out + audio_off[g], gn);
         }
 
         ace_synth_job_free(jobs[g]);

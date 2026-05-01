@@ -73,3 +73,10 @@ int ops_vae_decode(const AceSynth * ctx,
 // with RMS gain matching. Operates on the already-decoded PCM audio in out[].
 // Returns 0 on success, -1 on error.
 int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, SynthState & s);
+
+// LRC alignment extraction using an already-held DiT. Called from inside
+// ops_dit_generate while the DiT is still acquired, avoiding a redundant
+// adapter merge+reload under EVICT_STRICT. Results stored in s.lrc_results.
+// Implemented in pipeline-synth.cpp (where the alignment headers live).
+struct DiTGGML;
+int ops_lrc_extract(const AceSynth * ctx, DiTGGML * dit, int batch_n, SynthState & s);

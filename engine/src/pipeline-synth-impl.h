@@ -143,7 +143,11 @@ struct SynthState {
     int                      lyric_start_idx;    // pure lyric start (after header tokens)
     int                      lyric_end_idx;      // pure lyric end (before <|endoftext|>)
     std::string              vocal_language;     // "en", "zh", etc. (from request)
-    bool                     get_lrc;            // whether LRC was requested
+    bool                     get_lrc = false;     // whether LRC was requested
+
+    // LRC results (computed inline during ops_dit_generate while DiT is held)
+    std::vector<std::string> lrc_results;         // per-batch LRC text (empty if not computed)
+    bool                     lrc_done = false;    // true after ops_lrc_extract ran
 
     // debug / timing
     DebugDumper dbg;
