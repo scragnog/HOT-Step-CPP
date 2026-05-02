@@ -480,7 +480,6 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     // Cover-like tasks need the source audio as the "audio" multipart field
     // (maps to src_audio in the C++ engine). This is separate from timbre.
     let srcAudioBuf: Buffer | undefined;
-    const isCoverTask = ['cover', 'cover-nofsq', 'repaint', 'lego', 'extract'].includes(aceReq.task_type || '');
     if (isCoverTask && job.params.sourceAudioUrl) {
       const srcUrl = job.params.sourceAudioUrl;
       const srcPath = path.isAbsolute(srcUrl)
