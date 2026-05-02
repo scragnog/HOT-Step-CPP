@@ -256,5 +256,5 @@ export const settingsApi = {
   getEnv: () => get<{ values: Record<string, string>; restartKeys: string[] }>('/settings/env'),
   /** Update .env values (partial — only send changed keys) */
   updateEnv: (values: Record<string, string>) =>
-    post<{ updated: string[]; restartRequired: boolean }>('/settings/env', values),
+    post<{ updated: string[]; restartRequired: boolean }>('/settings/env', { values }),
 };
