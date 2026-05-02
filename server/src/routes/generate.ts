@@ -476,11 +476,34 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
     const coResident = job.params.coResident === true;
 
-    // Timbre reference: if enabled, read the source audio and pass
-    // it as ref_audio to the C++ engine's timbre conditioning pipeline.
+    // ── Source audio (for cover/repaint/lego/extract tasks) ──
+    // Cover-like tasks need the source audio as the "audio" multipart field
+    // (maps to src_audio in the C++ engine). This is separate from timbre.
+    let srcAudioBuf: Buffer | undefined;
+    const isCoverTask = ['cover', 'cover-nofsq', 'repaint', 'lego', 'extract'].includes(aceReq.task_type || '');
+    if (isCoverTask && job.params.sourceAudioUrl) {
+      const srcUrl = job.params.sourceAudioUrl;
+      const srcPath = path.isAbsolute(srcUrl)
+        ? srcUrl
+        : srcUrl.startsWith('/references/')
+          ? path.join(config.data.dir, 'references', srcUrl.replace('/references/', ''))
+          : path.join(config.data.dir, srcUrl);
+      logGeneration(job.id, 'DEBUG', `[Synth Phase] Looking for source audio at: ${srcPath}`);
+      if (fs.existsSync(srcPath)) {
+        srcAudioBuf = fs.readFileSync(srcPath);
+        logGeneration(job.id, 'INFO', `[Synth Phase] Source audio (cover): ${srcPath} (${(srcAudioBuf.length / 1024 / 1024).toFixed(1)} MB)`);
+      } else {
+        logGeneration(job.id, 'WARNING', `[Synth Phase] Source audio not found: ${srcPath}`);
+      }
+    }
+
+    // ── Timbre reference (for text2music timbre conditioning) ──
+    // Timbre reference goes into the "ref_audio" multipart field. Only used
+    // when timbreReference is enabled (boolean true → use mastering ref file,
+    // or explicit string path). sourceAudioUrl is NOT a timbre reference.
     let refAudioBuf: Buffer | undefined;
     const masteringRef = job.params.masteringReference;
-    const rawTimbre = job.params.sourceAudioUrl || job.params.timbreReference;
+    const rawTimbre = job.params.timbreReference;
     const timbreRef = (rawTimbre === true && typeof masteringRef === 'string')
       ? masteringRef
       : (typeof rawTimbre === 'string' ? rawTimbre : undefined);
@@ -580,9 +603,10 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
       // Submit single request to /synth
       let synthJobId: string;
-      if (refAudioBuf) {
-        logGeneration(job.id, 'INFO', `[Synth Phase] Track ${trackIdx + 1}: MULTIPART submission with timbre ref`);
-        synthJobId = await aceClient.submitSynthMultipart(synthReq, undefined, refAudioBuf, synthFormat, coResident);
+      if (srcAudioBuf || refAudioBuf) {
+        const parts = [srcAudioBuf ? 'src_audio' : '', refAudioBuf ? 'timbre_ref' : ''].filter(Boolean).join('+');
+        logGeneration(job.id, 'INFO', `[Synth Phase] Track ${trackIdx + 1}: MULTIPART submission (${parts})`);
+        synthJobId = await aceClient.submitSynthMultipart(synthReq, srcAudioBuf, refAudioBuf, synthFormat, coResident);
       } else {
         logGeneration(job.id, 'INFO', `[Synth Phase] Track ${trackIdx + 1}: plain JSON submission`);
         synthJobId = await aceClient.submitSynth(synthReq, synthFormat, coResident);

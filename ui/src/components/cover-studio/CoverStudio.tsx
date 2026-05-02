@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { Guitar, Search, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { usePersistedState } from '../../hooks/usePersistedState';
+import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
 import { generateApi } from '../../services/api';
 import { lireekApi, type Artist, type AlbumPreset } from '../../services/lireekApi';
 import { SourcePanel } from './SourcePanel';
@@ -17,6 +19,7 @@ import {
 export const CoverStudio: React.FC = () => {
   const { token } = useAuth();
   const gp = useGlobalParams();
+  const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
 
   // ── Source audio state ──
   const [sourceFileName, setSourceFileName] = useState(() => restore<string>('sourceFileName', ''));
@@ -247,6 +250,15 @@ export const CoverStudio: React.FC = () => {
         params.loraPath = selectedPreset.adapter_path;
         params.loraScale = selectedPreset.adapter_scale ?? gp.adapterScale;
         if (selectedPreset.adapter_group_scales) params.adapterGroupScales = selectedPreset.adapter_group_scales;
+        // Override trigger word to match the preset's adapter, not the global one
+        if (settings.triggerUseFilename) {
+          const presetFilename = selectedPreset.adapter_path.split(/[\\/]/).pop() || '';
+          const presetTrigger = presetFilename.replace(/\.safetensors$/i, '');
+          if (presetTrigger) {
+            params.triggerWord = presetTrigger;
+            params.triggerPlacement = settings.triggerPlacement || 'prepend';
+          }
+        }
       }
       // Reference track + matchering
       if (selectedPreset?.reference_track_path) {
