@@ -37,6 +37,7 @@
 #include "audio-io.h"
 #include "denoiser.h"
 #include "spectral-lifter.h"
+#include "supersep.h"
 #include "hot-step-params.h"
 #include "model-registry.h"
 #include "model-store.h"
@@ -1914,6 +1915,336 @@ int main(int argc, char ** argv) {
 
         // Encode to WAV16 and return
         std::string wav = audio_encode_wav(decoded.data(), T_decoded, 48000, WAV_S16);
+        res.set_content(wav, "audio/wav");
+    });
+
+    // ═══════════════════════════════════════════════════════════════════
+    // SuperSep: Native stem separation via ONNX Runtime
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Global SuperSep context (lazy-initialized on first request)
+    static SuperSep * g_supersep = nullptr;
+    static std::mutex mtx_supersep;
+
+    // SuperSep job results (separate from main job pool since stems are large)
+    struct SuperSepJob {
+        std::string          id;
+        std::atomic<int>     status{0};   // 0=running, 1=done, 2=failed
+        std::atomic<bool>    cancel{false};
+        float                progress{0.0f};
+        std::string          progress_msg;
+        std::mutex           mtx_progress;
+        SuperSepResult *     result{nullptr};
+        std::string          model_dir;
+
+        ~SuperSepJob() {
+            if (result) supersep_result_free(result);
+        }
+    };
+
+    static std::mutex mtx_sep_jobs;
+    static std::unordered_map<std::string, std::shared_ptr<SuperSepJob>> g_sep_jobs;
+
+    // POST /supersep/separate — start async stem separation
+    // Body: raw WAV or MP3 audio
+    // Query params: level=0..3 (BASIC/VOCAL_SPLIT/FULL/MAXIMUM)
+    // Returns: {"id": "..."}
+    svr.Post("/supersep/separate", [models_dir](const httplib::Request & req, httplib::Response & res) {
+        if (req.body.empty()) {
+            json_error(res, 400, "Empty body (expected audio)");
+            return;
+        }
+
+        int level = 0;
+        if (req.has_param("level")) {
+            level = atoi(req.get_param_value("level").c_str());
+            if (level < 0) level = 0;
+            if (level > 3) level = 3;
+        }
+
+        // Decode audio to interleaved stereo 44100 Hz
+        int     T_audio = 0, sr = 0;
+        float * planar = audio_read_buf((const uint8_t *)req.body.data(), req.body.size(), &T_audio, &sr);
+        if (!planar || T_audio <= 0) {
+            json_error(res, 400, "Failed to decode audio");
+            return;
+        }
+
+        // Resample to 44100 if needed
+        if (sr != 44100) {
+            int T_rs = 0;
+            float * resampled = audio_resample(planar, T_audio, sr, 44100, 2, &T_rs);
+            free(planar);
+            if (!resampled) {
+                json_error(res, 500, "Resample to 44100 failed");
+                return;
+            }
+            planar = resampled;
+            T_audio = T_rs;
+        }
+
+        // Convert planar to interleaved for SuperSep
+        float * interleaved = audio_planar_to_interleaved(planar, T_audio);
+        free(planar);
+        if (!interleaved) {
+            json_error(res, 500, "OOM converting to interleaved");
+            return;
+        }
+
+        // Create job
+        auto job = std::make_shared<SuperSepJob>();
+        job->id = job_make_id();
+        job->model_dir = std::string(models_dir) + "/supersep";
+
+        {
+            std::lock_guard<std::mutex> lock(mtx_sep_jobs);
+            g_sep_jobs[job->id] = job;
+        }
+
+        int n_frames = T_audio;
+        SuperSepLevel sep_level = (SuperSepLevel)level;
+
+        // Push to work queue (GPU-serialized with DiT/LM jobs)
+        work_push([job, interleaved, n_frames, sep_level]() {
+            // Initialize SuperSep if needed
+            {
+                std::lock_guard<std::mutex> lock(mtx_supersep);
+                if (!g_supersep) {
+                    g_supersep = supersep_init(job->model_dir.c_str(), 0);
+                }
+            }
+
+            if (!g_supersep) {
+                fprintf(stderr, "[Server] SuperSep init failed\n");
+                free(interleaved);
+                job->status.store(2);
+                return;
+            }
+
+            auto progress_cb = [](int stage, const char *msg, float pct, void *ud) {
+                auto *j = (SuperSepJob *)ud;
+                std::lock_guard<std::mutex> lock(j->mtx_progress);
+                j->progress = pct;
+                j->progress_msg = msg ? msg : "";
+            };
+
+            auto cancel_cb = [](void *ud) -> bool {
+                auto *j = (SuperSepJob *)ud;
+                return j->cancel.load();
+            };
+
+            SuperSepResult *result = supersep_run(
+                g_supersep, interleaved, n_frames, sep_level,
+                progress_cb, cancel_cb, (void *)job.get()
+            );
+            free(interleaved);
+
+            if (result) {
+                job->result = result;
+                job->status.store(1);
+                fprintf(stderr, "[Server] SuperSep job %s done (%d stems)\n",
+                        job->id.c_str(), result->n_stems);
+            } else {
+                job->status.store(job->cancel.load() ? 3 : 2);
+                fprintf(stderr, "[Server] SuperSep job %s failed\n", job->id.c_str());
+            }
+        });
+
+        fprintf(stderr, "[Server] SuperSep job %s created (level=%d, %.1fs audio)\n",
+                job->id.c_str(), level, (float)T_audio / 44100.0f);
+
+        std::string body = "{\"id\":\"" + job->id + "\"}";
+        res.set_content(body, "application/json");
+    });
+
+    // GET /supersep/progress?id=... — poll progress
+    svr.Get("/supersep/progress", [](const httplib::Request & req, httplib::Response & res) {
+        if (!req.has_param("id")) { json_error(res, 400, "Missing id"); return; }
+        std::string id = req.get_param_value("id");
+
+        std::shared_ptr<SuperSepJob> job;
+        {
+            std::lock_guard<std::mutex> lock(mtx_sep_jobs);
+            auto it = g_sep_jobs.find(id);
+            if (it == g_sep_jobs.end()) { json_error(res, 404, "Job not found"); return; }
+            job = it->second;
+        }
+
+        yyjson_mut_doc * doc = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val * root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+
+        int status = job->status.load();
+        yyjson_mut_obj_add_str(doc, root, "status", job_status_str(status));
+
+        {
+            std::lock_guard<std::mutex> lock(job->mtx_progress);
+            yyjson_mut_obj_add_real(doc, root, "progress", job->progress);
+            yyjson_mut_obj_add_str(doc, root, "message", job->progress_msg.c_str());
+        }
+
+        if (status == 1 && job->result) {
+            yyjson_mut_obj_add_int(doc, root, "n_stems", job->result->n_stems);
+        }
+
+        char * json = yyjson_mut_write(doc, 0, NULL);
+        yyjson_mut_doc_free(doc);
+        res.set_content(json, "application/json");
+        free(json);
+    });
+
+    // GET /supersep/result?id=... — get stem list (metadata, not audio)
+    svr.Get("/supersep/result", [](const httplib::Request & req, httplib::Response & res) {
+        if (!req.has_param("id")) { json_error(res, 400, "Missing id"); return; }
+        std::string id = req.get_param_value("id");
+
+        std::shared_ptr<SuperSepJob> job;
+        {
+            std::lock_guard<std::mutex> lock(mtx_sep_jobs);
+            auto it = g_sep_jobs.find(id);
+            if (it == g_sep_jobs.end()) { json_error(res, 404, "Job not found"); return; }
+            job = it->second;
+        }
+
+        if (job->status.load() != 1 || !job->result) {
+            json_error(res, 409, "Job not complete");
+            return;
+        }
+
+        yyjson_mut_doc * doc = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val * root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+
+        yyjson_mut_val * arr = yyjson_mut_arr(doc);
+        for (int i = 0; i < job->result->n_stems; i++) {
+            SuperSepStem & s = job->result->stems[i];
+            yyjson_mut_val * obj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, obj, "name", s.name);
+            yyjson_mut_obj_add_str(doc, obj, "category", s.category);
+            yyjson_mut_obj_add_str(doc, obj, "stem_type", s.stem_type);
+            yyjson_mut_obj_add_int(doc, obj, "n_frames", s.n_frames);
+            yyjson_mut_obj_add_int(doc, obj, "stage", s.stage);
+            yyjson_mut_obj_add_int(doc, obj, "index", i);
+            yyjson_mut_arr_append(arr, obj);
+        }
+        yyjson_mut_obj_add_val(doc, root, "stems", arr);
+        yyjson_mut_obj_add_str(doc, root, "id", id.c_str());
+
+        char * json = yyjson_mut_write(doc, 0, NULL);
+        yyjson_mut_doc_free(doc);
+        res.set_content(json, "application/json");
+        free(json);
+    });
+
+    // GET /supersep/serve?id=...&stem=N — download individual stem as WAV
+    svr.Get("/supersep/serve", [](const httplib::Request & req, httplib::Response & res) {
+        if (!req.has_param("id") || !req.has_param("stem")) {
+            json_error(res, 400, "Missing id or stem"); return;
+        }
+
+        std::string id = req.get_param_value("id");
+        int stem_idx = atoi(req.get_param_value("stem").c_str());
+
+        std::shared_ptr<SuperSepJob> job;
+        {
+            std::lock_guard<std::mutex> lock(mtx_sep_jobs);
+            auto it = g_sep_jobs.find(id);
+            if (it == g_sep_jobs.end()) { json_error(res, 404, "Job not found"); return; }
+            job = it->second;
+        }
+
+        if (job->status.load() != 1 || !job->result) {
+            json_error(res, 409, "Job not complete"); return;
+        }
+        if (stem_idx < 0 || stem_idx >= job->result->n_stems) {
+            json_error(res, 400, "Invalid stem index"); return;
+        }
+
+        SuperSepStem & s = job->result->stems[stem_idx];
+
+        // Convert interleaved to planar for WAV encoder
+        float * planar = (float *)malloc(sizeof(float) * s.n_frames * 2);
+        if (!planar) { json_error(res, 500, "OOM"); return; }
+        for (int i = 0; i < s.n_frames; i++) {
+            planar[i]              = s.samples[i * 2 + 0];
+            planar[s.n_frames + i] = s.samples[i * 2 + 1];
+        }
+
+        std::string wav = audio_encode_wav(planar, s.n_frames, 44100, WAV_S16);
+        free(planar);
+        res.set_content(wav, "audio/wav");
+    });
+
+    // POST /supersep/recombine — mix stems with volume/mute, return WAV
+    // Body: JSON {"id":"...", "stems":[{"index":0,"volume":1.0,"muted":false},...]}
+    svr.Post("/supersep/recombine", [](const httplib::Request & req, httplib::Response & res) {
+        yyjson_doc * doc = yyjson_read(req.body.c_str(), req.body.size(), 0);
+        if (!doc) { json_error(res, 400, "Invalid JSON"); return; }
+        yyjson_val * root = yyjson_doc_get_root(doc);
+
+        yyjson_val * v_id = yyjson_obj_get(root, "id");
+        if (!v_id) { yyjson_doc_free(doc); json_error(res, 400, "Missing id"); return; }
+        std::string id = yyjson_get_str(v_id);
+
+        std::shared_ptr<SuperSepJob> job;
+        {
+            std::lock_guard<std::mutex> lock(mtx_sep_jobs);
+            auto it = g_sep_jobs.find(id);
+            if (it == g_sep_jobs.end()) {
+                yyjson_doc_free(doc);
+                json_error(res, 404, "Job not found"); return;
+            }
+            job = it->second;
+        }
+
+        if (job->status.load() != 1 || !job->result) {
+            yyjson_doc_free(doc);
+            json_error(res, 409, "Job not complete"); return;
+        }
+
+        // Parse stem controls
+        yyjson_val * arr = yyjson_obj_get(root, "stems");
+        int n = job->result->n_stems;
+        std::vector<float> volumes(n, 1.0f);
+        std::vector<bool>  muted(n, false);
+
+        if (arr && yyjson_is_arr(arr)) {
+            yyjson_val * item;
+            size_t idx, max_val;
+            yyjson_arr_foreach(arr, idx, max_val, item) {
+                yyjson_val * vi = yyjson_obj_get(item, "index");
+                if (!vi) continue;
+                int si = (int)yyjson_get_int(vi);
+                if (si < 0 || si >= n) continue;
+
+                yyjson_val * vv = yyjson_obj_get(item, "volume");
+                if (vv && yyjson_is_num(vv)) volumes[si] = (float)yyjson_get_real(vv);
+
+                yyjson_val * vm = yyjson_obj_get(item, "muted");
+                if (vm && yyjson_is_bool(vm)) muted[si] = yyjson_get_bool(vm);
+            }
+        }
+        yyjson_doc_free(doc);
+
+        int out_frames = 0;
+        float * mixed = supersep_recombine(
+            job->result->stems, volumes.data(), muted.data(), n, &out_frames);
+
+        if (!mixed || out_frames <= 0) {
+            json_error(res, 500, "Recombine produced no audio");
+            return;
+        }
+
+        // Convert interleaved to planar for WAV encoder
+        float * planar = (float *)malloc(sizeof(float) * out_frames * 2);
+        for (int i = 0; i < out_frames; i++) {
+            planar[i]              = mixed[i * 2 + 0];
+            planar[out_frames + i] = mixed[i * 2 + 1];
+        }
+        free(mixed);
+
+        std::string wav = audio_encode_wav(planar, out_frames, 44100, WAV_S16);
+        free(planar);
         res.set_content(wav, "audio/wav");
     });
 

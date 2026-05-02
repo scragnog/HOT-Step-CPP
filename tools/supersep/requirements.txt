@@ -1,0 +1,8 @@
+torch>=2.0
+onnx>=1.14
+onnxruntime
+pyyaml
+numpy
+demucs
+# For BS-Roformer / Mel-Band-Roformer:
+# Clone https://github.com/ZFTurbo/MSS_ONNX_TensorRT and add to PYTHONPATH

@@ -101,6 +101,55 @@ else()
     target_compile_options(yyjson PRIVATE -w)
 endif()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ONNX Runtime (SuperSep stem separation)
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-built ORT GPU package: set ORT_ROOT cmake var or ONNXRUNTIME_ROOT env.
+# Download from https://github.com/microsoft/onnxruntime/releases
+# On Windows: onnxruntime-win-x64-gpu-<version>.zip
+option(HOT_STEP_SUPERSEP "Enable SuperSep stem separation (requires ONNX Runtime)" ON)
+
+set(ORT_ROOT "" CACHE PATH "Path to ONNX Runtime pre-built package")
+if(NOT ORT_ROOT AND DEFINED ENV{ONNXRUNTIME_ROOT})
+    set(ORT_ROOT "$ENV{ONNXRUNTIME_ROOT}")
+endif()
+
+set(SUPERSEP_ENABLED FALSE)
+if(HOT_STEP_SUPERSEP AND ORT_ROOT)
+    if(EXISTS "${ORT_ROOT}/include/onnxruntime_cxx_api.h")
+        set(SUPERSEP_ENABLED TRUE)
+    else()
+        message(WARNING "ORT_ROOT set but onnxruntime_cxx_api.h not found at ${ORT_ROOT}/include")
+    endif()
+endif()
+
+# SuperSep library (ONNX Runtime inference + STFT)
+add_library(supersep STATIC src/supersep.cpp)
+target_include_directories(supersep PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/pocketfft
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+if(MSVC)
+    target_compile_options(supersep PRIVATE /W4 /wd4100 /wd4505 /wd4244 /wd4267)
+else()
+    target_compile_options(supersep PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-sign-conversion)
+endif()
+
+if(SUPERSEP_ENABLED)
+    target_compile_definitions(supersep PUBLIC HOT_STEP_SUPERSEP)
+    target_include_directories(supersep PUBLIC "${ORT_ROOT}/include")
+    target_link_directories(supersep PUBLIC "${ORT_ROOT}/lib")
+    target_link_libraries(supersep PUBLIC onnxruntime)
+    message(STATUS "SuperSep: ENABLED (ORT at ${ORT_ROOT})")
+else()
+    message(STATUS "SuperSep: DISABLED (set ORT_ROOT to enable)")
+endif()
+
+if(CUDAToolkit_FOUND)
+    target_compile_definitions(supersep PRIVATE GGML_USE_CUDA)
+endif()
+
 # Core library (shared between binaries)
 add_library(acestep-core STATIC
     src/request.cpp
@@ -141,7 +190,7 @@ set_source_files_properties(${WEBUI_OUTPUT} PROPERTIES GENERATED TRUE)
 #       Our server binary is hot-step-server.cpp with extension layer support.
 add_executable(ace-server tools/hot-step-server.cpp ${WEBUI_OUTPUT})
 target_include_directories(ace-server PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(ace-server PRIVATE acestep-core httplib)
+target_link_libraries(ace-server PRIVATE acestep-core httplib supersep)
 link_ggml_backends(ace-server)
 # CUDA runtime for GET /vram (cudaMemGetInfo)
 find_package(CUDAToolkit QUIET)

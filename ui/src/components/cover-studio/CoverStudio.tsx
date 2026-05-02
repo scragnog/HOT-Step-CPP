@@ -1,16 +1,21 @@
 // CoverStudio.tsx — Main Cover Studio orchestrator
 // Composes: SourcePanel, ArtistSettingsPanel, RecentCovers
-import React, { useState, useEffect } from 'react';
-import { Guitar, Search, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Guitar, Search, Loader2, Layers } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
 import { generateApi } from '../../services/api';
 import { lireekApi, type Artist, type AlbumPreset } from '../../services/lireekApi';
+import {
+  startSeparation, waitForCompletion,
+  SEPARATION_LEVELS, type SeparationLevel, type StemInfo,
+} from '../../services/supersepApi';
 import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
 import { RecentCovers } from './RecentCovers';
+import { StemMixer } from './StemMixer';
 import {
   persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey,
   type AudioMetadata, type AudioAnalysis,
@@ -57,6 +62,16 @@ export const CoverStudio: React.FC = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toast, setToast] = useState('');
 
+  // ── Advanced Mode (SuperSep) ──
+  const [advancedMode, setAdvancedMode] = useState(false);
+  const [sepLevel, setSepLevel] = useState<SeparationLevel>(() => restore('sepLevel', 1) as SeparationLevel);
+  const [isSeparating, setIsSeparating] = useState(false);
+  const [sepProgress, setSepProgress] = useState(0);
+  const [sepMessage, setSepMessage] = useState('');
+  const [sepJobId, setSepJobId] = useState<string | null>(null);
+  const [sepStems, setSepStems] = useState<StemInfo[] | null>(null);
+  const [recombinedBlob, setRecombinedBlob] = useState<Blob | null>(null);
+
   // ── Persist ──
   useEffect(() => { persist('sourceFileName', sourceFileName); }, [sourceFileName]);
   useEffect(() => { persist('sourceAudioUrl', sourceAudioUrl); }, [sourceAudioUrl]);
@@ -72,6 +87,7 @@ export const CoverStudio: React.FC = () => {
   useEffect(() => { persist('coverNoiseStrength', coverNoiseStrength); }, [coverNoiseStrength]);
   useEffect(() => { persist('tempoScale', tempoScale); }, [tempoScale]);
   useEffect(() => { persist('pitchShift', pitchShift); }, [pitchShift]);
+  useEffect(() => { persist('sepLevel', sepLevel); }, [sepLevel]);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
 
@@ -310,6 +326,44 @@ export const CoverStudio: React.FC = () => {
 
   const canGenerate = !!sourceAudioUrl && !!lyrics.trim() && !isGenerating;
 
+  // ── SuperSep handlers ──
+  const handleSeparate = useCallback(async () => {
+    if (!sourceAudioUrl) { showToast('Upload source audio first'); return; }
+    setIsSeparating(true);
+    setSepProgress(0);
+    setSepMessage('Starting separation...');
+    setSepStems(null);
+    setRecombinedBlob(null);
+
+    try {
+      // Fetch the source audio as a blob
+      const audioRes = await fetch(sourceAudioUrl);
+      const audioBlob = await audioRes.blob();
+
+      // Start separation
+      const jobId = await startSeparation(audioBlob, sepLevel);
+      setSepJobId(jobId);
+
+      // Wait for completion with progress updates
+      const result = await waitForCompletion(jobId, (progress, message) => {
+        setSepProgress(progress);
+        setSepMessage(message);
+      });
+
+      setSepStems(result.stems);
+      showToast(`Separated into ${result.stems.length} stems!`);
+    } catch (err: any) {
+      showToast(`Separation failed: ${err.message}`);
+    } finally {
+      setIsSeparating(false);
+    }
+  }, [sourceAudioUrl, sepLevel]);
+
+  const handleRecombine = useCallback((blob: Blob) => {
+    setRecombinedBlob(blob);
+    showToast('Stems recombined! Ready for generation.');
+  }, []);
+
   // ── Render ──
   return (
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno-panel overflow-hidden">
@@ -332,6 +386,50 @@ export const CoverStudio: React.FC = () => {
           {toast}
         </div>
       )}
+
+      {/* Advanced Mode toggle */}
+      <div className="flex-shrink-0 px-6 py-2 border-b border-zinc-200 dark:border-white/5 flex items-center gap-4">
+        <button
+          onClick={() => setAdvancedMode(!advancedMode)}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            advancedMode
+              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+              : 'bg-white/5 text-zinc-400 border border-white/10 hover:border-white/20'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          Advanced Mode
+        </button>
+
+        {advancedMode && (
+          <>
+            <select
+              value={sepLevel}
+              onChange={(e) => setSepLevel(parseInt(e.target.value) as SeparationLevel)}
+              className="px-2 py-1 rounded-lg bg-black/20 border border-white/10 text-xs text-zinc-300 focus:outline-none focus:border-purple-500"
+            >
+              {SEPARATION_LEVELS.map(l => (
+                <option key={l.value} value={l.value}>{l.label} — {l.description}</option>
+              ))}
+            </select>
+
+            <button
+              onClick={handleSeparate}
+              disabled={isSeparating || !sourceAudioUrl}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-medium transition-colors disabled:opacity-50"
+            >
+              {isSeparating ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {Math.round(sepProgress * 100)}% — {sepMessage}
+                </>
+              ) : (
+                '✂ Split Stems'
+              )}
+            </button>
+          </>
+        )}
+      </div>
 
       {/* Main workspace */}
       <div className="flex-1 flex overflow-hidden">
@@ -365,9 +463,13 @@ export const CoverStudio: React.FC = () => {
               placeholder="Lyrics will appear here after searching Genius, or paste them manually..."
               className="w-full h-full resize-none bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono leading-relaxed" />
           </div>
-          {/* Recent Covers below lyrics */}
-          <div className="flex-shrink-0 border-t border-zinc-200 dark:border-white/5 p-4 max-h-[280px] overflow-y-auto scrollbar-hide">
-            <RecentCovers refreshTrigger={refreshTrigger} />
+          {/* Recent Covers + Stem Mixer below lyrics */}
+          <div className="flex-shrink-0 border-t border-zinc-200 dark:border-white/5 p-4 max-h-[360px] overflow-y-auto scrollbar-hide">
+            {advancedMode && sepStems && sepJobId ? (
+              <StemMixer jobId={sepJobId} stems={sepStems} onRecombine={handleRecombine} />
+            ) : (
+              <RecentCovers refreshTrigger={refreshTrigger} />
+            )}
           </div>
         </div>
 
