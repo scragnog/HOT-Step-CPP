@@ -1,4 +1,4 @@
-import { config } from '../../config.js';
+﻿import { config } from '../../config.js';
 import * as slopDetector from './slopDetector.js';
 import { 
   GENERATION_SYSTEM_PROMPT, 
@@ -1018,6 +1018,8 @@ function buildGenerationPrompt(profile: LyricsProfile, extraInstructions?: strin
     '2. CHORUS LINE COUNT: Exactly 4, 6, or 8 lines per chorus. Each chorus MUST have a hook line that repeats.',
     '3. *** ZERO TOLERANCE FOR COPYING ***',
     '4. NO SLOP: Do not use neon, fluorescent, embers, silhouette, static, void, ethereal, or any AI cliché.',
+    '5. MINIMIZE OVERUSED WORDS: heavy, broken, cold, dust, ghost, machine, nothing, nowhere, searching — use at most ONCE if at all.',
+    "6. VOCABULARY DIVERSITY: A Snoop Dogg song must NOT sound like a Joy Division song. Use THIS artist's actual vocabulary.",
     '',
     'Now write the song (lyrics only, starting with [Intro] or [Verse 1] — no title line):',
   );
@@ -1093,7 +1095,8 @@ export async function generateLyricsStreaming(
   if (slopResult.ai_score > 0) {
     console.warn(`Generation slop scan: score=${slopResult.ai_score} severity=${slopResult.severity}`,
       'words:', slopResult.layers.blacklisted_words.found,
-      'phrases:', slopResult.layers.blacklisted_phrases.found);
+      'phrases:', slopResult.layers.blacklisted_phrases.found,
+      'overuse:', slopResult.layers.overuse.found.map(o => `${o.word}(${o.count}x)`).join(', ') || 'none');
   }
 
   // === POST-HOC TITLE DERIVATION ===
@@ -1269,7 +1272,8 @@ export async function refineLyricsStreaming(
   if (slopResult.ai_score > 0) {
     console.warn(`Refinement slop scan: score=${slopResult.ai_score} severity=${slopResult.severity}`,
       'words:', slopResult.layers.blacklisted_words.found,
-      'phrases:', slopResult.layers.blacklisted_phrases.found);
+      'phrases:', slopResult.layers.blacklisted_phrases.found,
+      'overuse:', slopResult.layers.overuse.found.map(o => `${o.word}(${o.count}x)`).join(', ') || 'none');
   }
 
   return {

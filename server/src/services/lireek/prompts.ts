@@ -1,4 +1,4 @@
-import { BLACKLISTED_WORDS, BLACKLISTED_PHRASES } from './slopDetector.js';
+import { BLACKLISTED_WORDS, BLACKLISTED_PHRASES, OVERUSED_WORDS } from './slopDetector.js';
 
 export const GENERATION_SYSTEM_PROMPT = `You are a talented, creative songwriter who specialises in emulating specific artistic styles with uncanny accuracy.
 
@@ -65,6 +65,9 @@ ANTI-SLOP RULES (CRITICAL — ZERO TOLERANCE):
 - Use the artist's ACTUAL vocabulary and phrasing style, not generic poetic language.
 - If a word or phrase sounds like it came from an AI writing assistant, do NOT use it.
 - Specifically NEVER use: neon, fluorescent, streetlights, embers, silhouette, static, void, ethereal, shimmering.
+- OVERUSED VOCABULARY — MINIMIZE (using any of these more than ONCE in a song = sloppy writing):
+  ${Array.from(OVERUSED_WORDS).sort().join(', ')}
+  These words are not banned, but the model tends to lean on them as a crutch across every genre. A Britney Spears song should NOT share vocabulary DNA with a Metallica song. Use the artist's ACTUAL vocabulary, not these generic defaults. If you catch yourself writing "heavy" or "cold" or "broken" or "nothing left" — STOP and find a word that fits THIS artist's voice.
 - The "a-" prefix (e.g. "a-walkin'", "a-staring") is ONLY valid before verbs/gerunds (-ing words). NEVER put "a-" before adjectives, nouns, articles, or adverbs (e.g. "a-rusty", "a-this", "a-highly" are WRONG). Use it SPARINGLY — at most 1-2 times per song.
 `;
 
@@ -137,6 +140,13 @@ DURATION:
 
 Do NOT include any text outside the JSON object.
 Do NOT include any text outside the JSON object.
+
+SUBJECT ANTI-SLOP RULES:
+- The subject description MUST NOT contain any of these AI-cliché words: ${Array.from(BLACKLISTED_WORDS).slice(0, 30).sort().join(', ')}.
+- Do NOT use these overused subject framings: "The sensation of", "The feeling of", "A person watching", "The terrifying realization that". Start with a specific, cinematic scenario instead.
+- AVOID these subject themes unless the artist profile specifically calls for them: identity dissolution, mirror reflections, masks/disguises, industrial decay, suffocation metaphors, surveillance/being watched.
+- Be SPECIFIC and SENSORY: "A fight with a taxi driver over a $3 fare at 4am" beats "The suffocating sensation of urban disconnection".
+- Think like the ARTIST would think, not like an AI writing assistant.
 `;
 
 const PROFILE_COMMON_PREAMBLE = `You are an expert musicologist and lyric analyst.
@@ -333,6 +343,9 @@ ANTI-SLOP RULES
 - Prefer specificity over mood-fog.
 - BANNED WORDS (remove or replace if found): ${Array.from(BLACKLISTED_WORDS).sort().join(', ')}
 - BANNED PHRASES (remove or replace if found): ${Array.from(BLACKLISTED_PHRASES).sort().join('; ')}
+- OVERUSED VOCABULARY (minimize — use at most ONCE per song, ideally zero):
+  ${Array.from(OVERUSED_WORDS).sort().join(', ')}
+  These words are the model's default comfort blanket. Replace them with vocabulary that fits THIS artist's actual voice.
 
 21. PLAGIARISM CHECK (CRITICAL)
     The generation model sometimes copies the artist's REAL lyrics verbatim — hooks, chorus lines, song titles, or signature phrases. You MUST detect and REWRITE any line that sounds like it was lifted from the artist's actual catalogue. If a list of "ORIGINAL SONG TITLES" is provided, check that NO chorus hook, repeated phrase, or title in the refined lyrics matches them. Replace plagiarised lines with original alternatives that capture the SAME emotion and rhythm.

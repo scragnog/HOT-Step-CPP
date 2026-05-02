@@ -1,7 +1,8 @@
 // slopDetector.ts — AI-Slop Detection and Prevention System
 //
-// 6-layer defense to ensure generated lyrics feel authentic.
+// 7-layer defense to ensure generated lyrics feel authentic.
 // Direct port from Python slop_detector.py — all patterns preserved.
+// Layer 7 added based on corpus analysis of 608 generations (2026-05-02).
 
 // ── Layer 1 — Blacklisted Words ─────────────────────────────────────────────
 
@@ -44,6 +45,18 @@ export const BLACKLISTED_WORDS = new Set([
   'dichotomy', 'transcend', 'transcendence', 'metamorphosis', 'pinnacle',
   // Lighting clichés
   'fluorescent', 'halogen',
+  // Corpus-analysis additions (2026-05-02) — overused across 608 generations
+  'wreckage', 'jagged', 'bitter', 'hollow',
+  'steel', 'metal', 'transmission', 'dashboard', 'gears', 'gloom',
+]);
+
+// ── Layer 1b — Overused Words (soft-ban: penalized per-occurrence, not banned) ──
+// These words aren't inherently bad but the model leans on them like a crutch.
+// "heavy" alone appeared 811 times across 64.3% of 608 songs.
+
+export const OVERUSED_WORDS = new Set([
+  'heavy', 'broken', 'cold', 'dust', 'ghost', 'machine',
+  'nothing', 'nowhere', 'searching', 'wreckage', 'losing',
 ]);
 
 // ── Layer 2 — Blacklisted Phrases ───────────────────────────────────────────
@@ -77,6 +90,12 @@ export const BLACKLISTED_PHRASES = new Set([
   'carry the weight', 'unravel the truth', 'embers glow',
   'spark ignites', 'constellations align', 'resonates within',
   'let it all go', 'rise above it all',
+  // Corpus-analysis additions (2026-05-02)
+  'nothing left', 'nowhere left', 'nothing left to',
+  'the weight of', 'the wreckage', 'same old',
+  'every single', 'cold and heavy', 'cold and dark',
+  'cold and empty', 'heavy and cold', 'heavy and dark',
+  'pulling me down', 'dragging me down',
 ]);
 
 // ── Layer 3 — Regex Patterns ────────────────────────────────────────────────
@@ -87,6 +106,9 @@ const AI_PATTERNS = [
   /\b\w+ing\s+\w+ing\b/gi,
   /\bthe\s+\w+\s+of\s+my\s+\w+\b/gi,
   /^In\s+the\s+(darkness|silence|shadows|distance|stillness|emptiness)\b/gim,
+  // Corpus-analysis additions — "cold and [X]" / "heavy [noun]" overuse patterns
+  /\bcold\s+and\s+\w+\b/gi,
+  /\bheavy\s+(weight|hand|heart|air|load|chain|sky|dust|night|crown|veil|rain|door|stone|iron|fog|clouds?)\b/gi,
 ];
 
 // ── Layer 4 — Structural Analysis ───────────────────────────────────────────
@@ -196,6 +218,7 @@ export interface SlopScanResult {
     structural: { score: number; raw_score: number; issues: string[] };
     fingerprint: { score: number; raw_score: number; issues: string[] };
     statistical: { score: number; raw_score: number; issues: string[] };
+    overuse: { score: number; found: { word: string; count: number }[] };
   };
 }
 
@@ -260,9 +283,27 @@ export function scanForSlop(
   // Layer 6: Statistical anomalies
   const l6 = detectAnomalies(clean);
 
+  // Layer 7: Overused word detection (soft-ban)
+  // Penalize +3 per occurrence after the first — these aren't banned but the model
+  // uses them as a crutch across genres ("heavy" alone: 811x in 608 songs).
+  const overuseFound: { word: string; count: number }[] = [];
+  let l7Score = 0;
+  const wordFreq = new Map<string, number>();
+  for (const w of words) {
+    if (OVERUSED_WORDS.has(w)) wordFreq.set(w, (wordFreq.get(w) ?? 0) + 1);
+  }
+  for (const [word, count] of wordFreq) {
+    if (count > 1) {
+      const penalty = (count - 1) * 3; // +3 per occurrence after the first
+      l7Score += penalty;
+      overuseFound.push({ word, count });
+    }
+  }
+
   const sw = Math.max(0, Math.min(1, statisticalWeight));
   const total = l1Score + l2Score + l3Score +
-    Math.floor(l4.score * sw) + Math.floor(l5.score * sw) + Math.floor(l6.score * sw);
+    Math.floor(l4.score * sw) + Math.floor(l5.score * sw) + Math.floor(l6.score * sw) +
+    l7Score;
 
   return {
     ai_score: total,
@@ -275,6 +316,7 @@ export function scanForSlop(
       structural: { score: Math.floor(l4.score * sw), raw_score: l4.score, issues: l4.issues },
       fingerprint: { score: Math.floor(l5.score * sw), raw_score: l5.score, issues: l5.issues },
       statistical: { score: Math.floor(l6.score * sw), raw_score: l6.score, issues: l6.issues },
+      overuse: { score: l7Score, found: overuseFound },
     },
   };
 }
