@@ -33,6 +33,7 @@ import vstRoutes from './routes/vst.js';
 import analyzeRoutes from './routes/analyze.js';
 import uploadRoutes from './routes/upload.js';
 import supersepRoutes from './routes/supersep.js';
+import settingsRoutes from './routes/settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,6 +76,7 @@ app.use('/api/vst', vstRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/supersep', express.raw({ type: 'application/octet-stream', limit: '200mb' }), supersepRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Serve audio files from data/audio/
 app.use('/audio', express.static(config.data.audioDir, {

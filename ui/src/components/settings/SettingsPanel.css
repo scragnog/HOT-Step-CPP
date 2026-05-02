@@ -244,3 +244,220 @@
   background: #db2777;
   color: white;
 }
+
+/* ── Environment Settings ────────────────────────────────────── */
+
+.env-input {
+  width: 100%;
+  min-width: 200px;
+  max-width: 360px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8125rem;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  outline: none;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.env-input:focus {
+  border-color: rgba(236, 72, 153, 0.5);
+  box-shadow: 0 0 0 2px rgba(236, 72, 153, 0.1);
+}
+
+.env-input::placeholder {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.env-input--number {
+  max-width: 120px;
+  text-align: center;
+}
+
+/* Path row: input + browse button */
+.env-path-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 360px;
+  width: 100%;
+}
+
+.env-path-row .env-input {
+  flex: 1;
+  max-width: none;
+}
+
+.env-browse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+
+.env-browse-btn:hover {
+  background: rgba(236, 72, 153, 0.15);
+  border-color: rgba(236, 72, 153, 0.3);
+  color: #ec4899;
+}
+
+/* Password field wrapper */
+.env-password-wrapper {
+  position: relative;
+  max-width: 360px;
+  width: 100%;
+}
+
+.env-password-wrapper .env-input {
+  padding-right: 2.25rem;
+  max-width: none;
+}
+
+.env-password-toggle {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  transition: color 200ms ease;
+}
+
+.env-password-toggle:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Save bar */
+.env-save-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  margin-top: 0.5rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.env-save-btn {
+  padding: 0.5rem 1.25rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: #ec4899;
+  border: 1px solid #db2777;
+  color: white;
+  cursor: pointer;
+  transition: background 200ms ease, transform 100ms ease;
+}
+
+.env-save-btn:hover {
+  background: #db2777;
+}
+
+.env-save-btn:active {
+  transform: scale(0.97);
+}
+
+.env-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.env-save-status {
+  font-size: 0.75rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+}
+
+.env-save-status--success {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
+
+.env-save-status--error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.env-save-status--warning {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  color: #fde68a;
+}
+
+/* Restart badge */
+.setting-badge--restart {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+/* Subsection header (collapsible) */
+.env-subsection-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0;
+  cursor: pointer;
+  user-select: none;
+  transition: color 200ms ease;
+}
+
+.env-subsection-header:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.env-subsection-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.env-subsection-chevron {
+  color: rgba(255, 255, 255, 0.3);
+  transition: transform 200ms ease;
+}
+
+.env-subsection-chevron--open {
+  transform: rotate(90deg);
+}
+
+/* Select dropdown for env settings */
+.env-select {
+  min-width: 180px;
+  max-width: 360px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8125rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 200ms ease;
+}
+
+.env-select:focus {
+  border-color: rgba(236, 72, 153, 0.5);
+}
+

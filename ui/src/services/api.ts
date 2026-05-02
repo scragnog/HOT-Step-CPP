@@ -249,3 +249,12 @@ export const vstApi = {
   monitorSeek: (position: number) =>
     post<{ ok: boolean }>('/vst/monitor/seek', { position }),
 };
+
+// ── Settings / .env ─────────────────────────────────────────
+export const settingsApi = {
+  /** Read current .env values for exposed keys */
+  getEnv: () => get<{ values: Record<string, string>; restartKeys: string[] }>('/settings/env'),
+  /** Update .env values (partial — only send changed keys) */
+  updateEnv: (values: Record<string, string>) =>
+    post<{ updated: string[]; restartRequired: boolean }>('/settings/env', values),
+};

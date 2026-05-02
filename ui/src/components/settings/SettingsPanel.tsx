@@ -1,12 +1,17 @@
 // SettingsPanel.tsx — Application settings with persistent state
 //
 // All settings use localStorage via usePersistedState and survive page refreshes.
+// Environment settings read from / write to the server's .env file.
 
-import React, { useState } from 'react';
-import { Zap, Download, Tag, AlertTriangle, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Zap, Download, Tag, AlertTriangle, Loader2, Settings2,
+  FolderOpen, Eye, EyeOff, ChevronRight, Save,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { songApi } from '../../services/api';
+import { songApi, settingsApi } from '../../services/api';
 import { lireekApi } from '../../services/lireekApi';
+import { FileBrowserModal } from '../shared/FileBrowserModal';
 import './SettingsPanel.css';
 
 export interface AppSettings {
@@ -107,6 +112,149 @@ const SelectRow: React.FC<{
   </div>
 );
 
+// ── Environment (.env) sub-components ───────────────────────────────
+
+/** Restart-required keys set (mirrors server) */
+const RESTART_KEYS = new Set([
+  'ACESTEPCPP_MODELS', 'ACESTEPCPP_ADAPTERS', 'ACESTEPCPP_PORT', 'ACESTEPCPP_HOST',
+  'SERVER_PORT', 'DATA_DIR',
+]);
+
+/** Sensitive keys — display as masked password fields */
+const SENSITIVE_KEYS = new Set([
+  'GENIUS_ACCESS_TOKEN', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
+  'UNSLOTH_PASSWORD',
+]);
+
+/** Text / number input row for env settings */
+const EnvTextRow: React.FC<{
+  envKey: string;
+  label: string;
+  description: string;
+  value: string;
+  onChange: (key: string, value: string) => void;
+  type?: 'text' | 'number';
+  placeholder?: string;
+}> = ({ envKey, label, description, value, onChange, type = 'text', placeholder }) => (
+  <div className="setting-row">
+    <div className="setting-info">
+      <div className="setting-label">
+        {label}
+        {RESTART_KEYS.has(envKey) && (
+          <span className="setting-badge setting-badge--restart">⚠️ Restart</span>
+        )}
+      </div>
+      <div className="setting-description">{description}</div>
+    </div>
+    <input
+      id={`env-${envKey}`}
+      type={type}
+      className={`env-input${type === 'number' ? ' env-input--number' : ''}`}
+      value={value}
+      onChange={(e) => onChange(envKey, e.target.value)}
+      placeholder={placeholder}
+    />
+  </div>
+);
+
+/** Password input row with show/hide toggle */
+const EnvPasswordRow: React.FC<{
+  envKey: string;
+  label: string;
+  description: string;
+  value: string;
+  onChange: (key: string, value: string) => void;
+  placeholder?: string;
+}> = ({ envKey, label, description, value, onChange, placeholder }) => {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="setting-row">
+      <div className="setting-info">
+        <div className="setting-label">{label}</div>
+        <div className="setting-description">{description}</div>
+      </div>
+      <div className="env-password-wrapper">
+        <input
+          id={`env-${envKey}`}
+          type={visible ? 'text' : 'password'}
+          className="env-input"
+          value={value}
+          onChange={(e) => onChange(envKey, e.target.value)}
+          placeholder={placeholder || '••••••••'}
+        />
+        <button
+          type="button"
+          className="env-password-toggle"
+          onClick={() => setVisible(!visible)}
+          title={visible ? 'Hide' : 'Show'}
+        >
+          {visible ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/** Path input row with browse folder button */
+const EnvPathRow: React.FC<{
+  envKey: string;
+  label: string;
+  description: string;
+  value: string;
+  onChange: (key: string, value: string) => void;
+  onBrowse: (key: string) => void;
+  placeholder?: string;
+}> = ({ envKey, label, description, value, onChange, onBrowse, placeholder }) => (
+  <div className="setting-row">
+    <div className="setting-info">
+      <div className="setting-label">
+        {label}
+        {RESTART_KEYS.has(envKey) && (
+          <span className="setting-badge setting-badge--restart">⚠️ Restart</span>
+        )}
+      </div>
+      <div className="setting-description">{description}</div>
+    </div>
+    <div className="env-path-row">
+      <input
+        id={`env-${envKey}`}
+        type="text"
+        className="env-input"
+        value={value}
+        onChange={(e) => onChange(envKey, e.target.value)}
+        placeholder={placeholder || 'Select folder...'}
+      />
+      <button
+        type="button"
+        className="env-browse-btn"
+        onClick={() => onBrowse(envKey)}
+        title="Browse..."
+      >
+        <FolderOpen size={16} />
+      </button>
+    </div>
+  </div>
+);
+
+/** Collapsible subsection header */
+const EnvSubsection: React.FC<{
+  title: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}> = ({ title, isOpen, onToggle, children }) => (
+  <div>
+    <div className="env-subsection-header" onClick={onToggle}>
+      <ChevronRight
+        size={14}
+        className={`env-subsection-chevron${isOpen ? ' env-subsection-chevron--open' : ''}`}
+      />
+      <span className="env-subsection-title">{title}</span>
+    </div>
+    {isOpen && children}
+  </div>
+);
+
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   onSettingsChange,
@@ -171,6 +319,85 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
+  // ── Environment (.env) state ────────────────────────────────────
+  const [envValues, setEnvValues] = useState<Record<string, string>>({});
+  const [envOriginal, setEnvOriginal] = useState<Record<string, string>>({});
+  const [envLoading, setEnvLoading] = useState(true);
+  const [envSaving, setEnvSaving] = useState(false);
+  const [envStatus, setEnvStatus] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+
+  // Subsection open/close state
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    engine: true, server: true, apiKeys: true, llmConfig: true, llmEndpoints: false, paths: true,
+  });
+  const toggleSection = (key: string) =>
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  // File browser modal state
+  const [browseKey, setBrowseKey] = useState<string | null>(null);
+
+  // Load env settings on mount
+  const loadEnvSettings = useCallback(async () => {
+    try {
+      setEnvLoading(true);
+      const data = await settingsApi.getEnv();
+      setEnvValues(data.values);
+      setEnvOriginal(data.values);
+    } catch (err: any) {
+      console.error('[Settings] Failed to load .env:', err.message);
+    } finally {
+      setEnvLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadEnvSettings(); }, [loadEnvSettings]);
+
+  // Track which keys have changed
+  const envDirty = Object.keys(envValues).some((k) => envValues[k] !== envOriginal[k]);
+
+  const handleEnvChange = (key: string, value: string) => {
+    setEnvValues((prev) => ({ ...prev, [key]: value }));
+    setEnvStatus(null);
+  };
+
+  const handleEnvSave = async () => {
+    // Build diff — only send changed keys
+    const diff: Record<string, string> = {};
+    for (const [key, value] of Object.entries(envValues)) {
+      if (value !== envOriginal[key]) {
+        diff[key] = value;
+      }
+    }
+    if (Object.keys(diff).length === 0) return;
+
+    setEnvSaving(true);
+    setEnvStatus(null);
+    try {
+      const res = await settingsApi.updateEnv(diff);
+      setEnvOriginal({ ...envValues });
+      if (res.restartRequired) {
+        setEnvStatus({ type: 'warning', text: `Saved ${res.updated.length} setting(s). Some changes require a restart.` });
+      } else {
+        setEnvStatus({ type: 'success', text: `Saved ${res.updated.length} setting(s). Changes are live.` });
+      }
+    } catch (err: any) {
+      setEnvStatus({ type: 'error', text: `Failed to save: ${err.message}` });
+    } finally {
+      setEnvSaving(false);
+    }
+  };
+
+  const handleBrowse = (key: string) => {
+    setBrowseKey(key);
+  };
+
+  const handleBrowseSelect = (selectedPath: string) => {
+    if (browseKey) {
+      handleEnvChange(browseKey, selectedPath);
+    }
+    setBrowseKey(null);
+  };
+
   return (
     <div className="settings-panel">
       <div className="settings-header">
@@ -179,6 +406,144 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           Configure performance and behavior options
         </p>
       </div>
+
+      {/* ── Environment Section ──────────────────────────────────── */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <Settings2 size={16} className="settings-section-icon" />
+          <span className="settings-section-title">Environment</span>
+        </div>
+
+        {envLoading ? (
+          <div className="setting-row" style={{ justifyContent: 'center' }}>
+            <Loader2 size={16} className="animate-spin" style={{ color: 'rgba(255,255,255,0.4)' }} />
+            <span style={{ marginLeft: '8px', color: 'rgba(255,255,255,0.4)', fontSize: '0.8125rem' }}>Loading .env…</span>
+          </div>
+        ) : (
+          <>
+            {/* Engine */}
+            <EnvSubsection title="Engine" isOpen={openSections.engine} onToggle={() => toggleSection('engine')}>
+              <EnvPathRow envKey="ACESTEPCPP_MODELS" label="Models directory" description="Path to GGUF model files for the synthesis engine."
+                value={envValues.ACESTEPCPP_MODELS || ''} onChange={handleEnvChange} onBrowse={handleBrowse} />
+              <EnvPathRow envKey="ACESTEPCPP_ADAPTERS" label="Adapters directory" description="Path to LoRA/LoKR adapter files (.safetensors)."
+                value={envValues.ACESTEPCPP_ADAPTERS || ''} onChange={handleEnvChange} onBrowse={handleBrowse} />
+              <EnvTextRow envKey="ACESTEPCPP_PORT" label="Engine port" description="HTTP port for the ace-server C++ engine."
+                value={envValues.ACESTEPCPP_PORT || ''} onChange={handleEnvChange} type="number" placeholder="8085" />
+              <EnvTextRow envKey="ACESTEPCPP_HOST" label="Engine host" description="Bind address for the engine server."
+                value={envValues.ACESTEPCPP_HOST || ''} onChange={handleEnvChange} placeholder="127.0.0.1" />
+            </EnvSubsection>
+
+            {/* Server */}
+            <EnvSubsection title="Server" isOpen={openSections.server} onToggle={() => toggleSection('server')}>
+              <EnvTextRow envKey="SERVER_PORT" label="Server port" description="HTTP port for the Node.js server."
+                value={envValues.SERVER_PORT || ''} onChange={handleEnvChange} type="number" placeholder="3001" />
+              <EnvPathRow envKey="DATA_DIR" label="Data directory" description="Root directory for databases, audio files, and app data."
+                value={envValues.DATA_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} placeholder="./data" />
+            </EnvSubsection>
+
+            {/* API Keys */}
+            <EnvSubsection title="API Keys" isOpen={openSections.apiKeys} onToggle={() => toggleSection('apiKeys')}>
+              <EnvPasswordRow envKey="GENIUS_ACCESS_TOKEN" label="Genius API token" description="For fetching reference lyrics from Genius."
+                value={envValues.GENIUS_ACCESS_TOKEN || ''} onChange={handleEnvChange} />
+              <EnvPasswordRow envKey="GEMINI_API_KEY" label="Google Gemini key" description="For Gemini-powered lyric generation."
+                value={envValues.GEMINI_API_KEY || ''} onChange={handleEnvChange} />
+              <EnvPasswordRow envKey="OPENAI_API_KEY" label="OpenAI key" description="For GPT-powered lyric generation."
+                value={envValues.OPENAI_API_KEY || ''} onChange={handleEnvChange} />
+              <EnvPasswordRow envKey="ANTHROPIC_API_KEY" label="Anthropic key" description="For Claude-powered lyric generation."
+                value={envValues.ANTHROPIC_API_KEY || ''} onChange={handleEnvChange} />
+            </EnvSubsection>
+
+            {/* LLM Config */}
+            <EnvSubsection title="LLM Configuration" isOpen={openSections.llmConfig} onToggle={() => toggleSection('llmConfig')}>
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">Default LLM provider</div>
+                  <div className="setting-description">Which provider to use by default for lyric generation.</div>
+                </div>
+                <select
+                  id="env-DEFAULT_LLM_PROVIDER"
+                  className="env-select"
+                  value={envValues.DEFAULT_LLM_PROVIDER || 'gemini'}
+                  onChange={(e) => handleEnvChange('DEFAULT_LLM_PROVIDER', e.target.value)}
+                >
+                  <option value="gemini">Gemini</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="ollama">Ollama</option>
+                  <option value="lmstudio">LM Studio</option>
+                  <option value="unsloth">Unsloth</option>
+                </select>
+              </div>
+              <EnvTextRow envKey="GEMINI_MODEL" label="Gemini model" description="Model name for Gemini API."
+                value={envValues.GEMINI_MODEL || ''} onChange={handleEnvChange} placeholder="gemini-2.5-flash" />
+              <EnvTextRow envKey="OPENAI_MODEL" label="OpenAI model" description="Model name for OpenAI API."
+                value={envValues.OPENAI_MODEL || ''} onChange={handleEnvChange} placeholder="gpt-4o-mini" />
+              <EnvTextRow envKey="ANTHROPIC_MODEL" label="Anthropic model" description="Model name for Anthropic API."
+                value={envValues.ANTHROPIC_MODEL || ''} onChange={handleEnvChange} placeholder="claude-3-5-haiku-20241022" />
+              <EnvTextRow envKey="OLLAMA_MODEL" label="Ollama model" description="Model name for local Ollama instance."
+                value={envValues.OLLAMA_MODEL || ''} onChange={handleEnvChange} placeholder="llama3" />
+              <EnvTextRow envKey="LMSTUDIO_MODEL" label="LM Studio model" description="Model name for LM Studio."
+                value={envValues.LMSTUDIO_MODEL || ''} onChange={handleEnvChange} />
+              <EnvTextRow envKey="UNSLOTH_MODEL" label="Unsloth model" description="Model name for Unsloth."
+                value={envValues.UNSLOTH_MODEL || ''} onChange={handleEnvChange} />
+            </EnvSubsection>
+
+            {/* LLM Endpoints */}
+            <EnvSubsection title="LLM Endpoints" isOpen={openSections.llmEndpoints} onToggle={() => toggleSection('llmEndpoints')}>
+              <EnvTextRow envKey="OLLAMA_BASE_URL" label="Ollama URL" description="Base URL for the Ollama API."
+                value={envValues.OLLAMA_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://localhost:11434" />
+              <EnvTextRow envKey="LMSTUDIO_BASE_URL" label="LM Studio URL" description="Base URL for the LM Studio API."
+                value={envValues.LMSTUDIO_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://localhost:1234/v1" />
+              <EnvTextRow envKey="UNSLOTH_BASE_URL" label="Unsloth URL" description="Base URL for the Unsloth API."
+                value={envValues.UNSLOTH_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://127.0.0.1:8888" />
+              <EnvTextRow envKey="UNSLOTH_USERNAME" label="Unsloth username" description="Username for Unsloth authentication."
+                value={envValues.UNSLOTH_USERNAME || ''} onChange={handleEnvChange} />
+              <EnvPasswordRow envKey="UNSLOTH_PASSWORD" label="Unsloth password" description="Password for Unsloth authentication."
+                value={envValues.UNSLOTH_PASSWORD || ''} onChange={handleEnvChange} />
+            </EnvSubsection>
+
+            {/* Paths */}
+            <EnvSubsection title="Paths" isOpen={openSections.paths} onToggle={() => toggleSection('paths')}>
+              <EnvPathRow envKey="LYRICS_EXPORT_DIR" label="Lyrics export directory" description="Where exported lyrics files are saved."
+                value={envValues.LYRICS_EXPORT_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} />
+            </EnvSubsection>
+
+            {/* Save bar */}
+            <div className="env-save-bar">
+              {envStatus && (
+                <span className={`env-save-status env-save-status--${envStatus.type}`}>
+                  {envStatus.text}
+                </span>
+              )}
+              <button
+                className="env-save-btn"
+                onClick={handleEnvSave}
+                disabled={!envDirty || envSaving}
+              >
+                {envSaving ? (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Loader2 size={14} className="animate-spin" /> Saving…
+                  </span>
+                ) : (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Save size={14} /> Save Environment
+                  </span>
+                )}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* File Browser Modal for path settings */}
+      <FileBrowserModal
+        open={browseKey !== null}
+        onClose={() => setBrowseKey(null)}
+        onSelect={handleBrowseSelect}
+        mode="folder"
+        startPath={browseKey ? envValues[browseKey] || '' : ''}
+        title={browseKey ? `Select folder for ${browseKey}` : 'Select Folder'}
+      />
 
       {/* Performance Section */}
       <div className="settings-section">
