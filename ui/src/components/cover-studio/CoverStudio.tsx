@@ -1,5 +1,5 @@
 // CoverStudio.tsx — Main Cover Studio orchestrator
-// Composes: SourcePanel, ArtistSettingsPanel, RecentCovers
+// Composes: SourcePanel, ArtistSettingsPanel, CoverSidebarPanel
 import React, { useState, useEffect, useCallback } from 'react';
 import { Guitar, Search, Loader2, Layers } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -14,7 +14,7 @@ import {
 } from '../../services/supersepApi';
 import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
-import { RecentCovers } from './RecentCovers';
+import { CoverSidebarPanel } from './CoverSidebarPanel';
 import { StemMixer } from './StemMixer';
 import {
   persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey,
@@ -258,7 +258,9 @@ export const CoverStudio: React.FC = () => {
         customMode: true,
         lyrics,
         style: artistCaption || engineParams.style || '',
-        title: `${songTitle || 'Cover'} (${selectedArtist?.name || 'Cover'})`,
+        title: songArtist
+          ? `${songTitle || 'Cover'} (${songArtist} Cover)`
+          : (songTitle || 'Cover'),
         taskType: 'cover',
         sourceAudioUrl,
         audioCoverStrength,
@@ -277,8 +279,10 @@ export const CoverStudio: React.FC = () => {
       // Apply album preset adapter (overrides global adapter)
       if (selectedPreset?.adapter_path) {
         params.loraPath = selectedPreset.adapter_path;
-        params.loraScale = selectedPreset.adapter_scale ?? gp.adapterScale;
-        if (selectedPreset.adapter_group_scales) params.adapterGroupScales = selectedPreset.adapter_group_scales;
+        // IMPORTANT: always use the user's manual scale from the adapters dropdown,
+        // NOT the preset's stored scale — user's manual overrides take priority.
+        // params.loraScale and params.adapterGroupScales already come from
+        // engineParams (spread on line 257) and must not be overridden here.
         // Override trigger word to match the preset's adapter, not the global one
         if (settings.triggerUseFilename) {
           const presetFilename = selectedPreset.adapter_path.split(/[\\/]/).pop() || '';
@@ -477,14 +481,12 @@ export const CoverStudio: React.FC = () => {
               placeholder="Lyrics will appear here after searching Genius, or paste them manually..."
               className="w-full h-full resize-none bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono leading-relaxed" />
           </div>
-          {/* Recent Covers + Stem Mixer below lyrics */}
-          <div className="flex-shrink-0 border-t border-zinc-200 dark:border-white/5 p-4 max-h-[360px] overflow-y-auto scrollbar-hide">
-            {advancedMode && sepStems && sepJobId ? (
+          {/* Stem Mixer (advanced mode only) */}
+          {advancedMode && sepStems && sepJobId && (
+            <div className="flex-shrink-0 border-t border-zinc-200 dark:border-white/5 p-4 max-h-[360px] overflow-y-auto scrollbar-hide">
               <StemMixer jobId={sepJobId} stems={sepStems} onRecombine={handleRecombine} />
-            ) : (
-              <RecentCovers refreshTrigger={refreshTrigger} />
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Right: Artist + Settings */}
@@ -504,6 +506,14 @@ export const CoverStudio: React.FC = () => {
           isGenerating={isGenerating} genProgress={genProgress} genStage={genStage}
           onGenerate={handleGenerate} onCancel={handleCancel}
         />
+
+        {/* Right: Recent Covers + Queue */}
+        <div className="w-72 flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden">
+          <CoverSidebarPanel
+            showToast={showToast}
+            refreshKey={refreshTrigger}
+          />
+        </div>
       </div>
     </div>
   );
