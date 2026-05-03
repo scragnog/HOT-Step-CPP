@@ -1,0 +1,1441 @@
+{
+  "version": 1,
+  "packs": [
+    {
+      "id": "quick-start",
+      "name": "Quick Start",
+      "description": "Standard Turbo model with full pipeline — ready to generate in minutes. Best for most users.",
+      "fileIds": [
+        "dit-std-turbo-q80",
+        "lm-4b-q80",
+        "embedding-q8",
+        "vae-bf16",
+        "scragvae-bf16",
+        "pp-vae-f32"
+      ]
+    },
+    {
+      "id": "minimal",
+      "name": "Minimal Setup",
+      "description": "Smallest viable setup — great for low-VRAM GPUs or quick testing.",
+      "fileIds": [
+        "dit-std-turbo-q4km",
+        "lm-1.7b-q80",
+        "embedding-q8",
+        "vae-bf16",
+        "scragvae-bf16",
+        "pp-vae-bf16"
+      ]
+    },
+    {
+      "id": "xl-quality",
+      "name": "XL Quality",
+      "description": "XL Turbo model — larger architecture for richer, more detailed audio. Needs ~12GB VRAM.",
+      "fileIds": [
+        "dit-xlturbo-q80",
+        "lm-4b-q80",
+        "embedding-q8",
+        "vae-bf16",
+        "scragvae-bf16",
+        "pp-vae-f32"
+      ]
+    },
+    {
+      "id": "blackwell",
+      "name": "Blackwell Optimized",
+      "description": "MXFP4 quantised XL — native FP4 Tensor Core acceleration on RTX 5000 series. 22% faster than Q4.",
+      "fileIds": [
+        "dit-mxfp4-xlturbo",
+        "lm-4b-q80",
+        "embedding-q8",
+        "vae-bf16",
+        "scragvae-bf16",
+        "pp-vae-f32"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "id": "dit-std-base-bf16",
+      "filename": "acestep-v15-base-BF16.gguf",
+      "role": "dit",
+      "displayName": "Base BF16",
+      "scale": "standard",
+      "variant": "base",
+      "quant": "BF16",
+      "sizeBytes": 4791642016,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-base-q80",
+      "filename": "acestep-v15-base-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "Base Q8_0",
+      "scale": "standard",
+      "variant": "base",
+      "quant": "Q8_0",
+      "sizeBytes": 2549527936,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-base-q6k",
+      "filename": "acestep-v15-base-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "Base Q6_K",
+      "scale": "standard",
+      "variant": "base",
+      "quant": "Q6_K",
+      "sizeBytes": 1970472000,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-base-q5km",
+      "filename": "acestep-v15-base-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "Base Q5_K_M",
+      "scale": "standard",
+      "variant": "base",
+      "quant": "Q5_K_M",
+      "sizeBytes": 1700140160,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-base-q4km",
+      "filename": "acestep-v15-base-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "Base Q4_K_M",
+      "scale": "standard",
+      "variant": "base",
+      "quant": "Q4_K_M",
+      "sizeBytes": 1445710208,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-sft-bf16",
+      "filename": "acestep-v15-sft-BF16.gguf",
+      "role": "dit",
+      "displayName": "SFT BF16",
+      "scale": "standard",
+      "variant": "sft",
+      "quant": "BF16",
+      "sizeBytes": 4791642016,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-sft-q80",
+      "filename": "acestep-v15-sft-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "SFT Q8_0",
+      "scale": "standard",
+      "variant": "sft",
+      "quant": "Q8_0",
+      "sizeBytes": 2549527936,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-sft-q6k",
+      "filename": "acestep-v15-sft-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "SFT Q6_K",
+      "scale": "standard",
+      "variant": "sft",
+      "quant": "Q6_K",
+      "sizeBytes": 1970472000,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-sft-q5km",
+      "filename": "acestep-v15-sft-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "SFT Q5_K_M",
+      "scale": "standard",
+      "variant": "sft",
+      "quant": "Q5_K_M",
+      "sizeBytes": 1700140160,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-sft-q4km",
+      "filename": "acestep-v15-sft-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "SFT Q4_K_M",
+      "scale": "standard",
+      "variant": "sft",
+      "quant": "Q4_K_M",
+      "sizeBytes": 1445710208,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-bf16",
+      "filename": "acestep-v15-turbo-BF16.gguf",
+      "role": "dit",
+      "displayName": "Turbo BF16",
+      "scale": "standard",
+      "variant": "turbo",
+      "quant": "BF16",
+      "sizeBytes": 4791642080,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Fast generation — only 8 steps needed. Great starting point.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-std-turbo-q80",
+      "filename": "acestep-v15-turbo-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "Turbo Q8_0",
+      "scale": "standard",
+      "variant": "turbo",
+      "quant": "Q8_0",
+      "sizeBytes": 2549528000,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Fast generation — only 8 steps needed. Great starting point.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-std-turbo-q6k",
+      "filename": "acestep-v15-turbo-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "Turbo Q6_K",
+      "scale": "standard",
+      "variant": "turbo",
+      "quant": "Q6_K",
+      "sizeBytes": 1970472064,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Fast generation — only 8 steps needed. Great starting point.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-std-turbo-q5km",
+      "filename": "acestep-v15-turbo-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "Turbo Q5_K_M",
+      "scale": "standard",
+      "variant": "turbo",
+      "quant": "Q5_K_M",
+      "sizeBytes": 1700140224,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Fast generation — only 8 steps needed. Great starting point.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-std-turbo-q4km",
+      "filename": "acestep-v15-turbo-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "Turbo Q4_K_M",
+      "scale": "standard",
+      "variant": "turbo",
+      "quant": "Q4_K_M",
+      "sizeBytes": 1445710272,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Fast generation — only 8 steps needed. Great starting point.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-std-sftturbo50-bf16",
+      "filename": "acestep-v15-sftturbo50-BF16.gguf",
+      "role": "dit",
+      "displayName": "SFT+Turbo 50% BF16",
+      "scale": "standard",
+      "variant": "sftturbo50",
+      "quant": "BF16",
+      "sizeBytes": 4791642016,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Weight merge of SFT and Turbo — richer than Turbo, faster than SFT. 8-15 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-sftturbo50-q80",
+      "filename": "acestep-v15-sftturbo50-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "SFT+Turbo 50% Q8_0",
+      "scale": "standard",
+      "variant": "sftturbo50",
+      "quant": "Q8_0",
+      "sizeBytes": 2549527936,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Weight merge of SFT and Turbo — richer than Turbo, faster than SFT. 8-15 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-continuous-bf16",
+      "filename": "acestep-v15-turbo-continuous-BF16.gguf",
+      "role": "dit",
+      "displayName": "Turbo Continuous BF16",
+      "scale": "standard",
+      "variant": "turbo-continuous",
+      "quant": "BF16",
+      "sizeBytes": 4791642080,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo variant optimised for continuous/long-form generation.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-continuous-q80",
+      "filename": "acestep-v15-turbo-continuous-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "Turbo Continuous Q8_0",
+      "scale": "standard",
+      "variant": "turbo-continuous",
+      "quant": "Q8_0",
+      "sizeBytes": 2549527968,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo variant optimised for continuous/long-form generation.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-continuous-q6k",
+      "filename": "acestep-v15-turbo-continuous-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "Turbo Continuous Q6_K",
+      "scale": "standard",
+      "variant": "turbo-continuous",
+      "quant": "Q6_K",
+      "sizeBytes": 1970472032,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo variant optimised for continuous/long-form generation.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-continuous-q5km",
+      "filename": "acestep-v15-turbo-continuous-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "Turbo Continuous Q5_K_M",
+      "scale": "standard",
+      "variant": "turbo-continuous",
+      "quant": "Q5_K_M",
+      "sizeBytes": 1700140192,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo variant optimised for continuous/long-form generation.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-continuous-q4km",
+      "filename": "acestep-v15-turbo-continuous-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "Turbo Continuous Q4_K_M",
+      "scale": "standard",
+      "variant": "turbo-continuous",
+      "quant": "Q4_K_M",
+      "sizeBytes": 1445710240,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo variant optimised for continuous/long-form generation.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift1-bf16",
+      "filename": "acestep-v15-turbo-shift1-BF16.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift1 BF16",
+      "scale": "standard",
+      "variant": "turbo-shift1",
+      "quant": "BF16",
+      "sizeBytes": 4791642048,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift1-q80",
+      "filename": "acestep-v15-turbo-shift1-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift1 Q8_0",
+      "scale": "standard",
+      "variant": "turbo-shift1",
+      "quant": "Q8_0",
+      "sizeBytes": 2549527968,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift1-q6k",
+      "filename": "acestep-v15-turbo-shift1-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift1 Q6_K",
+      "scale": "standard",
+      "variant": "turbo-shift1",
+      "quant": "Q6_K",
+      "sizeBytes": 1970472032,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift1-q5km",
+      "filename": "acestep-v15-turbo-shift1-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift1 Q5_K_M",
+      "scale": "standard",
+      "variant": "turbo-shift1",
+      "quant": "Q5_K_M",
+      "sizeBytes": 1700140192,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift1-q4km",
+      "filename": "acestep-v15-turbo-shift1-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift1 Q4_K_M",
+      "scale": "standard",
+      "variant": "turbo-shift1",
+      "quant": "Q4_K_M",
+      "sizeBytes": 1445710240,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift3-bf16",
+      "filename": "acestep-v15-turbo-shift3-BF16.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift3 BF16",
+      "scale": "standard",
+      "variant": "turbo-shift3",
+      "quant": "BF16",
+      "sizeBytes": 4791642048,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift3-q80",
+      "filename": "acestep-v15-turbo-shift3-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift3 Q8_0",
+      "scale": "standard",
+      "variant": "turbo-shift3",
+      "quant": "Q8_0",
+      "sizeBytes": 2549527968,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift3-q6k",
+      "filename": "acestep-v15-turbo-shift3-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift3 Q6_K",
+      "scale": "standard",
+      "variant": "turbo-shift3",
+      "quant": "Q6_K",
+      "sizeBytes": 1970472032,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift3-q5km",
+      "filename": "acestep-v15-turbo-shift3-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift3 Q5_K_M",
+      "scale": "standard",
+      "variant": "turbo-shift3",
+      "quant": "Q5_K_M",
+      "sizeBytes": 1700140192,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
+      "tags": []
+    },
+    {
+      "id": "dit-std-turbo-shift3-q4km",
+      "filename": "acestep-v15-turbo-shift3-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift3 Q4_K_M",
+      "scale": "standard",
+      "variant": "turbo-shift3",
+      "quant": "Q4_K_M",
+      "sizeBytes": 1445710240,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlbase-bf16",
+      "filename": "acestep-v15-xl-base-BF16.gguf",
+      "role": "dit",
+      "displayName": "XL Base BF16",
+      "scale": "xl",
+      "variant": "xl-base",
+      "quant": "BF16",
+      "sizeBytes": 9978530784,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlbase-q80",
+      "filename": "acestep-v15-xl-base-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "XL Base Q8_0",
+      "scale": "xl",
+      "variant": "xl-base",
+      "quant": "Q8_0",
+      "sizeBytes": 5305828704,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlbase-q6k",
+      "filename": "acestep-v15-xl-base-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "XL Base Q6_K",
+      "scale": "xl",
+      "variant": "xl-base",
+      "quant": "Q6_K",
+      "sizeBytes": 4098812960,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlbase-q5km",
+      "filename": "acestep-v15-xl-base-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "XL Base Q5_K_M",
+      "scale": "xl",
+      "variant": "xl-base",
+      "quant": "Q5_K_M",
+      "sizeBytes": 3527566432,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlbase-q4km",
+      "filename": "acestep-v15-xl-base-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "XL Base Q4_K_M",
+      "scale": "xl",
+      "variant": "xl-base",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2989922656,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlsft-bf16",
+      "filename": "acestep-v15-xl-sft-BF16.gguf",
+      "role": "dit",
+      "displayName": "XL SFT BF16",
+      "scale": "xl",
+      "variant": "xl-sft",
+      "quant": "BF16",
+      "sizeBytes": 9978530784,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlsft-q80",
+      "filename": "acestep-v15-xl-sft-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "XL SFT Q8_0",
+      "scale": "xl",
+      "variant": "xl-sft",
+      "quant": "Q8_0",
+      "sizeBytes": 5305828704,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlsft-q6k",
+      "filename": "acestep-v15-xl-sft-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "XL SFT Q6_K",
+      "scale": "xl",
+      "variant": "xl-sft",
+      "quant": "Q6_K",
+      "sizeBytes": 4098812960,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlsft-q5km",
+      "filename": "acestep-v15-xl-sft-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "XL SFT Q5_K_M",
+      "scale": "xl",
+      "variant": "xl-sft",
+      "quant": "Q5_K_M",
+      "sizeBytes": 3527566432,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlsft-q4km",
+      "filename": "acestep-v15-xl-sft-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "XL SFT Q4_K_M",
+      "scale": "xl",
+      "variant": "xl-sft",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2989922656,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlturbo-bf16",
+      "filename": "acestep-v15-xl-turbo-BF16.gguf",
+      "role": "dit",
+      "displayName": "XL Turbo BF16",
+      "scale": "xl",
+      "variant": "xl-turbo",
+      "quant": "BF16",
+      "sizeBytes": 9978530816,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-xlturbo-q80",
+      "filename": "acestep-v15-xl-turbo-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "XL Turbo Q8_0",
+      "scale": "xl",
+      "variant": "xl-turbo",
+      "quant": "Q8_0",
+      "sizeBytes": 5305828736,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-xlturbo-q6k",
+      "filename": "acestep-v15-xl-turbo-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "XL Turbo Q6_K",
+      "scale": "xl",
+      "variant": "xl-turbo",
+      "quant": "Q6_K",
+      "sizeBytes": 4098812992,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-xlturbo-q5km",
+      "filename": "acestep-v15-xl-turbo-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "XL Turbo Q5_K_M",
+      "scale": "xl",
+      "variant": "xl-turbo",
+      "quant": "Q5_K_M",
+      "sizeBytes": 3527566464,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-xlturbo-q4km",
+      "filename": "acestep-v15-xl-turbo-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "XL Turbo Q4_K_M",
+      "scale": "xl",
+      "variant": "xl-turbo",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2989922688,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-xlsftturbo50-bf16",
+      "filename": "acestep-v15-xl-sftturbo50-BF16.gguf",
+      "role": "dit",
+      "displayName": "XL SFT+Turbo 50% BF16",
+      "scale": "xl",
+      "variant": "xl-sftturbo50",
+      "quant": "BF16",
+      "sizeBytes": 9978530816,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlsftturbo50-q80",
+      "filename": "acestep-v15-xl-sftturbo50-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "XL SFT+Turbo 50% Q8_0",
+      "scale": "xl",
+      "variant": "xl-sftturbo50",
+      "quant": "Q8_0",
+      "sizeBytes": 5305828768,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlsftturbo50-q6k",
+      "filename": "acestep-v15-xl-sftturbo50-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "XL SFT+Turbo 50% Q6_K",
+      "scale": "xl",
+      "variant": "xl-sftturbo50",
+      "quant": "Q6_K",
+      "sizeBytes": 4098813024,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlsftturbo50-q5km",
+      "filename": "acestep-v15-xl-sftturbo50-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "XL SFT+Turbo 50% Q5_K_M",
+      "scale": "xl",
+      "variant": "xl-sftturbo50",
+      "quant": "Q5_K_M",
+      "sizeBytes": 3527566496,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-xlsftturbo50-q4km",
+      "filename": "acestep-v15-xl-sftturbo50-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "XL SFT+Turbo 50% Q4_K_M",
+      "scale": "xl",
+      "variant": "xl-sftturbo50",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2989922720,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebasesftxlta0.5-bf16",
+      "filename": "acestep-v15-merge-base-sft-xl-ta-0.5-BF16.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+SFT (λ=0.5) BF16",
+      "scale": "xl",
+      "variant": "merge-base-sft-xl-ta-0.5",
+      "quant": "BF16",
+      "sizeBytes": 9978530784,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebasesftxlta0.5-q80",
+      "filename": "acestep-v15-merge-base-sft-xl-ta-0.5-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+SFT (λ=0.5) Q8_0",
+      "scale": "xl",
+      "variant": "merge-base-sft-xl-ta-0.5",
+      "quant": "Q8_0",
+      "sizeBytes": 5305828736,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebasesftxlta0.5-q6k",
+      "filename": "acestep-v15-merge-base-sft-xl-ta-0.5-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+SFT (λ=0.5) Q6_K",
+      "scale": "xl",
+      "variant": "merge-base-sft-xl-ta-0.5",
+      "quant": "Q6_K",
+      "sizeBytes": 4098812992,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebasesftxlta0.5-q5km",
+      "filename": "acestep-v15-merge-base-sft-xl-ta-0.5-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+SFT (λ=0.5) Q5_K_M",
+      "scale": "xl",
+      "variant": "merge-base-sft-xl-ta-0.5",
+      "quant": "Q5_K_M",
+      "sizeBytes": 3527566464,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebasesftxlta0.5-q4km",
+      "filename": "acestep-v15-merge-base-sft-xl-ta-0.5-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+SFT (λ=0.5) Q4_K_M",
+      "scale": "xl",
+      "variant": "merge-base-sft-xl-ta-0.5",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2989922688,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebaseturboxlta0.5-bf16",
+      "filename": "acestep-v15-merge-base-turbo-xl-ta-0.5-BF16.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+Turbo (λ=0.5) BF16",
+      "scale": "xl",
+      "variant": "merge-base-turbo-xl-ta-0.5",
+      "quant": "BF16",
+      "sizeBytes": 9978530784,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebaseturboxlta0.5-q80",
+      "filename": "acestep-v15-merge-base-turbo-xl-ta-0.5-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+Turbo (λ=0.5) Q8_0",
+      "scale": "xl",
+      "variant": "merge-base-turbo-xl-ta-0.5",
+      "quant": "Q8_0",
+      "sizeBytes": 5305828736,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebaseturboxlta0.5-q6k",
+      "filename": "acestep-v15-merge-base-turbo-xl-ta-0.5-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+Turbo (λ=0.5) Q6_K",
+      "scale": "xl",
+      "variant": "merge-base-turbo-xl-ta-0.5",
+      "quant": "Q6_K",
+      "sizeBytes": 4098812992,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebaseturboxlta0.5-q5km",
+      "filename": "acestep-v15-merge-base-turbo-xl-ta-0.5-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+Turbo (λ=0.5) Q5_K_M",
+      "scale": "xl",
+      "variant": "merge-base-turbo-xl-ta-0.5",
+      "quant": "Q5_K_M",
+      "sizeBytes": 3527566464,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergebaseturboxlta0.5-q4km",
+      "filename": "acestep-v15-merge-base-turbo-xl-ta-0.5-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+Turbo (λ=0.5) Q4_K_M",
+      "scale": "xl",
+      "variant": "merge-base-turbo-xl-ta-0.5",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2989922688,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergesftturboxlta0.3-bf16",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.3-BF16.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.3) BF16",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.3",
+      "quant": "BF16",
+      "sizeBytes": 9978530784,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-mergesftturboxlta0.3-q80",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.3-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.3) Q8_0",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.3",
+      "quant": "Q8_0",
+      "sizeBytes": 5305828736,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-mergesftturboxlta0.3-q6k",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.3-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.3) Q6_K",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.3",
+      "quant": "Q6_K",
+      "sizeBytes": 4098812992,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-mergesftturboxlta0.3-q5km",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.3-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.3) Q5_K_M",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.3",
+      "quant": "Q5_K_M",
+      "sizeBytes": 3527566464,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-mergesftturboxlta0.3-q4km",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.3-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.3) Q4_K_M",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.3",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2989922688,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "dit-mergesftturboxlta0.7-bf16",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.7-BF16.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.7) BF16",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.7",
+      "quant": "BF16",
+      "sizeBytes": 9978530784,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergesftturboxlta0.7-q80",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.7-Q8_0.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.7) Q8_0",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.7",
+      "quant": "Q8_0",
+      "sizeBytes": 5305828736,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergesftturboxlta0.7-q6k",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.7-Q6_K.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.7) Q6_K",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.7",
+      "quant": "Q6_K",
+      "sizeBytes": 4098812992,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergesftturboxlta0.7-q5km",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.7-Q5_K_M.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.7) Q5_K_M",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.7",
+      "quant": "Q5_K_M",
+      "sizeBytes": 3527566464,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mergesftturboxlta0.7-q4km",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.7-Q4_K_M.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.7) Q4_K_M",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.7",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2989922688,
+      "repo": "scragnog/ace-step-1.5-gguf-merge-models",
+      "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
+      "tags": []
+    },
+    {
+      "id": "dit-mxfp4-base",
+      "filename": "acestep-v15-base-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "Base MXFP4",
+      "scale": "standard",
+      "variant": "base",
+      "quant": "MXFP4",
+      "sizeBytes": 1281885888,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "Base model in MXFP4 — 3.7x compression, native FP4 on Blackwell GPUs.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-sft",
+      "filename": "acestep-v15-sft-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "SFT MXFP4",
+      "scale": "standard",
+      "variant": "sft",
+      "quant": "MXFP4",
+      "sizeBytes": 1281885888,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "SFT model in MXFP4 — strong structure with minimal VRAM.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-sftturbo50",
+      "filename": "acestep-v15-sftturbo50-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "SFT+Turbo 50% MXFP4",
+      "scale": "standard",
+      "variant": "sftturbo50",
+      "quant": "MXFP4",
+      "sizeBytes": 1281885888,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "SFT+Turbo merge in MXFP4 — balanced and tiny.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-turbo",
+      "filename": "acestep-v15-turbo-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "Turbo MXFP4",
+      "scale": "standard",
+      "variant": "turbo",
+      "quant": "MXFP4",
+      "sizeBytes": 1281885888,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "Turbo in MXFP4 — fastest possible generation with minimal VRAM.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-turbocontinuous",
+      "filename": "acestep-v15-turbo-continuous-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "Turbo Continuous MXFP4",
+      "scale": "standard",
+      "variant": "turbo-continuous",
+      "quant": "MXFP4",
+      "sizeBytes": 1281885920,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "Continuous generation variant in MXFP4.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-turboshift1",
+      "filename": "acestep-v15-turbo-shift1-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift1 MXFP4",
+      "scale": "standard",
+      "variant": "turbo-shift1",
+      "quant": "MXFP4",
+      "sizeBytes": 1281885920,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "Shift1 scheduling in MXFP4.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-turboshift3",
+      "filename": "acestep-v15-turbo-shift3-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "Turbo Shift3 MXFP4",
+      "scale": "standard",
+      "variant": "turbo-shift3",
+      "quant": "MXFP4",
+      "sizeBytes": 1281885920,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "Shift3 scheduling in MXFP4.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-xlbase",
+      "filename": "acestep-v15-xl-base-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "XL Base MXFP4",
+      "scale": "xl",
+      "variant": "xl-base",
+      "quant": "MXFP4",
+      "sizeBytes": 2660726432,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "XL Base in MXFP4 — large model, small footprint.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-xlsft",
+      "filename": "acestep-v15-xl-sft-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "XL SFT MXFP4",
+      "scale": "xl",
+      "variant": "xl-sft",
+      "quant": "MXFP4",
+      "sizeBytes": 2660726432,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "XL SFT in MXFP4 — best structure with low VRAM.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-xlsftturbo50",
+      "filename": "acestep-v15-xl-sftturbo50-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "XL SFT+Turbo 50% MXFP4",
+      "scale": "xl",
+      "variant": "xl-sftturbo50",
+      "quant": "MXFP4",
+      "sizeBytes": 2660726496,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "XL SFT+Turbo merge in MXFP4.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-xlturbo",
+      "filename": "acestep-v15-xl-turbo-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "XL Turbo MXFP4",
+      "scale": "xl",
+      "variant": "xl-turbo",
+      "quant": "MXFP4",
+      "sizeBytes": 2660726464,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "XL Turbo in MXFP4 — fastest XL with Blackwell native FP4 acceleration.",
+      "tags": [
+        "recommended",
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-mergebaseturboxlta0.5",
+      "filename": "acestep-v15-merge-base-turbo-xl-ta-0.5-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "Merge Base+Turbo MXFP4",
+      "scale": "xl",
+      "variant": "merge-base-turbo-xl-ta-0.5",
+      "quant": "MXFP4",
+      "sizeBytes": 2660726464,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "Base+Turbo merge in MXFP4.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-mergesftturboxlta0.3",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.3-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.3) MXFP4",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.3",
+      "quant": "MXFP4",
+      "sizeBytes": 2660726464,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "SFT+Turbo (mostly SFT) merge in MXFP4.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "dit-mxfp4-mergesftturboxlta0.7",
+      "filename": "acestep-v15-merge-sft-turbo-xl-ta-0.7-MXFP4.gguf",
+      "role": "dit",
+      "displayName": "Merge SFT+Turbo (λ=0.7) MXFP4",
+      "scale": "xl",
+      "variant": "merge-sft-turbo-xl-ta-0.7",
+      "quant": "MXFP4",
+      "sizeBytes": 2660726464,
+      "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
+      "description": "SFT+Turbo (mostly Turbo) merge in MXFP4.",
+      "tags": [
+        "blackwell"
+      ]
+    },
+    {
+      "id": "lm-4b-bf16",
+      "filename": "acestep-5Hz-lm-4B-BF16.gguf",
+      "role": "lm",
+      "displayName": "LM 4B BF16",
+      "scale": null,
+      "variant": "4B",
+      "quant": "BF16",
+      "sizeBytes": 8384454592,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Full-size language model — best audio code generation quality. 7.9GB.",
+      "tags": []
+    },
+    {
+      "id": "lm-4b-q80",
+      "filename": "acestep-5Hz-lm-4B-Q8_0.gguf",
+      "role": "lm",
+      "displayName": "LM 4B Q8",
+      "scale": null,
+      "variant": "4B",
+      "quant": "Q8_0",
+      "sizeBytes": 4457323648,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Near-lossless 4B LM — recommended balance of quality and size.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "lm-4b-q6k",
+      "filename": "acestep-5Hz-lm-4B-Q6_K.gguf",
+      "role": "lm",
+      "displayName": "LM 4B Q6_K",
+      "scale": null,
+      "variant": "4B",
+      "quant": "Q6_K",
+      "sizeBytes": 3442713504,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "4B LM with good quality at reduced size.",
+      "tags": []
+    },
+    {
+      "id": "lm-4b-q5km",
+      "filename": "acestep-5Hz-lm-4B-Q5_K_M.gguf",
+      "role": "lm",
+      "displayName": "LM 4B Q5_K_M",
+      "scale": null,
+      "variant": "4B",
+      "quant": "Q5_K_M",
+      "sizeBytes": 3025965984,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "4B LM — smaller with some quality trade-off.",
+      "tags": []
+    },
+    {
+      "id": "lm-1.7b-bf16",
+      "filename": "acestep-5Hz-lm-1.7B-BF16.gguf",
+      "role": "lm",
+      "displayName": "LM 1.7B BF16",
+      "scale": null,
+      "variant": "1.7B",
+      "quant": "BF16",
+      "sizeBytes": 3713827104,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Mid-size LM — good quality with lower VRAM. 3.5GB.",
+      "tags": []
+    },
+    {
+      "id": "lm-1.7b-q80",
+      "filename": "acestep-5Hz-lm-1.7B-Q8_0.gguf",
+      "role": "lm",
+      "displayName": "LM 1.7B Q8",
+      "scale": null,
+      "variant": "1.7B",
+      "quant": "Q8_0",
+      "sizeBytes": 1975837568,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Mid-size LM quantised — decent quality, very compact.",
+      "tags": []
+    },
+    {
+      "id": "lm-0.6b-bf16",
+      "filename": "acestep-5Hz-lm-0.6B-BF16.gguf",
+      "role": "lm",
+      "displayName": "LM 0.6B BF16",
+      "scale": null,
+      "variant": "0.6B",
+      "quant": "BF16",
+      "sizeBytes": 1331108128,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Smallest LM — fast but lower quality audio codes. 1.3GB.",
+      "tags": []
+    },
+    {
+      "id": "lm-0.6b-q80",
+      "filename": "acestep-5Hz-lm-0.6B-Q8_0.gguf",
+      "role": "lm",
+      "displayName": "LM 0.6B Q8",
+      "scale": null,
+      "variant": "0.6B",
+      "quant": "Q8_0",
+      "sizeBytes": 709846656,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Tiny LM — minimum viable for quick experiments.",
+      "tags": []
+    },
+    {
+      "id": "embedding-bf16",
+      "filename": "Qwen3-Embedding-0.6B-BF16.gguf",
+      "role": "embedding",
+      "displayName": "Qwen3 Embedding BF16",
+      "scale": null,
+      "variant": null,
+      "quant": "BF16",
+      "sizeBytes": 1196890592,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Full-precision text encoder — architecturally locked to all DiT models.",
+      "tags": []
+    },
+    {
+      "id": "embedding-q8",
+      "filename": "Qwen3-Embedding-0.6B-Q8_0.gguf",
+      "role": "embedding",
+      "displayName": "Qwen3 Embedding Q8",
+      "scale": null,
+      "variant": null,
+      "quant": "Q8_0",
+      "sizeBytes": 784144960,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Quantised text encoder — recommended, minimal quality loss.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "vae-bf16",
+      "filename": "vae-BF16.gguf",
+      "role": "vae",
+      "displayName": "Standard VAE",
+      "scale": null,
+      "variant": null,
+      "quant": "BF16",
+      "sizeBytes": 337420928,
+      "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+      "description": "Original ACE-Step VAE decoder — always BF16, required for all generation.",
+      "tags": [
+        "essential"
+      ]
+    },
+    {
+      "id": "scragvae-bf16",
+      "filename": "scragvae-BF16.gguf",
+      "role": "vae",
+      "displayName": "ScragVAE (Improved Decoder)",
+      "scale": null,
+      "variant": null,
+      "quant": "BF16",
+      "sizeBytes": 337420928,
+      "repo": "scragnog/Ace-Step-1.5-ScragVAE",
+      "description": "Fine-tuned VAE decoder with +38% high-frequency energy, +29dB dynamic range. Drop-in replacement for clearer, brighter audio.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "pp-vae-f32",
+      "filename": "pp-vae-F32.gguf",
+      "role": "pp-vae",
+      "displayName": "PP-VAE F32",
+      "scale": null,
+      "variant": null,
+      "quant": "F32",
+      "sizeBytes": 674811744,
+      "repo": "scragnog/HOT-Step-CPP-PP-VAE",
+      "description": "Post-processing VAE (full precision) — neural audio polish via encode→decode round-trip. Recommended for best cleanup quality.",
+      "tags": [
+        "recommended"
+      ]
+    },
+    {
+      "id": "pp-vae-bf16",
+      "filename": "pp-vae-BF16.gguf",
+      "role": "pp-vae",
+      "displayName": "PP-VAE BF16",
+      "scale": null,
+      "variant": null,
+      "quant": "BF16",
+      "sizeBytes": 337420896,
+      "repo": "scragnog/HOT-Step-CPP-PP-VAE",
+      "description": "Post-processing VAE (half precision) — good balance of quality and size.",
+      "tags": []
+    },
+    {
+      "id": "pp-vae-f16",
+      "filename": "pp-vae-F16.gguf",
+      "role": "pp-vae",
+      "displayName": "PP-VAE F16",
+      "scale": null,
+      "variant": null,
+      "quant": "F16",
+      "sizeBytes": 337420896,
+      "repo": "scragnog/HOT-Step-CPP-PP-VAE",
+      "description": "Post-processing VAE (FP16) — alternative half-precision variant.",
+      "tags": []
+    }
+  ]
+}
