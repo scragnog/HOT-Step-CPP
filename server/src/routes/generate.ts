@@ -110,7 +110,7 @@ function evictLmCache(): void {
 /** Translate frontend params to AceRequest format */
 function translateParams(params: any): AceRequest {
   const req: AceRequest = {
-    caption: params.prompt || params.songDescription || params.caption || '',
+    caption: params.prompt || params.songDescription || params.caption || params.style || '',
   };
 
   // Lyrics / instrumental
