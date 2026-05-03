@@ -2,6 +2,7 @@
 import React, { useCallback, useState } from 'react';
 import { Upload, Music, Loader2, X } from 'lucide-react';
 import type { AudioMetadata, AudioAnalysis } from './coverStudioUtils';
+import { ALL_KEYS } from './coverStudioUtils';
 
 interface SourcePanelProps {
   sourceFileName: string;
@@ -13,12 +14,15 @@ interface SourcePanelProps {
   onClear: () => void;
   bpmCorrection: number;
   onBpmCorrectionChange: (v: number) => void;
+  keyOverride: string | null;
+  onKeyOverrideChange: (v: string | null) => void;
 }
 
 export const SourcePanel: React.FC<SourcePanelProps> = ({
   sourceFileName, metadata, analysis, isUploading, isAnalyzing,
   onFileSelected, onClear,
   bpmCorrection, onBpmCorrectionChange,
+  keyOverride, onKeyOverrideChange,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -33,6 +37,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
   }, [onFileSelected]);
 
   const correctedBpm = analysis?.bpm ? Math.round(analysis.bpm * bpmCorrection) : null;
+  const effectiveKey = keyOverride || analysis?.key || null;
 
   return (
     <div className="w-[320px] flex-shrink-0 overflow-y-auto scrollbar-hide border-r border-zinc-200 dark:border-white/5 p-4 space-y-4">
@@ -125,7 +130,12 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
             </div>
             <div className="rounded-lg bg-gradient-to-br from-teal-500/10 to-emerald-500/10 border border-teal-500/20 p-3 text-center">
               <span className="text-[10px] text-zinc-500 block">Key</span>
-              <span className="text-lg font-bold text-teal-400">{analysis.key}</span>
+              <span className="text-lg font-bold text-teal-400">{effectiveKey || analysis.key}</span>
+              {keyOverride && (
+                <span className="text-[9px] text-zinc-500 block">
+                  (detected: {analysis.key})
+                </span>
+              )}
             </div>
           </div>
           {/* BPM correction — Essentia sometimes halves or doubles the tempo */}
@@ -149,6 +159,26 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
                   {opt.label}
                 </button>
               ))}
+            </div>
+          </div>
+          {/* Key override — Essentia sometimes gets the wrong key */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-zinc-500 whitespace-nowrap">Key fix:</span>
+            <div className="relative flex-1">
+              <select
+                value={keyOverride || ''}
+                onChange={e => onKeyOverrideChange(e.target.value || null)}
+                className={`w-full appearance-none rounded-md px-2 py-1 text-[10px] font-medium transition-all cursor-pointer focus:outline-none ${
+                  keyOverride
+                    ? 'bg-teal-500/20 text-teal-300 ring-1 ring-teal-500/40'
+                    : 'bg-white/5 text-zinc-500 hover:bg-white/10 hover:text-zinc-300'
+                }`}
+              >
+                <option value="">Detected{analysis?.key ? ` (${analysis.key})` : ''}</option>
+                {ALL_KEYS.map(k => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
             </div>
           </div>
         </div>

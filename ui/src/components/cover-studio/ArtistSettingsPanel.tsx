@@ -23,6 +23,7 @@ interface ArtistSettingsPanelProps {
   onPitchShift: (v: number) => void;
   analysis: AudioAnalysis | null;
   bpmCorrection: number;
+  keyOverride: string | null;
   artistCaption: string;
   onArtistCaptionChange: (v: string) => void;
   canGenerate: boolean;
@@ -38,12 +39,13 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
     artists, isLoadingArtists, selectedArtistId, onSelectArtist,
     artistPresets, selectedPreset, onSelectPreset,
     audioCoverStrength, onAudioCoverStrength, coverNoiseStrength, onCoverNoiseStrength,
-    tempoScale, onTempoScale, pitchShift, onPitchShift, analysis, bpmCorrection,
+    tempoScale, onTempoScale, pitchShift, onPitchShift, analysis, bpmCorrection, keyOverride,
     artistCaption, onArtistCaptionChange,
     canGenerate, isGenerating, genProgress, genStage, onGenerate, onCancel,
   } = props;
 
   const presetsWithAdapters = artistPresets.filter(p => p.preset?.adapter_path);
+  const effectiveKey = keyOverride || analysis?.key || null;
 
   return (
     <div className="w-[540px] flex-shrink-0 overflow-y-auto scrollbar-hide p-4 space-y-4">
@@ -184,11 +186,11 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
         <EditableSlider label="Pitch Shift" value={pitchShift} min={-12} max={12} step={1}
           onChange={onPitchShift}
           formatDisplay={v => {
-            const shifted = analysis?.key ? transposeKey(analysis.key, v) : null;
+            const shifted = effectiveKey ? transposeKey(effectiveKey, v) : null;
             const sign = v > 0 ? '+' : '';
             return shifted && v !== 0 ? `${sign}${v} st → ${shifted}` : `${sign}${v} st`;
           }}
-          helpText={`Semitones (-12 to +12)${analysis?.key ? `. Source: ${analysis.key}` : ''}`} />
+          helpText={`Semitones (-12 to +12)${effectiveKey ? `. Source: ${effectiveKey}` : ''}`} />
       </div>
 
       <div className="border-t border-zinc-200 dark:border-white/5" />

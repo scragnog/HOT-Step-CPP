@@ -59,6 +59,7 @@ export const CoverStudio: React.FC = () => {
   const [tempoScale, setTempoScale] = useState(() => restore<number>('tempoScale', 1.0));
   const [pitchShift, setPitchShift] = useState(() => restore<number>('pitchShift', 0));
   const [bpmCorrection, setBpmCorrection] = useState(() => restore<number>('bpmCorrection', 1));
+  const [keyOverride, setKeyOverride] = useState<string | null>(() => restore<string | null>('keyOverride', null));
 
   // ── Generation ──
   const [isGenerating, setIsGenerating] = useState(false);
@@ -96,6 +97,7 @@ export const CoverStudio: React.FC = () => {
   useEffect(() => { persist('tempoScale', tempoScale); }, [tempoScale]);
   useEffect(() => { persist('pitchShift', pitchShift); }, [pitchShift]);
   useEffect(() => { persist('bpmCorrection', bpmCorrection); }, [bpmCorrection]);
+  useEffect(() => { persist('keyOverride', keyOverride); }, [keyOverride]);
   useEffect(() => { persist('sepLevel', sepLevel); }, [sepLevel]);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
@@ -252,7 +254,7 @@ export const CoverStudio: React.FC = () => {
     try {
       const selectedArtist = artists.find(a => a.id === selectedArtistId);
       const sourceBpm = (analysis?.bpm || 120) * bpmCorrection;
-      const sourceKey = analysis?.key || 'C major';
+      const sourceKey = keyOverride || analysis?.key || 'C major';
       const targetBpm = Math.round(sourceBpm * tempoScale);
       const targetKey = pitchShift !== 0 ? transposeKey(sourceKey, pitchShift) : sourceKey;
 
@@ -383,6 +385,7 @@ export const CoverStudio: React.FC = () => {
     setSourceFileName(''); setSourceAudioUrl('');
     setMetadata(null); setAnalysis(null);
     setSongArtist(''); setSongTitle(''); setLyrics('');
+    setBpmCorrection(1); setKeyOverride(null);
   };
 
   const canGenerate = !!sourceAudioUrl && !!lyrics.trim() && !isGenerating;
@@ -500,6 +503,7 @@ export const CoverStudio: React.FC = () => {
           isUploading={isUploading} isAnalyzing={isAnalyzing}
           onFileSelected={handleFileSelected} onClear={handleClearSource}
           bpmCorrection={bpmCorrection} onBpmCorrectionChange={setBpmCorrection}
+          keyOverride={keyOverride} onKeyOverrideChange={setKeyOverride}
         />
 
         {/* Center: Lyrics */}
@@ -545,6 +549,7 @@ export const CoverStudio: React.FC = () => {
           pitchShift={pitchShift} onPitchShift={setPitchShift}
           analysis={analysis}
           bpmCorrection={bpmCorrection}
+          keyOverride={keyOverride}
           artistCaption={artistCaption} onArtistCaptionChange={setArtistCaption}
           canGenerate={canGenerate}
           isGenerating={isGenerating} genProgress={genProgress} genStage={genStage}
