@@ -3,9 +3,11 @@
 // Adapted from create/ModelSelector.tsx to read from GlobalParamsContext.
 
 import React, { useEffect, useState } from 'react';
+import { Download } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { modelApi } from '../../services/api';
 import { formatDitModel, formatLmModel, formatVaeModel } from './modelLabels';
+import { ModelManagerModal } from '../model-manager/ModelManagerModal';
 import type { AceModels } from '../../types';
 
 const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-white/10 text-sm text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
@@ -13,6 +15,7 @@ const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-800 border border-whi
 export const ModelsDropdown: React.FC = () => {
   const gp = useGlobalParams();
   const [models, setModels] = useState<AceModels | null>(null);
+  const [showModelManager, setShowModelManager] = useState(false);
 
   useEffect(() => {
     modelApi.list()
@@ -62,6 +65,24 @@ export const ModelsDropdown: React.FC = () => {
           </select>
         </div>
       )}
+
+      {/* Get More Models */}
+      <div className="border-t border-white/5 pt-3 mt-1">
+        <button
+          onClick={() => setShowModelManager(true)}
+          className="w-full px-3 py-2 rounded-xl bg-pink-500/10 border border-pink-500/20
+                     text-sm text-pink-400 hover:bg-pink-500/20 hover:text-pink-300
+                     transition-colors flex items-center justify-center gap-2"
+        >
+          <Download size={14} />
+          Get More Models
+        </button>
+      </div>
+
+      {/* Model Manager Modal */}
+      {showModelManager && (
+        <ModelManagerModal onClose={() => setShowModelManager(false)} />
+      )}
     </div>
   );
 };
@@ -76,3 +97,4 @@ export const ModelsBadge: React.FC = () => {
     </span>
   );
 };
+
