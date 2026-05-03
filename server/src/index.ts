@@ -17,7 +17,7 @@ import { execSync } from 'child_process';
 import { config } from './config.js';
 import { initLogger, logEngine, closeLogger } from './services/logger.js';
 import { initDb, closeDb } from './db/database.js';
-import { initLireekDb, closeLireekDb } from './db/lireekDb.js';
+// lireekDb is now part of the unified hotstep.db — no separate init needed
 import authRoutes from './routes/auth.js';
 import songRoutes from './routes/songs.js';
 import generateRoutes from './routes/generate.js';
@@ -51,7 +51,7 @@ console.log(`[Logger] Session logs: ${logDir}`);
 
 // Initialize databases
 initDb();
-initLireekDb();
+// lireek tables are created in initDb() — no separate init
 
 // Create Express app
 const app = express();
