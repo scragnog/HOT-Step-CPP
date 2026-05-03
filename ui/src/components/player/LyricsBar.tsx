@@ -2,7 +2,7 @@
 // Displayed between the waveform and transport controls when playing.
 // Ported from hot-step-9000.
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { ChevronDown, ChevronUp, Music } from 'lucide-react';
 
 interface LrcLine {
@@ -51,10 +51,10 @@ function findCurrentIndex(lines: LrcLine[], time: number): number {
 export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, isPlaying }) => {
     const [fetchedLrc, setFetchedLrc] = useState<string | null>(null);
     const [expanded, setExpanded] = useState(true);
-    const [displayText, setDisplayText] = useState('');
     const [fadeKey, setFadeKey] = useState(0);
+    const prevIdxRef = useRef(-1);
 
-    // Fetch LRC
+    // Fetch LRC — stays cached even if isPlaying toggles, because we never unmount
     useEffect(() => {
         if (!audioUrl) { setFetchedLrc(null); return; }
         let cancelled = false;
@@ -69,16 +69,19 @@ export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, isP
     const lines = useMemo(() => fetchedLrc ? parseLrc(fetchedLrc) : [], [fetchedLrc]);
     const currentIdx = findCurrentIndex(lines, currentTime);
 
-    // Update displayed text with crossfade when line changes
-    useEffect(() => {
-        const newText = currentIdx >= 0 ? lines[currentIdx]?.text : '';
-        if (newText && newText !== displayText) {
-            setFadeKey(prev => prev + 1);
-            setDisplayText(newText);
-        }
-    }, [currentIdx, lines]);
+    // Derive display text directly from currentIdx — no stale closure issues
+    const displayText = currentIdx >= 0 ? lines[currentIdx]?.text ?? '' : '';
 
-    if (lines.length === 0 || !isPlaying) return null;
+    // Trigger crossfade animation when the line index changes
+    useEffect(() => {
+        if (currentIdx >= 0 && currentIdx !== prevIdxRef.current) {
+            prevIdxRef.current = currentIdx;
+            setFadeKey(prev => prev + 1);
+        }
+    }, [currentIdx]);
+
+    // Don't render if no LRC data at all
+    if (lines.length === 0) return null;
 
     return (
         <div className="flex-shrink-0 border-t border-white/5 bg-black/80 backdrop-blur-sm z-30 transition-all duration-300">
