@@ -119,14 +119,21 @@ router.get('/lyrics-sets', (req: Request, res: Response) => {
 
 router.post('/lyrics-sets/create', (req: Request, res: Response) => {
   try {
-    const { artist_name, album, songs } = req.body;
-    if (!artist_name?.trim() || !Array.isArray(songs)) {
-      res.status(400).json({ error: 'artist_name and songs array required' });
+    const { artist_name, artist_id, album, songs = [], image_url } = req.body;
+    // Resolve artist by ID or name (UI sends artist_id; Genius flow sends artist_name)
+    let artist: Record<string, any> | undefined;
+    if (artist_id) {
+      artist = db.getArtist(artist_id);
+      if (!artist) { res.status(404).json({ error: 'Artist not found' }); return; }
+    } else if (artist_name?.trim()) {
+      artist = db.getOrCreateArtist(artist_name.trim());
+    } else {
+      res.status(400).json({ error: 'artist_name or artist_id required' });
       return;
     }
-    const artist = db.getOrCreateArtist(artist_name.trim());
-    const set = db.saveLyricsSet(artist.id as number, album ?? null, songs.length, songs);
-    res.json(set);
+    const songList = Array.isArray(songs) ? songs : [];
+    const set = db.saveLyricsSet(artist!.id as number, album ?? null, songList.length, songList, image_url ?? null);
+    res.json({ lyrics_set: set });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
