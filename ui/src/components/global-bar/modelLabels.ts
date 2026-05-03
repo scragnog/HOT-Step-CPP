@@ -64,6 +64,15 @@ export function formatVaeModel(filename: string): string {
   return name;
 }
 
+/** Parse an embedding model filename into a nice label like "Qwen3 0.6B-Q8" */
+export function formatEmbeddingModel(filename: string): string {
+  if (!filename) return '—';
+  const name = filename.replace(/\.gguf$/i, '');
+  const qwenMatch = name.match(/^Qwen3-Embedding-([\d.]+B)-([\w_]+)$/);
+  if (qwenMatch) return `Qwen3 ${qwenMatch[1]}-${qwenMatch[2]}`;
+  return name;
+}
+
 /** Strip path and extension from a mastering reference filename */
 export function formatReferenceName(filename: string): string {
   if (!filename) return '';

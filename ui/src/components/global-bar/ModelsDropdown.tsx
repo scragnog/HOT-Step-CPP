@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { modelApi } from '../../services/api';
-import { formatDitModel, formatLmModel, formatVaeModel } from './modelLabels';
+import { formatDitModel, formatLmModel, formatVaeModel, formatEmbeddingModel } from './modelLabels';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
 import type { AceModels } from '../../types';
 
@@ -26,6 +26,7 @@ export const ModelsDropdown: React.FC = () => {
   const ditModels = models?.models?.dit || [];
   const lmModels = models?.models?.lm || [];
   const vaeModels = models?.models?.vae || [];
+  const embeddingModels = models?.models?.embedding || [];
 
   return (
     <div className="space-y-3">
@@ -61,6 +62,19 @@ export const ModelsDropdown: React.FC = () => {
             onChange={e => gp.setVaeModel(e.target.value)}>
             {vaeModels.map(m => (
               <option key={m} value={m}>{formatVaeModel(m)}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Text Encoder — only show when multiple are available */}
+      {embeddingModels.length > 1 && (
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Text Encoder</label>
+          <select className={selectClasses} value={gp.embeddingModel}
+            onChange={e => gp.setEmbeddingModel(e.target.value)}>
+            {embeddingModels.map(m => (
+              <option key={m} value={m}>{formatEmbeddingModel(m)}</option>
             ))}
           </select>
         </div>

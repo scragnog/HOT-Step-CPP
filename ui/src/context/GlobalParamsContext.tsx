@@ -28,6 +28,8 @@ export interface GlobalParams {
   setLmModel: (v: string) => void;
   vaeModel: string;
   setVaeModel: (v: string) => void;
+  embeddingModel: string;
+  setEmbeddingModel: (v: string) => void;
 
   // ── Adapters ──
   adapter: string;
@@ -183,6 +185,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [ditModel, setDitModel] = usePersistedState('hs-ditModel', '');
   const [lmModel, setLmModel] = usePersistedState('hs-lmModel', '');
   const [vaeModel, setVaeModel] = usePersistedState('hs-vaeModel', '');
+  const [embeddingModel, setEmbeddingModel] = usePersistedState('hs-embeddingModel', '');
 
   // Adapters
   const [adapter, setAdapter] = usePersistedState('hs-adapter', '');
@@ -278,6 +281,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       ditModel,
       lmModel,
       vaeModel,
+      embeddingModel,
 
       // Adapter
       loraPath: adapter,
@@ -361,7 +365,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       ppVaeBlend: (postProcessingEnabled && ppVaeReencode && ppVaeBlend > 0) ? ppVaeBlend : undefined,
     };
   }, [
-    ditModel, lmModel, vaeModel,
+    ditModel, lmModel, vaeModel, embeddingModel,
     adapter, adapterScale, adapterMode, adapterGroupScales,
     inferenceSteps, guidanceScale, shift, inferMethod, scheduler, guidanceMode,
     seed, randomSeed, batchSize,
@@ -381,7 +385,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const value = useMemo<GlobalParams>(() => ({
     // Models
-    ditModel, setDitModel, lmModel, setLmModel, vaeModel, setVaeModel,
+    ditModel, setDitModel, lmModel, setLmModel, vaeModel, setVaeModel, embeddingModel, setEmbeddingModel,
     // Adapters
     adapter, setAdapter, adapterScale, setAdapterScale,
     adapterMode, setAdapterMode, adapterGroupScales, setAdapterGroupScales,
@@ -432,7 +436,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     // Derived
     getGlobalParams,
   }), [
-    ditModel, setDitModel, lmModel, setLmModel, vaeModel, setVaeModel,
+    ditModel, setDitModel, lmModel, setLmModel, vaeModel, setVaeModel, embeddingModel, setEmbeddingModel,
     adapter, setAdapter, adapterScale, setAdapterScale,
     adapterMode, setAdapterMode, adapterGroupScales, setAdapterGroupScales,
     adapterFolder, setAdapterFolder, advancedAdapters, setAdvancedAdapters,
