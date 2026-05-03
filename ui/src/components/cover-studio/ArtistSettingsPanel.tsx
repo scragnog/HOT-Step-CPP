@@ -1,6 +1,6 @@
 // ArtistSettingsPanel.tsx — Right panel: artist selector + cover settings + generate
 import React from 'react';
-import { Guitar, Disc3, Zap, Music, ChevronDown, Loader2 } from 'lucide-react';
+import { Guitar, Disc3, Zap, Music, ChevronDown, Loader2, Type } from 'lucide-react';
 import { EditableSlider } from './EditableSlider';
 import { transposeKey, type AudioAnalysis } from './coverStudioUtils';
 import type { Artist, AlbumPreset } from '../../services/lireekApi';
@@ -22,6 +22,8 @@ interface ArtistSettingsPanelProps {
   pitchShift: number;
   onPitchShift: (v: number) => void;
   analysis: AudioAnalysis | null;
+  artistCaption: string;
+  onArtistCaptionChange: (v: string) => void;
   canGenerate: boolean;
   isGenerating: boolean;
   genProgress: number;
@@ -36,6 +38,7 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
     artistPresets, selectedPreset, onSelectPreset,
     audioCoverStrength, onAudioCoverStrength, coverNoiseStrength, onCoverNoiseStrength,
     tempoScale, onTempoScale, pitchShift, onPitchShift, analysis,
+    artistCaption, onArtistCaptionChange,
     canGenerate, isGenerating, genProgress, genStage, onGenerate, onCancel,
   } = props;
 
@@ -47,16 +50,17 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
           <Guitar className="w-4 h-4 text-cyan-400" />
-          Cover As Artist
+          Target Artist
+          <span className="text-[10px] font-normal text-zinc-500">(optional)</span>
         </div>
         {isLoadingArtists ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-5 h-5 text-zinc-500 animate-spin" />
           </div>
         ) : artists.length === 0 ? (
-          <div className="text-center py-6">
-            <p className="text-xs text-zinc-500">No artists in Lyric Studio yet.</p>
-            <p className="text-[10px] text-zinc-400 mt-1">Add artists in Lyric Studio first.</p>
+          <div className="text-center py-4">
+            <p className="text-xs text-zinc-500">No trained artists available.</p>
+            <p className="text-[10px] text-zinc-400 mt-1">Describe the target style below, or add artists in Lyric Studio for adapter-powered covers.</p>
           </div>
         ) : (
           <div className="grid grid-cols-5 gap-2 max-h-[240px] overflow-y-auto scrollbar-hide">
@@ -135,6 +139,25 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
             )}
           </div>
         )}
+      </div>
+
+      {/* Style Description */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+          <Type className="w-4 h-4 text-purple-400" />
+          Style Description
+        </div>
+        <textarea
+          value={artistCaption}
+          onChange={e => onArtistCaptionChange(e.target.value)}
+          placeholder="Describe the target style, e.g. 'indie rock, breathy female vocal, lo-fi production, dreamy reverb, 2010s alternative'"
+          className="w-full h-24 resize-none rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-purple-500 transition-colors leading-relaxed"
+        />
+        <p className="text-[10px] text-zinc-500 leading-tight">
+          {selectedArtistId
+            ? 'Auto-filled from artist. Edit freely to refine the style.'
+            : 'Describe genre, instruments, vocal style, production, mood — used as the generation caption.'}
+        </p>
       </div>
 
       <div className="border-t border-zinc-200 dark:border-white/5" />
