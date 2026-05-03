@@ -277,6 +277,7 @@ const AppContent: React.FC = () => {
     const enrichedParams = {
       ...engineParams,
       ...contentParams,
+      source: 'create',
       coResident: settings.coResident,
       cacheLmCodes: settings.cacheLmCodes,
     };

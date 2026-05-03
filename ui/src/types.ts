@@ -181,6 +181,9 @@ export interface GenerationParams {
 
   // Cover/style caption (used by Cover Studio)
   style?: string;
+
+  // Source tracking — which UI mode originated the generation
+  source?: string;  // 'create' | 'lyric-studio' | 'cover-studio'
 }
 
 /** Generation job status from the server */
