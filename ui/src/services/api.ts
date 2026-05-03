@@ -3,7 +3,7 @@
 // Thin wrapper around fetch() for all server endpoints.
 // Each method is standalone — import only what you need.
 
-import type { Song, GenerationParams, GenerationJob, AuthState, AceModels, BrowseEntry, AdapterFile } from '../types';
+import type { Song, GenerationParams, GenerationJob, AuthState, AceModels, BrowseEntry, AdapterFile, ModelRegistry } from '../types';
 
 const BASE = '/api';
 
@@ -257,4 +257,20 @@ export const settingsApi = {
   /** Update .env values (partial — only send changed keys) */
   updateEnv: (values: Record<string, string>) =>
     post<{ updated: string[]; restartRequired: boolean }>('/settings/env', { values }),
+};
+
+// ── Model Manager ───────────────────────────────────────────
+export const modelManagerApi = {
+  /** Get full model registry with installed status */
+  registry: () => get<ModelRegistry>('/model-manager/registry'),
+  /** Start downloading a model file */
+  download: (fileId: string) => post<{ jobId: string }>('/model-manager/download', { fileId }),
+  /** Cancel an active download */
+  cancel: (jobId: string) => post<{ ok: boolean }>(`/model-manager/download/${jobId}/cancel`),
+  /** Resume a paused/failed download */
+  resume: (jobId: string) => post<{ jobId: string }>(`/model-manager/download/${jobId}/resume`),
+  /** Delete an installed model file */
+  deleteFile: (filename: string) => del<{ ok: boolean }>(`/model-manager/files/${encodeURIComponent(filename)}`),
+  /** SSE endpoint URL for download progress */
+  downloadsStreamUrl: `${BASE}/model-manager/downloads`,
 };

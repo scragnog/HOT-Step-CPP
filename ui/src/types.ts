@@ -226,3 +226,46 @@ export interface AdapterFile {
   path: string;
   size: number;
 }
+
+/** Model registry file entry */
+export interface RegistryFile {
+  id: string;
+  filename: string;
+  role: 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae';
+  displayName: string;
+  scale?: 'standard' | 'xl' | null;
+  variant?: string | null;
+  quant: string;
+  sizeBytes: number;
+  repo: string;
+  description: string;
+  tags: string[];
+  installed: boolean;
+}
+
+/** Starter pack definition */
+export interface StarterPack {
+  id: string;
+  name: string;
+  description: string;
+  fileIds: string[];
+}
+
+/** Model registry response from server */
+export interface ModelRegistry {
+  packs: StarterPack[];
+  files: RegistryFile[];
+  modelsDir: string;
+}
+
+/** Download job status */
+export interface DownloadJob {
+  jobId: string;
+  fileId: string;
+  filename: string;
+  status: 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  bytesDownloaded: number;
+  totalBytes: number;
+  speed: number;
+  error?: string;
+}
