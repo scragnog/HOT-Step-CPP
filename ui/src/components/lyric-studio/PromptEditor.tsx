@@ -106,7 +106,7 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 rounded-2xl border border-white/10 shadow-2xl w-[900px] max-h-[95vh] flex flex-col">
+      <div className="bg-zinc-900 rounded-2xl border border-white/10 shadow-2xl w-[900px] h-[95vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
           <div className="flex items-center gap-2">
