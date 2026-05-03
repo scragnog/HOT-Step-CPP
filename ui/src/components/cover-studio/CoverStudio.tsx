@@ -17,6 +17,11 @@ import { ArtistSettingsPanel } from './ArtistSettingsPanel';
 import { CoverSidebarPanel } from './CoverSidebarPanel';
 import { StemMixer } from './StemMixer';
 import {
+  addManualQueueItem, updateManualQueueItem,
+  completeManualQueueItem, failManualQueueItem,
+  useAudioGenQueue,
+} from '../../stores/audioGenQueueStore';
+import {
   persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey,
   type AudioMetadata, type AudioAnalysis,
 } from './coverStudioUtils';
@@ -62,6 +67,8 @@ export const CoverStudio: React.FC = () => {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toast, setToast] = useState('');
+  const [queueItemId, setQueueItemId] = useState<string | null>(null);
+  const queue = useAudioGenQueue();
 
   // ── Advanced Mode (SuperSep) ──
   const [advancedMode, setAdvancedMode] = useState(false);
@@ -304,26 +311,61 @@ export const CoverStudio: React.FC = () => {
       const jobId = res.jobId;
       showToast(`Cover generation started!`);
       setActiveJobId(jobId);
-      pollJob(jobId);
+
+      // Add to shared queue store so the sidebar Queue panel shows progress
+      const coverTitle = songArtist
+        ? `${songTitle || 'Cover'} (${songArtist} Cover)`
+        : (songTitle || 'Cover');
+      const qId = addManualQueueItem({
+        title: coverTitle,
+        artistName: selectedArtist?.name || '',
+        caption: params.style as string || '',
+      });
+      setQueueItemId(qId);
+      updateManualQueueItem(qId, { jobId });
+
+      pollJob(jobId, qId);
     } catch (err: any) { showToast(`Generation failed: ${err.message}`); setIsGenerating(false); }
   };
 
-  const pollJob = (jobId: string) => {
+  const pollJob = (jobId: string, qId: string) => {
     setGenProgress(0); setGenStage('Queued...');
+    const startTime = Date.now();
     const iv = setInterval(async () => {
       try {
         const s = await generateApi.status(jobId);
-        if (s.progress != null) setGenProgress(Math.round(s.progress * 100));
+        const pct = s.progress != null ? Math.round(s.progress * 100) : undefined;
+        if (pct != null) setGenProgress(pct);
         if (s.stage) setGenStage(s.stage);
+
+        // Update shared queue item
+        updateManualQueueItem(qId, {
+          progress: pct,
+          stage: s.stage || 'Generating...',
+          elapsed: Math.round((Date.now() - startTime) / 1000),
+        });
+
         if (s.status === 'succeeded') {
           clearInterval(iv); setGenProgress(100); setGenStage('Complete!');
-          setIsGenerating(false); setActiveJobId(null);
+          setIsGenerating(false); setActiveJobId(null); setQueueItemId(null);
           setRefreshTrigger(p => p + 1); showToast('Cover generated!');
           setTimeout(() => { setGenProgress(0); setGenStage(''); }, 3000);
+
+          // Complete queue item with audio data
+          const audioUrl = s.result?.audioUrls?.[0] || '';
+          const songId = s.result?.songIds?.[0];
+          const masteredUrl = s.result?.masteredAudioUrl;
+          completeManualQueueItem(qId, {
+            audioUrl,
+            songId,
+            masteredAudioUrl: masteredUrl,
+            audioDuration: s.result?.duration,
+          });
         } else if (s.status === 'failed') {
-          clearInterval(iv); setIsGenerating(false); setActiveJobId(null);
+          clearInterval(iv); setIsGenerating(false); setActiveJobId(null); setQueueItemId(null);
           setGenProgress(0); setGenStage('');
           showToast(`Failed: ${s.error || 'Unknown error'}`);
+          failManualQueueItem(qId, s.error || 'Unknown error');
         }
       } catch {}
     }, 2000);
@@ -332,7 +374,8 @@ export const CoverStudio: React.FC = () => {
 
   const handleCancel = async () => {
     if (activeJobId) { try { await generateApi.cancel(activeJobId); } catch {} }
-    setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage('');
+    if (queueItemId) failManualQueueItem(queueItemId, 'Cancelled by user');
+    setIsGenerating(false); setActiveJobId(null); setQueueItemId(null); setGenProgress(0); setGenStage('');
   };
 
   const handleClearSource = () => {
@@ -511,7 +554,7 @@ export const CoverStudio: React.FC = () => {
         <div className="w-72 flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden">
           <CoverSidebarPanel
             showToast={showToast}
-            refreshKey={refreshTrigger}
+            refreshKey={refreshTrigger + queue.completionCounter}
           />
         </div>
       </div>

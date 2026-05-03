@@ -167,6 +167,85 @@ export function clearFinishedFromAudioQueue(): void {
   _emit();
 }
 
+// ── Manual queue API (for Cover Studio and other non-Lyric-Studio modules) ───
+
+/** Add a pre-built item to the queue (no Lireek API calls, no preset lookup). */
+export function addManualQueueItem(opts: {
+  title: string;
+  artistName?: string;
+  caption?: string;
+}): string {
+  const id = _genId();
+  const item: AudioQueueItem = {
+    id,
+    generation: {
+      id: 0, profile_id: 0, provider: 'cover-studio', model: '',
+      title: opts.title, caption: opts.caption || '', lyrics: '',
+      created_at: new Date().toISOString(),
+    },
+    artistId: 0,
+    artistName: opts.artistName || '',
+    preset: null,
+    profileId: 0,
+    lyricsSetId: 0,
+    globalParams: {},
+    status: 'generating',
+    stage: 'Submitting...',
+  };
+  _state.items.push(item);
+  _emit();
+  return id;
+}
+
+/** Update progress/stage of a manually-added queue item. */
+export function updateManualQueueItem(id: string, update: {
+  jobId?: string;
+  progress?: number;
+  stage?: string;
+  elapsed?: number;
+  status?: AudioQueueStatus;
+}): void {
+  const item = _state.items.find(i => i.id === id);
+  if (!item) return;
+  if (update.jobId !== undefined) item.jobId = update.jobId;
+  if (update.progress !== undefined) item.progress = update.progress;
+  if (update.stage !== undefined) item.stage = update.stage;
+  if (update.elapsed !== undefined) item.elapsed = update.elapsed;
+  if (update.status !== undefined) item.status = update.status;
+  _emit();
+}
+
+/** Mark a manually-added queue item as succeeded with audio results. */
+export function completeManualQueueItem(id: string, result: {
+  audioUrl: string;
+  songId?: string;
+  masteredAudioUrl?: string;
+  audioDuration?: number;
+}): void {
+  const item = _state.items.find(i => i.id === id);
+  if (!item) return;
+  item.status = 'succeeded';
+  item.audioUrl = result.audioUrl;
+  if (result.songId) item.songId = result.songId;
+  if (result.masteredAudioUrl) item.masteredAudioUrl = result.masteredAudioUrl;
+  if (result.audioDuration) item.audioDuration = result.audioDuration;
+  item.progress = 100;
+  item.stage = 'Complete!';
+  _state.completionCounter++;
+  _emit();
+}
+
+/** Mark a manually-added queue item as failed. */
+export function failManualQueueItem(id: string, error: string): void {
+  const item = _state.items.find(i => i.id === id);
+  if (!item) return;
+  item.status = 'failed';
+  item.error = error;
+  item.progress = undefined;
+  item.stage = undefined;
+  _emit();
+}
+
 export function resumeQueue(token: string): void {
   if (_resumeCalled) return;
   _resumeCalled = true;
