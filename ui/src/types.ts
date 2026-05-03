@@ -37,6 +37,27 @@ export interface Song {
   mastered_audio_url?: string;
 }
 
+/** Normalized recent song returned by /api/songs/recent — unified across all modes */
+export interface UnifiedRecentSong {
+  id: string;
+  title: string;
+  audio_url: string;
+  mastered_audio_url: string;
+  cover_url: string;
+  duration: number;
+  lyrics: string;
+  caption: string;
+  style: string;
+  bpm: number;
+  key_scale: string;
+  source: string;        // 'create' | 'lyric-studio' | 'cover-studio'
+  created_at: string;
+  artist_name: string;
+  artist_image: string;
+  album: string;
+  generation_id: number | null;
+}
+
 /** Parameters sent to the generation API */
 export interface GenerationParams {
   // Content

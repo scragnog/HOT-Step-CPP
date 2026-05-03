@@ -150,6 +150,34 @@ export function recentSongToTrack(rs: {
   };
 }
 
+// Converter for UnifiedRecentSong objects (from /api/songs/recent)
+export function unifiedRecentSongToTrack(rs: {
+  id: string;
+  title: string;
+  audio_url: string;
+  mastered_audio_url?: string;
+  artist_name?: string;
+  cover_url?: string;
+  artist_image?: string;
+  duration?: number;
+  caption?: string;
+  lyrics?: string;
+  style?: string;
+}): PlaybackTrack {
+  return {
+    id: rs.id,
+    title: rs.title || 'Untitled',
+    audioUrl: rs.audio_url || '',
+    masteredAudioUrl: rs.mastered_audio_url || '',
+    artistName: rs.artist_name || '',
+    coverUrl: rs.cover_url || rs.artist_image || '',
+    duration: coerceDuration(rs.duration),
+    caption: rs.caption || '',
+    lyrics: rs.lyrics || '',
+    style: rs.style || '',
+  };
+}
+
 // Generic converter for AudioQueueItem-shaped objects
 export function audioQueueItemToTrack(item: {
   id: string;

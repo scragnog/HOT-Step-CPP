@@ -33,7 +33,7 @@ import { SourceLyricsTab } from './SourceLyricsTab';
 import { ProfilesTab } from './ProfilesTab';
 import { WrittenSongsTab } from './WrittenSongsTab';
 import { RecordingsTab } from './RecordingsTab';
-import { RightSidebarPanel } from './RightSidebarPanel';
+import { ActivitySidebar } from '../shared/ActivitySidebar';
 import { useAudioGeneration } from './useAudioGeneration';
 import { enqueueAudioGen, useAudioGenQueue } from '../../stores/audioGenQueueStore';
 import { usePlayback } from '../../stores/playbackStore';
@@ -638,8 +638,8 @@ export const LyricStudioV2: React.FC = () => {
               <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
             </div>
             <div className="h-full flex-shrink-0 border-l border-white/5 overflow-hidden" style={{ width: lsRightPanelWidth }}>
-              <RightSidebarPanel navLevel="artists" showToast={showToast}
-                recordingsRefreshKey={recordingsRefreshKey} compact={compactRight} />
+              <ActivitySidebar source="lyric-studio" showToast={showToast}
+                refreshKey={recordingsRefreshKey} compact={compactRight} />
             </div>
           </div>
         )}
@@ -685,8 +685,8 @@ export const LyricStudioV2: React.FC = () => {
               <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
             </div>
             <div className="h-full flex-shrink-0 border-l border-white/5 overflow-hidden" style={{ width: lsRightPanelWidth }}>
-              <RightSidebarPanel navLevel="albums" showToast={showToast}
-                recordingsRefreshKey={recordingsRefreshKey} compact={compactRight} />
+              <ActivitySidebar source="lyric-studio" showToast={showToast}
+                refreshKey={recordingsRefreshKey} compact={compactRight} />
             </div>
           </div>
         )}
@@ -777,9 +777,9 @@ export const LyricStudioV2: React.FC = () => {
               {/* Right: sidebar panel */}
               <div className="flex-shrink-0 border-l border-white/5 overflow-hidden flex flex-col relative" style={{ width: lsRightPanelWidth }}>
                 <div className="relative z-[1] flex-1 min-h-0 overflow-hidden">
-                  <RightSidebarPanel navLevel="album-detail"
+                  <ActivitySidebar source="lyric-studio"
                     showToast={showToast}
-                    recordingsRefreshKey={recordingsRefreshKey} compact={compactRight} />
+                    refreshKey={recordingsRefreshKey} compact={compactRight} />
                 </div>
               </div>
             </div>

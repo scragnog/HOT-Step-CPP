@@ -14,7 +14,7 @@ import {
 } from '../../services/supersepApi';
 import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
-import { CoverSidebarPanel } from './CoverSidebarPanel';
+import { ActivitySidebar } from '../shared/ActivitySidebar';
 import { StemMixer } from './StemMixer';
 import {
   addManualQueueItem, updateManualQueueItem,
@@ -560,9 +560,11 @@ export const CoverStudio: React.FC = () => {
 
         {/* Right: Recent Covers + Queue */}
         <div className="w-72 flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden">
-          <CoverSidebarPanel
+          <ActivitySidebar
             showToast={showToast}
+            source="cover-studio"
             refreshKey={refreshTrigger + queue.completionCounter}
+            queueCountColor="bg-cyan-500/20 text-cyan-300"
           />
         </div>
       </div>
