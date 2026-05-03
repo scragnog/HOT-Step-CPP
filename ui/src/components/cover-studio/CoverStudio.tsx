@@ -121,6 +121,8 @@ export const CoverStudio: React.FC = () => {
   const handleFileSelected = async (file: File) => {
     if (!token) { showToast('Please sign in first'); return; }
     setSourceFileName(file.name);
+    setBpmCorrection(1);
+    setKeyOverride(null);
 
     // Check track cache
     const cached = getTrackCache()[file.name];
