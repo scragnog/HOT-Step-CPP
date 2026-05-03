@@ -53,6 +53,7 @@ export const CoverStudio: React.FC = () => {
   const [coverNoiseStrength, setCoverNoiseStrength] = useState(() => restore<number>('coverNoiseStrength', 0));
   const [tempoScale, setTempoScale] = useState(() => restore<number>('tempoScale', 1.0));
   const [pitchShift, setPitchShift] = useState(() => restore<number>('pitchShift', 0));
+  const [bpmCorrection, setBpmCorrection] = useState(() => restore<number>('bpmCorrection', 1));
 
   // ── Generation ──
   const [isGenerating, setIsGenerating] = useState(false);
@@ -87,6 +88,7 @@ export const CoverStudio: React.FC = () => {
   useEffect(() => { persist('coverNoiseStrength', coverNoiseStrength); }, [coverNoiseStrength]);
   useEffect(() => { persist('tempoScale', tempoScale); }, [tempoScale]);
   useEffect(() => { persist('pitchShift', pitchShift); }, [pitchShift]);
+  useEffect(() => { persist('bpmCorrection', bpmCorrection); }, [bpmCorrection]);
   useEffect(() => { persist('sepLevel', sepLevel); }, [sepLevel]);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
@@ -189,6 +191,18 @@ export const CoverStudio: React.FC = () => {
     finally { setIsSearchingLyrics(false); }
   };
 
+  // ── Apply preset to global UI (adapter bar + mastering reference) ──
+  const applyPresetToGlobal = (preset: AlbumPreset | null) => {
+    if (preset?.adapter_path) {
+      gp.setAdapter(preset.adapter_path);
+      if (preset.adapter_scale != null) gp.setAdapterScale(preset.adapter_scale);
+      if (preset.adapter_group_scales) gp.setAdapterGroupScales(preset.adapter_group_scales);
+    }
+    if (preset?.reference_track_path) {
+      gp.setMasteringReference(preset.reference_track_path);
+    }
+  };
+
   // ── Artist preset loading ──
   const loadArtistPresets = async (artist: Artist) => {
     try {
@@ -211,11 +225,11 @@ export const CoverStudio: React.FC = () => {
         } catch {}
       }
       setArtistCaption(caption);
-      // Pick adapter preset
+      // Pick adapter preset — use first album with adapter (don't override cover settings)
       const withAdapter = results.find(p => p.preset?.adapter_path);
       if (withAdapter?.preset) {
         setSelectedPreset(withAdapter.preset);
-        if (withAdapter.preset.audio_cover_strength != null) setAudioCoverStrength(withAdapter.preset.audio_cover_strength);
+        applyPresetToGlobal(withAdapter.preset);
       } else { setSelectedPreset(results[0]?.preset || null); }
     } catch { setSelectedPreset(null); setArtistPresets([]); setArtistCaption(''); }
   };
@@ -231,7 +245,7 @@ export const CoverStudio: React.FC = () => {
     setIsGenerating(true);
     try {
       const selectedArtist = artists.find(a => a.id === selectedArtistId);
-      const sourceBpm = analysis?.bpm || 120;
+      const sourceBpm = (analysis?.bpm || 120) * bpmCorrection;
       const sourceKey = analysis?.key || 'C major';
       const targetBpm = Math.round(sourceBpm * tempoScale);
       const targetKey = pitchShift !== 0 ? transposeKey(sourceKey, pitchShift) : sourceKey;
@@ -438,6 +452,7 @@ export const CoverStudio: React.FC = () => {
           sourceFileName={sourceFileName} metadata={metadata} analysis={analysis}
           isUploading={isUploading} isAnalyzing={isAnalyzing}
           onFileSelected={handleFileSelected} onClear={handleClearSource}
+          bpmCorrection={bpmCorrection} onBpmCorrectionChange={setBpmCorrection}
         />
 
         {/* Center: Lyrics */}
@@ -478,7 +493,7 @@ export const CoverStudio: React.FC = () => {
           artists={artists} isLoadingArtists={isLoadingArtists}
           selectedArtistId={selectedArtistId} onSelectArtist={handleSelectArtist}
           artistPresets={artistPresets} selectedPreset={selectedPreset}
-          onSelectPreset={setSelectedPreset}
+          onSelectPreset={(p) => { setSelectedPreset(p); applyPresetToGlobal(p); }}
           audioCoverStrength={audioCoverStrength} onAudioCoverStrength={setAudioCoverStrength}
           coverNoiseStrength={coverNoiseStrength} onCoverNoiseStrength={setCoverNoiseStrength}
           tempoScale={tempoScale} onTempoScale={setTempoScale}

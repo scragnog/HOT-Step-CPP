@@ -101,7 +101,6 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
                   const chosen = artistPresets[parseInt(e.target.value)];
                   if (chosen?.preset) {
                     onSelectPreset(chosen.preset);
-                    if (chosen.preset.audio_cover_strength != null) onAudioCoverStrength(chosen.preset.audio_cover_strength);
                   }
                 }}
                 className="w-full appearance-none rounded-lg bg-black/5 dark:bg-white/5 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 pr-8 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer focus:ring-2 focus:ring-cyan-500/50 focus:outline-none"

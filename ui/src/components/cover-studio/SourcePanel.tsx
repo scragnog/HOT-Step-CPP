@@ -11,11 +11,14 @@ interface SourcePanelProps {
   isAnalyzing: boolean;
   onFileSelected: (file: File) => void;
   onClear: () => void;
+  bpmCorrection: number;
+  onBpmCorrectionChange: (v: number) => void;
 }
 
 export const SourcePanel: React.FC<SourcePanelProps> = ({
   sourceFileName, metadata, analysis, isUploading, isAnalyzing,
   onFileSelected, onClear,
+  bpmCorrection, onBpmCorrectionChange,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -28,6 +31,8 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
       onFileSelected(file);
     }
   }, [onFileSelected]);
+
+  const correctedBpm = analysis?.bpm ? Math.round(analysis.bpm * bpmCorrection) : null;
 
   return (
     <div className="w-[320px] flex-shrink-0 overflow-y-auto scrollbar-hide border-r border-zinc-200 dark:border-white/5 p-4 space-y-4">
@@ -111,11 +116,39 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-lg bg-gradient-to-br from-cyan-500/10 to-teal-500/10 border border-cyan-500/20 p-3 text-center">
               <span className="text-[10px] text-zinc-500 block">BPM</span>
-              <span className="text-lg font-bold text-cyan-400">{analysis.bpm}</span>
+              <span className="text-lg font-bold text-cyan-400">{correctedBpm ?? analysis.bpm}</span>
+              {bpmCorrection !== 1 && (
+                <span className="text-[9px] text-zinc-500 block">
+                  (detected: {analysis.bpm})
+                </span>
+              )}
             </div>
             <div className="rounded-lg bg-gradient-to-br from-teal-500/10 to-emerald-500/10 border border-teal-500/20 p-3 text-center">
               <span className="text-[10px] text-zinc-500 block">Key</span>
               <span className="text-lg font-bold text-teal-400">{analysis.key}</span>
+            </div>
+          </div>
+          {/* BPM correction — Essentia sometimes halves or doubles the tempo */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-zinc-500 whitespace-nowrap">Tempo fix:</span>
+            <div className="flex gap-1 flex-1">
+              {([
+                { label: '÷2', value: 0.5 },
+                { label: 'Detected', value: 1 },
+                { label: '×2', value: 2 },
+              ] as const).map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => onBpmCorrectionChange(opt.value)}
+                  className={`flex-1 px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
+                    bpmCorrection === opt.value
+                      ? 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-500/40'
+                      : 'bg-white/5 text-zinc-500 hover:bg-white/10 hover:text-zinc-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
