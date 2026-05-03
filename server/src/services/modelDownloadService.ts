@@ -232,7 +232,7 @@ class ModelDownloadService extends EventEmitter {
     try {
       await this._downloadWithRedirects(url, partPath, job, startByte);
 
-      if (job.status === 'cancelled') return;
+      if ((job.status as DownloadStatus) === 'cancelled') return;
 
       // Rename .part to final
       fs.renameSync(partPath, finalPath);
@@ -241,7 +241,7 @@ class ModelDownloadService extends EventEmitter {
       this.emit('progress');
       console.log(`[ModelManager] Download complete: ${file.filename}`);
     } catch (err: any) {
-      if (job.status === 'cancelled') return;
+      if ((job.status as DownloadStatus) === 'cancelled') return;
       job.status = 'failed';
       job.error = err.message;
       job.speed = 0;
