@@ -35,6 +35,8 @@ export const RecentCovers: React.FC<RecentCoversProps> = ({ refreshTrigger }) =>
               style: s.style || '',
               caption: s.caption || '',
               audioUrl: s.audio_url || '',
+              masteredAudioUrl: s.mastered_audio_url || '',
+              mastered_audio_url: s.mastered_audio_url || '',
               duration: s.duration && s.duration > 0
                 ? `${Math.floor(s.duration / 60)}:${String(Math.floor(s.duration % 60)).padStart(2, '0')}`
                 : '0:00',
