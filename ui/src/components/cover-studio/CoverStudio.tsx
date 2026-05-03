@@ -499,6 +499,7 @@ export const CoverStudio: React.FC = () => {
           tempoScale={tempoScale} onTempoScale={setTempoScale}
           pitchShift={pitchShift} onPitchShift={setPitchShift}
           analysis={analysis}
+          bpmCorrection={bpmCorrection}
           artistCaption={artistCaption} onArtistCaptionChange={setArtistCaption}
           canGenerate={canGenerate}
           isGenerating={isGenerating} genProgress={genProgress} genStage={genStage}

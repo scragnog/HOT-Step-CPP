@@ -22,6 +22,7 @@ interface ArtistSettingsPanelProps {
   pitchShift: number;
   onPitchShift: (v: number) => void;
   analysis: AudioAnalysis | null;
+  bpmCorrection: number;
   artistCaption: string;
   onArtistCaptionChange: (v: string) => void;
   canGenerate: boolean;
@@ -37,7 +38,7 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
     artists, isLoadingArtists, selectedArtistId, onSelectArtist,
     artistPresets, selectedPreset, onSelectPreset,
     audioCoverStrength, onAudioCoverStrength, coverNoiseStrength, onCoverNoiseStrength,
-    tempoScale, onTempoScale, pitchShift, onPitchShift, analysis,
+    tempoScale, onTempoScale, pitchShift, onPitchShift, analysis, bpmCorrection,
     artistCaption, onArtistCaptionChange,
     canGenerate, isGenerating, genProgress, genStage, onGenerate, onCancel,
   } = props;
@@ -176,10 +177,10 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
         <EditableSlider label="Tempo Scale" value={tempoScale} min={0.5} max={2.0} step={0.05}
           onChange={onTempoScale}
           formatDisplay={v => {
-            const bpm = analysis?.bpm;
+            const bpm = analysis?.bpm ? Math.round(analysis.bpm * bpmCorrection) : null;
             return bpm ? `${v.toFixed(2)}x (${Math.round(bpm * v)} BPM)` : `${v.toFixed(2)}x`;
           }}
-          helpText={`1.0 = original tempo${analysis?.bpm ? ` (${Math.round(analysis.bpm)} BPM)` : ''}`} />
+          helpText={`1.0 = original tempo${analysis?.bpm ? ` (${Math.round(analysis.bpm * bpmCorrection)} BPM)` : ''}`} />
         <EditableSlider label="Pitch Shift" value={pitchShift} min={-12} max={12} step={1}
           onChange={onPitchShift}
           formatDisplay={v => {
