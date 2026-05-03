@@ -193,10 +193,9 @@ export const CoverStudio: React.FC = () => {
 
   // ── Apply preset to global UI (adapter bar + mastering reference) ──
   const applyPresetToGlobal = (preset: AlbumPreset | null) => {
+    // Only sync the adapter path — never override user's manual scale/group-scale settings
     if (preset?.adapter_path) {
       gp.setAdapter(preset.adapter_path);
-      if (preset.adapter_scale != null) gp.setAdapterScale(preset.adapter_scale);
-      if (preset.adapter_group_scales) gp.setAdapterGroupScales(preset.adapter_group_scales);
     }
     if (preset?.reference_track_path) {
       gp.setMasteringReference(preset.reference_track_path);
