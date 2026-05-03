@@ -164,22 +164,20 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           {/* Key override — Essentia sometimes gets the wrong key */}
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-zinc-500 whitespace-nowrap">Key fix:</span>
-            <div className="relative flex-1">
-              <select
-                value={keyOverride || ''}
-                onChange={e => onKeyOverrideChange(e.target.value || null)}
-                className={`w-full appearance-none rounded-md px-2 py-1 text-[10px] font-medium transition-all cursor-pointer focus:outline-none ${
-                  keyOverride
-                    ? 'bg-teal-500/20 text-teal-300 ring-1 ring-teal-500/40'
-                    : 'bg-white/5 text-zinc-500 hover:bg-white/10 hover:text-zinc-300'
-                }`}
-              >
-                <option value="">Detected{analysis?.key ? ` (${analysis.key})` : ''}</option>
-                {ALL_KEYS.map(k => (
-                  <option key={k} value={k}>{k}</option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={keyOverride || ''}
+              onChange={e => onKeyOverrideChange(e.target.value || null)}
+              className={`flex-1 px-2 py-1 rounded-xl bg-zinc-800 border text-xs outline-none transition-colors cursor-pointer ${
+                keyOverride
+                  ? 'border-teal-500/40 text-teal-300 focus:border-teal-500/60 focus:ring-1 focus:ring-teal-500/20'
+                  : 'border-white/10 text-zinc-300 focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/20'
+              }`}
+            >
+              <option value="">Detected{analysis?.key ? ` (${analysis.key})` : ''}</option>
+              {ALL_KEYS.map(k => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+            </select>
           </div>
         </div>
       )}
