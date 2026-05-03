@@ -23,7 +23,7 @@ import { applyVstChain } from './vst.js';
 // NOTE: Spectral Lifter is now native C++ in the engine (spectral-lifter.h).
 // The Python subprocess wrapper (spectralLifter.ts) is deprecated.
 import { autoTrimSilence } from '../services/autoTrim.js';
-import { ensureEngineFormat } from '../services/audioConvert.js';
+import { ensureEngineFormat, timeStretchPitchShift } from '../services/audioConvert.js';
 import { subscribeLines, pushLog } from './logs.js';
 
 const router = Router();
@@ -508,7 +508,22 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       }
     }
 
-    // ── Timbre reference (for text2music timbre conditioning) ──
+    // ── Tempo/pitch pre-processing (cover source audio) ──────
+    // The Python ACE-Step backend handles tempo_scale/pitch_shift natively
+    // via release_task, but the C++ engine doesn't. Pre-process with ffmpeg.
+    const tempoScale = job.params.tempoScale as number | undefined;
+    const pitchShift = job.params.pitchShift as number | undefined;
+    if (srcAudioBuf && ((tempoScale && tempoScale !== 1.0) || (pitchShift && pitchShift !== 0))) {
+      try {
+        logGeneration(job.id, 'INFO', `[Synth Phase] Pre-processing source audio: tempo=${tempoScale ?? 1.0}x, pitch=${pitchShift ?? 0}st`);
+        srcAudioBuf = timeStretchPitchShift(srcAudioBuf, tempoScale ?? 1.0, pitchShift ?? 0);
+        logGeneration(job.id, 'INFO', `[Synth Phase] Pre-processed source audio: ${(srcAudioBuf.length / 1024 / 1024).toFixed(1)} MB`);
+      } catch (err: any) {
+        logGeneration(job.id, 'WARNING', `[Synth Phase] Tempo/pitch pre-processing failed: ${err.message}`);
+        // Continue with original audio — user still gets a cover, just without tempo/pitch change
+      }
+    }
+
     // Timbre reference goes into the "ref_audio" multipart field. Only used
     // when timbreReference is enabled (boolean true → use mastering ref file,
     // or explicit string path). sourceAudioUrl is NOT a timbre reference.
