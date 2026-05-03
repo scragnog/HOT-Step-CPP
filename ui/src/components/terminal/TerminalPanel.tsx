@@ -95,18 +95,39 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
     return lines.filter(l => l.text.toLowerCase().includes(term));
   }, [lines, search]);
 
-  // Auto-scroll to bottom when new lines arrive
+  // Auto-scroll to bottom when new lines arrive.
+  // Uses rAF to wait until the DOM has painted the new content so scrollHeight
+  // is accurate. Without this, scrollTop = scrollHeight fires too early and
+  // the view ends up one batch behind.
+  const prevLineCount = useRef(0);
   useEffect(() => {
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (!autoScroll || !scrollRef.current) return;
+    // Only auto-scroll when line count actually increased (new output)
+    // or when search changed (filter results updated)
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    });
+    prevLineCount.current = filteredLines.length;
   }, [filteredLines, autoScroll]);
 
-  // Detect manual scroll to disable auto-scroll
+  // Re-engage auto-scroll when search is cleared (user finished filtering)
+  const prevSearch = useRef(search);
+  useEffect(() => {
+    if (prevSearch.current && !search) {
+      // Filter was just cleared — snap to bottom
+      setAutoScroll(true);
+    }
+    prevSearch.current = search;
+  }, [search]);
+
+  // Detect manual scroll to disable auto-scroll.
+  // Only disengage when the user scrolls UP from the bottom.
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    const atBottom = scrollHeight - scrollTop - clientHeight < 40;
+    const atBottom = scrollHeight - scrollTop - clientHeight < 60;
     wasAtBottom.current = atBottom;
     setAutoScroll(atBottom);
   }, []);
