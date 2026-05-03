@@ -343,4 +343,80 @@ router.post('/:id/crop', (req, res) => {
   }
 });
 
+// GET /api/songs/recent — unified recent songs across all modes
+// Supports ?source=create|lyric-studio|cover-studio&limit=50
+// Returns a normalized shape compatible with the frontend's RecentSong interface
+router.get('/recent', (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  const source = req.query.source as string | undefined;
+  const limit = parseInt(req.query.limit as string, 10) || 50;
+
+  let query = 'SELECT * FROM songs WHERE user_id = ?';
+  const params: any[] = [userId];
+
+  if (source && source !== 'all') {
+    query += ` AND json_extract(generation_params, '$.source') = ?`;
+    params.push(source);
+  }
+
+  query += ' ORDER BY created_at DESC LIMIT ?';
+  params.push(limit);
+
+  const songs = getDb().prepare(query).all(...params) as any[];
+
+  // Enrich songs with Lyric Studio metadata where available
+  // For lyric-studio songs, look up artist name via the audio_generations → generations → profiles → lyrics_sets → artists chain
+  const audioUrls = songs.map(s => s.audio_url).filter(Boolean);
+  let lireekMetaMap = new Map<string, { artist_name: string; artist_image?: string; album?: string; generation_id?: number }>();
+
+  if (audioUrls.length > 0) {
+    try {
+      const placeholders = audioUrls.map(() => '?').join(',');
+      const enrichRows = getDb().prepare(
+        `SELECT ag.audio_url, a.name AS artist_name, a.image_url AS artist_image,
+                ls.album, g.id AS generation_id
+         FROM audio_generations ag
+         JOIN generations g ON g.id = ag.generation_id
+         JOIN profiles p ON p.id = g.profile_id
+         JOIN lyrics_sets ls ON ls.id = p.lyrics_set_id
+         JOIN artists a ON a.id = ls.artist_id
+         WHERE ag.audio_url IN (${placeholders})`
+      ).all(...audioUrls) as any[];
+      for (const row of enrichRows) {
+        lireekMetaMap.set(row.audio_url, row);
+      }
+    } catch { /* lireek tables may not exist yet */ }
+  }
+
+  // Build normalized response
+  const result = songs.map((s: any) => {
+    const genParams = JSON.parse(s.generation_params || '{}');
+    const lireekMeta = lireekMetaMap.get(s.audio_url);
+    return {
+      id: s.id,
+      title: s.title || 'Untitled',
+      audio_url: s.audio_url || '',
+      mastered_audio_url: s.mastered_audio_url || '',
+      cover_url: s.cover_url || '',
+      duration: s.duration || 0,
+      lyrics: s.lyrics || '',
+      caption: s.caption || '',
+      style: s.style || '',
+      bpm: s.bpm || 0,
+      key_scale: s.key_scale || '',
+      source: genParams.source || 'create',
+      created_at: s.created_at,
+      // Enriched from Lyric Studio metadata
+      artist_name: lireekMeta?.artist_name || genParams.artist_name || '',
+      artist_image: lireekMeta?.artist_image || '',
+      album: lireekMeta?.album || genParams.album || '',
+      generation_id: lireekMeta?.generation_id || null,
+    };
+  });
+
+  res.json({ songs: result });
+});
+
 export default router;
