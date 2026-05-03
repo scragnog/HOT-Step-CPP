@@ -78,6 +78,11 @@ Thumbs.db
 .claude/
 .gemini/
 
+# Dev-only scripts (local only, not needed by end users)
+dev.bat
+dev-rebuild.bat
+server/restart-loop.cmd
+
 # Local-only content
 benchmark-results/
 docs/
