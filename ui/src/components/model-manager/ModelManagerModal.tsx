@@ -4,6 +4,7 @@
 // Features starter packs at the top and a full tabbed catalogue below.
 
 import React, { useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { X, HardDrive, FolderOpen, Download } from 'lucide-react';
 import { useModelRegistry } from './useModelRegistry';
 import { useDownloadStream } from './useDownloadStream';
@@ -91,7 +92,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
 
   // ── Render ──────────────────────────────────────────────────
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
@@ -204,6 +205,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
