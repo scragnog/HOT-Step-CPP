@@ -26,7 +26,7 @@ HOT-Step CPP extends the base acestep.cpp engine with 80+ features across infere
 
 🎤 **Cover Studio** — Upload a reference track, get Essentia-based analysis (BPM, key, energy, timbre), and generate style-matched covers with artist-specific settings.
 
-🔊 **Audio Post-Processing** — Spectral denoiser (Wiener-filter), Spectral Lifter (native C++), duration buffer with auto-trim for clean endings, and configurable fade-out.
+🔊 **Audio Post-Processing** — Spectral denoiser (Wiener-filter), Spectral Lifter (native C++), PP-VAE neural audio polish, duration buffer with auto-trim for clean endings, and configurable fade-out.
 
 🧪 **Latent Space Controls** — Latent shift, latent rescale, custom timestep scheduling, DCW (Differential Correction in Wavelet domain) sampling, and auto-shift for adaptive noise scaling.
 
@@ -114,6 +114,17 @@ HOT-Step-CPP/
 | VAE | `vae-BF16.gguf` | 322 MB |
 
 Smaller LM variants available: 0.6B (fast) and 1.7B (balanced).
+
+#### Optional (recommended)
+
+| Type | File | Size | Source |
+|------|------|------|--------|
+| ScragVAE | `scragvae-BF16.gguf` | 322 MB | [scragnog/Ace-Step-1.5-ScragVAE](https://huggingface.co/scragnog/Ace-Step-1.5-ScragVAE) |
+| PP-VAE | `pp-vae-F32.gguf` | 644 MB | [scragnog/HOT-Step-CPP-PP-VAE](https://huggingface.co/scragnog/HOT-Step-CPP-PP-VAE) |
+
+**ScragVAE** is a fine-tuned VAE decoder with improved high-frequency energy and dynamic range — drop-in replacement for the standard VAE. **PP-VAE** enables neural audio polish via an encode→decode round-trip in the post-processing chain.
+
+> **💡 Tip:** You can also download models directly from the app! Click **Models → Get More Models** to browse 100+ models across 5 HuggingFace repos, with curated starter packs for quick setup.
 
 ### 4. Install UI & server dependencies
 

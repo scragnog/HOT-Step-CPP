@@ -54,6 +54,8 @@ Built on acestep.cpp (GGML/CUDA), with extensive modifications to the sampling, 
 | **Configurable Fade-Out** | Slider-controlled fade duration; automatically skipped when auto-trim detects a clean ending. |
 | **Download with Format Conversion** | Export as WAV, MP3, or FLAC with configurable defaults in Settings. |
 | **48kHz Native Processing** | Mastering pipeline operates at the native 48kHz sample rate — no lossy resample round-trip. |
+| **PP-VAE Neural Audio Polish** | Post-processing VAE that runs generated audio through an encode→decode round-trip to smooth spectral artifacts and improve tonal coherence. Optional wet/dry blend slider. F32 recommended for best quality. |
+| **ScragVAE Decoder** | Fine-tuned VAE decoder with +38% high-frequency energy and +29dB dynamic range improvement. Drop-in replacement for the standard decoder — selectable at runtime from the Models dropdown. |
 
 ---
 
@@ -134,6 +136,21 @@ A complete AI-powered lyrics and music generation workspace, powered by the Lire
 | **LM / Thinking Toggle** | Skip or enable the LM inference phase entirely — useful for speed when you don't need metadata generation. |
 | **Nuke Generations** | One-click wipe of all generated content and database entries. |
 | **Configurable Download Defaults** | Set preferred export format, filename prefix, and download behaviour. |
+
+---
+
+## Model Manager
+
+| Feature | Description |
+|---------|-------------|
+| **In-App Model Downloads** | Browse and download 100+ GGUF models directly from the app — no manual file management needed. |
+| **Curated Starter Packs** | 4 pre-configured bundles (Quick Start, Minimal, XL Quality, Blackwell Optimized) with one-click download of the full pipeline. |
+| **Tabbed Model Catalogue** | Browse all available models organised by role (DiT, LM, Text Encoder, VAE, PP-VAE) with descriptions and quantisation badges. |
+| **Concurrent Resumable Downloads** | Multiple simultaneous downloads with HTTP Range-based resumption — interruptions resume from where they left off. |
+| **Real-Time Progress** | SSE-streamed download progress with speed, ETA, and per-file status tracking. |
+| **Installed Status Tracking** | The catalogue shows which models you already have installed, with per-pack completion indicators. |
+| **Model Deletion** | Remove installed models directly from the UI with confirmation prompts. |
+| **5 HuggingFace Repos** | Models sourced from Serveurperso/ACE-Step-1.5-GGUF, scragnog/ace-step-1.5-gguf-merge-models, scragnog/Ace-Step-1.5-MXFP4-Quants, scragnog/Ace-Step-1.5-ScragVAE, and scragnog/HOT-Step-CPP-PP-VAE. |
 
 ---
 
