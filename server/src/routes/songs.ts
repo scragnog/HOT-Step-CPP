@@ -8,7 +8,7 @@ import path from 'path';
 import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
-import { deleteAudioGenerationsByJobIds, getLireekDb } from '../db/lireekDb.js';
+import { deleteAudioGenerationsByJobIds } from '../db/lireekDb.js';
 import { cropWavFile, cropLrcFile } from '../services/audioCrop.js';
 
 const router = Router();
@@ -256,7 +256,7 @@ router.post('/nuke-generations', (req, res) => {
   const songIds = songs.map((s: any) => s.id);
   const songResult = getDb().prepare('DELETE FROM songs WHERE user_id = ?').run(userId);
 
-  // 4. Delete all audio_generations from Lireek DB
+  // 4. Delete all audio_generations (same DB now)
   let lireekDeleted = 0;
   try {
     // Delete by matching job IDs first (precise)
@@ -264,11 +264,10 @@ router.post('/nuke-generations', (req, res) => {
       lireekDeleted += deleteAudioGenerationsByJobIds(songIds);
     }
     // Also nuke ALL audio_generations (catches any orphans)
-    const ldb = getLireekDb();
-    const allResult = ldb.prepare('DELETE FROM audio_generations').run();
+    const allResult = getDb().prepare('DELETE FROM audio_generations').run();
     lireekDeleted = Math.max(lireekDeleted, allResult.changes);
   } catch (err) {
-    console.error('[Songs] NUKE lireek cleanup error:', err);
+    console.error('[Songs] NUKE audio_generations cleanup error:', err);
   }
 
   console.log(`[Songs] NUKE: ${songResult.changes} songs, ${filesDeleted} files, ${lireekDeleted} lireek audio_gens deleted`);
