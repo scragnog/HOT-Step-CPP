@@ -482,11 +482,16 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     let srcAudioBuf: Buffer | undefined;
     if (isCoverTask && job.params.sourceAudioUrl) {
       const srcUrl = job.params.sourceAudioUrl;
-      const srcPath = path.isAbsolute(srcUrl)
-        ? srcUrl
-        : srcUrl.startsWith('/references/')
-          ? path.join(config.data.dir, 'references', srcUrl.replace('/references/', ''))
-          : path.join(config.data.dir, srcUrl);
+      // URL patterns (e.g. /references/uuid.flac) must be checked BEFORE
+      // path.isAbsolute — on Windows, '/foo' is absolute (current drive root)
+      // and would bypass the data-dir resolution.
+      const srcPath = srcUrl.startsWith('/references/')
+        ? path.join(config.data.dir, 'references', srcUrl.replace('/references/', ''))
+        : srcUrl.startsWith('/audio/')
+          ? path.join(config.data.audioDir, srcUrl.replace('/audio/', ''))
+          : path.isAbsolute(srcUrl)
+            ? srcUrl
+            : path.join(config.data.dir, srcUrl);
       logGeneration(job.id, 'DEBUG', `[Synth Phase] Looking for source audio at: ${srcPath}`);
       if (fs.existsSync(srcPath)) {
         srcAudioBuf = fs.readFileSync(srcPath);
@@ -508,9 +513,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       : (typeof rawTimbre === 'string' ? rawTimbre : undefined);
     logGeneration(job.id, 'DEBUG', `[Synth Phase] timbreRef=${timbreRef}, masteringRef=${masteringRef}`);
     if (timbreRef) {
-      const refPath = path.isAbsolute(timbreRef)
-        ? timbreRef
-        : path.join(config.data.dir, 'references', timbreRef);
+      const refPath = timbreRef.startsWith('/references/')
+        ? path.join(config.data.dir, 'references', timbreRef.replace('/references/', ''))
+        : path.isAbsolute(timbreRef)
+          ? timbreRef
+          : path.join(config.data.dir, 'references', timbreRef);
       logGeneration(job.id, 'DEBUG', `[Synth Phase] Looking for timbre ref at: ${refPath}`);
       if (fs.existsSync(refPath)) {
         refAudioBuf = fs.readFileSync(refPath);
@@ -775,9 +782,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           job.stage = `Mastering${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`;
           job.progress = 95;
           try {
-            const refPath = path.isAbsolute(masteringRef)
-              ? masteringRef
-              : path.join(config.data.dir, 'references', masteringRef);
+            const refPath = masteringRef.startsWith('/references/')
+              ? path.join(config.data.dir, 'references', masteringRef.replace('/references/', ''))
+              : path.isAbsolute(masteringRef)
+                ? masteringRef
+                : path.join(config.data.dir, 'references', masteringRef);
             const tempMastered = processedPath + '.mastered.wav';
             await runMastering(processedPath, refPath, tempMastered);
             fs.renameSync(tempMastered, processedPath);
