@@ -2,13 +2,14 @@
 // Ported from hot-step-9000, simplified for current cpp feature set.
 
 import React from 'react';
-import { Disc, Library, Mic, Guitar, Settings, Power, Terminal } from 'lucide-react';
+import { Disc, Library, Mic, Guitar, Settings, Power, Terminal, RotateCcw } from 'lucide-react';
 import { usePersistedState } from '../../hooks/usePersistedState';
 
 interface SidebarProps {
   activeView: string;
   onViewChange: (view: string) => void;
   onQuit: () => void;
+  onRestart?: () => void;
   showTerminal?: boolean;
   onToggleTerminal?: () => void;
 }
@@ -17,6 +18,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeView,
   onViewChange,
   onQuit,
+  onRestart,
   showTerminal = false,
   onToggleTerminal,
 }) => {
@@ -100,6 +102,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           )}
 
+          {/* Restart */}
+          {onRestart && (
+            <button
+              onClick={onRestart}
+              className={`
+                w-full rounded-xl flex items-center gap-3 transition-all duration-200 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10
+                ${isOpen ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+              `}
+              title="Restart HOT-Step CPP"
+            >
+              <div className="flex-shrink-0"><RotateCcw size={20} /></div>
+              {isOpen && (
+                <span className="text-sm font-medium whitespace-nowrap">Restart</span>
+              )}
+            </button>
+          )}
+
           {/* Quit / Shutdown */}
           <button
             onClick={onQuit}
@@ -145,3 +164,4 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick, isExpan
     )}
   </button>
 );
+

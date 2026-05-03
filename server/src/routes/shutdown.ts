@@ -1,10 +1,19 @@
-// shutdown.ts — Graceful shutdown endpoint
+// shutdown.ts — Graceful shutdown and restart endpoints
 //
 // POST /api/shutdown — kills ALL processes on our ports (Node, Vite, ace-server)
+// POST /api/restart  — kills Node + ace-server, writes marker file for loop restart
 // Uses port-based taskkill on Windows, like HOT-Step 9000.
 
 import { Router } from 'express';
 import { execSync, spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** Project root — two levels up from server/src/routes/ */
+const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 
 const router = Router();
 
@@ -92,4 +101,40 @@ router.post('/', (_req, res) => {
   }, 300);
 });
 
+// POST /api/restart — restart server (loop wrapper relaunches)
+router.post('/restart', (_req, res) => {
+  console.log('[Server] Restart requested via API');
+
+  // Write marker file so the loop wrapper (launch.bat / restart-loop.cmd)
+  // knows to re-launch instead of exiting
+  const markerPath = path.join(PROJECT_ROOT, '.restart-requested');
+  try {
+    fs.writeFileSync(markerPath, new Date().toISOString(), 'utf8');
+    console.log(`[Server] Wrote restart marker: ${markerPath}`);
+  } catch (err: any) {
+    console.error(`[Server] Failed to write restart marker: ${err.message}`);
+  }
+
+  res.json({ success: true, message: 'Restarting...' });
+
+  // Give the response time to flush, then kill server + ace-server (but NOT Vite)
+  setTimeout(() => {
+    console.log('[Server] Restarting — killing ace-server and self...');
+
+    if (process.platform === 'win32') {
+      // Kill ace-server by port — it will be re-spawned on restart
+      killPort(8085);
+
+      // Do NOT kill Vite (port 3000) — leave it running for dev mode
+
+      // Kill our own process tree from outside
+      killSelf();
+    }
+
+    // Fallback in case killSelf doesn't work
+    setTimeout(() => process.exit(0), 3000);
+  }, 300);
+});
+
 export default router;
+

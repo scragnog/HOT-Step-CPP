@@ -85,6 +85,65 @@ function urlForView(view: string): string {
   return '/';
 }
 
+/** Restarting overlay — polls /api/health and reloads when the server is back */
+const RestartingOverlay: React.FC = () => {
+  const [status, setStatus] = useState('Stopping server...');
+  const [dots, setDots] = useState('');
+
+  // Animate dots
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setDots(prev => prev.length >= 3 ? '' : prev + '.');
+    }, 500);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Poll for server health
+  useEffect(() => {
+    let cancelled = false;
+    let attempt = 0;
+
+    // Wait a moment before polling (give the server time to die)
+    const startDelay = setTimeout(() => {
+      setStatus('Waiting for server');
+      const poll = setInterval(async () => {
+        attempt++;
+        try {
+          const res = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
+          if (res.ok && !cancelled) {
+            clearInterval(poll);
+            setStatus('Reconnected! Reloading');
+            setTimeout(() => window.location.reload(), 500);
+          }
+        } catch {
+          // Still down — keep polling
+          if (attempt > 5 && !cancelled) {
+            setStatus('Waiting for server');
+          }
+        }
+      }, 2000);
+
+      // Cleanup
+      return () => { cancelled = true; clearInterval(poll); };
+    }, 3000);
+
+    return () => { cancelled = true; clearTimeout(startDelay); };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black text-white">
+      {/* Animated spinner */}
+      <div className="relative mb-8">
+        <div className="w-16 h-16 rounded-full border-4 border-amber-500/20" />
+        <div className="absolute inset-0 w-16 h-16 rounded-full border-4 border-transparent border-t-amber-400 animate-spin" />
+      </div>
+      <h1 className="text-2xl font-bold mb-2">Restarting HOT-Step CPP</h1>
+      <p className="text-zinc-400 text-lg">{status}{dots}</p>
+      <p className="text-zinc-600 text-sm mt-4">The page will reload automatically when the server is ready.</p>
+    </div>
+  );
+};
+
 /** Inner app content — must be rendered inside GlobalParamsProvider */
 const AppContent: React.FC = () => {
   const { token, isLoading } = useAuth();
@@ -147,6 +206,7 @@ const AppContent: React.FC = () => {
   } | null>(null);
 
   const [isShutdown, setIsShutdown] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
 
   // ── URL-based routing ──────────────────────────────────────
   const navigateTo = useCallback((view: string) => {
@@ -309,6 +369,9 @@ const AppContent: React.FC = () => {
     );
   }
 
+  if (isRestarting) {
+    return <RestartingOverlay />;
+  }
   // Main content renderer
   const renderContent = () => {
     if (activeView === 'settings') {
@@ -511,6 +574,19 @@ const AppContent: React.FC = () => {
                 setConfirmDialog(null);
                 try { await fetch('/api/shutdown', { method: 'POST' }); } catch { /* shutting down */ }
                 setIsShutdown(true);
+              },
+            });
+          }}
+          onRestart={() => {
+            setConfirmDialog({
+              title: 'Restart HOT-Step CPP',
+              message: 'This will restart the server and engine. The UI will reconnect automatically once the server is back.',
+              confirmLabel: 'Restart',
+              danger: false,
+              onConfirm: async () => {
+                setConfirmDialog(null);
+                setIsRestarting(true);
+                try { await fetch('/api/shutdown/restart', { method: 'POST' }); } catch { /* restarting */ }
               },
             });
           }}

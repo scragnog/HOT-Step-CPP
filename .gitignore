@@ -19,6 +19,9 @@ logs/
 # Environment (contains local paths)
 .env
 
+# Restart marker (transient, created by /api/restart)
+.restart-requested
+
 # Engine build artifacts
 engine/acestep.cpp/
 engine/build/
