@@ -300,11 +300,12 @@ export const CoverStudio: React.FC = () => {
           }
         }
       }
-      // Reference track + matchering
+      // Reference track + matchering + timbre conditioning
       if (selectedPreset?.reference_track_path) {
         params.referenceAudioUrl = selectedPreset.reference_track_path;
         params.masteringEnabled = true;
         params.masteringReference = selectedPreset.reference_track_path;
+        params.timbreReference = true; // Condition DiT output on target artist's timbre
       }
 
       const res = await generateApi.submit(params as any, token);
