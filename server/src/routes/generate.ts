@@ -23,6 +23,7 @@ import { applyVstChain } from './vst.js';
 // NOTE: Spectral Lifter is now native C++ in the engine (spectral-lifter.h).
 // The Python subprocess wrapper (spectralLifter.ts) is deprecated.
 import { autoTrimSilence } from '../services/autoTrim.js';
+import { ensureEngineFormat } from '../services/audioConvert.js';
 import { subscribeLines, pushLog } from './logs.js';
 
 const router = Router();
@@ -494,8 +495,14 @@ async function runGeneration(job: GenerationJob): Promise<void> {
             : path.join(config.data.dir, srcUrl);
       logGeneration(job.id, 'DEBUG', `[Synth Phase] Looking for source audio at: ${srcPath}`);
       if (fs.existsSync(srcPath)) {
-        srcAudioBuf = fs.readFileSync(srcPath);
-        logGeneration(job.id, 'INFO', `[Synth Phase] Source audio (cover): ${srcPath} (${(srcAudioBuf.length / 1024 / 1024).toFixed(1)} MB)`);
+        try {
+          srcAudioBuf = ensureEngineFormat(srcPath);
+          logGeneration(job.id, 'INFO', `[Synth Phase] Source audio (cover): ${srcPath} (${(srcAudioBuf.length / 1024 / 1024).toFixed(1)} MB)`);
+        } catch (convErr: any) {
+          logGeneration(job.id, 'WARNING', `[Synth Phase] Audio conversion failed: ${convErr.message}`);
+          // Fall back to raw file — engine may still handle it
+          srcAudioBuf = fs.readFileSync(srcPath);
+        }
       } else {
         logGeneration(job.id, 'WARNING', `[Synth Phase] Source audio not found: ${srcPath}`);
       }
