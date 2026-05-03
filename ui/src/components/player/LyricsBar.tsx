@@ -51,10 +51,8 @@ function findCurrentIndex(lines: LrcLine[], time: number): number {
 export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, isPlaying }) => {
     const [fetchedLrc, setFetchedLrc] = useState<string | null>(null);
     const [expanded, setExpanded] = useState(true);
-    const [fadeKey, setFadeKey] = useState(0);
-    const prevIdxRef = useRef(-1);
 
-    // Fetch LRC — stays cached even if isPlaying toggles, because we never unmount
+    // Fetch LRC — stays cached because we never unmount
     useEffect(() => {
         if (!audioUrl) { setFetchedLrc(null); return; }
         let cancelled = false;
@@ -69,16 +67,8 @@ export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, isP
     const lines = useMemo(() => fetchedLrc ? parseLrc(fetchedLrc) : [], [fetchedLrc]);
     const currentIdx = findCurrentIndex(lines, currentTime);
 
-    // Derive display text directly from currentIdx — no stale closure issues
+    // Derive display text directly — no stale closure, no animation key
     const displayText = currentIdx >= 0 ? lines[currentIdx]?.text ?? '' : '';
-
-    // Trigger crossfade animation when the line index changes
-    useEffect(() => {
-        if (currentIdx >= 0 && currentIdx !== prevIdxRef.current) {
-            prevIdxRef.current = currentIdx;
-            setFadeKey(prev => prev + 1);
-        }
-    }, [currentIdx]);
 
     // Don't render if no LRC data at all
     if (lines.length === 0) return null;
@@ -101,32 +91,16 @@ export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, isP
                 style={{ maxHeight: expanded ? '60px' : '0px', opacity: expanded ? 1 : 0 }}
             >
                 <div className="px-8 pb-3 flex items-center justify-center">
-                    <div
-                        key={fadeKey}
-                        className="text-center animate-lyrics-fade-in"
+                    <span
+                        className="text-lg md:text-xl font-bold text-white tracking-wide text-center transition-opacity duration-300"
+                        style={{
+                            textShadow: '0 0 30px rgba(236, 72, 153, 0.4), 0 2px 8px rgba(0,0,0,0.5)',
+                        }}
                     >
-                        <span
-                            className="text-lg md:text-xl font-bold text-white tracking-wide"
-                            style={{
-                                textShadow: '0 0 30px rgba(236, 72, 153, 0.4), 0 2px 8px rgba(0,0,0,0.5)',
-                            }}
-                        >
-                            {displayText || '♪ ♪ ♪'}
-                        </span>
-                    </div>
+                        {displayText || '♪ ♪ ♪'}
+                    </span>
                 </div>
             </div>
-
-            {/* Inline keyframe animation */}
-            <style>{`
-                @keyframes lyrics-fade-in {
-                    0% { opacity: 0; transform: translateY(8px); filter: blur(4px); }
-                    100% { opacity: 1; transform: translateY(0); filter: blur(0); }
-                }
-                .animate-lyrics-fade-in {
-                    animation: lyrics-fade-in 0.5s ease-out forwards;
-                }
-            `}</style>
         </div>
     );
 };
