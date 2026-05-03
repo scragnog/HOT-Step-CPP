@@ -6,6 +6,7 @@ interface PromptData {
   name: string;
   source: string;
   content: string;
+  default_content: string;
   has_default: boolean;
 }
 
@@ -39,11 +40,12 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
     try {
       const res = await lireekApi.listPrompts();
       const rawData = Array.isArray(res?.prompts) ? res.prompts : Array.isArray(res) ? res : [];
-      const data: PromptData[] = rawData.map(p => ({
+      const data: PromptData[] = rawData.map((p: any) => ({
         name: p.name,
         source: p.custom != null ? 'custom' : 'default',
-        content: p.custom ?? '',
-        has_default: true,
+        content: p.custom ?? p.default_content ?? '',
+        default_content: p.default_content ?? '',
+        has_default: !!p.default_content,
       }));
       setPrompts(data);
       if (data.length > 0 && !selected) {

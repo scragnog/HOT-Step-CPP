@@ -12,6 +12,12 @@ import { exportGeneration } from '../services/lireek/exportService.js';
 import { scanForSlop, BLACKLISTED_WORDS, BLACKLISTED_PHRASES } from '../services/lireek/slopDetector.js';
 import * as llmService from '../services/lireek/llmService.js';
 import * as profilerService from '../services/lireek/profilerService.js';
+import {
+  GENERATION_SYSTEM_PROMPT,
+  SONG_METADATA_SYSTEM_PROMPT,
+  PROFILE_PROMPT_1, PROFILE_PROMPT_2, PROFILE_PROMPT_3,
+  REFINEMENT_SYSTEM_PROMPT,
+} from '../services/lireek/prompts.js';
 
 const router = Router();
 
@@ -583,10 +589,17 @@ router.post('/purge-profiles', (_req: Request, res: Response) => {
 // ── Settings / Prompts ──────────────────────────────────────────────────────
 
 router.get('/prompts', (_req: Request, res: Response) => {
-  // Return list of customizable prompt names with current values
-  const names = ['generation_system', 'metadata_system', 'profile_system', 'refine_system'];
+  // Default prompt content — keyed by the editable prompt name
+  const defaults: Record<string, string> = {
+    generation_system: GENERATION_SYSTEM_PROMPT,
+    metadata_system: SONG_METADATA_SYSTEM_PROMPT,
+    profile_system: [PROFILE_PROMPT_1, PROFILE_PROMPT_2, PROFILE_PROMPT_3].join('\n\n---\n\n'),
+    refine_system: REFINEMENT_SYSTEM_PROMPT,
+  };
+  const names = Object.keys(defaults);
   const prompts = names.map(name => ({
     name,
+    default_content: defaults[name],
     custom: db.getSetting(`prompt_${name}`) || null,
   }));
   res.json({ prompts });

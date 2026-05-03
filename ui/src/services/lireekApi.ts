@@ -343,7 +343,7 @@ export const lireekApi = {
     api('/api/generate', { method: 'POST', body: params }),
 
   // ── Prompts ───────────────────────────────────────────────────────────
-  listPrompts: (): Promise<{ prompts: { name: string; custom: string | null }[] }> =>
+  listPrompts: (): Promise<{ prompts: { name: string; default_content: string; custom: string | null }[] }> =>
     api('/api/lireek/prompts'),
 
   savePrompt: (name: string, value: string): Promise<{ success: boolean }> =>
