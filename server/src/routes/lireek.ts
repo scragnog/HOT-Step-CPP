@@ -589,7 +589,7 @@ router.get('/prompts', (_req: Request, res: Response) => {
     name,
     custom: db.getSetting(`prompt_${name}`) || null,
   }));
-  res.json(prompts);
+  res.json({ prompts });
 });
 
 router.put('/prompts/:name', (req: Request, res: Response) => {

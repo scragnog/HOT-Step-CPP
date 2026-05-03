@@ -10,13 +10,10 @@ interface PromptData {
 }
 
 const FRIENDLY_NAMES: Record<string, string> = {
-  generation: 'Generation',
-  refinement: 'Refinement',
-  metadata: 'Metadata Planning',
-  profiler_1_themes: 'Profile: Themes & Subjects',
-  profiler_2_tone: 'Profile: Tone & Structure',
-  profiler_3_imagery: 'Profile: Imagery & Summary',
-  profiler_4_subjects: 'Profile: Song Subjects',
+  generation_system: 'Generation',
+  metadata_system: 'Metadata Planning',
+  profile_system: 'Artist Profiler',
+  refine_system: 'Refinement',
 };
 
 interface Props {
@@ -40,7 +37,8 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
   const loadPrompts = async () => {
     setLoading(true);
     try {
-      const { prompts: rawData } = await lireekApi.listPrompts();
+      const res = await lireekApi.listPrompts();
+      const rawData = Array.isArray(res?.prompts) ? res.prompts : Array.isArray(res) ? res : [];
       const data: PromptData[] = rawData.map(p => ({
         name: p.name,
         source: p.custom != null ? 'custom' : 'default',
