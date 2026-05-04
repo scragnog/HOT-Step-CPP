@@ -286,18 +286,22 @@ SuperSep * supersep_init(const char * model_dir, int device_id) {
     ctx->session_opts.SetIntraOpNumThreads(4);
     ctx->session_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
-#ifdef GGML_USE_CUDA
+    // Enable CUDA EP if requested. The ORT GPU SDK bundles its own CUDA EP
+    // (onnxruntime_providers_cuda.dll) so this doesn't depend on the system
+    // CUDA Toolkit that CMake's CUDAToolkit_FOUND checks for.
     if (device_id >= 0) {
-        OrtCUDAProviderOptions cuda_opts;
-        memset(&cuda_opts, 0, sizeof(cuda_opts));
-        cuda_opts.device_id = device_id;
-        ctx->session_opts.AppendExecutionProvider_CUDA(cuda_opts);
-        fprintf(stderr, "[SuperSep] CUDA EP enabled (device %d)\n", device_id);
+        try {
+            OrtCUDAProviderOptions cuda_opts;
+            memset(&cuda_opts, 0, sizeof(cuda_opts));
+            cuda_opts.device_id = device_id;
+            ctx->session_opts.AppendExecutionProvider_CUDA(cuda_opts);
+            fprintf(stderr, "[SuperSep] CUDA EP enabled (device %d)\n", device_id);
+        } catch (const std::exception &e) {
+            fprintf(stderr, "[SuperSep] CUDA EP failed: %s — falling back to CPU\n", e.what());
+        }
+    } else {
+        fprintf(stderr, "[SuperSep] CPU mode (device_id=%d)\n", device_id);
     }
-#else
-    (void)device_id;
-    fprintf(stderr, "[SuperSep] CPU mode (no CUDA)\n");
-#endif
 
     fprintf(stderr, "[SuperSep] Initialized (models: %s)\n", model_dir);
     return ctx;
@@ -340,38 +344,36 @@ SuperSepResult * supersep_run(
             ctx->s1_bs_roformer = load_onnx_model(ctx, "bs_roformer_sw.onnx");
         }
 
-        cb(1, "Computing STFT...", 0.10f);
-        StftParams sp = stft_default_params();
-        ComplexSpec spec = stft_forward(audio, n_frames, sp);
-
-        cb(1, "Running BS-RoFormer inference...", 0.15f);
+        cb(1, "Running BS-RoFormer inference...", 0.10f);
         std::vector<int64_t> out_shape;
-        auto masks = run_spec_model(ctx->s1_bs_roformer, spec, out_shape);
+        auto output = run_wave_model(ctx->s1_bs_roformer, audio, n_frames, out_shape);
 
         cb(1, "Extracting stems...", 0.20f);
-        int mask_stride = spec.n_channels * spec.n_freqs * spec.n_frames;
+        // Output shape: [1, n_sources, 2, n_samples]
+        int n_sources = (out_shape.size() >= 2) ? (int)out_shape[1] : 0;
+        fprintf(stderr, "[SuperSep] Stage 1 output: %d sources, shape=[", n_sources);
+        for (size_t i = 0; i < out_shape.size(); i++)
+            fprintf(stderr, "%s%lld", i ? "," : "", (long long)out_shape[i]);
+        fprintf(stderr, "]\n");
 
-        // Extract each stem via mask + iSTFT
-        for (int i = 0; i < N_STAGE1_STEMS && i < (int)out_shape[1]; i++) {
-            int stem_frames = 0;
-            float *stem_audio = extract_stem_from_mask(spec, masks.data(),
-                i * mask_stride, n_frames, &stem_frames);
+        // Extract each stem from waveform output
+        for (int i = 0; i < N_STAGE1_STEMS && i < n_sources; i++) {
+            float *stem_audio = extract_stem_interleaved(output, out_shape, i, n_frames);
 
             // Keep vocals/drums/other for later stages
             if (i == 3 && stages[1]) { // Vocals → Stage 2
                 s1_vocals = stem_audio;
-                s1_vocal_frames = stem_frames;
+                s1_vocal_frames = n_frames;
             } else if (i == 4 && stages[2]) { // Drums → Stage 3
                 s1_drums = stem_audio;
-                s1_drum_frames = stem_frames;
+                s1_drum_frames = n_frames;
             } else if (i == 5 && stages[3]) { // Other → Stage 4
                 s1_other = stem_audio;
-                s1_other_frames = stem_frames;
+                s1_other_frames = n_frames;
             } else {
-                add_stem(stems, STAGE1_STEMS[i], stem_audio, stem_frames);
+                add_stem(stems, STAGE1_STEMS[i], stem_audio, n_frames);
             }
         }
-        stft_free(&spec);
 
         // If not going deeper, add the kept stems
         if (!stages[1] && s1_vocals) {
@@ -406,22 +408,14 @@ SuperSepResult * supersep_run(
             }
 
             cb(2, "Splitting lead/backing vocals...", 0.35f);
-            StftParams sp = stft_default_params();
-            ComplexSpec spec = stft_forward(s1_vocals, s1_vocal_frames, sp);
-
             std::vector<int64_t> out_shape;
-            auto masks = run_spec_model(ctx->s2_mel_band, spec, out_shape);
+            auto output = run_wave_model(ctx->s2_mel_band, s1_vocals, s1_vocal_frames, out_shape);
 
-            int mask_stride = spec.n_channels * spec.n_freqs * spec.n_frames;
-            int n_out = std::min((int)out_shape[1], 2);
-
+            int n_out = (out_shape.size() >= 2) ? std::min((int)out_shape[1], 2) : 0;
             for (int i = 0; i < n_out; i++) {
-                int sf = 0;
-                float *sa = extract_stem_from_mask(spec, masks.data(),
-                    i * mask_stride, s1_vocal_frames, &sf);
-                add_stem(stems, STAGE2_STEMS[i], sa, sf);
+                float *sa = extract_stem_interleaved(output, out_shape, i, s1_vocal_frames);
+                add_stem(stems, STAGE2_STEMS[i], sa, s1_vocal_frames);
             }
-            stft_free(&spec);
             cb(2, "Vocal split complete", 0.45f);
         } catch (const std::exception &e) {
             fprintf(stderr, "[SuperSep] Stage 2 failed: %s\n", e.what());
@@ -446,22 +440,14 @@ SuperSepResult * supersep_run(
             }
 
             cb(3, "Splitting drums...", 0.55f);
-            StftParams sp = stft_default_params();
-            ComplexSpec spec = stft_forward(s1_drums, s1_drum_frames, sp);
-
             std::vector<int64_t> out_shape;
-            auto masks = run_spec_model(ctx->s3_mdx23c, spec, out_shape);
+            auto output = run_wave_model(ctx->s3_mdx23c, s1_drums, s1_drum_frames, out_shape);
 
-            int mask_stride = spec.n_channels * spec.n_freqs * spec.n_frames;
-            int n_out = std::min((int)out_shape[1], N_STAGE3_STEMS);
-
+            int n_out = (out_shape.size() >= 2) ? std::min((int)out_shape[1], N_STAGE3_STEMS) : 0;
             for (int i = 0; i < n_out; i++) {
-                int sf = 0;
-                float *sa = extract_stem_from_mask(spec, masks.data(),
-                    i * mask_stride, s1_drum_frames, &sf);
-                add_stem(stems, STAGE3_STEMS[i], sa, sf);
+                float *sa = extract_stem_interleaved(output, out_shape, i, s1_drum_frames);
+                add_stem(stems, STAGE3_STEMS[i], sa, s1_drum_frames);
             }
-            stft_free(&spec);
             cb(3, "Drum split complete", 0.70f);
         } catch (const std::exception &e) {
             fprintf(stderr, "[SuperSep] Stage 3 failed: %s\n", e.what());
