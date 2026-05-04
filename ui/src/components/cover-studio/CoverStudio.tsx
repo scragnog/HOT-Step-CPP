@@ -284,13 +284,15 @@ export const CoverStudio: React.FC = () => {
         setGenStage('Recombining stems...');
         setGenProgress(2);
         try {
-          // Build effective controls respecting solo state is handled by StemMixer internally,
-          // but the parent controls already have the user's volume/mute settings
-          const blob = await recombineStems(sepJobId, stemControls.map(c => ({
+          // Build effective controls — log them for diagnostics
+          const effectiveControls = stemControls.map(c => ({
             index: c.index,
             volume: c.muted ? 0 : c.volume,
             muted: c.muted,
-          })));
+          }));
+          console.log('[CoverStudio] Auto-recombine controls:', JSON.stringify(effectiveControls));
+          console.log('[CoverStudio] Stem names:', sepStems.map(s => `[${s.index}] ${s.name}`).join(', '));
+          const blob = await recombineStems(sepJobId, effectiveControls);
           // Upload recombined WAV to get a server-side URL
           const fd = new FormData();
           fd.append('audio', blob, 'recombined-stems.wav');

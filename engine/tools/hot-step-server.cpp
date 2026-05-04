@@ -2248,6 +2248,13 @@ int main(int argc, char ** argv) {
         }
         yyjson_doc_free(doc);
 
+        // Debug: log the effective mix controls
+        fprintf(stderr, "[SuperSep] Recombine request: %d stems\n", n);
+        for (int i = 0; i < n; i++) {
+            fprintf(stderr, "  [%d] %-20s vol=%.2f muted=%d\n",
+                    i, job->result->stems[i].name, volumes[i], (int)muted[i]);
+        }
+
         int out_frames = 0;
         float * mixed = supersep_recombine(
             job->result->stems, volumes.data(), muted.get(), n, &out_frames);
