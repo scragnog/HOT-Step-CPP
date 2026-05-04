@@ -2206,7 +2206,9 @@ int main(int argc, char ** argv) {
         yyjson_val * arr = yyjson_obj_get(root, "stems");
         int n = job->result->n_stems;
         std::vector<float> volumes(n, 1.0f);
-        std::vector<bool>  muted(n, false);
+        // NB: std::vector<bool> is a packed-bit proxy — no .data().
+        // Use a real bool array for the C API.
+        std::unique_ptr<bool[]> muted(new bool[n]());
 
         if (arr && yyjson_is_arr(arr)) {
             yyjson_val * item;
@@ -2228,7 +2230,7 @@ int main(int argc, char ** argv) {
 
         int out_frames = 0;
         float * mixed = supersep_recombine(
-            job->result->stems, volumes.data(), muted.data(), n, &out_frames);
+            job->result->stems, volumes.data(), muted.get(), n, &out_frames);
 
         if (!mixed || out_frames <= 0) {
             json_error(res, 500, "Recombine produced no audio");
