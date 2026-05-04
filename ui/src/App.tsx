@@ -154,7 +154,7 @@ const AppContent: React.FC = () => {
   // Resizable panel widths (persisted)
   const [createPanelWidth, setCreatePanelWidth] = usePersistedState('ace-createPanelWidth', 490);
   const [rightSidebarWidth, setRightSidebarWidth] = usePersistedState('ace-rightSidebarWidth', 360);
-  const [activitySidebarWidth, setActivitySidebarWidth] = usePersistedState('ace-activitySidebarWidth', 320);
+  const [activitySidebarWidth, setActivitySidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
   const [showRightSidebar, setShowRightSidebar] = useState(true);
 
   // Terminal panel state (persisted)

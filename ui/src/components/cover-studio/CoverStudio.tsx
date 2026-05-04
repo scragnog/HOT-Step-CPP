@@ -72,7 +72,7 @@ export const CoverStudio: React.FC = () => {
   const queue = useAudioGenQueue();
 
   // ── Sidebar resize ──
-  const [sidebarWidth, setSidebarWidth] = usePersistedState('cs-rightPanelWidth', 320);
+  const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
   const handleSidebarResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;

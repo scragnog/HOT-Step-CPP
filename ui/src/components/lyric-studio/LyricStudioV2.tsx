@@ -92,7 +92,7 @@ export const LyricStudioV2: React.FC = () => {
   const [nav, setNav] = useState<NavState>({ level: 'artists', selectedArtist: null, selectedAlbum: null });
 
   // ── Right panel width (persisted, pixel-based) ──
-  const [lsRightPanelWidth, setLsRightPanelWidth] = usePersistedState('ls-rightPanelWidth', 380);
+  const [lsRightPanelWidth, setLsRightPanelWidth] = usePersistedState('hs-activitySidebarWidth', 320);
   const compactRight = lsRightPanelWidth < 380;
 
   const handleRightPanelResize = useCallback((e: React.MouseEvent) => {
