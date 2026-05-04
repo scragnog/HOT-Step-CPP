@@ -52,6 +52,14 @@ struct SuperSep {
 static const int SUPERSEP_SR = 44100;
 static const float SILENCE_THRESHOLD_DB = -60.0f;
 
+// BS-RoFormer STFT params (from BS-Roformer-SW.yaml)
+static const int BS_N_FFT       = 2048;
+static const int BS_HOP_LENGTH  = 512;
+static const int BS_WIN_LENGTH  = 2048;
+static const int BS_CHUNK_SIZE  = 588800;  // ~13.4s at 44100Hz
+static const int BS_N_FREQS     = BS_N_FFT / 2 + 1;  // 1025
+static const int BS_NUM_STEMS   = 6;
+
 // Stem definitions for each stage
 struct StemDef {
     const char *key;
@@ -275,6 +283,255 @@ static void add_stem(std::vector<SuperSepStem> &stems, const StemDef &def,
     stems.push_back(s);
 }
 
+// ── BS-RoFormer STFT-based processing ───────────────────────────────────
+//
+// The ONNX model expects post-STFT input and produces mask output.
+// Preprocessing:  waveform → STFT → rearrange → model input [1, T, F*C*2]
+// Postprocessing: model output (mask) [1, stems, F*C, T, 2] → apply mask → iSTFT
+//
+// Reference: ZFTurbo/MSS_ONNX_TensorRT/models/preprocess.py
+
+// Process one chunk through BS-RoFormer.
+// chunk: interleaved stereo [L0,R0,L1,R1,...], chunk_frames per channel.
+// Returns n_stems interleaved stereo buffers (malloc'd). Caller frees each.
+static bool bs_roformer_process_chunk(
+    Ort::Session *session,
+    const float *chunk,          // interleaved stereo
+    int chunk_frames,            // per-channel frame count
+    int n_stems,
+    std::vector<float *> &stem_outputs,  // [n_stems] malloc'd interleaved stereo
+    std::vector<int> &stem_frame_counts
+) {
+    const int n_fft     = BS_N_FFT;
+    const int hop       = BS_HOP_LENGTH;
+    const int n_freqs   = BS_N_FREQS;  // 1025
+    const int n_ch      = 2;  // stereo
+
+    // ── STFT ─────────────────────────────────────────────────────────
+    StftParams sp;
+    sp.n_fft = n_fft;
+    sp.hop_length = hop;
+    sp.n_channels = n_ch;
+    ComplexSpec spec = stft_forward(chunk, chunk_frames, sp);
+    const int T = spec.n_frames;
+
+    fprintf(stderr, "[SuperSep] BS-RoFormer STFT: %d freqs x %d time frames\n", n_freqs, T);
+
+    // ── Rearrange STFT output to model input format ──────────────────
+    // Python: stft_repr has shape [batch, stereo, freq, time, 2] (real/imag)
+    //   rearrange 'b s f t c -> b (f s) t c' → [1, freq*stereo, time, 2]
+    //   rearrange 'b f t c -> b t (f c)'     → [1, time, freq*stereo*2]
+    //
+    // Our ComplexSpec layout: [ch][freq][time][2]
+    // Target: [1, T, n_freqs*n_ch*2]  where dimension ordering is
+    //   for each time step: [f0_ch0_re, f0_ch0_im, f0_ch1_re, f0_ch1_im, f1_ch0_re, ...]
+    //
+    // Actually from the Python code:
+    //   'b s f t c -> b (f s) t c' merges freq and stereo with freq leading
+    //   Then 'b f t c -> b t (f c)' flattens the (f_s) and c dimensions
+    //   So the order is: [f0_s0_re, f0_s0_im, f0_s1_re, f0_s1_im, f1_s0_re, ...]
+
+    int input_dim = n_freqs * n_ch * 2;  // 1025 * 2 * 2 = 4100
+    std::vector<float> model_input((size_t)T * input_dim);
+
+    for (int t = 0; t < T; t++) {
+        for (int f = 0; f < n_freqs; f++) {
+            for (int ch = 0; ch < n_ch; ch++) {
+                const float *c = spec.at(ch, f, t);
+                // Index into flattened: (f * n_ch + ch) * 2 + {0,1}
+                int base = (f * n_ch + ch) * 2;
+                model_input[(size_t)t * input_dim + base + 0] = c[0]; // real
+                model_input[(size_t)t * input_dim + base + 1] = c[1]; // imag
+            }
+        }
+    }
+
+    // Also save the stft_repr in the rearranged format [n_freqs*n_ch, T, 2]
+    // for mask application later
+    int fs = n_freqs * n_ch;  // 2050
+    std::vector<float> stft_repr((size_t)fs * T * 2);
+    for (int f = 0; f < n_freqs; f++) {
+        for (int ch = 0; ch < n_ch; ch++) {
+            int fs_idx = f * n_ch + ch;
+            for (int t = 0; t < T; t++) {
+                const float *c = spec.at(ch, f, t);
+                stft_repr[((size_t)fs_idx * T + t) * 2 + 0] = c[0];
+                stft_repr[((size_t)fs_idx * T + t) * 2 + 1] = c[1];
+            }
+        }
+    }
+
+    // ── Run ONNX inference ───────────────────────────────────────────
+    Ort::AllocatorWithDefaultOptions alloc;
+    Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+    std::vector<int64_t> input_shape = {1, (int64_t)T, (int64_t)input_dim};
+    auto input_tensor = Ort::Value::CreateTensor<float>(
+        mem, model_input.data(), model_input.size(), input_shape.data(), input_shape.size());
+
+    auto in_name = session->GetInputNameAllocated(0, alloc);
+    auto out_name = session->GetOutputNameAllocated(0, alloc);
+    const char *in_names[] = { in_name.get() };
+    const char *out_names[] = { out_name.get() };
+
+    auto outputs = session->Run(Ort::RunOptions{nullptr}, in_names, &input_tensor, 1, out_names, 1);
+
+    auto &out_tensor = outputs[0];
+    auto type_info = out_tensor.GetTensorTypeAndShapeInfo();
+    auto out_shape = type_info.GetShape();
+    const float *mask_data = out_tensor.GetTensorData<float>();
+
+    fprintf(stderr, "[SuperSep] BS-RoFormer output shape: [");
+    for (size_t i = 0; i < out_shape.size(); i++)
+        fprintf(stderr, "%s%lld", i ? "," : "", (long long)out_shape[i]);
+    fprintf(stderr, "]\n");
+
+    // Expected output: [1, n_stems, fs(=2050), T, 2]
+    int out_stems = (out_shape.size() >= 2) ? (int)out_shape[1] : 0;
+    int actual_stems = std::min(out_stems, n_stems);
+
+    // ── Apply mask and iSTFT for each stem ───────────────────────────
+    // mask shape: [1, stems, fs, T, 2] where fs = n_freqs * n_ch = 2050
+    // stft_repr: [fs, T, 2]
+    // Complex multiply: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
+    // Then iSTFT each stem
+
+    for (int s = 0; s < actual_stems; s++) {
+        // Build per-stem complex spectrogram: stft_repr * mask[s]
+        ComplexSpec stem_spec;
+        stem_spec.n_channels = n_ch;
+        stem_spec.n_freqs = n_freqs;
+        stem_spec.n_frames = T;
+        stem_spec.n_fft = n_fft;
+        stem_spec.hop_length = hop;
+        stem_spec.data = (float *)calloc((size_t)n_ch * n_freqs * T * 2, sizeof(float));
+
+        for (int f = 0; f < n_freqs; f++) {
+            for (int ch = 0; ch < n_ch; ch++) {
+                int fs_idx = f * n_ch + ch;
+                for (int t = 0; t < T; t++) {
+                    // stft_repr[fs_idx, t] complex
+                    float sr = stft_repr[((size_t)fs_idx * T + t) * 2 + 0];
+                    float si = stft_repr[((size_t)fs_idx * T + t) * 2 + 1];
+                    // mask[1, s, fs_idx, t, 2]
+                    size_t mask_off = ((size_t)s * fs * T + (size_t)fs_idx * T + t) * 2;
+                    float mr = mask_data[mask_off + 0];
+                    float mi = mask_data[mask_off + 1];
+                    // Complex multiply
+                    float *dst = stem_spec.at(ch, f, t);
+                    dst[0] = sr * mr - si * mi;
+                    dst[1] = sr * mi + si * mr;
+                }
+            }
+        }
+
+        int out_len = 0;
+        float *stem_audio = stft_inverse(stem_spec, chunk_frames, &out_len);
+        stft_free(&stem_spec);
+
+        stem_outputs.push_back(stem_audio);
+        stem_frame_counts.push_back(out_len);
+    }
+
+    stft_free(&spec);
+    return true;
+}
+
+// Full BS-RoFormer separation with chunking + overlap-add.
+// audio: interleaved stereo, n_frames per channel.
+// Returns per-stem interleaved stereo buffers.
+static bool bs_roformer_separate(
+    Ort::Session *session,
+    const float *audio,
+    int n_frames,
+    int n_stems,
+    std::vector<float *> &stem_outputs,   // [n_stems], each is interleaved stereo
+    std::vector<int> &stem_frame_counts,
+    std::function<void(int, const char *, float)> cb,
+    std::function<bool()> cancelled
+) {
+    const int chunk_size = BS_CHUNK_SIZE;
+
+    if (n_frames <= chunk_size) {
+        // Single chunk — no overlap needed
+        cb(1, "Running BS-RoFormer inference...", 0.10f);
+        return bs_roformer_process_chunk(session, audio, n_frames, n_stems,
+                                          stem_outputs, stem_frame_counts);
+    }
+
+    // Multiple chunks with overlap-add
+    // Use 50% overlap for seamless reconstruction
+    int overlap = chunk_size / 2;
+    int step = chunk_size - overlap;
+    int n_chunks = (n_frames - overlap + step - 1) / step;
+    if (n_chunks < 1) n_chunks = 1;
+
+    fprintf(stderr, "[SuperSep] Chunking: %d frames into %d chunks "
+            "(chunk=%d, overlap=%d, step=%d)\n",
+            n_frames, n_chunks, chunk_size, overlap, step);
+
+    // Allocate output accumulators (per stem)
+    std::vector<std::vector<float>> accum(n_stems, std::vector<float>(n_frames * 2, 0.0f));
+    std::vector<std::vector<float>> weight(n_stems, std::vector<float>(n_frames * 2, 0.0f));
+
+    // Crossfade window for blending overlapping chunks
+    auto fade_window = hann_window(chunk_size);
+
+    for (int c = 0; c < n_chunks; c++) {
+        if (cancelled()) return false;
+
+        int start = c * step;
+        int end = std::min(start + chunk_size, n_frames);
+        int this_chunk = end - start;
+
+        float pct = 0.10f + 0.15f * (float)c / (float)n_chunks;
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Processing chunk %d/%d...", c + 1, n_chunks);
+        cb(1, msg, pct);
+
+        // Extract chunk (interleaved stereo)
+        std::vector<float> chunk_buf(this_chunk * 2, 0.0f);
+        memcpy(chunk_buf.data(), audio + start * 2, (size_t)this_chunk * 2 * sizeof(float));
+
+        std::vector<float *> chunk_stems;
+        std::vector<int> chunk_counts;
+
+        if (!bs_roformer_process_chunk(session, chunk_buf.data(), this_chunk,
+                                        n_stems, chunk_stems, chunk_counts)) {
+            for (auto p : chunk_stems) free(p);
+            return false;
+        }
+
+        // Overlap-add with fade window
+        for (int s = 0; s < (int)chunk_stems.size() && s < n_stems; s++) {
+            int out_len = std::min(chunk_counts[s], this_chunk);
+            for (int i = 0; i < out_len; i++) {
+                float w = (i < chunk_size) ? fade_window[i] : 1.0f;
+                int dst = (start + i) * 2;
+                if (dst + 1 < n_frames * 2) {
+                    accum[s][dst + 0] += chunk_stems[s][i * 2 + 0] * w;
+                    accum[s][dst + 1] += chunk_stems[s][i * 2 + 1] * w;
+                    weight[s][dst + 0] += w;
+                    weight[s][dst + 1] += w;
+                }
+            }
+            free(chunk_stems[s]);
+        }
+    }
+
+    // Normalize and output
+    for (int s = 0; s < n_stems; s++) {
+        float *out = (float *)malloc((size_t)n_frames * 2 * sizeof(float));
+        for (int i = 0; i < n_frames * 2; i++) {
+            out[i] = (weight[s][i] > 1e-8f) ? accum[s][i] / weight[s][i] : 0.0f;
+        }
+        stem_outputs.push_back(out);
+        stem_frame_counts.push_back(n_frames);
+    }
+
+    return true;
+}
+
 // ── Public API ──────────────────────────────────────────────────────────
 
 SuperSep * supersep_init(const char * model_dir, int device_id) {
@@ -344,34 +601,35 @@ SuperSepResult * supersep_run(
             ctx->s1_bs_roformer = load_onnx_model(ctx, "bs_roformer_sw.onnx");
         }
 
-        cb(1, "Running BS-RoFormer inference...", 0.10f);
-        std::vector<int64_t> out_shape;
-        auto output = run_wave_model(ctx->s1_bs_roformer, audio, n_frames, out_shape);
+        std::vector<float *> s1_stems;
+        std::vector<int> s1_counts;
+
+        bool ok = bs_roformer_separate(
+            ctx->s1_bs_roformer, audio, n_frames, BS_NUM_STEMS,
+            s1_stems, s1_counts, cb, cancelled);
+
+        if (!ok) {
+            for (auto p : s1_stems) free(p);
+            return nullptr;
+        }
 
         cb(1, "Extracting stems...", 0.20f);
-        // Output shape: [1, n_sources, 2, n_samples]
-        int n_sources = (out_shape.size() >= 2) ? (int)out_shape[1] : 0;
-        fprintf(stderr, "[SuperSep] Stage 1 output: %d sources, shape=[", n_sources);
-        for (size_t i = 0; i < out_shape.size(); i++)
-            fprintf(stderr, "%s%lld", i ? "," : "", (long long)out_shape[i]);
-        fprintf(stderr, "]\n");
+        fprintf(stderr, "[SuperSep] Stage 1: got %d stems\n", (int)s1_stems.size());
 
-        // Extract each stem from waveform output
-        for (int i = 0; i < N_STAGE1_STEMS && i < n_sources; i++) {
-            float *stem_audio = extract_stem_interleaved(output, out_shape, i, n_frames);
-
+        // Assign stems (order: bass, drums, other, vocals, guitar, piano)
+        for (int i = 0; i < N_STAGE1_STEMS && i < (int)s1_stems.size(); i++) {
             // Keep vocals/drums/other for later stages
             if (i == 3 && stages[1]) { // Vocals → Stage 2
-                s1_vocals = stem_audio;
-                s1_vocal_frames = n_frames;
+                s1_vocals = s1_stems[i];
+                s1_vocal_frames = s1_counts[i];
             } else if (i == 4 && stages[2]) { // Drums → Stage 3
-                s1_drums = stem_audio;
-                s1_drum_frames = n_frames;
+                s1_drums = s1_stems[i];
+                s1_drum_frames = s1_counts[i];
             } else if (i == 5 && stages[3]) { // Other → Stage 4
-                s1_other = stem_audio;
-                s1_other_frames = n_frames;
+                s1_other = s1_stems[i];
+                s1_other_frames = s1_counts[i];
             } else {
-                add_stem(stems, STAGE1_STEMS[i], stem_audio, n_frames);
+                add_stem(stems, STAGE1_STEMS[i], s1_stems[i], s1_counts[i]);
             }
         }
 
