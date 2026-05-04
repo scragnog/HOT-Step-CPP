@@ -267,7 +267,7 @@ static float * extract_stem_from_mask(
 }
 
 static void add_stem(std::vector<SuperSepStem> &stems, const StemDef &def,
-                     float *samples, int n_frames) {
+                     float *samples, int n_frames, bool hidden = false) {
     if (!samples) return;
     if (is_silent(samples, n_frames, 2)) {
         fprintf(stderr, "[SuperSep] Skipping silent stem: %s\n", def.name);
@@ -282,6 +282,7 @@ static void add_stem(std::vector<SuperSepStem> &stems, const StemDef &def,
     s.n_samples = n_frames * 2;
     s.n_frames = n_frames;
     s.stage = def.stage;
+    s.hidden = hidden;
     stems.push_back(s);
 }
 
@@ -864,12 +865,13 @@ SuperSepResult * supersep_run(
 
             // Always add to output (duplicate buffer if held for later stage)
             float *buf = s1_stems[i];
-            if (i == 3 && stages[1] || i == 4 && stages[2] || i == 5 && stages[3]) {
+            bool is_held = (i == 3 && stages[1]) || (i == 4 && stages[2]) || (i == 5 && stages[3]);
+            if (is_held) {
                 size_t nbytes = (size_t)s1_counts[i] * 2 * sizeof(float);
                 buf = (float *)malloc(nbytes);
                 memcpy(buf, s1_stems[i], nbytes);
             }
-            add_stem(stems, STAGE1_STEMS[i], buf, s1_counts[i]);
+            add_stem(stems, STAGE1_STEMS[i], buf, s1_counts[i], /*hidden=*/is_held);
         }
 
         cb(1, "Stage 1 complete", 0.25f);

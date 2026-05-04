@@ -2146,6 +2146,7 @@ int main(int argc, char ** argv) {
             yyjson_mut_obj_add_int(doc, obj, "n_frames", s.n_frames);
             yyjson_mut_obj_add_int(doc, obj, "stage", s.stage);
             yyjson_mut_obj_add_int(doc, obj, "index", i);
+            yyjson_mut_obj_add_bool(doc, obj, "hidden", s.hidden);
             yyjson_mut_arr_append(arr, obj);
         }
         yyjson_mut_obj_add_val(doc, root, "stems", arr);

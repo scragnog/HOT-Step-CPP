@@ -46,6 +46,7 @@ typedef struct {
     int     n_samples;      // Total sample count (frames * 2 for stereo)
     int     n_frames;       // Per-channel frame count
     int     stage;          // Which stage produced this stem (1-4)
+    bool    hidden;         // If true, save to disk but exclude from UI
 } SuperSepStem;
 
 // Result of a separation run

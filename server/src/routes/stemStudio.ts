@@ -156,16 +156,17 @@ async function runSupersep(job: StemJob): Promise<void> {
     // 4. Fetch stem list
     const resultRes = await fetch(`${ACE_URL}/supersep/result?id=${aceJobId}`);
     if (!resultRes.ok) throw new Error('Failed to fetch SuperSep result');
-    const resultData = await resultRes.json() as { stems: Array<{ name: string; category: string; index: number; stage?: number }> };
+    const resultData = await resultRes.json() as { stems: Array<{ name: string; category: string; index: number; stage?: number; hidden?: boolean }> };
     const stemList = resultData.stems;
 
-    console.log(`[StemStudio] SuperSep job ${job.id}: ${stemList.length} stems to save`);
+    console.log(`[StemStudio] SuperSep job ${job.id}: ${stemList.length} stems to save (${stemList.filter(s => !s.hidden).length} visible)`);
 
-    // 5. Download each stem to disk
+    // 5. Download each stem to disk (including hidden ones for debug)
     job.status = 'saving';
     job.savingTotal = stemList.length;
     job.savingCurrent = 0;
-    job.tracks = stemList.map(s => sanitizeStemName(s.name));
+    // Only show non-hidden stems in the UI track list
+    job.tracks = stemList.filter(s => !s.hidden).map(s => sanitizeStemName(s.name));
 
     for (let i = 0; i < stemList.length; i++) {
       if ((job.status as string) === 'cancelled') return;
@@ -189,13 +190,17 @@ async function runSupersep(job: StemJob): Promise<void> {
       fs.mkdirSync(stageDir, { recursive: true });
       fs.writeFileSync(path.join(stageDir, `${safeName}.wav`), stemBuf);
 
-      job.completedStems.push(safeName);
-      console.log(`[StemStudio] SuperSep job ${job.id}: saved ${safeName} [stage ${stem.stage ?? 1}] (${(stemBuf.length / 1024).toFixed(0)} KB)`);
+      // Only track non-hidden stems for UI
+      if (!stem.hidden) {
+        job.completedStems.push(safeName);
+      }
+      console.log(`[StemStudio] SuperSep job ${job.id}: saved ${safeName} [stage ${stem.stage ?? 1}]${stem.hidden ? ' (hidden)' : ''} (${(stemBuf.length / 1024).toFixed(0)} KB)`);
     }
 
     // 6. Write metadata
-    // Build stem metadata for the result endpoint — preserve original names + categories
-    const stemMeta = stemList.map((s, idx) => ({
+    // Build stem metadata for the result endpoint — only visible stems
+    const visibleStems = stemList.filter(s => !s.hidden);
+    const stemMeta = visibleStems.map((s, idx) => ({
       originalName: s.name,
       safeName: sanitizeStemName(s.name),
       category: s.category,
