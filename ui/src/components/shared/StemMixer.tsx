@@ -54,8 +54,16 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
   const playbackStartTimeRef = useRef(0);
   const animationFrameRef = useRef<number>();
 
-  // Reset buffers when stems change (different job loaded)
+  // Reset buffers AND stop playback when stems change (different job loaded)
   useEffect(() => {
+    // Stop any active playback
+    sourceNodesRef.current.forEach(({ source }) => {
+      try { source.stop(); } catch {}
+    });
+    sourceNodesRef.current.clear();
+    setIsPlaying(false);
+
+    // Clear buffers
     buffersRef.current.clear();
     setLoadedStems(new Set());
     setDuration(0);
