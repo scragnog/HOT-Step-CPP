@@ -802,20 +802,64 @@ static bool mdx_process_chunk(
         }
     }
 
-    // 3. Run inference
+    // 3. Run inference — handle both single-input (MDX23C) and dual-input (HTDemucs) models
     Ort::AllocatorWithDefaultOptions alloc;
     Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
-    std::vector<int64_t> input_shape = {1, 4, dim_f, T};
-    auto input_tensor = Ort::Value::CreateTensor<float>(
-        mem, model_input.data(), model_input.size(), input_shape.data(), input_shape.size());
+    size_t n_inputs = session->GetInputCount();
+    size_t n_outputs = session->GetOutputCount();
 
-    auto in_name = session->GetInputNameAllocated(0, alloc);
-    auto out_name = session->GetOutputNameAllocated(0, alloc);
-    const char *in_names[] = { in_name.get() };
-    const char *out_names[] = { out_name.get() };
+    std::vector<int64_t> stft_shape = {1, 4, (int64_t)dim_f, (int64_t)T};
+    auto stft_tensor = Ort::Value::CreateTensor<float>(
+        mem, model_input.data(), model_input.size(), stft_shape.data(), stft_shape.size());
 
-    auto outputs = session->Run(Ort::RunOptions{nullptr}, in_names, &input_tensor, 1, out_names, 1);
+    // Build raw_audio tensor for hybrid models (HTDemucs)
+    // raw_audio shape: [1, 2, chunk_frames] (planar stereo)
+    std::vector<float> raw_audio;
+    Ort::Value raw_tensor{nullptr};
+    std::vector<int64_t> raw_shape;
+    if (n_inputs >= 2) {
+        // Get expected raw audio length from model input shape
+        auto inp1_info = session->GetInputTypeInfo(1).GetTensorTypeAndShapeInfo();
+        auto inp1_shape = inp1_info.GetShape();
+        int64_t raw_len = (inp1_shape.size() >= 3 && inp1_shape[2] > 0) ? inp1_shape[2] : chunk_frames;
+
+        raw_audio.resize(2 * raw_len, 0.0f);
+        // De-interleave: interleaved [L R L R ...] → planar [L L L ... R R R ...]
+        int copy_frames = std::min((int)raw_len, chunk_frames);
+        for (int i = 0; i < copy_frames; i++) {
+            raw_audio[i]           = chunk[i * 2];      // Left
+            raw_audio[raw_len + i] = chunk[i * 2 + 1];  // Right
+        }
+        raw_shape = {1, 2, raw_len};
+        raw_tensor = Ort::Value::CreateTensor<float>(
+            mem, raw_audio.data(), raw_audio.size(), raw_shape.data(), raw_shape.size());
+    }
+
+    // Collect input names and tensors
+    std::vector<Ort::AllocatedStringPtr> in_name_ptrs;
+    std::vector<const char *> in_names;
+    std::vector<Ort::Value> in_tensors;
+    for (size_t i = 0; i < n_inputs; i++) {
+        in_name_ptrs.push_back(session->GetInputNameAllocated(i, alloc));
+        in_names.push_back(in_name_ptrs.back().get());
+    }
+    in_tensors.push_back(std::move(stft_tensor));
+    if (n_inputs >= 2) in_tensors.push_back(std::move(raw_tensor));
+
+    // Collect output names
+    std::vector<Ort::AllocatedStringPtr> out_name_ptrs;
+    std::vector<const char *> out_names;
+    for (size_t i = 0; i < n_outputs; i++) {
+        out_name_ptrs.push_back(session->GetOutputNameAllocated(i, alloc));
+        out_names.push_back(out_name_ptrs.back().get());
+    }
+
+    fprintf(stderr, "[SuperSep] MDX: %zu inputs, %zu outputs\n", n_inputs, n_outputs);
+
+    auto outputs = session->Run(Ort::RunOptions{nullptr},
+                                 in_names.data(), in_tensors.data(), in_tensors.size(),
+                                 out_names.data(), out_names.size());
 
     auto &out_tensor = outputs[0];
     auto type_info = out_tensor.GetTensorTypeAndShapeInfo();
@@ -873,6 +917,25 @@ static bool mdx_process_chunk(
         int out_frames = 0;
         float *audio = stft_inverse(stem_spec, chunk_frames, &out_frames);
         stft_free(&stem_spec);
+
+        // For hybrid models (HTDemucs): add time-domain output (output_xt)
+        // output_xt shape: [batch, stems*2, samples] where stems*2 = planar stereo per stem
+        if (outputs.size() >= 2) {
+            auto &xt_tensor = outputs[1];
+            auto xt_info = xt_tensor.GetTensorTypeAndShapeInfo();
+            auto xt_shape = xt_info.GetShape();
+            const float *xt_data = xt_tensor.GetTensorData<float>();
+
+            if (xt_shape.size() >= 3) {
+                int xt_samples = (int)xt_shape[2];
+                int add_frames = std::min(out_frames, xt_samples);
+                // xt layout: [1, s*2+0, :] = left, [1, s*2+1, :] = right
+                for (int i = 0; i < add_frames; i++) {
+                    audio[i * 2 + 0] += xt_data[(size_t)(s * 2) * xt_samples + i];
+                    audio[i * 2 + 1] += xt_data[(size_t)(s * 2 + 1) * xt_samples + i];
+                }
+            }
+        }
 
         stem_outputs.push_back(audio);
         stem_counts.push_back(out_frames);
@@ -1243,6 +1306,8 @@ SuperSepResult * supersep_run(
     }
 
     // ── STAGE 4: "Other" refinement (HTDemucs waveform model) ────────
+    fprintf(stderr, "[SuperSep] Stage 4 check: stages[3]=%d, s1_other=%p, s1_other_frames=%d\n",
+            stages[3], (void*)s1_other, s1_other_frames);
     if (stages[3] && s1_other) {
         // Release previous stage models to free VRAM
         if (ctx->s3_mdx23c) { delete ctx->s3_mdx23c; ctx->s3_mdx23c = nullptr; }
