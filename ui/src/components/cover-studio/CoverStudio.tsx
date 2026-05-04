@@ -1,5 +1,5 @@
 // CoverStudio.tsx — Main Cover Studio orchestrator
-// Composes: SourcePanel, ArtistSettingsPanel, CoverSidebarPanel
+// Composes: SourcePanel, ArtistSettingsPanel, ActivitySidebar
 import React, { useState, useEffect, useCallback } from 'react';
 import { Guitar, Search, Loader2, Layers } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
