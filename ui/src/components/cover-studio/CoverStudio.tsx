@@ -71,6 +71,28 @@ export const CoverStudio: React.FC = () => {
   const [queueItemId, setQueueItemId] = useState<string | null>(null);
   const queue = useAudioGenQueue();
 
+  // ── Sidebar resize ──
+  const [sidebarWidth, setSidebarWidth] = usePersistedState('cs-rightPanelWidth', 320);
+  const handleSidebarResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const onMove = (ev: MouseEvent) => {
+      const newW = Math.min(700, Math.max(240, startW + startX - ev.clientX));
+      setSidebarWidth(newW);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [sidebarWidth, setSidebarWidth]);
+
   // ── Advanced Mode (SuperSep) ──
   const [advancedMode, setAdvancedMode] = useState(false);
   const [sepLevel, setSepLevel] = useState<SeparationLevel>(() => restore('sepLevel', 1) as SeparationLevel);
@@ -558,8 +580,15 @@ export const CoverStudio: React.FC = () => {
           onGenerate={handleGenerate} onCancel={handleCancel}
         />
 
+        {/* Resize handle */}
+        <div
+          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
+          onMouseDown={handleSidebarResize}
+        >
+          <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
+        </div>
         {/* Right: Recent Covers + Queue */}
-        <div className="w-72 flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden">
+        <div className="h-full flex-shrink-0 border-l border-white/5 overflow-hidden" style={{ width: sidebarWidth }}>
           <ActivitySidebar
             showToast={showToast}
             source="cover-studio"
