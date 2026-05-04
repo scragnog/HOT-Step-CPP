@@ -290,7 +290,7 @@ export const FloatingPlaylist: React.FC = () => {
 
                   {/* Duration — always visible, pinned right */}
                   {item.duration && item.duration > 0 && (
-                    <span className="text-[9px] text-zinc-600 font-mono flex-shrink-0 tabular-nums w-8 text-right">
+                    <span className="text-[9px] text-zinc-600 font-mono flex-shrink-0 tabular-nums w-8 text-right ml-auto">
                       {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, '0')}
                     </span>
                   )}
