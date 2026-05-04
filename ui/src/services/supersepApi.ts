@@ -48,7 +48,10 @@ export async function startSeparation(
     headers: { 'Content-Type': 'application/octet-stream' },
     body: audioBlob,
   });
-  if (!res.ok) throw new Error(`Separation failed: ${res.status}`);
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(errBody.error || `Separation failed: ${res.status}`);
+  }
   const data: SeparateResult = await res.json();
   return data.id;
 }
