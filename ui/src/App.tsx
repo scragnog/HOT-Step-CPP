@@ -16,6 +16,7 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
 import { SongList } from './components/library/SongList';
 import { JobQueue } from './components/queue/JobQueue';
+import { ActivitySidebar } from './components/shared/ActivitySidebar';
 import { Player } from './components/player/Player';
 import { WaveformPlayer, type WaveformPlayerHandle } from './components/player/WaveformPlayer';
 import { SectionMarkers } from './components/player/SectionMarkers';
@@ -235,9 +236,11 @@ const AppContent: React.FC = () => {
     setToast({ message, type, isVisible: true });
   };
 
-  // Song created callback — add to library
+  // Song created callback — add to library + trigger sidebar refresh
+  const [songCreatedCount, setSongCreatedCount] = useState(0);
   const handleSongCreated = useCallback((song: Song) => {
     setSongs(prev => [song, ...prev.filter(s => s.id !== song.id)]);
+    setSongCreatedCount(c => c + 1);
   }, []);
 
   // Play a song from the library (used by SongList, RightSidebar)
@@ -505,6 +508,15 @@ const AppContent: React.FC = () => {
               });
               showToast('Added to playlist', 'success');
             }}
+          />
+        </div>
+
+        {/* Activity Sidebar — Recent Songs + Queue */}
+        <div className="flex-shrink-0 w-[280px] h-full border-l border-white/5 bg-suno-panel overflow-hidden">
+          <ActivitySidebar
+            source="create"
+            showToast={showToast}
+            refreshKey={songCreatedCount}
           />
         </div>
 
