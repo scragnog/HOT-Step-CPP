@@ -6,6 +6,7 @@
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Play, X, Trash2, ChevronUp, ChevronDown,
   Music, ListPlus, ListMusic, Square, Download,
@@ -181,14 +182,15 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
         </div>
       )}
 
-      {/* Download Modal */}
-      {downloadSong && (
+      {/* Download Modal — portalled to body so it's not clipped by sidebar overflow */}
+      {downloadSong && createPortal(
         <DownloadModal
           song={downloadSong}
           isOpen={!!downloadSong}
           onClose={() => setDownloadSong(null)}
           artistName={downloadSong.artistName}
-        />
+        />,
+        document.body
       )}
     </div>
   );
