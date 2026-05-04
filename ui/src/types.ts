@@ -255,7 +255,7 @@ export interface AdapterFile {
 export interface RegistryFile {
   id: string;
   filename: string;
-  role: 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae';
+  role: 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'supersep';
   displayName: string;
   scale?: 'standard' | 'xl' | null;
   variant?: string | null;

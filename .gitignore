@@ -25,6 +25,7 @@ logs/
 # Engine build artifacts
 engine/acestep.cpp/
 engine/build/
+engine/deps/
 
 # Binaries & compiled objects
 *.exe

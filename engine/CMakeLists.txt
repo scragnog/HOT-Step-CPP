@@ -104,14 +104,23 @@ endif()
 # ─────────────────────────────────────────────────────────────────────────────
 # ONNX Runtime (SuperSep stem separation)
 # ─────────────────────────────────────────────────────────────────────────────
-# Pre-built ORT GPU package: set ORT_ROOT cmake var or ONNXRUNTIME_ROOT env.
-# Download from https://github.com/microsoft/onnxruntime/releases
-# On Windows: onnxruntime-win-x64-gpu-<version>.zip
+# Pre-built ORT GPU package. Resolution order:
+#   1. ORT_ROOT cmake variable
+#   2. ONNXRUNTIME_ROOT environment variable
+#   3. Auto-detect from engine/deps/onnxruntime/ (populated by buildall.cmd)
 option(HOT_STEP_SUPERSEP "Enable SuperSep stem separation (requires ONNX Runtime)" ON)
 
 set(ORT_ROOT "" CACHE PATH "Path to ONNX Runtime pre-built package")
 if(NOT ORT_ROOT AND DEFINED ENV{ONNXRUNTIME_ROOT})
     set(ORT_ROOT "$ENV{ONNXRUNTIME_ROOT}")
+endif()
+# Auto-detect from deps directory (buildall.cmd downloads here)
+if(NOT ORT_ROOT)
+    set(_ORT_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/onnxruntime")
+    if(EXISTS "${_ORT_DEPS_DIR}/include/onnxruntime_cxx_api.h")
+        set(ORT_ROOT "${_ORT_DEPS_DIR}")
+        message(STATUS "ORT auto-detected at ${ORT_ROOT}")
+    endif()
 endif()
 
 set(SUPERSEP_ENABLED FALSE)
@@ -197,6 +206,21 @@ find_package(CUDAToolkit QUIET)
 if(CUDAToolkit_FOUND)
     target_compile_definitions(ace-server PRIVATE GGML_USE_CUDA)
     target_link_libraries(ace-server PRIVATE CUDA::cudart)
+endif()
+
+# Copy ONNX Runtime DLLs next to ace-server.exe at build time
+if(SUPERSEP_ENABLED AND WIN32)
+    set(_ORT_DLL_DIR "${ORT_ROOT}/lib")
+    foreach(_dll onnxruntime.dll onnxruntime_providers_shared.dll onnxruntime_providers_cuda.dll)
+        if(EXISTS "${_ORT_DLL_DIR}/${_dll}")
+            add_custom_command(TARGET ace-server POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_ORT_DLL_DIR}/${_dll}"
+                    "$<TARGET_FILE_DIR:ace-server>/${_dll}"
+                COMMENT "Copying ${_dll}"
+            )
+        endif()
+    endforeach()
 endif()
 
 add_executable(ace-understand tools/ace-understand.cpp)

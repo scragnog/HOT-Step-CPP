@@ -52,6 +52,17 @@
         "scragvae-bf16",
         "pp-vae-f32"
       ]
+    },
+    {
+      "id": "stem-separation",
+      "name": "Stem Separation",
+      "description": "All 4 models for multi-stem audio separation in Cover Studio. Required for the SuperSep pipeline.",
+      "fileIds": [
+        "supersep-bs-roformer",
+        "supersep-mel-band",
+        "supersep-mdx23c",
+        "supersep-htdemucs"
+      ]
     }
   ],
   "files": [
@@ -1436,6 +1447,62 @@
       "repo": "scragnog/HOT-Step-CPP-PP-VAE",
       "description": "Post-processing VAE (FP16) — alternative half-precision variant.",
       "tags": []
+    },
+    {
+      "id": "supersep-bs-roformer",
+      "filename": "bs_roformer_sw.onnx",
+      "role": "supersep",
+      "subdir": "supersep",
+      "displayName": "BS-Roformer 6-Stem",
+      "scale": null,
+      "variant": "stage-1",
+      "quant": "FP32",
+      "sizeBytes": 704536949,
+      "repo": "scragnog/HOT-Step-CPP-SuperSep",
+      "description": "Stage 1: Primary 6-stem separation (vocals, drums, bass, guitar, piano, other). BS-Roformer architecture.",
+      "tags": ["essential"]
+    },
+    {
+      "id": "supersep-mel-band",
+      "filename": "mel_band_roformer_karaoke.onnx",
+      "role": "supersep",
+      "subdir": "supersep",
+      "displayName": "Mel-Band RoFormer Karaoke",
+      "scale": null,
+      "variant": "stage-2",
+      "quant": "FP32",
+      "sizeBytes": 917744739,
+      "repo": "scragnog/HOT-Step-CPP-SuperSep",
+      "description": "Stage 2: Vocal sub-separation into lead and backing vocals. Mel-Band RoFormer architecture.",
+      "tags": ["essential"]
+    },
+    {
+      "id": "supersep-mdx23c",
+      "filename": "mdx23c_drumsep.onnx",
+      "role": "supersep",
+      "subdir": "supersep",
+      "displayName": "MDX23C DrumSep",
+      "scale": null,
+      "variant": "stage-3",
+      "quant": "FP32",
+      "sizeBytes": 437702626,
+      "repo": "scragnog/HOT-Step-CPP-SuperSep",
+      "description": "Stage 3: Drum sub-separation (kick, snare, toms, hi-hat, cymbals). MDX23C architecture.",
+      "tags": ["essential"]
+    },
+    {
+      "id": "supersep-htdemucs",
+      "filename": "htdemucs_6s.onnx",
+      "role": "supersep",
+      "subdir": "supersep",
+      "displayName": "HTDemucs 6-Source",
+      "scale": null,
+      "variant": "stage-4",
+      "quant": "FP32",
+      "sizeBytes": 110384018,
+      "repo": "scragnog/HOT-Step-CPP-SuperSep",
+      "description": "Stage 4: 'Other' stem refinement via Hybrid Transformer Demucs. Meta Research architecture.",
+      "tags": ["essential"]
     }
   ]
 }

@@ -43,6 +43,7 @@ interface RegistryFile {
   id: string;
   filename: string;
   role: string;
+  subdir?: string;
   displayName: string;
   scale: string | null;
   variant: string | null;
@@ -76,13 +77,27 @@ class ModelDownloadService extends EventEmitter {
     };
   }
 
-  /** Scan models directory for installed .gguf files */
+  /** Scan models directory for installed model files (.gguf and .onnx) */
   getInstalledFiles(): Set<string> {
     const dir = this.modelsDir;
     if (!fs.existsSync(dir)) return new Set();
-    return new Set(
-      fs.readdirSync(dir).filter(f => f.endsWith('.gguf'))
-    );
+    const files = new Set<string>();
+    // Scan root directory
+    for (const f of fs.readdirSync(dir)) {
+      if (f.endsWith('.gguf') || f.endsWith('.onnx')) files.add(f);
+    }
+    // Scan subdirectories (e.g. supersep/)
+    for (const sub of fs.readdirSync(dir)) {
+      const subPath = path.join(dir, sub);
+      try {
+        if (fs.statSync(subPath).isDirectory()) {
+          for (const f of fs.readdirSync(subPath)) {
+            if (f.endsWith('.gguf') || f.endsWith('.onnx')) files.add(f);
+          }
+        }
+      } catch {}
+    }
+    return files;
   }
 
   /** Get all active/recent download jobs */
@@ -173,19 +188,33 @@ class ModelDownloadService extends EventEmitter {
 
   /** Delete a model file from disk */
   deleteFile(filename: string): boolean {
-    // Safety: only .gguf files
-    if (!filename.endsWith('.gguf')) throw new Error('Can only delete .gguf files');
+    // Safety: only known model extensions
+    if (!filename.endsWith('.gguf') && !filename.endsWith('.onnx')) {
+      throw new Error('Can only delete .gguf or .onnx files');
+    }
 
-    const filePath = path.join(this.modelsDir, filename);
-    if (!fs.existsSync(filePath)) return false;
+    // Check root dir and subdirectories
+    const candidates = [path.join(this.modelsDir, filename)];
+    // Also check subdirectories
+    try {
+      for (const sub of fs.readdirSync(this.modelsDir)) {
+        const subPath = path.join(this.modelsDir, sub);
+        if (fs.statSync(subPath).isDirectory()) {
+          candidates.push(path.join(subPath, filename));
+        }
+      }
+    } catch {}
 
-    // Ensure path is within models dir (prevent traversal)
-    const resolved = path.resolve(filePath);
     const modelsResolved = path.resolve(this.modelsDir);
-    if (!resolved.startsWith(modelsResolved)) throw new Error('Path traversal denied');
-
-    fs.unlinkSync(filePath);
-    return true;
+    for (const filePath of candidates) {
+      if (fs.existsSync(filePath)) {
+        const resolved = path.resolve(filePath);
+        if (!resolved.startsWith(modelsResolved)) throw new Error('Path traversal denied');
+        fs.unlinkSync(filePath);
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Clean up completed/cancelled/failed jobs older than 60s */
@@ -200,13 +229,16 @@ class ModelDownloadService extends EventEmitter {
   // ── Internal ────────────────────────────────────────────────
 
   private async _executeDownload(job: InternalJob, file: RegistryFile): Promise<void> {
-    const modelsDir = this.modelsDir;
-    if (!fs.existsSync(modelsDir)) {
-      fs.mkdirSync(modelsDir, { recursive: true });
+    // Determine target directory (root or subdirectory)
+    const targetDir = file.subdir
+      ? path.join(this.modelsDir, file.subdir)
+      : this.modelsDir;
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
     }
 
-    const partPath = path.join(modelsDir, `${file.filename}.part`);
-    const finalPath = path.join(modelsDir, file.filename);
+    const partPath = path.join(targetDir, `${file.filename}.part`);
+    const finalPath = path.join(targetDir, file.filename);
 
     // Check if already fully downloaded
     if (fs.existsSync(finalPath)) {
