@@ -109,6 +109,43 @@ export const StemStudio: React.FC = () => {
     if (meta?.lyrics) setLyrics(meta.lyrics);
   }, []);
 
+  const handleSupersep = useCallback(async () => {
+    if (!sourceAudioUrl) return;
+
+    setIsExtracting(true);
+    setExtractProgress(null);
+
+    try {
+      const jobId = await submitSupersep({
+        sourceAudioUrl,
+        sourceFileName,
+        level: sepLevel,
+      });
+
+      setActiveJobId(jobId);
+
+      const result = await waitForExtraction(jobId, (progress) => {
+        setExtractProgress(progress);
+      });
+
+      loadResultIntoMixer(jobId, result);
+      setRefreshTrigger(prev => prev + 1);
+
+    } catch (err: any) {
+      console.error('SuperSep failed:', err);
+      setExtractProgress({
+        status: 'failed',
+        progress: 0,
+        currentTrack: '',
+        completedStems: [],
+        totalTracks: 0,
+        error: err.message,
+      });
+    } finally {
+      setIsExtracting(false);
+    }
+  }, [sourceAudioUrl, sourceFileName, sepLevel]);
+
   const handleExtract = useCallback(async () => {
     if (!sourceAudioUrl) return;
 
@@ -162,44 +199,7 @@ export const StemStudio: React.FC = () => {
     } finally {
       setIsExtracting(false);
     }
-  }, [sourceAudioUrl, sourceFileName, selectedTracks, style, lyrics, extractModel, mode]);
-
-  const handleSupersep = useCallback(async () => {
-    if (!sourceAudioUrl) return;
-
-    setIsExtracting(true);
-    setExtractProgress(null);
-
-    try {
-      const jobId = await submitSupersep({
-        sourceAudioUrl,
-        sourceFileName,
-        level: sepLevel,
-      });
-
-      setActiveJobId(jobId);
-
-      const result = await waitForExtraction(jobId, (progress) => {
-        setExtractProgress(progress);
-      });
-
-      loadResultIntoMixer(jobId, result);
-      setRefreshTrigger(prev => prev + 1);
-
-    } catch (err: any) {
-      console.error('SuperSep failed:', err);
-      setExtractProgress({
-        status: 'failed',
-        progress: 0,
-        currentTrack: '',
-        completedStems: [],
-        totalTracks: 0,
-        error: err.message,
-      });
-    } finally {
-      setIsExtracting(false);
-    }
-  }, [sourceAudioUrl, sourceFileName, sepLevel]);
+  }, [sourceAudioUrl, sourceFileName, selectedTracks, style, lyrics, extractModel, mode, handleSupersep]);
 
   const loadResultIntoMixer = useCallback((jobId: string, result: ExtractJobResult) => {
     const stems: MixerStemInfo[] = result.stems.map((s, idx) => ({
