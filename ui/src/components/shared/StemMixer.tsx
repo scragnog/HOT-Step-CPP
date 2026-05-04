@@ -1,12 +1,19 @@
-// StemMixer.tsx — Interactive stem mixer for SuperSep
+// StemMixer.tsx — Shared interactive stem mixer
 //
-// Controlled component: parent owns volume/mute state so it can
-// read controls during generation for auto-recombine.
+// Controlled component: parent owns volume/mute state.
 // Supports real-time preview via Web Audio API.
+// Decoupled from any specific stem source — accepts audio URLs directly.
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import type { StemInfo } from '../../services/supersepApi';
-import { getStemAudioUrl, recombineStems } from '../../services/supersepApi';
+import { Download } from 'lucide-react';
+
+export interface MixerStemInfo {
+  name: string;
+  category: 'vocals' | 'instruments' | 'drums' | 'other';
+  audioUrl: string;    // direct URL to WAV/audio file
+  index: number;
+  stage?: number;      // optional — used by SuperSep stems
+}
 
 export interface StemControl {
   index: number;
@@ -16,10 +23,12 @@ export interface StemControl {
 
 interface StemMixerProps {
   jobId: string;
-  stems: StemInfo[];
+  stems: MixerStemInfo[];
   controls: StemControl[];
   onControlsChange: (controls: StemControl[]) => void;
   onClose?: () => void;
+  onDownloadStem?: (stem: MixerStemInfo) => void;
+  onDownloadAll?: () => void;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -31,7 +40,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const CATEGORY_ORDER = ['vocals', 'instruments', 'drums', 'other'];
 
-export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, onControlsChange, onClose }) => {
+export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, onControlsChange, onClose, onDownloadStem, onDownloadAll }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [soloIndex, setSoloIndex] = useState<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -45,6 +54,15 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
   const playbackStartTimeRef = useRef(0);
   const animationFrameRef = useRef<number>();
 
+  // Reset buffers when stems change (different job loaded)
+  useEffect(() => {
+    buffersRef.current.clear();
+    setLoadedStems(new Set());
+    setDuration(0);
+    setCurrentTime(0);
+    playbackOffsetRef.current = 0;
+  }, [jobId]);
+
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
@@ -54,7 +72,7 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
 
   // Group stems by category
   const groupedStems = useMemo(() => {
-    const groups: Record<string, StemInfo[]> = {};
+    const groups: Record<string, MixerStemInfo[]> = {};
     for (const s of stems) {
       const cat = s.category || 'other';
       if (!groups[cat]) groups[cat] = [];
@@ -90,7 +108,7 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
         continue;
       }
       try {
-        const url = getStemAudioUrl(jobId, stem.index);
+        const url = stem.audioUrl;
         const res = await fetch(url);
         const arrayBuf = await res.arrayBuffer();
         const audioBuf = await ctx.decodeAudioData(arrayBuf);
@@ -106,7 +124,7 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
     }
     setLoadedStems(loaded);
     setLoadingStems(false);
-  }, [jobId, stems]);
+  }, [stems]);
 
 
   const updateProgress = useCallback(() => {
@@ -243,6 +261,15 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
           >
             {loadingStems ? '⏳ Loading...' : isPlaying ? '⏹ Stop' : '▶ Preview'}
           </button>
+          {onDownloadAll && (
+            <button
+              onClick={onDownloadAll}
+              style={{ ...styles.button, display: 'flex', alignItems: 'center', gap: 4 }}
+              title="Download all stems as ZIP"
+            >
+              <Download size={13} /> All
+            </button>
+          )}
         </div>
       </div>
 
@@ -288,7 +315,9 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
                 >
                   <div style={styles.stemInfo}>
                     <span style={styles.stemName}>{stem.name}</span>
-                    <span style={styles.stageBadge}>S{stem.stage}</span>
+                    {stem.stage !== undefined && (
+                      <span style={styles.stageBadge}>S{stem.stage}</span>
+                    )}
                   </div>
 
                   <div style={styles.stemControls}>
@@ -322,6 +351,16 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
                     <span style={styles.volumeLabel}>
                       {Math.round(ctrl.volume * 100)}%
                     </span>
+
+                    {onDownloadStem && (
+                      <button
+                        onClick={() => onDownloadStem(stem)}
+                        style={{ ...styles.tinyButton, background: 'transparent', color: '#888' }}
+                        title={`Download ${stem.name}`}
+                      >
+                        <Download size={12} />
+                      </button>
+                    )}
                   </div>
                 </div>
               );

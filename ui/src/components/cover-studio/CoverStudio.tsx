@@ -9,13 +9,13 @@ import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
 import { generateApi } from '../../services/api';
 import { lireekApi, type Artist, type AlbumPreset } from '../../services/lireekApi';
 import {
-  startSeparation, waitForCompletion, recombineStems,
-  SEPARATION_LEVELS, type SeparationLevel, type StemInfo,
+  startSeparation, waitForCompletion, recombineStems, getStemAudioUrl,
+  SEPARATION_LEVELS, type SeparationLevel,
 } from '../../services/supersepApi';
 import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
 import { ActivitySidebar } from '../shared/ActivitySidebar';
-import { StemMixer, type StemControl } from './StemMixer';
+import { StemMixer, type StemControl, type MixerStemInfo } from '../shared/StemMixer';
 import {
   addManualQueueItem, updateManualQueueItem,
   completeManualQueueItem, failManualQueueItem,
@@ -100,7 +100,7 @@ export const CoverStudio: React.FC = () => {
   const [sepProgress, setSepProgress] = useState(0);
   const [sepMessage, setSepMessage] = useState('');
   const [sepJobId, setSepJobId] = useState<string | null>(null);
-  const [sepStems, setSepStems] = useState<StemInfo[] | null>(null);
+  const [sepStems, setSepStems] = useState<MixerStemInfo[] | null>(null);
   const [stemControls, setStemControls] = useState<StemControl[]>([]);
   const [showMixer, setShowMixer] = useState(false);
 
@@ -471,9 +471,17 @@ export const CoverStudio: React.FC = () => {
         setSepMessage(message);
       });
 
-      setSepStems(result.stems);
+      // Map SuperSep stems to shared MixerStemInfo (add audioUrl)
+      const mixerStems: MixerStemInfo[] = result.stems.map(s => ({
+        name: s.name,
+        category: s.category,
+        audioUrl: getStemAudioUrl(jobId, s.index),
+        index: s.index,
+        stage: s.stage,
+      }));
+      setSepStems(mixerStems);
       // Initialize stem controls (all at 100%, unmuted)
-      setStemControls(result.stems.map(s => ({ index: s.index, volume: 1.0, muted: false })));
+      setStemControls(mixerStems.map(s => ({ index: s.index, volume: 1.0, muted: false })));
       setShowMixer(true);
       showToast(`Separated into ${result.stems.length} stems!`);
     } catch (err: any) {
