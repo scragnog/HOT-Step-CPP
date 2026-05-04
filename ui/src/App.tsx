@@ -30,6 +30,7 @@ import { SettingsPanel, type AppSettings, DEFAULT_SETTINGS } from './components/
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { LyricStudioV2 } from './components/lyric-studio/LyricStudioV2';
 import { CoverStudio } from './components/cover-studio/CoverStudio';
+import { StemStudio } from './components/stem-studio/StemStudio';
 import { GlobalParamBar } from './components/global-bar/GlobalParamBar';
 import { PlaylistSidebar } from './components/playlist/PlaylistSidebar';
 import {
@@ -403,6 +404,14 @@ const AppContent: React.FC = () => {
       return (
         <div className="flex-1 overflow-hidden">
           <CoverStudio />
+        </div>
+      );
+    }
+
+    if (activeView === 'stem-studio') {
+      return (
+        <div className="flex-1 overflow-hidden">
+          <StemStudio />
         </div>
       );
     }
