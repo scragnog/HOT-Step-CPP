@@ -495,6 +495,9 @@ const AppContent: React.FC = () => {
             onReuse={handleReuse}
             onDownload={setDownloadSong}
             onRename={handleRename}
+            showFilters={false}
+            viewMode="grid"
+            title="Generations"
             onAddToPlaylist={(song) => {
               addToPlaylist({
                 id: song.id,

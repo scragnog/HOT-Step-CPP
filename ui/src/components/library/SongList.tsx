@@ -37,10 +37,17 @@ interface SongListProps {
   onDownload?: (song: Song) => void;
   onRename?: (song: Song, newTitle: string) => void;
   onAddToPlaylist?: (song: Song) => void;
+  /** Show source filter tabs — true for Library page, false for Create page */
+  showFilters?: boolean;
+  /** Layout mode — 'list' for compact rows, 'grid' for rich cards */
+  viewMode?: 'list' | 'grid';
+  /** Override the header title */
+  title?: string;
 }
 
 export const SongList: React.FC<SongListProps> = ({
   songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename, onAddToPlaylist,
+  showFilters = true, viewMode = 'list', title = 'Library',
 }) => {
   const playback = usePlayback();
   const [selectionMode, setSelectionMode] = useState(false);
@@ -109,10 +116,10 @@ export const SongList: React.FC<SongListProps> = ({
     <div className="p-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-bold text-white">Library</h3>
+        <h3 className="text-lg font-bold text-white">{title}</h3>
         <div className="flex items-center gap-2">
           <span className="text-xs text-zinc-500 font-medium">
-            {filteredSongs.length}{sourceFilter !== 'all' ? ` / ${songs.length}` : ''} song{filteredSongs.length !== 1 ? 's' : ''}
+            {filteredSongs.length}{showFilters && sourceFilter !== 'all' ? ` / ${songs.length}` : ''} song{filteredSongs.length !== 1 ? 's' : ''}
           </span>
           {!selectionMode ? (
             <button
@@ -133,38 +140,40 @@ export const SongList: React.FC<SongListProps> = ({
         </div>
       </div>
 
-      {/* Source Filter Tabs */}
-      <div className="flex items-center gap-1.5 mb-4 overflow-x-auto scrollbar-hide">
-        {SOURCE_FILTERS.map(f => {
-          const isActive = sourceFilter === f.id;
-          const count = sourceCounts[f.id] || 0;
-          return (
-            <button
-              key={f.id}
-              onClick={() => { setSourceFilter(f.id); exitSelectionMode(); }}
-              className={`
-                flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold
-                border transition-all duration-200 whitespace-nowrap
-                ${isActive
-                  ? f.color
-                  : 'text-zinc-500 bg-transparent border-transparent hover:text-zinc-300 hover:bg-white/5'
-                }
-              `}
-            >
-              {f.label}
-              {count > 0 && (
-                <span className={`
-                  min-w-[18px] h-4 px-1 rounded-full text-[10px] font-bold
-                  flex items-center justify-center
-                  ${isActive ? 'bg-white/15' : 'bg-zinc-800 text-zinc-500'}
-                `}>
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* Source Filter Tabs — only on Library page */}
+      {showFilters && (
+        <div className="flex items-center gap-1.5 mb-4 overflow-x-auto scrollbar-hide">
+          {SOURCE_FILTERS.map(f => {
+            const isActive = sourceFilter === f.id;
+            const count = sourceCounts[f.id] || 0;
+            return (
+              <button
+                key={f.id}
+                onClick={() => { setSourceFilter(f.id); exitSelectionMode(); }}
+                className={`
+                  flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold
+                  border transition-all duration-200 whitespace-nowrap
+                  ${isActive
+                    ? f.color
+                    : 'text-zinc-500 bg-transparent border-transparent hover:text-zinc-300 hover:bg-white/5'
+                  }
+                `}
+              >
+                {f.label}
+                {count > 0 && (
+                  <span className={`
+                    min-w-[18px] h-4 px-1 rounded-full text-[10px] font-bold
+                    flex items-center justify-center
+                    ${isActive ? 'bg-white/15' : 'bg-zinc-800 text-zinc-500'}
+                  `}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Bulk Action Bar */}
       {selectionMode && (
@@ -201,36 +210,64 @@ export const SongList: React.FC<SongListProps> = ({
         </div>
       )}
 
-      {/* Empty state for filter */}
+      {/* Empty state */}
       {filteredSongs.length === 0 && (
         <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
           <Music size={32} className="mb-3 opacity-20" />
-          <div className="text-sm text-zinc-500">No {SOURCE_FILTERS.find(f => f.id === sourceFilter)?.label} songs</div>
+          <div className="text-sm text-zinc-500">
+            {showFilters ? `No ${SOURCE_FILTERS.find(f => f.id === sourceFilter)?.label} songs` : 'No songs yet'}
+          </div>
         </div>
       )}
 
-      {/* Song List */}
-      <div className="space-y-1">
-        {filteredSongs.map(song => (
-          <SongItem
-            key={song.id}
-            song={song}
-            isActive={currentSongId === song.id}
-            isPlaying={currentSongId === song.id && playback.isPlaying}
-            selectionMode={selectionMode}
-            isSelected={selectedIds.has(song.id)}
-            onToggleSelect={() => toggleSelection(song.id)}
-            onPlay={() => onPlay(song)}
-            onSelect={() => onSelect?.(song)}
-            onDelete={() => onDelete(song)}
-            onReuse={() => onReuse?.(song)}
-            onDownload={() => onDownload?.(song)}
-            onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined}
-            onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(song) : undefined}
-            showSourceBadge={sourceFilter === 'all'}
-          />
-        ))}
-      </div>
+      {/* Grid View */}
+      {viewMode === 'grid' && filteredSongs.length > 0 && (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+          {filteredSongs.map(song => (
+            <SongCard
+              key={song.id}
+              song={song}
+              isActive={currentSongId === song.id}
+              isPlaying={currentSongId === song.id && playback.isPlaying}
+              selectionMode={selectionMode}
+              isSelected={selectedIds.has(song.id)}
+              onToggleSelect={() => toggleSelection(song.id)}
+              onPlay={() => onPlay(song)}
+              onSelect={() => onSelect?.(song)}
+              onDelete={() => onDelete(song)}
+              onReuse={() => onReuse?.(song)}
+              onDownload={() => onDownload?.(song)}
+              onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined}
+              onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(song) : undefined}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* List View */}
+      {viewMode === 'list' && filteredSongs.length > 0 && (
+        <div className="space-y-1">
+          {filteredSongs.map(song => (
+            <SongItem
+              key={song.id}
+              song={song}
+              isActive={currentSongId === song.id}
+              isPlaying={currentSongId === song.id && playback.isPlaying}
+              selectionMode={selectionMode}
+              isSelected={selectedIds.has(song.id)}
+              onToggleSelect={() => toggleSelection(song.id)}
+              onPlay={() => onPlay(song)}
+              onSelect={() => onSelect?.(song)}
+              onDelete={() => onDelete(song)}
+              onReuse={() => onReuse?.(song)}
+              onDownload={() => onDownload?.(song)}
+              onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined}
+              onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(song) : undefined}
+              showSourceBadge={showFilters && sourceFilter === 'all'}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -460,6 +497,198 @@ const SongItem: React.FC<SongItemProps> = ({
           )}
         </div>
       )}
+    </div>
+  );
+};
+
+// ── SongCard — Grid view card ────────────────────────────────────────────────
+
+interface SongCardProps {
+  song: Song;
+  isActive: boolean;
+  isPlaying: boolean;
+  selectionMode: boolean;
+  isSelected: boolean;
+  onToggleSelect: () => void;
+  onPlay: () => void;
+  onSelect?: () => void;
+  onDelete: () => void;
+  onReuse?: () => void;
+  onDownload?: () => void;
+  onRename?: (newTitle: string) => void;
+  onAddToPlaylist?: () => void;
+}
+
+const SongCard: React.FC<SongCardProps> = ({
+  song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
+  onPlay, onSelect, onDelete, onReuse, onDownload, onAddToPlaylist,
+}) => {
+  const [showMenu, setShowMenu] = React.useState(false);
+
+  const formatDuration = (val: string | number | undefined) => {
+    if (!val) return '--:--';
+    if (typeof val === 'string') return val;
+    const m = Math.floor(val / 60);
+    const s = Math.floor(val % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const gp = song.generationParams || song.generation_params as any;
+  const bpm = song.bpm || gp?.bpm;
+  const keyScale = song.key_scale || gp?.keyScale;
+  const model = song.dit_model || gp?.ditModel || '';
+  const modelShort = model ? model.split('/').pop()?.replace(/\.gguf$/, '').substring(0, 20) : '';
+
+  const formatDate = (d: string | Date | undefined) => {
+    if (!d) return '';
+    const date = typeof d === 'string' ? new Date(d) : d;
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffH = Math.floor(diffMs / 3600000);
+    if (diffH < 1) return 'Just now';
+    if (diffH < 24) return `${diffH}h ago`;
+    const diffD = Math.floor(diffH / 24);
+    if (diffD < 7) return `${diffD}d ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
+  const handleClick = () => {
+    if (selectionMode) onToggleSelect();
+    else onSelect?.();
+  };
+
+  return (
+    <div
+      className={`
+        group relative rounded-xl border overflow-hidden cursor-pointer
+        transition-all duration-200 hover:scale-[1.02] hover:shadow-lg hover:shadow-black/20
+        ${isSelected && selectionMode
+          ? 'border-pink-500/40 bg-pink-500/5 ring-1 ring-pink-500/20'
+          : isActive
+            ? 'border-pink-500/30 bg-pink-500/5'
+            : 'border-white/5 bg-zinc-900/50 hover:border-white/10 hover:bg-zinc-800/50'
+        }
+      `}
+      onClick={handleClick}
+    >
+      {/* Album Art Area */}
+      <div className="relative aspect-square bg-zinc-800 flex items-center justify-center overflow-hidden">
+        {song.coverUrl || song.cover_url ? (
+          <img src={song.coverUrl || song.cover_url} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <div className="flex flex-col items-center gap-2">
+            <Music size={32} className="text-zinc-700" />
+          </div>
+        )}
+
+        {/* Play overlay */}
+        {!selectionMode && (
+          <button
+            onClick={(e) => { e.stopPropagation(); if (isActive) togglePlay(); else onPlay(); }}
+            className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <div className="w-12 h-12 rounded-full bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
+              {isPlaying
+                ? <Pause size={20} className="text-white" />
+                : <Play size={20} className="text-white ml-0.5" />
+              }
+            </div>
+          </button>
+        )}
+
+        {/* Selection checkbox */}
+        {selectionMode && (
+          <div className="absolute top-2 left-2">
+            {isSelected
+              ? <CheckSquare size={20} className="text-pink-400 drop-shadow" />
+              : <Square size={20} className="text-white/60 drop-shadow" />
+            }
+          </div>
+        )}
+
+        {/* Duration badge */}
+        <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-sm text-[10px] font-mono text-white/80">
+          {formatDuration(song.duration)}
+        </div>
+
+        {/* More menu */}
+        {!selectionMode && (
+          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+              className="w-7 h-7 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/70 transition-colors"
+            >
+              <MoreHorizontal size={14} />
+            </button>
+            {showMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 bg-zinc-900 border border-white/10 rounded-xl shadow-xl py-1 min-w-[150px]">
+                  {onReuse && (
+                    <button onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
+                      <RotateCcw size={12} /> Reuse Prompt
+                    </button>
+                  )}
+                  {onAddToPlaylist && (
+                    <button onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); setShowMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
+                      <ListPlus size={12} /> Add to Playlist
+                    </button>
+                  )}
+                  {onDownload && (
+                    <button onClick={(e) => { e.stopPropagation(); onDownload(); setShowMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
+                      <Download size={12} /> Download
+                    </button>
+                  )}
+                  <button onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+                    <Trash2 size={12} /> Delete
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Card Body */}
+      <div className="px-3 py-2.5">
+        {/* Title */}
+        <div className={`text-sm font-semibold truncate ${isActive ? 'text-pink-400' : 'text-zinc-200'}`}>
+          {song.title || 'Untitled'}
+        </div>
+
+        {/* Style / Caption */}
+        <div className="text-[11px] text-zinc-500 truncate mt-0.5 leading-tight">
+          {song.style || song.caption || 'No description'}
+        </div>
+
+        {/* Metadata Row */}
+        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+          {bpm && (
+            <span className="text-[9px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-800/80 border border-white/5">
+              {bpm} BPM
+            </span>
+          )}
+          {keyScale && (
+            <span className="text-[9px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-800/80 border border-white/5">
+              {keyScale}
+            </span>
+          )}
+          {modelShort && (
+            <span className="text-[9px] text-violet-400/60 font-medium px-1.5 py-0.5 rounded bg-violet-500/5 border border-violet-500/10 truncate max-w-[100px]" title={model}>
+              {modelShort}
+            </span>
+          )}
+        </div>
+
+        {/* Date */}
+        <div className="text-[10px] text-zinc-600 mt-1.5">
+          {formatDate(song.created_at || song.createdAt)}
+        </div>
+      </div>
     </div>
   );
 };
