@@ -122,15 +122,8 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
                     )}
                   </div>
 
-                  {/* Duration */}
-                  {item.duration && item.duration > 0 && (
-                    <span className="text-[9px] text-zinc-600 font-mono flex-shrink-0">
-                      {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, '0')}
-                    </span>
-                  )}
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  {/* Actions — appear on hover between title and duration */}
+                  <div className="hidden group-hover:flex items-center gap-0 flex-shrink-0">
                     <button onClick={(e) => {
                         e.stopPropagation();
                         setDownloadSong({
@@ -163,6 +156,13 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
                       <X className="w-3 h-3" />
                     </button>
                   </div>
+
+                  {/* Duration — always visible, pinned right */}
+                  {item.duration && item.duration > 0 && (
+                    <span className="text-[9px] text-zinc-600 font-mono flex-shrink-0 tabular-nums w-8 text-right ml-auto">
+                      {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, '0')}
+                    </span>
+                  )}
                 </div>
               );
             })}
