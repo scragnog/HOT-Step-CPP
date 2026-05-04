@@ -541,6 +541,7 @@ const AppContent: React.FC = () => {
             source="create"
             showToast={showToast}
             refreshKey={songCreatedCount}
+            compact={activitySidebarWidth < 380}
           />
         </div>
 

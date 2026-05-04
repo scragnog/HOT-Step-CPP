@@ -541,6 +541,7 @@ export const CoverStudio: React.FC = () => {
             source="cover-studio"
             refreshKey={refreshTrigger + queue.completionCounter}
             queueCountColor="bg-cyan-500/20 text-cyan-300"
+            compact={sidebarWidth < 380}
           />
         </div>
       </div>
