@@ -258,7 +258,6 @@ static float * extract_stem_from_mask(
     memcpy(masked.data, input_spec.data, spec_size * sizeof(float));
 
     // Apply mask
-    int mask_stride = input_spec.n_channels * input_spec.n_freqs * input_spec.n_frames;
     stft_apply_mask(&masked, mask + mask_offset);
 
     // Inverse STFT
@@ -595,6 +594,10 @@ static bool mel_band_process_chunk(
 
     fprintf(stderr, "[SuperSep] Mel-Band STFT: %d freqs x %d time frames\n", n_freqs, T);
 
+    // DEBUG: Check input signal level
+    { float pk = 0; for (int i = 0; i < chunk_frames*2; i++) { float a = fabsf(chunk[i]); if (a>pk) pk=a; }
+      fprintf(stderr, "[SuperSep] DBG input chunk peak: %.6f\n", pk); }
+
     // ── Build stft_repr [fs, T, 2] ──────────────────────────────────
     // Rearrange: 'b s f t c -> b (f s) t c' with freq leading
     std::vector<float> stft_repr((size_t)fs * T * 2);
@@ -651,6 +654,12 @@ static bool mel_band_process_chunk(
     for (size_t i = 0; i < out_shape.size(); i++)
         fprintf(stderr, "%s%lld", i ? "," : "", (long long)out_shape[i]);
     fprintf(stderr, "]\n");
+
+    // DEBUG: Check model input and output levels
+    { float pk = 0; for (size_t i = 0; i < model_input.size(); i++) { float a = fabsf(model_input[i]); if (a>pk) pk=a; }
+      fprintf(stderr, "[SuperSep] DBG model_input peak: %.6f\n", pk); }
+    { float pk = 0; size_t n = (size_t)n_gathered * T * 2; for (size_t i = 0; i < n; i++) { float a = fabsf(mask_data[i]); if (a>pk) pk=a; }
+      fprintf(stderr, "[SuperSep] DBG mask_data peak: %.6f\n", pk); }
 
     // ── Scatter-add mask back to full spectrogram space ──────────────
     // mask_data: [1, 1, n_gathered, T, 2]
@@ -709,6 +718,12 @@ static bool mel_band_process_chunk(
         }
     }
 
+    // DEBUG: Check mask and result spectrogram levels
+    { float pk = 0; for (size_t i = 0; i < (size_t)fs*T*2; i++) { float a = fabsf(masks_summed[i]); if (a>pk) pk=a; }
+      fprintf(stderr, "[SuperSep] DBG masks_summed peak (after avg): %.6f\n", pk); }
+    { float pk = 0; size_t n = (size_t)n_ch*n_freqs*T*2; for (size_t i = 0; i < n; i++) { float a = fabsf(result_spec.data[i]); if (a>pk) pk=a; }
+      fprintf(stderr, "[SuperSep] DBG result_spec peak: %.6f\n", pk); }
+
     // ── iSTFT → lead vocals ─────────────────────────────────────────
     int lead_frames = 0;
     out_lead = stft_inverse(result_spec, chunk_frames, &lead_frames);
@@ -718,6 +733,13 @@ static bool mel_band_process_chunk(
     out_backing = (float *)malloc((size_t)chunk_frames * 2 * sizeof(float));
     for (int i = 0; i < chunk_frames * 2; i++) {
         out_backing[i] = chunk[i] - out_lead[i];
+    }
+
+    // DEBUG: Check output levels
+    { float pk = 0; for (int i = 0; i < chunk_frames*2; i++) { float a = fabsf(out_lead[i]); if (a>pk) pk=a; }
+      fprintf(stderr, "[SuperSep] DBG lead output peak: %.6f\n", pk); }
+    { float pk = 0; for (int i = 0; i < chunk_frames*2; i++) { float a = fabsf(out_backing[i]); if (a>pk) pk=a; }
+      fprintf(stderr, "[SuperSep] DBG backing output peak: %.6f\n", pk);
     }
 
     out_frames = chunk_frames;
@@ -812,6 +834,17 @@ SuperSepResult * supersep_run(
 
         cb(1, "Extracting stems...", 0.20f);
         fprintf(stderr, "[SuperSep] Stage 1: got %d stems\n", (int)s1_stems.size());
+
+        // DEBUG: Log per-stem peak amplitudes to verify stem ordering
+        for (int i = 0; i < (int)s1_stems.size(); i++) {
+            float pk = 0;
+            for (int j = 0; j < s1_counts[i] * 2 && j < 44100*20; j++) {
+                float a = fabsf(s1_stems[i][j]);
+                if (a > pk) pk = a;
+            }
+            fprintf(stderr, "[SuperSep] Stage 1 stem[%d] (%s): peak=%.6f, frames=%d\n",
+                    i, (i < N_STAGE1_STEMS ? STAGE1_STEMS[i].name : "?"), pk, s1_counts[i]);
+        }
 
         // Assign stems (order: bass, drums, other, vocals, guitar, piano)
         for (int i = 0; i < N_STAGE1_STEMS && i < (int)s1_stems.size(); i++) {

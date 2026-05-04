@@ -183,8 +183,14 @@ async function runSupersep(job: StemJob): Promise<void> {
 
       const stemBuf = Buffer.from(await stemRes.arrayBuffer());
       fs.writeFileSync(path.join(jobDir, `${safeName}.wav`), stemBuf);
+
+      // Also save into stage-N subfolder for raw per-stage debugging
+      const stageDir = path.join(jobDir, `stage-${stem.stage ?? 1}`);
+      fs.mkdirSync(stageDir, { recursive: true });
+      fs.writeFileSync(path.join(stageDir, `${safeName}.wav`), stemBuf);
+
       job.completedStems.push(safeName);
-      console.log(`[StemStudio] SuperSep job ${job.id}: saved ${safeName} (${(stemBuf.length / 1024).toFixed(0)} KB)`);
+      console.log(`[StemStudio] SuperSep job ${job.id}: saved ${safeName} [stage ${stem.stage ?? 1}] (${(stemBuf.length / 1024).toFixed(0)} KB)`);
     }
 
     // 6. Write metadata
