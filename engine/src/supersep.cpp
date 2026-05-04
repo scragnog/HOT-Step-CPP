@@ -846,9 +846,11 @@ SuperSepResult * supersep_run(
                     i, (i < N_STAGE1_STEMS ? STAGE1_STEMS[i].name : "?"), pk, s1_counts[i]);
         }
 
-        // Assign stems (order: bass, drums, other, vocals, guitar, piano)
+        // Assign stems — always output all Stage 1 stems.
+        // Stems needed by later stages get duplicated: one copy goes to output,
+        // the original pointer is kept for the downstream stage.
         for (int i = 0; i < N_STAGE1_STEMS && i < (int)s1_stems.size(); i++) {
-            // Keep vocals/drums/other for later stages
+            // Keep vocals/drums/other for later stages (hold the original pointer)
             if (i == 3 && stages[1]) { // Vocals → Stage 2
                 s1_vocals = s1_stems[i];
                 s1_vocal_frames = s1_counts[i];
@@ -858,23 +860,16 @@ SuperSepResult * supersep_run(
             } else if (i == 5 && stages[3]) { // Other → Stage 4
                 s1_other = s1_stems[i];
                 s1_other_frames = s1_counts[i];
-            } else {
-                add_stem(stems, STAGE1_STEMS[i], s1_stems[i], s1_counts[i]);
             }
-        }
 
-        // If not going deeper, add the kept stems
-        if (!stages[1] && s1_vocals) {
-            add_stem(stems, STAGE1_STEMS[3], s1_vocals, s1_vocal_frames);
-            s1_vocals = nullptr;
-        }
-        if (!stages[2] && s1_drums) {
-            add_stem(stems, STAGE1_STEMS[4], s1_drums, s1_drum_frames);
-            s1_drums = nullptr;
-        }
-        if (!stages[3] && s1_other) {
-            add_stem(stems, STAGE1_STEMS[5], s1_other, s1_other_frames);
-            s1_other = nullptr;
+            // Always add to output (duplicate buffer if held for later stage)
+            float *buf = s1_stems[i];
+            if (i == 3 && stages[1] || i == 4 && stages[2] || i == 5 && stages[3]) {
+                size_t nbytes = (size_t)s1_counts[i] * 2 * sizeof(float);
+                buf = (float *)malloc(nbytes);
+                memcpy(buf, s1_stems[i], nbytes);
+            }
+            add_stem(stems, STAGE1_STEMS[i], buf, s1_counts[i]);
         }
 
         cb(1, "Stage 1 complete", 0.25f);

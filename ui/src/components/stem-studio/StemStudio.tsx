@@ -37,9 +37,11 @@ function getBaseModels(ditModels: string[]): string[] {
 }
 
 export const StemStudio: React.FC = () => {
-  // Source audio
-  const [sourceAudioUrl, setSourceAudioUrl] = useState('');
-  const [sourceFileName, setSourceFileName] = useState('');
+  // Source audio (persisted across sessions for testing convenience)
+  const [sourceAudioUrl, _setSourceAudioUrl] = useState(() => localStorage.getItem('hs-stem-sourceUrl') || '');
+  const [sourceFileName, _setSourceFileName] = useState(() => localStorage.getItem('hs-stem-sourceFile') || '');
+  const setSourceAudioUrl = (url: string) => { localStorage.setItem('hs-stem-sourceUrl', url); _setSourceAudioUrl(url); };
+  const setSourceFileName = (name: string) => { localStorage.setItem('hs-stem-sourceFile', name); _setSourceFileName(name); };
 
   // Track selection
   const [selectedTracks, setSelectedTracks] = useState<string[]>(['vocals', 'drums', 'bass', 'guitar']);
