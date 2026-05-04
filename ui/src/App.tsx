@@ -9,13 +9,12 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from './context/AuthContext';
 import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
-import { useGenerationStore } from './stores/useGenerationStore';
 import { usePersistedState } from './hooks/usePersistedState';
 import { songApi } from './services/api';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
 import { SongList } from './components/library/SongList';
-import { JobQueue } from './components/queue/JobQueue';
+import { enqueueSimpleGen, useAudioGenQueue } from './stores/audioGenQueueStore';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
 import { Player } from './components/player/Player';
 import { WaveformPlayer, type WaveformPlayerHandle } from './components/player/WaveformPlayer';
@@ -250,8 +249,11 @@ const AppContent: React.FC = () => {
     playFromList(songToTrack(song), songs.map(songToTrack), 'library');
   }, [songs]);
 
-  // Generation store
-  const genStore = useGenerationStore(handleSongCreated);
+  // Shared audio generation queue (unified across all modes)
+  const audioQueue = useAudioGenQueue(token || undefined);
+  const activeJobCount = audioQueue.items.filter(i =>
+    i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating'
+  ).length;
 
   // Load songs on mount
   useEffect(() => {
@@ -284,10 +286,8 @@ const AppContent: React.FC = () => {
       coResident: settings.coResident,
       cacheLmCodes: settings.cacheLmCodes,
     };
-    genStore.submit(enrichedParams as GenerationParams, token).catch(err => {
-      console.error('[App] Generation failed:', err);
-    });
-  }, [token, genStore, settings, globalParams]);
+    enqueueSimpleGen(enrichedParams, token, handleSongCreated);
+  }, [token, settings, globalParams, handleSongCreated]);
 
   // Handle delete
   const handleDelete = useCallback(async (song: Song) => {
@@ -447,7 +447,7 @@ const AppContent: React.FC = () => {
         >
           <CreatePanel
             onGenerate={handleGenerate}
-            activeJobCount={genStore.activeJobCount}
+            activeJobCount={activeJobCount}
             reuseData={reuseData}
           />
         </div>
@@ -480,11 +480,6 @@ const AppContent: React.FC = () => {
 
         {/* Song List + Queue */}
         <div className="flex-1 min-w-0 overflow-y-auto">
-          <JobQueue
-            jobs={genStore.jobs}
-            onCancel={genStore.cancel}
-            onClearCompleted={genStore.clearCompleted}
-          />
           <SongList
             songs={songs}
             currentSongId={currentSong?.id}

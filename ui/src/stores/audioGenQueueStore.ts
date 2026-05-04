@@ -15,7 +15,7 @@
 
 import { useSyncExternalStore, useEffect } from 'react';
 import { lireekApi } from '../services/lireekApi';
-import { generateApi } from '../services/api';
+import { generateApi, songApi } from '../services/api';
 import { writePersistedState } from '../hooks/usePersistedState';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
 import type { GenerationParams } from '../types';
@@ -244,6 +244,108 @@ export function failManualQueueItem(id: string, error: string): void {
   item.progress = undefined;
   item.stage = undefined;
   _emit();
+}
+
+// ── Simple generation API (for Create page) ─────────────────────────────────
+
+/**
+ * Enqueue a simple generation from the Create page.
+ * Submits to the generate API, tracks progress in the shared queue,
+ * and calls onSongCreated for each resulting song.
+ *
+ * This replaces useGenerationStore for unified queue management.
+ */
+export async function enqueueSimpleGen(
+  params: Record<string, any>,
+  token: string,
+  onSongCreated?: (song: any) => void,
+): Promise<void> {
+  const title = (params.title as string) || 'Untitled';
+  const id = _genId();
+  const item: AudioQueueItem = {
+    id,
+    generation: {
+      id: 0, profile_id: 0, provider: 'create', model: '',
+      title, caption: (params.caption as string) || '', lyrics: (params.lyrics as string) || '',
+      created_at: new Date().toISOString(),
+    },
+    artistId: 0,
+    artistName: '',
+    preset: null,
+    profileId: 0,
+    lyricsSetId: 0,
+    globalParams: {},
+    status: 'generating',
+    stage: 'Submitting…',
+  };
+  _state.items.push(item);
+  _emit();
+
+  try {
+    const res = await generateApi.submit(params as any, token);
+    item.jobId = res.jobId;
+    item.stage = 'Queued…';
+    _emit();
+
+    // Poll until done
+    const startTime = Date.now();
+    while (true) {
+      await new Promise(r => setTimeout(r, 1500));
+      try {
+        const status = await generateApi.status(res.jobId);
+        item.progress = status.progress !== undefined
+          ? Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100))
+          : undefined;
+        item.stage = status.stage || 'Generating…';
+        item.elapsed = Math.round((Date.now() - startTime) / 1000);
+        _emit();
+
+        if (status.status === 'succeeded') {
+          const audioUrl = status.result?.audioUrls?.[0] || '';
+          const songIds = status.result?.songIds || [];
+          const masteredUrl = status.result?.masteredAudioUrl;
+          item.status = 'succeeded';
+          item.audioUrl = audioUrl;
+          item.songId = songIds[0];
+          item.masteredAudioUrl = masteredUrl;
+          item.audioDuration = status.result?.duration;
+          item.progress = 100;
+          item.stage = 'Complete!';
+          _state.completionCounter++;
+          _emit();
+
+          // Fetch and deliver songs to the library
+          if (onSongCreated) {
+            for (const songId of songIds) {
+              try {
+                const { song } = await songApi.get(songId);
+                onSongCreated(song);
+              } catch { /* non-fatal */ }
+            }
+          }
+          return;
+        }
+        if (status.status === 'failed') {
+          throw new Error(status.error || 'Generation failed');
+        }
+        // Safety: timeout after 30 minutes
+        if (Date.now() - startTime > 30 * 60 * 1000) {
+          throw new Error('Generation timed out');
+        }
+      } catch (e) {
+        if ((e as Error).message.includes('failed') || (e as Error).message.includes('timed out')) {
+          throw e;
+        }
+        // Transient network error — keep polling
+      }
+    }
+  } catch (err) {
+    item.status = 'failed';
+    item.error = (err as Error).message;
+    item.progress = undefined;
+    item.stage = undefined;
+    _emit();
+  }
 }
 
 export function resumeQueue(token: string): void {
