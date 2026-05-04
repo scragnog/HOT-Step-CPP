@@ -2240,7 +2240,7 @@ int main(int argc, char ** argv) {
                 if (si < 0 || si >= n) continue;
 
                 yyjson_val * vv = yyjson_obj_get(item, "volume");
-                if (vv && yyjson_is_num(vv)) volumes[si] = (float)yyjson_get_real(vv);
+                if (vv && yyjson_is_num(vv)) volumes[si] = (float)yyjson_get_num(vv);
 
                 yyjson_val * vm = yyjson_obj_get(item, "muted");
                 if (vm && yyjson_is_bool(vm)) muted[si] = yyjson_get_bool(vm);
