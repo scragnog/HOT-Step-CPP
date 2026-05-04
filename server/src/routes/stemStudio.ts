@@ -12,6 +12,7 @@ import archiver from 'archiver';
 import { aceClient, type AceRequest } from '../services/aceClient.js';
 import { ensureEngineFormat } from '../services/audioConvert.js';
 import { config } from '../config.js';
+import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
 
 const router = Router();
 
@@ -118,6 +119,12 @@ async function runExtraction(job: StemJob, ditSettings: any, style: string, lyri
       job.currentTrackName = trackName;
       job.status = 'extracting';
 
+      // Log to session generations folder
+      const stemLogId = `${job.id}_${trackName}`;
+      startGenerationLog(stemLogId, 'extract');
+      logGeneration(stemLogId, 'INFO', `Stem extraction: ${trackName} (${i + 1}/${job.tracks.length})`);
+      logGeneration(stemLogId, 'INFO', `Source: ${job.sourceFileName}`);
+
       console.log(`[StemStudio] Job ${job.id}: extracting track ${i + 1}/${job.tracks.length} — ${trackName}`);
 
       // Build AceRequest for this track
@@ -147,9 +154,12 @@ async function runExtraction(job: StemJob, ditSettings: any, style: string, lyri
         seed: Math.floor(Math.random() * 2_147_483_647),
       };
 
+      logGenerationParams(stemLogId, aceReq);
+
       // Submit via multipart (same pattern as cover mode)
       const aceJobId = await aceClient.submitSynthMultipart(aceReq, srcAudioBuf, undefined, 'wav16');
       job.currentAceJobId = aceJobId;
+      logGeneration(stemLogId, 'INFO', `Engine job submitted: ${aceJobId}`);
 
       // Poll until done
       await pollAceJob(aceJobId, job);
@@ -161,6 +171,8 @@ async function runExtraction(job: StemJob, ditSettings: any, style: string, lyri
       fs.writeFileSync(stemPath, audioBuf);
 
       job.completedStems.push(trackName);
+      logGeneration(stemLogId, 'INFO', `Complete: ${(audioBuf.length / 1024).toFixed(0)} KB`);
+      finishGenerationLog(stemLogId, 'extract');
       console.log(`[StemStudio] Job ${job.id}: ${trackName} complete (${(audioBuf.length / 1024).toFixed(0)} KB)`);
     }
 

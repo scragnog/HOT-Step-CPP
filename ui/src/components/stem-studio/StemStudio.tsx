@@ -19,9 +19,13 @@ import { SourceSelector } from './SourceSelector';
 import { TrackSelector } from './TrackSelector';
 import { RecentExtractions } from './RecentExtractions';
 
-/** Filter DiT model list to only base/SFT models (not turbo) */
+/** Filter DiT model list to only pure base models (no merge/sft/turbo) */
 function getBaseModels(ditModels: string[]): string[] {
-  return ditModels.filter(m => !m.toLowerCase().includes('turbo'));
+  return ditModels.filter(m => {
+    const lower = m.toLowerCase();
+    // Only allow acestep-v15-base-* and acestep-v15-xl-base-*
+    return lower.startsWith('acestep-v15-base-') || lower.startsWith('acestep-v15-xl-base-');
+  });
 }
 
 export const StemStudio: React.FC = () => {
@@ -351,14 +355,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   modelSelect: {
     flex: 1,
-    padding: '4px 8px',
-    borderRadius: 6,
+    padding: '5px 10px',
+    borderRadius: 12,
     border: '1px solid rgba(255,255,255,0.1)',
-    background: 'rgba(0,0,0,0.3)',
-    color: '#d4d4d4',
+    background: '#27272a',
+    color: '#d4d4d8',
     fontSize: 12,
     outline: 'none',
     cursor: 'pointer',
+    transition: 'border-color 0.15s ease',
   },
   progressSection: {
     display: 'flex',
