@@ -222,7 +222,7 @@ export const FloatingPlaylist: React.FC = () => {
               const isItemPlaying = currentSongId === item.id;
               return (
                 <div key={item.id}
-                  className={`group flex items-center gap-2 px-2.5 py-1.5 hover:bg-white/[0.04] transition-colors ${isItemPlaying ? 'bg-pink-500/10' : ''}`}>
+                  className={`group relative flex items-center gap-2 px-2.5 py-1.5 hover:bg-white/[0.04] transition-colors ${isItemPlaying ? 'bg-pink-500/10' : ''}`}>
                   <div className="w-6 flex-shrink-0 flex items-center justify-center">
                     <span className={`text-[10px] font-mono group-hover:hidden ${isItemPlaying ? 'text-pink-400 font-bold' : 'text-zinc-600'}`}>
                       {idx + 1}
@@ -253,13 +253,8 @@ export const FloatingPlaylist: React.FC = () => {
                     )}
                   </div>
 
-                  {item.duration && item.duration > 0 && (
-                    <span className="text-[9px] text-zinc-600 font-mono flex-shrink-0">
-                      {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, '0')}
-                    </span>
-                  )}
-
-                  <div className="flex items-center gap-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  {/* Action buttons — appear on hover between title and duration */}
+                  <div className="hidden group-hover:flex items-center gap-0 flex-shrink-0">
                     <button onClick={(e) => {
                         e.stopPropagation();
                         setDownloadSong({
@@ -292,6 +287,13 @@ export const FloatingPlaylist: React.FC = () => {
                       <X className="w-3 h-3" />
                     </button>
                   </div>
+
+                  {/* Duration — always visible, pinned right */}
+                  {item.duration && item.duration > 0 && (
+                    <span className="text-[9px] text-zinc-600 font-mono flex-shrink-0 tabular-nums w-8 text-right">
+                      {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, '0')}
+                    </span>
+                  )}
                 </div>
               );
             })}

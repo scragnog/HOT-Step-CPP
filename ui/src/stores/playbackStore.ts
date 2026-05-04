@@ -406,13 +406,39 @@ function startBothPlayers(): void {
   if (_retryCount <= MAX_RETRIES) {
     _retryTimer = setTimeout(startBothPlayers, RETRY_INTERVAL);
   } else {
+    // Mastered track failed but original is ready — fall back to original
+    if (_state.playMastered && origReady) {
+      console.warn('[Playback] Mastered audio failed to load, falling back to original');
+      _retryCount = 0;
+      _suppressPlayFalse = false;
+      setState({
+        playMastered: false,
+        currentAudioUrl: _state.currentTrack?.audioUrl || null,
+        isPlaying: true,
+        isLoading: false,
+        loadError: null,
+      });
+      applyVolumes();
+      return;
+    }
+
+    // Total failure — auto-advance if we're in a multi-track context
     _retryCount = 0;
     _suppressPlayFalse = false;
+    console.error('[Playback] Failed to load track:', _state.currentTrack?.title);
     setState({
       isPlaying: false,
       isLoading: false,
       loadError: 'Audio failed to load. The file may be missing or inaccessible.',
     });
+
+    // Auto-advance to next track after a short delay (like a skip)
+    if (_state.trackList.length > 1) {
+      setTimeout(() => {
+        console.log('[Playback] Auto-advancing past failed track');
+        next();
+      }, 500);
+    }
   }
 }
 
@@ -449,6 +475,23 @@ let _loadingTrackId: string | null = null;
 
 /** Core play logic — loads audio into WaveSurfer instances */
 function loadTrack(track: PlaybackTrack): void {
+  // Validate: skip tracks with no audio URL
+  if (!track.audioUrl) {
+    console.error('[Playback] Track has no audioUrl, skipping:', track.title);
+    _suppressPlayFalse = false;
+    setState({
+      currentTrack: track,
+      isPlaying: false,
+      isLoading: false,
+      loadError: 'No audio file available for this track.',
+    });
+    // Auto-advance if in a multi-track context
+    if (_state.trackList.length > 1) {
+      setTimeout(() => next(), 300);
+    }
+    return;
+  }
+
   _loadingTrackId = track.id;
   _retryCount = 0;
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
