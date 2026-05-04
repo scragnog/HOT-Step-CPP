@@ -838,7 +838,7 @@ SuperSepResult * supersep_run(
         // DEBUG: Log per-stem peak amplitudes to verify stem ordering
         for (int i = 0; i < (int)s1_stems.size(); i++) {
             float pk = 0;
-            for (int j = 0; j < s1_counts[i] * 2 && j < 44100*20; j++) {
+            for (int j = 0; j < s1_counts[i] * 2; j++) {
                 float a = fabsf(s1_stems[i][j]);
                 if (a > pk) pk = a;
             }
@@ -892,44 +892,92 @@ SuperSepResult * supersep_run(
 
             cb(2, "Splitting lead/backing vocals...", 0.35f);
 
-            // Mel-Band RoFormer uses spectrogram input with mel-band gathering.
-            // Pad to fixed chunk size (model has fixed input shape).
+            // Mel-Band RoFormer: chunking + overlap-add across full vocal track.
+            // Chunk size is 352800 samples (~8s). Use 1s crossfade overlap.
             const int mb_chunk = MB_CHUNK_SAMPLES;
-            int padded_frames = ((s1_vocal_frames + mb_chunk - 1) / mb_chunk) * mb_chunk;
-            if (padded_frames < mb_chunk) padded_frames = mb_chunk;
+            const int mb_crossfade = 44100;  // 1 second
+            const int mb_step = mb_chunk - mb_crossfade;
+            const int nf = s1_vocal_frames;
 
-            std::vector<float> padded_vocals(padded_frames * 2, 0.0f);
-            memcpy(padded_vocals.data(), s1_vocals, (size_t)s1_vocal_frames * 2 * sizeof(float));
+            // Allocate accumulators for lead + backing
+            std::vector<double> lead_accum(nf * 2, 0.0);
+            std::vector<double> back_accum(nf * 2, 0.0);
+            std::vector<double> weight_accum(nf * 2, 0.0);
 
-            // Process single chunk (or first chunk — simple for now)
-            float *lead = nullptr, *backing = nullptr;
-            int out_frames = 0;
-            bool ok = mel_band_process_chunk(
-                ctx->s2_mel_band, padded_vocals.data(), mb_chunk,
-                lead, backing, out_frames);
+            int n_chunks = (nf <= mb_chunk) ? 1 : (nf - mb_crossfade + mb_step - 1) / mb_step;
+            if (n_chunks < 1) n_chunks = 1;
 
-            if (ok && lead && backing) {
-                // Trim back to original length
-                if (out_frames > s1_vocal_frames) out_frames = s1_vocal_frames;
+            // Crossfade window
+            std::vector<float> fade_win(mb_chunk, 1.0f);
+            int half_fade = mb_crossfade / 2;
+            for (int i2 = 0; i2 < half_fade; i2++) {
+                float t = (float)i2 / (float)half_fade;
+                fade_win[i2] = t;
+                fade_win[mb_chunk - 1 - i2] = t;
+            }
 
-                // Trim lead
-                float *lead_trimmed = (float *)malloc((size_t)s1_vocal_frames * 2 * sizeof(float));
-                memset(lead_trimmed, 0, (size_t)s1_vocal_frames * 2 * sizeof(float));
-                memcpy(lead_trimmed, lead, (size_t)out_frames * 2 * sizeof(float));
-                free(lead);
+            fprintf(stderr, "[SuperSep] Mel-Band: %d frames -> %d chunks (chunk=%d, step=%d)\n",
+                    nf, n_chunks, mb_chunk, mb_step);
 
-                // Trim backing
-                float *back_trimmed = (float *)malloc((size_t)s1_vocal_frames * 2 * sizeof(float));
-                memset(back_trimmed, 0, (size_t)s1_vocal_frames * 2 * sizeof(float));
-                memcpy(back_trimmed, backing, (size_t)out_frames * 2 * sizeof(float));
-                free(backing);
+            bool any_ok = false;
+            for (int c = 0; c < n_chunks; c++) {
+                if (cancelled()) { free(s1_vocals); free(s1_drums); free(s1_other); return nullptr; }
 
-                add_stem(stems, STAGE2_STEMS[0], lead_trimmed, s1_vocal_frames);
-                add_stem(stems, STAGE2_STEMS[1], back_trimmed, s1_vocal_frames);
+                int start = c * mb_step;
+                int end = std::min(start + mb_chunk, nf);
+                int this_chunk = end - start;
+
+                float pct = 0.35f + 0.10f * (float)c / (float)n_chunks;
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Vocal chunk %d/%d...", c + 1, n_chunks);
+                cb(2, msg, pct);
+
+                // Pad to full chunk size (model expects fixed input)
+                std::vector<float> chunk_buf(mb_chunk * 2, 0.0f);
+                memcpy(chunk_buf.data(), s1_vocals + start * 2,
+                       (size_t)this_chunk * 2 * sizeof(float));
+
+                float *lead_chunk = nullptr, *back_chunk = nullptr;
+                int chunk_out = 0;
+                bool ok = mel_band_process_chunk(
+                    ctx->s2_mel_band, chunk_buf.data(), mb_chunk,
+                    lead_chunk, back_chunk, chunk_out);
+
+                if (ok && lead_chunk && back_chunk) {
+                    any_ok = true;
+                    // Overlap-add with crossfade
+                    for (int i2 = 0; i2 < this_chunk; i2++) {
+                        float w = fade_win[i2];
+                        if (c == 0 && i2 < half_fade) w = 1.0f;
+                        if (c == n_chunks - 1 && i2 >= this_chunk - half_fade) w = 1.0f;
+
+                        int dst = (start + i2) * 2;
+                        if (dst + 1 < nf * 2) {
+                            lead_accum[dst + 0] += lead_chunk[i2 * 2 + 0] * w;
+                            lead_accum[dst + 1] += lead_chunk[i2 * 2 + 1] * w;
+                            back_accum[dst + 0] += back_chunk[i2 * 2 + 0] * w;
+                            back_accum[dst + 1] += back_chunk[i2 * 2 + 1] * w;
+                            weight_accum[dst + 0] += w;
+                            weight_accum[dst + 1] += w;
+                        }
+                    }
+                }
+                free(lead_chunk);
+                free(back_chunk);
+            }
+
+            if (any_ok) {
+                // Normalize and output
+                float *lead_out = (float *)malloc((size_t)nf * 2 * sizeof(float));
+                float *back_out = (float *)malloc((size_t)nf * 2 * sizeof(float));
+                for (int i2 = 0; i2 < nf * 2; i2++) {
+                    lead_out[i2] = (weight_accum[i2] > 1e-8) ? (float)(lead_accum[i2] / weight_accum[i2]) : 0.0f;
+                    back_out[i2] = (weight_accum[i2] > 1e-8) ? (float)(back_accum[i2] / weight_accum[i2]) : 0.0f;
+                }
+                add_stem(stems, STAGE2_STEMS[0], lead_out, nf);
+                add_stem(stems, STAGE2_STEMS[1], back_out, nf);
             } else {
-                free(lead);
-                free(backing);
-                throw std::runtime_error("mel_band_process_chunk returned no data");
+                throw std::runtime_error("All mel-band chunks failed");
             }
 
             cb(2, "Vocal split complete", 0.45f);
