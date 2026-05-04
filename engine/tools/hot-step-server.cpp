@@ -2059,6 +2059,9 @@ int main(int argc, char ** argv) {
                 fprintf(stderr, "[Server] SuperSep job %s failed: %s\n",
                         job->id.c_str(), job->error_msg.c_str());
             }
+
+            // Release ONNX sessions to reclaim VRAM immediately
+            supersep_release_models(g_supersep);
         });
 
         fprintf(stderr, "[Server] SuperSep job %s created (level=%d, %.1fs audio)\n",

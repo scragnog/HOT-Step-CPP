@@ -95,6 +95,10 @@ void supersep_result_free(SuperSepResult * result);
 // Free the SuperSep context and all ONNX sessions.
 void supersep_free(SuperSep * ctx);
 
+// Release all cached ONNX sessions to reclaim VRAM.
+// The context remains valid; sessions are re-loaded on next run.
+void supersep_release_models(SuperSep * ctx);
+
 // Recombine stems with per-stem volume and mute controls.
 // stems: array of stem descriptors (path not used, samples pointer is used)
 // volumes: per-stem volume (0.0 to 2.0), parallel array

@@ -578,8 +578,12 @@ SuperSep * supersep_init(const char * model_dir, int device_id) {
             OrtCUDAProviderOptions cuda_opts;
             memset(&cuda_opts, 0, sizeof(cuda_opts));
             cuda_opts.device_id = device_id;
+            // Prevent exponential arena growth — allocate only what's needed
+            cuda_opts.arena_extend_strategy = 1;  // kSameAsRequested (not kNextPowerOfTwo)
+            // Cap GPU memory at 4GB to avoid maxing out VRAM
+            cuda_opts.gpu_mem_limit = (size_t)4 * 1024 * 1024 * 1024;
             ctx->session_opts.AppendExecutionProvider_CUDA(cuda_opts);
-            fprintf(stderr, "[SuperSep] CUDA EP enabled (device %d)\n", device_id);
+            fprintf(stderr, "[SuperSep] CUDA EP enabled (device %d, 4GB limit)\n", device_id);
         } catch (const std::exception &e) {
             fprintf(stderr, "[SuperSep] CUDA EP failed: %s — falling back to CPU\n", e.what());
         }
@@ -803,6 +807,15 @@ void supersep_free(SuperSep * ctx) {
     delete ctx;
 }
 
+void supersep_release_models(SuperSep * ctx) {
+    if (!ctx) return;
+    if (ctx->s1_bs_roformer) { delete ctx->s1_bs_roformer; ctx->s1_bs_roformer = nullptr; }
+    if (ctx->s2_mel_band)    { delete ctx->s2_mel_band;    ctx->s2_mel_band    = nullptr; }
+    if (ctx->s3_mdx23c)      { delete ctx->s3_mdx23c;      ctx->s3_mdx23c      = nullptr; }
+    if (ctx->s4_htdemucs)    { delete ctx->s4_htdemucs;    ctx->s4_htdemucs    = nullptr; }
+    fprintf(stderr, "[SuperSep] Released all ONNX sessions (VRAM freed)\n");
+}
+
 float * supersep_recombine(
     const SuperSepStem * stems,
     const float *        volumes,
@@ -864,6 +877,7 @@ SuperSepResult * supersep_run(SuperSep *, const float *, int, SuperSepLevel,
 
 void supersep_result_free(SuperSepResult *) {}
 void supersep_free(SuperSep *) {}
+void supersep_release_models(SuperSep *) {}
 
 float * supersep_recombine(const SuperSepStem *, const float *, const bool *,
                            int, int *) {

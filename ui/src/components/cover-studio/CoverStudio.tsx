@@ -528,8 +528,8 @@ export const CoverStudio: React.FC = () => {
               placeholder="Lyrics will appear here after searching Genius, or paste them manually..."
               className="w-full h-full resize-none bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono leading-relaxed" />
           </div>
-          {/* Stem Mixer (advanced mode only) */}
-          {advancedMode && sepStems && sepJobId && (
+          {/* Stem Mixer — always visible when stems are available */}
+          {sepStems && sepJobId && (
             <div className="flex-shrink-0 border-t border-white/5 p-4 max-h-[360px] overflow-y-auto scrollbar-hide">
               <StemMixer jobId={sepJobId} stems={sepStems}
                 controls={stemControls} onControlsChange={setStemControls}
