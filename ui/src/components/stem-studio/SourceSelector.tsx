@@ -173,7 +173,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({ sourceAudioUrl, 
                 key={song.id}
                 onClick={() => {
                   onSourceChange(song.audio_url, song.title, {
-                    style: song.style || song.caption || '',
+                    style: song.caption || '',
                     lyrics: song.lyrics || '',
                   });
                   setShowPicker(false);
