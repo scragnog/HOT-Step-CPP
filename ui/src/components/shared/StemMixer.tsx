@@ -56,8 +56,9 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
 
   // Reset buffers AND stop playback when stems change (different job loaded)
   useEffect(() => {
-    // Stop any active playback
+    // Stop any active playback — null onended first to prevent stale callbacks
     sourceNodesRef.current.forEach(({ source }) => {
+      source.onended = null;
       try { source.stop(); } catch {}
     });
     sourceNodesRef.current.clear();
@@ -224,7 +225,10 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
     // If playing, stop old sources and immediately restart from new position
     // (avoids the stale-closure problem of setTimeout + togglePlayback)
     if (isPlaying && audioContextRef.current) {
+      // Null onended on old sources BEFORE stopping — prevents stale callbacks
+      // from deleting new source nodes (same index) out of the map
       sourceNodesRef.current.forEach(({ source }) => {
+        source.onended = null;
         try { source.stop(); } catch {}
       });
       sourceNodesRef.current.clear();
