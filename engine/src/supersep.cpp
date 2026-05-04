@@ -580,10 +580,10 @@ SuperSep * supersep_init(const char * model_dir, int device_id) {
             cuda_opts.device_id = device_id;
             // Prevent exponential arena growth — allocate only what's needed
             cuda_opts.arena_extend_strategy = 1;  // kSameAsRequested (not kNextPowerOfTwo)
-            // Cap GPU memory at 4GB to avoid maxing out VRAM
-            cuda_opts.gpu_mem_limit = (size_t)4 * 1024 * 1024 * 1024;
+            // No hard memory cap — the model's attention layers need ~3GB per MatMul.
+            // VRAM is reclaimed after job completion via supersep_release_models().
             ctx->session_opts.AppendExecutionProvider_CUDA(cuda_opts);
-            fprintf(stderr, "[SuperSep] CUDA EP enabled (device %d, 4GB limit)\n", device_id);
+            fprintf(stderr, "[SuperSep] CUDA EP enabled (device %d, arena=exact)\n", device_id);
         } catch (const std::exception &e) {
             fprintf(stderr, "[SuperSep] CUDA EP failed: %s — falling back to CPU\n", e.what());
         }
