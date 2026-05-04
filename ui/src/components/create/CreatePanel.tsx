@@ -73,7 +73,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   };
 
   return (
-    <div className="h-full flex flex-col bg-zinc-50 dark:bg-suno-panel">
+    <div className="h-full flex flex-col bg-zinc-50 dark:bg-suno">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5">
         <h2 className="text-lg font-bold text-zinc-900 dark:text-white">Create</h2>

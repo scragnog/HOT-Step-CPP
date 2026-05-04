@@ -573,7 +573,7 @@ const AppContent: React.FC = () => {
               <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
             </div>
             <div
-              className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno-panel z-10 border-l border-zinc-200 dark:border-white/5"
+              className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5"
               style={{ width: rightSidebarWidth }}
             >
               <RightSidebar
