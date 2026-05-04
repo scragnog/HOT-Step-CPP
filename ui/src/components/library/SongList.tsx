@@ -1,13 +1,30 @@
-// SongList.tsx — Song library display with bulk selection
+// SongList.tsx — Song library display with bulk selection + source filtering
 // Ported from hot-step-9000 visual design with Tailwind.
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus,
 } from 'lucide-react';
 import type { Song } from '../../types';
 import { togglePlay, usePlayback } from '../../stores/playbackStore';
+
+// ── Source filter definitions ────────────────────────────────────────────────
+
+type SourceFilter = 'all' | 'create' | 'lyric-studio' | 'cover-studio';
+
+const SOURCE_FILTERS: { id: SourceFilter; label: string; color: string }[] = [
+  { id: 'all',           label: 'All',           color: 'text-zinc-300 bg-white/10 border-white/10' },
+  { id: 'create',        label: 'Create',        color: 'text-violet-300 bg-violet-500/15 border-violet-500/25' },
+  { id: 'lyric-studio',  label: 'Lyric Studio',  color: 'text-pink-300 bg-pink-500/15 border-pink-500/25' },
+  { id: 'cover-studio',  label: 'Cover Studio',  color: 'text-cyan-300 bg-cyan-500/15 border-cyan-500/25' },
+];
+
+function getSongSource(song: Song): string {
+  return (song.generationParams as any)?.source || (song.generation_params as any)?.source || 'create';
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 interface SongListProps {
   songs: Song[];
@@ -28,6 +45,24 @@ export const SongList: React.FC<SongListProps> = ({
   const playback = usePlayback();
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+
+  // Client-side source filtering
+  const filteredSongs = useMemo(() => {
+    if (sourceFilter === 'all') return songs;
+    return songs.filter(s => getSongSource(s) === sourceFilter);
+  }, [songs, sourceFilter]);
+
+  // Count songs per source for filter badges
+  const sourceCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: songs.length, create: 0, 'lyric-studio': 0, 'cover-studio': 0 };
+    for (const s of songs) {
+      const src = getSongSource(s);
+      if (src in counts) counts[src]++;
+      else counts.create++; // default to create for untagged
+    }
+    return counts;
+  }, [songs]);
 
   const toggleSelection = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -39,8 +74,8 @@ export const SongList: React.FC<SongListProps> = ({
   }, []);
 
   const selectAll = useCallback(() => {
-    setSelectedIds(new Set(songs.map(s => s.id)));
-  }, [songs]);
+    setSelectedIds(new Set(filteredSongs.map(s => s.id)));
+  }, [filteredSongs]);
 
   const deselectAll = useCallback(() => {
     setSelectedIds(new Set());
@@ -67,17 +102,17 @@ export const SongList: React.FC<SongListProps> = ({
     );
   }
 
-  const allSelected = selectedIds.size === songs.length;
+  const allSelected = selectedIds.size === filteredSongs.length && filteredSongs.length > 0;
   const someSelected = selectedIds.size > 0 && !allSelected;
 
   return (
     <div className="p-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <h3 className="text-lg font-bold text-white">Library</h3>
         <div className="flex items-center gap-2">
           <span className="text-xs text-zinc-500 font-medium">
-            {songs.length} song{songs.length !== 1 ? 's' : ''}
+            {filteredSongs.length}{sourceFilter !== 'all' ? ` / ${songs.length}` : ''} song{filteredSongs.length !== 1 ? 's' : ''}
           </span>
           {!selectionMode ? (
             <button
@@ -98,10 +133,42 @@ export const SongList: React.FC<SongListProps> = ({
         </div>
       </div>
 
+      {/* Source Filter Tabs */}
+      <div className="flex items-center gap-1.5 mb-4 overflow-x-auto scrollbar-hide">
+        {SOURCE_FILTERS.map(f => {
+          const isActive = sourceFilter === f.id;
+          const count = sourceCounts[f.id] || 0;
+          return (
+            <button
+              key={f.id}
+              onClick={() => { setSourceFilter(f.id); exitSelectionMode(); }}
+              className={`
+                flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold
+                border transition-all duration-200 whitespace-nowrap
+                ${isActive
+                  ? f.color
+                  : 'text-zinc-500 bg-transparent border-transparent hover:text-zinc-300 hover:bg-white/5'
+                }
+              `}
+            >
+              {f.label}
+              {count > 0 && (
+                <span className={`
+                  min-w-[18px] h-4 px-1 rounded-full text-[10px] font-bold
+                  flex items-center justify-center
+                  ${isActive ? 'bg-white/15' : 'bg-zinc-800 text-zinc-500'}
+                `}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Bulk Action Bar */}
       {selectionMode && (
         <div className="flex items-center gap-2 mb-3 px-3 py-2.5 rounded-xl bg-zinc-800/80 border border-white/5">
-          {/* Select All / None checkbox */}
           <button
             onClick={allSelected ? deselectAll : selectAll}
             className="p-1 rounded text-zinc-400 hover:text-white transition-colors"
@@ -134,9 +201,17 @@ export const SongList: React.FC<SongListProps> = ({
         </div>
       )}
 
-      {/* Song Grid */}
+      {/* Empty state for filter */}
+      {filteredSongs.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
+          <Music size={32} className="mb-3 opacity-20" />
+          <div className="text-sm text-zinc-500">No {SOURCE_FILTERS.find(f => f.id === sourceFilter)?.label} songs</div>
+        </div>
+      )}
+
+      {/* Song List */}
       <div className="space-y-1">
-        {songs.map(song => (
+        {filteredSongs.map(song => (
           <SongItem
             key={song.id}
             song={song}
@@ -152,6 +227,7 @@ export const SongList: React.FC<SongListProps> = ({
             onDownload={() => onDownload?.(song)}
             onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined}
             onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(song) : undefined}
+            showSourceBadge={sourceFilter === 'all'}
           />
         ))}
       </div>
@@ -173,11 +249,12 @@ interface SongItemProps {
   onDownload?: () => void;
   onRename?: (newTitle: string) => void;
   onAddToPlaylist?: () => void;
+  showSourceBadge?: boolean;
 }
 
 const SongItem: React.FC<SongItemProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
-  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist,
+  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, showSourceBadge,
 }) => {
   const [showMenu, setShowMenu] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
@@ -304,6 +381,16 @@ const SongItem: React.FC<SongItemProps> = ({
 
       {/* Metadata Badges */}
       <div className="hidden xl:flex items-center gap-2 flex-shrink-0">
+        {showSourceBadge && (() => {
+          const src = getSongSource(song);
+          const cfg = SOURCE_FILTERS.find(f => f.id === src);
+          if (!cfg || src === 'create') return null;
+          return (
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${cfg.color}`}>
+              {cfg.label}
+            </span>
+          );
+        })()}
         {gp?.bpm && (
           <span className="text-[10px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-800/50">
             {gp.bpm} BPM
