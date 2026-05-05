@@ -181,7 +181,10 @@ export const masteringApi = {
       headers: { Authorization: `Bearer ${token}` },
       body: form,
     });
-    if (!res.ok) throw new Error('Upload failed');
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(errBody.error || `Upload failed (${res.status})`);
+    }
     return res.json();
   },
   /** List uploaded reference tracks */
