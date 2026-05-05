@@ -120,7 +120,7 @@ export const LatentImport: React.FC<LatentImportProps> = ({
         ) : (
           <>
             <FileAudio className="w-3.5 h-3.5" />
-            Import Latent (.hslat)
+            Import Latent (.latent)
           </>
         )}
       </button>
