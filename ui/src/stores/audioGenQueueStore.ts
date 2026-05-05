@@ -150,12 +150,17 @@ export function removeFromAudioQueue(id: string): void {
   _emit();
 }
 
-/** Force-dismiss an active/generating item (user clicked X) */
+/** Force-dismiss an active/generating item (user clicked X).
+ *  Also calls the server cancel API to stop the generation and C++ engine. */
 export function forceFailQueueItem(id: string): void {
   const item = _state.items.find(i => i.id === id);
   if (item && (item.status === 'generating' || item.status === 'loading-adapter')) {
+    // Cancel on the server → triggers abort controller → cancels C++ engine job
+    if (item.jobId) {
+      generateApi.cancel(item.jobId).catch(() => {});
+    }
     item.status = 'failed';
-    item.error = 'Dismissed by user';
+    item.error = 'Cancelled by user';
     item.stage = undefined;
     item.progress = undefined;
     _emit();
@@ -355,15 +360,15 @@ export async function enqueueSimpleGen(
           }
           return;
         }
-        if (status.status === 'failed') {
-          throw new Error(status.error || 'Generation failed');
+        if (status.status === 'failed' || status.status === 'cancelled') {
+          throw new Error(status.error || (status.status === 'cancelled' ? 'Cancelled' : 'Generation failed'));
         }
         // Safety: timeout after 30 minutes
         if (Date.now() - startTime > 30 * 60 * 1000) {
           throw new Error('Generation timed out');
         }
       } catch (e) {
-        if ((e as Error).message.includes('failed') || (e as Error).message.includes('timed out')) {
+        if ((e as Error).message.includes('failed') || (e as Error).message.includes('timed out') || (e as Error).message.includes('Cancelled')) {
           throw e;
         }
         // Transient network error — keep polling
@@ -599,11 +604,13 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
         }
         return;
       }
-      if (status.status === 'failed') throw new Error(status.error || 'Generation failed');
+      if (status.status === 'failed' || status.status === 'cancelled') throw new Error(status.error || (status.status === 'cancelled' ? 'Cancelled' : 'Generation failed'));
     } catch (e) {
-      if ((e as Error).message.includes('failed') && !(e as Error).message.includes('fetch')) {
+      const msg = (e as Error).message;
+      if ((msg.includes('failed') || msg.includes('Cancelled')) && !msg.includes('fetch')) {
         throw e;
       }
+      // Transient network error — keep polling
     }
   }
 }
