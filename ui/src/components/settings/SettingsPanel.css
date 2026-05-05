@@ -471,6 +471,54 @@
   border-color: rgba(236, 72, 153, 0.5);
 }
 
+/* ── Tab navigation ─────────────────────────────────────────────── */
+
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 1.75rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.settings-tabs::-webkit-scrollbar { display: none; }
+
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 200ms ease, border-color 200ms ease;
+}
+
+.settings-tab:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.settings-tab--active {
+  color: #ec4899;
+  border-bottom-color: #ec4899;
+}
+
+.settings-tab--active:hover {
+  color: #ec4899;
+}
+
+.settings-tab-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
 /* ════════════════════════════════════════════════════════════════
    Light-mode overrides — map rgba(255,255,255,*) to rgba(0,0,0,*)
    ════════════════════════════════════════════════════════════════ */
@@ -603,5 +651,18 @@
 
 :root:not(.dark) .env-subsection-header:hover {
   color: rgba(0, 0, 0, 0.85);
+}
+
+/* Tabs */
+:root:not(.dark) .settings-tabs {
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+:root:not(.dark) .settings-tab {
+  color: rgba(0, 0, 0, 0.4);
+}
+
+:root:not(.dark) .settings-tab:hover {
+  color: rgba(0, 0, 0, 0.7);
 }
 

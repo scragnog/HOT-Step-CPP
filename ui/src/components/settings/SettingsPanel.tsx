@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Zap, Download, Tag, AlertTriangle, Loader2, Settings2,
   FolderOpen, Eye, EyeOff, ChevronRight, Save, Scissors,
+  Key, Database,
 } from 'lucide-react';
 import { getStemStats, deleteAllJobs, formatBytes, type StemStats } from '../../services/stemStudioApi';
 import { useAuth } from '../../context/AuthContext';
@@ -422,6 +423,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setBrowseKey(null);
   };
 
+  type TabId = 'general' | 'environment' | 'ai' | 'storage';
+  const [activeTab, setActiveTab] = useState<TabId>('general');
+
+  const tabs: Array<{ id: TabId; label: string; icon: React.ReactNode }> = [
+    { id: 'general',     label: 'General',        icon: <Zap size={15} className="settings-tab-icon" /> },
+    { id: 'environment', label: 'Environment',     icon: <Settings2 size={15} className="settings-tab-icon" /> },
+    { id: 'ai',          label: 'AI Services',     icon: <Key size={15} className="settings-tab-icon" /> },
+    { id: 'storage',     label: 'Storage & Data',  icon: <Database size={15} className="settings-tab-icon" /> },
+  ];
+
   return (
     <div className="settings-panel">
       <div className="settings-header">
@@ -431,7 +442,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </p>
       </div>
 
-      {/* ── Environment Section ──────────────────────────────────── */}
+      {/* ── Tab Navigation ── */}
+      <div className="settings-tabs">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            className={`settings-tab${activeTab === t.id ? ' settings-tab--active' : ''}`}
+            onClick={() => setActiveTab(t.id)}
+          >
+            {t.icon}
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══════════════ ENVIRONMENT TAB ═══════════════ */}
+      {activeTab === 'environment' && (
       <div className="settings-section">
         <div className="settings-section-header">
           <Settings2 size={16} className="settings-section-icon" />
@@ -463,67 +489,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 value={envValues.SERVER_PORT || ''} onChange={handleEnvChange} type="number" placeholder="3001" />
               <EnvPathRow envKey="DATA_DIR" label="Data directory" description="Root directory for databases, audio files, and app data."
                 value={envValues.DATA_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} placeholder="./data" />
-            </EnvSubsection>
-
-            {/* API Keys */}
-            <EnvSubsection title="API Keys" isOpen={openSections.apiKeys} onToggle={() => toggleSection('apiKeys')}>
-              <EnvPasswordRow envKey="GENIUS_ACCESS_TOKEN" label="Genius API token" description="For fetching reference lyrics from Genius."
-                value={envValues.GENIUS_ACCESS_TOKEN || ''} onChange={handleEnvChange} />
-              <EnvPasswordRow envKey="GEMINI_API_KEY" label="Google Gemini key" description="For Gemini-powered lyric generation."
-                value={envValues.GEMINI_API_KEY || ''} onChange={handleEnvChange} />
-              <EnvPasswordRow envKey="OPENAI_API_KEY" label="OpenAI key" description="For GPT-powered lyric generation."
-                value={envValues.OPENAI_API_KEY || ''} onChange={handleEnvChange} />
-              <EnvPasswordRow envKey="ANTHROPIC_API_KEY" label="Anthropic key" description="For Claude-powered lyric generation."
-                value={envValues.ANTHROPIC_API_KEY || ''} onChange={handleEnvChange} />
-            </EnvSubsection>
-
-            {/* LLM Config */}
-            <EnvSubsection title="LLM Configuration" isOpen={openSections.llmConfig} onToggle={() => toggleSection('llmConfig')}>
-              <div className="setting-row">
-                <div className="setting-info">
-                  <div className="setting-label">Default LLM provider</div>
-                  <div className="setting-description">Which provider to use by default for lyric generation.</div>
-                </div>
-                <select
-                  id="env-DEFAULT_LLM_PROVIDER"
-                  className="env-select"
-                  value={envValues.DEFAULT_LLM_PROVIDER || 'gemini'}
-                  onChange={(e) => handleEnvChange('DEFAULT_LLM_PROVIDER', e.target.value)}
-                >
-                  <option value="gemini">Gemini</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="ollama">Ollama</option>
-                  <option value="lmstudio">LM Studio</option>
-                  <option value="unsloth">Unsloth</option>
-                </select>
-              </div>
-              <EnvTextRow envKey="GEMINI_MODEL" label="Gemini model" description="Model name for Gemini API."
-                value={envValues.GEMINI_MODEL || ''} onChange={handleEnvChange} placeholder="gemini-2.5-flash" />
-              <EnvTextRow envKey="OPENAI_MODEL" label="OpenAI model" description="Model name for OpenAI API."
-                value={envValues.OPENAI_MODEL || ''} onChange={handleEnvChange} placeholder="gpt-4o-mini" />
-              <EnvTextRow envKey="ANTHROPIC_MODEL" label="Anthropic model" description="Model name for Anthropic API."
-                value={envValues.ANTHROPIC_MODEL || ''} onChange={handleEnvChange} placeholder="claude-3-5-haiku-20241022" />
-              <EnvTextRow envKey="OLLAMA_MODEL" label="Ollama model" description="Model name for local Ollama instance."
-                value={envValues.OLLAMA_MODEL || ''} onChange={handleEnvChange} placeholder="llama3" />
-              <EnvTextRow envKey="LMSTUDIO_MODEL" label="LM Studio model" description="Model name for LM Studio."
-                value={envValues.LMSTUDIO_MODEL || ''} onChange={handleEnvChange} />
-              <EnvTextRow envKey="UNSLOTH_MODEL" label="Unsloth model" description="Model name for Unsloth."
-                value={envValues.UNSLOTH_MODEL || ''} onChange={handleEnvChange} />
-            </EnvSubsection>
-
-            {/* LLM Endpoints */}
-            <EnvSubsection title="LLM Endpoints" isOpen={openSections.llmEndpoints} onToggle={() => toggleSection('llmEndpoints')}>
-              <EnvTextRow envKey="OLLAMA_BASE_URL" label="Ollama URL" description="Base URL for the Ollama API."
-                value={envValues.OLLAMA_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://localhost:11434" />
-              <EnvTextRow envKey="LMSTUDIO_BASE_URL" label="LM Studio URL" description="Base URL for the LM Studio API."
-                value={envValues.LMSTUDIO_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://localhost:1234/v1" />
-              <EnvTextRow envKey="UNSLOTH_BASE_URL" label="Unsloth URL" description="Base URL for the Unsloth API."
-                value={envValues.UNSLOTH_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://127.0.0.1:8888" />
-              <EnvTextRow envKey="UNSLOTH_USERNAME" label="Unsloth username" description="Username for Unsloth authentication."
-                value={envValues.UNSLOTH_USERNAME || ''} onChange={handleEnvChange} />
-              <EnvPasswordRow envKey="UNSLOTH_PASSWORD" label="Unsloth password" description="Password for Unsloth authentication."
-                value={envValues.UNSLOTH_PASSWORD || ''} onChange={handleEnvChange} />
             </EnvSubsection>
 
             {/* Paths */}
@@ -558,6 +523,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </>
         )}
       </div>
+      )}
 
       {/* File Browser Modal for path settings */}
       <FileBrowserModal
@@ -569,6 +535,102 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         title={browseKey ? `Select folder for ${browseKey}` : 'Select Folder'}
       />
 
+      {/* ═══════════════ AI SERVICES TAB ═══════════════ */}
+      {activeTab === 'ai' && (
+      <>
+      {/* API Keys Section */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <Key size={16} className="settings-section-icon" />
+          <span className="settings-section-title">API Keys</span>
+        </div>
+        <EnvPasswordRow envKey="GENIUS_ACCESS_TOKEN" label="Genius API token" description="For fetching reference lyrics from Genius."
+          value={envValues.GENIUS_ACCESS_TOKEN || ''} onChange={handleEnvChange} />
+        <EnvPasswordRow envKey="GEMINI_API_KEY" label="Google Gemini key" description="For Gemini-powered lyric generation."
+          value={envValues.GEMINI_API_KEY || ''} onChange={handleEnvChange} />
+        <EnvPasswordRow envKey="OPENAI_API_KEY" label="OpenAI key" description="For GPT-powered lyric generation."
+          value={envValues.OPENAI_API_KEY || ''} onChange={handleEnvChange} />
+        <EnvPasswordRow envKey="ANTHROPIC_API_KEY" label="Anthropic key" description="For Claude-powered lyric generation."
+          value={envValues.ANTHROPIC_API_KEY || ''} onChange={handleEnvChange} />
+      </div>
+
+      {/* LLM Configuration Section */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <Settings2 size={16} className="settings-section-icon" />
+          <span className="settings-section-title">LLM Configuration</span>
+        </div>
+        <div className="setting-row">
+          <div className="setting-info">
+            <div className="setting-label">Default LLM provider</div>
+            <div className="setting-description">Which provider to use by default for lyric generation.</div>
+          </div>
+          <select id="env-DEFAULT_LLM_PROVIDER" className="env-select"
+            value={envValues.DEFAULT_LLM_PROVIDER || 'gemini'}
+            onChange={(e) => handleEnvChange('DEFAULT_LLM_PROVIDER', e.target.value)}>
+            <option value="gemini">Gemini</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama</option>
+            <option value="lmstudio">LM Studio</option>
+            <option value="unsloth">Unsloth</option>
+          </select>
+        </div>
+        <EnvTextRow envKey="GEMINI_MODEL" label="Gemini model" description="Model name for Gemini API."
+          value={envValues.GEMINI_MODEL || ''} onChange={handleEnvChange} placeholder="gemini-2.5-flash" />
+        <EnvTextRow envKey="OPENAI_MODEL" label="OpenAI model" description="Model name for OpenAI API."
+          value={envValues.OPENAI_MODEL || ''} onChange={handleEnvChange} placeholder="gpt-4o-mini" />
+        <EnvTextRow envKey="ANTHROPIC_MODEL" label="Anthropic model" description="Model name for Anthropic API."
+          value={envValues.ANTHROPIC_MODEL || ''} onChange={handleEnvChange} placeholder="claude-3-5-haiku-20241022" />
+        <EnvTextRow envKey="OLLAMA_MODEL" label="Ollama model" description="Model name for local Ollama instance."
+          value={envValues.OLLAMA_MODEL || ''} onChange={handleEnvChange} placeholder="llama3" />
+        <EnvTextRow envKey="LMSTUDIO_MODEL" label="LM Studio model" description="Model name for LM Studio."
+          value={envValues.LMSTUDIO_MODEL || ''} onChange={handleEnvChange} />
+        <EnvTextRow envKey="UNSLOTH_MODEL" label="Unsloth model" description="Model name for Unsloth."
+          value={envValues.UNSLOTH_MODEL || ''} onChange={handleEnvChange} />
+      </div>
+
+      {/* LLM Endpoints Section */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <ChevronRight size={16} className="settings-section-icon" />
+          <span className="settings-section-title">LLM Endpoints</span>
+        </div>
+        <EnvTextRow envKey="OLLAMA_BASE_URL" label="Ollama URL" description="Base URL for the Ollama API."
+          value={envValues.OLLAMA_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://localhost:11434" />
+        <EnvTextRow envKey="LMSTUDIO_BASE_URL" label="LM Studio URL" description="Base URL for the LM Studio API."
+          value={envValues.LMSTUDIO_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://localhost:1234/v1" />
+        <EnvTextRow envKey="UNSLOTH_BASE_URL" label="Unsloth URL" description="Base URL for the Unsloth API."
+          value={envValues.UNSLOTH_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://127.0.0.1:8888" />
+        <EnvTextRow envKey="UNSLOTH_USERNAME" label="Unsloth username" description="Username for Unsloth authentication."
+          value={envValues.UNSLOTH_USERNAME || ''} onChange={handleEnvChange} />
+        <EnvPasswordRow envKey="UNSLOTH_PASSWORD" label="Unsloth password" description="Password for Unsloth authentication."
+          value={envValues.UNSLOTH_PASSWORD || ''} onChange={handleEnvChange} />
+      </div>
+
+      {/* Save bar for AI tab */}
+      <div className="env-save-bar">
+        {envStatus && (
+          <span className={`env-save-status env-save-status--${envStatus.type}`}>{envStatus.text}</span>
+        )}
+        <button className="env-save-btn" onClick={handleEnvSave} disabled={!envDirty || envSaving}>
+          {envSaving ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Loader2 size={14} className="animate-spin" /> Saving…
+            </span>
+          ) : (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Save size={14} /> Save Changes
+            </span>
+          )}
+        </button>
+      </div>
+      </>
+      )}
+
+      {/* ═══════════════ GENERAL TAB ═══════════════ */}
+      {activeTab === 'general' && (
+      <>
       {/* Performance Section */}
       <div className="settings-section">
         <div className="settings-section-header">
@@ -650,7 +712,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         />
       </div>
 
-      {/* Adapters Section */}
+      {/* Adapters Section (still in General tab) */}
       <div className="settings-section">
         <div className="settings-section-header">
           <Tag size={16} className="settings-section-icon" />
@@ -689,7 +751,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         )}
       </div>
+      </>
+      )}
 
+      {/* ═══════════════ STORAGE & DATA TAB ═══════════════ */}
+      {activeTab === 'storage' && (
+      <>
       {/* Stem Storage Section */}
       <div className="settings-section">
         <div className="settings-section-header">
@@ -978,6 +1045,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 };
