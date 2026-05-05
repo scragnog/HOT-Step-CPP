@@ -315,7 +315,7 @@ async function runExtraction(job: StemJob, ditSettings: any, style: string, lyri
       logGenerationParams(stemLogId, aceReq);
 
       // Submit via multipart (same pattern as cover mode)
-      const aceJobId = await aceClient.submitSynthMultipart(aceReq, srcAudioBuf, undefined, 'wav16');
+      const aceJobId = await aceClient.submitSynthMultipart(aceReq, srcAudioBuf, undefined, undefined, 'wav16');
       job.currentAceJobId = aceJobId;
       logGeneration(stemLogId, 'INFO', `Engine job submitted: ${aceJobId}`);
 

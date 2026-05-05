@@ -187,6 +187,7 @@ export const aceClient = {
     request: AceRequest | AceRequest[],
     srcAudio?: Buffer,
     refAudio?: Buffer,
+    srcLatents?: Buffer,
     format: string = 'wav16',
     keepLoaded = false,
   ): Promise<string> {
@@ -221,6 +222,11 @@ export const aceClient = {
     // Reference audio part
     if (refAudio) {
       addPart('ref_audio', refAudio, 'audio/wav', 'reference.wav');
+    }
+
+    // Source latents part (raw float32 — replaces VAE encode of source audio)
+    if (srcLatents) {
+      addPart('src_latents', srcLatents, 'application/octet-stream', 'source.latent');
     }
 
     parts.push(Buffer.from(`--${boundary}--\r\n`));
@@ -281,6 +287,21 @@ export const aceClient = {
     return fetch(`${BASE}/job?id=${jobId}&result=1`, {
       signal: AbortSignal.timeout(TIMEOUT_RESULT),
     });
+  },
+
+  /** GET /job?id=N&latent=1 — fetch captured post-DiT latent (raw float32).
+   *  Returns null if no latent was captured (non-cover tasks, cancelled, etc). */
+  async getJobLatent(jobId: string): Promise<Buffer | null> {
+    try {
+      const res = await fetch(`${BASE}/job?id=${jobId}&latent=1`, {
+        signal: AbortSignal.timeout(TIMEOUT_RESULT),
+      });
+      if (!res.ok) return null;
+      const buf = await res.arrayBuffer();
+      return buf.byteLength > 0 ? Buffer.from(buf) : null;
+    } catch {
+      return null;
+    }
   },
 
   /** POST /job?id=N&cancel=1 — cancel a running job */

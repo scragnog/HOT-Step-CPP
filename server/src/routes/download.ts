@@ -146,6 +146,28 @@ router.get('/:id', async (req, res) => {
     return;
   }
 
+  // Latent download — raw HSLAT binary, no format conversion
+  if (version === 'latent') {
+    const latentUrl = song?.latent_url;
+    if (!latentUrl) {
+      res.status(404).json({ error: 'No latent file available for this track' });
+      return;
+    }
+    const latentFilename = path.basename(latentUrl);
+    const latentPath = path.join(config.data.audioDir, latentFilename);
+    if (!fs.existsSync(latentPath)) {
+      res.status(404).json({ error: 'Latent file not found on disk' });
+      return;
+    }
+    const rawTitle = song.title || 'track';
+    const downloadName = `${rawTitle.replace(/[^a-zA-Z0-9 _()-]/g, '').trim() || 'track'}.latent`;
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+    res.setHeader('Content-Length', fs.statSync(latentPath).size);
+    fs.createReadStream(latentPath).pipe(res);
+    return;
+  }
+
   // Determine which audio URL to use
   let audioUrl: string;
   if (version === 'mastered' && song.mastered_audio_url) {

@@ -24,6 +24,7 @@ import { applyVstChain } from './vst.js';
 // The Python subprocess wrapper (spectralLifter.ts) is deprecated.
 import { autoTrimSilence } from '../services/autoTrim.js';
 import { ensureEngineFormat, timeStretchPitchShift } from '../services/audioConvert.js';
+import { writeHslat, readHslat, latentFrameCount, latentDuration, type HslatMetadata } from '../services/latentFormat.js';
 import { subscribeLines, pushLog } from './logs.js';
 
 const router = Router();
@@ -508,6 +509,33 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       }
     }
 
+    // ── Source latent (alternative to source audio — skips VAE encode) ──
+    let srcLatentBuf: Buffer | undefined;
+    if (isCoverTask && job.params.sourceLatentUrl) {
+      const latentUrl = job.params.sourceLatentUrl as string;
+      const latentPath = latentUrl.startsWith('/audio/')
+        ? path.join(config.data.audioDir, latentUrl.replace('/audio/', ''))
+        : path.isAbsolute(latentUrl) ? latentUrl : path.join(config.data.dir, latentUrl);
+      if (fs.existsSync(latentPath)) {
+        try {
+          const fileContents = fs.readFileSync(latentPath);
+          const parsed = readHslat(fileContents);
+          srcLatentBuf = parsed.rawLatent;
+          if (srcLatentBuf.length % 256 !== 0) {
+            logGeneration(job.id, 'WARNING', `[Latent] Invalid latent file size (${srcLatentBuf.length} bytes), ignoring`);
+            srcLatentBuf = undefined;
+          } else {
+            logGeneration(job.id, 'INFO',
+              `[Latent] Source latent loaded: ${latentPath} (${latentFrameCount(srcLatentBuf)} frames, ${latentDuration(srcLatentBuf).toFixed(1)}s)`);
+          }
+        } catch (latErr: any) {
+          logGeneration(job.id, 'WARNING', `[Latent] Failed to read source latent: ${latErr.message}`);
+        }
+      } else {
+        logGeneration(job.id, 'WARNING', `[Latent] Source latent not found: ${latentPath}`);
+      }
+    }
+
     // ── Tempo/pitch pre-processing (cover source audio) ──────
     // The Python ACE-Step backend handles tempo_scale/pitch_shift natively
     // via release_task, but the C++ engine doesn't. Pre-process with ffmpeg.
@@ -606,6 +634,8 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     const songIds: string[] = [];
     // Per-track mastered URLs (parallel array to audioUrls)
     const masteredUrls: string[] = [];
+    // Per-track latent URLs (parallel array to audioUrls)
+    const latentUrls: string[] = [];
 
     // ── Per-track synth loop ──────────────────────────────────
     // Each lmResult becomes a separate /synth call → separate audio file.
@@ -662,10 +692,10 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
       // Submit single request to /synth
       let synthJobId: string;
-      if (srcAudioBuf || refAudioBuf) {
-        const parts = [srcAudioBuf ? 'src_audio' : '', refAudioBuf ? 'timbre_ref' : ''].filter(Boolean).join('+');
+      if (srcAudioBuf || refAudioBuf || srcLatentBuf) {
+        const parts = [srcAudioBuf ? 'src_audio' : '', refAudioBuf ? 'timbre_ref' : '', srcLatentBuf ? 'src_latents' : ''].filter(Boolean).join('+');
         logGeneration(job.id, 'INFO', `[Synth Phase] Track ${trackIdx + 1}: MULTIPART submission (${parts})`);
-        synthJobId = await aceClient.submitSynthMultipart(synthReq, srcAudioBuf, refAudioBuf, synthFormat, coResident);
+        synthJobId = await aceClient.submitSynthMultipart(synthReq, srcAudioBuf, refAudioBuf, srcLatentBuf, synthFormat, coResident);
       } else {
         logGeneration(job.id, 'INFO', `[Synth Phase] Track ${trackIdx + 1}: plain JSON submission`);
         synthJobId = await aceClient.submitSynth(synthReq, synthFormat, coResident);
@@ -701,6 +731,44 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           logGeneration(job.id, 'WARNING', `[LRC] Track ${trackIdx + 1}: failed to save LRC: ${err}`);
         }
       }
+
+      // Fetch and save companion latent file (post-DiT neural representation)
+      let latentUrl = '';
+      try {
+        const rawLatent = await aceClient.getJobLatent(synthJobId);
+        if (rawLatent && rawLatent.length > 0) {
+          const latentMeta: HslatMetadata = {
+            duration: latentDuration(rawLatent),
+            bpm: aceReq.bpm,
+            key_scale: aceReq.keyscale,
+            time_signature: aceReq.timesignature,
+            caption: aceReq.caption,
+            lyrics: aceReq.lyrics,
+            seed: aceReq.seed,
+            inference_steps: aceReq.inference_steps,
+            guidance_scale: aceReq.guidance_scale,
+            shift: aceReq.shift,
+            task_type: aceReq.task_type,
+            adapter: aceReq.adapter,
+            adapter_scale: aceReq.adapter_scale,
+            dit_model: aceReq.synth_model,
+            vae_model: aceReq.vae_model,
+            created_at: new Date().toISOString(),
+          };
+          const hslatBuf = writeHslat(rawLatent, latentMeta);
+          const latentFilename = filename.replace(/\.[^.]+$/, '.latent');
+          const latentPath = path.join(config.data.audioDir, latentFilename);
+          fs.writeFileSync(latentPath, hslatBuf);
+          latentUrl = `/audio/${latentFilename}`;
+          logGeneration(job.id, 'INFO',
+            `[Latent] Track ${trackIdx + 1}: saved ${latentFilename} (${latentFrameCount(rawLatent)} frames, ${(hslatBuf.length / 1024).toFixed(0)} KB HSLAT)`);
+        }
+      } catch (latErr: any) {
+        logGeneration(job.id, 'DEBUG', `[Latent] Track ${trackIdx + 1}: capture skipped: ${latErr.message}`);
+      }
+
+      // Store latent URL for DB insert
+      latentUrls.push(latentUrl);
     }
 
     // Get metadata from LM results
@@ -865,6 +933,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     for (let i = 0; i < audioUrls.length; i++) {
       const audioUrl = audioUrls[i];
       const trackMastered = masteredUrls[i] || '';
+      const trackLatent = latentUrls[i] || '';
       // Use per-track LM result for metadata when available
       const trackResult = lmResults[i] || firstResult;
       const trackLyrics = trackResult.lyrics || job.params.lyrics || '';
@@ -874,13 +943,13 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       getDb().prepare(`
         INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
                            duration, bpm, key_scale, time_signature, tags, dit_model,
-                           generation_params, mastered_audio_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           generation_params, mastered_audio_url, latent_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         songId, job.userId, title, trackLyrics, style, trackCaption,
         audioUrl, duration, bpm, keyScale, timeSignature,
         JSON.stringify([]), aceReq.synth_model || '', JSON.stringify(job.params),
-        trackMastered,
+        trackMastered, trackLatent,
       );
       songIds.push(songId);
     }

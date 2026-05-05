@@ -61,4 +61,73 @@ router.post('/audio', upload.single('audio'), (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/upload/latent
+ * Multipart form: field "latent" with .latent file
+ * Returns: { latent_url: "/references/<uuid>.latent", metadata: { ... } }
+ *
+ * Accepts both HSLAT-headerered files and raw float32 files.
+ * If HSLAT, embedded metadata is returned for UI pre-population.
+ */
+const latentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB (latents are small — typically <1MB)
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext === '.latent' || file.mimetype === 'application/octet-stream') {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type "${file.originalname}". Expected .latent file.`));
+    }
+  },
+});
+
+router.post('/latent', latentUpload.single('latent'), (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: 'No file uploaded' });
+      return;
+    }
+
+    // Import readHslat dynamically to avoid circular deps at module load
+    // (latentFormat is a pure utility, no circular risk, but keeping import local for clarity)
+    const { readHslat } = require('../services/latentFormat.js');
+
+    const buf = req.file.buffer;
+    let metadata: Record<string, unknown> = {};
+
+    try {
+      const parsed = readHslat(buf);
+      metadata = parsed.metadata;
+      // Validate raw latent portion
+      if (parsed.rawLatent.length > 0 && parsed.rawLatent.length % 256 !== 0) {
+        res.status(400).json({
+          error: `Latent data size ${parsed.rawLatent.length} is not a multiple of 256 bytes (64 × float32)`,
+        });
+        return;
+      }
+    } catch (parseErr: any) {
+      res.status(400).json({ error: `Invalid latent file: ${parseErr.message}` });
+      return;
+    }
+
+    const filename = `${randomUUID()}.latent`;
+    const refsDir = path.join(config.data.dir, 'references');
+    fs.mkdirSync(refsDir, { recursive: true });
+    const filePath = path.join(refsDir, filename);
+    fs.writeFileSync(filePath, buf);
+
+    console.log(`[upload] Latent saved: ${req.file.originalname} (${(buf.length / 1024).toFixed(0)} KB) → ${filename}`);
+
+    res.json({
+      latent_url: `/references/${filename}`,
+      filename: req.file.originalname,
+      metadata,
+    });
+  } catch (err: any) {
+    console.error('[upload] Latent upload failed:', err.message);
+    res.status(500).json({ error: 'Latent upload failed', details: err.message });
+  }
+});
+
 export default router;
