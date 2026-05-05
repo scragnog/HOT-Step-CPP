@@ -67,6 +67,8 @@ export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, r
             audioUrl: s.audio_url || '',
             masteredAudioUrl: s.mastered_audio_url || '',
             mastered_audio_url: s.mastered_audio_url || '',
+            latentUrl: s.latent_url || '',
+            latent_url: s.latent_url || '',
             duration: s.duration || 0,
             tags: s.tags || [],
             createdAt: new Date(s.created_at),

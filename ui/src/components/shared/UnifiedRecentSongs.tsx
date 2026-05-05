@@ -112,6 +112,8 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
       duration: rs.duration || 0,
       tags: [],
       masteredAudioUrl: rs.mastered_audio_url || '',
+      latentUrl: rs.latent_url || '',
+      latent_url: rs.latent_url || '',
     };
     setDownloadSong(song);
     setDownloadArtist(rs.artist_name || '');

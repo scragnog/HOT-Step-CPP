@@ -46,6 +46,7 @@ export interface UnifiedRecentSong {
   title: string;
   audio_url: string;
   mastered_audio_url: string;
+  latent_url: string;
   cover_url: string;
   duration: number;
   lyrics: string;
