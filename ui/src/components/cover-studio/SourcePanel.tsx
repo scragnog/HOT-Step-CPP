@@ -4,6 +4,7 @@ import { Upload, Music, Loader2, X, Layers } from 'lucide-react';
 import type { AudioMetadata, AudioAnalysis } from './coverStudioUtils';
 import { ALL_KEYS } from './coverStudioUtils';
 import { SEPARATION_LEVELS, type SeparationLevel } from '../../services/supersepApi';
+import { LatentImport, type LatentMetadata } from '../shared/LatentImport';
 
 interface SourcePanelProps {
   sourceFileName: string;
@@ -28,6 +29,10 @@ interface SourcePanelProps {
   onSeparate: () => void;
   hasStems: boolean;
   onConfigureStems: () => void;
+  // Latent import
+  sourceLatentUrl: string;
+  onLatentLoaded: (url: string, meta: LatentMetadata) => void;
+  onLatentClear: () => void;
 }
 
 export const SourcePanel: React.FC<SourcePanelProps> = ({
@@ -40,6 +45,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
   isSeparating, sepProgress, sepMessage,
   sourceAudioUrl, onSeparate,
   hasStems, onConfigureStems,
+  sourceLatentUrl, onLatentLoaded, onLatentClear,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -109,6 +115,13 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
             </div>
           )}
         </div>
+
+        {/* Latent import (alternative to audio) */}
+        <LatentImport
+          latentUrl={sourceLatentUrl}
+          onLatentLoaded={onLatentLoaded}
+          onClear={onLatentClear}
+        />
       </div>
 
       {/* Metadata display */}

@@ -25,6 +25,7 @@ import {
   persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey,
   type AudioMetadata, type AudioAnalysis,
 } from './coverStudioUtils';
+import type { LatentMetadata } from '../shared/LatentImport';
 
 export const CoverStudio: React.FC = () => {
   const { token } = useAuth();
@@ -61,6 +62,7 @@ export const CoverStudio: React.FC = () => {
   const [bpmCorrection, setBpmCorrection] = useState(() => restore<number>('bpmCorrection', 1));
   const [keyOverride, setKeyOverride] = useState<string | null>(() => restore<string | null>('keyOverride', null));
   const [noFsq, setNoFsq] = useState(() => restore<boolean>('noFsq', false));
+  const [sourceLatentUrl, setSourceLatentUrl] = useState(() => restore<string>('sourceLatentUrl', ''));
 
   // ── Generation ──
   const [isGenerating, setIsGenerating] = useState(false);
@@ -124,6 +126,7 @@ export const CoverStudio: React.FC = () => {
   useEffect(() => { persist('bpmCorrection', bpmCorrection); }, [bpmCorrection]);
   useEffect(() => { persist('keyOverride', keyOverride); }, [keyOverride]);
   useEffect(() => { persist('noFsq', noFsq); }, [noFsq]);
+  useEffect(() => { persist('sourceLatentUrl', sourceLatentUrl); }, [sourceLatentUrl]);
   useEffect(() => { persist('sepLevel', sepLevel); }, [sepLevel]);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
@@ -338,6 +341,7 @@ export const CoverStudio: React.FC = () => {
         source: 'cover-studio',
         artistName: selectedArtist?.name || songArtist || '',
         sourceArtist: songArtist || '',
+        ...(sourceLatentUrl ? { sourceLatentUrl } : {}),
       };
       if (tempoScale !== 1.0) params.tempoScale = tempoScale;
       if (pitchShift !== 0) params.pitchShift = pitchShift;
@@ -520,6 +524,20 @@ export const CoverStudio: React.FC = () => {
           sourceAudioUrl={sourceAudioUrl} onSeparate={handleSeparate}
           hasStems={!!(sepStems && sepStems.length > 0 && sepJobId)}
           onConfigureStems={() => setShowMixer(true)}
+          sourceLatentUrl={sourceLatentUrl}
+          onLatentLoaded={(url: string, meta: LatentMetadata) => {
+            setSourceLatentUrl(url);
+            // Auto-populate fields from HSLAT metadata
+            if (meta.lyrics) setLyrics(meta.lyrics);
+            if (meta.caption) setArtistCaption(meta.caption);
+            if (meta.bpm && meta.bpm > 0) {
+              setAnalysis(prev => prev ? { ...prev, bpm: meta.bpm! } : { bpm: meta.bpm!, key: meta.key || '', scale: undefined });
+            }
+            if (meta.key) {
+              setKeyOverride(meta.key);
+            }
+          }}
+          onLatentClear={() => setSourceLatentUrl('')}
         />
 
         {/* Center: Lyrics */}

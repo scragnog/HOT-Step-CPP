@@ -511,7 +511,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
     // ── Source latent (alternative to source audio — skips VAE encode) ──
     let srcLatentBuf: Buffer | undefined;
-    if (isCoverTask && job.params.sourceLatentUrl) {
+    if (job.params.sourceLatentUrl) {
       const latentUrl = job.params.sourceLatentUrl as string;
       const latentPath = latentUrl.startsWith('/audio/')
         ? path.join(config.data.audioDir, latentUrl.replace('/audio/', ''))

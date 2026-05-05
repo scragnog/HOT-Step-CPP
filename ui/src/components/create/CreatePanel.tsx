@@ -10,6 +10,7 @@ import { usePersistedState } from '../../hooks/usePersistedState';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { ContentSection } from './ContentSection';
 import { MetadataSection } from './MetadataSection';
+import { LatentImport } from '../shared/LatentImport';
 import type { GenerationParams, Song } from '../../types';
 
 interface CreatePanelProps {
@@ -35,6 +36,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   const [timeSignature, setTimeSignature] = usePersistedState('hs-timeSignature', '');
   const [duration, setDuration] = usePersistedState('hs-duration', -1);
   const [vocalLanguage, setVocalLanguage] = usePersistedState('hs-vocalLanguage', 'en');
+  const [sourceLatentUrl, setSourceLatentUrl] = usePersistedState('hs-sourceLatentUrl', '');
 
   // Global params context — for reuse data
   const gp = useGlobalParams();
@@ -69,6 +71,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     if (title.trim()) params.title = title.trim();
     if (artist.trim()) params.artist = artist.trim();
     if (subject.trim()) params.subject = subject.trim();
+    if (sourceLatentUrl) params.sourceLatentUrl = sourceLatentUrl;
     onGenerate(params);
   };
 
@@ -97,6 +100,19 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
           timeSignature={timeSignature} onTimeSignatureChange={setTimeSignature}
           duration={duration} onDurationChange={setDuration}
           vocalLanguage={vocalLanguage} onVocalLanguageChange={setVocalLanguage}
+        />
+
+        {/* Latent import */}
+        <LatentImport
+          latentUrl={sourceLatentUrl}
+          onLatentLoaded={(url, meta) => {
+            setSourceLatentUrl(url);
+            if (meta.bpm && meta.bpm > 0) setBpm(meta.bpm);
+            if (meta.key) setKeyScale(meta.key);
+            if (meta.lyrics) setLyrics(meta.lyrics);
+            if (meta.caption) setCaption(meta.caption);
+          }}
+          onClear={() => setSourceLatentUrl('')}
         />
       </div>
 
