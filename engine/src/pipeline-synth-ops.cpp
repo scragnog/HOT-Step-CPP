@@ -6,7 +6,7 @@
 
 #include "pipeline-synth-ops.h"
 
-#include "dit-sampler.h"
+#include "hot-step-sampler.h"
 #include "philox.h"
 #include "pipeline-synth-impl.h"
 #include "task-types.h"
@@ -886,7 +886,7 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
         s.context_silence.empty() ? nullptr : s.context_silence.data(), s.cover_steps, cancel, cancel_data,
         s.per_S.data(), s.per_enc_S.data(), s.enc_hidden_nc.empty() ? nullptr : s.enc_hidden_nc.data(),
         s.per_enc_S_nc_final.empty() ? nullptr : s.per_enc_S_nc_final.data(), s.use_sde, s.seeds.data(),
-        ctx->params.use_batch_cfg, s.rr.dcw_scaler, s.rr.dcw_high_scaler, s.rr.dcw_mode.c_str());
+        ctx->params.use_batch_cfg);
     if (dit_rc != 0) {
         return -1;
     }
