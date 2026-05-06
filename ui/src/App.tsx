@@ -32,6 +32,7 @@ import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { LyricStudioV2 } from './components/lyric-studio/LyricStudioV2';
 import { CoverStudio } from './components/cover-studio/CoverStudio';
 import { StemStudio } from './components/stem-studio/StemStudio';
+import { StemBuilder } from './components/stem-builder/StemBuilder';
 import { GlobalParamBar } from './components/global-bar/GlobalParamBar';
 import { PlaylistSidebar } from './components/playlist/PlaylistSidebar';
 import {
@@ -66,6 +67,7 @@ import { usePlaylist, addToPlaylist } from './components/lyric-studio/playlistSt
 function viewFromUrl(path = window.location.pathname): string {
   if (path.startsWith('/lyric-studio')) return 'lyric-studio';
   if (path.startsWith('/cover-studio')) return 'cover-studio';
+  if (path.startsWith('/stem-builder')) return 'stem-builder';
   if (path.startsWith('/library')) return 'library';
   if (path.startsWith('/settings')) return 'settings';
   return 'create';
@@ -82,6 +84,7 @@ function urlForView(view: string): string {
     return '/lyric-studio';
   }
   if (view === 'cover-studio') return '/cover-studio';
+  if (view === 'stem-builder') return '/stem-builder';
   if (view === 'library') return '/library';
   if (view === 'settings') return '/settings';
   return '/';
@@ -416,6 +419,14 @@ const AppContent: React.FC = () => {
       return (
         <div className="flex-1 overflow-hidden">
           <StemStudio />
+        </div>
+      );
+    }
+
+    if (activeView === 'stem-builder') {
+      return (
+        <div className="flex-1 overflow-hidden">
+          <StemBuilder />
         </div>
       );
     }

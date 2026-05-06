@@ -2,7 +2,7 @@
 // Ported from hot-step-9000, simplified for current cpp feature set.
 
 import React from 'react';
-import { Disc, Library, Mic, Guitar, Scissors, Settings, Power, Terminal, RotateCcw, Sun, Moon } from 'lucide-react';
+import { Disc, Library, Mic, Guitar, Scissors, Layers, Settings, Power, Terminal, RotateCcw, Sun, Moon } from 'lucide-react';
 import { usePersistedState } from '../../hooks/usePersistedState';
 
 interface SidebarProps {
@@ -82,6 +82,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label="Stem Studio"
           active={activeView === 'stem-studio'}
           onClick={() => onViewChange('stem-studio')}
+          isExpanded={isOpen}
+        />
+
+        <NavItem
+          icon={<Layers size={20} />}
+          label="Stem Builder"
+          active={activeView === 'stem-builder'}
+          onClick={() => onViewChange('stem-builder')}
           isExpanded={isOpen}
         />
 
