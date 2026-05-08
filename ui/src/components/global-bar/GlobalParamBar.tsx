@@ -31,11 +31,18 @@ export const GlobalParamBar: React.FC = () => {
     if (sessionStorage.getItem('mm-auto-dismissed')) return;
     modelApi.list()
       .then((data) => {
-        const allModels = [
-          ...(data?.models?.dit || []),
-          ...(data?.models?.lm || []),
-          ...(data?.models?.vae || []),
-        ];
+        const dit = data?.models?.dit || [];
+        const lm = data?.models?.lm || [];
+        const vae = data?.models?.vae || [];
+        const emb = data?.models?.embedding || [];
+        const allModels = [...dit, ...lm, ...vae];
+
+        // Auto-select first available models on fresh install
+        if (dit.length > 0 && !gp.ditModel) gp.setDitModel(dit[0]);
+        if (lm.length > 0 && !gp.lmModel) gp.setLmModel(lm[0]);
+        if (vae.length > 0 && !gp.vaeModel) gp.setVaeModel(vae[0]);
+        if (emb.length > 0 && !gp.embeddingModel) gp.setEmbeddingModel(emb[0]);
+
         if (allModels.length === 0) {
           setShowModelManager(true);
         }

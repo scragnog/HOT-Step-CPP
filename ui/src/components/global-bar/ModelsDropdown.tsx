@@ -23,6 +23,28 @@ export const ModelsDropdown: React.FC = () => {
       .catch(() => {});
   }, []);
 
+  // Auto-select first available model when list loads and nothing is selected
+  useEffect(() => {
+    if (!models?.models) return;
+    const dit = models.models.dit || [];
+    const lm = models.models.lm || [];
+    const vae = models.models.vae || [];
+    const emb = models.models.embedding || [];
+
+    if (dit.length > 0 && (!gp.ditModel || !dit.includes(gp.ditModel))) {
+      gp.setDitModel(dit[0]);
+    }
+    if (lm.length > 0 && (!gp.lmModel || !lm.includes(gp.lmModel))) {
+      gp.setLmModel(lm[0]);
+    }
+    if (vae.length > 0 && (!gp.vaeModel || !vae.includes(gp.vaeModel))) {
+      gp.setVaeModel(vae[0]);
+    }
+    if (emb.length > 0 && (!gp.embeddingModel || !emb.includes(gp.embeddingModel))) {
+      gp.setEmbeddingModel(emb[0]);
+    }
+  }, [models]);
+
   const ditModels = models?.models?.dit || [];
   const lmModels = models?.models?.lm || [];
   const vaeModels = models?.models?.vae || [];
