@@ -1,14 +1,34 @@
 # HOT-Step CPP
 
-> **⚠️ ALPHA — ACTIVE DEVELOPMENT ⚠️**
->
-> This project is in **early alpha** and under very active development. Features may be incomplete, unstable, or change without notice.
->
-> **For a more complete experience right now, use [HOT-Step 9000](https://github.com/scragnog/HOT-Step-9000)** — the Python-based version with a full feature set and wider platform support. This C++ version is being developed as a faster, lighter alternative and will mature over time.
-
 A feature-rich UI for [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) — local AI music generation powered by GGML.
 
 Describe a song with a text caption and lyrics, and get stereo 48kHz audio generated entirely on your local hardware. No cloud, no API keys, no subscriptions.
+
+## Download
+
+Pre-built portable releases — no installation required. Extract, run, done.
+
+| Download | GPU | Size |
+|----------|-----|------|
+| [**HOT-Step-CPP — CUDA**](https://github.com/scragnog/HOT-Step-CPP/releases/download/v1.0.0/HOT-Step-CPP-v1.0.0-win-x64-cuda.zip) | NVIDIA (RTX 2000+) | 220 MB |
+| [**HOT-Step-CPP — Vulkan**](https://github.com/scragnog/HOT-Step-CPP/releases/download/v1.0.0/HOT-Step-CPP-v1.0.0-win-x64-vulkan.zip) | AMD / Intel / NVIDIA | 94 MB |
+| [**HOT-Step-CPP — CPU**](https://github.com/scragnog/HOT-Step-CPP/releases/download/v1.0.0/HOT-Step-CPP-v1.0.0-win-x64-cpu.zip) | No GPU required | 78 MB |
+
+**Which variant?**
+- **CUDA** — Best performance. Use this if you have an NVIDIA GPU (RTX 2060 or newer recommended).
+- **Vulkan** — Cross-vendor GPU support. Use this if you have an AMD or Intel GPU, or an older NVIDIA card.
+- **CPU** — No GPU needed. Works on any machine but generation will be significantly slower.
+
+### Quick Start
+
+1. Download and extract the zip for your hardware
+2. Run **`HOT-Step.bat`**
+3. Your browser opens to `http://localhost:3001`
+4. On first launch, go to **Models → Get More Models** to download the AI models (~7 GB)
+
+> **Requirements:** Windows 10/11 (64-bit), ~10 GB free disk space. CUDA variant needs NVIDIA drivers. Vulkan variant needs Vulkan 1.1+ capable drivers.
+
+---
 
 ## Highlights
 
@@ -54,9 +74,23 @@ HOT-Step CPP is three components working together:
 | **Server** | Node.js / TypeScript | Orchestrates the engine, manages songs, serves the UI |
 | **UI** | React / Vite / TypeScript | The browser-based frontend |
 
-## Prerequisites
+## Platform Support
 
-You'll need these installed before building:
+| Platform | Status |
+|----------|--------|
+| Windows + NVIDIA (CUDA) | ✅ Pre-built release available |
+| Windows + AMD/Intel (Vulkan) | ✅ Pre-built release available |
+| Windows CPU-only | ✅ Pre-built release available |
+| Linux | 🔧 Engine supports it, UI/server scripts TBD |
+| macOS (Metal) | 🔧 Engine supports it, UI/server scripts TBD |
+
+---
+
+## Building from Source
+
+If you prefer to build from source (or want to contribute), follow the instructions below. **Most users should use the [pre-built releases](#download) instead.**
+
+### Prerequisites
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
@@ -65,8 +99,6 @@ You'll need these installed before building:
 | [CMake](https://cmake.org/download/) | 3.14+ | Usually included with VS Build Tools |
 | [Node.js](https://nodejs.org/) | 18–22 LTS | **Node 24+ is not supported** — use nvm to install 22 LTS if needed |
 | [Git](https://git-scm.com/) | Any | For cloning |
-
-## Quick Start (Windows + NVIDIA)
 
 ### 1. Clone the repo
 
@@ -164,15 +196,6 @@ Open `http://localhost:3001` in your browser. That's it!
 dev.bat
 ```
 Then open `http://localhost:3000`.
-
-## Platform Support
-
-| Platform | Status |
-|----------|--------|
-| Windows + NVIDIA (CUDA) | ✅ Primary target |
-| Windows + AMD/Intel (Vulkan) | 🔧 Engine supports it, UI untested |
-| Linux | 🔧 Engine supports it, UI/server scripts TBD |
-| macOS (Metal) | 🔧 Engine supports it, UI/server scripts TBD |
 
 ## Troubleshooting
 
