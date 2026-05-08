@@ -24,34 +24,79 @@ export const GlobalParamBar: React.FC = () => {
   const gp = useGlobalParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Auto-open Model Manager on first launch ──────────────────────
+  // ── Auto-select models when engine becomes ready ────────────────
+  // Polls the engine until it returns a model list, then auto-selects
+  // the first available model for any empty slot. Runs independently
+  // of the Model Manager modal state.
   const [showModelManager, setShowModelManager] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    let retries = 0;
+    const MAX_RETRIES = 20; // ~60 seconds of polling
+
+    const tryAutoSelect = () => {
+      if (cancelled) return;
+      modelApi.list()
+        .then((data) => {
+          if (cancelled) return;
+          const dit = data?.models?.dit || [];
+          const lm = data?.models?.lm || [];
+          const vae = data?.models?.vae || [];
+          const emb = data?.models?.embedding || [];
+
+          // Auto-select first available model for any empty slot
+          if (dit.length > 0 && !gp.ditModel) gp.setDitModel(dit[0]);
+          if (lm.length > 0 && !gp.lmModel) gp.setLmModel(lm[0]);
+          if (vae.length > 0 && !gp.vaeModel) gp.setVaeModel(vae[0]);
+          if (emb.length > 0 && !gp.embeddingModel) gp.setEmbeddingModel(emb[0]);
+
+          // If we got models, we're done. If empty, keep polling
+          // (user might be downloading via Model Manager right now)
+          if (dit.length === 0 && retries < MAX_RETRIES) {
+            retries++;
+            setTimeout(tryAutoSelect, 3000);
+          }
+        })
+        .catch(() => {
+          // Engine not ready yet — retry
+          if (!cancelled && retries < MAX_RETRIES) {
+            retries++;
+            setTimeout(tryAutoSelect, 3000);
+          }
+        });
+    };
+
+    // Initial check after a short delay (let engine boot)
+    setTimeout(tryAutoSelect, 1500);
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Auto-open Model Manager on first launch ──────────────────────
+  // Separate from auto-select — only opens the modal if, after giving
+  // the engine time to start, there are genuinely no models available.
+  useEffect(() => {
     if (sessionStorage.getItem('mm-auto-dismissed')) return;
-    modelApi.list()
-      .then((data) => {
-        const dit = data?.models?.dit || [];
-        const lm = data?.models?.lm || [];
-        const vae = data?.models?.vae || [];
-        const emb = data?.models?.embedding || [];
-        const allModels = [...dit, ...lm, ...vae];
 
-        // Auto-select first available models on fresh install
-        if (dit.length > 0 && !gp.ditModel) gp.setDitModel(dit[0]);
-        if (lm.length > 0 && !gp.lmModel) gp.setLmModel(lm[0]);
-        if (vae.length > 0 && !gp.vaeModel) gp.setVaeModel(vae[0]);
-        if (emb.length > 0 && !gp.embeddingModel) gp.setEmbeddingModel(emb[0]);
-
-        if (allModels.length === 0) {
+    const timer = setTimeout(() => {
+      modelApi.list()
+        .then((data) => {
+          const allModels = [
+            ...(data?.models?.dit || []),
+            ...(data?.models?.lm || []),
+            ...(data?.models?.vae || []),
+          ];
+          if (allModels.length === 0) {
+            setShowModelManager(true);
+          }
+        })
+        .catch(() => {
+          // Engine still not running after 8s — likely no models at all
           setShowModelManager(true);
-        }
-      })
-      .catch(() => {
-        // Engine not running (e.g. no models directory configured) — still show
-        // the Model Manager so the user can download models on first launch
-        setShowModelManager(true);
-      });
+        });
+    }, 8000); // 8s delay: engine needs time to scan models + cuBLAS download
+
+    return () => clearTimeout(timer);
   }, []);
 
   // ── Preset Export ────────────────────────────────────────────────
