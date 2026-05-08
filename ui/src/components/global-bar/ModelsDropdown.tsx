@@ -19,7 +19,18 @@ export const ModelsDropdown: React.FC = () => {
 
   useEffect(() => {
     modelApi.list()
-      .then(setModels)
+      .then((data) => {
+        setModels(data);
+        // Auto-open Model Manager on first launch when no models are installed
+        const allModels = [
+          ...(data?.models?.dit || []),
+          ...(data?.models?.lm || []),
+          ...(data?.models?.vae || []),
+        ];
+        if (allModels.length === 0 && !sessionStorage.getItem('mm-auto-dismissed')) {
+          setShowModelManager(true);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -95,7 +106,10 @@ export const ModelsDropdown: React.FC = () => {
 
       {/* Model Manager Modal */}
       {showModelManager && (
-        <ModelManagerModal onClose={() => setShowModelManager(false)} />
+        <ModelManagerModal onClose={() => {
+          setShowModelManager(false);
+          sessionStorage.setItem('mm-auto-dismissed', '1');
+        }} />
       )}
     </div>
   );
