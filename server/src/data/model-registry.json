@@ -11,7 +11,9 @@
         "embedding-q8",
         "vae-bf16",
         "scragvae-bf16",
-        "pp-vae-f32"
+        "pp-vae-f32",
+        "cuda-rt-cublas",
+        "cuda-rt-cublaslt"
       ]
     },
     {
@@ -24,7 +26,9 @@
         "embedding-q8",
         "vae-bf16",
         "scragvae-bf16",
-        "pp-vae-bf16"
+        "pp-vae-bf16",
+        "cuda-rt-cublas",
+        "cuda-rt-cublaslt"
       ]
     },
     {
@@ -37,7 +41,9 @@
         "embedding-q8",
         "vae-bf16",
         "scragvae-bf16",
-        "pp-vae-f32"
+        "pp-vae-f32",
+        "cuda-rt-cublas",
+        "cuda-rt-cublaslt"
       ]
     },
     {
@@ -50,7 +56,18 @@
         "embedding-q8",
         "vae-bf16",
         "scragvae-bf16",
-        "pp-vae-f32"
+        "pp-vae-f32",
+        "cuda-rt-cublas",
+        "cuda-rt-cublaslt"
+      ]
+    },
+    {
+      "id": "cuda-runtime",
+      "name": "CUDA Runtime",
+      "description": "NVIDIA cuBLAS libraries required for GPU-accelerated generation. ~510 MB download. Required on machines without CUDA Toolkit.",
+      "fileIds": [
+        "cuda-rt-cublas",
+        "cuda-rt-cublaslt"
       ]
     },
     {
@@ -1690,6 +1707,32 @@
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "cuDNN base operations library.",
       "tags": ["runtime"]
+    },
+    {
+      "id": "cuda-rt-cublas",
+      "filename": "cublas64_13.dll",
+      "role": "runtime",
+      "displayName": "cuBLAS",
+      "scale": null,
+      "variant": null,
+      "quant": null,
+      "sizeBytes": 51569776,
+      "repo": "scragnog/HOT-Step-CPP-SuperSep",
+      "description": "NVIDIA cuBLAS library — required for CUDA-accelerated matrix operations.",
+      "tags": ["runtime", "required"]
+    },
+    {
+      "id": "cuda-rt-cublaslt",
+      "filename": "cublasLt64_13.dll",
+      "role": "runtime",
+      "displayName": "cuBLAS LT",
+      "scale": null,
+      "variant": null,
+      "quant": null,
+      "sizeBytes": 480641024,
+      "repo": "scragnog/HOT-Step-CPP-SuperSep",
+      "description": "NVIDIA cuBLAS Light library — extended matrix operation support.",
+      "tags": ["runtime", "required"]
     }
   ]
 }
