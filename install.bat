@@ -12,6 +12,11 @@ if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
+echo      Rebuilding native modules for your Node version...
+call npm rebuild better-sqlite3
+if %errorlevel% neq 0 (
+    echo WARNING: better-sqlite3 rebuild failed - you may need to reinstall
+)
 
 echo.
 echo [2/3] Installing UI dependencies...
