@@ -138,7 +138,7 @@ cd build
 
 REM Only run cmake configure if not yet configured (avoids invalidating incremental builds)
 if not exist "CMakeCache.txt" (
-    cmake .. -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=native -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_BACKEND_DL=ON
+    cmake .. -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;100;120" -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_BACKEND_DL=ON
 )
 cmake --build . --config Release -j %NUMBER_OF_PROCESSORS%
 
