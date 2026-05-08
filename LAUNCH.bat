@@ -4,8 +4,24 @@ echo   HOT-Step 9000 CPP - Production
 echo =============================================
 echo.
 
+REM Check dependencies are installed
+if not exist "%~dp0server\node_modules" (
+    echo ERROR: Server dependencies not installed.
+    echo        Run install.bat first, or: cd server ^& npm install
+    echo.
+    pause
+    exit /b 1
+)
+
 REM Build UI if dist doesn't exist
 if not exist "%~dp0ui\dist" (
+    if not exist "%~dp0ui\node_modules" (
+        echo ERROR: UI dependencies not installed.
+        echo        Run install.bat first, or: cd ui ^& npm install
+        echo.
+        pause
+        exit /b 1
+    )
     echo Building UI...
     cd /d "%~dp0ui"
     call npm run build
