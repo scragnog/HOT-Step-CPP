@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import { spawn, ChildProcess } from 'child_process';
 import { execSync } from 'child_process';
 
-import { config, PROJECT_ROOT } from './config.js';
+import { config, PROJECT_ROOT, PORTABLE_MODE } from './config.js';
 import { initLogger, logEngine, closeLogger } from './services/logger.js';
 import { initDb, closeDb } from './db/database.js';
 // lireekDb is now part of the unified hotstep.db — no separate init needed
@@ -278,13 +278,17 @@ async function ensureRequiredRuntime(): Promise<void> {
   });
 }
 
-// Bootstrap: download required DLLs, then start engine
+// Bootstrap: download required DLLs (portable only), then start engine
+// In dev/build-from-source mode, CUDA DLLs are in the system PATH via the
+// toolkit install — no need to download them into the engine directory.
 (async () => {
-  try {
-    setEngineReady(false, 'Downloading CUDA runtime...');
-    await ensureRequiredRuntime();
-  } catch (err: any) {
-    console.error('[Server] Runtime bootstrap failed:', err.message);
+  if (PORTABLE_MODE) {
+    try {
+      setEngineReady(false, 'Downloading CUDA runtime...');
+      await ensureRequiredRuntime();
+    } catch (err: any) {
+      console.error('[Server] Runtime bootstrap failed:', err.message);
+    }
   }
   setEngineReady(false, 'Starting engine...');
   aceProcess = startAceServer();
