@@ -35,6 +35,19 @@ const result = await esbuild.build({
   // can't handle dynamic require("node:events") from Express and other CJS deps.
   external: ['better-sqlite3', ...nodeExternals],
 
+  // Plugin: redirect browser polyfill packages (with trailing slash) to Node.js
+  // built-ins. e.g. require('process/') -> require('process')
+  plugins: [{
+    name: 'node-polyfill-redirect',
+    setup(build) {
+      // Match requires like 'process/', 'string_decoder/', 'events/', etc.
+      build.onResolve({ filter: /^(process|string_decoder|events|buffer|stream|util|path)\/$/ }, (args) => {
+        const builtin = args.path.replace(/\/$/, '');
+        return { path: builtin, external: true };
+      });
+    },
+  }],
+
   // Don't minify - keep readable for debugging production issues
   minify: false,
   sourcemap: false,
