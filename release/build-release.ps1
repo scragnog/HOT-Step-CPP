@@ -30,7 +30,7 @@ $OutputDir = Join-Path $ReleaseDir "out"
 $NodeCacheDir = Join-Path $ReleaseDir ".node-cache"
 $NodeZipName = "node-v${NodeVersion}-win-x64.zip"
 $NodeUrl = "https://nodejs.org/dist/v${NodeVersion}/${NodeZipName}"
-$NodeExe = Join-Path $NodeCacheDir "node-v${NodeVersion}-win-x64" "node.exe"
+$NodeExe = Join-Path (Join-Path $NodeCacheDir "node-v${NodeVersion}-win-x64") "node.exe"
 
 Write-Host "`n════════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "  HOT-Step CPP Release Builder" -ForegroundColor Cyan
@@ -62,7 +62,7 @@ if (-not (Test-Path $NodeExe)) {
     Remove-Item $zipPath -ErrorAction SilentlyContinue
 
     if (-not (Test-Path $NodeExe)) {
-        throw "Node.js extraction failed — $NodeExe not found"
+        throw "Node.js extraction failed - $NodeExe not found"
     }
 }
 
@@ -105,7 +105,7 @@ if (-not $SkipEngine) {
     }
 
     # Verify output
-    $aceServerExe = Join-Path $buildDir "Release" "ace-server.exe"
+    $aceServerExe = Join-Path (Join-Path $buildDir "Release") "ace-server.exe"
     if (-not (Test-Path $aceServerExe)) {
         throw "Build succeeded but ace-server.exe not found at $aceServerExe"
     }
@@ -118,19 +118,15 @@ if (-not $SkipEngine) {
 
 Write-Host "`n[Phase 3] Bundling server..." -ForegroundColor Yellow
 
-# Install server deps with portable Node.js (correct ABI for native modules)
-Write-Host "  Installing server dependencies (Node $nodeVer)..."
+# Install server deps with system npm (dev machine only)
+Write-Host "  Installing server dependencies..."
 Push-Location (Join-Path $ProjectRoot "server")
 try {
-    & $NodeExe (Join-Path $ProjectRoot "server" "node_modules" ".bin" "..\..\..\.." "node_modules" "npm" "bin" "npm-cli.js") install 2>&1 | Out-Null
-
-    # Fallback: use system npm with portable node
-    # The portable Node.js doesn't ship npm separately, so we use npx from system
-    # Actually, let's just use system npm for install then portable node for running
-    Write-Host "  Installing with system npm..."
-    npm install --ignore-scripts 2>&1 | Out-Null
-    # Rebuild native modules with the correct Node version
-    & $NodeExe --version | Out-Null  # verify it works
+    # Use cmd /c to prevent PS treating npm stderr warnings as errors
+    cmd /c "npm install --ignore-scripts 2>&1" | Out-Null
+    # Verify portable Node works
+    & $NodeExe --version | Out-Null
+    Write-Host "  Dependencies installed" -ForegroundColor Green
 } finally {
     Pop-Location
 }
@@ -139,16 +135,16 @@ try {
 Write-Host "  Installing esbuild..."
 Push-Location $ReleaseDir
 try {
-    if (-not (Test-Path (Join-Path $ReleaseDir "node_modules" "esbuild"))) {
+    if (-not (Test-Path (Join-Path $ReleaseDir "node_modules\esbuild"))) {
         npm install esbuild --save-dev 2>&1 | Out-Null
     }
 } finally {
     Pop-Location
 }
 
-# Run esbuild
+# Run esbuild (cmd /c prevents PS from treating esbuild stderr warnings as fatal)
 Write-Host "  Running esbuild..."
-& node (Join-Path $ReleaseDir "esbuild.config.mjs")
+cmd /c "node `"$(Join-Path $ReleaseDir 'esbuild.config.mjs')`" 2>&1"
 if ($LASTEXITCODE -ne 0) { throw "esbuild bundle failed" }
 
 Write-Host "  Server bundle complete" -ForegroundColor Green
@@ -181,13 +177,13 @@ $dist = $StagingDir
 # Runtime: portable Node.js
 Write-Host "  Copying runtime..."
 New-Item -ItemType Directory -Force (Join-Path $dist "runtime") | Out-Null
-Copy-Item $NodeExe (Join-Path $dist "runtime" "node.exe")
+Copy-Item $NodeExe (Join-Path $dist "runtime\node.exe")
 
 # Engine: binaries + DLLs
 Write-Host "  Copying engine binaries..."
 $engineOut = Join-Path $dist "engine"
 New-Item -ItemType Directory -Force $engineOut | Out-Null
-$buildRelease = Join-Path $ProjectRoot "engine" "build" "Release"
+$buildRelease = Join-Path (Join-Path $ProjectRoot "engine") "build\Release"
 
 $engineFiles = @(
     "ace-server.exe", "mastering.exe", "mp3-codec.exe",
@@ -221,41 +217,41 @@ Write-Host "  Copying server..."
 $serverOut = Join-Path $dist "server"
 # server.mjs was already placed by esbuild into staging/server/
 # Copy better-sqlite3 minimal package
-$bsqlSrc = Join-Path $ProjectRoot "server" "node_modules" "better-sqlite3"
-$bsqlDst = Join-Path $serverOut "node_modules" "better-sqlite3"
+$bsqlSrc = Join-Path (Join-Path $ProjectRoot "server") "node_modules\better-sqlite3"
+$bsqlDst = Join-Path $serverOut "node_modules\better-sqlite3"
 New-Item -ItemType Directory -Force $bsqlDst | Out-Null
 
 # Copy the JS package + native binding
 Copy-Item (Join-Path $bsqlSrc "package.json") (Join-Path $bsqlDst "package.json")
 New-Item -ItemType Directory -Force (Join-Path $bsqlDst "lib") | Out-Null
-Copy-Item -Recurse (Join-Path $bsqlSrc "lib" "*") (Join-Path $bsqlDst "lib")
-New-Item -ItemType Directory -Force (Join-Path $bsqlDst "build" "Release") | Out-Null
-Copy-Item (Join-Path $bsqlSrc "build" "Release" "better_sqlite3.node") `
-    (Join-Path $bsqlDst "build" "Release" "better_sqlite3.node")
+Copy-Item -Recurse (Join-Path $bsqlSrc "lib\*") (Join-Path $bsqlDst "lib")
+New-Item -ItemType Directory -Force (Join-Path $bsqlDst "build\Release") | Out-Null
+Copy-Item (Join-Path $bsqlSrc "build\Release\better_sqlite3.node") `
+    (Join-Path $bsqlDst "build\Release\better_sqlite3.node")
 
 # Copy ffmpeg.exe
-$ffmpegSrc = Join-Path $ProjectRoot "server" "node_modules" "ffmpeg-static" "ffmpeg.exe"
+$ffmpegSrc = Join-Path (Join-Path (Join-Path $ProjectRoot "server") "node_modules\ffmpeg-static") "ffmpeg.exe"
 if (Test-Path $ffmpegSrc) {
     Copy-Item $ffmpegSrc (Join-Path $serverOut "ffmpeg.exe")
 } else {
-    Write-Warning "  ffmpeg.exe not found — audio conversion will be limited"
+    Write-Warning "  ffmpeg.exe not found - audio conversion will be limited"
 }
 
 # Copy data files (model-registry.json, assistant-knowledge.md)
 $dataOut = Join-Path $serverOut "data"
 New-Item -ItemType Directory -Force $dataOut | Out-Null
-Copy-Item (Join-Path $ProjectRoot "server" "src" "data" "model-registry.json") (Join-Path $dataOut "model-registry.json")
-Copy-Item (Join-Path $ProjectRoot "server" "src" "data" "assistant-knowledge.md") (Join-Path $dataOut "assistant-knowledge.md")
+Copy-Item (Join-Path (Join-Path (Join-Path $ProjectRoot "server") "src\data") "model-registry.json") (Join-Path $dataOut "model-registry.json")
+Copy-Item (Join-Path (Join-Path (Join-Path $ProjectRoot "server") "src\data") "assistant-knowledge.md") (Join-Path $dataOut "assistant-knowledge.md")
 
 # UI: pre-built dist
 Write-Host "  Copying UI..."
-$uiSrc = Join-Path $ProjectRoot "ui" "dist"
-$uiDst = Join-Path $dist "ui" "dist"
+$uiSrc = Join-Path (Join-Path $ProjectRoot "ui") "dist"
+$uiDst = Join-Path (Join-Path $dist "ui") "dist"
 if (Test-Path $uiSrc) {
     New-Item -ItemType Directory -Force (Join-Path $dist "ui") | Out-Null
     Copy-Item -Recurse $uiSrc $uiDst
 } else {
-    Write-Warning "  UI dist not found — skipping"
+    Write-Warning "  UI dist not found - skipping"
 }
 
 # Essentia
@@ -278,6 +274,7 @@ New-Item -ItemType Directory -Force (Join-Path $dist "adapters") | Out-Null
 # Config and docs
 Copy-Item (Join-Path $ProjectRoot ".env.example") (Join-Path $dist ".env.example")
 Copy-Item (Join-Path $ReleaseDir "HOT-Step.bat") (Join-Path $dist "HOT-Step.bat")
+Copy-Item (Join-Path $ReleaseDir "README.txt") (Join-Path $dist "README.txt")
 
 Write-Host "  Assembly complete" -ForegroundColor Green
 
