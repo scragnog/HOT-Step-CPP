@@ -19,18 +19,7 @@ export const ModelsDropdown: React.FC = () => {
 
   useEffect(() => {
     modelApi.list()
-      .then((data) => {
-        setModels(data);
-        // Auto-open Model Manager on first launch when no models are installed
-        const allModels = [
-          ...(data?.models?.dit || []),
-          ...(data?.models?.lm || []),
-          ...(data?.models?.vae || []),
-        ];
-        if (allModels.length === 0 && !sessionStorage.getItem('mm-auto-dismissed')) {
-          setShowModelManager(true);
-        }
-      })
+      .then(setModels)
       .catch(() => {});
   }, []);
 

@@ -4,10 +4,12 @@
 // Each section shows a summary badge and expands on hover to reveal controls.
 // Sits full-width at the top of the entire window (above sidebar).
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Cpu, Plug, Sliders, Brain, AudioWaveform, Upload, Download } from 'lucide-react';
 import { BarSection, ToggleSwitch } from './BarSection';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { modelApi } from '../../services/api';
+import { ModelManagerModal } from '../model-manager/ModelManagerModal';
 import { ModelsDropdown, ModelsBadge } from './ModelsDropdown';
 import { AdaptersDropdown, AdaptersBadge } from './AdaptersDropdown';
 import { GenerationDropdown, GenerationBadge } from './GenerationDropdown';
@@ -21,6 +23,24 @@ export const GlobalParamBar: React.FC = () => {
   const [openSection, setOpenSection] = useState<SectionId>(null);
   const gp = useGlobalParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Auto-open Model Manager on first launch ──────────────────────
+  const [showModelManager, setShowModelManager] = useState(false);
+
+  useEffect(() => {
+    modelApi.list()
+      .then((data) => {
+        const allModels = [
+          ...(data?.models?.dit || []),
+          ...(data?.models?.lm || []),
+          ...(data?.models?.vae || []),
+        ];
+        if (allModels.length === 0 && !sessionStorage.getItem('mm-auto-dismissed')) {
+          setShowModelManager(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // ── Preset Export ────────────────────────────────────────────────
   const handleExport = useCallback(() => {
@@ -240,6 +260,14 @@ export const GlobalParamBar: React.FC = () => {
           <VramIndicator compact />
         </div>
       </div>
+
+      {/* Model Manager Modal — rendered here (always mounted) so auto-open works */}
+      {showModelManager && (
+        <ModelManagerModal onClose={() => {
+          setShowModelManager(false);
+          sessionStorage.setItem('mm-auto-dismissed', '1');
+        }} />
+      )}
     </div>
   );
 };
