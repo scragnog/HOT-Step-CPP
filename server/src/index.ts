@@ -136,6 +136,8 @@ if (fs.existsSync(uiDistPath)) {
 // Start ace-server as a child process if configured
 let aceProcess: ChildProcess | null = null;
 
+import { setEngineReady } from './engineState.js';
+
 function startAceServer(): ChildProcess | null {
   const exe = config.aceServer.exe;
   if (!exe || !fs.existsSync(exe)) {
@@ -279,11 +281,14 @@ async function ensureRequiredRuntime(): Promise<void> {
 // Bootstrap: download required DLLs, then start engine
 (async () => {
   try {
+    setEngineReady(false, 'Downloading CUDA runtime...');
     await ensureRequiredRuntime();
   } catch (err: any) {
     console.error('[Server] Runtime bootstrap failed:', err.message);
   }
+  setEngineReady(false, 'Starting engine...');
   aceProcess = startAceServer();
+  setEngineReady(true, 'Ready');
 })();
 
 // Start Express server

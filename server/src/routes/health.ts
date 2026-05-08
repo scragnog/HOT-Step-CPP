@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { aceClient } from '../services/aceClient.js';
 import { config } from '../config.js';
+import { engineReady, engineBootStatus } from '../engineState.js';
 
 const router = Router();
 
@@ -36,6 +37,10 @@ router.get('/', async (_req, res) => {
     server: {
       port: config.server.port,
       uptime: process.uptime(),
+    },
+    engine: {
+      ready: engineReady,
+      bootStatus: engineBootStatus,
     },
   });
 });

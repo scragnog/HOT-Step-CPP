@@ -17,6 +17,7 @@ import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
+import { engineReady, engineBootStatus } from '../engineState.js';
 import { autoTrimSilence } from '../services/autoTrim.js';
 import { writeHslat, latentFrameCount, latentDuration, type HslatMetadata } from '../services/latentFormat.js';
 import { subscribeLines, pushLog } from './logs.js';
@@ -642,6 +643,15 @@ function enqueueGeneration(job: GenerationJob): void {
 
 // POST /api/generate — start a generation job
 router.post('/', (req, res) => {
+  // Reject requests while engine is still bootstrapping (downloading DLLs, etc.)
+  if (!engineReady) {
+    res.status(503).json({
+      error: `Engine not ready: ${engineBootStatus}`,
+      detail: 'The CUDA runtime is still being set up. Please wait a moment and try again.',
+    });
+    return;
+  }
+
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
 
