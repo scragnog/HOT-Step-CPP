@@ -50,6 +50,7 @@ interface RegistryFile {
   filename: string;
   role: string;
   subdir?: string;
+  repoPath?: string;     // Path within the HuggingFace repo (e.g. "runtime/cublas64_13.dll")
   displayName: string;
   scale: string | null;
   variant: string | null;
@@ -305,7 +306,8 @@ class ModelDownloadService extends EventEmitter {
     job.abortController = new AbortController();
     this.emit('progress');
 
-    const url = `https://huggingface.co/${file.repo}/resolve/main/${file.filename}`;
+    const repoPath = file.repoPath || file.filename;
+    const url = `https://huggingface.co/${file.repo}/resolve/main/${repoPath}`;
 
     try {
       await this._downloadWithRedirects(url, partPath, job, startByte);

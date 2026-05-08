@@ -204,8 +204,87 @@ function startAceServer(): ChildProcess | null {
   return child;
 }
 
-// Start ace-server
-aceProcess = startAceServer();
+// ── Required runtime DLL bootstrap ──────────────────────────────────
+// On first launch, the engine needs cuBLAS DLLs that aren't in the zip.
+// Download them automatically from HuggingFace before starting ace-server.
+
+import { modelDownloadService } from './services/modelDownloadService.js';
+
+/** IDs of registry files tagged "required" that must exist before engine start */
+const REQUIRED_RUNTIME_IDS = ['cuda-rt-cublas', 'cuda-rt-cublaslt'];
+
+async function ensureRequiredRuntime(): Promise<void> {
+  const engineDir = path.dirname(config.aceServer.exe);
+  const registry = JSON.parse(
+    fs.readFileSync(path.join(__dirname, 'data', 'model-registry.json'), 'utf-8')
+  );
+
+  const missing: Array<{ id: string; filename: string }> = [];
+  for (const id of REQUIRED_RUNTIME_IDS) {
+    const file = registry.files.find((f: any) => f.id === id);
+    if (!file) continue;
+    if (!fs.existsSync(path.join(engineDir, file.filename))) {
+      missing.push({ id, filename: file.filename });
+    }
+  }
+
+  if (missing.length === 0) return;
+
+  console.log(`[Server] Missing required CUDA runtime: ${missing.map(m => m.filename).join(', ')}`);
+  console.log('[Server] Downloading automatically (required for GPU acceleration)...');
+
+  // Start all downloads
+  const jobIds: string[] = [];
+  for (const m of missing) {
+    const jobId = modelDownloadService.startDownload(m.id);
+    jobIds.push(jobId);
+    console.log(`[Server]   Queued: ${m.filename}`);
+  }
+
+  // Wait for all downloads to complete
+  await new Promise<void>((resolve) => {
+    const check = () => {
+      const jobs = modelDownloadService.getJobs();
+      const active = jobs.filter(j => jobIds.includes(j.jobId));
+      const allDone = active.every(j => j.status === 'completed' || j.status === 'failed');
+
+      // Log progress
+      for (const j of active) {
+        if (j.status === 'downloading' && j.totalBytes > 0) {
+          const pct = Math.round((j.bytesDownloaded / j.totalBytes) * 100);
+          const mb = Math.round(j.bytesDownloaded / 1024 / 1024);
+          const totalMb = Math.round(j.totalBytes / 1024 / 1024);
+          process.stdout.write(`\r[Server]   ${j.filename}: ${mb}/${totalMb} MB (${pct}%)    `);
+        }
+      }
+
+      if (allDone) {
+        process.stdout.write('\n');
+        const failed = active.filter(j => j.status === 'failed');
+        if (failed.length > 0) {
+          console.error(`[Server] WARNING: Some runtime downloads failed: ${failed.map(j => j.filename).join(', ')}`);
+          console.error('[Server] The engine may not start. Check your internet connection and try again.');
+        } else {
+          console.log('[Server] CUDA runtime downloaded successfully!');
+        }
+        resolve();
+      } else {
+        setTimeout(check, 500);
+      }
+    };
+    check();
+  });
+}
+
+// Bootstrap: download required DLLs, then start engine
+(async () => {
+  try {
+    await ensureRequiredRuntime();
+  } catch (err: any) {
+    console.error('[Server] Runtime bootstrap failed:', err.message);
+  }
+  aceProcess = startAceServer();
+})();
 
 // Start Express server
 const server = app.listen(config.server.port, config.server.host, () => {

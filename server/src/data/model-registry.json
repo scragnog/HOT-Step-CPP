@@ -1496,7 +1496,9 @@
       "sizeBytes": 704536949,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "Stage 1: Primary 6-stem separation (vocals, drums, bass, guitar, piano, other). BS-Roformer architecture.",
-      "tags": ["essential"]
+      "tags": [
+        "essential"
+      ]
     },
     {
       "id": "supersep-mel-band",
@@ -1510,7 +1512,9 @@
       "sizeBytes": 917744739,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "Stage 2: Vocal sub-separation into lead and backing vocals. Mel-Band RoFormer architecture.",
-      "tags": ["essential"]
+      "tags": [
+        "essential"
+      ]
     },
     {
       "id": "supersep-mdx23c",
@@ -1524,7 +1528,9 @@
       "sizeBytes": 437702626,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "Stage 3: Drum sub-separation (kick, snare, toms, hi-hat, cymbals). MDX23C architecture.",
-      "tags": ["essential"]
+      "tags": [
+        "essential"
+      ]
     },
     {
       "id": "supersep-htdemucs",
@@ -1538,7 +1544,9 @@
       "sizeBytes": 110384018,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "Stage 4: 'Other' stem refinement via Hybrid Transformer Demucs. Meta Research architecture.",
-      "tags": ["essential"]
+      "tags": [
+        "essential"
+      ]
     },
     {
       "id": "supersep-rt-onnxruntime",
@@ -1552,7 +1560,10 @@
       "sizeBytes": 15099904,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "Core ONNX Runtime inference library. Required for all SuperSep stem separation.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/onnxruntime.dll"
     },
     {
       "id": "supersep-rt-ort-cuda",
@@ -1566,7 +1577,10 @@
       "sizeBytes": 294391808,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "CUDA execution provider for GPU-accelerated stem separation.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/onnxruntime_providers_cuda.dll"
     },
     {
       "id": "supersep-rt-ort-shared",
@@ -1580,7 +1594,10 @@
       "sizeBytes": 22528,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "Shared provider support library for ONNX Runtime.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/onnxruntime_providers_shared.dll"
     },
     {
       "id": "supersep-rt-cudnn",
@@ -1594,7 +1611,10 @@
       "sizeBytes": 314880,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "NVIDIA cuDNN core library.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/cudnn64_9.dll"
     },
     {
       "id": "supersep-rt-cudnn-adv",
@@ -1608,7 +1628,10 @@
       "sizeBytes": 269025280,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "cuDNN advanced operations (attention, RNN, etc.).",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/cudnn_adv64_9.dll"
     },
     {
       "id": "supersep-rt-cudnn-cnn",
@@ -1622,7 +1645,10 @@
       "sizeBytes": 2936832,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "cuDNN convolution operations.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/cudnn_cnn64_9.dll"
     },
     {
       "id": "supersep-rt-cudnn-precompiled",
@@ -1636,7 +1662,10 @@
       "sizeBytes": 482058240,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "Pre-compiled cuDNN engine kernels for optimal GPU performance.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/cudnn_engines_precompiled64_9.dll"
     },
     {
       "id": "supersep-rt-cudnn-runtime",
@@ -1650,7 +1679,10 @@
       "sizeBytes": 31981568,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "Runtime-compiled cuDNN engine kernels.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/cudnn_engines_runtime_compiled64_9.dll"
     },
     {
       "id": "supersep-rt-cudnn-tensorir",
@@ -1664,7 +1696,10 @@
       "sizeBytes": 104960,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "cuDNN Tensor IR engines.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/cudnn_engines_tensor_ir64_9.dll"
     },
     {
       "id": "supersep-rt-cudnn-graph",
@@ -1678,7 +1713,10 @@
       "sizeBytes": 99942400,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "cuDNN graph operations and fusion.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/cudnn_graph64_9.dll"
     },
     {
       "id": "supersep-rt-cudnn-heuristic",
@@ -1692,7 +1730,10 @@
       "sizeBytes": 61759488,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "cuDNN heuristic engine selection.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/cudnn_heuristic64_9.dll"
     },
     {
       "id": "supersep-rt-cudnn-ops",
@@ -1706,7 +1747,10 @@
       "sizeBytes": 105611264,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "cuDNN base operations library.",
-      "tags": ["runtime"]
+      "tags": [
+        "runtime"
+      ],
+      "repoPath": "runtime/cudnn_ops64_9.dll"
     },
     {
       "id": "cuda-rt-cublas",
@@ -1719,7 +1763,11 @@
       "sizeBytes": 51569776,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "NVIDIA cuBLAS library — required for CUDA-accelerated matrix operations.",
-      "tags": ["runtime", "required"]
+      "tags": [
+        "runtime",
+        "required"
+      ],
+      "repoPath": "runtime/cublas64_13.dll"
     },
     {
       "id": "cuda-rt-cublaslt",
@@ -1732,7 +1780,11 @@
       "sizeBytes": 480641024,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "NVIDIA cuBLAS Light library — extended matrix operation support.",
-      "tags": ["runtime", "required"]
+      "tags": [
+        "runtime",
+        "required"
+      ],
+      "repoPath": "runtime/cublasLt64_13.dll"
     }
   ]
 }
