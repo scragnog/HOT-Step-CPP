@@ -8,12 +8,7 @@ import { Router } from 'express';
 import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-/** Project root — two levels up from server/src/routes/ */
-const PROJECT_ROOT = path.resolve(__dirname, '../../..');
+import { PROJECT_ROOT } from '../config.js';
 
 const router = Router();
 

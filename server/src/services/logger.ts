@@ -9,11 +9,10 @@
 
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { pushLog } from '../routes/logs.js';
+import { PROJECT_ROOT } from '../config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, '../../..');
+const projectRoot = PROJECT_ROOT;
 
 /** Current session log directory (null if not initialized) */
 let sessionDir: string | null = null;
