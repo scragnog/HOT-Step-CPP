@@ -230,6 +230,23 @@ Get-ChildItem (Join-Path $buildRelease "ggml-cpu-*.dll") -ErrorAction SilentlyCo
     Copy-Item $_.FullName (Join-Path $engineOut $_.Name)
 }
 
+# MSVC C++ Runtime — bundle so the app works on clean machines without VC++ Redistributable
+$msvcRedist = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter "vcruntime140.dll" -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'debug' -and $_.FullName -match 'Redist' } |
+    Select-Object -First 1
+if ($msvcRedist) {
+    $msvcDir = $msvcRedist.DirectoryName
+    foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")) {
+        $src = Join-Path $msvcDir $dll
+        if (Test-Path $src) {
+            Copy-Item $src (Join-Path $engineOut $dll)
+        }
+    }
+    Write-Host "  Bundled MSVC runtime DLLs"
+} else {
+    Write-Warning "  MSVC Redist not found — vcruntime DLLs not bundled"
+}
+
 # Server: bundled JS + native deps
 Write-Host "  Copying server..."
 $serverOut = Join-Path $dist "server"
