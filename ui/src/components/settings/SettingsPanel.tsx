@@ -10,6 +10,7 @@ import {
   Key, Database, Globe
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { SUPPORTED_LANGUAGES } from '../../i18n';
 import { getStemStats, deleteAllJobs, formatBytes, type StemStats } from '../../services/stemStudioApi';
 import { useAuth } from '../../context/AuthContext';
 import { songApi, settingsApi } from '../../services/api';
@@ -436,13 +437,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           label={t('settings.general.displayLanguage')}
           description={t('settings.general.displayLanguageDesc')}
           value={i18n.language?.split('-')[0] || 'en'}
-          options={[
-            { value: 'en', label: 'English' },
-            { value: 'zh', label: '中文 (Chinese)' },
-            { value: 'ja', label: '日本語 (Japanese)' },
-            { value: 'ko', label: '한국어 (Korean)' },
-            { value: 'ru', label: 'Русский (Russian)' },
-          ]}
+          options={SUPPORTED_LANGUAGES.map(l => ({ value: l.code, label: `${l.flag} ${l.name}` }))}
           onChange={(v) => i18n.changeLanguage(v)}
         />
       </div>
