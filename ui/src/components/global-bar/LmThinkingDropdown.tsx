@@ -4,6 +4,7 @@
 // This dropdown only shows the detailed LM parameters when LM is enabled.
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
 import { ToggleSwitch } from './BarSection';
@@ -12,11 +13,12 @@ const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 b
 
 export const LmThinkingDropdown: React.FC = () => {
   const gp = useGlobalParams();
+  const { t } = useTranslation();
 
   if (gp.skipLm) {
     return (
       <div className="text-xs text-zinc-500 italic text-center py-2">
-        LM conditioning is disabled. Toggle it on in the bar above.
+        {t('lm.disabled')}
       </div>
     );
   }
@@ -25,7 +27,7 @@ export const LmThinkingDropdown: React.FC = () => {
     <div className="space-y-3">
       {/* CoT Caption */}
       <div className="flex items-center justify-between">
-        <span className="text-sm text-zinc-600 dark:text-zinc-400">Chain-of-Thought Caption</span>
+        <span className="text-sm text-zinc-600 dark:text-zinc-400">{t('lm.cotCaption')}</span>
         <ToggleSwitch checked={gp.useCotCaption} onChange={gp.setUseCotCaption} accentColor="purple" />
       </div>
 
@@ -42,7 +44,7 @@ export const LmThinkingDropdown: React.FC = () => {
         onChange={gp.setLmTopP} min={0} max={1} step={0.01} showInput />
 
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Negative Prompt</label>
+        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('lm.negativePrompt')}</label>
         <input className={inputClasses} value={gp.lmNegativePrompt}
           onChange={e => gp.setLmNegativePrompt(e.target.value)}
           placeholder="NO USER INPUT" />

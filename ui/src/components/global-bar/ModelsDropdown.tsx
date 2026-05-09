@@ -3,6 +3,7 @@
 // Adapted from create/ModelSelector.tsx to read from GlobalParamsContext.
 
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Download } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { modelApi } from '../../services/api';
@@ -14,6 +15,7 @@ const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 
 
 export const ModelsDropdown: React.FC = () => {
   const gp = useGlobalParams();
+  const { t } = useTranslation();
   const [models, setModels] = useState<AceModels | null>(null);
   const [showModelManager, setShowModelManager] = useState(false);
 
@@ -54,10 +56,10 @@ export const ModelsDropdown: React.FC = () => {
     <div className="space-y-3">
       {/* DiT Model */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">DiT Model</label>
+        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('models.ditModel')}</label>
         <select className={selectClasses} value={gp.ditModel}
           onChange={e => gp.setDitModel(e.target.value)}>
-          {ditModels.length === 0 && <option value="">Loading...</option>}
+          {ditModels.length === 0 && <option value="">{t('common.loading')}</option>}
           {ditModels.map(m => (
             <option key={m} value={m}>{formatDitModel(m)}</option>
           ))}
@@ -66,10 +68,10 @@ export const ModelsDropdown: React.FC = () => {
 
       {/* LM Model */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">LM Model</label>
+        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('models.lmModel')}</label>
         <select className={selectClasses} value={gp.lmModel}
           onChange={e => gp.setLmModel(e.target.value)}>
-          {lmModels.length === 0 && <option value="">Loading...</option>}
+          {lmModels.length === 0 && <option value="">{t('common.loading')}</option>}
           {lmModels.map(m => (
             <option key={m} value={m}>{formatLmModel(m)}</option>
           ))}
@@ -79,7 +81,7 @@ export const ModelsDropdown: React.FC = () => {
       {/* VAE Model — only show when multiple VAEs are available */}
       {vaeModels.length > 1 && (
         <div>
-          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">VAE Decoder</label>
+          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('models.vaeDecoder')}</label>
           <select className={selectClasses} value={gp.vaeModel}
             onChange={e => gp.setVaeModel(e.target.value)}>
             {vaeModels.map(m => (
@@ -92,7 +94,7 @@ export const ModelsDropdown: React.FC = () => {
       {/* Text Encoder — only show when multiple are available */}
       {embeddingModels.length > 1 && (
         <div>
-          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Text Encoder</label>
+          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('models.textEncoder')}</label>
           <select className={selectClasses} value={gp.embeddingModel}
             onChange={e => gp.setEmbeddingModel(e.target.value)}>
             {embeddingModels.map(m => (
@@ -111,7 +113,7 @@ export const ModelsDropdown: React.FC = () => {
                      transition-colors flex items-center justify-center gap-2"
         >
           <Download size={14} />
-          Get More Models
+          {t('models.getMoreModels')}
         </button>
       </div>
 

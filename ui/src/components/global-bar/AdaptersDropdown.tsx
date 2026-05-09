@@ -4,6 +4,7 @@
 // Self-contained with Simple and Advanced modes, file browser, group scales.
 
 import React, { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FolderOpen, X, Tag, Search, Circle, ChevronDown, RotateCcw } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
@@ -36,6 +37,7 @@ function formatSize(bytes: number): string {
 
 export const AdaptersDropdown: React.FC = () => {
   const gp = useGlobalParams();
+  const { t } = useTranslation();
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
 
   // Internal state
@@ -92,7 +94,7 @@ export const AdaptersDropdown: React.FC = () => {
             !gp.advancedAdapters ? 'bg-zinc-200 dark:bg-zinc-700 text-white' : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
           }`}
         >
-          Simple
+          {t('common.simple')}
         </button>
         <button
           onClick={() => gp.setAdvancedAdapters(true)}
@@ -100,7 +102,7 @@ export const AdaptersDropdown: React.FC = () => {
             gp.advancedAdapters ? 'bg-zinc-200 dark:bg-zinc-700 text-white' : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
           }`}
         >
-          Advanced
+          {t('common.advanced')}
         </button>
       </div>
 
@@ -108,7 +110,7 @@ export const AdaptersDropdown: React.FC = () => {
       {!gp.advancedAdapters && (
         <>
           <div>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Adapter Path</label>
+            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('adapter.adapterPath')}</label>
             <div className="flex gap-2">
               <input
                 type="text"
@@ -120,7 +122,7 @@ export const AdaptersDropdown: React.FC = () => {
               <button
                 onClick={() => setFileBrowserOpen(true)}
                 className="px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors"
-                title="Browse for adapter file"
+                title={t('adapter.browseFile')}
               >
                 <FolderOpen size={14} />
               </button>
@@ -136,7 +138,7 @@ export const AdaptersDropdown: React.FC = () => {
               <button
                 onClick={() => gp.setAdapter('')}
                 className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors flex-shrink-0"
-                title="Clear adapter"
+                title={t('adapter.clearAdapter')}
               >
                 <X size={12} />
               </button>
@@ -157,7 +159,7 @@ export const AdaptersDropdown: React.FC = () => {
       {gp.advancedAdapters && (
         <>
           <div>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Adapter Folder</label>
+            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('adapter.adapterFolder')}</label>
             <div className="flex gap-2">
               <input
                 type="text"
@@ -170,14 +172,14 @@ export const AdaptersDropdown: React.FC = () => {
                 onClick={() => handleScan()}
                 disabled={!gp.adapterFolder || scanning}
                 className="px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                title="Scan folder"
+                title={t('adapter.scanFolder')}
               >
                 <Search size={14} className={scanning ? 'animate-spin' : ''} />
               </button>
               <button
                 onClick={() => setFileBrowserOpen(true)}
                 className="px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors"
-                title="Browse for folder"
+                title={t('adapter.browseFolder')}
               >
                 <FolderOpen size={14} />
               </button>
@@ -227,7 +229,7 @@ export const AdaptersDropdown: React.FC = () => {
                 <button
                   onClick={() => gp.setAdapter('')}
                   className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors flex-shrink-0"
-                  title="Deselect adapter"
+                  title={t('adapter.deselectAdapter')}
                 >
                   <X size={12} />
                 </button>
@@ -254,7 +256,7 @@ export const AdaptersDropdown: React.FC = () => {
 
           {/* Loading Mode */}
           <div>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Loading Mode</label>
+            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('adapter.loadingMode')}</label>
             <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
               <button
                 onClick={() => gp.setAdapterMode('merge')}
@@ -286,7 +288,7 @@ export const AdaptersDropdown: React.FC = () => {
             className="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
           >
             <ChevronDown size={12} className={`transition-transform duration-200 ${showGroupScales ? 'rotate-180' : ''}`} />
-            Group Scales
+            {t('adapter.groupScales')}
             {!allDefault && (
               <span className="w-1.5 h-1.5 rounded-full bg-pink-500" title="Group scales modified" />
             )}
@@ -295,7 +297,7 @@ export const AdaptersDropdown: React.FC = () => {
           {showGroupScales && (
             <div className="rounded-xl bg-zinc-100/50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/5 p-3 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Layer Scales</span>
+                <span className="text-[10px] font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">{t('adapter.layerScales')}</span>
                 <button type="button" onClick={() => gp.setAdapterGroupScales({ self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0 })}
                   className="flex items-center gap-1 text-[10px] text-zinc-600 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
                   <RotateCcw size={10} /> Reset
@@ -321,7 +323,7 @@ export const AdaptersDropdown: React.FC = () => {
         mode={fileBrowserMode}
         startPath={gp.advancedAdapters ? gp.adapterFolder : undefined}
         filter="adapters"
-        title={gp.advancedAdapters ? 'Select Adapter Folder' : 'Select Adapter File'}
+        title={gp.advancedAdapters ? t('adapter.selectAdapterFolder') : t('adapter.selectAdapterFile')}
       />
     </div>
   );
