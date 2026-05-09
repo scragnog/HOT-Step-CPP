@@ -12,7 +12,7 @@ Built on acestep.cpp (GGML/CUDA), with extensive modifications to the sampling, 
 
 All solvers, schedulers, and guidance modes are implemented as hot-loadable Lua plugins. Drop a `.lua` file into the appropriate `engine/plugins/` subdirectory and it appears in the UI at next launch — no C++ rebuild required. Each plugin can declare its own user-facing parameters (sliders, toggles, dropdowns) via a schema table, which the UI renders dynamically.
 
-The engine provides a native C++ bridge for performance-critical operations (APG momentum smoothing, perpendicular projection, norm thresholding) that Lua plugins can call via the `apg()` function. Advanced plugins can also declare a `post_step()` hook that receives model evaluation callbacks for techniques requiring extra forward passes at arbitrary latent positions.
+The engine provides a native C++ bridge for performance-critical operations (APG momentum smoothing, perpendicular projection, norm thresholding) that Lua plugins can call via the `apg()` function. Advanced plugins can also declare a `post_step()` hook that receives model evaluation callbacks for techniques requiring extra forward passes at arbitrary latent positions. See the **[Plugin Authoring Guide](PLUGINS.md)** for the full API reference.
 
 #### Solvers (17)
 
