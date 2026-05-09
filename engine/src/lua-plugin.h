@@ -515,6 +515,45 @@ static void lua_call_scheduler(LuaPlugin & plugin,
         lua_pop(L, 1);
     }
 }
+// ── APG bridge for Lua guidance plugins ──────────────────────────────────
+// Registers a Lua-callable `apg(cond, uncond, scale, result, Oc, T, norm_threshold)`
+// that routes through the native C++ apg_forward(), including:
+//   - momentum smoothing across steps
+//   - per-channel norm thresholding
+//   - perpendicular projection
+//
+// The momentum buffer for the current batch element is injected as a global
+// light userdata "_apg_mbuf" before each guide() call.
+
+static int lua_apg_closure(lua_State * L) {
+    // Args: pred_cond (FloatArray), pred_uncond (FloatArray), scale (number),
+    //       result (FloatArray), Oc (int), T (int), norm_threshold (number)
+    LuaFloatArray * cond   = (LuaFloatArray *) luaL_checkudata(L, 1, LUA_FLOAT_ARRAY_MT);
+    LuaFloatArray * uncond = (LuaFloatArray *) luaL_checkudata(L, 2, LUA_FLOAT_ARRAY_MT);
+    float scale            = (float) luaL_checknumber(L, 3);
+    LuaFloatArray * result = (LuaFloatArray *) luaL_checkudata(L, 4, LUA_FLOAT_ARRAY_MT);
+    int Oc                 = (int) luaL_checkinteger(L, 5);
+    int T                  = (int) luaL_checkinteger(L, 6);
+    float norm_threshold   = (float) luaL_optnumber(L, 7, 2.5);
+
+    // Retrieve momentum buffer from global
+    lua_getglobal(L, "_apg_mbuf");
+    APGMomentumBuffer * mbuf = (APGMomentumBuffer *) lua_touserdata(L, -1);
+    lua_pop(L, 1);
+
+    if (!mbuf) {
+        return luaL_error(L, "apg(): no momentum buffer available (internal error)");
+    }
+
+    apg_forward(cond->data, uncond->data, scale, *mbuf, result->data, Oc, T, norm_threshold);
+    return 0;
+}
+
+// Register the apg() function in a guidance plugin's Lua state
+static void lua_register_apg(lua_State * L) {
+    lua_pushcfunction(L, lua_apg_closure);
+    lua_setglobal(L, "apg");
+}
 
 // Call a Lua guidance's guide() function
 static void lua_call_guidance(LuaPlugin & plugin,
@@ -530,11 +569,24 @@ static void lua_call_guidance(LuaPlugin & plugin,
 
     int n = Oc * T;
 
+    // Inject momentum buffer pointer for the apg() C closure
+    lua_pushlightuserdata(L, &mbuf);
+    lua_setglobal(L, "_apg_mbuf");
+
     // Set context globals
     lua_pushinteger(L, ctx.step_idx);   lua_setglobal(L, "step_idx");
     lua_pushinteger(L, ctx.total_steps); lua_setglobal(L, "total_steps");
     lua_pushnumber(L, (double) ctx.dt);  lua_setglobal(L, "dt");
     lua_pushnumber(L, (double) ctx.t_curr); lua_setglobal(L, "t_curr");
+
+    // Register apg() on first call (idempotent check via global existence)
+    lua_getglobal(L, "apg");
+    if (!lua_isfunction(L, -1)) {
+        lua_pop(L, 1);
+        lua_register_apg(L);
+    } else {
+        lua_pop(L, 1);
+    }
 
     lua_getglobal(L, "guide");
     if (!lua_isfunction(L, -1)) {

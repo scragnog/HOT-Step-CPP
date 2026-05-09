@@ -1,7 +1,8 @@
 -- apg.lua: Adaptive Perpendicular Guidance (default)
--- Routes through apg_forward C helper for momentum + perpendicular projection.
--- This plugin declares the params; the actual APG math is in the C++ helper
--- because it's shared infrastructure used by all guidance modes.
+-- Routes through the native C++ apg_forward() for momentum smoothing,
+-- per-channel norm thresholding, and perpendicular projection.
+-- In practice, the engine takes the native C++ path for APG directly,
+-- but this Lua implementation exists as a correct fallback.
 
 guidance = {
     name        = "apg",
@@ -17,14 +18,7 @@ guidance = {
     },
 }
 
--- guide() receives: pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_threshold
--- The C++ wrapper calls apg_forward for us since APG core is shared C++ infrastructure.
--- This Lua function is the fallback / reference implementation.
 function guide(pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_threshold)
-    local n = Oc * T
-    -- Simple CFG: result = pred_uncond + scale * (pred_cond - pred_uncond)
-    -- Full APG with momentum is handled by the C++ wrapper
-    for i = 0, n - 1 do
-        result[i] = pred_uncond[i] + guidance_scale * (pred_cond[i] - pred_uncond[i])
-    end
+    -- Route through native APG C++ implementation
+    apg(pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_threshold)
 end

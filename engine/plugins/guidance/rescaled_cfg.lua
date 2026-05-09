@@ -1,5 +1,7 @@
 -- rescaled_cfg.lua: Std-matched post-processing guidance
--- Runs CFG at full scale, then rescales output to match conditional std.
+-- Runs APG at full scale, then rescales output to match conditional std.
+-- Routes through native APG (momentum + projection + norm thresholding),
+-- then applies std-matching post-processing.
 
 guidance = {
     name        = "rescaled_cfg",
@@ -11,12 +13,10 @@ function guide(pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_thres
     local n = Oc * T
     local phi = (guidance_scale > 4.0) and 0.95 or 0.7
 
-    -- Standard CFG first
-    for i = 0, n - 1 do
-        result[i] = pred_uncond[i] + guidance_scale * (pred_cond[i] - pred_uncond[i])
-    end
+    -- Run APG at full guidance scale first
+    apg(pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_threshold)
 
-    -- Compute std of conditional and guided
+    -- Compute std of conditional prediction and guided output
     local sum_c, sum2_c = 0, 0
     local sum_g, sum2_g = 0, 0
     for i = 0, n - 1 do
@@ -32,7 +32,7 @@ function guide(pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_thres
     local std_c = (var_c > 0) and math.sqrt(var_c) or 1e-5
     local std_g = (var_g > 0) and math.sqrt(var_g) or 1e-5
 
-    -- Rescale to match conditional std
+    -- Rescale to match conditional std, blend with raw APG output
     local factor = std_c / (std_g + 1e-5)
     for i = 0, n - 1 do
         local rescaled = result[i] * factor
