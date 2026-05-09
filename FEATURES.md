@@ -8,12 +8,71 @@ Everything HOT-Step CPP adds on top of the base [acestep.cpp](https://github.com
 
 Built on acestep.cpp (GGML/CUDA), with extensive modifications to the sampling, scheduling, and guidance systems:
 
+### Lua Plugin Architecture
+
+All solvers, schedulers, and guidance modes are implemented as hot-loadable Lua plugins. Drop a `.lua` file into the appropriate `engine/plugins/` subdirectory and it appears in the UI at next launch — no C++ rebuild required. Each plugin can declare its own user-facing parameters (sliders, toggles, dropdowns) via a schema table, which the UI renders dynamically.
+
+The engine provides a native C++ bridge for performance-critical operations (APG momentum smoothing, perpendicular projection, norm thresholding) that Lua plugins can call via the `apg()` function. Advanced plugins can also declare a `post_step()` hook that receives model evaluation callbacks for techniques requiring extra forward passes at arbitrary latent positions.
+
+#### Solvers (17)
+
+ODE/SDE solvers for the flow matching sampling loop:
+
+| Plugin | Description |
+|--------|-------------|
+| **Euler** | 1st-order Euler method (1 NFE) |
+| **Heun** | 2nd-order Heun's method (2 NFE) |
+| **RK4** | Classic 4th-order Runge-Kutta (4 NFE) |
+| **RK5** | 5th-order Runge-Kutta (6 NFE) |
+| **GL2s** | Gauss-Legendre 2-stage implicit Runge-Kutta (2 NFE) |
+| **RF-Solver** | 2nd-order rectified flow solver (2 NFE) |
+| **DPM++ 2M** | DPM-Solver++ multistep 2nd-order (1 NFE) |
+| **DPM++ 2M Adaptive** | Adaptive step-size variant of DPM++ 2M |
+| **DPM++ 3M** | DPM-Solver++ multistep 3rd-order (1 NFE) |
+| **UniPC** | Unified predictor-corrector (1 NFE) |
+| **UniPC-P** | UniPC with p-corrector (1 NFE) |
+| **JKASS Quality** | Multi-evaluation adaptive solver (4 NFE) |
+| **JKASS Fast** | Single-evaluation JKASS variant (1 NFE) |
+| **AFLOPS / AFLOPS-2** | Adaptive flow ODE solver with error estimation |
+| **DOPRI5 / DOP853** | Dormand-Prince adaptive solvers (5th/8th order) |
+| **SDE** | Stochastic differential equation solver with Philox RNG |
+| **STORK-2 / STORK-4** | Stochastic Taylor Runge-Kutta solvers |
+
+#### Schedulers (9)
+
+Noise schedule curves for the denoising trajectory:
+
+| Plugin | Description |
+|--------|-------------|
+| **Linear** | Uniform timestep spacing |
+| **Cosine** | Cosine-annealed schedule |
+| **Power** | Polynomial schedule with configurable exponent |
+| **SGM Uniform** | Score-based generative model uniform schedule |
+| **DDIM Uniform** | DDIM-style uniform schedule |
+| **Linear-Quadratic** | Linear start transitioning to quadratic |
+| **Beta (5,7)** | Beta distribution schedule |
+| **Bong Tangent** | Tangent-based custom schedule |
+| **Beta Math** | Generalised beta distribution with configurable α/β |
+
+#### Guidance Modes (7)
+
+Classifier-free guidance strategies, all routed through the native APG bridge:
+
+| Plugin | Description |
+|--------|-------------|
+| **APG** | Analytical Perpendicular Guidance — momentum smoothing, perpendicular projection, norm thresholding |
+| **Dynamic CFG** | Adaptive guidance scale that varies across timesteps — high early for structure, low late for detail |
+| **CFG++** | Manifold-constrained guidance for few-step models |
+| **Rescaled CFG** | Standard-deviation-based rescaling to prevent oversaturation |
+| **CFG-Zero⋆** | Zero-init guidance — zeroes early ODE steps where CFG predictions are counterproductive (Fan et al. 2025) |
+| **SMC-CFG** | Sliding Mode Control guidance — control-theoretic correction for stability at high scales (Han et al. 2025) |
+| **CFG-MP** | Manifold Projection — iterative post-step projection using extra model evaluations to reduce the prediction gap (Su et al. 2025). Uses the `post_step()` hook for model callbacks |
+
+### Other Engine Features
+
 | Feature | Description |
 |---------|-------------|
-| **Modular Solver Plugin System** | 14 ODE/SDE solvers — Euler, RK4, Heun, Gauss-Legendre 2s (implicit Runge-Kutta), RF-Solver (2nd-order rectified flow), JKASS Quality, and more. Each solver exposes its own sub-parameters. |
-| **Modular Scheduler Plugin System** | 8 noise schedulers with conditional sub-parameters (power exponent, beta range, composite blend). |
 | **Composite 2-Stage Scheduler** | Blend two scheduler curves across the denoising trajectory for fine-grained noise control. |
-| **Modular Guidance Mode Plugin System** | 4 guidance modes including Dynamic CFG with adaptive scaling. |
 | **Auto-Shift** | Adaptive noise shift scaling that adjusts based on track duration and step count. |
 | **DCW Sampling** | Differential Correction in Wavelet domain — an alternative sampling technique calibrated for the GGML engine. |
 | **Sideband Parameter Channel** | Extension layer for passing HOT-Step-specific parameters without modifying upstream function signatures, keeping the acestep.cpp sync path clean. |

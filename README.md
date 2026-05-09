@@ -34,7 +34,7 @@ Pre-built portable releases — no installation required. Extract, run, done.
 
 HOT-Step CPP extends the base acestep.cpp engine with 80+ features across inference, audio processing, and creative tooling. Here are the big ones:
 
-🎛️ **14 Solvers, 8 Schedulers, 4 Guidance Modes** — Modular plugin systems for ODE/SDE solvers (Euler, RK4, Gauss-Legendre, RF-Solver, and more), noise schedulers (with composite 2-stage blending), and guidance modes (including Dynamic CFG). Each exposes its own sub-parameters.
+🎛️ **17 Solvers, 9 Schedulers, 7 Guidance Modes** — Fully extensible Lua plugin architecture for ODE/SDE solvers, noise schedulers, and guidance modes. Drop a `.lua` file into `engine/plugins/` and it appears in the UI at next launch — no C++ rebuild needed. Includes research-derived modes like CFG-MP (manifold projection), SMC-CFG (sliding mode control), and CFG-Zero⋆ (zero-init). Each plugin can expose its own user-facing parameters (sliders, toggles, dropdowns).
 
 🎸 **LoRA Adapters with Runtime Mode** — Per-group scale controls (self_attn, cross_attn, mlp, cond_embed), K-quant GPU support via custom CUDA kernels, and a runtime LoRA mode that applies deltas in the forward pass without permanently merging weights.
 
