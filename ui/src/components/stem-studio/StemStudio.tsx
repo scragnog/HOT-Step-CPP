@@ -11,6 +11,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, Info, Clock, ListOrdered } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { modelApi } from '../../services/api';
 import {
   submitExtraction, submitSupersep, waitForExtraction, getExtractResult,
@@ -37,6 +38,7 @@ function getBaseModels(ditModels: string[]): string[] {
 }
 
 export const StemStudio: React.FC = () => {
+  const { t } = useTranslation();
   // Source audio (persisted across sessions for testing convenience)
   const [sourceAudioUrl, _setSourceAudioUrl] = useState(() => localStorage.getItem('hs-stem-sourceUrl') || '');
   const [sourceFileName, _setSourceFileName] = useState(() => localStorage.getItem('hs-stem-sourceFile') || '');
@@ -277,9 +279,9 @@ export const StemStudio: React.FC = () => {
           {/* Optional: style hint + lyrics */}
           <div className="border-t border-zinc-200 dark:border-white/5 pt-3">
             <details>
-              <summary className="text-xs text-zinc-500 cursor-pointer font-medium">Optional: Style &amp; Lyrics (improves extraction)</summary>
+              <summary className="text-xs text-zinc-500 cursor-pointer font-medium">{t('stem.optionalStyleLyrics')}</summary>
               <div className="flex flex-col gap-2 mt-2.5">
-                <label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Style Hint</label>
+                <label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">{t('stem.styleHint')}</label>
                 <input
                   type="text"
                   value={style}
@@ -287,7 +289,7 @@ export const StemStudio: React.FC = () => {
                   placeholder="e.g. indie rock, distorted guitar, raw vocals"
                   className="px-2.5 py-2 rounded-md border border-white/[0.08] bg-white/[0.04] text-zinc-700 dark:text-zinc-300 text-xs outline-none focus:border-purple-500/40 transition-colors"
                 />
-                <label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Lyrics</label>
+                <label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">{t('stem.lyrics')}</label>
                 <textarea
                   value={lyrics}
                   onChange={e => setLyrics(e.target.value)}
@@ -312,7 +314,7 @@ export const StemStudio: React.FC = () => {
           {mode === 'extract' && baseModels.length > 0 && (
             <div style={styles.modelSelector}>
               <Info size={13} style={{ color: '#a78bfa', flexShrink: 0 }} />
-              <span style={styles.modelLabel}>Extract Model</span>
+              <span style={styles.modelLabel}>{t('stem.extractModel')}</span>
               <select
                 value={extractModel}
                 onChange={e => setExtractModel(e.target.value)}
@@ -389,7 +391,7 @@ export const StemStudio: React.FC = () => {
         {/* Right — Recent Extractions + Queue */}
         <div className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden flex flex-col" style={{ width: sidebarWidth }}>
           <Section
-            title="Recent Extractions"
+            title={t('stem.recentExtractions')}
             icon={<Clock className="w-3 h-3" />}
             defaultOpen={true}
           >
@@ -401,7 +403,7 @@ export const StemStudio: React.FC = () => {
           </Section>
 
           <Section
-            title="Queue"
+            title={t('stem.queue')}
             icon={<ListOrdered className="w-3 h-3" />}
             count={queueCount}
             countColor="bg-purple-500/20 text-purple-300"

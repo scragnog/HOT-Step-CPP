@@ -300,6 +300,19 @@
     "models.ditModels": "DiT Models",
     "models.languageModels": "Language Models",
     "models.textEncoder": "Text Encoder",
-    "models.stemSeparation": "Stem Separation"
+    "models.stemSeparation": "Stem Separation",
+    "stem.optionalStyleLyrics": "Optional: Style & Lyrics (improves extraction)",
+    "stem.styleHint": "Style Hint",
+    "stem.stylePlaceholder": "e.g. indie rock, distorted guitar, raw vocals",
+    "stem.lyrics": "Lyrics",
+    "stem.lyricsPlaceholder": "Paste lyrics here to improve vocal extraction...",
+    "stem.extractModel": "Extract Model",
+    "stem.noBaseModels": "No base/SFT models found. Extract requires a non-turbo DiT model. Use <strong>Get More Models</strong> in the sidebar to download one.",
+    "stem.separating": "Separating... {{message}}",
+    "stem.savingStems": "Saving stems ({{done}}/{{total}})",
+    "stem.extractingTrack": "Extracting {{track}} ({{done}}/{{total}})",
+    "stem.extractionFailed": "❌ Extraction failed: {{error}}",
+    "stem.recentExtractions": "Recent Extractions",
+    "stem.queue": "Queue"
   }
 }
