@@ -6,6 +6,7 @@ import {
   Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 import { togglePlay, usePlayback } from '../../stores/playbackStore';
 
@@ -49,6 +50,7 @@ export const SongList: React.FC<SongListProps> = ({
   songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename, onAddToPlaylist,
   showFilters = true, viewMode = 'list', title = 'Library',
 }) => {
+  const { t } = useTranslation();
   const playback = usePlayback();
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -103,8 +105,8 @@ export const SongList: React.FC<SongListProps> = ({
     return (
       <div className="flex flex-col items-center justify-center py-24 text-zinc-500">
         <Music size={48} className="mb-4 opacity-30" />
-        <div className="text-lg font-medium text-zinc-600 dark:text-zinc-400">No songs yet</div>
-        <div className="text-sm text-zinc-600 mt-1">Create your first track to see it here</div>
+        <div className="text-lg font-medium text-zinc-600 dark:text-zinc-400">{t('library.noSongsYet')}</div>
+        <div className="text-sm text-zinc-600 mt-1">{t('library.createFirstTrack')}</div>
       </div>
     );
   }
@@ -125,9 +127,9 @@ export const SongList: React.FC<SongListProps> = ({
             <button
               onClick={() => setSelectionMode(true)}
               className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 px-2 py-1 rounded-lg hover:bg-white/5 transition-colors"
-              title="Select tracks"
+              title={t('library.selectTracks')}
             >
-              Select
+              {t('library.select')}
             </button>
           ) : (
             <button
@@ -181,7 +183,7 @@ export const SongList: React.FC<SongListProps> = ({
           <button
             onClick={allSelected ? deselectAll : selectAll}
             className="p-1 rounded text-zinc-600 dark:text-zinc-400 hover:text-white transition-colors"
-            title={allSelected ? 'Deselect all' : 'Select all'}
+            title={allSelected ? t('library.deselectAll') : t('library.selectAll')}
           >
             {allSelected
               ? <CheckSquare size={18} className="text-pink-400" />
@@ -193,8 +195,8 @@ export const SongList: React.FC<SongListProps> = ({
 
           <span className="text-xs text-zinc-600 dark:text-zinc-400 font-medium flex-1">
             {selectedIds.size === 0
-              ? 'Select tracks'
-              : `${selectedIds.size} selected`
+              ? t('library.selectTracks')
+              : t('library.selected', { count: selectedIds.size })
             }
           </span>
 
@@ -204,7 +206,7 @@ export const SongList: React.FC<SongListProps> = ({
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 hover:text-red-300 text-xs font-semibold transition-all"
             >
               <Trash2 size={13} />
-              Delete {selectedIds.size}
+              {t('library.deleteCount', { count: selectedIds.size })}
             </button>
           )}
         </div>
@@ -215,7 +217,7 @@ export const SongList: React.FC<SongListProps> = ({
         <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
           <Music size={32} className="mb-3 opacity-20" />
           <div className="text-sm text-zinc-500">
-            {showFilters ? `No ${SOURCE_FILTERS.find(f => f.id === sourceFilter)?.label} songs` : 'No songs yet'}
+            {showFilters ? t('library.noFilterSongs', { filter: SOURCE_FILTERS.find(f => f.id === sourceFilter)?.label }) : t('library.noSongsYet')}
           </div>
         </div>
       )}
@@ -293,6 +295,7 @@ const SongItem: React.FC<SongItemProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
   onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, showSourceBadge,
 }) => {
+  const { t } = useTranslation();
   const [showMenu, setShowMenu] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
   const [editTitle, setEditTitle] = React.useState(song.title || '');
@@ -404,7 +407,7 @@ const SongItem: React.FC<SongItemProps> = ({
               <button
                 onClick={e => { e.stopPropagation(); setEditTitle(song.title || ''); setEditing(true); }}
                 className="flex-shrink-0 p-0.5 rounded text-zinc-600 hover:text-zinc-700 dark:hover:text-zinc-300 opacity-0 group-hover/title:opacity-100 transition-opacity"
-                title="Rename"
+                title={t('library.rename')}
               >
                 <Pencil size={11} />
               </button>
@@ -412,7 +415,7 @@ const SongItem: React.FC<SongItemProps> = ({
           </div>
         )}
         <div className="text-xs text-zinc-500 truncate mt-0.5">
-          {song.style || song.caption || 'No description'}
+          {song.style || song.caption || t('library.noDescription')}
         </div>
       </div>
 
@@ -452,7 +455,7 @@ const SongItem: React.FC<SongItemProps> = ({
             <button
               onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); }}
               className="p-1.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-pink-400 hover:bg-white/10 transition-colors"
-              title="Add to Playlist"
+              title={t('library.addToPlaylist')}
             >
               <ListPlus size={15} />
             </button>
@@ -475,7 +478,7 @@ const SongItem: React.FC<SongItemProps> = ({
                     onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
                   >
-                    <RotateCcw size={14} /> Reuse Prompt
+                    <RotateCcw size={14} /> {t('library.reusePrompt')}
                   </button>
                 )}
                 {onDownload && (
@@ -483,14 +486,14 @@ const SongItem: React.FC<SongItemProps> = ({
                     onClick={(e) => { e.stopPropagation(); onDownload(); setShowMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
                   >
-                    <Download size={14} /> Download
+                    <Download size={14} /> {t('library.download')}
                   </button>
                 )}
                 <button
                   onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
                 >
-                  <Trash2 size={14} /> Delete
+                  <Trash2 size={14} /> {t('library.delete')}
                 </button>
               </div>
             </>
@@ -523,6 +526,7 @@ const SongCard: React.FC<SongCardProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
   onPlay, onSelect, onDelete, onReuse, onDownload, onAddToPlaylist,
 }) => {
+  const { t } = useTranslation();
   const [showMenu, setShowMenu] = React.useState(false);
 
   const formatDuration = (val: string | number | undefined) => {
@@ -627,24 +631,24 @@ const SongCard: React.FC<SongCardProps> = ({
                   {onReuse && (
                     <button onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                      <RotateCcw size={12} /> Reuse Prompt
+                      <RotateCcw size={12} /> {t('library.reusePrompt')}
                     </button>
                   )}
                   {onAddToPlaylist && (
                     <button onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); setShowMenu(false); }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                      <ListPlus size={12} /> Add to Playlist
+                      <ListPlus size={12} /> {t('library.addToPlaylist')}
                     </button>
                   )}
                   {onDownload && (
                     <button onClick={(e) => { e.stopPropagation(); onDownload(); setShowMenu(false); }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                      <Download size={12} /> Download
+                      <Download size={12} /> {t('library.download')}
                     </button>
                   )}
                   <button onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
-                    <Trash2 size={12} /> Delete
+                    <Trash2 size={12} /> {t('library.delete')}
                   </button>
                 </div>
               </>
@@ -662,7 +666,7 @@ const SongCard: React.FC<SongCardProps> = ({
 
         {/* Style / Caption */}
         <div className="text-[11px] text-zinc-500 truncate mt-0.5 leading-tight">
-          {song.style || song.caption || 'No description'}
+          {song.style || song.caption || t('library.noDescription')}
         </div>
 
         {/* Metadata Row */}

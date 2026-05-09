@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 
 interface RightSidebarProps {
@@ -24,13 +25,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   isPlaying,
   onDownload,
 }) => {
+  const { t } = useTranslation();
   const gp = song.generationParams;
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5">
-        <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 truncate">Song Details</h3>
+        <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 truncate">{t('details.songDetails')}</h3>
         <button
           onClick={onClose}
           className="p-1.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
@@ -65,19 +67,19 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-semibold transition-colors"
           >
             {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-            {isPlaying ? 'Pause' : 'Play'}
+            {isPlaying ? t('details.pause') : t('details.play')}
           </button>
           <button
             onClick={() => onReuse(song)}
             className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-colors"
-            title="Reuse Prompt"
+            title={t('details.reusePrompt')}
           >
             <RotateCcw size={16} />
           </button>
           <button
             onClick={() => onDelete(song)}
             className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-red-100 dark:hover:bg-red-900/50 text-zinc-700 dark:text-zinc-300 hover:text-red-400 transition-colors"
-            title="Delete"
+            title={t('details.delete')}
           >
             <Trash2 size={16} />
           </button>
@@ -85,7 +87,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
             <button
               onClick={() => onDownload(song)}
               className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-zinc-700 dark:text-zinc-300 hover:text-emerald-400 transition-colors"
-              title="Download"
+              title={t('details.download')}
             >
               <Download size={16} />
             </button>
@@ -95,38 +97,38 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
         {/* Metadata Badges */}
         <div className="grid grid-cols-2 gap-2">
           {song.duration && (
-            <MetaBadge icon={<Clock size={14} />} label="Duration" value={String(song.duration)} />
+            <MetaBadge icon={<Clock size={14} />} label={t('details.duration')} value={String(song.duration)} />
           )}
           {gp?.bpm && (
-            <MetaBadge icon={<Gauge size={14} />} label="BPM" value={String(gp.bpm)} />
+            <MetaBadge icon={<Gauge size={14} />} label={t('details.bpm')} value={String(gp.bpm)} />
           )}
           {gp?.keyScale && (
-            <MetaBadge icon={<Hash size={14} />} label="Key" value={gp.keyScale} />
+            <MetaBadge icon={<Hash size={14} />} label={t('details.key')} value={gp.keyScale} />
           )}
           {gp?.timeSignature && (
-            <MetaBadge icon={<Music size={14} />} label="Time Sig" value={gp.timeSignature} />
+            <MetaBadge icon={<Music size={14} />} label={t('details.timeSig')} value={gp.timeSignature} />
           )}
         </div>
 
         {/* Generation Info */}
         {gp && (
           <div className="space-y-3">
-            <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Generation Info</h4>
+            <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{t('details.generationInfo')}</h4>
 
             {gp.ditModel && (
-              <InfoRow label="DiT Model" value={gp.ditModel.split('/').pop() || gp.ditModel} />
+              <InfoRow label={t('details.ditModel')} value={gp.ditModel.split('/').pop() || gp.ditModel} />
             )}
             {gp.inferenceSteps && (
-              <InfoRow label="Steps" value={String(gp.inferenceSteps)} />
+              <InfoRow label={t('details.steps')} value={String(gp.inferenceSteps)} />
             )}
             {gp.guidanceScale !== undefined && (
-              <InfoRow label="Guidance" value={String(gp.guidanceScale)} />
+              <InfoRow label={t('details.guidance')} value={String(gp.guidanceScale)} />
             )}
             {gp.seed !== undefined && (
-              <InfoRow label="Seed" value={String(gp.seed)} />
+              <InfoRow label={t('details.seed')} value={String(gp.seed)} />
             )}
             {gp.adapter && (
-              <InfoRow label="Adapter" value={gp.adapter.split('/').pop() || gp.adapter} />
+              <InfoRow label={t('details.adapter')} value={gp.adapter.split('/').pop() || gp.adapter} />
             )}
           </div>
         )}
@@ -134,7 +136,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
         {/* Lyrics */}
         {song.lyrics && (
           <div className="space-y-2">
-            <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Lyrics</h4>
+            <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{t('details.lyrics')}</h4>
             <pre className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed bg-zinc-50/80 dark:bg-zinc-900/50 rounded-xl p-3 border border-zinc-200 dark:border-white/5 max-h-64 overflow-y-auto">
               {song.lyrics}
             </pre>
