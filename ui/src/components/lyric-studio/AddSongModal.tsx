@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, FileText, Type } from 'lucide-react';
 
 interface AddSongModalProps {
@@ -10,6 +11,7 @@ interface AddSongModalProps {
 
 export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onSubmit, albumName }) => {
   const [title, setTitle] = useState('');
+  const { t } = useTranslation();
   const [lyrics, setLyrics] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -38,7 +40,7 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
               <FileText className="w-4 h-4 text-amber-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">Add Song</h2>
+              <h2 className="text-lg font-bold text-white">{t('lyric.addSong')}</h2>
               {albumName && <p className="text-xs text-zinc-500">{albumName}</p>}
             </div>
           </div>
@@ -51,7 +53,7 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <Type className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-                Song Title
+                {t('lyric.songTitle')}
               </span>
             </label>
             <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
@@ -64,7 +66,7 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-                Lyrics
+                {t('lyric.lyrics')}
               </span>
             </label>
             <textarea value={lyrics} onChange={(e) => setLyrics(e.target.value)}
@@ -78,7 +80,7 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
           <button type="submit" disabled={!title.trim() || !lyrics.trim() || submitting}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white font-semibold transition-all"
           >
-            {submitting ? 'Adding…' : 'Add Song'}
+            {submitting ? t('lyric.adding') : t('lyric.addSong')}
           </button>
         </form>
       </div>

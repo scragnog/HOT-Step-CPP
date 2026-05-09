@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Disc3, Link2 } from 'lucide-react';
 
 interface AddAlbumModalProps {
@@ -10,6 +11,7 @@ interface AddAlbumModalProps {
 
 export const AddAlbumModal: React.FC<AddAlbumModalProps> = ({ isOpen, onClose, onSubmit, artistName }) => {
   const [albumName, setAlbumName] = useState('');
+  const { t } = useTranslation();
   const [imageUrl, setImageUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -37,7 +39,7 @@ export const AddAlbumModal: React.FC<AddAlbumModalProps> = ({ isOpen, onClose, o
               <Disc3 className="w-4 h-4 text-indigo-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">Add Album</h2>
+              <h2 className="text-lg font-bold text-white">{t('lyric.addAlbum')}</h2>
               <p className="text-xs text-zinc-500">{artistName}</p>
             </div>
           </div>
@@ -50,7 +52,7 @@ export const AddAlbumModal: React.FC<AddAlbumModalProps> = ({ isOpen, onClose, o
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <Disc3 className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-                Album Name <span className="text-zinc-500 font-normal">(optional)</span>
+                Album Name <span className="text-zinc-500 font-normal">{t('lyric.optional')}</span>
               </span>
             </label>
             <input type="text" value={albumName} onChange={(e) => setAlbumName(e.target.value)}
@@ -64,7 +66,7 @@ export const AddAlbumModal: React.FC<AddAlbumModalProps> = ({ isOpen, onClose, o
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <Link2 className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-                Cover Art URL <span className="text-zinc-500 font-normal">(optional)</span>
+                Cover Art URL <span className="text-zinc-500 font-normal">{t('lyric.optional')}</span>
               </span>
             </label>
             <input type="text" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)}
@@ -75,7 +77,7 @@ export const AddAlbumModal: React.FC<AddAlbumModalProps> = ({ isOpen, onClose, o
           <button type="submit" disabled={submitting}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white font-semibold transition-all"
           >
-            {submitting ? 'Creating…' : 'Create Album'}
+            {submitting ? t('lyric.creating') : t('lyric.createAlbum')}
           </button>
         </form>
       </div>

@@ -10,6 +10,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Play, Trash2, Headphones, ChevronDown, ChevronRight, Loader2, Clock, X, Filter, Download, ListPlus, Check } from 'lucide-react';
 import { lireekApi } from '../../services/lireekApi';
 import type { Generation, AudioGeneration } from '../../services/lireekApi';
@@ -41,6 +42,7 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
   generations, showToast, filterGenerationId, onClearFilter, onSongCountChange, refreshKey = 0, artistName, onDeleteComplete,
 }) => {
   const { token } = useAuth();
+  const { t } = useTranslation();
   const [groups, setGroups] = useState<SongGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedGenId, setExpandedGenId] = useState<number | null>(null);
@@ -204,10 +206,10 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
               <Headphones className="w-7 h-7 text-zinc-600" />
             </div>
             <h3 className="text-base font-semibold text-zinc-600 dark:text-zinc-400 mb-2">
-              {filterGenerationId ? 'No songs generated from these lyrics yet' : 'No generated songs yet'}
+              {filterGenerationId ? t('lyric.noGeneratedSongsYet') : t('lyric.noGeneratedSongsYet')}
             </h3>
             <p className="text-sm text-zinc-500 max-w-xs">
-              Go to the Generated Lyrics tab and generate audio to see songs here.
+              {t('lyric.goToGeneratedLyrics')}
             </p>
           </div>
         ) : (
@@ -237,7 +239,7 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
                   <div className="border-t border-zinc-200 dark:border-white/5">
                     {group.songs.length === 0 ? (
                       <p className="px-4 py-6 text-sm text-zinc-500 text-center">
-                        Audio generation is pending or failed. Check the queue.
+                        {t('lyric.audioPendingOrFailed')}
                       </p>
                     ) : (
                       <div className="divide-y divide-white/5">

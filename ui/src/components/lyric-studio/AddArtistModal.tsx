@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, User, Link2 } from 'lucide-react';
 
 interface AddArtistModalProps {
@@ -9,6 +10,7 @@ interface AddArtistModalProps {
 
 export const AddArtistModal: React.FC<AddArtistModalProps> = ({ isOpen, onClose, onSubmit }) => {
   const [name, setName] = useState('');
+  const { t } = useTranslation();
   const [imageUrl, setImageUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -39,7 +41,7 @@ export const AddArtistModal: React.FC<AddArtistModalProps> = ({ isOpen, onClose,
             <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
               <User className="w-4 h-4 text-emerald-400" />
             </div>
-            <h2 className="text-lg font-bold text-white">Add Artist</h2>
+            <h2 className="text-lg font-bold text-white">{t('lyric.addArtist')}</h2>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 text-zinc-600 dark:text-zinc-400 hover:text-white transition-colors">
             <X className="w-5 h-5" />
@@ -51,7 +53,7 @@ export const AddArtistModal: React.FC<AddArtistModalProps> = ({ isOpen, onClose,
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <User className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-                Artist Name
+                {t('lyric.artistName')}
               </span>
             </label>
             <input
@@ -65,7 +67,7 @@ export const AddArtistModal: React.FC<AddArtistModalProps> = ({ isOpen, onClose,
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <Link2 className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-                Image URL <span className="text-zinc-500 font-normal">(optional)</span>
+                {t('lyric.imageUrl')} <span className="text-zinc-500 font-normal">{t('lyric.optional')}</span>
               </span>
             </label>
             <input
@@ -77,7 +79,7 @@ export const AddArtistModal: React.FC<AddArtistModalProps> = ({ isOpen, onClose,
           <button type="submit" disabled={!name.trim() || submitting}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white font-semibold transition-all"
           >
-            {submitting ? 'Adding…' : 'Add Artist'}
+            {submitting ? t('lyric.adding') : t('lyric.addArtist')}
           </button>
         </form>
       </div>

@@ -1,6 +1,7 @@
 // TrackSelector.tsx — Toggle grid for selecting stem extraction tracks
 // Supports two modes: Extract (pick individual tracks) and SuperSep (pick separation level)
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { EXTRACT_TRACKS, TRACK_LABELS, TRACK_CATEGORIES } from '../../services/stemStudioApi';
 import { SEPARATION_LEVELS, type SeparationLevel } from '../../services/supersepApi';
 import { ToggleSwitch } from '../global-bar/BarSection';
@@ -37,6 +38,7 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
   onExtract, isExtracting, canExtract,
   sepLevel, onSepLevelChange,
 }) => {
+  const { t } = useTranslation();
   const toggleTrack = (track: string) => {
     if (selectedTracks.includes(track)) {
       onTracksChange(selectedTracks.filter(t => t !== track));
@@ -101,7 +103,7 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
       {/* SuperSep: Separation level dropdown */}
       {isSupersep && (
         <div style={styles.sepLevelSection}>
-          <h3 style={styles.sectionTitle}>Separation Level</h3>
+          <h3 style={styles.sectionTitle}>{t('stem.separationLevel')}</h3>
           <select
             value={sepLevel}
             onChange={e => onSepLevelChange(parseInt(e.target.value) as SeparationLevel)}
@@ -124,13 +126,13 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
       {/* Extract: Track selection grid */}
       {!isSupersep && (
         <>
-          <h3 style={styles.sectionTitle}>Select Tracks</h3>
+          <h3 style={styles.sectionTitle}>{t('stem.selectTracks')}</h3>
 
           {/* Quick actions */}
           <div style={styles.quickActions}>
-            <button onClick={selectAll} style={styles.quickBtn}>Select All</button>
-            <button onClick={clearAll} style={styles.quickBtn}>Clear</button>
-            <span style={styles.selectedCount}>{selectedTracks.length} selected</span>
+            <button onClick={selectAll} style={styles.quickBtn}>{t('stem.selectAllTracks')}</button>
+            <button onClick={clearAll} style={styles.quickBtn}>{t('stem.clearTracks')}</button>
+            <span style={styles.selectedCount}>{selectedTracks.length} {t('stem.selected')}</span>
           </div>
 
           {/* Track grid — Row 1: Vocals, Drums, Other | Row 2: Instruments */}

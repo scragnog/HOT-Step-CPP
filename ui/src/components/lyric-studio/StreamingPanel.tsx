@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, ChevronDown, ChevronUp, Terminal, SkipForward } from 'lucide-react';
 
 interface StreamingPanelProps {
@@ -13,6 +14,7 @@ export const StreamingPanel: React.FC<StreamingPanelProps> = ({
   visible, streamText, phase, done, onSkipThinking,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
+  const { t } = useTranslation();
   const [skipRequested, setSkipRequested] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
 
@@ -56,7 +58,7 @@ export const StreamingPanel: React.FC<StreamingPanelProps> = ({
           className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:text-zinc-200 transition-colors"
         >
           <Terminal className="w-3 h-3 text-pink-400" />
-          LLM Output
+          {t('lyric.llmOutput')}
           {phase && (
             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-pink-500 text-white">
               {phase}
@@ -76,13 +78,13 @@ export const StreamingPanel: React.FC<StreamingPanelProps> = ({
             title="Stop the model's chain-of-thought and produce output immediately"
           >
             <SkipForward className="w-3 h-3" />
-            Skip Thinking
+            {t('lyric.skipThinking')}
           </button>
         )}
         {skipRequested && !done && (
           <span className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-pink-400">
             <Loader2 className="w-3 h-3 animate-spin" />
-            Skipping…
+            {t('lyric.skipping')}
           </span>
         )}
       </div>
@@ -97,7 +99,7 @@ export const StreamingPanel: React.FC<StreamingPanelProps> = ({
             fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", Menlo, monospace',
           }}
         >
-          {streamText || (done ? '(no output)' : 'Waiting for LLM response…')}
+          {streamText || (done ? t('lyric.noOutput') : t('lyric.waitingForLlm'))}
         </pre>
       )}
     </div>

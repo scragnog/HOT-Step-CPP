@@ -2,6 +2,7 @@
 // Ported from hot-step-9000 with lireekApi import adaptation
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { lireekApi } from '../../services/lireekApi';
 
 // ── Provider type (local, matches API response) ───────────────────────────
@@ -101,7 +102,7 @@ const RowSelector: React.FC<{
         {models.map(m => (
           <option key={m} value={m}>{m}</option>
         ))}
-        {models.length === 0 && <option value="">No models</option>}
+        {models.length === 0 && <option value="">{t('lyric.noModels')}</option>}
       </select>
     </div>
   );
@@ -118,6 +119,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
   onSelectionsChange,
 }) => {
   const [providers, setProviders] = useState<LlmProviderInfo[]>(_providerCache || []);
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(!_providerCache);
   // Use ref to always have latest selections for the async callback
   const selectionsRef = useRef(selections);
@@ -162,7 +164,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
     return (
       <div className="flex items-center gap-2 text-xs text-zinc-500 py-1">
         <div className="w-3 h-3 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin" />
-        Loading providers…
+        {t('lyric.loadingProviders')}
       </div>
     );
   }
@@ -170,7 +172,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
   if (providers.length === 0) {
     return (
       <div className="text-xs text-amber-400 py-1">
-        ⚠ No LLM providers configured.
+        ⚠ {t('lyric.noProvidersConfigured')}
       </div>
     );
   }
@@ -178,7 +180,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
   return (
     <div className="space-y-3">
       <RowSelector
-        label="Profile"
+        label={t('lyric.profile')}
         color="text-amber-400"
         providers={providers}
         selectedProvider={selections.profiling.provider}
@@ -186,7 +188,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
         onSelectionChange={(p, m) => updateRole('profiling', p, m)}
       />
       <RowSelector
-        label="Generate"
+        label={t('lyric.generate')}
         color="text-green-400"
         providers={providers}
         selectedProvider={selections.generation.provider}
@@ -194,7 +196,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
         onSelectionChange={(p, m) => updateRole('generation', p, m)}
       />
       <RowSelector
-        label="Refine"
+        label={t('lyric.refine')}
         color="text-purple-400"
         providers={providers}
         selectedProvider={selections.refinement.provider}
@@ -247,7 +249,7 @@ export const ProviderSelector: React.FC<ProviderSelectorProps> = ({
     return (
       <div className={`flex items-center gap-2 text-xs text-zinc-500 ${compact ? '' : 'mb-3'}`}>
         <div className="w-3 h-3 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin" />
-        Loading providers…
+        {t('lyric.loadingProviders')}
       </div>
     );
   }
@@ -255,7 +257,7 @@ export const ProviderSelector: React.FC<ProviderSelectorProps> = ({
   if (providers.length === 0) {
     return (
       <div className={`text-xs text-amber-400 ${compact ? '' : 'mb-3'}`}>
-        ⚠ No LLM providers configured. Open Settings → LLM to add one.
+        ⚠ {t('lyric.noProvidersConfigured')}
       </div>
     );
   }
@@ -288,7 +290,7 @@ export const ProviderSelector: React.FC<ProviderSelectorProps> = ({
           {models.map(m => (
             <option key={m} value={m}>{m}</option>
           ))}
-          {models.length === 0 && <option value="">No models</option>}
+          {models.length === 0 && <option value="">{t('lyric.noModels')}</option>}
         </select>
       </div>
     </div>

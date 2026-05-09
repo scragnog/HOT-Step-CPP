@@ -7,6 +7,7 @@
  */
 
 import React, { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, CheckCircle2, XCircle, X, Music, Clock, Play, Square, ListPlus, Check, Download } from 'lucide-react';
 import {
   useAudioGenQueue,
@@ -22,6 +23,7 @@ import { play as pbPlay, audioQueueItemToTrack, usePlayback } from '../../stores
 
 export const InlineAudioQueue: React.FC = () => {
   const { items } = useAudioGenQueue();
+  const { t } = useTranslation();
   const [downloadSong, setDownloadSong] = React.useState<Song | null>(null);
   const pb = usePlayback();
   const currentSongId = pb.currentTrack?.id ?? null;
@@ -62,7 +64,7 @@ export const InlineAudioQueue: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center px-4">
         <Music className="w-5 h-5 text-zinc-600 mb-2" />
-        <p className="text-xs text-zinc-500">No queued generations</p>
+        <p className="text-xs text-zinc-500">{t('lyric.noQueuedGenerations')}</p>
       </div>
     );
   }
@@ -78,7 +80,7 @@ export const InlineAudioQueue: React.FC = () => {
         {finishedCount > 0 && (
           <button onClick={clearFinishedFromAudioQueue}
             className="text-[10px] text-zinc-500 hover:text-red-400 transition-colors">
-            Clear Done
+            {t('lyric.clearDone')}
           </button>
         )}
       </div>

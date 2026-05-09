@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Loader2, Sparkles, ChevronDown, ChevronRight, Check, Disc3, FileText, CheckSquare, Square } from 'lucide-react';
 import { lireekApi } from '../../services/lireekApi';
 import type { LyricsSet, SongLyric, Profile } from '../../services/lireekApi';
@@ -27,6 +28,7 @@ export const CuratedProfileModal: React.FC<CuratedProfileModalProps> = ({
   isOpen, onClose, artistId, artistName, albums, showToast, onComplete,
 }) => {
   const [expandedAlbumId, setExpandedAlbumId] = useState<number | null>(null);
+  const { t } = useTranslation();
   const [selections, setSelections] = useState<SelectionMap>({});
   const [building, setBuilding] = useState(false);
   const [streamPhase, setStreamPhase] = useState('');
@@ -187,7 +189,7 @@ export const CuratedProfileModal: React.FC<CuratedProfileModalProps> = ({
               <Sparkles className="w-4 h-4 text-purple-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">Build Curated Profile</h2>
+              <h2 className="text-lg font-bold text-white">{t('lyric.buildCuratedProfile')}</h2>
               <p className="text-xs text-zinc-500">{artistName} — Pick songs from any album</p>
             </div>
           </div>
@@ -205,7 +207,7 @@ export const CuratedProfileModal: React.FC<CuratedProfileModalProps> = ({
               <Loader2 className="w-6 h-6 text-zinc-500 animate-spin" />
             </div>
           ) : fullAlbums.length === 0 ? (
-            <div className="text-center py-12 text-zinc-500">No albums found.</div>
+            <div className="text-center py-12 text-zinc-500">{t('lyric.noAlbumsFound')}</div>
           ) : (
             fullAlbums.map(album => {
               const songs = parseSongs(album.songs);
@@ -232,7 +234,7 @@ export const CuratedProfileModal: React.FC<CuratedProfileModalProps> = ({
                         onClick={(e) => { e.stopPropagation(); toggleAlbum(album.id); }}
                       >
                         {allSelected ? <CheckSquare className="w-3.5 h-3.5 text-purple-400" /> : <Square className="w-3.5 h-3.5" />}
-                        {allSelected ? 'Deselect All' : 'Select All'}
+                        {allSelected ? t('lyric.deselectAll') : t('lyric.selectAll')}
                       </button>
                       {songs.map((song, idx) => {
                         const isSelected = selections[album.id]?.has(idx) || false;
@@ -276,12 +278,12 @@ export const CuratedProfileModal: React.FC<CuratedProfileModalProps> = ({
                 <strong className="text-white">
                   {(Object.values(selections) as Set<number>[]).filter(s => s.size > 0).length}
                 </strong> albums</>
-            ) : 'Select songs to build a curated profile'}
+            ) : t('lyric.selectSongsToProfile')}
           </span>
           <button onClick={handleBuild} disabled={totalSelected === 0 || building}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:bg-zinc-200 dark:disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-semibold transition-all"
           >
-            {building ? (<><Loader2 className="w-4 h-4 animate-spin" />Building…</>) : (<><Sparkles className="w-4 h-4" />Build Profile</>)}
+            {building ? (<><Loader2 className="w-4 h-4 animate-spin" />{t('lyric.building')}</>) : (<><Sparkles className="w-4 h-4" />{t('lyric.buildProfile')}</>)}
           </button>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Search, Music, Disc3 } from 'lucide-react';
 
 interface FetchLyricsModalProps {
@@ -12,6 +13,7 @@ export const FetchLyricsModal: React.FC<FetchLyricsModalProps> = ({
   isOpen, onClose, onFetch, prefillArtist,
 }) => {
   const [artist, setArtist] = useState(prefillArtist || '');
+  const { t } = useTranslation();
   const [album, setAlbum] = useState('');
   const [maxSongs, setMaxSongs] = useState(50);
 
@@ -45,7 +47,7 @@ export const FetchLyricsModal: React.FC<FetchLyricsModalProps> = ({
             <div className="w-8 h-8 rounded-lg bg-pink-500/10 flex items-center justify-center">
               <Search className="w-4 h-4 text-pink-400" />
             </div>
-            <h2 className="text-lg font-bold text-white">Fetch Lyrics</h2>
+            <h2 className="text-lg font-bold text-white">{t('lyric.fetchLyrics')}</h2>
           </div>
           <button
             onClick={onClose}
@@ -61,7 +63,7 @@ export const FetchLyricsModal: React.FC<FetchLyricsModalProps> = ({
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <Music className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-                Artist Name
+                {t('lyric.artistName')}
               </span>
             </label>
             <input
@@ -82,7 +84,7 @@ export const FetchLyricsModal: React.FC<FetchLyricsModalProps> = ({
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
               <span className="flex items-center gap-1.5">
                 <Disc3 className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
-                Album Name
+                {t('lyric.albumName')}
               </span>
             </label>
             <input
@@ -100,7 +102,7 @@ export const FetchLyricsModal: React.FC<FetchLyricsModalProps> = ({
 
           <div>
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-              Max Songs
+              {t('lyric.maxSongs')}
             </label>
             <input
               type="number"
@@ -118,7 +120,7 @@ export const FetchLyricsModal: React.FC<FetchLyricsModalProps> = ({
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-pink-600 hover:bg-pink-500 disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white font-semibold transition-all"
           >
             <Search className="w-4 h-4" />
-            Fetch Lyrics
+            {t('lyric.fetchLyrics')}
           </button>
         </form>
       </div>

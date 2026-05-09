@@ -1,5 +1,6 @@
 // RecentExtractions.tsx — List of past extraction jobs (right sidebar)
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Trash2, ChevronRight, Clock } from 'lucide-react';
 import { listJobs, deleteJob, type ExtractJobSummary } from '../../services/stemStudioApi';
 
@@ -22,6 +23,7 @@ function timeAgo(dateStr: string): string {
 
 export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJob, activeJobId, refreshTrigger }) => {
   const [jobs, setJobs] = useState<ExtractJobSummary[]>([]);
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -58,9 +60,9 @@ export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJo
 
       {!loading && jobs.length === 0 && (
         <div style={styles.emptyMsg}>
-          No extractions yet.
+          {t('stem.noExtractionsYet')}
           <br />
-          <span style={{ fontSize: 11, color: '#555' }}>Extract stems from a track to see them here.</span>
+          <span style={{ fontSize: 11, color: '#555' }}>{t('stem.extractToSeeHere')}</span>
         </div>
       )}
 
@@ -92,7 +94,7 @@ export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJo
               <button
                 onClick={(e) => handleDelete(e, job.id)}
                 style={styles.deleteBtn}
-                title="Delete extraction"
+                title={t('stem.deleteExtraction')}
               >
                 <Trash2 size={12} />
               </button>

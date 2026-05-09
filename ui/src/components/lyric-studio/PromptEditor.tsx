@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Save, RotateCcw, Code2, Loader2 } from 'lucide-react';
 import { lireekApi } from '../../services/lireekApi';
 
@@ -24,6 +25,7 @@ interface Props {
 
 export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
   const [prompts, setPrompts] = useState<PromptData[]>([]);
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [loading, setLoading] = useState(false);
@@ -111,7 +113,7 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-white/5">
           <div className="flex items-center gap-2">
             <Code2 className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-lg font-bold text-white">System Prompts</h2>
+            <h2 className="text-lg font-bold text-white">{t('lyric.systemPrompts')}</h2>
           </div>
           <div className="flex items-center gap-2">
             {toast && <span className="text-xs text-green-400">{toast}</span>}
@@ -141,7 +143,7 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
                 >
                   <span className="truncate">{FRIENDLY_NAMES[p.name] || p.name}</span>
                   {p.source === 'file' && (
-                    <span className="text-[9px] text-cyan-400 bg-cyan-400/10 px-1 rounded">custom</span>
+                    <span className="text-[9px] text-cyan-400 bg-cyan-400/10 px-1 rounded">{t('lyric.custom')}</span>
                   )}
                 </button>
               ))
@@ -156,10 +158,10 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{FRIENDLY_NAMES[selected] || selected}</span>
                     {currentPrompt?.source === 'file' && (
-                      <span className="text-[10px] text-cyan-400 bg-cyan-400/10 px-1.5 py-0.5 rounded">customized</span>
+                      <span className="text-[10px] text-cyan-400 bg-cyan-400/10 px-1.5 py-0.5 rounded">{t('lyric.customized')}</span>
                     )}
                     {dirty && (
-                      <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">unsaved changes</span>
+                      <span className="text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">{t('lyric.unsavedChanges')}</span>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -168,14 +170,14 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
                         className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:text-zinc-200 hover:bg-white/5 transition-colors"
                         title="Reset to default"
                       >
-                        <RotateCcw className="w-3 h-3" /> Reset
+                        <RotateCcw className="w-3 h-3" /> {t('lyric.reset')}
                       </button>
                     )}
                     <button onClick={handleSave} disabled={!dirty || saving}
                       className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium bg-cyan-500 text-black hover:bg-cyan-400 disabled:opacity-30 transition-all"
                     >
                       {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                      Save
+                      {t('common.save')}
                     </button>
                   </div>
                 </div>
@@ -189,7 +191,7 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm">
-                Select a prompt to edit
+                {t('lyric.selectPromptToEdit')}
               </div>
             )}
           </div>
