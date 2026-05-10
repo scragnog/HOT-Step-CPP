@@ -19,6 +19,7 @@ import {
   runInspireAndWait,
   runLlmInspire,
   fetchInspireProviders,
+  generateRandomSubject,
   type InspireResult,
   type InspireProvider,
 } from '../../services/inspireApi';
@@ -153,6 +154,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
   const [error, setError] = useState('');
   const [providers, setProviders] = useState<InspireProvider[]>([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
+  const [randomSubjectLoading, setRandomSubjectLoading] = useState(false);
 
   // ── Load LLM providers on mount ──
   useEffect(() => {
@@ -209,6 +211,23 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
     useCotCaption: thinking,
     skipLm: !thinking, // Thinking ON = LM runs (audio codes + CoT); OFF = skip LM (faster)
   }), [computedCaption, lyricMode, vocalLanguage, thinking]);
+
+  // ── Random subject via LLM ──
+  const handleRandomSubject = useCallback(async () => {
+    if (!selectedProvider || randomSubjectLoading) return;
+    setRandomSubjectLoading(true);
+    try {
+      const result = await generateRandomSubject(
+        { provider: selectedProvider, model: selectedModel || undefined, genres: selectedGenres },
+        token || undefined,
+      );
+      if (result) setSubject(result);
+    } catch (err: any) {
+      console.error('[InstaGen] Random subject failed:', err.message);
+    } finally {
+      setRandomSubjectLoading(false);
+    }
+  }, [selectedProvider, selectedModel, selectedGenres, token, randomSubjectLoading, setSubject]);
 
   // ── Inspire flow (preview ON) ──
   const handleInspire = useCallback(async () => {
@@ -543,9 +562,21 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
         {/* ── Subject (only for Lyrics + AI) ── */}
         {lyricMode === 'lyrics-ai' && (
           <div>
-            <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
-              Song Subject <span className="text-pink-500">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                Song Subject <span className="text-pink-500">*</span>
+              </label>
+              <button
+                onClick={handleRandomSubject}
+                disabled={randomSubjectLoading || !selectedProvider}
+                className="text-xs text-zinc-400 hover:text-violet-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                {randomSubjectLoading && (
+                  <div className="w-3 h-3 rounded-full border border-zinc-400 border-t-violet-400 animate-spin" />
+                )}
+                Random
+              </button>
+            </div>
             <input
               type="text"
               value={subject}

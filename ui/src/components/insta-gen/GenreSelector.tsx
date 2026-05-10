@@ -6,7 +6,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ChevronDown, X, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { GENRE_TAXONOMY } from '../../data/genres';
+import { GENRE_TAXONOMY, ALL_GENRES } from '../../data/genres';
 
 interface GenreSelectorProps {
   selected: string[];
@@ -50,6 +50,13 @@ export const GenreSelector: React.FC<GenreSelectorProps> = ({ selected, onChange
 
   const clearAll = useCallback(() => {
     onChange([]);
+  }, [onChange]);
+
+  const randomize = useCallback(() => {
+    // Pick 2-4 random genres from the full list
+    const count = 2 + Math.floor(Math.random() * 3); // 2, 3, or 4
+    const shuffled = [...ALL_GENRES].sort(() => Math.random() - 0.5);
+    onChange(shuffled.slice(0, count));
   }, [onChange]);
 
   // Filtered taxonomy based on search
@@ -96,6 +103,13 @@ export const GenreSelector: React.FC<GenreSelectorProps> = ({ selected, onChange
           </span>
         ))}
         <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); randomize(); }}
+            className="text-xs text-zinc-400 hover:text-violet-400 transition-colors"
+            title="Random genres"
+          >
+            Random
+          </button>
           {selected.length > 0 && (
             <button
               onClick={(e) => { e.stopPropagation(); clearAll(); }}

@@ -340,4 +340,51 @@ router.get('/llm/providers', async (_req, res) => {
   }
 });
 
+// POST /api/inspire/llm/subject — generate a random song subject via LLM
+router.post('/llm/subject', async (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  const { provider: providerName, model, genres } = req.body as {
+    provider: string;
+    model?: string;
+    genres?: string[];
+  };
+
+  if (!providerName) {
+    res.status(400).json({ error: 'Missing provider' });
+    return;
+  }
+
+  try {
+    const provider = getProvider(providerName);
+    const effectiveModel = model || provider.defaultModel;
+    const genreStr = genres?.length ? genres.join(', ') : 'any genre';
+
+    const systemPrompt = `You generate creative, specific song subjects for songwriters. Given a musical genre, suggest ONE vivid, concrete song subject. The subject should be a brief description (1-2 sentences max) that a songwriter can write lyrics about. Be specific and interesting — avoid generic topics. Do NOT write lyrics, only the subject/concept. Output ONLY the subject, nothing else.`;
+
+    const userPrompt = `Genre/Style: ${genreStr}\n\nSuggest a creative song subject:`;
+
+    console.log(`[Inspire/LLM] Generating random subject via ${providerName}/${effectiveModel}`);
+
+    let raw = await provider.call(systemPrompt, userPrompt, effectiveModel);
+    raw = stripThinkingBlocks(raw);
+    // Clean up: remove quotes, "Subject:" prefix, etc.
+    raw = raw.replace(/^["']|["']$/g, '').trim();
+    raw = raw.replace(/^(?:Subject|Topic|Concept|Idea):\s*/i, '').trim();
+    // Take only the first 1-2 sentences
+    const sentences = raw.split(/(?<=[.!?])\s+/);
+    raw = sentences.slice(0, 2).join(' ').trim();
+    // Remove trailing period for cleaner look in input field
+    raw = raw.replace(/\.\s*$/, '');
+
+    console.log(`[Inspire/LLM] Generated subject: "${raw}"`);
+
+    res.json({ subject: raw });
+  } catch (err: any) {
+    console.error(`[Inspire/LLM] Subject generation failed:`, err.message);
+    res.status(500).json({ error: err.message || 'Subject generation failed' });
+  }
+});
+
 export default router;

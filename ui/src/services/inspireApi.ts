@@ -171,3 +171,26 @@ export async function fetchInspireProviders(): Promise<InspireProvider[]> {
   if (!res.ok) throw new Error(`Failed to fetch providers: ${res.statusText}`);
   return res.json();
 }
+
+/** Ask the LLM to generate a random song subject for the given genres */
+export async function generateRandomSubject(
+  params: { provider: string; model?: string; genres?: string[] },
+  token?: string,
+): Promise<string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}/llm/subject`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(params),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(err.error || `Random subject generation failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  return data.subject || '';
+}
