@@ -170,6 +170,10 @@ export interface GlobalParams {
   ppVaeBlend: number;
   setPpVaeBlend: (v: number) => void;
 
+  // ── Cover Art ──
+  coverArtEnabled: boolean;
+  setCoverArtEnabled: (v: boolean) => void;
+
   // ── Derived ──
   /** Assemble all engine params for a generation request */
   getGlobalParams: () => Partial<GenerationParams>;
@@ -289,6 +293,9 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [ppVaeReencode, setPpVaeReencode] = usePersistedState('hs-ppVaeReencode', false);
   const [ppVaeBlend, setPpVaeBlend] = usePersistedState('hs-ppVaeBlend', 0.0);
 
+  // Cover Art
+  const [coverArtEnabled, setCoverArtEnabled] = usePersistedState('hs-coverArtEnabled', false);
+
   // Trigger word settings — read from shared settings (same key as App.tsx)
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
 
@@ -397,6 +404,9 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // PP-VAE re-encode
       ppVaeReencode: (postProcessingEnabled && ppVaeReencode) || undefined,
       ppVaeBlend: (postProcessingEnabled && ppVaeReencode && ppVaeBlend > 0) ? ppVaeBlend : undefined,
+
+      // Cover Art
+      coverArtEnabled: coverArtEnabled || undefined,
     };
   }, [
     ditModel, lmModel, vaeModel, embeddingModel,
@@ -413,6 +423,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
      spectralLifterEnabled, slDenoiseStrength, slNoiseFloor, slHfMix, slTransientBoost, slShimmerReduction,
     masteringEnabled, masteringReference, timbreReference, timbreAudioPath,
     ppVaeReencode, ppVaeBlend,
+    coverArtEnabled,
     postProcessingEnabled,
     pluginParams,
     settings,
@@ -471,6 +482,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     // PP-VAE
     ppVaeReencode, setPpVaeReencode,
     ppVaeBlend, setPpVaeBlend,
+    // Cover Art
+    coverArtEnabled, setCoverArtEnabled,
     // Derived
     getGlobalParams,
   }), [
@@ -512,6 +525,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     timbreAudioPath, setTimbreAudioPath,
     ppVaeReencode, setPpVaeReencode,
     ppVaeBlend, setPpVaeBlend,
+    coverArtEnabled, setCoverArtEnabled,
     getGlobalParams,
   ]);
 

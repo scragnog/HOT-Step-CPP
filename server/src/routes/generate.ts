@@ -646,6 +646,37 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       songIds.push(songId);
     }
 
+    // ── AI Cover Art (post-generation, non-fatal) ─────────────
+    if (job.params.coverArtEnabled) {
+      try {
+        const { generateCoverArt, getCoverArtReadiness } = await import('../services/coverArt/coverArtService.js');
+        const readiness = getCoverArtReadiness();
+        if (readiness.installed) {
+          job.stage = 'Generating cover art...';
+          job.progress = 95;
+          for (let i = 0; i < songIds.length; i++) {
+            const trackResult = lmResults[i] || firstResult;
+            try {
+              await generateCoverArt({
+                songId: songIds[i],
+                title,
+                style,
+                lyrics: trackResult.lyrics || '',
+                subject: job.params.coverArtSubject || job.params.subject || '',
+              });
+              logGeneration(job.id, 'INFO', `[CoverArt] Generated cover for song ${songIds[i]}`);
+            } catch (coverTrackErr: any) {
+              logGeneration(job.id, 'WARNING', `[CoverArt] Failed for song ${songIds[i]} (non-fatal): ${coverTrackErr.message}`);
+            }
+          }
+        } else {
+          logGeneration(job.id, 'DEBUG', `[CoverArt] Skipped — not installed (missing: ${readiness.missingFiles.join(', ')})`);
+        }
+      } catch (coverErr: any) {
+        logGeneration(job.id, 'WARNING', `[CoverArt] Failed (non-fatal): ${coverErr.message}`);
+      }
+    }
+
     job.status = 'succeeded';
     job.progress = 100;
     job.stage = 'Complete!';
