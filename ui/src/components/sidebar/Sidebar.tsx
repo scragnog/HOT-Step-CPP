@@ -56,8 +56,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* ── Create section — framed by purple bars ── */}
         {isOpen && <div className="h-[3px] bg-purple-500/40 mx-1 mt-1" />}
         {isOpen && (
-          <div className="text-center py-1">
-            <span className="text-xs font-bold text-purple-400 tracking-wide">{t('sidebar.createSection')}</span>
+          <div className="text-center -mb-1">
+            <span className="text-[1.2rem] font-bold text-purple-400 tracking-wide">{t('sidebar.createSection')}</span>
           </div>
         )}
         <NavItem
