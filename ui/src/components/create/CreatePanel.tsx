@@ -82,7 +82,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5">
         <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{t('createPanel.title')}</h2>
-        <span className="text-xs text-zinc-500 font-medium">text2music</span>
+        <span className="text-xs text-zinc-500 font-medium">{t('createPanel.subtitle')}</span>
       </div>
 
       {/* Scrollable body — now much slimmer */}

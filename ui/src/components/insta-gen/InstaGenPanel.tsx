@@ -569,6 +569,12 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
   return (
     <div className="h-full flex flex-col bg-white dark:bg-suno overflow-y-auto">
 
+      {/* Header — matches CreatePanel */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5 flex-shrink-0">
+        <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{t('instaGen.title')}</h2>
+        <span className="text-xs text-zinc-500 font-medium">{t('instaGen.panelSubtitle')}</span>
+      </div>
+
       {/* Content */}
       <div className="flex-1 px-4 pt-4 space-y-4 pb-4">
         {/* Genre Selector */}
