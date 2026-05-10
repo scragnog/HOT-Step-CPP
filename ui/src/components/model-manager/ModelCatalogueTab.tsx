@@ -109,7 +109,7 @@ const CollapsibleGroup: React.FC<{
           <button
             onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }}
             className="ml-auto p-1 rounded-lg hover:bg-white/5 text-zinc-600 hover:text-zinc-600 dark:text-zinc-400 transition-colors"
-            title={t('models.aboutCategory')}
+            title="About this category"
           >
             <Info size={13} />
           </button>

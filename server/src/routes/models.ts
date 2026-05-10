@@ -22,9 +22,16 @@ router.get('/', async (_req, res) => {
       defaults: props.default,
     });
   } catch (err: any) {
-    res.status(502).json({
-      error: 'Failed to fetch models from ace-server',
-      details: err.message,
+    // ace-server is down (e.g. no models installed yet).
+    // Return a valid empty response so the UI stays alive and can show
+    // the model manager / download UI instead of crashing to a blank page.
+    res.json({
+      models: { dit: [], lm: [], vae: [], understand: [] },
+      adapters: [],
+      config: {},
+      defaults: {},
+      aceServerDown: true,
+      error: err.message,
     });
   }
 });

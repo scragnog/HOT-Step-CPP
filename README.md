@@ -8,11 +8,19 @@ Describe a song with a text caption and lyrics, and get stereo 48kHz audio gener
 
 Pre-built portable releases — no installation required. Extract, run, done.
 
+#### Windows
+
 | Download | GPU | Size |
 |----------|-----|------|
 | [**HOT-Step-CPP — CUDA**](https://github.com/scragnog/HOT-Step-CPP/releases/download/v1.0.0/HOT-Step-CPP-v1.0.0-win-x64-cuda.zip) | NVIDIA (RTX 2000+) | 220 MB |
 | [**HOT-Step-CPP — Vulkan**](https://github.com/scragnog/HOT-Step-CPP/releases/download/v1.0.0/HOT-Step-CPP-v1.0.0-win-x64-vulkan.zip) | AMD / Intel / NVIDIA | 94 MB |
 | [**HOT-Step-CPP — CPU**](https://github.com/scragnog/HOT-Step-CPP/releases/download/v1.0.0/HOT-Step-CPP-v1.0.0-win-x64-cpu.zip) | No GPU required | 78 MB |
+
+#### macOS
+
+| Download | GPU | Size |
+|----------|-----|------|
+| [**HOT-Step-CPP — macOS (Apple Silicon)**](https://github.com/scragnog/HOT-Step-CPP/releases/download/v1.0.0/HOT-Step-CPP-v1.0.0-macOS-arm64.tar.gz) | Metal (M1/M2/M3/M4) | 97 MB |
 
 **Which variant?**
 - **CUDA** — Best performance. Use this if you have an NVIDIA GPU (RTX 2060 or newer recommended).
@@ -21,12 +29,21 @@ Pre-built portable releases — no installation required. Extract, run, done.
 
 ### Quick Start
 
+**Windows:**
 1. Download and extract the zip for your hardware
 2. Run **`HOT-Step.bat`**
 3. Your browser opens to `http://localhost:3001`
 4. On first launch, go to **Models → Get More Models** to download the AI models (~7 GB)
 
-> **Requirements:** Windows 10/11 (64-bit), ~10 GB free disk space. CUDA variant needs NVIDIA drivers. Vulkan variant needs Vulkan 1.1+ capable drivers.
+**macOS:**
+1. Download and extract the `.tar.gz`
+2. Open Terminal in the extracted folder and run **`./launch.sh`**
+3. Your browser opens to `http://localhost:3001`
+4. On first launch, the **Model Manager** opens automatically — download the AI models (~7 GB)
+
+> **Windows requirements:** Windows 10/11 (64-bit), ~10 GB free disk space. CUDA variant needs NVIDIA drivers. Vulkan variant needs Vulkan 1.1+ capable drivers.
+
+> **macOS requirements:** macOS 13+ (Apple Silicon M1/M2/M3/M4), ~10 GB free disk space. No other software needed — Node.js is bundled. If macOS blocks the app (unsigned binary), run: `xattr -cr /path/to/HOT-Step-CPP-v1.0.0-macOS-arm64/`
 
 ---
 
@@ -85,8 +102,8 @@ HOT-Step CPP is three components working together:
 | Windows + NVIDIA (CUDA) | ✅ Pre-built release available |
 | Windows + AMD/Intel (Vulkan) | ✅ Pre-built release available |
 | Windows CPU-only | ✅ Pre-built release available |
+| macOS Apple Silicon (Metal) | ✅ Pre-built release available |
 | Linux | 🔧 Engine supports it, UI/server scripts TBD |
-| macOS (Metal) | 🔧 Engine supports it, UI/server scripts TBD |
 
 ---
 
@@ -94,7 +111,9 @@ HOT-Step CPP is three components working together:
 
 If you prefer to build from source (or want to contribute), follow the instructions below. **Most users should use the [pre-built releases](#download) instead.**
 
-### Prerequisites
+### Windows
+
+#### Prerequisites
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
@@ -104,7 +123,7 @@ If you prefer to build from source (or want to contribute), follow the instructi
 | [Node.js](https://nodejs.org/) | 18–22 LTS | **Node 24+ is not supported** — use nvm to install 22 LTS if needed |
 | [Git](https://git-scm.com/) | Any | For cloning |
 
-### 1. Clone the repo
+#### 1. Clone the repo
 
 ```cmd
 git clone --recursive https://github.com/scragnog/HOT-Step-CPP.git
@@ -113,7 +132,7 @@ cd HOT-Step-CPP
 
 > **Already cloned without `--recursive`?** Run `git submodule update --init --recursive` to fetch the ggml and vst3sdk submodules.
 
-### 2. Build the engine
+#### 2. Build the engine
 
 The easiest way:
 
@@ -136,7 +155,7 @@ cd ..\..
 
 > **Note:** If you use **Ninja** as your CMake generator (`-G Ninja`), binaries will be placed directly in `engine/build/` rather than `engine/build/Release/`. The server auto-detects both locations.
 
-### 3. Download models
+#### 3. Download models
 
 Download four GGUF model files from [Hugging Face](https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/tree/main) and place them in a `models/` directory at the repo root:
 
@@ -172,7 +191,7 @@ Smaller LM variants available: 0.6B (fast) and 1.7B (balanced).
 
 > **💡 Tip:** You can also download models directly from the app! Click **Models → Get More Models** to browse 100+ models across 5 HuggingFace repos, with curated starter packs for quick setup.
 
-### 4. Install UI & server dependencies
+#### 4. Install UI & server dependencies
 
 ```cmd
 install.bat
@@ -185,7 +204,7 @@ cd server; npm install; cd ..
 cd ui; npm install; cd ..
 ```
 
-### 5. Run
+#### 5. Run
 
 ```cmd
 LAUNCH.bat
@@ -200,6 +219,99 @@ Open `http://localhost:3001` in your browser. That's it!
 dev.bat
 ```
 Then open `http://localhost:3000`.
+
+---
+
+### macOS (Apple Silicon)
+
+#### Prerequisites
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Xcode Command Line Tools | 16+ | `xcode-select --install` |
+| CMake | 3.14+ | `brew install cmake` |
+| Node.js | 18–22 LTS | `brew install node@22` — **Node 24+ is not supported** |
+| Git | Any | Included with Xcode CLI tools |
+
+> **Note:** Xcode provides the Metal SDK and C++ compiler. No separate GPU toolkit is needed — Metal support is built into macOS.
+
+#### 1. Clone the repo
+
+```bash
+git clone --recursive https://github.com/scragnog/HOT-Step-CPP.git
+cd HOT-Step-CPP
+```
+
+> **Already cloned without `--recursive`?** Run `git submodule update --init --recursive` to fetch the ggml and vst3sdk submodules.
+
+#### 2. Build the engine
+
+```bash
+cd engine
+mkdir build && cd build
+cmake .. -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build . --config Release -j $(sysctl -n hw.ncpu)
+cd ../..
+```
+
+> This builds with Metal GPU acceleration. The Metal shader library is embedded into the binary so no external `.metallib` file is needed at runtime.
+
+#### 3. Download models
+
+Same as Windows — place GGUF files in `models/`. See [model list above](#3-download-models). Or skip this and download from the in-app Model Manager on first launch.
+
+#### 4. Install UI & server dependencies
+
+```bash
+cd server && npm install && cd ..
+cd ui && npm install && cd ..
+```
+
+#### 5. Run
+
+```bash
+./launch.sh
+```
+
+Open `http://localhost:3001` in your browser.
+
+> **No `.env` file needed** for the standard setup. The server automatically finds the engine binary and models. See `.env.example` if you need to override paths.
+
+**Development mode** (with hot-reload):
+```bash
+./launch.sh  # In one terminal
+cd ui && npx vite  # In another terminal
+```
+Then open `http://localhost:3000`.
+
+---
+
+### Building a Portable Release
+
+You can package a self-contained, zero-prerequisite release for distribution. The resulting archive bundles everything — engine binaries, Node.js runtime, server, UI, and plugins — so end users just extract and run.
+
+#### macOS
+
+```bash
+./package-release.sh
+```
+
+This will:
+1. Build the C++ engine with Metal GPU acceleration
+2. Install production server dependencies
+3. Build the optimised production UI
+4. Download and bundle a Node.js 22 runtime (~40 MB)
+5. Package everything into a `.tar.gz`
+
+Options:
+```bash
+./package-release.sh --skip-build          # Skip engine build (use existing binaries)
+./package-release.sh --version=1.2.0       # Set version number
+```
+
+The output archive is fully portable — no brew, no npm, no Xcode needed on the target machine. The bundled `launch.sh` auto-detects and uses the included Node.js runtime.
+
+---
 
 ## Troubleshooting
 
@@ -267,6 +379,30 @@ engine\build.cmd
 ```
 
 The `CMakeCache.txt` is only generated once — `build.cmd` skips reconfiguration if it already exists.
+</details>
+
+<details>
+<summary><b>macOS: "operation not permitted" or app blocked by Gatekeeper</b></summary>
+
+Since the release binaries are unsigned, macOS may quarantine them. Remove the quarantine flag:
+
+```bash
+xattr -cr /path/to/HOT-Step-CPP-v1.0.0-macOS-arm64/
+```
+
+This only needs to be done once after extraction.
+</details>
+
+<details>
+<summary><b>macOS: Metal compilation errors during engine build</b></summary>
+
+Ensure you have Xcode (not just Command Line Tools) and run the first-launch setup:
+
+```bash
+sudo xcodebuild -runFirstLaunch
+```
+
+If you see errors about Metal Toolchain, these can usually be ignored — the embedded Metal library (`-DGGML_METAL_EMBED_LIBRARY=ON`) does not require a separate Metal Toolchain download.
 </details>
 
 ## Credits

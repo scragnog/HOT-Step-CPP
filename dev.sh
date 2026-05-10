@@ -1,8 +1,8 @@
 #!/bin/bash
-# HOT-Step CPP — macOS development mode
+# HOT-Step CPP — macOS Development Mode
 #
-# Starts both the Vite dev server (hot-reload UI) and the Node.js server.
-# The Node.js server spawns ace-server as a child process.
+# Starts Vite dev server (hot-reload UI) + Node.js server (tsx watch).
+# Automatically finds a compatible Node.js.
 #
 # Usage:
 #   ./dev.sh
@@ -10,24 +10,54 @@
 set -e
 
 cd "$(dirname "$0")"
+ROOT_DIR="$(pwd)"
 
+echo ""
 echo "╔══════════════════════════════════════════╗"
 echo "║     HOT-Step 9000 ⚡ DEV MODE           ║"
 echo "║       Vite HMR + tsx watch               ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
-# Install deps if needed
+# ── Find Node.js ────────────────────────────────────────────────────
+find_node() {
+    if [ -x "${ROOT_DIR}/runtime/node" ]; then
+        echo "${ROOT_DIR}/runtime"; return 0
+    fi
+    for bp in "/opt/homebrew/opt/node@22/bin" "/usr/local/opt/node@22/bin"; do
+        if [ -x "${bp}/node" ]; then echo "$bp"; return 0; fi
+    done
+    if command -v node &>/dev/null; then
+        local ver; ver="$(node --version 2>/dev/null | tr -d 'v')"
+        local major="${ver%%.*}"
+        if [ "$major" -ge 18 ] && [ "$major" -lt 24 ] 2>/dev/null; then
+            echo "$(dirname "$(command -v node)")"; return 0
+        fi
+    fi
+    return 1
+}
+
+NODE_DIR=""
+if NODE_DIR=$(find_node); then
+    export PATH="${NODE_DIR}:${PATH}"
+    echo "  Node.js: $(node --version)"
+else
+    echo "❌ No compatible Node.js found (need 18-22)."
+    echo "   Fix: brew install node@22"
+    exit 1
+fi
+
+# ── Install deps if needed ───────────────────────────────────────────
 if [ ! -d "server/node_modules" ]; then
     echo "📦 Installing server dependencies..."
-    cd server && npm install && cd ..
+    cd server && npm install --loglevel=warn && cd ..
 fi
 if [ ! -d "ui/node_modules" ]; then
     echo "📦 Installing UI dependencies..."
-    cd ui && npm install && cd ..
+    cd ui && npm install --loglevel=warn && cd ..
 fi
 
-# Cleanup function: kill Vite when the script exits
+# ── Cleanup on exit ──────────────────────────────────────────────────
 cleanup() {
     echo ""
     echo "[dev.sh] Shutting down..."
@@ -38,17 +68,19 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Start Vite dev server (UI hot-reload) in background
+# ── Start Vite (background) ─────────────────────────────────────────
 echo "🚀 Starting Vite dev server..."
 cd ui
-npm run dev &
+npx vite &
 VITE_PID=$!
 cd ..
 
-# Give Vite a moment to start
 sleep 2
 
-# Start Node.js server (spawns ace-server) in foreground
+# ── Start Node server (foreground) ──────────────────────────────────
 echo "🚀 Starting Node.js server..."
+echo "   UI:   http://localhost:3000 (Vite HMR)"
+echo "   API:  http://localhost:3001"
+echo ""
 cd server
-npm run dev
+npx tsx watch src/index.ts

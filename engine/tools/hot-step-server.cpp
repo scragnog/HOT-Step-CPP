@@ -2003,12 +2003,13 @@ int main(int argc, char ** argv) {
     g_store = store_create(g_keep_loaded ? EVICT_NEVER : EVICT_STRICT);
 
     // Initialize Lua plugin system.
-    // engine_dir: derive from executable path (ace-server lives in engine/build/bin/)
-    // project_dir: the top-level project directory (parent of models_dir, or cwd)
+    // engine_dir: derive from executable path (ace-server lives in engine/build/)
+    // project_dir: the top-level project directory (parent of engine/)
+    // Scans both engine/plugins/ (native) and <project-root>/plugins/ (community)
     {
         std::filesystem::path exe_path = std::filesystem::canonical(argv[0]);
-        // ace-server is in engine/build/bin/ — engine/ is two levels up
-        std::filesystem::path engine_dir = exe_path.parent_path().parent_path().parent_path();
+        // ace-server is in engine/build/ — engine/ is one level up
+        std::filesystem::path engine_dir = exe_path.parent_path().parent_path();
         // Project root is one more level up from engine/
         std::filesystem::path project_dir = engine_dir.parent_path();
         PluginRegistry::instance().init(engine_dir.string(), project_dir.string());

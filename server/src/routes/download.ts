@@ -16,11 +16,12 @@ import { getDb } from '../db/database.js';
 const execFileAsync = promisify(execFile);
 const router = Router();
 
-/** Get mp3-codec.exe path */
+/** Get mp3-codec binary path (platform-aware: no .exe on macOS/Linux) */
 function getMp3CodecPath(): string {
+  const ext = process.platform === 'win32' ? '.exe' : '';
   const aceExe = config.aceServer.exe;
-  if (aceExe) return path.join(path.dirname(aceExe), 'mp3-codec.exe');
-  return path.resolve(process.cwd(), '..', 'engine', 'build', 'Release', 'mp3-codec.exe');
+  if (aceExe) return path.join(path.dirname(aceExe), `mp3-codec${ext}`);
+  return path.resolve(process.cwd(), '..', 'engine', 'build', 'Release', `mp3-codec${ext}`);
 }
 
 /** Convert WAV to target format, return temp file path */

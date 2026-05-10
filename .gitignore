@@ -26,6 +26,7 @@ logs/
 engine/acestep.cpp/
 engine/build/
 engine/deps/
+engine/.cache/
 
 # Binaries & compiled objects
 *.exe
@@ -91,6 +92,9 @@ scratch/
 
 # Release build artifacts
 release/
+release-staging/
+runtime/
+*.tar.gz
 
 # Windows NUL device phantom
 nul

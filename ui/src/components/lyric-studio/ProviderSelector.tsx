@@ -73,6 +73,7 @@ const RowSelector: React.FC<{
   selectedModel: string;
   onSelectionChange: (provider: string, model: string) => void;
 }> = ({ label, color, providers, selectedProvider, selectedModel, onSelectionChange }) => {
+  const { t } = useTranslation();
   const currentProvider = providers.find(p => p.id === selectedProvider);
   const models = currentProvider?.models || [];
 
@@ -225,6 +226,7 @@ export const ProviderSelector: React.FC<ProviderSelectorProps> = ({
   label = 'LLM Provider',
   compact = false,
 }) => {
+  const { t } = useTranslation();
   const [providers, setProviders] = useState<LlmProviderInfo[]>(_providerCache || []);
   const [loading, setLoading] = useState(!_providerCache);
 
