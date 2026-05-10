@@ -101,11 +101,13 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, active
     setInspireProgress('Starting...');
 
     try {
+      const inspireCaption = subject.trim()
+        ? `${computedCaption}. Song about: ${subject.trim()}`
+        : computedCaption;
+      console.log('[InstaGen] Inspire request:', { inspireCaption, subject, computedCaption, vocalLanguage, lmModel: globalParams.lmModel });
       const result = await runInspireAndWait(
         {
-          caption: subject.trim()
-            ? `${computedCaption}. Song about: ${subject.trim()}`
-            : computedCaption,
+          caption: inspireCaption,
           subject: subject.trim() || undefined,
           vocalLanguage,
           useCotCaption: true,
