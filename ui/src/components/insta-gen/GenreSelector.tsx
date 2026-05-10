@@ -78,52 +78,53 @@ export const GenreSelector: React.FC<GenreSelectorProps> = ({ selected, onChange
         {t('instaGen.genreLabel')}
       </label>
 
-      {/* Selected chips + trigger */}
-      <div
-        className="min-h-[42px] w-full rounded-xl border border-zinc-300 dark:border-white/10 bg-zinc-50 dark:bg-white/5 px-3 py-2 cursor-pointer hover:border-pink-400/50 transition-colors flex flex-wrap items-center gap-1.5"
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        {selected.length === 0 && (
-          <span className="text-zinc-400 dark:text-zinc-500 text-sm select-none">
-            {t('instaGen.genrePlaceholder')}
-          </span>
-        )}
-        {selected.map(genre => (
-          <span
-            key={genre}
-            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-pink-500/15 text-pink-400 border border-pink-500/20 hover:bg-pink-500/25 transition-colors"
-          >
-            {genre}
-            <button
-              onClick={(e) => { e.stopPropagation(); toggle(genre); }}
-              className="hover:text-pink-200 transition-colors"
-            >
-              <X size={12} />
-            </button>
-          </span>
-        ))}
-        <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-          <button
-            onClick={(e) => { e.stopPropagation(); randomize(); }}
-            className="text-xs text-zinc-400 hover:text-violet-400 transition-colors"
-            title="Random genres"
-          >
-            Random
-          </button>
-          {selected.length > 0 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); clearAll(); }}
-              className="text-xs text-zinc-400 hover:text-red-400 transition-colors"
-              title={t('instaGen.clearAll')}
-            >
-              {t('instaGen.clearAll')}
-            </button>
+      {/* Selected chips + trigger + Random button */}
+      <div className="flex items-stretch gap-2">
+        <div
+          className="flex-1 min-h-[42px] rounded-xl border border-zinc-300 dark:border-white/10 bg-zinc-50 dark:bg-white/5 px-3 py-2 cursor-pointer hover:border-pink-400/50 transition-colors flex flex-wrap items-center gap-1.5"
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          {selected.length === 0 && (
+            <span className="text-zinc-400 dark:text-zinc-500 text-sm select-none">
+              {t('instaGen.genrePlaceholder')}
+            </span>
           )}
-          <ChevronDown
-            size={16}
-            className={`text-zinc-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
-          />
+          {selected.map(genre => (
+            <span
+              key={genre}
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-pink-500/15 text-pink-400 border border-pink-500/20 hover:bg-pink-500/25 transition-colors"
+            >
+              {genre}
+              <button
+                onClick={(e) => { e.stopPropagation(); toggle(genre); }}
+                className="hover:text-pink-200 transition-colors"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+            {selected.length > 0 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); clearAll(); }}
+                className="text-xs text-zinc-400 hover:text-red-400 transition-colors"
+                title={t('instaGen.clearAll')}
+              >
+                {t('instaGen.clearAll')}
+              </button>
+            )}
+            <ChevronDown
+              size={16}
+              className={`text-zinc-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+            />
+          </div>
         </div>
+        <button
+          onClick={randomize}
+          className="px-3 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 shadow-md shadow-violet-500/20 hover:shadow-violet-500/30 transition-all duration-200 flex-shrink-0"
+        >
+          Random
+        </button>
       </div>
 
       {/* Dropdown */}

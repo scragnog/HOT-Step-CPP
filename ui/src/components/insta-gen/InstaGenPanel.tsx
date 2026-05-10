@@ -154,7 +154,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
   const [error, setError] = useState('');
   const [providers, setProviders] = useState<InspireProvider[]>([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
-  const [randomSubjectLoading, setRandomSubjectLoading] = useState(false);
+  const [randomSubject, setRandomSubject] = useState(false);
 
   // ── Load LLM providers on mount ──
   useEffect(() => {
@@ -196,10 +196,10 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
   // ── Validation ──
   const canSubmit = useMemo(() => {
     if (selectedGenres.length === 0 && !additionalCaption.trim()) return false;
-    if (lyricMode === 'lyrics-ai' && !subject.trim()) return false;
+    if (lyricMode === 'lyrics-ai' && !randomSubject && !subject.trim()) return false;
     if (lyricMode === 'lyrics-ai' && !selectedProvider) return false;
     return true;
-  }, [selectedGenres, additionalCaption, lyricMode, subject, selectedProvider]);
+  }, [selectedGenres, additionalCaption, lyricMode, subject, selectedProvider, randomSubject]);
 
   // ── Build generation params ──
   const buildParams = useCallback((lyrics: string, caption: string): Partial<GenerationParams> => ({
@@ -212,22 +212,11 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
     skipLm: !thinking, // Thinking ON = LM runs (audio codes + CoT); OFF = skip LM (faster)
   }), [computedCaption, lyricMode, vocalLanguage, thinking]);
 
-  // ── Random subject via LLM ──
-  const handleRandomSubject = useCallback(async () => {
-    if (!selectedProvider || randomSubjectLoading) return;
-    setRandomSubjectLoading(true);
-    try {
-      const result = await generateRandomSubject(
-        { provider: selectedProvider, model: selectedModel || undefined, genres: selectedGenres },
-        token || undefined,
-      );
-      if (result) setSubject(result);
-    } catch (err: any) {
-      console.error('[InstaGen] Random subject failed:', err.message);
-    } finally {
-      setRandomSubjectLoading(false);
-    }
-  }, [selectedProvider, selectedModel, selectedGenres, token, randomSubjectLoading, setSubject]);
+  // ── Random subject toggle ──
+  const handleRandomSubject = useCallback(() => {
+    setRandomSubject(true);
+    setSubject('');
+  }, [setSubject]);
 
   // ── Inspire flow (preview ON) ──
   const handleInspire = useCallback(async () => {
@@ -238,13 +227,22 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
     try {
       if (lyricMode === 'lyrics-ai') {
         // ── External LLM path ──
+        // If random subject mode, generate a subject first
+        let effectiveSubject = subject.trim();
+        if (randomSubject || !effectiveSubject) {
+          setInspireProgress('Generating random subject...');
+          effectiveSubject = await generateRandomSubject(
+            { provider: selectedProvider, model: selectedModel || undefined, genres: selectedGenres },
+            token || undefined,
+          );
+        }
         setInspireProgress('Generating lyrics via AI...');
         const llmResult = await runLlmInspire(
           {
             provider: selectedProvider,
             model: selectedModel || undefined,
             genres: selectedGenres,
-            subject: subject.trim(),
+            subject: effectiveSubject,
             language: vocalLanguage,
           },
           token || undefined,
@@ -343,6 +341,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
     const capturedModel = selectedModel;
     const capturedGenres = [...selectedGenres];
     const capturedSubject = subject.trim();
+    const capturedRandomSubject = randomSubject;
     const capturedGlobalParams = { ...globalParams };
     const capturedToken = token;
 
@@ -366,13 +365,22 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
         if (capturedLyricMode === 'instrumental') {
           resolvedLyrics = '[Instrumental]';
         } else if (capturedLyricMode === 'lyrics-ai') {
+          // If random subject mode, generate a subject first
+          let effectiveSubject = capturedSubject;
+          if (capturedRandomSubject || !effectiveSubject) {
+            updateManualQueueItem(queueId, { stage: 'Generating random subject…' });
+            effectiveSubject = await generateRandomSubject(
+              { provider: capturedProvider, model: capturedModel || undefined, genres: capturedGenres },
+              capturedToken,
+            );
+          }
           updateManualQueueItem(queueId, { stage: 'Generating lyrics via AI…' });
           const llmResult = await runLlmInspire(
             {
               provider: capturedProvider,
               model: capturedModel || undefined,
               genres: capturedGenres,
-              subject: capturedSubject,
+              subject: effectiveSubject,
               language: capturedVocalLang,
             },
             capturedToken,
@@ -562,28 +570,33 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
         {/* ── Subject (only for Lyrics + AI) ── */}
         {lyricMode === 'lyrics-ai' && (
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                Song Subject <span className="text-pink-500">*</span>
-              </label>
+            <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
+              Song Subject {!randomSubject && <span className="text-pink-500">*</span>}
+            </label>
+            <div className="flex items-stretch gap-2">
+              <input
+                type="text"
+                value={subject}
+                onChange={(e) => { setSubject(e.target.value); setRandomSubject(false); }}
+                placeholder={randomSubject ? 'Subject will be chosen at random' : 'e.g. a man tired from a life of working 9 to 5'}
+                className={`flex-1 rounded-xl border bg-zinc-50 dark:bg-white/5 px-3 py-2.5 text-sm text-zinc-900 dark:text-white outline-none focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 transition-all ${
+                  randomSubject
+                    ? 'border-violet-500/30 placeholder:text-violet-400 dark:placeholder:text-violet-400/70'
+                    : 'border-zinc-300 dark:border-white/10 placeholder:text-zinc-400 dark:placeholder:text-zinc-500'
+                }`}
+              />
               <button
                 onClick={handleRandomSubject}
-                disabled={randomSubjectLoading || !selectedProvider}
-                className="text-xs text-zinc-400 hover:text-violet-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                disabled={!selectedProvider}
+                className={`px-3 rounded-xl text-xs font-semibold text-white shadow-md transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 flex-shrink-0 ${
+                  randomSubject
+                    ? 'bg-gradient-to-r from-violet-500 to-purple-500 shadow-violet-500/30 ring-1 ring-violet-400/50'
+                    : 'bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 shadow-violet-500/20 hover:shadow-violet-500/30'
+                }`}
               >
-                {randomSubjectLoading && (
-                  <div className="w-3 h-3 rounded-full border border-zinc-400 border-t-violet-400 animate-spin" />
-                )}
                 Random
               </button>
             </div>
-            <input
-              type="text"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              placeholder="e.g. a man tired from a life of working 9 to 5"
-              className="w-full rounded-xl border border-zinc-300 dark:border-white/10 bg-zinc-50 dark:bg-white/5 px-3 py-2.5 text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-500 outline-none focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 transition-all"
-            />
           </div>
         )}
 
