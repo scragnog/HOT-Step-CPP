@@ -36,7 +36,7 @@ export interface ManifestEntry {
  *
  * File sources:
  * - Diffusion model: leejet/FLUX.2-klein-4B-GGUF (Q4_0)
- * - VAE: black-forest-labs/FLUX.2-dev (flux2_ae.safetensors)
+ * - VAE: black-forest-labs/FLUX.2-klein-4B (ungated, Apache 2.0)
  * - LLM: unsloth/Qwen3-4B-GGUF (Q4_K_M)
  * - sd.exe: leejet/stable-diffusion.cpp GitHub releases (auto-detected)
  */
@@ -49,7 +49,9 @@ const MODEL_MANIFEST: ManifestEntry[] = [
   },
   {
     filename: REQUIRED_FILES.vae,
-    url: 'https://huggingface.co/black-forest-labs/FLUX.2-dev/resolve/main/ae.safetensors',
+    // NOTE: FLUX.2-dev is gated (requires HF login). FLUX.2-klein-4B is
+    // ungated (Apache 2.0) and ships the same VAE architecture.
+    url: 'https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/resolve/main/vae/diffusion_pytorch_model.safetensors',
     sizeBytes: 335_304_388,
     description: 'FLUX.2 VAE decoder',
   },
@@ -83,8 +85,10 @@ const SD_ASSET_PATTERNS: Record<string, string[]> = {
 
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/leejet/stable-diffusion.cpp/releases/latest';
 
-/** The binary name inside the release ZIP */
-const SD_BINARY_NAME = process.platform === 'win32' ? 'sd.exe' : 'sd';
+/** Possible binary names inside the release ZIP (varies between releases) */
+const SD_BINARY_NAMES = process.platform === 'win32'
+  ? ['sd-cli.exe', 'sd.exe']   // newer releases: sd-cli.exe, older: sd.exe
+  : ['sd-cli', 'sd'];
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -297,17 +301,38 @@ class CoverArtDownloader extends EventEmitter {
 
       await this._extractZip(zipPath, dir);
 
-      // Step 5: Verify sd.exe exists after extraction
-      const sdPath = path.join(dir, SD_BINARY_NAME);
-      if (!fs.existsSync(sdPath)) {
-        // The ZIP might have a subdirectory — search for it
-        const found = this._findFile(dir, SD_BINARY_NAME);
-        if (found) {
-          // Move it to the root of the cover-art directory
-          fs.renameSync(found, sdPath);
-          console.log(`[CoverArt Download] Moved ${SD_BINARY_NAME} from ${path.dirname(found)} to ${dir}`);
+      // Step 5: Find the sd binary — name varies between releases
+      // Newer releases use 'sd-cli.exe', older use 'sd.exe'
+      const canonicalName = REQUIRED_FILES.sdCli; // our canonical filename
+      const sdPath = path.join(dir, canonicalName);
 
-          // Also move any DLLs from that subdirectory
+      if (!fs.existsSync(sdPath)) {
+        let found: string | null = null;
+
+        // Search for any of the known binary names
+        for (const binaryName of SD_BINARY_NAMES) {
+          // Check root first
+          const rootPath = path.join(dir, binaryName);
+          if (fs.existsSync(rootPath)) {
+            found = rootPath;
+            break;
+          }
+          // Then search subdirectories (ZIP may have a nested folder)
+          const recursive = this._findFile(dir, binaryName);
+          if (recursive) {
+            found = recursive;
+            break;
+          }
+        }
+
+        if (found) {
+          // Rename to our canonical name
+          if (found !== sdPath) {
+            fs.renameSync(found, sdPath);
+            console.log(`[CoverArt Download] Found ${path.basename(found)}, renamed to ${canonicalName}`);
+          }
+
+          // Also move any DLLs/shared libs from the binary's subdirectory
           const subDir = path.dirname(found);
           if (subDir !== dir) {
             const files = fs.readdirSync(subDir);
@@ -321,11 +346,14 @@ class CoverArtDownloader extends EventEmitter {
                 }
               }
             }
-            // Clean up empty subdirectory
-            try { fs.rmdirSync(subDir, { recursive: true } as any); } catch {}
+            // Clean up the extracted subdirectory
+            try { fs.rmSync(subDir, { recursive: true, force: true }); } catch {}
           }
         } else {
-          throw new Error(`${SD_BINARY_NAME} not found after extraction`);
+          // List what we DID find for debugging
+          const allFiles = this._listFiles(dir);
+          console.error(`[CoverArt Download] Available files after extraction: ${allFiles.join(', ')}`);
+          throw new Error(`sd binary not found after extraction (searched for: ${SD_BINARY_NAMES.join(', ')})`);
         }
       }
 
@@ -412,6 +440,13 @@ class CoverArtDownloader extends EventEmitter {
       }
     } catch {}
     return null;
+  }
+
+  /** List all files in a directory (non-recursive) for debug output */
+  private _listFiles(dir: string): string[] {
+    try {
+      return fs.readdirSync(dir);
+    } catch { return []; }
   }
 
   /** Build the complete list of entries including sd.exe for status display */

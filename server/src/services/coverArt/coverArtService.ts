@@ -25,7 +25,7 @@ const COVER_ART_DIR = 'cover-art';
 export const REQUIRED_FILES = {
   sdCli: process.platform === 'win32' ? 'sd.exe' : 'sd',
   diffusionModel: 'flux-2-klein-4b-Q4_0.gguf',
-  vae: 'flux2_ae.safetensors',
+  vae: 'flux2_vae.safetensors',
   llm: 'Qwen3-4B-Q4_K_M.gguf',
 } as const;
 
