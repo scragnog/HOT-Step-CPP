@@ -84,6 +84,23 @@ async function runInspire(job: InspireJob, params: any): Promise<void> {
     job.stage = 'Generating lyrics & metadata...';
     job.progress = 10;
 
+    // Diagnostic logging — trace exactly what reaches the engine
+    console.log(`[Inspire] Job ${job.id} — input params:`, JSON.stringify({
+      caption: params.caption,
+      subject: params.subject,
+      vocalLanguage: params.vocalLanguage,
+      useCotCaption: params.useCotCaption,
+    }));
+    console.log(`[Inspire] Job ${job.id} — aceReq:`, JSON.stringify({
+      caption: aceReq.caption,
+      vocal_language: aceReq.vocal_language,
+      use_cot_caption: aceReq.use_cot_caption,
+      lyrics: aceReq.lyrics || '(empty)',
+      lm_temperature: aceReq.lm_temperature,
+      lm_cfg_scale: aceReq.lm_cfg_scale,
+      lm_top_p: aceReq.lm_top_p,
+    }));
+
     // Subscribe to engine logs for LM Phase 1 progress
     const unsub = subscribeLines((line) => {
       if (line.source !== 'engine') return;
@@ -133,7 +150,7 @@ async function runInspire(job: InspireJob, params: any): Promise<void> {
       vocalLanguage: first.vocal_language || params.vocalLanguage || 'en',
     };
 
-    console.log(`[Inspire] Job ${job.id} — complete. BPM=${job.result.bpm}, lyrics=${job.result.lyrics.length} chars`);
+    console.log(`[Inspire] Job ${job.id} — complete. BPM=${job.result.bpm}, lang=${job.result.vocalLanguage}, caption=${job.result.caption.substring(0, 100)}, lyrics=${job.result.lyrics.substring(0, 200)}`);
 
   } catch (err: any) {
     if (err.message === 'Cancelled') {
