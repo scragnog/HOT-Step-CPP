@@ -113,8 +113,8 @@ router.get('/download/progress', (req, res) => {
 // ── POST /generate — Generate cover art for a song ──────────────────────
 
 router.post('/generate', async (req, res) => {
-  const userId = getUserId(req);
-  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+  // No auth required — this is a local-only app and context menu
+  // calls this endpoint without auth headers.
 
   const { songId, title, style, lyrics, subject } = req.body;
   if (!songId) {

@@ -515,6 +515,9 @@ const SongItem: React.FC<SongItemProps> = ({
                         lyrics: song.lyrics || params?.lyrics || '',
                         subject: params?.subject || '',
                       }),
+                    }).then(r => {
+                      if (!r.ok) r.json().then(d => console.error('[CoverArt] Generate failed:', d)).catch(() => {});
+                      else console.log('[CoverArt] Generation started for', song.title || song.id);
                     }).catch(err => console.error('[CoverArt]', err));
                   }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-violet-400 hover:bg-violet-500/10 transition-colors"
@@ -693,6 +696,9 @@ const SongCard: React.FC<SongCardProps> = ({
                         lyrics: song.lyrics || params?.lyrics || '',
                         subject: params?.subject || '',
                       }),
+                    }).then(r => {
+                      if (!r.ok) r.json().then(d => console.error('[CoverArt] Generate failed:', d)).catch(() => {});
+                      else console.log('[CoverArt] Generation started for', song.title || song.id);
                     }).catch(err => console.error('[CoverArt]', err));
                   }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-violet-400 hover:bg-violet-500/10 transition-colors">
