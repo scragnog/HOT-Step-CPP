@@ -454,6 +454,7 @@ const AppContent: React.FC = () => {
           >
             <InstaGenPanel
               onGenerate={handleGenerate}
+              onSongCreated={handleSongCreated}
               activeJobCount={activeJobCount}
             />
           </div>
