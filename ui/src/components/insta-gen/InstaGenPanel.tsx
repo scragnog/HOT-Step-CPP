@@ -133,7 +133,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, active
     vocalLanguage: lyricMode === 'instrumental' ? undefined : vocalLanguage,
     source: 'insta-gen',
     useCotCaption: thinking,
-    skipLm: false, // InstaGen always needs the LM for audio codes (lyrics/metadata come from inspire)
+    skipLm: !thinking, // Thinking ON = LM runs (audio codes + CoT); OFF = skip LM (faster)
   }), [computedCaption, lyricMode, vocalLanguage, thinking]);
 
   // ── Inspire flow (preview ON) ──
@@ -175,7 +175,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, active
         );
 
         const result: InspireResult = {
-          caption: metaResult.caption || llmResult.caption || computedCaption,
+          caption: llmResult.caption || computedCaption,
           lyrics: llmResult.lyrics,  // Keep LLM lyrics, not inspire's
           bpm: metaResult.bpm,
           duration: metaResult.duration,
@@ -292,9 +292,11 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, active
       );
 
       // Step 3: Build params with lyrics + metadata from inspire
+      // Keep the user's caption — the inspire result's caption is LM-generated
+      // and often contains unwanted genre hallucinations. We only need inspire
+      // for metadata (bpm, duration, key, timesig) and lyrics.
       const finalLyrics = resolvedLyrics || inspireResult.lyrics;
-      const finalCaption = inspireResult.caption || resolvedCaption;
-      const params = buildParams(finalLyrics, finalCaption);
+      const params = buildParams(finalLyrics, resolvedCaption);
       if (inspireResult.bpm) params.bpm = inspireResult.bpm;
       if (inspireResult.duration) params.duration = inspireResult.duration;
       if (inspireResult.keyScale) params.keyScale = inspireResult.keyScale;
