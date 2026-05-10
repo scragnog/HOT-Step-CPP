@@ -110,6 +110,24 @@ function cleanTitle(line: string): string {
   return t;
 }
 
+// ── Module-level serial queue ──
+// Ensures InstaGen jobs run one at a time (inspire → generate → poll → next).
+// Without this, concurrent inspire calls stomp on each other's engine logs.
+const _instaQueue: Array<() => Promise<void>> = [];
+let _instaRunning = false;
+function enqueueInstaJob(fn: () => Promise<void>) {
+  _instaQueue.push(fn);
+  if (!_instaRunning) _drainInstaQueue();
+}
+async function _drainInstaQueue() {
+  _instaRunning = true;
+  while (_instaQueue.length > 0) {
+    const job = _instaQueue.shift()!;
+    await job();
+  }
+  _instaRunning = false;
+}
+
 export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSongCreated, activeJobCount }) => {
   const { t } = useTranslation();
   const { token } = useAuth();
@@ -314,11 +332,11 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
       caption: capturedCaption,
     });
     updateManualQueueItem(queueId, {
-      stage: capturedLyricMode === 'lyrics' ? 'Generating lyrics…' : 'Preparing…',
+      stage: _instaRunning ? 'Queued…' : (capturedLyricMode === 'lyrics' ? 'Generating lyrics…' : 'Preparing…'),
     });
 
-    // Run the full pipeline in the background (non-blocking)
-    (async () => {
+    // Run the full pipeline via serial queue (one at a time)
+    enqueueInstaJob(async () => {
       try {
         // Step 1: Resolve lyrics
         let resolvedLyrics = '';
@@ -438,7 +456,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, onSong
       } catch (err: any) {
         failManualQueueItem(queueId, err.message || 'Generation failed');
       }
-    })();
+    });
   }, [canSubmit, token, lyricMode, selectedProvider, selectedModel, selectedGenres, subject, vocalLanguage, computedCaption, thinking, buildParams, globalParams, onSongCreated]);
 
   // ── Back to input from preview ──
