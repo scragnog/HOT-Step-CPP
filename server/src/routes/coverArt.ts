@@ -52,7 +52,6 @@ router.get('/status', (_req, res) => {
       totalBytes: downloadStatus.totalBytes,
       downloadedBytes: downloadStatus.downloadedBytes,
       overallProgress: downloadStatus.overallProgress,
-      sdCliMissing: downloadStatus.sdCliMissing,
     },
   });
 });

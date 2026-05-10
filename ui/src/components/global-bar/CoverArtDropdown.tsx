@@ -29,7 +29,6 @@ interface CoverArtStatusResponse {
     totalBytes: number;
     downloadedBytes: number;
     overallProgress: number;
-    sdCliMissing: boolean;
   };
 }
 
@@ -196,11 +195,11 @@ export const CoverArtContent: React.FC = () => {
           <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-300 dark:border-white/5">
             <Image size={14} className="text-zinc-500 flex-shrink-0" />
             <span className="text-xs text-zinc-500">
-              Not installed — download required (~5.2 GB)
+              Not installed — one-click download (~5.9 GB)
             </span>
           </div>
 
-          <button
+        <button
             onClick={handleDownload}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-xl
                        bg-gradient-to-r from-pink-500/10 to-purple-500/10
@@ -209,23 +208,8 @@ export const CoverArtContent: React.FC = () => {
                        transition-all"
           >
             <Download size={14} />
-            Download Cover Art Models
+            Download Cover Art Models + Engine
           </button>
-
-          {status.download.sdCliMissing && (
-            <p className="text-[10px] text-amber-400/80 leading-relaxed px-1">
-              ⚠ sd-cli binary not found. Download it from the{' '}
-              <a
-                href="https://github.com/leejet/stable-diffusion.cpp/releases"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-amber-300"
-              >
-                stable-diffusion.cpp releases
-              </a>{' '}
-              and place it in the cover-art models directory.
-            </p>
-          )}
         </div>
       )}
 
