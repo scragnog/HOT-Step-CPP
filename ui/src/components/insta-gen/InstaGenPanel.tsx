@@ -155,14 +155,30 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, active
           token || undefined,
         );
 
-        // Wrap into InspireResult shape (no metadata — engine generates that later)
+        // Run inspire with the LLM lyrics to get metadata (bpm, duration, key, timesig)
+        setInspireProgress('Resolving song metadata...');
+        const metaResult = await runInspireAndWait(
+          {
+            caption: llmResult.caption || computedCaption,
+            lyrics: llmResult.lyrics,
+            vocalLanguage,
+            useCotCaption: true,
+            lmModel: globalParams.lmModel || undefined,
+            lmTemperature: globalParams.lmTemperature,
+            lmCfgScale: globalParams.lmCfgScale,
+            lmTopP: globalParams.lmTopP,
+          },
+          token || undefined,
+          (stage, _progress) => setInspireProgress(stage),
+        );
+
         const result: InspireResult = {
-          caption: llmResult.caption || computedCaption,
-          lyrics: llmResult.lyrics,
-          bpm: 0,
-          duration: 0,
-          keyScale: '',
-          timeSignature: '',
+          caption: metaResult.caption || llmResult.caption || computedCaption,
+          lyrics: llmResult.lyrics,  // Keep LLM lyrics, not inspire's
+          bpm: metaResult.bpm,
+          duration: metaResult.duration,
+          keyScale: metaResult.keyScale,
+          timeSignature: metaResult.timeSignature,
           vocalLanguage,
         };
 
@@ -218,21 +234,18 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, active
   const handleDirectGenerate = useCallback(async () => {
     if (!canSubmit) return;
 
-    if (lyricMode === 'instrumental') {
-      // Instrumental: no lyrics needed, go straight to generate
-      const params = buildParams('[Instrumental]', computedCaption);
-      onGenerate(params);
-      return;
-    }
-
-    // For both 'lyrics' and 'lyrics-ai': generate lyrics first, then generate audio.
-    // This mirrors the preview ON flow but skips the user review step.
     setError('');
     setPhase('inspiring');
 
     try {
-      if (lyricMode === 'lyrics-ai') {
-        // External LLM path
+      // Step 1: Resolve lyrics based on mode
+      let resolvedLyrics = '';
+      let resolvedCaption = computedCaption;
+
+      if (lyricMode === 'instrumental') {
+        resolvedLyrics = '[Instrumental]';
+      } else if (lyricMode === 'lyrics-ai') {
+        // External LLM generates lyrics
         setInspireProgress('Generating lyrics via AI...');
         const llmResult = await runLlmInspire(
           {
@@ -244,38 +257,51 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onGenerate, active
           },
           token || undefined,
         );
-        const params = buildParams(llmResult.lyrics, llmResult.caption || computedCaption);
-        onGenerate(params);
-
-      } else {
-        // Built-in LM path: run inspire to generate lyrics, then feed to generate
-        setInspireProgress('Generating lyrics...');
-        const result = await runInspireAndWait(
-          {
-            caption: computedCaption,
-            vocalLanguage,
-            useCotCaption: true,
-            lmModel: globalParams.lmModel || undefined,
-            lmTemperature: globalParams.lmTemperature,
-            lmCfgScale: globalParams.lmCfgScale,
-            lmTopP: globalParams.lmTopP,
-          },
-          token || undefined,
-          (stage, _progress) => setInspireProgress(stage),
-        );
-
-        // Feed inspire result straight to generate (no preview)
-        const params = buildParams(result.lyrics, result.caption);
-        if (result.bpm) params.bpm = result.bpm;
-        if (result.duration) params.duration = result.duration;
-        if (result.keyScale) params.keyScale = result.keyScale;
-        if (result.timeSignature) params.timeSignature = result.timeSignature;
-        onGenerate(params);
+        resolvedLyrics = llmResult.lyrics;
+        resolvedCaption = llmResult.caption || computedCaption;
       }
+      // For 'lyrics' mode, resolvedLyrics stays '' — inspire will generate them
+
+      // Step 2: Run inspire to get metadata (bpm, duration, key, timesig)
+      // and lyrics if not already resolved. This ensures consistent metadata
+      // regardless of skipLm setting or lyric source.
+      setInspireProgress(lyricMode === 'lyrics' ? 'Generating lyrics...' : 'Resolving song metadata...');
+      const inspireParams: any = {
+        caption: resolvedCaption,
+        vocalLanguage,
+        useCotCaption: true,
+        lmModel: globalParams.lmModel || undefined,
+        lmTemperature: globalParams.lmTemperature,
+        lmCfgScale: globalParams.lmCfgScale,
+        lmTopP: globalParams.lmTopP,
+      };
+      // If we already have lyrics, pass them so the LM only fills metadata
+      if (resolvedLyrics) {
+        inspireParams.lyrics = resolvedLyrics;
+      }
+      if (lyricMode === 'instrumental') {
+        inspireParams.instrumental = true;
+      }
+
+      const inspireResult = await runInspireAndWait(
+        inspireParams,
+        token || undefined,
+        (stage, _progress) => setInspireProgress(stage),
+      );
+
+      // Step 3: Build params with lyrics + metadata from inspire
+      const finalLyrics = resolvedLyrics || inspireResult.lyrics;
+      const finalCaption = inspireResult.caption || resolvedCaption;
+      const params = buildParams(finalLyrics, finalCaption);
+      if (inspireResult.bpm) params.bpm = inspireResult.bpm;
+      if (inspireResult.duration) params.duration = inspireResult.duration;
+      if (inspireResult.keyScale) params.keyScale = inspireResult.keyScale;
+      if (inspireResult.timeSignature) params.timeSignature = inspireResult.timeSignature;
+      onGenerate(params);
 
       setPhase('input');
     } catch (err: any) {
-      setError(err.message || 'Lyric generation failed');
+      setError(err.message || 'Generation failed');
       setPhase('input');
     }
   }, [canSubmit, lyricMode, selectedProvider, selectedModel, selectedGenres, subject, vocalLanguage, computedCaption, buildParams, onGenerate, token, globalParams]);
