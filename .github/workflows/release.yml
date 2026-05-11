@@ -156,27 +156,26 @@ jobs:
           Expand-Archive -Path $nodeZip -DestinationPath release/.node-cache -Force
 
       # ── Build Engine ───────────────────────────────────────────
-      - name: Cache CMake build
-        uses: actions/cache@v4
-        with:
-          path: engine/build
-          key: cmake-${{ matrix.variant }}-${{ hashFiles('engine/src/**', 'engine/ggml/**', 'engine/CMakeLists.txt') }}
-          restore-keys: |
-            cmake-${{ matrix.variant }}-
+      - name: Setup sccache (compiler cache)
+        uses: mozilla-actions/sccache-action@v0.0.7
 
       - name: Build C++ engine
         shell: pwsh
+        env:
+          SCCACHE_GHA_ENABLED: "true"
         run: |
           $buildDir = "engine/build"
           New-Item -ItemType Directory -Force $buildDir | Out-Null
           # Vulkan SDK paths may change between runs — force fresh configure
-          # (CUDA builds benefit hugely from cache, so only nuke for Vulkan)
           if ("${{ matrix.variant }}" -eq "vulkan") {
             $cacheFile = Join-Path $buildDir "CMakeCache.txt"
             if (Test-Path $cacheFile) { Remove-Item $cacheFile -Force; Write-Host "Cleared CMake cache (Vulkan)" }
           }
           Push-Location $buildDir
-          cmake .. ${{ matrix.cmake_flags }}
+          cmake .. ${{ matrix.cmake_flags }} `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CUDA_COMPILER_LAUNCHER=sccache
           cmake --build . --config Release -j $env:NUMBER_OF_PROCESSORS
           Pop-Location
 
