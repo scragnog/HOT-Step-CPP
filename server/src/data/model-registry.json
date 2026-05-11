@@ -1591,7 +1591,7 @@
       "scale": null,
       "variant": null,
       "quant": null,
-      "sizeBytes": 22528,
+      "sizeBytes": 21816,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "Shared provider support library for ONNX Runtime.",
       "tags": [

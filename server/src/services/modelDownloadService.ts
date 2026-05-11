@@ -348,7 +348,9 @@ class ModelDownloadService extends EventEmitter {
         // Handle redirects
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume(); // Drain response
-          this._downloadWithRedirects(res.headers.location, partPath, job, startByte, redirectCount + 1)
+          // Resolve relative redirects (e.g. /api/resolve-cache/...) against the original URL
+          const redirectUrl = new URL(res.headers.location, parsedUrl).href;
+          this._downloadWithRedirects(redirectUrl, partPath, job, startByte, redirectCount + 1)
             .then(resolve).catch(reject);
           return;
         }
