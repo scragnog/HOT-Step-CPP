@@ -75,6 +75,20 @@ jobs:
           version: latest
           cache: true
 
+      - name: Verify Vulkan SDK layout
+        if: matrix.variant == 'vulkan'
+        shell: bash
+        run: |
+          echo "VULKAN_SDK=$VULKAN_SDK"
+          echo "--- Top-level dirs ---"
+          ls -la "$VULKAN_SDK/" | head -20
+          echo "--- Looking for vulkan headers ---"
+          find "$VULKAN_SDK" -name "vulkan.h" -type f 2>/dev/null | head -5
+          echo "--- Looking for vulkan libs ---"
+          find "$VULKAN_SDK" -name "vulkan-1*" -type f 2>/dev/null | head -5
+          echo "--- Looking for glslc ---"
+          find "$VULKAN_SDK" -name "glslc*" -type f 2>/dev/null | head -5
+
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -158,14 +172,16 @@ jobs:
         run: |
           Push-Location server
           npm install --ignore-scripts
-          # ffmpeg-static needs its postinstall to download the binary
-          npx --yes ffmpeg-static 2>$null
+          # ffmpeg-static's install script downloads the actual binary
+          Push-Location node_modules/ffmpeg-static
+          node install.js
+          Pop-Location
           # Verify ffmpeg was downloaded
           if (Test-Path "node_modules/ffmpeg-static/ffmpeg.exe") {
             $sz = [math]::Round((Get-Item "node_modules/ffmpeg-static/ffmpeg.exe").Length / 1MB, 1)
             Write-Host "ffmpeg.exe downloaded ($sz MB)"
           } else {
-            Write-Warning "ffmpeg.exe not found after postinstall"
+            Write-Host "WARNING: ffmpeg.exe not found after install script" -ForegroundColor Yellow
           }
           Pop-Location
 
@@ -418,12 +434,12 @@ jobs:
           cd server && npm install --ignore-scripts
           cd node_modules/better-sqlite3 && npx prebuild-install --runtime node --target ${{ env.NODE_VERSION }} --arch arm64 --platform darwin || npm run build-release
           cd ../..
-          # ffmpeg-static needs its postinstall to download the binary
-          npx --yes ffmpeg-static 2>/dev/null || true
+          # ffmpeg-static's install script downloads the actual binary
+          cd node_modules/ffmpeg-static && node install.js && cd ../..
           if [ -f "node_modules/ffmpeg-static/ffmpeg" ]; then
             echo "ffmpeg downloaded ($(du -h node_modules/ffmpeg-static/ffmpeg | cut -f1))"
           else
-            echo "WARNING: ffmpeg not found after postinstall"
+            echo "WARNING: ffmpeg not found after install script"
           fi
           cd ..
 

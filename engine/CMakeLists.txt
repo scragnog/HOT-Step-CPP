@@ -64,10 +64,17 @@ endif()
 # Users can override with -DCMAKE_CUDA_ARCHITECTURES=native for local builds.
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     find_package(CUDAToolkit QUIET)
-    if(CUDAToolkit_FOUND AND CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8")
-        set(CMAKE_CUDA_ARCHITECTURES "75-virtual;80-virtual;86-real;89-real;90-real;120a-real;121a-real")
-    else()
-        set(CMAKE_CUDA_ARCHITECTURES "75-virtual;80-virtual;86-real;89-real;90-real")
+    # Base arch list: Turing through Lovelace/Ada
+    set(CMAKE_CUDA_ARCHITECTURES "75-virtual;80-virtual;86-real;89-real;90-real")
+    if(CUDAToolkit_FOUND)
+        # Blackwell sm_120a: CUDA 12.8+
+        if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES "120a-real")
+        endif()
+        # Blackwell sm_121a: CUDA 12.8.1+ (not present in 12.8.0)
+        if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8.1")
+            list(APPEND CMAKE_CUDA_ARCHITECTURES "121a-real")
+        endif()
     endif()
 endif()
 
