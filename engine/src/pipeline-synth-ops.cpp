@@ -906,6 +906,8 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
     // ── Latent output RMS guard ─────────────────────────────────────────
     // Detect latent blowup (common with XL models at high noise + high CFG)
     // and auto-rescale to prevent pure-noise/static VAE output.
+    // NOTE: Turbo models naturally output RMS ~1.0-1.1 (guidance=1.0 distillation).
+    // Threshold must be high enough to avoid false positives on turbo output.
     {
         const int  n       = (int) s.output.size();
         double     sum_sq  = 0.0;
@@ -913,7 +915,7 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
             sum_sq += (double) s.output[i] * s.output[i];
         }
         float out_rms = (float) sqrt(sum_sq / (double) n);
-        const float RMS_THRESHOLD = 1.0f;
+        const float RMS_THRESHOLD = 3.0f;
         const float TARGET_RMS    = 0.3f;
         if (out_rms > RMS_THRESHOLD) {
             float gain = TARGET_RMS / out_rms;
