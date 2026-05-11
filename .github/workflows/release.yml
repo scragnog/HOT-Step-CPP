@@ -178,8 +178,6 @@ jobs:
         shell: pwsh
         env:
           SCCACHE_GHA_ENABLED: "true"
-          # If GHA cache storage is down, fall back to direct compilation
-          # instead of failing every compile with exit code 2
           SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
         run: |
           $buildDir = "engine/build"
@@ -190,14 +188,44 @@ jobs:
             if (Test-Path $cacheFile) { Remove-Item $cacheFile -Force; Write-Host "Cleared CMake cache (Vulkan)" }
           }
 
+          # Test if sccache works end-to-end — GHA cache backend may be down.
+          # --start-server can succeed but the first actual compile fails when
+          # sccache tries to read from storage. Test with a real compilation.
+          $useSccache = $false
+          try {
+            sccache --stop-server 2>&1 | Out-Null
+            # Create a trivial test file and try compiling through sccache
+            $testFile = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.c'
+            "int main(){return 0;}" | Set-Content $testFile
+            $testObj = $testFile -replace '\.c$', '.obj'
+            $result = sccache cl.exe /nologo /c /Fo"$testObj" "$testFile" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              $useSccache = $true
+              Write-Host "sccache: test compile succeeded — caching enabled"
+            } else {
+              Write-Warning "sccache: test compile failed (exit $LASTEXITCODE) — building without cache"
+            }
+            Remove-Item $testFile, $testObj -ErrorAction SilentlyContinue
+          } catch {
+            Write-Warning "sccache: probe failed — $($_.Exception.Message)"
+          }
+
+          $launcherArgs = @()
+          if ($useSccache) {
+            $launcherArgs = @(
+              "-DCMAKE_C_COMPILER_LAUNCHER=sccache",
+              "-DCMAKE_CXX_COMPILER_LAUNCHER=sccache",
+              "-DCMAKE_CUDA_COMPILER_LAUNCHER=sccache"
+            )
+          } else {
+            Write-Host "Building WITHOUT sccache (cache backend unavailable)"
+          }
+
           Push-Location $buildDir
           # Use Ninja generator — Visual Studio generator ignores COMPILER_LAUNCHER
-          cmake .. -G Ninja `
-            -DCMAKE_BUILD_TYPE=Release `
-            ${{ matrix.cmake_flags }} `
-            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
-            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
-            -DCMAKE_CUDA_COMPILER_LAUNCHER=sccache
+          $cmakeArgs = @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release") + "${{ matrix.cmake_flags }}".Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries) + $launcherArgs
+          Write-Host "cmake $($cmakeArgs -join ' ')"
+          cmake .. @cmakeArgs
           cmake --build . -j $env:NUMBER_OF_PROCESSORS
           Pop-Location
 
