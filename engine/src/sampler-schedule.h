@@ -139,9 +139,17 @@ static void sampler_build_scheduler_override(
             fprintf(stderr, "[DiT] WARNING: unknown scheduler '%s', using linear\n", ss.c_str());
             sched = reg.scheduler_lookup("linear");
         }
-        auto & pp = g_hotstep_params.plugin_params;
-        lua_call_scheduler(*sched, out_schedule.data(), num_steps, shift_val, pp);
-        fprintf(stderr, "[DiT] Custom schedule: %s (%s), shift=%.2f\n",
-                sched->display_name.c_str(), sched->name.c_str(), shift_val);
+        if (!sched) {
+            // No plugins loaded at all — hardcoded linear fallback to avoid nullptr crash
+            fprintf(stderr, "[DiT] ERROR: no scheduler plugins loaded, using hardcoded linear\n");
+            for (int i = 0; i < num_steps; i++) {
+                out_schedule[i] = 1.0f - (float) i / (float) num_steps;
+            }
+        } else {
+            auto & pp = g_hotstep_params.plugin_params;
+            lua_call_scheduler(*sched, out_schedule.data(), num_steps, shift_val, pp);
+            fprintf(stderr, "[DiT] Custom schedule: %s (%s), shift=%.2f\n",
+                    sched->display_name.c_str(), sched->name.c_str(), shift_val);
+        }
     }
 }
