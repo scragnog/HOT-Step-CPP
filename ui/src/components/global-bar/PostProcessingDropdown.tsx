@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Sparkles, AudioWaveform, Zap, Image,
+  Sparkles, AudioWaveform, Zap, Image, Mic2,
   Upload, Trash2, Music2,
   ChevronDown, RotateCcw,
 } from 'lucide-react';
@@ -378,7 +378,103 @@ export const PostProcessingDropdown: React.FC = () => {
         </div>
       </Accordion>
 
-      {/* 2. VST Chain */}
+      {/* 2. Vocal Naturalizer */}
+      <Accordion
+        icon={<Mic2 size={14} />}
+        label={t('pp.vocalNaturalizer')}
+        accentColor="pink"
+        persistKey="hs-ppAccordion-naturalizer"
+        toggle={{ checked: gp.vocalNaturalizerEnabled, onChange: gp.setVocalNaturalizerEnabled }}
+      >
+        <div className="space-y-2 mt-2">
+          <p className="text-[10px] text-zinc-500 leading-relaxed">
+            Removes robotic/auto-tune artifacts from AI vocals using 5-stage
+            DSP humanisation. Uses SuperSep to isolate vocals before processing.
+            Adds ~30–60s. Skipped on instrumentals.
+          </p>
+          {gp.vocalNaturalizerEnabled && (
+            <div className="space-y-2 pt-1">
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    gp.setNaturalizeAmount(0.5);
+                    gp.setNatVibratoRate(4.5);
+                    gp.setNatVibratoDepth(1.0);
+                    gp.setNatFormantStrength(1.0);
+                    gp.setNatMetallicReduction(1.0);
+                    gp.setNatQuantizationMask(1.0);
+                    gp.setNatTransitionSmooth(1.0);
+                  }}
+                  className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-pink-400 transition-colors"
+                  title="Reset Vocal Naturalizer parameters to defaults"
+                >
+                  <RotateCcw size={11} />
+                  Reset
+                </button>
+              </div>
+              <EditableSlider
+                label="Amount"
+                value={gp.naturalizeAmount}
+                min={0} max={1.0} step={0.01}
+                onChange={gp.setNaturalizeAmount}
+                formatDisplay={v => v === 0 ? 'Off' : v <= 0.3 ? 'Subtle' : v <= 0.6 ? 'Moderate' : v <= 0.8 ? 'Strong' : 'Maximum'}
+                tooltip="Master intensity — scales all 5 naturalisation stages proportionally."
+              />
+              <EditableSlider
+                label="Vibrato Rate"
+                value={gp.natVibratoRate}
+                min={3.0} max={7.0} step={0.1}
+                onChange={gp.setNatVibratoRate}
+                formatDisplay={v => v.toFixed(1) + ' Hz'}
+                tooltip="Vibrato speed for pitch variation. Natural human vibrato is ~4–6 Hz."
+              />
+              <EditableSlider
+                label="Vibrato Depth"
+                value={gp.natVibratoDepth}
+                min={0} max={1.0} step={0.01}
+                onChange={gp.setNatVibratoDepth}
+                formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
+                tooltip="Pitch variation intensity. Breaks rigid pitch quantization from auto-tune."
+              />
+              <EditableSlider
+                label="Formant Humanize"
+                value={gp.natFormantStrength}
+                min={0} max={1.0} step={0.01}
+                onChange={gp.setNatFormantStrength}
+                formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
+                tooltip="Adds subtle variation to the 200–3000 Hz formant band to humanize locked timbre."
+              />
+              <EditableSlider
+                label="Metallic Cut"
+                value={gp.natMetallicReduction}
+                min={0} max={1.0} step={0.01}
+                onChange={gp.setNatMetallicReduction}
+                formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
+                tooltip="Reduces harsh digital artifacts in the 6–10 kHz range."
+              />
+              <EditableSlider
+                label="Quantization Mask"
+                value={gp.natQuantizationMask}
+                min={0} max={1.0} step={0.01}
+                onChange={gp.setNatQuantizationMask}
+                formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
+                tooltip="Shaped noise (1–4 kHz) to mask pitch 'stair-stepping' from quantization."
+              />
+              <EditableSlider
+                label="Transition Smooth"
+                value={gp.natTransitionSmooth}
+                min={0} max={1.0} step={0.01}
+                onChange={gp.setNatTransitionSmooth}
+                formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
+                tooltip="Smooths abrupt pitch transitions into natural glides between notes."
+              />
+            </div>
+          )}
+        </div>
+      </Accordion>
+
+      {/* 3. VST Chain */}
       <Accordion
         icon={<Sparkles size={14} />}
         label={t('pp.vstChain')}
@@ -431,13 +527,14 @@ export const PostProcessingDropdown: React.FC = () => {
 // ── Badge ───────────────────────────────────────────────────────
 
 export const PostProcessingBadge: React.FC = () => {
-  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, coverArtEnabled } = useGlobalParams();
+  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, coverArtEnabled, vocalNaturalizerEnabled } = useGlobalParams();
   const { chain } = useVstChainStore();
   const vstEnabled = chain.filter(p => p.enabled).length;
 
   const parts: string[] = [];
   if (ppVaeReencode) parts.push('PP-VAE');
   if (spectralLifterEnabled) parts.push('SL');
+  if (vocalNaturalizerEnabled) parts.push('Nat');
   if (vstEnabled > 0) parts.push(`${vstEnabled} VST${vstEnabled !== 1 ? 's' : ''}`);
   if (masteringEnabled && masteringReference) parts.push('Master');
   if (coverArtEnabled) parts.push('Cover');

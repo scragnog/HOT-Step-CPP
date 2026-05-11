@@ -164,6 +164,24 @@ export interface GlobalParams {
   timbreAudioPath: string;
   setTimbreAudioPath: (v: string) => void;
 
+  // Vocal Naturalizer
+  vocalNaturalizerEnabled: boolean;
+  setVocalNaturalizerEnabled: (v: boolean) => void;
+  naturalizeAmount: number;
+  setNaturalizeAmount: (v: number) => void;
+  natVibratoRate: number;
+  setNatVibratoRate: (v: number) => void;
+  natVibratoDepth: number;
+  setNatVibratoDepth: (v: number) => void;
+  natFormantStrength: number;
+  setNatFormantStrength: (v: number) => void;
+  natMetallicReduction: number;
+  setNatMetallicReduction: (v: number) => void;
+  natQuantizationMask: number;
+  setNatQuantizationMask: (v: number) => void;
+  natTransitionSmooth: number;
+  setNatTransitionSmooth: (v: number) => void;
+
   // PP-VAE re-encode
   ppVaeReencode: boolean;
   setPpVaeReencode: (v: boolean) => void;
@@ -289,6 +307,16 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [timbreReference, setTimbreReference] = usePersistedState('hs-timbreReference', false);
   const [timbreAudioPath, setTimbreAudioPath] = usePersistedState('hs-timbreAudioPath', '');
 
+  // Vocal Naturalizer
+  const [vocalNaturalizerEnabled, setVocalNaturalizerEnabled] = usePersistedState('hs-vocalNaturalizerEnabled', false);
+  const [naturalizeAmount, setNaturalizeAmount] = usePersistedState('hs-naturalizeAmount', 0.5);
+  const [natVibratoRate, setNatVibratoRate] = usePersistedState('hs-natVibratoRate', 4.5);
+  const [natVibratoDepth, setNatVibratoDepth] = usePersistedState('hs-natVibratoDepth', 1.0);
+  const [natFormantStrength, setNatFormantStrength] = usePersistedState('hs-natFormantStrength', 1.0);
+  const [natMetallicReduction, setNatMetallicReduction] = usePersistedState('hs-natMetallicReduction', 1.0);
+  const [natQuantizationMask, setNatQuantizationMask] = usePersistedState('hs-natQuantizationMask', 1.0);
+  const [natTransitionSmooth, setNatTransitionSmooth] = usePersistedState('hs-natTransitionSmooth', 1.0);
+
   // PP-VAE re-encode (spectral cleanup via post-processing VAE)
   const [ppVaeReencode, setPpVaeReencode] = usePersistedState('hs-ppVaeReencode', false);
   const [ppVaeBlend, setPpVaeBlend] = usePersistedState('hs-ppVaeBlend', 0.0);
@@ -401,6 +429,16 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       durationBuffer: autoTrimEnabled ? durationBuffer : undefined,
       autoTrimFadeMs: autoTrimEnabled ? autoTrimFadeMs : undefined,
 
+      // Vocal Naturalizer
+      vocalNaturalizerEnabled: postProcessingEnabled ? vocalNaturalizerEnabled : false,
+      naturalizeAmount: (postProcessingEnabled && vocalNaturalizerEnabled) ? naturalizeAmount : undefined,
+      natVibratoRate: (postProcessingEnabled && vocalNaturalizerEnabled) ? natVibratoRate : undefined,
+      natVibratoDepth: (postProcessingEnabled && vocalNaturalizerEnabled) ? natVibratoDepth : undefined,
+      natFormantStrength: (postProcessingEnabled && vocalNaturalizerEnabled) ? natFormantStrength : undefined,
+      natMetallicReduction: (postProcessingEnabled && vocalNaturalizerEnabled) ? natMetallicReduction : undefined,
+      natQuantizationMask: (postProcessingEnabled && vocalNaturalizerEnabled) ? natQuantizationMask : undefined,
+      natTransitionSmooth: (postProcessingEnabled && vocalNaturalizerEnabled) ? natTransitionSmooth : undefined,
+
       // PP-VAE re-encode
       ppVaeReencode: (postProcessingEnabled && ppVaeReencode) || undefined,
       ppVaeBlend: (postProcessingEnabled && ppVaeReencode && ppVaeBlend > 0) ? ppVaeBlend : undefined,
@@ -422,6 +460,9 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
      spectralLifterEnabled, slDenoiseStrength, slNoiseFloor, slHfMix, slTransientBoost, slShimmerReduction,
     masteringEnabled, masteringReference, timbreReference, timbreAudioPath,
+    vocalNaturalizerEnabled, naturalizeAmount,
+    natVibratoRate, natVibratoDepth, natFormantStrength,
+    natMetallicReduction, natQuantizationMask, natTransitionSmooth,
     ppVaeReencode, ppVaeBlend,
     coverArtEnabled,
     postProcessingEnabled,
@@ -479,6 +520,15 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     masteringReference, setMasteringReference,
     timbreReference, setTimbreReference,
     timbreAudioPath, setTimbreAudioPath,
+    // Vocal Naturalizer
+    vocalNaturalizerEnabled, setVocalNaturalizerEnabled,
+    naturalizeAmount, setNaturalizeAmount,
+    natVibratoRate, setNatVibratoRate,
+    natVibratoDepth, setNatVibratoDepth,
+    natFormantStrength, setNatFormantStrength,
+    natMetallicReduction, setNatMetallicReduction,
+    natQuantizationMask, setNatQuantizationMask,
+    natTransitionSmooth, setNatTransitionSmooth,
     // PP-VAE
     ppVaeReencode, setPpVaeReencode,
     ppVaeBlend, setPpVaeBlend,
@@ -523,6 +573,14 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     masteringReference, setMasteringReference,
     timbreReference, setTimbreReference,
     timbreAudioPath, setTimbreAudioPath,
+    vocalNaturalizerEnabled, setVocalNaturalizerEnabled,
+    naturalizeAmount, setNaturalizeAmount,
+    natVibratoRate, setNatVibratoRate,
+    natVibratoDepth, setNatVibratoDepth,
+    natFormantStrength, setNatFormantStrength,
+    natMetallicReduction, setNatMetallicReduction,
+    natQuantizationMask, setNatQuantizationMask,
+    natTransitionSmooth, setNatTransitionSmooth,
     ppVaeReencode, setPpVaeReencode,
     ppVaeBlend, setPpVaeBlend,
     coverArtEnabled, setCoverArtEnabled,

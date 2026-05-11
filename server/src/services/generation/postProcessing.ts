@@ -1,6 +1,6 @@
 // generation/postProcessing.ts — Post-generation processing chain
 //
-// PP-VAE re-encode, Spectral Lifter, VST chain, and mastering.
+// PP-VAE re-encode, Spectral Lifter, Vocal Naturalizer, VST chain, and mastering.
 // Operates on a COPY of the raw WAV — raw generation is never modified.
 
 import fs from 'fs';
@@ -9,6 +9,7 @@ import { config } from '../../config.js';
 import { aceClient } from '../../services/aceClient.js';
 import { runMastering } from '../../routes/mastering.js';
 import { applyVstChain } from '../../routes/vst.js';
+import { runVocalNaturalizer, type NaturalizerParams } from './vocalNaturalizer.js';
 
 type LogFn = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
 type StageFn = (stage: string) => void;
@@ -25,6 +26,17 @@ interface PostProcessParams {
   slShimmerReduction?: number;
   masteringEnabled?: boolean;
   masteringReference?: string;
+  // Vocal Naturalizer
+  vocalNaturalizerEnabled?: boolean;
+  naturalizeAmount?: number;
+  natVibratoRate?: number;
+  natVibratoDepth?: number;
+  natFormantStrength?: number;
+  natMetallicReduction?: number;
+  natQuantizationMask?: number;
+  natTransitionSmooth?: number;
+  // Context — used to skip naturalizer on instrumentals
+  instrumental?: boolean;
 }
 
 /** Run the full post-processing chain on a list of audio files. Returns parallel array of mastered URLs. */
@@ -89,6 +101,31 @@ export async function runPostProcessingChain(
         log('INFO', `[Spectral Lifter] Applied to ${audioFilename}`);
       } catch (slErr: any) {
         log('WARNING', `[Spectral Lifter] Failed (non-fatal): ${slErr.message}`);
+      }
+    }
+
+    // ── Vocal Naturalizer (between Spectral Lifter and VST Chain) ──
+    const natOn = ppMasterOn && !!params.vocalNaturalizerEnabled && !params.instrumental;
+    if (natOn) {
+      try {
+        const natParams: NaturalizerParams = {
+          amount: params.naturalizeAmount ?? 0.5,
+          vibratoRate: params.natVibratoRate ?? 4.5,
+          vibratoDepth: params.natVibratoDepth ?? 1.0,
+          formantStrength: params.natFormantStrength ?? 1.0,
+          metallicReduction: params.natMetallicReduction ?? 1.0,
+          quantizationMask: params.natQuantizationMask ?? 1.0,
+          transitionSmooth: params.natTransitionSmooth ?? 1.0,
+        };
+        const applied = await runVocalNaturalizer(
+          processedPath, natParams, log, setStage, i, audioUrls.length
+        );
+        if (applied) {
+          anyStageRan = true;
+          log('INFO', `[Vocal Naturalizer] Applied to ${processedFilename}`);
+        }
+      } catch (natErr: any) {
+        log('WARNING', `[Vocal Naturalizer] Failed (non-fatal): ${natErr.message}`);
       }
     }
 
