@@ -299,16 +299,24 @@ jobs:
             Copy-Item -Recurse "plugins" "$dist/plugins"
           }
 
-          # MSVC Runtime DLLs
+          # MSVC Runtime DLLs (CRT + OpenMP)
+          # CRT DLLs (vcruntime, msvcp) — all live under Microsoft.VC143.CRT
           $msvcRedist = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter "vcruntime140.dll" -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'debug' -and $_.FullName -match 'Redist' } |
             Select-Object -First 1
           if ($msvcRedist) {
             $msvcDir = $msvcRedist.DirectoryName
-            foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")) {
+            foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll")) {
               $src = Join-Path $msvcDir $dll
               if (Test-Path $src) { Copy-Item $src (Join-Path $engineOut $dll) }
             }
+          }
+          # OpenMP runtime (vcomp140.dll) — lives under Microsoft.VC143.OpenMP
+          $openmpRedist = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter "vcomp140.dll" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'debug' -and $_.FullName -match 'Redist' } |
+            Select-Object -First 1
+          if ($openmpRedist) {
+            Copy-Item $openmpRedist.FullName (Join-Path $engineOut "vcomp140.dll")
           }
 
           # Server
