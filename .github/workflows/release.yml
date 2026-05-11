@@ -1,0 +1,624 @@
+# .github/workflows/release.yml — Automated multi-platform release pipeline
+#
+# Triggered by: pushing a version tag (e.g. git tag v1.1.0 && git push origin v1.1.0)
+#
+# Jobs:
+#   1. build-windows (matrix: cuda/vulkan/cpu) — parallel Windows builds
+#   2. build-macos — Apple Silicon Metal build
+#   3. release — collect all artifacts, generate notes, create draft GitHub Release
+#
+# Architecture: see docs/plans/2026-05-11-release-automation-design.md
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # Required for gh release create
+
+env:
+  NODE_VERSION: '22.16.0'
+  ORT_VERSION: '1.25.1'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Windows builds (CUDA / Vulkan / CPU) — run in parallel via matrix strategy
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [cuda, vulkan, cpu]
+        include:
+          - variant: cuda
+            cmake_flags: >-
+              -DGGML_CUDA=ON -DGGML_VULKAN=OFF
+              -DGGML_BACKEND_DL=ON
+              -DHOT_STEP_STATIC_RUNTIME=ON
+              -DGGML_CPU_ALL_VARIANTS=ON
+          - variant: vulkan
+            cmake_flags: >-
+              -DGGML_CUDA=OFF -DGGML_VULKAN=ON
+              -DGGML_BACKEND_DL=ON
+              -DHOT_STEP_STATIC_RUNTIME=ON
+              -DGGML_CPU_ALL_VARIANTS=ON
+          - variant: cpu
+            cmake_flags: >-
+              -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
+              -DGGML_BACKEND_DL=OFF
+              -DHOT_STEP_STATIC_RUNTIME=ON
+              -DGGML_CPU_ALL_VARIANTS=ON
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0   # Full history for release notes
+
+      # ── SDK Setup ──────────────────────────────────────────────
+      - name: Install CUDA Toolkit 12.8
+        if: matrix.variant == 'cuda'
+        uses: Jimver/cuda-toolkit@v0.2.35
+        id: cuda-toolkit
+        with:
+          cuda: '12.8.0'
+          method: 'network'
+
+      - name: Install Vulkan SDK
+        if: matrix.variant == 'vulkan'
+        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        with:
+          vulkan-query-version: latest
+          vulkan-components: Vulkan-Headers, Vulkan-Loader
+          vulkan-use-cache: true
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # ── ONNX Runtime (SuperSep) ────────────────────────────────
+      - name: Cache ONNX Runtime
+        id: cache-ort
+        uses: actions/cache@v4
+        with:
+          path: engine/deps/onnxruntime
+          key: ort-win-x64-gpu-${{ env.ORT_VERSION }}
+
+      - name: Download ONNX Runtime
+        if: steps.cache-ort.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ortUrl = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/onnxruntime-win-x64-gpu-${{ env.ORT_VERSION }}.zip"
+          $ortZip = "$env:RUNNER_TEMP\ort.zip"
+          Write-Host "Downloading ORT from $ortUrl"
+          Invoke-WebRequest -Uri $ortUrl -OutFile $ortZip -UseBasicParsing
+          New-Item -ItemType Directory -Force engine/deps | Out-Null
+          Expand-Archive -Path $ortZip -DestinationPath engine/deps -Force
+          Rename-Item "engine/deps/onnxruntime-win-x64-gpu-${{ env.ORT_VERSION }}" "engine/deps/onnxruntime"
+
+      # ── Portable Node.js ───────────────────────────────────────
+      - name: Cache portable Node.js
+        id: cache-node
+        uses: actions/cache@v4
+        with:
+          path: release/.node-cache
+          key: node-win-${{ env.NODE_VERSION }}
+
+      - name: Download portable Node.js
+        if: steps.cache-node.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $nodeUrl = "https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-win-x64.zip"
+          $nodeZip = "$env:RUNNER_TEMP\node.zip"
+          New-Item -ItemType Directory -Force release/.node-cache | Out-Null
+          Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip -UseBasicParsing
+          Expand-Archive -Path $nodeZip -DestinationPath release/.node-cache -Force
+
+      # ── Build Engine ───────────────────────────────────────────
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: engine/build
+          key: cmake-${{ matrix.variant }}-${{ hashFiles('engine/src/**', 'engine/ggml/**', 'engine/CMakeLists.txt') }}
+          restore-keys: |
+            cmake-${{ matrix.variant }}-
+
+      - name: Build C++ engine
+        shell: pwsh
+        run: |
+          $buildDir = "engine/build"
+          New-Item -ItemType Directory -Force $buildDir | Out-Null
+          Push-Location $buildDir
+          cmake .. ${{ matrix.cmake_flags }}
+          cmake --build . --config Release -j $env:NUMBER_OF_PROCESSORS
+          Pop-Location
+
+          # Verify output
+          $aceServer = "engine/build/Release/ace-server.exe"
+          if (-not (Test-Path $aceServer)) {
+            throw "Build failed: ace-server.exe not found"
+          }
+          Write-Host "Engine build complete: $(Get-Item $aceServer | Select-Object -ExpandProperty Length | ForEach-Object { [math]::Round($_ / 1MB, 1) }) MB"
+
+      # ── Bundle Server ──────────────────────────────────────────
+      - name: Install server dependencies
+        shell: pwsh
+        run: |
+          Push-Location server
+          npm install --ignore-scripts
+          Pop-Location
+
+      - name: Rebuild better-sqlite3 for portable Node
+        shell: pwsh
+        run: |
+          $nodeExe = "release/.node-cache/node-v${{ env.NODE_VERSION }}-win-x64/node.exe"
+          Push-Location server/node_modules/better-sqlite3
+          npx prebuild-install --runtime node --target ${{ env.NODE_VERSION }} --arch x64 --platform win32
+          Pop-Location
+
+      - name: Bundle server with esbuild
+        shell: pwsh
+        run: |
+          Push-Location release
+          npm install esbuild --save-dev
+          Pop-Location
+          node release/esbuild.config.mjs
+
+      # ── Build UI ───────────────────────────────────────────────
+      - name: Build UI
+        shell: pwsh
+        run: |
+          Push-Location ui
+          npm install
+          npm run build
+          Pop-Location
+
+      # ── Assemble Release Package ───────────────────────────────
+      - name: Assemble release
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $variant = "${{ matrix.variant }}"
+          $dist = "release/staging"
+
+          # Clean staging
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Force $dist | Out-Null
+
+          # Runtime: portable Node.js
+          New-Item -ItemType Directory -Force "$dist/runtime" | Out-Null
+          Copy-Item "release/.node-cache/node-v${{ env.NODE_VERSION }}-win-x64/node.exe" "$dist/runtime/node.exe"
+
+          # Engine: binaries + DLLs
+          $engineOut = "$dist/engine"
+          New-Item -ItemType Directory -Force $engineOut | Out-Null
+          $buildRelease = "engine/build/Release"
+
+          $engineFiles = @(
+            "ace-server.exe", "mastering.exe", "mp3-codec.exe",
+            "neural-codec.exe", "vst-host.exe", "quantize.exe",
+            "ggml.dll", "ggml-base.dll", "ggml-cpu.dll"
+          )
+
+          # Add variant-specific DLLs
+          switch ($variant) {
+            "cuda"   { $engineFiles += "ggml-cuda.dll" }
+            "vulkan" { $engineFiles += "ggml-vulkan.dll" }
+          }
+
+          foreach ($file in $engineFiles) {
+            $src = Join-Path $buildRelease $file
+            if (Test-Path $src) {
+              Copy-Item $src (Join-Path $engineOut $file)
+            } else {
+              Write-Warning "Missing engine file: $file"
+            }
+          }
+
+          # CPU variant DLLs (ggml-cpu-*.dll from GGML_CPU_ALL_VARIANTS)
+          Get-ChildItem (Join-Path $buildRelease "ggml-cpu-*.dll") -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName (Join-Path $engineOut $_.Name)
+          }
+
+          # ORT DLLs (for SuperSep)
+          $ortLib = "engine/deps/onnxruntime/lib"
+          if (Test-Path $ortLib) {
+            foreach ($dll in @("onnxruntime.dll", "onnxruntime_providers_shared.dll", "onnxruntime_providers_cuda.dll")) {
+              $src = Join-Path $ortLib $dll
+              if (Test-Path $src) { Copy-Item $src (Join-Path $engineOut $dll) }
+            }
+          }
+
+          # Lua plugins
+          if (Test-Path "engine/plugins") {
+            Copy-Item -Recurse "engine/plugins" "$engineOut/plugins"
+          }
+          if (Test-Path "plugins") {
+            Copy-Item -Recurse "plugins" "$dist/plugins"
+          }
+
+          # MSVC Runtime DLLs
+          $msvcRedist = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter "vcruntime140.dll" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'debug' -and $_.FullName -match 'Redist' } |
+            Select-Object -First 1
+          if ($msvcRedist) {
+            $msvcDir = $msvcRedist.DirectoryName
+            foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")) {
+              $src = Join-Path $msvcDir $dll
+              if (Test-Path $src) { Copy-Item $src (Join-Path $engineOut $dll) }
+            }
+          }
+
+          # Server
+          $serverOut = "$dist/server"
+          # server.mjs was placed by esbuild into release/staging/server/
+          # Copy better-sqlite3 minimal package
+          $bsqlSrc = "server/node_modules/better-sqlite3"
+          $bsqlDst = "$serverOut/node_modules/better-sqlite3"
+          New-Item -ItemType Directory -Force $bsqlDst | Out-Null
+          Copy-Item "$bsqlSrc/package.json" "$bsqlDst/package.json"
+          New-Item -ItemType Directory -Force "$bsqlDst/lib" | Out-Null
+          Copy-Item -Recurse "$bsqlSrc/lib/*" "$bsqlDst/lib"
+          # Copy pre-built native addon (already rebuilt for Node 22 in earlier step)
+          New-Item -ItemType Directory -Force "$bsqlDst/build/Release" | Out-Null
+          Copy-Item "$bsqlSrc/build/Release/better_sqlite3.node" "$bsqlDst/build/Release/better_sqlite3.node"
+
+          # better-sqlite3 runtime deps
+          foreach ($dep in @("bindings", "file-uri-to-path")) {
+            $depSrc = "server/node_modules/$dep"
+            if (Test-Path $depSrc) {
+              Copy-Item -Recurse $depSrc "$serverOut/node_modules/$dep"
+            }
+          }
+
+          # ffmpeg
+          $ffmpegSrc = "server/node_modules/ffmpeg-static/ffmpeg.exe"
+          if (Test-Path $ffmpegSrc) {
+            Copy-Item $ffmpegSrc "$serverOut/ffmpeg.exe"
+          }
+
+          # Data files
+          $dataOut = "$serverOut/data"
+          New-Item -ItemType Directory -Force $dataOut | Out-Null
+          Copy-Item "server/src/data/model-registry.json" "$dataOut/model-registry.json"
+          if (Test-Path "server/src/data/assistant-knowledge.md") {
+            Copy-Item "server/src/data/assistant-knowledge.md" "$dataOut/assistant-knowledge.md"
+          }
+
+          # UI
+          if (Test-Path "ui/dist") {
+            New-Item -ItemType Directory -Force "$dist/ui" | Out-Null
+            Copy-Item -Recurse "ui/dist" "$dist/ui/dist"
+          }
+
+          # Essentia
+          if (Test-Path "Essentia") {
+            Copy-Item -Recurse "Essentia" "$dist/Essentia"
+          }
+
+          # Noise samples
+          if (Test-Path "noise_samples") {
+            Copy-Item -Recurse "noise_samples" "$dist/noise_samples"
+          }
+
+          # Empty user directories
+          New-Item -ItemType Directory -Force "$dist/models" | Out-Null
+          New-Item -ItemType Directory -Force "$dist/adapters" | Out-Null
+
+          # Config and docs
+          Copy-Item ".env.example" "$dist/.env.example"
+          Copy-Item "release/HOT-Step.bat" "$dist/HOT-Step.bat"
+          Copy-Item "release/README.txt" "$dist/README.txt"
+
+      - name: Package and checksum
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $variant = "${{ matrix.variant }}"
+          $zipName = "HOT-Step-CPP-v${version}-win-x64-${variant}.zip"
+          $zipPath = "release/out/$zipName"
+
+          New-Item -ItemType Directory -Force "release/out" | Out-Null
+
+          # Compress with .NET for better compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            "release/staging", $zipPath,
+            [System.IO.Compression.CompressionLevel]::Optimal, $false
+          )
+
+          $zipSize = (Get-Item $zipPath).Length
+          $zipSizeMB = [math]::Round($zipSize / 1MB, 1)
+          Write-Host "$zipName ($zipSizeMB MB)"
+
+          # SHA256
+          $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash
+          "$hash  $zipName" | Set-Content "release/out/${zipName}.sha256" -NoNewline
+          Write-Host "SHA256: $hash"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-win-${{ matrix.variant }}
+          path: |
+            release/out/*.zip
+            release/out/*.sha256
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # macOS build (Apple Silicon / Metal)
+  # ─────────────────────────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-14  # M1 Apple Silicon
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install build dependencies
+        run: brew install cmake
+
+      # ── Build Engine ───────────────────────────────────────────
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: engine/build
+          key: cmake-macos-${{ hashFiles('engine/src/**', 'engine/ggml/**', 'engine/CMakeLists.txt') }}
+          restore-keys: |
+            cmake-macos-
+
+      - name: Build C++ engine
+        run: |
+          mkdir -p engine/build && cd engine/build
+          cmake .. \
+            -DGGML_METAL=ON \
+            -DGGML_METAL_EMBED_LIBRARY=ON \
+            -DGGML_BACKEND_DL=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --config Release -j $(sysctl -n hw.logicalcpu)
+          echo "Engine build complete"
+          ls -la ace-server mastering mp3-codec 2>/dev/null || true
+
+      # ── Bundle Server ──────────────────────────────────────────
+      - name: Install server dependencies
+        run: |
+          cd server && npm install --ignore-scripts
+
+      - name: Bundle server with esbuild
+        run: |
+          cd release && npm install esbuild --save-dev
+          cd .. && node release/esbuild.config.mjs
+
+      # ── Build UI ───────────────────────────────────────────────
+      - name: Build UI
+        run: |
+          cd ui && npm install && npm run build
+
+      # ── Assemble Release Package ───────────────────────────────
+      - name: Download portable Node.js
+        run: |
+          NODE_MAC_VERSION="${{ env.NODE_VERSION }}"
+          NODE_URL="https://nodejs.org/dist/v${NODE_MAC_VERSION}/node-v${NODE_MAC_VERSION}-darwin-arm64.tar.gz"
+          mkdir -p /tmp/node-portable
+          curl -sL "$NODE_URL" | tar -xz -C /tmp/node-portable --strip-components=1
+
+      - name: Assemble release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DIST="release/staging"
+          rm -rf "$DIST" && mkdir -p "$DIST"
+
+          # Runtime: portable Node.js
+          mkdir -p "$DIST/runtime/bin" "$DIST/runtime/lib"
+          cp /tmp/node-portable/bin/node "$DIST/runtime/bin/node"
+          # Copy ICU data if present (required for intl support)
+          if ls /tmp/node-portable/lib/*.dat 2>/dev/null; then
+            cp /tmp/node-portable/lib/*.dat "$DIST/runtime/lib/"
+          fi
+
+          # Engine binaries
+          mkdir -p "$DIST/engine"
+          BUILD_DIR="engine/build"
+          for bin in ace-server mastering mp3-codec neural-codec vst-host quantize; do
+            if [ -f "$BUILD_DIR/$bin" ]; then
+              cp "$BUILD_DIR/$bin" "$DIST/engine/$bin"
+            fi
+          done
+
+          # Copy any dylibs (ggml backends, Metal)
+          find "$BUILD_DIR" -maxdepth 1 -name "*.dylib" -exec cp {} "$DIST/engine/" \;
+
+          # Fix rpaths for portable distribution
+          for bin in "$DIST/engine/"*; do
+            if [ -x "$bin" ] && file "$bin" | grep -q "Mach-O"; then
+              install_name_tool -add_rpath @executable_path "$bin" 2>/dev/null || true
+            fi
+          done
+
+          # Lua plugins
+          [ -d "engine/plugins" ] && cp -r engine/plugins "$DIST/engine/plugins"
+          [ -d "plugins" ] && cp -r plugins "$DIST/plugins"
+
+          # Server
+          SRVOUT="$DIST/server"
+          # server.mjs was placed by esbuild
+          # Copy better-sqlite3
+          BSQL_SRC="server/node_modules/better-sqlite3"
+          BSQL_DST="$SRVOUT/node_modules/better-sqlite3"
+          mkdir -p "$BSQL_DST/lib" "$BSQL_DST/build/Release"
+          cp "$BSQL_SRC/package.json" "$BSQL_DST/"
+          cp -r "$BSQL_SRC/lib/"* "$BSQL_DST/lib/"
+          cp "$BSQL_SRC/build/Release/better_sqlite3.node" "$BSQL_DST/build/Release/"
+          # Runtime deps
+          for dep in bindings file-uri-to-path; do
+            [ -d "server/node_modules/$dep" ] && cp -r "server/node_modules/$dep" "$SRVOUT/node_modules/$dep"
+          done
+
+          # Data files
+          mkdir -p "$SRVOUT/data"
+          cp server/src/data/model-registry.json "$SRVOUT/data/"
+          [ -f server/src/data/assistant-knowledge.md ] && cp server/src/data/assistant-knowledge.md "$SRVOUT/data/"
+
+          # UI
+          [ -d "ui/dist" ] && mkdir -p "$DIST/ui" && cp -r ui/dist "$DIST/ui/dist"
+
+          # Noise samples
+          [ -d "noise_samples" ] && cp -r noise_samples "$DIST/noise_samples"
+
+          # Empty user directories
+          mkdir -p "$DIST/models" "$DIST/adapters"
+
+          # Config
+          cp .env.example "$DIST/.env.example"
+
+          # Launch script
+          cat > "$DIST/HOT-Step.sh" << 'LAUNCH'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export HOT_STEP_ROOT="$DIR"
+          exec "$DIR/runtime/bin/node" "$DIR/server/server.mjs"
+          LAUNCH
+          chmod +x "$DIST/HOT-Step.sh"
+
+      - name: Package and checksum
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARNAME="HOT-Step-CPP-v${VERSION}-macOS-arm64.tar.gz"
+          mkdir -p release/out
+          tar -czf "release/out/$TARNAME" -C release/staging .
+          HASH=$(shasum -a 256 "release/out/$TARNAME" | awk '{print $1}')
+          echo "$HASH  $TARNAME" > "release/out/${TARNAME}.sha256"
+          echo "$TARNAME ($(du -h "release/out/$TARNAME" | awk '{print $1}'))"
+          echo "SHA256: $HASH"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: |
+            release/out/*.tar.gz
+            release/out/*.sha256
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Release — collect all artifacts, generate notes, create draft release
+  # ─────────────────────────────────────────────────────────────────────────
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Full history for release notes
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.sha256" \) -exec cp {} release-assets/ \;
+          echo "=== Release assets ==="
+          ls -lah release-assets/
+
+      - name: Generate release notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "First release — no previous tag found"
+            COMMITS=$(git log --oneline "$TAG")
+          else
+            COMMITS=$(git log --oneline "${PREV_TAG}..${TAG}")
+          fi
+
+          # Build release notes
+          cat > release-notes.md << 'HEADER'
+          ## What's Changed
+          HEADER
+
+          # Features
+          FEATS=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ feat" || true)
+          if [ -n "$FEATS" ]; then
+            echo "" >> release-notes.md
+            echo "### 🎵 Features" >> release-notes.md
+            echo "$FEATS" | sed 's/^[a-f0-9]* /- /' >> release-notes.md
+          fi
+
+          # Fixes
+          FIXES=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ fix" || true)
+          if [ -n "$FIXES" ]; then
+            echo "" >> release-notes.md
+            echo "### 🔧 Fixes" >> release-notes.md
+            echo "$FIXES" | sed 's/^[a-f0-9]* /- /' >> release-notes.md
+          fi
+
+          # Other
+          OTHER=$(echo "$COMMITS" | grep -viE "^[a-f0-9]+ (feat|fix)" || true)
+          if [ -n "$OTHER" ]; then
+            echo "" >> release-notes.md
+            echo "### 📝 Other" >> release-notes.md
+            echo "$OTHER" | sed 's/^[a-f0-9]* /- /' >> release-notes.md
+          fi
+
+          # Download table
+          echo "" >> release-notes.md
+          echo "---" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "### Downloads" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "| Platform | Variant | File | Size |" >> release-notes.md
+          echo "|----------|---------|------|------|" >> release-notes.md
+
+          for f in release-assets/*.zip release-assets/*.tar.gz; do
+            [ -f "$f" ] || continue
+            NAME=$(basename "$f")
+            SIZE=$(du -h "$f" | awk '{print $1}')
+            if echo "$NAME" | grep -q "cuda"; then
+              echo "| Windows | CUDA (GPU) | \`$NAME\` | $SIZE |" >> release-notes.md
+            elif echo "$NAME" | grep -q "vulkan"; then
+              echo "| Windows | Vulkan (GPU) | \`$NAME\` | $SIZE |" >> release-notes.md
+            elif echo "$NAME" | grep -q "cpu"; then
+              echo "| Windows | CPU | \`$NAME\` | $SIZE |" >> release-notes.md
+            elif echo "$NAME" | grep -q "macOS"; then
+              echo "| macOS | Metal (Apple Silicon) | \`$NAME\` | $SIZE |" >> release-notes.md
+            fi
+          done
+
+          echo "" >> release-notes.md
+          echo "SHA256 checksums are attached to each file." >> release-notes.md
+
+          echo "=== Generated release notes ==="
+          cat release-notes.md
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --draft \
+            --title "${{ github.ref_name }}" \
+            --notes-file release-notes.md \
+            release-assets/*
