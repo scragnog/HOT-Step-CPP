@@ -178,6 +178,9 @@ jobs:
         shell: pwsh
         env:
           SCCACHE_GHA_ENABLED: "true"
+          # If GHA cache storage is down, fall back to direct compilation
+          # instead of failing every compile with exit code 2
+          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
         run: |
           $buildDir = "engine/build"
           New-Item -ItemType Directory -Force $buildDir | Out-Null
@@ -187,28 +190,14 @@ jobs:
             if (Test-Path $cacheFile) { Remove-Item $cacheFile -Force; Write-Host "Cleared CMake cache (Vulkan)" }
           }
 
-          # Probe sccache health — if GHA cache backend is down, build uncached
-          $launcherFlags = @()
-          try {
-            $env:SCCACHE_GHA_ENABLED = "true"
-            sccache --start-server 2>&1 | Out-Null
-            sccache --zero-stats 2>&1 | Out-Null
-            Write-Host "sccache: healthy — compiler caching enabled"
-            $launcherFlags = @(
-              "-DCMAKE_C_COMPILER_LAUNCHER=sccache",
-              "-DCMAKE_CXX_COMPILER_LAUNCHER=sccache",
-              "-DCMAKE_CUDA_COMPILER_LAUNCHER=sccache"
-            )
-          } catch {
-            Write-Warning "sccache: unavailable — building without cache (build will be slower)"
-          }
-
           Push-Location $buildDir
           # Use Ninja generator — Visual Studio generator ignores COMPILER_LAUNCHER
           cmake .. -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             ${{ matrix.cmake_flags }} `
-            $launcherFlags
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CUDA_COMPILER_LAUNCHER=sccache
           cmake --build . -j $env:NUMBER_OF_PROCESSORS
           Pop-Location
 
