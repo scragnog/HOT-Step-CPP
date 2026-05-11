@@ -30,6 +30,7 @@ engine/.cache/
 
 # Binaries & compiled objects
 *.exe
+!Essentia/*.exe
 *.dll
 *.lib
 *.obj
@@ -43,6 +44,7 @@ engine/.cache/
 
 # Audio files
 *.wav
+!noise_samples/*.wav
 *.mp3
 *.flac
 *.ogg
@@ -90,8 +92,12 @@ benchmark-results/
 docs/plans/
 scratch/
 
-# Release build artifacts
-release/
+# Release build artifacts (but keep scripts and configs)
+release/staging/
+release/out/
+release/.node-cache/
+release/node_modules/
+release/package-lock.json
 release-staging/
 runtime/
 *.tar.gz
