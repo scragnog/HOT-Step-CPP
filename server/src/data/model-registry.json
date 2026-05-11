@@ -1343,7 +1343,7 @@
       "quant": "BF16",
       "sizeBytes": 3713827104,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
-      "description": "Mid-size LM — good quality with lower VRAM. 3.5GB.",
+      "description": "Mid-size LM — good quality with lower VRAM. 3.5GB. ⚠️ Not compatible with Vulkan builds (use 4B instead).",
       "tags": []
     },
     {
@@ -1356,7 +1356,7 @@
       "quant": "Q8_0",
       "sizeBytes": 1975837568,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
-      "description": "Mid-size LM quantised — decent quality, very compact.",
+      "description": "Mid-size LM quantised — decent quality, very compact. ⚠️ Not compatible with Vulkan builds (use 4B instead).",
       "tags": []
     },
     {
@@ -1369,7 +1369,7 @@
       "quant": "BF16",
       "sizeBytes": 1331108128,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
-      "description": "Smallest LM — fast but lower quality audio codes. 1.3GB.",
+      "description": "Smallest LM — fast but lower quality audio codes. 1.3GB. ⚠️ Not compatible with Vulkan builds (use 4B instead).",
       "tags": []
     },
     {
@@ -1382,7 +1382,7 @@
       "quant": "Q8_0",
       "sizeBytes": 709846656,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
-      "description": "Tiny LM — minimum viable for quick experiments.",
+      "description": "Tiny LM — minimum viable for quick experiments. ⚠️ Not compatible with Vulkan builds (use 4B instead).",
       "tags": []
     },
     {

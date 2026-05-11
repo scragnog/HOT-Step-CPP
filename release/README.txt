@@ -24,13 +24,28 @@ REQUIREMENTS
 
 GPU SUPPORT
 -----------
-This release includes CUDA support for NVIDIA GPUs:
-  - RTX 2000 series (Turing)
-  - RTX 3000 series (Ampere)
-  - RTX 4000 series (Ada Lovelace)
-  - RTX 5000 series (Blackwell)
+CUDA Build (NVIDIA):
+  Supports all NVIDIA GPUs with recent drivers:
+    - RTX 2000 series (Turing)
+    - RTX 3000 series (Ampere)
+    - RTX 4000 series (Ada Lovelace)
+    - RTX 5000 series (Blackwell)
 
-Make sure your NVIDIA drivers are up to date:
+Vulkan Build (AMD / NVIDIA / Intel):
+  Uses Vulkan for GPU acceleration. Works with most modern GPUs
+  that have Vulkan 1.1+ support. Requires GPU drivers with the
+  Vulkan runtime installed (included with most driver packages).
+
+  IMPORTANT: Use the 4B LM model with the Vulkan build.
+  The 1.7B LM model produces corrupted output due to precision
+  issues in the Vulkan compute shaders. The 4B model works
+  correctly. This does not affect the DiT or VAE pipelines.
+
+CPU Build:
+  Runs entirely on CPU. No GPU required, but generation will be
+  significantly slower.
+
+Make sure your GPU drivers are up to date:
   https://www.nvidia.com/en-us/drivers/
 
 
