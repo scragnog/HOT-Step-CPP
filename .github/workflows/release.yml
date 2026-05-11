@@ -372,6 +372,9 @@ jobs:
           New-Item -ItemType Directory -Force "$dist/models" | Out-Null
           New-Item -ItemType Directory -Force "$dist/adapters" | Out-Null
 
+          # Build variant marker (so server knows whether CUDA runtime is needed)
+          Set-Content -Path "$dist/engine/.variant" -Value $variant -NoNewline
+
           # Config and docs
           Copy-Item ".env.example" "$dist/.env.example"
           Copy-Item "release/HOT-Step.bat" "$dist/HOT-Step.bat"

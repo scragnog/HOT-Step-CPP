@@ -289,12 +289,20 @@ async function ensureRequiredRuntime(): Promise<void> {
 // toolkit install — no need to download them into the engine directory.
 (async () => {
   if (PORTABLE_MODE && process.platform === 'win32') {
-    // CUDA runtime DLLs are only needed on Windows (macOS uses Metal via GGML)
-    try {
-      setEngineReady(false, 'Downloading CUDA runtime...');
-      await ensureRequiredRuntime();
-    } catch (err: any) {
-      console.error('[Server] Runtime bootstrap failed:', err.message);
+    // CUDA runtime DLLs are only needed for CUDA builds — skip for Vulkan/CPU
+    const variantFile = path.join(path.dirname(config.aceServer.exe), '.variant');
+    const variant = fs.existsSync(variantFile)
+      ? fs.readFileSync(variantFile, 'utf-8').trim()
+      : 'cuda'; // Assume CUDA if no marker (pre-v1.1 builds)
+    if (variant === 'cuda') {
+      try {
+        setEngineReady(false, 'Downloading CUDA runtime...');
+        await ensureRequiredRuntime();
+      } catch (err: any) {
+        console.error('[Server] Runtime bootstrap failed:', err.message);
+      }
+    } else {
+      console.log(`[Server] Build variant: ${variant} — skipping CUDA runtime download`);
     }
   }
   setEngineReady(false, 'Starting engine...');
