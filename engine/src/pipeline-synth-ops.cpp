@@ -41,9 +41,10 @@ static void diag_stats_f32(const char * label, const float * data, size_t n) {
 }
 
 // CSV list parser tolerant to any whitespace around commas. Locale-immune via
-// std::from_chars (C++17 charconv, overloaded on the numeric type). Used for
-// audio_codes (int) and custom_timesteps (float). Bails on first parse error
-// or overflow, returning the values consumed so far.
+// std::from_chars (C++17 charconv) for integers. Float parsing uses strtof
+// for portability (Apple libc++ does not implement from_chars for floats).
+// Used for audio_codes (int) and custom_timesteps (float). Bails on first
+// parse error or overflow, returning the values consumed so far.
 template <typename T> static std::vector<T> parse_csv(const std::string & s) {
     std::vector<T> out;
     const char *   first = s.data();
@@ -62,6 +63,29 @@ template <typename T> static std::vector<T> parse_csv(const std::string & s) {
         }
         out.push_back(v);
         first = r.ptr;
+    }
+    return out;
+}
+
+// Float specialization: strtof-based (Apple libc++ lacks from_chars<float>)
+template <> std::vector<float> parse_csv<float>(const std::string & s) {
+    std::vector<float> out;
+    const char *       first = s.data();
+    const char *       last  = first + s.size();
+    while (first < last) {
+        while (first < last && (*first == ',' || *first == ' ')) {
+            first++;
+        }
+        if (first == last) {
+            break;
+        }
+        char * end = nullptr;
+        float  v   = std::strtof(first, &end);
+        if (end == first) {
+            break;  // no progress — parse error
+        }
+        out.push_back(v);
+        first = end;
     }
     return out;
 }

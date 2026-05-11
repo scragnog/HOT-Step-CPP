@@ -51,7 +51,6 @@ jobs:
               -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
               -DGGML_BACKEND_DL=OFF
               -DHOT_STEP_STATIC_RUNTIME=ON
-              -DGGML_CPU_ALL_VARIANTS=ON
 
     steps:
       - name: Checkout
@@ -74,7 +73,7 @@ jobs:
         uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
           vulkan-query-version: latest
-          vulkan-components: Vulkan-Headers, Vulkan-Loader
+          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang
           vulkan-use-cache: true
 
       - name: Setup MSVC
