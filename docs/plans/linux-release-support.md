@@ -1,6 +1,6 @@
 # Linux Release Support
 
-**Status:** Planned  
+**Status:** Implemented (bc07059)  
 **Date:** 2026-05-11  
 **Priority:** Medium — user demand confirmed (community forks already running Linux)
 
