@@ -300,12 +300,16 @@ jobs:
           }
 
           # MSVC Runtime DLLs (CRT + OpenMP)
+          # CI runners have multiple Redist versions — always pick the NEWEST
+          # to avoid ABI mismatches with pre-built binaries like onnxruntime.dll.
           # CRT DLLs (vcruntime, msvcp) — all live under Microsoft.VC143.CRT
           $msvcRedist = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter "vcruntime140.dll" -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'debug' -and $_.FullName -match 'Redist' } |
+            Sort-Object { $_.VersionInfo.FileVersionRaw } -Descending |
             Select-Object -First 1
           if ($msvcRedist) {
             $msvcDir = $msvcRedist.DirectoryName
+            Write-Host "MSVC CRT Redist: $msvcDir (v$($msvcRedist.VersionInfo.FileVersion))"
             foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll")) {
               $src = Join-Path $msvcDir $dll
               if (Test-Path $src) { Copy-Item $src (Join-Path $engineOut $dll) }
@@ -314,8 +318,10 @@ jobs:
           # OpenMP runtime (vcomp140.dll) — lives under Microsoft.VC143.OpenMP
           $openmpRedist = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter "vcomp140.dll" -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'debug' -and $_.FullName -match 'Redist' } |
+            Sort-Object { $_.VersionInfo.FileVersionRaw } -Descending |
             Select-Object -First 1
           if ($openmpRedist) {
+            Write-Host "MSVC OpenMP Redist: $($openmpRedist.FullName) (v$($openmpRedist.VersionInfo.FileVersion))"
             Copy-Item $openmpRedist.FullName (Join-Path $engineOut "vcomp140.dll")
           }
 
