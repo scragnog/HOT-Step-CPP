@@ -375,17 +375,19 @@ export const CoverStudio: React.FC = () => {
           }
         }
       }
-      // Reference track + matchering + timbre conditioning
+      // Reference track + matchering from album preset
       if (selectedPreset?.reference_track_path) {
         params.referenceAudioUrl = selectedPreset.reference_track_path;
         params.masteringEnabled = true;
         params.masteringReference = selectedPreset.reference_track_path;
-        const timbreOverride = timbreOverridePath || engineParams.timbreReference;
-        if (typeof timbreOverride === 'string' && timbreOverride) {
-          params.timbreReference = timbreOverride;  // dedicated timbre audio path
-        } else {
-          params.timbreReference = true;  // use preset reference track as timbre
-        }
+        // Default: use preset reference as timbre (can be overridden below)
+        params.timbreReference = true;
+      }
+      // Timbre conditioning — user override takes priority over preset reference
+      if (timbreOverridePath) {
+        params.timbreReference = timbreOverridePath;
+      } else if (typeof engineParams.timbreReference === 'string' && engineParams.timbreReference) {
+        params.timbreReference = engineParams.timbreReference;
       }
 
       const res = await generateApi.submit(params as any, token);
