@@ -214,13 +214,12 @@ jobs:
           npx prebuild-install --runtime node --target ${{ env.NODE_VERSION }} --arch x64 --platform win32
           Pop-Location
 
-      - name: Bundle server with esbuild
+      - name: Install esbuild
         shell: pwsh
         run: |
           Push-Location release
           npm install esbuild --save-dev
           Pop-Location
-          node release/esbuild.config.mjs
 
       # ── Build UI ───────────────────────────────────────────────
       - name: Build UI
@@ -315,7 +314,12 @@ jobs:
 
           # Server
           $serverOut = "$dist/server"
-          # server.mjs was placed by esbuild into release/staging/server/
+          New-Item -ItemType Directory -Force $serverOut | Out-Null
+          # Re-run esbuild into clean staging (staging was wiped above)
+          node release/esbuild.config.mjs
+          if (-not (Test-Path "$serverOut/server.mjs")) {
+            throw "esbuild failed: server.mjs not found in $serverOut"
+          }
           # Copy better-sqlite3 minimal package
           $bsqlSrc = "server/node_modules/better-sqlite3"
           $bsqlDst = "$serverOut/node_modules/better-sqlite3"
@@ -467,7 +471,6 @@ jobs:
       - name: Bundle server with esbuild
         run: |
           cd release && npm install esbuild --save-dev
-          cd .. && node release/esbuild.config.mjs
 
       # ── Build UI ───────────────────────────────────────────────
       - name: Build UI
@@ -521,7 +524,10 @@ jobs:
 
           # Server
           SRVOUT="$DIST/server"
-          # server.mjs was placed by esbuild
+          mkdir -p "$SRVOUT"
+          # Re-run esbuild into clean staging (staging was wiped above)
+          node release/esbuild.config.mjs
+          [ -f "$SRVOUT/server.mjs" ] || { echo "ERROR: server.mjs missing after esbuild"; exit 1; }
           # Copy better-sqlite3
           BSQL_SRC="server/node_modules/better-sqlite3"
           BSQL_DST="$SRVOUT/node_modules/better-sqlite3"
