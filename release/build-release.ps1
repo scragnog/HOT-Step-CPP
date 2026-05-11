@@ -85,8 +85,8 @@ if (-not $SkipEngine) {
     Write-Host "  Running buildall.cmd with static runtime..."
 
     # Smart CMake cache handling: only clear if build flags have changed.
-    # Deleting CMakeCache.txt forces a full reconfigure → full rebuild of ALL
-    # targets including ~100+ CUDA vendor kernels (~1 hour). If the cache already
+    # Deleting CMakeCache.txt forces a full reconfigure -> full rebuild of ALL
+    # targets including 100+ CUDA vendor kernels (~1 hour). If the cache already
     # has the correct release flags, we skip deletion for a fast incremental build.
     $buildDir = Join-Path $engineDir "build"
     $cacheFile = Join-Path $buildDir "CMakeCache.txt"
@@ -110,10 +110,10 @@ if (-not $SkipEngine) {
             Write-Host "  Clearing CMake cache (flags changed since last build)..." -ForegroundColor Yellow
             Remove-Item $cacheFile -Force
         } else {
-            Write-Host "  CMake cache valid — incremental build (CUDA vendor files will NOT rebuild)" -ForegroundColor Green
+            Write-Host "  CMake cache valid -- incremental build (CUDA vendor files will NOT rebuild)" -ForegroundColor Green
         }
     } else {
-        Write-Host "  No CMake cache — full build required" -ForegroundColor Yellow
+        Write-Host "  No CMake cache -- full build required" -ForegroundColor Yellow
     }
 
     # Set cmake flags for the build
@@ -290,7 +290,7 @@ if (Test-Path $enginePluginsSrc) {
     $pluginCount = (Get-ChildItem -Recurse $enginePluginsDst -Filter "*.lua" | Measure-Object).Count
     Write-Host "    $pluginCount native plugins (engine/plugins/)" -ForegroundColor Green
 } else {
-    Write-Warning "  engine/plugins/ not found — engine will have no built-in plugins!"
+    Write-Warning "  engine/plugins/ not found -- engine will have no built-in plugins!"
 }
 $communityPluginsSrc = Join-Path $ProjectRoot "plugins"
 if (Test-Path $communityPluginsSrc) {
