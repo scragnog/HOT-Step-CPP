@@ -10,7 +10,11 @@
 // computed from coefficient formulas, applied via direct-form II transposed.
 
 import fs from 'fs';
-import { config } from '../../config.js';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { config, getFFmpegPath } from '../../config.js';
+
+const execFileAsync = promisify(execFile);
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -380,6 +384,13 @@ export async function runVocalNaturalizer(
   setStage(`Vocal Naturalizer: separating stems${suffix}...`);
   const wavBuf = fs.readFileSync(processedPath);
 
+  // Capture the original sample rate BEFORE SuperSep resamples to 44.1kHz
+  let originalSampleRate = 48000;
+  try {
+    const inputWav = parseWav(wavBuf);
+    originalSampleRate = inputWav.sampleRate;
+  } catch { /* fallback to 48000 */ }
+
   let jobId: string;
   try {
     const sepRes = await fetch(`${ACE_URL}/supersep/separate?level=0`, {
@@ -508,6 +519,32 @@ export async function runVocalNaturalizer(
 
     const outWav = writeWav({ sampleRate: outRate, channels: outChannels, bitsPerSample: 32, samples: mixed });
     fs.writeFileSync(processedPath, outWav);
+
+    // SuperSep operates at 44100 Hz internally, so the remix comes back at
+    // 44.1kHz even though the original was 48kHz. Resample back to the
+    // original rate to avoid contaminating the rest of the pipeline.
+    if (outRate !== originalSampleRate) {
+      const ffmpegPath = getFFmpegPath();
+      if (ffmpegPath) {
+        const tempResampled = processedPath + '.resampled.wav';
+        try {
+          log('INFO', `[Vocal Naturalizer] Resampling ${outRate} → ${originalSampleRate} Hz`);
+          await execFileAsync(ffmpegPath, [
+            '-y', '-i', processedPath,
+            '-ar', String(originalSampleRate),
+            '-c:a', 'pcm_f32le',
+            tempResampled,
+          ], { timeout: 60_000 });
+          fs.renameSync(tempResampled, processedPath);
+        } catch (rsErr: any) {
+          log('WARNING', `[Vocal Naturalizer] Resample failed: ${rsErr.message}`);
+          try { fs.unlinkSync(tempResampled); } catch {}
+        }
+      } else {
+        log('WARNING', `[Vocal Naturalizer] ffmpeg not available — output remains at ${outRate} Hz`);
+      }
+    }
+
     log('INFO', `[Vocal Naturalizer] Applied to ${vocalIndices.length} vocal stem(s)`);
     return true;
   } catch (err: any) {
