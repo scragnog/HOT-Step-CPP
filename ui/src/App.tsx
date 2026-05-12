@@ -477,6 +477,7 @@ const AppContent: React.FC = () => {
             <InstaGenPanel
               onSongCreated={handleSongCreated}
               activeJobCount={activeJobCount}
+              onNavigate={navigateTo}
             />
           </div>
 

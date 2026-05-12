@@ -8,7 +8,7 @@
     "sidebar.library": "ライブラリ",
     "sidebar.lyricStudio": "Lyric Studio",
     "sidebar.coverStudio": "Cover Studio",
-    "sidebar.stemStudio": "Stem Studio",
+    "sidebar.stemStudio": "ステム分離",
     "sidebar.stemBuilder": "Stem Builder",
     "sidebar.settings": "設定",
     "sidebar.theme.switchToLight": "ライトモードに切り替える",

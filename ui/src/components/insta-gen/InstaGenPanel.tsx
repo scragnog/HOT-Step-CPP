@@ -39,6 +39,7 @@ type Phase = 'input' | 'inspiring' | 'preview' | 'generating';
 interface InstaGenPanelProps {
   onSongCreated?: (song: any) => void;
   activeJobCount: number;
+  onNavigate?: (view: string) => void;
 }
 
 /** Derive a song title from lyrics. Prefers [Chorus] first line, then [Verse 1], then first lyric line. */
@@ -107,7 +108,7 @@ async function _drainInstaQueue() {
   _instaRunning = false;
 }
 
-export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, activeJobCount: _activeJobCount }) => {
+export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, activeJobCount: _activeJobCount, onNavigate }) => {
   const { t } = useTranslation();
   const { token } = useAuth();
   const globalParams = useGlobalParams();
@@ -535,6 +536,29 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
     });
   }, [canSubmit, token, lyricMode, selectedProvider, selectedModel, selectedGenres, subject, vocalLanguage, computedCaption, thinking, buildParams, globalParams, onSongCreated]);
 
+  // ── Refine in Custom-Gen — write preview data to CreatePanel's persisted state ──
+  const handleRefineInCustomGen = useCallback(() => {
+    if (!inspireResult) return;
+    try {
+      // Write to the same localStorage keys that CreatePanel's usePersistedState reads
+      localStorage.setItem('hs-caption', JSON.stringify(editedCaption));
+      localStorage.setItem('hs-lyrics', JSON.stringify(editedLyrics));
+      localStorage.setItem('hs-instrumental', JSON.stringify(lyricMode === 'instrumental'));
+      if (inspireResult.bpm) localStorage.setItem('hs-bpm', JSON.stringify(inspireResult.bpm));
+      if (inspireResult.duration) localStorage.setItem('hs-duration', JSON.stringify(inspireResult.duration));
+      if (inspireResult.keyScale) localStorage.setItem('hs-keyScale', JSON.stringify(inspireResult.keyScale));
+      if (inspireResult.timeSignature) localStorage.setItem('hs-timeSignature', JSON.stringify(inspireResult.timeSignature));
+      if (vocalLanguage) localStorage.setItem('hs-vocalLanguage', JSON.stringify(vocalLanguage));
+      // Title from LLM or derived
+      const title = inspireResult.title || '';
+      if (title) localStorage.setItem('hs-title', JSON.stringify(title));
+    } catch { /* ignore storage errors */ }
+
+    setPhase('input');
+    setInspireResult(null);
+    onNavigate?.('create');
+  }, [inspireResult, editedCaption, editedLyrics, lyricMode, vocalLanguage, onNavigate]);
+
   // ── Back to input from preview ──
   const handleBack = useCallback(() => {
     setPhase('input');
@@ -552,6 +576,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
           onCaptionChange={setEditedCaption}
           onGenerate={handleGenerateFromPreview}
           onBack={handleBack}
+          onRefine={handleRefineInCustomGen}
           isGenerating={false}
         />
       </div>

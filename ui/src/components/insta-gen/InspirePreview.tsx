@@ -4,7 +4,7 @@
 // User can edit lyrics and caption before committing to full generation.
 
 import React from 'react';
-import { Music, ArrowLeft } from 'lucide-react';
+import { Music, ArrowLeft, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { InspireResult } from '../../services/inspireApi';
 
@@ -16,6 +16,7 @@ interface InspirePreviewProps {
   onCaptionChange: (caption: string) => void;
   onGenerate: () => void;
   onBack: () => void;
+  onRefine?: () => void;
   isGenerating: boolean;
 }
 
@@ -27,6 +28,7 @@ export const InspirePreview: React.FC<InspirePreviewProps> = ({
   onCaptionChange,
   onGenerate,
   onBack,
+  onRefine,
   isGenerating,
 }) => {
   const { t } = useTranslation();
@@ -84,8 +86,8 @@ export const InspirePreview: React.FC<InspirePreviewProps> = ({
         />
       </div>
 
-      {/* Generate button */}
-      <div className="px-4 py-3">
+      {/* Action buttons */}
+      <div className="px-4 py-3 space-y-2">
         <button
           onClick={onGenerate}
           disabled={isGenerating}
@@ -94,6 +96,16 @@ export const InspirePreview: React.FC<InspirePreviewProps> = ({
           <Music size={16} />
           {isGenerating ? t('instaGen.inspireLoading') : t('instaGen.preview.generate')}
         </button>
+        {onRefine && (
+          <button
+            onClick={onRefine}
+            disabled={isGenerating}
+            className="w-full py-2.5 rounded-xl text-sm font-medium text-zinc-300 border border-white/10 bg-white/5 hover:bg-white/10 hover:text-white transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            <Pencil size={14} />
+            {t('instaGen.preview.refine')}
+          </button>
+        )}
       </div>
     </div>
   );

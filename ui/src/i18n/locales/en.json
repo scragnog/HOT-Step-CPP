@@ -8,7 +8,7 @@
     "sidebar.library": "Library",
     "sidebar.lyricStudio": "Lyric Studio",
     "sidebar.coverStudio": "Cover Studio",
-    "sidebar.stemStudio": "Stem Studio",
+    "sidebar.stemStudio": "Stem Separator",
     "sidebar.stemBuilder": "Stem Builder",
     "sidebar.settings": "Settings",
     "sidebar.theme.switchToLight": "Switch to Light Mode",
@@ -677,6 +677,7 @@
     "instaGen.preview.generate": "Generate Song",
     "instaGen.preview.back": "Back to Editing",
     "instaGen.preview.editCaption": "Edit Caption",
+    "instaGen.preview.refine": "Refine in Custom-Gen",
     "instaGen.clearAll": "Clear All"
   }
 }
