@@ -69,18 +69,6 @@ export function getCoverArtReadiness(): CoverArtStatus {
     }
   }
 
-  // On Windows, the CUDA build of sd.exe needs runtime DLLs co-located.
-  // These ship inside the release ZIP but can be lost if extraction is
-  // partial or the user manually placed only sd.exe.
-  if (process.platform === 'win32' && !missing.includes(REQUIRED_FILES.sdCli)) {
-    const cudaDlls = ['cublas64_12.dll', 'cublasLt64_12.dll', 'cudart64_12.dll'];
-    for (const dll of cudaDlls) {
-      if (!fs.existsSync(path.join(dir, dll))) {
-        missing.push(dll);
-      }
-    }
-  }
-
   return {
     installed: missing.length === 0,
     missingFiles: missing,

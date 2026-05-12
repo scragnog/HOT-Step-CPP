@@ -205,9 +205,19 @@ class CoverArtDownloader extends EventEmitter {
         }
       }
 
-      // 2. Download sd.exe from GitHub releases (if not present)
+      // 2. Download sd.exe from GitHub releases (if not present, or if
+      //    CUDA runtime DLLs are missing on Windows — the release ZIP
+      //    bundles them alongside the binary)
       const sdPath = path.join(dir, REQUIRED_FILES.sdCli);
-      if (!fs.existsSync(sdPath)) {
+      const needsSdDownload = !fs.existsSync(sdPath) ||
+        (process.platform === 'win32' && !this._hasCudaRuntimeDlls(dir));
+
+      if (needsSdDownload) {
+        // Remove stale binary so the extractor runs the full flow
+        if (fs.existsSync(sdPath)) {
+          console.log(`[CoverArt Download] ${REQUIRED_FILES.sdCli}: exists but CUDA runtime DLLs missing — re-downloading`);
+          try { fs.unlinkSync(sdPath); } catch {}
+        }
         await this._downloadSdBinary(dir);
       } else {
         console.log(`[CoverArt Download] ${REQUIRED_FILES.sdCli}: already exists, skipping`);
@@ -488,6 +498,12 @@ class CoverArtDownloader extends EventEmitter {
     if (moved > 0) {
       console.log(`[CoverArt Download] Swept ${moved} runtime lib(s) to cover-art root`);
     }
+  }
+
+  /** Check if CUDA 12 runtime DLLs are co-located with sd.exe (Windows only) */
+  private _hasCudaRuntimeDlls(dir: string): boolean {
+    const dlls = ['cublas64_12.dll', 'cublasLt64_12.dll', 'cudart64_12.dll'];
+    return dlls.every(dll => fs.existsSync(path.join(dir, dll)));
   }
 
   /** Build the complete list of entries including sd.exe for status display */
