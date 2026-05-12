@@ -611,12 +611,14 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     job.progress = 89;
     job.stage = 'Post-processing...';
 
+    let ppQualityScores: Array<{ unmastered?: any; mastered?: any }> = [];
     try {
-      const ppResults = await runPostProcessingChain(
+      const ppResult = await runPostProcessingChain(
         audioUrls, job.params, totalTracks, job.id,
         log, (stage) => { job.stage = stage; }
       );
-      masteredUrls.push(...ppResults);
+      masteredUrls.push(...ppResult.masteredUrls);
+      ppQualityScores = ppResult.qualityScores;
     } catch (err: any) {
       logGeneration(job.id, 'WARNING', `[Post-Processing] Chain failed: ${err.message}`);
     }
@@ -626,22 +628,28 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       const audioUrl = audioUrls[i];
       const trackMastered = masteredUrls[i] || '';
       const trackLatent = latentUrls[i] || '';
+      const trackQualityScores = ppQualityScores[i] || {};
       // Use per-track LM result for metadata when available
       const trackResult = lmResults[i] || firstResult;
       const trackLyrics = trackResult.lyrics || job.params.lyrics || '';
       const trackCaption = trackResult.caption || '';
 
+      // Serialize quality scores (only if evaluator was enabled)
+      const qualityJson = (trackQualityScores.unmastered || trackQualityScores.mastered)
+        ? JSON.stringify(trackQualityScores)
+        : '';
+
       const songId = uuidv4();
       getDb().prepare(`
         INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
                            duration, bpm, key_scale, time_signature, tags, dit_model,
-                           generation_params, mastered_audio_url, latent_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           generation_params, mastered_audio_url, latent_url, quality_scores)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         songId, job.userId, title, trackLyrics, style, trackCaption,
         audioUrl, duration, bpm, keyScale, timeSignature,
         JSON.stringify([]), aceReq.synth_model || '', JSON.stringify(job.params),
-        trackMastered, trackLatent,
+        trackMastered, trackLatent, qualityJson,
       );
       songIds.push(songId);
     }

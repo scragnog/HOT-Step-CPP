@@ -173,6 +173,10 @@ export function initDb(): void {
       check: `SELECT COUNT(*) as c FROM pragma_table_info('songs') WHERE name='latent_url'`,
       alter: `ALTER TABLE songs ADD COLUMN latent_url TEXT DEFAULT ''`,
     },
+    {
+      check: `SELECT COUNT(*) as c FROM pragma_table_info('songs') WHERE name='quality_scores'`,
+      alter: `ALTER TABLE songs ADD COLUMN quality_scores TEXT DEFAULT ''`,
+    },
   ];
   for (const m of songsMigrations) {
     const row = db.prepare(m.check).get() as any;

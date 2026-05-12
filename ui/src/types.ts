@@ -38,6 +38,8 @@ export interface Song {
   // Latent file
   latentUrl?: string;
   latent_url?: string;
+  // Quality scores (JSON blob from DB)
+  quality_scores?: string;
 }
 
 /** Normalized recent song returned by /api/songs/recent — unified across all modes */
@@ -207,6 +209,10 @@ export interface GenerationParams {
   // Cover Art auto-generation
   coverArtEnabled?: boolean;
   coverArtSubject?: string;     // Override the auto-generated image subject
+
+  // Audio Quality Evaluator
+  qualityEvalEnabled?: boolean;
+  qualityEvalTarget?: 'unmastered' | 'mastered' | 'both';
 }
 
 /** Generation job status from the server */

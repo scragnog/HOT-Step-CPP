@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Sparkles, AudioWaveform, Zap, Image, Mic2,
+  Sparkles, AudioWaveform, Zap, Image, Mic2, BarChart3,
   Upload, Trash2, Music2,
   ChevronDown, RotateCcw,
 } from 'lucide-react';
@@ -45,6 +45,8 @@ const Accordion: React.FC<AccordionProps> = ({
     cyan: 'border-cyan-500/20 bg-cyan-500/5',
     violet: 'border-violet-500/20 bg-violet-500/5',
     amber: 'border-amber-500/20 bg-amber-500/5',
+    emerald: 'border-emerald-500/20 bg-emerald-500/5',
+    pink: 'border-pink-500/20 bg-pink-500/5',
   };
   const activeStyle = toggle?.checked ? (accentMap[accentColor] || '') : '';
 
@@ -520,6 +522,47 @@ export const PostProcessingDropdown: React.FC = () => {
       >
         <CoverArtContent />
       </Accordion>
+
+      {/* 5. Quality Evaluator */}
+      <Accordion
+        icon={<BarChart3 size={14} />}
+        label={t('pp.qualityEval')}
+        accentColor="emerald"
+        persistKey="hs-ppAccordion-quality"
+        toggle={{ checked: gp.qualityEvalEnabled, onChange: gp.setQualityEvalEnabled }}
+        badge={gp.qualityEvalEnabled ? (
+          <span className="text-[10px] text-emerald-400/60 font-mono">
+            {gp.qualityEvalTarget === 'both' ? 'Raw+Master' : gp.qualityEvalTarget === 'mastered' ? 'Mastered' : 'Unmastered'}
+          </span>
+        ) : undefined}
+      >
+        <div className="space-y-3 py-2">
+          <p className="text-xs text-zinc-500 leading-relaxed">
+            {t('pp.qualityEvalDesc')}
+          </p>
+          <div>
+            <label className="text-[11px] font-medium text-zinc-500 mb-1.5 block">{t('pp.qualityEvalTarget')}</label>
+            <div className="flex rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
+              {(['unmastered', 'mastered', 'both'] as const).map(opt => (
+                <button
+                  key={opt}
+                  onClick={() => gp.setQualityEvalTarget(opt)}
+                  className={`
+                    flex-1 px-2 py-1.5 text-[11px] font-semibold transition-all
+                    ${gp.qualityEvalTarget === opt
+                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                    }
+                    ${opt !== 'unmastered' ? 'border-l border-zinc-200 dark:border-white/10' : ''}
+                  `}
+                >
+                  {t(`pp.qualityEval${opt.charAt(0).toUpperCase() + opt.slice(1)}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Accordion>
     </div>
   );
 };
@@ -527,7 +570,7 @@ export const PostProcessingDropdown: React.FC = () => {
 // ── Badge ───────────────────────────────────────────────────────
 
 export const PostProcessingBadge: React.FC = () => {
-  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, coverArtEnabled, vocalNaturalizerEnabled } = useGlobalParams();
+  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, coverArtEnabled, vocalNaturalizerEnabled, qualityEvalEnabled } = useGlobalParams();
   const { chain } = useVstChainStore();
   const vstEnabled = chain.filter(p => p.enabled).length;
 
@@ -538,6 +581,7 @@ export const PostProcessingBadge: React.FC = () => {
   if (vstEnabled > 0) parts.push(`${vstEnabled} VST${vstEnabled !== 1 ? 's' : ''}`);
   if (masteringEnabled && masteringReference) parts.push('Master');
   if (coverArtEnabled) parts.push('Cover');
+  if (qualityEvalEnabled) parts.push('QE');
 
   if (parts.length === 0) return null;
 

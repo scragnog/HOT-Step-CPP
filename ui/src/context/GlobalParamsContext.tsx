@@ -194,6 +194,12 @@ export interface GlobalParams {
   coverArtSubject: string;
   setCoverArtSubject: (v: string) => void;
 
+  // ── Quality Evaluator ──
+  qualityEvalEnabled: boolean;
+  setQualityEvalEnabled: (v: boolean) => void;
+  qualityEvalTarget: string;
+  setQualityEvalTarget: (v: string) => void;
+
   // ── Derived ──
   /** Assemble all engine params for a generation request */
   getGlobalParams: () => Partial<GenerationParams>;
@@ -327,6 +333,10 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [coverArtEnabled, setCoverArtEnabled] = usePersistedState('hs-coverArtEnabled', false);
   const [coverArtSubject, setCoverArtSubject] = usePersistedState('hs-coverArtSubject', '');
 
+  // Quality Evaluator
+  const [qualityEvalEnabled, setQualityEvalEnabled] = usePersistedState('hs-qualityEvalEnabled', false);
+  const [qualityEvalTarget, setQualityEvalTarget] = usePersistedState('hs-qualityEvalTarget', 'unmastered');
+
   // Trigger word settings — read from shared settings (same key as App.tsx)
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
 
@@ -449,6 +459,10 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // Cover Art
       coverArtEnabled: coverArtEnabled || undefined,
       coverArtSubject: (coverArtEnabled && coverArtSubject) ? coverArtSubject : undefined,
+
+      // Quality Evaluator
+      qualityEvalEnabled: qualityEvalEnabled || undefined,
+      qualityEvalTarget: qualityEvalEnabled ? qualityEvalTarget as any : undefined,
     };
   }, [
     ditModel, lmModel, vaeModel, embeddingModel,
@@ -470,6 +484,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     ppVaeReencode, ppVaeBlend,
     coverArtEnabled,
     coverArtSubject,
+    qualityEvalEnabled, qualityEvalTarget,
     postProcessingEnabled,
     pluginParams,
     settings,
@@ -540,6 +555,9 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     // Cover Art
     coverArtEnabled, setCoverArtEnabled,
     coverArtSubject, setCoverArtSubject,
+    // Quality Evaluator
+    qualityEvalEnabled, setQualityEvalEnabled,
+    qualityEvalTarget, setQualityEvalTarget,
     // Derived
     getGlobalParams,
   }), [
@@ -591,6 +609,8 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     ppVaeBlend, setPpVaeBlend,
     coverArtEnabled, setCoverArtEnabled,
     coverArtSubject, setCoverArtSubject,
+    qualityEvalEnabled, setQualityEvalEnabled,
+    qualityEvalTarget, setQualityEvalTarget,
     getGlobalParams,
   ]);
 

@@ -325,6 +325,90 @@ export const SongList: React.FC<SongListProps> = ({
   );
 };
 
+// ── Quality Score Badge ──────────────────────────────────────────────────────
+
+interface ParsedQuality {
+  score: number;
+  metallic: number;
+  wordCuts: number;
+  noise: number;
+}
+
+function parseQualityScores(raw?: string): { unmastered?: ParsedQuality; mastered?: ParsedQuality } | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function qualityColor(score: number): string {
+  if (score >= 0.8) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+  if (score >= 0.5) return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+  return 'text-red-400 bg-red-500/10 border-red-500/20';
+}
+
+const QualityBadge: React.FC<{ song: Song }> = ({ song }) => {
+  const scores = parseQualityScores(song.quality_scores);
+  if (!scores) return null;
+
+  const [showTooltip, setShowTooltip] = React.useState(false);
+
+  const renderBadge = (q: ParsedQuality, label?: string) => (
+    <span
+      className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${qualityColor(q.score)} cursor-help`}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      {label ? `${label}: ` : ''}{Math.round(q.score * 100)}%
+    </span>
+  );
+
+  const renderTooltip = () => {
+    if (!showTooltip) return null;
+    const entries: Array<{ label: string; q: ParsedQuality }> = [];
+    if (scores.unmastered) entries.push({ label: 'Unmastered', q: scores.unmastered });
+    if (scores.mastered) entries.push({ label: 'Mastered', q: scores.mastered });
+
+    return (
+      <div className="absolute bottom-full left-0 mb-1.5 z-50 p-2.5 rounded-lg bg-zinc-900 border border-white/10 shadow-xl min-w-[160px]">
+        {entries.map(({ label, q }) => (
+          <div key={label} className="mb-2 last:mb-0">
+            <div className="text-[10px] font-bold text-zinc-300 mb-1">{label}</div>
+            <div className="space-y-0.5">
+              <div className="flex justify-between text-[10px]">
+                <span className="text-zinc-500">Overall</span>
+                <span className={qualityColor(q.score).split(' ')[0]}>{Math.round(q.score * 100)}%</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-zinc-500">Metallic</span>
+                <span className={qualityColor(q.metallic).split(' ')[0]}>{Math.round(q.metallic * 100)}%</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-zinc-500">Word Cuts</span>
+                <span className={qualityColor(q.wordCuts).split(' ')[0]}>{Math.round(q.wordCuts * 100)}%</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-zinc-500">Noise</span>
+                <span className={qualityColor(q.noise).split(' ')[0]}>{Math.round(q.noise * 100)}%</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const hasBoth = scores.unmastered && scores.mastered;
+
+  return (
+    <div className="relative inline-flex items-center gap-1">
+      {scores.unmastered && renderBadge(scores.unmastered, hasBoth ? 'Raw' : undefined)}
+      {scores.mastered && renderBadge(scores.mastered, hasBoth ? 'PP' : undefined)}
+      {renderTooltip()}
+    </div>
+  );
+};
+
 interface SongItemProps {
   song: Song;
   isActive: boolean;
@@ -492,6 +576,7 @@ const SongItem: React.FC<SongItemProps> = ({
             {gp.keyScale}
           </span>
         )}
+        <QualityBadge song={song} />
       </div>
 
       {/* Duration */}
@@ -761,6 +846,7 @@ const SongCard: React.FC<SongCardProps> = ({
               {modelShort}
             </span>
           )}
+          <QualityBadge song={song} />
         </div>
 
         {/* Date */}

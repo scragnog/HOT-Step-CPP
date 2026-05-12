@@ -1,6 +1,7 @@
 // generation/postProcessing.ts — Post-generation processing chain
 //
-// PP-VAE re-encode, Spectral Lifter, Vocal Naturalizer, VST chain, and mastering.
+// PP-VAE re-encode, Spectral Lifter, Vocal Naturalizer, VST chain, mastering,
+// and optional Audio Quality Evaluation.
 // Operates on a COPY of the raw WAV — raw generation is never modified.
 
 import fs from 'fs';
@@ -10,6 +11,7 @@ import { aceClient } from '../../services/aceClient.js';
 import { runMastering } from '../../routes/mastering.js';
 import { applyVstChain } from '../../routes/vst.js';
 import { runVocalNaturalizer, type NaturalizerParams } from './vocalNaturalizer.js';
+import { evaluateAudioQuality, formatQualityLog, type QualityResult } from './audioQualityEvaluator.js';
 
 type LogFn = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
 type StageFn = (stage: string) => void;
@@ -37,9 +39,24 @@ interface PostProcessParams {
   natTransitionSmooth?: number;
   // Context — used to skip naturalizer on instrumentals
   instrumental?: boolean;
+  // Audio Quality Evaluator
+  qualityEvalEnabled?: boolean;
+  qualityEvalTarget?: 'unmastered' | 'mastered' | 'both';
 }
 
-/** Run the full post-processing chain on a list of audio files. Returns parallel array of mastered URLs. */
+/** Quality scores for a single track (unmastered, mastered, or both). */
+export interface TrackQualityScores {
+  unmastered?: QualityResult;
+  mastered?: QualityResult;
+}
+
+/** Result of the full post-processing chain. */
+export interface PostProcessResult {
+  masteredUrls: string[];
+  qualityScores: TrackQualityScores[];
+}
+
+/** Run the full post-processing chain on a list of audio files. */
 export async function runPostProcessingChain(
   audioUrls: string[],
   params: PostProcessParams,
@@ -47,13 +64,16 @@ export async function runPostProcessingChain(
   jobId: string,
   log: LogFn,
   setStage: StageFn
-): Promise<string[]> {
+): Promise<PostProcessResult> {
   const ppMasterOn = params.postProcessingEnabled !== false;
   const ppVaeOn = ppMasterOn && !!params.ppVaeReencode;
   const spectralLifterOn = ppMasterOn && !!params.spectralLifterEnabled;
   const masteringRef = params.masteringReference;
   const masteringOn = ppMasterOn && !!masteringRef && !!params.masteringEnabled;
   const masteredUrls: string[] = [];
+  const qualityScores: TrackQualityScores[] = [];
+  const qeOn = !!params.qualityEvalEnabled;
+  const qeTarget = params.qualityEvalTarget || 'unmastered';
 
   for (let i = 0; i < audioUrls.length; i++) {
     const audioUrl = audioUrls[i];
@@ -69,6 +89,19 @@ export async function runPostProcessingChain(
 
     fs.copyFileSync(rawWavPath, processedPath);
     let anyStageRan = false;
+    const trackQuality: TrackQualityScores = {};
+
+    // ── Quality Evaluation: Unmastered (before any PP) ──
+    if (qeOn && (qeTarget === 'unmastered' || qeTarget === 'both')) {
+      try {
+        setStage(`Quality check (unmastered)${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
+        const result = evaluateAudioQuality(rawWavPath);
+        trackQuality.unmastered = result;
+        log('INFO', formatQualityLog(result, `Unmastered ${audioFilename}`));
+      } catch (qeErr: any) {
+        log('WARNING', `[Quality] Unmastered eval failed (non-fatal): ${qeErr.message}`);
+      }
+    }
 
     if (ppVaeOn) {
       setStage(`PP-VAE Re-encode${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
@@ -159,6 +192,20 @@ export async function runPostProcessingChain(
       }
     }
 
+    // ── Quality Evaluation: Mastered (after all PP stages) ──
+    if (qeOn && (qeTarget === 'mastered' || qeTarget === 'both') && anyStageRan) {
+      try {
+        setStage(`Quality check (mastered)${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
+        const result = evaluateAudioQuality(processedPath);
+        trackQuality.mastered = result;
+        log('INFO', formatQualityLog(result, `Mastered ${processedFilename}`));
+      } catch (qeErr: any) {
+        log('WARNING', `[Quality] Mastered eval failed (non-fatal): ${qeErr.message}`);
+      }
+    }
+
+    qualityScores.push(trackQuality);
+
     if (anyStageRan) {
       masteredUrls.push(`/audio/${processedFilename}`);
     } else {
@@ -167,5 +214,5 @@ export async function runPostProcessingChain(
     }
   }
 
-  return masteredUrls;
+  return { masteredUrls, qualityScores };
 }
