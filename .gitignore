@@ -108,3 +108,6 @@ nul
 # i18n dev-only utility scripts
 ui/add_strings.mjs
 ui/temp_strings.json
+
+# Temporarily withheld plugins (pending developer approval)
+plugins/solvers/storm_sampler_core.lua
