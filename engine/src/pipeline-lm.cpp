@@ -688,7 +688,7 @@ int ace_lm_generate(AceLm *            ctx,
     // JSON is the instruction. Empty field = "fill it". Filled = "don't touch".
     if (user_has_codes && !skip_codes) {
         fprintf(stderr, "[LM-Generate] audio_codes present, skip LM\n");
-    } else if (skip_codes || need_fill) {
+    } else if (skip_codes || need_fill || req->use_cot_caption) {
         // inspire/format modes always run Phase 1 with their own instruction.
         // generate mode uses the inspire instruction when lyrics are empty.
         if (mode == LM_MODE_INSPIRE || (mode == LM_MODE_GENERATE && need_lyrics)) {
