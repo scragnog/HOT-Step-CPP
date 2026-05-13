@@ -5,6 +5,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import {
   Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus, Image,
+  LayoutGrid, List as ListIcon, Table2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
@@ -91,8 +92,8 @@ interface SongListProps {
   onAddToPlaylist?: (song: Song) => void;
   /** Show source filter tabs — true for Library page, false for Create page */
   showFilters?: boolean;
-  /** Layout mode — 'list' for compact rows, 'grid' for rich cards */
-  viewMode?: 'list' | 'grid';
+  /** Layout mode — 'list' for compact rows, 'grid' for rich cards, 'table' for data-dense */
+  viewMode?: 'list' | 'grid' | 'table';
   /** Override the header title */
   title?: string;
 }
@@ -106,6 +107,17 @@ export const SongList: React.FC<SongListProps> = ({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+
+  // Internal view mode — persisted per context (title), initialized from prop
+  const storageKey = `hs-songlist-viewMode-${title}`;
+  const [activeViewMode, setActiveViewMode] = useState<'list' | 'grid' | 'table'>(() => {
+    try { const v = localStorage.getItem(storageKey); if (v === 'list' || v === 'grid' || v === 'table') return v; } catch {}
+    return viewMode ?? 'list';
+  });
+  const changeViewMode = useCallback((m: 'list' | 'grid' | 'table') => {
+    setActiveViewMode(m);
+    try { localStorage.setItem(storageKey, m); } catch {}
+  }, [storageKey]);
 
   // Client-side source filtering
   const filteredSongs = useMemo(() => {
@@ -174,6 +186,25 @@ export const SongList: React.FC<SongListProps> = ({
           <span className="text-xs text-zinc-500 font-medium">
             {filteredSongs.length}{showFilters && sourceFilter !== 'all' ? ` / ${songs.length}` : ''} song{filteredSongs.length !== 1 ? 's' : ''}
           </span>
+
+          {/* View mode toggle */}
+          <div className="flex items-center rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
+            {([['grid', LayoutGrid], ['list', ListIcon], ['table', Table2]] as const).map(([mode, Icon]) => (
+              <button
+                key={mode}
+                onClick={() => changeViewMode(mode as 'list' | 'grid' | 'table')}
+                className={`p-1.5 transition-colors ${
+                  activeViewMode === mode
+                    ? 'bg-pink-500/20 text-pink-400'
+                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                }`}
+                title={mode.charAt(0).toUpperCase() + mode.slice(1) + ' view'}
+              >
+                <Icon size={14} />
+              </button>
+            ))}
+          </div>
+
           {!selectionMode ? (
             <button
               onClick={() => setSelectionMode(true)}
@@ -274,7 +305,7 @@ export const SongList: React.FC<SongListProps> = ({
       )}
 
       {/* Grid View */}
-      {viewMode === 'grid' && filteredSongs.length > 0 && (
+      {activeViewMode === 'grid' && filteredSongs.length > 0 && (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
           {filteredSongs.map(song => (
             <SongCard
@@ -298,7 +329,7 @@ export const SongList: React.FC<SongListProps> = ({
       )}
 
       {/* List View */}
-      {viewMode === 'list' && filteredSongs.length > 0 && (
+      {activeViewMode === 'list' && filteredSongs.length > 0 && (
         <div className="space-y-1">
           {filteredSongs.map(song => (
             <SongItem
@@ -320,6 +351,24 @@ export const SongList: React.FC<SongListProps> = ({
             />
           ))}
         </div>
+      )}
+
+      {/* Table View */}
+      {activeViewMode === 'table' && filteredSongs.length > 0 && (
+        <SongTable
+          songs={filteredSongs}
+          currentSongId={currentSongId}
+          isPlaying={playback.isPlaying}
+          selectionMode={selectionMode}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelection}
+          onPlay={onPlay}
+          onSelect={onSelect}
+          onDelete={onDelete}
+          onReuse={onReuse}
+          onDownload={onDownload}
+          showSourceBadge={showFilters && sourceFilter === 'all'}
+        />
       )}
     </div>
   );
@@ -686,12 +735,6 @@ const SongCard: React.FC<SongCardProps> = ({
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const gp = song.generationParams || song.generation_params as any;
-  const bpm = song.bpm || gp?.bpm;
-  const keyScale = song.key_scale || gp?.keyScale;
-  const model = song.dit_model || gp?.ditModel || '';
-  const modelShort = model ? model.split('/').pop()?.replace(/\.gguf$/, '').substring(0, 20) : '';
-
   const formatDate = (d: string | Date | undefined) => {
     if (!d) return '';
     const date = typeof d === 'string' ? new Date(d) : d;
@@ -713,147 +756,324 @@ const SongCard: React.FC<SongCardProps> = ({
   return (
     <div
       className={`
-        group relative rounded-xl border overflow-hidden cursor-pointer
+        group relative rounded-xl border overflow-hidden cursor-pointer aspect-square
         transition-all duration-200 hover:scale-[1.02] hover:shadow-lg hover:shadow-black/20
         ${isSelected && selectionMode
           ? 'border-pink-500/40 bg-pink-500/5 ring-1 ring-pink-500/20'
           : isActive
             ? 'border-pink-500/30 bg-pink-500/5'
-            : 'border-zinc-200 dark:border-white/5 bg-zinc-50/80 dark:bg-zinc-900/50 hover:border-zinc-300 dark:hover:border-zinc-300 dark:border-white/10 hover:bg-zinc-100/50 dark:hover:bg-zinc-100/50 dark:bg-zinc-800/50'
+            : 'border-zinc-200 dark:border-white/5 bg-zinc-50/80 dark:bg-zinc-900/50 hover:border-zinc-300 dark:hover:border-white/10 hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50'
         }
       `}
       onClick={handleClick}
     >
-      {/* Album Art Area */}
-      <div className="relative aspect-square bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden">
+      {/* Full-bleed image */}
+      <div className="absolute inset-0 bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
         {song.coverUrl || song.cover_url ? (
           <img src={song.coverUrl || song.cover_url} alt="" className="w-full h-full object-cover" />
         ) : (
-          <div className="flex flex-col items-center gap-2">
-            <Music size={32} className="text-zinc-700" />
-          </div>
-        )}
-
-        {/* Play overlay */}
-        {!selectionMode && (
-          <button
-            onClick={(e) => { e.stopPropagation(); if (isActive) togglePlay(); else onPlay(); }}
-            className="absolute inset-0 flex items-center justify-center bg-black/20 dark:bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
-          >
-            <div className="w-12 h-12 rounded-full bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
-              {isPlaying
-                ? <Pause size={20} className="text-white" />
-                : <Play size={20} className="text-white ml-0.5" />
-              }
-            </div>
-          </button>
-        )}
-
-        {/* Selection checkbox */}
-        {selectionMode && (
-          <div className="absolute top-2 left-2">
-            {isSelected
-              ? <CheckSquare size={20} className="text-pink-400 drop-shadow" />
-              : <Square size={20} className="text-white/60 drop-shadow" />
-            }
-          </div>
-        )}
-
-        {/* Duration badge */}
-        <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md bg-black/20 dark:bg-black/40 dark:bg-black/70 backdrop-blur-sm text-[10px] font-mono text-white/80">
-          {formatDuration(song.duration)}
-        </div>
-
-        {/* More menu */}
-        {!selectionMode && (
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-              className="w-7 h-7 rounded-full bg-black/20 dark:bg-black/50 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/20 dark:bg-black/40 dark:bg-black/70 transition-colors"
-            >
-              <MoreHorizontal size={14} />
-            </button>
-            {showMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 rounded-xl shadow-xl py-1 min-w-[150px]">
-                  {onReuse && (
-                    <button onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                      <RotateCcw size={12} /> {t('library.reusePrompt')}
-                    </button>
-                  )}
-                  {onAddToPlaylist && (
-                    <button onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); setShowMenu(false); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                      <ListPlus size={12} /> {t('library.addToPlaylist')}
-                    </button>
-                  )}
-                  {onDownload && (
-                    <button onClick={(e) => { e.stopPropagation(); onDownload(); setShowMenu(false); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                      <Download size={12} /> {t('library.download')}
-                    </button>
-                  )}
-                  <button onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
-                    <Trash2 size={12} /> {t('library.delete')}
-                  </button>
-
-                  {/* Cover Art Generation */}
-                  <div className="border-t border-zinc-200 dark:border-white/5 my-1" />
-                  <button onClick={(e) => {
-                    e.stopPropagation();
-                    setShowMenu(false);
-                    triggerCoverArtGeneration(song);
-                  }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-violet-400 hover:bg-violet-500/10 transition-colors">
-                    <Image size={12} /> {song.coverUrl || song.cover_url ? 'Regenerate Cover' : 'Generate Cover'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+          <Music size={32} className="text-zinc-700" />
         )}
       </div>
 
-      {/* Card Body */}
-      <div className="px-3 py-2.5">
+      {/* Play overlay */}
+      {!selectionMode && (
+        <button
+          onClick={(e) => { e.stopPropagation(); if (isActive) togglePlay(); else onPlay(); }}
+          className="absolute inset-0 z-10 flex items-center justify-center bg-black/20 dark:bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+        >
+          <div className="w-12 h-12 rounded-full bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
+            {isPlaying
+              ? <Pause size={20} className="text-white" />
+              : <Play size={20} className="text-white ml-0.5" />
+            }
+          </div>
+        </button>
+      )}
+
+      {/* Selection checkbox */}
+      {selectionMode && (
+        <div className="absolute top-2 left-2 z-20">
+          {isSelected
+            ? <CheckSquare size={20} className="text-pink-400 drop-shadow" />
+            : <Square size={20} className="text-white/60 drop-shadow" />
+          }
+        </div>
+      )}
+
+      {/* Duration badge */}
+      <div className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-[10px] font-mono text-white/80"
+        style={selectionMode ? { left: '2rem' } : undefined}
+      >
+        {formatDuration(song.duration)}
+      </div>
+
+      {/* More menu */}
+      {!selectionMode && (
+        <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+            className="w-7 h-7 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/60 transition-colors"
+          >
+            <MoreHorizontal size={14} />
+          </button>
+          {showMenu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 rounded-xl shadow-xl py-1 min-w-[150px]">
+                {onReuse && (
+                  <button onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
+                    <RotateCcw size={12} /> {t('library.reusePrompt')}
+                  </button>
+                )}
+                {onAddToPlaylist && (
+                  <button onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
+                    <ListPlus size={12} /> {t('library.addToPlaylist')}
+                  </button>
+                )}
+                {onDownload && (
+                  <button onClick={(e) => { e.stopPropagation(); onDownload(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
+                    <Download size={12} /> {t('library.download')}
+                  </button>
+                )}
+                <button onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
+                  <Trash2 size={12} /> {t('library.delete')}
+                </button>
+
+                {/* Cover Art Generation */}
+                <div className="border-t border-zinc-200 dark:border-white/5 my-1" />
+                <button onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMenu(false);
+                  triggerCoverArtGeneration(song);
+                }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-violet-400 hover:bg-violet-500/10 transition-colors">
+                  <Image size={12} /> {song.coverUrl || song.cover_url ? 'Regenerate Cover' : 'Generate Cover'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Info overlay — gradient from bottom */}
+      <div className="absolute inset-x-0 bottom-0 z-10 p-3 pt-10 bg-gradient-to-t from-black/80 via-black/50 to-transparent pointer-events-none">
         {/* Title */}
-        <div className={`text-sm font-semibold truncate ${isActive ? 'text-pink-400' : 'text-zinc-800 dark:text-zinc-200'}`}>
+        <div className={`text-sm font-semibold drop-shadow-sm ${isActive ? 'text-pink-400' : 'text-white'}`}>
           {song.title || 'Untitled'}
         </div>
 
-        {/* Style / Caption */}
-        <div className="text-[11px] text-zinc-500 truncate mt-0.5 leading-tight">
+        {/* Style / Caption — wraps, max 3 lines */}
+        <div className="text-[11px] text-white/70 mt-0.5 leading-tight line-clamp-3">
           {song.style || song.caption || t('library.noDescription')}
         </div>
 
-        {/* Metadata Row */}
-        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-          {bpm && (
-            <span className="text-[9px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-200 dark:border-white/5">
-              {bpm} BPM
-            </span>
-          )}
-          {keyScale && (
-            <span className="text-[9px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-200 dark:border-white/5">
-              {keyScale}
-            </span>
-          )}
-          {modelShort && (
-            <span className="text-[9px] text-violet-400/60 font-medium px-1.5 py-0.5 rounded bg-violet-500/5 border border-violet-500/10 truncate max-w-[100px]" title={model}>
-              {modelShort}
-            </span>
-          )}
+        {/* Quality + Date row */}
+        <div className="flex items-center gap-2 mt-1.5 pointer-events-auto">
           <QualityBadge song={song} />
-        </div>
-
-        {/* Date */}
-        <div className="text-[10px] text-zinc-600 mt-1.5">
-          {formatDate(song.created_at || song.createdAt)}
+          <span className="text-[10px] text-white/50">
+            {formatDate(song.created_at || song.createdAt)}
+          </span>
         </div>
       </div>
+    </div>
+  );
+};
+
+
+// ── SongTable — Table view ───────────────────────────────────────────────────
+
+interface SongTableProps {
+  songs: Song[];
+  currentSongId?: string;
+  isPlaying: boolean;
+  selectionMode: boolean;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onPlay: (song: Song) => void;
+  onSelect?: (song: Song) => void;
+  onDelete: (song: Song) => void;
+  onReuse?: (song: Song) => void;
+  onDownload?: (song: Song) => void;
+  showSourceBadge?: boolean;
+}
+
+const SOURCE_BADGE_MAP: Record<string, { label: string; cls: string }> = {
+  'insta-gen': { label: 'Auto-Gen', cls: 'text-fuchsia-300 bg-fuchsia-500/15 border-fuchsia-500/25' },
+  'lyric-studio': { label: 'Lyric', cls: 'text-pink-300 bg-pink-500/15 border-pink-500/25' },
+  'cover-studio': { label: 'Cover', cls: 'text-cyan-300 bg-cyan-500/15 border-cyan-500/25' },
+};
+
+const SongTable: React.FC<SongTableProps> = ({
+  songs, currentSongId, isPlaying, selectionMode, selectedIds, onToggleSelect,
+  onPlay, onSelect, onDelete, onReuse, onDownload, showSourceBadge,
+}) => {
+  const { t } = useTranslation();
+
+  const formatDuration = (val: string | number | undefined) => {
+    if (!val) return '--:--';
+    if (typeof val === 'string') return val;
+    const m = Math.floor(val / 60);
+    const s = Math.floor(val % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const formatDate = (d: string | Date | undefined) => {
+    if (!d) return '';
+    const date = typeof d === 'string' ? new Date(d) : d;
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffH = Math.floor(diffMs / 3600000);
+    if (diffH < 1) return 'Just now';
+    if (diffH < 24) return `${diffH}h ago`;
+    const diffD = Math.floor(diffH / 24);
+    if (diffD < 7) return `${diffD}d ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-white/5">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-zinc-100/80 dark:bg-zinc-800/80 text-zinc-500 text-left">
+            {selectionMode && <th className="px-2 py-2.5 w-8" />}
+            <th className="px-2 py-2.5 w-8" />
+            <th className="px-2 py-2.5 font-semibold">Title</th>
+            <th className="px-2 py-2.5 font-semibold">Style</th>
+            {showSourceBadge && <th className="px-2 py-2.5 font-semibold">Source</th>}
+            <th className="px-2 py-2.5 font-semibold w-16 text-center">BPM</th>
+            <th className="px-2 py-2.5 font-semibold w-16 text-center">Key</th>
+            <th className="px-2 py-2.5 font-semibold w-24">Model</th>
+            <th className="px-2 py-2.5 font-semibold w-16 text-center">Quality</th>
+            <th className="px-2 py-2.5 font-semibold w-14 text-right">Time</th>
+            <th className="px-2 py-2.5 font-semibold w-20 text-right">Date</th>
+            <th className="px-2 py-2.5 w-20" />
+          </tr>
+        </thead>
+        <tbody>
+          {songs.map(song => {
+            const isActive = currentSongId === song.id;
+            const gp = song.generationParams || song.generation_params as any;
+            const bpm = song.bpm || gp?.bpm;
+            const keyScale = song.key_scale || gp?.keyScale;
+            const model = song.dit_model || gp?.ditModel || '';
+            const modelShort = model ? model.split('/').pop()?.replace(/\.gguf$/, '').substring(0, 16) : '';
+            const src = (gp as any)?.source || 'create';
+            const badge = SOURCE_BADGE_MAP[src];
+
+            return (
+              <tr
+                key={song.id}
+                className={`group border-t border-zinc-100 dark:border-white/5 cursor-pointer transition-colors ${
+                  selectedIds.has(song.id) && selectionMode
+                    ? 'bg-pink-500/10'
+                    : isActive
+                      ? 'bg-pink-500/5'
+                      : 'hover:bg-white/5'
+                }`}
+                onClick={() => selectionMode ? onToggleSelect(song.id) : onSelect?.(song)}
+              >
+                {/* Selection */}
+                {selectionMode && (
+                  <td className="px-2 py-2">
+                    {selectedIds.has(song.id)
+                      ? <CheckSquare size={15} className="text-pink-400" />
+                      : <Square size={15} className="text-zinc-600" />
+                    }
+                  </td>
+                )}
+
+                {/* Thumbnail + play */}
+                <td className="px-2 py-1.5">
+                  <div className="relative w-8 h-8 rounded bg-zinc-100 dark:bg-zinc-800 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                    {song.coverUrl || song.cover_url ? (
+                      <img src={song.coverUrl || song.cover_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <Music size={12} className="text-zinc-600" />
+                    )}
+                    {!selectionMode && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); if (isActive) togglePlay(); else onPlay(song); }}
+                        className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        {isActive && isPlaying
+                          ? <Pause size={10} className="text-white" />
+                          : <Play size={10} className="text-white ml-0.5" />
+                        }
+                      </button>
+                    )}
+                  </div>
+                </td>
+
+                {/* Title */}
+                <td className={`px-2 py-2 font-medium max-w-[200px] truncate ${isActive ? 'text-pink-400' : 'text-zinc-200'}`}>
+                  {song.title || 'Untitled'}
+                </td>
+
+                {/* Style */}
+                <td className="px-2 py-2 text-zinc-500 max-w-[200px] truncate">
+                  {song.style || song.caption || '—'}
+                </td>
+
+                {/* Source badge */}
+                {showSourceBadge && (
+                  <td className="px-2 py-2">
+                    {badge && (
+                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${badge.cls}`}>
+                        {badge.label}
+                      </span>
+                    )}
+                  </td>
+                )}
+
+                {/* BPM */}
+                <td className="px-2 py-2 text-zinc-500 text-center font-mono">{bpm || '—'}</td>
+
+                {/* Key */}
+                <td className="px-2 py-2 text-zinc-500 text-center">{keyScale || '—'}</td>
+
+                {/* Model */}
+                <td className="px-2 py-2 text-violet-400/60 truncate max-w-[100px]" title={model}>{modelShort || '—'}</td>
+
+                {/* Quality */}
+                <td className="px-2 py-2 text-center"><QualityBadge song={song} /></td>
+
+                {/* Duration */}
+                <td className="px-2 py-2 text-zinc-500 font-mono text-right">{formatDuration(song.duration)}</td>
+
+                {/* Date */}
+                <td className="px-2 py-2 text-zinc-600 text-right">{formatDate(song.created_at || song.createdAt)}</td>
+
+                {/* Actions */}
+                <td className="px-2 py-2">
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {onReuse && (
+                      <button onClick={(e) => { e.stopPropagation(); onReuse(song); }}
+                        className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/10 transition-colors" title={t('library.reusePrompt')}>
+                        <RotateCcw size={12} />
+                      </button>
+                    )}
+                    {onDownload && (
+                      <button onClick={(e) => { e.stopPropagation(); onDownload(song); }}
+                        className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/10 transition-colors" title={t('library.download')}>
+                        <Download size={12} />
+                      </button>
+                    )}
+                    <button onClick={(e) => { e.stopPropagation(); onDelete(song); }}
+                      className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors" title={t('library.delete')}>
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 };
