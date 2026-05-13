@@ -258,6 +258,7 @@ private:
             j += std::string(",\"needs_model\":") + (p.needs_model ? "true" : "false");
             j += std::string(",\"stateful\":") + (p.stateful ? "true" : "false");
             j += std::string(",\"stochastic\":") + (p.stochastic ? "true" : "false");
+            j += std::string(",\"owns_loop\":") + (p.owns_loop ? "true" : "false");
         }
 
         j += ",\"params\":[";

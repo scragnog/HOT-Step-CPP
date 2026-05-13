@@ -553,6 +553,83 @@ static int dit_ggml_generate(DiTGGML *           model,
     };
 
     // Flow matching loop
+    if (solver_plugin->owns_loop) {
+        // ── Full-loop solver path ──────────────────────────────────────
+        bool switched_cover_fl = false;
+
+        LoopModelFn loop_model_fn = [&](const float * xt_in, float t_val) {
+            evaluate_velocity(xt_in, t_val);
+        };
+
+        LoopOnStepFn loop_on_step = [&](int step_idx, float t_curr, float t_next) -> bool {
+            if (cancel && cancel(cancel_data)) {
+                fprintf(stderr, "[DiT] Cancelled at step %d/%d\n", step_idx, num_steps);
+                return true;
+            }
+            if (context_switch && cover_steps >= 0 &&
+                step_idx >= cover_steps && !switched_cover_fl) {
+                switched_cover_fl = true;
+                for (int b = 0; b < N; b++) {
+                    for (int t = 0; t < T; t++) {
+                        memcpy(&input_buf[b * T * in_ch + t * in_ch],
+                               &context_switch[b * T * ctx_ch + t * ctx_ch],
+                               ctx_ch * sizeof(float));
+                    }
+                    if (batch_cfg) {
+                        memcpy(&input_buf[(N + b) * T * in_ch],
+                               &input_buf[b * T * in_ch],
+                               T * in_ch * sizeof(float));
+                    }
+                }
+                if (enc_switch) {
+                    memcpy(enc_buf.data(), enc_switch, H_enc * enc_S * N * sizeof(float));
+                    if (real_enc_S_switch) {
+                        for (int b = 0; b < N; b++) {
+                            int re = real_enc_S_switch[b];
+                            for (int qi = 0; qi < S; qi++) {
+                                for (int ki = 0; ki < enc_S; ki++) {
+                                    float v = (ki < re) ? 0.0f : -INFINITY;
+                                    ca_data[b * enc_S * S + qi * enc_S + ki] = ggml_fp32_to_fp16(v);
+                                }
+                            }
+                        }
+                    }
+                }
+                fprintf(stderr, "[DiT] Cover: switched at step %d/%d\n", step_idx, num_steps);
+            }
+            g_ctx.step_idx = step_idx;
+            g_ctx.t_curr   = t_curr;
+            g_ctx.dt       = t_curr - t_next;
+            sampler_apply_dcw(xt.data(), vt.data(), N, T, Oc, t_curr, t_next, step_idx);
+            if (guidance_plugin->has_post_step && do_cfg && step_idx < num_steps - 1) {
+                PostStepModelFn eval_cond_fn = [&](const float * xt_in, float t_v) {
+                    eval_single_pass(xt_in, t_v, enc_cond_full, vt_cond.data());
+                };
+                PostStepModelFn eval_uncond_fn = [&](const float * xt_in, float t_v) {
+                    eval_single_pass(xt_in, t_v, enc_uncond_full, vt_uncond.data());
+                };
+                lua_call_post_step(*guidance_plugin, xt.data(), t_next, n_total,
+                    eval_cond_fn, eval_uncond_fn,
+                    vt_cond.data(), vt_uncond.data(),
+                    g_ctx, g_hotstep_params.plugin_params);
+            }
+            sampler_repaint_inject(xt.data(), noise, repaint_src, N, T, Oc,
+                                   repaint_t0, repaint_t1, repaint_injection_ratio,
+                                   step_idx, num_steps, t_next);
+            fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]\n",
+                    step_idx + 1, num_steps, t_curr, solver_plugin->display_name.c_str());
+            return false;
+        };
+
+        lua_call_solver_loop(*solver_plugin, xt.data(), vt.data(), schedule, num_steps,
+            n_total, N, T, Oc, loop_model_fn, loop_on_step,
+            g_hotstep_params.plugin_params);
+
+        memcpy(output, xt.data(), n_total * sizeof(float));
+
+
+    } else {
+    // ── Existing per-step loop (unchanged) ─────────────────────────
     bool switched_cover = false;
     for (int step = 0; step < num_steps; step++) {
         if (cancel && cancel(cancel_data)) {
@@ -714,6 +791,7 @@ static int dit_ggml_generate(DiTGGML *           model,
         fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]\n", step + 1, num_steps, t_curr,
                 solver_plugin->display_name.c_str());
     }
+    } // else (per-step loop)
 
     // Boundary blend: smooth repaint zone edges in latent space.
     sampler_repaint_blend(output, repaint_src, N, T, Oc,

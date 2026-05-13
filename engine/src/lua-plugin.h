@@ -1,9 +1,9 @@
-#pragma once
+﻿#pragma once
 // lua-plugin.h: Lua plugin system for drop-in solvers, schedulers, and guidance modes
 //
 // Provides:
 //   - Sandboxed Lua VM per plugin file
-//   - Zero-copy float array bridge (C float* ↔ Lua userdata)
+//   - Zero-copy float array bridge (C float* â†” Lua userdata)
 //   - Plugin metadata + param schema extraction
 //   - Wrapper functions matching C solver/scheduler/guidance signatures
 
@@ -25,9 +25,9 @@ extern "C" {
 #include "guidance/guidance-interface.h"
 #include "schedulers/scheduler-interface.h"
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Float array userdata — zero-copy bridge between C++ and Lua
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Float array userdata â€” zero-copy bridge between C++ and Lua
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 struct LuaFloatArray {
     float * data;
@@ -86,9 +86,9 @@ static void lua_register_floatarray(lua_State * L) {
     lua_pop(L, 1);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Param schema types
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 enum class ParamType { Slider, Select, Toggle, Text };
 
@@ -124,9 +124,9 @@ struct ParamSchema {
     std::string              transform;
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Plugin types
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 enum class PluginType { Solver, Scheduler, Guidance };
 
@@ -145,6 +145,7 @@ struct LuaPlugin {
     bool needs_model   = false;
     bool stateful      = false;
     bool stochastic    = false;
+    bool owns_loop     = false;   // full-loop solver: defines sample() instead of step()
 
     // Guidance-specific
     bool has_post_step = false;  // guidance plugin declares post_step()
@@ -163,7 +164,7 @@ struct LuaPlugin {
           description(std::move(o.description)), accent(std::move(o.accent)),
           filepath(std::move(o.filepath)), params(std::move(o.params)),
           nfe(o.nfe), order(o.order), needs_model(o.needs_model),
-          stateful(o.stateful), stochastic(o.stochastic),
+          stateful(o.stateful), stochastic(o.stochastic), owns_loop(o.owns_loop),
           has_post_step(o.has_post_step), L(o.L) {
         o.L = nullptr;
     }
@@ -172,9 +173,9 @@ struct LuaPlugin {
     LuaPlugin & operator=(const LuaPlugin &) = delete;
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Sandbox setup — restrict Lua to safe math-only operations
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Sandbox setup â€” restrict Lua to safe math-only operations
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 static void lua_setup_sandbox(lua_State * L) {
     // Whitelist: math, string, table, basic (print, type, pairs, ipairs, etc.)
@@ -193,9 +194,9 @@ static void lua_setup_sandbox(lua_State * L) {
     lua_register_floatarray(L);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Schema extraction helpers
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 static std::string lua_get_string(lua_State * L, int idx, const char * field, const char * def = "") {
     lua_getfield(L, idx, field);
@@ -306,9 +307,9 @@ static std::vector<ParamSchema> lua_extract_params(lua_State * L, int table_idx)
     return params;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Plugin loading — load a .lua file and extract metadata
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Plugin loading â€” load a .lua file and extract metadata
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 // Load a single plugin file. Returns true on success.
 // The plugin_dir is set as a require search path for companion data files.
@@ -367,6 +368,7 @@ static bool lua_load_plugin(LuaPlugin & plugin, const char * filepath, const cha
                 plugin.needs_model = lua_get_bool(L, tbl, "needs_model", false);
                 plugin.stateful    = lua_get_bool(L, tbl, "stateful", false);
                 plugin.stochastic  = lua_get_bool(L, tbl, "stochastic", false);
+                plugin.owns_loop   = lua_get_bool(L, tbl, "owns_loop", false);
             }
 
             // Detect post_step() for guidance plugins
@@ -400,9 +402,9 @@ static bool lua_load_plugin(LuaPlugin & plugin, const char * filepath, const cha
     return true;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Lua solver/scheduler/guidance call wrappers
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 // Inject plugin params into Lua globals before calling step/schedule/guide
 static void lua_inject_params(lua_State * L,
@@ -500,6 +502,108 @@ static void lua_call_solver_step(LuaPlugin & plugin,
     }
 }
 
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Full-loop solver support â€” owns_loop = true
+// The Lua plugin defines sample() instead of step() and controls the
+// entire sampling iteration. Engine hooks (DCW, repaint, guidance,
+// cancel, progress) are provided via an on_step_fn callback built
+// by the caller (hot-step-sampler.h).
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+// on_step_fn(step_idx, t_curr, t_next) â†’ bool (true = cancelled)
+using LoopOnStepFn = std::function<bool(int step_idx, float t_curr, float t_next)>;
+// model_fn(xt_data, t_val) â†’ writes velocity to vt
+using LoopModelFn  = std::function<void(const float * xt_data, float t_val)>;
+
+// on_step C closure â€” delegates to the LoopOnStepFn captured as upvalue
+static int lua_on_step_closure(lua_State * L) {
+    LoopOnStepFn * fn = (LoopOnStepFn *) lua_touserdata(L, lua_upvalueindex(1));
+    int   step_idx = (int) luaL_checkinteger(L, 1);
+    float t_curr   = (float) luaL_checknumber(L, 2);
+    float t_next   = (float) luaL_checknumber(L, 3);
+    bool cancelled = (*fn)(step_idx, t_curr, t_next);
+    lua_pushboolean(L, cancelled ? 1 : 0);
+    return 1;
+}
+
+// Call a full-loop Lua solver's sample(xt, vt_buf, schedule, n, model_fn)
+static void lua_call_solver_loop(
+    LuaPlugin &  plugin,
+    float *      xt,
+    float *      vt,
+    const float * schedule,
+    int          num_steps,
+    int          n,
+    int          N,         // batch size (for n_per)
+    int          T,
+    int          Oc,
+    LoopModelFn  model_fn,
+    LoopOnStepFn on_step_fn,
+    const std::unordered_map<std::string, std::string> & params)
+{
+    lua_State * L = plugin.L;
+    if (!L) return;
+
+    lua_inject_params(L, params, plugin.name);
+
+    // Set globals
+    lua_pushinteger(L, num_steps);  lua_setglobal(L, "num_steps");
+    lua_pushinteger(L, N);          lua_setglobal(L, "batch_n");
+    lua_pushinteger(L, T * Oc);     lua_setglobal(L, "n_per");
+
+    // Register on_step global closure
+    lua_pushlightuserdata(L, &on_step_fn);
+    lua_pushcclosure(L, lua_on_step_closure, 1);
+    lua_setglobal(L, "on_step");
+
+    // Push sample() function
+    lua_getglobal(L, "sample");
+    if (!lua_isfunction(L, -1)) {
+        fprintf(stderr, "[Plugins] ERROR: full-loop solver '%s' has no sample() function\n",
+                plugin.name.c_str());
+        lua_pop(L, 1);
+        return;
+    }
+
+    // Arg 1: xt (FloatArray, mutable)
+    lua_push_floatarray(L, xt, n, false);
+
+    // Arg 2: vt_buf (FloatArray, mutable â€” model_fn writes here)
+    lua_push_floatarray(L, vt, n, false);
+
+    // Arg 3: schedule (Lua table, 1-indexed, num_steps entries)
+    lua_newtable(L);
+    for (int i = 0; i < num_steps; i++) {
+        lua_pushinteger(L, i + 1);
+        lua_pushnumber(L, (double) schedule[i]);
+        lua_settable(L, -3);
+    }
+
+    // Arg 4: n (element count)
+    lua_pushinteger(L, n);
+
+    // Arg 5: model_fn closure
+    auto * mfn_ptr = new LoopModelFn(std::move(model_fn));
+    lua_pushlightuserdata(L, mfn_ptr);
+    lua_pushcclosure(L, [](lua_State * Ls) -> int {
+        auto * fn = (LoopModelFn *) lua_touserdata(Ls, lua_upvalueindex(1));
+        LuaFloatArray * arr = (LuaFloatArray *) luaL_checkudata(Ls, 1, LUA_FLOAT_ARRAY_MT);
+        float t_val = (float) luaL_checknumber(Ls, 2);
+        (*fn)(arr->data, t_val);
+        return 0;
+    }, 1);
+
+    // 5 args: xt, vt_buf, schedule, n, model_fn
+    if (lua_pcall(L, 5, 0, 0) != LUA_OK) {
+        fprintf(stderr, "[Plugins] ERROR in full-loop solver '%s' sample(): %s\n",
+                plugin.name.c_str(), lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+
+    delete mfn_ptr;
+}
+
+
 // Call a Lua scheduler's schedule() function
 static void lua_call_scheduler(LuaPlugin & plugin,
                                float * output, int num_steps, float shift,
@@ -526,7 +630,7 @@ static void lua_call_scheduler(LuaPlugin & plugin,
         lua_pop(L, 1);
     }
 }
-// ── APG bridge for Lua guidance plugins ──────────────────────────────────
+// â”€â”€ APG bridge for Lua guidance plugins â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Registers a Lua-callable `apg(cond, uncond, scale, result, Oc, T, norm_threshold)`
 // that routes through the native C++ apg_forward(), including:
 //   - momentum smoothing across steps
@@ -621,10 +725,10 @@ static void lua_call_guidance(LuaPlugin & plugin,
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Post-step hook for guidance plugins that need model callbacks
 // (e.g. CFG-MP manifold projection)
-// ═══════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 // Model callback type for post_step: evaluates at (xt_in, t_val), writes to bound output buffer
 using PostStepModelFn = std::function<void(const float *, float)>;
@@ -660,7 +764,7 @@ static void lua_call_post_step(LuaPlugin & plugin,
     // Arg 3: n
     lua_pushinteger(L, n);
 
-    // Arg 4: eval_cond closure — calls model with conditioning, writes to vt_cond_buf
+    // Arg 4: eval_cond closure â€” calls model with conditioning, writes to vt_cond_buf
     auto * cond_ptr = new PostStepModelFn(eval_cond_fn);
     lua_pushlightuserdata(L, cond_ptr);
     lua_pushcclosure(L, [](lua_State * Ls) -> int {
@@ -671,7 +775,7 @@ static void lua_call_post_step(LuaPlugin & plugin,
         return 0;
     }, 1);
 
-    // Arg 5: eval_uncond closure — calls model without conditioning, writes to vt_uncond_buf
+    // Arg 5: eval_uncond closure â€” calls model without conditioning, writes to vt_uncond_buf
     auto * uncond_ptr = new PostStepModelFn(eval_uncond_fn);
     lua_pushlightuserdata(L, uncond_ptr);
     lua_pushcclosure(L, [](lua_State * Ls) -> int {
