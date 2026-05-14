@@ -597,7 +597,11 @@ static int dit_ggml_generate(DiTGGML *           model,
                 }
                 fprintf(stderr, "[DiT] Cover: switched at step %d/%d\n", step_idx, num_steps);
             }
-            g_ctx.step_idx = step_idx;
+            // Advance step_idx by +1: full-loop solvers call model_fn (which
+            // reads g_ctx for guidance) BEFORE on_step fires, so we set the
+            // context for the NEXT iteration's eval. First eval reads 0 from
+            // the initial g_ctx, so the +1 here makes step 1's eval see 1, etc.
+            g_ctx.step_idx = step_idx + 1;
             g_ctx.t_curr   = t_curr;
             g_ctx.dt       = t_curr - t_next;
             sampler_apply_dcw(xt.data(), vt.data(), N, T, Oc, t_curr, t_next, step_idx);
