@@ -5,7 +5,7 @@
 // with optionally modified lyrics.
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Upload, Loader2, X, Music, FolderOpen } from 'lucide-react';
+import { Upload, Loader2, X, Music, FolderOpen, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
@@ -69,6 +69,7 @@ export const RepaintStudio: React.FC = () => {
   const [queueItemId, setQueueItemId] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toast, setToast] = useState('');
+  const [wipDismissed, setWipDismissed] = useState(false);
 
   // ── Sidebar resize ──
   const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-repaintSidebarWidth', 320);
@@ -331,6 +332,23 @@ export const RepaintStudio: React.FC = () => {
       {toast && (
         <div className="absolute top-16 right-6 z-50 px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2">
           {toast}
+        </div>
+      )}
+
+      {/* WIP notice banner */}
+      {!wipDismissed && (
+        <div className="flex-shrink-0 px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-3">
+          <AlertTriangle size={16} className="text-amber-400 flex-shrink-0" />
+          <p className="text-xs text-amber-300/90 flex-1">
+            <span className="font-semibold">Work in progress</span> — This component is under heavy development and may not work as expected.
+          </p>
+          <button
+            onClick={() => setWipDismissed(true)}
+            className="flex-shrink-0 w-5 h-5 rounded flex items-center justify-center text-amber-400/60 hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
+            title="Dismiss"
+          >
+            <X size={12} />
+          </button>
         </div>
       )}
 
