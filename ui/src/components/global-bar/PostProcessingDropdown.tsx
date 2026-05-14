@@ -266,6 +266,17 @@ export const PostProcessingDropdown: React.FC = () => {
 
   return (
     <div className="space-y-2">
+      {/* LRC Subtitle Generation Toggle */}
+      <div className="flex items-center justify-between px-1 py-1.5">
+        <div className="flex items-center gap-2">
+          <AudioWaveform size={14} className={gp.skipLrc ? 'text-zinc-500' : 'text-sky-400'} />
+          <div className="flex flex-col">
+            <span className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">Lyric Timestamps (LRC)</span>
+            <span className="text-[10px] text-zinc-500 leading-tight">Synchronized lyric alignment for karaoke-style playback</span>
+          </div>
+        </div>
+        <ToggleSwitch checked={!gp.skipLrc} onChange={v => gp.setSkipLrc(!v)} accentColor="sky" />
+      </div>
       {/* 0. PP-VAE Re-encode (only visible when PP-VAE model is available) */}
       {ppVaeAvailable && (
         <Accordion

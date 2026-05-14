@@ -390,14 +390,18 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     }
 
     // LRC: auto-enable synchronized lyric timestamps for non-instrumental tracks
+    // (unless user explicitly disabled via the skipLrc toggle)
+    const skipLrc = job.params.skipLrc === true;
     const hasLyrics = lmResults.some(r => r.lyrics && r.lyrics !== '[Instrumental]');
-    if (hasLyrics) {
+    if (hasLyrics && !skipLrc) {
       for (const r of lmResults) {
         if (r.lyrics && r.lyrics !== '[Instrumental]') {
           (r as any).get_lrc = true;
         }
       }
       logGeneration(job.id, 'INFO', '[Synth Phase] LRC generation enabled (non-instrumental lyrics detected)');
+    } else if (hasLyrics && skipLrc) {
+      logGeneration(job.id, 'INFO', '[Synth Phase] LRC generation skipped (disabled by user)');
     }
 
     if (coResident) {

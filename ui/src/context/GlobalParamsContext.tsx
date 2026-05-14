@@ -125,6 +125,8 @@ export interface GlobalParams {
   // ── LM / Thinking ──
   skipLm: boolean;
   setSkipLm: (v: boolean) => void;
+  skipLrc: boolean;
+  setSkipLrc: (v: boolean) => void;
   useCotCaption: boolean;
   setUseCotCaption: (v: boolean) => void;
   lmTemperature: number;
@@ -294,6 +296,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // LM / Thinking
   const [skipLm, setSkipLm] = usePersistedState('hs-skipLm', false);
+  const [skipLrc, setSkipLrc] = usePersistedState('hs-skipLrc', false);
   const [useCotCaption, setUseCotCaption] = usePersistedState('hs-useCotCaption', true);
   const [lmTemperature, setLmTemperature] = usePersistedState('hs-lmTemperature', 0.8);
   const [lmCfgScale, setLmCfgScale] = usePersistedState('hs-lmCfgScale', 2.2);
@@ -387,6 +390,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       // LM
       skipLm,
+      skipLrc,
       useCotCaption,
       lmTemperature,
       lmCfgScale,
@@ -475,7 +479,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     latentShift, latentRescale, customTimesteps,
     denoiseStrength, denoiseSmoothing, denoiseMix,
     autoTrimEnabled, durationBuffer, autoTrimFadeMs,
-    skipLm, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
+    skipLm, skipLrc, useCotCaption, lmTemperature, lmCfgScale, lmTopK, lmTopP, lmNegativePrompt, lmCodesStrength,
      spectralLifterEnabled, slDenoiseStrength, slNoiseFloor, slHfMix, slTransientBoost, slShimmerReduction,
     masteringEnabled, masteringReference, timbreReference, timbreAudioPath,
     vocalNaturalizerEnabled, naturalizeAmount,
@@ -523,7 +527,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     autoTrimEnabled, setAutoTrimEnabled, durationBuffer, setDurationBuffer,
     autoTrimFadeMs, setAutoTrimFadeMs,
     // LM
-    skipLm, setSkipLm, useCotCaption, setUseCotCaption,
+    skipLm, setSkipLm, skipLrc, setSkipLrc, useCotCaption, setUseCotCaption,
     lmTemperature, setLmTemperature, lmCfgScale, setLmCfgScale,
     lmTopK, setLmTopK, lmTopP, setLmTopP,
     lmNegativePrompt, setLmNegativePrompt,
@@ -582,7 +586,7 @@ export const GlobalParamsProvider: React.FC<{ children: React.ReactNode }> = ({ 
     denoiseMix, setDenoiseMix,
     autoTrimEnabled, setAutoTrimEnabled, durationBuffer, setDurationBuffer,
     autoTrimFadeMs, setAutoTrimFadeMs,
-    skipLm, setSkipLm, useCotCaption, setUseCotCaption,
+    skipLm, setSkipLm, skipLrc, setSkipLrc, useCotCaption, setUseCotCaption,
     lmTemperature, setLmTemperature, lmCfgScale, setLmCfgScale,
     lmTopK, setLmTopK, lmTopP, setLmTopP,
     lmNegativePrompt, setLmNegativePrompt, lmCodesStrength, setLmCodesStrength,

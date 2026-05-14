@@ -2,7 +2,7 @@
 // Ported from hot-step-9000's RightSidebar, simplified for current feature set.
 
 import React from 'react';
-import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download, Cpu, Terminal, Settings2, Zap, Radio, Activity, Layers, Sparkles, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 
@@ -97,39 +97,169 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
         {/* Metadata Badges */}
         <div className="grid grid-cols-2 gap-2">
           {song.duration && (
-            <MetaBadge icon={<Clock size={14} />} label={t('details.duration')} value={String(song.duration)} />
+            <MetaBadge icon={<Clock size={14} />} label={t('details.duration')} value={String(song.duration)} gradient="from-amber-500/10 to-orange-500/10 border-amber-200 dark:border-amber-500/30" iconColor="text-amber-600 dark:text-amber-400" />
           )}
-          {gp?.bpm && (
-            <MetaBadge icon={<Gauge size={14} />} label={t('details.bpm')} value={String(gp.bpm)} />
-          )}
+          {(song.bpm || gp?.bpm) ? (
+            <MetaBadge icon={<Gauge size={14} />} label={t('details.bpm')} value={String(song.bpm || gp?.bpm)} gradient="from-rose-500/10 to-pink-500/10 border-rose-200 dark:border-rose-500/30" iconColor="text-rose-600 dark:text-rose-400" />
+          ) : null}
           {gp?.keyScale && (
-            <MetaBadge icon={<Hash size={14} />} label={t('details.key')} value={gp.keyScale} />
+            <MetaBadge icon={<Hash size={14} />} label={t('details.key')} value={gp.keyScale} gradient="from-emerald-500/10 to-teal-500/10 border-emerald-200 dark:border-emerald-500/30" iconColor="text-emerald-600 dark:text-emerald-400" />
           )}
           {gp?.timeSignature && (
-            <MetaBadge icon={<Music size={14} />} label={t('details.timeSig')} value={gp.timeSignature} />
+            <MetaBadge icon={<Music size={14} />} label={t('details.timeSig')} value={gp.timeSignature} gradient="from-violet-500/10 to-purple-500/10 border-violet-200 dark:border-violet-500/30" iconColor="text-violet-600 dark:text-violet-400" />
           )}
         </div>
 
-        {/* Generation Info */}
+        {/* Generation Parameters Grid — HOT-Step 9000 style */}
         {gp && (
           <div className="space-y-3">
-            <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{t('details.generationInfo')}</h4>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-200 dark:border-indigo-500/30 flex items-center justify-center">
+                <SlidersHorizontal size={12} className="text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <h4 className="text-xs font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider">{t('details.generationInfo')}</h4>
+            </div>
 
-            {gp.ditModel && (
-              <InfoRow label={t('details.ditModel')} value={gp.ditModel.split('/').pop() || gp.ditModel} />
-            )}
-            {gp.inferenceSteps && (
-              <InfoRow label={t('details.steps')} value={String(gp.inferenceSteps)} />
-            )}
-            {gp.guidanceScale !== undefined && (
-              <InfoRow label={t('details.guidance')} value={String(gp.guidanceScale)} />
-            )}
-            {gp.seed !== undefined && (
-              <InfoRow label={t('details.seed')} value={String(gp.seed)} />
-            )}
-            {gp.adapter && (
-              <InfoRow label={t('details.adapter')} value={gp.adapter.split('/').pop() || gp.adapter} />
-            )}
+            <div className="grid grid-cols-2 gap-2">
+              {/* Models — blue accent */}
+              {gp.ditModel && (
+                <ParamCell
+                  label="DiT Model"
+                  value={getModelShortName(gp.ditModel)}
+                  gradient="from-blue-500/10 to-cyan-500/10 border-blue-200 dark:border-blue-500/30"
+                  iconColor="text-blue-600 dark:text-blue-400"
+                  icon={<Cpu size={12} />}
+                />
+              )}
+              {gp.lmModel && (
+                <ParamCell
+                  label="LM Model"
+                  value={getModelShortName(gp.lmModel)}
+                  gradient="from-blue-500/10 to-cyan-500/10 border-blue-200 dark:border-blue-500/30"
+                  iconColor="text-blue-600 dark:text-blue-400"
+                  icon={<Terminal size={12} />}
+                />
+              )}
+
+              {/* Engine — tech accent */}
+              {gp.inferenceSteps && (
+                <ParamCell
+                  label="Steps"
+                  value={String(gp.inferenceSteps)}
+                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
+                  iconColor="text-slate-600 dark:text-slate-400"
+                  icon={<Gauge size={12} />}
+                />
+              )}
+              {gp.guidanceScale !== undefined && (
+                <ParamCell
+                  label="CFG Scale"
+                  value={String(gp.guidanceScale)}
+                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
+                  iconColor="text-slate-600 dark:text-slate-400"
+                  icon={<Settings2 size={12} />}
+                />
+              )}
+
+              {/* Solver + Scheduler — violet accent */}
+              {gp.inferMethod && (
+                <ParamCell
+                  label="Solver"
+                  value={gp.inferMethod.toUpperCase()}
+                  gradient="from-violet-500/10 to-purple-500/10 border-violet-200 dark:border-violet-500/30"
+                  iconColor="text-violet-600 dark:text-violet-400"
+                  icon={<Zap size={12} />}
+                />
+              )}
+              {gp.scheduler && gp.scheduler !== 'linear' && (
+                <ParamCell
+                  label="Schedule"
+                  value={gp.scheduler.split(':')[0].replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                  gradient="from-violet-500/10 to-purple-500/10 border-violet-200 dark:border-violet-500/30"
+                  iconColor="text-violet-600 dark:text-violet-400"
+                  icon={<Clock size={12} />}
+                />
+              )}
+
+              {/* Guidance — emerald accent */}
+              {gp.guidanceMode && (
+                <ParamCell
+                  label="Guidance"
+                  value={gp.guidanceMode.toUpperCase()}
+                  gradient="from-emerald-500/10 to-teal-500/10 border-emerald-200 dark:border-emerald-500/30"
+                  iconColor="text-emerald-600 dark:text-emerald-400"
+                  icon={<Radio size={12} />}
+                />
+              )}
+
+              {/* Shift */}
+              {gp.shift !== undefined && (
+                <ParamCell
+                  label="Shift"
+                  value={gp.shift < 0 ? 'Auto' : String(gp.shift)}
+                  gradient="from-amber-500/10 to-orange-500/10 border-amber-200 dark:border-amber-500/30"
+                  iconColor="text-amber-600 dark:text-amber-400"
+                  icon={<Activity size={12} />}
+                />
+              )}
+
+              {/* Seed — mono */}
+              {gp.seed !== undefined && (
+                <ParamCell
+                  label="Seed"
+                  value={String(gp.seed).substring(0, 12) + (String(gp.seed).length > 12 ? '…' : '')}
+                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
+                  iconColor="text-slate-600 dark:text-slate-400"
+                  icon={<Hash size={12} />}
+                  mono
+                />
+              )}
+
+              {/* Batch Size */}
+              {gp.batchSize && gp.batchSize > 1 && (
+                <ParamCell
+                  label="Batch"
+                  value={String(gp.batchSize)}
+                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
+                  iconColor="text-slate-600 dark:text-slate-400"
+                  icon={<Layers size={12} />}
+                />
+              )}
+
+              {/* Adapter — pink accent */}
+              {(gp.adapter || gp.loraPath) && (
+                <ParamCell
+                  label="Adapter"
+                  value={getModelShortName(gp.adapter || gp.loraPath || '')}
+                  gradient="from-pink-500/10 to-rose-500/10 border-pink-200 dark:border-pink-500/30"
+                  iconColor="text-pink-600 dark:text-pink-400"
+                  icon={<Sparkles size={12} />}
+                  span2
+                />
+              )}
+              {gp.loraScale !== undefined && gp.loraScale !== 1 && (gp.adapter || gp.loraPath) && (
+                <ParamCell
+                  label="Adapter Scale"
+                  value={String(gp.loraScale)}
+                  gradient="from-pink-500/10 to-rose-500/10 border-pink-200 dark:border-pink-500/30"
+                  iconColor="text-pink-600 dark:text-pink-400"
+                  icon={<SlidersHorizontal size={12} />}
+                />
+              )}
+
+              {/* Thinking */}
+              {gp.useCotCaption !== undefined && (
+                <ParamCell
+                  label="Thinking"
+                  value={gp.useCotCaption ? 'ON' : 'OFF'}
+                  gradient={gp.useCotCaption
+                    ? "from-emerald-500/10 to-green-500/10 border-emerald-200 dark:border-emerald-500/30"
+                    : "from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"}
+                  iconColor={gp.useCotCaption ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-slate-400"}
+                  icon={<Zap size={12} />}
+                />
+              )}
+            </div>
           </div>
         )}
 
@@ -147,9 +277,16 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   );
 };
 
-const MetaBadge: React.FC<{ icon: React.ReactNode; label: string; value: string }> = ({ icon, label, value }) => (
-  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-100/50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/5">
-    <div className="text-zinc-500">{icon}</div>
+/** Extract basename from a full model path */
+const getModelShortName = (modelId: string): string => {
+  const base = modelId.split(/[\\/]/).filter(Boolean).pop() || modelId;
+  return base.replace(/^acestep-/, '');
+};
+
+/** Color-coded metadata badge (top section) */
+const MetaBadge: React.FC<{ icon: React.ReactNode; label: string; value: string; gradient: string; iconColor: string }> = ({ icon, label, value, gradient, iconColor }) => (
+  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r ${gradient} border`}>
+    <div className={iconColor}>{icon}</div>
     <div className="min-w-0">
       <div className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</div>
       <div className="text-sm text-zinc-800 dark:text-zinc-200 font-medium truncate">{value}</div>
@@ -157,9 +294,21 @@ const MetaBadge: React.FC<{ icon: React.ReactNode; label: string; value: string 
   </div>
 );
 
-const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div className="flex items-center justify-between text-sm">
-    <span className="text-zinc-500">{label}</span>
-    <span className="text-zinc-800 dark:text-zinc-200 font-medium truncate ml-4 text-right">{value}</span>
+/** Color-coded generation parameter cell (2-column grid) */
+const ParamCell: React.FC<{
+  label: string;
+  value: string;
+  gradient: string;
+  iconColor: string;
+  icon: React.ReactNode;
+  mono?: boolean;
+  span2?: boolean;
+}> = ({ label, value, gradient, iconColor, icon, mono, span2 }) => (
+  <div className={`flex items-center gap-2 px-2.5 py-2 rounded-lg bg-gradient-to-r ${gradient} border ${span2 ? 'col-span-2' : ''}`}>
+    <div className={`${iconColor} flex-shrink-0`}>{icon}</div>
+    <div className="min-w-0 flex-1">
+      <div className="text-[9px] text-zinc-500 uppercase tracking-wider leading-none mb-0.5">{label}</div>
+      <div className={`text-xs text-zinc-800 dark:text-zinc-200 font-semibold truncate ${mono ? 'font-mono' : ''}`}>{value}</div>
+    </div>
   </div>
 );

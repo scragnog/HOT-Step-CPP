@@ -142,12 +142,19 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
   const isFailed = item.status === 'failed';
   const isPending = item.status === 'pending';
 
-  // Show audio duration for completed items, generation elapsed for running/pending
-  const displaySeconds = isSucceeded && item.audioDuration ? item.audioDuration : (item.elapsed || 0);
-  const mins = Math.floor(displaySeconds / 60);
-  const secs = displaySeconds % 60;
-  const timeStr = displaySeconds > 0
-    ? `${mins}:${String(Math.floor(secs)).padStart(2, '0')}`
+  // Always show generation elapsed time; track duration shown separately for completed items
+  const elapsedSeconds = item.elapsed || 0;
+  const eMins = Math.floor(elapsedSeconds / 60);
+  const eSecs = elapsedSeconds % 60;
+  const elapsedStr = elapsedSeconds > 0
+    ? `${eMins}:${String(Math.floor(eSecs)).padStart(2, '0')}`
+    : '';
+
+  const durationSeconds = isSucceeded && item.audioDuration ? item.audioDuration : 0;
+  const dMins = Math.floor(durationSeconds / 60);
+  const dSecs = durationSeconds % 60;
+  const durationStr = durationSeconds > 0
+    ? `${dMins}:${String(Math.floor(dSecs)).padStart(2, '0')}`
     : '';
 
   const borderColor = isSucceeded ? 'border-green-500/20'
@@ -181,9 +188,14 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
         </div>
 
         <div className="flex items-center gap-1 flex-shrink-0">
-          {timeStr && (
-            <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-0.5">
-              <Clock className="w-2.5 h-2.5" />{timeStr}
+          {elapsedStr && (
+            <span className="text-[10px] text-zinc-500 font-mono" title="Generation time">
+              ⏱{elapsedStr}
+            </span>
+          )}
+          {isSucceeded && durationStr && (
+            <span className="text-[10px] text-zinc-600 font-mono" title="Track duration">
+              🎵{durationStr}
             </span>
           )}
           {isPending && (

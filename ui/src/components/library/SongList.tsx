@@ -737,7 +737,10 @@ const SongCard: React.FC<SongCardProps> = ({
 
   const formatDate = (d: string | Date | undefined) => {
     if (!d) return '';
-    const date = typeof d === 'string' ? new Date(d) : d;
+    // SQLite datetime('now') stores UTC without 'Z' suffix — force UTC interpretation
+    const date = typeof d === 'string'
+      ? new Date(d.includes('T') || d.includes('Z') ? d : d.replace(' ', 'T') + 'Z')
+      : d;
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffH = Math.floor(diffMs / 3600000);
@@ -1001,7 +1004,10 @@ const SongTable: React.FC<SongTableProps> = ({
 
   const formatDate = (d: string | Date | undefined) => {
     if (!d) return '';
-    const date = typeof d === 'string' ? new Date(d) : d;
+    // SQLite datetime('now') stores UTC without 'Z' suffix — force UTC interpretation
+    const date = typeof d === 'string'
+      ? new Date(d.includes('T') || d.includes('Z') ? d : d.replace(' ', 'T') + 'Z')
+      : d;
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffH = Math.floor(diffMs / 3600000);

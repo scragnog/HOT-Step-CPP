@@ -139,6 +139,13 @@ export const GenerationDropdown: React.FC = () => {
             </>
           )}
         </select>
+        {/* Solver description from Lua plugin metadata */}
+        {(() => {
+          const solver = findSolver(gp.inferMethod);
+          return solver?.description ? (
+            <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{solver.description}</p>
+          ) : null;
+        })()}
       </div>
 
       {/* ── Dynamic Solver Controls ── */}
@@ -180,6 +187,13 @@ export const GenerationDropdown: React.FC = () => {
           <option value="linear_quadratic">Linear-Quadratic</option>
           <option value="composite">Composite (2-Stage)</option>
         </select>
+        {/* Scheduler description from Lua plugin metadata */}
+        {(() => {
+          const sched = registry.schedulers.find(s => s.name === schedulerKey);
+          return sched?.description ? (
+            <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{sched.description}</p>
+          ) : null;
+        })()}
       </div>
 
       {/* ── Beta (Custom) Sub-Controls ── */}
@@ -312,6 +326,13 @@ export const GenerationDropdown: React.FC = () => {
             </>
           )}
         </select>
+        {/* Guidance description from Lua plugin metadata */}
+        {(() => {
+          const guide = findGuidance(gp.guidanceMode);
+          return guide?.description ? (
+            <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{guide.description}</p>
+          ) : null;
+        })()}
       </div>
 
       {/* ── APG Sub-Controls (native C++ path — always show for APG) ── */}
