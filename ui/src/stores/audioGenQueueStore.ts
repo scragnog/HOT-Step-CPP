@@ -241,6 +241,9 @@ export function completeManualQueueItem(id: string, result: {
   _state.completionCounter++;
   _emit();
 
+  // Notify App.tsx so Library updates in real-time
+  if (result.songId) _notifySongCreated(result.songId);
+
   // If server didn't provide duration, probe the audio file
   if (!item.audioDuration && result.audioUrl) {
     _probeAudioDuration(id, result.audioUrl);
@@ -257,6 +260,25 @@ export function failManualQueueItem(id: string, error: string): void {
   item.stage = undefined;
   _emit();
 }
+// ── Song-created notification ────────────────────────────────────────────────
+
+/**
+ * After a queue item completes with a songId, fetch the full song from the API
+ * and dispatch a CustomEvent so App.tsx can add it to the library state.
+ * This ensures the Library page updates in real-time without a browser reload.
+ */
+async function _notifySongCreated(songId: string): Promise<void> {
+  try {
+    const { song } = await songApi.get(songId);
+    if (song) {
+      window.dispatchEvent(new CustomEvent('song-created', { detail: { song } }));
+    }
+  } catch {
+    // Non-fatal — the song is saved, it'll appear on next reload
+    console.warn('[AudioQueue] Could not fetch song for library notification:', songId);
+  }
+}
+
 // ── Audio duration probing ───────────────────────────────────────────────────
 
 /** Probe an audio URL with a hidden Audio element to get the real duration. */
@@ -439,6 +461,8 @@ async function _processQueue(token: string): Promise<void> {
       await _executeItem(next, token);
       next.status = 'succeeded';
       _state.completionCounter++;
+      // Notify App.tsx so Library updates in real-time
+      if (next.songId) _notifySongCreated(next.songId);
     } catch (err) {
       next.status = 'failed';
       next.error = (err as Error).message;
@@ -628,6 +652,8 @@ async function _resumePolling(item: AudioQueueItem, token: string): Promise<void
     await _pollUntilDone(item, token);
     item.status = 'succeeded';
     _state.completionCounter++;
+    // Notify App.tsx so Library updates in real-time
+    if (item.songId) _notifySongCreated(item.songId);
   } catch (err) {
     item.status = 'failed';
     item.error = (err as Error).message;

@@ -381,6 +381,18 @@ const AppContent: React.FC = () => {
     return () => window.removeEventListener('cover-art-updated', handler);
   }, []);
 
+  // Listen for song-created events (fired by audioGenQueueStore on completion)
+  // This covers Lyric Studio, Cover Studio, and resumed queue items.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { song } = (e as CustomEvent).detail;
+      if (!song) return;
+      handleSongCreated(song);
+    };
+    window.addEventListener('song-created', handler);
+    return () => window.removeEventListener('song-created', handler);
+  }, [handleSongCreated]);
+
   // Rename handler — PATCH title to server + update local state
   const handleRename = useCallback(async (song: Song, newTitle: string) => {
     try {
