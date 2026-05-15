@@ -14,7 +14,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { UnifiedRecentSongs } from './UnifiedRecentSongs';
 import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
-import { useAudioGenQueue } from '../../stores/audioGenQueueStore';
+import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 
 // ── Shared Section Container ─────────────────────────────────────────────────
 
@@ -77,13 +77,13 @@ export const ActivitySidebar: React.FC<ActivitySidebarProps> = ({
   queueCountColor = 'bg-pink-500/20 text-pink-300',
 }) => {
   const { t } = useTranslation();
-  const queue = useAudioGenQueue();
-  const queueCount = queue.items.filter(i =>
-    i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating'
-  ).length;
+  const queueCount = useAudioGenQueueSelector(s =>
+    s.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length
+  );
+  const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
 
   // Combine external refresh key with queue completion counter
-  const recentRefreshKey = queue.completionCounter + refreshKey;
+  const recentRefreshKey = completionCounter + refreshKey;
 
   return (
     <div className="h-full flex flex-col">

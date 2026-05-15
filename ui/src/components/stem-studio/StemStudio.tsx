@@ -26,7 +26,7 @@ import { RecentExtractions } from './RecentExtractions';
 import { Section } from '../shared/ActivitySidebar';
 import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { useAudioGenQueue } from '../../stores/audioGenQueueStore';
+import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 
 /** Filter DiT model list to only pure base models (no merge/sft/turbo) */
 function getBaseModels(ditModels: string[]): string[] {
@@ -74,10 +74,9 @@ export const StemStudio: React.FC = () => {
 
   // Sidebar — shared width with other studio pages
   const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
-  const queue = useAudioGenQueue();
-  const queueCount = queue.items.filter(i =>
-    i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating'
-  ).length;
+  const queueCount = useAudioGenQueueSelector(s =>
+    s.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length
+  );
 
   // Fetch available base models on mount — restore persisted selection
   useEffect(() => {

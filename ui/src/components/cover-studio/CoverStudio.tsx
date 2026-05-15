@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
 import { generateApi } from '../../services/api';
@@ -20,7 +20,7 @@ import { StemMixer, type StemControl, type MixerStemInfo } from '../shared/StemM
 import {
   addManualQueueItem, updateManualQueueItem,
   completeManualQueueItem, failManualQueueItem,
-  useAudioGenQueue,
+  useAudioGenQueueSelector,
 } from '../../stores/audioGenQueueStore';
 import {
   persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey,
@@ -31,7 +31,7 @@ import type { LatentMetadata } from '../shared/LatentImport';
 export const CoverStudio: React.FC = () => {
   const { t } = useTranslation();
   const { token } = useAuth();
-  const gp = useGlobalParams();
+  const gp = useGlobalParamsStore();
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
 
   // ── Source audio state ──
@@ -78,7 +78,7 @@ export const CoverStudio: React.FC = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toast, setToast] = useState('');
   const [queueItemId, setQueueItemId] = useState<string | null>(null);
-  const queue = useAudioGenQueue();
+  const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
 
   // ── Sidebar resize ──
   const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
@@ -636,7 +636,7 @@ export const CoverStudio: React.FC = () => {
           <ActivitySidebar
             showToast={showToast}
             source="cover-studio"
-            refreshKey={refreshTrigger + queue.completionCounter}
+            refreshKey={refreshTrigger + completionCounter}
             queueCountColor="bg-cyan-500/20 text-cyan-300"
             compact={sidebarWidth < 380}
           />

@@ -36,10 +36,10 @@ import { WrittenSongsTab } from './WrittenSongsTab';
 import { RecordingsTab } from './RecordingsTab';
 import { ActivitySidebar } from '../shared/ActivitySidebar';
 import { useAudioGeneration } from './useAudioGeneration';
-import { enqueueAudioGen, useAudioGenQueue } from '../../stores/audioGenQueueStore';
+import { enqueueAudioGen, useResumeQueue, useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 import { usePlaybackSelector } from '../../stores/playbackStore';
 import { useAuth } from '../../context/AuthContext';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { QueuePanel } from './QueuePanel';
 import { PromptEditor } from './PromptEditor';
 // streamingStore used via queue panel
@@ -164,7 +164,8 @@ export const LyricStudioV2: React.FC = () => {
   const currentPlaybackTrack = usePlaybackSelector(s => s.currentTrack);
 
   // ── Audio generation ──
-  const audioQueue = useAudioGenQueue(token || undefined);
+  useResumeQueue(token || undefined);
+  const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
 
   // ── Toast ──
   const [toast, setToast] = useState<string | null>(null);
@@ -478,7 +479,7 @@ export const LyricStudioV2: React.FC = () => {
 
   // ── Audio generation ──
   const { sendToCreate } = useAudioGeneration({ profiles, showToast });
-  const globalParams = useGlobalParams();
+  const globalParams = useGlobalParamsStore();
 
   const handleGenerateAudio = useCallback(async (gen: Generation) => {
     if (!token) { showToast('Not authenticated'); return; }
@@ -500,11 +501,11 @@ export const LyricStudioV2: React.FC = () => {
 
   // Refresh album data on audio queue completions
   useEffect(() => {
-    if (audioQueue.completionCounter > 0) {
+    if (completionCounter > 0) {
       refreshAlbumData();
       setRecordingsRefreshKey(k => k + 1);
     }
-  }, [audioQueue.completionCounter]);
+  }, [completionCounter]);
 
   const handleSendToCreate = useCallback(async (gen: Generation) => {
     // Inject artist name — gen from getAlbumFullDetail doesn't include it

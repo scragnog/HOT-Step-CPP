@@ -13,7 +13,7 @@
  * Components subscribe via `useAudioGenQueue()` which uses `useSyncExternalStore`.
  */
 
-import { useSyncExternalStore, useEffect } from 'react';
+import { useSyncExternalStore, useEffect, useRef, useCallback } from 'react';
 import { lireekApi } from '../services/lireekApi';
 import { generateApi, songApi } from '../services/api';
 import { writePersistedState } from '../hooks/usePersistedState';
@@ -61,7 +61,24 @@ export interface AudioGenQueueState {
 
 const STORAGE_KEY = 'lireek-audio-gen-queue';
 
+let _persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Debounced persistence — avoids JSON.stringify on every 2.5s poll tick. */
 function _persist(): void {
+  if (_persistTimer) clearTimeout(_persistTimer);
+  _persistTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        items: _state.items,
+        completionCounter: _state.completionCounter,
+      }));
+    } catch { /* quota exceeded etc */ }
+  }, 2000);
+}
+
+/** Force-flush persistence immediately (status transitions, not progress ticks). */
+function _persistNow(): void {
+  if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       items: _state.items,
@@ -93,9 +110,9 @@ function _restore(): AudioGenQueueState {
 let _state: AudioGenQueueState = _restore();
 const _listeners = new Set<() => void>();
 
-function _emit() {
+function _emit(immediate = false) {
   _state = { ..._state, items: [..._state.items] };
-  _persist();
+  if (immediate) _persistNow(); else _persist();
   _listeners.forEach(fn => fn());
 }
 
@@ -141,13 +158,13 @@ export async function enqueueAudioGen(
   };
 
   _state.items.push(item);
-  _emit();
+  _emit(true);
   _processQueue(token);
 }
 
 export function removeFromAudioQueue(id: string): void {
   _state.items = _state.items.filter(i => i.id !== id);
-  _emit();
+  _emit(true);
 }
 
 /** Force-dismiss an active/generating item (user clicked X).
@@ -163,13 +180,13 @@ export function forceFailQueueItem(id: string): void {
     item.error = 'Cancelled by user';
     item.stage = undefined;
     item.progress = undefined;
-    _emit();
+    _emit(true);
   }
 }
 
 export function clearFinishedFromAudioQueue(): void {
   _state.items = _state.items.filter(i => i.status !== 'succeeded' && i.status !== 'failed');
-  _emit();
+  _emit(true);
 }
 
 // ── Manual queue API (for Cover Studio and other non-Lyric-Studio modules) ───
@@ -198,7 +215,7 @@ export function addManualQueueItem(opts: {
     stage: 'Submitting...',
   };
   _state.items.push(item);
-  _emit();
+  _emit(true);
   return id;
 }
 
@@ -219,7 +236,7 @@ export function updateManualQueueItem(id: string, update: {
   if (update.stage !== undefined) item.stage = update.stage;
   if (update.elapsed !== undefined) item.elapsed = update.elapsed;
   if (update.status !== undefined) item.status = update.status;
-  _emit();
+  _emit(true);
 }
 
 /** Mark a manually-added queue item as succeeded with audio results. */
@@ -239,7 +256,7 @@ export function completeManualQueueItem(id: string, result: {
   item.progress = 100;
   item.stage = 'Complete!';
   _state.completionCounter++;
-  _emit();
+  _emit(true);
 
   // Notify App.tsx so Library updates in real-time
   if (result.songId) _notifySongCreated(result.songId);
@@ -258,7 +275,7 @@ export function failManualQueueItem(id: string, error: string): void {
   item.error = error;
   item.progress = undefined;
   item.stage = undefined;
-  _emit();
+  _emit(true);
 }
 // ── Song-created notification ────────────────────────────────────────────────
 
@@ -291,7 +308,7 @@ function _probeAudioDuration(itemId: string, url: string): void {
       const item = _state.items.find(i => i.id === itemId);
       if (item) {
         item.audioDuration = Math.round(dur);
-        _emit();
+        _emit(true);
       }
     }
     audio.src = ''; // release
@@ -333,13 +350,13 @@ export async function enqueueSimpleGen(
     stage: 'Submitting…',
   };
   _state.items.push(item);
-  _emit();
+  _emit(true);
 
   try {
     const res = await generateApi.submit(params as any, token);
     item.jobId = res.jobId;
     item.stage = 'Queued…';
-    _emit();
+    _emit(true);
 
     // Poll until done
     const startTime = Date.now();
@@ -352,7 +369,7 @@ export async function enqueueSimpleGen(
           : undefined;
         item.stage = status.stage || 'Generating…';
         item.elapsed = Math.round((Date.now() - startTime) / 1000);
-        _emit();
+        _emit();  // progress tick — debounced persistence
 
         if (status.status === 'succeeded') {
           const audioUrl = status.result?.audioUrls?.[0] || '';
@@ -366,7 +383,7 @@ export async function enqueueSimpleGen(
           item.progress = 100;
           item.stage = 'Complete!';
           _state.completionCounter++;
-          _emit();
+          _emit(true);
 
           // If server didn't provide duration, probe the audio file
           if (!item.audioDuration && audioUrl) {
@@ -403,7 +420,7 @@ export async function enqueueSimpleGen(
     item.error = (err as Error).message;
     item.progress = undefined;
     item.stage = undefined;
-    _emit();
+    _emit(true);
   }
 }
 
@@ -421,7 +438,7 @@ export function resumeQueue(token: string): void {
       didFix = true;
     }
   }
-  if (didFix) _emit();
+  if (didFix) _emit(true);
 
   const hasPending = _state.items.some(i => i.status === 'pending');
   const inFlight = _state.items.filter(i => i.status === 'generating' && i.jobId);
@@ -467,7 +484,7 @@ async function _processQueue(token: string): Promise<void> {
       next.status = 'failed';
       next.error = (err as Error).message;
     }
-    _emit();
+    _emit(true);
   }
 
   _running = false;
@@ -524,7 +541,7 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   if (preset?.adapter_path) {
     item.status = 'loading-adapter';
     item.stage = `Preparing adapter for ${item.artistName}…`;
-    _emit();
+    _emit(true);
 
     // Update the top bar to reflect the adapter being used
     writePersistedState('hs-adapter', preset.adapter_path);
@@ -582,12 +599,12 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   params.source = 'lyric-studio';
   item.status = 'generating';
   item.stage = 'Submitting to audio engine…';
-  _emit();
+  _emit(true);
 
   const res = await generateApi.submit(params as any, token);
   const jobId = res.jobId;
   item.jobId = jobId;
-  _emit(); // persist jobId immediately
+  _emit(true); // persist jobId immediately
 
   // 6) Link audio to Lireek generation
   if (jobId) {
@@ -602,7 +619,7 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
   const jobId = item.jobId!;
   item.stage = 'Generating audio…';
   const startTime = item.elapsed ? Date.now() - item.elapsed * 1000 : Date.now();
-  _emit();
+  _emit(true);
 
   while (true) {
     await new Promise(r => setTimeout(r, 2500));
@@ -613,7 +630,7 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
         : undefined;
       item.stage = status.stage || 'Generating…';
       item.elapsed = Math.round((Date.now() - startTime) / 1000);
-      _emit();
+      _emit();  // progress tick — debounced persistence
 
       if (status.status === 'succeeded') {
         const audioUrl = status.result?.audioUrls?.[0];
@@ -624,7 +641,7 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
           if (songId) item.songId = songId;
           if (masteredUrl) item.masteredAudioUrl = masteredUrl;
           if (status.result?.duration) item.audioDuration = status.result.duration;
-          _emit();
+          _emit(true);
           // If server didn't provide duration, probe the audio file
           if (!item.audioDuration) _probeAudioDuration(item.id, audioUrl);
         }
@@ -658,10 +675,10 @@ async function _resumePolling(item: AudioQueueItem, token: string): Promise<void
     item.status = 'failed';
     item.error = (err as Error).message;
   }
-  _emit();
+  _emit(true);
 }
 
-// ── React hook ───────────────────────────────────────────────────────────────
+// ── React hooks ──────────────────────────────────────────────────────────────
 
 export function useAudioGenQueue(token?: string): AudioGenQueueState {
   useEffect(() => {
@@ -671,4 +688,38 @@ export function useAudioGenQueue(token?: string): AudioGenQueueState {
   }, [token]);
 
   return useSyncExternalStore(_subscribe, _getSnapshot, _getSnapshot);
+}
+
+/** Resume queue on mount (if items exist).  Does NOT subscribe to queue state. */
+export function useResumeQueue(token?: string): void {
+  useEffect(() => {
+    if (token && _state.items.length > 0) {
+      resumeQueue(token);
+    }
+  }, [token]);
+}
+
+/**
+ * Subscribe to a derived slice of queue state.  The component only re-renders
+ * when the selected value changes (Object.is equality).
+ *
+ * @example
+ *   const activeCount = useAudioGenQueueSelector(s =>
+ *     s.items.filter(i => i.status === 'generating').length
+ *   );
+ */
+export function useAudioGenQueueSelector<T>(selector: (state: AudioGenQueueState) => T): T {
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+
+  const selectedRef = useRef<T>(selector(_state));
+
+  const getSelectedSnapshot = useCallback(() => {
+    const next = selectorRef.current(_state);
+    if (Object.is(selectedRef.current, next)) return selectedRef.current;
+    selectedRef.current = next;
+    return next;
+  }, []);
+
+  return useSyncExternalStore(_subscribe, getSelectedSnapshot, getSelectedSnapshot);
 }

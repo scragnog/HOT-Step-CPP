@@ -16,7 +16,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Upload, X, Loader2, Info, AlertTriangle, Layers, Clock, ListOrdered } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { generateApi, modelApi } from '../../services/api';
 import { TrackPicker, type TrackName } from './TrackPicker';
@@ -25,7 +25,7 @@ import { RecentBuilds } from './RecentBuilds';
 import { PreviewPlayer } from './PreviewPlayer';
 import { Section } from '../shared/ActivitySidebar';
 import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
-import { useAudioGenQueue } from '../../stores/audioGenQueueStore';
+import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 
 /** Filter DiT model list to only pure base models (no merge/sft/turbo) */
 function getBaseModels(ditModels: string[]): string[] {
@@ -38,7 +38,7 @@ function getBaseModels(ditModels: string[]): string[] {
 export const StemBuilder: React.FC = () => {
   const { token } = useAuth();
   const { t } = useTranslation();
-  const gp = useGlobalParams();
+  const gp = useGlobalParamsStore();
 
   // ── Source audio ──
   const [sourceAudioUrl, setSourceAudioUrl] = useState(() => localStorage.getItem('hs-sb-sourceUrl') || '');
@@ -72,10 +72,10 @@ export const StemBuilder: React.FC = () => {
   // ── Sidebar ──
   const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const queue = useAudioGenQueue();
-  const queueCount = queue.items.filter(i =>
-    i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating'
-  ).length;
+  const queueCount = useAudioGenQueueSelector(s =>
+    s.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length
+  );
+  const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
 
   // ── Toast ──
   const [toast, setToast] = useState('');
@@ -532,7 +532,7 @@ export const StemBuilder: React.FC = () => {
             defaultOpen={true}
           >
             <RecentBuilds
-              refreshTrigger={refreshTrigger + queue.completionCounter}
+              refreshTrigger={refreshTrigger + completionCounter}
               onPlay={handlePlayRecent}
               onUseAsSource={handleUseRecentAsSource}
             />

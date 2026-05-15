@@ -7,7 +7,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Upload, Loader2, X, Music, FolderOpen, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { generateApi, songApi } from '../../services/api';
 import { fetchLrc } from '../../utils/lrcUtils';
@@ -18,7 +18,7 @@ import { ActivitySidebar } from '../shared/ActivitySidebar';
 import {
   addManualQueueItem, updateManualQueueItem,
   completeManualQueueItem, failManualQueueItem,
-  useAudioGenQueue,
+  useAudioGenQueueSelector,
 } from '../../stores/audioGenQueueStore';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
@@ -37,8 +37,8 @@ function restore<T>(key: string, fallback: T): T {
 
 export const RepaintStudio: React.FC = () => {
   const { token } = useAuth();
-  const gp = useGlobalParams();
-  const queue = useAudioGenQueue();
+  const gp = useGlobalParamsStore();
+  const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
   const { disguiseArtist } = useDisguiseMode();
 
   // ── Source song state ──
@@ -517,7 +517,7 @@ export const RepaintStudio: React.FC = () => {
           <ActivitySidebar
             showToast={(msg) => showToast(msg as string)}
             source="repaint"
-            refreshKey={refreshTrigger + queue.completionCounter}
+            refreshKey={refreshTrigger + completionCounter}
             queueCountColor="bg-pink-500/20 text-pink-300"
             compact={sidebarWidth < 380}
           />

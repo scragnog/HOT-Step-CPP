@@ -16,7 +16,7 @@ import { songApi } from './services/api';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
 import { SongList } from './components/library/SongList';
-import { enqueueSimpleGen, useAudioGenQueue } from './stores/audioGenQueueStore';
+import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector } from './stores/audioGenQueueStore';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
 import { Player } from './components/player/Player';
 import { WaveformPlayer, type WaveformPlayerHandle } from './components/player/WaveformPlayer';
@@ -293,11 +293,11 @@ const AppContent: React.FC = () => {
     playFromList(songToTrack(song), songs.map(songToTrack), 'library');
   }, [songs]);
 
-  // Shared audio generation queue (unified across all modes)
-  const audioQueue = useAudioGenQueue(token || undefined);
-  const activeJobCount = audioQueue.items.filter(i =>
-    i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating'
-  ).length;
+  // Shared audio generation queue — resume on mount, subscribe only to active count
+  useResumeQueue(token || undefined);
+  const activeJobCount = useAudioGenQueueSelector(s =>
+    s.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length
+  );
 
   // Load songs on mount
   useEffect(() => {
