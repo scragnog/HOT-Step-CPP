@@ -92,7 +92,7 @@ export const BarSection: React.FC<BarSectionProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative flex-1 min-w-0 flex flex-col"
+      className="relative flex-1 min-w-0"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -101,7 +101,7 @@ export const BarSection: React.FC<BarSectionProps> = ({
         id={`global-bar-${id}`}
         onClick={handleClick}
         className={`
-          w-full flex-1 px-3 flex items-center gap-2 transition-all duration-150 cursor-pointer
+          absolute inset-0 w-full px-3 flex items-center gap-2 transition-all duration-150 cursor-pointer
           border-b-2 ${isOpen ? `${accent.bgHover} ${accent.border}` : `${accent.bg} border-transparent hover:${accent.bgHover}`}
         `}
       >
