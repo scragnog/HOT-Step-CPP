@@ -19,15 +19,14 @@ import type { AudioQueueItem } from '../../stores/audioGenQueueStore';
 import { usePlaylist } from './playlistStore';
 import type { Song } from '../../types';
 import { DownloadModal } from '../shared/DownloadModal';
-import { play as pbPlay, audioQueueItemToTrack, usePlayback } from '../../stores/playbackStore';
+import { play as pbPlay, audioQueueItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
 export const InlineAudioQueue: React.FC = () => {
   const { items } = useAudioGenQueue();
   const { t } = useTranslation();
   const [downloadSong, setDownloadSong] = React.useState<Song | null>(null);
-  const pb = usePlayback();
-  const currentSongId = pb.currentTrack?.id ?? null;
+  const currentSongId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
 
   const active = items.filter(i => i.status === 'loading-adapter' || i.status === 'generating');
   const queued = items.filter(i => i.status === 'pending');

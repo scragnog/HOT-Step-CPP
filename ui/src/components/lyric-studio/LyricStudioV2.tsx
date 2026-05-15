@@ -37,7 +37,7 @@ import { RecordingsTab } from './RecordingsTab';
 import { ActivitySidebar } from '../shared/ActivitySidebar';
 import { useAudioGeneration } from './useAudioGeneration';
 import { enqueueAudioGen, useAudioGenQueue } from '../../stores/audioGenQueueStore';
-import { usePlayback } from '../../stores/playbackStore';
+import { usePlaybackSelector } from '../../stores/playbackStore';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { QueuePanel } from './QueuePanel';
@@ -160,7 +160,8 @@ export const LyricStudioV2: React.FC = () => {
   const [artistIdsWithAdapters, setArtistIdsWithAdapters] = useState<Set<number>>(new Set());
 
   // ── Playback (for backdrop effect) ──
-  const { isPlaying, currentTrack: currentPlaybackTrack } = usePlayback();
+  const isPlaying = usePlaybackSelector(s => s.isPlaying);
+  const currentPlaybackTrack = usePlaybackSelector(s => s.currentTrack);
 
   // ── Audio generation ──
   const audioQueue = useAudioGenQueue(token || undefined);

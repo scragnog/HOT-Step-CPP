@@ -10,7 +10,7 @@ import {
   ChevronUp, ChevronDown, Power, Headphones, Square,
 } from 'lucide-react';
 import { useVstChainStore } from '../../stores/vstChainStore';
-import { usePlayback, togglePlay } from '../../stores/playbackStore';
+import { usePlaybackSelector, togglePlay } from '../../stores/playbackStore';
 // VstPlugin type reserved for future use
 // import type { VstPlugin } from '../../services/api';
 
@@ -195,7 +195,8 @@ export const VstChainDropdown: React.FC = () => {
     startMonitor, stopMonitor, pollMonitorStatus,
     monitorPosition, monitorDuration, seekMonitor,
   } = useVstChainStore();
-  const { currentTrack, isPlaying } = usePlayback();
+  const currentTrack = usePlaybackSelector(s => s.currentTrack);
+  const isPlaying = usePlaybackSelector(s => s.isPlaying);
   const [showSearch, setShowSearch] = useState(false);
   const { t } = useTranslation();
 

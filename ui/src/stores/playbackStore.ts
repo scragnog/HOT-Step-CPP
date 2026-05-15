@@ -12,7 +12,7 @@
  * Persists preferences + track list to localStorage.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useSyncExternalStore, useRef, useCallback } from 'react';
 import type { WaveformPlayerHandle } from '../components/player/WaveformPlayer';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -726,8 +726,37 @@ export function reloadCurrentTrack(newDuration?: number): void {
   setTrimMode(false);
 }
 
-// ── React Hook ───────────────────────────────────────────────────────────────
+// ── React Hooks ──────────────────────────────────────────────────────────────
 
+/**
+ * Subscribe to the full playback state.
+ * @deprecated Prefer usePlaybackSelector(s => s.field) — subscribing to the
+ * full state causes re-renders on every currentTime tick (~20×/sec).
+ */
 export function usePlayback(): PlaybackState {
   return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+/**
+ * Subscribe to a slice of playback state.  The component only re-renders when
+ * the selected value changes (Object.is equality).
+ *
+ * @example
+ *   const isPlaying = usePlaybackSelector(s => s.isPlaying);
+ *   const trackId   = usePlaybackSelector(s => s.currentTrack?.id ?? null);
+ */
+export function usePlaybackSelector<T>(selector: (state: PlaybackState) => T): T {
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+
+  const selectedRef = useRef<T>(selector(_state));
+
+  const getSelectedSnapshot = useCallback(() => {
+    const next = selectorRef.current(_state);
+    if (Object.is(selectedRef.current, next)) return selectedRef.current;
+    selectedRef.current = next;
+    return next;
+  }, []);
+
+  return useSyncExternalStore(subscribe, getSelectedSnapshot);
 }

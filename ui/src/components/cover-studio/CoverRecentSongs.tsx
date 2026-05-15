@@ -12,7 +12,7 @@ import { songApi } from '../../services/api';
 import type { Song } from '../../types';
 import { DownloadModal } from '../shared/DownloadModal';
 import { usePlaylist } from '../lyric-studio/playlistStore';
-import { playFromList, songToTrack, usePlayback } from '../../stores/playbackStore';
+import { playFromList, songToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
 interface CoverRecentSongsProps {
@@ -30,7 +30,7 @@ let _fetchInFlight = false;
 
 export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, refreshKey = 0 }) => {
   const { token } = useAuth();
-  const pb = usePlayback();
+  const currentTrackId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
   const [songs, setSongs] = useState<Song[]>(_cachedCovers);
   const [loading, setLoading] = useState(_cachedCovers.length === 0);
   const mountedRef = useRef(true);
@@ -149,7 +149,7 @@ export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, r
           const dur = typeof song.duration === 'number' ? song.duration : 0;
           const mins = Math.floor(dur / 60);
           const secs = String(Math.floor(dur % 60)).padStart(2, '0');
-          const isCurrent = pb.currentTrack?.id === song.id;
+          const isCurrent = currentTrackId === song.id;
           const gp = song.generationParams as any;
           const targetArtist = gp?.artistName || song.artistName || '';
 

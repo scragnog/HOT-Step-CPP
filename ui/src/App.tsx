@@ -40,7 +40,7 @@ import { GlobalParamBar } from './components/global-bar/GlobalParamBar';
 import { InstaGenPanel } from './components/insta-gen/InstaGenPanel';
 import { PlaylistSidebar } from './components/playlist/PlaylistSidebar';
 import {
-  usePlayback,
+  usePlaybackSelector,
   registerPlayers,
   getActiveMediaElement,
   handleOriginalReady,
@@ -199,9 +199,22 @@ const AppContent: React.FC = () => {
   const [playlistWidth, setPlaylistWidth] = usePersistedState('ace-playlistWidth', 300);
   const playlistData = usePlaylist();
 
-  // ── Playback (from unified store) ──
-  const pb = usePlayback();
-  const currentSong = pb.currentTrack as (Song | null);  // PlaybackTrack is Song-compatible for rendering
+  // ── Playback (from unified store — each selector only re-renders when its value changes) ──
+  const currentTrack = usePlaybackSelector(s => s.currentTrack);
+  const currentSong = currentTrack as (Song | null);  // PlaybackTrack is Song-compatible for rendering
+  const isPlaying = usePlaybackSelector(s => s.isPlaying);
+  const currentTime = usePlaybackSelector(s => s.currentTime);
+  const duration = usePlaybackSelector(s => s.duration);
+  const volume = usePlaybackSelector(s => s.volume);
+  const playbackRate = usePlaybackSelector(s => s.playbackRate);
+  const playMastered = usePlaybackSelector(s => s.playMastered);
+  const spectrumEnabled = usePlaybackSelector(s => s.spectrumEnabled);
+  const shuffle = usePlaybackSelector(s => s.shuffle);
+  const repeat = usePlaybackSelector(s => s.repeat);
+  const trimMode = usePlaybackSelector(s => s.trimMode);
+  const trimInPoint = usePlaybackSelector(s => s.trimInPoint);
+  const trimOutPoint = usePlaybackSelector(s => s.trimOutPoint);
+  const trimClickCount = usePlaybackSelector(s => s.trimClickCount);
   const wavesurferRef = useRef<WaveformPlayerHandle>(null);
   const wavesurferAltRef = useRef<WaveformPlayerHandle>(null);
 
@@ -217,14 +230,14 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     const el = getActiveMediaElement();
     if (el) setSpectrumMediaEl(el);
-  }, [pb.playMastered, pb.currentTrack]);
+  }, [playMastered, currentTrack]);
 
   // ── Trim mode waveform click handler ──
   const handleWaveformClick = useCallback((timeSec: number) => {
-    if (pb.trimMode) {
+    if (trimMode) {
       pbHandleTrimClick(timeSec);
     }
-  }, [pb.trimMode]);
+  }, [trimMode]);
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: ToastType; isVisible: boolean }>({
@@ -635,7 +648,7 @@ const AppContent: React.FC = () => {
                   onReuse={handleReuse}
                   onDelete={handleDelete}
                   onPlay={(song) => playFromList(songToTrack(song), songs.map(songToTrack), 'library')}
-                  isPlaying={pb.isPlaying && pb.currentTrack?.id === selectedSong?.id}
+                  isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
                   onDownload={setDownloadSong}
                 />
               </div>
@@ -821,7 +834,7 @@ const AppContent: React.FC = () => {
                 onReuse={handleReuse}
                 onDelete={handleDelete}
                 onPlay={(song) => playFromList(songToTrack(song), songs.map(songToTrack), 'library')}
-                isPlaying={pb.isPlaying && pb.currentTrack?.id === selectedSong?.id}
+                isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
                 onDownload={setDownloadSong}
               />
             </div>
@@ -995,26 +1008,26 @@ const AppContent: React.FC = () => {
         <div
           style={{
             display: 'grid',
-            gridTemplateRows: (pb.isPlaying || pb.trimMode) ? '1fr' : '0fr',
-            opacity: (pb.isPlaying || pb.trimMode) ? 1 : 0,
+            gridTemplateRows: (isPlaying || trimMode) ? '1fr' : '0fr',
+            opacity: (isPlaying || trimMode) ? 1 : 0,
             transition: 'grid-template-rows 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
           }}
         >
           <div style={{ overflow: 'hidden', minHeight: 0 }}>
-          <SectionMarkers audioUrl={pb.currentTrack?.audioUrl ?? undefined} duration={pb.duration} />
+          <SectionMarkers audioUrl={currentTrack?.audioUrl ?? undefined} duration={duration} />
           <SpectrumAnalyzer
             mediaElement={spectrumMediaEl}
-            visible={pb.spectrumEnabled && pb.isPlaying}
-            isPlaying={pb.isPlaying}
+            visible={spectrumEnabled && isPlaying}
+            isPlaying={isPlaying}
           />
-          {pb.trimMode && (
+          {trimMode && (
             <TrimControls
-              trimInPoint={pb.trimInPoint}
-              trimOutPoint={pb.trimOutPoint}
-              trimClickCount={pb.trimClickCount}
-              duration={pb.duration}
-              songId={pb.currentTrack?.id ?? null}
-              audioUrl={pb.currentTrack?.audioUrl ?? null}
+              trimInPoint={trimInPoint}
+              trimOutPoint={trimOutPoint}
+              trimClickCount={trimClickCount}
+              duration={duration}
+              songId={currentTrack?.id ?? null}
+              audioUrl={currentTrack?.audioUrl ?? null}
               wavesurferRef={wavesurferRef}
               wavesurferAltRef={wavesurferAltRef}
               onReload={pbReloadCurrentTrack}
@@ -1025,14 +1038,14 @@ const AppContent: React.FC = () => {
           <div className="relative" style={{ height: 56 }}>
             <div style={{
               position: 'absolute', inset: 0,
-              opacity: pb.playMastered ? 0 : 1,
-              pointerEvents: pb.playMastered ? 'none' : 'auto',
+              opacity: playMastered ? 0 : 1,
+              pointerEvents: playMastered ? 'none' : 'auto',
               transition: 'opacity 0.15s ease',
             }}>
               <WaveformPlayer
                 ref={wavesurferRef}
-                volume={pb.playMastered ? 0 : pb.volume}
-                playbackRate={pb.playbackRate}
+                volume={playMastered ? 0 : volume}
+                playbackRate={playbackRate}
                 onTimeUpdate={pbSetCurrentTime}
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
@@ -1040,7 +1053,7 @@ const AppContent: React.FC = () => {
                 onWaveformClick={handleWaveformClick}
                 onReady={(dur) => {
                   handleOriginalReady(dur);
-                  if (!pb.playMastered) {
+                  if (!playMastered) {
                     setSpectrumMediaEl(wavesurferRef.current?.getMediaElement() ?? null);
                   }
                 }}
@@ -1048,14 +1061,14 @@ const AppContent: React.FC = () => {
             </div>
             <div style={{
               position: 'absolute', inset: 0,
-              opacity: pb.playMastered ? 1 : 0,
-              pointerEvents: pb.playMastered ? 'auto' : 'none',
+              opacity: playMastered ? 1 : 0,
+              pointerEvents: playMastered ? 'auto' : 'none',
               transition: 'opacity 0.15s ease',
             }}>
               <WaveformPlayer
                 ref={wavesurferAltRef}
-                volume={pb.playMastered ? pb.volume : 0}
-                playbackRate={pb.playbackRate}
+                volume={playMastered ? volume : 0}
+                playbackRate={playbackRate}
                 onTimeUpdate={pbSetCurrentTime}
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
@@ -1063,7 +1076,7 @@ const AppContent: React.FC = () => {
                 onWaveformClick={handleWaveformClick}
                 onReady={(dur) => {
                   handleAltReady(dur);
-                  if (pb.playMastered) {
+                  if (playMastered) {
                     setSpectrumMediaEl(wavesurferAltRef.current?.getMediaElement() ?? null);
                   }
                 }}
@@ -1074,40 +1087,40 @@ const AppContent: React.FC = () => {
           {/* /inner overflow wrapper */}
         </div>
         <LyricsBar
-          audioUrl={pb.currentTrack?.audioUrl ?? undefined}
-          currentTime={pb.currentTime}
-          isPlaying={pb.isPlaying}
+          audioUrl={currentTrack?.audioUrl ?? undefined}
+          currentTime={currentTime}
+          isPlaying={isPlaying}
         />
         <Player
           currentSong={currentSong}
-          isPlaying={pb.isPlaying}
+          isPlaying={isPlaying}
           onTogglePlay={pbTogglePlay}
-          currentTime={pb.currentTime}
-          duration={pb.duration}
+          currentTime={currentTime}
+          duration={duration}
           onSeek={pbSeek}
           onNext={pbNext}
           onPrevious={pbPrevious}
-          volume={pb.volume}
+          volume={volume}
           onVolumeChange={pbSetVolume}
-          playbackRate={pb.playbackRate}
+          playbackRate={playbackRate}
           onPlaybackRateChange={pbSetPlaybackRate}
           audioRef={wavesurferRef as any}
-          isShuffle={pb.shuffle}
-          onToggleShuffle={() => pbSetShuffle(!pb.shuffle)}
-          repeatMode={pb.repeat}
+          isShuffle={shuffle}
+          onToggleShuffle={() => pbSetShuffle(!shuffle)}
+          repeatMode={repeat}
           onToggleRepeat={pbCycleRepeat}
           onReusePrompt={() => currentSong && handleReuse(currentSong as Song)}
           onDelete={() => currentSong && handleDelete(currentSong as Song)}
           onDownload={() => currentSong && setDownloadSong(currentSong as Song)}
-          playMastered={pb.playMastered}
+          playMastered={playMastered}
           onToggleMastered={pbToggleMastered}
-          spectrumEnabled={pb.spectrumEnabled}
-          onToggleSpectrum={() => pbSetSpectrumEnabled(!pb.spectrumEnabled)}
+          spectrumEnabled={spectrumEnabled}
+          onToggleSpectrum={() => pbSetSpectrumEnabled(!spectrumEnabled)}
           showPlaylist={showPlaylist}
           playlistCount={playlistData.items.length}
           onTogglePlaylist={() => setShowPlaylist(prev => !prev)}
-          trimMode={pb.trimMode}
-          onToggleTrimMode={() => pbSetTrimMode(!pb.trimMode)}
+          trimMode={trimMode}
+          onToggleTrimMode={() => pbSetTrimMode(!trimMode)}
         />
       </div>
 

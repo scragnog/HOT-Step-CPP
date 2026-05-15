@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
-import { togglePlay, usePlayback } from '../../stores/playbackStore';
+import { togglePlay, usePlaybackSelector } from '../../stores/playbackStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
 // ── Source filter definitions ────────────────────────────────────────────────
@@ -104,7 +104,7 @@ export const SongList: React.FC<SongListProps> = ({
   showFilters = true, viewMode = 'list', title = 'Library',
 }) => {
   const { t } = useTranslation();
-  const playback = usePlayback();
+  const isPlaying = usePlaybackSelector(s => s.isPlaying);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
@@ -313,7 +313,7 @@ export const SongList: React.FC<SongListProps> = ({
               key={song.id}
               song={song}
               isActive={currentSongId === song.id}
-              isPlaying={currentSongId === song.id && playback.isPlaying}
+              isPlaying={currentSongId === song.id && isPlaying}
               selectionMode={selectionMode}
               isSelected={selectedIds.has(song.id)}
               onToggleSelect={() => toggleSelection(song.id)}
@@ -337,7 +337,7 @@ export const SongList: React.FC<SongListProps> = ({
               key={song.id}
               song={song}
               isActive={currentSongId === song.id}
-              isPlaying={currentSongId === song.id && playback.isPlaying}
+              isPlaying={currentSongId === song.id && isPlaying}
               selectionMode={selectionMode}
               isSelected={selectedIds.has(song.id)}
               onToggleSelect={() => toggleSelection(song.id)}
@@ -359,7 +359,7 @@ export const SongList: React.FC<SongListProps> = ({
         <SongTable
           songs={filteredSongs}
           currentSongId={currentSongId}
-          isPlaying={playback.isPlaying}
+          isPlaying={isPlaying}
           selectionMode={selectionMode}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelection}

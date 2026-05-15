@@ -13,7 +13,7 @@ import {
   Music, ListPlus, ListMusic, Square, Download,
 } from 'lucide-react';
 import { usePlaylist, type PlaylistItem } from '../lyric-studio/playlistStore';
-import { playFromList, playlistItemToTrack, usePlayback } from '../../stores/playbackStore';
+import { playFromList, playlistItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { DownloadModal } from '../shared/DownloadModal';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
@@ -25,8 +25,7 @@ interface PlaylistSidebarProps {
 export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => {
   const playlist = usePlaylist();
   const { t } = useTranslation();
-  const pb = usePlayback();
-  const currentSongId = pb.currentTrack?.id ?? null;
+  const currentSongId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
   const [downloadSong, setDownloadSong] = useState<Song | null>(null);
   const { disguiseArtist, disguiseTitle } = useDisguiseMode();
 

@@ -4,7 +4,7 @@ import { Music, Play, Pause, Loader2, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { songApi } from '../../services/api';
 import type { Song } from '../../types';
-import { playFromList, songToTrack, usePlayback } from '../../stores/playbackStore';
+import { playFromList, songToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 
 interface RecentCoversProps {
   refreshTrigger: number;
@@ -12,7 +12,8 @@ interface RecentCoversProps {
 
 export const RecentCovers: React.FC<RecentCoversProps> = ({ refreshTrigger }) => {
   const { token } = useAuth();
-  const pb = usePlayback();
+  const currentTrackId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
+  const isPlaying = usePlaybackSelector(s => s.isPlaying);
   const [covers, setCovers] = useState<Song[]>([]);
   const [loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -103,7 +104,7 @@ export const RecentCovers: React.FC<RecentCoversProps> = ({ refreshTrigger }) =>
       ) : (
         <div className="space-y-1">
           {covers.map(cover => {
-            const isCurrent = pb.currentTrack?.id === cover.id;
+            const isCurrent = currentTrackId === cover.id;
             return (
               <div
                 key={cover.id}
@@ -114,7 +115,7 @@ export const RecentCovers: React.FC<RecentCoversProps> = ({ refreshTrigger }) =>
                 `}
               >
                 <div className="w-6 h-6 rounded-full bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
-                  {isCurrent && pb.isPlaying ? (
+                  {isCurrent && isPlaying ? (
                     <Pause className="w-3 h-3 text-cyan-400" />
                   ) : (
                     <Play className="w-3 h-3 text-cyan-400" />
