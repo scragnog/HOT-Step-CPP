@@ -92,7 +92,7 @@ export const BarSection: React.FC<BarSectionProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative flex-1 min-w-0"
+      className="relative flex-1 min-w-0 flex flex-col"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
