@@ -52,7 +52,7 @@ function savePersisted(key: string, value: string) {
 
 // ── Component ────────────────────────────────────────────────────────────
 export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClose, onResult }) => {
-  const { t } = useTranslation();
+  const { } = useTranslation();
   const { token } = useAuth();
 
   // ── Provider state ──

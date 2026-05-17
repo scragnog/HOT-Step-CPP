@@ -828,7 +828,7 @@ interface SongCardProps {
 const SongCard: React.FC<SongCardProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
   onPlay, onSelect, onDelete, onReuse, onDownload, onAddToPlaylist,
-  abTrackAId, abTrackBId,
+  abTrackAId: _abTrackAId, abTrackBId: _abTrackBId,
 }) => {
   const { t } = useTranslation();
   const [showMenu, setShowMenu] = React.useState(false);

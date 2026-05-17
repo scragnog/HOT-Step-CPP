@@ -4,12 +4,11 @@
 // lines outside are dimmed for context. Section headers shown as badges.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Music, AlertCircle, FileText } from 'lucide-react';
+import { AlertCircle, FileText } from 'lucide-react';
 import {
   parseAllLrcLines,
   markRegion,
   reconstructLyrics,
-  lrcToPlainLyrics,
   formatTime,
   type RegionLrcLine,
 } from '../../utils/lrcUtils';

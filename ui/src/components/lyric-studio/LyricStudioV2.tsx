@@ -90,7 +90,7 @@ interface NavState {
 export const LyricStudioV2: React.FC = () => {
   const { token } = useAuth();
   const { t } = useTranslation();
-  const { disguiseArtist, disguiseAlbum } = useDisguiseMode();
+  const { disguiseArtist } = useDisguiseMode();
 
   // ── Navigation ──
   const [nav, setNav] = useState<NavState>({ level: 'artists', selectedArtist: null, selectedAlbum: null });

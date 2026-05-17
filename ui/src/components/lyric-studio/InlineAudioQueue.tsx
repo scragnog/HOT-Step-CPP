@@ -8,7 +8,7 @@
 
 import React, { useCallback, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, CheckCircle2, XCircle, X, Music, Clock, Play, Square, ListPlus, Check, Download } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, X, Music, Play, Square, ListPlus, Check, Download } from 'lucide-react';
 import {
   useAudioGenQueue,
   removeFromAudioQueue,

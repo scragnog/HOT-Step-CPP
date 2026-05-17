@@ -93,7 +93,7 @@ export const Player: React.FC<PlayerProps> = ({
   onExitABMode,
 }) => {
   const { t } = useTranslation();
-  const { disguiseArtist, isDisguised, disguiseTitle } = useDisguiseMode();
+  const { isDisguised, disguiseTitle } = useDisguiseMode();
 
 
   if (!currentSong) {

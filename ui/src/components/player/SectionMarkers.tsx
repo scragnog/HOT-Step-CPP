@@ -3,7 +3,7 @@
 // Ported from hot-step-9000.
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { parseSectionMarkers, type SectionMarker } from '../../utils/lrcUtils';
+import { parseSectionMarkers } from '../../utils/lrcUtils';
 
 interface SectionMarkersProps {
   audioUrl?: string;

@@ -3,7 +3,7 @@
 // Controls: repaint mode, crossfade, style caption, generate/cancel.
 
 import React from 'react';
-import { Loader2, Paintbrush, X, ChevronDown } from 'lucide-react';
+import { Loader2, Paintbrush, X } from 'lucide-react';
 
 interface RepaintSettingsProps {
   // Repaint parameters
@@ -43,7 +43,6 @@ export const RepaintSettings: React.FC<RepaintSettingsProps> = ({
   onGenerate,
   onCancel,
 }) => {
-  const currentMode = REPAINT_MODES.find(m => m.value === repaintMode) || REPAINT_MODES[1];
 
   // Crossfade in seconds (25Hz frame rate)
   const crossfadeSec = (crossfadeFrames / 25).toFixed(2);

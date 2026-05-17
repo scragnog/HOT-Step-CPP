@@ -181,10 +181,6 @@ export function reconstructLyrics(
   startSec: number,
   endSec: number,
 ): string {
-  const regionLyricLines = allLines.filter(
-    l => l.time >= startSec && l.time < endSec && l.sectionLabel === null
-  );
-
   let editIdx = 0;
   const result: string[] = [];
   for (const line of allLines) {

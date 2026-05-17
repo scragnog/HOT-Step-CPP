@@ -193,7 +193,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
               {gp.scheduler && gp.scheduler !== 'linear' && (
                 <ParamCell
                   label="Schedule"
-                  value={gp.scheduler.split(':')[0].replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                  value={gp.scheduler.split(':')[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
                   gradient="from-violet-500/10 to-purple-500/10 border-violet-200 dark:border-violet-500/30"
                   iconColor="text-violet-600 dark:text-violet-400"
                   icon={<Clock size={12} />}

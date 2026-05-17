@@ -208,7 +208,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
     const prev = get().pluginParams;
     const next: Record<string, string> = {};
     for (const [k, v] of Object.entries(prev)) {
-      if (!k.startsWith(pluginName + ':')) next[k] = v;
+      if (!k.startsWith(pluginName + ':')) next[k] = v as string;
     }
     set({ pluginParams: next });
     writeKey('hs-pluginParams', next);
@@ -218,7 +218,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   getGlobalParams: (): Partial<GenerationParams> => {
     const s = get();
     const settings: AppSettings = readKey('ace-settings', DEFAULT_SETTINGS);
-    const triggerWord = settings.triggerUseFilename && s.adapter
+    const triggerWord: string = settings.triggerUseFilename && s.adapter
       ? (s.adapter.split(/[\\\/]/).pop()?.replace(/\.safetensors$/i, '') || '')
       : '';
 
@@ -238,7 +238,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       temporalSmoothing: s.inferMethod === 'jkass_fast' ? s.temporalSmoothing : undefined,
       apgMomentum: s.guidanceMode === 'apg' ? s.apgMomentum : undefined,
       apgNormThreshold: s.guidanceMode === 'apg' ? s.apgNormThreshold : undefined,
-      skipLm: s.skipLm, skipLrc: s.skipLrc as any, useCotCaption: s.useCotCaption,
+      skipLm: s.skipLm, useCotCaption: s.useCotCaption,
       lmTemperature: s.lmTemperature, lmCfgScale: s.lmCfgScale,
       lmTopK: s.lmTopK, lmTopP: s.lmTopP, lmNegativePrompt: s.lmNegativePrompt,
       audioCoverStrength: (!s.skipLm && s.lmCodesStrength < 1.0) ? s.lmCodesStrength : undefined,

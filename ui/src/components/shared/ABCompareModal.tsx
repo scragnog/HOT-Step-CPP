@@ -7,7 +7,6 @@ import React from 'react';
 import { X, ArrowLeftRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useABCompareSelector, closeModal } from '../../stores/abCompareStore';
-import type { PlaybackTrack } from '../../stores/playbackStore';
 
 // Human-friendly labels for generation param keys
 const PARAM_LABELS: Record<string, string> = {
@@ -143,7 +142,7 @@ export const ABCompareModal: React.FC = () => {
   const isOpen = useABCompareSelector(s => s.isModalOpen);
   const trackA = useABCompareSelector(s => s.trackA);
   const trackB = useABCompareSelector(s => s.trackB);
-  const { t } = useTranslation();
+  const { } = useTranslation();
 
   if (!isOpen || !trackA || !trackB) return null;
 

@@ -4,7 +4,7 @@
 // the repaint zone. Region handles are draggable; dimmed zones show outside.
 
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
-import { Play, Pause, SkipForward, SkipBack } from 'lucide-react';
+import { Play, Pause, SkipForward } from 'lucide-react';
 import { WaveformPlayer, type WaveformPlayerHandle } from '../player/WaveformPlayer';
 import { SectionMarkers } from '../player/SectionMarkers';
 import { formatTime } from '../../utils/lrcUtils';
@@ -62,8 +62,6 @@ export const RepaintWaveform: React.FC<RepaintWaveformProps> = ({
 
     // Clear previous repaint regions
     ws.clearRegions();
-
-    const effEnd = regionEnd > 0 ? regionEnd : duration;
 
     // Dimmed zone before region
     if (regionStart > 0.01) {
