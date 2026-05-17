@@ -6,7 +6,7 @@
  * Completed items play through the main player (onPlaySong).
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, CheckCircle2, XCircle, X, Music, Clock, Play, Square, ListPlus, Check, Download } from 'lucide-react';
 import {
@@ -14,6 +14,8 @@ import {
   removeFromAudioQueue,
   clearFinishedFromAudioQueue,
   forceFailQueueItem,
+  getSendToPlaylist,
+  setSendToPlaylist,
 } from '../../stores/audioGenQueueStore';
 import type { AudioQueueItem } from '../../stores/audioGenQueueStore';
 import { usePlaylist } from './playlistStore';
@@ -21,12 +23,39 @@ import type { Song } from '../../types';
 import { DownloadModal } from '../shared/DownloadModal';
 import { play as pbPlay, audioQueueItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
+import { ToggleSwitch } from '../global-bar/BarSection';
+
+// ── Send To Playlist toggle reactivity ───────────────────────────────────────
+// Uses a storage event listener so the toggle stays in sync if changed elsewhere.
+
+const STORAGE_KEY = 'hs-sendToPlaylist';
+const _s2pListeners = new Set<() => void>();
+let _s2pSnapshot = getSendToPlaylist();
+
+function _s2pSubscribe(cb: () => void): () => void {
+  _s2pListeners.add(cb);
+  const onStorage = (e: StorageEvent) => { if (e.key === STORAGE_KEY) { _s2pSnapshot = getSendToPlaylist(); cb(); } };
+  window.addEventListener('storage', onStorage);
+  return () => { _s2pListeners.delete(cb); window.removeEventListener('storage', onStorage); };
+}
+function _s2pGetSnapshot(): boolean { return _s2pSnapshot; }
+
+function useSendToPlaylist(): [boolean, (v: boolean) => void] {
+  const value = useSyncExternalStore(_s2pSubscribe, _s2pGetSnapshot);
+  const toggle = useCallback((v: boolean) => {
+    setSendToPlaylist(v);
+    _s2pSnapshot = v;
+    _s2pListeners.forEach(fn => fn());
+  }, []);
+  return [value, toggle];
+}
 
 export const InlineAudioQueue: React.FC = () => {
   const { items } = useAudioGenQueue();
   const { t } = useTranslation();
   const [downloadSong, setDownloadSong] = React.useState<Song | null>(null);
   const currentSongId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
+  const [sendToPlaylist, setS2P] = useSendToPlaylist();
 
   const active = items.filter(i => i.status === 'loading-adapter' || i.status === 'generating');
   const queued = items.filter(i => i.status === 'pending');
@@ -60,17 +89,33 @@ export const InlineAudioQueue: React.FC = () => {
     setDownloadSong(song);
   }, []);
 
+  // Send To Playlist toggle — always visible at top
+  const sendToPlaylistRow = (
+    <div className="flex items-center justify-between px-2 py-1.5">
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+        <ListPlus className="w-3 h-3" />
+        {t('lyric.sendToPlaylist')}
+      </span>
+      <ToggleSwitch checked={sendToPlaylist} onChange={setS2P} accentColor="pink" />
+    </div>
+  );
+
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-8 text-center px-4">
-        <Music className="w-5 h-5 text-zinc-600 mb-2" />
-        <p className="text-xs text-zinc-500">{t('lyric.noQueuedGenerations')}</p>
+      <div className="px-2">
+        {sendToPlaylistRow}
+        <div className="flex flex-col items-center justify-center py-6 text-center px-4">
+          <Music className="w-5 h-5 text-zinc-600 mb-2" />
+          <p className="text-xs text-zinc-500">{t('lyric.noQueuedGenerations')}</p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-1 px-2">
+      {sendToPlaylistRow}
+
       <div className="flex items-center justify-between px-1 py-1">
         <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
           {pendingCount > 0 && `${pendingCount} pending`}

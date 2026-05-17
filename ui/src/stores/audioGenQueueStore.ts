@@ -18,6 +18,7 @@ import { lireekApi } from '../services/lireekApi';
 import { generateApi, songApi } from '../services/api';
 import { writePersistedState } from '../hooks/usePersistedState';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
+import { addToPlaylist } from '../components/lyric-studio/playlistStore';
 import type { GenerationParams } from '../types';
 import { resolveDuration } from '../utils/estimateDuration';
 
@@ -257,6 +258,7 @@ export function completeManualQueueItem(id: string, result: {
   item.stage = 'Complete!';
   _state.completionCounter++;
   _emit(true);
+  _maybeAutoAddToPlaylist(item);
 
   // Notify App.tsx so Library updates in real-time
   if (result.songId) _notifySongCreated(result.songId);
@@ -277,6 +279,38 @@ export function failManualQueueItem(id: string, error: string): void {
   item.stage = undefined;
   _emit(true);
 }
+// ── Auto-add to playlist ─────────────────────────────────────────────────────
+
+const SEND_TO_PLAYLIST_KEY = 'hs-sendToPlaylist';
+
+/** Read the "Send To Playlist" toggle from localStorage. */
+export function getSendToPlaylist(): boolean {
+  try {
+    const raw = localStorage.getItem(SEND_TO_PLAYLIST_KEY);
+    return raw ? JSON.parse(raw) === true : false;
+  } catch { return false; }
+}
+
+/** Write the "Send To Playlist" toggle to localStorage. */
+export function setSendToPlaylist(enabled: boolean): void {
+  localStorage.setItem(SEND_TO_PLAYLIST_KEY, JSON.stringify(enabled));
+}
+
+/** If the toggle is on, auto-add the completed item to the playlist. */
+function _maybeAutoAddToPlaylist(item: AudioQueueItem): void {
+  if (!getSendToPlaylist()) return;
+  const resolvedId = item.songId || item.id;
+  addToPlaylist({
+    id: resolvedId,
+    title: item.generation.title || 'Untitled',
+    audioUrl: item.audioUrl || '',
+    masteredAudioUrl: item.masteredAudioUrl || '',
+    artistName: item.artistName || '',
+    coverUrl: item.artistImageUrl || '',
+    duration: item.audioDuration || 0,
+  });
+}
+
 // ── Song-created notification ────────────────────────────────────────────────
 
 /**
@@ -412,6 +446,7 @@ export async function enqueueSimpleGen(
           item.stage = 'Complete!';
           _state.completionCounter++;
           _emit(true);
+          _maybeAutoAddToPlaylist(item);
 
           // If server didn't provide duration, probe the audio file
           if (!item.audioDuration && audioUrl) {
@@ -508,6 +543,7 @@ async function _processQueue(token: string): Promise<void> {
       _state.completionCounter++;
       // Notify App.tsx so Library updates in real-time
       if (next.songId) _notifySongCreated(next.songId);
+      _maybeAutoAddToPlaylist(next);
     } catch (err) {
       next.status = 'failed';
       next.error = (err as Error).message;
@@ -699,6 +735,7 @@ async function _resumePolling(item: AudioQueueItem, token: string): Promise<void
     _state.completionCounter++;
     // Notify App.tsx so Library updates in real-time
     if (item.songId) _notifySongCreated(item.songId);
+    _maybeAutoAddToPlaylist(item);
   } catch (err) {
     item.status = 'failed';
     item.error = (err as Error).message;

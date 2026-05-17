@@ -526,6 +526,7 @@
     "lyric.noOutput": "(no output)",
     "lyric.waitingForLlm": "Waiting for LLM response…",
     "lyric.noQueuedGenerations": "No queued generations",
+    "lyric.sendToPlaylist": "Send To Playlist",
     "lyric.clearDone": "Clear Done",
     "lyric.active": "Active",
     "lyric.queued": "Queued",

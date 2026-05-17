@@ -516,6 +516,7 @@
     "lyric.noOutput": "(无输出)",
     "lyric.waitingForLlm": "等待 LLM 响应...",
     "lyric.noQueuedGenerations": "没有排队的生成任务",
+    "lyric.sendToPlaylist": "发送到播放列表",
     "lyric.clearDone": "清除已完成",
     "lyric.active": "进行中",
     "lyric.queued": "排队中",

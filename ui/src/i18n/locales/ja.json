@@ -516,6 +516,7 @@
     "lyric.noOutput": "(出力なし)",
     "lyric.waitingForLlm": "LLM の応答を待機中…",
     "lyric.noQueuedGenerations": "待機中の生成はありません",
+    "lyric.sendToPlaylist": "プレイリストに送信",
     "lyric.clearDone": "完了済みをクリア",
     "lyric.active": "アクティブ",
     "lyric.queued": "待機中",

@@ -516,6 +516,7 @@
     "lyric.noOutput": "(нет вывода)",
     "lyric.waitingForLlm": "Ожидание ответа LLM...",
     "lyric.noQueuedGenerations": "Очередь пуста",
+    "lyric.sendToPlaylist": "Отправить в плейлист",
     "lyric.clearDone": "Очистить завершенные",
     "lyric.active": "Активно",
     "lyric.queued": "В очереди",

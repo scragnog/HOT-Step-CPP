@@ -516,6 +516,7 @@
     "lyric.noOutput": "(출력 없음)",
     "lyric.waitingForLlm": "LLM 응답 대기 중…",
     "lyric.noQueuedGenerations": "대기 중인 생성이 없습니다",
+    "lyric.sendToPlaylist": "플레이리스트에 보내기",
     "lyric.clearDone": "완료 항목 지우기",
     "lyric.active": "활성",
     "lyric.queued": "대기 중",
