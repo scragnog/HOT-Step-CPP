@@ -250,13 +250,20 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           const tw = job.params.triggerWord;
           const caption = result.caption || '';
           if (!caption.includes(tw)) {
+            const before = caption.substring(0, 80);
             switch (job.params.triggerPlacement) {
               case 'prepend': result.caption = caption ? `${tw}, ${caption}` : tw; break;
               case 'append':  result.caption = caption ? `${caption}, ${tw}` : tw; break;
               case 'replace': result.caption = tw; break;
             }
+            logGeneration(job.id, 'INFO', `[Trigger] Re-injected "${tw}" (${job.params.triggerPlacement}) — before: "${before}…" → after: "${(result.caption || '').substring(0, 80)}…"`);
+          } else {
+            logGeneration(job.id, 'INFO', `[Trigger] Already present: "${tw}" found in caption, skipping re-injection`);
           }
         }
+      } else if (job.params.triggerWord) {
+        // Trigger word configured but condition incomplete — log why
+        logGeneration(job.id, 'WARNING', `[Trigger] triggerWord="${job.params.triggerWord}" but placement=${job.params.triggerPlacement}, loraPath=${job.params.loraPath ? 'set' : 'MISSING'} — skipping re-injection`);
       }
     }
 
@@ -433,8 +440,14 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         synthReq.seed = Math.floor(Math.random() * 2_147_483_647);
       }
 
+      // Log the synth caption to verify trigger word presence
+      const synthCaptionPreview = (synthReq.caption || '').substring(0, 150);
+      console.log(`[Synth] Track ${trackIdx + 1} caption: ${synthCaptionPreview}`);
+      logGeneration(job.id, 'DEBUG', `[Synth Phase] Track ${trackIdx + 1} caption: "${synthCaptionPreview}"`);
+
       job.stage = `Synthesizing${trackLabel}...`;
       job.progress = Math.round(trackProgressBase);
+
 
       // Subscribe to engine logs for this track's DiT progress
       const unsubSynth = subscribeLines((line) => {
@@ -557,11 +570,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
     // Get metadata from LM results
     const firstResult = lmResults[0];
-    const rawTitle = job.params.title || firstResult.caption?.substring(0, 60) || 'Untitled';
-    // Format title as "Artist - Song Title" when artist is provided
-    const title = job.params.artist
-      ? `${job.params.artist} - ${rawTitle}`
-      : rawTitle;
+    const title = job.params.title || firstResult.caption?.substring(0, 60) || 'Untitled';
     const lyrics = firstResult.lyrics || job.params.lyrics || '';
     // Use subject for style/description when available, otherwise fall back to caption
     const style = job.params.subject || firstResult.caption || job.params.style || '';
