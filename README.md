@@ -89,6 +89,35 @@ HOT-Step CPP extends the base acestep.cpp engine with 80+ features across infere
 
 👉 **[See the full feature list →](FEATURES.md)**
 
+## Gallery
+
+### Library
+Browse your generated songs as a cover art grid with AI-generated artwork, quality scores, and audio metadata. The right sidebar shows a live playlist and engine terminal output. The bottom bar features a waveform visualizer with section markers (verse, chorus, bridge) and real-time synced lyrics.
+
+![Library — song grid with AI cover art, playlist sidebar, waveform visualizer, and synced lyrics playback](docs/images/hot-step-library.webp)
+
+### Auto-Gen
+AI-driven music creation — pick a genre, set a vocal mode, and the LLM handles everything else. The song details panel shows full generation metadata: models used, solver, scheduler, CFG scale, key signature, time signature, and duration.
+
+![Auto-Gen — AI-driven song creation with genre picker, generation queue, and detailed song parameter panel](docs/images/hot-step-auto-gen.webp)
+
+### Lyric Studio
+A complete AI-powered lyrics workspace. Browse artists and albums on the left, view and edit AI-generated lyrics with structural section tags in the centre, and manage your generation queue on the right. Supports multiple LLM providers for lyric generation and refinement.
+
+![Lyric Studio — artist browser, AI-generated lyrics editor with section tags, and generation queue](docs/images/hot-step-lyric-studio.webp)
+
+### Cover Studio
+Upload a reference track for automatic BPM and key detection via Essentia analysis. The engine extracts style descriptions, lyrics, and structural metadata. Fine-tune cover settings including structure fidelity, source preservation, pitch shift with key transposition, and tempo scaling.
+
+![Cover Studio — reference track analysis with BPM/key detection, style matching, and cover generation controls](docs/images/hot-step-cover-studio.webp)
+
+### Model Manager
+Browse curated starter packs tailored to different hardware tiers — from minimal setups to Blackwell-optimized configurations. Download individual GGUF models, stem separation networks, and CUDA/cuDNN runtime libraries directly from HuggingFace without leaving the app.
+
+![Model Manager — starter packs, individual model downloads, and runtime dependency management](docs/images/hot-step-model-manager.webp)
+
+---
+
 ## Architecture
 
 HOT-Step CPP is three components working together:
