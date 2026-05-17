@@ -7,7 +7,7 @@ import {
   Shuffle, Repeat, Repeat1,
   Volume2, VolumeX,
   RotateCcw, Trash2, Download,
-  Music, Sparkles, Activity, ListMusic, Scissors,
+  Music, Sparkles, Activity, ListMusic, Scissors, X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
@@ -43,6 +43,10 @@ interface PlayerProps {
   onTogglePlaylist: () => void;
   trimMode: boolean;
   onToggleTrimMode: () => void;
+  abMode: boolean;
+  abActiveLabel: 'A' | 'B';
+  onToggleAB: () => void;
+  onExitABMode: () => void;
 }
 
 const formatTime = (s: number) => {
@@ -81,6 +85,10 @@ export const Player: React.FC<PlayerProps> = ({
   onTogglePlaylist,
   trimMode,
   onToggleTrimMode,
+  abMode,
+  abActiveLabel,
+  onToggleAB,
+  onExitABMode,
 }) => {
   const { t } = useTranslation();
   const { disguiseArtist, isDisguised, disguiseTitle } = useDisguiseMode();
@@ -170,8 +178,8 @@ export const Player: React.FC<PlayerProps> = ({
           {playbackRate}x
         </button>
 
-        {/* Mastered toggle — only when song has mastered version */}
-        {currentSong.masteredAudioUrl && (
+        {/* Mastered toggle — only when song has mastered version (not in A/B mode) */}
+        {!abMode && currentSong.masteredAudioUrl && (
           <button
             onClick={onToggleMastered}
             className={`p-1.5 rounded-lg transition-all ${
@@ -183,6 +191,30 @@ export const Player: React.FC<PlayerProps> = ({
           >
             <Sparkles size={15} />
           </button>
+        )}
+
+        {/* A/B toggle — only in A/B comparison mode */}
+        {abMode && (
+          <>
+            <button
+              onClick={onToggleAB}
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                abActiveLabel === 'A'
+                  ? 'bg-blue-500/15 text-blue-400 border border-blue-500/25 shadow-[0_0_8px_rgba(59,130,246,0.15)]'
+                  : 'bg-orange-500/15 text-orange-400 border border-orange-500/25 shadow-[0_0_8px_rgba(249,115,22,0.15)]'
+              }`}
+              title={`Playing Track ${abActiveLabel} — click to switch`}
+            >
+              {abActiveLabel}
+            </button>
+            <button
+              onClick={onExitABMode}
+              className="p-1 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              title="Exit A/B mode"
+            >
+              <X size={14} />
+            </button>
+          </>
         )}
 
         {/* Trim / Crop toggle */}

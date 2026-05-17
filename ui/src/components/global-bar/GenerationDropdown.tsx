@@ -4,6 +4,7 @@
 // Reads from GlobalParamsContext instead of props.
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+// Seed input uses local string state to avoid parseInt("-") → NaN → -1 snap-back
 import { useTranslation } from 'react-i18next';
 import { RotateCcw, ChevronDown, Music2, Upload, Trash2 } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
@@ -648,8 +649,7 @@ export const GenerationDropdown: React.FC = () => {
           </div>
         </div>
         {!gp.randomSeed && (
-          <input type="number" className={inputClasses} value={gp.seed}
-            onChange={e => gp.setSeed(parseInt(e.target.value) || -1)} />
+          <SeedInput value={gp.seed} onChange={gp.setSeed} className={inputClasses} />
         )}
       </div>
 
@@ -657,6 +657,20 @@ export const GenerationDropdown: React.FC = () => {
       <Slider label="Batch Size" value={gp.batchSize}
         onChange={gp.setBatchSize} min={1} max={9} step={1} />
     </div>
+  );
+};
+
+/** Seed input with local string buffer — prevents parseInt("-") snap-back */
+const SeedInput: React.FC<{ value: number; onChange: (v: number) => void; className: string }> = ({ value, onChange, className }) => {
+  const [local, setLocal] = useState(String(value));
+  useEffect(() => { setLocal(String(value)); }, [value]);
+  const commit = () => { onChange(parseInt(local) || -1); };
+  return (
+    <input type="number" className={className} value={local}
+      onChange={e => setLocal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') commit(); }}
+    />
   );
 };
 

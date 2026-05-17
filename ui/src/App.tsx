@@ -61,12 +61,15 @@ import {
   setTrimMode as pbSetTrimMode,
   handleTrimClick as pbHandleTrimClick,
   reloadCurrentTrack as pbReloadCurrentTrack,
+  toggleAB as pbToggleAB,
+  exitABMode as pbExitABMode,
   songToTrack,
   playFromList,
 } from './stores/playbackStore';
 import type { Song, GenerationParams } from './types';
 import { usePlaylist, addToPlaylist } from './components/lyric-studio/playlistStore';
 import { DisguiseModeProvider } from './hooks/useDisguiseMode';
+import { ABCompareModal } from './components/shared/ABCompareModal';
 
 /** Derive top-level view from the browser URL */
 function viewFromUrl(path = window.location.pathname): string {
@@ -215,6 +218,8 @@ const AppContent: React.FC = () => {
   const trimInPoint = usePlaybackSelector(s => s.trimInPoint);
   const trimOutPoint = usePlaybackSelector(s => s.trimOutPoint);
   const trimClickCount = usePlaybackSelector(s => s.trimClickCount);
+  const abMode = usePlaybackSelector(s => s.abMode);
+  const abActiveLabel = usePlaybackSelector(s => s.playMastered && s.abMode ? 'B' as const : 'A' as const);
   const wavesurferRef = useRef<WaveformPlayerHandle>(null);
   const wavesurferAltRef = useRef<WaveformPlayerHandle>(null);
 
@@ -1121,6 +1126,10 @@ const AppContent: React.FC = () => {
           onTogglePlaylist={() => setShowPlaylist(prev => !prev)}
           trimMode={trimMode}
           onToggleTrimMode={() => pbSetTrimMode(!trimMode)}
+          abMode={abMode}
+          abActiveLabel={abActiveLabel}
+          onToggleAB={pbToggleAB}
+          onExitABMode={pbExitABMode}
         />
       </div>
 
@@ -1150,6 +1159,7 @@ const AppContent: React.FC = () => {
           defaultOpusBitrate={settings.downloadOpusBitrate}
         />
       )}
+      <ABCompareModal />
     </div>
   );
 };

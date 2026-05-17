@@ -40,7 +40,7 @@ interface BarSectionProps {
   headerToggle?: React.ReactNode;
 }
 
-const HOVER_CLOSE_DELAY = 200; // ms
+const HOVER_CLOSE_DELAY = 400; // ms
 
 export const BarSection: React.FC<BarSectionProps> = ({
   id, label, icon, badge, accentColor = 'pink', children,

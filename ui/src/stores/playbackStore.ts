@@ -72,6 +72,11 @@ export interface PlaybackState {
   trimInPoint: number | null;
   trimOutPoint: number | null;
   trimClickCount: number;  // 0 = waiting for IN, 1 = waiting for OUT, 2 = both set
+
+  // ── A/B Comparison Mode ──
+  abMode: boolean;
+  abTrackA: PlaybackTrack | null;
+  abTrackB: PlaybackTrack | null;
 }
 
 // ── Track Converters (delegated to playbackConverters.ts) ────────────────────
@@ -202,6 +207,10 @@ let _state: PlaybackState = {
   trimInPoint: null,
   trimOutPoint: null,
   trimClickCount: 0,
+
+  abMode: false,
+  abTrackA: null,
+  abTrackB: null,
 
   ...prefs,
 };
@@ -357,6 +366,10 @@ let _loadingTrackId: string | null = null;
 
 /** Core play logic — loads audio into WaveSurfer instances */
 function loadTrack(track: PlaybackTrack): void {
+  // Auto-exit A/B mode when playing a regular track
+  if (_state.abMode) {
+    setState({ abMode: false, abTrackA: null, abTrackB: null });
+  }
   // Validate: skip tracks with no audio URL
   if (!track.audioUrl) {
     console.error('[Playback] Track has no audioUrl, skipping:', track.title);
@@ -555,6 +568,65 @@ export function toggleMastered(): void {
 
   // Volume swap applied reactively via applyVolumes in the setState notification
   applyVolumes();
+}
+
+// ── A/B Comparison Mode ─────────────────────────────────────────────────────
+
+/** Enter A/B comparison mode — loads Track A into original, Track B into alt */
+export function enterABMode(trackA: PlaybackTrack, trackB: PlaybackTrack): void {
+  _retryCount = 0;
+  if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+  _loadingTrackId = trackA.id;
+
+  // Suppress play-false transition like a track switch
+  if (_state.isPlaying) _suppressPlayFalse = true;
+
+  setState({
+    abMode: true,
+    abTrackA: trackA,
+    abTrackB: trackB,
+    currentTrack: trackA,
+    trackList: [trackA, trackB],
+    trackIndex: 0,
+    source: 'direct',
+    hasMastered: true,       // Tell system alt player is active
+    playMastered: false,     // A is audible (original = A)
+    currentAudioUrl: trackA.audioUrl,
+    isLoading: true,
+    isPlaying: _state.isPlaying,
+    loadError: null,
+    currentTime: 0,
+    duration: 0,
+  });
+
+  // Load audio into WaveSurfer instances
+  _wsOriginalRef.current?.loadUrl(trackA.audioUrl);
+  _wsAltRef.current?.loadUrl(trackB.audioUrl);
+
+  applyVolumes();
+  applyPlaybackRate();
+}
+
+/** Exit A/B comparison mode */
+export function exitABMode(): void {
+  setState({
+    abMode: false,
+    abTrackA: null,
+    abTrackB: null,
+  });
+}
+
+/** Toggle between Track A and Track B — wraps toggleMastered with metadata swap */
+export function toggleAB(): void {
+  if (!_state.abMode || !_state.abTrackA || !_state.abTrackB) return;
+  toggleMastered();  // Swaps volumes + syncs position
+
+  // After toggleMastered, playMastered has been flipped
+  const nowB = _state.playMastered;
+  setState({
+    currentTrack: nowB ? _state.abTrackB : _state.abTrackA,
+    currentAudioUrl: nowB ? _state.abTrackB!.audioUrl : _state.abTrackA!.audioUrl,
+  });
 }
 
 // ── WaveSurfer Event Handlers ────────────────────────────────────────────────

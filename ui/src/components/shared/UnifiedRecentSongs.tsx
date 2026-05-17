@@ -15,6 +15,7 @@ import { useAuth } from '../../context/AuthContext';
 import { DownloadModal } from './DownloadModal';
 import { usePlaylist } from '../lyric-studio/playlistStore';
 import { playFromList, unifiedRecentSongToTrack } from '../../stores/playbackStore';
+import { useABCompareSelector, setTrackA, setTrackB } from '../../stores/abCompareStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
 interface UnifiedRecentSongsProps {
@@ -46,6 +47,8 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
   const [downloadSong, setDownloadSong] = useState<Song | null>(null);
   const [downloadArtist, setDownloadArtist] = useState('');
   const { disguiseArtist, disguiseTitle } = useDisguiseMode();
+  const abTrackAId = useABCompareSelector(s => s.trackA?.id ?? null);
+  const abTrackBId = useABCompareSelector(s => s.trackB?.id ?? null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -180,6 +183,20 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
                 )}
               </div>
               <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={(e) => { e.stopPropagation(); setTrackA(unifiedRecentSongToTrack(rs)); }}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    rs.id === abTrackAId ? 'bg-blue-500/20 text-blue-400' : 'bg-zinc-100/80 dark:bg-zinc-800/80 hover:bg-blue-900/60 text-zinc-600 dark:text-zinc-400 hover:text-blue-400'
+                  }`}
+                  title="Set as Track A">
+                  <span className="text-[9px] font-bold w-3 h-3 flex items-center justify-center">A</span>
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); setTrackB(unifiedRecentSongToTrack(rs)); }}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    rs.id === abTrackBId ? 'bg-orange-500/20 text-orange-400' : 'bg-zinc-100/80 dark:bg-zinc-800/80 hover:bg-orange-900/60 text-zinc-600 dark:text-zinc-400 hover:text-orange-400'
+                  }`}
+                  title="Set as Track B">
+                  <span className="text-[9px] font-bold w-3 h-3 flex items-center justify-center">B</span>
+                </button>
                 <AddToPlaylistBtn rs={rs} />
                 <button onClick={(e) => handleDownloadClick(e, rs)}
                   className="p-1.5 rounded-md bg-zinc-100/80 dark:bg-zinc-800/80 hover:bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400 hover:text-white transition-colors"

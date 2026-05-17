@@ -5,11 +5,13 @@ import React, { useState, useCallback, useMemo } from 'react';
 import {
   Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus, Image,
-  LayoutGrid, List as ListIcon, Table2,
+  LayoutGrid, List as ListIcon, Table2, ArrowLeftRight,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 import { togglePlay, usePlaybackSelector } from '../../stores/playbackStore';
+import { songToTrack } from '../../stores/playbackStore';
+import { useABCompareSelector, setTrackA, setTrackB, playAB, openModal as openABModal, clear as clearAB } from '../../stores/abCompareStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
 // ── Source filter definitions ────────────────────────────────────────────────
@@ -105,6 +107,11 @@ export const SongList: React.FC<SongListProps> = ({
 }) => {
   const { t } = useTranslation();
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
+  const abTrackAId = useABCompareSelector(s => s.trackA?.id ?? null);
+  const abTrackBId = useABCompareSelector(s => s.trackB?.id ?? null);
+  const hasBothAB = !!abTrackAId && !!abTrackBId;
+  const abTrackATitle = useABCompareSelector(s => s.trackA?.title ?? '');
+  const abTrackBTitle = useABCompareSelector(s => s.trackB?.title ?? '');
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
@@ -295,6 +302,51 @@ export const SongList: React.FC<SongListProps> = ({
         </div>
       )}
 
+      {/* A/B Comparison Bar */}
+      {(abTrackAId || abTrackBId) && (
+        <div className="mb-3 px-4 py-3 rounded-xl bg-gradient-to-r from-blue-500/5 via-zinc-900/0 to-orange-500/5 border border-white/10 flex items-center gap-3">
+          <ArrowLeftRight size={16} className="text-pink-400 flex-shrink-0" />
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+              abTrackAId ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-zinc-800 text-zinc-500 border-white/5'
+            }`}>
+              A {abTrackAId && <span className="font-normal truncate max-w-[100px]">{abTrackATitle}</span>}
+            </span>
+            <span className="text-[10px] text-zinc-600">vs</span>
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+              abTrackBId ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-zinc-800 text-zinc-500 border-white/5'
+            }`}>
+              B {abTrackBId && <span className="font-normal truncate max-w-[100px]">{abTrackBTitle}</span>}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {hasBothAB && (
+              <>
+                <button
+                  onClick={playAB}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold bg-pink-500/10 text-pink-400 border border-pink-500/20 hover:bg-pink-500/20 transition-colors"
+                >
+                  <Play size={10} /> Play A/B
+                </button>
+                <button
+                  onClick={openABModal}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 transition-colors"
+                >
+                  <ArrowLeftRight size={10} /> Compare
+                </button>
+              </>
+            )}
+            <button
+              onClick={clearAB}
+              className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              title="Clear A/B"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Empty state */}
       {filteredSongs.length === 0 && (
         <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
@@ -324,6 +376,8 @@ export const SongList: React.FC<SongListProps> = ({
               onDownload={() => onDownload?.(song)}
               onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined}
               onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(song) : undefined}
+              abTrackAId={abTrackAId}
+              abTrackBId={abTrackBId}
             />
           ))}
         </div>
@@ -349,6 +403,8 @@ export const SongList: React.FC<SongListProps> = ({
               onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined}
               onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(song) : undefined}
               showSourceBadge={showFilters && sourceFilter === 'all'}
+              abTrackAId={abTrackAId}
+              abTrackBId={abTrackBId}
             />
           ))}
         </div>
@@ -369,6 +425,8 @@ export const SongList: React.FC<SongListProps> = ({
           onReuse={onReuse}
           onDownload={onDownload}
           showSourceBadge={showFilters && sourceFilter === 'all'}
+          abTrackAId={abTrackAId}
+          abTrackBId={abTrackBId}
         />
       )}
     </div>
@@ -474,11 +532,14 @@ interface SongItemProps {
   onRename?: (newTitle: string) => void;
   onAddToPlaylist?: () => void;
   showSourceBadge?: boolean;
+  abTrackAId?: string | null;
+  abTrackBId?: string | null;
 }
 
 const SongItem: React.FC<SongItemProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
   onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, showSourceBadge,
+  abTrackAId, abTrackBId,
 }) => {
   const { t } = useTranslation();
   const [showMenu, setShowMenu] = React.useState(false);
@@ -530,6 +591,7 @@ const SongItem: React.FC<SongItemProps> = ({
             ? 'bg-pink-500/10 border border-pink-500/20'
             : 'hover:bg-white/5 border border-transparent'
         }
+        ${song.id === abTrackAId ? 'border-l-2 !border-l-blue-500' : song.id === abTrackBId ? 'border-l-2 !border-l-orange-500' : ''}
       `}
       onClick={handleClick}
     >
@@ -695,6 +757,25 @@ const SongItem: React.FC<SongItemProps> = ({
                 >
                   <Image size={14} /> {song.coverUrl ? 'Regenerate Cover Art' : 'Generate Cover Art'}
                 </button>
+
+                {/* A/B Comparison */}
+                <div className="border-t border-zinc-200 dark:border-white/5 my-1" />
+                <button
+                  onClick={(e) => { e.stopPropagation(); setTrackA(songToTrack(song)); setShowMenu(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                    song.id === abTrackAId ? 'text-blue-400 bg-blue-500/10' : 'text-blue-400/70 hover:bg-blue-500/10 hover:text-blue-400'
+                  }`}
+                >
+                  <ArrowLeftRight size={14} /> Set as Track A
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setTrackB(songToTrack(song)); setShowMenu(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                    song.id === abTrackBId ? 'text-orange-400 bg-orange-500/10' : 'text-orange-400/70 hover:bg-orange-500/10 hover:text-orange-400'
+                  }`}
+                >
+                  <ArrowLeftRight size={14} /> Set as Track B
+                </button>
               </div>
             </>
           )}
@@ -720,11 +801,14 @@ interface SongCardProps {
   onDownload?: () => void;
   onRename?: (newTitle: string) => void;
   onAddToPlaylist?: () => void;
+  abTrackAId?: string | null;
+  abTrackBId?: string | null;
 }
 
 const SongCard: React.FC<SongCardProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
   onPlay, onSelect, onDelete, onReuse, onDownload, onAddToPlaylist,
+  abTrackAId, abTrackBId,
 }) => {
   const { t } = useTranslation();
   const [showMenu, setShowMenu] = React.useState(false);
@@ -906,6 +990,8 @@ interface SongTableProps {
   onReuse?: (song: Song) => void;
   onDownload?: (song: Song) => void;
   showSourceBadge?: boolean;
+  abTrackAId?: string | null;
+  abTrackBId?: string | null;
 }
 
 const SOURCE_BADGE_MAP: Record<string, { label: string; cls: string }> = {
@@ -947,6 +1033,7 @@ function saveColWidths(w: Record<string, number>) {
 const SongTable: React.FC<SongTableProps> = ({
   songs, currentSongId, isPlaying, selectionMode, selectedIds, onToggleSelect,
   onPlay, onSelect, onDelete, onReuse, onDownload, showSourceBadge,
+  abTrackAId, abTrackBId,
 }) => {
   const { t } = useTranslation();
   const { isDisguised, disguiseTitle } = useDisguiseMode();
@@ -1121,6 +1208,16 @@ const SongTable: React.FC<SongTableProps> = ({
                   <button onClick={(e) => { e.stopPropagation(); onDelete(song); }}
                     className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors" title={t('library.delete')}>
                     <Trash2 size={12} />
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); setTrackA(songToTrack(song)); }}
+                    className={`p-1 rounded transition-colors ${song.id === abTrackAId ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10'}`}
+                    title="Set as Track A">
+                    <span className="text-[9px] font-bold">A</span>
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); setTrackB(songToTrack(song)); }}
+                    className={`p-1 rounded transition-colors ${song.id === abTrackBId ? 'text-orange-400 bg-orange-500/10' : 'text-zinc-500 hover:text-orange-400 hover:bg-orange-500/10'}`}
+                    title="Set as Track B">
+                    <span className="text-[9px] font-bold">B</span>
                   </button>
                 </div>
               ),
