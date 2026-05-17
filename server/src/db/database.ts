@@ -177,6 +177,10 @@ export function initDb(): void {
       check: `SELECT COUNT(*) as c FROM pragma_table_info('songs') WHERE name='quality_scores'`,
       alter: `ALTER TABLE songs ADD COLUMN quality_scores TEXT DEFAULT ''`,
     },
+    {
+      check: `SELECT COUNT(*) as c FROM pragma_table_info('songs') WHERE name='cover_art_subject'`,
+      alter: `ALTER TABLE songs ADD COLUMN cover_art_subject TEXT DEFAULT ''`,
+    },
   ];
   for (const m of songsMigrations) {
     const row = db.prepare(m.check).get() as any;

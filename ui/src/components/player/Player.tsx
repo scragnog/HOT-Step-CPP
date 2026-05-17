@@ -281,7 +281,7 @@ export const Player: React.FC<PlayerProps> = ({
           <button
             onClick={onReusePrompt}
             className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors"
-            title={t('player.reusePrompt')}
+            title={t('player.edit')}
           >
             <RotateCcw size={14} />
           </button>

@@ -40,6 +40,8 @@ export interface Song {
   latent_url?: string;
   // Quality scores (JSON blob from DB)
   quality_scores?: string;
+  // Cover art subject — custom prompt stored for "Regenerate Cover"
+  cover_art_subject?: string;
 }
 
 /** Normalized recent song returned by /api/songs/recent — unified across all modes */

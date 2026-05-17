@@ -49,22 +49,57 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // Global params context — for reuse data
   const gp = useGlobalParams();
 
-  // ── Reuse data ──
+  // ── Reuse data (Edit) — restores ALL generation params for full reproducibility ──
   useEffect(() => {
     if (!reuseData) return;
     const gpData = reuseData.song.generationParams;
     if (!gpData) return;
 
-    if (reuseData.song.caption || gpData.caption) setCaption(reuseData.song.caption || gpData.caption || '');
-    if (reuseData.song.lyrics || gpData.lyrics) setLyrics(reuseData.song.lyrics || gpData.lyrics || '');
-    if (reuseData.song.style || gpData.style) setCaption(reuseData.song.style || gpData.style || '');
+    // Style Description field ← user's original style input from generation_params
+    // Priority: gpData.caption (original user input) → song.style (DB column)
+    setCaption(gpData.caption || reuseData.song.style || '');
+    // Lyrics
+    setLyrics(gpData.lyrics || reuseData.song.lyrics || '');
+    // Song info metadata
+    if (gpData.title || reuseData.song.title) setTitle(gpData.title || reuseData.song.title || '');
+    if (gpData.artist) setArtist(gpData.artist);
+    if (gpData.subject) setSubject(gpData.subject);
+    // Metadata
     if (gpData.bpm) setBpm(gpData.bpm);
     if (gpData.keyScale) setKeyScale(gpData.keyScale);
     if (gpData.timeSignature) setTimeSignature(gpData.timeSignature);
     if (gpData.duration) setDuration(typeof gpData.duration === 'string' ? parseFloat(gpData.duration) : gpData.duration);
+    if (gpData.vocalLanguage) setVocalLanguage(gpData.vocalLanguage);
+    // Engine params — full reproducibility
     if (gpData.inferenceSteps) gp.setInferenceSteps(gpData.inferenceSteps);
     if (gpData.guidanceScale !== undefined) gp.setGuidanceScale(gpData.guidanceScale);
     if (gpData.seed !== undefined) gp.setSeed(gpData.seed);
+    if (gpData.randomSeed !== undefined) gp.setRandomSeed(gpData.randomSeed);
+    if (gpData.shift !== undefined) gp.setShift(gpData.shift);
+    if (gpData.inferMethod) gp.setInferMethod(gpData.inferMethod);
+    if (gpData.scheduler) gp.setScheduler(gpData.scheduler);
+    if (gpData.guidanceMode) gp.setGuidanceMode(gpData.guidanceMode);
+    if (gpData.batchSize) gp.setBatchSize(gpData.batchSize);
+    if (gpData.useCotCaption !== undefined) gp.setUseCotCaption(gpData.useCotCaption);
+    if (gpData.skipLm !== undefined) gp.setSkipLm(gpData.skipLm);
+    // Adapter
+    if (gpData.adapter || gpData.loraPath) gp.setAdapter(gpData.adapter || gpData.loraPath);
+    if (gpData.adapterScale ?? gpData.loraScale) gp.setAdapterScale(gpData.adapterScale ?? gpData.loraScale);
+    if (gpData.adapterGroupScales) gp.setAdapterGroupScales(gpData.adapterGroupScales);
+    if (gpData.adapterMode) gp.setAdapterMode(gpData.adapterMode);
+    // Model selection
+    if (gpData.ditModel) gp.setDitModel(gpData.ditModel);
+    if (gpData.lmModel) gp.setLmModel(gpData.lmModel);
+    if (gpData.vaeModel) gp.setVaeModel(gpData.vaeModel);
+    // DCW
+    if (gpData.dcwEnabled !== undefined) gp.setDcwEnabled(gpData.dcwEnabled);
+    if (gpData.dcwMode) gp.setDcwMode(gpData.dcwMode);
+    if (gpData.dcwScaler !== undefined) gp.setDcwScaler(gpData.dcwScaler);
+    if (gpData.dcwHighScaler !== undefined) gp.setDcwHighScaler(gpData.dcwHighScaler);
+    // Post-processing
+    if (gpData.postProcessingEnabled !== undefined) gp.setPostProcessingEnabled(gpData.postProcessingEnabled);
+    if (gpData.masteringEnabled !== undefined) gp.setMasteringEnabled(gpData.masteringEnabled);
+    if (gpData.masteringReference !== undefined) gp.setMasteringReference(gpData.masteringReference);
   }, [reuseData?.timestamp]);
 
   // ── AI generation result handler ──

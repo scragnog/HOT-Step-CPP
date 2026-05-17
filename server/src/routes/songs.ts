@@ -180,7 +180,7 @@ router.patch('/:id', (req, res) => {
 
   const updates = req.body;
   const allowed = ['title', 'lyrics', 'style', 'caption', 'cover_url', 'is_public',
-    'bpm', 'key_scale', 'time_signature', 'dit_model'];
+    'bpm', 'key_scale', 'time_signature', 'dit_model', 'cover_art_subject'];
 
   for (const key of allowed) {
     if (updates[key] !== undefined) {

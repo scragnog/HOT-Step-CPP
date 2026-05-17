@@ -572,8 +572,9 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     const firstResult = lmResults[0];
     const title = job.params.title || firstResult.caption?.substring(0, 60) || 'Untitled';
     const lyrics = firstResult.lyrics || job.params.lyrics || '';
-    // Use subject for style/description when available, otherwise fall back to caption
-    const style = job.params.subject || firstResult.caption || job.params.style || '';
+    // Store user's original style input — NOT the AI-generated caption (which has its own column).
+    // job.params.caption = the "Style Description" field from CreatePanel.
+    const style = job.params.caption || job.params.style || '';
     const bpm = firstResult.bpm || 0;
     let duration = firstResult.duration || 0;
     const keyScale = firstResult.keyscale || '';
@@ -665,6 +666,12 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         trackMastered, trackLatent, qualityJson,
       );
       songIds.push(songId);
+
+      // Persist cover art subject for future "Regenerate Cover" calls
+      if (job.params.coverArtSubject) {
+        getDb().prepare('UPDATE songs SET cover_art_subject = ? WHERE id = ?')
+          .run(job.params.coverArtSubject, songId);
+      }
     }
 
     // ── AI Cover Art (post-generation, non-fatal) ─────────────

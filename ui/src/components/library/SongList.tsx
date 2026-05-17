@@ -5,7 +5,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import {
   Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus, Image,
-  LayoutGrid, List as ListIcon, Table2, ArrowLeftRight,
+  LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Upload,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
@@ -44,7 +44,7 @@ function triggerCoverArtGeneration(song: Song): void {
       title: song.title || '',
       style: song.style || params?.style || '',
       lyrics: song.lyrics || params?.lyrics || '',
-      subject: params?.subject || '',
+      subject: song.cover_art_subject || params?.coverArtSubject || params?.subject || '',
     }),
   }).then(async r => {
     if (!r.ok) {
@@ -727,7 +727,7 @@ const SongItem: React.FC<SongItemProps> = ({
                     onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
                   >
-                    <RotateCcw size={14} /> {t('library.reusePrompt')}
+                    <RotateCcw size={14} /> {t('library.edit')}
                   </button>
                 )}
                 {onDownload && (
@@ -743,6 +743,26 @@ const SongItem: React.FC<SongItemProps> = ({
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
                 >
                   <Trash2 size={14} /> {t('library.delete')}
+                </button>
+
+                {/* Export Params */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMenu(false);
+                    const params = song.generationParams || song.generation_params || {};
+                    const exportData = { _format: 'hot-step-preset', _version: 1, ...params, title: song.title || '', caption: (params as any).caption || song.style || '', lyrics: (params as any).lyrics || song.lyrics || '' };
+                    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${(song.title || 'song').slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_params.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
+                >
+                  <Upload size={14} /> {t('library.exportParams')}
                 </button>
 
                 {/* Cover Art Generation */}
@@ -914,7 +934,7 @@ const SongCard: React.FC<SongCardProps> = ({
                 {onReuse && (
                   <button onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                    <RotateCcw size={12} /> {t('library.reusePrompt')}
+                    <RotateCcw size={12} /> {t('library.edit')}
                   </button>
                 )}
                 {onAddToPlaylist && (
@@ -932,6 +952,24 @@ const SongCard: React.FC<SongCardProps> = ({
                 <button onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
                   <Trash2 size={12} /> {t('library.delete')}
+                </button>
+
+                {/* Export Params */}
+                <button onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMenu(false);
+                  const params = song.generationParams || song.generation_params || {};
+                  const exportData = { _format: 'hot-step-preset', _version: 1, ...params, title: song.title || '', caption: (params as any).caption || song.style || '', lyrics: (params as any).lyrics || song.lyrics || '' };
+                  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${(song.title || 'song').slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_params.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
+                  <Upload size={12} /> {t('library.exportParams')}
                 </button>
 
                 {/* Cover Art Generation */}
@@ -1195,7 +1233,7 @@ const SongTable: React.FC<SongTableProps> = ({
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                   {onReuse && (
                     <button onClick={(e) => { e.stopPropagation(); onReuse(song); }}
-                      className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/10 transition-colors" title={t('library.reusePrompt')}>
+                      className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/10 transition-colors" title={t('library.edit')}>
                       <RotateCcw size={12} />
                     </button>
                   )}

@@ -2,7 +2,7 @@
 // Ported from hot-step-9000's RightSidebar, simplified for current feature set.
 
 import React from 'react';
-import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download, Cpu, Terminal, Settings2, Zap, Radio, Activity, Layers, Sparkles, SlidersHorizontal } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download, Upload, Cpu, Terminal, Settings2, Zap, Radio, Activity, Layers, Sparkles, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 
@@ -72,7 +72,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           <button
             onClick={() => onReuse(song)}
             className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-colors"
-            title={t('details.reusePrompt')}
+            title={t('details.edit')}
           >
             <RotateCcw size={16} />
           </button>
@@ -90,6 +90,25 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
               title={t('details.download')}
             >
               <Download size={16} />
+            </button>
+          )}
+          {gp && (
+            <button
+              onClick={() => {
+                const params = song.generationParams || song.generation_params || {};
+                const exportData = { _format: 'hot-step-preset', _version: 1, ...params, title: song.title || '', caption: (params as any).caption || song.style || '', lyrics: (params as any).lyrics || song.lyrics || '' };
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${(song.title || 'song').slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_params.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-sky-100 dark:hover:bg-sky-900/50 text-zinc-700 dark:text-zinc-300 hover:text-sky-400 transition-colors"
+              title={t('details.exportParams')}
+            >
+              <Upload size={16} />
             </button>
           )}
         </div>
