@@ -70,6 +70,7 @@ import type { Song, GenerationParams } from './types';
 import { usePlaylist, addToPlaylist } from './components/lyric-studio/playlistStore';
 import { DisguiseModeProvider } from './hooks/useDisguiseMode';
 import { ABCompareModal } from './components/shared/ABCompareModal';
+import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from './stores/abCompareStore';
 
 /** Derive top-level view from the browser URL */
 function viewFromUrl(path = window.location.pathname): string {
@@ -160,6 +161,45 @@ const RestartingOverlay: React.FC = () => {
       <h1 className="text-2xl font-bold mb-2">{t('app.restarting.title')}</h1>
       <p className="text-zinc-600 dark:text-zinc-400 text-lg">{status}{dots}</p>
       <p className="text-zinc-600 text-sm mt-4">{t('app.restarting.message')}</p>
+    </div>
+  );
+};
+
+/** Compact A/B comparison bar — shows above the player when both tracks are pinned */
+const ABMiniBar: React.FC = () => {
+  const trackA = useABCompareSelector(s => s.trackA);
+  const trackB = useABCompareSelector(s => s.trackB);
+  if (!trackA || !trackB) return null;
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-blue-500/5 via-transparent to-orange-500/5 border-t border-white/5">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+        A <span className="font-normal truncate max-w-[80px]">{trackA.title}</span>
+      </span>
+      <span className="text-[9px] text-zinc-600">vs</span>
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-orange-500/10 text-orange-400 border border-orange-500/20">
+        B <span className="font-normal truncate max-w-[80px]">{trackB.title}</span>
+      </span>
+      <div className="flex-1" />
+      <button
+        onClick={playAB}
+        className="px-2 py-1 rounded-md text-[9px] font-semibold bg-pink-500/10 text-pink-400 border border-pink-500/20 hover:bg-pink-500/20 transition-colors"
+      >
+        ▶ Play A/B
+      </button>
+      <button
+        onClick={openABModal}
+        className="px-2 py-1 rounded-md text-[9px] font-semibold bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 transition-colors"
+      >
+        ↔ Compare
+      </button>
+      <button
+        onClick={clearAB}
+        className="p-1 rounded-md text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+        title="Clear A/B"
+      >
+        ✕
+      </button>
     </div>
   );
 };
@@ -1096,6 +1136,8 @@ const AppContent: React.FC = () => {
           currentTime={currentTime}
           isPlaying={isPlaying}
         />
+        {/* Global A/B comparison mini-bar — visible from any view when both tracks are pinned */}
+        <ABMiniBar />
         <Player
           currentSong={currentSong}
           isPlaying={isPlaying}
