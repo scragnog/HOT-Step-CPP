@@ -87,7 +87,7 @@ export const RESTART_KEYS = new Set([
 /** Sensitive keys — display as masked password fields */
 export const SENSITIVE_KEYS = new Set([
   'GENIUS_ACCESS_TOKEN', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
-  'UNSLOTH_PASSWORD',
+  'UNSLOTH_PASSWORD', 'OPENAI_COMPAT_API_KEY',
 ]);
 
 /** Text / number input row for env settings */

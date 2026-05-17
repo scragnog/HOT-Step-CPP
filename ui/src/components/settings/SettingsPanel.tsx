@@ -368,6 +368,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <option value="ollama">Ollama</option>
             <option value="lmstudio">LM Studio</option>
             <option value="unsloth">Unsloth</option>
+            <option value="openai-compat">{envValues.OPENAI_COMPAT_NAME || 'OpenAI Compatible'}</option>
           </select>
         </div>
         <EnvTextRow envKey="GEMINI_MODEL" label={t('settings.ai.geminiModel')} description={t('settings.ai.geminiModelDesc')}
@@ -382,6 +383,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           value={envValues.LMSTUDIO_MODEL || ''} onChange={handleEnvChange} />
         <EnvTextRow envKey="UNSLOTH_MODEL" label={t('settings.ai.unslothModel')} description={t('settings.ai.unslothModelDesc')}
           value={envValues.UNSLOTH_MODEL || ''} onChange={handleEnvChange} />
+        <EnvTextRow envKey="OPENAI_COMPAT_MODEL" label={t('settings.ai.openaiCompatModel')} description={t('settings.ai.openaiCompatModelDesc')}
+          value={envValues.OPENAI_COMPAT_MODEL || ''} onChange={handleEnvChange} placeholder="auto-discovered" />
       </div>
 
       {/* LLM Endpoints Section */}
@@ -400,6 +403,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           value={envValues.UNSLOTH_USERNAME || ''} onChange={handleEnvChange} />
         <EnvPasswordRow envKey="UNSLOTH_PASSWORD" label={t('settings.ai.unslothPassword')} description={t('settings.ai.unslothPasswordDesc')}
           value={envValues.UNSLOTH_PASSWORD || ''} onChange={handleEnvChange} />
+        <EnvTextRow envKey="OPENAI_COMPAT_BASE_URL" label={t('settings.ai.openaiCompatUrl')} description={t('settings.ai.openaiCompatUrlDesc')}
+          value={envValues.OPENAI_COMPAT_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://mac-server:8000/v1" />
+        <EnvPasswordRow envKey="OPENAI_COMPAT_API_KEY" label={t('settings.ai.openaiCompatApiKey')} description={t('settings.ai.openaiCompatApiKeyDesc')}
+          value={envValues.OPENAI_COMPAT_API_KEY || ''} onChange={handleEnvChange} />
+        <EnvTextRow envKey="OPENAI_COMPAT_NAME" label={t('settings.ai.openaiCompatName')} description={t('settings.ai.openaiCompatNameDesc')}
+          value={envValues.OPENAI_COMPAT_NAME || ''} onChange={handleEnvChange} placeholder="OpenAI Compatible" />
       </div>
 
       {/* Save bar for AI tab */}
