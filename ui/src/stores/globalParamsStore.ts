@@ -56,7 +56,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   inferMethod: readKey("hs-inferMethod", 'euler'),
   scheduler: readKey("hs-scheduler", 'linear'),
   guidanceMode: readKey("hs-guidanceMode", 'apg'),
-  seed: readKey("hs-seed", -1),
+  seed: readKey("hs-seed", 42),
   randomSeed: readKey("hs-randomSeed", true),
   batchSize: readKey("hs-batchSize", 1),
   storkSubsteps: readKey("hs-storkSubsteps", 10),
@@ -135,7 +135,13 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setScheduler: (v: any) => { set({ scheduler: v }); writeKey("hs-scheduler", v); },
   setGuidanceMode: (v: any) => { set({ guidanceMode: v }); writeKey("hs-guidanceMode", v); },
   setSeed: (v: any) => { set({ seed: v }); writeKey("hs-seed", v); },
-  setRandomSeed: (v: any) => { set({ randomSeed: v }); writeKey("hs-randomSeed", v); },
+  setRandomSeed: (v: any) => {
+    set({ randomSeed: v }); writeKey("hs-randomSeed", v);
+    // When disabling random, snap seed away from -1 (the random sentinel)
+    if (!v && get().seed === -1) {
+      set({ seed: 42 }); writeKey("hs-seed", 42);
+    }
+  },
   setBatchSize: (v: any) => { set({ batchSize: v }); writeKey("hs-batchSize", v); },
   setStorkSubsteps: (v: any) => { set({ storkSubsteps: v }); writeKey("hs-storkSubsteps", v); },
   setBeatStability: (v: any) => { set({ beatStability: v }); writeKey("hs-beatStability", v); },

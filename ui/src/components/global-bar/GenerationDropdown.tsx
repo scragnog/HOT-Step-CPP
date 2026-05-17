@@ -664,7 +664,7 @@ export const GenerationDropdown: React.FC = () => {
 const SeedInput: React.FC<{ value: number; onChange: (v: number) => void; className: string }> = ({ value, onChange, className }) => {
   const [local, setLocal] = useState(String(value));
   useEffect(() => { setLocal(String(value)); }, [value]);
-  const commit = () => { onChange(parseInt(local) || -1); };
+  const commit = () => { onChange(parseInt(local) || 42); };
   return (
     <input type="number" className={className} value={local}
       onChange={e => setLocal(e.target.value)}
