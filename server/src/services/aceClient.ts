@@ -437,12 +437,31 @@ export const aceClient = {
 
   /** POST /vae with multipart — VAE encode: sends audio, returns raw f32 latent bytes.
    *  Polls until the engine job completes, then fetches the result.
-   *  Returns raw f32 [T*64] latent buffer. */
-  async vaeEncode(audioBuffer: Buffer): Promise<Buffer> {
+   *  Returns raw f32 [T*64] latent buffer.
+   *  @param vaeModel Optional VAE model name — sent as {"vae":"..."} in request part. */
+  async vaeEncode(audioBuffer: Buffer, vaeModel?: string): Promise<Buffer> {
     const boundary = '----HotStepBoundary' + Date.now();
-    const header = `--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="input.wav"\r\nContent-Type: audio/wav\r\n\r\n`;
-    const footer = `\r\n--${boundary}--\r\n`;
-    const body = Buffer.concat([Buffer.from(header), audioBuffer, Buffer.from(footer)]);
+    const parts: Buffer[] = [];
+    const addPart = (name: string, content: Buffer, contentType: string, filename?: string) => {
+      let header = `--${boundary}\r\nContent-Disposition: form-data; name="${name}"`;
+      if (filename) header += `; filename="${filename}"`;
+      header += `\r\nContent-Type: ${contentType}\r\n\r\n`;
+      parts.push(Buffer.from(header));
+      parts.push(content);
+      parts.push(Buffer.from('\r\n'));
+    };
+
+    // Request JSON part — tells the engine which VAE to use for encoding.
+    // The C++ /vae handler reads "vae" (not "vae_model") via request_parse_json.
+    if (vaeModel) {
+      addPart('request', Buffer.from(JSON.stringify({ vae: vaeModel })), 'application/json');
+    }
+
+    // Audio part
+    addPart('audio', audioBuffer, 'audio/wav', 'input.wav');
+
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+    const body = Buffer.concat(parts);
 
     const res = await fetch(`${BASE}/vae`, {
       method: 'POST',

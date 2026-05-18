@@ -334,13 +334,13 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     if (srcAudioBuf && !srcLatentBuf && srcAudioPath) {
       const tempo = job.params.tempoScale as number | undefined;
       const pitch = job.params.pitchShift as number | undefined;
-      srcLatentBuf = getCachedLatent(srcAudioPath, tempo, pitch);
+      srcLatentBuf = getCachedLatent(srcAudioPath, tempo, pitch, aceReq.vae_model);
       if (!srcLatentBuf) {
         try {
           job.stage = 'Encoding source audio (VAE)...';
           logGeneration(job.id, 'INFO', '[Latent Cache] Source cache MISS — VAE-encoding source audio...');
-          srcLatentBuf = await aceClient.vaeEncode(srcAudioBuf);
-          saveCachedLatent(srcAudioPath, srcLatentBuf, tempo, pitch);
+          srcLatentBuf = await aceClient.vaeEncode(srcAudioBuf, aceReq.vae_model);
+          saveCachedLatent(srcAudioPath, srcLatentBuf, tempo, pitch, aceReq.vae_model);
         } catch (err) {
           logGeneration(job.id, 'WARNING', `[Latent Cache] VAE encode failed, proceeding with raw audio: ${err}`);
           srcLatentBuf = undefined;
@@ -373,13 +373,13 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       }
 
       if (refPath) {
-        refLatentBuf = getCachedLatent(refPath);
+        refLatentBuf = getCachedLatent(refPath, undefined, undefined, aceReq.vae_model);
         if (!refLatentBuf) {
           try {
             job.stage = 'Encoding timbre reference (VAE)...';
             logGeneration(job.id, 'INFO', '[Latent Cache] Timbre cache MISS — VAE-encoding timbre reference...');
-            refLatentBuf = await aceClient.vaeEncode(refAudioBuf);
-            saveCachedLatent(refPath, refLatentBuf);
+            refLatentBuf = await aceClient.vaeEncode(refAudioBuf, aceReq.vae_model);
+            saveCachedLatent(refPath, refLatentBuf, undefined, undefined, aceReq.vae_model);
           } catch (err) {
             logGeneration(job.id, 'WARNING', `[Latent Cache] Timbre VAE encode failed, proceeding with raw audio: ${err}`);
             refLatentBuf = undefined;
