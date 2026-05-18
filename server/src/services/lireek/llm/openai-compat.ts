@@ -45,10 +45,13 @@ export class OpenAICompatProvider extends LLMProvider {
 
     if (!modelName) throw new Error(`No models available on ${this.name}`);
 
-    const payload = {
+    const payload: Record<string, any> = {
       model: modelName,
       messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
       stream: !!onChunk,
+      // Force thinking/reasoning for Qwen3-style models on oMLX/vLLM.
+      // Servers that don't support this parameter will safely ignore it.
+      enable_thinking: true,
     };
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
