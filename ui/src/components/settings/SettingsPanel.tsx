@@ -275,6 +275,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 value={envValues.ACESTEPCPP_PORT || ''} onChange={handleEnvChange} type="number" placeholder="8085" />
               <EnvTextRow envKey="ACESTEPCPP_HOST" label={t('settings.env.engineHost')} description={t('settings.env.engineHostDesc')}
                 value={envValues.ACESTEPCPP_HOST || ''} onChange={handleEnvChange} placeholder="127.0.0.1" />
+              <EnvTextRow envKey="ACESTEPCPP_VAE_CHUNK" label={t('settings.env.vaeChunk')} description={t('settings.env.vaeChunkDesc')}
+                value={envValues.ACESTEPCPP_VAE_CHUNK || ''} onChange={handleEnvChange} type="number" placeholder="1024" />
+              <EnvTextRow envKey="ACESTEPCPP_VAE_OVERLAP" label={t('settings.env.vaeOverlap')} description={t('settings.env.vaeOverlapDesc')}
+                value={envValues.ACESTEPCPP_VAE_OVERLAP || ''} onChange={handleEnvChange} type="number" placeholder="64" />
             </EnvSubsection>
 
             {/* Server */}

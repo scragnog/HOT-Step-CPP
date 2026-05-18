@@ -175,6 +175,14 @@ function startAceServer(): ChildProcess | null {
     console.log(`[Server] Noise profile: ${config.aceServer.noiseProfile}`);
   }
 
+  // VAE tiling parameters (resolves Vulkan pinned memory allocation failures)
+  if (config.aceServer.vaeChunk) {
+    args.push('--vae-chunk', String(config.aceServer.vaeChunk));
+  }
+  if (config.aceServer.vaeOverlap) {
+    args.push('--vae-overlap', String(config.aceServer.vaeOverlap));
+  }
+
   console.log(`[Server] Starting ace-server: ${path.basename(exe)}`);
   console.log(`[Server] Models: ${config.aceServer.models}`);
   console.log(`[Server] Port: ${config.aceServer.port}`);

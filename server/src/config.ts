@@ -100,6 +100,8 @@ export const config = {
     adapters: process.env.ACESTEPCPP_ADAPTERS || DEFAULT_ADAPTERS,
     port: parseInt(process.env.ACESTEPCPP_PORT || '8085', 10),
     host: process.env.ACESTEPCPP_HOST || '127.0.0.1',
+    vaeChunk: parseInt(process.env.ACESTEPCPP_VAE_CHUNK || '1024', 10),
+    vaeOverlap: parseInt(process.env.ACESTEPCPP_VAE_OVERLAP || '64', 10),
     noiseProfile: process.env.ACESTEPCPP_NOISE_PROFILE || (() => {
       // Auto-detect: find first .wav in noise_samples/
       const dir = DEFAULT_NOISE_SAMPLES;
@@ -195,6 +197,7 @@ export const ENV_FILE_PATH = path.join(PROJECT_ROOT, '.env');
 export const EXPOSED_ENV_KEYS = [
   // Engine
   'ACESTEPCPP_MODELS', 'ACESTEPCPP_ADAPTERS', 'ACESTEPCPP_PORT', 'ACESTEPCPP_HOST',
+  'ACESTEPCPP_VAE_CHUNK', 'ACESTEPCPP_VAE_OVERLAP',
   // Server
   'SERVER_PORT', 'DATA_DIR',
   // API keys
@@ -214,6 +217,7 @@ export const EXPOSED_ENV_KEYS = [
 /** Keys that require an app restart to take effect */
 export const RESTART_REQUIRED_KEYS = new Set([
   'ACESTEPCPP_MODELS', 'ACESTEPCPP_ADAPTERS', 'ACESTEPCPP_PORT', 'ACESTEPCPP_HOST',
+  'ACESTEPCPP_VAE_CHUNK', 'ACESTEPCPP_VAE_OVERLAP',
   'SERVER_PORT', 'DATA_DIR',
 ]);
 
@@ -246,6 +250,10 @@ export function reloadEnvConfig(): string[] {
     () => String(config.aceServer.port));
   apply('ACESTEPCPP_HOST', v => { config.aceServer.host = v || '127.0.0.1'; },
     () => config.aceServer.host);
+  apply('ACESTEPCPP_VAE_CHUNK', v => { config.aceServer.vaeChunk = parseInt(v || '1024', 10); },
+    () => String(config.aceServer.vaeChunk));
+  apply('ACESTEPCPP_VAE_OVERLAP', v => { config.aceServer.vaeOverlap = parseInt(v || '64', 10); },
+    () => String(config.aceServer.vaeOverlap));
 
   // ── Server ──
   apply('SERVER_PORT', v => { config.server.port = parseInt(v || '3001', 10); },
