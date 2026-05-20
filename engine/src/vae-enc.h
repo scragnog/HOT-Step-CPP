@@ -40,13 +40,28 @@ struct VAEEncoder {
     std::vector<float> scratch_in;       // transposed input [2 * T_audio]
 };
 
-// Load encoder weights from the same VAE GGUF (encoder.* tensors)
+// Load encoder weights from VAE file (GGUF or safetensors)
 static void vae_enc_load(VAEEncoder * m, const char * path) {
+    const char * ext = strrchr(path, '.');
+    bool is_st = (ext && _stricmp(ext, ".safetensors") == 0);
+
     GGUFModel gf = {};
-    if (!gf_load(&gf, path)) {
-        fprintf(stderr, "[VAE-Enc] FATAL: cannot load %s\n", path);
-        exit(1);
+    STFile    st = {};
+    if (is_st) {
+        if (!st_open(&st, path)) {
+            fprintf(stderr, "[VAE-Enc] FATAL: cannot load %s\n", path);
+            exit(1);
+        }
+    } else {
+        if (!gf_load(&gf, path)) {
+            fprintf(stderr, "[VAE-Enc] FATAL: cannot load %s\n", path);
+            exit(1);
+        }
     }
+    VaeWeightSource ws;
+    ws.is_st = is_st;
+    ws.gf    = &gf;
+    ws.st    = &st;
 
     // Encoder channel layout (mirror of decoder, bottom-up):
     //   conv1: 2 -> 128
@@ -118,8 +133,8 @@ static void vae_enc_load(VAEEncoder * m, const char * path) {
             (float) ggml_backend_buffer_get_size(m->buf) / (1024 * 1024));
 
     // Phase 3: load and fuse weights
-    vae_fuse_wn(m->c1w, gf, "encoder.conv1");
-    vae_load_bias(m->c1b, gf, "encoder.conv1.bias");
+    vae_fuse_wn(m->c1w, ws, "encoder.conv1");
+    vae_load_bias(m->c1b, ws, "encoder.conv1.bias");
 
     for (int i = 0; i < 5; i++) {
         VAEEncBlock & b       = m->blk[i];
@@ -129,30 +144,30 @@ static void vae_enc_load(VAEEncoder * m, const char * path) {
         for (int r = 0; r < 3; r++) {
             VAEResUnit & ru = b.ru[r];
             std::string  rp = blk_pfx + ".res_unit" + std::to_string(r + 1);
-            vae_load_snake(ru.s1a, gf, rp + ".snake1.alpha");
-            vae_load_snake_inv(ru.s1b, gf, rp + ".snake1.beta");
-            vae_fuse_wn(ru.c1w, gf, rp + ".conv1");
-            vae_load_bias(ru.c1b, gf, rp + ".conv1.bias");
-            vae_load_snake(ru.s2a, gf, rp + ".snake2.alpha");
-            vae_load_snake_inv(ru.s2b, gf, rp + ".snake2.beta");
-            vae_fuse_wn(ru.c2w, gf, rp + ".conv2");
-            vae_load_bias(ru.c2b, gf, rp + ".conv2.bias");
+            vae_load_snake(ru.s1a, ws, rp + ".snake1.alpha");
+            vae_load_snake_inv(ru.s1b, ws, rp + ".snake1.beta");
+            vae_fuse_wn(ru.c1w, ws, rp + ".conv1");
+            vae_load_bias(ru.c1b, ws, rp + ".conv1.bias");
+            vae_load_snake(ru.s2a, ws, rp + ".snake2.alpha");
+            vae_load_snake_inv(ru.s2b, ws, rp + ".snake2.beta");
+            vae_fuse_wn(ru.c2w, ws, rp + ".conv2");
+            vae_load_bias(ru.c2b, ws, rp + ".conv2.bias");
         }
 
         // snake + strided downsample conv (regular conv1d, NOT transposed)
-        vae_load_snake(b.sa, gf, blk_pfx + ".snake1.alpha");
-        vae_load_snake_inv(b.sb, gf, blk_pfx + ".snake1.beta");
-        vae_fuse_wn(b.dw, gf, blk_pfx + ".conv1");
-        vae_load_bias(b.db, gf, blk_pfx + ".conv1.bias");
+        vae_load_snake(b.sa, ws, blk_pfx + ".snake1.alpha");
+        vae_load_snake_inv(b.sb, ws, blk_pfx + ".snake1.beta");
+        vae_fuse_wn(b.dw, ws, blk_pfx + ".conv1");
+        vae_load_bias(b.db, ws, blk_pfx + ".conv1.bias");
     }
 
-    vae_load_snake(m->sa, gf, "encoder.snake1.alpha");
-    vae_load_snake_inv(m->sb, gf, "encoder.snake1.beta");
-    vae_fuse_wn(m->c2w, gf, "encoder.conv2");
-    vae_load_bias(m->c2b, gf, "encoder.conv2.bias");
+    vae_load_snake(m->sa, ws, "encoder.snake1.alpha");
+    vae_load_snake_inv(m->sb, ws, "encoder.snake1.beta");
+    vae_fuse_wn(m->c2w, ws, "encoder.conv2");
+    vae_load_bias(m->c2b, ws, "encoder.conv2.bias");
 
-    fprintf(stderr, "[VAE-Enc] Loaded: 5 blocks, downsample=1920x, F32 activations\n");
-    gf_close(&gf);
+    fprintf(stderr, "[VAE-Enc] Loaded (%s): 5 blocks, downsample=1920x, F32 activations\n", is_st ? "safetensors" : "GGUF");
+    if (is_st) st_close(&st); else gf_close(&gf);
 }
 
 // Build encoder graph: audio [T_audio, 2] -> [T_latent, 128]

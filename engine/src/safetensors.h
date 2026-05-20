@@ -13,6 +13,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "ggml.h"
 
 #ifdef _WIN32
 #    include <windows.h>
@@ -317,4 +318,28 @@ static void st_close(STFile * st) {
 // Get raw data pointer for a tensor entry
 static inline const void * st_data(const STFile & st, const STEntry & e) {
     return st.mapping + st.data_offset + e.data_start;
+}
+
+// Find entry by name. Returns nullptr if not found.
+static const STEntry * st_find(const STFile & st, const char * name) {
+    for (size_t i = 0; i < st.entries.size(); i++) {
+        if (st.entries[i].name == name) return &st.entries[i];
+    }
+    return nullptr;
+}
+
+// Convert safetensors dtype string to ggml_type.
+static ggml_type st_ggml_type(const STEntry & e) {
+    if (e.dtype == "F32")  return GGML_TYPE_F32;
+    if (e.dtype == "BF16") return GGML_TYPE_BF16;
+    if (e.dtype == "F16")  return GGML_TYPE_F16;
+    return GGML_TYPE_COUNT;
+}
+
+// Find tensor by name and return data pointer + type.
+static const void * st_find_data(const STFile & st, const char * name, ggml_type * out_type = nullptr) {
+    const STEntry * e = st_find(st, name);
+    if (!e) return nullptr;
+    if (out_type) *out_type = st_ggml_type(*e);
+    return st_data(st, *e);
 }

@@ -12,6 +12,7 @@
 #include "ggml-backend.h"
 #include "ggml.h"
 #include "gguf-weights.h"
+#include "safetensors.h"
 
 #include <cmath>
 #include <cstdio>
@@ -58,6 +59,53 @@ struct VAEGGML {
     std::vector<float> scratch_in;  // transposed input [64 * T]
 };
 
+// Abstracts tensor data access for VAE loading from GGUF or safetensors.
+struct VaeWeightSource {
+    bool        is_st = false;
+    GGUFModel * gf    = nullptr;
+    STFile *    st    = nullptr;
+
+    // Get raw data pointer + type for a named tensor
+    const void * data(const char * name, ggml_type & type) const {
+        if (is_st) {
+            const void * p = st_find_data(*st, name, &type);
+            if (!p) {
+                fprintf(stderr, "[VAE] FATAL: tensor '%s' not found in safetensors\n", name);
+            }
+            return p;
+        } else {
+            struct ggml_tensor * mt = ggml_get_tensor(gf->meta, name);
+            if (!mt) {
+                fprintf(stderr, "[VAE] FATAL: tensor '%s' not found in GGUF\n", name);
+                return nullptr;
+            }
+            type = mt->type;
+            return gf_get_data(*gf, name);
+        }
+    }
+
+    // Get shape info for a named tensor (n_dims and ne[])
+    bool shape(const char * name, int & n_dims, int64_t ne[4]) const {
+        if (is_st) {
+            const STEntry * e = st_find(*st, name);
+            if (!e) return false;
+            n_dims = e->n_dims;
+            // Reverse shape: safetensors is PyTorch order [dim0..dimN], ggml is [neN..ne0]
+            for (int i = 0; i < 4; i++) {
+                int src = e->n_dims - 1 - i;
+                ne[i] = (src >= 0 && src < e->n_dims) ? e->shape[src] : 1;
+            }
+            return true;
+        } else {
+            struct ggml_tensor * mt = ggml_get_tensor(gf->meta, name);
+            if (!mt) return false;
+            n_dims = ggml_n_dims(mt);
+            for (int i = 0; i < 4; i++) ne[i] = mt->ne[i];
+            return true;
+        }
+    }
+};
+
 // Load helpers
 
 // Type-aware element reader: extract float from GGUF data at index.
@@ -79,18 +127,17 @@ static inline float vae_read_float(const void * data, int idx, ggml_type type) {
 // Fuse weight_norm: w = g*v/||v||, write f32 into pre-allocated ggml_tensor
 // Works for Conv1d [OC,IC,K]: weight_norm normalizes over dim=0 (shape[0]).
 // Type-aware: reads F32, BF16, or F16 source tensors.
-static void vae_fuse_wn(struct ggml_tensor * dst, const GGUFModel & gf, const std::string & pfx) {
-    struct ggml_tensor * mv     = ggml_get_tensor(gf.meta, (pfx + ".weight_v").c_str());
-    struct ggml_tensor * mg     = ggml_get_tensor(gf.meta, (pfx + ".weight_g").c_str());
-    const void *         g      = gf_get_data(gf, (pfx + ".weight_g").c_str());
-    const void *         v      = gf_get_data(gf, (pfx + ".weight_v").c_str());
-    ggml_type            g_type = mg->type;
-    ggml_type            v_type = mv->type;
-    // PyTorch dim0 is ggml ne[n_dims-1]
-    int                  n_dims = ggml_n_dims(mv);
-    int                  dim0   = (int) mv->ne[n_dims - 1];
-    int                  fan    = (int) (ggml_nelements(mv) / dim0);
-    std::vector<float>   w(dim0 * fan);
+static void vae_fuse_wn(struct ggml_tensor * dst, const VaeWeightSource & ws, const std::string & pfx) {
+    ggml_type v_type, g_type;
+    const void * v = ws.data((pfx + ".weight_v").c_str(), v_type);
+    const void * g = ws.data((pfx + ".weight_g").c_str(), g_type);
+    int n_dims_v; int64_t ne_v[4];
+    ws.shape((pfx + ".weight_v").c_str(), n_dims_v, ne_v);
+    int dim0 = (int) ne_v[n_dims_v - 1];
+    int64_t total = 1;
+    for (int i = 0; i < n_dims_v; i++) total *= ne_v[i];
+    int fan = (int) (total / dim0);
+    std::vector<float> w(dim0 * fan);
     for (int d = 0; d < dim0; d++) {
         float gv  = vae_read_float(g, d, g_type);
         float nsq = 0;
@@ -119,18 +166,18 @@ static void vae_fuse_wn(struct ggml_tensor * dst, const GGUFModel & gf, const st
 // We need dst [IC, K*OC] in GGML (ne[0]=IC): element (ic, k_oc) = data[ic + k_oc*IC].
 // So we transpose during fuse: data[k_oc * IC + ic] = fused[ic * K_OC + k_oc].
 // Type-aware: reads F32, BF16, or F16 source tensors.
-static void vae_fuse_wn_ct(struct ggml_tensor * dst, const GGUFModel & gf, const std::string & pfx) {
-    struct ggml_tensor * mv     = ggml_get_tensor(gf.meta, (pfx + ".weight_v").c_str());
-    struct ggml_tensor * mg     = ggml_get_tensor(gf.meta, (pfx + ".weight_g").c_str());
-    const void *         g      = gf_get_data(gf, (pfx + ".weight_g").c_str());
-    const void *         v      = gf_get_data(gf, (pfx + ".weight_v").c_str());
-    ggml_type            g_type = mg->type;
-    ggml_type            v_type = mv->type;
-    int                  n_dims = ggml_n_dims(mv);
-    int                  dim0   = (int) mv->ne[n_dims - 1];           // IC
-    int                  fan    = (int) (ggml_nelements(mv) / dim0);  // K * OC
-    std::vector<float>   w(dim0 * fan);
-    for (int d = 0; d < dim0; d++) {                                  // d = ic
+static void vae_fuse_wn_ct(struct ggml_tensor * dst, const VaeWeightSource & ws, const std::string & pfx) {
+    ggml_type v_type, g_type;
+    const void * v = ws.data((pfx + ".weight_v").c_str(), v_type);
+    const void * g = ws.data((pfx + ".weight_g").c_str(), g_type);
+    int n_dims_v; int64_t ne_v[4];
+    ws.shape((pfx + ".weight_v").c_str(), n_dims_v, ne_v);
+    int dim0 = (int) ne_v[n_dims_v - 1];
+    int64_t total = 1;
+    for (int i = 0; i < n_dims_v; i++) total *= ne_v[i];
+    int fan = (int) (total / dim0);
+    std::vector<float> w(dim0 * fan);
+    for (int d = 0; d < dim0; d++) {
         float gv  = vae_read_float(g, d, g_type);
         float nsq = 0;
         for (int i = 0; i < fan; i++) {
@@ -138,7 +185,7 @@ static void vae_fuse_wn_ct(struct ggml_tensor * dst, const GGUFModel & gf, const
             nsq += vv * vv;
         }
         float s = gv / (sqrtf(nsq) + 1e-12f);
-        for (int i = 0; i < fan; i++) {  // i = k_oc
+        for (int i = 0; i < fan; i++) {
             float vv        = vae_read_float(v, d * fan + i, v_type);
             w[i * dim0 + d] = vv * s;    // transposed: [k_oc * IC + ic]
         }
@@ -154,12 +201,13 @@ static void vae_fuse_wn_ct(struct ggml_tensor * dst, const GGUFModel & gf, const
 
 // Load snake param [1,C,1] -> exp -> f32 [1, C]
 // Type-aware: reads F32, BF16, or F16 source tensors.
-static void vae_load_snake(struct ggml_tensor * dst, const GGUFModel & gf, const std::string & name) {
-    struct ggml_tensor * mt   = ggml_get_tensor(gf.meta, name.c_str());
-    int                  C    = (int) mt->ne[1];  // PyTorch [1,C,1] -> ggml ne=[1,C,1], middle dim
-    const void *         raw  = gf_get_data(gf, name.c_str());
-    ggml_type            type = mt->type;
-    std::vector<float>   d(C);
+static void vae_load_snake(struct ggml_tensor * dst, const VaeWeightSource & ws, const std::string & name) {
+    int n_dims; int64_t ne[4];
+    ws.shape(name.c_str(), n_dims, ne);
+    int C = (int) ne[1];  // PyTorch [1,C,1] -> ggml ne=[1,C,1], middle dim
+    ggml_type type;
+    const void * raw = ws.data(name.c_str(), type);
+    std::vector<float> d(C);
     for (int i = 0; i < C; i++) {
         d[i] = expf(vae_read_float(raw, i, type));
     }
@@ -168,12 +216,13 @@ static void vae_load_snake(struct ggml_tensor * dst, const GGUFModel & gf, const
 
 // Load snake param [1,C,1] -> 1/exp -> f32 [1, C] (reciprocal for mul fusion)
 // Type-aware: reads F32, BF16, or F16 source tensors.
-static void vae_load_snake_inv(struct ggml_tensor * dst, const GGUFModel & gf, const std::string & name) {
-    struct ggml_tensor * mt   = ggml_get_tensor(gf.meta, name.c_str());
-    int                  C    = (int) mt->ne[1];
-    const void *         raw  = gf_get_data(gf, name.c_str());
-    ggml_type            type = mt->type;
-    std::vector<float>   d(C);
+static void vae_load_snake_inv(struct ggml_tensor * dst, const VaeWeightSource & ws, const std::string & name) {
+    int n_dims; int64_t ne[4];
+    ws.shape(name.c_str(), n_dims, ne);
+    int C = (int) ne[1];
+    ggml_type type;
+    const void * raw = ws.data(name.c_str(), type);
+    std::vector<float> d(C);
     for (int i = 0; i < C; i++) {
         d[i] = 1.0f / expf(vae_read_float(raw, i, type));
     }
@@ -182,12 +231,13 @@ static void vae_load_snake_inv(struct ggml_tensor * dst, const GGUFModel & gf, c
 
 // Load bias [C] -> f32
 // Type-aware: reads F32, BF16, or F16 source tensors.
-static void vae_load_bias(struct ggml_tensor * dst, const GGUFModel & gf, const std::string & name) {
-    struct ggml_tensor * mt   = ggml_get_tensor(gf.meta, name.c_str());
-    int                  C    = (int) mt->ne[0];  // 1D: ne[0] = C
-    const void *         raw  = gf_get_data(gf, name.c_str());
-    ggml_type            type = mt->type;
-    std::vector<float>   d(C);
+static void vae_load_bias(struct ggml_tensor * dst, const VaeWeightSource & ws, const std::string & name) {
+    int n_dims; int64_t ne[4];
+    ws.shape(name.c_str(), n_dims, ne);
+    int C = (int) ne[0];  // 1D: ne[0] = C
+    ggml_type type;
+    const void * raw = ws.data(name.c_str(), type);
+    std::vector<float> d(C);
     for (int i = 0; i < C; i++) {
         d[i] = vae_read_float(raw, i, type);
     }
@@ -196,11 +246,26 @@ static void vae_load_bias(struct ggml_tensor * dst, const GGUFModel & gf, const 
 
 // Load model
 static void vae_ggml_load(VAEGGML * m, const char * path) {
+    const char * ext = strrchr(path, '.');
+    bool is_st = (ext && _stricmp(ext, ".safetensors") == 0);
+
     GGUFModel gf = {};
-    if (!gf_load(&gf, path)) {
-        fprintf(stderr, "[VAE] FATAL: cannot load %s\n", path);
-        exit(1);
+    STFile    st = {};
+    if (is_st) {
+        if (!st_open(&st, path)) {
+            fprintf(stderr, "[VAE] FATAL: cannot load %s\n", path);
+            exit(1);
+        }
+    } else {
+        if (!gf_load(&gf, path)) {
+            fprintf(stderr, "[VAE] FATAL: cannot load %s\n", path);
+            exit(1);
+        }
     }
+    VaeWeightSource ws;
+    ws.is_st = is_st;
+    ws.gf    = &gf;
+    ws.st    = &st;
 
     static const int strides[]   = { 10, 6, 4, 4, 2 };
     static const int in_ch[]     = { 2048, 1024, 512, 256, 128 };
@@ -258,35 +323,35 @@ static void vae_ggml_load(VAEGGML * m, const char * path) {
             (float) ggml_backend_buffer_get_size(m->buf) / (1024 * 1024));
 
     // Phase 3: load & fuse weights
-    vae_fuse_wn(m->c1w, gf, "decoder.conv1");
-    vae_load_bias(m->c1b, gf, "decoder.conv1.bias");
+    vae_fuse_wn(m->c1w, ws, "decoder.conv1");
+    vae_load_bias(m->c1b, ws, "decoder.conv1.bias");
 
     for (int i = 0; i < 5; i++) {
         VAEBlock &  b       = m->blk[i];
         std::string blk_pfx = "decoder.block." + std::to_string(i);
-        vae_load_snake(b.sa, gf, blk_pfx + ".snake1.alpha");
-        vae_load_snake_inv(b.sb, gf, blk_pfx + ".snake1.beta");
-        vae_fuse_wn_ct(b.ctw, gf, blk_pfx + ".conv_t1");
-        vae_load_bias(b.ctb, gf, blk_pfx + ".conv_t1.bias");
+        vae_load_snake(b.sa, ws, blk_pfx + ".snake1.alpha");
+        vae_load_snake_inv(b.sb, ws, blk_pfx + ".snake1.beta");
+        vae_fuse_wn_ct(b.ctw, ws, blk_pfx + ".conv_t1");
+        vae_load_bias(b.ctb, ws, blk_pfx + ".conv_t1.bias");
         for (int r = 0; r < 3; r++) {
             VAEResUnit & ru = b.ru[r];
             std::string  rp = blk_pfx + ".res_unit" + std::to_string(r + 1);
-            vae_load_snake(ru.s1a, gf, rp + ".snake1.alpha");
-            vae_load_snake_inv(ru.s1b, gf, rp + ".snake1.beta");
-            vae_fuse_wn(ru.c1w, gf, rp + ".conv1");
-            vae_load_bias(ru.c1b, gf, rp + ".conv1.bias");
-            vae_load_snake(ru.s2a, gf, rp + ".snake2.alpha");
-            vae_load_snake_inv(ru.s2b, gf, rp + ".snake2.beta");
-            vae_fuse_wn(ru.c2w, gf, rp + ".conv2");
-            vae_load_bias(ru.c2b, gf, rp + ".conv2.bias");
+            vae_load_snake(ru.s1a, ws, rp + ".snake1.alpha");
+            vae_load_snake_inv(ru.s1b, ws, rp + ".snake1.beta");
+            vae_fuse_wn(ru.c1w, ws, rp + ".conv1");
+            vae_load_bias(ru.c1b, ws, rp + ".conv1.bias");
+            vae_load_snake(ru.s2a, ws, rp + ".snake2.alpha");
+            vae_load_snake_inv(ru.s2b, ws, rp + ".snake2.beta");
+            vae_fuse_wn(ru.c2w, ws, rp + ".conv2");
+            vae_load_bias(ru.c2b, ws, rp + ".conv2.bias");
         }
     }
-    vae_load_snake(m->sa, gf, "decoder.snake1.alpha");
-    vae_load_snake_inv(m->sb, gf, "decoder.snake1.beta");
-    vae_fuse_wn(m->c2w, gf, "decoder.conv2");
+    vae_load_snake(m->sa, ws, "decoder.snake1.alpha");
+    vae_load_snake_inv(m->sb, ws, "decoder.snake1.beta");
+    vae_fuse_wn(m->c2w, ws, "decoder.conv2");
 
-    fprintf(stderr, "[VAE] Loaded: 5 blocks, upsample=1920x, F32 activations\n");
-    gf_close(&gf);
+    fprintf(stderr, "[VAE] Loaded (%s): 5 blocks, upsample=1920x, F32 activations\n", is_st ? "safetensors" : "GGUF");
+    if (is_st) st_close(&st); else gf_close(&gf);
 }
 
 // Graph building
