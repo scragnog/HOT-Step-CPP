@@ -136,6 +136,7 @@ export interface GenerationParams {
   sourceAudioUrl?: string;
   audioCoverStrength?: number;
   coverNoiseStrength?: number;
+  coverNoiseMethod?: string;
   repaintingStart?: number;
   repaintingEnd?: number;
   sourceLatentUrl?: string;  // HSLAT latent file URL (skips VAE encode)

@@ -58,10 +58,14 @@ export function formatLmModel(filename: string): string {
 /** Parse a VAE model filename into a nice label like "VAE" or "ScragVAE" */
 export function formatVaeModel(filename: string): string {
   if (!filename) return '—';
-  const name = filename.replace(/\.gguf$/i, '').replace(/-BF16$/, '');
-  if (name === 'vae') return 'VAE';
-  if (name === 'scragvae') return 'ScragVAE';
-  return name;
+  const isST = /\.safetensors$/i.test(filename);
+  const name = filename
+    .replace(/\.(gguf|safetensors)$/i, '')
+    .replace(/-(BF16|F16|F32)$/i, '');
+  const suffix = isST ? ' (ST)' : '';
+  if (name === 'vae') return 'VAE' + suffix;
+  if (name === 'scragvae') return 'ScragVAE' + suffix;
+  return name + suffix;
 }
 
 /** Parse an embedding model filename into a nice label like "Qwen3 0.6B-Q8" */
@@ -126,8 +130,10 @@ export function getLmModelDescription(filename: string): string {
 /** Get a contextual description for a VAE model */
 export function getVaeModelDescription(filename: string): string {
   if (!filename) return '';
-  const name = filename.replace(/\.gguf$/i, '').toLowerCase();
-  if (name === 'vae') return 'Stock ACE-Step VAE. Standard latent-to-audio decoding.';
-  if (name.includes('scragvae') || name.includes('scrag')) return 'ScragVAE — custom-trained for reduced artifacts and improved high-frequency clarity.';
-  return 'Variational autoencoder for latent-to-audio decoding.';
+  const isST = /\.safetensors$/i.test(filename);
+  const name = filename.replace(/\.(gguf|safetensors)$/i, '').toLowerCase();
+  const stNote = isST ? ' Full F32 precision — best quality for cover/restyle.' : '';
+  if (name.startsWith('vae')) return 'Stock ACE-Step VAE. Standard latent-to-audio decoding.' + stNote;
+  if (name.includes('scragvae') || name.includes('scrag')) return 'ScragVAE — custom-trained for reduced artifacts and improved clarity.' + stNote;
+  return 'Variational autoencoder for latent-to-audio decoding.' + stNote;
 }

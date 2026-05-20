@@ -59,6 +59,7 @@ export const CoverStudio: React.FC = () => {
   // ── Cover settings ──
   const [audioCoverStrength, setAudioCoverStrength] = useState(() => restore<number>('audioCoverStrength', 0.5));
   const [coverNoiseStrength, setCoverNoiseStrength] = useState(() => restore<number>('coverNoiseStrength', 0));
+  const [coverNoiseMethod, setCoverNoiseMethod] = useState(() => restore<string>('coverNoiseMethod', ''));
   const [tempoScale, setTempoScale] = useState(() => restore<number>('tempoScale', 1.0));
   const [pitchShift, setPitchShift] = useState(() => restore<number>('pitchShift', 0));
   const [bpmCorrection, setBpmCorrection] = useState(() => restore<number>('bpmCorrection', 1));
@@ -127,6 +128,7 @@ export const CoverStudio: React.FC = () => {
   useEffect(() => { persist('artistCaption', artistCaption); }, [artistCaption]);
   useEffect(() => { persist('audioCoverStrength', audioCoverStrength); }, [audioCoverStrength]);
   useEffect(() => { persist('coverNoiseStrength', coverNoiseStrength); }, [coverNoiseStrength]);
+  useEffect(() => { persist('coverNoiseMethod', coverNoiseMethod); }, [coverNoiseMethod]);
   useEffect(() => { persist('tempoScale', tempoScale); }, [tempoScale]);
   useEffect(() => { persist('pitchShift', pitchShift); }, [pitchShift]);
   useEffect(() => { persist('bpmCorrection', bpmCorrection); }, [bpmCorrection]);
@@ -345,6 +347,7 @@ export const CoverStudio: React.FC = () => {
         sourceAudioUrl: effectiveSourceUrl,
         audioCoverStrength,
         coverNoiseStrength,
+        ...(coverNoiseMethod ? { coverNoiseMethod } : {}),
         bpm: targetBpm,
         keyScale: targetKey,
         duration: 0,
@@ -611,6 +614,7 @@ export const CoverStudio: React.FC = () => {
           onSelectPreset={(p) => { setSelectedPreset(p); applyPresetToGlobal(p); }}
           audioCoverStrength={audioCoverStrength} onAudioCoverStrength={setAudioCoverStrength}
           coverNoiseStrength={coverNoiseStrength} onCoverNoiseStrength={setCoverNoiseStrength}
+          coverNoiseMethod={coverNoiseMethod} onCoverNoiseMethodChange={setCoverNoiseMethod}
           noFsq={noFsq} onNoFsqChange={setNoFsq}
           instrumental={instrumental} onInstrumentalChange={setInstrumental}
           tempoScale={tempoScale} onTempoScale={setTempoScale}

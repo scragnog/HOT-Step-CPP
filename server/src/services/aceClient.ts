@@ -58,6 +58,7 @@ export interface AceRequest {
   shift?: number;
   audio_cover_strength?: number;
   cover_noise_strength?: number;
+  cover_noise_method?: string;
   repainting_start?: number;
   repainting_end?: number;
   task_type?: string;

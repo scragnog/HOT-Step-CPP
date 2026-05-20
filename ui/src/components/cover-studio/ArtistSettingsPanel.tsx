@@ -19,6 +19,8 @@ interface ArtistSettingsPanelProps {
   onAudioCoverStrength: (v: number) => void;
   coverNoiseStrength: number;
   onCoverNoiseStrength: (v: number) => void;
+  coverNoiseMethod: string;
+  onCoverNoiseMethodChange: (v: string) => void;
   noFsq: boolean;
   onNoFsqChange: (v: boolean) => void;
   instrumental: boolean;
@@ -45,6 +47,7 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
     artists, isLoadingArtists, selectedArtistId, onSelectArtist, onClearArtist,
     artistPresets, selectedPreset, onSelectPreset,
     audioCoverStrength, onAudioCoverStrength, coverNoiseStrength, onCoverNoiseStrength,
+    coverNoiseMethod, onCoverNoiseMethodChange,
     noFsq, onNoFsqChange, instrumental, onInstrumentalChange,
     tempoScale, onTempoScale, pitchShift, onPitchShift, analysis, bpmCorrection, keyOverride,
     artistCaption, onArtistCaptionChange,
@@ -216,6 +219,19 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
         <EditableSlider label={t('cover.sourcePreservation')} value={coverNoiseStrength} min={0} max={1} step={0.05}
           onChange={onCoverNoiseStrength} formatDisplay={v => v.toFixed(2)}
           helpText={t('cover.sourcePreservationHelp')} />
+        {coverNoiseStrength > 0 && (
+          <div className="flex items-center justify-between px-1 py-1">
+            <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">Noise Method</span>
+            <select
+              className="appearance-none rounded-lg bg-black/5 dark:bg-white/5 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 pr-8 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer focus:ring-2 focus:ring-cyan-500/50 focus:outline-none"
+              value={coverNoiseMethod}
+              onChange={(e) => onCoverNoiseMethodChange(e.target.value)}
+            >
+              <option value="">Classic (Truncate)</option>
+              <option value="rescale">Full Denoise (Rescale)</option>
+            </select>
+          </div>
+        )}
         {/* NoFSQ toggle */}
         <div className="flex items-center justify-between px-1 py-1">
           <div>

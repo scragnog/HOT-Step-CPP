@@ -1449,6 +1449,34 @@
       ]
     },
     {
+      "id": "vae-f32-st",
+      "filename": "vae-F32.safetensors",
+      "role": "vae",
+      "displayName": "Standard VAE (Safetensors)",
+      "scale": null,
+      "variant": null,
+      "quant": "F32",
+      "sizeBytes": 337431388,
+      "repo": "ACE-Step/Ace-Step1.5",
+      "repoPath": "vae/diffusion_pytorch_model.safetensors",
+      "description": "Original ACE-Step VAE in safetensors format. Full F32 precision — better encode quality for cover/restyle vs GGUF.",
+      "tags": ["recommended"]
+    },
+    {
+      "id": "scragvae-f32-st",
+      "filename": "scragvae-F32.safetensors",
+      "role": "vae",
+      "displayName": "ScragVAE (Safetensors)",
+      "scale": null,
+      "variant": null,
+      "quant": "F32",
+      "sizeBytes": 674821856,
+      "repo": "scragnog/Ace-Step-1.5-ScragVAE",
+      "repoPath": "diffusion_pytorch_model.safetensors",
+      "description": "ScragVAE in safetensors format. Full F32 precision + reduced artifacts. Best quality for cover/restyle.",
+      "tags": ["recommended"]
+    },
+    {
       "id": "pp-vae-f32",
       "filename": "pp-vae-F32.gguf",
       "role": "pp-vae",
