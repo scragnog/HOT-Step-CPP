@@ -81,7 +81,7 @@ export const InlineAudioQueue: React.FC = () => {
       caption: item.generation.caption || '',
       audioUrl: item.audioUrl,
       masteredAudioUrl: item.masteredAudioUrl || '',
-      coverUrl: item.artistImageUrl || '',
+      coverUrl: item.coverUrl || item.artistImageUrl || '',
       duration: item.audioDuration || 0,
       artistName: item.artistName || '',
       tags: [],
@@ -307,7 +307,7 @@ const QueueAddToPlaylistBtn: React.FC<{ item: AudioQueueItem }> = ({ item }) => 
         audioUrl: item.audioUrl || '',
         masteredAudioUrl: item.masteredAudioUrl || '',
         artistName: item.artistName || '',
-        coverUrl: item.artistImageUrl || '',
+        coverUrl: item.coverUrl || item.artistImageUrl || '',
         duration: item.audioDuration || 0,
       });
     }

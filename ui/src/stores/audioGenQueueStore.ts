@@ -32,6 +32,9 @@ export interface AudioQueueItem {
   artistId: number;
   artistName: string;
   artistImageUrl?: string;
+  /** Track cover art URL — populated when the song resolves with cover_url from the DB.
+   *  Preferred over artistImageUrl for playback backdrop / playlist thumbnail. */
+  coverUrl?: string;
   preset: AlbumPreset | null;
   profileId: number;
   lyricsSetId: number;
@@ -306,7 +309,7 @@ function _maybeAutoAddToPlaylist(item: AudioQueueItem): void {
     audioUrl: item.audioUrl || '',
     masteredAudioUrl: item.masteredAudioUrl || '',
     artistName: item.artistName || '',
-    coverUrl: item.artistImageUrl || '',
+    coverUrl: item.coverUrl || item.artistImageUrl || '',
     duration: item.audioDuration || 0,
   });
 }
@@ -316,13 +319,23 @@ function _maybeAutoAddToPlaylist(item: AudioQueueItem): void {
 /**
  * After a queue item completes with a songId, fetch the full song from the API
  * and dispatch a CustomEvent so App.tsx can add it to the library state.
- * This ensures the Library page updates in real-time without a browser reload.
+ * Also backfills the queue item's coverUrl from the song's cover_url so the
+ * playback backdrop shows the track's cover art instead of the artist image.
  */
 async function _notifySongCreated(songId: string): Promise<void> {
   try {
     const { song } = await songApi.get(songId);
     if (song) {
       window.dispatchEvent(new CustomEvent('song-created', { detail: { song } }));
+      // Backfill coverUrl into the queue item so the playback track uses cover art
+      const coverUrl = song.coverUrl || song.cover_url;
+      if (coverUrl) {
+        const item = _state.items.find(i => i.songId === songId);
+        if (item && !item.coverUrl) {
+          item.coverUrl = coverUrl;
+          _emit(true);
+        }
+      }
     }
   } catch {
     // Non-fatal — the song is saved, it'll appear on next reload

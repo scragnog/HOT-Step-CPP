@@ -121,6 +121,7 @@ export function audioQueueItemToTrack(item: {
   masteredAudioUrl?: string;
   artistName?: string;
   artistImageUrl?: string;
+  coverUrl?: string;
   audioDuration?: number;
   generation: { title?: string; caption?: string };
 }): PlaybackTrack {
@@ -130,7 +131,7 @@ export function audioQueueItemToTrack(item: {
     audioUrl: item.audioUrl || '',
     masteredAudioUrl: item.masteredAudioUrl || '',
     artistName: item.artistName || '',
-    coverUrl: item.artistImageUrl || '',
+    coverUrl: item.coverUrl || item.artistImageUrl || '',
     duration: coerceDuration(item.audioDuration),
     caption: item.generation.caption || '',
   };
