@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -157,6 +158,14 @@ private:
         if (!fs::exists(dir_path) || !fs::is_directory(dir_path)) return;
 
         // Collect and sort files for deterministic load order
+        // First pass: collect all .lua stems in this directory
+        std::set<std::string> all_stems;
+        for (auto & entry : fs::directory_iterator(dir_path)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".lua") {
+                all_stems.insert(entry.path().stem().string());
+            }
+        }
+
         std::vector<fs::path> files;
         for (auto & entry : fs::directory_iterator(dir_path)) {
             if (entry.is_regular_file() && entry.path().extension() == ".lua") {
@@ -164,9 +173,19 @@ private:
                 std::string stem = entry.path().stem().string();
                 if (stem.find("_constants") != std::string::npos ||
                     stem.find("_math") != std::string::npos ||
-                    stem.find("_data") != std::string::npos ||
-                    stem.find("_core") != std::string::npos) {
+                    stem.find("_data") != std::string::npos) {
                     continue;
+                }
+                // Skip _core files only if a corresponding non-_core plugin exists
+                // e.g. skip "md_audio_tiled_core" when "md_audio_tiled" exists,
+                // but keep "storm_sampler_core" when no "storm_sampler" exists.
+                auto core_pos = stem.rfind("_core");
+                if (core_pos != std::string::npos &&
+                    core_pos == stem.size() - 5) {  // ends with _core
+                    std::string base = stem.substr(0, core_pos);
+                    if (all_stems.count(base)) {
+                        continue;  // companion — skip
+                    }
                 }
                 files.push_back(entry.path());
             }

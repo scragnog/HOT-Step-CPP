@@ -43,6 +43,14 @@ IMPORTANT: This is a reference/scripting port. For production use in a
 
 local M = {}
 
+-- Lua 5.4 removed math.tanh — polyfill via exp identity
+local tanh = math.tanh or function(x)
+    if x > 20 then return 1.0 end
+    if x < -20 then return -1.0 end
+    local e2x = math.exp(2 * x)
+    return (e2x - 1) / (e2x + 1)
+end
+
 -- =============================================================================
 -- CONSTANTS
 -- =============================================================================
@@ -422,9 +430,9 @@ end
 function M.apply_soft_clip(audio, ceiling_db)
     if ceiling_db >= 0 then return end
     local ceiling_lin = 10 ^ (ceiling_db / 20)
-    local scale       = ceiling_lin / math.tanh(1.0)
+    local scale       = ceiling_lin / tanh(1.0)
     for i = 1, #audio do
-        audio[i] = scale * math.tanh(audio[i] / scale)
+        audio[i] = scale * tanh(audio[i] / scale)
     end
 end
 
