@@ -243,18 +243,25 @@ static bool setup_processing(PluginInstance & inst, int sample_rate, int block_s
     setup.maxSamplesPerBlock = block_size;
     setup.sampleRate         = (double)sample_rate;
 
-    if (inst.processor->setupProcessing(setup) != kResultOk) {
-        fprintf(stderr, "[vst-host] setupProcessing failed\n");
-        return false;
-    }
-
-    // Activate all audio buses
+    // Activate all audio buses before setupProcessing
     int32 numInputBuses  = inst.component->getBusCount(kAudio, kInput);
     int32 numOutputBuses = inst.component->getBusCount(kAudio, kOutput);
     for (int32 i = 0; i < numInputBuses; i++)
         inst.component->activateBus(kAudio, kInput, i, true);
     for (int32 i = 0; i < numOutputBuses; i++)
         inst.component->activateBus(kAudio, kOutput, i, true);
+
+    if (inst.processor->setupProcessing(setup) != kResultOk) {
+        // Some JUCE plugins reject layouts with active input buses when no input
+        // is expected (strict isBusesLayoutSupported check). Retry without them.
+        fprintf(stderr, "[vst-host] setupProcessing failed, retrying with input buses deactivated\n");
+        for (int32 i = 0; i < numInputBuses; i++)
+            inst.component->activateBus(kAudio, kInput, i, false);
+        if (inst.processor->setupProcessing(setup) != kResultOk) {
+            fprintf(stderr, "[vst-host] setupProcessing failed even without input buses\n");
+            return false;
+        }
+    }
 
     inst.component->setActive(true);
     inst.processor->setProcessing(true);
@@ -361,6 +368,38 @@ static int cmd_process(const char * plugin_path, const char * input_path,
 // ── GUI Mode (Windows) ──────────────────────────────────────────────────────
 
 #ifdef _WIN32
+
+// Minimal IPlugFrame — prevents null-deref when plugins call resizeView()
+class SimplePlugFrame : public IPlugFrame {
+    HWND hwnd_;
+public:
+    SimplePlugFrame(HWND h) : hwnd_(h) {}
+
+    tresult PLUGIN_API resizeView(IPlugView* view, ViewRect* newSize) override {
+        if (!newSize || !hwnd_) return kResultFalse;
+        RECT wr = { 0, 0, newSize->right - newSize->left, newSize->bottom - newSize->top };
+        DWORD style = (DWORD)GetWindowLongPtrA(hwnd_, GWL_STYLE);
+        AdjustWindowRect(&wr, style, FALSE);
+        SetWindowPos(hwnd_, nullptr, 0, 0, wr.right - wr.left, wr.bottom - wr.top,
+                     SWP_NOMOVE | SWP_NOZORDER);
+        if (view) view->onSize(&*newSize);
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API queryInterface(const TUID _iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(_iid, IPlugFrame::iid) ||
+            FUnknownPrivate::iidEqual(_iid, FUnknown::iid)) {
+            *obj = this;
+            addRef();
+            return kResultOk;
+        }
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+};
+
 static IPlugView * g_plugView = nullptr;
 static PluginInstance * g_guiInst = nullptr;
 static const char * g_guiStatePath = nullptr;
@@ -441,6 +480,12 @@ static int cmd_gui(const char * plugin_path, const char * state_path) {
         view->release();
         return 1;
     }
+
+    // Provide IPlugFrame so plugins can call resizeView() without crashing
+    static SimplePlugFrame * s_plugFrame = nullptr;
+    delete s_plugFrame;
+    s_plugFrame = new SimplePlugFrame(hwnd);
+    view->setFrame(s_plugFrame);
 
     // Attach plugin view to window
     if (view->attached(hwnd, kPlatformTypeHWND) != kResultOk) {
@@ -832,6 +877,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
 
     // Open GUI for each plugin
     std::vector<IPlugView*> views;
+    std::vector<SimplePlugFrame*> plugFrames;
     for (size_t i = 0; i < ms.plugins.size(); i++) {
         auto ctrl = ms.plugins[i].provider->getController();
         if (!ctrl) continue;
@@ -851,6 +897,12 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
                                    wr.right - wr.left, wr.bottom - wr.top,
                                    nullptr, nullptr, GetModuleHandleA(nullptr), nullptr);
         if (!hwnd) { view->release(); continue; }
+
+        // Provide IPlugFrame so plugins can call resizeView() without crashing
+        auto * frame = new SimplePlugFrame(hwnd);
+        view->setFrame(frame);
+        plugFrames.push_back(frame);
+
         if (view->attached(hwnd, kPlatformTypeHWND) != kResultOk) {
             view->release(); DestroyWindow(hwnd); continue;
         }
@@ -981,6 +1033,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
 
     // Detach and release views
     for (auto * v : views) { v->removed(); v->release(); }
+    for (auto * f : plugFrames) delete f;
 
     // Save all plugin states
     for (size_t i = 0; i < ms.plugins.size(); i++) {

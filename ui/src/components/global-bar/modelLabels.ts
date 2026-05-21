@@ -86,7 +86,13 @@ export function formatReferenceName(filename: string): string {
   return basename.replace(/\.[^.]+$/, '');
 }
 
-/** Format a scheduler string into a short display name */
+/**
+ * Format a scheduler string into a short display name for badge display.
+ * NOTE: The dropdown now gets primary display names from the plugin registry
+ * (registry.schedulers[].display). This function is the fallback used by
+ * GenerationBadge and other non-dropdown contexts. Unknown scheduler names
+ * fall through to `|| scheduler` which returns the raw plugin name.
+ */
 export function formatScheduler(scheduler: string): string {
   if (scheduler.startsWith('composite')) return 'Composite';
   if (scheduler.startsWith('beta:')) return 'Beta';

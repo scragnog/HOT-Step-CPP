@@ -177,16 +177,28 @@ export const GenerationDropdown: React.FC = () => {
             else if (v === 'composite') gp.setScheduler('composite:bong_tangent+linear:0.50:0.50');
             else gp.setScheduler(v);
           }}>
-          <option value="linear">Linear (Default)</option>
-          <option value="beta57">Beta 57 (RES4LYF)</option>
-          <option value="beta">Beta (Custom)</option>
-          <option value="cosine">Cosine</option>
-          <option value="power">Power</option>
-          <option value="ddim_uniform">DDIM Uniform (Log-SNR)</option>
-          <option value="sgm_uniform">SGM / Karras (ρ=7)</option>
-          <option value="bong_tangent">Tangent (Front-loaded)</option>
-          <option value="linear_quadratic">Linear-Quadratic</option>
-          <option value="composite">Composite (2-Stage)</option>
+          {registry.schedulers.length > 0 ? (
+            <>
+              {registry.schedulers.map(s => (
+                <option key={s.name} value={s.name}>{s.display}</option>
+              ))}
+              {/* Synthetic entries: parameterized schedules handled by the UI */}
+              <option value="beta">Beta (Custom)</option>
+              <option value="power">Power</option>
+              <option value="composite">Composite (2-Stage)</option>
+            </>
+          ) : (
+            <>
+              {/* Fallback while registry is loading */}
+              <option value="linear">Linear (Default)</option>
+              <option value="cosine">Cosine</option>
+              <option value="ddim_uniform">DDIM Uniform</option>
+              <option value="sgm_uniform">SGM / Karras</option>
+              <option value="bong_tangent">Tangent</option>
+              <option value="linear_quadratic">Linear-Quadratic</option>
+              <option value="composite">Composite (2-Stage)</option>
+            </>
+          )}
         </select>
         {/* Scheduler description from Lua plugin metadata */}
         {(() => {
@@ -276,26 +288,40 @@ export const GenerationDropdown: React.FC = () => {
                     <label className="block text-[10px] text-purple-400 mb-1">Stage A</label>
                     <select className={selectClasses} value={stageA}
                       onChange={e => update(e.target.value, stageB, crossover, split)}>
-                      <option value="linear">Linear</option>
-                      <option value="beta57">Beta 57</option>
-                      <option value="cosine">Cosine</option>
-                      <option value="ddim_uniform">DDIM</option>
-                      <option value="sgm_uniform">SGM</option>
-                      <option value="bong_tangent">Tangent</option>
-                      <option value="linear_quadratic">Lin-Quad</option>
+                      {registry.schedulers.length > 0 ? (
+                        registry.schedulers.map(s => (
+                          <option key={s.name} value={s.name}>{s.display}</option>
+                        ))
+                      ) : (
+                        <>
+                          <option value="linear">Linear</option>
+                          <option value="cosine">Cosine</option>
+                          <option value="ddim_uniform">DDIM</option>
+                          <option value="sgm_uniform">SGM</option>
+                          <option value="bong_tangent">Tangent</option>
+                          <option value="linear_quadratic">Lin-Quad</option>
+                        </>
+                      )}
                     </select>
                   </div>
                   <div>
                     <label className="block text-[10px] text-purple-400 mb-1">Stage B</label>
                     <select className={selectClasses} value={stageB}
                       onChange={e => update(stageA, e.target.value, crossover, split)}>
-                      <option value="linear">Linear</option>
-                      <option value="beta57">Beta 57</option>
-                      <option value="cosine">Cosine</option>
-                      <option value="ddim_uniform">DDIM</option>
-                      <option value="sgm_uniform">SGM</option>
-                      <option value="bong_tangent">Tangent</option>
-                      <option value="linear_quadratic">Lin-Quad</option>
+                      {registry.schedulers.length > 0 ? (
+                        registry.schedulers.map(s => (
+                          <option key={s.name} value={s.name}>{s.display}</option>
+                        ))
+                      ) : (
+                        <>
+                          <option value="linear">Linear</option>
+                          <option value="cosine">Cosine</option>
+                          <option value="ddim_uniform">DDIM</option>
+                          <option value="sgm_uniform">SGM</option>
+                          <option value="bong_tangent">Tangent</option>
+                          <option value="linear_quadratic">Lin-Quad</option>
+                        </>
+                      )}
                     </select>
                   </div>
                 </div>

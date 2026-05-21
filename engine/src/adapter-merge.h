@@ -84,6 +84,10 @@ static bool adapter_to_f32(const void * src, float * dst, int64_t n, const std::
 //   ComfyUI single-file (diffusion_model prefix):
 //     diffusion_model.layers.0.self_attn.q_proj.lora_A.weight
 //
+//   PEFT raw export (wrapped modules):
+//     base_model.model.layers.0.mlp.original_mlp.down_proj.lora_A.default.weight
+//     (the ".original_mlp." infix is stripped before matching)
+//
 // Steps: strip known prefix, extract module path before ".lora_",
 // prepend "decoder." if needed, append ".weight".
 static std::string lora_base_name(const std::string & key) {
@@ -98,6 +102,22 @@ static std::string lora_base_name(const std::string & key) {
         size_t pfx_len = strlen(pfx);
         if (s.compare(0, pfx_len, pfx) == 0) {
             s = s.substr(pfx_len);
+            break;
+        }
+    }
+
+    // strip known PEFT module wrapper infixes.
+    // HuggingFace PEFT wraps modules as e.g. "mlp.original_mlp.proj" instead
+    // of "mlp.proj".  The ".original_<module>." segment is redundant.
+    static const char * peft_infixes[] = {
+        ".original_mlp.",
+        ".original_self_attn.",
+        ".original_cross_attn.",
+    };
+    for (const char * infix : peft_infixes) {
+        size_t ipos = s.find(infix);
+        if (ipos != std::string::npos) {
+            s.erase(ipos, strlen(infix) - 1);  // erase infix, keep trailing dot
             break;
         }
     }
