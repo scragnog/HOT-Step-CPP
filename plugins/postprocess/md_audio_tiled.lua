@@ -31,9 +31,12 @@ postprocess = {
         { key = "hum_notch", type = "toggle", label = "Hum Notch Filter",
           default = true,
           hint = "Multi-band surgical cuts at 74/94/654Hz to remove Oobleck VAE hum." },
+        { key = "peak_normalize_db", type = "slider", label = "Peak Normalize",
+          default = -1, min = -12, max = 0, step = 0.5,
+          hint = "Transparent peak normalization (pure gain reduction, no distortion). Scales audio so the loudest peak = target dBFS. Applied before soft clip. Set to 0 to disable." },
         { key = "soft_clip_db", type = "slider", label = "Soft Clip Ceiling",
           default = -3.0, min = -12, max = 0, step = 0.5,
-          hint = "tanh saturation ceiling in dB. Prevents clipping without hard limiting." },
+          hint = "tanh saturation ceiling in dB. Acts as safety net after peak normalize. Set to 0 to disable." },
     },
 }
 
@@ -60,6 +63,14 @@ function process(latents, B, C_lat, W, C_aud, final_samples, upscale_factor, vae
         if params.lss_strength then p.lss_strength = params.lss_strength end
         if params.stereo_width then p.stereo_width = params.stereo_width end
         if params.hum_notch ~= nil then p.hum_notch_enabled = params.hum_notch end
+        if params.peak_normalize_db then
+            -- 0 dB means disabled (peak_normalize_db must be < 0 to activate)
+            if params.peak_normalize_db < 0 then
+                p.peak_normalize_db = params.peak_normalize_db
+            else
+                p.peak_normalize_db = nil  -- disable
+            end
+        end
         if params.soft_clip_db then p.soft_clip_db = params.soft_clip_db end
     end
 

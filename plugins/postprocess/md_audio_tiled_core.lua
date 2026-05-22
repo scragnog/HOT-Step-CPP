@@ -437,6 +437,32 @@ function M.apply_soft_clip(audio, ceiling_db)
 end
 
 -- =============================================================================
+-- PEAK NORMALIZE
+-- =============================================================================
+
+---Transparent peak normalization: scale entire audio so max |sample| = target.
+---Pure gain reduction — no waveform distortion, no waveshaping.
+---Only attenuates (never boosts). Skipped if peak is already below target.
+---@param audio table  flat buffer
+---@param N integer  total samples
+---@param target_db number  target peak in dBFS (e.g., -1.0)
+function M.apply_peak_normalize(audio, N, target_db)
+    if not target_db or target_db >= 0 then return end
+    local target_lin = 10 ^ (target_db / 20)
+    local peak = 0.0
+    for i = 1, N do
+        local v = math.abs(audio[i])
+        if v > peak then peak = v end
+    end
+    if peak < 1e-8 then return end   -- silence
+    if peak <= target_lin then return end  -- already below target
+    local gain = target_lin / peak
+    for i = 1, N do
+        audio[i] = audio[i] * gain
+    end
+end
+
+-- =============================================================================
 -- STEREO WIDTH (M/S)
 -- =============================================================================
 
@@ -768,6 +794,8 @@ function M.execute_tiled_decode(vae_decode_fn, latents, B, C_lat, W,
         M.apply_stereo_width(output_audio, B, final_samples,
                               params.stereo_width or 0.8)
     end
+    M.apply_peak_normalize(output_audio, B * C_aud * final_samples,
+                            params.peak_normalize_db)  -- nil = skip
     M.apply_soft_clip(output_audio, params.soft_clip_db or -3.0)
 
     return output_audio
@@ -795,6 +823,7 @@ M.DEFAULT_PARAMS = {
 
     -- DSP chain
     highpass_hz    = 20.0,
+    peak_normalize_db = nil,    -- nil = disabled; e.g. -1.0 for -1dBFS peak target
     soft_clip_db   = -3.0,
     stereo_width   = 0.8,
 
