@@ -152,7 +152,7 @@ class ModelDownloadService extends EventEmitter {
         try {
           if (fs.statSync(subPath).isDirectory()) {
             for (const f of fs.readdirSync(subPath)) {
-              if (f.endsWith('.gguf') || f.endsWith('.onnx') || f.endsWith('.safetensors')) files.add(f);
+              if (f.endsWith('.gguf') || f.endsWith('.onnx') || f.endsWith('.safetensors') || f.endsWith('.bin')) files.add(f);
             }
           }
         } catch {}
