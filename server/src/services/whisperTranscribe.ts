@@ -405,6 +405,18 @@ function normaliseWhisperJson(raw: any): WhisperResult {
     return { segments };
   }
 
+  // Debug: log first segment structure to help diagnose parsing issues
+  if (transcription.length > 0) {
+    const first = transcription[0];
+    console.log(`[Whisper] JSON sample — first segment: text="${first?.text}", ` +
+      `offsets=${JSON.stringify(first?.offsets)}, ` +
+      `tokens=${Array.isArray(first?.tokens) ? first.tokens.length + ' items' : 'none'}`);
+    if (Array.isArray(first?.tokens) && first.tokens.length > 0) {
+      const t = first.tokens[0];
+      console.log(`[Whisper] JSON sample — first token: ${JSON.stringify(t)}`);
+    }
+  }
+
   for (const seg of transcription) {
     const startMs = seg?.offsets?.from ?? 0;
     const endMs = seg?.offsets?.to ?? 0;
