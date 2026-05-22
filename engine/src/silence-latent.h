@@ -16,10 +16,20 @@
 // Minimal ZIP reader for PyTorch .pt files.
 // We only need to find and read the "*/data/0" entry.
 //
-// ZIP local file header: [PK\x03\x04][2B ver][2B flags][2B method][4B datetime]
-//   [4B crc32][4B compressed_size][4B uncompressed_size][2B name_len][2B extra_len]
-//   [name][extra][data]
-// We look for method=0 (stored, not compressed).
+// PyTorch >= 2.x writes ZIP files with data descriptors (flag bit 3 set),
+// which means compressed_size/uncompressed_size in local file headers are 0.
+// We use the central directory (at end of ZIP) which always has correct sizes.
+//
+// Central directory entry (46+ bytes):
+//   [PK\x01\x02][2B ver_made][2B ver_needed][2B flags][2B method]
+//   [4B datetime][4B crc32][4B comp_size][4B uncomp_size]
+//   [2B name_len][2B extra_len][2B comment_len]
+//   [2B disk_start][2B int_attr][4B ext_attr][4B local_header_offset]
+//   [name][extra][comment]
+//
+// End of central directory (22 bytes):
+//   [PK\x05\x06][2B disk][2B disk_cd][2B n_entries_disk][2B n_entries_total]
+//   [4B cd_size][4B cd_offset][2B comment_len]
 
 static bool sl_read_silence_latent(const char * pt_path,
                                    std::vector<float> & out,
@@ -45,39 +55,70 @@ static bool sl_read_silence_latent(const char * pt_path,
     }
     fclose(f);
 
-    // Scan ZIP local file headers looking for "*/data/0"
-    size_t pos = 0;
-    while (pos + 30 <= (size_t) file_size) {
-        // Check PK\x03\x04 signature
+    // Find End of Central Directory record (scan backwards from EOF)
+    // EOCD signature: PK\x05\x06
+    size_t eocd_pos = 0;
+    bool found_eocd = false;
+    for (size_t i = (size_t) file_size - 22; i > 0 && i < (size_t) file_size; i--) {
+        if (buf[i] == 0x50 && buf[i + 1] == 0x4B &&
+            buf[i + 2] == 0x05 && buf[i + 3] == 0x06) {
+            eocd_pos = i;
+            found_eocd = true;
+            break;
+        }
+    }
+    if (!found_eocd) {
+        fprintf(stderr, "[SilenceLatent] No EOCD in %s\n", pt_path);
+        return false;
+    }
+
+    uint32_t cd_size   = *(uint32_t *) &buf[eocd_pos + 12];
+    uint32_t cd_offset = *(uint32_t *) &buf[eocd_pos + 16];
+
+    if (cd_offset + cd_size > (size_t) file_size) {
+        fprintf(stderr, "[SilenceLatent] Corrupt central directory in %s\n", pt_path);
+        return false;
+    }
+
+    // Scan central directory entries for "*/data/0"
+    size_t pos = cd_offset;
+    size_t cd_end = cd_offset + cd_size;
+
+    while (pos + 46 <= cd_end) {
+        // Check central directory signature: PK\x01\x02
         if (buf[pos] != 0x50 || buf[pos + 1] != 0x4B ||
-            buf[pos + 2] != 0x03 || buf[pos + 3] != 0x04) {
-            break;  // No more local headers
+            buf[pos + 2] != 0x01 || buf[pos + 3] != 0x02) {
+            break;
         }
 
-        uint16_t method = *(uint16_t *) &buf[pos + 8];
-        uint32_t compressed_size = *(uint32_t *) &buf[pos + 18];
-        uint32_t uncompressed_size = *(uint32_t *) &buf[pos + 22];
-        uint16_t name_len = *(uint16_t *) &buf[pos + 26];
-        uint16_t extra_len = *(uint16_t *) &buf[pos + 28];
+        uint16_t method          = *(uint16_t *) &buf[pos + 10];
+        uint32_t uncomp_size     = *(uint32_t *) &buf[pos + 24];
+        uint16_t name_len        = *(uint16_t *) &buf[pos + 28];
+        uint16_t extra_len       = *(uint16_t *) &buf[pos + 30];
+        uint16_t comment_len     = *(uint16_t *) &buf[pos + 32];
+        uint32_t local_offset    = *(uint32_t *) &buf[pos + 42];
 
-        size_t name_start = pos + 30;
-        size_t data_start = name_start + name_len + extra_len;
+        size_t name_start = pos + 46;
+        if (name_start + name_len > cd_end) break;
 
-        if (name_start + name_len > (size_t) file_size) break;
-
-        // Check if name ends with "/data/0"
         std::string entry_name((char *) &buf[name_start], name_len);
         bool is_data0 = (entry_name.size() >= 7 &&
                          entry_name.compare(entry_name.size() - 7, 7, "/data/0") == 0);
 
         if (is_data0 && method == 0) {
-            // Stored (uncompressed) — read raw f32 data
-            size_t nbytes = uncompressed_size;
+            // Found the data entry — compute actual data position from the local header
+            // Local header: 30 bytes + name_len + extra_len (may differ from central)
+            if (local_offset + 30 > (size_t) file_size) break;
+            uint16_t local_name_len  = *(uint16_t *) &buf[local_offset + 26];
+            uint16_t local_extra_len = *(uint16_t *) &buf[local_offset + 28];
+            size_t data_start = local_offset + 30 + local_name_len + local_extra_len;
+
+            size_t nbytes = uncomp_size;
             size_t expected_bytes = (size_t) expected_dim0 * expected_dim1 * sizeof(float);
+
             if (nbytes != expected_bytes) {
                 fprintf(stderr, "[SilenceLatent] WARNING: expected %zu bytes, got %u in %s\n",
-                        expected_bytes, uncompressed_size, pt_path);
-                // Try to use what we have
+                        expected_bytes, uncomp_size, pt_path);
                 if (nbytes < expected_bytes) {
                     return false;
                 }
@@ -103,8 +144,8 @@ static bool sl_read_silence_latent(const char * pt_path,
             return true;
         }
 
-        // Skip to next local header
-        pos = data_start + compressed_size;
+        // Advance to next central directory entry
+        pos = name_start + name_len + extra_len + comment_len;
     }
 
     fprintf(stderr, "[SilenceLatent] No data/0 entry found in %s\n", pt_path);
