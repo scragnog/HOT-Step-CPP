@@ -92,7 +92,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     job.params.seed = aceReq.seed;
   }
 
-  console.log(`[Generate] Job ${job.id} — ditModel=${job.params.ditModel || '(none)'}, synth_model=${aceReq.synth_model || '(none)'}, seed=${aceReq.seed ?? '(engine default)'}, source=${job.params.source || 'create'}`);
+  console.log(`[Generate] Job ${job.id} — ditModel=${job.params.ditModel || '(none)'}, synth_model=${aceReq.synth_model || '(none)'}, emb_model=${aceReq.emb_model || '(auto)'}, seed=${aceReq.seed ?? '(engine default)'}, source=${job.params.source || 'create'}`);
   const abortController = new AbortController();
 
   // Store abort controller for cancellation
@@ -196,6 +196,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         const synthFields: Partial<AceRequest> = {
           synth_model: aceReq.synth_model,
           vae_model: aceReq.vae_model,
+          emb_model: aceReq.emb_model,
           adapter: aceReq.adapter,
           adapter_scale: aceReq.adapter_scale,
           adapter_group_scales: aceReq.adapter_group_scales,
@@ -604,6 +605,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
             adapter_scale: aceReq.adapter_scale,
             dit_model: aceReq.synth_model,
             vae_model: aceReq.vae_model,
+            emb_model: aceReq.emb_model,
             created_at: new Date().toISOString(),
           };
           const hslatBuf = writeHslat(rawLatent, latentMeta);

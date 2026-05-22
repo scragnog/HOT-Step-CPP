@@ -487,6 +487,7 @@ static std::string resolve_name(const std::vector<ModelEntry> & bucket,
 // these are HOT-Step additions that travel alongside the upstream request.
 struct ServerFields {
     std::string vae_model;       // explicit VAE selection ("": use first in registry)
+    std::string emb_model;       // explicit text encoder selection ("": use first in registry)
     std::string solver_name;     // "euler", "rk4", "heun", etc.
     std::string scheduler;       // "composite:...", "bong_tangent", etc.
     std::string guidance_mode;   // "apg", "dynamic_cfg", etc.
@@ -517,6 +518,7 @@ struct ServerFields {
 
 static void parse_server_fields(const char * json, ServerFields * sf) {
     sf->vae_model       = "";
+    sf->emb_model       = "";
     sf->solver_name     = "euler";
     sf->scheduler       = "";
     sf->guidance_mode   = "apg";
@@ -541,6 +543,9 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     yyjson_val * v;
     if ((v = yyjson_obj_get(obj, "vae_model")) && yyjson_is_str(v)) {
         sf->vae_model = yyjson_get_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "emb_model")) && yyjson_is_str(v)) {
+        sf->emb_model = yyjson_get_str(v);
     }
     // Solver / scheduler / guidance
     if ((v = yyjson_obj_get(obj, "infer_method")) && yyjson_is_str(v)) {
@@ -852,7 +857,15 @@ static void synth_worker(std::shared_ptr<Job>    job,
     }
 
     AceSynthParams p    = g_synth_params;
-    p.text_encoder_path = g_registry.text_enc[0].path.c_str();
+    // HOT-STEP: Text encoder model selection. Resolve by name from registry.
+    const ModelEntry * emb_entry = nullptr;
+    if (!sf.emb_model.empty()) {
+        emb_entry = registry_find(g_registry.text_enc, sf.emb_model.c_str());
+        if (!emb_entry) {
+            fprintf(stderr, "[Server] Text encoder not found: %s, using default\n", sf.emb_model.c_str());
+        }
+    }
+    p.text_encoder_path = emb_entry ? emb_entry->path.c_str() : g_registry.text_enc[0].path.c_str();
     p.dit_path          = dit->path.c_str();
     // HOT-STEP: VAE model selection. Resolve by name from registry.
     const ModelEntry * vae_entry = nullptr;
@@ -907,6 +920,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
             p.adapter_scale = ace_reqs[0].adapter_scale;
         }
     }
+    fprintf(stderr, "[Server] Text encoder: %s\n", emb_entry ? sf.emb_model.c_str() : g_registry.text_enc[0].name.c_str());
     fprintf(stderr, "[Server] Loading synth: DiT=%s%s%s%s\n", dit_name.c_str(),
             ace_reqs[0].adapter.empty() ? "" : " Adapter=", ace_reqs[0].adapter.c_str(),
             (g_keep_loaded || req_keep_loaded) ? " [keep-loaded]" : "");

@@ -39,6 +39,7 @@ export interface HslatMetadata {
   adapter_scale?: number;
   dit_model?: string;
   vae_model?: string;
+  emb_model?: string;
 
   // Meta
   created_at?: string;    // ISO 8601 timestamp

@@ -71,6 +71,7 @@ export interface AceRequest {
   synth_model?: string;
   lm_model?: string;
   vae_model?: string;
+  emb_model?: string;
   adapter?: string;
   adapter_scale?: number;
   adapter_group_scales?: {

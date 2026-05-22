@@ -72,6 +72,7 @@ export function translateParams(params: any): AceRequest {
   if (params.ditModel) req.synth_model = params.ditModel;
   if (params.lmModel) req.lm_model = params.lmModel;
   if (params.vaeModel) req.vae_model = params.vaeModel;
+  if (params.embeddingModel) req.emb_model = params.embeddingModel;
   if (params.loraPath) req.adapter = params.loraPath;
   if (params.loraScale !== undefined) req.adapter_scale = params.loraScale;
   if (params.adapterGroupScales) req.adapter_group_scales = params.adapterGroupScales;
