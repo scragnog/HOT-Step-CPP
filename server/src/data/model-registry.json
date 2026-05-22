@@ -1835,6 +1835,54 @@
         "required"
       ],
       "repoPath": "runtime/cudart64_12.dll"
+    },
+    {
+      "id": "whisper-large-v3-turbo",
+      "filename": "ggml-large-v3-turbo.bin",
+      "role": "whisper",
+      "subdir": "whisper",
+      "displayName": "Large v3 Turbo",
+      "sizeBytes": 848035840,
+      "repo": "ggerganov/whisper.cpp",
+      "repoPath": "ggml-large-v3-turbo.bin",
+      "description": "Best balance of speed and accuracy. Recommended. ~5-10s per 30s track on GPU.",
+      "tags": ["recommended"]
+    },
+    {
+      "id": "whisper-large-v3",
+      "filename": "ggml-large-v3.bin",
+      "role": "whisper",
+      "subdir": "whisper",
+      "displayName": "Large v3",
+      "sizeBytes": 1610612736,
+      "repo": "ggerganov/whisper.cpp",
+      "repoPath": "ggml-large-v3.bin",
+      "description": "Maximum accuracy. Slower but best for difficult transcriptions. ~10-20s per 30s track on GPU.",
+      "tags": []
+    },
+    {
+      "id": "whisper-medium",
+      "filename": "ggml-medium.bin",
+      "role": "whisper",
+      "subdir": "whisper",
+      "displayName": "Medium",
+      "sizeBytes": 511705088,
+      "repo": "ggerganov/whisper.cpp",
+      "repoPath": "ggml-medium.bin",
+      "description": "Good accuracy with lower VRAM usage. ~3-8s per 30s track on GPU.",
+      "tags": []
+    },
+    {
+      "id": "whisper-base",
+      "filename": "ggml-base.bin",
+      "role": "whisper",
+      "subdir": "whisper",
+      "displayName": "Base",
+      "sizeBytes": 155189248,
+      "repo": "ggerganov/whisper.cpp",
+      "repoPath": "ggml-base.bin",
+      "description": "Fastest, smallest. Good for quick previews but lower accuracy. ~1-3s per 30s track on GPU.",
+      "tags": []
     }
   ]
 }

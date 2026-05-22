@@ -15,7 +15,7 @@ interface Props {
   onDelete: (filename: string) => void;
 }
 
-type RoleTab = 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'supersep';
+type RoleTab = 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'supersep' | 'whisper';
 
 const TABS: { id: RoleTab; label: string }[] = [
   { id: 'dit', label: 'DiT Models' },
@@ -24,6 +24,7 @@ const TABS: { id: RoleTab; label: string }[] = [
   { id: 'vae', label: 'VAE' },
   { id: 'pp-vae', label: 'PP-VAE' },
   { id: 'supersep', label: 'Stem Separation' },
+  { id: 'whisper', label: 'Whisper' },
 ];
 
 // ── Info blocks per category ────────────────────────────────
@@ -41,6 +42,7 @@ const ROLE_INFO: Record<string, string> = {
   vae: 'The VAE (Variational Autoencoder) decodes the DiT\'s latent output into audio waveforms. The standard VAE is required for all generation. ScragVAE is a fine-tuned decoder with improved high-frequency response — it\'s a drop-in replacement.',
   'pp-vae': 'The Post-Processing VAE performs a neural audio polish pass — running generated audio through an encode→decode round-trip to smooth artifacts and improve tonal coherence. Optional but recommended. Use F32 for best quality.',
   supersep: 'Stem separation models for Cover Studio. Uses a 4-stage ONNX pipeline: BS-Roformer splits audio into 6 stems, Mel-Band RoFormer separates lead/backing vocals, MDX23C isolates drum components, and HTDemucs refines the "other" stem. All 4 models are required for full separation. Models run via ONNX Runtime GPU — no Python needed.',
+  whisper: 'OpenAI Whisper models for transcribing actual sung lyrics with word-level timestamps. Enable Whisper Lyrics in Post-Processing to use.',
 };
 
 // ── Grouping logic ──────────────────────────────────────────
@@ -155,6 +157,7 @@ export const ModelCatalogueTab: React.FC<Props> = ({ files, downloadJobs, onDown
   const vaeFiles = useMemo(() => files.filter(f => f.role === 'vae'), [files]);
   const ppVaeFiles = useMemo(() => files.filter(f => f.role === 'pp-vae'), [files]);
   const supersepFiles = useMemo(() => files.filter(f => f.role === 'supersep'), [files]);
+  const whisperFiles = useMemo(() => files.filter(f => f.role === 'whisper'), [files]);
 
   const renderSimpleGroup = (roleFiles: RegistryFile[], info?: string) => (
     <div className="space-y-3">
@@ -244,6 +247,7 @@ export const ModelCatalogueTab: React.FC<Props> = ({ files, downloadJobs, onDown
       {activeTab === 'vae' && renderSimpleGroup(vaeFiles, ROLE_INFO.vae)}
       {activeTab === 'pp-vae' && renderSimpleGroup(ppVaeFiles, ROLE_INFO['pp-vae'])}
       {activeTab === 'supersep' && renderSimpleGroup(supersepFiles, ROLE_INFO.supersep)}
+      {activeTab === 'whisper' && renderSimpleGroup(whisperFiles, ROLE_INFO.whisper)}
     </div>
   );
 };
