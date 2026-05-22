@@ -17,18 +17,21 @@ export function useModelRegistry() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchRegistry = useCallback(async () => {
+  const fetchRegistry = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
       const data = await modelManagerApi.registry();
       setRegistry(data);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch registry');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
+
+  // Silent refresh — updates data without showing spinner
+  const silentRefresh = useCallback(() => fetchRegistry(true), [fetchRegistry]);
 
   useEffect(() => {
     fetchRegistry();
@@ -66,6 +69,7 @@ export function useModelRegistry() {
     loading,
     error,
     refresh: fetchRegistry,
+    silentRefresh,
     installedFiles,
     getFile,
     getPackFiles,

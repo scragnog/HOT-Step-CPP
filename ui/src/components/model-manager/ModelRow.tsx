@@ -46,9 +46,11 @@ export const ModelRow: React.FC<Props> = ({ file, downloadJob, onDownload, onCan
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
             <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{file.displayName}</span>
-            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${quantColors[file.quant] || 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400 border-zinc-600'}`}>
-              {file.quant}
-            </span>
+            {file.quant && (
+              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${quantColors[file.quant] || 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400 border-zinc-600'}`}>
+                {file.quant}
+              </span>
+            )}
             {file.tags.includes('recommended') && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-400 border border-pink-500/20 uppercase tracking-wider">
                 {t('models.recommended')}

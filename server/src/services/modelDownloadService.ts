@@ -144,7 +144,7 @@ class ModelDownloadService extends EventEmitter {
     // Scan models root directory
     if (fs.existsSync(dir)) {
       for (const f of fs.readdirSync(dir)) {
-        if (f.endsWith('.gguf') || f.endsWith('.onnx') || f.endsWith('.safetensors')) files.add(f);
+        if (f.endsWith('.gguf') || f.endsWith('.onnx') || f.endsWith('.safetensors') || f.endsWith('.bin')) files.add(f);
       }
       // Scan subdirectories (e.g. supersep/)
       for (const sub of fs.readdirSync(dir)) {
@@ -262,8 +262,8 @@ class ModelDownloadService extends EventEmitter {
   /** Delete a model/runtime file from disk */
   deleteFile(filename: string): boolean {
     // Safety: only known model/runtime extensions
-    if (!filename.endsWith('.gguf') && !filename.endsWith('.onnx') && !filename.endsWith('.safetensors') && !filename.endsWith('.dll')) {
-      throw new Error('Can only delete .gguf, .onnx, .safetensors, or .dll files');
+    if (!filename.endsWith('.gguf') && !filename.endsWith('.onnx') && !filename.endsWith('.safetensors') && !filename.endsWith('.dll') && !filename.endsWith('.bin')) {
+      throw new Error('Can only delete .gguf, .onnx, .safetensors, .bin, or .dll files');
     }
 
     // For DLLs, check engine directory

@@ -26,10 +26,10 @@ function formatSize(bytes: number): string {
 
 export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
   const { t } = useTranslation();
-  const { registry, loading, error, refresh, getPackFiles, installedFiles } = useModelRegistry();
+  const { registry, loading, error, refresh, silentRefresh, getPackFiles, installedFiles } = useModelRegistry();
 
   const { jobs, hasActiveDownloads } = useDownloadStream({
-    onComplete: refresh,
+    onComplete: silentRefresh,
   });
 
   // ── Actions ─────────────────────────────────────────────────
@@ -71,11 +71,11 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
   const handleDelete = useCallback(async (filename: string) => {
     try {
       await modelManagerApi.deleteFile(filename);
-      refresh();
+      silentRefresh();
     } catch (err: any) {
       console.error('[ModelManager] Delete failed:', err);
     }
-  }, [refresh]);
+  }, [silentRefresh]);
 
   // ── Computed ────────────────────────────────────────────────
 
@@ -96,8 +96,8 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/20 dark:bg-black/40 dark:bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      {/* Backdrop — does NOT close on click; only the X button closes the modal */}
+      <div className="absolute inset-0 bg-black/20 dark:bg-black/40 dark:bg-black/70 backdrop-blur-sm" />
 
       {/* Modal */}
       <div className="relative w-full max-w-5xl max-h-[90vh] mt-[5vh] mx-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 shadow-2xl flex flex-col overflow-hidden">
