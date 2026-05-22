@@ -145,7 +145,16 @@ static std::string config_json_classify(const char * json_path) {
         if (arch == "Qwen3ForCausalLM") {
             result = "LM";
         } else if (arch == "Qwen3Model") {
-            result = "Text-Enc";
+            // Qwen3Model is used by both Text Encoder AND some LM variants
+            // (e.g. 1.7B LM). Discriminate by vocab_size:
+            //   Text Encoder: 151669 (standard Qwen3 vocab)
+            //   LM:           217204 (extended with music tokens)
+            int vocab_size = 0;
+            yyjson_val * vs = yyjson_obj_get(root, "vocab_size");
+            if (vs && yyjson_is_int(vs)) {
+                vocab_size = (int) yyjson_get_int(vs);
+            }
+            result = (vocab_size > 200000) ? "LM" : "Text-Enc";
         }
     }
 
