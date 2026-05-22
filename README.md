@@ -1,6 +1,6 @@
 # HOT-Step CPP
 
-A feature-rich UI for [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) — local AI music generation powered by GGML.
+A feature-rich UI for [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) — local AI music generation powered by GGML, with native safetensors support.
 
 Describe a song with a text caption and lyrics, and get stereo 48kHz audio generated entirely on your local hardware. No cloud, no API keys, no subscriptions.
 
@@ -51,9 +51,9 @@ Pre-built portable releases — no installation required. Extract, run, done.
 
 ## Highlights
 
-HOT-Step CPP extends the base acestep.cpp engine with 80+ features across inference, audio processing, and creative tooling. Here are the big ones:
+HOT-Step CPP extends the base acestep.cpp engine with 100+ features across inference, audio processing, and creative tooling. Here are the big ones:
 
-🎛️ **17 Solvers, 9 Schedulers, 7 Guidance Modes** — Fully extensible Lua plugin architecture for ODE/SDE solvers, noise schedulers, and guidance modes. Drop a `.lua` file into `engine/plugins/` and it appears in the UI at next launch — no C++ rebuild needed. Includes research-derived modes like CFG-MP (manifold projection), SMC-CFG (sliding mode control), and CFG-Zero⋆ (zero-init). Each plugin can expose its own user-facing parameters (sliders, toggles, dropdowns). **[Create your own →](docs/PLUGINS.md)**
+🎛️ **17 Solvers, 9 Schedulers, 7 Guidance Modes, Postprocess Plugins** — Fully extensible Lua plugin architecture for ODE/SDE solvers, noise schedulers, guidance modes, and postprocess pipelines. Drop a `.lua` file into `engine/plugins/` and it appears in the UI at next launch — no C++ rebuild needed. Includes research-derived modes like CFG-MP (manifold projection), SMC-CFG (sliding mode control), and CFG-Zero⋆ (zero-init). Each plugin can expose its own user-facing parameters (sliders, toggles, dropdowns). **[Create your own →](docs/PLUGINS.md)**
 
 🎸 **LoRA Adapters with Runtime Mode** — Per-group scale controls (self_attn, cross_attn, mlp, cond_embed), K-quant GPU support via custom CUDA kernels, and a runtime LoRA mode that applies deltas in the forward pass without permanently merging weights.
 
@@ -65,7 +65,7 @@ HOT-Step CPP extends the base acestep.cpp engine with 80+ features across infere
 
 🔌 **VST3 Host** — Scan, load, and run your existing VST3 plugins directly in the generation pipeline. Offline processing and real-time WASAPI monitor mode with transport controls. **Note:** VST plugins run in a single-input pipeline with no external sidechain bus. Plugins that require an external key signal (sidechain compressors, keyed gates, duckers) will not trigger — use plugins in their internal detection mode instead.
 
-✍️ **Lyric Studio** — A complete AI-powered lyrics and music workspace. 6 LLM providers (Gemini, LM Studio, OpenAI-compatible), artist profiles with adapter presets, statistical lyric analysis, bulk generation with "Fill to N" mode, and full parameter parity with the Create page.
+✍️ **Lyric Studio** — A complete AI-powered lyrics and music workspace. 7 LLM providers (Gemini, LM Studio, OpenAI-compatible), artist profiles with adapter presets, statistical lyric analysis, bulk generation with "Fill to N" mode, and full parameter parity with the Create page.
 
 🎤 **Cover Studio** — Upload a reference track, get Essentia-based analysis (BPM, key, energy, timbre), and generate style-matched covers. Artist-optional workflow with editable style descriptions, pitch shift with key transposition preview, tempo scaling, stem separation + recombination, and per-album adapter presets.
 
@@ -86,6 +86,12 @@ HOT-Step CPP extends the base acestep.cpp engine with 80+ features across infere
 📥 **In-App Model Manager** — Browse 100+ GGUF models across 5 HuggingFace repos, download with curated starter packs, and manage your model library without leaving the app. Concurrent resumable downloads with real-time progress.
 
 🧬 **PP-VAE & ScragVAE** — Two custom VAE models. PP-VAE runs a neural encode→decode polish pass on generated audio to smooth spectral artifacts. ScragVAE is a fine-tuned decoder with improved high-frequency energy and dynamic range — both selectable at runtime.
+
+📦 **Safetensors Model Support** — Load HuggingFace-format safetensors models alongside GGUF. Drop a model folder into the models directory and it appears in the UI with a format badge. Supports DiT, LM, Text Encoder, and VAE. BF16 safetensors produce bit-perfect output vs BF16 GGUF. Adapters (LoRA) work with both base model formats.
+
+🎨 **Repaint Studio** — Region-based audio regeneration. Select a section of a track via waveform click-drag, edit synchronized lyrics, and regenerate just that portion while preserving the rest. Fix problematic sections without re-generating the entire song.
+
+🔄 **A/B Comparison** — Dual-track playback for comparing two generations side by side. Global A/B mini-bar above the player persists across views for quick cross-page comparison.
 
 👉 **[See the full feature list →](FEATURES.md)**
 
