@@ -302,18 +302,16 @@ export async function transcribeWithWhisper(
   const language = options.language ?? 'auto';
 
   // Build CLI args
-  //   --dtw:           compute token-level timestamps via Dynamic Time Warping (word-level!)
   //   --split-on-word: split segments at word boundaries, not BPE token boundaries
+  //   --max-len 1:     with --split-on-word, this gives exactly 1 word per segment
   //   --suppress-nst:  suppress non-speech tokens (reduces hallucination in silence)
   //   --no-fallback:   don't retry with higher temperature (reduces hallucination)
-  const modelBasename = path.basename(modelPath, '.bin').replace('ggml-', '');
   const args: string[] = [
     '-m', modelPath,
     '-f', audioPath,
     '-oj',                    // output JSON (writes <input>.json sidecar)
-    '--dtw', modelBasename,   // token-level timestamps via DTW (e.g. 'large-v3-turbo')
     '--split-on-word',        // split at word boundaries, not BPE tokens
-    '--max-len', '0',         // no max segment length (natural sentence boundaries)
+    '--max-len', '1',         // with --split-on-word: 1 word per segment
     '--beam-size', String(beamSize),
     '--no-prints',            // suppress progress to stderr
     '--suppress-nst',         // suppress non-speech tokens
