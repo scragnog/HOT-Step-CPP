@@ -235,13 +235,23 @@ export function reconcileLyrics(
     }
   }
 
-  // 2. Extract source words — strip section markers, split on whitespace
-  const sourceWords: string[] = sourceLyrics
+  // 2. Extract source words, preserving line structure
+  //    sourceLineIdx[i] = which source line word i belongs to
+  const sourceLines = sourceLyrics
     .split('\n')
     .map(line => line.trim())
-    .filter(line => line.length > 0 && !SECTION_MARKER.test(line))
-    .flatMap(line => line.split(/\s+/))
-    .filter(word => word.length > 0);
+    .filter(line => line.length > 0 && !SECTION_MARKER.test(line));
+
+  const sourceWords: string[] = [];
+  const sourceLineIdx: number[] = [];  // maps word index → source line number
+
+  for (let lineNum = 0; lineNum < sourceLines.length; lineNum++) {
+    const words = sourceLines[lineNum].split(/\s+/).filter(w => w.length > 0);
+    for (const w of words) {
+      sourceLineIdx.push(lineNum);
+      sourceWords.push(w);
+    }
+  }
 
   // 3. Build whisper text array for alignment
   const whisperTexts = whisperWords.map(w => w.word);
@@ -249,8 +259,11 @@ export function reconcileLyrics(
   // 4. Run Needleman-Wunsch alignment
   const aligned = needlemanWunsch(sourceWords, whisperTexts);
 
-  // 5. Build merged word list
-  const mergedWords: LyricsWord[] = [];
+  // 5. Build merged word list, carrying source line index
+  interface MergedWord extends LyricsWord {
+    srcLine: number;  // -1 for ad-lib/whisper-only words
+  }
+  const mergedWords: MergedWord[] = [];
 
   for (const pair of aligned) {
     if (pair.sourceIdx !== null && pair.whisperIdx !== null && pair.score > 0) {
@@ -262,6 +275,7 @@ export function reconcileLyrics(
         end: ww.end,
         confidence: ww.probability ?? 1,
         source: 'matched',
+        srcLine: sourceLineIdx[pair.sourceIdx],
       });
     } else if (pair.sourceIdx !== null && pair.whisperIdx !== null && pair.score <= 0) {
       // Mismatched pair: use whisper text + timing
@@ -272,6 +286,7 @@ export function reconcileLyrics(
         end: ww.end,
         confidence: ww.probability ?? 0,
         source: 'whisper',
+        srcLine: sourceLineIdx[pair.sourceIdx],
       });
     } else if (pair.sourceIdx === null && pair.whisperIdx !== null) {
       // Ad-lib: whisper heard something not in source
@@ -282,32 +297,45 @@ export function reconcileLyrics(
         end: ww.end,
         confidence: ww.probability ?? 0,
         source: 'ad-lib',
+        srcLine: -1,  // no source line
       });
     }
     // pair.whisperIdx === null → source word with no whisper match → drop
   }
 
-  // 6. Group words into lines
-  //    Split on: gap > 1.5s between consecutive words, or line >= 15 words
+  // 6. Group words into lines using source line boundaries
+  //    Primary break: when source line index changes
+  //    Secondary break: timing gap > threshold, or line too long
   const lines: LyricsLine[] = [];
 
   if (mergedWords.length === 0) {
     return { version: 1, method: 'whisper', whisperModel, vocalsIsolated, lines: [] };
   }
 
-  let currentWords: LyricsWord[] = [mergedWords[0]];
+  let currentWords: LyricsWord[] = [stripSrcLine(mergedWords[0])];
+  let currentSrcLine = mergedWords[0].srcLine;
 
   for (let i = 1; i < mergedWords.length; i++) {
     const prev = mergedWords[i - 1];
     const curr = mergedWords[i];
     const gap = curr.start - prev.end;
 
-    if (gap > LINE_GAP_THRESHOLD_S || currentWords.length >= LINE_MAX_WORDS) {
-      // Flush current line
+    // Break at source line boundary (when the source line changes)
+    const srcLineChanged = curr.srcLine !== -1 && currentSrcLine !== -1 && curr.srcLine !== currentSrcLine;
+    // Also break on large timing gaps or very long lines
+    const timingBreak = gap > LINE_GAP_THRESHOLD_S;
+    const lengthBreak = currentWords.length >= LINE_MAX_WORDS;
+
+    if (srcLineChanged || timingBreak || lengthBreak) {
       lines.push(buildLine(currentWords));
-      currentWords = [curr];
+      currentWords = [stripSrcLine(curr)];
+      currentSrcLine = curr.srcLine;
     } else {
-      currentWords.push(curr);
+      currentWords.push(stripSrcLine(curr));
+      // Track source line — ad-lib words (-1) inherit from the current line
+      if (curr.srcLine !== -1) {
+        currentSrcLine = curr.srcLine;
+      }
     }
   }
 
@@ -323,6 +351,15 @@ export function reconcileLyrics(
     vocalsIsolated,
     lines,
   };
+}
+
+// ──────────────────────────────────────────────
+// Strip internal srcLine field before outputting
+// ──────────────────────────────────────────────
+
+function stripSrcLine(word: LyricsWord & { srcLine?: number }): LyricsWord {
+  const { srcLine, ...rest } = word as any;
+  return rest;
 }
 
 // ──────────────────────────────────────────────
