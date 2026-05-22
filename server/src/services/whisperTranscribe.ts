@@ -302,16 +302,18 @@ export async function transcribeWithWhisper(
   const language = options.language ?? 'auto';
 
   // Build CLI args
-  //   --split-on-word: split segments at word boundaries, not BPE token boundaries
-  //   --max-len 1:     with --split-on-word, this gives exactly 1 word per segment
-  //   NOTE: --no-fallback removed — it causes repetition loops when decoder gets stuck
-  //   NOTE: --suppress-nst removed — too aggressive, interferes with decoding
+  //   --split-on-word:  split segments at word boundaries, not BPE token boundaries
+  //   --max-len 50:     phrase-level segments (~5-8 words). Short enough for decent
+  //                     per-word interpolation, long enough for stable timestamp anchors.
+  //   NOTE: --prompt removed — vocabulary priming seeds hallucinations during instrumentals.
+  //         The reconciliation service handles word matching post-hoc instead.
+  //   NOTE: --no-fallback removed — causes repetition loops when decoder gets stuck.
   const args: string[] = [
     '-m', modelPath,
     '-f', audioPath,
     '-oj',                    // output JSON (writes <input>.json sidecar)
     '--split-on-word',        // split at word boundaries, not BPE tokens
-    '--max-len', '1',         // with --split-on-word: 1 word per segment
+    '--max-len', '50',        // phrase-level segments for stable timestamps
     '--beam-size', String(beamSize),
     '--no-prints',            // suppress progress to stderr
   ];
@@ -321,11 +323,10 @@ export async function transcribeWithWhisper(
     args.push('--language', language);
   }
 
-  // Vocabulary priming prompt from source lyrics
-  const prompt = stripSectionMarkers(sourceLyrics);
-  if (prompt.length > 0) {
-    args.push('--prompt', prompt);
-  }
+  // NOTE: We intentionally do NOT pass --prompt with source lyrics.
+  // While it helps whisper recognise vocabulary, it also causes hallucinations
+  // during instrumental sections (whisper fills silence with prompted text).
+  // The Needleman-Wunsch reconciliation handles vocabulary alignment post-hoc.
 
   // whisper.cpp -oj writes JSON to <audioPath>.json
   const jsonOutputPath = audioPath + '.json';
