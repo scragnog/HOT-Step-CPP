@@ -366,7 +366,7 @@ static bool qwen3_load_text_encoder(Qwen3GGML * m, const char * gguf_path) {
         }
         ws.is_st = true;
         ws.sm = &sm;
-        ws.name_prefix = "model.";  // HF text encoder has model. prefix
+        ws.name_prefix = "";  // Qwen3-Embedding has no prefix (bare tensor names)
 
         // Read config from config.json sidecar (inline to avoid config-json.h include ordering issues)
         std::string cfg_path = std::string(gguf_path) + WS_SEP + "config.json";
