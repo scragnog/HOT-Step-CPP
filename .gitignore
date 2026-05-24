@@ -8,6 +8,7 @@ build/
 
 # Data (local, not committed)
 server/data/
+server/server/data/
 *.db
 *.db-shm
 *.db-wal

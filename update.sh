@@ -322,7 +322,7 @@ fi
 
 # --- UI build ---
 echo "  Building UI..."
-(cd ui && npm run build) || echo -e "  ${YELLOW}WARNING: UI build had issues.${NC}"
+(cd ui && npx vite build) || echo -e "  ${YELLOW}WARNING: UI build had issues.${NC}"
 echo "  UI build complete."
 
 # ── Phase 5: Validation & Report ─────────────────────────────────────
