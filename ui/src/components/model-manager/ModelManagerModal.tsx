@@ -26,7 +26,7 @@ function formatSize(bytes: number): string {
 
 export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
   const { t } = useTranslation();
-  const { registry, loading, error, refresh, silentRefresh, getPackFiles, installedFiles } = useModelRegistry();
+  const { registry, loading, error, silentRefresh, getPackFiles, installedFiles } = useModelRegistry();
 
   const { jobs, hasActiveDownloads } = useDownloadStream({
     onComplete: silentRefresh,
