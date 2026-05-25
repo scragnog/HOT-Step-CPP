@@ -1059,7 +1059,7 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <div className={`flex flex-col h-screen bg-white dark:bg-suno text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-all duration-300 ${discoMode ? 'disco-hue-drift' : ''}`}>
+    <div className="flex flex-col h-screen bg-white dark:bg-suno text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-all duration-300">
       {/* Global Parameter Bar — full width, above everything */}
       <GlobalParamBar />
 
