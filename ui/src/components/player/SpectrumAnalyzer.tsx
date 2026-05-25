@@ -33,7 +33,10 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
 
   // Initialize analyzer — only once per media element, never destroy
   useEffect(() => {
-    if (!containerRef.current || !mediaElement) return;
+    if (!containerRef.current || !mediaElement) {
+      console.log('[SpectrumAnalyzer] Skip init: container=', !!containerRef.current, 'media=', !!mediaElement);
+      return;
+    }
 
     // Already connected to this element — nothing to do
     if (analyzerRef.current && connectedElementRef.current === mediaElement) return;
@@ -51,6 +54,7 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
       }
       connectedElementRef.current = mediaElement;
       registerAudioMotion(analyzerRef.current);
+      console.log('[SpectrumAnalyzer] Reconnected + registered audioMotion');
       return;
     }
 
@@ -77,6 +81,7 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
       analyzerRef.current = analyzer;
       connectedElementRef.current = mediaElement;
       registerAudioMotion(analyzer);
+      console.log('[SpectrumAnalyzer] Created + registered audioMotion');
     } catch (err) {
       console.error('[SpectrumAnalyzer] Failed to initialize:', err);
     }

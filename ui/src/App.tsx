@@ -293,7 +293,7 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     const el = getActiveMediaElement();
     if (el) setSpectrumMediaEl(el);
-  }, [playMastered, currentTrack]);
+  }, [playMastered, currentTrack, isPlaying]);
 
   // Sync disco beat detection loop with playback state
   useEffect(() => {
