@@ -1,7 +1,7 @@
 // DiscoPulseWrapper.tsx — Beat-reactive panel wrapper for disco mode.
 //
 // Wraps a UI panel to apply scale transform + multi-coloured INSET box-shadow
-// glow that pulses with the kick drum frequency. Uses inset shadows because
+// glow that pulses with kick drum transients. Uses inset shadows because
 // regular box-shadow is clipped by overflow:hidden on parent containers.
 //
 // Uses direct DOM style manipulation (via ref) to avoid React re-renders at
@@ -40,7 +40,7 @@ export const DiscoPulseWrapper: React.FC<DiscoPulseWrapperProps> = ({
     const el = wrapperRef.current;
     if (!el) return;
 
-    if (!discoMode || pulseIntensity < 0.01) {
+    if (!discoMode || pulseIntensity < 0.005) {
       el.style.transform = '';
       el.style.boxShadow = '';
       el.style.filter = '';
@@ -68,7 +68,6 @@ export const DiscoPulseWrapper: React.FC<DiscoPulseWrapperProps> = ({
       className={`disco-pulse-wrapper ${className}`}
       style={{
         ...style,
-        // Apply stagger as CSS transition-delay — clean, no JS timer spam
         transitionDelay: staggerMs > 0 ? `${staggerMs}ms` : undefined,
       }}
       data-disco-active={discoMode || undefined}
@@ -81,26 +80,24 @@ export const DiscoPulseWrapper: React.FC<DiscoPulseWrapperProps> = ({
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function applyPulse(el: HTMLElement, intensity: number, color: string): void {
-  // Scale: 1.0 → 1.025 at full intensity (2.5% — clearly visible)
-  const scale = 1 + intensity * 0.025;
+  // Scale: 1.0 → 1.04 at full intensity (4% — clearly visible pop)
+  const scale = 1 + intensity * 0.04;
   el.style.transform = `scale(${scale})`;
 
   // INSET multi-layer glow — not clipped by overflow:hidden on parents!
-  // Three concentric inset layers: tight inner + mid spread + wide ambient
-  const tight = Math.round(6 * intensity);
-  const mid = Math.round(16 * intensity);
-  const wide = Math.round(30 * intensity);
+  const tight = Math.round(8 * intensity);
+  const mid = Math.round(20 * intensity);
+  const wide = Math.round(40 * intensity);
   el.style.boxShadow = [
-    `inset 0 0 ${tight}px 0 ${color}`,
-    `inset 0 0 ${mid}px 0 ${hexToRgba(color, 0.5)}`,
-    `inset 0 0 ${wide}px 0 ${hexToRgba(color, 0.2)}`,
-    // Also add a small outer glow for panels NOT inside overflow:hidden
-    `0 0 ${Math.round(8 * intensity)}px 0 ${hexToRgba(color, 0.4)}`,
+    `inset 0 0 ${tight}px ${Math.round(2 * intensity)}px ${color}`,
+    `inset 0 0 ${mid}px ${Math.round(4 * intensity)}px ${hexToRgba(color, 0.45)}`,
+    `inset 0 0 ${wide}px ${Math.round(6 * intensity)}px ${hexToRgba(color, 0.15)}`,
+    // Outer glow for edge-positioned panels (player bar, sidebar edges)
+    `0 0 ${Math.round(12 * intensity)}px ${Math.round(2 * intensity)}px ${hexToRgba(color, 0.5)}`,
   ].join(', ');
 
-  // Combined filter: brightness pulse + slow hue rotation for colour drift
-  const brightness = 1 + intensity * 0.08;
-  // Slow sinusoidal hue drift: ±15° over ~8 seconds
+  // Combined filter: brightness pop + slow hue drift
+  const brightness = 1 + intensity * 0.15;
   const hueShift = Math.sin(performance.now() / 4000) * 15;
   el.style.filter = `brightness(${brightness}) hue-rotate(${hueShift.toFixed(1)}deg)`;
 }

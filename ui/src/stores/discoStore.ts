@@ -2,7 +2,8 @@
 //
 // Uses the same useSyncExternalStore pattern as playbackStore.
 // Reads kick drum energy from the registered audioMotion-analyzer instance
-// via getEnergy(60, 150). No new AudioContext or AnalyserNode needed.
+// via getEnergy(60, 150). Uses onset detection (not raw energy level) to
+// detect actual beat hits — the pulse spikes on kick transients and decays fast.
 
 import { useSyncExternalStore, useRef, useCallback } from 'react';
 
@@ -10,7 +11,7 @@ import { useSyncExternalStore, useRef, useCallback } from 'react';
 
 interface DiscoState {
   discoMode: boolean;
-  pulseIntensity: number;  // 0.0–1.0, smoothed kick energy
+  pulseIntensity: number;  // 0.0–1.0, onset-detected pulse
 }
 
 // ── localStorage ─────────────────────────────────────────────────────────────
@@ -31,8 +32,6 @@ function saveDiscoPrefs(discoMode: boolean): void {
 
 // ── audioMotion Registration ─────────────────────────────────────────────────
 
-// Holds a reference to the audioMotion-analyzer instance from SpectrumAnalyzer.
-// We call getEnergy() on it — no new AudioContext or AnalyserNode needed.
 let _audioMotion: any = null;
 
 export function registerAudioMotion(instance: any): void {
@@ -74,20 +73,29 @@ function getSnapshot(): DiscoState {
   return _state;
 }
 
-// ── Beat Detection Loop ──────────────────────────────────────────────────────
+// ── Beat Detection Loop (Onset Detection) ────────────────────────────────────
 
 let _rafId: number | null = null;
-let _smoothedEnergy = 0;
 let _lastFrameTime = 0;
 let _debugFrameCount = 0;
 
-// Envelope follower parameters
-const ATTACK_MS = 30;    // Fast attack — snappy response to beat hits
-const DECAY_MS = 180;    // Slow decay — organic release
+// Onset detection state
+let _runningAvg = 0;         // Slow-moving average of bass energy
+let _pulse = 0;              // Current pulse value (0–1), decays per frame
+let _lastHitTime = 0;        // Prevent double-triggers within refractory period
+
+// Tuning knobs
+const AVG_SMOOTHING = 0.93;  // How slow the running average adapts (higher = slower)
+const ONSET_MULT = 1.4;      // Energy must exceed avg * this to trigger a hit
+const ONSET_FLOOR = 0.08;    // Minimum absolute delta to count as a hit
+const REFRACTORY_MS = 80;    // Min ms between hits (prevents double-triggers)
+const DECAY_RATE = 0.88;     // Per-frame decay (lower = faster drop) — ~150ms to near-zero at 60fps
+const HIT_STRENGTH = 2.5;    // Multiplier on the delta to scale the pulse spike
 
 function beatDetectionLoop(timestamp: number): void {
   if (!_state.discoMode) {
     _rafId = null;
+    _pulse = 0;
     setState({ pulseIntensity: 0 });
     return;
   }
@@ -98,34 +106,40 @@ function beatDetectionLoop(timestamp: number): void {
   let rawEnergy = 0;
   if (_audioMotion) {
     try {
-      // getEnergy() with two numeric args returns average energy in that Hz range
       rawEnergy = _audioMotion.getEnergy(60, 150) ?? 0;
     } catch {
       rawEnergy = 0;
     }
   }
 
-  // Debug: log once per second so we can verify values are coming through
+  // Update running average (slow-moving baseline)
+  _runningAvg = _runningAvg * AVG_SMOOTHING + rawEnergy * (1 - AVG_SMOOTHING);
+
+  // Onset detection: is current energy significantly above the running average?
+  const delta = rawEnergy - _runningAvg;
+  const threshold = _runningAvg * (ONSET_MULT - 1) + ONSET_FLOOR;
+  const timeSinceHit = timestamp - _lastHitTime;
+
+  if (delta > threshold && timeSinceHit > REFRACTORY_MS) {
+    // HIT! Spike the pulse proportional to how much we exceeded the threshold
+    const hitIntensity = Math.min(1.0, (delta / threshold) * HIT_STRENGTH * 0.5);
+    _pulse = Math.max(_pulse, hitIntensity);
+    _lastHitTime = timestamp;
+  }
+
+  // Decay the pulse each frame
+  _pulse *= DECAY_RATE;
+  if (_pulse < 0.01) _pulse = 0;
+
+  // Debug: log once per second
   _debugFrameCount++;
   if (_debugFrameCount % 60 === 0) {
-    console.log(`[Disco] raw=${rawEnergy.toFixed(3)} smoothed=${_smoothedEnergy.toFixed(3)} audioMotion=${!!_audioMotion}`);
+    console.log(`[Disco] raw=${rawEnergy.toFixed(3)} avg=${_runningAvg.toFixed(3)} delta=${delta.toFixed(3)} pulse=${_pulse.toFixed(3)}`);
   }
 
-  // Envelope follower: fast attack, slow decay
-  if (rawEnergy > _smoothedEnergy) {
-    const attackFactor = 1 - Math.exp(-dt / ATTACK_MS);
-    _smoothedEnergy += (rawEnergy - _smoothedEnergy) * attackFactor;
-  } else {
-    const decayFactor = 1 - Math.exp(-dt / DECAY_MS);
-    _smoothedEnergy += (rawEnergy - _smoothedEnergy) * decayFactor;
-  }
-
-  // Clamp to 0–1
-  const intensity = Math.max(0, Math.min(1, _smoothedEnergy));
-
-  // Only notify if meaningfully changed (avoid excess re-renders)
-  if (Math.abs(intensity - _state.pulseIntensity) > 0.005) {
-    _state = { ..._state, pulseIntensity: intensity };
+  // Only notify if meaningfully changed
+  if (Math.abs(_pulse - _state.pulseIntensity) > 0.005) {
+    _state = { ..._state, pulseIntensity: _pulse };
     notify();
   }
 
@@ -135,7 +149,10 @@ function beatDetectionLoop(timestamp: number): void {
 function startLoop(): void {
   if (_rafId !== null) return;
   _lastFrameTime = 0;
-  _smoothedEnergy = 0;
+  _runningAvg = 0;
+  _pulse = 0;
+  _lastHitTime = 0;
+  _debugFrameCount = 0;
   _rafId = requestAnimationFrame(beatDetectionLoop);
 }
 
@@ -144,7 +161,8 @@ function stopLoop(): void {
     cancelAnimationFrame(_rafId);
     _rafId = null;
   }
-  _smoothedEnergy = 0;
+  _pulse = 0;
+  _runningAvg = 0;
   setState({ pulseIntensity: 0 });
 }
 
@@ -164,10 +182,6 @@ export function toggleDiscoMode(): void {
   setDiscoMode(!_state.discoMode);
 }
 
-/**
- * Called by App.tsx when isPlaying changes — starts/stops the rAF loop
- * so we don't waste CPU when nothing is playing.
- */
 export function setDiscoPlaying(isPlaying: boolean): void {
   if (_state.discoMode && isPlaying) {
     startLoop();
@@ -194,12 +208,10 @@ export function useDiscoSelector<T>(selector: (state: DiscoState) => T): T {
   return useSyncExternalStore(subscribe, getSelectedSnapshot);
 }
 
-/** Convenience: get just the pulse intensity (updates ~60fps when active) */
 export function usePulseIntensity(): number {
   return useDiscoSelector(s => s.pulseIntensity);
 }
 
-/** Convenience: get disco mode on/off */
 export function useDiscoMode(): boolean {
   return useDiscoSelector(s => s.discoMode);
 }
