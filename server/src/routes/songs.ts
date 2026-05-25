@@ -701,6 +701,21 @@ async function extractDrumStemsBackground(songId: string, aceJobId: string, aceU
       getDb().prepare('UPDATE songs SET disco_data_url = ? WHERE id = ?')
         .run(discoDataUrl, songId);
       console.log(`[DrumStems] Song ${songId}: disco data saved → ${discoDataUrl}`);
+
+      // Clean up stem WAV files — disco JSON has all the data we need
+      for (const stemUrl of [kickUrl, snareUrl, hihatUrl]) {
+        if (!stemUrl) continue;
+        const stemPath = path.join(config.data.audioDir, path.basename(stemUrl));
+        try {
+          if (fs.existsSync(stemPath)) {
+            fs.unlinkSync(stemPath);
+            console.log(`[DrumStems] Song ${songId}: deleted ${path.basename(stemUrl)}`);
+          }
+        } catch { /* non-fatal */ }
+      }
+      // Clear stem URLs from DB — files no longer exist
+      getDb().prepare('UPDATE songs SET kick_stem_url = \'\', snare_stem_url = \'\', hihat_stem_url = \'\' WHERE id = ?')
+        .run(songId);
     }
   } catch (err: any) {
     console.error(`[DrumStems] Song ${songId}: disco analysis failed (non-fatal):`, err.message);
