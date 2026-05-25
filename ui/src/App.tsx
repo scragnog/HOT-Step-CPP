@@ -268,17 +268,17 @@ const AppContent: React.FC = () => {
   const wavesurferAltRef = useRef<WaveformPlayerHandle>(null);
   const discoMode = useDiscoMode();
 
-  // Disco glow colour assignments per panel
+  // Disco hue assignments per panel (0-360)
   const DISCO = {
-    sidebar:      '#39ff14',
-    createPanel:  '#ff1493',
-    songGrid:     '#00bfff',
-    activity:     '#a855f7',
-    playlist:     '#ff6b35',
-    assistant:    '#00fff5',
-    terminal:     '#00ff41',
-    player:       '#ffd700',
-    rightSidebar: '#ff00ff',
+    sidebar:      120,  // green
+    createPanel:  330,  // hot pink
+    songGrid:     195,  // deep sky blue
+    activity:     270,  // purple
+    playlist:     20,   // orange
+    assistant:    175,  // cyan
+    terminal:     135,  // green
+    player:       45,   // gold
+    rightSidebar: 300,  // magenta
   };
 
   // Register WaveSurfer ref objects with playback store.
@@ -605,7 +605,7 @@ const AppContent: React.FC = () => {
       return (
         <div className="flex flex-1 overflow-hidden">
           {/* Insta-Gen Panel — resizable */}
-          <DiscoPulseWrapper glowColor={DISCO.createPanel} staggerMs={25}
+          <DiscoPulseWrapper hue={DISCO.createPanel}
             className="flex-shrink-0 h-full border-r border-zinc-200 dark:border-white/5"
             style={{ width: createPanelWidth }}
           >
@@ -643,7 +643,7 @@ const AppContent: React.FC = () => {
           </div>
 
           {/* Song List — "Generations" (filtered to insta-gen only) */}
-          <DiscoPulseWrapper glowColor={DISCO.songGrid} staggerMs={50} className="flex-1 min-w-0 overflow-y-auto">
+          <DiscoPulseWrapper hue={DISCO.songGrid} className="flex-1 min-w-0 overflow-y-auto">
             <SongList
               songs={songs.filter(s => getSongSource(s) === 'insta-gen')}
               currentSongId={currentSong?.id}
@@ -699,7 +699,7 @@ const AppContent: React.FC = () => {
             <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
           </div>
           {/* Activity Sidebar — Recent Songs + Queue */}
-          <DiscoPulseWrapper glowColor={DISCO.activity} staggerMs={75} className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden" style={{ width: activitySidebarWidth }}>
+          <DiscoPulseWrapper hue={DISCO.activity} className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden" style={{ width: activitySidebarWidth }}>
             <ActivitySidebar
               source="insta-gen"
               showToast={showToast}
@@ -760,7 +760,7 @@ const AppContent: React.FC = () => {
     if (activeView === 'library') {
       return (
         <div className="flex flex-1 overflow-hidden">
-          <DiscoPulseWrapper glowColor={DISCO.songGrid} staggerMs={50} className="flex-1 min-w-0 overflow-y-auto">
+          <DiscoPulseWrapper hue={DISCO.songGrid} className="flex-1 min-w-0 overflow-y-auto">
             <SongList
               songs={songs}
               currentSongId={currentSong?.id}
@@ -840,7 +840,7 @@ const AppContent: React.FC = () => {
     return (
       <div className="flex flex-1 overflow-hidden">
         {/* Create Panel — resizable */}
-        <DiscoPulseWrapper glowColor={DISCO.createPanel} staggerMs={25} className="flex-shrink-0 h-full border-r border-zinc-200 dark:border-white/5" style={{ width: createPanelWidth }}>
+        <DiscoPulseWrapper hue={DISCO.createPanel} className="flex-shrink-0 h-full border-r border-zinc-200 dark:border-white/5" style={{ width: createPanelWidth }}>
           <CreatePanel
             onGenerate={handleGenerate}
             activeJobCount={activeJobCount}
@@ -875,7 +875,7 @@ const AppContent: React.FC = () => {
         </div>
 
         {/* Song List + Queue (filtered to create/custom-gen only) */}
-        <DiscoPulseWrapper glowColor={DISCO.songGrid} staggerMs={50} className="flex-1 min-w-0 overflow-y-auto">
+        <DiscoPulseWrapper hue={DISCO.songGrid} className="flex-1 min-w-0 overflow-y-auto">
           <SongList
             songs={songs.filter(s => getSongSource(s) === 'create')}
             currentSongId={currentSong?.id}
@@ -931,7 +931,7 @@ const AppContent: React.FC = () => {
           <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
         </div>
         {/* Activity Sidebar — Recent Songs + Queue */}
-        <DiscoPulseWrapper glowColor={DISCO.activity} staggerMs={75} className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden" style={{ width: activitySidebarWidth }}>
+        <DiscoPulseWrapper hue={DISCO.activity} className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden" style={{ width: activitySidebarWidth }}>
           <ActivitySidebar
             source="create"
             showToast={showToast}
@@ -995,7 +995,7 @@ const AppContent: React.FC = () => {
       <GlobalParamBar />
 
       <div className="flex-1 flex overflow-hidden">
-        <DiscoPulseWrapper glowColor={DISCO.sidebar} staggerMs={0}>
+        <DiscoPulseWrapper hue={DISCO.sidebar}>
         <Sidebar
           activeView={activeView}
           onViewChange={navigateTo}
@@ -1065,7 +1065,7 @@ const AppContent: React.FC = () => {
             >
               <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
             </div>
-            <DiscoPulseWrapper glowColor={DISCO.playlist} staggerMs={100}
+            <DiscoPulseWrapper hue={DISCO.playlist}
               className="flex-shrink-0 h-full border-l border-zinc-200 dark:border-white/5"
               style={{ width: playlistWidth }}
             >
@@ -1101,7 +1101,7 @@ const AppContent: React.FC = () => {
             >
               <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-violet-400 transition-colors" />
             </div>
-            <DiscoPulseWrapper glowColor={DISCO.assistant} staggerMs={125}
+            <DiscoPulseWrapper hue={DISCO.assistant}
               className="flex-shrink-0 h-full border-l border-zinc-200 dark:border-white/5"
               style={{ width: assistantWidth }}
             >
@@ -1137,7 +1137,7 @@ const AppContent: React.FC = () => {
             >
               <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-emerald-400 transition-colors" />
             </div>
-            <DiscoPulseWrapper glowColor={DISCO.terminal} staggerMs={150}
+            <DiscoPulseWrapper hue={DISCO.terminal}
               className="flex-shrink-0 h-full border-l border-zinc-200 dark:border-white/5"
               style={{ width: terminalWidth }}
             >
@@ -1148,7 +1148,7 @@ const AppContent: React.FC = () => {
       </div>
 
       {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}
-      <DiscoPulseWrapper glowColor={DISCO.player} staggerMs={175} className="flex-shrink-0 bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-white/5">
+      <DiscoPulseWrapper hue={DISCO.player} className="flex-shrink-0 bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-white/5">
         {/* Collapsible visualisation area — animates up when playing, down when paused/stopped.
             Uses CSS Grid 0fr→1fr trick so the transition tracks actual content height perfectly,
             unlike max-height which over-shoots and makes the expand feel instant. */}

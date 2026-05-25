@@ -407,16 +407,80 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 /* ========================================
-   Disco Mode — Beat-Reactive Panel Pulsing
+   Disco Mode — iOS 18 Rainbow Border Glow
    ======================================== */
 
-.disco-pulse-wrapper {
-  transition: transform 0.05s ease-out, box-shadow 0.05s ease-out, filter 0.05s ease-out;
-  will-change: transform, box-shadow, filter;
-  transform-origin: center center;
+/* Wrapper: establishes stacking context for glow layers */
+.disco-wrapper {
+  position: relative;
+  isolation: isolate;
 }
 
-/* Smooth exit when disco mode is toggled off */
-.disco-pulse-wrapper:not([data-disco-active]) {
-  transition: transform 0.3s ease, box-shadow 0.3s ease, filter 0.3s ease;
+/* Content sits on top of glow layers */
+.disco-content {
+  position: relative;
+  z-index: 1;
 }
+
+/* Glow container: clips the spinning gradient to card bounds */
+.disco-glow {
+  position: absolute;
+  inset: -2px;
+  border-radius: 10px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  will-change: opacity, transform;
+}
+
+/* The spinning conic gradient — oversized + centered so it sweeps all edges */
+.disco-glow-bg {
+  --disco-hue: 145;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  width: 150%;
+  aspect-ratio: 1;
+  background: conic-gradient(
+    in oklch longer hue,
+    oklch(0.85 0.30 calc(var(--disco-hue) * 1deg)),
+    oklch(0.85 0.30 calc(var(--disco-hue) * 1deg))
+  );
+  animation: disco-spin 3s linear infinite;
+}
+
+/* Blurred white layer — creates the soft luminous edge bleed */
+.disco-white-clip {
+  position: absolute;
+  inset: 0;
+  background: white;
+  filter: blur(6px);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  will-change: opacity;
+}
+
+/* Dark mode: use a slightly dimmer white so it doesn't blast */
+.dark .disco-white-clip {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+@keyframes disco-spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+/* When disco is not active, ensure zero visual impact */
+.disco-wrapper:not(.disco-active) .disco-glow,
+.disco-wrapper:not(.disco-active) .disco-white-clip {
+  opacity: 0 !important;
+  transition: opacity 0.4s ease;
+}
+
