@@ -99,6 +99,8 @@ router.get('/recent', (req, res) => {
       mastered_audio_url: s.mastered_audio_url || '',
       latent_url: s.latent_url || '',
       kick_stem_url: s.kick_stem_url || '',
+      snare_stem_url: s.snare_stem_url || '',
+      hihat_stem_url: s.hihat_stem_url || '',
       cover_url: s.cover_url || '',
       duration: s.duration || 0,
       lyrics: s.lyrics || '',
@@ -234,12 +236,14 @@ router.delete('/:id', (req, res) => {
       fs.unlinkSync(latentFilepath);
     }
   }
-  // Delete kick stem file if it exists
-  if (song.kick_stem_url && !song.kick_stem_url.startsWith('extracting:')) {
-    const kickFilename = path.basename(song.kick_stem_url);
-    const kickFilepath = path.join(config.data.audioDir, kickFilename);
-    if (fs.existsSync(kickFilepath)) {
-      fs.unlinkSync(kickFilepath);
+  // Delete drum stem files if they exist
+  for (const stemUrl of [song.kick_stem_url, song.snare_stem_url, song.hihat_stem_url]) {
+    if (stemUrl && !stemUrl.startsWith('extracting:')) {
+      const stemFilename = path.basename(stemUrl);
+      const stemFilepath = path.join(config.data.audioDir, stemFilename);
+      if (fs.existsSync(stemFilepath)) {
+        fs.unlinkSync(stemFilepath);
+      }
     }
   }
 
@@ -507,9 +511,14 @@ router.post('/:id/extract-kick', async (req, res) => {
     if (!song) { res.status(404).json({ error: 'Song not found' }); return; }
     if (!song.audio_url) { res.status(400).json({ error: 'No audio file' }); return; }
 
-    // Already has a kick stem?
-    if (song.kick_stem_url) {
-      res.json({ status: 'exists', kickStemUrl: song.kick_stem_url });
+    // Already has all drum stems?
+    if (song.kick_stem_url && song.snare_stem_url && song.hihat_stem_url) {
+      res.json({
+        status: 'exists',
+        kickStemUrl: song.kick_stem_url,
+        snareStemUrl: song.snare_stem_url,
+        hihatStemUrl: song.hihat_stem_url,
+      });
       return;
     }
 
@@ -544,14 +553,14 @@ router.post('/:id/extract-kick', async (req, res) => {
       .run(`extracting:${aceJobId}`, req.params.id);
 
     console.log(`[KickExtract] Song ${req.params.id}: ace-server job ${aceJobId}`);
-    res.json({ status: 'started', aceJobId });
+    res.json({ status: 'started', aceJobId, stems: ['kick', 'snare', 'hihat'] });
 
     // Continue extraction in background (don't await in request handler)
-    extractKickBackground(req.params.id, aceJobId, ACE_URL).catch(err => {
+    extractDrumStemsBackground(req.params.id, aceJobId, ACE_URL).catch(err => {
       console.error(`[KickExtract] Background extraction failed for ${req.params.id}:`, err.message);
       // Clear the extracting status
-      getDb().prepare('UPDATE songs SET kick_stem_url = ? WHERE id = ?')
-        .run('', req.params.id);
+      getDb().prepare('UPDATE songs SET kick_stem_url = ?, snare_stem_url = ?, hihat_stem_url = ? WHERE id = ?')
+        .run('', '', '', req.params.id);
     });
   } catch (err: any) {
     console.error('[KickExtract] Error:', err.message);
@@ -559,7 +568,7 @@ router.post('/:id/extract-kick', async (req, res) => {
   }
 });
 
-async function extractKickBackground(songId: string, aceJobId: string, aceUrl: string): Promise<void> {
+async function extractDrumStemsBackground(songId: string, aceJobId: string, aceUrl: string): Promise<void> {
   // Poll until separation completes
   const MAX_POLLS = 3600; // 30 minutes max
   for (let i = 0; i < MAX_POLLS; i++) {
@@ -578,30 +587,52 @@ async function extractKickBackground(songId: string, aceJobId: string, aceUrl: s
   if (!resultRes.ok) throw new Error('Failed to fetch SuperSep result');
   const resultData = await resultRes.json() as { stems: Array<{ name: string; category: string; index: number; stage?: number; hidden?: boolean }> };
 
-  // Find the kick stem
-  const kickStem = resultData.stems.find(s => s.name.toLowerCase().includes('kick'));
-  if (!kickStem) {
-    console.warn(`[KickExtract] Song ${songId}: no kick stem found in results`);
-    getDb().prepare('UPDATE songs SET kick_stem_url = ? WHERE id = ?').run('', songId);
-    return;
+  // Helper: find, download, and save a stem
+  async function downloadStem(
+    stems: typeof resultData.stems,
+    matchFn: (name: string) => boolean,
+    suffix: string,
+    label: string,
+  ): Promise<string> {
+    const stem = stems.find(s => matchFn(s.name.toLowerCase()));
+    if (!stem) {
+      console.warn(`[DrumStems] Song ${songId}: no ${label} stem found`);
+      return '';
+    }
+    const stemRes = await fetch(`${aceUrl}/supersep/serve?id=${aceJobId}&stem=${stem.index}`);
+    if (!stemRes.ok) {
+      console.warn(`[DrumStems] Song ${songId}: failed to download ${label} stem`);
+      return '';
+    }
+    const buf = Buffer.from(await stemRes.arrayBuffer());
+    const filename = `${songId}_${suffix}.wav`;
+    fs.writeFileSync(path.join(config.data.audioDir, filename), buf);
+    console.log(`[DrumStems] Song ${songId}: ${label} stem saved (${(buf.length / 1024).toFixed(0)} KB)`);
+    return `/audio/${filename}`;
   }
 
-  // Download just the kick stem
-  const stemRes = await fetch(`${aceUrl}/supersep/serve?id=${aceJobId}&stem=${kickStem.index}`);
-  if (!stemRes.ok) throw new Error('Failed to download kick stem');
+  // Download all three drum stems
+  const kickUrl = await downloadStem(
+    resultData.stems,
+    name => name.includes('kick'),
+    'kick', 'kick',
+  );
+  const snareUrl = await downloadStem(
+    resultData.stems,
+    name => name.includes('snare'),
+    'snare', 'snare',
+  );
+  const hihatUrl = await downloadStem(
+    resultData.stems,
+    name => name.includes('hi-hat') || name.includes('hihat'),
+    'hihat', 'hi-hat',
+  );
 
-  const kickBuf = Buffer.from(await stemRes.arrayBuffer());
+  // Update DB with all stems at once
+  getDb().prepare('UPDATE songs SET kick_stem_url = ?, snare_stem_url = ?, hihat_stem_url = ? WHERE id = ?')
+    .run(kickUrl, snareUrl, hihatUrl, songId);
 
-  // Save alongside the song audio
-  const kickFilename = `${songId}_kick.wav`;
-  const kickPath = path.join(config.data.audioDir, kickFilename);
-  fs.writeFileSync(kickPath, kickBuf);
-
-  // Update DB
-  const kickUrl = `/audio/${kickFilename}`;
-  getDb().prepare('UPDATE songs SET kick_stem_url = ? WHERE id = ?').run(kickUrl, songId);
-
-  console.log(`[KickExtract] Song ${songId}: kick stem saved (${(kickBuf.length / 1024).toFixed(0)} KB)`);
+  console.log(`[DrumStems] Song ${songId}: all drum stems processed`);
 }
 
 
