@@ -44,6 +44,8 @@ let _kickFreqData: Uint8Array | null = null;
 let _kickStemUrl: string = '';
 let _kickBinStart = 0;
 let _kickBinEnd = 0;
+let _mainIsPlaying = false;  // Track main player state for auto-play on stem load
+let _mainCurrentTime = 0;
 
 /** Load a kick stem URL for beat detection. Pass '' to unload. */
 export function setKickStemUrl(url: string): void {
@@ -67,7 +69,9 @@ export function setKickStemUrl(url: string): void {
   if (!_kickAudio) {
     _kickAudio = new Audio();
     _kickAudio.crossOrigin = 'anonymous';
-    _kickAudio.volume = 0; // Silent — only for analysis
+    // Volume must be non-zero for MediaElementSource to send signal
+    // in all browsers. We don't connect to ctx.destination so it's inaudible.
+    _kickAudio.volume = 1;
     _kickAudio.preload = 'auto';
   }
 
@@ -86,7 +90,7 @@ export function setKickStemUrl(url: string): void {
     _kickAnalyser.fftSize = 2048;
     _kickAnalyser.smoothingTimeConstant = 0.1; // Very low — we want raw transients
     _kickSource.connect(_kickAnalyser);
-    // DON'T connect to destination — we don't want to hear the kick stem
+    // DON'T connect to ctx.destination — we don't want to hear the kick stem
     // (the main WaveSurfer already plays the full mix)
 
     _kickFreqData = new Uint8Array(_kickAnalyser.frequencyBinCount);
@@ -100,10 +104,29 @@ export function setKickStemUrl(url: string): void {
 
   setState({ kickStemLoaded: true });
   console.log(`[Disco] Kick stem loaded: ${url}`);
+
+  // If the main player is already playing, auto-start the kick stem
+  // (handles the case where stem loads after playback has already started)
+  if (_mainIsPlaying) {
+    console.log(`[Disco] Main player already playing — auto-starting kick stem at ${_mainCurrentTime.toFixed(1)}s`);
+    _kickAudio.currentTime = _mainCurrentTime;
+    if (_kickCtx?.state === 'suspended') _kickCtx.resume();
+    _kickAudio.play().catch(() => {});
+  }
 }
 
 /** Sync kick stem playback with main player */
 export function syncKickStem(action: 'play' | 'pause' | 'seek', time?: number): void {
+  // Track main player state so we can auto-start on stem load
+  if (action === 'play') {
+    _mainIsPlaying = true;
+    if (time !== undefined) _mainCurrentTime = time;
+  } else if (action === 'pause') {
+    _mainIsPlaying = false;
+  } else if (action === 'seek' && time !== undefined) {
+    _mainCurrentTime = time;
+  }
+
   if (!_kickAudio || !_kickStemUrl) return;
 
   // Resume AudioContext on first interaction (Chrome autoplay policy)
