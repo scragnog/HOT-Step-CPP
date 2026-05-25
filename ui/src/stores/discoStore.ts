@@ -433,7 +433,15 @@ function stopLoop(): void {
 export function setDiscoMode(on: boolean): void {
   setState({ discoMode: on });
   saveDiscoPrefs(on);
-  if (on) startLoop(); else stopLoop();
+  if (on) {
+    startLoop();
+    // If main player is already playing, resume stems so beat detection gets signal
+    if (_mainIsPlaying) {
+      syncStems('play', _mainCurrentTime);
+    }
+  } else {
+    stopLoop();
+  }
 }
 
 export function toggleDiscoMode(): void {

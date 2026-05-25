@@ -494,8 +494,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           🪩 Disco Mode
         </h4>
         <SettingRow
-          label="Extract kick drum for visualisations"
-          description="After generation, extract a kick drum stem for beat-reactive visual effects. Takes ~60-90s extra per song."
+          label="Extract drum stems for visualisations"
+          description="After generation, extract kick, snare, and hi-hat stems for beat-reactive visual effects (rainbow borders, snare flash, hi-hat particles). Takes ~60-90s extra per song."
           checked={settings.discoKickExtract}
           onChange={v => update('discoKickExtract', v)}
         />

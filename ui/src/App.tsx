@@ -417,6 +417,30 @@ const AppContent: React.FC = () => {
     setToast({ message, type, isVisible: true });
   };
 
+  // Disco mode toggle — prompt to enable stem extraction if needed
+  const handleToggleDisco = useCallback(() => {
+    if (discoMode) {
+      // Turning off — always allowed
+      toggleDiscoMode();
+      return;
+    }
+    // Turning on — check if stem extraction is enabled
+    if (!settings.discoKickExtract) {
+      setConfirmDialog({
+        title: '🪩 Enable Disco Mode?',
+        message: 'Disco mode uses separated drum stems (kick, snare, hi-hat) for beat-reactive visuals. This requires extracting drum stems after each generation (~60-90s extra per song). Enable stem extraction and activate disco mode?',
+        confirmLabel: 'Enable & Activate',
+        onConfirm: () => {
+          setSettings(prev => ({ ...prev, discoKickExtract: true }));
+          toggleDiscoMode();
+          showToast('🪩 Disco mode enabled! Drum stems will be extracted for new songs.', 'success');
+        },
+      });
+    } else {
+      toggleDiscoMode();
+    }
+  }, [discoMode, settings.discoKickExtract]);
+
   // Song created callback — add to library + trigger sidebar refresh
   const [songCreatedCount, setSongCreatedCount] = useState(0);
   const handleSongCreated = useCallback((song: Song) => {
@@ -1329,7 +1353,7 @@ const AppContent: React.FC = () => {
           onToggleAB={pbToggleAB}
           onExitABMode={pbExitABMode}
           discoMode={discoMode}
-          onToggleDisco={toggleDiscoMode}
+          onToggleDisco={handleToggleDisco}
         />
         <HiHatParticles />
       </DiscoPulseWrapper>
