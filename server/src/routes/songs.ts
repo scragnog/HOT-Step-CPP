@@ -505,6 +505,9 @@ router.post('/:id/retranscribe', async (req, res) => {
   }
 });
 
+// Track in-flight extractions to prevent duplicate SuperSep jobs
+const extractionsInFlight = new Set<string>();
+
 // POST /api/songs/:id/extract-kick — extract kick drum stem for beat visualization
 router.post('/:id/extract-kick', async (req, res) => {
   try {
@@ -513,32 +516,35 @@ router.post('/:id/extract-kick', async (req, res) => {
     if (!song) { res.status(404).json({ error: 'Song not found' }); return; }
     if (!song.audio_url) { res.status(400).json({ error: 'No audio file' }); return; }
 
-    // Already has all drum stems?
+    // Already has disco data? (stems were analyzed and cleaned up)
+    if (song.disco_data_url) {
+      res.json({ status: 'exists', discoDataUrl: song.disco_data_url });
+      return;
+    }
+
+    // Already has all drum stems but no disco data? Backfill analysis.
     if (song.kick_stem_url && song.snare_stem_url && song.hihat_stem_url) {
-      // Backfill disco data if stems exist but analysis doesn't
-      let discoDataUrl = song.disco_data_url || '';
-      if (!discoDataUrl) {
-        try {
-          discoDataUrl = analyzeAndSaveDiscoData(req.params.id, config.data.audioDir, {
-            kick: song.kick_stem_url,
-            snare: song.snare_stem_url,
-            hihat: song.hihat_stem_url,
-          });
-          if (discoDataUrl) {
-            getDb().prepare('UPDATE songs SET disco_data_url = ? WHERE id = ?')
-              .run(discoDataUrl, req.params.id);
-          }
-        } catch (err: any) {
-          console.warn(`[KickExtract] Disco analysis backfill failed: ${err.message}`);
+      let discoDataUrl = '';
+      try {
+        discoDataUrl = analyzeAndSaveDiscoData(req.params.id, config.data.audioDir, {
+          kick: song.kick_stem_url,
+          snare: song.snare_stem_url,
+          hihat: song.hihat_stem_url,
+        });
+        if (discoDataUrl) {
+          getDb().prepare('UPDATE songs SET disco_data_url = ? WHERE id = ?')
+            .run(discoDataUrl, req.params.id);
         }
+      } catch (err: any) {
+        console.warn(`[KickExtract] Disco analysis backfill failed: ${err.message}`);
       }
-      res.json({
-        status: 'exists',
-        kickStemUrl: song.kick_stem_url,
-        snareStemUrl: song.snare_stem_url,
-        hihatStemUrl: song.hihat_stem_url,
-        discoDataUrl,
-      });
+      res.json({ status: 'exists', discoDataUrl });
+      return;
+    }
+
+    // Guard against duplicate in-flight extractions
+    if (extractionsInFlight.has(req.params.id)) {
+      res.json({ status: 'in-progress' });
       return;
     }
 
@@ -567,12 +573,8 @@ router.post('/:id/extract-kick', async (req, res) => {
     }
     const { id: aceJobId } = await sepRes.json() as { id: string };
 
-    // Return immediately — client will poll for status
-    // Store the ace job ID on the song for polling
-    getDb().prepare('UPDATE songs SET kick_stem_url = ? WHERE id = ?')
-      .run(`extracting:${aceJobId}`, req.params.id);
-
     console.log(`[KickExtract] Song ${req.params.id}: ace-server job ${aceJobId}`);
+    extractionsInFlight.add(req.params.id);
     res.json({ status: 'started', aceJobId, stems: ['kick', 'snare', 'hihat'] });
 
     // Continue extraction in background (don't await in request handler)
@@ -581,6 +583,8 @@ router.post('/:id/extract-kick', async (req, res) => {
       // Clear the extracting status
       getDb().prepare('UPDATE songs SET kick_stem_url = ?, snare_stem_url = ?, hihat_stem_url = ? WHERE id = ?')
         .run('', '', '', req.params.id);
+    }).finally(() => {
+      extractionsInFlight.delete(req.params.id);
     });
   } catch (err: any) {
     console.error('[KickExtract] Error:', err.message);
