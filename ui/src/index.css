@@ -405,3 +405,29 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .lyrics-word--future {
   color: rgba(255, 255, 255, 0.35);
 }
+
+/* ========================================
+   Disco Mode — Beat-Reactive Panel Pulsing
+   ======================================== */
+
+.disco-pulse-wrapper {
+  transition: transform 0.05s ease-out, box-shadow 0.05s ease-out;
+  will-change: transform, box-shadow;
+  position: relative;
+  z-index: 0;
+}
+
+/* Hue rotation — slow colour drift when disco is active */
+.disco-pulse-wrapper[data-disco-active] {
+  animation: disco-hue-drift 8s ease-in-out infinite alternate;
+}
+
+@keyframes disco-hue-drift {
+  0%   { filter: hue-rotate(-15deg); }
+  100% { filter: hue-rotate(15deg); }
+}
+
+/* Smooth exit when disco mode is toggled off */
+.disco-pulse-wrapper:not([data-disco-active]) {
+  transition: transform 0.3s ease, box-shadow 0.3s ease, filter 0.3s ease;
+}

@@ -11,6 +11,7 @@
 
 import { useEffect, useRef } from 'react';
 import AudioMotionAnalyzer from 'audiomotion-analyzer';
+import { registerAudioMotion } from '../../stores/discoStore';
 
 interface SpectrumAnalyzerProps {
   /** The HTMLMediaElement to analyze (from wavesurfer's getMediaElement) */
@@ -49,6 +50,7 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
         // (this shouldn't normally happen)
       }
       connectedElementRef.current = mediaElement;
+      registerAudioMotion(analyzerRef.current);
       return;
     }
 
@@ -74,6 +76,7 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
 
       analyzerRef.current = analyzer;
       connectedElementRef.current = mediaElement;
+      registerAudioMotion(analyzer);
     } catch (err) {
       console.error('[SpectrumAnalyzer] Failed to initialize:', err);
     }
