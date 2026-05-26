@@ -123,7 +123,10 @@ static BackendPair backend_init(const char * label) {
     bp.has_gpu = !best_is_cpu;
 
 #ifdef _WIN32
-    // Warn if we expected a GPU backend but got CPU
+    // Diagnose why CUDA backend didn't load (when ggml-cuda.dll is present).
+    // Try loading each dependency DLL individually and report the exact Windows
+    // error for each failure. This makes missing-DLL issues self-diagnosing
+    // instead of requiring back-and-forth with the user.
     if (best_is_cpu) {
         wchar_t exe_path[MAX_PATH];
         GetModuleFileNameW(NULL, exe_path, MAX_PATH);
@@ -132,10 +135,81 @@ static BackendPair backend_init(const char * label) {
         if (pos != std::wstring::npos) dir = dir.substr(0, pos);
 
         bool cuda_dll = GetFileAttributesW((dir + L"\\ggml-cuda.dll").c_str()) != INVALID_FILE_ATTRIBUTES;
+        bool vulkan_dll = GetFileAttributesW((dir + L"\\ggml-vulkan.dll").c_str()) != INVALID_FILE_ATTRIBUTES;
+
         if (cuda_dll) {
             fprintf(stderr, "[Load] WARNING: ggml-cuda.dll found but CUDA backend did not load.\n");
-            fprintf(stderr, "[Load]   Likely missing: cublas64_13.dll and/or cublasLt64_13.dll\n");
-            fprintf(stderr, "[Load]   Fix: Settings -> Model Manager -> CUDA Runtime, or re-download the CUDA release.\n");
+            fprintf(stderr, "[Load]   Diagnosing dependency chain...\n");
+
+            // DLLs that ggml-cuda.dll imports (load order matters: base first).
+            // Names use narrow strings for logging, wide strings for LoadLibrary.
+            struct DllCheck { const wchar_t * wname; const char * name; bool required; };
+            DllCheck deps[] = {
+                { L"ggml-base.dll",        "ggml-base.dll",        true  },
+                { L"cublas64_13.dll",       "cublas64_13.dll",      true  },
+                { L"cublasLt64_13.dll",     "cublasLt64_13.dll",    true  },
+                { L"VCRUNTIME140.dll",      "VCRUNTIME140.dll",     true  },
+                { L"VCRUNTIME140_1.dll",    "VCRUNTIME140_1.dll",   true  },
+                { L"MSVCP140.dll",          "MSVCP140.dll",         true  },
+            };
+
+            bool any_failed = false;
+            for (auto & dep : deps) {
+                // Check if file exists in engine dir
+                std::wstring full = dir + L"\\" + dep.wname;
+                bool on_disk = GetFileAttributesW(full.c_str()) != INVALID_FILE_ATTRIBUTES;
+
+                // Try loading (searches exe dir + system PATH)
+                HMODULE h = LoadLibraryW(dep.wname);
+                if (h) {
+                    FreeLibrary(h);
+                } else {
+                    DWORD err = GetLastError();
+                    wchar_t msg_buf[512] = {};
+                    FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                   NULL, err, 0, msg_buf, 512, NULL);
+                    // Trim trailing \r\n
+                    size_t len = wcslen(msg_buf);
+                    while (len > 0 && (msg_buf[len-1] == L'\n' || msg_buf[len-1] == L'\r'))
+                        msg_buf[--len] = 0;
+                    fprintf(stderr, "[Load]   FAIL: %s — %s (error %lu: %ls)\n",
+                            dep.name,
+                            on_disk ? "file exists but won't load" : "NOT FOUND in engine dir",
+                            (unsigned long) err, msg_buf);
+                    any_failed = true;
+                }
+            }
+
+            // Now try ggml-cuda.dll itself to get its specific error
+            HMODULE hcuda = LoadLibraryW(L"ggml-cuda.dll");
+            if (hcuda) {
+                fprintf(stderr, "[Load]   NOTE: ggml-cuda.dll loads OK now but GGML didn't pick it up.\n");
+                fprintf(stderr, "[Load]   This may be a GGML backend registration issue.\n");
+                FreeLibrary(hcuda);
+            } else {
+                DWORD err = GetLastError();
+                wchar_t msg_buf[512] = {};
+                FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                               NULL, err, 0, msg_buf, 512, NULL);
+                size_t len = wcslen(msg_buf);
+                while (len > 0 && (msg_buf[len-1] == L'\n' || msg_buf[len-1] == L'\r'))
+                    msg_buf[--len] = 0;
+                fprintf(stderr, "[Load]   ggml-cuda.dll load error %lu: %ls\n",
+                        (unsigned long) err, msg_buf);
+            }
+
+            if (any_failed) {
+                fprintf(stderr, "[Load]   Fix: Settings -> Model Manager -> CUDA Runtime -> Download\n");
+                fprintf(stderr, "[Load]   Or re-download the CUDA release ZIP and extract all DLLs.\n");
+            } else {
+                fprintf(stderr, "[Load]   All dependency DLLs loaded OK individually.\n");
+                fprintf(stderr, "[Load]   This may be a driver issue. Check: nvidia-smi\n");
+                fprintf(stderr, "[Load]   Minimum driver: 560.xx for CUDA 12.8, 570.xx for CUDA 13.x\n");
+            }
+        } else if (vulkan_dll) {
+            // Vulkan build but Vulkan didn't load — different diagnosis
+            fprintf(stderr, "[Load] WARNING: ggml-vulkan.dll found but Vulkan backend did not load.\n");
+            fprintf(stderr, "[Load]   Check that your GPU drivers include Vulkan support.\n");
         }
     }
 #endif
