@@ -4,6 +4,12 @@
 // Per-step DCW correction for SNR-t bias in flow matching.
 // 4 modes: low, high, double, pix — each with per-mode t-modulation.
 // Operates in-place on the post-step xt buffer.
+//
+// IMPORTANT: Corrections are scaled by dt (= t_curr - t_next) so the total
+// accumulated correction is step-count-invariant. Without dt scaling, the
+// correction compounds linearly with num_steps, causing warbling at 150+ steps.
+// A normalization factor (num_steps) preserves calibration at the reference
+// scaler values (0.05/0.02).
 
 #include "dcw.h"
 #include "hot-step-params.h"
@@ -24,7 +30,8 @@ static void sampler_apply_dcw(
     int           Oc,          // output channels
     float         t_curr,      // current timestep value
     float         t_next,      // next timestep value
-    int           step         // current step index (for first-step logging)
+    int           step,        // current step index (for first-step logging)
+    int           num_steps = 0 // total step count (for dt normalization)
 ) {
     if (!g_hotstep_params.dcw_enabled) return;
 
@@ -38,11 +45,21 @@ static void sampler_apply_dcw(
         is_low = true;  // fallback to safest mode
     }
 
+    // dt-based scaling for step-count invariance.
+    // The original paper assumes a fixed step count. Without dt scaling,
+    // the total correction grows linearly with num_steps (200 steps =
+    // 25× more correction than 8 steps → warbling). Multiplying by
+    // dt * num_steps keeps the per-step correction proportional to how
+    // much of the schedule each step covers, while num_steps normalizes
+    // so the user's scaler values remain calibrated.
+    float dt = t_curr - t_next;
+    float dt_norm = (num_steps > 0) ? dt * (float) num_steps : 1.0f;
+
     // Per-mode effective scaler, modulated as the paper prescribes
-    float s_low      = t_curr * g_hotstep_params.dcw_scaler;
-    float s_high     = (1.0f - t_curr) * g_hotstep_params.dcw_scaler;
-    float s_double_h = (1.0f - t_curr) * g_hotstep_params.dcw_high_scaler;
-    float s_pix      = g_hotstep_params.dcw_scaler;  // constant per paper
+    float s_low      = t_curr * dt_norm * g_hotstep_params.dcw_scaler;
+    float s_high     = (1.0f - t_curr) * dt_norm * g_hotstep_params.dcw_scaler;
+    float s_double_h = (1.0f - t_curr) * dt_norm * g_hotstep_params.dcw_high_scaler;
+    float s_pix      = dt_norm * g_hotstep_params.dcw_scaler;
 
     // Scratch buffers for DWT
     int Tl = (T + 1) / 2;
@@ -77,10 +94,11 @@ static void sampler_apply_dcw(
     }
 
     if (step == 0) {
-        fprintf(stderr, "[DCW] mode=%s scaler=%.4f high_scaler=%.4f "
-                "(eff_low=%.4f eff_high=%.4f at t=%.3f)\n",
+        fprintf(stderr, "[DCW] mode=%s scaler=%.4f high_scaler=%.4f dt_norm=%.4f "
+                "(eff_low=%.6f eff_high=%.6f at t=%.3f, dt=%.6f)\n",
                 dcw_mode.c_str(), g_hotstep_params.dcw_scaler,
-                g_hotstep_params.dcw_high_scaler,
-                s_low, s_double_h, t_curr);
+                g_hotstep_params.dcw_high_scaler, dt_norm,
+                s_low, s_double_h, t_curr, dt);
     }
 }
+

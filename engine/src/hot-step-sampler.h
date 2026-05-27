@@ -615,7 +615,7 @@ static int dit_ggml_generate(DiTGGML *           model,
             // have been overwritten. For safety, use vt as-is (full-loop
             // solvers are responsible for their own vt state).
             // TODO: snapshot vt in loop_on_step if full-loop multi-eval solvers need DCW
-            sampler_apply_dcw(xt.data(), vt.data(), N, T, Oc, t_curr, t_next, step_idx);
+            sampler_apply_dcw(xt.data(), vt.data(), N, T, Oc, t_curr, t_next, step_idx, num_steps);
             if (guidance_plugin->has_post_step && do_cfg && step_idx < num_steps - 1) {
                 PostStepModelFn eval_cond_fn = [&](const float * xt_in, float t_v) {
                     eval_single_pass(xt_in, t_v, enc_cond_full, vt_cond.data());
@@ -784,7 +784,7 @@ static int dit_ggml_generate(DiTGGML *           model,
             // ── DCW correction ──
             // Use the pre-solver velocity for multi-eval solvers (vt was
             // clobbered by intermediate model_fn calls during the step).
-            sampler_apply_dcw(xt.data(), vt_readonly, N, T, Oc, t_curr, t_next, step);
+            sampler_apply_dcw(xt.data(), vt_readonly, N, T, Oc, t_curr, t_next, step, num_steps);
 
             // ── Post-step guidance hook (CFG-MP manifold projection etc.) ──
             if (guidance_plugin->has_post_step && do_cfg && step < num_steps - 1) {
