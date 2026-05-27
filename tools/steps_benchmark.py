@@ -221,6 +221,21 @@ class AceEngine:
             time.sleep(1)
         raise TimeoutError(f"Job {job_id} timed out after {timeout}s")
 
+    def pp_vae_reencode(self, wav_data: bytes, blend: float = 0.0) -> bytes:
+        """Send WAV through PP-VAE re-encode endpoint. Returns processed WAV."""
+        params = {}
+        if blend > 0:
+            params["blend"] = f"{blend:.3f}"
+        r = self.session.post(
+            f"{self.base}/pp-vae-reencode",
+            data=wav_data,
+            params=params,
+            headers={"Content-Type": "audio/wav"},
+            timeout=120,
+        )
+        r.raise_for_status()
+        return r.content
+
     def get_result(self, job_id: str) -> bytes:
         """Fetch audio result bytes."""
         r = self.session.get(
@@ -515,12 +530,23 @@ Examples:
                         continue
 
                     audio_data = engine.get_result(job_id)
+
+                    # PP-VAE re-encode (if enabled in params)
+                    pp_vae_on = raw_params.get("ppVaeReencode", False)
+                    if pp_vae_on:
+                        try:
+                            blend = raw_params.get("ppVaeBlend", 0.0)
+                            audio_data = engine.pp_vae_reencode(audio_data, blend)
+                        except Exception as pp_err:
+                            print(f"PP-VAE failed ({pp_err}), saving raw ... ", end="", flush=True)
+
                     with open(filepath, "wb") as f_out:
                         f_out.write(audio_data)
 
                     elapsed = time.time() - t0
                     size_kb = len(audio_data) / 1024
-                    print(f"OK ({elapsed:.1f}s, {size_kb:.0f} KB)")
+                    pp_tag = "+PP" if pp_vae_on else ""
+                    print(f"OK{pp_tag} ({elapsed:.1f}s, {size_kb:.0f} KB)")
 
                 except Exception as e:
                     elapsed = time.time() - t0
