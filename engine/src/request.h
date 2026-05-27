@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // request.h: AceStep generation request (JSON serialization)
 //
 // Pure data container + JSON read/write. Zero business logic.
@@ -10,7 +10,8 @@
 
 struct AceRequest {
     // text content
-    std::string caption;  // ""
+    std::string caption;         // ""
+    std::string negative_prompt;   // "" -- encoded as uncond when non-empty
     std::string lyrics;   // ""
 
     // metadata (user-provided or LLM-enriched)

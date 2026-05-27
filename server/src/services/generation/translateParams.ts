@@ -1,4 +1,4 @@
-// generation/translateParams.ts — Translate frontend params to AceRequest format
+﻿// generation/translateParams.ts — Translate frontend params to AceRequest format
 //
 // Pure function with zero side effects. Maps UI-facing parameter names
 // to the AceRequest schema expected by the ace-server engine.
@@ -46,6 +46,7 @@ export function translateParams(params: any): AceRequest {
   if (params.lmCfgScale !== undefined) req.lm_cfg_scale = params.lmCfgScale;
   if (params.lmTopP !== undefined) req.lm_top_p = params.lmTopP;
   if (params.lmTopK !== undefined) req.lm_top_k = params.lmTopK;
+  if (params.negative_prompt) req.negative_prompt = params.negative_prompt;
   if (params.lmNegativePrompt) req.lm_negative_prompt = params.lmNegativePrompt;
 
   // DiT params

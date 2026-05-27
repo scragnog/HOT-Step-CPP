@@ -64,6 +64,7 @@ static int dit_ggml_generate(DiTGGML *           model,
                              int             repaint_t1               = 0,
                              float           repaint_injection_ratio  = 0.5f,
                              int             repaint_crossfade_frames = 0,
+                             const float *   neg_enc_data             = nullptr,
                              const char *    solver_name              = "euler",
                              const char *    guidance_mode            = "apg",
                               float           apg_momentum             = 0.75f,
@@ -319,9 +320,11 @@ static int dit_ggml_generate(DiTGGML *           model,
         }
 
         // Broadcast [H_enc] to [H_enc, enc_S] then fill uncond destination
+        // Use neg_enc_data if provided (negative_prompt encoded upstream)
         std::vector<float> null_enc_single(H_enc * enc_S);
+        const float * uncond_src = (neg_enc_data != nullptr) ? neg_enc_data : null_emb.data();
         for (int s = 0; s < enc_S; s++) {
-            memcpy(&null_enc_single[s * H_enc], null_emb.data(), H_enc * sizeof(float));
+            memcpy(&null_enc_single[s * H_enc], uncond_src, H_enc * sizeof(float));
         }
         if (dbg && dbg->enabled) {
             debug_dump_2d(dbg, "null_enc_hidden", null_enc_single.data(), enc_S, H_enc);
@@ -397,8 +400,9 @@ static int dit_ggml_generate(DiTGGML *           model,
             } else {
                 ggml_backend_tensor_get(model->null_condition_emb, null_emb.data(), 0, emb_n * sizeof(float));
             }
+            const float * uncond_src_ps = (neg_enc_data != nullptr) ? neg_enc_data : null_emb.data();
             for (int s = 0; s < enc_S; s++) {
-                memcpy(&null_enc_ps[s * H_enc], null_emb.data(), H_enc * sizeof(float));
+                memcpy(&null_enc_ps[s * H_enc], uncond_src_ps, H_enc * sizeof(float));
             }
         }
         for (int b = 0; b < N_graph; b++) {

@@ -1,4 +1,4 @@
-// aceClient.ts — HTTP client for acestep.cpp's ace-server API
+﻿// aceClient.ts — HTTP client for acestep.cpp's ace-server API
 //
 // Wraps all ace-server endpoints with typed methods.
 // Used by the generation orchestrator and model routes.
@@ -51,6 +51,7 @@ export interface AceRequest {
   lm_top_p?: number;
   lm_top_k?: number;
   lm_negative_prompt?: string;
+  negative_prompt?: string;
   use_cot_caption?: boolean;
   audio_codes?: string;
   inference_steps?: number;

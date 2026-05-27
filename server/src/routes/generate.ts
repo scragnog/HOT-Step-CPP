@@ -1,4 +1,4 @@
-// generate.ts — Generation orchestration route
+﻿// generate.ts — Generation orchestration route
 //
 // Orchestrates the two-step generation flow:
 //   1. POST /lm → poll → get enriched JSON with audio_codes
@@ -213,6 +213,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           latent_rescale: aceReq.latent_rescale,
           custom_timesteps: aceReq.custom_timesteps,
           use_cot_caption: aceReq.use_cot_caption,
+          negative_prompt: aceReq.negative_prompt,
         };
         for (const result of lmResults) {
           Object.assign(result, synthFields);

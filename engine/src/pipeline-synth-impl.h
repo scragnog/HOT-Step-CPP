@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // pipeline-synth-impl.h: private state of the synthesis pipeline
 //
 // Holds the types that the public API exposes as opaque handles (AceSynth,
@@ -126,6 +126,8 @@ struct SynthState {
     std::vector<float> enc_hidden_nc;
     std::vector<int>   per_enc_S_nc_final;
     std::vector<float> null_cond_vec;
+    std::vector<float> neg_text_hidden;  // Phase A: text encoder output for negative prompt
+    int                neg_S_text = 0;   // token count for negative text
 
     // DiT context
     std::vector<float> context;

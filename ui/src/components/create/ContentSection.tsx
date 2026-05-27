@@ -19,12 +19,15 @@ interface ContentSectionProps {
   onArtistChange: (v: string) => void;
   subject: string;
   onSubjectChange: (v: string) => void;
+  negativePrompt: string;
+  onNegativePromptChange: (v: string) => void;
 }
 
 export const ContentSection: React.FC<ContentSectionProps> = ({
   caption, onCaptionChange, lyrics, onLyricsChange,
   instrumental, onInstrumentalChange,
   title, onTitleChange, artist, onArtistChange, subject, onSubjectChange,
+  negativePrompt, onNegativePromptChange,
 }) => {
   const { t } = useTranslation();
   const hasMetadata = !!(title || artist || subject);
@@ -139,6 +142,20 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
           />
         </div>
       )}
+
+      {/* Negative Prompt */}
+      <div>
+        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
+          Negative Prompt
+        </label>
+        <textarea
+          className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none resize-none transition-colors"
+          placeholder="jazz, acoustic, slow, ambient, piano, soft, classical..."
+          value={negativePrompt}
+          onChange={e => onNegativePromptChange(e.target.value)}
+          rows={2}
+        />
+      </div>
     </div>
   );
 };

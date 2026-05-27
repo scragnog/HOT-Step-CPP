@@ -1,4 +1,4 @@
-// pipeline-synth-ops.cpp: primitive operations of the synthesis pipeline
+﻿// pipeline-synth-ops.cpp: primitive operations of the synthesis pipeline
 //
 // Each op takes AceSynth (the pipeline context) and SynthState (the transient
 // job state). See pipeline-synth-ops.h for the per-op contract and
@@ -565,6 +565,21 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
         }
 
         // Debug dump of sample 0 while text_hidden and lyric_embed are live.
+        // NEGATIVE PROMPT Phase A: encode negative text while text encoder is loaded
+        if (!reqs[0].negative_prompt.empty()) {
+            std::string neg_text_str, neg_lyric_str;
+            {
+                AceRequest neg_req = reqs[0];
+                neg_req.caption    = reqs[0].negative_prompt;
+                neg_req.lyrics     = "";
+                build_prompt_strings(neg_req, s.instruction_str, s.duration, neg_text_str, neg_lyric_str);
+            }
+            auto neg_text_ids = bpe_encode(bpe, neg_text_str.c_str(), true);
+            s.neg_S_text = (int) neg_text_ids.size();
+            s.neg_text_hidden.resize((size_t) H_text * s.neg_S_text);
+            qwen3_forward(te, neg_text_ids.data(), s.neg_S_text, s.neg_text_hidden.data());
+            fprintf(stderr, "[Encode-Text] negative_prompt text encoded: %d tokens\n", s.neg_S_text);
+        }
         debug_dump_2d(&s.dbg, "text_hidden", main_fwd[0].text_hidden.data(), main_fwd[0].S_text, H_text);
         debug_dump_2d(&s.dbg, "lyric_embed", main_fwd[0].lyric_embed.data(), main_fwd[0].S_lyric, H_text);
     }
@@ -595,6 +610,23 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
             memcpy(s.null_cond_vec.data(), ctx->meta->null_cond_cpu.data(), H_cond * sizeof(float));
         }
 
+        // NEGATIVE PROMPT Phase B: cond-encode neg text, mean-pool into null_cond_vec
+        if (!s.neg_text_hidden.empty() && s.neg_S_text > 0) {
+            std::vector<float> neg_enc;
+            int                neg_enc_S = 0;
+            cond_ggml_forward(ce, s.neg_text_hidden.data(), s.neg_S_text,
+                              nullptr, 0,
+                              s.timbre_feats.data(), s.S_ref_timbre, neg_enc, &neg_enc_S);
+            if (neg_enc_S > 0 && !neg_enc.empty()) {
+                s.null_cond_vec.assign(H_cond, 0.0f);
+                for (int si = 0; si < neg_enc_S; si++)
+                    for (int h = 0; h < H_cond; h++)
+                        s.null_cond_vec[h] += neg_enc[(size_t)si * H_cond + h];
+                float inv = 1.0f / (float)neg_enc_S;
+                for (int h = 0; h < H_cond; h++) s.null_cond_vec[h] *= inv;
+                fprintf(stderr, "[Encode-Text] negative_prompt encoded: enc_S=%d\n", neg_enc_S);
+            }
+        }
         for (int b = 0; b < batch_n; b++) {
             s.timer.reset();
             cond_ggml_forward(ce, main_fwd[b].text_hidden.data(), main_fwd[b].S_text, main_fwd[b].lyric_embed.data(),
@@ -934,7 +966,8 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
         s.context_silence.empty() ? nullptr : s.context_silence.data(), s.cover_steps, cancel, cancel_data,
         s.per_S.data(), s.per_enc_S.data(), s.enc_hidden_nc.empty() ? nullptr : s.enc_hidden_nc.data(),
         s.per_enc_S_nc_final.empty() ? nullptr : s.per_enc_S_nc_final.data(), s.use_sde, s.seeds.data(),
-        ctx->params.use_batch_cfg);
+        ctx->params.use_batch_cfg,
+        s.null_cond_vec.empty() ? nullptr : s.null_cond_vec.data());
     if (dit_rc != 0) {
         return -1;
     }

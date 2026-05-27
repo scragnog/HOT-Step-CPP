@@ -1,4 +1,4 @@
-// request.cpp: AceStep request JSON read/write (yyjson)
+﻿// request.cpp: AceStep request JSON read/write (yyjson)
 
 #include "request.h"
 
@@ -16,8 +16,9 @@ static const yyjson_write_flag WRITE_FLAGS =
 
 // Defaults (aligned with Python GenerationParams)
 void request_init(AceRequest * r) {
-    r->caption = "";
-    r->lyrics  = "";
+    r->caption          = "";
+    r->lyrics           = "";
+    r->negative_prompt  = "";
 
     r->bpm                  = 0;
     r->duration             = 0.0f;
@@ -93,6 +94,9 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
     }
     if ((v = yyjson_obj_get(obj, "audio_codes")) && yyjson_is_str(v)) {
         r->audio_codes = yy_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "negative_prompt")) && yyjson_is_str(v)) {
+        r->negative_prompt = yy_str(v);
     }
     if ((v = yyjson_obj_get(obj, "lm_negative_prompt")) && yyjson_is_str(v)) {
         r->lm_negative_prompt = yy_str(v);
@@ -395,6 +399,9 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     }
     if (all || r->lm_top_k != def.lm_top_k) {
         yyjson_mut_obj_add_int(doc, root, "lm_top_k", r->lm_top_k);
+    }
+    if (all || r->negative_prompt != def.negative_prompt) {
+        yyjson_mut_obj_add_str(doc, root, "negative_prompt", r->negative_prompt.c_str());
     }
     if (all || r->lm_negative_prompt != def.lm_negative_prompt) {
         yyjson_mut_obj_add_str(doc, root, "lm_negative_prompt", r->lm_negative_prompt.c_str());

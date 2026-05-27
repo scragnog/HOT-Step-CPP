@@ -31,6 +31,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // ── Content (per-song) ──
   const [caption, setCaption] = usePersistedState('hs-caption', '');
   const [lyrics, setLyrics] = usePersistedState('hs-lyrics', '');
+  const [negativePrompt, setNegativePrompt] = usePersistedState('hs-negative-prompt', '');
   const [instrumental, setInstrumental] = usePersistedState('hs-instrumental', false);
 
   // ── Song Info (optional, auto-populated from Lyric Studio Send to Create) ──
@@ -121,6 +122,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     const params: Partial<GenerationParams> = {
       caption,
       lyrics: instrumental ? '[Instrumental]' : lyrics,
+      ...(negativePrompt.trim() ? { negative_prompt: negativePrompt.trim() } : {}),
       instrumental,
       bpm, duration, keyScale, timeSignature, vocalLanguage,
       taskType: 'text2music',
@@ -159,6 +161,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
           title={title} onTitleChange={setTitle}
           artist={artist} onArtistChange={setArtist}
           subject={subject} onSubjectChange={setSubject}
+          negativePrompt={negativePrompt} onNegativePromptChange={setNegativePrompt}
         />
 
         <MetadataSection
