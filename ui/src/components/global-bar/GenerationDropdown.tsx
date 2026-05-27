@@ -523,7 +523,8 @@ export const GenerationDropdown: React.FC = () => {
               <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">DCW Correction</span>
             </div>
           </div>
-             <span onClick={(e) => {
+          {gp.dcwEnabled && (
+            <span onClick={(e) => {
               e.stopPropagation();
               gp.setDcwMode('double');
               gp.setDcwLowScaler(0.2);
