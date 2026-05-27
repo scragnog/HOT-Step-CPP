@@ -554,7 +554,7 @@ export const GenerationDropdown: React.FC = () => {
                 </div>
               </div>
             </div>
-            <Slider label="Correction Scaler" value={gp.dcwScaler}
+            <Slider label="Low-Freq Scaler" value={gp.dcwScaler}
               onChange={gp.setDcwScaler} min={0} max={1} step={0.01} showInput />
             {gp.dcwMode === 'double' && (
               <Slider label="High-Freq Scaler" value={gp.dcwHighScaler}
