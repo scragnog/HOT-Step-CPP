@@ -45,21 +45,20 @@ static void sampler_apply_dcw(
         is_low = true;  // fallback to safest mode
     }
 
-    // dt-based scaling for step-count invariance.
-    // The original paper assumes a fixed step count. Without dt scaling,
-    // the total correction grows linearly with num_steps (200 steps =
-    // 25× more correction than 8 steps → warbling). Multiplying by
-    // dt * num_steps keeps the per-step correction proportional to how
-    // much of the schedule each step covers, while num_steps normalizes
-    // so the user's scaler values remain calibrated.
-    float dt = t_curr - t_next;
-    float dt_norm = (num_steps > 0) ? dt * (float) num_steps : 1.0f;
+    // Step-count normalization for invariance.
+    // DCW correction is applied once per step. Without normalization, the
+    // total accumulated correction scales linearly with num_steps (200 steps
+    // = 25× more correction than 8 steps → warbling). We normalize relative
+    // to a reference step count so the user's scaler values remain calibrated
+    // at their typical settings. Reference of 8 matches the turbo default.
+    const float ref_steps = 20.0f;
+    float step_norm = (num_steps > 1) ? ref_steps / (float) num_steps : 1.0f;
 
     // Per-mode effective scaler, modulated as the paper prescribes
-    float s_low      = t_curr * dt_norm * g_hotstep_params.dcw_scaler;
-    float s_high     = (1.0f - t_curr) * dt_norm * g_hotstep_params.dcw_scaler;
-    float s_double_h = (1.0f - t_curr) * dt_norm * g_hotstep_params.dcw_high_scaler;
-    float s_pix      = dt_norm * g_hotstep_params.dcw_scaler;
+    float s_low      = t_curr * step_norm * g_hotstep_params.dcw_scaler;
+    float s_high     = (1.0f - t_curr) * step_norm * g_hotstep_params.dcw_scaler;
+    float s_double_h = (1.0f - t_curr) * step_norm * g_hotstep_params.dcw_high_scaler;
+    float s_pix      = step_norm * g_hotstep_params.dcw_scaler;
 
     // Scratch buffers for DWT
     int Tl = (T + 1) / 2;
@@ -94,11 +93,11 @@ static void sampler_apply_dcw(
     }
 
     if (step == 0) {
-        fprintf(stderr, "[DCW] mode=%s scaler=%.4f high_scaler=%.4f dt_norm=%.4f "
-                "(eff_low=%.6f eff_high=%.6f at t=%.3f, dt=%.6f)\n",
+        fprintf(stderr, "[DCW] mode=%s scaler=%.4f high_scaler=%.4f step_norm=%.4f "
+                "(eff_low=%.6f eff_high=%.6f at t=%.3f, steps=%d)\n",
                 dcw_mode.c_str(), g_hotstep_params.dcw_scaler,
-                g_hotstep_params.dcw_high_scaler, dt_norm,
-                s_low, s_double_h, t_curr, dt);
+                g_hotstep_params.dcw_high_scaler, step_norm,
+                s_low, s_double_h, t_curr, num_steps);
     }
 }
 
