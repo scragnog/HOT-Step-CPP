@@ -160,15 +160,20 @@ def translate_params(params: dict) -> dict:
     if params.get("negative_prompt"):
         req["negative_prompt"] = params["negative_prompt"]
 
+    # Postprocess plugin (e.g. md_audio_tiled tiled decoder)
+    if params.get("postprocessPlugin"):
+        req["postprocess_plugin"] = params["postprocessPlugin"]
+
     return req
 
 
 # ── Engine client (talks directly to ace-server :8085) ──
 
 class AceEngine:
-    def __init__(self, base_url: str, fmt: str = "wav16"):
+    def __init__(self, base_url: str, fmt: str = "wav16", keep_loaded: bool = False):
         self.base = base_url.rstrip("/")
         self.fmt = fmt
+        self.keep_loaded = keep_loaded
         self.session = requests.Session()
 
     def health(self) -> bool:
@@ -183,6 +188,8 @@ class AceEngine:
         params = {}
         if self.fmt != "mp3":
             params["format"] = self.fmt
+        if self.keep_loaded:
+            params["keep_loaded"] = "1"
         r = self.session.post(
             f"{self.base}/synth",
             json=ace_req,
@@ -375,8 +382,16 @@ Examples:
                         help="Skip generation, only run analysis on existing files")
     parser.add_argument("--skip-lm", action="store_true",
                         help="Skip LM phase — requires audio_codes in the params JSON")
+    parser.add_argument("--keep-loaded", action="store_true", default=True,
+                        help="Keep models in VRAM between runs (default: on)")
+    parser.add_argument("--no-keep-loaded", action="store_true",
+                        help="Don't keep models in VRAM (unload after each run)")
+    parser.add_argument("--no-pp", action="store_true", default=True,
+                        help="Strip post-processing flags (PP-VAE, Spectral Lifter, etc.) for clean benchmarks (default: on)")
 
     args = parser.parse_args()
+    if args.no_keep_loaded:
+        args.keep_loaded = False
 
     # Parse step counts and seeds
     step_counts = [int(s.strip()) for s in args.steps.split(",")]
@@ -408,7 +423,7 @@ Examples:
 
     # ── Generation phase ──
     if not args.skip_generation:
-        engine = AceEngine(args.engine, args.format)
+        engine = AceEngine(args.engine, args.format, keep_loaded=args.keep_loaded)
 
         # Health check
         if not engine.health():
@@ -416,14 +431,18 @@ Examples:
             print("Make sure the app is running (LAUNCH.bat or dev.bat)")
             sys.exit(1)
 
+        kl_str = "ON" if args.keep_loaded else "OFF"
+        pp_str = "stripped" if args.no_pp else "as-is"
         print(f"╔══════════════════════════════════════════════════════╗")
         print(f"║  HOT-Step Inference Steps Benchmark                 ║")
         print(f"╠══════════════════════════════════════════════════════╣")
-        print(f"║  Steps:  {args.steps:<43}║")
-        print(f"║  Seeds:  {args.seeds:<43}║")
-        print(f"║  Engine: {args.engine:<43}║")
-        print(f"║  Format: {args.format:<43}║")
-        print(f"║  Output: {str(out_dir):<43}║")
+        print(f"║  Steps:       {args.steps:<38}║")
+        print(f"║  Seeds:       {args.seeds:<38}║")
+        print(f"║  Engine:      {args.engine:<38}║")
+        print(f"║  Format:      {args.format:<38}║")
+        print(f"║  Keep loaded: {kl_str:<38}║")
+        print(f"║  Post-proc:   {pp_str:<38}║")
+        print(f"║  Output:      {str(out_dir):<38}║")
         print(f"╚══════════════════════════════════════════════════════╝")
         print()
 
@@ -447,9 +466,21 @@ Examples:
                     params_copy["seed"] = seed
                     params_copy["randomSeed"] = False
                     params_copy["batchSize"] = 1
+                    # Strip post-processing for clean benchmarks
+                    if args.no_pp:
+                        params_copy["ppVaeReencode"] = False
+                        params_copy["spectralLifterEnabled"] = False
+                        params_copy["masteringEnabled"] = False
+                        params_copy["vocalNaturalizerEnabled"] = False
+                        params_copy["denoiseStrength"] = 0
+                        # Keep postprocessPlugin (tiled decoder) — it IS the VAE decode path
                     ace_req = translate_params(params_copy)
                 else:
                     ace_req = dict(raw_params)
+                    if args.no_pp:
+                        ace_req.pop("denoise_strength", None)
+                        ace_req.pop("denoise_smoothing", None)
+                        ace_req.pop("denoise_mix", None)
                     ace_req["inference_steps"] = steps
                     ace_req["seed"] = seed
 
