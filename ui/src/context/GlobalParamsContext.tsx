@@ -59,7 +59,7 @@ export interface GlobalParams {
   // DCW
   dcwEnabled: boolean; setDcwEnabled: (v: boolean) => void;
   dcwMode: string; setDcwMode: (v: string) => void;
-  dcwScaler: number; setDcwScaler: (v: number) => void;
+  dcwLowScaler: number; setDcwLowScaler: (v: number) => void;
   dcwHighScaler: number; setDcwHighScaler: (v: number) => void;
   // Latent
   latentShift: number; setLatentShift: (v: number) => void;

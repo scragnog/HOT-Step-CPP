@@ -523,11 +523,10 @@ export const GenerationDropdown: React.FC = () => {
               <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">DCW Correction</span>
             </div>
           </div>
-          {gp.dcwEnabled && (
-            <span onClick={(e) => {
+             <span onClick={(e) => {
               e.stopPropagation();
               gp.setDcwMode('double');
-              gp.setDcwScaler(0.2);
+              gp.setDcwLowScaler(0.2);
               gp.setDcwHighScaler(0.2);
             }} className="flex items-center gap-1 text-[10px] text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer">
               <RotateCcw size={10} /> Reset
@@ -540,14 +539,7 @@ export const GenerationDropdown: React.FC = () => {
               <label className="block text-[10px] text-emerald-400 mb-1">Correction Mode</label>
               <div className="relative group/dcw">
                 <select className={selectClasses} value={gp.dcwMode}
-                  onChange={e => {
-                    const newMode = e.target.value;
-                    if (newMode === 'double' && gp.dcwMode !== 'double') {
-                      // Sync high scaler from current scaler so both start matched
-                      gp.setDcwHighScaler(gp.dcwScaler);
-                    }
-                    gp.setDcwMode(newMode);
-                  }}>
+                  onChange={e => gp.setDcwMode(e.target.value)}>
                   <option value="low">Low-Frequency</option>
                   <option value="high">High-Frequency</option>
                   <option value="double">Both (Low + High)</option>
@@ -561,10 +553,12 @@ export const GenerationDropdown: React.FC = () => {
                 </div>
               </div>
             </div>
-            <Slider label={gp.dcwMode === 'double' ? 'Low-Freq Scaler' : 'Scaler'} value={gp.dcwScaler}
-              onChange={gp.setDcwScaler} min={0} max={1} step={0.01} showInput />
-            {gp.dcwMode === 'double' && (
-              <Slider label="High-Freq Scaler" value={gp.dcwHighScaler}
+            {(gp.dcwMode === 'low' || gp.dcwMode === 'double' || gp.dcwMode === 'pix') && (
+              <Slider label={gp.dcwMode === 'double' ? 'Low-Freq Scaler' : 'Scaler'} value={gp.dcwLowScaler}
+                onChange={gp.setDcwLowScaler} min={0} max={1} step={0.01} showInput />
+            )}
+            {(gp.dcwMode === 'high' || gp.dcwMode === 'double') && (
+              <Slider label={gp.dcwMode === 'double' ? 'High-Freq Scaler' : 'Scaler'} value={gp.dcwHighScaler}
                 onChange={gp.setDcwHighScaler} min={0} max={1} step={0.01} showInput />
             )}
             <p className="text-[10px] text-zinc-500">

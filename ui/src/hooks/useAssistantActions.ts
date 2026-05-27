@@ -70,7 +70,7 @@ const LABEL_MAP: Record<string, string> = {
   // DCW
   dcwEnabled: 'DCW Enabled',
   dcwMode: 'DCW Mode',
-  dcwScaler: 'DCW Scaler',
+  dcwLowScaler: 'DCW Low Scaler',
   dcwHighScaler: 'DCW High Scaler',
   // Latent
   latentShift: 'Latent Shift',
@@ -151,7 +151,7 @@ export function useAssistantActions() {
     // DCW
     dcwEnabled: gp.setDcwEnabled,
     dcwMode: gp.setDcwMode,
-    dcwScaler: gp.setDcwScaler,
+    dcwLowScaler: gp.setDcwLowScaler,
     dcwHighScaler: gp.setDcwHighScaler,
     // Latent
     latentShift: gp.setLatentShift,

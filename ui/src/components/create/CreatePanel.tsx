@@ -95,7 +95,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     // DCW
     if (gpData.dcwEnabled !== undefined) gp.setDcwEnabled(gpData.dcwEnabled);
     if (gpData.dcwMode) gp.setDcwMode(gpData.dcwMode);
-    if (gpData.dcwScaler !== undefined) gp.setDcwScaler(gpData.dcwScaler);
+    if (gpData.dcwLowScaler !== undefined) gp.setDcwLowScaler(gpData.dcwLowScaler);
     if (gpData.dcwHighScaler !== undefined) gp.setDcwHighScaler(gpData.dcwHighScaler);
     // Post-processing
     if (gpData.postProcessingEnabled !== undefined) gp.setPostProcessingEnabled(gpData.postProcessingEnabled);

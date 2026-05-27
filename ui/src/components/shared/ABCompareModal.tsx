@@ -40,7 +40,7 @@ const PARAM_LABELS: Record<string, string> = {
   // DCW
   dcwEnabled: 'DCW Enabled',
   dcwMode: 'DCW Mode',
-  dcwScaler: 'DCW Scaler',
+  dcwLowScaler: 'DCW Low Scaler',
   dcwHighScaler: 'DCW High Scaler',
   // Post-processing
   denoiseStrength: 'Denoiser Strength',

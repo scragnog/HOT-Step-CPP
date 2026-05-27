@@ -184,7 +184,7 @@ export const GlobalParamBar: React.FC = () => {
         if (p.apgNormThreshold !== undefined) gp.setApgNormThreshold(p.apgNormThreshold);
         if (p.dcwEnabled !== undefined) gp.setDcwEnabled(p.dcwEnabled);
         if (p.dcwMode !== undefined) gp.setDcwMode(p.dcwMode);
-        if (p.dcwScaler !== undefined) gp.setDcwScaler(p.dcwScaler);
+        if (p.dcwLowScaler !== undefined) gp.setDcwLowScaler(p.dcwLowScaler);
         if (p.dcwHighScaler !== undefined) gp.setDcwHighScaler(p.dcwHighScaler);
         if (p.latentShift !== undefined) gp.setLatentShift(p.latentShift);
         if (p.latentRescale !== undefined) gp.setLatentRescale(p.latentRescale);

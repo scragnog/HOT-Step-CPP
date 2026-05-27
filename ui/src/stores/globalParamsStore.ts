@@ -67,7 +67,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   apgNormThreshold: readKey("hs-apgNormThreshold", 2.5),
   dcwEnabled: readKey("hs-dcwEnabled", false),
   dcwMode: readKey("hs-dcwMode", 'double'),
-  dcwScaler: readKey("hs-dcwScaler", 0.2),
+  dcwLowScaler: readKey("hs-dcwLowScaler", readKey("hs-dcwScaler", 0.2)),
   dcwHighScaler: readKey("hs-dcwHighScaler", 0.2),
   latentShift: readKey("hs-latentShift", 0.0),
   latentRescale: readKey("hs-latentRescale", 1.0),
@@ -162,7 +162,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setApgNormThreshold: (v: any) => { set({ apgNormThreshold: v }); writeKey("hs-apgNormThreshold", v); },
   setDcwEnabled: (v: any) => { set({ dcwEnabled: v }); writeKey("hs-dcwEnabled", v); },
   setDcwMode: (v: any) => { set({ dcwMode: v }); writeKey("hs-dcwMode", v); },
-  setDcwScaler: (v: any) => { set({ dcwScaler: v }); writeKey("hs-dcwScaler", v); },
+  setDcwLowScaler: (v: any) => { set({ dcwLowScaler: v }); writeKey("hs-dcwLowScaler", v); },
   setDcwHighScaler: (v: any) => { set({ dcwHighScaler: v }); writeKey("hs-dcwHighScaler", v); },
   setLatentShift: (v: any) => { set({ latentShift: v }); writeKey("hs-latentShift", v); },
   setLatentRescale: (v: any) => { set({ latentRescale: v }); writeKey("hs-latentRescale", v); },
@@ -274,7 +274,11 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
         : (s.postProcessingEnabled && s.masteringEnabled && s.timbreReference && s.masteringReference) ? true : undefined,
       dcwEnabled: s.dcwEnabled,
       dcwMode: s.dcwEnabled ? s.dcwMode : undefined,
-      dcwScaler: s.dcwEnabled ? s.dcwScaler * 0.05 : undefined,
+      // Route the correct scaler to dcw_scaler based on mode:
+      // low/double/pix use dcwLowScaler, high uses dcwHighScaler
+      dcwScaler: s.dcwEnabled
+        ? (s.dcwMode === 'high' ? s.dcwHighScaler * 0.02 : s.dcwLowScaler * 0.05)
+        : undefined,
       dcwHighScaler: (s.dcwEnabled && s.dcwMode === 'double') ? s.dcwHighScaler * 0.02 : undefined,
       latentShift: s.latentShift !== 0 ? s.latentShift : undefined,
       latentRescale: s.latentRescale !== 1 ? s.latentRescale : undefined,
