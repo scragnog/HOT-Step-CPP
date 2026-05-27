@@ -540,7 +540,14 @@ export const GenerationDropdown: React.FC = () => {
               <label className="block text-[10px] text-emerald-400 mb-1">Correction Mode</label>
               <div className="relative group/dcw">
                 <select className={selectClasses} value={gp.dcwMode}
-                  onChange={e => gp.setDcwMode(e.target.value)}>
+                  onChange={e => {
+                    const newMode = e.target.value;
+                    if (newMode === 'double' && gp.dcwMode !== 'double') {
+                      // Sync high scaler from current scaler so both start matched
+                      gp.setDcwHighScaler(gp.dcwScaler);
+                    }
+                    gp.setDcwMode(newMode);
+                  }}>
                   <option value="low">Low-Frequency</option>
                   <option value="high">High-Frequency</option>
                   <option value="double">Both (Low + High)</option>
