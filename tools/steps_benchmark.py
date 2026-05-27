@@ -386,8 +386,8 @@ Examples:
                         help="Keep models in VRAM between runs (default: on)")
     parser.add_argument("--no-keep-loaded", action="store_true",
                         help="Don't keep models in VRAM (unload after each run)")
-    parser.add_argument("--no-pp", action="store_true", default=True,
-                        help="Strip post-processing flags (PP-VAE, Spectral Lifter, etc.) for clean benchmarks (default: on)")
+    parser.add_argument("--no-pp", action="store_true", default=False,
+                        help="Strip post-processing flags (PP-VAE, Spectral Lifter, etc.) — off by default, params pass through as-is")
 
     args = parser.parse_args()
     if args.no_keep_loaded:
