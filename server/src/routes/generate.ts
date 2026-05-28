@@ -213,6 +213,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           latent_rescale: aceReq.latent_rescale,
           custom_timesteps: aceReq.custom_timesteps,
           cfg_cutoff_ratio: aceReq.cfg_cutoff_ratio,
+          cache_ratio: aceReq.cache_ratio,
           use_cot_caption: aceReq.use_cot_caption,
           negative_prompt: aceReq.negative_prompt,
         };

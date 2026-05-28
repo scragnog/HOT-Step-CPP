@@ -23,6 +23,7 @@ const PARAM_LABELS: Record<string, string> = {
   inferenceSteps: 'Inference Steps',
   guidanceScale: 'Guidance Scale',
   cfgCutoffRatio: 'CFG Cutoff Ratio',
+  cacheRatio: 'Step Cache',
   shift: 'Shift',
   inferMethod: 'Solver',
   scheduler: 'Scheduler',

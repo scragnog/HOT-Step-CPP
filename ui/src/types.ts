@@ -104,6 +104,7 @@ export interface GenerationParams {
   inferenceSteps: number;
   guidanceScale: number;
   cfgCutoffRatio?: number;
+  cacheRatio?: number;
   shift: number;
   inferMethod: string;
   scheduler: string;

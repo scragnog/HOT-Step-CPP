@@ -100,6 +100,7 @@ export interface AceRequest {
   latent_rescale?: number;     // 1.0 = no scaling
   custom_timesteps?: string;   // CSV of descending floats, overrides scheduler
   cfg_cutoff_ratio?: number;   // CFG step scheduling: 1.0 = full CFG, 0.5 = 50% CFG then cond-only
+  cache_ratio?: number;        // Step-level velocity caching: 0.0 = off, 0.5 = skip ~50% of passes
   // Post-VAE spectral denoiser (HOT-Step)
   denoise_strength?: number;   // 0.0 = off, 1.0 = max suppression
   denoise_smoothing?: number;  // 0.0 = sharp gate, 1.0 = very smooth

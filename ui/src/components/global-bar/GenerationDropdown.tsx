@@ -83,6 +83,15 @@ export const GenerationDropdown: React.FC = () => {
         </p>
       </div>
 
+      {/* Step Cache — velocity caching to skip redundant forward passes */}
+      <div>
+        <Slider label="Step Cache" value={gp.cacheRatio}
+          onChange={gp.setCacheRatio} min={0} max={0.7} step={0.05} showInput />
+        <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
+          Skip redundant forward passes by reusing velocity. Higher = faster but may reduce quality. Try 0.3–0.5.
+        </p>
+      </div>
+
       {/* Shift with Auto toggle */}
       <div>
         <div className="flex items-center justify-between mb-1.5">

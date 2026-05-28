@@ -38,6 +38,7 @@ export interface GlobalParams {
   inferenceSteps: number; setInferenceSteps: (v: number) => void;
   guidanceScale: number; setGuidanceScale: (v: number) => void;
   cfgCutoffRatio: number; setCfgCutoffRatio: (v: number) => void;
+  cacheRatio: number; setCacheRatio: (v: number) => void;
   shift: number; setShift: (v: number) => void;
   inferMethod: string; setInferMethod: (v: string) => void;
   scheduler: string; setScheduler: (v: string) => void;

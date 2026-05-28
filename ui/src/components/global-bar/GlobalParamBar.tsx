@@ -150,6 +150,7 @@ export const GlobalParamBar: React.FC = () => {
         if (p.inferenceSteps !== undefined) gp.setInferenceSteps(p.inferenceSteps);
         if (p.guidanceScale !== undefined) gp.setGuidanceScale(p.guidanceScale);
         if (p.cfgCutoffRatio !== undefined) gp.setCfgCutoffRatio(p.cfgCutoffRatio);
+        if (p.cacheRatio !== undefined) gp.setCacheRatio(p.cacheRatio);
         if (p.shift !== undefined) gp.setShift(p.shift);
         if (p.inferMethod !== undefined) gp.setInferMethod(p.inferMethod);
         if (p.scheduler !== undefined) gp.setScheduler(p.scheduler);
