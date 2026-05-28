@@ -508,6 +508,7 @@ struct ServerFields {
     float       latent_shift     = 0.0f;
     float       latent_rescale   = 1.0f;
     float       cfg_cutoff_ratio = 1.0f;
+    float       cache_ratio      = 0.0f;
     std::string custom_timesteps = "";
     // Post-VAE spectral denoiser (HOT-Step)
     float       denoise_strength  = 0.0f;   // 0 = off, 1 = max
@@ -630,6 +631,9 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     }
     if ((v = yyjson_obj_get(obj, "cfg_cutoff_ratio")) && yyjson_is_num(v)) {
         sf->cfg_cutoff_ratio = (float) yyjson_get_real(v);
+    }
+    if ((v = yyjson_obj_get(obj, "cache_ratio")) && yyjson_is_num(v)) {
+        sf->cache_ratio = (float) yyjson_get_real(v);
     }
     if ((v = yyjson_obj_get(obj, "custom_timesteps")) && yyjson_is_str(v)) {
         sf->custom_timesteps = yyjson_get_str(v);
@@ -960,6 +964,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
     g_hotstep_params.latent_rescale        = sf.latent_rescale;
     g_hotstep_params.custom_timesteps      = sf.custom_timesteps;
     g_hotstep_params.cfg_cutoff_ratio      = sf.cfg_cutoff_ratio;
+    g_hotstep_params.cache_ratio           = sf.cache_ratio;
     g_hotstep_params.plugin_params         = sf.plugin_params;
     fprintf(stderr, "[Server] HOT-Step params: solver=%s, guidance=%s, scheduler=%s\n",
             sf.solver_name.c_str(), sf.guidance_mode.c_str(),
@@ -974,6 +979,10 @@ static void synth_worker(std::shared_ptr<Job>    job,
     if (sf.cfg_cutoff_ratio < 1.0f) {
         fprintf(stderr, "[Server] CFG cutoff: ratio=%.2f (CFG for first %.0f%% of steps)\n",
                 sf.cfg_cutoff_ratio, sf.cfg_cutoff_ratio * 100.0f);
+    }
+    if (sf.cache_ratio > 0.0f) {
+        fprintf(stderr, "[Server] Step cache: ratio=%.2f (skip ~%.0f%% of forward passes)\n",
+                sf.cache_ratio, sf.cache_ratio * 100.0f);
     }
 
     AceSynth * ctx = ace_synth_load(g_store, &p);

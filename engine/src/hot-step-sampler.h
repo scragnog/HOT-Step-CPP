@@ -653,6 +653,44 @@ static int dit_ggml_generate(DiTGGML *           model,
     } else {
     // ── Existing per-step loop (unchanged) ─────────────────────────
     bool switched_cover = false;
+
+    // ── Step-level velocity caching ──────────────────────────────────
+    // Build a static schedule: which steps COMPUTE vs reuse cached velocity.
+    // Pattern: always compute first 2 and last 2 steps (boundaries matter most).
+    // Middle steps are computed every Nth step based on cache_ratio.
+    float cache_ratio = g_hotstep_params.cache_ratio;
+    std::vector<bool> step_computes(num_steps, true);
+    std::vector<float> vt_cached;
+    bool has_cached_vt = false;
+    int  cached_count  = 0;
+
+    if (cache_ratio > 0.0f && num_steps > 4) {
+        int protect = 2;  // protect first/last N steps
+        int middle_start = protect;
+        int middle_end   = num_steps - protect;
+        int middle_len   = middle_end - middle_start;
+
+        if (middle_len > 1) {
+            // compute_interval: how often to compute in the middle region
+            // cache_ratio=0.5 → interval=2 (compute every 2nd step)
+            // cache_ratio=0.33 → interval=2 (compute 2 out of 3)
+            // cache_ratio=0.67 → interval=3 (compute every 3rd step)
+            int compute_interval = std::max(2, (int) roundf(1.0f / (1.0f - cache_ratio)));
+            for (int s = middle_start; s < middle_end; s++) {
+                step_computes[s] = ((s - middle_start) % compute_interval == 0);
+            }
+        }
+
+        vt_cached.resize(n_total);
+
+        // Count and log
+        for (int s = 0; s < num_steps; s++) {
+            if (!step_computes[s]) cached_count++;
+        }
+        fprintf(stderr, "[DiT] Velocity cache: ratio=%.2f, %d/%d steps cached, %d computed\n",
+                cache_ratio, cached_count, num_steps, num_steps - cached_count);
+    }
+
     for (int step = 0; step < num_steps; step++) {
         if (cancel && cancel(cancel_data)) {
             fprintf(stderr, "[DiT] Cancelled at step %d/%d\n", step, num_steps);
@@ -775,8 +813,20 @@ static int dit_ggml_generate(DiTGGML *           model,
                     ggml_graph_n_nodes(gf), N);
         }
 
-        // Evaluate velocity at (xt, t_curr) — first evaluation (k1 for RK4, only eval for Euler)
-        evaluate_velocity(xt.data(), t_curr);
+        // Evaluate velocity at (xt, t_curr) — or reuse cached velocity
+        if (!step_computes[step] && has_cached_vt) {
+            // CACHE HIT: skip forward pass, reuse previous velocity
+            memcpy(vt.data(), vt_cached.data(), n_total * sizeof(float));
+        } else {
+            // COMPUTE: full forward pass
+            evaluate_velocity(xt.data(), t_curr);
+
+            // Cache this velocity for potential reuse by next step(s)
+            if (cached_count > 0) {
+                memcpy(vt_cached.data(), vt.data(), n_total * sizeof(float));
+                has_cached_vt = true;
+            }
+        }
 
         // dump intermediate tensors on step 0 (sample 0 only for batch)
         if (step == 0 && dbg && dbg->enabled) {
@@ -908,8 +958,9 @@ static int dit_ggml_generate(DiTGGML *           model,
             }
         }
 
-        fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]\n", step + 1, num_steps, t_curr,
-                solver_plugin->display_name.c_str());
+        fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]%s\n", step + 1, num_steps, t_curr,
+                solver_plugin->display_name.c_str(),
+                (!step_computes[step] && has_cached_vt) ? " (cached)" : "");
     }
     } // else (per-step loop)
 

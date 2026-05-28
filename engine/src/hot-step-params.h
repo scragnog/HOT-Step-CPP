@@ -93,6 +93,12 @@ struct HotStepParams {
     // 0.0 = no CFG at all (fastest, but ignores guidance_scale).
     float       cfg_cutoff_ratio = 1.0f;
 
+    // Step-level velocity caching: ratio of steps to skip by reusing the
+    // previous velocity prediction. 0.0 = no caching (default), 0.5 = skip
+    // ~50% of forward passes. First 2 and last 2 steps always compute.
+    // Stacks with cfg_cutoff_ratio for compound speedup.
+    float       cache_ratio      = 0.0f;
+
     // Custom timestep schedule — CSV of descending floats.
     // When non-empty, completely overrides both upstream schedule AND sideband scheduler.
     // N values = N-1 steps (trailing 0/endpoint is dropped by sampler).
