@@ -37,7 +37,7 @@ struct VAEResUnit {
 
 struct VAEBlock {
     struct ggml_tensor *sa, *sb;    // snake exp(a/b) [1, in_ch]
-    struct ggml_tensor *ctw, *ctb;  // conv_transpose F32 [K, OC, IC] standard layout, bias [out_ch]
+    struct ggml_tensor *ctw, *ctb;  // conv_transpose F16 [IC, K*OC] pre-transposed for GEMM, bias [out_ch]
     int                 in_ch, out_ch, stride, kernel;
     VAEResUnit          ru[3];
 };
@@ -325,9 +325,9 @@ static void vae_fuse_wn(struct ggml_tensor * dst, VaeWeightSource & ws, const st
     }
 }
 
-// Fuse weight_norm for ConvTranspose1d into [K, OC, IC] layout for ggml_conv_transpose_1d.
+// Fuse weight_norm for ConvTranspose1d into [IC, K*OC] layout for GEMM-based transpose conv.
 // Source weight_v is [K, OC, IC] (ggml ne[0]=K, ne[1]=OC, ne[2]=IC).
-// weight_norm dim0=IC, fan=K*OC.  We keep the native layout (no transpose).
+// weight_norm dim0=IC, fan=K*OC.  Data is transposed so mul_mat contracts over IC.
 // Type-aware: reads F32, BF16, or F16 source tensors.
 static void vae_fuse_wn_ct(struct ggml_tensor * dst, VaeWeightSource & ws, const std::string & pfx) {
     ggml_type v_type, g_type;
@@ -336,10 +336,10 @@ static void vae_fuse_wn_ct(struct ggml_tensor * dst, VaeWeightSource & ws, const
     if (!v || !g) { fprintf(stderr, "[VAE] FATAL: missing weight_norm tensors for '%s', aborting load\n", pfx.c_str()); exit(1); }
     int n_dims_v; int64_t ne_v[4];
     ws.shape((pfx + ".weight_v").c_str(), n_dims_v, ne_v);
-    int dim0 = (int) ne_v[n_dims_v - 1];
+    int dim0 = (int) ne_v[n_dims_v - 1];  // IC
     int64_t total = 1;
     for (int i = 0; i < n_dims_v; i++) total *= ne_v[i];
-    int fan = (int) (total / dim0);
+    int fan = (int) (total / dim0);       // K*OC
     std::vector<float> w(dim0 * fan);
     for (int d = 0; d < dim0; d++) {
         float gv  = vae_read_float(g, d, g_type);
@@ -350,8 +350,8 @@ static void vae_fuse_wn_ct(struct ggml_tensor * dst, VaeWeightSource & ws, const
         }
         float s = gv / (sqrtf(nsq) + 1e-12f);
         for (int i = 0; i < fan; i++) {
-            float vv       = vae_read_float(v, d * fan + i, v_type);
-            w[d * fan + i] = vv * s;    // native layout: [ic * K_OC + k_oc]
+            float vv        = vae_read_float(v, d * fan + i, v_type);
+            w[i * dim0 + d] = vv * s;    // transposed: [k_oc * IC + ic] for GEMM
         }
     }
     if (dst->type == GGML_TYPE_F16) {
@@ -457,7 +457,7 @@ static void vae_ggml_load(VAEGGML * m, const char * path) {
         int C        = out_ch[i];
         b.sa         = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1, in_ch[i]);
         b.sb         = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1, in_ch[i]);
-        b.ctw        = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, b.kernel, out_ch[i], in_ch[i]);
+        b.ctw        = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, in_ch[i], b.kernel * out_ch[i]);
         b.ctb        = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, out_ch[i]);
         for (int r = 0; r < 3; r++) {
             VAEResUnit & ru = b.ru[r];
@@ -555,43 +555,90 @@ static struct ggml_tensor * vae_conv1d(struct ggml_context * ctx,
     return y;
 }
 
-// ConvTranspose1d using standard upstream ggml_conv_transpose_1d
-// w: [K, OC, IC] standard ConvTranspose1d weight layout
+// ConvTranspose1d via GEMM + col2im using standard GGML ops only.
+// w: [IC, K*OC] F16, pre-transposed at load for mul_mat (contracts over IC).
 // x: [T_in, IC]
 // Returns: [T_out_cropped, OC]
 //
-// NOTE: vanilla ggml_conv_transpose_1d asserts p0==0 (no built-in padding).
-// ConvTranspose1d "padding" is really output cropping: remove `padding` samples
-// from each end. We compute with p0=0 (full output) then crop via ggml_view.
+// PERF: ggml_conv_transpose_1d uses a naive O(N*IC*T) CUDA kernel. This GEMM
+// approach uses cuBLAS (tensor-core accelerated), then standard reshape/pad/acc
+// ops for the col2im scatter-add. ~100x faster for our tensor sizes.
+//
+// Requires K = 2*stride (true for all VAE blocks: kernel = stride * 2).
 static struct ggml_tensor * vae_conv_t1d(struct ggml_context * ctx,
-                                         struct ggml_tensor *  w,  // [K, OC, IC] standard layout
+                                         struct ggml_tensor *  w,  // [IC, K*OC] F16 pre-transposed
                                          struct ggml_tensor *  b,  // [OC] or NULL
                                          struct ggml_tensor *  x,  // [T_in, IC]
                                          int                   stride,
                                          int                   padding,
                                          int                   oc) {
-    (void) oc;  // inferred from weight shape
-    // Compute full (unpadded) conv_transpose_1d
-    struct ggml_tensor * y = ggml_conv_transpose_1d(ctx, w, x, stride, 0 /*p0*/, 1 /*dilation*/);
-    // y shape: [OL_full, OC, 1]
+    int64_t T_in = x->ne[0];
+    int64_t IC   = x->ne[1];
+    int     S    = stride;
+    int     K    = 2 * S;  // always true for our VAE
+    int64_t T_out = (T_in - 1) * S + K;  // full output length
+    (void) IC;
 
+    // Step 1: Transpose x from [T_in, IC] to [IC, T_in]
+    struct ggml_tensor * xt = ggml_cont(ctx, ggml_transpose(ctx, x));
+
+    // Step 2: GEMM via cuBLAS — contracts over IC (ne[0] of both)
+    // w: [IC, K*OC]  xt: [IC, T_in]  ->  col: [K*OC, T_in]
+    struct ggml_tensor * col = ggml_mul_mat(ctx, w, xt);
+    // col: ne0=K*OC, ne1=T_in
+
+    // Step 3: col2im via reshape + permute + pad + acc
+    // Split K=2S kernel positions into two halves:
+    //   set_A (k=0..S-1): fills output positions i*S+0 .. i*S+(S-1)
+    //   set_B (k=S..2S-1): fills output positions i*S+S .. i*S+(2S-1)
+    // Each set is contiguous in the output after interleaving.
+
+    // Reshape col [K*OC, T_in] -> [OC, K, T_in] -> split on K dim
+    struct ggml_tensor * col3 = ggml_reshape_3d(ctx, col, oc, K, T_in);
+    // col3: ne0=OC, ne1=K, ne2=T_in
+
+    // --- Set A: first S kernel positions ---
+    // View [OC, S, T_in] starting at k=0
+    struct ggml_tensor * setA = ggml_view_3d(ctx, col3,
+                                              oc, S, T_in,
+                                              col3->nb[1], col3->nb[2],
+                                              0);
+    // Permute to [S, T_in, OC] for interleaving: ne0=S, ne1=T_in, ne2=OC
+    setA = ggml_cont(ctx, ggml_permute(ctx, setA, 1, 2, 0, 3));
+    // Reshape to [S*T_in, OC] — contiguous interleaved time samples
+    struct ggml_tensor * outA = ggml_reshape_2d(ctx, setA, S * T_in, oc);
+    // Pad to full T_out: add S zeros at end -> [S*T_in + S, OC] = [T_out, OC]
+    struct ggml_tensor * outA_pad = ggml_pad(ctx, outA, S, 0, 0, 0);
+
+    // --- Set B: last S kernel positions ---
+    // View [OC, S, T_in] starting at k=S
+    struct ggml_tensor * setB = ggml_view_3d(ctx, col3,
+                                              oc, S, T_in,
+                                              col3->nb[1], col3->nb[2],
+                                              S * col3->nb[1]);
+    // Same permute + reshape as set A
+    setB = ggml_cont(ctx, ggml_permute(ctx, setB, 1, 2, 0, 3));
+    struct ggml_tensor * outB = ggml_reshape_2d(ctx, setB, S * T_in, oc);
+
+    // Accumulate set B into padded set A at offset S (shifted by one stride)
+    // ggml_acc: dst = a; view(dst, nb1, nb2, nb3, offset) += b
+    struct ggml_tensor * y = ggml_acc(ctx, outA_pad, outB,
+                                      outA_pad->nb[1],    // nb1: stride between rows in dst
+                                      outA_pad->nb[2],    // nb2
+                                      outA_pad->nb[3],    // nb3
+                                      S * sizeof(float));  // offset: S samples into dim0
+
+    // Step 4: Crop padding from output
+    // ConvTranspose1d "padding" = remove `padding` samples from each end
     if (padding > 0) {
-        // Crop: remove `padding` samples from each end of dim0
-        // OL_full = (T_in - 1)*stride + K, cropped = OL_full - 2*padding
-        int64_t OL_full  = y->ne[0];
-        int64_t OL_crop  = OL_full - 2 * padding;
-        int64_t OC_dim   = y->ne[1];
-        // ggml_view_3d(ctx, src, ne0, ne1, ne2, nb1, nb2, offset)
-        y = ggml_view_3d(ctx, y,
-                         OL_crop, OC_dim, 1,
-                         y->nb[1], y->nb[2],
-                         padding * y->nb[0]);
-        y = ggml_cont(ctx, y);  // view is non-contiguous; reshape_2d requires contiguous
+        int64_t T_crop = T_out - 2 * padding;
+        y = ggml_view_2d(ctx, y, T_crop, oc,
+                         y->nb[1],
+                         padding * sizeof(float));
+        y = ggml_cont(ctx, y);
     }
 
-    // Squeeze to 2d: [OL, OC, 1] -> [OL, OC]
-    y = ggml_reshape_2d(ctx, y, y->ne[0], y->ne[1]);
-
+    // Step 5: Add bias
     if (b) {
         struct ggml_tensor * b2d = ggml_reshape_2d(ctx, b, 1, b->ne[0]);
         y                        = ggml_add(ctx, y, b2d);
