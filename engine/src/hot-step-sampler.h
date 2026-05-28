@@ -256,7 +256,7 @@ static int dit_ggml_generate(DiTGGML *           model,
     if (do_cfg) {
         apg_mbufs.reserve(N);
         for (int i = 0; i < N; i++) {
-            apg_mbufs.emplace_back((double) -apg_momentum);  // configurable momentum
+            apg_mbufs.emplace_back(-apg_momentum);  // configurable momentum
         }
         fprintf(stderr, "[DiT] CFG enabled: guidance_scale=%.1f, %s, N_graph=%d",
                 guidance_scale, batch_cfg ? "batched" : "2-pass", N_graph);
