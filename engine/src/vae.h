@@ -588,36 +588,37 @@ static struct ggml_tensor * vae_conv_t1d(struct ggml_context * ctx,
     // col: ne0=K*OC, ne1=T_in
 
     // Step 3: col2im via reshape + permute + pad + acc
+    // k_oc indexing: k_oc = k + oc*K (k is fast dim from weight layout)
     // Split K=2S kernel positions into two halves:
     //   set_A (k=0..S-1): fills output positions i*S+0 .. i*S+(S-1)
     //   set_B (k=S..2S-1): fills output positions i*S+S .. i*S+(2S-1)
-    // Each set is contiguous in the output after interleaving.
 
-    // Reshape col [K*OC, T_in] -> [OC, K, T_in] -> split on K dim
-    struct ggml_tensor * col3 = ggml_reshape_3d(ctx, col, oc, K, T_in);
-    // col3: ne0=OC, ne1=K, ne2=T_in
+    // Reshape col [K*OC, T_in] -> [K, OC, T_in] (k is ne0, fast dim)
+    struct ggml_tensor * col3 = ggml_reshape_3d(ctx, col, K, oc, T_in);
+    // col3: ne0=K, ne1=OC, ne2=T_in
 
-    // --- Set A: first S kernel positions ---
-    // View [OC, S, T_in] starting at k=0
+    // --- Set A: first S kernel positions (k=0..S-1) ---
+    // View [S, OC, T_in] starting at k=0
     struct ggml_tensor * setA = ggml_view_3d(ctx, col3,
-                                              oc, S, T_in,
+                                              S, oc, T_in,
                                               col3->nb[1], col3->nb[2],
                                               0);
-    // Permute to [S, T_in, OC] for interleaving: ne0=S, ne1=T_in, ne2=OC
-    setA = ggml_cont(ctx, ggml_permute(ctx, setA, 1, 2, 0, 3));
+    // Permute [S, OC, T_in] -> [S, T_in, OC] for correct interleaving
+    // permute(0, 2, 1): ne0'=S(ax0), ne1'=T_in(ax2), ne2'=OC(ax1)
+    setA = ggml_cont(ctx, ggml_permute(ctx, setA, 0, 2, 1, 3));
     // Reshape to [S*T_in, OC] — contiguous interleaved time samples
     struct ggml_tensor * outA = ggml_reshape_2d(ctx, setA, S * T_in, oc);
     // Pad to full T_out: add S zeros at end -> [S*T_in + S, OC] = [T_out, OC]
     struct ggml_tensor * outA_pad = ggml_pad(ctx, outA, S, 0, 0, 0);
 
-    // --- Set B: last S kernel positions ---
-    // View [OC, S, T_in] starting at k=S
+    // --- Set B: last S kernel positions (k=S..2S-1) ---
+    // View [S, OC, T_in] starting at k=S (offset in ne0 dim)
     struct ggml_tensor * setB = ggml_view_3d(ctx, col3,
-                                              oc, S, T_in,
+                                              S, oc, T_in,
                                               col3->nb[1], col3->nb[2],
-                                              S * col3->nb[1]);
+                                              S * col3->nb[0]);  // S elements into ne0
     // Same permute + reshape as set A
-    setB = ggml_cont(ctx, ggml_permute(ctx, setB, 1, 2, 0, 3));
+    setB = ggml_cont(ctx, ggml_permute(ctx, setB, 0, 2, 1, 3));
     struct ggml_tensor * outB = ggml_reshape_2d(ctx, setB, S * T_in, oc);
 
     // Accumulate set B into padded set A at offset S (shifted by one stride)
