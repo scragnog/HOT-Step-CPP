@@ -18,6 +18,9 @@ Metrics computed:
   - beat_confidence      : Beat tracking confidence (higher = more consistent rhythm)
   - flux_stability       : Inverse of spectral flux variance (higher = more stable texture)
   - hnr_vocal            : Harmonic-to-noise ratio in vocal band 300-3000Hz (higher = cleaner vocals)
+  - rms_variance         : Variance of RMS energy over time (higher = more dynamic, musical)
+  - mfcc_variance        : Variance of timbral features (higher = more varied, musical)
+  - is_degenerate        : 1.0 if output appears to be noise/buzz/static, 0.0 otherwise
   - perceptual_score     : Weighted composite of all metrics (higher = better)
 
 Usage:
@@ -200,8 +203,61 @@ def compute_hnr_vocal(y, sr):
     return hnr_db
 
 
+def compute_rms_variance(y, sr):
+    """Variance of RMS energy over time — music is dynamic, buzz/noise is flat."""
+    rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
+    if len(rms) < 2:
+        return 0.0
+    return float(np.var(rms))
+
+
+def compute_mfcc_variance(y, sr):
+    """Mean variance across MFCC coefficients — measures timbral diversity.
+    Music has changing timbre (instruments, vocals, sections);
+    buzz/noise has near-constant timbral signature."""
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+    # Variance of each coefficient over time, then average
+    per_coeff_var = np.var(mfccs, axis=1)
+    return float(np.mean(per_coeff_var))
+
+
+def detect_degeneracy(metrics: dict) -> float:
+    """Detect if audio is degenerate (buzz, noise, static, silence).
+    Returns 1.0 for degenerate, 0.0 for normal music.
+    
+    Heuristics based on empirical observation:
+    - Very low RMS variance = flat/static signal
+    - Very low MFCC variance = no timbral change
+    - Abnormally high flux stability = monotonous
+    - Very low treble ratio with high mid = typical of buzz/hum
+    """
+    flags = 0
+    
+    # Extremely low RMS variance — signal has no dynamics
+    if metrics['rms_variance'] < 0.0001:
+        flags += 1
+    
+    # Very low MFCC variance — no timbral change
+    if metrics['mfcc_variance'] < 50.0:
+        flags += 1
+    
+    # Abnormally high flux stability — too stable to be music
+    if metrics['flux_stability'] > 5.0:
+        flags += 1
+    
+    # Collapsed treble (< 6%) — buzz/hum signature
+    if metrics['treble_ratio'] < 0.065:
+        flags += 1
+    
+    # Need at least 2 flags to call it degenerate (avoid false positives)
+    return 1.0 if flags >= 2 else 0.0
+
+
 def compute_perceptual_score(metrics: dict) -> float:
-    """Weighted composite perceptual score. Higher = better."""
+    """Weighted composite perceptual score. Higher = better.
+    
+    Includes degeneracy detection — degenerate outputs (buzz, noise, static)
+    receive a heavy penalty to prevent them from scoring above real music."""
     score = 0.0
 
     # Spectral contrast: higher = clearer (weight: 3)
@@ -221,11 +277,21 @@ def compute_perceptual_score(metrics: dict) -> float:
     # Beat confidence: higher = better (weight: 2)
     score += metrics['beat_confidence'] * 10.0
 
-    # Flux stability: higher = more stable (weight: 1)
-    score += min(metrics['flux_stability'], 5.0) * 2.0
+    # Flux stability: cap at 2.0 (anything higher is suspicious)
+    score += min(metrics['flux_stability'], 2.0) * 2.0
 
     # HNR: higher = cleaner vocals (weight: 1)
     score += max(0, metrics['hnr_vocal']) * 0.5
+
+    # RMS variance: reward dynamic range (music breathes, buzz doesn't)
+    score += min(metrics['rms_variance'] * 500.0, 5.0)
+
+    # MFCC variance: reward timbral diversity
+    score += min(metrics['mfcc_variance'] * 0.02, 5.0)
+
+    # Degeneracy penalty: -30 points for detected buzz/noise/static
+    if metrics['is_degenerate'] > 0.5:
+        score -= 30.0
 
     return score
 
@@ -247,6 +313,9 @@ def analyse_file(wav_path: str, sr: int = 44100) -> dict:
     metrics['beat_confidence'] = compute_beat_confidence(mono, sr)
     metrics['flux_stability'] = compute_flux_stability(mono, sr)
     metrics['hnr_vocal'] = compute_hnr_vocal(mono, sr)
+    metrics['rms_variance'] = compute_rms_variance(mono, sr)
+    metrics['mfcc_variance'] = compute_mfcc_variance(mono, sr)
+    metrics['is_degenerate'] = detect_degeneracy(metrics)
     metrics['perceptual_score'] = compute_perceptual_score(metrics)
 
     return metrics
@@ -308,7 +377,8 @@ def main():
         'spectral_contrast', 'onset_strength', 'onset_density',
         'stereo_width', 'bass_ratio', 'mid_ratio', 'treble_ratio',
         'balance_deviation', 'beat_confidence', 'flux_stability',
-        'hnr_vocal', 'perceptual_score',
+        'hnr_vocal', 'rms_variance', 'mfcc_variance',
+        'is_degenerate', 'perceptual_score',
     ]
 
     # Combined output CSV
