@@ -8,7 +8,7 @@
 // useEventSource, this keeps the UI responsive even during heavy logging.
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, X, Trash2, Cpu, ArrowDown, Wifi, WifiOff } from 'lucide-react';
+import { Search, X, Trash2, Cpu, ArrowDown, Pin, PinOff, Wifi, WifiOff } from 'lucide-react';
 import { useEventSource, type LogLine } from '../../hooks/useEventSource';
 
 interface VramInfo {
@@ -86,7 +86,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
   const [autoScroll, setAutoScroll] = useState(true);
   const [vram, setVram] = useState<VramInfo | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const wasAtBottom = useRef(true);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  // Guard: ignore scroll events triggered by our own programmatic scrolls
+  const isProgrammaticScroll = useRef(false);
 
   // Filter lines by search term
   const filteredLines = useMemo(() => {
@@ -96,27 +98,22 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
   }, [lines, search]);
 
   // Auto-scroll to bottom when new lines arrive.
-  // Uses rAF to wait until the DOM has painted the new content so scrollHeight
-  // is accurate. Without this, scrollTop = scrollHeight fires too early and
-  // the view ends up one batch behind.
-  const prevLineCount = useRef(0);
+  // Uses a sentinel <div> at the bottom and scrollIntoView() which is immune
+  // to contentVisibility layout deferral issues that plagued scrollTop = scrollHeight.
   useEffect(() => {
-    if (!autoScroll || !scrollRef.current) return;
-    // Only auto-scroll when line count actually increased (new output)
-    // or when search changed (filter results updated)
+    if (!autoScroll || !bottomRef.current) return;
+    isProgrammaticScroll.current = true;
+    bottomRef.current.scrollIntoView({ block: 'end' });
+    // Reset guard after scroll events have fired (next frame)
     requestAnimationFrame(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
+      isProgrammaticScroll.current = false;
     });
-    prevLineCount.current = filteredLines.length;
   }, [filteredLines, autoScroll]);
 
   // Re-engage auto-scroll when search is cleared (user finished filtering)
   const prevSearch = useRef(search);
   useEffect(() => {
     if (prevSearch.current && !search) {
-      // Filter was just cleared — snap to bottom
       setAutoScroll(true);
     }
     prevSearch.current = search;
@@ -124,13 +121,19 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
 
   // Detect manual scroll to disable auto-scroll.
   // Only disengage when the user scrolls UP from the bottom.
+  // Ignores scroll events caused by our own programmatic scrolls.
   const handleScroll = useCallback(() => {
+    if (isProgrammaticScroll.current) return;
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    const atBottom = scrollHeight - scrollTop - clientHeight < 60;
-    wasAtBottom.current = atBottom;
-    setAutoScroll(atBottom);
-  }, []);
+    // 80px threshold — generous to avoid flicker from rounding/resize
+    const atBottom = scrollHeight - scrollTop - clientHeight < 80;
+    if (!atBottom && autoScroll) {
+      setAutoScroll(false);
+    } else if (atBottom && !autoScroll) {
+      setAutoScroll(true);
+    }
+  }, [autoScroll]);
 
   // Poll VRAM every 5 seconds
   useEffect(() => {
@@ -200,16 +203,35 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Auto-scroll pin toggle — always visible */}
+          <button
+            onClick={() => {
+              const next = !autoScroll;
+              setAutoScroll(next);
+              if (next && bottomRef.current) {
+                bottomRef.current.scrollIntoView({ block: 'end' });
+              }
+            }}
+            className={`p-1 rounded transition-colors ${
+              autoScroll
+                ? 'text-blue-400 bg-blue-500/10 hover:bg-blue-500/20'
+                : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+            }`}
+            title={autoScroll ? 'Auto-scroll ON (click to unpin)' : 'Auto-scroll OFF (click to pin to bottom)'}
+          >
+            {autoScroll ? <Pin size={12} /> : <PinOff size={12} />}
+          </button>
+          {/* Jump to bottom (only when not pinned) */}
           {!autoScroll && (
             <button
               onClick={() => {
                 setAutoScroll(true);
-                if (scrollRef.current) {
-                  scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                if (bottomRef.current) {
+                  bottomRef.current.scrollIntoView({ block: 'end' });
                 }
               }}
               className="p-1 rounded text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
-              title="Scroll to bottom"
+              title="Jump to bottom"
             >
               <ArrowDown size={12} />
             </button>
@@ -261,6 +283,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
         {filteredLines.map((line) => (
           <LogLineItem key={line.id} line={line} search={search} />
         ))}
+        {/* Sentinel element — scrollIntoView target for reliable auto-scroll */}
+        <div ref={bottomRef} />
       </div>
     </div>
   );
