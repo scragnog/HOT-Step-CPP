@@ -553,36 +553,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         />
       </div>
 
-      {/* Performance Section */}
-      <div className="settings-section">
-        <div className="settings-section-header">
-          <Zap size={16} className="settings-section-icon" />
-          <span className="settings-section-title">{t('settings.general.performance')}</span>
-        </div>
 
-        <SettingRow
-          id="setting-co-resident"
-          label={t('settings.general.coResident')}
-          description={t('settings.general.coResidentDesc')}
-          checked={settings.coResident}
-          onChange={(v) => update('coResident', v)}
-          badges={[
-            { text: '−13s', type: 'speed' },
-            { text: '+8GB VRAM', type: 'vram' },
-          ]}
-        />
-
-        <SettingRow
-          id="setting-cache-lm"
-          label={t('settings.general.cacheLm')}
-          description={t('settings.general.cacheLmDesc')}
-          checked={settings.cacheLmCodes}
-          onChange={(v) => update('cacheLmCodes', v)}
-          badges={[
-            { text: '−12s', type: 'speed' },
-          ]}
-        />
-      </div>
 
       {/* Disco Mode */}
       <div className="border-t border-zinc-200 dark:border-white/5 pt-4 mt-4">
