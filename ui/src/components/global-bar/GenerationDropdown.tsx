@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 // Seed input uses local string state to avoid parseInt("-") → NaN → -1 snap-back
 import { useTranslation } from 'react-i18next';
-import { RotateCcw, ChevronDown, Music2, Upload, Trash2 } from 'lucide-react';
+import { RotateCcw, ChevronDown, Music2, Upload, Trash2, Zap } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
 import { ToggleSwitch } from './BarSection';
@@ -29,6 +29,7 @@ export const GenerationDropdown: React.FC = () => {
   const [latentOpen, setLatentOpen] = usePersistedState('hs-genAccordion-latent', false);
   const [denoiserOpen, setDenoiserOpen] = usePersistedState('hs-genAccordion-denoiser', false);
   const [autoTrimOpen, setAutoTrimOpen] = usePersistedState('hs-genAccordion-autotrim', false);
+  const [perfOpen, setPerfOpen] = usePersistedState('hs-genAccordion-perf', false);
   const [timbreOpen, setTimbreOpen] = usePersistedState('hs-genAccordion-timbre', false);
   const { token } = useAuth();
 
@@ -74,22 +75,48 @@ export const GenerationDropdown: React.FC = () => {
       <Slider label="Guidance Scale" value={gp.guidanceScale}
         onChange={gp.setGuidanceScale} min={0} max={20} step={0.1} showInput />
 
-      {/* CFG Cutoff — ratio of steps using full guidance */}
-      <div>
-        <Slider label="CFG Cutoff" value={gp.cfgCutoffRatio}
-          onChange={gp.setCfgCutoffRatio} min={0} max={1} step={0.05} showInput />
-        <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
-          Ratio of steps using full guidance. Lower = faster but may reduce prompt adherence. 0.5 ≈ 20% speedup.
-        </p>
-      </div>
-
-      {/* Step Cache — velocity caching to skip redundant forward passes */}
-      <div>
-        <Slider label="Step Cache" value={gp.cacheRatio}
-          onChange={gp.setCacheRatio} min={0} max={0.7} step={0.05} showInput />
-        <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
-          Skip redundant forward passes by reusing velocity. Higher = faster but may reduce quality. Try 0.3–0.5.
-        </p>
+      {/* ── Performance / Speed Boosts (Accordion, closed by default) ── */}
+      <div className={`rounded-xl border transition-all overflow-hidden ${
+        (gp.cfgCutoffRatio < 1 || gp.cacheRatio > 0)
+          ? 'border-amber-500/20 bg-amber-500/5'
+          : 'border-zinc-200 dark:border-white/10 bg-zinc-100/30 dark:bg-zinc-800/30'
+      }`}>
+        <button
+          type="button"
+          onClick={() => setPerfOpen(!perfOpen)}
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-amber-500/5 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <ChevronDown size={12} className={`text-amber-400 transition-transform duration-200 ${perfOpen ? 'rotate-180' : ''}`} />
+            <Zap size={14} className={(gp.cfgCutoffRatio < 1 || gp.cacheRatio > 0) ? 'text-amber-400' : 'text-zinc-500'} />
+            <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Performance</span>
+          </div>
+          {(gp.cfgCutoffRatio < 1 || gp.cacheRatio > 0) && (
+            <span className="text-[10px] text-amber-400/60 font-mono">
+              {gp.cfgCutoffRatio < 1 ? `CFG ${Math.round(gp.cfgCutoffRatio * 100)}%` : ''}
+              {gp.cfgCutoffRatio < 1 && gp.cacheRatio > 0 ? ' · ' : ''}
+              {gp.cacheRatio > 0 ? `Cache ${Math.round(gp.cacheRatio * 100)}%` : ''}
+            </span>
+          )}
+        </button>
+        {perfOpen && (
+          <div className="px-3 pb-3 space-y-3 border-t border-zinc-200 dark:border-white/5">
+            <Slider label="CFG Cutoff" value={gp.cfgCutoffRatio}
+              onChange={gp.setCfgCutoffRatio} min={0} max={1} step={0.05} showInput />
+            <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
+              Ratio of steps using full guidance. Lower = faster but may reduce prompt adherence. 0.5 ≈ 20% speedup.
+            </p>
+            <Slider label="Step Cache" value={gp.cacheRatio}
+              onChange={gp.setCacheRatio} min={0} max={0.7} step={0.05} showInput />
+            <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
+              Skip redundant forward passes by reusing velocity. Higher = faster but may reduce quality. Try 0.3–0.5.
+            </p>
+            <button type="button" onClick={() => { gp.setCfgCutoffRatio(1); gp.setCacheRatio(0); }}
+              className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 transition-colors">
+              <RotateCcw size={10} /> Reset to defaults
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Shift with Auto toggle */}
