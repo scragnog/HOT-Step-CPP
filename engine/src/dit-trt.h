@@ -153,12 +153,12 @@ inline bool dit_trt_build(
     // Builder config
     auto config = builder->createBuilderConfig();
 
-    // FP16 + TF32: TRT auto-selects fp16 tensor cores for matmuls,
-    // keeps fp32 for norms/reductions where precision is needed.
-    // TF32 accelerates any remaining fp32 ops on Ampere+ tensor cores.
-    config->setFlag(nvinfer1::BuilderFlag::kFP16);
+    // TF32 ONLY: TRT 10.16 on Blackwell (sm_120) NaNs with kFP16 even
+    // though it claims to force layernorm Reduce/Pow to fp32. The XL model's
+    // 32-layer residual accumulation overflows fp16 intermediate values.
+    // TF32 provides ~2x speedup on Ampere+ via tensor cores (19-bit mantissa).
     config->setFlag(nvinfer1::BuilderFlag::kTF32);
-    fprintf(stderr, "[DiT-TRT] FP16 + TF32 (auto-mixed precision from fp32 graph)\n");
+    fprintf(stderr, "[DiT-TRT] TF32 only (fp32 graph, no fp16 — Blackwell overflow workaround)\n");
 
     // Enable refittable engine (zero perf penalty with IDENTICAL)
     config->setFlag(nvinfer1::BuilderFlag::kREFIT_IDENTICAL);
