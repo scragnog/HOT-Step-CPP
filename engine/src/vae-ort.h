@@ -75,21 +75,26 @@ static inline bool vae_ort_load(VaeOrt * ctx, const char * onnx_path, int device
         trt_cache_dir = (slash != std::string::npos) ? p.substr(0, slash) : ".";
     }
 
-    // Try TensorRT EP first
+    // Try TensorRT RTX EP first (ORT 1.21+ uses NvTensorRTRTXExecutionProvider)
     try {
         std::unordered_map<std::string, std::string> trt_opts;
         trt_opts["device_id"]                = std::to_string(device_id);
-        trt_opts["trt_max_workspace_size"]   = std::to_string((size_t)2 << 30);  // 2 GiB
-        trt_opts["trt_fp16_enable"]          = "1";
-        trt_opts["trt_engine_cache_enable"]  = "1";
-        trt_opts["trt_engine_cache_path"]    = trt_cache_dir;
+        trt_opts["nv_max_workspace_size"]    = std::to_string((size_t)2 << 30);  // 2 GiB
+        trt_opts["nv_runtime_cache_path"]    = trt_cache_dir;
+        trt_opts["nv_detailed_build_log"]    = "1";
 
-        ctx->session_opts.AppendExecutionProvider("TensorrtExecutionProvider", trt_opts);
+        // Dynamic shape profiles for VAE: input "latents" is [1, 64, T]
+        // T varies per generation length. Profile: min=64, opt=2048, max=8192 latent frames.
+        trt_opts["nv_profile_min_shapes"]    = "latents:1x64x64";
+        trt_opts["nv_profile_opt_shapes"]    = "latents:1x64x2048";
+        trt_opts["nv_profile_max_shapes"]    = "latents:1x64x8192";
+
+        ctx->session_opts.AppendExecutionProvider("NvTensorRTRTXExecutionProvider", trt_opts);
         ctx->using_trt = true;
-        fprintf(stderr, "[VAE-ORT] TensorRT EP appended (device %d, cache=%s)\n",
+        fprintf(stderr, "[VAE-ORT] TensorRT RTX EP appended (device %d, cache=%s)\n",
                 device_id, trt_cache_dir.c_str());
     } catch (const std::exception & e) {
-        fprintf(stderr, "[VAE-ORT] TensorRT EP unavailable: %s — trying CUDA EP\n", e.what());
+        fprintf(stderr, "[VAE-ORT] TensorRT RTX EP unavailable: %s — trying CUDA EP\n", e.what());
         ctx->using_trt = false;
     }
 
