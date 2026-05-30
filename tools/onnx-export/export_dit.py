@@ -156,12 +156,14 @@ class DiTForwardWrapper(nn.Module):
         context_latents = input_latents[:, :, :128]
         hidden_states = input_latents[:, :, 128:]
         
-        # Trace with fp32 autocast regardless of precision recipe.
-        # The model WEIGHTS are bf16 (for memory savings in the ONNX), but the
-        # compute graph must be fp32 to avoid the TorchScript exporter generating
-        # Cast(to=COMPLEX128) from SDPA's internal decomposition with bf16 inputs.
-        # TRT's FP16 builder flag then auto-selects fp16 matmuls at build time.
-        with torch.amp.autocast('cuda', dtype=torch.float32):
+        # bf16 autocast: the dynamo exporter decomposes complex ops
+        # (view_as_complex → rotate_half) into real-number equivalents,
+        # so no Cast(to=COMPLEX128) appears in the ONNX graph.
+        if self.precision == "bf16_mixed":
+            autocast_dtype = torch.bfloat16
+        else:
+            autocast_dtype = torch.float32
+        with torch.amp.autocast('cuda', dtype=autocast_dtype):
             outputs = self.dit(
                 hidden_states=hidden_states,
                 timestep=t,
@@ -387,9 +389,11 @@ def export_onnx(dit_model, config, output_path: str, opset: int = 18, precision:
     """Export the DiT forward pass to ONNX."""
     device = next(dit_model.parameters()).device
     
-    # Dummy inputs are fp32 for tracing (bf16 trace hits ComplexDouble in SDPA)
-    # The model weights stay bf16 in the ONNX — TRT's FP16 flag handles the rest
-    tensor_dtype = torch.float32
+    # Dummy inputs match precision recipe
+    if precision == "bf16_mixed":
+        tensor_dtype = torch.bfloat16
+    else:
+        tensor_dtype = torch.float32
     
     wrapper = DiTForwardWrapper(dit_model, precision=precision)
     wrapper.eval()
@@ -438,12 +442,10 @@ def export_onnx(dit_model, config, output_path: str, opset: int = 18, precision:
             "t_r":           {0: "batch"},
             "velocity":      {0: "batch", 1: "seq_len"},
         },
-        do_constant_folding=True,  # fp32 trace — no ComplexDouble issue
         export_params=True,
-        # Force legacy TorchScript exporter — the dynamo/ExportedProgram path
-        # has a type promotion bug with mixed bf16/fp32 graphs (assertion in
-        # RMSNorm: prim.device != aten.mul).
-        dynamo=False,
+        # Dynamo exporter decomposes complex ops into real equivalents,
+        # avoiding Cast(to=COMPLEX128) that TRT rejects. Required for bf16.
+        dynamo=True,
     )
     
     t1 = time.time()

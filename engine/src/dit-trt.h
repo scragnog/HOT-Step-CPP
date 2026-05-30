@@ -124,20 +124,20 @@ inline bool dit_trt_build(
     }
 
     // Create network — standard EXPLICIT_BATCH, NO STRONGLY_TYPED.
-    // Demon-proven approach: export in FP32, let TRT auto-select fp16
-    // for matmuls via the FP16 builder flag. TRT keeps fp32 where it
-    // detects precision issues (norms, reductions, etc.).
-    // Model weights are bf16 in the ONNX (halved file size) — TRT promotes
-    // them to fp16 during engine build. No STRONGLY_TYPED needed.
+    // STRONGLY_TYPED: TRT honors the per-tensor dtypes from the ONNX graph.
+    // The dynamo-exported bf16_mixed ONNX has bf16 trunk + fp32 islands.
+    // TRT runs bf16 tensor cores for matmuls and fp32 for norms/residuals.
     uint32_t net_flags = 1U << static_cast<uint32_t>(
-        nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+        nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)
+      | 1U << static_cast<uint32_t>(
+        nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
     auto network = builder->createNetworkV2(net_flags);
     if (!network) {
         fprintf(stderr, "[DiT-TRT] Failed to create network\n");
         delete builder;
         return false;
     }
-    fprintf(stderr, "[DiT-TRT] Network created (EXPLICIT_BATCH)\n");
+    fprintf(stderr, "[DiT-TRT] STRONGLY_TYPED network (bf16_mixed from dynamo)\n");
 
     // Parse ONNX
     auto parser = nvonnxparser::createParser(*network, logger);
@@ -153,12 +153,11 @@ inline bool dit_trt_build(
     // Builder config
     auto config = builder->createBuilderConfig();
 
-    // TF32 ONLY: TRT 10.16 on Blackwell (sm_120) NaNs with kFP16 even
-    // though it claims to force layernorm Reduce/Pow to fp32. The XL model's
-    // 32-layer residual accumulation overflows fp16 intermediate values.
-    // TF32 provides ~2x speedup on Ampere+ via tensor cores (19-bit mantissa).
+    // STRONGLY_TYPED + TF32: graph types are authoritative.
+    // TF32 accelerates fp32 island ops on tensor cores.
+    // No FP16/BF16 builder flags — STRONGLY_TYPED forbids them.
     config->setFlag(nvinfer1::BuilderFlag::kTF32);
-    fprintf(stderr, "[DiT-TRT] TF32 only (fp32 graph, no fp16 — Blackwell overflow workaround)\n");
+    fprintf(stderr, "[DiT-TRT] STRONGLY_TYPED + TF32 (bf16_mixed from dynamo ONNX)\n");
 
     // Enable refittable engine (zero perf penalty with IDENTICAL)
     config->setFlag(nvinfer1::BuilderFlag::kREFIT_IDENTICAL);

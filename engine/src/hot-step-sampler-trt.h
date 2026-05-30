@@ -222,20 +222,26 @@ static int dit_trt_generate(DitTrt *              trt,
         }
     }
 
-    // ── GPU buffers (FP32 for TRT I/O) ──────────────────────────────────
-    // TRT with FP16 builder flag keeps I/O tensors in fp32 (auto-selects
-    // fp16 internally for matmuls). All buffers must match engine dtype.
-    size_t input_elems = (size_t)N_graph * T * in_ch;
-    size_t enc_elems   = (size_t)N_graph * enc_S * H_enc;
-    size_t vel_elems   = (size_t)N_graph * T * Oc;
+    // ── GPU buffers (BF16 for TRT I/O) ──────────────────────────────────
+    // STRONGLY_TYPED bf16_mixed engine: input_latents, enc_hidden, velocity
+    // are bf16. Timesteps (t, t_r) are fp32. Host staging buffers convert
+    // fp32 <-> bf16 for GPU transfer.
+    size_t input_bf16_elems = (size_t)N_graph * T * in_ch;
+    size_t enc_bf16_elems   = (size_t)N_graph * enc_S * H_enc;
+    size_t vel_bf16_elems   = (size_t)N_graph * T * Oc;
 
-    // GPU device memory (all fp32)
+    // Host BF16 staging
+    std::vector<uint16_t> h_input_bf16(input_bf16_elems);
+    std::vector<uint16_t> h_enc_bf16(enc_bf16_elems);
+    std::vector<uint16_t> h_vel_bf16(vel_bf16_elems);
+
+    // GPU device memory
     void *d_input = nullptr, *d_enc = nullptr, *d_vel = nullptr;
     float *d_t = nullptr, *d_t_r = nullptr;
 
-    cudaMalloc(&d_input, input_elems * sizeof(float));
-    cudaMalloc(&d_enc,   enc_elems * sizeof(float));
-    cudaMalloc(&d_vel,   vel_elems * sizeof(float));
+    cudaMalloc(&d_input, input_bf16_elems * sizeof(uint16_t));
+    cudaMalloc(&d_enc,   enc_bf16_elems * sizeof(uint16_t));
+    cudaMalloc(&d_vel,   vel_bf16_elems * sizeof(uint16_t));
     cudaMalloc((void**)&d_t,     N_graph * sizeof(float));
     cudaMalloc((void**)&d_t_r,   N_graph * sizeof(float));
 
@@ -249,14 +255,15 @@ static int dit_trt_generate(DitTrt *              trt,
         return -1;
     }
 
-    // Pre-upload encoder hidden states (fp32 direct)
-    cudaMemcpy(d_enc, enc_buf.data(), enc_elems * sizeof(float),
+    // Pre-upload encoder hidden states (fp32 → bf16)
+    convert_fp32_to_bf16(enc_buf.data(), h_enc_bf16.data(), enc_bf16_elems);
+    cudaMemcpy(d_enc, h_enc_bf16.data(), enc_bf16_elems * sizeof(uint16_t),
                cudaMemcpyHostToDevice);
 
     GuidanceCtx g_ctx = {0, num_steps, 0.0f, 0.0f};
 
     // ── Forward pass helper ─────────────────────────────────────────────
-    // Packs xt into input_buf, uploads fp32, runs TRT, reads back fp32
+    // Packs xt into input_buf, converts to BF16, uploads, runs TRT, reads back
     auto trt_forward = [&](const float * xt_in, float t_val, int n_batch,
                            float * vel_out) {
         // Pack xt noise channels into input_buf slots [0..n_batch)
@@ -275,9 +282,10 @@ static int dit_trt_generate(DitTrt *              trt,
             }
         }
 
-        // Upload input (fp32 direct)
+        // Convert input to BF16 and upload
         size_t input_n = (size_t)n_batch * T * in_ch;
-        cudaMemcpy(d_input, input_buf.data(), input_n * sizeof(float),
+        convert_fp32_to_bf16(input_buf.data(), h_input_bf16.data(), input_n);
+        cudaMemcpy(d_input, h_input_bf16.data(), input_n * sizeof(uint16_t),
                    cudaMemcpyHostToDevice);
 
         // Set timestep (FP32, broadcast to all batch slots)
@@ -285,9 +293,10 @@ static int dit_trt_generate(DitTrt *              trt,
         cudaMemcpy(d_t, t_host.data(), n_batch * sizeof(float), cudaMemcpyHostToDevice);
         cudaMemcpy(d_t_r, t_host.data(), n_batch * sizeof(float), cudaMemcpyHostToDevice);
 
-        // Re-upload encoder states (fp32 direct)
+        // Re-upload encoder states (fp32 → bf16)
         size_t enc_n = (size_t)n_batch * enc_S * H_enc;
-        cudaMemcpy(d_enc, enc_buf.data(), enc_n * sizeof(float),
+        convert_fp32_to_bf16(enc_buf.data(), h_enc_bf16.data(), enc_n);
+        cudaMemcpy(d_enc, h_enc_bf16.data(), enc_n * sizeof(uint16_t),
                    cudaMemcpyHostToDevice);
 
         // Run TRT forward
@@ -298,10 +307,11 @@ static int dit_trt_generate(DitTrt *              trt,
             return false;
         }
 
-        // Read back velocity (fp32 direct)
+        // Read back velocity (BF16 → FP32)
         size_t vel_n = (size_t)n_batch * T * Oc;
-        cudaMemcpy(vel_out, d_vel, vel_n * sizeof(float),
+        cudaMemcpy(h_vel_bf16.data(), d_vel, vel_n * sizeof(uint16_t),
                    cudaMemcpyDeviceToHost);
+        convert_bf16_to_fp32(h_vel_bf16.data(), vel_out, vel_n);
         return true;
     };
 
