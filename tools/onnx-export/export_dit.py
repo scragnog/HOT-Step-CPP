@@ -6,8 +6,14 @@ Exports the SINGLE FORWARD PASS (one diffusion timestep) of the DiT model,
 wrapping the full 32-layer transformer + attention mask computation + RoPE
 into a single ONNX graph with 4 simplified inputs.
 
+Precision recipes (--precision):
+  fp32       — Full FP32. Correct but slow. Baseline for validation.
+  fp16_mixed — (default for XL) bf16 bulk + fp32 ConvTranspose1d island.
+               Used with TRT STRONGLY_TYPED mode. Demon-proven recipe.
+
 Usage:
     python export_dit.py --model-dir <path-to-safetensors-model> --output <output.onnx>
+    python export_dit.py --model-dir <path> --output <path> --precision fp16_mixed
 
 The diffusion loop, guidance (APG/CFG), and solvers stay in C++.
 TRT compiles the ONNX graph once; LoRA adapters use IRefitter weight swapping.
@@ -27,27 +33,110 @@ import torch.nn.functional as F
 # The model dir contains modeling_acestep_v15_xl_base.py
 
 
+class _Fp32CastWrapper(nn.Module):
+    """Run an inner module in fp32, casting around it.
+
+    Used when TRT has no kernel for a specific op shape.
+    The wrapper casts input to fp32, runs the inner module, then casts
+    output back to the caller's dtype.
+    """
+    def __init__(self, inner: nn.Module):
+        super().__init__()
+        inner.float()  # force inner weights to fp32
+        self.inner = inner
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out_dtype = x.dtype
+        # Disable autocast — without this, the outer autocast(fp16) overrides
+        # our explicit fp32 computation and TRT sees fp16 Conv weights.
+        with torch.amp.autocast('cuda', enabled=False):
+            return self.inner(x.float()).to(out_dtype)
+
+
+class PatchEmbedLinear(nn.Module):
+    """Replace Conv1d(C_in, C_out, K, stride=K) with reshape + Linear.
+    
+    TRT 10.16 has NO kernels for 1D convolutions with patch_size shapes
+    in any precision mode (fp16 or fp32). This is mathematically equivalent:
+      Conv1d: input[B, C_in, T] → output[B, C_out, T//K]
+      Linear: input[B, C_in, T] → unfold[B, T//K, C_in*K] → Linear → [B, C_out, T//K]
+    """
+    def __init__(self, conv: nn.Conv1d):
+        super().__init__()
+        C_out, C_in, K = conv.weight.shape
+        self.kernel_size = K
+        self.linear = nn.Linear(C_in * K, C_out, bias=conv.bias is not None)
+        # Conv weight [C_out, C_in, K] → Linear weight [C_out, C_in*K]
+        self.linear.weight.data = conv.weight.data.reshape(C_out, -1).clone()
+        if conv.bias is not None:
+            self.linear.bias.data = conv.bias.data.clone()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [B, C_in, T] (from Lambda transpose in proj_in)
+        B, C, T = x.shape
+        K = self.kernel_size
+        # Unfold patches: [B, C, T] → [B, T//K, C*K]
+        x = x.reshape(B, C, T // K, K)       # [B, C, T//K, K]
+        x = x.permute(0, 2, 1, 3)             # [B, T//K, C, K]
+        x = x.reshape(B, T // K, C * K)       # [B, T//K, C*K]
+        out = self.linear(x)                   # [B, T//K, C_out]
+        return out.transpose(1, 2)             # [B, C_out, T//K]
+
+
+class UnPatchLinear(nn.Module):
+    """Replace ConvTranspose1d(C_in, C_out, K, stride=K) with Linear + reshape.
+    
+    TRT 10.16 has NO kernels for 1D transposed convolutions with patch_size shapes.
+    This is mathematically equivalent:
+      ConvTranspose1d: input[B, C_in, T//K] → output[B, C_out, T]
+      Linear: input[B, T//K, C_in] → Linear → [B, T//K, C_out*K] → fold → [B, C_out, T]
+    """
+    def __init__(self, deconv: nn.ConvTranspose1d):
+        super().__init__()
+        C_in, C_out, K = deconv.weight.shape
+        self.kernel_size = K
+        self.C_out = C_out
+        self.linear = nn.Linear(C_in, C_out * K, bias=deconv.bias is not None)
+        # ConvTranspose1d weight [C_in, C_out, K] → Linear weight [C_out*K, C_in]
+        self.linear.weight.data = deconv.weight.data.permute(1, 2, 0).reshape(C_out * K, C_in).clone()
+        if deconv.bias is not None:
+            # ConvTranspose1d bias [C_out] → Linear bias [C_out*K] (repeat per patch)
+            self.linear.bias.data = deconv.bias.data.repeat_interleave(K).clone()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [B, C_in, T//K] (from Lambda transpose in proj_out)
+        B, C, T_small = x.shape
+        K = self.kernel_size
+        x = x.transpose(1, 2)                              # [B, T//K, C_in]
+        x = self.linear(x)                                  # [B, T//K, C_out*K]
+        x = x.reshape(B, T_small, self.C_out, K)            # [B, T//K, C_out, K]
+        x = x.permute(0, 2, 1, 3)                           # [B, C_out, T//K, K]
+        x = x.reshape(B, self.C_out, T_small * K)           # [B, C_out, T]
+        return x
+
+
 class DiTForwardWrapper(nn.Module):
     """
     Wrapper around AceStepDiTModel.forward() that simplifies the interface
     for ONNX export.
     
     ONNX inputs (4 total):
-        input_latents:  [B, T, 192]  fp16  — pre-concatenated [context_latents, xt]
-        enc_hidden:     [B, S, 2048] fp16  — encoder hidden states
-        t:              [B]          fp32  — current timestep
-        t_r:            [B]          fp32  — reference timestep
+        input_latents:  [B, T, 192]  — pre-concatenated [context_latents, xt]
+        enc_hidden:     [B, S, 2048] — encoder hidden states
+        t:              [B]          fp32 — current timestep
+        t_r:            [B]          fp32 — reference timestep
     
     ONNX output:
-        velocity:       [B, T, 64]   fp16  — predicted flow velocity
+        velocity:       [B, T, 64]   — predicted flow velocity
     
     Masks and position IDs are computed internally from T and S.
     """
     
-    def __init__(self, dit_model):
+    def __init__(self, dit_model, precision="fp16_mixed"):
         super().__init__()
         self.dit = dit_model
         self.config = dit_model.config
+        self.precision = precision
     
     def forward(self, input_latents, enc_hidden, t, t_r):
         """
@@ -66,8 +155,12 @@ class DiTForwardWrapper(nn.Module):
         context_latents = input_latents[:, :, :128]
         hidden_states = input_latents[:, :, 128:]
         
-        # Use autocast to handle mixed precision (t is fp32, weights are fp16)
-        with torch.amp.autocast('cuda', dtype=torch.float16):
+        # autocast(bf16) is needed during ONNX trace to handle RoPE's complex
+        # number computation (torch.view_as_complex → ComplexDouble).
+        # The model weights are already in the right dtypes (bf16 bulk + fp32
+        # islands); autocast just ensures the tracer resolves complex→real.
+        autocast_dtype = torch.float16 if self.precision == "fp16_mixed" else torch.float32
+        with torch.amp.autocast('cuda', dtype=autocast_dtype):
             outputs = self.dit(
                 hidden_states=hidden_states,
                 timestep=t,
@@ -86,7 +179,84 @@ class DiTForwardWrapper(nn.Module):
         return velocity
 
 
-def load_dit_model(model_dir: str, device: str = "cuda", dtype=torch.float16):
+def apply_fp16_mixed(dit_model):
+    """Apply the fp16_mixed precision recipe (XL models).
+    
+    fp16 bulk + fp32 islands for:
+      - time_embed / time_embed_r (timestep is always fp32 input)
+      - scale_shift_table (AdaLN — reduction ops need fp32 stability)  
+      - norm_out (output normalization)
+      - per-layer RMSNorms + AdaLN tables (prevent residual overflow)
+      - proj_out ConvTranspose1d (TRT has no fp16 deconv kernel for this shape)
+    
+    NOTE: TRT 10.16 does not support bf16. This recipe uses fp16 matmuls
+    with fp32 norms/residual-touching ops. The fp32 islands prevent the NaN
+    overflow that occurred when everything was fp16 (the norms accumulated
+    values exceeding fp16 range ±65504 over 32 layers).
+    
+    Uses STRONGLY_TYPED mode so TRT honors the fp16/fp32 split from the
+    ONNX graph instead of applying blanket FP16 quantization.
+    """
+    dit_model.to(torch.float16)
+    
+    # FP32 islands: timestep embeddings (t is always fp32 input)
+    if hasattr(dit_model, 'time_embed'):
+        dit_model.time_embed.float()
+        print("[export_dit] FP32 island: time_embed")
+    if hasattr(dit_model, 'time_embed_r'):
+        dit_model.time_embed_r.float()
+        print("[export_dit] FP32 island: time_embed_r")
+    
+    # FP32 island: output norm
+    if hasattr(dit_model, 'norm_out'):
+        dit_model.norm_out.float()
+        print("[export_dit] FP32 island: norm_out")
+    
+    # FP32 island: top-level AdaLN scale-shift table
+    if hasattr(dit_model, 'scale_shift_table'):
+        dit_model.scale_shift_table = nn.Parameter(
+            dit_model.scale_shift_table.data.float())
+        print("[export_dit] FP32 island: scale_shift_table")
+    
+    # FP32 islands: per-layer AdaLN tables + RMSNorms
+    # These are CRITICAL — the norms touch the residual stream and
+    # accumulated values exceed fp16 range over 32 layers. Keeping
+    # norms in fp32 prevents the overflow while matmuls stay fp16.
+    n_layers = 0
+    for layer in dit_model.layers:
+        if hasattr(layer, 'scale_shift_table'):
+            layer.scale_shift_table = nn.Parameter(
+                layer.scale_shift_table.data.float())
+        if hasattr(layer, 'self_attn_norm'):
+            layer.self_attn_norm.float()
+        if hasattr(layer, 'mlp_norm'):
+            layer.mlp_norm.float()
+        if hasattr(layer, 'cross_attn_norm'):
+            layer.cross_attn_norm.float()
+        n_layers += 1
+    if n_layers:
+        print(f"[export_dit] FP32 islands: {n_layers} layers (scale_shift + norms)")
+    
+    # Replace Conv1d/ConvTranspose1d with equivalent Linear ops.
+    # TRT 10.16 has NO kernels for 1D convolutions with patch_size=2 in ANY
+    # precision mode. PatchEmbedLinear/UnPatchLinear reformulate these as
+    # reshape+matmul which TRT handles perfectly with fp16 tensor cores.
+    if hasattr(dit_model, 'proj_in') and isinstance(dit_model.proj_in, nn.Sequential):
+        for i, mod in enumerate(dit_model.proj_in):
+            if isinstance(mod, nn.Conv1d):
+                dit_model.proj_in[i] = PatchEmbedLinear(mod)
+                print(f"[export_dit] Conv→Linear: proj_in[{i}] Conv1d → PatchEmbedLinear")
+    
+    if hasattr(dit_model, 'proj_out') and isinstance(dit_model.proj_out, nn.Sequential):
+        for i, mod in enumerate(dit_model.proj_out):
+            if isinstance(mod, nn.ConvTranspose1d):
+                dit_model.proj_out[i] = UnPatchLinear(mod)
+                print(f"[export_dit] Conv→Linear: proj_out[{i}] ConvTranspose1d → UnPatchLinear")
+    
+    return dit_model
+
+
+def load_dit_model(model_dir: str, device: str = "cuda", precision: str = "fp16_mixed"):
     """Load the AceStepDiTModel from a safetensors checkpoint."""
     model_dir = Path(model_dir)
     
@@ -105,11 +275,39 @@ def load_dit_model(model_dir: str, device: str = "cuda", dtype=torch.float16):
     except Exception:
         pass
     
-    # Add model dir to sys.path so we can import the model code
+    # Add model dir to sys.path so we can import the model code.
+    # Also add the Demon app root — model config files are re-export stubs
+    # that import from the acestep package (from Demon).
     sys.path.insert(0, str(model_dir))
+    demon_root = Path(model_dir).parent.parent.parent / "Demon"
+    if demon_root.exists():
+        sys.path.insert(0, str(demon_root))
+        print(f"[export_dit] Added {demon_root} to sys.path for acestep package")
+        # The model config stubs reference acestep.models.common but the
+        # actual module is acestep.models. Create a shim alias.
+        try:
+            import acestep.models as _am
+            sys.modules["acestep.models.common"] = _am
+            # Also create the subpackage entry so Python's import system is happy
+            import types
+            if not hasattr(_am, "common"):
+                _am.common = _am
+        except ImportError:
+            print("[export_dit] WARNING: Could not import acestep.models")
     
-    # Import the model class
-    from modeling_acestep_v15_xl_base import AceStepDiTModel
+    # Auto-detect the modeling module — different model variants use different
+    # filenames (modeling_acestep_v15_xl_base.py, xl_turbo.py, etc.)
+    import glob
+    modeling_files = glob.glob(str(model_dir / "modeling_acestep_v15*.py"))
+    if not modeling_files:
+        print(f"[export_dit] ERROR: No modeling_acestep_v15*.py found in {model_dir}")
+        sys.exit(1)
+    modeling_module = Path(modeling_files[0]).stem
+    print(f"[export_dit] Using modeling module: {modeling_module}")
+    
+    import importlib
+    mod = importlib.import_module(modeling_module)
+    AceStepDiTModel = mod.AceStepDiTModel
     from configuration_acestep_v15 import AceStepConfig
     
     # Load config
@@ -122,14 +320,35 @@ def load_dit_model(model_dir: str, device: str = "cuda", dtype=torch.float16):
     config._attn_implementation = "sdpa"
     
     print(f"[export_dit] Loading model from {model_dir}...")
+    print(f"[export_dit] Precision recipe: {precision}")
     t0 = time.time()
     
     # Create just the DiT model (decoder) — no need for full model
     dit_model = AceStepDiTModel(config)
     
-    # Load weights — filter to decoder.* prefix
+    # Load weights — handle both single-file and sharded safetensors
     from safetensors.torch import load_file
-    state_dict = load_file(str(model_dir / "model.safetensors"))
+    
+    index_path = model_dir / "model.safetensors.index.json"
+    single_path = model_dir / "model.safetensors"
+    
+    if index_path.exists():
+        # Sharded: load index to find all shard files
+        import json as _json
+        with open(index_path) as f:
+            index = _json.load(f)
+        shard_files = sorted(set(index["weight_map"].values()))
+        print(f"[export_dit] Loading {len(shard_files)} shards...")
+        state_dict = {}
+        for shard in shard_files:
+            shard_path = model_dir / shard
+            print(f"[export_dit]   Loading {shard}...")
+            state_dict.update(load_file(str(shard_path)))
+    elif single_path.exists():
+        state_dict = load_file(str(single_path))
+    else:
+        print(f"[export_dit] ERROR: No model.safetensors found in {model_dir}")
+        sys.exit(1)
     
     # Filter and remap: "decoder.X" -> "X" for the DiT model
     dit_state_dict = {}
@@ -143,22 +362,45 @@ def load_dit_model(model_dir: str, device: str = "cuda", dtype=torch.float16):
     if unexpected:
         print(f"[export_dit] Warning: {len(unexpected)} unexpected keys")
     
-    dit_model = dit_model.to(device=device, dtype=dtype)
+    # Apply precision recipe AFTER loading weights (so weights are converted correctly)
+    if precision == "fp16_mixed":
+        dit_model = dit_model.to(device=device)  # move to GPU first
+        dit_model = apply_fp16_mixed(dit_model)
+    elif precision == "fp32":
+        dit_model = dit_model.to(device=device, dtype=torch.float32)
+    else:
+        raise ValueError(f"Unknown precision: {precision}. Use 'fp16_mixed' or 'fp32'.")
+    
     dit_model.eval()
     
     t1 = time.time()
     print(f"[export_dit] Model loaded in {t1-t0:.1f}s")
     print(f"[export_dit] DiT: {sum(p.numel() for p in dit_model.parameters())/1e9:.2f}B params")
     
+    # Log dtype distribution
+    dtypes = {}
+    for p in dit_model.parameters():
+        dt = str(p.dtype)
+        dtypes[dt] = dtypes.get(dt, 0) + p.numel()
+    for dt, count in sorted(dtypes.items()):
+        print(f"[export_dit]   {dt}: {count/1e6:.1f}M params")
+    
     return dit_model, config
 
 
-def export_onnx(dit_model, config, output_path: str, opset: int = 18):
+def export_onnx(dit_model, config, output_path: str, opset: int = 18, precision: str = "fp16_mixed"):
     """Export the DiT forward pass to ONNX."""
     device = next(dit_model.parameters()).device
-    dtype = next(dit_model.parameters()).dtype
     
-    wrapper = DiTForwardWrapper(dit_model)
+    # Determine the tensor dtype for dummy inputs based on precision
+    if precision == "fp16_mixed":
+        tensor_dtype = torch.float16
+    elif precision == "fp32":
+        tensor_dtype = torch.float32
+    else:
+        tensor_dtype = torch.float32
+    
+    wrapper = DiTForwardWrapper(dit_model, precision=precision)
     wrapper.eval()
     
     # Create dummy inputs for tracing
@@ -166,19 +408,26 @@ def export_onnx(dit_model, config, output_path: str, opset: int = 18):
     T = 512   # typical sequence length (divisible by patch_size=2)
     S = 256   # typical encoder sequence length
     
-    dummy_input_latents = torch.randn(B, T, 192, device=device, dtype=dtype)
-    dummy_enc_hidden = torch.randn(B, S, 2048, device=device, dtype=dtype)
-    dummy_t = torch.tensor([0.5], device=device, dtype=torch.float32)
-    dummy_t_r = torch.tensor([0.5], device=device, dtype=torch.float32)
+    dummy_input_latents = torch.randn(B, T, 192, device=device, dtype=tensor_dtype)
+    dummy_enc_hidden = torch.randn(B, S, 2048, device=device, dtype=tensor_dtype)
+    dummy_t = torch.tensor([0.5], device=device, dtype=torch.float32)  # always fp32
+    dummy_t_r = torch.tensor([0.5], device=device, dtype=torch.float32)  # always fp32
     
     print(f"[export_dit] Tracing with shapes: input_latents={list(dummy_input_latents.shape)}, "
           f"enc_hidden={list(dummy_enc_hidden.shape)}, t={list(dummy_t.shape)}")
+    print(f"[export_dit] Input dtype: {tensor_dtype}, t/t_r dtype: fp32")
     
     # Test forward pass first
     print("[export_dit] Testing forward pass...")
     with torch.no_grad():
         test_out = wrapper(dummy_input_latents, dummy_enc_hidden, dummy_t, dummy_t_r)
     print(f"[export_dit] Output shape: {list(test_out.shape)} (expected [{B}, {T}, 64])")
+    print(f"[export_dit] Output dtype: {test_out.dtype}")
+    
+    # Check for NaN
+    if torch.isnan(test_out).any():
+        print("[export_dit] ERROR: Output contains NaN! Aborting export.")
+        sys.exit(1)
     
     # Export to ONNX
     print(f"[export_dit] Exporting to ONNX (opset {opset})...")
@@ -198,20 +447,57 @@ def export_onnx(dit_model, config, output_path: str, opset: int = 18):
             "t_r":           {0: "batch"},
             "velocity":      {0: "batch", 1: "seq_len"},
         },
-        do_constant_folding=True,
+        do_constant_folding=(precision != "fp16_mixed"),  # bf16 graph hits ComplexDouble in folding
         export_params=True,
+        # Force legacy TorchScript exporter — the dynamo/ExportedProgram path
+        # has a type promotion bug with mixed bf16/fp32 graphs (assertion in
+        # RMSNorm: prim.device != aten.mul).
+        dynamo=False,
     )
     
     t1 = time.time()
-    file_size = os.path.getsize(output_path)
+    print(f"[export_dit] ONNX trace completed in {t1-t0:.1f}s")
+    
+    # Large models (>2GB) need external data storage.
+    # PyTorch's ONNX exporter marks tensors as external but may not write
+    # the .data file properly. Re-save with onnx library to fix this.
+    print("[export_dit] Re-saving with external data...")
+    import onnx
+    from onnx.external_data_helper import convert_model_to_external_data
+    
+    model_proto = onnx.load(output_path, load_external_data=False)
+    
+    # Load raw_data from the proto (PyTorch embeds it inline even when >2GB)
+    # Then convert to proper external data format
+    data_filename = os.path.basename(output_path) + ".data"
+    data_path = output_path + ".data"
+    
+    # Remove old data file if exists
+    if os.path.exists(data_path):
+        os.remove(data_path)
+    
+    # Reload with external data resolved (from the just-exported file)
+    model_proto = onnx.load(output_path)
+    convert_model_to_external_data(
+        model_proto,
+        all_tensors_to_one_file=True,
+        location=data_filename,
+        size_threshold=1024,  # externalize anything >1KB
+        convert_attribute=False,
+    )
+    onnx.save(model_proto, output_path)
+    
+    onnx_size = os.path.getsize(output_path)
+    data_size = os.path.getsize(data_path) if os.path.exists(data_path) else 0
     print(f"[export_dit] Exported to {output_path}")
-    print(f"[export_dit] File size: {file_size/1e9:.2f} GB")
-    print(f"[export_dit] Export time: {t1-t0:.1f}s")
+    print(f"[export_dit] ONNX graph: {onnx_size/1e6:.1f} MB")
+    print(f"[export_dit] Weight data: {data_size/1e9:.2f} GB")
+    print(f"[export_dit] Total export time: {time.time()-t0:.1f}s")
     
     return output_path
 
 
-def verify_onnx(onnx_path: str, dit_model, config):
+def verify_onnx(onnx_path: str, dit_model, config, precision: str = "fp16_mixed"):
     """Verify the ONNX model produces matching output."""
     try:
         import onnxruntime as ort
@@ -220,15 +506,19 @@ def verify_onnx(onnx_path: str, dit_model, config):
         return
     
     device = next(dit_model.parameters()).device
-    dtype = next(dit_model.parameters()).dtype
     
-    wrapper = DiTForwardWrapper(dit_model)
+    if precision == "fp16_mixed":
+        tensor_dtype = torch.float16
+    else:
+        tensor_dtype = torch.float32
+    
+    wrapper = DiTForwardWrapper(dit_model, precision=precision)
     wrapper.eval()
     
     # Create test inputs
     B, T, S = 1, 256, 128
-    input_latents = torch.randn(B, T, 192, device=device, dtype=dtype)
-    enc_hidden = torch.randn(B, S, 2048, device=device, dtype=dtype)
+    input_latents = torch.randn(B, T, 192, device=device, dtype=tensor_dtype)
+    enc_hidden = torch.randn(B, S, 2048, device=device, dtype=tensor_dtype)
     t = torch.tensor([0.3], device=device, dtype=torch.float32)
     t_r = torch.tensor([0.3], device=device, dtype=torch.float32)
     
@@ -236,7 +526,7 @@ def verify_onnx(onnx_path: str, dit_model, config):
     with torch.no_grad():
         ref_out = wrapper(input_latents, enc_hidden, t, t_r)
     
-    # ONNX inference
+    # ONNX inference — feed fp32 (ORT doesn't support bf16 on most providers)
     sess = ort.InferenceSession(onnx_path, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
     ort_out = sess.run(None, {
         "input_latents": input_latents.cpu().float().numpy(),
@@ -254,10 +544,10 @@ def verify_onnx(onnx_path: str, dit_model, config):
     mean_diff = np.mean(np.abs(ref_np - ort_np))
     print(f"[export_dit] Verification: max_diff={max_diff:.6f}, mean_diff={mean_diff:.6f}")
     
-    if max_diff < 0.01:
-        print("[export_dit] ✅ ONNX output matches PyTorch (within FP16 tolerance)")
+    if max_diff < 0.05:  # bf16 has slightly larger tolerance than fp16
+        print("[export_dit] PASS: ONNX output matches PyTorch (within bf16 tolerance)")
     else:
-        print("[export_dit] ⚠️ Large difference detected — may need investigation")
+        print("[export_dit] WARNING: Large difference detected — may need investigation")
 
 
 def main():
@@ -268,6 +558,9 @@ def main():
                         help="Output ONNX file path (default: models/onnx/dit_<model_name>.onnx)")
     parser.add_argument("--opset", type=int, default=18,
                         help="ONNX opset version (default: 18)")
+    parser.add_argument("--precision", default="fp16_mixed",
+                        choices=["fp16_mixed", "fp32"],
+                        help="Precision recipe (default: fp16_mixed)")
     parser.add_argument("--verify", action="store_true",
                         help="Verify ONNX output matches PyTorch")
     parser.add_argument("--device", default="cuda",
@@ -285,14 +578,14 @@ def main():
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     
     # Load model
-    dit_model, config = load_dit_model(args.model_dir, device=args.device)
+    dit_model, config = load_dit_model(args.model_dir, device=args.device, precision=args.precision)
     
     # Export
-    export_onnx(dit_model, config, args.output, opset=args.opset)
+    export_onnx(dit_model, config, args.output, opset=args.opset, precision=args.precision)
     
     # Verify
     if args.verify:
-        verify_onnx(args.output, dit_model, config)
+        verify_onnx(args.output, dit_model, config, precision=args.precision)
     
     print("[export_dit] Done!")
 

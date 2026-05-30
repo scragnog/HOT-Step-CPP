@@ -92,6 +92,11 @@ static inline bool vae_ort_load(VaeOrt * ctx, const char * onnx_path, int device
         trt_opts.trt_engine_cache_enable    = 1;
         trt_opts.trt_engine_cache_path      = trt_cache_dir.c_str();
 
+        // NOTE: Demon uses builder_optimization_level=1 for VAE on Blackwell
+        // to avoid Myelin fusion segfaults. The legacy OrtTensorRTProviderOptions
+        // struct doesn't expose this field — would need V2 API. Will add if
+        // we observe VAE segfaults on sm_120+.
+
         const OrtApi & api = Ort::GetApi();
         OrtStatus * status = api.SessionOptionsAppendExecutionProvider_TensorRT(
             ctx->session_opts, &trt_opts);

@@ -123,15 +123,21 @@ inline bool dit_trt_build(
         return false;
     }
 
-    // Create network (explicit batch)
-    const auto flags = 1U << static_cast<uint32_t>(
+    // Create network with STRONGLY_TYPED flag.
+    // The fp16_mixed ONNX graph has dtypes baked in (fp16 bulk + fp32 islands).
+    // STRONGLY_TYPED forces TRT to honor these graph-level dtype annotations
+    // instead of applying blanket FP16 quantization (which NaN-overflows norms).
+    uint32_t net_flags = 1U << static_cast<uint32_t>(
         nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-    auto network = builder->createNetworkV2(flags);
+    net_flags |= 1U << static_cast<uint32_t>(
+        nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
+    auto network = builder->createNetworkV2(net_flags);
     if (!network) {
         fprintf(stderr, "[DiT-TRT] Failed to create network\n");
         delete builder;
         return false;
     }
+    fprintf(stderr, "[DiT-TRT] STRONGLY_TYPED network (fp16_mixed precision)\n");
 
     // Parse ONNX
     auto parser = nvonnxparser::createParser(*network, logger);
@@ -147,13 +153,11 @@ inline bool dit_trt_build(
     // Builder config
     auto config = builder->createBuilderConfig();
 
-    // FP16 disabled: layernorm overflow causes NaN on sm_120 (Blackwell).
-    // TODO: re-enable with per-layer precision (FP16 matmul, FP32 layernorm)
-    // if (builder->platformHasFastFp16()) {
-    //     config->setFlag(nvinfer1::BuilderFlag::kFP16);
-    //     fprintf(stderr, "[DiT-TRT] FP16 enabled\n");
-    // }
-    fprintf(stderr, "[DiT-TRT] FP32 mode (FP16 disabled to avoid layernorm overflow)\n");
+    // STRONGLY_TYPED mode: FP16/BF16 builder flags are FORBIDDEN — dtypes come
+    // from the ONNX graph (fp16 bulk + fp32 islands). TF32 is safe and
+    // helps fp32-island performance on Ampere+.
+    config->setFlag(nvinfer1::BuilderFlag::kTF32);
+    fprintf(stderr, "[DiT-TRT] STRONGLY_TYPED + TF32 (fp16_mixed from ONNX graph)\n");
 
     // Enable refittable engine (zero perf penalty with IDENTICAL)
     config->setFlag(nvinfer1::BuilderFlag::kREFIT_IDENTICAL);
