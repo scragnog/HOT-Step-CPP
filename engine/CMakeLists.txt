@@ -218,7 +218,7 @@ add_library(acestep-core STATIC
     src/pipeline-synth-ops.cpp
     src/pipeline-understand.cpp
 )
-target_link_libraries(acestep-core PUBLIC yyjson lua54)
+target_link_libraries(acestep-core PUBLIC yyjson lua54 supersep)
 link_ggml_backends(acestep-core)
 
 # ace-synth: full pipeline (text-enc + cond + dit + vae + wav)
