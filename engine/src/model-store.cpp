@@ -469,6 +469,86 @@ VaeOrt * store_require_vae_dec_ort(ModelStore * s, const ModelKey & k) {
     return m;
 }
 
+static void del_text_enc_ort(void * p) {
+    text_enc_ort_free(static_cast<TextEncOrt *>(p));
+    delete static_cast<TextEncOrt *>(p);
+}
+
+TextEncOrt * store_require_text_enc_ort(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<TextEncOrt>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer        t;
+    TextEncOrt * m = new TextEncOrt();
+
+    // Derive embed_tokens.bin and null_condition_emb.bin paths from ONNX directory
+    std::string dir;
+    {
+        std::string p = k.path;
+        auto slash = p.find_last_of("/\\");
+        dir = (slash != std::string::npos) ? p.substr(0, slash) : ".";
+    }
+    std::string embed_path = dir + WS_SEP + "embed_tokens.bin";
+    std::string null_cond_path = dir + WS_SEP + "null_condition_emb.bin";
+
+    const char * embed_cstr = nullptr;
+    {
+        FILE * f = fopen(embed_path.c_str(), "rb");
+        if (f) { fclose(f); embed_cstr = embed_path.c_str(); }
+    }
+
+    if (!text_enc_ort_load(m, k.path.c_str(), embed_cstr)) {
+        delete m;
+        return nullptr;
+    }
+    install_entry(s, k, m, 0, "TextEnc-ORT", del_text_enc_ort);
+    fprintf(stderr, "[Store] Load TextEnc-ORT: %.0f ms\n", t.ms());
+    return m;
+}
+
+static void del_cond_enc_ort(void * p) {
+    cond_enc_ort_free(static_cast<CondEncOrt *>(p));
+    delete static_cast<CondEncOrt *>(p);
+}
+
+CondEncOrt * store_require_cond_enc_ort(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<CondEncOrt>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer        t;
+    CondEncOrt * m = new CondEncOrt();
+
+    // null_condition_emb.bin in same directory as the ONNX
+    std::string dir;
+    {
+        std::string p = k.path;
+        auto slash = p.find_last_of("/\\");
+        dir = (slash != std::string::npos) ? p.substr(0, slash) : ".";
+    }
+    std::string null_cond_path = dir + WS_SEP + "null_condition_emb.bin";
+    const char * null_cstr = nullptr;
+    {
+        FILE * f = fopen(null_cond_path.c_str(), "rb");
+        if (f) { fclose(f); null_cstr = null_cond_path.c_str(); }
+    }
+
+    if (!cond_enc_ort_load(m, k.path.c_str(), null_cstr)) {
+        delete m;
+        return nullptr;
+    }
+    install_entry(s, k, m, 0, "CondEnc-ORT", del_cond_enc_ort);
+    fprintf(stderr, "[Store] Load CondEnc-ORT: %.0f ms\n", t.ms());
+    return m;
+}
+
 TokGGML * store_require_fsq_tok(ModelStore * s, const ModelKey & k) {
     std::lock_guard<std::mutex> lock(s->mtx);
     if (auto * hit = cache_hit<TokGGML>(s, k)) {

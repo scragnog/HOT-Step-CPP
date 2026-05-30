@@ -109,6 +109,12 @@ class CondEncoderWrapperFixed(nn.Module):
     For inference, timbre is always present (silence latent as zero timbre).
     This avoids dynamic control flow in the ONNX graph.
     
+    IMPORTANT: The timbre encoder's forward() uses unpack_timbre_embeddings()
+    which has data-dependent control flow (refer_audio_order_mask.max().item()).
+    torch.export cannot handle this. So we manually invoke the timbre encoder's
+    sub-components: embed_tokens → CLS prepend → transformer layers → norm → 
+    take position 0. This is equivalent for B=1 inference.
+    
     ONNX inputs:
         text_hidden:  [B, S_text, 1024]  fp16
         lyric_embed:  [B, S_lyric, 1024] fp16
@@ -122,7 +128,55 @@ class CondEncoderWrapperFixed(nn.Module):
         super().__init__()
         self.text_projector = cond_encoder.text_projector
         self.lyric_encoder = cond_encoder.lyric_encoder
-        self.timbre_encoder = cond_encoder.timbre_encoder
+        # Extract timbre encoder sub-components for manual invocation
+        self.timbre_embed_tokens = cond_encoder.timbre_encoder.embed_tokens
+        self.timbre_special_token = cond_encoder.timbre_encoder.special_token
+        self.timbre_norm = cond_encoder.timbre_encoder.norm
+        self.timbre_rotary_emb = cond_encoder.timbre_encoder.rotary_emb
+        self.timbre_layers = cond_encoder.timbre_encoder.layers
+        self.timbre_config = cond_encoder.timbre_encoder.config
+    
+    def _timbre_forward_simple(self, timbre_feats):
+        """Run the timbre encoder without unpack_timbre_embeddings.
+        
+        timbre_feats: [B, S_ref, 64]
+        Returns: [B, 1, hidden_size] — CLS token output
+        """
+        B = timbre_feats.shape[0]
+        
+        # Project: [B, S_ref, 64] → [B, S_ref, hidden_size]
+        inputs_embeds = self.timbre_embed_tokens(timbre_feats)
+        
+        # Prepend CLS token: [B, S_ref+1, hidden_size]
+        cls_token = self.timbre_special_token.expand(B, 1, -1)
+        inputs_embeds = torch.cat([cls_token, inputs_embeds], dim=1)
+        
+        S = inputs_embeds.shape[1]
+        
+        # Position IDs and RoPE
+        cache_position = torch.arange(0, S, device=inputs_embeds.device)
+        position_ids = cache_position.unsqueeze(0)
+        position_embeddings = self.timbre_rotary_emb(inputs_embeds, position_ids)
+        
+        # Build attention mask (full bidirectional, no padding)
+        # Using None for SDPA = no mask = full attention
+        hidden_states = inputs_embeds
+        
+        for layer in self.timbre_layers:
+            layer_outputs = layer(
+                hidden_states,
+                position_embeddings,
+                None,  # attention_mask=None → full bidirectional
+                position_ids,
+            )
+            hidden_states = layer_outputs[0]
+        
+        hidden_states = self.timbre_norm(hidden_states)
+        
+        # Extract CLS token (position 0): [B, hidden_size]
+        timbre_emb = hidden_states[:, 0:1, :]  # [B, 1, hidden_size]
+        
+        return timbre_emb
     
     def forward(self, text_hidden, lyric_embed, timbre_feats):
         B = text_hidden.shape[0]
@@ -142,17 +196,8 @@ class CondEncoderWrapperFixed(nn.Module):
         else:
             lyric_out = lyric_out[0]
         
-        # 3) Timbre encoding — always run, zeros produce a neutral timbre embedding
-        S_ref = timbre_feats.shape[1]
-        timbre_mask = torch.ones(B, S_ref, device=timbre_feats.device, dtype=torch.long)
-        order_mask = torch.zeros(B, device=timbre_feats.device, dtype=torch.long)
-        # The timbre encoder expects [N_total, ...] packed format
-        # For B=1, N_total=1, so just pass through
-        timbre_embs, _ = self.timbre_encoder(
-            refer_audio_acoustic_hidden_states_packed=timbre_feats,
-            refer_audio_order_mask=order_mask,
-            attention_mask=timbre_mask,
-        )
+        # 3) Timbre encoding — manual path (bypasses unpack_timbre_embeddings)
+        timbre_embs = self._timbre_forward_simple(timbre_feats)
         # timbre_embs: [B, 1, 2048]
         
         # 4) Concatenate: lyric + timbre + text_proj
@@ -179,20 +224,122 @@ def load_model(model_dir: str, device: str = "cuda", dtype=torch.float16):
     
     sys.path.insert(0, str(model_dir))
     
-    from modeling_acestep_v15_xl_base import AceStepConditionEncoder
-    from configuration_acestep_v15 import AceStepConfig
-    
+    # Create a stub AceStepConfig module to bypass the 'acestep' package import.
+    # The real AceStepConfig is a PretrainedConfig subclass. We construct it
+    # using AutoConfig which reads config.json and finds the auto_map.
+    # But first we need the config module to exist so the model code can import it.
     import json
+    import types
+    from transformers import PretrainedConfig
+    
     with open(model_dir / "config.json") as f:
         config_dict = json.load(f)
+    
+    # Create AceStepConfig class dynamically from config.json
+    class AceStepConfig(PretrainedConfig):
+        model_type = "acestep"
+        
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            # Set all config keys as attributes
+            for k, v in kwargs.items():
+                if not hasattr(self, k):
+                    setattr(self, k, v)
+            # Ensure critical attrs have defaults
+            if not hasattr(self, 'text_hidden_dim'):
+                self.text_hidden_dim = 1024
+            if not hasattr(self, 'timbre_hidden_dim'):
+                self.timbre_hidden_dim = 64
+            if not hasattr(self, 'encoder_hidden_size'):
+                self.encoder_hidden_size = 2048
+            if not hasattr(self, 'encoder_intermediate_size'):
+                self.encoder_intermediate_size = 6144
+            if not hasattr(self, 'encoder_num_attention_heads'):
+                self.encoder_num_attention_heads = 16
+            if not hasattr(self, 'encoder_num_key_value_heads'):
+                self.encoder_num_key_value_heads = 8
+            if not hasattr(self, 'num_lyric_encoder_hidden_layers'):
+                self.num_lyric_encoder_hidden_layers = 8
+            if not hasattr(self, 'num_timbre_encoder_hidden_layers'):
+                self.num_timbre_encoder_hidden_layers = 4
+            if not hasattr(self, 'num_attention_pooler_hidden_layers'):
+                self.num_attention_pooler_hidden_layers = 2
+            if not hasattr(self, 'out_channels'):
+                self.out_channels = 64
+            if not hasattr(self, 'in_channels'):
+                self.in_channels = 192
+    
+    # Register the stub config module
+    stub_mod = types.ModuleType("configuration_acestep_v15")
+    stub_mod.AceStepConfig = AceStepConfig
+    sys.modules["configuration_acestep_v15"] = stub_mod
+    
+    # Create stub acestep package hierarchy. Each intermediate module needs
+    # __path__ set so it acts as a package (allows submodule imports).
+    for mod_name in ["acestep", "acestep.models", "acestep.models.common"]:
+        m = types.ModuleType(mod_name)
+        m.__path__ = []  # makes it act as a package
+        sys.modules[mod_name] = m
+    
+    # Register configuration_acestep_v15 under the acestep.models.common path
+    cfg_mod = types.ModuleType("acestep.models.common.configuration_acestep_v15")
+    cfg_mod.AceStepConfig = AceStepConfig
+    sys.modules["acestep.models.common.configuration_acestep_v15"] = cfg_mod
+    
+    # Create apg_guidance stub — these functions are used by the DiT diffusion
+    # loop but NOT by the condition encoder. Provide dummies to satisfy import.
+    class MomentumBuffer:
+        def __init__(self, *a, **kw): pass
+    def _apg_stub(*a, **kw): return None
+    
+    apg_stub = types.ModuleType("acestep.models.common.apg_guidance")
+    apg_stub.MomentumBuffer = MomentumBuffer
+    apg_stub.adg_forward = _apg_stub
+    apg_stub.adg_w_norm_forward = _apg_stub
+    apg_stub.adg_wo_clip_forward = _apg_stub
+    apg_stub.apg_forward = _apg_stub
+    apg_stub.cfg_forward = _apg_stub
+    apg_stub.call_cos_tensor = _apg_stub
+    apg_stub.compute_perpendicular_component = _apg_stub
+    apg_stub.project = _apg_stub
+    sys.modules["acestep.models.common.apg_guidance"] = apg_stub
+    
+    # Also register the local apg_guidance module
+    apg_local = types.ModuleType("apg_guidance")
+    apg_local.MomentumBuffer = MomentumBuffer
+    apg_local.adg_forward = _apg_stub
+    apg_local.apg_forward = _apg_stub
+    apg_local.cfg_forward = _apg_stub
+    sys.modules["apg_guidance"] = apg_local
     
     config = AceStepConfig(**config_dict)
     config._attn_implementation = "sdpa"
     
+    # The encoder's Qwen3 sub-models (lyric/timbre) use encoder_hidden_size
+    # as their hidden_size. Set it on the config so Qwen3RotaryEmbedding works.
+    # transformers 5.x requires rope_parameters dict.
+    if not hasattr(config, 'rope_parameters') or config.rope_parameters is None:
+        config.rope_parameters = {
+            "rope_type": "default",
+            "rope_theta": config.rope_theta if hasattr(config, 'rope_theta') else 1000000.0,
+        }
+    
     print(f"[export_cond_enc] Loading model from {model_dir}...")
     t0 = time.time()
     
-    cond_encoder = AceStepConditionEncoder(config)
+    # The full model creates a separate encoder config with encoder-specific
+    # dimensions (see AceStepConditionGenerationModel.__init__ lines 1621-1628).
+    # The encoder uses encoder_hidden_size (2048), not the DiT hidden_size (2560).
+    import copy
+    encoder_config = copy.deepcopy(config)
+    encoder_config.hidden_size = config.encoder_hidden_size
+    encoder_config.intermediate_size = config.encoder_intermediate_size
+    encoder_config.num_attention_heads = config.encoder_num_attention_heads
+    encoder_config.num_key_value_heads = config.encoder_num_key_value_heads
+    
+    from modeling_acestep_v15_xl_base import AceStepConditionEncoder
+    
+    cond_encoder = AceStepConditionEncoder(encoder_config)
     
     # Load weights — filter to encoder.* prefix
     from safetensors.torch import load_file
@@ -216,9 +363,9 @@ def load_model(model_dir: str, device: str = "cuda", dtype=torch.float16):
     t1 = time.time()
     n_params = sum(p.numel() for p in cond_encoder.parameters()) / 1e6
     print(f"[export_cond_enc] Model loaded in {t1-t0:.1f}s ({n_params:.0f}M params)")
-    print(f"[export_cond_enc] text_hidden_dim={config.text_hidden_dim}, hidden_size={config.hidden_size}")
+    print(f"[export_cond_enc] text_hidden_dim={encoder_config.text_hidden_dim}, hidden_size={encoder_config.hidden_size}")
     
-    return cond_encoder, config
+    return cond_encoder, encoder_config
 
 
 def export_onnx(cond_encoder, config, output_path: str, opset: int = 18):
