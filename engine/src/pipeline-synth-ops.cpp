@@ -8,6 +8,7 @@
 
 #include "hot-step-sampler.h"
 #include "hot-step-sampler-trt.h"
+#include "adapter-trt.h"
 #include "philox.h"
 #include "pipeline-synth-impl.h"
 #include "task-types.h"
@@ -1239,7 +1240,39 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
             s_trt_ready = true;
         }
 
-        // TODO: LoRA adapter refitting here (check ctx->dit_key.adapter_path)
+        // LoRA adapter refitting: apply/revert/switch as needed
+        {
+            const std::string& want_adapter = ctx->dit_key.adapter_path;
+            const std::string& have_adapter = s_trt.current_adapter;
+
+            if (want_adapter.empty() && !have_adapter.empty()) {
+                // Revert to base model
+                fprintf(stderr, "[Adapter-TRT] Reverting adapter '%s' → base\n",
+                        have_adapter.c_str());
+                int64_t ms = adapter_trt_revert(&s_trt);
+                if (ms >= 0) {
+                    fprintf(stderr, "[Adapter-TRT] Reverted in %lld ms\n", (long long)ms);
+                }
+            } else if (!want_adapter.empty() && want_adapter != have_adapter) {
+                // Apply new adapter (or switch from one to another)
+                if (!have_adapter.empty()) {
+                    fprintf(stderr, "[Adapter-TRT] Switching adapter '%s' → '%s'\n",
+                            have_adapter.c_str(), want_adapter.c_str());
+                    // Revert to base first, then apply new
+                    adapter_trt_revert(&s_trt);
+                }
+                fprintf(stderr, "[Adapter-TRT] Applying adapter: %s (scale=%.2f)\n",
+                        want_adapter.c_str(), ctx->dit_key.adapter_scale);
+                int64_t ms = adapter_trt_apply(&s_trt, want_adapter.c_str(),
+                                               ctx->dit_key.adapter_scale);
+                if (ms < 0) {
+                    fprintf(stderr, "[Adapter-TRT] WARNING: adapter apply failed, continuing with base\n");
+                } else {
+                    fprintf(stderr, "[Adapter-TRT] Applied in %lld ms\n", (long long)ms);
+                }
+            }
+            // else: want == have, no change needed
+        }
 
         s.timer.reset();
         int dit_rc = dit_trt_generate(

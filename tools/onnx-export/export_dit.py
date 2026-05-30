@@ -441,7 +441,7 @@ def export_onnx(dit_model, config, output_path: str, opset: int = 18, precision:
         "t_r":           {0: batch},
     }
     
-    torch.onnx.export(
+    onnx_program = torch.onnx.export(
         wrapper,
         (dummy_input_latents, dummy_enc_hidden, dummy_t, dummy_t_r),
         output_path,
@@ -453,6 +453,93 @@ def export_onnx(dit_model, config, output_path: str, opset: int = 18, precision:
         external_data=True,
         dynamo=True,
     )
+    
+    # Post-process: rename val_N initializers to original parameter names.
+    # The dynamo exporter strips parameter names, replacing them with opaque
+    # val_0, val_1, ... constants. TRT adapter refit needs named weights to
+    # map LoRA deltas → engine weights.
+    #
+    # Strategy: iterate val_N initializers (sorted by N) and model parameters
+    # in order. Dynamo visits parameters in named_parameters() order, so we
+    # match by shape+numel as a sanity check and assign in sequence.
+    if onnx_program is not None and hasattr(onnx_program, 'model_proto'):
+        import onnx
+        model_proto = onnx_program.model_proto
+        
+        # Collect model parameters with shapes
+        param_info = []
+        for name, param in wrapper.named_parameters():
+            param_info.append((name, tuple(param.shape), param.numel()))
+        
+        # Collect val_N initializers sorted by N, only 2D+ (actual weight matrices)
+        val_inits = []
+        for init in model_proto.graph.initializer:
+            if init.name.startswith('val_'):
+                dims = tuple(init.dims)
+                numel = 1
+                for d in dims:
+                    numel *= d
+                if len(dims) >= 2 and numel > 100:  # skip small constants
+                    val_inits.append((init.name, dims, numel))
+        
+        # Sort by val_N number (extraction order)
+        val_inits.sort(key=lambda x: int(x[0].split('_')[1]))
+        
+        print(f"[export_dit] Matching {len(val_inits)} val_N weights to {len(param_info)} parameters")
+        
+        # Match val_N to parameters in order, using shape as sanity check
+        rename_map = {}
+        param_idx = 0
+        for val_name, val_shape, val_numel in val_inits:
+            # Find next parameter with matching shape
+            found = False
+            search_start = param_idx
+            while param_idx < len(param_info):
+                p_name, p_shape, p_numel = param_info[param_idx]
+                if p_numel == val_numel:
+                    # Shape match (account for possible transpose by dynamo)
+                    shape_ok = (p_shape == val_shape or 
+                               (len(p_shape) == 2 and len(val_shape) == 2 and
+                                p_shape[0] == val_shape[1] and p_shape[1] == val_shape[0]))
+                    if shape_ok:
+                        trt_name = "dit." + p_name if not p_name.startswith("dit.") else p_name
+                        rename_map[val_name] = trt_name
+                        param_idx += 1
+                        found = True
+                        break
+                param_idx += 1
+            
+            if not found:
+                # Reset search from where we left off — some val_N may be
+                # computed constants, not parameters
+                param_idx = search_start
+        
+        # Apply renames to initializers and all graph node references
+        if rename_map:
+            for init in model_proto.graph.initializer:
+                if init.name in rename_map:
+                    init.name = rename_map[init.name]
+            for node in model_proto.graph.node:
+                for i, inp in enumerate(node.input):
+                    if inp in rename_map:
+                        node.input[i] = rename_map[inp]
+                for i, out in enumerate(node.output):
+                    if out in rename_map:
+                        node.output[i] = rename_map[out]
+            
+            print(f"[export_dit] Renamed {len(rename_map)}/{len(val_inits)} val_N initializers")
+            
+            # Save a mapping sidecar for debugging
+            map_path = output_path.replace('.onnx', '.weight_map.json')
+            import json
+            with open(map_path, 'w') as f:
+                json.dump(rename_map, f, indent=2)
+            print(f"[export_dit] Weight map saved to {map_path}")
+            
+            # Re-save with renamed initializers
+            onnx.save(model_proto, output_path)
+    else:
+        print("[export_dit] WARNING: ONNXProgram not returned, weight names will be val_N")
     
     t1 = time.time()
     print(f"[export_dit] ONNX trace completed in {t1-t0:.1f}s")

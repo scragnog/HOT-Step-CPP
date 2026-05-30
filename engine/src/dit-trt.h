@@ -76,7 +76,7 @@ struct DitTrt {
     // ONNX path (needed for weight refitting)
     std::string onnx_path;
 
-    // Base weight cache (FP16 host memory, keyed by TRT weight name)
+    // Base weight cache (BF16 host memory, keyed by TRT weight name)
     // Populated on first load; used to revert adapter changes
     std::unordered_map<std::string, std::vector<uint16_t>> base_weights;
 
@@ -323,7 +323,7 @@ inline bool dit_trt_load(
 
         for (int32_t i = 0; i < num_weights; i++) {
             auto w = refitter->getNamedWeights(names[i]);
-            if (w.type == nvinfer1::DataType::kHALF && w.count > 0) {
+            if ((w.type == nvinfer1::DataType::kBF16 || w.type == nvinfer1::DataType::kHALF) && w.count > 0) {
                 const uint16_t* data = static_cast<const uint16_t*>(w.values);
                 ctx->base_weights[names[i]] =
                     std::vector<uint16_t>(data, data + w.count);
@@ -389,7 +389,7 @@ inline bool dit_trt_load(
 
 // Refit engine with LoRA adapter deltas.
 // `deltas` maps TRT weight names to merged weight data (W_base + delta).
-// Each value should point to FP16 data with the same element count as base.
+// Each value should point to BF16 data with the same element count as base.
 //
 // Returns refit time in milliseconds.
 inline int64_t dit_trt_refit_adapter(
@@ -416,7 +416,7 @@ inline int64_t dit_trt_refit_adapter(
         }
 
         nvinfer1::Weights w;
-        w.type   = nvinfer1::DataType::kHALF;
+        w.type   = nvinfer1::DataType::kBF16;
         w.values = data;
         w.count  = static_cast<int64_t>(it->second.size());
 
@@ -456,7 +456,7 @@ inline int64_t dit_trt_refit_base(DitTrt* ctx) {
 
     for (const auto& [name, data] : ctx->base_weights) {
         nvinfer1::Weights w;
-        w.type   = nvinfer1::DataType::kHALF;
+        w.type   = nvinfer1::DataType::kBF16;
         w.values = data.data();
         w.count  = static_cast<int64_t>(data.size());
         refitter->setNamedWeights(name.c_str(), w);
