@@ -162,15 +162,31 @@ static std::unordered_map<std::string, std::string> lokr_build_trt_reverse_map(
 }
 
 // ── Get GGML backend for GPU delta computation ──────────────────────────────
-// Reuses the shared backend from g_backend_cache (initialized by other GGML
-// modules like VAE/LM). Falls back to CPU if no GPU available.
+// In TRT-only mode, the shared g_backend_cache may be empty (GGML DiT never
+// loads). We lazily init our own CUDA backend for adapter delta computation.
 static ggml_backend_t adapter_trt_get_backend() {
+    // Try shared backend first (if LM or other GGML module initialized it)
     if (g_backend_refs > 0 && g_backend_cache.backend) {
         return g_backend_cache.backend;
     }
-    // Shouldn't happen — VAE/LM should have initialized the backend
-    fprintf(stderr, "[Adapter-TRT] WARNING: no shared GGML backend, falling back to CPU\n");
-    return g_backend_cache.cpu_backend;
+
+    // Lazily init our own backend
+    static ggml_backend_t s_adapter_backend = nullptr;
+    if (!s_adapter_backend) {
+        ggml_backend_load_all();
+        s_adapter_backend = ggml_backend_init_best();
+        if (s_adapter_backend) {
+            fprintf(stderr, "[Adapter-TRT] Initialized %s backend for delta computation\n",
+                    ggml_backend_name(s_adapter_backend));
+        } else {
+            // Last resort: CPU
+            s_adapter_backend = cpu_backend_new(backend_cpu_n_threads());
+            if (s_adapter_backend) {
+                fprintf(stderr, "[Adapter-TRT] Using CPU backend for delta computation\n");
+            }
+        }
+    }
+    return s_adapter_backend;
 }
 
 // ── LoRA merge path ─────────────────────────────────────────────────────────
