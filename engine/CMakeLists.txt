@@ -201,7 +201,7 @@ else()
 endif()
 
 if(CUDAToolkit_FOUND)
-    target_compile_definitions(supersep PRIVATE GGML_USE_CUDA)
+    target_compile_definitions(supersep PUBLIC GGML_USE_CUDA)
 endif()
 
 # macOS: CoreML EP requires Apple frameworks
