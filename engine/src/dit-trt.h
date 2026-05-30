@@ -123,21 +123,19 @@ inline bool dit_trt_build(
         return false;
     }
 
-    // Create network with STRONGLY_TYPED flag.
-    // The fp16_mixed ONNX graph has dtypes baked in (fp16 bulk + fp32 islands).
-    // STRONGLY_TYPED forces TRT to honor these graph-level dtype annotations
-    // instead of applying blanket FP16 quantization (which NaN-overflows norms).
+    // Create network — standard EXPLICIT_BATCH, NO STRONGLY_TYPED.
+    // Demon-proven approach: export in FP32, let TRT auto-select fp16
+    // for matmuls via the FP16 builder flag. TRT keeps fp32 where it
+    // detects precision issues (norms, reductions, etc.).
     uint32_t net_flags = 1U << static_cast<uint32_t>(
         nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-    net_flags |= 1U << static_cast<uint32_t>(
-        nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
     auto network = builder->createNetworkV2(net_flags);
     if (!network) {
         fprintf(stderr, "[DiT-TRT] Failed to create network\n");
         delete builder;
         return false;
     }
-    fprintf(stderr, "[DiT-TRT] STRONGLY_TYPED network (fp16_mixed precision)\n");
+    fprintf(stderr, "[DiT-TRT] Network created (EXPLICIT_BATCH)\n");
 
     // Parse ONNX
     auto parser = nvonnxparser::createParser(*network, logger);
@@ -153,11 +151,12 @@ inline bool dit_trt_build(
     // Builder config
     auto config = builder->createBuilderConfig();
 
-    // STRONGLY_TYPED mode: FP16/BF16 builder flags are FORBIDDEN — dtypes come
-    // from the ONNX graph (fp16 bulk + fp32 islands). TF32 is safe and
-    // helps fp32-island performance on Ampere+.
+    // FP16 flag: TRT auto-selects fp16 tensor cores for matmuls/convolutions
+    // while keeping fp32 for precision-sensitive ops (norms, reductions).
+    // TF32 accelerates any remaining fp32 ops on Ampere+.
+    config->setFlag(nvinfer1::BuilderFlag::kFP16);
     config->setFlag(nvinfer1::BuilderFlag::kTF32);
-    fprintf(stderr, "[DiT-TRT] STRONGLY_TYPED + TF32 (fp16_mixed from ONNX graph)\n");
+    fprintf(stderr, "[DiT-TRT] FP16 + TF32 (TRT auto-selects mixed precision)\n");
 
     // Enable refittable engine (zero perf penalty with IDENTICAL)
     config->setFlag(nvinfer1::BuilderFlag::kREFIT_IDENTICAL);
