@@ -62,7 +62,8 @@ engine/.cache/
 *.onnx
 
 # Downloaded tools (whisper.cpp, etc.)
-tools/
+tools/*
+!tools/onnx-export/
 
 # Test output logs
 engine/tests/*.log
