@@ -52,6 +52,11 @@ struct AceSynth {
     // ORT VAE: optional ONNX Runtime VAE decoder (TensorRT/CUDA EP)
     ModelKey    vae_dec_ort_key;   // VAE-Dec-ORT, from onnx_vae_path
     std::string onnx_vae_path;    // path to vae_decoder.onnx (empty = not available)
+
+    // ORT text/cond encoder: used when DiT is ONNX (.onnx path)
+    ModelKey    text_enc_ort_key;   // TextEnc-ORT, from text_encoder.onnx
+    ModelKey    cond_enc_ort_key;   // CondEnc-ORT, from cond_encoder.onnx
+    bool        is_onnx_pipeline;  // true when DiT is ONNX → all sub-models use ORT
 };
 
 // Transient state for a single job, shared by reference across the primitive
