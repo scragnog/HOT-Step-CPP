@@ -277,6 +277,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       apgMomentum: s.guidanceMode === 'apg' ? s.apgMomentum : undefined,
       apgNormThreshold: s.guidanceMode === 'apg' ? s.apgNormThreshold : undefined,
       skipLm: s.skipLm, useCotCaption: s.useCotCaption,
+      skipLrc: s.skipLrc || undefined,
       lmTemperature: s.lmTemperature, lmCfgScale: s.lmCfgScale,
       lmTopK: s.lmTopK, lmTopP: s.lmTopP, lmNegativePrompt: s.lmNegativePrompt,
       audioCoverStrength: (!s.skipLm && s.lmCodesStrength < 1.0) ? s.lmCodesStrength : undefined,
