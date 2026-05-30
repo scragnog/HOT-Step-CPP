@@ -59,36 +59,27 @@ static void matmul_f32(const float* B, const float* A, float* C,
     }
 }
 
-// Build the mapping from TRT weight name → base_weights key.
-// TRT weight names from dynamo export use the module path directly, e.g.:
-//   "dit.layers.0.self_attn.q_proj.weight"
-// The GGML GGUF convention uses "decoder." prefix:
-//   "decoder.layers.0.self_attn.q_proj.weight"
-// We need to try both forms when looking up in the base_weights cache.
+// Map a LoRA base name to a TRT weight name.
 //
+// LoRA keys use "decoder." prefix (e.g. "decoder.layers.0.self_attn.q_proj.weight").
+// The renamed ONNX uses "dit." prefix (e.g. "dit.layers.0.self_attn.q_proj.weight").
 // Returns the matching key from base_weights, or "" if not found.
 static std::string find_trt_weight_name(
     const DitTrt& ctx,
     const std::string& gguf_name  // e.g. "decoder.layers.0.self_attn.q_proj.weight"
 ) {
-    // Try exact match first
-    if (ctx.base_weights.count(gguf_name)) {
-        return gguf_name;
-    }
+    // Try exact match
+    if (ctx.base_weights.count(gguf_name)) return gguf_name;
 
-    // Try without "decoder." prefix (TRT/dynamo uses "dit." prefix)
+    // decoder.X → dit.X
     if (gguf_name.compare(0, 8, "decoder.") == 0) {
         std::string dit_name = "dit." + gguf_name.substr(8);
-        if (ctx.base_weights.count(dit_name)) {
-            return dit_name;
-        }
+        if (ctx.base_weights.count(dit_name)) return dit_name;
     }
 
-    // Try adding "dit." prefix to raw path
+    // Try dit. prefix on raw path
     std::string dit_prefixed = "dit." + gguf_name;
-    if (ctx.base_weights.count(dit_prefixed)) {
-        return dit_prefixed;
-    }
+    if (ctx.base_weights.count(dit_prefixed)) return dit_prefixed;
 
     return "";
 }
@@ -249,10 +240,23 @@ static int64_t adapter_trt_apply(
             continue;
         }
 
-        // Compute delta = B @ A  [out_feat, in_feat]
+        // Compute delta = B @ A  [out_feat, in_feat] (torch orientation)
         std::vector<float> delta((size_t)nel);
         matmul_f32(b_f32.data(), a_f32.data(), delta.data(),
                    (int)out_feat, (int)rank, (int)in_feat);
+
+        // If the engine stores this weight transposed [in_feat, out_feat],
+        // transpose the delta to match before merging with base.
+        bool is_transposed = ctx->weights_transposed.count(trt_name) > 0;
+        if (is_transposed) {
+            std::vector<float> delta_t((size_t)nel);
+            for (int64_t r = 0; r < out_feat; r++) {
+                for (int64_t c = 0; c < in_feat; c++) {
+                    delta_t[c * out_feat + r] = delta[r * in_feat + c];
+                }
+            }
+            delta = std::move(delta_t);
+        }
 
         // Merge: base_bf16 + scaling * delta → bf16
         // Convert base from bf16 to fp32, add scaled delta, convert back

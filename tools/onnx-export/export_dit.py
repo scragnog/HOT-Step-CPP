@@ -454,92 +454,179 @@ def export_onnx(dit_model, config, output_path: str, opset: int = 18, precision:
         dynamo=True,
     )
     
-    # Post-process: rename val_N initializers to original parameter names.
-    # The dynamo exporter strips parameter names, replacing them with opaque
-    # val_0, val_1, ... constants. TRT adapter refit needs named weights to
-    # map LoRA deltas → engine weights.
+    # ── Post-process: rename val_N initializers to original parameter FQNs ──
+    # Ported from Demon's rename_val_initializers_to_fqn (export.py:636-879).
     #
-    # Strategy: iterate val_N initializers (sorted by N) and model parameters
-    # in order. Dynamo visits parameters in named_parameters() order, so we
-    # match by shape+numel as a sanity check and assign in sequence.
-    if onnx_program is not None and hasattr(onnx_program, 'model_proto'):
-        import onnx
-        model_proto = onnx_program.model_proto
+    # The dynamo exporter replaces parameter names with opaque val_0, val_1, ...
+    # TRT refit addresses weights by ONNX name, so we must restore FQNs.
+    #
+    # Strategy: SHA-256 byte hash of full tensor data, tried in both
+    # orientations (torch [out,in] and ONNX MatMul [in,out]). Dynamo
+    # transposes Linear weights for MatMul but preserves the raw bytes,
+    # so exact-hash matching is reliable.
+    #
+    # Proto-only save: we never re-encode the external data file (onnx's
+    # writer has been observed to silently convert bf16→fp16 on re-save).
+    
+    print("[export_dit] Renaming val_N initializers to parameter FQNs...")
+    import hashlib, json
+    import onnx
+    from onnx import TensorProto
+    import numpy as np
+    
+    model_proto = onnx.load(output_path, load_external_data=False)
+    base_dir = os.path.dirname(output_path)
+    
+    def _sha(b: bytes) -> bytes:
+        return hashlib.sha256(b).digest()
+    
+    def _bytes_for(p: torch.Tensor):
+        """Raw bytes of a torch tensor in its native dtype."""
+        p_cpu = p.detach().cpu().contiguous()
+        if p_cpu.dtype == torch.bfloat16:
+            return p_cpu.view(torch.uint16).numpy().tobytes()
+        if p_cpu.dtype in (torch.float16, torch.float32):
+            return p_cpu.numpy().tobytes()
+        return None
+    
+    _TORCH_TO_ONNX_DT = {
+        torch.float32: TensorProto.FLOAT,
+        torch.float16: TensorProto.FLOAT16,
+        torch.bfloat16: TensorProto.BFLOAT16,
+    }
+    
+    # Build torch-side hash index: (onnx_dtype, shape, sha256) → (fqn, transposed)
+    # Hash each 2D param in both orientations.
+    torch_hash_index = {}
+    for name, p in wrapper.named_parameters():
+        if p.dim() != 2:
+            continue
+        canon = "dit." + name if not name.startswith("dit.") else name
+        onnx_dt = _TORCH_TO_ONNX_DT.get(p.dtype)
+        if onnx_dt is None:
+            continue
         
-        # Collect model parameters with shapes
-        param_info = []
-        for name, param in wrapper.named_parameters():
-            param_info.append((name, tuple(param.shape), param.numel()))
+        # Original orientation [out, in]
+        b_orig = _bytes_for(p)
+        if b_orig is None:
+            continue
+        shape_orig = tuple(p.shape)
+        torch_hash_index.setdefault(
+            (onnx_dt, shape_orig, _sha(b_orig)), (canon, False)
+        )
         
-        # Collect val_N initializers sorted by N, only 2D+ (actual weight matrices)
-        val_inits = []
+        # Transposed orientation [in, out] — how ONNX MatMul stores it
+        p_t = p.transpose(0, 1)
+        b_trans = _bytes_for(p_t)
+        if b_trans is not None:
+            shape_trans = (shape_orig[1], shape_orig[0])
+            torch_hash_index.setdefault(
+                (onnx_dt, shape_trans, _sha(b_trans)), (canon, True)
+            )
+    
+    print(f"[export_dit] Built hash index: {len(torch_hash_index)} entries "
+          f"from {sum(1 for _,p in wrapper.named_parameters() if p.dim()==2)} 2D params")
+    
+    def _read_external_bytes(init):
+        """Read raw bytes for one initializer from its external data file."""
+        loc = None
+        offset = 0
+        length = None
+        for ed in init.external_data:
+            if ed.key == "location":
+                loc = ed.value
+            elif ed.key == "offset":
+                offset = int(ed.value)
+            elif ed.key == "length":
+                length = int(ed.value)
+        if loc is None:
+            return None
+        ext_path = os.path.join(base_dir, loc)
+        with open(ext_path, "rb") as f:
+            f.seek(offset)
+            return f.read(length) if length is not None else f.read()
+    
+    # Match val_N initializers to torch parameters by SHA-256
+    used_names = {init.name for init in model_proto.graph.initializer}
+    val_inits_changed = {}  # old_name → new_name
+    transposed_fqns = []
+    claimed_torch = set()
+    float_dtypes = (TensorProto.BFLOAT16, TensorProto.FLOAT16, TensorProto.FLOAT)
+    renamed = 0
+    skipped = 0
+    
+    for init in model_proto.graph.initializer:
+        if not init.name.startswith("val_"):
+            continue
+        dims = tuple(init.dims)
+        if len(dims) != 2:
+            continue
+        nelem = int(np.prod(dims))
+        if nelem < 16:
+            continue
+        if init.data_type not in float_dtypes:
+            continue
+        
+        raw = _read_external_bytes(init)
+        if raw is None:
+            raw = bytes(init.raw_data) if init.raw_data else None
+        if raw is None:
+            continue
+        
+        expected_bytes = nelem * (4 if init.data_type == TensorProto.FLOAT else 2)
+        if len(raw) != expected_bytes:
+            skipped += 1
+            continue
+        
+        key = (init.data_type, dims, _sha(raw))
+        result = torch_hash_index.get(key)
+        if result is None:
+            skipped += 1
+            continue
+        canon, is_transposed = result
+        if canon in claimed_torch or canon in used_names:
+            skipped += 1
+            continue
+        
+        val_inits_changed[init.name] = canon
+        claimed_torch.add(canon)
+        used_names.add(canon)
+        if is_transposed:
+            transposed_fqns.append(canon)
+        renamed += 1
+    
+    # Apply renames to proto (initializers + node inputs + graph inputs/value_info)
+    if val_inits_changed:
         for init in model_proto.graph.initializer:
-            if init.name.startswith('val_'):
-                dims = tuple(init.dims)
-                numel = 1
-                for d in dims:
-                    numel *= d
-                if len(dims) >= 2 and numel > 100:  # skip small constants
-                    val_inits.append((init.name, dims, numel))
+            if init.name in val_inits_changed:
+                init.name = val_inits_changed[init.name]
+        for node in model_proto.graph.node:
+            for i, ref in enumerate(node.input):
+                if ref in val_inits_changed:
+                    node.input[i] = val_inits_changed[ref]
+        for vi in list(model_proto.graph.input) + list(model_proto.graph.value_info):
+            if vi.name in val_inits_changed:
+                vi.name = val_inits_changed[vi.name]
         
-        # Sort by val_N number (extraction order)
-        val_inits.sort(key=lambda x: int(x[0].split('_')[1]))
+        # Proto-only save — external data files keep original bytes
+        onnx.save(model_proto, output_path)
         
-        print(f"[export_dit] Matching {len(val_inits)} val_N weights to {len(param_info)} parameters")
-        
-        # Match val_N to parameters in order, using shape as sanity check
-        rename_map = {}
-        param_idx = 0
-        for val_name, val_shape, val_numel in val_inits:
-            # Find next parameter with matching shape
-            found = False
-            search_start = param_idx
-            while param_idx < len(param_info):
-                p_name, p_shape, p_numel = param_info[param_idx]
-                if p_numel == val_numel:
-                    # Shape match (account for possible transpose by dynamo)
-                    shape_ok = (p_shape == val_shape or 
-                               (len(p_shape) == 2 and len(val_shape) == 2 and
-                                p_shape[0] == val_shape[1] and p_shape[1] == val_shape[0]))
-                    if shape_ok:
-                        trt_name = "dit." + p_name if not p_name.startswith("dit.") else p_name
-                        rename_map[val_name] = trt_name
-                        param_idx += 1
-                        found = True
-                        break
-                param_idx += 1
-            
-            if not found:
-                # Reset search from where we left off — some val_N may be
-                # computed constants, not parameters
-                param_idx = search_start
-        
-        # Apply renames to initializers and all graph node references
-        if rename_map:
-            for init in model_proto.graph.initializer:
-                if init.name in rename_map:
-                    init.name = rename_map[init.name]
-            for node in model_proto.graph.node:
-                for i, inp in enumerate(node.input):
-                    if inp in rename_map:
-                        node.input[i] = rename_map[inp]
-                for i, out in enumerate(node.output):
-                    if out in rename_map:
-                        node.output[i] = rename_map[out]
-            
-            print(f"[export_dit] Renamed {len(rename_map)}/{len(val_inits)} val_N initializers")
-            
-            # Save a mapping sidecar for debugging
-            map_path = output_path.replace('.onnx', '.weight_map.json')
-            import json
-            with open(map_path, 'w') as f:
-                json.dump(rename_map, f, indent=2)
-            print(f"[export_dit] Weight map saved to {map_path}")
-            
-            # Re-save with renamed initializers
-            onnx.save(model_proto, output_path)
+        print(f"[export_dit] Renamed {renamed} val_N initializers to FQNs "
+              f"({len(transposed_fqns)} transposed, {skipped} skipped)")
     else:
-        print("[export_dit] WARNING: ONNXProgram not returned, weight names will be val_N")
+        print("[export_dit] WARNING: No val_N initializers matched any parameter")
+    
+    # Emit refit manifest sidecar
+    manifest = {
+        "version": 1,
+        "onnx_path": os.path.basename(output_path),
+        "weights_transposed": sorted(transposed_fqns),
+        "weights_renamed": renamed,
+    }
+    manifest_path = output_path + ".refit_manifest.json"
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest, f, indent=2, sort_keys=True)
+    print(f"[export_dit] Refit manifest saved to {manifest_path}")
     
     t1 = time.time()
     print(f"[export_dit] ONNX trace completed in {t1-t0:.1f}s")
