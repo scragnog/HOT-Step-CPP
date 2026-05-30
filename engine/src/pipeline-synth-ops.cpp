@@ -1084,7 +1084,8 @@ int ops_vae_decode(const AceSynth * ctx,
         s.timer.reset();
         int T_audio;
         if (use_ort) {
-            T_audio = vae_ort_decode(vae_ort, dit_out, T_latent, audio.data(), T_audio_max);
+            T_audio = vae_ort_decode_tiled(vae_ort, dit_out, T_latent, audio.data(), T_audio_max,
+                                            ctx->params.vae_chunk, ctx->params.vae_overlap);
         } else {
             T_audio = vae_ggml_decode_tiled(vae_ggml, dit_out, T_latent, audio.data(), T_audio_max,
                                             ctx->params.vae_chunk, ctx->params.vae_overlap, cancel, cancel_data);

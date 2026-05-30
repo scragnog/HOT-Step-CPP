@@ -238,6 +238,117 @@ static inline int vae_ort_decode(VaeOrt *    ctx,
     return T_audio;
 }
 
+// ── Tiled decode ──────────────────────────────────────────────────────────
+//
+// Overlap-discard chunking for bounded VRAM usage, mirroring
+// vae_ggml_decode_tiled(). Each tile decodes a latent window with overlap
+// context; the core (non-overlap) portion is kept and concatenated.
+//
+// stride = chunk_size - 2*overlap
+// Default chunk=256 / overlap=64 matches the GGML defaults.
+// Returns T_audio (total audio frames per channel) or -1 on error.
+
+static inline int vae_ort_decode_tiled(VaeOrt *      ctx,
+                                        const float * latent,      // [T_latent, 64] time-major
+                                        int           T_latent,
+                                        float *       audio_out,   // [2, T_audio_max] planar stereo
+                                        int           T_audio_max,
+                                        int           chunk_size = 256,
+                                        int           overlap    = 64) {
+    if (!ctx || !ctx->session || !latent || T_latent <= 0) return -1;
+
+    // Ensure positive stride
+    while (chunk_size - 2 * overlap <= 0 && overlap > 0) {
+        overlap /= 2;
+    }
+
+    // Short sequence: decode directly (no tiling needed)
+    if (T_latent <= chunk_size) {
+        return vae_ort_decode(ctx, latent, T_latent, audio_out, T_audio_max);
+    }
+
+    int stride    = chunk_size - 2 * overlap;
+    int num_steps = (T_latent + stride - 1) / stride;
+
+    fprintf(stderr, "[VAE-ORT] Tiled decode: %d tiles (chunk=%d, overlap=%d, stride=%d)\n",
+            num_steps, chunk_size, overlap, stride);
+
+    float upsample_factor = 0.0f;
+    int   audio_write_pos = 0;
+
+    // Temporary buffer for each tile's audio output
+    int tile_audio_max = chunk_size * 1920;
+    std::vector<float> tile_audio(2 * tile_audio_max);
+
+    for (int i = 0; i < num_steps; i++) {
+        // Core range in latent frames (the part we keep)
+        int core_start = i * stride;
+        int core_end   = core_start + stride;
+        if (core_end > T_latent) core_end = T_latent;
+
+        // Window range with overlap context
+        int win_start = core_start - overlap;
+        if (win_start < 0) win_start = 0;
+        int win_end = core_end + overlap;
+        if (win_end > T_latent) win_end = T_latent;
+        int win_len = win_end - win_start;
+
+        // Decode this tile
+        int tile_T = vae_ort_decode(ctx,
+                                     latent + win_start * 64,  // offset into latent
+                                     win_len,
+                                     tile_audio.data(),
+                                     tile_audio_max);
+        if (tile_T < 0) {
+            fprintf(stderr, "[VAE-ORT] FATAL: tile %d decode failed\n", i);
+            return -1;
+        }
+
+        // Determine upsample factor from first tile
+        if (i == 0) {
+            upsample_factor = (float)tile_T / (float)win_len;
+            fprintf(stderr, "[VAE-ORT] Upsample factor: %.2f (expected ~1920)\n", upsample_factor);
+        }
+
+        // Compute trim in audio samples
+        int added_start = core_start - win_start;
+        int trim_start  = (int)roundf((float)added_start * upsample_factor);
+        int added_end   = win_end - core_end;
+        int trim_end    = (int)roundf((float)added_end * upsample_factor);
+
+        int end_idx  = (trim_end > 0) ? (tile_T - trim_end) : tile_T;
+        int core_len = end_idx - trim_start;
+        if (core_len <= 0) continue;
+
+        // Check output bounds
+        if (audio_write_pos + core_len > T_audio_max) {
+            fprintf(stderr, "[VAE-ORT] FATAL: tiled output exceeds T_audio_max\n");
+            return -1;
+        }
+
+        // Copy trimmed ch0 and ch1 into final audio_out (planar: [L...][R...])
+        // tile_audio layout: [L0..LN, R0..RN] where N = tile_T
+        memcpy(audio_out + audio_write_pos,
+               tile_audio.data() + trim_start,
+               (size_t)core_len * sizeof(float));
+        memcpy(audio_out + T_audio_max + audio_write_pos,
+               tile_audio.data() + tile_T + trim_start,
+               (size_t)core_len * sizeof(float));
+        audio_write_pos += core_len;
+    }
+
+    // Compact ch1 from offset T_audio_max to offset audio_write_pos
+    memmove(audio_out + audio_write_pos,
+            audio_out + T_audio_max,
+            (size_t)audio_write_pos * sizeof(float));
+
+    fprintf(stderr, "[VAE-ORT] Tiled decode done: %d tiles → T_audio=%d (%.2fs @ 48kHz, TRT=%s)\n",
+            num_steps, audio_write_pos, (float)audio_write_pos / 48000.0f,
+            ctx->using_trt ? "yes" : "no");
+
+    return audio_write_pos;
+}
+
 #else  // !HOT_STEP_SUPERSEP — stubs
 
 struct VaeOrt {};
@@ -250,6 +361,11 @@ static inline bool vae_ort_load(VaeOrt *, const char *, int = 0) {
 static inline void vae_ort_free(VaeOrt *) {}
 
 static inline int vae_ort_decode(VaeOrt *, const float *, int, float *, int) {
+    fprintf(stderr, "[VAE-ORT] Not compiled (HOT_STEP_SUPERSEP not defined)\n");
+    return -1;
+}
+
+static inline int vae_ort_decode_tiled(VaeOrt *, const float *, int, float *, int, int = 256, int = 64) {
     fprintf(stderr, "[VAE-ORT] Not compiled (HOT_STEP_SUPERSEP not defined)\n");
     return -1;
 }
