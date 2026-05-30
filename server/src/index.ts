@@ -203,16 +203,22 @@ function startAceServer(): ChildProcess | null {
   console.log(`[Server] Port: ${config.aceServer.port}`);
 
   // Inject TensorRT libs into PATH if available (so ORT can load nvinfer_10.dll)
-  const spawnEnv = { ...process.env };
+  // IMPORTANT: On Windows, process.env is a case-insensitive Proxy, but spreading
+  // it to a plain object creates case-sensitive keys. The key is typically 'Path'
+  // not 'PATH', so we must find the actual key to avoid creating a shadowing duplicate.
+  let spawnOpts: { stdio: any; env?: NodeJS.ProcessEnv } = {
+    stdio: ['ignore', 'pipe', 'pipe'] as any,
+  };
   if (config.aceServer.trtLibs && fs.existsSync(config.aceServer.trtLibs)) {
-    spawnEnv.PATH = config.aceServer.trtLibs + ';' + (spawnEnv.PATH || '');
+    const env = { ...process.env };
+    // Find the actual PATH key (case-insensitive on Windows)
+    const pathKey = Object.keys(env).find(k => k.toUpperCase() === 'PATH') || 'PATH';
+    env[pathKey] = config.aceServer.trtLibs + ';' + (env[pathKey] || '');
+    spawnOpts.env = env;
     console.log(`[Server] TensorRT libs: ${config.aceServer.trtLibs}`);
   }
 
-  const child = spawn(exe, args, {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: spawnEnv,
-  });
+  const child = spawn(exe, args, spawnOpts);
 
   // Filter repetitive GGML noise from console output (still written to ace_engine.log via logEngine)
   const isNoise = (line: string) =>
