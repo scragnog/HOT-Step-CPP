@@ -227,6 +227,9 @@ static bool g_keep_loaded = false;
 // speculative decoding: path to 0.6B draft model (auto-discovered or --draft-lm)
 static std::string g_draft_lm_path;
 
+// ONNX model directory (optional, for TensorRT/CUDA EP accelerated VAE)
+static const char * g_onnx_dir = nullptr;
+
 // HOT-Step: pre-computed noise profile for spectral denoiser.
 // Loaded once at startup from a reference noise sample WAV.
 static NoiseProfile g_noise_profile;
@@ -1848,6 +1851,9 @@ static void usage(const char * prog) {
             "  --vae-chunk <N>         Latent frames per tile (default: %d)\n"
             "  --vae-overlap <N>       Overlap frames per side (default: %d)\n"
             "\n"
+            "ONNX/TensorRT:\n"
+            "  --onnx-dir <dir>        Directory with ONNX models (e.g. vae_decoder.onnx)\n"
+            "\n"
             "Speculative decoding:\n"
             "  --draft-lm <path>        Path to 0.6B draft LM (auto-discovers if omitted)\n"
             "  --no-draft               Disable draft model auto-discovery\n"
@@ -1933,6 +1939,9 @@ int main(int argc, char ** argv) {
         } else if (!strcmp(argv[i], "--no-draft")) {
             g_draft_lm_path = "none";
 
+        } else if (!strcmp(argv[i], "--onnx-dir") && i + 1 < argc) {
+            g_onnx_dir = argv[++i];
+
         } else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage(argv[0]);
             return 0;
@@ -1999,6 +2008,22 @@ int main(int argc, char ** argv) {
             }
         } else {
             fprintf(stderr, "[Server] WARNING: could not read noise profile WAV: %s\n", noise_profile_path);
+        }
+    }
+
+    // ONNX/TensorRT: auto-detect vae_decoder.onnx in --onnx-dir
+    static std::string g_onnx_vae_path_buf;
+    if (g_onnx_dir) {
+        g_onnx_vae_path_buf = std::string(g_onnx_dir) + "/vae_decoder.onnx";
+        FILE * f = fopen(g_onnx_vae_path_buf.c_str(), "rb");
+        if (f) {
+            fclose(f);
+            g_synth_params.onnx_vae_path = g_onnx_vae_path_buf.c_str();
+            fprintf(stderr, "[Server] ONNX VAE decoder: %s\n", g_onnx_vae_path_buf.c_str());
+        } else {
+            fprintf(stderr, "[Server] WARNING: --onnx-dir specified but no vae_decoder.onnx found in %s\n",
+                    g_onnx_dir);
+            g_onnx_vae_path_buf.clear();
         }
     }
 

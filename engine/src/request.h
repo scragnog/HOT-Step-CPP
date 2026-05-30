@@ -137,6 +137,10 @@ struct AceRequest {
     // audio output: MP3 encoder bitrate in kbps. Applies only when
     // output_format is "mp3". WAV outputs ignore this field.
     int mp3_bitrate;  // 128
+
+    // ONNX Runtime VAE decode: when true and an ONNX VAE model is available,
+    // route VAE decode through TensorRT/CUDA EP instead of the GGML tiled decoder.
+    bool use_ort_vae;  // false
 };
 
 // Initialize all fields to defaults (matches Python GenerationParams defaults)

@@ -66,6 +66,7 @@ void request_init(AceRequest * r) {
     r->pp_vae_reencode      = false;
     r->postprocess_plugin   = "";
     r->get_lrc              = false;
+    r->use_ort_vae          = false;
 }
 
 // helper: get yyjson string as std::string
@@ -244,6 +245,14 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
         } else if (yyjson_is_str(v)) {
             const char * s = yyjson_get_str(v);
             r->get_lrc     = (strcmp(s, "true") == 0 || strcmp(s, "1") == 0);
+        }
+    }
+    if ((v = yyjson_obj_get(obj, "use_ort_vae"))) {
+        if (yyjson_is_bool(v)) {
+            r->use_ort_vae = yyjson_get_bool(v);
+        } else if (yyjson_is_str(v)) {
+            const char * s = yyjson_get_str(v);
+            r->use_ort_vae = (strcmp(s, "true") == 0 || strcmp(s, "1") == 0);
         }
     }
 
@@ -512,6 +521,9 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     }
     if (all || r->get_lrc != def.get_lrc) {
         yyjson_mut_obj_add_bool(doc, root, "get_lrc", r->get_lrc);
+    }
+    if (all || r->use_ort_vae != def.use_ort_vae) {
+        yyjson_mut_obj_add_bool(doc, root, "use_ort_vae", r->use_ort_vae);
     }
 
     return doc;

@@ -1029,13 +1029,33 @@ int ops_vae_decode(const AceSynth * ctx,
                    SynthState &     s,
                    bool (*cancel)(void *),
                    void * cancel_data) {
-    VAEGGML * vae = store_require_vae_dec(ctx->store, ctx->vae_dec_key);
-    if (!vae) {
-        fprintf(stderr, "[VAE-Decode] FATAL: store_require_vae_dec failed\n");
-        return -1;
-    }
-    ModelHandle vae_guard(ctx->store, vae);
+    // ── Decide: ORT path or GGML path ──────────────────────────────
+    bool use_ort = s.rr.use_ort_vae && !ctx->onnx_vae_path.empty();
 
+    // Acquire the appropriate decoder module.
+    // We try ORT first; on failure, fall back to GGML.
+    VAEGGML * vae_ggml = nullptr;
+    VaeOrt  * vae_ort  = nullptr;
+
+    if (use_ort) {
+        vae_ort = store_require_vae_dec_ort(ctx->store, ctx->vae_dec_ort_key);
+        if (!vae_ort) {
+            fprintf(stderr, "[VAE-Decode] WARNING: ORT VAE load failed, falling back to GGML\n");
+            use_ort = false;
+        } else {
+            fprintf(stderr, "[VAE-Decode] Using ORT VAE decoder\n");
+        }
+    }
+    if (!use_ort) {
+        vae_ggml = store_require_vae_dec(ctx->store, ctx->vae_dec_key);
+        if (!vae_ggml) {
+            fprintf(stderr, "[VAE-Decode] FATAL: store_require_vae_dec failed\n");
+            return -1;
+        }
+    }
+
+    // RAII guard: whichever module we loaded, release it on scope exit
+    ModelHandle vae_guard(ctx->store, use_ort ? (void *)vae_ort : (void *)vae_ggml);
     // Latent splice for repaint/lego: keep s.output inside [t0, t1), copy
     // s.cover_latents outside. Hard cut at frame boundary, the VAE tiled
     // decoder smooths the seam in the waveform.
@@ -1062,8 +1082,13 @@ int ops_vae_decode(const AceSynth * ctx,
         float * dit_out = s.output.data() + b * s.Oc * s.T;
 
         s.timer.reset();
-        int T_audio = vae_ggml_decode_tiled(vae, dit_out, T_latent, audio.data(), T_audio_max, ctx->params.vae_chunk,
-                                            ctx->params.vae_overlap, cancel, cancel_data);
+        int T_audio;
+        if (use_ort) {
+            T_audio = vae_ort_decode(vae_ort, dit_out, T_latent, audio.data(), T_audio_max);
+        } else {
+            T_audio = vae_ggml_decode_tiled(vae_ggml, dit_out, T_latent, audio.data(), T_audio_max,
+                                            ctx->params.vae_chunk, ctx->params.vae_overlap, cancel, cancel_data);
+        }
         if (T_audio < 0) {
             if (cancel && cancel(cancel_data)) {
                 fprintf(stderr, "[VAE-Decode Batch%d] Cancelled\n", b);
@@ -1075,7 +1100,8 @@ int ops_vae_decode(const AceSynth * ctx,
             out[b].sample_rate = 48000;
             continue;
         }
-        fprintf(stderr, "[VAE-Decode Batch%d] Decode: %.1f ms\n", b, s.timer.ms());
+        fprintf(stderr, "[VAE-Decode Batch%d] Decode: %.1f ms (%s)\n", b, s.timer.ms(),
+                use_ort ? "ORT" : "GGML");
 
         if (b == 0) {
             debug_dump_2d(&s.dbg, "vae_audio", audio.data(), 2, T_audio);

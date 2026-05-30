@@ -54,6 +54,7 @@
 #include "qwen3-enc.h"
 #include "qwen3-lm.h"
 #include "vae-enc.h"
+#include "vae-ort.h"
 #include "vae.h"
 
 #include <cstddef>
@@ -70,6 +71,7 @@ enum ModelKind {
     MODEL_VAE_DEC,    // VAEGGML        from vae.gguf (decoder.*)
     MODEL_FSQ_TOK,    // TokGGML        from acestep-v15-*.gguf (tokenizer.*)
     MODEL_FSQ_DETOK,  // DetokGGML      from acestep-v15-*.gguf (detokenizer.*)
+    MODEL_VAE_DEC_ORT,// VaeOrt         from vae_decoder.onnx (TRT/CUDA EP)
 };
 
 struct ModelKey {
@@ -116,6 +118,7 @@ CondGGML *   store_require_cond_enc(ModelStore * s, const ModelKey & k);
 DiTGGML *    store_require_dit(ModelStore * s, const ModelKey & k);
 VAEEncoder * store_require_vae_enc(ModelStore * s, const ModelKey & k);
 VAEGGML *    store_require_vae_dec(ModelStore * s, const ModelKey & k);
+VaeOrt *     store_require_vae_dec_ort(ModelStore * s, const ModelKey & k);
 TokGGML *    store_require_fsq_tok(ModelStore * s, const ModelKey & k);
 DetokGGML *  store_require_fsq_detok(ModelStore * s, const ModelKey & k);
 

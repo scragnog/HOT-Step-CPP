@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // pipeline-synth-impl.h: private state of the synthesis pipeline
 //
 // Holds the types that the public API exposes as opaque handles (AceSynth,
@@ -48,6 +48,10 @@ struct AceSynth {
     ModelKey pp_vae_enc_key;  // PP-VAE encoder, from pp_vae_path
     ModelKey pp_vae_dec_key;  // PP-VAE decoder, from pp_vae_path
     bool     have_pp_vae;     // true if PP-VAE GGUF was found
+
+    // ORT VAE: optional ONNX Runtime VAE decoder (TensorRT/CUDA EP)
+    ModelKey    vae_dec_ort_key;   // VAE-Dec-ORT, from onnx_vae_path
+    std::string onnx_vae_path;    // path to vae_decoder.onnx (empty = not available)
 };
 
 // Transient state for a single job, shared by reference across the primitive

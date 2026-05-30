@@ -444,6 +444,31 @@ VAEGGML * store_require_vae_dec(ModelStore * s, const ModelKey & k) {
     return m;
 }
 
+static void del_vae_dec_ort(void * p) {
+    vae_ort_free(static_cast<VaeOrt *>(p));
+    delete static_cast<VaeOrt *>(p);
+}
+
+VaeOrt * store_require_vae_dec_ort(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<VaeOrt>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer    t;
+    VaeOrt * m = new VaeOrt();
+    if (!vae_ort_load(m, k.path.c_str())) {
+        delete m;
+        return nullptr;
+    }
+    // ORT manages its own VRAM — report 0 bytes to the store budget.
+    install_entry(s, k, m, 0, "VAE-Dec-ORT", del_vae_dec_ort);
+    fprintf(stderr, "[Store] Load VAE-Dec-ORT: %.0f ms\n", t.ms());
+    return m;
+}
+
 TokGGML * store_require_fsq_tok(ModelStore * s, const ModelKey & k) {
     std::lock_guard<std::mutex> lock(s->mtx);
     if (auto * hit = cache_hit<TokGGML>(s, k)) {

@@ -40,6 +40,7 @@ void ace_synth_default_params(AceSynthParams * p) {
     p->vae_overlap       = 64;
     p->dump_dir          = NULL;
     p->pp_vae_path       = NULL;
+    p->onnx_vae_path     = NULL;
 }
 
 AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
@@ -111,6 +112,15 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
         ctx->pp_vae_dec_key.path = params->pp_vae_path;
         ctx->have_pp_vae         = true;
         fprintf(stderr, "[Synth-Load] PP-VAE: %s\n", params->pp_vae_path);
+    }
+
+    // ORT VAE: optional ONNX Runtime VAE decoder
+    ctx->onnx_vae_path.clear();
+    if (params->onnx_vae_path && params->onnx_vae_path[0]) {
+        ctx->onnx_vae_path          = params->onnx_vae_path;
+        ctx->vae_dec_ort_key.kind   = MODEL_VAE_DEC_ORT;
+        ctx->vae_dec_ort_key.path   = params->onnx_vae_path;
+        fprintf(stderr, "[Synth-Load] ORT-VAE: %s\n", params->onnx_vae_path);
     }
 
     fprintf(stderr, "[Synth-Load] Ready: turbo=%s, merge=%s, fa=%s, batch_cfg=%s\n",

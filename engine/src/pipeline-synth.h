@@ -29,6 +29,7 @@ struct AceSynthParams {
     int          vae_overlap;        // overlap frames per side
     const char * dump_dir;           // intermediate tensor dump dir (NULL = disabled)
     const char * pp_vae_path;        // PP-VAE GGUF (NULL = no PP-VAE available)
+    const char * onnx_vae_path;      // ONNX VAE decoder path (NULL = not available)
 };
 
 // Output audio buffer. Caller must free with ace_audio_free().
