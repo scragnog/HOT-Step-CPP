@@ -77,19 +77,28 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
     ctx->Oc     = ctx->meta->cfg.out_channels;           // 64
     ctx->ctx_ch = ctx->meta->cfg.in_channels - ctx->Oc;  // 128
 
+    // For ONNX DiT: sub-models (cond_enc, fsq_tok/detok) will be separate
+    // ONNX files in the same directory as the DiT ONNX. Each model type is
+    // self-contained — no cross-dependency on safetensors or GGUF.
+    // For GGUF/SafeTensors: sub-models share the dit_path as before.
+    bool is_onnx_dit = dit_ends_with_onnx(params->dit_path);
+    std::string submodel_path = is_onnx_dit
+        ? dit_sidecar_dir(params->dit_path)  // ONNX dir for future cond_enc.onnx etc.
+        : std::string(params->dit_path);
+
     // ModelKeys. Each path identifies its GGUF; adapter info rides with the
     // DiT key because two DiTs with different adapters are distinct modules.
     ctx->text_enc_key.kind = MODEL_TEXT_ENC;
     ctx->text_enc_key.path = params->text_encoder_path;
 
     ctx->cond_enc_key.kind = MODEL_COND_ENC;
-    ctx->cond_enc_key.path = params->dit_path;
+    ctx->cond_enc_key.path = submodel_path;
 
     ctx->fsq_tok_key.kind = MODEL_FSQ_TOK;
-    ctx->fsq_tok_key.path = params->dit_path;
+    ctx->fsq_tok_key.path = submodel_path;
 
     ctx->fsq_detok_key.kind = MODEL_FSQ_DETOK;
-    ctx->fsq_detok_key.path = params->dit_path;
+    ctx->fsq_detok_key.path = submodel_path;
 
     ctx->dit_key.kind                 = MODEL_DIT;
     ctx->dit_key.path                 = params->dit_path;
