@@ -499,6 +499,12 @@ inline bool lm_trt_load(
         t1 - t0).count();
     fprintf(stderr, "[LM-TRT] Load complete: %lld ms, ~%zu MB GPU\n",
             (long long)ctx->load_time_ms, total_gpu_mb);
+
+    // Bind static tensor addresses ONCE (these never change).
+    ctx->context->setTensorAddress("input_ids",      ctx->d_input_ids);
+    ctx->context->setTensorAddress("position_ids",   ctx->d_position_ids);
+    ctx->context->setTensorAddress("attention_mask",  ctx->d_attn_mask);
+    ctx->context->setTensorAddress("logits",          ctx->d_logits);
     ctx->current_adapter.clear();
 
     // Pre-cache tensor name strings for the forward pass hot loop
@@ -606,19 +612,11 @@ inline bool lm_trt_forward(
     context->setInputShape("position_ids",   nvinfer1::Dims2(batch, n_tokens));
     context->setInputShape("attention_mask",  nvinfer1::Dims2(batch, kv_len));
 
-    // Set input tensor addresses
-    context->setTensorAddress("input_ids",     ctx->d_input_ids);
-    context->setTensorAddress("position_ids",  ctx->d_position_ids);
-    context->setTensorAddress("attention_mask", ctx->d_attn_mask);
-
-    // Set KV cache input/output shapes and addresses
-    // past_seq_len for first forward (kv_pos=0) needs special handling:
-    // TRT profile min is 1, so we use 1 even when kv_pos=0 and fill with zeros
+    // KV cache shapes + addresses (addresses swap each step due to double-buffer)
     int past_len = std::max(kv_pos, 1);
     nvinfer1::Dims4 kv_shape(batch, ctx->n_kv_heads, past_len, ctx->head_dim);
 
     for (int l = 0; l < ctx->n_layers; l++) {
-        // Use pre-cached names (no snprintf in hot loop)
         context->setInputShape(ctx->tn_past_key[l], kv_shape);
         context->setInputShape(ctx->tn_past_val[l], kv_shape);
 
@@ -627,9 +625,6 @@ inline bool lm_trt_forward(
         context->setTensorAddress(ctx->tn_present_key[l], *lm_trt_present_key(ctx, kv_set, l));
         context->setTensorAddress(ctx->tn_present_val[l], *lm_trt_present_val(ctx, kv_set, l));
     }
-
-    // Logits output
-    context->setTensorAddress("logits", ctx->d_logits);
 
     // Execute (no validation in release ÔÇö we checked at load time)
     bool ok = context->enqueueV3(s);
