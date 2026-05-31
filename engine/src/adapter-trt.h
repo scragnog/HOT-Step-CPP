@@ -23,6 +23,7 @@
 #include "hot-step-params.h"  // adapter_group_scales
 #include "safetensors.h"      // STFile, st_open, st_data
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -313,7 +314,11 @@ static int adapter_trt_apply_lora(
     return merged;
 }
 
-// ── LoKr merge path ─────────────────────────────────────────────────────────
+// ── LoKr merge path (batched GPU computation) ───────────────────────────────
+// All LoKr Kronecker products are built as subgraphs in a single GGML context,
+// allocated in one GPU buffer, computed in one graph dispatch, and downloaded
+// in one pass. This avoids 359× separate cudaMalloc/cudaFree cycles that
+// caused ~14s of CUDA driver overhead.
 static int adapter_trt_apply_lokr(
     DitTrt* ctx,
     const STFile& st,
@@ -345,10 +350,34 @@ static int adapter_trt_apply_lokr(
 
     std::unordered_map<std::string, std::string> name_map = lokr_build_trt_reverse_map(*ctx);
     int lokr_dim = adapter_read_lokr_dim(st);
-    int merged = 0, skipped = 0;
+    int skipped = 0;
 
     fprintf(stderr, "[Adapter-TRT] LoKr: found %zu modules, %zu TRT name mappings\n",
             modules.size(), name_map.size());
+
+    // ── Phase 1: Validate and collect all mergeable entries ──────────────
+    struct BatchEntry {
+        std::string trt_name;
+        int64_t a, b, c, d, r;
+        int64_t in_feat, out_feat;
+        float scaling;
+        bool has_factor;
+
+        // Host factor data (kept alive for upload)
+        std::vector<float> w1_f32;
+        std::vector<float> w2a_f32, w2b_f32, w2_f32;
+        int64_t w1_nel, w2a_nel, w2b_nel, w2_nel;
+
+        // Graph tensor pointers (filled in Phase 2)
+        struct ggml_tensor* tw1     = nullptr;
+        struct ggml_tensor* tw2a    = nullptr;
+        struct ggml_tensor* tw2b    = nullptr;
+        struct ggml_tensor* tw2_src = nullptr;
+        struct ggml_tensor* tdelta  = nullptr;
+    };
+
+    std::vector<BatchEntry> batch;
+    batch.reserve(modules.size());
 
     for (const auto& [lyc_prefix, m] : modules) {
         bool has_factor = (m.w2_a && m.w2_b);
@@ -372,32 +401,34 @@ static int adapter_trt_apply_lokr(
         }
         const auto& base_data = ctx->base_weights.at(trt_name);
 
-        // LoKr shapes: kron(w1[a,b], w2[c,d]) = [a*c, b*d]
-        int64_t a = m.w1->shape[0], b = m.w1->shape[1];
-        int64_t c, d, r;
+        BatchEntry e;
+        e.trt_name = trt_name;
+        e.a = m.w1->shape[0]; e.b = m.w1->shape[1];
+        e.has_factor = has_factor;
+
         if (has_factor) {
-            c = m.w2_a->shape[0]; r = m.w2_a->shape[1]; d = m.w2_b->shape[1];
-            if (r != m.w2_b->shape[0]) {
+            e.c = m.w2_a->shape[0]; e.r = m.w2_a->shape[1]; e.d = m.w2_b->shape[1];
+            if (e.r != m.w2_b->shape[0]) {
                 fprintf(stderr, "[Adapter-TRT] WARNING: LoKr rank mismatch for %s\n",
                         lyc_prefix.c_str());
                 skipped++; continue;
             }
         } else {
-            c = m.w2->shape[0]; d = m.w2->shape[1];
+            e.c = m.w2->shape[0]; e.d = m.w2->shape[1];
             if (lokr_dim <= 0) {
                 fprintf(stderr, "[Adapter-TRT] WARNING: monolithic LoKr %s needs lokr_config.linear_dim\n",
                         lyc_prefix.c_str());
                 skipped++; continue;
             }
-            r = lokr_dim;
+            e.r = lokr_dim;
         }
 
-        int64_t out_feat = a * c;  // [out, in] in torch orientation
-        int64_t in_feat  = b * d;
-        int64_t nel = out_feat * in_feat;
+        e.out_feat = e.a * e.c;
+        e.in_feat  = e.b * e.d;
+        int64_t nel = e.out_feat * e.in_feat;
         if (nel != (int64_t)base_data.size()) {
             fprintf(stderr, "[Adapter-TRT] WARNING: LoKr size mismatch for %s: kron=%lldx%lld=%lld vs base=%zu\n",
-                    lyc_prefix.c_str(), (long long)out_feat, (long long)in_feat,
+                    lyc_prefix.c_str(), (long long)e.out_feat, (long long)e.in_feat,
                     (long long)nel, base_data.size());
             skipped++; continue;
         }
@@ -407,8 +438,7 @@ static int adapter_trt_apply_lokr(
         if (!adapter_to_f32(st_data(st, *m.alpha), &alpha_val, 1, m.alpha->dtype)) {
             skipped++; continue;
         }
-
-        float scaling = (alpha_val / (float)r) * adapter_scale;
+        e.scaling = (alpha_val / (float)e.r) * adapter_scale;
 
         // Group scaling
         std::string gguf_name = trt_name;
@@ -418,82 +448,131 @@ static int adapter_trt_apply_lokr(
         float g_scale = adapter_group_scale_for(
             g_hotstep_params.adapter_group_scales,
             adapter_determine_group(gguf_name));
-        scaling *= g_scale;
+        e.scaling *= g_scale;
 
         // Load w1
-        int64_t w1_nel = a * b;
-        std::vector<float> w1_f32((size_t)w1_nel);
-        if (!adapter_to_f32(st_data(st, *m.w1), w1_f32.data(), w1_nel, m.w1->dtype)) {
+        e.w1_nel = e.a * e.b;
+        e.w1_f32.resize((size_t)e.w1_nel);
+        if (!adapter_to_f32(st_data(st, *m.w1), e.w1_f32.data(), e.w1_nel, m.w1->dtype)) {
             skipped++; continue;
         }
 
         // Load w2 factors
-        int64_t w2a_nel = 0, w2b_nel = 0, w2_nel = 0;
-        std::vector<float> w2a_f32, w2b_f32, w2_f32;
         if (has_factor) {
-            w2a_nel = c * r; w2b_nel = r * d;
-            w2a_f32.resize((size_t)w2a_nel); w2b_f32.resize((size_t)w2b_nel);
-            if (!adapter_to_f32(st_data(st, *m.w2_a), w2a_f32.data(), w2a_nel, m.w2_a->dtype) ||
-                !adapter_to_f32(st_data(st, *m.w2_b), w2b_f32.data(), w2b_nel, m.w2_b->dtype)) {
+            e.w2a_nel = e.c * e.r; e.w2b_nel = e.r * e.d;
+            e.w2a_f32.resize((size_t)e.w2a_nel); e.w2b_f32.resize((size_t)e.w2b_nel);
+            if (!adapter_to_f32(st_data(st, *m.w2_a), e.w2a_f32.data(), e.w2a_nel, m.w2_a->dtype) ||
+                !adapter_to_f32(st_data(st, *m.w2_b), e.w2b_f32.data(), e.w2b_nel, m.w2_b->dtype)) {
                 skipped++; continue;
             }
         } else {
-            w2_nel = c * d; w2_f32.resize((size_t)w2_nel);
-            if (!adapter_to_f32(st_data(st, *m.w2), w2_f32.data(), w2_nel, m.w2->dtype)) {
+            e.w2_nel = e.c * e.d; e.w2_f32.resize((size_t)e.w2_nel);
+            if (!adapter_to_f32(st_data(st, *m.w2), e.w2_f32.data(), e.w2_nel, m.w2->dtype)) {
                 skipped++; continue;
             }
         }
 
-        // GPU-accelerated Kronecker product (same graph as adapter-runtime.h)
-        auto build = [&](struct ggml_context* gctx) {
-            struct ggml_tensor* tw1 = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, b, a);
-            struct ggml_tensor* tw2;
-            struct ggml_tensor* tw2_src = nullptr;
-            struct ggml_tensor* tw2a = nullptr;
-            struct ggml_tensor* tw2b = nullptr;
-            if (has_factor) {
-                tw2a = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, r, c);
-                tw2b = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, d, r);
-                tw2  = ggml_mul_mat(gctx, ggml_cont(gctx, ggml_transpose(gctx, tw2b)), tw2a);
-            } else {
-                tw2_src = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, d, c);
-                tw2     = tw2_src;
-            }
+        batch.push_back(std::move(e));
+    }
 
-            struct ggml_tensor* tw1_s    = ggml_scale(gctx, tw1, scaling);
-            struct ggml_tensor* tw1_flat = ggml_reshape_2d(gctx, tw1_s, 1, a * b);
-            struct ggml_tensor* tw2_flat = ggml_reshape_2d(gctx, tw2, 1, c * d);
-            struct ggml_tensor* touter   = ggml_mul_mat(gctx, tw1_flat, tw2_flat);
-            struct ggml_tensor* t4d      = ggml_reshape_4d(gctx, touter, b, a, d, c);
-            struct ggml_tensor* tperm    = ggml_permute(gctx, t4d, 1, 3, 0, 2);
-            struct ggml_tensor* tdelta   = ggml_reshape_2d(gctx, ggml_cont(gctx, tperm), b * d, a * c);
+    if (batch.empty()) {
+        fprintf(stderr, "[Adapter-TRT] LoKr: 0 merged, %d skipped\n", skipped);
+        return 0;
+    }
 
-            adapter_delta_build db;
-            db.tdelta = tdelta;
-            db.upload = [=]() {
-                ggml_backend_tensor_set(tw1, w1_f32.data(), 0, (size_t)w1_nel * sizeof(float));
-                if (has_factor) {
-                    ggml_backend_tensor_set(tw2a, w2a_f32.data(), 0, (size_t)w2a_nel * sizeof(float));
-                    ggml_backend_tensor_set(tw2b, w2b_f32.data(), 0, (size_t)w2b_nel * sizeof(float));
-                } else {
-                    ggml_backend_tensor_set(tw2_src, w2_f32.data(), 0, (size_t)w2_nel * sizeof(float));
-                }
-            };
-            return db;
-        };
+    fprintf(stderr, "[Adapter-TRT] LoKr: %zu valid entries, building batched graph...\n", batch.size());
 
-        // ne0 = in_feat (b*d), ne1 = out_feat (a*c) in GGML convention
-        std::vector<float> delta_f32;
-        if (!adapter_compute_delta(build, in_feat, out_feat, backend, delta_f32)) {
-            fprintf(stderr, "[Adapter-TRT] WARNING: GPU delta compute failed for %s\n", lyc_prefix.c_str());
-            skipped++; continue;
+    // ── Phase 2: Build unified GGML graph ────────────────────────────────
+    // Each subgraph uses ~14 tensors and ~11 compute nodes
+    size_t n = batch.size();
+    size_t max_tensors = n * 14 + 32;
+    size_t max_nodes   = n * 12 + 32;
+    size_t meta = ggml_tensor_overhead() * max_tensors +
+                  ggml_graph_overhead_custom(max_nodes, false) +
+                  64 * 1024;
+
+    struct ggml_init_params gparams = { meta, NULL, true };
+    struct ggml_context* gctx = ggml_init(gparams);
+    if (!gctx) {
+        fprintf(stderr, "[Adapter-TRT] FATAL: failed to init batched graph context\n");
+        return 0;
+    }
+
+    struct ggml_cgraph* graph = ggml_new_graph_custom(gctx, max_nodes, false);
+
+    for (auto& e : batch) {
+        e.tw1 = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, e.b, e.a);
+
+        struct ggml_tensor* tw2;
+        if (e.has_factor) {
+            e.tw2a = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, e.r, e.c);
+            e.tw2b = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, e.d, e.r);
+            tw2 = ggml_mul_mat(gctx, ggml_cont(gctx, ggml_transpose(gctx, e.tw2b)), e.tw2a);
+        } else {
+            e.tw2_src = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, e.d, e.c);
+            tw2 = e.tw2_src;
         }
 
-        trt_merge_delta(*ctx, trt_name, base_data, delta_f32.data(),
-                        in_feat, out_feat, 1.0f,  // scaling already baked into delta
-                        merged_storage, merged_ptrs);
-        merged++;
+        struct ggml_tensor* tw1_s    = ggml_scale(gctx, e.tw1, e.scaling);
+        struct ggml_tensor* tw1_flat = ggml_reshape_2d(gctx, tw1_s, 1, e.a * e.b);
+        struct ggml_tensor* tw2_flat = ggml_reshape_2d(gctx, tw2, 1, e.c * e.d);
+        struct ggml_tensor* touter   = ggml_mul_mat(gctx, tw1_flat, tw2_flat);
+        struct ggml_tensor* t4d      = ggml_reshape_4d(gctx, touter, e.b, e.a, e.d, e.c);
+        struct ggml_tensor* tperm    = ggml_permute(gctx, t4d, 1, 3, 0, 2);
+        e.tdelta = ggml_reshape_2d(gctx, ggml_cont(gctx, tperm), e.b * e.d, e.a * e.c);
+
+        ggml_build_forward_expand(graph, e.tdelta);
     }
+
+    // ── Phase 3: Allocate, upload, compute ───────────────────────────────
+    auto t_gpu = std::chrono::steady_clock::now();
+
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(gctx, backend);
+    if (!buf) {
+        fprintf(stderr, "[Adapter-TRT] FATAL: failed to allocate batched GPU buffer\n");
+        ggml_free(gctx);
+        return 0;
+    }
+
+    for (auto& e : batch) {
+        ggml_backend_tensor_set(e.tw1, e.w1_f32.data(), 0, (size_t)e.w1_nel * sizeof(float));
+        if (e.has_factor) {
+            ggml_backend_tensor_set(e.tw2a, e.w2a_f32.data(), 0, (size_t)e.w2a_nel * sizeof(float));
+            ggml_backend_tensor_set(e.tw2b, e.w2b_f32.data(), 0, (size_t)e.w2b_nel * sizeof(float));
+        } else {
+            ggml_backend_tensor_set(e.tw2_src, e.w2_f32.data(), 0, (size_t)e.w2_nel * sizeof(float));
+        }
+    }
+
+    ggml_backend_graph_compute(backend, graph);
+
+    auto gpu_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t_gpu).count();
+    fprintf(stderr, "[Adapter-TRT] Batched GPU compute: %lld ms (%zu subgraphs)\n",
+            (long long)gpu_ms, n);
+
+    // ── Phase 4: Download results and merge ─────────────────────────────
+    auto t_merge = std::chrono::steady_clock::now();
+
+    for (auto& e : batch) {
+        int64_t nel = e.in_feat * e.out_feat;
+        std::vector<float> delta_f32((size_t)nel);
+        ggml_backend_tensor_get(e.tdelta, delta_f32.data(), 0, (size_t)nel * sizeof(float));
+
+        trt_merge_delta(*ctx, e.trt_name, ctx->base_weights.at(e.trt_name),
+                        delta_f32.data(), e.in_feat, e.out_feat, 1.0f,
+                        merged_storage, merged_ptrs);
+    }
+
+    auto merge_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t_merge).count();
+    fprintf(stderr, "[Adapter-TRT] CPU merge + download: %lld ms\n", (long long)merge_ms);
+
+    int merged = (int)batch.size();
+
+    // ── Phase 5: Cleanup ────────────────────────────────────────────────
+    ggml_backend_buffer_free(buf);
+    ggml_free(gctx);
 
     fprintf(stderr, "[Adapter-TRT] LoKr: %d merged, %d skipped\n", merged, skipped);
     return merged;
