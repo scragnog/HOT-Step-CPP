@@ -536,6 +536,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       let ditFirstStepAt = 0;
       let ditLastStepAt = 0;
       let vaeStartAt = 0;
+      let vaeEndAt = 0;           // [VAE-Decode Batch0] Decode: marks actual decode end
       let adapterMergeAt = 0;
       let ditLoadAt = 0;          // [DiT-TRT] Load + refit complete
       let ditLoadCompleteAt = 0;  // when DiT model load finished
@@ -570,12 +571,18 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           job.progress = Math.round(trackProgressBase + (step / total) * progressPerTrack * 0.8);
           return;
         }
-        if (line.text.includes('[VAE-Decode]') || line.text.includes('[VAE-ORT] Tiled decode')) {
+        if (line.text.includes('[VAE-Decode]') ||
+            line.text.includes('[VAE-ORT] Tiled decode') ||
+            line.text.includes('[VAE] Tiled decode') ||
+            line.text.includes('[VAE] Graph:')) {
           // Only trigger on actual decode start, not VAE model loading
           // [VAE] alone fires during model load (e.g. "[VAE] Loaded: 5 blocks")
           if (!vaeStartAt) vaeStartAt = now;
           job.stage = `Decoding audio (VAE)${trackLabel}...`;
           job.progress = Math.round(trackProgressBase + progressPerTrack * 0.9);
+        } else if (line.text.includes('[VAE-Decode Batch') && line.text.includes('Decode:')) {
+          // End of actual VAE decode (e.g. "[VAE-Decode Batch0] Decode: 442.0 ms (ORT)")
+          vaeEndAt = now;
         } else if (line.text.includes('[VAE]') && (line.text.includes('Loaded') || line.text.includes('Backend'))) {
           // VAE model loading — update stage but don't set vaeStartAt
           job.stage = `Loading VAE model${trackLabel}...`;
@@ -658,7 +665,8 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         timing.push({ name: `  DiT Denoising${trackSuffix}`, ms: Math.round(ditLastStepAt - ditFirstStepAt) });
       }
       if (vaeStartAt) {
-        timing.push({ name: `  VAE Decode${trackSuffix}`, ms: Math.round(synthEndAt - vaeStartAt) });
+        const vaeEnd = vaeEndAt || synthEndAt;  // fallback if end marker wasn't captured
+        timing.push({ name: `  VAE Decode${trackSuffix}`, ms: Math.round(vaeEnd - vaeStartAt) });
       }
       if (textEncStartAt && textEncEndAt) {
         const textEncMs = Math.round(textEncEndAt - textEncStartAt);
@@ -696,7 +704,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         + (textEncEndAt && !ditLoadCompleteAt && adapterMergeAt ? adapterMergeAt - textEncEndAt : 0)
         + (ditFirstStepAt && ditLastStepAt ? ditLastStepAt - ditFirstStepAt : 0)
         + (ditLastStepAt && vaeStartAt ? vaeStartAt - ditLastStepAt : 0)
-        + (vaeStartAt ? synthEndAt - vaeStartAt : 0);
+        + (vaeStartAt ? (vaeEndAt || synthEndAt) - vaeStartAt : 0);
       const unmeasuredMs = synthTrackMs - Math.round(totalAccountedMs);
       // Show individual gaps that are significant
       for (const g of gaps) {
