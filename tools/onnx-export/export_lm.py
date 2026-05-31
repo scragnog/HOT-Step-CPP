@@ -79,16 +79,11 @@ class Qwen3LMFullWrapper(nn.Module):
 
         logits = F.linear(outputs.last_hidden_state, self.lm_head_weight).float()
 
-        # Output only the NEW KV tokens (not full history).
-        # During decode (seq_len=1): present is [1, nkv, 1, hd]
-        # During prefill (seq_len=S): present is [1, nkv, S, hd]
-        # This eliminates O(past_len) copy inside TRT — C++ appends to single buffer.
-        seq_len = input_ids.shape[1]
         pkv = outputs.past_key_values
         result = [logits]
         for layer in pkv.layers:
-            result.append(layer.keys[:, :, -seq_len:, :].contiguous())
-            result.append(layer.values[:, :, -seq_len:, :].contiguous())
+            result.append(layer.keys)
+            result.append(layer.values)
         return tuple(result)
 
 
