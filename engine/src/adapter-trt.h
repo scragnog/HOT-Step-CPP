@@ -75,61 +75,33 @@ static std::string find_trt_weight_name(
     return "";
 }
 
-// ── Shared merge helper ─────────────────────────────────────────────────────
-// Merge a precomputed f32 delta into a base bf16 weight and store the result.
-// Handles transposed-layout weights from the refit manifest.
-//
-// delta_f32:    precomputed delta, [ne0, ne1] in GGML column-major = [in, out]
-// base_data:    bf16 weight from TRT base cache
-// nel:          total elements (in_feat * out_feat)
-// trt_name:     TRT weight name for transpose lookup
-//
-// The delta from adapter_compute_delta is GGML [ne0, ne1] = [in, out] column-major,
-// which in row-major terms is [out, in] — matching the transpose orientation already.
-// If the engine weight is transposed [in, out] (refit manifest), the base is already
-// in [in, out] order, so the delta needs transposing.
+// ── CPU merge helper (used by LoRA path only) ───────────────────────────────
+// The LoKr path uses GPU-side merge instead (base+delta→bf16 on GPU).
 static void trt_merge_delta(
     const DitTrt& ctx,
     const std::string& trt_name,
     const std::vector<uint16_t>& base_data,
-    const float* delta_f32,   // [ne0 * ne1] from adapter_compute_delta
-    int64_t ne0,              // GGML dim0 (in_feat for linear weights)
-    int64_t ne1,              // GGML dim1 (out_feat for linear weights)
-    float scaling,            // already includes alpha/rank * adapter_scale * group_scale
+    const float* delta_f32,
+    int64_t ne0, int64_t ne1,
+    float scaling,
     std::unordered_map<std::string, std::vector<uint16_t>>& merged_storage,
     std::unordered_map<std::string, const void*>& merged_ptrs
 ) {
     int64_t nel = ne0 * ne1;
-
-    // adapter_compute_delta returns delta in GGML layout [ne0, ne1]
-    // = column-major [in, out], which is row-major [out, in].
-    //
-    // TRT engine weight orientation depends on refit manifest:
-    // - transposed: stored as [in, out] (dynamo MatMul layout)
-    // - normal:     stored as [out, in] (torch Linear layout)
-    //
-    // The GGML delta in memory order is [out_row * ne0 + in_col] = [out, in] row-major.
-    // If the engine is NOT transposed, this matches directly.
-    // If the engine IS transposed, we need to iterate in transposed order.
     bool is_transposed = ctx.weights_transposed.count(trt_name) > 0;
-
     std::vector<uint16_t> merged_bf16((size_t)nel);
 
     if (is_transposed) {
-        // Base is [in, out] row-major = [ne0, ne1] row-major
-        // Delta is [out, in] row-major = [ne1, ne0] row-major
-        // Need to transpose delta while merging
         for (int64_t in_idx = 0; in_idx < ne0; in_idx++) {
             for (int64_t out_idx = 0; out_idx < ne1; out_idx++) {
-                int64_t base_idx  = in_idx * ne1 + out_idx;  // [in, out] row-major
-                int64_t delta_idx = out_idx * ne0 + in_idx;  // [out, in] row-major
+                int64_t base_idx  = in_idx * ne1 + out_idx;
+                int64_t delta_idx = out_idx * ne0 + in_idx;
                 float base_val = trt_bf16_to_fp32(base_data[base_idx]);
                 float merged_val = base_val + scaling * delta_f32[delta_idx];
                 merged_bf16[base_idx] = trt_fp32_to_bf16(merged_val);
             }
         }
     } else {
-        // Both [out, in] — element-wise
         for (int64_t j = 0; j < nel; j++) {
             float base_val = trt_bf16_to_fp32(base_data[j]);
             float merged_val = base_val + scaling * delta_f32[j];
@@ -362,6 +334,7 @@ static int adapter_trt_apply_lokr(
         int64_t in_feat, out_feat;
         float scaling;
         bool has_factor;
+        bool is_transposed;
 
         // Host factor data (kept alive for upload)
         std::vector<float> w1_f32;
@@ -373,7 +346,8 @@ static int adapter_trt_apply_lokr(
         struct ggml_tensor* tw2a    = nullptr;
         struct ggml_tensor* tw2b    = nullptr;
         struct ggml_tensor* tw2_src = nullptr;
-        struct ggml_tensor* tdelta  = nullptr;
+        struct ggml_tensor* tbase   = nullptr;   // base bf16 weight
+        struct ggml_tensor* tmerged = nullptr;    // final merged bf16 output
     };
 
     std::vector<BatchEntry> batch;
@@ -405,6 +379,7 @@ static int adapter_trt_apply_lokr(
         e.trt_name = trt_name;
         e.a = m.w1->shape[0]; e.b = m.w1->shape[1];
         e.has_factor = has_factor;
+        e.is_transposed = ctx->weights_transposed.count(trt_name) > 0;
 
         if (has_factor) {
             e.c = m.w2_a->shape[0]; e.r = m.w2_a->shape[1]; e.d = m.w2_b->shape[1];
@@ -482,10 +457,9 @@ static int adapter_trt_apply_lokr(
 
     fprintf(stderr, "[Adapter-TRT] LoKr: %zu valid entries, computing in micro-batches...\n", batch.size());
 
-    // ── Phase 2-4: Process in micro-batches ─────────────────────────────
-    // Each chunk builds/allocates/computes/frees its own graph to keep peak
-    // VRAM usage bounded (~1GB vs ~5-10GB for all 359 at once).
-    // Chunk size 32 → ~12 alloc/free cycles instead of 718.
+    // ── Phase 2-4: Process in micro-batches with GPU-side merge ─────────
+    // Each chunk: build Kronecker delta + merge (base+delta→bf16) ON GPU,
+    // then download the final bf16 result. No CPU merge loop needed.
     const size_t CHUNK_SIZE = 32;
     auto t_total = std::chrono::steady_clock::now();
     int merged = 0;
@@ -494,9 +468,10 @@ static int adapter_trt_apply_lokr(
         size_t chunk_end = std::min(chunk_start + CHUNK_SIZE, batch.size());
         size_t chunk_n   = chunk_end - chunk_start;
 
-        // Build graph for this chunk
-        size_t max_tensors = chunk_n * 14 + 32;
-        size_t max_nodes   = chunk_n * 12 + 32;
+        // Extra tensors per entry for GPU merge: tbase(bf16) + cast_f32 + add + cast_bf16
+        // + possible transpose = ~18 tensors total per entry
+        size_t max_tensors = chunk_n * 20 + 32;
+        size_t max_nodes   = chunk_n * 16 + 32;
         size_t meta = ggml_tensor_overhead() * max_tensors +
                       ggml_graph_overhead_custom(max_nodes, false) +
                       64 * 1024;
@@ -512,6 +487,8 @@ static int adapter_trt_apply_lokr(
 
         for (size_t i = chunk_start; i < chunk_end; i++) {
             auto& e = batch[i];
+
+            // ── Kronecker delta subgraph (same as before) ──
             e.tw1 = ggml_new_tensor_2d(gctx, GGML_TYPE_F32, e.b, e.a);
 
             struct ggml_tensor* tw2;
@@ -530,12 +507,38 @@ static int adapter_trt_apply_lokr(
             struct ggml_tensor* touter   = ggml_mul_mat(gctx, tw1_flat, tw2_flat);
             struct ggml_tensor* t4d      = ggml_reshape_4d(gctx, touter, e.b, e.a, e.d, e.c);
             struct ggml_tensor* tperm    = ggml_permute(gctx, t4d, 1, 3, 0, 2);
-            e.tdelta = ggml_reshape_2d(gctx, ggml_cont(gctx, tperm), e.b * e.d, e.a * e.c);
+            // tdelta: ne=(in_feat, out_feat) = [out, in] row-major
+            struct ggml_tensor* tdelta   = ggml_reshape_2d(gctx, ggml_cont(gctx, tperm), e.b * e.d, e.a * e.c);
 
-            ggml_build_forward_expand(graph, e.tdelta);
+            // ── GPU merge: base_bf16 + delta → merged_bf16 ──
+            // Base weight is bf16 from TRT cache. Upload it, cast to f32, add delta, cast back.
+            //
+            // Layout handling:
+            // - tdelta is GGML [in_feat, out_feat] = row-major [out, in]
+            // - Non-transposed base: also [out, in] → element-wise add
+            // - Transposed base: [in, out] → transpose delta before adding
+            int64_t nel = e.in_feat * e.out_feat;
+
+            if (e.is_transposed) {
+                // Base is [in, out] = GGML ne=(out_feat, in_feat)
+                e.tbase = ggml_new_tensor_2d(gctx, GGML_TYPE_BF16, e.out_feat, e.in_feat);
+                struct ggml_tensor* tbase_f32 = ggml_cast(gctx, e.tbase, GGML_TYPE_F32);
+                // Transpose delta from [in_feat, out_feat] to [out_feat, in_feat]
+                struct ggml_tensor* tdelta_t = ggml_cont(gctx, ggml_transpose(gctx, tdelta));
+                struct ggml_tensor* tsum = ggml_add(gctx, tbase_f32, tdelta_t);
+                e.tmerged = ggml_cast(gctx, tsum, GGML_TYPE_BF16);
+            } else {
+                // Base is [out, in] = GGML ne=(in_feat, out_feat) — same as delta
+                e.tbase = ggml_new_tensor_2d(gctx, GGML_TYPE_BF16, e.in_feat, e.out_feat);
+                struct ggml_tensor* tbase_f32 = ggml_cast(gctx, e.tbase, GGML_TYPE_F32);
+                struct ggml_tensor* tsum = ggml_add(gctx, tbase_f32, tdelta);
+                e.tmerged = ggml_cast(gctx, tsum, GGML_TYPE_BF16);
+            }
+
+            ggml_build_forward_expand(graph, e.tmerged);
         }
 
-        // Allocate, upload, compute
+        // Allocate
         ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(gctx, backend);
         if (!buf) {
             fprintf(stderr, "[Adapter-TRT] FATAL: failed to allocate chunk GPU buffer\n");
@@ -543,6 +546,7 @@ static int adapter_trt_apply_lokr(
             break;
         }
 
+        // Upload: adapter factors + base weights
         for (size_t i = chunk_start; i < chunk_end; i++) {
             auto& e = batch[i];
             ggml_backend_tensor_set(e.tw1, e.w1_f32.data(), 0, (size_t)e.w1_nel * sizeof(float));
@@ -552,20 +556,25 @@ static int adapter_trt_apply_lokr(
             } else {
                 ggml_backend_tensor_set(e.tw2_src, e.w2_f32.data(), 0, (size_t)e.w2_nel * sizeof(float));
             }
+            // Upload base bf16 weight
+            const auto& base_data = ctx->base_weights.at(e.trt_name);
+            ggml_backend_tensor_set(e.tbase, base_data.data(), 0,
+                                    base_data.size() * sizeof(uint16_t));
         }
 
+        // Compute (delta + merge all on GPU)
         ggml_backend_graph_compute(backend, graph);
 
-        // Download results and merge
+        // Download merged bf16 results directly
         for (size_t i = chunk_start; i < chunk_end; i++) {
             auto& e = batch[i];
             int64_t nel = e.in_feat * e.out_feat;
-            std::vector<float> delta_f32((size_t)nel);
-            ggml_backend_tensor_get(e.tdelta, delta_f32.data(), 0, (size_t)nel * sizeof(float));
+            std::vector<uint16_t> merged_bf16((size_t)nel);
+            ggml_backend_tensor_get(e.tmerged, merged_bf16.data(), 0,
+                                    (size_t)nel * sizeof(uint16_t));
 
-            trt_merge_delta(*ctx, e.trt_name, ctx->base_weights.at(e.trt_name),
-                            delta_f32.data(), e.in_feat, e.out_feat, 1.0f,
-                            merged_storage, merged_ptrs);
+            merged_storage[e.trt_name] = std::move(merged_bf16);
+            merged_ptrs[e.trt_name] = merged_storage[e.trt_name].data();
             merged++;
         }
 
@@ -576,8 +585,9 @@ static int adapter_trt_apply_lokr(
 
     auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t_total).count();
-    fprintf(stderr, "[Adapter-TRT] Batched compute: %lld ms (%d weights, %zu-entry chunks)\n",
+    fprintf(stderr, "[Adapter-TRT] Batched GPU merge: %lld ms (%d weights, %zu-entry chunks)\n",
             (long long)total_ms, merged, CHUNK_SIZE);
+    fflush(stderr);
 
     fprintf(stderr, "[Adapter-TRT] LoKr: %d merged, %d skipped\n", merged, skipped);
     return merged;
