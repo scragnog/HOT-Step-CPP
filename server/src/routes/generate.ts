@@ -537,6 +537,8 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       let ditLastStepAt = 0;
       let vaeStartAt = 0;
       let adapterMergeAt = 0;
+      let ditLoadAt = 0;          // [DiT-TRT] Load + refit complete
+      let ditLoadCompleteAt = 0;  // when DiT model load finished
       let fsqStartAt = 0;
       let textEncStartAt = 0;
       let textEncEndAt = 0;
@@ -572,16 +574,23 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           if (!vaeStartAt) vaeStartAt = now;
           job.stage = `Decoding audio (VAE)${trackLabel}...`;
           job.progress = Math.round(trackProgressBase + progressPerTrack * 0.9);
-        } else if (line.text.includes('[Adapter]') && line.text.includes('Merge')) {
+        } else if (
+          (line.text.includes('[Adapter]') && line.text.includes('Merge')) ||
+          (line.text.includes('[Adapter-TRT]') && (line.text.includes('Applying') || line.text.includes('Loading')))
+        ) {
           if (!adapterMergeAt) adapterMergeAt = now;
           job.stage = `Loading adapter${trackLabel}...`;
+        } else if (line.text.includes('[DiT-TRT]') && line.text.includes('Load + refit complete')) {
+          if (!ditLoadCompleteAt) ditLoadCompleteAt = now;
         } else if (line.text.includes('[Encode-Text') && !line.text.includes('Batch')) {
           // First [Encode-Text] log that isn't a per-batch sub-line
           if (!textEncStartAt) textEncStartAt = now;
         } else if (line.text.includes('[Encode-Text') && line.text.includes('enc_S=')) {
           // Last text encoder output line
           textEncEndAt = now;
-        } else if (line.text.includes('Loading synth') || line.text.includes('ensure_synth')) {
+        } else if (line.text.includes('Loading synth') || line.text.includes('ensure_synth') ||
+                   (line.text.includes('[DiT-TRT]') && line.text.includes('Building'))) {
+          if (!ditLoadAt) ditLoadAt = now;
           job.stage = `Loading DiT model${trackLabel}...`;
         } else if (line.text.includes('[FSQ]') || line.text.includes('fsq_detokenize')) {
           if (!fsqStartAt) fsqStartAt = now;
@@ -636,8 +645,9 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         if (fsqMs > 50) timing.push({ name: `  FSQ Detokenize${trackSuffix}`, ms: fsqMs });
       }
       if (adapterMergeAt && ditFirstStepAt) {
+        const adapterLabel = ditLoadCompleteAt ? 'Adapter Refit' : 'Adapter Merge';
         const adapterMs = Math.round(ditFirstStepAt - adapterMergeAt);
-        if (adapterMs > 50) timing.push({ name: `  Adapter Merge${trackSuffix}`, ms: adapterMs });
+        if (adapterMs > 50) timing.push({ name: `  ${adapterLabel}${trackSuffix}`, ms: adapterMs });
       }
       if (ditFirstStepAt && ditLastStepAt) {
         timing.push({ name: `  DiT Denoising${trackSuffix}`, ms: Math.round(ditLastStepAt - ditFirstStepAt) });
@@ -655,8 +665,12 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       if (firstEngineLogAt) {
         gaps.push({ name: 'HTTP→Engine', ms: Math.round(firstEngineLogAt - synthTrackStart) });
       }
-      // Gap 2: Text encoding end → adapter merge / DiT start (model loading: cond_enc → DiT)
-      if (textEncEndAt && adapterMergeAt) {
+      // Gap 2: Text encoding end → model load → adapter → DiT start
+      // Break into sub-gaps for better visibility
+      if (textEncEndAt && ditLoadCompleteAt) {
+        // TRT path: separate DiT model load from adapter refit
+        gaps.push({ name: 'DiT Model Load', ms: Math.round(ditLoadCompleteAt - textEncEndAt) });
+      } else if (textEncEndAt && adapterMergeAt) {
         gaps.push({ name: 'TextEnc→Adapter', ms: Math.round(adapterMergeAt - textEncEndAt) });
       } else if (textEncEndAt && ditFirstStepAt) {
         gaps.push({ name: 'TextEnc→DiT', ms: Math.round(ditFirstStepAt - textEncEndAt) });
@@ -672,8 +686,9 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       const totalAccountedMs =
         (firstEngineLogAt ? firstEngineLogAt - synthTrackStart : 0)
         + (textEncStartAt && textEncEndAt ? textEncEndAt - (resolveParamsAt || firstEngineLogAt || textEncStartAt) : 0)
+        + (ditLoadCompleteAt && textEncEndAt ? ditLoadCompleteAt - textEncEndAt : 0)
         + (adapterMergeAt && ditFirstStepAt ? ditFirstStepAt - adapterMergeAt : 0)
-        + (textEncEndAt && adapterMergeAt ? adapterMergeAt - textEncEndAt : 0)
+        + (textEncEndAt && !ditLoadCompleteAt && adapterMergeAt ? adapterMergeAt - textEncEndAt : 0)
         + (ditFirstStepAt && ditLastStepAt ? ditLastStepAt - ditFirstStepAt : 0)
         + (ditLastStepAt && vaeStartAt ? vaeStartAt - ditLastStepAt : 0)
         + (vaeStartAt ? synthEndAt - vaeStartAt : 0);
