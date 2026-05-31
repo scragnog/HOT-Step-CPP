@@ -39,7 +39,7 @@
 #define LM_TRT_N_KV_HEADS    8
 #define LM_TRT_HEAD_DIM    128
 #define LM_TRT_HIDDEN     2560
-#define LM_TRT_VOCAB    151936
+#define LM_TRT_VOCAB    217204
 
 // Phase 2 partial vocab: logits[offset:] = audio codes
 #define LM_TRT_PARTIAL_OFFSET 151645

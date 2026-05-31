@@ -57,20 +57,10 @@ class Qwen3LMFullWrapper(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.transformer = model.model  # Qwen3Model
-        # Trim to actual vocab (151,936) — removes 65K padding rows (43% less compute)
-        actual_vocab = 151936
-        full_weight = model.model.embed_tokens.weight
-        if full_weight.shape[0] > actual_vocab:
-            self.lm_head_weight = nn.Parameter(
-                full_weight[:actual_vocab].clone().contiguous(),
-                requires_grad=False
-            )
-            print(f"[Export] Full LM head: trimmed {full_weight.shape[0]} → {actual_vocab} tokens")
-        else:
-            self.lm_head_weight = full_weight
-            print(f"[Export] Full LM head: {full_weight.shape[0]} tokens (no trim needed)")
+        self.lm_head_weight = model.model.embed_tokens.weight  # Tied
         self.n_layers = model.config.num_hidden_layers
-        self.out_vocab = min(model.config.vocab_size, actual_vocab)
+        self.out_vocab = model.config.vocab_size
+        print(f"[Export] Full LM head: {self.out_vocab} tokens")
 
     def forward(self, input_ids, position_ids, attention_mask, *past_kvs):
         from transformers.cache_utils import DynamicCache
@@ -555,7 +545,7 @@ def main():
         _, renamed, transposed = export_onnx(
             wrapper_full, config, full_path, args.device,
             opset=args.opset, do_rename=do_rename, torch_model=wrapper_full)
-        write_config(config, args.output, wrapper_full.out_vocab, "full")
+        write_config(config, args.output, config.vocab_size, "full")
         if do_rename:
             write_refit_manifest(args.output, "full", "lm_full.onnx",
                                  renamed, transposed)
