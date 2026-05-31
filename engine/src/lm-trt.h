@@ -219,31 +219,31 @@ inline bool lm_trt_build(
     const int nkv = LM_TRT_N_KV_HEADS;
     const int hd  = LM_TRT_HEAD_DIM;
 
-    // input_ids: [B, S]
+    // input_ids: [1, S]  (batch is fixed at 1 in the ONNX export)
     profile->setDimensions("input_ids",
         nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims2(1, 1));
     profile->setDimensions("input_ids",
         nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims2(1, 1));
     profile->setDimensions("input_ids",
-        nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims2(2, 512));
+        nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims2(1, 512));
 
-    // position_ids: [B, S]
+    // position_ids: [1, S]
     profile->setDimensions("position_ids",
         nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims2(1, 1));
     profile->setDimensions("position_ids",
         nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims2(1, 1));
     profile->setDimensions("position_ids",
-        nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims2(2, 512));
+        nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims2(1, 512));
 
-    // attention_mask: [B, total_len]  (total = past + seq)
+    // attention_mask: [1, total_len]  (total = past + seq)
     profile->setDimensions("attention_mask",
         nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims2(1, 1));
     profile->setDimensions("attention_mask",
         nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims2(1, 512));
     profile->setDimensions("attention_mask",
-        nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims2(2, max_seq_len));
+        nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims2(1, max_seq_len));
 
-    // KV cache tensors: [B, nkv, past_seq, hd]
+    // KV cache tensors: [1, nkv, past_seq, hd]
     // past_seq_len min=1 (TRT can't do 0-length dims in some cases)
     for (int l = 0; l < LM_TRT_MAX_LAYERS; l++) {
         char kname[64], vname[64];
@@ -255,14 +255,14 @@ inline bool lm_trt_build(
         profile->setDimensions(kname,
             nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(1, nkv, 256, hd));
         profile->setDimensions(kname,
-            nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(2, nkv, max_seq_len, hd));
+            nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, nkv, max_seq_len, hd));
 
         profile->setDimensions(vname,
             nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(1, nkv, 1, hd));
         profile->setDimensions(vname,
             nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(1, nkv, 256, hd));
         profile->setDimensions(vname,
-            nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(2, nkv, max_seq_len, hd));
+            nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, nkv, max_seq_len, hd));
     }
 
     config->addOptimizationProfile(profile);
@@ -426,17 +426,17 @@ inline bool lm_trt_load(
     }
 
     // Allocate scratch buffers for inputs/outputs
-    // input_ids, position_ids: [max_batch=2, max_seq=512] int64
-    size_t ids_bytes = 2 * 512 * sizeof(int64_t);
+    // input_ids, position_ids: [1, max_seq=512] int64
+    size_t ids_bytes = 1 * 512 * sizeof(int64_t);
     cudaMalloc(&ctx->d_input_ids,    ids_bytes);
     cudaMalloc(&ctx->d_position_ids, ids_bytes);
 
-    // attention_mask: [max_batch=2, max_seq_len] int64
-    size_t mask_bytes = 2 * max_seq_len * sizeof(int64_t);
+    // attention_mask: [1, max_seq_len] int64
+    size_t mask_bytes = 1 * max_seq_len * sizeof(int64_t);
     cudaMalloc(&ctx->d_attn_mask, mask_bytes);
 
-    // logits: [max_batch=2, max_seq=512, vocab] fp32
-    size_t logits_bytes = 2ULL * 512 * ctx->vocab_size * sizeof(float);
+    // logits: [1, max_seq=512, vocab] fp32
+    size_t logits_bytes = 1ULL * 512 * ctx->vocab_size * sizeof(float);
     cudaMalloc(&ctx->d_logits, logits_bytes);
 
     size_t total_gpu_mb = (
