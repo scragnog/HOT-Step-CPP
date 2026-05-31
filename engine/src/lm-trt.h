@@ -106,6 +106,9 @@ struct LmTrt {
     std::mutex  refit_mutex;
     std::unordered_set<std::string> weights_transposed;
 
+    // CUDA stream for inference
+    cudaStream_t stream = nullptr;
+
     // Logger
     LmTrtLogger logger;
 
@@ -439,6 +442,20 @@ inline bool lm_trt_load(
     size_t logits_bytes = 1ULL * 512 * ctx->vocab_size * sizeof(float);
     cudaMalloc(&ctx->d_logits, logits_bytes);
 
+    // Zero all KV cache buffers — first forward reads past_len=1 of
+    // uninitialized memory if kv_pos=0 (profile min=1 workaround)
+    for (int s = 0; s < ctx->n_kv_sets; s++) {
+        for (int l = 0; l < ctx->n_layers; l++) {
+            cudaMemset(ctx->d_kv_key_a[s][l], 0, kv_bytes);
+            cudaMemset(ctx->d_kv_val_a[s][l], 0, kv_bytes);
+            cudaMemset(ctx->d_kv_key_b[s][l], 0, kv_bytes);
+            cudaMemset(ctx->d_kv_val_b[s][l], 0, kv_bytes);
+        }
+    }
+
+    // Create CUDA stream for inference
+    cudaStreamCreate(&ctx->stream);
+
     size_t total_gpu_mb = (
         ctx->n_kv_sets * ctx->n_layers * 4 * kv_bytes +  // 4 buffers
         ids_bytes * 2 + mask_bytes + logits_bytes
@@ -572,8 +589,9 @@ inline bool lm_trt_forward(
     // Logits output
     context->setTensorAddress("logits", ctx->d_logits);
 
-    // Execute
-    bool ok = context->enqueueV3(stream ? stream : 0);
+    // Execute on dedicated stream
+    cudaStream_t exec_stream = stream ? stream : ctx->stream;
+    bool ok = context->enqueueV3(exec_stream);
     if (!ok) {
         fprintf(stderr, "[LM-TRT] enqueueV3 failed\n");
         return false;
@@ -591,18 +609,17 @@ inline bool lm_trt_forward(
         cudaMemcpyAsync(logits_out,
                         (float*)ctx->d_logits + offset_bytes,
                         out_vocab * sizeof(float),
-                        cudaMemcpyDeviceToHost, stream);
+                        cudaMemcpyDeviceToHost, exec_stream);
     } else {
         // Full vocab: copy last token's logits
         size_t offset = (size_t)(n_tokens - 1) * ctx->vocab_size;
         cudaMemcpyAsync(logits_out,
                         (float*)ctx->d_logits + offset,
                         ctx->vocab_size * sizeof(float),
-                        cudaMemcpyDeviceToHost, stream);
+                        cudaMemcpyDeviceToHost, exec_stream);
     }
 
-    if (stream) cudaStreamSynchronize(stream);
-    else cudaDeviceSynchronize();
+    cudaStreamSynchronize(exec_stream);
 
     return true;
 }
@@ -689,6 +706,9 @@ inline void lm_trt_free(LmTrt* ctx) {
     if (ctx->context) { delete ctx->context; ctx->context = nullptr; }
     if (ctx->engine)  { delete ctx->engine;  ctx->engine = nullptr; }
     if (ctx->runtime) { delete ctx->runtime; ctx->runtime = nullptr; }
+
+    // CUDA stream
+    if (ctx->stream) { cudaStreamDestroy(ctx->stream); ctx->stream = nullptr; }
 
     ctx->base_weights.clear();
 }
