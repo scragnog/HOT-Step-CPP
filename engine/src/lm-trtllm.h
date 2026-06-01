@@ -48,38 +48,56 @@ static bool register_trtllm_plugins() {
 #ifdef _WIN32
     HMODULE hMod = GetModuleHandleA("nvinfer_plugin_tensorrt_llm.dll");
     if (!hMod) {
-        // Try to find the DLL in the trtllm-libs directory next to the engine
-        // First, add the trtllm-libs dir to the DLL search path so transitive
-        // deps (like nvinfer_10.dll) can be found
+        // Find the engine exe directory to locate DLL search paths
         char exePath[MAX_PATH];
         GetModuleFileNameA(NULL, exePath, MAX_PATH);
         std::string exeDir(exePath);
         auto slash = exeDir.find_last_of("\\/");
         if (slash != std::string::npos) exeDir = exeDir.substr(0, slash);
 
-        // Try: exe/../../../engine/trtllm-libs (exe is in engine/build/Release/)
-        // But simpler: walk up and check common locations
-        std::vector<std::string> searchDirs;
-        searchDirs.push_back(exeDir + "\\..\\..\\trtllm-libs");
-        searchDirs.push_back(exeDir + "\\..\\trtllm-libs");
-        searchDirs.push_back(exeDir);
+        // The plugin DLL depends on:
+        //   tensorrt_llm.dll    → in engine/trtllm-libs/
+        //   nvinfer_10.dll      → in engine/deps/tensorrt_libs/
+        // We need BOTH directories in the DLL search order.
+        // Use SetDefaultDllDirectories + AddDllDirectory for multi-dir support.
+        std::string trtllmDir = exeDir + "\\..\\..\\trtllm-libs";
+        std::string trtDir    = exeDir + "\\..\\..\\deps\\tensorrt_libs";
 
-        for (auto& dir : searchDirs) {
-            std::string fullPath = dir + "\\nvinfer_plugin_tensorrt_llm.dll";
-            // Add the directory to DLL search path so transitive deps resolve
-            SetDllDirectoryA(dir.c_str());
-            hMod = LoadLibraryA(fullPath.c_str());
-            if (hMod) {
-                fprintf(stderr, "[LM-TRTLLM] Loaded plugin from %s\n", dir.c_str());
-                break;
-            }
-        }
-        SetDllDirectoryA(NULL);  // Reset to default search
+        // Enable AddDllDirectory-based search
+        SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+
+        DLL_DIRECTORY_COOKIE cookie1 = nullptr, cookie2 = nullptr;
+
+        // Convert to wide strings for AddDllDirectory
+        auto toWide = [](const std::string& s) -> std::wstring {
+            int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+            std::wstring ws(len, 0);
+            MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &ws[0], len);
+            return ws;
+        };
+
+        std::wstring wTrtllm = toWide(trtllmDir);
+        std::wstring wTrt    = toWide(trtDir);
+        cookie1 = AddDllDirectory(wTrtllm.c_str());
+        cookie2 = AddDllDirectory(wTrt.c_str());
+
+        if (cookie1) fprintf(stderr, "[LM-TRTLLM] Added DLL dir: %s\n", trtllmDir.c_str());
+        if (cookie2) fprintf(stderr, "[LM-TRTLLM] Added DLL dir: %s\n", trtDir.c_str());
+
+        // Load with full path, using the expanded search dirs for transitive deps
+        std::string fullPath = trtllmDir + "\\nvinfer_plugin_tensorrt_llm.dll";
+        hMod = LoadLibraryExA(fullPath.c_str(), NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
 
         if (!hMod) {
-            // Fall back to bare name (uses PATH)
-            hMod = LoadLibraryA("nvinfer_plugin_tensorrt_llm.dll");
+            // Try bare name as last resort
+            hMod = LoadLibraryExA("nvinfer_plugin_tensorrt_llm.dll", NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         }
+
+        // Clean up directory cookies (DLLs already loaded, deps resolved)
+        if (cookie1) RemoveDllDirectory(cookie1);
+        if (cookie2) RemoveDllDirectory(cookie2);
+        // Restore default DLL search behavior
+        SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     }
     if (!hMod) {
         DWORD err = GetLastError();
