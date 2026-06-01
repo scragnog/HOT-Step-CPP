@@ -279,8 +279,8 @@ inline bool lm_trtllm_forward_logits(
         // The tensor data is on host (Executor copies it for us)
         // Shape: [1, 1, vocabSizePadded] — we want the last dim
         auto shape = logits_tensor.getShape();
-        int64_t vocab_padded = shape.d[shape.nbDims - 1];
-        int copy_count = std::min((int64_t)ctx->vocab_size, vocab_padded);
+        int64_t vocab_padded = shape[shape.size() - 1];
+        int copy_count = (int)std::min((int64_t)ctx->vocab_size, vocab_padded);
 
         const float* src = static_cast<const float*>(logits_tensor.getData());
         memcpy(logits_out, src, copy_count * sizeof(float));
@@ -362,8 +362,8 @@ inline bool lm_trtllm_forward_logits_cfg(
             }
             const auto& tensor = result.generationLogits.value();
             auto shape = tensor.getShape();
-            int64_t vocab_padded = shape.d[shape.nbDims - 1];
-            int copy_count = std::min((int64_t)ctx->vocab_size, vocab_padded);
+            int64_t vocab_padded = shape[shape.size() - 1];
+            int copy_count = (int)std::min((int64_t)ctx->vocab_size, vocab_padded);
             memcpy(out, static_cast<const float*>(tensor.getData()), copy_count * sizeof(float));
             return true;
         };

@@ -1,7 +1,7 @@
 // pipeline-lm.cpp: ACE-Step LM pipeline implementation
 //
 // Wraps Qwen3 LM for caption enrichment and audio code generation.
-// Supports both GGML and TRT backends.
+// Supports GGML, TRT (raw NvInfer), and TRT-LLM (Executor) backends.
 
 #include "pipeline-lm.h"
 
@@ -17,6 +17,10 @@
 #include "lm-trt.h"
 #endif
 
+#ifdef HOT_STEP_TRTLLM
+#include "lm-trtllm.h"
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -27,6 +31,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <filesystem>
 
 struct AceLm {
     ModelStore * store;
@@ -43,6 +49,12 @@ struct AceLm {
     LmTrt      lm_trt;
     bool       use_trt = false;
 #endif
+
+#ifdef HOT_STEP_TRTLLM
+    // TRT-LLM Executor (high-performance alternative)
+    LmTrtLlm   lm_trtllm;
+    bool        use_trtllm = false;
+#endif
 };
 
 // ── Dispatch wrappers: GGML vs TRT ─────────────────────────────────────────
@@ -52,6 +64,11 @@ struct AceLm {
 #ifdef HOT_STEP_TRT
 static bool s_use_trt = false;  // set during ace_lm_load, read during generate
 static LmTrt * s_trt_ctx = nullptr;
+#endif
+
+#ifdef HOT_STEP_TRTLLM
+static bool s_use_trtllm = false;
+static LmTrtLlm * s_trtllm_ctx = nullptr;
 #endif
 
 // Safe vocab_size accessor: works with either GGML (m != null) or TRT (m == null)
@@ -985,6 +1002,45 @@ AceLm * ace_lm_load(ModelStore * store, const AceLmParams * params) {
     }
 #endif
 
+    // ── TRT-LLM Executor detection ──────────────────────────────────────────
+    // If model_path/trtllm-engine-* exists, use TRT-LLM Executor instead of
+    // GGML or raw TRT. The Executor handles KV cache, attention kernels, and
+    // scheduling internally — no manual buffer management needed.
+#ifdef HOT_STEP_TRTLLM
+    if (!ctx->use_trt) {  // Don't override raw TRT if it's already active
+        std::string model_dir(params->model_path);
+        // Look for a trtllm-engine directory (match any suffix like -RTX5090)
+        std::string trtllm_dir;
+        try {
+            for (auto& entry : std::filesystem::directory_iterator(model_dir)) {
+                if (entry.is_directory()) {
+                    std::string name = entry.path().filename().string();
+                    if (name.find("trtllm-engine") == 0) {
+                        // Check for rank0.engine (the actual engine file)
+                        auto engine_file = entry.path() / "rank0.engine";
+                        if (std::filesystem::exists(engine_file)) {
+                            trtllm_dir = entry.path().string();
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (...) {
+            // Filesystem errors are non-fatal
+        }
+
+        if (!trtllm_dir.empty()) {
+            fprintf(stderr, "[Ace-LM] TRT-LLM engine found at %s\n", trtllm_dir.c_str());
+            if (lm_trtllm_load(&ctx->lm_trtllm, trtllm_dir.c_str(), params->max_seq)) {
+                ctx->use_trtllm = true;
+                fprintf(stderr, "[Ace-LM] TRT-LLM Executor ready: max_seq=%d\n", params->max_seq);
+            } else {
+                fprintf(stderr, "[Ace-LM] WARNING: TRT-LLM init failed, falling back to GGML\n");
+            }
+        }
+    }
+#endif
+
     // Speculative decoding: load draft model if path provided
     ctx->draft_loaded = false;
     if (params->draft_model_path && params->draft_model_path[0]) {
@@ -1033,23 +1089,31 @@ int ace_lm_generate(AceLm *            ctx,
     s_use_trt = ctx->use_trt;
     s_trt_ctx = ctx->use_trt ? &ctx->lm_trt : nullptr;
 #endif
+#ifdef HOT_STEP_TRTLLM
+    s_use_trtllm = ctx->use_trtllm;
+    s_trtllm_ctx = ctx->use_trtllm ? &ctx->lm_trtllm : nullptr;
+#endif
 
-    // Acquire GPU LM from the store (GGML path). Skip when using TRT.
+    // Acquire GPU LM from the store (GGML path). Skip when using TRT or TRT-LLM.
     Qwen3LM * model = nullptr;
     std::unique_ptr<ModelHandle> lm_guard;
 
+    bool skip_ggml = false;
 #ifdef HOT_STEP_TRT
-    if (!ctx->use_trt) {
+    if (ctx->use_trt) skip_ggml = true;
 #endif
+#ifdef HOT_STEP_TRTLLM
+    if (ctx->use_trtllm) skip_ggml = true;
+#endif
+
+    if (!skip_ggml) {
         model = store_require_lm(ctx->store, ctx->lm_key);
         if (!model) {
             fprintf(stderr, "[Ace-LM] ERROR: store_require_lm failed\n");
             return -1;
         }
         lm_guard = std::make_unique<ModelHandle>(ctx->store, model);
-#ifdef HOT_STEP_TRT
     }
-#endif
 
     // Runtime flags: safe to set on every require (cache-hit or fresh load).
     // These are GGML-specific; skip when TRT is active.
@@ -1067,12 +1131,24 @@ int ace_lm_generate(AceLm *            ctx,
         }
     }
 
-    // Vocab size: from GGML model or TRT constant
+    // Vocab size: from GGML model or TRT/TRT-LLM constant
+    int vocab_size;
+    if (model) {
+        vocab_size = model->cfg.vocab_size;
+    }
 #ifdef HOT_STEP_TRT
-    int vocab_size = model ? model->cfg.vocab_size : LM_TRT_VOCAB;
-#else
-    int vocab_size = model->cfg.vocab_size;
+    else if (ctx->use_trt) {
+        vocab_size = LM_TRT_VOCAB;
+    }
 #endif
+#ifdef HOT_STEP_TRTLLM
+    else if (ctx->use_trtllm) {
+        vocab_size = LM_TRTLLM_VOCAB;
+    }
+#endif
+    else {
+        vocab_size = LM_TRT_VOCAB; // fallback, shouldn't happen
+    }
 
     // CPU-resident tokenizer and FSM template. Owned by the store, never
     // evicted. FSM must be copied before mutation since the template is shared.
@@ -1353,6 +1429,15 @@ void ace_lm_free(AceLm * ctx) {
         s_use_trt = false;
         s_trt_ctx = nullptr;
         fprintf(stderr, "[Ace-LM] TRT LM freed\n");
+    }
+#endif
+#ifdef HOT_STEP_TRTLLM
+    if (ctx->use_trtllm) {
+        lm_trtllm_free(&ctx->lm_trtllm);
+        ctx->use_trtllm = false;
+        s_use_trtllm = false;
+        s_trtllm_ctx = nullptr;
+        fprintf(stderr, "[Ace-LM] TRT-LLM Executor freed\n");
     }
 #endif
     if (ctx->draft_loaded) {
