@@ -247,6 +247,29 @@ if(TRT_ENABLED)
     message(STATUS "[TRT] DiT TRT acceleration: ENABLED")
 endif()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TRT-LLM Executor (C++ Executor API for LM inference)
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-built TRT-LLM SDK (tensorrt_llm.dll + plugin DLL).
+# Auto-detect from engine/trtllm-libs/.
+# This is SEPARATE from HOT_STEP_TRT (raw NvInfer for DiT). Both can coexist.
+set(TRTLLM_ENABLED FALSE)
+set(_TRTLLM_LIBS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/trtllm-libs")
+set(_TRTLLM_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/trtllm-include")
+if(WIN32 AND EXISTS "${_TRTLLM_LIBS_DIR}/tensorrt_llm.lib"
+         AND EXISTS "${_TRTLLM_INC_DIR}/tensorrt_llm/executor/executor.h")
+    set(TRTLLM_ENABLED TRUE)
+    message(STATUS "[TRT-LLM] Found at ${_TRTLLM_LIBS_DIR}")
+    target_compile_definitions(acestep-core PUBLIC HOT_STEP_TRTLLM)
+    target_include_directories(acestep-core PUBLIC "${_TRTLLM_INC_DIR}")
+    target_link_directories(acestep-core PUBLIC "${_TRTLLM_LIBS_DIR}")
+    target_link_libraries(acestep-core PUBLIC tensorrt_llm nvinfer_plugin_tensorrt_llm)
+    message(STATUS "[TRT-LLM] LM Executor: ENABLED")
+else()
+    message(STATUS "[TRT-LLM] Not found (set engine/trtllm-libs/ + trtllm-include/ to enable)")
+endif()
+
+
 # ace-synth: full pipeline (text-enc + cond + dit + vae + wav)
 add_executable(ace-synth tools/ace-synth.cpp)
 target_link_libraries(ace-synth PRIVATE acestep-core)
