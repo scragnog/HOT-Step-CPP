@@ -24,9 +24,9 @@
 
 #include <tensorrt_llm/executor/executor.h>
 
-// Forward-declare plugin initialization (exported by nvinfer_plugin_tensorrt_llm.dll)
-// Must be called before the Executor to register GPTAttention, PagedKVCache, etc.
-extern "C" bool initTrtLlmPlugins(void* logger, const char* libNamespace = "");
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace tle = tensorrt_llm::executor;
 
@@ -34,6 +34,47 @@ namespace tle = tensorrt_llm::executor;
 
 #define LM_TRTLLM_VOCAB        217204
 #define LM_TRTLLM_MAX_SEQ      8192
+
+// ── Plugin registration (dynamic load) ───────────────────────────────────────
+// initTrtLlmPlugins must be called before Executor creation to register
+// custom ops (GPTAttention, PagedKVCache, etc.) into the TensorRT PluginRegistry.
+// We load it dynamically to avoid pulling the full DLL dependency chain at startup.
+
+static bool s_trtllm_plugins_registered = false;
+
+static bool register_trtllm_plugins() {
+    if (s_trtllm_plugins_registered) return true;
+
+#ifdef _WIN32
+    HMODULE hMod = GetModuleHandleA("nvinfer_plugin_tensorrt_llm.dll");
+    if (!hMod) {
+        hMod = LoadLibraryA("nvinfer_plugin_tensorrt_llm.dll");
+    }
+    if (!hMod) {
+        fprintf(stderr, "[LM-TRTLLM] Cannot load nvinfer_plugin_tensorrt_llm.dll\n");
+        return false;
+    }
+
+    typedef bool (*InitPluginsFn)(void*, const char*);
+    auto fn = (InitPluginsFn)GetProcAddress(hMod, "initTrtLlmPlugins");
+    if (!fn) {
+        fprintf(stderr, "[LM-TRTLLM] Cannot find initTrtLlmPlugins in plugin DLL\n");
+        return false;
+    }
+
+    bool ok = fn(nullptr, "tensorrt_llm");
+    if (ok) {
+        s_trtllm_plugins_registered = true;
+        fprintf(stderr, "[LM-TRTLLM] TRT-LLM plugins registered\n");
+    } else {
+        fprintf(stderr, "[LM-TRTLLM] initTrtLlmPlugins returned false\n");
+    }
+    return ok;
+#else
+    fprintf(stderr, "[LM-TRTLLM] Plugin registration not implemented on this platform\n");
+    return false;
+#endif
+}
 
 // ── LmTrtLlm context ────────────────────────────────────────────────────────
 
@@ -69,11 +110,9 @@ inline bool lm_trtllm_load(
     try {
         // Register TRT-LLM custom plugins (GPTAttention, PagedKVCache, etc.)
         // Must happen before engine deserialization.
-        static bool plugins_inited = false;
-        if (!plugins_inited) {
-            initTrtLlmPlugins(nullptr, "tensorrt_llm");
-            plugins_inited = true;
-            fprintf(stderr, "[LM-TRTLLM] TRT-LLM plugins registered\n");
+        if (!register_trtllm_plugins()) {
+            fprintf(stderr, "[LM-TRTLLM] Plugin registration failed — cannot load engine\n");
+            return false;
         }
 
         // Executor config: single GPU, greedy/sampling, gather logits

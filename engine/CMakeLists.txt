@@ -263,7 +263,9 @@ if(WIN32 AND EXISTS "${_TRTLLM_LIBS_DIR}/tensorrt_llm.lib"
     target_compile_definitions(acestep-core PUBLIC HOT_STEP_TRTLLM)
     target_include_directories(acestep-core PUBLIC "${_TRTLLM_INC_DIR}")
     target_link_directories(acestep-core PUBLIC "${_TRTLLM_LIBS_DIR}")
-    target_link_libraries(acestep-core PUBLIC tensorrt_llm nvinfer_plugin_tensorrt_llm)
+    target_link_libraries(acestep-core PUBLIC tensorrt_llm)
+    # NOTE: nvinfer_plugin_tensorrt_llm is loaded dynamically via LoadLibrary
+    # in lm-trtllm.h to avoid pulling its dependency chain at process startup.
     message(STATUS "[TRT-LLM] LM Executor: ENABLED")
 else()
     message(STATUS "[TRT-LLM] Not found (set engine/trtllm-libs/ + trtllm-include/ to enable)")
