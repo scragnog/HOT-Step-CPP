@@ -140,7 +140,53 @@ struct LmTrtLlm {
     bool    loaded       = false;
 };
 
-// ── Init / Shutdown ──────────────────────────────────────────────────────────
+// Crash diagnostics — Vectored Exception Handler (no __try needed)
+#ifdef _WIN32
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
+
+static LONG WINAPI trtllm_veh_handler(EXCEPTION_POINTERS* ep) {
+    auto code = ep->ExceptionRecord->ExceptionCode;
+    // Only handle fatal exceptions
+    if (code != EXCEPTION_ACCESS_VIOLATION &&
+        code != EXCEPTION_STACK_OVERFLOW &&
+        code != EXCEPTION_ILLEGAL_INSTRUCTION) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    auto addr = ep->ExceptionRecord->ExceptionAddress;
+    fprintf(stderr, "\n[LM-TRTLLM] *** CRASH: Exception 0x%08lX at %p ***\n", code, addr);
+
+    HMODULE hMod = nullptr;
+    if (GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR)addr, &hMod)) {
+        char modName[MAX_PATH] = {};
+        GetModuleFileNameA(hMod, modName, MAX_PATH);
+        MODULEINFO mi = {};
+        GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi));
+        uintptr_t offset = (uintptr_t)addr - (uintptr_t)mi.lpBaseOfDll;
+        fprintf(stderr, "[LM-TRTLLM] *** Module: %s + 0x%zX ***\n", modName, offset);
+    }
+
+    if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->NumberParameters >= 2) {
+        auto rw = ep->ExceptionRecord->ExceptionInformation[0];
+        auto target = (uintptr_t)ep->ExceptionRecord->ExceptionInformation[1];
+        fprintf(stderr, "[LM-TRTLLM] *** %s address 0x%zX ***\n",
+                rw == 0 ? "Reading" : rw == 1 ? "Writing" : "DEP violation", target);
+    }
+    fflush(stderr);
+    return EXCEPTION_CONTINUE_SEARCH;  // Let the default handler terminate
+}
+
+static void* s_trtllm_veh = nullptr;
+
+static void install_trtllm_crash_handler() {
+    if (!s_trtllm_veh) {
+        s_trtllm_veh = AddVectoredExceptionHandler(1, trtllm_veh_handler);
+    }
+}
+#endif
 
 inline bool lm_trtllm_load(
     LmTrtLlm*  ctx,
@@ -177,17 +223,27 @@ inline bool lm_trtllm_load(
         exec_config.setGatherGenerationLogits(true);
 
         fprintf(stderr, "[LM-TRTLLM] Creating Executor from %s ...\n", engine_dir);
+        fflush(stderr);
 
+#ifdef _WIN32
+        install_trtllm_crash_handler();
+#endif
         ctx->executor = std::make_unique<tle::Executor>(
             engine_path,
             tle::ModelType::kDECODER_ONLY,
             exec_config
         );
 
+        fprintf(stderr, "[LM-TRTLLM] Executor constructor returned\n");
+        fflush(stderr);
+
         if (!ctx->executor->canEnqueueRequests()) {
             fprintf(stderr, "[LM-TRTLLM] Executor created but cannot enqueue requests\n");
             return false;
         }
+
+        fprintf(stderr, "[LM-TRTLLM] canEnqueueRequests = true\n");
+        fflush(stderr);
 
         ctx->loaded = true;
         auto t1 = std::chrono::steady_clock::now();
@@ -195,6 +251,7 @@ inline bool lm_trtllm_load(
 
         fprintf(stderr, "[LM-TRTLLM] Executor ready in %lld ms (vocab=%d, max_seq=%d)\n",
                 (long long)ctx->load_time_ms, ctx->vocab_size, ctx->max_seq_len);
+        fflush(stderr);
         return true;
 
     } catch (const std::exception& e) {
@@ -349,8 +406,11 @@ inline bool lm_trtllm_forward_logits(
     );
 
     try {
+        fprintf(stderr, "[LM-TRTLLM] Enqueuing request (n_tokens=%d)...\n", n_tokens);
+        fflush(stderr);
         auto request_id = ctx->executor->enqueueRequest(std::move(request));
-
+        fprintf(stderr, "[LM-TRTLLM] Request enqueued, awaiting response...\n");
+        fflush(stderr);
         auto responses = ctx->executor->awaitResponses(
             request_id,
             std::chrono::milliseconds(30000)
