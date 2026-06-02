@@ -92,10 +92,12 @@ struct DitTrt {
     // Loaded from refit_manifest.json sidecar emitted by export_dit.py.
     std::unordered_set<std::string> weights_transposed;
 
-    // I/O tensor dtype: true when engine expects fp16 I/O (FP8 QDQ model),
-    // false when engine expects bf16 I/O (dynamo bf16_mixed model).
-    // Set at load time by inspecting the engine's input tensor dtype.
-    bool io_is_fp16 = false;
+    // I/O tensor dtype for host ↔ GPU conversion.
+    // bf16: dynamo bf16_mixed export (standard path, needs bf16↔fp32 staging)
+    // fp16: hypothetical fp16 export (needs fp16↔fp32 staging)
+    // fp32: FP8 QDQ model from modelopt (no staging needed, direct upload)
+    enum IODtype { IO_BF16, IO_FP16, IO_FP32 };
+    IODtype io_dtype = IO_BF16;
 
     // Logger
     DitTrtLogger logger;
@@ -429,13 +431,19 @@ inline bool dit_trt_load(
         return false;
     }
 
-    // Detect I/O dtype: fp16 (FP8 QDQ model from modelopt) vs bf16 (dynamo export)
+    // Detect I/O dtype: fp32 (FP8 QDQ from modelopt), fp16, or bf16 (dynamo)
     {
         const char* il_name = ctx->engine->getIOTensorName(ctx->idx_input_latents);
         auto il_dtype = ctx->engine->getTensorDataType(il_name);
-        ctx->io_is_fp16 = (il_dtype == nvinfer1::DataType::kHALF);
-        fprintf(stderr, "[DiT-TRT] I/O dtype: %s\n",
-                ctx->io_is_fp16 ? "fp16 (FP8 model)" : "bf16 (standard)");
+        if (il_dtype == nvinfer1::DataType::kFLOAT) {
+            ctx->io_dtype = DitTrt::IO_FP32;
+        } else if (il_dtype == nvinfer1::DataType::kHALF) {
+            ctx->io_dtype = DitTrt::IO_FP16;
+        } else {
+            ctx->io_dtype = DitTrt::IO_BF16;
+        }
+        const char* names[] = { "bf16", "fp16", "fp32" };
+        fprintf(stderr, "[DiT-TRT] I/O dtype: %s\n", names[ctx->io_dtype]);
     }
 
     auto t1 = std::chrono::steady_clock::now();

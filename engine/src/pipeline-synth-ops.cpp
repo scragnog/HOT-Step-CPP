@@ -1242,10 +1242,10 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
         }
 
         // LoRA adapter refitting: apply/revert/switch as needed
-        // FP8 engines (io_is_fp16) need fp16 merge math — not yet implemented.
-        if (s_trt.io_is_fp16) {
+        // Non-bf16 engines (fp32 from FP8, etc.) need different merge math.
+        if (s_trt.io_dtype != DitTrt::IO_BF16) {
             if (!ctx->dit_key.adapter_path.empty()) {
-                fprintf(stderr, "[Adapter-TRT] WARNING: LoRA adapters not yet supported with FP8 model, skipping\n");
+                fprintf(stderr, "[Adapter-TRT] WARNING: LoRA adapters not yet supported with this engine I/O dtype, skipping\n");
                 fflush(stderr);
             }
         } else {

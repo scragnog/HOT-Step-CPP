@@ -286,26 +286,32 @@ static int dit_trt_generate(DitTrt *              trt,
         }
     }
 
-    // Data layout: host FP32 [B, T, C] ↔ GPU BF16/FP16 [B, T, C] for TRT
-    // BF16 for standard dynamo-exported models, FP16 for FP8 QDQ models.
-    // are bf16. Timesteps (t, t_r) are fp32. Host staging buffers convert
-    // fp32 <-> bf16 for GPU transfer.
-    size_t input_bf16_elems = (size_t)N_graph * T * in_ch;
-    size_t enc_bf16_elems   = (size_t)N_graph * enc_S * H_enc;
-    size_t vel_bf16_elems   = (size_t)N_graph * T * Oc;
+    // Data layout depends on engine I/O dtype:
+    //   IO_BF16: host FP32 → bf16 staging → GPU (standard dynamo export)
+    //   IO_FP16: host FP32 → fp16 staging → GPU (hypothetical)
+    //   IO_FP32: host FP32 → GPU directly  (FP8 QDQ model, no staging)
+    bool io_is_fp32 = (trt->io_dtype == DitTrt::IO_FP32);
+    size_t io_elem_bytes = io_is_fp32 ? sizeof(float) : sizeof(uint16_t);
 
-    // Host BF16 staging
-    std::vector<uint16_t> h_input_bf16(input_bf16_elems);
-    std::vector<uint16_t> h_enc_bf16(enc_bf16_elems);
-    std::vector<uint16_t> h_vel_bf16(vel_bf16_elems);
+    size_t input_elems = (size_t)N_graph * T * in_ch;
+    size_t enc_elems   = (size_t)N_graph * enc_S * H_enc;
+    size_t vel_elems   = (size_t)N_graph * T * Oc;
+
+    // Host staging (only needed for bf16/fp16; unused for fp32)
+    std::vector<uint16_t> h_input_staged, h_enc_staged, h_vel_staged;
+    if (!io_is_fp32) {
+        h_input_staged.resize(input_elems);
+        h_enc_staged.resize(enc_elems);
+        h_vel_staged.resize(vel_elems);
+    }
 
     // GPU device memory
     void *d_input = nullptr, *d_enc = nullptr, *d_vel = nullptr;
     float *d_t = nullptr, *d_t_r = nullptr;
 
-    cudaMalloc(&d_input, input_bf16_elems * sizeof(uint16_t));
-    cudaMalloc(&d_enc,   enc_bf16_elems * sizeof(uint16_t));
-    cudaMalloc(&d_vel,   vel_bf16_elems * sizeof(uint16_t));
+    cudaMalloc(&d_input, input_elems * io_elem_bytes);
+    cudaMalloc(&d_enc,   enc_elems * io_elem_bytes);
+    cudaMalloc(&d_vel,   vel_elems * io_elem_bytes);
     cudaMalloc((void**)&d_t,     N_graph * sizeof(float));
     cudaMalloc((void**)&d_t_r,   N_graph * sizeof(float));
 
@@ -319,14 +325,19 @@ static int dit_trt_generate(DitTrt *              trt,
         return -1;
     }
 
-    // Pre-upload encoder hidden states (fp32 → bf16/fp16)
-    if (trt->io_is_fp16) {
-        convert_fp32_to_fp16(enc_buf.data(), h_enc_bf16.data(), enc_bf16_elems);
+    // Pre-upload encoder hidden states
+    if (io_is_fp32) {
+        cudaMemcpyAsync(d_enc, enc_buf.data(), enc_elems * sizeof(float),
+                   cudaMemcpyHostToDevice, trt->stream);
+    } else if (trt->io_dtype == DitTrt::IO_FP16) {
+        convert_fp32_to_fp16(enc_buf.data(), h_enc_staged.data(), enc_elems);
+        cudaMemcpyAsync(d_enc, h_enc_staged.data(), enc_elems * sizeof(uint16_t),
+                   cudaMemcpyHostToDevice, trt->stream);
     } else {
-        convert_fp32_to_bf16(enc_buf.data(), h_enc_bf16.data(), enc_bf16_elems);
+        convert_fp32_to_bf16(enc_buf.data(), h_enc_staged.data(), enc_elems);
+        cudaMemcpyAsync(d_enc, h_enc_staged.data(), enc_elems * sizeof(uint16_t),
+                   cudaMemcpyHostToDevice, trt->stream);
     }
-    cudaMemcpyAsync(d_enc, h_enc_bf16.data(), enc_bf16_elems * sizeof(uint16_t),
-               cudaMemcpyHostToDevice, trt->stream);
     cudaStreamSynchronize(trt->stream);
 
     GuidanceCtx g_ctx = {0, num_steps, 0.0f, 0.0f};
@@ -351,30 +362,40 @@ static int dit_trt_generate(DitTrt *              trt,
             }
         }
 
-        // Convert input to BF16/FP16 and upload
+        // Upload input to GPU
         size_t input_n = (size_t)n_batch * T * in_ch;
-        if (trt->io_is_fp16) {
-            convert_fp32_to_fp16(input_buf.data(), h_input_bf16.data(), input_n);
+        if (io_is_fp32) {
+            cudaMemcpyAsync(d_input, input_buf.data(), input_n * sizeof(float),
+                       cudaMemcpyHostToDevice, trt->stream);
+        } else if (trt->io_dtype == DitTrt::IO_FP16) {
+            convert_fp32_to_fp16(input_buf.data(), h_input_staged.data(), input_n);
+            cudaMemcpyAsync(d_input, h_input_staged.data(), input_n * sizeof(uint16_t),
+                       cudaMemcpyHostToDevice, trt->stream);
         } else {
-            convert_fp32_to_bf16(input_buf.data(), h_input_bf16.data(), input_n);
+            convert_fp32_to_bf16(input_buf.data(), h_input_staged.data(), input_n);
+            cudaMemcpyAsync(d_input, h_input_staged.data(), input_n * sizeof(uint16_t),
+                       cudaMemcpyHostToDevice, trt->stream);
         }
-        cudaMemcpyAsync(d_input, h_input_bf16.data(), input_n * sizeof(uint16_t),
-                   cudaMemcpyHostToDevice, trt->stream);
 
         // Set timestep (FP32, broadcast to all batch slots)
         std::vector<float> t_host(n_batch, t_val);
         cudaMemcpyAsync(d_t, t_host.data(), n_batch * sizeof(float), cudaMemcpyHostToDevice, trt->stream);
         cudaMemcpyAsync(d_t_r, t_host.data(), n_batch * sizeof(float), cudaMemcpyHostToDevice, trt->stream);
 
-        // Re-upload encoder states (fp32 → bf16/fp16)
+        // Re-upload encoder states
         size_t enc_n = (size_t)n_batch * enc_S * H_enc;
-        if (trt->io_is_fp16) {
-            convert_fp32_to_fp16(enc_buf.data(), h_enc_bf16.data(), enc_n);
+        if (io_is_fp32) {
+            cudaMemcpyAsync(d_enc, enc_buf.data(), enc_n * sizeof(float),
+                       cudaMemcpyHostToDevice, trt->stream);
+        } else if (trt->io_dtype == DitTrt::IO_FP16) {
+            convert_fp32_to_fp16(enc_buf.data(), h_enc_staged.data(), enc_n);
+            cudaMemcpyAsync(d_enc, h_enc_staged.data(), enc_n * sizeof(uint16_t),
+                       cudaMemcpyHostToDevice, trt->stream);
         } else {
-            convert_fp32_to_bf16(enc_buf.data(), h_enc_bf16.data(), enc_n);
+            convert_fp32_to_bf16(enc_buf.data(), h_enc_staged.data(), enc_n);
+            cudaMemcpyAsync(d_enc, h_enc_staged.data(), enc_n * sizeof(uint16_t),
+                       cudaMemcpyHostToDevice, trt->stream);
         }
-        cudaMemcpyAsync(d_enc, h_enc_bf16.data(), enc_n * sizeof(uint16_t),
-                   cudaMemcpyHostToDevice, trt->stream);
 
         // Run TRT forward on dedicated stream
         bool ok = dit_trt_forward(trt, d_input, d_enc, d_t, d_t_r,
@@ -387,14 +408,19 @@ static int dit_trt_generate(DitTrt *              trt,
         // Sync stream before reading back results
         cudaStreamSynchronize(trt->stream);
 
-        // Read back velocity (BF16/FP16 → FP32)
+        // Read back velocity
         size_t vel_n = (size_t)n_batch * T * Oc;
-        cudaMemcpy(h_vel_bf16.data(), d_vel, vel_n * sizeof(uint16_t),
-                   cudaMemcpyDeviceToHost);
-        if (trt->io_is_fp16) {
-            convert_fp16_to_fp32(h_vel_bf16.data(), vel_out, vel_n);
+        if (io_is_fp32) {
+            cudaMemcpy(vel_out, d_vel, vel_n * sizeof(float),
+                       cudaMemcpyDeviceToHost);
         } else {
-            convert_bf16_to_fp32(h_vel_bf16.data(), vel_out, vel_n);
+            cudaMemcpy(h_vel_staged.data(), d_vel, vel_n * sizeof(uint16_t),
+                       cudaMemcpyDeviceToHost);
+            if (trt->io_dtype == DitTrt::IO_FP16) {
+                convert_fp16_to_fp32(h_vel_staged.data(), vel_out, vel_n);
+            } else {
+                convert_bf16_to_fp32(h_vel_staged.data(), vel_out, vel_n);
+            }
         }
         return true;
     };
