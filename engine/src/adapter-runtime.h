@@ -47,6 +47,13 @@ struct DiTLoRA {
     DiTLoRALayer                    layers[DIT_LORA_MAX_LAYERS];
     DiTLoRADelta                    proj_in;
     DiTLoRADelta                    cond_emb;
+    DiTLoRADelta                    time_embed_linear_1;
+    DiTLoRADelta                    time_embed_linear_2;
+    DiTLoRADelta                    time_embed_time_proj;
+    DiTLoRADelta                    time_embed_r_linear_1;
+    DiTLoRADelta                    time_embed_r_linear_2;
+    DiTLoRADelta                    time_embed_r_time_proj;
+
     struct ggml_context *           ctx    = nullptr;  // owns the delta tensors
     ggml_backend_buffer_t           buffer = nullptr;  // single buffer for all deltas
     std::vector<DiTLoRAStagedDelta> staged;            // temp F32 data awaiting BF16 upload
@@ -67,6 +74,13 @@ static void dit_lora_free(DiTLoRA * lora) {
 static DiTLoRADelta * dit_lora_slot(DiTLoRA * lora, const std::string & gguf_name) {
     if (gguf_name == "decoder.proj_in.1.weight") return &lora->proj_in;
     if (gguf_name == "decoder.condition_embedder.weight") return &lora->cond_emb;
+    
+    if (gguf_name == "decoder.time_embed.linear_1.weight") return &lora->time_embed_linear_1;
+    if (gguf_name == "decoder.time_embed.linear_2.weight") return &lora->time_embed_linear_2;
+    if (gguf_name == "decoder.time_embed.time_proj.weight") return &lora->time_embed_time_proj;
+    if (gguf_name == "decoder.time_embed_r.linear_1.weight") return &lora->time_embed_r_linear_1;
+    if (gguf_name == "decoder.time_embed_r.linear_2.weight") return &lora->time_embed_r_linear_2;
+    if (gguf_name == "decoder.time_embed_r.time_proj.weight") return &lora->time_embed_r_time_proj;
 
     // Parse: "decoder.layers.<N>.<block>.<proj>.weight"
     const char * p = gguf_name.c_str();
@@ -231,12 +245,11 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
         int64_t ne0 = ne_arr[0], ne1 = ne_arr[1];
 
         // Conv1d pre-permuted check
-        if (n_dims >= 3 && wctx) {
-            for (size_t pi = 0; pi < wctx->pending.size(); pi++) {
-                auto & pc = wctx->pending[pi];
-                if (pc.tensor && pc.tensor->name && gguf_name == pc.tensor->name) {
-                    ne0 = pc.tensor->ne[0];
-                    ne1 = pc.tensor->ne[1];
+        if (n_dims >= 3 && wctx && wctx->ctx) {
+            for (struct ggml_tensor * t = ggml_get_first_tensor(wctx->ctx); t != nullptr; t = ggml_get_next_tensor(wctx->ctx, t)) {
+                if (t->name && gguf_name == t->name) {
+                    ne0 = t->ne[0];
+                    ne1 = t->ne[1];
                     fprintf(stderr, "[Adapter-RT] Conv1d %s: using pre-permuted shape [%lld, %lld]\n",
                             gguf_name.c_str(), (long long) ne0, (long long) ne1);
                     break;
@@ -392,12 +405,11 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
         int64_t ne0 = ne_arr[0], ne1 = ne_arr[1];
 
         // Conv1d pre-permuted check
-        if (n_dims >= 3 && wctx) {
-            for (size_t pi = 0; pi < wctx->pending.size(); pi++) {
-                auto & pc = wctx->pending[pi];
-                if (pc.tensor && pc.tensor->name && gguf_name == pc.tensor->name) {
-                    ne0 = pc.tensor->ne[0];
-                    ne1 = pc.tensor->ne[1];
+        if (n_dims >= 3 && wctx && wctx->ctx) {
+            for (struct ggml_tensor * t = ggml_get_first_tensor(wctx->ctx); t != nullptr; t = ggml_get_next_tensor(wctx->ctx, t)) {
+                if (t->name && gguf_name == t->name) {
+                    ne0 = t->ne[0];
+                    ne1 = t->ne[1];
                     fprintf(stderr, "[Adapter-RT] Conv1d %s: using pre-permuted shape [%lld, %lld]\n",
                             gguf_name.c_str(), (long long) ne0, (long long) ne1);
                     break;

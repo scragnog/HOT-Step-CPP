@@ -53,6 +53,20 @@ static struct ggml_tensor * dit_ggml_linear_lora(struct ggml_context * ctx,
     return y;
 }
 
+// Helper: Linear layer with bias and runtime LoRA delta
+static struct ggml_tensor * dit_ggml_linear_bias_lora(struct ggml_context * ctx,
+                                                      struct ggml_tensor *  weight,
+                                                      struct ggml_tensor *  delta,
+                                                      struct ggml_tensor *  bias,
+                                                      struct ggml_tensor *  input) {
+    struct ggml_tensor * out = ggml_mul_mat(ctx, weight, input);
+    if (delta) {
+        struct ggml_tensor * dy = ggml_mul_mat(ctx, delta, input);
+        out = ggml_add(ctx, out, dy);
+    }
+    return ggml_add(ctx, out, dit_ggml_f32(ctx, bias));
+}
+
 // Helper: Linear layer with bias
 static struct ggml_tensor * dit_ggml_linear_bias(struct ggml_context * ctx,
                                                  struct ggml_tensor *  weight,
@@ -96,6 +110,9 @@ static struct ggml_tensor * dit_ggml_build_temb(struct ggml_context * ctx,
                                                 DiTGGMLTembWeights *  w,
                                                 struct ggml_tensor *  t_scalar,
                                                 struct ggml_tensor ** out_tproj,
+                                                DiTLoRADelta *        delta_lin1,
+                                                DiTLoRADelta *        delta_lin2,
+                                                DiTLoRADelta *        delta_proj,
                                                 const char *          suffix = "") {
     // scale timestep by 1000 (diffusion convention, matches Python)
     struct ggml_tensor * t_scaled = ggml_scale(ctx, t_scalar, 1000.0f);
@@ -110,7 +127,7 @@ static struct ggml_tensor * dit_ggml_build_temb(struct ggml_context * ctx,
     }
 
     // linear1 + silu: [256] -> [H]
-    struct ggml_tensor * h = dit_ggml_linear_bias(ctx, w->linear_1_w, w->linear_1_b, sinusoidal);
+    struct ggml_tensor * h = dit_ggml_linear_bias_lora(ctx, w->linear_1_w, delta_lin1 ? delta_lin1->delta : nullptr, w->linear_1_b, sinusoidal);
     {
         char name[64];
         snprintf(name, sizeof(name), "temb_lin1%s", suffix);
@@ -121,11 +138,11 @@ static struct ggml_tensor * dit_ggml_build_temb(struct ggml_context * ctx,
     h = ggml_silu(ctx, h);
 
     // linear2: [H] -> [H]
-    struct ggml_tensor * temb = dit_ggml_linear_bias(ctx, w->linear_2_w, w->linear_2_b, h);
+    struct ggml_tensor * temb = dit_ggml_linear_bias_lora(ctx, w->linear_2_w, delta_lin2 ? delta_lin2->delta : nullptr, w->linear_2_b, h);
 
     // silu + proj: [H] -> [6H]
     struct ggml_tensor * h2 = ggml_silu(ctx, temb);
-    *out_tproj              = dit_ggml_linear_bias(ctx, w->time_proj_w, w->time_proj_b, h2);
+    *out_tproj              = dit_ggml_linear_bias_lora(ctx, w->time_proj_w, delta_proj ? delta_proj->delta : nullptr, w->time_proj_b, h2);
 
     return temb;  // [H] (used for output adaln)
 }
@@ -534,7 +551,11 @@ static struct ggml_cgraph * dit_ggml_build_graph(DiTGGML *             m,
 
     {
         struct ggml_tensor * tproj_t;
-        struct ggml_tensor * temb_t = dit_ggml_build_temb(ctx, &m->time_embed, t_val, &tproj_t, "_t");
+        struct ggml_tensor * temb_t = dit_ggml_build_temb(ctx, &m->time_embed, t_val, &tproj_t,
+                                                          m->lora.active ? &m->lora.time_embed_linear_1 : nullptr,
+                                                          m->lora.active ? &m->lora.time_embed_linear_2 : nullptr,
+                                                          m->lora.active ? &m->lora.time_embed_time_proj : nullptr,
+                                                          "_t");
         ggml_set_name(temb_t, "temb_t");
         ggml_set_output(temb_t);
 
@@ -542,7 +563,11 @@ static struct ggml_cgraph * dit_ggml_build_graph(DiTGGML *             m,
         // Python passes (t - t_r) to time_embed_r, not t_r directly
         // In turbo mode t = t_r, so input is 0
         struct ggml_tensor * t_diff = ggml_sub(ctx, t_val, tr_val);
-        struct ggml_tensor * temb_r = dit_ggml_build_temb(ctx, &m->time_embed_r, t_diff, &tproj_r, "_r");
+        struct ggml_tensor * temb_r = dit_ggml_build_temb(ctx, &m->time_embed_r, t_diff, &tproj_r,
+                                                          m->lora.active ? &m->lora.time_embed_r_linear_1 : nullptr,
+                                                          m->lora.active ? &m->lora.time_embed_r_linear_2 : nullptr,
+                                                          m->lora.active ? &m->lora.time_embed_r_time_proj : nullptr,
+                                                          "_r");
         ggml_set_name(temb_r, "temb_r");
         ggml_set_output(temb_r);
 

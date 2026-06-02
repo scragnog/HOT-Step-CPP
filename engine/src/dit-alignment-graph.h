@@ -269,10 +269,10 @@ static int dit_alignment_extract(
     struct ggml_tensor * tproj, * temb;
     {
         struct ggml_tensor * tproj_t;
-        struct ggml_tensor * temb_t = dit_ggml_build_temb(ctx, &dit->time_embed, t_t, &tproj_t, "_t");
+        struct ggml_tensor * temb_t = dit_ggml_build_temb(ctx, &dit->time_embed, t_t, &tproj_t, nullptr, nullptr, nullptr, "_t");
         struct ggml_tensor * t_diff = ggml_sub(ctx, t_t, t_tr);
         struct ggml_tensor * tproj_r;
-        struct ggml_tensor * temb_r = dit_ggml_build_temb(ctx, &dit->time_embed_r, t_diff, &tproj_r, "_r");
+        struct ggml_tensor * temb_r = dit_ggml_build_temb(ctx, &dit->time_embed_r, t_diff, &tproj_r, nullptr, nullptr, nullptr, "_r");
         temb  = ggml_add(ctx, temb_t, temb_r);
         tproj = ggml_add(ctx, tproj_t, tproj_r);
     }
