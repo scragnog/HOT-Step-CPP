@@ -135,6 +135,8 @@ export interface GenerationParams {
     cond_embed: number;
   };
   adapterMode: string;  // "merge", "merge_hq", or "runtime"
+  mergeHqIncludeCond: boolean;  // ablation: include condition_embedder in merge_hq
+  mergeHqIncludeTime: boolean;  // ablation: include time_embed in merge_hq
 
   // Trigger word (applied server-side to caption)
   triggerWord?: string;

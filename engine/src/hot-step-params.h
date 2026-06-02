@@ -77,6 +77,11 @@ struct HotStepParams {
     // at the cost of ~2× VRAM for adapted tensors. Same quality as runtime, merge speed.
     std::string adapter_mode = "merge";
 
+    // merge_hq ablation: selectively re-enable non-layer tensor groups
+    // By default merge_hq skips these (matching runtime behavior).
+    bool merge_hq_include_cond = false;  // decoder.condition_embedder
+    bool merge_hq_include_time = false;  // decoder.time_embed* (6 tensors)
+
     // DCW (Differential Correction in Wavelet domain) — CVPR 2026
     // Training-free sampler-side correction that mitigates SNR-t bias.
     bool        dcw_enabled      = false;

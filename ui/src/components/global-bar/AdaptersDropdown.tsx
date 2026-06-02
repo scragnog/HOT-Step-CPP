@@ -290,6 +290,28 @@ export const AdaptersDropdown: React.FC = () => {
                 ? 'Merges adapter at F32 precision. Same quality as Runtime, faster inference.'
                 : 'Classic merge to native type. Fastest, but may lose adapter detail.'}
             </p>
+            {gp.adapterMode === 'merge_hq' && (
+              <div className="mt-2 flex flex-col gap-1">
+                <label className="flex items-center gap-2 text-[11px] text-zinc-500 cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={gp.mergeHqIncludeCond}
+                    onChange={e => gp.setMergeHqIncludeCond(e.target.checked)}
+                    className="rounded border-zinc-300 text-amber-600 focus:ring-amber-500"
+                  />
+                  Include Conditioning
+                </label>
+                <label className="flex items-center gap-2 text-[11px] text-zinc-500 cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={gp.mergeHqIncludeTime}
+                    onChange={e => gp.setMergeHqIncludeTime(e.target.checked)}
+                    className="rounded border-zinc-300 text-amber-600 focus:ring-amber-500"
+                  />
+                  Include Timestep
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Group Scales */}

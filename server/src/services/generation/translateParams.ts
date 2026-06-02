@@ -78,6 +78,8 @@ export function translateParams(params: any): AceRequest {
   if (params.loraScale !== undefined) req.adapter_scale = params.loraScale;
   if (params.adapterGroupScales) req.adapter_group_scales = params.adapterGroupScales;
   if (params.adapterMode) req.adapter_mode = params.adapterMode;
+  if (params.mergeHqIncludeCond !== undefined) req.merge_hq_include_cond = params.mergeHqIncludeCond;
+  if (params.mergeHqIncludeTime !== undefined) req.merge_hq_include_time = params.mergeHqIncludeTime;
 
   // Trigger word
   if (params.triggerWord && params.triggerPlacement && params.loraPath) {

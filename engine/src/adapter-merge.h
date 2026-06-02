@@ -518,12 +518,22 @@ static bool adapter_merge_on_backend(WeightCtx *                                
     return true;
 }
 
-// Check if a GGUF tensor name corresponds to a DiT layer projection (decoder.layers.N.*).
-// Non-layer weights (condition_embedder, time_embed, proj_in) are skipped in merge_hq
-// mode to match runtime behavior — runtime has no slots for these and leaves them
-// at base weights. Modifying them can hurt quality for style/timbre adapters.
-static bool adapter_is_layer_weight(const std::string & name) {
-    return name.find("decoder.layers.") == 0;
+// Decide whether a tensor should be merged in merge_hq mode.
+// Layer weights (decoder.layers.N.*) are always merged.
+// Non-layer weights are skipped by default but can be re-enabled via ablation flags.
+static bool adapter_should_merge_hq(const std::string & name) {
+    // Layer projections — always merge
+    if (name.find("decoder.layers.") == 0) return true;
+
+    // Ablation: condition_embedder
+    if (g_hotstep_params.merge_hq_include_cond &&
+        name.find("condition_embedder") != std::string::npos) return true;
+
+    // Ablation: time_embed (covers time_embed and time_embed_r)
+    if (g_hotstep_params.merge_hq_include_time &&
+        name.find("time_embed") != std::string::npos) return true;
+
+    return false;  // skip everything else (proj_in, etc.)
 }
 
 // LoRA merge path. Matches PEFT merge_and_unload for PEFT payloads and ComfyUI
@@ -600,7 +610,7 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
         }
 
         // merge_hq: skip non-layer weights to match runtime behavior
-        if (promote_f32 && !adapter_is_layer_weight(gguf_name)) {
+        if (promote_f32 && !adapter_should_merge_hq(gguf_name)) {
             fprintf(stderr, "[Adapter-HQ] Skipping non-layer weight: %s\n", gguf_name.c_str());
             skipped++;
             continue;
@@ -827,7 +837,7 @@ static bool adapter_merge_lokr(WeightCtx *          wctx,
         }
 
         // merge_hq: skip non-layer weights to match runtime behavior
-        if (promote_f32 && !adapter_is_layer_weight(gguf_name)) {
+        if (promote_f32 && !adapter_should_merge_hq(gguf_name)) {
             fprintf(stderr, "[Adapter-HQ] Skipping non-layer weight: %s\n", gguf_name.c_str());
             skipped++;
             continue;

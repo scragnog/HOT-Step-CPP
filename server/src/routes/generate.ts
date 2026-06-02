@@ -224,6 +224,8 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           adapter_scale: aceReq.adapter_scale,
           adapter_group_scales: aceReq.adapter_group_scales,
           adapter_mode: aceReq.adapter_mode,
+          merge_hq_include_cond: aceReq.merge_hq_include_cond,
+          merge_hq_include_time: aceReq.merge_hq_include_time,
           infer_method: aceReq.infer_method,
           scheduler: aceReq.scheduler,
           guidance_mode: aceReq.guidance_mode,

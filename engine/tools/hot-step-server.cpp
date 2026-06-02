@@ -505,6 +505,8 @@ struct ServerFields {
     float       temporal_smoothing = 0.13f;
     AdapterGroupScales group_scales;  // per-group adapter scale multipliers
     std::string adapter_mode;         // "merge" (default), "merge_hq" (F32), or "runtime"
+    bool        merge_hq_include_cond = false;  // ablation: include condition_embedder in merge_hq
+    bool        merge_hq_include_time = false;  // ablation: include time_embed in merge_hq
     // DCW (Differential Correction in Wavelet domain)
     bool        dcw_enabled      = false;
     std::string dcw_mode         = "low";
@@ -567,6 +569,13 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     }
     if ((v = yyjson_obj_get(obj, "adapter_mode")) && yyjson_is_str(v)) {
         sf->adapter_mode = yyjson_get_str(v);
+    }
+    // merge_hq ablation toggles
+    if ((v = yyjson_obj_get(obj, "merge_hq_include_cond"))) {
+        if (yyjson_is_bool(v)) sf->merge_hq_include_cond = yyjson_get_bool(v);
+    }
+    if ((v = yyjson_obj_get(obj, "merge_hq_include_time"))) {
+        if (yyjson_is_bool(v)) sf->merge_hq_include_time = yyjson_get_bool(v);
     }
     // APG tuning
     if ((v = yyjson_obj_get(obj, "apg_momentum")) && yyjson_is_num(v)) {
@@ -974,6 +983,8 @@ static void synth_worker(std::shared_ptr<Job>    job,
     g_hotstep_params.temporal_smoothing  = sf.temporal_smoothing;
     g_hotstep_params.adapter_group_scales = sf.group_scales;
     g_hotstep_params.adapter_mode         = sf.adapter_mode;
+    g_hotstep_params.merge_hq_include_cond = sf.merge_hq_include_cond;
+    g_hotstep_params.merge_hq_include_time = sf.merge_hq_include_time;
     g_hotstep_params.dcw_enabled          = sf.dcw_enabled;
     g_hotstep_params.dcw_mode             = sf.dcw_mode;
     g_hotstep_params.dcw_scaler           = sf.dcw_scaler;

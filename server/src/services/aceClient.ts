@@ -83,6 +83,8 @@ export interface AceRequest {
     cond_embed: number;
   };
   adapter_mode?: string;  // "merge" (default), "merge_hq" (F32 promoted), or "runtime"
+  merge_hq_include_cond?: boolean;  // ablation: include condition_embedder in merge_hq
+  merge_hq_include_time?: boolean;  // ablation: include time_embed in merge_hq
   // Solver sub-parameters
   stork_substeps?: number;
   beat_stability?: number;
