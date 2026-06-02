@@ -649,7 +649,16 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
             skipped++;
             continue;
         }
-        if (in_feat != ne0 || out_feat != ne1) {
+        // Conv1d expansion: adapter trained on [out, in_ch] but base is [in_ch*P, out]
+        int64_t conv_expand = 1;
+        if (in_feat == ne0 && out_feat == ne1) {
+            // exact match
+        } else if (out_feat == ne1 && ne0 > 0 && (ne0 % in_feat) == 0) {
+            conv_expand = ne0 / in_feat;
+            fprintf(stderr, "[Adapter] Conv1d %s: tiling LoRA delta [%lld, %lld] x%lld -> [%lld, %lld]\n",
+                    gguf_name.c_str(), (long long) in_feat, (long long) out_feat,
+                    (long long) conv_expand, (long long) ne0, (long long) ne1);
+        } else {
             fprintf(stderr, "[Adapter] WARNING: shape mismatch for %s: LoRA [%lld,%lld] vs GGUF [%lld,%lld]\n",
                     gguf_name.c_str(), (long long) out_feat, (long long) in_feat, (long long) ne1, (long long) ne0);
             skipped++;
@@ -700,6 +709,12 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
             struct ggml_tensor * tb_br  = ggml_cast(ctx, ggml_cast(ctx, tb, GGML_TYPE_BF16), GGML_TYPE_F32);
             struct ggml_tensor * ta_t   = ggml_cont(ctx, ggml_transpose(ctx, ta_br));
             struct ggml_tensor * tdelta = ggml_scale(ctx, ggml_mul_mat(ctx, ta_t, tb_br), scaling);
+
+            // Conv1d expansion: tile delta [in_ch, out] -> [in_ch*P, out]
+            if (conv_expand > 1) {
+                struct ggml_tensor * ttile = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, in_feat * conv_expand, out_feat);
+                tdelta = ggml_repeat(ctx, tdelta, ttile);
+            }
 
             adapter_delta_build db;
             db.tdelta = tdelta;
@@ -922,7 +937,17 @@ static bool adapter_merge_lokr(WeightCtx *          wctx,
             r = lokr_dim;
         }
 
-        if (a * c != ne1 || b * d != ne0) {
+        // Conv1d expansion: adapter trained on [out, in_ch] but base tensor is
+        // [in_ch*P, out] (pre-permuted). Detect and tile delta across patch dim.
+        int64_t conv_expand = 1;
+        if (a * c == ne1 && b * d == ne0) {
+            // exact match — normal 2D weight
+        } else if (a * c == ne1 && ne0 > 0 && (ne0 % (b * d)) == 0) {
+            conv_expand = ne0 / (b * d);
+            fprintf(stderr, "[Adapter] Conv1d %s: tiling delta [%lld, %lld] x%lld -> [%lld, %lld]\n",
+                    gguf_name.c_str(), (long long)(b * d), (long long)(a * c),
+                    (long long) conv_expand, (long long) ne0, (long long) ne1);
+        } else {
             fprintf(stderr,
                     "[Adapter] WARNING: LoKr shape mismatch for %s: kron(%lldx%lld, %lldx%lld) = %lldx%lld vs GGUF "
                     "out=%lld in=%lld\n",
@@ -1039,6 +1064,13 @@ static bool adapter_merge_lokr(WeightCtx *          wctx,
             struct ggml_tensor * tkron_p   = ggml_permute(ctx, touter_4d, 1, 3, 0, 2);
             struct ggml_tensor * tkron_c   = ggml_cont(ctx, tkron_p);
             struct ggml_tensor * tdelta    = ggml_reshape_2d(ctx, tkron_c, b * d, a * c);
+
+            // Conv1d expansion: tile delta [in_ch, out] -> [in_ch*P, out]
+            // Each patch position receives the same adapter delta.
+            if (conv_expand > 1) {
+                struct ggml_tensor * ttile = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, b * d * conv_expand, a * c);
+                tdelta = ggml_repeat(ctx, tdelta, ttile);
+            }
 
             adapter_delta_build db;
             db.tdelta = tdelta;
