@@ -898,14 +898,29 @@ static void synth_worker(std::shared_ptr<Job>    job,
     p.text_encoder_path = emb_entry ? emb_entry->path.c_str() : g_registry.text_enc[0].path.c_str();
     p.dit_path          = dit->path.c_str();
     // HOT-STEP: VAE model selection. Resolve by name from registry.
+    // ONNX VAE files are decoder-only — they go through the ORT decode path,
+    // NOT the GGML encode path. If the user selects an ONNX VAE, we route it
+    // to onnx_vae_path and use the first GGUF/safetensors VAE for encoding.
     const ModelEntry * vae_entry = nullptr;
+    bool               vae_is_onnx = false;
     if (!sf.vae_model.empty()) {
         vae_entry = registry_find(g_registry.vae, sf.vae_model.c_str());
         if (!vae_entry) {
             fprintf(stderr, "[Server] VAE not found: %s, using default\n", sf.vae_model.c_str());
+        } else if (vae_entry->name.size() >= 5 &&
+                   vae_entry->name.substr(vae_entry->name.size() - 5) == ".onnx") {
+            vae_is_onnx = true;
+            // Route ONNX VAE to ORT decode path
+            p.onnx_vae_path = vae_entry->path.c_str();
+            fprintf(stderr, "[Server] ONNX VAE selected: %s → ORT decode path\n", vae_entry->name.c_str());
+            // Fall back to GGUF/safetensors for encoding
+            vae_entry = registry_find_non_onnx(g_registry.vae);
         }
     }
-    p.vae_path          = vae_entry ? vae_entry->path.c_str() : g_registry.vae[0].path.c_str();
+    if (!vae_entry) {
+        vae_entry = registry_find_non_onnx(g_registry.vae);
+    }
+    p.vae_path = vae_entry ? vae_entry->path.c_str() : g_registry.vae[0].path.c_str();
     // PP-VAE: auto-detect from registry, prefer highest precision: F32 > BF16 > F16
     p.pp_vae_path = nullptr;
     if (!g_registry.pp_vae.empty()) {
@@ -1601,10 +1616,15 @@ static void vae_encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, floa
         return;
     }
 
-    std::string        vae_name  = resolve_name(g_registry.vae, ace_req.vae, g_loaded_vae);
-    const ModelEntry * vae_entry = registry_find(g_registry.vae, vae_name.c_str());
+    // ONNX VAE files are decoder-only — cannot be used for encoding.
+    // Use registry_find_non_onnx to skip them and fall back to GGUF/safetensors.
+    const ModelEntry * vae_entry = registry_find_non_onnx(g_registry.vae, ace_req.vae.c_str());
     if (!vae_entry) {
-        fprintf(stderr, "[Server] encode: VAE not found: %s\n", vae_name.c_str());
+        // Try without name filter — just get any non-ONNX VAE
+        vae_entry = registry_find_non_onnx(g_registry.vae);
+    }
+    if (!vae_entry) {
+        fprintf(stderr, "[Server] encode: no GGUF/safetensors VAE available for encoding\n");
         job->status.store(2);
         return;
     }
@@ -1641,7 +1661,7 @@ static void vae_encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, floa
             (float) src_len / 48000.0f, T_latent, ms);
 
     if (g_keep_loaded) {
-        g_loaded_vae = vae_name;
+        g_loaded_vae = vae_entry->name;
     } else {
         g_loaded_vae.clear();
     }

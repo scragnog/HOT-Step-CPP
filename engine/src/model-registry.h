@@ -59,6 +59,31 @@ static const ModelEntry * registry_find(const std::vector<ModelEntry> & bucket, 
     return nullptr;
 }
 
+// Find the first non-ONNX entry in a bucket, or a specific named entry if it's non-ONNX.
+// Use this when an ONNX model cannot serve the purpose (e.g., VAE encode — ONNX VAE files
+// are decoder-only and don't contain encoder weights).
+static const ModelEntry * registry_find_non_onnx(const std::vector<ModelEntry> & bucket, const char * name = nullptr) {
+    auto is_onnx = [](const std::string & n) {
+        return n.size() >= 5 && n.substr(n.size() - 5) == ".onnx";
+    };
+    if (name && name[0]) {
+        // Specific name requested — return it only if it's not ONNX
+        for (const auto & e : bucket) {
+            if (e.name == name && !is_onnx(e.name)) {
+                return &e;
+            }
+        }
+        return nullptr;
+    }
+    // No specific name — return first non-ONNX entry
+    for (const auto & e : bucket) {
+        if (!is_onnx(e.name)) {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
 // find an adapter entry by name. returns NULL if not found.
 static const AdapterEntry * registry_find_adapter(const ModelRegistry & reg, const char * name) {
     for (const auto & e : reg.adapters) {
