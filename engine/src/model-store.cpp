@@ -638,8 +638,18 @@ void store_release(ModelStore * s, void * handle) {
     GpuEntry & e = gpu_it->second;
     assert(e.refcount > 0);
     e.refcount--;
-    if (e.refcount == 0 && s->policy == EVICT_STRICT) {
-        fprintf(stderr, "[Store] Unload %s (%.1f MB)\n", e.label, (float) e.bytes / (1024.0f * 1024.0f));
+    // EVICT_STRICT: always unload on release.
+    // EVICT_NEVER:  keep modules resident — EXCEPT the LM. The LM (~8 GB)
+    //               must not coexist with synth models (DiT+VAE+TextEnc+
+    //               CondEnc+FSQ, ~20+ GB combined). Keeping both families
+    //               resident exceeds most GPU budgets. LM reload is cheap
+    //               (~3s) compared to DiT+adapter merge (~8s) which is
+    //               what keep-loaded actually saves.
+    const bool force_unload = (gpu_it->first.kind == MODEL_LM);
+    if (e.refcount == 0 && (s->policy == EVICT_STRICT || force_unload)) {
+        fprintf(stderr, "[Store] Unload %s (%.1f MB)%s\n", e.label,
+                (float) e.bytes / (1024.0f * 1024.0f),
+                force_unload && s->policy != EVICT_STRICT ? " [LM always freed]" : "");
         e.deleter(e.ptr);
         s->handle_to_key.erase(hit);
         s->gpu.erase(gpu_it);
