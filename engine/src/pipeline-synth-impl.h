@@ -45,9 +45,13 @@ struct AceSynth {
     ModelKey vae_dec_key;    // VAE decoder, from vae_path
 
     // PP-VAE: optional post-processing VAE (auto-detected from models dir)
-    ModelKey pp_vae_enc_key;  // PP-VAE encoder, from pp_vae_path
-    ModelKey pp_vae_dec_key;  // PP-VAE decoder, from pp_vae_path
-    bool     have_pp_vae;     // true if PP-VAE GGUF was found
+    ModelKey pp_vae_enc_key;      // PP-VAE encoder (GGML), from pp_vae_path
+    ModelKey pp_vae_dec_key;      // PP-VAE decoder (GGML), from pp_vae_path
+    ModelKey pp_vae_enc_ort_key;  // PP-VAE encoder (ORT), from pp_vae_onnx_enc_path
+    ModelKey pp_vae_dec_ort_key;  // PP-VAE decoder (ORT), from pp_vae_onnx_dec_path
+    bool     have_pp_vae;         // true if PP-VAE GGUF was found
+    std::string pp_vae_onnx_enc_path;  // path to scragvae_encoder.onnx (empty = not available)
+    std::string pp_vae_onnx_dec_path;  // path to scragvae_decoder.onnx (empty = not available)
 
     // ORT VAE: optional ONNX Runtime VAE decoder (TensorRT/CUDA EP)
     ModelKey    vae_dec_ort_key;   // VAE-Dec-ORT, from onnx_vae_path

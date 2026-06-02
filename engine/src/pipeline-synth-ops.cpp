@@ -1730,17 +1730,33 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
     }
 
     // Phase 1: Encode all batch items through PP-VAE encoder → latents
+    // Prefers ORT/TRT encoder when available, falls back to GGML.
     // Encoder converts planar stereo PCM → interleaved → VAE latents [T_latent, 64]
     std::vector<std::vector<float>> latents(batch_n);
     std::vector<int>                T_latent(batch_n, 0);
 
     {
-        VAEEncoder * enc = store_require_vae_enc(ctx->store, ctx->pp_vae_enc_key);
-        if (!enc) {
-            fprintf(stderr, "[PP-VAE] WARNING: encoder unavailable, skipping\n");
-            return 0;  // non-fatal: just skip the re-encode
+        bool use_ort_enc = !ctx->pp_vae_onnx_enc_path.empty();
+        VaeEncOrt  * enc_ort  = nullptr;
+        VAEEncoder * enc_ggml = nullptr;
+
+        if (use_ort_enc) {
+            enc_ort = store_require_vae_enc_ort(ctx->store, ctx->pp_vae_enc_ort_key);
+            if (!enc_ort) {
+                fprintf(stderr, "[PP-VAE] ORT encoder unavailable, falling back to GGML\n");
+                use_ort_enc = false;
+            }
         }
-        ModelHandle enc_guard(ctx->store, enc);
+        if (!use_ort_enc) {
+            enc_ggml = store_require_vae_enc(ctx->store, ctx->pp_vae_enc_key);
+            if (!enc_ggml) {
+                fprintf(stderr, "[PP-VAE] WARNING: encoder unavailable, skipping\n");
+                return 0;  // non-fatal: just skip the re-encode
+            }
+        }
+        ModelHandle enc_guard(ctx->store, use_ort_enc ? (void *)enc_ort : (void *)enc_ggml);
+
+        fprintf(stderr, "[PP-VAE] Encoding via %s\n", use_ort_enc ? "ORT/TRT" : "GGML");
 
         for (int b = 0; b < batch_n; b++) {
             if (!out[b].samples || out[b].n_samples <= 0) {
@@ -1751,7 +1767,7 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
             int   max_T   = (T_audio / 1920) + 64;
             latents[b].resize((size_t) max_T * 64);
 
-            // vae_enc_encode_tiled expects interleaved stereo [T*2]
+            // vae_enc expects interleaved stereo [T*2]
             // out[b].samples is planar [L0..LN, R0..RN] → need to interleave
             std::vector<float> interleaved(T_audio * 2);
             const float * L = out[b].samples;
@@ -1761,8 +1777,16 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
                 interleaved[i * 2 + 1] = R[i];
             }
 
-            T_latent[b] = vae_enc_encode_tiled(enc, interleaved.data(), T_audio, latents[b].data(), max_T,
-                                                ctx->params.vae_chunk, ctx->params.vae_overlap);
+            if (use_ort_enc) {
+                T_latent[b] = vae_enc_ort_encode_tiled(enc_ort, interleaved.data(), T_audio,
+                                                        latents[b].data(), max_T,
+                                                        ctx->params.vae_chunk, ctx->params.vae_overlap);
+            } else {
+                T_latent[b] = vae_enc_encode_tiled(enc_ggml, interleaved.data(), T_audio,
+                                                    latents[b].data(), max_T,
+                                                    ctx->params.vae_chunk, ctx->params.vae_overlap);
+            }
+
             if (T_latent[b] <= 0) {
                 fprintf(stderr, "[PP-VAE Batch%d] WARNING: encode failed\n", b);
                 T_latent[b] = 0;
@@ -1788,14 +1812,30 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
     fprintf(stderr, "[PP-VAE] Encode done: %.1f ms\n", s.timer.ms());
 
     // Phase 2: Decode all latents through PP-VAE decoder → PCM
+    // Prefers ORT/TRT decoder when available, falls back to GGML.
     {
         s.timer.reset();
-        VAEGGML * dec = store_require_vae_dec(ctx->store, ctx->pp_vae_dec_key);
-        if (!dec) {
-            fprintf(stderr, "[PP-VAE] WARNING: decoder unavailable, skipping\n");
-            return 0;
+        bool use_ort_dec = !ctx->pp_vae_onnx_dec_path.empty();
+        VaeOrt  * dec_ort  = nullptr;
+        VAEGGML * dec_ggml = nullptr;
+
+        if (use_ort_dec) {
+            dec_ort = store_require_vae_dec_ort(ctx->store, ctx->pp_vae_dec_ort_key);
+            if (!dec_ort) {
+                fprintf(stderr, "[PP-VAE] ORT decoder unavailable, falling back to GGML\n");
+                use_ort_dec = false;
+            }
         }
-        ModelHandle dec_guard(ctx->store, dec);
+        if (!use_ort_dec) {
+            dec_ggml = store_require_vae_dec(ctx->store, ctx->pp_vae_dec_key);
+            if (!dec_ggml) {
+                fprintf(stderr, "[PP-VAE] WARNING: decoder unavailable, skipping\n");
+                return 0;
+            }
+        }
+        ModelHandle dec_guard(ctx->store, use_ort_dec ? (void *)dec_ort : (void *)dec_ggml);
+
+        fprintf(stderr, "[PP-VAE] Decoding via %s\n", use_ort_dec ? "ORT/TRT" : "GGML");
 
         for (int b = 0; b < batch_n; b++) {
             if (T_latent[b] <= 0) {
@@ -1805,8 +1845,17 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
             int                T_audio_max = T_latent[b] * 1920;
             std::vector<float> audio(2 * T_audio_max);
 
-            int T_audio = vae_ggml_decode_tiled(dec, latents[b].data(), T_latent[b], audio.data(), T_audio_max,
-                                                ctx->params.vae_chunk, ctx->params.vae_overlap, NULL, NULL);
+            int T_audio;
+            if (use_ort_dec) {
+                T_audio = vae_ort_decode_tiled(dec_ort, latents[b].data(), T_latent[b],
+                                                audio.data(), T_audio_max,
+                                                ctx->params.vae_chunk, ctx->params.vae_overlap);
+            } else {
+                T_audio = vae_ggml_decode_tiled(dec_ggml, latents[b].data(), T_latent[b],
+                                                 audio.data(), T_audio_max,
+                                                 ctx->params.vae_chunk, ctx->params.vae_overlap, NULL, NULL);
+            }
+
             if (T_audio <= 0) {
                 fprintf(stderr, "[PP-VAE Batch%d] WARNING: decode failed\n", b);
                 continue;

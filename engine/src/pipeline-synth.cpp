@@ -155,6 +155,8 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
 
     // PP-VAE: optional post-processing VAE
     ctx->have_pp_vae = false;
+    ctx->pp_vae_onnx_enc_path.clear();
+    ctx->pp_vae_onnx_dec_path.clear();
     if (params->pp_vae_path && params->pp_vae_path[0]) {
         ctx->pp_vae_enc_key.kind = MODEL_VAE_ENC;
         ctx->pp_vae_enc_key.path = params->pp_vae_path;
@@ -162,6 +164,31 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
         ctx->pp_vae_dec_key.path = params->pp_vae_path;
         ctx->have_pp_vae         = true;
         fprintf(stderr, "[Synth-Load] PP-VAE: %s\n", params->pp_vae_path);
+
+        // Auto-discover ONNX encoder/decoder in models/onnx/ directory.
+        // The PP-VAE uses the same Oobleck architecture as scragvae, so
+        // scragvae_encoder.onnx / scragvae_decoder.onnx work directly.
+        if (params->onnx_vae_path && params->onnx_vae_path[0]) {
+            // Derive encoder path from decoder: *_decoder.onnx → *_encoder.onnx
+            std::string dec_path = params->onnx_vae_path;
+            auto pos = dec_path.rfind("_decoder.onnx");
+            if (pos != std::string::npos) {
+                std::string enc_path = dec_path.substr(0, pos) + "_encoder.onnx";
+                FILE * f = fopen(enc_path.c_str(), "rb");
+                if (f) {
+                    fclose(f);
+                    ctx->pp_vae_onnx_enc_path      = enc_path;
+                    ctx->pp_vae_enc_ort_key.kind    = MODEL_VAE_ENC_ORT;
+                    ctx->pp_vae_enc_ort_key.path    = enc_path;
+                    fprintf(stderr, "[Synth-Load] PP-VAE ORT encoder: %s\n", enc_path.c_str());
+                }
+            }
+            // Use the ONNX decoder directly for PP-VAE decode
+            ctx->pp_vae_onnx_dec_path      = dec_path;
+            ctx->pp_vae_dec_ort_key.kind    = MODEL_VAE_DEC_ORT;
+            ctx->pp_vae_dec_ort_key.path    = dec_path;
+            fprintf(stderr, "[Synth-Load] PP-VAE ORT decoder: %s\n", dec_path.c_str());
+        }
     }
 
     // ORT VAE: optional ONNX Runtime VAE decoder
