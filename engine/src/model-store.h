@@ -56,6 +56,7 @@
 #include "qwen3-lm.h"
 #include "text-enc-ort.h"
 #include "vae-enc.h"
+#include "vae-enc-ort.h"
 #include "vae-ort.h"
 #include "vae.h"
 
@@ -76,6 +77,7 @@ enum ModelKind {
     MODEL_VAE_DEC_ORT,// VaeOrt         from vae_decoder.onnx (TRT/CUDA EP)
     MODEL_TEXT_ENC_ORT,// TextEncOrt    from text_encoder.onnx (TRT/CUDA EP)
     MODEL_COND_ENC_ORT,// CondEncOrt    from cond_encoder.onnx (TRT/CUDA EP)
+    MODEL_VAE_ENC_ORT, // VaeEncOrt     from vae_encoder.onnx (TRT/CUDA EP)
 };
 
 struct ModelKey {
@@ -124,6 +126,7 @@ DiTGGML *    store_require_dit(ModelStore * s, const ModelKey & k);
 VAEEncoder * store_require_vae_enc(ModelStore * s, const ModelKey & k);
 VAEGGML *    store_require_vae_dec(ModelStore * s, const ModelKey & k);
 VaeOrt *     store_require_vae_dec_ort(ModelStore * s, const ModelKey & k);
+VaeEncOrt *  store_require_vae_enc_ort(ModelStore * s, const ModelKey & k);
 TextEncOrt * store_require_text_enc_ort(ModelStore * s, const ModelKey & k);
 CondEncOrt * store_require_cond_enc_ort(ModelStore * s, const ModelKey & k);
 TokGGML *    store_require_fsq_tok(ModelStore * s, const ModelKey & k);

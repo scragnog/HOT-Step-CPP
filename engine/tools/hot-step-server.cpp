@@ -1605,6 +1605,8 @@ static void vae_decode_worker(std::shared_ptr<Job> job,
 
 // encode worker: VAE encode only. Encodes 48kHz interleaved stereo
 // audio into latents [T_25Hz, 64] time-major, stores raw f32 in job.
+// Prefers ONNX/TRT encoder when available (faster via TensorRT fusion),
+// falls back to GGML encoder for GGUF/safetensors VAE models.
 static void vae_encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, float * src_interleaved, int src_len) {
     struct buf_guard {
         float * p;
@@ -1616,52 +1618,128 @@ static void vae_encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, floa
         return;
     }
 
-    // ONNX VAE files are decoder-only — cannot be used for encoding.
-    // Use registry_find_non_onnx to skip them and fall back to GGUF/safetensors.
-    const ModelEntry * vae_entry = registry_find_non_onnx(g_registry.vae, ace_req.vae.c_str());
-    if (!vae_entry) {
-        // Try without name filter — just get any non-ONNX VAE
-        vae_entry = registry_find_non_onnx(g_registry.vae);
-    }
-    if (!vae_entry) {
-        fprintf(stderr, "[Server] encode: no GGUF/safetensors VAE available for encoding\n");
-        job->status.store(2);
-        return;
-    }
-
-    ModelKey vae_key;
-    vae_key.kind          = MODEL_VAE_ENC;
-    vae_key.path          = vae_entry->path;
-    vae_key.adapter_scale = 1.0f;
-
-    auto         t_start = std::chrono::steady_clock::now();
-    VAEEncoder * vae = store_require_vae_enc(g_store, vae_key);
-    if (!vae) {
-        fprintf(stderr, "[Server] encode: store_require_vae_enc failed\n");
-        job->status.store(2);
-        return;
-    }
-    ModelHandle vae_guard(g_store, vae);
-
     int T_latent_max = src_len / 1920 + 64;
     if (T_latent_max > MAX_T_LATENT) {
         T_latent_max = MAX_T_LATENT;
     }
     std::vector<float> latent((size_t) T_latent_max * LATENT_CHANNELS);
-    int T_latent = vae_enc_encode_tiled(vae, src_interleaved, src_len, latent.data(), T_latent_max,
-                                        g_synth_params.vae_chunk, g_synth_params.vae_overlap);
-    if (T_latent < 0) {
-        fprintf(stderr, "[Server] encode: vae_enc_encode_tiled failed\n");
-        job->status.store(2);
-        return;
+    int T_latent = -1;
+    std::string vae_name_used;
+
+    auto t_start = std::chrono::steady_clock::now();
+
+    // ── Try ONNX encoder first ─────────────────────────────────────
+    // Look for a *_encoder.onnx file matching the selected (or default) VAE.
+    // E.g., if user selected "scragvae_decoder.onnx", look for "scragvae_encoder.onnx".
+    // Also auto-detect from the onnx/ directory if no specific VAE is selected.
+    bool tried_ort = false;
+    {
+        std::string enc_onnx_path;
+        // If a specific VAE was requested and it's ONNX, derive encoder path
+        if (!ace_req.vae.empty()) {
+            const ModelEntry * entry = registry_find(g_registry.vae, ace_req.vae.c_str());
+            if (entry && entry->name.size() >= 5 &&
+                entry->name.substr(entry->name.size() - 5) == ".onnx") {
+                // Replace "_decoder.onnx" with "_encoder.onnx"
+                std::string p = entry->path;
+                auto pos = p.rfind("_decoder.onnx");
+                if (pos != std::string::npos) {
+                    enc_onnx_path = p.substr(0, pos) + "_encoder.onnx";
+                }
+            }
+        }
+        // If no specific ONNX VAE selected, check the registry for any ONNX decoder
+        // and derive the encoder path from it
+        if (enc_onnx_path.empty()) {
+            for (const auto & e : g_registry.vae) {
+                if (e.name.size() >= 5 && e.name.substr(e.name.size() - 5) == ".onnx") {
+                    std::string p = e.path;
+                    auto pos = p.rfind("_decoder.onnx");
+                    if (pos != std::string::npos) {
+                        std::string candidate = p.substr(0, pos) + "_encoder.onnx";
+                        FILE * f = fopen(candidate.c_str(), "rb");
+                        if (f) {
+                            fclose(f);
+                            enc_onnx_path = candidate;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we found an encoder ONNX, try ORT
+        if (!enc_onnx_path.empty()) {
+            FILE * f = fopen(enc_onnx_path.c_str(), "rb");
+            if (f) {
+                fclose(f);
+                tried_ort = true;
+                ModelKey ort_key;
+                ort_key.kind = MODEL_VAE_ENC_ORT;
+                ort_key.path = enc_onnx_path;
+
+                VaeEncOrt * enc_ort = store_require_vae_enc_ort(g_store, ort_key);
+                if (enc_ort) {
+                    ModelHandle guard(g_store, enc_ort);
+                    T_latent = vae_enc_ort_encode_tiled(enc_ort, src_interleaved, src_len,
+                                                         latent.data(), T_latent_max,
+                                                         g_synth_params.vae_chunk, g_synth_params.vae_overlap);
+                    if (T_latent >= 0) {
+                        // Extract basename for logging
+                        auto slash = enc_onnx_path.find_last_of("/\\");
+                        vae_name_used = (slash != std::string::npos) ? enc_onnx_path.substr(slash + 1) : enc_onnx_path;
+                    } else {
+                        fprintf(stderr, "[Server] encode: ORT encode failed, falling back to GGML\n");
+                    }
+                } else {
+                    fprintf(stderr, "[Server] encode: ORT session load failed, falling back to GGML\n");
+                }
+            }
+        }
     }
+
+    // ── GGML fallback ──────────────────────────────────────────────
+    if (T_latent < 0) {
+        const ModelEntry * vae_entry = registry_find_non_onnx(g_registry.vae, ace_req.vae.c_str());
+        if (!vae_entry) {
+            vae_entry = registry_find_non_onnx(g_registry.vae);
+        }
+        if (!vae_entry) {
+            fprintf(stderr, "[Server] encode: no GGUF/safetensors VAE available for encoding\n");
+            job->status.store(2);
+            return;
+        }
+
+        ModelKey vae_key;
+        vae_key.kind          = MODEL_VAE_ENC;
+        vae_key.path          = vae_entry->path;
+        vae_key.adapter_scale = 1.0f;
+
+        VAEEncoder * vae = store_require_vae_enc(g_store, vae_key);
+        if (!vae) {
+            fprintf(stderr, "[Server] encode: store_require_vae_enc failed\n");
+            job->status.store(2);
+            return;
+        }
+        ModelHandle vae_guard(g_store, vae);
+
+        T_latent = vae_enc_encode_tiled(vae, src_interleaved, src_len, latent.data(), T_latent_max,
+                                         g_synth_params.vae_chunk, g_synth_params.vae_overlap);
+        if (T_latent < 0) {
+            fprintf(stderr, "[Server] encode: vae_enc_encode_tiled failed\n");
+            job->status.store(2);
+            return;
+        }
+        vae_name_used = vae_entry->name;
+    }
+
     auto t_end = std::chrono::steady_clock::now();
     float ms = (float) std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_start).count() / 1000.0f;
-    fprintf(stderr, "[Server] encode: %d audio samples (%.2fs) -> %d latent frames, %.0fms\n", src_len,
-            (float) src_len / 48000.0f, T_latent, ms);
+    fprintf(stderr, "[Server] encode: %d audio samples (%.2fs) -> %d latent frames, %.0fms (%s)\n", src_len,
+            (float) src_len / 48000.0f, T_latent, ms, vae_name_used.c_str());
 
     if (g_keep_loaded) {
-        g_loaded_vae = vae_entry->name;
+        g_loaded_vae = vae_name_used;
     } else {
         g_loaded_vae.clear();
     }

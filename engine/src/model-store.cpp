@@ -501,6 +501,31 @@ VaeOrt * store_require_vae_dec_ort(ModelStore * s, const ModelKey & k) {
     return m;
 }
 
+static void del_vae_enc_ort(void * p) {
+    vae_ort_free(static_cast<VaeEncOrt *>(p));
+    delete static_cast<VaeEncOrt *>(p);
+}
+
+VaeEncOrt * store_require_vae_enc_ort(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<VaeEncOrt>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer       t;
+    VaeEncOrt * m = new VaeEncOrt();
+    if (!vae_ort_load(m, k.path.c_str())) {
+        delete m;
+        return nullptr;
+    }
+    // ORT manages its own VRAM — report 0 bytes to the store budget.
+    install_entry(s, k, m, 0, "VAE-Enc-ORT", del_vae_enc_ort);
+    fprintf(stderr, "[Store] Load VAE-Enc-ORT: %.0f ms\n", t.ms());
+    return m;
+}
+
 static void del_text_enc_ort(void * p) {
     text_enc_ort_free(static_cast<TextEncOrt *>(p));
     delete static_cast<TextEncOrt *>(p);
