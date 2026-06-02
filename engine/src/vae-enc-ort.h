@@ -160,13 +160,22 @@ static inline int vae_enc_ort_encode_tiled(VaeEncOrt *   ctx,
         audio_overlap /= 2;
     }
 
-    // Short audio: pad to audio_chunk and encode (fixed TRT shape)
+    // Short audio: replicate-pad to audio_chunk for fixed TRT shape
     if (T_audio <= audio_chunk) {
-        std::vector<float> padded((size_t)audio_chunk * 2, 0.0f);
+        if (T_audio == audio_chunk) {
+            return vae_enc_ort_encode(ctx, audio, T_audio, latent_out, max_T_latent);
+        }
+        // Replicate-pad: copy real audio, repeat last sample pair to fill
+        std::vector<float> padded((size_t)audio_chunk * 2);
         memcpy(padded.data(), audio, (size_t)T_audio * 2 * sizeof(float));
+        float last_L = padded[(size_t)(T_audio - 1) * 2];
+        float last_R = padded[(size_t)(T_audio - 1) * 2 + 1];
+        for (int s = T_audio; s < audio_chunk; s++) {
+            padded[(size_t)s * 2]     = last_L;
+            padded[(size_t)s * 2 + 1] = last_R;
+        }
         int full_T = vae_enc_ort_encode(ctx, padded.data(), audio_chunk, latent_out, max_T_latent);
         if (full_T < 0) return full_T;
-        // Trim to actual T_audio proportion
         int actual_T = (int)roundf((float)T_audio / (float)audio_chunk * (float)full_T);
         if (actual_T > full_T) actual_T = full_T;
         return actual_T;
@@ -184,6 +193,7 @@ static inline int vae_enc_ort_encode_tiled(VaeEncOrt *   ctx,
     // Temporary buffer for each tile's latent output
     int tile_latent_max = chunk_size + 64;  // generous
     std::vector<float> tile_latent((size_t)tile_latent_max * 64);
+    std::vector<float> padded_audio;  // reused for edge tiles
 
     for (int i = 0; i < num_steps; i++) {
         // Core range in audio samples (the part we keep)
@@ -198,27 +208,35 @@ static inline int vae_enc_ort_encode_tiled(VaeEncOrt *   ctx,
         if (win_end > T_audio) win_end = T_audio;
         int win_len = win_end - win_start;
 
-        // Pad tile input to fixed audio_chunk so TRT always sees shape
-        // [1, 2, audio_chunk]. Avoids engine recompilation for edge tiles.
-        std::vector<float> padded_audio((size_t)audio_chunk * 2, 0.0f);
-        memcpy(padded_audio.data(),
-               audio + win_start * 2,
-               (size_t)win_len * 2 * sizeof(float));
+        // Always encode audio_chunk for fixed TRT shape.
+        // Edge tiles (win_len < audio_chunk) get replicate-padded.
+        const float * encode_input;
+        if (win_len < audio_chunk) {
+            padded_audio.resize((size_t)audio_chunk * 2);
+            memcpy(padded_audio.data(),
+                   audio + (size_t)win_start * 2,
+                   (size_t)win_len * 2 * sizeof(float));
+            float last_L = padded_audio[(size_t)(win_len - 1) * 2];
+            float last_R = padded_audio[(size_t)(win_len - 1) * 2 + 1];
+            for (int s = win_len; s < audio_chunk; s++) {
+                padded_audio[(size_t)s * 2]     = last_L;
+                padded_audio[(size_t)s * 2 + 1] = last_R;
+            }
+            encode_input = padded_audio.data();
+        } else {
+            encode_input = audio + (size_t)win_start * 2;
+        }
 
-        // Encode the padded tile (always audio_chunk samples)
-        int tile_T_full = vae_enc_ort_encode(ctx,
-                                         padded_audio.data(),
-                                         audio_chunk,
-                                         tile_latent.data(),
-                                         tile_latent_max);
-        if (tile_T_full < 0) {
+        int tile_T_raw = vae_enc_ort_encode(ctx, encode_input, audio_chunk,
+                                             tile_latent.data(), tile_latent_max);
+        if (tile_T_raw < 0) {
             fprintf(stderr, "[VAE-Enc-ORT] FATAL: tile %d encode failed\n", i);
             return -1;
         }
 
-        // Trim output to actual win_len proportion
-        int tile_T = (int)roundf((float)win_len / (float)audio_chunk * (float)tile_T_full);
-        if (tile_T > tile_T_full) tile_T = tile_T_full;
+        // Valid latent frames for this tile's actual data
+        int tile_T = (win_len == audio_chunk) ? tile_T_raw
+                     : (int)roundf((float)win_len / (float)audio_chunk * (float)tile_T_raw);
 
         // Determine downsample factor from first tile
         if (i == 0) {
