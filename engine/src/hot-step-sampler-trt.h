@@ -57,6 +57,70 @@ static void convert_bf16_to_fp32(const uint16_t* src, float* dst, size_t n) {
     }
 }
 
+// ── FP16 ↔ FP32 conversion (host) ─────────────────────────────────────
+// FP16 (IEEE 754 half): 1 sign + 5 exponent + 10 mantissa bits.
+// Needed for FP8 QDQ models (modelopt autocast outputs fp16 I/O).
+
+static inline uint16_t fp32_to_fp16(float v) {
+    uint32_t u;
+    memcpy(&u, &v, 4);
+    uint32_t sign = (u >> 16) & 0x8000;
+    int32_t  exp  = ((u >> 23) & 0xFF) - 127 + 15;
+    uint32_t mant = u & 0x7FFFFF;
+    if (exp <= 0) {
+        // Underflow → zero (skip denorms for speed)
+        return (uint16_t)sign;
+    } else if (exp >= 31) {
+        // Overflow → infinity
+        return (uint16_t)(sign | 0x7C00);
+    }
+    // Round to nearest even
+    uint32_t h = sign | ((uint32_t)exp << 10) | (mant >> 13);
+    // Rounding: add 0x1000 (bit 12) and check tie-breaking
+    uint32_t remainder = mant & 0x1FFF;
+    if (remainder > 0x1000 || (remainder == 0x1000 && (h & 1))) {
+        h++;
+    }
+    return (uint16_t)h;
+}
+
+static inline float fp16_to_fp32(uint16_t h) {
+    uint32_t sign = ((uint32_t)h & 0x8000) << 16;
+    uint32_t exp  = (h >> 10) & 0x1F;
+    uint32_t mant = h & 0x03FF;
+    uint32_t u;
+    if (exp == 0) {
+        if (mant == 0) {
+            u = sign;  // ±zero
+        } else {
+            // Denorm → normalize
+            exp = 1;
+            while (!(mant & 0x0400)) { mant <<= 1; exp--; }
+            mant &= 0x03FF;
+            u = sign | ((uint32_t)(exp + 127 - 15) << 23) | (mant << 13);
+        }
+    } else if (exp == 31) {
+        u = sign | 0x7F800000 | (mant << 13);  // inf/nan
+    } else {
+        u = sign | ((uint32_t)(exp + 127 - 15) << 23) | (mant << 13);
+    }
+    float result;
+    memcpy(&result, &u, 4);
+    return result;
+}
+
+static void convert_fp32_to_fp16(const float* src, uint16_t* dst, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        dst[i] = fp32_to_fp16(src[i]);
+    }
+}
+
+static void convert_fp16_to_fp32(const uint16_t* src, float* dst, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        dst[i] = fp16_to_fp32(src[i]);
+    }
+}
+
 // TRT-accelerated DiT sampling loop
 // Same interface as dit_ggml_generate() but uses DitTrt instead of DiTGGML
 static int dit_trt_generate(DitTrt *              trt,
@@ -222,8 +286,8 @@ static int dit_trt_generate(DitTrt *              trt,
         }
     }
 
-    // ── GPU buffers (BF16 for TRT I/O) ──────────────────────────────────
-    // STRONGLY_TYPED bf16_mixed engine: input_latents, enc_hidden, velocity
+    // Data layout: host FP32 [B, T, C] ↔ GPU BF16/FP16 [B, T, C] for TRT
+    // BF16 for standard dynamo-exported models, FP16 for FP8 QDQ models.
     // are bf16. Timesteps (t, t_r) are fp32. Host staging buffers convert
     // fp32 <-> bf16 for GPU transfer.
     size_t input_bf16_elems = (size_t)N_graph * T * in_ch;
@@ -255,8 +319,12 @@ static int dit_trt_generate(DitTrt *              trt,
         return -1;
     }
 
-    // Pre-upload encoder hidden states (fp32 → bf16)
-    convert_fp32_to_bf16(enc_buf.data(), h_enc_bf16.data(), enc_bf16_elems);
+    // Pre-upload encoder hidden states (fp32 → bf16/fp16)
+    if (trt->io_is_fp16) {
+        convert_fp32_to_fp16(enc_buf.data(), h_enc_bf16.data(), enc_bf16_elems);
+    } else {
+        convert_fp32_to_bf16(enc_buf.data(), h_enc_bf16.data(), enc_bf16_elems);
+    }
     cudaMemcpyAsync(d_enc, h_enc_bf16.data(), enc_bf16_elems * sizeof(uint16_t),
                cudaMemcpyHostToDevice, trt->stream);
     cudaStreamSynchronize(trt->stream);
@@ -283,9 +351,13 @@ static int dit_trt_generate(DitTrt *              trt,
             }
         }
 
-        // Convert input to BF16 and upload
+        // Convert input to BF16/FP16 and upload
         size_t input_n = (size_t)n_batch * T * in_ch;
-        convert_fp32_to_bf16(input_buf.data(), h_input_bf16.data(), input_n);
+        if (trt->io_is_fp16) {
+            convert_fp32_to_fp16(input_buf.data(), h_input_bf16.data(), input_n);
+        } else {
+            convert_fp32_to_bf16(input_buf.data(), h_input_bf16.data(), input_n);
+        }
         cudaMemcpyAsync(d_input, h_input_bf16.data(), input_n * sizeof(uint16_t),
                    cudaMemcpyHostToDevice, trt->stream);
 
@@ -294,9 +366,13 @@ static int dit_trt_generate(DitTrt *              trt,
         cudaMemcpyAsync(d_t, t_host.data(), n_batch * sizeof(float), cudaMemcpyHostToDevice, trt->stream);
         cudaMemcpyAsync(d_t_r, t_host.data(), n_batch * sizeof(float), cudaMemcpyHostToDevice, trt->stream);
 
-        // Re-upload encoder states (fp32 → bf16)
+        // Re-upload encoder states (fp32 → bf16/fp16)
         size_t enc_n = (size_t)n_batch * enc_S * H_enc;
-        convert_fp32_to_bf16(enc_buf.data(), h_enc_bf16.data(), enc_n);
+        if (trt->io_is_fp16) {
+            convert_fp32_to_fp16(enc_buf.data(), h_enc_bf16.data(), enc_n);
+        } else {
+            convert_fp32_to_bf16(enc_buf.data(), h_enc_bf16.data(), enc_n);
+        }
         cudaMemcpyAsync(d_enc, h_enc_bf16.data(), enc_n * sizeof(uint16_t),
                    cudaMemcpyHostToDevice, trt->stream);
 
@@ -311,11 +387,15 @@ static int dit_trt_generate(DitTrt *              trt,
         // Sync stream before reading back results
         cudaStreamSynchronize(trt->stream);
 
-        // Read back velocity (BF16 → FP32)
+        // Read back velocity (BF16/FP16 → FP32)
         size_t vel_n = (size_t)n_batch * T * Oc;
         cudaMemcpy(h_vel_bf16.data(), d_vel, vel_n * sizeof(uint16_t),
                    cudaMemcpyDeviceToHost);
-        convert_bf16_to_fp32(h_vel_bf16.data(), vel_out, vel_n);
+        if (trt->io_is_fp16) {
+            convert_fp16_to_fp32(h_vel_bf16.data(), vel_out, vel_n);
+        } else {
+            convert_bf16_to_fp32(h_vel_bf16.data(), vel_out, vel_n);
+        }
         return true;
     };
 

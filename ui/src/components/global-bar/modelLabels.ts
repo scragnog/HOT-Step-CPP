@@ -6,6 +6,11 @@
 /** Parse a DiT model filename into a nice label like "Base/Turbo XL-BF16" */
 export function formatDitModel(filename: string): string {
   if (!filename) return '—';
+
+  // ONNX models: special labels
+  if (filename === 'dit_fp8.onnx') return 'DiT XL FP8 (TensorRT)';
+  if (filename === 'dit_bf16.onnx') return 'DiT XL BF16 (TensorRT)';
+
   const name = filename.replace(/\.gguf$/i, '');
 
   // Extract quant suffix (last segment after final dash, e.g. BF16, Q8_0, Q4_K_M)
@@ -122,6 +127,10 @@ export function getDitModelDescription(filename: string): string {
   if (!filename) return '';
   // Strip both extensions — works for GGUF filenames and safetensors dirs
   const name = filename.replace(/\.gguf$/i, '').toLowerCase();
+
+  // ONNX / TRT models
+  if (name.includes('fp8')) return 'FP8 quantized DiT — fastest inference with FP8 tensor cores. LoRA adapters not yet supported.';
+  if (name === 'dit_bf16.onnx') return 'BF16 DiT via TensorRT. Equivalent quality to GGUF BF16 with TRT acceleration.';
 
   if (name.includes('turbo') && name.includes('xl')) return 'Extended architecture with turbo training. Fast inference at 8–15 steps with enriched audio quality.';
   if (name.includes('merge') && name.includes('xl')) return 'Merged XL checkpoint combining base stability with turbo speed. Best of both worlds.';

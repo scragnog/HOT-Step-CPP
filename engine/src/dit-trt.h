@@ -92,6 +92,11 @@ struct DitTrt {
     // Loaded from refit_manifest.json sidecar emitted by export_dit.py.
     std::unordered_set<std::string> weights_transposed;
 
+    // I/O tensor dtype: true when engine expects fp16 I/O (FP8 QDQ model),
+    // false when engine expects bf16 I/O (dynamo bf16_mixed model).
+    // Set at load time by inspecting the engine's input tensor dtype.
+    bool io_is_fp16 = false;
+
     // Logger
     DitTrtLogger logger;
 
@@ -422,6 +427,15 @@ inline bool dit_trt_load(
         ctx->idx_t < 0 || ctx->idx_t_r < 0 || ctx->idx_velocity < 0) {
         fprintf(stderr, "[DiT-TRT] Missing I/O tensors!\n");
         return false;
+    }
+
+    // Detect I/O dtype: fp16 (FP8 QDQ model from modelopt) vs bf16 (dynamo export)
+    {
+        const char* il_name = ctx->engine->getIOTensorName(ctx->idx_input_latents);
+        auto il_dtype = ctx->engine->getTensorDataType(il_name);
+        ctx->io_is_fp16 = (il_dtype == nvinfer1::DataType::kHALF);
+        fprintf(stderr, "[DiT-TRT] I/O dtype: %s\n",
+                ctx->io_is_fp16 ? "fp16 (FP8 model)" : "bf16 (standard)");
     }
 
     auto t1 = std::chrono::steady_clock::now();

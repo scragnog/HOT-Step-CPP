@@ -1242,7 +1242,13 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
         }
 
         // LoRA adapter refitting: apply/revert/switch as needed
-        {
+        // FP8 engines (io_is_fp16) need fp16 merge math — not yet implemented.
+        if (s_trt.io_is_fp16) {
+            if (!ctx->dit_key.adapter_path.empty()) {
+                fprintf(stderr, "[Adapter-TRT] WARNING: LoRA adapters not yet supported with FP8 model, skipping\n");
+                fflush(stderr);
+            }
+        } else {
             auto t_adapter_wall = std::chrono::steady_clock::now();
             const std::string& want_adapter = ctx->dit_key.adapter_path;
             const std::string& have_adapter = s_trt.current_adapter;
