@@ -6,7 +6,7 @@ import ReactDOM from 'react-dom';
 import {
   Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus, Image,
-  LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Upload, Mic2,
+  LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Upload, Mic2, Loader2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
@@ -14,6 +14,7 @@ import { togglePlay, usePlaybackSelector } from '../../stores/playbackStore';
 import { songToTrack } from '../../stores/playbackStore';
 import { useABCompareSelector, setTrackA, setTrackB, playAB, openModal as openABModal, clear as clearAB } from '../../stores/abCompareStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
+import { downloadAll } from '../../utils/downloadTrack';
 
 // ── Source filter definitions ────────────────────────────────────────────────
 
@@ -216,6 +217,20 @@ export const SongList: React.FC<SongListProps> = ({
     exitSelectionMode();
   }, [selectedIds, onBulkDelete, exitSelectionMode]);
 
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+
+  const handleBulkDownload = useCallback(async () => {
+    if (selectedIds.size === 0 || bulkDownloading) return;
+    const selected = filteredSongs.filter(s => selectedIds.has(s.id));
+    if (selected.length === 0) return;
+    setBulkDownloading(true);
+    try {
+      await downloadAll(selected);
+    } finally {
+      setBulkDownloading(false);
+    }
+  }, [selectedIds, filteredSongs, bulkDownloading]);
+
   if (songs.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-zinc-500">
@@ -335,13 +350,24 @@ export const SongList: React.FC<SongListProps> = ({
           </span>
 
           {selectedIds.size > 0 && (
-            <button
-              onClick={handleBulkDelete}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 hover:text-red-300 text-xs font-semibold transition-all"
-            >
-              <Trash2 size={13} />
-              {t('library.deleteCount', { count: selectedIds.size })}
-            </button>
+            <>
+              <button
+                onClick={handleBulkDownload}
+                disabled={bulkDownloading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 text-xs font-semibold transition-all disabled:opacity-40"
+              >
+                {bulkDownloading
+                  ? <><Loader2 size={13} className="animate-spin" /> Downloading…</>
+                  : <><Download size={13} /> {t('library.downloadCount', { count: selectedIds.size })}</>}
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 hover:text-red-300 text-xs font-semibold transition-all"
+              >
+                <Trash2 size={13} />
+                {t('library.deleteCount', { count: selectedIds.size })}
+              </button>
+            </>
           )}
         </div>
       )}

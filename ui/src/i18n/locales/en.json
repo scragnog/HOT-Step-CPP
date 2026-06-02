@@ -260,6 +260,7 @@
     "library.select": "Select",
     "library.selected": "{{count}} selected",
     "library.deleteCount": "Delete {{count}}",
+    "library.downloadCount": "Download {{count}}",
     "library.deselectAll": "Deselect all",
     "library.selectAll": "Select all",
     "library.noFilterSongs": "No {{filter}} songs",

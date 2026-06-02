@@ -73,7 +73,8 @@ export async function downloadTrack(
   const bitrate = format === 'opus' ? settings.downloadOpusBitrate : settings.downloadMp3Bitrate;
   const hasMastered = !!(song.masteredAudioUrl || song.mastered_audio_url);
 
-  const finalArtist = options?.artistName || song.artistName || '';
+  const finalArtist = options?.artistName || song.artistName
+    || (song.generationParams as any)?.artist || (song.generation_params as any)?.artist || '';
   const finalPrepend = options?.prepend || readFilenamePrepend();
 
   // Build common query params
