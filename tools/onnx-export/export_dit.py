@@ -272,7 +272,7 @@ def load_dit_model(model_dir: str, device: str = "cuda", precision: str = "bf16_
     # Also add the Demon app root — model config files are re-export stubs
     # that import from the acestep package (from Demon).
     sys.path.insert(0, str(model_dir))
-    demon_root = Path(model_dir).parent.parent.parent / "Demon"
+    demon_root = Path(model_dir).resolve().parent.parent.parent / "Demon"
     if demon_root.exists():
         sys.path.insert(0, str(demon_root))
         print(f"[export_dit] Added {demon_root} to sys.path for acestep package")
