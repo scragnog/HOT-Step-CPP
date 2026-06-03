@@ -124,7 +124,7 @@ export const ArtistGrid: React.FC<ArtistGridProps> = ({
           {artists.map((artist, idx) => (
             <div
               key={artist.id}
-              className={`group relative aspect-[3/4] rounded-2xl cursor-pointer transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl hover:shadow-pink-500/10 ls2-card-in ls2-stagger-${Math.min(idx + 1, 11)}`}
+              className={`group relative aspect-[3/4] rounded-2xl cursor-pointer transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl hover:shadow-pink-500/10 ls2-card-in ls2-stagger-${Math.min(idx + 1, 11)} ${menuOpenId === artist.id ? 'z-30' : ''}`}
               onClick={() => onSelectArtist(artist)}
             >
               {/* Image clip wrapper — overflow-hidden here so the context menu can extend beyond the card */}
