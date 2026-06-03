@@ -124,10 +124,49 @@ function _restore(): AudioGenQueueState {
 let _state: AudioGenQueueState = _restore();
 const _listeners = new Set<() => void>();
 
+/** Max completed items to retain in the queue (oldest are pruned). */
+const MAX_COMPLETED = 20;
+
 function _emit(immediate = false) {
+  // Auto-prune: on status transitions (immediate=true), cap completed items
+  // and strip globalParams from terminal items to reduce serialization cost.
+  if (immediate) {
+    _pruneCompleted();
+  }
   _state = { ..._state, items: [..._state.items] };
   if (immediate) _persistNow(); else _persist();
   _listeners.forEach(fn => fn());
+}
+
+/**
+ * Emit only if the active item's progress or stage actually changed.
+ * Avoids ~50% of unnecessary re-renders during poll ticks.
+ */
+let _lastEmitStage: string | undefined;
+let _lastEmitProgress: number | undefined;
+function _emitIfChanged(item: AudioQueueItem) {
+  if (item.stage === _lastEmitStage && item.progress === _lastEmitProgress) return;
+  _lastEmitStage = item.stage;
+  _lastEmitProgress = item.progress;
+  _emit();
+}
+
+/** Prune oldest completed items beyond MAX_COMPLETED and strip globalParams
+ *  from terminal items (succeeded/failed) to reduce serialization cost. */
+function _pruneCompleted(): void {
+  // Strip globalParams from terminal items — only needed at submit time
+  for (const item of _state.items) {
+    if ((item.status === 'succeeded' || item.status === 'failed') && item.globalParams && Object.keys(item.globalParams).length > 0) {
+      item.globalParams = {};
+    }
+  }
+
+  // Keep at most MAX_COMPLETED terminal items (oldest first)
+  const terminal = _state.items.filter(i => i.status === 'succeeded' || i.status === 'failed');
+  if (terminal.length > MAX_COMPLETED) {
+    const toRemove = new Set(terminal.slice(0, terminal.length - MAX_COMPLETED).map(i => i.id));
+    _state.items = _state.items.filter(i => !toRemove.has(i.id));
+  }
 }
 
 function _getSnapshot(): AudioGenQueueState { return _state; }
@@ -469,7 +508,7 @@ export async function enqueueSimpleGen(
           : undefined;
         item.stage = status.stage || 'Generating…';
         item.elapsed = Math.round((Date.now() - startTime) / 1000);
-        _emit();  // progress tick — debounced persistence
+        _emitIfChanged(item);  // progress tick — skip if nothing changed
 
         if (status.status === 'succeeded') {
           const audioUrl = status.result?.audioUrls?.[0] || '';
@@ -796,7 +835,7 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
         : undefined;
       item.stage = status.stage || 'Generating…';
       item.elapsed = Math.round((Date.now() - startTime) / 1000);
-      _emit();  // progress tick — debounced persistence
+      _emitIfChanged(item);  // progress tick — skip if nothing changed
 
       if (status.status === 'succeeded') {
         const audioUrl = status.result?.audioUrls?.[0];

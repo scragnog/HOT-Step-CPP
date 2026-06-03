@@ -63,6 +63,21 @@ interface GenerationJob {
 
 const jobs = new Map<string, GenerationJob>();
 
+// TTL cleanup: prune terminal jobs older than 1 hour every 10 minutes.
+// Prevents unbounded memory growth during long batch sessions.
+const JOB_TTL_MS = 60 * 60 * 1000; // 1 hour
+setInterval(() => {
+  const now = Date.now();
+  let pruned = 0;
+  for (const [id, job] of jobs) {
+    if (['succeeded', 'failed', 'cancelled'].includes(job.status) && now - job.createdAt > JOB_TTL_MS) {
+      jobs.delete(id);
+      pruned++;
+    }
+  }
+  if (pruned > 0) console.log(`[Generate] Pruned ${pruned} terminal job(s) from memory`);
+}, 10 * 60 * 1000).unref();
+
 // translateParams is now imported from ../services/generation/translateParams.ts
 
 /** Poll ace-server job until completion, with stall detection watchdog.

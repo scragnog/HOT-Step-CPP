@@ -6,7 +6,7 @@
  * Completed items play through the main player (onPlaySong).
  */
 
-import React, { useCallback, useSyncExternalStore } from 'react';
+import React, { memo, useCallback, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, CheckCircle2, XCircle, X, Music, Play, Square, ListPlus, Check, Download, RotateCcw } from 'lucide-react';
 import {
@@ -174,11 +174,11 @@ export const InlineAudioQueue: React.FC = () => {
   );
 };
 
-const GroupLabel: React.FC<{ label: string; color: string }> = ({ label, color }) => (
+const GroupLabel = memo<{ label: string; color: string }>(({ label, color }) => (
   <p className={`text-[9px] font-bold uppercase tracking-widest ${color} px-1 pt-2 pb-0.5`}>
     {label}
   </p>
-);
+));
 
 interface QueueItemRowProps {
   item: AudioQueueItem;
@@ -187,7 +187,7 @@ interface QueueItemRowProps {
   onDownload?: (item: AudioQueueItem) => void;
 }
 
-const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPlay, onDownload }) => {
+const QueueItemRow = memo<QueueItemRowProps>(({ item, isPlayingInMain, onPlay, onDownload }) => {
   const { disguiseArtist } = useDisguiseMode();
   const isRunning = item.status === 'loading-adapter' || item.status === 'generating';
   const isSucceeded = item.status === 'succeeded';
@@ -297,9 +297,9 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
       )}
     </div>
   );
-};
+});
 
-const QueueAddToPlaylistBtn: React.FC<{ item: AudioQueueItem }> = ({ item }) => {
+const QueueAddToPlaylistBtn = memo<{ item: AudioQueueItem }>(({ item }) => {
   const playlist = usePlaylist();
   const inPlaylist = playlist.isIn(item.songId || item.id);
 
@@ -326,4 +326,4 @@ const QueueAddToPlaylistBtn: React.FC<{ item: AudioQueueItem }> = ({ item }) => 
       {inPlaylist ? <Check className="w-3 h-3" /> : <ListPlus className="w-3 h-3" />}
     </button>
   );
-};
+});

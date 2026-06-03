@@ -29,6 +29,7 @@ const STORAGE_KEY = 'lireek-playQueue';
 const CHANGE_EVENT = 'lireek-playlist-change';
 
 let _snapshot: PlaylistItem[] | null = null;
+let _persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function read(): PlaylistItem[] {
   if (_snapshot) return _snapshot;
@@ -41,9 +42,27 @@ function read(): PlaylistItem[] {
   return _snapshot!;
 }
 
-function write(items: PlaylistItem[]): void {
+/** Debounced persistence — avoids synchronous JSON.stringify on every add/remove. */
+function _persistPlaylist(): void {
+  if (_persistTimer) clearTimeout(_persistTimer);
+  _persistTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(_snapshot || []));
+    } catch { /* quota exceeded */ }
+  }, 500);
+}
+
+/** Force-flush persistence immediately (for clear, reorder — infrequent ops). */
+function _persistPlaylistNow(): void {
+  if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(_snapshot || []));
+  } catch { /* quota exceeded */ }
+}
+
+function write(items: PlaylistItem[], immediate = false): void {
   _snapshot = items;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  if (immediate) _persistPlaylistNow(); else _persistPlaylist();
   window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
 }
 
@@ -61,13 +80,13 @@ export function removeFromPlaylist(id: string): void {
   write(read().filter(i => i.id !== id));
 }
 
-export function clearPlaylist(): void { write([]); }
+export function clearPlaylist(): void { write([], true); }
 
 export function isInPlaylist(id: string): boolean {
   return read().some(i => i.id === id);
 }
 
-export function reorderPlaylist(items: PlaylistItem[]): void { write(items); }
+export function reorderPlaylist(items: PlaylistItem[]): void { write(items, true); }
 
 export function moveItem(id: string, direction: 'up' | 'down'): void {
   const list = [...read()];
