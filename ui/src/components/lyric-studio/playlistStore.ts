@@ -42,13 +42,15 @@ function read(): PlaylistItem[] {
   return _snapshot!;
 }
 
-/** Debounced persistence — avoids synchronous JSON.stringify on every add/remove. */
+/** Debounced persistence — for high-frequency ops (drag reorder). */
 function _persistPlaylist(): void {
   if (_persistTimer) clearTimeout(_persistTimer);
   _persistTimer = setTimeout(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(_snapshot || []));
-    } catch { /* quota exceeded */ }
+    } catch (e) {
+      console.error('[Playlist] localStorage write failed (quota?):', e);
+    }
   }, 500);
 }
 
@@ -57,7 +59,9 @@ function _persistPlaylistNow(): void {
   if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(_snapshot || []));
-  } catch { /* quota exceeded */ }
+  } catch (e) {
+    console.error('[Playlist] localStorage write failed (quota?):', e);
+  }
 }
 
 function write(items: PlaylistItem[], immediate = false): void {
@@ -73,7 +77,7 @@ export function getPlaylist(): PlaylistItem[] { return read(); }
 export function addToPlaylist(item: PlaylistItem): void {
   const list = read();
   if (list.some(i => i.id === item.id)) return;
-  write([...list, item]);
+  write([...list, item], true);  // persist immediately — playlist changes must not be lost
 }
 
 export function removeFromPlaylist(id: string): void {
