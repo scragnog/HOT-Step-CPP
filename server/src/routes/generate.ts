@@ -228,10 +228,25 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         job.progress = 10;
 
         const lmStart = performance.now();
+        const lmModelLoads: Array<{ type: string; ms: number; sizeMb?: number }> = [];
 
         // Subscribe to engine logs for LM progress
         const unsubLm = subscribeLines((line) => {
           if (line.source !== 'engine') return;
+          // Capture model load times from [Store] Load <TYPE>: <N> ms
+          const storeLoad = line.text.match(/\[Store\] Load (.+?):\s+(\d+)\s*ms/);
+          if (storeLoad) {
+            lmModelLoads.push({ type: storeLoad[1], ms: parseInt(storeLoad[2], 10) });
+            job.stage = `Loading ${storeLoad[1]}...`;
+            return;
+          }
+          // Capture unload sizes for context
+          const storeUnload = line.text.match(/\[Store\] Unload (.+?) \(([\d.]+) MB\)/);
+          if (storeUnload) {
+            const last = lmModelLoads.findLast(m => m.type === storeUnload[1]);
+            if (last) last.sizeMb = parseFloat(storeUnload[2]);
+            return;
+          }
           const lm1 = line.text.match(/\[LM-Phase1\] Step (\d+).*?([\d.]+) tok\/s/);
           if (lm1) {
             job.stage = `LM Phase 1: Step ${lm1[1]} (${lm1[2]} tok/s)`;
@@ -322,7 +337,18 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
         // Unsubscribe LM progress watcher
         unsubLm();
-        timing.push({ name: 'LM Phase', ms: Math.round(performance.now() - lmStart) });
+        const lmTotalMs = Math.round(performance.now() - lmStart);
+        // Report LM model loads as sub-phases
+        const lmLoadTotalMs = lmModelLoads.reduce((sum, m) => sum + m.ms, 0);
+        if (lmLoadTotalMs > 50) {
+          for (const m of lmModelLoads) {
+            if (m.ms > 50) {
+              const sizeInfo = m.sizeMb ? ` (${m.sizeMb.toFixed(0)} MB)` : '';
+              timing.push({ name: `  Load ${m.type}${sizeInfo}`, ms: m.ms });
+            }
+          }
+        }
+        timing.push({ name: 'LM Phase', ms: lmTotalMs });
       }
 
       // Re-inject trigger word into LM results — CoT caption replaces the
@@ -602,11 +628,26 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       let firstEngineLogAt = 0;  // first log line from engine = job started
       let ditLastStepEndAt = 0;  // timestamp of last DiT step log (not vae)
       let resolveParamsAt = 0;   // [Resolve-T] or [Resolve-Params] marks job setup
+      const synthModelLoads: Array<{ type: string; ms: number; sizeMb?: number }> = [];
 
       const unsubSynth = subscribeLines((line) => {
         if (line.source !== 'engine') return;
         const now = performance.now();
         if (!firstEngineLogAt) firstEngineLogAt = now;
+        // Capture model load times from [Store] Load <TYPE>: <N> ms
+        const storeLoad = line.text.match(/\[Store\] Load (.+?):\s+(\d+)\s*ms/);
+        if (storeLoad) {
+          synthModelLoads.push({ type: storeLoad[1], ms: parseInt(storeLoad[2], 10) });
+          job.stage = `Loading ${storeLoad[1]}${trackLabel}...`;
+          return;
+        }
+        // Capture unload sizes for context
+        const storeUnload = line.text.match(/\[Store\] (?:Unload|Evict) (.+?) \(([\d.]+) MB\)/);
+        if (storeUnload) {
+          const last = synthModelLoads.findLast(m => m.type === storeUnload[1]);
+          if (last && !last.sizeMb) last.sizeMb = parseFloat(storeUnload[2]);
+          return;
+        }
         const dit = line.text.match(/\[DiT(?:-TRT)?\] Step (\d+)\/(\d+)\s+t=[\d.]+\s+\[(.+?)\]/);
         if (dit) {
           if (!ditFirstStepAt) ditFirstStepAt = now;
@@ -707,6 +748,18 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       const synthTrackMs = Math.round(synthEndAt - synthTrackStart);
       const trackSuffix = totalTracks > 1 ? ` Track ${trackIdx + 1}` : '';
 
+      // ── Model Loading breakdown (from [Store] Load/Unload engine logs) ──
+      const synthLoadTotalMs = synthModelLoads.reduce((sum, m) => sum + m.ms, 0);
+      if (synthLoadTotalMs > 50) {
+        for (const m of synthModelLoads) {
+          if (m.ms > 50) {
+            const sizeInfo = m.sizeMb ? ` (${m.sizeMb.toFixed(0)} MB)` : '';
+            timing.push({ name: `  📦 Load ${m.type}${sizeInfo}${trackSuffix}`, ms: m.ms });
+          }
+        }
+        timing.push({ name: `  📦 Model Loading Total${trackSuffix}`, ms: synthLoadTotalMs });
+      }
+
       // Sub-phase breakdown (indented with leading spaces for visual hierarchy)
       if (fsqStartAt && ditFirstStepAt) {
         const fsqMs = Math.round(ditFirstStepAt - fsqStartAt);
@@ -749,9 +802,6 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         gaps.push({ name: 'DiT→VAE', ms: Math.round(vaeStartAt - ditLastStepAt) });
       }
       // Gap 4: VAE/synth done → result fetched + file written (HTTP response + I/O)
-      // vaeStartAt→synthEndAt includes VAE decode + result fetch; VAE decode itself
-      // is fast (~2s) but synthEndAt includes getJobResult HTTP call + writeFileSync.
-      // We can't separate these without another marker, so we show total overhead.
       const totalAccountedMs =
         (firstEngineLogAt ? firstEngineLogAt - synthTrackStart : 0)
         + (textEncStartAt && textEncEndAt ? textEncEndAt - (resolveParamsAt || firstEngineLogAt || textEncStartAt) : 0)
