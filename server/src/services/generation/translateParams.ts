@@ -4,6 +4,7 @@
 // to the AceRequest schema expected by the ace-server engine.
 
 import type { AceRequest } from '../../services/aceClient.js';
+import { mapPath } from '../../services/pathMapper.js';
 
 /** Translate frontend params to AceRequest format */
 export function translateParams(params: any): AceRequest {
@@ -74,7 +75,7 @@ export function translateParams(params: any): AceRequest {
   if (params.lmModel) req.lm_model = params.lmModel;
   if (params.vaeModel) req.vae_model = params.vaeModel;
   if (params.embeddingModel) req.emb_model = params.embeddingModel;
-  if (params.loraPath) req.adapter = params.loraPath;
+  if (params.loraPath) req.adapter = mapPath(params.loraPath);
   if (params.loraScale !== undefined) req.adapter_scale = params.loraScale;
   if (params.adapterGroupScales) req.adapter_group_scales = params.adapterGroupScales;
   if (params.adapterMode) req.adapter_mode = params.adapterMode;

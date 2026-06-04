@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { config } from '../../config.js';
+import { mapPath } from '../../services/pathMapper.js';
 import { ensureEngineFormat, timeStretchPitchShift } from '../../services/audioConvert.js';
 import { readHslat, latentFrameCount, latentDuration } from '../../services/latentFormat.js';
 import { convertToWav } from '../../routes/mastering.js';
@@ -20,13 +21,14 @@ export function loadSourceAudio(
 ): Buffer | undefined {
   if (!sourceAudioUrl) return undefined;
 
-  const srcPath = sourceAudioUrl.startsWith('/references/')
-    ? path.join(config.data.dir, 'references', sourceAudioUrl.replace('/references/', ''))
-    : sourceAudioUrl.startsWith('/audio/')
-      ? path.join(config.data.audioDir, sourceAudioUrl.replace('/audio/', ''))
-      : path.isAbsolute(sourceAudioUrl)
-        ? sourceAudioUrl
-        : path.join(config.data.dir, sourceAudioUrl);
+  const resolvedUrl = mapPath(sourceAudioUrl) || sourceAudioUrl;
+  const srcPath = resolvedUrl.startsWith('/references/')
+    ? path.join(config.data.dir, 'references', resolvedUrl.replace('/references/', ''))
+    : resolvedUrl.startsWith('/audio/')
+      ? path.join(config.data.audioDir, resolvedUrl.replace('/audio/', ''))
+      : path.isAbsolute(resolvedUrl)
+        ? resolvedUrl
+        : path.join(config.data.dir, resolvedUrl);
 
   log('DEBUG', `[Synth Phase] Looking for source audio at: ${srcPath}`);
 
@@ -113,11 +115,12 @@ export async function loadTimbreReference(
   log('DEBUG', `[Synth Phase] timbreRef=${timbreRef}, masteringRef=${masteringRef}`);
   if (!timbreRef) return undefined;
 
-  let refPath = timbreRef.startsWith('/references/')
-    ? path.join(config.data.dir, 'references', timbreRef.replace('/references/', ''))
-    : path.isAbsolute(timbreRef)
-      ? timbreRef
-      : path.join(config.data.dir, 'references', timbreRef);
+  const mappedRef = mapPath(timbreRef) || timbreRef;
+  let refPath = mappedRef.startsWith('/references/')
+    ? path.join(config.data.dir, 'references', mappedRef.replace('/references/', ''))
+    : path.isAbsolute(mappedRef)
+      ? mappedRef
+      : path.join(config.data.dir, 'references', mappedRef);
 
   // Randomize timbre reference
   if (params.randomizeTimbreRef) {
