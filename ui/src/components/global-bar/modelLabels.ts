@@ -73,11 +73,15 @@ export function formatLmModel(filename: string): string {
 export function formatVaeModel(filename: string): string {
   if (!filename) return '—';
   const name = filename
-    .replace(/\.(gguf|safetensors)$/i, '')
+    .replace(/\.(gguf|safetensors|onnx)$/i, '')
     .replace(/-(BF16|F16|F32)$/i, '');
   // Format badge in ModelSelect handles GGUF/ST indication — no suffix needed
   if (name === 'vae') return 'VAE';
   if (name === 'scragvae') return 'ScragVAE';
+  if (name === 'vae-DreamVAE') return 'DreamVAE';
+  if (name === 'vae-Regrind-V7') return 'Regrind V7';
+  if (name === 'vae-Regrind-V9b') return 'Regrind V9b';
+  if (name === 'vae-Regrind-V9b-Blend50') return 'Regrind V9b Blend50';
   return name;
 }
 
@@ -158,8 +162,13 @@ export function getLmModelDescription(filename: string): string {
 /** Get a contextual description for a VAE model */
 export function getVaeModelDescription(filename: string): string {
   if (!filename) return '';
-  const name = filename.replace(/\.(gguf|safetensors)$/i, '').toLowerCase();
-  if (name.startsWith('vae')) return 'Stock ACE-Step VAE. Standard latent-to-audio decoding.';
+  const name = filename.replace(/\.(gguf|safetensors|onnx)$/i, '').toLowerCase();
+  if (name.includes('dreamvae')) return 'DreamVAE — alternative decoder architecture with smoother output characteristics.';
+  if (name.includes('regrind') && name.includes('blend50')) return 'Regrind V9b Blend50 — 50/50 blend of Regrind V9b with stock weights for balanced clarity.';
+  if (name.includes('regrind-v9b') || name.includes('regrind_v9b')) return 'Regrind V9b — latest iteration with refined high-frequency response and reduced artifacts.';
+  if (name.includes('regrind-v7') || name.includes('regrind_v7')) return 'Regrind V7 — retrained decoder for improved spectral fidelity.';
+  if (name.includes('regrind')) return 'Regrind VAE — retrained decoder for improved audio clarity.';
   if (name.includes('scragvae') || name.includes('scrag')) return 'ScragVAE — custom-trained for reduced artifacts and improved clarity.';
+  if (name.startsWith('vae')) return 'Stock ACE-Step VAE. Standard latent-to-audio decoding.';
   return 'Variational autoencoder for latent-to-audio decoding.';
 }
