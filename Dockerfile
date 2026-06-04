@@ -74,9 +74,9 @@ RUN npm install --omit=dev && npm install tsx
 # ── Stage 4: Runtime ────────────────────────────────────────────────
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
-# Install Node.js 22 (LTS)
+# Install Node.js 22 (LTS) + runtime libraries the engine needs
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates libgomp1 \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
