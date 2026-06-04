@@ -29,7 +29,7 @@ services:
       # All I/O on host — accessible from Windows Explorer
       - ./models:/app/models              # GGUF model files
       - "D:/Ace-Step-Latest/All LoKR Files/sidestep/xl-base-turbo-05:/app/adapters:ro"
-      - ./data:/app/server/data            # SQLite DB + generated audio
+      - ./server/data:/app/server/data          # Shared SQLite DB + audio (same as Windows app)
       # Lua plugins (bind-mounted so edits are instant, no rebuild needed)
       - ./engine/plugins:/app/engine/plugins:ro   # Built-in (solvers, schedulers, etc.)
       - ./plugins:/app/plugins:ro                  # Community/custom plugins
