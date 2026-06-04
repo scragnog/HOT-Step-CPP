@@ -28,7 +28,7 @@ services:
     volumes:
       # All I/O on host — accessible from Windows Explorer
       - ./models:/app/models              # GGUF model files
-      - ./adapters:/app/adapters           # LoRA safetensors
+      - "D:/Ace-Step-Latest/All LoKR Files/sidestep/xl-base-turbo-05:/app/adapters:ro"
       - ./data:/app/server/data            # SQLite DB + generated audio
       # Lua plugins (bind-mounted so edits are instant, no rebuild needed)
       - ./engine/plugins:/app/engine/plugins:ro   # Built-in (solvers, schedulers, etc.)
