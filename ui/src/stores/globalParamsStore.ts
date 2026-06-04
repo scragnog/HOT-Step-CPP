@@ -135,6 +135,11 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // VAE backend selection (ONNX Runtime / TensorRT)
   useOrtVae: readKey('hs-useOrtVae', false),
 
+  // LUFS Normalization
+  lufsEnabled: readKey('hs-lufsEnabled', false),
+  lufsPreset: readKey('hs-lufsPreset', 'spotify'),
+  lufsTarget: readKey('hs-lufsTarget', -14),
+
   // -- Actions --
   setDitModel: (v: any) => { set({ ditModel: v }); writeKey("hs-ditModel", v); },
   setLmModel: (v: any) => { set({ lmModel: v }); writeKey("hs-lmModel", v); },
@@ -235,6 +240,20 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setPostprocessEnabled: (v: any) => { set({ postprocessEnabled: v }); writeKey("hs-postprocessEnabled", v); },
   setPostprocessPlugin: (v: any) => { set({ postprocessPlugin: v }); writeKey("hs-postprocessPlugin", v); },
   setUseOrtVae: (v: any) => { set({ useOrtVae: v }); writeKey('hs-useOrtVae', v); },
+  setLufsEnabled: (v: any) => { set({ lufsEnabled: v }); writeKey('hs-lufsEnabled', v); },
+  setLufsPreset: (v: any) => {
+    set({ lufsPreset: v });
+    writeKey('hs-lufsPreset', v);
+    // Auto-set target from preset
+    const presetTargets: Record<string, number> = {
+      spotify: -14, apple: -16, ebu: -23, club: -8,
+    };
+    if (v !== 'custom' && presetTargets[v] !== undefined) {
+      set({ lufsTarget: presetTargets[v] });
+      writeKey('hs-lufsTarget', presetTargets[v]);
+    }
+  },
+  setLufsTarget: (v: any) => { set({ lufsTarget: v }); writeKey('hs-lufsTarget', v); },
 
   // Plugin param helpers
   setPluginParam: (key: string, value: string) => {
@@ -332,6 +351,8 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       qualityEvalEnabled: (s.postProcessingEnabled && s.qualityEvalEnabled) || undefined,
       qualityEvalTarget: (s.postProcessingEnabled && s.qualityEvalEnabled) ? s.qualityEvalTarget : undefined,
       postprocessPlugin: (s.postProcessingEnabled && s.postprocessEnabled && s.postprocessPlugin) ? s.postprocessPlugin : undefined,
+      lufsEnabled: (s.postProcessingEnabled && s.masteringEnabled && s.lufsEnabled) || undefined,
+      lufsTarget: (s.postProcessingEnabled && s.masteringEnabled && s.lufsEnabled) ? s.lufsTarget : undefined,
       useOrtVae: s.useOrtVae || undefined,
       whisperLyricsEnabled: s.whisperLyricsEnabled,
       whisperModel: s.whisperLyricsEnabled ? s.whisperModel : undefined,

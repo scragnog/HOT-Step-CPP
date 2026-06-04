@@ -235,6 +235,10 @@ export interface GenerationParams {
   qualityEvalEnabled?: boolean;
   qualityEvalTarget?: 'unmastered' | 'mastered' | 'both';
 
+  // LUFS Normalization (final mastering stage)
+  lufsEnabled?: boolean;
+  lufsTarget?: number;          // target integrated LUFS (e.g. -14)
+
   // Postprocess plugin (replaces built-in VAE tiled decoder)
   postprocessPlugin?: string;
 

@@ -25,6 +25,15 @@ import { CoverArtContent, CoverArtBadge } from './CoverArtDropdown';
 import { PluginControls } from './PluginControls';
 import { EditableSlider } from '../shared/EditableSlider';
 
+// LUFS normalization presets
+const LUFS_PRESETS = [
+  { id: 'spotify', label: 'Spotify / YouTube Music', lufs: -14 },
+  { id: 'apple', label: 'Apple Music / Tidal', lufs: -16 },
+  { id: 'ebu', label: 'EBU R128 (Broadcast)', lufs: -23 },
+  { id: 'club', label: 'Club / DJ Playback', lufs: -8 },
+  { id: 'custom', label: 'Custom', lufs: null },
+] as const;
+
 // ── Accordion Section ───────────────────────────────────────────
 
 interface AccordionProps {
@@ -726,6 +735,72 @@ export const PostProcessingDropdown: React.FC = () => {
         <MasteringContent />
       </Accordion>
 
+      {/* 3.5. LUFS Normalization (only visible when mastering is enabled) */}
+      {gp.masteringEnabled && (
+        <Accordion
+          icon={<AudioWaveform size={14} />}
+          label={t('pp.lufsNormalize')}
+          accentColor="amber"
+          persistKey="hs-ppAccordion-lufs"
+          toggle={{ checked: gp.lufsEnabled, onChange: gp.setLufsEnabled }}
+          badge={gp.lufsEnabled ? (
+            <span className="text-[10px] text-amber-400/60 font-mono">
+              {gp.lufsTarget} LUFS
+            </span>
+          ) : undefined}
+        >
+          <div className="space-y-3 mt-2">
+            <p className="text-[10px] text-zinc-500 leading-relaxed">
+              Measures integrated loudness (ITU-R BS.1770-4) and adjusts gain to hit
+              the target &mdash; boosting quiet tracks and reducing loud ones. Includes a
+              true-peak limiter at -1 dBTP to prevent clipping.
+            </p>
+
+            {gp.lufsEnabled && (
+              <div className="space-y-2 pt-1">
+                {/* Preset selector */}
+                <div>
+                  <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
+                    {t('pp.lufsPreset')}
+                  </label>
+                  <select
+                    className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 outline-none transition-colors cursor-pointer"
+                    value={gp.lufsPreset}
+                    onChange={e => gp.setLufsPreset(e.target.value)}
+                  >
+                    {LUFS_PRESETS.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}{p.lufs !== null ? ` (${p.lufs} LUFS)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Custom slider — only when preset is 'custom' */}
+                {gp.lufsPreset === 'custom' && (
+                  <EditableSlider
+                    label={t('pp.lufsTarget')}
+                    value={gp.lufsTarget}
+                    min={-30} max={-5} step={0.5}
+                    onChange={gp.setLufsTarget}
+                    formatDisplay={v => `${v.toFixed(1)} LUFS`}
+                    tooltip="Target integrated loudness. Lower = quieter, higher = louder."
+                  />
+                )}
+
+                {/* Info about current target */}
+                <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
+                  <AudioWaveform size={14} className="text-amber-400 flex-shrink-0" />
+                  <span className="text-[10px] text-amber-300">
+                    Target: {gp.lufsTarget} LUFS &middot; True-peak ceiling: -1.0 dBTP
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </Accordion>
+      )}
+
       {/* 4. Cover Art */}
       <Accordion
         icon={<Image size={14} />}
@@ -787,7 +862,7 @@ export const PostProcessingDropdown: React.FC = () => {
 // ── Badge ───────────────────────────────────────────────────────
 
 export const PostProcessingBadge: React.FC = () => {
-  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, coverArtEnabled, vocalNaturalizerEnabled, gainOffsetDb, qualityEvalEnabled, postprocessEnabled, postprocessPlugin, whisperLyricsEnabled } = useGlobalParams();
+  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, coverArtEnabled, vocalNaturalizerEnabled, gainOffsetDb, qualityEvalEnabled, postprocessEnabled, postprocessPlugin, whisperLyricsEnabled, lufsEnabled, lufsTarget } = useGlobalParams();
   const { chain } = useVstChainStore();
   const vstEnabled = chain.filter(p => p.enabled).length;
 
@@ -799,6 +874,7 @@ export const PostProcessingBadge: React.FC = () => {
   if (gainOffsetDb !== 0) parts.push(`${gainOffsetDb > 0 ? '+' : ''}${gainOffsetDb}dB`);
   if (vstEnabled > 0) parts.push(`${vstEnabled} VST${vstEnabled !== 1 ? 's' : ''}`);
   if (masteringEnabled && masteringReference) parts.push('Master');
+  if (masteringEnabled && lufsEnabled) parts.push(`${lufsTarget} LUFS`);
   if (coverArtEnabled) parts.push('Cover');
   if (qualityEvalEnabled) parts.push('QE');
   if (whisperLyricsEnabled) parts.push('Whisper');

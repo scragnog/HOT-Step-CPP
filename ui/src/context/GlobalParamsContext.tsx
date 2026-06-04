@@ -122,6 +122,10 @@ export interface GlobalParams {
   // Postprocess plugin
   postprocessEnabled: boolean; setPostprocessEnabled: (v: boolean) => void;
   postprocessPlugin: string; setPostprocessPlugin: (v: string) => void;
+  // LUFS Normalization
+  lufsEnabled: boolean; setLufsEnabled: (v: boolean) => void;
+  lufsPreset: string; setLufsPreset: (v: string) => void;
+  lufsTarget: number; setLufsTarget: (v: number) => void;
   // VAE backend
   useOrtVae: boolean; setUseOrtVae: (v: boolean) => void;
   // Whisper Lyrics
