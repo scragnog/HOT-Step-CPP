@@ -66,8 +66,9 @@ FROM node:22 AS server-deps
 
 WORKDIR /build/server
 COPY server/package*.json ./
-# Install production deps only. tsx comes from optionalDependencies.
-RUN npm install --omit=dev
+# Install production deps. tsx is in both devDependencies and optionalDependencies,
+# but npm --omit=dev deduplicates and skips it. Install explicitly.
+RUN npm install --omit=dev && npm install tsx
 
 
 # ── Stage 4: Runtime ────────────────────────────────────────────────
