@@ -1,0 +1,88 @@
+# ============================================================================
+# HOT-Step 9000 CPP — Docker Build Context Exclusions
+# Keep the build context small and fast by excluding everything not needed
+# for the Docker build.
+# ============================================================================
+
+# ── Git / Version Control ───────────────────────────────────────────
+.git/
+.gitmodules
+
+# ── Engine build artifacts (rebuilt inside Docker) ──────────────────
+engine/build/
+engine/deps/
+engine/.cache/
+engine/__pycache__/
+
+# ── TensorRT-LLM (not used in Phase 1) ─────────────────────────────
+engine/trtllm-libs/
+engine/trtllm-include/
+
+# ── Node.js dependencies (reinstalled inside Docker) ────────────────
+server/node_modules/
+server/dist/
+ui/node_modules/
+
+# ── Runtime data (bind-mounted at runtime, not baked in) ────────────
+server/data/
+models/
+adapters/
+checkpoints/
+data/
+logs/
+
+# ── Build / Release artifacts ───────────────────────────────────────
+build/
+release/
+release-staging/
+runtime/
+benchmark-results/
+
+# ── Agent / IDE / Dev tooling ───────────────────────────────────────
+.agents/
+.agent/
+.claude/
+.gemini/
+.vscode/
+.idea/
+scratch/
+docs/plans/
+
+# ── Windows-only binaries and objects ───────────────────────────────
+*.exe
+*.dll
+*.lib
+*.obj
+*.pdb
+*.ilk
+*.exp
+
+# ── Model weights (mounted at runtime) ─────────────────────────────
+*.gguf
+*.safetensors
+*.pt
+*.pth
+*.onnx
+
+# ── Audio files (generated at runtime) ──────────────────────────────
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.aac
+*.wma
+*.m4a
+
+# ── EXCEPT noise samples (baked into image) ─────────────────────────
+!noise_samples/
+!noise_samples/*.wav
+
+# ── Misc ────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.tar.gz
+nul
+Thumbs.db
+.DS_Store
+.env
+*.patch

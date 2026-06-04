@@ -1,0 +1,35 @@
+# ============================================================================
+# HOT-Step 9000 CPP — Docker Compose
+#
+# Usage:
+#   docker compose up              # Start (build if needed)
+#   docker compose up --build      # Force rebuild
+#   docker compose down            # Stop
+#   docker compose logs -f         # Follow logs
+# ============================================================================
+
+services:
+  hot-step:
+    build:
+      context: .
+      args:
+        # Dev: Blackwell only (~3 min build)
+        # Distribution: "75;80;86;89;90;120a" (~15-20 min)
+        CUDA_ARCHS: "120a"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "3001:3001"
+    volumes:
+      # All I/O on host — accessible from Windows Explorer
+      - ./models:/app/models              # GGUF model files
+      - ./adapters:/app/adapters           # LoRA safetensors
+      - ./data:/app/server/data            # SQLite DB + generated audio
+    env_file:
+      - .env.docker
+    restart: unless-stopped
