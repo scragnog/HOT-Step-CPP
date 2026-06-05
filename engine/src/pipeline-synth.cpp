@@ -100,9 +100,15 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
     std::string fsq_path = submodel_path;
     if (is_onnx_dit) {
         // Scan models dir for a safetensors DiT that has model.safetensors
+        // dit_path is e.g. /app/models/onnx/dit-fp8 — need to reach /app/models
+        // (the top-level models dir where safetensors DiTs live)
         std::string onnx_dir = dit_sidecar_dir(params->dit_path);
         std::string models_dir = onnx_dir;
+        // Go up from dit-fp8 → onnx
         auto slash = models_dir.find_last_of("/\\");
+        if (slash != std::string::npos) models_dir = models_dir.substr(0, slash);
+        // Go up from onnx → models root
+        slash = models_dir.find_last_of("/\\");
         if (slash != std::string::npos) models_dir = models_dir.substr(0, slash);
 
         // Look for XL model dirs with safetensors (matching the ONNX config)
