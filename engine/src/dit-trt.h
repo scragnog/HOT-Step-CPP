@@ -24,6 +24,8 @@
 #include <cstdio>
 #include <mutex>
 #include <chrono>
+#include <thread>
+#include <atomic>
 
 // TRT headers
 #include "NvInfer.h"
@@ -223,8 +225,29 @@ inline bool dit_trt_build(
 
     config->addOptimizationProfile(profile);
 
-    // Build serialized engine
+    // Build serialized engine — this is the blocking call (5-30 min).
+    // Launch a heartbeat thread to emit periodic log lines, preventing
+    // the Node.js stall detector from killing the job.
+    std::atomic<bool> build_done{false};
+    std::thread heartbeat([&build_done, &t0]() {
+        int tick = 0;
+        while (!build_done.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            if (build_done.load(std::memory_order_relaxed)) break;
+            tick++;
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - t0).count();
+            fprintf(stderr, "[DiT-TRT] Engine build in progress... (%llds elapsed)\n",
+                    (long long)elapsed);
+            fflush(stderr);
+        }
+    });
+
     auto serialized = builder->buildSerializedNetwork(*network, *config);
+
+    build_done.store(true, std::memory_order_relaxed);
+    heartbeat.join();
+
     if (!serialized) {
         fprintf(stderr, "[DiT-TRT] Engine build failed\n");
         delete config;

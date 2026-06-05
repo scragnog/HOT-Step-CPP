@@ -691,6 +691,23 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           job.stage = `Loading adapter${trackLabel}...`;
         } else if (line.text.includes('[DiT-TRT]') && line.text.includes('Load + refit complete')) {
           if (!ditLoadCompleteAt) ditLoadCompleteAt = now;
+        } else if (line.text.includes('[DiT-Generate] Building TRT engine') ||
+                   (line.text.includes('[DiT-TRT]') && (line.text.includes('STRONGLY_TYPED') ||
+                    line.text.includes('kREFIT') || line.text.includes('This will take')))) {
+          // TRT engine compilation phase — update stage to prevent stall detection
+          if (!ditLoadAt) ditLoadAt = now;
+          job.stage = `Building TRT engine${trackLabel} (first run only, ~5-10 min)...`;
+        } else if (line.text.includes('[TRT-WARN]') || line.text.includes('[TRT-ERROR]') ||
+                   line.text.includes('[DiT-TRT] Engine build in progress')) {
+          // TRT emits warnings during engine build + our heartbeat thread
+          // Append elapsed time to stage string so stall detector sees a change
+          if (ditLoadAt) {
+            const elapsed = Math.round((now - ditLoadAt) / 1000);
+            job.stage = `Building TRT engine${trackLabel} (${elapsed}s elapsed)...`;
+          }
+        } else if (line.text.includes('[DiT-Generate] Loading cached TRT engine')) {
+          if (!ditLoadAt) ditLoadAt = now;
+          job.stage = `Loading TRT engine${trackLabel}...`;
         } else if (line.text.includes('[Encode-Text') && !line.text.includes('Batch')) {
           // First [Encode-Text] log that isn't a per-batch sub-line
           if (!textEncStartAt) textEncStartAt = now;
