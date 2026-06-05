@@ -37,6 +37,11 @@ services:
       # Server source (live from host — `docker compose restart` to apply changes)
       # node_modules stays baked in the image; only src/ is overlaid
       - ./server/src:/app/server/src:ro
+      # TRT engine cache (GPU-specific, persists across container restarts)
+      - trt_engine_cache:/app/trt_cache
     env_file:
       - .env.docker
     restart: unless-stopped
+
+volumes:
+  trt_engine_cache:

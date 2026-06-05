@@ -215,14 +215,46 @@ if(APPLE AND SUPERSEP_ENABLED)
 endif()
 # TensorRT Native SDK (DiT TRT acceleration + LoRA refitting)
 # ─────────────────────────────────────────────────────────────────────────────
-# Pre-built TRT SDK (headers + import libs). Auto-detect from engine/deps/tensorrt/.
-# The runtime DLLs (nvinfer_10.dll, nvonnxparser_10.dll) come from engine/deps/tensorrt_libs/.
+# Platform-specific TRT detection:
+#   Windows: vendored SDK in engine/deps/tensorrt/ (versioned import libs)
+#   Linux:   system-installed TRT packages via find_path/find_library
+# The runtime DLLs/SOs are expected on the library search path at runtime.
 set(TRT_ENABLED FALSE)
+
+# --- Windows: vendored SDK in engine/deps/tensorrt/ ---
 set(_TRT_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/tensorrt")
 if(WIN32 AND EXISTS "${_TRT_DEPS_DIR}/include/NvInfer.h" AND EXISTS "${_TRT_DEPS_DIR}/lib/nvinfer_10.lib")
     set(TRT_ENABLED TRUE)
-    message(STATUS "[TRT] Found at ${_TRT_DEPS_DIR}")
-else()
+    set(_TRT_INCLUDE_DIR "${_TRT_DEPS_DIR}/include")
+    set(_TRT_LIB_DIR "${_TRT_DEPS_DIR}/lib")
+    # Windows vendored SDK ships versioned import libs
+    set(_TRT_NVINFER_LIB nvinfer_10)
+    set(_TRT_NVONNXPARSER_LIB nvonnxparser_10)
+    message(STATUS "[TRT] Found vendored SDK at ${_TRT_DEPS_DIR}")
+
+# --- Linux: system-installed TRT packages ---
+elseif(NOT WIN32)
+    find_path(_TRT_INCLUDE_DIR
+        NAMES NvInfer.h
+        PATHS /usr/include/x86_64-linux-gnu /usr/local/include /usr/include
+    )
+    find_library(_TRT_NVINFER_LIB
+        NAMES nvinfer
+        PATHS /usr/lib/x86_64-linux-gnu /usr/local/lib /usr/lib
+    )
+    find_library(_TRT_NVONNXPARSER_LIB
+        NAMES nvonnxparser
+        PATHS /usr/lib/x86_64-linux-gnu /usr/local/lib /usr/lib
+    )
+    if(_TRT_INCLUDE_DIR AND _TRT_NVINFER_LIB AND _TRT_NVONNXPARSER_LIB)
+        set(TRT_ENABLED TRUE)
+        message(STATUS "[TRT] Found system TRT: ${_TRT_NVINFER_LIB}")
+    else()
+        message(STATUS "[TRT] Not found (install libnvinfer-dev + libnvonnxparsers-dev to enable)")
+    endif()
+endif()
+
+if(NOT TRT_ENABLED AND WIN32)
     message(STATUS "[TRT] Not found (set engine/deps/tensorrt/ to enable DiT TRT)")
 endif()
 
@@ -238,12 +270,14 @@ add_library(acestep-core STATIC
 target_link_libraries(acestep-core PUBLIC yyjson lua54 supersep)
 link_ggml_backends(acestep-core)
 
-# TRT native linkage for DiT acceleration
+# TRT native linkage for DiT acceleration (shared across platforms)
 if(TRT_ENABLED)
     target_compile_definitions(acestep-core PUBLIC HOT_STEP_TRT)
-    target_include_directories(acestep-core PUBLIC "${_TRT_DEPS_DIR}/include")
-    target_link_directories(acestep-core PUBLIC "${_TRT_DEPS_DIR}/lib")
-    target_link_libraries(acestep-core PUBLIC nvinfer_10 nvonnxparser_10)
+    target_include_directories(acestep-core PUBLIC "${_TRT_INCLUDE_DIR}")
+    if(_TRT_LIB_DIR)
+        target_link_directories(acestep-core PUBLIC "${_TRT_LIB_DIR}")
+    endif()
+    target_link_libraries(acestep-core PUBLIC ${_TRT_NVINFER_LIB} ${_TRT_NVONNXPARSER_LIB})
     message(STATUS "[TRT] DiT TRT acceleration: ENABLED")
 endif()
 

@@ -19,6 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake ninja-build build-essential git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# TensorRT SDK for DiT/LM acceleration (native TRT API)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnvinfer-dev \
+    libnvinfer-plugin-dev \
+    libnvonnxparsers-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Download ONNX Runtime GPU SDK (Linux x64) for SuperSep stem separation
 ARG ORT_VERSION=1.25.1
 RUN curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz" \
@@ -75,6 +82,13 @@ RUN npm install --omit=dev && npm install tsx
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
 # Install Node.js 22 (LTS) + runtime libraries the engine needs
+# TensorRT runtime libraries for DiT/LM acceleration
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnvinfer10 \
+    libnvinfer-plugin10 \
+    libnvonnxparsers10 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates libgomp1 \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
