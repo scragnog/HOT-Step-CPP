@@ -22,6 +22,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dirent.h>
+#endif
 
 // Config (populated from GGUF metadata or config.json by dit_ggml_load)
 // DiTGGMLConfig is defined in config-json.h
@@ -124,17 +130,49 @@ static bool dit_ends_with_gguf(const char * path) {
     return len >= 5 && strcmp(path + len - 5, ".gguf") == 0;
 }
 
-// Helper: check if path ends with .onnx
+// Helper: check if path ends with .onnx OR is a directory containing .onnx files
 static bool dit_ends_with_onnx(const char * path) {
     size_t len = strlen(path);
-    return len >= 5 && strcmp(path + len - 5, ".onnx") == 0;
+    if (len >= 5 && strcmp(path + len - 5, ".onnx") == 0) {
+        return true;
+    }
+    // Check if path is a directory containing any .onnx file
+    // (e.g. registry stores "models/onnx/dit-fp8" not "models/onnx/dit-fp8/dit_fp8.onnx")
+    struct stat st;
+    if (stat(path, &st) == 0 && (st.st_mode & S_IFDIR)) {
+#ifdef _WIN32
+        std::string pattern = std::string(path) + "\\*.onnx";
+        WIN32_FIND_DATAA fd;
+        HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            FindClose(h);
+            return true;
+        }
+#else
+        DIR * d = opendir(path);
+        if (d) {
+            struct dirent * ent;
+            while ((ent = readdir(d)) != nullptr) {
+                const char * name = ent->d_name;
+                size_t nlen = strlen(name);
+                if (nlen >= 5 && strcmp(name + nlen - 5, ".onnx") == 0) {
+                    closedir(d);
+                    return true;
+                }
+            }
+            closedir(d);
+        }
+#endif
+    }
+    return false;
 }
 
 // Helper: get sidecar directory for a model path
 // For .onnx files: parent directory (sidecars live alongside the ONNX file)
-// For directories (safetensors): the directory itself
+// For directories (ONNX subdirs or safetensors): the directory itself
 static std::string dit_sidecar_dir(const char * path) {
-    if (dit_ends_with_onnx(path)) {
+    size_t len = strlen(path);
+    if (len >= 5 && strcmp(path + len - 5, ".onnx") == 0) {
         std::string p(path);
         auto sep = p.find_last_of("/\\");
         return (sep != std::string::npos) ? p.substr(0, sep) : ".";
