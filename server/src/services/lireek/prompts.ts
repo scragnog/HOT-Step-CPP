@@ -54,6 +54,18 @@ REPETITION / HOOK RULES (CRITICAL):
 - Parenthetical echo lines (e.g. "(you know it's true)") count as separate lines — use them if the artist's style calls for it.
 - It's OK to repeat key phrases across verses and choruses for thematic cohesion.
 
+HOOK SPECIFICITY RULES (CRITICAL — READ CAREFULLY):
+- The chorus hook MUST be SPECIFIC to this song's subject matter. It should contain a concrete noun, image, or scenario from the verses — NOT a generic emotional statement.
+- BANNED HOOK FORMULAS — the following structural patterns are FORBIDDEN in chorus hooks because they produce identical-sounding songs across all genres:
+  • "[Verb] it [all/down/away/out]" (e.g. "Burn it all down", "Wash it all away", "Tear it all down", "Watch it fade away")
+  • "Watch [me/it/them] [verb]" (e.g. "Watch it burn", "Watch me break", "Watch it fade")
+  • "Don't let them [verb]" (e.g. "Don't let them see", "Don't let them take")
+  • "Nothing left to [verb]" / "Nowhere left to [verb]"
+  • "Let it [burn/fade/go/fall/break/die]"
+  • Any hook that could apply to ANY song by ANY artist. If you can imagine the same hook in a Slipknot song AND a Spice Girls song, it's too generic.
+- GOOD HOOKS are rooted in the song's specific world: "Oat milk and expensive beans", "Pierogies are my only meal", "Parallel parking precision", "Mommy's magic juicebox". These work because they could ONLY belong to THAT specific song.
+- The hook doesn't have to be quirky — it just has to be SPECIFIC. "California castaway" is simple but specific. "Watch it burn" is not.
+
 Do NOT include any commentary or explanations — just the title and lyrics.
 
 The representative excerpts are there to show you the FEEL, not to be copied. Absorb the cadence, word choices, and line-to-line flow, then create something new in that exact voice.
@@ -373,6 +385,7 @@ ANTI-SLOP RULES
        - As outro buildouts
     c) CALIBRATION: If the artist's profile shows a LOW chorus repetition percentage (<15%), be subtle — one repeated line per chorus is enough. If HIGH (>30%), lean heavily into repetition and exclamations. If no data is provided, default to moderate hookification.
     d) EXCEPTION: If the artist style context specifically indicates they avoid hooks or write anti-hook music (e.g. progressive, avant-garde, spoken word), skip this step.
+    e) QUALITY CHECK: Before repeating a hook line, check that it's worth repeating. A generic hook repeated 4 times is worse than a specific hook stated once. If the hook is a banned formula (see rule 26), fix it BEFORE hookifying.
 
 25. FINAL QUALITY CHECK
     Before outputting, silently check:
@@ -383,6 +396,16 @@ ANTI-SLOP RULES
     - Does the bridge deepen the song rather than explain it?
     - Does the lyric now feel more singable and more finished?
     If an edit improves neatness but weakens character, undo it.
+
+26. HOOK QUALITY GATE (CRITICAL — REWRITE GENERIC HOOKS)
+    After refining, check the chorus hook against these BANNED HOOK FORMULAS:
+    - "[Verb] it [all/down/away/out]" (e.g. "Burn it all down", "Wash it all away")
+    - "Watch [me/it/them] [verb]" (e.g. "Watch it burn", "Watch me break")
+    - "Don't let them [verb]" (e.g. "Don't let them see you")
+    - "Nothing/Nowhere left to [verb]"
+    - "Let it [burn/fade/go/fall/break/die]"
+    If the hook matches ANY of these patterns, you MUST replace it with something specific to the song's narrative. Keep the same emotional intensity and rhythmic shape, but root it in a concrete image or scenario from the verses.
+    A hook like "Watch it burn" → could become "Torch the lease agreement" (Bowling For Soup), "Smell the burning bridge" (Rise Against), or "Kerosene Sunday" (The Used). Same energy, but SPECIFIC.
 `;
 
 export const INSTAGEN_LYRIC_SYSTEM_PROMPT = `You are a talented songwriter. You will be given a musical genre/style and a song subject. Write original, singable lyrics for that song.

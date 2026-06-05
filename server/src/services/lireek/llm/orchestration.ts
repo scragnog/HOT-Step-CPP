@@ -21,6 +21,42 @@ const BLUEPRINT_LABEL_NAMES: Record<string, string> = {
   POC: 'Post-Chorus', I: 'Intro', O: 'Outro', IL: 'Interlude',
 };
 
+// Words banned from titles — enforced programmatically since prompt-only bans leak
+const BANNED_TITLE_WORDS = new Set([
+  'glass', 'steel', 'plastic', 'concrete', 'midnight', 'mirror',
+  'heavy', 'terminal', 'altar', 'confessional', 'ledger', 'gospel',
+  'chrome', 'gilded', 'puppet', 'halo', 'protocol', 'eden', 'digital',
+  'algorithm', 'code', 'circuit', 'grid', 'data', 'wire',
+  'sanctuary', 'void', 'ethereal', 'neon', 'silhouette', 'static',
+  'embers', 'fluorescent', 'shimmering', 'tapestry', 'weight',
+  'skin', 'signal', 'platform',
+]);
+
+// Structural title formula patterns that produce repetitive titles
+const BANNED_TITLE_PATTERNS: RegExp[] = [
+  /^watch\s+(it|me|them|us|him|her)\b/i,
+  /^let\s+it\s+(burn|fade|go|fall|bleed|break|rot|die|end)\b/i,
+  /^burn\s+it\s+(all|down)\b/i,
+  /^nothing\s+left/i,
+  /^nowhere\s+left/i,
+];
+
+/**
+ * Check if a title contains banned words or matches banned patterns.
+ * Returns an array of issues found (empty = title is clean).
+ */
+function validateTitle(title: string): string[] {
+  const issues: string[] = [];
+  const words = title.toLowerCase().split(/\W+/).filter(Boolean);
+  for (const w of words) {
+    if (BANNED_TITLE_WORDS.has(w)) issues.push(`banned word: "${w}"`);
+  }
+  for (const pat of BANNED_TITLE_PATTERNS) {
+    if (pat.test(title)) issues.push(`banned pattern: ${pat.source}`);
+  }
+  return issues;
+}
+
 /**
  * Append a unique nonce to a system prompt to bust oMLX's KV cache.
  * Without this, oMLX reuses cached prefix states for identical system prompts,
@@ -213,8 +249,10 @@ function buildGenerationPrompt(profile: LyricsProfile, extraInstructions?: strin
     '2. CHORUS LINE COUNT: Exactly 4, 6, or 8 lines per chorus. Each chorus MUST have a hook line that repeats.',
     '3. *** ZERO TOLERANCE FOR COPYING ***',
     '4. NO SLOP: Do not use neon, fluorescent, embers, silhouette, static, void, ethereal, or any AI cliché.',
-    '5. MINIMIZE OVERUSED WORDS: heavy, broken, cold, dust, ghost, machine, nothing, nowhere, searching — use at most ONCE if at all.',
-    "6. VOCABULARY DIVERSITY: A Snoop Dogg song must NOT sound like a Joy Division song. Use THIS artist's actual vocabulary.",
+    '5. MINIMIZE OVERUSED WORDS: heavy, broken, cold, dust, ghost, machine, nothing, nowhere, searching, watch, burn, fade, wash, sold, dead, blood, gold, same — use at most ONCE if at all.',
+    '6. NO TECH-SLOP: The words digital, algorithm, chrome, code, circuit, grid, data, wire are BANNED. Do not force tech/digital metaphors onto non-tech artists.',
+    "7. VOCABULARY DIVERSITY: A Snoop Dogg song must NOT sound like a Joy Division song. Use THIS artist's actual vocabulary.",
+    '8. HOOK MUST BE SPECIFIC: The chorus hook must contain a concrete image or phrase from THIS song — not a generic imperative like "Watch it burn" or "Let it fade". If the hook could fit in any song by any artist, rewrite it.',
     '',
     'Now write the song (lyrics only, starting with [Intro] or [Verse 1] — no title line):',
   );
@@ -276,7 +314,8 @@ export async function generateLyricsStreaming(
     console.warn(`Generation slop scan: score=${slopResult.ai_score} severity=${slopResult.severity}`,
       'words:', slopResult.layers.blacklisted_words.found,
       'phrases:', slopResult.layers.blacklisted_phrases.found,
-      'overuse:', slopResult.layers.overuse.found.map((o: any) => `${o.word}(${o.count}x)`).join(', ') || 'none');
+      'overuse:', slopResult.layers.overuse.found.map((o: any) => `${o.word}(${o.count}x)`).join(', ') || 'none',
+      'hook_formulas:', slopResult.layers.hook_formulas.found.join(', ') || 'none');
   }
 
   if (onPhase) onPhase("Choosing title…");
@@ -295,6 +334,31 @@ export async function generateLyricsStreaming(
     titleRaw = titleRaw.replace(/^(?:Title:\s*|#\s*)/i, '').replace(/^["'`]|["'`]$/g, '').trim();
     title = titleRaw.split('\n')[0].trim();
     console.log('[LLM] Derived title:', title);
+
+    // Validate title against banned words/patterns
+    const titleIssues = validateTitle(title);
+    if (titleIssues.length) {
+      console.warn(`[LLM] Title "${title}" failed validation: ${titleIssues.join(', ')}. Requesting re-derivation.`);
+      // Re-derive with explicit rejection guidance
+      const retryLines = [...titleLines];
+      retryLines.push(`\nThe title "${title}" is REJECTED because: ${titleIssues.join(', ')}.`);
+      retryLines.push('Choose a DIFFERENT title that avoids these issues. Return ONLY the new title:');
+      try {
+        let retryRaw = await provider.call(cacheBustPrompt(TITLE_DERIVATION_PROMPT), retryLines.join('\n'), effectiveModel, onChunk);
+        retryRaw = stripThinkingBlocks(retryRaw).trim();
+        retryRaw = retryRaw.replace(/^(?:Title:\s*|#\s*)/i, '').replace(/^["'`]|["'`]$/g, '').trim();
+        const retryTitle = retryRaw.split('\n')[0].trim();
+        const retryIssues = validateTitle(retryTitle);
+        if (!retryIssues.length) {
+          console.log(`[LLM] Re-derived title: "${retryTitle}" (was: "${title}")`);
+          title = retryTitle;
+        } else {
+          console.warn(`[LLM] Re-derived title "${retryTitle}" still failed: ${retryIssues.join(', ')}. Keeping original.`);
+        }
+      } catch (retryErr) {
+        console.warn('[LLM] Title re-derivation failed:', retryErr);
+      }
+    }
   } catch (err) { console.warn('[LLM] Title derivation failed, falling back to empty:', err); }
 
   let duration = metadata.duration || 0;
@@ -399,7 +463,8 @@ export async function refineLyricsStreaming(
     console.warn(`Refinement slop scan: score=${slopResult.ai_score} severity=${slopResult.severity}`,
       'words:', slopResult.layers.blacklisted_words.found,
       'phrases:', slopResult.layers.blacklisted_phrases.found,
-      'overuse:', slopResult.layers.overuse.found.map((o: any) => `${o.word}(${o.count}x)`).join(', ') || 'none');
+      'overuse:', slopResult.layers.overuse.found.map((o: any) => `${o.word}(${o.count}x)`).join(', ') || 'none',
+      'hook_formulas:', slopResult.layers.hook_formulas.found.join(', ') || 'none');
   }
 
   return {

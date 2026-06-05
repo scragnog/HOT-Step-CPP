@@ -48,6 +48,11 @@ export const BLACKLISTED_WORDS = new Set([
   // Corpus-analysis additions (2026-05-02) — overused across 608 generations
   'wreckage', 'jagged', 'bitter', 'hollow',
   'steel', 'metal', 'transmission', 'dashboard', 'gears', 'gloom',
+  // Tech-slop additions (2026-06-05) — user-flagged + corpus analysis
+  // These get slathered across all genres regardless of artist fit
+  'digital', 'algorithm', 'algorithms', 'chrome',
+  'code', 'circuit', 'circuits', 'grid', 'data',
+  'wire', 'wires', 'wired',
 ]);
 
 // ── Layer 1b — Overused Words (soft-ban: penalized per-occurrence, not banned) ──
@@ -57,6 +62,9 @@ export const BLACKLISTED_WORDS = new Set([
 export const OVERUSED_WORDS = new Set([
   'heavy', 'broken', 'cold', 'dust', 'ghost', 'machine',
   'nothing', 'nowhere', 'searching', 'wreckage', 'losing',
+  // Corpus-analysis additions (2026-06-05) — overused in hooks/titles across 992 generations
+  'watch', 'burn', 'fade', 'fading', 'wash', 'sold',
+  'dead', 'blood', 'gold', 'same',
 ]);
 
 // ── Layer 2 — Blacklisted Phrases ───────────────────────────────────────────
@@ -97,6 +105,26 @@ export const BLACKLISTED_PHRASES = new Set([
   'cold and empty', 'heavy and cold', 'heavy and dark',
   'pulling me down', 'dragging me down',
 ]);
+
+// ── Layer 8 — Overused Hook Formulas ────────────────────────────────────────
+// These structural patterns produce identical-sounding hooks across genres.
+// Each matches a common LLM comfort pattern for chorus writing.
+// Penalty: +5 per match in a chorus section.
+
+export const OVERUSED_HOOK_PATTERNS: RegExp[] = [
+  // "[Verb] it [all/down/away/out/off/back/up]" — 46 titles used this
+  /\b(watch|burn|tear|wash|break|crush|push|pull|let|cut|rip|smash|turn)\s+it\s+(all|down|away|out|off|back|up)\b/gi,
+  // "Watch [me/it/them/us] [verb]" — 25 titles
+  /\bwatch\s+(me|it|them|us|him|her)\s+\w+/gi,
+  // "Don't let them [verb]" — 7 titles
+  /\bdon'?t\s+let\s+(them|him|her|it)\s+\w+/gi,
+  // "Nothing left to [verb]" / "Nowhere left to [verb]"
+  /\b(nothing|nowhere)\s+left\s+to\s+\w+/gi,
+  // "Let it [verb/adjective]" — generic release formula
+  /\blet\s+it\s+(burn|fade|go|fall|bleed|break|rot|die|end|crash|crumble|drown)\b/gi,
+  // "[Verb]ing it all [away/down]"
+  /\b\w+ing\s+it\s+all\s+(away|down)\b/gi,
+];
 
 // ── Layer 3 — Regex Patterns ────────────────────────────────────────────────
 
@@ -219,6 +247,7 @@ export interface SlopScanResult {
     fingerprint: { score: number; raw_score: number; issues: string[] };
     statistical: { score: number; raw_score: number; issues: string[] };
     overuse: { score: number; found: { word: string; count: number }[] };
+    hook_formulas: { score: number; found: string[] };
   };
 }
 
@@ -300,10 +329,28 @@ export function scanForSlop(
     }
   }
 
+  // Layer 8: Overused hook formula detection
+  // Only scans chorus sections to target hook patterns specifically
+  const chorusSections = text.split(/\[(?:Chorus|Hook).*?\]/i).slice(1)
+    .map(s => s.split(/\[/)[0]?.trim()).filter(Boolean);
+  const chorusText = chorusSections.join('\n');
+  const hookFormulaFound: string[] = [];
+  let l8Score = 0;
+  if (chorusText) {
+    for (const pat of OVERUSED_HOOK_PATTERNS) {
+      pat.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = pat.exec(chorusText)) !== null) {
+        hookFormulaFound.push(m[0]);
+        l8Score += 5;
+      }
+    }
+  }
+
   const sw = Math.max(0, Math.min(1, statisticalWeight));
   const total = l1Score + l2Score + l3Score +
     Math.floor(l4.score * sw) + Math.floor(l5.score * sw) + Math.floor(l6.score * sw) +
-    l7Score;
+    l7Score + l8Score;
 
   return {
     ai_score: total,
@@ -317,6 +364,7 @@ export function scanForSlop(
       fingerprint: { score: Math.floor(l5.score * sw), raw_score: l5.score, issues: l5.issues },
       statistical: { score: Math.floor(l6.score * sw), raw_score: l6.score, issues: l6.issues },
       overuse: { score: l7Score, found: overuseFound },
+      hook_formulas: { score: l8Score, found: hookFormulaFound },
     },
   };
 }
