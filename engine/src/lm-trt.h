@@ -172,9 +172,8 @@ inline bool lm_trt_build(
     }
 
     // STRONGLY_TYPED: TRT honors per-tensor dtypes from dynamo ONNX
+    // Note: kEXPLICIT_BATCH was removed in TRT 10.x (always-on since TRT 8).
     uint32_t net_flags = 1U << static_cast<uint32_t>(
-        nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)
-      | 1U << static_cast<uint32_t>(
         nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
     auto network = builder->createNetworkV2(net_flags);
     if (!network) {

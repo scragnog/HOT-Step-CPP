@@ -141,13 +141,11 @@ inline bool dit_trt_build(
         return false;
     }
 
-    // Create network — standard EXPLICIT_BATCH, NO STRONGLY_TYPED.
-    // STRONGLY_TYPED: TRT honors the per-tensor dtypes from the ONNX graph.
+    // Create network — STRONGLY_TYPED: TRT honors per-tensor dtypes from ONNX.
     // The dynamo-exported bf16_mixed ONNX has bf16 trunk + fp32 islands.
     // TRT runs bf16 tensor cores for matmuls and fp32 for norms/residuals.
+    // Note: kEXPLICIT_BATCH was removed in TRT 10.x (always-on since TRT 8).
     uint32_t net_flags = 1U << static_cast<uint32_t>(
-        nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)
-      | 1U << static_cast<uint32_t>(
         nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
     auto network = builder->createNetworkV2(net_flags);
     if (!network) {
