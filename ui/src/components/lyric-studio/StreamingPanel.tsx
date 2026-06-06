@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, ChevronDown, ChevronUp, Terminal, SkipForward } from 'lucide-react';
 
@@ -17,13 +17,23 @@ export const StreamingPanel: React.FC<StreamingPanelProps> = ({
   const { t } = useTranslation();
   const [skipRequested, setSkipRequested] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Auto-scroll to bottom
+  // Only render the last chunk of text to avoid DOM/layout explosion
+  const MAX_DISPLAY = 50_000; // ~50KB visible in the panel
+  const displayText = useMemo(() => {
+    if (streamText.length <= MAX_DISPLAY) return streamText;
+    return '…(earlier output trimmed)…\n' + streamText.slice(-MAX_DISPLAY);
+  }, [streamText]);
+
+  // Debounced auto-scroll — avoids forcing layout reflow on every chunk
   useEffect(() => {
-    if (preRef.current && !collapsed) {
-      preRef.current.scrollTop = preRef.current.scrollHeight;
-    }
-  }, [streamText, collapsed]);
+    if (collapsed) return;
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = setTimeout(() => {
+      if (preRef.current) preRef.current.scrollTop = preRef.current.scrollHeight;
+    }, 100);
+  }, [displayText, collapsed]);
 
   // Reset skip state when a new stream starts
   useEffect(() => {
@@ -34,15 +44,18 @@ export const StreamingPanel: React.FC<StreamingPanelProps> = ({
 
   if (!visible) return null;
 
-  // Detect if model is currently inside a thinking block
-  // Handles both <think>...</think> and LM Studio's <|channel>thought...<channel|>
-  const thinkOpens = (streamText.match(/<think>/g) || []).length;
-  const thinkCloses = (streamText.match(/<\/think>/g) || []).length;
-  const channelOpens = (streamText.match(/<\|channel>thought/g) || []).length;
-  const channelCloses = (streamText.match(/<channel\|>/g) || []).length;
-  const isThinking = !done && (
-    (thinkOpens > thinkCloses) || (channelOpens > channelCloses)
-  ) && !skipRequested;
+  // Detect if model is currently inside a thinking block.
+  // Only scan the tail of the text — we just need the last open/close tag.
+  const isThinking = useMemo(() => {
+    if (done || skipRequested) return false;
+    // Check last 500 chars for unclosed thinking tags
+    const tail = streamText.slice(-500);
+    const lastThinkOpen = tail.lastIndexOf('<think>');
+    const lastThinkClose = tail.lastIndexOf('</think>');
+    const lastChannelOpen = tail.lastIndexOf('<|channel>thought');
+    const lastChannelClose = tail.lastIndexOf('<channel|>');
+    return (lastThinkOpen > lastThinkClose) || (lastChannelOpen > lastChannelClose);
+  }, [streamText, done, skipRequested]);
 
   const handleSkip = () => {
     setSkipRequested(true);
@@ -99,7 +112,7 @@ export const StreamingPanel: React.FC<StreamingPanelProps> = ({
             fontFamily: 'ui-monospace, "Cascadia Code", "Fira Code", Menlo, monospace',
           }}
         >
-          {streamText || (done ? t('lyric.noOutput') : t('lyric.waitingForLlm'))}
+          {displayText || (done ? t('lyric.noOutput') : t('lyric.waitingForLlm'))}
         </pre>
       )}
     </div>

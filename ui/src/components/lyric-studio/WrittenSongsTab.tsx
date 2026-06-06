@@ -83,7 +83,11 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
         gen.id,
         { provider, model },
         {
-          onChunk: (text) => setRefineStreamText(prev => prev + text),
+          onChunk: (text) => setRefineStreamText(prev => {
+            const next = prev + text;
+            // Cap at 200KB to prevent OOM — matches streaming store limit
+            return next.length > 200_000 ? '\u2026(earlier output trimmed)\u2026\n' + next.slice(-200_000) : next;
+          }),
           onPhase: (phase) => setRefineStreamPhase(phase),
           onResult: () => {
             showToast(`Refined: ${gen.title || 'Untitled'}`);

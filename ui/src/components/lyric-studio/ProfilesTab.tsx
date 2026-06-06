@@ -38,7 +38,10 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
 
     try {
       await streamBuildProfile(lyricsSetId, { provider, model: model || undefined }, {
-        onChunk: (text) => setStreamText(prev => prev + text),
+        onChunk: (text) => setStreamText(prev => {
+            const next = prev + text;
+            return next.length > 200_000 ? '\u2026(earlier output trimmed)\u2026\n' + next.slice(-200_000) : next;
+          }),
         onPhase: (phase) => setStreamPhase(phase),
         onResult: () => {
           setStreamDone(true);
