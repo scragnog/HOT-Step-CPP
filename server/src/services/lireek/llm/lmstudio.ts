@@ -48,6 +48,7 @@ export class LMStudioProvider extends LLMProvider {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(300_000),
     });
 
     if (!resp.ok) throw new Error(`LM Studio error: ${resp.status} ${await resp.text()}`);

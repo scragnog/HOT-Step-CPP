@@ -27,6 +27,7 @@ export class OpenAIProvider extends LLMProvider {
         'Authorization': `Bearer ${config.lireek.openaiApiKey}`,
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(300_000),
     });
 
     if (!resp.ok) throw new Error(`OpenAI error: ${resp.status} ${await resp.text()}`);

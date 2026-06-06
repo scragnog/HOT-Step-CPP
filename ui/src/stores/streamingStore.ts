@@ -39,15 +39,34 @@ export interface StreamingState {
 
 // ── Module-level singleton state ─────────────────────────────────────────────
 
+// Cap streaming text to prevent unbounded memory growth from thinking models
+const MAX_STREAM_TEXT = 200_000; // ~200KB trailing window
+
 let _state: StreamingState = {
   text: '', phase: '', done: false, visible: false, currentLabel: '', queue: [],
 };
 
 const _listeners = new Set<() => void>();
 
+/** Immediate emit — used for infrequent state changes (queue status, stream start/finish) */
 function _emit() {
   _state = { ..._state };
   _listeners.forEach(fn => fn());
+}
+
+/**
+ * Throttled emit — used during streaming to batch React re-renders.
+ * Without this, every chunk (hundreds/sec) triggers a full re-render,
+ * creating a render storm that exhausts browser memory.
+ */
+let _emitScheduled = false;
+function _emitThrottled() {
+  if (_emitScheduled) return;
+  _emitScheduled = true;
+  requestAnimationFrame(() => {
+    _emitScheduled = false;
+    _emit();
+  });
 }
 
 function _getSnapshot(): StreamingState { return _state; }
@@ -70,13 +89,17 @@ function resetStream(label: string) {
 
 function appendChunk(text: string) {
   _state.text += text;
-  _emit();
+  // Trim to trailing window if text exceeds cap (prevents OOM from thinking models)
+  if (_state.text.length > MAX_STREAM_TEXT) {
+    _state.text = '…(earlier output trimmed)…\n' + _state.text.slice(-MAX_STREAM_TEXT);
+  }
+  _emitThrottled();
 }
 
 function setPhase(phase: string) {
   _state.phase = phase;
   _state.text += `\n--- ${phase} ---\n`;
-  _emit();
+  _emitThrottled();
 }
 
 function finishStream() {

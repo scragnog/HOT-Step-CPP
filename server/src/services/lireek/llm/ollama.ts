@@ -44,6 +44,7 @@ export class OllamaProvider extends LLMProvider {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(300_000),
     });
 
     if (!resp.ok) throw new Error(`Ollama error: ${resp.status} ${await resp.text()}`);

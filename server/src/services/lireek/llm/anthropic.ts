@@ -30,6 +30,7 @@ export class AnthropicProvider extends LLMProvider {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(300_000),
     });
 
     if (!resp.ok) throw new Error(`Anthropic error: ${resp.status} ${await resp.text()}`);

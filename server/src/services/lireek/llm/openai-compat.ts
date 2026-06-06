@@ -63,6 +63,7 @@ export class OpenAICompatProvider extends LLMProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(300_000),
     });
 
     if (!resp.ok) throw new Error(`${this.name} error: ${resp.status} ${await resp.text()}`);

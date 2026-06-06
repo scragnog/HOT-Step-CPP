@@ -48,10 +48,12 @@ export class LlamaCppProvider extends LLMProvider {
       stream: !!onChunk,
     };
 
+    // 5-min timeout — prevents hung requests from blocking the generation queue
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(300_000),
     });
 
     if (!resp.ok) throw new Error(`llama.cpp error: ${resp.status} ${await resp.text()}`);
