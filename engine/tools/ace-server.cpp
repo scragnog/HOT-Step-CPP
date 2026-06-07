@@ -1825,6 +1825,37 @@ static void handle_warm(const httplib::Request & req, httplib::Response & res) {
     res.set_content(body, "application/json");
 }
 
+// GET /jobs
+// Returns an array of every job currently in g_jobs. Lets external
+// reconcilers (e.g. apps/ose/acestep/run.py) discover live engine jobs
+// when the wrapper has died mid-flight. Honors the existing MAX_JOBS
+// eviction policy: evicted jobs are not listed. Read-only — does not
+// touch the worker queue or model store.
+static void handle_jobs_list(const httplib::Request &, httplib::Response & res) {
+    yyjson_mut_doc * doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val * arr = yyjson_mut_arr(doc);
+    yyjson_mut_doc_set_root(doc, arr);
+
+    std::lock_guard<std::mutex> lock(mtx_jobs);
+    for (const auto & id : g_job_order) {
+        auto it = g_jobs.find(id);
+        if (it == g_jobs.end()) continue;
+        const auto & j = it->second;
+        yyjson_mut_val * obj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, obj, "id", j->id.c_str());
+        yyjson_mut_obj_add_str(doc, obj, "status", job_status_str(j->status.load()));
+        yyjson_mut_obj_add_str(doc, obj, "phase",  job_phase_str(j->phase.load()));
+        yyjson_mut_obj_add_int(doc, obj, "phase_step",  j->phase_step.load(std::memory_order_relaxed));
+        yyjson_mut_obj_add_int(doc, obj, "phase_total", j->phase_total.load(std::memory_order_relaxed));
+        yyjson_mut_arr_append(arr, obj);
+    }
+
+    char * json = yyjson_mut_write(doc, 0, NULL);
+    yyjson_mut_doc_free(doc);
+    res.set_content(json, "application/json");
+    free(json);
+}
+
 // GET /props
 // server configuration, available models, and default request.
 // the webui reads this at boot to populate dropdowns and status indicators.
@@ -2108,6 +2139,7 @@ int main(int argc, char ** argv) {
     });
     svr.Get("/props", handle_props);
     svr.Get("/logs", handle_logs);
+    svr.Get("/jobs", handle_jobs_list);
 
     // job system endpoints
     svr.Get("/job", [](const httplib::Request & req, httplib::Response & res) {
