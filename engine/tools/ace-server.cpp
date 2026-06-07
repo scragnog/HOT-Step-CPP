@@ -542,6 +542,15 @@ struct LogCapture {
 
 // GET /logs: SSE stream of stderr lines.
 // sends backlog (up to LOG_RING_SIZE) then streams new lines in real time.
+//
+// TODO(2f, engine-cpp-F8): SSE subscribers each pin one worker thread from
+// httplib's shared ThreadPool for the full connection lifetime. With N
+// long-lived SSE clients the pool starves and /job + /synth requests get
+// queued behind them. httplib only exposes a single `new_task_queue`
+// factory (no per-route pool), so segregating /logs needs either a second
+// listener on a different port or a hand-rolled epoll/select dispatcher
+// inside this route — both are deep httplib surgery and out of scope for
+// the wrapper-resilience pass. Left as a follow-up.
 static void handle_logs(const httplib::Request &, httplib::Response & res) {
     res.set_header("Cache-Control", "no-cache");
     res.set_header("X-Accel-Buffering", "no");
