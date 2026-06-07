@@ -1671,6 +1671,160 @@ static void handle_vae(const httplib::Request & req, httplib::Response & res) {
     res.set_content(body, "application/json");
 }
 
+// warm worker: same setup as synth_worker through ace_synth_load, then stops.
+// On EVICT_NEVER (set by `?keep_loaded=1` or `--keep-loaded`) the modules
+// stay resident, so the next /synth using the same DiT + adapter combo skips
+// the cold-start load. Returns immediately on STRICT — there's no value in
+// pre-loading under STRICT because the modules would be evicted instantly.
+struct WarmRequest {
+    std::string dit;
+    std::string vae;
+    std::string adapter;
+    float       adapter_scale = 1.0f;
+};
+
+static void warm_worker(std::shared_ptr<Job> job, WarmRequest wr) {
+    if (job->cancel.load()) {
+        job_set_phase(*job, JobPhase::CANCELLED);
+        job->status.store(JobStatus::CANCELLED);
+        return;
+    }
+
+    if (!g_keep_loaded) {
+        // Document the no-op clearly so callers learn from the response.
+        job->result_body = "{\"warm\":false,\"reason\":\"keep_loaded not set; would be evicted immediately\"}";
+        job->result_mime = "application/json";
+        job_set_phase(*job, JobPhase::DONE);
+        job->status.store(JobStatus::DONE);
+        return;
+    }
+
+    std::string        dit_name = resolve_name(g_registry.dit, wr.dit, g_loaded_dit);
+    const ModelEntry * dit      = registry_find(g_registry.dit, dit_name.c_str());
+    if (!dit || g_registry.text_enc.empty() || g_registry.vae.empty()) {
+        fprintf(stderr, "[Server] warm: DiT/Text-Enc/VAE not resolvable\n");
+        job_set_phase(*job, JobPhase::FAILED);
+        job->status.store(JobStatus::FAILED);
+        return;
+    }
+    std::string        vae_name = resolve_name(g_registry.vae, wr.vae, g_loaded_vae);
+    const ModelEntry * vae      = registry_find(g_registry.vae, vae_name.c_str());
+    if (!vae) {
+        fprintf(stderr, "[Server] warm: VAE not found: %s\n", vae_name.c_str());
+        job_set_phase(*job, JobPhase::FAILED);
+        job->status.store(JobStatus::FAILED);
+        return;
+    }
+
+    // Idempotent fast-path: if the same DiT + adapter combo is already in the
+    // sticky-name slot, the store already holds it resident — no work to do.
+    if (g_loaded_dit == dit_name && g_loaded_adapter == wr.adapter && g_loaded_vae == vae_name) {
+        job->result_body = "{\"warm\":true,\"already_loaded\":true}";
+        job->result_mime = "application/json";
+        job_set_phase(*job, JobPhase::DONE);
+        job->status.store(JobStatus::DONE);
+        fprintf(stderr, "[Server] warm: already loaded (DiT=%s VAE=%s Adapter=%s)\n", dit_name.c_str(), vae_name.c_str(),
+                wr.adapter.c_str());
+        return;
+    }
+
+    AceSynthParams p    = g_synth_params;
+    p.text_encoder_path = g_registry.text_enc[0].path.c_str();
+    p.dit_path          = dit->path.c_str();
+    p.vae_path          = vae->path.c_str();
+    p.adapter_path      = nullptr;
+    p.adapter_scale     = 1.0f;
+    if (!wr.adapter.empty()) {
+        const AdapterEntry * adapter = registry_find_adapter(g_registry, wr.adapter.c_str());
+        if (!adapter) {
+            fprintf(stderr, "[Server] warm: adapter not found: %s\n", wr.adapter.c_str());
+            job_set_phase(*job, JobPhase::FAILED);
+            job->status.store(JobStatus::FAILED);
+            return;
+        }
+        p.adapter_path  = adapter->path.c_str();
+        p.adapter_scale = wr.adapter_scale;
+    }
+
+    fprintf(stderr, "[Server] warm: loading DiT=%s VAE=%s%s%s\n", dit_name.c_str(), vae_name.c_str(),
+            wr.adapter.empty() ? "" : " Adapter=", wr.adapter.c_str());
+
+    job_set_phase(*job, wr.adapter.empty() ? JobPhase::LOADING_DIT : JobPhase::ADAPTER_PRECOMPUTE);
+
+    g_adapter_cancel.store(&job->cancel, std::memory_order_release);
+    struct WarmCancelGuard {
+        ~WarmCancelGuard() { g_adapter_cancel.store(nullptr, std::memory_order_release); }
+    } warm_cancel_guard;
+
+    AceSynth * ctx = ace_synth_load(g_store, &p);
+    if (!ctx) {
+        fprintf(stderr, "[Server] warm: synth load failed\n");
+        bool cancelled = job->cancel.load();
+        job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
+        job->status.store(cancelled ? JobStatus::CANCELLED : JobStatus::FAILED);
+        return;
+    }
+    // Free the ctx but leave the underlying store entries resident — under
+    // EVICT_NEVER the store ignores the refcount drop, so the modules stay
+    // hot for the next /synth.
+    ace_synth_free(ctx);
+
+    // Set the sticky-name hints so resolve_name picks the same models next.
+    g_loaded_dit           = dit_name;
+    g_loaded_adapter       = wr.adapter;
+    g_loaded_adapter_scale = wr.adapter_scale;
+    g_loaded_vae           = vae_name;
+
+    job->result_body = "{\"warm\":true,\"already_loaded\":false}";
+    job->result_mime = "application/json";
+    job_set_phase(*job, JobPhase::DONE);
+    job->status.store(JobStatus::DONE);
+    fprintf(stderr, "[Server] warm: done (DiT=%s VAE=%s Adapter=%s)\n", dit_name.c_str(), vae_name.c_str(),
+            wr.adapter.c_str());
+}
+
+// POST /warm
+// Accepts JSON body { dit, vae?, adapter?, adapter_scale? }. Spawns a
+// background job that loads the requested DiT + VAE + adapter so the
+// next /synth with the same key short-circuits the model load. Returns
+// {"id":"N"} immediately; poll via GET /job?id=N as with /synth.
+static void handle_warm(const httplib::Request & req, httplib::Response & res) {
+    if (g_registry.dit.empty() || g_registry.text_enc.empty() || g_registry.vae.empty()) {
+        json_error(res, 501, "No synth models in registry (need dit + text-encoder + vae)");
+        return;
+    }
+
+    apply_keep_loaded_if_requested(req);
+
+    WarmRequest wr;
+    if (!req.body.empty()) {
+        yyjson_doc *     doc  = yyjson_read(req.body.c_str(), req.body.size(), 0);
+        yyjson_val *     root = doc ? yyjson_doc_get_root(doc) : nullptr;
+        if (!root || !yyjson_is_obj(root)) {
+            if (doc) yyjson_doc_free(doc);
+            json_error(res, 400, "Invalid JSON: expected an object");
+            return;
+        }
+        yyjson_val * v;
+        if ((v = yyjson_obj_get(root, "dit"))     && yyjson_is_str(v)) wr.dit     = yyjson_get_str(v);
+        if ((v = yyjson_obj_get(root, "vae"))     && yyjson_is_str(v)) wr.vae     = yyjson_get_str(v);
+        if ((v = yyjson_obj_get(root, "adapter")) && yyjson_is_str(v)) wr.adapter = yyjson_get_str(v);
+        if ((v = yyjson_obj_get(root, "adapter_scale")) && yyjson_is_num(v)) {
+            wr.adapter_scale = (float) yyjson_get_num(v);
+        }
+        yyjson_doc_free(doc);
+    }
+
+    auto job = job_create();
+    fprintf(stderr, "[Server] Job %s created (warm: dit=%s vae=%s adapter=%s)\n", job->id.c_str(), wr.dit.c_str(),
+            wr.vae.c_str(), wr.adapter.c_str());
+
+    work_push([job, wr]() mutable { warm_worker(job, std::move(wr)); });
+
+    std::string body = "{\"id\":\"" + job->id + "\"}";
+    res.set_content(body, "application/json");
+}
+
 // GET /props
 // server configuration, available models, and default request.
 // the webui reads this at boot to populate dropdowns and status indicators.
@@ -1948,6 +2102,7 @@ int main(int argc, char ** argv) {
     svr.Post("/synth", handle_synth);
     svr.Post("/understand", handle_understand);
     svr.Post("/vae", handle_vae);
+    svr.Post("/warm", handle_warm);
     svr.Get("/health", [](const httplib::Request &, httplib::Response & res) {
         res.set_content("{\"status\":\"ok\"}", "application/json");
     });
