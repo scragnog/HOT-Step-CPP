@@ -530,6 +530,38 @@ static void json_error(httplib::Response & res, int status, const char * msg) {
     free(json);
 }
 
+// Per-request `?keep_loaded=1` (or `keep_loaded=true`) flips the server into
+// EVICT_NEVER for the rest of its lifetime. Idempotent: if the server is
+// already keep-loaded (CLI flag or an earlier request), this is a no-op.
+//
+// This is the wrapper-facing knob for the cold-start LoKr precompute stall
+// (Jun 6 incident). The Node wrapper already passes a `keepLoaded` boolean
+// to aceClient.submitLm / submitSynth; before this hook the engine ignored
+// it, so every request paid the ~17 s adapter precompute cost. With the
+// per-request flag honored, the second /synth with the same DiT + adapter
+// short-circuits the load via the ModelStore cache.
+static bool request_keep_loaded(const httplib::Request & req) {
+    if (!req.has_param("keep_loaded")) {
+        return false;
+    }
+    const std::string & v = req.get_param_value("keep_loaded");
+    return v == "1" || v == "true";
+}
+
+static void apply_keep_loaded_if_requested(const httplib::Request & req) {
+    if (g_keep_loaded) {
+        return;  // already on, no work to do
+    }
+    if (!request_keep_loaded(req)) {
+        return;
+    }
+    g_keep_loaded = true;
+    if (g_store) {
+        store_set_policy(g_store, EVICT_NEVER);
+    }
+    fprintf(stderr, "[Server] keep_loaded enabled via request query param\n");
+}
+
 // resolve model name: explicit request > already loaded > first in bucket
 static std::string resolve_name(const std::vector<ModelEntry> & bucket,
                                 const std::string &             requested,
@@ -623,6 +655,10 @@ static void handle_lm(const httplib::Request & req, httplib::Response & res) {
         json_error(res, 501, "No LM models in registry");
         return;
     }
+
+    // honor `?keep_loaded=1` from the wrapper — keeps the LM resident across
+    // requests so the next /lm call short-circuits the model load.
+    apply_keep_loaded_if_requested(req);
 
     // parse request
     AceRequest ace_req;
@@ -886,6 +922,11 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
         return;
     }
 
+    // honor `?keep_loaded=1` — primary reason this knob exists: keep DiT +
+    // adapter (with its 17 s precomputed LoKr deltas) resident across /synth
+    // requests so the cold-start path only ever runs once.
+    apply_keep_loaded_if_requested(req);
+
     // parse request: plain JSON (single or array) or multipart (JSON + audio file or src_latents).
     // synth_model, lm_model, adapter, adapter_scale travel inside AceRequest now.
     std::vector<AceRequest> ace_reqs;
@@ -1127,6 +1168,8 @@ static void handle_understand(const httplib::Request & req, httplib::Response & 
         json_error(res, 400, "Understand requires multipart/form-data");
         return;
     }
+
+    apply_keep_loaded_if_requested(req);
 
     // parse multipart: required "audio" or "src_latents" part, optional "request" part for sampling params.
     // synth_model, lm_model, adapter, adapter_scale travel inside AceRequest.
@@ -1388,6 +1431,8 @@ static void handle_vae(const httplib::Request & req, httplib::Response & res) {
         json_error(res, 400, "VAE endpoint requires multipart/form-data");
         return;
     }
+
+    apply_keep_loaded_if_requested(req);
 
     AceRequest ace_req;
     request_init(&ace_req);
