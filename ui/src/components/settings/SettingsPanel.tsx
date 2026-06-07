@@ -163,6 +163,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [envSaving, setEnvSaving] = useState(false);
   const [envStatus, setEnvStatus] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
 
+  // Detected GPUs for the GPU selector dropdown
+  const [detectedGpus, setDetectedGpus] = useState<Array<{ index: number; name: string; memoryMB: number }>>([]);
+
   // Subsection open/close state
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     engine: true, server: true, apiKeys: true, llmConfig: true, llmEndpoints: false, paths: true,
@@ -177,9 +180,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const loadEnvSettings = useCallback(async () => {
     try {
       setEnvLoading(true);
-      const data = await settingsApi.getEnv();
+      const [data, gpuData] = await Promise.all([
+        settingsApi.getEnv(),
+        settingsApi.getGpus().catch(() => ({ gpus: [] })),
+      ]);
       setEnvValues(data.values);
       setEnvOriginal(data.values);
+      setDetectedGpus(gpuData.gpus);
     } catch (err: any) {
       console.error('[Settings] Failed to load .env:', err.message);
     } finally {
@@ -298,9 +305,42 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 value={envValues.ACESTEPCPP_VAE_CHUNK || ''} onChange={handleEnvChange} type="number" placeholder="1024" />
               <EnvTextRow envKey="ACESTEPCPP_VAE_OVERLAP" label={t('settings.env.vaeOverlap')} description={t('settings.env.vaeOverlapDesc')}
                 value={envValues.ACESTEPCPP_VAE_OVERLAP || ''} onChange={handleEnvChange} type="number" placeholder="64" />
-              <EnvTextRow envKey="CUDA_VISIBLE_DEVICES" label="GPU Device"
-                description="Which GPU(s) the engine should use. Set to 0 for first GPU, 1 for second, etc. Leave empty for auto-detect (picks the best GPU). Requires restart."
-                value={envValues.CUDA_VISIBLE_DEVICES || ''} onChange={handleEnvChange} placeholder="(auto)" />
+
+              {/* GPU Device selector — auto-detects available GPUs */}
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">GPU Device</div>
+                  <div className="setting-description">
+                    Which GPU the engine should use. Requires restart.
+                  </div>
+                </div>
+                {detectedGpus.length > 0 ? (
+                  <select
+                    id="env-CUDA_VISIBLE_DEVICES"
+                    className="env-select"
+                    value={envValues.CUDA_VISIBLE_DEVICES || ''}
+                    onChange={(e) => handleEnvChange('CUDA_VISIBLE_DEVICES', e.target.value)}
+                  >
+                    <option value="">Auto (best available)</option>
+                    {detectedGpus.map((gpu) => (
+                      <option key={gpu.index} value={String(gpu.index)}>
+                        GPU {gpu.index}: {gpu.name} ({Math.round(gpu.memoryMB / 1024)} GB)
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id="env-CUDA_VISIBLE_DEVICES"
+                    className="env-input"
+                    type="text"
+                    value={envValues.CUDA_VISIBLE_DEVICES || ''}
+                    onChange={(e) => handleEnvChange('CUDA_VISIBLE_DEVICES', e.target.value)}
+                    placeholder="(auto)"
+                    style={{ width: '80px', textAlign: 'center' }}
+                  />
+                )}
+              </div>
+
             </EnvSubsection>
 
             {/* Server */}

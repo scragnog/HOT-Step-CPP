@@ -6,6 +6,8 @@
 
 import { Router } from 'express';
 import fs from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import {
   ENV_FILE_PATH,
   EXPOSED_ENV_KEYS,
@@ -14,6 +16,7 @@ import {
   config,
 } from '../config.js';
 
+const execFileAsync = promisify(execFile);
 const router = Router();
 
 /** Set of exposed keys for fast lookup */
@@ -166,6 +169,38 @@ router.post('/env', (req, res) => {
   } catch (err: any) {
     console.error('[Settings] Failed to update .env:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/settings/gpus
+ *
+ * Detect available NVIDIA GPUs via nvidia-smi.
+ * Returns an array of { index, name, memoryMB } objects.
+ * Returns empty array if nvidia-smi is unavailable (AMD, Intel, CPU-only).
+ */
+router.get('/gpus', async (_req, res) => {
+  try {
+    const { stdout } = await execFileAsync('nvidia-smi', [
+      '--query-gpu=index,name,memory.total',
+      '--format=csv,noheader,nounits',
+    ], { timeout: 5000 });
+
+    const gpus = stdout.trim().split('\n')
+      .filter(line => line.trim())
+      .map(line => {
+        const [index, name, memoryMB] = line.split(',').map(s => s.trim());
+        return {
+          index: parseInt(index, 10),
+          name,
+          memoryMB: parseInt(memoryMB, 10),
+        };
+      });
+
+    res.json({ gpus });
+  } catch {
+    // nvidia-smi not found or failed — not an NVIDIA system
+    res.json({ gpus: [] });
   }
 });
 

@@ -281,6 +281,8 @@ export const settingsApi = {
   /** Update .env values (partial — only send changed keys) */
   updateEnv: (values: Record<string, string>) =>
     post<{ updated: string[]; restartRequired: boolean }>('/settings/env', { values }),
+  /** Detect available GPUs via nvidia-smi */
+  getGpus: () => get<{ gpus: Array<{ index: number; name: string; memoryMB: number }> }>('/settings/gpus'),
 };
 
 // ── Model Manager ───────────────────────────────────────────
