@@ -28,6 +28,7 @@
 //   /synth      DiT + Text-Enc + VAE
 //   /understand LM + DiT + VAE
 
+#include "adapter-cancel.h"   // g_adapter_cancel — set by worker around ace_synth_load
 #include "audio-io.h"
 #include "model-registry.h"
 #include "model-store.h"
@@ -878,13 +879,23 @@ static void synth_worker(std::shared_ptr<Job>    job,
     job_set_phase(*job, ace_reqs[0].adapter.empty() ? JobPhase::LOADING_DIT
                                                     : JobPhase::ADAPTER_PRECOMPUTE);
 
+    // Wire the per-job cancel flag into the adapter precompute loops so a
+    // wrapper-side cancel during cold start aborts in <100 ms instead of
+    // waiting for all 352 deltas to finish. Cleared in a RAII guard below
+    // regardless of which exit path we take.
+    g_adapter_cancel.store(&job->cancel, std::memory_order_release);
+    struct AdapterCancelGuard {
+        ~AdapterCancelGuard() { g_adapter_cancel.store(nullptr, std::memory_order_release); }
+    } adapter_cancel_guard;
+
     AceSynth * ctx = ace_synth_load(g_store, &p);
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: synth load failed\n");
         free(src_interleaved);
         free(ref_interleaved);
-        job_set_phase(*job, JobPhase::FAILED);
-        job->status.store(JobStatus::FAILED);
+        bool cancelled = job->cancel.load();
+        job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
+        job->status.store(cancelled ? JobStatus::CANCELLED : JobStatus::FAILED);
         return;
     }
     job_set_phase(*job, JobPhase::DIT_INFERENCE, 0, ace_reqs[0].inference_steps);
