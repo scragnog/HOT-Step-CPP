@@ -1290,6 +1290,9 @@ router.get('/status/:id', (req, res) => {
     progress: job.progress,
     result: job.result,
     error: job.error,
+    ace_job_id: job.aceJobId ?? null,
+    ace_phase: (job as any).acePhase ?? null,
+    ace_phase_progress: (job as any).acePhaseProgress ?? null,
   });
 });
 
