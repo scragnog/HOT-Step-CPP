@@ -169,6 +169,15 @@ function startAceServer(): ChildProcess | null {
     args.push('--adapters', config.aceServer.adapters);
   }
 
+  // --keep-loaded: flips the engine's ModelStore to EVICT_NEVER so the
+  // 17 s LoKr precompute only happens once per DiT + adapter combo. Without
+  // this flag every /synth pays the cold-start cost. Set
+  // ACESTEPCPP_KEEP_LOADED=0 to disable (VRAM-constrained dev boxes).
+  if (config.aceServer.keepLoaded) {
+    args.push('--keep-loaded');
+    console.log('[Server] --keep-loaded: DiT + adapter stay resident across requests');
+  }
+
   // Add noise profile if available
   if (config.aceServer.noiseProfile && fs.existsSync(config.aceServer.noiseProfile)) {
     args.push('--noise-profile', config.aceServer.noiseProfile);

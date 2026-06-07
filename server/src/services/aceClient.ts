@@ -123,6 +123,49 @@ export interface AceRequest {
 /** Job status from ace-server */
 export interface AceJobStatus {
   status: 'running' | 'done' | 'failed' | 'cancelled';
+  /** Fine-grained engine phase (engine commit 6d9873c). Optional for
+   *  back-compat with older ace-server builds. */
+  phase?: AceJobPhase;
+  phase_step?: number;
+  phase_total?: number;
+}
+
+/** Fine-grained engine phase — matches JobPhase in engine/tools/ace-server.cpp.
+ *  Lowercase snake_case mirrors job_phase_str(). */
+export type AceJobPhase =
+  | 'queued'
+  | 'loading_text_enc'
+  | 'encoding_text'
+  | 'loading_cond_enc'
+  | 'encoding_cond'
+  | 'loading_dit'
+  | 'loading_adapter'
+  | 'adapter_precompute'
+  | 'dit_inference'
+  | 'loading_vae'
+  | 'vae_decode'
+  | 'encoding_output'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+/** One row from GET /jobs (engine commit 69db1ab). */
+export interface AceJobsListEntry {
+  id: string;
+  status: 'running' | 'done' | 'failed' | 'cancelled';
+  phase: AceJobPhase;
+  phase_step: number;
+  phase_total: number;
+}
+
+/** Body shape for POST /warm (engine commit 0f31401). */
+export interface AceWarmRequest {
+  dit: string;
+  vae?: string;
+  adapter?: string;
+  adapter_scale?: number;
+  adapter_mode?: string;
+  adapter_group_scales?: AceRequest['adapter_group_scales'];
 }
 
 /** Plugin parameter schema from Lua plugin metadata */
@@ -383,6 +426,30 @@ export const aceClient = {
       method: 'POST',
       signal: AbortSignal.timeout(TIMEOUT_POLL),
     });
+  },
+
+  /** POST /warm — pre-load a DiT + VAE + adapter combo so the next /synth
+   *  with the same key short-circuits the 17 s cold-start adapter precompute.
+   *  Requires the engine to be running in keep-loaded mode (either started
+   *  with --keep-loaded or a prior request set ?keep_loaded=1); under STRICT
+   *  the engine returns {warm:false} since modules would be evicted instantly.
+   *  Returns the engine job id — poll via pollJob until status=done. */
+  async warm(request: AceWarmRequest, keepLoaded = true): Promise<string> {
+    const params = new URLSearchParams();
+    if (keepLoaded) params.set('keep_loaded', '1');
+    const qs = params.toString();
+    const path = qs ? `/warm?${qs}` : '/warm';
+    const res = await acePost(path, request);
+    const data = await res.json() as { id: string };
+    return data.id;
+  },
+
+  /** GET /jobs — enumerate every job currently in the engine's in-memory job
+   *  table. Used by the reconcile path in apps/ose/acestep/run.py to find a
+   *  still-running engine job after the wrapper crashed mid-poll. */
+  async listJobs(): Promise<AceJobsListEntry[]> {
+    const res = await aceGet('/jobs');
+    return res.json();
   },
 
   /** Check if ace-server is reachable */

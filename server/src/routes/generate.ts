@@ -44,6 +44,14 @@ interface GenerationJob {
   stage?: string;
   progress?: number;
   aceJobId?: string;  // Current ace-server job ID (LM or synth)
+  /** Fine-grained engine phase pulled from GET /job?id=N (engine commit
+   *  6d9873c). Surfaces "stuck in 17 s adapter precompute" vs. "actually
+   *  failed" so the consumer (Studio UI + apps/ose/acestep/run.py reconcile
+   *  path) can decide whether to keep waiting or bail. */
+  acePhase?: string;
+  /** Sub-phase progress, formatted by pollUntilDone: e.g. "step 12/50" or
+   *  empty when phase_total is 0. Surfaced to /status as ace_phase_progress. */
+  acePhaseProgress?: string;
   lmResults?: AceRequest[];
   result?: {
     audioUrls: string[];
@@ -126,6 +134,16 @@ async function pollUntilDone(aceJobId: string, job: GenerationJob, signal: Abort
     // (e.g. ace-server busy mid-DiT-step) don't kill the loop
     try {
       const status = await aceClient.pollJob(aceJobId);
+      // Surface the engine's fine-grained phase + step counter to the
+      // wrapper Job so /api/generate/status/:id can return them via
+      // ace_phase / ace_phase_progress. The fields are optional on the
+      // wire (old ace-server builds don't populate them), so guard each.
+      if (status.phase) {
+        job.acePhase = status.phase;
+        const step = status.phase_step ?? 0;
+        const total = status.phase_total ?? 0;
+        job.acePhaseProgress = total > 0 ? `step ${step}/${total}` : '';
+      }
       if (status.status === 'done') return;
       if (status.status === 'failed') throw new Error('Generation failed on ace-server');
       if (status.status === 'cancelled') throw new Error('Cancelled by ace-server');
@@ -1291,8 +1309,8 @@ router.get('/status/:id', (req, res) => {
     result: job.result,
     error: job.error,
     ace_job_id: job.aceJobId ?? null,
-    ace_phase: (job as any).acePhase ?? null,
-    ace_phase_progress: (job as any).acePhaseProgress ?? null,
+    ace_phase: job.acePhase ?? null,
+    ace_phase_progress: job.acePhaseProgress ?? null,
   });
 });
 

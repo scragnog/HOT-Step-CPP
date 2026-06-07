@@ -119,6 +119,14 @@ export const config = {
     // To re-enable: set ACESTEPCPP_DRAFT_LM env var or uncomment auto-detect.
     draftLm: process.env.ACESTEPCPP_DRAFT_LM || '',
     onnxDir: process.env.ACESTEPCPP_ONNX_DIR || DEFAULT_ONNX_DIR,
+    /** Pass --keep-loaded to the spawned ace-server, flipping the engine's
+     *  ModelStore to EVICT_NEVER at startup so DiT + adapter + LoKr
+     *  precompute stay resident across requests. Default true: the cold-
+     *  start LoKr precompute is ~17 s, hot-start ~50 ms — keeping models
+     *  loaded is the right default for an interactive product. Override
+     *  with ACESTEPCPP_KEEP_LOADED=0 if VRAM is tight and you'd rather
+     *  pay the cold-start cost than carry several DiT+adapter combos. */
+    keepLoaded: (process.env.ACESTEPCPP_KEEP_LOADED ?? '1') !== '0',
     /** TensorRT runtime DLL directory — auto-detected or TENSORRT_LIBS env override */
     trtLibs: process.env.TENSORRT_LIBS || (() => {
       // Auto-detect from engine/deps/tensorrt_libs/ (downloaded by Model Manager)
