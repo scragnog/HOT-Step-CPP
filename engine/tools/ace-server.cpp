@@ -209,6 +209,53 @@ enum class JobStatus : int {
     CANCELLED = 3,
 };
 
+// Fine-grained phase the worker is currently in. Surfaced through GET /job
+// alongside the coarse JobStatus so the wrapper (and any external reconciler
+// hitting :8085 directly, e.g. apps/ose/acestep/run.py) can tell *why* a
+// long-running job is taking a while — model load vs. adapter precompute
+// (the 17 s LoKr stall) vs. actual DiT inference.
+//
+// Phases are advisory: workers may skip ones that don't apply (e.g. /lm
+// never enters DIT_INFERENCE). Order roughly follows the synth pipeline.
+enum class JobPhase : int {
+    QUEUED               = 0,
+    LOADING_TEXT_ENC     = 1,
+    ENCODING_TEXT        = 2,
+    LOADING_COND_ENC     = 3,
+    ENCODING_COND        = 4,
+    LOADING_DIT          = 5,
+    LOADING_ADAPTER      = 6,
+    ADAPTER_PRECOMPUTE   = 7,
+    DIT_INFERENCE        = 8,
+    LOADING_VAE          = 9,
+    VAE_DECODE           = 10,
+    ENCODING_OUTPUT      = 11,
+    DONE                 = 12,
+    FAILED               = 13,
+    CANCELLED            = 14,
+};
+
+static const char * job_phase_str(JobPhase p) {
+    switch (p) {
+        case JobPhase::QUEUED:               return "queued";
+        case JobPhase::LOADING_TEXT_ENC:     return "loading_text_enc";
+        case JobPhase::ENCODING_TEXT:        return "encoding_text";
+        case JobPhase::LOADING_COND_ENC:     return "loading_cond_enc";
+        case JobPhase::ENCODING_COND:        return "encoding_cond";
+        case JobPhase::LOADING_DIT:          return "loading_dit";
+        case JobPhase::LOADING_ADAPTER:      return "loading_adapter";
+        case JobPhase::ADAPTER_PRECOMPUTE:   return "adapter_precompute";
+        case JobPhase::DIT_INFERENCE:        return "dit_inference";
+        case JobPhase::LOADING_VAE:          return "loading_vae";
+        case JobPhase::VAE_DECODE:           return "vae_decode";
+        case JobPhase::ENCODING_OUTPUT:      return "encoding_output";
+        case JobPhase::DONE:                 return "done";
+        case JobPhase::FAILED:               return "failed";
+        case JobPhase::CANCELLED:            return "cancelled";
+    }
+    return "unknown";
+}
+
 struct Job {
     std::string            id;
     std::atomic<JobStatus> status{ JobStatus::RUNNING };
@@ -216,11 +263,28 @@ struct Job {
     std::string            result_mime;
     std::atomic<bool>      cancel{ false };
 
+    // Phase tracking. phase_step / phase_total are optional sub-progress
+    // for phases that have a natural counter (e.g. DIT_INFERENCE: step/total
+    // = current denoise step / inference_steps; ADAPTER_PRECOMPUTE could
+    // count deltas). 0/0 means "no sub-progress available".
+    std::atomic<JobPhase>  phase{ JobPhase::QUEUED };
+    std::atomic<int>       phase_step{ 0 };
+    std::atomic<int>       phase_total{ 0 };
+
     // memory ordering contract: result_body and result_mime are written
     // before status is stored (seq_cst). the client loads status (seq_cst)
     // and only reads result fields after seeing done/failed. this guarantees
     // visibility without an explicit mutex on the result fields.
 };
+
+// Helper: set both phase + reset step counters in one shot. Workers use this
+// at log-anchor points so external observers never see a stale step counter
+// from the previous phase.
+static inline void job_set_phase(Job & job, JobPhase p, int step = 0, int total = 0) {
+    job.phase_step.store(step, std::memory_order_relaxed);
+    job.phase_total.store(total, std::memory_order_relaxed);
+    job.phase.store(p, std::memory_order_release);
+}
 
 static std::mutex                                            mtx_jobs;
 static std::unordered_map<std::string, std::shared_ptr<Job>> g_jobs;
@@ -581,6 +645,7 @@ static std::string resolve_name(const std::vector<ModelEntry> & bucket,
 // LM worker: generates metadata + lyrics + codes, stores JSON result in job.
 static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch_size, int mode) {
     if (job->cancel.load()) {
+        job_set_phase(*job, JobPhase::CANCELLED);
         job->status.store(JobStatus::CANCELLED);
         return;
     }
@@ -590,11 +655,17 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     const ModelEntry * entry   = registry_find(g_registry.lm, lm_name.c_str());
     if (!entry) {
         fprintf(stderr, "[Server] LM not found: %s\n", lm_name.c_str());
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
     AceLmParams p = g_lm_params;
     p.model_path  = entry->path.c_str();
+
+    // LM has no DiT; it reuses LOADING_DIT to mean "loading the language model
+    // weights" so the wrapper has a single 'loading the big model' phase to
+    // surface, regardless of /lm vs /synth.
+    job_set_phase(*job, JobPhase::LOADING_DIT);
 
     // Acquire a fresh LM ctx from the shared store. Under EVICT_STRICT the
     // module is reloaded if another pipeline evicted it; under EVICT_NEVER
@@ -602,9 +673,11 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     AceLm * ctx = ace_lm_load(g_store, &p);
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: LM load failed\n");
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
+    job_set_phase(*job, JobPhase::DIT_INFERENCE);  // LM "inference" phase
 
     // Execute and always free the ctx, success or failure: the store decides
     // whether the underlying GPU module stays resident.
@@ -614,9 +687,12 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     ace_lm_free(ctx);
 
     if (rc != 0) {
-        job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::FAILED);
+        bool cancelled = job->cancel.load();
+        job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
+        job->status.store(cancelled ? JobStatus::CANCELLED : JobStatus::FAILED);
         return;
     }
+    job_set_phase(*job, JobPhase::ENCODING_OUTPUT);
 
     // Sticky name hint for resolve_name under --keep-loaded. Master clears it
     // in the default mode since the ctx is gone; we match that behavior.
@@ -638,6 +714,7 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
 
     job->result_body = std::move(body);
     job->result_mime = "application/json";
+    job_set_phase(*job, JobPhase::DONE);
     job->status.store(JobStatus::DONE);
     fprintf(stderr, "[Server] Job %s done (LM, %d results)\n", job->id.c_str(), lm_batch_size);
 }
@@ -735,6 +812,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
     if (job->cancel.load()) {
         free(src_interleaved);
         free(ref_interleaved);
+        job_set_phase(*job, JobPhase::CANCELLED);
         job->status.store(JobStatus::CANCELLED);
         return;
     }
@@ -746,6 +824,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
         fprintf(stderr, "[Server] DiT not found: %s\n", dit_name.c_str());
         free(src_interleaved);
         free(ref_interleaved);
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
@@ -753,6 +832,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
         fprintf(stderr, "[Server] Missing Text-Enc or VAE in registry\n");
         free(src_interleaved);
         free(ref_interleaved);
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
@@ -762,6 +842,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
         fprintf(stderr, "[Server] VAE not found: %s\n", vae_name.c_str());
         free(src_interleaved);
         free(ref_interleaved);
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
@@ -778,6 +859,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
             fprintf(stderr, "[Server] Adapter not found: %s\n", ace_reqs[0].adapter.c_str());
             free(src_interleaved);
             free(ref_interleaved);
+            job_set_phase(*job, JobPhase::FAILED);
             job->status.store(JobStatus::FAILED);
             return;
         }
@@ -787,14 +869,25 @@ static void synth_worker(std::shared_ptr<Job>    job,
     fprintf(stderr, "[Server] Loading synth: DiT=%s VAE=%s%s%s\n", dit_name.c_str(), vae_name.c_str(),
             ace_reqs[0].adapter.empty() ? "" : " Adapter=", ace_reqs[0].adapter.c_str());
 
+    // ace_synth_load fans out into text-enc + cond-enc + DiT + adapter (LoKr
+    // precompute) + VAE setup, all serialized. We don't have per-sub-load
+    // callbacks here, so we mark the whole call as the heaviest phase:
+    // ADAPTER_PRECOMPUTE when an adapter is in play (the 17 s stall), else
+    // LOADING_DIT. The wrapper / run.py reconcile path keys on this to
+    // explain why a job is silent for 15+ seconds with no DiT step logs yet.
+    job_set_phase(*job, ace_reqs[0].adapter.empty() ? JobPhase::LOADING_DIT
+                                                    : JobPhase::ADAPTER_PRECOMPUTE);
+
     AceSynth * ctx = ace_synth_load(g_store, &p);
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: synth load failed\n");
         free(src_interleaved);
         free(ref_interleaved);
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
+    job_set_phase(*job, JobPhase::DIT_INFERENCE, 0, ace_reqs[0].inference_steps);
 
     // Build the flat batch. Seeds are resolved per original request, then
     // synth_batch_size is expanded into per-seed variants in groups[0].
@@ -848,9 +941,15 @@ static void synth_worker(std::shared_ptr<Job>    job,
         for (auto & a : audio) {
             ace_audio_free(&a);
         }
-        job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::FAILED);
+        bool cancelled = job->cancel.load();
+        job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
+        job->status.store(cancelled ? JobStatus::CANCELLED : JobStatus::FAILED);
         return;
     }
+
+    // After synth_batch_run returns, the audio is decoded — the VAE pass is
+    // included inside the runner. Surface the wav/mp3 encode phase next.
+    job_set_phase(*job, JobPhase::ENCODING_OUTPUT, 0, total_alloc);
 
     // Sticky name hints for resolve_name under --keep-loaded. Master clears
     // them in the default mode since the ctx is gone; we match that behavior.
@@ -895,7 +994,9 @@ static void synth_worker(std::shared_ptr<Job>    job,
     job->result_body = multipart_build_audio_latent(encoded, mime, captured_latents);
     job->result_mime = MULTIPART_MIME;
 
-    job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::DONE);
+    bool cancelled = job->cancel.load();
+    job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::DONE);
+    job->status.store(cancelled ? JobStatus::CANCELLED : JobStatus::DONE);
     fprintf(stderr, "[Server] Job %s done (%d tracks)\n", job->id.c_str(), total_tracks);
 }
 
@@ -1086,6 +1187,7 @@ static void understand_worker(std::shared_ptr<Job> job,
                               int                  src_T_latent) {
     if (job->cancel.load()) {
         free(src_interleaved);
+        job_set_phase(*job, JobPhase::CANCELLED);
         job->status.store(JobStatus::CANCELLED);
         return;
     }
@@ -1101,6 +1203,7 @@ static void understand_worker(std::shared_ptr<Job> job,
         fprintf(stderr, "[Server] LM, DiT or VAE not found: lm=%s dit=%s vae=%s\n", lm_name.c_str(), dit_name.c_str(),
                 vae_name.c_str());
         free(src_interleaved);
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
@@ -1110,13 +1213,16 @@ static void understand_worker(std::shared_ptr<Job> job,
     p.dit_path            = dit->path.c_str();
     p.vae_path            = vae_entry->path.c_str();
 
+    job_set_phase(*job, JobPhase::LOADING_DIT);
     AceUnderstand * ctx = ace_understand_load(g_store, &p);
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: understand load failed\n");
         free(src_interleaved);
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
+    job_set_phase(*job, JobPhase::DIT_INFERENCE);
 
     AceRequest         out;
     std::vector<float> captured_latent;
@@ -1128,9 +1234,12 @@ static void understand_worker(std::shared_ptr<Job> job,
     free(src_interleaved);
 
     if (rc != 0) {
-        job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::FAILED);
+        bool cancelled = job->cancel.load();
+        job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
+        job->status.store(cancelled ? JobStatus::CANCELLED : JobStatus::FAILED);
         return;
     }
+    job_set_phase(*job, JobPhase::ENCODING_OUTPUT);
 
     // Sticky name hints for resolve_name under --keep-loaded. Master clears
     // them in the default mode since the ctx is gone; we match that behavior.
@@ -1147,6 +1256,7 @@ static void understand_worker(std::shared_ptr<Job> job,
     std::string json_part = "[" + request_to_json(&out) + "]";
     job->result_body      = multipart_build_json_latent(json_part, captured_latent, captured_T_latent);
     job->result_mime      = MULTIPART_MIME;
+    job_set_phase(*job, JobPhase::DONE);
     job->status.store(JobStatus::DONE);
     fprintf(stderr, "[Server] Job %s done (understand)\n", job->id.c_str());
 }
@@ -1263,6 +1373,7 @@ static void decode_worker(std::shared_ptr<Job> job,
                           WavFormat            wav_fmt,
                           int                  peak_clip) {
     if (job->cancel.load()) {
+        job_set_phase(*job, JobPhase::CANCELLED);
         job->status.store(JobStatus::CANCELLED);
         return;
     }
@@ -1271,6 +1382,7 @@ static void decode_worker(std::shared_ptr<Job> job,
     const ModelEntry * vae_entry = registry_find(g_registry.vae, vae_name.c_str());
     if (!vae_entry) {
         fprintf(stderr, "[Server] decode: VAE not found: %s\n", vae_name.c_str());
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
@@ -1280,13 +1392,16 @@ static void decode_worker(std::shared_ptr<Job> job,
     vae_key.path          = vae_entry->path;
     vae_key.adapter_scale = 1.0f;
 
+    job_set_phase(*job, JobPhase::LOADING_VAE);
     Timer     t_dec;
     VAEGGML * vae = store_require_vae_dec(g_store, vae_key);
     if (!vae) {
         fprintf(stderr, "[Server] decode: store_require_vae_dec failed\n");
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
+    job_set_phase(*job, JobPhase::VAE_DECODE);
     ModelHandle vae_guard(g_store, vae);
 
     int                T_audio_max = (src_T_latent + 64) * 1920;
@@ -1295,9 +1410,11 @@ static void decode_worker(std::shared_ptr<Job> job,
                                         g_synth_params.vae_chunk, g_synth_params.vae_overlap);
     if (T_audio < 0) {
         fprintf(stderr, "[Server] decode: vae_ggml_decode_tiled failed\n");
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
+    job_set_phase(*job, JobPhase::ENCODING_OUTPUT);
     fprintf(stderr, "[Server] decode: %d latent frames -> %d audio samples (%.2fs), %.0fms\n", src_T_latent, T_audio,
             (float) T_audio / 48000.0f, t_dec.ms());
 
@@ -1326,7 +1443,9 @@ static void decode_worker(std::shared_ptr<Job> job,
     // client just uploaded it, echoing it back would only burn bandwidth.
     job->result_body = std::move(encoded);
     job->result_mime = mime;
-    job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::DONE);
+    bool decode_cancelled = job->cancel.load();
+    job_set_phase(*job, decode_cancelled ? JobPhase::CANCELLED : JobPhase::DONE);
+    job->status.store(decode_cancelled ? JobStatus::CANCELLED : JobStatus::DONE);
     fprintf(stderr, "[Server] Job %s done (decode)\n", job->id.c_str());
 }
 
@@ -1347,6 +1466,7 @@ static void encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, float * 
     } buf{ src_interleaved };
 
     if (job->cancel.load()) {
+        job_set_phase(*job, JobPhase::CANCELLED);
         job->status.store(JobStatus::CANCELLED);
         return;
     }
@@ -1355,6 +1475,7 @@ static void encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, float * 
     const ModelEntry * vae_entry = registry_find(g_registry.vae, vae_name.c_str());
     if (!vae_entry) {
         fprintf(stderr, "[Server] encode: VAE not found: %s\n", vae_name.c_str());
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
@@ -1364,13 +1485,16 @@ static void encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, float * 
     vae_key.path          = vae_entry->path;
     vae_key.adapter_scale = 1.0f;
 
+    job_set_phase(*job, JobPhase::LOADING_VAE);
     Timer        t_enc;
     VAEEncoder * vae = store_require_vae_enc(g_store, vae_key);
     if (!vae) {
         fprintf(stderr, "[Server] encode: store_require_vae_enc failed\n");
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
+    job_set_phase(*job, JobPhase::VAE_DECODE);  // encoder runs the same VAE codec, reuse phase
     ModelHandle vae_guard(g_store, vae);
 
     // 1 latent frame covers 1920 audio samples, plus a safety tile for the
@@ -1385,9 +1509,11 @@ static void encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, float * 
                                                        g_synth_params.vae_chunk, g_synth_params.vae_overlap);
     if (T_latent < 0) {
         fprintf(stderr, "[Server] encode: vae_enc_encode_tiled failed\n");
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(JobStatus::FAILED);
         return;
     }
+    job_set_phase(*job, JobPhase::ENCODING_OUTPUT);
     fprintf(stderr, "[Server] encode: %d audio samples (%.2fs) -> %d latent frames, %.0fms\n", src_len,
             (float) src_len / 48000.0f, T_latent, t_enc.ms());
 
@@ -1405,7 +1531,9 @@ static void encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, float * 
     std::memcpy(body.data(), latent.data(), body.size());
     job->result_body = std::move(body);
     job->result_mime = "application/octet-stream";
-    job->status.store(job->cancel.load() ? JobStatus::CANCELLED : JobStatus::DONE);
+    bool encode_cancelled = job->cancel.load();
+    job_set_phase(*job, encode_cancelled ? JobPhase::CANCELLED : JobPhase::DONE);
+    job->status.store(encode_cancelled ? JobStatus::CANCELLED : JobStatus::DONE);
     fprintf(stderr, "[Server] Job %s done (encode)\n", job->id.c_str());
 }
 
@@ -1835,11 +1963,17 @@ int main(int argc, char ** argv) {
             res.set_content(job->result_body, job->result_mime);
             return;
         }
-        // default: return status JSON
-        std::string body = "{\"status\":\"";
-        body += job_status_str(job->status.load());
-        body += "\"}";
-        res.set_content(body, "application/json");
+        // default: return status JSON. Now includes phase + phase_step/total
+        // so the wrapper (and external reconcilers like apps/ose/acestep/run.py)
+        // can distinguish "stalled in 17 s adapter precompute" from "actually
+        // failed" without parsing /logs SSE.
+        char phase_buf[256];
+        int  step  = job->phase_step.load(std::memory_order_relaxed);
+        int  total = job->phase_total.load(std::memory_order_relaxed);
+        snprintf(phase_buf, sizeof(phase_buf),
+                 "{\"status\":\"%s\",\"phase\":\"%s\",\"phase_step\":%d,\"phase_total\":%d}",
+                 job_status_str(job->status.load()), job_phase_str(job->phase.load()), step, total);
+        res.set_content(phase_buf, "application/json");
     });
     svr.Post("/job", [](const httplib::Request & req, httplib::Response & res) {
         if (!req.has_param("id")) {
