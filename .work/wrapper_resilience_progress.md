@@ -72,3 +72,48 @@ job, and writes audio that nobody collects.
 ## Decisions log
 
 <!-- Subsequent components append dated entries here as work proceeds. -->
+
+### 2026-06-07 — C3 done: /status surfaces ace_job_id + ace_phase + ace_phase_progress
+
+Modified `server/src/routes/generate.ts` (GET `/api/generate/status/:id` handler
+at L1282) and `server/src/routes/inspire.ts` (GET `/api/inspire/status/:id`
+handler at L193) to include three new fields in the response object:
+
+- `ace_job_id: job.aceJobId ?? null` — already tracked on the Job/InspireJob,
+  just not exposed. C1's reconcile path in `apps/ose/acestep/run.py` uses
+  this to correlate wrapper failures with engine `/jobs/:id` state on :8085.
+- `ace_phase: (job as any).acePhase ?? null` — placeholder for C2 (engine
+  `JobPhase` enum will be threaded into the wrapper Job). Stays `null` for
+  now; adding the field future-proofs the surface so we don't need a second
+  wrapper patch when C2 lands.
+- `ace_phase_progress: (job as any).acePhaseProgress ?? null` — same
+  rationale, sub-phase progress (e.g., "lokr_precompute 42%") future-tracks
+  for C2.
+
+Decisions:
+
+1. **Snake_case field names** (`ace_job_id`, not `aceJobId`). The companion
+   `run.py` consumer is Python and would have to camel->snake convert
+   otherwise. Existing wrapper fields stay camelCase (`jobId`, etc.) — we
+   are adding, not renaming.
+2. **`(job as any)` cast for the two C2 fields** is intentional. The Job
+   interface doesn't yet have `acePhase` / `acePhaseProgress` and we don't
+   want to ship a type change in C3 that would force a follow-up edit when
+   C2 lands. C2 will widen the Job interface properly.
+3. **`null` over `undefined`.** JSON.stringify drops `undefined` keys, which
+   would make the field's absence indistinguishable from a missing field on
+   the consumer side. Explicit `null` means "field exists, value not yet
+   set" which is what run.py's reconcile branches on.
+4. **Mirrored the change in `inspire.ts` for symmetry** per task brief. Did
+   NOT touch `stemStudio` / `coverArt` / `supersep` (out of scope for C3 and
+   they don't go through the same ace-server stall failure mode in C1).
+5. **No `dist/` rebuild, no daemon restart.** The wrapper is served from
+   `server/dist/` at runtime. User reviews the change first; deciding when
+   to rebuild and restart is on them.
+6. **Typecheck:** `npm run typecheck` reports 4 pre-existing `findLast`
+   errors at `generate.ts:246` and `:647` that exist on the base branch
+   too (verified with `git stash` + recheck). My 3-field addition introduces
+   zero new errors. The pre-existing errors are not C3's responsibility to
+   fix; they're a lib/tsconfig target issue that touches code unrelated to
+   `/status`.
+
