@@ -471,6 +471,11 @@
   border-color: rgba(236, 72, 153, 0.5);
 }
 
+.env-select option {
+  background: #1e1e2e;
+  color: rgba(255, 255, 255, 0.9);
+}
+
 /* ── Tab navigation ─────────────────────────────────────────────── */
 
 .settings-tabs {
@@ -609,6 +614,11 @@
 :root:not(.dark) .env-select {
   background: rgba(0, 0, 0, 0.04);
   border-color: rgba(0, 0, 0, 0.1);
+  color: rgba(0, 0, 0, 0.85);
+}
+
+:root:not(.dark) .env-select option {
+  background: #ffffff;
   color: rgba(0, 0, 0, 0.85);
 }
 
