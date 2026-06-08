@@ -312,10 +312,9 @@ jobs:
           )
 
           # Add variant-specific DLLs
-          switch ($variant) {
-            "cuda"   { $engineFiles += "ggml-cuda.dll" }
-            "vulkan" { $engineFiles += "ggml-vulkan.dll" }
-          }
+          # Note: matrix variants are 'cuda13.1', 'cuda12.8' — use prefix match, not exact
+          if ($variant -match '^cuda') { $engineFiles += "ggml-cuda.dll" }
+          if ($variant -eq 'vulkan') { $engineFiles += "ggml-vulkan.dll" }
 
           foreach ($file in $engineFiles) {
             $src = Join-Path $buildRelease $file
@@ -338,7 +337,7 @@ jobs:
             $ortCore = Join-Path $ortLib "onnxruntime.dll"
             if (Test-Path $ortCore) { Copy-Item $ortCore (Join-Path $engineOut "onnxruntime.dll") }
             # CUDA providers — only needed for CUDA variant
-            if ($variant -eq "cuda") {
+            if ($variant -match "^cuda") {
               foreach ($dll in @("onnxruntime_providers_shared.dll", "onnxruntime_providers_cuda.dll")) {
                 $src = Join-Path $ortLib $dll
                 if (Test-Path $src) { Copy-Item $src (Join-Path $engineOut $dll) }
@@ -455,6 +454,7 @@ jobs:
           # Config and docs
           Copy-Item ".env.example" "$dist/.env.example"
           Copy-Item "release/HOT-Step.bat" "$dist/HOT-Step.bat"
+          Copy-Item "open-browser-if-needed.ps1" "$dist/open-browser-if-needed.ps1"
           Copy-Item "release/README.txt" "$dist/README.txt"
 
       - name: Package and checksum
@@ -908,7 +908,7 @@ jobs:
             # Core runtime — needed by all variants
             find "$ORT_LIB" -name "libonnxruntime.so*" -exec cp {} "$DIST/engine/" \;
             # CUDA providers — only needed for CUDA variant
-            if [ "$VARIANT" = "cuda" ]; then
+            if [[ "$VARIANT" =~ ^cuda ]]; then
               find "$ORT_LIB" -name "libonnxruntime_providers_shared.so" -exec cp {} "$DIST/engine/" \;
               find "$ORT_LIB" -name "libonnxruntime_providers_cuda.so" -exec cp {} "$DIST/engine/" \;
             fi
