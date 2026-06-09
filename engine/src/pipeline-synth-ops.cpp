@@ -2154,3 +2154,11 @@ int ops_stream_generate(const AceSynth* ctx, int batch_n, SynthState& s,
 }
 
 #endif // HOT_STEP_TRT
+
+#ifndef HOT_STEP_TRT
+int ops_stream_generate(const AceSynth* /*ctx*/, int /*batch_n*/, SynthState& /*s*/,
+                        bool (*)(void*), void*) {
+    fprintf(stderr, "[Stream] ERROR: streaming requires TRT (HOT_STEP_TRT not compiled)\n");
+    return -1;
+}
+#endif

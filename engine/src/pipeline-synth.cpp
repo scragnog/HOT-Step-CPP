@@ -513,6 +513,18 @@ static int run_tail(AceSynth *         ctx,
     ops_init_noise(ctx, reqs, batch_n, s);
     diag_stats_f32("noise", s.noise.data(), s.noise.size());
 
+    // Stream mode: route through DEMON-style ring buffer pipeline
+    if (s.rr.stream_mode) {
+        fprintf(stderr, "[Synth-Run] stream_mode=true → routing to ops_stream_generate()\n");
+        if (ops_stream_generate(ctx, batch_n, s, cancel, cancel_data) != 0) {
+            return -1;
+        }
+        // Stream pipeline handles its own VAE decode internally.
+        // Still populate s.output with the final latent for downstream compatibility.
+        diag_stats_f32("dit_output (stream)", s.output.data(), s.output.size());
+        return 0;
+    }
+
     if (ops_dit_generate(ctx, batch_n, s, cancel, cancel_data) != 0) {
         return -1;
     }

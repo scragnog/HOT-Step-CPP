@@ -57,6 +57,10 @@ void ops_init_noise(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
 // Run the DiT denoising loop.
 int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*cancel)(void *), void * cancel_data);
 
+// Run the streaming DiT pipeline (DEMON-style ring buffer).
+// Only available when HOT_STEP_TRT is defined. Falls back to ops_dit_generate otherwise.
+int ops_stream_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*cancel)(void *), void * cancel_data);
+
 // Phase 2 primitive.
 
 // Latent splice for repaint/lego (kept generated frames inside [t0, t1),
