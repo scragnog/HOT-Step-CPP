@@ -9,6 +9,7 @@
 #include "hot-step-sampler.h"
 #include "hot-step-sampler-trt.h"
 #include "adapter-trt.h"
+#include "stream-pipeline.h"
 #include "philox.h"
 #include "pipeline-synth-impl.h"
 #include "task-types.h"
@@ -1963,3 +1964,193 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
     return 0;
 }
 
+// ── Streaming pipeline (DEMON-style ring buffer) ────────────────────────
+//
+// Creates a StreamPipeline, submits the request, ticks until complete,
+// and emits [STREAM_PREVIEW] markers to stderr for Node.js SSE parsing.
+//
+// This runs on the existing worker thread. The HTTP handler returns
+// immediately (job ID), and Node.js reads preview markers from stderr.
+
+#ifdef HOT_STEP_TRT
+
+int ops_stream_generate(const AceSynth* ctx, int batch_n, SynthState& s,
+                        bool (*cancel)(void*), void* cancel_data) {
+    // Stream mode only works with TRT
+    if (!dit_ends_with_onnx(ctx->dit_key.path.c_str())) {
+        fprintf(stderr, "[Stream] ERROR: streaming requires TRT (ONNX model)\n");
+        return -1;
+    }
+
+    // Reuse the static TRT context from ops_dit_generate
+    // (it's already built/loaded by the normal path)
+    static DitTrt s_stream_trt;
+    static bool   s_stream_trt_ready = false;
+    static std::string s_stream_onnx_path;
+
+    // Build/load TRT engine if needed (same logic as ops_dit_generate)
+    if (!s_stream_trt_ready || s_stream_onnx_path != ctx->dit_key.path) {
+        if (s_stream_trt_ready) {
+            dit_trt_free(&s_stream_trt);
+            s_stream_trt.current_adapter.clear();
+            s_stream_trt_ready = false;
+        }
+
+        std::string onnx_path;
+        {
+            const std::string& p = ctx->dit_key.path;
+            size_t plen = p.size();
+            if (plen >= 5 && p.compare(plen - 5, 5, ".onnx") == 0) {
+                onnx_path = p;
+            } else {
+#ifdef _WIN32
+                std::string pattern = p + "\\*.onnx";
+                WIN32_FIND_DATAA fd;
+                HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+                if (h != INVALID_HANDLE_VALUE) {
+                    do {
+                        std::string fname(fd.cFileName);
+                        std::string lower = fname;
+                        for (auto& c : lower) c = (char)tolower((unsigned char)c);
+                        if (lower.find("dit") != std::string::npos) {
+                            onnx_path = p + "\\" + fname;
+                            break;
+                        }
+                    } while (FindNextFileA(h, &fd));
+                    FindClose(h);
+                }
+#else
+                DIR* d = opendir(p.c_str());
+                if (d) {
+                    struct dirent* ent;
+                    while ((ent = readdir(d)) != nullptr) {
+                        std::string fname(ent->d_name);
+                        std::string lower = fname;
+                        for (auto& c : lower) c = (char)tolower((unsigned char)c);
+                        if (lower.find("dit") != std::string::npos &&
+                            lower.size() >= 5 && lower.compare(lower.size() - 5, 5, ".onnx") == 0) {
+                            onnx_path = p + "/" + fname;
+                            break;
+                        }
+                    }
+                    closedir(d);
+                }
+#endif
+                if (onnx_path.empty()) {
+                    fprintf(stderr, "[Stream] FATAL: no dit*.onnx found in %s\n", p.c_str());
+                    return -1;
+                }
+            }
+        }
+
+        // Engine with batch=8 profile for streaming
+        std::string engine_path = onnx_path.substr(0, onnx_path.size() - 5) + "_stream.engine";
+
+        FILE* ef = fopen(engine_path.c_str(), "rb");
+        if (ef) {
+            fclose(ef);
+            fprintf(stderr, "[Stream] Loading cached streaming TRT engine: %s\n", engine_path.c_str());
+        } else {
+            fprintf(stderr, "[Stream] Building streaming TRT engine (max_batch=8)...\n");
+            if (!dit_trt_build(onnx_path.c_str(), engine_path.c_str(), 0, 8)) {
+                fprintf(stderr, "[Stream] FATAL: TRT engine build failed\n");
+                return -1;
+            }
+        }
+
+        if (!dit_trt_load(&s_stream_trt, engine_path.c_str(), onnx_path.c_str())) {
+            fprintf(stderr, "[Stream] FATAL: TRT engine load failed\n");
+            return -1;
+        }
+        s_stream_onnx_path = onnx_path;
+        s_stream_trt_ready = true;
+    }
+
+    // Get ORT VAE decoder
+    VaeOrt* vae_ort = nullptr;
+    if (!ctx->onnx_vae_path.empty()) {
+        vae_ort = store_require_vae_dec_ort(ctx->store, ctx->vae_dec_ort_key);
+    }
+
+    // Configure stream pipeline
+    StreamConfig stream_cfg;
+    stream_cfg.depth     = s.rr.stream_depth > 0 ? s.rr.stream_depth : 8;
+    stream_cfg.num_steps = s.num_steps;
+    stream_cfg.shift     = s.shift;
+    stream_cfg.denoise   = s.rr.cover_noise_strength > 0.0f ? s.rr.cover_noise_strength : 1.0f;
+    stream_cfg.vae_chunk   = ctx->params.vae_chunk;
+    stream_cfg.vae_overlap = ctx->params.vae_overlap;
+    stream_cfg.chunk_dir   = s.rr.stream_chunk_dir;
+
+    // Ensure chunk directory exists
+    if (!stream_cfg.chunk_dir.empty()) {
+#ifdef _WIN32
+        CreateDirectoryA(stream_cfg.chunk_dir.c_str(), nullptr);
+#else
+        mkdir(stream_cfg.chunk_dir.c_str(), 0755);
+#endif
+    }
+
+    fprintf(stderr, "[Stream] Starting: depth=%d steps=%d T=%d enc_S=%d\n",
+            stream_cfg.depth, stream_cfg.num_steps, s.T, s.enc_S);
+
+    StreamPipeline pipeline(&s_stream_trt, vae_ort, stream_cfg);
+
+    // Submit the request
+    StreamSlotRequest req;
+    req.enc_hidden.assign(s.enc_hidden.begin(), s.enc_hidden.end());
+    req.context_latents.assign(s.context.begin(), s.context.end());
+    req.enc_S = s.enc_S;
+    req.T     = s.T;
+    req.seed  = s.seeds.empty() ? 42 : s.seeds[0];
+    req.denoise = stream_cfg.denoise;
+
+    // Source latents for cover mode
+    if (s.use_source_context && s.have_cover && !s.cover_latents.empty()) {
+        req.source_latents.assign(s.cover_latents.begin(), s.cover_latents.end());
+    }
+
+    pipeline.submit(req);
+
+    // Tick loop — run until complete
+    auto t_start = std::chrono::steady_clock::now();
+    int preview_count = 0;
+
+    while (pipeline.active_slots() > 0 || !pipeline.queue_empty()) {
+        if (cancel && cancel(cancel_data)) {
+            fprintf(stderr, "[Stream] Cancelled at tick %d\n", pipeline.total_ticks());
+            break;
+        }
+
+        auto preview = pipeline.tick();
+        if (preview) {
+            preview_count++;
+            fprintf(stderr, "[STREAM_PREVIEW] path=%s t_start=%.3f duration=%.3f tick=%d slot=%d final=%d\n",
+                    preview->wav_path.c_str(), preview->t_start, preview->duration,
+                    preview->tick_idx, preview->slot_idx, preview->is_final ? 1 : 0);
+            fflush(stderr);
+        }
+    }
+
+    auto t_end = std::chrono::steady_clock::now();
+    float total_ms = std::chrono::duration<float, std::milli>(t_end - t_start).count();
+    fprintf(stderr, "[Stream] Complete: %d ticks, %d previews, %.1f ms total\n",
+            pipeline.total_ticks(), preview_count, total_ms);
+
+    // Release VAE
+    if (vae_ort) {
+        store_release(ctx->store, vae_ort);
+    }
+
+    // Release TRT engine if eviction policy says so
+    if (store_get_policy(ctx->store) == EVICT_STRICT) {
+        dit_trt_free(&s_stream_trt);
+        s_stream_trt_ready = false;
+        s_stream_onnx_path.clear();
+        fprintf(stderr, "[Stream] Engine unloaded from VRAM\n");
+    }
+
+    return 0;
+}
+
+#endif // HOT_STEP_TRT

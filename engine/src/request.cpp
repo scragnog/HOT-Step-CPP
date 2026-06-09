@@ -67,6 +67,9 @@ void request_init(AceRequest * r) {
     r->postprocess_plugin   = "";
     r->get_lrc              = false;
     r->use_ort_vae          = false;
+    r->stream_mode           = false;
+    r->stream_depth          = 8;
+    r->stream_chunk_dir      = "";
 }
 
 // helper: get yyjson string as std::string
@@ -254,6 +257,22 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
             const char * s = yyjson_get_str(v);
             r->use_ort_vae = (strcmp(s, "true") == 0 || strcmp(s, "1") == 0);
         }
+    }
+
+    // streaming
+    if ((v = yyjson_obj_get(obj, "stream_mode"))) {
+        if (yyjson_is_bool(v)) {
+            r->stream_mode = yyjson_get_bool(v);
+        } else if (yyjson_is_str(v)) {
+            const char * s = yyjson_get_str(v);
+            r->stream_mode = (strcmp(s, "true") == 0 || strcmp(s, "1") == 0);
+        }
+    }
+    if ((v = yyjson_obj_get(obj, "stream_depth")) && yyjson_is_num(v)) {
+        r->stream_depth = (int) yyjson_get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "stream_chunk_dir")) && yyjson_is_str(v)) {
+        r->stream_chunk_dir = yy_str(v);
     }
 
     // Lyrics is the source of truth for instrumental mode.
@@ -524,6 +543,16 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     }
     if (all || r->use_ort_vae != def.use_ort_vae) {
         yyjson_mut_obj_add_bool(doc, root, "use_ort_vae", r->use_ort_vae);
+    }
+    // streaming
+    if (all || r->stream_mode != def.stream_mode) {
+        yyjson_mut_obj_add_bool(doc, root, "stream_mode", r->stream_mode);
+    }
+    if (all || r->stream_depth != def.stream_depth) {
+        yyjson_mut_obj_add_int(doc, root, "stream_depth", r->stream_depth);
+    }
+    if (all || r->stream_chunk_dir != def.stream_chunk_dir) {
+        yyjson_mut_obj_add_str(doc, root, "stream_chunk_dir", r->stream_chunk_dir.c_str());
     }
 
     return doc;
