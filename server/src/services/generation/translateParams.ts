@@ -133,5 +133,10 @@ export function translateParams(params: any): AceRequest {
   // VAE backend selection (ONNX Runtime / TensorRT)
   if (params.useOrtVae) req.use_ort_vae = true;
 
+  // Streaming pipeline (DEMON-style ring buffer)
+  if (params.streamMode) req.stream_mode = true;
+  if (params.streamDepth !== undefined) req.stream_depth = params.streamDepth;
+  if (params.streamChunkDir) req.stream_chunk_dir = params.streamChunkDir;
+
   return req;
 }

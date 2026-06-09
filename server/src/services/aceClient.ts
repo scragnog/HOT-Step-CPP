@@ -118,6 +118,10 @@ export interface AceRequest {
   postprocess_plugin?: string;
   // VAE backend selection: true = ONNX Runtime (+TensorRT), false/undefined = GGML (default)
   use_ort_vae?: boolean;
+  // Streaming pipeline (DEMON-style ring buffer)
+  stream_mode?: boolean;       // true = route through streaming pipeline
+  stream_depth?: number;       // ring buffer depth (default 8)
+  stream_chunk_dir?: string;   // directory for preview WAV files
 }
 
 /** Job status from ace-server */

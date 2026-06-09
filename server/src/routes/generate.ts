@@ -59,6 +59,14 @@ interface GenerationJob {
   error?: string;
   params: any;
   createdAt: number;
+  /** Stream preview WAV files emitted by the DEMON-style ring buffer */
+  streamPreviews?: Array<{
+    path: string;
+    step: number;
+    totalSteps: number;
+    slot: number;
+    timestamp: number;
+  }>;
 }
 
 const jobs = new Map<string, GenerationJob>();
@@ -730,6 +738,30 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           job.stage = `Preparing DiT${trackLabel}...`;
         } else if (line.text.includes('[Resolve-T]') || line.text.includes('[Resolve-Params]')) {
           if (!resolveParamsAt) resolveParamsAt = now;
+        }
+
+        // ── Streaming pipeline markers ──────────────────────────────
+        // [Stream] tick N step M/S — ring buffer progress
+        const streamTick = line.text.match(/\[Stream\] tick (\d+) step (\d+)\/(\d+)/);
+        if (streamTick) {
+          if (!ditFirstStepAt) ditFirstStepAt = now;
+          ditLastStepAt = now;
+          const step = parseInt(streamTick[2], 10);
+          const total = parseInt(streamTick[3], 10);
+          job.stage = `Streaming${trackLabel}: Step ${step}/${total}`;
+          job.progress = Math.round(trackProgressBase + (step / total) * progressPerTrack * 0.8);
+        }
+        // [STREAM_PREVIEW] path=<file> step=N/M slot=K
+        const preview = line.text.match(/\[STREAM_PREVIEW\] path=(.+?) step=(\d+)\/(\d+) slot=(\d+)/);
+        if (preview) {
+          if (!job.streamPreviews) job.streamPreviews = [];
+          job.streamPreviews.push({
+            path: preview[1],
+            step: parseInt(preview[2], 10),
+            totalSteps: parseInt(preview[3], 10),
+            slot: parseInt(preview[4], 10),
+            timestamp: Date.now(),
+          });
         }
       });
 
@@ -1407,6 +1439,91 @@ router.post('/reset-queue', (_req, res) => {
     cancelled,
     drained,
   });
+});
+
+// GET /api/generate/stream/:id — SSE endpoint for streaming preview audio
+// Frontend connects via EventSource. Receives:
+//   event: status   — job status/stage/progress updates
+//   event: preview  — new preview WAV file available for playback
+//   event: done     — generation complete, final audio URL
+//   event: error    — generation failed
+router.get('/stream/:id', (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) { res.status(404).json({ error: 'Job not found' }); return; }
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');  // nginx compatibility
+  res.flushHeaders();
+
+  let lastPreviewIdx = 0;
+  let lastStage = '';
+  let lastProgress = -1;
+  let closed = false;
+
+  const sendSSE = (event: string, data: unknown) => {
+    if (closed) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Poll interval — check for new previews and status changes
+  const interval = setInterval(() => {
+    if (closed) return;
+
+    // Send status updates when changed
+    if (job.stage !== lastStage || job.progress !== lastProgress) {
+      lastStage = job.stage || '';
+      lastProgress = job.progress || 0;
+      sendSSE('status', {
+        status: job.status,
+        stage: job.stage,
+        progress: job.progress,
+      });
+    }
+
+    // Send new preview events
+    const previews = job.streamPreviews;
+    if (previews && previews.length > lastPreviewIdx) {
+      for (let i = lastPreviewIdx; i < previews.length; i++) {
+        // Convert filesystem path to a URL the frontend can fetch
+        // Preview WAVs are written to the stream_chunk_dir, which should be
+        // inside data/audio/ or a temp dir served by the static middleware
+        const p = previews[i];
+        sendSSE('preview', {
+          url: p.path,  // absolute path — frontend will need a serving route
+          step: p.step,
+          totalSteps: p.totalSteps,
+          slot: p.slot,
+        });
+      }
+      lastPreviewIdx = previews.length;
+    }
+
+    // Terminal states — send final event and close
+    if (job.status === 'succeeded') {
+      sendSSE('done', {
+        result: job.result,
+      });
+      cleanup();
+    } else if (job.status === 'failed' || job.status === 'cancelled') {
+      sendSSE('error', {
+        status: job.status,
+        error: job.error,
+      });
+      cleanup();
+    }
+  }, 250);  // 4Hz polling — fast enough for audio preview updates
+
+  const cleanup = () => {
+    closed = true;
+    clearInterval(interval);
+    res.end();
+  };
+
+  // Client disconnect
+  req.on('close', cleanup);
 });
 
 export default router;
