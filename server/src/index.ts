@@ -143,6 +143,7 @@ if (fs.existsSync(uiDistPath)) {
 let aceProcess: ChildProcess | null = null;
 
 import { setEngineReady } from './engineState.js';
+import { aceClient } from './services/aceClient.js';
 
 // Crash-count limiter: prevent infinite respawn on fatal errors (missing DLLs, etc.)
 let crashCount = 0;
@@ -458,7 +459,54 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   setEngineReady(false, cudaReady ? 'Starting engine...' : 'Starting engine (CPU only — CUDA runtime missing)...');
   aceProcess = startAceServer();
   setEngineReady(true, cudaReady ? 'Ready' : 'Ready (CPU only — GPU runtime missing)');
+
+  // Fire-and-forget: wait for engine /health, then POST /warm with the
+  // configured DiT + VAE + adapter so the first user-facing /synth skips
+  // the ~7-minute cold-start VRAM-copy phase. Failures here only log —
+  // they never block the wrapper from accepting requests.
+  if (config.aceServer.warmOnStartup && config.aceServer.keepLoaded && config.aceServer.warmDit) {
+    void warmEngineOnStartup();
+  } else if (config.aceServer.warmOnStartup && !config.aceServer.keepLoaded) {
+    console.log('[Server] warm-on-startup skipped: ACESTEPCPP_KEEP_LOADED is off (engine would evict immediately)');
+  } else if (config.aceServer.warmOnStartup && !config.aceServer.warmDit) {
+    console.log('[Server] warm-on-startup skipped: no ACESTEPCPP_WARM_DIT or ACESTEP_DIT_MODEL configured');
+  }
 })();
+
+/** Poll engine /health until reachable (or 90s elapsed), then POST /warm
+ *  with the configured DiT + VAE + adapter. The warm is itself an async
+ *  engine job; we kick it off and don't await it, so the wrapper is free
+ *  to accept requests while the LoKr deltas are still being copied to VRAM.
+ *  Any /synth that arrives mid-warm will queue behind it and get the same
+ *  hot cache for free. */
+async function warmEngineOnStartup(): Promise<void> {
+  const deadline = Date.now() + 90_000;
+  let healthy = false;
+  while (Date.now() < deadline) {
+    if (await aceClient.isReachable()) { healthy = true; break; }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  if (!healthy) {
+    console.warn('[Server] warm-on-startup: engine /health never came up in 90s — skipping warm');
+    return;
+  }
+  const cfg = config.aceServer;
+  const req: { dit: string; vae?: string; adapter?: string; adapter_scale?: number } = {
+    dit: cfg.warmDit,
+  };
+  if (cfg.warmVae) req.vae = cfg.warmVae;
+  if (cfg.warmAdapter) {
+    req.adapter = cfg.warmAdapter;
+    if (Number.isFinite(cfg.warmAdapterScale)) req.adapter_scale = cfg.warmAdapterScale;
+  }
+  try {
+    const jobId = await aceClient.warm(req, true);
+    console.log(`[Server] warm-on-startup: posted /warm dit=${cfg.warmDit}${cfg.warmAdapter ? ` adapter=${cfg.warmAdapter}` : ''} job=${jobId}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Server] warm-on-startup: /warm failed (will warm on first user request instead): ${msg}`);
+  }
+}
 
 // Start Express server
 const server = app.listen(config.server.port, config.server.host, () => {

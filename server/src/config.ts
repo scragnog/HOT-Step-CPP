@@ -127,6 +127,26 @@ export const config = {
      *  with ACESTEPCPP_KEEP_LOADED=0 if VRAM is tight and you'd rather
      *  pay the cold-start cost than carry several DiT+adapter combos. */
     keepLoaded: (process.env.ACESTEPCPP_KEEP_LOADED ?? '1') !== '0',
+    /** Post /warm to the engine after it boots, pre-loading the configured
+     *  DiT + VAE + adapter so the first user-facing /synth skips the ~7 min
+     *  cold-start VRAM-copy phase. Requires keepLoaded — under EVICT_STRICT
+     *  the engine drops the modules instantly, making the warm a waste.
+     *  Default '1' when keepLoaded is on; set ACESTEPCPP_WARM_ON_STARTUP=0
+     *  to disable. */
+    warmOnStartup: (process.env.ACESTEPCPP_WARM_ON_STARTUP ?? '1') !== '0',
+    /** Filename of the DiT to warm (resolved against models dir).
+     *  Falls back to ACESTEP_DIT_MODEL (the worker hotstep.conf knob) so
+     *  the warm naturally matches what the worker submits. */
+    warmDit: process.env.ACESTEPCPP_WARM_DIT || process.env.ACESTEP_DIT_MODEL || '',
+    /** Filename of the VAE to warm. */
+    warmVae: process.env.ACESTEPCPP_WARM_VAE || process.env.ACESTEP_VAE_MODEL || '',
+    /** Filename of the adapter to warm (resolved against adapters dir).
+     *  Empty disables adapter pre-load — DiT/VAE alone still cuts most of
+     *  the cold-start. */
+    warmAdapter: process.env.ACESTEPCPP_WARM_ADAPTER || '',
+    /** Adapter scale to use for the warm. Matches ACESTEP_LORA_SCALE default
+     *  so the warm and the worker hit the same LoKr-delta cache key. */
+    warmAdapterScale: parseFloat(process.env.ACESTEPCPP_WARM_ADAPTER_SCALE || process.env.ACESTEP_LORA_SCALE || '0.97'),
     /** TensorRT runtime DLL directory — auto-detected or TENSORRT_LIBS env override */
     trtLibs: process.env.TENSORRT_LIBS || (() => {
       // Auto-detect from engine/deps/tensorrt_libs/ (downloaded by Model Manager)
