@@ -508,15 +508,11 @@ const AppContent: React.FC = () => {
       parallelQualityEval: settings.parallelQualityEval,
       parallelCoverArt: settings.parallelCoverArt,
     };
-    // When stream mode is active, capture the jobId for SSE via callback
-    const isStream = !!(enrichedParams as any).streamMode;
-    if (!isStream) setStreamJobId(null);
 
     enqueueSimpleGen(
       enrichedParams,
       token,
       handleSongCreated,
-      isStream ? (jobId) => setStreamJobId(jobId) : undefined,
     );
   }, [token, settings, globalParams, handleSongCreated]);
 
