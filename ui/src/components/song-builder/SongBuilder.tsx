@@ -14,7 +14,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Plus, Loader2, Play, Pause, Check, Trash2, Music, Layers,
-  ChevronLeft, ArrowRightToLine, ArrowLeftToLine, Sparkles, MapPin,
+  ChevronLeft, ArrowRightToLine, ArrowLeftToLine, Sparkles, MapPin, Pencil,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
@@ -34,6 +34,16 @@ function fmtBlock(label: string, lyrics: string): string {
 }
 
 const SECTION_PRESETS = ['Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Bridge', 'Outro', 'Solo', 'Instrumental'];
+
+// '' = Auto (LM picks). Mirrors create/MetadataSection.tsx conventions.
+const KEY_SIGNATURES = [
+  '', 'C major', 'C minor', 'C# major', 'C# minor', 'D major', 'D minor',
+  'D# major', 'D# minor', 'E major', 'E minor', 'F major', 'F minor',
+  'F# major', 'F# minor', 'G major', 'G minor', 'G# major', 'G# minor',
+  'A major', 'A minor', 'A# major', 'A# minor', 'B major', 'B minor',
+];
+const TIME_SIGNATURES = ['', '4/4', '3/4', '6/8', '2/4', '5/4'];
+const BAR_PRESETS = [2, 4, 6, 8, 12, 16, 24, 32];
 
 // ── Main studio ──────────────────────────────────────────────────────────────
 
@@ -65,6 +75,14 @@ export const SongBuilder: React.FC = () => {
   // New-project form
   const [newTitle, setNewTitle] = useState('');
   const [newStyle, setNewStyle] = useState('');
+  const [newBpm, setNewBpm] = useState(0);            // 0 = Auto
+  const [newKey, setNewKey] = useState('');           // '' = Auto
+  const [newTimeSig, setNewTimeSig] = useState('');   // '' = Auto
+
+  // Section length: 'bars' (derived from BPM) or 'seconds' (manual). Bars mode
+  // only applies when the project has a real BPM; otherwise we fall back to secs.
+  const [lengthMode, setLengthMode] = useState<'bars' | 'seconds'>('bars');
+  const [nextBars, setNextBars] = useState(8);
 
   // Composer (next section to generate)
   const [direction, setDirection] = useState<BuilderDirection>('first');
@@ -91,6 +109,13 @@ export const SongBuilder: React.FC = () => {
   const [genProgress, setGenProgress] = useState(0);
   const [genStage, setGenStage] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // One job per variant (so options stream in as each finishes) — tracked for cancel.
+  const activeJobIdsRef = useRef<string[]>([]);
+
+  // Per-section lyric editing (correct the sheet fed forward when the DiT alters lines)
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [editLyrics, setEditLyrics] = useState('');
+  const [editLabel, setEditLabel] = useState('');
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 4000); };
 
@@ -106,9 +131,11 @@ export const SongBuilder: React.FC = () => {
   const headSong = head?.chosen ?? null;
   const headDuration = headSong?.duration ?? 0;
 
-  // The most recent section that has variants but no pick yet → audition target
-  const auditionSection = useMemo(
-    () => sections.filter(s => s.status === 'ready').sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null,
+  // The section currently being generated/auditioned (variants stream in while
+  // 'generating', finalize at 'ready'). Either way it's the audition target.
+  const activeSection = useMemo(
+    () => sections.filter(s => s.status === 'generating' || s.status === 'ready')
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null,
     [sections],
   );
 
@@ -149,11 +176,27 @@ export const SongBuilder: React.FC = () => {
     if (!token) return;
     try {
       const { project: p } = await builderApi.createProject(
-        { title: newTitle || 'Untitled Song', style: newStyle, variantCount: 4, sectionLength: 30 }, token);
+        {
+          title: newTitle || 'Untitled Song', style: newStyle,
+          bpm: newBpm || 0, keyScale: newKey, timeSignature: newTimeSig,
+          variantCount: 4, sectionLength: 30,
+        }, token);
       setProject(p); setSections([]); setNewTitle('');
       setProjects(prev => [p, ...prev]);
     } catch (e: any) { showToast(`Create failed: ${e.message}`); }
-  }, [token, newTitle, newStyle]);
+  }, [token, newTitle, newStyle, newBpm, newKey, newTimeSig]);
+
+  // Persist a project field change (optimistic local update + background PATCH).
+  const saveProjectFields = useCallback(async (patch: Record<string, any>) => {
+    if (!project || !token) return;
+    const local: any = {};
+    if ('style' in patch) local.style = patch.style;
+    if ('bpm' in patch) local.bpm = patch.bpm;
+    if ('keyScale' in patch) local.key_scale = patch.keyScale;
+    if ('timeSignature' in patch) local.time_signature = patch.timeSignature;
+    setProject(prev => prev ? { ...prev, ...local } : prev);
+    try { await builderApi.updateProject(project.id, patch, token); } catch { /* non-fatal */ }
+  }, [project, token]);
 
   const backToList = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -169,11 +212,37 @@ export const SongBuilder: React.FC = () => {
 
   // ── Build the cumulative lyric sheet for the section about to be generated ──
   const cumulativeLyrics = useMemo(() => {
-    const blocks = timeline.map(s => fmtBlock(s.label, s.chosen?.lyrics ?? s.lyrics));
+    // Use the per-section lyric the user entered/edited (NOT the chosen song's
+    // lyrics, which holds the full cumulative sheet fed at that step and would
+    // double-count). Editing a section's lyrics here is what flows forward.
+    const blocks = timeline.map(s => fmtBlock(s.label, s.lyrics));
     const newBlock = fmtBlock(nextLabel, nextLyrics);
     const all = direction === 'prepend' ? [newBlock, ...blocks] : [...blocks, newBlock];
     return all.filter(Boolean).join('\n\n') || '[Instrumental]';
   }, [timeline, nextLabel, nextLyrics, direction]);
+
+  // ── Section length: bars ↔ seconds ──
+  const beatsPerBar = useMemo(() => parseInt((project?.time_signature || '').split('/')[0], 10) || 4, [project?.time_signature]);
+  const bpm = project?.bpm || 0;
+  const barsSeconds = useMemo(
+    () => (bpm > 0 ? Math.max(1, Math.round((nextBars * beatsPerBar * 60) / bpm)) : 0),
+    [bpm, beatsPerBar, nextBars],
+  );
+  // Effective seconds handed to generation (bars mode needs a real BPM).
+  const effectiveLength = (lengthMode === 'bars' && bpm > 0) ? barsSeconds : nextLength;
+  // Sung-line count for the estimate — excludes blank lines and [structure] tags.
+  const lyricLineCount = useMemo(
+    () => nextLyrics.split('\n').map(l => l.trim()).filter(l => l && !/^\[.*\]$/.test(l)).length,
+    [nextLyrics],
+  );
+  const estimateBarsFromLyrics = useCallback(() => {
+    // Rough heuristic: ~2 bars per sung line (typical verse density), snapped to a
+    // common bar count. A starting point — the user adjusts from there.
+    const raw = Math.max(2, Math.round(lyricLineCount * 2));
+    const snapped = BAR_PRESETS.reduce((a, b) => (Math.abs(b - raw) < Math.abs(a - raw) ? b : a), BAR_PRESETS[0]);
+    setNextBars(snapped);
+    setLengthMode('bars');
+  }, [lyricLineCount]);
 
   // ── Generate the next section ──
   const handleGenerate = useCallback(async () => {
@@ -192,8 +261,8 @@ export const SongBuilder: React.FC = () => {
         title: `${project.title} — ${nextLabel || direction}`,
         style: project.style || (engineParams as any).style || '',
         lyrics: cumulativeLyrics,
-        batchSize: project.variant_count || 4,
-        randomSeed: true,
+        batchSize: 1,        // one variant per job → options stream in progressively
+        randomSeed: true,    // fresh seed per job, so the variants differ
       };
 
       // ── Builder pipeline tuning ──────────────────────────────────────────
@@ -226,20 +295,20 @@ export const SongBuilder: React.FC = () => {
       if (project.vocal_language) params.vocalLanguage = project.vocal_language;
 
       if (direction === 'first') {
-        params.duration = nextLength;
+        params.duration = effectiveLength;
       } else {
         // Overwrite `overlap` seconds at the seam so the prior section's clean
         // resolution (append) or song-start (prepend) is regenerated as a
         // transition rather than preserved verbatim. Clamp so we never overwrite
         // the whole source or more than the new section is long.
-        const overlap = Math.max(0, Math.min(transitionOverlap, headDuration - 1, nextLength));
+        const overlap = Math.max(0, Math.min(transitionOverlap, headDuration - 1, effectiveLength));
         params.taskType = 'repaint';
         params.duration = 0; // engine derives from source canvas
         if (direction === 'prepend') {
           // connect-at point: content before it (the unwanted head) is regenerated
           // as part of the intro lead-in. Default 0 = overwrite only the seam.
           const at = clipPoint ?? 0;
-          params.repaintingStart = -nextLength;          // pad/generate before the song
+          params.repaintingStart = -effectiveLength;     // pad/generate before the song
           params.repaintingEnd = at + overlap;           // overwrite [0, at+overlap]
         } else {
           // extend-from point: content after it (the unwanted tail) is fully inside
@@ -248,7 +317,7 @@ export const SongBuilder: React.FC = () => {
           params.repaintingStart = from - overlap;       // overwrite back from the attach point
           // Ensure the whole tail past `from` is regenerated (never preserve a
           // sliver of old tail beyond the new content when the user trims).
-          params.repaintingEnd = Math.max(from + nextLength, headDuration);
+          params.repaintingEnd = Math.max(from + effectiveLength, headDuration);
         }
         params.repaintInjectionRatio = 0.5;
         params.repaintCrossfadeFrames = 10;
@@ -258,84 +327,146 @@ export const SongBuilder: React.FC = () => {
         if (audio) params.sourceAudioUrl = audio;
       }
 
-      const { jobId } = await generateApi.submit(params as any, token);
-      setActiveJobId(jobId);
+      const n = Math.max(1, project.variant_count || 4);
 
-      // Record the section immediately so a refresh/reload survives the in-flight job.
+      // Create the section up-front so streaming candidates have a home and a
+      // refresh/reload survives the in-flight jobs.
       const { section } = await builderApi.createSection(project.id, {
         label: nextLabel,
         lyrics: nextLyrics,
         direction,
-        sectionLength: nextLength,
-        jobId,
+        sectionLength: effectiveLength,
         status: 'generating',
       }, token);
       setSections(prev => [...prev, section]);
 
-      pollJob(jobId, section.id);
+      // One job per variant — the single GPU worker runs them in order, so each
+      // option becomes audible as it finishes instead of waiting for the batch.
+      const jobIds: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const { jobId } = await generateApi.submit(params as any, token);
+        jobIds.push(jobId);
+      }
+      activeJobIdsRef.current = jobIds;
+      setActiveJobId(jobIds[0]);
+      pollVariantJobs(jobIds, section.id);
     } catch (e: any) {
       showToast(`Generation failed: ${e.message}`);
       setIsGenerating(false);
     }
-  }, [token, project, direction, headSong, headDuration, gp, nextLabel, nextLyrics, nextLength, cumulativeLyrics, previewMastering, transitionOverlap, clipPoint]);
+  }, [token, project, direction, headSong, headDuration, gp, nextLabel, nextLyrics, effectiveLength, cumulativeLyrics, previewMastering, transitionOverlap, clipPoint]);
 
-  const pollJob = useCallback((jobId: string, sectionId: string) => {
+  // Poll all variant jobs; append each finished song to the section's candidate
+  // list as it lands (streaming), then mark 'ready' when the last one finishes.
+  const pollVariantJobs = useCallback((jobIds: string[], sectionId: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
+    const pending = new Set(jobIds);
+    const collected: string[] = [];
     pollRef.current = setInterval(async () => {
-      try {
-        const s = await generateApi.status(jobId);
-        const rawProg = (s as any).progress;
-        if (rawProg != null) setGenProgress(Math.min(100, Math.round(rawProg > 1 ? rawProg : rawProg * 100)));
-        if ((s as any).stage) setGenStage((s as any).stage);
-
+      for (const jobId of Array.from(pending)) {
+        let s: any;
+        try { s = await generateApi.status(jobId); } catch { continue; }
         if (s.status === 'succeeded') {
-          clearInterval(pollRef.current!);
-          const songIds: string[] = (s as any).result?.songIds || [];
-          await builderApi.updateSection(sectionId, { candidateSongIds: songIds, status: 'ready' }, token!);
-          setIsGenerating(false);
-          setActiveJobId(null);
-          setGenProgress(100);
-          setGenStage('Pick a variant');
+          pending.delete(jobId);
+          collected.push(...((s.result?.songIds as string[]) || []));
+          await builderApi.updateSection(sectionId, { candidateSongIds: [...collected] }, token!).catch(() => {});
           await refresh();
-        } else if (s.status === 'failed') {
-          clearInterval(pollRef.current!);
-          await builderApi.updateSection(sectionId, { status: 'failed' }, token!).catch(() => {});
-          setIsGenerating(false);
-          setActiveJobId(null);
-          setGenStage('');
-          showToast(`Failed: ${(s as any).error || 'Unknown error'}`);
-          await refresh();
+        } else if (s.status === 'failed' || s.status === 'cancelled') {
+          pending.delete(jobId);
         }
-      } catch { /* transient poll error — keep polling */ }
+      }
+      setGenProgress(Math.round(((jobIds.length - pending.size) / jobIds.length) * 100));
+      setGenStage(`Generated ${collected.length} of ${jobIds.length}…`);
+
+      if (pending.size === 0) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        activeJobIdsRef.current = [];
+        await builderApi.updateSection(sectionId, {
+          candidateSongIds: [...collected],
+          status: collected.length ? 'ready' : 'failed',
+        }, token!).catch(() => {});
+        setIsGenerating(false);
+        setActiveJobId(null);
+        setGenStage(collected.length ? 'Pick a variant' : '');
+        if (!collected.length) showToast('All variants failed');
+        await refresh();
+      }
     }, 2000);
   }, [token, refresh]);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   // ── Choose a variant for a section ──
-  const chooseVariant = useCallback(async (sectionId: string, songId: string) => {
+  const chooseVariant = useCallback(async (sectionId: string, song: Song) => {
     if (!token) return;
+    // Got our pick — stop polling and cancel any still-running variant jobs.
+    if (pollRef.current) clearInterval(pollRef.current);
+    for (const jid of activeJobIdsRef.current) generateApi.cancel(jid).catch(() => {});
+    activeJobIdsRef.current = [];
+    setIsGenerating(false); setActiveJobId(null); setGenStage(''); setGenProgress(0);
     try {
-      await builderApi.updateSection(sectionId, { chosenSongId: songId, status: 'chosen' }, token);
+      await builderApi.updateSection(sectionId, { chosenSongId: song.id, status: 'chosen' }, token);
+      // Backfill auto'd musical params from the first concrete section so later
+      // sections inherit a real BPM/key (and bars-mode lights up).
+      if (project && (!project.bpm || !project.key_scale)) {
+        const patch: Record<string, any> = {};
+        if (!project.bpm && song.bpm) patch.bpm = Math.round(song.bpm);
+        if (!project.key_scale && song.key_scale) patch.keyScale = song.key_scale;
+        if (Object.keys(patch).length) saveProjectFields(patch);
+      }
       // Advance composer: default to appending the next section.
       setDirection('append');
       setNextLabel('Verse');
       setNextLyrics('');
       await refresh();
     } catch (e: any) { showToast(`Could not select: ${e.message}`); }
-  }, [token, refresh]);
+  }, [token, refresh, project, saveProjectFields]);
 
   const deleteSection = useCallback(async (sectionId: string) => {
     if (!token) return;
+    // If discarding the section that's mid-generation, stop its jobs too.
+    if (sectionId === activeSection?.id) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      for (const jid of activeJobIdsRef.current) generateApi.cancel(jid).catch(() => {});
+      activeJobIdsRef.current = [];
+      setIsGenerating(false); setActiveJobId(null); setGenStage(''); setGenProgress(0);
+    }
     await builderApi.deleteSection(sectionId, token).catch(() => {});
     await refresh();
-  }, [token, refresh]);
+  }, [token, refresh, activeSection]);
 
   const cancelGen = useCallback(async () => {
-    if (activeJobId) { try { await generateApi.cancel(activeJobId); } catch {} }
     if (pollRef.current) clearInterval(pollRef.current);
+    for (const jid of activeJobIdsRef.current) generateApi.cancel(jid).catch(() => {});
+    if (activeJobId) generateApi.cancel(activeJobId).catch(() => {});
+    activeJobIdsRef.current = [];
     setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage('');
   }, [activeJobId]);
+
+  // Stop the remaining variant jobs but keep the options that already finished,
+  // finalizing the section so the user can pick from what arrived.
+  const stopGenerating = useCallback(async (sectionId: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    for (const jid of activeJobIdsRef.current) generateApi.cancel(jid).catch(() => {});
+    activeJobIdsRef.current = [];
+    setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage('');
+    const sec = sections.find(s => s.id === sectionId);
+    await builderApi.updateSection(sectionId, { status: (sec?.candidates.length ?? 0) > 0 ? 'ready' : 'failed' }, token!).catch(() => {});
+    await refresh();
+  }, [token, refresh, sections]);
+
+  // ── Edit a committed section's lyrics (e.g. correct lines the DiT altered) ──
+  const openLyricEditor = useCallback((s: BuilderSection) => {
+    setEditingSectionId(s.id);
+    setEditLabel(s.label || '');
+    setEditLyrics(s.lyrics || '');
+  }, []);
+  const saveLyricEdit = useCallback(async () => {
+    if (!token || !editingSectionId) return;
+    await builderApi.updateSection(editingSectionId, { label: editLabel, lyrics: editLyrics }, token).catch(() => {});
+    setEditingSectionId(null);
+    await refresh();
+  }, [token, editingSectionId, editLabel, editLyrics, refresh]);
 
   // ── Render: project list (no project open) ──
   if (!project) {
@@ -364,9 +495,34 @@ export const SongBuilder: React.FC = () => {
               />
               <input
                 value={newStyle} onChange={e => setNewStyle(e.target.value)}
-                placeholder="Style / caption (e.g. dreamy synthpop, 90 bpm, female vocals)"
+                placeholder="Style / caption (e.g. dreamy synthpop, female vocals)"
                 className="w-full px-3 py-2 rounded-lg bg-black/20 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500"
               />
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[10px] text-zinc-500 mb-1">BPM</label>
+                  <input
+                    type="number" min={0} max={300}
+                    value={newBpm || ''} placeholder="Auto"
+                    onChange={e => setNewBpm(parseInt(e.target.value, 10) || 0)}
+                    className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-zinc-500 mb-1">Key</label>
+                  <select value={newKey} onChange={e => setNewKey(e.target.value)}
+                    className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white focus:outline-none focus:border-violet-500">
+                    {KEY_SIGNATURES.map(k => <option key={k} value={k}>{k || 'Auto'}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-zinc-500 mb-1">Time sig</label>
+                  <select value={newTimeSig} onChange={e => setNewTimeSig(e.target.value)}
+                    className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white focus:outline-none focus:border-violet-500">
+                    {TIME_SIGNATURES.map(t => <option key={t} value={t}>{t || 'Auto'}</option>)}
+                  </select>
+                </div>
+              </div>
               <button
                 onClick={createProject}
                 className="w-full px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium flex items-center justify-center gap-2 transition-colors"
@@ -428,6 +584,52 @@ export const SongBuilder: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-6">
+        {/* ── Song settings (shared across sections) ── */}
+        <div>
+          <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Song settings</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="col-span-2 sm:col-span-1">
+              <label className="block text-[10px] text-zinc-500 mb-1">Style</label>
+              <input
+                value={project.style || ''}
+                onChange={e => setProject(prev => prev ? { ...prev, style: e.target.value } : prev)}
+                onBlur={e => saveProjectFields({ style: e.target.value })}
+                placeholder="Style / caption"
+                className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 mb-1">BPM</label>
+              <input
+                type="number" min={0} max={300}
+                value={project.bpm || ''} placeholder="Auto"
+                onChange={e => setProject(prev => prev ? { ...prev, bpm: parseInt(e.target.value, 10) || 0 } : prev)}
+                onBlur={e => saveProjectFields({ bpm: parseInt(e.target.value, 10) || 0 })}
+                className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 mb-1">Key</label>
+              <select value={project.key_scale || ''} onChange={e => saveProjectFields({ keyScale: e.target.value })}
+                className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white focus:outline-none focus:border-violet-500">
+                {KEY_SIGNATURES.map(k => <option key={k} value={k}>{k || 'Auto'}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 mb-1">Time sig</label>
+              <select value={project.time_signature || ''} onChange={e => saveProjectFields({ timeSignature: e.target.value })}
+                className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white focus:outline-none focus:border-violet-500">
+                {TIME_SIGNATURES.map(t => <option key={t} value={t}>{t || 'Auto'}</option>)}
+              </select>
+            </div>
+          </div>
+          {bpm > 0 ? (
+            <p className="text-[10px] text-zinc-600 mt-1.5">Established on the first section; later sections inherit tempo/key from the audio they extend.</p>
+          ) : (
+            <p className="text-[10px] text-amber-500/70 mt-1.5">Set a BPM to size sections by bars. With Auto, the model picks tempo and sections are sized in seconds.</p>
+          )}
+        </div>
+
         {/* ── Timeline of committed sections ── */}
         <div>
           <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Timeline</h3>
@@ -443,7 +645,10 @@ export const SongBuilder: React.FC = () => {
                     className={`flex-shrink-0 w-40 rounded-xl border p-3 ${isHead ? 'border-violet-500/50 bg-violet-500/10' : 'border-white/10 bg-white/[0.03]'}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[10px] uppercase tracking-wide text-zinc-500">#{i + 1}{isHead ? ' · head' : ''}</span>
-                      <Trash2 size={12} className="text-zinc-600 hover:text-red-400 cursor-pointer" onClick={() => deleteSection(s.id)} />
+                      <div className="flex items-center gap-1.5">
+                        <Pencil size={11} className="text-zinc-600 hover:text-violet-300 cursor-pointer" onClick={() => openLyricEditor(s)} aria-label="Edit lyrics fed forward" />
+                        <Trash2 size={12} className="text-zinc-600 hover:text-red-400 cursor-pointer" onClick={() => deleteSection(s.id)} />
+                      </div>
                     </div>
                     <div className="text-sm text-white font-medium truncate">{s.label || 'Section'}</div>
                     <div className="text-[11px] text-zinc-500 mb-2">{Math.round(s.chosen?.duration || 0)}s · {s.direction}</div>
@@ -461,19 +666,26 @@ export const SongBuilder: React.FC = () => {
           )}
         </div>
 
-        {/* ── Audition: variants awaiting a pick ── */}
-        {auditionSection && (
+        {/* ── Audition: variants stream in; pick the moment your favourite lands ── */}
+        {activeSection && (
           <div className="rounded-2xl border border-violet-500/30 bg-violet-500/[0.06] p-4">
-            <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
-              <Sparkles size={15} className="text-violet-400" /> Pick a variant for “{auditionSection.label || 'section'}”
-            </h3>
-            <p className="text-[11px] text-zinc-500 mb-3">All variants share the same prior song and differ only in this new section.</p>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Sparkles size={15} className="text-violet-400" /> Pick a variant for “{activeSection.label || 'section'}”
+              </h3>
+              {activeSection.status === 'generating' && (
+                <span className="text-[11px] text-violet-300 flex items-center gap-1.5">
+                  <Loader2 size={12} className="animate-spin" /> {genStage || 'Generating…'}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-500 mb-3">Options appear as they finish — audition and pick as soon as your favourite lands. All share the same prior song and differ only in this new section.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {auditionSection.candidates.map((c, i) => {
+              {activeSection.candidates.map((c, i) => {
                 const isThis = playingTrackId === c.id;
                 return (
                   <div key={c.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3 flex items-center gap-3">
-                    <button onClick={() => playSong(c, auditionSection.candidates)} className="w-9 h-9 rounded-full bg-violet-600 hover:bg-violet-500 flex items-center justify-center flex-shrink-0" title="Play in the bar below — scrub to audition">
+                    <button onClick={() => playSong(c, activeSection.candidates)} className="w-9 h-9 rounded-full bg-violet-600 hover:bg-violet-500 flex items-center justify-center flex-shrink-0" title="Play in the bar below — scrub to audition">
                       {isThis && isPlaying ? <Pause size={15} className="text-white" /> : <Play size={15} className="text-white" />}
                     </button>
                     <div className="flex-1 min-w-0">
@@ -481,7 +693,7 @@ export const SongBuilder: React.FC = () => {
                       <div className="text-[11px] text-zinc-500">{Math.round(c.duration || 0)}s</div>
                     </div>
                     <button
-                      onClick={() => chooseVariant(auditionSection.id, c.id)}
+                      onClick={() => chooseVariant(activeSection.id, c)}
                       className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium flex items-center gap-1.5"
                     >
                       <Check size={13} /> Use
@@ -489,13 +701,30 @@ export const SongBuilder: React.FC = () => {
                   </div>
                 );
               })}
+              {/* Placeholder slots for variants still in flight */}
+              {activeSection.status === 'generating' &&
+                Array.from({ length: Math.max(0, (project.variant_count || 4) - activeSection.candidates.length) }).map((_, k) => (
+                  <div key={`ph-${k}`} className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-3 flex items-center gap-3 text-zinc-600">
+                    <Loader2 size={15} className="animate-spin flex-shrink-0" />
+                    <span className="text-xs">Generating option {activeSection.candidates.length + k + 1}…</span>
+                  </div>
+                ))}
             </div>
-            <button onClick={() => deleteSection(auditionSection.id)} className="mt-3 text-[11px] text-zinc-500 hover:text-red-400">Discard these variants</button>
+            <div className="flex items-center gap-4 mt-3">
+              <button onClick={() => deleteSection(activeSection.id)} className="text-[11px] text-zinc-500 hover:text-red-400">
+                Discard{activeSection.status === 'generating' ? ' & stop' : ' these variants'}
+              </button>
+              {activeSection.status === 'generating' && (
+                <button onClick={() => stopGenerating(activeSection.id)} className="text-[11px] text-zinc-500 hover:text-amber-400">
+                  Stop &amp; keep what's done
+                </button>
+              )}
+            </div>
           </div>
         )}
 
         {/* ── Composer: generate the next section ── */}
-        {!auditionSection && (
+        {!activeSection && (
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             <h3 className="text-sm font-semibold text-white mb-3">
               {direction === 'first' ? 'Generate first section' : direction === 'prepend' ? 'Prepend a section' : 'Extend with next section'}
@@ -531,10 +760,48 @@ export const SongBuilder: React.FC = () => {
               className="w-full px-3 py-2 mb-2 rounded-lg bg-black/20 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500 resize-y"
             />
 
-            <div className="flex items-center gap-3 mb-3">
-              <label className="text-xs text-zinc-400">Length</label>
-              <input type="range" min={5} max={60} step={1} value={nextLength} onChange={e => setNextLength(Number(e.target.value))} className="flex-1 accent-violet-500" />
-              <span className="text-xs text-violet-300 w-10 text-right">{nextLength}s</span>
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs text-zinc-400">Length</label>
+                {bpm > 0 && (
+                  <div className="flex gap-1">
+                    <button onClick={() => setLengthMode('bars')}
+                      className={`px-2 py-0.5 rounded text-[10px] ${lengthMode === 'bars' ? 'bg-violet-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'}`}>Bars</button>
+                    <button onClick={() => setLengthMode('seconds')}
+                      className={`px-2 py-0.5 rounded text-[10px] ${lengthMode === 'seconds' ? 'bg-violet-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'}`}>Seconds</button>
+                  </div>
+                )}
+              </div>
+
+              {lengthMode === 'bars' && bpm > 0 ? (
+                <div>
+                  <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                    {BAR_PRESETS.map(b => (
+                      <button key={b} onClick={() => setNextBars(b)}
+                        className={`px-2.5 py-1 rounded-full text-[11px] ${nextBars === b ? 'bg-violet-600 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'}`}>{b}</button>
+                    ))}
+                    <input type="number" min={1} max={64} value={nextBars}
+                      onChange={e => setNextBars(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      className="w-14 px-2 py-1 rounded bg-black/20 border border-white/10 text-xs text-white focus:outline-none focus:border-violet-500" />
+                    <span className="text-[11px] text-zinc-500">bars</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-violet-300">≈ {barsSeconds}s
+                      <span className="text-zinc-600"> at {bpm} BPM · {beatsPerBar}/{(project.time_signature || '4/4').split('/')[1] || '4'}</span>
+                    </span>
+                    <button onClick={estimateBarsFromLyrics} disabled={lyricLineCount === 0}
+                      className="text-[11px] text-violet-400 hover:text-violet-300 disabled:opacity-40"
+                      title="Estimate bars from the number of lyric lines (~2 bars per line) — a starting point you can adjust">
+                      ≈ from lyrics ({lyricLineCount} line{lyricLineCount === 1 ? '' : 's'})
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <input type="range" min={5} max={90} step={1} value={nextLength} onChange={e => setNextLength(Number(e.target.value))} className="flex-1 accent-violet-500" />
+                  <span className="text-xs text-violet-300 w-10 text-right">{nextLength}s</span>
+                </div>
+              )}
             </div>
 
             {direction !== 'first' && (
@@ -617,6 +884,31 @@ export const SongBuilder: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Lyric editor — correct the sheet fed forward when the DiT alters lines */}
+      {editingSectionId && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6" onClick={() => setEditingSectionId(null)}>
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-zinc-900 p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-white mb-1">Edit section lyrics</h3>
+            <p className="text-[11px] text-zinc-500 mb-3">
+              This is what gets fed forward when generating later sections. If the model dropped or changed lines, correct it here to match what was actually sung — so later sections build on the real lyrics.
+            </p>
+            <input
+              value={editLabel} onChange={e => setEditLabel(e.target.value)} placeholder="Label"
+              className="w-full px-3 py-2 mb-2 rounded-lg bg-black/20 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500"
+            />
+            <textarea
+              value={editLyrics} onChange={e => setEditLyrics(e.target.value)} rows={8}
+              placeholder="Lyrics for this section"
+              className="w-full px-3 py-2 rounded-lg bg-black/20 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-violet-500 resize-y"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={() => setEditingSectionId(null)} className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-zinc-300">Cancel</button>
+              <button onClick={saveLyricEdit} className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-xs text-white font-medium">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
