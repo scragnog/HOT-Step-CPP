@@ -143,10 +143,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     if (artist.trim()) params.artist = artist.trim();
     if (subject.trim()) params.subject = subject.trim();
     if (sourceLatentUrl) params.sourceLatentUrl = sourceLatentUrl;
-    // Stream mode
-    if (streamMode) {
-      (params as any).streamMode = true;
-    }
+    // Stream mode — SHELVED
+    // if (streamMode) {
+    //   (params as any).streamMode = true;
+    // }
     onGenerate(params);
   };
 
@@ -204,8 +204,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
         <CoverArtSubjectSection />
       </div>
 
-      {/* Stream Player — shows when streaming generation is active */}
-      {streamJobId && (
+      {/* Stream Player — SHELVED: streaming not yet production-ready */}
+      {false && streamJobId && (
         <div className="px-4 py-2 border-t border-zinc-200 dark:border-white/5">
           <StreamPlayer
             connected={stream.connected}
@@ -223,8 +223,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
 
       {/* Generate button + Stream toggle */}
       <div className="px-4 py-3 border-t border-zinc-200 dark:border-white/5 space-y-2">
-        {/* Stream mode toggle */}
-        <div className="flex items-center justify-between">
+        {/* Stream mode toggle — SHELVED: streaming not yet production-ready */}
+        {false && <div className="flex items-center justify-between">
           <button
             onClick={() => setStreamMode(!streamMode)}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
@@ -240,14 +240,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
           {streamMode && (
             <span className="text-[10px] text-zinc-600 italic">Preview audio during generation</span>
           )}
-        </div>
+        </div>}
 
         <button
-          className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
-            streamMode
-              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 hover:shadow-lg hover:shadow-emerald-500/20'
-              : 'bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 hover:shadow-lg hover:shadow-pink-500/20'
-          } text-white`}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 hover:shadow-lg hover:shadow-pink-500/20 text-white"
           onClick={handleGenerate}
           disabled={!caption.trim() && !lyrics.trim() && !instrumental}
         >
@@ -258,11 +254,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
               <span className="ml-1 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-white/20 text-xs font-bold tabular-nums">
                 {activeJobCount}
               </span>
-            </>
-          ) : streamMode ? (
-            <>
-              <Radio size={18} />
-              Stream Generate
             </>
           ) : (
             <>
