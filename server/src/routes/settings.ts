@@ -31,6 +31,7 @@ function getResolvedDefaults(): Record<string, string> {
     ACESTEPCPP_ADAPTERS: config.aceServer.adapters,
     ACESTEPCPP_PORT: String(config.aceServer.port),
     ACESTEPCPP_HOST: config.aceServer.host,
+    ACESTEPCPP_KEEP_LOADED: config.aceServer.keepLoaded ? '1' : '0',
     CUDA_VISIBLE_DEVICES: config.aceServer.cudaVisibleDevices,
     SERVER_PORT: String(config.server.port),
     DATA_DIR: config.data.dir,

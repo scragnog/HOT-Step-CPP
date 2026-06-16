@@ -44,6 +44,12 @@ interface GenerationJob {
   stage?: string;
   progress?: number;
   aceJobId?: string;  // Current ace-server job ID (LM or synth)
+  /** Fine-grained engine phase pulled from GET /job (e.g. "adapter_precompute").
+   *  Surfaces "stuck in the ~17 s adapter precompute" vs. "actually failed". */
+  acePhase?: string;
+  /** Sub-phase progress formatted by pollUntilDone, e.g. "step 12/50", or
+   *  empty when phase_total is 0. Surfaced to /status as ace_phase_progress. */
+  acePhaseProgress?: string;
   lmResults?: AceRequest[];
   result?: {
     audioUrls: string[];
@@ -136,6 +142,15 @@ async function pollUntilDone(aceJobId: string, job: GenerationJob, signal: Abort
     // (e.g. ace-server busy mid-DiT-step) don't kill the loop
     try {
       const status = await aceClient.pollJob(aceJobId);
+      // Surface the engine's fine-grained phase + step counter so /status can
+      // return ace_phase / ace_phase_progress. Optional on the wire (older
+      // ace-server builds omit them), so guard.
+      if (status.phase) {
+        job.acePhase = status.phase;
+        const step = status.phase_step ?? 0;
+        const total = status.phase_total ?? 0;
+        job.acePhaseProgress = total > 0 ? `step ${step}/${total}` : '';
+      }
       if (status.status === 'done') return;
       if (status.status === 'failed') throw new Error('Generation failed on ace-server');
       if (status.status === 'cancelled') throw new Error('Cancelled by ace-server');
@@ -1352,6 +1367,9 @@ router.get('/status/:id', (req, res) => {
     progress: job.progress,
     result: job.result,
     error: job.error,
+    ace_job_id: job.aceJobId ?? null,
+    ace_phase: job.acePhase ?? null,
+    ace_phase_progress: job.acePhaseProgress ?? null,
   });
 });
 

@@ -145,6 +145,7 @@ if (fs.existsSync(uiDistPath)) {
 let aceProcess: ChildProcess | null = null;
 
 import { setEngineReady } from './engineState.js';
+import { aceClient } from './services/aceClient.js';
 
 // Crash-count limiter: prevent infinite respawn on fatal errors (missing DLLs, etc.)
 let crashCount = 0;
@@ -169,6 +170,15 @@ function startAceServer(): ChildProcess | null {
   // Add adapters dir if it exists
   if (config.aceServer.adapters && fs.existsSync(config.aceServer.adapters)) {
     args.push('--adapters', config.aceServer.adapters);
+  }
+
+  // --keep-loaded: flips the engine's ModelStore to EVICT_NEVER so the ~17 s
+  // LoKr precompute (and the DiT/VAE load) only happens once per combo instead
+  // of every /synth. Default OFF (VRAM trade-off) — toggle in Settings →
+  // Environment → "Keep models in VRAM" (ACESTEPCPP_KEEP_LOADED), restart-required.
+  if (config.aceServer.keepLoaded) {
+    args.push('--keep-loaded');
+    console.log('[Server] --keep-loaded: DiT + adapter stay resident across requests');
   }
 
   // Add noise profile if available
@@ -466,7 +476,50 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   setEngineReady(false, cudaReady ? 'Starting engine...' : 'Starting engine (CPU only — CUDA runtime missing)...');
   aceProcess = startAceServer();
   setEngineReady(true, cudaReady ? 'Ready' : 'Ready (CPU only — GPU runtime missing)');
+
+  // Fire-and-forget warm-on-startup: once the engine /health is up, POST /warm
+  // with the configured DiT + VAE + adapter so the first user /synth skips the
+  // cold-start. Gated on keepLoaded (the engine evicts instantly under STRICT,
+  // making warm pointless) and a configured warmDit. Off by default since
+  // keepLoaded is off. Failures only log — they never block request serving.
+  if (config.aceServer.warmOnStartup && config.aceServer.keepLoaded && config.aceServer.warmDit) {
+    void warmEngineOnStartup();
+  } else if (config.aceServer.warmOnStartup && config.aceServer.warmDit && !config.aceServer.keepLoaded) {
+    console.log('[Server] warm-on-startup skipped: keep-loaded is off (engine would evict immediately)');
+  }
 })();
+
+/** Poll engine /health until reachable (or 90s), then POST /warm with the
+ *  configured DiT + VAE + adapter. The warm is itself an async engine job; we
+ *  kick it off without awaiting, so the wrapper stays free to accept requests
+ *  while the LoKr deltas are copied to VRAM. Any /synth that arrives mid-warm
+ *  queues behind it and gets the same hot cache for free. */
+async function warmEngineOnStartup(): Promise<void> {
+  const deadline = Date.now() + 90_000;
+  let healthy = false;
+  while (Date.now() < deadline) {
+    if (await aceClient.isReachable()) { healthy = true; break; }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  if (!healthy) {
+    console.warn('[Server] warm-on-startup: engine /health never came up in 90s — skipping warm');
+    return;
+  }
+  const cfg = config.aceServer;
+  const req: { dit: string; vae?: string; adapter?: string; adapter_scale?: number } = { dit: cfg.warmDit };
+  if (cfg.warmVae) req.vae = cfg.warmVae;
+  if (cfg.warmAdapter) {
+    req.adapter = cfg.warmAdapter;
+    if (Number.isFinite(cfg.warmAdapterScale)) req.adapter_scale = cfg.warmAdapterScale;
+  }
+  try {
+    const jobId = await aceClient.warm(req, true);
+    console.log(`[Server] warm-on-startup: posted /warm dit=${cfg.warmDit}${cfg.warmAdapter ? ` adapter=${cfg.warmAdapter}` : ''} job=${jobId}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Server] warm-on-startup: /warm failed (will warm on first user request instead): ${msg}`);
+  }
+}
 
 // Start Express server
 const server = app.listen(config.server.port, config.server.host, () => {

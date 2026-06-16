@@ -11,6 +11,7 @@
 // Reuses the same safetensors parsing and delta graph construction from
 // adapter-merge.h — only the merge step is replaced with delta storage.
 
+#include "adapter-cancel.h"
 #include "adapter-merge.h"
 #include "ggml-backend.h"
 #include "ggml.h"
@@ -20,6 +21,10 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+// Cooperative cancel for the LoKr/LoRA delta precompute loop lives in
+// adapter-cancel.h so ace-server.cpp can poke at it without pulling all of
+// adapter-runtime.h's transitive ggml/safetensors deps. See that header.
 
 // Per-projection runtime LoRA delta (stored as BF16 tensor in VRAM)
 struct DiTLoRADelta {
@@ -166,7 +171,8 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
         else if (lora_is_b(e.name)) b_map[base] = &e;
     }
 
-    int merged = 0, skipped = 0;
+    int  merged = 0, skipped = 0;
+    bool cancelled = false;
 
     // Determine precision-rounding type for delta computation.
     // BF16 is ideal (matches storage format) but requires a bf16→f32 copy
@@ -182,6 +188,17 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
     }
 
     for (const auto & kv : a_map) {
+        // Cooperative cancel: check between every delta. The dominant cost
+        // inside the body is adapter_compute_delta (GPU graph build + run),
+        // which is non-trivial to interrupt — best we can do is stop
+        // queueing more work.  Sub-100ms granularity in practice.
+        if (adapter_cancel_requested()) {
+            fprintf(stderr, "[Adapter-RT] LoRA: cancelled at delta %d (merged=%d, skipped=%d)\n",
+                    merged + skipped, merged, skipped);
+            cancelled = true;
+            break;
+        }
+
         const std::string & gguf_name = kv.first;
         const STEntry *     ea        = kv.second;
 
@@ -298,6 +315,9 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
         merged++;
     }
 
+    if (cancelled) {
+        return false;
+    }
     fprintf(stderr, "[Adapter-RT] LoRA: %d deltas precomputed (%d skipped), scale=%.2f\n", merged, skipped, scale);
     return merged > 0;
 }
@@ -331,10 +351,21 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
     }
 
     std::unordered_map<std::string, std::string> name_map = lokr_build_reverse_map(ws);
-    int lokr_dim = adapter_read_lokr_dim(st);
-    int merged = 0, skipped = 0;
+    int  lokr_dim = adapter_read_lokr_dim(st);
+    int  merged = 0, skipped = 0;
+    bool cancelled = false;
 
     for (const auto & kv : modules) {
+        // Cooperative cancel: this is the ~17 s hot loop. Check every iter so
+        // a wrapper-side cancel during cold start aborts in <100 ms instead of
+        // waiting for all 352 deltas to finish.
+        if (adapter_cancel_requested()) {
+            fprintf(stderr, "[Adapter-RT] LoKr: cancelled at delta %d/%zu (merged=%d, skipped=%d)\n",
+                    merged + skipped, modules.size(), merged, skipped);
+            cancelled = true;
+            break;
+        }
+
         const std::string & lyc_prefix = kv.first;
         const LoKrEntry &   m          = kv.second;
 
@@ -506,6 +537,9 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
         merged++;
     }
 
+    if (cancelled) {
+        return false;
+    }
     fprintf(stderr, "[Adapter-RT] LoKr: %d deltas precomputed (%d skipped), scale=%.2f\n",
             merged, skipped, user_scale);
     return merged > 0;

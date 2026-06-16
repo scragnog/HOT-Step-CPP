@@ -17,7 +17,7 @@ import { songApi, settingsApi } from '../../services/api';
 import { lireekApi } from '../../services/lireekApi';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import {
-  SettingRow, SelectRow,
+  SettingRow, SelectRow, Toggle,
   EnvTextRow, EnvPasswordRow, EnvPathRow, EnvSubsection,
 } from './SettingsPrimitives';
 import './SettingsPanel.css';
@@ -339,6 +339,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     style={{ width: '80px', textAlign: 'center' }}
                   />
                 )}
+              </div>
+
+              {/* Keep models in VRAM — passes --keep-loaded to the engine.
+                  Restart-required (spawn-time flag). Default off (VRAM cost). */}
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-label">Keep Models in VRAM</div>
+                  <div className="setting-description">
+                    Keep the DiT + adapter + VAE resident between generations so the one-time
+                    ~17 s adapter precompute isn't paid on every render. Much faster repeat
+                    generations, but holds ~13 GB of VRAM. Leave off on VRAM-tight GPUs. Requires restart.
+                  </div>
+                </div>
+                <Toggle
+                  id="env-ACESTEPCPP_KEEP_LOADED"
+                  checked={(envValues.ACESTEPCPP_KEEP_LOADED || '0') === '1'}
+                  onChange={(v) => handleEnvChange('ACESTEPCPP_KEEP_LOADED', v ? '1' : '0')}
+                />
               </div>
 
             </EnvSubsection>

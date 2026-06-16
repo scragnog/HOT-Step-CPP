@@ -27,6 +27,8 @@ interface InspireJob {
   stage?: string;
   progress?: number;
   aceJobId?: string;
+  acePhase?: string;
+  acePhaseProgress?: string;
   result?: {
     caption: string;
     lyrics: string;
@@ -64,6 +66,12 @@ async function pollUntilDone(aceJobId: string, job: InspireJob, signal: AbortSig
     }
 
     const status = await aceClient.pollJob(aceJobId);
+    if (status.phase) {
+      job.acePhase = status.phase;
+      const step = status.phase_step ?? 0;
+      const total = status.phase_total ?? 0;
+      job.acePhaseProgress = total > 0 ? `step ${step}/${total}` : '';
+    }
     if (status.status === 'done') return;
     if (status.status === 'failed') throw new Error('Inspire failed on ace-server');
     if (status.status === 'cancelled') throw new Error('Cancelled by ace-server');
@@ -201,6 +209,9 @@ router.get('/status/:id', (req, res) => {
     progress: job.progress,
     result: job.result,
     error: job.error,
+    ace_job_id: job.aceJobId ?? null,
+    ace_phase: job.acePhase ?? null,
+    ace_phase_progress: job.acePhaseProgress ?? null,
   });
 });
 

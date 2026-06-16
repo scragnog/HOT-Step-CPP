@@ -127,6 +127,47 @@ export interface AceRequest {
 /** Job status from ace-server */
 export interface AceJobStatus {
   status: 'running' | 'done' | 'failed' | 'cancelled';
+  /** Fine-grained engine phase. Optional for back-compat with older
+   *  ace-server builds that don't populate it. */
+  phase?: AceJobPhase;
+  phase_step?: number;
+  phase_total?: number;
+}
+
+/** Fine-grained engine phase — matches JobPhase in hot-step-server.cpp.
+ *  Lowercase snake_case mirrors job_phase_str(). */
+export type AceJobPhase =
+  | 'queued'
+  | 'loading_text_enc'
+  | 'encoding_text'
+  | 'loading_cond_enc'
+  | 'encoding_cond'
+  | 'loading_dit'
+  | 'loading_adapter'
+  | 'adapter_precompute'
+  | 'dit_inference'
+  | 'loading_vae'
+  | 'vae_decode'
+  | 'encoding_output'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+/** One row from GET /jobs. */
+export interface AceJobsListEntry {
+  id: string;
+  status: 'running' | 'done' | 'failed' | 'cancelled';
+  phase: AceJobPhase;
+  phase_step: number;
+  phase_total: number;
+}
+
+/** Body shape for POST /warm. */
+export interface AceWarmRequest {
+  dit: string;
+  vae?: string;
+  adapter?: string;
+  adapter_scale?: number;
 }
 
 /** Plugin parameter schema from Lua plugin metadata */
@@ -219,6 +260,29 @@ export const aceClient = {
   /** GET /plugins — dynamic Lua plugin registry (solvers, schedulers, guidance) */
   async plugins(): Promise<PluginRegistry> {
     const res = await aceGet('/plugins');
+    return res.json();
+  },
+
+  /** POST /warm — pre-load a DiT + VAE + adapter combo so the next /synth with
+   *  the same key short-circuits the cold-start adapter precompute. Requires the
+   *  engine to be in keep-loaded mode (--keep-loaded or a prior ?keep_loaded=1);
+   *  under STRICT the engine returns {warm:false} since modules evict instantly.
+   *  Returns the engine job id — poll via pollJob until status=done. */
+  async warm(request: AceWarmRequest, keepLoaded = true): Promise<string> {
+    const params = new URLSearchParams();
+    if (keepLoaded) params.set('keep_loaded', '1');
+    const qs = params.toString();
+    const path = qs ? `/warm?${qs}` : '/warm';
+    const res = await acePost(path, request);
+    const data = await res.json() as { id: string };
+    return data.id;
+  },
+
+  /** GET /jobs — enumerate every job currently in the engine's in-memory job
+   *  table. Used to reconcile a still-running engine job after a client
+   *  disconnected mid-poll. */
+  async listJobs(): Promise<AceJobsListEntry[]> {
+    const res = await aceGet('/jobs');
     return res.json();
   },
 

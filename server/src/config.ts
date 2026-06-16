@@ -121,6 +121,32 @@ export const config = {
     // To re-enable: set ACESTEPCPP_DRAFT_LM env var or uncomment auto-detect.
     draftLm: process.env.ACESTEPCPP_DRAFT_LM || '',
     onnxDir: process.env.ACESTEPCPP_ONNX_DIR || DEFAULT_ONNX_DIR,
+    /** Pass --keep-loaded to the spawned ace-server, flipping the engine's
+     *  ModelStore to EVICT_NEVER at startup so DiT + adapter + LoKr precompute
+     *  stay resident across requests (cold-start LoKr precompute is ~17 s,
+     *  hot-start ~50 ms). Default OFF: keeping ~13 GB resident is a VRAM
+     *  trade-off that's wrong for VRAM-tight desktops. Toggle from the Settings
+     *  UI (Environment tab → "Keep models in VRAM") or set ACESTEPCPP_KEEP_LOADED=1.
+     *  Restart-required (it's a spawn-time flag). Note: the engine also honors a
+     *  per-request `?keep_loaded=1`, which the UI "co-resident" toggle uses. */
+    keepLoaded: (process.env.ACESTEPCPP_KEEP_LOADED ?? '0') !== '0',
+    /** Post /warm to the engine after it boots, pre-loading the configured
+     *  DiT + VAE + adapter so the first user-facing /synth skips the cold-start.
+     *  Requires keepLoaded — under EVICT_STRICT the engine drops the modules
+     *  instantly, making the warm a waste. Gated on keepLoaded && warmDit, so
+     *  with keep-loaded off (the default) this never fires. */
+    warmOnStartup: (process.env.ACESTEPCPP_WARM_ON_STARTUP ?? '1') !== '0',
+    /** Filename of the DiT to warm (resolved against the models dir). Empty
+     *  disables warm-on-startup entirely. */
+    warmDit: process.env.ACESTEPCPP_WARM_DIT || '',
+    /** Filename of the VAE to warm. */
+    warmVae: process.env.ACESTEPCPP_WARM_VAE || '',
+    /** Filename of the adapter to warm (resolved against the adapters dir).
+     *  Empty disables adapter pre-load — DiT/VAE alone still cuts most cold-start. */
+    warmAdapter: process.env.ACESTEPCPP_WARM_ADAPTER || '',
+    /** Adapter scale to use for the warm. Should match what the UI submits so
+     *  the warm and the render hit the same LoKr-delta cache key. */
+    warmAdapterScale: parseFloat(process.env.ACESTEPCPP_WARM_ADAPTER_SCALE || '1.0'),
     /** TensorRT runtime DLL directory — auto-detected or TENSORRT_LIBS env override */
     trtLibs: process.env.TENSORRT_LIBS || (() => {
       // Auto-detect from engine/deps/tensorrt_libs/ (downloaded by Model Manager)
@@ -239,7 +265,7 @@ export const ENV_FILE_PATH = path.join(PROJECT_ROOT, '.env');
 export const EXPOSED_ENV_KEYS = [
   // Engine
   'ACESTEPCPP_MODELS', 'ACESTEPCPP_ADAPTERS', 'ACESTEPCPP_PORT', 'ACESTEPCPP_HOST',
-  'ACESTEPCPP_VAE_CHUNK', 'ACESTEPCPP_VAE_OVERLAP',
+  'ACESTEPCPP_VAE_CHUNK', 'ACESTEPCPP_VAE_OVERLAP', 'ACESTEPCPP_KEEP_LOADED',
   // GPU
   'CUDA_VISIBLE_DEVICES',
   // Server
@@ -262,7 +288,7 @@ export const EXPOSED_ENV_KEYS = [
 /** Keys that require an app restart to take effect */
 export const RESTART_REQUIRED_KEYS = new Set([
   'ACESTEPCPP_MODELS', 'ACESTEPCPP_ADAPTERS', 'ACESTEPCPP_PORT', 'ACESTEPCPP_HOST',
-  'ACESTEPCPP_VAE_CHUNK', 'ACESTEPCPP_VAE_OVERLAP',
+  'ACESTEPCPP_VAE_CHUNK', 'ACESTEPCPP_VAE_OVERLAP', 'ACESTEPCPP_KEEP_LOADED',
   'CUDA_VISIBLE_DEVICES',
   'SERVER_PORT', 'DATA_DIR',
 ]);
@@ -302,6 +328,8 @@ export function reloadEnvConfig(): string[] {
     () => String(config.aceServer.vaeOverlap));
   apply('CUDA_VISIBLE_DEVICES', v => { config.aceServer.cudaVisibleDevices = v; },
     () => config.aceServer.cudaVisibleDevices);
+  apply('ACESTEPCPP_KEEP_LOADED', v => { config.aceServer.keepLoaded = (v || '0') !== '0'; },
+    () => (config.aceServer.keepLoaded ? '1' : '0'));
 
   // ── Server ──
   apply('SERVER_PORT', v => { config.server.port = parseInt(v || '3001', 10); },

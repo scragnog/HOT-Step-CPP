@@ -34,6 +34,7 @@
 //   /synth      DiT + Text-Enc + VAE
 //   /understand LM + DiT + VAE
 
+#include "adapter-cancel.h"   // g_adapter_cancel — set by worker around ace_synth_load
 #include "audio-io.h"
 #include "audio-resample.h"
 #include "denoiser.h"
@@ -244,6 +245,52 @@ static const int LATENT_FRAME_BYTES = LATENT_CHANNELS * (int) sizeof(float);
 // the result. the client polls GET /job?id=N until done, then fetches
 // the result with GET /job?id=N&result=1.
 // cancel: POST /job?id=N&cancel=1 sets the per-job flag.
+
+// Fine-grained phase the worker is currently in. Surfaced through GET /job
+// (and GET /jobs) alongside the coarse int status so the wrapper can tell
+// *why* a long-running job is taking a while — model load vs. adapter
+// precompute (the ~17 s LoKr stall) vs. actual DiT inference. Phases are
+// advisory: workers may skip ones that don't apply (e.g. /lm never enters
+// real DIT_INFERENCE). Order roughly follows the synth pipeline.
+enum class JobPhase : int {
+    QUEUED             = 0,
+    LOADING_TEXT_ENC   = 1,
+    ENCODING_TEXT      = 2,
+    LOADING_COND_ENC   = 3,
+    ENCODING_COND      = 4,
+    LOADING_DIT        = 5,
+    LOADING_ADAPTER    = 6,
+    ADAPTER_PRECOMPUTE = 7,
+    DIT_INFERENCE      = 8,
+    LOADING_VAE        = 9,
+    VAE_DECODE         = 10,
+    ENCODING_OUTPUT    = 11,
+    DONE               = 12,
+    FAILED             = 13,
+    CANCELLED          = 14,
+};
+
+static const char * job_phase_str(JobPhase p) {
+    switch (p) {
+        case JobPhase::QUEUED:             return "queued";
+        case JobPhase::LOADING_TEXT_ENC:   return "loading_text_enc";
+        case JobPhase::ENCODING_TEXT:      return "encoding_text";
+        case JobPhase::LOADING_COND_ENC:   return "loading_cond_enc";
+        case JobPhase::ENCODING_COND:      return "encoding_cond";
+        case JobPhase::LOADING_DIT:        return "loading_dit";
+        case JobPhase::LOADING_ADAPTER:    return "loading_adapter";
+        case JobPhase::ADAPTER_PRECOMPUTE: return "adapter_precompute";
+        case JobPhase::DIT_INFERENCE:      return "dit_inference";
+        case JobPhase::LOADING_VAE:        return "loading_vae";
+        case JobPhase::VAE_DECODE:         return "vae_decode";
+        case JobPhase::ENCODING_OUTPUT:    return "encoding_output";
+        case JobPhase::DONE:               return "done";
+        case JobPhase::FAILED:             return "failed";
+        case JobPhase::CANCELLED:          return "cancelled";
+    }
+    return "unknown";
+}
+
 struct Job {
     std::string       id;
     std::atomic<int>  status{ 0 };  // 0=running 1=done 2=failed 3=cancelled
@@ -253,11 +300,27 @@ struct Job {
     std::vector<float> result_latent; // post-DiT latent [T*64] float32, empty if not captured
     std::atomic<bool> cancel{ false };
 
+    // Phase tracking (advisory, independent of `status`). phase_step/phase_total
+    // are optional sub-progress for phases with a natural counter; 0/0 means
+    // "no sub-progress available".
+    std::atomic<JobPhase> phase{ JobPhase::QUEUED };
+    std::atomic<int>      phase_step{ 0 };
+    std::atomic<int>      phase_total{ 0 };
+
     // memory ordering contract: result_body and result_mime are written
     // before status is stored (seq_cst). the client loads status (seq_cst)
     // and only reads result fields after seeing done/failed. this guarantees
     // visibility without an explicit mutex on the result fields.
 };
+
+// Set phase + reset sub-progress counters in one shot, at worker log-anchor
+// points, so external observers never see a stale step counter from a prior
+// phase.
+static inline void job_set_phase(Job & job, JobPhase p, int step = 0, int total = 0) {
+    job.phase_step.store(step, std::memory_order_relaxed);
+    job.phase_total.store(total, std::memory_order_relaxed);
+    job.phase.store(p, std::memory_order_release);
+}
 
 static std::mutex                                            mtx_jobs;
 static std::unordered_map<std::string, std::shared_ptr<Job>> g_jobs;
@@ -693,6 +756,7 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
 // LM worker: generates metadata + lyrics + codes, stores JSON result in job.
 static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch_size, int mode) {
     if (job->cancel.load()) {
+        job_set_phase(*job, JobPhase::CANCELLED);
         job->status.store(3);
         return;
     }
@@ -702,11 +766,16 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     const ModelEntry * entry   = registry_find(g_registry.lm, lm_name.c_str());
     if (!entry) {
         fprintf(stderr, "[Server] LM not found: %s\n", lm_name.c_str());
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(2);
         return;
     }
     AceLmParams p = g_lm_params;
     p.model_path  = entry->path.c_str();
+
+    // LM has no DiT; it reuses LOADING_DIT to mean "loading the big model" so
+    // the wrapper has one 'loading' phase to surface across /lm and /synth.
+    job_set_phase(*job, JobPhase::LOADING_DIT);
 
     // Acquire a fresh LM ctx from the shared store. Under EVICT_STRICT the
     // module is reloaded if another pipeline evicted it; under EVICT_NEVER
@@ -714,9 +783,11 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     AceLm * ctx = ace_lm_load(g_store, &p);
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: LM load failed\n");
+        job_set_phase(*job, JobPhase::FAILED);
         job->status.store(2);
         return;
     }
+    job_set_phase(*job, JobPhase::DIT_INFERENCE);  // LM "inference" phase
 
     // Execute and always free the ctx, success or failure: the store decides
     // whether the underlying GPU module stays resident.
@@ -729,7 +800,9 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     ace_lm_free(ctx);
 
     if (rc != 0) {
-        job->status.store(job->cancel.load() ? 3 : 2);
+        bool cancelled = job->cancel.load();
+        job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
+        job->status.store(cancelled ? 3 : 2);
         return;
     }
 
@@ -753,6 +826,7 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
 
     job->result_body = std::move(body);
     job->result_mime = "application/json";
+    job_set_phase(*job, JobPhase::DONE);
     job->status.store(1);
     fprintf(stderr, "[Server] Job %s done (LM, %d results)\n", job->id.c_str(), lm_batch_size);
 }
@@ -860,6 +934,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
         free(src_latents);
         free(ref_interleaved);
         free(ref_latents);
+        job_set_phase(*job, JobPhase::CANCELLED);
         job->status.store(3);
         return;
     }
@@ -1022,6 +1097,22 @@ static void synth_worker(std::shared_ptr<Job>    job,
                 sf.cache_ratio, sf.cache_ratio * 100.0f);
     }
 
+    // ace_synth_load fans out into text-enc + cond-enc + DiT + adapter (LoKr
+    // precompute) + VAE setup, all serialized. Without per-sub-load callbacks we
+    // mark the whole call as the heaviest phase: ADAPTER_PRECOMPUTE when an
+    // adapter is in play (the ~17 s stall), else LOADING_DIT. The wrapper keys
+    // on this to explain why a job is silent for 15+ s with no DiT step logs.
+    job_set_phase(*job, ace_reqs[0].adapter.empty() ? JobPhase::LOADING_DIT
+                                                    : JobPhase::ADAPTER_PRECOMPUTE);
+
+    // Wire the per-job cancel flag into the adapter precompute loops so a cancel
+    // during cold start aborts in <100 ms instead of waiting for all deltas.
+    // Cleared via RAII on every exit path below.
+    g_adapter_cancel.store(&job->cancel, std::memory_order_release);
+    struct AdapterCancelGuard {
+        ~AdapterCancelGuard() { g_adapter_cancel.store(nullptr, std::memory_order_release); }
+    } adapter_cancel_guard;
+
     AceSynth * ctx = ace_synth_load(g_store, &p);
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: synth load failed\n");
@@ -1029,9 +1120,12 @@ static void synth_worker(std::shared_ptr<Job>    job,
         free(src_latents);
         free(ref_interleaved);
         free(ref_latents);
-        job->status.store(2);
+        bool cancelled = job->cancel.load();
+        job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
+        job->status.store(cancelled ? 3 : 2);
         return;
     }
+    job_set_phase(*job, JobPhase::DIT_INFERENCE, 0, ace_reqs[0].inference_steps);
 
     // HOT-Step: restore auto-shift that upstream removed.
     // When shift == -1, compute adaptive shift from duration + step count.
@@ -1136,7 +1230,9 @@ static void synth_worker(std::shared_ptr<Job>    job,
         for (auto & a : audio) {
             ace_audio_free(&a);
         }
-        job->status.store(job->cancel.load() ? 3 : 2);
+        bool cancelled = job->cancel.load();
+        job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
+        job->status.store(cancelled ? 3 : 2);
         return;
     }
 
@@ -1155,6 +1251,9 @@ static void synth_worker(std::shared_ptr<Job>    job,
     }
 
     const int total_tracks = total_alloc;
+
+    // VAE decode happened inside synth_batch_run; now peak-normalize + encode.
+    job_set_phase(*job, JobPhase::ENCODING_OUTPUT, 0, total_tracks);
 
     // encode each track (peak normalize + encode)
     const char * mime = output_wav ? "audio/wav" : "audio/mpeg";
@@ -1207,7 +1306,9 @@ static void synth_worker(std::shared_ptr<Job>    job,
         job->result_mime = "multipart/mixed; boundary=" + boundary;
     }
 
-    job->status.store(job->cancel.load() ? 3 : 1);
+    bool cancelled = job->cancel.load();
+    job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::DONE);
+    job->status.store(cancelled ? 3 : 1);
     fprintf(stderr, "[Server] Job %s done (%d tracks)\n", job->id.c_str(), total_tracks);
 }
 
@@ -1867,6 +1968,203 @@ static void handle_vae(const httplib::Request & req, httplib::Response & res) {
     res.set_content(body, "application/json");
 }
 
+// warm worker: same setup as synth_worker through ace_synth_load, then stops.
+// Under EVICT_NEVER (set by `--keep-loaded` or a prior `?keep_loaded=1`) the
+// modules stay resident, so the next /synth using the same DiT + adapter combo
+// skips the cold-start load. Returns immediately on STRICT — pre-loading there
+// is pointless since the modules would be evicted instantly.
+struct WarmRequest {
+    std::string dit;
+    std::string vae;
+    std::string adapter;
+    float       adapter_scale = 1.0f;
+};
+
+static void warm_worker(std::shared_ptr<Job> job, WarmRequest wr) {
+    if (job->cancel.load()) {
+        job_set_phase(*job, JobPhase::CANCELLED);
+        job->status.store(3);
+        return;
+    }
+
+    if (!g_keep_loaded) {
+        // Document the no-op clearly so callers learn from the response.
+        job->result_body = "{\"warm\":false,\"reason\":\"keep_loaded not set; would be evicted immediately\"}";
+        job->result_mime = "application/json";
+        job_set_phase(*job, JobPhase::DONE);
+        job->status.store(1);
+        return;
+    }
+
+    std::string        dit_name = resolve_name(g_registry.dit, wr.dit, g_loaded_dit);
+    const ModelEntry * dit      = registry_find(g_registry.dit, dit_name.c_str());
+    if (!dit || g_registry.text_enc.empty() || g_registry.vae.empty()) {
+        fprintf(stderr, "[Server] warm: DiT/Text-Enc/VAE not resolvable\n");
+        job_set_phase(*job, JobPhase::FAILED);
+        job->status.store(2);
+        return;
+    }
+    const ModelEntry * vae = registry_find_non_onnx(g_registry.vae);
+    if (!wr.vae.empty()) {
+        const ModelEntry * sel = registry_find(g_registry.vae, wr.vae.c_str());
+        if (sel && !(sel->name.size() >= 5 && sel->name.substr(sel->name.size() - 5) == ".onnx")) {
+            vae = sel;
+        }
+    }
+    if (!vae) {
+        fprintf(stderr, "[Server] warm: no non-ONNX VAE available\n");
+        job_set_phase(*job, JobPhase::FAILED);
+        job->status.store(2);
+        return;
+    }
+    std::string vae_name = vae->name;
+
+    // Idempotent fast-path: if the same DiT + adapter + VAE combo is already in
+    // the sticky-name slot, the store holds it resident — nothing to do.
+    if (g_loaded_dit == dit_name && g_loaded_adapter == wr.adapter && g_loaded_vae == vae_name) {
+        job->result_body = "{\"warm\":true,\"already_loaded\":true}";
+        job->result_mime = "application/json";
+        job_set_phase(*job, JobPhase::DONE);
+        job->status.store(1);
+        fprintf(stderr, "[Server] warm: already loaded (DiT=%s VAE=%s Adapter=%s)\n",
+                dit_name.c_str(), vae_name.c_str(), wr.adapter.c_str());
+        return;
+    }
+
+    AceSynthParams p    = g_synth_params;
+    p.text_encoder_path = g_registry.text_enc[0].path.c_str();
+    p.dit_path          = dit->path.c_str();
+    p.vae_path          = vae->path.c_str();
+    p.adapter_path      = nullptr;
+    p.adapter_scale     = 1.0f;
+    if (!wr.adapter.empty()) {
+        const AdapterEntry * adapter = registry_find_adapter(g_registry, wr.adapter.c_str());
+        if (!adapter) {
+            fprintf(stderr, "[Server] warm: adapter not found: %s\n", wr.adapter.c_str());
+            job_set_phase(*job, JobPhase::FAILED);
+            job->status.store(2);
+            return;
+        }
+        p.adapter_path  = adapter->path.c_str();
+        p.adapter_scale = wr.adapter_scale;
+    }
+
+    fprintf(stderr, "[Server] warm: loading DiT=%s VAE=%s%s%s\n", dit_name.c_str(), vae_name.c_str(),
+            wr.adapter.empty() ? "" : " Adapter=", wr.adapter.c_str());
+
+    job_set_phase(*job, wr.adapter.empty() ? JobPhase::LOADING_DIT : JobPhase::ADAPTER_PRECOMPUTE);
+
+    // Wire the per-job cancel flag into the adapter precompute loops so a cancel
+    // during cold start aborts in <100 ms. Cleared via RAII on every exit path.
+    g_adapter_cancel.store(&job->cancel, std::memory_order_release);
+    struct WarmCancelGuard {
+        ~WarmCancelGuard() { g_adapter_cancel.store(nullptr, std::memory_order_release); }
+    } warm_cancel_guard;
+
+    AceSynth * ctx = ace_synth_load(g_store, &p);
+    if (!ctx) {
+        fprintf(stderr, "[Server] warm: synth load failed\n");
+        bool cancelled = job->cancel.load();
+        job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
+        job->status.store(cancelled ? 3 : 2);
+        return;
+    }
+    // Free the ctx but leave the underlying store entries resident — under
+    // EVICT_NEVER the store ignores the refcount drop, so the modules stay hot.
+    ace_synth_free(ctx);
+
+    // Set the sticky-name hints so resolve_name picks the same models next.
+    g_loaded_dit           = dit_name;
+    g_loaded_adapter       = wr.adapter;
+    g_loaded_adapter_scale = wr.adapter_scale;
+    g_loaded_vae           = vae_name;
+
+    job->result_body = "{\"warm\":true,\"already_loaded\":false}";
+    job->result_mime = "application/json";
+    job_set_phase(*job, JobPhase::DONE);
+    job->status.store(1);
+    fprintf(stderr, "[Server] warm: done (DiT=%s VAE=%s Adapter=%s)\n", dit_name.c_str(), vae_name.c_str(),
+            wr.adapter.c_str());
+}
+
+// POST /warm
+// Body { dit, vae?, adapter?, adapter_scale? }. Spawns a background job that
+// loads the requested DiT + VAE + adapter so the next /synth with the same key
+// short-circuits the model load. Honors `?keep_loaded=1`. Returns {"id":"N"};
+// poll via GET /job?id=N as with /synth.
+static void handle_warm(const httplib::Request & req, httplib::Response & res) {
+    if (g_registry.dit.empty() || g_registry.text_enc.empty() || g_registry.vae.empty()) {
+        json_error(res, 501, "No synth models in registry (need dit + text-encoder + vae)");
+        return;
+    }
+
+    // per-request co-resident: ?keep_loaded=1 flips the store to NEVER for the
+    // rest of the process lifetime (same one-way behavior as /synth and /lm).
+    const bool req_keep_loaded = req.has_param("keep_loaded") && req.get_param_value("keep_loaded") == "1";
+    if (req_keep_loaded && !g_keep_loaded) {
+        g_keep_loaded = true;
+        store_set_policy(g_store, EVICT_NEVER);
+        fprintf(stderr, "[Server] keep_loaded enabled via /warm request query param\n");
+    }
+
+    WarmRequest wr;
+    if (!req.body.empty()) {
+        yyjson_doc * doc  = yyjson_read(req.body.c_str(), req.body.size(), 0);
+        yyjson_val * root = doc ? yyjson_doc_get_root(doc) : nullptr;
+        if (!root || !yyjson_is_obj(root)) {
+            if (doc) yyjson_doc_free(doc);
+            json_error(res, 400, "Invalid JSON: expected an object");
+            return;
+        }
+        yyjson_val * v;
+        if ((v = yyjson_obj_get(root, "dit"))     && yyjson_is_str(v)) wr.dit     = yyjson_get_str(v);
+        if ((v = yyjson_obj_get(root, "vae"))     && yyjson_is_str(v)) wr.vae     = yyjson_get_str(v);
+        if ((v = yyjson_obj_get(root, "adapter")) && yyjson_is_str(v)) wr.adapter = yyjson_get_str(v);
+        if ((v = yyjson_obj_get(root, "adapter_scale")) && yyjson_is_num(v)) {
+            wr.adapter_scale = (float) yyjson_get_num(v);
+        }
+        yyjson_doc_free(doc);
+    }
+
+    auto job = job_create();
+    fprintf(stderr, "[Server] Job %s created (warm: dit=%s vae=%s adapter=%s)\n", job->id.c_str(), wr.dit.c_str(),
+            wr.vae.c_str(), wr.adapter.c_str());
+
+    work_push([job, wr]() mutable { warm_worker(job, std::move(wr)); });
+
+    std::string body = "{\"id\":\"" + job->id + "\"}";
+    res.set_content(body, "application/json");
+}
+
+// GET /jobs
+// Array of every job currently in g_jobs. Lets external reconcilers discover
+// live engine jobs when a client died mid-poll. Honors the existing MAX_JOBS
+// eviction policy. Read-only — does not touch the worker queue or model store.
+static void handle_jobs_list(const httplib::Request &, httplib::Response & res) {
+    yyjson_mut_doc * doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val * arr = yyjson_mut_arr(doc);
+    yyjson_mut_doc_set_root(doc, arr);
+
+    std::lock_guard<std::mutex> lock(mtx_jobs);
+    for (const auto & id : g_job_order) {
+        auto it = g_jobs.find(id);
+        if (it == g_jobs.end()) continue;
+        const auto & j = it->second;
+        yyjson_mut_val * obj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, obj, "id", j->id.c_str());
+        yyjson_mut_obj_add_str(doc, obj, "status", job_status_str(j->status.load()));
+        yyjson_mut_obj_add_str(doc, obj, "phase",  job_phase_str(j->phase.load()));
+        yyjson_mut_obj_add_int(doc, obj, "phase_step",  j->phase_step.load(std::memory_order_relaxed));
+        yyjson_mut_obj_add_int(doc, obj, "phase_total", j->phase_total.load(std::memory_order_relaxed));
+        yyjson_mut_arr_append(arr, obj);
+    }
+
+    char * json = yyjson_mut_write(doc, 0, NULL);
+    yyjson_mut_doc_free(doc);
+    res.set_content(json ? json : "[]", "application/json");
+    if (json) free(json);
+}
+
 // GET /props
 // server configuration, available models, and default request.
 // the webui reads this at boot to populate dropdowns and status indicators.
@@ -2271,11 +2569,13 @@ int main(int argc, char ** argv) {
     svr.Post("/synth", handle_synth);
     svr.Post("/understand", handle_understand);
     svr.Post("/vae", handle_vae);
+    svr.Post("/warm", handle_warm);
     svr.Get("/health", [](const httplib::Request &, httplib::Response & res) {
         res.set_content("{\"status\":\"ok\"}", "application/json");
     });
     svr.Get("/props", handle_props);
     svr.Get("/logs", handle_logs);
+    svr.Get("/jobs", handle_jobs_list);
     // HOT-STEP: Lua plugin registry endpoint
     svr.Get("/plugins", [](const httplib::Request &, httplib::Response & res) {
         std::string json = PluginRegistry::instance().to_json();
@@ -2338,11 +2638,16 @@ int main(int argc, char ** argv) {
             }
             return;
         }
-        // default: return status JSON
-        std::string body = "{\"status\":\"";
-        body += job_status_str(job->status.load());
-        body += "\"}";
-        res.set_content(body, "application/json");
+        // default: return status JSON. Now includes phase + phase_step/total so
+        // the wrapper can distinguish "stalled in the ~17 s adapter precompute"
+        // from "actually failed" without parsing the /logs SSE stream.
+        char phase_buf[256];
+        int  step  = job->phase_step.load(std::memory_order_relaxed);
+        int  total = job->phase_total.load(std::memory_order_relaxed);
+        snprintf(phase_buf, sizeof(phase_buf),
+                 "{\"status\":\"%s\",\"phase\":\"%s\",\"phase_step\":%d,\"phase_total\":%d}",
+                 job_status_str(job->status.load()), job_phase_str(job->phase.load()), step, total);
+        res.set_content(phase_buf, "application/json");
     });
     svr.Post("/job", [](const httplib::Request & req, httplib::Response & res) {
         if (!req.has_param("id")) {
