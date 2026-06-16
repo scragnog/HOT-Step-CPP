@@ -160,6 +160,52 @@ export function initDb(): void {
       cover_url       TEXT,
       created_at      TEXT DEFAULT (datetime('now'))
     );
+
+    -- ── Song Builder (Udio-style section-by-section generation) ──────────────
+    -- A project is one song being assembled from ordered sections. Each section
+    -- generates N candidate songs (variants); the user picks one (chosen_song_id)
+    -- and the next section outpaint-extends from the chosen variant's latent.
+    CREATE TABLE IF NOT EXISTS builder_projects (
+      id              TEXT PRIMARY KEY,
+      user_id         TEXT NOT NULL REFERENCES users(id),
+      title           TEXT NOT NULL DEFAULT 'Untitled Song',
+      -- Shared musical params reused across every section
+      style           TEXT DEFAULT '',
+      bpm             INTEGER DEFAULT 0,
+      key_scale       TEXT DEFAULT '',
+      time_signature  TEXT DEFAULT '',
+      vocal_language  TEXT DEFAULT '',
+      -- Default seconds per generated section (user-overridable per section)
+      section_length  REAL DEFAULT 30,
+      -- Default number of variants generated per section
+      variant_count   INTEGER DEFAULT 4,
+      gen_params      TEXT DEFAULT '{}',
+      created_at      TEXT DEFAULT (datetime('now')),
+      updated_at      TEXT DEFAULT (datetime('now'))
+    );
+
+    -- One row per committed/in-progress section. position orders sections along
+    -- the timeline (may be negative or fractional to allow prepend/insert without
+    -- renumbering). candidate_song_ids is a JSON array of song ids (the variants);
+    -- chosen_song_id is the committed pick (NULL until the user chooses).
+    CREATE TABLE IF NOT EXISTS builder_sections (
+      id                 TEXT PRIMARY KEY,
+      project_id         TEXT NOT NULL REFERENCES builder_projects(id) ON DELETE CASCADE,
+      position           REAL NOT NULL DEFAULT 0,
+      label              TEXT DEFAULT '',
+      lyrics             TEXT DEFAULT '',
+      direction          TEXT DEFAULT 'append',  -- 'first' | 'append' | 'prepend'
+      section_length     REAL DEFAULT 30,
+      candidate_song_ids TEXT DEFAULT '[]',
+      chosen_song_id     TEXT,
+      job_id             TEXT,
+      status             TEXT DEFAULT 'pending',  -- 'pending' | 'generating' | 'ready' | 'chosen' | 'failed'
+      created_at         TEXT DEFAULT (datetime('now')),
+      updated_at         TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_builder_projects_user ON builder_projects(user_id);
+    CREATE INDEX IF NOT EXISTS idx_builder_sections_project ON builder_sections(project_id, position);
   `);
 
   // ── Migrations — add columns that may not exist in older databases ────────

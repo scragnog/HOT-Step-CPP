@@ -166,6 +166,92 @@ export const generateApi = {
   resetQueue: () => post<{ success: boolean; cancelled: number; drained: number }>('/generate/reset-queue'),
 };
 
+// ── Song Builder (Udio-style section-by-section generation) ──
+export interface BuilderProject {
+  id: string;
+  user_id: string;
+  title: string;
+  style: string;
+  bpm: number;
+  key_scale: string;
+  time_signature: string;
+  vocal_language: string;
+  section_length: number;
+  variant_count: number;
+  gen_params: string;
+  created_at: string;
+  updated_at: string;
+  section_count?: number;
+}
+
+export type BuilderDirection = 'first' | 'append' | 'prepend';
+export type BuilderSectionStatus = 'pending' | 'generating' | 'ready' | 'chosen' | 'failed';
+
+export interface BuilderSection {
+  id: string;
+  project_id: string;
+  position: number;
+  label: string;
+  lyrics: string;
+  direction: BuilderDirection;
+  section_length: number;
+  candidate_song_ids: string[];
+  candidates: Song[];
+  chosen: Song | null;
+  chosen_song_id: string | null;
+  job_id: string | null;
+  status: BuilderSectionStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+function normalizeSection(s: any): BuilderSection {
+  return {
+    ...s,
+    candidate_song_ids: s.candidate_song_ids || [],
+    candidates: (s.candidates || []).map(normalizeSong),
+    chosen: s.chosen ? normalizeSong(s.chosen) : null,
+  };
+}
+
+export interface BuilderSectionInput {
+  position?: number;
+  label?: string;
+  lyrics?: string;
+  direction?: BuilderDirection;
+  sectionLength?: number;
+  candidateSongIds?: string[];
+  chosenSongId?: string | null;
+  jobId?: string | null;
+  status?: BuilderSectionStatus;
+}
+
+export const builderApi = {
+  listProjects: (token: string) =>
+    get<{ projects: BuilderProject[] }>('/builder/projects', token),
+  getProject: async (id: string, token: string) => {
+    const data = await get<{ project: BuilderProject; sections: any[] }>(`/builder/projects/${id}`, token);
+    return { project: data.project, sections: data.sections.map(normalizeSection) };
+  },
+  createProject: (body: Partial<BuilderProject> & { keyScale?: string; timeSignature?: string; vocalLanguage?: string; sectionLength?: number; variantCount?: number; genParams?: unknown }, token: string) =>
+    post<{ project: BuilderProject; sections: BuilderSection[] }>('/builder/projects', body, token),
+  updateProject: async (id: string, body: Record<string, unknown>, token: string) => {
+    const data = await patch<{ project: BuilderProject; sections: any[] }>(`/builder/projects/${id}`, body, token);
+    return { project: data.project, sections: data.sections.map(normalizeSection) };
+  },
+  deleteProject: (id: string, token: string) => del<{ ok: boolean }>(`/builder/projects/${id}`, token),
+
+  createSection: async (projectId: string, body: BuilderSectionInput, token: string) => {
+    const data = await post<{ section: any }>(`/builder/projects/${projectId}/sections`, body, token);
+    return { section: normalizeSection(data.section) };
+  },
+  updateSection: async (sectionId: string, body: BuilderSectionInput, token: string) => {
+    const data = await patch<{ section: any }>(`/builder/sections/${sectionId}`, body, token);
+    return { section: normalizeSection(data.section) };
+  },
+  deleteSection: (sectionId: string, token: string) => del<{ ok: boolean }>(`/builder/sections/${sectionId}`, token),
+};
+
 // ── Models ──────────────────────────────────────────────────
 export const modelApi = {
   list: () => get<AceModels>('/models'),

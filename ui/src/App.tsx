@@ -36,6 +36,7 @@ import { CoverStudio } from './components/cover-studio/CoverStudio';
 import { StemStudio } from './components/stem-studio/StemStudio';
 import { StemBuilder } from './components/stem-builder/StemBuilder';
 import { RepaintStudio } from './components/repaint-studio/RepaintStudio';
+import { SongBuilder } from './components/song-builder/SongBuilder';
 import { GlobalParamBar } from './components/global-bar/GlobalParamBar';
 import { InstaGenPanel } from './components/insta-gen/InstaGenPanel';
 import { PlaylistSidebar } from './components/playlist/PlaylistSidebar';
@@ -84,6 +85,7 @@ function viewFromUrl(path = window.location.pathname): string {
   if (path.startsWith('/cover-studio')) return 'cover-studio';
   if (path.startsWith('/stem-studio')) return 'stem-studio';
   if (path.startsWith('/stem-builder')) return 'stem-builder';
+  if (path.startsWith('/song-builder')) return 'song-builder';
   if (path.startsWith('/repaint')) return 'repaint';
   if (path.startsWith('/library')) return 'library';
   if (path.startsWith('/settings')) return 'settings';
@@ -104,6 +106,7 @@ function urlForView(view: string): string {
   if (view === 'cover-studio') return '/cover-studio';
   if (view === 'stem-studio') return '/stem-studio';
   if (view === 'stem-builder') return '/stem-builder';
+  if (view === 'song-builder') return '/song-builder';
   if (view === 'repaint') return '/repaint';
   if (view === 'library') return '/library';
   if (view === 'settings') return '/settings';
@@ -682,6 +685,14 @@ const AppContent: React.FC = () => {
       return (
         <DiscoPulseWrapper hue={DISCO.createPanel} className="flex-1 overflow-hidden">
           <RepaintStudio />
+        </DiscoPulseWrapper>
+      );
+    }
+
+    if (activeView === 'song-builder') {
+      return (
+        <DiscoPulseWrapper hue={DISCO.createPanel} className="flex-1 overflow-hidden">
+          <SongBuilder />
         </DiscoPulseWrapper>
       );
     }
