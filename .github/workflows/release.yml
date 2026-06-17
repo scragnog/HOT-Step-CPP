@@ -1070,8 +1070,10 @@ jobs:
       - name: Generate release notes
         run: |
           TAG="${GITHUB_REF_NAME}"
-          # Get previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+          # Previous tag for the changelog range. --exclude '*-*' skips hyphenated
+          # tags (e.g. v1.1.0-CI-Test, -rc) so a transient test tag can't become the
+          # "previous release" and truncate the notes to just a couple of commits.
+          PREV_TAG=$(git describe --tags --abbrev=0 --exclude '*-*' "${TAG}^" 2>/dev/null || echo "")
 
           if [ -z "$PREV_TAG" ]; then
             echo "First release — no previous tag found"
