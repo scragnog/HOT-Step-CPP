@@ -28,7 +28,10 @@ env:
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
   build-windows:
-    runs-on: windows-latest
+    # Pin to windows-2022 (VS 2022). windows-latest migrated to windows-2025,
+    # whose newer MSVC (_MSC_VER >= 1950) is rejected by CUDA 12.8/13.1 nvcc
+    # (host_config.h: "Only the versions between 2017 and 2022 are supported").
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
