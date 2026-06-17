@@ -190,9 +190,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/build
-          key: cmake-win-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/CMakeLists.txt') }}
+          # Runner image is part of the key: a build dir configured on one image
+          # (compiler abs-paths baked into CMakeCache) is unusable on another.
+          # windows-latest moved to windows-2025; we pin windows-2022, so the old
+          # cache must NOT be restored (stale cl.exe path → configure failure).
+          key: cmake-windows-2022-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/CMakeLists.txt') }}
           restore-keys: |
-            cmake-win-${{ matrix.variant }}-
+            cmake-windows-2022-${{ matrix.variant }}-
 
       - name: Restore source file timestamps
         shell: bash
