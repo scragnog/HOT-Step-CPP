@@ -4,6 +4,11 @@ A feature-rich UI for [acestep.cpp](https://github.com/ServeurpersoCom/acestep.c
 
 Describe a song with a text caption and lyrics, and get stereo 48kHz audio generated entirely on your local hardware. No cloud, no API keys, no subscriptions.
 
+> ### 🧱 New: Song Builder *(in development — try it out!)*
+> Build a song **section by section**, Udio-style. Generate an intro, then generate several options for the next section (verse, pre-chorus, chorus…), audition them, pick your favourite, and extend — one piece at a time. You can prepend an intro after the fact, set per-section lyrics and bar counts, choose where each section attaches, and even seed a repeated section from an earlier one to follow its chords.
+>
+> It's a **new feature still in active development and testing**, so expect rough edges — but we'd love for you to try it and share feedback. Find it in the sidebar as **Song Builder**.
+
 ## Download
 
 Pre-built portable releases — no installation required. Extract, run, done.
