@@ -14,6 +14,16 @@
 
 import { useSyncExternalStore, useRef, useCallback } from 'react';
 import type { WaveformPlayerHandle } from '../components/player/WaveformPlayer';
+import { useVstChainStore } from './vstChainStore';
+
+/** VST monitoring and the global player are mutually exclusive — they'd play
+ *  two tracks at once. Whenever global playback starts, stop the VST monitor. */
+function stopVstMonitorIfActive(): void {
+  try {
+    const vst = useVstChainStore.getState();
+    if (vst.monitoring) vst.stopMonitor();
+  } catch { /* vst store not initialized yet */ }
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -435,6 +445,7 @@ function loadTrack(track: PlaybackTrack): void {
 
 /** Play a single track with no navigation context */
 export function play(track: PlaybackTrack): void {
+  stopVstMonitorIfActive();
   setState({
     trackList: [track],
     trackIndex: 0,
@@ -450,6 +461,7 @@ export function playFromList(
   list: PlaybackTrack[],
   source: PlaybackSource
 ): void {
+  stopVstMonitorIfActive();
   const idx = list.findIndex(t => t.id === track.id);
   setState({
     trackList: list,
@@ -463,6 +475,9 @@ export function playFromList(
 /** Toggle play/pause on both WaveSurfer instances */
 export function togglePlay(): void {
   if (!_state.currentTrack) return;
+  // Resuming (currently paused → about to play) stops the VST monitor so the two
+  // don't play at once. Pausing must NOT — the monitor-start flow pauses us first.
+  if (!_state.isPlaying) stopVstMonitorIfActive();
   // Pause no longer collapses the player bar — only stop() does that.
   // Clear suppress guard so isPlaying state updates naturally.
   _suppressPlayFalse = false;

@@ -18,6 +18,8 @@ import { LmThinkingDropdown, LmThinkingBadge } from './LmThinkingDropdown';
 import { PostProcessingDropdown, PostProcessingBadge } from './PostProcessingDropdown';
 import { VramIndicator } from '../shared/VramIndicator';
 import { DiscoPulseWrapper } from '../shared/DiscoPulseWrapper';
+import { MonitorBar } from './MonitorBar';
+import { useVstChainStore } from '../../stores/vstChainStore';
 
 type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'postprocessing' | null;
 
@@ -26,6 +28,7 @@ export const GlobalParamBar: React.FC = () => {
   const [openSection, setOpenSection] = useState<SectionId>(null);
   const gp = useGlobalParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const monitoring = useVstChainStore(s => s.monitoring);
 
   // ── Auto-select models when engine becomes ready ────────────────
   // Polls the engine until it returns a model list, then auto-selects
@@ -313,19 +316,25 @@ export const GlobalParamBar: React.FC = () => {
           </DiscoPulseWrapper>
         </div>
 
-        {/* Right — Export/Import + VRAM */}
-        <div className="flex items-center gap-2 flex-shrink-0 px-3 border-l border-zinc-200 dark:border-white/5" style={{ width: '210px' }}>
-          <button onClick={handleExport} title={t('globalBar.exportPreset')}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-emerald-400 transition-colors">
-            <Upload size={13} />
-          </button>
-          <button onClick={() => fileInputRef.current?.click()} title={t('globalBar.importPreset')}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-sky-400 transition-colors">
-            <Download size={13} />
-          </button>
-          <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
-          <div className="w-px h-4 bg-white/5" />
-          <VramIndicator compact />
+        {/* Right — MonitorBar when active, otherwise Export/Import + VRAM */}
+        <div className={`flex items-center gap-2 flex-shrink-0 px-3 border-l border-zinc-200 dark:border-white/5 transition-all overflow-hidden ${monitoring ? 'w-[300px]' : 'w-[210px]'}`}>
+          {monitoring ? (
+            <MonitorBar />
+          ) : (
+            <>
+              <button onClick={handleExport} title={t('globalBar.exportPreset')}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-emerald-400 transition-colors">
+                <Upload size={13} />
+              </button>
+              <button onClick={() => fileInputRef.current?.click()} title={t('globalBar.importPreset')}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-sky-400 transition-colors">
+                <Download size={13} />
+              </button>
+              <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+              <div className="w-px h-4 bg-white/5" />
+              <VramIndicator compact />
+            </>
+          )}
         </div>
       </div>
 

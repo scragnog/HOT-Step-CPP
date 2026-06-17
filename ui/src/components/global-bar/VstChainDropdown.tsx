@@ -2,17 +2,23 @@
 //
 // Shows the plugin chain, lets you add/remove/reorder plugins,
 // toggle enable/disable, and launch native plugin GUIs.
+//
+// Changes over stock:
+//   - PluginSearch stays open after add; shows added count; Done button
+//   - ChainRow: green dot when GUI open, restart-to-apply hint while monitoring
+//   - Pending changes banner when monitor is running and a GUI was opened
+//   - Preset section: save / load / delete named chain snapshots
+//   - Status poll lives in MonitorBar now (no own interval here)
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Trash2, ExternalLink, Search,
   ChevronUp, ChevronDown, Power, Headphones, Square,
+  BookmarkPlus, Check, RefreshCw, AlertTriangle,
 } from 'lucide-react';
 import { useVstChainStore } from '../../stores/vstChainStore';
 import { usePlaybackSelector, togglePlay } from '../../stores/playbackStore';
-// VstPlugin type reserved for future use
-// import type { VstPlugin } from '../../services/api';
 
 // Format seconds as mm:ss
 function formatTime(s: number): string {
@@ -22,29 +28,34 @@ function formatTime(s: number): string {
 }
 
 // ── Plugin Search Dropdown ──────────────────────────────────
+// Stays open after adds. Done button closes.
 
 const PluginSearch: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { plugins, scanning, scanPlugins, addToChain, chain } = useVstChainStore();
   const { t } = useTranslation();
   const [filter, setFilter] = useState('');
+  const [addedUids, setAddedUids] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (plugins.length === 0 && !scanning) {
-      scanPlugins();
-    }
+    if (plugins.length === 0 && !scanning) scanPlugins();
   }, [plugins.length, scanning, scanPlugins]);
 
   const filtered = useMemo(() => {
-    if (!filter) return plugins;
     const q = filter.toLowerCase();
-    return plugins.filter(
-      p => p.name.toLowerCase().includes(q) ||
-           p.vendor.toLowerCase().includes(q) ||
-           p.subcategories.toLowerCase().includes(q)
+    return (plugins || []).filter(p =>
+      !q ||
+      p.name.toLowerCase().includes(q) ||
+      p.vendor.toLowerCase().includes(q) ||
+      p.subcategories.toLowerCase().includes(q)
     );
   }, [plugins, filter]);
 
-  const inChain = useMemo(() => new Set(chain.map(p => p.uid)), [chain]);
+  const inChain = useMemo(() => new Set((chain || []).map(p => p.uid)), [chain]);
+
+  const handleAdd = (plugin: typeof plugins[number]) => {
+    addToChain(plugin);
+    setAddedUids(s => new Set([...s, plugin.uid]));
+  };
 
   return (
     <div className="space-y-2">
@@ -73,50 +84,139 @@ const PluginSearch: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             {plugins.length === 0 ? t('vst.noPluginsFound') : t('vst.noMatches')}
           </div>
         ) : (
-          filtered.map(plugin => (
-            <button
-              key={plugin.uid}
-              disabled={inChain.has(plugin.uid)}
-              onClick={() => { addToChain(plugin); onClose(); }}
-              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
-                inChain.has(plugin.uid)
-                  ? 'opacity-30 cursor-not-allowed'
-                  : 'hover:bg-violet-500/10 cursor-pointer'
-              }`}
-            >
-              <Plus size={12} className={`flex-shrink-0 ${inChain.has(plugin.uid) ? 'text-zinc-600' : 'text-violet-400'}`} />
-              <div className="min-w-0 flex-1">
-                <div className="text-xs text-zinc-800 dark:text-zinc-200 truncate">{plugin.name}</div>
-                <div className="text-[10px] text-zinc-500 truncate">{plugin.vendor} · {plugin.subcategories}</div>
-              </div>
-            </button>
-          ))
+          filtered.map(plugin => {
+            const already = inChain.has(plugin.uid);
+            const justAdded = addedUids.has(plugin.uid);
+            return (
+              <button
+                key={plugin.uid}
+                disabled={already}
+                onClick={() => !already && handleAdd(plugin)}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
+                  already ? 'opacity-40 cursor-not-allowed' : 'hover:bg-violet-500/10 cursor-pointer'
+                }`}
+              >
+                {justAdded
+                  ? <Check size={12} className="flex-shrink-0 text-emerald-400" />
+                  : <Plus size={12} className={`flex-shrink-0 ${already ? 'text-zinc-600' : 'text-violet-400'}`} />
+                }
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-zinc-800 dark:text-zinc-200 truncate">{plugin.name}</div>
+                  <div className="text-[10px] text-zinc-500 truncate">{plugin.vendor} · {plugin.subcategories}</div>
+                </div>
+              </button>
+            );
+          })
         )}
       </div>
 
-      {/* Rescan button */}
-      <button
-        onClick={scanPlugins}
-        disabled={scanning}
-        className="w-full text-[10px] text-zinc-600 hover:text-violet-400 transition-colors py-1"
-      >
-        {scanning ? t('vst.scanning') : `Rescan (${plugins.length} found)`}
-      </button>
+      {/* Rescan + Done */}
+      <div className="flex items-center justify-between pt-1">
+        <button
+          onClick={scanPlugins}
+          disabled={scanning}
+          className="text-[10px] text-zinc-600 hover:text-violet-400 transition-colors"
+        >
+          {scanning ? t('vst.scanning') : `Rescan (${plugins.length} found)`}
+        </button>
+        <button
+          onClick={onClose}
+          className="text-[10px] font-semibold text-violet-400 hover:text-violet-300 transition-colors px-2 py-0.5 rounded-lg hover:bg-violet-500/10"
+        >
+          {addedUids.size > 0 ? `Done (+${addedUids.size})` : 'Done'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ── Preset Manager ──────────────────────────────────────────
+// Save / load / delete named chain snapshots (localStorage).
+
+const PresetManager: React.FC = () => {
+  const { presets, savePreset, loadPreset, deletePreset, chain } = useVstChainStore();
+  const [saving, setSaving] = useState(false);
+  const [newName, setNewName] = useState('');
+  const names = Object.keys(presets);
+
+  const handleSave = () => {
+    const name = newName.trim();
+    if (!name) return;
+    savePreset(name);
+    setNewName('');
+    setSaving(false);
+  };
+
+  if (names.length === 0 && !saving && chain.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {names.length > 0 && (
+        <select
+          className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-white/10 text-[10px] text-zinc-600 dark:text-zinc-400 cursor-pointer focus:border-violet-500/50 outline-none transition-colors"
+          defaultValue=""
+          onChange={e => { if (e.target.value) { loadPreset(e.target.value); e.target.value = ''; } }}
+        >
+          <option value="" disabled>Load preset…</option>
+          {names.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      )}
+
+      {names.length > 0 && (
+        <select
+          className="px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-white/10 text-[10px] text-zinc-600 dark:text-zinc-400 cursor-pointer focus:border-red-500/50 outline-none transition-colors"
+          defaultValue=""
+          onChange={e => { if (e.target.value) { deletePreset(e.target.value); e.target.value = ''; } }}
+        >
+          <option value="" disabled>Delete…</option>
+          {names.map(n => <option key={n} value={n}>✕ {n}</option>)}
+        </select>
+      )}
+
+      {chain.length > 0 && (
+        saving ? (
+          <div className="flex items-center gap-1 flex-1 min-w-0">
+            <input
+              type="text"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setSaving(false); }}
+              placeholder="Preset name…"
+              autoFocus
+              className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-violet-500/40 text-[10px] text-zinc-800 dark:text-zinc-200 placeholder-zinc-500 outline-none"
+            />
+            <button
+              onClick={handleSave}
+              disabled={!newName.trim()}
+              className="p-1 rounded text-emerald-400 hover:text-emerald-300 disabled:opacity-30 transition-colors"
+            >
+              <Check size={12} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setSaving(true)}
+            title="Save current chain as preset"
+            className="p-1.5 rounded-lg hover:bg-violet-500/10 text-zinc-500 hover:text-violet-400 transition-colors flex-shrink-0"
+          >
+            <BookmarkPlus size={12} />
+          </button>
+        )
+      )}
     </div>
   );
 };
 
 // ── Chain Entry Row ─────────────────────────────────────────
 
-// ChainRow uses inline type annotation below
-
 const ChainRow: React.FC<{
   entry: { uid: string; name: string; vendor: string; path: string; enabled: boolean; statePath: string };
   index: number;
   total: number;
 }> = ({ entry, index, total }) => {
-  const { toggleEnabled, removeFromChain, reorderChain, openGui } = useVstChainStore();
+  const { toggleEnabled, removeFromChain, reorderChain, openGui, openGuiUids, monitoring } = useVstChainStore();
   const { t } = useTranslation();
+  const guiOpen = openGuiUids.includes(entry.uid);
 
   return (
     <div
@@ -149,17 +249,22 @@ const ChainRow: React.FC<{
         {index + 1}
       </span>
 
-      {/* Plugin name */}
+      {/* Plugin name (green dot when its GUI window is open) */}
       <div className="min-w-0 flex-1">
-        <div className="text-xs text-zinc-800 dark:text-zinc-200 truncate">{entry.name}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-zinc-800 dark:text-zinc-200 truncate">{entry.name}</span>
+          {guiOpen && <span title="GUI window open" className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />}
+        </div>
         <div className="text-[10px] text-zinc-500 truncate">{entry.vendor}</div>
       </div>
 
       {/* Actions */}
       <button
         onClick={() => openGui(entry)}
-        title={t('vst.openPluginUi')}
-        className="p-1 rounded hover:bg-violet-500/10 text-zinc-500 hover:text-violet-400 transition-colors flex-shrink-0"
+        title={monitoring ? 'Open GUI — restart monitor to apply changes' : (guiOpen ? 'Bring GUI to front' : t('vst.openPluginUi'))}
+        className={`p-1 rounded transition-colors flex-shrink-0 ${
+          guiOpen ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-zinc-500 hover:text-violet-400 hover:bg-violet-500/10'
+        }`}
       >
         <ExternalLink size={12} />
       </button>
@@ -192,26 +297,23 @@ const ChainRow: React.FC<{
 export const VstChainDropdown: React.FC = () => {
   const {
     chain, chainLoaded, loadChain, monitoring,
-    startMonitor, stopMonitor, pollMonitorStatus,
+    startMonitor, stopMonitor, restartMonitor,
     monitorPosition, monitorDuration, seekMonitor,
+    pendingGuiChanges,
   } = useVstChainStore();
   const currentTrack = usePlaybackSelector(s => s.currentTrack);
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
+  const presets = useVstChainStore(s => s.presets);
   const [showSearch, setShowSearch] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const { t } = useTranslation();
 
   useEffect(() => {
     if (!chainLoaded) loadChain();
   }, [chainLoaded, loadChain]);
 
-  // Poll monitor status while monitoring (300ms for smooth transport)
-  useEffect(() => {
-    if (!monitoring) return;
-    const id = setInterval(() => pollMonitorStatus(), 300);
-    return () => clearInterval(id);
-  }, [monitoring, pollMonitorStatus]);
-
-  const enabledCount = chain.filter(p => p.enabled).length;
+  const safeChain = chain || [];
+  const enabledCount = safeChain.filter(p => p.enabled).length;
   const hasTrack = !!currentTrack?.audioUrl;
 
   const handleMonitorToggle = async () => {
@@ -224,16 +326,61 @@ export const VstChainDropdown: React.FC = () => {
     }
   };
 
+  const handleRestart = async () => {
+    setRestarting(true);
+    await restartMonitor();
+    setRestarting(false);
+  };
+
   return (
     <div className="space-y-3">
-      {/* Current chain */}
-      {chain.length > 0 ? (
+      {/* Presets */}
+      {(safeChain.length > 0 || Object.keys(presets).length > 0) && (
         <div className="space-y-1">
-          <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1">
-            Plugin Chain ({enabledCount}/{chain.length} active)
+          <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Presets</div>
+          <PresetManager />
+        </div>
+      )}
+
+      {/* Pending changes banner — GUI was opened while monitoring */}
+      {monitoring && pendingGuiChanges && (
+        <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <AlertTriangle size={12} className="text-amber-400 flex-shrink-0" />
+          <span className="text-[10px] text-amber-300 flex-1 leading-relaxed">
+            GUI changes won't be heard until the monitor restarts — it loads state files at startup.
+          </span>
+          <button
+            onClick={handleRestart}
+            disabled={restarting}
+            className="flex items-center gap-1 text-[10px] font-semibold text-amber-300 hover:text-amber-200 transition-colors flex-shrink-0 disabled:opacity-50"
+          >
+            <RefreshCw size={11} className={restarting ? 'animate-spin' : ''} />
+            {restarting ? 'Restarting…' : 'Restart'}
+          </button>
+        </div>
+      )}
+
+      {/* Current chain */}
+      {safeChain.length > 0 ? (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">
+              Plugin Chain ({enabledCount}/{safeChain.length} active)
+            </div>
+            {monitoring && !pendingGuiChanges && (
+              <button
+                onClick={handleRestart}
+                disabled={restarting}
+                title="Restart monitor to reload plugin state"
+                className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-violet-400 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={10} className={restarting ? 'animate-spin' : ''} />
+                reload
+              </button>
+            )}
           </div>
-          {chain.map((entry, i) => (
-            <ChainRow key={entry.uid} entry={entry} index={i} total={chain.length} />
+          {safeChain.map((entry, i) => (
+            <ChainRow key={entry.uid} entry={entry} index={i} total={safeChain.length} />
           ))}
         </div>
       ) : (
@@ -273,23 +420,23 @@ export const VstChainDropdown: React.FC = () => {
         </button>
       )}
 
-      {/* Transport bar during monitoring */}
-      {monitoring && monitorDuration > 0 && (
+      {/* Transport bar during monitoring (MonitorBar is the persistent version) */}
+      {monitoring && (monitorDuration ?? 0) > 0 && (
         <div className="space-y-1">
           <input
             type="range"
             min={0}
             max={monitorDuration}
             step={0.5}
-            value={monitorPosition}
+            value={monitorPosition ?? 0}
             onChange={e => seekMonitor(parseFloat(e.target.value))}
             className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
             style={{
-              background: `linear-gradient(to right, rgb(139 92 246) ${(monitorPosition / monitorDuration) * 100}%, rgb(63 63 70) ${(monitorPosition / monitorDuration) * 100}%)`,
+              background: `linear-gradient(to right, rgb(139 92 246) ${((monitorPosition ?? 0) / monitorDuration) * 100}%, rgb(63 63 70) ${((monitorPosition ?? 0) / monitorDuration) * 100}%)`,
             }}
           />
           <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
-            <span>{formatTime(monitorPosition)}</span>
+            <span>{formatTime(monitorPosition ?? 0)}</span>
             <span>{formatTime(monitorDuration)}</span>
           </div>
         </div>
@@ -323,7 +470,7 @@ export const VstChainDropdown: React.FC = () => {
 
 export const VstChainBadge: React.FC = () => {
   const { chain, monitoring } = useVstChainStore();
-  const enabled = chain.filter(p => p.enabled);
+  const enabled = (chain || []).filter(p => p.enabled);
 
   if (enabled.length === 0 && !monitoring) return null;
 

@@ -15,6 +15,8 @@
 #include <vector>
 #include <fstream>
 #include <algorithm>
+#include <mutex>
+#include <atomic>
 
 // Windows headers MUST come before VST3 SDK to avoid IConnectionPoint collision
 // (ocidl.h defines COM IConnectionPoint, VST3 has Steinberg::Vst::IConnectionPoint)
@@ -137,12 +139,60 @@ static int cmd_scan() {
 
 // ── Process Mode ─────────────────────────────────────────────────────────────
 
+// Minimal IComponentHandler — lets JUCE plugins push param changes from GUI
+// to the audio processor in realtime via inputParameterChanges.
+// Without this, GUI knob moves never reach processBlock.
+class ParamChangeHandler final : public IComponentHandler {
+public:
+    struct Change { ParamID id; ParamValue value; };
+
+    tresult PLUGIN_API beginEdit(ParamID) override { return kResultOk; }
+    tresult PLUGIN_API performEdit(ParamID id, ParamValue value) override {
+        std::lock_guard<std::mutex> lock(mtx);
+        // Overwrite existing pending change for this param (last value wins)
+        for (auto & c : pending) { if (c.id == id) { c.value = value; return kResultOk; } }
+        pending.push_back({ id, value });
+        return kResultOk;
+    }
+    tresult PLUGIN_API endEdit(ParamID) override { return kResultOk; }
+    tresult PLUGIN_API restartComponent(int32) override { return kResultOk; }
+
+    tresult PLUGIN_API queryInterface(const TUID _iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(_iid, IComponentHandler::iid) ||
+            FUnknownPrivate::iidEqual(_iid, FUnknown::iid)) {
+            *obj = this; addRef(); return kResultOk;
+        }
+        *obj = nullptr; return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef()  override { return ++refCount; }
+    uint32 PLUGIN_API release() override { uint32 r = --refCount; if (!r) delete this; return r; }
+
+    // Called from audio thread — drain pending changes into ProcessData
+    void drainInto(ParameterChanges & dest) {
+        std::lock_guard<std::mutex> lock(mtx);
+        for (auto & c : pending) {
+            int32 idx = 0;
+            auto * q = dest.addParameterData(c.id, idx);
+            if (q) q->addPoint(0, c.value, idx);
+        }
+        pending.clear();
+    }
+
+private:
+    std::mutex mtx;
+    std::vector<Change> pending;
+    std::atomic<uint32> refCount { 1 };
+};
+
 struct PluginInstance {
     VST3::Hosting::Module::Ptr module;
     IPtr<PlugProvider>         provider;
     IComponent *               component  = nullptr;
     IAudioProcessor *          processor  = nullptr;
     bool                       active     = false;
+    int32                      numActiveInputBuses  = 1;
+    int32                      numActiveOutputBuses = 1;
+    ParamChangeHandler *       paramHandler = nullptr;  // realtime param bridge
 
     ~PluginInstance() {
         if (active && processor) {
@@ -184,6 +234,13 @@ static bool load_plugin(const std::string & path, PluginInstance & inst) {
                                         (void **)&inst.processor) != kResultOk) {
         fprintf(stderr, "[vst-host] Component does not support IAudioProcessor\n");
         return false;
+    }
+
+    // Wire up param change handler so GUI edits reach the audio thread in realtime
+    auto controller = inst.provider->getController();
+    if (controller) {
+        inst.paramHandler = new ParamChangeHandler();
+        controller->setComponentHandler(inst.paramHandler);
     }
 
     return true;
@@ -238,36 +295,47 @@ static bool save_state(PluginInstance & inst, const std::string & state_path) {
 static bool setup_processing(PluginInstance & inst, int sample_rate, int block_size,
                               int32 process_mode = kOffline) {
     ProcessSetup setup;
-    setup.processMode       = process_mode;
+    setup.processMode        = process_mode;
     setup.symbolicSampleSize = kSample32;
     setup.maxSamplesPerBlock = block_size;
     setup.sampleRate         = (double)sample_rate;
 
-    // Activate all audio buses before setupProcessing
-    int32 numInputBuses  = inst.component->getBusCount(kAudio, kInput);
-    int32 numOutputBuses = inst.component->getBusCount(kAudio, kOutput);
-    for (int32 i = 0; i < numInputBuses; i++)
-        inst.component->activateBus(kAudio, kInput, i, true);
-    for (int32 i = 0; i < numOutputBuses; i++)
-        inst.component->activateBus(kAudio, kOutput, i, true);
-
+    // VST3 spec + JUCE requirement: setupProcessing BEFORE activateBus/setActive.
+    // Steinberg's own plugins (Ozone etc) tolerate wrong order. JUCE enforces it.
     if (inst.processor->setupProcessing(setup) != kResultOk) {
-        // Some JUCE plugins reject layouts with active input buses when no input
-        // is expected (strict isBusesLayoutSupported check). Retry without them.
-        fprintf(stderr, "[vst-host] setupProcessing failed, retrying with input buses deactivated\n");
-        for (int32 i = 0; i < numInputBuses; i++)
-            inst.component->activateBus(kAudio, kInput, i, false);
-        if (inst.processor->setupProcessing(setup) != kResultOk) {
-            fprintf(stderr, "[vst-host] setupProcessing failed even without input buses\n");
-            return false;
-        }
+        fprintf(stderr, "[vst-host] setupProcessing failed\n");
+        return false;
     }
 
-    inst.component->setActive(true);
+    // Activate buses AFTER setupProcessing (correct VST3 spec order)
+    int32 numInputBuses  = inst.component->getBusCount(kAudio, kInput);
+    int32 numOutputBuses = inst.component->getBusCount(kAudio, kOutput);
+    for (int32 i = 0; i < numOutputBuses; i++)
+        inst.component->activateBus(kAudio, kOutput, i, true);
+    for (int32 i = 0; i < numInputBuses; i++)
+        inst.component->activateBus(kAudio, kInput, i, true);
+
+    // setActive — JUCE calls isBusesLayoutSupported here (strict check)
+    if (inst.component->setActive(true) != kResultOk) {
+        // JUCE strict bus layout check failed — deactivate aux/sidechain buses only.
+        // Bus 0 = main stereo in, buses 1+ = sidechain/aux (e.g. DIAMOND compressor).
+        // Deactivating bus 0 would leave the plugin with no input — don't do that.
+        fprintf(stderr, "[vst-host] setActive failed, retrying with aux input buses deactivated\n");
+        for (int32 i = 1; i < numInputBuses; i++)
+            inst.component->activateBus(kAudio, kInput, i, false);
+        if (inst.component->setActive(true) != kResultOk) {
+            fprintf(stderr, "[vst-host] setActive failed even without input buses\n");
+            return false;
+        }
+        numInputBuses = 1;  // only main bus active after retry
+    }
+
     inst.processor->setProcessing(true);
     inst.active = true;
-
+    inst.numActiveOutputBuses = numOutputBuses;
+    inst.numActiveInputBuses  = numInputBuses;  // all active unless retry below set some off
     return true;
+
 }
 
 static int cmd_process(const char * plugin_path, const char * input_path,
@@ -308,6 +376,18 @@ static int cmd_process(const char * plugin_path, const char * input_path,
     std::vector<float> right_out(T, 0.0f);
 
     // Process in blocks
+    // Provide minimal ProcessContext — JUCE plugins dereference this unconditionally.
+    // Null processContext causes immediate crash in JUCE's VST3 wrapper.
+    ProcessContext ctx = {};
+    ctx.state                = ProcessContext::kPlaying
+                             | ProcessContext::kTempoValid
+                             | ProcessContext::kTimeSigValid;
+    ctx.sampleRate           = (double)sr;
+    ctx.projectTimeSamples   = 0;
+    ctx.tempo                = 120.0;
+    ctx.timeSigNumerator     = 4;
+    ctx.timeSigDenominator   = 4;
+
     int pos = 0;
     while (pos < T) {
         int n = std::min(block_size, T - pos);
@@ -326,19 +406,26 @@ static int cmd_process(const char * plugin_path, const char * input_path,
         output_bus.silenceFlags = 0;
         output_bus.channelBuffers32 = out_bufs;
 
+        // Sidechain bus — zeroed, for plugins with aux inputs (e.g. DIAMOND)
+        static float sc_zero[2][4096] = {};
+        float * sc_bufs[2] = { sc_zero[0], sc_zero[1] };
+        AudioBusBuffers sc_bus; sc_bus.numChannels = 2; sc_bus.silenceFlags = 3; sc_bus.channelBuffers32 = sc_bufs;
+        AudioBusBuffers in_buses[2] = { input_bus, sc_bus };
+
         ProcessData data;
         data.processMode         = kOffline;
         data.symbolicSampleSize  = kSample32;
         data.numSamples          = n;
-        data.numInputs           = 1;
-        data.numOutputs          = 1;
-        data.inputs              = &input_bus;
+        data.numInputs           = inst.numActiveInputBuses;
+        data.numOutputs          = inst.numActiveOutputBuses;
+        data.inputs              = in_buses;
         data.outputs             = &output_bus;
         data.inputParameterChanges  = nullptr;
         data.outputParameterChanges = nullptr;
         data.inputEvents         = nullptr;
         data.outputEvents        = nullptr;
-        data.processContext      = nullptr;
+        ctx.projectTimeSamples   = pos;
+        data.processContext      = &ctx;
 
         inst.processor->process(data);
         pos += n;
@@ -650,6 +737,7 @@ struct MonitorState {
     std::string current_track;
     FILETIME    control_mtime = {};
     bool        running = true;
+    bool        paused  = false;
 
     // Processing buffers (reused per block)
     std::vector<float> buf_a_L, buf_a_R, buf_b_L, buf_b_R;
@@ -706,6 +794,12 @@ static void monitor_check_control(MonitorState & ms) {
             yyjson_doc_free(doc);
             return;
         }
+        if (action && !strcmp(action, "pause")) {
+            ms.paused = true;
+        }
+        if (action && !strcmp(action, "play")) {
+            ms.paused = false;
+        }
     }
 
     yyjson_val * track_val = yyjson_obj_get(root, "track");
@@ -736,6 +830,13 @@ static void monitor_process_block(MonitorState & ms, float * out_L, float * out_
         return;
     }
 
+    // Paused: output silence without advancing position
+    if (ms.paused) {
+        memset(out_L, 0, n * sizeof(float));
+        memset(out_R, 0, n * sizeof(float));
+        return;
+    }
+
     // Ensure buffers are large enough
     if ((int)ms.buf_a_L.size() < n) {
         ms.buf_a_L.resize(n); ms.buf_a_R.resize(n);
@@ -757,27 +858,65 @@ static void monitor_process_block(MonitorState & ms, float * out_L, float * out_
     ms.pos += n;
     if (ms.loop && ms.pos >= ms.T) ms.pos = ms.pos % ms.T;
 
-    // Process through each plugin
+    // Process through each plugin in chunks — JUCE allocates internal buffers
+    // at prepareToPlay for maxSamplesPerBlock. Never pass more than that.
+    // block_size = 4096 so this only matters if WASAPI gives an unusually large buffer.
+    const int MAX_CHUNK = 4096;
+    ProcessContext mctx = {};
+    mctx.state              = ProcessContext::kPlaying
+                            | ProcessContext::kTempoValid
+                            | ProcessContext::kTimeSigValid;
+    mctx.sampleRate         = (ms.sr > 0) ? (double)ms.sr : 48000.0;
+    mctx.tempo              = 120.0;
+    mctx.timeSigNumerator   = 4;
+    mctx.timeSigDenominator = 4;
+
     float * cur_L = src_L, * cur_R = src_R;
     float * dst_L = ms.buf_b_L.data(), * dst_R = ms.buf_b_R.data();
 
+    int processed = 0;
+    while (processed < n) {
+        int chunk = std::min(n - processed, MAX_CHUNK);
+
     for (size_t pi = 0; pi < ms.plugins.size(); pi++) {
-        float * in_bufs[2]  = { cur_L, cur_R };
-        float * ob[2]       = { dst_L, dst_R };
+        int32 nIn  = ms.plugins[pi].numActiveInputBuses;
+        int32 nOut = ms.plugins[pi].numActiveOutputBuses;
+
+        float * in_bufs[2]  = { cur_L + processed, cur_R + processed };
+        float * ob[2]       = { dst_L + processed, dst_R + processed };
         AudioBusBuffers ib; ib.numChannels = 2; ib.silenceFlags = 0; ib.channelBuffers32 = in_bufs;
         AudioBusBuffers ob_bus; ob_bus.numChannels = 2; ob_bus.silenceFlags = 0; ob_bus.channelBuffers32 = ob;
 
+        static float sc_zero[2][4096] = {};
+        float * sc_bufs[2] = { sc_zero[0], sc_zero[1] };
+        AudioBusBuffers sc_bus; sc_bus.numChannels = 2; sc_bus.silenceFlags = 3; sc_bus.channelBuffers32 = sc_bufs;
+
+        AudioBusBuffers in_buses[2] = { ib, sc_bus };
+        AudioBusBuffers out_buses[1] = { ob_bus };
+
+        // Drain GUI param changes into this block's inputParameterChanges
+        ParameterChanges paramChanges;
+        if (ms.plugins[pi].paramHandler)
+            ms.plugins[pi].paramHandler->drainInto(paramChanges);
+
         ProcessData pd;
         pd.processMode = kRealtime; pd.symbolicSampleSize = kSample32;
-        pd.numSamples = n; pd.numInputs = 1; pd.numOutputs = 1;
-        pd.inputs = &ib; pd.outputs = &ob_bus;
-        pd.inputParameterChanges = nullptr; pd.outputParameterChanges = nullptr;
-        pd.inputEvents = nullptr; pd.outputEvents = nullptr; pd.processContext = nullptr;
+        pd.numSamples = chunk;
+        pd.numInputs  = nIn;
+        pd.numOutputs = nOut;
+        pd.inputs  = in_buses;
+        pd.outputs = out_buses;
+        pd.inputParameterChanges  = &paramChanges;
+        pd.outputParameterChanges = nullptr;
+        mctx.projectTimeSamples = ms.pos - n + processed;
+        pd.inputEvents = nullptr; pd.outputEvents = nullptr; pd.processContext = &mctx;
 
         ms.plugins[pi].processor->process(pd);
 
-        // Swap buffers for next plugin
-        std::swap(cur_L, dst_L); std::swap(cur_R, dst_R);
+        // after first plugin, subsequent plugins read from dst
+        if (pi == 0) { std::swap(cur_L, dst_L); std::swap(cur_R, dst_R); }
+    }
+        processed += chunk;
     }
 
     memcpy(out_L, cur_L, n * sizeof(float));
@@ -848,7 +987,10 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
     // Load plugins
     ms.plugins.resize(defs.size());
     ms.state_paths.resize(defs.size());
-    const int block_size = 512;  // Low latency for real-time
+    // Must be >= WASAPI buffer size (typically 1024-2048 at 48kHz shared mode).
+    // JUCE allocates internal scratch buffers at prepareToPlay for exactly this size.
+    // Passing a larger block crashes with 0xC0000005. 4096 covers all WASAPI configs.
+    const int block_size = 4096;
 
     for (size_t i = 0; i < defs.size(); i++) {
         ms.state_paths[i] = defs[i].state;
@@ -984,8 +1126,13 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
                     pRenderClient->ReleaseBuffer(available, 0);
                 }
             }
-        } else if (wait == WAIT_OBJECT_0 + 1) {
-            // Win32 messages
+        }
+
+        // Pump Win32 messages on EVERY iteration — not just on QS_ALLINPUT.
+        // JUCE's 30Hz timer, repaint callbacks, and waveform display all fire
+        // via WM_TIMER / WM_PAINT. If we only pump on the message event, WASAPI
+        // events (22ms) dominate the loop and starve JUCE's UI thread entirely.
+        {
             MSG msg;
             while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
                 if (msg.message == WM_QUIT) { ms.running = false; break; }
@@ -1009,8 +1156,8 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
             double dur_sec = (ms.sr > 0) ? (double)ms.T / ms.sr : 0;
             char sbuf[256];
             snprintf(sbuf, sizeof(sbuf),
-                     "{\"position\":%.2f,\"duration\":%.2f,\"loop\":%s}",
-                     pos_sec, dur_sec, ms.loop ? "true" : "false");
+                     "{\"position\":%.2f,\"duration\":%.2f,\"loop\":%s,\"paused\":%s}",
+                     pos_sec, dur_sec, ms.loop ? "true" : "false", ms.paused ? "true" : "false");
             HANDLE hStatus = CreateFileA(ms.status_file.c_str(), GENERIC_WRITE,
                                          FILE_SHARE_READ, nullptr,
                                          CREATE_ALWAYS, 0, nullptr);

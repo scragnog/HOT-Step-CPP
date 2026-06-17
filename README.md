@@ -538,3 +538,9 @@ If you see errors about Metal Toolchain, these can usually be ignored — the em
 ## License
 
 The engine component (`engine/`) is licensed under MIT. See [engine/LICENSE](engine/LICENSE) for details.
+
+---
+
+> ### 💜 Special Thanks
+>
+> A heartfelt thank you to **Alexander Allan ([MDMAchine](https://github.com/MDMAchine))** for his ongoing and generous contributions to HOT-Step — from the STORM solver and MD Audio Tiled Core postprocess plugins to the real-time VST3 monitoring UX (chain presets, live monitor transport, pause/resume/restart) and a slew of JUCE VST3 hosting crash fixes in the engine. Your work has made this project meaningfully better. 🙏

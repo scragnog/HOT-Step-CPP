@@ -256,6 +256,8 @@ router.post('/process', async (req, res) => {
 // ── Monitor — Real-time playback through VST chain ──────────
 
 let monitorProcess: ChildProcess | null = null;
+let monitorPaused = false;
+let monitorCurrentTrack = '';  // track path currently loaded in monitor
 const monitorControlFile = () => path.join(config.vst.statesDir, 'monitor_control.json');
 const monitorStatusFile  = () => path.join(config.vst.statesDir, 'monitor_status.json');
 
@@ -344,6 +346,8 @@ router.post('/monitor/start', (req, res) => {
 
   // Write initial control file
   writeMonitorControl({ track: absTrackPath, action: 'play' });
+  monitorPaused = false;
+  monitorCurrentTrack = absTrackPath;
 
   console.log(`[VST] Starting monitor: ${enabled.length} plugin(s), track=${path.basename(absTrackPath)}`);
 
@@ -383,6 +387,8 @@ router.post('/monitor/stop', (_req, res) => {
     return;
   }
   writeMonitorControl({ action: 'stop' });
+  monitorPaused = false;
+  monitorCurrentTrack = '';
   // Give it a moment to save state gracefully, then force-kill
   setTimeout(() => {
     if (isMonitorAlive()) {
@@ -433,7 +439,7 @@ router.get('/monitor/status', (_req, res) => {
       }
     } catch { /* ignore parse errors */ }
   }
-  res.json({ running, pid: monitorProcess?.pid || null, position, duration });
+  res.json({ running, paused: monitorPaused, pid: monitorProcess?.pid || null, position, duration });
 });
 
 // POST /monitor/seek — Seek to a position in seconds
@@ -458,6 +464,107 @@ router.post('/monitor/seek', (req, res) => {
   writeMonitorControl(controlData);
 
   res.json({ ok: true, position });
+});
+
+
+// POST /monitor/pause — pause playback
+router.post('/monitor/pause', (_req, res) => {
+  if (!isMonitorAlive()) {
+    res.status(400).json({ error: 'Monitor is not running' });
+    return;
+  }
+  monitorPaused = true;
+  writeMonitorControl({ action: 'pause' });
+  res.json({ ok: true });
+});
+
+// POST /monitor/resume — resume playback
+router.post('/monitor/resume', (_req, res) => {
+  if (!isMonitorAlive()) {
+    res.status(400).json({ error: 'Monitor is not running' });
+    return;
+  }
+  monitorPaused = false;
+  let ctrl: Record<string, unknown> = {};
+  try {
+    const raw = fs.readFileSync(monitorControlFile(), 'utf-8');
+    ctrl = JSON.parse(raw);
+  } catch { /* start fresh */ }
+  writeMonitorControl({ ...ctrl, action: 'play' });
+  res.json({ ok: true });
+});
+
+// POST /monitor/restart — kill and restart monitor, reloading state files from disk
+// This is how GUI parameter changes take effect in the monitor.
+router.post('/monitor/restart', async (_req, res) => {
+  const exe = config.vst.exe;
+  const track = monitorCurrentTrack;
+
+  if (!track || !fs.existsSync(track)) {
+    res.status(400).json({ error: 'No track loaded in monitor' });
+    return;
+  }
+  if (!fs.existsSync(exe)) {
+    res.status(503).json({ error: 'vst-host.exe not found' });
+    return;
+  }
+
+  // Gracefully stop the existing process
+  if (isMonitorAlive()) {
+    writeMonitorControl({ action: 'stop' });
+    try { monitorProcess?.kill(); } catch {}
+    monitorProcess = null;
+  }
+  monitorPaused = false;
+
+  // Brief pause for process cleanup and state file flush
+  await new Promise(r => setTimeout(r, 800));
+
+  // Reload chain — picks up any GUI state file changes
+  const chain = loadChain();
+  const enabled = chain.plugins.filter(p => p.enabled);
+  if (enabled.length === 0) {
+    res.status(400).json({ error: 'No enabled plugins in chain' });
+    return;
+  }
+
+  const tempChainFile = path.join(config.vst.statesDir, '_monitor_chain.json');
+  const chainData = {
+    plugins: enabled.map(p => ({
+      path: p.path,
+      state: fs.existsSync(p.statePath) ? p.statePath : '',
+      enabled: true,
+    })),
+  };
+  fs.writeFileSync(tempChainFile, JSON.stringify(chainData), 'utf-8');
+  writeMonitorControl({ track, action: 'play' });
+  monitorCurrentTrack = track;
+
+  console.log(`[VST] Restarting monitor: ${enabled.length} plugin(s), track=${path.basename(track)}`);
+
+  const child = spawn(exe, [
+    '--monitor',
+    '--chain', tempChainFile,
+    '--input', track,
+    '--control', monitorControlFile(),
+    '--status', monitorStatusFile(),
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+
+  monitorProcess = child;
+
+  child.stderr?.on('data', (data: Buffer) => {
+    for (const line of data.toString().split('\n')) {
+      if (line.trim()) console.log(`[VST] ${line.trim()}`);
+    }
+  });
+
+  child.on('exit', (code) => {
+    console.log(`[VST] Monitor exited (code ${code})`);
+    monitorProcess = null;
+    try { fs.unlinkSync(tempChainFile); } catch {}
+  });
+
+  res.json({ ok: true, pid: child.pid, plugins: enabled.length });
 });
 
 
