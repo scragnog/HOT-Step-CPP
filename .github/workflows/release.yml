@@ -210,6 +210,19 @@ jobs:
               [ -f "$file" ] && python3 -c "import os; os.utime('$file', ($ts, $ts))" 2>/dev/null
             done
           echo "Restored git timestamps for engine/ source files"
+          # GGML submodule: restore mtimes from its OWN git history. The
+          # superproject only tracks the submodule gitlink, so these files (the
+          # CUDA kernels — by far the longest compile) stayed at checkout mtime,
+          # making Ninja recompile all of CUDA every run despite the build cache.
+          if [ -e engine/ggml/.git ]; then
+            git -C engine/ggml log --pretty=format:%at --name-only | \
+              awk '/^[0-9]+$/{t=$0;next} NF && !seen[$0]++{print t, $0}' | \
+              while IFS=' ' read -r ts file; do
+                f="engine/ggml/$file"
+                [ -f "$f" ] && python3 -c "import os; os.utime('$f', ($ts, $ts))" 2>/dev/null
+              done
+            echo "Restored git timestamps for engine/ggml submodule (CUDA sources)"
+          fi
 
       - name: Build C++ engine
         shell: pwsh
@@ -548,6 +561,19 @@ jobs:
               [ -f "$file" ] && python3 -c "import os; os.utime('$file', ($ts, $ts))" 2>/dev/null
             done
           echo "Restored git timestamps for engine/ source files"
+          # GGML submodule: restore mtimes from its OWN git history. The
+          # superproject only tracks the submodule gitlink, so these files (the
+          # CUDA kernels — by far the longest compile) stayed at checkout mtime,
+          # making Ninja recompile all of CUDA every run despite the build cache.
+          if [ -e engine/ggml/.git ]; then
+            git -C engine/ggml log --pretty=format:%at --name-only | \
+              awk '/^[0-9]+$/{t=$0;next} NF && !seen[$0]++{print t, $0}' | \
+              while IFS=' ' read -r ts file; do
+                f="engine/ggml/$file"
+                [ -f "$f" ] && python3 -c "import os; os.utime('$f', ($ts, $ts))" 2>/dev/null
+              done
+            echo "Restored git timestamps for engine/ggml submodule (CUDA sources)"
+          fi
 
       - name: Build C++ engine
         run: |
@@ -837,6 +863,19 @@ jobs:
               [ -f "$file" ] && python3 -c "import os; os.utime('$file', ($ts, $ts))" 2>/dev/null
             done
           echo "Restored git timestamps for engine/ source files"
+          # GGML submodule: restore mtimes from its OWN git history. The
+          # superproject only tracks the submodule gitlink, so these files (the
+          # CUDA kernels — by far the longest compile) stayed at checkout mtime,
+          # making Ninja recompile all of CUDA every run despite the build cache.
+          if [ -e engine/ggml/.git ]; then
+            git -C engine/ggml log --pretty=format:%at --name-only | \
+              awk '/^[0-9]+$/{t=$0;next} NF && !seen[$0]++{print t, $0}' | \
+              while IFS=' ' read -r ts file; do
+                f="engine/ggml/$file"
+                [ -f "$f" ] && python3 -c "import os; os.utime('$f', ($ts, $ts))" 2>/dev/null
+              done
+            echo "Restored git timestamps for engine/ggml submodule (CUDA sources)"
+          fi
 
       - name: Build C++ engine
         run: |
