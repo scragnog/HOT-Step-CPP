@@ -27,6 +27,22 @@
 #include <string>
 #include <vector>
 
+// VRAM instrumentation: total GPU usage at pipeline phase boundaries, so we can
+// see the split between model weights, DiT activations and VAE-decode buffers.
+#ifdef GGML_USE_CUDA
+#include <cuda_runtime.h>
+static void diag_vram(const char * label) {
+    size_t free_b = 0, total_b = 0;
+    if (cudaMemGetInfo(&free_b, &total_b) == cudaSuccess) {
+        fprintf(stderr, "[VRAM] %-16s used %7.0f MB  (free %.0f MB)\n", label,
+                (double) (total_b - free_b) / (1024.0 * 1024.0),
+                (double) free_b / (1024.0 * 1024.0));
+    }
+}
+#else
+static void diag_vram(const char *) {}
+#endif
+
 void ace_synth_default_params(AceSynthParams * p) {
     p->text_encoder_path = NULL;
     p->dit_path          = NULL;
@@ -521,6 +537,7 @@ static int run_tail(AceSynth *         ctx,
     }
     diag_stats_f32("enc_hidden", s.enc_hidden.data(), s.enc_hidden.size());
 
+    diag_vram("before ctx-build");
     if (ops_build_context(ctx, reqs, batch_n, s) != 0) {
         return -1;
     }
@@ -542,9 +559,11 @@ static int run_tail(AceSynth *         ctx,
         return 0;
     }
 
+    diag_vram("before DiT");
     if (ops_dit_generate(ctx, batch_n, s, cancel, cancel_data) != 0) {
         return -1;
     }
+    diag_vram("after DiT");
     diag_stats_f32("dit_output", s.output.data(), s.output.size());
 
     return 0;
@@ -923,12 +942,14 @@ int ace_synth_job_run_vae(AceSynth *    ctx,
     // Route through postprocess plugin if one is selected
     const std::string & pp = job->state.rr.postprocess_plugin;
     int rc;
+    diag_vram("before VAE");
     if (!pp.empty()) {
         rc = ops_vae_decode_postprocess(ctx, job->batch_n, out, job->state,
                                         pp.c_str(), cancel, cancel_data);
     } else {
         rc = ops_vae_decode(ctx, job->batch_n, out, job->state, cancel, cancel_data);
     }
+    diag_vram("after VAE");
     return rc;
 }
 
