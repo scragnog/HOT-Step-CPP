@@ -205,6 +205,24 @@ export const StemBuilder: React.FC = () => {
         masteringEnabled: false,
         masteringReference: undefined,
         timbreReference: undefined,
+        // ── Force the lego generation regime (matches engine examples/lego.json) ──
+        // The global UI defaults — notably CFG 9 — collapse the source-conditioned
+        // lego latent to near-silence (issue #56). lego wants near-zero guidance and
+        // a minimal schedule shift. At scale 1.0 the guidance term is exactly zero
+        // (apg result = pred_cond + (scale-1)*orth), so the mode is moot but pinned
+        // to the reference default. Inference steps are left to the user's choice.
+        guidanceScale: 1.0,    // pure conditional — CFG amplification (was 9) is the garbage cause
+        guidanceMode: 'apg',   // engine default / lego reference (no vanilla-CFG mode exists; inert at scale 1.0)
+        shift: 1.0,            // lego.json reference — source-conditioned base-model task
+        useCotCaption: false,  // lego is driven by the engine's fixed instruction + source audio
+        inferMethod: 'euler',  // simple, stable solver
+        scheduler: 'linear',
+        // ── Deliver a raw stem — disable the whole post-processing FX chain ──
+        postProcessingEnabled: false,
+        vocalNaturalizerEnabled: false,
+        spectralLifterEnabled: false,
+        ppVaeReencode: false,
+        denoiseStrength: 0,
         // ── Source conditioning ──
         audioCoverStrength: 1.0,  // full source conditioning for lego
         // ── Clear metadata — let engine infer from source audio ──
