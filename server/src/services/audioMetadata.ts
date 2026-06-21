@@ -144,6 +144,23 @@ export function gatherSongMetadata(song: any): AudioMetadata {
     }
   }
 
+  // ── User overrides (metadata editor, #60) ──
+  // When the user has edited a tag-only field, embed it VERBATIM — overriding
+  // the auto-derivation above (e.g. the "(AI-Generated)" artist suffix).
+  // Columns (title/genre/bpm/key/lyrics/cover) are edited directly and already
+  // read above, so only the columnless fields live here.
+  if (song.metadata_overrides) {
+    try {
+      const ov = typeof song.metadata_overrides === 'string'
+        ? JSON.parse(song.metadata_overrides || '{}')
+        : (song.metadata_overrides || {});
+      if (typeof ov.artist === 'string' && ov.artist.trim() !== '') meta.artist = ov.artist;
+      if (typeof ov.album === 'string' && ov.album.trim() !== '') meta.album = ov.album;
+      if (typeof ov.year === 'string' && ov.year.trim() !== '') meta.date = ov.year;
+      if (typeof ov.comment === 'string' && ov.comment.trim() !== '') meta.comment = ov.comment;
+    } catch { /* malformed overrides — ignore */ }
+  }
+
   return meta;
 }
 

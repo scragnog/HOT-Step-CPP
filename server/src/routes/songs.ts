@@ -110,6 +110,8 @@ router.get('/recent', (req, res) => {
       style: s.style || '',
       bpm: s.bpm || 0,
       key_scale: s.key_scale || '',
+      time_signature: s.time_signature || '',
+      metadata_overrides: s.metadata_overrides || '',
       source: genParams.source || 'create',
       created_at: s.created_at,
       // Enriched from Lyric Studio metadata
@@ -197,6 +199,16 @@ router.patch('/:id', (req, res) => {
   if (updates.tags) {
     getDb().prepare('UPDATE songs SET tags = ? WHERE id = ?')
       .run(JSON.stringify(updates.tags), req.params.id);
+  }
+
+  // Metadata-editor overrides (#60) — embed-tag values used verbatim on export.
+  // Accept an object, store as JSON; an empty/null value clears the overrides.
+  if (updates.metadata_overrides !== undefined) {
+    const val = updates.metadata_overrides && typeof updates.metadata_overrides === 'object'
+      ? JSON.stringify(updates.metadata_overrides)
+      : '';
+    getDb().prepare('UPDATE songs SET metadata_overrides = ? WHERE id = ?')
+      .run(val, req.params.id);
   }
 
   const updated = getDb().prepare('SELECT * FROM songs WHERE id = ?').get(req.params.id) as any;

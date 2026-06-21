@@ -243,6 +243,12 @@ export function initDb(): void {
       check: `SELECT COUNT(*) as c FROM pragma_table_info('songs') WHERE name='disco_data_url'`,
       alter: `ALTER TABLE songs ADD COLUMN disco_data_url TEXT DEFAULT ''`,
     },
+    {
+      // User-edited embed-tag overrides (JSON: { artist, album, year, comment }).
+      // Used verbatim by gatherSongMetadata when set — see metadata editor (#60).
+      check: `SELECT COUNT(*) as c FROM pragma_table_info('songs') WHERE name='metadata_overrides'`,
+      alter: `ALTER TABLE songs ADD COLUMN metadata_overrides TEXT DEFAULT ''`,
+    },
   ];
   for (const m of songsMigrations) {
     const row = db.prepare(m.check).get() as any;

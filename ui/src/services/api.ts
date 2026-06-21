@@ -102,6 +102,7 @@ function normalizeSong(s: any): Song {
     dit_model: s.dit_model,
     generation_params: s.generation_params,
     generationParams: gp,
+    metadata_overrides: s.metadata_overrides,
     created_at: s.created_at,
     createdAt: s.created_at ? new Date(s.created_at) : undefined,
     masteredAudioUrl: s.mastered_audio_url || s.masteredAudioUrl || '',

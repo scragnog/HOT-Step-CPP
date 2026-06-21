@@ -130,4 +130,45 @@ router.post('/latent', latentUpload.single('latent'), (req: Request, res: Respon
   }
 });
 
+// ── Cover image upload (metadata editor, #60) ────────────────────────────────
+const ALLOWED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'];
+
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ALLOWED_IMAGE_EXTENSIONS.includes(ext) || file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid image type "${file.originalname}" (${file.mimetype}). Allowed: ${ALLOWED_IMAGE_EXTENSIONS.join(', ')}`));
+    }
+  },
+});
+
+/**
+ * POST /api/upload/cover-image
+ * Multipart form: field "image" with an image file.
+ * Saves to data/audio/ (served at /audio/, where gatherSongMetadata looks for
+ * cover art to embed on export). Returns: { cover_url: "/audio/<uuid>.<ext>" }
+ */
+router.post('/cover-image', imageUpload.single('image'), (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: 'No file uploaded' });
+      return;
+    }
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.png';
+    const filename = `${randomUUID()}${ext}`;
+    fs.mkdirSync(config.data.audioDir, { recursive: true });
+    const filePath = path.join(config.data.audioDir, filename);
+    fs.writeFileSync(filePath, req.file.buffer);
+    console.log(`[upload] Cover image saved: ${req.file.originalname} (${(req.file.size / 1024).toFixed(0)} KB) → ${filename}`);
+    res.json({ cover_url: `/audio/${filename}`, filename: req.file.originalname });
+  } catch (err: any) {
+    console.error('[upload] Cover image upload failed:', err.message);
+    res.status(500).json({ error: 'Cover image upload failed', details: err.message });
+  }
+});
+
 export default router;

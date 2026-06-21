@@ -7,7 +7,7 @@ import {
   Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus, Image,
   LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Upload, Mic2, Loader2,
-  Check, Columns3, ChevronLeft, ChevronRight, Disc3,
+  Check, Columns3, ChevronLeft, ChevronRight, Disc3, Tags,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
@@ -213,6 +213,8 @@ interface SongListProps {
   onAddToPlaylist?: (song: Song) => void;
   /** Load this track's source audio + title/lyrics/style into Cover Studio. */
   onSendToCover?: (song: Song) => void;
+  /** Open the metadata editor for this track. */
+  onEditMetadata?: (song: Song) => void;
   /** Show source filter tabs — true for Library page, false for Create page */
   showFilters?: boolean;
   /** Layout mode — 'list' for compact rows, 'grid' for rich cards, 'table' for data-dense */
@@ -223,7 +225,7 @@ interface SongListProps {
 
 export const SongList: React.FC<SongListProps> = ({
   songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename, onAddToPlaylist,
-  onSendToCover, showFilters = true, viewMode = 'list', title = 'Library',
+  onSendToCover, onEditMetadata, showFilters = true, viewMode = 'list', title = 'Library',
 }) => {
   const { t } = useTranslation();
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
@@ -551,6 +553,7 @@ export const SongList: React.FC<SongListProps> = ({
               onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined}
               onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(song) : undefined}
               onSendToCover={onSendToCover ? () => onSendToCover(song) : undefined}
+              onEditMetadata={onEditMetadata ? () => onEditMetadata(song) : undefined}
               abTrackAId={abTrackAId}
               abTrackBId={abTrackBId}
             />
@@ -578,6 +581,7 @@ export const SongList: React.FC<SongListProps> = ({
               onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined}
               onAddToPlaylist={onAddToPlaylist ? () => onAddToPlaylist(song) : undefined}
               onSendToCover={onSendToCover ? () => onSendToCover(song) : undefined}
+              onEditMetadata={onEditMetadata ? () => onEditMetadata(song) : undefined}
               showSourceBadge={showFilters && sourceFilter === 'all'}
               abTrackAId={abTrackAId}
               abTrackBId={abTrackBId}
@@ -718,6 +722,7 @@ interface SongItemProps {
   onRename?: (newTitle: string) => void;
   onAddToPlaylist?: () => void;
   onSendToCover?: () => void;
+  onEditMetadata?: () => void;
   showSourceBadge?: boolean;
   abTrackAId?: string | null;
   abTrackBId?: string | null;
@@ -725,7 +730,7 @@ interface SongItemProps {
 
 const SongItem: React.FC<SongItemProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
-  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover, showSourceBadge,
+  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover, onEditMetadata, showSourceBadge,
   abTrackAId, abTrackBId,
 }) => {
   const { t } = useTranslation();
@@ -932,6 +937,14 @@ const SongItem: React.FC<SongItemProps> = ({
                     <Disc3 size={14} /> {t('library.sendToCover', 'Send to Cover Studio')}
                   </button>
                 )}
+                {onEditMetadata && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onEditMetadata(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-amber-400 hover:bg-amber-500/10 transition-colors"
+                  >
+                    <Tags size={14} /> {t('metadata.editTitle', 'Edit Metadata')}
+                  </button>
+                )}
                 <button
                   onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
@@ -1033,13 +1046,14 @@ interface SongCardProps {
   onRename?: (newTitle: string) => void;
   onAddToPlaylist?: () => void;
   onSendToCover?: () => void;
+  onEditMetadata?: () => void;
   abTrackAId?: string | null;
   abTrackBId?: string | null;
 }
 
 const SongCard: React.FC<SongCardProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
-  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover,
+  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover, onEditMetadata,
   abTrackAId: _abTrackAId, abTrackBId: _abTrackBId,
 }) => {
   const { t } = useTranslation();
@@ -1183,6 +1197,12 @@ const SongCard: React.FC<SongCardProps> = ({
                   <button onClick={(e) => { e.stopPropagation(); onSendToCover(); setShowMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-cyan-400 hover:bg-cyan-500/10 transition-colors">
                     <Disc3 size={12} /> {t('library.sendToCover', 'Send to Cover Studio')}
+                  </button>
+                )}
+                {onEditMetadata && (
+                  <button onClick={(e) => { e.stopPropagation(); onEditMetadata(); setShowMenu(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-amber-400 hover:bg-amber-500/10 transition-colors">
+                    <Tags size={12} /> {t('metadata.editTitle', 'Edit Metadata')}
                   </button>
                 )}
                 <button onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}

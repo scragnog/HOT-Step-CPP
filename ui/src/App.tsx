@@ -25,6 +25,7 @@ import { LyricsBar } from './components/player/LyricsBar';
 import { TrimControls } from './components/player/TrimControls';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
 import { RightSidebar } from './components/details/RightSidebar';
+import { MetadataEditorModal } from './components/details/MetadataEditorModal';
 import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
 import { downloadTrack } from './utils/downloadTrack';
@@ -565,6 +566,10 @@ const AppContent: React.FC = () => {
     navigateTo('cover-studio');
   }, [navigateTo]);
 
+  // Metadata editor (#60)
+  const [metadataEditSong, setMetadataEditSong] = useState<Song | null>(null);
+  const handleEditMetadata = useCallback((song: Song) => setMetadataEditSong(song), []);
+
   // Song update handler
   const handleSongUpdate = useCallback((updatedSong: Song) => {
     setSongs(prev => prev.map(s => s.id === updatedSong.id ? updatedSong : s));
@@ -754,7 +759,7 @@ const AppContent: React.FC = () => {
               onDelete={handleDelete}
               onBulkDelete={handleBulkDelete}
               onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
-              onReuse={handleReuse} onSendToCover={handleSendToCover}
+              onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
               onDownload={handleDownload}
               onRename={handleRename}
               showFilters={false}
@@ -846,7 +851,7 @@ const AppContent: React.FC = () => {
                 <RightSidebar
                   song={selectedSong}
                   onClose={() => setShowRightSidebar(false)}
-                  onReuse={handleReuse} onSendToCover={handleSendToCover}
+                  onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
                   onDelete={handleDelete}
                   onPlay={(song) => playFromList(songToTrack(song), songs.map(songToTrack), 'library')}
                   isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
@@ -871,7 +876,7 @@ const AppContent: React.FC = () => {
               onDelete={handleDelete}
               onBulkDelete={handleBulkDelete}
               onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
-              onReuse={handleReuse} onSendToCover={handleSendToCover}
+              onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
               onDownload={handleDownload}
               onRename={handleRename}
               onAddToPlaylist={(song) => {
@@ -925,7 +930,7 @@ const AppContent: React.FC = () => {
                 <RightSidebar
                   song={selectedSong}
                   onClose={() => setShowRightSidebar(false)}
-                  onReuse={handleReuse} onSendToCover={handleSendToCover}
+                  onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
                   onDelete={handleDelete}
                   onPlay={(song) => playFromList(songToTrack(song), songs.map(songToTrack), 'library')}
                   isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
@@ -987,7 +992,7 @@ const AppContent: React.FC = () => {
             onDelete={handleDelete}
             onBulkDelete={handleBulkDelete}
             onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
-            onReuse={handleReuse} onSendToCover={handleSendToCover}
+            onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
             onDownload={handleDownload}
             onRename={handleRename}
             showFilters={false}
@@ -1079,7 +1084,7 @@ const AppContent: React.FC = () => {
               <RightSidebar
                 song={selectedSong}
                 onClose={() => setShowRightSidebar(false)}
-                onReuse={handleReuse} onSendToCover={handleSendToCover}
+                onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
                 onDelete={handleDelete}
                 onPlay={(song) => playFromList(songToTrack(song), songs.map(songToTrack), 'library')}
                 isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
@@ -1403,6 +1408,15 @@ const AppContent: React.FC = () => {
       />
 
       <ABCompareModal />
+
+      {metadataEditSong && token && (
+        <MetadataEditorModal
+          song={metadataEditSong}
+          token={token}
+          onClose={() => setMetadataEditSong(null)}
+          onSaved={(s) => { handleSongUpdate(s); setMetadataEditSong(null); }}
+        />
+      )}
     </div>
   );
 };

@@ -28,6 +28,8 @@ export interface Song {
   // Generation params — snake_case from DB, camelCase for components
   generation_params?: Record<string, unknown>;
   generationParams?: Record<string, any>;
+  // User-edited embed-tag overrides (JSON string: { artist, album, year, comment }) (#60)
+  metadata_overrides?: string;
   created_at?: string;
   createdAt?: Date | string;
   // UI state

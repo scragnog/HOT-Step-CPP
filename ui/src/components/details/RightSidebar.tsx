@@ -2,7 +2,7 @@
 // Ported from hot-step-9000's RightSidebar, simplified for current feature set.
 
 import React from 'react';
-import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download, Upload, Cpu, Terminal, Settings2, Zap, Radio, Activity, Layers, Sparkles, SlidersHorizontal, Pencil, Disc3 } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download, Upload, Cpu, Terminal, Settings2, Zap, Radio, Activity, Layers, Sparkles, SlidersHorizontal, Pencil, Disc3, Tags } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 import { HoverFullText } from '../shared/HoverFullText';
@@ -17,6 +17,7 @@ interface RightSidebarProps {
   onDownload?: (song: Song) => void;
   onRename?: (song: Song, newTitle: string) => void;
   onSendToCover?: (song: Song) => void;
+  onEditMetadata?: (song: Song) => void;
 }
 
 export const RightSidebar: React.FC<RightSidebarProps> = ({
@@ -29,6 +30,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   onDownload,
   onRename,
   onSendToCover,
+  onEditMetadata,
 }) => {
   const { t } = useTranslation();
   const gp = song.generationParams;
@@ -159,6 +161,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
               title={t('library.sendToCover', 'Send to Cover Studio')}
             >
               <Disc3 size={16} />
+            </button>
+          )}
+          {onEditMetadata && (
+            <button
+              onClick={() => onEditMetadata(song)}
+              className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-zinc-700 dark:text-zinc-300 hover:text-amber-400 transition-colors"
+              title={t('metadata.editTitle', 'Edit Metadata')}
+            >
+              <Tags size={16} />
             </button>
           )}
           {gp && (
