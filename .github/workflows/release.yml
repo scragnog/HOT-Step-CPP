@@ -229,11 +229,12 @@ jobs:
         run: |
           $buildDir = "engine/build"
           New-Item -ItemType Directory -Force $buildDir | Out-Null
-          # Vulkan SDK paths may change between runs — force fresh configure
-          if ("${{ matrix.variant }}" -eq "vulkan") {
-            $cacheFile = Join-Path $buildDir "CMakeCache.txt"
-            if (Test-Path $cacheFile) { Remove-Item $cacheFile -Force; Write-Host "Cleared CMake cache (Vulkan)" }
-          }
+          # A restored build cache may carry absolute toolchain paths that are
+          # dead in this run — the ninja binary (ephemeral _temp/<run-id> dir from
+          # lukka/get-cmake) and the Vulkan SDK. Drop the tiny CMakeCache.txt so
+          # configure re-detects them; cached object files remain for incremental.
+          $cacheFile = Join-Path $buildDir "CMakeCache.txt"
+          if (Test-Path $cacheFile) { Remove-Item $cacheFile -Force; Write-Host "Cleared stale CMakeCache.txt" }
 
           Push-Location $buildDir
           $cmakeArgs = @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release") + "${{ matrix.cmake_flags }}".Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries)
@@ -880,6 +881,12 @@ jobs:
       - name: Build C++ engine
         run: |
           mkdir -p engine/build && cd engine/build
+          # A restored build cache may carry absolute toolchain paths (notably
+          # the ninja binary, installed to an ephemeral _temp/<run-id> dir by
+          # lukka/get-cmake). Drop the tiny CMakeCache.txt so configure re-detects
+          # the current run's ninja; the cached object files remain for an
+          # incremental compile.
+          rm -f CMakeCache.txt
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             ${{ matrix.cmake_flags }}
