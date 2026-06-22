@@ -9,6 +9,7 @@
 
 import React from 'react';
 import { useGlobalParamsStore } from '../stores/globalParamsStore';
+import type { AdapterGroupScales } from '../stores/globalParamsStore';
 import type { GenerationParams } from '../types';
 
 // Re-export types that consumers may import from here
@@ -29,8 +30,8 @@ export interface GlobalParams {
   adapter: string; setAdapter: (v: string) => void;
   adapterScale: number; setAdapterScale: (v: number) => void;
   adapterMode: string; setAdapterMode: (v: string) => void;
-  adapterGroupScales: { self_attn: number; cross_attn: number; mlp: number; cond_embed: number };
-  setAdapterGroupScales: (v: { self_attn: number; cross_attn: number; mlp: number; cond_embed: number }) => void;
+  adapterGroupScales: AdapterGroupScales;
+  setAdapterGroupScales: (v: AdapterGroupScales) => void;
   adapterFolder: string; setAdapterFolder: (v: string) => void;
   advancedAdapters: boolean; setAdvancedAdapters: (v: boolean) => void;
   adaptersOpen: boolean; setAdaptersOpen: (v: boolean) => void;

@@ -101,6 +101,7 @@ export interface GenerationParams {
   lmTopP: number;
   lmNegativePrompt: string;
   useCotCaption: boolean;
+  skipLrc?: boolean;  // Skip LRC (timed-lyrics) generation
 
   // DiT settings
   inferenceSteps: number;

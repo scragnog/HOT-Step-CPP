@@ -45,7 +45,7 @@ export const HoverFullText: React.FC<HoverFullTextProps> = ({ text, className = 
     }).catch(() => {});
   };
 
-  const Tag = as as keyof JSX.IntrinsicElements;
+  const Tag: React.ElementType = as;
 
   return (
     <>

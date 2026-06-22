@@ -57,11 +57,9 @@ function saveDiscoPrefs(discoMode: boolean): void {
 
 let _discoData: DiscoData | null = null;
 let _discoDataUrl = '';
-let _discoDataLoading = false;
 
 // Track main player state
 let _mainCurrentTime = 0;
-let _mainIsPlaying = false;
 
 /** Look up normalised energy at a given time */
 function getEnergyAtTime(energyArray: number[] | undefined, fps: number, timeSec: number): number {
@@ -78,13 +76,11 @@ function loadDiscoData(url: string): void {
 
   if (!url) {
     _discoData = null;
-    _discoDataLoading = false;
     setState({ discoDataLoaded: false });
     console.log('[Disco] Disco data unloaded');
     return;
   }
 
-  _discoDataLoading = true;
   console.log(`[Disco] Loading disco data: ${url}`);
 
   fetch(url)
@@ -95,7 +91,6 @@ function loadDiscoData(url: string): void {
     .then((data: DiscoData) => {
       if (_discoDataUrl !== url) return; // URL changed while loading
       _discoData = data;
-      _discoDataLoading = false;
       setState({ discoDataLoaded: true });
       const totalWindows = Math.max(data.kick?.length || 0, data.snare?.length || 0, data.hihat?.length || 0);
       console.log(`[Disco] Disco data ready: ${totalWindows} windows, ${data.duration?.toFixed(1)}s, fps=${data.fps}`);
@@ -103,7 +98,6 @@ function loadDiscoData(url: string): void {
     .catch(err => {
       console.warn('[Disco] Disco data load failed:', err);
       _discoData = null;
-      _discoDataLoading = false;
       setState({ discoDataLoaded: false });
     });
 }
@@ -132,12 +126,7 @@ export function updateMainTime(time: number): void {
 
 /** Sync main player state (play/pause) */
 export function syncStems(action: 'play' | 'pause' | 'seek', time?: number): void {
-  if (action === 'play') {
-    _mainIsPlaying = true;
-    if (time !== undefined) _mainCurrentTime = time;
-  } else if (action === 'pause') {
-    _mainIsPlaying = false;
-  } else if (action === 'seek' && time !== undefined) {
+  if (time !== undefined && (action === 'play' || action === 'seek')) {
     _mainCurrentTime = time;
   }
 }
@@ -149,14 +138,12 @@ export function syncKickStem(action: 'play' | 'pause' | 'seek', time?: number): 
 
 // ── Audio: Full Mix Fallback ─────────────────────────────────────────────────
 
-let _audioMotion: any = null;
 let _fallbackAnalyser: AnalyserNode | null = null;
-let _fallbackFreqData: Uint8Array | null = null;
+let _fallbackFreqData: Uint8Array<ArrayBuffer> | null = null;
 let _fallbackBinStart = 0;
 let _fallbackBinEnd = 0;
 
 export function registerAudioMotion(instance: any): void {
-  _audioMotion = instance;
   try {
     const ctx: AudioContext = instance.audioCtx;
     _fallbackAnalyser = ctx.createAnalyser();
@@ -172,7 +159,6 @@ export function registerAudioMotion(instance: any): void {
 }
 
 export function unregisterAudioMotion(): void {
-  _audioMotion = null;
   _fallbackAnalyser = null;
   _fallbackFreqData = null;
 }
@@ -373,7 +359,6 @@ export function toggleDiscoMode(): void {
 }
 
 export function setDiscoPlaying(isPlaying: boolean): void {
-  _mainIsPlaying = isPlaying;
   if (_state.discoMode && isPlaying) startLoop();
   else if (!isPlaying) stopLoop();
 }

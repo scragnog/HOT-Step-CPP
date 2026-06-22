@@ -70,7 +70,7 @@ export const SongBuilder: React.FC = () => {
   const [projects, setProjects] = useState<BuilderProject[]>([]);
   const [project, setProject] = useState<BuilderProject | null>(null);
   const [sections, setSections] = useState<BuilderSection[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [toast, setToast] = useState('');
 
   // New-project form
@@ -134,7 +134,7 @@ export const SongBuilder: React.FC = () => {
     return chosenSections.reduce((a, b) => (a.created_at >= b.created_at ? a : b));
   }, [chosenSections]);
   const headSong = head?.chosen ?? null;
-  const headDuration = headSong?.duration ?? 0;
+  const headDuration = Number(headSong?.duration) || 0;
   // Some songs (older repaint sections) were saved with duration 0. When the head
   // is loaded in the play bar, trust the bar's real measured duration instead, so
   // clip-point clamping and region math never collapse to the start of the song.
@@ -265,7 +265,7 @@ export const SongBuilder: React.FC = () => {
       const bars = Math.round((secs * bpm) / (beatsPerBar * 60));
       return `${bars} bar${bars === 1 ? '' : 's'} · ${Math.round(secs)}s`;
     }
-    return secs > 0 ? `${Math.round(secs)}s` : `${Math.round(s.chosen?.duration || 0)}s`;
+    return secs > 0 ? `${Math.round(secs)}s` : `${Math.round(Number(s.chosen?.duration) || 0)}s`;
   }, [bpm, beatsPerBar]);
 
   // ── Generate the next section ──
@@ -742,7 +742,7 @@ export const SongBuilder: React.FC = () => {
                     </button>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-white">Option {i + 1}</div>
-                      <div className="text-[11px] text-zinc-500">{Math.round(c.duration || 0)}s</div>
+                      <div className="text-[11px] text-zinc-500">{Math.round(Number(c.duration) || 0)}s</div>
                     </div>
                     <button
                       onClick={() => chooseVariant(activeSection.id, c)}

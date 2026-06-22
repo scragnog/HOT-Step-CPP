@@ -236,7 +236,6 @@ export function useStreamGeneration(jobId: string | null) {
           // Resume from approximately where the user was in the track
           if (isPlayingRef.current && audioCtxRef.current) {
             // Calculate current playback position
-            const ctx = audioCtxRef.current;
             let currentPos = playbackOffsetRef.current;
             if (currentSourceRef.current) {
               // Rough estimate based on when we started

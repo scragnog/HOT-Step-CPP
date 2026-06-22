@@ -17,6 +17,8 @@ export interface AdapterGroupScales {
   cross_attn: number;
   mlp: number;
   cond_embed: number;
+  time_embed: number;
+  proj_in: number;
 }
 
 // -- Per-key localStorage adapter --
