@@ -183,10 +183,11 @@ jobs:
         run: |
           $buildDir = "engine/build"
           New-Item -ItemType Directory -Force $buildDir | Out-Null
-          if ("${{ matrix.variant }}" -eq "vulkan") {
-            $cacheFile = Join-Path $buildDir "CMakeCache.txt"
-            if (Test-Path $cacheFile) { Remove-Item $cacheFile -Force }
-          }
+          # Drop every CMakeCache.txt (top-level + nested ExternalProjects, e.g.
+          # ggml's vulkan-shaders-gen) so a restored cache's dead ninja/SDK paths
+          # don't break configure. Matches release.yml.
+          Get-ChildItem -Path $buildDir -Recurse -Filter CMakeCache.txt -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
           Push-Location $buildDir
           $cmakeArgs = @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release") + "${{ matrix.cmake_flags }}".Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries)
           cmake .. @cmakeArgs
@@ -313,6 +314,9 @@ jobs:
       - name: Build C++ engine
         run: |
           mkdir -p engine/build && cd engine/build
+          # Drop every CMakeCache.txt (top-level + nested ExternalProjects) so a
+          # restored cache's dead ninja path doesn't break configure. Matches release.yml.
+          find . -name CMakeCache.txt -delete 2>/dev/null || true
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             ${{ matrix.cmake_flags }}
