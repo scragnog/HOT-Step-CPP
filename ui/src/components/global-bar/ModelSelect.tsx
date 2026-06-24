@@ -24,6 +24,17 @@ export function getModelFormat(name: string): 'gguf' | 'safetensors' | 'onnx' {
   return 'safetensors';
 }
 
+/** Middle-truncate a long label so BOTH ends stay visible (the tail often holds
+ *  the distinguishing suffix, e.g. "…-xlremap-s0.3"). CSS truncates only the
+ *  right, which hides exactly that. Returns the string unchanged if short. */
+export function middleEllipsis(s: string, max = 40): string {
+  if (s.length <= max) return s;
+  const keep = max - 1; // room for the ellipsis
+  const head = Math.ceil(keep * 0.55);
+  const tail = keep - head;
+  return `${s.slice(0, head)}…${s.slice(s.length - tail)}`;
+}
+
 interface FormatBadgeProps {
   format: 'gguf' | 'safetensors' | 'onnx';
   compact?: boolean;
@@ -163,6 +174,7 @@ export const ModelSelect: React.FC<ModelSelectProps> = ({
         type="button"
         onClick={() => setOpen(!open)}
         onKeyDown={handleTriggerKeyDown}
+        title={value || undefined}
         className="w-full flex items-center gap-2 px-3 py-2 rounded-xl
                    bg-zinc-100 dark:bg-zinc-800
                    border border-zinc-300 dark:border-white/10
@@ -174,7 +186,7 @@ export const ModelSelect: React.FC<ModelSelectProps> = ({
         {value ? (
           <>
             {selectedFormat && <FormatBadge format={selectedFormat} compact />}
-            <span className="truncate flex-1 text-left">{formatLabel(value)}</span>
+            <span className="truncate flex-1 text-left">{middleEllipsis(formatLabel(value))}</span>
           </>
         ) : (
           <span className="truncate flex-1 text-left text-zinc-400">{placeholder}</span>
@@ -233,13 +245,14 @@ export const ModelSelect: React.FC<ModelSelectProps> = ({
                       setOpen(false);
                     }}
                     onMouseEnter={() => setFocusIdx(i)}
+                    title={opt}
                     className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors
                       ${focused ? 'bg-pink-500/10 dark:bg-pink-500/15' : ''}
                       ${selected ? 'text-pink-400' : 'text-zinc-700 dark:text-zinc-200'}
                       hover:bg-pink-500/10 dark:hover:bg-pink-500/15`}
                   >
                     <FormatBadge format={fmt} />
-                    <span className="truncate flex-1">{formatLabel(opt)}</span>
+                    <span className="truncate flex-1">{middleEllipsis(formatLabel(opt), 48)}</span>
                     {selected && <Check size={14} className="shrink-0 text-pink-400" />}
                   </button>
                 );

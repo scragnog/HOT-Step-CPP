@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 import { HoverFullText } from '../shared/HoverFullText';
 import { openCoverArtPrompt } from '../library/CoverArtPromptModal';
+import { formatDitModel, formatLmModel } from '../global-bar/modelLabels';
 
 interface RightSidebarProps {
   song: Song;
@@ -234,7 +235,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
               {gp.ditModel && (
                 <ParamCell
                   label="DiT Model"
-                  value={getModelShortName(gp.ditModel)}
+                  value={formatDitModel(gp.ditModel)}
+                  title={gp.ditModel}
                   gradient="from-blue-500/10 to-cyan-500/10 border-blue-200 dark:border-blue-500/30"
                   iconColor="text-blue-600 dark:text-blue-400"
                   icon={<Cpu size={12} />}
@@ -243,7 +245,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
               {gp.lmModel && (
                 <ParamCell
                   label="LM Model"
-                  value={getModelShortName(gp.lmModel)}
+                  value={formatLmModel(gp.lmModel)}
+                  title={gp.lmModel}
                   gradient="from-blue-500/10 to-cyan-500/10 border-blue-200 dark:border-blue-500/30"
                   iconColor="text-blue-600 dark:text-blue-400"
                   icon={<Terminal size={12} />}
@@ -340,6 +343,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                 <ParamCell
                   label="Adapter"
                   value={getModelShortName(gp.adapter || gp.loraPath || '')}
+                  title={gp.adapter || gp.loraPath || ''}
                   gradient="from-pink-500/10 to-rose-500/10 border-pink-200 dark:border-pink-500/30"
                   iconColor="text-pink-600 dark:text-pink-400"
                   icon={<Sparkles size={12} />}
@@ -412,12 +416,13 @@ const ParamCell: React.FC<{
   icon: React.ReactNode;
   mono?: boolean;
   span2?: boolean;
-}> = ({ label, value, gradient, iconColor, icon, mono, span2 }) => (
+  title?: string;  // full text shown on hover (the cell value is truncated)
+}> = ({ label, value, gradient, iconColor, icon, mono, span2, title }) => (
   <div className={`flex items-center gap-2 px-2.5 py-2 rounded-lg bg-gradient-to-r ${gradient} border ${span2 ? 'col-span-2' : ''}`}>
     <div className={`${iconColor} flex-shrink-0`}>{icon}</div>
     <div className="min-w-0 flex-1">
       <div className="text-[9px] text-zinc-500 uppercase tracking-wider leading-none mb-0.5">{label}</div>
-      <div className={`text-xs text-zinc-800 dark:text-zinc-200 font-semibold truncate ${mono ? 'font-mono' : ''}`}>{value}</div>
+      <div className={`text-xs text-zinc-800 dark:text-zinc-200 font-semibold truncate ${mono ? 'font-mono' : ''}`} title={title ?? value}>{value}</div>
     </div>
   </div>
 );

@@ -142,6 +142,14 @@ export function getDitModelDescription(filename: string): string {
   if (name.includes('xl') && name.includes('base')) return 'Extended architecture baseline. Full quality with 30–50 steps recommended.';
   if (name.includes('turbo-continuous')) return 'Turbo variant trained for continuous flow. Works well across all step ranges.';
   if (name.includes('turbo-shift')) return 'Turbo variant with pre-baked shift calibration.';
+  // Merge checkpoints must be matched BEFORE the bare turbo/sft/base substrings,
+  // else a "merge-base-turbo" blend wrongly gets the pure-Turbo description (#68).
+  if (name.includes('merge')) {
+    if (name.includes('sft') && name.includes('turbo')) return 'Merged SFT+Turbo checkpoint — fine-tuned consistency with turbo speed. ~8–20 steps.';
+    if (name.includes('base') && name.includes('turbo')) return 'Merged Base+Turbo checkpoint — baseline quality blended with turbo speed. ~8–20 steps.';
+    if (name.includes('base') && name.includes('sft')) return 'Merged Base+SFT checkpoint — baseline quality with fine-tuned consistency.';
+    return 'Merged checkpoint blending multiple training paradigms.';
+  }
   if (name.includes('turbo')) return 'Distilled for fast inference. Best at 8–15 steps. The speed workhorse.';
   if (name.includes('sft')) return 'Supervised fine-tuned for consistent, prompt-adherent output.';
   if (name.includes('base')) return 'Full quality baseline model. Best with 30–50 steps.';
