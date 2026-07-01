@@ -11,6 +11,7 @@
 #include "dit.h"
 
 #include <cmath>
+#include <cstdlib>
 
 // Helper: ensure tensor is f32 (cast if bf16/f16)
 static struct ggml_tensor * dit_ggml_f32(struct ggml_context * ctx, struct ggml_tensor * t) {
@@ -82,6 +83,12 @@ struct DiTLoRASectionCtx {
     const std::vector<float> *                means = nullptr;
 };
 
+// Debug toggles to isolate the per-section path:
+//   HOTSTEP_SECTION_NOMASK — apply every section adapter's delta UNMASKED (full
+//     strength, no per-frame gating). If adapters become audible, the mask
+//     multiply is the culprit; if still nil, the separate-delta wiring is.
+static const bool g_hotstep_section_nomask = (std::getenv("HOTSTEP_SECTION_NOMASK") != nullptr);
+
 // Apply a per-layer projection with LoRA. Summed path (sect==nullptr): y = W@x +
 // single_delta@x. Section path: y = W@x + Σ_i gate_i·(delta_i@x), gate = mask
 // (frame-indexed) or mean scalar (otherwise).
@@ -101,7 +108,9 @@ static struct ggml_tensor * dit_lora_apply_layer(struct ggml_context *      ctx,
             struct ggml_tensor * d = (lr.layers[layer_idx].*slot).delta;
             if (!d) continue;
             struct ggml_tensor * dy = ggml_mul_mat(ctx, d, input);
-            if (frame_masked) {
+            if (g_hotstep_section_nomask) {
+                // debug: apply unmasked (full strength)
+            } else if (frame_masked) {
                 if (sect->masks && i < sect->masks->size() && (*sect->masks)[i])
                     dy = ggml_mul(ctx, dy, (*sect->masks)[i]);
             } else if (sect->means && i < sect->means->size()) {
@@ -132,7 +141,9 @@ static struct ggml_tensor * dit_lora_apply_global(struct ggml_context *      ctx
             struct ggml_tensor * d = (lr.*slot).delta;
             if (!d) continue;
             struct ggml_tensor * dy = ggml_mul_mat(ctx, d, input);
-            if (frame_masked) {
+            if (g_hotstep_section_nomask) {
+                // debug: apply unmasked (full strength)
+            } else if (frame_masked) {
                 if (sect->masks && i < sect->masks->size() && (*sect->masks)[i])
                     dy = ggml_mul(ctx, dy, (*sect->masks)[i]);
             } else if (sect->means && i < sect->means->size()) {
