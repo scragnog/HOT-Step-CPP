@@ -178,6 +178,11 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
     if (!g_hotstep_params.adapter_sections.empty()) {
         ctx->dit_key.adapter_stack += "|sect";
     }
+    // Runtime delta quantization changes the loaded VRAM tensors, so it must cache
+    // as a distinct DiT. Only meaningful in runtime mode; bf16 keeps the legacy key.
+    if (g_hotstep_params.adapter_mode == "runtime" && g_hotstep_params.adapter_runtime_quant != "bf16") {
+        ctx->dit_key.adapter_stack += "|q:" + g_hotstep_params.adapter_runtime_quant;
+    }
     // Basin re-base: only meaningful with an adapter, and only in merge mode.
     if (!ctx->dit_key.adapter_path.empty() && g_hotstep_params.adapter_mode != "runtime") {
         ctx->dit_key.rebase_source = g_hotstep_params.rebase_source;

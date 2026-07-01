@@ -124,8 +124,22 @@ static DiTLoRADelta * dit_lora_slot(DiTLoRA * lora, const std::string & gguf_nam
 
 // adapter_compute_delta is defined in adapter-merge.h (shared with split merge path)
 
-// Stage a precomputed delta: create BF16 tensor in lora context, store F32 data for later upload.
-// The tensor and data are paired so upload order doesn't matter.
+// Choose the VRAM storage type for a runtime delta from g_hotstep_params, honoring
+// per-tensor block-size constraints (Q4_K needs ne0 % 256 == 0, Q8_0 needs
+// ne0 % 32 == 0, where ne0 = in_features is the mul_mat contraction dim). Falls
+// back to BF16 when the requested quant can't tile this tensor. Quantizing the
+// precomputed deltas cuts VRAM (~½ for Q8_0, ~¼ for Q4_K) so many stacked adapters
+// fit; quality impact is small since the base is usually already 4-bit.
+static inline ggml_type adapter_runtime_storage_type(int64_t ne0) {
+    const std::string & q = g_hotstep_params.adapter_runtime_quant;
+    if (q == "q4_k" && (ne0 % 256) == 0) return GGML_TYPE_Q4_K;
+    if ((q == "q4_k" || q == "q8_0") && (ne0 % 32) == 0) return GGML_TYPE_Q8_0;
+    return GGML_TYPE_BF16;
+}
+
+// Stage a precomputed delta: create the storage tensor in lora context, store F32
+// data for later (quantized) upload. The tensor and data are paired so upload
+// order doesn't matter.
 static void adapter_stage_delta(DiTLoRA * lora, DiTLoRADelta * slot,
                                  const std::string & gguf_name,
                                  int64_t ne0, int64_t ne1,
@@ -152,7 +166,7 @@ static void adapter_stage_delta(DiTLoRA * lora, DiTLoRADelta * slot,
     }
     char tname[128];
     snprintf(tname, sizeof(tname), "lora_%s", gguf_name.c_str());
-    slot->delta = ggml_new_tensor_2d(lora->ctx, GGML_TYPE_BF16, ne0, ne1);
+    slot->delta = ggml_new_tensor_2d(lora->ctx, adapter_runtime_storage_type(ne0), ne0, ne1);
     ggml_set_name(slot->delta, tname);
     lora->staged.push_back({ slot->delta, std::move(delta_f32) });
 }
@@ -645,24 +659,37 @@ static bool adapter_runtime_finalize(DiTLoRA * lora, ggml_backend_t backend) {
     }
     ggml_backend_buffer_set_usage(lora->buffer, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
 
-    // Upload: convert F32 staging to BF16 and set into tensors.
-    // Each staged entry pairs its tensor pointer with its F32 data,
-    // so iteration order is irrelevant — no order mismatch possible.
+    // Upload: quantize/convert F32 staging into each tensor's storage type
+    // (BF16 / Q8_0 / Q4_K) and set it. Each staged entry pairs its tensor pointer
+    // with its F32 data, so iteration order is irrelevant.
     size_t total_bytes = 0;
+    int    n_quant = 0;
     for (auto & sd : lora->staged) {
-        int64_t nel = ggml_nelements(sd.tensor);
-        std::vector<ggml_bf16_t> bf16((size_t) nel);
-        ggml_fp32_to_bf16_row(sd.f32_data.data(), bf16.data(), nel);
-        ggml_backend_tensor_set(sd.tensor, bf16.data(), 0, (size_t) nel * sizeof(ggml_bf16_t));
-        total_bytes += (size_t) nel * sizeof(ggml_bf16_t);
+        struct ggml_tensor * t   = sd.tensor;
+        int64_t              nel = ggml_nelements(t);
+        if (t->type == GGML_TYPE_BF16) {
+            std::vector<ggml_bf16_t> bf16((size_t) nel);
+            ggml_fp32_to_bf16_row(sd.f32_data.data(), bf16.data(), nel);
+            ggml_backend_tensor_set(t, bf16.data(), 0, (size_t) nel * sizeof(ggml_bf16_t));
+            total_bytes += (size_t) nel * sizeof(ggml_bf16_t);
+        } else {
+            int64_t          ne0 = t->ne[0], ne1 = t->ne[1];
+            size_t           nbytes = ggml_row_size(t->type, ne0) * (size_t) ne1;
+            std::vector<char> qbuf(nbytes);
+            ggml_quantize_chunk(t->type, sd.f32_data.data(), qbuf.data(), 0, ne1, ne0, nullptr);
+            ggml_backend_tensor_set(t, qbuf.data(), 0, nbytes);
+            total_bytes += nbytes;
+            n_quant++;
+        }
     }
 
     size_t n_deltas = lora->staged.size();
     lora->staged.clear();
     lora->active = true;
 
-    fprintf(stderr, "[Adapter-RT] Loaded %zu deltas (%.1f MB BF16) into VRAM\n",
-            n_deltas, (float) total_bytes / (1024 * 1024));
+    fprintf(stderr, "[Adapter-RT] Loaded %zu deltas (%.1f MB, %d quantized to %s) into VRAM\n",
+            n_deltas, (float) total_bytes / (1024 * 1024), n_quant,
+            g_hotstep_params.adapter_runtime_quant.c_str());
     return true;
 }
 

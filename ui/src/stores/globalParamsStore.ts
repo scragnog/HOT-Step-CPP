@@ -58,6 +58,9 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   adapterStackMode: readKey("hs-adapterStackMode", 'blend'),
   adapterStackBudget: readKey("hs-adapterStackBudget", 0.75),
   adapterMode: readKey("hs-adapterMode", 'runtime'),
+  // Runtime adapter delta VRAM precision: 'bf16' (full), 'q8_0' (~½), 'q4_k' (~¼).
+  // Lets many stacked adapters fit in VRAM; runtime mode only.
+  adapterRuntimeQuant: readKey("hs-adapterRuntimeQuant", 'bf16'),
   adapterGroupScales: readKey("hs-adapterGroupScales", {
     self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0, time_embed: 0.0, proj_in: 0.0,
   }),
@@ -190,6 +193,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setAdapterStackMode: (v: any) => { set({ adapterStackMode: v }); writeKey("hs-adapterStackMode", v); },
   setAdapterStackBudget: (v: any) => { set({ adapterStackBudget: v }); writeKey("hs-adapterStackBudget", v); },
   setAdapterMode: (v: any) => { set({ adapterMode: v }); writeKey("hs-adapterMode", v); },
+  setAdapterRuntimeQuant: (v: any) => { set({ adapterRuntimeQuant: v }); writeKey("hs-adapterRuntimeQuant", v); },
   setAdapterGroupScales: (v: any) => { set({ adapterGroupScales: v }); writeKey("hs-adapterGroupScales", v); },
   setRebaseSource: (v: any) => { set({ rebaseSource: v }); writeKey("hs-rebaseSource", v); },
   setRebaseBeta: (v: any) => { set({ rebaseBeta: v }); writeKey("hs-rebaseBeta", v); },
@@ -359,6 +363,8 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       adapterStackBudget: s.adapterStackBudget,
       adapterGroupScales: primary ? s.adapterGroupScales : undefined,
       adapterMode: primary ? s.adapterMode : 'merge',
+      // Runtime delta quantization (VRAM saver) — only relevant in runtime mode.
+      adapterRuntimeQuant: (primary && s.adapterMode === 'runtime') ? s.adapterRuntimeQuant : undefined,
       // Basin re-base: only sent with an adapter in merge mode and a chosen source.
       rebaseSource: (primary && s.adapterMode === 'merge' && s.rebaseSource) ? s.rebaseSource : undefined,
       rebaseBeta: (primary && s.adapterMode === 'merge' && s.rebaseSource) ? s.rebaseBeta : undefined,

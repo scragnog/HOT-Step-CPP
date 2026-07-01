@@ -95,6 +95,7 @@ export function translateParams(params: any): AceRequest {
   }
   if (params.adapterGroupScales) req.adapter_group_scales = params.adapterGroupScales;
   if (params.adapterMode) req.adapter_mode = params.adapterMode;
+  if (params.adapterRuntimeQuant) req.adapter_runtime_quant = params.adapterRuntimeQuant;
 
   // Per-section adapter masking (regional LoRA): parse inline [Section]{k=v} directives
   // from the lyrics into a per-section weight table, strip them from the lyrics sent to

@@ -106,6 +106,13 @@ struct HotStepParams {
     // merge stores merged weights as F32 to avoid catastrophic BF16 cancellation.
     std::string adapter_mode = "merge";
 
+    // Runtime adapter delta storage precision: "bf16" (default, full quality),
+    // "q8_0" (~half VRAM), or "q4_k" (~quarter VRAM). Quantizes the precomputed
+    // delta tensors in VRAM at load time — nothing is written to disk. Lets many
+    // stacked adapters (per-section masking) fit in VRAM; quality impact is small
+    // since the base is typically already 4-bit (NVFP4). Runtime mode only.
+    std::string adapter_runtime_quant = "bf16";
+
     // Multi-adapter stack. When non-empty, supersedes the single adapter_path
     // passed to dit_ggml_load: every entry is applied with its own scale —
     // merged sequentially into the base weights (merge mode) or summed into the

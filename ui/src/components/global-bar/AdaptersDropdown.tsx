@@ -395,6 +395,41 @@ export const AdaptersDropdown: React.FC = () => {
             </p>
           </div>
 
+          {/* Adapter Quantization — runtime mode only (quantizes the in-VRAM deltas) */}
+          {gp.adapterMode === 'runtime' && (
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
+                {t('adapter.runtimeQuant', 'Adapter VRAM')}
+              </label>
+              <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
+                {([
+                  { v: 'bf16', label: 'Full',   sub: 'BF16' },
+                  { v: 'q8_0', label: 'Q8 ½',   sub: 'Q8_0' },
+                  { v: 'q4_k', label: 'Q4 ¼',   sub: 'Q4_K' },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => gp.setAdapterRuntimeQuant(opt.v)}
+                    title={opt.sub}
+                    className={`flex-1 px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      gp.adapterRuntimeQuant === opt.v
+                        ? 'bg-sky-600 text-white'
+                        : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-zinc-600 mt-1">
+                Quantizes the runtime adapter deltas in VRAM (nothing written to disk). Q8 halves /
+                Q4 quarters VRAM per adapter — lets more stacked adapters fit. Small quality cost;
+                safe when the base model is already 4-bit (NVFP4).
+              </p>
+            </div>
+          )}
+
           {/* Basin re-base (cross-base adapter support) — merge mode only.
               Home base must be a SafeTensors model (nudge reads F32 weights), so
               the selector is filtered to safetensors DiT models only. */}

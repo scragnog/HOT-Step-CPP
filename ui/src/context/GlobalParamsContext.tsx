@@ -38,6 +38,8 @@ export interface GlobalParams {
   adapterStackMode: string; setAdapterStackMode: (v: string) => void;
   adapterStackBudget: number; setAdapterStackBudget: (v: number) => void;
   adapterMode: string; setAdapterMode: (v: string) => void;
+  // Runtime delta VRAM precision: 'bf16' | 'q8_0' | 'q4_k' (runtime mode only)
+  adapterRuntimeQuant: string; setAdapterRuntimeQuant: (v: string) => void;
   adapterGroupScales: AdapterGroupScales;
   setAdapterGroupScales: (v: AdapterGroupScales) => void;
   // Basin re-base (cross-base adapter support)

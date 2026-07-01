@@ -568,6 +568,7 @@ struct ServerFields {
     float       temporal_smoothing = 0.13f;
     AdapterGroupScales group_scales;  // per-group adapter scale multipliers
     std::string adapter_mode;         // "merge" (default, F32 promoted) or "runtime"
+    std::string adapter_runtime_quant = "bf16";  // runtime delta VRAM precision: bf16/q8_0/q4_k
     // Basin re-base: nudge adapted weights toward the adapter's training base S.
     std::string rebase_source = "";   // absolute path to S (resolved by Node server)
     float       rebase_beta   = 0.0f; // 0 = off
@@ -643,6 +644,9 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     }
     if ((v = yyjson_obj_get(obj, "adapter_mode")) && yyjson_is_str(v)) {
         sf->adapter_mode = yyjson_get_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "adapter_runtime_quant")) && yyjson_is_str(v)) {
+        sf->adapter_runtime_quant = yyjson_get_str(v);
     }
     if ((v = yyjson_obj_get(obj, "rebase_source")) && yyjson_is_str(v)) {
         sf->rebase_source = yyjson_get_str(v);
@@ -1128,6 +1132,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
     g_hotstep_params.temporal_smoothing  = sf.temporal_smoothing;
     g_hotstep_params.adapter_group_scales = sf.group_scales;
     g_hotstep_params.adapter_mode         = sf.adapter_mode;
+    g_hotstep_params.adapter_runtime_quant = sf.adapter_runtime_quant.empty() ? "bf16" : sf.adapter_runtime_quant;
     // Per-section adapter masking (regional LoRA). Carry the parsed sections into
     // the sideband and force runtime mode — merge bakes weights and cannot vary
     // per frame. Only active with a multi-adapter stack.
