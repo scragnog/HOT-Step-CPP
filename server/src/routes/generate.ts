@@ -309,40 +309,23 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         const resultRes = await aceClient.getJobResult(lmJobId);
         lmResults = await resultRes.json() as AceRequest[];
 
-        // The LM engine response only contains LM-relevant fields (caption,
-        // lyrics, audio_codes, bpm, etc.). Synth-side sideband fields
-        // (adapter, group scales, DCW, solver, scheduler, etc.) must be
-        // re-injected from the current request so they reach the /synth
-        // endpoint. Without this, adapter_group_scales is missing from the
-        // synth JSON, causing the C++ engine to use default scales.
-        const synthFields: Partial<AceRequest> = {
-          synth_model: aceReq.synth_model,
-          vae_model: aceReq.vae_model,
-          emb_model: aceReq.emb_model,
-          adapter: aceReq.adapter,
-          adapter_scale: aceReq.adapter_scale,
-          adapter_group_scales: aceReq.adapter_group_scales,
-          adapter_mode: aceReq.adapter_mode,
-          infer_method: aceReq.infer_method,
-          scheduler: aceReq.scheduler,
-          guidance_mode: aceReq.guidance_mode,
-          guidance_scale: aceReq.guidance_scale,
-          dcw_enabled: aceReq.dcw_enabled,
-          dcw_mode: aceReq.dcw_mode,
-          dcw_scaler: aceReq.dcw_scaler,
-          dcw_high_scaler: aceReq.dcw_high_scaler,
-          latent_shift: aceReq.latent_shift,
-          latent_rescale: aceReq.latent_rescale,
-          custom_timesteps: aceReq.custom_timesteps,
-          cfg_cutoff_ratio: aceReq.cfg_cutoff_ratio,
-          cache_ratio: aceReq.cache_ratio,
-          use_cot_caption: aceReq.use_cot_caption,
-          negative_prompt: aceReq.negative_prompt,
-          use_ort_vae: aceReq.use_ort_vae,
-        };
-        for (const result of lmResults) {
-          Object.assign(result, synthFields);
-        }
+        // The LM echo is the C++ AceRequest with LM-generated fields filled
+        // in — ServerFields-only sideband (adapter_runtime_quant, alignment
+        // timing, rebase, plugin_params, …) is not part of the C++ struct and
+        // never survives the round trip. Rebuild each result from the CURRENT
+        // request and take only the LM-generated fields from the echo (the
+        // same reconstruction the cache-hit path uses above), so every
+        // sideband field reaches /synth regardless of cache state.
+        lmResults = lmResults.map(lmOut => ({
+          ...aceReq,
+          audio_codes: lmOut.audio_codes,
+          caption: lmOut.caption,
+          lyrics: lmOut.lyrics,
+          bpm: lmOut.bpm,
+          duration: lmOut.duration,
+          keyscale: lmOut.keyscale,
+          timesignature: lmOut.timesignature,
+        }));
         job.lmResults = lmResults;
 
         // Store only LM-generated fields in cache (never DiT/adapter/DCW/etc.)

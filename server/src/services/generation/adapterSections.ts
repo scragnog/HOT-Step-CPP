@@ -2,10 +2,10 @@
 //
 // Parses inline per-section adapter-influence directives from the lyrics, e.g.
 //
-//   [Intro]{adapter_1=1; adapter_2=0}
-//   [Verse 1]{adapter_1=0.5; adapter_2=0.5}
+//   [Intro]{greenday_idiot=1; blink_selftitled=0}
+//   [Verse 1]{greenday_idiot=0.5; blink_selftitled=0.5}
 //   ...lines...
-//   [Chorus]{adapter_1=0; adapter_2=1}
+//   [Chorus]{#1=0; #2=1}   (positional #N / bare N also accepted)
 //
 // and turns them into a per-section weight table indexed to the loaded adapter
 // stack, plus the lyrics with the {…} directives stripped (the model must never
@@ -30,7 +30,7 @@ function triggerOf(p: string): string {
   return (p.split(/[\\/]/).pop() || p).replace(/\.safetensors$/i, '');
 }
 
-/** Resolve a directive key ("adapter_1", trigger word, or "#2") to a stack index, or -1. */
+/** Resolve a directive key (trigger word = filename stem, or positional "#2"/"2") to a stack index, or -1. */
 function resolveKey(key: string, triggers: string[]): number {
   const k = key.trim().toLowerCase();
   const byTrigger = triggers.findIndex(t => t.toLowerCase() === k);
@@ -43,19 +43,54 @@ function resolveKey(key: string, triggers: string[]): number {
   return -1;
 }
 
-/** Parse a `key=val; key=val` directive body into raw per-adapter weights (unmentioned → 0). */
-function parseDirective(body: string, triggers: string[]): number[] {
+interface DirectiveParse {
+  raw: number[];        // per-adapter weights (unmentioned → 0)
+  pairs: number;        // `key=val` pairs found (0 → not a directive at all)
+  resolved: number;     // pairs whose key matched a stacked adapter
+  unresolved: string[]; // keys that parsed but matched nothing (typos)
+}
+
+/** Parse a `key=val; key=val` directive body into raw per-adapter weights. */
+function parseDirective(body: string, triggers: string[]): DirectiveParse {
   const raw = new Array(triggers.length).fill(0);
+  let pairs = 0, resolved = 0;
+  const unresolved: string[] = [];
   for (const part of body.split(/[;,]/)) {
     const eq = part.indexOf('=');
     if (eq < 0) continue;
     const key = part.slice(0, eq).trim();
     const val = parseFloat(part.slice(eq + 1).trim());
     if (!key || !Number.isFinite(val)) continue;
+    pairs++;
     const idx = resolveKey(key, triggers);
-    if (idx >= 0) raw[idx] = val;
+    if (idx >= 0) { raw[idx] = Math.max(0, val); resolved++; }
+    else unresolved.push(key);
   }
-  return raw;
+  return { raw, pairs, resolved, unresolved };
+}
+
+/** True when a `{…}` body is directive-shaped (≥1 key=val pair), regardless of key resolution. */
+function isDirectiveShaped(body: string): boolean {
+  for (const part of body.split(/[;,]/)) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    const key = part.slice(0, eq).trim();
+    const val = parseFloat(part.slice(eq + 1).trim());
+    if (key && Number.isFinite(val)) return true;
+  }
+  return false;
+}
+
+/**
+ * Strip directive-shaped `[Header]{…}` blocks from lyrics WITHOUT applying them.
+ * Used when the ≥2-adapter gate is not met, so stray directives never reach the
+ * LM/encoder as garbage tokens. Non-directive `{…}` (no key=val pair, e.g. a
+ * stylistic `{softly}`) is left untouched.
+ */
+export function stripAdapterDirectives(lyrics: string): string {
+  if (!lyrics) return lyrics;
+  return lyrics.replace(/(\[[^\]\n]+\])[ \t]*\{([^}]*)\}/g, (full, header, body) =>
+    isDirectiveShaped(body) ? header : full);
 }
 
 /** Apply the #72 Sum/Blend transform to a section's raw weights. */
@@ -95,7 +130,6 @@ export function parseAdapterSections(
   const sections: AdapterSection[] = [];
   let cleaned = '';
   let lastIndex = 0;
-  let pendingDirective: number[] | null = null; // for the preamble (none)
 
   // Helper to push a section given its body text and directive (raw weights or null).
   const pushSection = (body: string, raw: number[] | null) => {
@@ -122,15 +156,30 @@ export function parseAdapterSections(
     let cursor = hStart + header.length;
 
     // Optional directive immediately after the header (allowing whitespace).
+    // A `{…}` block is only treated as a directive when it contains at least
+    // one key=val pair — `[Verse] {softly}` is lyric text, not an all-zero
+    // directive, and must stay in the lyrics untouched.
     let raw: number[] | null = null;
     const after = lyrics.slice(cursor);
     const dm = after.match(/^[ \t]*\{([^}]*)\}/);
-    let headerOut = header;
+    const headerOut = header;
     if (dm) {
-      raw = parseDirective(dm[1], triggers);
-      cursor += dm[0].length; // skip the directive in the output
-    } else {
-      raw = pendingDirective; // (unused; kept for symmetry)
+      const p = parseDirective(dm[1], triggers);
+      if (p.pairs > 0) {
+        cursor += dm[0].length; // directive-shaped → strip from the output
+        if (p.unresolved.length) {
+          console.warn(`[AdapterSections] ${header} directive: unknown adapter key(s) ${p.unresolved.map(k => `"${k}"`).join(', ')} — loaded triggers: ${triggers.join(', ')}`);
+        }
+        if (p.resolved > 0) {
+          raw = p.raw;
+        } else {
+          // Every key was a typo — fall back to the stack defaults rather
+          // than silently disabling all adapters for this section.
+          console.warn(`[AdapterSections] ${header} directive: no keys resolved, using stack default weights`);
+          raw = null;
+        }
+      }
+      // p.pairs === 0 → not a directive: leave the `{…}` in the body/lyrics.
     }
 
     // Body runs until the next header (or end).

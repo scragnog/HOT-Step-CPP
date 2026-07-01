@@ -325,11 +325,13 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
     const s = get();
     const settings: AppSettings = readKey('ace-settings', DEFAULT_SETTINGS);
 
-    // Effective adapter stack: the multi-adapter list when present, otherwise the
-    // single `adapter` folded into a one-element stack. `primary` drives the
-    // single-adapter features (trigger word, basin re-base, group scales) which
-    // remain keyed on the first adapter.
-    const isStack = !!(s.adapterStack && s.adapterStack.length > 0);
+    // Effective adapter stack: the multi-adapter list when in Advanced mode,
+    // otherwise the single `adapter` folded into a one-element stack. `primary`
+    // drives the single-adapter features (trigger word, basin re-base, group
+    // scales) which remain keyed on the first adapter. Gated on advancedAdapters
+    // to match the badge/UI — a stack persisted from a previous Advanced session
+    // must not override the Simple-mode selection.
+    const isStack = !!(s.advancedAdapters && s.adapterStack && s.adapterStack.length > 0);
     const rawStack: { path: string; scale: number }[] = isStack
       ? s.adapterStack
       : (s.adapter ? [{ path: s.adapter, scale: s.adapterScale }] : []);
