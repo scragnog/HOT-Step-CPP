@@ -1413,37 +1413,86 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
 
         // P2 per-section masking: build the token→section map so the sampler can
         // derive accurate section boundaries from the model's cross-attention
-        // alignment (frame→token) instead of the proportional frame guess. Each
-        // lyric token is mapped to a section by its fractional char position across
-        // the lyrics (tokenisation is ~uniform, so this is far more stable than
-        // guessing frame positions — the accurate part is frame→token from the
-        // model). Only when section masking + alignment are active.
+        // alignment (frame→token) instead of the proportional frame guess.
+        //
+        // Primary: HEADER-ANCHORED mapping — scan the concatenated token text for
+        // `[...]` section headers and start a new section at each one, giving exact
+        // token spans. Falls back to char-proportional mapping (fractional char
+        // position vs the sections' declared sizes) when the header count doesn't
+        // match the section table (e.g. the LM restructured the lyrics). The
+        // proportional fallback carries a small systematic skew: `size` excludes
+        // headers/whitespace while the token walk includes them.
+        // Only when section masking + alignment are active.
         g_hotstep_params.adapter_section_token_map.clear();
         if (!g_hotstep_params.adapter_sections.empty() &&
             g_hotstep_params.adapter_section_align_at > 0.0f &&
             !s.lyric_token_texts.empty() && s.lyric_end_idx > s.lyric_start_idx) {
             const auto & secs = g_hotstep_params.adapter_sections;
-            std::vector<double> cum(secs.size() + 1, 0.0);
-            for (size_t k = 0; k < secs.size(); k++)
-                cum[k + 1] = cum[k] + (secs[k].size > 0.0f ? (double) secs[k].size : 1.0);
-            double total = cum[secs.size()];
-            if (total <= 0.0) total = 1.0;
-            double tok_total = 0.0;
-            for (const auto & t : s.lyric_token_texts) tok_total += (double) t.size();
-            if (tok_total <= 0.0) tok_total = 1.0;
+            const size_t n_sec = secs.size();
+
+            // Concatenate token texts, recording each token's char span.
+            std::string flat;
+            std::vector<std::pair<size_t, size_t>> tok_span(s.lyric_token_texts.size());
+            for (size_t i = 0; i < s.lyric_token_texts.size(); i++) {
+                tok_span[i] = { flat.size(), flat.size() + s.lyric_token_texts[i].size() };
+                flat += s.lyric_token_texts[i];
+            }
+
+            // Locate `[...]` headers (same shape the server parser splits on:
+            // non-empty, no ']' or newline inside).
+            std::vector<size_t> header_starts;
+            for (size_t p = 0; p < flat.size(); p++) {
+                if (flat[p] != '[') continue;
+                size_t q = flat.find_first_of("]\n", p + 1);
+                if (q != std::string::npos && flat[q] == ']' && q > p + 1) {
+                    header_starts.push_back(p);
+                    p = q;
+                }
+            }
+
+            // H headers → sections either start at each header (H == n_sec), or the
+            // server emitted an extra preamble section before the first header
+            // (H + 1 == n_sec): header k then starts section k+1.
+            const size_t H = header_starts.size();
+            const bool   anchored   = (H > 0) && (H == n_sec || H + 1 == n_sec);
+            const int    sec_offset = (H + 1 == n_sec) ? 1 : 0;
+
             std::vector<int> tmap(s.enc_S, -1);
-            double char_pos = 0.0;
-            for (int i = 0; i < (int) s.lyric_token_texts.size(); i++) {
-                int enc_idx = s.lyric_start_idx + i;
-                double mid  = (char_pos + 0.5 * (double) s.lyric_token_texts[i].size()) / tok_total * total;
-                int    sec  = (int) secs.size() - 1;
-                for (size_t k = 0; k < secs.size(); k++) { if (mid < cum[k + 1]) { sec = (int) k; break; } }
-                if (enc_idx >= 0 && enc_idx < s.enc_S) tmap[enc_idx] = sec;
-                char_pos += (double) s.lyric_token_texts[i].size();
+            if (anchored) {
+                for (size_t i = 0; i < s.lyric_token_texts.size(); i++) {
+                    int enc_idx = s.lyric_start_idx + (int) i;
+                    if (enc_idx < 0 || enc_idx >= s.enc_S) continue;
+                    size_t mid = (tok_span[i].first + tok_span[i].second) / 2;
+                    int sec = 0;
+                    for (size_t h = 0; h < H; h++) {
+                        if (mid >= header_starts[h]) sec = (int) h + sec_offset;
+                        else break;
+                    }
+                    if (sec >= (int) n_sec) sec = (int) n_sec - 1;
+                    tmap[enc_idx] = sec;
+                }
+            } else {
+                // Char-proportional fallback.
+                std::vector<double> cum(n_sec + 1, 0.0);
+                for (size_t k = 0; k < n_sec; k++)
+                    cum[k + 1] = cum[k] + (secs[k].size > 0.0f ? (double) secs[k].size : 1.0);
+                double total = cum[n_sec];
+                if (total <= 0.0) total = 1.0;
+                double tok_total = (double) flat.size();
+                if (tok_total <= 0.0) tok_total = 1.0;
+                for (size_t i = 0; i < s.lyric_token_texts.size(); i++) {
+                    int enc_idx = s.lyric_start_idx + (int) i;
+                    if (enc_idx < 0 || enc_idx >= s.enc_S) continue;
+                    double mid = 0.5 * (double) (tok_span[i].first + tok_span[i].second) / tok_total * total;
+                    int    sec = (int) n_sec - 1;
+                    for (size_t k = 0; k < n_sec; k++) { if (mid < cum[k + 1]) { sec = (int) k; break; } }
+                    tmap[enc_idx] = sec;
+                }
             }
             g_hotstep_params.adapter_section_token_map = std::move(tmap);
-            fprintf(stderr, "[Adapter-RT] P2: token→section map (%d lyric tokens, %zu sections, enc_S=%d)\n",
-                    s.lyric_end_idx - s.lyric_start_idx, secs.size(), s.enc_S);
+            fprintf(stderr, "[Adapter-RT] P2: token→section map (%d lyric tokens, %zu sections, enc_S=%d, %s: %zu headers)\n",
+                    s.lyric_end_idx - s.lyric_start_idx, n_sec, s.enc_S,
+                    anchored ? "header-anchored" : "char-proportional", H);
         }
 
         s.timer.reset();

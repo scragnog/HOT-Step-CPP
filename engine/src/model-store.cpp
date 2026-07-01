@@ -59,6 +59,8 @@ struct ModelKeyHash {
             hash_f(k.adapter_group_scales.cross_attn);
             hash_f(k.adapter_group_scales.mlp);
             hash_f(k.adapter_group_scales.cond_embed);
+            hash_f(k.adapter_group_scales.time_embed);
+            hash_f(k.adapter_group_scales.proj_in);
             // basin re-base: distinct (source, beta) must cache as distinct merges.
             h ^= std::hash<std::string>{}(k.rebase_source) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
             hash_f(k.rebase_beta);
@@ -85,6 +87,8 @@ struct ModelKeyEq {
                 && a.adapter_group_scales.cross_attn == b.adapter_group_scales.cross_attn
                 && a.adapter_group_scales.mlp        == b.adapter_group_scales.mlp
                 && a.adapter_group_scales.cond_embed == b.adapter_group_scales.cond_embed
+                && a.adapter_group_scales.time_embed == b.adapter_group_scales.time_embed
+                && a.adapter_group_scales.proj_in    == b.adapter_group_scales.proj_in
                 && a.rebase_source == b.rebase_source
                 && a.rebase_beta   == b.rebase_beta
                 && a.adapter_stack == b.adapter_stack;

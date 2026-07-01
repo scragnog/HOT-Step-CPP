@@ -757,6 +757,13 @@ static int dit_ggml_generate(DiTGGML *           model,
 
         vt_cached.resize(n_total);
 
+        // The P2 alignment pass estimates x0 = xt - t·vt from the CURRENT xt and
+        // t — a cached vt from an earlier step would feed it a mismatched
+        // estimate. Force a real compute on the alignment step.
+        if (p2_align_step >= 0 && p2_align_step < num_steps) {
+            step_computes[p2_align_step] = true;
+        }
+
         for (int s = 0; s < num_steps; s++) {
             if (!step_computes[s]) cached_count++;
         }
@@ -783,6 +790,10 @@ static int dit_ggml_generate(DiTGGML *           model,
             }
             if (current_model_step == p2_align_step) run_p2_alignment(xt_in, vt.data(), t_val);
         };
+
+        // Set by loop_on_step when the CFG-cutoff graph rebuild fails to allocate —
+        // the lambda can only signal "stop" (bool), so the fatal is carried out here.
+        bool graph_alloc_failed = false;
 
         LoopOnStepFn loop_on_step = [&](int step_idx, float t_curr, float t_next) -> bool {
             if (cancel && cancel(cancel_data)) {
@@ -880,8 +891,11 @@ static int dit_ggml_generate(DiTGGML *           model,
                     }
                 }
                 if (!ggml_backend_sched_alloc_graph(model->sched, gf)) {
-                    fprintf(stderr, "[DiT] FATAL: failed to re-allocate graph after CFG cutoff\n");
-                    // Can't return from lambda with int, just log and continue
+                    fprintf(stderr, "[DiT] FATAL: failed to re-allocate graph after CFG cutoff — aborting\n");
+                    // Computing on an unallocated graph is UB — stop the solver
+                    // loop; the fatal is returned after lua_call_solver_loop.
+                    graph_alloc_failed = true;
+                    return true;
                 }
 
                 t_enc        = ggml_graph_get_tensor(gf, "enc_hidden");
@@ -939,6 +953,11 @@ static int dit_ggml_generate(DiTGGML *           model,
         lua_call_solver_loop(*solver_plugin, xt.data(), vt.data(), schedule, num_steps,
             n_total, N, T, Oc, loop_model_fn, loop_on_step,
             g_hotstep_params.plugin_params);
+
+        if (graph_alloc_failed) {
+            ggml_free(ctx);
+            return -1;
+        }
 
         memcpy(output, xt.data(), n_total * sizeof(float));
 

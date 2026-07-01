@@ -183,6 +183,13 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
     if (g_hotstep_params.adapter_mode == "runtime" && g_hotstep_params.adapter_runtime_quant != "bf16") {
         ctx->dit_key.adapter_stack += "|q:" + g_hotstep_params.adapter_runtime_quant;
     }
+    // Merge vs runtime produce structurally different loaded models (baked weights
+    // vs base + VRAM deltas) — without the mode in the key, toggling merge↔runtime
+    // with the same adapter would reuse the wrong cached DiT.
+    if ((!ctx->dit_key.adapter_path.empty() || !g_hotstep_params.adapters.empty())
+        && g_hotstep_params.adapter_mode == "runtime") {
+        ctx->dit_key.adapter_stack += "|mode:runtime";
+    }
     // Basin re-base: only meaningful with an adapter, and only in merge mode.
     if (!ctx->dit_key.adapter_path.empty() && g_hotstep_params.adapter_mode != "runtime") {
         ctx->dit_key.rebase_source = g_hotstep_params.rebase_source;

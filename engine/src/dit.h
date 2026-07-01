@@ -305,6 +305,8 @@ static struct ggml_tensor * dit_load_proj_out_w(WeightCtx *          wctx,
     return dst;
 }
 
+static void dit_ggml_free(DiTGGML * m); // defined below; used by load-failure cleanup
+
 // Load full DiT model from GGUF or safetensors
 static bool dit_ggml_load(DiTGGML *    m,
                           const char * path,
@@ -619,19 +621,20 @@ static bool dit_ggml_load(DiTGGML *    m,
                 // N× VRAM vs the summed path — the price of per-section control.
                 m->loras.clear();
                 m->loras.resize(stack.size());
-                rt_ok = false;
+                // ALL adapters must load — a partial stack would silently generate
+                // with some adapters missing (and get cached that way, see below).
+                rt_ok = true;
                 for (size_t i = 0; i < stack.size(); i++) {
                     // Load each adapter UNIT-scaled (scale 1.0): the per-frame
                     // section mask carries the full effective scale, so baking the
                     // stack scale into the delta too would double-scale it. Group
                     // scales still apply (they gate weight groups, not sections).
                     std::vector<AdapterSpec> one{ AdapterSpec{ stack[i].path, 1.0f } };
-                    if (adapter_load_runtime_stack(&m->loras[i], &m->wctx, ws, one,
-                                                   g_hotstep_params.adapter_group_scales, m->backend)) {
-                        rt_ok = true;
-                    } else {
-                        fprintf(stderr, "[Adapter-RT] WARNING: section adapter %zu loaded no deltas: %s\n",
+                    if (!adapter_load_runtime_stack(&m->loras[i], &m->wctx, ws, one,
+                                                    g_hotstep_params.adapter_group_scales, m->backend)) {
+                        fprintf(stderr, "[Adapter-RT] ERROR: section adapter %zu loaded no deltas: %s\n",
                                 i, stack[i].path.c_str());
+                        rt_ok = false;
                     }
                 }
                 fprintf(stderr, "[Adapter-RT] Per-section load: %zu adapters kept separate\n", m->loras.size());
@@ -643,7 +646,16 @@ static bool dit_ggml_load(DiTGGML *    m,
                                              g_hotstep_params.adapter_group_scales, m->backend);
             }
             if (!rt_ok) {
-                fprintf(stderr, "[Adapter-RT] WARNING: runtime adapter load failed\n");
+                // FAIL the load, matching the merge path. Returning success here
+                // would install an adapter-LESS model in the store under the
+                // adapter-bearing cache key — every later request with these
+                // adapters would silently cache-hit base-model output. wctx is
+                // already on the GPU at this point, so free the model's resources
+                // (the store's failure path only does `delete m`).
+                fprintf(stderr, "[Adapter-RT] FATAL: runtime adapter load failed\n");
+                if (is_st) { st_multi_close(&sm); } else { gf_close(&gf); }
+                dit_ggml_free(m);
+                return false;
             }
             fprintf(stderr, "[Adapter-RT] Load time: %.1f ms (%zu adapter%s)\n", rt_timer.ms(),
                     stack.empty() ? (size_t) 1 : stack.size(), (stack.size() == 1) ? "" : "s");

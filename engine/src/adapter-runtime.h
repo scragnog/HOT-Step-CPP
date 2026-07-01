@@ -391,6 +391,21 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
         else if (suffix == "dora_scale") m.dora_scale = &e;
     }
 
+    // DoRA detection: dora_scale is a per-row multiplicative rescale of (W+ΔW)
+    // that cannot be expressed as a precomputed additive delta. The MERGE path
+    // applies it; this runtime path does not — warn loudly rather than produce
+    // silently-wrong output.
+    {
+        int dora_n = 0;
+        for (const auto & kv : modules) {
+            if (kv.second.dora_scale) dora_n++;
+        }
+        if (dora_n > 0) {
+            fprintf(stderr, "[Adapter-RT] WARNING: %d LoKr module(s) carry dora_scale — DoRA rescaling is NOT applied in runtime mode; output will differ from merge mode. Use merge mode for DoRA adapters.\n",
+                    dora_n);
+        }
+    }
+
     std::unordered_map<std::string, std::string> name_map = lokr_build_reverse_map(ws);
     int  lokr_dim = adapter_read_lokr_dim(st);
     int  merged = 0, skipped = 0;
