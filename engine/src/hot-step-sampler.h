@@ -256,12 +256,15 @@ static int dit_ggml_generate(DiTGGML *           model,
     // ── Per-section adapter masks (regional LoRA) ─────────────────────────────
     // P1: proportional frame→section map. Partition the S latent frames across the
     // sections by their relative `size`, then each adapter's mask is that section's
-    // weight, with a short linear crossfade at boundaries. Uploaded once (static in
-    // P1); P2 will recompute mid-sampling from cross-attention alignment.
+    // weight, with a short linear crossfade at boundaries. Computed once into
+    // lora_mask_host and (re-)uploaded whenever the graph is (re)built — the CFG
+    // cutoff rebuilds the graph mid-sampling, so a one-time upload would leave the
+    // new mask tensors uninitialised for the final steps. P2 will recompute the
+    // host buffers mid-sampling from cross-attention alignment.
+    std::vector<std::vector<float>> lora_mask_host;  // [adapter][S]
     if (!model->lora_masks.empty() && !g_hotstep_params.adapter_sections.empty()) {
         const auto & secs = g_hotstep_params.adapter_sections;
         const size_t Nad  = model->lora_masks.size();
-        // Section frame boundaries (proportional to size).
         double total = 0.0;
         for (const auto & s : secs) total += (s.size > 0.0f ? s.size : 1.0f);
         if (total <= 0.0) total = 1.0;
@@ -275,29 +278,27 @@ static int dit_ggml_generate(DiTGGML *           model,
         auto secWeight = [&](size_t k, size_t i) -> float {
             return (k < secs.size() && i < secs[k].weights.size()) ? secs[k].weights[i] : 0.0f;
         };
-        // Which section each frame belongs to.
         std::vector<int> frame_sec(S, 0);
         for (size_t k = 0; k < secs.size(); k++)
             for (int s = bnd[k]; s < bnd[k + 1] && s < S; s++) frame_sec[s] = (int) k;
         const int xf = std::max(1, S / 50);  // crossfade half-width (~2% of song)
-        std::vector<float> host(S);
+        lora_mask_host.assign(Nad, std::vector<float>(S, 0.0f));
         for (size_t i = 0; i < Nad; i++) {
             for (int s = 0; s < S; s++) {
-                int    k  = frame_sec[s];
-                float  w  = secWeight((size_t) k, i);
-                // Linear crossfade near the boundary to the next/prev section.
+                int   k = frame_sec[s];
+                float w = secWeight((size_t) k, i);
                 if (k + 1 < (int) secs.size()) {
                     int b = bnd[k + 1];
                     if (s >= b - xf) {
-                        float t   = (float) (s - (b - xf)) / (float) (2 * xf);  // 0..1 across the seam
-                        t         = t < 0 ? 0 : (t > 1 ? 1 : t);
-                        float wn  = secWeight((size_t) k + 1, i);
-                        w         = w * (1.0f - t) + wn * t;
+                        float t  = (float) (s - (b - xf)) / (float) (2 * xf);
+                        t        = t < 0 ? 0 : (t > 1 ? 1 : t);
+                        float wn = secWeight((size_t) k + 1, i);
+                        w        = w * (1.0f - t) + wn * t;
                     }
                 }
-                host[s] = w;
+                lora_mask_host[i][s] = w;
             }
-            ggml_backend_tensor_set(model->lora_masks[i], host.data(), 0, (size_t) S * sizeof(float));
+            ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
         }
         fprintf(stderr, "[Adapter-RT] Per-section masks uploaded: %zu adapters × %d frames, %zu sections\n",
                 Nad, S, secs.size());
@@ -774,6 +775,9 @@ static int dit_ggml_generate(DiTGGML *           model,
                         struct ggml_tensor * ti = ggml_graph_get_tensor(gf, iname);
                         if (ti) ggml_backend_sched_set_tensor_backend(model->sched, ti, model->backend);
                     }
+                    for (struct ggml_tensor * mk : model->lora_masks) {
+                        if (mk) ggml_backend_sched_set_tensor_backend(model->sched, mk, model->backend);
+                    }
                 }
                 if (!ggml_backend_sched_alloc_graph(model->sched, gf)) {
                     fprintf(stderr, "[DiT] FATAL: failed to re-allocate graph after CFG cutoff\n");
@@ -814,6 +818,13 @@ static int dit_ggml_generate(DiTGGML *           model,
                 ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N * sizeof(uint16_t));
                 ggml_backend_tensor_set(t_sa_mask_pad, sa_pad_data.data(), 0, S * S * N * sizeof(uint16_t));
                 ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N * sizeof(uint16_t));
+
+                // Re-upload per-section adapter masks into the rebuilt graph's fresh
+                // mask tensors (else the post-cutoff steps run with garbage masks).
+                for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
+                    if (model->lora_masks[i])
+                        ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
+                }
 
                 fprintf(stderr, "[DiT] Graph rebuilt: %d nodes (was 2N, now N=%d)\n",
                         ggml_graph_n_nodes(gf), N);
@@ -909,6 +920,9 @@ static int dit_ggml_generate(DiTGGML *           model,
                     struct ggml_tensor * ti = ggml_graph_get_tensor(gf, iname);
                     if (ti) ggml_backend_sched_set_tensor_backend(model->sched, ti, model->backend);
                 }
+                for (struct ggml_tensor * mk : model->lora_masks) {
+                    if (mk) ggml_backend_sched_set_tensor_backend(model->sched, mk, model->backend);
+                }
             }
             if (!ggml_backend_sched_alloc_graph(model->sched, gf)) {
                 fprintf(stderr, "[DiT] FATAL: failed to re-allocate graph after CFG cutoff\n");
@@ -954,6 +968,15 @@ static int dit_ggml_generate(DiTGGML *           model,
             ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N * sizeof(uint16_t));
             ggml_backend_tensor_set(t_sa_mask_pad, sa_pad_data.data(), 0, S * S * N * sizeof(uint16_t));
             ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N * sizeof(uint16_t));
+
+            // Re-upload per-section adapter masks — the rebuild created fresh mask
+            // input tensors ([1,S,1], batch-independent) that would otherwise be
+            // uninitialised, silently corrupting the adapter effect for the final
+            // (post-cutoff) steps.
+            for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
+                if (model->lora_masks[i])
+                    ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
+            }
 
             fprintf(stderr, "[DiT] Graph rebuilt: %d nodes (was 2N, now N=%d)\n",
                     ggml_graph_n_nodes(gf), N);
