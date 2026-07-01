@@ -351,12 +351,6 @@ export const AdaptersDropdown: React.FC = () => {
 [Chorus]{${stackTriggerWords.split(', ').map((w, i) => `${w}=${i === 0 ? '0' : '1'}`).join('; ')}}`}</pre>
 
                   <div className="pt-1 space-y-2">
-                    <Slider label="Section Isolation" value={gp.adapterSectionIsolation}
-                      onChange={gp.setAdapterSectionIsolation} min={0} max={1} step={0.05} showInput />
-                    <p className="text-[9px] text-zinc-500 leading-relaxed -mt-1">
-                      Stops sections inheriting the first section's voice (choruses coupling). 0 = off,
-                      higher = more independent sections but choppier transitions. ~0.5 is moderate.
-                    </p>
                     <Slider label="Alignment Timing" value={gp.adapterSectionAlignAt}
                       onChange={gp.setAdapterSectionAlignAt} min={0.2} max={0.85} step={0.05} showInput />
                     <p className="text-[9px] text-zinc-500 leading-relaxed -mt-1">

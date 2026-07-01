@@ -233,11 +233,6 @@ static int dit_ggml_generate(DiTGGML *           model,
     }
     ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
     ggml_backend_tensor_set(t_sa_mask_pad, sa_pad_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
-    // Base (window+padding) self-attn masks WITHOUT any section-isolation penalty.
-    // The per-section masking rebuilds sa_sw/sa_pad from these + the frame→section
-    // map so it can re-derive when the alignment refines the sections mid-sampling.
-    std::vector<uint16_t> base_sa_sw_data = sa_sw_data;
-    std::vector<uint16_t> base_sa_pad_data = sa_pad_data;
 
     // Cross-attention mask: per-batch encoder padding.
     // [ne0=enc_S (KV), ne1=S (Q), 1, N_graph] blocks padding in enc_hidden.
@@ -305,41 +300,6 @@ static int dit_ggml_generate(DiTGGML *           model,
             ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
             fprintf(stderr, "[Adapter-RT]   mask[%zu] min=%.3f max=%.3f mean=%.3f (%s)\n",
                     i, mn, mx, sum / (float) S, tag);
-        }
-
-        // Regional self-attention isolation: add a penalty to cross-section self-
-        // attn logits so each section develops its own character instead of the
-        // model's coherence propagating the first section's voice through the whole
-        // song (and choruses coupling to the first chorus). Re-derived from the base
-        // (window+padding) masks so it tracks frame_sec when the alignment refines
-        // it. The per-step re-upload keeps it alive against the scheduler.
-        float iso = g_hotstep_params.adapter_section_isolation;
-        if (iso > 0.0f && !base_sa_sw_data.empty()) {
-            const uint16_t pv = ggml_fp32_to_fp16(-iso * 8.0f);  // penalty in logit units
-            for (int b = 0; b < N; b++) {
-                for (int qi = 0; qi < S; qi++) {
-                    int sq = qi < (int) frame_sec.size() ? frame_sec[qi] : 0;
-                    for (int ki = 0; ki < S; ki++) {
-                        int      off = b * S * S + qi * S + ki;
-                        uint16_t sw  = base_sa_sw_data[off];
-                        uint16_t pd  = base_sa_pad_data[off];
-                        int      sk  = ki < (int) frame_sec.size() ? frame_sec[ki] : 0;
-                        if (sq != sk) {  // only penalise otherwise-allowed pairs (base==+0.0)
-                            if (sw == 0) sw = pv;
-                            if (pd == 0) pd = pv;
-                        }
-                        sa_sw_data[off]  = sw;
-                        sa_pad_data[off] = pd;
-                    }
-                }
-                if (batch_cfg) {
-                    memcpy(&sa_sw_data[(N + b) * S * S], &sa_sw_data[b * S * S], S * S * sizeof(uint16_t));
-                    memcpy(&sa_pad_data[(N + b) * S * S], &sa_pad_data[b * S * S], S * S * sizeof(uint16_t));
-                }
-            }
-            ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
-            ggml_backend_tensor_set(t_sa_mask_pad, sa_pad_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
-            fprintf(stderr, "[Adapter-RT]   section self-attn isolation pen=%.1f (%s)\n", iso * 8.0f, tag);
         }
     };
 
