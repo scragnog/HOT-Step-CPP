@@ -1411,6 +1411,41 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
             dit->use_flash_attn = false;
         }
 
+        // P2 per-section masking: build the token→section map so the sampler can
+        // derive accurate section boundaries from the model's cross-attention
+        // alignment (frame→token) instead of the proportional frame guess. Each
+        // lyric token is mapped to a section by its fractional char position across
+        // the lyrics (tokenisation is ~uniform, so this is far more stable than
+        // guessing frame positions — the accurate part is frame→token from the
+        // model). Only when section masking + alignment are active.
+        g_hotstep_params.adapter_section_token_map.clear();
+        if (!g_hotstep_params.adapter_sections.empty() &&
+            g_hotstep_params.adapter_section_align_at > 0.0f &&
+            !s.lyric_token_texts.empty() && s.lyric_end_idx > s.lyric_start_idx) {
+            const auto & secs = g_hotstep_params.adapter_sections;
+            std::vector<double> cum(secs.size() + 1, 0.0);
+            for (size_t k = 0; k < secs.size(); k++)
+                cum[k + 1] = cum[k] + (secs[k].size > 0.0f ? (double) secs[k].size : 1.0);
+            double total = cum[secs.size()];
+            if (total <= 0.0) total = 1.0;
+            double tok_total = 0.0;
+            for (const auto & t : s.lyric_token_texts) tok_total += (double) t.size();
+            if (tok_total <= 0.0) tok_total = 1.0;
+            std::vector<int> tmap(s.enc_S, -1);
+            double char_pos = 0.0;
+            for (int i = 0; i < (int) s.lyric_token_texts.size(); i++) {
+                int enc_idx = s.lyric_start_idx + i;
+                double mid  = (char_pos + 0.5 * (double) s.lyric_token_texts[i].size()) / tok_total * total;
+                int    sec  = (int) secs.size() - 1;
+                for (size_t k = 0; k < secs.size(); k++) { if (mid < cum[k + 1]) { sec = (int) k; break; } }
+                if (enc_idx >= 0 && enc_idx < s.enc_S) tmap[enc_idx] = sec;
+                char_pos += (double) s.lyric_token_texts[i].size();
+            }
+            g_hotstep_params.adapter_section_token_map = std::move(tmap);
+            fprintf(stderr, "[Adapter-RT] P2: token→section map (%d lyric tokens, %zu sections, enc_S=%d)\n",
+                    s.lyric_end_idx - s.lyric_start_idx, secs.size(), s.enc_S);
+        }
+
         s.timer.reset();
         // Per-request CFG-batching override: split into two forwards (half the
         // DiT activation memory, ~2x DiT time) when batch_cfg_override == 0.

@@ -120,8 +120,16 @@ struct HotStepParams {
     // summed as usual). See docs/plans/per-section-adapter-masking.md.
     std::vector<AdapterSection> adapter_sections;
     // Fraction of denoising steps to run before deriving the frame→section mask
-    // from cross-attention alignment (P2); P1 ignores it (proportional map).
+    // from cross-attention alignment (P2). <= 0 disables alignment (P1 proportional
+    // map only).
     float adapter_section_align_at = 0.55f;
+    // P2 token→section map: for each encoder token, which section index it belongs
+    // to (or -1 for non-lyric / unmapped tokens). Length == enc_S. Built by the
+    // pipeline from the lyric token texts + per-section char boundaries. When
+    // non-empty (and align_at > 0), the sampler runs a mid-sampling cross-attention
+    // alignment pass and rebuilds the frame→section masks from the model's real
+    // lyric→audio alignment instead of the proportional guess.
+    std::vector<int> adapter_section_token_map;
 
     // Basin re-base: nudge adapted weights toward the base the adapter was trained
     // on (S) before merging, by beta*(S - T). Lets a heavy adapter trained on one

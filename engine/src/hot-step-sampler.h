@@ -6,8 +6,10 @@
 // Guidance modes are resolved by name via guidance/guidance-registry.h.
 // Matches Python ACE-Step-1.5 acestep/models/base/apg_guidance.py
 
+#include "alignment-config.h"
 #include "dcw.h"
 #include "debug.h"
+#include "dit-alignment-graph.h"
 #include "dit-graph.h"
 #include "dit.h"
 #include "guidance/apg-core.h"
@@ -18,6 +20,7 @@
 #include "sampler-repaint.h"
 #include "sampler-schedule.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -283,11 +286,50 @@ static int dit_ggml_generate(DiTGGML *           model,
     // new mask tensors uninitialised for the final steps. P2 will recompute the
     // host buffers mid-sampling from cross-attention alignment.
     std::vector<std::vector<float>> lora_mask_host;  // [adapter][S]
-    if (!model->lora_masks.empty() && !g_hotstep_params.adapter_sections.empty()) {
+    const bool section_active = (!model->lora_masks.empty() && !g_hotstep_params.adapter_sections.empty());
+
+    // Build the per-adapter masks from a frame→section assignment (hard weights,
+    // triangular-smoothed by ±xf for a ~0.5 s crossfade). Reused for both the P1
+    // proportional map and the P2 alignment-derived map. Uploads to the GPU mask
+    // tensors (the per-step re-upload keeps them alive against the scheduler).
+    auto rebuild_section_masks = [&](const std::vector<int> & frame_sec, const char * tag) {
+        if (!section_active) return;
         const auto & secs = g_hotstep_params.adapter_sections;
         const size_t Nad  = model->lora_masks.size();
+        auto secWeight = [&](int k, size_t i) -> float {
+            return (k >= 0 && k < (int) secs.size() && i < secs[k].weights.size()) ? secs[k].weights[i] : 0.0f;
+        };
+        const int xf = std::max(3, S / 300);
+        lora_mask_host.assign(Nad, std::vector<float>(S, 0.0f));
+        std::vector<float> hard(S);
+        for (size_t i = 0; i < Nad; i++) {
+            for (int s = 0; s < S; s++) hard[s] = secWeight(s < (int) frame_sec.size() ? frame_sec[s] : 0, i);
+            float mn = 1e9f, mx = -1e9f, sum = 0.0f;
+            for (int s = 0; s < S; s++) {
+                double acc = 0.0, wsum = 0.0;
+                int lo = s - xf < 0 ? 0 : s - xf;
+                int hi = s + xf >= S ? S - 1 : s + xf;
+                for (int sp = lo; sp <= hi; sp++) {
+                    double wd = (double) (xf + 1 - std::abs(sp - s));
+                    acc += hard[sp] * wd;
+                    wsum += wd;
+                }
+                float v              = (float) (wsum > 0 ? acc / wsum : hard[s]);
+                lora_mask_host[i][s] = v;
+                mn = v < mn ? v : mn; mx = v > mx ? v : mx; sum += v;
+            }
+            ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
+            fprintf(stderr, "[Adapter-RT]   mask[%zu] min=%.3f max=%.3f mean=%.3f (%s)\n",
+                    i, mn, mx, sum / (float) S, tag);
+        }
+    };
+
+    // Initial P1 proportional frame→section map (also the fallback if P2 alignment
+    // is disabled or fails). Sections partition the S frames by their `size`.
+    if (section_active) {
+        const auto & secs = g_hotstep_params.adapter_sections;
         double total = 0.0;
-        for (const auto & s : secs) total += (s.size > 0.0f ? s.size : 1.0f);
+        for (const auto & sc : secs) total += (sc.size > 0.0f ? sc.size : 1.0f);
         if (total <= 0.0) total = 1.0;
         std::vector<int> bnd(secs.size() + 1, 0);
         double cum = 0.0;
@@ -296,45 +338,95 @@ static int dit_ggml_generate(DiTGGML *           model,
             bnd[k + 1] = (int) llround((double) S * cum / total);
         }
         bnd[secs.size()] = S;
-        auto secWeight = [&](size_t k, size_t i) -> float {
-            return (k < secs.size() && i < secs[k].weights.size()) ? secs[k].weights[i] : 0.0f;
-        };
         std::vector<int> frame_sec(S, 0);
         for (size_t k = 0; k < secs.size(); k++)
             for (int s = bnd[k]; s < bnd[k + 1] && s < S; s++) frame_sec[s] = (int) k;
-        // Crossfade: build the hard per-frame weight, then triangular-smooth it over
-        // ±xf frames. Smoothing gives symmetric, continuous section transitions
-        // (the old trailing-only fade left a discontinuity at each section start,
-        // which glitched the audio).
-        // ~0.5 s each side (S runs at ~25 latent fps). A short crossfade minimises
-        // the window where two conflicting adapters blend 50/50 (which garbles the
-        // transition); long crossfades sound like the messy global blend.
-        const int xf = std::max(3, S / 300);
-        lora_mask_host.assign(Nad, std::vector<float>(S, 0.0f));
-        std::vector<float> hard(S);
-        for (size_t i = 0; i < Nad; i++) {
-            for (int s = 0; s < S; s++) hard[s] = secWeight((size_t) frame_sec[s], i);
-            float mn = 1e9f, mx = -1e9f, sum = 0.0f;
-            for (int s = 0; s < S; s++) {
-                double acc = 0.0, wsum = 0.0;
-                int lo = s - xf < 0 ? 0 : s - xf;
-                int hi = s + xf >= S ? S - 1 : s + xf;
-                for (int sp = lo; sp <= hi; sp++) {
-                    double wd = (double) (xf + 1 - std::abs(sp - s));  // triangular kernel
-                    acc += hard[sp] * wd;
-                    wsum += wd;
-                }
-                float v            = (float) (wsum > 0 ? acc / wsum : hard[s]);
-                lora_mask_host[i][s] = v;
-                mn = v < mn ? v : mn; mx = v > mx ? v : mx; sum += v;
-            }
-            ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
-            fprintf(stderr, "[Adapter-RT]   mask[%zu] min=%.3f max=%.3f mean=%.3f\n",
-                    i, mn, mx, sum / (float) S);
-        }
-        fprintf(stderr, "[Adapter-RT] Per-section masks uploaded: %zu adapters × %d frames, %zu sections\n",
-                Nad, S, secs.size());
+        rebuild_section_masks(frame_sec, "proportional");
+        fprintf(stderr, "[Adapter-RT] Per-section masks: %zu adapters × %d frames, %zu sections\n",
+                model->lora_masks.size(), S, secs.size());
     }
+
+    // ── P2: alignment-driven section boundaries ───────────────────────────────
+    // Re-allocate the main graph on the scheduler (the alignment extract below
+    // resets dit->sched for its own partial graph, leaving the main graph
+    // unallocated). Same force+alloc pattern as the CFG-cutoff rebuild; the graph
+    // itself is unchanged and all inputs are re-uploaded per step.
+    auto realloc_main_graph = [&]() {
+        ggml_backend_sched_reset(model->sched);
+        if (model->backend != model->cpu_backend) {
+            const char * inames[] = { "enc_hidden", "input_latents", "t", "t_r", "positions", "sa_mask_sw", "sa_mask_pad", "ca_mask" };
+            for (const char * in : inames) {
+                struct ggml_tensor * ti = ggml_graph_get_tensor(gf, in);
+                if (ti) ggml_backend_sched_set_tensor_backend(model->sched, ti, model->backend);
+            }
+            for (struct ggml_tensor * mk : model->lora_masks)
+                if (mk) ggml_backend_sched_set_tensor_backend(model->sched, mk, model->backend);
+        }
+        if (!ggml_backend_sched_alloc_graph(model->sched, gf))
+            fprintf(stderr, "[Adapter-RT] P2: FATAL failed to re-alloc main graph after alignment\n");
+    };
+
+    // Run the cross-attention alignment once at ~align_at, derive frame→section
+    // from the model's real lyric→audio alignment, and rebuild the masks. Keeps
+    // the P1 proportional map if disabled/failed. Called from the loop with the
+    // current batch-0 latent (xt) and velocity (vt).
+    bool      p2_done       = false;
+    const int p2_align_step = (section_active && g_hotstep_params.adapter_section_align_at > 0.0f &&
+                               !g_hotstep_params.adapter_section_token_map.empty())
+                                  ? std::max(1, std::min(num_steps - 1, (int) (g_hotstep_params.adapter_section_align_at * num_steps)))
+                                  : -1;
+    auto run_p2_alignment = [&](const float * xt_data, const float * vt_data, float t_curr) {
+        if (p2_done || p2_align_step < 0) return;
+        p2_done = true;
+        std::vector<float> x0((size_t) T * Oc);
+        for (int i = 0; i < T * Oc; i++) x0[i] = xt_data[i] - t_curr * vt_data[i];  // flow-matching x0 estimate
+
+        AlignmentConfig acfg = alignment_config_resolve("", model->cfg.n_layers, model->cfg.n_heads);
+        if (!acfg.valid || acfg.total_heads <= 0) {
+            fprintf(stderr, "[Adapter-RT] P2: no alignment config — keeping proportional map\n");
+            return;
+        }
+        bool saved_fa       = model->use_flash_attn;
+        model->use_flash_attn = false;  // scored attention needs manual (non-flash) path
+        std::vector<float> scores((size_t) acfg.total_heads * enc_S * S);
+        int rc = dit_alignment_extract(model, acfg, x0.data(), context_latents, enc_hidden_data,
+                                       T, S, enc_S, 8, scores.data());
+        model->use_flash_attn = saved_fa;
+        realloc_main_graph();  // alignment reset the sched either way
+        if (rc != 0) {
+            fprintf(stderr, "[Adapter-RT] P2: alignment extract failed — keeping proportional map\n");
+            return;
+        }
+        // frame → dominant lyric token → section (attention summed over heads).
+        const auto &     tmap = g_hotstep_params.adapter_section_token_map;
+        std::vector<int> frame_sec(S, 0);
+        int              last_sec = 0;
+        for (int f = 0; f < S; f++) {
+            float best = -1e30f; int best_tok = -1;
+            for (int tok = 0; tok < enc_S && tok < (int) tmap.size(); tok++) {
+                if (tmap[tok] < 0) continue;  // non-lyric token
+                float acc = 0.0f;
+                for (int h = 0; h < acfg.total_heads; h++)
+                    acc += scores[(size_t) h * enc_S * S + (size_t) f * enc_S + tok];
+                if (acc > best) { best = acc; best_tok = tok; }
+            }
+            int sec      = (best_tok >= 0) ? tmap[best_tok] : last_sec;
+            frame_sec[f] = sec;
+            last_sec     = sec;
+        }
+        // Median-smooth (±med) to remove single-frame jitter before the crossfade.
+        const int med = std::max(1, S / 200);
+        std::vector<int> fs2(frame_sec);
+        for (int f = 0; f < S; f++) {
+            std::vector<int> win;
+            for (int d = -med; d <= med; d++) { int p = f + d; if (p >= 0 && p < S) win.push_back(frame_sec[p]); }
+            std::sort(win.begin(), win.end());
+            fs2[f] = win[win.size() / 2];
+        }
+        rebuild_section_masks(fs2, "alignment");
+        fprintf(stderr, "[Adapter-RT] P2: masks rebuilt from cross-attention alignment (step %d, t=%.3f)\n",
+                p2_align_step, t_curr);
+    };
 
     std::vector<APGMomentumBuffer> apg_mbufs;
     std::vector<float>             null_enc_buf;
@@ -730,6 +822,7 @@ static int dit_ggml_generate(DiTGGML *           model,
                     has_cached_vt = true;
                 }
             }
+            if (current_model_step == p2_align_step) run_p2_alignment(xt_in, vt.data(), t_val);
         };
 
         LoopOnStepFn loop_on_step = [&](int step_idx, float t_curr, float t_next) -> bool {
@@ -1044,6 +1137,7 @@ static int dit_ggml_generate(DiTGGML *           model,
                 has_cached_vt = true;
             }
         }
+        if (step == p2_align_step) run_p2_alignment(xt.data(), vt.data(), t_curr);
 
         // dump intermediate tensors on step 0 (sample 0 only for batch)
         if (step == 0 && dbg && dbg->enabled) {
