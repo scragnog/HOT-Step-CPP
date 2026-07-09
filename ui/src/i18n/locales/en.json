@@ -498,6 +498,7 @@
     "lyric.generating": "Generating...",
     "lyric.generateLyrics": "Generate Lyrics",
     "lyric.generateNoThink": "Generate (No Thinking)",
+    "lyric.noThinking": "No Thinking (skip reasoning)",
     "lyric.generateNoThinkHint": "Ask the model to answer directly without a reasoning/thinking phase — faster on thinking models (Qwen3 etc.). Models with no off-switch may still think.",
     "lyric.count": "Count:",
     "lyric.subjectPlaceholder": "Optional — specify a subject for the lyrics",

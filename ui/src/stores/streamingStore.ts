@@ -26,6 +26,8 @@ export interface QueueItem {
   count?: number;
   countCompleted?: number;
   userSubject?: string;
+  /** Suppress LLM reasoning for this run (see CallOptions.noThink server-side). */
+  noThink?: boolean;
 }
 
 export interface StreamingState {
@@ -270,7 +272,7 @@ async function _executeQueueItem(item: QueueItem): Promise<void> {
       case 'generate':
         await consumeSSE(
           `/api/lireek/profiles/${item.targetId}/generate-stream`,
-          { provider_name: item.provider, model: item.model, user_subject: item.userSubject },
+          { provider_name: item.provider, model: item.model, user_subject: item.userSubject, no_think: item.noThink },
           makeCallbacks(),
         );
         break;

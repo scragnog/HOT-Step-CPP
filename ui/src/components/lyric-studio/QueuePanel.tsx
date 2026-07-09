@@ -85,6 +85,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   const [genCount, setGenCount] = useState(4);
   const [genFillMode, setGenFillMode] = useState(false);
   const [genFillTarget, setGenFillTarget] = useState(10);
+  const [genNoThink, setGenNoThink] = useState(false);
 
   // Generation counts for the "generate" tab
   const [genCountsMap, setGenCountsMap] = useState<Map<number, number>>(new Map());
@@ -260,7 +261,15 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
         const ls = lyricsSets.find(l => l.id === profile?.lyrics_set_id);
         const existing = genCountsMap.get(profileId) || 0;
         const count = genFillMode ? Math.max(0, genFillTarget - existing) : genCount;
-        return { type: 'generate' as QueueItemType, targetId: profileId, label: `Generate: ${ls?.artist_name || '?'} — ${ls?.album || 'Unknown'}`, provider: generationModel.provider, model: generationModel.model, count };
+        return {
+          type: 'generate' as QueueItemType,
+          targetId: profileId,
+          label: `Generate: ${ls?.artist_name || '?'} — ${ls?.album || 'Unknown'}${genNoThink ? ' · ⚡ no-think' : ''}`,
+          provider: generationModel.provider,
+          model: generationModel.model,
+          count,
+          noThink: genNoThink || undefined,
+        };
       }).filter(item => item.count > 0);
       if (items.length === 0) { showToast?.('All selected profiles already at or above target'); return; }
       addBulkToQueue(items);
@@ -620,6 +629,14 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                       className="w-16 px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-white text-center focus:outline-none focus:border-green-500/50" />
                   </>
                 )}
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer select-none" title={t('lyric.generateNoThinkHint')}>
+                  <input type="checkbox" checked={genNoThink} onChange={e => setGenNoThink(e.target.checked)} className="accent-sky-500" />
+                  <span className="text-xs text-zinc-600 dark:text-zinc-400 flex items-center gap-1">
+                    <Zap className="w-3 h-3 text-sky-400" /> {t('lyric.noThinking')}
+                  </span>
+                </label>
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-zinc-600 dark:text-zinc-400">{t('lyric.hideProfilesWith')}</span>
