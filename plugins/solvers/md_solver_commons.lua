@@ -18,11 +18,12 @@
 --   Level 3: post_advance() convenience -- calls all stages in order
 --   Param defs: standard param definitions solvers can append
 --
--- CROSS-CUTTING FIXES BAKED IN:
---   Tonal ramp: 0.3 + 0.7 * (1 - sigma_ratio) -- strengthens in detail phase
---   Look-back floor: 0.15 -- never vanishes completely
---   anchor_blend default: 0.12 (was 0.08)
---   RMS servo default: true
+-- DEFAULTS REVISED (2026-07-14 listening tests, Rob/scragnog):
+--   Look-back floor REMOVED -- the 0.15 floor never faded out and smeared the
+--   final detail steps (main garble source). Look-back now fades to zero.
+--   look_back_enabled, identity_anchor, rms_servo: default OFF (opt-in).
+--   anchor_blend back to 0.08 (was 0.12). Tonal ramp kept:
+--   0.3 + 0.7 * (1 - sigma_ratio)
 -- ============================================================================
 
 local C = {}
@@ -339,13 +340,13 @@ function C.apply_tonal_anchor(x_new, n, B, NPB, sigma_ratio, anchor_sigma, tonal
     return x_new
 end
 
--- Look-back smoother with detail-phase floor (0.15)
+-- Look-back smoother, SNR-adaptive, fades to zero at low sigma
 -- slot: "lb_prev" (primary) or "lb2_prev" (secondary)
 function C.apply_look_back(x_new, n, sigma_ratio, lb_lambda, lb_snr_power, state, slot)
     slot = slot or "lb_prev"
     local prev = state[slot]
     if prev ~= nil then
-        local lb_w = lb_lambda * math.max(sigma_ratio ^ lb_snr_power, 0.15)
+        local lb_w = lb_lambda * (sigma_ratio ^ lb_snr_power)
         if lb_w > 1e-6 then
             for j = 0, n - 1 do
                 x_new[j] = (1.0 - lb_w) * x_new[j] + lb_w * prev[j]
@@ -459,13 +460,13 @@ C.RELATIONAL_PARAMS = {
 
 C.ANCHOR_PARAMS = {
     { key = "identity_anchor", type = "toggle", label = "Identity Anchor",
-      default = true,
+      default = false,
       hint = "Captures latent snapshot at anchor_sigma. Gently pulls output back." },
     { key = "anchor_sigma", type = "slider", label = "Anchor Sigma",
       default = 0.5, min = 0.1, max = 0.9, step = 0.05,
       hint = "Sigma fraction for identity/tonal anchor capture." },
     { key = "anchor_blend", type = "slider", label = "Anchor Blend",
-      default = 0.12, min = 0.01, max = 0.30, step = 0.01,
+      default = 0.08, min = 0.01, max = 0.30, step = 0.01,
       hint = "Pull strength toward identity anchor snapshot." },
     { key = "tonal_anchor", type = "toggle", label = "Tonal Anchor",
       default = true,
@@ -477,16 +478,16 @@ C.ANCHOR_PARAMS = {
 
 C.LOOKBACK_PARAMS = {
     { key = "look_back_enabled", type = "toggle", label = "Look-Back Smoother",
-      default = true, hint = "SNR-adaptive latent EMA with detail-phase floor." },
+      default = false, hint = "SNR-adaptive latent EMA. Fades to zero at low sigma." },
     { key = "look_back_lambda", type = "slider", label = "Look-Back Lambda",
-      default = 0.30, min = 0.05, max = 1.0, step = 0.05, hint = "Max smoothing at high sigma." },
+      default = 0.15, min = 0.05, max = 1.0, step = 0.05, hint = "Max smoothing at high sigma." },
     { key = "look_back_snr_power", type = "slider", label = "Look-Back SNR Power",
       default = 1.3, min = 0.5, max = 3.0, step = 0.1, hint = "Falloff exponent." },
 }
 
 C.RMS_PARAMS = {
     { key = "rms_servo", type = "toggle", label = "RMS Servo",
-      default = true, hint = "Per-batch downward-only RMS ceiling." },
+      default = false, hint = "Per-batch downward-only RMS ceiling. ACE-Step latents run ~2.0 RMS -- calibrate targets before enabling." },
     { key = "rms_target_min", type = "slider", label = "RMS Target Min",
       default = 1.2, min = 0.1, max = 3.0, step = 0.05, hint = "RMS ceiling at low sigma." },
     { key = "rms_target_max", type = "slider", label = "RMS Target Max",
@@ -531,15 +532,15 @@ function C.read_common_opts(p)
         drift_on      = C.bool_param(p, "drift_guard", false),
         drift_thr     = C.num_param(p, "drift_threshold", 0.85),
         -- Anchors
-        f_id_anchor   = C.bool_param(p, "identity_anchor", true),
+        f_id_anchor   = C.bool_param(p, "identity_anchor", false),
         anchor_sigma  = C.num_param(p, "anchor_sigma", 0.5),
-        anchor_blend  = C.num_param(p, "anchor_blend", 0.12),
+        anchor_blend  = C.num_param(p, "anchor_blend", 0.08),
         f_tonal       = C.bool_param(p, "tonal_anchor", true),
         tonal_str     = C.num_param(p, "tonal_strength", 0.20),
-        f_lookback    = C.bool_param(p, "look_back_enabled", true),
-        lb_lambda     = C.num_param(p, "look_back_lambda", 0.30),
+        f_lookback    = C.bool_param(p, "look_back_enabled", false),
+        lb_lambda     = C.num_param(p, "look_back_lambda", 0.15),
         lb_snr_power  = C.num_param(p, "look_back_snr_power", 1.3),
-        f_rms         = C.bool_param(p, "rms_servo", true),
+        f_rms         = C.bool_param(p, "rms_servo", false),
         rms_tgt_min   = C.num_param(p, "rms_target_min", 1.2),
         rms_tgt_max   = C.num_param(p, "rms_target_max", 2.5),
         rms_gain      = C.num_param(p, "rms_servo_gain", 0.6),

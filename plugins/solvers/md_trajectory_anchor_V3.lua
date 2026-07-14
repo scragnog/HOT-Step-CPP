@@ -165,7 +165,7 @@ solver = {
             key     = "identity_anchor",
             type    = "toggle",
             label   = "Identity Anchor",
-            default = true,
+            default = false,
             hint    = "Captures a snapshot of xt at anchor_sigma, then gently pulls toward it on all subsequent steps. Prevents late-stage structural drift. Tonal anchor fires at the same sigma.",
         },
         {
@@ -211,14 +211,14 @@ solver = {
             key     = "look_back_enabled",
             type    = "toggle",
             label   = "Look-Back Smoother",
-            default = true,
+            default = false,
             hint    = "SNR-adaptive latent EMA. Blends current output toward previous step output, weighted heavily at high sigma (structure), fading to zero at low sigma (detail). Suppresses ODE manifold shearing and harmonic hum. arXiv:2602.09449.",
         },
         {
             key     = "look_back_lambda",
             type    = "slider",
             label   = "Look-Back Lambda",
-            default = 0.55,
+            default = 0.15,
             min     = 0.05,
             max     = 1.0,
             step    = 0.05,
@@ -477,13 +477,13 @@ function step(xt, vt, t_curr, t_prev, n)
     local mem_blend     = num_param(params, "memory_blend", 0.12)
     local f_concept     = bool_param(params, "concept_lock", true)
     local concept_power = num_param(params, "concept_sigma_power", 1.0)
-    local f_anchor      = bool_param(params, "identity_anchor", true)
+    local f_anchor      = bool_param(params, "identity_anchor", false)
     local anchor_sigma  = num_param(params, "anchor_sigma", 0.5)
     local anchor_blend  = num_param(params, "anchor_blend", 0.08)
     local f_tonal       = bool_param(params, "tonal_anchor", true)
     local tonal_str     = num_param(params, "tonal_strength", 0.15)
-    local f_lookback    = bool_param(params, "look_back_enabled", true)
-    local lb_lambda     = num_param(params, "look_back_lambda", 0.55)
+    local f_lookback    = bool_param(params, "look_back_enabled", false)
+    local lb_lambda     = num_param(params, "look_back_lambda", 0.15)
     local lb_snr_power  = num_param(params, "look_back_snr_power", 1.3)
     local f_rms         = bool_param(params, "rms_servo", false)
     local rms_tgt_min   = num_param(params, "rms_target_min", 1.2)

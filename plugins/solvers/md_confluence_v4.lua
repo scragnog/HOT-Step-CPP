@@ -111,7 +111,7 @@ solver = {
           default = 1.0, min = 0.25, max = 3.0, step = 0.25,
           hint = "Concept lock fade curve across sigma." },
         { key = "identity_anchor", type = "toggle", label = "Anchor: Identity Anchor",
-          default = true, hint = "Snapshot pull-back at anchor_sigma." },
+          default = false, hint = "Snapshot pull-back at anchor_sigma." },
         { key = "anchor_sigma", type = "slider", label = "Anchor: Anchor Sigma",
           default = 0.5, min = 0.1, max = 0.9, step = 0.05,
           hint = "Sigma fraction for identity/tonal anchor capture." },
@@ -124,9 +124,9 @@ solver = {
           default = 0.15, min = 0.0, max = 1.0, step = 0.05,
           hint = "Tonal correction scale (hard-capped 0.1%/step regardless)." },
         { key = "look_back_enabled_anchor", type = "toggle", label = "Anchor: Look-Back Smoother",
-          default = true, hint = "SNR-adaptive latent EMA." },
+          default = false, hint = "SNR-adaptive latent EMA." },
         { key = "look_back_lambda_anchor", type = "slider", label = "Anchor: Look-Back Lambda",
-          default = 0.55, min = 0.05, max = 1.0, step = 0.05,
+          default = 0.15, min = 0.05, max = 1.0, step = 0.05,
           hint = "Max look-back weight at high sigma." },
         { key = "look_back_snr_power_anchor", type = "slider", label = "Anchor: Look-Back SNR Power",
           default = 1.3, min = 0.5, max = 3.0, step = 0.1,
@@ -148,7 +148,7 @@ solver = {
 
         -- ── Post-Blend Shearing Control ──────────────────────────────────
         { key = "post_blend_lookback", type = "slider", label = "Post-Blend Look-Back",
-          default = 0.25, min = 0.0, max = 0.7, step = 0.05,
+          default = 0.0, min = 0.0, max = 0.7, step = 0.05,
           hint = "SNR-adaptive EMA on x_final AFTER the blend. Neither sub-solver's look-back covers the blend seam -- this does. 0 = off. 0.25 = subtle anti-shear. Fades with sigma like anchor's look-back." },
         { key = "post_blend_snr_power", type = "slider", label = "Post-Blend SNR Power",
           default = 1.0, min = 0.5, max = 3.0, step = 0.1,
@@ -507,13 +507,13 @@ local function anchor_candidate(x, v_curr, sigma_curr, sigma_next, step_idx, n, 
     local mem_blend     = num_param(p, "memory_blend", 0.12)
     local f_concept     = bool_param(p, "concept_lock", true)
     local concept_power = num_param(p, "concept_sigma_power", 1.0)
-    local f_anchor      = bool_param(p, "identity_anchor", true)
+    local f_anchor      = bool_param(p, "identity_anchor", false)
     local anchor_sigma  = num_param(p, "anchor_sigma", 0.5)
     local anchor_blend  = num_param(p, "anchor_blend", 0.08)
     local f_tonal       = bool_param(p, "tonal_anchor", true)
     local tonal_str     = num_param(p, "tonal_strength", 0.15)
-    local f_lookback    = bool_param(p, "look_back_enabled_anchor", true)
-    local lb_lambda     = num_param(p, "look_back_lambda_anchor", 0.55)
+    local f_lookback    = bool_param(p, "look_back_enabled_anchor", false)
+    local lb_lambda     = num_param(p, "look_back_lambda_anchor", 0.15)
     local lb_snr_power  = num_param(p, "look_back_snr_power_anchor", 1.3)
     local f_rms         = bool_param(p, "rms_servo", false)
     local rms_tgt_min   = num_param(p, "rms_target_min", 1.2)
@@ -753,7 +753,7 @@ function sample(xt, vt_buf, schedule, n, model_fn)
     local lb_lambda_storm   = num_param(p, "look_back_lambda_storm", 0.15)
     local lb_snr_storm      = num_param(p, "look_back_snr_power_storm", 1.5)
     local warmup            = math.floor(num_param(p, "warmup_steps", 2))
-    local pb_lb_lambda      = num_param(p, "post_blend_lookback", 0.25)
+    local pb_lb_lambda      = num_param(p, "post_blend_lookback", 0.0)
     local pb_lb_snr         = num_param(p, "post_blend_snr_power", 1.0)
     local spec_guard        = num_param(p, "spectral_guard", 0.4)
     local late_damp_at      = num_param(p, "late_damp_override", 0.7)

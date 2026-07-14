@@ -48,7 +48,7 @@ solver = {
 
         -- ── Look-Back Smoother ──
         { key = "look_back_lambda", type = "slider", label = "Look-Back Lambda",
-          default = 0.5, min = 0.0, max = 1.0, step = 0.01,
+          default = 0.15, min = 0.0, max = 1.0, step = 0.01,
           hint = "Inter-step smoothing strength. 0=off (raw). 0.15=standard. Higher = smoother but softer detail." },
         { key = "look_back_snr_power", type = "slider", label = "Look-Back SNR Power",
           default = 1.2, min = 0.5, max = 3.0, step = 0.1,
@@ -74,7 +74,7 @@ solver = {
           default = false,
           hint = "Print JSON diagnostic logs to console at generation end." },
         { key = "verbose", type = "toggle", label = "Verbose Logging",
-          default = true,
+          default = false,
           hint = "Print per-step solver decisions to console (debug)." },
         { key = "relational_weight", type = "slider", label = "Relational Weight",
           default = 0.0, min = 0.0, max = 1.0, step = 0.05,

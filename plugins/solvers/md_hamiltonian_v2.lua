@@ -80,7 +80,7 @@ solver = {
           default = 0.6, min = 0.1, max = 1.0, step = 0.05, hint = "Mid momentum multiplier." },
         -- Post-step look-back (secondary)
         { key = "post_look_back", type = "slider", label = "Post-Step Look-Back",
-          default = 0.20, min = 0.0, max = 0.6, step = 0.05, hint = "Additional SNR-adaptive EMA. 0 = off." },
+          default = 0.0, min = 0.0, max = 0.6, step = 0.05, hint = "Additional SNR-adaptive EMA. 0 = off (default)." },
         { key = "post_look_back_snr", type = "slider", label = "Post-Step LB SNR Power",
           default = 1.0, min = 0.5, max = 3.0, step = 0.1, hint = "Falloff." },
     },
@@ -106,7 +106,7 @@ function sample(xt, vt_buf, schedule, n, model_fn)
     local f_spec_mom    = C.bool_param(p, "spectral_momentum", true)
     local spec_hi       = C.num_param(p, "spectral_hi_boost", 1.4)
     local spec_mid      = C.num_param(p, "spectral_mid_cut", 0.6)
-    local post_lb_lam   = C.num_param(p, "post_look_back", 0.20)
+    local post_lb_lam   = C.num_param(p, "post_look_back", 0.0)
     local post_lb_snr   = C.num_param(p, "post_look_back_snr", 1.0)
     local opts          = C.read_common_opts(p)
     local state         = C.new_state()
