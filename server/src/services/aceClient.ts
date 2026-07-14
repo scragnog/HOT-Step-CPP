@@ -44,6 +44,9 @@ export interface AceRequest {
   timesignature?: string;
   vocal_language?: string;
   seed?: number;
+  /** LM-phase sampling seed (caption/lyrics/audio-codes). Independent from
+   *  `seed`, which drives DiT synthesis. -1 or omitted lets the engine pick. */
+  lm_seed?: number;
   lm_batch_size?: number;
   synth_batch_size?: number;
   lm_temperature?: number;

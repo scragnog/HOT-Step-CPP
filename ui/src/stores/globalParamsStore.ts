@@ -88,6 +88,10 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   guidanceMode: readKey("hs-guidanceMode", 'apg'),
   seed: readKey("hs-seed", 42),
   randomSeed: readKey("hs-randomSeed", true),
+  // LM Seed — independent of the DiT/generation seed above, unless tied
+  // via lmSeedFollowsDit (default true = original tied behavior).
+  lmSeed: readKey("hs-lmSeed", 42),
+  lmSeedFollowsDit: readKey("hs-lmSeedFollowsDit", true),
   batchSize: readKey("hs-batchSize", 1),
   storkSubsteps: readKey("hs-storkSubsteps", 10),
   beatStability: readKey("hs-beatStability", 0.25),
@@ -224,6 +228,8 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       set({ seed: 42 }); writeKey("hs-seed", 42);
     }
   },
+  setLmSeed: (v: any) => { set({ lmSeed: v }); writeKey("hs-lmSeed", v); },
+  setLmSeedFollowsDit: (v: any) => { set({ lmSeedFollowsDit: v }); writeKey("hs-lmSeedFollowsDit", v); },
   setBatchSize: (v: any) => { set({ batchSize: v }); writeKey("hs-batchSize", v); },
   setStorkSubsteps: (v: any) => { set({ storkSubsteps: v }); writeKey("hs-storkSubsteps", v); },
   setBeatStability: (v: any) => { set({ beatStability: v }); writeKey("hs-beatStability", v); },
@@ -390,7 +396,9 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       lmCfgCutoffRatio: s.lmCfgCutoffRatio < 1.0 ? s.lmCfgCutoffRatio : undefined,
       cacheRatio: s.cacheRatio > 0 ? s.cacheRatio : undefined,
       inferMethod: s.inferMethod, scheduler: s.scheduler, guidanceMode: s.guidanceMode,
-      seed: s.seed, randomSeed: s.randomSeed, batchSize: s.batchSize,
+      seed: s.seed, randomSeed: s.randomSeed,
+      lmSeed: s.lmSeed, lmSeedFollowsDit: s.lmSeedFollowsDit,
+      batchSize: s.batchSize,
       storkSubsteps: (s.inferMethod === 'stork2' || s.inferMethod === 'stork4') ? s.storkSubsteps : undefined,
       beatStability: s.inferMethod === 'jkass_fast' ? s.beatStability : undefined,
       frequencyDamping: s.inferMethod === 'jkass_fast' ? s.frequencyDamping : undefined,

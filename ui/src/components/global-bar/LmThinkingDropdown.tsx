@@ -3,17 +3,34 @@
 // The on/off toggle is in the bar header (ToggleSwitch).
 // This dropdown only shows the detailed LM parameters when LM is enabled.
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Save } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
 import { ToggleSwitch } from './BarSection';
+import { SeedManagerDrawer } from './SeedManagerDrawer';
 
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
+
+/** Seed input with local string buffer — prevents parseInt("-") snap-back */
+const SeedInput: React.FC<{ value: number; onChange: (v: number) => void; className: string }> = ({ value, onChange, className }) => {
+  const [local, setLocal] = useState(String(value));
+  useEffect(() => { setLocal(String(value)); }, [value]);
+  const commit = () => { onChange(parseInt(local) || 42); };
+  return (
+    <input type="number" className={className} value={local}
+      onChange={e => setLocal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') commit(); }}
+    />
+  );
+};
 
 export const LmThinkingDropdown: React.FC = () => {
   const gp = useGlobalParams();
   const { t } = useTranslation();
+  const [seedDrawerOpen, setSeedDrawerOpen] = useState(false);
 
   if (gp.skipLm) {
     return (
@@ -52,19 +69,56 @@ export const LmThinkingDropdown: React.FC = () => {
 
       <Slider label="LM Codes Strength" value={gp.lmCodesStrength}
         onChange={gp.setLmCodesStrength} min={0} max={1} step={0.05} showInput />
+
+      {/* LM Seed — independent from the Generation (DiT) seed by default,
+          unless "Use DiT Seed" is on, which ties lm_seed to the DiT seed
+          (the original engine behavior: locked seed -> both deterministic,
+          random -> both random). */}
+      <div className="relative">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">LM Seed</label>
+            <button onClick={() => setSeedDrawerOpen(true)} title="Seed Manager"
+              className="text-zinc-500 hover:text-amber-400 transition-colors">
+              <Save size={12} />
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-zinc-500">Use DiT Seed</span>
+            <ToggleSwitch checked={gp.lmSeedFollowsDit} onChange={gp.setLmSeedFollowsDit} accentColor="sky" />
+          </div>
+        </div>
+        {!gp.lmSeedFollowsDit && (
+          <SeedInput value={gp.lmSeed} onChange={gp.setLmSeed} className={inputClasses} />
+        )}
+        <p className="text-[10px] text-zinc-500 mt-1">
+          {gp.lmSeedFollowsDit
+            ? 'Tied to the Generation seed — locked seed means both are deterministic, random means both are random.'
+            : 'Drives caption/lyrics/audio-code sampling independently of the Generation seed.'}
+        </p>
+        <SeedManagerDrawer
+          isOpen={seedDrawerOpen}
+          onClose={() => setSeedDrawerOpen(false)}
+          currentSeed={gp.lmSeed}
+          onLoad={(seed) => { gp.setLmSeed(seed); gp.setLmSeedFollowsDit(false); setSeedDrawerOpen(false); }}
+          onLoadRandom={(seed) => { gp.setLmSeed(seed); gp.setLmSeedFollowsDit(false); }}
+        />
+      </div>
     </div>
   );
 };
 
 /** Summary badge for the LM / Thinking section */
 export const LmThinkingBadge: React.FC = () => {
-  const { skipLm, useCotCaption, lmTemperature, lmCfgScale, lmCodesStrength } = useGlobalParams();
+  const { skipLm, useCotCaption, lmTemperature, lmCfgScale, lmCodesStrength, lmSeedFollowsDit } = useGlobalParams();
 
   if (skipLm) return null;
 
+  const seedLabel = lmSeedFollowsDit ? 'DiT' : 'Fix';
+
   return (
     <span className="text-[10px] text-zinc-500 font-mono truncate">
-      {useCotCaption ? 'CoT · ' : ''}T{lmTemperature.toFixed(2)} · CFG {lmCfgScale.toFixed(1)}{lmCodesStrength < 1.0 ? ` · CS ${lmCodesStrength.toFixed(2)}` : ''}
+      {useCotCaption ? 'CoT · ' : ''}T{lmTemperature.toFixed(2)} · CFG {lmCfgScale.toFixed(1)}{lmCodesStrength < 1.0 ? ` · CS ${lmCodesStrength.toFixed(2)}` : ''} · Seed {seedLabel}
     </span>
   );
 };

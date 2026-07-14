@@ -161,6 +161,8 @@ export const GlobalParamBar: React.FC = () => {
         if (p.guidanceMode !== undefined) gp.setGuidanceMode(p.guidanceMode);
         if (p.seed !== undefined) gp.setSeed(p.seed);
         if (p.randomSeed !== undefined) gp.setRandomSeed(p.randomSeed);
+        if (p.lmSeed !== undefined) gp.setLmSeed(p.lmSeed);
+        if (p.lmSeedFollowsDit !== undefined) gp.setLmSeedFollowsDit(p.lmSeedFollowsDit);
         if (p.batchSize !== undefined) gp.setBatchSize(p.batchSize);
         if (p.useCotCaption !== undefined) gp.setUseCotCaption(p.useCotCaption);
         if (p.skipLm !== undefined) gp.setSkipLm(p.skipLm);

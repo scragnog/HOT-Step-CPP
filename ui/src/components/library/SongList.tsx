@@ -1389,6 +1389,7 @@ const BASE_COLS: ColDef[] = [
   { id: 'date',    label: 'Date',    defaultW: 80,  minW: 50,  align: 'left', resizable: true },
   // ── Generation data (hidden by default; enable via Columns menu) ──
   { id: 'seed',      label: 'Seed',      defaultW: 96,  minW: 60, align: 'left', resizable: true, defaultHidden: true },
+  { id: 'lmSeed',    label: 'LM Seed',   defaultW: 96,  minW: 60, align: 'left', resizable: true, defaultHidden: true },
   { id: 'steps',     label: 'Steps',     defaultW: 56,  minW: 44, align: 'left', resizable: true, defaultHidden: true },
   { id: 'cfg',       label: 'CFG',       defaultW: 56,  minW: 44, align: 'left', resizable: true, defaultHidden: true },
   { id: 'shift',     label: 'Shift',     defaultW: 56,  minW: 44, align: 'left', resizable: true, defaultHidden: true },
@@ -1405,6 +1406,7 @@ const BASE_COLS: ColDef[] = [
   { id: 'instrumental', label: 'Instr.', defaultW: 60, minW: 48, align: 'center', resizable: true, defaultHidden: true },
   { id: 'mastered',  label: 'Mastered',  defaultW: 76,  minW: 56, align: 'center', resizable: true, defaultHidden: true },
   { id: 'seedType',  label: 'Seed Type', defaultW: 80,  minW: 56, align: 'left', resizable: true, defaultHidden: true },
+  { id: 'lmSeedType', label: 'LM Seed Type', defaultW: 90, minW: 60, align: 'left', resizable: true, defaultHidden: true },
   // Holds up to 5 action buttons (edit/download/delete/A/B). Must be wide
   // enough that the fixed-layout <td overflow-hidden> never clips them — the
   // column is non-resizable so the user can't widen it manually (#58).
@@ -1685,6 +1687,7 @@ const SongTable: React.FC<SongTableProps> = ({
               date: <span className="text-zinc-600">{formatDate(song.created_at || song.createdAt)}</span>,
               // ── Generation data (hidden by default) ──
               seed: <span className="text-zinc-500 font-mono truncate block">{gp?.seed ?? '—'}</span>,
+              lmSeed: <span className="text-zinc-500 font-mono truncate block">{gp?.lmSeed ?? '—'}</span>,
               steps: <span className="text-zinc-500 font-mono">{gp?.inferenceSteps ?? '—'}</span>,
               cfg: <span className="text-zinc-500 font-mono">{gp?.guidanceScale ?? '—'}</span>,
               shift: <span className="text-zinc-500 font-mono">{gp?.shift ?? '—'}</span>,
@@ -1701,6 +1704,7 @@ const SongTable: React.FC<SongTableProps> = ({
               instrumental: <span className="text-zinc-500">{gp?.instrumental ? 'Yes' : (gp?.instrumental === false ? 'No' : '—')}</span>,
               mastered: isMastered ? <Check size={13} className="text-emerald-400 inline" /> : <span className="text-zinc-600">—</span>,
               seedType: <span className="text-zinc-500">{gp?.randomSeed === true ? 'Random' : (gp?.randomSeed === false ? 'Fixed' : '—')}</span>,
+              lmSeedType: <span className="text-zinc-500">{gp?.lmSeedFollowsDit === true ? 'Tied to DiT' : (gp?.lmSeedFollowsDit === false ? 'Fixed' : '—')}</span>,
               actions: (
                 <div className="flex items-center justify-end gap-0.5 flex-nowrap flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                   {onReuse && (

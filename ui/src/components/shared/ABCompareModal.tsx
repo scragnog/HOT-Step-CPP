@@ -93,7 +93,7 @@ const PARAM_LABELS: Record<string, string> = {
 // Keys to skip in comparison (always different or internal)
 const SKIP_KEYS = new Set([
   'prompt', 'lyrics', 'title', 'caption', 'songDescription', 'customMode',
-  'randomSeed', 'seed', 'source', 'style', 'artist', 'subject', 'trackName',
+  'randomSeed', 'seed', 'lmSeedFollowsDit', 'lmSeed', 'source', 'style', 'artist', 'subject', 'trackName',
   'sourceAudioUrl', 'sourceLatentUrl', 'lmNegativePrompt',
   'pluginParams',  // shown separately if needed
   'adapterGroupScales',

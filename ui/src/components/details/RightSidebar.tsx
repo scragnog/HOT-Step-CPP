@@ -327,6 +327,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                 />
               )}
 
+              {/* LM Seed — mono */}
+              {gp.lmSeed !== undefined && (
+                <ParamCell
+                  label="LM Seed"
+                  value={String(gp.lmSeed).substring(0, 12) + (String(gp.lmSeed).length > 12 ? '…' : '')}
+                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
+                  iconColor="text-slate-600 dark:text-slate-400"
+                  icon={<Hash size={12} />}
+                  mono
+                />
+              )}
+
               {/* Batch Size */}
               {gp.batchSize && gp.batchSize > 1 && (
                 <ParamCell

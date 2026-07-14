@@ -63,6 +63,10 @@ export interface GlobalParams {
   guidanceMode: string; setGuidanceMode: (v: string) => void;
   seed: number; setSeed: (v: number) => void;
   randomSeed: boolean; setRandomSeed: (v: boolean) => void;
+  // LM Seed — independent from seed/randomSeed above; drives LM-phase
+  // sampling. When lmSeedFollowsDit is true, it's tied to `seed` instead.
+  lmSeed: number; setLmSeed: (v: number) => void;
+  lmSeedFollowsDit: boolean; setLmSeedFollowsDit: (v: boolean) => void;
   batchSize: number; setBatchSize: (v: number) => void;
   // Solver sub-params
   storkSubsteps: number; setStorkSubsteps: (v: number) => void;

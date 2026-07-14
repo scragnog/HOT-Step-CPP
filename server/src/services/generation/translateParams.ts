@@ -33,11 +33,23 @@ export function translateParams(params: any): AceRequest {
   }
   if (params.vocalLanguage) req.vocal_language = params.vocalLanguage;
 
-  // Seed
+  // Seed (DiT / generation phase)
   if (params.randomSeed) {
     req.seed = Math.floor(Math.random() * 2_147_483_647);
   } else if (params.seed !== undefined) {
     req.seed = params.seed;
+  }
+
+  // LM Seed — independent from the seed above, unless tied to it via
+  // lmSeedFollowsDit (default true — matches the engine's original
+  // behavior: locked seed -> both deterministic, random -> both random).
+  // When tied, lm_seed is left unset entirely so the engine's own fallback
+  // (lm_seed defaults to the DiT seed when absent) does the tying — this
+  // correctly follows a *randomized* seed too, since req.seed is already
+  // resolved above by this point.
+  const lmSeedFollowsDit = params.lmSeedFollowsDit !== false; // default true
+  if (!lmSeedFollowsDit && params.lmSeed !== undefined) {
+    req.lm_seed = params.lmSeed;
   }
 
   // Batch

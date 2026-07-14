@@ -742,7 +742,7 @@ export const GenerationDropdown: React.FC = () => {
       <div className="relative">
         <div className="flex items-center justify-between mb-1.5">
           <div className="flex items-center gap-1.5">
-            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Seed</label>
+            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Generation Seed</label>
             <button onClick={() => setSeedDrawerOpen(true)} title="Seed Manager"
               className="text-zinc-500 hover:text-amber-400 transition-colors">
               <Save size={12} />
@@ -756,6 +756,9 @@ export const GenerationDropdown: React.FC = () => {
         {!gp.randomSeed && (
           <SeedInput value={gp.seed} onChange={gp.setSeed} className={inputClasses} />
         )}
+        <p className="text-[10px] text-zinc-500 mt-1">
+          Drives audio synthesis (DiT). Varies per track during batch generation. See LM Seed for caption/lyrics/code sampling.
+        </p>
         <SeedManagerDrawer
           isOpen={seedDrawerOpen}
           onClose={() => setSeedDrawerOpen(false)}
@@ -807,7 +810,7 @@ export const GenerationBadge: React.FC = () => {
 
   return (
     <span className="text-[10px] text-zinc-500 font-mono truncate">
-      {gp.inferenceSteps}s · {solver} · {schedule} · {guidance} {gp.guidanceScale.toFixed(1)} · σ{shiftLabel} · {seedLabel}
+      {gp.inferenceSteps}s · {solver} · {schedule} · {guidance} {gp.guidanceScale.toFixed(1)} · σ{shiftLabel} · Seed {seedLabel}
     </span>
   );
 };

@@ -114,9 +114,18 @@ export interface GenerationParams {
   scheduler: string;
   guidanceMode: string;
 
-  // Seed
+  // Seed (DiT / generation phase)
   seed: number;
   randomSeed: boolean;
+
+  // LM Seed — independent from the seed above. Controls the LM phase's
+  // caption/lyrics/audio-code sampling. When lmSeedFollowsDit is true
+  // (default), lmSeed is ignored and the LM seed is tied to the DiT seed —
+  // the original engine behavior: locked seed -> both deterministic,
+  // random -> both random. Set lmSeedFollowsDit to false to use lmSeed as
+  // an independent fixed value instead.
+  lmSeed?: number;
+  lmSeedFollowsDit?: boolean;
 
   // Batch
   batchSize: number;

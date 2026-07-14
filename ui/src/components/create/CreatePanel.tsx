@@ -87,6 +87,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     if (gpData.cacheRatio !== undefined) gp.setCacheRatio(gpData.cacheRatio);
     if (gpData.seed !== undefined) gp.setSeed(gpData.seed);
     if (gpData.randomSeed !== undefined) gp.setRandomSeed(gpData.randomSeed);
+    if (gpData.lmSeed !== undefined) gp.setLmSeed(gpData.lmSeed);
+    if (gpData.lmSeedFollowsDit !== undefined) gp.setLmSeedFollowsDit(gpData.lmSeedFollowsDit);
     if (gpData.shift !== undefined) gp.setShift(gpData.shift);
     if (gpData.inferMethod) gp.setInferMethod(gpData.inferMethod);
     if (gpData.scheduler) gp.setScheduler(gpData.scheduler);

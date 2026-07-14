@@ -1,6 +1,6 @@
 // generation/lmCache.ts — LM audio code cache
 //
-// Caches ONLY LM-generated output fields keyed by seed + LM-affecting params.
+// Caches ONLY LM-generated output fields keyed by lm_seed + LM-affecting params.
 // Non-LM parameters (DiT, adapter, DCW, etc.) are NEVER cached.
 
 import crypto from 'crypto';
@@ -21,8 +21,13 @@ const lmCache = new Map<string, { lmOutputs: LmCacheEntry[]; timestamp: number }
 
 /** Compute a stable hash key from LM-affecting parameters */
 export function computeLmCacheKey(req: AceRequest): string {
+  // lm_seed is left unset on the request when the LM seed is tied to the
+  // DiT seed (the engine's own fallback then ties it) — use the effective
+  // value here too, or every tied request would collide on `undefined`
+  // regardless of the actual (possibly random) DiT seed.
+  const effectiveLmSeed = req.lm_seed !== undefined ? req.lm_seed : req.seed;
   const keyObj = {
-    seed: req.seed,
+    lm_seed: effectiveLmSeed,
     caption: req.caption,
     lyrics: req.lyrics,
     bpm: req.bpm,

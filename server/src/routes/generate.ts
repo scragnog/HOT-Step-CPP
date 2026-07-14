@@ -190,13 +190,21 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 
   const aceReq = translateParams(job.params);
 
-  // Write the resolved seed back into job.params so the DB stores the actual
-  // seed used — critical for reproducibility when randomSeed is true.
+  // Write the resolved seeds back into job.params so the DB stores the actual
+  // values used — critical for reproducibility when randomSeed is true, or
+  // when lmSeedFollowsDit is on (lm_seed isn't sent to the engine at all in
+  // that case — the engine ties it to seed itself — so mirror that here
+  // rather than leaving a stale/unused "fixed" value in job.params).
   if (aceReq.seed !== undefined) {
     job.params.seed = aceReq.seed;
   }
+  if (aceReq.lm_seed !== undefined) {
+    job.params.lmSeed = aceReq.lm_seed;
+  } else if (job.params.lmSeedFollowsDit !== false) {
+    job.params.lmSeed = aceReq.seed;
+  }
 
-  console.log(`[Generate] Job ${job.id} — ditModel=${job.params.ditModel || '(none)'}, synth_model=${aceReq.synth_model || '(none)'}, emb_model=${aceReq.emb_model || '(auto)'}, seed=${aceReq.seed ?? '(engine default)'}, source=${job.params.source || 'create'}`);
+  console.log(`[Generate] Job ${job.id} — ditModel=${job.params.ditModel || '(none)'}, synth_model=${aceReq.synth_model || '(none)'}, emb_model=${aceReq.emb_model || '(auto)'}, seed=${aceReq.seed ?? '(engine default)'}, lm_seed=${aceReq.lm_seed ?? `(tied to seed: ${aceReq.seed ?? 'engine default'})`}, source=${job.params.source || 'create'}`);
   const abortController = new AbortController();
 
   // Store abort controller for cancellation
@@ -1147,6 +1155,19 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         if (measured > 0) trackDuration = Math.round(measured);
       }
 
+      // Per-track generation_params. job.params.seed/lmSeed only reflect the
+      // job-level (first-track) value — when randomSeed varies the DiT seed
+      // per track (or the engine varies lm_seed per output in a live LM
+      // batch), later tracks would otherwise all show track 1's seed in the
+      // DB/UI even though a different one was actually used to synthesize
+      // them, making reproduction impossible. trackResult (== lmResults[i],
+      // mutated in place by the synth loop) holds the real per-track values.
+      const trackParams = {
+        ...job.params,
+        seed: trackResult.seed !== undefined ? trackResult.seed : job.params.seed,
+        lmSeed: trackResult.lm_seed !== undefined ? trackResult.lm_seed : job.params.lmSeed,
+      };
+
       const songId = uuidv4();
       getDb().prepare(`
         INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
@@ -1156,7 +1177,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       `).run(
         songId, job.userId, title, trackLyrics, style, trackCaption,
         audioUrl, trackDuration, bpm, keyScale, timeSignature,
-        JSON.stringify([]), aceReq.synth_model || '', JSON.stringify(job.params),
+        JSON.stringify([]), aceReq.synth_model || '', JSON.stringify(trackParams),
         trackMastered, trackLatent, qualityJson,
       );
       songIds.push(songId);
