@@ -14,6 +14,9 @@ export interface LmCacheEntry {
   duration: number;
   keyscale: string;
   timesignature: string;
+  /** Resolved engine LM seed for this output (base lm_seed + batch index) —
+   *  cached so cache-hit tracks display the seed that produced their codes. */
+  lm_seed?: number;
 }
 
 const LM_CACHE_MAX = 20;

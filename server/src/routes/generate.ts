@@ -251,6 +251,9 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           duration: lmOut.duration,
           keyscale: lmOut.keyscale,
           timesignature: lmOut.timesignature,
+          // Resolved per-output LM seed (base + batch index) from the run
+          // that produced these codes — see the cache-miss rebuild below.
+          lm_seed: lmOut.lm_seed,
         }));
         job.lmResults = lmResults;
         cached.timestamp = Date.now(); // refresh LRU
@@ -333,6 +336,11 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           duration: lmOut.duration,
           keyscale: lmOut.keyscale,
           timesignature: lmOut.timesignature,
+          // The engine gives each LM batch output its own seed (lm_seed + b)
+          // and echoes the resolved value — keep it so per-track
+          // generation_params record the seed that actually produced this
+          // track's codes, not the request-level base.
+          lm_seed: lmOut.lm_seed,
         }));
         job.lmResults = lmResults;
 
@@ -346,6 +354,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
             duration: r.duration || 0,
             keyscale: r.keyscale || '',
             timesignature: r.timesignature || '',
+            lm_seed: r.lm_seed,
           }));
           setLmCache(cacheKey, lmOutputs);
           logGeneration(job.id, 'INFO', `[LM Phase] Cached LM outputs (key=${cacheKey}, cache size=${getLmCacheSize()})`);
