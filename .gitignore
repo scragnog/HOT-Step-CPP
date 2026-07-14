@@ -9,6 +9,10 @@ build/
 # Data (local, not committed)
 server/data/
 server/server/data/
+# Root runtime data (SQLite DB, generated audio/latents) and model weights —
+# anchored to root: server/src/data/ and ui/src/data/ are tracked source
+/data/
+/models/
 *.db
 *.db-shm
 *.db-wal
