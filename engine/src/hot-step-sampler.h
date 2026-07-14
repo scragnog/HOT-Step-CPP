@@ -18,6 +18,7 @@
 #include "philox.h"
 #include "sampler-dcw.h"
 #include "sampler-repaint.h"
+#include "static-graph.h"
 #include "sampler-schedule.h"
 
 #include <algorithm>
@@ -150,17 +151,28 @@ static int dit_ggml_generate(DiTGGML *           model,
     int                  H_enc = (int) t_enc->ne[0];  // encoder hidden size (from condition_embedder)
 
     // Allocate compute buffers.
-    // Critical: reset FIRST (clears old state), THEN force inputs to GPU, THEN alloc.
-    // Without GPU forcing, inputs default to CPU where the scheduler aliases their
-    // buffers with intermediates. enc_hidden is read at every cross-attn layer (24x),
-    // so CPU aliasing corrupts it mid-graph. With N>1 the larger buffers trigger
-    // more aggressive aliasing, causing batch sample 1+ to produce noise.
-    ggml_backend_sched_reset(model->sched);
-    if (model->backend != model->cpu_backend) {
+    // Preferred: direct static execution — gallocr on the primary backend, no
+    // scheduler. Inputs marked input+output stay resident across replays (no
+    // per-step re-upload), and the stable topology lets the CUDA backend
+    // capture/replay the graph. Falls back to the scheduler when any node op
+    // is unsupported on the primary backend.
+    StaticGraph dit_graph;
+    bool        enc_dirty = false;  // direct: t_enc holds foreign content, refresh before next cond pass
+
+    // Fallback critical order: reset FIRST (clears old state), THEN force
+    // inputs to GPU, THEN alloc. Without GPU forcing, inputs default to CPU
+    // where the scheduler aliases their buffers with intermediates. enc_hidden
+    // is read at every cross-attn layer (24x), so CPU aliasing corrupts it
+    // mid-graph. With N>1 the larger buffers trigger more aggressive aliasing,
+    // causing batch sample 1+ to produce noise.
+    auto force_inputs_to_backend = [&](struct ggml_cgraph * g) {
+        if (model->backend == model->cpu_backend) {
+            return;
+        }
         const char * input_names[] = { "enc_hidden", "input_latents", "t",       "t_r",
                                        "positions",  "sa_mask_sw",    "ca_mask" };
         for (const char * iname : input_names) {
-            struct ggml_tensor * t = ggml_graph_get_tensor(gf, iname);
+            struct ggml_tensor * t = ggml_graph_get_tensor(g, iname);
             if (t) {
                 ggml_backend_sched_set_tensor_backend(model->sched, t, model->backend);
             }
@@ -169,12 +181,62 @@ static int dit_ggml_generate(DiTGGML *           model,
         for (struct ggml_tensor * mk : model->lora_masks) {
             if (mk) ggml_backend_sched_set_tensor_backend(model->sched, mk, model->backend);
         }
-    }
-    if (!ggml_backend_sched_alloc_graph(model->sched, gf)) {
+    };
+
+    // Persistent inputs carry both flags: gallocr allocates inputs up front
+    // and never frees an output, keeping their slots out of the intermediate
+    // reuse pool across replays. enc_hidden is resident too; two-pass CFG,
+    // post_step plugin passes and the cover switch overwrite its contents and
+    // flag it via enc_dirty. Adapter masks are resident like enc_hidden (P2
+    // re-uploads them explicitly on content change).
+    auto mark_resident_inputs = [&](struct ggml_cgraph * g) {
+        const char * resident_names[] = { "enc_hidden", "positions", "sa_mask_sw", "ca_mask" };
+        for (const char * rname : resident_names) {
+            struct ggml_tensor * t = ggml_graph_get_tensor(g, rname);
+            if (t) {
+                ggml_set_input(t);
+                ggml_set_output(t);
+            }
+        }
+        for (struct ggml_tensor * mk : model->lora_masks) {
+            if (mk) {
+                ggml_set_input(mk);
+                ggml_set_output(mk);
+            }
+        }
+    };
+
+    // static_graph_alloc with the fork's GPU-forcing preserved on the fallback
+    // branch (sched_reset clears usr backend assignments, so re-force AFTER it —
+    // upstream's helper loses the forcing there).
+    auto hotstep_graph_alloc = [&](struct ggml_cgraph * g) -> bool {
+        mark_resident_inputs(g);
+        if (static_graph_backend_supports(model->backend, g)) {
+            dit_graph.galloc = ggml_gallocr_new(ggml_backend_get_default_buffer_type(model->backend));
+            if (dit_graph.galloc && ggml_gallocr_alloc_graph(dit_graph.galloc, g)) {
+                dit_graph.direct = true;
+                return true;
+            }
+            if (dit_graph.galloc) {
+                ggml_gallocr_free(dit_graph.galloc);
+                dit_graph.galloc = nullptr;
+            }
+        }
+        ggml_backend_sched_reset(model->sched);
+        force_inputs_to_backend(g);
+        if (!ggml_backend_sched_alloc_graph(model->sched, g)) {
+            return false;
+        }
+        dit_graph.sched_allocated = true;
+        return true;
+    };
+
+    if (!hotstep_graph_alloc(gf)) {
         fprintf(stderr, "[DiT] FATAL: failed to allocate graph\n");
         ggml_free(ctx);
         return -1;
     }
+    fprintf(stderr, "[DiT] Graph exec: %s\n", dit_graph.direct ? "direct (static, no scheduler)" : "scheduler fallback");
 
     // Encoder hidden states: re-uploaded per step (scheduler clobbers input buffers).
     // When CFG batched, slots [0,N) hold real encoder states, [N,2N) hold null.
@@ -578,20 +640,25 @@ static int dit_ggml_generate(DiTGGML *           model,
             ggml_backend_tensor_set(t_tr, &t_val, 0, sizeof(float));
         }
 
-        // Re-upload constants every step — the GGML scheduler aliases input tensor
-        // buffers as scratch space for intermediate computations, clobbering them
-        // after each graph compute. Confirmed: skipping these produces blank output.
-        ggml_backend_tensor_set(t_enc, enc_buf.data(), 0, enc_buf.size() * sizeof(float));
-        ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N_graph * sizeof(int32_t));
-        ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
-        ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N_graph * sizeof(uint16_t));
-        // Per-section adapter masks are constant GPU inputs read at every layer —
-        // same as enc_hidden, the scheduler clobbers them after each compute, so
-        // they MUST be re-uploaded every step. Uploading once left them garbage for
-        // steps 2..N, zeroing the masked adapter delta (the "nil adapter" bug).
-        for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
-            if (model->lora_masks[i])
-                ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
+        // Scheduler fallback: input buffers are aliased as scratch space for
+        // intermediates, clobbering them after each compute — refresh ALL
+        // constants every call (confirmed: skipping these produces blank output,
+        // and stale adapter masks caused the "nil adapter" bug).
+        // Direct graph: constants are pinned resident via the output flag; only
+        // enc_hidden refreshes, and only when something overwrote it (two-pass
+        // CFG, post_step plugin passes, cover switch).
+        if (!dit_graph.direct || enc_dirty) {
+            ggml_backend_tensor_set(t_enc, enc_buf.data(), 0, enc_buf.size() * sizeof(float));
+            enc_dirty = false;
+        }
+        if (!dit_graph.direct) {
+            ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N_graph * sizeof(int32_t));
+            ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
+            ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N_graph * sizeof(uint16_t));
+            for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
+                if (model->lora_masks[i])
+                    ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
+            }
         }
 
         // Pack xt into input tensor (cond + uncond slots)
@@ -609,7 +676,7 @@ static int dit_ggml_generate(DiTGGML *           model,
         ggml_backend_tensor_set(t_input, input_buf.data(), 0, in_ch * T * N_graph * sizeof(float));
 
         // Forward pass
-        ggml_backend_sched_graph_compute(model->sched, gf);
+        static_graph_compute(&dit_graph, model->backend, model->sched, gf);
 
         // Read output and apply CFG/APG
         if (batch_cfg) {
@@ -632,6 +699,7 @@ static int dit_ggml_generate(DiTGGML *           model,
             ggml_backend_tensor_get(t_output, vt_cond.data(), 0, n_total * sizeof(float));
             // Unconditional pass
             ggml_backend_tensor_set(t_enc, null_enc_buf.data(), 0, H_enc * enc_S * N * sizeof(float));
+            enc_dirty = true;  // t_enc now holds null enc — cond pass must re-upload
             ggml_backend_tensor_set(t_input, input_buf.data(), 0, in_ch * T * N * sizeof(float));
             if (t_t) {
                 ggml_backend_tensor_set(t_t, &t_val, 0, sizeof(float));
@@ -639,14 +707,16 @@ static int dit_ggml_generate(DiTGGML *           model,
             if (t_tr) {
                 ggml_backend_tensor_set(t_tr, &t_val, 0, sizeof(float));
             }
-            ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N * sizeof(int32_t));
-            ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N * sizeof(uint16_t));
-            ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N * sizeof(uint16_t));
-            for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
-                if (model->lora_masks[i])
-                    ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
+            if (!dit_graph.direct) {
+                ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N * sizeof(int32_t));
+                ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N * sizeof(uint16_t));
+                ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N * sizeof(uint16_t));
+                for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
+                    if (model->lora_masks[i])
+                        ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
+                }
             }
-            ggml_backend_sched_graph_compute(model->sched, gf);
+            static_graph_compute(&dit_graph, model->backend, model->sched, gf);
             ggml_backend_tensor_get(t_output, vt_uncond.data(), 0, n_total * sizeof(float));
             for (int b = 0; b < N; b++) {
                 if (use_apg_native) {
@@ -677,6 +747,7 @@ static int dit_ggml_generate(DiTGGML *           model,
         // Upload encoding (all N_graph slots, all same type)
         ggml_backend_tensor_set(t_enc, enc_full.data(), 0,
                                 H_enc * enc_S * N_graph * sizeof(float));
+        enc_dirty = true;  // t_enc no longer holds enc_buf — cond pass must re-upload
 
         // Pack xt into all N_graph slots
         for (int b = 0; b < N_graph; b++) {
@@ -690,20 +761,23 @@ static int dit_ggml_generate(DiTGGML *           model,
         ggml_backend_tensor_set(t_input, input_buf.data(), 0,
                                 in_ch * T * N_graph * sizeof(float));
 
-        // Re-upload masks/positions (full N_graph)
-        ggml_backend_tensor_set(t_pos, pos_data.data(), 0,
-                                S * N_graph * sizeof(int32_t));
-        ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0,
-                                S * S * N_graph * sizeof(uint16_t));
-        ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0,
-                                enc_S * S * N_graph * sizeof(uint16_t));
-        for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
-            if (model->lora_masks[i])
-                ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
+        // Re-upload masks/positions (full N_graph) — scheduler fallback only;
+        // resident on a direct graph.
+        if (!dit_graph.direct) {
+            ggml_backend_tensor_set(t_pos, pos_data.data(), 0,
+                                    S * N_graph * sizeof(int32_t));
+            ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0,
+                                    S * S * N_graph * sizeof(uint16_t));
+            ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0,
+                                    enc_S * S * N_graph * sizeof(uint16_t));
+            for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
+                if (model->lora_masks[i])
+                    ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
+            }
         }
 
         // Forward pass
-        ggml_backend_sched_graph_compute(model->sched, gf);
+        static_graph_compute(&dit_graph, model->backend, model->sched, gf);
 
         // Read first N samples only
         ggml_backend_tensor_get(t_output, out_buf, 0, n_total * sizeof(float));
@@ -815,6 +889,12 @@ static int dit_ggml_generate(DiTGGML *           model,
                         }
                     }
                 }
+                // Direct graph: the per-step refresh path is off, so push the
+                // swapped ca_mask once; enc_buf refreshes via enc_dirty.
+                enc_dirty = true;
+                if (dit_graph.direct && enc_switch) {
+                    ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, ca_data.size() * sizeof(uint16_t));
+                }
                 fprintf(stderr, "[DiT] Cover: switched at step %d/%d\n", step_idx, num_steps);
             }
             // Advance step_idx by +1: full-loop solvers call model_fn (which
@@ -858,25 +938,14 @@ static int dit_ggml_generate(DiTGGML *           model,
                 batch_cfg = false;
                 N_graph   = N;
 
+                static_graph_release(&dit_graph, model->sched);
                 ggml_free(ctx);
                 ctx_buf.assign(ctx_size, 0);
                 struct ggml_init_params gp2 = { ctx_size, ctx_buf.data(), true };
                 ctx = ggml_init(gp2);
                 gf  = dit_ggml_build_graph(model, ctx, T, enc_S, N_graph, &t_input, &t_output);
 
-                ggml_backend_sched_reset(model->sched);
-                if (model->backend != model->cpu_backend) {
-                    const char * input_names[] = { "enc_hidden", "input_latents", "t", "t_r",
-                                                   "positions", "sa_mask_sw", "ca_mask" };
-                    for (const char * iname : input_names) {
-                        struct ggml_tensor * ti = ggml_graph_get_tensor(gf, iname);
-                        if (ti) ggml_backend_sched_set_tensor_backend(model->sched, ti, model->backend);
-                    }
-                    for (struct ggml_tensor * mk : model->lora_masks) {
-                        if (mk) ggml_backend_sched_set_tensor_backend(model->sched, mk, model->backend);
-                    }
-                }
-                if (!ggml_backend_sched_alloc_graph(model->sched, gf)) {
+                if (!hotstep_graph_alloc(gf)) {
                     fprintf(stderr, "[DiT] FATAL: failed to re-allocate graph after CFG cutoff — aborting\n");
                     // Computing on an unallocated graph is UB — stop the solver
                     // loop; the fatal is returned after lua_call_solver_loop.
@@ -915,6 +984,7 @@ static int dit_ggml_generate(DiTGGML *           model,
                 ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N * sizeof(int32_t));
                 ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N * sizeof(uint16_t));
                 ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N * sizeof(uint16_t));
+                enc_dirty = false;
 
                 // Re-upload per-section adapter masks into the rebuilt graph's fresh
                 // mask tensors (else the post-cutoff steps run with garbage masks).
@@ -923,8 +993,8 @@ static int dit_ggml_generate(DiTGGML *           model,
                         ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
                 }
 
-                fprintf(stderr, "[DiT] Graph rebuilt: %d nodes (was 2N, now N=%d)\n",
-                        ggml_graph_n_nodes(gf), N);
+                fprintf(stderr, "[DiT] Graph rebuilt: %d nodes (was 2N, now N=%d, %s)\n",
+                        ggml_graph_n_nodes(gf), N, dit_graph.direct ? "direct" : "scheduler");
             }
 
             fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]%s\n",
@@ -938,6 +1008,7 @@ static int dit_ggml_generate(DiTGGML *           model,
             g_hotstep_params.plugin_params);
 
         if (graph_alloc_failed) {
+            static_graph_release(&dit_graph, model->sched);
             ggml_free(ctx);
             return -1;
         }
@@ -953,6 +1024,7 @@ static int dit_ggml_generate(DiTGGML *           model,
     for (int step = 0; step < num_steps; step++) {
         if (cancel && cancel(cancel_data)) {
             fprintf(stderr, "[DiT] Cancelled at step %d/%d\n", step, num_steps);
+            static_graph_release(&dit_graph, model->sched);
             ggml_free(ctx);
             return -1;
         }
@@ -984,6 +1056,12 @@ static int dit_ggml_generate(DiTGGML *           model,
                     }
                 }
             }
+            // Direct graph: the per-step refresh path is off, so push the
+            // swapped ca_mask once; enc_buf refreshes via enc_dirty.
+            enc_dirty = true;
+            if (dit_graph.direct && enc_switch) {
+                ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, ca_data.size() * sizeof(uint16_t));
+            }
             fprintf(stderr, "[DiT] Cover: switched to non-cover context at step %d/%d\n", step, num_steps);
         }
 
@@ -1007,26 +1085,14 @@ static int dit_ggml_generate(DiTGGML *           model,
             N_graph   = N;
 
             // Rebuild graph with smaller N_graph
+            static_graph_release(&dit_graph, model->sched);
             ggml_free(ctx);
             ctx_buf.assign(ctx_size, 0);
             struct ggml_init_params gp2 = { ctx_size, ctx_buf.data(), true };
             ctx = ggml_init(gp2);
             gf  = dit_ggml_build_graph(model, ctx, T, enc_S, N_graph, &t_input, &t_output);
 
-            // Re-allocate scheduler for new graph
-            ggml_backend_sched_reset(model->sched);
-            if (model->backend != model->cpu_backend) {
-                const char * input_names[] = { "enc_hidden", "input_latents", "t", "t_r",
-                                               "positions", "sa_mask_sw", "ca_mask" };
-                for (const char * iname : input_names) {
-                    struct ggml_tensor * ti = ggml_graph_get_tensor(gf, iname);
-                    if (ti) ggml_backend_sched_set_tensor_backend(model->sched, ti, model->backend);
-                }
-                for (struct ggml_tensor * mk : model->lora_masks) {
-                    if (mk) ggml_backend_sched_set_tensor_backend(model->sched, mk, model->backend);
-                }
-            }
-            if (!ggml_backend_sched_alloc_graph(model->sched, gf)) {
+            if (!hotstep_graph_alloc(gf)) {
                 fprintf(stderr, "[DiT] FATAL: failed to re-allocate graph after CFG cutoff\n");
                 ggml_free(ctx);
                 return -1;
@@ -1067,6 +1133,7 @@ static int dit_ggml_generate(DiTGGML *           model,
             ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N * sizeof(int32_t));
             ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N * sizeof(uint16_t));
             ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N * sizeof(uint16_t));
+            enc_dirty = false;
 
             // Re-upload per-section adapter masks — the rebuild created fresh mask
             // input tensors ([1,S,1], batch-independent) that would otherwise be
@@ -1077,8 +1144,8 @@ static int dit_ggml_generate(DiTGGML *           model,
                     ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
             }
 
-            fprintf(stderr, "[DiT] Graph rebuilt: %d nodes (was 2N, now N=%d)\n",
-                    ggml_graph_n_nodes(gf), N);
+            fprintf(stderr, "[DiT] Graph rebuilt: %d nodes (was 2N, now N=%d, %s)\n",
+                    ggml_graph_n_nodes(gf), N, dit_graph.direct ? "direct" : "scheduler");
         }
 
         // Evaluate velocity at (xt, t_curr) — or reuse cached velocity
@@ -1277,6 +1344,7 @@ static int dit_ggml_generate(DiTGGML *           model,
         }
     }
 
+    static_graph_release(&dit_graph, model->sched);
     ggml_free(ctx);
     return 0;
 }
