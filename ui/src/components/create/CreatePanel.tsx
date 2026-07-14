@@ -16,6 +16,7 @@ import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { AiGenerateModal, type AiGenerateResult } from './AiGenerateModal';
 import { useStreamGeneration } from '../../hooks/useStreamGeneration';
 import { StreamPlayer } from '../player/StreamPlayer';
+import { expandWildcards, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
 import type { GenerationParams, Song } from '../../types';
 
 interface CreatePanelProps {
@@ -41,6 +42,19 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   const [lyrics, setLyrics] = usePersistedState('hs-lyrics', '');
   const [negativePrompt, setNegativePrompt] = usePersistedState('hs-negative-prompt', '');
   const [instrumental, setInstrumental] = usePersistedState('hs-instrumental', false);
+
+  // ── Compose-time caption helpers (MDMAchine) ──
+  const [loraTrigger, setLoraTrigger] = usePersistedState('hs-lora-trigger', '');
+  const [beatIntro, setBeatIntro] = usePersistedState('hs-beat-intro', false);
+  const [introBars, setIntroBars] = usePersistedState('hs-intro-bars', 2);
+  const [autoExpand, setAutoExpand] = usePersistedState('hs-main-auto-expand', false);
+
+  // LoRA trigger word prepended, beat intro/outro request appended
+  const buildCaption = useCallback((base: string) => {
+    const loraText = loraTrigger.trim() ? `${loraTrigger.trim()}, ` : '';
+    const beatText = beatIntro ? `, with a clean ${introBars}-bar percussive intro and outro for DJ mixing` : '';
+    return `${loraText}${base}${beatText}`;
+  }, [loraTrigger, beatIntro, introBars]);
 
   // ── Song Info (optional, auto-populated from Lyric Studio Send to Create) ──
   const [title, setTitle] = usePersistedState('hs-title', '');
@@ -132,9 +146,17 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   }, [setCaption, setLyrics, setTitle, setSubject, setBpm, setKeyScale, setTimeSignature, setDuration, setVocalLanguage, setInstrumental]);
 
   const handleGenerate = () => {
+    // Wildcard auto-expand: reproducible from the DiT seed when it's locked,
+    // fresh randomness when the seed is random anyway
+    const wcSeed = gp.randomSeed ? randomWildcardSeed() : gp.seed;
+    const resolvedCaption = autoExpand && hasWildcards(caption)
+      ? expandWildcards(caption, wcSeed, 0) : caption;
+    const resolvedLyrics = autoExpand && hasWildcards(lyrics)
+      ? expandWildcards(lyrics, wcSeed, 0) : lyrics;
+
     const params: Partial<GenerationParams> = {
-      caption,
-      lyrics: instrumental ? '[Instrumental]' : lyrics,
+      caption: buildCaption(resolvedCaption),
+      lyrics: instrumental ? '[Instrumental]' : resolvedLyrics,
       ...(negativePrompt.trim() ? { negative_prompt: negativePrompt.trim() } : {}),
       instrumental,
       bpm, duration, keyScale, timeSignature, vocalLanguage,
@@ -179,6 +201,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
           artist={artist} onArtistChange={setArtist}
           subject={subject} onSubjectChange={setSubject}
           negativePrompt={negativePrompt} onNegativePromptChange={setNegativePrompt}
+          loraTrigger={loraTrigger} onLoraTriggerChange={setLoraTrigger}
+          beatIntro={beatIntro} onBeatIntroChange={setBeatIntro}
+          introBars={introBars} onIntroBarsChange={setIntroBars}
+          autoExpand={autoExpand} onAutoExpandChange={setAutoExpand}
+          wildcardSeed={gp.randomSeed ? undefined : gp.seed}
         />
 
         <MetadataSection
