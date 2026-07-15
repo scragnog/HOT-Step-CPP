@@ -13,6 +13,7 @@
 
 #include "adapter-cancel.h"
 #include "adapter-merge.h"
+#include "convrot.h"
 #include "ggml-backend.h"
 #include "ggml.h"
 #include "timer.h"
@@ -23,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -757,10 +759,18 @@ static bool adapter_runtime_finalize(DiTLoRA * lora, ggml_backend_t backend) {
 // S is read with adapter_rebase_fetch (2D linear, shape-matched tensors only —
 // same skips as merge). T is dequantized host-side from the still-open weight
 // source, so the nudge is exact against what actually sits on the GPU.
+//
+// ConvRot models: T is stored PRE-ROTATED (W·H per input-dim group), but S and
+// the deltas live in unrotated space and the deltas consume unrotated
+// activations at inference. Nudging with raw T would bake a rotated-space term
+// into the delta — audible as total corruption (found the hard way 2026-07-15).
+// convrot_groups (tensor name → group size) marks which T's must be unrotated
+// host-side (fast radix-4 transform; H·H = I) before computing beta*(S - T).
 static void adapter_runtime_rebase(DiTLoRA *            lora,
                                    const WeightSource & ws,
                                    const char *         rebase_source,
-                                   float                rebase_beta) {
+                                   float                rebase_beta,
+                                   const std::unordered_map<std::string, int> * convrot_groups = nullptr) {
     if (!rebase_source || !rebase_source[0] || rebase_beta == 0.0f || lora->staged.empty()) {
         return;
     }
@@ -827,6 +837,13 @@ static void adapter_runtime_rebase(DiTLoRA *            lora,
                 }
                 traits->to_float(tdata, tbuf.data(), nel);
             }
+            // ConvRot: bring T back to unrotated space before the nudge
+            if (convrot_groups) {
+                auto it = convrot_groups->find(gguf_name);
+                if (it != convrot_groups->end()) {
+                    convrot_transform_rows(tbuf.data(), ne1, ne0, it->second);
+                }
+            }
             float * d = sd.f32_data.data();
             for (int64_t i = 0; i < nel; i++) {
                 d[i] += rebase_beta * (s[i] - tbuf[i]);
@@ -865,7 +882,8 @@ static bool adapter_load_runtime_stack(DiTLoRA *                       lora,
                                        const AdapterGroupScales &      gs,
                                        ggml_backend_t                  backend,
                                        const char *                    rebase_source = nullptr,
-                                       float                           rebase_beta = 0.0f) {
+                                       float                           rebase_beta = 0.0f,
+                                       const std::unordered_map<std::string, int> * convrot_groups = nullptr) {
     if (stack.empty()) {
         fprintf(stderr, "[Adapter-RT] WARNING: empty adapter stack\n");
         return false;
@@ -900,7 +918,7 @@ static bool adapter_load_runtime_stack(DiTLoRA *                       lora,
         // only — later adapters sum their deltas on top, exactly matching the
         // merge path's nudge-then-stack order (dit.h). See adapter_runtime_rebase.
         if (i == 0) {
-            adapter_runtime_rebase(lora, ws, rebase_source, rebase_beta);
+            adapter_runtime_rebase(lora, ws, rebase_source, rebase_beta, convrot_groups);
         }
     }
 
@@ -922,7 +940,8 @@ static bool adapter_load_runtime(DiTLoRA *                  lora,
                                   const AdapterGroupScales & gs,
                                   ggml_backend_t             backend,
                                   const char *               rebase_source = nullptr,
-                                  float                      rebase_beta = 0.0f) {
+                                  float                      rebase_beta = 0.0f,
+                                  const std::unordered_map<std::string, int> * convrot_groups = nullptr) {
     std::vector<AdapterSpec> single{ AdapterSpec{ std::string(adapter_path), adapter_scale } };
-    return adapter_load_runtime_stack(lora, wctx, ws, single, gs, backend, rebase_source, rebase_beta);
+    return adapter_load_runtime_stack(lora, wctx, ws, single, gs, backend, rebase_source, rebase_beta, convrot_groups);
 }

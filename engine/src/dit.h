@@ -9,6 +9,7 @@
 //                conv_transpose_1d, add, mul, scale, view, reshape, permute.
 
 #include "adapter-merge.h"
+#include "convrot.h"
 #include "hot-step-build-flags.h"
 #include "adapter-runtime.h"
 #include "backend.h"
@@ -187,50 +188,22 @@ static void dit_convrot_parse_map(const char * s, std::unordered_map<std::string
     }
 }
 
-// Build the normalized ConvRot "regular" Hadamard matrix for group size G
-// (power of 4 only): H_G = H4 ⊗ H4 ⊗ ... , scaled by 1/sqrt(G). Matches
-// convert_to_quant utils/convrot.py build_hadamard(). Row-major; H is
-// symmetric so ggml_mul_mat(H, x) applies exactly rotate_activation(x).
-// Returns nullptr if G is unsupported.
+// Build the normalized ConvRot "regular" Hadamard matrix tensor for group
+// size G (see convrot.h). Row-major; H is symmetric so ggml_mul_mat(H, x)
+// applies exactly rotate_activation(x). Returns nullptr if G is unsupported.
 static struct ggml_tensor * dit_convrot_build_h(WeightCtx * wctx, int G) {
-    bool pow4 = G >= 4;
-    for (int t = G; t > 1; t /= 4) {
-        if (t % 4 != 0) { pow4 = false; break; }
-    }
-    if (!pow4 || G > 4096) return nullptr;
+    std::vector<float> hdata;
+    if (!convrot_build_h_data(G, hdata)) return nullptr;
 
-    // H4 from ConvRot Theorem 3.3: every row/col sums to 2 (no all-ones row).
-    static const float H4[16] = { 1, 1, 1, -1,   1, 1, -1, 1,   1, -1, 1, 1,   -1, 1, 1, 1 };
-
-    auto    buf  = std::make_unique<float[]>((size_t) G * G);
-    float * data = buf.get();
-    auto    tmp  = std::make_unique<float[]>((size_t) G * G);
-
-    int cur = 4;
-    memcpy(data, H4, sizeof(H4));
-    while (cur < G) {
-        int next = cur * 4;  // kron(H_cur, H4)
-        for (int i = 0; i < cur; i++) {
-            for (int j = 0; j < cur; j++) {
-                float a = data[(size_t) i * cur + j];
-                for (int k = 0; k < 4; k++) {
-                    for (int l = 0; l < 4; l++) {
-                        tmp[(size_t) (i * 4 + k) * next + (j * 4 + l)] = a * H4[k * 4 + l];
-                    }
-                }
-            }
-        }
-        memcpy(data, tmp.get(), (size_t) next * next * sizeof(float));
-        cur = next;
-    }
-    const float norm = 1.0f / sqrtf((float) G);
-    for (size_t i = 0; i < (size_t) G * G; i++) data[i] *= norm;
+    size_t n   = (size_t) G * G;
+    auto   buf = std::make_unique<float[]>(n);
+    memcpy(buf.get(), hdata.data(), n * sizeof(float));
 
     struct ggml_tensor * t = ggml_new_tensor_2d(wctx->ctx, GGML_TYPE_F32, G, G);
     char nm[32];
     snprintf(nm, sizeof(nm), "convrot_h%d", G);
     ggml_set_name(t, nm);
-    wctx->pending.push_back({ t, data, (size_t) G * G * sizeof(float), 0 });
+    wctx->pending.push_back({ t, buf.get(), n * sizeof(float), 0 });
     wctx->staging.push_back(std::move(buf));
     return t;
 }
@@ -831,11 +804,13 @@ static bool dit_ggml_load(DiTGGML *    m,
             } else if (!stack.empty()) {
                 rt_ok = adapter_load_runtime_stack(&m->lora, &m->wctx, ws, stack,
                                                    g_hotstep_params.adapter_group_scales, m->backend,
-                                                   rebase_source, rebase_beta);
+                                                   rebase_source, rebase_beta,
+                                                   m->convrot.active ? &rotmap : nullptr);
             } else {
                 rt_ok = adapter_load_runtime(&m->lora, &m->wctx, ws, adapter_path, adapter_scale,
                                              g_hotstep_params.adapter_group_scales, m->backend,
-                                             rebase_source, rebase_beta);
+                                             rebase_source, rebase_beta,
+                                             m->convrot.active ? &rotmap : nullptr);
             }
             if (!rt_ok) {
                 // FAIL the load, matching the merge path. Returning success here
