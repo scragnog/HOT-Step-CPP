@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
 project(acestep-ggml LANGUAGES C CXX)
 
+# CI cache generation: 2 (2026-07-16). This file is hashed into the GitHub
+# Actions build-cache key — bump this comment to force cold builds when the
+# cached objects themselves are suspect (v1.1.3 stale-cache mixed-ABI crash,
+# issues #82/#83). Routine drift is handled by the .built-commit stamp guard
+# in release.yml/cache-warm.yml; this is the manual override.
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

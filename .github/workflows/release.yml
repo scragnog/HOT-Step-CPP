@@ -235,6 +235,25 @@ jobs:
               done
             echo "Restored git timestamps for engine/ggml submodule (CUDA sources)"
           fi
+          # Stale-cache guard (issues #82/#83): commit times are NOT monotonic
+          # with build order. A commit authored while the previous Cache Warm
+          # was still building gets an mtime OLDER than the cached objects, so
+          # Ninja skips rebuilding its dependents — if a struct changed, the
+          # link mixes two ABIs and the binary crashes at runtime (v1.1.3).
+          # The cache carries a .built-commit stamp of the commit it was built
+          # from; explicitly re-touch everything that changed since. No stamp
+          # or unknown commit → touch all engine sources (full engine-code
+          # rebuild; the expensive ggml objects stay valid).
+          if [ -f engine/build/.built-commit ] && \
+             git cat-file -e "$(cat engine/build/.built-commit)^{commit}" 2>/dev/null; then
+            base="$(cat engine/build/.built-commit)"
+            git diff --name-only "$base" HEAD -- engine/ ':(exclude)engine/ggml' | \
+              while read -r f; do [ -f "$f" ] && touch "$f"; done
+            echo "Stale-cache guard: touched files changed since cached commit $base"
+          else
+            find engine/src engine/tools -type f -exec touch {} +
+            echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
+          fi
 
       - name: Build C++ engine
         shell: pwsh
@@ -284,6 +303,9 @@ jobs:
             throw "Build failed: ace-server.exe not found"
           }
           Write-Host "Engine build complete: $(Get-Item $aceServer | Select-Object -ExpandProperty Length | ForEach-Object { [math]::Round($_ / 1MB, 1) }) MB"
+
+          # Stamp the commit this build dir was built from (stale-cache guard)
+          Set-Content -Path "engine/build/.built-commit" -Value "${{ github.sha }}" -NoNewline
 
       # ── Bundle Server ──────────────────────────────────────────
       - name: Install server dependencies
@@ -509,6 +531,63 @@ jobs:
           Copy-Item "open-browser-if-needed.ps1" "$dist/open-browser-if-needed.ps1"
           Copy-Item "release/README.txt" "$dist/README.txt"
 
+      - name: Smoke test packaged engine
+        shell: bash
+        run: |
+          # Boot the packaged engine against stub models and hit the endpoints
+          # the UI touches on load. Catches runtime-broken binaries that build
+          # and link green — e.g. the v1.1.3 stale-cache mixed-ABI crash
+          # (issues #82/#83), which died on the first GET /props. The stubs are
+          # header-only GGUFs (classified by general.architecture alone);
+          # /props never loads a model, so no GPU or real weights are needed.
+          mkdir -p smoke-models
+          python3 - << 'PYEOF'
+          import struct
+          def s(x):
+              b = x.encode()
+              return struct.pack('<Q', len(b)) + b
+          for arch in ['acestep-lm', 'acestep-dit', 'acestep-text-enc', 'acestep-vae']:
+              d = b'GGUF' + struct.pack('<I', 3) + struct.pack('<Q', 0) + struct.pack('<Q', 1)
+              d += s('general.architecture') + struct.pack('<I', 8) + s(arch)
+              open('smoke-models/stub-%s.gguf' % arch, 'wb').write(d)
+          PYEOF
+          ROOT="$PWD"
+          BIN="$ROOT/release/staging/engine/ace-server"
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          export LD_LIBRARY_PATH="$ROOT/release/staging/engine:${LD_LIBRARY_PATH:-}"
+          cd release/staging
+          "$BIN" --models ../../smoke-models --host 127.0.0.1 --port 18085 \
+            > "$ROOT/smoke-engine.log" 2>&1 &
+          PID=$!
+          cd "$ROOT"
+          ok=0
+          for i in $(seq 1 60); do
+            sleep 1
+            kill -0 $PID 2>/dev/null || break
+            if curl -sf -m 2 http://127.0.0.1:18085/health > /dev/null 2>&1; then ok=1; break; fi
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::Smoke test: engine never became healthy (crashed on startup?)"
+            cat smoke-engine.log
+            exit 1
+          fi
+          for ep in health props plugins props; do
+            if ! curl -sf -m 10 "http://127.0.0.1:18085/$ep" > /dev/null; then
+              echo "::error::Smoke test: GET /$ep failed — engine likely crashed serving it"
+              cat smoke-engine.log
+              exit 1
+            fi
+          done
+          sleep 2
+          if ! kill -0 $PID 2>/dev/null; then
+            echo "::error::Smoke test: engine died after serving requests"
+            cat smoke-engine.log
+            exit 1
+          fi
+          kill $PID 2>/dev/null || true
+          rm -rf smoke-models
+          echo "Smoke test passed: packaged engine boots and serves /health /props /plugins"
+
       - name: Package and checksum
         shell: pwsh
         run: |
@@ -606,6 +685,25 @@ jobs:
               done
             echo "Restored git timestamps for engine/ggml submodule (CUDA sources)"
           fi
+          # Stale-cache guard (issues #82/#83): commit times are NOT monotonic
+          # with build order. A commit authored while the previous Cache Warm
+          # was still building gets an mtime OLDER than the cached objects, so
+          # Ninja skips rebuilding its dependents — if a struct changed, the
+          # link mixes two ABIs and the binary crashes at runtime (v1.1.3).
+          # The cache carries a .built-commit stamp of the commit it was built
+          # from; explicitly re-touch everything that changed since. No stamp
+          # or unknown commit → touch all engine sources (full engine-code
+          # rebuild; the expensive ggml objects stay valid).
+          if [ -f engine/build/.built-commit ] && \
+             git cat-file -e "$(cat engine/build/.built-commit)^{commit}" 2>/dev/null; then
+            base="$(cat engine/build/.built-commit)"
+            git diff --name-only "$base" HEAD -- engine/ ':(exclude)engine/ggml' | \
+              while read -r f; do [ -f "$f" ] && touch "$f"; done
+            echo "Stale-cache guard: touched files changed since cached commit $base"
+          else
+            find engine/src engine/tools -type f -exec touch {} +
+            echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
+          fi
 
       - name: Build C++ engine
         run: |
@@ -618,6 +716,8 @@ jobs:
           cmake --build . --config Release -j $(sysctl -n hw.logicalcpu)
           echo "Engine build complete"
           ls -la ace-server mastering mp3-codec 2>/dev/null || true
+          # Stamp the commit this build dir was built from (stale-cache guard)
+          echo -n "${{ github.sha }}" > .built-commit
 
       # ── Bundle Server ──────────────────────────────────────────
       - name: Install server dependencies
@@ -737,6 +837,62 @@ jobs:
           exec "$DIR/runtime/bin/node" "$DIR/server/server.mjs"
           LAUNCH
           chmod +x "$DIST/HOT-Step.sh"
+
+      - name: Smoke test packaged engine
+        run: |
+          # Boot the packaged engine against stub models and hit the endpoints
+          # the UI touches on load. Catches runtime-broken binaries that build
+          # and link green — e.g. the v1.1.3 stale-cache mixed-ABI crash
+          # (issues #82/#83), which died on the first GET /props. The stubs are
+          # header-only GGUFs (classified by general.architecture alone);
+          # /props never loads a model, so no GPU or real weights are needed.
+          mkdir -p smoke-models
+          python3 - << 'PYEOF'
+          import struct
+          def s(x):
+              b = x.encode()
+              return struct.pack('<Q', len(b)) + b
+          for arch in ['acestep-lm', 'acestep-dit', 'acestep-text-enc', 'acestep-vae']:
+              d = b'GGUF' + struct.pack('<I', 3) + struct.pack('<Q', 0) + struct.pack('<Q', 1)
+              d += s('general.architecture') + struct.pack('<I', 8) + s(arch)
+              open('smoke-models/stub-%s.gguf' % arch, 'wb').write(d)
+          PYEOF
+          ROOT="$PWD"
+          BIN="$ROOT/release/staging/engine/ace-server"
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          export LD_LIBRARY_PATH="$ROOT/release/staging/engine:${LD_LIBRARY_PATH:-}"
+          cd release/staging
+          "$BIN" --models ../../smoke-models --host 127.0.0.1 --port 18085 \
+            > "$ROOT/smoke-engine.log" 2>&1 &
+          PID=$!
+          cd "$ROOT"
+          ok=0
+          for i in $(seq 1 60); do
+            sleep 1
+            kill -0 $PID 2>/dev/null || break
+            if curl -sf -m 2 http://127.0.0.1:18085/health > /dev/null 2>&1; then ok=1; break; fi
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::Smoke test: engine never became healthy (crashed on startup?)"
+            cat smoke-engine.log
+            exit 1
+          fi
+          for ep in health props plugins props; do
+            if ! curl -sf -m 10 "http://127.0.0.1:18085/$ep" > /dev/null; then
+              echo "::error::Smoke test: GET /$ep failed — engine likely crashed serving it"
+              cat smoke-engine.log
+              exit 1
+            fi
+          done
+          sleep 2
+          if ! kill -0 $PID 2>/dev/null; then
+            echo "::error::Smoke test: engine died after serving requests"
+            cat smoke-engine.log
+            exit 1
+          fi
+          kill $PID 2>/dev/null || true
+          rm -rf smoke-models
+          echo "Smoke test passed: packaged engine boots and serves /health /props /plugins"
 
       - name: Package and checksum
         run: |
@@ -919,6 +1075,25 @@ jobs:
               done
             echo "Restored git timestamps for engine/ggml submodule (CUDA sources)"
           fi
+          # Stale-cache guard (issues #82/#83): commit times are NOT monotonic
+          # with build order. A commit authored while the previous Cache Warm
+          # was still building gets an mtime OLDER than the cached objects, so
+          # Ninja skips rebuilding its dependents — if a struct changed, the
+          # link mixes two ABIs and the binary crashes at runtime (v1.1.3).
+          # The cache carries a .built-commit stamp of the commit it was built
+          # from; explicitly re-touch everything that changed since. No stamp
+          # or unknown commit → touch all engine sources (full engine-code
+          # rebuild; the expensive ggml objects stay valid).
+          if [ -f engine/build/.built-commit ] && \
+             git cat-file -e "$(cat engine/build/.built-commit)^{commit}" 2>/dev/null; then
+            base="$(cat engine/build/.built-commit)"
+            git diff --name-only "$base" HEAD -- engine/ ':(exclude)engine/ggml' | \
+              while read -r f; do [ -f "$f" ] && touch "$f"; done
+            echo "Stale-cache guard: touched files changed since cached commit $base"
+          else
+            find engine/src engine/tools -type f -exec touch {} +
+            echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
+          fi
 
       - name: Build C++ engine
         run: |
@@ -953,6 +1128,8 @@ jobs:
             exit 1
           fi
           echo "Engine build complete: $(du -h ace-server | awk '{print $1}')"
+          # Stamp the commit this build dir was built from (stale-cache guard)
+          echo -n "${{ github.sha }}" > .built-commit
 
       # ── Bundle Server ──────────────────────────────────────────
       - name: Install server dependencies
@@ -1083,6 +1260,62 @@ jobs:
           cp release/HOT-Step.sh "$DIST/HOT-Step.sh"
           chmod +x "$DIST/HOT-Step.sh"
           cp release/README.txt "$DIST/README.txt"
+
+      - name: Smoke test packaged engine
+        run: |
+          # Boot the packaged engine against stub models and hit the endpoints
+          # the UI touches on load. Catches runtime-broken binaries that build
+          # and link green — e.g. the v1.1.3 stale-cache mixed-ABI crash
+          # (issues #82/#83), which died on the first GET /props. The stubs are
+          # header-only GGUFs (classified by general.architecture alone);
+          # /props never loads a model, so no GPU or real weights are needed.
+          mkdir -p smoke-models
+          python3 - << 'PYEOF'
+          import struct
+          def s(x):
+              b = x.encode()
+              return struct.pack('<Q', len(b)) + b
+          for arch in ['acestep-lm', 'acestep-dit', 'acestep-text-enc', 'acestep-vae']:
+              d = b'GGUF' + struct.pack('<I', 3) + struct.pack('<Q', 0) + struct.pack('<Q', 1)
+              d += s('general.architecture') + struct.pack('<I', 8) + s(arch)
+              open('smoke-models/stub-%s.gguf' % arch, 'wb').write(d)
+          PYEOF
+          ROOT="$PWD"
+          BIN="$ROOT/release/staging/engine/ace-server"
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          export LD_LIBRARY_PATH="$ROOT/release/staging/engine:${LD_LIBRARY_PATH:-}"
+          cd release/staging
+          "$BIN" --models ../../smoke-models --host 127.0.0.1 --port 18085 \
+            > "$ROOT/smoke-engine.log" 2>&1 &
+          PID=$!
+          cd "$ROOT"
+          ok=0
+          for i in $(seq 1 60); do
+            sleep 1
+            kill -0 $PID 2>/dev/null || break
+            if curl -sf -m 2 http://127.0.0.1:18085/health > /dev/null 2>&1; then ok=1; break; fi
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error::Smoke test: engine never became healthy (crashed on startup?)"
+            cat smoke-engine.log
+            exit 1
+          fi
+          for ep in health props plugins props; do
+            if ! curl -sf -m 10 "http://127.0.0.1:18085/$ep" > /dev/null; then
+              echo "::error::Smoke test: GET /$ep failed — engine likely crashed serving it"
+              cat smoke-engine.log
+              exit 1
+            fi
+          done
+          sleep 2
+          if ! kill -0 $PID 2>/dev/null; then
+            echo "::error::Smoke test: engine died after serving requests"
+            cat smoke-engine.log
+            exit 1
+          fi
+          kill $PID 2>/dev/null || true
+          rm -rf smoke-models
+          echo "Smoke test passed: packaged engine boots and serves /health /props /plugins"
 
       - name: Package and checksum
         run: |

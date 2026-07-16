@@ -188,6 +188,22 @@ jobs:
               done
             echo "Restored git timestamps for engine/ggml submodule (CUDA sources)"
           fi
+          # Stale-cache guard (issues #82/#83): commit times are NOT monotonic
+          # with build order — a commit authored while a previous warm was still
+          # building gets an mtime OLDER than the restored objects, so Ninja
+          # skips rebuilding its dependents (mixed-ABI binaries baked into the
+          # "fresh" cache). Re-touch everything changed since the cached commit;
+          # no/unknown stamp → touch all engine sources. Matches release.yml.
+          if [ -f engine/build/.built-commit ] && \
+             git cat-file -e "$(cat engine/build/.built-commit)^{commit}" 2>/dev/null; then
+            base="$(cat engine/build/.built-commit)"
+            git diff --name-only "$base" HEAD -- engine/ ':(exclude)engine/ggml' | \
+              while read -r f; do [ -f "$f" ] && touch "$f"; done
+            echo "Stale-cache guard: touched files changed since cached commit $base"
+          else
+            find engine/src engine/tools -type f -exec touch {} +
+            echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
+          fi
 
       - name: Build C++ engine
         shell: pwsh
@@ -218,6 +234,9 @@ jobs:
           if (-not (Test-Path $aceServer)) { $aceServer = "engine/build/ace-server.exe" }
           if (-not (Test-Path $aceServer)) { throw "Build failed: ace-server.exe not found" }
           Write-Host "Engine build complete — cache will be saved for release reuse"
+
+          # Stamp the commit this build dir was built from (stale-cache guard)
+          Set-Content -Path "engine/build/.built-commit" -Value "${{ github.sha }}" -NoNewline
 
   # ── Linux (must match release.yml build-linux: runner, deps, flags, keys) ──
   warm-linux:
@@ -341,6 +360,22 @@ jobs:
               done
             echo "Restored git timestamps for engine/ggml submodule (CUDA sources)"
           fi
+          # Stale-cache guard (issues #82/#83): commit times are NOT monotonic
+          # with build order — a commit authored while a previous warm was still
+          # building gets an mtime OLDER than the restored objects, so Ninja
+          # skips rebuilding its dependents (mixed-ABI binaries baked into the
+          # "fresh" cache). Re-touch everything changed since the cached commit;
+          # no/unknown stamp → touch all engine sources. Matches release.yml.
+          if [ -f engine/build/.built-commit ] && \
+             git cat-file -e "$(cat engine/build/.built-commit)^{commit}" 2>/dev/null; then
+            base="$(cat engine/build/.built-commit)"
+            git diff --name-only "$base" HEAD -- engine/ ':(exclude)engine/ggml' | \
+              while read -r f; do [ -f "$f" ] && touch "$f"; done
+            echo "Stale-cache guard: touched files changed since cached commit $base"
+          else
+            find engine/src engine/tools -type f -exec touch {} +
+            echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
+          fi
 
       - name: Build C++ engine
         run: |
@@ -363,3 +398,5 @@ jobs:
             exit 1
           fi
           echo "Engine build complete — cache will be saved for release reuse"
+          # Stamp the commit this build dir was built from (stale-cache guard)
+          echo -n "${{ github.sha }}" > .built-commit
