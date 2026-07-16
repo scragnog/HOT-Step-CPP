@@ -1367,6 +1367,7 @@ static int run_transcribe_raw(MidiModel * m, const std::string & wav_path,
 int main(int argc, char ** argv) {
     std::string model_dir, validate_dir, validate_decode_dir, validate_midi_dir;
     std::string raw_path, out_path = "out.mid";
+    std::string device = "cpu";
     bool   jsonl = false;
     double tol   = 1e-3;
     for (int i = 1; i < argc; i++) {
@@ -1378,6 +1379,7 @@ int main(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--out") && i + 1 < argc) out_path = argv[++i];
         else if (!strcmp(argv[i], "--jsonl")) jsonl = true;
         else if (!strcmp(argv[i], "--tol") && i + 1 < argc) tol = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--device") && i + 1 < argc) device = argv[++i];
     }
     if (model_dir.empty()) {
         fprintf(stderr,
@@ -1387,8 +1389,23 @@ int main(int argc, char ** argv) {
                 "    --transcribe-raw <f32.bin> [--out out.mid] [--jsonl]   raw mono 16 kHz f32 -> MIDI\n"
                 "    --validate <dir>          logit parity vs oracle [--tol <x>]\n"
                 "    --validate-decode <dir>   mel + greedy token parity vs oracle\n"
-                "    --validate-midi <dir>     multi-chunk events + MIDI bytes vs oracle\n");
+                "    --validate-midi <dir>     multi-chunk events + MIDI bytes vs oracle\n"
+                "  --device cpu|auto|<name>  backend (default cpu — see note below)\n"
+                "\n"
+                "  NOTE: cpu is the default because CUDA TF32 matmul noise destabilizes\n"
+                "  this model's greedy decode (chunks run to the 2000-token cap without\n"
+                "  EOS). GPU support is tracked in docs/plans/muscriptor-cpp-port.md §7.\n");
         return 2;
+    }
+
+    // Default to the validated CPU backend unless explicitly overridden.
+    // GGML_BACKEND env (read by backend_init) still wins if the user set it.
+    if (!getenv("GGML_BACKEND") && device != "auto") {
+#ifdef _WIN32
+        _putenv_s("GGML_BACKEND", device == "cpu" ? "CPU" : device.c_str());
+#else
+        setenv("GGML_BACKEND", device == "cpu" ? "CPU" : device.c_str(), 1);
+#endif
     }
 
     ggml_time_init();
