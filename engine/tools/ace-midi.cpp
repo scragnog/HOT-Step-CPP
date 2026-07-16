@@ -107,10 +107,14 @@ struct MidiModel {
     ggml_backend_t       backend, cpu_backend;
     ggml_backend_sched_t sched;
 
-    // KV cache (batch=1): per layer K [D, max_seq, H], V [max_seq, D, H], f32
+    // KV cache (batch=1): per layer K [D, max_seq, H], V [max_seq, D, H].
+    // F32 on CPU (byte-exact oracle parity); F16 on GPU — the f32->f16 cpy
+    // kernels are the llama.cpp-exercised path (the f32->f32 non-contiguous
+    // cpy miswrites on CUDA), and f16 KV matches upstream's GPU autocast.
     ggml_context *             kv_ctx = nullptr;
     ggml_backend_buffer_t      kv_buf = nullptr;
     std::vector<ggml_tensor *> kv_k, kv_v;
+    ggml_type                  kv_type = GGML_TYPE_F32;
     int                        max_seq = 0;
 
     // Host-side copies for CPU input assembly / mel frontend
@@ -275,13 +279,14 @@ static bool load_model(MidiModel * m, const std::string & dir) {
     m->max_seq = MIDI_MEL_FRAMES + 2 + 1 + 300 + MIDI_MAX_GEN;
     {
         const int D = c.head_dim(), H = c.num_heads;
+        m->kv_type = (bp.backend != bp.cpu_backend) ? GGML_TYPE_F16 : GGML_TYPE_F32;
         ggml_init_params kp = { (size_t) c.num_layers * 2 * ggml_tensor_overhead() + 4096, NULL, true };
         m->kv_ctx = ggml_init(kp);
         m->kv_k.resize(c.num_layers);
         m->kv_v.resize(c.num_layers);
         for (int l = 0; l < c.num_layers; l++) {
-            m->kv_k[l] = ggml_new_tensor_3d(m->kv_ctx, GGML_TYPE_F32, D, m->max_seq, H);
-            m->kv_v[l] = ggml_new_tensor_3d(m->kv_ctx, GGML_TYPE_F32, m->max_seq, D, H);
+            m->kv_k[l] = ggml_new_tensor_3d(m->kv_ctx, m->kv_type, D, m->max_seq, H);
+            m->kv_v[l] = ggml_new_tensor_3d(m->kv_ctx, m->kv_type, m->max_seq, D, H);
             char nm[32];
             snprintf(nm, sizeof(nm), "kv_k_%d", l);
             ggml_set_name(m->kv_k[l], nm);
@@ -330,6 +335,12 @@ static ggml_tensor * build_layer_norm(ggml_context * ctx, ggml_tensor * x,
     return ggml_add(ctx, x, b);
 }
 
+// Debug probe (env ACE_MIDI_PROBE=<file-prefix>): on the first T==1 step,
+// dump layer-0 intermediates so backends can be diffed op by op.
+struct ProbeSlot { const char * name; ggml_tensor * t; };
+static std::vector<ProbeSlot> g_probe_slots;
+static bool g_probe_armed = false;
+
 // Forward T tokens at cache position n_past; writes K/V into the cache and
 // reads back the LAST position's logits. n_past=0 with T>1 is the prefill;
 // T=1 with n_past>0 is a decode step. Caller advances n_past by T afterwards.
@@ -346,6 +357,14 @@ static void forward_tokens(MidiModel * m, const float * input, int T, int n_past
     ggml_set_input(inp);
 
     ggml_cgraph * gf = ggml_new_graph_custom(ctx, 8192, false);
+
+    static int step_calls = 0;
+    const bool probe = getenv("ACE_MIDI_PROBE") && T == 1 && step_calls == 0;
+    if (T == 1) step_calls++;
+    g_probe_slots.clear();
+    auto probe_add = [&](const char * name, ggml_tensor * t) {
+        if (probe) { ggml_set_output(t); g_probe_slots.push_back({ name, t }); }
+    };
 
     ggml_tensor * x = inp;
     for (int l = 0; l < c.num_layers; l++) {
@@ -364,16 +383,23 @@ static void forward_tokens(MidiModel * m, const float * input, int T, int n_past
         ggml_tensor * v3 = ggml_reshape_3d(ctx, ggml_cont(ctx, v), D, H, T);
 
         // append current K rows: cache K layout [D, max_seq, H], slice dim1 [n_past, n_past+T)
+        // append current K rows: cache K layout [D, max_seq, H], slice dim1
         ggml_tensor * kc = m->kv_k[l];
         ggml_tensor * k_dst = ggml_view_3d(ctx, kc, D, T, H, kc->nb[1], kc->nb[2],
                                            (size_t) n_past * kc->nb[1]);
         ggml_build_forward_expand(gf, ggml_cpy(ctx, ggml_permute(ctx, k3, 0, 2, 1, 3), k_dst));
 
-        // append current V rows: cache V layout [max_seq, D, H], slice dim0 [n_past, n_past+T)
+        // append current V rows into the transposed cache [max_seq, D, H].
+        // Write via the llama.cpp idiom — 2-D transposed src into a 2-D
+        // strided view — the one scatter pattern the CUDA cpy kernel is
+        // known-good for. The earlier 3-D single-element-per-row view write
+        // silently corrupted rows on CUDA (heads >= 1 got stale VRAM), which
+        // wrecked every decode step; CPU was unaffected. Probe-verified.
         ggml_tensor * vc = m->kv_v[l];
-        ggml_tensor * v_dst = ggml_view_3d(ctx, vc, T, D, H, vc->nb[1], vc->nb[2],
+        ggml_tensor * v_dst = ggml_view_2d(ctx, vc, T, D * H, vc->nb[1],
                                            (size_t) n_past * vc->nb[0]);
-        ggml_build_forward_expand(gf, ggml_cpy(ctx, ggml_permute(ctx, v3, 1, 2, 0, 3), v_dst));
+        ggml_tensor * v2 = ggml_cont(ctx, v);  // [dim, T]
+        ggml_build_forward_expand(gf, ggml_cpy(ctx, ggml_transpose(ctx, v2), v_dst));
 
         ggml_tensor * Q = ggml_permute(ctx, ggml_reshape_3d(ctx, ggml_cont(ctx, q), D, H, T), 0, 2, 1, 3);  // [D, T, H]
         ggml_tensor * K = ggml_view_3d(ctx, kc, D, n_kv, H, kc->nb[1], kc->nb[2], 0);   // [D, n_kv, H]
@@ -381,13 +407,26 @@ static void forward_tokens(MidiModel * m, const float * input, int T, int n_past
 
         ggml_tensor * kq = ggml_mul_mat(ctx, K, Q);                       // [n_kv, T, H]
         kq = ggml_scale(ctx, kq, 1.0f / sqrtf((float) D));
-        kq = ggml_diag_mask_inf(ctx, kq, n_past);                         // causal, bottom-right aligned
+        // Causal mask (bottom-right aligned). For T=1 a single query row
+        // attends the whole cache, so the mask is a mathematical no-op —
+        // skip it: the legacy diag_mask_inf CUDA kernel miscomputes with
+        // n_past > 0, which silently corrupted every decode step on GPU.
+        if (T > 1) kq = ggml_diag_mask_inf(ctx, kq, n_past);
         kq = ggml_soft_max(ctx, kq);
 
         ggml_tensor * kqv = ggml_mul_mat(ctx, V, kq);                     // [D, T, H]
         ggml_tensor * att = ggml_cont(ctx, ggml_permute(ctx, kqv, 0, 2, 1, 3));  // [D, H, T]
         att = ggml_reshape_2d(ctx, att, c.dim, T);
         att = ggml_mul_mat(ctx, L.out_proj, att);
+
+        if (l == 0) {
+            probe_add("h", h);
+            probe_add("qkv", qkv);
+            probe_add("K", K);
+            probe_add("V", V);
+            probe_add("kqsoft", kq);
+            probe_add("att", att);
+        }
 
         x = ggml_add(ctx, x, att);
 
@@ -416,6 +455,20 @@ static void forward_tokens(MidiModel * m, const float * input, int T, int n_past
         exit(1);
     }
     ggml_backend_tensor_get(logits, logits_last, (size_t) (T - 1) * logits->nb[1], (size_t) c.card * 4);
+
+    if (probe) {
+        const char * prefix_env = getenv("ACE_MIDI_PROBE");
+        for (auto & s : g_probe_slots) {
+            char path[512];
+            snprintf(path, sizeof(path), "%s_%s.bin", prefix_env, s.name);
+            std::vector<uint8_t> buf(ggml_nbytes(s.t));
+            ggml_backend_tensor_get(s.t, buf.data(), 0, buf.size());
+            FILE * f = fopen(path, "wb");
+            if (f) { fwrite(buf.data(), 1, buf.size(), f); fclose(f); }
+            fprintf(stderr, "[probe] %s: ne=[%lld,%lld,%lld] -> %s\n", s.name,
+                    (long long) s.t->ne[0], (long long) s.t->ne[1], (long long) s.t->ne[2], path);
+        }
+    }
 
     ggml_free(ctx);
 }
@@ -1341,6 +1394,57 @@ static int run_validate_midi(MidiModel * m, const std::string & vdir) {
     return pass ? 0 : 1;
 }
 
+// Debug: teacher-force the oracle's reference tokens and dump every step's
+// full logits. Running this on two backends and diffing the dumps separates
+// "bounded numeric noise flipping near-ties" from "compute-path bug".
+static int run_dump_logits(MidiModel * m, const std::string & vdir, const std::string & out_file) {
+    const MidiConfig & c = m->cfg;
+    std::vector<float> prefix = read_f32_file(vdir + "/prefix.bin");
+
+    std::vector<int> ref_tokens;
+    {
+        FILE * f = fopen((vdir + "/tokens_ref.json").c_str(), "rb");
+        if (!f) { fprintf(stderr, "[ace-midi] cannot open tokens_ref.json\n"); return 1; }
+        std::string j(1 << 20, 0);
+        size_t n = fread(j.data(), 1, j.size() - 1, f);
+        fclose(f);
+        j.resize(n);
+        for (const char * p = j.c_str(); *p; p++) {
+            if (*p >= '0' && *p <= '9') {
+                ref_tokens.push_back(atoi(p));
+                while (*p >= '0' && *p <= '9') p++;
+            }
+        }
+    }
+
+    FILE * out = fopen(out_file.c_str(), "wb");
+    if (!out) { fprintf(stderr, "[ace-midi] cannot write %s\n", out_file.c_str()); return 1; }
+
+    const int T_prefix = (int) (prefix.size() / c.dim);
+    int T0 = T_prefix + 1;
+    std::vector<float> input((size_t) T0 * c.dim);
+    memcpy(input.data(), prefix.data(), prefix.size() * 4);
+    memcpy(input.data() + prefix.size(), m->emb_host.data() + (size_t) c.bos_id() * c.dim, (size_t) c.dim * 4);
+    add_sin_pos(input.data(), T0, c.dim, 0);
+
+    std::vector<float> logits(c.card);
+    forward_tokens(m, input.data(), T0, 0, logits.data());
+    fwrite(logits.data(), 4, (size_t) c.card, out);
+    int n_past = T0;
+
+    std::vector<float> step(c.dim);
+    for (size_t i = 0; i < ref_tokens.size(); i++) {   // teacher-forced walk
+        memcpy(step.data(), m->emb_host.data() + (size_t) ref_tokens[i] * c.dim, (size_t) c.dim * 4);
+        add_sin_pos(step.data(), 1, c.dim, n_past);
+        forward_tokens(m, step.data(), 1, n_past, logits.data());
+        n_past++;
+        fwrite(logits.data(), 4, (size_t) c.card, out);
+    }
+    fclose(out);
+    fprintf(stderr, "[ace-midi] dumped %zu x %d logits to %s\n", ref_tokens.size() + 1, c.card, out_file.c_str());
+    return 0;
+}
+
 // Transcribe a raw f32 mono 16 kHz file to MIDI (+ optional JSONL streaming)
 static int run_transcribe_raw(MidiModel * m, const std::string & wav_path,
                               const std::string & out_path, bool jsonl) {
@@ -1367,7 +1471,8 @@ static int run_transcribe_raw(MidiModel * m, const std::string & wav_path,
 int main(int argc, char ** argv) {
     std::string model_dir, validate_dir, validate_decode_dir, validate_midi_dir;
     std::string raw_path, out_path = "out.mid";
-    std::string device = "cpu";
+    std::string dump_dir;
+    std::string device = "auto";
     bool   jsonl = false;
     double tol   = 1e-3;
     for (int i = 1; i < argc; i++) {
@@ -1376,6 +1481,7 @@ int main(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--validate-decode") && i + 1 < argc) validate_decode_dir = argv[++i];
         else if (!strcmp(argv[i], "--validate-midi") && i + 1 < argc) validate_midi_dir = argv[++i];
         else if (!strcmp(argv[i], "--transcribe-raw") && i + 1 < argc) raw_path = argv[++i];
+        else if (!strcmp(argv[i], "--dump-logits") && i + 1 < argc) dump_dir = argv[++i];
         else if (!strcmp(argv[i], "--out") && i + 1 < argc) out_path = argv[++i];
         else if (!strcmp(argv[i], "--jsonl")) jsonl = true;
         else if (!strcmp(argv[i], "--tol") && i + 1 < argc) tol = atof(argv[++i]);
@@ -1390,11 +1496,8 @@ int main(int argc, char ** argv) {
                 "    --validate <dir>          logit parity vs oracle [--tol <x>]\n"
                 "    --validate-decode <dir>   mel + greedy token parity vs oracle\n"
                 "    --validate-midi <dir>     multi-chunk events + MIDI bytes vs oracle\n"
-                "  --device cpu|auto|<name>  backend (default cpu — see note below)\n"
-                "\n"
-                "  NOTE: cpu is the default because CUDA TF32 matmul noise destabilizes\n"
-                "  this model's greedy decode (chunks run to the 2000-token cap without\n"
-                "  EOS). GPU support is tracked in docs/plans/muscriptor-cpp-port.md §7.\n");
+                "  --device auto|cpu|<name>  backend (default auto = best available;\n"
+                "                            cpu is the byte-exact oracle-parity path)\n");
         return 2;
     }
 
@@ -1415,6 +1518,7 @@ int main(int argc, char ** argv) {
     if (!validate_dir.empty()) return run_validate(&m, validate_dir, tol);
     if (!validate_decode_dir.empty()) return run_validate_decode(&m, validate_decode_dir);
     if (!validate_midi_dir.empty()) return run_validate_midi(&m, validate_midi_dir);
+    if (!dump_dir.empty()) return run_dump_logits(&m, dump_dir, out_path);
     if (!raw_path.empty()) return run_transcribe_raw(&m, raw_path, out_path, jsonl);
     fprintf(stderr, "[ace-midi] no mode given\n");
     return 2;
