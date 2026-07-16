@@ -382,6 +382,7 @@ jobs:
           $engineFiles = @(
             "ace-server.exe", "mastering.exe", "mp3-codec.exe",
             "neural-codec.exe", "vst-host.exe", "quantize.exe",
+            "ace-midi.exe",
             "ggml.dll", "ggml-base.dll", "ggml-cpu.dll"
           )
 
@@ -768,7 +769,7 @@ jobs:
           # Engine binaries
           mkdir -p "$DIST/engine"
           BUILD_DIR="engine/build"
-          for bin in ace-server mastering mp3-codec neural-codec vst-host quantize; do
+          for bin in ace-server mastering mp3-codec neural-codec vst-host quantize ace-midi; do
             if [ -f "$BUILD_DIR/$bin" ]; then
               cp "$BUILD_DIR/$bin" "$DIST/engine/$bin"
             fi
@@ -1174,7 +1175,7 @@ jobs:
           # Engine binaries
           mkdir -p "$DIST/engine"
           BUILD_DIR="engine/build"
-          for bin in ace-server mastering mp3-codec neural-codec vst-host quantize; do
+          for bin in ace-server mastering mp3-codec neural-codec vst-host quantize ace-midi; do
             if [ -f "$BUILD_DIR/$bin" ]; then
               cp "$BUILD_DIR/$bin" "$DIST/engine/$bin"
             fi
