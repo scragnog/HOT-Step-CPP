@@ -115,15 +115,23 @@ function killSelf(): void {
       const parentPid = match[1];
       console.log(`[Shutdown] Killing parent PID ${parentPid} (our process tree)`);
 
-      // Spawn detached killer to kill parent after we start exiting
-      const killer = spawn('cmd.exe', [
-        '/c', `ping -n 2 127.0.0.1 > nul & taskkill /PID ${parentPid} /T /F`
-      ], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      killer.unref();
+      // Spawn taskkill directly after a Node-side delay. Do NOT use the
+      // `cmd /c ping -n 2 ... & taskkill` sleep idiom: ping can hang forever
+      // (observed 2026-07-17 — hung PING.EXE processes meant taskkill never
+      // ran, tsx watch survived, and the restart-loop marker was never
+      // consumed, leaving the server dead after an in-app restart).
+      setTimeout(() => {
+        try {
+          const killer = spawn('taskkill', ['/PID', parentPid, '/T', '/F'], {
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true,
+          });
+          killer.unref();
+        } catch {
+          // Fallback: our own process.exit still runs
+        }
+      }, 700);
     }
   } catch {
     // Fallback: just exit
