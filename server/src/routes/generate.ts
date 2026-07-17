@@ -1731,6 +1731,9 @@ router.post('/storm/stream', async (req, res) => {
   const baseSeed = typeof baseParams.seed === 'number'
     ? baseParams.seed
     : Math.floor(Math.random() * 2147483647);
+  // "Keep DiT & VAE loaded" setting — same per-request ?keep_loaded=1 the
+  // normal synth phase sends; without it the engine evicts between slots.
+  const coResident = baseParams.coResident === true;
   let slotIdx = 0;
 
   console.log(`[STORM ${streamId}] stream started (baseSeed=${baseSeed})`);
@@ -1802,7 +1805,7 @@ router.post('/storm/stream', async (req, res) => {
 
       // Inline poll — checks streamRunning every 300 ms so stop/disconnect
       // cancels mid-render instead of waiting out the slot.
-      const synthJobId = await aceClient.submitSynth(aceReq, 'wav32');
+      const synthJobId = await aceClient.submitSynth(aceReq, 'wav32', coResident);
       streamAceJob.set(streamId, synthJobId);
       const slotStart = Date.now();
       let jobDone = false;

@@ -350,6 +350,10 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
       },
       ...(cacheRatio > 0       ? { cacheRatio }      : {}),
       ...(cfgCutoffRatio < 1.0 ? { cfgCutoffRatio }  : {}),
+      coResident: (() => {
+        try { return JSON.parse(localStorage.getItem('ace-settings') || '{}').coResident === true; }
+        catch { return false; }
+      })(),
     };
     if (mode === 'sequential') {
       onGenerate({ ...params, guidanceScale: liveParams.guidance_scale, inferenceSteps: liveParams.inference_steps, duration: liveParams.duration, bpm: liveParams.bpm });
