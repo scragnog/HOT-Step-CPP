@@ -78,27 +78,58 @@ static ggml_backend_t cpu_backend_new(int n_threads) {
     return cpu;
 }
 
-// Collapse exact consecutive duplicate ggml log lines and report the total
-// count when the run ends (tames the CUDA graph capture "reused" flood).
+// Filter + dedup for ggml log lines.
+// 1) DEBUG-level messages are dropped entirely. The CUDA graph capture path
+//    logs "CUDA Graph id N reused" / warmup lines on virtually every compute —
+//    78% of a real session log. Set HOTSTEP_GGML_DEBUG=1 to pass them through
+//    when debugging the CUDA graph layer itself.
+// 2) Remaining consecutive lines that differ only in digits are collapsed into
+//    one line + a single "[Dedup]" summary. Digit-insensitive comparison
+//    matters: alternating graph ids ("id 3 reused" / "id 4 reused") defeated
+//    the old exact-match dedup AND re-emitted its summary on every alternation
+//    — the dedup itself became log spam.
 static void acestep_ggml_log(enum ggml_log_level level, const char * text, void * user_data) {
-    (void) level;
     (void) user_data;
-    static char last[256] = { 0 };
-    static int  count     = 0;
+    static const bool debug_pass = std::getenv("HOTSTEP_GGML_DEBUG") != nullptr;
+    if (level == GGML_LOG_LEVEL_DEBUG && !debug_pass) {
+        return;
+    }
 
-    if (count > 0 && strcmp(text, last) == 0) {
+    static char last_norm[256] = { 0 };
+    static int  count          = 0;
+
+    // Normalize digit runs to '#' so lines differing only in numbers compare
+    // equal ("id 3 reused" == "id 47 reused").
+    char   norm[256];
+    size_t j      = 0;
+    bool   in_num = false;
+    for (size_t i = 0; text[i] && j < sizeof(norm) - 1; i++) {
+        char c = text[i];
+        if (c >= '0' && c <= '9') {
+            if (!in_num) {
+                norm[j++] = '#';
+                in_num    = true;
+            }
+        } else {
+            norm[j++] = c;
+            in_num    = false;
+        }
+    }
+    norm[j] = 0;
+
+    if (count > 0 && strcmp(norm, last_norm) == 0) {
         count++;
         return;
     }
 
     if (count > 1) {
-        fprintf(stderr, "[Dedup] Previous line repeated %d times total\n", count);
+        fprintf(stderr, "[Dedup] previous message repeated %d times\n", count);
     }
 
     fputs(text, stderr);
-    strncpy(last, text, sizeof(last) - 1);
-    last[sizeof(last) - 1] = 0;
-    count                  = 1;
+    strncpy(last_norm, norm, sizeof(last_norm) - 1);
+    last_norm[sizeof(last_norm) - 1] = 0;
+    count                            = 1;
     fflush(stderr);
 }
 
