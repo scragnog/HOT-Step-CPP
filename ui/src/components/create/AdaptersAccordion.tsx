@@ -260,9 +260,20 @@ export const AdaptersAccordion: React.FC<AdaptersAccordionProps> = ({
                       >
                         Runtime ⚡
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => onAdapterModeChange('runtime_lowrank')}
+                        className={`flex-1 px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                          adapterMode === 'runtime_lowrank' ? 'bg-violet-600 text-white' : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                        }`}
+                      >
+                        Low-Rank 🪶
+                      </button>
                     </div>
                     <p className="text-[10px] text-zinc-600 mt-1">
-                      {adapterMode === 'runtime'
+                      {adapterMode === 'runtime_lowrank'
+                        ? 'Applies raw adapter factors per-step — lowest VRAM (LoRA & LoKr; DoRA needs Merge).'
+                        : adapterMode === 'runtime'
                         ? 'Keeps base weights intact, applies adapter per-step. Same quality, slower inference, saves VRAM.'
                         : 'Merges adapter at F32 precision. Best quality, fast inference, but uses more VRAM during synthesis.'}
                     </p>
@@ -406,9 +417,20 @@ export const AdaptersAccordion: React.FC<AdaptersAccordionProps> = ({
                       >
                         Runtime ⚡
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => onAdapterModeChange('runtime_lowrank')}
+                        className={`flex-1 px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                          adapterMode === 'runtime_lowrank' ? 'bg-violet-600 text-white' : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                        }`}
+                      >
+                        Low-Rank 🪶
+                      </button>
                     </div>
                     <p className="text-[10px] text-zinc-600 mt-1">
-                      {adapterMode === 'runtime'
+                      {adapterMode === 'runtime_lowrank'
+                        ? 'Applies raw adapter factors per-step — lowest VRAM (LoRA & LoKr; DoRA needs Merge).'
+                        : adapterMode === 'runtime'
                         ? 'Keeps base weights intact, applies adapter per-step. Same quality, slower inference, saves VRAM.'
                         : 'Merges adapter at F32 precision. Best quality, fast inference, but uses more VRAM during synthesis.'}
                     </p>

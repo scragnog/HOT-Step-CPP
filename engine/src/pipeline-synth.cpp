@@ -179,8 +179,12 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
         ctx->dit_key.adapter_stack += "|sect";
     }
     // Runtime delta quantization changes the loaded VRAM tensors, so it must cache
-    // as a distinct DiT. Only meaningful in runtime mode; bf16 keeps the legacy key.
-    if (g_hotstep_params.adapter_mode == "runtime" && g_hotstep_params.adapter_runtime_quant != "bf16") {
+    // as a distinct DiT. Meaningful in both runtime modes (lowrank still stores
+    // full-size rebase-correction / Conv1d-fallback deltas at this precision);
+    // bf16 keeps the legacy key.
+    bool runtime_any = g_hotstep_params.adapter_mode == "runtime"
+                    || g_hotstep_params.adapter_mode == "runtime_lowrank";
+    if (runtime_any && g_hotstep_params.adapter_runtime_quant != "bf16") {
         ctx->dit_key.adapter_stack += "|q:" + g_hotstep_params.adapter_runtime_quant;
     }
     // Low-VRAM merge stores merged weights in native quant instead of F32 —
@@ -198,6 +202,12 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
     if ((!ctx->dit_key.adapter_path.empty() || !g_hotstep_params.adapters.empty())
         && g_hotstep_params.adapter_mode == "runtime") {
         ctx->dit_key.adapter_stack += "|mode:runtime";
+    }
+    // Lowrank runtime loads factor tensors instead of delta products — a third
+    // structurally distinct model per adapter config, so its own marker.
+    if ((!ctx->dit_key.adapter_path.empty() || !g_hotstep_params.adapters.empty())
+        && g_hotstep_params.adapter_mode == "runtime_lowrank") {
+        ctx->dit_key.adapter_stack += "|mode:runtime_lr";
     }
     // Basin re-base: only meaningful with an adapter. Supported in merge mode
     // AND runtime mode (nudge folded into the staged delta sum) — but NOT on

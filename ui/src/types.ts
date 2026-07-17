@@ -166,7 +166,7 @@ export interface GenerationParams {
     time_embed: number;
     proj_in: number;
   };
-  adapterMode: string;  // "merge" or "runtime"
+  adapterMode: string;  // "merge", "runtime", or "runtime_lowrank"
 
   // Trigger word (applied server-side to caption). triggerWords carries every
   // loaded adapter's trigger; triggerWord is their joined form (back-compat).

@@ -396,9 +396,20 @@ export const AdaptersDropdown: React.FC = () => {
               >
                 Runtime ⚡
               </button>
+              <button
+                type="button"
+                onClick={() => gp.setAdapterMode('runtime_lowrank')}
+                className={`flex-1 px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  gp.adapterMode === 'runtime_lowrank' ? 'bg-violet-600 text-white' : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                }`}
+              >
+                Low-Rank 🪶
+              </button>
             </div>
             <p className="text-[10px] text-zinc-600 mt-1">
-              {gp.adapterMode === 'runtime'
+              {gp.adapterMode === 'runtime_lowrank'
+                ? 'Applies raw adapter factors per-step, never materializing full deltas — lowest VRAM (LoRA & LoKr; DoRA needs Merge). Basin re-base still works.'
+                : gp.adapterMode === 'runtime'
                 ? 'Keeps base weights intact, applies adapter per-step. Same quality, slower inference, saves VRAM.'
                 : 'Merges adapter at F32 precision. Best quality, fast inference, but uses more VRAM during synthesis.'}
             </p>
@@ -438,8 +449,9 @@ export const AdaptersDropdown: React.FC = () => {
             </div>
           )}
 
-          {/* Adapter Quantization — runtime mode only (quantizes the in-VRAM deltas) */}
-          {gp.adapterMode === 'runtime' && (
+          {/* Adapter Quantization — runtime modes (quantizes the in-VRAM full-size
+              deltas; in Low-Rank mode that's the re-base correction + Conv1d fallbacks) */}
+          {(gp.adapterMode === 'runtime' || gp.adapterMode === 'runtime_lowrank') && (
             <div>
               <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
                 {t('adapter.runtimeQuant', 'Adapter VRAM')}

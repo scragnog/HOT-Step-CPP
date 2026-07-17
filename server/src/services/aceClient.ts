@@ -106,7 +106,7 @@ export interface AceRequest {
     time_embed: number;
     proj_in: number;
   };
-  adapter_mode?: string;  // "merge" (default, F32 promoted) or "runtime"
+  adapter_mode?: string;  // "merge" (default, F32 promoted), "runtime", or "runtime_lowrank" (factor apply, lowest VRAM)
   /** Runtime adapter delta VRAM precision: "bf16" (full), "q8_0" (~½), "q4_k" (~¼).
    *  Quantizes precomputed deltas in VRAM at load; no disk change. Runtime mode only. */
   adapter_runtime_quant?: string;

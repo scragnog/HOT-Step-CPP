@@ -130,7 +130,7 @@ static int dit_ggml_generate(DiTGGML *           model,
     // Graph context (generous fixed allocation, shapes are constant across steps).
     // Per-section masking multiplies the per-adapter LoRA nodes, so scale the node
     // budget with the separate-adapter count (m->loras) to avoid graph overflow.
-    size_t               graph_cap = 8192 + model->loras.size() * 4096;
+    size_t               graph_cap = 8192 + model->loras.size() * 4096 + dit_lora_unit_nodes(&model->lora);
     size_t               ctx_size = ggml_tensor_overhead() * graph_cap + ggml_graph_overhead_custom(graph_cap, false);
     std::vector<uint8_t> ctx_buf(ctx_size);
 

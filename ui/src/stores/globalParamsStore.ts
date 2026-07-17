@@ -391,8 +391,10 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       adapterSectionIsolation: stack.length >= 2 ? s.adapterSectionIsolation : undefined,
       adapterGroupScales: primary ? s.adapterGroupScales : undefined,
       adapterMode: primary ? s.adapterMode : 'merge',
-      // Runtime delta quantization (VRAM saver) — only relevant in runtime mode.
-      adapterRuntimeQuant: (primary && s.adapterMode === 'runtime') ? s.adapterRuntimeQuant : undefined,
+      // Runtime delta quantization (VRAM saver) — relevant in both runtime modes
+      // (lowrank still stores full-size re-base corrections / Conv1d fallbacks).
+      adapterRuntimeQuant: (primary && (s.adapterMode === 'runtime' || s.adapterMode === 'runtime_lowrank'))
+        ? s.adapterRuntimeQuant : undefined,
       // Merge low-VRAM storage (native-quant re-encode) — only relevant in merge mode.
       adapterMergeLowVram: (primary && s.adapterMode !== 'runtime' && s.adapterMergeLowVram) ? true : undefined,
       // Basin re-base: only sent with an adapter and a chosen source. Works in

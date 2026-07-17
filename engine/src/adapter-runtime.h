@@ -33,9 +33,28 @@
 // adapter-cancel.h so ace-server.cpp can poke at it without pulling all of
 // adapter-runtime.h's transitive ggml/safetensors deps. See that header.
 
-// Per-projection runtime LoRA delta (stored as BF16 tensor in VRAM)
+// Low-rank factor unit (adapter_mode == "runtime_lowrank"): the adapter's raw
+// factors kept in VRAM instead of the materialized full-size delta product.
+// LoRA:  y += B@(A@x)          — a [in, r], b [r, out], scaling pre-folded into b.
+// LoKr:  y += (w1 ⊗ w2)@x      — k1 [b1, a1], k2 [d2, c2], scaling pre-folded
+//        into k1; applied via the Kronecker identity (validated by
+//        HOTSTEP_KRON_TEST, see docs/plans/lowrank-runtime-adapters.md §8):
+//        reshape → mul_mat(k2) → permute/cont → mul_mat(k1) → permute/cont.
+// Exactly one of (a,b) or (k1,k2) is set. ~20-40× less VRAM than a full delta.
+struct DiTLoRAFactorUnit {
+    struct ggml_tensor * a  = nullptr;  // LoRA A  (ggml [in, r], BF16)
+    struct ggml_tensor * b  = nullptr;  // LoRA B  (ggml [r, out], BF16, scale folded)
+    struct ggml_tensor * k1 = nullptr;  // LoKr w1 (ggml [b1, a1], BF16, scale folded)
+    struct ggml_tensor * k2 = nullptr;  // LoKr w2 (ggml [d2, c2], BF16)
+};
+
+// Per-projection runtime LoRA delta (stored as BF16/Q8_0/Q4_0 tensor in VRAM).
+// In lowrank mode `delta` holds only the (optional) full-size components that
+// cannot be expressed as factors — the basin re-base correction and Conv1d-tiled
+// fallbacks — while `units` carries the adapter factors (one unit per adapter).
 struct DiTLoRADelta {
-    struct ggml_tensor * delta = nullptr;  // [in, out] BF16, or NULL
+    struct ggml_tensor *           delta = nullptr;  // [in, out], or NULL
+    std::vector<DiTLoRAFactorUnit> units;            // lowrank mode only
 };
 
 // Per-layer LoRA deltas for all adapted projections
@@ -182,6 +201,62 @@ static void adapter_stage_delta(DiTLoRA * lora, DiTLoRADelta * slot,
     lora->staged.push_back({ slot->delta, std::move(delta_f32) });
 }
 
+// ─── Low-rank runtime mode (adapter_mode == "runtime_lowrank") ───
+
+static inline bool adapter_runtime_lowrank_active() {
+    return g_hotstep_params.adapter_mode == "runtime_lowrank";
+}
+
+// Stage one factor tensor: BF16 tensor in lora->ctx + F32 payload for finalize.
+// Named "lrf_*" so adapter_runtime_rebase (which folds β·(S−T) into staged
+// tensors named "lora_*") never touches factors — the base correction is
+// full-rank and rides the zero-initialized correction deltas instead.
+static struct ggml_tensor * adapter_stage_factor(DiTLoRA * lora, const char * kind,
+                                                 const std::string & gguf_name,
+                                                 int64_t ne0, int64_t ne1,
+                                                 std::vector<float> && f32) {
+    char tname[128];
+    snprintf(tname, sizeof(tname), "lrf_%s_%s", kind, gguf_name.c_str());
+    struct ggml_tensor * t = ggml_new_tensor_2d(lora->ctx, GGML_TYPE_BF16, ne0, ne1);
+    ggml_set_name(t, tname);
+    lora->staged.push_back({ t, std::move(f32) });
+    return t;
+}
+
+// Zero-filled full-size correction delta for a slot: created for the FIRST stack
+// adapter's slots when basin re-base is active in lowrank mode, so that
+// adapter_runtime_rebase has a full-rank tensor to fold β·(S−T) into (factors
+// can't carry it). Quantized like any runtime delta (adapter_runtime_quant).
+static void adapter_stage_zero_correction(DiTLoRA * lora, DiTLoRADelta * slot,
+                                          const std::string & gguf_name,
+                                          int64_t ne0, int64_t ne1) {
+    if (slot->delta) {
+        return;  // already has a full-size component (e.g. Conv1d fallback)
+    }
+    adapter_stage_delta(lora, slot, gguf_name, ne0, ne1,
+                        std::vector<float>((size_t) (ne0 * ne1), 0.0f));
+}
+
+// Graph node budget contribution of factor units (LoKr apply ≈ 9 nodes/unit,
+// LoRA ≈ 3; use the LoKr bound plus slack). Callers add this to graph_cap and
+// the scheduler hash-set size so lowrank stacks never overflow the graph.
+static size_t dit_lora_unit_nodes(const DiTLoRA * lora) {
+    if (!lora || !lora->active) return 0;
+    size_t units = 0;
+    for (int i = 0; i < DIT_LORA_MAX_LAYERS; i++) {
+        const DiTLoRALayer & ly = lora->layers[i];
+        const DiTLoRADelta * slots[11] = { &ly.sa_q, &ly.sa_k, &ly.sa_v, &ly.sa_o,
+                                           &ly.ca_q, &ly.ca_k, &ly.ca_v, &ly.ca_o,
+                                           &ly.gate, &ly.up, &ly.down };
+        for (const DiTLoRADelta * s : slots) units += s->units.size();
+    }
+    units += lora->proj_in.units.size() + lora->cond_emb.units.size()
+           + lora->time_embed_linear_1.units.size() + lora->time_embed_linear_2.units.size()
+           + lora->time_embed_time_proj.units.size() + lora->time_embed_r_linear_1.units.size()
+           + lora->time_embed_r_linear_2.units.size() + lora->time_embed_r_time_proj.units.size();
+    return units * 12;
+}
+
 // ─── LoRA runtime loading ───
 
 static bool adapter_runtime_lora(DiTLoRA *                  lora,
@@ -191,7 +266,8 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
                                   const std::string &        cfg_dir,
                                   float                      scale,
                                   const AdapterGroupScales & gs,
-                                  ggml_backend_t             backend) {
+                                  ggml_backend_t             backend,
+                                  bool                       zero_corr = false) {
     int alpha_cfg = adapter_read_alpha(cfg_dir.c_str());
 
     std::map<std::string, const STEntry *> a_map, b_map;
@@ -327,6 +403,23 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
             skipped++; continue;
         }
 
+        // Low-rank mode: keep the raw factors in VRAM and apply B@(A@x) in the
+        // graph — the full-size delta product is never materialized. Conv1d
+        // tiled tensors (conv_expand > 1) keep the full-delta path: tiling a
+        // factor pair across the patch dim has no low-rank form.
+        if (adapter_runtime_lowrank_active() && conv_expand == 1) {
+            if (zero_corr) {
+                adapter_stage_zero_correction(lora, slot, gguf_name, ne0, ne1);
+            }
+            for (int64_t bi = 0; bi < b_nel; bi++) b_f32[(size_t) bi] *= scaling;
+            DiTLoRAFactorUnit u;
+            u.a = adapter_stage_factor(lora, "a", gguf_name, in_feat, rank, std::move(a_f32));
+            u.b = adapter_stage_factor(lora, "b", gguf_name, rank, out_feat, std::move(b_f32));
+            slot->units.push_back(u);
+            merged++;
+            continue;
+        }
+
         auto build = [&](struct ggml_context * ctx) {
             struct ggml_tensor * ta     = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, in_feat, rank);
             struct ggml_tensor * tb     = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, rank, out_feat);
@@ -375,7 +468,8 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
                                   const STFile &             st,
                                   float                      user_scale,
                                   const AdapterGroupScales & gs,
-                                  ggml_backend_t             backend) {
+                                  ggml_backend_t             backend,
+                                  bool                       zero_corr = false) {
     struct LoKrEntry {
         const STEntry * w1 = nullptr, * w2 = nullptr, * w2_a = nullptr, * w2_b = nullptr;
         const STEntry * alpha = nullptr, * dora_scale = nullptr;
@@ -546,6 +640,36 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
         // Per-tensor detail suppressed (uncomment for debugging)
         // fprintf(stderr, "[Adapter-RT]   %s → scaling=%.4f\n", gguf_name.c_str(), scaling);
 
+        // Low-rank mode: store w1/w2 and apply (w1 ⊗ w2)@x via the Kronecker
+        // identity in the graph — the kron product is never materialized.
+        // Conv1d-tiled tensors keep the full-delta path (same as LoRA above).
+        if (adapter_runtime_lowrank_active() && conv_expand == 1) {
+            if (zero_corr) {
+                adapter_stage_zero_correction(lora, slot, gguf_name, ne0, ne1);
+            }
+            // Densify a factored w2 host-side (tiny: c×r×d products).
+            if (has_factor) {
+                w2_nel = c * d;
+                w2_f32.assign((size_t) w2_nel, 0.0f);
+                for (int64_t ci = 0; ci < c; ci++)
+                    for (int64_t ki = 0; ki < r; ki++) {
+                        float wa = w2a_f32[(size_t) (ci * r + ki)];
+                        if (wa == 0.0f) continue;
+                        const float * wb = &w2b_f32[(size_t) (ki * d)];
+                        float *       wo = &w2_f32[(size_t) (ci * d)];
+                        for (int64_t j = 0; j < d; j++) wo[j] += wa * wb[j];
+                    }
+            }
+            float fold = scaling * user_scale;
+            for (int64_t i1 = 0; i1 < w1_nel; i1++) w1_f32[(size_t) i1] *= fold;
+            DiTLoRAFactorUnit u;
+            u.k1 = adapter_stage_factor(lora, "k1", gguf_name, b, a, std::move(w1_f32));
+            u.k2 = adapter_stage_factor(lora, "k2", gguf_name, d, c, std::move(w2_f32));
+            slot->units.push_back(u);
+            merged++;
+            continue;
+        }
+
         // Build the same Kronecker product graph as adapter_merge_lokr
         auto build = [&](struct ggml_context * ctx) {
             struct ggml_tensor * tw1 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, b, a);
@@ -618,7 +742,8 @@ static bool adapter_runtime_stage_file(DiTLoRA *                  lora,
                                        const char *               adapter_path,
                                        float                      adapter_scale,
                                        const AdapterGroupScales & gs,
-                                       ggml_backend_t             backend) {
+                                       ggml_backend_t             backend,
+                                       bool                       zero_corr = false) {
     // Load safetensors (same logic as adapter_merge)
     std::string path_str(adapter_path);
     STFile st;
@@ -649,7 +774,7 @@ static bool adapter_runtime_stage_file(DiTLoRA *                  lora,
 
     bool ok;
     if (adapter_detect_lokr(st)) {
-        ok = adapter_runtime_lokr(lora, wctx, ws, st, adapter_scale, gs, backend);
+        ok = adapter_runtime_lokr(lora, wctx, ws, st, adapter_scale, gs, backend, zero_corr);
     } else {
         std::string cfg_dir;
         size_t slash = path_str.find_last_of("/\\");
@@ -659,7 +784,7 @@ static bool adapter_runtime_stage_file(DiTLoRA *                  lora,
         } else {
             cfg_dir = path_str;  // directory format
         }
-        ok = adapter_runtime_lora(lora, wctx, ws, st, cfg_dir, adapter_scale, gs, backend);
+        ok = adapter_runtime_lora(lora, wctx, ws, st, cfg_dir, adapter_scale, gs, backend, zero_corr);
     }
 
     st_close(&st);
@@ -893,6 +1018,11 @@ static bool adapter_load_runtime_stack(DiTLoRA *                       lora,
     // (deltas accumulate into the same tensor), so the per-adapter slot count
     // bounds the total — sizing as for a single adapter is sufficient.
     int max_deltas = DIT_LORA_MAX_LAYERS * 11 + 32;
+    // Lowrank: each adapter stages up to 2 factor tensors per slot (not summed),
+    // plus optional zero-correction deltas — size the ctx for the whole stack.
+    if (adapter_runtime_lowrank_active()) {
+        max_deltas *= (int) (2 * stack.size() + 1);
+    }
     size_t ctx_size = (size_t) max_deltas * ggml_tensor_overhead() + 4096;
     struct ggml_init_params params = { ctx_size, NULL, true };
     lora->ctx = ggml_init(params);
@@ -901,9 +1031,14 @@ static bool adapter_load_runtime_stack(DiTLoRA *                       lora,
         return false;
     }
 
+    // Lowrank + basin re-base: the correction is full-rank and can't ride the
+    // factors, so the FIRST adapter's slots get zero-filled full-size deltas
+    // for adapter_runtime_rebase to fold β·(S−T) into (once per stack).
+    bool rebase_active = rebase_source && rebase_source[0] && rebase_beta != 0.0f;
     int staged_ok = 0;
     for (size_t i = 0; i < stack.size(); i++) {
-        if (adapter_runtime_stage_file(lora, wctx, ws, stack[i].path.c_str(), stack[i].scale, gs, backend)) {
+        bool zero_corr = adapter_runtime_lowrank_active() && rebase_active && i == 0;
+        if (adapter_runtime_stage_file(lora, wctx, ws, stack[i].path.c_str(), stack[i].scale, gs, backend, zero_corr)) {
             staged_ok++;
         } else {
             fprintf(stderr, "[Adapter-RT] WARNING: stack adapter %zu staged no deltas: %s\n", i, stack[i].path.c_str());

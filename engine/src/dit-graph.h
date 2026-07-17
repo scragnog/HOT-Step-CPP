@@ -67,35 +67,72 @@ static struct ggml_tensor * dit_convrot_rotate(struct ggml_context * ctx,
     return ggml_reshape_4d(ctx, xr, x->ne[0], x->ne[1], x->ne[2], x->ne[3]);
 }
 
-// Helper: Linear layer with runtime LoRA delta
-// y = W@x + delta@x  (delta is precomputed BF16 in VRAM, or NULL)
-// base_input: ConvRot-rotated input for the base weight (NULL → use input);
-// the delta always consumes the raw input (deltas are unrotated).
-static struct ggml_tensor * dit_ggml_linear_lora(struct ggml_context * ctx,
-                                                 struct ggml_tensor *  weight,
-                                                 struct ggml_tensor *  delta,
-                                                 struct ggml_tensor *  input,
-                                                 struct ggml_tensor *  base_input = nullptr) {
-    struct ggml_tensor * y = ggml_mul_mat(ctx, weight, base_input ? base_input : input);
-    if (delta) {
-        struct ggml_tensor * dy = ggml_mul_mat(ctx, delta, input);
-        y = ggml_add(ctx, y, dy);
+// Apply a slot's runtime adapter components onto y: the optional full-size
+// delta (summed deltas, basin re-base correction, Conv1d fallbacks) plus any
+// lowrank factor units. LoRA units add B@(A@x) — batched dims ride mul_mat
+// directly. LoKr units apply (w1 ⊗ w2)@x via the Kronecker identity
+// (HOTSTEP_KRON_TEST-validated choreography, docs/plans/lowrank-runtime-
+// adapters.md §8) — trailing dims flatten into the column axis and reshape
+// back. Everything consumes the RAW input (unrotated space, like full deltas).
+static struct ggml_tensor * dit_lora_apply_units(struct ggml_context * ctx,
+                                                 const DiTLoRADelta *  sd,
+                                                 struct ggml_tensor *  y,
+                                                 struct ggml_tensor *  input) {
+    if (!sd) {
+        return y;
+    }
+    if (sd->delta) {
+        y = ggml_add(ctx, y, ggml_mul_mat(ctx, sd->delta, input));
+    }
+    if (sd->units.empty()) {
+        return y;
+    }
+    struct ggml_tensor * xin  = ggml_is_contiguous(input) ? input : ggml_cont(ctx, input);
+    const int64_t        cols = ggml_nelements(input) / input->ne[0];
+    for (const DiTLoRAFactorUnit & u : sd->units) {
+        struct ggml_tensor * dy = nullptr;
+        if (u.a && u.b) {
+            dy = ggml_mul_mat(ctx, u.b, ggml_mul_mat(ctx, u.a, xin));
+        } else if (u.k1 && u.k2) {
+            const int64_t        bb = u.k1->ne[0], aa = u.k1->ne[1];
+            const int64_t        dd = u.k2->ne[0], cc = u.k2->ne[1];
+            struct ggml_tensor * X2 = ggml_reshape_2d(ctx, xin, dd, bb * cols);
+            struct ggml_tensor * T3 = ggml_reshape_3d(ctx, ggml_mul_mat(ctx, u.k2, X2), cc, bb, cols);
+            struct ggml_tensor * P2 =
+                ggml_reshape_2d(ctx, ggml_cont(ctx, ggml_permute(ctx, T3, 1, 0, 2, 3)), bb, cc * cols);
+            struct ggml_tensor * Y3 = ggml_reshape_3d(ctx, ggml_mul_mat(ctx, u.k1, P2), aa, cc, cols);
+            struct ggml_tensor * YP = ggml_cont(ctx, ggml_permute(ctx, Y3, 1, 0, 2, 3));  // [cc, aa, cols]
+            dy = ggml_reshape_4d(ctx, YP, aa * cc, input->ne[1], input->ne[2], input->ne[3]);
+        }
+        if (dy) {
+            y = ggml_add(ctx, y, dy);
+        }
     }
     return y;
 }
 
-// Helper: Linear layer with bias and runtime LoRA delta
+// Helper: Linear layer with runtime LoRA slot (full delta and/or factor units)
+// y = W@x + slot components  (sd NULL → plain linear)
+// base_input: ConvRot-rotated input for the base weight (NULL → use input);
+// adapter components always consume the raw input (they are unrotated).
+static struct ggml_tensor * dit_ggml_linear_lora(struct ggml_context * ctx,
+                                                 struct ggml_tensor *  weight,
+                                                 const DiTLoRADelta *  sd,
+                                                 struct ggml_tensor *  input,
+                                                 struct ggml_tensor *  base_input = nullptr) {
+    struct ggml_tensor * y = ggml_mul_mat(ctx, weight, base_input ? base_input : input);
+    return dit_lora_apply_units(ctx, sd, y, input);
+}
+
+// Helper: Linear layer with bias and runtime LoRA slot
 static struct ggml_tensor * dit_ggml_linear_bias_lora(struct ggml_context * ctx,
                                                       struct ggml_tensor *  weight,
-                                                      struct ggml_tensor *  delta,
+                                                      const DiTLoRADelta *  sd,
                                                       struct ggml_tensor *  bias,
                                                       struct ggml_tensor *  input,
                                                       struct ggml_tensor *  base_input = nullptr) {
     struct ggml_tensor * out = ggml_mul_mat(ctx, weight, base_input ? base_input : input);
-    if (delta) {
-        struct ggml_tensor * dy = ggml_mul_mat(ctx, delta, input);
-        out = ggml_add(ctx, out, dy);
-    }
+    out                      = dit_lora_apply_units(ctx, sd, out, input);
     return ggml_add(ctx, out, dit_ggml_f32(ctx, bias));
 }
 
@@ -120,13 +157,15 @@ struct DiTLoRASectionCtx {
 //     multiply is the culprit; if still nil, the separate-delta wiring is.
 static const bool g_hotstep_section_nomask = (std::getenv("HOTSTEP_SECTION_NOMASK") != nullptr);
 
-// Apply a per-layer projection with LoRA. Summed path (sect==nullptr): y = W@x +
-// single_delta@x. Section path: y = W@x + Σ_i gate_i·(delta_i@x), gate = mask
-// (frame-indexed) or mean scalar (otherwise).
+// Apply a per-layer projection with LoRA. Summed path (sect==nullptr): y = W@x
+// + the slot's components (full delta and/or lowrank factor units). Section
+// path: y = W@x + Σ_i gate_i·(delta_i@x), gate = mask (frame-indexed) or mean
+// scalar (otherwise). Sections never carry factor units — the engine forces
+// plain runtime mode on the per-section path.
 static struct ggml_tensor * dit_lora_apply_layer(struct ggml_context *      ctx,
                                                  struct ggml_tensor *       weight,
                                                  struct ggml_tensor *       input,
-                                                 struct ggml_tensor *       single_delta,
+                                                 const DiTLoRADelta *       single_sd,
                                                  const DiTLoRASectionCtx *  sect,
                                                  int                        layer_idx,
                                                  DiTLoRADelta DiTLoRALayer::* slot,
@@ -152,8 +191,8 @@ static struct ggml_tensor * dit_lora_apply_layer(struct ggml_context *      ctx,
             }
             y = ggml_add(ctx, y, dy);
         }
-    } else if (single_delta) {
-        y = ggml_add(ctx, y, ggml_mul_mat(ctx, single_delta, input));
+    } else if (single_sd) {
+        y = dit_lora_apply_units(ctx, single_sd, y, input);
     }
     return y;
 }
@@ -163,7 +202,7 @@ static struct ggml_tensor * dit_lora_apply_layer(struct ggml_context *      ctx,
 static struct ggml_tensor * dit_lora_apply_global(struct ggml_context *      ctx,
                                                   struct ggml_tensor *       base_y,
                                                   struct ggml_tensor *       input,
-                                                  struct ggml_tensor *       single_delta,
+                                                  const DiTLoRADelta *       single_sd,
                                                   const DiTLoRASectionCtx *  sect,
                                                   DiTLoRADelta DiTLoRA::*     slot,
                                                   bool                       frame_masked) {
@@ -185,8 +224,8 @@ static struct ggml_tensor * dit_lora_apply_global(struct ggml_context *      ctx
             }
             y = ggml_add(ctx, y, dy);
         }
-    } else if (single_delta) {
-        y = ggml_add(ctx, y, ggml_mul_mat(ctx, single_delta, input));
+    } else if (single_sd) {
+        y = dit_lora_apply_units(ctx, single_sd, y, input);
     }
     return y;
 }
@@ -252,7 +291,7 @@ static struct ggml_tensor * dit_ggml_build_temb(struct ggml_context * ctx,
     }
 
     // linear1 + silu: [256] -> [H]
-    struct ggml_tensor * h = dit_ggml_linear_bias_lora(ctx, w->linear_1_w, delta_lin1 ? delta_lin1->delta : nullptr, w->linear_1_b, sinusoidal,
+    struct ggml_tensor * h = dit_ggml_linear_bias_lora(ctx, w->linear_1_w, delta_lin1, w->linear_1_b, sinusoidal,
                                                        dit_convrot_rotate(ctx, m, sinusoidal, w->rot_lin1));
     {
         char name[64];
@@ -264,12 +303,12 @@ static struct ggml_tensor * dit_ggml_build_temb(struct ggml_context * ctx,
     h = ggml_silu(ctx, h);
 
     // linear2: [H] -> [H]
-    struct ggml_tensor * temb = dit_ggml_linear_bias_lora(ctx, w->linear_2_w, delta_lin2 ? delta_lin2->delta : nullptr, w->linear_2_b, h,
+    struct ggml_tensor * temb = dit_ggml_linear_bias_lora(ctx, w->linear_2_w, delta_lin2, w->linear_2_b, h,
                                                           dit_convrot_rotate(ctx, m, h, w->rot_lin2));
 
     // silu + proj: [H] -> [6H]
     struct ggml_tensor * h2 = ggml_silu(ctx, temb);
-    *out_tproj              = dit_ggml_linear_bias_lora(ctx, w->time_proj_w, delta_proj ? delta_proj->delta : nullptr, w->time_proj_b, h2,
+    *out_tproj              = dit_ggml_linear_bias_lora(ctx, w->time_proj_w, delta_proj, w->time_proj_b, h2,
                                                         dit_convrot_rotate(ctx, m, h2, w->rot_proj));
 
     return temb;  // [H] (used for output adaln)
@@ -330,9 +369,9 @@ static struct ggml_tensor * dit_ggml_build_self_attn(
         k = ggml_cont(ctx, ggml_view_3d(ctx, qk, kv_dim, S, N, qk->nb[1], qk->nb[2], (size_t) q_dim * qk->nb[0]));
         v = dit_ggml_linear(ctx, ly->sa_v_proj, norm_sa_rot);
     } else {
-        q = dit_lora_apply_layer(ctx, ly->sa_q_proj, norm_sa, lora ? lora->sa_q.delta : nullptr, sect, layer_idx, &DiTLoRALayer::sa_q, true, norm_sa_rot);
-        k = dit_lora_apply_layer(ctx, ly->sa_k_proj, norm_sa, lora ? lora->sa_k.delta : nullptr, sect, layer_idx, &DiTLoRALayer::sa_k, true, norm_sa_rot);
-        v = dit_lora_apply_layer(ctx, ly->sa_v_proj, norm_sa, lora ? lora->sa_v.delta : nullptr, sect, layer_idx, &DiTLoRALayer::sa_v, true, norm_sa_rot);
+        q = dit_lora_apply_layer(ctx, ly->sa_q_proj, norm_sa, lora ? &lora->sa_q : nullptr, sect, layer_idx, &DiTLoRALayer::sa_q, true, norm_sa_rot);
+        k = dit_lora_apply_layer(ctx, ly->sa_k_proj, norm_sa, lora ? &lora->sa_k : nullptr, sect, layer_idx, &DiTLoRALayer::sa_k, true, norm_sa_rot);
+        v = dit_lora_apply_layer(ctx, ly->sa_v_proj, norm_sa, lora ? &lora->sa_v : nullptr, sect, layer_idx, &DiTLoRALayer::sa_v, true, norm_sa_rot);
     }
 
     // 2) Reshape to heads: [Nh*D, S, N] -> [D, Nh, S, N]
@@ -403,7 +442,7 @@ static struct ggml_tensor * dit_ggml_build_self_attn(
     }
 
     // 8) O projection: [Nh*D, S, N] -> [H, S, N]
-    struct ggml_tensor * out = dit_lora_apply_layer(ctx, ly->sa_o_proj, attn, lora ? lora->sa_o.delta : nullptr, sect, layer_idx, &DiTLoRALayer::sa_o, true,
+    struct ggml_tensor * out = dit_lora_apply_layer(ctx, ly->sa_o_proj, attn, lora ? &lora->sa_o : nullptr, sect, layer_idx, &DiTLoRALayer::sa_o, true,
                                                     dit_convrot_rotate(ctx, m, attn, ly->rot_sa_o));
     return out;
 }
@@ -427,13 +466,13 @@ static struct ggml_tensor * dit_ggml_build_mlp(struct ggml_context * ctx,
         ff                      = ggml_swiglu(ctx, gu);
     } else {
         // Separate: two matmuls + split swiglu
-        struct ggml_tensor * gate = dit_lora_apply_layer(ctx, ly->gate_proj, norm_ffn, lora ? lora->gate.delta : nullptr, sect, layer_idx, &DiTLoRALayer::gate, true, norm_ffn_rot);
-        struct ggml_tensor * up   = dit_lora_apply_layer(ctx, ly->up_proj, norm_ffn, lora ? lora->up.delta : nullptr, sect, layer_idx, &DiTLoRALayer::up, true, norm_ffn_rot);
+        struct ggml_tensor * gate = dit_lora_apply_layer(ctx, ly->gate_proj, norm_ffn, lora ? &lora->gate : nullptr, sect, layer_idx, &DiTLoRALayer::gate, true, norm_ffn_rot);
+        struct ggml_tensor * up   = dit_lora_apply_layer(ctx, ly->up_proj, norm_ffn, lora ? &lora->up : nullptr, sect, layer_idx, &DiTLoRALayer::up, true, norm_ffn_rot);
         ff                        = ggml_swiglu_split(ctx, gate, up);
     }
 
     // Down projection: [I, S] -> [H, S]
-    return dit_lora_apply_layer(ctx, ly->down_proj, ff, lora ? lora->down.delta : nullptr, sect, layer_idx, &DiTLoRALayer::down, true,
+    return dit_lora_apply_layer(ctx, ly->down_proj, ff, lora ? &lora->down : nullptr, sect, layer_idx, &DiTLoRALayer::down, true,
                                 dit_convrot_rotate(ctx, m, ff, ly->rot_down));
 }
 
@@ -486,9 +525,9 @@ static struct ggml_tensor * dit_ggml_build_cross_attn(struct ggml_context * ctx,
     } else {
         // ca_q is frame-indexed ([q_dim, S]) → per-frame mask. ca_k/ca_v come from
         // the encoder ([kv_dim, enc_S], token-indexed) → mean-scaled, not masked.
-        q = dit_lora_apply_layer(ctx, ly->ca_q_proj, norm_ca, lora ? lora->ca_q.delta : nullptr, sect, layer_idx, &DiTLoRALayer::ca_q, true, norm_ca_rot);
-        k = dit_lora_apply_layer(ctx, ly->ca_k_proj, enc, lora ? lora->ca_k.delta : nullptr, sect, layer_idx, &DiTLoRALayer::ca_k, false, enc_rot);
-        v = dit_lora_apply_layer(ctx, ly->ca_v_proj, enc, lora ? lora->ca_v.delta : nullptr, sect, layer_idx, &DiTLoRALayer::ca_v, false, enc_rot);
+        q = dit_lora_apply_layer(ctx, ly->ca_q_proj, norm_ca, lora ? &lora->ca_q : nullptr, sect, layer_idx, &DiTLoRALayer::ca_q, true, norm_ca_rot);
+        k = dit_lora_apply_layer(ctx, ly->ca_k_proj, enc, lora ? &lora->ca_k : nullptr, sect, layer_idx, &DiTLoRALayer::ca_k, false, enc_rot);
+        v = dit_lora_apply_layer(ctx, ly->ca_v_proj, enc, lora ? &lora->ca_v : nullptr, sect, layer_idx, &DiTLoRALayer::ca_v, false, enc_rot);
     }
 
     // reshape to [D, heads, seq, N] then permute to [D, seq, heads, N]
@@ -532,7 +571,7 @@ static struct ggml_tensor * dit_ggml_build_cross_attn(struct ggml_context * ctx,
     attn = ggml_reshape_3d(ctx, attn, Nh * D, S, N);
 
     // O projection ([H, S], frame-indexed)
-    return dit_lora_apply_layer(ctx, ly->ca_o_proj, attn, lora ? lora->ca_o.delta : nullptr, sect, layer_idx, &DiTLoRALayer::ca_o, true,
+    return dit_lora_apply_layer(ctx, ly->ca_o_proj, attn, lora ? &lora->ca_o : nullptr, sect, layer_idx, &DiTLoRALayer::ca_o, true,
                                 dit_convrot_rotate(ctx, m, attn, ly->rot_ca_o));
 }
 
@@ -657,7 +696,7 @@ static struct ggml_cgraph * dit_ggml_build_graph(DiTGGML *             m,
 
     // Node budget scales with the separate per-adapter delta sets (per-section
     // masking); must match the ctx sizing in the sampler.
-    size_t graph_cap = 8192 + m->loras.size() * 4096;
+    size_t graph_cap = 8192 + m->loras.size() * 4096 + dit_lora_unit_nodes(&m->lora);
     struct ggml_cgraph * gf = ggml_new_graph_custom(ctx, graph_cap, false);
 
     // Inputs
@@ -795,9 +834,8 @@ static struct ggml_cgraph * dit_ggml_build_graph(DiTGGML *             m,
     struct ggml_tensor * hidden  = dit_ggml_linear_bias(ctx, m->proj_in_w, m->proj_in_b, patched);
     if (section_mode) {
         hidden = dit_lora_apply_global(ctx, hidden, patched, nullptr, sect, &DiTLoRA::proj_in, true);
-    } else if (m->lora.active && m->lora.proj_in.delta) {
-        struct ggml_tensor * dy = ggml_mul_mat(ctx, m->lora.proj_in.delta, patched);
-        hidden = ggml_add(ctx, hidden, dy);
+    } else if (m->lora.active) {
+        hidden = dit_lora_apply_units(ctx, &m->lora.proj_in, hidden, patched);
     }
     ggml_set_name(hidden, "hidden_after_proj_in");
     ggml_set_output(hidden);
@@ -810,9 +848,8 @@ static struct ggml_cgraph * dit_ggml_build_graph(DiTGGML *             m,
     if (section_mode) {
         // cond_emb is token/global-indexed → mean-scaled, not per-frame masked.
         enc = dit_lora_apply_global(ctx, enc, enc_hidden, nullptr, sect, &DiTLoRA::cond_emb, false);
-    } else if (m->lora.active && m->lora.cond_emb.delta) {
-        struct ggml_tensor * dy = ggml_mul_mat(ctx, m->lora.cond_emb.delta, enc_hidden);
-        enc = ggml_add(ctx, enc, dy);
+    } else if (m->lora.active) {
+        enc = dit_lora_apply_units(ctx, &m->lora.cond_emb, enc, enc_hidden);
     }
     ggml_set_name(enc, "enc_after_cond_emb");
     ggml_set_output(enc);

@@ -403,6 +403,13 @@ static bool dit_ggml_load(DiTGGML *    m,
     int sched_nodes = 8192;
     if (!g_hotstep_params.adapter_sections.empty() && g_hotstep_params.adapters.size() >= 2)
         sched_nodes = 8192 + (int) g_hotstep_params.adapters.size() * 4096;
+    // Lowrank runtime: every projection gains a factor apply per stacked adapter
+    // (LoKr ≈ 9 nodes) — size like the graph_cap bump (m->lora isn't loaded yet,
+    // so use the intended stack size; 12 nodes/unit × 360 slots per adapter).
+    if (g_hotstep_params.adapter_mode == "runtime_lowrank") {
+        size_t n_adapters = g_hotstep_params.adapters.empty() ? 1 : g_hotstep_params.adapters.size();
+        sched_nodes += (int) (n_adapters * 360 * 12);
+    }
     m->sched          = backend_sched_new(bp, sched_nodes);
     m->use_flash_attn = bp.has_gpu && !HOT_STEP_FA_DISABLED;
 
@@ -540,8 +547,9 @@ static bool dit_ggml_load(DiTGGML *    m,
         // HOT-Step: Runtime LoRA and merge_hq need individual projections (no fusion)
         // Runtime: deltas are applied per-projection in the compute graph
         // Merge HQ: projections are promoted to F32, incompatible with fused BF16 tensors
-        bool skip_fusion = (adapter_path && 
-            (g_hotstep_params.adapter_mode == "runtime" || 
+        bool skip_fusion = (adapter_path &&
+            (g_hotstep_params.adapter_mode == "runtime" ||
+             g_hotstep_params.adapter_mode == "runtime_lowrank" ||
              g_hotstep_params.adapter_mode == "merge"));
         ly.self_attn_norm = ws_load_tensor_f32(&m->wctx, ws, p + ".self_attn_norm.weight");
         if (!skip_fusion) {
@@ -691,7 +699,8 @@ static bool dit_ggml_load(DiTGGML *    m,
     // Merge adapter deltas into projection weights (before GPU upload and QKV fusion)
     // HOT-Step: skip merge in runtime mode — runtime adapter loaded after wctx_alloc
     if (adapter_path) {
-        bool runtime_mode = (g_hotstep_params.adapter_mode == "runtime");
+        bool runtime_mode = (g_hotstep_params.adapter_mode == "runtime" ||
+                             g_hotstep_params.adapter_mode == "runtime_lowrank");
         // ConvRot weights live in rotated space; merge-mode deltas are unrotated
         // and would corrupt them. Runtime mode is safe (deltas run as separate
         // matmuls on the UNROTATED activations in the graph).
@@ -768,7 +777,8 @@ static bool dit_ggml_load(DiTGGML *    m,
 
     // HOT-Step: load runtime adapter AFTER wctx_alloc (base weights on GPU first)
     if (adapter_path) {
-        bool runtime_mode = (g_hotstep_params.adapter_mode == "runtime");
+        bool runtime_mode = (g_hotstep_params.adapter_mode == "runtime" ||
+                             g_hotstep_params.adapter_mode == "runtime_lowrank");
         if (runtime_mode) {
             Timer rt_timer;
             // Multi-adapter stack: precompute each adapter's deltas and SUM them
