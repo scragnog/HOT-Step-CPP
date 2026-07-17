@@ -7,7 +7,7 @@
 // layout/paint for offscreen lines. Combined with batched SSE updates in
 // useEventSource, this keeps the UI responsive even during heavy logging.
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, X, Trash2, Cpu, ArrowDown, Pin, PinOff, Wifi, WifiOff } from 'lucide-react';
 import { useEventSource, type LogLine } from '../../hooks/useEventSource';
 
@@ -83,12 +83,38 @@ LogLineItem.displayName = 'LogLineItem';
 export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
   const { lines, connected, clear } = useEventSource('/api/logs', true);
   const [search, setSearch] = useState('');
-  const [autoScroll, setAutoScroll] = useState(true);
   const [vram, setVram] = useState<VramInfo | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  // Guard: ignore scroll events triggered by our own programmatic scrolls
-  const isProgrammaticScroll = useRef(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // ── Stick-to-bottom pin ──────────────────────────────────────────────────
+  // The pin only disengages on PROVABLE user intent (wheel-up, touch, scrollbar
+  // drag, scroll keys). Any other displacement while pinned — contentVisibility
+  // height corrections, line-cap trimming, panel resizes — is treated as a
+  // layout shift and snapped back to the bottom. The previous design guarded
+  // programmatic scrolls for one frame and disengaged on anything else, so
+  // async layout shifts from content-visibility (estimated 18px vs real wrapped
+  // height) silently killed the pin and stranded the view mid-log.
+  const [pinned, setPinnedState] = useState(true);
+  const pinnedRef = useRef(true);
+  const setPinned = useCallback((v: boolean) => {
+    pinnedRef.current = v;
+    setPinnedState(v);
+  }, []);
+  // User-intent tracking: recent upward wheel/touch/key, or an active pointer
+  // drag (scrollbar). Timestamps beat booleans here — no cleanup races.
+  const lastIntentRef = useRef(0);
+  const draggingRef = useRef(false);
+
+  const snapToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+
+  const pinAndSnap = useCallback(() => {
+    setPinned(true);
+    snapToBottom();
+  }, [setPinned, snapToBottom]);
 
   // Filter lines by search term
   const filteredLines = useMemo(() => {
@@ -97,43 +123,76 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
     return lines.filter(l => l.text.toLowerCase().includes(term));
   }, [lines, search]);
 
-  // Auto-scroll to bottom when new lines arrive.
-  // Uses a sentinel <div> at the bottom and scrollIntoView() which is immune
-  // to contentVisibility layout deferral issues that plagued scrollTop = scrollHeight.
-  useEffect(() => {
-    if (!autoScroll || !bottomRef.current) return;
-    isProgrammaticScroll.current = true;
-    bottomRef.current.scrollIntoView({ block: 'end' });
-    // Reset guard after scroll events have fired (next frame)
-    requestAnimationFrame(() => {
-      isProgrammaticScroll.current = false;
-    });
-  }, [filteredLines, autoScroll]);
+  // Snap on new/changed lines — layout effect so the pinned view never paints
+  // at the stale position first.
+  useLayoutEffect(() => {
+    if (pinnedRef.current) snapToBottom();
+  }, [filteredLines, snapToBottom]);
 
-  // Re-engage auto-scroll when search is cleared (user finished filtering)
+  // Snap on ANY height change of the container or its content: catches
+  // content-visibility layout corrections, wrapping changes, and panel resizes
+  // that happen without a lines update.
+  useEffect(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el || !content) return;
+    const ro = new ResizeObserver(() => {
+      if (pinnedRef.current) snapToBottom();
+    });
+    ro.observe(el);
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [snapToBottom]);
+
+  // Re-engage the pin when search is cleared (user finished filtering)
   const prevSearch = useRef(search);
   useEffect(() => {
-    if (prevSearch.current && !search) {
-      setAutoScroll(true);
-    }
+    if (prevSearch.current && !search) pinAndSnap();
     prevSearch.current = search;
-  }, [search]);
+  }, [search, pinAndSnap]);
 
-  // Detect manual scroll to disable auto-scroll.
-  // Only disengage when the user scrolls UP from the bottom.
-  // Ignores scroll events caused by our own programmatic scrolls.
   const handleScroll = useCallback(() => {
-    if (isProgrammaticScroll.current) return;
-    if (!scrollRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    // 80px threshold — generous to avoid flicker from rounding/resize
-    const atBottom = scrollHeight - scrollTop - clientHeight < 80;
-    if (!atBottom && autoScroll) {
-      setAutoScroll(false);
-    } else if (atBottom && !autoScroll) {
-      setAutoScroll(true);
+    const el = scrollRef.current;
+    if (!el) return;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const userIntent = draggingRef.current || performance.now() - lastIntentRef.current < 250;
+    if (pinnedRef.current) {
+      if (dist < 4) return; // at bottom — all good
+      if (userIntent) {
+        setPinned(false);   // user deliberately scrolled away
+      } else {
+        snapToBottom();     // layout shift — correct it, keep the pin
+      }
+    } else if (dist < 48) {
+      setPinned(true);      // user came back to the bottom — re-pin
     }
-  }, [autoScroll]);
+  }, [setPinned, snapToBottom]);
+
+  // Intent signals. Wheel-up is the classic "let me read old logs" gesture;
+  // touch and scroll keys count regardless of direction (downward ones land at
+  // the bottom and fall into the re-pin path anyway); pointer-down covers
+  // scrollbar drags until release.
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (e.deltaY < 0) lastIntentRef.current = performance.now();
+  }, []);
+  const handleTouchMove = useCallback(() => {
+    lastIntentRef.current = performance.now();
+  }, []);
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (['ArrowUp', 'PageUp', 'Home', 'ArrowDown', 'PageDown', 'End', ' '].includes(e.key)) {
+      lastIntentRef.current = performance.now();
+    }
+  }, []);
+  const handlePointerDown = useCallback(() => {
+    draggingRef.current = true;
+    const release = () => {
+      draggingRef.current = false;
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+    };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+  }, []);
 
   // Poll VRAM every 5 seconds
   useEffect(() => {
@@ -205,31 +264,20 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
         <div className="flex items-center gap-1">
           {/* Auto-scroll pin toggle — always visible */}
           <button
-            onClick={() => {
-              const next = !autoScroll;
-              setAutoScroll(next);
-              if (next && bottomRef.current) {
-                bottomRef.current.scrollIntoView({ block: 'end' });
-              }
-            }}
+            onClick={() => (pinned ? setPinned(false) : pinAndSnap())}
             className={`p-1 rounded transition-colors ${
-              autoScroll
+              pinned
                 ? 'text-blue-400 bg-blue-500/10 hover:bg-blue-500/20'
                 : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
             }`}
-            title={autoScroll ? 'Auto-scroll ON (click to unpin)' : 'Auto-scroll OFF (click to pin to bottom)'}
+            title={pinned ? 'Pinned to bottom (click to unpin)' : 'Unpinned (click to pin to bottom)'}
           >
-            {autoScroll ? <Pin size={12} /> : <PinOff size={12} />}
+            {pinned ? <Pin size={12} /> : <PinOff size={12} />}
           </button>
           {/* Jump to bottom (only when not pinned) */}
-          {!autoScroll && (
+          {!pinned && (
             <button
-              onClick={() => {
-                setAutoScroll(true);
-                if (bottomRef.current) {
-                  bottomRef.current.scrollIntoView({ block: 'end' });
-                }
-              }}
+              onClick={pinAndSnap}
               className="p-1 rounded text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
               title="Jump to bottom"
             >
@@ -273,18 +321,25 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
         )}
       </div>
 
-      {/* Log lines */}
+      {/* Log lines. overflow-anchor: none — the browser's native scroll
+          anchoring fights the pin logic (it re-anchors to visible lines when
+          heights shift); the pin handles positioning itself. */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        onWheel={handleWheel}
+        onTouchMove={handleTouchMove}
+        onKeyDown={handleKeyDown}
+        onPointerDown={handlePointerDown}
+        style={{ overflowAnchor: 'none' }}
         className="flex-1 overflow-y-auto overflow-x-hidden font-mono text-[11px] leading-[18px] p-2
                    scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent"
       >
-        {filteredLines.map((line) => (
-          <LogLineItem key={line.id} line={line} search={search} />
-        ))}
-        {/* Sentinel element — scrollIntoView target for reliable auto-scroll */}
-        <div ref={bottomRef} />
+        <div ref={contentRef}>
+          {filteredLines.map((line) => (
+            <LogLineItem key={line.id} line={line} search={search} />
+          ))}
+        </div>
       </div>
     </div>
   );
