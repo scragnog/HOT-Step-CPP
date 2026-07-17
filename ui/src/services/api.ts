@@ -372,6 +372,24 @@ export const settingsApi = {
   getGpus: () => get<{ gpus: Array<{ index: number; name: string; memoryMB: number }> }>('/settings/gpus'),
 };
 
+// ── Parameter Profiles ──────────────────────────────────────
+export interface ParamProfile {
+  name: string;
+  saved_at: string;
+  data: Record<string, unknown>;
+}
+
+export const profileApi = {
+  /** List all saved profiles (full data inline) */
+  list: () => get<{ profiles: ParamProfile[]; count: number }>('/profiles'),
+  /** Save or overwrite a named profile */
+  save: (name: string, data: Record<string, unknown>) =>
+    post<{ ok: boolean; name: string; saved_at: string }>('/profiles', { name, data }),
+  /** Delete a profile */
+  remove: (name: string) =>
+    del<{ ok: boolean; deleted: string }>(`/profiles/${encodeURIComponent(name)}`),
+};
+
 // ── Model Manager ───────────────────────────────────────────
 export const modelManagerApi = {
   /** Get full model registry with installed status */

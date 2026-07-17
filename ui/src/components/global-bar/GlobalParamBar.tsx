@@ -5,7 +5,7 @@
 // Sits full-width at the top of the entire window (above sidebar).
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Cpu, Plug, Sliders, Brain, AudioWaveform, Upload, Download } from 'lucide-react';
+import { Cpu, Plug, Sliders, Brain, AudioWaveform, Upload, Download, Bookmark } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarSection, ToggleSwitch } from './BarSection';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
@@ -20,6 +20,8 @@ import { VramIndicator } from '../shared/VramIndicator';
 import { DiscoPulseWrapper } from '../shared/DiscoPulseWrapper';
 import { MonitorBar } from './MonitorBar';
 import { useVstChainStore } from '../../stores/vstChainStore';
+import { ProfilesModal } from './ProfilesModal';
+import { applyProfileData, collectProfileData } from '../../utils/paramProfiles';
 
 type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'postprocessing' | null;
 
@@ -35,6 +37,7 @@ export const GlobalParamBar: React.FC = () => {
   // the first available model for any empty slot. Runs independently
   // of the Model Manager modal state.
   const [showModelManager, setShowModelManager] = useState(false);
+  const [showProfiles, setShowProfiles] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,20 +110,8 @@ export const GlobalParamBar: React.FC = () => {
 
   // ── Preset Export ────────────────────────────────────────────────
   const handleExport = useCallback(() => {
-    // Read content params from localStorage (same keys CreatePanel uses)
-    const readLS = <T,>(key: string, fallback: T): T => {
-      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
-    };
-    const preset: Record<string, unknown> = {
-      _format: 'hot-step-preset', _version: 1,
-      // Content (from localStorage)
-      caption: readLS('hs-caption', ''), lyrics: readLS('hs-lyrics', ''), instrumental: readLS('hs-instrumental', false),
-      bpm: readLS('hs-bpm', 0), duration: readLS('hs-duration', -1),
-      keyScale: readLS('hs-keyScale', ''), timeSignature: readLS('hs-timeSignature', ''),
-      vocalLanguage: readLS('hs-vocalLanguage', 'en'),
-      // Global engine params
-      ...gp.getGlobalParams(),
-    };
+    // Raw v2 snapshot — same shape as saved profiles (utils/paramProfiles.ts)
+    const preset = collectProfileData();
     const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -129,7 +120,7 @@ export const GlobalParamBar: React.FC = () => {
     a.download = `${slug}_params.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [gp]);
+  }, []);
 
   // ── Preset Import ────────────────────────────────────────────────
   const handleImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,73 +130,16 @@ export const GlobalParamBar: React.FC = () => {
     reader.onload = () => {
       try {
         const p = JSON.parse(reader.result as string);
-        const writeLS = (key: string, val: unknown) => localStorage.setItem(key, JSON.stringify(val));
-        // Content → localStorage (CreatePanel reads from there)
-        if (p.caption !== undefined) writeLS('hs-caption', p.caption);
-        if (p.lyrics !== undefined) writeLS('hs-lyrics', p.lyrics);
-        if (p.instrumental !== undefined) writeLS('hs-instrumental', p.instrumental);
-        if (p.bpm !== undefined) writeLS('hs-bpm', p.bpm);
-        if (p.duration !== undefined) writeLS('hs-duration', p.duration);
-        if (p.keyScale !== undefined) writeLS('hs-keyScale', p.keyScale);
-        if (p.timeSignature !== undefined) writeLS('hs-timeSignature', p.timeSignature);
-        if (p.vocalLanguage !== undefined) writeLS('hs-vocalLanguage', p.vocalLanguage);
-        // Global engine params → context
-        if (p.inferenceSteps !== undefined) gp.setInferenceSteps(p.inferenceSteps);
-        if (p.guidanceScale !== undefined) gp.setGuidanceScale(p.guidanceScale);
-        if (p.cfgCutoffRatio !== undefined) gp.setCfgCutoffRatio(p.cfgCutoffRatio);
-        if (p.lmCfgCutoffRatio !== undefined) gp.setLmCfgCutoffRatio(p.lmCfgCutoffRatio);
-        if (p.cacheRatio !== undefined) gp.setCacheRatio(p.cacheRatio);
-        if (p.shift !== undefined) gp.setShift(p.shift);
-        if (p.inferMethod !== undefined) gp.setInferMethod(p.inferMethod);
-        if (p.scheduler !== undefined) gp.setScheduler(p.scheduler);
-        if (p.guidanceMode !== undefined) gp.setGuidanceMode(p.guidanceMode);
-        if (p.seed !== undefined) gp.setSeed(p.seed);
-        if (p.randomSeed !== undefined) gp.setRandomSeed(p.randomSeed);
-        if (p.lmSeed !== undefined) gp.setLmSeed(p.lmSeed);
-        if (p.lmSeedFollowsDit !== undefined) gp.setLmSeedFollowsDit(p.lmSeedFollowsDit);
-        if (p.batchSize !== undefined) gp.setBatchSize(p.batchSize);
-        if (p.useCotCaption !== undefined) gp.setUseCotCaption(p.useCotCaption);
-        if (p.skipLm !== undefined) gp.setSkipLm(p.skipLm);
-        if (p.lmTemperature !== undefined) gp.setLmTemperature(p.lmTemperature);
-        if (p.lmCfgScale !== undefined) gp.setLmCfgScale(p.lmCfgScale);
-        if (p.lmTopK !== undefined) gp.setLmTopK(p.lmTopK);
-        if (p.lmTopP !== undefined) gp.setLmTopP(p.lmTopP);
-        if (p.lmNegativePrompt !== undefined) gp.setLmNegativePrompt(p.lmNegativePrompt);
-        if (p.ditModel !== undefined) gp.setDitModel(p.ditModel);
-        if (p.lmModel !== undefined) gp.setLmModel(p.lmModel);
-        if (p.vaeModel !== undefined) gp.setVaeModel(p.vaeModel);
-        if (p.adapter !== undefined) gp.setAdapter(p.adapter);
-        if (p.adapterScale !== undefined) gp.setAdapterScale(p.adapterScale);
-        if (p.adapterGroupScales !== undefined) gp.setAdapterGroupScales(p.adapterGroupScales);
-        if (p.adapterMode !== undefined) gp.setAdapterMode(p.adapterMode);
-        if (p.postProcessingEnabled !== undefined) gp.setPostProcessingEnabled(p.postProcessingEnabled);
-        if (p.spectralLifterEnabled !== undefined) gp.setSpectralLifterEnabled(p.spectralLifterEnabled);
-        if (p.masteringEnabled !== undefined) gp.setMasteringEnabled(p.masteringEnabled);
-        if (p.masteringReference !== undefined) gp.setMasteringReference(p.masteringReference);
-        if (p.timbreReference !== undefined) gp.setTimbreReference(p.timbreReference);
-        if (p.timbreAudioPath !== undefined) gp.setTimbreAudioPath(p.timbreAudioPath);
-        if (p.storkSubsteps !== undefined) gp.setStorkSubsteps(p.storkSubsteps);
-        if (p.beatStability !== undefined) gp.setBeatStability(p.beatStability);
-        if (p.frequencyDamping !== undefined) gp.setFrequencyDamping(p.frequencyDamping);
-        if (p.temporalSmoothing !== undefined) gp.setTemporalSmoothing(p.temporalSmoothing);
-        if (p.apgMomentum !== undefined) gp.setApgMomentum(p.apgMomentum);
-        if (p.apgNormThreshold !== undefined) gp.setApgNormThreshold(p.apgNormThreshold);
-        if (p.dcwEnabled !== undefined) gp.setDcwEnabled(p.dcwEnabled);
-        if (p.dcwMode !== undefined) gp.setDcwMode(p.dcwMode);
-        if (p.dcwLowScaler !== undefined) gp.setDcwLowScaler(p.dcwLowScaler);
-        if (p.dcwHighScaler !== undefined) gp.setDcwHighScaler(p.dcwHighScaler);
-        if (p.latentShift !== undefined) gp.setLatentShift(p.latentShift);
-        if (p.latentRescale !== undefined) gp.setLatentRescale(p.latentRescale);
-        if (p.customTimesteps !== undefined) gp.setCustomTimesteps(p.customTimesteps);
-        // Force a page reload to pick up localStorage content changes
-        window.location.reload();
+        // Applies live (store + content via StorageEvents) — no reload needed.
+        // Handles both v2 raw snapshots and legacy v1 preset files.
+        applyProfileData(p);
       } catch (err) {
         console.error('[Preset Import] Invalid JSON:', err);
       }
     };
     reader.readAsText(file);
     e.target.value = '';
-  }, [gp]);
+  }, []);
 
   const handleOpen = useCallback((id: SectionId) => {
     setOpenSection(id);
@@ -319,11 +253,15 @@ export const GlobalParamBar: React.FC = () => {
         </div>
 
         {/* Right — MonitorBar when active, otherwise Export/Import + VRAM */}
-        <div className={`flex items-center gap-2 flex-shrink-0 px-3 border-l border-zinc-200 dark:border-white/5 transition-all overflow-hidden ${monitoring ? 'w-[300px]' : 'w-[210px]'}`}>
+        <div className={`flex items-center gap-2 flex-shrink-0 px-3 border-l border-zinc-200 dark:border-white/5 transition-all overflow-hidden ${monitoring ? 'w-[300px]' : 'w-[240px]'}`}>
           {monitoring ? (
             <MonitorBar />
           ) : (
             <>
+              <button onClick={() => setShowProfiles(true)} title={t('globalBar.profiles')}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-pink-400 transition-colors">
+                <Bookmark size={13} />
+              </button>
               <button onClick={handleExport} title={t('globalBar.exportPreset')}
                 className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-emerald-400 transition-colors">
                 <Upload size={13} />
@@ -339,6 +277,9 @@ export const GlobalParamBar: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Parameter Profiles Modal */}
+      {showProfiles && <ProfilesModal onClose={() => setShowProfiles(false)} />}
 
       {/* Model Manager Modal — rendered here (always mounted) so auto-open works */}
       {showModelManager && (
