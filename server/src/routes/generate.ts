@@ -1718,8 +1718,11 @@ router.post('/storm/stream', async (req, res) => {
   res.setHeader('Transfer-Encoding', 'chunked');
 
   // Browser tab closed / fetch aborted without POST /stop — stop generating.
-  req.on('close', () => {
-    if (streamRunning.get(streamId)) {
+  // Must watch res, not req: on Node >=16 the request stream emits 'close' as
+  // soon as its body is consumed (express.json already did), which would kill
+  // every stream instantly. res emits 'close' when the connection terminates.
+  res.on('close', () => {
+    if (streamRunning.get(streamId) && !res.writableFinished) {
       console.log(`[STORM ${streamId}] client disconnected — stopping stream`);
       stopStream(streamId);
     }
