@@ -710,6 +710,12 @@ static bool dit_ggml_load(DiTGGML *    m,
                 if (t == GGML_TYPE_NVFP4 || t == GGML_TYPE_MXFP4) {
                     promote_f32 = false;
                     fprintf(stderr, "[Adapter] FP4 model detected — merge will requant to native type (no F32 promotion)\n");
+                } else if (g_hotstep_params.adapter_merge_lowvram) {
+                    // Opt-in "Merge (low VRAM)": store merged weights in the base's
+                    // native quant instead of F32. Same tensor selection as HQ merge
+                    // (adapter_hq_should_skip is widened to cover this flag).
+                    promote_f32 = false;
+                    fprintf(stderr, "[Adapter] Low-VRAM merge — merged weights re-encoded to native type (no F32 promotion)\n");
                 }
             }
             Timer adapter_timer;

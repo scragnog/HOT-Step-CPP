@@ -183,6 +183,15 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
     if (g_hotstep_params.adapter_mode == "runtime" && g_hotstep_params.adapter_runtime_quant != "bf16") {
         ctx->dit_key.adapter_stack += "|q:" + g_hotstep_params.adapter_runtime_quant;
     }
+    // Low-VRAM merge stores merged weights in native quant instead of F32 —
+    // different bytes in VRAM, so it must cache as a distinct DiT. Merge mode
+    // with an adapter only. (On FP4 bases HQ merge already skips promotion, so
+    // both keys would hold identical weights — a harmless duplicate; the base's
+    // tensor type isn't known at key-build time.)
+    if ((!ctx->dit_key.adapter_path.empty() || !g_hotstep_params.adapters.empty())
+        && g_hotstep_params.adapter_mode != "runtime" && g_hotstep_params.adapter_merge_lowvram) {
+        ctx->dit_key.adapter_stack += "|mlv";
+    }
     // Merge vs runtime produce structurally different loaded models (baked weights
     // vs base + VRAM deltas) — without the mode in the key, toggling merge↔runtime
     // with the same adapter would reuse the wrong cached DiT.

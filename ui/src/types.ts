@@ -152,6 +152,9 @@ export interface GenerationParams {
   adapterSectionIsolation?: boolean;
   /** Runtime-mode delta quantization ('bf16' | 'q8_0' | 'q4_0' | aliased 'q4_k'). */
   adapterRuntimeQuant?: string;
+  /** Merge-mode low-VRAM storage: re-encode merged weights to the base's native
+   *  quant instead of F32 promotion. */
+  adapterMergeLowVram?: boolean;
   /** Basin re-base: source DiT model name + nudge strength (merge mode only). */
   rebaseSource?: string;
   rebaseBeta?: number;

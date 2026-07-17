@@ -106,6 +106,14 @@ struct HotStepParams {
     // merge stores merged weights as F32 to avoid catastrophic BF16 cancellation.
     std::string adapter_mode = "merge";
 
+    // Merge (low VRAM): re-encode merged weights back to the base's native quant
+    // (e.g. Q8_0) instead of F32 promotion. The merge arithmetic still runs in F32
+    // on the backend; only the stored result differs (~¼ the VRAM of an F32-promoted
+    // merge on a Q8 base, at the cost of one extra quantization round-trip).
+    // Tensor selection is identical to the HQ merge (adapter_hq_should_skip applies
+    // either way). Merge mode only; ignored in runtime mode.
+    bool adapter_merge_lowvram = false;
+
     // Runtime adapter delta storage precision: "bf16" (default, full quality),
     // "q8_0" (~half VRAM), or "q4_k" (~quarter VRAM). Quantizes the precomputed
     // delta tensors in VRAM at load time — nothing is written to disk. Lets many

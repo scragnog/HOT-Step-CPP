@@ -43,6 +43,8 @@ export interface GlobalParams {
   adapterMode: string; setAdapterMode: (v: string) => void;
   // Runtime delta VRAM precision: 'bf16' | 'q8_0' | 'q4_k' (runtime mode only)
   adapterRuntimeQuant: string; setAdapterRuntimeQuant: (v: string) => void;
+  // Merge-mode storage: false = HQ (F32 promoted), true = low VRAM (native quant)
+  adapterMergeLowVram: boolean; setAdapterMergeLowVram: (v: boolean) => void;
   adapterGroupScales: AdapterGroupScales;
   setAdapterGroupScales: (v: AdapterGroupScales) => void;
   // Basin re-base (cross-base adapter support)

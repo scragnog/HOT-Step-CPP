@@ -569,6 +569,7 @@ struct ServerFields {
     AdapterGroupScales group_scales;  // per-group adapter scale multipliers
     std::string adapter_mode;         // "merge" (default, F32 promoted) or "runtime"
     std::string adapter_runtime_quant = "bf16";  // runtime delta VRAM precision: bf16/q8_0/q4_k
+    bool        adapter_merge_lowvram = false;   // merge mode: requant to native type instead of F32 promotion
     float adapter_section_align_at = 0.55f;  // per-section masking: alignment step fraction
     float adapter_section_isolation = 0.0f;  // per-section masking: cross-section self-attn penalty (0..1)
     // Basin re-base: nudge adapted weights toward the adapter's training base S.
@@ -649,6 +650,9 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     }
     if ((v = yyjson_obj_get(obj, "adapter_runtime_quant")) && yyjson_is_str(v)) {
         sf->adapter_runtime_quant = yyjson_get_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "adapter_merge_lowvram")) && yyjson_is_bool(v)) {
+        sf->adapter_merge_lowvram = yyjson_get_bool(v);
     }
     if ((v = yyjson_obj_get(obj, "adapter_section_align_at")) && yyjson_is_num(v)) {
         sf->adapter_section_align_at = (float) yyjson_get_num(v);
@@ -1149,6 +1153,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
     g_hotstep_params.adapter_group_scales = sf.group_scales;
     g_hotstep_params.adapter_mode         = sf.adapter_mode;
     g_hotstep_params.adapter_runtime_quant = sf.adapter_runtime_quant.empty() ? "bf16" : sf.adapter_runtime_quant;
+    g_hotstep_params.adapter_merge_lowvram = sf.adapter_merge_lowvram;
     g_hotstep_params.adapter_section_align_at  = sf.adapter_section_align_at;
     g_hotstep_params.adapter_section_isolation = sf.adapter_section_isolation;
     // Per-section adapter masking (regional LoRA). Carry the parsed sections into

@@ -66,6 +66,9 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // Runtime adapter delta VRAM precision: 'bf16' (full), 'q8_0' (~½), 'q4_k' (~¼).
   // Lets many stacked adapters fit in VRAM; runtime mode only.
   adapterRuntimeQuant: readKey("hs-adapterRuntimeQuant", 'bf16'),
+  // Merge (low VRAM): re-encode merged weights to the base's native quant instead
+  // of F32 promotion (~¼ the merged-DiT VRAM on a Q8 base). Merge mode only.
+  adapterMergeLowVram: readKey("hs-adapterMergeLowVram", false),
   adapterGroupScales: readKey("hs-adapterGroupScales", {
     self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0, time_embed: 0.0, proj_in: 0.0,
   }),
@@ -208,6 +211,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setAdapterSectionIsolation: (v: any) => { set({ adapterSectionIsolation: v }); writeKey("hs-adapterSectionIsolation", v); },
   setAdapterMode: (v: any) => { set({ adapterMode: v }); writeKey("hs-adapterMode", v); },
   setAdapterRuntimeQuant: (v: any) => { set({ adapterRuntimeQuant: v }); writeKey("hs-adapterRuntimeQuant", v); },
+  setAdapterMergeLowVram: (v: any) => { set({ adapterMergeLowVram: v }); writeKey("hs-adapterMergeLowVram", v); },
   setAdapterGroupScales: (v: any) => { set({ adapterGroupScales: v }); writeKey("hs-adapterGroupScales", v); },
   setRebaseSource: (v: any) => { set({ rebaseSource: v }); writeKey("hs-rebaseSource", v); },
   setRebaseBeta: (v: any) => { set({ rebaseBeta: v }); writeKey("hs-rebaseBeta", v); },
@@ -389,6 +393,8 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       adapterMode: primary ? s.adapterMode : 'merge',
       // Runtime delta quantization (VRAM saver) — only relevant in runtime mode.
       adapterRuntimeQuant: (primary && s.adapterMode === 'runtime') ? s.adapterRuntimeQuant : undefined,
+      // Merge low-VRAM storage (native-quant re-encode) — only relevant in merge mode.
+      adapterMergeLowVram: (primary && s.adapterMode !== 'runtime' && s.adapterMergeLowVram) ? true : undefined,
       // Basin re-base: only sent with an adapter and a chosen source. Works in
       // both merge and runtime modes (runtime folds the nudge into the delta sum);
       // the engine skips it on the per-section masking path.

@@ -791,8 +791,10 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
             continue;
         }
 
-        // merge_hq: skip non-layer weights to match runtime behavior
-        if (promote_f32 && adapter_hq_should_skip(gguf_name)) {
+        // merge_hq semantics: skip non-layer weights to match runtime behavior.
+        // Low-VRAM merge keeps the exact same tensor selection — only the stored
+        // precision differs from the HQ merge.
+        if ((promote_f32 || g_hotstep_params.adapter_merge_lowvram) && adapter_hq_should_skip(gguf_name)) {
             fprintf(stderr, "[Adapter-HQ] Skipping non-layer weight: %s\n", gguf_name.c_str());
             skipped++;
             continue;
@@ -1060,8 +1062,10 @@ static bool adapter_merge_lokr(WeightCtx *          wctx,
             continue;
         }
 
-        // merge_hq: skip non-layer weights to match runtime behavior
-        if (promote_f32 && adapter_hq_should_skip(gguf_name)) {
+        // merge_hq semantics: skip non-layer weights to match runtime behavior.
+        // Low-VRAM merge keeps the exact same tensor selection — only the stored
+        // precision differs from the HQ merge.
+        if ((promote_f32 || g_hotstep_params.adapter_merge_lowvram) && adapter_hq_should_skip(gguf_name)) {
             fprintf(stderr, "[Adapter-HQ] Skipping non-layer weight: %s\n", gguf_name.c_str());
             skipped++;
             continue;

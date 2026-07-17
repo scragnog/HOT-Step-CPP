@@ -404,6 +404,40 @@ export const AdaptersDropdown: React.FC = () => {
             </p>
           </div>
 
+          {/* Merge VRAM — merge mode only (storage precision of the merged weights) */}
+          {gp.adapterMode === 'merge' && (
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
+                {t('adapter.mergeVram', 'Merge VRAM')}
+              </label>
+              <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
+                {([
+                  { v: false, label: 'HQ',      sub: 'Merged weights stored as F32 (best quality, ~4× VRAM on a Q8 base)' },
+                  { v: true,  label: 'Low ¼',   sub: 'Merged weights re-encoded to the base\'s native quant' },
+                ] as const).map(opt => (
+                  <button
+                    key={String(opt.v)}
+                    type="button"
+                    onClick={() => gp.setAdapterMergeLowVram(opt.v)}
+                    title={opt.sub}
+                    className={`flex-1 px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      gp.adapterMergeLowVram === opt.v
+                        ? 'bg-sky-600 text-white'
+                        : 'bg-white dark:bg-zinc-900 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-zinc-600 mt-1">
+                HQ keeps merged weights at F32 (a Q8 base grows ~4× in VRAM). Low re-encodes them
+                back to the base&apos;s native quant — base-model VRAM, one extra quantization
+                round-trip. FP4 bases always use the low path.
+              </p>
+            </div>
+          )}
+
           {/* Adapter Quantization — runtime mode only (quantizes the in-VRAM deltas) */}
           {gp.adapterMode === 'runtime' && (
             <div>
