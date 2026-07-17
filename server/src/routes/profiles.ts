@@ -107,6 +107,43 @@ router.post('/', (req, res) => {
   }
 });
 
+// PATCH /api/profiles/:name — rename { newName } (data unchanged)
+router.patch('/:name', (req, res) => {
+  const oldName = req.params.name;
+  const { newName } = req.body ?? {};
+  if (!newName || typeof newName !== 'string' || !safeName(newName)) {
+    res.status(400).json({ error: 'newName is required' });
+    return;
+  }
+  const src = profilePath(oldName);
+  if (!fs.existsSync(src)) {
+    res.status(404).json({ error: `profile '${oldName}' not found` });
+    return;
+  }
+  const dstName = safeName(newName);
+  const dst = profilePath(newName);
+  const sameFile = path.resolve(dst) === path.resolve(src);
+  if (fs.existsSync(dst) && !sameFile) {
+    res.status(409).json({ error: `a profile named '${dstName}' already exists` });
+    return;
+  }
+  const profile = readProfile(oldName);
+  if (!profile) {
+    res.status(404).json({ error: `profile '${oldName}' not found` });
+    return;
+  }
+  profile.name = dstName;
+  try {
+    fs.writeFileSync(dst, JSON.stringify(profile, null, 2), 'utf8');
+    if (!sameFile) fs.unlinkSync(src);
+    console.log(`[Profiles] Renamed '${oldName}' -> '${dstName}'`);
+    res.json({ ok: true, name: dstName });
+  } catch (err: any) {
+    console.error('[Profiles] rename failed:', err.message);
+    res.status(500).json({ error: 'failed to rename profile' });
+  }
+});
+
 // DELETE /api/profiles/:name — delete
 router.delete('/:name', (req, res) => {
   const p = profilePath(req.params.name);

@@ -385,6 +385,9 @@ export const profileApi = {
   /** Save or overwrite a named profile */
   save: (name: string, data: Record<string, unknown>) =>
     post<{ ok: boolean; name: string; saved_at: string }>('/profiles', { name, data }),
+  /** Rename a profile (data unchanged) */
+  rename: (name: string, newName: string) =>
+    patch<{ ok: boolean; name: string }>(`/profiles/${encodeURIComponent(name)}`, { newName }),
   /** Delete a profile */
   remove: (name: string) =>
     del<{ ok: boolean; deleted: string }>(`/profiles/${encodeURIComponent(name)}`),

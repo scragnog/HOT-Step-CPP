@@ -33,43 +33,69 @@ const CONTENT_KEYS: Record<string, string> = {
   introBars: 'hs-intro-bars',
 };
 
-// ── Store fields captured in a profile ──
+// ── Store fields captured in a profile, grouped by domain ──
 // Everything that affects generation. Deliberately excluded: adaptersOpen
 // (accordion UI state) and adapterFolder (browse location preference).
 // localStorage key is `hs-<field>` unless overridden in FIELD_KEY_OVERRIDES.
-const PROFILE_FIELDS = [
-  // Models
-  'ditModel', 'lmModel', 'vaeModel', 'embeddingModel', 'useOrtVae',
-  // Adapters
-  'adapter', 'adapterScale', 'adapterStack', 'adapterStackMode', 'adapterStackBudget',
-  'adapterSectionAlignAt', 'adapterSectionIsolation', 'adapterMode', 'adapterRuntimeQuant',
-  'adapterMergeLowVram', 'adapterGroupScales', 'rebaseSource', 'rebaseBeta', 'advancedAdapters',
-  // DiT sampling
-  'inferenceSteps', 'guidanceScale', 'cfgCutoffRatio', 'lmCfgCutoffRatio', 'cacheRatio',
-  'shift', 'inferMethod', 'scheduler', 'guidanceMode', 'seed', 'randomSeed',
-  'batchSize', 'storkSubsteps', 'beatStability', 'frequencyDamping', 'temporalSmoothing',
-  'apgMomentum', 'apgNormThreshold', 'dcwEnabled', 'dcwMode', 'dcwLowScaler', 'dcwHighScaler',
-  'latentShift', 'latentRescale', 'customTimesteps',
-  'denoiseStrength', 'denoiseSmoothing', 'denoiseMix',
-  'lssStrength', 'lssVarThresh', 'lssDcRemove',
-  'pluginParams',
-  // LM
-  'lmSeed', 'lmSeedFollowsDit', 'skipLm', 'skipLrc', 'useCotCaption',
-  'lmTemperature', 'lmCfgScale', 'lmTopK', 'lmTopP', 'lmNegativePrompt', 'lmCodesStrength',
-  // Post-processing
-  'postProcessingEnabled', 'spectralLifterEnabled', 'slDenoiseStrength', 'slNoiseFloor',
-  'slHfMix', 'slTransientBoost', 'slShimmerReduction',
-  'masteringEnabled', 'masteringReference', 'timbreReference', 'timbreAudioPath',
-  'vocalNaturalizerEnabled', 'gainOffsetDb', 'naturalizeAmount', 'natVibratoRate',
-  'natVibratoDepth', 'natFormantStrength', 'natMetallicReduction', 'natQuantizationMask',
-  'natTransitionSmooth', 'ppVaeReencode', 'ppVaeBlend', 'ppVaeUseOnnx',
-  'postprocessEnabled', 'postprocessPlugin',
-  'lufsEnabled', 'lufsPreset', 'lufsTarget',
-  'autoTrimEnabled', 'durationBuffer', 'autoTrimFadeMs',
-  // Extras
-  'coverArtEnabled', 'coverArtSubject', 'qualityEvalEnabled', 'qualityEvalTarget',
-  'whisperLyricsEnabled', 'whisperModel', 'whisperLanguage', 'whisperBeamSize', 'whisperIsolateVocals',
-] as const;
+// This grouping is the single source of truth for collect/apply AND the
+// profile inspector, so a field added here shows up in every path at once.
+export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
+  {
+    title: 'Models',
+    fields: ['ditModel', 'lmModel', 'vaeModel', 'embeddingModel', 'useOrtVae'],
+  },
+  {
+    title: 'Adapters',
+    fields: [
+      'adapter', 'adapterScale', 'adapterStack', 'adapterStackMode', 'adapterStackBudget',
+      'adapterSectionAlignAt', 'adapterSectionIsolation', 'adapterMode', 'adapterRuntimeQuant',
+      'adapterMergeLowVram', 'adapterGroupScales', 'rebaseSource', 'rebaseBeta', 'advancedAdapters',
+    ],
+  },
+  {
+    title: 'DiT Sampling',
+    fields: [
+      'inferenceSteps', 'guidanceScale', 'cfgCutoffRatio', 'lmCfgCutoffRatio', 'cacheRatio',
+      'shift', 'inferMethod', 'scheduler', 'guidanceMode', 'seed', 'randomSeed',
+      'batchSize', 'storkSubsteps', 'beatStability', 'frequencyDamping', 'temporalSmoothing',
+      'apgMomentum', 'apgNormThreshold', 'dcwEnabled', 'dcwMode', 'dcwLowScaler', 'dcwHighScaler',
+      'latentShift', 'latentRescale', 'customTimesteps',
+      'denoiseStrength', 'denoiseSmoothing', 'denoiseMix',
+      'lssStrength', 'lssVarThresh', 'lssDcRemove',
+      'pluginParams',
+    ],
+  },
+  {
+    title: 'LM / Thinking',
+    fields: [
+      'lmSeed', 'lmSeedFollowsDit', 'skipLm', 'skipLrc', 'useCotCaption',
+      'lmTemperature', 'lmCfgScale', 'lmTopK', 'lmTopP', 'lmNegativePrompt', 'lmCodesStrength',
+    ],
+  },
+  {
+    title: 'Post-Processing',
+    fields: [
+      'postProcessingEnabled', 'spectralLifterEnabled', 'slDenoiseStrength', 'slNoiseFloor',
+      'slHfMix', 'slTransientBoost', 'slShimmerReduction',
+      'masteringEnabled', 'masteringReference', 'timbreReference', 'timbreAudioPath',
+      'vocalNaturalizerEnabled', 'gainOffsetDb', 'naturalizeAmount', 'natVibratoRate',
+      'natVibratoDepth', 'natFormantStrength', 'natMetallicReduction', 'natQuantizationMask',
+      'natTransitionSmooth', 'ppVaeReencode', 'ppVaeBlend', 'ppVaeUseOnnx',
+      'postprocessEnabled', 'postprocessPlugin',
+      'lufsEnabled', 'lufsPreset', 'lufsTarget',
+      'autoTrimEnabled', 'durationBuffer', 'autoTrimFadeMs',
+    ],
+  },
+  {
+    title: 'Extras',
+    fields: [
+      'coverArtEnabled', 'coverArtSubject', 'qualityEvalEnabled', 'qualityEvalTarget',
+      'whisperLyricsEnabled', 'whisperModel', 'whisperLanguage', 'whisperBeamSize', 'whisperIsolateVocals',
+    ],
+  },
+];
+
+const PROFILE_FIELDS: string[] = PARAM_GROUPS.flatMap(g => g.fields);
 
 // Store fields whose localStorage key is not simply `hs-<field>`
 const FIELD_KEY_OVERRIDES: Record<string, string> = {
@@ -171,4 +197,70 @@ export function summarizeProfile(p: ProfileData): string {
   const dit = typeof p.ditModel === 'string' ? p.ditModel.split(/[\\/]/).pop() : '';
   if (dit) parts.push(dit.replace(/\.(gguf|safetensors)$/i, ''));
   return parts.join(' · ');
+}
+
+// ── Inspector ──────────────────────────────────────────────────────────────
+
+/** camelCase field name → "Camel Case" label for display. */
+function prettifyKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/^./, c => c.toUpperCase())
+    .replace(/\bLm\b/g, 'LM')
+    .replace(/\bDit\b/g, 'DiT')
+    .replace(/\bDcw\b/g, 'DCW')
+    .replace(/\bApg\b/g, 'APG')
+    .replace(/\bLss\b/g, 'LSS')
+    .replace(/\bVae\b/g, 'VAE')
+    .replace(/\bLufs\b/g, 'LUFS')
+    .replace(/\bCfg\b/g, 'CFG')
+    .replace(/\bBpm\b/g, 'BPM')
+    .replace(/\bOrt\b/g, 'ORT')
+    .replace(/\bCot\b/g, 'CoT');
+}
+
+/** Human-readable value for the inspector. */
+function formatValue(v: unknown): string {
+  if (v === undefined || v === null || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'On' : 'Off';
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'string') {
+    const base = v.split(/[\\/]/).pop() || v;   // shorten model/adapter paths
+    return base.length > 60 ? base.slice(0, 57) + '…' : base;
+  }
+  try {
+    const json = JSON.stringify(v);
+    return json.length > 80 ? json.slice(0, 77) + '…' : json;
+  } catch { return String(v); }
+}
+
+export interface InspectRow { key: string; label: string; value: string }
+export interface InspectGroup { title: string; rows: InspectRow[] }
+
+/**
+ * Break a profile's data into display groups for the inspector. Only fields
+ * actually present in the profile are shown; a leading "Content" group carries
+ * the CreatePanel fields (caption/lyrics/etc.).
+ */
+export function describeProfileGroups(data: ProfileData): InspectGroup[] {
+  const groups: InspectGroup[] = [];
+
+  const contentRows: InspectRow[] = [];
+  for (const field of Object.keys(CONTENT_KEYS)) {
+    if (data[field] !== undefined) {
+      contentRows.push({ key: field, label: prettifyKey(field), value: formatValue(data[field]) });
+    }
+  }
+  if (contentRows.length) groups.push({ title: 'Content', rows: contentRows });
+
+  for (const g of PARAM_GROUPS) {
+    const rows: InspectRow[] = [];
+    for (const field of g.fields) {
+      if (data[field] !== undefined) {
+        rows.push({ key: field, label: prettifyKey(field), value: formatValue(data[field]) });
+      }
+    }
+    if (rows.length) groups.push({ title: g.title, rows });
+  }
+  return groups;
 }

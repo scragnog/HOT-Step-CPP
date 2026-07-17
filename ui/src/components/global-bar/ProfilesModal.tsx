@@ -7,10 +7,10 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bookmark, Check, Download, RefreshCw, Save, Trash2, Upload, X } from 'lucide-react';
+import { Bookmark, Check, ChevronDown, ChevronRight, Download, Pencil, RefreshCw, Save, Trash2, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { profileApi, type ParamProfile } from '../../services/api';
-import { applyProfileData, collectProfileData, summarizeProfile } from '../../utils/paramProfiles';
+import { applyProfileData, collectProfileData, describeProfileGroups, summarizeProfile } from '../../utils/paramProfiles';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 
 interface ProfilesModalProps {
@@ -25,6 +25,9 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   const [newName, setNewName] = useState('');
   const [appliedName, setAppliedName] = useState('');
   const [confirmAction, setConfirmAction] = useState<{ kind: 'delete' | 'overwrite' | 'import'; name: string; data?: Record<string, unknown> } | null>(null);
+  const [expandedName, setExpandedName] = useState('');
+  const [renamingName, setRenamingName] = useState('');
+  const [renameValue, setRenameValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
@@ -62,6 +65,30 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
       .then(() => refresh())
       .catch(e => setError(e.message));
   }, [refresh]);
+
+  const startRename = useCallback((p: ParamProfile) => {
+    setRenamingName(p.name);
+    setRenameValue(p.name);
+    setError('');
+  }, []);
+
+  const commitRename = useCallback(() => {
+    const from = renamingName;
+    const to = renameValue.trim();
+    if (!to || to === from) { setRenamingName(''); return; }
+    if (profiles.some(p => p.name.toLowerCase() === to.toLowerCase() && p.name !== from)) {
+      setError(t('profiles.renameCollision', { name: to }));
+      return;
+    }
+    profileApi.rename(from, to)
+      .then(() => {
+        if (appliedName === from) setAppliedName(to);
+        if (expandedName === from) setExpandedName(to);
+        setRenamingName('');
+        refresh();
+      })
+      .catch(e => setError(e.message));
+  }, [renamingName, renameValue, profiles, appliedName, expandedName, refresh, t]);
 
   // ── JSON export/import (same preset format as saved profiles) ──
 
@@ -161,41 +188,90 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
           {!loading && profiles.length === 0 && (
             <div className="py-8 text-center text-sm text-zinc-500">{t('profiles.empty')}</div>
           )}
-          {profiles.map(p => (
-            <div key={p.name}
-              className="group flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{p.name}</span>
-                  {appliedName === p.name && (
-                    <span className="flex items-center gap-1 text-[10px] text-emerald-500 flex-shrink-0">
-                      <Check size={11} /> {t('profiles.applied')}
+          {profiles.map(p => {
+            const isExpanded = expandedName === p.name;
+            const isRenaming = renamingName === p.name;
+            return (
+            <div key={p.name} className="rounded-xl overflow-hidden">
+              <div className="group flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors">
+                {isRenaming ? (
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    onChange={e => setRenameValue(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') commitRename();
+                      else if (e.key === 'Escape') setRenamingName('');
+                    }}
+                    onBlur={commitRename}
+                    className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-pink-500/50 text-sm text-zinc-800 dark:text-zinc-200 focus:ring-1 focus:ring-pink-500/20 outline-none"
+                  />
+                ) : (
+                  <button onClick={() => setExpandedName(isExpanded ? '' : p.name)}
+                    title={t('profiles.inspect')}
+                    className="flex-1 min-w-0 flex items-center gap-1.5 text-left">
+                    <span className="flex-shrink-0 text-zinc-400">
+                      {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                     </span>
-                  )}
-                </div>
-                <div className="text-[10px] text-zinc-500 truncate">
-                  {summarizeProfile(p.data)}
-                  {p.saved_at && <> · {new Date(p.saved_at).toLocaleString()}</>}
-                </div>
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{p.name}</span>
+                        {appliedName === p.name && (
+                          <span className="flex items-center gap-1 text-[10px] text-emerald-500 flex-shrink-0">
+                            <Check size={11} /> {t('profiles.applied')}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block text-[10px] text-zinc-500 truncate">
+                        {summarizeProfile(p.data)}
+                        {p.saved_at && <> · {new Date(p.saved_at).toLocaleString()}</>}
+                      </span>
+                    </span>
+                  </button>
+                )}
+                <button onClick={() => handleApply(p)} title={t('profiles.apply')}
+                  className="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-pink-600 hover:text-white dark:hover:bg-pink-600 transition-colors">
+                  {t('profiles.apply')}
+                </button>
+                <button onClick={() => startRename(p)} title={t('profiles.rename')}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
+                  <Pencil size={13} />
+                </button>
+                <button onClick={() => setConfirmAction({ kind: 'overwrite', name: p.name })} title={t('profiles.update')}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-sky-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
+                  <RefreshCw size={13} />
+                </button>
+                <button onClick={() => handleExportProfile(p)} title={t('profiles.export')}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
+                  <Upload size={13} />
+                </button>
+                <button onClick={() => setConfirmAction({ kind: 'delete', name: p.name })} title={t('profiles.delete')}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
+                  <Trash2 size={13} />
+                </button>
               </div>
-              <button onClick={() => handleApply(p)} title={t('profiles.apply')}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-pink-600 hover:text-white dark:hover:bg-pink-600 transition-colors">
-                {t('profiles.apply')}
-              </button>
-              <button onClick={() => setConfirmAction({ kind: 'overwrite', name: p.name })} title={t('profiles.update')}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-sky-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
-                <RefreshCw size={13} />
-              </button>
-              <button onClick={() => handleExportProfile(p)} title={t('profiles.export')}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
-                <Upload size={13} />
-              </button>
-              <button onClick={() => setConfirmAction({ kind: 'delete', name: p.name })} title={t('profiles.delete')}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
-                <Trash2 size={13} />
-              </button>
+
+              {/* Inspector — grouped parameter list */}
+              {isExpanded && (
+                <div className="mx-2 mb-2 mt-0.5 rounded-xl bg-zinc-100/70 dark:bg-black/20 border border-zinc-200 dark:border-white/5 px-3 py-3 space-y-3">
+                  {describeProfileGroups(p.data).map(g => (
+                    <div key={g.title}>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-pink-500/80 mb-1">{g.title}</div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                        {g.rows.map(r => (
+                          <div key={r.key} className="flex items-baseline justify-between gap-2 min-w-0">
+                            <span className="text-[11px] text-zinc-500 truncate">{r.label}</span>
+                            <span className="text-[11px] font-mono text-zinc-700 dark:text-zinc-300 truncate text-right">{r.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
           {error && (
             <div className="px-2 py-2 text-xs text-red-400">{error}</div>
           )}
