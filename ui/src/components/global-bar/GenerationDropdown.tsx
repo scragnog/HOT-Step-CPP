@@ -81,7 +81,7 @@ export const GenerationDropdown: React.FC = () => {
   return (
     <div className="space-y-3">
       <Slider label="Inference Steps" value={gp.inferenceSteps}
-        onChange={gp.setInferenceSteps} min={1} max={200} step={1} showInput />
+        onChange={gp.setInferenceSteps} min={1} max={300} step={1} showInput />
 
       <Slider label="Guidance Scale" value={gp.guidanceScale}
         onChange={gp.setGuidanceScale} min={0} max={20} step={0.1} showInput />
