@@ -5,9 +5,9 @@
 // current config under a name, apply, overwrite, or delete. Applying is
 // live: no page reload, CreatePanel content included.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bookmark, Check, RefreshCw, Save, Trash2, X } from 'lucide-react';
+import { Bookmark, Check, Download, RefreshCw, Save, Trash2, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { profileApi, type ParamProfile } from '../../services/api';
 import { applyProfileData, collectProfileData, summarizeProfile } from '../../utils/paramProfiles';
@@ -24,7 +24,8 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   const [error, setError] = useState('');
   const [newName, setNewName] = useState('');
   const [appliedName, setAppliedName] = useState('');
-  const [confirmAction, setConfirmAction] = useState<{ kind: 'delete' | 'overwrite'; name: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ kind: 'delete' | 'overwrite' | 'import'; name: string; data?: Record<string, unknown> } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
     profileApi.list()
@@ -62,6 +63,53 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
       .catch(e => setError(e.message));
   }, [refresh]);
 
+  // ── JSON export/import (same preset format as saved profiles) ──
+
+  const handleExportProfile = useCallback((p: ParamProfile) => {
+    const blob = new Blob([JSON.stringify(p.data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${p.name.replace(/[^a-zA-Z0-9 _-]/g, '_')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const importAs = useCallback((name: string, data: Record<string, unknown>) => {
+    profileApi.save(name, data)
+      .then(() => refresh())
+      .catch(e => setError(e.message));
+  }, [refresh]);
+
+  const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        let parsed = JSON.parse(reader.result as string);
+        // Tolerate a full profile wrapper ({ name, saved_at, data }) as well as bare preset JSON
+        if (parsed && typeof parsed === 'object' && parsed._format === undefined && parsed.data?._format === 'hot-step-preset') {
+          parsed = parsed.data;
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          setError(t('profiles.importInvalid'));
+          return;
+        }
+        const name = file.name.replace(/\.json$/i, '').trim() || 'imported';
+        if (profiles.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+          setConfirmAction({ kind: 'import', name, data: parsed });
+        } else {
+          importAs(name, parsed);
+        }
+      } catch {
+        setError(t('profiles.importInvalid'));
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }, [profiles, importAs, t]);
+
   // Portal to body: the global bar's backdrop-filter makes it the containing
   // block for fixed descendants, which would pin this overlay to the bar.
   return createPortal(
@@ -76,10 +124,17 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
             <Bookmark size={16} className="text-pink-500" />
             <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">{t('profiles.title')}</h2>
           </div>
-          <button onClick={onClose}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => fileInputRef.current?.click()} title={t('profiles.import')}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-sky-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
+              <Download size={14} />
+            </button>
+            <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
+            <button onClick={onClose}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Save current */}
@@ -131,6 +186,10 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
                 className="p-1.5 rounded-lg text-zinc-400 hover:text-sky-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
                 <RefreshCw size={13} />
               </button>
+              <button onClick={() => handleExportProfile(p)} title={t('profiles.export')}
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
+                <Upload size={13} />
+              </button>
               <button onClick={() => setConfirmAction({ kind: 'delete', name: p.name })} title={t('profiles.delete')}
                 className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
                 <Trash2 size={13} />
@@ -149,11 +208,14 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
         title={confirmAction?.kind === 'delete' ? t('profiles.deleteTitle') : t('profiles.overwriteTitle')}
         message={confirmAction?.kind === 'delete'
           ? t('profiles.deleteMessage', { name: confirmAction?.name })
-          : t('profiles.overwriteMessage', { name: confirmAction?.name })}
+          : confirmAction?.kind === 'import'
+            ? t('profiles.importOverwriteMessage', { name: confirmAction?.name })
+            : t('profiles.overwriteMessage', { name: confirmAction?.name })}
         danger={confirmAction?.kind === 'delete'}
         onConfirm={() => {
           if (!confirmAction) return;
           if (confirmAction.kind === 'delete') handleDelete(confirmAction.name);
+          else if (confirmAction.kind === 'import' && confirmAction.data) importAs(confirmAction.name, confirmAction.data);
           else saveAs(confirmAction.name);
           setConfirmAction(null);
         }}

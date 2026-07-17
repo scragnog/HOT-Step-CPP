@@ -4,8 +4,8 @@
 // Each section shows a summary badge and expands on hover to reveal controls.
 // Sits full-width at the top of the entire window (above sidebar).
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Cpu, Plug, Sliders, Brain, AudioWaveform, Upload, Download, Bookmark } from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Cpu, Plug, Sliders, Brain, AudioWaveform, Bookmark } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarSection, ToggleSwitch } from './BarSection';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
@@ -21,7 +21,6 @@ import { DiscoPulseWrapper } from '../shared/DiscoPulseWrapper';
 import { MonitorBar } from './MonitorBar';
 import { useVstChainStore } from '../../stores/vstChainStore';
 import { ProfilesModal } from './ProfilesModal';
-import { applyProfileData, collectProfileData } from '../../utils/paramProfiles';
 
 type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'postprocessing' | null;
 
@@ -29,7 +28,6 @@ export const GlobalParamBar: React.FC = () => {
   const { t } = useTranslation();
   const [openSection, setOpenSection] = useState<SectionId>(null);
   const gp = useGlobalParams();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const monitoring = useVstChainStore(s => s.monitoring);
 
   // ── Auto-select models when engine becomes ready ────────────────
@@ -106,39 +104,6 @@ export const GlobalParamBar: React.FC = () => {
     }, 8000); // 8s delay: engine needs time to scan models + cuBLAS download
 
     return () => clearTimeout(timer);
-  }, []);
-
-  // ── Preset Export ────────────────────────────────────────────────
-  const handleExport = useCallback(() => {
-    // Raw v2 snapshot — same shape as saved profiles (utils/paramProfiles.ts)
-    const preset = collectProfileData();
-    const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const slug = (String(preset.caption || 'preset')).slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-    a.download = `${slug}_params.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, []);
-
-  // ── Preset Import ────────────────────────────────────────────────
-  const handleImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const p = JSON.parse(reader.result as string);
-        // Applies live (store + content via StorageEvents) — no reload needed.
-        // Handles both v2 raw snapshots and legacy v1 preset files.
-        applyProfileData(p);
-      } catch (err) {
-        console.error('[Preset Import] Invalid JSON:', err);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
   }, []);
 
   const handleOpen = useCallback((id: SectionId) => {
@@ -258,19 +223,14 @@ export const GlobalParamBar: React.FC = () => {
             <MonitorBar />
           ) : (
             <>
+              {/* Mini version of the BarSection tabs to the left */}
               <button onClick={() => setShowProfiles(true)} title={t('globalBar.profiles')}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-pink-400 transition-colors">
-                <Bookmark size={13} />
+                className="group flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-pink-500/10 transition-colors duration-150">
+                <Bookmark size={13} className="flex-shrink-0 text-zinc-500 group-hover:text-pink-400 transition-colors duration-150" />
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-800 dark:group-hover:text-zinc-200 transition-colors duration-150">
+                  {t('globalBar.profiles')}
+                </span>
               </button>
-              <button onClick={handleExport} title={t('globalBar.exportPreset')}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-emerald-400 transition-colors">
-                <Upload size={13} />
-              </button>
-              <button onClick={() => fileInputRef.current?.click()} title={t('globalBar.importPreset')}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-zinc-500 hover:text-sky-400 transition-colors">
-                <Download size={13} />
-              </button>
-              <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
               <div className="w-px h-4 bg-white/5" />
               <VramIndicator compact />
             </>
