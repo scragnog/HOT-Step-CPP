@@ -14,6 +14,45 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
+// ── Model-name title suffix ─────────────────────────────────────────────────
+// Titles are tagged with the LLM that wrote them: "Song Name - Fable 5".
+// The appending happens HERE (not in the LLM prompt) so it is deterministic.
+
+/** Turn a model id like "claude-fable-5" / "claude-opus-4-8" into "Fable 5" / "Opus 4.8".
+ *  Friendly names ("Fable 5", "Gemini 3 Pro") pass through unchanged. */
+function prettifyModel(raw: string): string {
+  let s = raw.trim();
+  if (!s) return s;
+  if (/\s/.test(s) && !/[-_/]/.test(s)) return s; // already a friendly name
+  s = s.replace(/^(us\.)?(anthropic[./])?(claude-)?/i, '');
+  s = s.replace(/[-.]?\d{8}$/, '');               // date suffix e.g. -20251001
+  s = s.replace(/[-.]?v\d+(:\d+)?$/i, '');        // bedrock-style :0 / v1 suffix
+  const parts = s.split(/[-_]/).filter(Boolean);
+  const out: string[] = [];
+  for (const part of parts) {
+    // Join consecutive single-digit segments as a version: opus 4 8 → opus 4.8
+    if (/^\d$/.test(part) && out.length && /^\d+(\.\d+)*$/.test(out[out.length - 1])) {
+      out[out.length - 1] += `.${part}`;
+    } else {
+      out.push(/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1));
+    }
+  }
+  return out.join(' ') || raw.trim();
+}
+
+/** Append " - <Model>" to a title unless it already carries that suffix. */
+function withModelSuffix(title: string, model?: string): string {
+  const t = title.trim();
+  if (!model) return t;
+  const pretty = prettifyModel(model);
+  if (!pretty || t.toLowerCase().endsWith(`- ${pretty.toLowerCase()}`)) return t;
+  return `${t} - ${pretty}`;
+}
+
+const MODEL_PARAM_DESC =
+  "Name of the model YOU are running as (e.g. 'Fable 5', 'claude-opus-4-8', 'Gemini 3 Pro'). " +
+  'Always pass this — it is appended to the song title ("Song Name - Fable 5") and stored with the generation.';
+
 // ── list_artists ────────────────────────────────────────────────────────────
 
 server.tool(
@@ -184,7 +223,8 @@ server.tool(
       '',
       '---',
       '',
-      'Write the lyrics following the system prompt rules. Then call `save_generation` to save the result.',
+      'Write the lyrics following the system prompt rules. Then call `save_generation` to save the result — ' +
+      "include the `model` param with your own model name (e.g. 'Fable 5') so it is appended to the title.",
     ].join('\n');
 
     return { content: [{ type: 'text', text }] };
@@ -199,14 +239,15 @@ server.tool(
   {
     profile_id: z.number().describe('Profile ID'),
     lyrics: z.string().describe('Generated lyrics'),
-    title: z.string().describe('Song title'),
+    title: z.string().describe('Song title (WITHOUT model name — the server appends it)'),
+    model: z.string().optional().describe(MODEL_PARAM_DESC),
     subject: z.string().optional().describe('Song subject'),
     bpm: z.number().optional().describe('BPM'),
     key: z.string().optional().describe('Musical key (e.g. "C Major")'),
     caption: z.string().optional().describe('Audio style caption'),
     duration: z.number().optional().describe('Duration in seconds'),
   },
-  async ({ profile_id, lyrics, title, subject, bpm, key, caption, duration }) => {
+  async ({ profile_id, lyrics, title, model, subject, bpm, key, caption, duration }) => {
     const profile = db.getProfile(profile_id);
     if (!profile) {
       return { content: [{ type: 'text', text: `Profile ${profile_id} not found.` }] };
@@ -214,10 +255,10 @@ server.tool(
 
     const saved = db.saveGeneration({
       profileId: profile_id,
-      provider: 'antigravity',
-      model: 'claude-opus-4',
+      provider: 'mcp',
+      model: model || 'unknown',
       lyrics,
-      title,
+      title: withModelSuffix(title, model),
       subject,
       bpm,
       key,
@@ -286,7 +327,8 @@ server.tool(
       '',
       '---',
       '',
-      'Write the refined lyrics (starting with "Title: ..."). Then call `save_refinement` to save.',
+      'Write the refined lyrics (starting with "Title: ..."). Then call `save_refinement` to save — ' +
+      "include the `model` param with your own model name (e.g. 'Fable 5') so it is appended to the title.",
     ].join('\n');
 
     return { content: [{ type: 'text', text }] };
@@ -301,9 +343,10 @@ server.tool(
   {
     generation_id: z.number().describe('Parent generation ID'),
     lyrics: z.string().describe('Refined lyrics'),
-    title: z.string().describe('Refined title'),
+    title: z.string().describe('Refined title (WITHOUT model name — the server appends it)'),
+    model: z.string().optional().describe(MODEL_PARAM_DESC),
   },
-  async ({ generation_id, lyrics, title }) => {
+  async ({ generation_id, lyrics, title, model }) => {
     const parent = db.getGeneration(generation_id);
     if (!parent) {
       return { content: [{ type: 'text', text: `Generation ${generation_id} not found.` }] };
@@ -311,10 +354,10 @@ server.tool(
 
     const saved = db.saveGeneration({
       profileId: parent.profile_id,
-      provider: 'antigravity',
-      model: 'claude-opus-4',
+      provider: 'mcp',
+      model: model || 'unknown',
       lyrics,
-      title,
+      title: withModelSuffix(title, model),
       subject: parent.subject,
       bpm: parent.bpm,
       key: parent.key,
@@ -392,7 +435,8 @@ server.tool(
       userPrompt,
       '```',
       '',
-      'Respond with ONLY the title.',
+      'Respond with ONLY the title. Do NOT include your model name in it — ' +
+      'when saving, pass your model name via the `model` param and the server appends it automatically.',
     ].join('\n');
 
     return { content: [{ type: 'text', text }] };
