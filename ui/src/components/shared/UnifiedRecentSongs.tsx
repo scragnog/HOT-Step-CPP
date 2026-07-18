@@ -31,6 +31,15 @@ interface UnifiedRecentSongsProps {
 const _cache = new Map<string, { songs: UnifiedRecentSong[]; key: number }>();
 const _fetchInFlight = new Set<string>();  // per-source to avoid cross-blocking
 
+const CACHE_CLEARED_EVENT = 'recent-songs-cache-cleared';
+
+/** Drop all cached recent-song lists (e.g. after Nuke All Generations) and
+ *  tell any mounted instances to empty themselves. */
+export function clearRecentSongsCache(): void {
+  _cache.clear();
+  window.dispatchEvent(new Event(CACHE_CLEARED_EVENT));
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
@@ -54,6 +63,12 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
       mountedRef.current = false;
     };
   }, [cacheKey]);
+
+  useEffect(() => {
+    const onCleared = () => { setSongs([]); setLoading(false); };
+    window.addEventListener(CACHE_CLEARED_EVENT, onCleared);
+    return () => window.removeEventListener(CACHE_CLEARED_EVENT, onCleared);
+  }, []);
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }

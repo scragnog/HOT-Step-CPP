@@ -16,7 +16,8 @@ import { songApi } from './services/api';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
 import { SongList } from './components/library/SongList';
-import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector } from './stores/audioGenQueueStore';
+import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
+import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
 import { Player } from './components/player/Player';
 import { WaveformPlayer, type WaveformPlayerHandle } from './components/player/WaveformPlayer';
@@ -663,7 +664,15 @@ const AppContent: React.FC = () => {
           <SettingsPanel
             settings={settings}
             onSettingsChange={setSettings}
-            onNukeComplete={() => { setSongs([]); setSelectedSong(null); }}
+            onNukeComplete={() => {
+              setSongs([]);
+              setSelectedSong(null);
+              // Queue + Recent Songs live outside library state: the queue is a
+              // persisted singleton store, Recent Songs a module-level cache —
+              // both survive the nuke unless explicitly cleared.
+              clearFinishedFromAudioQueue();
+              clearRecentSongsCache();
+            }}
           />
         </DiscoPulseWrapper>
       );
