@@ -41,6 +41,17 @@ router.get('/', (req, res) => {
   res.json({ songs: parsed });
 });
 
+// GET /api/songs/ids — bare id list, used by the UI queue to prune entries
+// whose songs were deleted (nuke, other tab, individual delete)
+// IMPORTANT: Must be defined BEFORE /:id to avoid Express matching 'ids' as an id
+router.get('/ids', (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  const rows = getDb().prepare('SELECT id FROM songs WHERE user_id = ?').all(userId) as Array<{ id: string }>;
+  res.json({ ids: rows.map(r => r.id) });
+});
+
 // GET /api/songs/recent — unified recent songs across all modes
 // Supports ?source=create|lyric-studio|cover-studio&limit=50
 // Returns a normalized shape compatible with the frontend's RecentSong interface

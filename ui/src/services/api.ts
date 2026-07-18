@@ -138,6 +138,7 @@ export const songApi = {
     ),
   crop: (id: string, inPoint: number, outPoint: number, token: string, audioUrl?: string) =>
     post<{ cropped: boolean; newDuration: number }>(`/songs/${id}/crop`, { inPoint, outPoint, audioUrl }, token),
+  listIds: (token: string) => get<{ ids: string[] }>('/songs/ids', token),
   getRecentSongs: (token: string, source?: string, limit = 50) =>
     get<{ songs: UnifiedRecentSong[] }>(
       `/songs/recent?limit=${limit}${source && source !== 'all' ? `&source=${source}` : ''}`, token

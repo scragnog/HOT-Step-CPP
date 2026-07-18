@@ -614,9 +614,40 @@ export async function resumeQueue(token: string): Promise<void> {
   // Wait for IndexedDB restore to complete before processing
   await _idbReady;
 
+  _pruneDeletedSongs(token);
+
   const hasPending = _state.items.some(i => i.status === 'pending');
   if (hasPending) {
     _processQueue(token);
+  }
+}
+
+/**
+ * Drop succeeded items whose song no longer exists in the DB — the queue is
+ * persisted in IndexedDB, so entries survive nukes/deletes done before this
+ * page load or from another tab. Candidates are captured BEFORE the fetch so
+ * an item that completes mid-fetch can never be pruned by a stale id list.
+ */
+async function _pruneDeletedSongs(token: string): Promise<void> {
+  const candidates = _state.items
+    .filter(i => i.status === 'succeeded' && i.songId)
+    .map(i => i.id);
+  if (candidates.length === 0) return;
+
+  try {
+    const { ids } = await songApi.listIds(token);
+    const existing = new Set(ids);
+    const candidateSet = new Set(candidates);
+    const before = _state.items.length;
+    _state.items = _state.items.filter(i =>
+      !candidateSet.has(i.id) || existing.has(i.songId!)
+    );
+    if (_state.items.length !== before) {
+      console.log(`[AudioGenQueue] Pruned ${before - _state.items.length} queue entries for deleted songs`);
+      _emit(true);
+    }
+  } catch {
+    // Non-fatal — server unreachable, keep entries as-is
   }
 }
 
