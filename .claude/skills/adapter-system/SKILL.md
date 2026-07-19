@@ -13,7 +13,7 @@ internals, cache-key construction, cross-arch research history) lives in
 ## Glossary (read first — no prior context assumed)
 
 - **DiT** — Diffusion Transformer, the C++ model that denoises audio latents (32 layers on the XL base). Lives in `engine/src/dit.h` / `dit-graph.h`.
-- **LoRA** — low-rank adapter: two small matrices A, B whose product `B@A` is a delta added to a base weight. **LoKr** — LyCORIS Kronecker-product variant (`.lokr_w1/.lokr_w2` tensors). **DoRA** — adds a per-row multiplicative rescale (`dora_scale`).
+- **LoRA** — low-rank adapter: two small matrices A, B whose product `B@A` is a delta added to a base weight. **LoKr** — LyCORIS Kronecker-product variant (`.lokr_w1/.lokr_w2` tensors). **DoRA** — adds a per-row multiplicative rescale; two on-disk namings, both supported in MERGE MODE ONLY: LyCORIS `dora_scale` (LoKr path) and PEFT `lora_magnitude_vector` (LoRA path, since 2026-07-19). With DoRA the delta carries only alpha/rank; user strength × group scale blends the decompose factor (`s = u·(m/‖W+Δ‖) + (1−u)`), so strength 0 does NOT fully disable a DoRA adapter.
 - **Delta (Δ)** — the full-size weight difference an adapter contributes: `W_adapted = W_base + scale·Δ`.
 - **Merge mode** — deltas are baked into base weights on load, before GPU upload (`adapter-merge.h`). **Runtime mode** — deltas live as separate GPU tensors, applied each sampling step as `y = W@x + Δ@x` (`adapter-runtime.h` + `dit-graph.h`).
 - **aceReq** — the JSON generation request (`AceRequest`) the Node server sends to the C++ engine's `/synth` endpoint.
@@ -72,8 +72,8 @@ Different adapters active in different song sections, driven by lyric directives
 
 | Path | Role |
 |---|---|
-| `engine/src/adapter-merge.h` | Merge mode: safetensors/PEFT/LyCORIS parsing, LoKr detection (:360), GPU merge graph (`adapter_merge_on_backend` :445), delta compute (`adapter_compute_delta` :402), basin re-base (`adapter_rebase_fetch` :78), entry `adapter_merge` (:1332) |
-| `engine/src/adapter-runtime.h` | Runtime mode: `DiTLoRA*` structs (:33-68), slot map `dit_lora_slot` (:82), stack delta-sum `adapter_stage_delta` (:150), quantized finalize (:667), `adapter_load_runtime_stack` (:748), DoRA merge-only warning (:394-405) |
+| `engine/src/adapter-merge.h` | Merge mode: safetensors/PEFT/LyCORIS parsing, LoKr detection (:440), GPU merge graph (`adapter_merge_on_backend` :523, contains the DoRA weight-decompose for both GPU and host paths), delta compute (`adapter_compute_delta` :480), basin re-base (`adapter_rebase_fetch` :78), PEFT DoRA magnitude detection (`lora_is_magnitude` :183), per-module `alpha_pattern` parser (`adapter_read_alpha_pattern` :238 — REQUIRED for PEFT rank_pattern adapters, else per-module strength is alpha_global/rank_actual ≈ wildly wrong), entry `adapter_merge` (:1453) |
+| `engine/src/adapter-runtime.h` | Runtime mode: `DiTLoRA*` structs (:39-70), slot map `dit_lora_slot` (:105), stack delta-sum `adapter_stage_delta` (:173), quantized finalize (:804), `adapter_load_runtime_stack` (:1011), DoRA merge-only warnings (PEFT :299, LoKr :510) |
 | `engine/src/adapter-cancel.h` | `g_adapter_cancel` atomic + `adapter_cancel_requested()` — cooperative cancel of the ~17 s delta precompute; separate header so the server avoids ggml deps |
 | `engine/src/adapter-trt.h` | TensorRT IRefitter merge variant (`#ifdef HOT_STEP_TRT`) |
 | `engine/src/dit.h` | Load orchestration: merge-vs-runtime, fusion skip (:420), once-per-stack re-base (:565), per-section per-adapter loads (:618), fail-don't-cache (:648). Fork hook: includes `adapter-merge.h`/`adapter-runtime.h` (:11/:13) |
@@ -105,7 +105,8 @@ Different adapters active in different song sections, driven by lyric directives
 | Adapter VRAM / Alignment Timing knobs "do nothing" | A ServerFields param dropped in an LM round-trip whitelist — Golden rule 8 |
 | Merge stack with re-base outputs only the LAST adapter | Re-base applied per adapter instead of once per stack (`dit.h:565`) |
 | Section adapters roughly twice as strong as expected | Section deltas loaded with stack scale instead of unit scale (`dit.h:628`) |
-| DoRA adapter sounds wrong in runtime mode | DoRA is merge-only; runtime can't express the multiplicative rescale (`adapter-runtime.h:394`) |
+| DoRA adapter sounds wrong in runtime mode | DoRA is merge-only; runtime can't express the multiplicative rescale — engine warns and applies plain LoRA (`adapter-runtime.h:299` PEFT, `:510` LoKr) |
+| PEFT adapter with per-module ranks (`rank_pattern` in adapter_config.json) sounds weak/distorted | `alpha_pattern` must be parsed per module (`adapter_read_alpha_pattern`) — the global `lora_alpha` over the actual per-tensor rank gives e.g. 128/512 instead of the trained 1024/512. Also requires `adapter_config.json` to sit NEXT TO the .safetensors (alpha fallback is rank ⇒ wrong strength without it) |
 | All solvers/schedulers/guidance dead after an upstream sync (compiles fine) | `pipeline-synth-ops.cpp` lost the `hot-step-sampler.h` include — run `engine/verify-hooks.ps1` |
 
 ## Institutional knowledge (from the departing lead engineer)

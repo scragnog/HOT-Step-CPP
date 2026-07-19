@@ -272,6 +272,8 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
 
     std::map<std::string, const STEntry *> a_map, b_map;
     std::map<std::string, float>           alpha_map;
+    adapter_read_alpha_pattern(cfg_dir.c_str(), alpha_map);
+    int                                    dora_n = 0;
     for (const auto & e : st.entries) {
         const char * alpha_suffix = ".alpha";
         size_t       slen         = strlen(alpha_suffix);
@@ -290,6 +292,12 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
         if (base.empty()) continue;
         if (lora_is_a(e.name))      a_map[base] = &e;
         else if (lora_is_b(e.name)) b_map[base] = &e;
+        else if (lora_is_magnitude(e.name)) dora_n++;
+    }
+    if (dora_n > 0) {
+        fprintf(stderr,
+                "[Adapter-RT] WARNING: %d module(s) carry lora_magnitude_vector (PEFT DoRA) — DoRA rescaling is NOT applied in runtime mode; output will differ from merge mode. Use merge mode for DoRA adapters.\n",
+                dora_n);
     }
 
     int  merged = 0, skipped = 0;

@@ -177,6 +177,13 @@ static bool lora_is_b(const std::string & key) {
     return key.find(".lora_B.") != std::string::npos || key.find(".lora_up.") != std::string::npos;
 }
 
+// PEFT DoRA magnitude vector: ".lora_magnitude_vector" bare, or with a
+// trailing ".weight" / ".default.weight" depending on PEFT version. Same
+// per-output-row rescale semantics as the LyCORIS "dora_scale" tensor.
+static bool lora_is_magnitude(const std::string & key) {
+    return key.find(".lora_magnitude_vector") != std::string::npos;
+}
+
 // Read adapter_config.json for alpha. Returns alpha or 0 if not found.
 // Rank is always read from the actual tensor shapes (more reliable).
 static int adapter_read_alpha(const char * dir) {
@@ -226,6 +233,77 @@ static int adapter_read_alpha(const char * dir) {
         fprintf(stderr, "[Adapter] adapter_config.json: alpha=%d\n", alpha);
     }
     return alpha;
+}
+
+// Read per-module "alpha_pattern" from adapter_config.json (written by PEFT
+// when modules train with individual ranks/alphas, e.g. rank-pruned DoRAs).
+// Keys are module paths ("layers.0.self_attn.q_proj"); values override the
+// global lora_alpha for that module. Rank is per-tensor from the A shape
+// already, so without this a rank_pattern adapter merges with wildly wrong
+// per-module strength. Fills out[gguf_name] = alpha; missing file/field is
+// a no-op. ComfyUI baked per-tensor .alpha scalars overwrite these later.
+static void adapter_read_alpha_pattern(const char * dir, std::map<std::string, float> & out) {
+    std::string path = std::string(dir) + "/adapter_config.json";
+    FILE *      f    = fopen(path.c_str(), "rb");
+    if (!f) {
+        return;
+    }
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<char> buf((size_t) len + 1);
+    size_t            nr = fread(buf.data(), 1, (size_t) len, f);
+    fclose(f);
+    if (nr != (size_t) len) {
+        return;
+    }
+    buf[(size_t) len] = '\0';
+
+    const char * p = strstr(buf.data(), "\"alpha_pattern\"");
+    if (!p) {
+        return;
+    }
+    p = strchr(p + 15, ':');
+    if (!p) {
+        return;
+    }
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+        p++;
+    }
+    if (*p != '{') {
+        return;  // null or unexpected value
+    }
+    p++;
+    size_t n = 0;
+    while (*p) {
+        const char * k0    = strchr(p, '"');
+        const char * brace = strchr(p, '}');
+        if (!k0 || (brace && brace < k0)) {
+            break;  // end of the pattern object
+        }
+        k0++;
+        const char * k1 = strchr(k0, '"');
+        if (!k1) {
+            break;
+        }
+        std::string  key(k0, (size_t) (k1 - k0));
+        const char * c = strchr(k1, ':');
+        if (!c) {
+            break;
+        }
+        float       val  = (float) atof(c + 1);
+        std::string gguf = key;
+        if (gguf.compare(0, 8, "decoder.") != 0) {
+            gguf = "decoder." + gguf;
+        }
+        out[gguf + ".weight"] = val;
+        n++;
+        p = c + 1;
+    }
+    if (n > 0) {
+        fprintf(stderr, "[Adapter] adapter_config.json: alpha_pattern with %zu per-module entries\n", n);
+    }
 }
 
 // Read linear_dim from LyCORIS __metadata__.lokr_config for LoKr payloads.
@@ -733,9 +811,11 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
     int alpha_cfg = adapter_read_alpha(cfg_dir.c_str());
 
     // group lora_A and lora_B entries by their GGUF base tensor name.
-    // also collect per tensor alpha scalars (ComfyUI baked format).
-    std::map<std::string, const STEntry *> a_map, b_map;
+    // also collect per tensor alpha scalars (ComfyUI baked format) and
+    // PEFT DoRA magnitude vectors.
+    std::map<std::string, const STEntry *> a_map, b_map, ds_map;
     std::map<std::string, float>           alpha_map;
+    adapter_read_alpha_pattern(cfg_dir.c_str(), alpha_map);
     for (const auto & e : st.entries) {
         // per tensor alpha: "base_model.model.layers.0.self_attn.q_proj.alpha"
         // scalar F32 with shape [] containing the baked alpha value
@@ -761,6 +841,8 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
             a_map[base] = &e;
         } else if (lora_is_b(e.name)) {
             b_map[base] = &e;
+        } else if (lora_is_magnitude(e.name)) {
+            ds_map[base] = &e;
         }
     }
 
@@ -770,8 +852,9 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
         pending_idx[wctx->pending[i].src] = i;
     }
 
-    int merged  = 0;
-    int skipped = 0;
+    int merged     = 0;
+    int skipped    = 0;
+    int dora_count = 0;
 
     for (const auto & kv : a_map) {
         const std::string & gguf_name = kv.first;
@@ -874,6 +957,37 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
                                                  adapter_determine_group(gguf_name));
         scaling *= g_scale;
 
+        // PEFT DoRA: optional magnitude vector, one value per output row.
+        // Same weight-decompose as LyCORIS dora_scale (LoKr path convention):
+        // the delta keeps only the alpha/rank factor and the user strength
+        // blends the per-row rescale inside adapter_merge_on_backend.
+        const float *      ds_ptr = nullptr;
+        std::vector<float> ds_f32;
+        float              effective_user_scale = 1.0f;
+        auto               ds_it = ds_map.find(gguf_name);
+        if (ds_it != ds_map.end()) {
+            const STEntry * eds    = ds_it->second;
+            int64_t         ds_nel = 1;
+            for (int di = 0; di < eds->n_dims; di++) {
+                ds_nel *= eds->shape[di];
+            }
+            if (ds_nel != ne1) {
+                fprintf(stderr,
+                        "[Adapter] WARNING: lora_magnitude_vector nel %lld != out rows %lld for %s, merging without DoRA rescale\n",
+                        (long long) ds_nel, (long long) ne1, gguf_name.c_str());
+            } else {
+                ds_f32.resize((size_t) ds_nel);
+                if (!adapter_to_f32(st_data(st, *eds), ds_f32.data(), ds_nel, eds->dtype)) {
+                    fprintf(stderr, "[Adapter] WARNING: unsupported lora_magnitude_vector dtype %s for %s, merging without DoRA rescale\n",
+                            eds->dtype.c_str(), gguf_name.c_str());
+                } else {
+                    ds_ptr               = ds_f32.data();
+                    scaling              = alpha / (float) rank;
+                    effective_user_scale = scale * g_scale;
+                }
+            }
+        }
+
         // load A and B to F32, PEFT rounds them through BF16 before the GEMM
         int64_t            a_nel = rank * in_feat;
         int64_t            b_nel = out_feat * rank;
@@ -920,16 +1034,19 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
         std::vector<float> rebase_buf;
         const float *      rebase_ptr = adapter_rebase_fetch(rebase_src, rebase_beta, gguf_name.c_str(), ne0, ne1, rebase_buf);
 
-        if (!adapter_merge_on_backend(wctx, pending_idx, base_ptr, ttype, ne0, ne1, nullptr, 1.0f, backend,
+        if (!adapter_merge_on_backend(wctx, pending_idx, base_ptr, ttype, ne0, ne1, ds_ptr, effective_user_scale, backend,
                                       gguf_name.c_str(), build, promote_f32, rebase_ptr, rebase_beta)) {
             skipped++;
             continue;
+        }
+        if (ds_ptr) {
+            dora_count++;
         }
         merged++;
     }
 
     const auto & gs = g_hotstep_params.adapter_group_scales;
-    fprintf(stderr, "[Adapter] LoRA merged %d pairs (skipped %d), scale=%.2f\n", merged, skipped, scale);
+    fprintf(stderr, "[Adapter] LoRA merged %d pairs (%d with DoRA, skipped %d), scale=%.2f\n", merged, dora_count, skipped, scale);
     fprintf(stderr, "[Adapter] Group scales: self_attn=%.2f, cross_attn=%.2f, mlp=%.2f, cond_embed=%.2f, time_embed=%.2f, proj_in=%.2f\n",
             gs.self_attn, gs.cross_attn, gs.mlp, gs.cond_embed, gs.time_embed, gs.proj_in);
     return merged > 0;

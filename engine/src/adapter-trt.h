@@ -113,6 +113,48 @@ static void trt_merge_delta(
     merged_ptrs[trt_name] = merged_storage[trt_name].data();
 }
 
+// DoRA variant of trt_merge_delta: merged = (base + delta) * s_row with
+// s_row = user * (ds[row] / (||base + delta||_row + eps)) + (1 - user).
+// The delta carries only the alpha/rank factor (LyCORIS convention, same
+// math as the DoRA branch in adapter_merge_on_backend).
+static void trt_merge_delta_dora(
+    const DitTrt& ctx,
+    const std::string& trt_name,
+    const std::vector<uint16_t>& base_data,
+    const float* delta_f32,
+    const float* ds,
+    int64_t ne0, int64_t ne1,   // ne0 = in_feat, ne1 = out_feat
+    float user_scale,
+    std::unordered_map<std::string, std::vector<uint16_t>>& merged_storage,
+    std::unordered_map<std::string, const void*>& merged_ptrs
+) {
+    // torch.finfo(torch.bfloat16).eps, matches adapter_merge_on_backend
+    const float eps = 7.8125e-3f;
+    int64_t nel = ne0 * ne1;
+    bool is_transposed = ctx.weights_transposed.count(trt_name) > 0;
+    std::vector<uint16_t> merged_bf16((size_t)nel);
+    std::vector<float> row((size_t)ne0);
+
+    for (int64_t out_idx = 0; out_idx < ne1; out_idx++) {
+        float sum_sq = 0.0f;
+        for (int64_t in_idx = 0; in_idx < ne0; in_idx++) {
+            int64_t base_idx = is_transposed ? in_idx * ne1 + out_idx : out_idx * ne0 + in_idx;
+            float v = trt_bf16_to_fp32(base_data[base_idx]) + delta_f32[out_idx * ne0 + in_idx];
+            row[(size_t)in_idx] = v;
+            sum_sq += v * v;
+        }
+        float s = ds[out_idx] / (sqrtf(sum_sq) + eps);
+        if (user_scale != 1.0f) { s = s * user_scale + (1.0f - user_scale); }
+        for (int64_t in_idx = 0; in_idx < ne0; in_idx++) {
+            int64_t base_idx = is_transposed ? in_idx * ne1 + out_idx : out_idx * ne0 + in_idx;
+            merged_bf16[base_idx] = trt_fp32_to_bf16(row[(size_t)in_idx] * s);
+        }
+    }
+
+    merged_storage[trt_name] = std::move(merged_bf16);
+    merged_ptrs[trt_name] = merged_storage[trt_name].data();
+}
+
 // ── Build TRT reverse map for LoKr ──────────────────────────────────────────
 // Maps lycoris prefix (e.g. "lycoris_layers_0_self_attn_q_proj")
 // to TRT weight name (e.g. "dit.layers.0.self_attn.q_proj.weight")
@@ -174,8 +216,9 @@ static int adapter_trt_apply_lora(
 ) {
     int alpha_cfg = adapter_read_alpha(cfg_dir.c_str());
 
-    std::map<std::string, const STEntry*> a_map, b_map;
+    std::map<std::string, const STEntry*> a_map, b_map, ds_map;
     std::map<std::string, float> alpha_map;
+    adapter_read_alpha_pattern(cfg_dir.c_str(), alpha_map);
 
     for (const auto& e : st.entries) {
         const char* alpha_suffix = ".alpha";
@@ -197,10 +240,12 @@ static int adapter_trt_apply_lora(
         if (base.empty()) continue;
         if (lora_is_a(e.name)) a_map[base] = &e;
         else if (lora_is_b(e.name)) b_map[base] = &e;
+        else if (lora_is_magnitude(e.name)) ds_map[base] = &e;
     }
 
-    fprintf(stderr, "[Adapter-TRT] LoRA: found %zu A/B pairs\n", a_map.size());
-    int merged = 0, skipped = 0;
+    fprintf(stderr, "[Adapter-TRT] LoRA: found %zu A/B pairs (%zu with DoRA magnitude)\n",
+            a_map.size(), ds_map.size());
+    int merged = 0, skipped = 0, dora_merged = 0;
 
     // Use BF16 precision rounding (same as adapter-runtime.h)
     ggml_type round_type = GGML_TYPE_BF16;
@@ -244,6 +289,33 @@ static int adapter_trt_apply_lora(
             adapter_determine_group(gguf_name));
         scaling *= g_scale;
 
+        // PEFT DoRA: optional magnitude vector, one value per output row.
+        // Delta keeps only alpha/rank; the user strength blends the per-row
+        // rescale inside trt_merge_delta_dora (same as adapter-merge.h).
+        const float* ds_ptr = nullptr;
+        std::vector<float> ds_f32;
+        float effective_user_scale = 1.0f;
+        auto ds_it = ds_map.find(gguf_name);
+        if (ds_it != ds_map.end()) {
+            const STEntry* eds = ds_it->second;
+            int64_t ds_nel = 1;
+            for (int di = 0; di < eds->n_dims; di++) ds_nel *= eds->shape[di];
+            if (ds_nel != out_feat) {
+                fprintf(stderr, "[Adapter-TRT] WARNING: lora_magnitude_vector nel %lld != out rows %lld for %s, merging without DoRA rescale\n",
+                        (long long)ds_nel, (long long)out_feat, gguf_name.c_str());
+            } else {
+                ds_f32.resize((size_t)ds_nel);
+                if (!adapter_to_f32(st_data(st, *eds), ds_f32.data(), ds_nel, eds->dtype)) {
+                    fprintf(stderr, "[Adapter-TRT] WARNING: unsupported lora_magnitude_vector dtype %s for %s, merging without DoRA rescale\n",
+                            eds->dtype.c_str(), gguf_name.c_str());
+                } else {
+                    ds_ptr = ds_f32.data();
+                    scaling = alpha / (float)rank;
+                    effective_user_scale = adapter_scale * g_scale;
+                }
+            }
+        }
+
         // Load A and B to fp32
         int64_t a_nel = rank * in_feat;
         int64_t b_nel = out_feat * rank;
@@ -276,13 +348,20 @@ static int adapter_trt_apply_lora(
             skipped++; continue;
         }
 
-        trt_merge_delta(*ctx, trt_name, base_data, delta_f32.data(),
-                        in_feat, out_feat, 1.0f,  // scaling already baked into delta
-                        merged_storage, merged_ptrs);
+        if (ds_ptr) {
+            trt_merge_delta_dora(*ctx, trt_name, base_data, delta_f32.data(), ds_ptr,
+                                 in_feat, out_feat, effective_user_scale,
+                                 merged_storage, merged_ptrs);
+            dora_merged++;
+        } else {
+            trt_merge_delta(*ctx, trt_name, base_data, delta_f32.data(),
+                            in_feat, out_feat, 1.0f,  // scaling already baked into delta
+                            merged_storage, merged_ptrs);
+        }
         merged++;
     }
 
-    fprintf(stderr, "[Adapter-TRT] LoRA: %d merged, %d skipped\n", merged, skipped);
+    fprintf(stderr, "[Adapter-TRT] LoRA: %d merged (%d with DoRA), %d skipped\n", merged, dora_merged, skipped);
     return merged;
 }
 
