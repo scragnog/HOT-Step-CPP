@@ -38,10 +38,19 @@ struct AdapterGroupScales {
 // adapter's per-frame mask on every upload. Empty = always on (1.0). Applied
 // per step, never baked into weights — deliberately NOT part of the model
 // cache key, so curves can change between requests with zero model reload.
+// `gain_in_steps`: curve x-axis domain. false (default) = flow-matching t —
+// REQUIRED for interval experts trained on a t-window and for router-exported
+// curves (must match training). true = remaining-steps fraction (1 = first
+// step, 0 = last): the sampler maps each step's t to its schedule index, so
+// "50% of steps" means 50% of the steps regardless of how nonuniformly the
+// shifted schedule spaces them in t. UI percentage windows use this (a shift-3
+// schedule at 20 steps spends 17 steps above t=0.5 — a t-domain "0-50%" window
+// starved the second adapter to 3 tail steps).
 struct AdapterSpec {
     std::string        path;
     float              scale = 1.0f;
     std::vector<float> gain_curve;
+    bool               gain_in_steps = false;
 };
 
 // Evaluate a gain curve at flow-matching t. Clamps t into [0,1]; empty curve

@@ -387,20 +387,51 @@ static int dit_ggml_generate(DiTGGML *           model,
     // contents now change per step.
     const bool lora_gains_active =
         section_active && hotstep_adapter_gains_active(g_hotstep_params.adapters);
+    // Evaluate one adapter's gain at model-evaluation time t. Step-domain curves
+    // (gain_in_steps) are evaluated on the remaining-steps fraction — t is mapped
+    // to its nearest schedule index — so "half the steps" means half the STEPS.
+    // A shift-3 schedule at 20 steps spends 17 steps above t=0.5; evaluating a
+    // percentage window in raw t starved the late adapter to the last 3 steps.
+    auto lora_gain_at = [&](size_t i, float t_val) -> float {
+        const auto & gstack = g_hotstep_params.adapters;
+        if (i >= gstack.size()) return 1.0f;
+        float x = t_val;
+        if (gstack[i].gain_in_steps && schedule && num_steps > 1) {
+            int   best = 0;
+            float bd   = 1e9f;
+            for (int k = 0; k < num_steps; k++) {
+                float d = fabsf(schedule[k] - t_val);
+                if (d < bd) { bd = d; best = k; }
+            }
+            x = 1.0f - (float) best / (float) (num_steps - 1);
+        }
+        return hotstep_adapter_gain(gstack[i].gain_curve, x);
+    };
     std::vector<float> lora_mask_scaled;
     auto upload_lora_masks = [&](float t_val) {
-        const auto & gstack = g_hotstep_params.adapters;
         for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
             if (!model->lora_masks[i]) continue;
             const float * src = lora_mask_host[i].data();
             if (lora_gains_active) {
-                float g = (i < gstack.size()) ? hotstep_adapter_gain(gstack[i].gain_curve, t_val) : 1.0f;
+                float g = lora_gain_at(i, t_val);
                 lora_mask_scaled.resize((size_t) S);
                 for (int s = 0; s < S; s++) lora_mask_scaled[(size_t) s] = src[s] * g;
                 src = lora_mask_scaled.data();
             }
             ggml_backend_tensor_set(model->lora_masks[i], src, 0, (size_t) S * sizeof(float));
         }
+    };
+    // Per-step log suffix (" gains=[0.87,0.13]") so gating is verifiable from
+    // the engine log without instrumentation.
+    auto lora_gain_log = [&](float t_val) -> std::string {
+        if (!lora_gains_active) return "";
+        std::string s = " gains=[";
+        for (size_t i = 0; i < model->lora_masks.size(); i++) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%s%.2f", i ? "," : "", lora_gain_at(i, t_val));
+            s += buf;
+        }
+        return s + "]";
     };
     if (lora_gains_active) {
         fprintf(stderr, "[Adapter-RT] Timestep gains active: masks re-uploaded per evaluation\n");
@@ -1024,9 +1055,10 @@ static int dit_ggml_generate(DiTGGML *           model,
                         ggml_graph_n_nodes(gf), N, dit_graph.direct ? "direct" : "scheduler");
             }
 
-            fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]%s\n",
+            fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]%s%s\n",
                     step_idx + 1, num_steps, t_curr, solver_plugin->display_name.c_str(),
-                    (cached_count > 0 && !step_computes[step_idx]) ? " (cached)" : "");
+                    (cached_count > 0 && !step_computes[step_idx]) ? " (cached)" : "",
+                    lora_gain_log(t_curr).c_str());
             return false;
         };
 
@@ -1318,9 +1350,10 @@ static int dit_ggml_generate(DiTGGML *           model,
             }
         }
 
-        fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]%s\n", step + 1, num_steps, t_curr,
+        fprintf(stderr, "[DiT] Step %d/%d t=%.3f [%s]%s%s\n", step + 1, num_steps, t_curr,
                 solver_plugin->display_name.c_str(),
-                (!step_computes[step] && has_cached_vt) ? " (cached)" : "");
+                (!step_computes[step] && has_cached_vt) ? " (cached)" : "",
+                lora_gain_log(t_curr).c_str());
     }
     } // else (per-step loop)
 

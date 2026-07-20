@@ -206,7 +206,9 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
     set({ adapterStack: next }); writeKey("hs-adapterStack", next);
   },
   // Set one entry's active-timestep window (timestep-dependent adapters).
-  // t is flow-matching time: 1 = pure noise (first step), 0 = clean (last step).
+  // Axis is remaining-steps fraction: 1 = first step (noise), 0 = last step
+  // (clean). Evaluated per STEP by the engine (gain_domain 'steps'), so 50%
+  // means half the steps even on shift-skewed schedules.
   // Full range [0,1] means "always on" and is stripped to keep entries clean.
   setAdapterStackWindow: (path: string, stepStart: number, stepEnd: number) => {
     const cur: { path: string; scale: number; stepStart?: number; stepEnd?: number }[] = get().adapterStack || [];

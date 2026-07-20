@@ -13,10 +13,14 @@
 // user-scale multiplier. `gain_curve` (optional) is a timestep-dependent gain:
 // uniform samples of g(t) over flow-matching t ∈ [0,1], multiplied into the
 // adapter's per-frame mask each sampling step (interval experts / MoE mixing).
+// `gain_in_steps` (wire field "gain_domain": "steps" | "t", default "t"):
+// whether gain_curve's x-axis is remaining-steps fraction or flow-matching t.
+// UI windows use "steps"; trained-expert / router curves use "t".
 struct AceAdapterRef {
     std::string        name;
     float              scale = 1.0f;
     std::vector<float> gain_curve;
+    bool               gain_in_steps = false;
 };
 
 // One lyric section for per-section adapter masking (regional LoRA). `weights`

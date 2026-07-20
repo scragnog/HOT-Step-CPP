@@ -1106,7 +1106,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
                 job->status.store(2);
                 return;
             }
-            g_hotstep_params.adapters.push_back({ path, ar.scale, ar.gain_curve });
+            g_hotstep_params.adapters.push_back({ path, ar.scale, ar.gain_curve, ar.gain_in_steps });
         }
         if (!g_hotstep_params.adapters.empty()) {
             p.adapter_path  = g_hotstep_params.adapters[0].path.c_str();

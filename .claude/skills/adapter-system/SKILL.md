@@ -84,10 +84,17 @@ slices of the trajectory ("structure" expert early / "timbre" expert late — TD
   evaluation regardless (`!dit_graph.direct || lora_gains_active`). Host masks stay
   UNSCALED — scaling happens into a scratch buffer at upload so P2 rebuilds and
   repeated evals never compound gains.
-- **Wire format**: `adapters[].gain_curve` = uniform samples of g(t) over [0,1]
-  (33 from the UI). UI "Active phase X–Y%" is % of denoising, flipped to t
-  (`stepStart/stepEnd` in t-domain on stack entries); window edges are smoothstep
-  ramps CENTERED on the bound so adjacent windows crossfade summing to 1.
+- **Wire format**: `adapters[].gain_curve` = uniform samples of g(x) over [0,1]
+  (33 from the UI) + `gain_domain`: `"steps"` (x = remaining-steps fraction,
+  engine maps each eval's t to its nearest schedule index) or `"t"` (x = raw
+  flow-matching t). UI windows are ALWAYS `"steps"`; trained-expert / router
+  curves must be `"t"` (must match the training axis). This split exists because
+  shifted schedules are wildly nonuniform in t — shift-3 @ 20 steps spends 17
+  steps above t=0.5, so a t-domain "0–50%" window starved the late adapter to 3
+  tail steps ("all I hear is the first adapter"). Window edges are smoothstep
+  ramps CENTERED on the bound so adjacent windows crossfade summing to 1. Every
+  `[DiT] Step` log line appends ` gains=[..]` when gating is active — check
+  there first when a mix sounds one-sided.
 - **Training side**: Side-Step `--timestep-window-min/max` (rejection-resampled
   logit-normal; discrete mode filters the 8-step schedule) trains matching
   interval experts. T-LoRA: the high-noise expert overfits fastest — lower rank.

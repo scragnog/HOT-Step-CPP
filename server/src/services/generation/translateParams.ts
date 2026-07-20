@@ -133,21 +133,29 @@ export function translateParams(params: any): AceRequest {
   if (Array.isArray(params.loraStack) && params.loraStack.length > 0) {
     req.adapters = params.loraStack
       .filter((a: { path?: string }) => a && a.path)
-      .map((a: { path: string; scale?: number; stepStart?: number; stepEnd?: number; stepSoft?: number; gainCurve?: number[] }) => {
-        const entry: { name: string; scale: number; gain_curve?: number[] } = {
+      .map((a: { path: string; scale?: number; stepStart?: number; stepEnd?: number; stepSoft?: number; gainCurve?: number[]; gainDomain?: string }) => {
+        const entry: { name: string; scale: number; gain_curve?: number[]; gain_domain?: 'steps' | 't' } = {
           name: mapPath(a.path) as string,
           scale: a.scale ?? 1.0,
         };
         // Timestep-dependent gain (interval experts / MoE mixing): an explicit
-        // curve wins; otherwise an active-t window [stepStart, stepEnd] compiles
+        // curve wins; otherwise an active window [stepStart, stepEnd] compiles
         // to one. A full-range window (0..1) means "always on" — no curve.
+        //
+        // Domain: UI windows are "% of denoising" and MUST evaluate per STEP
+        // ('steps') — shifted schedules are wildly nonuniform in t (17 of 20
+        // steps sit above t=0.5 at shift 3, which starved the late adapter).
+        // Explicit curves default to 't' (trained-expert / router curves must
+        // match their training axis) unless gainDomain says otherwise.
         if (Array.isArray(a.gainCurve) && a.gainCurve.length > 0) {
           entry.gain_curve = a.gainCurve.map((g) => Math.max(0, Number(g) || 0));
+          entry.gain_domain = a.gainDomain === 'steps' ? 'steps' : 't';
         } else {
           const s = a.stepStart ?? 0;
           const e = a.stepEnd ?? 1;
           if (s > 0 || e < 1) {
             entry.gain_curve = windowToGainCurve(s, e, a.stepSoft ?? 0.1);
+            entry.gain_domain = 'steps';
           }
         }
         return entry;
