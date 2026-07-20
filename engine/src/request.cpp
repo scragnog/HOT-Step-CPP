@@ -165,7 +165,7 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
                 }
                 // curve x-axis domain: "steps" (remaining-steps fraction) or "t"
                 yyjson_val * gd = yyjson_obj_get(a_val, "gain_domain");
-                if (gd && yyjson_is_str(gd)) ref.gain_in_steps = (strcmp(yy_str(gd), "steps") == 0);
+                if (gd && yyjson_is_str(gd)) ref.gain_in_steps = (yy_str(gd) == "steps");
             }
             if (!ref.name.empty()) r->adapters.push_back(ref);
         }
