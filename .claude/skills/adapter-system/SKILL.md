@@ -61,6 +61,39 @@ Different adapters active in different song sections, driven by lyric directives
 - **Graph** (`dit-graph.h`): one `[1,S,1]` F32 mask tensor per adapter, shared across layers. Frame-indexed projections get `Σᵢ (Δᵢ@x) ⊙ maskᵢ`; token/global projections (cross-attn k/v, cond_embed) get the adapter's scalar **mean** section weight instead — a frame mask is the wrong axis there (`dit-graph.h:430-433`). Known limitation: text conditioning is therefore a constant blend across the song.
 - **Sampler** (`hot-step-sampler.h`): P1 builds an initial frame→section map proportional to section character counts (:306-323), with a ~0.5 s triangular crossfade between sections (`ce57675`). P2: at `adapter_section_align_at` fraction of steps (default 0.55, UI "Alignment Timing"), estimate x0, run alignment extraction on a **private scheduler**, map frames → dominant lyric token → section via the header-anchored token map (`pipeline-synth-ops.cpp:1419-1495`), median-smooth, rebuild masks (:338-385). Falls back to the P1 map on failure.
 
+## Timestep-dependent adapter gating (interval experts / MoE) — shipped 2026-07-20
+
+Per-adapter gain curves g(t) over flow-matching t (1=noise → 0=clean): each stacked
+adapter's per-frame mask is multiplied by its interpolated g(t) at EVERY model
+evaluation (`upload_lora_masks(t_val)` in `hot-step-sampler.h` — the single helper
+that replaced all five raw mask-upload sites). Different adapters can own different
+slices of the trajectory ("structure" expert early / "timbre" expert late — TD-LoRA
+/ TimeStep Master scalar mixing). Key facts:
+
+- **Rides the per-section machinery**: a curve-carrying stack with no lyric
+  directives gets a synthetic single whole-song section from `translateParams.ts`
+  (+ forced runtime mode); allowed at stack size 1 (gates in `dit.h` and
+  `hot-step-server.cpp` accept `>=2 adapters OR gains active`). Composes with real
+  per-section directives (mask × gain).
+- **Curves are NOT in the ModelKey** — deliberate: they change per-step mask
+  uploads only, never loaded weights, so mixing retunes with zero model reload
+  (the `|sect` marker still applies via the synthetic section). Do not "fix" this
+  by adding them to the key.
+- **Direct-graph caveat**: masks are pinned resident on direct graphs and normally
+  skip per-step re-upload; with gains active `upload_lora_masks` runs on EVERY
+  evaluation regardless (`!dit_graph.direct || lora_gains_active`). Host masks stay
+  UNSCALED — scaling happens into a scratch buffer at upload so P2 rebuilds and
+  repeated evals never compound gains.
+- **Wire format**: `adapters[].gain_curve` = uniform samples of g(t) over [0,1]
+  (33 from the UI). UI "Active phase X–Y%" is % of denoising, flipped to t
+  (`stepStart/stepEnd` in t-domain on stack entries); window edges are smoothstep
+  ramps CENTERED on the bound so adjacent windows crossfade summing to 1.
+- **Training side**: Side-Step `--timestep-window-min/max` (rejection-resampled
+  logit-normal; discrete mode filters the 8-step schedule) trains matching
+  interval experts. T-LoRA: the high-noise expert overfits fastest — lower rank.
+- Inherits per-section constraints: runtime-only (no DoRA rescale), N× VRAM
+  (Q4_0 knob), no basin re-base.
+
 ### Per-section hard constraints (violating any reproduces a shipped bug)
 
 1. Re-upload masks every step + after graph rebuilds — Golden rule 1.
