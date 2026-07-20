@@ -92,7 +92,16 @@ slices of the trajectory ("structure" expert early / "timbre" expert late — TD
   logit-normal; discrete mode filters the 8-step schedule) trains matching
   interval experts. T-LoRA: the high-noise expert overfits fastest — lower rank.
 - Inherits per-section constraints: runtime-only (no DoRA rescale), N× VRAM
-  (Q4_0 knob), no basin re-base.
+  (Q4_0 knob), no basin re-base. `runtime_lowrank` is CLOBBERED to plain runtime
+  (server + engine) — windows currently require the full-delta path; masked
+  low-rank apply is untried future work.
+- **VRAM trap (shipped bug, fixed same day)**: windows force runtime mode
+  server-side, but `getGlobalParams()` gated `adapterRuntimeQuant` on the
+  *selected* mode — a Merge-mode user with windows got full BF16 deltas
+  (~8 GB/adapter on XL, 32 GB with 2 + reload churn) and their Merge-VRAM "Low"
+  setting meant nothing. Quant now flows (and the Adapter VRAM knob shows)
+  whenever windows are active. Any future knob that matters on a *forced*
+  path must gate on the EFFECTIVE mode, not the selected one.
 
 ### Per-section hard constraints (violating any reproduces a shipped bug)
 

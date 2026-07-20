@@ -361,7 +361,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
     // to match the badge/UI — a stack persisted from a previous Advanced session
     // must not override the Simple-mode selection.
     const isStack = !!(s.advancedAdapters && s.adapterStack && s.adapterStack.length > 0);
-    const rawStack: { path: string; scale: number }[] = isStack
+    const rawStack: { path: string; scale: number; stepStart?: number; stepEnd?: number }[] = isStack
       ? s.adapterStack
       : (s.adapter ? [{ path: s.adapter, scale: s.adapterScale }] : []);
 
@@ -382,6 +382,11 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
         : rawStack.map(e => ({ ...e, scale: +(budget / rawStack.length).toFixed(4) }));
     }
     const primary = stack[0]?.path || '';
+    // Timestep windows force runtime mode server-side regardless of the selected
+    // adapter mode — runtime-only knobs must flow whenever they're present.
+    const hasStepWindows = stack.some(
+      (e: { stepStart?: number; stepEnd?: number }) => e.stepStart !== undefined || e.stepEnd !== undefined,
+    );
 
     // Trigger words: one per loaded adapter (every adapter in the stack
     // contributes its filename trigger, not just the first).
@@ -408,7 +413,10 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       adapterMode: primary ? s.adapterMode : 'merge',
       // Runtime delta quantization (VRAM saver) — relevant in both runtime modes
       // (lowrank still stores full-size re-base corrections / Conv1d fallbacks).
-      adapterRuntimeQuant: (primary && (s.adapterMode === 'runtime' || s.adapterMode === 'runtime_lowrank'))
+      // Also sent when timestep windows are active: they force runtime mode
+      // server-side even from Merge, and gating on the *selected* mode silently
+      // killed the knob there (full BF16 deltas, 2×8 GB — the 32 GB bug).
+      adapterRuntimeQuant: (primary && (s.adapterMode === 'runtime' || s.adapterMode === 'runtime_lowrank' || hasStepWindows))
         ? s.adapterRuntimeQuant : undefined,
       // Merge low-VRAM storage (native-quant re-encode) — only relevant in merge mode.
       adapterMergeLowVram: (primary && s.adapterMode !== 'runtime' && s.adapterMergeLowVram) ? true : undefined,

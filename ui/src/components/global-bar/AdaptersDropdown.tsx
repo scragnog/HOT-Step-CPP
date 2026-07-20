@@ -61,6 +61,10 @@ export const AdaptersDropdown: React.FC = () => {
   // In advanced mode the stack drives everything; in simple mode the single adapter does.
   const stack: { path: string; scale: number; stepStart?: number; stepEnd?: number }[] = gp.adapterStack || [];
 
+  // Any stack entry with a timestep window forces runtime mode server-side —
+  // several knobs below change visibility/meaning when this is true.
+  const stackHasWindows = stack.some(e => e.stepStart !== undefined || e.stepEnd !== undefined);
+
   // Timestep window helpers. Store fields stepStart/stepEnd are flow-matching t
   // (1 = noise, 0 = clean); the UI shows "% of denoising" (0% = first step),
   // so display = (1 − t) flipped: startPct derives from stepEnd and vice versa.
@@ -368,6 +372,15 @@ export const AdaptersDropdown: React.FC = () => {
                 </div>
               ))}
 
+              {stackHasWindows && (
+                <div className="px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-[10px] text-amber-400/90 leading-relaxed m-0">
+                    {t('adapter.timestepWindowVram',
+                      'Timestep windows force Runtime mode: each adapter holds its own full-size deltas in VRAM. Set Adapter VRAM below to Q8 ½ or Q4 ¼ to keep this affordable.')}
+                  </p>
+                </div>
+              )}
+
               {settings.triggerUseFilename && stackTriggerWords && (
                 <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-pink-500/10 border border-pink-500/20">
                   <Tag size={10} className="text-pink-400 flex-shrink-0" />
@@ -487,8 +500,10 @@ export const AdaptersDropdown: React.FC = () => {
           )}
 
           {/* Adapter Quantization — runtime modes (quantizes the in-VRAM full-size
-              deltas; in Low-Rank mode that's the re-base correction + Conv1d fallbacks) */}
-          {(gp.adapterMode === 'runtime' || gp.adapterMode === 'runtime_lowrank') && (
+              deltas; in Low-Rank mode that's the re-base correction + Conv1d fallbacks).
+              Also shown when timestep windows are set: windows force runtime mode
+              server-side, so this knob governs VRAM even from Merge/Low-Rank. */}
+          {(gp.adapterMode === 'runtime' || gp.adapterMode === 'runtime_lowrank' || stackHasWindows) && (
             <div>
               <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
                 {t('adapter.runtimeQuant', 'Adapter VRAM')}
