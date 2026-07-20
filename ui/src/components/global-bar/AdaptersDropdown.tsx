@@ -59,7 +59,18 @@ export const AdaptersDropdown: React.FC = () => {
 
   const fileBrowserMode = gp.advancedAdapters ? 'folder' as const : 'file' as const;
   // In advanced mode the stack drives everything; in simple mode the single adapter does.
-  const stack: { path: string; scale: number }[] = gp.adapterStack || [];
+  const stack: { path: string; scale: number; stepStart?: number; stepEnd?: number }[] = gp.adapterStack || [];
+
+  // Timestep window helpers. Store fields stepStart/stepEnd are flow-matching t
+  // (1 = noise, 0 = clean); the UI shows "% of denoising" (0% = first step),
+  // so display = (1 − t) flipped: startPct derives from stepEnd and vice versa.
+  const winStartPct = (e: { stepEnd?: number }) => Math.round((1 - (e.stepEnd ?? 1)) * 100);
+  const winEndPct = (e: { stepStart?: number }) => Math.round((1 - (e.stepStart ?? 0)) * 100);
+  const setWindowPct = (path: string, sPct: number, ePct: number) => {
+    const lo = Math.max(0, Math.min(100, Math.min(sPct, ePct)));
+    const hi = Math.max(0, Math.min(100, Math.max(sPct, ePct)));
+    gp.setAdapterStackWindow(path, 1 - hi / 100, 1 - lo / 100);
+  };
   const primaryPath = gp.advancedAdapters ? (stack[0]?.path || '') : gp.adapter;
   const hasAdapter = gp.advancedAdapters ? stack.length > 0 : !!gp.adapter;
   const triggerWord = deriveTriggerWord(primaryPath);
@@ -328,6 +339,32 @@ export const AdaptersDropdown: React.FC = () => {
                       : isBlend ? t('adapter.weight', 'Weight') : t('adapter.adapterScale', 'Adapter Scale')}
                     value={entry.scale}
                     onChange={v => gp.setAdapterStackScale(entry.path, v)} min={0} max={4} step={0.05} showInput />
+                  {/* Timestep window (interval experts): which slice of denoising this
+                      adapter is active in. 0% = first step (structure), 100% = last
+                      (texture/detail). Any non-full window forces runtime mode. */}
+                  <div className="flex items-center gap-1.5"
+                    title={t('adapter.timestepWindowHint',
+                      'Active slice of the denoising process. Early steps shape structure/rhythm, late steps shape timbre/detail. Windows crossfade where adapters meet. Forces runtime mode.')}>
+                    <span className="text-[10px] text-zinc-500 flex-shrink-0">
+                      {t('adapter.timestepWindow', 'Active phase')}
+                    </span>
+                    <input type="number" min={0} max={100} step={5} value={winStartPct(entry)}
+                      onChange={e => setWindowPct(entry.path, Number(e.target.value), winEndPct(entry))}
+                      className="w-12 px-1 py-0.5 text-[10px] text-right rounded bg-white dark:bg-black/30 border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300" />
+                    <span className="text-[10px] text-zinc-500">–</span>
+                    <input type="number" min={0} max={100} step={5} value={winEndPct(entry)}
+                      onChange={e => setWindowPct(entry.path, winStartPct(entry), Number(e.target.value))}
+                      className="w-12 px-1 py-0.5 text-[10px] text-right rounded bg-white dark:bg-black/30 border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300" />
+                    <span className="text-[10px] text-zinc-500">%</span>
+                    {(entry.stepStart !== undefined || entry.stepEnd !== undefined) && (
+                      <button type="button"
+                        onClick={() => gp.setAdapterStackWindow(entry.path, 0, 1)}
+                        className="text-[10px] text-amber-400/80 hover:text-amber-300 flex-shrink-0"
+                        title={t('adapter.timestepWindowReset', 'Reset to always active')}>
+                        ⏱ {t('adapter.timestepWindowClear', 'clear')}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
 

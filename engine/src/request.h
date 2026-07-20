@@ -10,10 +10,13 @@
 
 // One adapter reference in a multi-adapter stack. `name` is a registry adapter
 // id (or an absolute path, resolved by the server); `scale` is its individual
-// user-scale multiplier.
+// user-scale multiplier. `gain_curve` (optional) is a timestep-dependent gain:
+// uniform samples of g(t) over flow-matching t ∈ [0,1], multiplied into the
+// adapter's per-frame mask each sampling step (interval experts / MoE mixing).
 struct AceAdapterRef {
-    std::string name;
-    float       scale = 1.0f;
+    std::string        name;
+    float              scale = 1.0f;
+    std::vector<float> gain_curve;
 };
 
 // One lyric section for per-section adapter masking (regional LoRA). `weights`

@@ -29,11 +29,14 @@ export interface GlobalParams {
   // Adapters
   adapter: string; setAdapter: (v: string) => void;
   adapterScale: number; setAdapterScale: (v: number) => void;
-  // Multi-adapter stack: { path, scale }[] applied together (supersedes `adapter`)
-  adapterStack: { path: string; scale: number }[];
-  setAdapterStack: (v: { path: string; scale: number }[]) => void;
+  // Multi-adapter stack: { path, scale }[] applied together (supersedes `adapter`).
+  // Optional stepStart/stepEnd: active-timestep window in flow-matching t
+  // (timestep-dependent adapters / interval experts).
+  adapterStack: { path: string; scale: number; stepStart?: number; stepEnd?: number }[];
+  setAdapterStack: (v: { path: string; scale: number; stepStart?: number; stepEnd?: number }[]) => void;
   toggleAdapterInStack: (path: string, scale?: number) => void;
   setAdapterStackScale: (path: string, scale: number) => void;
+  setAdapterStackWindow: (path: string, stepStart: number, stepEnd: number) => void;
   // Stack scaling: 'sum' (raw scales summed) or 'blend' (weights normalised to budget)
   adapterStackMode: string; setAdapterStackMode: (v: string) => void;
   adapterStackBudget: number; setAdapterStackBudget: (v: number) => void;

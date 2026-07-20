@@ -205,6 +205,19 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
     const next = cur.map(a => (a.path === path ? { ...a, scale } : a));
     set({ adapterStack: next }); writeKey("hs-adapterStack", next);
   },
+  // Set one entry's active-timestep window (timestep-dependent adapters).
+  // t is flow-matching time: 1 = pure noise (first step), 0 = clean (last step).
+  // Full range [0,1] means "always on" and is stripped to keep entries clean.
+  setAdapterStackWindow: (path: string, stepStart: number, stepEnd: number) => {
+    const cur: { path: string; scale: number; stepStart?: number; stepEnd?: number }[] = get().adapterStack || [];
+    const full = stepStart <= 0 && stepEnd >= 1;
+    const next = cur.map(a => {
+      if (a.path !== path) return a;
+      if (full) { const { stepStart: _s, stepEnd: _e, ...rest } = a; return rest; }
+      return { ...a, stepStart, stepEnd };
+    });
+    set({ adapterStack: next }); writeKey("hs-adapterStack", next);
+  },
   setAdapterStackMode: (v: any) => { set({ adapterStackMode: v }); writeKey("hs-adapterStackMode", v); },
   setAdapterStackBudget: (v: any) => { set({ adapterStackBudget: v }); writeKey("hs-adapterStackBudget", v); },
   setAdapterSectionAlignAt: (v: any) => { set({ adapterSectionAlignAt: v }); writeKey("hs-adapterSectionAlignAt", v); },
@@ -362,9 +375,11 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
     if (isStack && s.adapterStackMode === 'blend' && rawStack.length >= 2) {
       const budget = s.adapterStackBudget ?? 0.75;
       const sumW = rawStack.reduce((acc, e) => acc + (e.scale || 0), 0);
+      // Spread each entry so per-adapter extras (stepStart/stepEnd timestep
+      // window, etc.) survive the blend re-scale.
       stack = sumW > 0
-        ? rawStack.map(e => ({ path: e.path, scale: +(budget * (e.scale || 0) / sumW).toFixed(4) }))
-        : rawStack.map(e => ({ path: e.path, scale: +(budget / rawStack.length).toFixed(4) }));
+        ? rawStack.map(e => ({ ...e, scale: +(budget * (e.scale || 0) / sumW).toFixed(4) }))
+        : rawStack.map(e => ({ ...e, scale: +(budget / rawStack.length).toFixed(4) }));
     }
     const primary = stack[0]?.path || '';
 

@@ -1106,7 +1106,7 @@ static void synth_worker(std::shared_ptr<Job>    job,
                 job->status.store(2);
                 return;
             }
-            g_hotstep_params.adapters.push_back({ path, ar.scale });
+            g_hotstep_params.adapters.push_back({ path, ar.scale, ar.gain_curve });
         }
         if (!g_hotstep_params.adapters.empty()) {
             p.adapter_path  = g_hotstep_params.adapters[0].path.c_str();
@@ -1118,7 +1118,15 @@ static void synth_worker(std::shared_ptr<Job>    job,
             g_hotstep_params.adapters.empty() ? "" : " Adapters=",
             (g_keep_loaded || req_keep_loaded) ? " [keep-loaded]" : "");
     for (const auto & a : g_hotstep_params.adapters) {
-        fprintf(stderr, "[Server]   adapter: %s (scale=%.2f)\n", a.path.c_str(), a.scale);
+        if (a.gain_curve.empty()) {
+            fprintf(stderr, "[Server]   adapter: %s (scale=%.2f)\n", a.path.c_str(), a.scale);
+        } else {
+            fprintf(stderr, "[Server]   adapter: %s (scale=%.2f, gain curve %zu pts, g(1)=%.2f g(0.5)=%.2f g(0)=%.2f)\n",
+                    a.path.c_str(), a.scale, a.gain_curve.size(),
+                    hotstep_adapter_gain(a.gain_curve, 1.0f),
+                    hotstep_adapter_gain(a.gain_curve, 0.5f),
+                    hotstep_adapter_gain(a.gain_curve, 0.0f));
+        }
     }
 
     // HOT-STEP: per-request co-resident mode. Once flipped to NEVER, stays
@@ -1158,9 +1166,13 @@ static void synth_worker(std::shared_ptr<Job>    job,
     g_hotstep_params.adapter_section_isolation = sf.adapter_section_isolation;
     // Per-section adapter masking (regional LoRA). Carry the parsed sections into
     // the sideband and force runtime mode — merge bakes weights and cannot vary
-    // per frame. Only active with a multi-adapter stack.
+    // per frame. Active with a multi-adapter stack, or with any stack (even a
+    // single adapter) whose entries carry timestep gain curves — step gating
+    // rides the same per-adapter mask machinery via a synthetic single section.
     g_hotstep_params.adapter_sections.clear();
-    if (!ace_reqs[0].adapter_sections.empty() && g_hotstep_params.adapters.size() >= 2) {
+    if (!ace_reqs[0].adapter_sections.empty() &&
+        (g_hotstep_params.adapters.size() >= 2 ||
+         (!g_hotstep_params.adapters.empty() && hotstep_adapter_gains_active(g_hotstep_params.adapters)))) {
         for (const auto & s : ace_reqs[0].adapter_sections) {
             AdapterSection sec;
             sec.weights = s.weights;

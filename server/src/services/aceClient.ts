@@ -87,7 +87,7 @@ export interface AceRequest {
    *  `adapter`/`adapter_scale`: every entry is applied with its own scale
    *  (merged sequentially, or summed in runtime mode). Each `name` is a registry
    *  adapter id (or absolute path) resolved by the engine. */
-  adapters?: { name: string; scale: number }[];
+  adapters?: { name: string; scale: number; gain_curve?: number[] }[];
   /** Per-section adapter masking (regional LoRA). Ordered per lyric section; each
    *  entry gives the effective per-adapter scale for that section (indexed to
    *  `adapters`) and a relative size hint. Runtime mode only. */

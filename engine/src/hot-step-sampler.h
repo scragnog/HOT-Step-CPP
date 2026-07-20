@@ -377,6 +377,35 @@ static int dit_ggml_generate(DiTGGML *           model,
                 model->lora_masks.size(), S, secs.size());
     }
 
+    // ── Timestep-dependent adapter gains (interval experts / MoE mixing) ─────
+    // Each stacked adapter may carry a gain curve g(t); the effective mask
+    // uploaded for a model evaluation at timestep t is lora_mask_host[i] * g_i(t).
+    // Scaling happens into a scratch buffer at upload time — the host masks stay
+    // unscaled so P2 rebuilds and repeated evaluations never compound gains.
+    // With gains active, masks MUST be re-uploaded for every evaluation even on
+    // direct graphs (where they are otherwise pinned resident), because their
+    // contents now change per step.
+    const bool lora_gains_active =
+        section_active && hotstep_adapter_gains_active(g_hotstep_params.adapters);
+    std::vector<float> lora_mask_scaled;
+    auto upload_lora_masks = [&](float t_val) {
+        const auto & gstack = g_hotstep_params.adapters;
+        for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
+            if (!model->lora_masks[i]) continue;
+            const float * src = lora_mask_host[i].data();
+            if (lora_gains_active) {
+                float g = (i < gstack.size()) ? hotstep_adapter_gain(gstack[i].gain_curve, t_val) : 1.0f;
+                lora_mask_scaled.resize((size_t) S);
+                for (int s = 0; s < S; s++) lora_mask_scaled[(size_t) s] = src[s] * g;
+                src = lora_mask_scaled.data();
+            }
+            ggml_backend_tensor_set(model->lora_masks[i], src, 0, (size_t) S * sizeof(float));
+        }
+    };
+    if (lora_gains_active) {
+        fprintf(stderr, "[Adapter-RT] Timestep gains active: masks re-uploaded per evaluation\n");
+    }
+
     // ── P2: alignment-driven section boundaries ───────────────────────────────
     // Run the cross-attention alignment once at ~align_at, derive frame→section
     // from the model's real lyric→audio alignment, and rebuild the masks. Keeps
@@ -655,10 +684,11 @@ static int dit_ggml_generate(DiTGGML *           model,
             ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N_graph * sizeof(int32_t));
             ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N_graph * sizeof(uint16_t));
             ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N_graph * sizeof(uint16_t));
-            for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
-                if (model->lora_masks[i])
-                    ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
-            }
+        }
+        // Adapter masks: refresh on scheduler-fallback graphs (clobbered), and on
+        // ANY graph when timestep gains are active (values change with t_val).
+        if (!dit_graph.direct || lora_gains_active) {
+            upload_lora_masks(t_val);
         }
 
         // Pack xt into input tensor (cond + uncond slots)
@@ -711,10 +741,9 @@ static int dit_ggml_generate(DiTGGML *           model,
                 ggml_backend_tensor_set(t_pos, pos_data.data(), 0, S * N * sizeof(int32_t));
                 ggml_backend_tensor_set(t_sa_mask_sw, sa_sw_data.data(), 0, S * S * N * sizeof(uint16_t));
                 ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0, enc_S * S * N * sizeof(uint16_t));
-                for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
-                    if (model->lora_masks[i])
-                        ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
-                }
+            }
+            if (!dit_graph.direct || lora_gains_active) {
+                upload_lora_masks(t_val);
             }
             static_graph_compute(&dit_graph, model->backend, model->sched, gf);
             ggml_backend_tensor_get(t_output, vt_uncond.data(), 0, n_total * sizeof(float));
@@ -762,7 +791,8 @@ static int dit_ggml_generate(DiTGGML *           model,
                                 in_ch * T * N_graph * sizeof(float));
 
         // Re-upload masks/positions (full N_graph) — scheduler fallback only;
-        // resident on a direct graph.
+        // resident on a direct graph. Adapter masks additionally refresh when
+        // timestep gains are active (values change with t_val).
         if (!dit_graph.direct) {
             ggml_backend_tensor_set(t_pos, pos_data.data(), 0,
                                     S * N_graph * sizeof(int32_t));
@@ -770,10 +800,9 @@ static int dit_ggml_generate(DiTGGML *           model,
                                     S * S * N_graph * sizeof(uint16_t));
             ggml_backend_tensor_set(t_ca_mask, ca_data.data(), 0,
                                     enc_S * S * N_graph * sizeof(uint16_t));
-            for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
-                if (model->lora_masks[i])
-                    ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
-            }
+        }
+        if (!dit_graph.direct || lora_gains_active) {
+            upload_lora_masks(t_val);
         }
 
         // Forward pass
@@ -988,10 +1017,8 @@ static int dit_ggml_generate(DiTGGML *           model,
 
                 // Re-upload per-section adapter masks into the rebuilt graph's fresh
                 // mask tensors (else the post-cutoff steps run with garbage masks).
-                for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
-                    if (model->lora_masks[i])
-                        ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
-                }
+                // Scaled by the current step's timestep gain when active.
+                upload_lora_masks(t_curr);
 
                 fprintf(stderr, "[DiT] Graph rebuilt: %d nodes (was 2N, now N=%d, %s)\n",
                         ggml_graph_n_nodes(gf), N, dit_graph.direct ? "direct" : "scheduler");
@@ -1138,11 +1165,8 @@ static int dit_ggml_generate(DiTGGML *           model,
             // Re-upload per-section adapter masks — the rebuild created fresh mask
             // input tensors ([1,S,1], batch-independent) that would otherwise be
             // uninitialised, silently corrupting the adapter effect for the final
-            // (post-cutoff) steps.
-            for (size_t i = 0; i < model->lora_masks.size() && i < lora_mask_host.size(); i++) {
-                if (model->lora_masks[i])
-                    ggml_backend_tensor_set(model->lora_masks[i], lora_mask_host[i].data(), 0, (size_t) S * sizeof(float));
-            }
+            // (post-cutoff) steps. Scaled by the current step's timestep gain.
+            upload_lora_masks(t_curr);
 
             fprintf(stderr, "[DiT] Graph rebuilt: %d nodes (was 2N, now N=%d, %s)\n",
                     ggml_graph_n_nodes(gf), N, dit_graph.direct ? "direct" : "scheduler");

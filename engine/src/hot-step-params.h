@@ -31,10 +31,31 @@ struct AdapterGroupScales {
 // absolute adapter path (flat .safetensors file or PEFT directory); `scale` is
 // this adapter's individual user-scale multiplier. Group scales and basin
 // re-base apply globally to every adapter in the stack.
+//
+// `gain_curve`: timestep-dependent adapter gain (interval experts / MoE-style
+// mixing). Uniform samples of g(t) over flow-matching t ∈ [0,1] (t=1 noise,
+// t=0 clean), linearly interpolated by the sampler and multiplied into this
+// adapter's per-frame mask on every upload. Empty = always on (1.0). Applied
+// per step, never baked into weights — deliberately NOT part of the model
+// cache key, so curves can change between requests with zero model reload.
 struct AdapterSpec {
-    std::string path;
-    float       scale = 1.0f;
+    std::string        path;
+    float              scale = 1.0f;
+    std::vector<float> gain_curve;
 };
+
+// Evaluate a gain curve at flow-matching t. Clamps t into [0,1]; empty curve
+// means "always on".
+static inline float hotstep_adapter_gain(const std::vector<float> & curve, float t) {
+    if (curve.empty()) return 1.0f;
+    if (curve.size() == 1) return curve[0];
+    float x  = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    float f  = x * (float) (curve.size() - 1);
+    int   i0 = (int) f;
+    if (i0 >= (int) curve.size() - 1) return curve.back();
+    float fr = f - (float) i0;
+    return curve[(size_t) i0] * (1.0f - fr) + curve[(size_t) i0 + 1] * fr;
+}
 
 // One lyric section for per-section adapter masking (regional LoRA). `weights`
 // are the effective per-adapter scales for this section (indexed to the adapter
@@ -212,10 +233,22 @@ struct HotStepParams {
 // and in adapter-merge.h during adapter loading.
 inline HotStepParams g_hotstep_params;
 
+// True when any adapter in the stack carries a timestep gain curve. Gain-gated
+// stacks ride the per-section (separate per-adapter DiTLoRA + mask) load path
+// even without lyric directives, and are allowed at stack size 1.
+static inline bool hotstep_adapter_gains_active(const std::vector<AdapterSpec> & adapters) {
+    for (const auto & a : adapters) {
+        if (!a.gain_curve.empty()) return true;
+    }
+    return false;
+}
+
 // Stable signature of a multi-adapter stack, for the DiT model cache key.
 // Encodes each adapter's path and the bit-pattern of its scale so distinct
 // stacks (or the same stack with a different per-adapter scale) map to distinct
 // cache entries. Empty stack => empty string (single-adapter legacy keying).
+// Gain curves are deliberately EXCLUDED: they only affect per-step mask
+// uploads, never loaded weights (see AdapterSpec).
 static inline std::string hotstep_adapter_stack_sig(const std::vector<AdapterSpec> & adapters) {
     std::string s;
     for (const auto & a : adapters) {

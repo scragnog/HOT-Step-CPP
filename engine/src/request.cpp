@@ -154,6 +154,15 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
                 yyjson_val * sv = yyjson_obj_get(a_val, "scale");
                 if (nv && yyjson_is_str(nv)) ref.name = yy_str(nv);
                 if (sv && yyjson_is_num(sv)) ref.scale = (float) yyjson_get_num(sv);
+                // timestep gain curve: array of g(t) samples over t ∈ [0,1]
+                yyjson_val * gv = yyjson_obj_get(a_val, "gain_curve");
+                if (gv && yyjson_is_arr(gv)) {
+                    size_t       g_idx, g_max;
+                    yyjson_val * g_val;
+                    yyjson_arr_foreach(gv, g_idx, g_max, g_val) {
+                        if (yyjson_is_num(g_val)) ref.gain_curve.push_back((float) yyjson_get_num(g_val));
+                    }
+                }
             }
             if (!ref.name.empty()) r->adapters.push_back(ref);
         }
@@ -601,6 +610,11 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
             yyjson_mut_val * o = yyjson_mut_obj(doc);
             yyjson_mut_obj_add_strcpy(doc, o, "name", a.name.c_str());
             yyjson_mut_obj_add_real(doc, o, "scale", a.scale);
+            if (!a.gain_curve.empty()) {
+                yyjson_mut_val * ga = yyjson_mut_arr(doc);
+                for (float g : a.gain_curve) yyjson_mut_arr_add_real(doc, ga, g);
+                yyjson_mut_obj_add_val(doc, o, "gain_curve", ga);
+            }
             yyjson_mut_arr_append(arr, o);
         }
         yyjson_mut_obj_add_val(doc, root, "adapters", arr);

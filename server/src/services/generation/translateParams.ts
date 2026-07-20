@@ -7,6 +7,39 @@ import type { AceRequest } from '../../services/aceClient.js';
 import { mapPath } from '../../services/pathMapper.js';
 import { parseAdapterSections, stripAdapterDirectives } from './adapterSections.js';
 
+/** Samples per compiled timestep gain curve (t ∈ [0,1], uniform). */
+const GAIN_CURVE_SAMPLES = 33;
+
+/**
+ * Compile an active-timestep window into a gain curve g(t) sampled uniformly
+ * over flow-matching t ∈ [0,1] (t=1 noise → t=0 clean).
+ *
+ * Edges use smoothstep ramps of width `soft` CENTERED on the window bounds
+ * (g=0.5 exactly at start/end). Two adapters sharing a boundary — e.g. a
+ * "structure" expert on [0.5, 1] and a "timbre" expert on [0, 0.5] — therefore
+ * crossfade with gains summing to exactly 1 across the transition.
+ */
+function windowToGainCurve(start: number, end: number, soft = 0.1): number[] {
+  const lo = Math.min(start, end);
+  const hi = Math.max(start, end);
+  const smooth = (x: number) => {
+    const c = Math.max(0, Math.min(1, x));
+    return c * c * (3 - 2 * c);
+  };
+  // Ramp centered on an edge: 0 at edge-soft/2, 0.5 at edge, 1 at edge+soft/2.
+  const rise = (t: number, edge: number) =>
+    soft > 0 ? smooth((t - (edge - soft / 2)) / soft) : (t >= edge ? 1 : 0);
+  const curve: number[] = [];
+  for (let i = 0; i < GAIN_CURVE_SAMPLES; i++) {
+    const t = i / (GAIN_CURVE_SAMPLES - 1);
+    // Window bounds at the domain ends need no ramp (nothing to fade to).
+    const gLo = lo <= 0 ? 1 : rise(t, lo);
+    const gHi = hi >= 1 ? 1 : 1 - rise(t, hi);
+    curve.push(gLo * gHi);
+  }
+  return curve;
+}
+
 /** Translate frontend params to AceRequest format */
 export function translateParams(params: any): AceRequest {
   const req: AceRequest = {
@@ -100,10 +133,25 @@ export function translateParams(params: any): AceRequest {
   if (Array.isArray(params.loraStack) && params.loraStack.length > 0) {
     req.adapters = params.loraStack
       .filter((a: { path?: string }) => a && a.path)
-      .map((a: { path: string; scale?: number }) => ({
-        name: mapPath(a.path) as string,
-        scale: a.scale ?? 1.0,
-      }));
+      .map((a: { path: string; scale?: number; stepStart?: number; stepEnd?: number; stepSoft?: number; gainCurve?: number[] }) => {
+        const entry: { name: string; scale: number; gain_curve?: number[] } = {
+          name: mapPath(a.path) as string,
+          scale: a.scale ?? 1.0,
+        };
+        // Timestep-dependent gain (interval experts / MoE mixing): an explicit
+        // curve wins; otherwise an active-t window [stepStart, stepEnd] compiles
+        // to one. A full-range window (0..1) means "always on" — no curve.
+        if (Array.isArray(a.gainCurve) && a.gainCurve.length > 0) {
+          entry.gain_curve = a.gainCurve.map((g) => Math.max(0, Number(g) || 0));
+        } else {
+          const s = a.stepStart ?? 0;
+          const e = a.stepEnd ?? 1;
+          if (s > 0 || e < 1) {
+            entry.gain_curve = windowToGainCurve(s, e, a.stepSoft ?? 0.1);
+          }
+        }
+        return entry;
+      });
   }
   if (params.adapterGroupScales) req.adapter_group_scales = params.adapterGroupScales;
   if (params.adapterMode) req.adapter_mode = params.adapterMode;
@@ -133,6 +181,20 @@ export function translateParams(params: any): AceRequest {
     // must STILL be stripped — otherwise `[Verse]{x=0.9}` reaches the LM/encoder
     // as garbage tokens.
     req.lyrics = stripAdapterDirectives(req.lyrics);
+  }
+  // Timestep-dependent adapter gating (interval experts / MoE mixing) rides the
+  // engine's per-section mask machinery. When any stacked adapter carries a gain
+  // curve but lyric directives produced no sections, synthesize a single
+  // whole-song section carrying the stack scales, and force runtime mode (merge
+  // bakes weights once; gains vary per step). P2 alignment stays off naturally:
+  // it requires a section token map, which only directive parsing builds.
+  if (
+    Array.isArray(req.adapters) &&
+    req.adapters.some((a) => a.gain_curve && a.gain_curve.length > 0) &&
+    (!req.adapter_sections || req.adapter_sections.length === 0)
+  ) {
+    req.adapter_sections = [{ weights: req.adapters.map((a) => a.scale), size: 1 }];
+    req.adapter_mode = 'runtime';
   }
   // Basin re-base: rebaseSource is a DiT model NAME (engine resolves to its path).
   // Only meaningful alongside an adapter; engine ignores it otherwise.

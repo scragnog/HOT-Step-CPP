@@ -401,7 +401,9 @@ static bool dit_ggml_load(DiTGGML *    m,
     // loads keep the default 8192. Uses the intended stack size (m->loras isn't
     // populated yet at this point in the load).
     int sched_nodes = 8192;
-    if (!g_hotstep_params.adapter_sections.empty() && g_hotstep_params.adapters.size() >= 2)
+    if (!g_hotstep_params.adapter_sections.empty() &&
+        (g_hotstep_params.adapters.size() >= 2 ||
+         (!g_hotstep_params.adapters.empty() && hotstep_adapter_gains_active(g_hotstep_params.adapters))))
         sched_nodes = 8192 + (int) g_hotstep_params.adapters.size() * 4096;
     // Lowrank runtime: every projection gains a factor apply per stacked adapter
     // (LoKr ≈ 9 nodes) — size like the graph_cap bump (m->lora isn't loaded yet,
@@ -786,7 +788,8 @@ static bool dit_ggml_load(DiTGGML *    m,
             // VRAM flat regardless of stack depth). Empty stack => single adapter.
             const std::vector<AdapterSpec> & stack = g_hotstep_params.adapters;
             bool rt_ok;
-            if (!g_hotstep_params.adapter_sections.empty() && stack.size() >= 2) {
+            if (!g_hotstep_params.adapter_sections.empty() &&
+                (stack.size() >= 2 || (!stack.empty() && hotstep_adapter_gains_active(stack)))) {
                 // Per-section masking: load each adapter into its OWN DiTLoRA
                 // (not summed) so the graph can gate each with a per-frame mask.
                 // N× VRAM vs the summed path — the price of per-section control.
