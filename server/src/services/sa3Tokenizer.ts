@@ -3,14 +3,18 @@
 // The C++ engine's POST /sa3-refine endpoint requires a pre-tokenized prompt
 // (256 padded T5Gemma token ids as CSV) because the engine's bpe.h cannot
 // parse SentencePiece tokenizer.json. Tokenization happens here in Node via
-// @huggingface/transformers, loading tokenizer.json + tokenizer_config.json
-// from <modelsDir>/onnx/sa3/ — the same directory ace-server scans for the
-// SA3 ONNX graphs.
+// @lenml/tokenizers (pure-JS port of the transformers.js tokenizer — chosen
+// over @huggingface/transformers because that package transitively pulls
+// onnxruntime-node native binaries, which broke the esbuild release bundle;
+// verified token-for-token identical to the Python tokenizer on all 256 ids),
+// loading tokenizer.json + tokenizer_config.json from <modelsDir>/onnx/sa3/ —
+// the same directory ace-server scans for the SA3 ONNX graphs.
 
 import fs from 'fs';
 import path from 'path';
-import type { PreTrainedTokenizer } from '@huggingface/transformers';
 import { config } from '../config.js';
+
+type Sa3Tokenizer = ReturnType<typeof import('@lenml/tokenizers').TokenizerLoader.fromPreTrained>;
 
 /** The engine's SA3_TOK_LEN — /sa3-refine expects exactly this many ids. */
 const SA3_TOK_LEN = 256;
@@ -29,11 +33,10 @@ export function sa3ModelsInstalled(): boolean {
       && fs.existsSync(path.join(dir, 'tokenizer.json'));
 }
 
-// Lazy singleton — @huggingface/transformers is a heavy import (pulls in
-// onnxruntime bindings), so it's dynamically imported on first use only.
-let tokenizerPromise: Promise<PreTrainedTokenizer> | null = null;
+// Lazy singleton — the 34MB tokenizer.json parse is deferred to first use.
+let tokenizerPromise: Promise<Sa3Tokenizer> | null = null;
 
-async function getTokenizer(): Promise<PreTrainedTokenizer> {
+async function getTokenizer(): Promise<Sa3Tokenizer> {
   if (!tokenizerPromise) {
     tokenizerPromise = (async () => {
       const dir = sa3Dir();
@@ -41,10 +44,9 @@ async function getTokenizer(): Promise<PreTrainedTokenizer> {
         fs.readFileSync(path.join(dir, 'tokenizer.json'), 'utf-8'));
       const tokenizerConfig = JSON.parse(
         fs.readFileSync(path.join(dir, 'tokenizer_config.json'), 'utf-8'));
-      const { PreTrainedTokenizer } = await import('@huggingface/transformers');
-      // Construct directly from the parsed JSON files — avoids the
-      // from_pretrained() remote/hub path resolution entirely.
-      return new PreTrainedTokenizer(tokenizerJSON, tokenizerConfig);
+      const { TokenizerLoader } = await import('@lenml/tokenizers');
+      // Construct directly from the parsed JSON files — no hub resolution.
+      return TokenizerLoader.fromPreTrained({ tokenizerJSON, tokenizerConfig });
     })();
     // On failure, allow a retry on the next call instead of caching the error.
     tokenizerPromise.catch(() => { tokenizerPromise = null; });
