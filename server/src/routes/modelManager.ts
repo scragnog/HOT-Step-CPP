@@ -23,14 +23,20 @@ router.get('/registry', (_req, res) => {
 });
 
 // POST /api/model-manager/download
+// Body: { fileId, hfToken? } — hfToken is an optional Hugging Face token
+// forwarded as `Authorization: Bearer <token>` to huggingface.co (needed
+// only for gated repos; omitted/empty = anonymous download).
 router.post('/download', (req, res) => {
   try {
-    const { fileId } = req.body;
+    const { fileId, hfToken } = req.body;
     if (!fileId) {
       res.status(400).json({ error: 'fileId is required' });
       return;
     }
-    const jobId = modelDownloadService.startDownload(fileId);
+    const jobId = modelDownloadService.startDownload(
+      fileId,
+      typeof hfToken === 'string' ? hfToken : undefined,
+    );
     res.json({ jobId });
   } catch (err: any) {
     res.status(400).json({ error: err.message });

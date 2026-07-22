@@ -222,6 +222,7 @@ export const StemBuilder: React.FC = () => {
         vocalNaturalizerEnabled: false,
         spectralLifterEnabled: false,
         ppVaeReencode: false,
+        stableStepOn: false,
         denoiseStrength: 0,
         // ── Source conditioning ──
         audioCoverStrength: 1.0,  // full source conditioning for lego

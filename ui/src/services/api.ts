@@ -398,8 +398,10 @@ export const profileApi = {
 export const modelManagerApi = {
   /** Get full model registry with installed status */
   registry: () => get<ModelRegistry>('/model-manager/registry'),
-  /** Start downloading a model file */
-  download: (fileId: string) => post<{ jobId: string }>('/model-manager/download', { fileId }),
+  /** Start downloading a model file. Optional hfToken is forwarded to
+   *  huggingface.co as a Bearer token (gated repos only). */
+  download: (fileId: string, hfToken?: string) =>
+    post<{ jobId: string }>('/model-manager/download', hfToken ? { fileId, hfToken } : { fileId }),
   /** Cancel an active download */
   cancel: (jobId: string) => post<{ ok: boolean }>(`/model-manager/download/${jobId}/cancel`),
   /** Resume a paused/failed download */

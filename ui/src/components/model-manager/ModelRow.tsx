@@ -15,8 +15,9 @@ interface Props {
   onDelete: (filename: string) => void;
 }
 
-/** Format bytes to human-readable string */
+/** Format bytes to human-readable string (0 = size unknown) */
 function formatSize(bytes: number): string {
+  if (bytes <= 0) return '—';
   if (bytes >= 1_073_741_824) return (bytes / 1_073_741_824).toFixed(1) + ' GB';
   if (bytes >= 1_048_576) return (bytes / 1_048_576).toFixed(0) + ' MB';
   return (bytes / 1024).toFixed(0) + ' KB';

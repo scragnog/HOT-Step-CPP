@@ -139,6 +139,9 @@ export interface GlobalParams {
   ppVaeReencode: boolean; setPpVaeReencode: (v: boolean) => void;
   ppVaeBlend: number; setPpVaeBlend: (v: number) => void;
   ppVaeUseOnnx: boolean; setPpVaeUseOnnx: (v: boolean) => void;
+  // StableStep (SA3 refine)
+  stableStepOn: boolean; setStableStepOn: (v: boolean) => void;
+  stableStepStrength: number; setStableStepStrength: (v: number) => void;
   // Cover Art
   coverArtEnabled: boolean; setCoverArtEnabled: (v: boolean) => void;
   coverArtSubject: string; setCoverArtSubject: (v: string) => void;

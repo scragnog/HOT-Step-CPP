@@ -73,6 +73,7 @@ export interface DownloadJob {
 interface InternalJob extends DownloadJob {
   abortController?: AbortController;
   speedSamples: { time: number; bytes: number }[];
+  hfToken?: string;   // Optional Hugging Face token for gated repos
 }
 
 interface RegistryFile {
@@ -196,6 +197,16 @@ class ModelDownloadService extends EventEmitter {
       }
     }
 
+    // Scan the StableStep (SA3) directory — lives two levels deep
+    // (<modelsDir>/onnx/sa3) and contains non-model extensions
+    // (.onnx.data, .json) that the generic scan above ignores.
+    const sa3Dir = path.join(dir, 'onnx', 'sa3');
+    if (fs.existsSync(sa3Dir)) {
+      for (const f of fs.readdirSync(sa3Dir)) {
+        if (!f.endsWith('.part')) files.add(f);
+      }
+    }
+
     // Scan engine directory for runtime DLLs
     const engDir = this.engineDir;
     if (fs.existsSync(engDir)) {
@@ -221,8 +232,10 @@ class ModelDownloadService extends EventEmitter {
     }));
   }
 
-  /** Start downloading a file by registry ID */
-  startDownload(fileId: string): string {
+  /** Start downloading a file by registry ID.
+   *  Optional hfToken is forwarded as `Authorization: Bearer <token>` on
+   *  huggingface.co requests (needed for gated repos; empty = anonymous). */
+  startDownload(fileId: string, hfToken?: string): string {
     const file = registry.files.find((f: RegistryFile) => f.id === fileId);
     if (!file) throw new Error(`Unknown file ID: ${fileId}`);
 
@@ -243,6 +256,7 @@ class ModelDownloadService extends EventEmitter {
       totalBytes: file.sizeBytes,
       speed: 0,
       speedSamples: [],
+      hfToken: hfToken?.trim() || undefined,
     };
 
     this.jobs.set(jobId, job);
@@ -298,9 +312,11 @@ class ModelDownloadService extends EventEmitter {
 
   /** Delete a model/runtime file from disk */
   deleteFile(filename: string): boolean {
-    // Safety: only known model/runtime extensions
-    if (!filename.endsWith('.gguf') && !filename.endsWith('.onnx') && !filename.endsWith('.safetensors') && !filename.endsWith('.dll') && !filename.endsWith('.bin')) {
-      throw new Error('Can only delete .gguf, .onnx, .safetensors, .bin, or .dll files');
+    // Safety: only known model/runtime extensions.
+    // .data / .json are StableStep (SA3) companions (sa3-dit.onnx.data,
+    // tokenizer.json etc.) living under onnx/sa3.
+    if (!filename.endsWith('.gguf') && !filename.endsWith('.onnx') && !filename.endsWith('.safetensors') && !filename.endsWith('.dll') && !filename.endsWith('.bin') && !filename.endsWith('.data') && !filename.endsWith('.json')) {
+      throw new Error('Can only delete .gguf, .onnx, .safetensors, .bin, .dll, .data, or .json files');
     }
 
     // For DLLs, check engine directory
@@ -325,6 +341,8 @@ class ModelDownloadService extends EventEmitter {
         }
       }
     } catch {}
+    // StableStep (SA3) files live two levels deep: <modelsDir>/onnx/sa3
+    candidates.push(path.join(this.modelsDir, 'onnx', 'sa3', filename));
 
     const modelsResolved = path.resolve(this.modelsDir);
     for (const filePath of candidates) {
@@ -484,6 +502,12 @@ class ModelDownloadService extends EventEmitter {
       };
       if (startByte > 0) {
         headers['Range'] = `bytes=${startByte}-`;
+      }
+      // Hugging Face token for gated repos — only sent to huggingface.co
+      // itself. CDN redirect targets (cdn-lfs / xethub) use pre-signed URLs
+      // and reject requests carrying an extra Authorization header.
+      if (job.hfToken && /(^|\.)huggingface\.co$/.test(parsedUrl.hostname)) {
+        headers['Authorization'] = `Bearer ${job.hfToken}`;
       }
 
       const req = transport.get(parsedUrl, { headers }, (res) => {

@@ -81,6 +81,7 @@ export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
       'vocalNaturalizerEnabled', 'gainOffsetDb', 'naturalizeAmount', 'natVibratoRate',
       'natVibratoDepth', 'natFormantStrength', 'natMetallicReduction', 'natQuantizationMask',
       'natTransitionSmooth', 'ppVaeReencode', 'ppVaeBlend', 'ppVaeUseOnnx',
+      'stableStepOn', 'stableStepStrength',
       'postprocessEnabled', 'postprocessPlugin',
       'lufsEnabled', 'lufsPreset', 'lufsTarget',
       'autoTrimEnabled', 'durationBuffer', 'autoTrimFadeMs',

@@ -17,6 +17,7 @@ const BASE = config.aceServer.url;
 const TIMEOUT_QUICK  =  15_000;   // health checks, props, job submit
 const TIMEOUT_POLL   =  30_000;   // job polling — fail fast, let watchdog decide on stalls
 const TIMEOUT_RESULT = 300_000;   // fetching large audio results (encode + transfer)
+const TIMEOUT_SA3    = 1_800_000; // /sa3-refine — first call may build a TensorRT engine (many minutes)
 
 /** Props response from GET /props */
 export interface AceProps {
@@ -560,6 +561,106 @@ export const aceClient = {
     if (!res.ok) {
       const errBody = await res.text().catch(() => 'Unknown error');
       throw new Error(`ace-server POST /pp-vae-reencode failed (${res.status}): ${errBody}`);
+    }
+    const arrayBuf = await res.arrayBuffer();
+    return Buffer.from(arrayBuf);
+  },
+
+  /** POST /sa3-refine — synchronous SA3 (Stable Audio 3) SDEdit refine.
+   *  Sends WAV audio body; the pre-tokenized T5Gemma prompt and sampler
+   *  options ride in the query string (the engine cannot tokenize
+   *  SentencePiece itself — see sa3Tokenizer.ts).
+   *  Returns processed WAV at the input sample rate.
+   *  NOTE: the first-ever call may take many minutes (TensorRT engine build),
+   *  hence the dedicated 30-minute timeout. */
+  async submitSa3Refine(
+    wavBuffer: Buffer,
+    opts: {
+      tokens: number[];       // exactly 256 padded T5Gemma token ids
+      nTokens: number;        // real (non-pad) token count
+      strength?: number;      // 0..1 init noise level (engine default 0.3)
+      steps?: number;         // sampler steps (engine default 8)
+      sampler?: 'pingpong' | 'euler';
+      seed?: number;          // uint64 RNG seed (engine default: random)
+      rmsMatch?: boolean;     // match output RMS to input (engine default true)
+    },
+  ): Promise<Buffer> {
+    const params = new URLSearchParams();
+    params.set('tokens', opts.tokens.join(','));
+    params.set('n_tokens', String(opts.nTokens));
+    if (opts.strength !== undefined) params.set('strength', String(opts.strength));
+    if (opts.steps !== undefined) params.set('steps', String(opts.steps));
+    if (opts.sampler) params.set('sampler', opts.sampler);
+    if (opts.seed !== undefined) params.set('seed', String(opts.seed));
+    if (opts.rmsMatch !== undefined) params.set('rms_match', opts.rmsMatch ? '1' : '0');
+
+    const res = await fetch(`${BASE}/sa3-refine?${params.toString()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/wav' },
+      body: wavBuffer,
+      signal: AbortSignal.timeout(TIMEOUT_SA3),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => 'Unknown error');
+      throw new Error(`ace-server POST /sa3-refine failed (${res.status}): ${errBody}`);
+    }
+    const arrayBuf = await res.arrayBuffer();
+    return Buffer.from(arrayBuf);
+  },
+
+  /** POST /supersep/separate?level=N — start async stem separation.
+   *  Body: WAV/MP3 audio. Returns the SuperSep job id.
+   *  level: 0=BASIC (6 stems), 1=VOCAL_SPLIT, 2=FULL, 3=MAXIMUM. */
+  async submitSuperSepSeparate(audioBuffer: Buffer, level = 0): Promise<string> {
+    const res = await fetch(`${BASE}/supersep/separate?level=${level}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: audioBuffer,
+      signal: AbortSignal.timeout(TIMEOUT_RESULT),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => 'Unknown error');
+      throw new Error(`ace-server POST /supersep/separate failed (${res.status}): ${errBody}`);
+    }
+    const data = await res.json() as { id: string };
+    return data.id;
+  },
+
+  /** GET /supersep/progress?id=... — poll a SuperSep separation job. */
+  async superSepProgress(jobId: string): Promise<{
+    status: string; progress: number; message: string; error?: string; n_stems?: number;
+  }> {
+    const res = await aceGet(`/supersep/progress?id=${jobId}`, TIMEOUT_POLL);
+    return res.json();
+  },
+
+  /** GET /supersep/result?id=... — stem list metadata for a completed job. */
+  async superSepResult(jobId: string): Promise<{
+    id: string;
+    stems: Array<{
+      name: string; category: string; stem_type: string;
+      n_frames: number; stage: number; index: number; hidden: boolean;
+    }>;
+  }> {
+    const res = await aceGet(`/supersep/result?id=${jobId}`, TIMEOUT_POLL);
+    return res.json();
+  },
+
+  /** POST /supersep/recombine — mix a completed job's stems with per-stem
+   *  volume/mute controls. Returns a 48 kHz 16-bit stereo WAV. */
+  async superSepRecombine(
+    jobId: string,
+    stems: Array<{ index: number; volume?: number; muted?: boolean }>,
+  ): Promise<Buffer> {
+    const res = await fetch(`${BASE}/supersep/recombine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: jobId, stems }),
+      signal: AbortSignal.timeout(TIMEOUT_RESULT),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => 'Unknown error');
+      throw new Error(`ace-server POST /supersep/recombine failed (${res.status}): ${errBody}`);
     }
     const arrayBuf = await res.arrayBuffer();
     return Buffer.from(arrayBuf);

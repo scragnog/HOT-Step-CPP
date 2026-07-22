@@ -319,6 +319,7 @@ export const SongBuilder: React.FC = () => {
         params.postProcessingEnabled = false;
         params.masteringEnabled = false;
         params.ppVaeReencode = false;
+        params.stableStepOn = false;
         params.spectralLifterEnabled = false;
         params.lufsEnabled = false;
       }

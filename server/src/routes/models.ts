@@ -64,4 +64,25 @@ router.get('/pp-vae', (_req, res) => {
   }
 });
 
+// GET /api/models/stablestep — check StableStep (SA3) model availability
+// Mirrors the pp-vae route: scans <modelsDir>/onnx/sa3/ for the SA3 DiT graph
+// and tokenizer (the same check postProcessing uses via sa3ModelsInstalled).
+// Returns { available: boolean, files: string[] } — files lists what is
+// actually present in the sa3 directory.
+router.get('/stablestep', (_req, res) => {
+  try {
+    const sa3Dir = path.join(config.aceServer.models, 'onnx', 'sa3');
+    let sa3Files: string[] = [];
+    if (fs.existsSync(sa3Dir)) {
+      sa3Files = fs.readdirSync(sa3Dir).filter(f => !f.endsWith('.part'));
+    }
+    const available =
+      fs.existsSync(path.join(sa3Dir, 'sa3-dit.onnx')) &&
+      fs.existsSync(path.join(sa3Dir, 'tokenizer.json'));
+    res.json({ available, files: sa3Files });
+  } catch (err: any) {
+    res.json({ available: false, files: [], error: err.message });
+  }
+});
+
 export default router;

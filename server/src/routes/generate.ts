@@ -570,6 +570,7 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     const ppEnabled = job.params.postProcessingEnabled !== false;
     const anyPpActive = ppEnabled && (
       !!job.params.ppVaeReencode ||
+      !!(job.params.stableStepOn ?? job.params.stableStep) ||
       !!job.params.spectralLifterEnabled ||
       !!job.params.masteringEnabled
     );
@@ -1120,6 +1121,14 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     const ppParams = {
       ...job.params,
       parallelQualityEval: !!job.params.parallelQualityEval,
+      // StableStep (SA3 refine): normalize the flag (preset files may use the
+      // "stableStep" alias), default strength, and provide per-track captions
+      // for prompt building (LM caption preferred, user style as fallback).
+      stableStepOn: !!(job.params.stableStepOn ?? job.params.stableStep),
+      stableStepStrength: typeof job.params.stableStepStrength === 'number'
+        ? job.params.stableStepStrength : 0.3,
+      stableStepCaptions: audioUrls.map((_, ti) =>
+        (lmResults[ti]?.caption || firstResult.caption || job.params.caption || '') as string),
     };
 
     let ppQualityScores: Array<{ unmastered?: any; mastered?: any }> = [];

@@ -24,6 +24,19 @@ function formatSize(bytes: number): string {
   return (bytes / 1024).toFixed(0) + ' KB';
 }
 
+/** Read the persisted Hugging Face token (set on the StableStep tab).
+ *  Forwarded with every download request; the server only sends it to
+ *  huggingface.co and only when non-empty (gated repos). */
+function getStoredHfToken(): string | undefined {
+  try {
+    const raw = localStorage.getItem('hs-hfToken');
+    const token = raw !== null ? JSON.parse(raw) : '';
+    return typeof token === 'string' && token.trim() ? token.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
   const { t } = useTranslation();
   const { registry, loading, error, silentRefresh, getPackFiles, installedFiles } = useModelRegistry();
@@ -36,7 +49,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
 
   const handleDownload = useCallback(async (fileId: string) => {
     try {
-      await modelManagerApi.download(fileId);
+      await modelManagerApi.download(fileId, getStoredHfToken());
     } catch (err: any) {
       console.error('[ModelManager] Download failed:', err);
     }
@@ -45,7 +58,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
   const handleDownloadPack = useCallback(async (fileIds: string[]) => {
     for (const id of fileIds) {
       try {
-        await modelManagerApi.download(id);
+        await modelManagerApi.download(id, getStoredHfToken());
       } catch (err: any) {
         console.error('[ModelManager] Pack download failed:', err);
       }

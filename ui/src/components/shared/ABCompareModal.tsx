@@ -81,6 +81,9 @@ const PARAM_LABELS: Record<string, string> = {
   // PP-VAE
   ppVaeReencode: 'PP-VAE Re-encode',
   ppVaeBlend: 'PP-VAE Blend',
+  // StableStep
+  stableStepOn: 'StableStep',
+  stableStepStrength: 'StableStep Refine Strength',
   // Vocal Naturalizer
   vocalNaturalizerEnabled: 'Vocal Naturalizer',
   naturalizeAmount: 'Naturalize Amount',

@@ -70,6 +70,9 @@ const LABEL_MAP: Record<string, string> = {
   // PP-VAE
   ppVaeReencode: 'PP-VAE Re-encode',
   ppVaeBlend: 'PP-VAE Blend',
+  // StableStep
+  stableStepOn: 'StableStep',
+  stableStepStrength: 'StableStep Refine Strength',
   // DCW
   dcwEnabled: 'DCW Enabled',
   dcwMode: 'DCW Mode',
@@ -154,6 +157,9 @@ export function useAssistantActions() {
     // PP-VAE
     ppVaeReencode: gp.setPpVaeReencode,
     ppVaeBlend: gp.setPpVaeBlend,
+    // StableStep
+    stableStepOn: gp.setStableStepOn,
+    stableStepStrength: gp.setStableStepStrength,
     // DCW
     dcwEnabled: gp.setDcwEnabled,
     dcwMode: gp.setDcwMode,

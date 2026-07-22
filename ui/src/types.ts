@@ -249,6 +249,10 @@ export interface GenerationParams {
   ppVaeBlend?: number;         // 0.0 = fully PP-VAE, 1.0 = fully original
   ppVaeUseOnnx?: boolean;      // true = prefer ONNX/TRT, false = force GGUF
 
+  // StableStep (SA3 SDEdit refine of the instrumental)
+  stableStepOn?: boolean;
+  stableStepStrength?: number; // 0.10–0.60 init noise level (default 0.3)
+
   // DCW (Dynamic CFG Weighting)
   dcwEnabled?: boolean;
   dcwMode?: string;            // 'single' | 'double'
@@ -356,7 +360,7 @@ export interface AdapterFile {
 export interface RegistryFile {
   id: string;
   filename: string;
-  role: 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'supersep' | 'whisper';
+  role: 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'supersep' | 'whisper' | 'stablestep' | 'runtime';
   subdir?: string;
   displayName: string;
   scale?: 'standard' | 'xl' | null;

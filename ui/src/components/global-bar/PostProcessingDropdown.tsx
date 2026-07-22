@@ -275,6 +275,15 @@ export const PostProcessingDropdown: React.FC = () => {
       .catch(() => setPpVaeAvailable(false));
   }, []);
 
+  // StableStep (SA3) availability — auto-detect from models/onnx/sa3
+  const [stableStepAvailable, setStableStepAvailable] = useState(false);
+  useEffect(() => {
+    fetch('/api/models/stablestep')
+      .then(r => r.json())
+      .then(data => setStableStepAvailable(!!data.available))
+      .catch(() => setStableStepAvailable(false));
+  }, []);
+
   // Postprocess plugin availability — fetch from /api/plugins
   const [postprocessPlugins, setPostprocessPlugins] = useState<any[]>([]);
   useEffect(() => {
@@ -477,6 +486,52 @@ export const PostProcessingDropdown: React.FC = () => {
           </div>
         </Accordion>
       )}
+
+      {/* 1.5. StableStep — SA3 refine of the instrumental */}
+      <Accordion
+        icon={<Sparkles size={14} />}
+        label="StableStep"
+        accentColor="sky"
+        persistKey="hs-ppAccordion-stablestep"
+        toggle={stableStepAvailable
+          ? { checked: gp.stableStepOn, onChange: gp.setStableStepOn }
+          : undefined}
+        badge={!stableStepAvailable ? (
+          <span className="text-[10px] text-zinc-500 font-mono">not installed</span>
+        ) : undefined}
+      >
+        <div className="space-y-2 mt-2">
+          <p className="text-[10px] text-zinc-500 leading-relaxed">
+            Re-renders the instrumental through Stable Audio 3 to replace VAE fizz
+            with real detail; vocals are split out, cleaned with PP-VAE, and remixed.
+          </p>
+          {!stableStepAvailable && (
+            <div className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20">
+              <span className="text-sky-400 text-xs mt-px">ⓘ</span>
+              <p className="text-[10px] text-sky-300/80 leading-relaxed">
+                StableStep models are not installed — download them in the
+                Model Manager (StableStep tab, ~12 GB) to enable this feature.
+              </p>
+            </div>
+          )}
+          {stableStepAvailable && gp.stableStepOn && (
+            <div className="space-y-2 pt-1">
+              <EditableSlider
+                label="Refine strength"
+                value={gp.stableStepStrength}
+                min={0.10} max={0.60} step={0.05}
+                onChange={gp.setStableStepStrength}
+                formatDisplay={v => (v * 100).toFixed(0) + '%'}
+                tooltip="How much of the instrumental is re-rendered. Higher values re-interpret the instrumentation more; lower values stay closer to the original."
+              />
+              <p className="text-[10px] text-zinc-500 leading-relaxed">
+                Higher values re-interpret the instrumentation more. 30% is a good
+                balance between cleanup and faithfulness.
+              </p>
+            </div>
+          )}
+        </div>
+      </Accordion>
 
       {/* 1. Spectral Lifter */}
       <Accordion
@@ -862,13 +917,14 @@ export const PostProcessingDropdown: React.FC = () => {
 // ── Badge ───────────────────────────────────────────────────────
 
 export const PostProcessingBadge: React.FC = () => {
-  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, coverArtEnabled, vocalNaturalizerEnabled, gainOffsetDb, qualityEvalEnabled, postprocessEnabled, postprocessPlugin, whisperLyricsEnabled, lufsEnabled, lufsTarget } = useGlobalParams();
+  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, stableStepOn, coverArtEnabled, vocalNaturalizerEnabled, gainOffsetDb, qualityEvalEnabled, postprocessEnabled, postprocessPlugin, whisperLyricsEnabled, lufsEnabled, lufsTarget } = useGlobalParams();
   const { chain } = useVstChainStore();
   const vstEnabled = chain.filter(p => p.enabled).length;
 
   const parts: string[] = [];
   if (postprocessEnabled && postprocessPlugin) parts.push('TD');
   if (ppVaeReencode) parts.push('PP-VAE');
+  if (stableStepOn) parts.push('StableStep');
   if (spectralLifterEnabled) parts.push('SL');
   if (vocalNaturalizerEnabled) parts.push('Nat');
   if (gainOffsetDb !== 0) parts.push(`${gainOffsetDb > 0 ? '+' : ''}${gainOffsetDb}dB`);
