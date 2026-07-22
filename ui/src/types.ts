@@ -252,6 +252,7 @@ export interface GenerationParams {
   // StableStep (SA3 SDEdit refine of the instrumental)
   stableStepOn?: boolean;
   stableStepStrength?: number; // 0.10–0.60 init noise level (default 0.3)
+  stableStepBackend?: 'auto' | 'onnx' | 'gguf'; // engine backend (default 'auto')
 
   // DCW (Dynamic CFG Weighting)
   dcwEnabled?: boolean;

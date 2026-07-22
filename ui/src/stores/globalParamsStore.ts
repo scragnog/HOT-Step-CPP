@@ -152,6 +152,9 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   ppVaeUseOnnx: readKey("hs-ppVaeUseOnnx", true),
   stableStepOn: readKey("hs-stableStepOn", false),
   stableStepStrength: readKey("hs-stableStepStrength", 0.3),
+  // Engine backend for the SA3 refine: 'auto' (engine picks) | 'onnx'
+  // (ONNX Runtime/TensorRT, NVIDIA) | 'gguf' (GGML — CUDA/Vulkan/CPU).
+  stableStepBackend: readKey("hs-stableStepBackend", 'auto'),
   coverArtEnabled: readKey("hs-coverArtEnabled", false),
   coverArtSubject: readKey("hs-coverArtSubject", ''),
   qualityEvalEnabled: readKey("hs-qualityEvalEnabled", false),
@@ -311,6 +314,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setPpVaeUseOnnx: (v: any) => { set({ ppVaeUseOnnx: v }); writeKey("hs-ppVaeUseOnnx", v); },
   setStableStepOn: (v: any) => { set({ stableStepOn: v }); writeKey("hs-stableStepOn", v); },
   setStableStepStrength: (v: any) => { set({ stableStepStrength: v }); writeKey("hs-stableStepStrength", v); },
+  setStableStepBackend: (v: any) => { set({ stableStepBackend: v }); writeKey("hs-stableStepBackend", v); },
   setCoverArtEnabled: (v: any) => { set({ coverArtEnabled: v }); writeKey("hs-coverArtEnabled", v); },
   setCoverArtSubject: (v: any) => { set({ coverArtSubject: v }); writeKey("hs-coverArtSubject", v); },
   setQualityEvalEnabled: (v: any) => { set({ qualityEvalEnabled: v }); writeKey("hs-qualityEvalEnabled", v); },
@@ -500,6 +504,8 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       ppVaeUseOnnx: (s.postProcessingEnabled && s.ppVaeReencode) ? s.ppVaeUseOnnx : undefined,
       stableStepOn: (s.postProcessingEnabled && s.stableStepOn) || undefined,
       stableStepStrength: (s.postProcessingEnabled && s.stableStepOn) ? s.stableStepStrength : undefined,
+      stableStepBackend: (s.postProcessingEnabled && s.stableStepOn && s.stableStepBackend !== 'auto')
+        ? s.stableStepBackend : undefined,
       coverArtEnabled: (s.postProcessingEnabled && s.coverArtEnabled) || undefined,
       coverArtSubject: (s.postProcessingEnabled && s.coverArtEnabled && s.coverArtSubject) ? s.coverArtSubject : undefined,
       qualityEvalEnabled: (s.postProcessingEnabled && s.qualityEvalEnabled) || undefined,

@@ -275,13 +275,18 @@ export const PostProcessingDropdown: React.FC = () => {
       .catch(() => setPpVaeAvailable(false));
   }, []);
 
-  // StableStep (SA3) availability — auto-detect from models/onnx/sa3
+  // StableStep (SA3) availability — auto-detect ONNX (models/onnx/sa3) and
+  // GGML (root GGUFs) backend installs from the extended availability endpoint.
+  const [stableStepBackends, setStableStepBackends] = useState<{ onnx: boolean; gguf: boolean }>({ onnx: false, gguf: false });
   const [stableStepAvailable, setStableStepAvailable] = useState(false);
   useEffect(() => {
     fetch('/api/models/stablestep')
       .then(r => r.json())
-      .then(data => setStableStepAvailable(!!data.available))
-      .catch(() => setStableStepAvailable(false));
+      .then(data => {
+        setStableStepAvailable(!!data.available);
+        setStableStepBackends({ onnx: !!data.backends?.onnx, gguf: !!data.backends?.gguf });
+      })
+      .catch(() => { setStableStepAvailable(false); setStableStepBackends({ onnx: false, gguf: false }); });
   }, []);
 
   // Postprocess plugin availability — fetch from /api/plugins
@@ -509,8 +514,9 @@ export const PostProcessingDropdown: React.FC = () => {
             <div className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20">
               <span className="text-sky-400 text-xs mt-px">ⓘ</span>
               <p className="text-[10px] text-sky-300/80 leading-relaxed">
-                StableStep models are not installed — download them in the
-                Model Manager (StableStep tab, ~12 GB) to enable this feature.
+                StableStep models are not installed — download a backend set in the
+                Model Manager (StableStep tab; GGML ~5.8 GB or ONNX ~12 GB) to
+                enable this feature.
               </p>
             </div>
           )}
@@ -528,6 +534,53 @@ export const PostProcessingDropdown: React.FC = () => {
                 Higher values re-interpret the instrumentation more. 30% is a good
                 balance between cleanup and faithfulness.
               </p>
+              {/* Backend selector: Auto / ONNX (TensorRT) / GGML */}
+              <div>
+                <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1">Backend</label>
+                <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800">
+                  {([
+                    { value: 'auto' as const, label: 'Auto', installed: true },
+                    { value: 'onnx' as const, label: 'ONNX (TensorRT)', installed: stableStepBackends.onnx },
+                    { value: 'gguf' as const, label: 'GGML', installed: stableStepBackends.gguf },
+                  ]).map((opt, idx) => {
+                    const selected = gp.stableStepBackend === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        disabled={!opt.installed}
+                        onClick={() => gp.setStableStepBackend(opt.value)}
+                        title={!opt.installed
+                          ? `${opt.label} models not installed — download in Model Manager (StableStep tab)`
+                          : opt.value === 'auto'
+                            ? 'Let the engine pick the best installed backend'
+                            : opt.value === 'onnx'
+                              ? 'ONNX Runtime with TensorRT acceleration (NVIDIA only)'
+                              : 'GGML backend — CUDA, Vulkan or CPU'}
+                        className={`flex-1 px-2 py-1.5 text-xs transition-colors ${idx > 0 ? 'border-l border-zinc-300 dark:border-white/10' : ''} ${
+                          selected
+                            ? 'bg-sky-500/20 text-sky-600 dark:text-sky-300 font-medium'
+                            : opt.installed
+                              ? 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 cursor-pointer'
+                              : 'text-zinc-400 dark:text-zinc-600 cursor-not-allowed'
+                        }`}
+                      >
+                        {opt.label}
+                        {!opt.installed && (
+                          <span className="block text-[9px] font-normal text-zinc-400 dark:text-zinc-600">not installed</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1 text-[10px] text-zinc-500 leading-relaxed">
+                  {gp.stableStepBackend === 'onnx'
+                    ? 'ONNX Runtime with TensorRT (NVIDIA). First run per song-length bucket builds the TensorRT engine (slow once, then cached).'
+                    : gp.stableStepBackend === 'gguf'
+                      ? 'GGML backend — runs on CUDA, Vulkan or CPU. Fastest option on NVIDIA in current testing.'
+                      : 'Auto lets the engine pick the best installed backend.'}
+                </p>
+              </div>
             </div>
           )}
         </div>

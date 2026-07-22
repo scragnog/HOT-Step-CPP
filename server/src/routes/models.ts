@@ -65,23 +65,44 @@ router.get('/pp-vae', (_req, res) => {
 });
 
 // GET /api/models/stablestep — check StableStep (SA3) model availability
-// Mirrors the pp-vae route: scans <modelsDir>/onnx/sa3/ for the SA3 DiT graph
-// and tokenizer (the same check postProcessing uses via sa3ModelsInstalled).
-// Returns { available: boolean, files: string[] } — files lists what is
-// actually present in the sa3 directory.
+// Two engine backends exist:
+//   onnx — <modelsDir>/onnx/sa3/ ONNX set (sa3-dit.onnx + companions), runs
+//          via ONNX Runtime / TensorRT (NVIDIA only)
+//   gguf — 4 GGUF files at the models dir root, runs via GGML
+//          (CUDA / Vulkan / CPU)
+// tokenizer.json in onnx/sa3/ is required for BOTH backends (Node tokenizes).
+// Returns { available, backends: { onnx, gguf }, files } — files lists what
+// is actually present in the sa3 directory.
+const SA3_GGUF_FILES = [
+  'sa3-dit-BF16.gguf',
+  'sa3-same-enc-F16.gguf',
+  'sa3-same-dec-F16.gguf',
+  'sa3-text-enc-BF16.gguf',
+];
 router.get('/stablestep', (_req, res) => {
   try {
-    const sa3Dir = path.join(config.aceServer.models, 'onnx', 'sa3');
+    const modelsDir = config.aceServer.models;
+    const sa3Dir = path.join(modelsDir, 'onnx', 'sa3');
     let sa3Files: string[] = [];
     if (fs.existsSync(sa3Dir)) {
       sa3Files = fs.readdirSync(sa3Dir).filter(f => !f.endsWith('.part'));
     }
-    const available =
-      fs.existsSync(path.join(sa3Dir, 'sa3-dit.onnx')) &&
-      fs.existsSync(path.join(sa3Dir, 'tokenizer.json'));
-    res.json({ available, files: sa3Files });
+    const tokenizerOk = fs.existsSync(path.join(sa3Dir, 'tokenizer.json'));
+    const onnx = tokenizerOk && fs.existsSync(path.join(sa3Dir, 'sa3-dit.onnx'));
+    const gguf = tokenizerOk &&
+      SA3_GGUF_FILES.every(f => fs.existsSync(path.join(modelsDir, f)));
+    res.json({
+      available: onnx || gguf,
+      backends: { onnx, gguf },
+      files: sa3Files,
+    });
   } catch (err: any) {
-    res.json({ available: false, files: [], error: err.message });
+    res.json({
+      available: false,
+      backends: { onnx: false, gguf: false },
+      files: [],
+      error: err.message,
+    });
   }
 });
 

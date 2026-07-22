@@ -43,7 +43,7 @@ const ROLE_INFO: Record<string, string> = {
   embedding: 'The text encoder (Qwen3 Embedding) converts your caption and lyrics into embeddings for the DiT. It is architecturally locked — all DiT models were trained with this exact encoder. You need exactly one.',
   vae: 'The VAE (Variational Autoencoder) decodes the DiT\'s latent output into audio waveforms. The standard VAE is required for all generation. ScragVAE is a fine-tuned decoder with improved high-frequency response — it\'s a drop-in replacement.',
   'pp-vae': 'The Post-Processing VAE performs a neural audio polish pass — running generated audio through an encode→decode round-trip to smooth artifacts and improve tonal coherence. Optional but recommended. Use F32 for best quality.',
-  stablestep: 'Stable Audio 3 refiner models (fp32 ONNX) for the StableStep post-processing feature. ~12 GB. StableStep re-renders the instrumental through Stable Audio 3 to replace VAE fizz with real detail; vocals are split out, cleaned with PP-VAE, and remixed. All 9 files are required. First use after download is slow while the TensorRT engine builds (one-time per length bucket).',
+  stablestep: 'Stable Audio 3 refiner models for the StableStep post-processing feature. StableStep re-renders the instrumental through Stable Audio 3 to replace VAE fizz with real detail; vocals are split out, cleaned with PP-VAE, and remixed. Two engine backends are available — install either (or both): the GGML backend (4 GGUF files, ~5.8 GB) runs on CUDA, Vulkan or CPU and is the fastest option on NVIDIA in current testing; the ONNX backend (~12 GB, fp32) runs via TensorRT on NVIDIA only and is slow on first use while the TensorRT engine builds (one-time per length bucket). The tokenizer files from the ONNX set are required by BOTH backends.',
   supersep: 'Stem separation models for Cover Studio. Uses a 4-stage ONNX pipeline: BS-Roformer splits audio into 6 stems, Mel-Band RoFormer separates lead/backing vocals, MDX23C isolates drum components, and HTDemucs refines the "other" stem. All 4 models are required for full separation. Models run via ONNX Runtime GPU — no Python needed.',
   whisper: 'OpenAI Whisper models for transcribing actual sung lyrics with word-level timestamps. Enable Whisper Lyrics in Post-Processing to use.',
 };
@@ -173,6 +173,12 @@ const StableStepTab: React.FC<{
 
   const missing = files.filter(f => !f.installed);
 
+  // Two engine backends ship under the same repo: the GGUF files (models root)
+  // power the GGML backend; everything else is the ONNX/TensorRT set. The
+  // tokenizer JSONs in the ONNX set are required by BOTH backends.
+  const ggufFiles = files.filter(f => f.filename.endsWith('.gguf'));
+  const onnxFiles = files.filter(f => !f.filename.endsWith('.gguf'));
+
   // Gate every download behind license acceptance.
   const gatedDownload = (fileId: string) => {
     if (!licenseAccepted) {
@@ -262,7 +268,7 @@ const StableStepTab: React.FC<{
       {missing.length > 0 && (
         <div className="flex items-center justify-between px-1">
           <span className="text-[11px] text-zinc-500">
-            {files.length - missing.length}/{files.length} files installed &middot; full set ~12 GB
+            {files.length - missing.length}/{files.length} files installed &middot; GGML set ~5.8 GB &middot; ONNX set ~12 GB
           </span>
           <button
             onClick={handleDownloadAll}
@@ -280,19 +286,57 @@ const StableStepTab: React.FC<{
         </div>
       )}
 
-      {/* File list */}
-      <div className={`space-y-1.5 ${licenseAccepted ? '' : 'opacity-60'}`}>
-        {files.map(f => (
-          <ModelRow
-            key={f.id}
-            file={f}
-            downloadJob={downloadJobs.find(j => j.fileId === f.id && j.status !== 'completed' && j.status !== 'cancelled')}
-            onDownload={gatedDownload}
-            onCancel={onCancel}
-            onResume={onResume}
-            onDelete={onDelete}
-          />
-        ))}
+      {/* File list — grouped by engine backend */}
+      <div className={`space-y-3 ${licenseAccepted ? '' : 'opacity-60'}`}>
+        {ggufFiles.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="px-1">
+              <h4 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                GGML backend (universal — CUDA/Vulkan/CPU)
+              </h4>
+              <p className="text-[10px] text-zinc-500 leading-relaxed">
+                4 GGUF files (~5.8 GB). Fastest option on NVIDIA in current testing
+                and the only backend for Vulkan/CPU builds. Also requires the
+                tokenizer files from the ONNX set below.
+              </p>
+            </div>
+            {ggufFiles.map(f => (
+              <ModelRow
+                key={f.id}
+                file={f}
+                downloadJob={downloadJobs.find(j => j.fileId === f.id && j.status !== 'completed' && j.status !== 'cancelled')}
+                onDownload={gatedDownload}
+                onCancel={onCancel}
+                onResume={onResume}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        )}
+        {onnxFiles.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="px-1">
+              <h4 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                ONNX backend (NVIDIA TensorRT)
+              </h4>
+              <p className="text-[10px] text-zinc-500 leading-relaxed">
+                fp32 ONNX set (~12 GB), NVIDIA only. The tokenizer files in this
+                set are required by BOTH backends.
+              </p>
+            </div>
+            {onnxFiles.map(f => (
+              <ModelRow
+                key={f.id}
+                file={f}
+                downloadJob={downloadJobs.find(j => j.fileId === f.id && j.status !== 'completed' && j.status !== 'cancelled')}
+                onDownload={gatedDownload}
+                onCancel={onCancel}
+                onResume={onResume}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

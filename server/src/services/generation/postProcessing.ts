@@ -19,6 +19,24 @@ import { wavDurationSec } from '../audioCrop.js';
 type LogFn = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
 type StageFn = (stage: string) => void;
 
+// StableStep GGML backend files — 4 GGUFs at the models dir root (the ONNX
+// set lives in <models>/onnx/sa3 and is checked via sa3ModelsInstalled()).
+// tokenizer.json in onnx/sa3 is required for BOTH backends (Node tokenizes).
+// Keep in sync with SA3_GGUF_FILES in routes/models.ts.
+const SA3_GGUF_FILES = [
+  'sa3-dit-BF16.gguf',
+  'sa3-same-enc-F16.gguf',
+  'sa3-same-dec-F16.gguf',
+  'sa3-text-enc-BF16.gguf',
+];
+
+/** True if the SA3 GGML backend appears installed (4 root GGUFs + tokenizer). */
+function sa3GgufInstalled(): boolean {
+  const modelsDir = config.aceServer.models;
+  return fs.existsSync(path.join(modelsDir, 'onnx', 'sa3', 'tokenizer.json'))
+      && SA3_GGUF_FILES.every(f => fs.existsSync(path.join(modelsDir, f)));
+}
+
 interface PostProcessParams {
   postProcessingEnabled?: boolean;
   ppVaeReencode?: boolean;
@@ -28,6 +46,9 @@ interface PostProcessParams {
   stableStepOn?: boolean;
   stableStep?: boolean;          // preset/settings-file alias for stableStepOn
   stableStepStrength?: number;   // 0..1 init noise level (default 0.3)
+  /** Engine backend for the SA3 refine: 'onnx' (ONNX Runtime/TensorRT),
+   *  'gguf' (GGML — CUDA/Vulkan/CPU) or 'auto' (engine picks, default). */
+  stableStepBackend?: 'auto' | 'onnx' | 'gguf';
   /** Per-track captions (parallel to audioUrls) used to build the SA3 prompt.
    *  Populated by the generate route from the LM results. */
   stableStepCaptions?: string[];
@@ -147,9 +168,12 @@ export async function runPostProcessingChain(
     if (stableStepOn) {
       const ssStart = performance.now();
       try {
-        if (!sa3ModelsInstalled()) {
-          log('WARNING', '[StableStep] SA3 models not installed (models/onnx/sa3) — skipping');
+        if (!sa3ModelsInstalled() && !sa3GgufInstalled()) {
+          log('WARNING', '[StableStep] SA3 models not installed (neither models/onnx/sa3 nor root GGUFs) — skipping');
         } else {
+          // Engine backend: 'onnx' | 'gguf' forces one; undefined = engine auto.
+          const backend = (params.stableStepBackend === 'onnx' || params.stableStepBackend === 'gguf')
+            ? params.stableStepBackend : undefined;
           const strength = params.stableStepStrength ?? 0.3;
           const caption = params.stableStepCaptions?.[i] || '';
           const durationSec = wavDurationSec(processedPath);
@@ -163,7 +187,7 @@ export async function runPostProcessingChain(
             setStage(`StableStep: refining instrumental${suffix}...`);
             const wavBuf = fs.readFileSync(processedPath);
             const refined = await aceClient.submitSa3Refine(wavBuf, {
-              tokens: ids, nTokens, strength,
+              tokens: ids, nTokens, strength, backend,
             });
             fs.writeFileSync(processedPath, refined);
           } else {
@@ -196,7 +220,7 @@ export async function runPostProcessingChain(
               log('INFO', '[StableStep] No vocal/instrumental split — refining full mix');
               setStage(`StableStep: refining instrumental${suffix}...`);
               const refined = await aceClient.submitSa3Refine(srcBuf, {
-                tokens: ids, nTokens, strength,
+                tokens: ids, nTokens, strength, backend,
               });
               fs.writeFileSync(processedPath, refined);
             } else {
@@ -208,7 +232,7 @@ export async function runPostProcessingChain(
 
               setStage(`StableStep: refining instrumental${suffix}...`);
               const refinedInst = await aceClient.submitSa3Refine(instBuf, {
-                tokens: ids, nTokens, strength, outSr: 48000,
+                tokens: ids, nTokens, strength, outSr: 48000, backend,
               });
 
               setStage(`StableStep: processing vocals${suffix}...`);
@@ -231,7 +255,7 @@ export async function runPostProcessingChain(
           }
 
           anyStageRan = true;
-          log('INFO', `[StableStep] Refined ${audioFilename} (strength=${strength})`);
+          log('INFO', `[StableStep] Refined ${audioFilename} (strength=${strength}, backend=${backend ?? 'auto'})`);
         }
       } catch (ssErr: any) {
         log('WARNING', `[StableStep] Failed (non-fatal): ${ssErr.message}`);

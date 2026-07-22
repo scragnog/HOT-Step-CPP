@@ -1127,6 +1127,10 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       stableStepOn: !!(job.params.stableStepOn ?? job.params.stableStep),
       stableStepStrength: typeof job.params.stableStepStrength === 'number'
         ? job.params.stableStepStrength : 0.3,
+      // Engine backend: 'onnx' (ONNX Runtime/TensorRT) | 'gguf' (GGML) —
+      // anything else normalizes to 'auto' (engine picks).
+      stableStepBackend: (job.params.stableStepBackend === 'onnx' || job.params.stableStepBackend === 'gguf')
+        ? job.params.stableStepBackend as 'onnx' | 'gguf' : 'auto' as const,
       stableStepCaptions: audioUrls.map((_, ti) =>
         (lmResults[ti]?.caption || firstResult.caption || job.params.caption || '') as string),
     };

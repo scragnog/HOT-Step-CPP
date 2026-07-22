@@ -142,6 +142,7 @@ export interface GlobalParams {
   // StableStep (SA3 refine)
   stableStepOn: boolean; setStableStepOn: (v: boolean) => void;
   stableStepStrength: number; setStableStepStrength: (v: number) => void;
+  stableStepBackend: 'auto' | 'onnx' | 'gguf'; setStableStepBackend: (v: 'auto' | 'onnx' | 'gguf') => void;
   // Cover Art
   coverArtEnabled: boolean; setCoverArtEnabled: (v: boolean) => void;
   coverArtSubject: string; setCoverArtSubject: (v: string) => void;

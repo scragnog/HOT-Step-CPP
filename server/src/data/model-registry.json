@@ -1690,6 +1690,58 @@
       "tags": ["essential"]
     },
     {
+      "id": "stablestep-gguf-dit",
+      "filename": "sa3-dit-BF16.gguf",
+      "role": "stablestep",
+      "displayName": "SA3 DiT (GGML)",
+      "scale": null,
+      "variant": null,
+      "quant": "BF16",
+      "sizeBytes": 0,
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "GGML backend: Stable Audio 3 diffusion transformer (BF16 GGUF). Runs via GGML on CUDA, Vulkan or CPU — the fastest option on NVIDIA in current testing.",
+      "tags": []
+    },
+    {
+      "id": "stablestep-gguf-same-enc",
+      "filename": "sa3-same-enc-F16.gguf",
+      "role": "stablestep",
+      "displayName": "SAME Encoder (GGML)",
+      "scale": null,
+      "variant": null,
+      "quant": "F16",
+      "sizeBytes": 0,
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "GGML backend: Stable Audio autoencoder (encoder half, F16 GGUF) — encodes the instrumental into SA3 latents.",
+      "tags": []
+    },
+    {
+      "id": "stablestep-gguf-same-dec",
+      "filename": "sa3-same-dec-F16.gguf",
+      "role": "stablestep",
+      "displayName": "SAME Decoder (GGML)",
+      "scale": null,
+      "variant": null,
+      "quant": "F16",
+      "sizeBytes": 0,
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "GGML backend: Stable Audio autoencoder (decoder half, F16 GGUF) — decodes refined SA3 latents back to audio.",
+      "tags": []
+    },
+    {
+      "id": "stablestep-gguf-text-enc",
+      "filename": "sa3-text-enc-BF16.gguf",
+      "role": "stablestep",
+      "displayName": "T5Gemma Text Encoder (GGML)",
+      "scale": null,
+      "variant": null,
+      "quant": "BF16",
+      "sizeBytes": 0,
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "GGML backend: T5Gemma text encoder (BF16 GGUF) — turns the refine prompt into conditioning embeddings.",
+      "tags": []
+    },
+    {
       "id": "supersep-bs-roformer",
       "filename": "bs_roformer_sw.onnx",
       "role": "supersep",

@@ -250,10 +250,13 @@ Adapters fine-tune the DiT for specific styles, artists, or genres.
 ### StableStep (SA3 Refine)
 - `stableStepOn` (bool): Re-render the track's instrumental through Stable Audio 3 to replace VAE fizz with real detail
 - `stableStepStrength` (0.10-0.60, default 0.30): "Refine strength" — how much of the instrumental is re-rendered; higher values re-interpret the instrumentation more
+- `stableStepBackend` ('auto' | 'onnx' | 'gguf', default 'auto'): which engine backend runs the SA3 refine; 'auto' lets the engine pick the best installed backend
 - How it works: the song is stem-split; the instrumental is re-rendered via Stable Audio 3 (SDEdit) at the chosen strength; the vocals are cleaned with PP-VAE; then everything is remixed
-- Where: the toggle lives in the Post-Processing dropdown in the global bar, next to PP-VAE
-- Requires the StableStep model set (~12 GB, fp32 ONNX) — download it in Model Manager → StableStep tab (a Stability AI Community License acceptance is required before download)
-- First use after download is slow: the TensorRT engine is built once per song-length bucket, then cached — later runs at that length are fast
+- Where: the toggle lives in the Post-Processing dropdown in the global bar, next to PP-VAE; a "Backend" selector (Auto / ONNX (TensorRT) / GGML) appears below the strength slider when the toggle is on
+- Two engine backends exist — install either or both in Model Manager → StableStep tab (a Stability AI Community License acceptance is required before download):
+  - GGML backend: 4 GGUF files (~5.8 GB) at the models root. Runs on CUDA, Vulkan or CPU — it is the ONLY option for Vulkan/CPU builds, and in current testing it is also faster on NVIDIA (~2s vs ~29s per 30-second clip)
+  - ONNX backend: fp32 ONNX set (~12 GB, NVIDIA TensorRT only) — retained as an alternative. First use after download is slow: the TensorRT engine is built once per song-length bucket, then cached — later runs at that length are fast
+  - The tokenizer files from the ONNX set are required by BOTH backends (the server tokenizes the prompt)
 
 ### Duration Buffer & Auto-Trim
 - `autoTrimEnabled` (bool): Detect silence at the end and trim

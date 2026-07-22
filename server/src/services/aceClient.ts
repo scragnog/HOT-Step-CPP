@@ -584,11 +584,15 @@ export const aceClient = {
       seed?: number;          // uint64 RNG seed (engine default: random)
       rmsMatch?: boolean;     // match output RMS to input (engine default true)
       outSr?: number;         // output sample rate (engine default: input rate)
+      /** Engine backend: 'onnx' (ONNX Runtime/TensorRT) or 'gguf' (GGML —
+       *  CUDA/Vulkan/CPU). 'auto'/undefined lets the engine pick. */
+      backend?: 'auto' | 'onnx' | 'gguf';
     },
   ): Promise<Buffer> {
     const params = new URLSearchParams();
     params.set('tokens', opts.tokens.join(','));
     params.set('n_tokens', String(opts.nTokens));
+    if (opts.backend && opts.backend !== 'auto') params.set('backend', opts.backend);
     if (opts.strength !== undefined) params.set('strength', String(opts.strength));
     if (opts.steps !== undefined) params.set('steps', String(opts.steps));
     if (opts.sampler) params.set('sampler', opts.sampler);
