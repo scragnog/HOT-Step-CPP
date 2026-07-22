@@ -6,7 +6,7 @@
 //
 // Usage:
 //   sa3-ggml-test --models <dir-with-sa3-*.gguf> --goldens <dir-with-manifest.json>
-//                 [--component text_enc|seconds|same_enc|same_dec|all]
+//                 [--component text_enc|seconds|same_enc|same_dec|dit|all]
 //
 // Components:
 //   text_enc: sa3-text-enc-BF16.gguf, T5Gemma encoder + learned padding
@@ -18,9 +18,14 @@
 //             [1,2,524288] f32, expected latents [1,256,128] f32.
 //   same_dec: sa3-same-dec-F16.gguf, SAME-L decoder. Input latents
 //             [1,256,128] f32, expected audio [1,2,524288] f32.
+//   dit:      sa3-dit-BF16.gguf, DiffusionTransformer single forward. Inputs
+//             x [1,256,T] f32, t [1] f32, cross_attn_cond [1,S,768] f32,
+//             global_embed [1,768] f32, local_add_cond [1,257,T] f32,
+//             padding_mask [1,T] u8; expected v [1,256,T] f32.
 //
 // Exit code 0 only if every run component passes cosine > 0.999.
 
+#include "sa3-dit-ggml.h"
 #include "sa3-same-ggml.h"
 #include "sa3-t5gemma-enc.h"
 #include "yyjson.h"
@@ -270,6 +275,76 @@ static bool run_same(const std::string & models, const std::string & goldens, yy
     return true;
 }
 
+static bool run_dit(const std::string & models, const std::string & goldens, yyjson_val * root, Metrics * out) {
+    const char * in_names[] = { "x", "t", "cross_attn_cond", "global_embed", "local_add_cond", "padding_mask" };
+    std::vector<std::vector<uint8_t>> raw(7);
+    for (int i = 0; i < 6; i++) {
+        std::string f = manifest_file(root, "dit", "inputs", in_names[i]);
+        if (f.empty() || !read_file(goldens + "/" + f, raw[(size_t) i])) {
+            fprintf(stderr, "[Test] dit: missing input '%s'\n", in_names[i]);
+            return false;
+        }
+    }
+    std::string exp_f = manifest_file(root, "dit", "outputs", "v");
+    if (exp_f.empty() || !read_file(goldens + "/" + exp_f, raw[6])) {
+        fprintf(stderr, "[Test] dit: missing output 'v'\n");
+        return false;
+    }
+
+    int64_t n_x     = manifest_shape_prod(root, "dit", "inputs", "x");
+    int64_t n_cross = manifest_shape_prod(root, "dit", "inputs", "cross_attn_cond");
+    int64_t n_glob  = manifest_shape_prod(root, "dit", "inputs", "global_embed");
+    int64_t n_local = manifest_shape_prod(root, "dit", "inputs", "local_add_cond");
+    int64_t T       = manifest_shape_prod(root, "dit", "inputs", "padding_mask");
+    int64_t n_out   = manifest_shape_prod(root, "dit", "outputs", "v");
+    if (T <= 0 || n_x != 256 * T || n_out != n_x || n_glob != 768 || n_cross % 768 != 0 ||
+        n_local != 257 * T) {
+        fprintf(stderr, "[Test] dit: bad shapes in manifest\n");
+        return false;
+    }
+    int64_t S_c = n_cross / 768;
+    if (raw[0].size() != (size_t) n_x * 4 || raw[1].size() != 4 || raw[2].size() != (size_t) n_cross * 4 ||
+        raw[3].size() != (size_t) n_glob * 4 || raw[4].size() != (size_t) n_local * 4 ||
+        raw[5].size() != (size_t) T || raw[6].size() != (size_t) n_out * 4) {
+        fprintf(stderr, "[Test] dit: golden file sizes do not match manifest shapes\n");
+        return false;
+    }
+
+    SA3DiT dit = {};
+    if (!sa3_dit_load(&dit, (models + "/sa3-dit-BF16.gguf").c_str())) {
+        return false;
+    }
+
+    // Debug hook: SA3_DIT_STAGE=<n> dumps the token sequence after n layers
+    // (0 = memory+projected input) to SA3_DIT_DUMP (default sa3_dit_stage.bin).
+    const char * env_stage = getenv("SA3_DIT_STAGE");
+    if (env_stage) {
+        dit.debug_stage = atoi(env_stage);
+        fprintf(stderr, "[Test] dit: DEBUG dumping stage %d\n", dit.debug_stage);
+    }
+
+    std::vector<float> got((size_t) n_out);
+    sa3_dit_forward(&dit, (const float *) raw[0].data(), *(const float *) raw[1].data(),
+                    (const float *) raw[2].data(), S_c, (const float *) raw[3].data(),
+                    (const float *) raw[4].data(), raw[5].data(), T, got.data());
+
+    if (env_stage && !dit.debug_out.empty()) {
+        const char * dump = getenv("SA3_DIT_DUMP");
+        std::string  path = dump ? dump : "sa3_dit_stage.bin";
+        FILE *       f    = fopen(path.c_str(), "wb");
+        if (f) {
+            fwrite(dit.debug_out.data(), sizeof(float), dit.debug_out.size(), f);
+            fclose(f);
+            fprintf(stderr, "[Test] dit: stage tensor (%zu floats) -> %s\n", dit.debug_out.size(),
+                    path.c_str());
+        }
+    }
+    sa3_dit_free(&dit);
+
+    *out = compare(got.data(), (const float *) raw[6].data(), (size_t) n_out);
+    return true;
+}
+
 int main(int argc, char ** argv) {
     std::string models, goldens, component = "all";
     for (int i = 1; i < argc; i++) {
@@ -281,12 +356,12 @@ int main(int argc, char ** argv) {
             component = argv[++i];
         } else {
             fprintf(stderr,
-                    "Usage: sa3-ggml-test --models <dir> --goldens <dir> [--component text_enc|seconds|same_enc|same_dec|all]\n");
+                    "Usage: sa3-ggml-test --models <dir> --goldens <dir> [--component text_enc|seconds|same_enc|same_dec|dit|all]\n");
             return 2;
         }
     }
     if (models.empty() || goldens.empty()) {
-        fprintf(stderr, "Usage: sa3-ggml-test --models <dir> --goldens <dir> [--component text_enc|seconds|same_enc|same_dec|all]\n");
+        fprintf(stderr, "Usage: sa3-ggml-test --models <dir> --goldens <dir> [--component text_enc|seconds|same_enc|same_dec|dit|all]\n");
         return 2;
     }
 
@@ -353,6 +428,19 @@ int main(int argc, char ** argv) {
             all_pass = all_pass && pass;
         } else {
             printf("same_dec: ERROR\n");
+            all_pass = false;
+        }
+    }
+    if (component == "all" || component == "dit") {
+        Metrics m;
+        any_run = true;
+        if (run_dit(models, goldens, root, &m)) {
+            bool pass = m.cosine > PASS_COSINE;
+            printf("dit:      cosine=%.6f max_abs_diff=%.6f  %s\n", m.cosine, m.max_abs_diff,
+                   pass ? "PASS" : "FAIL");
+            all_pass = all_pass && pass;
+        } else {
+            printf("dit:      ERROR\n");
             all_pass = false;
         }
     }
