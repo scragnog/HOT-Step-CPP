@@ -3153,6 +3153,7 @@ int main(int argc, char ** argv) {
     //   sampler   "pingpong" (default) | "euler"
     //   seed      RNG seed (default: random)
     //   rms_match 1 (default) match output RMS to input | 0 raw
+    //   out_sr    output sample rate (default: input rate)
     //   debug_zero_noise  1 = deterministic validation mode (zero noise)
     // Requires models/onnx/sa3/ with the 5 exported graphs. 501 if absent.
     svr.Post("/sa3-refine", [models_dir](const httplib::Request & req, httplib::Response & res) {
@@ -3271,15 +3272,20 @@ int main(int argc, char ** argv) {
             }
         }
 
-        // Resample back to the input rate, encode WAV
+        // Resample to the output rate (default: input rate), encode WAV
+        int sr_out = sr_in;
+        if (req.has_param("out_sr")) {
+            int v = atoi(req.get_param_value("out_sr").c_str());
+            if (v >= 8000 && v <= 192000) sr_out = v;
+        }
         int T_out = 0;
-        float * out_native = audio_resample(out44.data(), T44, SA3_SR, sr_in, 2, &T_out);
+        float * out_native = audio_resample(out44.data(), T44, SA3_SR, sr_out, 2, &T_out);
         if (!out_native || T_out <= 0) {
             free(out_native);
             json_error(res, 500, "Resample to output rate failed");
             return;
         }
-        std::string wav = audio_encode_wav(out_native, T_out, sr_in, WAV_S16);
+        std::string wav = audio_encode_wav(out_native, T_out, sr_out, WAV_S16);
         free(out_native);
         res.set_content(wav, "audio/wav");
     });
@@ -3314,7 +3320,8 @@ int main(int argc, char ** argv) {
 
     // POST /supersep/separate — start async stem separation
     // Body: raw WAV or MP3 audio
-    // Query params: level=0..3 (BASIC/VOCAL_SPLIT/FULL/MAXIMUM)
+    // Query params: level=0..4 (BASIC/VOCAL_SPLIT/FULL/MAXIMUM/VOCALS_ONLY)
+    //   level=4: single Mel-Band karaoke pass -> 2 stems (Vocals+Instrumental)
     // Returns: {"id": "..."}
     svr.Post("/supersep/separate", [models_dir](const httplib::Request & req, httplib::Response & res) {
         if (req.body.empty()) {
@@ -3326,7 +3333,7 @@ int main(int argc, char ** argv) {
         if (req.has_param("level")) {
             level = atoi(req.get_param_value("level").c_str());
             if (level < 0) level = 0;
-            if (level > 3) level = 3;
+            if (level > SUPERSEP_VOCALS_ONLY) level = SUPERSEP_VOCALS_ONLY;
         }
 
         // Decode audio to interleaved stereo 44100 Hz

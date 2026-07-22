@@ -35,6 +35,9 @@ typedef enum {
     SUPERSEP_VOCAL_SPLIT = 1,  // Stages 1+2: 8 stems (lead/backing vocals)
     SUPERSEP_FULL        = 2,  // Stages 1+2+3: 14 stems (+ drum breakdown)
     SUPERSEP_MAXIMUM     = 3,  // Stages 1+2+3+4: up to 17 stems
+    SUPERSEP_VOCALS_ONLY = 4,  // Mel-Band karaoke on the full mix: 2 stems
+                               // (Vocals + Instrumental). One model pass —
+                               // used by StableStep, much faster than BASIC.
 } SuperSepLevel;
 
 // A single separated stem

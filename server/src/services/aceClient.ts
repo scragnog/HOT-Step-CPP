@@ -583,6 +583,7 @@ export const aceClient = {
       sampler?: 'pingpong' | 'euler';
       seed?: number;          // uint64 RNG seed (engine default: random)
       rmsMatch?: boolean;     // match output RMS to input (engine default true)
+      outSr?: number;         // output sample rate (engine default: input rate)
     },
   ): Promise<Buffer> {
     const params = new URLSearchParams();
@@ -593,6 +594,7 @@ export const aceClient = {
     if (opts.sampler) params.set('sampler', opts.sampler);
     if (opts.seed !== undefined) params.set('seed', String(opts.seed));
     if (opts.rmsMatch !== undefined) params.set('rms_match', opts.rmsMatch ? '1' : '0');
+    if (opts.outSr !== undefined) params.set('out_sr', String(opts.outSr));
 
     const res = await fetch(`${BASE}/sa3-refine?${params.toString()}`, {
       method: 'POST',
@@ -610,7 +612,8 @@ export const aceClient = {
 
   /** POST /supersep/separate?level=N — start async stem separation.
    *  Body: WAV/MP3 audio. Returns the SuperSep job id.
-   *  level: 0=BASIC (6 stems), 1=VOCAL_SPLIT, 2=FULL, 3=MAXIMUM. */
+   *  level: 0=BASIC (6 stems), 1=VOCAL_SPLIT, 2=FULL, 3=MAXIMUM,
+   *         4=VOCALS_ONLY (single karaoke-model pass: Vocals + Instrumental). */
   async submitSuperSepSeparate(audioBuffer: Buffer, level = 0): Promise<string> {
     const res = await fetch(`${BASE}/supersep/separate?level=${level}`, {
       method: 'POST',
@@ -644,6 +647,19 @@ export const aceClient = {
   }> {
     const res = await aceGet(`/supersep/result?id=${jobId}`, TIMEOUT_POLL);
     return res.json();
+  },
+
+  /** GET /supersep/serve?id=...&stem=N — download one stem as a 44.1 kHz WAV. */
+  async superSepStem(jobId: string, index: number): Promise<Buffer> {
+    const res = await fetch(`${BASE}/supersep/serve?id=${jobId}&stem=${index}`, {
+      signal: AbortSignal.timeout(TIMEOUT_RESULT),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => 'Unknown error');
+      throw new Error(`ace-server GET /supersep/serve failed (${res.status}): ${errBody}`);
+    }
+    const arrayBuf = await res.arrayBuffer();
+    return Buffer.from(arrayBuf);
   },
 
   /** POST /supersep/recombine — mix a completed job's stems with per-stem

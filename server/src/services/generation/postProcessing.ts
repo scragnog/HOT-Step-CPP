@@ -167,10 +167,11 @@ export async function runPostProcessingChain(
             });
             fs.writeFileSync(processedPath, refined);
           } else {
-            // Full stem workflow: separate → refine instrumental / clean vocals → recombine
-            setStage(`StableStep: separating stems${suffix}...`);
+            // Stem workflow: VOCALS_ONLY split (single karaoke-model pass ->
+            // Vocals + Instrumental) → refine instrumental / clean vocals → mix.
+            setStage(`StableStep: separating vocals${suffix}...`);
             const srcBuf = fs.readFileSync(processedPath);
-            const sepId = await aceClient.submitSuperSepSeparate(srcBuf, 0 /* BASIC: 6 stems */);
+            const sepId = await aceClient.submitSuperSepSeparate(srcBuf, 4 /* VOCALS_ONLY */);
 
             // Poll separation to completion (GPU-serialized with other engine work)
             const sepDeadline = Date.now() + 30 * 60_000;
@@ -186,40 +187,41 @@ export async function runPostProcessingChain(
 
             const sepResult = await aceClient.superSepResult(sepId);
             const stems = sepResult.stems;
-            const isVocal = (s: { category: string }) => s.category === 'vocals';
-            const hasVocalStem = stems.some(s => isVocal(s) && !s.hidden);
+            const vocalStem = stems.find(s => s.category === 'vocals' && !s.hidden);
+            const instStem = stems.find(s => s.category === 'instruments' && !s.hidden);
 
-            if (!hasVocalStem) {
-              // No vocal energy detected — refine the whole mix directly
-              log('INFO', '[StableStep] No vocal stem found — refining full mix');
+            if (!vocalStem || !instStem) {
+              // No vocal energy detected (silent stems are dropped engine-side)
+              // — refine the whole mix directly.
+              log('INFO', '[StableStep] No vocal/instrumental split — refining full mix');
               setStage(`StableStep: refining instrumental${suffix}...`);
               const refined = await aceClient.submitSa3Refine(srcBuf, {
                 tokens: ids, nTokens, strength,
               });
               fs.writeFileSync(processedPath, refined);
             } else {
-              // Engine-side recombine gives 48 kHz WAVs for both halves:
-              // instrumental = everything except vocals, vocals = solo vocals.
-              const instControls = stems.map(s => ({
-                index: s.index, volume: 1.0, muted: s.hidden || isVocal(s),
-              }));
-              const vocalControls = stems.map(s => ({
-                index: s.index, volume: 1.0, muted: s.hidden || !isVocal(s),
-              }));
-              const instBuf = await aceClient.superSepRecombine(sepId, instControls);
-              const vocalBuf = await aceClient.superSepRecombine(sepId, vocalControls);
+              // Fetch both stems directly (44.1 kHz). The refined instrumental
+              // is requested at 48 kHz (out_sr) to match PP-VAE's fixed 48 kHz
+              // output so the final mix rates agree.
+              const instBuf = await aceClient.superSepStem(sepId, instStem.index);
+              const vocalBuf = await aceClient.superSepStem(sepId, vocalStem.index);
 
               setStage(`StableStep: refining instrumental${suffix}...`);
               const refinedInst = await aceClient.submitSa3Refine(instBuf, {
-                tokens: ids, nTokens, strength,
+                tokens: ids, nTokens, strength, outSr: 48000,
               });
 
               setStage(`StableStep: processing vocals${suffix}...`);
-              let cleanVocals = vocalBuf;
+              let cleanVocals: Buffer;
               try {
-                cleanVocals = await aceClient.submitPpVaeReencode(vocalBuf, 0.0);
+                cleanVocals = await aceClient.submitPpVaeReencode(vocalBuf, 0.0); // 48 kHz out
               } catch (vErr: any) {
                 log('WARNING', `[StableStep] Vocal PP-VAE failed, using raw vocal stem: ${vErr.message}`);
+                // Raw stem is 44.1 kHz — round-trip through /sa3-refine at
+                // strength 0 is wasteful, so upsample via the engine's
+                // recombine of the solo vocal stem (48 kHz out) instead.
+                cleanVocals = await aceClient.superSepRecombine(sepId,
+                  stems.map(s => ({ index: s.index, volume: 1.0, muted: s.index !== vocalStem.index })));
               }
 
               setStage(`StableStep: recombining${suffix}...`);
