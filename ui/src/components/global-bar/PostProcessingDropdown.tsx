@@ -509,6 +509,7 @@ export const PostProcessingDropdown: React.FC = () => {
           <p className="text-[10px] text-zinc-500 leading-relaxed">
             Re-renders the instrumental through Stable Audio 3 to replace VAE fizz
             with real detail; vocals are split out, cleaned with PP-VAE, and remixed.
+            {' '}<span className="text-zinc-600">Powered by Stability AI.</span>
           </p>
           {!stableStepAvailable && (
             <div className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20">
