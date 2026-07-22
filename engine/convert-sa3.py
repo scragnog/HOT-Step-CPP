@@ -3,9 +3,12 @@
 #
 # Produces four GGUFs into models/:
 #   sa3-dit-BF16.gguf       arch "sa3-dit"       from stable-audio-3-medium (model.* keys)
-#   sa3-same-enc-BF16.gguf  arch "sa3-same-enc"  from pretransform.model.* (encoder side)
-#   sa3-same-dec-BF16.gguf  arch "sa3-same-dec"  from pretransform.model.* (decoder side)
+#   sa3-same-enc-F16.gguf   arch "sa3-same-enc"  from pretransform.model.* (encoder side)
+#   sa3-same-dec-F16.gguf   arch "sa3-same-dec"  from pretransform.model.* (decoder side)
 #   sa3-text-enc-BF16.gguf  arch "sa3-t5gemma"   from the t5gemma-b-b-ul2 subfolder
+#
+# The SAME pair is stored F16 (not BF16): the decoder's sinusoidal FF blocks
+# amplify per-weight rounding noise across its 12 layers (see write_sa3_gguf).
 #
 # Tensor policy: >=2D weights -> BF16; 1D tensors (norms, biases, scales) -> F32
 # (precision finding from the ONNX leg: this model's norm/timestep paths are
@@ -44,22 +47,40 @@ def to_np(t):
     return t.numpy()
 
 
-def write_sa3_gguf(out_path, arch, tensors, config_json, extra_meta=None):
-    """tensors: list of (name, np.float32 array). >=2D stored BF16, 1D stored F32."""
+def write_sa3_gguf(out_path, arch, tensors, config_json, extra_meta=None, half="bf16"):
+    """tensors: list of (name, np.float32 array). >=2D stored in `half`
+    ("bf16" or "f16"), 1D tensors (norms, biases, scales) stored F32.
+
+    half="f16" is used for the SAME autoencoder halves: the decoder's
+    sinusoidal FF layers amplify weight rounding noise layer over layer
+    (bf16 ~0.4% rel error -> parity cosine 0.9987 < 0.999; f16 ~0.05%
+    passes). Same file size either way; weight magnitudes are far inside
+    f16 range."""
     w = gguf.GGUFWriter(out_path, arch)
     w.add_string("sa3.config_json", config_json)
     for k, v in (extra_meta or {}).items():
         w.add_string(k, v)
     import torch
-    n_bf16 = n_f32 = 0
+    n_half = n_f32 = 0
     for name, arr in tensors:
         arr = np.ascontiguousarray(arr, dtype=np.float32)
+        if arr.size == 0:
+            # e.g. bottleneck.noise_scaling_factor (1, 0, 1) when
+            # noise_augment_dim == 0. ggml's gguf reader hits an integer
+            # divide-by-zero on ne==0 tensors, and the C++ side never reads
+            # them — drop.
+            log(f"  skipping zero-element tensor {name} {arr.shape}")
+            continue
         if arr.ndim >= 2:
-            # raw_dtype does NOT convert — it labels. Convert to bf16 bytes
+            # raw_dtype does NOT convert — it labels. Convert to 16-bit bytes
             # explicitly (uint16 view keeps the logical shape).
-            bf16 = torch.from_numpy(arr).to(torch.bfloat16).view(torch.uint16).numpy()
-            w.add_tensor(name, bf16, raw_dtype=gguf.GGMLQuantizationType.BF16)
-            n_bf16 += 1
+            if half == "f16":
+                h = torch.from_numpy(arr).to(torch.float16).view(torch.uint16).numpy()
+                w.add_tensor(name, h, raw_dtype=gguf.GGMLQuantizationType.F16)
+            else:
+                h = torch.from_numpy(arr).to(torch.bfloat16).view(torch.uint16).numpy()
+                w.add_tensor(name, h, raw_dtype=gguf.GGMLQuantizationType.BF16)
+            n_half += 1
         else:
             w.add_tensor(name, arr)  # F32
             n_f32 += 1
@@ -68,7 +89,7 @@ def write_sa3_gguf(out_path, arch, tensors, config_json, extra_meta=None):
     w.write_tensors_to_file()
     w.close()
     size = os.path.getsize(out_path) / 1e9
-    log(f"{os.path.basename(out_path)}: {n_bf16} BF16 + {n_f32} F32 tensors, {size:.2f} GB")
+    log(f"{os.path.basename(out_path)}: {n_half} {half.upper()} + {n_f32} F32 tensors, {size:.2f} GB")
 
 
 def main():
@@ -104,10 +125,10 @@ def main():
 
     write_sa3_gguf(os.path.join(OUTPUT_DIR, "sa3-dit-BF16.gguf"),
                   "sa3-dit", dit_tensors, config_json)
-    write_sa3_gguf(os.path.join(OUTPUT_DIR, "sa3-same-enc-BF16.gguf"),
-                  "sa3-same-enc", enc_tensors, config_json)
-    write_sa3_gguf(os.path.join(OUTPUT_DIR, "sa3-same-dec-BF16.gguf"),
-                  "sa3-same-dec", dec_tensors, config_json)
+    write_sa3_gguf(os.path.join(OUTPUT_DIR, "sa3-same-enc-F16.gguf"),
+                  "sa3-same-enc", enc_tensors, config_json, half="f16")
+    write_sa3_gguf(os.path.join(OUTPUT_DIR, "sa3-same-dec-F16.gguf"),
+                  "sa3-same-dec", dec_tensors, config_json, half="f16")
 
     # ── T5Gemma encoder (separate HF model in the repo subfolder) ───────
     t5_cfg = hf_hub_download(REPO, "config.json", subfolder="t5gemma-b-b-ul2")
