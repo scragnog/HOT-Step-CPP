@@ -1025,93 +1025,50 @@ SuperSepResult * supersep_run(
 
     std::vector<SuperSepStem> stems;
 
-    // ── VOCALS_ONLY: single Mel-Band karaoke pass on the full mix ────────
-    // Two stems (Vocals + Instrumental), no BS-RoFormer involved. Used by
-    // the StableStep post-processing stage.
+    // ── VOCALS_ONLY: BS-RoFormer pass, 2-stem output ─────────────────────
+    // The 6-stem model computes all stems in one forward anyway; we keep only
+    // the Vocals stem (lead AND backing vocals — unlike the karaoke model,
+    // whose "vocals" is lead-only and leaves backing vocals in the
+    // instrumental, where downstream SA3 refinement would scramble them) and
+    // derive Instrumental as mix − vocals. The complement guarantees
+    // vocals + instrumental reconstructs the input exactly — no residual is
+    // lost to the split. Used by the StableStep post-processing stage.
     if (level == SUPERSEP_VOCALS_ONLY) {
-        cb(1, "Loading Mel-Band RoFormer model...", 0.05f);
+        cb(1, "Loading BS-RoFormer model...", 0.05f);
         if (cancelled()) return nullptr;
         try {
-            if (!ctx->s2_mel_band) {
-                ctx->s2_mel_band = load_onnx_model(ctx, "mel_band_roformer_karaoke.onnx");
-            }
-            const int mb_chunk = MB_CHUNK_SAMPLES;
-            const int mb_crossfade = 44100;
-            const int mb_step = mb_chunk - mb_crossfade;
-            const int nf = n_frames;
-
-            std::vector<double> voc_accum(nf * 2, 0.0);
-            std::vector<double> inst_accum(nf * 2, 0.0);
-            std::vector<double> weight_accum(nf * 2, 0.0);
-
-            int n_chunks = (nf <= mb_chunk) ? 1 : (nf - mb_crossfade + mb_step - 1) / mb_step;
-            if (n_chunks < 1) n_chunks = 1;
-
-            std::vector<float> fade_win(mb_chunk, 1.0f);
-            int half_fade = mb_crossfade / 2;
-            for (int i2 = 0; i2 < half_fade; i2++) {
-                float t = (float)i2 / (float)half_fade;
-                fade_win[i2] = t;
-                fade_win[mb_chunk - 1 - i2] = t;
+            if (!ctx->s1_bs_roformer) {
+                ctx->s1_bs_roformer = load_onnx_model(ctx, "bs_roformer_sw.onnx");
             }
 
-            fprintf(stderr, "[SuperSep] Vocals-only: %d frames -> %d chunks\n", nf, n_chunks);
-
-            bool any_ok = false;
-            for (int c = 0; c < n_chunks; c++) {
-                if (cancelled()) return nullptr;
-
-                int start = c * mb_step;
-                int end = std::min(start + mb_chunk, nf);
-                int this_chunk = end - start;
-
-                float pct = 0.10f + 0.80f * (float)c / (float)n_chunks;
-                char msg[64];
-                snprintf(msg, sizeof(msg), "Vocal split chunk %d/%d...", c + 1, n_chunks);
-                cb(1, msg, pct);
-
-                std::vector<float> chunk_buf(mb_chunk * 2, 0.0f);
-                memcpy(chunk_buf.data(), audio + (size_t)start * 2,
-                       (size_t)this_chunk * 2 * sizeof(float));
-
-                float *voc_chunk = nullptr, *inst_chunk = nullptr;
-                int chunk_out = 0;
-                bool ok = mel_band_process_chunk(
-                    ctx->s2_mel_band, chunk_buf.data(), mb_chunk,
-                    voc_chunk, inst_chunk, chunk_out);
-
-                if (ok && voc_chunk && inst_chunk) {
-                    any_ok = true;
-                    for (int i2 = 0; i2 < this_chunk; i2++) {
-                        float w = fade_win[i2];
-                        if (c == 0 && i2 < half_fade) w = 1.0f;
-                        if (c == n_chunks - 1 && i2 >= this_chunk - half_fade) w = 1.0f;
-
-                        int dst = (start + i2) * 2;
-                        if (dst + 1 < nf * 2) {
-                            voc_accum[dst + 0]  += voc_chunk[i2 * 2 + 0] * w;
-                            voc_accum[dst + 1]  += voc_chunk[i2 * 2 + 1] * w;
-                            inst_accum[dst + 0] += inst_chunk[i2 * 2 + 0] * w;
-                            inst_accum[dst + 1] += inst_chunk[i2 * 2 + 1] * w;
-                            weight_accum[dst + 0] += w;
-                            weight_accum[dst + 1] += w;
-                        }
-                    }
-                }
-                free(voc_chunk);
-                free(inst_chunk);
+            std::vector<float *> s1_stems;
+            std::vector<int> s1_counts;
+            bool ok = bs_roformer_separate(
+                ctx->s1_bs_roformer, audio, n_frames, BS_NUM_STEMS,
+                s1_stems, s1_counts, cb, cancelled);
+            if (!ok) {
+                for (auto p : s1_stems) free(p);
+                return nullptr;
             }
 
-            if (!any_ok) throw std::runtime_error("All mel-band chunks failed");
-
-            float *voc_out  = (float *)malloc((size_t)nf * 2 * sizeof(float));
-            float *inst_out = (float *)malloc((size_t)nf * 2 * sizeof(float));
-            for (int i2 = 0; i2 < nf * 2; i2++) {
-                voc_out[i2]  = (weight_accum[i2] > 1e-8) ? (float)(voc_accum[i2]  / weight_accum[i2]) : 0.0f;
-                inst_out[i2] = (weight_accum[i2] > 1e-8) ? (float)(inst_accum[i2] / weight_accum[i2]) : 0.0f;
+            // Vocals = stage-1 stem index 3; free the rest immediately.
+            float *vocals = nullptr;
+            int voc_frames = 0;
+            for (int i = 0; i < (int)s1_stems.size(); i++) {
+                if (i == 3) { vocals = s1_stems[i]; voc_frames = s1_counts[i]; }
+                else free(s1_stems[i]);
             }
-            add_stem(stems, VOCALS_ONLY_STEMS[0], voc_out, nf);
-            add_stem(stems, VOCALS_ONLY_STEMS[1], inst_out, nf);
+            if (!vocals) throw std::runtime_error("BS-RoFormer produced no vocals stem");
+
+            cb(1, "Deriving instrumental (mix - vocals)...", 0.90f);
+            int nf = std::min(voc_frames, n_frames);
+            float *inst = (float *)malloc((size_t)n_frames * 2 * sizeof(float));
+            for (int i2 = 0; i2 < n_frames * 2; i2++) {
+                float v = (i2 < nf * 2) ? vocals[i2] : 0.0f;
+                inst[i2] = audio[i2] - v;
+            }
+            add_stem(stems, VOCALS_ONLY_STEMS[0], vocals, voc_frames);
+            add_stem(stems, VOCALS_ONLY_STEMS[1], inst, n_frames);
             cb(1, "Vocal split complete", 0.95f);
         } catch (const std::exception &e) {
             fprintf(stderr, "[SuperSep] Vocals-only failed: %s\n", e.what());

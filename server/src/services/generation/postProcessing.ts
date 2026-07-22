@@ -191,7 +191,7 @@ export async function runPostProcessingChain(
             });
             fs.writeFileSync(processedPath, refined);
           } else {
-            // Stem workflow: VOCALS_ONLY split (single karaoke-model pass ->
+            // Stem workflow: VOCALS_ONLY split (BS-RoFormer 2-stem ->
             // Vocals + Instrumental) → refine instrumental / clean vocals → mix.
             setStage(`StableStep: separating vocals${suffix}...`);
             const srcBuf = fs.readFileSync(processedPath);

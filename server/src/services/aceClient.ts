@@ -617,7 +617,7 @@ export const aceClient = {
   /** POST /supersep/separate?level=N — start async stem separation.
    *  Body: WAV/MP3 audio. Returns the SuperSep job id.
    *  level: 0=BASIC (6 stems), 1=VOCAL_SPLIT, 2=FULL, 3=MAXIMUM,
-   *         4=VOCALS_ONLY (single karaoke-model pass: Vocals + Instrumental). */
+   *         4=VOCALS_ONLY (BS-RoFormer 2-stem: Vocals incl. backing + complement Instrumental). */
   async submitSuperSepSeparate(audioBuffer: Buffer, level = 0): Promise<string> {
     const res = await fetch(`${BASE}/supersep/separate?level=${level}`, {
       method: 'POST',

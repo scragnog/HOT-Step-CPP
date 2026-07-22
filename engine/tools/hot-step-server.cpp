@@ -3366,7 +3366,7 @@ int main(int argc, char ** argv) {
     // POST /supersep/separate — start async stem separation
     // Body: raw WAV or MP3 audio
     // Query params: level=0..4 (BASIC/VOCAL_SPLIT/FULL/MAXIMUM/VOCALS_ONLY)
-    //   level=4: single Mel-Band karaoke pass -> 2 stems (Vocals+Instrumental)
+    //   level=4: BS-RoFormer 2-stem output — Vocals (lead+backing) + Instrumental (mix − vocals)
     // Returns: {"id": "..."}
     svr.Post("/supersep/separate", [models_dir](const httplib::Request & req, httplib::Response & res) {
         if (req.body.empty()) {
