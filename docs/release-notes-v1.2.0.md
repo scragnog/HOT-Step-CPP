@@ -1,9 +1,4 @@
-# Release notes draft — v1.1.4 → HEAD
-
-> Paste into the CI-drafted release body. Two flagship features this cycle —
-> consider calling it **v1.2.0** rather than v1.1.5.
-
----
+# v1.2.0
 
 The StableStep release. Two flagship features: **StableStep**, a Stable Audio 3-powered
 instrumental refiner that finally kills VAE fizz at the source, and **MIDI Studio**,
