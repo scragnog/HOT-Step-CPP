@@ -80,6 +80,7 @@ enum ModelKind {
     MODEL_COND_ENC_ORT,// CondEncOrt    from cond_encoder.onnx (TRT/CUDA EP)
     MODEL_VAE_ENC_ORT, // VaeEncOrt     from vae_encoder.onnx (TRT/CUDA EP)
     MODEL_SA3_ORT,     // Sa3Refine     from onnx/sa3/ directory, 5 graphs (TRT/CUDA EP)
+    MODEL_SA3_GGML,    // Sa3GgmlRefine from models root, 4 sa3-*.gguf (GGML backend)
 };
 
 struct ModelKey {
@@ -142,6 +143,7 @@ VaeEncOrt *  store_require_vae_enc_ort(ModelStore * s, const ModelKey & k);
 TextEncOrt * store_require_text_enc_ort(ModelStore * s, const ModelKey & k);
 CondEncOrt * store_require_cond_enc_ort(ModelStore * s, const ModelKey & k);
 Sa3Refine *  store_require_sa3_ort(ModelStore * s, const ModelKey & k);  // k.path = onnx/sa3 DIRECTORY
+Sa3GgmlRefine * store_require_sa3_ggml(ModelStore * s, const ModelKey & k);  // k.path = models root DIRECTORY (4 sa3-*.gguf)
 TokGGML *    store_require_fsq_tok(ModelStore * s, const ModelKey & k);
 DetokGGML *  store_require_fsq_detok(ModelStore * s, const ModelKey & k);
 

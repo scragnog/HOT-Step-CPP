@@ -607,6 +607,46 @@ Sa3Refine * store_require_sa3_ort(ModelStore * s, const ModelKey & k) {
     return m;
 }
 
+static void del_sa3_ggml(void * p) {
+    sa3_ggml_free(static_cast<Sa3GgmlRefine *>(p));
+    delete static_cast<Sa3GgmlRefine *>(p);
+}
+
+// GGML modules allocate weight buffers through the store's accounting like
+// the other GGML kinds: sum the four modules' WeightCtx backend buffers
+// (the seconds embedder is CPU-side and negligible).
+static size_t bytes_of_sa3_ggml(const Sa3GgmlRefine * m) {
+    if (!m) {
+        return 0;
+    }
+    size_t total = 0;
+    if (m->text_enc_m.wctx.buffer) total += ggml_backend_buffer_get_size(m->text_enc_m.wctx.buffer);
+    if (m->same_enc_m.wctx.buffer) total += ggml_backend_buffer_get_size(m->same_enc_m.wctx.buffer);
+    if (m->same_dec_m.wctx.buffer) total += ggml_backend_buffer_get_size(m->same_dec_m.wctx.buffer);
+    if (m->dit_m.wctx.buffer)      total += ggml_backend_buffer_get_size(m->dit_m.wctx.buffer);
+    return total;
+}
+
+Sa3GgmlRefine * store_require_sa3_ggml(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<Sa3GgmlRefine>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer           t;
+    Sa3GgmlRefine * m = new Sa3GgmlRefine();
+    if (!sa3_ggml_load(m, k.path.c_str())) {  // k.path = models root with the 4 sa3-*.gguf
+        sa3_ggml_free(m);
+        delete m;
+        return nullptr;
+    }
+    install_entry(s, k, m, bytes_of_sa3_ggml(m), "SA3-Refine-GGML", del_sa3_ggml);
+    fprintf(stderr, "[Store] Load SA3-Refine-GGML: %.0f ms\n", t.ms());
+    return m;
+}
+
 static void del_text_enc_ort(void * p) {
     text_enc_ort_free(static_cast<TextEncOrt *>(p));
     delete static_cast<TextEncOrt *>(p);

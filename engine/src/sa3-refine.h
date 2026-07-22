@@ -1,5 +1,5 @@
 #pragma once
-// sa3-refine.h: Stable Audio 3 SDEdit-style refiner (ONNX Runtime, TRT/CUDA EP)
+// sa3-refine.h: Stable Audio 3 SDEdit-style refiner (ONNX Runtime or GGML)
 //
 // Post-processing module: encodes 44.1kHz stereo audio into SAME-L latent
 // space, partially re-noises it (strength = init noise level), denoises with
@@ -7,13 +7,30 @@
 // per step), and decodes back to audio. Used to re-render instrumental stems
 // with real treble detail (de-fizz).
 //
-// Five ONNX graphs in one directory (see tools/onnx-export/export_sa3_*.py):
-//   sa3-text_encoder.onnx     [1,256]i64 + [1,256]bool -> [1,256,768]   (fp32!)
-//   sa3-seconds_embedder.onnx [1]f32                   -> [1,768]
-//   sa3-same_encoder.onnx     [1,2,524288]             -> [1,256,128]   (static chunk)
-//   sa3-same_decoder.onnx     [1,256,128]              -> [1,2,524288]  (static chunk)
-//   sa3-dit.onnx              x[1,256,T] t[1] cross[1,257,768] glob[1,768]
-//                             local[1,257,T] pad[1,T]bool -> v[1,256,T] (dynamic T)
+// The orchestration (schedule, tiled encode/decode, sampler, conditioning
+// assembly) is backend-agnostic: it drives an Sa3Backend interface with five
+// operations. Two implementations exist:
+//
+//   ONNX (Sa3Refine + Sa3OrtBackend, HOT_STEP_SUPERSEP builds only) — five
+//   ORT graphs in one directory (see tools/onnx-export/export_sa3_*.py):
+//     sa3-text_encoder.onnx     [1,256]i64 + [1,256]bool -> [1,256,768]   (fp32!)
+//     sa3-seconds_embedder.onnx [1]f32                   -> [1,768]
+//     sa3-same_encoder.onnx     [1,2,524288]             -> [1,256,128]   (static chunk)
+//     sa3-same_decoder.onnx     [1,256,128]              -> [1,2,524288]  (static chunk)
+//     sa3-dit.onnx              x[1,256,T] t[1] cross[1,257,768] glob[1,768]
+//                               local[1,257,T] pad[1,T]bool -> v[1,256,T] (dynamic T)
+//
+//   GGML (Sa3GgmlRefine) — four GGUFs in one directory (parity-gated vs the
+//   ONNX goldens, see tools/sa3-ggml-test.cpp):
+//     sa3-text-enc-BF16.gguf  (sa3-t5gemma-enc.h; also seconds embedder from
+//     sa3-dit-BF16.gguf)      the DiT GGUF's conditioner tensors
+//     sa3-same-enc-F16.gguf   (sa3-same-ggml.h, one 128-latent chunk)
+//     sa3-same-dec-F16.gguf
+//     sa3-dit-BF16.gguf       (sa3-dit-ggml.h, graph rebuilt per T)
+//
+// All backend buffers are torch-contiguous / channel-first, matching the
+// exported ONNX graphs: text [256,768] token-major, latents [256,L], audio
+// planar [2,S], cross [257,768] token-major, local [257,T].
 //
 // Numerical reference: tools/onnx-export/e2e_sa3_ort.py (cosine 0.999999 vs
 // PyTorch). Schedule quirk preserved on purpose: t[0] is forced to `strength`
@@ -24,7 +41,8 @@
 // tokenizer.json); the endpoint receives 256 padded token ids + valid count.
 //
 // Thread safety: none. Caller serialises access (single GPU worker thread).
-// Guarded by HOT_STEP_SUPERSEP (shared ORT dependency).
+// ONNX path guarded by HOT_STEP_SUPERSEP (shared ORT dependency); the GGML
+// path is always available.
 //
 // Part of HOT-Step CPP. MIT license.
 
@@ -57,6 +75,320 @@
                                  // builds one engine per DiT input shape; bucketing
                                  // caps that at ~16 engines total. padding_mask
                                  // makes the extra padding semantically inert.
+
+// ── Backend interface ──────────────────────────────────────────────────
+//
+// Five compute ops behind which the ONNX sessions or the GGML modules sit.
+// Layouts (all f32, channel-first / torch-contiguous, batch 1 implied):
+//   text_encode        ids[SA3_TOK_LEN] i64 + valid count -> out[256*768]
+//                      token-major (out[s*768 + h]), learned-padding rows
+//                      already substituted.
+//   seconds_embed      seconds -> out[768]
+//   same_encode_chunk  audio planar [2][524288] -> latents [256][128]
+//   same_decode_chunk  latents [256][128] -> audio planar [2][524288]
+//   dit_forward        x[256][T], t, cross[257][768] token-major,
+//                      glob[768], local[257][T], pad_mask[T] (0/1 bytes)
+//                      -> v[256][T]
+// Each op returns false on failure (aborts the refine).
+
+struct Sa3Backend {
+    virtual ~Sa3Backend() = default;
+    virtual const char * name() const = 0;
+    virtual bool text_encode(const int64_t * ids, int n_tokens, float * out) = 0;
+    virtual bool seconds_embed(float seconds, float * out) = 0;
+    virtual bool same_encode_chunk(const float * audio, float * latents) = 0;
+    virtual bool same_decode_chunk(const float * latents, float * audio) = 0;
+    virtual bool dit_forward(const float * x, float t, const float * cross,
+                             const float * glob, const float * local,
+                             const char * pad_mask, int T, float * v) = 0;
+};
+
+// ── Schedule: LogSNRShift(rate=0, anchor_logsnr=-6.2, logsnr_end=2.0) ───
+// Mirrors build_schedule + LogSNRShift.shift for the model's default
+// sampling dist shift (seq-len invariant since rate=0).
+
+static inline void sa3_build_schedule(int steps, float strength, std::vector<float> & out) {
+    out.resize(steps + 1);
+    for (int i = 0; i <= steps; i++) {
+        float t = strength * (1.0f - (float)i / (float)steps);  // linspace(strength, 0)
+        float t_out;
+        if (t <= 0.0f)      t_out = 0.0f;
+        else if (t >= 1.0f) t_out = 1.0f;
+        else {
+            float logsnr = 2.0f - t * (2.0f - (-6.2f));
+            t_out = 1.0f / (1.0f + expf(logsnr));  // sigmoid(-logsnr)
+        }
+        out[i] = t_out;
+    }
+    out[0] = strength;  // reference forces t[0]=sigma_max AFTER the warp
+}
+
+// ── Tiled SAME encode/decode (overlap-trim, mirrors encode_audio/decode_audio) ──
+
+static inline void sa3_chunk_starts(int total, int size, int hop, std::vector<int> & starts) {
+    starts.clear();
+    for (int s = 0; s + size <= total; s += hop) starts.push_back(s);
+    if (starts.empty() || starts.back() != total - size) starts.push_back(total - size);
+}
+
+// audio: planar stereo [2][S] (S multiple of SA3_DS, >= one chunk after padding
+// handled by caller). latents_out: [SA3_LAT_CH][L] channel-first, L = S/SA3_DS.
+static inline bool sa3_encode_tiled(Sa3Backend * be, const float * audio, int S,
+                                    std::vector<float> & latents_out) {
+    int L = S / SA3_DS;
+    latents_out.assign((size_t)SA3_LAT_CH * L, 0.0f);
+    int hop = (SA3_CHUNK_LAT - SA3_OVERLAP_LAT) * SA3_DS;
+    std::vector<int> starts;
+    sa3_chunk_starts(S, SA3_CHUNK_SAMPLES, hop, starts);
+    int half = SA3_OVERLAP_LAT / 2;
+    std::vector<float> chunk_buf((size_t)2 * SA3_CHUNK_SAMPLES);
+    std::vector<float> lat_buf((size_t)SA3_LAT_CH * SA3_CHUNK_LAT);
+    for (size_t i = 0; i < starts.size(); i++) {
+        int s = starts[i];
+        // planar [2][S] -> chunk planar [2][CHUNK]
+        memcpy(chunk_buf.data(),                     audio + s,     sizeof(float) * SA3_CHUNK_SAMPLES);
+        memcpy(chunk_buf.data() + SA3_CHUNK_SAMPLES, audio + S + s, sizeof(float) * SA3_CHUNK_SAMPLES);
+        if (!be->same_encode_chunk(chunk_buf.data(), lat_buf.data())) return false;
+        const float * lat = lat_buf.data();  // [256,128]
+        bool first = (i == 0), last = (i + 1 == starts.size());
+        int os = last ? (L - SA3_CHUNK_LAT) : (s / SA3_DS);
+        int left  = first ? 0 : half;
+        int right = last ? SA3_CHUNK_LAT : SA3_CHUNK_LAT - half;
+        for (int c = 0; c < SA3_LAT_CH; c++) {
+            memcpy(latents_out.data() + (size_t)c * L + os + left,
+                   lat + (size_t)c * SA3_CHUNK_LAT + left,
+                   sizeof(float) * (right - left));
+        }
+    }
+    return true;
+}
+
+// latents: [SA3_LAT_CH][L] -> audio_out planar [2][L*SA3_DS]
+static inline bool sa3_decode_tiled(Sa3Backend * be, const float * latents, int L,
+                                    std::vector<float> & audio_out) {
+    int S = L * SA3_DS;
+    audio_out.assign((size_t)2 * S, 0.0f);
+    int hop = SA3_CHUNK_LAT - SA3_OVERLAP_LAT;
+    std::vector<int> starts;
+    sa3_chunk_starts(L, SA3_CHUNK_LAT, hop, starts);
+    int half_s = (SA3_OVERLAP_LAT / 2) * SA3_DS;
+    std::vector<float> chunk_buf((size_t)SA3_LAT_CH * SA3_CHUNK_LAT);
+    std::vector<float> aud_buf((size_t)2 * SA3_CHUNK_SAMPLES);
+    for (size_t i = 0; i < starts.size(); i++) {
+        int s = starts[i];
+        for (int c = 0; c < SA3_LAT_CH; c++) {
+            memcpy(chunk_buf.data() + (size_t)c * SA3_CHUNK_LAT,
+                   latents + (size_t)c * L + s, sizeof(float) * SA3_CHUNK_LAT);
+        }
+        if (!be->same_decode_chunk(chunk_buf.data(), aud_buf.data())) return false;
+        const float * aud = aud_buf.data();  // [2,524288]
+        bool first = (i == 0), last = (i + 1 == starts.size());
+        int os = (last ? (L - SA3_CHUNK_LAT) : s) * SA3_DS;
+        int left  = first ? 0 : half_s;
+        int right = last ? SA3_CHUNK_SAMPLES : SA3_CHUNK_SAMPLES - half_s;
+        memcpy(audio_out.data() + os + left,     aud + left,                     sizeof(float) * (right - left));
+        memcpy(audio_out.data() + S + os + left, aud + SA3_CHUNK_SAMPLES + left, sizeof(float) * (right - left));
+    }
+    return true;
+}
+
+// ── Main refine (backend-agnostic orchestration) ───────────────────────
+//
+// audio: planar stereo [2][T44] at 44.1kHz. token_ids: SA3_TOK_LEN padded ids.
+// strength: init noise level (0.3 default recipe). steps: 8. pingpong: true
+// for production (per-step renoise), false = deterministic Euler (validation).
+// zero_noise: replaces all noise draws with zeros (numerical validation vs
+// the Python harness — C++ RNG can't reproduce torch's stream).
+// out: planar stereo [2][T44] at 44.1kHz, clamped to [-1,1].
+
+static inline bool sa3_refine_run_backend(Sa3Backend * be,
+                                          const float * audio, int T44,
+                                          const int64_t * token_ids, int n_tokens,
+                                          float strength, int steps,
+                                          bool pingpong, uint64_t seed, bool zero_noise,
+                                          std::vector<float> & out) {
+    if (!be || !audio || T44 <= 0 || steps < 1) return false;
+    float seconds_total = (float)T44 / SA3_SR;
+
+    // Adapted sample size (mirrors _adapt_sample_size)
+    int64_t target = (int64_t)((seconds_total + SA3_HEADROOM_SEC) * SA3_SR);
+    target = ((target + SA3_DS - 1) / SA3_DS) * SA3_DS;
+    target = ((target + SA3_ALIGN_SAMPLES - 1) / SA3_ALIGN_SAMPLES) * SA3_ALIGN_SAMPLES;
+    int S = (int)target;
+    if (S < SA3_CHUNK_SAMPLES) S = SA3_CHUNK_SAMPLES;  // static chunk graph minimum
+    int L = S / SA3_DS;
+    L = ((L + SA3_T_BUCKET - 1) / SA3_T_BUCKET) * SA3_T_BUCKET;  // TRT shape bucketing
+    S = L * SA3_DS;
+
+    // Conditioning
+    std::vector<float> text_emb((size_t)SA3_TOK_LEN * SA3_COND_DIM);  // [256,768]
+    if (!be->text_encode(token_ids, n_tokens, text_emb.data())) return false;
+
+    std::vector<float> sec_emb(SA3_COND_DIM);  // [768]
+    if (!be->seconds_embed(seconds_total, sec_emb.data())) return false;
+
+    // cross = concat(text[256], seconds[1]) -> [257,768]
+    std::vector<float> cross((size_t)(SA3_TOK_LEN + 1) * SA3_COND_DIM);
+    memcpy(cross.data(), text_emb.data(), sizeof(float) * SA3_TOK_LEN * SA3_COND_DIM);
+    memcpy(cross.data() + (size_t)SA3_TOK_LEN * SA3_COND_DIM, sec_emb.data(), sizeof(float) * SA3_COND_DIM);
+
+    // Pad audio to S, encode
+    std::vector<float> padded((size_t)2 * S, 0.0f);
+    memcpy(padded.data(),     audio,       sizeof(float) * T44);
+    memcpy(padded.data() + S, audio + T44, sizeof(float) * T44);
+    std::vector<float> x;
+    if (!sa3_encode_tiled(be, padded.data(), S, x)) return false;
+
+    // Mix with noise: x = init*(1-s) + noise*s
+    std::mt19937_64 rng(seed);
+    std::normal_distribution<float> gauss(0.0f, 1.0f);
+    for (size_t i = 0; i < x.size(); i++) {
+        float n = zero_noise ? 0.0f : gauss(rng);
+        x[i] = x[i] * (1.0f - strength) + n * strength;
+    }
+
+    // Schedule + padding mask
+    std::vector<float> sigmas;
+    sa3_build_schedule(steps, strength, sigmas);
+    int eff = (int)ceil((double)(int64_t)(seconds_total * SA3_SR) / SA3_DS);
+    int headroom_tokens = (int)(SA3_HEADROOM_SEC * SA3_SR / SA3_DS);
+    int valid = eff + headroom_tokens; if (valid > L) valid = L;
+    std::vector<char> pad_mask(L);
+    for (int i = 0; i < L; i++) pad_mask[i] = (i < valid) ? 1 : 0;
+    std::vector<float> local_add((size_t)(SA3_LAT_CH + 1) * L, 0.0f);  // no inpaint
+
+    // Sampler loop (default pingpong, matching rf_denoiser production path)
+    std::vector<float> v((size_t)SA3_LAT_CH * L);
+    for (int i = 0; i < steps; i++) {
+        float t_curr = sigmas[i], t_next = sigmas[i + 1];
+        if (!be->dit_forward(x.data(), t_curr, cross.data(), sec_emb.data(),
+                             local_add.data(), pad_mask.data(), L, v.data())) return false;
+        if (pingpong) {
+            // denoised = x - t*v; x = (1-t_next)*denoised + t_next*randn
+            for (size_t k = 0; k < x.size(); k++) {
+                float denoised = x[k] - t_curr * v[k];
+                float n = zero_noise ? 0.0f : gauss(rng);
+                x[k] = (1.0f - t_next) * denoised + t_next * n;
+            }
+        } else {
+            float dt = t_next - t_curr;
+            for (size_t k = 0; k < x.size(); k++) x[k] += dt * v[k];
+        }
+        fprintf(stderr, "[SA3] step %d/%d t=%.4f->%.4f\n", i + 1, steps, t_curr, t_next);
+    }
+
+    // Decode, zero padded region, trim to input length, clamp
+    std::vector<float> decoded;
+    if (!sa3_decode_tiled(be, x.data(), L, decoded)) return false;
+    int S_dec = L * SA3_DS;
+    int valid_samples = valid * SA3_DS;
+    out.assign((size_t)2 * T44, 0.0f);
+    for (int chn = 0; chn < 2; chn++) {
+        const float * src = decoded.data() + (size_t)chn * S_dec;
+        float * dst = out.data() + (size_t)chn * T44;
+        int n = T44 < valid_samples ? T44 : valid_samples;
+        for (int k = 0; k < n; k++) {
+            float vsm = src[k];
+            dst[k] = vsm < -1.0f ? -1.0f : (vsm > 1.0f ? 1.0f : vsm);
+        }
+    }
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// GGML backend (always available — no ORT dependency)
+// ═══════════════════════════════════════════════════════════════════════
+
+#include "sa3-dit-ggml.h"
+#include "sa3-same-ggml.h"
+#include "sa3-t5gemma-enc.h"
+
+struct Sa3GgmlRefine final : Sa3Backend {
+    SA3T5GemmaEnc      text_enc_m{};
+    SA3SecondsEmbedder seconds_m{};
+    SA3Same            same_enc_m{};
+    SA3Same            same_dec_m{};
+    SA3DiT             dit_m{};
+    bool               loaded = false;
+    std::string        dir;
+
+    const char * name() const override { return "gguf"; }
+
+    bool text_encode(const int64_t * ids, int n_tokens, float * out) override {
+        int32_t ids32[SA3_TOK_LEN];
+        uint8_t mask[SA3_TOK_LEN];
+        for (int i = 0; i < SA3_TOK_LEN; i++) {
+            ids32[i] = (int32_t)ids[i];
+            mask[i]  = (i < n_tokens) ? 1 : 0;
+        }
+        // output token-major [256,768] == ONNX [1,256,768]
+        sa3_t5gemma_forward(&text_enc_m, ids32, mask, SA3_TOK_LEN, out);
+        return true;
+    }
+    bool seconds_embed(float seconds, float * out) override {
+        sa3_seconds_embed(seconds_m, seconds, out);
+        return true;
+    }
+    bool same_encode_chunk(const float * audio, float * latents) override {
+        // module I/O is torch-contiguous: audio planar [2,S], latents [256,128]
+        sa3_same_forward(&same_enc_m, audio, latents, SA3_CHUNK_LAT);
+        return true;
+    }
+    bool same_decode_chunk(const float * latents, float * audio) override {
+        sa3_same_forward(&same_dec_m, latents, audio, SA3_CHUNK_LAT);
+        return true;
+    }
+    bool dit_forward(const float * x, float t, const float * cross, const float * glob,
+                     const float * local, const char * pad_mask, int T, float * v) override {
+        // module I/O is torch-contiguous: x [256,T], cross [257,768] token-major,
+        // local [257,T], out [256,T] — identical to the orchestration buffers.
+        sa3_dit_forward(&dit_m, x, t, cross, SA3_TOK_LEN + 1, glob, local,
+                        reinterpret_cast<const uint8_t *>(pad_mask), T, v);
+        return true;
+    }
+};
+
+// Load all four GGUFs from `dir` (the models root, same place the pp-vae
+// GGUFs live). The seconds embedder reads its two tiny tensors from the DiT
+// GGUF (conditioner.* extras).
+static inline bool sa3_ggml_load(Sa3GgmlRefine * m, const char * dir) {
+    if (!m || !dir) return false;
+    m->dir = dir;
+    std::string d = dir;
+    bool ok = sa3_t5gemma_load(&m->text_enc_m, (d + "/sa3-text-enc-BF16.gguf").c_str())
+           && sa3_seconds_embedder_load(&m->seconds_m, (d + "/sa3-dit-BF16.gguf").c_str())
+           && sa3_same_load(&m->same_enc_m, (d + "/sa3-same-enc-F16.gguf").c_str(), true)
+           && sa3_same_load(&m->same_dec_m, (d + "/sa3-same-dec-F16.gguf").c_str(), false)
+           && sa3_dit_load(&m->dit_m, (d + "/sa3-dit-BF16.gguf").c_str());
+    m->loaded = ok;
+    fprintf(stderr, "[SA3] GGML backend loaded from %s: %s\n", dir, ok ? "OK" : "FAILED");
+    return ok;
+}
+
+static inline void sa3_ggml_free(Sa3GgmlRefine * m) {
+    if (!m) return;
+    // Module free functions tolerate never-loaded (zero-initialised) members.
+    if (m->text_enc_m.sched) sa3_t5gemma_free(&m->text_enc_m);
+    if (m->same_enc_m.sched) sa3_same_free(&m->same_enc_m);
+    if (m->same_dec_m.sched) sa3_same_free(&m->same_dec_m);
+    if (m->dit_m.sched)      sa3_dit_free(&m->dit_m);
+    m->loaded = false;
+}
+
+static inline bool sa3_refine_run_ggml(Sa3GgmlRefine * m,
+                                       const float * audio, int T44,
+                                       const int64_t * token_ids, int n_tokens,
+                                       float strength, int steps,
+                                       bool pingpong, uint64_t seed, bool zero_noise,
+                                       std::vector<float> & out) {
+    if (!m || !m->loaded) return false;
+    return sa3_refine_run_backend(m, audio, T44, token_ids, n_tokens,
+                                  strength, steps, pingpong, seed, zero_noise, out);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ONNX Runtime backend (TRT/CUDA EP), HOT_STEP_SUPERSEP builds only
+// ═══════════════════════════════════════════════════════════════════════
 
 #ifdef HOT_STEP_SUPERSEP
 
@@ -226,225 +558,87 @@ static inline Ort::Value sa3_tensor_f32(const float * data, std::vector<int64_t>
                                            shape.data(), shape.size());
 }
 
-// ── Schedule: LogSNRShift(rate=0, anchor_logsnr=-6.2, logsnr_end=2.0) ───
-// Mirrors build_schedule + LogSNRShift.shift for the model's default
-// sampling dist shift (seq-len invariant since rate=0).
+// ── ORT backend: the five ops over the validated ONNX sessions ─────────
+// Tensor shapes/layouts identical to the pre-refactor code; outputs are
+// memcpy'd into the caller's buffers (bit-identical values).
 
-static inline void sa3_build_schedule(int steps, float strength, std::vector<float> & out) {
-    out.resize(steps + 1);
-    for (int i = 0; i <= steps; i++) {
-        float t = strength * (1.0f - (float)i / (float)steps);  // linspace(strength, 0)
-        float t_out;
-        if (t <= 0.0f)      t_out = 0.0f;
-        else if (t >= 1.0f) t_out = 1.0f;
-        else {
-            float logsnr = 2.0f - t * (2.0f - (-6.2f));
-            t_out = 1.0f / (1.0f + expf(logsnr));  // sigmoid(-logsnr)
-        }
-        out[i] = t_out;
-    }
-    out[0] = strength;  // reference forces t[0]=sigma_max AFTER the warp
-}
+struct Sa3OrtBackend final : Sa3Backend {
+    Sa3Refine * ctx;
+    explicit Sa3OrtBackend(Sa3Refine * c) : ctx(c) {}
 
-// ── Tiled SAME encode/decode (overlap-trim, mirrors encode_audio/decode_audio) ──
+    const char * name() const override { return "onnx"; }
 
-static inline void sa3_chunk_starts(int total, int size, int hop, std::vector<int> & starts) {
-    starts.clear();
-    for (int s = 0; s + size <= total; s += hop) starts.push_back(s);
-    if (starts.empty() || starts.back() != total - size) starts.push_back(total - size);
-}
-
-// audio: planar stereo [2][S] (S multiple of SA3_DS, >= one chunk after padding
-// handled by caller). latents_out: [SA3_LAT_CH][L] channel-first, L = S/SA3_DS.
-static inline bool sa3_encode_tiled(Sa3Refine * ctx, const float * audio, int S,
-                                    std::vector<float> & latents_out) {
-    int L = S / SA3_DS;
-    latents_out.assign((size_t)SA3_LAT_CH * L, 0.0f);
-    int hop = (SA3_CHUNK_LAT - SA3_OVERLAP_LAT) * SA3_DS;
-    std::vector<int> starts;
-    sa3_chunk_starts(S, SA3_CHUNK_SAMPLES, hop, starts);
-    int half = SA3_OVERLAP_LAT / 2;
-    std::vector<float> chunk_buf((size_t)2 * SA3_CHUNK_SAMPLES);
-    for (size_t i = 0; i < starts.size(); i++) {
-        int s = starts[i];
-        // planar [2][S] -> chunk planar [2][CHUNK]
-        memcpy(chunk_buf.data(),                     audio + s,     sizeof(float) * SA3_CHUNK_SAMPLES);
-        memcpy(chunk_buf.data() + SA3_CHUNK_SAMPLES, audio + S + s, sizeof(float) * SA3_CHUNK_SAMPLES);
+    bool text_encode(const int64_t * ids, int n_tokens, float * out) override {
+        std::vector<int64_t> ids_v(ids, ids + SA3_TOK_LEN);
+        std::vector<char> tok_mask(SA3_TOK_LEN);
+        for (int i = 0; i < SA3_TOK_LEN; i++) tok_mask[i] = (i < n_tokens) ? 1 : 0;
+        Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        std::vector<int64_t> ids_shape = {1, SA3_TOK_LEN};
         std::vector<Sa3Feed> feeds;
-        feeds.push_back({"audio", sa3_tensor_f32(chunk_buf.data(), {1, 2, SA3_CHUNK_SAMPLES})});
-        Ort::Value out = sa3_run(ctx->same_enc, feeds);
-        const float * lat = out.GetTensorData<float>();  // [1,256,128]
-        bool first = (i == 0), last = (i + 1 == starts.size());
-        int os = last ? (L - SA3_CHUNK_LAT) : (s / SA3_DS);
-        int left  = first ? 0 : half;
-        int right = last ? SA3_CHUNK_LAT : SA3_CHUNK_LAT - half;
-        for (int c = 0; c < SA3_LAT_CH; c++) {
-            memcpy(latents_out.data() + (size_t)c * L + os + left,
-                   lat + (size_t)c * SA3_CHUNK_LAT + left,
-                   sizeof(float) * (right - left));
-        }
+        feeds.push_back({"input_ids", Ort::Value::CreateTensor<int64_t>(
+            mem, ids_v.data(), ids_v.size(), ids_shape.data(), ids_shape.size())});
+        feeds.push_back({"attention_mask", Ort::Value::CreateTensor<bool>(
+            mem, reinterpret_cast<bool *>(tok_mask.data()), tok_mask.size(),
+            ids_shape.data(), ids_shape.size())});
+        Ort::Value o = sa3_run(ctx->text_enc, feeds);
+        memcpy(out, o.GetTensorData<float>(), sizeof(float) * SA3_TOK_LEN * SA3_COND_DIM);
+        return true;
     }
-    return true;
-}
-
-// latents: [SA3_LAT_CH][L] -> audio_out planar [2][L*SA3_DS]
-static inline bool sa3_decode_tiled(Sa3Refine * ctx, const float * latents, int L,
-                                    std::vector<float> & audio_out) {
-    int S = L * SA3_DS;
-    audio_out.assign((size_t)2 * S, 0.0f);
-    int hop = SA3_CHUNK_LAT - SA3_OVERLAP_LAT;
-    std::vector<int> starts;
-    sa3_chunk_starts(L, SA3_CHUNK_LAT, hop, starts);
-    int half_s = (SA3_OVERLAP_LAT / 2) * SA3_DS;
-    std::vector<float> chunk_buf((size_t)SA3_LAT_CH * SA3_CHUNK_LAT);
-    for (size_t i = 0; i < starts.size(); i++) {
-        int s = starts[i];
-        for (int c = 0; c < SA3_LAT_CH; c++) {
-            memcpy(chunk_buf.data() + (size_t)c * SA3_CHUNK_LAT,
-                   latents + (size_t)c * L + s, sizeof(float) * SA3_CHUNK_LAT);
-        }
+    bool seconds_embed(float seconds, float * out) override {
         std::vector<Sa3Feed> feeds;
-        feeds.push_back({"latents", sa3_tensor_f32(chunk_buf.data(), {1, SA3_LAT_CH, SA3_CHUNK_LAT})});
-        Ort::Value out = sa3_run(ctx->same_dec, feeds);
-        const float * aud = out.GetTensorData<float>();  // [1,2,524288]
-        bool first = (i == 0), last = (i + 1 == starts.size());
-        int os = (last ? (L - SA3_CHUNK_LAT) : s) * SA3_DS;
-        int left  = first ? 0 : half_s;
-        int right = last ? SA3_CHUNK_SAMPLES : SA3_CHUNK_SAMPLES - half_s;
-        memcpy(audio_out.data() + os + left,     aud + left,                     sizeof(float) * (right - left));
-        memcpy(audio_out.data() + S + os + left, aud + SA3_CHUNK_SAMPLES + left, sizeof(float) * (right - left));
+        feeds.push_back({"seconds", sa3_tensor_f32(&seconds, {1})});
+        Ort::Value o = sa3_run(ctx->seconds_emb, feeds);
+        memcpy(out, o.GetTensorData<float>(), sizeof(float) * SA3_COND_DIM);
+        return true;
     }
-    return true;
-}
+    bool same_encode_chunk(const float * audio, float * latents) override {
+        std::vector<Sa3Feed> feeds;
+        feeds.push_back({"audio", sa3_tensor_f32(audio, {1, 2, SA3_CHUNK_SAMPLES})});
+        Ort::Value o = sa3_run(ctx->same_enc, feeds);
+        memcpy(latents, o.GetTensorData<float>(), sizeof(float) * SA3_LAT_CH * SA3_CHUNK_LAT);
+        return true;
+    }
+    bool same_decode_chunk(const float * latents, float * audio) override {
+        std::vector<Sa3Feed> feeds;
+        feeds.push_back({"latents", sa3_tensor_f32(latents, {1, SA3_LAT_CH, SA3_CHUNK_LAT})});
+        Ort::Value o = sa3_run(ctx->same_dec, feeds);
+        memcpy(audio, o.GetTensorData<float>(), sizeof(float) * 2 * SA3_CHUNK_SAMPLES);
+        return true;
+    }
+    bool dit_forward(const float * x, float t, const float * cross, const float * glob,
+                     const float * local, const char * pad_mask, int T, float * v) override {
+        std::vector<char> mask(pad_mask, pad_mask + T);
+        Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        std::vector<int64_t> pad_shape = {1, T};
+        std::vector<Sa3Feed> feeds;
+        feeds.push_back({"x", sa3_tensor_f32(x, {1, SA3_LAT_CH, T})});
+        feeds.push_back({"t", sa3_tensor_f32(&t, {1})});
+        feeds.push_back({"cross_attn_cond", sa3_tensor_f32(cross, {1, SA3_TOK_LEN + 1, SA3_COND_DIM})});
+        feeds.push_back({"global_embed", sa3_tensor_f32(glob, {1, SA3_COND_DIM})});
+        feeds.push_back({"local_add_cond", sa3_tensor_f32(local, {1, SA3_LAT_CH + 1, T})});
+        feeds.push_back({"padding_mask", Ort::Value::CreateTensor<bool>(
+            mem, reinterpret_cast<bool *>(mask.data()), mask.size(),
+            pad_shape.data(), pad_shape.size())});
+        Ort::Value o = sa3_run(ctx->dit, feeds);
+        memcpy(v, o.GetTensorData<float>(), sizeof(float) * SA3_LAT_CH * (size_t)T);
+        return true;
+    }
+};
 
-// ── Main refine ────────────────────────────────────────────────────────
-//
-// audio: planar stereo [2][T44] at 44.1kHz. token_ids: SA3_TOK_LEN padded ids.
-// strength: init noise level (0.3 default recipe). steps: 8. pingpong: true
-// for production (per-step renoise), false = deterministic Euler (validation).
-// zero_noise: replaces all noise draws with zeros (numerical validation vs
-// the Python harness — C++ RNG can't reproduce torch's stream).
-// out: planar stereo [2][T44] at 44.1kHz, clamped to [-1,1].
-
+// Back-compat entry point: run the refine on the ONNX sessions.
 static inline bool sa3_refine_run(Sa3Refine * ctx,
                                   const float * audio, int T44,
                                   const int64_t * token_ids, int n_tokens,
                                   float strength, int steps,
                                   bool pingpong, uint64_t seed, bool zero_noise,
                                   std::vector<float> & out) {
-    if (!ctx || !ctx->dit || !audio || T44 <= 0 || steps < 1) return false;
-    float seconds_total = (float)T44 / SA3_SR;
-
-    // Adapted sample size (mirrors _adapt_sample_size)
-    int64_t target = (int64_t)((seconds_total + SA3_HEADROOM_SEC) * SA3_SR);
-    target = ((target + SA3_DS - 1) / SA3_DS) * SA3_DS;
-    target = ((target + SA3_ALIGN_SAMPLES - 1) / SA3_ALIGN_SAMPLES) * SA3_ALIGN_SAMPLES;
-    int S = (int)target;
-    if (S < SA3_CHUNK_SAMPLES) S = SA3_CHUNK_SAMPLES;  // static chunk graph minimum
-    int L = S / SA3_DS;
-    L = ((L + SA3_T_BUCKET - 1) / SA3_T_BUCKET) * SA3_T_BUCKET;  // TRT shape bucketing
-    S = L * SA3_DS;
-
-    // Conditioning
-    std::vector<int64_t> ids(token_ids, token_ids + SA3_TOK_LEN);
-    std::vector<char> tok_mask(SA3_TOK_LEN);
-    for (int i = 0; i < SA3_TOK_LEN; i++) tok_mask[i] = (i < n_tokens) ? 1 : 0;
-    Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    std::vector<int64_t> ids_shape = {1, SA3_TOK_LEN};
-    std::vector<Sa3Feed> tfeeds;
-    tfeeds.push_back({"input_ids", Ort::Value::CreateTensor<int64_t>(
-        mem, ids.data(), ids.size(), ids_shape.data(), ids_shape.size())});
-    tfeeds.push_back({"attention_mask", Ort::Value::CreateTensor<bool>(
-        mem, reinterpret_cast<bool *>(tok_mask.data()), tok_mask.size(),
-        ids_shape.data(), ids_shape.size())});
-    Ort::Value text_out = sa3_run(ctx->text_enc, tfeeds);
-    const float * text_emb = text_out.GetTensorData<float>();  // [1,256,768]
-
-    float sec_in = seconds_total;
-    std::vector<Sa3Feed> sfeeds;
-    sfeeds.push_back({"seconds", sa3_tensor_f32(&sec_in, {1})});
-    Ort::Value sec_out = sa3_run(ctx->seconds_emb, sfeeds);
-    const float * sec_emb = sec_out.GetTensorData<float>();    // [1,768]
-
-    // cross = concat(text[256], seconds[1]) -> [1,257,768]
-    std::vector<float> cross((size_t)(SA3_TOK_LEN + 1) * SA3_COND_DIM);
-    memcpy(cross.data(), text_emb, sizeof(float) * SA3_TOK_LEN * SA3_COND_DIM);
-    memcpy(cross.data() + (size_t)SA3_TOK_LEN * SA3_COND_DIM, sec_emb, sizeof(float) * SA3_COND_DIM);
-
-    // Pad audio to S, encode
-    std::vector<float> padded((size_t)2 * S, 0.0f);
-    memcpy(padded.data(),     audio,       sizeof(float) * T44);
-    memcpy(padded.data() + S, audio + T44, sizeof(float) * T44);
-    std::vector<float> x;
-    if (!sa3_encode_tiled(ctx, padded.data(), S, x)) return false;
-
-    // Mix with noise: x = init*(1-s) + noise*s
-    std::mt19937_64 rng(seed);
-    std::normal_distribution<float> gauss(0.0f, 1.0f);
-    for (size_t i = 0; i < x.size(); i++) {
-        float n = zero_noise ? 0.0f : gauss(rng);
-        x[i] = x[i] * (1.0f - strength) + n * strength;
-    }
-
-    // Schedule + padding mask
-    std::vector<float> sigmas;
-    sa3_build_schedule(steps, strength, sigmas);
-    int eff = (int)ceil((double)(int64_t)(seconds_total * SA3_SR) / SA3_DS);
-    int headroom_tokens = (int)(SA3_HEADROOM_SEC * SA3_SR / SA3_DS);
-    int valid = eff + headroom_tokens; if (valid > L) valid = L;
-    std::vector<char> pad_mask(L);
-    for (int i = 0; i < L; i++) pad_mask[i] = (i < valid) ? 1 : 0;
-    std::vector<float> local_add((size_t)(SA3_LAT_CH + 1) * L, 0.0f);  // no inpaint
-
-    // Sampler loop (default pingpong, matching rf_denoiser production path)
-    std::vector<int64_t> x_shape    = {1, SA3_LAT_CH, L};
-    std::vector<int64_t> pad_shape  = {1, L};
-    for (int i = 0; i < steps; i++) {
-        float t_curr = sigmas[i], t_next = sigmas[i + 1];
-        std::vector<Sa3Feed> feeds;
-        feeds.push_back({"x", sa3_tensor_f32(x.data(), x_shape)});
-        feeds.push_back({"t", sa3_tensor_f32(&t_curr, {1})});
-        feeds.push_back({"cross_attn_cond", sa3_tensor_f32(cross.data(), {1, SA3_TOK_LEN + 1, SA3_COND_DIM})});
-        feeds.push_back({"global_embed", sa3_tensor_f32(sec_emb, {1, SA3_COND_DIM})});
-        feeds.push_back({"local_add_cond", sa3_tensor_f32(local_add.data(), {1, SA3_LAT_CH + 1, L})});
-        feeds.push_back({"padding_mask", Ort::Value::CreateTensor<bool>(
-            mem, reinterpret_cast<bool *>(pad_mask.data()), pad_mask.size(),
-            pad_shape.data(), pad_shape.size())});
-        Ort::Value v_out = sa3_run(ctx->dit, feeds);
-        const float * v = v_out.GetTensorData<float>();
-        if (pingpong) {
-            // denoised = x - t*v; x = (1-t_next)*denoised + t_next*randn
-            for (size_t k = 0; k < x.size(); k++) {
-                float denoised = x[k] - t_curr * v[k];
-                float n = zero_noise ? 0.0f : gauss(rng);
-                x[k] = (1.0f - t_next) * denoised + t_next * n;
-            }
-        } else {
-            float dt = t_next - t_curr;
-            for (size_t k = 0; k < x.size(); k++) x[k] += dt * v[k];
-        }
-        fprintf(stderr, "[SA3] step %d/%d t=%.4f->%.4f\n", i + 1, steps, t_curr, t_next);
-    }
-
-    // Decode, zero padded region, trim to input length, clamp
-    std::vector<float> decoded;
-    if (!sa3_decode_tiled(ctx, x.data(), L, decoded)) return false;
-    int S_dec = L * SA3_DS;
-    int valid_samples = valid * SA3_DS;
-    out.assign((size_t)2 * T44, 0.0f);
-    for (int chn = 0; chn < 2; chn++) {
-        const float * src = decoded.data() + (size_t)chn * S_dec;
-        float * dst = out.data() + (size_t)chn * T44;
-        int n = T44 < valid_samples ? T44 : valid_samples;
-        for (int k = 0; k < n; k++) {
-            float vsm = src[k];
-            dst[k] = vsm < -1.0f ? -1.0f : (vsm > 1.0f ? 1.0f : vsm);
-        }
-    }
-    return true;
+    if (!ctx || !ctx->dit) return false;
+    Sa3OrtBackend be(ctx);
+    return sa3_refine_run_backend(&be, audio, T44, token_ids, n_tokens,
+                                  strength, steps, pingpong, seed, zero_noise, out);
 }
 
-#else  // !HOT_STEP_SUPERSEP — stubs
+#else  // !HOT_STEP_SUPERSEP — ORT stubs (GGML backend above remains available)
 
 struct Sa3Refine {};
 static inline bool sa3_load(Sa3Refine *, const char *, int = 0) { return false; }

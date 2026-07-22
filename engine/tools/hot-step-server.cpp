@@ -61,6 +61,7 @@ static volatile int * _hotstep_guard_ = &hotstep_sampler_linked_;
 #include "request.h"
 #include "synth-batch-runner.h"
 #include "task-types.h"
+#include "timer.h"
 #include "version.h"
 #include "yyjson.h"
 
@@ -3155,20 +3156,43 @@ int main(int argc, char ** argv) {
     //   rms_match 1 (default) match output RMS to input | 0 raw
     //   out_sr    output sample rate (default: input rate)
     //   debug_zero_noise  1 = deterministic validation mode (zero noise)
-    // Requires models/onnx/sa3/ with the 5 exported graphs. 501 if absent.
+    //   backend   "onnx" (5 graphs in models/onnx/sa3/) | "gguf" (4 sa3-*.gguf
+    //             in the models root) | "auto" (default: onnx if present,
+    //             else gguf). 501 if the selected backend's models are absent.
     svr.Post("/sa3-refine", [models_dir](const httplib::Request & req, httplib::Response & res) {
         if (req.body.empty()) {
             json_error(res, 400, "Empty body (expected WAV audio)");
             return;
         }
         std::string sa3_dir = std::string(models_dir) + "/onnx/sa3";
-        {
-            FILE * f = fopen((sa3_dir + "/sa3-dit.onnx").c_str(), "rb");
-            if (!f) {
-                json_error(res, 501, "SA3 models not installed (expected models/onnx/sa3/)");
+        auto file_exists = [](const std::string & p) {
+            FILE * f = fopen(p.c_str(), "rb");
+            if (f) { fclose(f); return true; }
+            return false;
+        };
+        bool have_onnx = file_exists(sa3_dir + "/sa3-dit.onnx");
+        bool have_gguf = file_exists(std::string(models_dir) + "/sa3-dit-BF16.gguf");
+        std::string backend = req.has_param("backend") ? req.get_param_value("backend") : "auto";
+        bool use_gguf;
+        if (backend == "onnx") {
+            if (!have_onnx) {
+                json_error(res, 501, "SA3 ONNX models not installed (expected models/onnx/sa3/)");
                 return;
             }
-            fclose(f);
+            use_gguf = false;
+        } else if (backend == "gguf") {
+            if (!have_gguf) {
+                json_error(res, 501, "SA3 GGUF models not installed (expected sa3-*.gguf in models dir)");
+                return;
+            }
+            use_gguf = true;
+        } else {  // auto
+            if (have_onnx)      use_gguf = false;
+            else if (have_gguf) use_gguf = true;
+            else {
+                json_error(res, 501, "SA3 models not installed (expected models/onnx/sa3/ or sa3-*.gguf)");
+                return;
+            }
         }
 
         // Params
@@ -3227,29 +3251,50 @@ int main(int argc, char ** argv) {
             json_error(res, 500, "Resample to 44.1k failed");
             return;
         }
-        fprintf(stderr, "[Server] SA3 refine: %.2fs @ %dHz, strength=%.2f, steps=%d, sampler=%s\n",
-                (float) T_in / sr_in, sr_in, strength, steps, pingpong ? "pingpong" : "euler");
+        fprintf(stderr, "[Server] SA3 refine: %.2fs @ %dHz, strength=%.2f, steps=%d, sampler=%s, backend=%s\n",
+                (float) T_in / sr_in, sr_in, strength, steps, pingpong ? "pingpong" : "euler",
+                use_gguf ? "gguf" : "onnx");
 
         // Input RMS (for gain matching)
         double in_sum_sq = 0.0;
         for (int i = 0; i < T44 * 2; i++) in_sum_sq += (double) p44[i] * p44[i];
         float in_rms = (float) sqrt(in_sum_sq / (double)(T44 * 2));
 
-        // Acquire model + run
-        ModelKey k{};
-        k.kind = MODEL_SA3_ORT;
-        k.path = sa3_dir;
-        Sa3Refine * sa3 = store_require_sa3_ort(g_store, k);
-        if (!sa3) {
-            free(p44);
-            json_error(res, 500, "SA3 model load failed");
-            return;
-        }
-        ModelHandle guard(g_store, sa3);
-
+        // Acquire model (selected backend) + run
         std::vector<float> out44;
-        bool ok = sa3_refine_run(sa3, p44, T44, ids.data(), n_tokens,
-                                 strength, steps, pingpong, seed, zero_noise, out44);
+        bool ok;
+        Timer refine_timer;
+        if (use_gguf) {
+            ModelKey k{};
+            k.kind = MODEL_SA3_GGML;
+            k.path = models_dir;  // 4 sa3-*.gguf in the models root
+            Sa3GgmlRefine * sa3 = store_require_sa3_ggml(g_store, k);
+            if (!sa3) {
+                free(p44);
+                json_error(res, 500, "SA3 GGML model load failed");
+                return;
+            }
+            ModelHandle guard(g_store, sa3);
+            refine_timer.reset();
+            ok = sa3_refine_run_ggml(sa3, p44, T44, ids.data(), n_tokens,
+                                     strength, steps, pingpong, seed, zero_noise, out44);
+        } else {
+            ModelKey k{};
+            k.kind = MODEL_SA3_ORT;
+            k.path = sa3_dir;
+            Sa3Refine * sa3 = store_require_sa3_ort(g_store, k);
+            if (!sa3) {
+                free(p44);
+                json_error(res, 500, "SA3 model load failed");
+                return;
+            }
+            ModelHandle guard(g_store, sa3);
+            refine_timer.reset();
+            ok = sa3_refine_run(sa3, p44, T44, ids.data(), n_tokens,
+                                strength, steps, pingpong, seed, zero_noise, out44);
+        }
+        fprintf(stderr, "[Server] SA3 refine compute (%s): %.0f ms\n",
+                use_gguf ? "gguf" : "onnx", refine_timer.ms());
         free(p44);
         if (!ok) {
             json_error(res, 500, "SA3 refine failed");
