@@ -41,8 +41,8 @@ git push origin vX.Y.Z
 ```
 
 This triggers `Release` → builds Windows (cuda13.1 / cuda12.8 / vulkan / cpu),
-Linux (same four), macOS (Metal) → creates a **draft** release with **18 assets**
-(9 archives + 9 `.sha256`).
+Linux (same four), macOS (Metal) → creates a **draft** release with **22 assets**
+(11 archives + 11 `.sha256`).
 
 To change the commit or re-run: delete + re-push the tag (it rebuilds).
 
@@ -69,7 +69,7 @@ The workflow leaves the release as a **draft**. Verify the asset count (18) and
 the `What's Changed` notes, then:
 
 ```bash
-gh release view vX.Y.Z --json assets --jq '.assets | length'   # expect 18
+gh release view vX.Y.Z --json assets --jq '.assets | length'   # expect 22
 gh release edit vX.Y.Z --draft=false --latest
 ```
 
