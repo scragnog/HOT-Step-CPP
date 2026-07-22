@@ -310,6 +310,19 @@ Audio-to-MIDI transcription on HOT-Step's **native `ace-midi` engine** — a C++
 
 ---
 
+## StableStep
+
+Post-processing refiner that re-renders the instrumental of a generated track through **Stable Audio 3** (SDEdit-style partial re-noising) running natively in the C++ engine — no Python. Replaces autoencoder fizz with real spectral detail while vocals are separated, cleaned, and remixed byte-untouched. *Powered by Stability AI* (models under the [Stability AI Community License](https://stability.ai/community-license-agreement)).
+
+| Feature | Description |
+|---------|-------------|
+| **SDEdit Instrumental Refine** | The instrumental is encoded into SAME-L latent space, partially re-noised at the chosen strength, and denoised by the SA3 DiT (8-step distilled rectified flow) conditioned on a prompt derived from the track's own caption (vocal descriptors stripped, length appended). |
+| **Vocal-Safe Pipeline** | BS-RoFormer splits vocals (lead + backing) from the mix; the instrumental is derived as the exact complement so no content is lost. Vocals get a PP-VAE polish and are remixed over the refined instrumental — lyrics and performance are never re-generated. |
+| **Refine Strength** | 0.10–0.60 slider (default 0.30). Low = cleanup; high = re-interpretation of the instrumentation. |
+| **Dual Engine Backends** | GGML (CUDA / Vulkan / CPU, 4 GGUF files ~5.8 GB — fastest option on NVIDIA in current testing) or ONNX Runtime with TensorRT (NVIDIA, ~12 GB). Auto mode picks whichever is installed. |
+| **In-App Model Download** | Model Manager → StableStep tab, with license acceptance and optional Hugging Face token. Both backend sets from [scragnog/HOT-Step-CPP-StableStep](https://huggingface.co/scragnog/HOT-Step-CPP-StableStep). |
+| **Level Matching** | The refined instrumental and cleaned vocals are RMS-matched to their pre-processing levels, preserving the original vocal/instrumental balance through the chain. |
+
 ## AI Assistant
 
 In-app LLM-powered assistant with full context awareness:

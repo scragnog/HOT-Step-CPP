@@ -83,6 +83,8 @@ HOT-Step CPP extends the base acestep.cpp engine with 100+ features across infer
 
 🎼 **MIDI Studio** — Audio-to-MIDI transcription on a native C++/GGML port of [MuScriptor](https://github.com/muscriptor/muscriptor) (Kyutai & Mirelo), validated byte-for-byte against the reference and GPU-accelerated — a 3.5-minute track transcribes in under a minute. Convert any library track or an uploaded WAV/MP3 into multi-track MIDI (34 instrument groups + drums), watch the piano roll fill in live while transcription runs, and hit play immediately with a crossfade slider between the original audio and the MIDI rendition, plus per-instrument mute/solo. Small/medium/large models with in-app weight download (gated on Hugging Face; weights CC BY-NC 4.0 — non-commercial).
 
+✨ **StableStep** — Post-processing refiner that re-renders the instrumental of a finished track through **Stable Audio 3** (SDEdit-style partial re-noising) to replace VAE fizz with genuine spectral detail. Vocals are split out via BS-RoFormer (lead + backing), cleaned with PP-VAE, and remixed untouched — lyrics stay intact. Adjustable refine strength, per-track prompt derived from the generation caption, and two engine backends: GGML (CUDA/Vulkan/CPU, ~5.8 GB, fastest in testing) or ONNX/TensorRT (~12 GB). Models download in-app under the Stability AI Community License. *Powered by Stability AI.*
+
 🔊 **Audio Post-Processing** — Spectral denoiser (Wiener-filter), Spectral Lifter (native C++), PP-VAE neural audio polish, Vocal Naturalizer (5-stage DSP humanization, experimental — may affect downstream processing), duration buffer with auto-trim for clean endings, and configurable fade-out.
 
 📊 **Audio Quality Evaluator** — Automatic post-generation quality scoring using spectral analysis. Three weighted metrics — metallic sound detection (spectral rolloff), word cut detection (spectral flux discontinuities), and noise/hiss analysis (zero-crossing rate) — produce a 0–100% score per track. Choose to evaluate unmastered, mastered, or both for direct comparison. Scores display as colour-coded badges in the Library. Ported from [JK-AceStep-Nodes](https://github.com/jeankassio/JK-AceStep-Nodes) (MIT License).
@@ -237,6 +239,8 @@ Smaller LM variants available: 0.6B (fast) and 1.7B (balanced).
 |------|------|------|--------|
 | ScragVAE | `scragvae-BF16.gguf` | 322 MB | [scragnog/Ace-Step-1.5-ScragVAE](https://huggingface.co/scragnog/Ace-Step-1.5-ScragVAE) |
 | PP-VAE | `pp-vae-F32.gguf` | 644 MB | [scragnog/HOT-Step-CPP-PP-VAE](https://huggingface.co/scragnog/HOT-Step-CPP-PP-VAE) |
+| StableStep (GGML) | `sa3-*.gguf` (4 files) | 5.8 GB | [scragnog/HOT-Step-CPP-StableStep](https://huggingface.co/scragnog/HOT-Step-CPP-StableStep) |
+| StableStep (ONNX) | `onnx/sa3/` (9 files) | 12 GB | [scragnog/HOT-Step-CPP-StableStep](https://huggingface.co/scragnog/HOT-Step-CPP-StableStep) |
 
 **ScragVAE** is a fine-tuned VAE decoder with improved high-frequency energy and dynamic range — drop-in replacement for the standard VAE. **PP-VAE** enables neural audio polish via an encode→decode round-trip in the post-processing chain.
 
@@ -539,6 +543,7 @@ If you see errors about Metal Toolchain, these can usually be ignored — the em
 - **Alexander Allan ([MDMAchine](https://github.com/MDMAchine))** — STORM solver plugin (adaptive STORK/DPM++3M hybrid) and MD Audio Tiled Core postprocess plugin (advanced tiled VAE decode with OLA crossfading, dual-pass merge, and DSP chain)
 - **[ComfyUI_MusicTools](https://github.com/jeankassio/ComfyUI_MusicTools)** — Vocal Naturalizer DSP algorithm by Jean Kassio (MIT License)
 - **[JK-AceStep-Nodes](https://github.com/jeankassio/JK-AceStep-Nodes)** — Audio Quality Evaluator metrics by Jean Kassio (MIT License)
+- **[Stability AI](https://stability.ai)** — Stable Audio 3 (diffusion transformer + SAME-L autoencoder + T5Gemma text encoder); powers the StableStep refiner via our native ONNX/GGML conversions, distributed under the [Stability AI Community License](https://stability.ai/community-license-agreement). *Powered by Stability AI.*
 - **[MuScriptor](https://github.com/muscriptor/muscriptor)** — Multi-instrument music transcription model by Kyutai and Mirelo (Simon Rouard, Michael Krause, Axel Roebel, Carl-Johann Simon-Gabriel, Alexandre Défossez — [arXiv:2607.08168](https://arxiv.org/abs/2607.08168)); powers MIDI Studio via our native GGML port (code MIT, model weights CC BY-NC 4.0)
 
 ## License
