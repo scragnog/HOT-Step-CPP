@@ -3139,6 +3139,151 @@ int main(int argc, char ** argv) {
         res.set_content(wav, "audio/wav");
     });
 
+    // POST /sa3-refine — synchronous SA3 SDEdit refine (instrumental de-fizz).
+    // Encodes to SAME-L latents, partially re-noises, denoises with the SA3
+    // DiT, decodes. Numerical reference: tools/onnx-export/e2e_sa3_ort.py.
+    // Body: WAV or MP3 audio (any sample rate; processed at 44.1k, returned
+    // at the input rate, 16-bit WAV).
+    // Query params:
+    //   tokens    csv of 256 padded T5Gemma token ids (Node tokenizes;
+    //             bpe.h cannot parse SentencePiece tokenizer.json)
+    //   n_tokens  valid (non-pad) token count
+    //   strength  init noise level (default 0.3)
+    //   steps     sampler steps (default 8)
+    //   sampler   "pingpong" (default) | "euler"
+    //   seed      RNG seed (default: random)
+    //   rms_match 1 (default) match output RMS to input | 0 raw
+    //   debug_zero_noise  1 = deterministic validation mode (zero noise)
+    // Requires models/onnx/sa3/ with the 5 exported graphs. 501 if absent.
+    svr.Post("/sa3-refine", [models_dir](const httplib::Request & req, httplib::Response & res) {
+        if (req.body.empty()) {
+            json_error(res, 400, "Empty body (expected WAV audio)");
+            return;
+        }
+        std::string sa3_dir = std::string(models_dir) + "/onnx/sa3";
+        {
+            FILE * f = fopen((sa3_dir + "/sa3-dit.onnx").c_str(), "rb");
+            if (!f) {
+                json_error(res, 501, "SA3 models not installed (expected models/onnx/sa3/)");
+                return;
+            }
+            fclose(f);
+        }
+
+        // Params
+        float strength = 0.3f;
+        int   steps = 8;
+        bool  pingpong = true;
+        bool  zero_noise = false;
+        bool  rms_match = true;
+        uint64_t seed = (uint64_t)time(nullptr) * 2654435761ull;
+        if (req.has_param("strength")) {
+            strength = std::strtof(req.get_param_value("strength").c_str(), nullptr);
+            if (strength < 0.0f) strength = 0.0f;
+            if (strength > 1.0f) strength = 1.0f;
+        }
+        if (req.has_param("steps")) {
+            steps = atoi(req.get_param_value("steps").c_str());
+            if (steps < 1) steps = 1;
+            if (steps > 64) steps = 64;
+        }
+        if (req.has_param("sampler") && req.get_param_value("sampler") == "euler") pingpong = false;
+        if (req.has_param("seed"))  seed = std::strtoull(req.get_param_value("seed").c_str(), nullptr, 10);
+        if (req.has_param("debug_zero_noise") && req.get_param_value("debug_zero_noise") == "1") zero_noise = true;
+        if (req.has_param("rms_match") && req.get_param_value("rms_match") == "0") rms_match = false;
+
+        // Tokenized prompt (padded to SA3_TOK_LEN)
+        std::vector<int64_t> ids(SA3_TOK_LEN, 0);
+        int n_tokens = req.has_param("n_tokens") ? atoi(req.get_param_value("n_tokens").c_str()) : 0;
+        if (req.has_param("tokens")) {
+            const std::string & csv = req.get_param_value("tokens");
+            int idx = 0;
+            const char * p = csv.c_str();
+            while (*p && idx < SA3_TOK_LEN) {
+                ids[idx++] = strtoll(p, nullptr, 10);
+                const char * comma = strchr(p, ',');
+                if (!comma) break;
+                p = comma + 1;
+            }
+        }
+        if (n_tokens <= 0) {
+            json_error(res, 400, "Missing tokens/n_tokens (tokenized prompt required)");
+            return;
+        }
+
+        // Decode audio at native rate, resample to 44.1k (planar stereo)
+        int T_in = 0, sr_in = 0;
+        float * planar = audio_read_buf((const uint8_t *) req.body.data(), req.body.size(), &T_in, &sr_in);
+        if (!planar || T_in <= 0) {
+            json_error(res, 400, "Failed to decode audio");
+            return;
+        }
+        int T44 = 0;
+        float * p44 = audio_resample(planar, T_in, sr_in, SA3_SR, 2, &T44);
+        free(planar);
+        if (!p44 || T44 <= 0) {
+            free(p44);
+            json_error(res, 500, "Resample to 44.1k failed");
+            return;
+        }
+        fprintf(stderr, "[Server] SA3 refine: %.2fs @ %dHz, strength=%.2f, steps=%d, sampler=%s\n",
+                (float) T_in / sr_in, sr_in, strength, steps, pingpong ? "pingpong" : "euler");
+
+        // Input RMS (for gain matching)
+        double in_sum_sq = 0.0;
+        for (int i = 0; i < T44 * 2; i++) in_sum_sq += (double) p44[i] * p44[i];
+        float in_rms = (float) sqrt(in_sum_sq / (double)(T44 * 2));
+
+        // Acquire model + run
+        ModelKey k{};
+        k.kind = MODEL_SA3_ORT;
+        k.path = sa3_dir;
+        Sa3Refine * sa3 = store_require_sa3_ort(g_store, k);
+        if (!sa3) {
+            free(p44);
+            json_error(res, 500, "SA3 model load failed");
+            return;
+        }
+        ModelHandle guard(g_store, sa3);
+
+        std::vector<float> out44;
+        bool ok = sa3_refine_run(sa3, p44, T44, ids.data(), n_tokens,
+                                 strength, steps, pingpong, seed, zero_noise, out44);
+        free(p44);
+        if (!ok) {
+            json_error(res, 500, "SA3 refine failed");
+            return;
+        }
+
+        // RMS gain matching (same convention as PP-VAE)
+        if (rms_match && in_rms > 1e-6f) {
+            double out_sum_sq = 0.0;
+            for (size_t i = 0; i < out44.size(); i++) out_sum_sq += (double) out44[i] * out44[i];
+            float out_rms = (float) sqrt(out_sum_sq / (double) out44.size());
+            if (out_rms > 1e-6f) {
+                float gain = in_rms / out_rms;
+                for (size_t i = 0; i < out44.size(); i++) {
+                    float v = out44[i] * gain;
+                    out44[i] = v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);
+                }
+                fprintf(stderr, "[Server] SA3 refine gain=%.3f (in_rms=%.4f, out_rms=%.4f)\n",
+                        gain, in_rms, out_rms);
+            }
+        }
+
+        // Resample back to the input rate, encode WAV
+        int T_out = 0;
+        float * out_native = audio_resample(out44.data(), T44, SA3_SR, sr_in, 2, &T_out);
+        if (!out_native || T_out <= 0) {
+            free(out_native);
+            json_error(res, 500, "Resample to output rate failed");
+            return;
+        }
+        std::string wav = audio_encode_wav(out_native, T_out, sr_in, WAV_S16);
+        free(out_native);
+        res.set_content(wav, "audio/wav");
+    });
+
     // ═══════════════════════════════════════════════════════════════════
     // SuperSep: Native stem separation via ONNX Runtime
     // ═══════════════════════════════════════════════════════════════════

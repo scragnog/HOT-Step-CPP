@@ -54,6 +54,7 @@
 #include "metadata-fsm.h"
 #include "qwen3-enc.h"
 #include "qwen3-lm.h"
+#include "sa3-refine.h"
 #include "text-enc-ort.h"
 #include "vae-enc.h"
 #include "vae-enc-ort.h"
@@ -78,6 +79,7 @@ enum ModelKind {
     MODEL_TEXT_ENC_ORT,// TextEncOrt    from text_encoder.onnx (TRT/CUDA EP)
     MODEL_COND_ENC_ORT,// CondEncOrt    from cond_encoder.onnx (TRT/CUDA EP)
     MODEL_VAE_ENC_ORT, // VaeEncOrt     from vae_encoder.onnx (TRT/CUDA EP)
+    MODEL_SA3_ORT,     // Sa3Refine     from onnx/sa3/ directory, 5 graphs (TRT/CUDA EP)
 };
 
 struct ModelKey {
@@ -139,6 +141,7 @@ VaeOrt *     store_require_vae_dec_ort(ModelStore * s, const ModelKey & k);
 VaeEncOrt *  store_require_vae_enc_ort(ModelStore * s, const ModelKey & k);
 TextEncOrt * store_require_text_enc_ort(ModelStore * s, const ModelKey & k);
 CondEncOrt * store_require_cond_enc_ort(ModelStore * s, const ModelKey & k);
+Sa3Refine *  store_require_sa3_ort(ModelStore * s, const ModelKey & k);  // k.path = onnx/sa3 DIRECTORY
 TokGGML *    store_require_fsq_tok(ModelStore * s, const ModelKey & k);
 DetokGGML *  store_require_fsq_detok(ModelStore * s, const ModelKey & k);
 

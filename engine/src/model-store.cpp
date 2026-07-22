@@ -582,6 +582,31 @@ VaeEncOrt * store_require_vae_enc_ort(ModelStore * s, const ModelKey & k) {
     return m;
 }
 
+static void del_sa3_ort(void * p) {
+    sa3_free_sessions(static_cast<Sa3Refine *>(p));
+    delete static_cast<Sa3Refine *>(p);
+}
+
+Sa3Refine * store_require_sa3_ort(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<Sa3Refine>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer       t;
+    Sa3Refine * m = new Sa3Refine();
+    if (!sa3_load(m, k.path.c_str())) {  // k.path = directory holding the 5 graphs
+        delete m;
+        return nullptr;
+    }
+    // ORT manages its own VRAM — report 0 bytes to the store budget.
+    install_entry(s, k, m, 0, "SA3-Refine-ORT", del_sa3_ort);
+    fprintf(stderr, "[Store] Load SA3-Refine-ORT: %.0f ms\n", t.ms());
+    return m;
+}
+
 static void del_text_enc_ort(void * p) {
     text_enc_ort_free(static_cast<TextEncOrt *>(p));
     delete static_cast<TextEncOrt *>(p);
