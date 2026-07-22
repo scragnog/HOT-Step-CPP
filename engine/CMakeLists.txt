@@ -511,6 +511,11 @@ link_ggml_backends(quantize)
 add_executable(neural-codec tools/neural-codec.cpp)
 link_ggml_backends(neural-codec)
 
+# sa3-ggml-test: parity tests for the StableStep GGML SA3 modules vs goldens
+add_executable(sa3-ggml-test tools/sa3-ggml-test.cpp)
+target_link_libraries(sa3-ggml-test PRIVATE yyjson)
+link_ggml_backends(sa3-ggml-test)
+
 # ace-midi: MuScriptor audio->MIDI transcription (GGML port, in development —
 # docs/plans/muscriptor-cpp-port.md). Standalone tool, no acestep-core needed.
 add_executable(ace-midi tools/ace-midi.cpp)

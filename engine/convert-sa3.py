@@ -121,6 +121,13 @@ def main():
             if key.startswith("decoder."):
                 continue
             t5_tensors.append((key, to_np(f.get_tensor(key))))
+    # The SA3 conditioner's learned padding embedding is applied to the text
+    # encoder's output (padded positions replaced) — it belongs to this module,
+    # so duplicate it here (it also rides in the DiT gguf with the rest of
+    # conditioner.*).
+    with safe_open(ckpt_path, framework="pt", device="cpu") as f:
+        key = "conditioner.conditioners.prompt.padding_embedding"
+        t5_tensors.append((key, to_np(f.get_tensor(key))))
     write_sa3_gguf(os.path.join(OUTPUT_DIR, "sa3-text-enc-BF16.gguf"),
                   "sa3-t5gemma", t5_tensors, t5_config_json,
                   extra_meta={"sa3.parent_config_json": config_json})
