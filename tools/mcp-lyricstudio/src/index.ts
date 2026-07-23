@@ -157,7 +157,7 @@ server.tool(
       '',
       '## Step 1: Plan Song Metadata',
       '',
-      'Respond to the following prompt with a JSON object containing: subject, bpm, key, caption, duration.',
+      'Respond to the following prompt with a JSON object containing: subject, bpm, key, caption, duration, structure.',
       '',
       '### System Prompt',
       '```',
@@ -172,7 +172,7 @@ server.tool(
       '---',
       '',
       '## Step 2',
-      'After generating the metadata JSON, call `build_lyrics_prompt` with the profile_id and your generated metadata values (subject, bpm, duration, and optionally extra_instructions).',
+      'After generating the metadata JSON, call `build_lyrics_prompt` with the profile_id and your generated metadata values (subject, bpm, duration, structure, and optionally extra_instructions).',
     ].filter(Boolean).join('\n');
 
     return { content: [{ type: 'text', text }] };
@@ -189,9 +189,10 @@ server.tool(
     subject: z.string().describe('Song subject from metadata generation'),
     bpm: z.number().describe('BPM from metadata generation'),
     duration: z.number().describe('Duration in seconds from metadata generation'),
+    structure: z.string().optional().describe('Planned song structure from metadata generation, e.g. "I-V-C-V-C-B-C-O"'),
     extra_instructions: z.string().optional().describe('Extra instructions'),
   },
-  async ({ profile_id, subject, bpm, duration, extra_instructions }) => {
+  async ({ profile_id, subject, bpm, duration, structure, extra_instructions }) => {
     const profile = db.getProfile(profile_id);
     if (!profile) {
       return { content: [{ type: 'text', text: `Profile ${profile_id} not found.` }] };
@@ -202,12 +203,12 @@ server.tool(
     let fullInstructions = `The song must be about: ${subject}`;
     if (extra_instructions) fullInstructions += `\n\n${extra_instructions}`;
 
-    const userPrompt = prompts.buildGenerationPrompt(pd, fullInstructions, duration, bpm);
+    const userPrompt = prompts.buildGenerationPrompt(pd, fullInstructions, duration, bpm, structure);
 
     const text = [
       `# Lyrics Generation: ${profile.artist_name}`,
       `**Subject:** ${subject}`,
-      `**BPM:** ${bpm} | **Duration:** ${duration}s`,
+      `**BPM:** ${bpm} | **Duration:** ${duration}s${structure ? ` | **Structure:** ${structure}` : ''}`,
       '',
       '---',
       '',

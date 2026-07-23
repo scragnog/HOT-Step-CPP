@@ -64,11 +64,14 @@ export interface LyricsProfile {
 }
 
 import * as llmService from './llmService.js';
-import { 
+import {
   PROFILE_PROMPT_1,
   PROFILE_PROMPT_2,
   PROFILE_PROMPT_3,
-  STYLE_CAPTION_PROMPT
+  STYLE_CAPTION_PROMPT,
+  SUBJECT_ANALYSIS_PROMPT,
+  buildProfilePrompt,
+  buildSubjectAnalysisPrompt
 } from './prompts.js';
 
 // The imported dict is a default export depending on interop.
@@ -639,66 +642,15 @@ async function llmCallWithRetry(providerName: string, modelName: string, sysProm
   return { raw: '', data: {} };
 }
 
-function buildProfilePrompt(artist: string, album: string | null, songs: SongLyrics[], ruleStats: any): string {
-  let header = `Artist: ${artist}\n`;
-  if (album) header += `Album: ${album}\n`;
-  header += `Songs analysed: ${songs.length}\n\n=== RULE-BASED ANALYSIS ===\n`;
-  
-  header += `Average verse length: ${ruleStats.avg_verse_lines} lines\n`;
-  header += `Average chorus length: ${ruleStats.avg_chorus_lines} lines\n`;
-  header += `Top rhyme schemes: ${ruleStats.rhyme_schemes.join(', ')}\n`;
-  const rq = ruleStats.rhyme_quality;
-  header += `Rhyme quality breakdown: ${rq.perfect} perfect, ${rq.slant} slant, ${rq.assonance} assonance\n`;
-  header += `Structure blueprints: ${ruleStats.structure_blueprints.join(', ')}\n`;
-  header += `Perspective: ${ruleStats.perspective}\n`;
-  
-  const ms = ruleStats.meter_stats;
-  header += `Meter: avg ${ms.avg_syllables_per_line} syllables/line (σ=${ms.syllable_std_dev}), ${ms.avg_words_per_line} words/line, range ${ms.line_length_range}\n`;
-  
-  const vs = ruleStats.vocabulary_stats;
-  header += `Vocabulary: ${vs.total_words} total words, ${vs.unique_words} unique, TTR=${vs.type_token_ratio}\n`;
-  header += `Contractions: ${vs.contraction_pct}% of words\nProfanity: ${vs.profanity_pct}% of words\n`;
-  header += `Distinctive words: ${vs.distinctive_words.join(', ')}\n`;
-
-  const llv = ms.line_length_variation || {};
-  if (llv.histogram) {
-    header += `Syllable distribution: ${Object.entries(llv.histogram).map(([k,v]) => `${k}: ${v}%`).join(', ')}\n`;
-  }
-
-  const rs = ruleStats.repetition_stats;
-  if (rs) {
-    header += `Chorus repetition: ${rs.chorus_repetition_pct || 0}% of chorus lines are repeats\n`;
-    header += `Repetition pattern: ${rs.pattern || 'unknown'}\n`;
-    if (rs.hook_examples?.length) header += `Hook examples: ${rs.hook_examples.slice(0,3).join('; ')}\n`;
-  }
-
-  let lyricsSection = "\n=== COMPLETE LYRICS ===\n\n";
-  for (const s of songs) lyricsSection += `--- ${s.title} ---\n${s.lyrics}\n\n`;
-
-  return header + lyricsSection;
-}
-
-const SUBJECT_SYSTEM_PROMPT = `You are a music analyst. For each song provided, write a ONE-SENTENCE summary of what the song is about — its core subject, not its style.
-
-Then group all the subjects into 5-10 thematic categories that describe the range of topics this artist writes about.
-
-Return JSON in exactly this format:
-{
-  "song_subjects": {
-    "Song Title": "one sentence about what this specific song is about"
-  },
-  "subject_categories": ["category1", "category2"]
-}
-
-Be specific and concrete. Do NOT include any text outside the JSON object.`;
+// buildProfilePrompt + the subject-analysis system prompt live in prompts.ts
+// (the canonical prompt source shared with the MCP server).
 
 async function analyseSongSubjects(songs: SongLyrics[], providerName: string, modelName: string, onChunk?: ChunkCallback): Promise<{song_subjects: Record<string, string>, subject_categories: string[]}> {
-  const songList = songs.map(s => `--- ${s.title} ---\n${s.lyrics.substring(0, 500)}`).join('\n\n');
-  const usrPrompt = `Analyse the subjects of these ${songs.length} songs:\n\n${songList}`;
+  const usrPrompt = buildSubjectAnalysisPrompt(songs);
   
   const provider = llmService.getProvider(providerName);
   try {
-    const raw = await provider.call(SUBJECT_SYSTEM_PROMPT, usrPrompt, modelName, onChunk);
+    const raw = await provider.call(SUBJECT_ANALYSIS_PROMPT, usrPrompt, modelName, onChunk);
     const data = extractJson(raw);
     if (data) return { song_subjects: data.song_subjects || {}, subject_categories: data.subject_categories || [] };
   } catch (e) {

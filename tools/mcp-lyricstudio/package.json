@@ -6,7 +6,7 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "tsx src/index.ts",
-    "build": "tsc",
+    "build": "echo No build step - runs from source via tsx; prompts are shared from server/src/services/lireek/prompts.ts",
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {

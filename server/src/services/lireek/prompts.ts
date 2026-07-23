@@ -1,4 +1,90 @@
+// prompts.ts — CANONICAL single source of truth for all Lyric Studio prompts.
+//
+// Consumed by BOTH:
+//   - the in-app pipeline (llm/orchestration.ts, profilerService.ts)
+//   - the MCP server (tools/mcp-lyricstudio/src/prompts.ts re-exports this file)
+// Do NOT fork these prompts elsewhere — edit them here.
+//
+// Prompt philosophy: rules are split into two tiers.
+//   TIER 1 (pipeline requirements) — mechanical constraints of the downstream
+//     music model (section headers, punctuation, line budget). Hard.
+//   TIER 2 (style targets) — artist-calibration guidance. The writer has
+//     explicit creative latitude here; screaming MUST at a capable model
+//     produces formulaic lyrics, which the anti-slop rules then fight.
+
 import { BLACKLISTED_WORDS, BLACKLISTED_PHRASES, OVERUSED_WORDS } from './slopDetector.js';
+import { stripLyricQuotes } from './llm/postprocess.js';
+
+/** Loose profile shape — accepts both the app's LyricsProfile and the MCP's raw profile_data JSON. */
+export type PromptProfile = Record<string, any>;
+
+// ── Blueprint helpers ───────────────────────────────────────────────────────
+
+export const BLUEPRINT_LABEL_NAMES: Record<string, string> = {
+  V: 'Verse', C: 'Chorus', B: 'Bridge', PC: 'Pre-Chorus',
+  POC: 'Post-Chorus', I: 'Intro', O: 'Outro', IL: 'Interlude',
+};
+
+const BLUEPRINT_CODES_LEGEND =
+  'I=Intro, V=Verse, PC=Pre-Chorus, C=Chorus, POC=Post-Chorus, B=Bridge, IL=Interlude, O=Outro';
+
+const FALLBACK_BLUEPRINT = 'V-C-V-C-B-C';
+
+/** Parse a structure string (e.g. "I-V-C-V-C-B-C-O") into a canonical blueprint, or null if unusable. */
+export function normalizeBlueprint(structure?: string | null): string | null {
+  if (!structure) return null;
+  const tokens = structure.toUpperCase().split(/[-,>\s]+/).filter(Boolean);
+  const valid = tokens.filter(t => BLUEPRINT_LABEL_NAMES[t]);
+  if (valid.length < 3 || !valid.includes('C')) return null;
+  return valid.join('-');
+}
+
+/** Dedupe + sanity-filter observed blueprints (truncating anything after the first Outro). */
+function cleanBlueprints(blueprints?: string[]): string[] {
+  if (!blueprints?.length) return [];
+  return [...new Set(blueprints.map(bp => {
+    const parts = bp.split('-');
+    const oi = parts.indexOf('O');
+    return (oi >= 0 ? parts.slice(0, oi + 1) : parts).join('-');
+  }))].filter(bp => {
+    const parts = bp.split('-');
+    return parts.length >= 3 && parts.includes('C') && parts.every(p => BLUEPRINT_LABEL_NAMES[p]);
+  });
+}
+
+/**
+ * Sample a blueprint from the artist's observed structures.
+ * Unlike the old selectBestBlueprint (deterministic argmax that gave every
+ * generation for an artist the identical structure), this keeps every observed
+ * structure in play — richer shapes (more distinct sections, a bridge) just get
+ * a mild edge. Pass `rand` for deterministic tests.
+ */
+export function pickBlueprint(blueprints?: string[], rand: () => number = Math.random): string {
+  const cleaned = cleanBlueprints(blueprints);
+  if (!cleaned.length) return FALLBACK_BLUEPRINT;
+  const weights = cleaned.map(bp => {
+    const parts = bp.split('-');
+    return 1 + new Set(parts).size * 0.5 + (parts.includes('B') ? 1 : 0);
+  });
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = rand() * total;
+  for (let i = 0; i < cleaned.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return cleaned[i];
+  }
+  return cleaned[cleaned.length - 1];
+}
+
+/** Expand "I-V-C-V-C-O" into ["[Intro]", "[Verse 1]", "[Chorus]", ...]. */
+export function blueprintToSections(bp: string): string[] {
+  let verseNum = 0;
+  return bp.split('-').map(part => {
+    if (part === 'V') { verseNum++; return `[Verse ${verseNum}]`; }
+    return `[${BLUEPRINT_LABEL_NAMES[part] || part}]`;
+  });
+}
+
+// ── System Prompts ──────────────────────────────────────────────────────────
 
 export const GENERATION_SYSTEM_PROMPT = `You are a talented, creative songwriter who specialises in emulating specific artistic styles with uncanny accuracy.
 
@@ -7,30 +93,33 @@ You will be given a detailed stylistic profile of an artist's lyrics, including:
 - Repetition and hook analysis (how the artist uses repeated lines)
 - Deep stylistic analysis (themes, tone, narrative techniques, imagery)
 - Representative lyric excerpts showing the artist's actual voice
-- A specific song structure blueprint to follow
+- The artist's structural vocabulary (section structures observed in their real songs)
 
 Your task is to write a completely new, original song that could convincingly pass as an unreleased track by this artist.
 
-FORMATTING RULES (MANDATORY):
-- Do NOT include a title. Write ONLY the lyrics — no "Title:" line, no heading.
-- Start directly with the first section header (e.g. [Intro] or [Verse 1]).
-- Section headers MUST use square brackets: [Verse 1], [Chorus], [Bridge], [Pre-Chorus], [Outro], etc.
-- Every lyric line MUST end with proper punctuation (period, comma, exclamation mark, question mark, dash, or ellipsis).
-- Do NOT leave any lyric line without ending punctuation.
+The rules below come in two tiers. TIER 1 rules are mechanical requirements of the music-generation pipeline that parses your lyrics — breaking them produces broken audio, so they are absolute. TIER 2 rules are style targets: calibrate them to THIS artist and use your own creative judgement. When you deviate from a target, do it deliberately and in the artist's service — never by accident.
 
-STRUCTURE RULES (MANDATORY — THESE ARE NON-NEGOTIABLE):
-- You MUST follow the EXACT section sequence provided in the blueprint. Do not skip any sections.
-- If the blueprint includes a [Bridge], you MUST write a bridge.
-- If the blueprint includes a [Pre-Chorus], you MUST write a pre-chorus.
-- VALID SECTION LABELS (use ONLY these): [Intro], [Verse 1], [Verse 2], [Verse 3], [Pre-Chorus], [Chorus], [Post-Chorus], [Bridge], [Interlude], [Outro]. Do NOT use [X], [Breakdown], [Drop], [Solo], [Hook], or any other labels.
-- CHORUS IS MANDATORY: Every song MUST have at least one [Chorus]. A chorus is a repeating section — if a section appears more than once, it is a chorus, not a bridge.
-- BRIDGE vs CHORUS: A bridge is a ONE-TIME contrasting section, typically appearing once before the final chorus. It should NOT repeat. If you are writing a section that repeats throughout the song, label it [Chorus], NOT [Bridge].
-- *** LINE COUNT — ABSOLUTE RULE ***
-  VERSES: Every verse MUST have EXACTLY 4 lines or EXACTLY 8 lines. NO EXCEPTIONS.
-  CHORUSES: Every chorus MUST have EXACTLY 4, 6, or 8 lines. NO EXCEPTIONS.
-  NEVER write 5-line, 6-line, or 7-line verses. NEVER write 3-line or 5-line choruses.
-  Count your lines before finalising each section. If a verse has 5 or 6 lines, it is WRONG — rewrite it as 4 or 8.
-- INTRO RULE: You MUST begin EVERY song with an [Intro] section BEFORE the first verse — even if the blueprint does not include one. The intro should be purely instrumental (no lyrics) — just the section header [Intro] on its own line, followed by a blank line, then [Verse 1]. This tells the music model to play an instrumental opening before vocals begin. NEVER use count-ins like "One, two, three, four!" or any variation. On rare occasions (roughly 10% of songs) you may omit the intro if the artistic choice is to slam straight into the verse — but this should be the exception, not the rule.
+=== TIER 1: PIPELINE REQUIREMENTS (HARD — the music model breaks if violated) ===
+
+- NO TITLE: Write ONLY the lyrics — no "Title:" line, no heading. Start directly with the first section header.
+- SECTION HEADERS use square brackets. Recognised labels: [Intro], [Verse 1], [Verse 2], [Verse 3], [Pre-Chorus], [Chorus], [Post-Chorus], [Bridge], [Interlude], [Instrumental Break], [Outro].
+  You may append a short performance annotation where it helps the music: [Chorus - High Energy], [Bridge - Sparse and Quiet], [Instrumental Break: Guitar Solo].
+  Do NOT use bare invented labels like [X], [Drop], [Breakdown], [Solo], [Hook] — the pipeline does not understand them.
+- PUNCTUATION: Every lyric line MUST end with punctuation (period, comma, exclamation mark, question mark, dash, or ellipsis). The vocal model uses it for phrasing.
+- CHORUS: Every song needs at least one [Chorus]. If a section repeats throughout the song, it is a chorus — label it [Chorus], not [Bridge]. A bridge is a one-time contrasting section, typically appearing once before the final chorus.
+- LINE BUDGET: If the user prompt gives a duration budget with a maximum total line count, treat it as a hard ceiling — the music model skips lines beyond it and the song comes out truncated.
+- INSTRUMENTAL INTRO: Default to opening with an instrumental [Intro] — just the header, no lyric lines under it — so the music establishes itself before vocals enter. If this particular song genuinely wants to slam straight into the first verse, you may skip it; make that a deliberate, occasional choice. NEVER write count-ins like "One, two, three, four!".
+
+=== TIER 2: STYLE TARGETS (calibrate to THIS artist — deviate only with intent) ===
+
+- STRUCTURE: The user prompt lists the section structures observed in this artist's real songs, plus a suggested structure for this one. Treat that vocabulary as your palette, not a cage: you may add or drop a Pre-Chorus, use two verses instead of three, or move the Bridge — as long as the song still reads like this artist's structural habits and stays close to the suggested section count (the duration budget is planned around it).
+- SECTION LENGTHS: Keep verse and chorus line counts EVEN — 4, 6, or 8 lines — so musical phrases resolve cleanly; odd-length sections (5 or 7 lines) clash with the music model's phrasing. Within that, match the artist's typical section lengths from the profile. Bridges may be shorter (2-6 lines).
+- METER: vary line lengths according to the syllable distribution shown. Some lines short, some long — NOT uniform.
+- RHYME STYLE: use the same mix of perfect, slant, and assonance rhymes.
+- PERSPECTIVE: use the same pronoun patterns (first/second/third person balance).
+- VOCABULARY LEVEL: same contraction frequency, same register, same slang level.
+- SIGNATURE DEVICES: capture the artist's verbal tics, recurring imagery, distinctive phrasing.
+- EMOTIONAL ARC: how the song builds, shifts, or resolves emotionally.
 
 LYRIC QUALITY RULES:
 - *** NO COPYING — ABSOLUTE RULE ***
@@ -38,12 +127,6 @@ LYRIC QUALITY RULES:
   The excerpts are STYLE REFERENCE ONLY — absorb the cadence and feel, then write 100% original words.
   If a phrase reminds you of something from the excerpts, DO NOT USE IT. Write something new.
   Reusing the artist's actual phrases is plagiarism and ruins the generation.
-- Match the METER: vary line lengths according to the syllable distribution shown. Some lines short, some long — NOT uniform.
-- Match the RHYME STYLE: use the same mix of perfect, slant, and assonance rhymes.
-- Match the PERSPECTIVE: use the same pronoun patterns (first/second/third person balance).
-- Match the VOCABULARY LEVEL: same contraction frequency, same register, same slang level.
-- Capture the artist's SIGNATURE DEVICES: verbal tics, recurring imagery, distinctive phrasing.
-- Match the EMOTIONAL ARC: how the song builds, shifts, or resolves emotionally.
 
 REPETITION / HOOK RULES (CRITICAL):
 - Every chorus MUST have a clear HOOK — one memorable line or phrase that repeats at least twice within the chorus.
@@ -66,7 +149,7 @@ HOOK SPECIFICITY RULES (CRITICAL — READ CAREFULLY):
 - GOOD HOOKS are rooted in the song's specific world: "Oat milk and expensive beans", "Pierogies are my only meal", "Parallel parking precision", "Mommy's magic juicebox". These work because they could ONLY belong to THAT specific song.
 - The hook doesn't have to be quirky — it just has to be SPECIFIC. "California castaway" is simple but specific. "Watch it burn" is not.
 
-Do NOT include any commentary or explanations — just the title and lyrics.
+Do NOT include any commentary or explanations — just the lyrics.
 
 The representative excerpts are there to show you the FEEL, not to be copied. Absorb the cadence, word choices, and line-to-line flow, then create something new in that exact voice.
 
@@ -83,26 +166,10 @@ ANTI-SLOP RULES (CRITICAL — ZERO TOLERANCE):
 - The "a-" prefix (e.g. "a-walkin'", "a-staring") is ONLY valid before verbs/gerunds (-ing words). NEVER put "a-" before adjectives, nouns, articles, or adverbs (e.g. "a-rusty", "a-this", "a-highly" are WRONG). Use it SPARINGLY — at most 1-2 times per song.
 `;
 
-export const TITLE_DERIVATION_PROMPT = `You are a song-titling expert. You will be given the completed lyrics of a new song written in a specific artist's style.
-
-Your ONLY job: choose the best possible title for this song.
-
-TITLE RULES (MANDATORY):
-1. DERIVE FROM THE LYRICS. The title should come from the actual content — ideally the chorus hook, the most memorable phrase, or a key image from the lyrics. Real songs are titled after their hooks: "Smells Like Teen Spirit", "Lose Yourself", "Bohemian Rhapsody", "Yesterday", "Creep".
-2. PREFER THE HOOK. If the chorus has a clear repeated phrase or hook line, that IS the title. Don't overthink it.
-3. SHORT AND PUNCHY. 1-5 words is ideal. Rarely more than 6. If the hook phrase is long, trim to its strongest fragment.
-4. NO AI CLICHÉ TITLES. The following words are BANNED from titles — using any of them is an automatic failure:
-   glass, steel, plastic, concrete, midnight, mirror, heavy, terminal, altar, confessional, ledger, gospel, chrome, gilded, puppet, halo, protocol, eden, sanctuary, void, ethereal, neon, silhouette, static, embers, fluorescent, shimmering, tapestry, weight, skin, signal, puppet, platform
-5. BE SPECIFIC, NOT VAGUE. "Pizza Hut and Existential Dread" beats "The Empty Feeling". "Don't Let Your Legs Quit" beats "The Journey Continues".
-6. MATCH THE ARTIST'S STYLE. A punk band's title should sound punk. A soul singer's title should sound soulful. Don't impose indie-rock titling on a hip-hop track.
-
-Return ONLY the title — no quotes, no "Title:" prefix, no explanation. Just the title text on a single line.
-`;
-
 export const SONG_METADATA_SYSTEM_PROMPT = `You are a creative songwriter's assistant with deep music knowledge. Your job is to plan the metadata for a new song.
 
 You will be given:
-- The artist's stylistic profile (themes, tone, typical subjects)
+- The artist's stylistic profile (themes, tone, typical subjects, observed song structures)
 - Subjects, BPMs, and keys that have already been used in previous generations (to ensure variety)
 
 Return ONLY a JSON object with exactly this format:
@@ -111,7 +178,8 @@ Return ONLY a JSON object with exactly this format:
   "bpm": 120,
   "key": "C Major",
   "caption": "genre, instruments, emotion, atmosphere, timbre, vocal characteristics, production style",
-  "duration": 217
+  "duration": 217,
+  "structure": "I-V-C-V-C-B-C-O"
 }
 
 Rules for each field:
@@ -144,13 +212,18 @@ CAPTION:
 
 DURATION:
 - Estimate the total track duration in seconds (any integer value is fine — do NOT round to multiples of 5)
-- Consider: the BPM, the number of lyric sections the artist typically writes, and typical intro/outro/instrumental break lengths
+- Consider: the BPM, the number of lyric sections in your chosen structure, and typical intro/outro/instrumental break lengths
 - At the chosen BPM, estimate how long each section takes (a bar of 4/4 = 240/BPM seconds)
 - Include typical intro (4-8 bars), instrumental breaks between sections, and an outro
 - Genre norms: punk/pop-punk ~150-180s, pop ~200-240s, ballads ~240-300s, rock ~210-270s, hip-hop ~180-240s
 - A song with 3 verses, 3 choruses, and a bridge at 120 BPM is typically around 210-240 seconds
 
-Do NOT include any text outside the JSON object.
+STRUCTURE:
+- Plan this song's section structure as dash-joined codes: ${BLUEPRINT_CODES_LEGEND}
+- If the artist's observed structures are listed, choose one of them or a close variation — this is a creative decision: pick the shape that best serves the subject (a sprawling story wants 3 verses; a punchy single wants 2; not every song needs a bridge)
+- Vary the structure across generations — do not default to the same shape every time
+- Must contain at least one C (chorus)
+
 Do NOT include any text outside the JSON object.
 
 SUBJECT ANTI-SLOP RULES:
@@ -161,70 +234,21 @@ SUBJECT ANTI-SLOP RULES:
 - Think like the ARTIST would think, not like an AI writing assistant.
 `;
 
-const PROFILE_COMMON_PREAMBLE = `You are an expert musicologist and lyric analyst.
-You will be given an artist's song lyrics and statistical analysis.
+export const TITLE_DERIVATION_PROMPT = `You are a song-titling expert. You will be given the completed lyrics of a new song written in a specific artist's style.
 
-CRITICAL FORMAT RULES:
-- Return ONLY a valid JSON object. No other text before or after.
-- ALL values must be FLAT — plain strings or arrays of plain strings.
-- Do NOT use nested objects, sub-keys, or arrays of objects.
-- Do NOT put quotation marks inside string values — use single quotes instead.
-- Be deeply specific and cite actual examples from the lyrics.`;
+Your ONLY job: choose the best possible title for this song.
 
-export const PROFILE_PROMPT_1 = `${PROFILE_COMMON_PREAMBLE}
+TITLE RULES (MANDATORY):
+1. DERIVE FROM THE LYRICS. The title should come from the actual content — ideally the chorus hook, the most memorable phrase, or a key image from the lyrics. Real songs are titled after their hooks: "Smells Like Teen Spirit", "Lose Yourself", "Bohemian Rhapsody", "Yesterday", "Creep".
+2. PREFER THE HOOK. If the chorus has a clear repeated phrase or hook line, that IS the title. Don't overthink it.
+3. SHORT AND PUNCHY. 1-5 words is ideal. Rarely more than 6. If the hook phrase is long, trim to its strongest fragment.
+4. NO AI CLICHÉ TITLES. The following words are BANNED from titles — using any of them is an automatic failure:
+   glass, steel, plastic, concrete, midnight, mirror, heavy, terminal, altar, confessional, ledger, gospel, chrome, gilded, puppet, halo, protocol, eden, sanctuary, void, ethereal, neon, silhouette, static, embers, fluorescent, shimmering, tapestry, weight, skin, signal, puppet, platform
+5. BE SPECIFIC, NOT VAGUE. "Pizza Hut and Existential Dread" beats "The Empty Feeling". "Don't Let Your Legs Quit" beats "The Journey Continues".
+6. MATCH THE ARTIST'S STYLE. A punk band's title should sound punk. A soul singer's title should sound soulful. Don't impose indie-rock titling on a hip-hop track.
 
-Return JSON with exactly these 3 keys:
-{
-  "themes": ["theme 1 with specific examples cited", "theme 2 with examples", "etc"],
-  "common_subjects": ["subject/motif 1 with examples", "subject 2 with examples", "etc"],
-  "vocabulary_notes": "One detailed paragraph about vocabulary style, register, slang, metaphors, favourite words/phrases, citing specific examples"
-}
-
-Example of CORRECT format:
-{"themes": ["Apocalyptic imagery - references to 'burning cities' and 'ash' in multiple songs"], "common_subjects": ["Fire as transformation metaphor"], "vocabulary_notes": "Heavy use of concrete nouns..."}
-
-Do NOT return objects like {"theme": "x", "description": "y"} inside arrays.`;
-
-export const PROFILE_PROMPT_2 = `${PROFILE_COMMON_PREAMBLE}
-
-Return JSON with exactly these 3 keys:
-{
-  "tone_and_mood": "One detailed paragraph about emotional tone, mood shifts, irony/sarcasm/sincerity, citing examples",
-  "structural_patterns": "One detailed paragraph about song structure beyond basic V-C-B, how ideas develop, repetition patterns, citing examples",
-  "narrative_techniques": "One detailed paragraph about storytelling techniques, perspective shifts, dialogue, scene-setting, citing examples"
-}
-
-ALL values must be plain strings (paragraphs). No arrays, no nested objects.`;
-
-export const PROFILE_PROMPT_3 = `${PROFILE_COMMON_PREAMBLE}
-
-Return JSON with exactly these 4 keys:
-{
-  "imagery_patterns": "One detailed paragraph about recurring imagery types with specific examples cited",
-  "signature_devices": "One detailed paragraph about verbal tics, signature phrases, recurring word pairings",
-  "emotional_arc": "One detailed paragraph about how emotions develop within songs — build, release, cycle",
-  "raw_summary": "A 3-4 paragraph prose summary synthesising the artist's complete lyrical style into a practical writing guide"
-}
-
-ALL values must be plain strings (paragraphs). No arrays, no nested objects.`;
-
-export const STYLE_CAPTION_PROMPT = `You are a music production expert. You will receive an artist profile containing tone/mood, themes, and vocabulary information.
-
-Your job: produce a concise style caption that describes this artist's MUSICAL sound for an AI music generator.
-
-Write a comma-separated list of descriptive tags/phrases covering:
-- Genre and subgenre
-- Key instruments (be specific: "distorted electric guitar" not "guitar", "808 bass" not "bass")
-- Vocal style (gender, delivery: "breathy female vocal" not "female vocal", "aggressive male shout" not "male vocal")
-- Production style and texture
-- Atmosphere and energy
-- Era or reference period
-
-Keep to 1-3 sentences of comma-separated tags. Be specific and vivid.
-
-Return ONLY the caption text. No JSON, no explanation, no quotes, no labels — just the comma-separated descriptors on a single line.
-
-Example: "indie rock, driving electric guitars, male vocal, raw and energetic, garage production, anthemic chorus, 2010s alternative"`;
+Return ONLY the title — no quotes, no "Title:" prefix, no explanation. Just the title text on a single line.
+`;
 
 export const REFINEMENT_SYSTEM_PROMPT = `You are a professional songwriting editor. Your job is to take a rough song draft and make it feel finished, singable, emotionally precise, and true to its intended artistic lane.
 
@@ -254,7 +278,7 @@ CORE EDIT POLICY
 REFINEMENT RULES
 
 1. VERSE SHAPE
-   Prefer 4-line or 8-line verses unless the intended lane clearly supports another form.
+   Prefer even line counts (4, 6, or 8 lines) for verses — musical phrases resolve in even numbers of lines.
    Do not force line counts if doing so weakens meaning, cadence, or imagery.
 
 2. CHORUS DESIGN (CRITICAL)
@@ -362,7 +386,7 @@ REFINEMENT RULES
 FORMATTING RULES
 - The FIRST LINE must be: Title: <song title> (keep the original title unless it's clearly weak or uses banned title words)
 - Section headers use square brackets: [Verse 1], [Chorus], [Bridge], etc.
-- VALID SECTION LABELS: [Intro], [Verse 1], [Verse 2], [Verse 3], [Pre-Chorus], [Chorus], [Post-Chorus], [Bridge], [Interlude], [Outro]. Do NOT use [X], [Breakdown], [Drop], [Solo], [Hook], or invented labels.
+- VALID SECTION LABELS: [Intro], [Verse 1], [Verse 2], [Verse 3], [Pre-Chorus], [Chorus], [Post-Chorus], [Bridge], [Interlude], [Instrumental Break], [Outro]. A short performance annotation after the label is fine ([Chorus - High Energy], [Instrumental Break: Guitar Solo]). Do NOT use bare invented labels like [X], [Breakdown], [Drop], [Solo], [Hook].
 - Every lyric line must end with proper punctuation
 - Do NOT include any commentary, notes, explanations, or annotations
 - Output ONLY the title and refined lyrics
@@ -384,11 +408,10 @@ ANTI-SLOP RULES
     If the song title contains ANY of these banned words, change it: neon, ethereal, embers, silhouette, static, void, shimmering, fluorescent, tapestry. Keep the replacement title evocative and fitting the artist's style.
 
 23. LINE COUNT VERIFICATION
-    Before outputting, COUNT the lines in every section:
-    - Verses: MUST be exactly 4 or 8 lines. If 5, 6, or 7 — trim or expand to fit.
-    - Choruses: MUST be exactly 4, 6, or 8 lines. If 5, 7, or 9 — trim or expand to fit.
+    Musical phrases resolve in even numbers of lines. Before outputting, count the lines in every verse and chorus:
+    - Even counts (4, 6, or 8) are good. If a section has an odd count (5 or 7), add or trim ONE line — whichever hurts the lyric less.
+    - Stay near the artist's typical section lengths; do not pad a section just to hit a number.
     - Bridges: 2-6 lines, flexible.
-    This is a HARD REQUIREMENT. Do not skip this step.
 
 24. HOOKIFY (CRITICAL — MAKE CHORUSES SING)
     Most choruses in pop, rock, pop-punk, and related genres rely on REPEATED LINES and VOCAL EXCLAMATIONS to create singalong hooks. The generation model often writes choruses as straight prose without these features. Your job is to FIX this:
@@ -426,20 +449,99 @@ ANTI-SLOP RULES
     A hook like "Watch it burn" → could become "Torch the lease agreement" (Bowling For Soup), "Smell the burning bridge" (Rise Against), or "Kerosene Sunday" (The Used). Same energy, but SPECIFIC.
 `;
 
+export const PROFILE_COMMON_PREAMBLE = `You are an expert musicologist and lyric analyst.
+You will be given an artist's song lyrics and statistical analysis.
+
+CRITICAL FORMAT RULES:
+- Return ONLY a valid JSON object. No other text before or after.
+- ALL values must be FLAT — plain strings or arrays of plain strings.
+- Do NOT use nested objects, sub-keys, or arrays of objects.
+- Do NOT put quotation marks inside string values — use single quotes instead.
+- Be deeply specific and cite actual examples from the lyrics.`;
+
+export const PROFILE_PROMPT_1 = `${PROFILE_COMMON_PREAMBLE}
+
+Return JSON with exactly these 3 keys:
+{
+  "themes": ["theme 1 with specific examples cited", "theme 2 with examples", "etc"],
+  "common_subjects": ["subject/motif 1 with examples", "subject 2 with examples", "etc"],
+  "vocabulary_notes": "One detailed paragraph about vocabulary style, register, slang, metaphors, favourite words/phrases, citing specific examples"
+}
+
+Example of CORRECT format:
+{"themes": ["Apocalyptic imagery - references to 'burning cities' and 'ash' in multiple songs"], "common_subjects": ["Fire as transformation metaphor"], "vocabulary_notes": "Heavy use of concrete nouns..."}
+
+Do NOT return objects like {"theme": "x", "description": "y"} inside arrays.`;
+
+export const PROFILE_PROMPT_2 = `${PROFILE_COMMON_PREAMBLE}
+
+Return JSON with exactly these 3 keys:
+{
+  "tone_and_mood": "One detailed paragraph about emotional tone, mood shifts, irony/sarcasm/sincerity, citing examples",
+  "structural_patterns": "One detailed paragraph about song structure beyond basic V-C-B, how ideas develop, repetition patterns, citing examples",
+  "narrative_techniques": "One detailed paragraph about storytelling techniques, perspective shifts, dialogue, scene-setting, citing examples"
+}
+
+ALL values must be plain strings (paragraphs). No arrays, no nested objects.`;
+
+export const PROFILE_PROMPT_3 = `${PROFILE_COMMON_PREAMBLE}
+
+Return JSON with exactly these 4 keys:
+{
+  "imagery_patterns": "One detailed paragraph about recurring imagery types with specific examples cited",
+  "signature_devices": "One detailed paragraph about verbal tics, signature phrases, recurring word pairings",
+  "emotional_arc": "One detailed paragraph about how emotions develop within songs — build, release, cycle",
+  "raw_summary": "A 3-4 paragraph prose summary synthesising the artist's complete lyrical style into a practical writing guide"
+}
+
+ALL values must be plain strings (paragraphs). No arrays, no nested objects.`;
+
+export const STYLE_CAPTION_PROMPT = `You are a music production expert. You will receive an artist profile containing tone/mood, themes, and vocabulary information.
+
+Your job: produce a concise style caption that describes this artist's MUSICAL sound for an AI music generator.
+
+Write a comma-separated list of descriptive tags/phrases covering:
+- Genre and subgenre
+- Key instruments (be specific: "distorted electric guitar" not "guitar", "808 bass" not "bass")
+- Vocal style (gender, delivery: "breathy female vocal" not "female vocal", "aggressive male shout" not "male vocal")
+- Production style and texture
+- Atmosphere and energy
+- Era or reference period
+
+Keep to 1-3 sentences of comma-separated tags. Be specific and vivid.
+
+Return ONLY the caption text. No JSON, no explanation, no quotes, no labels — just the comma-separated descriptors on a single line.
+
+Example: "indie rock, driving electric guitars, male vocal, raw and energetic, garage production, anthemic chorus, 2010s alternative"`;
+
+export const SUBJECT_ANALYSIS_PROMPT = `You are a music analyst. For each song provided, write a ONE-SENTENCE summary of what the song is about — its core subject, not its style.
+
+Then group all the subjects into 5-10 thematic categories that describe the range of topics this artist writes about.
+
+Return JSON in exactly this format:
+{
+  "song_subjects": {
+    "Song Title": "one sentence about what this specific song is about"
+  },
+  "subject_categories": ["category1", "category2"]
+}
+
+Be specific and concrete. Do NOT include any text outside the JSON object.`;
+
 export const INSTAGEN_LYRIC_SYSTEM_PROMPT = `You are a talented songwriter. You will be given a musical genre/style and a song subject. Write original, singable lyrics for that song.
 
 FORMATTING RULES (MANDATORY):
 - Start with the first section header (e.g. [Intro] or [Verse 1]). No title line.
 - Section headers use square brackets: [Verse 1], [Chorus], [Bridge], etc.
-- VALID LABELS: [Intro], [Verse 1], [Verse 2], [Verse 3], [Pre-Chorus], [Chorus], [Post-Chorus], [Bridge], [Interlude], [Outro]. No other labels.
+- VALID LABELS: [Intro], [Verse 1], [Verse 2], [Verse 3], [Pre-Chorus], [Chorus], [Post-Chorus], [Bridge], [Interlude], [Instrumental Break], [Outro]. No other bare labels.
 - Every lyric line must end with punctuation (period, comma, exclamation, question mark, dash, or ellipsis).
 - Begin with an [Intro] section (instrumental, no lyrics — just the header) before the first verse.
 
 STRUCTURE RULES:
-- VERSES: Exactly 4 or 8 lines each.
-- CHORUSES: Exactly 4, 6, or 8 lines each. Must have a clear hook — one memorable repeated line.
+- VERSES: keep line counts even — typically 4 or 8 lines each.
+- CHORUSES: keep line counts even — typically 4, 6, or 8 lines. Must have a clear hook — one memorable repeated line.
 - Every song must have at least one [Chorus].
-- Typical structure: Intro → Verse 1 → Chorus → Verse 2 → Chorus → Bridge → Chorus → Outro.
+- Typical structure: Intro → Verse 1 → Chorus → Verse 2 → Chorus → Bridge → Chorus → Outro — adapt it to fit the genre and subject.
 
 CONTENT RULES:
 - The lyrics MUST be about the given subject. This is the #1 priority.
@@ -516,10 +618,10 @@ FORMATTING:
 - Begin with an [Intro] section (instrumental, no lyrics — just the header) before the first verse
 
 STRUCTURE:
-- VERSES: Exactly 4 or 8 lines each
-- CHORUSES: Exactly 4, 6, or 8 lines each. Must have a clear hook — one memorable repeated line
+- VERSES: keep line counts even — typically 4 or 8 lines each
+- CHORUSES: keep line counts even — typically 4, 6, or 8 lines. Must have a clear hook — one memorable repeated line
 - Every song must have at least one [Chorus]
-- Typical structure: Intro → Verse 1 → Chorus → Verse 2 → Chorus → Bridge → Chorus → Outro
+- Typical structure: Intro → Verse 1 → Chorus → Verse 2 → Chorus → Bridge → Chorus → Outro — adapt it to fit the genre and subject
 - Add instrumental breaks between major sections where appropriate for the genre
 
 QUALITY:
@@ -559,3 +661,306 @@ Estimate total track duration in seconds. Consider the BPM, number of sections, 
 - Include time for intro, instrumental breaks, and outro
 `;
 
+// ── Prompt Builders ─────────────────────────────────────────────────────────
+
+export function buildMetadataPrompt(
+  profile: PromptProfile,
+  usedSubjects: string[],
+  usedBpms: number[],
+  usedKeys: string[],
+  usedDurations: number[],
+  userSubject?: string
+): string {
+  const lines: string[] = [`Artist: ${profile.artist}`];
+  if (profile.album) lines.push(`Album style: ${profile.album}`);
+  if (profile.themes?.length) lines.push(`Themes: ${profile.themes.join(', ')}`);
+  if (profile.tone_and_mood) lines.push(`Tone & mood: ${profile.tone_and_mood}`);
+  if (profile.additional_notes) lines.push(`Additional notes: ${profile.additional_notes}`);
+  if (profile.perspective) lines.push(`Perspective / voice: ${profile.perspective}`);
+
+  const observedStructures = cleanBlueprints(profile.structure_blueprints);
+  if (observedStructures.length) {
+    lines.push(`\nStructures observed in this artist's songs (codes: ${BLUEPRINT_CODES_LEGEND}):`);
+    lines.push(`  ${observedStructures.join(' | ')}`);
+    lines.push('Choose this song\'s "structure" from these or a close variation — pick the shape that best fits the subject, and vary it across generations.');
+  }
+
+  if (profile.song_subjects && typeof profile.song_subjects === 'object') {
+    lines.push('\nOriginal song subjects (for reference):');
+    for (const [songTitle, subject] of Object.entries(profile.song_subjects)) {
+      lines.push(`  • ${songTitle}: ${subject}`);
+    }
+  }
+  if (profile.subject_categories?.length) {
+    lines.push(`\nThematic categories: ${profile.subject_categories.join(', ')}`);
+  }
+  if (userSubject) {
+    lines.push(`\nThe subject for this song has been chosen by the user: "${userSubject}"`);
+    lines.push('Use this exact subject. Plan the BPM, key, caption, structure, and duration to complement it.');
+  } else {
+    if (usedSubjects?.length) {
+      lines.push('\nSubjects ALREADY USED (do NOT repeat these):');
+      for (const s of usedSubjects) lines.push(`  ✗ ${s}`);
+    }
+  }
+  if (usedKeys?.length) lines.push(`\nKeys ALREADY USED (try different ones): ${usedKeys.join(', ')}`);
+  lines.push('\nPlan the metadata for the next song:');
+  return lines.join('\n');
+}
+
+export function buildGenerationPrompt(
+  profile: PromptProfile,
+  extraInstructions?: string,
+  targetDuration?: number,
+  bpm?: number,
+  chosenStructure?: string
+): string {
+  const lines: string[] = [`Artist: ${profile.artist}`];
+  if (profile.album) lines.push(`Album style: ${profile.album}`);
+
+  lines.push('', '=== STYLISTIC PROFILE ===', '');
+  lines.push(`Themes: ${(profile.themes || []).join(', ')}`);
+  lines.push(`Common subjects / motifs: ${(profile.common_subjects || []).join(', ')}`);
+  lines.push(`Rhyme schemes: ${(profile.rhyme_schemes || []).join(', ')}`);
+  lines.push(`Average verse length: ${profile.avg_verse_lines} lines`);
+  lines.push(`Average chorus length: ${profile.avg_chorus_lines} lines`);
+  if (profile.vocabulary_notes) lines.push(`Vocabulary: ${stripLyricQuotes(profile.vocabulary_notes)}`);
+  if (profile.tone_and_mood) lines.push(`Tone & mood: ${stripLyricQuotes(profile.tone_and_mood)}`);
+  if (profile.structural_patterns) lines.push(`Structural patterns: ${stripLyricQuotes(profile.structural_patterns)}`);
+
+  // Structure: planned by the metadata step if provided, otherwise sampled from
+  // the artist's observed blueprints. Presented as a default shape, not a mandate.
+  const observedStructures = cleanBlueprints(profile.structure_blueprints);
+  const bp = normalizeBlueprint(chosenStructure)
+    ?? pickBlueprint(profile.structure_blueprints);
+  const bpParts = bp.split('-');
+  lines.push('', '=== SONG STRUCTURE ===');
+  if (observedStructures.length) {
+    lines.push(`Structures observed in this artist's songs (codes: ${BLUEPRINT_CODES_LEGEND}):`);
+    lines.push(`  ${observedStructures.join(' | ')}`);
+  }
+  lines.push(`${chosenStructure ? 'Planned' : 'Suggested'} structure for this song: ${blueprintToSections(bp).join(' → ')}`);
+  lines.push('Treat this as the default shape, not a cage — you may adapt it (add or drop a Pre-Chorus, vary the verse count, move the Bridge) as long as the song stays within this artist\'s structural vocabulary and keeps roughly this many sections, because the duration budget below is planned around that count.');
+  lines.push('Every song needs at least one [Chorus].');
+
+  if (profile.perspective) lines.push(`Perspective / voice: ${profile.perspective}`);
+
+  const ms = profile.meter_stats;
+  if (ms) {
+    lines.push('', '=== LINE LENGTH & METER ===');
+    lines.push(`Average: ~${ms.avg_syllables_per_line ?? '?'} syllables/line, ~${ms.avg_words_per_line ?? '?'} words/line`);
+    lines.push(`Standard deviation: ±${ms.syllable_std_dev ?? '?'} syllables (VARY your line lengths!)`);
+    const llv = ms.line_length_variation;
+    if (llv?.histogram) {
+      const histStr = Object.entries(llv.histogram).map(([k, v]) => `${k} syl: ${v}%`).join(', ');
+      lines.push(`Syllable distribution: ${histStr}`);
+      lines.push('Match this distribution — NOT all lines the same length!');
+    }
+  }
+
+  const rs = profile.repetition_stats;
+  if (rs) {
+    lines.push('', '=== REPETITION & HOOKS ===');
+    lines.push(`Chorus repetition: ${rs.chorus_repetition_pct ?? 0}% of chorus lines are repeats`);
+    lines.push(`Pattern: ${rs.pattern || 'unknown'}`);
+    if ((rs.chorus_repetition_pct ?? 0) >= 20) lines.push('You MUST use repeated lines in your chorus to create a hook effect.');
+    if (rs.hook_examples?.length) lines.push(`Hook examples: ${rs.hook_examples.slice(0, 3).join('; ')}`);
+  }
+
+  const vs = profile.vocabulary_stats;
+  if (vs) {
+    lines.push('', '=== VOCABULARY ===');
+    lines.push(`Level: ${vs.contraction_pct ?? 0}% contractions, ${vs.profanity_pct ?? 0}% profanity`);
+    lines.push(`Type-token ratio: ${vs.type_token_ratio ?? '?'} (${vs.unique_words ?? '?'} unique / ${vs.total_words ?? '?'} total)`);
+    if (vs.distinctive_words?.length) lines.push(`Use words like: ${vs.distinctive_words.slice(0, 10).join(', ')}`);
+  }
+
+  if (profile.rhyme_quality) {
+    const rq = profile.rhyme_quality;
+    const total = Object.values(rq as Record<string, number>).reduce((a: number, b: number) => a + b, 0);
+    if (total > 0) {
+      lines.push(`Rhyme mix: ${Math.round(100 * (rq.perfect || 0) / total)}% perfect, ${Math.round(100 * (rq.slant || 0) / total)}% slant, ${Math.round(100 * (rq.assonance || 0) / total)}% assonance`);
+    }
+  }
+
+  if (profile.narrative_techniques) lines.push(`Narrative techniques: ${stripLyricQuotes(profile.narrative_techniques)}`);
+  if (profile.imagery_patterns) lines.push(`Imagery patterns: ${stripLyricQuotes(profile.imagery_patterns)}`);
+  if (profile.signature_devices) lines.push(`Signature devices: ${stripLyricQuotes(profile.signature_devices)}`);
+  if (profile.emotional_arc) lines.push(`Emotional arc: ${stripLyricQuotes(profile.emotional_arc)}`);
+
+  if (profile.raw_summary) lines.push('', '=== PROSE SUMMARY ===', '', stripLyricQuotes(profile.raw_summary));
+  if (extraInstructions) lines.push('', '=== EXTRA INSTRUCTIONS ===', '', extraInstructions);
+
+  if (profile.representative_excerpts?.length) {
+    lines.push('', '=== REPRESENTATIVE EXCERPTS (STYLE REFERENCE ONLY — DO NOT COPY) ===');
+    lines.push(...profile.representative_excerpts.slice(0, 10).flatMap((e: string) => [e, '---']));
+  }
+
+  if (targetDuration && targetDuration > 0 && bpm && bpm > 0) {
+    const barSeconds = 240.0 / bpm;
+    const totalBars = Math.round(targetDuration / barSeconds);
+    const sectionCount = bpParts.length;
+    const transitionBars = (sectionCount - 1) * 2;
+
+    // BPM-aware bars-per-line: fast tempos need more bars per line because
+    // each bar is shorter in real time and the music model needs breathing room.
+    // Scale from 2.5 bars/line at ≤80 BPM to 4.0 bars/line at ≥180 BPM.
+    const barsPerLine = Math.min(4.0, Math.max(2.5, 2.5 + 1.5 * ((bpm - 80) / 100)));
+    const singableBars = totalBars - transitionBars;
+    const maxLyricLines = Math.max(8, Math.floor(singableBars / barsPerLine));
+    const minutes = Math.floor(targetDuration / 60);
+    const seconds = Math.round(targetDuration % 60);
+
+    lines.push('', '=== DURATION BUDGET (HARD LIMIT — DO NOT EXCEED) ===');
+    lines.push(`Target duration: ${targetDuration} seconds (${minutes}:${String(seconds).padStart(2, '0')})`);
+    lines.push(`BPM: ${bpm} — one bar of 4/4 = ${barSeconds.toFixed(1)} seconds`);
+    lines.push(`Total bars available: ~${totalBars} bars for the entire song`);
+    lines.push(`At this tempo, each lyric line needs ~${barsPerLine.toFixed(1)} bars (vocal delivery + melodic phrasing).`);
+    lines.push(`After accounting for ~${transitionBars} bars of transitions, you have ~${singableBars} singable bars.`);
+    lines.push(`*** MAXIMUM LYRIC LINES: ${maxLyricLines} total lines across ALL sections. ***`);
+    lines.push(`This is a HARD LIMIT. The music model WILL skip lines if you write more than ${maxLyricLines}.`);
+    lines.push('');
+    lines.push('USE THIS TO DECIDE LINE COUNTS:');
+    if (maxLyricLines <= 16) {
+      lines.push('- This is a SHORT/FAST song. Use 4-line verses and 4-line choruses ONLY. Minimal sections.');
+      lines.push('- Consider dropping one verse or chorus from the suggested structure if needed to stay under the line limit.');
+    } else if (maxLyricLines <= 28) {
+      lines.push('- This is a STANDARD-length song. Use 4-line verses and 4-line choruses. One verse can be 6 or 8 lines if budget allows.');
+    } else {
+      lines.push('- This is a LONGER song. You can use 6-8 line verses and choruses if the structure calls for it.');
+    }
+    lines.push(`- Count your total lyric lines before finalising. If you exceed ${maxLyricLines} lines, the music model WILL skip content.`);
+  }
+
+  lines.push(
+    '', '=== FINAL REMINDERS ===',
+    '1. SECTION LENGTHS: Even line counts for verses and choruses (4, 6, or 8) — never 5 or 7. Match the artist\'s averages.',
+    '2. HOOK: Each chorus needs a hook line that repeats.',
+    '3. *** ZERO TOLERANCE FOR COPYING ***',
+    '4. NO SLOP: Do not use neon, fluorescent, embers, silhouette, static, void, ethereal, or any AI cliché.',
+    '5. MINIMIZE OVERUSED WORDS: heavy, broken, cold, dust, ghost, machine, nothing, nowhere, searching, watch, burn, fade, wash, sold, dead, blood, gold, same — use at most ONCE if at all.',
+    '6. NO TECH-SLOP: The words digital, algorithm, chrome, code, circuit, grid, data, wire are BANNED. Do not force tech/digital metaphors onto non-tech artists.',
+    "7. VOCABULARY DIVERSITY: A Snoop Dogg song must NOT sound like a Joy Division song. Use THIS artist's actual vocabulary.",
+    '8. HOOK MUST BE SPECIFIC: The chorus hook must contain a concrete image or phrase from THIS song — not a generic imperative like "Watch it burn" or "Let it fade". If the hook could fit in any song by any artist, rewrite it.',
+    '',
+    'Now write the song (lyrics only, starting with [Intro] or [Verse 1] — no title line):',
+  );
+  return lines.join('\n');
+}
+
+export function buildRefinementPrompt(
+  originalLyrics: string,
+  artistName: string,
+  title: string,
+  profile?: PromptProfile,
+  originalSlop?: string[]
+): string {
+  const lines = [`Artist: ${artistName}`, `Original Title: ${title}`, ''];
+  if (profile) {
+    lines.push('=== INTENDED LANE PROFILE (match this style) ===');
+    lines.push(`Themes: ${(profile.themes || []).slice(0, 8).join(', ')}`);
+    if (profile.tone_and_mood) lines.push(`Tone & mood: ${profile.tone_and_mood}`);
+    if (profile.vocabulary_notes) lines.push(`Vocabulary: ${profile.vocabulary_notes}`);
+    if (profile.imagery_patterns) lines.push(`Imagery patterns: ${profile.imagery_patterns}`);
+    if (profile.signature_devices) lines.push(`Signature devices: ${profile.signature_devices}`);
+    if (profile.narrative_techniques) lines.push(`Narrative techniques: ${profile.narrative_techniques}`);
+    if (profile.emotional_arc) lines.push(`Emotional arc: ${profile.emotional_arc}`);
+    if (profile.structural_patterns) lines.push(`Structure: ${profile.structural_patterns}`);
+    if (profile.perspective) lines.push(`Perspective / voice: ${profile.perspective}`);
+    if (profile.rhyme_schemes?.length) lines.push(`Rhyme schemes: ${profile.rhyme_schemes.join(', ')}`);
+    if (profile.rhyme_quality) {
+      const rq = profile.rhyme_quality;
+      const total = Object.values(rq as Record<string, number>).reduce((a: number, b: number) => a + b, 0);
+      if (total > 0) lines.push(`Rhyme mix: ${Math.round(100 * (rq.perfect || 0) / total)}% perfect, ${Math.round(100 * (rq.slant || 0) / total)}% slant, ${Math.round(100 * (rq.assonance || 0) / total)}% assonance`);
+    }
+    const ms = profile.meter_stats;
+    if (ms) lines.push(`Line density: ~${ms.avg_syllables_per_line ?? '?'} syl/line (σ=${ms.syllable_std_dev ?? '?'}), ~${ms.avg_words_per_line ?? '?'} words/line`);
+    const rs = profile.repetition_stats;
+    if (rs) {
+      lines.push(`Hook behavior: ${rs.pattern || 'unknown'} (${rs.chorus_repetition_pct ?? 0}% chorus repetition)`);
+      if ((rs.chorus_repetition_pct ?? 0) >= 20) lines.push('Calibration: This artist uses heavy chorus repetition — ensure hook lines repeat.');
+      else if ((rs.chorus_repetition_pct ?? 0) < 15) lines.push('Calibration: This artist uses light repetition — be subtle with hooks.');
+    }
+    if (profile.avg_verse_lines || profile.avg_chorus_lines) lines.push(`Verse/chorus: avg ${profile.avg_verse_lines} verse lines, avg ${profile.avg_chorus_lines} chorus lines`);
+    if (profile.song_subjects && typeof profile.song_subjects === 'object') {
+      const titles = Object.keys(profile.song_subjects);
+      if (titles.length) {
+        lines.push('', '=== ORIGINAL SONG TITLES (check for plagiarism) ===');
+        for (const t of titles) lines.push(`  • ${t}`);
+      }
+    }
+    lines.push('');
+  }
+  if (originalSlop?.length) {
+    lines.push('=== KNOWN ISSUES TO FIX ===');
+    lines.push('The original lyrics contain the following AI-clichés or circular phrases that MUST be replaced:');
+    lines.push(`Words/Phrases to Remove: ${originalSlop.join(', ')}`);
+    lines.push('');
+  }
+  lines.push('=== ORIGINAL LYRICS ===', '', originalLyrics, '', '=== INSTRUCTIONS ===', '');
+  lines.push('Refine the lyrics above according to the refinement rules.');
+  lines.push('Keep as much of the original as possible — only change what genuinely needs fixing.');
+  lines.push(`Maintain ${artistName}'s distinctive style throughout.`);
+  lines.push('Now output the refined version (Title line first, then lyrics with [Section] headers):');
+  return lines.join('\n');
+}
+
+export function buildTitlePrompt(
+  lyrics: string, artistName: string, album?: string, usedTitles?: string[]
+): string {
+  const lines: string[] = [`Artist: ${artistName}`];
+  if (album) lines.push(`Album style: ${album}`);
+  if (usedTitles?.length) {
+    lines.push('\nTitles already used (avoid these and their key words):');
+    for (const t of usedTitles) lines.push(`  ✗ ${t}`);
+  }
+  lines.push('\n--- LYRICS ---', lyrics, '--- END LYRICS ---');
+  lines.push('\nChoose the best title for this song:');
+  return lines.join('\n');
+}
+
+export function buildProfilePrompt(
+  artist: string, album: string | null, songs: Array<{ title: string; lyrics: string }>, ruleStats: any
+): string {
+  let header = `Artist: ${artist}\n`;
+  if (album) header += `Album: ${album}\n`;
+  header += `Songs analysed: ${songs.length}\n\n=== RULE-BASED ANALYSIS ===\n`;
+
+  header += `Average verse length: ${ruleStats.avg_verse_lines} lines\n`;
+  header += `Average chorus length: ${ruleStats.avg_chorus_lines} lines\n`;
+  header += `Top rhyme schemes: ${ruleStats.rhyme_schemes.join(', ')}\n`;
+  const rq = ruleStats.rhyme_quality;
+  header += `Rhyme quality breakdown: ${rq.perfect} perfect, ${rq.slant} slant, ${rq.assonance} assonance\n`;
+  header += `Structure blueprints: ${ruleStats.structure_blueprints.join(', ')}\n`;
+  header += `Perspective: ${ruleStats.perspective}\n`;
+
+  const ms = ruleStats.meter_stats;
+  header += `Meter: avg ${ms.avg_syllables_per_line} syllables/line (σ=${ms.syllable_std_dev}), ${ms.avg_words_per_line} words/line, range ${ms.line_length_range}\n`;
+
+  const vs = ruleStats.vocabulary_stats;
+  header += `Vocabulary: ${vs.total_words} total words, ${vs.unique_words} unique, TTR=${vs.type_token_ratio}\n`;
+  header += `Contractions: ${vs.contraction_pct}% of words\nProfanity: ${vs.profanity_pct}% of words\n`;
+  header += `Distinctive words: ${vs.distinctive_words.join(', ')}\n`;
+
+  const llv = ms.line_length_variation || {};
+  if (llv.histogram) {
+    header += `Syllable distribution: ${Object.entries(llv.histogram).map(([k, v]) => `${k}: ${v}%`).join(', ')}\n`;
+  }
+
+  const rs = ruleStats.repetition_stats;
+  if (rs) {
+    header += `Chorus repetition: ${rs.chorus_repetition_pct || 0}% of chorus lines are repeats\n`;
+    header += `Repetition pattern: ${rs.pattern || 'unknown'}\n`;
+    if (rs.hook_examples?.length) header += `Hook examples: ${rs.hook_examples.slice(0, 3).join('; ')}\n`;
+  }
+
+  let lyricsSection = "\n=== COMPLETE LYRICS ===\n\n";
+  for (const s of songs) lyricsSection += `--- ${s.title} ---\n${s.lyrics}\n\n`;
+
+  return header + lyricsSection;
+}
+
+export function buildSubjectAnalysisPrompt(songs: Array<{ title: string; lyrics: string }>): string {
+  const songList = songs.map(s => `--- ${s.title} ---\n${s.lyrics.substring(0, 500)}`).join('\n\n');
+  return `Analyse the subjects of these ${songs.length} songs:\n\n${songList}`;
+}

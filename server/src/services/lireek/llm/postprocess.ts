@@ -84,9 +84,12 @@ export function fixSectionLabels(text: string): string {
   return result.join('\n');
 }
 
+// Musical phrases resolve in even numbers of lines, so odd-length verses and
+// choruses (5, 7, 9 lines) clash with the music model's phrasing. Rather than
+// forcing every section to exactly 4/8 lines (the old behaviour, which deleted
+// up to 3 lines of content), only trim ONE line when the count is odd.
+// Even counts of any reasonable size pass through untouched.
 export function enforceLineCounts(text: string): string {
-  const VERSE_VALID = new Set([4, 8]);
-  const CHORUS_VALID = new Set([4, 6, 8]);
   const sections: { header: string; lines: string[] }[] = [];
   let currentHeader = '';
   let currentLines: string[] = [];
@@ -107,10 +110,7 @@ export function enforceLineCounts(text: string): string {
     const isVerse = headerLower.includes('verse');
     const isChorus = headerLower.includes('chorus') || headerLower.includes('hook');
     let target: number | null = null;
-    if (isVerse && !VERSE_VALID.has(count)) { target = count <= 6 ? 4 : 8; }
-    else if (isChorus && !CHORUS_VALID.has(count)) {
-      if (count <= 5) target = 4; else if (count <= 7) target = 6; else target = 8;
-    }
+    if ((isVerse || isChorus) && count >= 3 && count % 2 !== 0) target = count - 1;
     let finalLines = lines;
     if (target !== null && target < count) {
       let kept = 0; finalLines = [];
@@ -144,14 +144,6 @@ export function estimateDuration(lyrics: string, bpm: number): number {
   return Math.max(90, Math.min(Math.floor(lyricLineCount * 3.5 + Math.max(sectionCount - 1, 0) * 4 * barDuration), 360));
 }
 
-export function selectBestBlueprint(blueprints: string[]): string {
-  if (!blueprints.length) return 'V-C-V-C-B-C';
-  return blueprints
-    .map(bp => { const parts = bp.split('-'); const oi = parts.indexOf('O'); return oi >= 0 ? parts.slice(0, oi + 1).join('-') : bp; })
-    .reduce((best, bp) => {
-      const parts = bp.split('-'), unique = new Set(parts).size, hasBridge = parts.includes('B') ? 1 : 0;
-      const score = unique * 10 + hasBridge * 100 + parts.length;
-      const bp2 = best.split('-'), u2 = new Set(bp2).size, b2 = bp2.includes('B') ? 1 : 0;
-      return score > u2 * 10 + b2 * 100 + bp2.length ? bp : best;
-    });
-}
+// selectBestBlueprint was removed — structure selection now lives in
+// ../prompts.ts (pickBlueprint), which samples from the artist's observed
+// blueprints instead of deterministically picking the same one every time.

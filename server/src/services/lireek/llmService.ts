@@ -23,7 +23,6 @@ export {
   fixAPrefix,
   stripLyricQuotes,
   estimateDuration,
-  selectBestBlueprint,
   generateLyricsStreaming,
   refineLyricsStreaming,
 } from './llm/index.js';

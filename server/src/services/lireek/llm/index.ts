@@ -14,7 +14,7 @@ export { LLMProvider } from './base.js';
 export { getProvider, listProviders } from './registry.js';
 
 // Post-processing
-export { stripThinkingBlocks, postprocessLyrics, fixSectionLabels, enforceLineCounts, fixAPrefix, stripLyricQuotes, estimateDuration, selectBestBlueprint } from './postprocess.js';
+export { stripThinkingBlocks, postprocessLyrics, fixSectionLabels, enforceLineCounts, fixAPrefix, stripLyricQuotes, estimateDuration } from './postprocess.js';
 
 // Orchestration (high-level generation functions)
 export { generateLyricsStreaming, refineLyricsStreaming } from './orchestration.js';
