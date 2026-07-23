@@ -16,6 +16,7 @@ import {
   buildTitlePrompt,
 } from '../prompts.js';
 import type { LyricsProfile } from '../profilerService.js';
+import { withModelSuffix } from '../modelName.js';
 import type { GenerationResponse, ChunkCallback, CallOptions } from './types.js';
 import { getProvider } from './registry.js';
 import {
@@ -209,6 +210,9 @@ export async function generateLyricsStreaming(
     }
   } catch (err) { console.warn('[LLM] Title derivation failed, falling back to empty:', err); }
 
+  // Tag the title with the model that wrote it, same as the MCP path does
+  title = withModelSuffix(title, effectiveModel);
+
   let duration = metadata.duration || 0;
   if (metadata.bpm > 0 && !duration) duration = estimateDuration(raw, metadata.bpm);
 
@@ -263,6 +267,8 @@ export async function refineLyricsStreaming(
       'overuse:', slopResult.layers.overuse.found.map((o: any) => `${o.word}(${o.count}x)`).join(', ') || 'none',
       'hook_formulas:', slopResult.layers.hook_formulas.found.join(', ') || 'none');
   }
+
+  refinedTitle = withModelSuffix(refinedTitle, effectiveModel);
 
   return {
     lyrics: raw, provider: providerName, model: effectiveModel, title: refinedTitle,
