@@ -220,15 +220,31 @@ function countSyllables(word: string): int {
 
 const SECTION_HEADER_RE = /^\[(.+?)\]$/i;
 
-const SECTION_LABEL_MAP: Record<string, string> = {
-  verse: 'V', chorus: 'C', hook: 'C', bridge: 'B', 
-  'pre-chorus': 'PC', prechorus: 'PC', 'post-chorus': 'POC',
-  intro: 'I', outro: 'O', interlude: 'IL', refrain: 'C'
-};
+// ORDER IS SIGNIFICANT. Matching is substring-based, so the most specific patterns
+// must come first: 'Pre-Chorus' and 'Post-Chorus' both contain 'chorus', and were
+// previously swallowed by the generic 'chorus' entry — meaning PC and POC could
+// never be produced by the analyser at all.
+//
+// The instrumental catch-alls sit last on purpose, so labels that name a musical
+// role ('Instrumental Bridge', 'Instrumental Outro') keep that role, while a bare
+// 'Instrumental' or 'Instrumental Break' falls through to Interlude.
+const SECTION_LABEL_PATTERNS: [string, string][] = [
+  ['pre-chorus', 'PC'], ['pre chorus', 'PC'], ['prechorus', 'PC'],
+  ['post-chorus', 'POC'], ['post chorus', 'POC'], ['postchorus', 'POC'],
+  ['verse', 'V'],
+  ['chorus', 'C'], ['hook', 'C'], ['refrain', 'C'],
+  ['bridge', 'B'],
+  ['intro', 'I'],
+  ['outro', 'O'],
+  ['interlude', 'IL'],
+  ['break', 'IL'],
+  ['instrumental', 'IL'],
+  ['solo', 'IL'],
+];
 
 function normaliseSectionLabel(rawLabel: string): string {
   const lower = rawLabel.toLowerCase().trim();
-  for (const [key, code] of Object.entries(SECTION_LABEL_MAP)) {
+  for (const [key, code] of SECTION_LABEL_PATTERNS) {
     if (lower.includes(key)) return code;
   }
   return 'X';
@@ -353,13 +369,17 @@ function analyseStructure(allSongs: SongLyrics[]): { v: number, c: number, bluep
         labels.push(sec.label);
       }
     }
+    // A song with no recognised section headers parses to a single 'X' and has no
+    // observable structure. Counting those produced a bare 'X' blueprint that, being
+    // identical across every unheadered song, outranked every genuine structure.
+    if (!labels.some(l => l !== 'X')) continue;
+
     const bp = labels.join('-');
     if (bp) blueprintsFreq[bp] = (blueprintsFreq[bp] || 0) + 1;
   }
 
   const topBps = Object.entries(blueprintsFreq)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
     .map(x => x[0])
     // Sanitise medley/multi-part songs: truncate at Outro
     .map(bp => {
@@ -367,8 +387,12 @@ function analyseStructure(allSongs: SongLyrics[]): { v: number, c: number, bluep
       const outroIdx = parts.indexOf('O');
       return outroIdx >= 0 ? parts.slice(0, outroIdx + 1).join('-') : bp;
     })
-    // Dedupe after truncation
-    .filter((bp, i, arr) => arr.indexOf(bp) === i);
+    // Drop unparseable stretches so the generator is never handed a bare 'X'
+    .map(bp => bp.split('-').filter(p => p !== 'X').join('-'))
+    .filter(bp => bp.length > 0)
+    // Dedupe after truncation, then take the top 3
+    .filter((bp, i, arr) => arr.indexOf(bp) === i)
+    .slice(0, 3);
 
   return { 
     v: vCount ? parseFloat((vSum / vCount).toFixed(1)) : 0, 
@@ -783,6 +807,7 @@ export function recalculateProfileStats(songs: SongLyrics[], profileData: any): 
   const rep = analyseRepetition(songs);
   const lineVar = analyseLineLengthVariation(songs);
   const perspective = analysePerspective(songs);
+  const excerpts = selectRepresentativeExcerpts(songs);
 
   return {
     ...profileData,
@@ -796,5 +821,10 @@ export function recalculateProfileStats(songs: SongLyrics[], profileData: any): 
     repetition_stats: rep as any,
     line_length_variation: lineVar,
     perspective,
+    // These two are derived here as well as in buildProfile — without them, profiles
+    // created outside the app (e.g. via the MCP) have no structural vocabulary for
+    // the generator to plan a structure from, and no style excerpts to imitate.
+    structure_blueprints: struct.blueprints,
+    representative_excerpts: excerpts,
   };
 }

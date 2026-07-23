@@ -115,20 +115,48 @@ export function registerLlmRoutes(router: Router): void {
 
   // ── Recalculate Stats (no LLM) ──────────────────────────────────────────────
 
-  router.post('/profiles/recalculate-stats', async (_req: Request, res: Response) => {
+  router.post('/profiles/recalculate-stats', async (req: Request, res: Response) => {
     try {
-      const profiles = db.getProfiles();
-      let updated = 0;
+      // Optional profile_ids narrows the run to specific profiles. Omit it to
+      // recalculate every profile, which is the original behaviour.
+      const requestedIds: number[] | undefined = Array.isArray(req.body?.profile_ids)
+        ? req.body.profile_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
+        : undefined;
+
+      const allProfiles = db.getProfiles();
+      const profiles = requestedIds?.length
+        ? allProfiles.filter((p: any) => requestedIds.includes(p.id))
+        : allProfiles;
+
+      const updated: number[] = [];
+      const skipped: { id: number; reason: string }[] = [];
       for (const profile of profiles) {
         const lyricsSet = db.getLyricsSet(profile.lyrics_set_id);
-        if (!lyricsSet) continue;
+        if (!lyricsSet) {
+          skipped.push({ id: profile.id, reason: 'lyrics set not found' });
+          continue;
+        }
         const songs = (lyricsSet.songs || []) as { title: string; album?: string; lyrics: string }[];
-        if (!songs.length) continue;
+        if (!songs.length) {
+          skipped.push({ id: profile.id, reason: 'lyrics set has no songs' });
+          continue;
+        }
         const patched = profilerService.recalculateProfileStats(songs, profile.profile_data);
         db.updateProfileData(profile.id, patched);
-        updated++;
+        updated.push(profile.id);
       }
-      res.json({ updated, total: profiles.length });
+
+      const missing = requestedIds?.length
+        ? requestedIds.filter((id) => !allProfiles.some((p: any) => p.id === id))
+        : [];
+
+      res.json({
+        updated: updated.length,
+        updated_ids: updated,
+        skipped,
+        missing,
+        total: profiles.length,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
