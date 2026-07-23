@@ -62,16 +62,21 @@ export function getLyricsSet(id: number): any {
 
 export function getLyricsSets(artistId?: number): any[] {
   const db = getDb();
+  // profile_id is NULL when the set has never been profiled — this is what makes
+  // "which artists still need a profile?" answerable without querying SQLite directly.
+  const profileSubquery =
+    `(SELECT p.id FROM profiles p WHERE p.lyrics_set_id = ls.id
+      ORDER BY p.created_at DESC LIMIT 1) AS profile_id`;
   const query = artistId
     ? db.prepare(
-        `SELECT ls.*, a.name as artist_name FROM lyrics_sets ls
+        `SELECT ls.*, a.name as artist_name, ${profileSubquery} FROM lyrics_sets ls
          JOIN artists a ON a.id = ls.artist_id
          WHERE ls.artist_id = ? ORDER BY ls.fetched_at DESC`
       )
     : db.prepare(
-        `SELECT ls.*, a.name as artist_name FROM lyrics_sets ls
+        `SELECT ls.*, a.name as artist_name, ${profileSubquery} FROM lyrics_sets ls
          JOIN artists a ON a.id = ls.artist_id
-         ORDER BY ls.fetched_at DESC`
+         ORDER BY a.name, ls.fetched_at DESC`
       );
   const rows = (artistId ? query.all(artistId) : query.all()) as any[];
   return rows.map(r => {

@@ -41,6 +41,48 @@ server.tool(
   }
 );
 
+// ── list_lyrics_sets ────────────────────────────────────────────────────────
+
+server.tool(
+  'list_lyrics_sets',
+  'List lyrics sets with their IDs, song counts, and whether a profile has been built from them. ' +
+    'Use this to find the lyrics_set_id needed by prepare_profile_build/save_profile, and to find ' +
+    'which artists still need a profile. Set unprofiled_only to list just the sets with no profile yet.',
+  {
+    artist_id: z.number().optional().describe('Filter by artist ID'),
+    unprofiled_only: z
+      .boolean()
+      .optional()
+      .describe('Only return lyrics sets that do not have a profile yet'),
+  },
+  async ({ artist_id, unprofiled_only }) => {
+    let sets = db.getLyricsSets(artist_id);
+    if (unprofiled_only) sets = sets.filter((s: any) => s.profile_id == null);
+    if (!sets.length) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: unprofiled_only
+              ? 'No unprofiled lyrics sets found — every lyrics set already has a profile.'
+              : 'No lyrics sets found.',
+          },
+        ],
+      };
+    }
+    const lines = [unprofiled_only ? '# Lyrics Sets (unprofiled)\n' : '# Lyrics Sets\n'];
+    for (const s of sets) {
+      const album = s.album ? ` — Album: "${s.album}"` : ' — (all songs)';
+      const profile =
+        s.profile_id == null ? '**no profile yet**' : `profile ${s.profile_id}`;
+      lines.push(
+        `- **Lyrics Set ${s.id}**: ${s.artist_name}${album} — ${s.total_songs} song(s), ${profile}`
+      );
+    }
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  }
+);
+
 // ── list_profiles ───────────────────────────────────────────────────────────
 
 server.tool(
@@ -55,7 +97,7 @@ server.tool(
     const lines = ['# Profiles\n'];
     for (const p of profiles) {
       const album = p.album ? ` — Album: "${p.album}"` : ' — (all songs)';
-      lines.push(`- **Profile ${p.id}**: ${p.artist_name}${album} (built with ${p.provider}/${p.model}, ${p.created_at})`);
+      lines.push(`- **Profile ${p.id}** (lyrics set ${p.lyrics_set_id}): ${p.artist_name}${album} (built with ${p.provider}/${p.model}, ${p.created_at})`);
     }
     return { content: [{ type: 'text', text: lines.join('\n') }] };
   }
