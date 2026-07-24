@@ -18,6 +18,11 @@ import { wavDurationSec } from '../audioCrop.js';
 
 type LogFn = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
 type StageFn = (stage: string) => void;
+/** Fired once per track when Whisper stem-mode is active: stemPath is a temp
+ *  WAV of the isolated vocal stem, or null when no stem could be produced
+ *  (caller should fall back to full-mix transcription). The caller owns
+ *  deleting the temp file. */
+type VocalStemFn = (trackIdx: number, stemPath: string | null) => void;
 
 // StableStep GGML backend files — 4 GGUFs at the models dir root (the ONNX
 // set lives in <models>/onnx/sa3 and is checked via sa3ModelsInstalled()).
@@ -52,6 +57,9 @@ interface PostProcessParams {
   /** Per-track captions (parallel to audioUrls) used to build the SA3 prompt.
    *  Populated by the generate route from the LM results. */
   stableStepCaptions?: string[];
+  /** Whisper "Isolate vocals first" toggle — when set (and onVocalStem is
+   *  provided), a SuperSep split runs even if StableStep won't consume it. */
+  whisperIsolateVocals?: boolean;
   spectralLifterEnabled?: boolean;
   slDenoiseStrength?: number;
   slNoiseFloor?: number;
@@ -96,14 +104,59 @@ export interface PostProcessResult {
   timing: Array<{ name: string; ms: number }>;
 }
 
-/** Run the full post-processing chain on a list of audio files. */
+// ── Shared vocal separation ─────────────────────────────────────────────────
+
+/** Result of a VOCALS_ONLY SuperSep split (stems are 44.1 kHz WAVs). */
+interface VocalSeparation {
+  sepId: string;
+  stems: Array<{ index: number; category: string; hidden: boolean }>;
+  vocalIndex: number;
+  vocalBuf: Buffer;
+  instBuf: Buffer;
+}
+
+/** Run a BS-RoFormer VOCALS_ONLY split (2-stem: Vocals + Instrumental) via the
+ *  engine's SuperSep API and fetch both stems. Returns null when the split
+ *  produced no usable vocal/instrumental pair (silent stems are dropped
+ *  engine-side). Throws on separation failure/timeout. */
+async function separateVocals(srcBuf: Buffer): Promise<VocalSeparation | null> {
+  const sepId = await aceClient.submitSuperSepSeparate(srcBuf, 4 /* VOCALS_ONLY */);
+
+  // Poll separation to completion (GPU-serialized with other engine work)
+  const sepDeadline = Date.now() + 30 * 60_000;
+  for (;;) {
+    const prog = await aceClient.superSepProgress(sepId);
+    if (prog.status === 'done') break;
+    if (prog.status === 'failed' || prog.status === 'cancelled') {
+      throw new Error(`SuperSep ${prog.status}: ${prog.error || prog.message || 'unknown'}`);
+    }
+    if (Date.now() > sepDeadline) throw new Error('SuperSep separation timed out');
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  const sepResult = await aceClient.superSepResult(sepId);
+  const stems = sepResult.stems;
+  const vocalStem = stems.find(s => s.category === 'vocals' && !s.hidden);
+  const instStem = stems.find(s => s.category === 'instruments' && !s.hidden);
+  if (!vocalStem || !instStem) return null;
+
+  const instBuf = await aceClient.superSepStem(sepId, instStem.index);
+  const vocalBuf = await aceClient.superSepStem(sepId, vocalStem.index);
+  return { sepId, stems, vocalIndex: vocalStem.index, vocalBuf, instBuf };
+}
+
+/** Run the full post-processing chain on a list of audio files.
+ *  onVocalStem (optional): requests the isolated vocal stem for Whisper
+ *  transcription — see VocalStemFn. Fired per track as soon as the shared
+ *  SuperSep split completes, so CPU transcription overlaps later GPU stages. */
 export async function runPostProcessingChain(
   audioUrls: string[],
   params: PostProcessParams,
   totalTracks: number,
   jobId: string,
   log: LogFn,
-  setStage: StageFn
+  setStage: StageFn,
+  onVocalStem?: VocalStemFn
 ): Promise<PostProcessResult> {
   const ppMasterOn = params.postProcessingEnabled !== false;
   const stableStepOn = ppMasterOn && !!(params.stableStepOn ?? params.stableStep);
@@ -161,14 +214,57 @@ export async function runPostProcessingChain(
       await runQePre();
     }
 
+    // ── Shared vocal separation (StableStep stem workflow + Whisper isolation) ──
+    // BS-RoFormer VOCALS_ONLY split, run at most ONCE per track. Consumers:
+    //   - StableStep (vocal gens): SA3-refines the instrumental stem, cleans
+    //     the vocal stem, recombines.
+    //   - Whisper isolation (onVocalStem): the vocal stem is written to a temp
+    //     WAV and handed to the caller BEFORE the SA3 refine so CPU
+    //     transcription overlaps the GPU work.
+    // Deliberately NOT gated on ppMasterOn: the split is a service for
+    // Whisper, not an audio-modifying PP stage (anyStageRan untouched).
+    const sa3Available = sa3ModelsInstalled() || sa3GgufInstalled();
+    const stableStepWantsStems = stableStepOn && sa3Available && !params.instrumental;
+    const whisperWantsStems = !!onVocalStem && !!params.whisperIsolateVocals && !params.instrumental;
+    let vocalSep: VocalSeparation | null = null;
+
+    if (stableStepWantsStems || whisperWantsStems) {
+      const sepStart = performance.now();
+      setStage(`Separating vocals${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
+      try {
+        vocalSep = await separateVocals(fs.readFileSync(processedPath));
+        if (!vocalSep) {
+          log('INFO', '[SuperSep] No vocal/instrumental split (no vocal energy detected)');
+        }
+      } catch (sepErr: any) {
+        log('WARNING', `[SuperSep] Vocal separation failed (non-fatal): ${sepErr.message}`);
+      }
+      timing.push({ name: 'Vocal Separation', ms: Math.round(performance.now() - sepStart) });
+    }
+
+    // Hand the vocal stem to the Whisper callback (null = fall back to full mix)
+    if (onVocalStem) {
+      let stemPath: string | null = null;
+      if (vocalSep) {
+        try {
+          stemPath = processedPath + '.vocalstem.tmp.wav';
+          fs.writeFileSync(stemPath, vocalSep.vocalBuf);
+        } catch (stemErr: any) {
+          log('WARNING', `[SuperSep] Failed to write vocal stem for Whisper: ${stemErr.message}`);
+          stemPath = null;
+        }
+      }
+      onVocalStem(i, stemPath);
+    }
+
     // ── StableStep: SA3 SDEdit refine (before PP-VAE) ──
     // Instrumental gens: refine the whole mix through the SA3 model.
-    // Vocal gens: SuperSep-split into vocals + instrumental, SA3-refine the
+    // Vocal gens: consume the shared split above — SA3-refine the
     // instrumental, PP-VAE the vocals, then recombine sample-wise in Node.
     if (stableStepOn) {
       const ssStart = performance.now();
       try {
-        if (!sa3ModelsInstalled() && !sa3GgufInstalled()) {
+        if (!sa3Available) {
           log('WARNING', '[StableStep] SA3 models not installed (neither models/onnx/sa3 nor root GGUFs) — skipping');
         } else {
           // Engine backend: 'onnx' | 'gguf' forces one; undefined = engine auto.
@@ -190,68 +286,43 @@ export async function runPostProcessingChain(
               tokens: ids, nTokens, strength, backend,
             });
             fs.writeFileSync(processedPath, refined);
-          } else {
-            // Stem workflow: VOCALS_ONLY split (BS-RoFormer 2-stem ->
-            // Vocals + Instrumental) → refine instrumental / clean vocals → mix.
-            setStage(`StableStep: separating vocals${suffix}...`);
+          } else if (!vocalSep) {
+            // No vocal/instrumental split available (no vocal energy detected,
+            // or the separation failed) — refine the whole mix directly.
+            log('INFO', '[StableStep] No vocal/instrumental split — refining full mix');
+            setStage(`StableStep: refining instrumental${suffix}...`);
             const srcBuf = fs.readFileSync(processedPath);
-            const sepId = await aceClient.submitSuperSepSeparate(srcBuf, 4 /* VOCALS_ONLY */);
+            const refined = await aceClient.submitSa3Refine(srcBuf, {
+              tokens: ids, nTokens, strength, backend,
+            });
+            fs.writeFileSync(processedPath, refined);
+          } else {
+            // Stems from the shared split above (44.1 kHz). The refined
+            // instrumental is requested at 48 kHz (out_sr) to match PP-VAE's
+            // fixed 48 kHz output so the final mix rates agree.
+            const vs = vocalSep;
 
-            // Poll separation to completion (GPU-serialized with other engine work)
-            const sepDeadline = Date.now() + 30 * 60_000;
-            for (;;) {
-              const prog = await aceClient.superSepProgress(sepId);
-              if (prog.status === 'done') break;
-              if (prog.status === 'failed' || prog.status === 'cancelled') {
-                throw new Error(`SuperSep ${prog.status}: ${prog.error || prog.message || 'unknown'}`);
-              }
-              if (Date.now() > sepDeadline) throw new Error('SuperSep separation timed out');
-              await new Promise(r => setTimeout(r, 500));
+            setStage(`StableStep: refining instrumental${suffix}...`);
+            const refinedInst = await aceClient.submitSa3Refine(vs.instBuf, {
+              tokens: ids, nTokens, strength, outSr: 48000, backend,
+            });
+
+            setStage(`StableStep: processing vocals${suffix}...`);
+            let cleanVocals: Buffer;
+            try {
+              cleanVocals = await aceClient.submitPpVaeReencode(vs.vocalBuf, 0.0); // 48 kHz out
+            } catch (vErr: any) {
+              log('WARNING', `[StableStep] Vocal PP-VAE failed, using raw vocal stem: ${vErr.message}`);
+              // Raw stem is 44.1 kHz — round-trip through /sa3-refine at
+              // strength 0 is wasteful, so upsample via the engine's
+              // recombine of the solo vocal stem (48 kHz out) instead.
+              cleanVocals = await aceClient.superSepRecombine(vs.sepId,
+                vs.stems.map(s => ({ index: s.index, volume: 1.0, muted: s.index !== vs.vocalIndex })));
             }
 
-            const sepResult = await aceClient.superSepResult(sepId);
-            const stems = sepResult.stems;
-            const vocalStem = stems.find(s => s.category === 'vocals' && !s.hidden);
-            const instStem = stems.find(s => s.category === 'instruments' && !s.hidden);
-
-            if (!vocalStem || !instStem) {
-              // No vocal energy detected (silent stems are dropped engine-side)
-              // — refine the whole mix directly.
-              log('INFO', '[StableStep] No vocal/instrumental split — refining full mix');
-              setStage(`StableStep: refining instrumental${suffix}...`);
-              const refined = await aceClient.submitSa3Refine(srcBuf, {
-                tokens: ids, nTokens, strength, backend,
-              });
-              fs.writeFileSync(processedPath, refined);
-            } else {
-              // Fetch both stems directly (44.1 kHz). The refined instrumental
-              // is requested at 48 kHz (out_sr) to match PP-VAE's fixed 48 kHz
-              // output so the final mix rates agree.
-              const instBuf = await aceClient.superSepStem(sepId, instStem.index);
-              const vocalBuf = await aceClient.superSepStem(sepId, vocalStem.index);
-
-              setStage(`StableStep: refining instrumental${suffix}...`);
-              const refinedInst = await aceClient.submitSa3Refine(instBuf, {
-                tokens: ids, nTokens, strength, outSr: 48000, backend,
-              });
-
-              setStage(`StableStep: processing vocals${suffix}...`);
-              let cleanVocals: Buffer;
-              try {
-                cleanVocals = await aceClient.submitPpVaeReencode(vocalBuf, 0.0); // 48 kHz out
-              } catch (vErr: any) {
-                log('WARNING', `[StableStep] Vocal PP-VAE failed, using raw vocal stem: ${vErr.message}`);
-                // Raw stem is 44.1 kHz — round-trip through /sa3-refine at
-                // strength 0 is wasteful, so upsample via the engine's
-                // recombine of the solo vocal stem (48 kHz out) instead.
-                cleanVocals = await aceClient.superSepRecombine(sepId,
-                  stems.map(s => ({ index: s.index, volume: 1.0, muted: s.index !== vocalStem.index })));
-              }
-
-              setStage(`StableStep: recombining${suffix}...`);
-              const mixed = mixWavBuffers(refinedInst, cleanVocals);
-              fs.writeFileSync(processedPath, mixed);
-            }
+            setStage(`StableStep: recombining${suffix}...`);
+            const mixed = mixWavBuffers(refinedInst, cleanVocals);
+            fs.writeFileSync(processedPath, mixed);
           }
 
           anyStageRan = true;

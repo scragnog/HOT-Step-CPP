@@ -389,7 +389,14 @@ export const PostProcessingDropdown: React.FC = () => {
               </div>
               {gp.whisperIsolateVocals && (
                 <p className="text-[10px] text-sky-400/60 leading-relaxed">
-                  Runs stem separation to isolate vocals before transcription. May improve accuracy for busy mixes.
+                  {gp.stableStepOn
+                    ? "Shares StableStep's stem split — vocals are isolated once and used by both."
+                    : 'Runs stem separation to isolate vocals before transcription. May improve accuracy for busy mixes.'}
+                </p>
+              )}
+              {!gp.whisperIsolateVocals && gp.stableStepOn && (
+                <p className="text-[10px] text-sky-400/60 leading-relaxed">
+                  StableStep is enabled — transcription automatically uses its isolated vocal stem (no extra split).
                 </p>
               )}
             </div>

@@ -613,6 +613,65 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     // Per-track latent URLs (parallel array to audioUrls)
     const latentUrls: string[] = [];
 
+    // ── Whisper Lyrics Transcription (shared by full-mix and stem modes) ──
+    // CPU-only (whisper-cli), no VRAM impact — safe to overlap GPU work.
+    const runWhisperForTrack = async (trackNum: number, wavPath: string, trackLyrics: string, wavFilename: string) => {
+      const whisperTimingStart = performance.now();
+      try {
+        const { ensureWhisperCli, findWhisperModel, transcribeWithWhisper } = await import('../services/whisperTranscribe.js');
+        const { reconcileLyrics } = await import('../services/lyricsReconcile.js');
+
+        const whisperReady = await ensureWhisperCli();
+        if (!whisperReady) {
+          logGeneration(job.id, 'WARNING', '[Whisper] whisper-cli not available and auto-download failed — skipping');
+          return;
+        }
+        if (!findWhisperModel(job.params.whisperModel)) {
+          logGeneration(job.id, 'WARNING', '[Whisper] No Whisper model found — skipping transcription');
+          return;
+        }
+        const whisperStart = Date.now();
+        logGeneration(job.id, 'INFO', `[Whisper] Track ${trackNum}: starting transcription...`);
+
+        const whisperResult = await transcribeWithWhisper(wavPath, trackLyrics, {
+          model: job.params.whisperModel,
+          language: job.params.whisperLanguage || 'auto',
+          beamSize: job.params.whisperBeamSize || 5,
+        });
+
+        if (whisperResult && whisperResult.segments?.length > 0) {
+          const modelName = job.params.whisperModel || 'auto';
+          const lyricsJson = reconcileLyrics(whisperResult, trackLyrics, modelName, false);
+
+          const lyricsJsonFilename = wavFilename.replace(/\.[^.]+$/, '.lyrics.json');
+          const lyricsJsonPath = path.join(config.data.audioDir, lyricsJsonFilename);
+          fs.writeFileSync(lyricsJsonPath, JSON.stringify(lyricsJson, null, 2));
+
+          const elapsed = Date.now() - whisperStart;
+          const wordCount = lyricsJson.lines.reduce((n: number, l: any) => n + l.words.length, 0);
+          logGeneration(job.id, 'INFO',
+            `[Whisper] Track ${trackNum}: saved ${lyricsJsonFilename} (${lyricsJson.lines.length} lines, ${wordCount} words, ${elapsed}ms)`
+          );
+        } else {
+          logGeneration(job.id, 'WARNING', `[Whisper] Track ${trackNum}: no segments returned`);
+        }
+      } catch (err: any) {
+        logGeneration(job.id, 'WARNING', `[Whisper] Track ${trackNum}: failed: ${err.message}`);
+      }
+      const whisperMs = Math.round(performance.now() - whisperTimingStart);
+      if (whisperMs > 50) timing.push({ name: `Whisper Track ${trackNum}`, ms: whisperMs });
+    };
+
+    // Stem-mode Whisper: when StableStep is on (its split is free to reuse) or
+    // the "Isolate vocals first" toggle is set, transcription is deferred to the
+    // post-processing chain, which hands us the isolated vocal stem via the
+    // onVocalStem callback. Keyed by trackIdx; entries still present after PP
+    // fall back to full-mix transcription.
+    const whisperStemMode = !!job.params.whisperLyricsEnabled
+      && !job.params.instrumental
+      && !!(job.params.whisperIsolateVocals || job.params.stableStepOn || job.params.stableStep);
+    const pendingStemWhisper = new Map<number, { wavPath: string; lyrics: string; filename: string }>();
+
     // ── Parallel Cover Art: launch right after LM (earliest possible) ──
     // At this point we have title/style/lyrics/subject from LM results.
     // Image generation (GPU) starts now and overlaps with the entire synth phase.
@@ -953,62 +1012,22 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       }
 
       // ── Whisper Lyrics Transcription (optional) ──
-      // Can run in parallel with post-processing (CPU-only, no VRAM impact)
-      const runWhisperForTrack = async (trackNum: number, wavPath: string, trackLyrics: string, wavFilename: string) => {
-        const whisperTimingStart = performance.now();
-        try {
-          const { ensureWhisperCli, findWhisperModel, transcribeWithWhisper } = await import('../services/whisperTranscribe.js');
-          const { reconcileLyrics } = await import('../services/lyricsReconcile.js');
-
-          const whisperReady = await ensureWhisperCli();
-          if (!whisperReady) {
-            logGeneration(job.id, 'WARNING', '[Whisper] whisper-cli not available and auto-download failed — skipping');
-            return;
-          }
-          if (!findWhisperModel(job.params.whisperModel)) {
-            logGeneration(job.id, 'WARNING', '[Whisper] No Whisper model found — skipping transcription');
-            return;
-          }
-          const whisperStart = Date.now();
-          logGeneration(job.id, 'INFO', `[Whisper] Track ${trackNum}: starting transcription...`);
-
-          const whisperResult = await transcribeWithWhisper(wavPath, trackLyrics, {
-            model: job.params.whisperModel,
-            language: job.params.whisperLanguage || 'auto',
-            beamSize: job.params.whisperBeamSize || 5,
-          });
-
-          if (whisperResult && whisperResult.segments?.length > 0) {
-            const modelName = job.params.whisperModel || 'auto';
-            const lyricsJson = reconcileLyrics(whisperResult, trackLyrics, modelName, false);
-
-            const lyricsJsonFilename = wavFilename.replace(/\.[^.]+$/, '.lyrics.json');
-            const lyricsJsonPath = path.join(config.data.audioDir, lyricsJsonFilename);
-            fs.writeFileSync(lyricsJsonPath, JSON.stringify(lyricsJson, null, 2));
-
-            const elapsed = Date.now() - whisperStart;
-            const wordCount = lyricsJson.lines.reduce((n: number, l: any) => n + l.words.length, 0);
-            logGeneration(job.id, 'INFO',
-              `[Whisper] Track ${trackNum}: saved ${lyricsJsonFilename} (${lyricsJson.lines.length} lines, ${wordCount} words, ${elapsed}ms)`
-            );
-          } else {
-            logGeneration(job.id, 'WARNING', `[Whisper] Track ${trackNum}: no segments returned`);
-          }
-        } catch (err: any) {
-          logGeneration(job.id, 'WARNING', `[Whisper] Track ${trackNum}: failed: ${err.message}`);
-        }
-        const whisperMs = Math.round(performance.now() - whisperTimingStart);
-        if (whisperMs > 50) timing.push({ name: `Whisper Track ${trackNum}`, ms: whisperMs });
-      };
-
+      // Full-mix mode runs here (optionally in parallel with post-processing).
+      // Stem mode defers to the PP chain's shared SuperSep split — see the
+      // onVocalStem callback at the runPostProcessingChain call site.
       if (job.params.whisperLyricsEnabled) {
-        const whisperPromise = runWhisperForTrack(trackIdx + 1, filepath, synthReq.lyrics || '', filename);
-        if (job.params.parallelWhisper) {
-          // Deferred — will be awaited after post-processing
-          deferredTasks.push(whisperPromise);
-          logGeneration(job.id, 'INFO', `[Whisper] Track ${trackIdx + 1}: launched in parallel`);
+        if (whisperStemMode) {
+          pendingStemWhisper.set(trackIdx, { wavPath: filepath, lyrics: synthReq.lyrics || '', filename });
+          logGeneration(job.id, 'INFO', `[Whisper] Track ${trackIdx + 1}: deferred — will transcribe isolated vocal stem`);
         } else {
-          await whisperPromise;
+          const whisperPromise = runWhisperForTrack(trackIdx + 1, filepath, synthReq.lyrics || '', filename);
+          if (job.params.parallelWhisper) {
+            // Deferred — will be awaited after post-processing
+            deferredTasks.push(whisperPromise);
+            logGeneration(job.id, 'INFO', `[Whisper] Track ${trackIdx + 1}: launched in parallel`);
+          } else {
+            await whisperPromise;
+          }
         }
       }
 
@@ -1133,13 +1152,37 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         ? job.params.stableStepBackend as 'onnx' | 'gguf' : 'auto' as const,
       stableStepCaptions: audioUrls.map((_, ti) =>
         (lmResults[ti]?.caption || firstResult.caption || job.params.caption || '') as string),
+      whisperIsolateVocals: !!job.params.whisperIsolateVocals,
     };
+
+    // Stem-mode Whisper: fired by the PP chain as soon as a track's vocal stem
+    // exists (before the SA3 refine) so CPU transcription overlaps GPU work.
+    // stemPath null = no stem produced → transcribe the full mix instead.
+    const onVocalStem = pendingStemWhisper.size > 0
+      ? (trackIdx: number, stemPath: string | null) => {
+          const pend = pendingStemWhisper.get(trackIdx);
+          if (!pend) return;
+          pendingStemWhisper.delete(trackIdx);
+          if (stemPath) {
+            logGeneration(job.id, 'INFO', `[Whisper] Track ${trackIdx + 1}: transcribing isolated vocal stem`);
+          } else {
+            logGeneration(job.id, 'WARNING', `[Whisper] Track ${trackIdx + 1}: no vocal stem available — falling back to full mix`);
+          }
+          const whisperPromise = runWhisperForTrack(
+            trackIdx + 1, stemPath ?? pend.wavPath, pend.lyrics, pend.filename
+          ).finally(() => {
+            if (stemPath) { try { fs.unlinkSync(stemPath); } catch {} }
+          });
+          deferredTasks.push(whisperPromise);
+        }
+      : undefined;
 
     let ppQualityScores: Array<{ unmastered?: any; mastered?: any }> = [];
     try {
       const ppResult = await runPostProcessingChain(
         audioUrls, ppParams, totalTracks, job.id,
-        log, (stage) => { job.stage = stage; }
+        log, (stage) => { job.stage = stage; },
+        onVocalStem
       );
       masteredUrls.push(...ppResult.masteredUrls);
       if (ppResult.timing && ppResult.timing.length > 0) {
@@ -1148,6 +1191,16 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       ppQualityScores = ppResult.qualityScores;
     } catch (err: any) {
       logGeneration(job.id, 'WARNING', `[Post-Processing] Chain failed: ${err.message}`);
+    }
+
+    // Stem-mode Whisper fallback: any deferred track whose callback never fired
+    // (PP chain threw, non-WAV track, etc.) still gets a full-mix transcription.
+    if (pendingStemWhisper.size > 0) {
+      for (const [ti, pend] of pendingStemWhisper) {
+        logGeneration(job.id, 'WARNING', `[Whisper] Track ${ti + 1}: stem split never ran — falling back to full mix`);
+        deferredTasks.push(runWhisperForTrack(ti + 1, pend.wavPath, pend.lyrics, pend.filename));
+      }
+      pendingStemWhisper.clear();
     }
 
     // Create song entries in DB — one per track
