@@ -1,5 +1,5 @@
 # Configuration
-REPO_DIR = HOT-Step-CPP
+REPO_DIR = .
 BACKEND ?=
 
 # Detect if running inside WSL
