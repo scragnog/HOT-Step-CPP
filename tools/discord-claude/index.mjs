@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
+import * as transcript from './transcript.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -53,15 +54,15 @@ let sessions = {};
 try { sessions = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8')); } catch { /* fresh start */ }
 const saveSessions = () => fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 1));
 
-const buffers = new Map(); // channelId -> [{author, content}]
 const busy = new Set();    // channelId — one invocation at a time per channel
 
-function remember(msg) {
-  const buf = buffers.get(msg.channelId) ?? [];
-  buf.push({ author: msg.member?.displayName ?? msg.author.username, content: msg.cleanContent });
-  while (buf.length > CONTEXT_MESSAGES) buf.shift();
-  buffers.set(msg.channelId, buf);
-}
+// Every message in an allowed channel is written to logs/discord/ as it lands
+// — bots and our own replies included. That log replaces the old in-memory
+// buffer, which was empty on restart and lost everything said between pings.
+const log = (msg) => {
+  try { transcript.appendMany(msg.channelId, [transcript.toRecord(msg)]); }
+  catch (e) { console.error('[bridge] transcript write failed:', String(e.message ?? e).slice(0, 200)); }
+};
 
 // ── Claude invocation ───────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ function runClaude(prompt, channelId) {
       // Read-only is the capability CEILING; this narrows disclosure within
       // it. Secrets are unreadable even by name — an injected "print the
       // .env" gets a permission denial, not the bot token.
-      '--disallowedTools', '"Read(**/.env),Read(**/.env.*),Read(**/*.pem),Read(**/*token*),Read(**/sessions.json)"',
+      '--disallowedTools', '"Read(**/.env),Read(**/.env.*),Read(**/*.pem),Read(**/*token*),Read(**/sessions.json),Read(**/logs/discord/**)"',
       // No MCP servers in Discord-facing sessions: the permission layer would
       // deny their tools anyway, but Gmail/home-automation shouldn't even be
       // visible to a session that untrusted text can steer.
@@ -139,13 +140,16 @@ const client = new Client({
 client.on('clientReady', () => console.log(`[bridge] logged in as ${client.user.tag}, model ${currentModel}`));
 
 client.on('messageCreate', async (msg) => {
-  if (msg.author.bot) return;
   // Threads inherit permission from their parent channel id.
   const chanOk = ALLOWED_CHANNELS.has(msg.channelId) ||
     (msg.channel.isThread?.() && ALLOWED_CHANNELS.has(msg.channel.parentId ?? ''));
   if (!chanOk) return;
 
-  remember(msg);
+  // Log BEFORE the bot-skip: the bridge's own replies are part of the
+  // conversation, and omitting them is why the ping path could only stay
+  // coherent via --resume.
+  log(msg);
+  if (msg.author.bot) return;
 
   const fromAllowed = ALLOWED_USERS.has(msg.author.id);
 
@@ -171,8 +175,7 @@ client.on('messageCreate', async (msg) => {
   busy.add(msg.channelId);
   try {
     await msg.channel.sendTyping().catch(() => {});
-    const context = (buffers.get(msg.channelId) ?? [])
-      .map(m => `${m.author}: ${m.content}`).join('\n');
+    const context = await buildContext(msg.channel);
     // persona.md is re-read per reply so edits apply live. It leads the
     // prompt; the fixed footer below it names the docs entry points and
     // restates the respond-to-the-ping task so a persona edit can't
@@ -205,16 +208,17 @@ client.on('messageCreate', async (msg) => {
 // ping involved. `note` optionally steers the topic; `channelId` defaults to
 // the first allowed channel.
 
-async function fetchContext(channel) {
+// Single source of context for BOTH entry points. We hit the Discord API
+// first so anything said while the bridge was down gets folded in — the log
+// self-heals on the next invocation — then read the window back off disk.
+async function buildContext(channel) {
   try {
-    const msgs = await channel.messages.fetch({ limit: CONTEXT_MESSAGES });
-    return [...msgs.values()]
-      .reverse()
-      .map(m => `${m.member?.displayName ?? m.author.username}${m.author.bot ? ' [bot]' : ''}: ${m.cleanContent}`)
-      .join('\n');
-  } catch {
-    return (buffers.get(channel.id) ?? []).map(m => `${m.author}: ${m.content}`).join('\n');
-  }
+    const batch = await channel.messages.fetch({ limit: 100 });
+    if (transcript.appendMany(channel.id, [...batch.values()].map(transcript.toRecord))) {
+      transcript.dedupeSort(channel.id);
+    }
+  } catch { /* offline or missing perms — fall through to what is already on disk */ }
+  return transcript.format(transcript.readChannel(channel.id).slice(-CONTEXT_MESSAGES));
 }
 
 async function interject(channelId, note) {
@@ -224,7 +228,7 @@ async function interject(channelId, note) {
   busy.add(channelId);
   try {
     await channel.sendTyping().catch(() => {});
-    const context = await fetchContext(channel);
+    const context = await buildContext(channel);
     let persona = '';
     try { persona = fs.readFileSync(path.join(HERE, 'persona.md'), 'utf-8').trim(); } catch { /* optional */ }
     const prompt =

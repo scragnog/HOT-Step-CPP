@@ -84,6 +84,24 @@ Start with the newest session folder. Generation failures → matching `gen_*.lo
 
 Solvers (17), schedulers (9), guidance modes, and postprocess are **hot-loadable Lua plugins** in [engine/plugins/](engine/plugins/) — drop a `.lua` in the right subdir, appears in the UI next launch, no C++ rebuild. Each plugin can declare its own UI params. Native C++ bridge via `apg()`; advanced plugins use `post_step()` for extra forward passes. **Adding a solver/scheduler/guidance = write a `.lua` plugin** (the old approach of editing `dit-sampler.h` is obsolete — the engine now routes through `hot-step-sampler.h`). Authoring guide: [docs/PLUGINS.md](docs/PLUGINS.md).
 
+## Discord transcripts
+
+The MM3 working group lives in Discord, and a lot of project-relevant decisions
+happen there. [tools/discord-claude/](tools/discord-claude/) bridges that thread to
+Claude *and* logs every message to `logs/discord/<channelId>.jsonl` (gitignored —
+it is other people's chat). Read it with:
+
+```
+node tools/discord-claude/read-log.mjs --list                     # channels + message counts
+node tools/discord-claude/read-log.mjs --since 12h                # busiest channel, recent
+node tools/discord-claude/read-log.mjs --channel all-for-one --last 200
+node tools/discord-claude/read-log.mjs --all --grep "encoder|NVFP4" --context 3
+```
+
+`backfill.mjs` pulls history from the Discord API (safe to re-run; dedupes by message id).
+**Do not** reconstruct the thread by scraping `~/.claude/projects/*.jsonl` — those sessions
+only ever saw a rolling window and are lossy.
+
 ## Read-Y-for-X index
 
 | For… | Read |
@@ -91,6 +109,7 @@ Solvers (17), schedulers (9), guidance modes, and postprocess are **hot-loadable
 | **Any maintenance task — start here** (per-domain procedures, gotchas, distilled institutional knowledge) | [.claude/skills/README.md](.claude/skills/README.md) — 15 skills (13 fact-checked + 2 MM3) |
 | **MiniMax-Music3 backend** (second generation backend: engine port, /mm3 endpoints, backend registry/toggle, trap list) | [.claude/skills/mm3-backend/SKILL.md](.claude/skills/mm3-backend/SKILL.md) |
 | MM3 caption/prompt format (genre adherence) | [.claude/skills/mm3-captioning/SKILL.md](.claude/skills/mm3-captioning/SKILL.md) |
+| **What the Discord working group said** (MM3 group: bghira, Serveurperso, testerf, Shaz…) — searchable transcripts of every channel | `node tools/discord-claude/read-log.mjs --list` — see [Discord transcripts](#discord-transcripts) |
 | Full feature catalogue (100+) | [FEATURES.md](FEATURES.md) |
 | Engine internals, CLI, request JSON, generation modes | [engine/docs/ARCHITECTURE.md](engine/docs/ARCHITECTURE.md) |
 | **Training system** (dataset→preprocess→LM/DiT training→audition; ace-train, FSQ, ggml training gotchas) | [docs/TRAINING.md](docs/TRAINING.md) |

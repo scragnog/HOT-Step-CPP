@@ -61,3 +61,25 @@ composes under the persona, and speaks unprompted. Local-only: the endpoint
 binds 127.0.0.1:47821 (INTERJECT_PORT to change). The steer note is never
 shown in the thread.
 
+
+## Transcripts (`logs/discord/`)
+
+Every message in an allowed channel is appended to `logs/discord/<channelId>.jsonl`
+as it arrives — other bots and ScragBot's own replies included. `logs/` is
+gitignored; these are other people's messages and must not be committed.
+
+    node read-log.mjs --list                          # channels, counts, last activity
+    node read-log.mjs --since 12h                     # busiest channel, last 12 hours
+    node read-log.mjs --channel all-for-one --last 200
+    node read-log.mjs --all --grep "encoder|NVFP4" --context 3
+
+`--channel` takes an id or any substring of the name. `--since` takes `90m` /
+`6h` / `3d` or a date.
+
+`node backfill.mjs [--max N]` pages history out of the Discord API to cover
+anything said before logging existed, threads included. Safe to re-run — records
+dedupe by message id.
+
+The transcript is also what the bot itself reads for context, so it is the single
+source of truth for "what was said": the in-memory buffer is gone, and Claude
+session files are NOT a substitute (they only ever held a rolling window).
