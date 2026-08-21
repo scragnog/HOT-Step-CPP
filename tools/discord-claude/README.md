@@ -44,3 +44,11 @@ files or run commands.
   still applies to Rob-authored messages.
 - To reset a channel's conversation memory: delete its entry from
   `sessions.json` and restart.
+
+## Personality
+
+Edit `persona.md` in this folder — voice, boundaries, quirks. It is re-read
+on EVERY reply, so changes apply live without restarting the bot. The
+operating instructions (docs pointers, respond-to-ping) are appended by the
+code after the persona, so a persona edit cannot break the mechanics.
+

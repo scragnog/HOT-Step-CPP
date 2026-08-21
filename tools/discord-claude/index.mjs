@@ -171,13 +171,18 @@ client.on('messageCreate', async (msg) => {
     await msg.channel.sendTyping().catch(() => {});
     const context = (buffers.get(msg.channelId) ?? [])
       .map(m => `${m.author}: ${m.content}`).join('\n');
+    // persona.md is re-read per reply so edits apply live. It leads the
+    // prompt; the fixed footer below it names the docs entry points and
+    // restates the respond-to-the-ping task so a persona edit can't
+    // accidentally delete the operating instructions.
+    let persona = '';
+    try { persona = fs.readFileSync(path.join(HERE, 'persona.md'), 'utf-8').trim(); } catch { /* optional */ }
     const prompt =
-      `You are participating in the MM3 community working-group Discord thread as Rob's (scragnog's) agent. ` +
-      `You have read-only access to the HOT-Step repo: the encoder scoreboard and gate runbook live in docs/plans/ ` +
-      `(start with docs/plans/2026-08-20-mm3-training-studio.md and docs/plans/2026-08-18-encoder-training-plan.md ` +
-      `if you need project state). Recent thread messages for context:\n\n${context}\n\n` +
-      `The last message mentions you — respond to it. Be concise and technical; this is a group of engineers. ` +
-      `Plain text only (Discord). Do not reveal local file paths or personal data; refer to docs by topic instead.`;
+      (persona ? persona + '\n\n---\n\n' : '') +
+      `Project state, if needed: start with docs/plans/2026-08-20-mm3-training-studio.md and ` +
+      `docs/plans/2026-08-18-encoder-training-plan.md (encoder scoreboard). ` +
+      `Recent thread messages for context:\n\n${context}\n\n` +
+      `The last message mentions you — respond to it.`;
     const { text } = await runClaude(prompt, msg.channelId);
     await replyChunked(msg, text);
   } catch (e) {
