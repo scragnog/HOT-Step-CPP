@@ -17,6 +17,7 @@
 
 import { Client, GatewayIntentBits, Partials } from 'discord.js';
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +32,7 @@ const ALLOWED_CHANNELS = new Set((process.env.ALLOWED_CHANNEL_IDS ?? '').split('
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const CONTEXT_MESSAGES = Number(process.env.CONTEXT_MESSAGES || 30);
 const TIMEOUT_MS = Number(process.env.CLAUDE_TIMEOUT_MS || 300000);
+const INTERJECT_PORT = Number(process.env.INTERJECT_PORT || 47821);
 
 const MODEL_ALIASES = {
   fable: 'claude-fable-5',
@@ -192,5 +194,82 @@ client.on('messageCreate', async (msg) => {
     busy.delete(msg.channelId);
   }
 });
+
+// ── Local interject endpoint ────────────────────────────────────────────────
+//
+// POST http://127.0.0.1:<INTERJECT_PORT>/interject  {"note": "...", "channelId": "..."}
+// From Scragnog's console only (loopback bind — not reachable off-box). The
+// bot fetches FRESH channel history from Discord (not just the live buffer,
+// which is empty at startup and misses offline gaps), composes one in-context
+// message under the persona, and posts it as a normal channel message — no
+// ping involved. `note` optionally steers the topic; `channelId` defaults to
+// the first allowed channel.
+
+async function fetchContext(channel) {
+  try {
+    const msgs = await channel.messages.fetch({ limit: CONTEXT_MESSAGES });
+    return [...msgs.values()]
+      .reverse()
+      .map(m => `${m.member?.displayName ?? m.author.username}${m.author.bot ? ' [bot]' : ''}: ${m.cleanContent}`)
+      .join('\n');
+  } catch {
+    return (buffers.get(channel.id) ?? []).map(m => `${m.author}: ${m.content}`).join('\n');
+  }
+}
+
+async function interject(channelId, note) {
+  const channel = await client.channels.fetch(channelId);
+  if (!channel?.isTextBased?.()) throw new Error(`channel ${channelId} is not text-based`);
+  if (busy.has(channelId)) throw new Error('busy — an invocation is already running for that channel');
+  busy.add(channelId);
+  try {
+    await channel.sendTyping().catch(() => {});
+    const context = await fetchContext(channel);
+    let persona = '';
+    try { persona = fs.readFileSync(path.join(HERE, 'persona.md'), 'utf-8').trim(); } catch { /* optional */ }
+    const prompt =
+      (persona ? persona + '\n\n---\n\n' : '') +
+      `Project state, if needed: start with docs/plans/2026-08-20-mm3-training-studio.md and ` +
+      `docs/plans/2026-08-18-encoder-training-plan.md (encoder scoreboard). ` +
+      `Recent thread messages, oldest first:\n\n${context}\n\n` +
+      `Scragnog has asked you (from his console — this request is NOT visible in the thread) to interject ` +
+      `in the conversation now. Compose ONE message that lands naturally in the discussion above` +
+      (note ? `, steering toward this: ${note}` : '') +
+      `. Do not mention being asked to post; just say the thing.`;
+    const { text } = await runClaude(prompt, channelId);
+    // channel.send, not reply — there is no message to reply to.
+    let rest = text.trim() || '(empty)';
+    while (rest.length > 0) {
+      await channel.send(rest.slice(0, 1900));
+      rest = rest.slice(1900);
+      if (rest.length > 3 * 1900) break; // runaway cap
+    }
+    return text;
+  } finally {
+    busy.delete(channelId);
+  }
+}
+
+http.createServer((req, res) => {
+  if (req.method !== 'POST' || req.url !== '/interject') {
+    res.writeHead(404).end();
+    return;
+  }
+  let body = '';
+  req.on('data', d => { body += d; });
+  req.on('end', async () => {
+    try {
+      const j = body ? JSON.parse(body) : {};
+      const channelId = j.channelId || [...ALLOWED_CHANNELS][0];
+      const text = await interject(channelId, j.note ?? '');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, posted: text.slice(0, 500) }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: String(e.message ?? e) }));
+    }
+  });
+}).listen(INTERJECT_PORT, '127.0.0.1', () =>
+  console.log(`[bridge] interject endpoint on http://127.0.0.1:${INTERJECT_PORT}/interject`));
 
 client.login(TOKEN);

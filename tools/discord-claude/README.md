@@ -52,3 +52,12 @@ on EVERY reply, so changes apply live without restarting the bot. The
 operating instructions (docs pointers, respond-to-ping) are appended by the
 code after the persona, so a persona edit cannot break the mechanics.
 
+
+## Interjecting from your PC (no ping)
+
+With the bot running: `say.cmd` (or `say.cmd "steer note"`) posts a
+contextual message into the thread — the bot fetches fresh channel history,
+composes under the persona, and speaks unprompted. Local-only: the endpoint
+binds 127.0.0.1:47821 (INTERJECT_PORT to change). The steer note is never
+shown in the thread.
+
