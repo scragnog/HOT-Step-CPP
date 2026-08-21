@@ -147,6 +147,56 @@ drift. This directly motivates building the request-translator to *always* emit 
 full Structured Caption rather than passing a short user-typed description straight
 through to `<|caption_start|>`.
 
+## DIALECT beats format: the prose decides the genre, not the label (2026-08-21)
+
+The format is necessary and not sufficient. A caption can pass
+`validateMm3Caption` cleanly, name a specific genre, and still render a
+different one — because MM3 reads the ~560 words of description, not the two
+words after "scale is minor.".
+
+Worked case: a caption whose Basic Attributes line ended `Hardcore Punk.`
+rendered as southern rock on every seed. Grepping its distinctive vocabulary
+against the 1,000 templates says why:
+
+| phrase used | template families that use it |
+|---|---|
+| `live-room` | country-americana, **blues-rock-southern-rock**, blues-rock-indie-soul |
+| `baritone` | indie-folk-acoustic-pop, blues-rock-soul, traditional-pop |
+| `close-miked` | indie-folk-acoustic-pop, soul-blues-ballad, dark-folk-americana |
+| `galloping` | power-metal / symphonic-metal |
+| `garage`, `minimal polish` | **zero templates** — out of distribution |
+
+And the corpus's own punk/hardcore templates say the opposite on every axis:
+"heavily distorted" not *mild* distortion; "wide soundstage, panned hard L/R,
+wall of sound" not "tight midrange focus"; "heavily compressed, modern rock
+radio" not "live-room honesty"; "clear youthful **tenor** with a nasal edge" not
+"chest-voice **baritone**"; "palm-muted chugging / power chords" not "ringing
+**open-chord** texture".
+
+Two rules follow, both checkable:
+
+1. **Write in the target family's dialect — grep the templates for the words you
+   are about to use** and confirm they cluster in the right family. "Authentic /
+   raw / garage / minimal polish / live-room" is roots-rock vocabulary in this
+   corpus no matter what genre the label claims.
+2. **The genre clause is a SLASH PAIR.** `Hardcore Punk.` appears in none of the
+   1,000 templates. Every punk/hardcore entry is paired — `Pop Punk /
+   Alternative Rock`, `Metalcore / Post-Hardcore`, `Alternative Rock /
+   Post-Hardcore`, `J-Rock / Pop Punk` — and the corpus-wide mode is two
+   slash-joined genres. An unpaired, unattested term is a genre the model was
+   never taught.
+
+This supersedes nothing above; it is the layer under "THE GENRE MUST BE
+SPECIFIC" in `MM3_CAPTION_SYSTEM_PROMPT`. Specific *and attested and consistent
+with the prose*. The structural fix is retrieval — few-shot the caption writer
+with 2-3 real templates from the routed family — designed in
+`docs/plans/2026-08-21-mm3-prompt-translator.md`.
+
+**Confound to control first:** the caption is consumed ONLY by the LM (the flow
+DiT's uncond branch is `zeros_like(condition)`, not an empty prompt —
+`engine/src/minimax/mm3-dit-graph.h:459`). Never judge caption adherence on a
+quantised LM; q8_0/NVFP4/MXFP4 degrade exactly the stage being measured.
+
 ## The format is MANDATORY, not preferred (ear-verified 2026-08-14)
 
 A controlled A/B settled this for training data. One track (Alkaline Trio,
