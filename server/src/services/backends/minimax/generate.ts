@@ -75,6 +75,57 @@ const MM3_DEFAULT_DURATION_SEC = 60;
 /** Progress ticker interval — /mm3/job never takes the engine's MM3 mutex. */
 const DETAIL_POLL_MS = 1_500;
 
+// ── Structured Caption repair ────────────────────────────────────────────────
+
+/**
+ * The three heading lines of an MM3 Structured Caption, each paired with the
+ * first labelled field that belongs under it.
+ *
+ * All 1,000 of MiniMax's reference captions carry all three headings as bare
+ * lines, and Lyric Studio writes them (every one of the 506 captions in the DB
+ * starts "Global Metadata"). A caption can still reach here with one missing —
+ * measured 2026-08-21: three MM3 renders went out byte-identical to their
+ * stored caption MINUS its first line, so the model saw an unlabelled Global
+ * Metadata block sitting above two labelled ones. Nothing in this repo strips
+ * it, which leaves the caption box itself — a paste that began on line 2 looks
+ * exactly like this — so the fix belongs on the way OUT, where every path is
+ * covered regardless of how the text got into the box.
+ */
+const MM3_HEADINGS: ReadonlyArray<{ heading: string; firstLabel: RegExp }> = [
+  { heading: 'Global Metadata', firstLabel: /^Basic Attributes\s*:/i },
+  { heading: 'Vocal Details', firstLabel: /^Vocal Gender & Timbre\s*:/i },
+  { heading: 'Arrangement', firstLabel: /^Instrument Lifecycle Description/i },
+];
+
+/**
+ * Re-insert any heading line missing from an otherwise well-formed Structured
+ * Caption. Returns the caption unchanged, and reports nothing, when the text is
+ * not a Structured Caption at all — a bare "Energetic synthwave, 120 BPM" is a
+ * legal MM3 caption (it is what the reference pipeline's own fixture sends) and
+ * must never grow headings it did not ask for.
+ */
+export function repairMm3CaptionHeadings(caption: string): { caption: string; restored: string[] } {
+  const lines = caption.split('\n');
+  // Anchor on the labels, not the headings: a caption with no labels at all is
+  // a plain description and is left alone.
+  if (!MM3_HEADINGS.some(h => lines.some(l => h.firstLabel.test(l)))) {
+    return { caption, restored: [] };
+  }
+
+  const restored: string[] = [];
+  // Back to front, so an insertion never shifts an index still to be used.
+  for (let i = MM3_HEADINGS.length - 1; i >= 0; i--) {
+    const { heading, firstLabel } = MM3_HEADINGS[i];
+    if (lines.some(l => l.trim().toLowerCase() === heading.toLowerCase())) continue;
+    const at = lines.findIndex(l => firstLabel.test(l));
+    if (at < 0) continue;   // that whole section is absent — not ours to invent
+    lines.splice(at, 0, heading);
+    restored.unshift(heading);
+  }
+
+  return { caption: restored.length ? lines.join('\n') : caption, restored };
+}
+
 // ── Param mapping ────────────────────────────────────────────────────────────
 
 export interface MinimaxParamMapping {
@@ -101,7 +152,15 @@ export interface MinimaxParamMapping {
 export function mapMinimaxParams(params: any): MinimaxParamMapping {
   const notes: string[] = [];
 
-  const caption: string = params.prompt || params.songDescription || params.caption || params.style || '';
+  const rawCaption: string = params.prompt || params.songDescription || params.caption || params.style || '';
+  const repaired = repairMm3CaptionHeadings(rawCaption);
+  const caption = repaired.caption;
+  if (repaired.restored.length) {
+    notes.push(
+      `Structured Caption was missing its ${repaired.restored.map(h => `"${h}"`).join(' and ')} `
+      + `heading line — restored before sending. All 1,000 of MiniMax's reference captions carry all three.`,
+    );
+  }
 
   // Instrumental: MM3's contract is blank lyrics → the engine substitutes its
   // own instrumental token. Do NOT send ACE's '[Instrumental]' sentinel; that
