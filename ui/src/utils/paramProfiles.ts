@@ -13,7 +13,7 @@
 // v1 files (the old export, shaped like getGlobalParams() output) are still
 // accepted via a small reverse-mapping in applyProfileData().
 
-import { useGlobalParamsStore } from '../stores/globalParamsStore';
+import { useGlobalParamsStore, scopedKey } from '../stores/globalParamsStore';
 import { writePersistedState } from '../hooks/usePersistedState';
 
 // ── Content fields (CreatePanel state, persisted via usePersistedState) ──
@@ -112,7 +112,12 @@ const FIELD_KEY_OVERRIDES: Record<string, string> = {
 };
 
 function fieldStorageKey(field: string): string {
-  return FIELD_KEY_OVERRIDES[field] ?? `hs-${field}`;
+  // scopedKey() is a no-op for everything except the per-backend fields
+  // (solver / scheduler / guidance, plugin + backend params). Applying a
+  // preset while MiniMax-Music3 is active has to write into MM3's slot —
+  // writing the bare key would put the values somewhere the live store never
+  // reads back, so the next backend switch would silently undo the preset.
+  return scopedKey(FIELD_KEY_OVERRIDES[field] ?? `hs-${field}`);
 }
 
 export type ProfileData = Record<string, unknown>;

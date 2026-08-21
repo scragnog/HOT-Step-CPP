@@ -24,7 +24,7 @@
 // caption for both sides (adapter side then risks a doubled tag — rerun the
 // audition for an exact send).
 
-import { useGlobalParamsStore } from '../../stores/globalParamsStore';
+import { useGlobalParamsStore, scopedKey } from '../../stores/globalParamsStore';
 import { writePersistedState } from '../../hooks/usePersistedState';
 import type { AuditionPreview, AuditionSideResult } from '../../services/trainingApi';
 
@@ -108,7 +108,9 @@ export function sendAuditionToCustomGen(
   gps.setLssStrength(0);
   // Solver/scheduler plugin params back to declared defaults.
   useGlobalParamsStore.setState({ pluginParams: {} });
-  try { localStorage.setItem('hs-pluginParams', '{}'); } catch { /* full */ }
+  // scopedKey(): pluginParams is per backend, so clear the ACTIVE backend's
+  // copy — the bare key belongs to ACE-Step.
+  try { localStorage.setItem(scopedKey('hs-pluginParams'), '{}'); } catch { /* full */ }
 
   // ── LM / Thinking — exactly what buildLmRequest sent ────────────────────
   gps.setSkipLm(false);

@@ -20,7 +20,8 @@
 // getGlobalParams() spreads into the request — so the keys here must match the
 // ones server/src/services/backends/minimax/generate.ts reads. That bag is the
 // generic extension channel, so no per-knob store field is needed; it also
-// persists (hs-backendParams), which is why a pick survives a reload.
+// persists (hs-backendParams@<backendId> — the bag is per backend), which is
+// why a pick survives a reload.
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';

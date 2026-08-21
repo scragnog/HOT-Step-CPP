@@ -11,6 +11,29 @@
 
 import { create } from 'zustand';
 
+// ── Active-backend mirror ──
+//
+// The server owns the active backend (persisted in its `settings` table), but
+// it is one fetch away and the store is constructed synchronously at import.
+// globalParamsStore hydrates its PER-BACKEND fields (solver / scheduler /
+// guidance, plugin + extension params) from this id at that same moment, so
+// booting on 'ace' and correcting a tick later would flash ACE's sampler
+// settings — and, worse, a knob moved inside that window would be written to
+// ACE's slot while MiniMax-Music3 was the active backend.
+//
+// So mirror the last known id locally and start from it. fetchBackends()
+// overwrites it with the server's answer immediately; the two only ever
+// disagree if the DB was changed by another client.
+const ACTIVE_KEY = 'hs-activeBackend';
+
+function readActiveMirror(): string {
+  try { return localStorage.getItem(ACTIVE_KEY) || 'ace'; } catch { return 'ace'; }
+}
+
+function writeActiveMirror(id: string): void {
+  try { localStorage.setItem(ACTIVE_KEY, id); } catch { /* full / blocked */ }
+}
+
 // ── Types (mirror server/src/services/backends/types.ts — §4.2) ──
 
 export interface BackendInfo {
@@ -139,9 +162,11 @@ interface BackendState {
 
 export const useBackendStore = create<BackendState>((set, get) => ({
   backends: [],
-  // Default 'ace' — matches the server's default and every pre-multi-backend
+  // Last known active id (mirrored to localStorage, see above) so the
+  // per-backend UI state hydrates correctly on the very first render.
+  // Falls back to 'ace' — the server's default and every pre-multi-backend
   // install; overwritten by fetchBackends() once the registry responds.
-  activeBackendId: 'ace',
+  activeBackendId: readActiveMirror(),
   capabilities: {},
   models: {},
   loading: false,
@@ -153,9 +178,11 @@ export const useBackendStore = create<BackendState>((set, get) => ({
       const res = await fetch('/api/backends');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { backends: BackendInfo[]; activeId: string } = await res.json();
+      const activeId = data.activeId || 'ace';
+      writeActiveMirror(activeId);
       set({
         backends: Array.isArray(data.backends) ? data.backends : [],
-        activeBackendId: data.activeId || 'ace',
+        activeBackendId: activeId,
         loading: false,
       });
     } catch (err) {
@@ -229,6 +256,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { activeId: string } = await res.json();
+      writeActiveMirror(data.activeId);
       set({
         activeBackendId: data.activeId,
         backends: get().backends.map(b => ({ ...b, active: b.id === data.activeId })),

@@ -35,6 +35,82 @@ function writeKey<T>(key: string, value: T): void {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* full */ }
 }
 
+// -- Per-backend settings scope --
+//
+// A handful of fields are NOT global: they are remembered per generation
+// backend. MiniMax-Music3 runs the SAME Lua solver/scheduler/guidance plugins
+// as ACE-Step but through a completely different denoiser, so a pick that is
+// right for one is usually wrong for the other -- and until this existed both
+// backends read and wrote one `hs-inferMethod`, so changing the solver in MM3
+// mode silently rewrote the ACE-Step setting (and vice versa).
+//
+// Key rule: 'ace' keeps the BARE `hs-*` key, every other backend gets
+// `hs-*@<backendId>`. That means zero migration for existing installs -- the
+// ACE settings people already have stay exactly where they are.
+//
+// First visit to a non-'ace' backend SEEDS (and persists) from the bare key,
+// so switching forks the settings in force rather than snapping to defaults.
+// After that one write the two are fully independent.
+//
+// Adding a field here is all it takes -- the initial hydrate, the backend
+// switch and the preset/profile writer all read this table.
+const BACKEND_SCOPED_FIELDS: { field: string; key: string; fallback: unknown }[] = [
+  { field: 'inferMethod',   key: 'hs-inferMethod',   fallback: 'euler' },
+  { field: 'scheduler',     key: 'hs-scheduler',     fallback: 'linear' },
+  { field: 'guidanceMode',  key: 'hs-guidanceMode',  fallback: 'apg' },
+  // The picks' declared params travel with the picks: "stork2:substeps" may
+  // want a different value on each backend's sampler.
+  { field: 'pluginParams',  key: 'hs-pluginParams',  fallback: {} as Record<string, string> },
+  // Backend-declared extension knobs. Per backend by definition -- two
+  // backends may each declare a knob called `steps` and mean different things.
+  { field: 'backendParams', key: 'hs-backendParams', fallback: {} as Record<string, unknown> },
+];
+
+const BACKEND_SCOPED_KEYS: readonly string[] = BACKEND_SCOPED_FIELDS.map(f => f.key);
+
+/** Live active backend id. 'ace' for every install with no second backend. */
+function activeBackendId(): string {
+  return useBackendStore.getState().activeBackendId || 'ace';
+}
+
+/**
+ * localStorage key for `base` under `backendId`. Unscoped keys pass through
+ * unchanged, so this is safe to call on any hs-* key.
+ *
+ * Exported because the preset/profile writer (utils/paramProfiles.ts) persists
+ * store fields by key without going through the setters -- applying a preset
+ * while MM3 is active must land in MM3's slot, not ACE's.
+ */
+export function scopedKey(base: string, backendId: string = activeBackendId()): string {
+  if (!BACKEND_SCOPED_KEYS.includes(base)) return base;
+  return backendId === 'ace' ? base : `${base}@${backendId}`;
+}
+
+function readScoped<T>(base: string, fallback: T, backendId: string = activeBackendId()): T {
+  const key = scopedKey(base, backendId);
+  if (key !== base) {
+    try {
+      if (localStorage.getItem(key) === null) {
+        // First visit to this backend: fork from whatever is in force rather
+        // than resetting the user to defaults, and persist it so a later
+        // change on the OTHER backend can't drift this one.
+        const seeded = readKey(base, fallback);
+        writeKey(key, seeded);
+        return seeded;
+      }
+    } catch { /* storage blocked -- fall through to the plain read */ }
+  }
+  return readKey(key, fallback);
+}
+
+/** Every per-backend field, read for `backendId`. Used for the initial store
+ *  hydrate and again on each backend switch. */
+function hydrateBackendScoped(backendId: string = activeBackendId()): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of BACKEND_SCOPED_FIELDS) out[f.field] = readScoped(f.key, f.fallback, backendId);
+  return out;
+}
+
 // -- Store --
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,16 +198,19 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // value stored, and reading it back would keep silently applying an override
   // with no UI left to show or undo it. See docs/plans/attention-drift/.
   ditSlidingWindow: -1,
-  inferMethod: readKey("hs-inferMethod", 'euler'),
-  scheduler: readKey("hs-scheduler", 'linear'),
-  guidanceMode: readKey("hs-guidanceMode", 'apg'),
+  // Solver / scheduler / guidance -- PER BACKEND, so does the spread below
+  // cover `inferMethod`, `scheduler`, `guidanceMode`, `pluginParams` and
+  // `backendParams` in one line. Declared in BACKEND_SCOPED_FIELDS above;
+  // re-read on every backend switch by the subscription at the bottom of this
+  // file. Changing a solver in MiniMax-Music3 mode must not touch ACE-Step's.
+  ...hydrateBackendScoped(),
   seed: readKey("hs-seed", 42),
   randomSeed: readKey("hs-randomSeed", true),
-  // Backend-declared knobs (capabilities().extensions), keyed by the schema's
-  // `key`. One persisted bag rather than a named field per knob: the whole
-  // point of the extension mechanism is that a backend can add a control
-  // WITHOUT a matching edit here. Spread into the request payload below.
-  backendParams: readKey("hs-backendParams", {} as Record<string, unknown>),
+  // `backendParams` -- backend-declared knobs (capabilities().extensions),
+  // keyed by the schema's `key`. One persisted bag rather than a named field
+  // per knob: the whole point of the extension mechanism is that a backend can
+  // add a control WITHOUT a matching edit here. Spread into the request payload
+  // below. Hydrated by the ...hydrateBackendScoped() spread above (per backend).
   // LM Seed — independent of the DiT/generation seed above, unless tied
   // via lmSeedFollowsDit (default true = original tied behavior).
   lmSeed: readKey("hs-lmSeed", 42),
@@ -235,8 +314,8 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   qualityEvalEnabled: readKey("hs-qualityEvalEnabled", false),
   qualityEvalTarget: readKey("hs-qualityEvalTarget", 'unmastered'),
 
-  // Dynamic Lua plugin params
-  pluginParams: readKey('hs-pluginParams', {} as Record<string, string>),
+  // Dynamic Lua plugin params -- `pluginParams`, hydrated per backend by the
+  // ...hydrateBackendScoped() spread above (BACKEND_SCOPED_FIELDS).
 
   // Whisper Lyrics Transcription
   whisperLyricsEnabled: readKey("hs-whisperLyricsEnabled", false),
@@ -324,14 +403,15 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setCacheRatio: (v: any) => { set({ cacheRatio: v }); writeKey("hs-cacheRatio", v); },
   setShift: (v: any) => { set({ shift: v }); writeKey("hs-shift", v); },
   setDitSlidingWindow: (v: any) => { set({ ditSlidingWindow: v }); writeKey("hs-ditSlidingWindow", v); },
-  setInferMethod: (v: any) => { set({ inferMethod: v }); writeKey("hs-inferMethod", v); },
-  setScheduler: (v: any) => { set({ scheduler: v }); writeKey("hs-scheduler", v); },
-  setGuidanceMode: (v: any) => { set({ guidanceMode: v }); writeKey("hs-guidanceMode", v); },
+  // scopedKey(): these three land in the ACTIVE backend's slot, not a shared one.
+  setInferMethod: (v: any) => { set({ inferMethod: v }); writeKey(scopedKey("hs-inferMethod"), v); },
+  setScheduler: (v: any) => { set({ scheduler: v }); writeKey(scopedKey("hs-scheduler"), v); },
+  setGuidanceMode: (v: any) => { set({ guidanceMode: v }); writeKey(scopedKey("hs-guidanceMode"), v); },
   setSeed: (v: any) => { set({ seed: v }); writeKey("hs-seed", v); },
   setBackendParam: (key: string, v: any) => {
     const next = { ...(get().backendParams || {}), [key]: v };
     set({ backendParams: next });
-    writeKey("hs-backendParams", next);
+    writeKey(scopedKey("hs-backendParams"), next);
   },
   setRandomSeed: (v: any) => {
     set({ randomSeed: v }); writeKey("hs-randomSeed", v);
@@ -453,7 +533,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
     const prev = get().pluginParams;
     const next = { ...prev, [key]: value };
     set({ pluginParams: next });
-    writeKey('hs-pluginParams', next);
+    writeKey(scopedKey('hs-pluginParams'), next);
   },
   resetPluginParams: (pluginName: string) => {
     const prev = get().pluginParams;
@@ -462,7 +542,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       if (!k.startsWith(pluginName + ':')) next[k] = v as string;
     }
     set({ pluginParams: next });
-    writeKey('hs-pluginParams', next);
+    writeKey(scopedKey('hs-pluginParams'), next);
   },
 
   // -- Derived: assemble generation params --
@@ -721,6 +801,26 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
     };
   },
 }));
+
+// -- Backend switch -> re-read the per-backend fields --
+//
+// One subscription rather than a call inside backendStore.switchBackend: this
+// file already imports backendStore, and the reverse import would be a cycle.
+// It also catches the OTHER way the active id moves -- fetchBackends() at boot
+// resolving to whatever the server persisted, which the initial hydrate above
+// could only guess at.
+//
+// Nothing is written here: hydrateBackendScoped() reads (and, on a backend's
+// first visit, seeds) localStorage, so the settings the user leaves behind on
+// the backend they are switching AWAY from were already persisted by its
+// setters.
+let lastScopedBackendId = activeBackendId();
+useBackendStore.subscribe((st) => {
+  const id = st.activeBackendId || 'ace';
+  if (id === lastScopedBackendId) return;
+  lastScopedBackendId = id;
+  useGlobalParamsStore.setState(hydrateBackendScoped(id));
+});
 
 // One-shot boot sync. An existing install already has a DiT chosen in
 // localStorage that the server has never been told about, and a user who never
