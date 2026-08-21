@@ -411,12 +411,20 @@ async function models(): Promise<BackendModels> {
  *  the change feeds (a DiT swap keeps the 17 GB LM warm), so the next
  *  generation pays a partial warm — that is the honest cost of the switch. */
 async function selectModel(selection: Record<string, string>) {
+  // A MISSING role means "leave it alone", never "reset to auto". The engine
+  // treats an absent/empty role as auto (best-first, which is f16), so a
+  // partial body like {depth: "q8_0"} would silently revert a deliberately
+  // picked q8_0 LM to f16 — and this function would then PERSIST the revert.
+  // Measured as a mystery 2× LM slowdown on 2026-08-21 before the cause was
+  // found. The UI already sends every role; this guards API callers and
+  // future panels. An EXPLICIT "" still means auto.
+  const persisted = persistedSelection();
   const sel = {
-    lm:    selection.lm ?? '',
-    depth: selection.depth ?? '',
-    cond:  selection.cond ?? '',
-    dit:   selection.dit ?? selection.synth ?? '',
-    voc:   selection.voc ?? '',
+    lm:    selection.lm ?? persisted.lm,
+    depth: selection.depth ?? persisted.depth,
+    cond:  selection.cond ?? persisted.cond,
+    dit:   selection.dit ?? selection.synth ?? persisted.dit,
+    voc:   selection.voc ?? persisted.voc,
   };
   const result = await mm3SelectModel(sel);
   // Persist only after the engine accepted it, so a rejected quant can never

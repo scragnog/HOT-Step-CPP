@@ -556,10 +556,26 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
     std::vector<float>   hid_buf((size_t) (H * 2));
     std::vector<float>   samp_scratch;
 
+    // MM3_DEPTH_PROF=1 — phase-level timing across frames, printed every 100
+    // frames. Diagnostic for the "9.3 ms/frame is launch-bound" question: it
+    // separates upload / graph compute / readback / host sampling so the fix
+    // (CUDA graphs? fewer syncs? fused readback?) targets the real cost.
+    static const bool depth_prof = [] {
+        const char * e = std::getenv("MM3_DEPTH_PROF");
+        return e && e[0] && e[0] != '0';
+    }();
+    static double prof_up = 0.0, prof_comp = 0.0, prof_down = 0.0, prof_host = 0.0;
+    static int    prof_frames = 0;
+    const auto    now         = [] { return std::chrono::steady_clock::now(); };
+    const auto    ms_since    = [](std::chrono::steady_clock::time_point t) {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
+    };
+
     const auto t0 = std::chrono::steady_clock::now();
     for (int cb = 1; cb <= NC; cb++) {
         MM3DepthStep * s = &g_mm3_depth.step[cb - 1];
 
+        const auto tu = now();
         ggml_backend_tensor_set(s->in_hidden, lm_hidden_cond, 0, (size_t) H * sizeof(float));
         ggml_backend_tensor_set(s->in_hidden, lm_hidden_uncond, (size_t) H * sizeof(float),
                                 (size_t) H * sizeof(float));
@@ -567,16 +583,28 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
         if (s->in_ac) {
             ggml_backend_tensor_set(s->in_ac, ac_rows.data(), 0, (size_t) (cb - 1) * sizeof(int32_t));
         }
+        if (depth_prof) {
+            prof_up += ms_since(tu);
+        }
 
+        const auto tc = now();
         if (ggml_backend_sched_graph_compute(s->sched, s->graph) != GGML_STATUS_SUCCESS) {
             if (err) {
                 *err = "depth graph compute failed at codebook " + std::to_string(cb);
             }
             return false;
         }
+        if (depth_prof) {
+            prof_comp += ms_since(tc);
+        }
 
+        const auto td = now();
         ggml_backend_tensor_get(s->out_logit, logit_buf.data(), 0, (size_t) (V * 2) * sizeof(float));
         ggml_backend_tensor_get(s->out_hid, hid_buf.data(), 0, (size_t) (H * 2) * sizeof(float));
+        if (depth_prof) {
+            prof_down += ms_since(td);
+        }
+        const auto th = now();
 
         float * lc_row = out->logits_cond.data() + (size_t) ((cb - 1) * V);
         float * lu_row = out->logits_uncond.data() + (size_t) ((cb - 1) * V);
@@ -613,7 +641,18 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
         out->codes[cb - 1] = code;
         // Codebook cb's feedback embedding lives at row code + (cb-1)*V (note 2).
         ac_rows[(size_t) (cb - 1)] = code + (int32_t) ((cb - 1) * V);
+        if (depth_prof) {
+            prof_host += ms_since(th);
+        }
     }
     out->ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    if (depth_prof && ++prof_frames % 100 == 0) {
+        fprintf(stderr,
+                "[MM3-Depth] prof over %d frames: upload %.2f + compute %.2f + readback %.2f + host %.2f "
+                "= %.2f ms/frame\n",
+                prof_frames, prof_up / prof_frames, prof_comp / prof_frames, prof_down / prof_frames,
+                prof_host / prof_frames,
+                (prof_up + prof_comp + prof_down + prof_host) / prof_frames);
+    }
     return true;
 }

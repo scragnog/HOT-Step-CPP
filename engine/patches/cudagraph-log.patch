@@ -1,0 +1,27 @@
+--- a/engine/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/engine/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -4097,11 +4097,24 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend,
+ 
+     ggml_cuda_graph_set_enabled(cuda_ctx, graph_key);
+ 
++    // HOT-Step diagnostic: GGML_CUDA_GRAPH_LOG=1 prints one line per compute
++    // with the decision state — the tool that found the post-model-swap
++    // re-capture pathology. Zero cost when unset.
++    static const bool hs_graph_log = getenv("GGML_CUDA_GRAPH_LOG") != nullptr;
++
+     ggml_cuda_graph * graph = cuda_ctx->cuda_graph(graph_key);
+     if (graph->is_enabled()) {
+         const bool graph_compatible = ggml_cuda_graph_check_compability(cgraph);
++        if (hs_graph_log) {
++            fprintf(stderr, "[cudagraph] key=%p uid=%zu->%zu nodes=%d compat=%d warm=%d inst=%d\n", graph_key,
++                    (size_t) graph->uid, (size_t) cgraph->uid, cgraph->n_nodes, (int) graph_compatible,
++                    (int) graph->warmup_complete, (int) (graph->instance != nullptr));
++        }
+         if (graph_compatible) {
+             const bool properties_changed = ggml_cuda_graph_update_required(cuda_ctx, cgraph);
++            if (hs_graph_log && properties_changed) {
++                fprintf(stderr, "[cudagraph] key=%p PROPERTIES CHANGED\n", graph_key);
++            }
+ 
+             if (!graph->warmup_complete) {
+                 // Warmup: need at least 2 calls with no property change on the 2nd call

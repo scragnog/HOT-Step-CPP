@@ -31,6 +31,16 @@ Together these two are what make LM training possible on a card smaller than 32 
 
 Base quant alone does not reach a 12 GB card; **LoRA rank is the other lever**. Q4_K_M peaks: r256/1500 19.2 GB, r64/1500 13.2 GB, r32/750 11.1 GB, r16/500 10.2 GB.
 
+`cudagraph-log.patch` adds an **env-gated one-line-per-compute decision trace**
+(`GGML_CUDA_GRAPH_LOG=1`) to `ggml_backend_cuda_graph_compute` — key, uid,
+node count, compatibility, warmup state, and a line whenever node properties
+change. Zero cost when unset. This is a *diagnostic*, not a fix: it is the
+tool that established that CUDA graph capture is already active for every MM3
+graph (LM decode −29 %, depth −14 % vs `GGML_CUDA_DISABLE_GRAPHS=1`) and that
+an apparent post-model-swap "graph thrash" was actually the select-model API
+resetting an omitted LM role to auto/f16. **Losing this patch is benign** —
+no verify-hook guards it; reapply it when you next need the trace.
+
 Reapply from the repo root — **apply all of them**. Two of them now touch `cpy.cu`, so they are no longer file-disjoint, but their hunks do not overlap and **both orders were verified to apply cleanly**; a full pristine→apply-all replay was checked to reproduce the tested bytes exactly. The glob below is what CI runs:
 
 ```sh
