@@ -79,6 +79,7 @@ tools/mcp-lyricstudio/node_modules/
 tools/discord-claude/node_modules/
 tools/discord-claude/.env
 tools/discord-claude/sessions.json
+tools/discord-claude/persona.md
 
 # Test output logs
 engine/tests/*.log
