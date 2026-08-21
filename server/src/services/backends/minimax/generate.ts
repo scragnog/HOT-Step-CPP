@@ -938,12 +938,19 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
 }
 
 /** Best-effort MM3 eviction for the ACE path (plan §4.4). Cheap when cold,
- *  short-fused so a hung engine can never stall an ACE generation. */
+ *  short-fused so a hung engine can never stall an ACE generation.
+ *
+ *  Keeps the engine's AR slot: this is eviction the USER did not ask for, and
+ *  a trip to ACE and back should not cost a cached plan (~130 s of replan on a
+ *  155 s song). Safe because the AR key pins the LM + depth model identity and
+ *  a real model change drops the slot on its own path — see the note on
+ *  mm3_handle_unload (mm3-server.h). */
 export async function releaseMinimaxVramForAce(): Promise<void> {
   try {
-    const r = await mm3Unload(3_000);
+    const r = await mm3Unload(3_000, /*keepArCache=*/true);
     if (r?.unloaded) {
-      console.log(`[Generate] Freed MiniMax-Music3 VRAM before ACE work (${(r.freed_mb ?? 0).toFixed(0)} MB)`);
+      console.log(`[Generate] Freed MiniMax-Music3 VRAM before ACE work (${(r.freed_mb ?? 0).toFixed(0)} MB)`
+        + `${r.ar_cache_kept ? ' — AR plan cache kept' : ''}`);
     }
   } catch { /* never blocks ACE */ }
 }

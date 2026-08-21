@@ -429,7 +429,33 @@ static void mm3_handle_warm(const httplib::Request &, httplib::Response & res) {
 }
 
 // POST /mm3/unload — free VRAM. Idempotent.
-static void mm3_handle_unload(const httplib::Request &, httplib::Response & res) {
+//
+// Body may carry {"keep_ar_cache": true} to free VRAM WITHOUT dropping the
+// host-side AR slot. Default false, so an explicit user-driven unload still
+// hands back everything.
+static void mm3_handle_unload(const httplib::Request & req, httplib::Response & res) {
+    // Why this opt-in exists: the backend toggle frees MM3's VRAM for ACE
+    // through this same endpoint, and a round trip to ACE and back was
+    // therefore costing a cached plan — a full AR replan (~130 s on a 155 s
+    // song) for a switch the user may not even have generated on.
+    //
+    // Keeping the slot is SAFE, not merely convenient. mm3_unload() clears
+    // weights, contexts and residency flags but does NOT touch lm_file or
+    // role_file[], so the AR key (which pins lm/depth path + tensor_bytes +
+    // file_type, mm3-job.h) rebuilds identically after a reload of the same
+    // models. A genuine model change drops the slot on its own path
+    // ("model selection changed", below). There is no route by which a kept
+    // slot can serve a plan that does not match the request.
+    bool keep_ar = false;
+    if (!req.body.empty()) {
+        yyjson_doc * d = yyjson_read(req.body.data(), req.body.size(), 0);
+        if (d) {
+            yyjson_val * v = yyjson_obj_get(yyjson_doc_get_root(d), "keep_ar_cache");
+            keep_ar        = v && yyjson_is_true(v);
+            yyjson_doc_free(d);
+        }
+    }
+
     std::lock_guard<std::mutex> lock(g_mm3_mutex);
 
     const bool   was_loaded = g_mm3.loaded;
@@ -448,10 +474,20 @@ static void mm3_handle_unload(const httplib::Request &, httplib::Response & res)
     mm3_lm_free(&g_mm3_lm);
     mm3_unload(&g_mm3);
     // Host RAM, not VRAM, and hundreds of MB of it — an explicit unload is the
-    // user asking for memory back, so the AR slot goes too. (Deliberately NOT
-    // hooked into mm3_unload() itself: that fires after every generation when
-    // keep-loaded is off, which would drop the slot before it could ever hit.)
-    mm3_ar_cache_clear("engine unload");
+    // user asking for memory back, so the AR slot goes too UNLESS the caller
+    // asked to keep it (VRAM-only eviction; see the note at the top).
+    // (Deliberately NOT hooked into mm3_unload() itself: that fires after every
+    // generation when keep-loaded is off, which would drop the slot before it
+    // could ever hit.)
+    const bool ar_kept = keep_ar && !g_mm3_ar_cache.key.empty();
+    if (keep_ar) {
+        if (ar_kept) {
+            fprintf(stderr, "[MM3-ARCache] kept %.0f MB across a VRAM-only unload\n",
+                    (double) mm3_ar_cache_bytes() / 1048576.0);
+        }
+    } else {
+        mm3_ar_cache_clear("engine unload");
+    }
 
     yyjson_mut_doc * doc  = yyjson_mut_doc_new(NULL);
     yyjson_mut_val * root = yyjson_mut_obj(doc);
@@ -460,6 +496,7 @@ static void mm3_handle_unload(const httplib::Request &, httplib::Response & res)
     yyjson_mut_obj_add_bool(doc, root, "loaded", false);
     yyjson_mut_obj_add_uint(doc, root, "freed_bytes", was_loaded ? freed : 0);
     yyjson_mut_obj_add_real(doc, root, "freed_mb", was_loaded ? (double) freed / (1024.0 * 1024.0) : 0.0);
+    yyjson_mut_obj_add_bool(doc, root, "ar_cache_kept", ar_kept);
     char * json = yyjson_mut_write(doc, 0, NULL);
     yyjson_mut_doc_free(doc);
     res.set_content(json ? json : "{}", "application/json");

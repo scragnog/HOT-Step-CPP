@@ -282,6 +282,8 @@ export interface Mm3TokenizeCheck {
 }
 
 export interface Mm3UnloadResult {
+  /** engine kept its host-side AR slot across this unload */
+  ar_cache_kept?: boolean;
   unloaded: boolean;   // true only if something was actually resident
   loaded: boolean;     // always false on success
   freed_bytes?: number;
@@ -410,13 +412,20 @@ export async function mm3SelectModel(sel: Mm3Selection): Promise<Mm3SelectModelR
 
 /** POST /mm3/unload — free MM3 weights + KV cache. Idempotent and cheap when
  *  cold. Soft-fails: VRAM arbitration must never break a generation or a
- *  backend switch, so failures are reported, not thrown. */
-export async function mm3Unload(timeoutMs = TIMEOUT_QUICK): Promise<Mm3UnloadResult | null> {
+ *  backend switch, so failures are reported, not thrown.
+ *
+ *  `keepArCache` frees VRAM without dropping the engine's host-side AR slot —
+ *  use it for eviction the user did not ask for (a backend switch), never for
+ *  an explicit "unload" they clicked. */
+export async function mm3Unload(
+  timeoutMs = TIMEOUT_QUICK,
+  keepArCache = false,
+): Promise<Mm3UnloadResult | null> {
   try {
     const res = await fetch(`${base()}/mm3/unload`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+      body: JSON.stringify(keepArCache ? { keep_ar_cache: true } : {}),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return null;

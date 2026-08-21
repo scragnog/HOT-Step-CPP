@@ -510,11 +510,17 @@ export const minimaxBackend: EngineBackend = {
   models,
   selectModel,
   /** Model-residency arbitration (plan §4.4): switching away from MM3 frees
-   *  its ~13 GB rather than leaving it parked next to the ACE pipeline. */
+   *  its ~13 GB rather than leaving it parked next to the ACE pipeline.
+   *
+   *  Keeps the AR plan cache. This is VRAM arbitration the user did not ask
+   *  for — flipping to ACE to check something and coming back must not cost a
+   *  cached plan. Correctness is held by the AR key, which pins LM + depth
+   *  model identity; a real model change drops the slot on its own path. */
   async releaseVram() {
-    const r = await mm3Unload();
+    const r = await mm3Unload(undefined, /*keepArCache=*/true);
     if (r?.unloaded) {
-      console.log(`[Backends] MiniMax-Music3 unloaded (${(r.freed_mb ?? 0).toFixed(0)} MB freed)`);
+      console.log(`[Backends] MiniMax-Music3 unloaded (${(r.freed_mb ?? 0).toFixed(0)} MB freed)`
+        + `${r.ar_cache_kept ? ' — AR plan cache kept' : ''}`);
     }
   },
 };
