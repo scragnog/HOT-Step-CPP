@@ -165,10 +165,20 @@ expression for expression, so the parity fixtures still cover the default path.
 This holds even for `infer_method=euler` (Lua computes in double and rounds on
 store; the native loop is float throughout — they can differ in the last ulp).
 Server-side the picks only travel when `params.samplerPluginsEnabled` is on,
-because solver/guidance are shared global UI state and ACE defaults them to
-euler + apg — forwarding blindly would move every MM3 render off the native
-loop silently, and `guidance_mode: "apg"` is a genuinely different algorithm
-from MM3's plain CFG.
+because ACE defaults solver/guidance to euler + apg — forwarding blindly would
+move every MM3 render off the native loop silently, and `guidance_mode: "apg"`
+is a genuinely different algorithm from MM3's plain CFG.
+
+**The picks are per backend as of 07b2a5c** (they were one shared global before,
+so changing the solver in MM3 mode rewrote ACE's). `BACKEND_SCOPED_FIELDS` in
+`ui/src/stores/globalParamsStore.ts` lists them: `inferMethod`, `scheduler`,
+`guidanceMode`, `pluginParams`, `backendParams`. Storage key is the bare `hs-*`
+for `ace` and `hs-*@<backendId>` for anything else; a backend's first visit
+seeds from the bare key, and `useBackendStore.subscribe` re-hydrates the store
+on every switch. Anything writing one of those keys **outside the setters**
+(`utils/paramProfiles.ts`, `sendAuditionToCustomGen.ts`) must route through the
+exported `scopedKey()` — a bare-key write lands where the live store will never
+read it back, and the next backend switch silently undoes it.
 
 Not supported: **owns_loop solvers** (11 of them, mostly MDMAchine's — they'd
 bypass the per-step overlap blend and break every window seam; engine warns and
