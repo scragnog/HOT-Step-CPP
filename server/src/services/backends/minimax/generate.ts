@@ -72,6 +72,55 @@ export interface MinimaxGenerationDeps {
 /** MM3's own duration ceiling (mirrors the capability manifest). */
 const MM3_MAX_DURATION_SEC = 300;
 const MM3_DEFAULT_DURATION_SEC = 60;
+
+// ── Low-step schedule compensation ───────────────────────────────────────────
+//
+// MM3's native schedule is UNIFORM with shift=1 (engine mm3-dit-graph.h:744),
+// faithfully reproducing upstream — and upstream's checkpoint declares
+// `mm3.flow.steps = 30`. There is no low-step-count compensation anywhere in
+// the reference, so dropping `steps` alone degrades in a specific, measurable
+// way rather than gracefully.
+//
+// Why it degrades: the vocoder decodes latent channels 0..63 as LEFT and
+// 64..127 as RIGHT in two INDEPENDENT passes (mm3-vocoder-graph.h:596), and the
+// initial noise is i.i.d. across all 128 channels (mm3-pipeline.h:462). So the
+// two halves start completely uncorrelated and every bit of stereo coherence
+// has to be manufactured by the DiT along the trajectory. Coarse Euler steps
+// leave that work unfinished. Measured on a matched 10-vs-30-step pair:
+//
+//   L/R correlation   -0.07  vs  +0.77      (anti-phase mids, 160 Hz - 2.6 kHz)
+//   side/mid ratio    +0.5 dB vs -9.5 dB
+//   mid spectrum      -8 dB @ 60 Hz, tapering to 0 dB above 2 kHz
+//
+// i.e. thin and phasey ("tinny"), NOT dull — the HF is already at the correct
+// absolute level. That is the tell that the LATE trajectory is converged and
+// only the EARLY (high-noise) part is starved, which is exactly what a shifted
+// schedule buys back.
+//
+// The law: the shift warp t' = shift*t/(1+(shift-1)*t) turns the uniform grid
+// u = i/steps into sigma(u) = u / (shift - (shift-1)*u), whose FIRST step is
+// 1/(shift*(steps-1)+1). Setting that equal to the 30-step native first step of
+// 1/30 and solving gives shift = 29/(steps-1) — which returns exactly 1.0 at
+// 30 steps, so the curve is continuous at the boundary and this can never
+// perturb a default render.
+//
+// VALIDATED BY EAR at 10 steps (shift 3.2). 8..29 is interpolation on a curve
+// anchored at both ends. Below 8 it is EXTRAPOLATION: the first-step match is
+// bought with an ever-larger final leap to clean (0.54 at 6 steps, 0.86 at 2),
+// and there is a point where that must break down. If a very-low-step render
+// comes out muddy/smeared rather than thin, the shift is too high for that
+// budget — that is the signature to tune against.
+const MM3_REFERENCE_STEPS = 30;
+const MM3_MIN_STEPS = 2;
+const MM3_MAX_STEPS = 60;
+const MM3_FLOW_SHIFT_MAX = 20;  // engine-side ceiling, mm3-request.h:986
+
+/** Schedule shift that gives `steps` the same high-noise resolution as 30 steps. */
+export function mm3LowStepShift(steps: number): number {
+  if (!Number.isFinite(steps) || steps <= 1) return MM3_FLOW_SHIFT_MAX;
+  const raw = (MM3_REFERENCE_STEPS - 1) / (steps - 1);
+  return Math.min(MM3_FLOW_SHIFT_MAX, Math.max(1, Math.round(raw * 100) / 100));
+}
 /** Progress ticker interval — /mm3/job never takes the engine's MM3 mutex. */
 const DETAIL_POLL_MS = 1_500;
 
@@ -211,7 +260,15 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
     notes.push(`batchSize ${requestedBatch} requested — MiniMax-Music3 v1 generates 1 track per job (capability manifest: batch.max = 1)`);
   }
 
-  const samplerPlugins = mapMinimaxSamplerPlugins(params, notes);
+  // Hoisted above the sampler-plugin mapping: low-step compensation has to know
+  // the step count before it can decide whether to engage.
+  const rawSteps = Number(params.mm3Steps);
+  const resolvedSteps =
+    Number.isFinite(rawSteps) && rawSteps >= MM3_MIN_STEPS && rawSteps <= MM3_MAX_STEPS
+      ? Math.round(rawSteps)
+      : undefined;
+
+  const samplerPlugins = mapMinimaxSamplerPlugins(params, resolvedSteps, notes);
 
   return {
     req: {
@@ -225,10 +282,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       // omitted from the wire when unset so the engine keeps applying the
       // checkpoint defaults (30 / 1.7) — an out-of-range value is dropped here
       // rather than sent for the engine to reject mid-job.
-      ...(Number.isFinite(Number(params.mm3Steps)) && Number(params.mm3Steps) >= 8 &&
-          Number(params.mm3Steps) <= 60
-            ? { steps: Math.round(Number(params.mm3Steps)) }
-            : {}),
+      ...(resolvedSteps !== undefined ? { steps: resolvedSteps } : {}),
       ...(Number.isFinite(Number(params.mm3CfgFlow)) && Number(params.mm3CfgFlow) >= 1.0 &&
           Number(params.mm3CfgFlow) <= 5.0
             ? { cfg_flow: Number(params.mm3CfgFlow) }
@@ -331,17 +385,65 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
  * Names are ACE's throughout — see translateParams.ts:128-130, 273, 300. The
  * engine takes the same spellings, so this is a pass-through, not a mapping.
  */
-function mapMinimaxSamplerPlugins(params: any, notes: string[]): Partial<Mm3SynthRequest> {
-  if (!params.samplerPluginsEnabled) return {};
+function mapMinimaxSamplerPlugins(
+  params: any,
+  steps: number | undefined,
+  notes: string[],
+): Partial<Mm3SynthRequest> {
+  const autoOn  = params.mm3AutoLowStep !== false;   // opt-OUT, see index.ts
+  const lowStep = steps !== undefined && steps < MM3_REFERENCE_STEPS;
+  const autoShift = lowStep ? mm3LowStepShift(steps as number) : 1;
+
+  // The user's own shift wins, but only if they actually moved the slider —
+  // 1.0 IS the default, so it cannot be distinguished from "untouched". Anyone
+  // who genuinely wants the raw native schedule at a low step count turns
+  // Low-Step Compensation off, which is unambiguous.
+  const rawShift = Number(params.mm3FlowShift);
+  const userShift = Number.isFinite(rawShift) && rawShift > 0
+      && rawShift <= MM3_FLOW_SHIFT_MAX && rawShift !== 1
+    ? rawShift
+    : undefined;
+
+  if (!params.samplerPluginsEnabled) {
+    if (!autoOn || !lowStep) return {};
+    // AUTOMATIC PATH. Deliberately narrow: scheduler + shift and nothing else.
+    // `inferMethod` / `guidanceMode` / `apgNormThreshold` / `pluginParams` are
+    // shared global pickers that hold ACE's defaults (euler + APG) whether or
+    // not this backend was ever considered — forwarding them here would swap
+    // MM3 onto a different guidance ALGORITHM as a side effect of lowering a
+    // step count. That is precisely the failure the gate below exists to
+    // prevent, and engaging automatically makes it worse, not better.
+    const shift = userShift ?? autoShift;
+    notes.push(
+      `low-step compensation: ${steps} steps is under the checkpoint's ${MM3_REFERENCE_STEPS}, so the flow ran `
+      + `scheduler=linear at flow_shift=${shift}`
+      + (userShift !== undefined
+          ? ' (your Schedule Shift)'
+          : autoShift >= MM3_FLOW_SHIFT_MAX
+            ? ` (29/(steps-1) wanted ${Math.round(((MM3_REFERENCE_STEPS - 1) / ((steps as number) - 1)) * 100) / 100}, clamped to the engine ceiling — under ~8 steps this law is extrapolating)`
+            : ' (29/(steps-1), matching 30-step first-step resolution)')
+      + '. Solver and guidance stay native. Turn off "Low-Step Compensation" for the raw native schedule.',
+    );
+    return { scheduler: 'linear', flow_shift: shift };
+  }
 
   const out: Partial<Mm3SynthRequest> = {};
   if (params.inferMethod) out.infer_method = params.inferMethod;
   if (params.scheduler) out.scheduler = params.scheduler;
   if (params.guidanceMode) out.guidance_mode = params.guidanceMode;
 
-  if (Number.isFinite(Number(params.mm3FlowShift))
-      && Number(params.mm3FlowShift) > 0 && Number(params.mm3FlowShift) <= 20) {
-    out.flow_shift = Number(params.mm3FlowShift);
+  if (userShift !== undefined) {
+    out.flow_shift = userShift;
+  } else if (autoOn && lowStep) {
+    // Plugins on, shift left at default, steps under 30: still compensate.
+    // Their scheduler pick stands if they made one — shift warps whichever
+    // curve is selected, so this stays additive rather than overriding.
+    out.flow_shift = autoShift;
+    if (!out.scheduler) out.scheduler = 'linear';
+    notes.push(
+      `low-step compensation: flow_shift=${autoShift} applied for ${steps} steps `
+      + `(29/(steps-1)) on scheduler=${out.scheduler}`,
+    );
   }
   if (Number.isFinite(Number(params.apgNormThreshold))
       && Number(params.apgNormThreshold) >= 0 && Number(params.apgNormThreshold) <= 100) {

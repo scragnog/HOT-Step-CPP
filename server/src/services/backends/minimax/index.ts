@@ -275,10 +275,13 @@ async function capabilities(): Promise<BackendCapabilities> {
         type: 'slider',
         label: 'Flow Steps',
         hint: 'Euler steps per window. The checkpoint default is 30; lower is '
-            + 'proportionally faster (the flow stage dominates long renders) at '
-            + 'some cost in detail.',
+            + 'proportionally faster (the flow stage dominates long renders). '
+            + 'Below 30, Low-Step Compensation reshapes the schedule to keep the '
+            + 'stereo image and low end intact — without it, low step counts go '
+            + 'thin and phasey rather than merely soft. Under 8 steps is '
+            + 'experimental territory.',
         default: 30,
-        min: 8,
+        min: 2,
         max: 60,
         step: 1,
       },
@@ -313,12 +316,29 @@ async function capabilities(): Promise<BackendCapabilities> {
         type: 'slider',
         label: 'Schedule Shift',
         hint: 'Timestep warp passed to a scheduler plugin. 1.0 matches MiniMax-Music3\'s '
-            + 'own schedule; higher spends more steps near the noisy end. Does nothing '
-            + 'unless Sampler Plugins is on AND a schedule other than Native is picked.',
+            + 'own schedule; higher spends more steps near the noisy end, where '
+            + 'global structure and stereo coherence are decided. Left at 1.0 this '
+            + 'defers to Low-Step Compensation; move it and your value wins outright.',
         default: 1.0,
         min: 0.5,
-        max: 6.0,
+        max: 20.0,
         step: 0.05,
+      },
+      {
+        // Opt-OUT rather than opt-in. MM3's schedule is uniform/shift=1 and the
+        // checkpoint declares steps=30, so every sub-30 render was already
+        // paying this cost silently — the toggle only decides whether it is
+        // absorbed or handed to the user. Default ON is the honest default.
+        key: 'mm3AutoLowStep',
+        type: 'toggle',
+        label: 'Low-Step Compensation',
+        hint: 'Below 30 steps, run the flow on the linear schedule with '
+            + 'flow_shift = 29/(steps-1), so the noisy end of the trajectory keeps '
+            + 'the resolution it gets at 30 steps. Without it, low step counts lose '
+            + 'stereo coherence and low end rather than just detail (measured at 10 '
+            + 'steps: L/R correlation -0.07 vs +0.77, and -8 dB at 60 Hz). Solver and '
+            + 'guidance stay native. No effect at 30 steps or above.',
+        default: true,
       },
       {
         // ── MM3 Plank ──

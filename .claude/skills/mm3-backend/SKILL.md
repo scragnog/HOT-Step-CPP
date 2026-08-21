@@ -154,6 +154,56 @@ counts localises a drop to the wire rather than the UI.
     already degrade per-request with an empty registry. Any future boot-time hard-exit must
     ask "can MM3 still serve?" first.
 
+## Low step counts go THIN, not dull — and why (root-caused + fixed 2026-08-21)
+
+Dropping `steps` below the checkpoint's 30 degrades in a specific, non-obvious way.
+Measured on a matched 10-vs-30-step pair (same seed/caption/structure):
+
+| | 10-step vs 30-step |
+|---|---|
+| L/R correlation | **−0.07** vs +0.77 (anti-phase mids, 160 Hz–2.6 kHz) |
+| side/mid ratio | **+0.5 dB** vs −9.5 dB |
+| Mid spectrum | **−8 dB @ 60 Hz**, tapering to **0 dB above 2 kHz** |
+
+So it is thin and phasey ("tinny", "cheap radio"), **not** dull — HF is already at the
+correct *absolute* level. Do not reach for a treble fix; the tilt is the illusion.
+
+**Root cause, three facts that only bite together:**
+1. The vocoder decodes latent channels **0–63 as LEFT and 64–127 as RIGHT in two
+   INDEPENDENT passes** (`mm3-vocoder-graph.h:596`). Zero cross-channel coupling.
+2. Initial noise is **i.i.d. across all 128 channels** (`mm3-pipeline.h:462`), so the two
+   halves start completely uncorrelated.
+3. The schedule is **uniform, shift=1** (`mm3-dit-graph.h:744`), faithful to upstream —
+   and the GGUF declares `mm3.flow.steps = 30`. **There is no low-step compensation in
+   the reference at all.**
+
+⇒ Every bit of stereo coherence must be manufactured by the DiT along the trajectory.
+Coarse Euler steps leave that work unfinished, and the same starved high-noise phase
+costs the low end. It is NOT residual noise: the excess side energy tracks the music
+envelope at +0.93 and *drops* in quiet passages — that measurement is what rules the
+noise hypothesis out, so run it before assuming otherwise.
+
+**The fix (shipped, server-side, no rebuild):** `shift = 29 / (steps − 1)`, derived by
+setting the shifted grid's first step `1/(shift·(steps−1)+1)` equal to the 30-step
+native `1/30`. Returns exactly 1.0 at 30 steps, so the curve is continuous and can
+never perturb a default render. Lives in `mm3LowStepShift()`
+(`server/src/services/backends/minimax/generate.ts`), applied by the `mm3AutoLowStep`
+extension (default ON). It forces **scheduler + shift only** — forwarding the shared
+`inferMethod`/`guidanceMode` pickers would silently swap MM3 onto ACE's APG default.
+
+**EAR-VALIDATED at 10 steps (shift 3.2).** 8–29 is interpolation on a curve anchored at
+both ends. **Below 8 is extrapolation** — the first-step match is bought with an
+ever-larger final leap to clean (0.54 @ 6 steps, 0.86 @ 2), which must break down
+somewhere. Symptom to tune against: muddy/smeared = shift too high for the budget;
+thin/wide again = too low. Slider min is now 2 steps.
+
+**DSP fallback** (built, measured, NOT shipped): a linear-phase M/S correction —
++8 dB mid low-shelf, −3 dB side with a −8 dB bell at 1.4 kHz — recovers the 30-step
+balance to 0.63 dB (mid) / 0.83 dB (side) RMS error. It cannot restore HF *coherence*
+(only ~0.2 correlated with the 30-step above 2.5 kHz), so fixing the trajectory beats
+correcting after the vocoder. Analysis scripts + A/B renders:
+`D:/Ace-Step-Latest/_experiments/_LISTENING/2026-08-21_lowstep-dsp/`.
+
 ## Sampler plugins: shared with ACE (built 2026-08-16 — NOT YET COMPILED OR HEARD)
 
 The same Lua solver / scheduler / guidance plugins that drive the ACE DiT now
