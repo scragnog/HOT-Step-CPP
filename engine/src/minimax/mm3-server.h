@@ -47,6 +47,7 @@
 // real GPU work on an httplib thread and can therefore contend with the ACE
 // worker — that is exactly what /mm3/synth exists to avoid.
 
+#include "mm3-ar-cache.h"
 #include "mm3-ar-loop.h"
 #include "mm3-cond-graph.h"
 #include "mm3-depth-graph.h"
@@ -305,6 +306,17 @@ static void mm3_handle_props(const httplib::Request &, httplib::Response & res) 
     const bool synth_ready = mm3_available(g_mm3);
     yyjson_mut_obj_add_bool(doc, root, "synth_ready", synth_ready);
     yyjson_mut_obj_add_uint(doc, root, "prompt_token_limit", MM3_MAX_PROMPT_TOKENS);
+    // AR cache (mm3-ar-cache.h). Reported so a caller can tell "reuse_ar is on
+    // but the slot is empty" from "reuse_ar did nothing", and can see what the
+    // held block is costing in host RAM.
+    {
+        yyjson_mut_val * ac = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_val(doc, root, "ar_cache", ac);
+        yyjson_mut_obj_add_bool(doc, ac, "present", !g_mm3_ar_cache.key.empty());
+        yyjson_mut_obj_add_int(doc, ac, "frames", g_mm3_ar_cache.frames);
+        yyjson_mut_obj_add_real(doc, ac, "mb", (double) mm3_ar_cache_bytes() / 1048576.0);
+        yyjson_mut_obj_add_int(doc, ac, "hits", g_mm3_ar_cache.hits);
+    }
     yyjson_mut_obj_add_uint(doc, root, "max_audio_frames_limit", MM3_MAX_AUDIO_FRAMES);
 
     yyjson_mut_val * dirs = yyjson_mut_arr(doc);
@@ -435,6 +447,11 @@ static void mm3_handle_unload(const httplib::Request &, httplib::Response & res)
     mm3_cond_free(&g_mm3_cond);
     mm3_lm_free(&g_mm3_lm);
     mm3_unload(&g_mm3);
+    // Host RAM, not VRAM, and hundreds of MB of it — an explicit unload is the
+    // user asking for memory back, so the AR slot goes too. (Deliberately NOT
+    // hooked into mm3_unload() itself: that fires after every generation when
+    // keep-loaded is off, which would drop the slot before it could ever hit.)
+    mm3_ar_cache_clear("engine unload");
 
     yyjson_mut_doc * doc  = yyjson_mut_doc_new(NULL);
     yyjson_mut_val * root = yyjson_mut_obj(doc);
@@ -1743,6 +1760,10 @@ static void mm3_handle_select_model(const httplib::Request & req, httplib::Respo
         mm3_depth_free(&g_mm3_depth);
         mm3_cond_free(&g_mm3_cond);
         mm3_lm_free(&g_mm3_lm);
+        // The LM/depth files are part of the AR cache key, so a role change
+        // could never hit it again anyway — this just stops a dead slot from
+        // holding hundreds of MB of host RAM for the rest of the session.
+        mm3_ar_cache_clear("model selection changed");
     }
 
     std::string err;

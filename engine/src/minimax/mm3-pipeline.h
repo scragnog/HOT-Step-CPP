@@ -493,6 +493,25 @@ struct MM3GenRequest {
     int      steps      = 30;
     float    cfg_flow   = 1.7f;
 
+    // Seed for the AR stage ONLY. Unset (the default) ties it to `seed`, which
+    // is what MM3 natively does — one seed drives both the code sampling and
+    // the per-window flow noise. Splitting them exists for the same reason ACE
+    // has `lm_seed`: it lets the flow noise be rerolled without changing the
+    // plan, which is what keeps the AR cache (mm3-job.h) alive across a reroll.
+    // Two fields rather than a -1 sentinel because a drawn seed uses the full
+    // 64-bit range and would go negative through any signed spelling.
+    bool     ar_seed_set = false;
+    uint64_t ar_seed     = 0;
+
+    // ── AR cache hit (mm3-job.h owns the storage) ──────────────────────────
+    // When set, stage 1 is skipped ENTIRELY — no LM, no depth decoder, no
+    // per-frame forward passes — and this block is fed straight to the
+    // condition encoder in its place. Layout is MM3ArResult::frame_hiddens:
+    // [cached_frames, num_codebooks, embedding_length] floats, layer-major.
+    // BORROWED and read-only for the whole call; the cache outlives it.
+    const float * cached_hiddens = nullptr;
+    int64_t       cached_frames  = 0;
+
     // Lua solver/scheduler/guidance overrides shared with the ACE sampler
     // (mm3-plugins.h). All-empty — the default — runs the parity-proven native
     // path, so a caller that knows nothing about plugins is unaffected.
@@ -548,8 +567,12 @@ struct MM3GenResult {
     std::vector<std::vector<float>> window_latents;  // only when keep_window_latents
 
     // AR stage detail (codes + timings). frame_hiddens are moved in and are
-    // ~39 MB at 300 frames — the caller owns them.
+    // ~39 MB at 300 frames — the caller owns them. EMPTY on an AR cache hit:
+    // the block was never produced by this run, it was borrowed (see
+    // MM3GenRequest::cached_hiddens), so nothing here may be moved out of it.
     MM3ArResult ar;
+    /** True when stage 1 was served from MM3GenRequest::cached_hiddens. */
+    bool        ar_cached = false;
 
     double  ar_ms    = 0.0;
     double  cond_ms  = 0.0;
@@ -626,7 +649,7 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     // ── stage 1: AR plan ──
     MM3ArOptions aopt;
     aopt.max_frames        = req.max_frames;
-    aopt.seed              = req.seed;
+    aopt.seed              = req.ar_seed_set ? req.ar_seed : req.seed;
     aopt.collect_hiddens   = true;  // the whole point: the condition encoder eats these
     aopt.lm_adapter        = req.lm_adapter;
     aopt.lm_adapter_scales = req.lm_adapter_scales;
@@ -663,26 +686,41 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     aopt.want_lrc = req.want_lrc;
     aopt.tok      = tok;
 
-    const auto t_ar = std::chrono::steady_clock::now();
-    if (!mm3_ar_plan(m, ids_cond.data(), ids_uncond.data(), (int64_t) ids_cond.size(), aopt, &out->ar, err)) {
-        return false;
+    if (req.cached_hiddens) {
+        // AR cache hit: the caller has last run's frame-hidden block and the
+        // AR-affecting inputs have not changed, so there is nothing to compute.
+        // The codes and the LRC are NOT reproduced here — the cache holds those
+        // too and the job layer copies them back onto the result.
+        out->ar_cached   = true;
+        out->ar_ms       = 0.0;
+        out->ar.n_frames = req.cached_frames;
+    } else {
+        const auto t_ar = std::chrono::steady_clock::now();
+        if (!mm3_ar_plan(m, ids_cond.data(), ids_uncond.data(), (int64_t) ids_cond.size(), aopt, &out->ar, err)) {
+            return false;
+        }
+        out->ar_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_ar).count();
     }
-    out->ar_ms  = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_ar).count();
     out->frames = out->ar.n_frames;
 
     const int64_t F = out->ar.n_frames;
     if (F <= 0) {
         if (err) {
-            *err = "the AR stage emitted zero frames";
+            *err = req.cached_hiddens ? "the cached AR block claims zero frames" : "the AR stage emitted zero frames";
         }
         return false;
     }
-    if ((int64_t) out->ar.frame_hiddens.size() != F * LAY * H) {
+    if (!req.cached_hiddens && (int64_t) out->ar.frame_hiddens.size() != F * LAY * H) {
         if (err) {
             *err = "the AR stage returned a frame-hidden block of the wrong size";
         }
         return false;
     }
+
+    // The condition encoder's input, from whichever source. Borrowed on a cache
+    // hit; owned by `out->ar` otherwise. Neither is written to — mm3_cond_encode
+    // takes it as `const float *`.
+    const float * const HID = req.cached_hiddens ? req.cached_hiddens : out->ar.frame_hiddens.data();
 
     // ── window plan (fact 1) ──
     std::vector<int64_t> starts;
@@ -707,6 +745,11 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     // Policy lives in the caller (mm3-job.h), not here — this file stays a pure
     // compute path. An absent hook means "keep everything resident", which is
     // exactly what the bring-up endpoints want.
+    //
+    // On an AR cache hit there is nothing to hand over — the LM was never
+    // loaded — so mm3-job.h simply does not install the hook and brings the
+    // flow stack in up front. The call still happens if a caller set one
+    // anyway: "prepare for stage 2" is the honest reading of the contract.
     if (req.after_ar && !req.after_ar(err)) {
         return false;
     }
@@ -740,7 +783,7 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
         }
         const auto t_c = std::chrono::steady_clock::now();
         int64_t    L   = 0;
-        if (!mm3_cond_encode(m, out->ar.frame_hiddens.data() + (size_t) (cs * LAY * H), wf, cond, &L, err)) {
+        if (!mm3_cond_encode(m, HID + (size_t) (cs * LAY * H), wf, cond, &L, err)) {
             return false;
         }
         out->cond_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_c).count();
@@ -878,9 +921,9 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
 
     fprintf(stderr,
             "[MM3-Pipe] %lld frames -> %lld window(s) -> %lld samples/ch (%.2fs @ %d Hz) | "
-            "AR %.0f ms, cond %.0f ms, flow %.0f ms, voc %.0f ms, total %.0f ms\n",
+            "AR %.0f ms%s, cond %.0f ms, flow %.0f ms, voc %.0f ms, total %.0f ms\n",
             (long long) F, (long long) NW, (long long) total,
             (double) total / (double) (out->sample_rate > 0 ? out->sample_rate : 1), out->sample_rate, out->ar_ms,
-            out->cond_ms, out->flow_ms, out->voc_ms, out->total_ms);
+            out->ar_cached ? " (cached)" : "", out->cond_ms, out->flow_ms, out->voc_ms, out->total_ms);
     return true;
 }

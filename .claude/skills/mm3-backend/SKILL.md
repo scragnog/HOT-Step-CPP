@@ -232,10 +232,9 @@ arithmetic.
 
 What it IS for: a fixed semantic bed, so an A/B of two flow-stage
 solver/scheduler/guidance settings compares those settings instead of two
-different AR samplings. A genuine AR speedup would need `frame_hiddens`
-captured (the condition encoder's actual input, ~39 MB at 750 frames) and
-`mm3_ar_plan` skipped entirely — architecturally straightforward, unbuilt, and
-NOT what the codes-only path gives you.
+different AR samplings. It is also PORTABLE and survives a restart, which the
+AR cache below does not. For the speedup, see the AR cache — that is the
+`frame_hiddens` path this section used to describe as unbuilt.
 
 Frame arithmetic: entry 0 is the un-emitted iteration, so `I` codes render
 `I-1` frames. `mm3-request.h` derives `max_frames`/`duration` from the array and
@@ -247,6 +246,71 @@ containment check, blob decode) → `minimax/generate.ts` (save/replay) →
 `mm3SaveArCodes` / `mm3PlankPath` capability extensions. The plank reference
 reaches the server from the browser, so it goes through
 `resolveMm3PlankPath()` — never join it onto a path directly.
+
+## MM3 AR cache: the speedup the Plank is not (built + measured 2026-08-21)
+
+`engine/src/minimax/mm3-ar-cache.h`. One slot holding the previous render's
+`frame_hiddens`, so a render that changes only FLOW-side settings skips stage 1
+outright. Opt in per request with `reuse_ar: true`; UI toggle **Reuse Planner
+Output** (`mm3ReuseAr`, default ON).
+
+**Why this works where the plank does not:** the flow DiT never sees the codes.
+Its real input is the `[F, 8, 4096]` hidden block the condition encoder eats
+(`mm3-pipeline.h`), so pinning codes still re-runs every AR forward pass to
+regenerate them. Caching the hiddens skips the work.
+
+**Measured on a 12 s clip, q8_0, RTX 5090:**
+
+| | AR | flow | total | warm |
+|---|---|---|---|---|
+| miss (12 steps) | 5364 ms | 1844 ms | 8745 ms | 4140 ms |
+| hit (24 steps, cfg 2.2) | **0 ms** | 3428 ms | 3782 ms | **1159 ms** |
+
+The hit did *twice* the flow work in under half the time. `warm_ms` drops
+because a hit never loads the LM at all — `mm3_load_parts(lm=false,
+depth=false, rest=true)`, and `staged` goes false so there is no mid-run
+handover either. **Proven bit-identical:** same request twice (miss then hit)
+-> byte-identical WAV *and* byte-identical plank blob.
+
+**The key is the whole correctness argument** (`mm3_ar_cache_key`, mm3-job.h) —
+same discipline as ACE's `computeLmCacheKey`, same failure mode if something is
+missing (a knob that looks dead). In it: prompt (caption+lyrics+instrumental),
+`max_frames`, resolved AR seed, effective `get_lrc`, LM adapter path+mtime+mode
++all six dials, forced-code digests, and the LM/depth file path+bytes+file_type.
+Deliberately NOT in it: steps, cfg_flow, sampler plugins and their params,
+flow_shift, forced_noise, wav_bits, cond/dit/voc model choices — the knobs the
+cache exists to let you tweak. Bump the `v=` field if the AR path changes shape.
+
+**`ar_seed` (new wire field, and the reason a seed change need not re-plan).**
+MM3 natively drives both the plan and the flow noise from one seed, so changing
+the seed always re-plans. `ar_seed` splits them the way ACE's `lm_seed` does:
+set it (UI: **Planner Seed**, blank = tied) to pin the plan while the main seed
+rerolls the flow noise. Verified: seed 9999 + ar_seed 4242 hit the slot filled
+by seed 4242 and produced different audio.
+
+**Traps.**
+- **A random seed can never hit.** `randomSeed` draws fresh every render, so the
+  plan is fresh every render. generate.ts pushes a note saying exactly that
+  rather than letting the toggle look dead.
+- **RAM, not VRAM**: 128 KB per frame = ~3 MB per second of audio, so ~600 MB
+  for a 200 s song, held in the ENGINE's host memory. Reported by `/mm3/props`
+  -> `ar_cache: {present, frames, mb, hits}`. Dropped by `POST /mm3/unload`, by a
+  model-role change, and by the next miss (before the new run, not after).
+- **Deliberately NOT hooked into `mm3_unload()`** — that fires after every
+  generation when keep-loaded is off, which would drop the slot before it could
+  ever hit.
+- **The manifest default is mirrored as `!== false` in generate.ts.** The UI only
+  writes a backend-declared param once the user touches it, so for a
+  `default: true` toggle an absent value must resolve to ON or the control lies.
+  Applies to any future default-true extension param.
+- Stage-1 byproducts (codes, LRC, EOS flag) are cached alongside the hiddens and
+  restored onto the result, so plank capture and `x-lrc-text` behave identically
+  on a hit — verified.
+
+Layers: `mm3-ar-cache.h` (slot) -> `mm3-job.h` (key + lookup + fill) ->
+`mm3-pipeline.h` (`cached_hiddens` borrowed, `HID` pointer) -> `client.ts`
+(`reuse_ar`/`ar_seed`/`ar_cached`) -> `generate.ts` (mapping + notes) ->
+`index.ts` (manifest params).
 
 ## Performance budget (RTX 5090, f16, 12 s clip ≈ 12.4 s wall ≈ 1.0× realtime)
 

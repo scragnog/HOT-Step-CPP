@@ -548,6 +548,7 @@ struct MM3SynthRequest {
     double  duration   = 0.0;  // as asked, seconds
     int64_t max_frames = 0;    // = min(round(duration * frame_rate), 9000)
     int64_t seed_in    = -1;   // as asked (-1 = random)
+    int64_t ar_seed_in = -1;   // as asked (-1 = tied to the resolved seed)
     int     wav_bits   = 16;
     // Emit LRC lyric timestamps from the LM's alignment heads (mm3-align.h).
     // Ignored for instrumentals — there is nothing to align.
@@ -558,6 +559,15 @@ struct MM3SynthRequest {
     // Zero cost when false (the default): the codes already exist in memory,
     // this only decides whether they are serialised onto the job.
     bool    get_ar_codes = false;
+
+    // ── AR cache (mm3-job.h) ───────────────────────────────────────────────
+    // Reuse the previous run's frame-hidden block when every AR-affecting
+    // input is byte-identical, and skip stage 1 outright. UNLIKE the plank
+    // above this IS a speedup — a large one (AR is roughly half the render) —
+    // because the condition encoder's actual input is the hidden block, not
+    // the codes. Costs one block of host RAM (128 KB per frame; ~600 MB for a
+    // 200 s song), which is why it is opt-in rather than always on.
+    bool    reuse_ar = false;
 
     // Replay previously-captured codes instead of sampling them. Both must be
     // present together, with acoustic == semantic * 7. Entry 0 is the
@@ -728,6 +738,19 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
         seed = (uint64_t) out->seed_in;
     }
 
+    // ar_seed — optional, -1 (the default) ties the AR stage to `seed`. A
+    // random `seed` therefore still gives a random plan; splitting them is a
+    // deliberate act. Note the asymmetry: an absent ar_seed resolves to the
+    // seed that was actually drawn, so the AR cache key stays stable across a
+    // re-render of the same take.
+    double ar_seed_d   = -1.0;
+    bool   have_ar_seed = false;
+    if (!mm3_req_num(root, "ar_seed", &ar_seed_d, &have_ar_seed, err)) {
+        return false;
+    }
+    out->ar_seed_in       = have_ar_seed ? (int64_t) llround(ar_seed_d) : -1;
+    const uint64_t ar_seed = out->ar_seed_in >= 0 ? (uint64_t) out->ar_seed_in : seed;
+
     double cfg = m.synth_cfg.flow.cfg_scale > 0.0f ? (double) m.synth_cfg.flow.cfg_scale : 1.7;
     if (!mm3_req_num(root, "cfg_flow", &cfg, &present, err)) {
         return false;
@@ -788,6 +811,20 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 return false;
             }
             out->get_ar_codes = yyjson_get_bool(v);
+        }
+    }
+
+    // ── AR cache: reuse_ar ──
+    {
+        yyjson_val * v = yyjson_obj_get(root, "reuse_ar");
+        if (v && !yyjson_is_null(v)) {
+            if (!yyjson_is_bool(v)) {
+                if (err) {
+                    *err = "\"reuse_ar\" must be a boolean";
+                }
+                return false;
+            }
+            out->reuse_ar = yyjson_get_bool(v);
         }
     }
 
@@ -1004,6 +1041,8 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     out->gen.prompt     = out->prompt;
     out->gen.max_frames = out->max_frames;
     out->gen.seed       = seed;
+    out->gen.ar_seed_set = true;   // always resolved past here, tied or not
+    out->gen.ar_seed     = ar_seed;
     out->gen.steps      = (int) nsteps;
     out->gen.cfg_flow   = (float) cfg;
     out->gen.plugins    = plug;

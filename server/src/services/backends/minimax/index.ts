@@ -335,6 +335,36 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: false,
       },
       {
+        // ── AR cache ──
+        // The speed feature the plank is NOT. Default ON: the engine only
+        // fills the slot when a render happens, and the whole point is that
+        // iterating on flow settings should not re-plan.
+        //
+        // NOTE the default must be mirrored in generate.ts as `!== false` —
+        // the UI sends nothing for an untouched control (see the comment
+        // there), so an absent value has to resolve the same way.
+        key: 'mm3ReuseAr',
+        type: 'toggle',
+        label: 'Reuse Planner Output',
+        hint: 'Skip the AR planner when nothing upstream of the flow stage changed — '
+            + 'roughly halves the render when you are only tweaking steps, CFG, solver '
+            + 'or scheduler. Any change to caption, lyrics, duration, seed, LM adapter '
+            + 'or LM/depth model re-plans automatically. Holds one block of engine RAM '
+            + '(~3 MB per second of audio, so roughly 600 MB for a 200 s song). Needs a '
+            + 'fixed seed to be able to hit.',
+        default: true,
+      },
+      {
+        key: 'mm3ArSeed',
+        type: 'text',
+        label: 'Planner Seed',
+        hint: 'Seed for the AR planner only. Blank ties it to the main seed, which is '
+            + 'MiniMax-Music3’s own behaviour. Set a number to pin the plan while the '
+            + 'main seed still rerolls the flow noise — the one way to change the seed '
+            + 'and still reuse the planner.',
+        default: '',
+      },
+      {
         key: 'mm3PlankPath',
         type: 'select',
         label: 'Replay AR Plan',

@@ -53,6 +53,7 @@
 // Callers that want the real MM3 vocabulary poll GET /mm3/job?id=... instead,
 // which reports the raw stage name plus the run's shape, timings and seed.
 
+#include "mm3-ar-cache.h"
 #include "mm3-lm-merge.h"
 #include "mm3-request.h"
 #include "mm3-server.h"
@@ -91,6 +92,8 @@ struct MM3JobState {
     int64_t  max_frames = 0;
     int64_t  n_tokens   = 0;
     bool     instrumental = false;
+    /** True when stage 1 was served from the AR cache (no LM, no AR compute). */
+    bool     ar_cached  = false;
 
     bool    have_result = false;
     int64_t frames      = 0;
@@ -144,9 +147,17 @@ static size_t mm3_kv_bytes_estimate(const MM3Model & m, int64_t n_ctx_needed) {
 
 // Weights + KV + compute headroom. Distinct files only — in bundle mode the
 // four role files alias one GGUF and must not be counted four times.
-static size_t mm3_vram_need(const MM3Model & m, int64_t n_ctx_needed) {
-    return (size_t) mm3_total_tensor_bytes(m) +
-           mm3_kv_bytes_estimate(m, n_ctx_needed) + MM3_VRAM_COMPUTE_HEADROOM;
+//
+// `stage2_only` is the AR-cache-hit shape: the LM is never loaded and there is
+// no KV cache, so asking for the full figure would evict the ACE side for
+// VRAM this run will not touch.
+static size_t mm3_vram_need(const MM3Model & m, int64_t n_ctx_needed, bool stage2_only = false) {
+    uint64_t weights = mm3_total_tensor_bytes(m);
+    if (stage2_only) {
+        weights -= m.lm_file.found ? m.lm_file.tensor_bytes : 0;  // the LM is never a role file
+        return (size_t) weights + MM3_VRAM_COMPUTE_HEADROOM;
+    }
+    return (size_t) weights + mm3_kv_bytes_estimate(m, n_ctx_needed) + MM3_VRAM_COMPUTE_HEADROOM;
 }
 
 static bool mm3_cuda_free_bytes(size_t * free_b, size_t * total_b) {
@@ -182,11 +193,12 @@ static bool mm3_cuda_free_bytes(size_t * free_b, size_t * total_b) {
 // Non-CUDA builds cannot measure free VRAM; there the eviction is
 // unconditional whenever ACE modules are resident and MM3 is cold, which is
 // the conservative choice.
-static void mm3_arbitrate_vram(const MM3Model & m, int64_t n_ctx_needed, MM3JobState * st) {
+static void mm3_arbitrate_vram(const MM3Model & m, int64_t n_ctx_needed, MM3JobState * st,
+                               bool stage2_only = false) {
     if (m.loaded) {
         return;  // already resident: whatever fit before still fits
     }
-    const size_t need = mm3_vram_need(m, n_ctx_needed);
+    const size_t need = mm3_vram_need(m, n_ctx_needed, stage2_only);
 
     size_t free_b = 0, total_b = 0;
     const bool have_cuda = mm3_cuda_free_bytes(&free_b, &total_b);
@@ -224,6 +236,94 @@ static void mm3_arbitrate_vram(const MM3Model & m, int64_t n_ctx_needed, MM3JobS
         fprintf(stderr, "[MM3-Job] VRAM: freed %d module(s), free now %.2f GB of %.2f GB\n", freed,
                 (double) free_b / 1073741824.0, (double) total_b / 1073741824.0);
     }
+}
+
+// ── AR cache key ────────────────────────────────────────────────────────────
+//
+// The slot itself lives in mm3-ar-cache.h (it has to be visible to
+// mm3-server.h's unload/select-model handlers too). What lives here is the
+// KEY, because building it needs the parsed request.
+//
+// THE KEY IS THE WHOLE CORRECTNESS ARGUMENT. Anything that changes the emitted
+// hiddens must appear in it, or the feature becomes "my knob does nothing" —
+// the exact failure the ACE-side lmCache learned the hard way (a repetition
+// penalty missing from computeLmCacheKey looked like a dead slider). Stored as
+// a plain string and compared exactly: no hashing, no collisions.
+
+/** Every input that can change the frame-hidden block, in one exact string.
+ *
+ *  Deliberately NOT in here, because stage 2 consumes them and re-runs anyway:
+ *  steps, cfg_flow, the solver/scheduler/guidance plugin selection and their
+ *  params, flow_shift, forced_noise, wav_bits, and the cond/dit/voc model
+ *  choices. Those are precisely the knobs this cache exists to let you tweak. */
+static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & req) {
+    std::string k;
+    k.reserve(req.prompt.size() + 1024);
+
+    auto add_s = [&](const char * n, const std::string & v) { k += n; k += '='; k += v; k += '\n'; };
+    auto add_i = [&](const char * n, long long v) { k += n; k += '='; k += std::to_string(v); k += '\n'; };
+    auto add_u = [&](const char * n, unsigned long long v) { k += n; k += '='; k += std::to_string(v); k += '\n'; };
+    auto add_f = [&](const char * n, double v) {
+        char b[64];
+        snprintf(b, sizeof(b), "%.9g", v);
+        k += n; k += '='; k += b; k += '\n';
+    };
+    // FNV-1a over a code array — the plank blobs are the one input too big to
+    // inline, and a digest of them is enough to tell two planks apart.
+    auto add_codes = [&](const char * n, const std::vector<int32_t> & v) {
+        uint64_t h = 1469598103934665603ULL;
+        for (const int32_t x : v) {
+            const uint32_t u = (uint32_t) x;
+            for (int b = 0; b < 4; b++) {
+                h = (h ^ (uint64_t) ((u >> (b * 8)) & 0xFF)) * 1099511628211ULL;
+            }
+        }
+        k += n; k += '='; k += std::to_string(v.size()); k += ':'; k += std::to_string(h); k += '\n';
+    };
+
+    // Bump when the AR path itself changes shape (new sampler behaviour, a
+    // different hidden layout) so stale slots from an older binary can't hit.
+    add_i("v", 1);
+
+    // The prompt carries caption + lyrics + the instrumental substitution, and
+    // the tokenizer is a pure function of it plus the LM GGUF (below).
+    add_s("prompt", req.prompt);
+    add_i("max_frames", req.max_frames);
+    add_u("ar_seed", req.gen.ar_seed_set ? req.gen.ar_seed : req.gen.seed);
+    // The alignment heads run a manual-attention path on 3 of 36 layers, so
+    // asking for LRC can move the emitted codes — and the LRC text itself is
+    // cached alongside, so a hit must not be able to hand back a missing one.
+    add_i("lrc", (req.want_lrc && !req.instrumental) ? 1 : 0);
+
+    // LM adapter: identity (path + mtime, so a retrained checkpoint under the
+    // same name misses), how it is applied, and every dial.
+    if (!req.lm_adapter.empty()) {
+        struct stat sb {};
+        const bool  ok = stat(req.lm_adapter.c_str(), &sb) == 0;
+        add_s("ad", req.lm_adapter);
+        add_i("ad_mtime", ok ? (long long) sb.st_mtime : -1);
+        add_s("ad_mode", req.lm_adapter_mode);
+        const MM3LmAdapterScales & s = req.lm_adapter_scales;
+        add_f("ad_g", s.global); add_f("ad_a", s.attn);  add_f("ad_m", s.mlp);
+        add_f("ad_e", s.early);  add_f("ad_i", s.mid);   add_f("ad_l", s.late);
+    }
+
+    // Plank replay pins the codes, which pins the hiddens with them.
+    if (!req.forced_semantic.empty()) {
+        add_codes("fs", req.forced_semantic);
+        add_codes("fa", req.forced_acoustic);
+    }
+
+    // The two models that produce the block. Quant flips borderline codes, so
+    // a role swap must miss — path alone is not enough when a file is replaced
+    // in place, hence the byte counts too.
+    add_s("lm", m.lm_file.path);
+    add_u("lm_b", (unsigned long long) m.lm_file.tensor_bytes);
+    add_u("lm_t", m.lm_file.file_type);
+    add_s("dp", m.role_file[MM3_R_DEPTH].path);
+    add_u("dp_b", (unsigned long long) m.role_file[MM3_R_DEPTH].tensor_bytes);
+    add_u("dp_t", m.role_file[MM3_R_DEPTH].file_type);
+    return k;
 }
 
 // Base64 for the x-lrc-text response header. Same encoding the ACE /synth path
@@ -326,6 +426,37 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     std::lock_guard<std::mutex> mm3_lock(g_mm3_mutex);
     holds_mm3_lock = true;
 
+    // ── AR cache lookup ─────────────────────────────────────────────────────
+    //
+    // Decided BEFORE arbitration and loading, because a hit changes both: no
+    // LM weights, no KV cache, and the flow stack comes in up front instead of
+    // through the mid-run handover.
+    const std::string ar_key = mm3_ar_cache_key(g_mm3, req);
+    const bool        ar_hit = req.reuse_ar && !g_mm3_ar_cache.key.empty() && g_mm3_ar_cache.key == ar_key &&
+                        g_mm3_ar_cache.frames > 0 &&
+                        (int64_t) g_mm3_ar_cache.hiddens.size() ==
+                            g_mm3_ar_cache.frames * (int64_t) g_mm3.lm_cfg.num_codebooks *
+                                (int64_t) g_mm3.lm_cfg.embedding_length;
+    if (ar_hit) {
+        g_mm3_ar_cache.hits++;
+        req.gen.cached_hiddens = g_mm3_ar_cache.hiddens.data();
+        req.gen.cached_frames  = g_mm3_ar_cache.frames;
+        fprintf(stderr, "[MM3-Job] %s: AR cache HIT - %lld frames, %.0f MB reused, stage 1 skipped (hit #%lld)\n",
+                job->id.c_str(), (long long) g_mm3_ar_cache.frames, (double) mm3_ar_cache_bytes() / 1048576.0,
+                (long long) g_mm3_ar_cache.hits);
+    } else if (req.reuse_ar) {
+        fprintf(stderr, "[MM3-Job] %s: AR cache MISS (%s) - planning fresh\n", job->id.c_str(),
+                g_mm3_ar_cache.key.empty() ? "slot empty" : "an AR-affecting input changed");
+        // Free the stale block NOW rather than after the run: it is hundreds of
+        // MB that this render has no use for, and holding it while the next one
+        // is built would double the host-RAM peak for no reason.
+        mm3_ar_cache_clear("superseded");
+    }
+    {
+        std::lock_guard<std::mutex> lock(st->mtx);
+        st->ar_cached = ar_hit;
+    }
+
     // ── VRAM arbitration + warm ──
     job_set_phase(*job, JobPhase::LOADING_DIT);
     set_stage("arbitrating", -1, 0, 0, 0);
@@ -335,7 +466,7 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     const int64_t n_ctx_needed = req.n_tokens + req.max_frames + 8;
 
     const auto t_arb = std::chrono::steady_clock::now();
-    mm3_arbitrate_vram(g_mm3, n_ctx_needed, st.get());
+    mm3_arbitrate_vram(g_mm3, n_ctx_needed, st.get(), /*stage2_only=*/ar_hit);
     const double arb_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_arb).count();
 
     if (job->cancel.load()) {
@@ -353,12 +484,16 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     //
     // Under keep-loaded the staging is skipped entirely: the whole point of
     // that setting is to pay VRAM to avoid reload latency.
-    const bool staged   = !g_keep_loaded;
-    const bool was_warm = g_mm3.loaded;
+    // On an AR cache hit stage 1 never runs, so the LM and the depth decoder
+    // are not loaded AT ALL — that saves the 8.5-16 GB load as well as the AR
+    // compute, and in staged mode it also saves the mid-run free/reload, since
+    // the flow stack comes in here instead of at the handover.
+    const bool staged   = !g_keep_loaded && !ar_hit;
+    const bool was_warm = ar_hit ? g_mm3.rest_resident : g_mm3.loaded;
     set_stage(was_warm ? "warm" : "warming", -1, 0, 0, 0);
     const auto  t_warm = std::chrono::steady_clock::now();
     std::string err;
-    if (!mm3_load_parts(&g_mm3, /*lm=*/true, /*depth=*/true, /*rest=*/!staged, &err)) {
+    if (!mm3_load_parts(&g_mm3, /*lm=*/!ar_hit, /*depth=*/!ar_hit, /*rest=*/!staged, &err)) {
         fail(2, "failed", err.empty() ? "MiniMax-Music3 load failed" : err);
         fprintf(stderr, "[MM3-Job] %s: load failed: %s\n", job->id.c_str(), err.c_str());
         return;
@@ -418,8 +553,12 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     //             pristine LM reload first. In staged mode the LM reloads
     //             from disk every generation anyway, so the reload branch
     //             below only ever fires under keep-loaded.
+    //
+    // Skipped wholesale on an AR cache hit: there is no LM to adapt, and the
+    // adapter's identity and dials are already baked into the cache key, so a
+    // hit means "this exact adapter produced this exact block".
     const bool merge_mode = !req.lm_adapter.empty() && req.lm_adapter_mode == "merge";
-    {
+    if (!ar_hit) {
         struct stat asb {};
 
         const bool  stat_ok  = !req.lm_adapter.empty() && stat(req.lm_adapter.c_str(), &asb) == 0;
@@ -510,6 +649,34 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
             fail(2, "failed", err.empty() ? "MM3 generation failed" : err);
         }
         return;
+    }
+
+    // ── AR cache: restore on a hit, fill on a miss ─────────────────────────
+    //
+    // The pipeline only ever borrowed the hidden block, so on a hit `r.ar` is
+    // otherwise empty. The stage-1 BYPRODUCTS — the codes, the LRC, the EOS
+    // flag — are cached alongside it and put back here, so a cache hit and a
+    // fresh plan are indistinguishable to everything downstream (plank capture,
+    // x-lrc-text, the job detail).
+    if (ar_hit) {
+        r.ar.semantic_all = g_mm3_ar_cache.semantic_all;
+        r.ar.acoustic_all = g_mm3_ar_cache.acoustic_all;
+        r.ar.lrc          = g_mm3_ar_cache.lrc;
+        r.ar.n_frames     = g_mm3_ar_cache.frames;
+        r.ar.eos_hit      = g_mm3_ar_cache.eos_hit;
+    } else if (req.reuse_ar && r.frames > 0 && !r.ar.frame_hiddens.empty()) {
+        // MOVED, not copied: the run is finished with the block and this is the
+        // only reason host RAM never holds two of them.
+        g_mm3_ar_cache.key          = ar_key;
+        g_mm3_ar_cache.frames       = r.frames;
+        g_mm3_ar_cache.hiddens      = std::move(r.ar.frame_hiddens);
+        g_mm3_ar_cache.semantic_all = r.ar.semantic_all;
+        g_mm3_ar_cache.acoustic_all = r.ar.acoustic_all;
+        g_mm3_ar_cache.lrc          = r.ar.lrc;
+        g_mm3_ar_cache.eos_hit      = r.ar.eos_hit;
+        g_mm3_ar_cache.hits         = 0;
+        fprintf(stderr, "[MM3-Job] %s: AR cache filled - %lld frames, %.0f MB held for the next render\n",
+                job->id.c_str(), (long long) r.frames, (double) mm3_ar_cache_bytes() / 1048576.0);
     }
 
     // ── encode ──
@@ -661,6 +828,11 @@ static void mm3_handle_synth(const httplib::Request & hreq, httplib::Response & 
     yyjson_mut_obj_add_strcpy(o, orot, "job_id", job->id.c_str());
     yyjson_mut_obj_add_strcpy(o, orot, "id", job->id.c_str());  // the ACE /synth spelling
     yyjson_mut_obj_add_uint(o, orot, "seed", req.gen.seed);
+    // Echoed so a caller can prove the AR-side fields landed: ar_seed is the
+    // RESOLVED value (equal to seed unless it was split), reuse_ar is what the
+    // job will actually do a lookup with.
+    yyjson_mut_obj_add_uint(o, orot, "ar_seed", req.gen.ar_seed_set ? req.gen.ar_seed : req.gen.seed);
+    yyjson_mut_obj_add_bool(o, orot, "reuse_ar", req.reuse_ar);
     yyjson_mut_obj_add_uint(o, orot, "max_frames", req.max_frames);
     yyjson_mut_obj_add_real(o, orot, "duration", req.duration);
     yyjson_mut_obj_add_uint(o, orot, "prompt_tokens", req.n_tokens);
@@ -740,6 +912,10 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
     yyjson_mut_obj_add_int(o, orot, "max_frames", st->max_frames);
     yyjson_mut_obj_add_int(o, orot, "prompt_tokens", st->n_tokens);
     yyjson_mut_obj_add_bool(o, orot, "instrumental", st->instrumental);
+    // AR cache: true means stage 1 was skipped entirely for this job. Reported
+    // live (not only on the finished result) so a poller can say so while the
+    // flow stage is still running.
+    yyjson_mut_obj_add_bool(o, orot, "ar_cached", st->ar_cached);
     yyjson_mut_obj_add_int(o, orot, "evicted_modules", st->evicted_modules);
     yyjson_mut_obj_add_real(o, orot, "evicted_mb", (double) st->evicted_bytes / 1048576.0);
     yyjson_mut_obj_add_real(o, orot, "arbitrate_ms", st->arbitrate_ms);

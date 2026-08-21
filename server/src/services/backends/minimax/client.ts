@@ -164,6 +164,21 @@ export interface Mm3SynthRequest {
   forced_semantic?: number[];  // [I], entry 0 is the un-emitted iteration
   forced_acoustic?: number[];  // [I * 7], flat, iteration-major
 
+  // ── AR cache (engine: minimax/mm3-ar-cache.h) ─────────────────────────────
+  /** Reuse the previous render's AR (planner) output when every AR-affecting
+   *  input is unchanged, skipping stage 1 entirely. UNLIKE the plank above this
+   *  IS a large speedup — AR is roughly half a render — because the flow DiT's
+   *  real input is the frame-hidden block, not the codes. Costs one block of
+   *  ENGINE host RAM (~128 KB per frame, so ~600 MB for a 200 s song), which is
+   *  why it is opt-in. The engine keys the lookup itself; the server never has
+   *  to decide what "unchanged" means. */
+  reuse_ar?: boolean;
+  /** Seed for the AR stage only. Omitted = tied to `seed`, which is MM3's
+   *  native behaviour (one seed drives both the plan and the flow noise).
+   *  Splitting them lets the flow noise be rerolled while the plan — and
+   *  therefore the AR cache entry — stays put. */
+  ar_seed?: number;
+
   // ── Sampler plugins (engine: minimax/mm3-plugins.h) ───────────────────────
   // The SAME Lua solver/scheduler/guidance plugins the ACE DiT uses, driving
   // MM3's flow DiT through a convention adapter. Field names are ACE's, so one
@@ -230,6 +245,9 @@ export interface Mm3JobDetail {
   max_frames: number;
   prompt_tokens: number;
   instrumental: boolean;
+  /** AR cache: true when stage 1 was skipped entirely for this job. Set as soon
+   *  as the job starts, not only on the finished result. */
+  ar_cached?: boolean;
   evicted_modules?: number;
   evicted_mb?: number;
   arbitrate_ms?: number;

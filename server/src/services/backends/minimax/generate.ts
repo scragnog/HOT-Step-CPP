@@ -126,6 +126,27 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
     ? -1
     : (typeof params.seed === 'number' && params.seed >= 0 ? params.seed : -1);
 
+  // AR-stage seed. -1 (the default) ties it to `seed`, which is MM3's native
+  // behaviour. Setting it explicitly pins the PLAN while the flow noise still
+  // follows `seed` — the only way to reroll the noise and still hit the AR
+  // cache. Range-checked here so a junk value never reaches the engine.
+  // Blank/absent means "tied". Number('') is 0, not NaN, so the blank check
+  // has to come first or an untouched text field would silently pin the
+  // planner to seed 0.
+  const arSeedRaw = String(params.mm3ArSeed ?? '').trim();
+  const arSeedNum = arSeedRaw === '' ? NaN : Number(arSeedRaw);
+  const arSeed: number = Number.isFinite(arSeedNum) && arSeedNum >= 0 ? Math.round(arSeedNum) : -1;
+
+  // The one combination that cannot work, called out rather than left to look
+  // like a dead toggle: a fresh random seed each render means a fresh plan each
+  // render, so there is nothing for the cache to match.
+  if (params.mm3ReuseAr !== false && seed < 0 && arSeed < 0) {
+    notes.push(
+      'AR cache is on but the seed is random — every render plans afresh, so it cannot hit. '
+      + 'Fix the seed, or set an explicit AR seed to keep the plan while the flow noise rerolls.',
+    );
+  }
+
   const requestedBatch = Number(params.batchSize) || 1;
   if (requestedBatch > 1) {
     notes.push(`batchSize ${requestedBatch} requested — MiniMax-Music3 v1 generates 1 track per job (capability manifest: batch.max = 1)`);
@@ -159,6 +180,19 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       get_lrc: params.skipLrc !== true,
       // MM3 Plank capture — opt-in, zero cost when off.
       ...(params.mm3SaveArCodes === true ? { get_ar_codes: true } : {}),
+      // ── AR cache ──
+      //
+      // `!== false`, not `=== true`, and that is not a typo: the UI only writes
+      // a backend-declared param into the request once the user TOUCHES it
+      // (BackendGenerationDropdown reads `backendParams[key] ?? p.default`).
+      // For a manifest default of true, an untouched control shows ON while
+      // sending nothing — so an absent value has to mean the declared default
+      // or the toggle would lie. Same idiom as get_lrc/skipLrc above.
+      //
+      // The engine owns the "did anything upstream change?" decision; the
+      // server never has to model it. See engine/src/minimax/mm3-ar-cache.h.
+      ...(params.mm3ReuseAr !== false ? { reuse_ar: true } : {}),
+      ...(arSeed >= 0 ? { ar_seed: arSeed } : {}),
       // MM3 Plank replay. A plank that will not load is a note, not a failure:
       // the render proceeds with a normal AR pass.
       ...(params.mm3PlankPath ? (() => {
@@ -463,8 +497,16 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
       log('INFO',
         `[MM3] Rendered ${r.frames} frames → ${r.duration_sec.toFixed(1)}s @ ${r.sample_rate} Hz, `
         + `rms ${r.rms.toFixed(4)}, peak ${r.peak.toFixed(3)}${r.eos ? ', EOS hit' : ''}${r.has_nan ? ' — WARNING: NaNs present' : ''}`);
+      // AR cache outcome. Worth a line of its own: a hit changes the shape of
+      // the run (no LM load, no stage 1) and "why was that render so fast?" /
+      // "why did it re-plan?" are the two questions this feature raises.
+      if (finalDetail.ar_cached) {
+        log('INFO', '[MM3] AR cache HIT — planner skipped, this render was flow-stage only');
+      } else if (req.reuse_ar) {
+        log('INFO', '[MM3] AR cache miss — planned fresh; the result is held for the next render');
+      }
       if (r.ms) {
-        timing.push({ name: '  AR planner', ms: Math.round(r.ms.ar) });
+        timing.push({ name: finalDetail.ar_cached ? '  AR planner (cached)' : '  AR planner', ms: Math.round(r.ms.ar) });
         timing.push({ name: '  Condition encoder', ms: Math.round(r.ms.cond) });
         timing.push({ name: '  Flow (DiT)', ms: Math.round(r.ms.flow) });
         timing.push({ name: '  Vocoder', ms: Math.round(r.ms.voc) });
