@@ -246,6 +246,17 @@ AR for 7 % of params) · flow 2.2 s/window · vocoder 85 ms/window. Speed levers
 codes), **depth-decoder kernel fusion**, TRT much later. Known quality morsel: our synth on
 identical codes measures ~18 % lower spectral flatness than the reference (unresolved, minor).
 
+**CLOSED NEGATIVE (2026-08-21): batching the flow DiT's cond+uncond CFG passes.** Full batch-2
+graph built and A/B'd (bcdcab0): 81 ms/step vs 66 two-pass at L=689 — **22 % SLOWER**, corr
+0.999991. The forward is COMPUTE-bound (~145 GB/s effective, nowhere near bandwidth), so the
+ceiling was ~3 ms of weight re-streaming and ggml's batched matmul/flash dispatch costs more.
+The code stays in mm3-dit-graph.h behind `MM3_DIT_CFG_BATCH=1` — re-measure on a new ggml
+before believing it, don't rebuild it from scratch. Real LM-side numbers from the same day
+(254 s render, f16): LM 23.4 ms/step *with* LRC capture on, 16.6 without (the +41 % is the
+all-manual-attention cost, live in every get_lrc render); runtime LM adapter r256 = +6.6
+ms/step (+28 %, not the hoped +9 %: 252 modules ≈ +1000 nodes on a 2545-node decode graph —
+launch overhead, not just the +8 % streaming).
+
 ## Validation bar for MM3 changes
 
 Forced-replay parity against the fixtures (never sampled-path comparisons — RNG can't match
