@@ -127,6 +127,7 @@
 // bound, as design note A assumed, which is exactly why the second CFG row is
 // nearly free.
 
+#include "mm3-align.h"
 #include "mm3-lm-adapter.h"
 #include "mm3-model.h"
 
@@ -160,9 +161,17 @@ struct MM3LmSlot {
     // inputs
     ggml_tensor * in_ids  = nullptr;  // prefill: I32 [T*B] (row-major: cond row then uncond row)
                                       // decode:  I32 [num_codebooks] feedback row indices
+                                      // replay:  I32 [T] token_embd row per position
     ggml_tensor * in_pos  = nullptr;  // I32 [T]
     ggml_tensor * in_rows = nullptr;  // I64 [T] KV destination rows
     ggml_tensor * in_mask = nullptr;  // F16 [n_kv_pad, T]
+    // Replay-slot extras (LRC replay, see mm3_lm_lrc_replay): the per-position
+    // acoustic embedding rows, the 0/1 gate that zeroes them on prompt
+    // positions, and the per-position embedding scale (1.0 on prompt positions,
+    // ar_embedding_scale on frame positions).
+    ggml_tensor * in_ac    = nullptr;  // I32 [T * (num_codebooks-1)]
+    ggml_tensor * in_gate  = nullptr;  // F32 [1, T]
+    ggml_tensor * in_scale = nullptr;  // F32 [1, T]
 
     // outputs
     ggml_tensor * out_hidden   = nullptr;  // F32 [H, 1, B] last position, pre-head
@@ -216,6 +225,9 @@ struct MM3LmGraph {
 
     MM3LmSlot prefill;
     MM3LmSlot decode;
+    // Post-hoc LRC replay (teacher-forced chunk over blocks 0..max align layer,
+    // manual attention, single CFG row). Built lazily by mm3_lm_lrc_replay.
+    MM3LmSlot replay;
 
     // host staging, reused every step
     std::vector<int32_t>  ids_host;
@@ -266,6 +278,7 @@ static void mm3_lm_free_kv(MM3LmGraph * g) {
 static void mm3_lm_free(MM3LmGraph * g) {
     mm3_lm_free_slot_all(&g->prefill);
     mm3_lm_free_slot_all(&g->decode);
+    mm3_lm_free_slot_all(&g->replay);
     mm3_lm_free_kv(g);
     g->lm_token    = nullptr;
     g->synth_token = nullptr;
@@ -291,6 +304,7 @@ static void mm3_lm_set_adapter(MM3LmGraph * g, const MM3LmAdapter * ad, const MM
     g->adapter_scales = sc;
     mm3_lm_free_slot_all(&g->prefill);
     mm3_lm_free_slot_all(&g->decode);
+    mm3_lm_free_slot_all(&g->replay);
 }
 
 // ── Graph pieces ────────────────────────────────────────────────────────────
@@ -645,6 +659,7 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     // A bigger cache means new tensors, so every graph that views them dies too.
     mm3_lm_free_slot(&g->prefill);
     mm3_lm_free_slot(&g->decode);
+    mm3_lm_free_slot(&g->replay);
     mm3_lm_free_kv(g);
 
     const int64_t D   = (int64_t) c.key_length;
@@ -879,5 +894,260 @@ static bool mm3_lm_decode(const MM3Model & m, MM3LmGraph * g, int32_t sem_token_
     }
     mm3_lm_read_outputs(c, g->decode, out_hidden, out_logits, out_feedback);
     g->kv_pos++;
+    return true;
+}
+
+// ── LRC replay: post-hoc alignment capture ──────────────────────────────────
+//
+// The live capture path (MM3_LRC_LIVE=1) pays ~+41 % on EVERY decode step,
+// because reading attention requires the manual F32 path and — measured, not
+// assumed — it must run on ALL 36 layers or the alignment comes out wrong
+// (see the trap note in mm3_lm_prepare). This replay pass gets the same
+// attention for a fraction of the cost by exploiting causality: for a GIVEN
+// token sequence, a teacher-forced prefill computes exactly the attention the
+// step-by-step decode computed. So the decode runs pure flash (zero capture
+// overhead, audio bit-identical to a no-LRC render), and afterwards — while
+// the LM is still resident, before the staged handover — the full sequence
+// [prompt + frame feedback embeddings] is re-run in chunks with manual
+// attention everywhere, and the three alignment heads' lyric columns are read
+// out of it.
+//
+// Three properties keep this in the VALIDATED regime rather than the broken
+// mixed one:
+//   1. Every replayed layer is manual — no flash/manual mixing inside a
+//      forward, which is what produced the wrong-alignment trap.
+//   2. Only blocks 0..mm3_align_max_layer() run. Layers above the deepest
+//      capture layer feed nothing the replay reads (causally downstream), so
+//      truncating them cannot change the captured scores.
+//   3. One CFG row. The conditional row's KV never depends on the uncond row,
+//      so the replay reproduces row 0 of the decode exactly (via ne3=1 views
+//      onto row 0 of the shared KV cache — whose contents are clobbered, which
+//      is fine: the AR stage is done with them and the handover frees them
+//      next).
+//
+// The per-position input embedding reproduces both prefill and decode inputs
+// in one formula: h[t] = (token_embd[id] + gate * SUM_k audio_embd[ac_k]) *
+// scale, with gate=0/scale=1 on prompt positions (plain token embedding) and
+// gate=1/scale=ar_embedding_scale on frame positions (the decode graph's
+// feedback embedding, same summation order, so the arithmetic matches).
+
+// Queries per replay chunk. The manual-attention score tensor is
+// [n_kv_pad, T, Nh] F32 per layer transiently, so T trades VRAM for launch
+// count: 256 keeps the peak a few hundred MB at 5-minute song lengths.
+#define MM3_LRC_REPLAY_CHUNK 256
+
+static bool mm3_lm_build_replay_slot(const MM3Model & m, MM3LmGraph * g, MM3LmSlot * s, int64_t T, int64_t n_kv_pad,
+                                     std::string * err) {
+    const MM3LmConfig & c    = m.lm_cfg;
+    const int64_t       H    = (int64_t) c.embedding_length;
+    const int64_t       D    = (int64_t) c.key_length;
+    const int64_t       Nkv  = (int64_t) c.head_count_kv;
+    const int64_t       NC   = (int64_t) c.num_codebooks - 1;
+    const int           Lmax = mm3_align_max_layer();
+
+    const size_t ctx_bytes =
+        ggml_tensor_overhead() * (MM3_LM_MAX_NODES + 256) + ggml_graph_overhead_custom(MM3_LM_MAX_NODES, false);
+    s->gbuf = (uint8_t *) malloc(ctx_bytes);
+    if (!s->gbuf) {
+        if (err) {
+            *err = "out of host memory allocating the MM3 LM replay graph context";
+        }
+        return false;
+    }
+    ggml_init_params ip  = { ctx_bytes, s->gbuf, /*no_alloc*/ true };
+    ggml_context *   ctx = ggml_init(ip);
+    if (!ctx) {
+        free(s->gbuf);
+        s->gbuf = nullptr;
+        if (err) {
+            *err = "ggml_init failed for the MM3 LM replay graph context";
+        }
+        return false;
+    }
+    ggml_cgraph * gf = ggml_new_graph_custom(ctx, MM3_LM_MAX_NODES, false);
+
+    s->in_pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, T);
+    ggml_set_name(s->in_pos, "mm3_lm_replay_positions");
+    ggml_set_input(s->in_pos);
+    s->in_rows = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, T);
+    ggml_set_name(s->in_rows, "mm3_lm_replay_kv_rows");
+    ggml_set_input(s->in_rows);
+    s->in_mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, n_kv_pad, T);
+    ggml_set_name(s->in_mask, "mm3_lm_replay_mask");
+    ggml_set_input(s->in_mask);
+    s->in_ids = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, T);
+    ggml_set_name(s->in_ids, "mm3_lm_replay_ids");
+    ggml_set_input(s->in_ids);
+    s->in_ac = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, T * NC);
+    ggml_set_name(s->in_ac, "mm3_lm_replay_ac_rows");
+    ggml_set_input(s->in_ac);
+    s->in_gate = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1, T);
+    ggml_set_name(s->in_gate, "mm3_lm_replay_gate");
+    ggml_set_input(s->in_gate);
+    s->in_scale = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1, T);
+    ggml_set_name(s->in_scale, "mm3_lm_replay_scale");
+    ggml_set_input(s->in_scale);
+
+    // The hybrid input embedding. Acoustic rows are position-major (position t's
+    // NC entries at t*NC..t*NC+NC-1), so position t's k-th code sits at column
+    // t*NC + k of the gather — a stride-NC*nb1 view per k, summed in the same
+    // left-to-right order the decode graph uses.
+    ggml_tensor * h_tok = ggml_get_rows(ctx, m.lm.token_embd, s->in_ids);          // [H, T]
+    ggml_tensor * e_ac  = ggml_get_rows(ctx, m.synth.depth.audio_embd, s->in_ac);  // [H, T*NC]
+    ggml_tensor * acc   = ggml_view_2d(ctx, e_ac, H, T, (size_t) NC * e_ac->nb[1], 0);
+    for (int64_t k = 1; k < NC; k++) {
+        acc = ggml_add(ctx, acc,
+                       ggml_view_2d(ctx, e_ac, H, T, (size_t) NC * e_ac->nb[1], (size_t) k * e_ac->nb[1]));
+    }
+    ggml_tensor * h = ggml_add(ctx, h_tok, ggml_mul(ctx, acc, s->in_gate));
+    h               = ggml_mul(ctx, h, s->in_scale);
+    h               = ggml_reshape_3d(ctx, h, H, T, 1);
+
+    s->attn_scores.assign(m.lm.blk.size(), nullptr);
+    for (int i = 0; i <= Lmax && i < (int) m.lm.blk.size(); i++) {
+        // ne3=1 views onto CFG row 0 of the shared cache — offset 0, contiguous.
+        ggml_tensor * kc0 = ggml_view_4d(ctx, g->kv_k[(size_t) i], D, g->n_ctx, Nkv, 1, g->kv_k[(size_t) i]->nb[1],
+                                         g->kv_k[(size_t) i]->nb[2], g->kv_k[(size_t) i]->nb[3], 0);
+        ggml_tensor * vc0 = ggml_view_4d(ctx, g->kv_v[(size_t) i], D, g->n_ctx, Nkv, 1, g->kv_v[(size_t) i]->nb[1],
+                                         g->kv_v[(size_t) i]->nb[2], g->kv_v[(size_t) i]->nb[3], 0);
+        ggml_tensor * sc   = nullptr;
+        const bool    want = mm3_align_layer_needed(i);
+        h = mm3_lm_block(ctx, gf, c, m.lm.blk[(size_t) i], h, s->in_pos, s->in_mask, s->in_rows, kc0, vc0, n_kv_pad,
+                         /*use_flash*/ false, want ? &sc : nullptr, g->adapter, &g->adapter_scales, i);
+        if (want && sc) {
+            ggml_set_name(sc, ("mm3_lm_replay_attn_" + std::to_string(i)).c_str());
+            ggml_set_output(sc);
+            ggml_build_forward_expand(gf, sc);
+            s->attn_scores[(size_t) i] = sc;
+        }
+    }
+    s->graph = gf;
+
+    ggml_backend_sched_reset(s->sched);
+    if (!ggml_backend_sched_alloc_graph(s->sched, s->graph)) {
+        ggml_free(ctx);
+        free(s->gbuf);
+        s->gbuf  = nullptr;
+        s->graph = nullptr;
+        if (err) {
+            *err = "MM3 LM replay graph allocation failed (out of VRAM?) at T=" + std::to_string((long long) T) +
+                   ", kv=" + std::to_string((long long) n_kv_pad);
+        }
+        return false;
+    }
+    s->gctx          = ctx;
+    s->T             = T;
+    s->n_kv_pad      = n_kv_pad;
+    s->n_nodes       = ggml_graph_n_nodes(s->graph);
+    s->compute_bytes = ggml_backend_sched_get_buffer_size(s->sched, g->backend);
+    return true;
+}
+
+// Run the replay over [prompt + n_steps frame feedbacks] and fill `flat` in
+// mm3_align_build_lrc()'s [head][token][frame] layout. `sem_all` / `ac_all`
+// are the AR result's code arrays (raw codes, no vocab offset). Clobbers the
+// KV cache — call only after the AR stage is completely done with it.
+static bool mm3_lm_lrc_replay(const MM3Model & m, MM3LmGraph * g, const int32_t * cond_ids, int64_t n_prompt,
+                              const int32_t * sem_all, const int32_t * ac_all, int64_t n_steps, int64_t lyr0,
+                              int64_t lyr1, std::vector<float> * flat, std::string * err) {
+    const MM3LmConfig & c     = m.lm_cfg;
+    const int64_t       NC    = (int64_t) c.num_codebooks - 1;
+    const int64_t       AV    = (int64_t) c.acoustic_vocab_size;
+    const int64_t       OFF   = (int64_t) c.semantic_vocab_offset;
+    const int64_t       total = n_prompt + n_steps;
+    const int64_t       n_tok = lyr1 - lyr0;
+    if (n_steps <= 0 || n_tok <= 0) {
+        if (err) {
+            *err = "nothing to replay";
+        }
+        return false;
+    }
+    if (total > g->n_ctx) {
+        if (err) {
+            *err = "replay of " + std::to_string((long long) total) + " positions exceeds the KV cache (" +
+                   std::to_string((long long) g->n_ctx) + ")";
+        }
+        return false;
+    }
+    const int64_t n_kv_pad = std::min<int64_t>(mm3_lm_bucket(total), g->n_ctx);
+
+    flat->assign((size_t) (MM3_ALIGN_N_HEADS * n_tok * n_steps), 0.0f);
+
+    const auto t0 = std::chrono::steady_clock::now();
+    g->kv_pos     = 0;
+
+    std::vector<int32_t> ids, ac;
+    std::vector<float>   gate, scl, row((size_t) n_tok);
+    int                  n_chunks = 0;
+    while (g->kv_pos < total) {
+        const int64_t T = std::min<int64_t>(MM3_LRC_REPLAY_CHUNK, total - g->kv_pos);
+        if (!g->replay.graph || g->replay.T != T || g->replay.n_kv_pad != n_kv_pad) {
+            mm3_lm_free_slot(&g->replay);
+            if (!g->replay.sched) {
+                g->replay.sched = backend_sched_new(g->bp, MM3_LM_MAX_NODES * 2);
+            }
+            if (!mm3_lm_build_replay_slot(m, g, &g->replay, T, n_kv_pad, err)) {
+                return false;
+            }
+        }
+        MM3LmSlot & s = g->replay;
+
+        ids.assign((size_t) T, 0);
+        ac.assign((size_t) (T * NC), 0);
+        gate.assign((size_t) T, 0.0f);
+        scl.assign((size_t) T, 1.0f);
+        for (int64_t i = 0; i < T; i++) {
+            const int64_t abs = g->kv_pos + i;
+            if (abs < n_prompt) {
+                ids[(size_t) i] = cond_ids[abs];
+            } else {
+                const int64_t j = abs - n_prompt;
+                ids[(size_t) i] = (int32_t) OFF + sem_all[j];
+                for (int64_t k = 0; k < NC; k++) {
+                    ac[(size_t) (i * NC + k)] = ac_all[j * NC + k] + (int32_t) (k * AV);
+                }
+                gate[(size_t) i] = 1.0f;
+                scl[(size_t) i]  = c.ar_embedding_scale;
+            }
+        }
+        ggml_backend_tensor_set(s.in_ids, ids.data(), 0, ids.size() * sizeof(int32_t));
+        ggml_backend_tensor_set(s.in_ac, ac.data(), 0, ac.size() * sizeof(int32_t));
+        ggml_backend_tensor_set(s.in_gate, gate.data(), 0, gate.size() * sizeof(float));
+        ggml_backend_tensor_set(s.in_scale, scl.data(), 0, scl.size() * sizeof(float));
+        mm3_lm_upload_step(g, &s, T, n_kv_pad);
+
+        if (ggml_backend_sched_graph_compute(s.sched, s.graph) != GGML_STATUS_SUCCESS) {
+            if (err) {
+                *err = "MM3 LM replay graph compute failed";
+            }
+            return false;
+        }
+
+        for (int hh = 0; hh < MM3_ALIGN_N_HEADS; hh++) {
+            const MM3AlignHead & ah = MM3_ALIGN_HEADS[hh];
+            ggml_tensor *        sc = s.attn_scores[(size_t) ah.layer];
+            if (!sc) {
+                continue;
+            }
+            for (int64_t i = 0; i < T; i++) {
+                const int64_t abs = g->kv_pos + i;
+                if (abs < n_prompt) {
+                    continue;
+                }
+                const int64_t j   = abs - n_prompt;
+                const size_t  off = (size_t) lyr0 * sc->nb[0] + (size_t) i * sc->nb[1] + (size_t) ah.head * sc->nb[2];
+                ggml_backend_tensor_get(sc, row.data(), off, (size_t) n_tok * sizeof(float));
+                for (int64_t t = 0; t < n_tok; t++) {
+                    (*flat)[(size_t) ((hh * n_tok + t) * n_steps + j)] = row[(size_t) t];
+                }
+            }
+        }
+        g->kv_pos += T;
+        n_chunks++;
+    }
+
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    fprintf(stderr, "[MM3-LRC] Replay: %lld positions (%lld frames) in %d chunks, blocks 0..%d, %.0f ms\n",
+            (long long) total, (long long) n_steps, n_chunks, mm3_align_max_layer(), ms);
     return true;
 }

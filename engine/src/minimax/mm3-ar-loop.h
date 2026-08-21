@@ -310,8 +310,20 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
     // one, plus slack so the last decode step never sits exactly on the boundary.
     // Must be set BEFORE prepare: the graph builder decides per layer
     // whether to materialise attention, and a cached graph is reused.
+    //
+    // LRC capture is a POST-HOC REPLAY by default (mm3_lm_lrc_replay): the
+    // decode runs pure flash — bit-identical to a no-LRC render — and the
+    // alignment attention is recomputed afterwards from the sampled codes, at
+    // a few seconds per song instead of ~+41 % on every decode step.
+    // MM3_LRC_LIVE=1 restores the old all-manual live capture — the
+    // validation path (same codes through both must give the same LRC) and
+    // the fallback if replay alignment ever misbehaves.
+    static const bool lrc_live = [] {
+        const char * e = std::getenv("MM3_LRC_LIVE");
+        return e && e[0] && e[0] != '0';
+    }();
     {
-        const bool want = opt.want_lrc && opt.tok != nullptr;
+        const bool want = opt.want_lrc && opt.tok != nullptr && lrc_live;
         if (g_mm3_lm.align_capture != want) {
             g_mm3_lm.align_capture = want;
             mm3_lm_free(&g_mm3_lm);   // graphs encode the choice — rebuild them
@@ -337,9 +349,9 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
     // of them for offline scoring. Discovery only — never on in a normal run.
     const bool align_dump = g_mm3_lm.dump_attn;
     int64_t    lyr0 = -1, lyr1 = -1;
-    // The span is needed by BOTH consumers — the discovery dump and production
-    // LRC — so it is located whenever either is active.
-    if (align_dump || g_mm3_lm.align_capture) {
+    // The span is needed by ALL consumers — the discovery dump, live capture,
+    // and the post-hoc replay — so it is located whenever any of them will run.
+    if (align_dump || g_mm3_lm.align_capture || (opt.want_lrc && opt.tok != nullptr)) {
         for (int64_t i = 0; i < n_prompt; i++) {
             if (cond_ids[i] == (int32_t) m.lm_cfg.tok_lyrics_start) lyr0 = i + 1;
             if (cond_ids[i] == (int32_t) m.lm_cfg.tok_lyrics_end)   lyr1 = i;
@@ -625,6 +637,36 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_lrc).count();
             fprintf(stderr, "[MM3-LRC] %s (%d frames, %.1f s, %.0f ms)\n",
                     out->lrc.empty() ? "no alignment produced" : "LRC built", n_fr, dur, lrc_ms);
+        }
+    }
+
+    // ── LRC via post-hoc replay (the default path) ───────────────────────────
+    // The decode above ran pure flash; recompute the alignment attention from
+    // the sampled codes now, while the LM is still resident. Failure only costs
+    // the LRC, never the render.
+    if (opt.want_lrc && opt.tok != nullptr && !g_mm3_lm.align_capture && !align_dump && lyr0 >= 0 && lyr1 > lyr0 &&
+        out->n_frames > 1) {
+        // Column count must match what the live path would have captured: one
+        // per decode step — every iteration that pushed codes also fed back,
+        // except the last when the max-frames break fired before its feedback.
+        const int64_t n_steps = out->eos_hit ? out->n_iterations : out->n_iterations - 1;
+        if (n_steps > 1) {
+            std::vector<float> flat;
+            std::string        rerr;
+            const auto         t_lrc = std::chrono::steady_clock::now();
+            if (mm3_lm_lrc_replay(m, &g_mm3_lm, cond_ids, n_prompt, out->semantic_all.data(),
+                                  out->acoustic_all.data(), n_steps, lyr0, lyr1, &flat, &rerr)) {
+                const float dur =
+                    m.lm_cfg.frame_rate > 0 ? (float) out->n_frames / (float) m.lm_cfg.frame_rate : 0.0f;
+                const std::vector<int> ids(cond_ids + lyr0, cond_ids + lyr1);
+                out->lrc = mm3_align_build_lrc(flat, ids, opt.tok->bpe, (int) n_steps, dur);
+                const double lrc_ms =
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_lrc).count();
+                fprintf(stderr, "[MM3-LRC] %s via replay (%lld frames, %.1f s, %.0f ms)\n",
+                        out->lrc.empty() ? "no alignment produced" : "LRC built", (long long) n_steps, dur, lrc_ms);
+            } else {
+                fprintf(stderr, "[MM3-LRC] Replay failed (%s) — no LRC for this render\n", rerr.c_str());
+            }
         }
     }
 

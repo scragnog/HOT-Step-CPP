@@ -82,6 +82,19 @@ static inline bool mm3_align_layer_needed(int layer) {
     return false;
 }
 
+// Deepest layer any alignment head reads. The LRC replay pass (mm3-lm-graph.h)
+// runs blocks 0..this and stops — layers above it feed only the logits, which
+// the replay never needs.
+static inline int mm3_align_max_layer(void) {
+    int mx = 0;
+    for (int i = 0; i < MM3_ALIGN_N_HEADS; i++) {
+        if (MM3_ALIGN_HEADS[i].layer > mx) {
+            mx = MM3_ALIGN_HEADS[i].layer;
+        }
+    }
+    return mx;
+}
+
 // Incremental detokenisation of the lyric span, matching what lrc_align()
 // expects: token_texts[i] is the text token i ADDS to the running string, so
 // concatenating them reproduces the lyric. Mirrors the ACE implementation in
