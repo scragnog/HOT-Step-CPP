@@ -578,6 +578,10 @@ struct MM3SynthRequest {
     // thirds are advanced dials (halving `late` destabilised termination).
     std::string        lm_adapter;
     MM3LmAdapterScales lm_adapter_scales = {};
+    // "runtime" (default) = low-rank deltas in-graph, live dials, +28 %/step
+    // at r256. "merge" = fold scale·B·A into the resident weights once
+    // (mm3-lm-merge.h) — zero per-step cost, scale changes re-merge.
+    std::string        lm_adapter_mode = "runtime";
 
     std::string prompt;  // the assembled template
     int64_t     n_tokens = 0;
@@ -798,6 +802,23 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 return false;
             }
             out->lm_adapter = yyjson_get_str(v);
+        }
+        yyjson_val * mv = yyjson_obj_get(root, "lm_adapter_mode");
+        if (mv && !yyjson_is_null(mv)) {
+            if (!yyjson_is_str(mv)) {
+                if (err) {
+                    *err = "\"lm_adapter_mode\" must be \"runtime\" or \"merge\"";
+                }
+                return false;
+            }
+            const std::string mode = yyjson_get_str(mv);
+            if (mode != "runtime" && mode != "merge") {
+                if (err) {
+                    *err = "\"lm_adapter_mode\" must be \"runtime\" or \"merge\", got \"" + mode + "\"";
+                }
+                return false;
+            }
+            out->lm_adapter_mode = mode;
         }
         struct {
             const char * key;

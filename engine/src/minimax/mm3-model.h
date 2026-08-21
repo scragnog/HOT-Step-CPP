@@ -382,6 +382,11 @@ struct MM3Model {
     bool           lm_resident    = false;
     bool           depth_resident = false;
     bool           rest_resident  = false;
+    // Identity of the LM adapter merged INTO the resident LM weights
+    // (mm3-lm-merge.h), or "" = pristine base. Encodes (path, mtime, scales),
+    // so any change forces an LM reload before the next merge or base render.
+    // Cleared wherever the LM weights are freed — a fresh load is pristine.
+    std::string    lm_merge_tag;
     bool           backend_ref    = false;
     ggml_backend_t backend        = nullptr;
     ggml_backend_t cpu_backend    = nullptr;
@@ -1350,6 +1355,7 @@ static void mm3_unload(MM3Model * m) {
     m->lm_resident    = false;
     m->depth_resident = false;
     m->rest_resident  = false;
+    m->lm_merge_tag.clear();
     if (m->backend_ref) {
         backend_release(m->backend, m->cpu_backend);
         m->backend     = nullptr;
@@ -1688,6 +1694,7 @@ static size_t mm3_free_lm(MM3Model * m) {
     m->vram_lm     = 0;
     m->lm_resident = false;
     m->loaded      = false;
+    m->lm_merge_tag.clear();
     return freed;
 }
 

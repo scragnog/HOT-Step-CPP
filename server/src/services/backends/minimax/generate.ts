@@ -196,9 +196,14 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           return Number.isFinite(v) && v >= -4 && v <= 4 ? v : fallback;
         };
         const d = MM3_LM_ADAPTER_DEFAULT_SCALES;
-        notes.push(`LM adapter: ${path.basename(resolved)}`);
+        // Application mode: "runtime" (default; low-rank deltas in-graph, live
+        // dials, ~+28%/step at r256) or "merge" (folded into the resident
+        // weights once — zero per-step cost; scale changes re-merge).
+        const mode = params.mm3LmAdapterMode === 'merge' ? 'merge' : 'runtime';
+        notes.push(`LM adapter: ${path.basename(resolved)} (${mode})`);
         return {
           lm_adapter: resolved,
+          lm_adapter_mode: mode,
           lm_adapter_scale: dial('mm3LmAdapterScale', d.scale),
           lm_adapter_scale_attn: dial('mm3LmAdapterScaleAttn', d.scaleAttn),
           lm_adapter_scale_mlp: dial('mm3LmAdapterScaleMlp', d.scaleMlp),

@@ -145,9 +145,10 @@ export interface Mm3SynthRequest {
   steps?: number;
   /** 16 | 24 | 32, default 16. */
   get_wav_bits?: number;
-  /** Emit LRC lyric timestamps from the LM's alignment heads. Adds ~50%
-   *  to the AR stage (forces the manual attention path) and is ignored
-   *  for instrumentals. */
+  /** Emit LRC lyric timestamps from the LM's alignment heads. Since the
+   *  post-hoc replay pass (2026-08-21) this costs a fraction of a second
+   *  after the AR stage — the decode itself is untouched. Ignored for
+   *  instrumentals. */
   get_lrc?: boolean;
 
   // ── MM3 Plank (engine: minimax/mm3-job.h) ─────────────────────────────────

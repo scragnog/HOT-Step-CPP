@@ -53,6 +53,7 @@
 // Callers that want the real MM3 vocabulary poll GET /mm3/job?id=... instead,
 // which reports the raw stage name plus the run's shape, timings and seed.
 
+#include "mm3-lm-merge.h"
 #include "mm3-request.h"
 #include "mm3-server.h"
 
@@ -399,31 +400,80 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     req.gen.want_lrc      = req.want_lrc && !req.instrumental;
     req.gen.should_cancel = [&job]() { return job->cancel.load(); };
 
-    // ── Runtime LM adapter (worker thread, g_mm3_mutex held) ───────────────
+    // ── LM adapter (worker thread, g_mm3_mutex held) ───────────────────────
     // Load fails the JOB, never falls back silently — an adapter the user
     // asked for that quietly didn't load would be indistinguishable from "the
     // adapter does nothing" (the exact failure mode the ablation work exists
     // to study). A cached adapter for a DIFFERENT path is dropped first; one
     // for the same path is revalidated by mtime so a retrained checkpoint
     // under the same name is picked up.
-    if (!req.lm_adapter.empty()) {
+    //
+    // Two application modes (req.lm_adapter_mode):
+    //   runtime — low-rank deltas in-graph, live dials, +28 %/step at r256.
+    //   merge   — scale·B·A folded into the resident weights once
+    //             (mm3-lm-merge.h); the AR loop then runs the plain base graph
+    //             at full speed. MM3Model::lm_merge_tag tracks what is baked
+    //             in; any mismatch (different adapter, different dials, or a
+    //             base render on a merged LM under keep-loaded) forces a
+    //             pristine LM reload first. In staged mode the LM reloads
+    //             from disk every generation anyway, so the reload branch
+    //             below only ever fires under keep-loaded.
+    const bool merge_mode = !req.lm_adapter.empty() && req.lm_adapter_mode == "merge";
+    {
         struct stat asb {};
 
-        const bool stat_ok = stat(req.lm_adapter.c_str(), &asb) == 0;
-        const bool cached  = g_mm3_lm_adapter && g_mm3_lm_adapter->path == req.lm_adapter && stat_ok &&
-                            (int64_t) asb.st_mtime == g_mm3_lm_adapter->mtime;
-        if (!cached) {
-            mm3_lm_adapter_drop();
-            std::string aerr;
-            g_mm3_lm_adapter = mm3_lm_adapter_load(req.lm_adapter.c_str(), &aerr);
-            if (!g_mm3_lm_adapter) {
-                fail(2, "lm_adapter", aerr);  // fail() handles transient release
+        const bool  stat_ok  = !req.lm_adapter.empty() && stat(req.lm_adapter.c_str(), &asb) == 0;
+        std::string want_tag;  // "" = this render wants a pristine base
+        if (merge_mode) {
+            want_tag = mm3_lm_merge_make_tag(req.lm_adapter, stat_ok ? (int64_t) asb.st_mtime : 0,
+                                             req.gen.lm_adapter_scales);
+        }
+        if (g_mm3.lm_merge_tag != want_tag && !g_mm3.lm_merge_tag.empty()) {
+            // Something else is baked into the resident LM — reload pristine.
+            fprintf(stderr, "[MM3-Job] %s: merged LM is stale — reloading pristine base\n", job->id.c_str());
+            set_stage("swapping", -1, 0, 0, 0);
+            mm3_lm_free(&g_mm3_lm);
+            mm3_free_lm(&g_mm3);
+            std::string lerr;
+            if (!mm3_load_parts(&g_mm3, /*lm=*/true, /*depth=*/true, /*rest=*/!staged, &lerr)) {
+                fail(2, "failed", lerr.empty() ? "pristine LM reload failed" : lerr);
                 return;
             }
         }
-        req.gen.lm_adapter = g_mm3_lm_adapter;
-    } else {
-        req.gen.lm_adapter = nullptr;  // cached adapter stays resident but inert
+
+        if (!req.lm_adapter.empty()) {
+            const bool cached = g_mm3_lm_adapter && g_mm3_lm_adapter->path == req.lm_adapter && stat_ok &&
+                                (int64_t) asb.st_mtime == g_mm3_lm_adapter->mtime;
+            if (!cached) {
+                mm3_lm_adapter_drop();
+                std::string aerr;
+                g_mm3_lm_adapter = mm3_lm_adapter_load(req.lm_adapter.c_str(), &aerr);
+                if (!g_mm3_lm_adapter) {
+                    fail(2, "lm_adapter", aerr);  // fail() handles transient release
+                    return;
+                }
+            }
+            if (merge_mode) {
+                if (g_mm3.lm_merge_tag != want_tag) {
+                    set_stage("merging", -1, 0, 0, 0);
+                    std::string merr;
+                    if (!mm3_lm_merge_apply(&g_mm3, g_mm3_lm_adapter, req.gen.lm_adapter_scales, &merr)) {
+                        // A part-way merge leaves mixed weights — drop the LM so
+                        // the next generation reloads a pristine base.
+                        mm3_lm_free(&g_mm3_lm);
+                        mm3_free_lm(&g_mm3);
+                        fail(2, "lm_adapter", merr.empty() ? "LM adapter merge failed" : merr);
+                        return;
+                    }
+                    g_mm3.lm_merge_tag = want_tag;
+                }
+                req.gen.lm_adapter = nullptr;  // baked in; no runtime deltas on top
+            } else {
+                req.gen.lm_adapter = g_mm3_lm_adapter;
+            }
+        } else {
+            req.gen.lm_adapter = nullptr;  // cached adapter stays resident but inert
+        }
     }
 
     // The stage-1 -> stage-2 handover (see mm3-pipeline.h). Runs on the worker

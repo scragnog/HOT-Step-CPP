@@ -35,6 +35,7 @@ const inputClasses =
 /** Request-param keys, in the order the panel presents them. */
 const PARAM = {
   adapter: 'mm3LmAdapter',
+  mode:    'mm3LmAdapterMode',
   scale:   'mm3LmAdapterScale',
   attn:    'mm3LmAdapterScaleAttn',
   mlp:     'mm3LmAdapterScaleMlp',
@@ -207,6 +208,44 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
           {entry.notes && (
             <p className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed italic">{entry.notes}</p>
           )}
+        </div>
+      )}
+
+      {/* ── Application mode ── */}
+      {selected && (
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
+            {t('globalBar.mm3LmMode', 'Application')}
+          </label>
+          <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
+            {(['runtime', 'merge'] as const).map(m => {
+              const active = String(params[PARAM.mode] ?? 'runtime') === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setBackendParam(PARAM.mode, m)}
+                  className={
+                    'flex-1 px-3 py-1.5 text-xs transition-colors ' +
+                    (active
+                      ? 'bg-emerald-500/20 text-emerald-500 font-medium'
+                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300')
+                  }
+                >
+                  {m === 'runtime'
+                    ? t('globalBar.mm3LmModeRuntime', 'Runtime')
+                    : t('globalBar.mm3LmModeMerge', 'Merge')}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
+            {String(params[PARAM.mode] ?? 'runtime') === 'merge'
+              ? t('globalBar.mm3LmModeMergeHint',
+                  'Folded into the model weights once per adapter+dial combination — planning runs at full base-model speed. Changing any dial re-merges (a few seconds). On a quantized LM the merge re-quantizes; ear-check against Runtime if in doubt.')
+              : t('globalBar.mm3LmModeRuntimeHint',
+                  'Applied as live low-rank deltas every step — dial changes cost nothing, but planning runs ~25% slower at rank 256. Pick Merge when the dials are settled.')}
+          </p>
         </div>
       )}
 
