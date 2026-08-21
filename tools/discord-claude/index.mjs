@@ -16,7 +16,7 @@
 // Setup: see README.md (bot token, MessageContent intent, invite URL, .env).
 
 import { Client, GatewayIntentBits, Partials } from 'discord.js';
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,32 +65,51 @@ function remember(msg) {
 
 function runClaude(prompt, channelId) {
   return new Promise((resolve) => {
+    // The prompt goes via STDIN, never argv: on Windows the claude.cmd shim
+    // forces shell launching, where multi-line/quoted argv WILL mangle. Every
+    // remaining arg is shell-safe by construction (no spaces or quotes), and
+    // the empty MCP config travels as a file path for the same reason.
     const args = [
-      '-p', prompt,
+      '-p',
       '--model', currentModel,
       '--output-format', 'json',
       '--allowedTools', 'Read,Grep,Glob',
       // Read-only is the capability CEILING; this narrows disclosure within
       // it. Secrets are unreadable even by name — an injected "print the
       // .env" gets a permission denial, not the bot token.
-      '--disallowedTools', 'Read(**/.env),Read(**/.env.*),Read(**/*.pem),Read(**/*token*),Read(**/sessions.json)',
+      '--disallowedTools', '"Read(**/.env),Read(**/.env.*),Read(**/*.pem),Read(**/*token*),Read(**/sessions.json)"',
+      // No MCP servers in Discord-facing sessions: the permission layer would
+      // deny their tools anyway, but Gmail/home-automation shouldn't even be
+      // visible to a session that untrusted text can steer.
+      '--strict-mcp-config', '--mcp-config', JSON.stringify(path.join(HERE, 'mcp-empty.json')),
       '--max-turns', '15',
     ];
     if (sessions[channelId]) args.push('--resume', sessions[channelId]);
-    execFile(CLAUDE_BIN, args, { cwd: REPO, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, shell: process.platform === 'win32' },
-      (err, stdout) => {
-        if (err && !stdout) {
-          resolve({ text: `(bridge error: ${String(err.message ?? err).slice(0, 300)})` });
-          return;
-        }
-        try {
-          const j = JSON.parse(stdout);
-          if (j.session_id) { sessions[channelId] = j.session_id; saveSessions(); }
-          resolve({ text: j.result ?? '(empty result)' });
-        } catch {
-          resolve({ text: String(stdout).trim() || '(no output)' });
-        }
-      });
+    const child = spawn(CLAUDE_BIN, args, {
+      cwd: REPO,
+      shell: process.platform === 'win32', // claude is a .cmd shim on Windows
+      timeout: TIMEOUT_MS,
+      windowsHide: true,
+    });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', (e) => resolve({ text: `(bridge error: ${String(e.message ?? e).slice(0, 300)})` }));
+    child.on('close', () => {
+      try {
+        // --output-format json emits an ARRAY of events (verified live);
+        // the terminal entry has type "result" with .result/.session_id.
+        const parsed = JSON.parse(stdout);
+        const events = Array.isArray(parsed) ? parsed : [parsed];
+        const done = events.findLast?.(e => e?.type === 'result') ?? events[events.length - 1];
+        if (done?.session_id) { sessions[channelId] = done.session_id; saveSessions(); }
+        resolve({ text: done?.result ?? '(empty result)' });
+      } catch {
+        resolve({ text: String(stdout).trim() || `(no output; stderr: ${stderr.slice(0, 200)})` });
+      }
+    });
+    child.stdin.write(prompt);
+    child.stdin.end();
   });
 }
 
