@@ -197,6 +197,15 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
     // mm3-plugins.h for the sigma<->t and channel-major<->time-major mappings.
     const bool use_plugins = plugins && plugins->active;
 
+    // Batched CFG (mm3-dit-graph.h design note B): both branches in one graph
+    // compute. Opt-in via MM3_DIT_CFG_BATCH=1 — measured SLOWER than two-pass
+    // (see the note), kept for re-testing on future ggml versions. Disabled
+    // for post_step guidance plugins regardless — those evaluate ONE branch at
+    // a time through the B=1 graph, and alternating B=2/B=1 computes would
+    // rebuild the graph twice per step.
+    const bool wants_post_step = use_plugins && plugins->guidance && plugins->guidance->has_post_step;
+    const bool batched_cfg     = mm3_dit_cfg_batched() && !wants_post_step;
+
     std::vector<float> sigmas, timesteps;
     if (plugins && plugins->scheduler) {
         mm3_plugins_schedule(*plugins, steps, &sigmas, &timesteps);
@@ -224,7 +233,7 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
         v_guided.assign((size_t) N, 0.0f);
 
         const bool multi_eval    = plugins->solver && plugins->solver->needs_model;
-        const bool wants_post    = plugins->guidance && plugins->guidance->has_post_step;
+        const bool wants_post    = wants_post_step;
         if (multi_eval || wants_post) {
             pred_c2.assign((size_t) N, 0.0f);
             pred_u2.assign((size_t) N, 0.0f);
@@ -243,10 +252,17 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
             model_fn = [&](const float * xt_ace, float t_val) {
                 const float sig = 1.0f - t_val;
                 mm3_plug_from_ace_view(xt_ace, plugins->cm_tmp.data(), C, L, /*negate=*/false);
-                if (!mm3_dit_run(m, &g_mm3_dit, plugins->cm_tmp.data(), nullptr, 1.0f, sig, L, pred_c2.data(),
-                                 &sub_eval_err) ||
-                    !mm3_dit_run(m, &g_mm3_dit, plugins->cm_tmp.data(), nullptr, 0.0f, sig, L, pred_u2.data(),
-                                 &sub_eval_err)) {
+                // A sub-evaluation needs both branches — the batched graph's
+                // exact shape — so it follows the main loop's batching choice
+                // and never forces a B-switch rebuild mid-window.
+                const bool ok =
+                    batched_cfg ? mm3_dit_run_cfg2(m, &g_mm3_dit, plugins->cm_tmp.data(), nullptr, sig, L,
+                                                   pred_c2.data(), pred_u2.data(), &sub_eval_err)
+                                : mm3_dit_run(m, &g_mm3_dit, plugins->cm_tmp.data(), nullptr, 1.0f, sig, L,
+                                              pred_c2.data(), &sub_eval_err) &&
+                                      mm3_dit_run(m, &g_mm3_dit, plugins->cm_tmp.data(), nullptr, 0.0f, sig, L,
+                                                  pred_u2.data(), &sub_eval_err);
+                if (!ok) {
                     sub_eval_failed = true;
                     return;
                 }
@@ -311,14 +327,23 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
 
         const auto t0 = std::chrono::steady_clock::now();
 
-        // Conditional. The condition is uploaded on the first pass only; every
-        // later pass reuses the resident copy and toggles the gate.
-        if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), i == 0 ? cond : nullptr, 1.0f, t, L, pred_c.data(), err)) {
-            return false;
-        }
-        // Unconditional: same tensor, gate 0 == zeros_like(condition).
-        if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), nullptr, 0.0f, t, L, pred_u.data(), err)) {
-            return false;
+        // The condition is uploaded on the first pass only; every later pass
+        // reuses the resident copy and toggles the gate. Batched: one compute
+        // returns both branches (batch 0 gated 1.0 = conditional, batch 1
+        // gated 0.0 == zeros_like(condition)).
+        if (batched_cfg) {
+            if (!mm3_dit_run_cfg2(m, &g_mm3_dit, out_latents.data(), i == 0 ? cond : nullptr, t, L, pred_c.data(),
+                                  pred_u.data(), err)) {
+                return false;
+            }
+        } else {
+            if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), i == 0 ? cond : nullptr, 1.0f, t, L, pred_c.data(),
+                             err)) {
+                return false;
+            }
+            if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), nullptr, 0.0f, t, L, pred_u.data(), err)) {
+                return false;
+            }
         }
 
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -415,10 +440,11 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
         stats->compute_bytes = g_mm3_dit.compute_bytes;
     }
     fprintf(stderr,
-            "[MM3-Flow] Window: L=%lld, ov=%lld, %d steps, cfg %.2f, %lld forwards -> %.0f ms (%.0f ms/step, %.0f "
+            "[MM3-Flow] Window: L=%lld, ov=%lld, %d steps, cfg %.2f%s, %lld forwards -> %.0f ms (%.0f ms/step, %.0f "
             "ms/forward)\n",
-            (long long) L, (long long) overlap, steps, (double) cfg_scale, (long long) n_forwards, total_ms,
-            total_ms / (double) steps, fwd_ms / (double) (n_forwards > 0 ? n_forwards : 1));
+            (long long) L, (long long) overlap, steps, (double) cfg_scale, batched_cfg ? " (batched)" : "",
+            (long long) n_forwards, total_ms, total_ms / (double) steps,
+            fwd_ms / (double) (n_forwards > 0 ? n_forwards : 1));
     return true;
 }
 

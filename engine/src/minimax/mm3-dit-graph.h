@@ -67,14 +67,25 @@
 //    torch [1, L, 2048] is already ne = [2048, L]. That asymmetry is real, not a
 //    mistake: the reference itself does `encoder_hidden_states.transpose(1, 2)`.
 //
-// B. CFG RUNS AS TWO SEQUENTIAL PASSES OVER ONE CACHED GRAPH, NOT A BATCH OF 2.
-//    At L=689 every matmul in the stack is already large enough to saturate the
-//    GPU (the smallest is 2048x2048 x 690 tokens), so batching would buy little
-//    while doubling the compute buffer and forcing an S*N position vector through
-//    RoPE. Instead the unconditional pass reuses the SAME uploaded condition and
-//    multiplies it by a 1-element `cond_gate` input (1.0 = conditional, 0.0 =
-//    unconditional). That is exactly `torch.zeros_like(condition)` — the manifest
-//    pins `flow_uncond_conditioning: "zeros_like(condition), not a re-encoded
+// B. CFG RUNS AS TWO SEQUENTIAL PASSES OVER ONE CACHED GRAPH, NOT A BATCH OF 2
+//    — and that is now MEASURED, not just reasoned. A full batched variant
+//    exists (the graph generalises to [.., S, B] with the batch riding
+//    ne[2]/ne[3]; RoPE broadcasts positions over ne[3], flash_attn_ext batches
+//    over ne[3] natively) and was A/B'd on 2026-08-21 (RTX 5090, f16 DiT,
+//    L=689, same seed): batched 81 ms/step vs two-pass 66 ms/step — 22 %
+//    SLOWER, with output corr 0.999991 (numerically equivalent). The forward
+//    is COMPUTE-bound at this L (~4.8 GB streamed in 33 ms ≈ 145 GB/s, far
+//    under bandwidth), so batching's theoretical ceiling was only the ~3 ms of
+//    weight re-streaming, and ggml's batched matmul/flash dispatch costs more
+//    than that. `MM3_DIT_CFG_BATCH=1` re-enables the batched path if a future
+//    ggml/backend change moves the trade-off; re-measure before believing it.
+//    The single-branch B=1 graph remains what POST /mm3/dit-forward and
+//    POST /mm3/flow-sample run, so the parity fixtures cover the production
+//    path. In both variants the unconditional pass reuses the SAME uploaded
+//    condition multiplied by a `cond_gate` input (1.0 = conditional, 0.0 =
+//    unconditional; [1,1,B], so the batched graph gates per batch row). That
+//    is exactly `torch.zeros_like(condition)` — the manifest pins
+//    `flow_uncond_conditioning: "zeros_like(condition), not a re-encoded
 //    empty prompt"` — and it avoids re-uploading 5.6 MB per pass, 60 times per
 //    window.
 //
@@ -176,6 +187,10 @@ struct MM3DitGraph {
     ggml_tensor *  in_pos  = nullptr;  // [L+1]      I32, RoPE positions
     ggml_tensor *  output  = nullptr;  // [L, 128]   F32, channel-major
     int64_t        graph_L = 0;
+    // Batch size the cached graph was built for: 1 = the classic single-branch
+    // forward, 2 = both CFG branches in one compute (batch 0 = conditional,
+    // batch 1 = unconditional via the gate). Part of the cache key.
+    int64_t        graph_B = 1;
     size_t         compute_bytes = 0;
     int            n_nodes       = 0;
     // Cleared on every graph rebuild; see design note B.
@@ -340,7 +355,9 @@ static ggml_tensor * mm3_dit_ln(ggml_context * ctx, ggml_tensor * x, ggml_tensor
 }
 
 // Manual F32 attention, for CPU / -DHOT_STEP_DISABLE_FA builds. Same helper the
-// ACE DiT uses (dit-graph.h::dit_attn_f32). q/k/v [D, S, Nh] -> [D, Nh, S].
+// ACE DiT uses (dit-graph.h::dit_attn_f32). q/k/v [D, S, Nh, B] -> [D, Nh, S, B]
+// — every op here broadcasts/batches over the trailing dims, so the CFG batch
+// rides through untouched.
 static ggml_tensor * mm3_dit_attn_f32(ggml_context * ctx, ggml_tensor * q, ggml_tensor * k, ggml_tensor * v,
                                       float scale) {
     ggml_tensor * scores = ggml_mul_mat(ctx, k, q);
@@ -350,7 +367,8 @@ static ggml_tensor * mm3_dit_attn_f32(ggml_context * ctx, ggml_tensor * q, ggml_
     return ggml_cont(ctx, ggml_permute(ctx, out, 0, 2, 1, 3));
 }
 
-// One transformer block. h [E, S] -> [E, S].
+// One transformer block. h [E, S, B] -> [E, S, B]. B is the CFG batch (1 or
+// 2); with B == 1 every op below is shape-for-shape the original 2D/3D build.
 static ggml_tensor * mm3_dit_block(ggml_context * ctx, const MM3DitGraph & g, const MM3DitConfig & c,
                                    const MM3DitBlock & w, ggml_tensor * h, ggml_tensor * positions) {
     const int64_t E  = (int64_t) c.embedding_length;
@@ -358,57 +376,63 @@ static ggml_tensor * mm3_dit_block(ggml_context * ctx, const MM3DitGraph & g, co
     const int64_t Nh = (int64_t) c.head_count;
     const int64_t FI = (int64_t) c.ff_inner;
     const int64_t S  = h->ne[1];
+    const int64_t B  = h->ne[2];
 
     // ── self-attention ──
     ggml_tensor * n   = mm3_dit_ln(ctx, h, w.attn_norm_w, w.attn_norm_b, c.layer_norm_eps);
-    ggml_tensor * qkv = ggml_mul_mat(ctx, w.attn_qkv, n);  // [3E, S], fused q||k||v
+    ggml_tensor * qkv = ggml_mul_mat(ctx, w.attn_qkv, n);  // [3E, S, B], fused q||k||v
 
-    ggml_tensor * q = ggml_cont(ctx, ggml_view_2d(ctx, qkv, E, S, qkv->nb[1], 0));
-    ggml_tensor * k = ggml_cont(ctx, ggml_view_2d(ctx, qkv, E, S, qkv->nb[1], (size_t) E * qkv->nb[0]));
-    ggml_tensor * v = ggml_cont(ctx, ggml_view_2d(ctx, qkv, E, S, qkv->nb[1], (size_t) (2 * E) * qkv->nb[0]));
+    ggml_tensor * q = ggml_cont(ctx, ggml_view_3d(ctx, qkv, E, S, B, qkv->nb[1], qkv->nb[2], 0));
+    ggml_tensor * k = ggml_cont(ctx, ggml_view_3d(ctx, qkv, E, S, B, qkv->nb[1], qkv->nb[2], (size_t) E * qkv->nb[0]));
+    ggml_tensor * v =
+        ggml_cont(ctx, ggml_view_3d(ctx, qkv, E, S, B, qkv->nb[1], qkv->nb[2], (size_t) (2 * E) * qkv->nb[0]));
 
-    q = ggml_reshape_3d(ctx, q, D, Nh, S);
-    k = ggml_reshape_3d(ctx, k, D, Nh, S);
-    v = ggml_reshape_3d(ctx, v, D, Nh, S);
+    q = ggml_reshape_4d(ctx, q, D, Nh, S, B);
+    k = ggml_reshape_4d(ctx, k, D, Nh, S, B);
+    v = ggml_reshape_4d(ctx, v, D, Nh, S, B);
 
     // Partial RoPE: n_dims = rope_dim (32) of head_dim (64). ggml's NEOX mode
     // pairs element i with i + n_dims/2 and passes dims >= n_dims through
     // untouched — exactly the reference's chunk-2 rotate-half over hs[..., :32].
+    // The position vector indexes ne[2] (= S) and broadcasts over the ne[3]
+    // batch, so both CFG branches see identical rotations.
     q = ggml_rope_ext(ctx, q, positions, NULL, (int) c.rope_dim, GGML_ROPE_TYPE_NEOX, 0, c.rope_theta, 1.0f, 0.0f,
                       1.0f, 0.0f, 0.0f);
     k = ggml_rope_ext(ctx, k, positions, NULL, (int) c.rope_dim, GGML_ROPE_TYPE_NEOX, 0, c.rope_theta, 1.0f, 0.0f,
                       1.0f, 0.0f, 0.0f);
 
-    q = ggml_permute(ctx, q, 0, 2, 1, 3);  // [D, S, Nh]
+    q = ggml_permute(ctx, q, 0, 2, 1, 3);  // [D, S, Nh, B]
     k = ggml_permute(ctx, k, 0, 2, 1, 3);
     v = ggml_permute(ctx, v, 0, 2, 1, 3);
 
     const float   scale = 1.0f / sqrtf((float) D);
     ggml_tensor * attn;
     if (g.use_flash_attn) {
-        // Full bidirectional attention — no mask, no causality, no GQA.
+        // Full bidirectional attention — no mask, no causality, no GQA. The
+        // ne[3] batch keeps the two CFG branches strictly separate.
         attn = ggml_flash_attn_ext(ctx, q, ggml_cast(ctx, k, GGML_TYPE_F16), ggml_cast(ctx, v, GGML_TYPE_F16), NULL,
                                    scale, 0.0f, 0.0f);
         ggml_flash_attn_ext_set_prec(attn, GGML_PREC_F32);
     } else {
         attn = mm3_dit_attn_f32(ctx, q, k, v, scale);
     }
-    attn = ggml_reshape_2d(ctx, attn, Nh * D, S);           // [E, S]
+    attn = ggml_reshape_3d(ctx, attn, Nh * D, S, B);        // [E, S, B]
     h    = ggml_add(ctx, h, ggml_mul_mat(ctx, w.attn_output, attn));
 
     // ── feed-forward: GLU with the VALUE half first ──
     ggml_tensor * n2 = mm3_dit_ln(ctx, h, w.ffn_norm_w, w.ffn_norm_b, c.layer_norm_eps);
-    ggml_tensor * f  = ggml_add(ctx, ggml_mul_mat(ctx, w.ffn_in_w, n2), w.ffn_in_b);  // [2*FI, S]
+    ggml_tensor * f  = ggml_add(ctx, ggml_mul_mat(ctx, w.ffn_in_w, n2), w.ffn_in_b);  // [2*FI, S, B]
 
-    ggml_tensor * val  = ggml_cont(ctx, ggml_view_2d(ctx, f, FI, S, f->nb[1], 0));
-    ggml_tensor * gate = ggml_cont(ctx, ggml_view_2d(ctx, f, FI, S, f->nb[1], (size_t) FI * f->nb[0]));
+    ggml_tensor * val  = ggml_cont(ctx, ggml_view_3d(ctx, f, FI, S, B, f->nb[1], f->nb[2], 0));
+    ggml_tensor * gate = ggml_cont(ctx, ggml_view_3d(ctx, f, FI, S, B, f->nb[1], f->nb[2], (size_t) FI * f->nb[0]));
     ggml_tensor * y    = ggml_mul(ctx, val, ggml_silu(ctx, gate));
 
     y = ggml_add(ctx, ggml_mul_mat(ctx, w.ffn_out_w, y), w.ffn_out_b);
     return ggml_add(ctx, h, y);
 }
 
-// Full forward. Returns velocity [L, 128] (channel-major, torch memory order).
+// Full forward. Returns velocity [L, 128, B] (channel-major, torch memory
+// order; batch outermost). B == 1 reproduces the original build node for node.
 static ggml_tensor * mm3_dit_build(ggml_context * ctx, const MM3Model & m, const MM3DitGraph & g) {
     const MM3DitConfig &  c = m.synth_cfg.dit;
     const MM3DitWeights & w = m.synth.dit;
@@ -417,59 +441,79 @@ static ggml_tensor * mm3_dit_build(ggml_context * ctx, const MM3Model & m, const
     const int64_t IC = (int64_t) c.in_channels;
     const int64_t CC = (int64_t) c.concat_channels;
     const int64_t L  = g.in_lat->ne[0];
+    const int64_t B  = g.graph_B;
 
     // [L, 128] (time fastest, as uploaded) -> [128, L] (channel fastest, as the
-    // matmuls want). See design note A.
+    // matmuls want). See design note A. The latents are uploaded ONCE and
+    // repeated across the CFG batch in-graph (both branches denoise the same x).
     ggml_tensor * x = ggml_cont(ctx, ggml_transpose(ctx, g.in_lat));
+    if (B > 1) {
+        x = ggml_repeat_4d(ctx, x, IC, L, B, 1);
+    }
 
     // The permanent zero block. The open release has no cover-audio slot, so the
     // middle 128 channels are always zero (reference: `torch.zeros_like`).
     ggml_tensor * zeros = ggml_scale(ctx, x, 0.0f);
 
-    // cond_gate is 1.0 for the conditional pass and 0.0 for the unconditional
+    // cond_gate is 1.0 for the conditional branch and 0.0 for the unconditional
     // one — CFG's uncond branch is zeros_like(condition), not an empty prompt.
-    ggml_tensor * cond = ggml_mul(ctx, g.in_cond, g.in_gate);
+    // In the batched graph the gate is [1, 1, B] ({1, 0}), so one mul produces
+    // the conditional AND the zeroed condition in their respective batch rows.
+    ggml_tensor * cond = g.in_cond;
+    if (B > 1) {
+        cond = ggml_repeat_4d(ctx, cond, cond->ne[0], L, B, 1);
+    }
+    cond = ggml_mul(ctx, cond, g.in_gate);
 
-    ggml_tensor * full = ggml_concat(ctx, ggml_concat(ctx, x, zeros, 0), cond, 0);  // [2304, L]
+    ggml_tensor * full = ggml_concat(ctx, ggml_concat(ctx, x, zeros, 0), cond, 0);  // [2304, L, B]
 
     // preprocess_conv is Conv1d k=1 no bias == a plain matmul over channels, and
     // it is RESIDUAL.
     ggml_tensor * pre_w = ggml_reshape_2d(ctx, w.preprocess_conv, CC, CC);
     full                = ggml_add(ctx, ggml_mul_mat(ctx, pre_w, full), full);
 
-    ggml_tensor * h = ggml_mul_mat(ctx, w.proj_in, full);  // [2048, L]
+    ggml_tensor * h = ggml_mul_mat(ctx, w.proj_in, full);  // [2048, L, B]
 
     // Timestep embedding: the Fourier features arrive precomputed from the host
-    // (design note C); this is just the two-layer MLP with a SiLU between.
+    // (design note C); this is just the two-layer MLP with a SiLU between. Both
+    // CFG branches share t, so the MLP runs once and the result is repeated.
     ggml_tensor * temb = ggml_add(ctx, ggml_mul_mat(ctx, w.time_embd_w[0], g.in_temb), w.time_embd_b[0]);
     temb               = ggml_silu(ctx, temb);
     temb               = ggml_add(ctx, ggml_mul_mat(ctx, w.time_embd_w[1], temb), w.time_embd_b[1]);  // [2048, 1]
+    if (B > 1) {
+        temb = ggml_repeat_4d(ctx, temb, temb->ne[0], 1, B, 1);
+    }
 
     // Prepended as sequence token 0 — this is what shifts every latent frame's
     // RoPE position by one.
-    h = ggml_concat(ctx, temb, h, 1);  // [2048, L+1]
+    h = ggml_concat(ctx, temb, h, 1);  // [2048, L+1, B]
 
     for (size_t i = 0; i < w.blk.size(); i++) {
         h = mm3_dit_block(ctx, g, c, w.blk[i], h, g.in_pos);
     }
 
     // Strip the time token, then project back to latent channels.
-    h = ggml_cont(ctx, ggml_view_2d(ctx, h, E, L, h->nb[1], h->nb[1]));  // [2048, L]
-    ggml_tensor * out = ggml_mul_mat(ctx, w.proj_out, h);                 // [128, L]
+    h = ggml_cont(ctx, ggml_view_3d(ctx, h, E, L, B, h->nb[1], h->nb[2], h->nb[1]));  // [2048, L, B]
+    ggml_tensor * out = ggml_mul_mat(ctx, w.proj_out, h);                              // [128, L, B]
 
     ggml_tensor * post_w = ggml_reshape_2d(ctx, w.postprocess_conv, IC, IC);
     out                  = ggml_add(ctx, ggml_mul_mat(ctx, post_w, out), out);
 
-    // Back to torch memory order for the caller.
-    return ggml_cont(ctx, ggml_transpose(ctx, out));  // [L, 128]
+    // Back to torch memory order for the caller. ggml_transpose swaps ne0/ne1
+    // only, so the batch stays outermost: [L, 128, B], one contiguous
+    // 128*L-float velocity per branch.
+    return ggml_cont(ctx, ggml_transpose(ctx, out));
 }
 
-// Build the graph for a given sequence length, or reuse the cached one.
-static bool mm3_dit_ensure_graph(const MM3Model & m, MM3DitGraph * g, int64_t L, std::string * err) {
-    if (g->graph && g->graph_L == L) {
+// Build the graph for a given sequence length and CFG batch (1 or 2), or reuse
+// the cached one. Switching B rebuilds — the two callers never interleave
+// within a window, so in practice this fires once per residency, not per step.
+static bool mm3_dit_ensure_graph(const MM3Model & m, MM3DitGraph * g, int64_t L, int64_t B, std::string * err) {
+    if (g->graph && g->graph_L == L && g->graph_B == B) {
         return true;
     }
     mm3_dit_free_graph(g);
+    g->graph_B = B;
 
     const MM3DitConfig & c = m.synth_cfg.dit;
 
@@ -505,7 +549,8 @@ static bool mm3_dit_ensure_graph(const MM3Model & m, MM3DitGraph * g, int64_t L,
     ggml_set_name(g->in_temb, "mm3_dit_fourier");
     ggml_set_input(g->in_temb);
 
-    g->in_gate = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1, 1);
+    // [1, 1, B]: one gate value per CFG batch row ({1} single, {1, 0} batched).
+    g->in_gate = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 1, 1, B);
     ggml_set_name(g->in_gate, "mm3_dit_cond_gate");
     ggml_set_input(g->in_gate);
 
@@ -539,9 +584,9 @@ static bool mm3_dit_ensure_graph(const MM3Model & m, MM3DitGraph * g, int64_t L,
     g->n_nodes       = ggml_graph_n_nodes(g->graph);
     g->compute_bytes = ggml_backend_sched_get_buffer_size(g->sched, g->backend);
 
-    fprintf(stderr, "[MM3-DiT] Graph: L=%lld (S=%lld), %d nodes, %d splits, compute buffer %.0f MB\n", (long long) L,
-            (long long) (L + 1), g->n_nodes, ggml_backend_sched_get_n_splits(g->sched),
-            (double) g->compute_bytes / (1024.0 * 1024.0));
+    fprintf(stderr, "[MM3-DiT] Graph: L=%lld (S=%lld), B=%lld%s, %d nodes, %d splits, compute buffer %.0f MB\n",
+            (long long) L, (long long) (L + 1), (long long) B, B > 1 ? " (batched CFG)" : "", g->n_nodes,
+            ggml_backend_sched_get_n_splits(g->sched), (double) g->compute_bytes / (1024.0 * 1024.0));
     return true;
 }
 
@@ -562,7 +607,7 @@ static MM3DitGraph g_mm3_dit;
 // Not thread-safe: the caller serialises (mm3-server.h holds g_mm3_mutex).
 static bool mm3_dit_run(const MM3Model & m, MM3DitGraph * g, const float * latents, const float * cond, float gate,
                         float t, int64_t L, float * out, std::string * err) {
-    if (!mm3_dit_ensure_graph(m, g, L, err)) {
+    if (!mm3_dit_ensure_graph(m, g, L, 1, err)) {
         return false;
     }
 
@@ -606,6 +651,69 @@ static bool mm3_dit_run(const MM3Model & m, MM3DitGraph * g, const float * laten
     }
     ggml_backend_tensor_get(g->output, out, 0, ggml_nbytes(g->output));
     return true;
+}
+
+// Both CFG branches in ONE graph compute (design note B). Same contract as
+// mm3_dit_run, but the gate is fixed to {1, 0} across the batch and both
+// velocities come back from the one forward: batch row 0 -> out_c (conditional),
+// row 1 -> out_u (unconditional). The 2.4B weights stream once instead of twice.
+static bool mm3_dit_run_cfg2(const MM3Model & m, MM3DitGraph * g, const float * latents, const float * cond, float t,
+                             int64_t L, float * out_c, float * out_u, std::string * err) {
+    if (!mm3_dit_ensure_graph(m, g, L, 2, err)) {
+        return false;
+    }
+
+    const size_t       H = g->fourier_w.size();
+    std::vector<float> temb(2 * H);
+    for (size_t i = 0; i < H; i++) {
+        const double a = 2.0 * 3.14159265358979323846 * (double) t * (double) g->fourier_w[i];
+        temb[i]        = (float) std::cos(a);
+        temb[H + i]    = (float) std::sin(a);
+    }
+    ggml_backend_tensor_set(g->in_temb, temb.data(), 0, temb.size() * sizeof(float));
+
+    std::vector<int32_t> pos((size_t) (L + 1));
+    for (int64_t i = 0; i <= L; i++) {
+        pos[(size_t) i] = (int32_t) i;
+    }
+    ggml_backend_tensor_set(g->in_pos, pos.data(), 0, pos.size() * sizeof(int32_t));
+
+    const float gate2[2] = { 1.0f, 0.0f };
+    ggml_backend_tensor_set(g->in_gate, gate2, 0, sizeof(gate2));
+    ggml_backend_tensor_set(g->in_lat, latents, 0, ggml_nbytes(g->in_lat));
+    if (cond) {
+        ggml_backend_tensor_set(g->in_cond, cond, 0, ggml_nbytes(g->in_cond));
+        g->cond_uploaded = true;
+    } else if (!g->cond_uploaded) {
+        if (err) {
+            *err = "no condition uploaded yet (internal: mm3_dit_run_cfg2 called with cond=nullptr first)";
+        }
+        return false;
+    }
+
+    if (ggml_backend_sched_graph_compute(g->sched, g->graph) != GGML_STATUS_SUCCESS) {
+        if (err) {
+            *err = "DiT graph compute failed";
+        }
+        return false;
+    }
+    // Output is [L, 128, 2]: one contiguous 128*L velocity per branch.
+    const size_t half = ggml_nbytes(g->output) / 2;
+    ggml_backend_tensor_get(g->output, out_c, 0, half);
+    ggml_backend_tensor_get(g->output, out_u, half, half);
+    return true;
+}
+
+// MM3_DIT_CFG_BATCH=1 enables the batched-CFG graph. OFF by default: measured
+// 22 % slower than the two-pass loop on the hardware that matters (see design
+// note B) — this is a re-testing knob for future ggml versions, not a
+// production switch. Read once; flipping it needs an engine restart.
+static bool mm3_dit_cfg_batched(void) {
+    static const bool batched = [] {
+        const char * e = std::getenv("MM3_DIT_CFG_BATCH");
+        return e && e[0] && e[0] != '0';
+    }();
+    return batched;
 }
 
 // Single conditional forward, the parity workhorse behind POST /mm3/dit-forward.
