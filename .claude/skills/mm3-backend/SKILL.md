@@ -240,11 +240,31 @@ reaches the server from the browser, so it goes through
 
 ## Performance budget (RTX 5090, f16, 12 s clip ≈ 12.4 s wall ≈ 1.0× realtime)
 
-AR 25.5 ms/frame (LM step 15.3 — bandwidth-bound; depth 9.2 — launch-bound tiny matmuls, 37 % of
-AR for 7 % of params) · flow 2.2 s/window · vocoder 85 ms/window. Speed levers in order:
-**q8_0 LM** (~2× LM step + smaller download; re-validate by ear — quant can flip borderline
-codes), **depth-decoder kernel fusion**, TRT much later. Known quality morsel: our synth on
+AR 25.5 ms/frame (LM step 15.3 — bandwidth-bound; depth 9.2, 37 % of AR for 7 % of params) ·
+flow 2.2 s/window · vocoder 85 ms/window. Speed levers in order: **q8_0 LM** (~2× LM step,
+measured 16.6→8.8 ms/step; re-validate by ear — quant can flip borderline codes), **NVFP4
+depth** (9.4→4.9 ms/frame, below), TRT much later. Known quality morsel: our synth on
 identical codes measures ~18 % lower spectral flatness than the reference (unresolved, minor).
+
+**CUDA graphs: already active — do not build a capture project (measured 2026-08-21).**
+The vendored ggml-cuda has per-graph keyed capture (keyed on the split cgraph's nodes[0],
+2-call warmup, 10 s idle eviction) and it engages for every MM3 graph unprompted. A/B vs
+`GGML_CUDA_DISABLE_GRAPHS=1`: LM decode 9.1 vs 12.9 ms/step (−29 % with graphs), depth 9.4 vs
+11.1 ms/frame (−14 %). The old "depth is launch-bound → kernel fusion / CUDA graphs" diagnosis
+is therefore STALE: with graphs on, depth is **matvec-efficiency-bound** (~1 GB f16 streamed
+per codebook step at ~half of peak on 4–16-column matmuls), so the lever is the quant ladder:
+depth f16 9.4 → q8_0 6.4 → **NVFP4 4.9 ms/frame** (Blackwell-native kernels; Q4_K_M is NO
+better than q8_0 — K-quant dequant cost eats the bandwidth win in mmv). Zero code, per-role
+picker. Acoustic codes = timbre: ear-check on multiple seeds before adopting. Diagnostics that
+found all this and stay available: `MM3_DEPTH_PROF=1` (phase timing per frame, mm3-depth-graph.h)
+and `GGML_CUDA_GRAPH_LOG=1` (per-compute capture decisions, engine/patches/cudagraph-log.patch).
+
+**select-model trap: a role OMITTED from the body means auto (= best-first = f16), not "keep".**
+Raw-API partial bodies like `{"depth":"q8_0"}` silently reset the LM to f16 — measured as a
+mystery 2× LM slowdown that looked exactly like CUDA-graph thrash until the load line
+(16,374 MB) gave it away. The Node layer now merges missing roles from persisted settings
+(index.ts selectModel) and the UI always sends every role; when poking the ENGINE directly,
+always send the full selection.
 
 **CLOSED NEGATIVE (2026-08-21): batching the flow DiT's cond+uncond CFG passes.** Full batch-2
 graph built and A/B'd (bcdcab0): 81 ms/step vs 66 two-pass at L=689 — **22 % SLOWER**, corr
