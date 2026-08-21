@@ -175,8 +175,13 @@ struct MM3LmSlot {
 
     // outputs
     ggml_tensor * out_hidden   = nullptr;  // F32 [H, 1, B] last position, pre-head
-    ggml_tensor * out_logits   = nullptr;  // F32 [V, 1, B]
+    ggml_tensor * out_logits   = nullptr;  // F32 [logits_n, 1, B]
     ggml_tensor * out_feedback = nullptr;  // F32 [H, 1]     decode only
+    // The head rows this slot computes: [logits_lo, logits_lo + logits_n) of
+    // the vocabulary. Full head = (0, V); sliced (MM3LmGraph::head_slice) =
+    // the contiguous EOS+semantic span the AR sampler actually reads.
+    int64_t       logits_lo = 0;
+    int64_t       logits_n  = 0;
 
     // Alignment probe (MM3_ALIGN_DUMP=1): post-softmax attention weights per
     // layer, [n_kv, T, Nh, B]. Only populated on the manual F32 path — flash
@@ -207,6 +212,14 @@ struct MM3LmGraph {
     // Production alignment: capture only the layers in MM3_ALIGN_HEADS. The
     // other 33 keep flash attention, so this costs a fraction of dump_attn.
     bool           align_capture  = false;
+    // Compute the output head over ONLY the contiguous EOS+semantic span
+    // instead of the full 200k vocabulary (design note F's "revisit"). The AR
+    // sampler never reads anything else — every other row is masked to -inf
+    // downstream — so the arithmetic is identical while ~0.8 GB/step of head
+    // weights stop streaming and the logit readback shrinks 12×. Opt-in like
+    // align_capture (the graphs bake the choice): mm3_ar_plan sets it; the
+    // mm3-lm-probe parity tool keeps the full head it compares against.
+    bool           head_slice     = false;
 
     // Identity of the weights this prep was derived from. BOTH buffers matter:
     // the feedback embedding reads token_embd from the LM file and audio_embd
@@ -311,6 +324,29 @@ static void mm3_lm_set_adapter(MM3LmGraph * g, const MM3LmAdapter * ad, const MM
 
 static ggml_tensor * mm3_lm_rms(ggml_context * ctx, ggml_tensor * x, ggml_tensor * w, float eps) {
     return ggml_mul(ctx, ggml_rms_norm(ctx, x, eps), w);
+}
+
+// The contiguous head-row span covering EOS and the semantic codes — the only
+// vocabulary rows the AR sampler ever reads. For the shipped checkpoint that
+// is rows 151670..168059: EOS 151670, then 4 dead rows, then the 16384
+// semantic codes at 151675. Returns false (caller keeps the full head) if the
+// config doesn't describe such a span or EOS sits far from the codes.
+static bool mm3_lm_head_slice_span(const MM3LmConfig & c, int64_t * lo, int64_t * n) {
+    const int64_t EOS = (int64_t) c.eos_audio;
+    const int64_t OFF = (int64_t) c.semantic_vocab_offset;
+    const int64_t SV  = (int64_t) c.semantic_vocab_size;
+    const int64_t V   = (int64_t) c.vocab_size;
+    if (SV <= 0 || OFF < 0 || EOS < 0 || OFF + SV > V || EOS >= V) {
+        return false;
+    }
+    const int64_t a = EOS < OFF ? EOS : OFF;
+    const int64_t b = (EOS + 1) > (OFF + SV) ? (EOS + 1) : (OFF + SV);
+    if (b - a > SV + 4096) {
+        return false;  // EOS far outside the code block: slicing buys nothing
+    }
+    *lo = a;
+    *n  = b - a;
+    return true;
 }
 
 // Manual F32 attention, for CPU / -DHOT_STEP_DISABLE_FA / MM3_LM_NO_FLASH builds.
@@ -534,7 +570,18 @@ static bool mm3_lm_build_slot(const MM3Model & m, MM3LmGraph * g, MM3LmSlot * s,
     ggml_set_name(s->out_hidden, "mm3_lm_last_hidden");
     ggml_set_output(s->out_hidden);
 
-    s->out_logits = ggml_mul_mat(ctx, m.lm.output, last);  // [V, 1, B]
+    // Full head, or just the EOS+semantic row span (a row-aligned view of the
+    // possibly-quantized weight — rows are whole quant blocks, so any row
+    // offset is representable). Identical arithmetic for every row that
+    // survives: the sampler masks everything outside the span to -inf anyway.
+    s->logits_lo = 0;
+    s->logits_n  = (int64_t) c.vocab_size;
+    ggml_tensor * head = m.lm.output;
+    if (g->head_slice && mm3_lm_head_slice_span(c, &s->logits_lo, &s->logits_n)) {
+        head = ggml_view_2d(ctx, m.lm.output, m.lm.output->ne[0], s->logits_n, m.lm.output->nb[1],
+                            (size_t) s->logits_lo * m.lm.output->nb[1]);
+    }
+    s->out_logits = ggml_mul_mat(ctx, head, last);  // [logits_n, 1, B]
     ggml_set_name(s->out_logits, "mm3_lm_logits");
     ggml_set_output(s->out_logits);
 
@@ -740,12 +787,13 @@ static void mm3_lm_upload_step(MM3LmGraph * g, MM3LmSlot * s, int64_t T, int64_t
 static void mm3_lm_read_outputs(const MM3LmConfig & c, const MM3LmSlot & s, float * out_hidden, float * out_logits,
                                 float * out_feedback) {
     const size_t H = (size_t) c.embedding_length;
-    const size_t V = (size_t) c.vocab_size;
     if (out_hidden) {
         ggml_backend_tensor_get(s.out_hidden, out_hidden, 0, H * MM3_LM_CFG_ROWS * sizeof(float));
     }
     if (out_logits) {
-        ggml_backend_tensor_get(s.out_logits, out_logits, 0, V * MM3_LM_CFG_ROWS * sizeof(float));
+        // The caller's buffer is sized [logits_n, B] — full V or the sliced
+        // span, whichever this slot was built for.
+        ggml_backend_tensor_get(s.out_logits, out_logits, 0, (size_t) s.logits_n * MM3_LM_CFG_ROWS * sizeof(float));
     }
     if (out_feedback && s.out_feedback) {
         ggml_backend_tensor_get(s.out_feedback, out_feedback, 0, H * sizeof(float));

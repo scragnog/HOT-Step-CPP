@@ -329,8 +329,26 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
             mm3_lm_free(&g_mm3_lm);   // graphs encode the choice — rebuild them
         }
     }
+    // Head slice: production always wants it (the sampler reads nothing
+    // outside the EOS+semantic span). Baked into the cached graphs, so the
+    // first generation after boot pays one slot rebuild; the mm3-lm-probe
+    // parity tool builds its own MM3LmGraph and keeps the full head.
+    if (!g_mm3_lm.head_slice) {
+        g_mm3_lm.head_slice = true;
+        mm3_lm_free_slot(&g_mm3_lm.prefill);
+        mm3_lm_free_slot(&g_mm3_lm.decode);
+        mm3_lm_free_slot(&g_mm3_lm.replay);
+    }
     if (!mm3_lm_prepare(m, &g_mm3_lm, n_prompt + max_frames + 2, err)) {
         return false;
+    }
+    // What the graphs will actually compute per step: [hlo, hlo+hn) of the
+    // vocabulary. Mirrors the slot builder's choice exactly (same helper,
+    // same flag), so the readback buffers below are sized to match.
+    int64_t hlo = 0, hn = V;
+    if (!g_mm3_lm.head_slice || !mm3_lm_head_slice_span(c, &hlo, &hn)) {
+        hlo = 0;
+        hn  = V;
     }
 
     // ── Alignment probe (MM3_ALIGN_DUMP=1) ───────────────────────────────────
@@ -391,7 +409,7 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
     out->sem_vocab   = SV;
 
     std::vector<float> hidden((size_t) (H * MM3_LM_CFG_ROWS));
-    std::vector<float> logits((size_t) (V * MM3_LM_CFG_ROWS));
+    std::vector<float> logits((size_t) (hn * MM3_LM_CFG_ROWS));
     std::vector<float> feedback((size_t) H);
 
     const auto t_start = std::chrono::steady_clock::now();
@@ -431,8 +449,10 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
         const auto t_host0 = std::chrono::steady_clock::now();
 
         // ── gather the candidate logits, both rows ──
+        // Rows are indexed relative to hlo — 0 for the full head, the span
+        // start under the head slice.
         const float * lrow_c = logits.data();
-        const float * lrow_u = logits.data() + V;
+        const float * lrow_u = logits.data() + hn;
         auto          fix    = [&](float x) -> float {
             if (std::isnan(x) || (std::isinf(x) && x > 0.0f)) {
                 out->nonfinite_logits++;
@@ -440,11 +460,11 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
             }
             return x;
         };
-        cand_cond[0] = fix(lrow_c[EOS]);
-        cand_unc[0]  = fix(lrow_u[EOS]);
+        cand_cond[0] = fix(lrow_c[EOS - hlo]);
+        cand_unc[0]  = fix(lrow_u[EOS - hlo]);
         for (int64_t j = 0; j < SV; j++) {
-            cand_cond[(size_t) (j + 1)] = fix(lrow_c[OFF + j]);
-            cand_unc[(size_t) (j + 1)]  = fix(lrow_u[OFF + j]);
+            cand_cond[(size_t) (j + 1)] = fix(lrow_c[OFF - hlo + j]);
+            cand_unc[(size_t) (j + 1)]  = fix(lrow_u[OFF - hlo + j]);
         }
 
         // ── CFG, then the first top-k filter (ranked by the CONDITIONAL row) ──
@@ -524,8 +544,8 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
             MM3ArDump d;
             d.last_hidden.assign(hidden.begin(), hidden.end());
             d.sem_logits.resize((size_t) (2 * SV));
-            memcpy(d.sem_logits.data(), lrow_c + OFF, (size_t) SV * sizeof(float));
-            memcpy(d.sem_logits.data() + SV, lrow_u + OFF, (size_t) SV * sizeof(float));
+            memcpy(d.sem_logits.data(), lrow_c + (OFF - hlo), (size_t) SV * sizeof(float));
+            memcpy(d.sem_logits.data() + SV, lrow_u + (OFF - hlo), (size_t) SV * sizeof(float));
             d.guided.assign(cand_guided.begin() + 1, cand_guided.end());
             d.feedback.assign((size_t) (2 * H), 0.0f);
             d.depth_hidden = frame.hiddens;
