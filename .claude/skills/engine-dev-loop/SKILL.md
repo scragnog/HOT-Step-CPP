@@ -63,6 +63,9 @@ Windows PowerShell 5; this repo's convention is `;`).
 
 ```powershell
 # 1. Rebuild (shuts down app gracefully, waits for ace-server to die, builds):
+#    ONLY works from an interactive console. From an agent tool call or any piped/
+#    redirected shell it silently does nothing and exits 0 — see the warning below,
+#    and run the three phases manually instead.
 & "D:\Ace-Step-Latest\hot-step-cpp\dev-rebuild.bat"
 
 # 2. VERIFY the build yourself — dev-rebuild prints "Done" regardless of result, and the
@@ -103,6 +106,59 @@ triggers the respawn handler instead (`server/src/index.ts:284-309`; the crash l
 There is also `POST /api/restart` (`shutdown.ts:156-190`), which writes a
 `.restart-requested` marker that `LAUNCH.bat` / `server/restart-loop.cmd` loop on. That is
 for in-app restarts only — it does not rebuild anything.
+
+### ⚠ dev-rebuild.bat does NOTHING from a non-interactive shell (agents: read this)
+
+`dev-rebuild.bat` uses `timeout /t 1 /nobreak` in its wait loop (steps 2 above). `timeout`
+requires a real console: with stdin redirected to the null device — which is every agent
+tool call, every piped invocation, every CI-style run — it fails immediately with
+`ERROR: Input redirection is not supported`. The loop then falls straight through, so the
+script **skips the shutdown AND the build, prints nothing, and exits 0.**
+
+This is maximally deceptive: exit 0, no error text, and (because it never shut anything
+down) the app is still running afterwards, so nothing looks wrong. Observed 2026-08-21 —
+the "build" took 2 seconds and `ace-server.exe` kept a five-hour-old timestamp.
+
+Run the three phases yourself instead. This is the same sequence the script performs, and
+it is safe for the reason Procedure 1 explains — Node initiates the kill, so no respawn:
+
+```powershell
+# 1. graceful shutdown (Node kills ace-server, Vite, then itself)
+try { Invoke-RestMethod -Method Post -Uri "http://localhost:3001/api/shutdown" -TimeoutSec 10 | Out-Null } catch {}
+
+# 2. wait for the binary lock to actually clear — never skip this, it is what
+#    prevents LNK1104 and the respawn loop
+$n=0; while ((Get-Process ace-server -ErrorAction SilentlyContinue) -and $n -lt 20) { Start-Sleep -Seconds 1; $n++ }
+if (Get-Process ace-server -ErrorAction SilentlyContinue) { Stop-Process -Name ace-server -Force; Start-Sleep -Seconds 2 }
+
+# 3. build, then VERIFY (see Procedure 1 step 2 — the exit code is meaningless)
+& cmd.exe /c "engine\build.cmd"
+Get-Item "engine\build\Release\ace-server.exe" | Select-Object LastWriteTime
+```
+
+Grep the build output for `ace-server.vcxproj ->` — that line is printed only on a
+successful link, and is a positive signal rather than the absence of a negative one.
+
+### Errors in a header you never edited = broken literal in the file included *before* it
+
+A single unterminated string literal or comment makes the parser run on into the next
+header, so MSVC reports the damage at the wrong file entirely. Symptoms are surreal:
+`(double) some_func() / 1048576.0` failing with *"cannot convert from `size_t (__cdecl *)(void)`
+to `double`"* plus *"Context does not allow for disambiguation of overloaded function"* — a
+call the compiler cannot see the `()` on, in code that is provably correct and unmodified.
+
+Do not debug the reported file. Check the previous one in the include chain, at your edit.
+
+The usual cause when an agent made the edit: a `\n` inside a C string written as a **real
+newline**. Shell heredocs and some scripting layers collapse `\\n` → `\n` → an actual line
+break, splitting the literal across two lines. Verify after any scripted C++ edit:
+
+```bash
+sed -n '<start>,<end>p' <file> | cat -A     # look for a line ending mid-string
+```
+
+Prefer the Edit tool over heredocs for C++ containing escapes. (Same class of bug bit a
+Windows path in a Markdown file the same day: `\\2026` → octal escape → mangled text.)
 
 ### How long builds take
 
@@ -267,6 +323,8 @@ check if the server seems to run old code.
 | Node runs an old binary despite a successful build | Stale flat `engine/ace-server.exe` shadowing `build/Release/` (config.ts:46-52), or `ACESTEPCPP_EXE` set in `.env` | Delete the flat exe / unset the override |
 | Header edit seemingly ignored | Stale .obj | Procedure 2 (surgical delete of `acestep-core.dir` + `acestep-core.lib`) |
 | `dev-rebuild.bat` says "Done" but nothing changed | It never checks the build result | Scroll up and read the MSBuild output; check the exe timestamp |
+| `dev-rebuild.bat` exits 0 in ~2 s, prints nothing, app still running | Non-interactive shell: its `timeout /t` needs a console, so the whole script falls through — no shutdown, no build | Run the 3 phases manually (Procedure 1 → "does NOTHING from a non-interactive shell") |
+| Compile errors in a header you never touched | Unterminated string/comment in the file included *before* it — usually a `\n` written as a real newline by a heredoc | `sed -n 'A,Bp' <the file you edited> \| cat -A`; use the Edit tool for C++ with escapes |
 | Vite dead after rebuild in dev mode | dev-rebuild's shutdown kills port 3000 too (`shutdown.ts:72-98`) | Restart with `dev.bat`, not LAUNCH.bat |
 | Node server won't start / weird npm dep errors after an otherwise-good build | Wrong Node version — **Node 18–22 LTS only; Node 24+ breaks dependencies** (`engines` enforces `<24`) | `node --version`; switch Node, don't touch the engine or build cache |
 | Connection refused on :8085 right after relaunch | Engine still starting — dev.bat returns before services listen | Retry `/health` up to ~30 s, then check `ace_engine.log` |
