@@ -309,8 +309,16 @@ Traps, each of which produced a wrong answer first:
    depends on whether the layers feeding them ran flash or manual by far more
    than that difference is supposed to matter. Not understood; do not "optimise"
    it back without re-validating against Whisper.
-   Net cost is ~+49 % on the LM step, so roughly +20 % on a long render, and
-   only when the LRC toggle is on. Still cheaper than a full Whisper pass.
+   Net cost WAS ~+49 % on the LM step — **superseded 2026-08-21 by the
+   post-hoc replay pass** (`mm3_lm_lrc_replay`, mm3-lm-graph.h): decode runs
+   pure flash (audio bit-identical to a no-LRC render, verified) and the
+   alignment attention is recomputed afterwards from the sampled codes —
+   teacher-forced 256-query chunks, all-manual, blocks 0..24 only, single CFG
+   row via ne3=1 views onto KV row 0 — at ~0.1-0.5 s per song. Causality makes
+   prefill attention identical to decode attention over the same tokens, and
+   all-manual keeps it out of the mixed-graph trap above; LRC verified
+   character-identical to the live path on the same forced codes.
+   `MM3_LRC_LIVE=1` restores live capture (validation/fallback).
 5. The dump is **MM3ALIGN2**: an ASCII header line, then `tokens` × int32 lyric
    token ids, then f32 in `[frame][layer][head][token]` order. v1 omitted the
    ids, which is what forced the bogus token-progress-vs-word-progress
@@ -351,6 +359,16 @@ ACE's whole DiT-stack UI (merge/runtime modes, per-section masking, trigger
 embedding). Picker prefills the scale dials from the picked adapter's sidecar
 `recommendedScales`; depth thirds sit behind an advanced disclosure. Values
 ride `backendParams` → `getGlobalParams()`, so a new dial needs no store field.
+**Two application modes since 2026-08-21** (`lm_adapter_mode`, UI toggle,
+`params.mm3LmAdapterMode`): `runtime` (default; live dials, measured +28 %
+LM step on f16 and **+51 % on q8_0** — the fixed overhead looms larger over
+halved streaming) and `merge` (mm3-lm-merge.h folds scale·B·A into the
+resident weights: merged step == base step, 15 s once per (adapter, dials)
+on q8_0 via dequant+delta+requant — IQ types refused, need imatrix).
+`MM3Model::lm_merge_tag` tracks what is baked in; mismatch forces a pristine
+LM reload (verified live under keep-loaded); staged mode reloads per gen
+anyway. Merge failure part-way drops LM residency — never leaves mixed
+weights serving.
 **Writing a checkpoint + a JSON sidecar into `<adapters>/mm3-lm-adapters/<run>/`
 is the entire publish step** — that is the contract the future native trainer
 targets (docs/plans/2026-08-20-mm3-training-server-design.md §5). r256 ≈ 1.4 GB
