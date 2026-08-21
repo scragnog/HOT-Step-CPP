@@ -246,6 +246,17 @@ measured 16.6→8.8 ms/step; re-validate by ear — quant can flip borderline co
 depth** (9.4→4.9 ms/frame, below), TRT much later. Known quality morsel: our synth on
 identical codes measures ~18 % lower spectral flatness than the reference (unresolved, minor).
 
+**Current q8_0 steady state (2026-08-21, post head-slice):** LM 8.3 ms/step · depth q8_0
+6.4–6.9 ms/frame · flow q8_0 31–33 ms/forward (quant bought only ~5 % — the flow DiT is
+compute-bound, ~94 TFLOPS effective). The LM head now computes only the contiguous
+EOS+semantic row span (mm3_lm_head_slice_span; opt-in per graph — mm3-lm-probe keeps the full
+head), proven bit-identical, −8 %/step. LM streams ~8.5 GB in 8.3 ms ≈ 57 % of a 5090's peak —
+what remains is kernel-level (mmvq at 2 columns) or KV-cache quantization (~5 % late-song);
+the AR stage is close to its architectural floor. Remaining flow levers, in value order:
+fewer steps via the sampler plugins (linear; multistep deterministic solvers first, listen at
+window seams), a native CFG-interval knob (skip the uncond forward outside a mid-sigma band),
+TeaCache-style velocity reuse, TRT much later.
+
 **CUDA graphs: already active — do not build a capture project (measured 2026-08-21).**
 The vendored ggml-cuda has per-graph keyed capture (keyed on the split cgraph's nodes[0],
 2-call warmup, 10 s idle eviction) and it engages for every MM3 graph unprompted. A/B vs
