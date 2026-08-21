@@ -21,7 +21,7 @@
 //
 // ── Design decisions, and why ────────────────────────────────────────────────
 //
-// A. THE 2-ROW CFG BATCH IS THE WHOLE POINT, AND IT IS FREE. AR CFG is a fixed
+// A. THE 2-ROW CFG BATCH IS THE WHOLE POINT, AND IT IS FREE. AR CFG is normally
 //    1.5 (`mm3.ar.cfg_scale`), so every step must evaluate a conditional and an
 //    unconditional row. At one token per row a decode step is pure BANDWIDTH:
 //    17.2 GB of f16 weights get streamed whatever the batch is. Two rows through
@@ -29,6 +29,27 @@
 //    sequential passes would cost double. This is the opposite trade from the
 //    flow DiT (mm3-dit-graph.h note B), where each pass is already 690 tokens
 //    wide and batching buys nothing — same model, different regime.
+//
+//    A1. ...UNLESS THE CHECKPOINT BAKED THE GUIDANCE IN. A guidance-distilled
+//    composer (the depth-pruned 5.7B students distil against the teacher's
+//    CFG-GUIDED distributions) declares `mm3.ar.cfg_scale = 1.0`, at which the
+//    blend `u + (c - u) * 1.0` is identically `c` — the unconditional row is
+//    computed, read back, and then algebraically cancelled. So `cfg_rows` is a
+//    RUNTIME 1-or-2 derived from the scale, not a compile-time 2:
+//
+//        |cfg - 1| <= 1e-6  ->  cfg_rows = 1
+//
+//    Because it is keyed on the arithmetic and not on a model name, it is safe
+//    for any checkpoint: at any other scale the pair still runs, bit-identical
+//    to before. What this buys is mostly NOT decode latency — note A's
+//    bandwidth argument cuts both ways, and dropping a row from a
+//    memory-bound step saves little — but:
+//      * the KV cache HALVES (288 -> 144 kB/position; 1.1 GB on a 5-minute
+//        render), which is the binding constraint on a 22.5 GB f16 stack, and
+//      * prefill, which IS compute-bound at T = prompt length, halves.
+//    The student's real speed win is its 21 blocks instead of 36; this change
+//    is what stops us paying for a row whose only effect is to be subtracted
+//    from itself.
 //
 //    Batch lives in ne3 throughout: activations are [H, T, B], attention is
 //    [D, T, Nh, B] against a [D, n_kv, Nkv, B] cache. GQA falls out of ggml's
@@ -45,7 +66,7 @@
 //    SIZE IT FROM THE REQUEST. n_ctx = prompt + max_frames + slack, rounded to the
 //    bucket. The cache costs
 //        2 rows x 36 layers x 2 (K+V) x 8 heads x 128 dims x 2 bytes = 288 kB
-//    per position — 106 MB for a 12-second render, 2.2 GB for the 5-minute
+//    per position (halved at cfg_rows = 1, note A1) — 106 MB for a 12-second render, 2.2 GB for the 5-minute
 //    ceiling, 2.9 GB at the model's declared 10240-token context. Allocating the
 //    ceiling unconditionally would cost more VRAM than the depth decoder. The
 //    cache therefore GROWS on demand and never shrinks, so a repeat request at
@@ -148,8 +169,11 @@
 #define MM3_LM_MAX_NODES 4096
 // Attention-window quantum (design note C).
 #define MM3_LM_KV_BUCKET 256
-// The CFG batch. Fixed by the checkpoint, not a knob.
-#define MM3_LM_CFG_ROWS 2
+// MM3_LM_CFG_ROWS (mm3-model.h) is the MAXIMUM — the size every host-side
+// staging buffer is cut to, so a caller's [2, H] hidden / [2, V] logit buffers
+// are always big enough. The number of rows actually computed and read back is
+// MM3LmGraph::cfg_rows (mm3_cfg_rows(), 1 or 2 — note A1); use that for graph
+// shapes and transfer sizes, never the ceiling.
 
 // One cached graph. Prefill and decode differ only in T and the input mode.
 struct MM3LmSlot {
@@ -234,7 +258,11 @@ struct MM3LmGraph {
     std::vector<ggml_tensor *> kv_v;
     int64_t                    n_ctx    = 0;
     size_t                     kv_bytes = 0;
-    int64_t                    kv_pos   = 0;  // shared: both CFG rows advance together
+    int64_t                    kv_pos   = 0;  // shared: all CFG rows advance together
+    // 1 or 2 (note A1), derived from mm3.ar.cfg_scale in mm3_lm_prepare. Every
+    // graph shape and every host<->device transfer size keys off THIS, not the
+    // MM3_LM_CFG_ROWS ceiling. A change invalidates the KV cache and all slots.
+    int                        cfg_rows = MM3_LM_CFG_ROWS;
 
     MM3LmSlot prefill;
     MM3LmSlot decode;
@@ -460,7 +488,7 @@ static bool mm3_lm_build_slot(const MM3Model & m, MM3LmGraph * g, MM3LmSlot * s,
                               bool decode, std::string * err) {
     const MM3LmConfig & c  = m.lm_cfg;
     const int64_t       H  = (int64_t) c.embedding_length;
-    const int64_t       B  = MM3_LM_CFG_ROWS;
+    const int64_t       B  = (int64_t) g->cfg_rows;
     const int64_t       NC = (int64_t) c.num_codebooks - 1;
 
     const size_t ctx_bytes =
@@ -534,7 +562,8 @@ static bool mm3_lm_build_slot(const MM3Model & m, MM3LmGraph * g, MM3LmSlot * s,
 
         // Both CFG rows are fed the SAME embedding: the sampled codes are shared
         // (the reference `.repeat(2)`s them) and only the KV history differs.
-        h = ggml_concat(ctx, fb, fb, 2);  // [H, 1, B]
+        // At cfg_rows = 1 there is no second row to duplicate into.
+        h = B > 1 ? ggml_concat(ctx, fb, fb, 2) : ggml_reshape_3d(ctx, fb, H, 1, 1);  // [H, 1, B]
     }
 
     // Alignment probe: keep a handle on every layer's post-softmax attention so
@@ -659,9 +688,15 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     // feedback embedding), which lives in the DEPTH buffer — so that is the
     // buffer whose identity must invalidate the cached graph.
     const void * st = (const void *) m.wctx_depth.buffer;
-    if (g->lm_token != lt || g->synth_token != st) {
+    // A guidance-distilled LM (cfg_scale 1.0) needs single-row graphs and a
+    // half-size KV cache, so a checkpoint swap that changes the scale must tear
+    // everything down exactly like a weight swap does — the cached slots bake
+    // the row count into their shapes.
+    const int rows = mm3_cfg_rows(c);
+    if (g->lm_token != lt || g->synth_token != st || g->cfg_rows != rows) {
         mm3_lm_free(g);
     }
+    g->cfg_rows = rows;
 
     if (!g->backend_ref) {
         BackendPair bp = backend_init("MM3-LM");
@@ -725,10 +760,10 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     g->kv_v.assign((size_t) L, nullptr);
     for (int i = 0; i < L; i++) {
         char nm[64];
-        g->kv_k[(size_t) i] = ggml_new_tensor_4d(g->kv_ctx, GGML_TYPE_F16, D, want, Nkv, MM3_LM_CFG_ROWS);
+        g->kv_k[(size_t) i] = ggml_new_tensor_4d(g->kv_ctx, GGML_TYPE_F16, D, want, Nkv, g->cfg_rows);
         snprintf(nm, sizeof(nm), "mm3.lm.kv_k.%d", i);
         ggml_set_name(g->kv_k[(size_t) i], nm);
-        g->kv_v[(size_t) i] = ggml_new_tensor_4d(g->kv_ctx, GGML_TYPE_F16, D, want, Nkv, MM3_LM_CFG_ROWS);
+        g->kv_v[(size_t) i] = ggml_new_tensor_4d(g->kv_ctx, GGML_TYPE_F16, D, want, Nkv, g->cfg_rows);
         snprintf(nm, sizeof(nm), "mm3.lm.kv_v.%d", i);
         ggml_set_name(g->kv_v[(size_t) i], nm);
     }
@@ -752,8 +787,10 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     g->kv_bytes = ggml_backend_buffer_get_size(g->kv_buf);
     g->kv_pos   = 0;
 
-    fprintf(stderr, "[MM3-LM] KV cache: %lld positions x %d layers x 2 rows = %.2f GB (%.0f kB/position), flash=%s\n",
-            (long long) want, L, (double) g->kv_bytes / (1024.0 * 1024.0 * 1024.0),
+    fprintf(stderr,
+            "[MM3-LM] KV cache: %lld positions x %d layers x %d row%s = %.2f GB (%.0f kB/position), flash=%s\n",
+            (long long) want, L, g->cfg_rows, g->cfg_rows == 1 ? "" : "s",
+            (double) g->kv_bytes / (1024.0 * 1024.0 * 1024.0),
             (double) g->kv_bytes / (double) want / 1024.0, g->use_flash_attn ? "yes" : "no");
     return true;
 }
@@ -786,14 +823,18 @@ static void mm3_lm_upload_step(MM3LmGraph * g, MM3LmSlot * s, int64_t T, int64_t
 
 static void mm3_lm_read_outputs(const MM3LmConfig & c, const MM3LmSlot & s, float * out_hidden, float * out_logits,
                                 float * out_feedback) {
-    const size_t H = (size_t) c.embedding_length;
+    const size_t H    = (size_t) c.embedding_length;
+    // Rows this slot actually computed. Callers size their buffers to the
+    // MM3_LM_CFG_ROWS ceiling, so reading fewer rows is always safe; reading
+    // the ceiling from a 1-row output tensor would overrun it.
+    const size_t rows = (size_t) s.out_hidden->ne[2];
     if (out_hidden) {
-        ggml_backend_tensor_get(s.out_hidden, out_hidden, 0, H * MM3_LM_CFG_ROWS * sizeof(float));
+        ggml_backend_tensor_get(s.out_hidden, out_hidden, 0, H * rows * sizeof(float));
     }
     if (out_logits) {
         // The caller's buffer is sized [logits_n, B] — full V or the sliced
         // span, whichever this slot was built for.
-        ggml_backend_tensor_get(s.out_logits, out_logits, 0, (size_t) s.logits_n * MM3_LM_CFG_ROWS * sizeof(float));
+        ggml_backend_tensor_get(s.out_logits, out_logits, 0, (size_t) s.logits_n * rows * sizeof(float));
     }
     if (out_feedback && s.out_feedback) {
         ggml_backend_tensor_get(s.out_feedback, out_feedback, 0, H * sizeof(float));
@@ -878,11 +919,15 @@ static bool mm3_lm_prefill(const MM3Model & m, MM3LmGraph * g, const int32_t * i
 
     g->kv_pos = 0;
 
-    g->ids_host.resize((size_t) (n_prompt * MM3_LM_CFG_ROWS));
+    // At cfg_rows = 1 the unconditional row is never built, so ids_uncond is
+    // accepted and ignored rather than made optional at every call site.
+    g->ids_host.resize((size_t) (n_prompt * g->cfg_rows));
     memcpy(g->ids_host.data(), ids_cond, (size_t) n_prompt * sizeof(int32_t));
-    memcpy(g->ids_host.data() + n_prompt, ids_uncond, (size_t) n_prompt * sizeof(int32_t));
+    if (g->cfg_rows > 1) {
+        memcpy(g->ids_host.data() + n_prompt, ids_uncond, (size_t) n_prompt * sizeof(int32_t));
+    }
     ggml_backend_tensor_set(g->prefill.in_ids, g->ids_host.data(), 0,
-                            (size_t) (n_prompt * MM3_LM_CFG_ROWS) * sizeof(int32_t));
+                            (size_t) (n_prompt * g->cfg_rows) * sizeof(int32_t));
     mm3_lm_upload_step(g, &g->prefill, n_prompt, n_kv_pad);
 
     if (ggml_backend_sched_graph_compute(g->prefill.sched, g->prefill.graph) != GGML_STATUS_SUCCESS) {

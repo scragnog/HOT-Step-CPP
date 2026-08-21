@@ -77,6 +77,15 @@ CONVERTER_VERSION = 1
 # ---------------------------------------------------------------------------
 
 # -- global LM (Qwen3-8B with extended audio vocab) -------------------------
+# LM_LAYERS is the only one of these a legitimate variant may change: the
+# depth-pruned distilled students (e.g. Mothersuperior/minimax-music3-composer-
+# 5.7b-distilled, 21 layers) keep every other dimension bit-for-bit, because
+# the stock depth decoder consumes the LM's 4096-wide hidden state and the
+# 200000-row audio vocabulary is what makes it a music model at all. So it is
+# overridable via --lm-layers while the rest stays hardcoded (see the note
+# above). The leftover-tensor diff at the end of main() is what makes this
+# safe: a wrong --lm-layers leaves whole `model.layers.N.*` groups unconsumed
+# and the run dies rather than emitting a truncated model.
 LM_LAYERS = 36
 LM_DIM = 4096
 LM_FF = 12288
@@ -369,7 +378,7 @@ class Source:
                     n_new += 1
                 self.index[name] = f            # later (higher score) wins
             note = f", {n_over} overriding earlier files" if n_over else ""
-            log(f"indexed {os.path.relpath(path)}: {n_new + n_over} tensors{note}")
+            log(f"indexed {short(path)}: {n_new + n_over} tensors{note}")
 
         self.layout = self._detect_layout()
         log(f"source layout: {self.layout}")
@@ -488,6 +497,18 @@ class Bundle:
             f"({n['f32']} F32, {n['f16']} F16, {n['q8_0']} Q8_0), {size:.2f} GB")
 
 
+def short(path):
+    """Display path: relative when that is meaningful, absolute otherwise.
+
+    os.path.relpath RAISES on Windows when `path` and the cwd sit on different
+    drives, which is the normal case here -- bulk weights live on a data drive
+    and the repo does not. Cosmetic logging must never abort a conversion."""
+    try:
+        return os.path.relpath(path)
+    except ValueError:
+        return os.path.abspath(path)
+
+
 def fold_weight_norm(g, v, label):
     """PyTorch weight_norm (dim=0): w = g * v / ||v||, norm over all axes but 0.
 
@@ -508,7 +529,8 @@ def fold_weight_norm(g, v, label):
 # Component: global LM  ->  arch "qwen3", llama.cpp tensor names
 # ---------------------------------------------------------------------------
 
-def build_lm(src, bundle, tokenizer, embed_tokenizer_json):
+def build_lm(src, bundle, tokenizer, embed_tokenizer_json, n_layers=LM_LAYERS,
+             ar_cfg_scale=AR_CFG_SCALE):
     if src.has("model.embed_tokens_prefill.weight", "model.lm_head_pruned.weight",
                "model.layers.0.self_attn.qkv_proj.weight"):
         die("this text encoder is the '_pruned_' repack (fused qkv / split "
@@ -518,10 +540,12 @@ def build_lm(src, bundle, tokenizer, embed_tokenizer_json):
     b = bundle
     b.meta("add_name", "MiniMax-Music3 LM")
     b.meta("add_description",
-           "MiniMax-Music3 global LM: Qwen3-8B with an extended audio vocabulary")
+           "MiniMax-Music3 global LM: Qwen3-8B with an extended audio vocabulary"
+           + ("" if n_layers == LM_LAYERS else
+              f" (depth-pruned to {n_layers} of {LM_LAYERS} blocks)"))
     b.meta("add_context_length", LM_CTX)
     b.meta("add_embedding_length", LM_DIM)
-    b.meta("add_block_count", LM_LAYERS)
+    b.meta("add_block_count", n_layers)
     b.meta("add_feed_forward_length", LM_FF)
     b.meta("add_head_count", LM_HEADS)
     b.meta("add_head_count_kv", LM_KV_HEADS)
@@ -540,7 +564,7 @@ def build_lm(src, bundle, tokenizer, embed_tokenizer_json):
     b.meta("add_uint32", "mm3.frame_rate", FRAME_RATE)
     b.meta("add_uint32", "mm3.max_audio_frames", MAX_AUDIO_FRAMES)
     b.meta("add_uint32", "mm3.max_prompt_tokens", MAX_PROMPT_TOKENS)
-    b.meta("add_float32", "mm3.ar.cfg_scale", AR_CFG_SCALE)
+    b.meta("add_float32", "mm3.ar.cfg_scale", ar_cfg_scale)
     b.meta("add_uint32", "mm3.ar.top_k", AR_TOP_K)
     b.meta("add_float32", "mm3.ar.embedding_scale", float(NUM_CODEBOOKS) ** -0.5)
     for k, v in SPECIAL_TOKEN_IDS.items():
@@ -563,7 +587,7 @@ def build_lm(src, bundle, tokenizer, embed_tokenizer_json):
 
     q_dim = LM_HEADS * LM_HEAD_DIM
     kv_dim = LM_KV_HEADS * LM_HEAD_DIM
-    for i in range(LM_LAYERS):
+    for i in range(n_layers):
         p = f"model.layers.{i}"
         d = f"blk.{i}"
         b.put(f"{d}.attn_norm.weight",
@@ -677,7 +701,7 @@ def find_tokenizer(src, explicit, search_paths):
                 if os.path.isfile(f):
                     with open(f, "r", encoding="utf-8") as fh:
                         raw = fh.read()
-                    log(f"tokenizer: {os.path.relpath(f)}")
+                    log(f"tokenizer: {short(f)}")
                     return json.loads(raw), raw
     return None, None
 
@@ -1139,8 +1163,30 @@ def main():
     ap.add_argument("--embed-tokenizer-json", action="store_true",
                     help="also store tokenizer.json verbatim as mm3.tokenizer_json "
                          "(+11 MB)")
+    ap.add_argument("--lm-layers", type=int, default=LM_LAYERS, metavar="N",
+                    help=f"LM block count (default {LM_LAYERS}). Set this for a "
+                         "depth-pruned student such as the 5.7B distilled "
+                         "composer (--lm-layers 21). A wrong value is caught by "
+                         "the leftover-tensor check, not silently emitted.")
+    ap.add_argument("--ar-cfg-scale", type=float, default=AR_CFG_SCALE,
+                    metavar="S",
+                    help=f"mm3.ar.cfg_scale (default {AR_CFG_SCALE}). Pass 1.0 "
+                         "for a CFG-free / guidance-distilled composer: the "
+                         "engine then runs a SINGLE AR row instead of the "
+                         "cond+uncond pair, halving the LM KV cache.")
+    ap.add_argument("--suffix", default="", metavar="TAG",
+                    help="appended to the quant token in the output filename, "
+                         "e.g. --suffix -d21-lr6e5 -> mm3-lm-q8_0-d21-lr6e5.gguf. "
+                         "The engine treats the whole token as the variant name, "
+                         "so tagged files sit alongside the stock ones in the "
+                         "model picker instead of overwriting them.")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
+
+    if args.lm_layers < 1:
+        die("--lm-layers must be positive")
+    if args.suffix and not all(ch.isalnum() or ch in "-_." for ch in args.suffix):
+        die("--suffix may only contain alphanumerics, '-', '_' and '.'")
 
     want = [c.strip() for c in args.components.split(",") if c.strip()]
     bad = [c for c in want if c not in ALL_COMPONENTS]
@@ -1150,9 +1196,10 @@ def main():
         die("--components selected nothing")
 
     os.makedirs(args.out, exist_ok=True)
-    lm_path = os.path.join(args.out, f"mm3-lm-{args.quant}.gguf")
-    synth_path = os.path.join(args.out, f"mm3-synth-{args.quant}.gguf")
-    enc_path = os.path.join(args.out, f"mm3-enc-{args.quant}.gguf")
+    tag = args.quant + args.suffix
+    lm_path = os.path.join(args.out, f"mm3-lm-{tag}.gguf")
+    synth_path = os.path.join(args.out, f"mm3-synth-{tag}.gguf")
+    enc_path = os.path.join(args.out, f"mm3-enc-{tag}.gguf")
 
     want_lm = "lm" in want
     want_synth = [c for c in SYNTH_COMPONENTS if c in want]
@@ -1179,7 +1226,8 @@ def main():
             b = Bundle("qwen3")
             common_meta(b, src, args, ["lm"])
             predicates.append(("lm", build_lm(
-                src, b, tok, raw if args.embed_tokenizer_json else None)))
+                src, b, tok, raw if args.embed_tokenizer_json else None,
+                n_layers=args.lm_layers, ar_cfg_scale=args.ar_cfg_scale)))
             b.write(lm_path, args.quant)
 
         if want_synth:

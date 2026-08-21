@@ -123,6 +123,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <random>
 #include <string>
@@ -240,7 +241,12 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
     const int64_t       AV = (int64_t) c.acoustic_vocab_size;
     const int64_t       OFF  = (int64_t) c.semantic_vocab_offset;
     const int64_t       EOS  = (int64_t) c.eos_audio;
-    const float         CFG  = c.ar_cfg_scale > 0.0f ? c.ar_cfg_scale : 1.5f;
+    const float         CFG  = mm3_ar_cfg_scale(c);
+    // 1 for a guidance-distilled checkpoint (mm3-model.h): the LM and depth
+    // graphs then evaluate the conditional row only, and every "uncond" pointer
+    // below aliases the conditional one so the blend stays the identity it
+    // already is at CFG 1.0.
+    const int           ROWS = mm3_cfg_rows(c);
     const int           TOPK = c.ar_top_k > 0 ? (int) c.ar_top_k : 50;
 
     if (n_prompt <= 0) {
@@ -412,6 +418,21 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
     std::vector<float> logits((size_t) (hn * MM3_LM_CFG_ROWS));
     std::vector<float> feedback((size_t) H);
 
+    // A single-row LM (ROWS == 1, guidance-distilled checkpoint) fills only the
+    // conditional half of these buffers. Rather than teach every consumer below
+    // — the CFG blend, the depth decoder, the parity dumps, prefill_hidden —
+    // about the row count, restore the invariant they were all written against:
+    // "row 1 is the unconditional row", which at CFG 1.0 IS the conditional row.
+    // Every use downstream then stays unconditional and correct by construction.
+    // Costs one ~80 kB memcpy per frame against a ~10 ms GPU step.
+    const auto mirror_uncond = [&]() {
+        if (ROWS > 1) {
+            return;
+        }
+        memcpy(hidden.data() + H, hidden.data(), (size_t) H * sizeof(float));
+        memcpy(logits.data() + hn, logits.data(), (size_t) hn * sizeof(float));
+    };
+
     const auto t_start = std::chrono::steady_clock::now();
     {
         const auto t0 = std::chrono::steady_clock::now();
@@ -421,6 +442,7 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
         }
         out->prefill_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     }
+    mirror_uncond();
     out->prefill_hidden.assign(hidden.begin(), hidden.end());
 
     // Candidate layout: index 0 is EOS, indices 1..SV are semantic codes 0..SV-1.
@@ -586,6 +608,7 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
             out->lm_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             out->lm_steps++;
         }
+        mirror_uncond();
         if (lrc_on) {
             std::vector<float> slice;
             for (int hh = 0; hh < MM3_ALIGN_N_HEADS; hh++) {

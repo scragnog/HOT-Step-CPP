@@ -146,11 +146,13 @@ struct MM3DepthStep {
     uint8_t *            gbuf  = nullptr;
     ggml_cgraph *        graph = nullptr;
 
-    ggml_tensor * in_hidden = nullptr;  // [H, 1, 2] F32 — LM last_hidden, row 0 = cond
+    // B below is MM3DepthGraph::cfg_rows — 2 normally, 1 for a guidance-baked
+    // checkpoint (mm3-lm-graph.h note A1). Row 0 is always the conditional one.
+    ggml_tensor * in_hidden = nullptr;  // [H, 1, B] F32 — LM last_hidden, row 0 = cond
     ggml_tensor * in_sem    = nullptr;  // [1]       I32 — LM vocab id of the semantic code
     ggml_tensor * in_ac     = nullptr;  // [c-1]     I32 — depth.audio_embd row indices (null at c=1)
-    ggml_tensor * out_logit = nullptr;  // [V, 1, 2] F32 — pre-CFG logits, row 0 = cond
-    ggml_tensor * out_hid   = nullptr;  // [H, 1, 2] F32 — last-position hidden, row 0 = cond
+    ggml_tensor * out_logit = nullptr;  // [V, 1, B] F32 — pre-CFG logits, row 0 = cond
+    ggml_tensor * out_hid   = nullptr;  // [H, 1, B] F32 — last-position hidden, row 0 = cond
 
     ggml_tensor * mask = nullptr;  // [S, S] F32 causal mask, lives in the prep buffer
     int64_t       S    = 0;
@@ -172,6 +174,12 @@ struct MM3DepthGraph {
 
     MM3DepthStep step[MM3_DEPTH_MAX_STEPS];
     int          n_steps = 0;
+    // CFG rows these graphs were built for, from the same rule the LM uses
+    // (mm3_lm_cfg_rows_for). The depth decoder runs seven graphs per frame and
+    // guides each with the SAME mm3.ar.cfg_scale, so at 1.0 its unconditional
+    // row is dead for exactly the reason the LM's is. Baked into the shapes, so
+    // a change must invalidate the cached steps.
+    int          cfg_rows = MM3_LM_CFG_ROWS;
 };
 
 // One frame's worth of depth-decoder output.
@@ -268,6 +276,7 @@ static bool mm3_depth_build_step(const MM3Model & m, MM3DepthGraph * g, int cb, 
     const MM3DepthWeights & w  = m.synth.depth;
     const int64_t           H  = (int64_t) c.embedding_length;
     const int64_t           S  = cb + 1;  // hidden + semantic + (cb-1) acoustic
+    const int64_t           B  = (int64_t) g->cfg_rows;
     MM3DepthStep *          s  = &g->step[cb - 1];
 
     const size_t ctx_bytes =
@@ -290,7 +299,7 @@ static bool mm3_depth_build_step(const MM3Model & m, MM3DepthGraph * g, int cb, 
         return false;
     }
 
-    s->in_hidden = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, H, 1, 2);
+    s->in_hidden = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, H, 1, B);
     ggml_set_name(s->in_hidden, "mm3_depth_lm_hidden");
     ggml_set_input(s->in_hidden);
 
@@ -306,7 +315,7 @@ static bool mm3_depth_build_step(const MM3Model & m, MM3DepthGraph * g, int cb, 
 
     // Token 0: the LM hidden, per CFG row. Tokens 1..: the shared embeddings —
     // identical in both rows because the sampled codes are shared (note 5).
-    ggml_tensor * tok0 = ggml_mul_mat(ctx, w.proj, s->in_hidden);  // [H, 1, 2]
+    ggml_tensor * tok0 = ggml_mul_mat(ctx, w.proj, s->in_hidden);  // [H, 1, B]
 
     ggml_tensor * shared = ggml_get_rows(ctx, m.lm.token_embd, s->in_sem);  // [H, 1] — LM table (note 1)
     if (cb > 1) {
@@ -314,8 +323,12 @@ static bool mm3_depth_build_step(const MM3Model & m, MM3DepthGraph * g, int cb, 
         shared           = ggml_concat(ctx, shared, ac, 1);             // [H, cb]
     }
     shared = ggml_mul_mat(ctx, w.proj, shared);          // [H, cb]
-    shared = ggml_concat(ctx, shared, shared, 2);        // [H, cb, 2] — same for both rows
-    ggml_tensor * seq = ggml_concat(ctx, tok0, shared, 1);  // [H, S, 2]
+    if (B > 1) {
+        shared = ggml_concat(ctx, shared, shared, 2);    // [H, cb, 2] — same for both rows
+    } else {
+        shared = ggml_reshape_3d(ctx, shared, H, cb, 1); // [H, cb, 1] — nothing to duplicate
+    }
+    ggml_tensor * seq = ggml_concat(ctx, tok0, shared, 1);  // [H, S, B]
 
     // Learned absolute positions 0..S-1, added after the projection (note 4).
     ggml_tensor * pos = ggml_view_2d(ctx, w.pos_embd, H, S, w.pos_embd->nb[1], 0);
@@ -324,14 +337,14 @@ static bool mm3_depth_build_step(const MM3Model & m, MM3DepthGraph * g, int cb, 
     for (size_t i = 0; i < w.blk.size(); i++) {
         h = mm3_depth_block(ctx, c, w.blk[i], h, s->mask);
     }
-    h = mm3_depth_norm(ctx, h, w.output_norm, c.rms_eps);  // [H, S, 2]
+    h = mm3_depth_norm(ctx, h, w.output_norm, c.rms_eps);  // [H, S, B]
 
     // Last position only — that is what the head reads and what the flow stage
     // collects.
     ggml_tensor * last = ggml_cont(
-        ctx, ggml_view_3d(ctx, h, H, 1, 2, h->nb[1], h->nb[2], (size_t) (S - 1) * h->nb[1]));  // [H, 1, 2]
+        ctx, ggml_view_3d(ctx, h, H, 1, B, h->nb[1], h->nb[2], (size_t) (S - 1) * h->nb[1]));  // [H, 1, B]
 
-    ggml_tensor * logits = ggml_mul_mat(ctx, w.head[(size_t) (cb - 1)], last);  // [V, 1, 2]
+    ggml_tensor * logits = ggml_mul_mat(ctx, w.head[(size_t) (cb - 1)], last);  // [V, 1, B]
 
     s->out_hid   = last;
     s->out_logit = logits;
@@ -379,10 +392,14 @@ static bool mm3_depth_prepare(const MM3Model & m, MM3DepthGraph * g, std::string
     }
     const void * st = (const void *) m.wctx_depth.buffer;
     const void * lt = (const void *) m.wctx_lm.buffer;
-    if (g->synth_token == st && g->lm_token == lt && g->n_steps > 0) {
+    // The row count comes from the LM config, because it is the LM's guidance
+    // scale that decides whether an unconditional row exists to feed us.
+    const int    rows = mm3_cfg_rows(m.lm_cfg);
+    if (g->synth_token == st && g->lm_token == lt && g->cfg_rows == rows && g->n_steps > 0) {
         return true;
     }
     mm3_depth_free(g);
+    g->cfg_rows = rows;
 
     const MM3DepthConfig & c = m.synth_cfg.depth;
     if (c.block_count == 0 || c.embedding_length == 0 || c.head_count == 0 || c.head_dim == 0) {
@@ -550,10 +567,13 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
     out->logits_uncond.assign((size_t) (NC * V), 0.0f);
 
     const int32_t      sem_id  = semantic_code + (int32_t) lc.semantic_vocab_offset;
-    const float        cfg     = lc.ar_cfg_scale > 0.0f ? lc.ar_cfg_scale : 1.5f;
+    const float        cfg     = mm3_ar_cfg_scale(lc);
+    // 1 for a guidance-baked checkpoint (mm3-model.h). The buffers stay cut to
+    // the 2-row ceiling — only the transfer sizes and the blend follow B.
+    const int64_t      B       = (int64_t) g_mm3_depth.cfg_rows;
     std::vector<int32_t> ac_rows((size_t) NC, 0);
-    std::vector<float>   logit_buf((size_t) (V * 2));
-    std::vector<float>   hid_buf((size_t) (H * 2));
+    std::vector<float>   logit_buf((size_t) (V * MM3_LM_CFG_ROWS));
+    std::vector<float>   hid_buf((size_t) (H * MM3_LM_CFG_ROWS));
     std::vector<float>   samp_scratch;
 
     // MM3_DEPTH_PROF=1 — phase-level timing across frames, printed every 100
@@ -577,8 +597,10 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
 
         const auto tu = now();
         ggml_backend_tensor_set(s->in_hidden, lm_hidden_cond, 0, (size_t) H * sizeof(float));
-        ggml_backend_tensor_set(s->in_hidden, lm_hidden_uncond, (size_t) H * sizeof(float),
-                                (size_t) H * sizeof(float));
+        if (B > 1) {
+            ggml_backend_tensor_set(s->in_hidden, lm_hidden_uncond, (size_t) H * sizeof(float),
+                                    (size_t) H * sizeof(float));
+        }
         ggml_backend_tensor_set(s->in_sem, &sem_id, 0, sizeof(int32_t));
         if (s->in_ac) {
             ggml_backend_tensor_set(s->in_ac, ac_rows.data(), 0, (size_t) (cb - 1) * sizeof(int32_t));
@@ -599,8 +621,8 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
         }
 
         const auto td = now();
-        ggml_backend_tensor_get(s->out_logit, logit_buf.data(), 0, (size_t) (V * 2) * sizeof(float));
-        ggml_backend_tensor_get(s->out_hid, hid_buf.data(), 0, (size_t) (H * 2) * sizeof(float));
+        ggml_backend_tensor_get(s->out_logit, logit_buf.data(), 0, (size_t) (V * B) * sizeof(float));
+        ggml_backend_tensor_get(s->out_hid, hid_buf.data(), 0, (size_t) (H * B) * sizeof(float));
         if (depth_prof) {
             prof_down += ms_since(td);
         }
@@ -609,7 +631,11 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
         float * lc_row = out->logits_cond.data() + (size_t) ((cb - 1) * V);
         float * lu_row = out->logits_uncond.data() + (size_t) ((cb - 1) * V);
         memcpy(lc_row, logit_buf.data(), (size_t) V * sizeof(float));
-        memcpy(lu_row, logit_buf.data() + V, (size_t) V * sizeof(float));
+        // At B = 1 there is no second row in the buffer to copy; the guidance is
+        // baked in, which is the same statement as "the unconditional row equals
+        // the conditional one". Mirroring it keeps logits_uncond meaningful for
+        // the parity dumps rather than leaving them uninitialised.
+        memcpy(lu_row, B > 1 ? logit_buf.data() + V : logit_buf.data(), (size_t) V * sizeof(float));
         // Conditional row only (note 6).
         memcpy(out->hiddens.data() + (size_t) ((cb - 1) * H), hid_buf.data(), (size_t) H * sizeof(float));
 
@@ -618,11 +644,17 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
             code = forced_codes[cb - 1];
         } else {
             // CFG-guided distribution (design note D), reusing the logit buffer's
-            // second half — the uncond row is not needed once combined.
+            // second half — the uncond row is not needed once combined. At B = 1
+            // the blend is the identity, so the conditional row IS the guided
+            // distribution and the pass over V is skipped entirely.
             float * guided = logit_buf.data() + V;
-            for (int64_t i = 0; i < V; i++) {
-                const float u = lu_row[i];
-                guided[i]     = u + cfg * (lc_row[i] - u);
+            if (B > 1) {
+                for (int64_t i = 0; i < V; i++) {
+                    const float u = lu_row[i];
+                    guided[i]     = u + cfg * (lc_row[i] - u);
+                }
+            } else {
+                guided = lc_row;
             }
             if (rng) {
                 code = (int32_t) mm3_sample_top_k(guided, V, top_k, *rng, &samp_scratch);

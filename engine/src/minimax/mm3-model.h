@@ -50,6 +50,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -104,6 +105,34 @@ struct MM3LmConfig {
     uint32_t tok_lyrics_start  = 0;
     uint32_t tok_lyrics_end    = 0;
 };
+
+// ── AR guidance rows ────────────────────────────────────────────────────────
+//
+// The AR stage (LM + depth decoder) normally evaluates a conditional and an
+// unconditional row and blends them at mm3.ar.cfg_scale. A guidance-DISTILLED
+// composer — the depth-pruned 5.7B students are trained against the teacher's
+// CFG-guided distributions — declares a scale of 1.0, at which
+//
+//     guided = u + (c - u) * 1.0 == c
+//
+// identically, for every logit. The unconditional row is then computed, read
+// back, and algebraically cancelled: pure waste. Both stages therefore build
+// single-row graphs at 1.0 and the full pair at anything else.
+//
+// Keyed on the arithmetic, never on a model name, so it is correct for any
+// checkpoint that ships this scale — and bit-identical to the old code path at
+// the stock 1.5. Lives here rather than in mm3-lm-graph.h because the depth
+// decoder needs it too and only sees mm3-model.h.
+#define MM3_LM_CFG_ROWS 2
+
+// The scale to guide with, with the pre-KV-metadata fallback applied once.
+static inline float mm3_ar_cfg_scale(const MM3LmConfig & c) {
+    return c.ar_cfg_scale > 0.0f ? c.ar_cfg_scale : 1.5f;
+}
+
+static inline int mm3_cfg_rows(const MM3LmConfig & c) {
+    return std::fabs(mm3_ar_cfg_scale(c) - 1.0f) <= 1e-6f ? 1 : MM3_LM_CFG_ROWS;
+}
 
 // RVQ depth decoder — 4-layer llama-shaped causal stack, no RoPE.
 struct MM3DepthConfig {
