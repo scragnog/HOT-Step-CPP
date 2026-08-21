@@ -365,7 +365,10 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
   for (const n of notes) log('WARNING', `[MM3] ${n}`);
 
-  console.log(`[Generate] Job ${job.id} — backend=minimax-m3, duration=${req.duration}s, seed=${req.seed}, lyrics=${req.lyrics ? `${req.lyrics.length} chars` : '(instrumental)'}`);
+  // caption length is the SEND-side half of the caption echo: the engine prints
+  // the cleaned caption itself ([MM3-Job] <id> caption ...), so a mismatch
+  // between these two lines localises a drop to the wire rather than the UI.
+  console.log(`[Generate] Job ${job.id} — backend=minimax-m3, duration=${req.duration}s, seed=${req.seed}, caption=${req.caption.length} chars, lyrics=${req.lyrics ? `${req.lyrics.length} chars` : '(instrumental)'}`);
 
   let detailTimer: NodeJS.Timeout | undefined;
 

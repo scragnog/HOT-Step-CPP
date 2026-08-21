@@ -59,6 +59,7 @@
 #include "mm3-server.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <deque>
 #include <map>
 #include <memory>
@@ -819,6 +820,24 @@ static void mm3_handle_synth(const httplib::Request & hreq, httplib::Response & 
             job->id.c_str(), (long long) req.n_tokens, (long long) req.max_frames, req.duration,
             (unsigned long long) req.gen.seed, req.gen.steps, (double) req.gen.cfg_flow,
             req.instrumental ? ", instrumental" : "");
+
+    // Caption echo. The ACE side prints its CoT block ([LM-Phase2] CoT[0]) so an
+    // operator can see what the model was actually handed; without an equivalent
+    // here, a caption that arrived mangled — or never arrived — is invisible
+    // until you listen to the result. What is printed is the CLEANED caption,
+    // i.e. the text as it sits inside the assembled template after
+    // mm3_clean_caption stripped markdown/bullets/rules, NOT the raw box
+    // contents: the difference is exactly what a Structured Caption pasted from
+    // a markdown-emitting tool loses. MM3_LOG_PROMPT=1 dumps the whole assembled
+    // template (caption + lyric block + control tags) instead.
+    if (std::getenv("MM3_LOG_PROMPT")) {
+        fprintf(stderr, "[MM3-Job] %s prompt (%zu bytes, assembled):\n%s\n", job->id.c_str(), req.prompt.size(),
+                req.prompt.c_str());
+    } else {
+        const std::string cap = mm3_clean_caption(req.caption);
+        fprintf(stderr, "[MM3-Job] %s caption (%zu bytes in, %zu cleaned), lyrics %zu bytes:\n%s\n", job->id.c_str(),
+                req.caption.size(), cap.size(), req.lyrics.size(), cap.c_str());
+    }
 
     work_push([job, st, req]() mutable { mm3_synth_worker(job, st, std::move(req)); });
 

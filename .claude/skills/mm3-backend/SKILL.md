@@ -55,6 +55,23 @@ on httplib threads; never build production paths on them.
 `engine/trtllm-libs` + `engine/deps/tensorrt_libs` are prepended to PATH (aceEngineProcess.ts
 does this; `engine/server.cmd` does not).
 
+**Caption echo (added 2026-08-21).** `POST /mm3/synth` prints the caption to stderr at job
+creation, so it reaches the terminal, `ace_engine.log` and the in-app Terminal — the MM3
+analogue of ACE's `[LM-Phase2] CoT[0]` dump, which MM3 had no equivalent of:
+
+```
+[MM3-Job] <id> created - 63 prompt tokens, ...
+[MM3-Job] <id> caption (149 bytes in, 143 cleaned), lyrics 46 bytes:
+<the cleaned caption>
+```
+
+It prints the **cleaned** caption (post `mm3_clean_caption`), not the raw body, because the two
+differ exactly where a markdown-emitting tool pasted `**bold**` headings or `- ` bullets in —
+the drift you would otherwise only hear. `MM3_LOG_PROMPT=1` swaps it for the whole assembled
+template (`<|im_start|><|caption_start|>…<|lyrics_start|>[start]…<|audio_start|>`). The
+Node-side `[Generate] … caption=N chars` line is the send-side half; a mismatch between the two
+counts localises a drop to the wire rather than the UI.
+
 ## The trap list (each cost real debugging — do not relearn)
 
 1. **ComfyUI's wrapper NEGATES the DiT output; the diffusers reference (and our port) does not.**
