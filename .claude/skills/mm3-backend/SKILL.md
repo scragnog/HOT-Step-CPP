@@ -100,7 +100,8 @@ counts localises a drop to the wire rather than the UI.
     reverse on backend switch and before ACE gens. ~600 MB stays in the CUDA pool after unload
     (returns on process exit — not a leak).
 12. The LM GGUF is **not interchangeable with stock Qwen3-8B GGUFs** (extended 200 k vocab,
-    untied head) and llama.cpp alone cannot run music generation.
+    untied head) and llama.cpp alone cannot run music generation. It IS interchangeable with a
+    **depth-pruned distilled composer** — see "Alternative composer LMs" below.
 13. **`read_wav_buf` returns INTERLEAVED `[T,2]`; the DAV encoder wants PLANAR `[L:T][R:T]`.**
     Use `audio_io_read_wav_buf` (audio-io.h), which de-interleaves — never the raw reader.
     `mm3-preprocess` sliced the raw reader's output as `{p, p+T}` and made "left" the FIRST HALF
@@ -153,6 +154,62 @@ counts localises a drop to the wire rather than the UI.
     (mm3-model.h — filename-only probe of `<models>` + `<models>/mm3`) is true; ACE handlers
     already degrade per-request with an empty registry. Any future boot-time hard-exit must
     ask "can MM3 still serve?" first.
+
+## Alternative composer LMs (depth-pruned + guidance-distilled) — 2026-08-22
+
+The composer LM is **independently swappable**: the 5-way split means a variant replaces
+`mm3-lm-*.gguf` only, and depth/cond/dit/voc stay as they are. Proven with
+[Mothersuperior/minimax-music3-composer-5.7b-distilled](https://huggingface.co/Mothersuperior/minimax-music3-composer-5.7b-distilled)
+(36 → 21 blocks, 5.69B, repair-distilled against the teacher's **CFG-guided** distributions;
+two LR arms). Everything but the block count is bit-for-bit stock — the depth decoder
+consumes a 4096-wide hidden and the 200 k audio vocabulary is what makes it a music model,
+so those cannot move.
+
+```
+python engine/tools/convert-mm3.py --src <arm-dir> --out models/mm3 \
+  --components lm --quant q8_0 --lm-layers 21 --ar-cfg-scale 1.0 \
+  --suffix=-d21-lr6e5 --tokenizer <official>/tokenizer/tokenizer.json
+```
+
+- `--suffix` (needs `=`, else argparse eats the leading `-`) makes the whole trailing token the
+  variant name, so tagged files appear as extra entries in the LM dropdown next to the stock
+  quants. That is the A/B mechanism — no file juggling.
+- `--lm-layers` is guarded by the **leftover-tensor diff**, not by trust: a wrong count leaves
+  whole `model.layers.N.*` groups unconsumed and the run dies.
+- `source layout: unknown` on a bare `Qwen3ForCausalLM` dir is expected and harmless.
+
+**CFG 1.0 means single-row, and the engine acts on it.** `mm3_cfg_rows()` (mm3-model.h) returns
+1 when `mm3.ar.cfg_scale == 1.0`, because `u + (c-u)*1.0` is identically `c` — the
+unconditional row would be computed, read back and cancelled. The LM graph, its KV cache and
+the depth decoder all build single-row; the AR loop mirrors row 0 into row 1 so every consumer
+downstream stays unconditional. Keyed on the arithmetic, never a model name.
+
+Measured (RTX 5090, matched caption/seed/duration, only the LM swapped):
+
+| | teacher 36L / 2 rows | distilled 21L / 1 row |
+|---|---|---|
+| LM decode | 8.0 ms/step | **3.8** |
+| depth decode | 9.4 ms/frame | **7.9** |
+| AR stage | 5317 ms | **3534** |
+| end to end (12 s clip) | 9.5 s | **7.7 s** |
+| LM KV cache | 288 kB/pos | **84 kB/pos** |
+| Q8_0 file | 9.13 GB | **6.05 GB** |
+
+**The depth decoder is the clean control for the row change alone** — identical weights in both
+runs, so its 1.19× is bought purely by dropping the row. Design note A ("2 rows are ~free
+because decode is bandwidth-bound") is therefore only *mostly* right: at these tiny per-row
+matmuls the second row costs ~20 %, not ~0 %. The rest of the LM's 2.1× is the 36→21 prune.
+
+**Casualty: LRC alignment.** `MM3_ALIGN_HEADS` (mm3-align.h) pins layers 12/19/**24**, found
+empirically on the teacher. On 21 layers, 24 does not exist — the replay loop clamps
+(`mm3-lm-graph.h`, `i < m.lm.blk.size()`) so nothing crashes, but the heads are
+teacher-specific and the timestamps are not to be trusted. Re-discovery
+(`MM3_ALIGN_DUMP=1`) would be needed per variant. Audio is unaffected.
+
+**Not yet judged by ear.** Renders staged in
+`_experiments/_LISTENING/2026-08-22_mm3-distilled-lm/`. Remember trap #10 before drawing any
+conclusion from them: this is a **planner** swap, so 02/03 are different takes, not degraded
+copies of 01, and a single seed proves nothing.
 
 ## Low step counts go THIN, not dull — and why (root-caused + fixed 2026-08-21)
 
