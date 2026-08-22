@@ -392,44 +392,37 @@ let _loadToken = 0;
 /** Last track we actually put through the speakers, so the log announces a real
  *  start once rather than on every retry tick. */
 let _lastStartedTrackId: string | null = null;
+/** A fresh track load must begin at 0; a variant switch must NOT (it syncs to
+ *  the audible deck on purpose). Set by loadTrack, consumed by the first deck
+ *  that reports ready. */
+let _seekZeroOnReady = false;
 function isCurrentLoad(token: number): boolean {
   return token === _loadToken;
 }
 
-/** The URL each deck was last told to load.
+/** Which LOAD each deck has finished, or -1 for "nothing from this track yet".
  *
  *  `readyState >= 2` is NOT "ready to play this track" — it is "ready to play
- *  whatever is currently in the element", and loadUrl() is asynchronous, so
- *  straight after a track change every deck still holds the PREVIOUS file and
- *  reports itself perfectly ready. Starting on that plays the track you just
- *  navigated away from, and the one you asked for only arrives later when its
- *  own ready event lands — which is exactly "it played the wrong one, then
- *  eventually swapped".
+ *  whatever is in the element", and loadUrl() is asynchronous, so straight after
+ *  a track change every deck still holds the PREVIOUS file and reports itself
+ *  perfectly ready. Starting on that plays the track you just left.
  *
- *  So readiness is checked against the URL we asked for, not against the
- *  element's opinion of itself. */
-const _wantSrc: { orig: string | null; alt: string | null; noadapter: string | null } = {
-  orig: null, alt: null, noadapter: null,
+ *  Comparing the element's src does not work either: WaveSurfer fetches the file
+ *  to compute its waveform and then points the element at a BLOB url, so the
+ *  path we asked for is nowhere to be found and every deck looks permanently
+ *  unready — right track selected, nothing ever plays.
+ *
+ *  The load EVENT is the only honest signal. Each deck records the load it
+ *  belongs to when it reports ready; loadTrack resets them. A deck is startable
+ *  when its stamp is the current load. */
+const _deckLoad: { orig: number; alt: number; noadapter: number } = {
+  orig: -1, alt: -1, noadapter: -1,
 };
 
-/** Does this media element actually hold `want`? currentSrc is absolute and may
- *  carry a cache-buster, so compare on the path. */
-function srcIs(m: HTMLMediaElement | null, want: string | null): boolean {
-  if (!m || !want) return false;
-  const have = m.currentSrc || m.src;
-  if (!have) return false;
-  try {
-    return new URL(have, window.location.href).pathname
-        === new URL(want, window.location.href).pathname;
-  } catch {
-    return have.endsWith(want);
-  }
-}
-
-function deckReady(ws: WaveformPlayerHandle | null, want: string | null): boolean {
-  if (!ws) return false;
+function deckReady(ws: WaveformPlayerHandle | null, stamp: number): boolean {
+  if (!ws || stamp !== _loadToken) return false;
   const m = ws.getMediaElement();
-  return !!m && m.readyState >= 2 && srcIs(m, want);
+  return !!m && m.readyState >= 2;
 }
 
 /**
@@ -506,7 +499,7 @@ function startBothPlayers(token: number = _loadToken): void {
 
   // Start original if it holds THIS track's file
   let origReady = false;
-  if (deckReady(wsOrig, _wantSrc.orig)) {
+  if (deckReady(wsOrig, _deckLoad.orig)) {
     const m = wsOrig!.getMediaElement()!;
     if (m.paused) wsOrig!.play();
     origReady = true;
@@ -514,7 +507,7 @@ function startBothPlayers(token: number = _loadToken): void {
 
   // Start alt if it holds THIS track's mastered file
   let altReady = false;
-  if (_state.hasMastered && deckReady(wsAlt, _wantSrc.alt)) {
+  if (_state.hasMastered && deckReady(wsAlt, _deckLoad.alt)) {
     const m = wsAlt!.getMediaElement()!;
     if (m.paused) wsAlt!.play();
     altReady = true;
@@ -522,7 +515,7 @@ function startBothPlayers(token: number = _loadToken): void {
 
   // Start no-adapter deck if ready
   let noAdapterReady = false;
-  if (_state.hasNoAdapter && deckReady(wsNoAdapter, _wantSrc.noadapter)) {
+  if (_state.hasNoAdapter && deckReady(wsNoAdapter, _deckLoad.noadapter)) {
     const m = wsNoAdapter!.getMediaElement()!;
     if (m.paused) wsNoAdapter!.play();
     noAdapterReady = true;
@@ -744,12 +737,12 @@ function loadTrack(track: PlaybackTrack): void {
   // track switch in the app.
   const audibleDeck = useMastered ? _wsAltRef.current : _wsOriginalRef.current;
   const audibleUrl = useMastered ? track.masteredAudioUrl! : track.audioUrl;
-  // What each deck is now expected to hold. Anything it held before is stale
-  // the moment this is set, which is what stops a deck being started on the
-  // previous track's audio.
-  _wantSrc.orig = track.audioUrl || null;
-  _wantSrc.alt = hasMastered ? track.masteredAudioUrl! : null;
-  _wantSrc.noadapter = hasNoAdapter ? track.noAdapterAudioUrl! : null;
+  // Every deck now holds the PREVIOUS track until it says otherwise. Clearing
+  // the stamps is what stops one being started on that audio.
+  _deckLoad.orig = _deckLoad.alt = _deckLoad.noadapter = -1;
+  // A new track starts at the beginning. Without this the incoming deck keeps
+  // the outgoing one's playhead and the bar shows a position from another song.
+  _seekZeroOnReady = true;
   // Silence the decks that are NOT about to be loaded, or they keep running the
   // previous track's audio — inaudible because their volume is zeroed, right up
   // until it ends and fires a finish that looks like this track ending.
@@ -1142,8 +1135,25 @@ export function handleOriginalReady(duration: number, token?: number): void {
   if (token !== undefined && !isCurrentLoad(token)) return;
   // Ignore stale ready events from previously loaded tracks
   if (_loadingTrackId && _state.currentTrack && _loadingTrackId !== _state.currentTrack.id) return;
+  _deckLoad.orig = _loadToken;
+  rewindIfFreshLoad();
   setState({ duration });
   startBothPlayers();
+}
+
+/** Put a freshly loaded track back to its start.
+ *
+ *  WaveSurfer keeps the element's playhead across a load, so without this the
+ *  incoming track opens wherever the outgoing one had got to — the bar shows a
+ *  position belonging to another song, and playback resumes from it. Runs once
+ *  per load, and never on a variant switch, which syncs position deliberately. */
+function rewindIfFreshLoad(): void {
+  if (!_seekZeroOnReady) return;
+  _seekZeroOnReady = false;
+  for (const ref of [_wsOriginalRef, _wsAltRef, _wsNoAdapterRef]) {
+    ref.current?.seekTo(0);
+  }
+  setState({ currentTime: 0 });
 }
 
 /** Mastered (alt) track became ready — sync position then start */
@@ -1152,6 +1162,8 @@ export function handleAltReady(duration: number, token?: number): void {
   // token says which load it belongs to.
   if (token !== undefined && !isCurrentLoad(token)) return;
   if (_loadingTrackId && _state.currentTrack && _loadingTrackId !== _state.currentTrack.id) return;
+  _deckLoad.alt = _loadToken;
+  rewindIfFreshLoad();
   // Sync alt position with original
   const wsOrig = _wsOriginalRef.current;
   const wsAlt = _wsAltRef.current;
@@ -1171,6 +1183,8 @@ export function handleNoAdapterReady(duration: number, token?: number): void {
   // token says which load it belongs to.
   if (token !== undefined && !isCurrentLoad(token)) return;
   if (_loadingTrackId && _state.currentTrack && _loadingTrackId !== _state.currentTrack.id) return;
+  _deckLoad.noadapter = _loadToken;
+  rewindIfFreshLoad();
   const wsOrig = _wsOriginalRef.current;
   const wsNoAdapter = _wsNoAdapterRef.current;
   if (wsNoAdapter && wsOrig) {
