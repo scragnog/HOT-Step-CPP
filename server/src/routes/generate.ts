@@ -1693,8 +1693,17 @@ router.get('/mm3/stream/:id', async (req, res) => {
   // (not req): req emits 'close' as soon as its body is consumed.
   res.on('close', () => { if (!res.writableEnded) upstream.abort(); });
 
+  // `?take=N` selects which song of an ensemble render to stream. The takes
+  // decode in lockstep and have their own queues in the engine, so N of these
+  // can be open at once and all advance together. Omitted means take 0, which
+  // is what a one-take render has always served.
+  const take = Math.max(0, Number(req.query.take) || 0);
+
   try {
-    const eng = await fetch(mm3StreamUrl(job.aceJobId), { signal: upstream.signal });
+    const engUrl = take > 0
+      ? `${mm3StreamUrl(job.aceJobId)}${mm3StreamUrl(job.aceJobId).includes('?') ? '&' : '?'}take=${take}`
+      : mm3StreamUrl(job.aceJobId);
+    const eng = await fetch(engUrl, { signal: upstream.signal });
     if (!eng.ok || !eng.body) {
       const msg = await eng.text().catch(() => '');
       res.status(eng.status === 409 ? 409 : 502).type('application/json').send(msg || JSON.stringify({ error: 'stream unavailable' }));

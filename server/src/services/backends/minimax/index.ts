@@ -398,6 +398,31 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: false,
       },
       {
+        // ── Ensemble takes ──
+        // The autoregressive planner reads the whole 8B LM plus seven 0.6B
+        // depth passes for EVERY audio frame, and that read costs the same
+        // whether it serves one song or four — so decoding several takes in
+        // lockstep shares it. Measured on an RTX 5090 at q8_0, the AR stage
+        // does 4 takes in the time it used to do 1.4.
+        //
+        // A slider rather than a free number: the ceiling is a CUDA kernel
+        // limit (ggml amortises a quantised weight read across at most 8
+        // matrix-vector columns, and a CFG pair costs two of them), not a
+        // preference, so offering 12 would just be clamped silently.
+        key: 'mm3Takes',
+        type: 'slider',
+        label: 'Variations Per Render',
+        min: 1,
+        max: 4,
+        step: 1,
+        hint: 'Render several DIFFERENT songs from one prompt in a single pass, each '
+            + 'from its own seed. The planner is shared, so the extra takes are close '
+            + 'to free — three variations cost about the time of one and a half. Each '
+            + 'take is saved as its own track. The flow stage is not shared, so this '
+            + 'is a throughput win, not an instant one.',
+        default: 1,
+      },
+      {
         key: 'mm3ArSeed',
         type: 'text',
         label: 'Planner Seed',

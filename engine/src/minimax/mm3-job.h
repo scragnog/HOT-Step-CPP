@@ -608,8 +608,15 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     // LM weights, no KV cache, and the flow stack comes in up front instead of
     // through the mid-run handover.
     const std::string ar_key = mm3_ar_cache_key(g_mm3, req);
-    const bool        ar_hit = req.reuse_ar && !g_mm3_ar_cache.key.empty() && g_mm3_ar_cache.key == ar_key &&
-                        g_mm3_ar_cache.frames > 0 &&
+    // THE CACHE HOLDS ONE PLAN, so it can only ever serve a one-take render.
+    // Offering it to an ensemble skips stage 1 entirely and leaves takes 1..K-1
+    // with no frame-hiddens at all — which surfaces as "the cached AR block
+    // claims zero frames (take 1)" rather than as anything resembling a cache
+    // problem. An ensemble therefore always plans fresh; the block it produces
+    // for take 0 is still cached below, so a later single-track render can
+    // reuse it.
+    const bool        ar_hit = req.reuse_ar && st->n_takes <= 1 && !g_mm3_ar_cache.key.empty() &&
+                        g_mm3_ar_cache.key == ar_key && g_mm3_ar_cache.frames > 0 &&
                         (int64_t) g_mm3_ar_cache.hiddens.size() ==
                             g_mm3_ar_cache.frames * (int64_t) g_mm3.lm_cfg.num_codebooks *
                                 (int64_t) g_mm3.lm_cfg.embedding_length;

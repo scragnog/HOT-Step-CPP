@@ -273,6 +273,27 @@ export interface Mm3JobDetail {
    *  from the submit response. False on a streamed run is not a failure; it is
    *  the serial fallback. */
   stream_interleaved?: boolean;
+  /** Ensemble takes this job actually rendered — always present, and 1 for an
+   *  ordinary render. It is the CLAMPED count (the engine caps it at the
+   *  checkpoint's row budget), so it is what exists to fetch, never what was
+   *  asked for. */
+  takes?: number;
+  /** Per-take summary, present only when there is more than one take. Take t's
+   *  audio is at GET /mm3/take?id=<id>&take=<t> and its live stream at
+   *  GET /mm3/stream?id=<id>&take=<t>. */
+  take_detail?: Array<{
+    take: number;
+    seed: number;
+    frames: number;
+    duration_s: number;
+    eos: boolean;
+    rms: number;
+    peak: number;
+    /** Take 0 is served by the shared /job?id=&result=1 as well; the rest only
+     *  by /mm3/take. Reported so a client need not special-case index 0. */
+    audio_ready: boolean;
+    streaming: boolean;
+  }>;
   /** Chunks pushed so far — 0 while the AR stage is still planning. */
   stream_chunks?: number;
   stream_mb?: number;

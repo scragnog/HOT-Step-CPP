@@ -312,6 +312,10 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       // mm3ReuseAr comment above — the idiom follows the declared default,
       // it is not a house style.)
       ...(params.mm3Stream === true ? { stream: true } : {}),
+      // Ensemble takes: N different songs from this one prompt in a single
+      // batched AR pass. Omitted at 1 so an ordinary render's wire request is
+      // byte-for-byte what it always was.
+      ...(Number(params.mm3Takes) > 1 ? { takes: Math.min(8, Math.max(1, Math.round(Number(params.mm3Takes)))) } : {}),
       // MM3 Plank replay. A plank that will not load is a note, not a failure:
       // the render proceeds with a normal AR pass.
       ...(params.mm3PlankPath ? (() => {
@@ -690,35 +694,6 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     job.stage = 'MiniMax-Music3: saving audio...';
     job.progress = 95;
     const saveStart = performance.now();
-    const audioRes = await aceClient.getJobResult(sub.job_id);
-    if (!audioRes.ok) {
-      throw new Error(`Failed to fetch MiniMax-Music3 result (HTTP ${audioRes.status})`);
-    }
-    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-    if (audioBuffer.length === 0) throw new Error('MiniMax-Music3 returned an empty audio body');
-
-    const contentType = audioRes.headers.get('content-type') || 'audio/wav';
-    const ext = contentType.includes('wav') ? 'wav' : 'bin';
-    const filename = `${uuidv4()}.${ext}`;
-    const filepath = path.join(config.data.audioDir, filename);
-    fs.writeFileSync(filepath, audioBuffer);
-    const audioUrl = `/audio/${filename}`;
-
-    // LRC lyric timestamps, if the engine produced them. Same transport the ACE
-    // path uses (base64 in x-lrc-text on the job result), so this is the same
-    // six lines and the same <uuid>.lrc convention downstream consumers expect.
-    const lrcHeader = audioRes.headers.get('x-lrc-text');
-    if (lrcHeader) {
-      try {
-        const lrcText = Buffer.from(lrcHeader, 'base64').toString('utf-8');
-        const lrcPath = path.join(config.data.audioDir, filename.replace(/\.[^.]+$/, '.lrc'));
-        fs.writeFileSync(lrcPath, lrcText);
-        log('INFO', `[LRC] saved ${path.basename(lrcPath)} (${lrcText.length} bytes)`);
-      } catch (lErr: any) {
-        log('WARNING', `[LRC] failed to save: ${lErr?.message || lErr}`);
-      }
-    }
-
     // Final MM3 detail: shape + per-stage timings, straight from the engine.
     const finalDetail = await mm3JobDetail(sub.job_id);
     if (finalDetail?.result) {
@@ -783,186 +758,266 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
       }
     }
 
-    // Duration from the actual WAV header (MM3 renders 44.1 kHz — the parser
-    // reads the real rate, so no 48 kHz assumption leaks in here).
-    const measured = wavDurationSec(filepath);
-    const duration = measured > 0
-      ? Math.round(measured)
-      : Math.round(finalDetail?.result?.duration_sec || sub.duration || 0);
-
-    log('INFO', `[MM3] Saved ${filename} (${(audioBuffer.length / 1024).toFixed(0)} KB, ${duration}s)`);
-    timing.push({ name: 'Save', ms: Math.round(performance.now() - saveStart) });
-
-    // ── Persist ──
-    const captionLine = req.caption.split('\n').map(s => s.trim()).find(s => s.length > 0) || '';
-    const title: string = job.params.title || captionLine.substring(0, 60) || 'Untitled';
-    const style: string = job.params.caption || job.params.style || '';
-    const trackParams = {
-      ...job.params,
-      backend: 'minimax-m3',
-      seed: sub.seed,
-      duration: sub.duration,
-      // The exact wire request, so a reproduce/A-B flow has the real inputs
-      // rather than an ACE-shaped approximation of them.
-      mm3Request: req,
-      mm3: {
-        max_frames: sub.max_frames,
-        steps: sub.steps,
-        cfg_flow: sub.cfg_flow,
-        prompt_tokens: sub.prompt_tokens,
-        instrumental: sub.instrumental,
-        sample_rate: finalDetail?.result?.sample_rate ?? 44100,
-      },
-    };
-
-    // ── Post-processing (the model-agnostic subset) ──────────────────────
+    // ── One song per take ──────────────────────────────────────────────────
     //
-    // v1 skipped the whole chain because it is 48 kHz-minded and ACE-coupled.
-    // Re-auditing it stage by stage, that is only true of some of it:
-    //
-    //   VST chain     — rate-agnostic. vst-host reads the rate from the WAV and
-    //                   calls setupProcessing with it; the hardcoded 48000 is
-    //                   in the GUI command, not the processing path.
-    //   StableStep    — SA3 is NATIVELY 44.1 kHz (sa3-refine.h SA3_SR 44100)
-    //                   and out_sr defaults to the input rate, so a 44.1 kHz
-    //                   mix is a better match here than ACE's 48 kHz. The
-    //                   48000 the old audit cited belongs to the vocal-split
-    //                   branch only — disableStemSplit keeps us off it.
-    //   Mastering     — reads and writes the file's own sample rate.
-    //
-    // Still excluded, deliberately: PP-VAE re-encode (round-trips through the
-    // ACE VAE — wrong model and rate) and Spectral Lifter (tuned for the ACE
-    // 48 kHz output). Those are model-coupled, not merely rate-coupled.
-    let masteredUrl = '';
-    try {
-      const ppParams: PostProcessParams = {
-        ...job.params,
-        // Model-coupled stages: off regardless of what the UI persisted.
-        ppVaeReencode: false,
-        spectralLifterEnabled: false,
-        // The vocal split MUST run for a vocal track: SA3 refines instrumental
-        // only, and handing it a full mix makes it hallucinate replacement
-        // vocals. SuperSep is a plain audio separator with no ACE coupling, and
-        // at 44.1 kHz the whole StableStep path is resample-free (see the
-        // native-rate branch in postProcessing.ts), so nothing here needs the
-        // 48 kHz plumbing.
-        instrumental: sub.instrumental,
-      };
-      // No "is anything actually on?" pre-check needed: the chain copies the
-      // WAV, runs whatever is enabled, and if NOTHING ran it deletes the copy
-      // and returns '' — so an all-off pass is a cheap no-op that also covers
-      // the VST case (applyVstChain returns false when the chain is empty).
-      if (ppParams.postProcessingEnabled !== false) {
-        const ppStart = performance.now();
-        const ppResult = await runPostProcessingChain(
-          [audioUrl], ppParams, 1, job.id,
-          log, (stage) => { job.stage = stage; },
+    // An ensemble render produced N different songs from this one prompt, and
+    // each becomes its own library track: its own file, its own LRC, its own
+    // post-processing, its own row. `takes` is what the ENGINE actually
+    // rendered (it clamps to the checkpoint's row budget), never what was
+    // asked for — a UI that requested 8 on a 4-take checkpoint must save 4
+    // songs, not iterate over four missing ones.
+    const nTakes = Math.max(1, Number(finalDetail?.takes ?? 1));
+    const takeDetail: any[] = Array.isArray((finalDetail as any)?.take_detail)
+      ? (finalDetail as any).take_detail : [];
+    if (nTakes > 1) {
+      log('INFO', `[MM3] Ensemble render: ${nTakes} takes -> ${nTakes} songs`);
+    }
+    const audioUrls: string[] = [];
+    const songIds: string[] = [];
+
+    for (let takeIdx = 0; takeIdx < nTakes; takeIdx++) {
+      const takeSeed = Number(takeDetail[takeIdx]?.seed ?? sub.seed);
+      // Take 0's bytes are ALSO on the shared /job?id=&result=1, but
+      // /mm3/take serves every take through one uniform URL — so there is no
+      // "first one is special" branch to get wrong.
+      const takeRes = await fetch(
+        `${config.aceServer.url}/mm3/take?id=${encodeURIComponent(sub.job_id)}&take=${takeIdx}`,
+        { signal: AbortSignal.timeout(120_000) },
+      );
+      if (!takeRes.ok) {
+        throw new Error(`Failed to fetch MiniMax-Music3 take ${takeIdx} (HTTP ${takeRes.status})`);
+      }
+      const audioBuffer = Buffer.from(await takeRes.arrayBuffer());
+      if (audioBuffer.length === 0) {
+        throw new Error(`MiniMax-Music3 returned an empty audio body for take ${takeIdx}`);
+      }
+      const contentType = takeRes.headers.get('content-type') || 'audio/wav';
+      const ext = contentType.includes('wav') ? 'wav' : 'bin';
+      const filename = `${uuidv4()}.${ext}`;
+      const filepath = path.join(config.data.audioDir, filename);
+      fs.writeFileSync(filepath, audioBuffer);
+      const audioUrl = `/audio/${filename}`;
+
+      // LRC lyric timestamps, if the engine produced them for THIS take — the
+      // takes sing the same words at different moments, so a shared LRC would
+      // be wrong for every take but one.
+      try {
+        const lrcRes = await fetch(
+          `${config.aceServer.url}/mm3/take?id=${encodeURIComponent(sub.job_id)}&take=${takeIdx}&lrc=1`,
+          { signal: AbortSignal.timeout(30_000) },
         );
-        masteredUrl = ppResult.masteredUrls?.[0] || '';
-        const ppMs = Math.round(performance.now() - ppStart);
-        if (masteredUrl) {
-          log('INFO', `[MM3] Post-processing produced ${masteredUrl} in ${ppMs} ms`);
+        if (lrcRes.ok) {
+          const lrcText = await lrcRes.text();
+          if (lrcText.trim()) {
+            const lrcPath = path.join(config.data.audioDir, filename.replace(/\.[^.]+$/, '.lrc'));
+            fs.writeFileSync(lrcPath, lrcText);
+            log('INFO', `[LRC] saved ${path.basename(lrcPath)} (${lrcText.length} bytes)`);
+          }
         }
+      } catch (lErr: any) {
+        log('WARNING', `[LRC] failed to save: ${lErr?.message || lErr}`);
       }
-    } catch (ppErr: any) {
-      // Non-fatal, exactly as on the ACE side: a failed post stage must never
-      // lose the render that already succeeded.
-      log('WARNING', `[MM3] Post-processing chain failed (non-fatal): ${ppErr?.message || ppErr}`);
-    }
+      // Duration from the actual WAV header (MM3 renders 44.1 kHz — the parser
+      // reads the real rate, so no 48 kHz assumption leaks in here).
+      const measured = wavDurationSec(filepath);
+      const duration = measured > 0
+        ? Math.round(measured)
+        : Math.round(finalDetail?.result?.duration_sec || sub.duration || 0);
 
-    // ── Whisper transcription ────────────────────────────────────────────
-    //
-    // Backend-agnostic: whisper-cli takes a file path and resamples internally,
-    // so it needs nothing from ACE. Runs on the RAW render rather than the
-    // post-processed copy — VST/mastering colour the mix without adding any
-    // information, and StableStep remixes the original vocal stem untouched, so
-    // the raw file is the cleanest input for ASR.
-    //
-    // This is also, for now, MM3's only route to word timings: the LRC path
-    // reads ACE's DiT lyric cross-attention, which MM3's DiT does not have.
-    if (job.params.whisperLyricsEnabled && !sub.instrumental) {
-      const wStart = performance.now();
+      log('INFO', `[MM3] Saved ${filename} (${(audioBuffer.length / 1024).toFixed(0)} KB, ${duration}s)`);
+      timing.push({ name: 'Save', ms: Math.round(performance.now() - saveStart) });
+
+      // ── Persist ──
+      const captionLine = req.caption.split('\n').map(s => s.trim()).find(s => s.length > 0) || '';
+      const baseTitle: string = job.params.title || captionLine.substring(0, 60) || 'Untitled';
+      // Takes are siblings, not versions, so they are numbered rather than
+      // left silently identical — four rows with the same name in the library
+      // is indistinguishable from a bug.
+      const title: string = nTakes > 1 ? `${baseTitle} (take ${takeIdx + 1})` : baseTitle;
+      const style: string = job.params.caption || job.params.style || '';
+      const trackParams = {
+        ...job.params,
+        backend: 'minimax-m3',
+        // THIS take's seed, not the base one. Take t was drawn from seed + t,
+        // and stamping the base on every row would leave all but the first
+        // song unreproducible.
+        seed: takeSeed,
+        ...(nTakes > 1 ? { mm3Take: takeIdx, mm3Takes: nTakes, mm3BaseSeed: sub.seed } : {}),
+        duration: sub.duration,
+        // The exact wire request, so a reproduce/A-B flow has the real inputs
+        // rather than an ACE-shaped approximation of them.
+        mm3Request: req,
+        mm3: {
+          max_frames: sub.max_frames,
+          steps: sub.steps,
+          cfg_flow: sub.cfg_flow,
+          prompt_tokens: sub.prompt_tokens,
+          instrumental: sub.instrumental,
+          sample_rate: finalDetail?.result?.sample_rate ?? 44100,
+        },
+      };
+
+      // ── Post-processing (the model-agnostic subset) ──────────────────────
+      //
+      // v1 skipped the whole chain because it is 48 kHz-minded and ACE-coupled.
+      // Re-auditing it stage by stage, that is only true of some of it:
+      //
+      //   VST chain     — rate-agnostic. vst-host reads the rate from the WAV and
+      //                   calls setupProcessing with it; the hardcoded 48000 is
+      //                   in the GUI command, not the processing path.
+      //   StableStep    — SA3 is NATIVELY 44.1 kHz (sa3-refine.h SA3_SR 44100)
+      //                   and out_sr defaults to the input rate, so a 44.1 kHz
+      //                   mix is a better match here than ACE's 48 kHz. The
+      //                   48000 the old audit cited belongs to the vocal-split
+      //                   branch only — disableStemSplit keeps us off it.
+      //   Mastering     — reads and writes the file's own sample rate.
+      //
+      // Still excluded, deliberately: PP-VAE re-encode (round-trips through the
+      // ACE VAE — wrong model and rate) and Spectral Lifter (tuned for the ACE
+      // 48 kHz output). Those are model-coupled, not merely rate-coupled.
+      let masteredUrl = '';
       try {
-        const { ensureWhisperCli, findWhisperModel, transcribeWithWhisper } =
-          await import('../../whisperTranscribe.js');
-        const { reconcileLyrics } = await import('../../lyricsReconcile.js');
+        const ppParams: PostProcessParams = {
+          ...job.params,
+          // Model-coupled stages: off regardless of what the UI persisted.
+          ppVaeReencode: false,
+          spectralLifterEnabled: false,
+          // The vocal split MUST run for a vocal track: SA3 refines instrumental
+          // only, and handing it a full mix makes it hallucinate replacement
+          // vocals. SuperSep is a plain audio separator with no ACE coupling, and
+          // at 44.1 kHz the whole StableStep path is resample-free (see the
+          // native-rate branch in postProcessing.ts), so nothing here needs the
+          // 48 kHz plumbing.
+          instrumental: sub.instrumental,
+        };
+        // No "is anything actually on?" pre-check needed: the chain copies the
+        // WAV, runs whatever is enabled, and if NOTHING ran it deletes the copy
+        // and returns '' — so an all-off pass is a cheap no-op that also covers
+        // the VST case (applyVstChain returns false when the chain is empty).
+        if (ppParams.postProcessingEnabled !== false) {
+          const ppStart = performance.now();
+          const ppResult = await runPostProcessingChain(
+            [audioUrl], ppParams, 1, job.id,
+            log, (stage) => { job.stage = stage; },
+          );
+          masteredUrl = ppResult.masteredUrls?.[0] || '';
+          const ppMs = Math.round(performance.now() - ppStart);
+          if (masteredUrl) {
+            log('INFO', `[MM3] Post-processing produced ${masteredUrl} in ${ppMs} ms`);
+          }
+        }
+      } catch (ppErr: any) {
+        // Non-fatal, exactly as on the ACE side: a failed post stage must never
+        // lose the render that already succeeded.
+        log('WARNING', `[MM3] Post-processing chain failed (non-fatal): ${ppErr?.message || ppErr}`);
+      }
 
-        if (!(await ensureWhisperCli())) {
-          log('WARNING', '[Whisper] whisper-cli unavailable and auto-download failed — skipping');
-        } else if (!findWhisperModel(job.params.whisperModel)) {
-          log('WARNING', '[Whisper] no Whisper model installed — skipping');
-        } else {
-          log('INFO', '[Whisper] transcribing MiniMax-Music3 render...');
-          const wr = await transcribeWithWhisper(filepath, req.lyrics || '', {
-            model: job.params.whisperModel,
-            language: job.params.whisperLanguage || 'auto',
-            beamSize: job.params.whisperBeamSize || 5,
-          });
-          if (wr && wr.segments?.length > 0) {
-            const lyricsJson = reconcileLyrics(wr, req.lyrics || '', job.params.whisperModel || 'auto', false);
-            const lyricsPath = path.join(config.data.audioDir,
-                                         filename.replace(/\.[^.]+$/, '.lyrics.json'));
-            fs.writeFileSync(lyricsPath, JSON.stringify(lyricsJson, null, 2));
-            const words = lyricsJson.lines.reduce((n: number, l: any) => n + l.words.length, 0);
-            log('INFO', `[Whisper] saved ${path.basename(lyricsPath)} `
-              + `(${lyricsJson.lines.length} lines, ${words} words, ${Math.round(performance.now() - wStart)} ms)`);
+      // ── Whisper transcription ────────────────────────────────────────────
+      //
+      // Backend-agnostic: whisper-cli takes a file path and resamples internally,
+      // so it needs nothing from ACE. Runs on the RAW render rather than the
+      // post-processed copy — VST/mastering colour the mix without adding any
+      // information, and StableStep remixes the original vocal stem untouched, so
+      // the raw file is the cleanest input for ASR.
+      //
+      // This is also, for now, MM3's only route to word timings: the LRC path
+      // reads ACE's DiT lyric cross-attention, which MM3's DiT does not have.
+      if (job.params.whisperLyricsEnabled && !sub.instrumental) {
+        const wStart = performance.now();
+        try {
+          const { ensureWhisperCli, findWhisperModel, transcribeWithWhisper } =
+            await import('../../whisperTranscribe.js');
+          const { reconcileLyrics } = await import('../../lyricsReconcile.js');
+
+          if (!(await ensureWhisperCli())) {
+            log('WARNING', '[Whisper] whisper-cli unavailable and auto-download failed — skipping');
+          } else if (!findWhisperModel(job.params.whisperModel)) {
+            log('WARNING', '[Whisper] no Whisper model installed — skipping');
           } else {
-            log('WARNING', '[Whisper] no segments returned');
+            log('INFO', '[Whisper] transcribing MiniMax-Music3 render...');
+            const wr = await transcribeWithWhisper(filepath, req.lyrics || '', {
+              model: job.params.whisperModel,
+              language: job.params.whisperLanguage || 'auto',
+              beamSize: job.params.whisperBeamSize || 5,
+            });
+            if (wr && wr.segments?.length > 0) {
+              const lyricsJson = reconcileLyrics(wr, req.lyrics || '', job.params.whisperModel || 'auto', false);
+              const lyricsPath = path.join(config.data.audioDir,
+                                           filename.replace(/\.[^.]+$/, '.lyrics.json'));
+              fs.writeFileSync(lyricsPath, JSON.stringify(lyricsJson, null, 2));
+              const words = lyricsJson.lines.reduce((n: number, l: any) => n + l.words.length, 0);
+              log('INFO', `[Whisper] saved ${path.basename(lyricsPath)} `
+                + `(${lyricsJson.lines.length} lines, ${words} words, ${Math.round(performance.now() - wStart)} ms)`);
+            } else {
+              log('WARNING', '[Whisper] no segments returned');
+            }
           }
+        } catch (wErr: any) {
+          // Non-fatal, like every other post stage: a failed transcription must
+          // not cost the render.
+          log('WARNING', `[Whisper] failed (non-fatal): ${wErr?.message || wErr}`);
         }
-      } catch (wErr: any) {
-        // Non-fatal, like every other post stage: a failed transcription must
-        // not cost the render.
-        log('WARNING', `[Whisper] failed (non-fatal): ${wErr?.message || wErr}`);
+        timing.push({ name: 'Whisper', ms: Math.round(performance.now() - wStart) });
       }
-      timing.push({ name: 'Whisper', ms: Math.round(performance.now() - wStart) });
-    }
 
-    const songId = uuidv4();
-    getDb().prepare(`
-      INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
-                         duration, bpm, key_scale, time_signature, tags, dit_model,
-                         generation_params, mastered_audio_url, latent_url, quality_scores,
-                         noadapter_audio_url, backend)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      songId, job.userId, title, req.lyrics || '', style, req.caption,
-      audioUrl, duration, 0, '', '',
-      JSON.stringify([]), 'mm3', JSON.stringify(trackParams),
-      masteredUrl, '', '',
-      '', 'minimax-m3',
+      const songId = uuidv4();
+      getDb().prepare(`
+        INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
+                           duration, bpm, key_scale, time_signature, tags, dit_model,
+                           generation_params, mastered_audio_url, latent_url, quality_scores,
+                           noadapter_audio_url, backend)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        songId, job.userId, title, req.lyrics || '', style, req.caption,
+        audioUrl, duration, 0, '', '',
+        JSON.stringify([]), 'mm3', JSON.stringify(trackParams),
+        masteredUrl, '', '',
+        '', 'minimax-m3',
+      );
+
+      // ── Cover art (backend-agnostic: a text→image service, no engine coupling) ──
+      if (job.params.coverArtEnabled) {
+        const coverStart = performance.now();
+        try {
+          const { generateCoverArt, getCoverArtReadiness } = await import('../../coverArt/coverArtService.js');
+          const readiness = getCoverArtReadiness();
+          if (readiness.installed) {
+            job.stage = 'Generating cover art...';
+            job.progress = 97;
+            await generateCoverArt({
+              songId,
+              title,
+              style: style || captionLine,
+              lyrics: req.lyrics || '',
+              subject: job.params.coverArtSubject || job.params.subject || '',
+            });
+            log('INFO', `[CoverArt] Generated cover for song ${songId}`);
+            if (job.params.coverArtSubject) {
+              getDb().prepare('UPDATE songs SET cover_art_subject = ? WHERE id = ?')
+                .run(job.params.coverArtSubject, songId);
+            }
+          } else {
+            log('DEBUG', `[CoverArt] Skipped — not installed (missing: ${readiness.missingFiles.join(', ')})`);
+          }
+        } catch (coverErr: any) {
+          log('WARNING', `[CoverArt] Failed (non-fatal): ${coverErr.message}`);
+        }
+        const coverMs = Math.round(performance.now() - coverStart);
+        if (coverMs > 50) timing.push({ name: 'Cover Art', ms: coverMs });
+      }
+
+
+      audioUrls.push(masteredUrl || audioUrl);
+      songIds.push(songId);
+    }
+    // Every take is the same requested length unless one hit EOS early; report
+    // the longest, which is the render as a whole.
+    const duration = Math.max(
+      1,
+      ...(takeDetail.length
+        ? takeDetail.map((d: any) => Math.round(Number(d?.duration_s) || 0))
+        : [Math.round(finalDetail?.result?.duration_sec || sub.duration || 0)]),
     );
-
-    // ── Cover art (backend-agnostic: a text→image service, no engine coupling) ──
-    if (job.params.coverArtEnabled) {
-      const coverStart = performance.now();
-      try {
-        const { generateCoverArt, getCoverArtReadiness } = await import('../../coverArt/coverArtService.js');
-        const readiness = getCoverArtReadiness();
-        if (readiness.installed) {
-          job.stage = 'Generating cover art...';
-          job.progress = 97;
-          await generateCoverArt({
-            songId,
-            title,
-            style: style || captionLine,
-            lyrics: req.lyrics || '',
-            subject: job.params.coverArtSubject || job.params.subject || '',
-          });
-          log('INFO', `[CoverArt] Generated cover for song ${songId}`);
-          if (job.params.coverArtSubject) {
-            getDb().prepare('UPDATE songs SET cover_art_subject = ? WHERE id = ?')
-              .run(job.params.coverArtSubject, songId);
-          }
-        } else {
-          log('DEBUG', `[CoverArt] Skipped — not installed (missing: ${readiness.missingFiles.join(', ')})`);
-        }
-      } catch (coverErr: any) {
-        log('WARNING', `[CoverArt] Failed (non-fatal): ${coverErr.message}`);
-      }
-      const coverMs = Math.round(performance.now() - coverStart);
-      if (coverMs > 50) timing.push({ name: 'Cover Art', ms: coverMs });
-    }
 
     const totalMs = Math.round(performance.now() - pipelineStart);
     timing.push({ name: 'TOTAL', ms: totalMs });
@@ -971,14 +1026,15 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     job.progress = 100;
     job.stage = 'Complete!';
     job.result = {
-      audioUrls: [audioUrl],
-      songIds: [songId],
+      audioUrls,
+      songIds,
       duration,
       timing,
       totalMs,
     };
 
-    log('INFO', `[Result] 1 audio file saved, 1 song created (backend=minimax-m3)`);
+    log('INFO', `[Result] ${audioUrls.length} audio file(s) saved, ${songIds.length} song(s) created `
+      + `(backend=minimax-m3${songIds.length > 1 ? `, ${songIds.length} takes` : ''})`);
     console.log(`[Generate] Job ${job.id} (minimax-m3) completed in ${(totalMs / 1000).toFixed(1)}s`);
     finishGenerationLog(job.id, 'mm3-text2music');
 
