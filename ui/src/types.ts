@@ -367,6 +367,10 @@ export interface GenerationJob {
     noAdapterAudioUrl?: string;
   };
   error?: string;
+  /** MiniMax-Music3 live audio: true once the engine has confirmed it will
+   *  serve this job on GET /api/generate/mm3/stream/:jobId. Absent on every
+   *  other backend, and on any MM3 render that did not ask for streaming. */
+  mm3_streaming?: boolean;
 }
 
 /** User profile */

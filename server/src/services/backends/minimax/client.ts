@@ -173,6 +173,18 @@ export interface Mm3SynthRequest {
    *  why it is opt-in. The engine keys the lookup itself; the server never has
    *  to decide what "unchanged" means. */
   reuse_ar?: boolean;
+
+  // ── Streaming (engine: minimax/mm3-job.h, GET /mm3/stream) ────────────────
+  /** Emit each 200-frame window's audio as soon as it is vocoded and cropped,
+   *  so playback can start before the render finishes. The finished WAV is
+   *  still produced and fetched exactly as it is without this — streaming is an
+   *  ADDITIONAL output, never a replacement, so every downstream feature (song
+   *  row, library, mastering, stems) is unaffected.
+   *
+   *  Opt-in because it is not free: the vocoder moves inside the flow loop and
+   *  the emitted chunks are buffered in engine host RAM until a reader drains
+   *  them. The engine echoes `streaming` back to say whether it will serve. */
+  stream?: boolean;
   /** Seed for the AR stage only. Omitted = tied to `seed`, which is MM3's
    *  native behaviour (one seed drives both the plan and the flow noise).
    *  Splitting them lets the flow noise be rerolled while the plan — and
@@ -217,6 +229,11 @@ export interface Mm3SynthResponse {
   steps: number;
   cfg_flow: number;
   wav_bits: number;
+  /** Whether GET /mm3/stream will actually serve this job. Today it mirrors the
+   *  `stream` field that was sent; it is a separate answer because the engine
+   *  reserves the right to decline (the co-residency path has a VRAM gate) and
+   *  a decline must never fail the render — the caller just does not stream. */
+  streaming?: boolean;
   /** Present only when a sampler plugin was actually selected. Absent means the
    *  native flow loop ran — which is what makes this the honest answer to "did
    *  my picks reach the engine?". */
@@ -248,6 +265,13 @@ export interface Mm3JobDetail {
   /** AR cache: true when stage 1 was skipped entirely for this job. Set as soon
    *  as the job starts, not only on the finished result. */
   ar_cached?: boolean;
+  /** Streaming: true when this job was submitted with `stream: true`. */
+  streaming?: boolean;
+  /** Chunks pushed so far — 0 while the AR stage is still planning. */
+  stream_chunks?: number;
+  stream_mb?: number;
+  /** Whether a reader is currently attached to GET /mm3/stream. */
+  stream_reader?: boolean;
   evicted_modules?: number;
   evicted_mb?: number;
   arbitrate_ms?: number;
@@ -357,6 +381,16 @@ export function mm3PropsCached(): Mm3Props | null {
  *  a resolved promise here means the job will actually run. */
 export async function mm3Synth(req: Mm3SynthRequest): Promise<Mm3SynthResponse> {
   return mm3Post<Mm3SynthResponse>('/mm3/synth', req, TIMEOUT_QUICK);
+}
+
+/** The engine URL of a job's live audio stream — a chunked body of
+ *  concatenated self-contained WAVs, same transport as STORM's.
+ *
+ *  Deliberately a URL rather than a fetch helper: the Node route pipes the body
+ *  through untouched, and buffering it here to hand back a Buffer would undo
+ *  the entire point of the feature. */
+export function mm3StreamUrl(jobId: string): string {
+  return `${base()}/mm3/stream?id=${encodeURIComponent(jobId)}`;
 }
 
 /** GET /mm3/job?id= — MM3 stage detail. Soft-fails to null: this is progress

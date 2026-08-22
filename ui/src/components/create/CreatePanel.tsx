@@ -16,6 +16,8 @@ import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { AiGenerateModal, type AiGenerateResult } from './AiGenerateModal';
 import { useStreamGeneration } from '../../hooks/useStreamGeneration';
 import { StreamPlayer } from '../player/StreamPlayer';
+import { useMm3StreamAudio } from '../../hooks/useMm3StreamAudio';
+import { Mm3StreamPlayer } from '../player/Mm3StreamPlayer';
 import { expandWildcards, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
 import type { GenerationParams, Song } from '../../types';
 
@@ -25,14 +27,24 @@ interface CreatePanelProps {
   reuseData?: { song: Song; timestamp: number } | null;
   /** Currently active streaming job ID (for SSE connection) */
   streamJobId?: string | null;
+  /** Active MiniMax-Music3 job the engine has confirmed it will stream live.
+   *  Null unless "Play While Rendering" was on AND the engine accepted. */
+  mm3StreamJobId?: string | null;
 }
 
-export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData, streamJobId }) => {
+export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData, streamJobId, mm3StreamJobId }) => {
   const { t } = useTranslation();
 
   // ── Stream mode ──
   const [streamMode, setStreamMode] = usePersistedState('hs-streamMode', false);
   const stream = useStreamGeneration(streamJobId || null);
+
+  // ── MM3 "Play While Rendering" ──
+  // Its own hook and its own player: MM3 windows are consecutive spans of ONE
+  // signal and hard-splice, where the STORM path above crossfades between
+  // independent generations. Sharing that scheduler would put a fade across
+  // every window seam. See useMm3StreamAudio's header.
+  const mm3Stream = useMm3StreamAudio();
 
   // ── AI Generate modal ──
   const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -246,6 +258,30 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
             onPlay={stream.play}
             onPause={stream.pause}
             onStop={stream.stop}
+          />
+        </div>
+      )}
+
+      {/* MM3 live preview — shown only while a render the ENGINE agreed to
+          stream is in flight. Separate from the shelved ACE block above. */}
+      {(mm3StreamJobId || mm3Stream.active) && (
+        <div className="px-4 py-2 border-t border-zinc-200 dark:border-white/5">
+          <Mm3StreamPlayer
+            isPlaying={mm3Stream.isPlaying}
+            chunks={mm3Stream.chunks}
+            received={mm3Stream.received}
+            position={mm3Stream.position}
+            ahead={mm3Stream.ahead}
+            underruns={mm3Stream.underruns}
+            done={mm3Stream.done}
+            active={mm3Stream.active}
+            volume={mm3Stream.volume}
+            headroom={mm3Stream.headroom}
+            error={mm3Stream.error}
+            onStart={() => { if (mm3StreamJobId) void mm3Stream.start(mm3StreamJobId); }}
+            onStop={mm3Stream.stop}
+            onVolume={mm3Stream.setVolume}
+            onHeadroom={mm3Stream.setHeadroom}
           />
         </div>
       )}

@@ -253,6 +253,10 @@ async function capabilities(): Promise<BackendCapabilities> {
       repaint: false,
       lego: false,
       extract: false,
+      // STORM-style continuous streaming (an endless chain of independent
+      // generations) — genuinely not supported. NOT the same thing as the
+      // `mm3Stream` extension below, which plays ONE render's windows as they
+      // finish; that is gated by the extension toggle, not by this flag.
       streaming: false,
       // Native MM3 LM LoRA training shipped 2026-08-20 (ace-train mm3-codes +
       // mm3-lm-train, wired as Training Studio job kinds). Nothing reads this
@@ -373,6 +377,25 @@ async function capabilities(): Promise<BackendCapabilities> {
             + '(~3 MB per second of audio, so roughly 600 MB for a 200 s song). Needs a '
             + 'fixed seed to be able to hit.',
         default: true,
+      },
+      {
+        // ── Streaming player ──
+        // Lives here rather than as a core UI control on purpose: it is a
+        // backend-specific capability (windowed rendering is what makes it
+        // possible at all), and the extensions channel already carries it into
+        // getGlobalParams() with no store field, no route change and no
+        // ACE-side risk. The ACE `streamMode` block in CreatePanel.tsx is a
+        // different, shelved feature and stays shelved.
+        key: 'mm3Stream',
+        type: 'toggle',
+        label: 'Play While Rendering',
+        hint: 'Start listening a few seconds in, while the rest of the song is still '
+            + 'being computed. MiniMax-Music3 renders in overlapping windows, so each '
+            + 'window is final long before the last one exists. The complete '
+            + 'file is still written and saved exactly as usual — this only adds a live '
+            + 'preview. Off by default: it holds the rendered audio in engine memory '
+            + 'until the browser drains it.',
+        default: false,
       },
       {
         key: 'mm3ArSeed',

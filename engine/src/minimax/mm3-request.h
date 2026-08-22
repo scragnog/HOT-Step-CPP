@@ -569,6 +569,16 @@ struct MM3SynthRequest {
     // 200 s song), which is why it is opt-in rather than always on.
     bool    reuse_ar = false;
 
+    // ── Streaming (mm3-job.h + GET /mm3/stream) ────────────────────────────
+    // Emit each window's PCM as soon as it is vocoded and cropped, so a caller
+    // can start playing before the render finishes. OPT-IN per request: it
+    // moves the vocoder inside the flow loop (mm3-pipeline.h MM3ChunkCb) and
+    // buffers the emitted chunks in host RAM until a reader drains them, and a
+    // plain render should pay for neither. The finished WAV is produced and
+    // delivered exactly as it is today — streaming is an ADDITIONAL output,
+    // never a replacement.
+    bool    stream = false;
+
     // Replay previously-captured codes instead of sampling them. Both must be
     // present together, with acoustic == semantic * 7. Entry 0 is the
     // un-emitted iteration, so I codes render I-1 frames (mm3-ar-loop.h).
@@ -811,6 +821,20 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 return false;
             }
             out->get_ar_codes = yyjson_get_bool(v);
+        }
+    }
+
+    // ── Streaming ──
+    {
+        yyjson_val * v = yyjson_obj_get(root, "stream");
+        if (v && !yyjson_is_null(v)) {
+            if (!yyjson_is_bool(v)) {
+                if (err) {
+                    *err = "\"stream\" must be a boolean";
+                }
+                return false;
+            }
+            out->stream = yyjson_get_bool(v);
         }
     }
 

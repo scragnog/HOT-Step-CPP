@@ -33,6 +33,7 @@ import { runPostProcessingChain } from '../services/generation/postProcessing.js
 import { getCachedLatent, saveCachedLatent } from '../services/generation/sourceLatentCache.js';
 import { getActiveBackendId } from '../services/backends/registry.js';
 import { runMinimaxGeneration, releaseMinimaxVramForAce } from '../services/backends/minimax/generate.js';
+import { mm3StreamUrl } from '../services/backends/minimax/client.js';
 
 const router = Router();
 
@@ -73,6 +74,11 @@ export interface GenerationJob {
   error?: string;
   params: any;
   createdAt: number;
+  /** MiniMax-Music3 "play while rendering": true once the engine has confirmed
+   *  it will serve this job's audio on GET /mm3/stream. The ENGINE's answer,
+   *  not the request's — it may decline, and the UI must then behave exactly
+   *  as it does with streaming off. */
+  mm3Streaming?: boolean;
   /** Stream preview WAV files emitted by the DEMON-style ring buffer */
   streamPreviews?: Array<{
     path: string;
@@ -1638,7 +1644,72 @@ router.get('/status/:id', (req, res) => {
     ace_job_id: job.aceJobId ?? null,
     ace_phase: job.acePhase ?? null,
     ace_phase_progress: job.acePhaseProgress ?? null,
+    // MM3 live-audio stream: GET /api/generate/mm3/stream/:id is worth opening
+    // only once this is true. Absent/false on every other backend and on every
+    // render that did not ask for it.
+    mm3_streaming: job.mm3Streaming === true,
   });
+});
+
+// GET /api/generate/mm3/stream/:id — the live audio of a running MM3 render.
+//
+// A PIPE, not a handler: the engine already produces exactly the byte stream
+// the browser wants (concatenated self-contained WAVs, chunked), so this reads
+// the response body and writes it straight out. Buffering it — even into a
+// single Buffer before sending — would undo the whole feature, so nothing here
+// may await the end of the body.
+//
+// Keyed on the NODE job id, not the engine's, so the browser never has to learn
+// engine ids and a cancel through the existing /cancel/:id keeps working.
+router.get('/mm3/stream/:id', async (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) { res.status(404).json({ error: 'Job not found' }); return; }
+  if (!job.aceJobId) {
+    // Submitted but not yet handed to the engine. A 409 rather than a wait:
+    // the client polls status and reopens, and holding the socket here would
+    // pin a connection for an unbounded queue wait.
+    res.status(409).json({ error: 'This job has not reached the engine yet' });
+    return;
+  }
+  if (job.mm3Streaming !== true) {
+    res.status(409).json({ error: 'This job is not streaming' });
+    return;
+  }
+
+  const upstream = new AbortController();
+  // Browser tab closed / player stopped — drop the engine connection too, so
+  // the engine stops holding chunks for a reader that has gone away. Watch res
+  // (not req): req emits 'close' as soon as its body is consumed.
+  res.on('close', () => { if (!res.writableEnded) upstream.abort(); });
+
+  try {
+    const eng = await fetch(mm3StreamUrl(job.aceJobId), { signal: upstream.signal });
+    if (!eng.ok || !eng.body) {
+      const msg = await eng.text().catch(() => '');
+      res.status(eng.status === 409 ? 409 : 502).type('application/json').send(msg || JSON.stringify({ error: 'stream unavailable' }));
+      return;
+    }
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    const reader = eng.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!res.write(Buffer.from(value))) {
+        // Respect backpressure: a browser that is not draining fast enough
+        // must slow the pipe rather than grow an unbounded Node-side buffer.
+        await new Promise<void>(resolve => res.once('drain', () => resolve()));
+      }
+    }
+    res.end();
+  } catch (err: any) {
+    if (err?.name === 'AbortError') { try { res.end(); } catch {} return; }
+    console.warn(`[MM3 Stream] job ${job.id}: ${err?.message ?? err}`);
+    if (!res.headersSent) res.status(502).json({ error: String(err?.message ?? err) });
+    else { try { res.end(); } catch {} }
+  }
 });
 
 // POST /api/generate/cancel/:id — cancel a running job

@@ -134,6 +134,66 @@ struct MM3GenProgress {
 
 using MM3ProgressCb = std::function<void(const MM3GenProgress &)>;
 
+// ── Streaming chunk sink ────────────────────────────────────────────────────
+//
+// Called once per window, on the generating thread, the moment that window's
+// PCM is FINAL — after it has been vocoded and cropped. Nothing downstream
+// ever touches those samples again (fact 4: vocode-then-crop, and the kept
+// spans tile the song exactly once), so a chunk is safe to play the instant it
+// arrives.
+//
+//   seq            0-based window index; chunks arrive in order, no gaps
+//   sample_offset  where this chunk starts in the finished song, per channel
+//   n_samples      length of this chunk, per channel. 0 is legal for a
+//                  degenerate final window and must be tolerated
+//   planar         2 * n_samples floats, [L: n_samples][R: n_samples], already
+//                  clamped to [-1, 1] with NaN/Inf zeroed — i.e. bit-for-bit
+//                  the values the finished WAV will carry. BORROWED: valid
+//                  only for the duration of the call.
+//
+// Installing a sink also changes WHEN the vocoder runs: inline, per window,
+// instead of in one pass after every window has been denoised. That is a
+// scheduling change only — the vocoder is a pure function of one window's
+// latents, and the latents are never revisited once mm3_flow_sample_chunk
+// returns — but it is why the sink is opt-in rather than always on. A render
+// with no sink keeps today's exact stage order, VRAM profile and graph-cache
+// behaviour, byte for byte.
+using MM3ChunkCb = std::function<void(int64_t seq, int64_t sample_offset, int64_t n_samples, const float * planar,
+                                      int sample_rate)>;
+
+// Which span of a vocoded window survives the stitch (fact 4). THE one place
+// this is computed: the streaming sink and the final stitch must agree sample
+// for sample, or the streamed concatenation stops being the saved file — and
+// that is exactly the bug an ear cannot localise.
+static inline void mm3_window_crop(int64_t k, int64_t NW, int64_t L, int64_t UP, int64_t * left, int64_t * len) {
+    const int64_t T = L * UP;
+    const int64_t l = k == 0 ? 0 : (int64_t) MM3_CROP_LEFT_LATENTS * UP;
+    // The LAST window has no right crop — getting this wrong truncates the
+    // ending, and on a streamed render it would truncate it silently.
+    const int64_t r = k == NW - 1 ? 0 : (int64_t) MM3_CROP_RIGHT_LATENTS * UP;
+    int64_t       n = T - l - r;
+    if (n < 0) {
+        n = 0;
+    }
+    *left = l;
+    *len  = n;
+}
+
+/** The finished-audio value of one vocoder sample. Shared by the streaming
+ *  sink and the final clamp pass so the two cannot drift. */
+static inline float mm3_clamp_sample(float v) {
+    if (std::isnan(v) || std::isinf(v)) {
+        return 0.0f;
+    }
+    if (v > 1.0f) {
+        return 1.0f;
+    }
+    if (v < -1.0f) {
+        return -1.0f;
+    }
+    return v;
+}
+
 // ── The overlap-aware Euler loop ────────────────────────────────────────────
 //
 // A strict superset of mm3_flow_sample() (mm3-dit-graph.h), which stays exactly
@@ -549,6 +609,13 @@ struct MM3GenRequest {
      *  without this file owning a VRAM policy. Return false (setting *err) to
      *  abort the run. Optional: unset means "everything stays resident". */
     std::function<bool(std::string * err)> after_ar;
+    /** Streaming sink (MM3ChunkCb above). Unset — the default — runs the
+     *  original serial pipeline: every window denoised, then every window
+     *  vocoded, then stitched. Set, the vocoder moves inside the window loop
+     *  and each window's final PCM is handed over as soon as it exists. The
+     *  callback runs on this thread and must not block for long; mm3-job.h's
+     *  implementation is a memcpy into a queue. */
+    MM3ChunkCb on_chunk;
 };
 
 struct MM3GenResult {
@@ -755,6 +822,15 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     }
 
     // ── stage 2: per-window condition -> flow ──
+    //
+    // With a streaming sink installed the vocoder runs INSIDE this loop (see
+    // MM3ChunkCb): window k is denoised, vocoded, cropped and handed over
+    // before window k+1 is conditioned. Without one, stage 3 below vocodes
+    // everything in a second pass, exactly as it always has.
+    const bool         streaming = (bool) req.on_chunk;
+    std::vector<std::vector<float>> wavs((size_t) NW);
+    int64_t            stream_offset = 0;   // samples/channel already emitted
+    std::vector<float> stream_buf;          // scratch for the cropped chunk
     std::vector<std::vector<float>> chunk_latents((size_t) NW);
     std::vector<float>              prev_latent;  // [128, 172] channel-major
     int64_t                         prev_len = 0;
@@ -839,24 +915,58 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
                (size_t) (prev_len * (int64_t) cc.out_dim) * sizeof(float));
 
         chunk_latents[(size_t) k] = std::move(lat);
+
+        // ── streaming: vocode + emit this window now ────────────────────────
+        // The carry (prev_latent / prev_cond) was taken from `lat` above and
+        // is what window k+1 needs; window k's own latents are finished, so
+        // vocoding them here costs nothing extra and buys ~one window of
+        // audio per flow pass instead of the whole song at the end.
+        if (streaming) {
+            if (bail()) {
+                return false;
+            }
+            if (progress) {
+                progress(MM3GenProgress{ "vocode", k, NW, 0, 1 });
+            }
+            const auto t_v1 = std::chrono::steady_clock::now();
+            if (!mm3_vocoder_decode(m, chunk_latents[(size_t) k].data(), L, wavs[(size_t) k], err)) {
+                return false;
+            }
+            out->voc_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_v1).count();
+
+            int64_t left = 0, len = 0;
+            mm3_window_crop(k, NW, L, UP, &left, &len);
+            stream_buf.assign((size_t) (2 * len), 0.0f);
+            for (int ch = 0; ch < 2; ch++) {
+                const float * src = wavs[(size_t) k].data() + (int64_t) ch * (L * UP) + left;
+                float *       dst = stream_buf.data() + (int64_t) ch * len;
+                for (int64_t i = 0; i < len; i++) {
+                    dst[i] = mm3_clamp_sample(src[i]);
+                }
+            }
+            req.on_chunk(k, stream_offset, len, stream_buf.data(), out->sample_rate);
+            stream_offset += len;
+        }
     }
 
     // ── stage 3: vocode + stitch (fact 4) ──
-    std::vector<std::vector<float>> wavs((size_t) NW);
-    const auto t_v = std::chrono::steady_clock::now();
-    for (int64_t k = 0; k < NW; k++) {
-        if (bail()) {
-            return false;
+    // Already done, window by window, when a streaming sink is installed.
+    if (!streaming) {
+        const auto t_v = std::chrono::steady_clock::now();
+        for (int64_t k = 0; k < NW; k++) {
+            if (bail()) {
+                return false;
+            }
+            if (progress) {
+                progress(MM3GenProgress{ "vocode", k, NW, 0, 1 });
+            }
+            if (!mm3_vocoder_decode(m, chunk_latents[(size_t) k].data(), out->window_L[(size_t) k], wavs[(size_t) k],
+                                    err)) {
+                return false;
+            }
         }
-        if (progress) {
-            progress(MM3GenProgress{ "vocode", k, NW, 0, 1 });
-        }
-        if (!mm3_vocoder_decode(m, chunk_latents[(size_t) k].data(), out->window_L[(size_t) k], wavs[(size_t) k],
-                                err)) {
-            return false;
-        }
+        out->voc_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_v).count();
     }
-    out->voc_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_v).count();
 
     if (progress) {
         progress(MM3GenProgress{ "stitch", -1, NW, 0, 1 });
@@ -865,16 +975,8 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     std::vector<int64_t> keep_left((size_t) NW), keep_len((size_t) NW);
     int64_t              total = 0;
     for (int64_t k = 0; k < NW; k++) {
-        const int64_t T     = out->window_L[(size_t) k] * UP;
-        const int64_t left  = k == 0 ? 0 : (int64_t) MM3_CROP_LEFT_LATENTS * UP;
-        const int64_t right = k == NW - 1 ? 0 : (int64_t) MM3_CROP_RIGHT_LATENTS * UP;
-        int64_t       len   = T - left - right;
-        if (len < 0) {
-            len = 0;
-        }
-        keep_left[(size_t) k] = left;
-        keep_len[(size_t) k]  = len;
-        total += len;
+        mm3_window_crop(k, NW, out->window_L[(size_t) k], UP, &keep_left[(size_t) k], &keep_len[(size_t) k]);
+        total += keep_len[(size_t) k];
     }
 
     out->audio.assign((size_t) (2 * total), 0.0f);
@@ -894,14 +996,10 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     for (float & v : out->audio) {
         if (std::isnan(v) || std::isinf(v)) {
             out->has_nan = true;
-            v            = 0.0f;
-            continue;
         }
-        if (v > 1.0f) {
-            v = 1.0f;
-        } else if (v < -1.0f) {
-            v = -1.0f;
-        }
+        // Same expression the streaming sink applied to its copy — that
+        // identity is what makes the streamed concatenation bit-identical.
+        v = mm3_clamp_sample(v);
         const float a = std::fabs(v);
         if (a > out->peak) {
             out->peak = a;

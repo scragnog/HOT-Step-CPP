@@ -52,6 +52,15 @@
 //
 // Callers that want the real MM3 vocabulary poll GET /mm3/job?id=... instead,
 // which reports the raw stage name plus the run's shape, timings and seed.
+//
+// ── Streaming (GET /mm3/stream?id=) ─────────────────────────────────────────
+//
+// Opt in with `"stream": true` on the request. Each 200-frame window's audio is
+// final the moment it is vocoded and cropped, so it is pushed to a per-job
+// queue and served as a chunked body of concatenated WAVs while the render
+// continues. It is an ADDITIONAL output: the complete WAV is still built,
+// encoded onto Job::result_body and fetched the usual way, so the song row,
+// the library entry, mastering and stems are untouched.
 
 #include "mm3-ar-cache.h"
 #include "mm3-lm-merge.h"
@@ -59,6 +68,7 @@
 #include "mm3-server.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdlib>
 #include <deque>
 #include <map>
@@ -72,6 +82,88 @@
 // graphs (LM prefill/decode, depth, cond, DiT, vocoder), which are allocated
 // lazily and not knowable before the first run.
 #define MM3_VRAM_COMPUTE_HEADROOM ((size_t) 3 * 1024 * 1024 * 1024)
+
+// ── Streaming: the per-job chunk queue ──────────────────────────────────────
+//
+// The GPU worker pushes finished windows in (mm3-pipeline.h MM3ChunkCb); the
+// GET /mm3/stream handler, on an httplib thread, pops them out.
+//
+// It has its OWN mutex and that is load-bearing twice over. It must never take
+// g_mm3_mutex — an in-flight generation holds that for its entire run, which is
+// exactly why GET /mm3/props blocks and GET /mm3/job does not, and a stream
+// that blocked on it could not deliver the audio of the very job holding it.
+// And it must not share MM3JobState::mtx either, which the worker locks on
+// every Euler step to publish progress.
+//
+// Each entry is a COMPLETE, self-contained WAV — same transport shape as
+// POST /api/generate/storm/stream, so ui/src/hooks/useStreamAudio.ts's
+// WAV-extraction helper reads this byte stream unmodified.
+struct MM3StreamQueue {
+    std::mutex              mtx;
+    std::condition_variable cv;
+    std::deque<std::string> chunks;
+    bool                    finished  = false;  // the run ended (any outcome)
+    bool                    abandoned = false;  // buffered past the cap with nobody reading
+    std::string             error;              // set when the run ended badly
+    int64_t                 bytes_queued = 0;   // sitting in the deque right now (under mtx)
+
+    // ATOMIC, deliberately not guarded by `mtx`. GET /mm3/job reads these while
+    // already holding MM3JobState::mtx — the lock the worker takes on every
+    // Euler step to publish progress. Reaching for `mtx` from inside that would
+    // nest two locks the other paths take independently, and would put the
+    // generation behind an HTTP handler. Nothing here needs a consistent
+    // snapshot; they are counters for a progress line.
+    std::atomic<bool>    attached{ false };  // a reader currently holds the stream
+    std::atomic<int64_t> bytes_total{ 0 };
+    std::atomic<int64_t> n_chunks{ 0 };
+    std::atomic<int>     sample_rate{ 0 };
+};
+
+// Safety valve, not a policy: the server attaches its reader immediately after
+// POST /mm3/synth returns, long before the first window exists, so in practice
+// nothing accumulates. This bounds the damage when nobody ever reads — a
+// submitted-and-forgotten stream, or a browser tab that went away mid-render.
+//
+// 128 MB, chosen to clear the longest render MM3 accepts: 360 s of 16-bit
+// 44.1 kHz stereo is 63.5 MB, so a user who submits and only presses Listen at
+// the end still gets the whole song. Sized to the format, not to a round
+// number — 32-bit float output is 4x, and that one CAN hit the cap.
+#define MM3_STREAM_MAX_UNREAD_BYTES ((int64_t) 128 * 1024 * 1024)
+
+/** Hand one finished window to whoever is reading. Never blocks the worker. */
+static void mm3_stream_push(MM3StreamQueue & q, std::string wav, int sample_rate) {
+    std::lock_guard<std::mutex> lock(q.mtx);
+    if (q.abandoned || q.finished) {
+        return;
+    }
+    q.sample_rate.store(sample_rate);
+    if (!q.attached.load() && q.bytes_queued + (int64_t) wav.size() > MM3_STREAM_MAX_UNREAD_BYTES) {
+        q.abandoned = true;
+        q.chunks.clear();
+        q.bytes_queued = 0;
+        fprintf(stderr, "[MM3-Stream] no reader after %.0f MB buffered - dropping the stream (the render continues)\n",
+                (double) q.bytes_total.load() / 1048576.0);
+        q.cv.notify_all();
+        return;
+    }
+    q.bytes_queued += (int64_t) wav.size();
+    q.bytes_total.fetch_add((int64_t) wav.size());
+    q.n_chunks.fetch_add(1);
+    q.chunks.push_back(std::move(wav));
+    q.cv.notify_all();
+}
+
+/** End the stream. MUST be called on every exit path of the worker — a reader
+ *  blocked on the condition variable has no other way to learn the run is over.
+ *  Queued chunks are left in place so a reader still drains what did render. */
+static void mm3_stream_close(MM3StreamQueue & q, const std::string & error) {
+    std::lock_guard<std::mutex> lock(q.mtx);
+    if (!q.finished) {
+        q.finished = true;
+        q.error    = error;
+    }
+    q.cv.notify_all();
+}
 
 // ── Per-job MM3 state ───────────────────────────────────────────────────────
 
@@ -109,6 +201,13 @@ struct MM3JobState {
     double  arbitrate_ms = 0.0, warm_ms = 0.0;
     size_t  evicted_bytes = 0;
     int     evicted_modules = 0;
+
+    /** Live chunk queue, allocated only when the request asked for streaming.
+     *  Null means this job produces no stream and GET /mm3/stream will say so.
+     *  shared_ptr because the reader outlives nothing in particular: the job
+     *  state is evicted on a 32-entry LRU while a slow client may still be
+     *  draining. */
+    std::shared_ptr<MM3StreamQueue> stream;
 };
 
 static std::mutex                                                   g_mm3_jobs_mtx;
@@ -357,6 +456,21 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         st->step      = step;
         st->n_steps   = n_steps;
     };
+    // ── Streaming: close the queue however this function exits ─────────────
+    // Every `return` below — early cancel, load failure, adapter failure,
+    // generation failure, success — has to release a reader parked on the
+    // condition variable. A destructor is the only spelling that cannot be
+    // forgotten when a new failure path is added later.
+    struct StreamCloser {
+        std::shared_ptr<MM3StreamQueue> q;
+        std::string                     why = "the run ended before it finished";
+        ~StreamCloser() {
+            if (q) {
+                mm3_stream_close(*q, why);
+            }
+        }
+    } stream_closer{ st->stream };
+
     // Post-run residency, mirroring the ACE side's EVICT_STRICT default.
     //
     // MM3 keeps its weights in its own buffers rather than in the ModelStore, so
@@ -398,6 +512,7 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
             st->stage = stage;
             st->error = msg;
         }
+        stream_closer.why = msg;  // a reader learns WHY the audio stopped
         job_set_phase(*job, status == 3 ? JobPhase::CANCELLED : JobPhase::FAILED);
         job->status.store(status);
         // A failed or cancelled run must not leave the weights parked either —
@@ -639,6 +754,36 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         };
     }
 
+    // ── Streaming sink ─────────────────────────────────────────────────────
+    //
+    // One self-contained WAV per window, pushed the moment that window's PCM
+    // is final. The samples handed over are already clamped exactly as the
+    // saved file's are (mm3-pipeline.h mm3_clamp_sample), and `wav_bits` is
+    // the SAME format the finished file uses — so concatenating every chunk's
+    // sample data reproduces the saved WAV byte for byte. That identity is the
+    // validation bar for this feature, and it only holds while both sides
+    // encode through audio_encode_wav with the same format.
+    if (st->stream) {
+        const WavFormat sfmt = req.wav_bits == 32 ? WAV_F32 : (req.wav_bits == 24 ? WAV_S24 : WAV_S16);
+        auto            q    = st->stream;
+        const std::string jid = job->id;
+        req.gen.on_chunk = [q, sfmt, jid](int64_t seq, int64_t off, int64_t n, const float * planar, int sr) {
+            // A degenerate final window can crop to nothing. Emitting a
+            // header-only WAV would be harmless here but `DataSink::write`
+            // treats a zero-length write as end-of-stream, so skip it.
+            if (n <= 0 || !planar) {
+                return;
+            }
+            std::string wav = audio_encode_wav(planar, (int) n, sr, sfmt);
+            if (seq == 0) {
+                fprintf(stderr, "[MM3-Stream] %s: first chunk at %.2f s of audio (%zu bytes)\n", jid.c_str(),
+                        (double) n / (double) (sr > 0 ? sr : 1), wav.size());
+            }
+            (void) off;  // carried by the concatenation order, not the WAV header
+            mm3_stream_push(*q, std::move(wav), sr);
+        };
+    }
+
     MM3GenResult r;
     const bool   ok = mm3_generate(g_mm3, req.gen, &g_mm3_tokenizer, progress, &r, &err);
     if (!ok) {
@@ -745,6 +890,12 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         return;
     }
 
+    stream_closer.why.clear();  // clean end — a reader sees EOF, not an error
+    if (st->stream) {
+        fprintf(stderr, "[MM3-Stream] %s: %lld chunk(s), %.1f MB streamed\n", job->id.c_str(),
+                (long long) st->stream->n_chunks.load(), (double) st->stream->bytes_total.load() / 1048576.0);
+    }
+
     job_set_phase(*job, JobPhase::DONE);
     job->status.store(1);
     fprintf(stderr, "[MM3-Job] %s: done - %lld frames, %lld samples/ch (%.2f s @ %d Hz), rms %.4f, %.0f ms\n",
@@ -810,6 +961,13 @@ static void mm3_handle_synth(const httplib::Request & hreq, httplib::Response & 
 
     auto job = job_create();
     auto st  = std::make_shared<MM3JobState>();
+    // Allocated here, not in the worker: the caller opens GET /mm3/stream as
+    // soon as this response lands, which is long before the job reaches the
+    // front of the FIFO. The queue has to exist for that reader to attach to,
+    // or the stream would 409 on every render that had to wait its turn.
+    if (req.stream) {
+        st->stream = std::make_shared<MM3StreamQueue>();
+    }
     st->seed         = req.gen.seed;
     st->max_frames   = req.max_frames;
     st->n_tokens     = req.n_tokens;
@@ -852,6 +1010,13 @@ static void mm3_handle_synth(const httplib::Request & hreq, httplib::Response & 
     // job will actually do a lookup with.
     yyjson_mut_obj_add_uint(o, orot, "ar_seed", req.gen.ar_seed_set ? req.gen.ar_seed : req.gen.seed);
     yyjson_mut_obj_add_bool(o, orot, "reuse_ar", req.reuse_ar);
+    // Whether GET /mm3/stream will actually serve this job. Today it is simply
+    // what was asked for — the serial pipeline can always emit windows as they
+    // finish. It is echoed rather than assumed because the co-residency work
+    // (sliding AR/flow pipeline) has a VRAM gate that CAN decline, and when it
+    // does the caller must be told here rather than discovering it as a
+    // silent absence of audio. Never a reason to fail a render.
+    yyjson_mut_obj_add_bool(o, orot, "streaming", req.stream);
     yyjson_mut_obj_add_uint(o, orot, "max_frames", req.max_frames);
     yyjson_mut_obj_add_real(o, orot, "duration", req.duration);
     yyjson_mut_obj_add_uint(o, orot, "prompt_tokens", req.n_tokens);
@@ -935,6 +1100,15 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
     // live (not only on the finished result) so a poller can say so while the
     // flow stage is still running.
     yyjson_mut_obj_add_bool(o, orot, "ar_cached", st->ar_cached);
+    // Streaming: whether GET /mm3/stream can serve this job, and how much has
+    // gone out so far. Reported live so a poller can distinguish "streaming is
+    // on but the AR stage has not produced a window yet" from "not streaming".
+    yyjson_mut_obj_add_bool(o, orot, "streaming", (bool) st->stream);
+    if (st->stream) {
+        yyjson_mut_obj_add_int(o, orot, "stream_chunks", st->stream->n_chunks.load());
+        yyjson_mut_obj_add_real(o, orot, "stream_mb", (double) st->stream->bytes_total.load() / 1048576.0);
+        yyjson_mut_obj_add_bool(o, orot, "stream_reader", st->stream->attached.load());
+    }
     yyjson_mut_obj_add_int(o, orot, "evicted_modules", st->evicted_modules);
     yyjson_mut_obj_add_real(o, orot, "evicted_mb", (double) st->evicted_bytes / 1048576.0);
     yyjson_mut_obj_add_real(o, orot, "arbitrate_ms", st->arbitrate_ms);
@@ -972,8 +1146,97 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
     }
 }
 
+// ── GET /mm3/stream?id=... ──────────────────────────────────────────────────
+//
+// The audio of a still-running job, as a chunked HTTP body of concatenated
+// self-contained WAVs — the SAME transport POST /api/generate/storm/stream
+// already uses, so the browser-side WAV extractor is shared rather than
+// reinvented.
+//
+// Requires the job to have been submitted with `"stream": true`. Answers 409
+// rather than 404 when it was not, because "this job exists but produces no
+// stream" and "no such job" are different problems for a caller to handle.
+//
+// NEVER takes g_mm3_mutex. The generation it is streaming holds that lock for
+// its whole run, so acquiring it here would deadlock the feature against
+// itself — the same rule GET /mm3/job follows.
+//
+// One reader at a time. Chunks are CONSUMED as they are written, so a second
+// reader would silently steal half the song from the first; a reconnect after
+// a drop cannot resume for the same reason, and gets what is still queued.
+static void mm3_handle_stream(const httplib::Request & hreq, httplib::Response & res) {
+    if (!hreq.has_param("id")) {
+        mm3_json_error(res, 400, "missing ?id=<job id>");
+        return;
+    }
+    const std::string id = hreq.get_param_value("id");
+    auto              st = mm3_job_state_get(id);
+    if (!st) {
+        mm3_json_error(res, 404, "no MM3 job with that id (it may have been evicted)");
+        return;
+    }
+    auto q = st->stream;
+    if (!q) {
+        mm3_json_error(res, 409, "this job was not submitted with \"stream\": true");
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(q->mtx);
+        if (q->abandoned) {
+            mm3_json_error(res, 409, "the stream was dropped (nothing was reading it) - the render is unaffected");
+            return;
+        }
+        if (q->attached.load()) {
+            mm3_json_error(res, 409, "this job's stream already has a reader");
+            return;
+        }
+        if (q->finished && q->chunks.empty()) {
+            mm3_json_error(res, 409, "this job has already finished - fetch the WAV from GET /job?id=&result=1");
+            return;
+        }
+        q->attached.store(true);
+    }
+
+    fprintf(stderr, "[MM3-Stream] %s: reader attached\n", id.c_str());
+    res.set_header("Cache-Control", "no-cache");
+    res.set_header("X-Accel-Buffering", "no");  // stop any proxy from buffering the point of the feature
+    res.set_chunked_content_provider(
+        "audio/wav",
+        [q](size_t, httplib::DataSink & sink) -> bool {
+            std::unique_lock<std::mutex> lock(q->mtx);
+            // A 1 s ceiling rather than an open wait: httplib re-enters the
+            // provider in a loop and checks peer liveness between calls, so
+            // returning empty-handed is how a dropped client gets noticed.
+            q->cv.wait_for(lock, std::chrono::seconds(1),
+                           [&] { return !q->chunks.empty() || q->finished || q->abandoned; });
+            while (!q->chunks.empty()) {
+                std::string c = std::move(q->chunks.front());
+                q->chunks.pop_front();
+                q->bytes_queued -= (int64_t) c.size();
+                lock.unlock();
+                // Never a zero-length write: DataSink reads that as done().
+                if (c.empty() || !sink.write(c.data(), c.size())) {
+                    return false;
+                }
+                lock.lock();
+            }
+            if (q->finished || q->abandoned) {
+                lock.unlock();
+                sink.done();
+                return true;
+            }
+            return true;
+        },
+        [q](bool success) {
+            q->attached.store(false);
+            fprintf(stderr, "[MM3-Stream] reader detached (%s), %lld chunk(s) sent\n",
+                    success ? "complete" : "disconnected", (long long) q->n_chunks.load());
+        });
+}
+
 // The second half of the hook. Called next to mm3_register_routes().
 static void mm3_register_job_routes(httplib::Server & svr) {
     svr.Post("/mm3/synth", mm3_handle_synth);
     svr.Get("/mm3/job", mm3_handle_job);
+    svr.Get("/mm3/stream", mm3_handle_stream);
 }

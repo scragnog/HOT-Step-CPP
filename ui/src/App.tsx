@@ -494,6 +494,15 @@ const AppContent: React.FC = () => {
     return active?.jobId || null;
   });
 
+  // MiniMax-Music3 "play while rendering" — the job currently offering live
+  // audio. Keyed on the ENGINE's confirmation (item.mm3Streaming, set from
+  // /status's mm3_streaming), not on the request flag: a render the engine
+  // declined to stream must look exactly like a render that never asked.
+  const mm3StreamJobId = useAudioGenQueueSelector(s => {
+    const active = s.items.find(i => i.status === 'generating' && i.jobId && i.mm3Streaming === true);
+    return active?.jobId || null;
+  });
+
   // Load songs on mount
   useEffect(() => {
     if (!token) return;
@@ -1004,6 +1013,7 @@ const AppContent: React.FC = () => {
             activeJobCount={activeJobCount}
             reuseData={reuseData}
             streamJobId={streamJobId}
+            mm3StreamJobId={mm3StreamJobId}
           />
         </DiscoPulseWrapper>
 

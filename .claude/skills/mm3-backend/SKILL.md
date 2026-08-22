@@ -46,6 +46,8 @@ call with ~2.5 s timeout and keep last-known-good), `POST /mm3/warm` / `POST /mm
 worker as ACE `/synth`; standard `/job?id=` progress/cancel/result; request contract documented
 in `mm3-request.h`/`mm3-job.h`), `GET /mm3/job?id=` (MM3-vocabulary progress, never blocks;
 `&ar=1` returns the Plank code blob — see below),
+`GET /mm3/stream?id=` (live audio of a running job — chunked WAVs, one reader, never takes the
+MM3 mutex; see "Streaming player" below), 
 `POST /mm3/tokenize-check` (cold-capable; 5000-token limit), plus deprecated bring-up endpoints
 (`/mm3/voc-decode`, `/mm3/dit-forward`, `/mm3/flow-sample`, `/mm3/depth-frame`,
 `/mm3/cond-encode`, `/mm3/lm-plan`, `/mm3/synth-e2e`) kept for parity work — they run GPU work
@@ -370,6 +372,103 @@ containment check, blob decode) → `minimax/generate.ts` (save/replay) →
 `mm3SaveArCodes` / `mm3PlankPath` capability extensions. The plank reference
 reaches the server from the browser, so it goes through
 `resolveMm3PlankPath()` — never join it onto a path directly.
+
+## Streaming player: listen while it renders (SHIPPED 2026-08-22 — measured, not yet heard)
+
+Opt in per request with `"stream": true`; UI toggle **Play While Rendering**
+(`mm3Stream`, manifest extension, default OFF). A window's PCM is FINAL the
+moment it is vocoded and cropped, so it is pushed to a per-job queue and served
+as a chunked body of concatenated self-contained WAVs on
+`GET /mm3/stream?id=<job>` while the render continues.
+
+**Measured (60 s clip, 30 steps, q8_0, RTX 5090):**
+
+| | total | first audio |
+|---|---|---|
+| AR cache HIT (the app default) | 32.3 s | **4.2 s** — then a window every ~2.1 s carrying 4.0 s of audio |
+| AR cache MISS | 75.2 s | ~36.5 s (= the AR stage; see the phase-3 note) |
+
+1.86x realtime, so the buffer grows monotonically and playback never catches
+the renderer.
+
+**The transport is STORM's, the scheduler is NOT.** The byte stream is the same
+shape `POST /api/generate/storm/stream` already emits, so `extractWav` is shared
+(moved to `ui/src/utils/wavStream.ts`). But `useStreamAudio` CROSSFADES between
+independent generations; MM3 windows are consecutive spans of ONE signal and
+must HARD-SPLICE, so `useMm3StreamAudio.ts` is a separate hook. Three things it
+does that a copy of the STORM path would get wrong: the AudioContext is built at
+the **rate read from the first WAV header** (MM3 is 44.1 kHz, `useStreamAudio`
+hardcodes 48 k, and a resampling context destroys the exact frame counts the
+splice depends on); scheduling accumulates **frames, not `ab.duration`**; and a
+late window is started at an OFFSET into its buffer rather than at a past
+timestamp (which would play the whole buffer immediately and overlap its
+predecessor).
+
+**Proven bit-identical, twice, and that is the bar.** Re-runnable against a
+live app, and worth running after ANY change to the window loop, the crop
+arithmetic or the WAV encoder:
+
+```
+node server/scripts/check-mm3-stream.mjs           # engine: the two byte-identity claims + the 409s
+node server/scripts/check-mm3-stream-node.mjs      # Node tier: proxy, /status flag, cancel mid-stream
+node server/scripts/check-mm3-stream-latency.mjs   # time to first audio, AR miss vs hit
+```
+
+`stream:false` and `stream:true`
+at the same seed produce a **byte-identical WAV** — the restructure that moves
+the vocoder inside the flow loop is numerically neutral — and the concatenated
+PCM of every streamed chunk is **byte-identical to the saved WAV's PCM**.
+A seam would be an offset bug, and it is measurable, so it is measured rather
+than listened for. `mm3_window_crop()` (mm3-pipeline.h) is the ONE place the
+crop is computed, shared by the sink and the final stitch, and
+`mm3_clamp_sample()` likewise — the identity holds only while both sides use
+them.
+
+**Traps.**
+- **Installing a sink CHANGES WHEN THE VOCODER RUNS** — inline per window
+  instead of one pass after every window is denoised. That is why it is opt-in:
+  a render with no sink keeps today's exact stage order and VRAM profile.
+- **The engine's `streaming` echo is the authority, not the request.** The
+  submit response and `/status`'s `mm3_streaming` say whether the engine will
+  actually serve. The UI shows its Listen affordance off THAT, so a decline is
+  invisible rather than a button that 409s. Today it always agrees; the field
+  exists because the phase-3 VRAM gate can say no.
+- **`GET /mm3/stream` must never take `g_mm3_mutex`** — the generation it is
+  streaming holds that for its whole run (the same reason `/mm3/props` blocks
+  and `/mm3/job` does not). Its queue has its own mutex, and the counters
+  `/mm3/job` reports are **atomics**, because that handler reads them while
+  already holding `MM3JobState::mtx` — the lock the worker takes on every Euler
+  step.
+- **One reader, consumed on read.** Chunks are popped as they are written, so a
+  second reader would silently steal half the song; a reconnect cannot resume.
+  409, not a partial stream.
+- **`DataSink::write(d, 0)` means end-of-stream** in cpp-httplib. A window that
+  crops to zero samples is skipped rather than emitted as a header-only WAV.
+- **The queue is capped at 128 MB unread** (`MM3_STREAM_MAX_UNREAD_BYTES`),
+  sized to clear a 360 s 16-bit render so "submit, then press Listen at the
+  end" still works. 32-bit float output is 4x and CAN hit it; the stream is
+  then dropped with a log line and the render continues untouched.
+- **Progress mapping had to change.** `minimaxStageText` reported flow in a
+  40-85 band and vocode in 85-91; with vocode running BETWEEN flow passes that
+  ran the bar forward and snapped it back once per window. Flow is now a
+  fraction across ALL windows, and vocode reports in the flow band when
+  streaming, its own band when not.
+
+**What is NOT built: phase 3, the sliding pipeline.** `mm3-job.h`'s staged
+handover frees the LM before loading the flow stack, so the AR stage must
+finish before any window can be dispatched — which is why an AR cache MISS
+still waits out the planner. Making the AR loop a producer that feeds windows
+while it is still planning needs both stacks co-resident (q8_0 ~15 GB is
+comfortable on 32 GB; f16 ~27 GB is not), i.e. a per-run VRAM decision that
+falls back to today's serial path. Design: `docs/plans/2026-08-21-mm3-streaming-player.md`.
+
+Layers: `mm3-pipeline.h` (`MM3ChunkCb`, inline vocode, `mm3_window_crop`) ->
+`mm3-request.h` (`stream`) -> `mm3-job.h` (`MM3StreamQueue`, sink,
+`GET /mm3/stream`) -> `minimax/client.ts` (`stream`/`streaming`/`mm3StreamUrl`)
+-> `minimax/generate.ts` (mapping + `job.mm3Streaming`) -> `minimax/index.ts`
+(manifest extension) -> `routes/generate.ts` (`GET /api/generate/mm3/stream/:id`
+pipe + `mm3_streaming` on `/status`) -> `useMm3StreamAudio.ts` +
+`Mm3StreamPlayer.tsx` -> `CreatePanel.tsx`.
 
 ## MM3 AR cache: the speedup the Plank is not (built + measured 2026-08-21)
 

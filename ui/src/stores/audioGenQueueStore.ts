@@ -56,6 +56,12 @@ export interface AudioQueueItem {
   masteredAudioUrl?: string;
   noAdapterAudioUrl?: string;
   audioDuration?: number;
+  /** MiniMax-Music3 "play while rendering": the ENGINE has confirmed it will
+   *  serve this job's audio live. Only true once the job reaches the engine
+   *  and streaming was both requested and accepted — the Create panel shows
+   *  its Listen affordance off this, never off the request flag, so a decline
+   *  simply means no player rather than a button that 409s. */
+  mm3Streaming?: boolean;
 }
 
 export interface AudioGenQueueState {
@@ -1100,6 +1106,7 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
         : undefined;
       item.stage = status.stage || 'Generating…';
       item.elapsed = t.elapsed;
+      if (status.mm3_streaming === true && !item.mm3Streaming) item.mm3Streaming = true;
       _emit();  // progress tick — debounced persistence
 
       if (status.status === 'succeeded') {

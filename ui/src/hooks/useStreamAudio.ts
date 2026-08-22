@@ -1,4 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
+// Moved out to utils/wavStream.ts when the MM3 player needed the same parser —
+// same function, same behaviour, one copy.
+import { extractWav } from '../utils/wavStream';
 
 interface StreamState {
   isPlaying: boolean;
@@ -19,19 +22,6 @@ interface StreamState {
 
 const DEFAULT_MAX_BUFFER = 900;
 
-function extractWav(buf: Uint8Array): { data: Uint8Array; remaining: Uint8Array } | null {
-  if (buf.length < 44) return null;
-  if (buf[0]!==0x52||buf[1]!==0x49||buf[2]!==0x46||buf[3]!==0x46) {
-    for (let i=1;i<buf.length-4;i++)
-      if (buf[i]===0x52&&buf[i+1]===0x49&&buf[i+2]===0x46&&buf[i+3]===0x46)
-        return extractWav(buf.slice(i));
-    return null;
-  }
-  const sz=buf[4]|(buf[5]<<8)|(buf[6]<<16)|(buf[7]<<24);
-  const total=sz+8;
-  if (total<44||total>500000000||buf.length<total) return null;
-  return {data:buf.slice(0,total),remaining:buf.slice(total)};
-}
 
 
 // ── Goertzel + chroma key detection ─────────────────────────────────────────

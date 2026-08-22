@@ -306,6 +306,12 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       // server never has to model it. See engine/src/minimax/mm3-ar-cache.h.
       ...(params.mm3ReuseAr !== false ? { reuse_ar: true } : {}),
       ...(arSeed >= 0 ? { ar_seed: arSeed } : {}),
+      // ── Streaming ──
+      // `=== true`, not `!== false`: the manifest default is OFF, so an
+      // untouched control must resolve to off. (The mirror-image of the
+      // mm3ReuseAr comment above — the idiom follows the declared default,
+      // it is not a house style.)
+      ...(params.mm3Stream === true ? { stream: true } : {}),
       // MM3 Plank replay. A plank that will not load is a note, not a failure:
       // the render proceeds with a normal AR pass.
       ...(params.mm3PlankPath ? (() => {
@@ -492,10 +498,28 @@ export function minimaxStageText(d: Mm3JobDetail, elapsedSec: number): { stage: 
       return { stage: `MiniMax-Music3: planning (frame ${d.step}/${d.n_steps})`, progress: 10 + Math.round(frac(d.step, d.n_steps) * 25) };
     case 'cond':
       return { stage: `MiniMax-Music3: conditioning (window ${d.window + 1}/${d.n_windows})`, progress: 36 + Math.round(frac(d.window + 1, d.n_windows) * 4) };
-    case 'flow':
-      return { stage: `MiniMax-Music3: flow step ${d.step}/${d.n_steps}${d.n_windows > 1 ? ` (window ${d.window + 1}/${d.n_windows})` : ''}`, progress: 40 + Math.round(frac(d.step, d.n_steps) * 45) };
-    case 'vocode':
-      return { stage: `MiniMax-Music3: vocoding (window ${d.window + 1}/${d.n_windows})`, progress: 85 + Math.round(frac(d.window + 1, d.n_windows) * 6) };
+    case 'flow': {
+      // Fraction across ALL windows, not within one. Per-window it sawtoothed
+      // 40->85 once per window; that was survivable when vocoding came after
+      // every window, and stops being so with streaming on, where the vocoder
+      // reports in BETWEEN flow passes.
+      const overall = d.n_windows > 0 ? (d.window + frac(d.step, d.n_steps)) / d.n_windows : frac(d.step, d.n_steps);
+      return {
+        stage: `MiniMax-Music3: flow step ${d.step}/${d.n_steps}${d.n_windows > 1 ? ` (window ${d.window + 1}/${d.n_windows})` : ''}`,
+        progress: 40 + Math.round(Math.max(0, Math.min(1, overall)) * 45),
+      };
+    }
+    case 'vocode': {
+      // Two shapes, because the vocoder runs at two different points. Serial:
+      // one pass after every window is denoised, in its own 85-91 band.
+      // Streaming: inline after each window's flow, so it belongs at exactly
+      // the position that window occupies in the 40-85 band — reporting it at
+      // 85 would run the bar forward and then snap it back, once per window.
+      const stage = `MiniMax-Music3: vocoding (window ${d.window + 1}/${d.n_windows})`;
+      return d.streaming
+        ? { stage, progress: 40 + Math.round(frac(d.window + 1, d.n_windows) * 45) }
+        : { stage, progress: 85 + Math.round(frac(d.window + 1, d.n_windows) * 6) };
+    }
     case 'stitch':
       return silent('MiniMax-Music3: stitching windows', 92);
     case 'encoding':
@@ -579,6 +603,16 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     const submitStart = performance.now();
     const sub = await mm3Synth(req);
     job.aceJobId = sub.job_id;   // standard /job id — /cancel/:id reaches it unchanged
+    // Published on the job so GET /api/generate/status/:id can tell the browser
+    // whether there is anything to listen to. The ENGINE's answer, not the
+    // request's: it is allowed to decline, and when it does the UI must behave
+    // exactly as it does today rather than opening a stream that never fills.
+    job.mm3Streaming = req.stream === true && sub.streaming !== false;
+    if (req.stream && !job.mm3Streaming) {
+      log('WARNING', '[MM3] Streaming was requested but the engine declined it — this render is not streamable');
+    } else if (job.mm3Streaming) {
+      log('INFO', '[MM3] Streaming on — windows play as they finish; the complete WAV is still saved as usual');
+    }
 
     // Persist the RESOLVED seed so a randomized take is reproducible.
     job.params.seed = sub.seed;
