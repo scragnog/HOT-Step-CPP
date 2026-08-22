@@ -368,8 +368,12 @@ function getSnapshot(): PlaybackState {
 
 let _retryTimer: ReturnType<typeof setTimeout> | null = null;
 let _retryCount = 0;
-const MAX_RETRIES = 30;
-const RETRY_INTERVAL = 150;
+// 60 x 250 ms = 15 s. Generous on purpose: readiness is now checked against the
+// URL we asked for, so this can no longer be satisfied early by a deck holding
+// the previous file — it is a real wait for a real file, and an MM3 render is
+// ~34 MB. Giving up too soon auto-advances past a track that was merely large.
+const MAX_RETRIES = 60;
+const RETRY_INTERVAL = 250;
 
 /** Monotonic id for the CURRENT load attempt.
  *
@@ -385,8 +389,47 @@ const RETRY_INTERVAL = 150;
  *  A counter rather than an id, because loading the same track twice in a row
  *  is a real thing a user does and must still invalidate the first attempt. */
 let _loadToken = 0;
+/** Last track we actually put through the speakers, so the log announces a real
+ *  start once rather than on every retry tick. */
+let _lastStartedTrackId: string | null = null;
 function isCurrentLoad(token: number): boolean {
   return token === _loadToken;
+}
+
+/** The URL each deck was last told to load.
+ *
+ *  `readyState >= 2` is NOT "ready to play this track" — it is "ready to play
+ *  whatever is currently in the element", and loadUrl() is asynchronous, so
+ *  straight after a track change every deck still holds the PREVIOUS file and
+ *  reports itself perfectly ready. Starting on that plays the track you just
+ *  navigated away from, and the one you asked for only arrives later when its
+ *  own ready event lands — which is exactly "it played the wrong one, then
+ *  eventually swapped".
+ *
+ *  So readiness is checked against the URL we asked for, not against the
+ *  element's opinion of itself. */
+const _wantSrc: { orig: string | null; alt: string | null; noadapter: string | null } = {
+  orig: null, alt: null, noadapter: null,
+};
+
+/** Does this media element actually hold `want`? currentSrc is absolute and may
+ *  carry a cache-buster, so compare on the path. */
+function srcIs(m: HTMLMediaElement | null, want: string | null): boolean {
+  if (!m || !want) return false;
+  const have = m.currentSrc || m.src;
+  if (!have) return false;
+  try {
+    return new URL(have, window.location.href).pathname
+        === new URL(want, window.location.href).pathname;
+  } catch {
+    return have.endsWith(want);
+  }
+}
+
+function deckReady(ws: WaveformPlayerHandle | null, want: string | null): boolean {
+  if (!ws) return false;
+  const m = ws.getMediaElement();
+  return !!m && m.readyState >= 2 && srcIs(m, want);
 }
 
 /**
@@ -461,34 +504,28 @@ function startBothPlayers(token: number = _loadToken): void {
   const wsAlt = _wsAltRef.current;
   const wsNoAdapter = _wsNoAdapterRef.current;
 
-  // Start original if ready
+  // Start original if it holds THIS track's file
   let origReady = false;
-  if (wsOrig) {
-    const m = wsOrig.getMediaElement();
-    if (m && m.readyState >= 2) {
-      if (m.paused) wsOrig.play();
-      origReady = true;
-    }
+  if (deckReady(wsOrig, _wantSrc.orig)) {
+    const m = wsOrig!.getMediaElement()!;
+    if (m.paused) wsOrig!.play();
+    origReady = true;
   }
 
-  // Start alt if ready (mastered track)
+  // Start alt if it holds THIS track's mastered file
   let altReady = false;
-  if (wsAlt && _state.hasMastered) {
-    const m = wsAlt.getMediaElement();
-    if (m && m.readyState >= 2) {
-      if (m.paused) wsAlt.play();
-      altReady = true;
-    }
+  if (_state.hasMastered && deckReady(wsAlt, _wantSrc.alt)) {
+    const m = wsAlt!.getMediaElement()!;
+    if (m.paused) wsAlt!.play();
+    altReady = true;
   }
 
   // Start no-adapter deck if ready
   let noAdapterReady = false;
-  if (wsNoAdapter && _state.hasNoAdapter) {
-    const m = wsNoAdapter.getMediaElement();
-    if (m && m.readyState >= 2) {
-      if (m.paused) wsNoAdapter.play();
-      noAdapterReady = true;
-    }
+  if (_state.hasNoAdapter && deckReady(wsNoAdapter, _wantSrc.noadapter)) {
+    const m = wsNoAdapter!.getMediaElement()!;
+    if (m.paused) wsNoAdapter!.play();
+    noAdapterReady = true;
   }
 
   // The AUDIBLE track must be ready before we declare success.
@@ -496,6 +533,12 @@ function startBothPlayers(token: number = _loadToken): void {
     : _state.playMastered ? altReady : origReady;
 
   if (audibleReady) {
+    const startedNew = !_state.isPlaying || _lastStartedTrackId !== _state.currentTrack?.id;
+    if (startedNew) {
+      _lastStartedTrackId = _state.currentTrack?.id ?? null;
+      console.log(`[Playback] playing "${_state.currentTrack?.title}" `
+        + `(${_state.playNoAdapter ? 'no-adapter' : _state.playMastered ? 'mastered' : 'original'})`);
+    }
     _retryCount = 0;
     _suppressPlayFalse = false;
     // Audio is out; the A/B decks can have the bandwidth now.
@@ -701,6 +744,12 @@ function loadTrack(track: PlaybackTrack): void {
   // track switch in the app.
   const audibleDeck = useMastered ? _wsAltRef.current : _wsOriginalRef.current;
   const audibleUrl = useMastered ? track.masteredAudioUrl! : track.audioUrl;
+  // What each deck is now expected to hold. Anything it held before is stale
+  // the moment this is set, which is what stops a deck being started on the
+  // previous track's audio.
+  _wantSrc.orig = track.audioUrl || null;
+  _wantSrc.alt = hasMastered ? track.masteredAudioUrl! : null;
+  _wantSrc.noadapter = hasNoAdapter ? track.noAdapterAudioUrl! : null;
   // Silence the decks that are NOT about to be loaded, or they keep running the
   // previous track's audio — inaudible because their volume is zeroed, right up
   // until it ends and fires a finish that looks like this track ending.
