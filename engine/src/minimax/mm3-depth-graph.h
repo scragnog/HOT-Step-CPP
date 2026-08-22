@@ -185,6 +185,11 @@ struct MM3DepthGraph {
     // carries its OWN semantic and acoustic codes, which is the one place the
     // batch is not a broadcast: see the gather in mm3_depth_build_step.
     int          n_takes  = 1;
+    // Flatten [H, S, B] to [H, S*B] around the position-wise linears so the
+    // weight is read ONCE for the whole batch instead of once per row. Same
+    // lever as MM3LmGraph::fold_rows and gated the same way; see
+    // mm3_depth_block. Baked into the cached steps.
+    bool         fold_rows = false;
 
     // The real batch: cfg_rows * n_takes, capped at MM3_MAX_BATCH_ROWS.
     int rows() const { return cfg_rows * n_takes; }
@@ -239,20 +244,40 @@ static ggml_tensor * mm3_depth_norm(ggml_context * ctx, ggml_tensor * x, ggml_te
     return ggml_mul(ctx, ggml_rms_norm(ctx, x, eps), w);
 }
 
-// One decoder block. h [H, S, 2] -> [H, S, 2]. Causal, no RoPE.
+// One decoder block. h [H, S, B] -> [H, S, B]. Causal, no RoPE.
+//
+// `fold` flattens the batch into the token axis around the POSITION-WISE
+// linears — q/k/v, the attention output, and the whole SwiGLU. Those layers do
+// not mix positions, so [H, S, B] and [H, S*B] are the same computation on the
+// same bytes; the difference is that ggml reads the weight once for S*B columns
+// instead of once per batch row (see the long note on mm3_lm_mm). The attention
+// in the middle DOES mix positions and keeps the [.., S, .., B] shape.
+//
+// This is where the ensemble's remaining marginal cost lives: seven 0.6 B
+// sweeps per frame, previously re-streamed once per take.
 static ggml_tensor * mm3_depth_block(ggml_context * ctx, const MM3DepthConfig & c, const MM3DepthLayer & w,
-                                     ggml_tensor * h, ggml_tensor * mask) {
+                                     ggml_tensor * h, ggml_tensor * mask, bool fold) {
     const int64_t H  = (int64_t) c.embedding_length;
     const int64_t D  = (int64_t) c.head_dim;
     const int64_t Nh = (int64_t) c.head_count;
     const int64_t S  = h->ne[1];
     const int64_t B  = h->ne[2];
+    fold = fold && B > 1;
 
-    ggml_tensor * n = mm3_depth_norm(ctx, h, w.attn_norm, c.rms_eps);
+    // [H, S, B] <-> [H, S*B], a relabel of contiguous memory (index s + S*b).
+    const auto flat = [&](ggml_tensor * t) {
+        return fold ? ggml_reshape_2d(ctx, ggml_cont(ctx, t), H, S * B) : t;
+    };
+    const auto unflat = [&](ggml_tensor * t) {
+        return fold ? ggml_reshape_3d(ctx, t, H, S, B) : t;
+    };
 
-    ggml_tensor * q = ggml_mul_mat(ctx, w.attn_q, n);  // [H, S, B]
-    ggml_tensor * k = ggml_mul_mat(ctx, w.attn_k, n);
-    ggml_tensor * v = ggml_mul_mat(ctx, w.attn_v, n);
+    ggml_tensor * n  = mm3_depth_norm(ctx, h, w.attn_norm, c.rms_eps);
+    ggml_tensor * nf = flat(n);
+
+    ggml_tensor * q = unflat(ggml_mul_mat(ctx, w.attn_q, nf));  // [H, S, B]
+    ggml_tensor * k = unflat(ggml_mul_mat(ctx, w.attn_k, nf));
+    ggml_tensor * v = unflat(ggml_mul_mat(ctx, w.attn_v, nf));
 
     // [H, S, B] -> [D, Nh, S, B] -> [D, S, Nh, B]
     q = ggml_cont(ctx, ggml_permute(ctx, ggml_reshape_4d(ctx, q, D, Nh, S, B), 0, 2, 1, 3));
@@ -268,13 +293,13 @@ static ggml_tensor * mm3_depth_block(ggml_context * ctx, const MM3DepthConfig & 
     attn               = ggml_cont(ctx, ggml_permute(ctx, attn, 0, 2, 1, 3));  // [D, Nh, S, B]
     attn               = ggml_reshape_3d(ctx, attn, H, S, B);
 
-    h = ggml_add(ctx, h, ggml_mul_mat(ctx, w.attn_output, attn));
+    h = ggml_add(ctx, h, unflat(ggml_mul_mat(ctx, w.attn_output, flat(attn))));
 
     // SwiGLU, llama shape: down(silu(gate) * up).
-    ggml_tensor * n2   = mm3_depth_norm(ctx, h, w.ffn_norm, c.rms_eps);
+    ggml_tensor * n2   = flat(mm3_depth_norm(ctx, h, w.ffn_norm, c.rms_eps));
     ggml_tensor * gate = ggml_silu(ctx, ggml_mul_mat(ctx, w.ffn_gate, n2));
     ggml_tensor * up   = ggml_mul_mat(ctx, w.ffn_up, n2);
-    ggml_tensor * y    = ggml_mul_mat(ctx, w.ffn_down, ggml_mul(ctx, gate, up));
+    ggml_tensor * y    = unflat(ggml_mul_mat(ctx, w.ffn_down, ggml_mul(ctx, gate, up)));
     return ggml_add(ctx, h, y);
 }
 
@@ -358,7 +383,7 @@ static bool mm3_depth_build_step(const MM3Model & m, MM3DepthGraph * g, int cb, 
     ggml_tensor * h   = ggml_add(ctx, seq, pos);
 
     for (size_t i = 0; i < w.blk.size(); i++) {
-        h = mm3_depth_block(ctx, c, w.blk[i], h, s->mask);
+        h = mm3_depth_block(ctx, c, w.blk[i], h, s->mask, g->fold_rows);
     }
     h = mm3_depth_norm(ctx, h, w.output_norm, c.rms_eps);  // [H, S, B]
 
@@ -412,11 +437,24 @@ static void mm3_depth_set_takes(MM3DepthGraph * g, int takes) {
     if (takes > MM3_MAX_BATCH_ROWS) {
         takes = MM3_MAX_BATCH_ROWS;
     }
-    if (g->n_takes == takes) {
+    // Mirrors mm3_lm_set_takes: single-track renders keep the kernel they have
+    // always used so a saved seed still reproduces its song, and from two takes
+    // up the fold is pure win. MM3_LM_FOLD_ROWS drives both stages together —
+    // one knob, because they are one decision.
+    static const int forced = [] {
+        const char * e = std::getenv("MM3_LM_FOLD_ROWS");
+        if (!e || !e[0]) {
+            return -1;
+        }
+        return e[0] == '0' ? 0 : 1;
+    }();
+    const bool fold = forced >= 0 ? forced == 1 : takes > 1;
+    if (g->n_takes == takes && g->fold_rows == fold) {
         return;
     }
     mm3_depth_free(g);
-    g->n_takes = takes;
+    g->n_takes   = takes;
+    g->fold_rows = fold;
 }
 
 // Acquire a backend, build the causal masks, and build all seven step graphs.
