@@ -53,6 +53,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <vector>
@@ -131,6 +132,23 @@ static inline float mm3_ar_cfg_scale(const MM3LmConfig & c) {
 }
 
 static inline int mm3_cfg_rows(const MM3LmConfig & c) {
+    // MM3_AR_CFG_ROWS=2 forces the pair back on for a guidance-baked checkpoint.
+    // This is a CORRECTNESS GATE, not a tuning knob: at scale 1.0 the blend is
+    // the identity, so a 2-row render MUST be bit-identical to the 1-row one.
+    // If it is not, the single-row path is broken and the difference is a bug
+    // here — not the checkpoint's fault. Run it before blaming a model for
+    // incoherence. (=1 forces single-row; anything else is ignored.)
+    static const int forced = [] {
+        const char * e = std::getenv("MM3_AR_CFG_ROWS");
+        if (!e || !e[0]) {
+            return 0;
+        }
+        const int v = atoi(e);
+        return (v == 1 || v == 2) ? v : 0;
+    }();
+    if (forced) {
+        return forced;
+    }
     return std::fabs(mm3_ar_cfg_scale(c) - 1.0f) <= 1e-6f ? 1 : MM3_LM_CFG_ROWS;
 }
 
