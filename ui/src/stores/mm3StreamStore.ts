@@ -693,13 +693,42 @@ export function mm3StreamPlay(): void {
 
 export function mm3StreamPause(): void {
   wantPlay = false;
-  if (!playing) return;
-  pausedFrame = positionFrames();
+  // ALWAYS stop the sources, even when the flag already says paused.
+  //
+  // `playing` tracks INTENT; the audio is whatever AudioBufferSourceNodes are
+  // scheduled, and anchorAt() queues every buffered window at once — on a
+  // finished render that is the entire song, minutes of audio, already handed
+  // to the graph and sounding no matter what any flag says. Only stopSources()
+  // silences it.
+  //
+  // The old `if (!playing) return` meant that once the flag went false for any
+  // reason — reaching the end of a take, a select() that re-anchored — every
+  // later pause was a no-op and the queued audio played on. That is the
+  // phantom track: unstoppable precisely because the store believed it had
+  // already stopped.
+  const wasPlaying = playing;
+  if (wasPlaying) pausedFrame = positionFrames();
   playing = false;
   stopSources();
   const r = cur();
   if (r) r.pausedFrame = pausedFrame;
-  emit({ playing: false, position: pausedFrame / (r?.rate || 1) });
+  if (wasPlaying) {
+    emit({ playing: false, position: pausedFrame / (r?.rate || 1) });
+  }
+}
+
+/** Hard silence: stop every scheduled source and forget the intent to play,
+ *  without touching the buffers. What the playback arbiter wants when the audio
+ *  is being handed to another engine — `pause` carries playhead semantics that
+ *  do not apply when you are simply not the one making sound any more. */
+export function mm3StreamSilence(): void {
+  wantPlay = false;
+  if (playing) pausedFrame = positionFrames();
+  playing = false;
+  stopSources();
+  const r = cur();
+  if (r) r.pausedFrame = pausedFrame;
+  emit({ playing: false });
 }
 
 export function mm3StreamToggle(): void {

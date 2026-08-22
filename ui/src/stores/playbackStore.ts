@@ -16,7 +16,8 @@ import { useSyncExternalStore, useRef, useCallback } from 'react';
 import type { WaveformPlayerHandle } from '../components/player/WaveformPlayer';
 import { useVstChainStore } from './vstChainStore';
 import {
-  mm3StreamSnapshot, mm3StreamSubscribe, mm3StreamToggle, mm3StreamPause, mm3StreamSelect, mm3StreamPlay,
+  mm3StreamSnapshot, mm3StreamSubscribe, mm3StreamToggle, mm3StreamSelect, mm3StreamPlay,
+  mm3StreamSilence,
   mm3StreamSeek, mm3StreamSetVolume,
 } from './mm3StreamStore';
 
@@ -76,11 +77,16 @@ function pauseFileDecks(): void {
  *  monitor. Silence-then-activate rather than activate-then-silence, so there is
  *  no window in which two are sounding. */
 function setAudible(next: Audible): void {
+  const from = _audible.kind === 'stream' ? `stream:${_audible.take}` : _audible.kind;
+  const to = next.kind === 'stream' ? `stream:${next.take}` : next.kind;
   if (next.kind !== 'file') pauseFileDecks();
-  if (next.kind !== 'stream') mm3StreamPause();
+  if (next.kind !== 'stream') mm3StreamSilence();
   // The VST monitor is its own player and loses to anything the user starts.
   if (next.kind !== 'none') stopVstMonitorIfActive();
   _audible = next;
+  // Cheap and worth keeping: when something plays that should not, this line
+  // is the difference between knowing which engine did it and guessing.
+  if (from !== to) console.log(`[Playback] audible: ${from} -> ${to}`);
 }
 
 /** Is the live stream the thing making sound? Read from the arbiter, NOT from
@@ -420,6 +426,27 @@ function scheduleAutoAdvance(reason: string, delayMs: number): void {
   }, delayMs);
 }
 
+/** The shadow decks this track still owes, loaded once the audible one is up.
+ *  Token-scoped like everything else, so a track change before they are armed
+ *  simply drops them. */
+let _pendingShadows: {
+  token: number; track: PlaybackTrack;
+  hasMastered: boolean; hasNoAdapter: boolean; useMastered: boolean;
+} | null = null;
+
+function loadShadowDecks(): void {
+  const p = _pendingShadows;
+  if (!p || !isCurrentLoad(p.token)) return;
+  _pendingShadows = null;
+  // The A/B partner of whatever is audible, plus the reference render.
+  if (p.useMastered) {
+    _wsOriginalRef.current?.loadUrl(p.track.audioUrl);
+  } else if (p.hasMastered) {
+    _wsAltRef.current?.loadUrl(p.track.masteredAudioUrl!);
+  }
+  if (p.hasNoAdapter) _wsNoAdapterRef.current?.loadUrl(p.track.noAdapterAudioUrl!);
+}
+
 /** Attempt to start all loaded players. Retries if the AUDIBLE track isn't ready.
  *
  *  `token` is the load this belongs to; a queued retry from an abandoned load
@@ -471,6 +498,8 @@ function startBothPlayers(token: number = _loadToken): void {
   if (audibleReady) {
     _retryCount = 0;
     _suppressPlayFalse = false;
+    // Audio is out; the A/B decks can have the bandwidth now.
+    loadShadowDecks();
     // Arm the once-per-track finish guard here rather than in loadTrack. Doing
     // it at load time cleared it before the outgoing player's trailing finish
     // arrived, so that event looked like a fresh track ending and skipped one.
@@ -482,6 +511,9 @@ function startBothPlayers(token: number = _loadToken): void {
   // Audible track not ready — retry
   _retryCount++;
   if (_retryCount <= MAX_RETRIES) {
+    if (_retryCount === 1 || _retryCount % 10 === 0) {
+      console.log(`[Playback] load #${token} waiting for the audible deck (try ${_retryCount}/${MAX_RETRIES})`);
+    }
     _retryTimer = setTimeout(() => startBothPlayers(token), RETRY_INTERVAL);
   } else {
     // Mastered/no-adapter track failed but original is ready — fall back to original
@@ -621,6 +653,7 @@ function loadTrack(track: PlaybackTrack): void {
   // Everything still in flight for the previous track — queued retries, decks
   // about to report ready — belongs to a load that no longer exists.
   const token = ++_loadToken;
+  _pendingShadows = null;
   cancelAutoAdvance();
   _retryCount = 0;
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
@@ -653,22 +686,32 @@ function loadTrack(track: PlaybackTrack): void {
     currentAudioUrl: useMastered ? track.masteredAudioUrl! : track.audioUrl,
   });
 
-  // Load into WaveSurfer
-  _wsOriginalRef.current?.loadUrl(track.audioUrl);
-  if (_wsAltRef.current && hasMastered) {
-    _wsAltRef.current.loadUrl(track.masteredAudioUrl!);
-  } else {
-    // This track has no mastered version, so nothing overwrites the alt player —
-    // it would otherwise keep running the PREVIOUS track's audio, silent because
-    // its volume is zeroed, until that audio ended and fired its own finish.
-    _wsAltRef.current?.pause();
+  // ── Load the AUDIBLE deck first, the shadows a moment later ─────────────
+  //
+  // The three decks run in lockstep with volume deciding which is heard, so an
+  // A/B switch is instant — but loading all three at once means three ~34 MB
+  // fetches and three full decodes competing for bandwidth and CPU, and the one
+  // you are actually waiting on is only a third of the traffic. On MM3's
+  // three-minute renders that is the difference between a track starting now
+  // and starting in ten seconds.
+  //
+  // So: the audible variant loads immediately and nothing else competes with it.
+  // The shadow decks load once it is ready (armed in startBothPlayers), which
+  // costs an A/B switch attempted in the first second or two and buys every
+  // track switch in the app.
+  const audibleDeck = useMastered ? _wsAltRef.current : _wsOriginalRef.current;
+  const audibleUrl = useMastered ? track.masteredAudioUrl! : track.audioUrl;
+  // Silence the decks that are NOT about to be loaded, or they keep running the
+  // previous track's audio — inaudible because their volume is zeroed, right up
+  // until it ends and fires a finish that looks like this track ending.
+  for (const ref of [_wsOriginalRef, _wsAltRef, _wsNoAdapterRef]) {
+    if (ref.current && ref.current !== audibleDeck) ref.current.pause();
   }
-  if (_wsNoAdapterRef.current && hasNoAdapter) {
-    _wsNoAdapterRef.current.loadUrl(track.noAdapterAudioUrl!);
-  } else {
-    // Same stale-audio guard as the alt deck above.
-    _wsNoAdapterRef.current?.pause();
-  }
+  audibleDeck?.loadUrl(audibleUrl);
+  _pendingShadows = { token, track, hasMastered, hasNoAdapter, useMastered };
+  console.log(`[Playback] load #${token} "${track.title}" `
+    + `(${useMastered ? 'mastered' : 'original'} first`
+    + `${hasMastered || hasNoAdapter ? ', shadows deferred' : ''})`);
 
   applyVolumes();
   applyPlaybackRate();
@@ -895,6 +938,20 @@ export function setPlaybackVariant(variant: PlaybackVariant): void {
   const activeWs = deckFor(current);
   const targetWs = deckFor(variant);
   if (!targetWs) return;
+
+  // The shadow decks load AFTER the audible one (see loadTrack), so an A/B
+  // switch in the first second or two can land on a deck with nothing in it.
+  // Load it on demand rather than switching to silence; it will start itself
+  // when ready because isPlaying is already true.
+  if (targetWs.getDuration() <= 0) {
+    const url = variant === 'mastered' ? track.masteredAudioUrl
+      : variant === 'noadapter' ? track.noAdapterAudioUrl
+      : track.audioUrl;
+    if (url) {
+      console.log(`[Playback] ${variant} deck not loaded yet — fetching it now`);
+      targetWs.loadUrl(url);
+    }
+  }
 
   // Sync target position from the currently audible deck. The reference render
   // skips auto-trim so its duration can differ — sync by absolute seconds.
