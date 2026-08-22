@@ -550,6 +550,11 @@ function loadTrack(track: PlaybackTrack): void {
   cancelAutoAdvance();
   _retryCount = 0;
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+  // This track plays from a FILE, so the stream player must go quiet. It is a
+  // separate audio engine with its own context and its own scheduled sources:
+  // nothing about loading a file stops it, and the two then play at once. That
+  // is the whole reason switching between finished takes felt haunted.
+  mm3StreamPause();
 
   const hasMastered = !!track.masteredAudioUrl;
   const hasNoAdapter = !!track.noAdapterAudioUrl;
@@ -671,7 +676,13 @@ export function stop(): void {
   // finished file. Deliberately does not close the stream — reopening is not
   // possible (the engine consumes chunks as they are read), so a stop that
   // dropped the audio would be unrecoverable.
-  if (isStreamDeck()) mm3StreamPause();
+  //
+  // UNCONDITIONAL. Guarding this on isStreamDeck() meant Stop only silenced the
+  // stream while a live card happened to be the current track: move to a
+  // finished track and the stream player was still running underneath, so Stop
+  // paused the file deck, cleared the bar, and left the stream audible with
+  // nothing on screen able to control it.
+  mm3StreamPause();
   _suppressPlayFalse = false;
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
   _retryCount = 0;
