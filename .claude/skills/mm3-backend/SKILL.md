@@ -446,8 +446,12 @@ them.
   crops to zero samples is skipped rather than emitted as a header-only WAV.
 - **The queue is capped at 128 MB unread** (`MM3_STREAM_MAX_UNREAD_BYTES`),
   sized to clear a 360 s 16-bit render so "submit, then press Listen at the
-  end" still works. 32-bit float output is 4x and CAN hit it; the stream is
-  then dropped with a log line and the render continues untouched.
+  end" still works — verified: a render nobody ever attached to is
+  byte-identical to a non-streamed one, and a reader attaching AFTER it
+  finished still gets every window. 32-bit float output is 4x and CAN hit the
+  cap; the stream is then dropped with a log line and the render continues
+  untouched. (A finished job 409s only once its chunks have been drained —
+  "already finished" is about an empty queue, not about the job's status.)
 - **Progress mapping had to change.** `minimaxStageText` reported flow in a
   40-85 band and vocode in 85-91; with vocode running BETWEEN flow passes that
   ran the bar forward and snapped it back once per window. Flow is now a
