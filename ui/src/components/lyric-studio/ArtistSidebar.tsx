@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useCallback } from 'react';
-import { ChevronLeft } from 'lucide-react';
+import React, { useRef, useEffect, useCallback, useMemo, useState } from 'react';
+import { ChevronLeft, Search, X } from 'lucide-react';
 import type { Artist } from '../../services/lireekApi';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
@@ -12,6 +12,14 @@ interface ArtistSidebarProps {
 }
 
 const SCROLL_KEY = 'ls-artist-sidebar-scroll';
+const FILTER_KEY = 'ls-artist-sidebar-filter';
+
+/** Lowercase + strip diacritics, so "Motorhead" finds "Motörhead". */
+const normalize = (s: string) =>
+  s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+
+/** Sort key: a leading "The " is ignored, so "The Beach Boys" files under B. */
+const sortKey = (name: string) => normalize(name).replace(/^the\s+/, '').trim();
 
 export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
   artists, selectedArtistId, onSelectArtist, onBack,
@@ -21,6 +29,31 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
   const [imageErrors, setImageErrors] = React.useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Filter text survives navigating into an album and back (the sidebar remounts)
+  const [query, setQuery] = useState(() => {
+    try { return sessionStorage.getItem(FILTER_KEY) ?? ''; } catch { return ''; }
+  });
+
+  // Sort + filter run on the REAL names — disguise mode is display-only
+  const visibleArtists = useMemo(() => {
+    const sorted = [...artists].sort((a, b) =>
+      sortKey(a.name).localeCompare(sortKey(b.name), undefined, { numeric: true })
+    );
+    const q = normalize(query.trim());
+    if (!q) return sorted;
+    return sorted.filter(a => {
+      const n = normalize(a.name);
+      return n.includes(q) || n.replace(/^the\s+/, '').includes(q);
+    });
+  }, [artists, query]);
+
+  const setFilter = useCallback((value: string) => {
+    setQuery(value);
+    try { sessionStorage.setItem(FILTER_KEY, value); } catch { /* ignore */ }
+    // Jump back to the top of the (now different) list
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, []);
 
   // Restore scroll position on mount
   useEffect(() => {
@@ -60,9 +93,38 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
         All Artists
       </button>
 
+      {/* Name filter */}
+      <div className="px-3 py-2 border-b border-zinc-200 dark:border-white/5">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setFilter(''); } }}
+            placeholder="Filter artists..."
+            className="w-full pl-8 pr-7 py-1.5 text-xs rounded-md bg-white dark:bg-white/5 border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-pink-500/50"
+          />
+          {query && (
+            <button
+              onClick={() => setFilter('')}
+              title="Clear filter"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-white/10"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Artist list */}
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-2">
-        {artists.map((artist) => {
+        {visibleArtists.length === 0 && (
+          <p className="px-4 py-6 text-xs text-zinc-500 text-center">
+            No artists match that filter
+          </p>
+        )}
+        {visibleArtists.map((artist) => {
           const isSelected = artist.id === selectedArtistId;
           const hasAdapter = !artistIdsWithAdapters || artistIdsWithAdapters.size === 0 || artistIdsWithAdapters.has(artist.id);
           return (
@@ -114,7 +176,9 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
 
       {/* Artist count */}
       <div className="px-4 py-2 border-t border-zinc-200 dark:border-white/5 text-[10px] text-zinc-600 text-center">
-        {artists.length} artist{artists.length !== 1 ? 's' : ''}
+        {query.trim()
+          ? `${visibleArtists.length} of ${artists.length} artists`
+          : `${artists.length} artist${artists.length !== 1 ? 's' : ''}`}
       </div>
     </div>
   );
