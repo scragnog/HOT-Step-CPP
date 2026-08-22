@@ -152,6 +152,49 @@ static inline int mm3_cfg_rows(const MM3LmConfig & c) {
     return std::fabs(mm3_ar_cfg_scale(c) - 1.0f) <= 1e-6f ? 1 : MM3_LM_CFG_ROWS;
 }
 
+// ── Ensemble takes: K songs decoded in lockstep ──────────────────────────────
+//
+// The AR stage reads the whole 8B LM plus seven 0.6B depth passes for EVERY
+// frame at 25 fps. That read is bandwidth-bound and costs the same whether it
+// serves one song or four, so decoding K INDEPENDENT takes of the same prompt
+// as one batch amortises it — the marginal take is a fraction of a solo render.
+// (Technique from Rreitsma/minimax-music3-ensemble-blocks; the arithmetic here
+// is ours because the reference is torch and this is ggml.)
+//
+// ROW LAYOUT IS TAKE-MAJOR: row index = take * cfg_rows + (0 cond, 1 uncond),
+// i.e. t0c t0u t1c t1u ... Not cond-block-then-uncond-block. Two reasons, and
+// both are load-bearing:
+//
+//   1. It makes "duplicate each take's shared embedding across its CFG pair" a
+//      single ggml_repeat_4d over ne1 followed by a reshape — exactly
+//      torch's repeat_interleave. Cond-major would need a gather.
+//   2. At K = 1 it is byte-for-byte the layout the single-take code already
+//      used, so every existing readback, dump and blend stays correct without
+//      knowing takes exist.
+//
+// THE CEILING IS A CUDA KERNEL, NOT A GUESS. ggml's MMVQ/MMVF matrix-vector
+// kernels — the ones that amortise the weight read across rows — handle at most
+// MMVQ_MAX_BATCH_SIZE (8) columns; above that CUDA falls back to MMQ/cuBLAS
+// GEMM, which at these tiny N is a worse regime and would throw the entire
+// point away. So cfg_rows * takes must stay <= 8: K <= 4 with a CFG pair,
+// K <= 8 on a guidance-distilled checkpoint that runs single-row.
+#define MM3_MAX_BATCH_ROWS 8
+
+// Largest K the row budget allows for this checkpoint. 4 normally, 8 at CFG 1.0.
+static inline int mm3_max_takes(const MM3LmConfig & c) {
+    const int r = mm3_cfg_rows(c);
+    return r > 0 ? MM3_MAX_BATCH_ROWS / r : 1;
+}
+
+// Clamp a requested take count into what the kernels can actually serve.
+static inline int mm3_clamp_takes(const MM3LmConfig & c, int takes) {
+    const int hi = mm3_max_takes(c);
+    if (takes < 1) {
+        return 1;
+    }
+    return takes > hi ? hi : takes;
+}
+
 // RVQ depth decoder — 4-layer llama-shaped causal stack, no RoPE.
 struct MM3DepthConfig {
     uint32_t block_count         = 0;

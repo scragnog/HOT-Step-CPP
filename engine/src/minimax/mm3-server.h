@@ -1158,6 +1158,9 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
     opt.seed            = (uint64_t) mm3_json_i64(root, "seed", 42);
     opt.collect_hiddens = mm3_json_bool(root, "hiddens", false);
     opt.dump_iters      = req.has_param("dump") ? strtoll(req.get_param_value("dump").c_str(), nullptr, 10) : 0;
+    // Ensemble takes: plan K independent songs from this prompt in one batched
+    // pass (mm3-ar-loop.h). Clamped inside mm3_ar_plan_takes to the row budget.
+    opt.n_takes         = (int) mm3_json_i64(root, "takes", 1);
 
     std::vector<int32_t> f_sem, f_ac;
     bool                 has_sem = false, has_ac = false;
@@ -1185,12 +1188,20 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
 
     const bool binary = opt.dump_iters > 0 || opt.collect_hiddens;
 
-    MM3ArResult r;
-    std::string err;
-    if (!mm3_ar_plan(g_mm3, ids_cond.data(), ids_uncond.data(), (int64_t) ids_cond.size(), opt, &r, &err)) {
+    // Sized to the request, then to what the checkpoint's row budget actually
+    // allows — mm3_ar_plan_takes clamps, so the vector has to cover the ASK or
+    // it would write past the end when the ask is legal but large.
+    const int                K = mm3_clamp_takes(g_mm3.lm_cfg, opt.n_takes);
+    std::vector<MM3ArResult> rs((size_t) (K > 0 ? K : 1));
+    std::string              err;
+    if (!mm3_ar_plan_takes(g_mm3, ids_cond.data(), ids_uncond.data(), (int64_t) ids_cond.size(), opt, rs.data(),
+                           &err)) {
         mm3_json_error(res, 500, err.empty() ? "AR planning failed" : err);
         return;
     }
+    // Take 0 carries the shared stage timings, so every existing header and the
+    // binary body keep meaning exactly what they meant before takes existed.
+    MM3ArResult & r = rs[0];
 
     char hdr[64];
     snprintf(hdr, sizeof(hdr), "%lld", (long long) r.n_frames);
@@ -1208,6 +1219,8 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
     snprintf(hdr, sizeof(hdr), "%zu", ids_cond.size());
     res.set_header("X-MM3-Prompt-Tokens", hdr);
     res.set_header("X-MM3-Eos", r.eos_hit ? "1" : "0");
+    snprintf(hdr, sizeof(hdr), "%d", K);
+    res.set_header("X-MM3-Takes", hdr);
     snprintf(hdr, sizeof(hdr), "%.1f", r.total_ms);
     res.set_header("X-MM3-Ms", hdr);
     snprintf(hdr, sizeof(hdr), "%.1f", r.prefill_ms);
@@ -1267,6 +1280,36 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
     yyjson_mut_obj_add_uint(o, orot, "kv_bytes", g_mm3_lm.kv_bytes);
     yyjson_mut_obj_add_uint(o, orot, "kv_positions", g_mm3_lm.n_ctx);
     yyjson_mut_obj_add_uint(o, orot, "nonfinite_logits", r.nonfinite_logits);
+    yyjson_mut_obj_add_uint(o, orot, "takes", (uint64_t) K);
+    yyjson_mut_obj_add_real(o, orot, "prefill_sum", r.prefill_sum);
+    yyjson_mut_obj_add_real(o, orot, "iter0_max", r.iter0_max);
+    yyjson_mut_obj_add_int(o, orot, "iter0_argmax", r.iter0_argmax);
+
+    // One entry per take: its seed, how far it got, and its own semantic code
+    // sequence. The codes are what an ensemble has to be judged on — two takes
+    // that share a code sequence are the same song, and that is precisely the
+    // failure mode a batched sampler can have.
+    if (K > 1) {
+        yyjson_mut_val * tk = yyjson_mut_arr(o);
+        for (int t = 0; t < K; t++) {
+            yyjson_mut_val * e = yyjson_mut_obj(o);
+            yyjson_mut_obj_add_uint(o, e, "take", (uint64_t) t);
+            yyjson_mut_obj_add_uint(o, e, "seed", rs[(size_t) t].seed);
+            yyjson_mut_obj_add_uint(o, e, "frames", rs[(size_t) t].n_frames);
+            yyjson_mut_obj_add_uint(o, e, "iterations", rs[(size_t) t].n_iterations);
+            yyjson_mut_obj_add_bool(o, e, "eos", rs[(size_t) t].eos_hit);
+            yyjson_mut_obj_add_real(o, e, "prefill_sum", rs[(size_t) t].prefill_sum);
+            yyjson_mut_obj_add_real(o, e, "iter0_max", rs[(size_t) t].iter0_max);
+            yyjson_mut_obj_add_int(o, e, "iter0_argmax", rs[(size_t) t].iter0_argmax);
+            yyjson_mut_val * sa = yyjson_mut_arr(o);
+            for (int32_t v : rs[(size_t) t].semantic_all) {
+                yyjson_mut_arr_add_int(o, sa, v);
+            }
+            yyjson_mut_obj_add_val(o, e, "semantic", sa);
+            yyjson_mut_arr_add_val(tk, e);
+        }
+        yyjson_mut_obj_add_val(o, orot, "per_take", tk);
+    }
 
     yyjson_mut_val * tm = yyjson_mut_obj(o);
     yyjson_mut_obj_add_val(o, orot, "ms", tm);

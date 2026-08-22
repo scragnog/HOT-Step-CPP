@@ -180,6 +180,14 @@ struct MM3DepthGraph {
     // row is dead for exactly the reason the LM's is. Baked into the shapes, so
     // a change must invalidate the cached steps.
     int          cfg_rows = MM3_LM_CFG_ROWS;
+    // Ensemble takes (mm3-model.h), mirroring MM3LmGraph::n_takes — the depth
+    // decoder is inside the AR loop, so it batches the same K songs. Each take
+    // carries its OWN semantic and acoustic codes, which is the one place the
+    // batch is not a broadcast: see the gather in mm3_depth_build_step.
+    int          n_takes  = 1;
+
+    // The real batch: cfg_rows * n_takes, capped at MM3_MAX_BATCH_ROWS.
+    int rows() const { return cfg_rows * n_takes; }
 };
 
 // One frame's worth of depth-decoder output.
@@ -276,7 +284,9 @@ static bool mm3_depth_build_step(const MM3Model & m, MM3DepthGraph * g, int cb, 
     const MM3DepthWeights & w  = m.synth.depth;
     const int64_t           H  = (int64_t) c.embedding_length;
     const int64_t           S  = cb + 1;  // hidden + semantic + (cb-1) acoustic
-    const int64_t           B  = (int64_t) g->cfg_rows;
+    const int64_t           B  = (int64_t) g->rows();
+    const int64_t           K  = (int64_t) g->n_takes;
+    const int64_t           P  = (int64_t) g->cfg_rows;
     MM3DepthStep *          s  = &g->step[cb - 1];
 
     const size_t ctx_bytes =
@@ -303,30 +313,43 @@ static bool mm3_depth_build_step(const MM3Model & m, MM3DepthGraph * g, int cb, 
     ggml_set_name(s->in_hidden, "mm3_depth_lm_hidden");
     ggml_set_input(s->in_hidden);
 
-    s->in_sem = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 1);
+    // One semantic id PER TAKE — takes sample independently, so this is the one
+    // input that is genuinely per-row rather than broadcast.
+    s->in_sem = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, K);
     ggml_set_name(s->in_sem, "mm3_depth_semantic_id");
     ggml_set_input(s->in_sem);
 
     if (cb > 1) {
-        s->in_ac = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, cb - 1);
+        // Take-major: K blocks of (cb - 1) flat audio_embd row indices.
+        s->in_ac = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, K * (cb - 1));
         ggml_set_name(s->in_ac, "mm3_depth_acoustic_rows");
         ggml_set_input(s->in_ac);
     }
 
-    // Token 0: the LM hidden, per CFG row. Tokens 1..: the shared embeddings —
-    // identical in both rows because the sampled codes are shared (note 5).
+    // Token 0: the LM hidden, per row (already [H, 1, B] from the caller).
     ggml_tensor * tok0 = ggml_mul_mat(ctx, w.proj, s->in_hidden);  // [H, 1, B]
 
-    ggml_tensor * shared = ggml_get_rows(ctx, m.lm.token_embd, s->in_sem);  // [H, 1] — LM table (note 1)
+    // Tokens 1..: this take's own semantic + acoustic embeddings, identical
+    // across the take's CFG pair (the sampled codes are shared within a take —
+    // note 5) but DIFFERENT between takes.
+    ggml_tensor * shared = ggml_get_rows(ctx, m.lm.token_embd, s->in_sem);  // [H, K] — LM table (note 1)
+    shared               = ggml_reshape_3d(ctx, shared, H, 1, K);
     if (cb > 1) {
-        ggml_tensor * ac = ggml_get_rows(ctx, w.audio_embd, s->in_ac);  // [H, cb-1]
-        shared           = ggml_concat(ctx, shared, ac, 1);             // [H, cb]
+        ggml_tensor * ac = ggml_get_rows(ctx, w.audio_embd, s->in_ac);  // [H, K*(cb-1)]
+        ac               = ggml_reshape_3d(ctx, ac, H, cb - 1, K);
+        shared           = ggml_concat(ctx, shared, ac, 1);             // [H, cb, K]
     }
-    shared = ggml_mul_mat(ctx, w.proj, shared);          // [H, cb]
-    if (B > 1) {
-        shared = ggml_concat(ctx, shared, shared, 2);    // [H, cb, 2] — same for both rows
+    shared = ggml_mul_mat(ctx, w.proj, shared);          // [H, cb, K]
+    if (P > 1) {
+        // Duplicate each take's block across its CFG pair. Repeat over a
+        // size-1 ne1 then flatten IS repeat_interleave, and it lands take-major
+        // (index r + P*t): see the row-layout note in mm3-model.h. At K = 1 this
+        // is byte-identical to the ggml_concat(shared, shared, 2) it replaced.
+        shared = ggml_reshape_3d(ctx, ggml_cont(ctx, shared), H * cb, 1, K);
+        shared = ggml_repeat_4d(ctx, shared, H * cb, P, K, 1);          // [H*cb, P, K]
+        shared = ggml_reshape_3d(ctx, shared, H, cb, B);                // [H, cb, B]
     } else {
-        shared = ggml_reshape_3d(ctx, shared, H, cb, 1); // [H, cb, 1] — nothing to duplicate
+        shared = ggml_reshape_3d(ctx, shared, H, cb, B);                // [H, cb, K] — nothing to duplicate
     }
     ggml_tensor * seq = ggml_concat(ctx, tok0, shared, 1);  // [H, S, B]
 
@@ -378,6 +401,24 @@ static bool mm3_depth_build_step(const MM3Model & m, MM3DepthGraph * g, int cb, 
 
 // ── Prep ────────────────────────────────────────────────────────────────────
 
+// Set the ensemble take count. Must be called BEFORE mm3_depth_prepare — the
+// seven step graphs bake rows() into their shapes, so a change tears them down.
+// Kept in lockstep with mm3_lm_set_takes by the AR loop, which is the only
+// place that decides K.
+static void mm3_depth_set_takes(MM3DepthGraph * g, int takes) {
+    if (takes < 1) {
+        takes = 1;
+    }
+    if (takes > MM3_MAX_BATCH_ROWS) {
+        takes = MM3_MAX_BATCH_ROWS;
+    }
+    if (g->n_takes == takes) {
+        return;
+    }
+    mm3_depth_free(g);
+    g->n_takes = takes;
+}
+
 // Acquire a backend, build the causal masks, and build all seven step graphs.
 // Cheap after the first call: returns immediately when both model buffers are
 // the ones the current graphs were derived from.
@@ -395,6 +436,8 @@ static bool mm3_depth_prepare(const MM3Model & m, MM3DepthGraph * g, std::string
     // The row count comes from the LM config, because it is the LM's guidance
     // scale that decides whether an unconditional row exists to feed us.
     const int    rows = mm3_cfg_rows(m.lm_cfg);
+    // n_takes is set by mm3_depth_set_takes BEFORE this call and has already
+    // torn the steps down if it changed, so it needs no comparison here.
     if (g->synth_token == st && g->lm_token == lt && g->cfg_rows == rows && g->n_steps > 0) {
         return true;
     }
@@ -510,29 +553,39 @@ static bool mm3_depth_prepare(const MM3Model & m, MM3DepthGraph * g, std::string
 
 static MM3DepthGraph g_mm3_depth;
 
-// Decode one frame's seven residual codes.
+// Decode one frame's seven residual codes, for K ensemble takes at once.
 //
-//   lm_hidden_cond / lm_hidden_uncond
-//                   4096 floats each — the global LM's last_hidden_state for the
-//                   conditional and unconditional CFG rows of THIS AR iteration.
-//   semantic_code   the frame's codebook-0 code, in [0, semantic_vocab_size).
-//                   NOT the raw token id: the LM vocab offset is added here.
-//   forced_codes    optional [7]; when non-null the sampler is bypassed and these
-//                   codes are fed back into the sequence instead. This is the
-//                   parity mode — it makes the graph see exactly the token
-//                   sequence the reference saw, so the logits are comparable even
-//                   though the reference's multinomial draw is not reproducible.
-//   out             codes, the 7 CONDITIONAL-row hidden states (the flow stage's
-//                   conditioning), and both pre-CFG logit rows per codebook.
-//   rng             optional; when non-null each code is drawn by the reference's
-//                   top-k multinomial recipe (mm3-sample.h) instead of argmax.
-//                   Ignored under `forced_codes`.
+//   lm_hidden_rows  [rows(), H] F32 — the LM's last_hidden_state for EVERY row
+//                   of this AR iteration, take-major (take t's conditional row
+//                   is t*cfg_rows, its unconditional row t*cfg_rows + 1). This
+//                   is exactly the buffer mm3_lm_decode filled, passed straight
+//                   through: no per-row copy, one upload.
+//   sem_codes       [takes] each take's codebook-0 code, in
+//                   [0, semantic_vocab_size). NOT raw token ids: the LM vocab
+//                   offset is added here.
+//   forced_codes    optional [takes, 7]; when non-null the sampler is bypassed
+//                   and these codes are fed back instead. This is the parity
+//                   mode — it makes the graph see exactly the token sequence
+//                   the reference saw, so the logits are comparable even though
+//                   the reference's multinomial draw is not reproducible.
+//   out             [takes] frames: codes, the 7 CONDITIONAL-row hidden states
+//                   (the flow stage's conditioning), and both pre-CFG logit
+//                   rows per codebook.
+//   rngs            optional [takes]; when non-null each take draws its codes by
+//                   the reference's top-k multinomial recipe (mm3-sample.h) from
+//                   ITS OWN generator instead of argmax. Independent streams are
+//                   what make the takes genuinely different songs rather than
+//                   one song rendered K times.
 //   top_k           the checkpoint's `mm3.ar.top_k`; <= 0 means "no cap".
 //
+// The seven graph computes are SHARED across takes — that is the whole point:
+// seven sweeps of 0.6 B weights cost about the same for one take or four, so
+// only the host-side sampling below is genuinely per-take.
+//
 // Not thread-safe: the caller serialises (mm3-server.h holds g_mm3_mutex).
-static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_cond, const float * lm_hidden_uncond,
-                                   int32_t semantic_code, const int32_t * forced_codes, MM3DepthFrame * out,
-                                   std::string * err = nullptr, std::mt19937_64 * rng = nullptr, int top_k = 0) {
+static bool mm3_depth_decode_takes(const MM3Model & m, const float * lm_hidden_rows, const int32_t * sem_codes,
+                                   const int32_t * forced_codes, MM3DepthFrame * out, std::string * err = nullptr,
+                                   std::mt19937_64 * rngs = nullptr, int top_k = 0) {
     if (!mm3_depth_prepare(m, &g_mm3_depth, err)) {
         return false;
     }
@@ -541,45 +594,62 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
     const int64_t          H  = (int64_t) c.embedding_length;
     const int64_t          V  = (int64_t) c.audio_vocab_size;
     const int              NC = g_mm3_depth.n_steps;
+    const int64_t          K  = (int64_t) g_mm3_depth.n_takes;
+    // 1 for a guidance-baked checkpoint (mm3-model.h). The host buffers stay cut
+    // to the MM3_MAX_BATCH_ROWS ceiling; only transfer sizes and the blend follow.
+    const int64_t          P  = (int64_t) g_mm3_depth.cfg_rows;
+    const int64_t          B  = (int64_t) g_mm3_depth.rows();
 
-    if (semantic_code < 0 || (uint32_t) semantic_code >= lc.semantic_vocab_size) {
-        if (err) {
-            *err = "semantic code " + std::to_string(semantic_code) + " is outside [0, " +
-                   std::to_string(lc.semantic_vocab_size) + ")";
+    for (int64_t t = 0; t < K; t++) {
+        if (sem_codes[t] < 0 || (uint32_t) sem_codes[t] >= lc.semantic_vocab_size) {
+            if (err) {
+                *err = "semantic code " + std::to_string(sem_codes[t]) + " (take " + std::to_string((long long) t) +
+                       ") is outside [0, " + std::to_string(lc.semantic_vocab_size) + ")";
+            }
+            return false;
         }
-        return false;
-    }
-    if (forced_codes) {
-        for (int i = 0; i < NC; i++) {
-            if (forced_codes[i] < 0 || (int64_t) forced_codes[i] >= V) {
-                if (err) {
-                    *err = "forced code " + std::to_string(forced_codes[i]) + " for codebook " + std::to_string(i + 1) +
-                           " is outside [0, " + std::to_string(V) + ")";
+        if (forced_codes) {
+            for (int i = 0; i < NC; i++) {
+                const int32_t fc = forced_codes[t * NC + i];
+                if (fc < 0 || (int64_t) fc >= V) {
+                    if (err) {
+                        *err = "forced code " + std::to_string(fc) + " for codebook " + std::to_string(i + 1) +
+                               " (take " + std::to_string((long long) t) + ") is outside [0, " + std::to_string(V) +
+                               ")";
+                    }
+                    return false;
                 }
-                return false;
             }
         }
     }
 
-    out->n_codes = NC;
-    out->hiddens.assign((size_t) (NC * H), 0.0f);
-    out->logits_cond.assign((size_t) (NC * V), 0.0f);
-    out->logits_uncond.assign((size_t) (NC * V), 0.0f);
+    for (int64_t t = 0; t < K; t++) {
+        out[t].n_codes = NC;
+        out[t].hiddens.assign((size_t) (NC * H), 0.0f);
+        out[t].logits_cond.assign((size_t) (NC * V), 0.0f);
+        out[t].logits_uncond.assign((size_t) (NC * V), 0.0f);
+    }
 
-    const int32_t      sem_id  = semantic_code + (int32_t) lc.semantic_vocab_offset;
-    const float        cfg     = mm3_ar_cfg_scale(lc);
-    // 1 for a guidance-baked checkpoint (mm3-model.h). The buffers stay cut to
-    // the 2-row ceiling — only the transfer sizes and the blend follow B.
-    const int64_t      B       = (int64_t) g_mm3_depth.cfg_rows;
-    std::vector<int32_t> ac_rows((size_t) NC, 0);
-    std::vector<float>   logit_buf((size_t) (V * MM3_LM_CFG_ROWS));
-    std::vector<float>   hid_buf((size_t) (H * MM3_LM_CFG_ROWS));
-    std::vector<float>   samp_scratch;
+    const float cfg = mm3_ar_cfg_scale(lc);
+    // Take-major, mirroring in_ac's layout: take t's codebook i sits at t*NC + i.
+    // Reused as the running feedback across the seven steps.
+    std::vector<int32_t> ac_rows((size_t) (K * NC), 0);
+    std::vector<int32_t> packed((size_t) (K * NC), 0);
+    std::vector<int32_t> sem_ids((size_t) K);
+    for (int64_t t = 0; t < K; t++) {
+        sem_ids[(size_t) t] = sem_codes[t] + (int32_t) lc.semantic_vocab_offset;
+    }
+    std::vector<float> logit_buf((size_t) (V * MM3_MAX_BATCH_ROWS));
+    std::vector<float> hid_buf((size_t) (H * MM3_MAX_BATCH_ROWS));
+    // The CFG blend needs its own scratch now: at B > 2 the old trick of reusing
+    // logit_buf's second half would clobber another take's logits.
+    std::vector<float> guided_buf((size_t) V);
+    std::vector<float> samp_scratch;
 
     // MM3_DEPTH_PROF=1 — phase-level timing across frames, printed every 100
     // frames. Diagnostic for the "9.3 ms/frame is launch-bound" question: it
     // separates upload / graph compute / readback / host sampling so the fix
-    // (CUDA graphs? fewer syncs? fused readback?) targets the real cost.
+    // targets the real cost.
     static const bool depth_prof = [] {
         const char * e = std::getenv("MM3_DEPTH_PROF");
         return e && e[0] && e[0] != '0';
@@ -596,14 +666,18 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
         MM3DepthStep * s = &g_mm3_depth.step[cb - 1];
 
         const auto tu = now();
-        ggml_backend_tensor_set(s->in_hidden, lm_hidden_cond, 0, (size_t) H * sizeof(float));
-        if (B > 1) {
-            ggml_backend_tensor_set(s->in_hidden, lm_hidden_uncond, (size_t) H * sizeof(float),
-                                    (size_t) H * sizeof(float));
-        }
-        ggml_backend_tensor_set(s->in_sem, &sem_id, 0, sizeof(int32_t));
+        // One upload for every row: the caller's buffer is already take-major and
+        // contiguous, which is why this takes the whole block rather than a
+        // cond/uncond pair.
+        ggml_backend_tensor_set(s->in_hidden, lm_hidden_rows, 0, (size_t) (H * B) * sizeof(float));
+        ggml_backend_tensor_set(s->in_sem, sem_ids.data(), 0, (size_t) K * sizeof(int32_t));
         if (s->in_ac) {
-            ggml_backend_tensor_set(s->in_ac, ac_rows.data(), 0, (size_t) (cb - 1) * sizeof(int32_t));
+            // in_ac is [K, cb-1] but ac_rows is [K, NC] — repack per take so the
+            // strides match instead of shipping the not-yet-written tail.
+            for (int64_t t = 0; t < K; t++) {
+                memcpy(packed.data() + t * (cb - 1), ac_rows.data() + t * NC, (size_t) (cb - 1) * sizeof(int32_t));
+            }
+            ggml_backend_tensor_set(s->in_ac, packed.data(), 0, (size_t) (K * (cb - 1)) * sizeof(int32_t));
         }
         if (depth_prof) {
             prof_up += ms_since(tu);
@@ -628,63 +702,87 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
         }
         const auto th = now();
 
-        float * lc_row = out->logits_cond.data() + (size_t) ((cb - 1) * V);
-        float * lu_row = out->logits_uncond.data() + (size_t) ((cb - 1) * V);
-        memcpy(lc_row, logit_buf.data(), (size_t) V * sizeof(float));
-        // At B = 1 there is no second row in the buffer to copy; the guidance is
-        // baked in, which is the same statement as "the unconditional row equals
-        // the conditional one". Mirroring it keeps logits_uncond meaningful for
-        // the parity dumps rather than leaving them uninitialised.
-        memcpy(lu_row, B > 1 ? logit_buf.data() + V : logit_buf.data(), (size_t) V * sizeof(float));
-        // Conditional row only (note 6).
-        memcpy(out->hiddens.data() + (size_t) ((cb - 1) * H), hid_buf.data(), (size_t) H * sizeof(float));
+        for (int64_t t = 0; t < K; t++) {
+            const int64_t rc = t * P;                // this take's conditional row
+            const int64_t ru = P > 1 ? rc + 1 : rc;  // ...and its unconditional one
+            float *       lc_row = out[t].logits_cond.data() + (size_t) ((cb - 1) * V);
+            float *       lu_row = out[t].logits_uncond.data() + (size_t) ((cb - 1) * V);
+            memcpy(lc_row, logit_buf.data() + (size_t) (rc * V), (size_t) V * sizeof(float));
+            // At P = 1 there is no second row to copy; the guidance is baked in,
+            // which is the same statement as "the unconditional row equals the
+            // conditional one". Mirroring it keeps logits_uncond meaningful for
+            // the parity dumps rather than leaving it uninitialised.
+            memcpy(lu_row, logit_buf.data() + (size_t) (ru * V), (size_t) V * sizeof(float));
+            // Conditional row only (note 6).
+            memcpy(out[t].hiddens.data() + (size_t) ((cb - 1) * H), hid_buf.data() + (size_t) (rc * H),
+                   (size_t) H * sizeof(float));
 
-        int32_t code;
-        if (forced_codes) {
-            code = forced_codes[cb - 1];
-        } else {
-            // CFG-guided distribution (design note D), reusing the logit buffer's
-            // second half — the uncond row is not needed once combined. At B = 1
-            // the blend is the identity, so the conditional row IS the guided
-            // distribution and the pass over V is skipped entirely.
-            float * guided = logit_buf.data() + V;
-            if (B > 1) {
-                for (int64_t i = 0; i < V; i++) {
-                    const float u = lu_row[i];
-                    guided[i]     = u + cfg * (lc_row[i] - u);
-                }
+            int32_t code;
+            if (forced_codes) {
+                code = forced_codes[t * NC + (cb - 1)];
             } else {
-                guided = lc_row;
-            }
-            if (rng) {
-                code = (int32_t) mm3_sample_top_k(guided, V, top_k, *rng, &samp_scratch);
-            } else {
-                int32_t best_i = 0;
-                float   best_v = -INFINITY;
-                for (int64_t i = 0; i < V; i++) {
-                    if (guided[i] > best_v) {
-                        best_v = guided[i];
-                        best_i = (int32_t) i;
+                // CFG-guided distribution (design note D). At P = 1 the blend is
+                // the identity, so the conditional row IS the guided distribution
+                // and the pass over V is skipped entirely.
+                float * guided = lc_row;
+                if (P > 1) {
+                    guided = guided_buf.data();
+                    for (int64_t i = 0; i < V; i++) {
+                        const float u = lu_row[i];
+                        guided[i]     = u + cfg * (lc_row[i] - u);
                     }
                 }
-                code = best_i;
+                if (rngs) {
+                    code = (int32_t) mm3_sample_top_k(guided, V, top_k, rngs[t], &samp_scratch);
+                } else {
+                    int32_t best_i = 0;
+                    float   best_v = -INFINITY;
+                    for (int64_t i = 0; i < V; i++) {
+                        if (guided[i] > best_v) {
+                            best_v = guided[i];
+                            best_i = (int32_t) i;
+                        }
+                    }
+                    code = best_i;
+                }
             }
+            out[t].codes[cb - 1] = code;
+            // Codebook cb's feedback embedding lives at row code + (cb-1)*V (note 2).
+            ac_rows[(size_t) (t * NC + (cb - 1))] = code + (int32_t) ((cb - 1) * V);
         }
-        out->codes[cb - 1] = code;
-        // Codebook cb's feedback embedding lives at row code + (cb-1)*V (note 2).
-        ac_rows[(size_t) (cb - 1)] = code + (int32_t) ((cb - 1) * V);
         if (depth_prof) {
             prof_host += ms_since(th);
         }
     }
-    out->ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    for (int64_t t = 0; t < K; t++) {
+        out[t].ms = ms;
+    }
     if (depth_prof && ++prof_frames % 100 == 0) {
         fprintf(stderr,
-                "[MM3-Depth] prof over %d frames: upload %.2f + compute %.2f + readback %.2f + host %.2f "
-                "= %.2f ms/frame\n",
-                prof_frames, prof_up / prof_frames, prof_comp / prof_frames, prof_down / prof_frames,
-                prof_host / prof_frames,
+                "[MM3-Depth] prof over %d frames (%lld take%s): upload %.2f + compute %.2f + readback %.2f + "
+                "host %.2f = %.2f ms/frame\n",
+                prof_frames, (long long) K, K == 1 ? "" : "s", prof_up / prof_frames, prof_comp / prof_frames,
+                prof_down / prof_frames, prof_host / prof_frames,
                 (prof_up + prof_comp + prof_down + prof_host) / prof_frames);
     }
     return true;
+}
+
+// Single-take convenience wrapper — the shape POST /mm3/depth-frame and the
+// parity fixtures were written against. Forces the graphs back to one take.
+static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_cond, const float * lm_hidden_uncond,
+                                   int32_t semantic_code, const int32_t * forced_codes, MM3DepthFrame * out,
+                                   std::string * err = nullptr, std::mt19937_64 * rng = nullptr, int top_k = 0) {
+    mm3_depth_set_takes(&g_mm3_depth, 1);
+    if (!mm3_depth_prepare(m, &g_mm3_depth, err)) {
+        return false;
+    }
+    const int64_t      H = (int64_t) m.synth_cfg.depth.embedding_length;
+    std::vector<float> rows((size_t) (H * g_mm3_depth.rows()));
+    memcpy(rows.data(), lm_hidden_cond, (size_t) H * sizeof(float));
+    if (g_mm3_depth.rows() > 1) {
+        memcpy(rows.data() + H, lm_hidden_uncond, (size_t) H * sizeof(float));
+    }
+    return mm3_depth_decode_takes(m, rows.data(), &semantic_code, forced_codes, out, err, rng, top_k);
 }

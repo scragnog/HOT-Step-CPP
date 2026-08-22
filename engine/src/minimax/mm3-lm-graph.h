@@ -169,11 +169,12 @@
 #define MM3_LM_MAX_NODES 4096
 // Attention-window quantum (design note C).
 #define MM3_LM_KV_BUCKET 256
-// MM3_LM_CFG_ROWS (mm3-model.h) is the MAXIMUM — the size every host-side
-// staging buffer is cut to, so a caller's [2, H] hidden / [2, V] logit buffers
+// MM3_MAX_BATCH_ROWS (mm3-model.h) is the MAXIMUM — the size every host-side
+// staging buffer is cut to, so a caller's [8, H] hidden / [8, V] logit buffers
 // are always big enough. The number of rows actually computed and read back is
-// MM3LmGraph::cfg_rows (mm3_cfg_rows(), 1 or 2 — note A1); use that for graph
-// shapes and transfer sizes, never the ceiling.
+// MM3LmGraph::rows() = cfg_rows * n_takes (1..8); use that for graph shapes and
+// transfer sizes, never the ceiling. cfg_rows alone is the CFG pair size and is
+// NOT the batch once ensemble takes are in play.
 
 // One cached graph. Prefill and decode differ only in T and the input mode.
 struct MM3LmSlot {
@@ -259,10 +260,22 @@ struct MM3LmGraph {
     int64_t                    n_ctx    = 0;
     size_t                     kv_bytes = 0;
     int64_t                    kv_pos   = 0;  // shared: all CFG rows advance together
-    // 1 or 2 (note A1), derived from mm3.ar.cfg_scale in mm3_lm_prepare. Every
-    // graph shape and every host<->device transfer size keys off THIS, not the
-    // MM3_LM_CFG_ROWS ceiling. A change invalidates the KV cache and all slots.
+    // 1 or 2 (note A1), derived from mm3.ar.cfg_scale in mm3_lm_prepare. This is
+    // the CFG PAIR size, not the batch: the batch is rows() = cfg_rows * takes.
+    // A change invalidates the KV cache and all slots.
     int                        cfg_rows = MM3_LM_CFG_ROWS;
+    // Ensemble takes K (mm3-model.h): how many independent songs decode in
+    // lockstep. 1 = today's single-song path, and every shape below then reduces
+    // to exactly what it was. Also invalidates the KV cache and all slots.
+    int                        n_takes  = 1;
+    // Fold the decode batch onto ne1 so ggml's CUDA backend picks the kernel
+    // that shares the weight read across rows (see mm3_lm_mm). Baked into the
+    // cached slots, so mm3_lm_set_takes owns it and a change tears them down.
+    bool                       fold_rows = false;
+
+    // The real batch. EVERY graph shape and every host<->device transfer size
+    // keys off this, never off cfg_rows and never off a compile-time ceiling.
+    int rows() const { return cfg_rows * n_takes; }
 
     MM3LmSlot prefill;
     MM3LmSlot decode;
@@ -394,8 +407,43 @@ static ggml_tensor * mm3_lm_attn_f32(ggml_context * ctx, ggml_tensor * q, ggml_t
 // Base matmul + optional runtime LoRA delta: y = W x + s * B (A x). A/B are
 // f16, x is f32 — ggml's mixed mul_mat handles both. The scale is baked as a
 // graph constant; MM3LmGraph invalidates cached slots when it changes.
+// One weight matmul, with the batch rows folded onto ne1 for the decode step.
+//
+// WHY THIS RESHAPE EARNS ITS KEEP. ggml's CUDA backend picks the kernel that
+// amortises a quantised weight read across columns by looking at `src1->ne[1]`
+// (ggml-cuda.cu, `use_mul_mat_vec_q`, capped at MMVQ_MAX_BATCH_SIZE = 8).
+// A decode activation is [H, T=1, B]: ne1 is 1 and the batch rides ne2, so ggml
+// issues B INDEPENDENT matrix-vector products and streams the whole 9 GB of
+// weights once per row — the exact cost the ensemble exists to share.
+//
+// At T == 1, [H, 1, B] and [H, B, 1] are the SAME BYTES (ne0 fastest, then a
+// unit dimension), so folding is a free relabel that puts the rows where the
+// kernel looks for them. Measured on an RTX 5090, q8_0, 300 frames — LM decode
+// step, which is the whole story:
+//
+//     takes         1      2      3      4
+//     ne2 (before)  8.13  11.56  15.18  18.65 ms   +43 % per extra take
+//     ne1 (after)   6.99   7.14   7.81   8.24 ms    +6 % per extra take
+//
+// AND IT IS NOT BIT-IDENTICAL. A different kernel sums the same products in a
+// different order, so logits move by an ulp — which the top-k multinomial then
+// amplifies into a different, equally valid trajectory. That is a REGRESSION
+// for anyone re-rendering a saved seed, so it is gated on `want_fold`:
+// MM3LmGraph::fold_rows is false at one take (a single-track render is
+// bit-identical to what it always was) and true from two takes up, where there
+// is no prior behaviour to preserve. MM3_LM_FOLD_ROWS=1/0 overrides either way
+// — 1 buys single-track renders the same ~14 %/step at the cost of seed
+// reproducibility, and it is how the two paths are A/B'd.
+//
+// The prefill path is untouched on both settings: there ne1 is already T (the
+// whole prompt), so it is a real GEMM and belongs on the MMQ/cuBLAS path it
+// already takes.
 static ggml_tensor * mm3_lm_mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor * x, const MM3LmAdapter * ad,
-                               const MM3LmAdapterScales & sc, int layer, int module) {
+                               const MM3LmAdapterScales & sc, int layer, int module, bool want_fold) {
+    const bool fold = want_fold && x->ne[1] == 1 && x->ne[2] > 1 && x->ne[3] == 1 && ggml_is_contiguous(x);
+    if (fold) {
+        x = ggml_reshape_2d(ctx, x, x->ne[0], x->ne[2]);  // [H, 1, B] -> [H, B]
+    }
     ggml_tensor * y = ggml_mul_mat(ctx, w, x);
     if (ad) {
         const MM3LmAdapterPair & p = ad->mods[layer][module];
@@ -406,6 +454,9 @@ static ggml_tensor * mm3_lm_mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor 
                 y               = ggml_add(ctx, y, ggml_scale(ctx, d, s));
             }
         }
+    }
+    if (fold) {
+        y = ggml_reshape_3d(ctx, y, y->ne[0], 1, y->ne[1]);  // [N, B] -> [N, 1, B]
     }
     return y;
 }
@@ -418,7 +469,8 @@ static ggml_tensor * mm3_lm_block(ggml_context * ctx, ggml_cgraph * gf, const MM
                                   ggml_tensor * h, ggml_tensor * positions, ggml_tensor * mask, ggml_tensor * rows,
                                   ggml_tensor * kcache, ggml_tensor * vcache, int64_t n_kv_pad, bool use_flash,
                                   ggml_tensor ** out_scores = nullptr, const MM3LmAdapter * ad = nullptr,
-                                  const MM3LmAdapterScales * ad_sc = nullptr, int layer_idx = 0) {
+                                  const MM3LmAdapterScales * ad_sc = nullptr, int layer_idx = 0,
+                                  bool fold_rows = false) {
     const int64_t H   = (int64_t) c.embedding_length;
     const int64_t D   = (int64_t) c.key_length;
     const int64_t Nh  = (int64_t) c.head_count;
@@ -430,9 +482,9 @@ static ggml_tensor * mm3_lm_block(ggml_context * ctx, ggml_cgraph * gf, const MM
 
     ggml_tensor * n = mm3_lm_rms(ctx, h, w.attn_norm, c.rms_eps);
 
-    ggml_tensor * q = mm3_lm_mm(ctx, w.attn_q, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_Q);  // [Nh*D, T, B]
-    ggml_tensor * k = mm3_lm_mm(ctx, w.attn_k, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_K);  // [Nkv*D, T, B]
-    ggml_tensor * v = mm3_lm_mm(ctx, w.attn_v, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_V);
+    ggml_tensor * q = mm3_lm_mm(ctx, w.attn_q, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_Q, fold_rows);  // [Nh*D, T, B]
+    ggml_tensor * k = mm3_lm_mm(ctx, w.attn_k, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_K, fold_rows);  // [Nkv*D, T, B]
+    ggml_tensor * v = mm3_lm_mm(ctx, w.attn_v, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_V, fold_rows);
 
     q = ggml_reshape_4d(ctx, q, D, Nh, T, B);
     k = ggml_reshape_4d(ctx, k, D, Nkv, T, B);
@@ -471,14 +523,14 @@ static ggml_tensor * mm3_lm_block(ggml_context * ctx, ggml_cgraph * gf, const MM
     }
     attn = ggml_reshape_3d(ctx, attn, H, T, B);  // [D, Nh, T, B] -> [H, T, B]
 
-    h = ggml_add(ctx, h, mm3_lm_mm(ctx, w.attn_output, attn, ad, sc_local, layer_idx, MM3_LM_ADAPTER_O));
+    h = ggml_add(ctx, h, mm3_lm_mm(ctx, w.attn_output, attn, ad, sc_local, layer_idx, MM3_LM_ADAPTER_O, fold_rows));
 
     // SwiGLU: down(silu(gate) * up).
     ggml_tensor * n2   = mm3_lm_rms(ctx, h, w.ffn_norm, c.rms_eps);
-    ggml_tensor * gate = ggml_silu(ctx, mm3_lm_mm(ctx, w.ffn_gate, n2, ad, sc_local, layer_idx, MM3_LM_ADAPTER_GATE));
-    ggml_tensor * up   = mm3_lm_mm(ctx, w.ffn_up, n2, ad, sc_local, layer_idx, MM3_LM_ADAPTER_UP);
+    ggml_tensor * gate = ggml_silu(ctx, mm3_lm_mm(ctx, w.ffn_gate, n2, ad, sc_local, layer_idx, MM3_LM_ADAPTER_GATE, fold_rows));
+    ggml_tensor * up   = mm3_lm_mm(ctx, w.ffn_up, n2, ad, sc_local, layer_idx, MM3_LM_ADAPTER_UP, fold_rows);
     return ggml_add(ctx, h,
-                    mm3_lm_mm(ctx, w.ffn_down, ggml_mul(ctx, gate, up), ad, sc_local, layer_idx, MM3_LM_ADAPTER_DOWN));
+                    mm3_lm_mm(ctx, w.ffn_down, ggml_mul(ctx, gate, up), ad, sc_local, layer_idx, MM3_LM_ADAPTER_DOWN, fold_rows));
 }
 
 // Build one slot. `decode` selects the input mode: false = token ids for T
@@ -488,7 +540,9 @@ static bool mm3_lm_build_slot(const MM3Model & m, MM3LmGraph * g, MM3LmSlot * s,
                               bool decode, std::string * err) {
     const MM3LmConfig & c  = m.lm_cfg;
     const int64_t       H  = (int64_t) c.embedding_length;
-    const int64_t       B  = (int64_t) g->cfg_rows;
+    const int64_t       B  = (int64_t) g->rows();
+    const int64_t       K  = (int64_t) g->n_takes;
+    const int64_t       P  = (int64_t) g->cfg_rows;
     const int64_t       NC = (int64_t) c.num_codebooks - 1;
 
     const size_t ctx_bytes =
@@ -536,34 +590,59 @@ static bool mm3_lm_build_slot(const MM3Model & m, MM3LmGraph * g, MM3LmSlot * s,
         h = ggml_get_rows(ctx, m.lm.token_embd, s->in_ids);  // [H, T*B]
         h = ggml_reshape_3d(ctx, h, H, T, B);
     } else {
-        // Decode: the soft feedback embedding (design note E). Row 0 of in_ids is
-        // the LM vocab id of the semantic code; rows 1..NC are FLAT row indices
-        // into depth.audio_embd (code + (i-1)*audio_vocab_size), computed by the
-        // caller because the offset arithmetic is shared with the depth decoder.
-        s->in_ids = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, NC + 1);
+        // Decode: the soft feedback embedding (design note E). in_ids is
+        // TAKE-MAJOR, K blocks of (NC + 1): within take t, entry 0 is the LM
+        // vocab id of that take's semantic code and entries 1..NC are FLAT row
+        // indices into depth.audio_embd (code + (i-1)*audio_vocab_size),
+        // computed by the caller because the offset arithmetic is shared with
+        // the depth decoder. At K = 1 this is the old [NC + 1] layout exactly.
+        s->in_ids = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, K * (NC + 1));
         ggml_set_name(s->in_ids, "mm3_lm_feedback_rows");
         ggml_set_input(s->in_ids);
 
-        ggml_tensor * sem_idx = ggml_view_1d(ctx, s->in_ids, 1, 0);
-        ggml_tensor * ac_idx  = ggml_view_1d(ctx, s->in_ids, NC, ggml_type_size(GGML_TYPE_I32));
+        // Gather all K takes at once, then fold the per-take blocks apart with
+        // reshapes. get_rows demands a 1-D index tensor, so the two strided
+        // views below pick the semantic and acoustic entries out of the
+        // interleaved take-major array. ggml_view_1d cannot stride, so the
+        // semantic ids are gathered with a stride via view_2d instead: the
+        // block is [1 sem, NC acoustic] per take, so sem sits every (NC+1).
+        ggml_tensor * ids2 = ggml_reshape_2d(ctx, s->in_ids, NC + 1, K);   // [NC+1, K]
+        ggml_tensor * sem_idx =
+            ggml_cont(ctx, ggml_view_2d(ctx, ids2, 1, K, ids2->nb[1], 0));                     // [1, K]
+        ggml_tensor * ac_idx =
+            ggml_cont(ctx, ggml_view_2d(ctx, ids2, NC, K, ids2->nb[1], ggml_type_size(GGML_TYPE_I32)));  // [NC, K]
+        sem_idx = ggml_reshape_1d(ctx, sem_idx, K);
+        ac_idx  = ggml_reshape_1d(ctx, ac_idx, NC * K);
 
-        ggml_tensor * e_sem = ggml_get_rows(ctx, m.lm.token_embd, sem_idx);              // [H, 1]
-        ggml_tensor * e_ac  = ggml_get_rows(ctx, m.synth.depth.audio_embd, ac_idx);      // [H, NC]
+        ggml_tensor * e_sem = ggml_get_rows(ctx, m.lm.token_embd, sem_idx);          // [H, K]
+        ggml_tensor * e_ac  = ggml_get_rows(ctx, m.synth.depth.audio_embd, ac_idx);  // [H, NC*K]
 
-        ggml_tensor * acc = ggml_view_2d(ctx, e_ac, H, 1, e_ac->nb[1], 0);
+        // Sum the NC acoustic embeddings WITHIN each take. Reshaped to
+        // [H, NC, K], a ne1-sliced view picks codebook i for every take at once,
+        // so this stays NC adds regardless of K.
+        e_sem              = ggml_reshape_3d(ctx, e_sem, H, 1, K);
+        e_ac               = ggml_reshape_3d(ctx, e_ac, H, NC, K);
+        ggml_tensor * acc  = ggml_view_3d(ctx, e_ac, H, 1, K, e_ac->nb[1], e_ac->nb[2], 0);
         for (int64_t i = 1; i < NC; i++) {
-            acc = ggml_add(ctx, acc, ggml_view_2d(ctx, e_ac, H, 1, e_ac->nb[1], (size_t) i * e_ac->nb[1]));
+            acc = ggml_add(ctx, acc,
+                           ggml_view_3d(ctx, e_ac, H, 1, K, e_ac->nb[1], e_ac->nb[2], (size_t) i * e_ac->nb[1]));
         }
-        ggml_tensor * fb = ggml_scale(ctx, ggml_add(ctx, e_sem, acc), c.ar_embedding_scale);  // [H, 1]
+        ggml_tensor * fb = ggml_scale(ctx, ggml_add(ctx, e_sem, acc), c.ar_embedding_scale);  // [H, 1, K]
 
         s->out_feedback = fb;
         ggml_set_name(s->out_feedback, "mm3_lm_feedback");
         ggml_set_output(s->out_feedback);
 
-        // Both CFG rows are fed the SAME embedding: the sampled codes are shared
-        // (the reference `.repeat(2)`s them) and only the KV history differs.
-        // At cfg_rows = 1 there is no second row to duplicate into.
-        h = B > 1 ? ggml_concat(ctx, fb, fb, 2) : ggml_reshape_3d(ctx, fb, H, 1, 1);  // [H, 1, B]
+        // Both CFG rows of a take are fed the SAME embedding: within a take the
+        // sampled codes are shared (the reference `.repeat(2)`s them) and only
+        // the KV history differs. Takes, in contrast, are fully independent.
+        //
+        // repeat over ne1 then flatten IS repeat_interleave, and that is why the
+        // row layout is take-major: the result indexes as r + P*t, i.e. exactly
+        // t*cfg_rows + r. At K = 1, P = 2 this produces the same two rows the
+        // old ggml_concat(fb, fb, 2) did, in the same order.
+        fb = ggml_cont(ctx, fb);
+        h  = ggml_reshape_3d(ctx, ggml_repeat_4d(ctx, fb, H, P, K, 1), H, 1, B);  // [H, 1, B]
     }
 
     // Alignment probe: keep a handle on every layer's post-softmax attention so
@@ -580,7 +659,7 @@ static bool mm3_lm_build_slot(const MM3Model & m, MM3LmGraph * g, MM3LmSlot * s,
         const bool want = g->dump_attn || (g->align_capture && mm3_align_layer_needed((int) i));
         h = mm3_lm_block(ctx, gf, c, m.lm.blk[i], h, s->in_pos, s->in_mask, s->in_rows, g->kv_k[i], g->kv_v[i],
                          n_kv_pad, g->use_flash_attn && !want, want ? &sc : nullptr, g->adapter, &g->adapter_scales,
-                         (int) i);
+                         (int) i, g->fold_rows);
         if (want && sc) {
             ggml_set_name(sc, ("mm3_lm_attn_" + std::to_string(i)).c_str());
             ggml_set_output(sc);
@@ -651,6 +730,39 @@ static int64_t mm3_lm_bucket(int64_t n) {
 }
 
 // Acquire the backend and make sure the KV cache covers `n_ctx_needed` positions.
+// Set the ensemble take count. Must be called BEFORE mm3_lm_prepare, because
+// the KV cache and every cached slot bake rows() into their shapes — so a
+// change tears them down exactly like a weight swap does. Clamped by the
+// caller (mm3_clamp_takes); this only enforces the hard kernel ceiling so a
+// bad call site can never silently push ggml off the matrix-vector path.
+static void mm3_lm_set_takes(MM3LmGraph * g, int takes) {
+    if (takes < 1) {
+        takes = 1;
+    }
+    if (takes > MM3_MAX_BATCH_ROWS) {
+        takes = MM3_MAX_BATCH_ROWS;
+    }
+    // Single-track renders keep the kernel they have always used, so a saved
+    // seed still reproduces its song. From two takes up there is no prior
+    // behaviour to preserve and the fold is pure win. MM3_LM_FOLD_ROWS forces
+    // it either way — that override is the A/B, and the parity check
+    // (check-mm3-ensemble.mjs) drives it.
+    static const int forced = [] {
+        const char * e = std::getenv("MM3_LM_FOLD_ROWS");
+        if (!e || !e[0]) {
+            return -1;
+        }
+        return e[0] == '0' ? 0 : 1;
+    }();
+    const bool fold = forced >= 0 ? forced == 1 : takes > 1;
+    if (g->n_takes == takes && g->fold_rows == fold) {
+        return;
+    }
+    mm3_lm_free(g);
+    g->n_takes   = takes;
+    g->fold_rows = fold;
+}
+
 // Grows only; a shrink would throw away a valid allocation for nothing.
 static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_needed, std::string * err) {
     // Residency is staged (mm3-model.h): check the parts this graph actually
@@ -693,6 +805,9 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     // everything down exactly like a weight swap does — the cached slots bake
     // the row count into their shapes.
     const int rows = mm3_cfg_rows(c);
+    // Ensemble takes tear everything down for the same reason: the KV cache and
+    // every slot bake rows() = cfg_rows * n_takes into their shapes. `n_takes`
+    // is set by mm3_lm_set_takes BEFORE this call.
     if (g->lm_token != lt || g->synth_token != st || g->cfg_rows != rows) {
         mm3_lm_free(g);
     }
@@ -760,10 +875,10 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     g->kv_v.assign((size_t) L, nullptr);
     for (int i = 0; i < L; i++) {
         char nm[64];
-        g->kv_k[(size_t) i] = ggml_new_tensor_4d(g->kv_ctx, GGML_TYPE_F16, D, want, Nkv, g->cfg_rows);
+        g->kv_k[(size_t) i] = ggml_new_tensor_4d(g->kv_ctx, GGML_TYPE_F16, D, want, Nkv, g->rows());
         snprintf(nm, sizeof(nm), "mm3.lm.kv_k.%d", i);
         ggml_set_name(g->kv_k[(size_t) i], nm);
-        g->kv_v[(size_t) i] = ggml_new_tensor_4d(g->kv_ctx, GGML_TYPE_F16, D, want, Nkv, g->cfg_rows);
+        g->kv_v[(size_t) i] = ggml_new_tensor_4d(g->kv_ctx, GGML_TYPE_F16, D, want, Nkv, g->rows());
         snprintf(nm, sizeof(nm), "mm3.lm.kv_v.%d", i);
         ggml_set_name(g->kv_v[(size_t) i], nm);
     }
@@ -787,9 +902,10 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     g->kv_bytes = ggml_backend_buffer_get_size(g->kv_buf);
     g->kv_pos   = 0;
 
+    const std::string takes_note = g->n_takes > 1 ? " (" + std::to_string(g->n_takes) + " takes)" : std::string();
     fprintf(stderr,
-            "[MM3-LM] KV cache: %lld positions x %d layers x %d row%s = %.2f GB (%.0f kB/position), flash=%s\n",
-            (long long) want, L, g->cfg_rows, g->cfg_rows == 1 ? "" : "s",
+            "[MM3-LM] KV cache: %lld positions x %d layers x %d row%s%s = %.2f GB (%.0f kB/position), flash=%s\n",
+            (long long) want, L, g->rows(), g->rows() == 1 ? "" : "s", takes_note.c_str(),
             (double) g->kv_bytes / (1024.0 * 1024.0 * 1024.0),
             (double) g->kv_bytes / (double) want / 1024.0, g->use_flash_attn ? "yes" : "no");
     return true;
@@ -919,15 +1035,23 @@ static bool mm3_lm_prefill(const MM3Model & m, MM3LmGraph * g, const int32_t * i
 
     g->kv_pos = 0;
 
+    // The prefill index array is B contiguous blocks of n_prompt (get_rows +
+    // reshape to [H, T, B] means block b is row b). Every take starts from the
+    // SAME prompt — takes diverge only through sampling — so this is the CFG
+    // pair written K times, take-major.
+    //
     // At cfg_rows = 1 the unconditional row is never built, so ids_uncond is
     // accepted and ignored rather than made optional at every call site.
-    g->ids_host.resize((size_t) (n_prompt * g->cfg_rows));
-    memcpy(g->ids_host.data(), ids_cond, (size_t) n_prompt * sizeof(int32_t));
-    if (g->cfg_rows > 1) {
-        memcpy(g->ids_host.data() + n_prompt, ids_uncond, (size_t) n_prompt * sizeof(int32_t));
+    const int64_t B = (int64_t) g->rows();
+    g->ids_host.resize((size_t) (n_prompt * B));
+    for (int t = 0; t < g->n_takes; t++) {
+        int32_t * blk = g->ids_host.data() + (size_t) (t * g->cfg_rows) * (size_t) n_prompt;
+        memcpy(blk, ids_cond, (size_t) n_prompt * sizeof(int32_t));
+        if (g->cfg_rows > 1) {
+            memcpy(blk + n_prompt, ids_uncond, (size_t) n_prompt * sizeof(int32_t));
+        }
     }
-    ggml_backend_tensor_set(g->prefill.in_ids, g->ids_host.data(), 0,
-                            (size_t) (n_prompt * g->cfg_rows) * sizeof(int32_t));
+    ggml_backend_tensor_set(g->prefill.in_ids, g->ids_host.data(), 0, (size_t) (n_prompt * B) * sizeof(int32_t));
     mm3_lm_upload_step(g, &g->prefill, n_prompt, n_kv_pad);
 
     if (ggml_backend_sched_graph_compute(g->prefill.sched, g->prefill.graph) != GGML_STATUS_SUCCESS) {
@@ -945,11 +1069,15 @@ static bool mm3_lm_prefill(const MM3Model & m, MM3LmGraph * g, const int32_t * i
 // codes in-graph, advances both CFG rows by one position, and returns the new
 // last hidden state, head logits, and (for parity) the feedback embedding itself.
 //
-//   sem_token_id   LM vocab id of the frame's semantic code (code + offset)
-//   acoustic_rows  [num_codebooks-1] FLAT depth.audio_embd row indices
-//   out_feedback   [H] F32, may be null
-static bool mm3_lm_decode(const MM3Model & m, MM3LmGraph * g, int32_t sem_token_id, const int32_t * acoustic_rows,
-                          float * out_hidden, float * out_logits, float * out_feedback, std::string * err) {
+//   sem_token_id   [takes] LM vocab ids of each take's semantic code (+ offset)
+//   acoustic_rows  [takes, num_codebooks-1] FLAT depth.audio_embd row indices
+//   out_feedback   [H] F32 (take 0), may be null
+//
+// Both inputs are arrays of `g->n_takes` entries; at K = 1 that is a pointer to
+// a single value and the old one-song call site is unchanged.
+static bool mm3_lm_decode(const MM3Model & m, MM3LmGraph * g, const int32_t * sem_token_id,
+                          const int32_t * acoustic_rows, float * out_hidden, float * out_logits, float * out_feedback,
+                          std::string * err) {
     const MM3LmConfig & c  = m.lm_cfg;
     const int64_t       NC = (int64_t) c.num_codebooks - 1;
 
@@ -973,10 +1101,15 @@ static bool mm3_lm_decode(const MM3Model & m, MM3LmGraph * g, int32_t sem_token_
                 g->decode.n_nodes, (double) g->decode.compute_bytes / (1024.0 * 1024.0));
     }
 
-    g->ids_host.resize((size_t) (NC + 1));
-    g->ids_host[0] = sem_token_id;
-    memcpy(g->ids_host.data() + 1, acoustic_rows, (size_t) NC * sizeof(int32_t));
-    ggml_backend_tensor_set(g->decode.in_ids, g->ids_host.data(), 0, (size_t) (NC + 1) * sizeof(int32_t));
+    // Take-major blocks of [sem, ac0..ac_{NC-1}], matching the slot's reshape.
+    const int64_t K = (int64_t) g->n_takes;
+    g->ids_host.resize((size_t) (K * (NC + 1)));
+    for (int64_t t = 0; t < K; t++) {
+        int32_t * blk = g->ids_host.data() + (size_t) (t * (NC + 1));
+        blk[0]        = sem_token_id[t];
+        memcpy(blk + 1, acoustic_rows + t * NC, (size_t) NC * sizeof(int32_t));
+    }
+    ggml_backend_tensor_set(g->decode.in_ids, g->ids_host.data(), 0, (size_t) (K * (NC + 1)) * sizeof(int32_t));
     mm3_lm_upload_step(g, &g->decode, 1, n_kv_pad);
 
     if (ggml_backend_sched_graph_compute(g->decode.sched, g->decode.graph) != GGML_STATUS_SUCCESS) {
