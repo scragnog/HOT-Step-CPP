@@ -14,7 +14,9 @@ import { MetadataSection } from './MetadataSection';
 import { LatentImport } from '../shared/LatentImport';
 import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { AiGenerateModal, type AiGenerateResult } from './AiGenerateModal';
+import { Mm3ComposeButton } from './Mm3ComposeButton';
 import { useStreamGeneration } from '../../hooks/useStreamGeneration';
+import { useBackendStore } from '../../stores/backendStore';
 import { StreamPlayer } from '../player/StreamPlayer';
 import { expandWildcards, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
 import type { GenerationParams, Song } from '../../types';
@@ -29,6 +31,7 @@ interface CreatePanelProps {
 
 export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData, streamJobId }) => {
   const { t } = useTranslation();
+  const mm3Mode = useBackendStore(s => s.activeBackendId) === 'minimax-m3';
 
   // ── Stream mode ──
   const [streamMode, setStreamMode] = usePersistedState('hs-streamMode', false);
@@ -67,6 +70,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   const [timeSignature, setTimeSignature] = usePersistedState('hs-timeSignature', '');
   const [duration, setDuration] = usePersistedState('hs-duration', -1);
   const [vocalLanguage, setVocalLanguage] = usePersistedState('hs-vocalLanguage', 'en');
+  // '' = Any. Reaches MiniMax-Music3 only through the composed caption's Vocal
+  // Details section — there is no wire field for it on either backend.
+  const [vocalGender, setVocalGender] = usePersistedState('hs-vocalGender', '');
   const [sourceLatentUrl, setSourceLatentUrl] = usePersistedState('hs-sourceLatentUrl', '');
 
   // Global params context — for reuse data
@@ -160,6 +166,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       ...(negativePrompt.trim() ? { negative_prompt: negativePrompt.trim() } : {}),
       instrumental,
       bpm, duration, keyScale, timeSignature, vocalLanguage,
+      // vocalGender is deliberately NOT sent: neither backend has a wire field
+      // for it. It reaches the model only by being written into the caption's
+      // Vocal Details section by Mm3ComposeButton, and the caption is what
+      // travels. Adding it to the request would create another dead knob.
       taskType: 'text2music',
     };
     // Optional song info fields — only include if populated
@@ -208,12 +218,24 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
           wildcardSeed={gp.randomSeed ? undefined : gp.seed}
         />
 
+        {/* MM3 only: turn the plain-English caption into a Structured Caption */}
+        {mm3Mode && (
+          <div className="pt-2">
+            <Mm3ComposeButton
+              brief={caption}
+              controls={{ bpm, keyScale, timeSignature, duration, vocalLanguage, vocalGender }}
+              onComposed={setCaption}
+            />
+          </div>
+        )}
+
         <MetadataSection
           bpm={bpm} onBpmChange={setBpm}
           keyScale={keyScale} onKeyScaleChange={setKeyScale}
           timeSignature={timeSignature} onTimeSignatureChange={setTimeSignature}
           duration={duration} onDurationChange={setDuration}
           vocalLanguage={vocalLanguage} onVocalLanguageChange={setVocalLanguage}
+          vocalGender={vocalGender} onVocalGenderChange={setVocalGender}
         />
 
         {/* Latent import */}

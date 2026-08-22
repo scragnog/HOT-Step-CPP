@@ -4,6 +4,7 @@
 // Route handlers are split into focused modules:
 //   - lireek/crudRoutes.ts: Artists, Lyrics Sets, Profiles, Generations, Presets
 //   - lireek/llmRoutes.ts: LLM-powered generation, profiling, refinement
+//   - lireek/mm3Routes.ts: deterministic MiniMax-Music3 caption composition
 // Small utility routes (slop, purge, prompts, recent) remain here.
 
 import { Router, type Request, type Response } from 'express';
@@ -17,6 +18,7 @@ import {
 } from '../services/lireek/prompts.js';
 import { registerCrudRoutes } from './lireek/crudRoutes.js';
 import { registerLlmRoutes } from './lireek/llmRoutes.js';
+import { registerMm3Routes } from './lireek/mm3Routes.js';
 
 const router = Router();
 
@@ -29,6 +31,7 @@ function param(req: Request, name: string): string {
 // ── Register modular route groups ────────────────────────────────────────────
 registerCrudRoutes(router);
 registerLlmRoutes(router);
+registerMm3Routes(router);
 
 // ── Slop Scanner ────────────────────────────────────────────────────────────
 

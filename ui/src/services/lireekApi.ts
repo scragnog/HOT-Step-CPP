@@ -514,3 +514,38 @@ export const streamBuildCuratedProfile = (
   consumeSSE(`/api/lireek/artists/${artistId}/curated-profile-stream`, {
     ...req, provider_name: req.provider,
   }, callbacks);
+
+// ── MiniMax-Music3 caption composition (deterministic, no LLM) ───────────────
+
+export interface Mm3ComposeControls {
+  bpm?: number;
+  keyScale?: string;
+  timeSignature?: string;
+  duration?: number;
+  vocalLanguage?: string;
+  vocalGender?: string;
+}
+
+export interface Mm3ComposeResult {
+  caption: string;
+  family: string;
+  fallback: boolean;
+  genre: string;
+  slots: Record<string, { value: string | number | null; source: 'control' | 'brief' | 'corpus-default' }>;
+  provenance: Record<string, string>;
+  sourceCount: number;
+  notes: string[];
+  validation: string[];
+}
+
+/**
+ * Turns a plain-English brief into a MiniMax-Music3 Structured Caption by
+ * selecting prose from MiniMax's own 1,000 reference captions. Pure server-side
+ * computation — no provider, no API key, no network beyond this call.
+ */
+export const composeMm3Caption = (
+  brief: string,
+  controls?: Mm3ComposeControls,
+  seed?: number,
+): Promise<Mm3ComposeResult> =>
+  api('/api/lireek/mm3/compose', { method: 'POST', body: { brief, controls, seed } });
