@@ -62,6 +62,11 @@ export interface AudioQueueItem {
    *  its Listen affordance off this, never off the request flag, so a decline
    *  simply means no player rather than a button that 409s. */
   mm3Streaming?: boolean;
+  /** True when the engine renders windows WHILE it plans (audio in seconds).
+   *  False means it fell back to the serial path and audio starts once
+   *  planning finishes — still a stream, just a later one. Undefined until the
+   *  engine has decided. */
+  mm3Interleaved?: boolean;
 }
 
 export interface AudioGenQueueState {
@@ -1107,6 +1112,9 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
       item.stage = status.stage || 'Generating…';
       item.elapsed = t.elapsed;
       if (status.mm3_streaming === true && !item.mm3Streaming) item.mm3Streaming = true;
+      if (status.mm3_interleaved !== null && status.mm3_interleaved !== undefined) {
+        item.mm3Interleaved = status.mm3_interleaved;
+      }
       _emit();  // progress tick — debounced persistence
 
       if (status.status === 'succeeded') {

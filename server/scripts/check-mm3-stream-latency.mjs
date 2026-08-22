@@ -1,15 +1,20 @@
-// mm3-stream-latency.mjs — where does the first audio actually arrive?
+// check-mm3-stream-latency.mjs — when does the first audio actually arrive?
 //
-// The phase-1 pipeline dispatches windows only once the AR stage is done, so
-// time-to-first-audio == AR time. Two cases matter and they are very different:
+// Three cases, and the difference between them is the whole feature:
 //
-//   AR cache MISS — the planner runs; first audio lands near the end.
-//   AR cache HIT  — stage 1 is skipped outright (mm3-ar-cache.h), so the first
-//                   window is one flow pass away. This is the app's DEFAULT
-//                   (mm3ReuseAr defaults ON), so it is the case users see.
+//   INTERLEAVED, fresh plan  — the planner and the flow stage take turns, so the
+//                              first window lands a few seconds in. Needs both
+//                              model stacks co-resident (engine decides).
+//   SERIAL, fresh plan       — the fallback when they will not co-reside: no
+//                              window can exist until the planner is done, so
+//                              first audio == the whole AR stage.
+//   AR cache HIT             — stage 1 never runs at all; the first window is
+//                              one flow pass away.
 //
-// It also exercises the plan's first trap: an AR-cache hit means there is no
-// live AR loop, and window dispatch must not assume one.
+// It also prints the sustained rate, which is what decides whether playback
+// stutters: audio must be produced faster than it is consumed.
+//
+// Usage: node server/scripts/check-mm3-stream-latency.mjs [engineUrl]
 
 const ENGINE = process.argv[2] || 'http://127.0.0.1:8085';
 const CAPTION = [
@@ -18,18 +23,23 @@ const CAPTION = [
   'Arrangement: steady analog bass, gated pads, simple four-on-the-floor drums.',
 ].join('\n');
 
+const DURATION = 60;
+const STEPS = 30;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function run({ stream, reuse_ar, steps, duration, seed, label }) {
+async function run({ stream, reuse_ar, seed, label }) {
   const t0 = Date.now();
   const res = await fetch(`${ENGINE}/mm3/synth`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ caption: CAPTION, lyrics: '', duration, seed, steps, get_wav_bits: 16, get_lrc: false, reuse_ar, stream }),
+    body: JSON.stringify({
+      caption: CAPTION, lyrics: '', duration: DURATION, seed,
+      steps: STEPS, get_wav_bits: 16, get_lrc: false, reuse_ar, stream,
+    }),
   });
   if (!res.ok) throw new Error(`submit ${res.status}: ${await res.text()}`);
   const sub = await res.json();
 
-  let firstByte = 0, bytes = 0, chunks = 0;
+  let firstAudio = 0, chunks = 0, audioSec = 0;
   let readerDone = Promise.resolve();
   if (stream) {
     const sres = await fetch(`${ENGINE}/mm3/stream?id=${sub.job_id}`);
@@ -40,17 +50,20 @@ async function run({ stream, reuse_ar, steps, duration, seed, label }) {
       for (;;) {
         const { done, value } = await rd.read();
         if (done) break;
-        if (!firstByte) firstByte = Date.now();
-        bytes += value.length;
         pending = Buffer.concat([pending, Buffer.from(value)]);
-        // count complete RIFFs as they land
         for (;;) {
           if (pending.length < 44 || pending.toString('ascii', 0, 4) !== 'RIFF') break;
           const total = pending.readUInt32LE(4) + 8;
           if (pending.length < total) break;
-          chunks++;
-          const at = ((Date.now() - t0) / 1000).toFixed(1);
-          console.log(`      window ${chunks} at +${at}s (${(pending.readUInt32LE(40) / 4 / 44100).toFixed(2)}s of audio)`);
+          const secs = pending.readUInt32LE(40) / 4 / pending.readUInt32LE(24);
+          chunks++; audioSec += secs;
+          const at = (Date.now() - t0) / 1000;
+          if (!firstAudio) firstAudio = at;
+          // The margin is what matters once playing: audio in hand minus audio
+          // consumed. Negative means the player has caught the renderer.
+          const margin = audioSec - (at - firstAudio);
+          console.log(`      window ${String(chunks).padStart(2)} at +${at.toFixed(1)}s  ` +
+                      `(+${secs.toFixed(2)}s audio, ${audioSec.toFixed(1)}s total, buffer ${margin >= 0 ? '+' : ''}${margin.toFixed(1)}s)`);
           pending = pending.subarray(total);
         }
       }
@@ -61,32 +74,33 @@ async function run({ stream, reuse_ar, steps, duration, seed, label }) {
     const j = await (await fetch(`${ENGINE}/job?id=${sub.job_id}`)).json();
     if (j.status === 'done') break;
     if (j.status === 'failed' || j.status === 'cancelled') throw new Error(`job ${j.status}`);
-    await sleep(500);
+    await sleep(400);
   }
   await readerDone;
   const total = (Date.now() - t0) / 1000;
   const d = await (await fetch(`${ENGINE}/mm3/job?id=${sub.job_id}`)).json();
-
+  const dur = d.result?.duration_sec ?? 0;
   console.log(`  ${label}: total ${total.toFixed(1)}s` +
-    (stream ? `, FIRST AUDIO at ${((firstByte - t0) / 1000).toFixed(1)}s (${chunks} windows, ${(bytes / 1048576).toFixed(1)} MB)` : '') +
-    `  [ar_cached=${d.ar_cached}, ar ${Math.round(d.result?.ms?.ar ?? 0)}ms, flow ${Math.round(d.result?.ms?.flow ?? 0)}ms, voc ${Math.round(d.result?.ms?.voc ?? 0)}ms]`);
-  return { total, firstAudio: (firstByte - t0) / 1000, detail: d };
+    (stream ? `, FIRST AUDIO at ${firstAudio.toFixed(1)}s` : '') +
+    `  [interleaved=${d.stream_interleaved}, ar_cached=${d.ar_cached}, ` +
+    `ar ${Math.round(d.result?.ms?.ar ?? 0)}ms, flow ${Math.round(d.result?.ms?.flow ?? 0)}ms]`);
+  console.log(`      ${dur.toFixed(1)}s of audio in ${total.toFixed(1)}s = ${(dur / total).toFixed(2)}x realtime`);
+  return { total, firstAudio, detail: d };
 }
 
 (async () => {
-  const cfg = { duration: 60, seed: 777, steps: 30 };
-  console.log(`\n60 s clip, ${cfg.steps} steps, q8_0 — time to first audio\n`);
+  console.log(`\n${DURATION} s clip, ${STEPS} steps — time to first audio\n`);
 
-  console.log('  [1/2] priming the AR cache (stream off)…');
-  await run({ ...cfg, stream: false, reuse_ar: true, label: 'prime (AR miss)' });
-
-  console.log('\n  [2/2] same request, streaming on — the AR cache should hit');
-  const hit = await run({ ...cfg, stream: true, reuse_ar: true, label: 'stream + AR HIT' });
-
-  if (hit.detail.ar_cached !== true) {
-    console.log('\n  NOTE: the AR cache did NOT hit, so this measured the miss path.');
+  console.log('  [1/2] fresh plan, streaming (interleaved if the stacks co-reside)');
+  const fresh = await run({ stream: true, reuse_ar: true, seed: 31337, label: 'fresh plan' });
+  if (fresh.detail.stream_interleaved !== true) {
+    console.log('\n  NOTE: the engine declined co-residency, so this measured the SERIAL fallback.');
   }
-  console.log(`\n  Playback needs audio faster than realtime; this render produced ` +
-              `${(hit.detail.result?.duration_sec ?? 0).toFixed(1)}s of audio in ${hit.total.toFixed(1)}s ` +
-              `(${((hit.detail.result?.duration_sec ?? 0) / hit.total).toFixed(2)}x realtime).`);
+
+  console.log('\n  [2/2] same request again — the AR cache should hit, so no planner at all');
+  const hit = await run({ stream: true, reuse_ar: true, seed: 31337, label: 'AR cache hit' });
+  if (hit.detail.ar_cached !== true) console.log('\n  NOTE: the AR cache did NOT hit.');
+
+  console.log(`\n  first audio: ${fresh.firstAudio.toFixed(1)}s on a fresh plan, ` +
+              `${hit.firstAudio.toFixed(1)}s on a cache hit`);
 })().catch(e => { console.error('ERROR:', e.message); process.exit(1); });

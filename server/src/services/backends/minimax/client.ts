@@ -267,6 +267,12 @@ export interface Mm3JobDetail {
   ar_cached?: boolean;
   /** Streaming: true when this job was submitted with `stream: true`. */
   streaming?: boolean;
+  /** True when windows were dispatched WHILE the planner was still running —
+   *  i.e. audio starts seconds in rather than after the whole plan. Decided on
+   *  the worker thread by a VRAM check, so it is only knowable from here, never
+   *  from the submit response. False on a streamed run is not a failure; it is
+   *  the serial fallback. */
+  stream_interleaved?: boolean;
   /** Chunks pushed so far — 0 while the AR stage is still planning. */
   stream_chunks?: number;
   stream_mb?: number;

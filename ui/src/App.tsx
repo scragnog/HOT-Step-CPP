@@ -502,6 +502,13 @@ const AppContent: React.FC = () => {
     const active = s.items.find(i => i.status === 'generating' && i.jobId && i.mm3Streaming === true);
     return active?.jobId || null;
   });
+  // Whether that job renders windows while it plans. `false` is worth telling
+  // the user about — it is the difference between audio in seconds and audio
+  // after the planner — so it is a tri-state, not a boolean with a default.
+  const mm3StreamInterleaved = useAudioGenQueueSelector(s => {
+    const active = s.items.find(i => i.status === 'generating' && i.jobId && i.mm3Streaming === true);
+    return active ? active.mm3Interleaved ?? null : null;
+  });
 
   // Load songs on mount
   useEffect(() => {
@@ -1014,6 +1021,7 @@ const AppContent: React.FC = () => {
             reuseData={reuseData}
             streamJobId={streamJobId}
             mm3StreamJobId={mm3StreamJobId}
+            mm3StreamInterleaved={mm3StreamInterleaved}
           />
         </DiscoPulseWrapper>
 

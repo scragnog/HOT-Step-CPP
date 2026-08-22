@@ -27,6 +27,9 @@ interface Mm3StreamPlayerProps {
   done: boolean;
   /** Stream open, or scheduled audio still playing out. */
   active: boolean;
+  /** Engine renders windows while it plans (true), fell back to serial so audio
+   *  starts after planning (false), or has not decided yet (null). */
+  interleaved: boolean | null;
   volume: number;
   headroom: number;
   error: string | null;
@@ -42,7 +45,7 @@ const mmss = (s: number) => {
 };
 
 export const Mm3StreamPlayer: React.FC<Mm3StreamPlayerProps> = ({
-  isPlaying, chunks, received, position, ahead, underruns, done, active,
+  isPlaying, chunks, received, position, ahead, underruns, done, active, interleaved,
   volume, headroom, error, onStart, onStop, onVolume, onHeadroom,
 }) => {
   // "Live" = the stream is open, or its tail is still playing out.
@@ -80,6 +83,16 @@ export const Mm3StreamPlayer: React.FC<Mm3StreamPlayerProps> = ({
             <Headphones size={14} />
             Listen now
           </button>
+          {/* Say WHY it will be slow rather than letting it look broken: on the
+              serial fallback the first window cannot exist until the planner
+              is done, which on a fresh plan is most of the render. */}
+          {interleaved === false && (
+            <p className="text-[10px] text-zinc-500 leading-snug">
+              Not enough VRAM to keep both model stacks resident, so audio starts once planning
+              finishes rather than a few seconds in. Reusing the planner output, or a smaller LM
+              quant, avoids the wait.
+            </p>
+          )}
           {/* Only adjustable before starting: the playback origin of a live
               stream is already fixed, and moving it would misplace every
               chunk already scheduled against it. */}
@@ -136,8 +149,9 @@ export const Mm3StreamPlayer: React.FC<Mm3StreamPlayerProps> = ({
 
           {underruns > 0 && (
             <div className="text-[10px] text-amber-600 dark:text-amber-400">
-              {underruns} window{underruns === 1 ? '' : 's'} arrived late — rendering is running slower than
-              playback. Raise the buffer before the next render, or use fewer flow steps.
+              Paused to rebuffer {underruns}&times; — rendering is running slower than playback, so the
+              track is playing with gaps rather than dropping audio. A q8_0 LM, fewer flow steps, or a
+              bigger buffer next time all fix it.
             </div>
           )}
         </>

@@ -381,15 +381,48 @@ moment it is vocoded and cropped, so it is pushed to a per-job queue and served
 as a chunked body of concatenated self-contained WAVs on
 `GET /mm3/stream?id=<job>` while the render continues.
 
-**Measured (60 s clip, 30 steps, q8_0, RTX 5090):**
+**Two levels, and the second is the one that matters.**
 
-| | total | first audio |
+*Streaming* moves the vocoder inside the window loop, so a window is emitted as
+soon as it is denoised instead of in a second pass at the end. Always available.
+
+*Interleaving* (`stream_interleave`) dispatches windows **while the AR planner
+is still planning**, via `MM3ArOptions::on_frame_ready`. Without it the first
+window cannot exist until the planner is done — which on a fresh plan is most
+of the render, so streaming alone buys almost nothing there. This is the part
+that needs the LM and the flow stack **co-resident**, i.e. no staged handover,
+which is why it is a per-run VRAM decision made in `mm3-job.h`.
+
+**Measured (60 s clip, 30 steps, RTX 5090, all-q8_0 except cond/voc):**
+
+| | first audio | total | sustained |
+|---|---|---|---|
+| fresh plan, interleaved | **10.1 s** | 56.8 s | 1.06x realtime, buffer grows +5.0 → +13.5 s |
+| AR cache hit (no planner at all) | **3.3 s** | 30.4 s | 1.97x realtime |
+| fresh plan, serial fallback | ~AR stage (23–51 s) | same | n/a |
+
+**THROUGHPUT IS THE REAL CONSTRAINT, NOT LATENCY.** Interleaving reorders work;
+it does not create any. Playback only survives if audio is produced faster than
+it is consumed, and that is a per-configuration fact:
+
+| | fresh plan | verdict |
 |---|---|---|
-| AR cache HIT (the app default) | 32.3 s | **4.2 s** — then a window every ~2.1 s carrying 4.0 s of audio |
-| AR cache MISS | 75.2 s | ~36.5 s (= the AR stage; see the phase-3 note) |
+| q8_0 | 1.06x realtime | sustains, buffer grows |
+| f16 | **0.74x** | the player IS caught, mid-song, and stalls |
 
-1.86x realtime, so the buffer grows monotonically and playback never catches
-the renderer.
+So the quant ladder is not just a speed preference here — it decides whether a
+fresh-plan stream plays through. Measure before claiming a config works.
+
+**The `+1` frame rule, and why it is not an off-by-one.** While the planner runs,
+F is unknown. Window k needs a RIGHT crop iff a window k+1 exists, iff
+`F > cs + win`. Dispatch is gated on `frames >= cs + win + 1`, which makes that
+true outright because the planner has not stopped. Gating on `cs + win` instead
+is wrong in exactly one case, and it is a case that happens: the planner hits
+EOS on that very frame, `F == cs + win`, window k turns out to be the LAST one,
+and it has already been emitted with 258 latents (3.0 s) cropped off its end.
+One extra frame — 40 ms of audio — buys a crop that can never be wrong. After
+the planner returns, the settled plan is re-derived and every already-dispatched
+window is checked against it rather than trusted.
 
 **The transport is STORM's, the scheduler is NOT.** The byte stream is the same
 shape `POST /api/generate/storm/stream` already emits, so `extractWav` is shared
@@ -399,40 +432,66 @@ must HARD-SPLICE, so `useMm3StreamAudio.ts` is a separate hook. Three things it
 does that a copy of the STORM path would get wrong: the AudioContext is built at
 the **rate read from the first WAV header** (MM3 is 44.1 kHz, `useStreamAudio`
 hardcodes 48 k, and a resampling context destroys the exact frame counts the
-splice depends on); scheduling accumulates **frames, not `ab.duration`**; and a
-late window is started at an OFFSET into its buffer rather than at a past
-timestamp (which would play the whole buffer immediately and overlap its
-predecessor).
+splice depends on); scheduling accumulates **frames, not `ab.duration`**; and on
+underrun it **stalls rather than drops** — the whole timeline shifts forward so
+every later window plays in full, because a pause is better than a hole in a
+track someone is deciding whether to keep.
 
-**Proven bit-identical, twice, and that is the bar.** Re-runnable against a
-live app, and worth running after ANY change to the window loop, the crop
-arithmetic or the WAV encoder:
+**Proven bit-identical, twice, and that is the bar.** Re-runnable against a live
+app, and worth running after ANY change to the window loop, the crop arithmetic
+or the WAV encoder:
 
 ```
 node server/scripts/check-mm3-stream.mjs           # engine: the two byte-identity claims + the 409s
 node server/scripts/check-mm3-stream-node.mjs      # Node tier: proxy, /status flag, cancel mid-stream
-node server/scripts/check-mm3-stream-latency.mjs   # time to first audio, AR miss vs hit
+node server/scripts/check-mm3-stream-latency.mjs   # first audio + sustained rate, fresh vs cached
 ```
 
-`stream:false` and `stream:true`
-at the same seed produce a **byte-identical WAV** — the restructure that moves
-the vocoder inside the flow loop is numerically neutral — and the concatenated
-PCM of every streamed chunk is **byte-identical to the saved WAV's PCM**.
-A seam would be an offset bug, and it is measurable, so it is measured rather
-than listened for. `mm3_window_crop()` (mm3-pipeline.h) is the ONE place the
-crop is computed, shared by the sink and the final stitch, and
-`mm3_clamp_sample()` likewise — the identity holds only while both sides use
-them.
+`stream:false` and `stream:true` at the same seed produce a **byte-identical
+WAV** — and since the streamed run is the INTERLEAVED one, that also proves the
+reordering (condition and denoise window k while the planner works on later
+frames) is numerically neutral, which is the only way to ship a control-flow
+change this invasive. The concatenated PCM of every streamed chunk is likewise
+**byte-identical to the saved WAV's PCM**. A seam would be an offset bug, and it
+is measurable, so it is measured rather than listened for.
+
+`process_window()` in mm3-pipeline.h is the ONLY copy of the per-window body;
+the planner hook and the post-planner sweep both call it, so they cannot drift.
+`mm3_window_crop_lr()` / `mm3_window_crop()` are one piece of arithmetic in two
+spellings (the dispatcher knows "is there another window after this one?" before
+it knows how many there are), and `mm3_clamp_sample()` likewise — those
+identities are what make the streamed bytes the saved bytes.
 
 **Traps.**
 - **Installing a sink CHANGES WHEN THE VOCODER RUNS** — inline per window
   instead of one pass after every window is denoised. That is why it is opt-in:
   a render with no sink keeps today's exact stage order and VRAM profile.
-- **The engine's `streaming` echo is the authority, not the request.** The
-  submit response and `/status`'s `mm3_streaming` say whether the engine will
-  actually serve. The UI shows its Listen affordance off THAT, so a decline is
-  invisible rather than a button that 409s. Today it always agrees; the field
-  exists because the phase-3 VRAM gate can say no.
+- **Interleaving and `after_ar` are mutually exclusive.** That hook means "the
+  LM is done, swap residency", and interleaving has already run stage 2 against
+  a live LM by the time the AR returns. `mm3-job.h` only asks for interleaving
+  when it is not staging; mm3-pipeline.h also disables interleaving if a hook is
+  somehow set, so the conflict fails SAFE (serial).
+- **An AR cache hit never interleaves**, and does not need to: stage 1 does not
+  run, so the serial sweep starts emitting immediately (this is the plan's
+  trap 1 — window dispatch must not assume a live AR loop).
+- **`frame_hiddens` is read with a fresh `.data()` every window.** The planner is
+  still appending to it between dispatches. `mm3-ar-loop.h` reserves the whole
+  `max_frames` block up front so it does not in fact reallocate — but a pointer
+  captured before the planner ran would be a dangling read the day that reserve
+  changes, and the failure mode is silent garbage audio.
+- **`ar_ms` had to stop double-counting.** Interleaving nests stage 2 inside the
+  AR call, so its wall time is no longer the planner's cost. Before the fix a
+  60.2 s render reported ar 50.3 s + flow 27.4 s. `dispatch_ms` is measured
+  around each nested window and subtracted.
+- **Progress needed its own stage.** With the planner and the flow stage taking
+  turns several times a second, the `ar` (10–35) and `flow` (40–85) bands made
+  the bar oscillate for the whole render. Interleaved runs report a single
+  `"stream"` stage carrying windows-out and frames-planned; `minimaxStageText`
+  maps it to one monotonic 10–90 axis.
+- **The engine's `streaming` echo is the authority, not the request**, and
+  `stream_interleaved` on `GET /mm3/job` is the authority on which of the two
+  levels you got. Declining co-residency is NOT a failure — the render still
+  streams, just later. The UI says why rather than looking broken.
 - **`GET /mm3/stream` must never take `g_mm3_mutex`** — the generation it is
   streaming holds that for its whole run (the same reason `/mm3/props` blocks
   and `/mm3/job` does not). Its queue has its own mutex, and the counters
@@ -452,26 +511,16 @@ them.
   cap; the stream is then dropped with a log line and the render continues
   untouched. (A finished job 409s only once its chunks have been drained —
   "already finished" is about an empty queue, not about the job's status.)
-- **Progress mapping had to change.** `minimaxStageText` reported flow in a
-  40-85 band and vocode in 85-91; with vocode running BETWEEN flow passes that
-  ran the bar forward and snapped it back once per window. Flow is now a
-  fraction across ALL windows, and vocode reports in the flow band when
-  streaming, its own band when not.
 
-**What is NOT built: phase 3, the sliding pipeline.** `mm3-job.h`'s staged
-handover frees the LM before loading the flow stack, so the AR stage must
-finish before any window can be dispatched — which is why an AR cache MISS
-still waits out the planner. Making the AR loop a producer that feeds windows
-while it is still planning needs both stacks co-resident (q8_0 ~15 GB is
-comfortable on 32 GB; f16 ~27 GB is not), i.e. a per-run VRAM decision that
-falls back to today's serial path. Design: `docs/plans/2026-08-21-mm3-streaming-player.md`.
-
-Layers: `mm3-pipeline.h` (`MM3ChunkCb`, inline vocode, `mm3_window_crop`) ->
-`mm3-request.h` (`stream`) -> `mm3-job.h` (`MM3StreamQueue`, sink,
-`GET /mm3/stream`) -> `minimax/client.ts` (`stream`/`streaming`/`mm3StreamUrl`)
--> `minimax/generate.ts` (mapping + `job.mm3Streaming`) -> `minimax/index.ts`
-(manifest extension) -> `routes/generate.ts` (`GET /api/generate/mm3/stream/:id`
-pipe + `mm3_streaming` on `/status`) -> `useMm3StreamAudio.ts` +
+Layers: `mm3-ar-loop.h` (`on_frame_ready`) -> `mm3-pipeline.h` (`MM3ChunkCb`,
+`process_window`, the dispatch predicate, `mm3_window_crop_lr`) ->
+`mm3-request.h` (`stream`) -> `mm3-job.h` (`MM3StreamQueue`, the co-residency
+check, `GET /mm3/stream`) -> `minimax/client.ts`
+(`stream`/`streaming`/`stream_interleaved`/`mm3StreamUrl`) ->
+`minimax/generate.ts` (mapping, `job.mm3Streaming`/`mm3Interleaved`, the
+`stream` stage text) -> `minimax/index.ts` (manifest extension) ->
+`routes/generate.ts` (`GET /api/generate/mm3/stream/:id` pipe + `mm3_streaming`
+/ `mm3_interleaved` on `/status`) -> `useMm3StreamAudio.ts` +
 `Mm3StreamPlayer.tsx` -> `CreatePanel.tsx`.
 
 ## MM3 AR cache: the speedup the Plank is not (built + measured 2026-08-21)

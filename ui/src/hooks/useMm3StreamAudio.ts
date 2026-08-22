@@ -31,8 +31,16 @@
 //      accumulate float error across a hundred windows.
 //   3. HEADROOM IS A PRE-BUFFER, NOT A CROSSFADE. `base` is set to
 //      `currentTime + headroom` on the first chunk, mirroring the reference
-//      Space. Rendering runs ~1.4x realtime on a 5090, so the buffer grows
-//      from there; the headroom only has to cover a slow patch.
+//      Space, and is pushed forward again if the renderer ever falls behind.
+//
+// ON UNDERRUN, STALL — DO NOT DROP. Whether the render outruns playback is a
+// per-configuration fact, not a given: measured on a 5090 at 30 steps, a
+// q8_0 fresh plan sustains 1.00x realtime and an AR-cache hit 1.98x, but an
+// f16 fresh plan manages 0.74x and WILL be caught. When that happens the whole
+// timeline is shifted forward — every later window plays in full, one
+// headroom later. The alternative (start the late window part-way in, so it
+// still ends where it was due) keeps the clock but puts a hole in the song,
+// and this is a preview of a track someone is deciding whether to keep.
 //
 // The stream is an ADDITIONAL output. The finished WAV is still written, saved
 // and added to the library exactly as it is with streaming off — nothing here
@@ -95,6 +103,10 @@ export function useMm3StreamAudio() {
   const baseRef      = useRef(0);
   /** Frames (per channel) already scheduled — the splice cursor. */
   const cursorRef    = useRef(0);
+  /** Seconds `base` has been pushed forward by rebuffering. Playback position
+   *  is derived from audio consumed, not from `base`, so that a stall does not
+   *  make the readout jump backwards. */
+  const stalledRef   = useRef(0);
   const rateRef      = useRef(0);
   const volumeRef    = useRef(1.0);
   const headroomRef  = useRef(DEFAULT_HEADROOM);
@@ -105,11 +117,14 @@ export function useMm3StreamAudio() {
     // the body ends there are still seconds of scheduled audio to report on.
     if (!ac) return;
     const rate = rateRef.current || 1;
-    const endOfBuffer = baseRef.current + cursorRef.current / rate;
+    const scheduled = cursorRef.current / rate;
+    const endOfBuffer = baseRef.current + scheduled;
     const ahead = baseRef.current > 0 ? Math.max(0, endOfBuffer - ac.currentTime) : 0;
     setState(p => ({
       ...p,
-      position: baseRef.current > 0 ? Math.max(0, ac.currentTime - baseRef.current) : 0,
+      // Audio CONSUMED, not wall time since `base` — the two differ by every
+      // rebuffer stall, and only this one is monotonic.
+      position: baseRef.current > 0 ? Math.max(0, scheduled - ahead) : 0,
       ahead,
       active: netRef.current || ahead > 0,
     }));
@@ -126,6 +141,7 @@ export function useMm3StreamAudio() {
     gainRef.current = null;
     baseRef.current = 0;
     cursorRef.current = 0;
+    stalledRef.current = 0;
     rateRef.current = 0;
   }, []);
 
@@ -210,29 +226,30 @@ export function useMm3StreamAudio() {
           }
           if (!netRef.current) break;
 
-          const at = baseRef.current + cursorRef.current / rate;
-
-          // Underrun: the window arrived after the moment it was due. DROP the
-          // late part rather than pushing the timeline back — starting it now
-          // at offset `skip` makes it end at exactly `at + duration`, so the
-          // splice cursor stays honest and the next window still lands right.
-          // (Calling start(at) with a past time would play the WHOLE buffer
-          // immediately and overlap the previous window's tail.)
-          const skip = ac.currentTime - at;
-          if (skip > 0) underruns++;
-          if (skip < ab.duration) {
-            const src = ac.createBufferSource();
-            src.buffer = ab;
-            src.connect(g);
-            // No ramp, no fade: consecutive spans of one signal, spliced at
-            // the sample the engine cropped them to.
-            if (skip > 0) src.start(ac.currentTime, skip);
-            else src.start(at);
-            sourcesRef.current.push(src);
-            src.onended = () => {
-              sourcesRef.current = sourcesRef.current.filter(s => s !== src);
-            };
+          // Underrun: this window is due before it arrived, i.e. the renderer
+          // has been caught. Shift the ENTIRE timeline forward by the deficit
+          // plus one headroom, so this window and every later one still play in
+          // full — a stall, not a hole. Already-scheduled windows are unaffected
+          // (they have played); only future start times move.
+          if (baseRef.current + cursorRef.current / rate < ac.currentTime) {
+            const deficit = ac.currentTime - (baseRef.current + cursorRef.current / rate);
+            const rebuffer = deficit + Math.max(1, headroomRef.current);
+            baseRef.current += rebuffer;
+            stalledRef.current += rebuffer;
+            underruns++;
           }
+
+          const at = baseRef.current + cursorRef.current / rate;
+          const src = ac.createBufferSource();
+          src.buffer = ab;
+          src.connect(g);
+          // No ramp, no fade: consecutive spans of one signal, spliced at the
+          // sample the engine cropped them to.
+          src.start(at);
+          sourcesRef.current.push(src);
+          src.onended = () => {
+            sourcesRef.current = sourcesRef.current.filter(s => s !== src);
+          };
 
           // The cursor advances by the HEADER's frame count, not ab.length:
           // they agree when the context rate matches (which is the point of

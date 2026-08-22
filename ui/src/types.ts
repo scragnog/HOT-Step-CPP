@@ -371,6 +371,10 @@ export interface GenerationJob {
    *  serve this job on GET /api/generate/mm3/stream/:jobId. Absent on every
    *  other backend, and on any MM3 render that did not ask for streaming. */
   mm3_streaming?: boolean;
+  /** True when windows render while the planner runs (audio in seconds); false
+   *  when the engine fell back to dispatching them after planning; null until
+   *  it has decided. */
+  mm3_interleaved?: boolean | null;
 }
 
 /** User profile */

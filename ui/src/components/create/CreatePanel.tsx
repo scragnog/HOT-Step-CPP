@@ -30,9 +30,12 @@ interface CreatePanelProps {
   /** Active MiniMax-Music3 job the engine has confirmed it will stream live.
    *  Null unless "Play While Rendering" was on AND the engine accepted. */
   mm3StreamJobId?: string | null;
+  /** True when that job renders windows while it plans; false when it fell
+   *  back to serial (audio arrives once planning finishes); null = undecided. */
+  mm3StreamInterleaved?: boolean | null;
 }
 
-export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData, streamJobId, mm3StreamJobId }) => {
+export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData, streamJobId, mm3StreamJobId, mm3StreamInterleaved }) => {
   const { t } = useTranslation();
 
   // ── Stream mode ──
@@ -275,6 +278,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
             underruns={mm3Stream.underruns}
             done={mm3Stream.done}
             active={mm3Stream.active}
+            interleaved={mm3StreamInterleaved ?? null}
             volume={mm3Stream.volume}
             headroom={mm3Stream.headroom}
             error={mm3Stream.error}

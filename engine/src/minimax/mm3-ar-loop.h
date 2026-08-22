@@ -190,6 +190,21 @@ struct MM3ArOptions {
     // Called after every emitted frame. Cheap; used for server-side progress.
     std::function<void(int64_t /*frames*/, int64_t /*max_frames*/)> on_frame;
 
+    /** THE STREAMING HOOK. Called after every emitted frame, once that frame's
+     *  hiddens are already appended to MM3ArResult::frame_hiddens — so the
+     *  callback may read [0, frames) of the block and act on it.
+     *
+     *  This is what lets mm3-pipeline.h condition, denoise and vocode a window
+     *  while the planner is still working on later frames, instead of waiting
+     *  for the whole plan. It runs ON THIS THREAD, between AR steps: it is not
+     *  concurrency, it is interleaving, and heavy work inside it directly
+     *  delays the next frame.
+     *
+     *  Return false to abort the run, having written the reason into *err —
+     *  distinct from `should_cancel`, which is a user cancel and reports
+     *  MM3_ERR_CANCELLED. Unset (the default) is the plain batch path. */
+    std::function<bool(int64_t /*frames*/, std::string * /*err*/)> on_frame_ready;
+
     // Returns true to abort. Polled once per AR iteration — the finest grain
     // this loop has, and the only one that matters: at ~25 frames of real audio
     // per second of wall clock, a 60 s song is thousands of poll points. On
@@ -583,6 +598,12 @@ static bool mm3_ar_plan(const MM3Model & m, const int32_t * cond_ids, const int3
             out->n_frames++;
             if (opt.on_frame) {
                 opt.on_frame(out->n_frames, max_frames);
+            }
+            // After on_frame (progress first, so a long dispatch is not
+            // mistaken for a stalled planner) and before the cancel poll, so a
+            // cancel during a dispatched window is still caught this iteration.
+            if (opt.on_frame_ready && !opt.on_frame_ready(out->n_frames, err)) {
+                return false;
             }
             if (opt.should_cancel && opt.should_cancel()) {
                 if (err) {

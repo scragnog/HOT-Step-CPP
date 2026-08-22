@@ -509,6 +509,23 @@ export function minimaxStageText(d: Mm3JobDetail, elapsedSec: number): { stage: 
         progress: 40 + Math.round(Math.max(0, Math.min(1, overall)) * 45),
       };
     }
+    case 'stream': {
+      // Interleaved streaming: the planner and the flow stage take turns many
+      // times a second, so their own bands (10-35 and 40-85) would make the bar
+      // oscillate for the whole render. One axis instead — audio actually
+      // produced — with partial credit for the window currently being planned
+      // so it does not sit at zero through the first window.
+      //   window/n_windows = windows emitted, step/n_steps = frames planned.
+      const framesPerWindow = d.n_windows > 0 ? d.n_steps / d.n_windows : d.n_steps;
+      const nextFrac = framesPerWindow > 0
+        ? Math.max(0, Math.min(1, d.step / framesPerWindow - d.window))
+        : 0;
+      const overall = d.n_windows > 0 ? (d.window + nextFrac) / d.n_windows : 0;
+      return {
+        stage: `MiniMax-Music3: planning + rendering (${d.window}/${d.n_windows} windows, frame ${d.step}/${d.n_steps})`,
+        progress: 10 + Math.round(Math.max(0, Math.min(1, overall)) * 80),
+      };
+    }
     case 'vocode': {
       // Two shapes, because the vocoder runs at two different points. Serial:
       // one pass after every window is denoised, in its own 85-91 band.
@@ -646,6 +663,16 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
         // MM3's stage is finer-grained than GET /job's phase mapping; surface
         // it through the existing ace_phase_progress channel.
         if (d.n_steps > 0) job.acePhaseProgress = `step ${d.step}/${d.n_steps}`;
+        // Whether the engine is dispatching windows DURING planning. Only
+        // knowable once the worker has run its VRAM check, and it is the
+        // difference between "audio in seconds" and "audio after the plan", so
+        // it is logged once and published for the player to be honest about.
+        if (d.streaming && d.stream_interleaved !== undefined && job.mm3Interleaved === undefined) {
+          job.mm3Interleaved = d.stream_interleaved === true;
+          log('INFO', d.stream_interleaved
+            ? '[MM3] Streaming is INTERLEAVED — windows render while the planner runs, so audio starts in seconds'
+            : '[MM3] Streaming is SERIAL — the two model stacks would not co-reside, so audio starts once planning finishes');
+        }
       })();
     }, DETAIL_POLL_MS);
     detailTimer.unref?.();

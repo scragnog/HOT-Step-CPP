@@ -187,6 +187,10 @@ struct MM3JobState {
     bool     instrumental = false;
     /** True when stage 1 was served from the AR cache (no LM, no AR compute). */
     bool     ar_cached  = false;
+    /** True when windows were dispatched WHILE the planner ran (co-resident).
+     *  False on a streamed run means the audio starts after planning, which is
+     *  the difference a user actually feels. */
+    bool     interleaved = false;
 
     bool    have_result = false;
     int64_t frames      = 0;
@@ -604,7 +608,65 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     // are not loaded AT ALL — that saves the 8.5-16 GB load as well as the AR
     // compute, and in staged mode it also saves the mid-run free/reload, since
     // the flow stack comes in here instead of at the handover.
-    const bool staged   = !g_keep_loaded && !ar_hit;
+    // ── Interleaved streaming: can the LM and the flow stack co-reside? ────
+    //
+    // Streaming after the AR stage is cheap and always available. Streaming
+    // WHILE it plans is what makes the feature worth having on a fresh plan —
+    // and it is incompatible with the staged handover below, which exists
+    // precisely so the two stacks never have to be resident at once. So this is
+    // a per-run VRAM decision, exactly like mm3_arbitrate_vram's.
+    //
+    // Declining is not a failure: the render proceeds, still streams, and the
+    // first window simply arrives when the planner is done. It is reported so
+    // the caller can say which it got rather than guess from the timing.
+    //
+    // An AR cache hit is excluded because there is nothing to interleave with:
+    // stage 1 never runs, so the serial sweep starts emitting immediately.
+    bool interleave = false;
+    if (req.stream && !ar_hit) {
+        if (g_keep_loaded) {
+            // Keep-loaded already means co-resident by policy — that is what
+            // the setting buys, and it is the same reason `staged` is false.
+            interleave = true;
+            fprintf(stderr, "[MM3-Job] %s: interleaved streaming (keep-loaded: both stacks stay resident)\n",
+                    job->id.c_str());
+        } else {
+            // The co-resident figure is what mm3_vram_need already computes with
+            // stage2_only=false: every role file + this run's KV + compute
+            // headroom. Whatever is already ours does not need finding again.
+            const size_t need     = mm3_vram_need(g_mm3, n_ctx_needed, /*stage2_only=*/false);
+            const size_t resident = mm3_vram_bytes(g_mm3);
+            const size_t want     = need > resident ? need - resident : 0;
+            size_t       free_b = 0, total_b = 0;
+            if (!mm3_cuda_free_bytes(&free_b, &total_b)) {
+                // No way to measure (CPU/Vulkan build). Do not gamble a
+                // several-GB over-commit on an unmeasured guess.
+                fprintf(stderr, "[MM3-Job] %s: streaming stays serial - free VRAM is not measurable on this build\n",
+                        job->id.c_str());
+            } else if (free_b >= want) {
+                interleave = true;
+                fprintf(stderr,
+                        "[MM3-Job] %s: interleaved streaming - need %.2f GB more, %.2f GB free of %.2f GB\n",
+                        job->id.c_str(), (double) want / 1073741824.0, (double) free_b / 1073741824.0,
+                        (double) total_b / 1073741824.0);
+            } else {
+                fprintf(stderr,
+                        "[MM3-Job] %s: streaming stays serial - co-residency needs %.2f GB more, only %.2f GB free "
+                        "(the render is unaffected; audio starts once planning finishes)\n",
+                        job->id.c_str(), (double) want / 1073741824.0, (double) free_b / 1073741824.0);
+            }
+        }
+    }
+    req.gen.stream_interleave = interleave;
+    {
+        std::lock_guard<std::mutex> lock(st->mtx);
+        st->interleaved = interleave;
+    }
+
+    // Interleaving means no handover: the LM has to still be there when window
+    // k is conditioned, and the flow stack has to already be there when the
+    // planner is only a fifth of the way through.
+    const bool staged   = !g_keep_loaded && !ar_hit && !interleave;
     const bool was_warm = ar_hit ? g_mm3.rest_resident : g_mm3.loaded;
     set_stage(was_warm ? "warm" : "warming", -1, 0, 0, 0);
     const auto  t_warm = std::chrono::steady_clock::now();
@@ -637,6 +699,14 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         } else if (stage == "flow") {
             const int64_t done  = p.window * flow_total_hint + p.step;
             const int64_t total = p.n_windows * flow_total_hint;
+            job_set_phase(*job, JobPhase::DIT_INFERENCE, (int) done, (int) total);
+        } else if (stage == "stream") {
+            // Interleaved: the planner and the flow stage take turns several
+            // times a second, so their own bands would make the bar oscillate.
+            // One axis instead — audio actually produced, with partial credit
+            // for the window currently being planned. See mm3-pipeline.h.
+            const int64_t done  = p.window * flow_total_hint + (p.n_steps > 0 ? p.step * flow_total_hint / p.n_steps : 0);
+            const int64_t total = (p.n_windows > 0 ? p.n_windows : 1) * flow_total_hint;
             job_set_phase(*job, JobPhase::DIT_INFERENCE, (int) done, (int) total);
         } else if (stage == "vocode") {
             job_set_phase(*job, JobPhase::VAE_DECODE, (int) (p.window + 1), (int) p.n_windows);
@@ -1104,6 +1174,9 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
     // gone out so far. Reported live so a poller can distinguish "streaming is
     // on but the AR stage has not produced a window yet" from "not streaming".
     yyjson_mut_obj_add_bool(o, orot, "streaming", (bool) st->stream);
+    // Whether windows were dispatched DURING planning. Decided on the worker
+    // thread after the VRAM check, so it cannot be echoed at submit time.
+    yyjson_mut_obj_add_bool(o, orot, "stream_interleaved", st->interleaved);
     if (st->stream) {
         yyjson_mut_obj_add_int(o, orot, "stream_chunks", st->stream->n_chunks.load());
         yyjson_mut_obj_add_real(o, orot, "stream_mb", (double) st->stream->bytes_total.load() / 1048576.0);

@@ -124,10 +124,16 @@ const check = (name, ok, detail) => {
   const totalMs = Date.now() - b0;
   console.log(`  stream closed: ${streamed.length} bytes; first byte at ${((firstChunkAt - b0) / 1000).toFixed(1)}s of ${(totalMs / 1000).toFixed(1)}s total`);
 
+  const detB = await (await fetch(`${ENGINE}/mm3/job?id=${b.job_id}`)).json();
+  console.log(`  interleaved=${detB.stream_interleaved} (windows dispatched while the planner ran)`);
   await waitDone(b.job_id);
   const wavB = await getWav(b.job_id);
 
   // ── Claim 1: the restructure is numerically neutral ──
+  // With interleaving on, run B conditioned and denoised window k while the
+  // planner was still working on later frames. If that produced the same bytes
+  // as the strictly serial run A, the reordering is provably neutral — which
+  // is the only way to ship a control-flow change this invasive.
   const dAB = firstDiff(wavA, wavB);
   check('stream=false and stream=true are byte-identical', dAB === -1,
     dAB === -1 ? `${wavA.length} bytes` : `first difference at byte ${dAB} (A=${wavA.length}, B=${wavB.length})`);

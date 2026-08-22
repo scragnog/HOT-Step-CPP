@@ -79,6 +79,11 @@ export interface GenerationJob {
    *  not the request's — it may decline, and the UI must then behave exactly
    *  as it does with streaming off. */
   mm3Streaming?: boolean;
+  /** True when the engine is dispatching windows DURING planning (both model
+   *  stacks co-resident), false when it fell back to dispatching them after.
+   *  Undefined until the engine has decided. Purely informational — a serial
+   *  stream is still a stream. */
+  mm3Interleaved?: boolean;
   /** Stream preview WAV files emitted by the DEMON-style ring buffer */
   streamPreviews?: Array<{
     path: string;
@@ -1648,6 +1653,7 @@ router.get('/status/:id', (req, res) => {
     // only once this is true. Absent/false on every other backend and on every
     // render that did not ask for it.
     mm3_streaming: job.mm3Streaming === true,
+    mm3_interleaved: job.mm3Interleaved ?? null,
   });
 });
 
