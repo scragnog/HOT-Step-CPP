@@ -301,13 +301,24 @@ function scheduleSeg(i: number): void {
   const seg = r.segs[i];
   if (!seg || seg.start + seg.frames <= anchorFrame) return;   // entirely played
   const at = anchorTime + (seg.start - anchorFrame) / r.rate;
-  const offsetFrames = Math.max(0, anchorFrame - seg.start);
+  let offsetFrames = Math.max(0, anchorFrame - seg.start);
+  // A window whose due time has already passed — decoded a beat late — must
+  // not simply be started NOW: that shifts it later than the audio before it
+  // ended, which is a hole. Skip into the buffer by however long it is late,
+  // so the splice still lands where the previous window stopped. Being late by
+  // more than a window is an underrun and is handled by re-anchoring instead.
+  let startAt = at;
+  if (at < ac.currentTime) {
+    offsetFrames += (ac.currentTime - at) * r.rate;
+    startAt = ac.currentTime;
+  }
+  if (offsetFrames >= seg.buf.length) return;   // entirely in the past
   const src = ac.createBufferSource();
   src.buffer = seg.buf;
   src.connect(gain);
   // No ramp, no fade: consecutive spans of one signal, spliced at the sample
   // the engine cropped them to.
-  src.start(Math.max(at, ac.currentTime), offsetFrames / r.rate);
+  src.start(startAt, offsetFrames / r.rate);
   sources.push(src);
   src.onended = () => { sources = sources.filter(s => s !== src); };
   scheduled.add(i);
@@ -500,9 +511,23 @@ async function open(jobId: string, take: number, expected: number, autoPlay: boo
         }
         if (!r.netOpen) break;
 
-        const seg: Seg = { buf: ab, start: r.totalFrames, frames: n };
+        // THE TIMELINE IS THE DECODED AUDIO, not what the header claimed.
+        //
+        // Windows were placed using the WAV header's frame count while the
+        // thing actually played is the decoded buffer. Any difference between
+        // the two — a decoder that trims, a header that rounds — is inserted as
+        // SILENCE at every seam, because the next window is scheduled from the
+        // header's idea of where this one ended. The engine's bytes are gapless
+        // (check-mm3-stream proves the streamed PCM is byte-identical to the
+        // saved file), so a hole between windows can only have come from here.
+        const frames = ab.length || n;
+        if (chunks === 0 && frames !== n) {
+          console.warn(`[MM3 Stream] window header says ${n} frames, decoded ${frames} `
+            + '— using the decoded length (the difference would be an audible gap per window)');
+        }
+        const seg: Seg = { buf: ab, start: r.totalFrames, frames };
         r.segs.push(seg);
-        r.totalFrames += n;
+        r.totalFrames += frames;
         appendPeaks(r, ab);
         chunks++;
         r.chunks = chunks;

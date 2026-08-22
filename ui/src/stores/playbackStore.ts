@@ -29,20 +29,65 @@ function stopVstMonitorIfActive(): void {
   } catch { /* vst store not initialized yet */ }
 }
 
-// ── The stream deck ─────────────────────────────────────────────────────────
+// ── WHO IS AUDIBLE ──────────────────────────────────────────────────────────
 //
-// A fourth deck alongside original / mastered / no-adapter, except that its
-// audio is not a file and not a media element: it is a Web Audio graph fed by
-// mm3StreamStore as the engine emits finished windows. Everything below that
-// touches playback asks `isStreamDeck()` first and delegates.
+// There are two independent audio engines here: three WaveSurfer decks
+// (original / mastered / no-adapter, which play together and are muted against
+// each other) and a Web Audio graph fed by mm3StreamStore as the engine emits
+// finished windows. Plus the VST monitor, which is a third.
 //
-// It is a delegation and not an abstraction on purpose. Making WaveSurfer play a
-// track that has no URL, no length and no seekable end would mean fighting every
-// assumption it is built on; four `if` statements in the transport is the whole
-// cost of not doing that.
+// They used to have no owner. Which one held the transport was INFERRED from
+// whatever track happened to be selected — `!!currentTrack?.streamJobId` — so
+// ownership flipped underneath the engines rather than being decided, and every
+// action had to remember to touch both. The ones that forgot produced exactly
+// the bugs you would predict: a stream still playing under a file track, Stop
+// silencing one engine and clearing the bar while the other kept going, and a
+// transport routed to whichever deck the current track implied rather than the
+// one actually making sound.
+//
+// So ownership is now STATE, and there is one way to change it. setAudible()
+// silences everything that is not the incoming owner before handing it over.
+// Two things playing at once stops being something a dozen call sites must each
+// remember and becomes unrepresentable.
+//
+// The stream stays a delegation rather than a fourth WaveSurfer deck, for the
+// original reason: making WaveSurfer play a track with no URL, no length and no
+// seekable end means fighting every assumption it is built on.
+type Audible =
+  | { kind: 'none' }
+  | { kind: 'file' }
+  | { kind: 'stream'; jobId: string; take: number };
 
+let _audible: Audible = { kind: 'none' };
+
+/** Pause all three file decks. They run in lockstep with volumes deciding which
+ *  is heard, so silencing 'the file deck' means silencing all of them. */
+function pauseFileDecks(): void {
+  // pause(), never playPause(): a toggle would START a deck that was already
+  // stopped, which is the opposite of what every caller here wants.
+  for (const ref of [_wsOriginalRef, _wsAltRef, _wsNoAdapterRef]) {
+    ref.current?.pause();
+  }
+}
+
+/** Hand the audio over to exactly one engine, silencing the others first.
+ *
+ *  Every transition goes through here — load, play, stop, track change, VST
+ *  monitor. Silence-then-activate rather than activate-then-silence, so there is
+ *  no window in which two are sounding. */
+function setAudible(next: Audible): void {
+  if (next.kind !== 'file') pauseFileDecks();
+  if (next.kind !== 'stream') mm3StreamPause();
+  // The VST monitor is its own player and loses to anything the user starts.
+  if (next.kind !== 'none') stopVstMonitorIfActive();
+  _audible = next;
+}
+
+/** Is the live stream the thing making sound? Read from the arbiter, NOT from
+ *  the selected track — those are different questions, and conflating them is
+ *  what routed the transport to an engine that was not playing. */
 function isStreamDeck(): boolean {
-  return !!_state.currentTrack?.streamJobId;
+  return _audible.kind === 'stream';
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -320,6 +365,24 @@ let _retryCount = 0;
 const MAX_RETRIES = 30;
 const RETRY_INTERVAL = 150;
 
+/** Monotonic id for the CURRENT load attempt.
+ *
+ *  Every async thing that can outlive a track change — a ready event from a
+ *  deck that is still finishing the previous file, a queued retry — captures
+ *  this and refuses to act if it has moved on. The old guard compared
+ *  `_loadingTrackId` against `currentTrack.id`, which cannot tell a stale event
+ *  from a fresh one: both see the NEW track, so the stale one passed and
+ *  started the wrong deck. That race is the "clicking does nothing, then it
+ *  starts twenty seconds later" symptom, and it is intermittent because it is a
+ *  race.
+ *
+ *  A counter rather than an id, because loading the same track twice in a row
+ *  is a real thing a user does and must still invalidate the first attempt. */
+let _loadToken = 0;
+function isCurrentLoad(token: number): boolean {
+  return token === _loadToken;
+}
+
 /**
  * When switching from one playing track to another, we suppress the
  * isPlaying→false transition so the visualiser doesn't collapse and
@@ -357,8 +420,14 @@ function scheduleAutoAdvance(reason: string, delayMs: number): void {
   }, delayMs);
 }
 
-/** Attempt to start all loaded players. Retries if the AUDIBLE track isn't ready. */
-function startBothPlayers(): void {
+/** Attempt to start all loaded players. Retries if the AUDIBLE track isn't ready.
+ *
+ *  `token` is the load this belongs to; a queued retry from an abandoned load
+ *  drops out here rather than starting a track the user has moved off. */
+function startBothPlayers(token: number = _loadToken): void {
+  if (!isCurrentLoad(token)) return;
+  // A file deck starting means the file deck owns the audio.
+  if (_audible.kind !== 'file') setAudible({ kind: 'file' });
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
 
   const wsOrig = _wsOriginalRef.current;
@@ -413,7 +482,7 @@ function startBothPlayers(): void {
   // Audible track not ready — retry
   _retryCount++;
   if (_retryCount <= MAX_RETRIES) {
-    _retryTimer = setTimeout(startBothPlayers, RETRY_INTERVAL);
+    _retryTimer = setTimeout(() => startBothPlayers(token), RETRY_INTERVAL);
   } else {
     // Mastered/no-adapter track failed but original is ready — fall back to original
     if ((_state.playMastered || _state.playNoAdapter) && origReady) {
@@ -498,11 +567,13 @@ function loadTrack(track: PlaybackTrack): void {
   // mirror below drive time/duration/isPlaying from the stream.
   if (track.streamJobId) {
     _loadingTrackId = track.id;
+    _loadToken++;              // invalidate any file load still in flight
     cancelAutoAdvance();
+    if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
     _suppressPlayFalse = false;
-    _wsOriginalRef.current?.pause();
-    _wsAltRef.current?.pause();
-    _wsNoAdapterRef.current?.pause();
+    // Hand the audio to the stream engine — this silences the file decks and
+    // the VST monitor, so nothing can be left sounding underneath.
+    setAudible({ kind: 'stream', jobId: track.streamJobId, take: track.streamTake ?? 0 });
     // Point the player at THIS card's take. Every take of the render is already
     // buffering, so this is a switch, not a start — the song you pick is
     // audible from wherever you last left it, not from the beginning.
@@ -547,14 +618,16 @@ function loadTrack(track: PlaybackTrack): void {
   }
 
   _loadingTrackId = track.id;
+  // Everything still in flight for the previous track — queued retries, decks
+  // about to report ready — belongs to a load that no longer exists.
+  const token = ++_loadToken;
   cancelAutoAdvance();
   _retryCount = 0;
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
-  // This track plays from a FILE, so the stream player must go quiet. It is a
-  // separate audio engine with its own context and its own scheduled sources:
-  // nothing about loading a file stops it, and the two then play at once. That
-  // is the whole reason switching between finished takes felt haunted.
-  mm3StreamPause();
+  // This track plays from a FILE. Handing ownership over silences the stream
+  // engine and the VST monitor; they are separate players and nothing about
+  // loading a file stops them on its own.
+  setAudible({ kind: 'file' });
 
   const hasMastered = !!track.masteredAudioUrl;
   const hasNoAdapter = !!track.noAdapterAudioUrl;
@@ -599,6 +672,10 @@ function loadTrack(track: PlaybackTrack): void {
 
   applyVolumes();
   applyPlaybackRate();
+  // Belt to the ready events' braces: if a deck never reports (a cached file
+  // can be ready before the listener is attached), this still starts it — and
+  // being token-scoped it cannot start the wrong one.
+  startBothPlayers(token);
 }
 
 // ── Stream mirror ───────────────────────────────────────────────────────────
@@ -677,32 +754,14 @@ export function stop(): void {
   // possible (the engine consumes chunks as they are read), so a stop that
   // dropped the audio would be unrecoverable.
   //
-  // UNCONDITIONAL. Guarding this on isStreamDeck() meant Stop only silenced the
-  // stream while a live card happened to be the current track: move to a
-  // finished track and the stream player was still running underneath, so Stop
-  // paused the file deck, cleared the bar, and left the stream audible with
-  // nothing on screen able to control it.
-  mm3StreamPause();
+  // Stop means SILENCE — every engine, whichever one the bar happens to be
+  // pointed at. `none` silences the file decks and the stream in one move.
+  setAudible({ kind: 'none' });
   _suppressPlayFalse = false;
+  _loadToken++;   // nothing still loading may start after a stop
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
   _retryCount = 0;
-
-  // Pause all WaveSurfer instances (don't call playPause — we want guaranteed pause)
-  const wsOrig = _wsOriginalRef.current;
-  const wsAlt = _wsAltRef.current;
-  const wsNoAdapter = _wsNoAdapterRef.current;
-  if (wsOrig) {
-    const m = wsOrig.getMediaElement();
-    if (m && !m.paused) wsOrig.playPause();
-  }
-  if (wsAlt) {
-    const m = wsAlt.getMediaElement();
-    if (m && !m.paused) wsAlt.playPause();
-  }
-  if (wsNoAdapter) {
-    const m = wsNoAdapter.getMediaElement();
-    if (m && !m.paused) wsNoAdapter.playPause();
-  }
+  cancelAutoAdvance();
 
   setState({
     playerActive: false,
@@ -971,7 +1030,10 @@ export function toggleAB(): void {
 // Called from App.tsx WaveformPlayer callbacks
 
 /** Original track became ready */
-export function handleOriginalReady(duration: number): void {
+export function handleOriginalReady(duration: number, token?: number): void {
+  // A deck can become ready for a file the user has already moved off; the
+  // token says which load it belongs to.
+  if (token !== undefined && !isCurrentLoad(token)) return;
   // Ignore stale ready events from previously loaded tracks
   if (_loadingTrackId && _state.currentTrack && _loadingTrackId !== _state.currentTrack.id) return;
   setState({ duration });
@@ -979,7 +1041,10 @@ export function handleOriginalReady(duration: number): void {
 }
 
 /** Mastered (alt) track became ready — sync position then start */
-export function handleAltReady(duration: number): void {
+export function handleAltReady(duration: number, token?: number): void {
+  // A deck can become ready for a file the user has already moved off; the
+  // token says which load it belongs to.
+  if (token !== undefined && !isCurrentLoad(token)) return;
   if (_loadingTrackId && _state.currentTrack && _loadingTrackId !== _state.currentTrack.id) return;
   // Sync alt position with original
   const wsOrig = _wsOriginalRef.current;
@@ -995,7 +1060,10 @@ export function handleAltReady(duration: number): void {
 }
 
 /** No-adapter reference deck became ready — sync position then start */
-export function handleNoAdapterReady(duration: number): void {
+export function handleNoAdapterReady(duration: number, token?: number): void {
+  // A deck can become ready for a file the user has already moved off; the
+  // token says which load it belongs to.
+  if (token !== undefined && !isCurrentLoad(token)) return;
   if (_loadingTrackId && _state.currentTrack && _loadingTrackId !== _state.currentTrack.id) return;
   const wsOrig = _wsOriginalRef.current;
   const wsNoAdapter = _wsNoAdapterRef.current;
