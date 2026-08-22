@@ -1214,6 +1214,16 @@ static void mm3_handle_synth(const httplib::Request & hreq, httplib::Response & 
     yyjson_mut_obj_add_strcpy(o, orot, "job_id", job->id.c_str());
     yyjson_mut_obj_add_strcpy(o, orot, "id", job->id.c_str());  // the ACE /synth spelling
     yyjson_mut_obj_add_uint(o, orot, "seed", req.gen.seed);
+    // A uint64 seed does NOT survive a JSON number in a JavaScript client:
+    // 18226392072674864222, ...223 and ...224 all parse to the same float64,
+    // so three distinct takes report one seed and none of them can be
+    // reproduced. The decimal string is the lossless spelling; `seed` stays
+    // for every existing reader.
+    yyjson_mut_obj_add_strcpy(o, orot, "seed_str", std::to_string(req.gen.seed).c_str());
+    // The CLAMPED take count. The caller asked for something; this is what the
+    // checkpoint's row budget actually allows, and therefore how many songs
+    // and how many streams will exist.
+    yyjson_mut_obj_add_int(o, orot, "takes", st->n_takes);
     // Echoed so a caller can prove the AR-side fields landed: ar_seed is the
     // RESOLVED value (equal to seed unless it was split), reuse_ar is what the
     // job will actually do a lookup with.
@@ -1302,6 +1312,7 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
     yyjson_mut_obj_add_int(o, orot, "step", st->step);
     yyjson_mut_obj_add_int(o, orot, "n_steps", st->n_steps);
     yyjson_mut_obj_add_uint(o, orot, "seed", st->seed);
+    yyjson_mut_obj_add_strcpy(o, orot, "seed_str", std::to_string(st->seed).c_str());
     yyjson_mut_obj_add_int(o, orot, "max_frames", st->max_frames);
     yyjson_mut_obj_add_int(o, orot, "prompt_tokens", st->n_tokens);
     yyjson_mut_obj_add_bool(o, orot, "instrumental", st->instrumental);
@@ -1361,6 +1372,9 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
             yyjson_mut_val *      e  = yyjson_mut_obj(o);
             yyjson_mut_obj_add_int(o, e, "take", t);
             yyjson_mut_obj_add_uint(o, e, "seed", to.seed);
+            // Lossless — see the note on the synth response. Without this the
+            // three takes of an ensemble are indistinguishable by seed.
+            yyjson_mut_obj_add_strcpy(o, e, "seed_str", std::to_string(to.seed).c_str());
             yyjson_mut_obj_add_int(o, e, "frames", to.frames);
             yyjson_mut_obj_add_real(o, e, "duration_s", to.duration_s);
             yyjson_mut_obj_add_bool(o, e, "eos", to.eos);

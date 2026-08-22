@@ -16,7 +16,7 @@ import { useSyncExternalStore, useRef, useCallback } from 'react';
 import type { WaveformPlayerHandle } from '../components/player/WaveformPlayer';
 import { useVstChainStore } from './vstChainStore';
 import {
-  mm3StreamSnapshot, mm3StreamSubscribe, mm3StreamToggle, mm3StreamPause,
+  mm3StreamSnapshot, mm3StreamSubscribe, mm3StreamToggle, mm3StreamPause, mm3StreamSelect,
   mm3StreamSeek, mm3StreamSetVolume,
 } from './mm3StreamStore';
 
@@ -71,6 +71,7 @@ export interface PlaybackTrack {
    *  transport below delegates there instead of to the WaveSurfer decks. The
    *  track becomes an ordinary one the moment the render is saved. */
   streamJobId?: string;
+  streamTake?: number;
 }
 
 export type PlaybackSource =
@@ -502,6 +503,10 @@ function loadTrack(track: PlaybackTrack): void {
     _wsOriginalRef.current?.pause();
     _wsAltRef.current?.pause();
     _wsNoAdapterRef.current?.pause();
+    // Point the player at THIS card's take. Every take of the render is already
+    // buffering, so this is a switch, not a start — the song you pick is
+    // audible from wherever you last left it, not from the beginning.
+    mm3StreamSelect(track.streamJobId, track.streamTake ?? 0);
     const snap = mm3StreamSnapshot();
     setState({
       currentTrack: track,
@@ -597,6 +602,9 @@ mm3StreamSubscribe(() => {
   if (!track?.streamJobId) return;
   const snap = mm3StreamSnapshot();
   if (snap.jobId !== track.streamJobId) return;
+  // A different take of the same render is audible — its transport is not this
+  // card's, and writing it here would make one card show another's playhead.
+  if (snap.take !== (track.streamTake ?? 0)) return;
   const duration = snap.expected || snap.received;
   if (
     snap.playing === _state.isPlaying &&

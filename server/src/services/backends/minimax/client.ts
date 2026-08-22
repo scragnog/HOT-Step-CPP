@@ -137,6 +137,11 @@ export interface Mm3SynthRequest {
   duration?: number;
   /** Escape hatch — wins over duration. */
   max_frames?: number;
+  /** Ensemble takes: render N DIFFERENT songs from this one prompt in a single
+   *  batched autoregressive pass. Take t is drawn from seed + t. Clamped by the
+   *  engine to the checkpoint's row budget (4 with a CFG pair), so read the
+   *  response's `takes` for what will actually be produced. Omit for 1. */
+  takes?: number;
   /** -1 = engine draws one; the resolved value comes back in the response. */
   seed?: number;
   /** Default = the checkpoint's flow.cfg_scale (1.7). */
@@ -221,6 +226,16 @@ export interface Mm3SynthResponse {
   job_id: string;
   id: string;                 // the ACE /synth spelling — same value
   seed: number;               // RESOLVED seed (never -1)
+  /** The same seed as a DECIMAL STRING, and the only spelling that survives.
+   *  A uint64 does not fit a float64: 18226392072674864222 and its two
+   *  successors all parse to the same JS number, which is what made an
+   *  ensemble's takes report one seed and become individually
+   *  unreproducible. Prefer this everywhere a seed is stored or displayed. */
+  seed_str?: string;
+  /** Ensemble takes the engine ACCEPTED — clamped to the checkpoint's row
+   *  budget, so it is how many songs and how many streams will exist, not
+   *  what was asked for. 1 for an ordinary render. */
+  takes?: number;
   max_frames: number;
   duration: number;
   prompt_tokens: number;
@@ -259,6 +274,8 @@ export interface Mm3JobDetail {
   step: number;
   n_steps: number;
   seed: number;
+  /** Lossless decimal-string seed — see Mm3SynthResponse.seed_str. */
+  seed_str?: string;
   max_frames: number;
   prompt_tokens: number;
   instrumental: boolean;
@@ -284,6 +301,8 @@ export interface Mm3JobDetail {
   take_detail?: Array<{
     take: number;
     seed: number;
+    /** Lossless decimal-string seed — the only one safe to store or show. */
+    seed_str?: string;
     frames: number;
     duration_s: number;
     eos: boolean;

@@ -63,6 +63,10 @@ export interface Song {
    *  audioUrl — playback goes through mm3StreamStore — and it is replaced by the
    *  real row the instant the render is saved. */
   streamJobId?: string;
+  /** Which take of that render this card is. An ensemble streams several
+   *  different songs from one job, all buffering at once — selecting a card
+   *  points the player at ITS take. 0 (or absent) for an ordinary render. */
+  streamTake?: number;
 }
 
 /** Normalized recent song returned by /api/songs/recent — unified across all modes */
@@ -384,6 +388,15 @@ export interface GenerationJob {
   /** Resolved render length in seconds — known before the first window exists,
    *  so a streaming card can show real progress rather than a spinner. */
   mm3_duration?: number | null;
+  /** Ensemble takes this render is producing — the count the ENGINE accepted,
+   *  so it is how many queue entries, cards and streams belong on screen.
+   *  Present from the moment the engine has the job, i.e. long before any
+   *  audio. 1 (or absent) is an ordinary render. */
+  mm3_takes?: number | null;
+  /** Each take's seed as a DECIMAL STRING. Strings because these are uint64:
+   *  18226392072674864222 and its successors all collapse onto one float64,
+   *  so a numeric seed cannot tell three takes apart. */
+  mm3_take_seeds?: string[] | null;
 }
 
 /** User profile */

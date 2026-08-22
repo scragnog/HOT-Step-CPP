@@ -64,6 +64,12 @@ import { extractWav, wavFrameCount, wavSampleRate } from '../utils/wavStream';
 export interface Mm3StreamState {
   /** The job whose stream is open (or was last opened). */
   jobId: string | null;
+  /** Which take of that render is AUDIBLE. An ensemble render streams every
+   *  take at once — they all buffer, one plays — so this says which one the
+   *  transport below is describing. 0 for an ordinary render. */
+  take: number;
+  /** How many takes this render is streaming. 1 for an ordinary render. */
+  takeCount: number;
   /** The network stream is open — i.e. more audio is still coming. */
   connected: boolean;
   /** The engine closed the stream: what is here is the whole track. */
@@ -102,7 +108,7 @@ const HEADROOM = 5;
 const PEAK_RATE = 40;
 
 const INITIAL: Mm3StreamState = {
-  jobId: null, connected: false, done: false, playing: false,
+  jobId: null, take: 0, takeCount: 1, connected: false, done: false, playing: false,
   position: 0, received: 0, expected: 0, chunks: 0, underruns: 0,
   needsGesture: false, volume: 1.0, error: null, peaksVersion: 0,
 };
@@ -115,6 +121,27 @@ function emit(patch: Partial<Mm3StreamState>): void {
   listeners.forEach(fn => fn());
 }
 
+/** Republish the ACTIVE receiver's shape. Called after anything that changes
+ *  which take you are hearing, or that take's contents — the transport fields
+ *  (playing, position) belong to the player and are left alone. */
+function emitActive(extra: Partial<Mm3StreamState> = {}): void {
+  const r = cur();
+  if (!r) { emit(extra); return; }
+  emit({
+    jobId: r.jobId, take: r.take, takeCount: takeCountFor(r.jobId),
+    connected: r.connected, done: r.done, received: r.received, expected: r.expected,
+    chunks: r.chunks, underruns: r.underruns, error: r.error,
+    peaksVersion: r.peaksVersion,
+    ...extra,
+  });
+}
+
+function takeCountFor(jobId: string): number {
+  let n = 0;
+  for (const r of receivers.values()) if (r.jobId === jobId) n++;
+  return Math.max(1, n);
+}
+
 interface Seg {
   buf: AudioBuffer;
   /** First frame of this segment in the finished track. */
@@ -122,18 +149,72 @@ interface Seg {
   frames: number;
 }
 
+// ── Receivers and the player ────────────────────────────────────────────────
+//
+// An ensemble render streams K takes AT ONCE, and they all have to be read:
+// the engine drops a stream nobody is draining once it buffers past a
+// threshold, so an unread take loses its live audio entirely. But three songs
+// through the speakers at once is not listening, it is noise.
+//
+// So the store splits in two. A RECEIVER per take owns the network read and
+// the decoded audio — segments, length, waveform — and nothing else. The
+// PLAYER is a singleton: one AudioContext, one gain, one set of scheduled
+// sources, pointed at whichever receiver is currently selected. Switching
+// takes re-anchors the player onto a different receiver's buffer; every take
+// keeps its own playhead, so coming back to one resumes where you left it.
+//
+// Memory: a decoded three-minute stereo take is ~63 MB, so four of them is
+// ~250 MB. That is the price of being able to hear any of them instantly, and
+// it is released when the group is torn down.
+interface Receiver {
+  key: string;      // `${jobId}:${take}`
+  jobId: string;
+  take: number;
+  segs: Seg[];
+  totalFrames: number;
+  rate: number;
+  /** Waveform envelope, one max-abs value per 1/PEAK_RATE second. */
+  peaks: Float32Array;
+  peakCount: number;
+  /** Playhead for THIS take while it is not the audible one. */
+  pausedFrame: number;
+  connected: boolean;
+  done: boolean;
+  received: number;
+  expected: number;
+  chunks: number;
+  underruns: number;
+  error: string | null;
+  abort: AbortController | null;
+  netOpen: boolean;
+  peaksVersion: number;
+}
+
+const receivers = new Map<string, Receiver>();
+/** The receiver the PLAYER is pointed at — the one you can hear. */
+let activeKey: string | null = null;
+
+const rkey = (jobId: string, take: number): string => `${jobId}:${take}`;
+
+function newReceiver(jobId: string, take: number, expected: number): Receiver {
+  return {
+    key: rkey(jobId, take), jobId, take,
+    segs: [], totalFrames: 0, rate: 0,
+    peaks: new Float32Array(0), peakCount: 0, pausedFrame: 0,
+    connected: false, done: false, received: 0, expected,
+    chunks: 0, underruns: 0, error: null, abort: null, netOpen: false,
+    peaksVersion: 0,
+  };
+}
+
+/** The audible receiver, or null before anything is open. */
+function cur(): Receiver | null {
+  return activeKey ? receivers.get(activeKey) ?? null : null;
+}
+
 let ac: AudioContext | null = null;
 let gain: GainNode | null = null;
-let abort: AbortController | null = null;
 let raf = 0;
-
-let segs: Seg[] = [];
-let totalFrames = 0;
-let rate = 0;
-
-/** Waveform envelope, one max-abs value per 1/PEAK_RATE second. */
-let peaks = new Float32Array(0);
-let peakCount = 0;
 
 /** The anchor (see the header). */
 let anchorFrame = 0;
@@ -152,8 +233,13 @@ let playing = false;
  *  while waiting must survive the first window's auto-start. */
 let wantPlay = false;
 
-let netOpen = false;
 let volume = 1.0;
+
+/** True while ANY take of the current group is still reading. */
+export function mm3StreamReceiving(): boolean {
+  for (const r of receivers.values()) if (r.netOpen) return true;
+  return false;
+}
 
 /** Jobs already auto-opened, so a remount does not reopen a stream the user
  *  deliberately stopped. */
@@ -168,9 +254,10 @@ const MAX_AUTO_ATTEMPTS = 3;
 // ── Position ────────────────────────────────────────────────────────────────
 
 function positionFrames(): number {
-  if (!ac || !playing) return pausedFrame;
-  const p = anchorFrame + Math.max(0, ac.currentTime - anchorTime) * rate;
-  return Math.min(p, totalFrames);
+  const r = cur();
+  if (!ac || !playing || !r) return pausedFrame;
+  const p = anchorFrame + Math.max(0, ac.currentTime - anchorTime) * (r.rate || 1);
+  return Math.min(p, r.totalFrames);
 }
 
 function tick(): void {
@@ -179,18 +266,20 @@ function tick(): void {
   // `return` here (as the first cut had) kills the loop before there is
   // anything to report and never restarts it, so the playhead never moves for
   // the whole render while the audio plays perfectly.
-  if (ac) {
+  const r = cur();
+  if (ac && r) {
     const pf = positionFrames();
     // The end of a finished stream is the end of the track. Without this the
     // transport sits at 100% still claiming to play, and the play button would
     // do nothing when pressed.
-    if (playing && state.done && totalFrames > 0 && pf >= totalFrames) {
+    if (playing && r.done && r.totalFrames > 0 && pf >= r.totalFrames) {
       playing = false;
       wantPlay = false;
-      pausedFrame = totalFrames;
-      emit({ playing: false, position: totalFrames / (rate || 1) });
+      pausedFrame = r.totalFrames;
+      r.pausedFrame = r.totalFrames;
+      emit({ playing: false, position: r.totalFrames / (r.rate || 1) });
     } else {
-      emit({ position: pf / (rate || 1) });
+      emit({ position: pf / (r.rate || 1) });
     }
   }
   raf = requestAnimationFrame(tick);
@@ -207,17 +296,18 @@ function stopSources(): void {
 /** Hand one segment to the graph under the current anchor, skipping any part
  *  already behind the playhead. */
 function scheduleSeg(i: number): void {
-  if (!ac || !gain || scheduled.has(i)) return;
-  const seg = segs[i];
+  const r = cur();
+  if (!ac || !gain || !r || scheduled.has(i)) return;
+  const seg = r.segs[i];
   if (!seg || seg.start + seg.frames <= anchorFrame) return;   // entirely played
-  const at = anchorTime + (seg.start - anchorFrame) / rate;
+  const at = anchorTime + (seg.start - anchorFrame) / r.rate;
   const offsetFrames = Math.max(0, anchorFrame - seg.start);
   const src = ac.createBufferSource();
   src.buffer = seg.buf;
   src.connect(gain);
   // No ramp, no fade: consecutive spans of one signal, spliced at the sample
   // the engine cropped them to.
-  src.start(Math.max(at, ac.currentTime), offsetFrames / rate);
+  src.start(Math.max(at, ac.currentTime), offsetFrames / r.rate);
   sources.push(src);
   src.onended = () => { sources = sources.filter(s => s !== src); };
   scheduled.add(i);
@@ -226,22 +316,23 @@ function scheduleSeg(i: number): void {
 /** Re-anchor: frame `frame` becomes due `delay` seconds from now, and everything
  *  from there is rescheduled. The one primitive behind start, seek and rebuffer. */
 function anchorAt(frame: number, delay: number): void {
-  if (!ac) return;
+  const r = cur();
+  if (!ac || !r) return;
   stopSources();
-  anchorFrame = Math.max(0, Math.min(frame, totalFrames));
+  anchorFrame = Math.max(0, Math.min(frame, r.totalFrames));
   anchorTime = ac.currentTime + delay;
-  for (let i = 0; i < segs.length; i++) scheduleSeg(i);
+  for (let i = 0; i < r.segs.length; i++) scheduleSeg(i);
 }
 
 // ── Waveform ────────────────────────────────────────────────────────────────
 
-function appendPeaks(buf: AudioBuffer): void {
+function appendPeaks(r: Receiver, buf: AudioBuffer): void {
   const per = Math.max(1, Math.round(buf.sampleRate / PEAK_RATE));
   const n = Math.ceil(buf.length / per);
-  if (peakCount + n > peaks.length) {
-    const grown = new Float32Array(Math.max(peaks.length * 2, peakCount + n + 1024));
-    grown.set(peaks.subarray(0, peakCount));
-    peaks = grown;
+  if (r.peakCount + n > r.peaks.length) {
+    const grown = new Float32Array(Math.max(r.peaks.length * 2, r.peakCount + n + 1024));
+    grown.set(r.peaks.subarray(0, r.peakCount));
+    r.peaks = grown;
   }
   // Max-abs across both channels, so a hard-panned moment is not drawn as silence.
   const L = buf.getChannelData(0);
@@ -254,56 +345,97 @@ function appendPeaks(buf: AudioBuffer): void {
       const a = Math.abs(L[i]) > Math.abs(R[i]) ? Math.abs(L[i]) : Math.abs(R[i]);
       if (a > m) m = a;
     }
-    peaks[peakCount++] = m;
+    r.peaks[r.peakCount++] = m;
   }
 }
 
 /** The waveform so far. Deliberately NOT React state — it is thousands of floats
- *  that a canvas reads directly; `peaksVersion` is the render trigger. */
-export function mm3StreamPeaks(): { peaks: Float32Array; count: number; rate: number } {
-  return { peaks, count: peakCount, rate: PEAK_RATE };
+ *  that a canvas reads directly; `peaksVersion` is the render trigger.
+ *
+ *  With no arguments it is the AUDIBLE take, which is what the play bar draws.
+ *  Pass a job and take to draw a background one — an ensemble's cards each show
+ *  their own song growing, and they are not the one you are listening to. */
+export function mm3StreamPeaks(jobId?: string, take = 0): { peaks: Float32Array; count: number; rate: number } {
+  const r = jobId ? receivers.get(rkey(jobId, take)) : cur();
+  return r
+    ? { peaks: r.peaks, count: r.peakCount, rate: PEAK_RATE }
+    : { peaks: new Float32Array(0), count: 0, rate: PEAK_RATE };
+}
+
+/** One take's live progress, for its own card: how much audio has arrived and
+ *  how much is coming. Null until that take's stream is open. */
+export function mm3StreamTakeState(jobId: string, take: number): {
+  received: number; expected: number; done: boolean; connected: boolean;
+  chunks: number; error: string | null; audible: boolean;
+} | null {
+  const r = receivers.get(rkey(jobId, take));
+  if (!r) return null;
+  return {
+    received: r.received, expected: r.expected, done: r.done, connected: r.connected,
+    chunks: r.chunks, error: r.error, audible: activeKey === r.key,
+  };
 }
 
 // ── Connection ──────────────────────────────────────────────────────────────
 
+/** Drop the player AND every receiver. Called when a DIFFERENT render's stream
+ *  opens, and by mm3StreamStop — never between takes of the same render, which
+ *  is the whole reason they coexist. */
 function teardown(): void {
-  netOpen = false;
   playing = false;
   cancelAnimationFrame(raf);
+  raf = 0;
   stopSources();
   try { ac?.close(); } catch { /* already closed */ }
   ac = null;
   gain = null;
-  segs = [];
-  totalFrames = 0;
-  rate = 0;
-  peaks = new Float32Array(0);
-  peakCount = 0;
+  for (const r of receivers.values()) {
+    r.abort?.abort();
+    r.abort = null;
+    r.netOpen = false;
+  }
+  receivers.clear();
+  activeKey = null;
   anchorFrame = 0;
   anchorTime = 0;
   pausedFrame = 0;
 }
 
-async function open(jobId: string, expected: number, autoPlay: boolean): Promise<void> {
-  if (netOpen) return;
-  // A previous render's context may still be around (its tail played out and was
-  // never stopped). Start clean: the new stream has its own timeline.
-  teardown();
-  netOpen = true;
-  wantPlay = autoPlay;
-  emit({ ...INITIAL, jobId, expected, volume, connected: true });
+async function open(jobId: string, take: number, expected: number, autoPlay: boolean): Promise<void> {
+  const key = rkey(jobId, take);
+  if (receivers.get(key)?.netOpen) return;
+  // A DIFFERENT render's audio is finished with — its tail played out and was
+  // never stopped. Start clean. Takes of the SAME render live alongside each
+  // other, which is the whole point, so only a change of job tears down.
+  const existing = cur();
+  if (existing && existing.jobId !== jobId) teardown();
+
+  const r = newReceiver(jobId, take, expected);
+  r.netOpen = true;
+  r.connected = true;
+  receivers.set(key, r);
+  // The first take opened becomes the audible one; later takes buffer silently
+  // until selected. Auto-play intent belongs to the player, not the receiver.
+  if (!activeKey || !receivers.has(activeKey)) {
+    activeKey = key;
+    wantPlay = autoPlay;
+    emit({ ...INITIAL, jobId, take, takeCount: takeCountFor(jobId), expected, volume, connected: true });
+  } else {
+    emitActive();
+  }
 
   // Logged because the failure mode of this feature is SILENCE, and silence is
   // indistinguishable from "the engine has not produced a window yet".
-  console.log(`[MM3 Stream] opening ${jobId} (expecting ${expected.toFixed(1)}s)`);
+  console.log(`[MM3 Stream] opening ${jobId} take ${take} (expecting ${expected.toFixed(1)}s)`);
   const ctrl = new AbortController();
-  abort = ctrl;
-  raf = requestAnimationFrame(tick);
+  r.abort = ctrl;
+  if (!raf) raf = requestAnimationFrame(tick);
 
   let chunks = 0, underruns = 0;
 
   try {
-    const res = await fetch(`/api/generate/mm3/stream/${encodeURIComponent(jobId)}`, { signal: ctrl.signal });
+    const url = `/api/generate/mm3/stream/${encodeURIComponent(jobId)}${take > 0 ? `?take=${take}` : ''}`;
+    const res = await fetch(url, { signal: ctrl.signal });
     if (!res.ok || !res.body) {
       // 409 is the engine declining (not a streaming job, already finished,
       // already has a reader). Surface its own sentence — those are written to
@@ -320,7 +452,7 @@ async function open(jobId: string, expected: number, autoPlay: boolean): Promise
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (!netOpen) break;
+      if (!r.netOpen) break;
 
       const merged = new Uint8Array(buf.length + value.length);
       merged.set(buf); merged.set(value, buf.length);
@@ -331,19 +463,20 @@ async function open(jobId: string, expected: number, autoPlay: boolean): Promise
         if (!w) break;
         buf = w.remaining;
 
-        const r = wavSampleRate(w.data);
+        const sr = wavSampleRate(w.data);
         const n = wavFrameCount(w.data);
-        if (!r || !n) continue;
+        if (!sr || !n) continue;
 
         // First chunk: build the context AT THE STREAM'S RATE (see the header).
+        // Shared by every take — they are windows of the same engine at the same
+        // rate, and a second context would mean a second clock to splice against.
         if (!ac) {
-          const ctx = new AudioContext({ sampleRate: r });
+          const ctx = new AudioContext({ sampleRate: sr });
           const g = ctx.createGain();
           g.gain.value = volume;
           g.connect(ctx.destination);
           ac = ctx;
           gain = g;
-          rate = r;
           // Autoplay policy: a context created without a user gesture starts
           // suspended. Try to resume; if the browser still says no, say so
           // rather than sitting silently on a full buffer.
@@ -352,6 +485,7 @@ async function open(jobId: string, expected: number, autoPlay: boolean): Promise
           }
           emit({ needsGesture: ctx.state === 'suspended' });
         }
+        r.rate = sr;
         const ctx = ac;
         if (!ctx) break;
 
@@ -364,25 +498,34 @@ async function open(jobId: string, expected: number, autoPlay: boolean): Promise
         } catch {
           continue;  // a torn chunk costs one window, not the stream
         }
-        if (!netOpen) break;
+        if (!r.netOpen) break;
 
-        const seg: Seg = { buf: ab, start: totalFrames, frames: n };
-        segs.push(seg);
-        totalFrames += n;
-        appendPeaks(ab);
+        const seg: Seg = { buf: ab, start: r.totalFrames, frames: n };
+        r.segs.push(seg);
+        r.totalFrames += n;
+        appendPeaks(r, ab);
         chunks++;
+        r.chunks = chunks;
+        r.received = r.totalFrames / (r.rate || 1);
+        r.peaksVersion++;
+
+        // Everything below drives the TRANSPORT, so it applies only to the take
+        // you are hearing. The others accumulate silently — that is what makes
+        // switching to one instant instead of restarting it.
+        const audible = activeKey === r.key;
 
         if (chunks === 1) {
-          console.log(`[MM3 Stream] first window: ${(n / rate).toFixed(2)}s @ ${rate} Hz, context ${ctx.state}`);
+          console.log(`[MM3 Stream] ${jobId} take ${take} first window: `
+            + `${(n / r.rate).toFixed(2)}s @ ${r.rate} Hz, context ${ctx.state}`);
           // Start the transport one headroom from now. The playhead holds at 0
           // until then (positionFrames' max(0, …)) — the pre-buffer the
           // reference Space uses.
-          if (wantPlay) {
+          if (audible && wantPlay) {
             playing = true;
             anchorAt(0, HEADROOM);
           }
-        } else if (playing) {
-          const dueAt = anchorTime + (seg.start - anchorFrame) / rate;
+        } else if (audible && playing) {
+          const dueAt = anchorTime + (seg.start - anchorFrame) / r.rate;
           if (dueAt < ctx.currentTime) {
             // The renderer has been caught. Re-anchor so this window and every
             // later one still play IN FULL, one headroom from now: a stall
@@ -390,44 +533,58 @@ async function open(jobId: string, expected: number, autoPlay: boolean): Promise
             // and lose audio, and this is a track someone is deciding whether
             // to keep.
             underruns++;
+            r.underruns = underruns;
             anchorAt(seg.start, HEADROOM);
           } else {
-            scheduleSeg(segs.length - 1);
+            scheduleSeg(r.segs.length - 1);
           }
         }
 
-        emit({
-          chunks, underruns, playing,
-          received: totalFrames / rate,
-          peaksVersion: state.peaksVersion + 1,
-        });
+        // A background take still has to publish, or its card would never show
+        // it growing — which is the one thing an ensemble stream is for.
+        if (audible) emitActive({ playing });
+        else emit({ peaksVersion: state.peaksVersion + 1 });
       }
     }
-    console.log(`[MM3 Stream] closed: ${chunks} window(s), ${(totalFrames / (rate || 1)).toFixed(1)}s, ${underruns} rebuffer(s)`);
+    console.log(`[MM3 Stream] ${jobId} take ${take} closed: ${chunks} window(s), `
+      + `${(r.totalFrames / (r.rate || 1)).toFixed(1)}s, ${underruns} rebuffer(s)`);
     // The engine is done, so `received` IS the length. Replacing `expected`
     // here is what makes a card that finished early (EOS) stop showing a gap it
-    // will never fill.
-    emit({ done: true, connected: false, expected: totalFrames / (rate || 1) });
+    // will never fill — and takes DO finish at different lengths, because each
+    // hits its own EOS.
+    r.done = true;
+    r.connected = false;
+    r.expected = r.totalFrames / (r.rate || 1);
+    if (activeKey === r.key) emitActive();
+    else emit({ peaksVersion: state.peaksVersion + 1 });
   } catch (e: unknown) {
     const err = e as Error;
     if (err?.name !== 'AbortError') {
-      console.warn(`[MM3 Stream] ${jobId}: ${err?.message || String(e)}`);
-      emit({ error: err?.message || String(e), connected: false });
+      console.warn(`[MM3 Stream] ${jobId} take ${take}: ${err?.message || String(e)}`);
+      r.error = err?.message || String(e);
+      r.connected = false;
+      if (activeKey === r.key) emitActive();
       // Nothing arrived at all — most likely the job had not reached the engine
-      // yet. Retry a couple of times before giving up.
+      // yet. Retry a couple of times before giving up. Keyed per TAKE, because
+      // one take losing the race must not spend another take's budget.
       if (chunks === 0) {
-        const n = (attempts.get(jobId) ?? 0) + 1;
-        attempts.set(jobId, n);
+        const n = (attempts.get(key) ?? 0) + 1;
+        attempts.set(key, n);
         if (n < MAX_AUTO_ATTEMPTS) {
-          setTimeout(() => { autoOpened.delete(jobId); mm3StreamEnsure(jobId, expected, autoPlay); }, 2000);
+          setTimeout(() => {
+            autoOpened.delete(key);
+            receivers.delete(key);
+            mm3StreamEnsure(jobId, expected, autoPlay, take);
+          }, 2000);
         }
       }
     }
   } finally {
     // The scheduled tail keeps playing; only the NETWORK side stops here.
-    netOpen = false;
-    abort = null;
-    emit({ connected: false });
+    r.netOpen = false;
+    r.abort = null;
+    r.connected = false;
+    if (activeKey === r.key) emit({ connected: false });
   }
 }
 
@@ -436,19 +593,62 @@ async function open(jobId: string, expected: number, autoPlay: boolean): Promise
 /** Open the stream for `jobId` if nothing is playing it yet. Idempotent, and it
  *  will not reopen a stream the user stopped on purpose. A null jobId is NOT a
  *  teardown: a render that has just finished still has audio to play. */
-export function mm3StreamEnsure(jobId: string | null, expected = 0, autoPlay = true): void {
-  if (!jobId || netOpen || autoOpened.has(jobId)) return;
-  autoOpened.add(jobId);
-  void open(jobId, expected, autoPlay);
+export function mm3StreamEnsure(jobId: string | null, expected = 0, autoPlay = true, take = 0): void {
+  if (!jobId) return;
+  const key = rkey(jobId, take);
+  if (autoOpened.has(key) || receivers.get(key)?.netOpen) return;
+  autoOpened.add(key);
+  void open(jobId, take, expected, autoPlay);
+}
+
+/** Open EVERY take of an ensemble render at once.
+ *
+ *  All of them must be read, not just the one being listened to: the engine
+ *  drops a stream nobody is draining once it buffers past a threshold, so an
+ *  unopened take silently loses its live audio (the saved file is unaffected).
+ *  Only take 0 is allowed to auto-play; the rest buffer until selected. */
+export function mm3StreamEnsureTakes(jobId: string | null, takes: number, expected = 0, autoPlay = true): void {
+  if (!jobId) return;
+  for (let t = 0; t < Math.max(1, takes); t++) {
+    mm3StreamEnsure(jobId, expected, autoPlay && t === 0, t);
+  }
+}
+
+/** Make a take the audible one. The others keep receiving.
+ *
+ *  Each take remembers its own playhead, so switching away and back resumes
+ *  where you were rather than restarting. Playback INTENT carries across: if
+ *  you were listening, you are still listening, just to a different song. */
+export function mm3StreamSelect(jobId: string, take: number): void {
+  const key = rkey(jobId, take);
+  const next = receivers.get(key);
+  if (!next || activeKey === key) return;
+  const prev = cur();
+  if (prev) prev.pausedFrame = playing ? positionFrames() : pausedFrame;
+  const wasPlaying = playing;
+  stopSources();
+  playing = false;
+  activeKey = key;
+  pausedFrame = Math.min(next.pausedFrame, next.totalFrames);
+  emitActive({ playing: false, position: pausedFrame / (next.rate || 1) });
+  if (wasPlaying && next.totalFrames > 0) mm3StreamPlay();
+  console.log(`[MM3 Stream] now hearing ${jobId} take ${take}`);
+}
+
+/** Which take is audible, so a card can show itself as the one playing. */
+export function mm3StreamActiveTake(): { jobId: string; take: number } | null {
+  const r = cur();
+  return r ? { jobId: r.jobId, take: r.take } : null;
 }
 
 /** Open because the user asked — after they stopped, or after the auto-open gave
  *  up. Bypasses the once-only guard and resets the retry budget. */
-export function mm3StreamStart(jobId: string, expected = 0): void {
-  if (netOpen) return;
-  autoOpened.add(jobId);
-  attempts.delete(jobId);
-  void open(jobId, expected, true);
+export function mm3StreamStart(jobId: string, expected = 0, take = 0): void {
+  const key = rkey(jobId, take);
+  if (receivers.get(key)?.netOpen) return;
+  autoOpened.add(key);
+  attempts.delete(key);
+  void open(jobId, take, expected, true);
 }
 
 export function mm3StreamPlay(): void {
@@ -472,7 +672,9 @@ export function mm3StreamPause(): void {
   pausedFrame = positionFrames();
   playing = false;
   stopSources();
-  emit({ playing: false, position: pausedFrame / (rate || 1) });
+  const r = cur();
+  if (r) r.pausedFrame = pausedFrame;
+  emit({ playing: false, position: pausedFrame / (r?.rate || 1) });
 }
 
 export function mm3StreamToggle(): void {
@@ -483,17 +685,19 @@ export function mm3StreamToggle(): void {
  *  before this is true (so the user sees it coming) but its transport only
  *  means anything after. */
 export function mm3StreamHasAudio(): boolean {
-  return totalFrames > 0;
+  return (cur()?.totalFrames ?? 0) > 0;
 }
 
 /** Seek inside the audio received so far. Beyond that there is nothing to play,
  *  so it clamps rather than pretending. */
 export function mm3StreamSeek(sec: number): void {
-  if (!ac || !rate) return;
-  const frame = Math.max(0, Math.min(sec * rate, totalFrames));
+  const r = cur();
+  if (!ac || !r || !r.rate) return;
+  const frame = Math.max(0, Math.min(sec * r.rate, r.totalFrames));
   pausedFrame = frame;
+  r.pausedFrame = frame;
   if (playing) anchorAt(frame, 0.05);
-  emit({ position: frame / rate });
+  emit({ position: frame / r.rate });
 }
 
 export function mm3StreamSetVolume(v: number): void {
@@ -510,9 +714,14 @@ export function mm3StreamResume(): void {
 
 /** Close the stream and drop the audio. The render is unaffected — this ends a
  *  preview, it does not cancel a job. */
+/** Close EVERY take's stream and drop the audio. The render is unaffected —
+ *  this ends a preview, it does not cancel a job. */
 export function mm3StreamStop(): void {
-  abort?.abort();
-  abort = null;
+  for (const r of receivers.values()) {
+    r.abort?.abort();
+    r.abort = null;
+    r.netOpen = false;
+  }
   teardown();
   emit({ ...INITIAL, volume });
 }

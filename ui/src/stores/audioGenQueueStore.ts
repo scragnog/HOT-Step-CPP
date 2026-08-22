@@ -70,6 +70,23 @@ export interface AudioQueueItem {
   /** Resolved render length in seconds (engine-side), for the streaming card's
    *  progress and the play bar's duration. */
   mm3Duration?: number;
+  /** ── Ensemble takes ──
+   *  One render can produce several DIFFERENT songs from the same prompt. Each
+   *  becomes its OWN queue entry so it can be watched, streamed and played
+   *  independently — a single entry holding three songs is a batch, not three
+   *  tracks.
+   *
+   *  The entries share one `jobId`. Exactly one of them (`mm3Take === 0`, the
+   *  one that was enqueued) polls it; the siblings are created by the store
+   *  when the engine reports the take count, and are driven from that poll.
+   *  `mm3TakeOf` being set is what marks an entry as a non-polling sibling. */
+  mm3Take?: number;
+  /** Total takes in this render. Present on every entry of the group. */
+  mm3TakeCount?: number;
+  /** Set on siblings only — the id of the entry that owns the polling. */
+  mm3TakeOf?: string;
+  /** This take's seed, lossless (decimal string). */
+  mm3TakeSeed?: string;
 }
 
 export interface AudioGenQueueState {
@@ -99,6 +116,75 @@ function _captureMm3Stream(item: AudioQueueItem, status: GenerationJob): void {
     item.mm3Interleaved = status.mm3_interleaved;
   }
   if (status.mm3_duration) item.mm3Duration = status.mm3_duration;
+  _expandTakes(item, status);
+}
+
+/** Split an ensemble render into one queue entry PER TAKE.
+ *
+ *  Runs the first time the engine reports a take count above one, which is as
+ *  soon as it has the job — long before any audio. That timing is the whole
+ *  point: the entries have to exist while the takes are still rendering, so
+ *  each can be watched and listened to as it grows. Creating them at the end
+ *  would just be a batch that reveals itself once there is nothing left to
+ *  watch.
+ *
+ *  Only the ORIGINAL entry polls the job. The siblings carry `mm3TakeOf` and
+ *  are driven from that one poll (_syncTakeSiblings), because K entries polling
+ *  one job id would be K times the requests for one answer.
+ *
+ *  Idempotent: a poll tick runs several times a second and must not keep
+ *  adding entries. */
+function _expandTakes(item: AudioQueueItem, status: GenerationJob): void {
+  const takes = Number(status.mm3_takes ?? 1);
+  if (takes <= 1 || item.mm3TakeOf || item.mm3TakeCount) return;
+
+  const seeds = status.mm3_take_seeds ?? [];
+  item.mm3Take = 0;
+  item.mm3TakeCount = takes;
+  item.mm3TakeSeed = seeds[0];
+
+  const at = _state.items.findIndex(i => i.id === item.id);
+  if (at < 0) return;
+  const siblings: AudioQueueItem[] = [];
+  for (let t = 1; t < takes; t++) {
+    siblings.push({
+      ...item,
+      // A distinct id, because everything downstream keys on it — but the SAME
+      // jobId, because there is one render behind all of them.
+      id: `${item.id}:take${t}`,
+      mm3Take: t,
+      mm3TakeCount: takes,
+      mm3TakeOf: item.id,
+      mm3TakeSeed: seeds[t],
+      // Nothing of take 0's output belongs to a sibling.
+      audioUrl: undefined,
+      songId: undefined,
+      masteredAudioUrl: undefined,
+      noAdapterAudioUrl: undefined,
+      audioDuration: undefined,
+    });
+  }
+  _state.items.splice(at + 1, 0, ...siblings);
+  console.log(`[MM3 Takes] ${item.jobId}: ${takes} takes -> ${takes} queue entries`);
+}
+
+/** Mirror the polling entry's live state onto its take siblings. They share one
+ *  render, so progress, stage and streaming flags are common to all of them;
+ *  only the finished OUTPUT differs, and that is assigned per take on success. */
+function _syncTakeSiblings(item: AudioQueueItem): void {
+  if (!item.mm3TakeCount || item.mm3TakeCount <= 1) return;
+  for (const s of _state.items) {
+    if (s.mm3TakeOf !== item.id) continue;
+    s.status = item.status;
+    s.progress = item.progress;
+    s.stage = item.stage;
+    s.elapsed = item.elapsed;
+    s.error = item.error;
+    s.jobId = item.jobId;
+    s.mm3Streaming = item.mm3Streaming;
+    s.mm3Interleaved = item.mm3Interleaved;
+    s.mm3Duration = item.mm3Duration;
+  }
 }
 
 // ── Persistence (IndexedDB — no 5MB cap) ─────────────────────────────────────
@@ -624,16 +710,33 @@ export async function enqueueSimpleGen(
         item.stage = status.stage || 'Generating…';
         item.elapsed = t.elapsed;
         _captureMm3Stream(item, status);
+        _syncTakeSiblings(item);
         _emit();  // progress tick — debounced persistence
 
         if (status.status === 'succeeded') {
-          const audioUrl = status.result?.audioUrls?.[0] || '';
+          const audioUrls = status.result?.audioUrls || [];
+          const audioUrl = audioUrls[0] || '';
           const songIds = status.result?.songIds || [];
           const masteredUrl = status.result?.masteredAudioUrl;
           item.status = 'succeeded';
           item.audioUrl = audioUrl;
           item.songId = songIds[0];
           item.masteredAudioUrl = masteredUrl;
+          // Each take entry takes the song at ITS index. The server returns them
+          // in take order, so entry t owns songIds[t] — anything else would give
+          // three entries the same track.
+          if (item.mm3TakeCount && item.mm3TakeCount > 1) {
+            for (const s of _state.items) {
+              if (s.mm3TakeOf !== item.id) continue;
+              const t = s.mm3Take ?? 0;
+              s.status = 'succeeded';
+              s.progress = 100;
+              s.stage = 'Complete!';
+              s.audioUrl = audioUrls[t] || '';
+              s.songId = songIds[t];
+              s.audioDuration = status.result?.duration;
+            }
+          }
           item.noAdapterAudioUrl = status.result?.noAdapterAudioUrl;
           item.audioDuration = status.result?.duration;
           item.progress = 100;

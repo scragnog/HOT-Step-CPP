@@ -88,6 +88,16 @@ export interface GenerationJob {
    *  the browser so a streaming track knows its full duration before its first
    *  window exists. */
   mm3Duration?: number;
+  /** Ensemble takes this render is producing — the CLAMPED count the engine
+   *  actually accepted, so it is how many streams exist to open and how many
+   *  cards belong on screen. 1 (or absent) is an ordinary render. Known as soon
+   *  as the engine has the job, i.e. long before any audio. */
+  mm3Takes?: number;
+  /** Each take's seed, as a DECIMAL STRING. Strings because these are uint64 —
+   *  18226392072674864222 and its two successors all collapse to the same
+   *  float64, which is exactly what made three distinct takes report one seed
+   *  and become individually unreproducible. */
+  mm3TakeSeeds?: string[];
   /** Stream preview WAV files emitted by the DEMON-style ring buffer */
   streamPreviews?: Array<{
     path: string;
@@ -1659,6 +1669,12 @@ router.get('/status/:id', (req, res) => {
     mm3_streaming: job.mm3Streaming === true,
     mm3_interleaved: job.mm3Interleaved ?? null,
     mm3_duration: job.mm3Duration ?? null,
+    // How many songs this render is producing, and each one's seed. Sent from
+    // the moment the engine accepts the job so the grid can stand up one card
+    // per take immediately — waiting for audio would put them all on screen at
+    // the end, which is the one thing streaming exists to avoid.
+    mm3_takes: job.mm3Takes ?? 1,
+    mm3_take_seeds: job.mm3TakeSeeds ?? null,
   });
 });
 

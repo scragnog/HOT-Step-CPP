@@ -17,7 +17,7 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
 import { SongList } from './components/library/SongList';
 import { StreamWaveform } from './components/player/StreamWaveform';
-import { mm3StreamEnsure, useMm3StreamAudio } from './stores/mm3StreamStore';
+import { mm3StreamEnsureTakes, useMm3StreamAudio } from './stores/mm3StreamStore';
 import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
 import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
@@ -524,13 +524,21 @@ const AppContent: React.FC = () => {
     s.items.find(i => i.status === 'generating' && i.jobId && i.mm3Streaming === true) ?? null
   );
   const mm3StreamState = useMm3StreamAudio();
-  const streamingSong = useMemo<Song | null>(() => {
-    if (!streamingItem?.jobId) return null;
+  // ONE CARD PER TAKE. An ensemble render produces several different songs at
+  // once and they all stream simultaneously, so each gets its own card from the
+  // moment the engine reports the take count — clicking one makes it the
+  // audible take while the rest keep buffering. A single card would turn three
+  // songs into a batch you only meet when it is over.
+  const streamingSongs = useMemo<Song[]>(() => {
+    if (!streamingItem?.jobId) return [];
     const p = (streamingItem.globalParams || {}) as Record<string, any>;
-    return {
-      id: `mm3-stream:${streamingItem.jobId}`,
+    const takes = Math.max(1, streamingItem.mm3TakeCount ?? 1);
+    const base = streamingItem.generation?.title || p.title || 'Generating…';
+    return Array.from({ length: takes }, (_, t) => ({
+      id: `mm3-stream:${streamingItem.jobId}:${t}`,
       streamJobId: streamingItem.jobId,
-      title: streamingItem.generation?.title || p.title || 'Generating…',
+      streamTake: t,
+      title: takes > 1 ? `${base} (take ${t + 1})` : base,
       lyrics: p.lyrics || '',
       style: p.caption || p.prompt || '',
       caption: p.caption || p.prompt || '',
@@ -539,9 +547,10 @@ const AppContent: React.FC = () => {
       tags: [],
       artistName: streamingItem.artistName || '',
       isGenerating: true,
-    } as Song;
-  }, [streamingItem?.jobId, streamingItem?.mm3Duration, streamingItem?.generation?.title,
-      streamingItem?.artistName, streamingItem?.globalParams]);
+    } as Song));
+  }, [streamingItem?.jobId, streamingItem?.mm3Duration, streamingItem?.mm3TakeCount,
+      streamingItem?.generation?.title, streamingItem?.artistName, streamingItem?.globalParams]);
+  const streamingSong = streamingSongs[0] ?? null;
 
   // Open the stream as soon as the engine confirms one. Here rather than in the
   // queue sidebar because App is always mounted and the sidebar is not — a
@@ -552,9 +561,17 @@ const AppContent: React.FC = () => {
   // It only auto-plays when the bar is IDLE. Starting a stream over a track the
   // user is listening to would put two songs through the speakers at once; the
   // card is there to be clicked instead.
+  // Every take, not just the first: the engine DROPS a stream nobody is
+  // draining once it buffers past a threshold, so an unopened take loses its
+  // live audio (its saved file is unaffected). Only take 0 may auto-play.
   useEffect(() => {
-    mm3StreamEnsure(streamingItem?.jobId ?? null, streamingItem?.mm3Duration ?? 0, !isPlayingRef.current);
-  }, [streamingItem?.jobId, streamingItem?.mm3Duration]);
+    mm3StreamEnsureTakes(
+      streamingItem?.jobId ?? null,
+      streamingItem?.mm3TakeCount ?? 1,
+      streamingItem?.mm3Duration ?? 0,
+      !isPlayingRef.current,
+    );
+  }, [streamingItem?.jobId, streamingItem?.mm3Duration, streamingItem?.mm3TakeCount]);
 
   // ...and hand the PLAY BAR to it the moment there is audio.
   //
@@ -1119,7 +1136,7 @@ const AppContent: React.FC = () => {
               // The live render first: it is the newest thing here, and it is
               // playable before its file exists. Dropped automatically once the
               // real row arrives, because the queue item stops being 'generating'.
-              ...(streamingSong ? [streamingSong] : []),
+              ...streamingSongs,
               ...songs.filter(s => getSongSource(s) === 'create'),
             ]}
             currentSongId={currentSong?.id}

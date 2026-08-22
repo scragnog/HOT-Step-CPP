@@ -633,6 +633,25 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     // browser needs it BEFORE any audio arrives, so a streaming card can show
     // how much of the track is finished instead of an indeterminate spinner.
     job.mm3Duration = sub.duration;
+    // How many songs this render will produce, published the instant the engine
+    // accepts the job. The browser stands up one queue entry and one card per
+    // take off this — waiting until the takes finish would put them all on
+    // screen at the end, which is the one thing streaming exists to avoid.
+    //
+    // Seeds go over as DECIMAL STRINGS: they are uint64, and
+    // 18226392072674864222 with its two successors all collapse onto the same
+    // float64 — which is exactly what made three distinct takes report one
+    // seed and become individually unreproducible.
+    job.mm3Takes = Math.max(1, Number(sub.takes ?? req.takes ?? 1));
+    if (job.mm3Takes > 1) {
+      // seed_str, never seed: the number has already lost the low digits by the
+      // time it reaches JS, so basing the takes on it would give three seeds
+      // that are all wrong and all identical.
+      const base = BigInt(sub.seed_str ?? String(sub.seed ?? 0));
+      job.mm3TakeSeeds = Array.from({ length: job.mm3Takes }, (_, t) => (base + BigInt(t)).toString());
+      log('INFO', `[MM3] Ensemble: ${job.mm3Takes} takes from one prompt, seeds `
+        + `${job.mm3TakeSeeds[0]}..${job.mm3TakeSeeds[job.mm3Takes - 1]}`);
+    }
     if (req.stream && !job.mm3Streaming) {
       log('WARNING', '[MM3] Streaming was requested but the engine declined it — this render is not streamable');
     } else if (job.mm3Streaming) {
@@ -776,7 +795,13 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     const songIds: string[] = [];
 
     for (let takeIdx = 0; takeIdx < nTakes; takeIdx++) {
-      const takeSeed = Number(takeDetail[takeIdx]?.seed ?? sub.seed);
+      // Decimal string throughout — a uint64 seed does not survive float64, and
+      // a song row that cannot reproduce itself is worse than no seed at all.
+      const takeSeed = String(
+        takeDetail[takeIdx]?.seed_str
+        ?? (job.mm3TakeSeeds?.[takeIdx])
+        ?? (sub.seed_str ? (BigInt(sub.seed_str) + BigInt(takeIdx)).toString() : String(sub.seed)),
+      );
       // Take 0's bytes are ALSO on the shared /job?id=&result=1, but
       // /mm3/take serves every take through one uniform URL — so there is no
       // "first one is special" branch to get wrong.
