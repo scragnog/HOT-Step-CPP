@@ -170,6 +170,38 @@ static void mm3_stream_close(MM3StreamQueue & q, const std::string & error) {
 // Live stage + finished-run detail for GET /mm3/job. Kept beside the engine's
 // own Job rather than inside it so hot-step-server.cpp's Job struct is
 // untouched.
+// One ensemble take's finished output.
+//
+// Take 0 ALSO goes into the upstream `Job` (result_body / result_lrc /
+// result_ar_codes) so a one-take render, the shared GET /job?result=1 handler,
+// and every existing caller behave exactly as they always did. Takes 1..K-1
+// live only here and are fetched with GET /mm3/take?id=<job>&take=<n>.
+//
+// This asymmetry is deliberate: `Job` is upstream-derived and adding
+// MM3-specific members to it is the kind of edit an upstream sync silently
+// destroys (see the hook table in CLAUDE.md).
+struct MM3TakeOutput {
+    std::string wav;       // encoded audio/wav, same format as take 0
+    std::string lrc;       // raw (not base64) — the /mm3/take handler encodes
+    std::string ar_codes;  // same flat i32 blob shape as Job::result_ar_codes
+
+    uint64_t seed        = 0;
+    int64_t  frames      = 0;
+    int64_t  n_windows   = 0;
+    int64_t  n_samples   = 0;
+    int      sample_rate = 0;
+    double   duration_s  = 0.0;
+    double   rms         = 0.0;
+    double   peak        = 0.0;
+    bool     eos         = false;
+    bool     has_nan     = false;
+
+    /** This take's live chunk queue. One per take, because the takes render in
+     *  lockstep and a reader subscribes to ONE of them — a shared queue would
+     *  interleave four songs into one byte stream. */
+    std::shared_ptr<MM3StreamQueue> stream;
+};
+
 struct MM3JobState {
     std::mutex  mtx;
     std::string stage = "queued";  // "queued" | "arbitrating" | "warming" | mm3_generate's stages | "encoding" | terminal
@@ -210,8 +242,19 @@ struct MM3JobState {
      *  Null means this job produces no stream and GET /mm3/stream will say so.
      *  shared_ptr because the reader outlives nothing in particular: the job
      *  state is evicted on a 32-entry LRU while a slow client may still be
-     *  draining. */
+     *  draining.
+     *
+     *  ALIAS of takes[0].stream — kept so every existing reader of `st->stream`
+     *  keeps working without knowing takes exist. */
     std::shared_ptr<MM3StreamQueue> stream;
+
+    /** How many songs this job renders (1 = an ordinary render). Resolved after
+     *  clamping, so it is what the engine actually produced, not what was asked
+     *  for. */
+    int                        n_takes = 1;
+    /** Sized to n_takes the moment the job starts, so GET /mm3/stream can find
+     *  take t's queue before the render has produced anything for it. */
+    std::vector<MM3TakeOutput> takes;
 };
 
 static std::mutex                                                   g_mm3_jobs_mtx;
@@ -465,15 +508,28 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     // generation failure, success — has to release a reader parked on the
     // condition variable. A destructor is the only spelling that cannot be
     // forgotten when a new failure path is added later.
+    //
+    // EVERY take's queue, not just take 0's. An ensemble render has K readers
+    // parked on K condition variables, and closing one leaves the others
+    // waiting on a producer that has already exited — the reader does not see
+    // an error, it sees nothing at all, until its own client gives up minutes
+    // later. Observed as "terminated" on takes 1 and 2 while take 0 ended
+    // cleanly, which is exactly the shape of a per-take resource being handled
+    // in the singular.
     struct StreamCloser {
-        std::shared_ptr<MM3StreamQueue> q;
-        std::string                     why = "the run ended before it finished";
+        std::vector<std::shared_ptr<MM3StreamQueue>> qs;
+        std::string                                  why = "the run ended before it finished";
         ~StreamCloser() {
-            if (q) {
-                mm3_stream_close(*q, why);
+            for (auto & q : qs) {
+                if (q) {
+                    mm3_stream_close(*q, why);
+                }
             }
         }
-    } stream_closer{ st->stream };
+    } stream_closer;
+    for (const MM3TakeOutput & t : st->takes) {
+        stream_closer.qs.push_back(t.stream);
+    }
 
     // Post-run residency, mirroring the ACE side's EVICT_STRICT default.
     //
@@ -835,15 +891,22 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     // encode through audio_encode_wav with the same format.
     if (st->stream) {
         const WavFormat sfmt = req.wav_bits == 32 ? WAV_F32 : (req.wav_bits == 24 ? WAV_S24 : WAV_S16);
-        auto            q    = st->stream;
+        // Captured by value so the sink never touches `st` (and therefore never
+        // needs its mutex) while the worker holds it. One queue per take: a
+        // reader subscribes to ONE song, and a shared queue would splice four
+        // of them into one byte stream.
+        std::vector<std::shared_ptr<MM3StreamQueue>> qs;
+        qs.reserve(st->takes.size());
+        for (const MM3TakeOutput & t : st->takes) {
+            qs.push_back(t.stream);
+        }
         const std::string jid = job->id;
-        // The take index arrives but is not routed yet: this job layer still
-        // owns exactly one stream queue, so it only ever runs one-take renders
-        // (mm3_generate_takes with K = 1). Multi-take streaming needs a queue
-        // per take, which is the next increment.
-        req.gen.on_chunk = [q, sfmt, jid](int take, int64_t seq, int64_t off, int64_t n, const float * planar,
-                                          int sr) {
-            (void) take;
+        req.gen.on_chunk = [qs, sfmt, jid](int take, int64_t seq, int64_t off, int64_t n, const float * planar,
+                                           int sr) {
+            if (take < 0 || (size_t) take >= qs.size() || !qs[(size_t) take]) {
+                return;
+            }
+            const std::shared_ptr<MM3StreamQueue> & q = qs[(size_t) take];
             // A degenerate final window can crop to nothing. Emitting a
             // header-only WAV would be harmless here but `DataSink::write`
             // treats a zero-length write as end-of-stream, so skip it.
@@ -852,16 +915,21 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
             }
             std::string wav = audio_encode_wav(planar, (int) n, sr, sfmt);
             if (seq == 0) {
-                fprintf(stderr, "[MM3-Stream] %s: first chunk at %.2f s of audio (%zu bytes)\n", jid.c_str(),
-                        (double) n / (double) (sr > 0 ? sr : 1), wav.size());
+                fprintf(stderr, "[MM3-Stream] %s: take %d first chunk at %.2f s of audio (%zu bytes)\n", jid.c_str(),
+                        take, (double) n / (double) (sr > 0 ? sr : 1), wav.size());
             }
             (void) off;  // carried by the concatenation order, not the WAV header
             mm3_stream_push(*q, std::move(wav), sr);
         };
     }
 
-    MM3GenResult r;
-    const bool   ok = mm3_generate(g_mm3, req.gen, &g_mm3_tokenizer, progress, &r, &err);
+    const int                 K = st->n_takes > 0 ? st->n_takes : 1;
+    std::vector<MM3GenResult> rs((size_t) K);
+    const bool ok = mm3_generate_takes(g_mm3, req.gen, &g_mm3_tokenizer, progress, rs.data(), K, &err);
+    // Take 0 is the job's primary result: it fills the upstream Job exactly as
+    // a one-take render always has, so nothing downstream needs to know the
+    // others exist.
+    MM3GenResult & r = rs[0];
     if (!ok) {
         if (err == MM3_ERR_CANCELLED) {
             fprintf(stderr, "[MM3-Job] %s: cancelled\n", job->id.c_str());
@@ -938,6 +1006,50 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         memcpy(wp, r.ar.acoustic_all.data(), (size_t) n_ac * sizeof(int32_t));
         fprintf(stderr, "[MM3-Job] %s: AR codes captured — %d semantic + %d acoustic i32 (%.1f KB)\n",
                 job->id.c_str(), n_sem, n_ac, (double) job->result_ar_codes.size() / 1024.0);
+    }
+
+    // ── takes 1..K-1: encode into the MM3-side table ──────────────────────
+    // Take 0 was written to the upstream Job above; these are fetched with
+    // GET /mm3/take?id=<job>&take=<n>.
+    for (int t = 0; t < K; t++) {
+        MM3GenResult & rt = rs[(size_t) t];
+        std::lock_guard<std::mutex> lock(st->mtx);
+        MM3TakeOutput & to = st->takes[(size_t) t];
+        to.frames      = rt.frames;
+        to.n_windows   = rt.n_windows;
+        to.n_samples   = rt.n_samples;
+        to.sample_rate = rt.sample_rate;
+        to.duration_s  = rt.sample_rate > 0 ? (double) rt.n_samples / (double) rt.sample_rate : 0.0;
+        to.rms         = rt.rms;
+        to.peak        = rt.peak;
+        to.eos         = rt.ar.eos_hit;
+        to.has_nan     = rt.has_nan;
+        to.seed        = rt.ar.seed ? rt.ar.seed : req.gen.seed + (uint64_t) t;
+        to.lrc         = rt.ar.lrc;
+        if (t == 0) {
+            continue;  // already in job->result_body; do not hold a second copy
+        }
+        to.wav = audio_encode_wav(rt.audio.data(), (int) rt.n_samples, rt.sample_rate, fmt);
+        if (req.get_ar_codes && !rt.ar.semantic_all.empty()) {
+            const int32_t n_sem = (int32_t) rt.ar.semantic_all.size();
+            const int32_t n_ac  = (int32_t) rt.ar.acoustic_all.size();
+            to.ar_codes.resize(sizeof(int32_t) * (2 + (size_t) n_sem + (size_t) n_ac));
+            char * wp = &to.ar_codes[0];
+            memcpy(wp, &n_sem, sizeof(int32_t));
+            wp += sizeof(int32_t);
+            memcpy(wp, rt.ar.semantic_all.data(), (size_t) n_sem * sizeof(int32_t));
+            wp += (size_t) n_sem * sizeof(int32_t);
+            memcpy(wp, &n_ac, sizeof(int32_t));
+            wp += sizeof(int32_t);
+            memcpy(wp, rt.ar.acoustic_all.data(), (size_t) n_ac * sizeof(int32_t));
+        }
+    }
+    if (K > 1) {
+        std::string per;
+        for (int t = 0; t < K; t++) {
+            per += (t ? ", " : "") + std::to_string(st->takes[(size_t) t].duration_s).substr(0, 5) + "s";
+        }
+        fprintf(stderr, "[MM3-Job] %s: %d takes encoded — %s\n", job->id.c_str(), K, per.c_str());
     }
 
     {
@@ -1041,8 +1153,22 @@ static void mm3_handle_synth(const httplib::Request & hreq, httplib::Response & 
     // soon as this response lands, which is long before the job reaches the
     // front of the FIFO. The queue has to exist for that reader to attach to,
     // or the stream would 409 on every render that had to wait its turn.
+    //
+    // ONE QUEUE PER TAKE, for the same reason and with the same timing: a
+    // caller streaming four takes opens four readers immediately. Clamped here
+    // so `takes` reflects what will actually be rendered — a reader asking for
+    // take 3 on a checkpoint that only allows two must 404 now, not silently
+    // wait forever on a queue nothing will ever push to.
+    st->n_takes = mm3_clamp_takes(g_mm3.lm_cfg, req.takes);
+    st->takes.resize((size_t) st->n_takes);
+    for (int t = 0; t < st->n_takes; t++) {
+        st->takes[(size_t) t].seed = req.gen.seed + (uint64_t) t;
+        if (req.stream) {
+            st->takes[(size_t) t].stream = std::make_shared<MM3StreamQueue>();
+        }
+    }
     if (req.stream) {
-        st->stream = std::make_shared<MM3StreamQueue>();
+        st->stream = st->takes[0].stream;  // alias, see MM3JobState::stream
     }
     st->seed         = req.gen.seed;
     st->max_frames   = req.max_frames;
@@ -1217,6 +1343,31 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
         yyjson_mut_obj_add_real(o, ms, "voc", st->voc_ms);
         yyjson_mut_obj_add_real(o, ms, "total", st->total_ms);
     }
+
+    // Always reported, so a caller can tell a one-take render from an ensemble
+    // without inspecting the request it sent.
+    yyjson_mut_obj_add_int(o, orot, "takes", st->n_takes);
+    if (st->n_takes > 1) {
+        yyjson_mut_val * arr = yyjson_mut_arr(o);
+        for (int t = 0; t < (int) st->takes.size(); t++) {
+            const MM3TakeOutput & to = st->takes[(size_t) t];
+            yyjson_mut_val *      e  = yyjson_mut_obj(o);
+            yyjson_mut_obj_add_int(o, e, "take", t);
+            yyjson_mut_obj_add_uint(o, e, "seed", to.seed);
+            yyjson_mut_obj_add_int(o, e, "frames", to.frames);
+            yyjson_mut_obj_add_real(o, e, "duration_s", to.duration_s);
+            yyjson_mut_obj_add_bool(o, e, "eos", to.eos);
+            yyjson_mut_obj_add_real(o, e, "rms", to.rms);
+            yyjson_mut_obj_add_real(o, e, "peak", to.peak);
+            // Take 0's audio comes from the shared GET /job?id=&result=1; the
+            // rest from GET /mm3/take. Reported rather than implied so a client
+            // does not have to special-case index 0 from memory.
+            yyjson_mut_obj_add_bool(o, e, "audio_ready", t == 0 ? st->have_result : !to.wav.empty());
+            yyjson_mut_obj_add_bool(o, e, "streaming", (bool) to.stream);
+            yyjson_mut_arr_add_val(arr, e);
+        }
+        yyjson_mut_obj_add_val(o, orot, "take_detail", arr);
+    }
     char * json = yyjson_mut_write(o, 0, NULL);
     yyjson_mut_doc_free(o);
     res.set_content(json ? json : "{}", "application/json");
@@ -1240,9 +1391,15 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
 // its whole run, so acquiring it here would deadlock the feature against
 // itself — the same rule GET /mm3/job follows.
 //
-// One reader at a time. Chunks are CONSUMED as they are written, so a second
-// reader would silently steal half the song from the first; a reconnect after
-// a drop cannot resume for the same reason, and gets what is still queued.
+// One reader at a time PER TAKE. Chunks are CONSUMED as they are written, so a
+// second reader on the same take would silently steal half the song from the
+// first; a reconnect after a drop cannot resume for the same reason, and gets
+// what is still queued.
+//
+// `?take=<n>` selects which song of an ensemble render to stream — the takes
+// have their own queues and are decoded in lockstep, so K readers can be open
+// at once and all advance together. Omitted means take 0, which is what a
+// one-take render has always served.
 static void mm3_handle_stream(const httplib::Request & hreq, httplib::Response & res) {
     if (!hreq.has_param("id")) {
         mm3_json_error(res, 400, "missing ?id=<job id>");
@@ -1254,7 +1411,17 @@ static void mm3_handle_stream(const httplib::Request & hreq, httplib::Response &
         mm3_json_error(res, 404, "no MM3 job with that id (it may have been evicted)");
         return;
     }
-    auto q = st->stream;
+    int take = 0;
+    if (hreq.has_param("take")) {
+        take = atoi(hreq.get_param_value("take").c_str());
+    }
+    if (take < 0 || (size_t) take >= st->takes.size()) {
+        mm3_json_error(res, 404,
+                       "this job rendered " + std::to_string(st->takes.size()) + " take(s); no take " +
+                           std::to_string(take));
+        return;
+    }
+    auto q = st->takes[(size_t) take].stream;
     if (!q) {
         mm3_json_error(res, 409, "this job was not submitted with \"stream\": true");
         return;
@@ -1276,7 +1443,7 @@ static void mm3_handle_stream(const httplib::Request & hreq, httplib::Response &
         q->attached.store(true);
     }
 
-    fprintf(stderr, "[MM3-Stream] %s: reader attached\n", id.c_str());
+    fprintf(stderr, "[MM3-Stream] %s: reader attached to take %d\n", id.c_str(), take);
     res.set_header("Cache-Control", "no-cache");
     res.set_header("X-Accel-Buffering", "no");  // stop any proxy from buffering the point of the feature
     res.set_chunked_content_provider(
@@ -1313,9 +1480,88 @@ static void mm3_handle_stream(const httplib::Request & hreq, httplib::Response &
         });
 }
 
+// ── GET /mm3/take?id=...&take=N ────────────────────────────────────────────
+//
+// The finished audio of one take of an ensemble render. Take 0 is ALSO served
+// by the shared GET /job?id=&result=1 (it fills the upstream Job like any
+// single-track render), so this exists for takes 1..K-1 — but it accepts 0 too,
+// so a client can fetch every take through one uniform URL instead of
+// special-casing the first.
+//
+// `&lrc=1` returns that take's LRC as text/plain; `&ar=1` its AR code blob.
+// Never takes g_mm3_mutex, for the same reason GET /mm3/job does not.
+static void mm3_handle_take(const httplib::Request & hreq, httplib::Response & res) {
+    if (!hreq.has_param("id")) {
+        mm3_json_error(res, 400, "missing ?id=<job id>");
+        return;
+    }
+    const std::string id = hreq.get_param_value("id");
+    auto              st = mm3_job_state_get(id);
+    if (!st) {
+        mm3_json_error(res, 404, "no MM3 job with that id (it may have been evicted)");
+        return;
+    }
+    const int take = hreq.has_param("take") ? atoi(hreq.get_param_value("take").c_str()) : 0;
+    if (take < 0 || (size_t) take >= st->takes.size()) {
+        mm3_json_error(res, 404,
+                       "this job rendered " + std::to_string(st->takes.size()) + " take(s); no take " +
+                           std::to_string(take));
+        return;
+    }
+
+    std::string wav, lrc, codes;
+    bool        ready = false;
+    {
+        std::lock_guard<std::mutex> lock(st->mtx);
+        const MM3TakeOutput &       to = st->takes[(size_t) take];
+        ready                          = st->have_result;
+        lrc                            = to.lrc;
+        codes                          = to.ar_codes;
+        wav                            = to.wav;
+    }
+    if (!ready) {
+        mm3_json_error(res, 409, "this job has not finished yet");
+        return;
+    }
+    // Take 0's bytes live on the upstream Job, not in the side table — one copy
+    // of a multi-megabyte WAV, not two.
+    if (take == 0) {
+        auto job = job_find(id);
+        if (!job || job->status.load() != 1) {
+            mm3_json_error(res, 409, "this job has not finished yet");
+            return;
+        }
+        wav   = job->result_body;
+        codes = job->result_ar_codes;
+    }
+
+    if (hreq.has_param("lrc") && hreq.get_param_value("lrc") == "1") {
+        if (lrc.empty()) {
+            mm3_json_error(res, 404, "no LRC for this take");
+            return;
+        }
+        res.set_content(lrc, "text/plain; charset=utf-8");
+        return;
+    }
+    if (hreq.has_param("ar") && hreq.get_param_value("ar") == "1") {
+        if (codes.empty()) {
+            mm3_json_error(res, 404, "AR codes not available (get_ar_codes was not set, or none captured)");
+            return;
+        }
+        res.set_content(codes, "application/octet-stream");
+        return;
+    }
+    if (wav.empty()) {
+        mm3_json_error(res, 404, "no audio for this take");
+        return;
+    }
+    res.set_content(wav, "audio/wav");
+}
+
 // The second half of the hook. Called next to mm3_register_routes().
 static void mm3_register_job_routes(httplib::Server & svr) {
     svr.Post("/mm3/synth", mm3_handle_synth);
+    svr.Get("/mm3/take", mm3_handle_take);
     svr.Get("/mm3/job", mm3_handle_job);
     svr.Get("/mm3/stream", mm3_handle_stream);
 }

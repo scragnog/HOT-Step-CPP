@@ -578,6 +578,12 @@ struct MM3SynthRequest {
     // delivered exactly as it is today — streaming is an ADDITIONAL output,
     // never a replacement.
     bool    stream = false;
+    /** Ensemble takes: how many DIFFERENT songs to render from this one prompt
+     *  in a single batched AR pass (mm3-ar-loop.h). 1 = an ordinary render.
+     *  Clamped to what the checkpoint's row budget allows — 4 with a CFG pair —
+     *  rather than rejected, so a caller that asks for more gets fewer songs
+     *  and a log line, not an error. Take t uses seed + t. */
+    int     takes  = 1;
 
     // Replay previously-captured codes instead of sampling them. Both must be
     // present together, with acoustic == semantic * 7. Entry 0 is the
@@ -835,6 +841,27 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 return false;
             }
             out->stream = yyjson_get_bool(v);
+        }
+    }
+
+    // ── Ensemble takes ──
+    {
+        yyjson_val * v = yyjson_obj_get(root, "takes");
+        if (v && !yyjson_is_null(v)) {
+            if (!yyjson_is_int(v)) {
+                if (err) {
+                    *err = "\"takes\" must be an integer";
+                }
+                return false;
+            }
+            const int64_t t = yyjson_get_sint(v);
+            if (t < 1 || t > MM3_MAX_BATCH_ROWS) {
+                if (err) {
+                    *err = "\"takes\" must be between 1 and " + std::to_string(MM3_MAX_BATCH_ROWS);
+                }
+                return false;
+            }
+            out->takes = (int) t;
         }
     }
 
