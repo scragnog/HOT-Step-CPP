@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 import { togglePlay, usePlaybackSelector } from '../../stores/playbackStore';
 import { songToTrack } from '../../stores/playbackStore';
-import { useMm3StreamAudio } from '../../stores/mm3StreamStore';
+import { useMm3StreamAudio, mm3StreamTakeState } from '../../stores/mm3StreamStore';
 import { useABCompareSelector, setTrackA, setTrackB, playAB, openModal as openABModal, clear as clearAB } from '../../stores/abCompareStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { downloadAll } from '../../utils/downloadTrack';
@@ -698,13 +698,27 @@ interface SongItemProps {
  *  track was still being written. `frac` is AUDIO RECEIVED over the resolved
  *  duration — what the play button can actually reach — not the engine's stage
  *  percentage, which runs ahead of it. */
-function useStreamingSong(song: Song): { isStreaming: boolean; frac: number } {
+function useStreamingSong(song: Song): { isStreaming: boolean; frac: number; audible: boolean } {
+  // Subscribed for the re-render; the numbers come from THIS take.
   const stream = useMm3StreamAudio();
+  const take = song.streamTake ?? 0;
   const isStreaming = !!song.streamJobId && stream.jobId === song.streamJobId;
-  const frac = isStreaming && stream.expected > 0
-    ? Math.max(0, Math.min(1, stream.received / stream.expected))
+  // PER TAKE, because every card of an ensemble shares one jobId — reading the
+  // store's top-level state would paint all of them with the progress of
+  // whichever take happens to be audible.
+  const st = isStreaming && song.streamJobId
+    ? mm3StreamTakeState(song.streamJobId, take)
+    : null;
+  const received = st ? st.received : stream.received;
+  const expected = st ? st.expected : stream.expected;
+  const frac = isStreaming && expected > 0
+    ? Math.max(0, Math.min(1, received / expected))
     : 0;
-  return { isStreaming, frac };
+  // Is this the take coming out of the speakers? Several are growing at once
+  // and only one is audible, so a card has to say which — otherwise the first
+  // thing you hear belongs to a track you cannot identify.
+  const audible = isStreaming && stream.take === take;
+  return { isStreaming, frac, audible };
 }
 
 const SongItem: React.FC<SongItemProps> = ({
@@ -712,7 +726,7 @@ const SongItem: React.FC<SongItemProps> = ({
   onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover, onEditMetadata, showSourceBadge,
   abTrackAId, abTrackBId,
 }) => {
-  const { isStreaming, frac: streamFrac } = useStreamingSong(song);
+  const { isStreaming, frac: streamFrac, audible: streamAudible } = useStreamingSong(song);
   const { t } = useTranslation();
   const [showMenu, setShowMenu] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
@@ -831,8 +845,10 @@ const SongItem: React.FC<SongItemProps> = ({
             {/* The row equivalent of the grid card's badge + bar: the track is
                 playable, and this is how much of it exists so far. */}
             {isStreaming && (
-              <span className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded
-                               bg-orange-500/90 text-[9px] font-bold uppercase tracking-wide text-white">
+              <span className={`flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded
+                               text-[9px] font-bold uppercase tracking-wide text-white
+                               ${streamAudible ? 'bg-pink-500/90' : 'bg-orange-500/90'}`}
+                    title={streamAudible ? 'This is the take you are hearing' : 'Rendering — click to listen to this one'}>
                 <Radio size={8} className="animate-pulse" />
                 {Math.round(streamFrac * 100)}%
               </span>
@@ -1066,7 +1082,7 @@ const SongCard: React.FC<SongCardProps> = ({
   const { isDisguised, disguiseTitle } = useDisguiseMode();
 
   // A streaming card is a real, playable track whose file does not exist yet.
-  const { isStreaming, frac: streamFrac } = useStreamingSong(song);
+  const { isStreaming, frac: streamFrac, audible: streamAudible } = useStreamingSong(song);
 
   React.useEffect(() => {
     if (editing && renameInputRef.current) {
@@ -1178,15 +1194,19 @@ const SongCard: React.FC<SongCardProps> = ({
           that is not there yet. */}
       {isStreaming && (
         <>
-          <div className="absolute top-2 right-2 z-20 flex items-center gap-1 px-1.5 py-0.5 rounded-md
-                          bg-orange-500/90 text-[9px] font-bold uppercase tracking-wide text-white shadow">
+          {/* Several takes stream at once and only one is audible. The badge says
+              which, because otherwise the audio that starts by itself belongs to
+              a card you cannot pick out. */}
+          <div className={`absolute top-2 right-2 z-20 flex items-center gap-1 px-1.5 py-0.5 rounded-md
+                          text-[9px] font-bold uppercase tracking-wide text-white shadow
+                          ${streamAudible ? 'bg-pink-500/90' : 'bg-orange-500/90'}`}>
             <Radio size={9} className="animate-pulse" />
-            Generating
+            {streamAudible ? 'Listening' : 'Generating'}
           </div>
           <div className="absolute inset-x-0 bottom-0 z-20">
             <div className="px-2 pb-1 text-[9px] font-medium text-orange-200 drop-shadow
                             flex items-center justify-between tabular-nums">
-              <span>generation in progress</span>
+              <span>{streamAudible ? 'playing as it renders' : 'generation in progress'}</span>
               <span>{Math.round(streamFrac * 100)}%</span>
             </div>
             <div className="h-1 bg-black/50">

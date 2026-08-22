@@ -48,6 +48,12 @@ export function songToTrack(song: Song): PlaybackTrack {
     // Live MiniMax-Music3 render: the transport delegates to mm3StreamStore
     // instead of loading a URL that does not exist yet.
     streamJobId: song.streamJobId,
+    // WHICH take, and this line is load-bearing. This mapping is field-by-field,
+    // so a new one is silently dropped rather than failing to compile: without
+    // it every card of an ensemble arrived as `undefined` -> take 0, and all
+    // three play buttons drove the same song while the highlight moved between
+    // them. Anything added to Song for the player has to be added here too.
+    streamTake: song.streamTake,
   };
 }
 

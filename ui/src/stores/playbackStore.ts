@@ -16,7 +16,7 @@ import { useSyncExternalStore, useRef, useCallback } from 'react';
 import type { WaveformPlayerHandle } from '../components/player/WaveformPlayer';
 import { useVstChainStore } from './vstChainStore';
 import {
-  mm3StreamSnapshot, mm3StreamSubscribe, mm3StreamToggle, mm3StreamPause, mm3StreamSelect,
+  mm3StreamSnapshot, mm3StreamSubscribe, mm3StreamToggle, mm3StreamPause, mm3StreamSelect, mm3StreamPlay,
   mm3StreamSeek, mm3StreamSetVolume,
 } from './mm3StreamStore';
 
@@ -507,6 +507,11 @@ function loadTrack(track: PlaybackTrack): void {
     // buffering, so this is a switch, not a start — the song you pick is
     // audible from wherever you last left it, not from the beginning.
     mm3StreamSelect(track.streamJobId, track.streamTake ?? 0);
+    // pbPlay means PLAY, so start it — selecting alone would leave a click on a
+    // paused card switching the audio silently. Harmless when it is already
+    // running (mm3StreamPlay returns early), and when the chosen take has no
+    // audio yet it records the intent so its first window starts on arrival.
+    mm3StreamPlay();
     const snap = mm3StreamSnapshot();
     setState({
       currentTrack: track,
