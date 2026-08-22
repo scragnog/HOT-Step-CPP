@@ -690,11 +690,29 @@ interface SongItemProps {
   abTrackBId?: string | null;
 }
 
+/** The live-render treatment, for whichever view mode is on.
+ *
+ *  All THREE modes need it, and that is the whole reason this is a hook: the
+ *  grid card got it first, the Generations list remembers its view mode in
+ *  localStorage, and a user in list mode saw a plain row with no hint that the
+ *  track was still being written. `frac` is AUDIO RECEIVED over the resolved
+ *  duration — what the play button can actually reach — not the engine's stage
+ *  percentage, which runs ahead of it. */
+function useStreamingSong(song: Song): { isStreaming: boolean; frac: number } {
+  const stream = useMm3StreamAudio();
+  const isStreaming = !!song.streamJobId && stream.jobId === song.streamJobId;
+  const frac = isStreaming && stream.expected > 0
+    ? Math.max(0, Math.min(1, stream.received / stream.expected))
+    : 0;
+  return { isStreaming, frac };
+}
+
 const SongItem: React.FC<SongItemProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
   onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover, onEditMetadata, showSourceBadge,
   abTrackAId, abTrackBId,
 }) => {
+  const { isStreaming, frac: streamFrac } = useStreamingSong(song);
   const { t } = useTranslation();
   const [showMenu, setShowMenu] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
@@ -740,7 +758,9 @@ const SongItem: React.FC<SongItemProps> = ({
     <div
       className={`
         group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200
-        ${isSelected && selectionMode
+        ${isStreaming
+          ? 'bg-orange-500/10 border border-orange-500/50 mm3-stream-glow'
+          : isSelected && selectionMode
           ? 'bg-pink-500/10 border border-pink-500/20'
           : isActive
             ? 'bg-pink-500/10 border border-pink-500/20'
@@ -803,9 +823,20 @@ const SongItem: React.FC<SongItemProps> = ({
           />
         ) : (
           <div className="flex items-center gap-1 group/title">
-            <div className={`text-sm font-medium truncate ${isActive ? 'text-pink-400' : 'text-zinc-800 dark:text-zinc-200'}`}>
+            <div className={`text-sm font-medium truncate ${
+              isStreaming ? 'text-orange-400' : isActive ? 'text-pink-400' : 'text-zinc-800 dark:text-zinc-200'
+            }`}>
               {disguiseTitle(song.title || 'Untitled')}
             </div>
+            {/* The row equivalent of the grid card's badge + bar: the track is
+                playable, and this is how much of it exists so far. */}
+            {isStreaming && (
+              <span className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded
+                               bg-orange-500/90 text-[9px] font-bold uppercase tracking-wide text-white">
+                <Radio size={8} className="animate-pulse" />
+                {Math.round(streamFrac * 100)}%
+              </span>
+            )}
             {onRename && !selectionMode && (
               <button
                 onClick={e => { e.stopPropagation(); setEditTitle(song.title || ''); setEditing(true); }}
@@ -815,6 +846,14 @@ const SongItem: React.FC<SongItemProps> = ({
                 <Pencil size={11} />
               </button>
             )}
+          </div>
+        )}
+        {isStreaming && (
+          <div className="mt-1 mb-0.5 h-0.5 rounded-full bg-black/30 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-orange-500 to-amber-400 transition-[width] duration-300"
+              style={{ width: `${streamFrac * 100}%` }}
+            />
           </div>
         )}
         <div className="text-xs text-zinc-500 truncate mt-0.5">
@@ -1026,17 +1065,8 @@ const SongCard: React.FC<SongCardProps> = ({
   const renameInputRef = React.useRef<HTMLInputElement>(null);
   const { isDisguised, disguiseTitle } = useDisguiseMode();
 
-  // ── Live render ──
   // A streaming card is a real, playable track whose file does not exist yet.
-  // It gets an orange treatment for as long as that is true, and the fraction
-  // of the track already rendered is the honest progress number — not the
-  // engine's stage percentage, because what the user can actually listen to is
-  // what has been received.
-  const stream = useMm3StreamAudio();
-  const isStreaming = !!song.streamJobId && stream.jobId === song.streamJobId;
-  const streamFrac = isStreaming && stream.expected > 0
-    ? Math.max(0, Math.min(1, stream.received / stream.expected))
-    : 0;
+  const { isStreaming, frac: streamFrac } = useStreamingSong(song);
 
   React.useEffect(() => {
     if (editing && renameInputRef.current) {
@@ -1327,6 +1357,7 @@ const TableTitleCell: React.FC<{
   disguiseTitle: (t: string) => string;
 }> = ({ song, isActive, onRename, disguiseTitle }) => {
   const { t } = useTranslation();
+  const { isStreaming, frac } = useStreamingSong(song);
   const [editing, setEditing] = React.useState(false);
   const [editTitle, setEditTitle] = React.useState(song.title || '');
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -1365,9 +1396,20 @@ const TableTitleCell: React.FC<{
 
   return (
     <span className="flex items-center gap-1 group/title min-w-0">
-      <span className={`font-medium truncate ${isActive ? 'text-pink-400' : 'text-zinc-200'}`}>
+      <span className={`font-medium truncate ${
+        isStreaming ? 'text-orange-400' : isActive ? 'text-pink-400' : 'text-zinc-200'
+      }`}>
         {disguiseTitle(song.title || 'Untitled')}
       </span>
+      {/* Third view mode, same treatment. A row that reads as an ordinary track
+          while its audio is still being written is the bug this exists to stop. */}
+      {isStreaming && (
+        <span className="flex-shrink-0 flex items-center gap-1 px-1 rounded bg-orange-500/90
+                         text-[9px] font-bold uppercase tracking-wide text-white">
+          <Radio size={8} className="animate-pulse" />
+          {Math.round(frac * 100)}%
+        </span>
+      )}
       {onRename && (
         <button
           onClick={e => { e.stopPropagation(); setEditTitle(song.title || ''); setEditing(true); }}

@@ -17,7 +17,7 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
 import { SongList } from './components/library/SongList';
 import { StreamWaveform } from './components/player/StreamWaveform';
-import { mm3StreamEnsure } from './stores/mm3StreamStore';
+import { mm3StreamEnsure, useMm3StreamAudio } from './stores/mm3StreamStore';
 import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
 import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
@@ -27,6 +27,7 @@ import { SectionMarkers } from './components/player/SectionMarkers';
 import { LyricsBar } from './components/player/LyricsBar';
 import { TrimControls } from './components/player/TrimControls';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
+import { StreamSpectrum } from './components/player/StreamSpectrum';
 import { RightSidebar } from './components/details/RightSidebar';
 import { MetadataEditorModal } from './components/details/MetadataEditorModal';
 import { CoverArtPromptModal } from './components/library/CoverArtPromptModal';
@@ -272,6 +273,10 @@ const AppContent: React.FC = () => {
   const isStreamTrack = !!currentTrack?.streamJobId;
   const currentSong = currentTrack as (Song | null);  // PlaybackTrack is Song-compatible for rendering
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
+  // Read inside an effect that must NOT re-run when playback state changes —
+  // the auto-play decision is made once, when the stream opens.
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
   const playerActive = usePlaybackSelector(s => s.playerActive);
   const currentTime = usePlaybackSelector(s => s.currentTime);
   const duration = usePlaybackSelector(s => s.duration);
@@ -518,6 +523,7 @@ const AppContent: React.FC = () => {
   const streamingItem = useAudioGenQueueSelector(s =>
     s.items.find(i => i.status === 'generating' && i.jobId && i.mm3Streaming === true) ?? null
   );
+  const mm3StreamState = useMm3StreamAudio();
   const streamingSong = useMemo<Song | null>(() => {
     if (!streamingItem?.jobId) return null;
     const p = (streamingItem.globalParams || {}) as Record<string, any>;
@@ -542,9 +548,29 @@ const AppContent: React.FC = () => {
   // render started from Create and then watched from the Library page must
   // still play. mm3StreamEnsure is idempotent and remembers jobs it has already
   // opened, so it will not reopen one the user deliberately stopped.
+  //
+  // It only auto-plays when the bar is IDLE. Starting a stream over a track the
+  // user is listening to would put two songs through the speakers at once; the
+  // card is there to be clicked instead.
   useEffect(() => {
-    mm3StreamEnsure(streamingItem?.jobId ?? null, streamingItem?.mm3Duration ?? 0);
+    mm3StreamEnsure(streamingItem?.jobId ?? null, streamingItem?.mm3Duration ?? 0, !isPlayingRef.current);
   }, [streamingItem?.jobId, streamingItem?.mm3Duration]);
+
+  // ...and hand the PLAY BAR to it the moment there is audio.
+  //
+  // Without this the stream plays while the bar still points at whatever was
+  // there before: the grid card does not highlight, the waveform never appears
+  // (it renders off currentTrack), and the transport controls the wrong track.
+  // Audio starting and the bar knowing about it have to be the same event.
+  const tookOverRef = useRef<string | null>(null);
+  useEffect(() => {
+    const jobId = mm3StreamState.jobId;
+    if (!jobId || mm3StreamState.chunks === 0 || !streamingSong) return;
+    if (tookOverRef.current === jobId) return;
+    if (!mm3StreamState.playing) return;   // it did not auto-play; leave the bar alone
+    tookOverRef.current = jobId;
+    pbPlay(songToTrack(streamingSong));
+  }, [mm3StreamState.jobId, mm3StreamState.chunks, mm3StreamState.playing, streamingSong]);
 
 
   // Load songs on mount
@@ -1381,11 +1407,16 @@ const AppContent: React.FC = () => {
         >
           <div style={{ overflow: 'hidden', minHeight: 0 }}>
           <SectionMarkers audioUrl={currentTrack?.audioUrl ?? undefined} duration={duration} />
+          {/* Two analysers, one visible at a time. The media-element one must
+              stay mounted forever (it owns a MediaElementSourceNode that carries
+              the file decks' audio — see SpectrumAnalyzer's header), so it is
+              collapsed rather than unmounted while a live render is playing. */}
           <SpectrumAnalyzer
             mediaElement={spectrumMediaEl}
-            visible={spectrumEnabled && playerActive}
+            visible={spectrumEnabled && playerActive && !isStreamTrack}
             isPlaying={isPlaying}
           />
+          <StreamSpectrum visible={spectrumEnabled && playerActive && isStreamTrack} />
           {trimMode && (
             <TrimControls
               trimInPoint={trimInPoint}

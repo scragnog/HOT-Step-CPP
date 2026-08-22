@@ -145,10 +145,12 @@ let sources: AudioBufferSourceNode[] = [];
 /** Playhead while paused. */
 let pausedFrame = 0;
 let playing = false;
-/** The user pressed pause. Kept apart from `playing` so the first window's
- *  auto-start cannot override a deliberate pause made while waiting for it —
- *  which is exactly when someone would press it. */
-let userPaused = false;
+/** INTENT to play, as distinct from `playing` (actually sounding). They differ
+ *  for the whole gap between opening the stream and the first window arriving —
+ *  press play in that window and there is nothing to start yet, so the intent is
+ *  recorded and honoured when audio appears. The reverse also matters: pausing
+ *  while waiting must survive the first window's auto-start. */
+let wantPlay = false;
 
 let netOpen = false;
 let volume = 1.0;
@@ -172,9 +174,25 @@ function positionFrames(): number {
 }
 
 function tick(): void {
-  if (!ac) return;
-  const r = rate || 1;
-  emit({ position: positionFrames() / r });
+  // RE-ARM UNCONDITIONALLY. `ac` does not exist until the first window lands,
+  // which on a fresh plan is ten seconds after the stream opens — an early
+  // `return` here (as the first cut had) kills the loop before there is
+  // anything to report and never restarts it, so the playhead never moves for
+  // the whole render while the audio plays perfectly.
+  if (ac) {
+    const pf = positionFrames();
+    // The end of a finished stream is the end of the track. Without this the
+    // transport sits at 100% still claiming to play, and the play button would
+    // do nothing when pressed.
+    if (playing && state.done && totalFrames > 0 && pf >= totalFrames) {
+      playing = false;
+      wantPlay = false;
+      pausedFrame = totalFrames;
+      emit({ playing: false, position: totalFrames / (rate || 1) });
+    } else {
+      emit({ position: pf / (rate || 1) });
+    }
+  }
   raf = requestAnimationFrame(tick);
 }
 
@@ -266,13 +284,13 @@ function teardown(): void {
   pausedFrame = 0;
 }
 
-async function open(jobId: string, expected: number): Promise<void> {
+async function open(jobId: string, expected: number, autoPlay: boolean): Promise<void> {
   if (netOpen) return;
   // A previous render's context may still be around (its tail played out and was
   // never stopped). Start clean: the new stream has its own timeline.
   teardown();
   netOpen = true;
-  userPaused = false;
+  wantPlay = autoPlay;
   emit({ ...INITIAL, jobId, expected, volume, connected: true });
 
   // Logged because the failure mode of this feature is SILENCE, and silence is
@@ -359,7 +377,7 @@ async function open(jobId: string, expected: number): Promise<void> {
           // Start the transport one headroom from now. The playhead holds at 0
           // until then (positionFrames' max(0, …)) — the pre-buffer the
           // reference Space uses.
-          if (!userPaused) {
+          if (wantPlay) {
             playing = true;
             anchorAt(0, HEADROOM);
           }
@@ -401,7 +419,7 @@ async function open(jobId: string, expected: number): Promise<void> {
         const n = (attempts.get(jobId) ?? 0) + 1;
         attempts.set(jobId, n);
         if (n < MAX_AUTO_ATTEMPTS) {
-          setTimeout(() => { autoOpened.delete(jobId); mm3StreamEnsure(jobId, expected); }, 2000);
+          setTimeout(() => { autoOpened.delete(jobId); mm3StreamEnsure(jobId, expected, autoPlay); }, 2000);
         }
       }
     }
@@ -418,10 +436,10 @@ async function open(jobId: string, expected: number): Promise<void> {
 /** Open the stream for `jobId` if nothing is playing it yet. Idempotent, and it
  *  will not reopen a stream the user stopped on purpose. A null jobId is NOT a
  *  teardown: a render that has just finished still has audio to play. */
-export function mm3StreamEnsure(jobId: string | null, expected = 0): void {
+export function mm3StreamEnsure(jobId: string | null, expected = 0, autoPlay = true): void {
   if (!jobId || netOpen || autoOpened.has(jobId)) return;
   autoOpened.add(jobId);
-  void open(jobId, expected);
+  void open(jobId, expected, autoPlay);
 }
 
 /** Open because the user asked — after they stopped, or after the auto-open gave
@@ -430,11 +448,13 @@ export function mm3StreamStart(jobId: string, expected = 0): void {
   if (netOpen) return;
   autoOpened.add(jobId);
   attempts.delete(jobId);
-  void open(jobId, expected);
+  void open(jobId, expected, true);
 }
 
 export function mm3StreamPlay(): void {
-  userPaused = false;
+  // Recorded even when there is nothing to play yet — the first window will
+  // honour it. This is what makes "press play while it says waiting…" work.
+  wantPlay = true;
   if (!ac || playing) return;
   if (ac.state === 'suspended') {
     void ac.resume().then(() => emit({ needsGesture: ac?.state === 'suspended' }));
@@ -447,7 +467,7 @@ export function mm3StreamPlay(): void {
 }
 
 export function mm3StreamPause(): void {
-  userPaused = true;
+  wantPlay = false;
   if (!playing) return;
   pausedFrame = positionFrames();
   playing = false;
@@ -514,4 +534,16 @@ export function mm3StreamSnapshot(): Mm3StreamState {
  *  bar) rather than components that render it. */
 export function mm3StreamSubscribe(fn: () => void): () => void {
   return subscribe(fn);
+}
+
+/** The live graph, for the spectrum analyser.
+ *
+ *  Returned as (context, node) rather than as a media element because there is
+ *  no media element — and deliberately NOT routed through one. The analyser
+ *  attaches a second audioMotion instance to THIS context with
+ *  `connectSpeakers: false`, so it only observes: the audio path stays
+ *  gain → destination at the stream's own 44.1 kHz, which is what keeps the
+ *  window splices sample-exact. Null until the first window has been decoded. */
+export function mm3StreamGraph(): { ctx: AudioContext; node: AudioNode } | null {
+  return ac && gain ? { ctx: ac, node: gain } : null;
 }
