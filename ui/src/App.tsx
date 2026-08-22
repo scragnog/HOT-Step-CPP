@@ -494,22 +494,6 @@ const AppContent: React.FC = () => {
     return active?.jobId || null;
   });
 
-  // MiniMax-Music3 "play while rendering" — the job currently offering live
-  // audio. Keyed on the ENGINE's confirmation (item.mm3Streaming, set from
-  // /status's mm3_streaming), not on the request flag: a render the engine
-  // declined to stream must look exactly like a render that never asked.
-  const mm3StreamJobId = useAudioGenQueueSelector(s => {
-    const active = s.items.find(i => i.status === 'generating' && i.jobId && i.mm3Streaming === true);
-    return active?.jobId || null;
-  });
-  // Whether that job renders windows while it plans. `false` is worth telling
-  // the user about — it is the difference between audio in seconds and audio
-  // after the planner — so it is a tri-state, not a boolean with a default.
-  const mm3StreamInterleaved = useAudioGenQueueSelector(s => {
-    const active = s.items.find(i => i.status === 'generating' && i.jobId && i.mm3Streaming === true);
-    return active ? active.mm3Interleaved ?? null : null;
-  });
-
   // Load songs on mount
   useEffect(() => {
     if (!token) return;
@@ -1020,8 +1004,6 @@ const AppContent: React.FC = () => {
             activeJobCount={activeJobCount}
             reuseData={reuseData}
             streamJobId={streamJobId}
-            mm3StreamJobId={mm3StreamJobId}
-            mm3StreamInterleaved={mm3StreamInterleaved}
           />
         </DiscoPulseWrapper>
 

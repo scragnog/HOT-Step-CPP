@@ -20,7 +20,7 @@ import { useGlobalParamsStore } from './globalParamsStore';
 import { writePersistedState } from '../hooks/usePersistedState';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
 import { addToPlaylist } from '../components/lyric-studio/playlistStore';
-import type { GenerationParams } from '../types';
+import type { GenerationParams, GenerationJob } from '../types';
 import { resolveDuration } from '../utils/estimateDuration';
 import { createGenerationTimer, getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import { captionForBackend } from '../utils/captionForBackend';
@@ -77,6 +77,25 @@ export interface AudioGenQueueState {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 // (mergeCreatePanelSettings removed — we now use getGlobalParams() snapshot
 // passed in at enqueue time, identical to the Create page path.)
+
+// ── MM3 live audio ───────────────────────────────────────────────────────────
+
+/** Copy the MiniMax-Music3 streaming flags off a status poll onto the item.
+ *
+ *  THERE ARE THREE POLL LOOPS IN THIS FILE — enqueueSimpleGen has its own,
+ *  _pollUntilDone has another, and _tryReconnect a third — and every one of them
+ *  needs this. The first cut of the streaming player set the flag in
+ *  _pollUntilDone alone, so the Create page (which goes through
+ *  enqueueSimpleGen) never showed a player at all while the engine was
+ *  streaming perfectly: 20 windows of audio rendered and nothing to play them.
+ *  A fourth poll loop would need this line too, which is why it is a function
+ *  and not two statements. */
+function _captureMm3Stream(item: AudioQueueItem, status: GenerationJob): void {
+  if (status.mm3_streaming === true && !item.mm3Streaming) item.mm3Streaming = true;
+  if (status.mm3_interleaved !== null && status.mm3_interleaved !== undefined) {
+    item.mm3Interleaved = status.mm3_interleaved;
+  }
+}
 
 // ── Persistence (IndexedDB — no 5MB cap) ─────────────────────────────────────
 // localStorage has a hard 5MB browser limit that large queues (600+ items with
@@ -600,6 +619,7 @@ export async function enqueueSimpleGen(
           : undefined;
         item.stage = status.stage || 'Generating…';
         item.elapsed = t.elapsed;
+        _captureMm3Stream(item, status);
         _emit();  // progress tick — debounced persistence
 
         if (status.status === 'succeeded') {
@@ -888,6 +908,7 @@ async function _tryReconnect(item: AudioQueueItem, _token: string): Promise<bool
 
     // Still running — resume polling
     console.log(`[AudioQueue] Reconnected to job ${jobId} — resuming poll (status=${status.status})`);
+    _captureMm3Stream(item, status);
     item.status = 'generating';
     item.stage = status.stage || 'Reconnected…';
     item.progress = status.progress;
@@ -1111,10 +1132,7 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
         : undefined;
       item.stage = status.stage || 'Generating…';
       item.elapsed = t.elapsed;
-      if (status.mm3_streaming === true && !item.mm3Streaming) item.mm3Streaming = true;
-      if (status.mm3_interleaved !== null && status.mm3_interleaved !== undefined) {
-        item.mm3Interleaved = status.mm3_interleaved;
-      }
+      _captureMm3Stream(item, status);
       _emit();  // progress tick — debounced persistence
 
       if (status.status === 'succeeded') {

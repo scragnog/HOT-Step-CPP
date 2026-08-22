@@ -6,7 +6,7 @@
  * Completed items play through the main player (onPlaySong).
  */
 
-import React, { memo, useCallback, useSyncExternalStore } from 'react';
+import React, { memo, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, CheckCircle2, XCircle, X, Music, Play, Square, ListPlus, Check, Download, RotateCcw } from 'lucide-react';
 import {
@@ -26,6 +26,8 @@ import { downloadTrack } from '../../utils/downloadTrack';
 import { play as pbPlay, audioQueueItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { ToggleSwitch } from '../global-bar/BarSection';
+import { Mm3StreamPlayer } from '../player/Mm3StreamPlayer';
+import { mm3StreamEnsure } from '../../stores/mm3StreamStore';
 
 // ── Send To Playlist toggle reactivity ───────────────────────────────────────
 // Uses a storage event listener so the toggle stays in sync if changed elsewhere.
@@ -59,6 +61,15 @@ export const InlineAudioQueue: React.FC = () => {
   const [sendToPlaylist, setS2P] = useSendToPlaylist();
 
   const active = items.filter(i => i.status === 'loading-adapter' || i.status === 'generating');
+
+  // Open the MM3 live-audio stream as soon as the engine confirms one. The
+  // toggle is called "Play While Rendering", so a user who turned it on wants
+  // audio, not a second button to hunt for. mm3StreamEnsure is idempotent and
+  // remembers jobs it has already opened, so a remount (or a second mounted
+  // sidebar) will not reopen a stream the user deliberately stopped — which
+  // matters because the engine allows exactly one reader per job.
+  const streamingJobId = active.find(i => i.mm3Streaming && i.jobId)?.jobId ?? null;
+  useEffect(() => { mm3StreamEnsure(streamingJobId); }, [streamingJobId]);
   const queued = items.filter(i => i.status === 'pending');
   const finished = items
     .filter(i => i.status === 'succeeded' || i.status === 'failed')
@@ -301,6 +312,17 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
             )}
           </div>
         </div>
+      )}
+
+      {/* MiniMax-Music3 "Play While Rendering": listen to the windows the
+          engine has already finished, while it renders the rest. Lives here
+          rather than on the Create page because this card is what the user is
+          watching, and the sidebar it sits in is mounted on every studio page —
+          so the preview follows the generation instead of being stranded on
+          whichever page started it. mm3Streaming is the ENGINE's confirmation,
+          set by _captureMm3Stream from the /status poll. */}
+      {isRunning && item.mm3Streaming && item.jobId && (
+        <Mm3StreamPlayer jobId={item.jobId} interleaved={item.mm3Interleaved ?? null} />
       )}
 
       {isFailed && item.error && (
