@@ -425,15 +425,21 @@ static ggml_tensor * mm3_lm_attn_f32(ggml_context * ctx, ggml_tensor * q, ggml_t
 //     ne2 (before)  8.13  11.56  15.18  18.65 ms   +43 % per extra take
 //     ne1 (after)   6.99   7.14   7.81   8.24 ms    +6 % per extra take
 //
-// AND IT IS NOT BIT-IDENTICAL. A different kernel sums the same products in a
-// different order, so logits move by an ulp — which the top-k multinomial then
-// amplifies into a different, equally valid trajectory. That is a REGRESSION
-// for anyone re-rendering a saved seed, so it is gated on `want_fold`:
-// MM3LmGraph::fold_rows is false at one take (a single-track render is
-// bit-identical to what it always was) and true from two takes up, where there
-// is no prior behaviour to preserve. MM3_LM_FOLD_ROWS=1/0 overrides either way
-// — 1 buys single-track renders the same ~14 %/step at the cost of seed
-// reproducibility, and it is how the two paths are A/B'd.
+// IT MAY NOT BE BIT-IDENTICAL, AND THAT IS FINE. A different kernel sums the
+// same products in a different order, so a logit can move by an ulp, which the
+// top-k multinomial can amplify into a different — equally valid — song from
+// the same seed. It measured identical over every draw tried, but the argument
+// for shipping it does not rest on that: a render nobody heard has no claim on
+// being reproduced, and any take a listener DID hear is already a wav on disk.
+//
+// What actually has to hold is CORRECTNESS, not reproducibility: the folded
+// kernel must compute the right forward, not merely a different one. That is
+// what check-mm3-ensemble.mjs pins, by replaying the fixture's own codes
+// through the folded decode path and comparing the hidden states and logits
+// against the reference bf16 dumps.
+//
+// On by default at every take count. MM3_LM_FOLD_ROWS=0 restores the old
+// kernels, which is how the two paths are A/B'd.
 //
 // The prefill path is untouched on both settings: there ne1 is already T (the
 // whole prompt), so it is a real GEMM and belongs on the MMQ/cuBLAS path it
@@ -742,11 +748,9 @@ static void mm3_lm_set_takes(MM3LmGraph * g, int takes) {
     if (takes > MM3_MAX_BATCH_ROWS) {
         takes = MM3_MAX_BATCH_ROWS;
     }
-    // Single-track renders keep the kernel they have always used, so a saved
-    // seed still reproduces its song. From two takes up there is no prior
-    // behaviour to preserve and the fold is pure win. MM3_LM_FOLD_ROWS forces
-    // it either way — that override is the A/B, and the parity check
-    // (check-mm3-ensemble.mjs) drives it.
+    // On everywhere, including single-track renders — see the note on
+    // mm3_lm_mm for why reproducing a counterfactual seed is not a thing worth
+    // paying 15 %/step for. MM3_LM_FOLD_ROWS=0 restores the old kernels.
     static const int forced = [] {
         const char * e = std::getenv("MM3_LM_FOLD_ROWS");
         if (!e || !e[0]) {
@@ -754,7 +758,7 @@ static void mm3_lm_set_takes(MM3LmGraph * g, int takes) {
         }
         return e[0] == '0' ? 0 : 1;
     }();
-    const bool fold = forced >= 0 ? forced == 1 : takes > 1;
+    const bool fold = forced >= 0 ? forced == 1 : true;
     if (g->n_takes == takes && g->fold_rows == fold) {
         return;
     }

@@ -128,6 +128,76 @@ if (!fs.existsSync(refPath)) {
   }
 }
 
+// ── 1b. the FOLDED DECODE kernel must be correct, not merely fast ───────────
+//
+// The fold (mm3_lm_mm / mm3_depth_block) swaps which CUDA kernel runs for every
+// decode-step matmul, so it must be checked on the DECODE path — section [1]
+// only exercises the prefill, where no fold happens. Forced replay feeds the
+// fixture's own code sequence so the graph sees exactly the tokens the
+// reference saw, which makes the hidden states and logits directly comparable
+// even though the reference's multinomial draw is not reproducible.
+//
+// This, not seed reproducibility, is the bar the fold has to clear: a different
+// song from the same seed is harmless (nobody heard the other one), but a
+// WRONG forward is not.
+console.log('\n[1b] folded decode path vs the reference, via forced replay');
+{
+  const need = ['codes_semantic_all.bin', 'codes_acoustic_all.bin', 'lm_i1_last_hidden.bin'];
+  if (!need.every((f) => fs.existsSync(path.join(FIX, f)))) {
+    console.log('  SKIP  decode fixtures not present');
+  } else {
+    const H_ = H, SV = 16384, NC = 7;
+    const semAll = readI32(path.join(FIX, 'codes_semantic_all.bin'));
+    const acAll = readI32(path.join(FIX, 'codes_acoustic_all.bin'));
+    const idsCond = readI32(path.join(FIX, 'tok_ids_cond.bin'));
+    const idsUncond = readI32(path.join(FIX, 'tok_ids_uncond.bin'));
+    const ITERS = 4;
+
+    const url = `${URL_BASE}/mm3/lm-plan?dump=${ITERS}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ids_cond: idsCond, ids_uncond: idsUncond,
+        forced_semantic: semAll, forced_acoustic: acAll,
+        max_frames: ITERS + 2, seed: 4242, takes: 1,
+      }),
+    });
+    if (!r.ok) {
+      fail(`forced replay: ${r.status} ${(await r.text()).slice(0, 200)}`);
+    } else {
+      const buf = Buffer.from(await r.arrayBuffer());
+      const all = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      // Body layout (mm3-server.h): prefill_hidden, then per iteration
+      // last_hidden[2H] sem_logits[2SV] guided[SV] feedback[2H] depth_hidden[NC*H].
+      const per = 2 * H_ + 2 * SV + SV + 2 * H_ + NC * H_;
+      for (let it = 1; it < ITERS; it++) {
+        const base = 2 * H_ + it * per;
+        if (base + per > all.length) { fail(`dump truncated at iteration ${it}`); break; }
+        const lh = all.subarray(base, base + 2 * H_);
+        const sl = all.subarray(base + 2 * H_, base + 2 * H_ + 2 * SV);
+        const dh = all.subarray(base + 2 * H_ + 2 * SV + SV + 2 * H_,
+                                base + 2 * H_ + 2 * SV + SV + 2 * H_ + NC * H_);
+        const checks = [
+          ['last_hidden', lh, `lm_i${it}_last_hidden.bin`],
+          ['sem_logits ', sl, `lm_i${it}_semantic_logits.bin`],
+          ['depth_hidden', dh, `lm_i${it}_depth_hidden.bin`],
+        ];
+        for (const [name, got, file] of checks) {
+          const fp = path.join(FIX, file);
+          if (!fs.existsSync(fp)) continue;
+          const ref = readF32(fp);
+          const n = Math.min(got.length, ref.length);
+          const st = compare(got.subarray(0, n), ref.subarray(0, n));
+          const line = `iter ${it} ${name}: corr ${st.corr.toFixed(7)} rmse ${st.relRmse.toExponential(3)}`;
+          if (st.corr < MIN_CORR) fail(`${line}  (below ${MIN_CORR})`);
+          else pass(line);
+        }
+      }
+    }
+  }
+}
+
 // ── 2. takes must be different songs, and reproducible ──────────────────────
 console.log('\n[2] takes are distinct songs, and the batch is deterministic');
 for (const k of TAKES.filter((k) => k > 1)) {

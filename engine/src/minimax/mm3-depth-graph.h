@@ -437,10 +437,9 @@ static void mm3_depth_set_takes(MM3DepthGraph * g, int takes) {
     if (takes > MM3_MAX_BATCH_ROWS) {
         takes = MM3_MAX_BATCH_ROWS;
     }
-    // Mirrors mm3_lm_set_takes: single-track renders keep the kernel they have
-    // always used so a saved seed still reproduces its song, and from two takes
-    // up the fold is pure win. MM3_LM_FOLD_ROWS drives both stages together —
-    // one knob, because they are one decision.
+    // Mirrors mm3_lm_set_takes, and MM3_LM_FOLD_ROWS drives both stages
+    // together — one knob, because it is one decision. On by default at every
+    // take count; =0 restores the old kernels.
     static const int forced = [] {
         const char * e = std::getenv("MM3_LM_FOLD_ROWS");
         if (!e || !e[0]) {
@@ -448,7 +447,7 @@ static void mm3_depth_set_takes(MM3DepthGraph * g, int takes) {
         }
         return e[0] == '0' ? 0 : 1;
     }();
-    const bool fold = forced >= 0 ? forced == 1 : takes > 1;
+    const bool fold = forced >= 0 ? forced == 1 : true;
     if (g->n_takes == takes && g->fold_rows == fold) {
         return;
     }
