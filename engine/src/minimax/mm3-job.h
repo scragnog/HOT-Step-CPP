@@ -837,7 +837,13 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         const WavFormat sfmt = req.wav_bits == 32 ? WAV_F32 : (req.wav_bits == 24 ? WAV_S24 : WAV_S16);
         auto            q    = st->stream;
         const std::string jid = job->id;
-        req.gen.on_chunk = [q, sfmt, jid](int64_t seq, int64_t off, int64_t n, const float * planar, int sr) {
+        // The take index arrives but is not routed yet: this job layer still
+        // owns exactly one stream queue, so it only ever runs one-take renders
+        // (mm3_generate_takes with K = 1). Multi-take streaming needs a queue
+        // per take, which is the next increment.
+        req.gen.on_chunk = [q, sfmt, jid](int take, int64_t seq, int64_t off, int64_t n, const float * planar,
+                                          int sr) {
+            (void) take;
             // A degenerate final window can crop to nothing. Emitting a
             // header-only WAV would be harmless here but `DataSink::write`
             // treats a zero-length write as end-of-stream, so skip it.

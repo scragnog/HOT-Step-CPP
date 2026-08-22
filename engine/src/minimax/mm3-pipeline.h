@@ -158,7 +158,8 @@ using MM3ProgressCb = std::function<void(const MM3GenProgress &)>;
 // returns — but it is why the sink is opt-in rather than always on. A render
 // with no sink keeps today's exact stage order, VRAM profile and graph-cache
 // behaviour, byte for byte.
-using MM3ChunkCb = std::function<void(int64_t seq, int64_t sample_offset, int64_t n_samples, const float * planar,
+using MM3ChunkCb = std::function<void(int take, int64_t seq, int64_t sample_offset, int64_t n_samples,
+                                      const float * planar,
                                       int sample_rate)>;
 
 // Which span of a vocoded window survives the stitch (fact 4). THE one place
@@ -640,6 +641,44 @@ struct MM3GenRequest {
     bool       stream_interleave = false;
 };
 
+struct MM3GenResult;
+
+// Everything stage 2 carries from one window to the next, for ONE take.
+//
+// Ensemble renders run K of these side by side: the takes decode in lockstep in
+// stage 1, so window k becomes dispatchable for all of them at the same moment,
+// and they then advance together instead of one song finishing before the next
+// starts. That is the difference between "three streams growing" and "three
+// renders queued".
+//
+// Splitting this out is also what keeps `process_window` the ONLY copy of the
+// per-window body — the alternative was a second, take-aware version of it,
+// and two pieces of crop arithmetic that merely look alike is exactly the bug
+// this file is written to avoid.
+struct MM3TakeRun {
+    MM3GenResult * out = nullptr;
+    // Re-read per window, never cached: while interleaving, the planner is
+    // still appending to this take's frame_hiddens between dispatches.
+    std::function<const float *()> hiddens;
+
+    std::vector<std::vector<float>> chunk_latents;
+    std::vector<std::vector<float>> wavs;
+    std::vector<float>              prev_latent;  // [128, 172] channel-major
+    int64_t                         prev_len = 0;
+    std::vector<float>              prev_cond;    // [172, 2048] row-major
+    int64_t                         stream_offset = 0;  // samples/ch already emitted
+    int64_t                         windows_done  = 0;  // next window index to dispatch
+    MM3PluginRun                    plugin_run;
+    // This take's flow-noise seed: req.seed + take index, so take 0 is exactly
+    // the noise a single-track render at that seed has always drawn.
+    uint64_t                        seed = 0;
+
+    // Settled once the planner stops (per take — an early EOS makes them differ).
+    std::vector<int64_t> starts;
+    int64_t              F  = 0;
+    int64_t              NW = 0;
+};
+
 struct MM3GenResult {
     std::vector<float> audio;        // planar stereo: [ch0 T][ch1 T]
     int64_t            n_samples = 0;  // T, per channel
@@ -681,12 +720,23 @@ struct MM3GenResult {
 
 // ── The assembly ────────────────────────────────────────────────────────────
 
-// Plan, condition, denoise, vocode and stitch one song.
+// Plan, condition, denoise, vocode and stitch K songs from one prompt.
+//
+// `outs` is an array of `takes` results. Stage 1 decodes all K in a single
+// batched AR pass (mm3-ar-loop.h); stage 2 then runs per take, window by
+// window, so the takes advance TOGETHER rather than one song completing before
+// the next begins. With a streaming sink installed that is K streams growing
+// side by side.
+//
+// takes == 1 is the single-song path, unchanged in every observable way: one
+// MM3TakeRun, take 0's seed is `req.seed`, and the AR reduces to the loop it
+// always ran. mm3_generate() below is the one-take wrapper every existing
+// caller still uses.
 //
 // `tok` is loaded on demand and only when the request carries a prompt rather
 // than explicit ids.
-static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Tokenizer * tok,
-                         const MM3ProgressCb & progress, MM3GenResult * out, std::string * err) {
+static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM3Tokenizer * tok,
+                               const MM3ProgressCb & progress, MM3GenResult * outs, int takes, std::string * err) {
     const auto t_all = std::chrono::steady_clock::now();
 
     const MM3LmConfig &   lc = m.lm_cfg;
@@ -699,11 +749,19 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     const int64_t CH  = (int64_t) m.synth_cfg.dit.in_channels;  // 128
     const int64_t UP  = (int64_t) vc.total_upsample;            // 512
 
+    // Ensemble takes, clamped to the row budget the AR kernels can serve
+    // (mm3-model.h). Clamped rather than rejected, and mm3_ar_plan_takes logs
+    // when it bites, so a caller asking for more than the checkpoint allows
+    // gets fewer songs rather than an error.
+    const int K = mm3_clamp_takes(m.lm_cfg, takes);
+
     const int64_t win_frames = m.synth_cfg.dit.window_frames ? (int64_t) m.synth_cfg.dit.window_frames : 200;
     const int64_t hop_frames = m.synth_cfg.dit.hop_frames ? (int64_t) m.synth_cfg.dit.hop_frames : 100;
 
-    *out = MM3GenResult{};
-    out->sample_rate = (int) vc.sampling_rate;
+    for (int t = 0; t < K; t++) {
+        outs[t]             = MM3GenResult{};
+        outs[t].sample_rate = (int) vc.sampling_rate;
+    }
 
     // ── token ids ──
     std::vector<int32_t> ids_cond = req.ids_cond, ids_uncond = req.ids_uncond;
@@ -804,36 +862,54 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     //     construction; this is the belt, and it fails SAFE (serial).
     const bool interleave = req.stream_interleave && streaming && !req.cached_hiddens && !req.after_ar;
 
-    std::vector<std::vector<float>> chunk_latents;
-    std::vector<std::vector<float>> wavs;
-    std::vector<float>              prev_latent;  // [128, 172] channel-major
-    int64_t                         prev_len = 0;
-    std::vector<float>              prev_cond;    // [172, 2048] row-major (rows = latent frames)
-    std::vector<float>              cond;
-    std::vector<float>              noise;
-    int64_t                         stream_offset = 0;  // samples/channel already emitted
-    std::vector<float>              stream_buf;         // scratch for the cropped chunk
-    int64_t                         windows_done  = 0;  // == the next window index to dispatch
+    // SHARED scratch. Safe to share across takes because process_window is
+    // called serially — never two windows in flight at once.
+    std::vector<float> cond;
+    std::vector<float> noise;
+    std::vector<float> stream_buf;  // scratch for the cropped chunk
 
     // Resolve the plugin selection ONCE per song, not once per window: the
     // lookup logs what will run, and repeating it per window would spam the
     // engine log with the same three lines for every 200-frame chunk. The
     // per-window state reset lives in MM3PluginRun::begin_window instead.
-    MM3PluginRun plugin_run = mm3_plugins_resolve(req.plugins);
+    // Resolved once and copied per take, so K takes do not produce K copies of
+    // the same three log lines.
+    const MM3PluginRun plugin_proto = mm3_plugins_resolve(req.plugins);
 
-    // The condition encoder's input, from whichever source. Borrowed on a cache
-    // hit; owned by `out->ar` otherwise. Neither is written to - mm3_cond_encode
-    // takes it as `const float *`.
+    // THE PLANNER'S OUTPUT LIVES HERE FOR THE WHOLE CALL, and is moved onto
+    // `outs` only at the very end.
     //
-    // RE-READ PER WINDOW, never cached in a local. While interleaving, the AR
-    // loop is still appending to `out->ar.frame_hiddens` between dispatches.
-    // mm3-ar-loop.h reserves the full max_frames block up front so it does not
-    // in fact reallocate - but a `const float * const` captured before the
-    // planner ran would be a dangling pointer the day that reserve changes, and
-    // the failure would be silent garbage audio.
-    auto hid = [&]() -> const float * {
-        return req.cached_hiddens ? req.cached_hiddens : out->ar.frame_hiddens.data();
-    };
+    // It cannot be written straight into outs[t].ar and it cannot be moved
+    // across early: while interleaving, `st.hiddens()` is re-read on every
+    // dispatched window WHILE the planner is still appending. Moving the block
+    // mid-call leaves the streaming path reading a hollowed-out vector — which
+    // is exactly the crash this shape prevents.
+    std::vector<MM3ArResult> ars((size_t) K);
+
+    std::vector<MM3TakeRun> tk((size_t) K);
+    for (int t = 0; t < K; t++) {
+        MM3TakeRun & st = tk[(size_t) t];
+        st.out          = &outs[t];
+        st.plugin_run   = plugin_proto;
+        // Take 0 draws exactly the noise a single-track render at this seed has
+        // always drawn; the others are offset so their flow noise is their own.
+        st.seed = req.seed + (uint64_t) t;
+        // The condition encoder's input, from whichever source. Borrowed on a
+        // cache hit; owned by outs[t].ar otherwise. Neither is written to —
+        // mm3_cond_encode takes it as `const float *`.
+        //
+        // RE-READ PER WINDOW, never cached in a local. While interleaving, the
+        // AR loop is still appending to frame_hiddens between dispatches.
+        // mm3-ar-loop.h reserves the full max_frames block up front so it does
+        // not in fact reallocate — but a `const float * const` captured before
+        // the planner ran would be a dangling pointer the day that reserve
+        // changes, and the failure would be silent garbage audio.
+        MM3ArResult * arp    = &ars[(size_t) t];
+        const float * cached = (t == 0) ? req.cached_hiddens : nullptr;
+        st.hiddens           = [arp, cached]() -> const float * {
+            return cached ? cached : arp->frame_hiddens.data();
+        };
+    }
 
     // How many windows a full-length plan would produce. Only ever used for
     // progress reporting while the true count is still unknown.
@@ -856,7 +932,13 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     MM3ProgressCb window_report = progress;
     if (interleave && progress) {
         window_report = [&](const MM3GenProgress &) {
-            progress(MM3GenProgress{ "stream", windows_done, nw_estimate, ar_frames_done, req.max_frames });
+            // The leading take's window count: they advance in lockstep, so this
+            // is how far the render as a whole has got.
+            int64_t done = 0;
+            for (const MM3TakeRun & s : tk) {
+                done = s.windows_done > done ? s.windows_done : done;
+            }
+            progress(MM3GenProgress{ "stream", done, nw_estimate, ar_frames_done, req.max_frames });
         };
     }
 
@@ -867,10 +949,12 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     //   wf       frames in the window (200, or shorter for the final one)
     //   is_last  no window follows - decides the right crop, and getting it
     //            wrong truncates the ending
-    auto process_window = [&](int64_t k, int64_t cs, int64_t wf, bool is_last, int64_t nw_hint,
+    auto process_window = [&](int t, int64_t k, int64_t cs, int64_t wf, bool is_last, int64_t nw_hint,
                               const MM3ProgressCb & rep) -> bool {
-        chunk_latents.resize((size_t) k + 1);
-        wavs.resize((size_t) k + 1);
+        MM3TakeRun &   st  = tk[(size_t) t];
+        MM3GenResult * out = st.out;
+        st.chunk_latents.resize((size_t) k + 1);
+        st.wavs.resize((size_t) k + 1);
         out->chunk_frames.push_back(wf);
 
         if (bail()) {
@@ -881,16 +965,16 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
         }
         const auto t_c = std::chrono::steady_clock::now();
         int64_t    L   = 0;
-        if (!mm3_cond_encode(m, hid() + (size_t) (cs * LAY * H), wf, cond, &L, err)) {
+        if (!mm3_cond_encode(m, st.hiddens() + (size_t) (cs * LAY * H), wf, cond, &L, err)) {
             return false;
         }
         out->cond_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_c).count();
         out->window_L.push_back(L);
 
         // (3a) the previous window's conditioning wins over the overlap.
-        const int64_t overlap = prev_len > 0 ? (prev_len < L ? prev_len : L) : 0;
+        const int64_t overlap = st.prev_len > 0 ? (st.prev_len < L ? st.prev_len : L) : 0;
         if (overlap > 0) {
-            memcpy(cond.data(), prev_cond.data(), (size_t) (overlap * (int64_t) cc.out_dim) * sizeof(float));
+            memcpy(cond.data(), st.prev_cond.data(), (size_t) (overlap * (int64_t) cc.out_dim) * sizeof(float));
         }
         out->window_overlap.push_back(overlap);
 
@@ -901,7 +985,7 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
             noise  = req.forced_noise[(size_t) k];
             forced = true;
         } else {
-            mm3_fill_noise(req.seed, k, noise, NN);
+            mm3_fill_noise(st.seed, k, noise, NN);
         }
         out->forced_noise_used.push_back(forced ? 1 : 0);
 
@@ -916,8 +1000,8 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
             }
         };
         if (!mm3_flow_sample_chunk(m, noise.data(), cond.data(), L, req.steps, req.cfg_flow, overlap,
-                                   overlap > 0 ? prev_latent.data() : nullptr, prev_len, lat, &fstats, on_step,
-                                   req.should_cancel, err, &plugin_run)) {
+                                   overlap > 0 ? st.prev_latent.data() : nullptr, st.prev_len, lat, &fstats, on_step,
+                                   req.should_cancel, err, &st.plugin_run)) {
             return false;
         }
         out->flow_ms += fstats.total_ms;
@@ -927,16 +1011,17 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
         // (3) carry: latents[L-344 : L-172] and the matching condition rows.
         const int64_t ostart = L - MM3_CARRY_SPAN_LATENTS > 0 ? L - MM3_CARRY_SPAN_LATENTS : 0;
         const int64_t oend   = L - MM3_OVERLAP_LATENTS > ostart ? L - MM3_OVERLAP_LATENTS : ostart;
-        prev_len             = oend - ostart;
-        prev_latent.assign((size_t) (CH * prev_len), 0.0f);
+        st.prev_len          = oend - ostart;
+        st.prev_latent.assign((size_t) (CH * st.prev_len), 0.0f);
         for (int64_t c = 0; c < CH; c++) {
-            memcpy(prev_latent.data() + c * prev_len, lat.data() + c * L + ostart, (size_t) prev_len * sizeof(float));
+            memcpy(st.prev_latent.data() + c * st.prev_len, lat.data() + c * L + ostart,
+                   (size_t) st.prev_len * sizeof(float));
         }
-        prev_cond.assign((size_t) (prev_len * (int64_t) cc.out_dim), 0.0f);
-        memcpy(prev_cond.data(), cond.data() + ostart * (int64_t) cc.out_dim,
-               (size_t) (prev_len * (int64_t) cc.out_dim) * sizeof(float));
+        st.prev_cond.assign((size_t) (st.prev_len * (int64_t) cc.out_dim), 0.0f);
+        memcpy(st.prev_cond.data(), cond.data() + ostart * (int64_t) cc.out_dim,
+               (size_t) (st.prev_len * (int64_t) cc.out_dim) * sizeof(float));
 
-        chunk_latents[(size_t) k] = std::move(lat);
+        st.chunk_latents[(size_t) k] = std::move(lat);
 
         // -- streaming: vocode + emit this window now --
         // The carry above is everything window k+1 needs; window k's own
@@ -951,7 +1036,7 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
                 rep(MM3GenProgress{ "vocode", k, nw_hint, 0, 1 });
             }
             const auto t_v1 = std::chrono::steady_clock::now();
-            if (!mm3_vocoder_decode(m, chunk_latents[(size_t) k].data(), L, wavs[(size_t) k], err)) {
+            if (!mm3_vocoder_decode(m, st.chunk_latents[(size_t) k].data(), L, st.wavs[(size_t) k], err)) {
                 return false;
             }
             out->voc_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_v1).count();
@@ -960,17 +1045,17 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
             mm3_window_crop_lr(k == 0, is_last, L, UP, &left, &len);
             stream_buf.assign((size_t) (2 * len), 0.0f);
             for (int ch = 0; ch < 2; ch++) {
-                const float * src = wavs[(size_t) k].data() + (int64_t) ch * (L * UP) + left;
+                const float * src = st.wavs[(size_t) k].data() + (int64_t) ch * (L * UP) + left;
                 float *       dst = stream_buf.data() + (int64_t) ch * len;
                 for (int64_t i = 0; i < len; i++) {
                     dst[i] = mm3_clamp_sample(src[i]);
                 }
             }
-            req.on_chunk(k, stream_offset, len, stream_buf.data(), out->sample_rate);
-            stream_offset += len;
+            req.on_chunk(t, k, st.stream_offset, len, stream_buf.data(), out->sample_rate);
+            st.stream_offset += len;
         }
 
-        windows_done = k + 1;
+        st.windows_done = k + 1;
         return true;
     };
 
@@ -989,36 +1074,49 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     // Assigned here rather than beside the other aopt fields because it needs
     // `interleave` and `windows_done`, and because the frame count has to be
     // tracked whether or not anyone is listening to progress.
+    aopt.n_takes  = K;
     aopt.on_frame = [&](int64_t f, int64_t total) {
         ar_frames_done = f;
         if (!progress) {
             return;
         }
         if (interleave) {
-            progress(MM3GenProgress{ "stream", windows_done, nw_estimate, f, total });
+            progress(MM3GenProgress{ "stream", tk[0].windows_done, nw_estimate, f, total });
         } else {
             progress(MM3GenProgress{ "ar", -1, 0, f, total });
         }
     };
 
     if (interleave) {
-        aopt.on_frame_ready = [&](int64_t frames, std::string * e) -> bool {
-            while (windows_done * hop_frames + win_frames + 1 <= frames) {
-                const int64_t k  = windows_done;
-                const auto    t0 = std::chrono::steady_clock::now();
-                const bool    ok =
-                    process_window(k, k * hop_frames, win_frames, /*is_last=*/false, nw_estimate, window_report);
-                dispatch_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-                if (!ok) {
-                    if (e && err && e != err) {
-                        *e = *err;
+        // Dispatch every window whose geometry has settled, FOR EVERY TAKE.
+        //
+        // The takes decode in lockstep, so their counts move together and a
+        // window becomes dispatchable for all of them in the same iteration —
+        // which is what makes K streams grow side by side rather than in
+        // series. A take that hit EOS early simply stops qualifying; its
+        // `frames[t]` stops rising and the loop below stops finding work for it.
+        aopt.on_takes_frame_ready = [&](const int64_t * frames, int n, std::string * e) -> bool {
+            for (int t = 0; t < n; t++) {
+                MM3TakeRun & st = tk[(size_t) t];
+                while (st.windows_done * hop_frames + win_frames + 1 <= frames[t]) {
+                    const int64_t k  = st.windows_done;
+                    const auto    t0 = std::chrono::steady_clock::now();
+                    const bool    ok = process_window(t, k, k * hop_frames, win_frames, /*is_last=*/false,
+                                                      nw_estimate, window_report);
+                    dispatch_ms +=
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                    if (!ok) {
+                        if (e && err && e != err) {
+                            *e = *err;
+                        }
+                        return false;
                     }
-                    return false;
                 }
             }
             return true;
         };
-        fprintf(stderr, "[MM3-Pipe] interleaved streaming: windows dispatch while the planner is still running\n");
+        fprintf(stderr, "[MM3-Pipe] interleaved streaming: %d take(s) dispatch while the planner is still running\n",
+                K);
     }
 
     if (req.cached_hiddens) {
@@ -1026,68 +1124,99 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
         // AR-affecting inputs have not changed, so there is nothing to compute.
         // The codes and the LRC are NOT reproduced here — the cache holds those
         // too and the job layer copies them back onto the result.
-        out->ar_cached   = true;
-        out->ar_ms       = 0.0;
-        out->ar.n_frames = req.cached_frames;
+        //
+        // The cache holds ONE plan, so a hit is a one-take render by
+        // construction; mm3-job.h never offers a cached block for K > 1.
+        outs[0].ar_cached = true;
+        outs[0].ar_ms     = 0.0;
+        ars[0].n_frames   = req.cached_frames;
     } else {
         const auto t_ar = std::chrono::steady_clock::now();
-        if (!mm3_ar_plan(m, ids_cond.data(), ids_uncond.data(), (int64_t) ids_cond.size(), aopt, &out->ar, err)) {
+        // One batched pass for all K takes. Every take's result lands in its own
+        // MM3ArResult, and take 0 carries the shared stage timings.
+        if (!mm3_ar_plan_takes(m, ids_cond.data(), ids_uncond.data(), (int64_t) ids_cond.size(), aopt, ars.data(),
+                               err)) {
             return false;
         }
-        out->ar_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_ar).count();
+        double ar_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_ar).count();
         // See `dispatch_ms`: on an interleaved run the windows rendered inside
         // this call are not planning time.
-        out->ar_ms -= dispatch_ms;
-        if (out->ar_ms < 0.0) {
-            out->ar_ms = 0.0;
+        ar_ms -= dispatch_ms;
+        if (ar_ms < 0.0) {
+            ar_ms = 0.0;
+        }
+        // The planning cost is ONE batched pass, so it is reported whole on
+        // every take rather than divided — dividing would imply each take could
+        // have been had for that price, which is the opposite of the point.
+        for (int t = 0; t < K; t++) {
+            outs[t].ar_ms = ar_ms;
         }
     }
-    out->frames = out->ar.n_frames;
-
-    const int64_t F = out->ar.n_frames;
-    if (F <= 0) {
-        if (err) {
-            *err = req.cached_hiddens ? "the cached AR block claims zero frames" : "the AR stage emitted zero frames";
-        }
-        return false;
-    }
-    if (!req.cached_hiddens && (int64_t) out->ar.frame_hiddens.size() != F * LAY * H) {
-        if (err) {
-            *err = "the AR stage returned a frame-hidden block of the wrong size";
-        }
-        return false;
+    for (int t = 0; t < K; t++) {
+        outs[t].frames = ars[(size_t) t].n_frames;
     }
 
-    // -- window plan (fact 1), now that F is known --
-    std::vector<int64_t> starts;
-    if (F <= win_frames) {
-        starts.push_back(0);
-    } else {
-        for (int64_t s = 0; s < F - hop_frames; s += hop_frames) {
-            starts.push_back(s);
-        }
-    }
-    const int64_t NW  = (int64_t) starts.size();
-    out->n_windows    = NW;
-    out->chunk_starts = starts;
-
-    // Anything already dispatched must agree with the plan that just settled.
-    // It does by construction (see the `+ 1` note above), but a mismatch here is
-    // a mis-cropped or mis-placed window, and the only instrument that would
-    // notice is an ear - so it is checked rather than trusted.
-    if (windows_done > NW) {
-        if (err) {
-            *err = "streaming dispatched more windows (" + std::to_string(windows_done) + ") than the plan holds (" +
-                   std::to_string(NW) + ")";
-        }
-        return false;
-    }
-    for (int64_t k = 0; k < windows_done; k++) {
-        if (starts[(size_t) k] != k * hop_frames || out->chunk_frames[(size_t) k] != win_frames || k == NW - 1) {
+    // -- window plan (fact 1), now that each take's F is known --
+    //
+    // PER TAKE, because an early EOS makes the frame counts differ: take 1 can
+    // be a full-length song while take 2 stopped at 40 s, and they then have
+    // different window counts and different final-window geometry.
+    for (int t = 0; t < K; t++) {
+        MM3TakeRun &   st  = tk[(size_t) t];
+        MM3GenResult * out = st.out;
+        const int64_t  F   = ars[(size_t) t].n_frames;
+        if (F <= 0) {
             if (err) {
-                *err = "a streamed window disagrees with the settled window plan at index " + std::to_string(k);
+                *err = req.cached_hiddens ? "the cached AR block claims zero frames"
+                                          : "the AR stage emitted zero frames";
+                if (K > 1) {
+                    *err += " (take " + std::to_string(t) + ")";
+                }
             }
             return false;
+        }
+        if (!(t == 0 && req.cached_hiddens) && (int64_t) ars[(size_t) t].frame_hiddens.size() != F * LAY * H) {
+            if (err) {
+                *err = "the AR stage returned a frame-hidden block of the wrong size";
+                if (K > 1) {
+                    *err += " (take " + std::to_string(t) + ")";
+                }
+            }
+            return false;
+        }
+
+        if (F <= win_frames) {
+            st.starts.push_back(0);
+        } else {
+            for (int64_t s = 0; s < F - hop_frames; s += hop_frames) {
+                st.starts.push_back(s);
+            }
+        }
+        st.F              = F;
+        st.NW             = (int64_t) st.starts.size();
+        out->n_windows    = st.NW;
+        out->chunk_starts = st.starts;
+
+        // Anything already dispatched must agree with the plan that just
+        // settled. It does by construction (see the `+ 1` note above), but a
+        // mismatch here is a mis-cropped or mis-placed window, and the only
+        // instrument that would notice is an ear — so it is checked rather than
+        // trusted.
+        if (st.windows_done > st.NW) {
+            if (err) {
+                *err = "streaming dispatched more windows (" + std::to_string(st.windows_done) +
+                       ") than the plan holds (" + std::to_string(st.NW) + ")";
+            }
+            return false;
+        }
+        for (int64_t k = 0; k < st.windows_done; k++) {
+            if (st.starts[(size_t) k] != k * hop_frames || out->chunk_frames[(size_t) k] != win_frames ||
+                k == st.NW - 1) {
+                if (err) {
+                    *err = "a streamed window disagrees with the settled window plan at index " + std::to_string(k);
+                }
+                return false;
+            }
         }
     }
 
@@ -1117,87 +1246,126 @@ static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Token
     // tail - the short final window, and whichever full windows the planner
     // outran. Same function either way, which is the whole point of it being a
     // function.
-    for (int64_t k = windows_done; k < NW; k++) {
-        const int64_t cs = starts[(size_t) k];
-        const int64_t ce = (cs + win_frames < F) ? cs + win_frames : F;
-        if (!process_window(k, cs, ce - cs, /*is_last=*/k == NW - 1, NW, progress)) {
-            return false;
+    // Round-robin over takes rather than take-by-take: on a serial (non
+    // interleaved) run this is what keeps K streams growing together instead of
+    // the first song finishing before the second starts. Takes that have run
+    // out of windows are simply skipped.
+    {
+        int64_t max_nw = 0;
+        for (int t = 0; t < K; t++) {
+            max_nw = tk[(size_t) t].NW > max_nw ? tk[(size_t) t].NW : max_nw;
+        }
+        for (int64_t k = 0; k < max_nw; k++) {
+            for (int t = 0; t < K; t++) {
+                MM3TakeRun & st = tk[(size_t) t];
+                if (k < st.windows_done || k >= st.NW) {
+                    continue;
+                }
+                const int64_t cs = st.starts[(size_t) k];
+                const int64_t ce = (cs + win_frames < st.F) ? cs + win_frames : st.F;
+                if (!process_window(t, k, cs, ce - cs, /*is_last=*/k == st.NW - 1, st.NW, progress)) {
+                    return false;
+                }
+            }
         }
     }
 
-    // ── stage 3: vocode + stitch (fact 4) ──
+    // ── stage 3: vocode + stitch (fact 4), per take ──
     // Already done, window by window, when a streaming sink is installed.
-    if (!streaming) {
-        const auto t_v = std::chrono::steady_clock::now();
+    for (int t = 0; t < K; t++) {
+        MM3TakeRun &   st  = tk[(size_t) t];
+        MM3GenResult * out = st.out;
+        const int64_t  NW  = st.NW;
+
+        if (!streaming) {
+            const auto t_v = std::chrono::steady_clock::now();
+            for (int64_t k = 0; k < NW; k++) {
+                if (bail()) {
+                    return false;
+                }
+                if (progress) {
+                    progress(MM3GenProgress{ "vocode", k, NW, 0, 1 });
+                }
+                if (!mm3_vocoder_decode(m, st.chunk_latents[(size_t) k].data(), out->window_L[(size_t) k],
+                                        st.wavs[(size_t) k], err)) {
+                    return false;
+                }
+            }
+            out->voc_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_v).count();
+        }
+
+        if (progress) {
+            progress(MM3GenProgress{ "stitch", -1, NW, 0, 1 });
+        }
+
+        std::vector<int64_t> keep_left((size_t) NW), keep_len((size_t) NW);
+        int64_t              total = 0;
         for (int64_t k = 0; k < NW; k++) {
-            if (bail()) {
-                return false;
-            }
-            if (progress) {
-                progress(MM3GenProgress{ "vocode", k, NW, 0, 1 });
-            }
-            if (!mm3_vocoder_decode(m, chunk_latents[(size_t) k].data(), out->window_L[(size_t) k], wavs[(size_t) k],
-                                    err)) {
-                return false;
-            }
+            mm3_window_crop(k, NW, out->window_L[(size_t) k], UP, &keep_left[(size_t) k], &keep_len[(size_t) k]);
+            total += keep_len[(size_t) k];
         }
-        out->voc_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_v).count();
+
+        out->audio.assign((size_t) (2 * total), 0.0f);
+        out->n_samples = total;
+        int64_t at = 0;
+        for (int64_t k = 0; k < NW; k++) {
+            const int64_t T = out->window_L[(size_t) k] * UP;
+            for (int ch = 0; ch < 2; ch++) {
+                memcpy(out->audio.data() + (int64_t) ch * total + at,
+                       st.wavs[(size_t) k].data() + (int64_t) ch * T + keep_left[(size_t) k],
+                       (size_t) keep_len[(size_t) k] * sizeof(float));
+            }
+            at += keep_len[(size_t) k];
+        }
+
+        double sum_sq = 0.0;
+        for (float & v : out->audio) {
+            if (std::isnan(v) || std::isinf(v)) {
+                out->has_nan = true;
+            }
+            // Same expression the streaming sink applied to its copy — that
+            // identity is what makes the streamed concatenation bit-identical.
+            v = mm3_clamp_sample(v);
+            const float a = std::fabs(v);
+            if (a > out->peak) {
+                out->peak = a;
+            }
+            sum_sq += (double) v * (double) v;
+        }
+        out->rms = out->audio.empty() ? 0.0 : std::sqrt(sum_sq / (double) out->audio.size());
+
+        if (req.keep_window_latents) {
+            out->window_latents = std::move(st.chunk_latents);
+        }
+
+        out->total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_all).count();
+
+        fprintf(stderr,
+                "[MM3-Pipe] %s%lld frames -> %lld window(s) -> %lld samples/ch (%.2fs @ %d Hz) | "
+                "AR %.0f ms%s, cond %.0f ms, flow %.0f ms, voc %.0f ms, total %.0f ms\n",
+                K > 1 ? ("take " + std::to_string(t) + ": ").c_str() : "", (long long) st.F, (long long) NW,
+                (long long) total, (double) total / (double) (out->sample_rate > 0 ? out->sample_rate : 1),
+                out->sample_rate, out->ar_ms, out->ar_cached ? " (cached)" : "", out->cond_ms, out->flow_ms,
+                out->voc_ms, out->total_ms);
+    }
+
+    // Safe now: every window is rendered, so nothing reads `ars` again.
+    for (int t = 0; t < K; t++) {
+        outs[t].ar = std::move(ars[(size_t) t]);
     }
 
     if (progress) {
-        progress(MM3GenProgress{ "stitch", -1, NW, 0, 1 });
+        progress(MM3GenProgress{ "done", -1, tk[0].NW, tk[0].NW, tk[0].NW });
     }
-
-    std::vector<int64_t> keep_left((size_t) NW), keep_len((size_t) NW);
-    int64_t              total = 0;
-    for (int64_t k = 0; k < NW; k++) {
-        mm3_window_crop(k, NW, out->window_L[(size_t) k], UP, &keep_left[(size_t) k], &keep_len[(size_t) k]);
-        total += keep_len[(size_t) k];
+    if (K > 1) {
+        fprintf(stderr, "[MM3-Pipe] %d takes from one prompt in %.0f ms (one batched plan + %d flow passes)\n", K,
+                outs[0].total_ms, K);
     }
-
-    out->audio.assign((size_t) (2 * total), 0.0f);
-    out->n_samples = total;
-    int64_t at = 0;
-    for (int64_t k = 0; k < NW; k++) {
-        const int64_t T = out->window_L[(size_t) k] * UP;
-        for (int ch = 0; ch < 2; ch++) {
-            memcpy(out->audio.data() + (int64_t) ch * total + at,
-                   wavs[(size_t) k].data() + (int64_t) ch * T + keep_left[(size_t) k],
-                   (size_t) keep_len[(size_t) k] * sizeof(float));
-        }
-        at += keep_len[(size_t) k];
-    }
-
-    double sum_sq = 0.0;
-    for (float & v : out->audio) {
-        if (std::isnan(v) || std::isinf(v)) {
-            out->has_nan = true;
-        }
-        // Same expression the streaming sink applied to its copy — that
-        // identity is what makes the streamed concatenation bit-identical.
-        v = mm3_clamp_sample(v);
-        const float a = std::fabs(v);
-        if (a > out->peak) {
-            out->peak = a;
-        }
-        sum_sq += (double) v * (double) v;
-    }
-    out->rms = out->audio.empty() ? 0.0 : std::sqrt(sum_sq / (double) out->audio.size());
-
-    if (req.keep_window_latents) {
-        out->window_latents = std::move(chunk_latents);
-    }
-
-    out->total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_all).count();
-    if (progress) {
-        progress(MM3GenProgress{ "done", -1, NW, NW, NW });
-    }
-
-    fprintf(stderr,
-            "[MM3-Pipe] %lld frames -> %lld window(s) -> %lld samples/ch (%.2fs @ %d Hz) | "
-            "AR %.0f ms%s, cond %.0f ms, flow %.0f ms, voc %.0f ms, total %.0f ms\n",
-            (long long) F, (long long) NW, (long long) total,
-            (double) total / (double) (out->sample_rate > 0 ? out->sample_rate : 1), out->sample_rate, out->ar_ms,
-            out->ar_cached ? " (cached)" : "", out->cond_ms, out->flow_ms, out->voc_ms, out->total_ms);
     return true;
+}
+
+// Render ONE song — the shape every existing caller was written against.
+static bool mm3_generate(const MM3Model & m, const MM3GenRequest & req, MM3Tokenizer * tok,
+                         const MM3ProgressCb & progress, MM3GenResult * out, std::string * err) {
+    return mm3_generate_takes(m, req, tok, progress, out, 1, err);
 }
