@@ -638,6 +638,58 @@ all-manual-attention cost, live in every get_lrc render); runtime LM adapter r25
 ms/step (+28 %, not the hoped +9 %: 252 modules ≈ +1000 nodes on a 2545-node decode graph —
 launch overhead, not just the +8 % streaming).
 
+## Caption composer: plain English -> Structured Caption, no LLM (SHIPPED 2026-08-22, 3f80d84f)
+
+`POST /api/lireek/mm3/compose` turns a plain-English brief into an MM3
+Structured Caption by **selecting prose from MiniMax's own 1,000 reference
+captions** — no model, no provider, no network. Same brief + controls + seed is
+byte-identical; a new seed gives a different take in the same genre.
+
+Why not an LLM: MM3 reads the caption's PROSE, not its genre label. A caption
+whose Basic Attributes said "Hardcore Punk." rendered as southern rock every
+seed because an LLM had invented southern-rock vocabulary for the body.
+Selecting real prose makes that unreachable — the composer can only emit words
+the target genre's templates contain.
+
+| Piece | Where |
+|---|---|
+| corpus build (1019 upstream files -> one 4.3 MB JSON) | `server/scripts/build-mm3-corpus.mjs` |
+| committed corpus (`.claude/` is absent in a release) | `server/src/data/mm3-corpus.json` |
+| route / parseBrief / resolveSlots / compose | `server/src/services/lireek/mm3Compose.ts` |
+| endpoints | `server/src/routes/lireek/mm3Routes.ts` |
+| 51 self-checks | `cd server && npx tsx scripts/check-mm3-compose.ts` |
+| UI (caption box IS the brief box) | `ui/src/components/create/Mm3ComposeButton.tsx` |
+
+Slot precedence is **explicit control > brief prose > corpus default**; on
+conflict the control wins AND the conflict is surfaced. Re-run
+`build-mm3-corpus.mjs` after any upstream refresh.
+
+### Three Create-page controls have NO path to MM3 — do not re-derive this
+
+| Control | Why it cannot reach the model |
+|---|---|
+| **time signature** | Zero hits for `time_?sig\|signature` anywhere in `engine/src/minimax/`. The caption cannot carry it either: 26/1000 reference captions state a meter, all inside Groove prose, never in Basic Attributes — and they are 4/4 x24, 3/4 x1, 6/8 x1. **Hidden in MM3 mode.** |
+| **language** | MM3 has **no language input at all**. The tokenizer is a byte-level Qwen3/GPT-2 BPE (`mm3-tokenizer.h:17-20`), so any UTF-8 encodes and the language simply follows the characters of the lyrics. No reference caption states a language. **Relabelled "Lyrics Language".** |
+| **duration** | A real wire param (`generate.ts:277`) but a **CEILING, not a target**: `max_frames = min(round(duration*25), 9000)`, the AR loop breaks there, and EOS can fire earlier — `mm3-ar-loop.h:98-99` records a 7500-frame request stopping naturally at 1200. A short render means EOS fired; a song that seems to "want to be longer" is being **truncated at your number**. |
+
+**bpm and keyScale are also ignored on the MM3 wire** (`generate.ts:192`) — they
+were dead knobs until the composer started writing them into Basic Attributes.
+`vocalGender` is deliberately NOT in the generation request for the same reason:
+no backend has a wire field for it; it travels inside the caption.
+
+### Gender pools are thin in guitar genres
+
+metal-heavy-rock has **2** female captions of 78; hip-hop-rap **2** of 74;
+country-americana 6 of 50. A thin family borrows its **vocal columns only** from
+the family its own cards name under `Secondary routes`. Do NOT "fix" this by
+gender-flipping male templates (tenor->alto) — that invents prose the corpus
+never had, which is the exact failure the composer exists to prevent.
+
+### Not yet heard
+
+Genre fidelity is measured (8/8 routing, 0 out-of-distribution terms in composed
+punk captions). **Nothing has been rendered.** The ear test is still the bar.
+
 ## Validation bar for MM3 changes
 
 Forced-replay parity against the fixtures (never sampled-path comparisons — RNG can't match
