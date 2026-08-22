@@ -67,6 +67,9 @@ export interface AudioQueueItem {
    *  planning finishes — still a stream, just a later one. Undefined until the
    *  engine has decided. */
   mm3Interleaved?: boolean;
+  /** Resolved render length in seconds (engine-side), for the streaming card's
+   *  progress and the play bar's duration. */
+  mm3Duration?: number;
 }
 
 export interface AudioGenQueueState {
@@ -95,6 +98,7 @@ function _captureMm3Stream(item: AudioQueueItem, status: GenerationJob): void {
   if (status.mm3_interleaved !== null && status.mm3_interleaved !== undefined) {
     item.mm3Interleaved = status.mm3_interleaved;
   }
+  if (status.mm3_duration) item.mm3Duration = status.mm3_duration;
 }
 
 // ── Persistence (IndexedDB — no 5MB cap) ─────────────────────────────────────

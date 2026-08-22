@@ -6,7 +6,7 @@
 // Playback is managed by playbackStore — App.tsx just renders WaveSurfer
 // DOM hosts and wires their callbacks to the store.
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './context/AuthContext';
 import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
@@ -16,6 +16,8 @@ import { songApi } from './services/api';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
 import { SongList } from './components/library/SongList';
+import { StreamWaveform } from './components/player/StreamWaveform';
+import { mm3StreamEnsure } from './stores/mm3StreamStore';
 import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
 import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
@@ -74,6 +76,7 @@ import {
   stop as pbStop,
   songToTrack,
   playFromList,
+  play as pbPlay,
 } from './stores/playbackStore';
 import type { Song, GenerationParams } from './types';
 import { usePlaylist, addToPlaylist } from './components/lyric-studio/playlistStore';
@@ -265,6 +268,8 @@ const AppContent: React.FC = () => {
 
   // ── Playback (from unified store — each selector only re-renders when its value changes) ──
   const currentTrack = usePlaybackSelector(s => s.currentTrack);
+  /** The bar is driving a live MiniMax-Music3 render rather than a file. */
+  const isStreamTrack = !!currentTrack?.streamJobId;
   const currentSong = currentTrack as (Song | null);  // PlaybackTrack is Song-compatible for rendering
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
   const playerActive = usePlaybackSelector(s => s.playerActive);
@@ -475,6 +480,14 @@ const AppContent: React.FC = () => {
 
   // Play a song from the library (used by SongList, RightSidebar)
   const playSong = useCallback((song: Song) => {
+    // A live render is played on its own, not inside a list: it is not in
+    // `songs` (it has no row yet), so playFromList would place it at index 0 of
+    // somebody else's list and skip/next would jump into the library the moment
+    // its tail ended. There is also nothing to show in the details sidebar.
+    if (song.streamJobId) {
+      pbPlay(songToTrack(song));
+      return;
+    }
     setSelectedSong(song);
     setShowRightSidebar(true);
     playFromList(songToTrack(song), songs.map(songToTrack), 'library');
@@ -493,6 +506,46 @@ const AppContent: React.FC = () => {
     );
     return active?.jobId || null;
   });
+
+  // ── The live MiniMax-Music3 render, as a track ──
+  //
+  // A streaming render is a real, playable track before its file exists, so it
+  // is stood up as a synthetic Song and prepended to the generations grid. It
+  // carries no audioUrl: playbackStore sees `streamJobId` and drives
+  // mm3StreamStore instead of loading a URL. The moment the render is saved the
+  // real row arrives from the server and this one is dropped — matched on the
+  // job id, so the two can never both be on screen.
+  const streamingItem = useAudioGenQueueSelector(s =>
+    s.items.find(i => i.status === 'generating' && i.jobId && i.mm3Streaming === true) ?? null
+  );
+  const streamingSong = useMemo<Song | null>(() => {
+    if (!streamingItem?.jobId) return null;
+    const p = (streamingItem.globalParams || {}) as Record<string, any>;
+    return {
+      id: `mm3-stream:${streamingItem.jobId}`,
+      streamJobId: streamingItem.jobId,
+      title: streamingItem.generation?.title || p.title || 'Generating…',
+      lyrics: p.lyrics || '',
+      style: p.caption || p.prompt || '',
+      caption: p.caption || p.prompt || '',
+      audioUrl: '',
+      duration: streamingItem.mm3Duration || 0,
+      tags: [],
+      artistName: streamingItem.artistName || '',
+      isGenerating: true,
+    } as Song;
+  }, [streamingItem?.jobId, streamingItem?.mm3Duration, streamingItem?.generation?.title,
+      streamingItem?.artistName, streamingItem?.globalParams]);
+
+  // Open the stream as soon as the engine confirms one. Here rather than in the
+  // queue sidebar because App is always mounted and the sidebar is not — a
+  // render started from Create and then watched from the Library page must
+  // still play. mm3StreamEnsure is idempotent and remembers jobs it has already
+  // opened, so it will not reopen one the user deliberately stopped.
+  useEffect(() => {
+    mm3StreamEnsure(streamingItem?.jobId ?? null, streamingItem?.mm3Duration ?? 0);
+  }, [streamingItem?.jobId, streamingItem?.mm3Duration]);
+
 
   // Load songs on mount
   useEffect(() => {
@@ -1036,7 +1089,13 @@ const AppContent: React.FC = () => {
         {/* Song List + Queue (filtered to create/custom-gen only) */}
         <DiscoPulseWrapper hue={DISCO.songGrid} className="flex-1 min-w-0 overflow-y-auto">
           <SongList
-            songs={songs.filter(s => getSongSource(s) === 'create')}
+            songs={[
+              // The live render first: it is the newest thing here, and it is
+              // playable before its file exists. Dropped automatically once the
+              // real row arrives, because the queue item stops being 'generating'.
+              ...(streamingSong ? [streamingSong] : []),
+              ...songs.filter(s => getSongSource(s) === 'create'),
+            ]}
             currentSongId={currentSong?.id}
             onPlay={playSong}
             onDelete={handleDelete}
@@ -1341,12 +1400,21 @@ const AppContent: React.FC = () => {
               onCancel={() => pbSetTrimMode(false)}
             />
           )}
-          {/* Triple waveform: original + mastered + no-adapter reference stacked, opacity-switched */}
+          {/* Triple waveform: original + mastered + no-adapter reference stacked,
+              opacity-switched — plus the live-render canvas, which REPLACES them
+              rather than stacking. WaveSurfer needs a media element with a known
+              length; a track that is still being written has neither, so its
+              waveform is drawn from the envelope mm3StreamStore accumulates. */}
           <div className="relative" style={{ height: 56 }}>
+            {isStreamTrack && (
+              <div className="absolute inset-0 z-10">
+                <StreamWaveform height={56} />
+              </div>
+            )}
             <div style={{
               position: 'absolute', inset: 0,
-              opacity: (playMastered || playNoAdapter) ? 0 : 1,
-              pointerEvents: (playMastered || playNoAdapter) ? 'none' : 'auto',
+              opacity: (isStreamTrack || playMastered || playNoAdapter) ? 0 : 1,
+              pointerEvents: (isStreamTrack || playMastered || playNoAdapter) ? 'none' : 'auto',
               transition: 'opacity 0.15s ease',
             }}>
               <WaveformPlayer

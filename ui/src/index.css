@@ -537,3 +537,19 @@ input[type="range"]::-webkit-slider-thumb:hover {
     transform: translateY(-60px) scale(0.3);
   }
 }
+
+/* ── Live MiniMax-Music3 render ──────────────────────────────────────────────
+   A card whose audio is still being written glows orange until it is not. The
+   glow breathes rather than the card: animating the element's own opacity would
+   fade the cover art and the progress readout in and out with it, and the one
+   thing a "generation in progress" card must not do is become hard to read. */
+@keyframes mm3-stream-glow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.45), 0 0 18px 2px rgba(249, 115, 22, 0.25); }
+  50%      { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.85), 0 0 26px 6px rgba(249, 115, 22, 0.45); }
+}
+.mm3-stream-glow {
+  animation: mm3-stream-glow 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mm3-stream-glow { animation: none; box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.7); }
+}

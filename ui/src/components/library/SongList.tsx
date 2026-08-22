@@ -7,12 +7,13 @@ import {
   Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus, Image,
   LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Upload, Mic2, Loader2,
-  Check, Columns3, ChevronLeft, ChevronRight, Disc3, Tags,
+  Check, Columns3, ChevronLeft, ChevronRight, Disc3, Tags, Radio,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 import { togglePlay, usePlaybackSelector } from '../../stores/playbackStore';
 import { songToTrack } from '../../stores/playbackStore';
+import { useMm3StreamAudio } from '../../stores/mm3StreamStore';
 import { useABCompareSelector, setTrackA, setTrackB, playAB, openModal as openABModal, clear as clearAB } from '../../stores/abCompareStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { downloadAll } from '../../utils/downloadTrack';
@@ -1025,6 +1026,18 @@ const SongCard: React.FC<SongCardProps> = ({
   const renameInputRef = React.useRef<HTMLInputElement>(null);
   const { isDisguised, disguiseTitle } = useDisguiseMode();
 
+  // ── Live render ──
+  // A streaming card is a real, playable track whose file does not exist yet.
+  // It gets an orange treatment for as long as that is true, and the fraction
+  // of the track already rendered is the honest progress number — not the
+  // engine's stage percentage, because what the user can actually listen to is
+  // what has been received.
+  const stream = useMm3StreamAudio();
+  const isStreaming = !!song.streamJobId && stream.jobId === song.streamJobId;
+  const streamFrac = isStreaming && stream.expected > 0
+    ? Math.max(0, Math.min(1, stream.received / stream.expected))
+    : 0;
+
   React.useEffect(() => {
     if (editing && renameInputRef.current) {
       renameInputRef.current.focus();
@@ -1074,7 +1087,9 @@ const SongCard: React.FC<SongCardProps> = ({
       className={`
         group relative rounded-xl border overflow-hidden cursor-pointer aspect-square
         transition-all duration-200 hover:scale-[1.02] hover:shadow-lg hover:shadow-black/20
-        ${isSelected && selectionMode
+        ${isStreaming
+          ? 'border-orange-500/60 mm3-stream-glow'
+          : isSelected && selectionMode
           ? 'border-pink-500/40 bg-pink-500/5 ring-1 ring-pink-500/20'
           : isActive
             ? 'border-pink-500/30 bg-pink-500/5'
@@ -1096,7 +1111,9 @@ const SongCard: React.FC<SongCardProps> = ({
       {!selectionMode && (
         <button
           onClick={(e) => { e.stopPropagation(); if (isActive) togglePlay(); else onPlay(); }}
-          className="absolute inset-0 z-10 flex items-center justify-center bg-black/20 dark:bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+          className={`absolute inset-0 z-10 flex items-center justify-center bg-black/20 dark:bg-black/40 transition-opacity ${
+            isStreaming ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
         >
           <div className="w-12 h-12 rounded-full bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
             {isPlaying
@@ -1124,8 +1141,37 @@ const SongCard: React.FC<SongCardProps> = ({
         {formatDuration(song.duration)}
       </div>
 
-      {/* More menu */}
-      {!selectionMode && (
+      {/* Live-render treatment: the orange ring above says "not finished", this
+          says how far along and how much is listenable. Progress is measured in
+          AUDIO RECEIVED, which is the part the play button can actually reach —
+          the engine's stage percentage would run ahead of it and promise audio
+          that is not there yet. */}
+      {isStreaming && (
+        <>
+          <div className="absolute top-2 right-2 z-20 flex items-center gap-1 px-1.5 py-0.5 rounded-md
+                          bg-orange-500/90 text-[9px] font-bold uppercase tracking-wide text-white shadow">
+            <Radio size={9} className="animate-pulse" />
+            Generating
+          </div>
+          <div className="absolute inset-x-0 bottom-0 z-20">
+            <div className="px-2 pb-1 text-[9px] font-medium text-orange-200 drop-shadow
+                            flex items-center justify-between tabular-nums">
+              <span>generation in progress</span>
+              <span>{Math.round(streamFrac * 100)}%</span>
+            </div>
+            <div className="h-1 bg-black/50">
+              <div
+                className="h-full bg-gradient-to-r from-orange-500 to-amber-400 transition-[width] duration-300"
+                style={{ width: `${streamFrac * 100}%` }}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* More menu — hidden on a live render: every item on it (download,
+          delete, send-to-cover, export) needs a file that does not exist yet. */}
+      {!selectionMode && !isStreaming && (
         <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             ref={menuBtnRef}

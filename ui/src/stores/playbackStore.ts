@@ -15,6 +15,10 @@
 import { useSyncExternalStore, useRef, useCallback } from 'react';
 import type { WaveformPlayerHandle } from '../components/player/WaveformPlayer';
 import { useVstChainStore } from './vstChainStore';
+import {
+  mm3StreamSnapshot, mm3StreamSubscribe, mm3StreamToggle, mm3StreamPause,
+  mm3StreamSeek, mm3StreamSetVolume,
+} from './mm3StreamStore';
 
 /** VST monitoring and the global player are mutually exclusive — they'd play
  *  two tracks at once. Whenever global playback starts, stop the VST monitor. */
@@ -23,6 +27,22 @@ function stopVstMonitorIfActive(): void {
     const vst = useVstChainStore.getState();
     if (vst.monitoring) vst.stopMonitor();
   } catch { /* vst store not initialized yet */ }
+}
+
+// ── The stream deck ─────────────────────────────────────────────────────────
+//
+// A fourth deck alongside original / mastered / no-adapter, except that its
+// audio is not a file and not a media element: it is a Web Audio graph fed by
+// mm3StreamStore as the engine emits finished windows. Everything below that
+// touches playback asks `isStreamDeck()` first and delegates.
+//
+// It is a delegation and not an abstraction on purpose. Making WaveSurfer play a
+// track that has no URL, no length and no seekable end would mean fighting every
+// assumption it is built on; four `if` statements in the transport is the whole
+// cost of not doing that.
+
+function isStreamDeck(): boolean {
+  return !!_state.currentTrack?.streamJobId;
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -46,6 +66,11 @@ export interface PlaybackTrack {
   lyrics?: string;
   caption?: string;
   generationParams?: Record<string, any>;
+  /** MiniMax-Music3 live render. When set, this track's audio does not exist as
+   *  a file yet — it is arriving window by window into mm3StreamStore, and the
+   *  transport below delegates there instead of to the WaveSurfer decks. The
+   *  track becomes an ordinary one the moment the render is saved. */
+  streamJobId?: string;
 }
 
 export type PlaybackSource =
@@ -427,6 +452,7 @@ function startBothPlayers(): void {
 }
 
 function applyVolumes(): void {
+  if (isStreamDeck()) { mm3StreamSetVolume(_state.volume); return; }
   const audible = _state.playNoAdapter ? 'noadapter' : _state.playMastered ? 'mastered' : 'original';
   _wsOriginalRef.current?.setVolume(audible === 'original' ? _state.volume : 0);
   _wsAltRef.current?.setVolume(audible === 'mastered' ? _state.volume : 0);
@@ -466,6 +492,33 @@ function loadTrack(track: PlaybackTrack): void {
   if (_state.abMode) {
     setState({ abMode: false, abTrackA: null, abTrackB: null });
   }
+  // A live render has no file to load. Take over the bar, silence the three
+  // file decks so a previous track cannot keep playing underneath, and let the
+  // mirror below drive time/duration/isPlaying from the stream.
+  if (track.streamJobId) {
+    _loadingTrackId = track.id;
+    cancelAutoAdvance();
+    _suppressPlayFalse = false;
+    _wsOriginalRef.current?.pause();
+    _wsAltRef.current?.pause();
+    _wsNoAdapterRef.current?.pause();
+    const snap = mm3StreamSnapshot();
+    setState({
+      currentTrack: track,
+      playerActive: true,
+      isLoading: false,
+      loadError: null,
+      isPlaying: snap.playing,
+      currentTime: snap.position,
+      duration: snap.expected || snap.received,
+      hasMastered: false, playMastered: false,
+      hasNoAdapter: false, playNoAdapter: false,
+      currentAudioUrl: null,
+    });
+    mm3StreamSetVolume(_state.volume);
+    return;
+  }
+
   // Validate: skip tracks with no audio URL
   if (!track.audioUrl) {
     console.error('[Playback] Track has no audioUrl, skipping:', track.title);
@@ -533,6 +586,26 @@ function loadTrack(track: PlaybackTrack): void {
   applyPlaybackRate();
 }
 
+// ── Stream mirror ───────────────────────────────────────────────────────────
+//
+// While the current track is a live render, the bar's clock IS the stream's.
+// Mirrored rather than polled so the position stays in step with the audio
+// graph rather than with a React interval, and guarded on the job id so a
+// finished stream cannot keep writing over a track the user has moved on to.
+mm3StreamSubscribe(() => {
+  const track = _state.currentTrack;
+  if (!track?.streamJobId) return;
+  const snap = mm3StreamSnapshot();
+  if (snap.jobId !== track.streamJobId) return;
+  const duration = snap.expected || snap.received;
+  if (
+    snap.playing === _state.isPlaying &&
+    Math.abs(snap.position - _state.currentTime) < 0.05 &&
+    Math.abs(duration - _state.duration) < 0.05
+  ) return;
+  setState({ isPlaying: snap.playing, currentTime: snap.position, duration });
+});
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /** Play a single track with no navigation context */
@@ -570,6 +643,7 @@ export function togglePlay(): void {
   // Resuming (currently paused → about to play) stops the VST monitor so the two
   // don't play at once. Pausing must NOT — the monitor-start flow pauses us first.
   if (!_state.isPlaying) stopVstMonitorIfActive();
+  if (isStreamDeck()) { mm3StreamToggle(); return; }
   // Pause no longer collapses the player bar — only stop() does that.
   // Clear suppress guard so isPlaying state updates naturally.
   _suppressPlayFalse = false;
@@ -580,6 +654,11 @@ export function togglePlay(): void {
 
 /** Stop playback entirely — pauses audio, resets position, and collapses the player bar */
 export function stop(): void {
+  // Stops LISTENING, not rendering: the engine keeps going and still saves the
+  // finished file. Deliberately does not close the stream — reopening is not
+  // possible (the engine consumes chunks as they are read), so a stop that
+  // dropped the audio would be unrecoverable.
+  if (isStreamDeck()) mm3StreamPause();
   _suppressPlayFalse = false;
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
   _retryCount = 0;
@@ -626,6 +705,7 @@ export function stop(): void {
 
 /** Seek all WaveSurfer instances to a time in seconds */
 export function seek(time: number): void {
+  if (isStreamDeck()) { mm3StreamSeek(time); return; }
   const wsOrig = _wsOriginalRef.current;
   const wsAlt = _wsAltRef.current;
   const wsNoAdapter = _wsNoAdapterRef.current;

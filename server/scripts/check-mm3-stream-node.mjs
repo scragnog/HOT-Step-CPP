@@ -58,6 +58,11 @@ const id1 = await submit();
 console.log(`  job ${id1}`);
 const s1 = await waitStreaming(id1);
 check('/status reports mm3_streaming', s1.mm3_streaming === true, `status=${s1.status}`);
+// The card's orange progress is (audio received / this). Without it the UI can
+// only show a spinner, so it is a contract, not a nicety.
+check('/status reports mm3_duration before any audio', typeof s1.mm3_duration === 'number' && s1.mm3_duration > 0,
+  `mm3_duration=${s1.mm3_duration}`);
+
 
 const res1 = await fetch(`${NODE}/api/generate/mm3/stream/${id1}`);
 check('Node proxy serves the stream', res1.ok, `HTTP ${res1.status}`);
@@ -81,6 +86,15 @@ if (res1.ok) {
   console.log(`  ${chunks1} windows, ${(bytes1 / 1048576).toFixed(1)} MB, first audio at ${((first1 - t0) / 1000).toFixed(1)}s`);
 }
 check('the proxied stream carries whole windows', chunks1 > 1 && bytes1 > 0, `${chunks1} windows`);
+// Tri-state ON PURPOSE, and asserted only here: it is decided on the GPU worker
+// thread after a VRAM check, so it is legitimately null between submit and the
+// job reaching the front of the queue. The UI renders that null as "undecided"
+// rather than as "serial", which is why the field is nullable rather than a
+// boolean with a default.
+const s1b = await status(id1);
+check('/status settles mm3_interleaved once the job runs',
+  s1b.mm3_interleaved === true || s1b.mm3_interleaved === false,
+  `mm3_interleaved=${s1b.mm3_interleaved}`);
 
 // The render must still finish and save normally — streaming is additive.
 for (;;) {

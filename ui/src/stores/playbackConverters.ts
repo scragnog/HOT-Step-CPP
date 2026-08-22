@@ -45,6 +45,9 @@ export function songToTrack(song: Song): PlaybackTrack {
     lyrics: song.lyrics || '',
     caption: song.caption || '',
     generationParams: song.generationParams || song.generation_params as any,
+    // Live MiniMax-Music3 render: the transport delegates to mm3StreamStore
+    // instead of loading a URL that does not exist yet.
+    streamJobId: song.streamJobId,
   };
 }
 

@@ -84,6 +84,10 @@ export interface GenerationJob {
    *  Undefined until the engine has decided. Purely informational — a serial
    *  stream is still a stream. */
   mm3Interleaved?: boolean;
+  /** Resolved render length in seconds, echoed by the engine at submit. Sent to
+   *  the browser so a streaming track knows its full duration before its first
+   *  window exists. */
+  mm3Duration?: number;
   /** Stream preview WAV files emitted by the DEMON-style ring buffer */
   streamPreviews?: Array<{
     path: string;
@@ -1654,6 +1658,7 @@ router.get('/status/:id', (req, res) => {
     // render that did not ask for it.
     mm3_streaming: job.mm3Streaming === true,
     mm3_interleaved: job.mm3Interleaved ?? null,
+    mm3_duration: job.mm3Duration ?? null,
   });
 });
 

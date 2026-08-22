@@ -57,6 +57,12 @@ export interface Song {
   cover_art_subject?: string;
   // Generation backend that produced this song ('ace', future: 'minimax-m3', ...)
   backend?: string;
+  /** LIVE RENDER, not a saved row. A synthetic Song stood up by App.tsx while a
+   *  MiniMax-Music3 stream is in flight, so the track appears in the generations
+   *  grid and is playable the moment its first window lands. It carries no
+   *  audioUrl — playback goes through mm3StreamStore — and it is replaced by the
+   *  real row the instant the render is saved. */
+  streamJobId?: string;
 }
 
 /** Normalized recent song returned by /api/songs/recent — unified across all modes */
@@ -375,6 +381,9 @@ export interface GenerationJob {
    *  when the engine fell back to dispatching them after planning; null until
    *  it has decided. */
   mm3_interleaved?: boolean | null;
+  /** Resolved render length in seconds — known before the first window exists,
+   *  so a streaming card can show real progress rather than a spinner. */
+  mm3_duration?: number | null;
 }
 
 /** User profile */

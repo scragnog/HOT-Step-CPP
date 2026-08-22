@@ -625,6 +625,10 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     // request's: it is allowed to decline, and when it does the UI must behave
     // exactly as it does today rather than opening a stream that never fills.
     job.mm3Streaming = req.stream === true && sub.streaming !== false;
+    // The render's resolved length, known the instant the job is accepted. The
+    // browser needs it BEFORE any audio arrives, so a streaming card can show
+    // how much of the track is finished instead of an indeterminate spinner.
+    job.mm3Duration = sub.duration;
     if (req.stream && !job.mm3Streaming) {
       log('WARNING', '[MM3] Streaming was requested but the engine declined it — this render is not streamable');
     } else if (job.mm3Streaming) {
