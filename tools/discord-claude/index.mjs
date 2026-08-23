@@ -10,6 +10,8 @@
 //     the scoreboard; it cannot edit files or run commands.
 //   - Per-channel session continuity via --resume (session id persisted to
 //     sessions.json beside this file).
+//   - CAN ping people back: mentions.mjs keeps a name <-> user-id roster, feeds
+//     it to Claude, and rewrites "@name" into a real mention on the way out.
 //   - `!model fable|opus|sonnet|<full-id>` (allowlisted only) switches the
 //     runtime default model. `!model` reports it.
 //
@@ -23,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
 import * as transcript from './transcript.mjs';
+import * as mentions from './mentions.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -62,6 +65,11 @@ const busy = new Set();    // channelId — one invocation at a time per channel
 const log = (msg) => {
   try { transcript.appendMany(msg.channelId, [transcript.toRecord(msg)]); }
   catch (e) { console.error('[bridge] transcript write failed:', String(e.message ?? e).slice(0, 200)); }
+  // Same pass learns who is pingable: the transcript stores cleanContent, where
+  // every mention is already flattened to a bare name, so ids have to be
+  // harvested from the live message object or they're gone.
+  try { mentions.observe(msg); }
+  catch (e) { console.error('[bridge] roster update failed:', String(e.message ?? e).slice(0, 200)); }
 };
 
 // ── Claude invocation ───────────────────────────────────────────────────────
@@ -116,17 +124,25 @@ function runClaude(prompt, channelId) {
   });
 }
 
+// What may ping from an outgoing message. `parse: ['users']` is what makes a
+// mention token live at all — an allowedMentions object WITHOUT it suppresses
+// every mention in the message, which is why the bot's "@name" used to be
+// inert even when it got the id syntax right. roles/everyone stay omitted, so
+// no amount of prompt injection can make it @everyone the server.
+const MENTION_POLICY = { parse: ['users'], repliedUser: false };
+
 // Discord hard limit is 2000 chars per message.
 async function replyChunked(msg, text) {
   const chunks = [];
-  let rest = text.trim() || '(empty reply)';
+  // Resolve BEFORE chunking so a rewritten id token can't be split in half.
+  let rest = mentions.resolve(text).trim() || '(empty reply)';
   while (rest.length > 0) {
     chunks.push(rest.slice(0, 1900));
     rest = rest.slice(1900);
   }
   let target = msg;
   for (const c of chunks.slice(0, 5)) { // cap runaway replies
-    target = await target.reply({ content: c, allowedMentions: { repliedUser: false } });
+    target = await target.reply({ content: c, allowedMentions: MENTION_POLICY });
   }
 }
 
@@ -137,7 +153,12 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-client.on('clientReady', () => console.log(`[bridge] logged in as ${client.user.tag}, model ${currentModel}`));
+client.on('clientReady', () => {
+  console.log(`[bridge] logged in as ${client.user.tag}, model ${currentModel}`);
+  // Backfilled transcripts already name everyone who has ever posted; seed the
+  // roster from them so pings work on the first reply, not the second.
+  try { mentions.seedFromTranscripts([...ALLOWED_CHANNELS]); } catch { /* non-fatal */ }
+});
 
 client.on('messageCreate', async (msg) => {
   // Threads inherit permission from their parent channel id.
@@ -187,7 +208,14 @@ client.on('messageCreate', async (msg) => {
       `Project state, if needed: start with docs/plans/2026-08-20-mm3-training-studio.md and ` +
       `docs/plans/2026-08-18-encoder-training-plan.md (encoder scoreboard). ` +
       `Recent thread messages for context:\n\n${context}\n\n` +
-      `The last message mentions you — respond to it.`;
+      mentions.rosterBlock() + `\n` +
+      `The last message mentions you — respond to it.
+
+` +
+      `REMINDER, and it outranks the length of anything above: 700 characters MAX, one Discord ` +
+      `message, aim for 300. The long replies in that context buffer are yours and they are the ` +
+      `problem, not the template. Answer, one fact, one jab, stop. Full sass, fewer words. Go long ` +
+      `ONLY if the message you are answering explicitly asked for detail.`;
     const { text } = await runClaude(prompt, msg.channelId);
     await replyChunked(msg, text);
   } catch (e) {
@@ -236,15 +264,21 @@ async function interject(channelId, note) {
       `Project state, if needed: start with docs/plans/2026-08-20-mm3-training-studio.md and ` +
       `docs/plans/2026-08-18-encoder-training-plan.md (encoder scoreboard). ` +
       `Recent thread messages, oldest first:\n\n${context}\n\n` +
+      mentions.rosterBlock() + `\n` +
       `Scragnog has asked you (from his console — this request is NOT visible in the thread) to interject ` +
       `in the conversation now. Compose ONE message that lands naturally in the discussion above` +
       (note ? `, steering toward this: ${note}` : '') +
-      `. Do not mention being asked to post; just say the thing.`;
+      `. Do not mention being asked to post; just say the thing.
+
+` +
+      `REMINDER, and it outranks the length of anything above: 700 characters MAX, one Discord ` +
+      `message, aim for 300. The long replies in that context buffer are yours and they are the ` +
+      `problem, not the template. Answer, one fact, one jab, stop. Full sass, fewer words.`;
     const { text } = await runClaude(prompt, channelId);
     // channel.send, not reply — there is no message to reply to.
-    let rest = text.trim() || '(empty)';
+    let rest = mentions.resolve(text).trim() || '(empty)';
     while (rest.length > 0) {
-      await channel.send(rest.slice(0, 1900));
+      await channel.send({ content: rest.slice(0, 1900), allowedMentions: MENTION_POLICY });
       rest = rest.slice(1900);
       if (rest.length > 3 * 1900) break; // runaway cap
     }

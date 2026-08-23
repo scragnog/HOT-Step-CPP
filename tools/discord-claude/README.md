@@ -62,6 +62,31 @@ binds 127.0.0.1:47821 (INTERJECT_PORT to change). The steer note is never
 shown in the thread.
 
 
+## Pinging people back (`mentions.mjs`)
+
+The bot can tag people for real. Two things had to be true, and neither was:
+
+1. **Claude never saw a user id.** The transcript stores `cleanContent`, where
+   Discord has already flattened `<@1234>` down to `@DisplayName`. So ids are
+   harvested from the live message object — the author, plus everyone *they*
+   mentioned — into `logs/discord/roster.json` (gitignored, other people's
+   names), seeded on startup from the transcripts already on disk. The 40
+   most-recently-seen get listed in every prompt as `name -> <@id>`.
+2. **Outgoing mentions were suppressed.** An `allowedMentions` object without
+   `parse` kills *every* mention in the message, so even a correctly-formed id
+   token was inert. Replies now send `parse: ['users']` — user mentions live,
+   roles and `@everyone` structurally impossible regardless of what any
+   Discord message talks the model into.
+
+On the way out, `mentions.resolve()` rewrites any `@Name` it recognises into
+the id token (longest name first, so "Purple Orc" beats "Purple"; existing
+`<@id>` tokens and things like `rob@example.com` are left alone), capped at 4
+distinct people per message. `persona.md` carries the etiquette: at most one
+ping, and only when the message is genuinely *for* someone.
+
+Someone who has never posted or been mentioned in a logged channel is not in
+the roster and cannot be pinged. They enter it the first time either happens.
+
 ## Transcripts (`logs/discord/`)
 
 Every message in an allowed channel is appended to `logs/discord/<channelId>.jsonl`

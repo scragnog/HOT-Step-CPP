@@ -50,6 +50,9 @@ export function toRecord(msg) {
     channel: ch?.name ?? '',
     parent: isThread ? (ch.parent?.name ?? '') : '',
     author: msg.member?.displayName ?? msg.author?.username ?? 'unknown',
+    // Display names get changed per-server; the username is the stable handle
+    // people actually type after the @. Both feed the ping roster.
+    username: msg.author?.username ?? '',
     authorId: msg.author?.id ?? '',
     bot: Boolean(msg.author?.bot),
     replyTo: msg.reference?.messageId ?? null,
