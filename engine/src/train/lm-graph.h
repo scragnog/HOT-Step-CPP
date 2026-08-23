@@ -477,6 +477,33 @@ struct LmLayerOpts {
                                            // nullptr in the P2/P3 forward-collect
                                            // graphs, which have no backward and
                                            // would only carry dead nodes
+
+    // ── RANK DROPOUT ───────────────────────────────────────────────────────
+    //
+    // An [r] or [r,1] F32 mask multiplied into the LoRA bottleneck: survivors
+    // carry 1/(1-p), dropped components carry 0. nullptr = off, and with it off
+    // lm_linear emits the shipped graph verbatim.
+    //
+    // WHY THE BOTTLENECK AND NOT THE INPUT. PEFT's lora_dropout drops elements
+    // of x, whose mask is [hidden, S] — 88 MB per module at S 5400, times 252
+    // modules, per step. Masking rank components instead needs r floats per
+    // step and is a real regulariser (LyCORIS calls it rank_dropout): each step
+    // trains a random lower-rank subnetwork. It is NOT the same thing as
+    // lora_dropout and should not be described as such.
+    //
+    // ONE MASK, SHARED BY EVERY MODULE. Per-module masks would need a pair
+    // index threaded into lm_linear, and QwLoraPair is shared with the
+    // inference runtime. Sharing correlates the dropout across modules — a
+    // coarser regulariser than independent masks, closer to "train a random
+    // rank-(1-p)r subnetwork this step". Stated because it is a real
+    // difference, not because it is a defect.
+    //
+    // CHECKPOINT SAFETY IS BY CONSTRUCTION: this is a persistent tensor
+    // uploaded once per micro-step, and D13 already requires the recomputed
+    // forward to use the same LmLayerOpts as the collect pass. Both passes
+    // therefore read the same bytes. A freshly-drawn mask per pass would
+    // silently compute gradients for a different network than the loss.
+    ggml_tensor * rank_mask = nullptr;
 };
 
 // F32 bytes of ONE transformer layer's trainable-graph weights (7 projections +
@@ -547,6 +574,9 @@ static ggml_tensor * lm_linear(ggml_context * ctx, ggml_tensor * w, const QwLora
     }
     if (pr && pr->A && pr->B) {
         ggml_tensor * t = ggml_mul_mat(ctx, pr->A, x);  // [r, S]
+        if (opts.rank_mask) {
+            t = ggml_mul(ctx, t, opts.rank_mask);       // [r,1] broadcasts over S
+        }
         t               = ggml_scale(ctx, t, pr->scale);
         y               = ggml_add(ctx, y, ggml_mul_mat(ctx, pr->B, t));
     } else if (pr && pr->has_lokr()) {

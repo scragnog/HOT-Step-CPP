@@ -219,6 +219,30 @@ struct MM3LmTrainArgs {
      *  Drawn from the training RNG, so it is reproducible and survives a resume
      *  along with everything else. */
     double      caption_dropout = 0.0;
+    /** Fraction of LoRA rank components zeroed each step (survivors rescaled by
+     *  1/(1-p)). 0 = off. bghira runs lora_dropout 0.1.
+     *
+     *  NOT the same mechanism as PEFT's lora_dropout, which drops elements of
+     *  the layer INPUT — that mask is [hidden, S] per module, 88 MB each at our
+     *  sequence lengths. This drops rank components instead (LyCORIS calls it
+     *  rank_dropout): r floats per step, and each step trains a random
+     *  lower-rank subnetwork. Comparable in spirit, cheaper by four orders of
+     *  magnitude, and worth stating plainly rather than filing under the same
+     *  name. */
+    double      rank_dropout = 0.0;
+    /** Replace EVERY training caption with the contents of this file.
+     *
+     *  For a style adapter over one album, a shared caption is not a shortcut —
+     *  it is the point. With the caption constant across rows, the only thing
+     *  distinguishing them is the audio (and the lyrics), so the adapter has
+     *  nowhere to put the style except into itself, and the caption becomes a
+     *  handle that summons the album. It also raises the trigger's share of the
+     *  prompt from 0.5% of a 1300-token MOSS caption to ~15% of a short one,
+     *  which is the difference between a handle and a rounding error.
+     *
+     *  The .mm3.txt files on disk are never touched. Lyrics still come from the
+     *  manifest per row. */
+    std::string caption_file;
     std::string dataset_name;
     // Per-layer gradient checkpointing. ON by default and that is not a
     // preference: the MM3 prompt is ~1,100 tokens, so even a 128-frame crop
@@ -380,6 +404,7 @@ static ggml_tensor * mm3_lm_ckpt_embed(ggml_context * ctx, LmCkptRun & r, int S)
 static bool mm3_lm_load_samples_from(const std::string & manifest, const std::string & captions_dir,
                                      const std::string & codes_dir, const std::string & lm_path,
                                      const std::string & trigger_prefix,
+                                     const std::string & caption_override,
                                      const MM3TrainLm & t,
                                      std::vector<MM3LmSample> * out, std::string * err) {
     struct { std::string manifest, captions_dir, codes_dir, lm_path; } a {
@@ -425,7 +450,9 @@ static bool mm3_lm_load_samples_from(const std::string & manifest, const std::st
             // caption in the manifest: an ACE caption trains the wrong genre and
             // the failure is invisible.
             std::string caption;
-            if (!mm3_lm_read_file(a.captions_dir + "/" + stem + ".mm3.txt", &caption)) {
+            if (!caption_override.empty()) {
+                caption = caption_override;
+            } else if (!mm3_lm_read_file(a.captions_dir + "/" + stem + ".mm3.txt", &caption)) {
                 fprintf(stderr, "[mm3-lm-train] SKIP %s: no %s.mm3.txt\n", id.c_str(), stem.c_str());
                 continue;
             }
@@ -443,7 +470,15 @@ static bool mm3_lm_load_samples_from(const std::string & manifest, const std::st
             if (!trigger_prefix.empty()) {
                 // Front of the FIRST line, comma + space — the training-row shape.
                 size_t lead = caption.find_first_not_of(" \t\r\n\xEF\xBB\xBF");
-                caption = trigger_prefix + (lead == std::string::npos ? caption : caption.substr(lead));
+                std::string body = lead == std::string::npos ? caption : caption.substr(lead);
+                // IDEMPOTENT. A shared caption written for a style adapter will
+                // usually open with the trigger already, and prepending a second
+                // copy trains "system of a down, system of a down, ..." — a token
+                // sequence no render will ever reproduce.
+                std::string lb = body.substr(0, trigger_prefix.size()), lp = trigger_prefix;
+                for (auto & ch : lb) ch = (char) tolower((unsigned char) ch);
+                for (auto & ch : lp) ch = (char) tolower((unsigned char) ch);
+                caption = (lb == lp) ? body : trigger_prefix + body;
             }
             if (samples.empty()) {
                 // The first assembled caption, once, so a trigger that is not
@@ -474,9 +509,18 @@ static bool mm3_lm_load_samples_from(const std::string & manifest, const std::st
 
 static bool mm3_lm_load_samples(const MM3LmTrainArgs & a, const MM3TrainLm & t,
                                 std::vector<MM3LmSample> * out, std::string * err) {
+    std::string shared;
+    if (!a.caption_file.empty() && !mm3_lm_read_file(a.caption_file, &shared)) {
+        if (err) *err = "cannot read --caption-file " + a.caption_file;
+        return false;
+    }
+    while (!shared.empty() && (shared.back() == '\n' || shared.back() == '\r'
+                               || shared.back() == ' ')) {
+        shared.pop_back();
+    }
     return mm3_lm_load_samples_from(a.manifest, a.captions_dir, a.codes_dir, a.lm_path,
                                     a.trigger_prepend && !a.trigger.empty() ? a.trigger + ", " : "",
-                                    t, out, err);
+                                    shared, t, out, err);
 }
 
 // ── finite-difference gradient check ────────────────────────────────────────
@@ -1188,6 +1232,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // surrogate's loss gradient (which is exactly 1.0 — see lm-ckpt.h D9).
     ggml_tensor * t_gs     = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_one    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
+    // Rank-dropout mask, [r]. A PERSISTENT buffer, not a per-graph tensor,
+    // precisely so the checkpoint's recompute pass reads the same bytes the
+    // collect pass did (lm-ckpt.h D13). A freshly drawn mask per pass would
+    // compute gradients for a different network than the loss.
+    ggml_tensor * t_rankmask = a.rank_dropout > 0.0
+                                 ? ggml_new_tensor_2d(ctx_static, GGML_TYPE_F32, a.rank, 1)
+                                 : nullptr;
     // Sized but never read under checkpointing (the override supplies the
     // embedding); lm_ckpt_micro_step skips its upload.
     ggml_tensor * t_tok    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, S_max);
@@ -1249,6 +1300,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         }
         LmCkptCfg cc;
         cc.chunk     = a.ckpt_chunk;
+        cc.rank_mask = t_rankmask;
         cc.s_max     = (int) S_max;
         cc.layer_lo  = 0;
         cc.layer_hi  = c.n_layers;
@@ -1347,6 +1399,27 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     LmRng rng;
     lm_rng_seed(&rng, (uint64_t) a.seed ^ 0x9E3779B97F4A7C15ull);
 
+    // Rank dropout. `active=false` writes all ones, which is what eval and the
+    // prior capture must see: dropout is a training-time perturbation, and a
+    // measurement taken through a randomly crippled adapter measures nothing.
+    std::vector<float> rankmask_host;
+    auto set_rank_mask = [&](bool active) {
+        if (!t_rankmask) {
+            return;
+        }
+        rankmask_host.assign((size_t) a.rank, 1.0f);
+        if (active) {
+            const float keep = 1.0f - (float) a.rank_dropout;
+            const float up   = keep > 0.0f ? 1.0f / keep : 1.0f;
+            for (int i = 0; i < a.rank; i++) {
+                rankmask_host[(size_t) i] =
+                    lm_rng_uniform(&rng) < (float) a.rank_dropout ? 0.0f : up;
+            }
+        }
+        ggml_backend_tensor_set(t_rankmask, rankmask_host.data(), 0,
+                                rankmask_host.size() * sizeof(float));
+    };
+
     // --crop-anchor. Read once: it is consulted per micro-step and per eval crop.
     const bool anchor_song = (a.crop_anchor != "zero");
     fprintf(stderr, "[mm3-lm-train] crop anchor: %s\n",
@@ -1368,7 +1441,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // averaging the two together produces a number that describes neither.
     double               reg_running = 0.0;
     int                  reg_n_micro = 0;
-    int                  n_dropped   = 0;   // caption-dropout steps taken
+    // PER SEGMENT, not per run: n_micro is restored from the resume state and
+    // these are not, so dividing one by the other after a pause under-reports
+    // the rate. Reporting the segment is honest and needs no change to the
+    // resume format — which matters, since bumping it would strand every state
+    // file already on disk.
+    int                  n_dropped   = 0;   // caption-dropout steps, THIS SEGMENT
+    int                  n_style_seg = 0;   // style steps, THIS SEGMENT
 
     auto save_ckpt = [&](int step, double loss) -> std::string {
         char sub[64];
@@ -1446,6 +1525,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             return -1.0;
         }
         ckpt_run.forward_only = true;
+        set_rank_mask(false);      // measure the whole adapter, not a subnetwork
         double sum = 0.0;
         int    n   = 0;
         for (const EvalCrop & ec : eval_plan) {
@@ -1616,7 +1696,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     if (reg_on && rc == 0) {
         std::string rerr;
         if (!mm3_lm_load_samples_from(a.reg_manifest, a.reg_captions_dir, a.reg_codes_dir, a.lm_path,
-                                      /*trigger_prefix=*/"", t, &reg_samples, &rerr)
+                                      /*trigger_prefix=*/"", /*caption_override=*/"", t,
+                                      &reg_samples, &rerr)
             || reg_samples.empty()) {
             fatal_msg = "regularisation set has no usable samples"
                       + (rerr.empty() ? std::string(" — check --reg-manifest/--reg-captions/--reg-codes")
@@ -1708,6 +1789,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             pc.idx.reserve((size_t) n_sup * (size_t) a.reg_topk);
             pc.p.reserve((size_t) n_sup * (size_t) a.reg_topk);
             ckpt_run.forward_only = true;
+            set_rank_mask(false);  // the teacher is the base, not a subnetwork
             ckpt_run.capture_k    = a.reg_topk;
             ckpt_run.capture_idx  = &pc.idx;
             ckpt_run.capture_p    = &pc.p;
@@ -1848,6 +1930,9 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             ggml_backend_tensor_set(t_pos, pos.data(), 0, pos.size() * sizeof(int32_t));
 
             if (drop_caption) n_dropped++;
+            // A fresh subnetwork per micro-step, uploaded BEFORE the forward so
+            // the checkpoint recompute sees the same one.
+            set_rank_mask(true);
             double ce = 0.0;
             bool   ok = false;
             if (a.ckpt) {
@@ -1900,6 +1985,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 if (!is_reg) {
                     running += ce;
                     n_micro++;
+                    n_style_seg++;
                 } else {
                     reg_running += ce;
                     reg_n_micro++;
@@ -2038,9 +2124,10 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     }
 
     if (n_dropped > 0) {
-        fprintf(stderr, "[mm3-lm-train] caption dropout: %d of %d style steps used the trigger alone "
-                        "(%.1f%%, asked for %.1f%%)\n",
-                n_dropped, n_micro, n_micro ? 100.0 * n_dropped / (double) n_micro : 0.0,
+        fprintf(stderr, "[mm3-lm-train] caption dropout: %d of %d style steps THIS SEGMENT "
+                        "used the trigger alone (%.1f%%, asked for %.1f%%)\n",
+                n_dropped, n_style_seg,
+                n_style_seg ? 100.0 * n_dropped / (double) n_style_seg : 0.0,
                 100.0 * a.caption_dropout);
     }
     if (reg_n_micro > 0) {

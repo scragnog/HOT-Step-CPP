@@ -182,6 +182,13 @@ struct LmCkptCfg {
     ggml_tensor * head_w    = nullptr;  // nullptr => lm->embed_tokens
     int64_t       head_row0 = 0;        // first scored row of head_w
     int           head_v    = 0;        // 0 => cfg.vocab_size
+
+    // Rank dropout mask, [r] F32, owned by the caller. nullptr = off. Passed
+    // straight through to LmLayerOpts, which is what makes it satisfy D13: the
+    // collect and recompute passes read the same tensor, so they see the same
+    // subnetwork. The caller must leave it all-ones (or clear it) for eval and
+    // for any forward whose output is treated as the frozen base.
+    ggml_tensor * rank_mask = nullptr;
 };
 
 // The scored head and its width, resolved. One place, so no call site can
@@ -612,6 +619,7 @@ static inline LmLayerOpts lm_ckpt_layer_opts(const LmCkptState & st) {
     o.attn_head_block = st.cfg.attn_head_block;
     o.attn_zero       = st.t_zero_attn;
     o.weights_bf16    = st.cfg.weights_bf16;
+    o.rank_mask       = st.cfg.rank_mask;
     // o.wt stays nullptr: P2/P3 are forward-only, so a transposed weight there
     // would be a node nothing consumes. Only the P7 backward segment sets it.
     return o;

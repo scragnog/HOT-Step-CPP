@@ -1258,7 +1258,8 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 //       [--steps 1000] [--save-every 100] [--warmup 50]
 //       [--max-frames 4096] [--crop-mode beginning|random] [--grad-accum 1]
 //       [--optimizer adamw|muon] [--muon-*] [--trigger word] [--trigger-prepend]
-//       [--caption-dropout 0.2] [--seed 42]
+//       [--caption-dropout 0.2] [--rank-dropout 0.1] [--caption-file <txt>]
+//       [--seed 42]
 //       [--crop-anchor song|zero] [--resume <state>] [--pause-file <path>]
 //       [--no-pause]
 //       [--reg-manifest <json> --reg-captions <dir> --reg-codes <dir>
@@ -1349,6 +1350,8 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--trigger"))       a.trigger      = next("--trigger");
         else if (!strcmp(argv[i], "--trigger-prepend")) a.trigger_prepend = true;
         else if (!strcmp(argv[i], "--caption-dropout")) a.caption_dropout = atof(next("--caption-dropout"));
+        else if (!strcmp(argv[i], "--rank-dropout")) a.rank_dropout = atof(next("--rank-dropout"));
+        else if (!strcmp(argv[i], "--caption-file")) a.caption_file = next("--caption-file");
         else if (!strcmp(argv[i], "--dataset-name"))  a.dataset_name = next("--dataset-name");
         else if (!strcmp(argv[i], "--optimizer"))     a.optimizer    = next("--optimizer");
         else if (!strcmp(argv[i], "--muon-lr-scale")) a.muon_lr_scale = (float) atof(next("--muon-lr-scale"));
@@ -1379,6 +1382,10 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     }
     if (a.crop_anchor != "song" && a.crop_anchor != "zero") {
         fprintf(stderr, "ace-train mm3-lm-train: --crop-anchor must be song or zero\n");
+        return 2;
+    }
+    if (a.rank_dropout < 0.0 || a.rank_dropout >= 1.0) {
+        fprintf(stderr, "ace-train mm3-lm-train: --rank-dropout must be 0..<1\n");
         return 2;
     }
     if (a.caption_dropout < 0.0 || a.caption_dropout > 1.0) {
