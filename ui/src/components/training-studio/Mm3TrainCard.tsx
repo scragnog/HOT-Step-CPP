@@ -18,7 +18,7 @@
 
 import React, { useState } from 'react';
 import {
-  AlertTriangle, ChevronDown, ChevronRight, Cpu, Loader2, Play, Volume2, XCircle,
+  AlertTriangle, ChevronDown, ChevronRight, Cpu, Loader2, Play, ShieldCheck, Volume2, XCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -59,6 +59,9 @@ interface FormState {
   previewCaption: string;
   previewControl: boolean;
   previewBaseline: boolean;
+  regDatasetId: string;
+  regEvery: number;
+  regTopK: number;
 }
 
 const NumField: React.FC<{
@@ -139,6 +142,12 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     previewCaption: '',
     previewControl: true,
     previewBaseline: true,
+    // Prior preservation is off until a corpus is chosen: it needs a second
+    // dataset the user has to nominate, and defaulting it on would silently
+    // train a different objective than the form otherwise describes.
+    regDatasetId: '',
+    regEvery: status.defaults.regularisation?.every ?? 3,
+    regTopK: status.defaults.regularisation?.topK ?? 64,
     ...edits,
   } : null;
 
@@ -188,6 +197,13 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         basePrecision: form.basePrecision, holdout: form.holdout, evalEvery: form.evalEvery,
         cropAnchor: form.cropAnchor,
         ...(form.trigger.trim() ? { trigger: form.trigger.trim() } : {}),
+        ...(form.regDatasetId ? {
+          regularisation: {
+            datasetId: form.regDatasetId,
+            every: form.regEvery,
+            topK: form.regTopK,
+          },
+        } : {}),
         ...(form.previewEverySteps > 0 || form.previewEveryMinutes > 0 ? {
           preview: {
             everySteps: form.previewEverySteps,
@@ -371,6 +387,69 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   </span>
                 </label>
               </div>
+            </div>
+
+            {/* -- Prior preservation -------------------------------------- */}
+            <div className="mt-3 rounded-lg border border-zinc-200 dark:border-white/10 p-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={13} className="text-amber-500" />
+                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                  {t('trainingStudio.mm3.regTitle', 'Prior preservation')}
+                </span>
+              </div>
+              <p className="text-[10px] text-zinc-500 leading-snug mt-1">
+                {t('trainingStudio.mm3.regBlurb',
+                  'Spends some steps on an UNRELATED dataset, scored against what the base model '
+                  + 'itself predicted there rather than against that music. The adapter is then '
+                  + 'penalised for changing its mind about material that has nothing to do with the '
+                  + 'artist, which is the only thing in the objective that separates "learned the '
+                  + 'voice" from "rewrote the planner". Leave the corpus unset to turn it off.')}
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
+                <label className="flex flex-col gap-1 md:col-span-1">
+                  <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                    {t('trainingStudio.mm3.regDataset', 'Corpus')}
+                  </span>
+                  <select className={INPUT} value={form.regDatasetId}
+                    onChange={e => set('regDatasetId', e.target.value)}>
+                    <option value="">{t('trainingStudio.mm3.regOff', 'Off')}</option>
+                    {(status?.regCandidates ?? []).map(d => (
+                      <option key={d.id} value={d.id}>{d.name} ({d.songs})</option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] text-zinc-500 leading-snug">
+                    {(status?.regCandidates?.length ?? 0) === 0
+                      ? t('trainingStudio.mm3.regNone',
+                          'No other dataset has RVQ codes yet — a regularisation corpus needs exactly '
+                          + 'what a training corpus needs. Run the codes export on one.')
+                      : t('trainingStudio.mm3.regDatasetHint',
+                          'Pick something with nothing in common with this artist. Its lyrics may be '
+                          + 'empty; only its captions and codes are used.')}
+                  </span>
+                </label>
+                <NumField label={t('trainingStudio.mm3.regEvery', 'Every N steps')}
+                  value={form.regEvery} onChange={v => set('regEvery', v)}
+                  hint={t('trainingStudio.mm3.regEveryHint',
+                    '3 = one prior step per two style steps') as string} />
+                <NumField label={t('trainingStudio.mm3.regTopK', 'Classes kept')}
+                  value={form.regTopK} onChange={v => set('regTopK', v)} step={64}
+                  hint={t('trainingStudio.mm3.regTopKHint',
+                    'Coverage: 64 = 90%, 128 = 94%, 256 = 97%') as string} />
+              </div>
+              {form.regDatasetId && (
+                <div className="mt-2 text-[10px] text-amber-600/90 dark:text-amber-400/90 leading-snug">
+                  {t('trainingStudio.mm3.regDilution',
+                    'This dilutes style exposure: at every {{n}} steps only {{s}} of your {{total}} '
+                    + 'steps train on the artist. Raise Steps to about {{want}} to keep the same '
+                    + 'exposure as running without it.',
+                    {
+                      n: form.regEvery,
+                      s: form.steps - Math.floor(form.steps / Math.max(2, form.regEvery)),
+                      total: form.steps,
+                      want: Math.round(form.steps / (1 - 1 / Math.max(2, form.regEvery))),
+                    })}
+                </div>
+              )}
             </div>
 
             <button

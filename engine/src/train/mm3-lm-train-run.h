@@ -85,6 +85,7 @@
 #include "train/lm-export.h"
 #include "train/lm-ckpt.h"
 #include "train/mm3-lm-resume.h"
+#include "train/mm3-lm-prior.h"
 #include "train/mm3-f32-isolate.h"
 #include "train/mm3-lm-load.h"
 #include "minimax/mm3-request.h"
@@ -226,6 +227,33 @@ struct MM3LmTrainArgs {
     std::string pause_file;               // default <out>/PAUSE
     std::string resume_path;              // --resume <state file>
     bool        no_pause = false;         // --no-pause: never look for a sentinel
+
+    // ── Prior preservation (train/mm3-lm-prior.h) ──────────────────────────
+    //
+    // A second, UNRELATED corpus whose batches are scored against the frozen
+    // base model's own next-token distribution instead of their ground-truth
+    // codes. The adapter is thereby punished for changing its mind about
+    // material that has nothing to do with the artist — which is the only term
+    // in this objective that distinguishes "learned the voice" from "rewrote
+    // the planner".
+    //
+    // OFF by default: it needs a corpus the user has to supply, and silently
+    // training a different objective than the one asked for would be worse than
+    // not offering it.
+    std::string reg_manifest, reg_captions_dir, reg_codes_dir;
+    /** Every Nth optimizer step is a regularisation step. 0 = off. 3 mirrors
+     *  bghira's 1:2 ratio (one prior step for every two style steps).
+     *
+     *  NOTE THIS DILUTES STYLE EXPOSURE: at --reg-every 3, a 1000-step run
+     *  spends only ~667 steps on the artist. His regularised variant raised the
+     *  step count to keep style exposure constant, and so should you. */
+    int         reg_every = 0;
+    /** Classes kept per position. 64 is his; the producer logs the measured
+     *  probability mass it covers so the choice is checkable. */
+    int         reg_topk = 64;
+    /** Where the captured base distributions live. Empty = <reg-codes>/../prior,
+     *  so a second run over the same corpus reuses them. */
+    std::string reg_prior_dir;
 };
 
 struct MM3LmSample {
@@ -250,6 +278,9 @@ static bool mm3_lm_read_file(const std::string & path, std::string * out) {
     fclose(f);
     return ok;
 }
+
+static bool mm3_lm_load_samples(const MM3LmTrainArgs & a, const MM3TrainLm & t,
+                                std::vector<MM3LmSample> * out, std::string * err);
 
 // ── the MM3 input embedding ─────────────────────────────────────────────────
 //
@@ -297,8 +328,12 @@ static ggml_tensor * mm3_lm_ckpt_embed(ggml_context * ctx, LmCkptRun & r, int S)
 // FD-check entry point needs exactly the same data path as training — a
 // gradient check against a DIFFERENT sequence than the trainer builds would
 // verify nothing that matters.
-static bool mm3_lm_load_samples(const MM3LmTrainArgs & a, const MM3TrainLm & t,
-                                std::vector<MM3LmSample> * out, std::string * err) {
+static bool mm3_lm_load_samples_from(const std::string & manifest, const std::string & captions_dir,
+                                     const std::string & codes_dir, const std::string & lm_path,
+                                     const MM3TrainLm & t,
+                                     std::vector<MM3LmSample> * out, std::string * err) {
+    struct { std::string manifest, captions_dir, codes_dir, lm_path; } a {
+        manifest, captions_dir, codes_dir, lm_path };
     std::vector<MM3LmSample> & samples = *out;
         std::string jbuf;
         if (!mm3_lm_read_file(a.manifest, &jbuf)) {
@@ -365,6 +400,11 @@ static bool mm3_lm_load_samples(const MM3LmTrainArgs & a, const MM3TrainLm & t,
         }
         yyjson_doc_free(doc);
     return true;
+}
+
+static bool mm3_lm_load_samples(const MM3LmTrainArgs & a, const MM3TrainLm & t,
+                                std::vector<MM3LmSample> * out, std::string * err) {
+    return mm3_lm_load_samples_from(a.manifest, a.captions_dir, a.codes_dir, a.lm_path, t, out, err);
 }
 
 // ── finite-difference gradient check ────────────────────────────────────────
@@ -1251,6 +1291,11 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     int64_t              t_step0 = t_start;
     double               best_eval = -1.0;
     int                  best_eval_step = 0;
+    // Prior-preservation steps are accounted separately throughout: their loss
+    // is soft-target CE against the frozen base, not CE against a code, and
+    // averaging the two together produces a number that describes neither.
+    double               reg_running = 0.0;
+    int                  reg_n_micro = 0;
 
     auto save_ckpt = [&](int step, double loss) -> std::string {
         char sub[64];
@@ -1407,6 +1452,19 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     int              epoch_n = 0;
     int64_t          epoch_t0 = ggml_time_ms();
 
+    // ── prior preservation ─────────────────────────────────────────────────
+    //
+    // The regularisation corpus and its cached base distributions. Loaded here,
+    // captured below, and drawn from on every reg_every'th step. Its own pass
+    // order is separate from the style order on purpose: a reg step must not
+    // consume a style epoch, or the epoch curve would stop meaning "how many
+    // times the model has seen the album".
+    std::vector<MM3LmSample>   reg_samples;
+    std::vector<MM3PriorCache> reg_priors;
+    std::vector<int>           reg_order;
+    int                        reg_epoch_cur = -1;
+    const bool reg_on = a.reg_every > 0 && !a.reg_manifest.empty();
+
     auto next_sample = [&]() -> const MM3LmSample & {
         if (order_pos >= order.size()) {
             lm_epoch_order(&order, (int) samples.size(), true, (uint64_t) a.seed, epoch);
@@ -1472,17 +1530,199 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 start_step, a.steps);
     }
 
+    // ── prior preservation: load the corpus and capture the base's answers ──
+    //
+    // ORDER MATTERS. The capture has to happen here — after the checkpoint
+    // machinery exists, and before the first optimizer step — because it relies
+    // on the adapter being inert. PEFT initialises B to zero, so right now a
+    // forward pass IS the frozen base; one step from now it is not, and the
+    // teacher would quietly become the student.
+    //
+    // A resume therefore cannot regenerate: it must find the cache on disk, and
+    // says so rather than capturing a contaminated distribution.
+    if (reg_on && rc == 0) {
+        std::string rerr;
+        if (!mm3_lm_load_samples_from(a.reg_manifest, a.reg_captions_dir, a.reg_codes_dir, a.lm_path,
+                                      t, &reg_samples, &rerr) || reg_samples.empty()) {
+            fatal_msg = "regularisation set has no usable samples"
+                      + (rerr.empty() ? std::string(" — check --reg-manifest/--reg-captions/--reg-codes")
+                                      : (": " + rerr));
+            fprintf(stderr, "[mm3-lm-train] %s\n", fatal_msg.c_str());
+            rc = 1;
+        }
+    }
+    if (reg_on && rc == 0) {
+        std::string prior_dir = a.reg_prior_dir;
+        if (prior_dir.empty()) {
+            prior_dir = a.reg_codes_dir + "/../prior";
+        }
+        pm_mkdir_p(prior_dir);
+        const int W = (int) SL;   // scored width the capture spans
+        reg_priors.resize(reg_samples.size());
+
+        int    made = 0, loaded = 0;
+        double cov_sum = 0.0;
+        const int64_t cap_t0 = ggml_time_ms();
+        for (size_t i = 0; i < reg_samples.size() && rc == 0; i++) {
+            const MM3LmSample & rs = reg_samples[i];
+            // The crop is the SAME deterministic one training will use, which is
+            // only true because the recipe truncates from the start. A random
+            // crop would need a cache per offset, or a teacher that disagrees
+            // with the student about which audio it is looking at.
+            const int64_t K      = std::min<int64_t>(K_max, rs.n_frames);
+            const bool    at_end = K >= rs.n_frames;
+            const int64_t Fin    = at_end ? K : K - 1;
+            const int64_t n_sup  = at_end ? K + 1 : K;
+            const int64_t P      = (int64_t) rs.prompt.size();
+            const int64_t S      = P + Fin;
+            if (S > S_max || Fin < 1) {
+                fprintf(stderr, "[mm3-lm-train] SKIP reg %s: sequence %lld exceeds %lld\n",
+                        rs.id.c_str(), (long long) S, (long long) S_max);
+                continue;
+            }
+            const std::string path = mm3_prior_path(prior_dir, rs.id, a.lm_path, a.reg_topk);
+            std::string       lerr;
+            if (mm3_prior_load(path, a.reg_topk, (int) n_sup, W, &reg_priors[i], &lerr)) {
+                loaded++;
+                cov_sum += mm3_prior_coverage(reg_priors[i]);
+                continue;
+            }
+            if (start_step > 0) {
+                fatal_msg = "resuming, but the prior cache for " + rs.id + " is missing or stale ("
+                          + lerr + "). It can only be captured before the first optimizer step, so "
+                            "the adapter is no longer inert and a fresh capture would teach the "
+                            "student its own output. Delete the run and start over, or point "
+                            "--reg-prior at the original cache.";
+                fprintf(stderr, "[mm3-lm-train] %s\n", fatal_msg.c_str());
+                rc = 1;
+                break;
+            }
+
+            // Forward-only through the machinery training already allocated, so
+            // the capture costs compute and not VRAM.
+            sem_in.resize((size_t) Fin);
+            ac_in.resize((size_t) (Fin * NC));
+            for (int64_t j = 0; j < Fin; j++) {
+                const int32_t * f = &rs.codes[(size_t) (j * 8)];
+                sem_in[(size_t) j] = f[0] + (int32_t) t.semantic_vocab_offset;
+                for (int64_t k2 = 0; k2 < NC; k2++) {
+                    ac_in[(size_t) (k2 * Fin + j)] = f[1 + k2] + (int32_t) (k2 * AV);
+                }
+            }
+            tgt.resize((size_t) n_sup);
+            for (int64_t j = 0; j < n_sup; j++) {
+                tgt[(size_t) j] = (at_end && j == n_sup - 1)
+                                    ? mm3_lm_train_slice_eos(t)
+                                    : mm3_lm_train_slice_index(t, rs.codes[(size_t) (j * 8)]);
+            }
+            if ((int) S != last_mask_S) {
+                lm_causal_mask((int) S, &msk);
+                ggml_backend_tensor_set(t_msk, msk.data(), 0, msk.size() * sizeof(float));
+                last_mask_S = (int) S;
+            }
+            pos.resize((size_t) S);
+            for (int64_t j = 0; j < P; j++)   pos[(size_t) j] = (int32_t) j;
+            for (int64_t j = 0; j < Fin; j++) pos[(size_t) (P + j)] = (int32_t) (P + j);
+            ggml_backend_tensor_set(t_prompt, rs.prompt.data(), 0, (size_t) P * sizeof(int32_t));
+            ggml_backend_tensor_set(t_sem, sem_in.data(), 0, sem_in.size() * sizeof(int32_t));
+            ggml_backend_tensor_set(t_ac, ac_in.data(), 0, ac_in.size() * sizeof(int32_t));
+            ggml_backend_tensor_set(t_pos, pos.data(), 0, pos.size() * sizeof(int32_t));
+            embed_ctx.P = P; embed_ctx.Fin = Fin;
+
+            MM3PriorCache pc;
+            pc.k = a.reg_topk; pc.n_pos = (int) n_sup; pc.width = W;
+            pc.idx.reserve((size_t) n_sup * (size_t) a.reg_topk);
+            pc.p.reserve((size_t) n_sup * (size_t) a.reg_topk);
+            ckpt_run.forward_only = true;
+            ckpt_run.capture_k    = a.reg_topk;
+            ckpt_run.capture_idx  = &pc.idx;
+            ckpt_run.capture_p    = &pc.p;
+            LmSample smp;
+            smp.tokens.assign((size_t) S, 0);
+            smp.targets  = tgt;
+            smp.n_masked = (int) P;
+            smp.s_tr     = (int) n_sup;
+            const bool ok = lm_ckpt_micro_step(ckpt_run, smp, false, nullptr);
+            ckpt_run.capture_k   = 0;
+            ckpt_run.capture_idx = nullptr;
+            ckpt_run.capture_p   = nullptr;
+            ckpt_run.forward_only = false;
+            if (!ok || (int) pc.idx.size() != pc.n_pos * pc.k) {
+                fatal_msg = "prior capture failed for " + rs.id;
+                fprintf(stderr, "[mm3-lm-train] %s\n", fatal_msg.c_str());
+                rc = 1;
+                break;
+            }
+            std::string serr;
+            if (!mm3_prior_save(path, pc, &serr)) {
+                fprintf(stderr, "[mm3-lm-train] prior cache not written (%s) — continuing in memory\n",
+                        serr.c_str());
+            }
+            cov_sum += mm3_prior_coverage(pc);
+            reg_priors[i] = std::move(pc);
+            made++;
+        }
+        if (rc == 0) {
+            const int n_ok = made + loaded;
+            fprintf(stderr,
+                    "[mm3-lm-train] prior preservation: %d regularisation song(s) (%d captured, %d cached), "
+                    "top-%d covering %.2f%% of the base's probability mass, %lld s\n",
+                    n_ok, made, loaded, a.reg_topk,
+                    n_ok ? 100.0 * cov_sum / (double) n_ok : 0.0,
+                    (long long) ((ggml_time_ms() - cap_t0) / 1000));
+            fprintf(stderr,
+                    "[mm3-lm-train] every %d%s step trains against the frozen base instead of the "
+                    "artist — style exposure is %d of %d steps\n",
+                    a.reg_every, a.reg_every == 2 ? "nd" : a.reg_every == 3 ? "rd" : "th",
+                    a.steps - a.steps / a.reg_every, a.steps);
+            jl("{\"type\":\"prior\",\"songs\":%d,\"captured\":%d,\"cached\":%d,\"topK\":%d,"
+               "\"coverage\":%.6f,\"regEvery\":%d}",
+               n_ok, made, loaded, a.reg_topk, n_ok ? cov_sum / (double) n_ok : 0.0, a.reg_every);
+        }
+    }
+
     for (int step = start_step + 1; step <= a.steps && rc == 0; step++) {
         double acc_loss = 0.0;
+        // A REGULARISATION STEP, on the schedule rather than at random, so two
+        // runs with the same seed see the same steps and the ratio is exactly
+        // what was asked for rather than what a coin gave.
+        const bool is_reg = reg_on && !reg_samples.empty() && (step % a.reg_every == 0);
         for (int micro = 0; micro < std::max(1, a.grad_accum) && rc == 0; micro++) {
-            const MM3LmSample & s = next_sample();
+            const MM3PriorCache * prior = nullptr;
+            const MM3LmSample *   sp    = nullptr;
+            if (is_reg) {
+                // Its own pass, so a reg step never consumes a style epoch — and
+                // its position in that pass is DERIVED FROM `step` rather than
+                // carried in a cursor. That makes it survive a pause/resume for
+                // free: a cursor would have to live in the resume state, and one
+                // that silently reset would re-bias exposure in exactly the way
+                // the shuffled pass exists to prevent.
+                const int nreg      = (int) reg_samples.size();
+                const int reg_index = step / a.reg_every - 1;   // 0-based reg step
+                const int reg_epoch = reg_index / nreg;
+                if (reg_epoch != reg_epoch_cur || reg_order.empty()) {
+                    lm_epoch_order(&reg_order, nreg, true, (uint64_t) a.seed ^ 0x9E37ull, reg_epoch);
+                    reg_epoch_cur = reg_epoch;
+                }
+                const int ri = reg_order[(size_t) (reg_index % nreg)];
+                sp    = &reg_samples[(size_t) ri];
+                prior = &reg_priors[(size_t) ri];
+                if (prior->n_pos <= 0) {
+                    continue;   // skipped at capture time (too long); no step
+                }
+            } else {
+                sp = &next_sample();
+            }
+            const MM3LmSample & s = *sp;
             const int64_t       P = (int64_t) s.prompt.size();
 
             // Fresh crop every time this song comes up. `beginning` exists only
-            // to reproduce the intros-only failure lm2 hit.
+            // to reproduce the intros-only failure lm2 hit. A reg step is ALWAYS
+            // deterministic from the start — its cached teacher was captured on
+            // exactly that crop and no other.
             int64_t K = std::min<int64_t>(K_max, s.n_frames);
             int64_t c0 = 0;
-            if (a.crop_mode != "beginning" && s.n_frames > K) {
+            if (!is_reg && a.crop_mode != "beginning" && s.n_frames > K) {
                 c0 = (int64_t) (lm_rng_next(&rng) % (uint64_t) (s.n_frames - K + 1));
             }
             const bool    at_end = (c0 + K) >= s.n_frames;
@@ -1538,6 +1778,15 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 smp.targets  = tgt;
                 smp.n_masked = (int) P;
                 smp.s_tr     = (int) n_sup;
+                if (prior) {
+                    // Score against what the base model itself predicted here,
+                    // not against this song's actual codes. `targets` goes
+                    // unused; LmChunkLabelGuard switches on soft_k.
+                    smp.soft_k   = prior->k;
+                    smp.soft_idx = prior->idx;
+                    smp.soft_p   = prior->p;
+                    smp.s_tr     = std::min<int>(smp.s_tr, prior->n_pos);
+                }
                 ok = lm_ckpt_micro_step(ckpt_run, smp, true, &ce);
             } else {
                 ggml_init_params gip = { arena.size(), arena.data(), true };
@@ -1565,8 +1814,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 rc = 1;
             } else {
                 acc_loss += ce;
-                running  += ce;
-                n_micro++;
+                if (!is_reg) {
+                    running += ce;
+                    n_micro++;
+                } else {
+                    reg_running += ce;
+                    reg_n_micro++;
+                }
             }
         }
         if (rc) break;
@@ -1585,10 +1839,14 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         const int64_t now_ms  = ggml_time_ms();
         const int64_t step_ms = now_ms - t_step0;
         t_step0 = now_ms;
+        // `reg` marks a prior-preservation step. Its loss is a DIFFERENT
+        // quantity — cross-entropy against a soft distribution rather than a
+        // one-hot code — so plotting the two on one series would draw a curve
+        // that means two things. Consumers filter on this flag.
         jl("{\"type\":\"step\",\"step\":%d,\"totalSteps\":%d,\"loss\":%.6f,\"lr\":%.9g,"
-           "\"gradNorm\":%.6f,\"clipScale\":%.6f,\"ms\":%lld,\"stepMs\":%lld}",
+           "\"gradNorm\":%.6f,\"clipScale\":%.6f,\"ms\":%lld,\"stepMs\":%lld,\"reg\":%s}",
            step, a.steps, win, (double) stats.lr, (double) stats.grad_norm, (double) stats.clip,
-           (long long) (now_ms - t_start), (long long) step_ms);
+           (long long) (now_ms - t_start), (long long) step_ms, is_reg ? "true" : "false");
         jl("{\"type\":\"progress\",\"completed\":%d,\"total\":%d,\"phase\":\"train\"}", step, a.steps);
         if (step == 1 || step % 10 == 0 || step == a.steps) {
             fprintf(stderr, "[mm3-lm-train] step %d/%d loss %.4f lr %.3g |g| %.3f clip %.3f %lld s\n", step,
@@ -1616,9 +1874,11 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         // One pass over the training songs. With 13 songs that is 13 steps, so
         // the epoch mean is a 13-crop average — the smooth line the per-step
         // noise is drawn against, and what the 5-epoch average is taken over.
-        epoch_loss_sum += win;
-        epoch_n++;
-        if (order_pos >= order.size() && !order.empty()) {
+        if (!is_reg) {
+            epoch_loss_sum += win;
+            epoch_n++;
+        }
+        if (!is_reg && order_pos >= order.size() && !order.empty()) {
             epoch++;
             const double emean = epoch_loss_sum / std::max(1, epoch_n);
             jl("{\"type\":\"epoch\",\"epoch\":%d,\"loss\":%.6f,\"step\":%d,\"lr\":%.9g,\"ms\":%lld}",
@@ -1694,6 +1954,10 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         }
     }
 
+    if (reg_n_micro > 0) {
+        fprintf(stderr, "[mm3-lm-train] prior preservation: %d steps, mean soft CE %.4f\n",
+                reg_n_micro, reg_running / (double) reg_n_micro);
+    }
     fprintf(stderr, "[mm3-lm-train] %s after %d micro-steps, mean loss %.4f, %lld s\n",
             rc ? "STOPPED" : paused ? "paused" : "done", n_micro, n_micro ? running / n_micro : 0.0,
             (long long) ((ggml_time_ms() - t_start) / 1000));

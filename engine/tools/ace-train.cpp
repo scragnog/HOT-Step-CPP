@@ -1260,11 +1260,20 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 //       [--optimizer adamw|muon] [--muon-*] [--trigger word] [--seed 42]
 //       [--crop-anchor song|zero] [--resume <state>] [--pause-file <path>]
 //       [--no-pause]
+//       [--reg-manifest <json> --reg-captions <dir> --reg-codes <dir>
+//        --reg-every 3 [--reg-topk 64] [--reg-prior <dir>]]
 //
 // --crop-anchor song (the default) presents a crop at its TRUE position in the
 // track. `zero` is the legacy convention, where every crop claimed to be the
 // song's opening — a train/inference mismatch, since generation always starts
 // at frame 0. Kept only so a pre-2026-08-23 run can be reproduced.
+//
+// --reg-* turns on PRIOR PRESERVATION: every --reg-every'th step trains on an
+// unrelated corpus against the FROZEN BASE MODEL'S OWN next-token distribution
+// rather than that corpus's real codes, so the adapter is penalised for
+// changing its mind about material that has nothing to do with the artist. The
+// base distributions are captured once before step 1 (while the adapter is
+// still inert) and cached; see train/mm3-lm-prior.h. Off by default.
 //
 // --resume / --pause-file drive the preview loop: the server touches the
 // sentinel, this program saves LoRA + optimizer momentum + RNG + epoch cursor
@@ -1316,6 +1325,12 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--resume"))        a.resume_path  = next("--resume");
         else if (!strcmp(argv[i], "--pause-file"))    a.pause_file   = next("--pause-file");
         else if (!strcmp(argv[i], "--no-pause"))      a.no_pause     = true;
+        else if (!strcmp(argv[i], "--reg-manifest")) a.reg_manifest = next("--reg-manifest");
+        else if (!strcmp(argv[i], "--reg-captions")) a.reg_captions_dir = next("--reg-captions");
+        else if (!strcmp(argv[i], "--reg-codes"))    a.reg_codes_dir = next("--reg-codes");
+        else if (!strcmp(argv[i], "--reg-prior"))    a.reg_prior_dir = next("--reg-prior");
+        else if (!strcmp(argv[i], "--reg-every"))    a.reg_every    = atoi(next("--reg-every"));
+        else if (!strcmp(argv[i], "--reg-topk"))     a.reg_topk     = atoi(next("--reg-topk"));
         else if (!strcmp(argv[i], "--jsonl"))         g_jsonl        = true;
         else if (!strcmp(argv[i], "--no-ckpt"))       a.ckpt         = false;
         else if (!strcmp(argv[i], "--fd-check"))      fd_probes      = atoi(next("--fd-check"));
@@ -1362,6 +1377,22 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     if (a.crop_anchor != "song" && a.crop_anchor != "zero") {
         fprintf(stderr, "ace-train mm3-lm-train: --crop-anchor must be song or zero\n");
         return 2;
+    }
+    if (a.reg_every > 0) {
+        if (a.reg_manifest.empty() || a.reg_captions_dir.empty() || a.reg_codes_dir.empty()) {
+            fprintf(stderr, "ace-train mm3-lm-train: --reg-every needs --reg-manifest, --reg-captions "
+                            "and --reg-codes (the unrelated corpus to preserve the prior over)\n");
+            return 2;
+        }
+        if (a.reg_every < 2) {
+            fprintf(stderr, "ace-train mm3-lm-train: --reg-every must be >= 2 (at 1 every step would "
+                            "be a regularisation step and nothing would learn the artist)\n");
+            return 2;
+        }
+        if (a.reg_topk < 1 || a.reg_topk > LM_CAPTURE_K_MAX) {
+            fprintf(stderr, "ace-train mm3-lm-train: --reg-topk must be 1..%d\n", LM_CAPTURE_K_MAX);
+            return 2;
+        }
     }
     if (!pm_mkdir_p(a.out_dir)) {
         fprintf(stderr, "ace-train mm3-lm-train: cannot create %s\n", a.out_dir.c_str());

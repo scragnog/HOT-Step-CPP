@@ -463,7 +463,22 @@ export const MM3_LM_DEFAULTS = {
   /** SimpleTuner's `lr_end: 4e-7` over a 5e-5 base. Our shared cosine bottomed
    *  at 0.1 of base, running the tail of the schedule twelve times hotter. */
   lrEndFrac: 0.008,
+  /** Prior preservation, OFF until a regularisation dataset is chosen — it
+   *  needs a corpus the user has to supply. `regEvery: 3` is bghira's 1:2 ratio
+   *  and is what the UI offers the moment one is picked. */
+  regEvery: 3,
+  regTopK: 64,
 } as const;
+
+/** Where a regularisation corpus's captured base distributions live.
+ *
+ *  Beside the dataset's codes rather than under the training run, because the
+ *  capture depends only on (base model, song, crop) — so a second run over the
+ *  same corpus reuses it, and re-running a whole training sweep does not pay
+ *  for the capture every time. */
+export function mm3PriorDir(slug: string): string {
+  return path.join(mm3CodesDir(slug), 'prior');
+}
 
 // ── Arg building ────────────────────────────────────────────────────────────
 
@@ -511,6 +526,13 @@ export interface ResolvedMm3TrainLmOptions {
   cropAnchor: 'song' | 'zero';
   /** Cosine floor as a fraction of lr (SimpleTuner's lr_end / lr). */
   lrEndFrac: number;
+  /** Prior preservation. All four move together or none of them do. */
+  regManifest?: string;
+  regCaptionsDir?: string;
+  regCodesDir?: string;
+  regPriorDir?: string;
+  regEvery?: number;
+  regTopK?: number;
   /** Mid-run audio previews. Undefined = off; the runner resolves the plan. */
   preview?: Mm3PreviewOptions;
   /** Set by the runner when relaunching a paused run — never by a route. */
@@ -546,6 +568,16 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   if (o.trigger) args.push('--trigger', o.trigger);
   if (o.datasetName) args.push('--dataset-name', o.datasetName);
   args.push('--crop-anchor', o.cropAnchor);
+  // Prior preservation. Guarded on the whole set, not on `regEvery` alone: the
+  // engine refuses a partial set, and it should never see one from here.
+  if (o.regEvery && o.regEvery > 0 && o.regManifest && o.regCaptionsDir && o.regCodesDir) {
+    args.push('--reg-manifest', o.regManifest);
+    args.push('--reg-captions', o.regCaptionsDir);
+    args.push('--reg-codes', o.regCodesDir);
+    args.push('--reg-every', String(o.regEvery));
+    args.push('--reg-topk', String(o.regTopK ?? MM3_LM_DEFAULTS.regTopK));
+    if (o.regPriorDir) args.push('--reg-prior', o.regPriorDir);
+  }
   // Previews pause the trainer through a sentinel file. When they are off, say
   // so explicitly: a stray PAUSE left behind by a killed run would otherwise
   // stop the next run at its first step.

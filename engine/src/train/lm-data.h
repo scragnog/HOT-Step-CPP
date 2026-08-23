@@ -31,6 +31,21 @@ struct LmSample {
     std::vector<int32_t> targets;   // s_tr entries; targets[i] = tokens[n_masked + i]
     int                  n_masked = 0;
     int                  s_tr     = 0;  // == (int)tokens.size() - n_masked
+
+    // ── Prior preservation (soft targets) ──────────────────────────────────
+    //
+    // When soft_k > 0 the head scores against a DISTRIBUTION per position
+    // instead of a single correct token: soft_idx/soft_p hold the top-K of the
+    // frozen base model's own next-token prediction, captured before training
+    // began. `targets` is then unused for the loss.
+    //
+    // This is what makes a regularisation batch mean "keep predicting what you
+    // used to" rather than "learn this other song too" — the difference between
+    // an adapter that stays surgical and one that bleeds its style into every
+    // prompt.
+    std::vector<int32_t> soft_idx;  // s_tr * soft_k, column indices into V
+    std::vector<float>   soft_p;    // s_tr * soft_k, each row sums to 1
+    int                  soft_k = 0;
 };
 
 // Load lm_codes.jsonl into rows (thin wrapper over lm-extract.h's reader).
@@ -178,6 +193,81 @@ struct LmLabelGuard {
     ~LmLabelGuard() { lm_labels_clear(t, tgt, s_tr, V); }
     LmLabelGuard(const LmLabelGuard &)             = delete;
     LmLabelGuard & operator=(const LmLabelGuard &) = delete;
+};
+
+// ─── soft (top-K) labels ────────────────────────────────────────────────────
+//
+// The label tensor ggml_cross_entropy_loss takes is a DENSE [V, n] distribution,
+// and lm_labels_write merely happens to put a single 1.0 in each row. Both the
+// loss and its backward — (softmax - labels) — are already correct for any row
+// distribution, so a soft target needs no new op and no new gradient: it is the
+// same buffer with K entries per row instead of one.
+//
+// DENSE UPLOAD, NOT SCATTER. The hard-label path pokes one float per row and
+// that is fine at one write per position; a soft label has K of them, and at
+// K=64 over a 4096-frame crop that is 262,144 individual 4-byte device writes
+// per fill and as many again to clear. Measured at only 128 positions it
+// already cost +50% on the step. Building the [V, n] block on the host and
+// sending it in ONE transfer is ~8 MB per chunk — about a millisecond of PCIe —
+// and its cost no longer depends on K at all, which is what makes a larger K a
+// free choice rather than a trade.
+static inline void lm_soft_labels_write(ggml_tensor * t_lab, const int32_t * idx, const float * p,
+                                        int n, int K, int V, bool set) {
+    // Reused across chunks and steps; sized by the largest chunk seen.
+    static std::vector<float> dense;
+    dense.assign((size_t) n * (size_t) V, 0.0f);
+    if (set) {
+        for (int i = 0; i < n; i++) {
+            float * row = dense.data() + (size_t) i * (size_t) V;
+            for (int k = 0; k < K; k++) {
+                const size_t  j = (size_t) i * (size_t) K + (size_t) k;
+                const int32_t c = idx[j];
+                if (c >= 0 && c < V) {
+                    row[c] = p[j];
+                }
+            }
+        }
+    }
+    // The label buffer is [V, chunk] with contiguous rows, so the first n rows
+    // are one contiguous span. The clear path uploads zeros over exactly the
+    // same span — a hard-label step afterwards assumes it starts from zero.
+    ggml_backend_tensor_set(t_lab, dense.data(), 0, dense.size() * sizeof(float));
+}
+
+/** One guard for both label forms, because the head must not care which it has.
+ *
+ *  The buffer is SHARED across chunks and is only ever sparsely written, so the
+ *  destructor has to zero exactly what the constructor wrote. A missed clear
+ *  does not fail loudly — it silently adds a stale label to the next chunk's
+ *  loss, which is the kind of bug that shows up as "training is a bit worse"
+ *  three days later. */
+struct LmChunkLabelGuard {
+    ggml_tensor *   t    = nullptr;
+    const int32_t * idx  = nullptr;
+    const float *   p    = nullptr;
+    int             n    = 0, K = 0, V = 0;
+
+    /** `off` is the chunk's first supervised position within the sample. */
+    LmChunkLabelGuard(ggml_tensor * t_lab, const LmSample & s, int off, int n_, int vocab)
+        : t(t_lab), n(n_), K(s.soft_k), V(vocab) {
+        if (K > 0) {
+            idx = s.soft_idx.data() + (size_t) off * (size_t) K;
+            p   = s.soft_p.data()   + (size_t) off * (size_t) K;
+            lm_soft_labels_write(t, idx, p, n, K, V, true);
+        } else {
+            idx = s.targets.data() + off;
+            lm_labels_set(t, idx, n, V);
+        }
+    }
+    ~LmChunkLabelGuard() {
+        if (K > 0) {
+            lm_soft_labels_write(t, idx, p, n, K, V, false);
+        } else {
+            lm_labels_clear(t, idx, n, V);
+        }
+    }
+    LmChunkLabelGuard(const LmChunkLabelGuard &)             = delete;
+    LmChunkLabelGuard & operator=(const LmChunkLabelGuard &) = delete;
 };
 
 // ─── causal mask ────────────────────────────────────────────────────────────

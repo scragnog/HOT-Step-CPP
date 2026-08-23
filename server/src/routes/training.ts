@@ -85,7 +85,8 @@ import {
 import { getTrainingDefaults, setTrainingDefaults } from '../services/training/trainingDefaults.js';
 import {
   availableMm3Bases, MM3_VRAM_MODEL, recommendMm3Config,
-  MM3_LM_DEFAULTS, missingMm3TrainModels, mm3AdapterRunDir, mm3CodesDir, mm3RunName,
+  MM3_LM_DEFAULTS, missingMm3TrainModels, mm3AdapterRunDir, mm3CodesDir, mm3PriorDir,
+  mm3RunName,
   type Mm3BasePrecision,
 } from '../services/training/mm3Train.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
@@ -1746,6 +1747,21 @@ router.get('/datasets/:id/mm3', async (req: Request, res: Response) => {
       // not there just moves the failure to spawn time. Sized at the DEFAULT
       // recipe; the UI re-estimates locally as the user moves rank/frames.
       bases: availableMm3Bases(),
+      // Datasets that could serve as a PRIOR-PRESERVATION corpus: anything with
+      // RVQ codes that is not this one. Listed by the server because "has codes"
+      // is a filesystem fact the browser cannot see, and offering a dataset
+      // without them would fail at spawn time instead of at pick time.
+      regCandidates: repo.listDatasets()
+        .filter(d => d.id !== ds.id)
+        .map(d => {
+          const inner = path.join(mm3CodesDir(d.slug), 'codes');
+          let songs = 0;
+          try {
+            songs = fs.readdirSync(inner).filter(f => f.endsWith('.codes')).length;
+          } catch { /* no codes: filtered out below */ }
+          return { id: d.id, name: d.name || d.slug, songs };
+        })
+        .filter(d => d.songs > 0),
       // What the card can actually hold. 0 when ace-server is not up, which the
       // UI must treat as "unknown" rather than "no VRAM" — the difference is a
       // greyed-out estimate versus a false "will not fit" on a 5090.
@@ -1815,6 +1831,47 @@ function parseMm3PreviewOptions(raw: unknown): Mm3PreviewOptions | undefined {
     control: p.control !== false,
     controlCaption: str('controlCaption'),
     baseline: p.baseline !== false,
+  };
+}
+
+/** Resolve the regularisation corpus off the request body.
+ *
+ *  Returns {} when prior preservation is off, and THROWS when it is on but the
+ *  corpus cannot be used — a silently-dropped regularisation set would train a
+ *  different objective than the one asked for and look identical in the logs. */
+function resolveMm3Regularisation(raw: unknown, styleDatasetId: string): Partial<{
+  regManifest: string; regCaptionsDir: string; regCodesDir: string;
+  regPriorDir: string; regEvery: number; regTopK: number;
+}> {
+  if (!raw || typeof raw !== 'object') return {};
+  const r = raw as Record<string, unknown>;
+  const every = Number.isFinite(Number(r.every)) ? Math.trunc(Number(r.every)) : MM3_LM_DEFAULTS.regEvery;
+  const id = typeof r.datasetId === 'string' ? r.datasetId : '';
+  if (!id || every <= 0) return {};
+  if (every < 2) {
+    throw new Error('Regularisation cadence must be at least 2 — at 1 every step would be a '
+                  + 'regularisation step and nothing would learn the artist.');
+  }
+  if (id === styleDatasetId) {
+    throw new Error('The regularisation corpus must be a DIFFERENT dataset. Preserving the prior '
+                  + 'over the same songs the adapter is learning cancels itself out.');
+  }
+  const ds = repo.getDataset(id);
+  if (!ds) throw new Error('Regularisation dataset not found');
+  const codes = path.join(mm3CodesDir(ds.slug), 'codes');
+  const n = fs.existsSync(codes) ? fs.readdirSync(codes).filter(f => f.endsWith('.codes')).length : 0;
+  if (n === 0) {
+    throw new Error(`"${ds.name || ds.slug}" has no RVQ codes — run the codes export on it first. `
+                  + 'A regularisation corpus needs exactly what a training corpus needs.');
+  }
+  const topK = Number.isFinite(Number(r.topK)) ? Math.trunc(Number(r.topK)) : MM3_LM_DEFAULTS.regTopK;
+  return {
+    regManifest:    ds.datasetJsonPath,
+    regCaptionsDir: ds.sourceDir,
+    regCodesDir:    codes,
+    regPriorDir:    mm3PriorDir(ds.slug),
+    regEvery:       every,
+    regTopK:        Math.min(256, Math.max(1, topK)),
   };
 }
 
@@ -1888,6 +1945,16 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
     const cropMode  = b.cropMode === 'beginning' ? 'beginning' : D.cropMode;
     const runName   = mm3RunName(ds.slug);
 
+    // Resolved before the job is built so a bad regularisation corpus is a 400
+    // the user can act on, not a 500 from inside the queue.
+    let reg: ReturnType<typeof resolveMm3Regularisation>;
+    try {
+      reg = resolveMm3Regularisation(b.regularisation, ds.id);
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || String(err) });
+      return;
+    }
+
     const job = queue.startMm3TrainLmJob(ds.id, {
       manifest:    ds.datasetJsonPath,
       captionsDir,
@@ -1914,6 +1981,7 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       // reproduce a pre-2026-08-23 run. See Mm3TrainLmRequest.cropAnchor.
       cropAnchor:  b.cropAnchor === 'zero' ? 'zero' : 'song',
       lrEndFrac:   num('lrEndFrac', D.lrEndFrac, 0, 1),
+      ...reg,
       preview:     parseMm3PreviewOptions(b.preview),
     });
     res.json({ jobId: job.id, kind: job.kind, runName, outDir: mm3AdapterRunDir(runName) });

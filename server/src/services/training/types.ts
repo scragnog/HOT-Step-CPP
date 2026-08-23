@@ -64,6 +64,31 @@ export interface Mm3TrainLmRequest {
   cropAnchor?: 'song' | 'zero';
   /** Mid-run audio previews. Omitted or all-zero cadence = off. */
   preview?: Mm3PreviewOptions;
+  /** Prior preservation. Omitted or `every: 0` = off. */
+  regularisation?: Mm3RegularisationOptions;
+}
+
+/** Prior preservation: train some steps against the FROZEN BASE MODEL'S OWN
+ *  predictions on an unrelated corpus, so the adapter is penalised for changing
+ *  its mind about material that has nothing to do with the artist.
+ *
+ *  This is the one term in the objective that distinguishes "learned the voice"
+ *  from "rewrote the planner", and it is what bghira's regularised fiona variant
+ *  added after finding that generic captions still summoned the style. */
+export interface Mm3RegularisationOptions {
+  /** Dataset id of the unrelated corpus. It needs MM3 captions and RVQ codes,
+   *  exactly like a training dataset; lyrics may be empty. */
+  datasetId: string;
+  /** Every Nth step is a regularisation step. 0 = off, 3 = bghira's 1:2 ratio.
+   *
+   *  It DILUTES style exposure: at 3, a 1000-step run spends ~667 steps on the
+   *  artist. Raise the step count to compensate, as his regularised run did. */
+  every?: number;
+  /** Classes kept per position when capturing the base's distribution. 64 is
+   *  his. Measured coverage of the base's probability mass on MM3 semantic
+   *  codes: 64 -> 89.6%, 128 -> 94.1%, 256 -> 97.0%. The per-step cost does not
+   *  depend on K (the label block is uploaded dense), only the cache size does. */
+  topK?: number;
 }
 
 /** Mid-run audio previews for an MM3 LM training run (services/training/

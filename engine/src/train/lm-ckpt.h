@@ -578,6 +578,22 @@ struct LmCkptRun {
      *  The head still writes dL/dh into Gh[0] as a side effect; nothing reads
      *  it, and P4 clears that buffer at the start of every micro-step. */
     bool forward_only = false;
+
+    // ── PRIOR-PRESERVATION CAPTURE ─────────────────────────────────────────
+    //
+    // With capture_k > 0 the chunked head reads its logits back and appends the
+    // top-K of each supervised position to capture_idx/capture_p. That is how a
+    // regularisation target is produced: the frozen base model's OWN answer,
+    // recorded once, so a later step can be told "keep predicting this" instead
+    // of "learn this other song too".
+    //
+    // It must run while the adapter is provably inert — at init B is zero, so
+    // the LoRA contributes exactly nothing and the capture is the true base
+    // distribution. After a single optimizer step that is no longer true, which
+    // is why the result is cached to disk rather than recomputed on resume.
+    int                    capture_k   = 0;
+    std::vector<int32_t> * capture_idx = nullptr;
+    std::vector<float>   * capture_p   = nullptr;
 };
 
 static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S) {
@@ -601,6 +617,70 @@ static inline LmLayerOpts lm_ckpt_layer_opts(const LmCkptState & st) {
     return o;
 }
 
+/** Read one chunk's logits back and append each row's top-K as a normalised
+ *  distribution.
+ *
+ *  Softmax is taken over the WHOLE scored width and only then truncated to K,
+ *  so p reflects the base's real confidence — renormalising the top-K to sum to
+ *  1 afterwards would turn a flat, uncertain prediction into a confident one and
+ *  teach the adapter to be more certain than the model it is protecting. The
+ *  leftover mass is simply dropped: rows sum to <= 1, and the cross-entropy
+ *  treats the missing mass as unconstrained, which is exactly right — we have no
+ *  opinion about the 16,000 codes the base considered and rejected.
+ *
+ *  K = 64 at 16,385 classes typically captures well over 99% of the mass; the
+ *  producer logs the measured coverage so a pathological case is visible rather
+ *  than assumed. */
+#define LM_CAPTURE_K_MAX 256
+
+static void lm_ckpt_capture_topk(LmCkptRun & r, ggml_tensor * lg, int V, int Sc) {
+    static std::vector<float> row;              // reused; V floats
+    const int K = r.capture_k;
+    row.resize((size_t) V);
+    for (int i = 0; i < Sc; i++) {
+        ggml_backend_tensor_get(lg, row.data(), (size_t) i * (size_t) V * sizeof(float),
+                                (size_t) V * sizeof(float));
+        float mx = -INFINITY;
+        for (int v = 0; v < V; v++) {
+            if (row[v] > mx) mx = row[v];
+        }
+        double sum = 0.0;
+        for (int v = 0; v < V; v++) {
+            const double e = exp((double) row[v] - (double) mx);
+            row[v] = (float) e;
+            sum += e;
+        }
+        const float inv = (float) (1.0 / (sum > 0.0 ? sum : 1.0));
+
+        // Insertion selection into a K-sized running top list. One pass over V
+        // with an early-out on the smallest kept value; at K=64 / V=16k that is
+        // nothing next to the matmul that produced these logits, and it needs no
+        // per-position allocation. K is bounded at the CLI (LM_CAPTURE_K_MAX).
+        int   best_i[LM_CAPTURE_K_MAX];
+        float best_v[LM_CAPTURE_K_MAX];
+        const int kk = K < LM_CAPTURE_K_MAX ? K : LM_CAPTURE_K_MAX;
+        for (int k = 0; k < kk; k++) { best_i[k] = -1; best_v[k] = -INFINITY; }
+        for (int v = 0; v < V; v++) {
+            const float x = row[v];
+            if (x <= best_v[kk - 1]) {
+                continue;
+            }
+            int j = kk - 1;
+            while (j > 0 && best_v[j - 1] < x) {
+                best_v[j] = best_v[j - 1];
+                best_i[j] = best_i[j - 1];
+                j--;
+            }
+            best_v[j] = x;
+            best_i[j] = v;
+        }
+        for (int k = 0; k < kk; k++) {
+            r.capture_idx->push_back(best_i[k] >= 0 ? best_i[k] : 0);
+            r.capture_p->push_back(best_i[k] >= 0 ? best_v[k] * inv : 0.0f);
+        }
+    }
+}
+
 // P5 (production): per-chunk graphs, no autodiff, disjoint t_G column writes.
 static bool lm_ckpt_head_chunked(LmCkptRun & r, const LmSample & s, bool count_loss, double * ce_out) {
     LmCkptState &         st   = *r.st;
@@ -622,7 +702,7 @@ static bool lm_ckpt_head_chunked(LmCkptRun & r, const LmSample & s, bool count_l
         const float gs = (float) Sc / ((float) s_tr * (float) GA);
         ggml_backend_tensor_set(r.t_gs, &gs, 0, sizeof(float));
 
-        LmLabelGuard guard(st.t_labc, s.targets.data() + i, Sc, V);
+        LmChunkLabelGuard guard(st.t_labc, s, i, Sc, V);
 
         ggml_init_params ip  = { st.arena.size(), st.arena.data(), true };
         ggml_context *   ctx = ggml_init(ip);
@@ -644,6 +724,12 @@ static bool lm_ckpt_head_chunked(LmCkptRun & r, const LmSample & s, bool count_l
         ggml_tensor * dl = ggml_cross_entropy_loss_back(ctx, r.t_gs, lg, lb);  // (grad, logits, labels)
         ggml_tensor * dh = ggml_mul_mat(ctx, ebt, dl);                         // [H, Sc]
         ggml_tensor * gv = ggml_view_2d(ctx, st.Gh[0], H, Sc, st.Gh[0]->nb[1], col * st.Gh[0]->nb[1]);
+        if (r.capture_k > 0) {
+            // The logits are an intermediate; without this the arena is free to
+            // reuse their memory before the readback.
+            ggml_set_output(lg);
+            ggml_build_forward_expand(gf, lg);
+        }
         ggml_build_forward_expand(gf, lc);
         ggml_build_forward_expand(gf, ggml_cpy(ctx, dh, gv));
 
@@ -658,6 +744,9 @@ static bool lm_ckpt_head_chunked(LmCkptRun & r, const LmSample & s, bool count_l
             float lv = 0.0f;
             ggml_backend_tensor_get(lc, &lv, 0, sizeof(float));
             ce += (double) lv * (double) Sc / (double) s_tr;
+        }
+        if (ok && r.capture_k > 0) {
+            lm_ckpt_capture_topk(r, lg, V, Sc);
         }
         ggml_free(ctx);
         if (!ok) {

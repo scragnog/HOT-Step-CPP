@@ -53,6 +53,9 @@ export interface Mm3Status {
    *  taken server-side. */
   vramModel: Mm3VramModel;
   defaults: Mm3TrainLmRequest & { maxFrames: number; cropMode: string };
+  /** Datasets usable as a prior-preservation corpus: they have RVQ codes and
+   *  are not this one. Absent on an older server. */
+  regCandidates?: Array<{ id: string; name: string; songs: number }>;
 }
 
 /** One installed base. `quality` and `lossDelta` are MEASURED against f16 on an
@@ -141,6 +144,20 @@ export interface Mm3TrainLmRequest {
   cropAnchor?: 'song' | 'zero';
   /** Mid-run audio previews. Both cadence fields zero = off. */
   preview?: Mm3PreviewOptions;
+  /** Prior preservation. Omitted, or no datasetId, = off. */
+  regularisation?: Mm3RegularisationOptions;
+}
+
+/** Prior preservation: some steps train against the FROZEN BASE MODEL'S OWN
+ *  predictions on an unrelated corpus, so the adapter is punished for changing
+ *  its mind about material that has nothing to do with the artist. */
+export interface Mm3RegularisationOptions {
+  datasetId: string;
+  /** Every Nth step. 3 = one prior step per two style steps. */
+  every?: number;
+  /** Classes kept per position. Measured coverage of the base's probability
+   *  mass: 64 -> 89.6%, 128 -> 94.1%, 256 -> 97.0%. */
+  topK?: number;
 }
 
 /** Mid-run audio previews. Each preview point pauses training for roughly a
