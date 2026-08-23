@@ -87,6 +87,19 @@ ping, and only when the message is genuinely *for* someone.
 Someone who has never posted or been mentioned in a logged channel is not in
 the roster and cannot be pinged. They enter it the first time either happens.
 
+**Bots are excluded** from the roster — pinging one usually means waking
+somebody else's automation. `PINGABLE_BOTS` in `mentions.mjs` is the allowlist
+of deliberate exceptions; it currently holds only **ClaudeClanker**
+(`1540351007316516966`), the working group's other agent. Entries there are
+seeded at module load, survive the recency cut in `entries()` (so a quiet spell
+can't silently kill the ping), and get tagged `(bot)` in the prompt roster with
+their own etiquette paragraph. Never add this bot's own id.
+
+Note the ping is **one-way**: `messageCreate` returns early on `msg.author.bot`,
+so ClaudeClanker's answer is logged into the context buffer but does not wake
+ScragBot. It'll read the reply the next time a human pings it — there is no
+automatic bot-to-bot volley, by design.
+
 ## Transcripts (`logs/discord/`)
 
 Every message in an allowed channel is appended to `logs/discord/<channelId>.jsonl`

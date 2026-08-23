@@ -27,6 +27,16 @@ const ROSTER_LIMIT = 40;
 // stop rewriting and let the rest stay as plain text.
 const MAX_MENTIONS = 4;
 
+// Bots are kept out of the roster on purpose — pinging one usually means waking
+// somebody else's automation. ClaudeClanker is the deliberate exception: it is
+// the working group's other agent, it argues back, and half the point of two
+// bots in one channel is being able to put a claim in front of the other one.
+// id -> display name. Never add this bot's own id here.
+const PINGABLE_BOTS = {
+  '1540351007316516966': 'ClaudeClanker',
+};
+const isPingableBot = (id) => Object.prototype.hasOwnProperty.call(PINGABLE_BOTS, String(id ?? ''));
+
 // id -> { names: [...], ts: iso }  (names[0] is the preferred display form)
 let roster = {};
 try { roster = JSON.parse(fs.readFileSync(ROSTER_FILE, 'utf-8')); } catch { /* fresh */ }
@@ -54,6 +64,10 @@ function remember(id, names, ts) {
   if (ts && ts > entry.ts) { entry.ts = ts; dirty = true; }
 }
 
+// Allowlisted bots must be pingable from a cold start: every observe()/seed
+// path below skips bots, so nothing else would ever put them in the roster.
+for (const [id, name] of Object.entries(PINGABLE_BOTS)) remember(id, [name], '');
+
 export function save() {
   if (!dirty) return;
   try {
@@ -70,11 +84,11 @@ export function save() {
 // in this channel without ever having spoken in it.
 export function observe(msg) {
   const ts = new Date(msg.createdTimestamp ?? Date.now()).toISOString();
-  if (!msg.author?.bot) {
+  if (!msg.author?.bot || isPingableBot(msg.author?.id)) {
     remember(msg.author?.id, [msg.member?.displayName, msg.author?.globalName, msg.author?.username], ts);
   }
   for (const u of msg.mentions?.users?.values?.() ?? []) {
-    if (u.bot) continue;
+    if (u.bot && !isPingableBot(u.id)) continue;
     const m = msg.guild?.members?.cache?.get(u.id);
     remember(u.id, [m?.displayName, u.globalName, u.username], ts);
   }
@@ -89,7 +103,7 @@ export function observe(msg) {
 export function seedFromTranscripts(channelIds = []) {
   for (const id of new Set([...channelIds, ...Object.keys(channelIndex())])) {
     for (const r of readChannel(id)) {
-      if (r.bot) continue;
+      if (r.bot && !isPingableBot(r.authorId)) continue;
       remember(r.authorId, [r.author, r.username], r.ts);
     }
   }
@@ -97,10 +111,17 @@ export function seedFromTranscripts(channelIds = []) {
 }
 
 function entries() {
-  return Object.entries(roster)
+  const ranked = Object.entries(roster)
     .filter(([, v]) => v.names?.length)
-    .sort((a, b) => String(b[1].ts).localeCompare(String(a[1].ts)))
-    .slice(0, ROSTER_LIMIT);
+    .sort((a, b) => String(b[1].ts).localeCompare(String(a[1].ts)));
+  const list = ranked.slice(0, ROSTER_LIMIT);
+  // A quiet spell must not silently remove the ability: recency ranking would
+  // eventually push the other bot past ROSTER_LIMIT and the ping would go dead
+  // with nothing in the logs to say why.
+  for (const [id, v] of ranked) {
+    if (isPingableBot(id) && !list.some(([seen]) => seen === id)) list.push([id, v]);
+  }
+  return list;
 }
 
 // The prompt block. Deliberately shows the exact token to type — models are
@@ -108,12 +129,24 @@ function entries() {
 export function rosterBlock() {
   const list = entries();
   if (!list.length) return '';
-  const lines = list.map(([id, v]) => `  ${v.names[0]} -> <@${id}>`).join('\n');
+  const lines = list
+    .map(([id, v]) => `  ${v.names[0]}${isPingableBot(id) ? ' (bot)' : ''} -> <@${id}>`)
+    .join('\n');
+  const bots = list.filter(([id]) => isPingableBot(id)).map(([, v]) => v.names[0]);
   return `People you can ping in this thread (write the arrow token EXACTLY, ` +
     `angle brackets and all, and it becomes a real ping; writing just the name pings nobody):\n${lines}\n` +
     `Only ping someone when the message is genuinely FOR them — a question they must answer, ` +
     `or credit/blame that is theirs. Never ping more than one person, never ping to say hello, ` +
-    `and never use @everyone or @here.\n`;
+    `and never use @everyone or @here.\n` +
+    (bots.length
+      ? `${bots.join(' and ')} is the group's other AI agent, not a person. Ping it only to put a ` +
+        `specific claim in front of it: a disagreement worth settling, or a cross-check on something ` +
+        `it asserted. Make the message self-contained — it answers in the channel and you are NOT ` +
+        `woken by its reply, so never ask it something you need the answer to before you can finish ` +
+        `your point. Never ping it to be seen talking to it, never to agree with it, and never open ` +
+        `a bot-to-bot back-and-forth. It counts against the same one-ping-per-message limit as ` +
+        `everyone else.\n`
+      : '');
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
