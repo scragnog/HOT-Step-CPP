@@ -198,6 +198,27 @@ struct MM3LmTrainArgs {
      *  dataset stays clean and the choice is recorded in the run rather than
      *  baked into files. */
     bool        trigger_prepend = false;
+    /** Probability that a training step uses the TRIGGER WORD ALONE as the
+     *  caption instead of the full descriptor caption. 0 = off.
+     *
+     *  The point is to make the trigger carry the style BY ITSELF, which is the
+     *  only way a bare-trigger prompt works at inference — a model that has only
+     *  ever seen the trigger alongside a full caption has no reason to have
+     *  learned what it means on its own.
+     *
+     *  Deliberately not 1.0-by-another-name: training on trigger-only rows
+     *  EXCLUSIVELY would leave the descriptor path untrained, so the adapter
+     *  could produce the album but never be steered ("soad_toxicity, 140 BPM,
+     *  acoustic" would mean nothing to it). Mixing keeps both.
+     *
+     *  This is SimpleTuner's caption_dropout_probability in spirit, but it drops
+     *  to the trigger rather than to empty — his LM path raises on an empty
+     *  caption, so that knob can never fire there, and MM3 conditions so heavily
+     *  on the structured caption that an empty one is far out of distribution.
+     *
+     *  Drawn from the training RNG, so it is reproducible and survives a resume
+     *  along with everything else. */
+    double      caption_dropout = 0.0;
     std::string dataset_name;
     // Per-layer gradient checkpointing. ON by default and that is not a
     // preference: the MM3 prompt is ~1,100 tokens, so even a 128-frame crop
@@ -280,6 +301,13 @@ struct MM3LmTrainArgs {
 struct MM3LmSample {
     std::string          id;
     std::vector<int32_t> prompt;          // tokenised MM3 prompt
+    /** The same row with the caption reduced to the TRIGGER WORD ALONE, for
+     *  caption dropout. Empty when dropout is off or there is no trigger.
+     *
+     *  Tokenised up front rather than on demand: it costs one extra pass over a
+     *  short string per song at load, and doing it per step would put the BPE
+     *  tokenizer inside the training loop. */
+    std::vector<int32_t> prompt_trigger_only;
     std::vector<int32_t> codes;           // [n_frames * 8], warm-up row already dropped
     int64_t              n_frames = 0;
 };
@@ -425,6 +453,14 @@ static bool mm3_lm_load_samples_from(const std::string & manifest, const std::st
                 fprintf(stderr, "[mm3-lm-train] first training caption begins: %.120s\n", head.c_str());
             }
             mm3_tokenizer_encode(tok, mm3_assemble_prompt(caption, lyrics), &sm.prompt);
+            if (!trigger_prefix.empty()) {
+                // Caption dropout's alternative prompt: the trigger and nothing
+                // else. Lyrics are KEPT — dropping those too would change what
+                // the model is being asked to sing, not how it is described.
+                std::string bare = trigger_prefix;
+                while (!bare.empty() && (bare.back() == ' ' || bare.back() == ',')) bare.pop_back();
+                mm3_tokenizer_encode(tok, mm3_assemble_prompt(bare, lyrics), &sm.prompt_trigger_only);
+            }
             if (sm.prompt.empty() || sm.n_frames < 8) {
                 fprintf(stderr, "[mm3-lm-train] SKIP %s: empty prompt or %lld frames\n", id.c_str(),
                         (long long) sm.n_frames);
@@ -1332,6 +1368,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // averaging the two together produces a number that describes neither.
     double               reg_running = 0.0;
     int                  reg_n_micro = 0;
+    int                  n_dropped   = 0;   // caption-dropout steps taken
 
     auto save_ckpt = [&](int step, double loss) -> std::string {
         char sub[64];
@@ -1751,7 +1788,15 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 sp = &next_sample();
             }
             const MM3LmSample & s = *sp;
-            const int64_t       P = (int64_t) s.prompt.size();
+            // Caption dropout: a reg step never drops (its cached teacher was
+            // captured against the full caption and no other), and a row with no
+            // trigger-only form has nothing to drop to.
+            const bool drop_caption =
+                !is_reg && a.caption_dropout > 0.0 && !s.prompt_trigger_only.empty()
+                && lm_rng_uniform(&rng) < (float) a.caption_dropout;
+            const std::vector<int32_t> & prompt_ids =
+                drop_caption ? s.prompt_trigger_only : s.prompt;
+            const int64_t       P = (int64_t) prompt_ids.size();
 
             // Fresh crop every time this song comes up. `beginning` exists only
             // to reproduce the intros-only failure lm2 hit. A reg step is ALWAYS
@@ -1797,11 +1842,12 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             pos.resize((size_t) S);
             for (int64_t i = 0; i < P; i++) pos[(size_t) i] = (int32_t) i;
             for (int64_t j = 0; j < Fin; j++) pos[(size_t) (P + j)] = (int32_t) (P + anchor0 + j);
-            ggml_backend_tensor_set(t_prompt, s.prompt.data(), 0, (size_t) P * sizeof(int32_t));
+            ggml_backend_tensor_set(t_prompt, prompt_ids.data(), 0, (size_t) P * sizeof(int32_t));
             ggml_backend_tensor_set(t_sem, sem_in.data(), 0, sem_in.size() * sizeof(int32_t));
             ggml_backend_tensor_set(t_ac, ac_in.data(), 0, ac_in.size() * sizeof(int32_t));
             ggml_backend_tensor_set(t_pos, pos.data(), 0, pos.size() * sizeof(int32_t));
 
+            if (drop_caption) n_dropped++;
             double ce = 0.0;
             bool   ok = false;
             if (a.ckpt) {
@@ -1991,6 +2037,12 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         }
     }
 
+    if (n_dropped > 0) {
+        fprintf(stderr, "[mm3-lm-train] caption dropout: %d of %d style steps used the trigger alone "
+                        "(%.1f%%, asked for %.1f%%)\n",
+                n_dropped, n_micro, n_micro ? 100.0 * n_dropped / (double) n_micro : 0.0,
+                100.0 * a.caption_dropout);
+    }
     if (reg_n_micro > 0) {
         fprintf(stderr, "[mm3-lm-train] prior preservation: %d steps, mean soft CE %.4f\n",
                 reg_n_micro, reg_running / (double) reg_n_micro);

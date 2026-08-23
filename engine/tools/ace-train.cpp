@@ -1258,7 +1258,7 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 //       [--steps 1000] [--save-every 100] [--warmup 50]
 //       [--max-frames 4096] [--crop-mode beginning|random] [--grad-accum 1]
 //       [--optimizer adamw|muon] [--muon-*] [--trigger word] [--trigger-prepend]
-//       [--seed 42]
+//       [--caption-dropout 0.2] [--seed 42]
 //       [--crop-anchor song|zero] [--resume <state>] [--pause-file <path>]
 //       [--no-pause]
 //       [--reg-manifest <json> --reg-captions <dir> --reg-codes <dir>
@@ -1348,6 +1348,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--seed"))          a.seed         = atoi(next("--seed"));
         else if (!strcmp(argv[i], "--trigger"))       a.trigger      = next("--trigger");
         else if (!strcmp(argv[i], "--trigger-prepend")) a.trigger_prepend = true;
+        else if (!strcmp(argv[i], "--caption-dropout")) a.caption_dropout = atof(next("--caption-dropout"));
         else if (!strcmp(argv[i], "--dataset-name"))  a.dataset_name = next("--dataset-name");
         else if (!strcmp(argv[i], "--optimizer"))     a.optimizer    = next("--optimizer");
         else if (!strcmp(argv[i], "--muon-lr-scale")) a.muon_lr_scale = (float) atof(next("--muon-lr-scale"));
@@ -1378,6 +1379,16 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     }
     if (a.crop_anchor != "song" && a.crop_anchor != "zero") {
         fprintf(stderr, "ace-train mm3-lm-train: --crop-anchor must be song or zero\n");
+        return 2;
+    }
+    if (a.caption_dropout < 0.0 || a.caption_dropout > 1.0) {
+        fprintf(stderr, "ace-train mm3-lm-train: --caption-dropout must be 0..1\n");
+        return 2;
+    }
+    if (a.caption_dropout > 0.0 && !a.trigger_prepend) {
+        fprintf(stderr, "ace-train mm3-lm-train: --caption-dropout needs --trigger-prepend — it drops "
+                        "the caption TO the trigger, and without a trained trigger there is nothing "
+                        "to drop to\n");
         return 2;
     }
     if (a.reg_every > 0) {
