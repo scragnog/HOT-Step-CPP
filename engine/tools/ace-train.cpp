@@ -1257,6 +1257,18 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 //       [--rank 256] [--alpha 256] [--lr 8e-5] [--steps 800] [--save-every 100]
 //       [--max-frames 1500] [--crop-mode random|beginning] [--grad-accum 1]
 //       [--optimizer adamw|muon] [--muon-*] [--trigger word] [--seed 42]
+//       [--crop-anchor song|zero] [--resume <state>] [--pause-file <path>]
+//       [--no-pause]
+//
+// --crop-anchor song (the default) presents a crop at its TRUE position in the
+// track. `zero` is the legacy convention, where every crop claimed to be the
+// song's opening — a train/inference mismatch, since generation always starts
+// at frame 0. Kept only so a pre-2026-08-23 run can be reproduced.
+//
+// --resume / --pause-file drive the preview loop: the server touches the
+// sentinel, this program saves LoRA + optimizer momentum + RNG + epoch cursor
+// and exits 0 with a `paused` event, the server renders the checkpoint on the
+// freed card, then relaunches with --resume. See train/mm3-lm-resume.h.
 //
 // Defaults ARE the validated recipe (docs/plans/2026-08-20-mm3-training-studio.md):
 // r256/alpha256, lr 8e-5 constant, 800 steps, checkpoint every 100, max_frames
@@ -1296,6 +1308,10 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--warmup"))        a.warmup       = atoi(next("--warmup"));
         else if (!strcmp(argv[i], "--max-frames"))    a.max_frames   = atoll(next("--max-frames"));
         else if (!strcmp(argv[i], "--crop-mode"))     a.crop_mode    = next("--crop-mode");
+        else if (!strcmp(argv[i], "--crop-anchor"))   a.crop_anchor  = next("--crop-anchor");
+        else if (!strcmp(argv[i], "--resume"))        a.resume_path  = next("--resume");
+        else if (!strcmp(argv[i], "--pause-file"))    a.pause_file   = next("--pause-file");
+        else if (!strcmp(argv[i], "--no-pause"))      a.no_pause     = true;
         else if (!strcmp(argv[i], "--jsonl"))         g_jsonl        = true;
         else if (!strcmp(argv[i], "--no-ckpt"))       a.ckpt         = false;
         else if (!strcmp(argv[i], "--fd-check"))      fd_probes      = atoi(next("--fd-check"));
@@ -1337,6 +1353,10 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     }
     if (a.optimizer != "adamw" && a.optimizer != "muon") {
         fprintf(stderr, "ace-train mm3-lm-train: --optimizer must be adamw or muon\n");
+        return 2;
+    }
+    if (a.crop_anchor != "song" && a.crop_anchor != "zero") {
+        fprintf(stderr, "ace-train mm3-lm-train: --crop-anchor must be song or zero\n");
         return 2;
     }
     if (!pm_mkdir_p(a.out_dir)) {

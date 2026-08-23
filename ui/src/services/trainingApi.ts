@@ -124,6 +124,48 @@ export interface Mm3TrainLmRequest {
   holdout?: number;
   evalEvery?: number;
   trigger?: string;
+  /** `song` (default) presents each crop at its TRUE position in the track.
+   *  `zero` is the pre-2026-08-23 convention where every crop claimed to be the
+   *  song's opening — a train/inference mismatch, since generation always
+   *  starts at frame 0. Kept only to reproduce an older run. */
+  cropAnchor?: 'song' | 'zero';
+  /** Mid-run audio previews. Both cadence fields zero = off. */
+  preview?: Mm3PreviewOptions;
+}
+
+/** Mid-run audio previews. Each preview point pauses training for roughly a
+ *  minute: the trainer must leave the card entirely for the render (it holds
+ *  ~22.6 GB of a 32.6 GB card and a warm MM3 stack is another 11.8 GB), so it
+ *  saves its optimizer state, exits, and is relaunched with --resume. */
+export interface Mm3PreviewOptions {
+  everySteps?: number;
+  everyMinutes?: number;
+  seconds?: number;
+  seed?: number;
+  /** Blank = the first HELD-OUT song's caption, trigger prepended. */
+  caption?: string;
+  lyrics?: string;
+  control?: boolean;
+  controlCaption?: string;
+  baseline?: boolean;
+}
+
+/** One rendered preview; the audio is at
+ *  GET /api/training/mm3/preview?run=<run>&file=<file>. */
+export interface TrainingPreview {
+  id: string;
+  step: number;
+  totalSteps: number;
+  kind: 'artist' | 'control';
+  base: boolean;
+  file: string;
+  seconds: number;
+  seed: number;
+  caption: string;
+  loss?: number;
+  bytes: number;
+  ms: number;
+  ts: number;
 }
 
 export type SampleLabelStatus =
@@ -715,6 +757,7 @@ export type TrainingStreamEvent =
       sample?: TrainingSample; error?: string;                      // `sample` present on success
     }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string; ts: number }
+  | { type: 'preview'; run: string; preview: TrainingPreview }
   | TrainingMetricEvent
   | { type: 'status'; status: TrainingJobStatus; error?: string };  // terminal; server closes after this
 

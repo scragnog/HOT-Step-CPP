@@ -33,9 +33,14 @@ import type {
   TrainingDatasetDetail,
   TrainingDatasetSummary,
   TrainingJobSummary,
+  TrainingPreview,
   TrainingSample,
   TrainingStreamEvent,
 } from '../services/trainingApi';
+
+/** A preview plus the run it belongs to — the run name is what the audio
+ *  URL needs, and it lives on the event rather than on the preview. */
+export type TrainingPreviewRow = TrainingPreview & { run: string };
 
 const JOB_LOG_CAP = 200;
 const EDIT_DEBOUNCE_MS = 500;
@@ -103,6 +108,7 @@ export function blankTrainSeries(): {
   trainTargetLoss: number;
   trainMaxEpochs: number;
   trainStepsPerEpoch: number;
+  trainPreviews: TrainingPreviewRow[];
 } {
   lastStepSeen = -1;
   return {
@@ -111,6 +117,7 @@ export function blankTrainSeries(): {
     trainTargetLoss: 0,
     trainMaxEpochs: 0,
     trainStepsPerEpoch: 0,
+    trainPreviews: [],
   };
 }
 
@@ -209,6 +216,9 @@ interface TrainingState {
   /** From the one `data` metric — turns a global step number into an epoch
    *  position so the step and epoch layers share one x-axis. */
   trainStepsPerEpoch: number;
+  /** Mid-run audio previews of an MM3 LM run, oldest first. Deduped by id: the
+   *  SSE buffer is replayed on every reconnect. */
+  trainPreviews: TrainingPreviewRow[];
 
   // audition (codes preview) — §6.6
   /** Preview history for the open dataset, newest first. */
@@ -335,6 +345,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   trainTargetLoss: 0,
   trainMaxEpochs: 0,
   trainStepsPerEpoch: 0,
+  trainPreviews: [],
 
   auditions: [],
   auditionRunning: false,
@@ -1011,6 +1022,19 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         if (cur.some(l => l.ts === ev.ts && l.level === ev.level && l.message === ev.message)) break;
         const log = [...cur, { level: ev.level, message: ev.message, ts: ev.ts }];
         set({ jobLog: log.length > JOB_LOG_CAP ? log.slice(log.length - JOB_LOG_CAP) : log });
+        break;
+      }
+
+      case 'preview': {
+        // Append-and-dedupe: the whole SSE buffer replays on every reconnect,
+        // and the id (step + kind, or base + kind) is stable per render.
+        const cur = get().trainPreviews;
+        if (cur.some(p => p.id === ev.preview.id && p.run === ev.run)) break;
+        const next = [...cur, { ...ev.preview, run: ev.run }];
+        // Oldest first, base pinned to the front — the reference belongs at the
+        // start of the strip, and it is the only row with step 0.
+        next.sort((a, b) => (a.step - b.step) || a.kind.localeCompare(b.kind));
+        set({ trainPreviews: next });
         break;
       }
 

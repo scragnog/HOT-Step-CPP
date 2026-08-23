@@ -13,6 +13,7 @@ import path from 'path';
 
 import { config } from '../../config.js';
 import { datasetDir } from './paths.js';
+import type { Mm3PreviewOptions } from './types.js';
 
 /** The MM3 model files training needs, resolved under <models>/mm3/.
  *
@@ -392,6 +393,18 @@ export const MM3_LM_DEFAULTS = {
   basePrecision: 'q8_0' as Mm3BasePrecision,
   holdout: 0.15,
   evalEvery: 50,
+  /** Each crop is presented at its TRUE position in the track.
+   *
+   *  This is a RECIPE CHANGE as of 2026-08-23 and runs before it used `zero`,
+   *  where every crop was labelled as if it were the song's opening. That was a
+   *  straight train/inference mismatch — generation always begins at frame 0,
+   *  so the positions a mid-song crop occupied during training are the ones
+   *  that mean "the first two seconds" at render time. bghira's SOAD campaign
+   *  independently reports the two symptoms this predicts (sound arriving
+   *  instantly at 0:00, tempo drifting mid-track) and that position-labelled
+   *  windowed crops fix the pacing. `zero` is kept only to reproduce an older
+   *  run; the two are not comparable. */
+  cropAnchor: 'song' as 'song' | 'zero',
 } as const;
 
 // ── Arg building ────────────────────────────────────────────────────────────
@@ -437,6 +450,11 @@ export interface ResolvedMm3TrainLmOptions {
   trigger: string;
   datasetName: string;
   basePrecision: Mm3BasePrecision;
+  cropAnchor: 'song' | 'zero';
+  /** Mid-run audio previews. Undefined = off; the runner resolves the plan. */
+  preview?: Mm3PreviewOptions;
+  /** Set by the runner when relaunching a paused run — never by a route. */
+  resumeFrom?: string;
 }
 
 export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
@@ -466,5 +484,14 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   args.push('--eval-every', String(o.evalEvery));
   if (o.trigger) args.push('--trigger', o.trigger);
   if (o.datasetName) args.push('--dataset-name', o.datasetName);
+  args.push('--crop-anchor', o.cropAnchor);
+  // Previews pause the trainer through a sentinel file. When they are off, say
+  // so explicitly: a stray PAUSE left behind by a killed run would otherwise
+  // stop the next run at its first step.
+  if (o.preview) {
+    if (o.resumeFrom) args.push('--resume', o.resumeFrom);
+  } else {
+    args.push('--no-pause');
+  }
   return args;
 }

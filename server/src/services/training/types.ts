@@ -57,6 +57,64 @@ export interface Mm3TrainLmRequest {
   /** Recorded in the adapter sidecar so the picker can show it. Not prepended
    *  to captions here — the dataset's own captions already carry it. */
   trigger?: string;
+  /** `song` (default) presents each crop at its TRUE position in the track;
+   *  `zero` is the pre-2026-08-23 convention where every crop claimed to be the
+   *  opening, which is a train/inference mismatch (generation always starts at
+   *  frame 0). Kept only to reproduce an older run. */
+  cropAnchor?: 'song' | 'zero';
+  /** Mid-run audio previews. Omitted or all-zero cadence = off. */
+  preview?: Mm3PreviewOptions;
+}
+
+/** Mid-run audio previews for an MM3 LM training run (services/training/
+ *  mm3Preview.ts). The cadence fields are the switch: both zero means off.
+ *
+ *  A preview is not free — the trainer has to pause, save ~5.6 GB of optimizer
+ *  state and exit so the render can have the card, then reload. Budget roughly
+ *  a minute and a half per preview point, against ~4 s per training step. */
+export interface Mm3PreviewOptions {
+  /** Render every N optimizer steps. 0 = off. */
+  everySteps?: number;
+  /** …or every N minutes of training, whichever comes first. 0 = off. */
+  everyMinutes?: number;
+  /** Sample length in seconds (8–120). 24 s ≈ 16 s of GPU. */
+  seconds?: number;
+  /** Fixed across every preview in the run — that is what makes step-to-step
+   *  comparison legible. */
+  seed?: number;
+  /** Blank = the first HELD-OUT song's own caption, with the trigger prepended
+   *  the way the training rows carry it. */
+  caption?: string;
+  lyrics?: string;
+  /** Also render a neutral off-genre caption with the adapter active, to catch
+   *  collateral damage to the base planner. */
+  control?: boolean;
+  /** Override the built-in control caption. '-' disables the control render. */
+  controlCaption?: string;
+  /** Render both captions with NO adapter before step 1, as the reference. */
+  baseline?: boolean;
+}
+
+/** One rendered preview. The audio is served by
+ *  GET /api/training/mm3/preview?run=<run>&file=<file>. */
+export interface TrainingPreview {
+  id: string;
+  step: number;
+  totalSteps: number;
+  kind: 'artist' | 'control';
+  /** True for the no-adapter reference rendered before step 1. */
+  base: boolean;
+  /** Filename inside the run's previews/ directory. */
+  file: string;
+  seconds: number;
+  seed: number;
+  caption: string;
+  /** Training loss at the checkpoint this was rendered from. */
+  loss?: number;
+  bytes: number;
+  /** Wall time of the render itself. */
+  ms: number;
+  ts: number;
 }
 
 export type SampleLabelStatus =
@@ -315,6 +373,9 @@ export type TrainingStreamEvent =
       sample?: TrainingSample; error?: string;                     // `sample` present on success
     }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string; ts: number }
+  // NB `preview`, not `sample` — `sample` is already this union's dataset-row
+  // event and reusing it would collide in every consumer's switch.
+  | { type: 'preview'; run: string; preview: TrainingPreview }
   | { type: 'status'; status: TrainingJobStatus; error?: string }   // terminal; server closes after this
   | TrainingMetricEvent;
 

@@ -123,7 +123,7 @@ import { getGenerations, getLyricsSet } from '../db/lireekDb.js';
 import type {
   AuditionListResponse, AuditionOptions, AuditionSideSpec,
   BulkSetInput, CaptionOptions, CreateDatasetInput, FieldSource, GeniusOptions, LabelOptions, LmSize,
-  LyricStudioExportInput,
+  LyricStudioExportInput, Mm3PreviewOptions,
   PatchSampleInput, PipelineFolderSpec, PipelineLabelOptions, PipelineStage,
   PreprocessCompat, PreprocessDtype, PreprocessNormalize, PreprocessOptions,
   TrainingCapabilities, TrainingDatasetRow, TrainingDefaults, TrainingSample,
@@ -1788,6 +1788,59 @@ router.post('/datasets/:id/mm3-codes', (req: Request, res: Response) => {
   }
 });
 
+/** Mid-run preview options off the request body, clamped.
+ *
+ *  Returns undefined for "off", which is what the runner checks. Both cadence
+ *  fields at zero is off — a preview block with captions but no cadence would
+ *  otherwise look configured and never fire. */
+function parseMm3PreviewOptions(raw: unknown): Mm3PreviewOptions | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const p = raw as Record<string, unknown>;
+  const int = (k: string, d: number, lo: number, hi: number): number => {
+    const v = Number(p[k]);
+    return Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.trunc(v))) : d;
+  };
+  const everySteps = int('everySteps', 0, 0, 100000);
+  const everyMinutes = int('everyMinutes', 0, 0, 1440);
+  if (everySteps <= 0 && everyMinutes <= 0) return undefined;
+  const str = (k: string): string | undefined =>
+    typeof p[k] === 'string' ? (p[k] as string) : undefined;
+  return {
+    everySteps,
+    everyMinutes,
+    seconds: int('seconds', 24, 8, 120),
+    seed: int('seed', 424242, 0, 2 ** 31 - 1),
+    caption: str('caption'),
+    lyrics: str('lyrics'),
+    control: p.control !== false,
+    controlCaption: str('controlCaption'),
+    baseline: p.baseline !== false,
+  };
+}
+
+/** GET /mm3/preview?run=<run>&file=<file> — one rendered preview WAV.
+ *
+ *  Served rather than base64'd down the SSE stream: a 24 s 16-bit stereo WAV is
+ *  ~4 MB, and the stream is also carrying a step event every four seconds. */
+router.get('/mm3/preview', (req: Request, res: Response) => {
+  const run = String(req.query.run || '');
+  const file = String(req.query.file || '');
+  // Containment: both components reach us from the browser. Anything with a
+  // separator or a dot-segment is refused outright rather than normalised.
+  if (!run || !file || /[\\/]|\.\./.test(run) || /[\\/]|\.\./.test(file) || !file.endsWith('.wav')) {
+    res.status(400).json({ error: 'bad preview reference' });
+    return;
+  }
+  const full = path.join(mm3AdapterRunDir(run), 'previews', file);
+  if (!fs.existsSync(full)) {
+    res.status(404).json({ error: 'preview not found' });
+    return;
+  }
+  res.setHeader('Content-Type', 'audio/wav');
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(full);
+});
+
 /** POST /datasets/:id/mm3-train-lm */
 router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
   try {
@@ -1857,6 +1910,10 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       evalEvery:   num('evalEvery', D.evalEvery, 0, 100000),
       trigger:     typeof b.trigger === 'string' ? b.trigger.trim() : (ds.customTag || ''),
       datasetName: ds.name || ds.slug,
+      // `song` is the default and the correct convention; `zero` exists only to
+      // reproduce a pre-2026-08-23 run. See Mm3TrainLmRequest.cropAnchor.
+      cropAnchor:  b.cropAnchor === 'zero' ? 'zero' : 'song',
+      preview:     parseMm3PreviewOptions(b.preview),
     });
     res.json({ jobId: job.id, kind: job.kind, runName, outDir: mm3AdapterRunDir(runName) });
   } catch (err: any) {

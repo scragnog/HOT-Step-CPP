@@ -84,6 +84,7 @@
 #include "train/lm-data.h"
 #include "train/lm-export.h"
 #include "train/lm-ckpt.h"
+#include "train/mm3-lm-resume.h"
 #include "train/mm3-f32-isolate.h"
 #include "train/mm3-lm-load.h"
 #include "minimax/mm3-request.h"
@@ -152,6 +153,32 @@ struct MM3LmTrainArgs {
                                      // to be COMPARABLE with itself, and a
                                      // short crop keeps the cost off the run.
     int         eval_crops = 3;      // deterministic crops per held-out song
+
+    // ── Crop position anchoring ────────────────────────────────────────────
+    //
+    // "song": a crop taken at frame c0 is presented at RoPE positions
+    // P + c0 + j, i.e. WHERE IT ACTUALLY IS in the track.
+    // "zero": every crop is presented at P + j, as if it were the opening.
+    //
+    // "zero" was the original behaviour and it is a train/inference mismatch:
+    // generation always starts at frame 0, so position P+5 at inference means
+    // 0.2 s into the song, while under "zero" the trainer used those same
+    // positions to teach material from 60 s in. The model learns that a song
+    // can begin anywhere. bghira's 2026-08-22 SOAD campaign reports the two
+    // symptoms this predicts — an instant-sound-at-0:00 artifact and tempo
+    // drift mid-track — and reports that position-labelled windowed crops fix
+    // the pacing. Kept switchable because it changes the recipe: a run trained
+    // under "zero" is not comparable with one trained under "song".
+    std::string crop_anchor = "song";     // song | zero
+
+    // ── Pause / resume (mm3-lm-resume.h) ───────────────────────────────────
+    //
+    // Empty pause_file disables the check entirely. The server uses this to
+    // interleave audio previews: touch the sentinel, let the trainer save and
+    // exit, render the checkpoint with the whole card, resume.
+    std::string pause_file;               // default <out>/PAUSE
+    std::string resume_path;              // --resume <state file>
+    bool        no_pause = false;         // --no-pause: never look for a sentinel
 };
 
 struct MM3LmSample {
@@ -1155,6 +1182,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // ── training loop ──
     LmRng rng;
     lm_rng_seed(&rng, (uint64_t) a.seed ^ 0x9E3779B97F4A7C15ull);
+
+    // --crop-anchor. Read once: it is consulted per micro-step and per eval crop.
+    const bool anchor_song = (a.crop_anchor != "zero");
+    fprintf(stderr, "[mm3-lm-train] crop anchor: %s\n",
+            anchor_song ? "song (crops carry their true position)"
+                        : "zero (every crop presented as the opening — the legacy convention)");
+    jl("{\"type\":\"cropAnchor\",\"mode\":\"%s\"}", anchor_song ? "song" : "zero");
     std::vector<int32_t> sem_in, ac_in, tgt, pos;
     std::vector<float>   msk;
     int                  last_mask_S = 0;
@@ -1166,7 +1200,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     double               best_eval = -1.0;
     int                  best_eval_step = 0;
 
-    auto save_ckpt = [&](int step, double loss) {
+    auto save_ckpt = [&](int step, double loss) -> std::string {
         char sub[64];
         snprintf(sub, sizeof(sub), "ckpt-%d", step);
         const std::string dir = a.out_dir + "/" + sub;
@@ -1184,7 +1218,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         std::string    xerr;
         if (!lm_export_peft(lora, c, meta, dir, &res, &xerr)) {
             fprintf(stderr, "[mm3-lm-train] export failed: %s\n", xerr.c_str());
-            return;
+            return std::string();
         }
         // The sidecar the shipped MM3 adapter picker reads. Written beside the
         // safetensors so `<out>` pointed at <adapters>/mm3-lm-adapters/<run>
@@ -1206,6 +1240,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
            json_escape(dir).c_str());
         jl("{\"type\":\"export\",\"tensors\":%zu,\"path\":\"%s\"}", lora.params.size(),
            json_escape(dir).c_str());
+        return dir;
     };
 
     // ── held-out evaluation ────────────────────────────────────────────────
@@ -1272,8 +1307,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 ggml_backend_tensor_set(t_msk, msk.data(), 0, msk.size() * sizeof(float));
                 last_mask_S = (int) S;
             }
+            // Same anchoring as training — an eval measured under a different
+            // position convention is not measuring the thing being trained.
             pos.resize((size_t) S);
-            for (int64_t i = 0; i < S; i++) pos[(size_t) i] = (int32_t) i;
+            for (int64_t i = 0; i < P; i++) pos[(size_t) i] = (int32_t) i;
+            for (int64_t j = 0; j < Fin; j++) {
+                pos[(size_t) (P + j)] = (int32_t) (P + (anchor_song ? ec.c0 : 0) + j);
+            }
             ggml_backend_tensor_set(t_prompt, es.prompt.data(), 0, (size_t) P * sizeof(int32_t));
             ggml_backend_tensor_set(t_sem, sem_in.data(), 0, sem_in.size() * sizeof(int32_t));
             ggml_backend_tensor_set(t_ac, ac_in.data(), 0, ac_in.size() * sizeof(int32_t));
@@ -1323,7 +1363,64 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         return samples[(size_t) order[order_pos++]];
     };
 
-    for (int step = 1; step <= a.steps && rc == 0; step++) {
+    // ── pause / resume (mm3-lm-resume.h) ───────────────────────────────────
+    //
+    // The whole point of this machinery is the audio preview loop: the trainer
+    // cannot render a sample while it is resident, so the server pauses it,
+    // renders the checkpoint with the whole card, and resumes. Everything that
+    // makes the resumed run identical to an uninterrupted one lives in the
+    // state file — momentum included; see the header for why that matters.
+    const std::string pause_file = a.no_pause
+                                     ? std::string()
+                                     : (a.pause_file.empty() ? mm3_lm_pause_path(a.out_dir) : a.pause_file);
+    const std::string state_path = a.out_dir + "/resume-state.bin";
+    bool              paused     = false;
+    std::string       fatal_msg;
+
+    MM3LmResumeState rstate;
+    rstate.rank           = a.rank;
+    rstate.alpha          = a.alpha;
+    rstate.seed           = a.seed;
+    rstate.n_params       = (int32_t) lora.params.size();
+    rstate.n_samples      = (int32_t) samples.size();
+    rstate.n_holdout      = (int32_t) holdout.size();
+    rstate.optimizer_muon = a.optimizer == "muon" ? 1 : 0;
+
+    int start_step = 0;
+    if (!a.resume_path.empty()) {
+        std::string rerr;
+        if (!mm3_lm_resume_load(a.resume_path, &rstate, lora, opt, &rerr)) {
+            fprintf(stderr, "[mm3-lm-train] resume failed: %s\n", rerr.c_str());
+            fatal_msg = "resume failed: " + rerr;
+            rc        = 1;
+        } else {
+            start_step     = rstate.steps_done;
+            n_micro        = rstate.n_micro;
+            running        = rstate.running;
+            epoch          = rstate.epoch;
+            epoch_n        = rstate.epoch_n;
+            epoch_loss_sum = rstate.epoch_loss_sum;
+            order.assign(rstate.order.begin(), rstate.order.end());
+            order_pos      = (size_t) rstate.order_pos;
+            best_eval      = rstate.best_eval;
+            best_eval_step = rstate.best_eval_step;
+            opt.opt_step   = rstate.opt_step;
+            opt.opt_iter   = rstate.opt_iter;
+            for (int i = 0; i < 4; i++) rng.s[i] = rstate.rng[i];
+            fprintf(stderr,
+                    "[mm3-lm-train] resumed at step %d/%d (epoch %d, %zu/%zu through the pass, "
+                    "optimizer iter %d)\n",
+                    start_step, a.steps, epoch, order_pos, order.size(), opt.opt_iter);
+            jl("{\"type\":\"resumed\",\"step\":%d,\"totalSteps\":%d,\"epoch\":%d,\"bestEvalStep\":%d}",
+               start_step, a.steps, epoch, best_eval_step);
+        }
+    }
+    if (start_step >= a.steps && rc == 0) {
+        fprintf(stderr, "[mm3-lm-train] resume state is already at step %d of %d — nothing to do\n",
+                start_step, a.steps);
+    }
+
+    for (int step = start_step + 1; step <= a.steps && rc == 0; step++) {
         double acc_loss = 0.0;
         for (int micro = 0; micro < std::max(1, a.grad_accum) && rc == 0; micro++) {
             const MM3LmSample & s = next_sample();
@@ -1340,6 +1437,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             const int64_t Fin    = at_end ? K : K - 1;      // frames used as INPUT
             const int64_t n_sup  = at_end ? K + 1 : K;      // supervised positions
             const int64_t S      = P + Fin;
+            const int64_t anchor0 = anchor_song ? c0 : 0;
 
             sem_in.resize((size_t) Fin);
             ac_in.resize((size_t) (Fin * NC));
@@ -1364,8 +1462,12 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 ggml_backend_tensor_set(t_msk, msk.data(), 0, msk.size() * sizeof(float));
                 last_mask_S = (int) S;
             }
+            // Prompt at 0..P-1; frames at their TRUE position in the track
+            // under --crop-anchor song (see MM3LmTrainArgs). Under "zero" the
+            // frames restart at P, which is what every crop used to claim.
             pos.resize((size_t) S);
-            for (int64_t i = 0; i < S; i++) pos[(size_t) i] = (int32_t) i;
+            for (int64_t i = 0; i < P; i++) pos[(size_t) i] = (int32_t) i;
+            for (int64_t j = 0; j < Fin; j++) pos[(size_t) (P + j)] = (int32_t) (P + anchor0 + j);
             ggml_backend_tensor_set(t_prompt, s.prompt.data(), 0, (size_t) P * sizeof(int32_t));
             ggml_backend_tensor_set(t_sem, sem_in.data(), 0, sem_in.size() * sizeof(int32_t));
             ggml_backend_tensor_set(t_ac, ac_in.data(), 0, ac_in.size() * sizeof(int32_t));
@@ -1489,13 +1591,59 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             }
         }
 
-        if (a.save_every > 0 && (step % a.save_every == 0 || step == a.steps)) {
-            save_ckpt(step, win);
+        const bool saved_here = a.save_every > 0 && (step % a.save_every == 0 || step == a.steps);
+        std::string ckpt_dir;
+        if (saved_here) {
+            ckpt_dir = save_ckpt(step, win);
+        }
+
+        // ── pause for an audio preview ────────────────────────────────────
+        //
+        // One stat() per step, against a ~4 s step. The checkpoint is exported
+        // FIRST (if this step did not already export one) so the `paused` event
+        // can name something renderable; then the full optimizer state goes to
+        // disk and this process exits, handing the card to the render.
+        if (mm3_lm_pause_requested(pause_file)) {
+            if (!saved_here) {
+                ckpt_dir = save_ckpt(step, win);
+            }
+            rstate.steps_done     = step;
+            rstate.n_micro        = n_micro;
+            rstate.running        = running;
+            rstate.epoch          = epoch;
+            rstate.epoch_n        = epoch_n;
+            rstate.epoch_loss_sum = epoch_loss_sum;
+            rstate.order.assign(order.begin(), order.end());
+            rstate.order_pos      = (int32_t) order_pos;
+            rstate.best_eval      = best_eval;
+            rstate.best_eval_step = best_eval_step;
+            rstate.opt_step       = opt.opt_step;
+            rstate.opt_iter       = opt.opt_iter;
+            for (int i = 0; i < 4; i++) rstate.rng[i] = rng.s[i];
+
+            const int64_t t_save0 = ggml_time_ms();
+            std::string   serr;
+            if (!mm3_lm_resume_save(state_path, rstate, lora, opt, &serr)) {
+                // A pause that cannot be resumed is worse than no pause: the
+                // run would silently restart from zero. Fail loudly instead.
+                fprintf(stderr, "[mm3-lm-train] cannot save resume state: %s\n", serr.c_str());
+                fatal_msg = "cannot save resume state: " + serr;
+                rc        = 1;
+                break;
+            }
+            mm3_lm_pause_clear(pause_file);
+            fprintf(stderr, "[mm3-lm-train] paused at step %d/%d — state saved in %lld ms, %s\n", step,
+                    a.steps, (long long) (ggml_time_ms() - t_save0), state_path.c_str());
+            jl("{\"type\":\"paused\",\"step\":%d,\"totalSteps\":%d,\"loss\":%.6f,\"state\":\"%s\","
+               "\"ckpt\":\"%s\"}",
+               step, a.steps, win, json_escape(state_path).c_str(), json_escape(ckpt_dir).c_str());
+            paused = true;
+            break;
         }
     }
 
     fprintf(stderr, "[mm3-lm-train] %s after %d micro-steps, mean loss %.4f, %lld s\n",
-            rc ? "STOPPED" : "done", n_micro, n_micro ? running / n_micro : 0.0,
+            rc ? "STOPPED" : paused ? "paused" : "done", n_micro, n_micro ? running / n_micro : 0.0,
             (long long) ((ggml_time_ms() - t_start) / 1000));
     if (best_eval >= 0.0) {
         // The point of the holdout: which checkpoint to reach for FIRST, decided
@@ -1507,8 +1655,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 best_eval, best_eval_step);
     }
     if (rc) {
-        jl("{\"type\":\"fatal\",\"message\":\"training stopped early — see the engine log\"}");
-    } else {
+        jl("{\"type\":\"fatal\",\"message\":\"%s\"}",
+           fatal_msg.empty() ? "training stopped early — see the engine log"
+                             : json_escape(fatal_msg).c_str());
+    } else if (!paused) {
+        // A paused run has already said so, and `done` is what the server reads
+        // as "this training is over" — emitting it here would end the run at the
+        // first preview.
         jl("{\"type\":\"done\",\"steps\":%d,\"meanLoss\":%.6f,\"ms\":%lld}", n_micro,
            n_micro ? running / n_micro : 0.0, (long long) (ggml_time_ms() - t_start));
     }

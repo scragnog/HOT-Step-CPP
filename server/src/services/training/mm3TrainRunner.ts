@@ -30,6 +30,7 @@ import {
 import {
   emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, type TrainingJob,
 } from './labelingQueue.js';
+import { planMm3Previews, renderMm3Preview, type Mm3PreviewPlan } from './mm3Preview.js';
 
 function log(job: TrainingJob, level: 'info' | 'warn' | 'error', message: string): void {
   pushEvent(job, { type: 'log', level, message, ts: Date.now() });
@@ -51,7 +52,21 @@ function text(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
 
-interface RelayState { fatalMessage: string; doneSeen: boolean }
+interface RelayState {
+  fatalMessage: string;
+  doneSeen: boolean;
+  /** Set when the trainer honoured a PAUSE sentinel and saved its state. The
+   *  presence of this is what tells the segment loop "there is more to run". */
+  pausedAt?: number;
+  pauseState?: string;
+  pauseCkpt?: string;
+  /** Last checkpoint directory this segment exported, paused or not. */
+  lastCkpt?: string;
+  lastLoss?: number;
+  /** Called on every step event, so the segment loop can decide when to ask
+   *  for a pause without parsing the JSONL a second time. */
+  onStep?: (step: number, loss: number | undefined) => void;
+}
 
 /** ace-train JSONL -> the TrainingStreamEvent union. Deliberately defensive:
  *  every field access guarded, unknown `type` ignored. `step` emits no log line
@@ -142,13 +157,34 @@ function relay(job: TrainingJob, ev: Record<string, unknown>, st: RelayState): v
         gradNorm: optNum(ev, 'gradNorm'), clipScale: optNum(ev, 'clipScale'),
         totalSteps: optNum(ev, 'totalSteps'), stepMs: optNum(ev, 'stepMs'),
       });
+      st.lastLoss = optNum(ev, 'loss');
+      st.onStep?.(int(ev.step), optNum(ev, 'loss'));
       break;
     case 'milestone':
       pushEvent(job, {
         type: 'metric', metric: 'milestone', ts: Date.now(),
         step: optNum(ev, 'step'), loss: optNum(ev, 'loss'), path: text(ev.path) || undefined,
       });
+      st.lastCkpt = text(ev.path) || st.lastCkpt;
       log(job, 'info', `Checkpoint at step ${int(ev.step)} (loss ${(optNum(ev, 'loss') ?? 0).toFixed(4)})`);
+      break;
+    case 'cropAnchor':
+      log(job, 'info', text(ev.mode) === 'zero'
+        ? 'Crop anchor: zero — every crop is presented as the song\'s opening (the legacy convention).'
+        : 'Crop anchor: song — each crop carries its true position in the track.');
+      break;
+    case 'resumed':
+      log(job, 'info',
+        `Resumed at step ${int(ev.step)}/${int(ev.totalSteps)} (epoch ${int(ev.epoch)}) with optimizer `
+        + 'state intact.');
+      break;
+    case 'paused':
+      // NOT a terminal state — the segment loop relaunches with --resume once
+      // the preview has rendered.
+      st.pausedAt = int(ev.step);
+      st.pauseState = text(ev.state);
+      st.pauseCkpt = text(ev.ckpt) || st.lastCkpt;
+      st.lastLoss = optNum(ev, 'loss') ?? st.lastLoss;
       break;
     case 'progress': {
       job.done = int(ev.completed);
@@ -175,18 +211,25 @@ function relay(job: TrainingJob, ev: Record<string, unknown>, st: RelayState): v
   }
 }
 
-/** Shared spawn + relay + engine restore. `kind` only shapes the log lines. */
+/** Shared spawn + relay + engine restore. `kind` only shapes the log lines.
+ *
+ *  Returns the relay state so a caller can see whether the child PAUSED rather
+ *  than finished — the engine is back up by then, which is exactly the window a
+ *  preview render needs. */
 async function runMm3AceTrain(
   job: TrainingJob,
   kind: 'mm3-codes' | 'mm3-lm-train',
   args: string[],
   timeoutMs: number,
   verifyOutput: () => string | null,
-): Promise<void> {
+  onStep?: (step: number, loss: number | undefined) => void,
+): Promise<RelayState> {
+  const st: RelayState = { fatalMessage: '', doneSeen: false, onStep };
+
   const exe = aceTrainExe();
   if (!exe) {
     finishJob(job, 'failed', 'ace-train is not in this build — rebuild the engine');
-    return;
+    return st;
   }
 
   // `enqueue()` does NOT mark a job running — every runner does it itself
@@ -208,7 +251,7 @@ async function runMm3AceTrain(
     if (!engineExited) {
       throw new Error('The engine did not shut down — MM3 training needs its VRAM. Restart the app and try again.');
     }
-    if (isCancelled(job)) return;
+    if (isCancelled(job)) return st;
 
     job.phase = 'loading-models';
     emitProgress(job);
@@ -227,7 +270,6 @@ async function runMm3AceTrain(
       }
     });
 
-    const st: RelayState = { fatalMessage: '', doneSeen: false };
     const rl = readline.createInterface({ input: child.stdout! });
     rl.on('line', (line) => {
       try {
@@ -252,7 +294,7 @@ async function runMm3AceTrain(
       job.child = undefined;
     });
 
-    if (isCancelled(job)) return;
+    if (isCancelled(job)) return st;
     if (timedOut) {
       // Before the exit-code branch: a killed child yields null, which would
       // otherwise surface as "exited with code null". Checkpoints already
@@ -279,6 +321,7 @@ async function runMm3AceTrain(
       log(job, 'warn', 'Engine did not answer /health within 90 s — restart the app if generation fails');
     }
   }
+  return st;
 }
 
 // ── mm3-codes ───────────────────────────────────────────────────────────────
@@ -316,38 +359,197 @@ export async function runMm3CodesJob(job: TrainingJob): Promise<void> {
 
 // ── mm3-lm-train ────────────────────────────────────────────────────────────
 
+// A training run is one job but potentially SEVERAL ace-train processes, one
+// per preview point. See mm3Preview.ts for why the trainer has to leave the
+// card entirely for a render; the loop below is the other half of that.
+//
+// Each pass through the loop is a segment:
+//
+//   stop engine -> train -> PAUSE sentinel -> trainer saves state, exits 0
+//     -> restart engine (runMm3AceTrain's finally) -> render previews -> repeat
+//
+// The engine restart is not extra work bought by previews: runMm3AceTrain
+// already stops the engine on the way in and restores it on the way out, so a
+// preview lands exactly in the window where the card is free and the engine is
+// up. Nothing else in the job model changes — same job id, same SSE stream,
+// same loss chart, one continuous step axis.
+
+/** Ask the running trainer to stop at its next step boundary. */
+function requestPause(outDir: string): void {
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(path.join(outDir, 'PAUSE'), '');
+  } catch { /* the trainer simply runs on; the next trigger tries again */ }
+}
+
+/** Clear a sentinel left behind by a killed or crashed run. Without this the
+ *  next run would pause at step 1 and never make progress. */
+function clearPause(outDir: string): void {
+  try { fs.rmSync(path.join(outDir, 'PAUSE'), { force: true }); } catch { /* ignore */ }
+}
+
+/** Render every preview in the plan against one checkpoint (or the base model
+ *  when `adapterPath` is empty) and push each to the job's stream.
+ *
+ *  A preview failure NEVER fails the run. The renders are diagnostics; losing
+ *  50 minutes of training because a WAV did not come back would be a strictly
+ *  worse outcome than not hearing it. */
+async function renderPreviewSet(
+  job: TrainingJob,
+  plan: Mm3PreviewPlan,
+  runName: string,
+  adapterPath: string,
+  step: number,
+  totalSteps: number,
+  loss?: number,
+): Promise<void> {
+  for (const spec of plan.specs) {
+    if (isCancelled(job)) return;
+    const label = adapterPath ? `step ${step}` : 'base model';
+    try {
+      job.phase = 'preview';
+      emitProgress(job);
+      const preview = await renderMm3Preview({
+        spec, seconds: plan.seconds, seed: plan.seed, adapterPath,
+        step, totalSteps, dir: plan.dir, loss,
+      });
+      pushEvent(job, { type: 'preview', run: runName, preview });
+      log(job, 'info',
+        `Preview (${spec.kind}, ${label}): ${plan.seconds}s rendered in `
+        + `${(preview.ms / 1000).toFixed(1)}s — ${preview.file}`);
+    } catch (err: any) {
+      log(job, 'warn',
+        `Preview (${spec.kind}, ${label}) failed: ${err?.message || String(err)} — training continues.`);
+    }
+  }
+}
+
 export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
   const opts = job.opts as ResolvedMm3TrainLmOptions | undefined;
   if (!opts?.manifest || !opts.codesDir || !opts.outDir) {
     finishJob(job, 'failed', 'mm3-lm-train job is missing its manifest, codes or output path');
     return;
   }
-  const missing = missingMm3TrainModels('train');
+  const missing = missingMm3TrainModels('train', opts.basePrecision);
   if (missing.length) {
-    finishJob(job, 'failed',
-      `MiniMax-Music3 training models are missing: ${missing.join(', ')}. `
-      + 'Training needs the F16 files specifically — a quantized base cannot be trained.');
+    finishJob(job, 'failed', `MiniMax-Music3 training models are missing: ${missing.join(', ')}`);
     return;
   }
 
-  const args = buildMm3TrainLmArgs(opts);
-  // 3.9 s/step measured at the production recipe; budget 20 s/step so a slower
-  // card or a longer crop does not trip the killer, with a 6 h floor.
-  const timeoutMs = Math.max(6 * 60 * 60 * 1000, opts.steps * 20 * 1000);
+  const runName = path.basename(opts.outDir);
+  const plan = planMm3Previews({
+    preview: opts.preview,
+    manifest: opts.manifest,
+    captionsDir: opts.captionsDir,
+    codesDir: opts.codesDir,
+    outDir: opts.outDir,
+    holdout: opts.holdout,
+    trigger: opts.trigger,
+  });
+  clearPause(opts.outDir);
+
+  // The output check, shared by every segment. saveEvery 0 means "never
+  // checkpoint" — a legitimate ask for a probe run, and demanding one anyway
+  // failed a run that did exactly what it was told.
+  const verifyOutput = () => {
+    if (opts.saveEvery <= 0) return null;
+    const found = fs.existsSync(opts.outDir)
+      && fs.readdirSync(opts.outDir).some(d =>
+        fs.existsSync(path.join(opts.outDir, d, 'adapter_model.safetensors')));
+    return found ? null : 'mm3-lm-train finished but wrote no checkpoint';
+  };
 
   try {
-    await runMm3AceTrain(job, 'mm3-lm-train', args, timeoutMs, () => {
-      // saveEvery 0 means "never checkpoint" — a legitimate ask for a probe
-      // run, and demanding one anyway failed a run that did exactly what it
-      // was told. Only a run that was SUPPOSED to write one is judged on it.
-      if (opts.saveEvery <= 0) return null;
-      // A checkpoint is a directory holding the PEFT pair. Finding none means
-      // the run produced nothing usable however cleanly it exited.
-      const found = fs.existsSync(opts.outDir)
-        && fs.readdirSync(opts.outDir).some(d =>
-          fs.existsSync(path.join(opts.outDir, d, 'adapter_model.safetensors')));
-      return found ? null : 'mm3-lm-train finished but wrote no checkpoint';
-    });
+    if (plan) {
+      const cadence = [
+        plan.everySteps > 0 ? `every ${plan.everySteps} steps` : '',
+        plan.everyMinutes > 0 ? `every ${plan.everyMinutes} min` : '',
+      ].filter(Boolean).join(' or ');
+      log(job, 'info',
+        `Audio previews ${cadence}: ${plan.specs.map(s => s.kind).join(' + ')}, `
+        + `${plan.seconds}s at seed ${plan.seed}. Each one pauses training for roughly a minute `
+        + '(the trainer has to leave the card for the render).');
+
+      // The step-0 reference, rendered before the engine is ever stopped. This
+      // is the only render in the run that costs nothing extra — the engine is
+      // already up — and it is the one the ear needs most: "worse than base" is
+      // not a judgement anyone can make without base.
+      if (plan.baseline && !isCancelled(job)) {
+        await renderPreviewSet(job, plan, runName, '', 0, opts.steps, undefined);
+      }
+    }
+
+    let resumeFrom = '';
+    let lastStep = 0;
+    for (;;) {
+      if (isCancelled(job)) return;
+
+      // Cadence state, reset per segment because the trainer restarts.
+      let nextStepTrigger = plan && plan.everySteps > 0
+        ? Math.floor(lastStep / plan.everySteps) * plan.everySteps + plan.everySteps
+        : Number.POSITIVE_INFINITY;
+      let pauseAsked = false;
+      let minuteTimer: NodeJS.Timeout | undefined;
+
+      const askPause = () => {
+        if (pauseAsked) return;
+        pauseAsked = true;
+        requestPause(opts.outDir);
+      };
+      if (plan && plan.everyMinutes > 0) {
+        minuteTimer = setTimeout(askPause, plan.everyMinutes * 60_000);
+      }
+
+      const onStep = (step: number, _loss: number | undefined) => {
+        lastStep = Math.max(lastStep, step);
+        if (!plan) return;
+        // Never pause on the last step: the run is about to end and export a
+        // checkpoint anyway, and the final preview is rendered after `done`
+        // with the engine already back up.
+        if (step >= opts.steps) return;
+        if (step >= nextStepTrigger) {
+          nextStepTrigger += plan.everySteps;
+          askPause();
+        }
+      };
+
+      // Budget the segment on the steps it can still run, with a 1 h floor so a
+      // cold model load plus a short segment never trips the killer.
+      const remaining = Math.max(1, opts.steps - lastStep);
+      const timeoutMs = Math.max(60 * 60 * 1000, remaining * 20 * 1000);
+
+      const args = buildMm3TrainLmArgs({ ...opts, resumeFrom });
+      let st: RelayState;
+      try {
+        st = await runMm3AceTrain(job, 'mm3-lm-train', args, timeoutMs, verifyOutput, onStep);
+      } finally {
+        if (minuteTimer) clearTimeout(minuteTimer);
+      }
+      if (isCancelled(job)) return;
+
+      if (st.pausedAt && st.pauseState && plan) {
+        // A pause is mid-run, so `progress` has not reached total and the UI
+        // would otherwise show a stalled bar while the render happens.
+        log(job, 'info', `Paused at step ${st.pausedAt}/${opts.steps} to render a preview…`);
+        clearPause(opts.outDir);
+        await renderPreviewSet(job, plan, runName, st.pauseCkpt || '', st.pausedAt, opts.steps,
+                               st.lastLoss);
+        if (isCancelled(job)) return;
+        resumeFrom = st.pauseState;
+        lastStep = st.pausedAt;
+        continue;
+      }
+
+      // Not paused = the run is over. Render the final checkpoint now, while
+      // the engine is up, so the last thing in the strip is the finished
+      // adapter rather than the last preview point before it.
+      if (plan && st.lastCkpt && !isCancelled(job)) {
+        await renderPreviewSet(job, plan, runName, st.lastCkpt, lastStep || opts.steps, opts.steps,
+                               st.lastLoss);
+      }
+      break;
+    }
+
     if (!isCancelled(job)) {
       log(job, 'info',
         'Checkpoints are in the MM3 adapter folder — they appear in the adapter picker with no install step.');
@@ -355,5 +557,7 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
     }
   } catch (err: any) {
     if (!isCancelled(job)) finishJob(job, 'failed', err?.message || String(err));
+  } finally {
+    clearPause(opts.outDir);
   }
 }

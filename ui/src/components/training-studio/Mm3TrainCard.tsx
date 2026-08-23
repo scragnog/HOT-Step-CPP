@@ -18,7 +18,7 @@
 
 import React, { useState } from 'react';
 import {
-  AlertTriangle, ChevronDown, ChevronRight, Cpu, Loader2, Play, XCircle,
+  AlertTriangle, ChevronDown, ChevronRight, Cpu, Loader2, Play, Volume2, XCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -26,6 +26,7 @@ import { estimateMm3PeakMb } from '../../services/trainingApi';
 import type { Mm3TrainLmRequest } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { JobProgress } from './JobProgress';
+import { Mm3PreviewStrip } from './Mm3PreviewStrip';
 import { useMm3Status } from './useMm3Status';
 import { TrainingChart } from './TrainingChart';
 
@@ -50,6 +51,14 @@ interface FormState {
   basePrecision: string;
   holdout: number;
   evalEvery: number;
+  cropAnchor: 'song' | 'zero';
+  previewEverySteps: number;
+  previewEveryMinutes: number;
+  previewSeconds: number;
+  previewSeed: number;
+  previewCaption: string;
+  previewControl: boolean;
+  previewBaseline: boolean;
 }
 
 const NumField: React.FC<{
@@ -119,6 +128,17 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     basePrecision: status.recommended?.base || status.defaults.basePrecision || 'q8_0',
     holdout: status.defaults.holdout ?? 0.15,
     evalEvery: status.defaults.evalEvery ?? 50,
+    cropAnchor: (status.defaults.cropAnchor as 'song' | 'zero') ?? 'song',
+    // Previews default OFF. They are the fastest way to learn whether a run is
+    // worth finishing, but each one costs about a minute, so opting in is the
+    // user's call rather than a surprise on the clock.
+    previewEverySteps: 0,
+    previewEveryMinutes: 0,
+    previewSeconds: 24,
+    previewSeed: 424242,
+    previewCaption: '',
+    previewControl: true,
+    previewBaseline: true,
     ...edits,
   } : null;
 
@@ -165,7 +185,19 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         optimizer: form.optimizer, muonLrScale: form.muonLrScale,
         gradAccum: form.gradAccum, seed: form.seed,
         basePrecision: form.basePrecision, holdout: form.holdout, evalEvery: form.evalEvery,
+        cropAnchor: form.cropAnchor,
         ...(form.trigger.trim() ? { trigger: form.trigger.trim() } : {}),
+        ...(form.previewEverySteps > 0 || form.previewEveryMinutes > 0 ? {
+          preview: {
+            everySteps: form.previewEverySteps,
+            everyMinutes: form.previewEveryMinutes,
+            seconds: form.previewSeconds,
+            seed: form.previewSeed,
+            control: form.previewControl,
+            baseline: form.previewBaseline,
+            ...(form.previewCaption.trim() ? { caption: form.previewCaption.trim() } : {}),
+          },
+        } : {}),
       };
       await startMm3TrainLm(body);
     } finally {
@@ -255,6 +287,90 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   + 'contain it — this does not add it to them.')}
               </span>
             </label>
+
+            {/* -- Previews ------------------------------------------------
+                Above Advanced on purpose: this is the control that decides
+                whether the user finds out at step 200 or at step 800 that the
+                run is going the wrong way. */}
+            <div className="mt-3 rounded-lg border border-zinc-200 dark:border-white/10 p-3">
+              <div className="flex items-center gap-2">
+                <Volume2 size={13} className="text-amber-500" />
+                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                  {t('trainingStudio.mm3.previewTitle', 'Audio previews during training')}
+                </span>
+              </div>
+              <p className="text-[10px] text-zinc-500 leading-snug mt-1">
+                {t('trainingStudio.mm3.previewBlurb',
+                  'Renders a sample from the checkpoint while the run is still going, so you can hear '
+                  + 'whether it is heading the right way and abort if not. Each preview point pauses '
+                  + 'training for about a minute: the trainer has to hand the whole card to the render, '
+                  + 'so it saves its optimizer state, exits, renders, and resumes exactly where it was. '
+                  + 'Zero in both fields turns previews off.')}
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
+                <NumField label={t('trainingStudio.mm3.previewEverySteps', 'Every N steps')}
+                  value={form.previewEverySteps} onChange={v => set('previewEverySteps', v)}
+                  step={50} hint={t('trainingStudio.mm3.previewStepsHint', '0 = off') as string} />
+                <NumField label={t('trainingStudio.mm3.previewEveryMinutes', 'Or every N minutes')}
+                  value={form.previewEveryMinutes} onChange={v => set('previewEveryMinutes', v)}
+                  step={5} hint={t('trainingStudio.mm3.previewMinutesHint',
+                    'Whichever comes first') as string} />
+                <NumField label={t('trainingStudio.mm3.previewSeconds', 'Length (s)')}
+                  value={form.previewSeconds} onChange={v => set('previewSeconds', v)}
+                  step={4} hint={t('trainingStudio.mm3.previewSecondsHint',
+                    '24 s costs about 16 s of GPU') as string} />
+                <NumField label={t('trainingStudio.mm3.previewSeed', 'Preview seed')}
+                  value={form.previewSeed} onChange={v => set('previewSeed', v)}
+                  hint={t('trainingStudio.mm3.previewSeedHint',
+                    'Fixed across the run') as string} />
+              </div>
+              <label className="flex flex-col gap-1 mt-3">
+                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                  {t('trainingStudio.mm3.previewCaption', 'Preview caption')}
+                </span>
+                <textarea
+                  className={`${INPUT} font-mono text-[11px] leading-snug`} rows={3}
+                  placeholder={t('trainingStudio.mm3.previewCaptionPlaceholder',
+                    'Blank = the first held-out song’s own caption, with the trigger prepended') as string}
+                  value={form.previewCaption}
+                  onChange={e => set('previewCaption', e.target.value)}
+                />
+                <span className="text-[10px] text-zinc-500 leading-snug">
+                  {t('trainingStudio.mm3.previewCaptionHint',
+                    'Leave blank unless you have a reason not to: a held-out caption carries the '
+                    + 'artist’s true BPM and tuning, and a wrong one becomes audible as soon as '
+                    + 'identity bakes in. The trigger is prepended as "trigger, " on the caption’s '
+                    + 'first line, which is the exact shape the training rows use.')}
+                </span>
+              </label>
+              <div className="flex flex-col gap-1.5 mt-3">
+                <label className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300">
+                  <input type="checkbox" className="mt-0.5" checked={form.previewControl}
+                    onChange={e => set('previewControl', e.target.checked)} />
+                  <span>
+                    {t('trainingStudio.mm3.previewControl', 'Also render a neutral control caption')}
+                    <span className="block text-[10px] text-zinc-500">
+                      {t('trainingStudio.mm3.previewControlHint',
+                        'An off-genre prompt rendered WITH the adapter. This is the one that catches '
+                        + 'the adapter damaging the base planner - on the artist caption a damaged '
+                        + 'model and a good one both sound roughly like the artist.')}
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300">
+                  <input type="checkbox" className="mt-0.5" checked={form.previewBaseline}
+                    onChange={e => set('previewBaseline', e.target.checked)} />
+                  <span>
+                    {t('trainingStudio.mm3.previewBaseline', 'Render a no-adapter reference first')}
+                    <span className="block text-[10px] text-zinc-500">
+                      {t('trainingStudio.mm3.previewBaselineHint',
+                        'Free - the engine is still up before the run starts. Without it there is '
+                        + 'nothing to judge "worse than base" against.')}
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
 
             <button
               onClick={() => setAdvanced(v => !v)}
@@ -353,6 +469,25 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       + 'not to be used. Leave this on random.')}
                   </span>
                 </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                    {t('trainingStudio.mm3.cropAnchor', 'Crop position')}
+                  </span>
+                  <select className={INPUT} value={form.cropAnchor}
+                    onChange={e => set('cropAnchor', e.target.value as 'song' | 'zero')}>
+                    <option value="song">song (true position)</option>
+                    <option value="zero">zero (legacy)</option>
+                  </select>
+                  <span className="text-[10px] text-zinc-500 leading-snug">
+                    {t('trainingStudio.mm3.cropAnchorHint',
+                      'Under "zero" every crop was presented to the model as if it were the opening of '
+                      + 'the song, whatever part of the track it came from - while generation always '
+                      + 'starts at frame 0. That mismatch teaches the model that a song can begin '
+                      + 'anywhere, and shows up as sound arriving instantly at 0:00 and as tempo '
+                      + 'drifting mid-track. "song" labels each crop with where it actually is. Runs '
+                      + 'trained under the two are not comparable.')}
+                  </span>
+                </label>
               </div>
             )}
 
@@ -414,6 +549,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               ))}
             </div>
           )}
+          {jobKind === 'mm3-train-lm' && <Mm3PreviewStrip />}
           {jobKind === 'mm3-train-lm' && trainStepSeries.length > 1 && (
             <div className="mt-3">
               {/* Four series now, on one fractional-epoch axis: per-step noise,
