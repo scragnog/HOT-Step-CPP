@@ -80,18 +80,28 @@ export interface Mm3Recommendation {
 export interface Mm3VramModel {
   loadedOverheadMb: number;
   perRankMb: number;
+  /** AdamW's second momentum buffer. Optional: an older server does not send it. */
+  adamwPerRankMb?: number;
   perTokenMb: number;
+  /** Quadratic sequence term (attention scores). Optional for the same reason. */
+  perTokenSqMb?: number;
   promptTokens: number;
   constMb: number;
 }
 
 /** Peak VRAM in MB. The coefficients come from the server, which fitted them to
- *  six measured configurations; this is only the arithmetic. */
+ *  measured configurations; this is only the arithmetic. */
 export function estimateMm3PeakMb(baseBytes: number, rank: number, maxFrames: number,
-                                  m: Mm3VramModel): number {
-  const loaded = baseBytes / 1048576 + m.loadedOverheadMb;
-  const S      = m.promptTokens + Math.max(0, maxFrames);
-  return Math.round(loaded + m.perRankMb * rank + m.perTokenMb * S + m.constMb);
+                                  m: Mm3VramModel,
+                                  optimizer: 'muon' | 'adamw' = 'adamw'): number {
+  const loaded  = baseBytes / 1048576 + m.loadedOverheadMb;
+  const S       = m.promptTokens + Math.max(0, maxFrames);
+  // The S term is QUADRATIC — the backward retains [S, S, heads] attention
+  // scores for the live checkpoint segment. Older coefficients had only the
+  // linear part, which was exact around S ~ 2642 and 6 GB low at S ~ 5238.
+  const perRank = m.perRankMb + (optimizer === 'adamw' ? (m.adamwPerRankMb ?? 0) : 0);
+  const sq      = (m.perTokenSqMb ?? 0) * S * S;
+  return Math.round(loaded + perRank * rank + m.perTokenMb * S + sq + m.constMb);
 }
 
 export interface Mm3CodesRequest {

@@ -101,30 +101,77 @@
 static void        jl(const char * fmt, ...);
 static std::string json_escape(const std::string & s);
 
+// ── THE DEFAULTS ARE bghira's SimpleTuner RECIPE (2026-08-23) ───────────────
+//
+// They used to be ours: r256 / alpha 256 / lr 8e-5 constant-ish / Muon at
+// lr_scale 64 / random 1500-frame crops / 800 steps. That recipe produced
+// adapters that carried a trace of the artist's timbre while making the backing
+// track audibly simpler and cheaper — identity weak AND base damaged.
+//
+// bghira trains the same component with SimpleTuner and gets better results, and
+// he publishes the configs. Two references:
+//   * terminusresearch/minimax-music3-lm-lora-fiona-crapple  (9 tracks)
+//   * RareConcepts/soad-mm3-vanilla-20260822 + the training-tournament card
+//     (45 tracks, 1000 steps, simpletuner_config.json in every checkpoint)
+//
+// The SOAD config, verbatim, is what the numbers below now mirror:
+//
+//     lora_rank 64            lora_alpha = rank        lora_dropout 0.1
+//     learning_rate 5e-5      lr_scheduler cosine      lr_warmup_steps 50
+//     lr_end 4e-7             optimizer adamw_bf16     max_grad_norm 1.0
+//     train_batch_size 1      grad_accum 1             max_train_steps 1000
+//     minimax_music_lm_max_frames 0   (= whole tracks, truncated FROM THE START)
+//
+// The comparison that motivated the change: over 45 tracks he runs 42 epochs;
+// we ran 61 over 13 songs, at four times the rank, with a normalised-update
+// optimizer at an untuned scale, no warmup and no regularisation of any kind.
+// We were training harder AND with more capacity on less data.
+//
+// TWO OF HIS SETTINGS ARE DELIBERATELY NOT COPIED:
+//   * `lora_dropout 0.1` is not implemented here yet. It is not a default we
+//     can flip: per-layer activation checkpointing recomputes the forward, so
+//     any dropout mask must be REPRODUCIBLE at recompute time or the gradients
+//     are computed against a different network than the loss was. That needs a
+//     position-derived deterministic mask, not a stored random tensor.
+//   * `caption_dropout_probability 0.1` is INERT in his LM runs — his
+//     _lm_prompt_text raises on an empty caption, so the knob can never fire in
+//     language_model mode. Copying it would be diverging, not replicating.
 struct MM3LmTrainArgs {
     std::string lm_path, depth_path, manifest, captions_dir, codes_dir, out_dir;
-    int         rank = 256, alpha = 256;
-    double      lr = 8e-5, weight_decay = 0.01, grad_clip = 1.0;
-    int         steps = 800, save_every = 100, warmup = 0;
-    int64_t     max_frames = 1500;
-    std::string crop_mode = "random";     // random | beginning
+    int         rank = 64, alpha = 64;
+    double      lr = 5e-5, weight_decay = 0.01, grad_clip = 1.0;
+    int         steps = 1000, save_every = 100, warmup = 50;
+    /** Cosine floor as a fraction of lr, i.e. SimpleTuner's `lr_end`: his
+     *  4e-7 over a 5e-5 base is 0.008. Our shared schedule bottomed at 0.1,
+     *  which ran the tail of the run twelve times hotter than his. */
+    double      lr_end_frac = 0.008;
+    /** 4096 frames = 164 s at 25 fps, and it pairs with crop_mode `beginning`
+     *  to reproduce his `lm_max_frames: 0` — whole track where it fits, and
+     *  otherwise truncated FROM THE START, which is the point: his option help
+     *  says "taken from the start so lyrics stay aligned".
+     *
+     *  Our old random 1500-frame crop broke that alignment on every crop with
+     *  a non-zero offset — the prompt carried the whole song's lyrics while the
+     *  supervised audio came from a minute in. --crop-anchor at least tells the
+     *  model WHERE it is now; start-truncation removes the mismatch instead. */
+    int64_t     max_frames = 4096;
+    std::string crop_mode = "beginning";  // random | beginning
     int         grad_accum = 1, seed = 42;
-    // MUON BY DEFAULT, and at a scale that was measured rather than inherited.
+    // ADAMW BY DEFAULT as of 2026-08-23, because the recipe it belongs to is
+    // now rank 64.
     //
-    // Two independent reasons, both from this program's own numbers:
-    //  * IT IS THE ONE THAT FITS. AdamW carries a second momentum buffer —
-    //    +2.66 GB at rank 256 on a run already peaking at 31.7 GB of a 32 GB
-    //    card — and lowering --max-frames does not rescue it, because the crop
-    //    only moves the ~0.6 GB of checkpoint buffers.
-    //  * Muon's update is NORMALISED by Newton-Schulz, so an AdamW learning
-    //    rate means nothing to it. A 50-step sweep at r256 on alk3, identical
-    //    seed so every arm saw identical crops (step 1 loss 3.3318 in all four):
-    //        lr_scale  1 -> mean 3.3114    16 -> mean 2.8960
-    //        lr_scale  4 -> mean 3.1842    64 -> mean 2.5407
-    //    Monotonic, so 64 is the best of what was TESTED, not a tuned optimum;
-    //    the top of the usable range has not been found. Revisit with a proper
-    //    sweep before any long run.
-    std::string optimizer = "muon";       // adamw | muon
+    // Muon was never chosen on merit — it was chosen because it FIT. AdamW's
+    // second momentum buffer costs +2.66 GB at rank 256 on a run that already
+    // peaked at 31.7 GB of a 32 GB card. At rank 64 that buffer is 0.67 GB and
+    // the constraint evaporates, which removes the only argument for Muon here.
+    //
+    // Muon also made the learning rate meaningless: its update is normalised by
+    // Newton-Schulz, so `lr` had to be paired with an --muon-lr-scale that was
+    // never tuned (a 50-step sweep gave 1 -> 3.3114, 4 -> 3.1842, 16 -> 2.8960,
+    // 64 -> 2.5407 — monotonic, so 64 was the best of four values TESTED and the
+    // top of the range was never found). A 5e-5 AdamW rate is a number with a
+    // published reference behind it. Muon remains available via --optimizer.
+    std::string optimizer = "adamw";      // adamw | muon
     float       muon_lr_scale = 64.0f, muon_momentum = 0.95f;
     int         muon_ns_steps = 5, muon_min_dim = 16, muon_bucket = 16;
     bool        muon_nesterov = true;
@@ -997,7 +1044,11 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // The split is an EVENT, not just a log line: a run that put zero
     // parameters on Muon trained as AdamW, and the UI should be able to say so.
     jl("{\"type\":\"optimizer\",\"name\":\"%s\",\"tensors\":%zu,\"muon\":%d,\"buckets\":%zu,\"lrScale\":%.4f}",
-       a.optimizer.c_str(), lora.params.size(), opt.n_muon, opt.muon_buckets.size(), (double) a.muon_lr_scale);
+       a.optimizer.c_str(), lora.params.size(), opt.n_muon, opt.muon_buckets.size(),
+       // 1.0 under AdamW: reporting the Muon scale on an AdamW run made the
+       // event say lrScale 64 next to "504 on AdamW", and the UI multiplies the
+       // displayed learning rate by it.
+       a.optimizer == "muon" ? (double) a.muon_lr_scale : 1.0);
 
     // ── persistent tensors ──
     ggml_context * ctx_static = nullptr;
@@ -1056,6 +1107,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     opt.t_eps        = t_eps;
     opt.t_gnorm2     = t_gn2;
     opt.base_lr      = (float) a.lr;
+    opt.lr_floor     = (float) a.lr_end_frac;
     opt.weight_decay = (float) a.weight_decay;
     opt.grad_clip    = (float) a.grad_clip;
     opt.total_steps  = a.steps;

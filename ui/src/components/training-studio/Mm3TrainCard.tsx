@@ -148,7 +148,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   const chosen = status?.bases?.find(b => b.id === form?.basePrecision);
   const peak = (() => {
     if (!form || !status?.vramModel || !chosen) return null;
-    const mb    = estimateMm3PeakMb(chosen.bytes, form.rank, form.maxFrames, status.vramModel)
+    const mb    = estimateMm3PeakMb(chosen.bytes, form.rank, form.maxFrames, status.vramModel,
+                                    form.optimizer)
                 + (chosen.extraMb || 0);
     const total = status.gpuTotalMb || 0;
     const gb    = (mb / 1024).toFixed(1);
@@ -404,9 +405,11 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     </select>
                     <span className="text-[10px] text-zinc-500 leading-snug">
                       {t('trainingStudio.mm3.optimizerHint',
-                        'Muon is the default for two reasons: at rank 256 AdamW\'s second momentum buffer '
-                        + 'does not fit on a 32 GB card, and Muon\'s normalised update means an AdamW '
-                        + 'learning rate does not apply to it.')}
+                        'AdamW is the default and matches the published SimpleTuner recipe. Muon was '
+                        + 'only ever chosen here because it FIT at rank 256, where AdamW carries a '
+                        + 'second momentum buffer costing an extra 2.7 GB; at rank 64 that is 0.7 GB '
+                        + 'and the constraint is gone. Muon also makes the learning rate meaningless — '
+                        + 'its update is normalised, so it needs a scale factor instead.')}
                     </span>
                   </label>
                   {form.optimizer === 'muon' && (
@@ -463,10 +466,20 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     <option value="random">random</option>
                     <option value="beginning">beginning</option>
                   </select>
-                  <span className="text-[10px] text-amber-600/80 dark:text-amber-400/80 leading-snug">
-                    {t('trainingStudio.mm3.cropModeHint',
-                      '`beginning` trains on song intros only — it exists to reproduce a known failure, '
-                      + 'not to be used. Leave this on random.')}
+                  <span className={`text-[10px] leading-snug ${
+                    form.cropMode === 'beginning' && form.maxFrames < 2500
+                      ? 'text-amber-600/80 dark:text-amber-400/80' : 'text-zinc-500'
+                  }`}>
+                    {form.cropMode === 'beginning' && form.maxFrames < 2500
+                      ? t('trainingStudio.mm3.cropModeIntros',
+                          'At this crop length `beginning` means the first minute of every song — an '
+                          + 'intros-only trainer, which is the failure the lm2 run hit. Either raise the '
+                          + 'crop to 4096 frames or switch to random.')
+                      : t('trainingStudio.mm3.cropModeHint',
+                          '`beginning` takes each track from the start, which keeps the lyrics in the '
+                          + 'prompt aligned with the audio being supervised. That is what SimpleTuner '
+                          + 'does and it is the default. `random` samples a window from anywhere in the '
+                          + 'track, which breaks that alignment on every crop that does not start at zero.')}
                   </span>
                 </label>
                 <label className="flex flex-col gap-1">

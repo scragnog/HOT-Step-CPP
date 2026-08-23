@@ -1913,6 +1913,7 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       // `song` is the default and the correct convention; `zero` exists only to
       // reproduce a pre-2026-08-23 run. See Mm3TrainLmRequest.cropAnchor.
       cropAnchor:  b.cropAnchor === 'zero' ? 'zero' : 'song',
+      lrEndFrac:   num('lrEndFrac', D.lrEndFrac, 0, 1),
       preview:     parseMm3PreviewOptions(b.preview),
     });
     res.json({ jobId: job.id, kind: job.kind, runName, outDir: mm3AdapterRunDir(runName) });

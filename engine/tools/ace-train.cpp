@@ -1254,8 +1254,9 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 //   ace-train mm3-lm-train --lm <mm3-lm-*.gguf> --depth <mm3-depth-*.gguf>
 //       --manifest <mm3_preprocess.json> --captions <dataset dir>
 //       --codes <dir from mm3-codes> --out <dir>
-//       [--rank 256] [--alpha 256] [--lr 8e-5] [--steps 800] [--save-every 100]
-//       [--max-frames 1500] [--crop-mode random|beginning] [--grad-accum 1]
+//       [--rank 64] [--alpha 64] [--lr 5e-5] [--lr-end-frac 0.008]
+//       [--steps 1000] [--save-every 100] [--warmup 50]
+//       [--max-frames 4096] [--crop-mode beginning|random] [--grad-accum 1]
 //       [--optimizer adamw|muon] [--muon-*] [--trigger word] [--seed 42]
 //       [--crop-anchor song|zero] [--resume <state>] [--pause-file <path>]
 //       [--no-pause]
@@ -1270,9 +1271,11 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 // and exits 0 with a `paused` event, the server renders the checkpoint on the
 // freed card, then relaunches with --resume. See train/mm3-lm-resume.h.
 //
-// Defaults ARE the validated recipe (docs/plans/2026-08-20-mm3-training-studio.md):
-// r256/alpha256, lr 8e-5 constant, 800 steps, checkpoint every 100, max_frames
-// 1500, random crops.
+// Defaults MIRROR bghira's published SimpleTuner recipe as of 2026-08-23 —
+// r64/alpha64, AdamW at lr 5e-5 cosine with 50 warmup steps, 1000 steps,
+// checkpoint every 100, whole tracks truncated from the start. The reasoning,
+// the two settings of his that are deliberately NOT copied, and what the old
+// numbers were live on MM3LmTrainArgs in train/mm3-lm-train-run.h.
 static int cmd_mm3_lm_train(int argc, char ** argv) {
     MM3LmTrainArgs a;
     // --fd-check N runs the finite-difference gradient gate instead of
@@ -1301,6 +1304,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--rank"))          a.rank         = atoi(next("--rank"));
         else if (!strcmp(argv[i], "--alpha"))         a.alpha        = atoi(next("--alpha"));
         else if (!strcmp(argv[i], "--lr"))            a.lr           = atof(next("--lr"));
+        else if (!strcmp(argv[i], "--lr-end-frac"))   a.lr_end_frac  = atof(next("--lr-end-frac"));
         else if (!strcmp(argv[i], "--weight-decay"))  a.weight_decay = atof(next("--weight-decay"));
         else if (!strcmp(argv[i], "--grad-clip"))     a.grad_clip    = atof(next("--grad-clip"));
         else if (!strcmp(argv[i], "--steps"))         a.steps        = atoi(next("--steps"));

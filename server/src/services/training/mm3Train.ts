@@ -152,32 +152,48 @@ export interface Mm3BaseInfo {
 
 /** Peak VRAM for a configuration, in MB.
  *
- *  Fitted to six measured points on a 5090 and accurate to <0.5% across the
- *  whole range it covers (10.2 GB to 22.6 GB), which is why the UI can show a
- *  number instead of a shrug:
- *
- *      peak = loaded + 31.2*rank + 1.4515*S + 441          S = 1142 + frames
+ *      peak = loaded + (31.2 + adamw ? 10.4 : 0)*rank
+ *                    + 0.2679*S + 0.00044765*S^2 + 441      S = 1142 + frames
  *
  *  `loaded` is the LM file plus ~1672 MB of fixed company (depth model, audio
- *  embeddings, tokenizer). 31.2 MB per rank is 12 bytes per LoRA parameter —
- *  weights, gradients and Muon momentum, one F32 copy each. The S terms are the
- *  36 per-layer checkpoints plus the graph arena, both linear in sequence
- *  length. 1142 is the typical MM3 prompt: it dominates short crops, which is
- *  why shrinking maxFrames is a weaker lever than it looks.
+ *  embeddings, tokenizer) and is measured to within 7 MB. 31.2 MB per rank is
+ *  12 bytes per LoRA parameter — weights, gradients and one momentum buffer,
+ *  F32 each; AdamW carries a SECOND momentum buffer, which is the extra 10.4.
  *
- *  MEASURED f16 comes out ~1 GB ABOVE this (31.4 vs 30.3 predicted). The fit is
- *  over the quantized bases, where the in-graph cast is freed per segment; f16
- *  holds its weights differently. Treat an f16 estimate as a floor. */
+ *  THE S TERM IS QUADRATIC, and it did not used to be (2026-08-23). The old
+ *  model was `1.4515*S`, fitted over configurations that all sat near S ~ 2642
+ *  (a 1500-frame crop plus the ~1142-token prompt), where it was exact: it
+ *  predicts 3835 MB of activations against 3833 measured. It simply does not
+ *  extrapolate — at S = 5238 it predicts 7603 MB against 13686 measured, a
+ *  6 GB miss, because the non-flash attention branch the trainer backpropagates
+ *  through holds [S, S, heads] scores. That range stopped being hypothetical
+ *  the moment the recipe moved to 4096-frame windows, so it is now fitted
+ *  through both anchors instead:
+ *
+ *      rank 64 / q8_0 / AdamW,  1500 frames (S=2642)  ->  17307 MB measured
+ *      rank 64 / q8_0 / AdamW,  4096 frames (S=5238)  ->  27160 MB measured
+ *
+ *  Both anchors share a rank and a base, so any error in the per-rank or
+ *  constant terms is absorbed into the two S coefficients. Treat the curve as
+ *  calibrated for the shipped recipe and as an estimate elsewhere — and note
+ *  the quadratic term means a longer crop is a far more expensive knob than the
+ *  old linear model made it look. */
 export const MM3_VRAM_MODEL = {
   /** Depth model + audio embeddings + tokenizer, on top of the LM file. */
   loadedOverheadMb: 1672,
-  /** 12 bytes per LoRA parameter (weights + grads + Muon momentum, F32 each),
-   *  times 2.728 M parameters per unit of rank. */
+  /** 12 bytes per LoRA parameter (weights + grads + one momentum, F32 each),
+   *  times 2.6 M parameters per unit of rank. */
   perRankMb: 31.2,
-  /** 36 per-layer checkpoints plus the graph arena, both linear in sequence. */
-  perTokenMb: 1.4515,
-  /** Typical MM3 prompt. Added to maxFrames to get the sequence length, and the
-   *  reason a short crop saves less than it looks like it should. */
+  /** AdamW's SECOND momentum buffer, one more F32 per parameter. Only 0.67 GB
+   *  at rank 64 — which is the whole reason the recipe could move off Muon. */
+  adamwPerRankMb: 10.4,
+  /** Linear part of the activation cost: per-layer checkpoints and the arena. */
+  perTokenMb: 0.2679,
+  /** Quadratic part: the [S, S, heads] attention scores the backward retains
+   *  for the live checkpoint segment. This is the term that makes crop length
+   *  expensive. */
+  perTokenSqMb: 0.00044765,
+  /** Typical MM3 prompt. Added to maxFrames to get the sequence length. */
   promptTokens: 1142,
   constMb: 441,
 } as const;
@@ -188,11 +204,14 @@ export const MM3_VRAM_MODEL = {
  *  this as the user drags rank and crop length, and a second copy of these
  *  numbers over there would drift from the measurements that produced them. */
 export function estimateMm3PeakMb(baseBytes: number, rank: number, maxFrames: number,
-                                  extraMb = 0): number {
+                                  extraMb = 0,
+                                  optimizer: 'muon' | 'adamw' = MM3_LM_DEFAULTS.optimizer): number {
   const M      = MM3_VRAM_MODEL;
   const loaded = baseBytes / 1048576 + M.loadedOverheadMb;
   const S      = M.promptTokens + Math.max(0, maxFrames);
-  return Math.round(loaded + M.perRankMb * rank + M.perTokenMb * S + M.constMb + extraMb);
+  const perRank = M.perRankMb + (optimizer === 'adamw' ? M.adamwPerRankMb : 0);
+  return Math.round(loaded + perRank * rank + M.perTokenMb * S + M.perTokenSqMb * S * S
+                    + M.constMb + extraMb);
 }
 
 /** Every installed base, best quality first.
@@ -259,7 +278,12 @@ export function availableMm3Bases(rank: number = MM3_LM_DEFAULTS.rank,
 /** RANK LADDER for the recommender. The defaults were validated at 256 on a
  *  32 GB card; below that, rank is the term that has to give. 31.2 MB per unit
  *  of rank means 256 -> 64 frees 6.0 GB, which is more than any base swap. */
-const MM3_RANK_LADDER = [256, 128, 64, 32, 16];
+// Ranks the recommender may fall back to, high to low. It starts at the RECIPE
+// rank and only ever goes down: rank is a recipe choice with published evidence
+// behind it, not a "more is better" dial the card size should win. Before this
+// was capped, a 32 GB card was offered r256 — overriding the default and
+// quietly reinstating the configuration the recipe change exists to leave.
+const MM3_RANK_LADDER_FULL = [256, 128, 64, 32, 16];
 
 export interface Mm3Recommendation {
   base: string;
@@ -289,6 +313,13 @@ export interface Mm3Recommendation {
  *  `headroomMb` is not padding for the estimate (good to <0.3%) but for the
  *  desktop session sharing the GPU, which is what pushed f16 from 3.7 to
  *  12-14 s/step in the A/B that set the default. */
+/** The ladder, capped at the recipe's rank. Declared as a function because
+ *  MM3_LM_DEFAULTS is defined further down the file. */
+function rankLadder(): number[] {
+  const capped = MM3_RANK_LADDER_FULL.filter(r => r <= MM3_LM_DEFAULTS.rank);
+  return capped.length ? capped : [MM3_LM_DEFAULTS.rank];
+}
+
 export function recommendMm3Config(gpuTotalMb: number,
                                    maxFrames: number = MM3_LM_DEFAULTS.maxFrames,
                                    headroomMb?: number): Mm3Recommendation {
@@ -313,7 +344,7 @@ export function recommendMm3Config(gpuTotalMb: number,
     if (base.quality === 'poor') {
       continue;
     }
-    for (const rank of MM3_RANK_LADDER) {
+    for (const rank of rankLadder()) {
       const peak = estimateMm3PeakMb(base.bytes, rank, maxFrames, base.extraMb);
       if (peak + headroom <= gpuTotalMb) {
         return { base: base.id, rank, overBudget: false };
@@ -323,7 +354,8 @@ export function recommendMm3Config(gpuTotalMb: number,
   // Nothing fits at any rank. Offer the SMALLEST usable base at the LOWEST rank
   // — the configuration with the best chance — and say so, rather than silently
   // landing on something that cannot run.
-  const lowest = MM3_RANK_LADDER[MM3_RANK_LADDER.length - 1];
+  const ladder = rankLadder();
+  const lowest = ladder[ladder.length - 1];
   const usable = availableMm3Bases(lowest, maxFrames).filter(b => b.quality !== 'poor');
   const smallest = usable.reduce<Mm3BaseInfo | null>(
     (best, b) => (!best || b.peakMb < best.peakMb ? b : best), null);
@@ -368,23 +400,46 @@ export function mm3RunName(slug: string): string {
 // recipe table or from a measurement recorded there. The Jobs form is a VIEW
 // of this object; it must never carry a second copy of these numbers.
 export const MM3_LM_DEFAULTS = {
-  rank: 256,
-  alpha: 256,
-  lr: 8e-5,
-  steps: 800,
+  // ── bghira's published SimpleTuner recipe (adopted 2026-08-23) ───────────
+  //
+  // Sources, both with full configs: the SOAD tournament
+  // (RareConcepts/soad-mm3-vanilla-20260822, simpletuner_config.json in every
+  // checkpoint) and terminusresearch/minimax-music3-lm-lora-fiona-crapple.
+  //
+  // What we ran before: r256/alpha256, lr 8e-5, Muon @ lr_scale 64, random
+  // 1500-frame crops, 800 steps, no warmup. That produced adapters with a trace
+  // of the artist over a backing track that had gone simpler and cheaper —
+  // weak identity AND a damaged base. The arithmetic says why: he runs 42
+  // epochs over 45 tracks, we ran 61 over 13, at four times the rank.
+  //
+  // The full reasoning, and the two of his settings we deliberately do NOT
+  // copy, are on MM3LmTrainArgs in engine/src/train/mm3-lm-train-run.h.
+  rank: 64,
+  alpha: 64,
+  lr: 5e-5,
+  steps: 1000,
   saveEvery: 100,
-  warmup: 0,
+  /** His lr_warmup_steps. Note step 1 still runs at lr 0 — the shared schedule
+   *  is 0-based, which costs one step out of a thousand. */
+  warmup: 50,
   gradAccum: 1,
   seed: 42,
-  /** Requires random crops — with `beginning` this trains intros only, which
-   *  is exactly what went wrong in the lm2 run. */
-  maxFrames: 1500,
-  cropMode: 'random' as 'random' | 'beginning',
-  /** Muon, not AdamW, for two measured reasons: AdamW's second momentum buffer
-   *  does not FIT at rank 256 on a 32 GB card, and Muon's normalised update
-   *  makes an AdamW learning rate meaningless. 64 is the best of {1,4,16,64}
-   *  measured over 50 steps — not a tuned optimum. */
-  optimizer: 'muon' as 'muon' | 'adamw',
+  /** 4096 frames = 164 s. With cropMode `beginning` this is his
+   *  `minimax_music_lm_max_frames: 0` — the whole track where it fits, and
+   *  otherwise truncated FROM THE START. */
+  maxFrames: 4096,
+  /** `beginning` is now correct, not the trap it used to be. It was a trap at
+   *  maxFrames 1500, where it meant "the first 60 seconds of every song" — an
+   *  intros-only trainer, which is what the lm2 run became. At 4096 frames it
+   *  is start-truncation of most of a track, and it is what keeps the lyrics in
+   *  the prompt aligned with the audio being supervised. Random crops break
+   *  that alignment on every crop with a non-zero offset. */
+  cropMode: 'beginning' as 'random' | 'beginning',
+  /** AdamW, matching `adamw_bf16`. Muon was only ever chosen because it FIT at
+   *  rank 256 (AdamW's second momentum buffer costs +2.66 GB there, +0.67 GB at
+   *  rank 64) and it made `lr` meaningless — its update is normalised, so it
+   *  needed a --muon-lr-scale that was never tuned past "best of four values". */
+  optimizer: 'adamw' as 'muon' | 'adamw',
   muonLrScale: 64,
   /** q8_0, not f16 — see the note on Mm3TrainModels. Same step time since the
    *  cpy-q-occupancy patch, ~8.5 GB less resident, and therefore the only one
@@ -405,6 +460,9 @@ export const MM3_LM_DEFAULTS = {
    *  windowed crops fix the pacing. `zero` is kept only to reproduce an older
    *  run; the two are not comparable. */
   cropAnchor: 'song' as 'song' | 'zero',
+  /** SimpleTuner's `lr_end: 4e-7` over a 5e-5 base. Our shared cosine bottomed
+   *  at 0.1 of base, running the tail of the schedule twelve times hotter. */
+  lrEndFrac: 0.008,
 } as const;
 
 // ── Arg building ────────────────────────────────────────────────────────────
@@ -451,6 +509,8 @@ export interface ResolvedMm3TrainLmOptions {
   datasetName: string;
   basePrecision: Mm3BasePrecision;
   cropAnchor: 'song' | 'zero';
+  /** Cosine floor as a fraction of lr (SimpleTuner's lr_end / lr). */
+  lrEndFrac: number;
   /** Mid-run audio previews. Undefined = off; the runner resolves the plan. */
   preview?: Mm3PreviewOptions;
   /** Set by the runner when relaunching a paused run — never by a route. */
@@ -470,6 +530,7 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
     '--rank', String(o.rank),
     '--alpha', String(o.alpha),
     '--lr', String(o.lr),
+    '--lr-end-frac', String(o.lrEndFrac),
     '--steps', String(o.steps),
     '--save-every', String(o.saveEvery),
     '--warmup', String(o.warmup),

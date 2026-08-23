@@ -28,12 +28,17 @@
 
 // Side-Step's lr_lambda (train_lm.py:268-272) with L6(b) applied:
 // `step`, NOT `step + 1` — lr == 0 at optimizer step 0.
-static inline float lm_lr_lambda(int step, int total, int warmup) {
+//
+// `floor` is the fraction of base_lr the cosine bottoms out at. 0.1 is
+// Side-Step's and stays the default for every existing caller; the MM3 LM
+// trainer lowers it to match SimpleTuner's `lr_end`, which runs the tail of the
+// schedule an order of magnitude colder than we did.
+static inline float lm_lr_lambda(int step, int total, int warmup, float floor = 0.1f) {
     if (warmup > 0 && step < warmup) {
         return (float) step / (float) warmup;
     }
     const float p = (float) (step - warmup) / (float) std::max(1, total - warmup);
-    return 0.1f + 0.9f * 0.5f * (1.0f + cosf(3.14159265358979f * p));
+    return floor + (1.0f - floor) * 0.5f * (1.0f + cosf(3.14159265358979f * p));
 }
 
 // ─── per-parameter update rule (2026-07-30) ─────────────────────────────────
@@ -124,6 +129,9 @@ struct LmOptim {
     ggml_tensor * t_gnorm2   = nullptr;  // [1] readback only
 
     float base_lr      = 1e-4f;
+    /** Cosine floor as a fraction of base_lr. 0.1 is Side-Step's; the MM3 LM
+     *  trainer sets it from --lr-end-frac to match SimpleTuner's lr_end. */
+    float lr_floor     = 0.1f;
     float weight_decay = 0.01f;
     float grad_clip    = 1.0f;
     int   total_steps  = 1;
@@ -452,7 +460,7 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
     }
 
     // (c) the update, per parameter, by rule
-    const float lr_now = o->base_lr * lm_lr_lambda(o->opt_step, o->total_steps, o->warmup_steps);
+    const float lr_now = o->base_lr * lm_lr_lambda(o->opt_step, o->total_steps, o->warmup_steps, o->lr_floor);
     const float mu_wd  = (o->muon.wd >= 0.0f) ? o->muon.wd : o->weight_decay;
     for (size_t j = 0; j < o->acc.size(); j++) {
         ggml_tensor * g = c ? ggml_mul(ctx, o->acc[j], c) : o->acc[j];  // [1] broadcasts
