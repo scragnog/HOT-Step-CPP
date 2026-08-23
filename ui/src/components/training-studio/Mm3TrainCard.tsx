@@ -48,6 +48,7 @@ interface FormState {
   gradAccum: number;
   seed: number;
   trigger: string;
+  triggerPrepend: boolean;
   basePrecision: string;
   holdout: number;
   evalEvery: number;
@@ -124,6 +125,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     gradAccum: status.defaults.gradAccum ?? 1,
     seed: status.defaults.seed ?? 42,
     trigger: trigger ?? '',
+    triggerPrepend: status.defaults.triggerPrepend !== false,
     // The RECOMMENDED base, not the global default: the default was chosen on a
     // 32 GB card and on a 12 GB one it is simply wrong. The server picks the
     // highest-fidelity base that fits THIS GPU, and falls back to the default
@@ -196,7 +198,9 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         gradAccum: form.gradAccum, seed: form.seed,
         basePrecision: form.basePrecision, holdout: form.holdout, evalEvery: form.evalEvery,
         cropAnchor: form.cropAnchor,
-        ...(form.trigger.trim() ? { trigger: form.trigger.trim() } : {}),
+        ...(form.trigger.trim()
+          ? { trigger: form.trigger.trim(), triggerPrepend: form.triggerPrepend }
+          : {}),
         ...(form.regDatasetId ? {
           regularisation: {
             datasetId: form.regDatasetId,
@@ -298,10 +302,22 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 {t('trainingStudio.mm3.trigger', 'Trigger word')}
               </span>
               <input className={INPUT} value={form.trigger} onChange={e => set('trigger', e.target.value)} />
-              <span className="text-[10px] text-zinc-500 leading-snug">
-                {t('trainingStudio.mm3.triggerHint',
-                  'Recorded in the adapter sidecar so the picker can show it. Your captions should already '
-                  + 'contain it — this does not add it to them.')}
+            </label>
+            {/* A sibling, not a child: a label nested inside a label is invalid
+                and clicking the checkbox would focus the text input instead. */}
+            <label className="flex items-start gap-2 mt-2 text-[11px] text-zinc-600 dark:text-zinc-300">
+              <input type="checkbox" className="mt-0.5" checked={form.triggerPrepend}
+                onChange={e => set('triggerPrepend', e.target.checked)}
+                disabled={!form.trigger.trim()} />
+              <span>
+                {t('trainingStudio.mm3.triggerPrepend', 'Train the trigger')}
+                <span className="block text-[10px] text-zinc-500">
+                  {t('trainingStudio.mm3.triggerPrependHint',
+                    'Puts "trigger, " at the front of every training caption, in memory — your files '
+                    + 'are not touched. Leave this ON. With it off the word is only recorded in the '
+                    + 'adapter sidecar and never learned, so typing it at render time bolts an unseen '
+                    + 'token sequence onto your prompt and makes the result WORSE, not better.')}
+                </span>
               </span>
             </label>
 

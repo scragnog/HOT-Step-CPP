@@ -1257,7 +1257,8 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 //       [--rank 64] [--alpha 64] [--lr 5e-5] [--lr-end-frac 0.008]
 //       [--steps 1000] [--save-every 100] [--warmup 50]
 //       [--max-frames 4096] [--crop-mode beginning|random] [--grad-accum 1]
-//       [--optimizer adamw|muon] [--muon-*] [--trigger word] [--seed 42]
+//       [--optimizer adamw|muon] [--muon-*] [--trigger word] [--trigger-prepend]
+//       [--seed 42]
 //       [--crop-anchor song|zero] [--resume <state>] [--pause-file <path>]
 //       [--no-pause]
 //       [--reg-manifest <json> --reg-captions <dir> --reg-codes <dir>
@@ -1346,6 +1347,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--grad-accum"))    a.grad_accum   = atoi(next("--grad-accum"));
         else if (!strcmp(argv[i], "--seed"))          a.seed         = atoi(next("--seed"));
         else if (!strcmp(argv[i], "--trigger"))       a.trigger      = next("--trigger");
+        else if (!strcmp(argv[i], "--trigger-prepend")) a.trigger_prepend = true;
         else if (!strcmp(argv[i], "--dataset-name"))  a.dataset_name = next("--dataset-name");
         else if (!strcmp(argv[i], "--optimizer"))     a.optimizer    = next("--optimizer");
         else if (!strcmp(argv[i], "--muon-lr-scale")) a.muon_lr_scale = (float) atof(next("--muon-lr-scale"));

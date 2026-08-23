@@ -54,9 +54,22 @@ export interface Mm3TrainLmRequest {
   cropMode?: 'random' | 'beginning';
   optimizer?: 'muon' | 'adamw';
   muonLrScale?: number;
-  /** Recorded in the adapter sidecar so the picker can show it. Not prepended
-   *  to captions here — the dataset's own captions already carry it. */
+  /** The trigger word. Recorded in the adapter sidecar either way; whether it is
+   *  TRAINED depends on `triggerPrepend`. */
   trigger?: string;
+  /** Prepend `<trigger>, ` to every training caption at prompt assembly, which
+   *  is what actually TRAINS the trigger. Default true.
+   *
+   *  It used to be impossible: `trigger` was recorded in the adapter sidecar and
+   *  nothing put it in the prompt, so unless the captions already contained it
+   *  the word was never learned. The first SOAD run shipped that way — 14 MOSS
+   *  captions, none containing `soad_toxicity` — and rendering with the trigger
+   *  then bolted an UNSEEN token sequence onto an in-distribution prompt. It
+   *  measurably hurt: the same checkpoint sounded better with the trigger
+   *  removed, and tolerated full adapter strength instead of half.
+   *
+   *  Captions on disk are untouched; the injection happens in memory. */
+  triggerPrepend?: boolean;
   /** `song` (default) presents each crop at its TRUE position in the track;
    *  `zero` is the pre-2026-08-23 convention where every crop claimed to be the
    *  opening, which is a train/inference mismatch (generation always starts at

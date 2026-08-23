@@ -460,6 +460,10 @@ export const MM3_LM_DEFAULTS = {
    *  windowed crops fix the pacing. `zero` is kept only to reproduce an older
    *  run; the two are not comparable. */
   cropAnchor: 'song' as 'song' | 'zero',
+  /** ON, and it did not used to exist. A trigger that is only in the sidecar is
+   *  not a trigger — it is an unseen token sequence you then paste in front of
+   *  your prompts at render time, which is worse than not having one. */
+  triggerPrepend: true,
   /** SimpleTuner's `lr_end: 4e-7` over a 5e-5 base. Our shared cosine bottomed
    *  at 0.1 of base, running the tail of the schedule twelve times hotter. */
   lrEndFrac: 0.008,
@@ -521,6 +525,9 @@ export interface ResolvedMm3TrainLmOptions {
   holdout: number;
   evalEvery: number;
   trigger: string;
+  /** Whether the trigger is injected into the training captions (and therefore
+   *  learned at all). See Mm3TrainLmRequest.triggerPrepend. */
+  triggerPrepend: boolean;
   datasetName: string;
   basePrecision: Mm3BasePrecision;
   cropAnchor: 'song' | 'zero';
@@ -565,7 +572,12 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   if (o.optimizer === 'muon') args.push('--muon-lr-scale', String(o.muonLrScale));
   args.push('--holdout', String(o.holdout));
   args.push('--eval-every', String(o.evalEvery));
-  if (o.trigger) args.push('--trigger', o.trigger);
+  if (o.trigger) {
+    args.push('--trigger', o.trigger);
+    // Without this the word is recorded and never trained — the failure the
+    // first SOAD run shipped with.
+    if (o.triggerPrepend) args.push('--trigger-prepend');
+  }
   if (o.datasetName) args.push('--dataset-name', o.datasetName);
   args.push('--crop-anchor', o.cropAnchor);
   // Prior preservation. Guarded on the whole set, not on `regEvery` alone: the

@@ -176,7 +176,28 @@ struct MM3LmTrainArgs {
     float       muon_lr_scale = 64.0f, muon_momentum = 0.95f;
     int         muon_ns_steps = 5, muon_min_dim = 16, muon_bucket = 16;
     bool        muon_nesterov = true;
-    std::string trigger;                  // recorded in the sidecar, not prepended here
+    /** The trigger word. Recorded in the adapter sidecar either way; whether it
+     *  is actually TRAINED depends on --trigger-prepend below. */
+    std::string trigger;
+    /** Prepend `<trigger>, ` to every training caption at prompt assembly.
+     *
+     *  WITHOUT THIS THE TRIGGER IS NOT TRAINED AT ALL, and that is not a
+     *  hypothetical: the first SOAD run recorded `soad_toxicity` in the sidecar,
+     *  none of the 14 MOSS-written captions contained it, and rendering with
+     *  `soad_toxicity, <caption>` therefore bolted an unseen token sequence onto
+     *  an otherwise in-distribution prompt. It measurably HURT — the same
+     *  checkpoint sounded better with the trigger removed, and supported full
+     *  adapter strength instead of half.
+     *
+     *  The injected shape is `trigger, ` at the very front of the caption's
+     *  first line, on the same line as `Global Metadata`, which is exactly what
+     *  lm_apply_tag / applyTriggerTag emit at inference. A trigger on its own
+     *  line is a different token sequence and dilutes to nothing.
+     *
+     *  Captions on disk are never modified — this happens in memory, so the
+     *  dataset stays clean and the choice is recorded in the run rather than
+     *  baked into files. */
+    bool        trigger_prepend = false;
     std::string dataset_name;
     // Per-layer gradient checkpointing. ON by default and that is not a
     // preference: the MM3 prompt is ~1,100 tokens, so even a 128-frame crop
@@ -330,6 +351,7 @@ static ggml_tensor * mm3_lm_ckpt_embed(ggml_context * ctx, LmCkptRun & r, int S)
 // verify nothing that matters.
 static bool mm3_lm_load_samples_from(const std::string & manifest, const std::string & captions_dir,
                                      const std::string & codes_dir, const std::string & lm_path,
+                                     const std::string & trigger_prefix,
                                      const MM3TrainLm & t,
                                      std::vector<MM3LmSample> * out, std::string * err) {
     struct { std::string manifest, captions_dir, codes_dir, lm_path; } a {
@@ -390,6 +412,18 @@ static bool mm3_lm_load_samples_from(const std::string & manifest, const std::st
             sm.n_frames = n_rows - 1;                        // drop the warm-up row
             sm.codes.resize((size_t) (sm.n_frames * 8));
             memcpy(sm.codes.data(), cbuf.data() + 8 * sizeof(int32_t), sm.codes.size() * sizeof(int32_t));
+            if (!trigger_prefix.empty()) {
+                // Front of the FIRST line, comma + space — the training-row shape.
+                size_t lead = caption.find_first_not_of(" \t\r\n\xEF\xBB\xBF");
+                caption = trigger_prefix + (lead == std::string::npos ? caption : caption.substr(lead));
+            }
+            if (samples.empty()) {
+                // The first assembled caption, once, so a trigger that is not
+                // actually in the prompt is visible in the log instead of being
+                // discovered weeks later by ear.
+                const std::string head = caption.substr(0, caption.find('\n'));
+                fprintf(stderr, "[mm3-lm-train] first training caption begins: %.120s\n", head.c_str());
+            }
             mm3_tokenizer_encode(tok, mm3_assemble_prompt(caption, lyrics), &sm.prompt);
             if (sm.prompt.empty() || sm.n_frames < 8) {
                 fprintf(stderr, "[mm3-lm-train] SKIP %s: empty prompt or %lld frames\n", id.c_str(),
@@ -404,7 +438,9 @@ static bool mm3_lm_load_samples_from(const std::string & manifest, const std::st
 
 static bool mm3_lm_load_samples(const MM3LmTrainArgs & a, const MM3TrainLm & t,
                                 std::vector<MM3LmSample> * out, std::string * err) {
-    return mm3_lm_load_samples_from(a.manifest, a.captions_dir, a.codes_dir, a.lm_path, t, out, err);
+    return mm3_lm_load_samples_from(a.manifest, a.captions_dir, a.codes_dir, a.lm_path,
+                                    a.trigger_prepend && !a.trigger.empty() ? a.trigger + ", " : "",
+                                    t, out, err);
 }
 
 // ── finite-difference gradient check ────────────────────────────────────────
@@ -1543,7 +1579,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     if (reg_on && rc == 0) {
         std::string rerr;
         if (!mm3_lm_load_samples_from(a.reg_manifest, a.reg_captions_dir, a.reg_codes_dir, a.lm_path,
-                                      t, &reg_samples, &rerr) || reg_samples.empty()) {
+                                      /*trigger_prefix=*/"", t, &reg_samples, &rerr)
+            || reg_samples.empty()) {
             fatal_msg = "regularisation set has no usable samples"
                       + (rerr.empty() ? std::string(" — check --reg-manifest/--reg-captions/--reg-codes")
                                       : (": " + rerr));

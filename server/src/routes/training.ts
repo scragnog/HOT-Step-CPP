@@ -1976,6 +1976,7 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       holdout:     num('holdout', D.holdout, 0, 0.5),
       evalEvery:   num('evalEvery', D.evalEvery, 0, 100000),
       trigger:     typeof b.trigger === 'string' ? b.trigger.trim() : (ds.customTag || ''),
+      triggerPrepend: b.triggerPrepend !== false,
       datasetName: ds.name || ds.slug,
       // `song` is the default and the correct convention; `zero` exists only to
       // reproduce a pre-2026-08-23 run. See Mm3TrainLmRequest.cropAnchor.
