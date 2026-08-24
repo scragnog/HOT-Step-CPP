@@ -104,6 +104,41 @@ fragments and neither had learned how a song starts or ends. It compared two
 structurally broken adapters. **Re-run it at this crop before spending 8 GB on
 f16 again.**
 
+### BF16 tensor cores (`--weights bf16`) — works, but not on a 32 GB card
+
+The trainer runs base matmuls in **F32**: `ggml_out_prod` is F32-only, so
+`lm_linear` dequantizes each weight in-graph and the GEMMs land on TF32. Lever A
+(`engine/src/train/lm-bf16.h`) feeds the raw BF16 weight to mul_mat and rewrites
+the backward's OUT_PROD nodes into MUL_MAT, reaching the tensor cores. Wired into
+`mm3-lm-train` on 2026-08-24; needs a BF16 base from
+`convert-mm3.py --components lm --quant bf16`.
+
+Measured on a 5090, matched in every other respect:
+
+| config | crop | track | step | ms/frame | peak | free |
+|---|---|---|---|---|---|---|
+| q8_0 + F32 window | 4272 | 84% | 15.50 s | 3.63 | 27.7 GB | 4.2 |
+| q8_0 + F32 window | 2496 | 49% | 10.50 s | 4.21 | 20.1 GB | 11.8 |
+| bf16 + Lever A | 2496 | 49% | **7.50 s** | 3.00 | 28.9 GB | 3.0 |
+| bf16 + Lever A | 3100 | 61% | 9.75 s | 3.15 | 30.6 GB | 1.2 |
+
+**1.4x faster at matched crop, for 9.0 GB** — 7.7 GB of which is simply the base
+being 16-bit rather than q8_0. That ceilings bf16 at ~3100 frames where q8_0
+reaches 4272, so the speed costs **23 points of track coverage**, and coverage is
+what decides whether a render sounds like a song. Per supervised frame bf16 is
+only 1.15x ahead there.
+
+**Default stays q8_0.** Pick bf16 when coverage is not the binding constraint: a
+bigger card, a shorter corpus, or a deliberate speed run.
+
+One loose thread: identical step-1 loss (3.5930 vs 3.5932) at a **29% lower
+gradient norm** (5.561 vs 7.870) is the quantizer's error appearing as gradient
+noise. Whether that matters by ear is untested.
+
+BF16 is also the SOURCE dtype of the MM3 weights — but it is not better for
+inference than f16, which keeps all 7 of BF16's mantissa bits and adds 3 more.
+Render on q8_0 as always.
+
 ### Supervising fewer positions does NOT buy VRAM
 
 Worth writing down because it is an intuitive and wrong idea. Restricting the
