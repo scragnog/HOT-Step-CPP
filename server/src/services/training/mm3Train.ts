@@ -123,6 +123,32 @@ interface Mm3BaseFacts {
 }
 
 const MM3_BASE_FACTS: Record<string, Mm3BaseFacts> = {
+  /** TRAINING ONLY, and the only base that reaches the tensor cores.
+   *
+   *  Every other base here trains through the F32 window: ggml_out_prod is
+   *  F32-only, so lm_linear dequantizes each weight to F32 in-graph and the
+   *  GEMMs run as TF32. A BF16 base lets `--weights bf16` (Lever A) feed the raw
+   *  weight to mul_mat and rewrite the backward's out_prod nodes into mul_mat,
+   *  so both directions use BF16 kernels.
+   *
+   *  MM3's published weights ARE BF16, so this is the source dtype rather than a
+   *  conversion — but it is not better for INFERENCE than f16, which keeps all
+   *  7 of BF16's mantissa bits and adds 3 more. Render on q8_0 as always.
+   *
+   *  MEASURED, and it is a bad trade on a 32 GB card. At crop 2496, matched in
+   *  every other respect: 7.5 s/step against q8_0's 10.5 (1.4x) for 29.6 GB
+   *  against 20.6 (+9.0). The base itself is 7.7 GB of that and Lever A's
+   *  in-graph transposes are the other 1.3. It ceilings at ~3100 frames with
+   *  1.2 GB to spare, where q8_0 reaches 4272 — so the speed costs 23 points of
+   *  track coverage, and coverage is the thing that decides whether a render
+   *  sounds like a song. Per supervised frame it is only 1.15x ahead there.
+   *
+   *  Pick it when coverage is NOT the binding constraint: a bigger card, a
+   *  shorter corpus, or a deliberate speed run. Its gradients are also cleaner —
+   *  identical step-1 loss to q8_0 (3.5930 vs 3.5932) at a 29% lower gradient
+   *  norm (5.561 vs 7.870), which is the quantizer's error showing up as noise —
+   *  but that has never been shown to matter by ear. */
+  'bf16':   { lossDelta: 0,      quality: 'reference', extraMb: 1336 },
   'f16':    { lossDelta: 0,      quality: 'reference', extraMb: 1047 },
   'q8_0':   { lossDelta: 0.0002, quality: 'excellent' },
   'Q6_K':   { lossDelta: 0.003,  quality: 'excellent' },
@@ -423,12 +449,33 @@ export const MM3_LM_DEFAULTS = {
   rank: 128,
   alpha: 128,
   lr: 8e-5,
-  steps: 2500,
-  saveEvery: 250,
-  /** Preview cadence, defaulted to saveEvery: a preview renders FROM a
-   *  checkpoint, so any other value either renders one twice or skips one you
-   *  could have heard. Overridable in the form. */
-  previewEverySteps: 250,
+  /** 1200, down from 2500, because a step is no longer the same size. At the
+   *  128-frame crop a step supervised 5 seconds; at 4272 it supervises 171, so
+   *  2500 steps went from 320k supervised frames to 10.7M — 312 epochs over 8
+   *  songs, each now covering 85% of every track instead of 2.5%.
+   *
+   *  It does NOT drop as far as the 33x that arithmetic suggests, and the reason
+   *  is worth keeping: AdamW travels roughly `lr` in parameter space per step
+   *  regardless of how much data backs the gradient, so the adapter still needs
+   *  updates to move. What DID change is that the gradients are far less noisy,
+   *  so there is less noise regularising the fit — expect the ear-optimum
+   *  earlier in step count and harder overfitting past it.
+   *
+   *  1200 steps x ~15.5 s is ~5.2 hours. NOT tuned by ear yet; it is reasoning
+   *  from the step-size change, not a measured optimum. */
+  steps: 1200,
+  /** 100, so a 1200-step run still yields 12 checkpoints to audition. At 250 it
+   *  would yield four, and the ear-optimum has never landed on a round number. */
+  saveEvery: 100,
+  /** OFF: previews run on the clock instead (previewEveryMinutes). A preview
+   *  costs a pause, a full engine restart and a render — roughly a minute — so
+   *  pinning it to the checkpoint cadence tied preview cost to a number chosen
+   *  for a completely different reason. On a clock the overhead is a known,
+   *  fixed fraction of the run whatever the step size does next. */
+  previewEverySteps: 0,
+  /** Every 10 minutes: ~31 previews over a 5.2-hour run at ~1 minute each, so
+   *  about 10% overhead for a continuous read on how the adapter is arriving. */
+  previewEveryMinutes: 10,
   /** His lr_warmup_steps. Note step 1 still runs at lr 0 — the shared schedule
    *  is 0-based, which costs one step out of a thousand. */
   warmup: 50,
@@ -667,6 +714,12 @@ export interface ResolvedMm3TrainLmOptions {
 
 export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   const m = resolveMm3TrainModels(o.basePrecision);
+  // DERIVED, not a separate knob. Lever A needs a BF16-native base and a BF16
+  // base has no other reason to be selected — it is the same size as f16 and
+  // worse for inference — so the two are one decision. Offering them separately
+  // would only create two ways to ask for a run the engine then falls back out
+  // of, with a warning the user has to notice.
+  const weights = o.basePrecision === 'bf16' ? 'bf16' : 'f32-window';
   const args = [
     'mm3-lm-train', '--jsonl',
     '--lm', m.lm,
@@ -687,6 +740,7 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
     '--max-frames', String(o.maxFrames),
     '--crop-mode', o.cropMode,
     '--optimizer', o.optimizer,
+    '--weights', weights,
   ];
   if (o.cropMode === 'structured') {
     args.push('--crop-start-frac', String(o.cropStartFrac));

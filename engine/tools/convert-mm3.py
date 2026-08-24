@@ -443,6 +443,22 @@ QUANT = "quant"    # q8_0 under --quant q8_0, f16 otherwise
 F16_MAX = 65504.0
 
 
+def to_bf16(arr):
+    """F32 -> BF16 bytes, round-to-nearest-even.
+
+    A plain truncation of the low 16 bits biases every weight toward zero, which
+    over 6.95 B parameters is a systematic shift rather than noise. RNE adds the
+    rounding term before the shift: 0x7FFF, plus one more when the retained LSB
+    is already set, which is what breaks the exact-half tie toward even.
+
+    NaN cannot survive truncation intact (the payload is in the low bits), but a
+    weight file containing NaN is broken well before this point.
+    """
+    u = np.ascontiguousarray(arr, dtype=np.float32).view(np.uint32)
+    rounded = (u + 0x7FFF + ((u >> 16) & 1)) >> 16
+    return rounded.astype(np.uint16)
+
+
 class Bundle:
     """Accumulates (name, array, policy) and writes one GGUF."""
 
@@ -463,12 +479,25 @@ class Bundle:
         w = gguf.GGUFWriter(path, self.arch)
         for fn, args in self.kv:
             getattr(w, fn)(*args)
-        n = {"f32": 0, "f16": 0, "q8_0": 0}
+        n = {"f32": 0, "f16": 0, "bf16": 0, "q8_0": 0}
         for name, arr, policy in self.tensors:
             ne0 = arr.shape[-1] if arr.ndim else 1
             if policy == F32 or arr.ndim < 2:
                 w.add_tensor(name, arr)
                 n["f32"] += 1
+                continue
+            if quant == "bf16":
+                # No F16_MAX escape hatch and none needed: BF16 carries F32's
+                # exponent, so the overflow that forces an F32 promotion below
+                # cannot happen. Lever A also requires EVERY projection to be
+                # BF16 — lm_bf16_base_is_bf16() checks all 7 per layer and falls
+                # back to the F32 window if even one is not — so a per-tensor
+                # promotion here would silently disable the thing this mode
+                # exists to enable.
+                w.add_tensor(name, to_bf16(arr),
+                             raw_shape=arr.shape,
+                             raw_dtype=gguf.GGMLQuantizationType.BF16)
+                n["bf16"] += 1
                 continue
             peak = float(np.abs(arr).max()) if arr.size else 0.0
             if peak > F16_MAX:
@@ -494,7 +523,8 @@ class Bundle:
         w.close()
         size = os.path.getsize(path) / 1e9
         log(f"wrote {os.path.basename(path)}: {len(self.tensors)} tensors "
-            f"({n['f32']} F32, {n['f16']} F16, {n['q8_0']} Q8_0), {size:.2f} GB")
+            f"({n['f32']} F32, {n['f16']} F16, {n['bf16']} BF16, {n['q8_0']} Q8_0), "
+            f"{size:.2f} GB")
 
 
 def short(path):
@@ -1154,7 +1184,13 @@ def main():
     ap.add_argument("--out", required=True, metavar="DIR", help="output directory")
     ap.add_argument("--components", default=",".join(ALL_COMPONENTS),
                     help=f"comma list of {','.join(ALL_COMPONENTS)} (default: all)")
-    ap.add_argument("--quant", default="f16", choices=("f16", "q8_0"))
+    ap.add_argument("--quant", default="f16", choices=("f16", "bf16", "q8_0"),
+                    help="f16 (default) or q8_0 for inference; bf16 for TRAINING "
+                         "only — `ace-train mm3-lm-train --weights bf16` needs a "
+                         "BF16-native base to reach the tensor cores, and falls "
+                         "back to the slower F32 window on anything else. A bf16 "
+                         "file is the same size as f16 and there is no reason to "
+                         "render from it.")
     ap.add_argument("--force", action="store_true",
                     help="overwrite existing output files (default: skip)")
     ap.add_argument("--tokenizer", metavar="PATH",

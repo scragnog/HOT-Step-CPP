@@ -299,6 +299,19 @@ struct MM3LmTrainArgs {
     // gives S > 1,200 and a naive fwd+bwd retains ~18 GB of activations on top
     // of a 16 GB f16 base. Measured: it spills into WDDM shared memory and a
     // step takes 38 s that should take under one.
+    /** Lever A. `bf16` feeds the raw BF16 weight to mul_mat to reach the tensor
+     *  cores; `f32-window` is the shipped path, which dequantizes each weight to
+     *  F32 in-graph because ggml_out_prod is F32-only.
+     *
+     *  Requires CUDA (only ggml-cuda carries engine/patches/bf16-out-prod.patch)
+     *  AND a BF16-native base (mm3-lm-bf16.gguf, from convert-mm3.py --quant
+     *  bf16). Both are checked below and FALL BACK with a warning rather than
+     *  failing, because a run that silently ran F32 under a bf16 label is worse
+     *  than one that says so.
+     *
+     *  It CHANGES THE TRAINED WEIGHTS: activation gradients are BF16-rounded at
+     *  every layer. That is the trade, and it is recorded in the run log. */
+    std::string weights    = "f32-window";   // f32-window | bf16
     bool        ckpt       = true;
     int         ckpt_chunk = 128;
 
@@ -1407,15 +1420,49 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // the chunked CE head keeps the [16389, chunk] logits off the peak too.
     // The head override is what makes the second half work for MM3: an UNTIED
     // head, scored only over [eos_audio, semantic_offset + semantic_size).
+    // ── Lever A (--weights bf16) ────────────────────────────────────────────
+    //
+    // Resolved BEFORE the graph is built, and it falls back rather than failing.
+    // Neither gate has a graceful path further in: on a non-CUDA backend the
+    // BF16 out_prod patch is absent and ggml would GGML_ABORT mid-backward, and
+    // on a non-BF16 base the surgery has no weights to rewrite. `weights_used`
+    // (not a.weights) is what gets reported, so a fallback is never mislabelled
+    // as the bf16 run it was not.
+    bool        weights_bf16 = (a.weights == "bf16");
+    std::string weights_used = a.weights;
+    if (weights_bf16) {
+        std::string why;
+        if (strncmp(ggml_backend_name(t.lm.backend), "CUDA", 4) != 0) {
+            why = std::string("BF16 weights require CUDA (only ggml-cuda carries the BF16 out_prod patch) "
+                              "— falling back to f32-window; this run is on ")
+                + ggml_backend_name(t.lm.backend);
+        } else if (!lm_bf16_base_is_bf16(t.lm)) {
+            why = std::string("BF16 weights require a BF16-native base — falling back to f32-window; ")
+                + a.lm_path + " loads its projections as " + lm_bf16_base_proj_type_name(t.lm)
+                + ". Build one with: python engine/tools/convert-mm3.py --components lm --quant bf16";
+        }
+        if (!why.empty()) {
+            fprintf(stderr, "[mm3-lm-train] WARNING: %s\n", why.c_str());
+            weights_bf16 = false;
+            weights_used = "f32-window";
+        }
+    }
+    fprintf(stderr, "[mm3-lm-train] base matmuls: %s\n",
+            weights_bf16 ? "bf16 (tensor cores, Lever A)"
+                         : "f32-window (weights dequantized to F32 in-graph)");
+    jl("{\"type\":\"weights\",\"mode\":\"%s\"}", weights_used.c_str());
+
     LmCkptState ckpt_st;
     LmCkptRun   ckpt_run;
     MM3EmbedCtx embed_ctx;
     if (a.ckpt) {
-        // Quantized bases allowed: the default lm_linear path casts every
-        // weight to F32 in-graph, so the backward never touches the quantized
-        // tensor. Lever A is not used here, which is the case where it would
-        // not hold.
-        if (!lm_ckpt_check_base(&t.lm, &err, /*allow_quantized=*/true)) {
+        // Quantized bases are allowed ONLY on the f32-window path, where
+        // lm_linear casts every weight to F32 in-graph so the backward never
+        // sees the quantized tensor. Under Lever A the raw weight goes straight
+        // to mul_mat, so a quantized one would hit the transpose path that
+        // block-quantized types cannot take — hence the gate above, which has
+        // already forced weights_bf16 off unless every projection is BF16.
+        if (!lm_ckpt_check_base(&t.lm, &err, /*allow_quantized=*/!weights_bf16)) {
             fprintf(stderr, "[mm3-lm-train] %s\n", err.c_str());
             lm_lora_detach(&lora, &t.lm);
             lm_lora_free(&lora);
@@ -1423,7 +1470,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             return 1;
         }
         LmCkptCfg cc;
-        cc.chunk     = a.ckpt_chunk;
+        cc.chunk        = a.ckpt_chunk;
+        cc.weights_bf16 = weights_bf16;                 // Lever A
         cc.rank_mask = t_rankmask;
         cc.s_max     = (int) S_max;
         cc.layer_lo  = 0;

@@ -153,8 +153,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     // Previews default OFF. They are the fastest way to learn whether a run is
     // worth finishing, but each one costs about a minute, so opting in is the
     // user's call rather than a surprise on the clock.
-    previewEverySteps: status.defaults.previewEverySteps ?? status.defaults.saveEvery ?? 250,
-    previewEveryMinutes: 0,
+    previewEverySteps: status.defaults.previewEverySteps ?? 0,
+    previewEveryMinutes: status.defaults.previewEveryMinutes ?? 10,
     previewSeconds: 24,
     previewSeed: 424242,
     previewCaption: '',

@@ -230,6 +230,13 @@ static void print_usage(void) {
             "                randomises the rest: [--crop-start-frac 0.2]\n"
             "                [--crop-end-frac 0.2]. Costs nothing - same crop length,\n"
             "                same memory.\n"
+            "                [--weights f32-window|bf16] default f32-window. `bf16` is\n"
+            "                Lever A: the raw BF16 weight goes to mul_mat and the\n"
+            "                backward's out_prod nodes are rewritten to mul_mat, so both\n"
+            "                directions reach the tensor cores instead of TF32. Needs CUDA\n"
+            "                and a BF16-native base (convert-mm3.py --quant bf16); falls\n"
+            "                back with a warning otherwise. It CHANGES the trained weights\n"
+            "                — activation gradients are BF16-rounded at every layer.\n"
             "                [--ckpt-segments N] gradient checkpointing over the block stack.\n"
             "                Peak attention is n_blk*n_heads*S^2*4 B, so crop 2584 (30 s) needs\n"
             "                ~30.8 GB monolithic and is impossible without this; 6 segments\n"
@@ -1358,6 +1365,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--warmup"))        a.warmup       = atoi(next("--warmup"));
         else if (!strcmp(argv[i], "--max-frames"))    a.max_frames   = atoll(next("--max-frames"));
         else if (!strcmp(argv[i], "--crop-mode"))     a.crop_mode    = next("--crop-mode");
+        else if (!strcmp(argv[i], "--weights"))       a.weights      = next("--weights");
         else if (!strcmp(argv[i], "--crop-start-frac")) a.crop_start_frac = atof(next("--crop-start-frac"));
         else if (!strcmp(argv[i], "--crop-end-frac"))   a.crop_end_frac   = atof(next("--crop-end-frac"));
         else if (!strcmp(argv[i], "--crop-anchor"))   a.crop_anchor  = next("--crop-anchor");
@@ -1423,6 +1431,10 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     }
     if (a.crop_mode != "random" && a.crop_mode != "beginning" && a.crop_mode != "structured") {
         fprintf(stderr, "ace-train mm3-lm-train: --crop-mode must be random, beginning or structured\n");
+        return 2;
+    }
+    if (a.weights != "f32-window" && a.weights != "bf16") {
+        fprintf(stderr, "ace-train mm3-lm-train: --weights must be f32-window or bf16\n");
         return 2;
     }
     if (a.crop_start_frac < 0.0 || a.crop_end_frac < 0.0

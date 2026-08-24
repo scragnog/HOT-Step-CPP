@@ -58,7 +58,8 @@ export interface Mm3Status {
   /** previewEverySteps rides along so the form can default the preview cadence
    *  to the checkpoint cadence without hardcoding a second copy of it. */
   defaults: Mm3TrainLmRequest & { maxFrames: number; cropMode: string;
-                                  previewEverySteps?: number };
+                                  previewEverySteps?: number;
+                                  previewEveryMinutes?: number };
   /** Datasets usable as a prior-preservation corpus: they have RVQ codes and
    *  are not this one. Absent on an older server. */
   regCandidates?: Array<{ id: string; name: string; songs: number }>;
