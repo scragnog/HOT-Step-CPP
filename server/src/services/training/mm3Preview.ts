@@ -106,7 +106,8 @@ interface ManifestRow { id: string; filename: string; lyrics: string }
  *  rows. Picking the preview caption off the raw manifest would, on any dataset
  *  with a skip near the end, quietly preview a song the model was TRAINED on,
  *  which is the one thing a held-out preview must not do. */
-function usableRows(manifest: string, captionsDir: string, codesDir: string): ManifestRow[] {
+function usableRows(manifest: string, captionsDir: string, codesDir: string,
+                    requireCaption = true): ManifestRow[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(fs.readFileSync(manifest, 'utf-8'));
@@ -123,7 +124,11 @@ function usableRows(manifest: string, captionsDir: string, codesDir: string): Ma
     const filename = typeof r?.filename === 'string' ? r.filename : '';
     if (!id || !filename) continue;
     const stem = filename.replace(/\.[^.]*$/, '');
-    if (!fs.existsSync(path.join(captionsDir, `${stem}.mm3.txt`))) continue;
+    // A per-song caption is only REQUIRED when there is no shared one. Demanding
+    // it unconditionally returned an empty list for every dataset trained from
+    // _shared-caption.txt, which silently disabled previews for exactly the
+    // workflow that is now the default.
+    if (requireCaption && !fs.existsSync(path.join(captionsDir, `${stem}.mm3.txt`))) continue;
     if (!fs.existsSync(path.join(codesDir, `${id}.codes`))) continue;
     out.push({ id, filename, lyrics: typeof r?.lyrics === 'string' ? r.lyrics : '' });
   }
@@ -170,6 +175,9 @@ export function planMm3Previews(o: {
   outDir: string;
   holdout: number;
   trigger: string;
+  /** The dataset-wide caption, when one is in force. Used for the 'artist'
+   *  preview so a dataset with no per-song .mm3.txt still gets one. */
+  captionFile?: string;
 }): Mm3PreviewPlan | null {
   const p = o.preview;
   const everySteps = Math.max(0, Math.trunc(p?.everySteps ?? MM3_PREVIEW_DEFAULTS.everySteps));
@@ -183,10 +191,24 @@ export function planMm3Previews(o: {
   let caption = (p?.caption ?? '').trim();
   let lyrics = (p?.lyrics ?? '').trim();
   if (!caption) {
-    const rows = usableRows(o.manifest, o.captionsDir, o.codesDir);
+    // The shared caption IS the training prompt when one is in force, so the
+    // preview should be rendered with it rather than with a per-song caption the
+    // adapter never saw.
+    let shared = '';
+    if (o.captionFile) {
+      try {
+        shared = fs.readFileSync(o.captionFile, 'utf-8').trim();
+      } catch { /* unreadable — fall back to per-song below */ }
+    }
+    // Lyrics still come from a real song, and when a shared caption is in force
+    // a row does not need its own .mm3.txt to be usable.
+    const rows = usableRows(o.manifest, o.captionsDir, o.codesDir, !shared);
     const held = holdoutRows(rows, o.holdout);
     const pick = held.length ? held[0] : rows.length ? rows[rows.length - 1] : null;
-    if (pick) {
+    if (shared) {
+      caption = shared;
+      if (!lyrics && pick) lyrics = pick.lyrics;
+    } else if (pick) {
       const stem = pick.filename.replace(/\.[^.]*$/, '');
       try {
         caption = fs.readFileSync(path.join(o.captionsDir, `${stem}.mm3.txt`), 'utf-8').trim();

@@ -445,6 +445,7 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
     outDir: opts.outDir,
     holdout: opts.holdout,
     trigger: opts.trigger,
+    captionFile: opts.captionFile,
   });
   clearPause(opts.outDir);
 
@@ -453,9 +454,13 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
   // failed a run that did exactly what it was told.
   const verifyOutput = () => {
     if (opts.saveEvery <= 0) return null;
+    // LoKr writes lokr_weights.safetensors, LoRA writes a PEFT directory. Looking
+    // only for the PEFT name marked a perfectly good LoKr run as "wrote no
+    // checkpoint" with its checkpoints sitting on disk.
     const found = fs.existsSync(opts.outDir)
       && fs.readdirSync(opts.outDir).some(d =>
-        fs.existsSync(path.join(opts.outDir, d, 'adapter_model.safetensors')));
+        fs.existsSync(path.join(opts.outDir, d, 'adapter_model.safetensors'))
+        || fs.existsSync(path.join(opts.outDir, d, 'lokr_weights.safetensors')));
     return found ? null : 'mm3-lm-train finished but wrote no checkpoint';
   };
 
