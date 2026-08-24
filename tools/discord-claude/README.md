@@ -37,13 +37,19 @@ files or run commands.
 - Replies bill headless Claude Code sessions against Rob's plan; `!model
   sonnet` is the cheap mode for chatter.
 - The invocation prompt instructs: concise, technical, no local paths or
-  personal data. Session state (per-channel ids) persists in
-  `sessions.json` (gitignored).
+  personal data. Every ping is a FRESH headless session; `sessions.json`
+  records the last session id per channel purely so a reply can be traced
+  back to its transcript for token auditing.
 - Posting norm change: this bot speaks AS ITSELF (clearly a bot account),
   distinct from Rob's own posts. Rob's previous "I draft, Rob posts" norm
   still applies to Rob-authored messages.
-- To reset a channel's conversation memory: delete its entry from
-  `sessions.json` and restart.
+- Conversation memory is the last `CONTEXT_MESSAGES` (200) entries of
+  `logs/discord/<channelId>.jsonl`, rebuilt on every ping. There is no
+  session state to reset. Raising the number is the only way to widen the
+  bot's reach, and it is cheap: 200 messages costs ~12k tokens more per call
+  than 30, against a ~36k floor set by CLAUDE.md, the memory index and the
+  skill list. Resuming sessions instead was measured at $7.71 a reply and
+  removed on 2026-08-24; fresh sessions run ~$0.42 and stay flat.
 
 ## Personality
 

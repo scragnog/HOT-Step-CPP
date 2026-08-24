@@ -8,8 +8,9 @@
 //     so it inherits CLAUDE.md, memory, skills, and the docs/plans corpus.
 //     Tools are restricted to read-only (Read/Grep/Glob) — the bot can cite
 //     the scoreboard; it cannot edit files or run commands.
-//   - Per-channel session continuity via --resume (session id persisted to
-//     sessions.json beside this file).
+//   - Every ping is a FRESH headless session (no --resume). Reach comes from
+//     CONTEXT_MESSAGES worth of transcript, not from session state. Why:
+//     see the comment in runClaude().
 //   - CAN ping people back: mentions.mjs keeps a name <-> user-id roster, feeds
 //     it to Claude, and rewrites "@name" into a real mention on the way out.
 //   - `!model fable|opus|sonnet|<full-id>` (allowlisted only) switches the
@@ -95,7 +96,21 @@ function runClaude(prompt, channelId) {
       '--strict-mcp-config', '--mcp-config', JSON.stringify(path.join(HERE, 'mcp-empty.json')),
       '--max-turns', '15',
     ];
-    if (sessions[channelId]) args.push('--resume', sessions[channelId]);
+    // No --resume, deliberately. It looked free and was not.
+    //
+    // Measured 2026-08-24 on the channel that had been resuming since 21 Aug:
+    // 917k tokens of context to produce a 95-token reply, growing ~5k per
+    // ping, averaging $7.71 a reply. Idle gaps made it worse rather than
+    // better, because the 1h prompt cache expires between pings, so the first
+    // ping after lunch rewrote the entire 850k prefix at the 2x write rate.
+    //
+    // Nothing is lost by dropping it: buildContext() already rebuilds the
+    // window from the transcript log on EVERY invocation, so session history
+    // and prompt context were the same Discord messages stored twice. Fresh
+    // sessions measure ~56k flat at ~$0.42 a reply and stay there. If the bot
+    // needs to see further back, raise CONTEXT_MESSAGES; 200 messages costs
+    // ~12k tokens more than 30, which is noise against the ~36k floor that
+    // CLAUDE.md, the memory index and the skill list impose on every call.
     const child = spawn(CLAUDE_BIN, args, {
       cwd: REPO,
       shell: process.platform === 'win32', // claude is a .cmd shim on Windows
@@ -113,6 +128,9 @@ function runClaude(prompt, channelId) {
         const parsed = JSON.parse(stdout);
         const events = Array.isArray(parsed) ? parsed : [parsed];
         const done = events.findLast?.(e => e?.type === 'result') ?? events[events.length - 1];
+        // Recorded, not resumed: this is the only pointer back to the
+        // session JSONL under ~/.claude/projects/, which is where per-reply
+        // token usage can be audited after the fact.
         if (done?.session_id) { sessions[channelId] = done.session_id; saveSessions(); }
         resolve({ text: done?.result ?? '(empty result)' });
       } catch {
@@ -167,8 +185,9 @@ client.on('messageCreate', async (msg) => {
   if (!chanOk) return;
 
   // Log BEFORE the bot-skip: the bridge's own replies are part of the
-  // conversation, and omitting them is why the ping path could only stay
-  // coherent via --resume.
+  // conversation. This is what lets the ping path stay coherent with no
+  // session state at all - the bot reads its own last replies back out of
+  // the transcript like any other participant's.
   log(msg);
   if (msg.author.bot) return;
 
