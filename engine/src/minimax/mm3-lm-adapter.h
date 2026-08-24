@@ -82,16 +82,47 @@ struct MM3LmAdapterScales {
     bool operator!=(const MM3LmAdapterScales & o) const { return !(*this == o); }
 };
 
+// Which component of a module a safetensors key carries. PEFT LoRA files use
+// A/B; LyCORIS LoKr files use w1 plus either a monolithic w2 or the w2_a/w2_b
+// pair, and a scalar alpha.
+enum MM3LmAdapterComp {
+    MM3_LM_COMP_NONE = 0,
+    MM3_LM_COMP_A,
+    MM3_LM_COMP_B,
+    MM3_LM_COMP_W1,
+    MM3_LM_COMP_W2,
+    MM3_LM_COMP_W2A,
+    MM3_LM_COMP_W2B,
+    MM3_LM_COMP_ALPHA,
+};
+
 struct MM3LmAdapterPair {
     ggml_tensor * a          = nullptr;  // [in, r]  (f16)
     ggml_tensor * b          = nullptr;  // [r, out] (f16)
     float         base_scale = 1.0f;     // alpha/rank when an alpha scalar exists, else 1
+
+    // ── LoKr (dW = kron(w1, w2) * lokr_scale) ──────────────────────────────
+    // ggml extents, mirroring lm_lokr_init: w1 [in_m, out_l], w2 [in_n, out_k],
+    // w2_a [dim, out_k], w2_b [in_n, dim]. Geometry is read back off the
+    // tensors so nothing here has to parse the LyCORIS config blob.
+    ggml_tensor * w1         = nullptr;
+    ggml_tensor * w2         = nullptr;  // monolithic
+    ggml_tensor * w2_a       = nullptr;  // factorized
+    ggml_tensor * w2_b       = nullptr;
+    int64_t       in_m = 0, in_n = 0, out_l = 0, out_k = 0;
+    float         lokr_scale = 1.0f;
+    float         alpha_raw  = 0.0f;     // the file's alpha scalar, pre-division
+    bool          has_alpha  = false;
+
+    bool has_lora() const { return a && b; }
+    bool has_lokr() const { return w1 && (w2 || (w2_a && w2_b)); }
 };
 
 struct MM3LmAdapter {
     std::string      path;
     int64_t          mtime = 0;
-    int              rank  = 0;
+    int              rank  = 0;   // LoRA only; 0 for LoKr
+    bool             is_lokr = false;
     MM3LmAdapterPair mods[MM3_LM_ADAPTER_LAYERS][MM3_LM_ADAPTER_MODULES];
     int              n_loaded = 0;
 
@@ -171,6 +202,84 @@ static bool mm3_lm_adapter_parse_key(const std::string & key, int * layer, int *
     return true;
 }
 
+// LyCORIS LoKr keys, as written by lm_export_lokr:
+//   lycoris_layers_<L>_<site with dots as underscores>.lokr_w1 | .lokr_w2
+//                                                     | .lokr_w2_a | .lokr_w2_b
+//                                                     | .alpha
+static MM3LmAdapterComp mm3_lm_adapter_parse_lokr(const std::string & key, int * layer, int * module) {
+    const char * s = key.c_str();
+    if (strncmp(s, "lycoris_layers_", 15) != 0) {
+        return MM3_LM_COMP_NONE;
+    }
+    s += 15;
+    char * end = nullptr;
+    long   lyr = strtol(s, &end, 10);
+    if (end == s || *end != '_' || lyr < 0 || lyr >= MM3_LM_ADAPTER_LAYERS) {
+        return MM3_LM_COMP_NONE;
+    }
+    s = end + 1;
+    // Site name with '.' replaced by '_', so compare against the module keys
+    // under the same substitution rather than keeping a second table.
+    int mod = -1;
+    for (int m = 0; m < MM3_LM_ADAPTER_MODULES; m++) {
+        std::string want(MM3_LM_ADAPTER_MODULE_KEY[m]);
+        for (size_t i = 0; i < want.size(); i++) {
+            if (want[i] == '.') {
+                want[i] = '_';
+            }
+        }
+        if (strncmp(s, want.c_str(), want.size()) == 0 && s[want.size()] == '.') {
+            mod = m;
+            s += want.size() + 1;
+            break;
+        }
+    }
+    if (mod < 0) {
+        return MM3_LM_COMP_NONE;
+    }
+    MM3LmAdapterComp c = MM3_LM_COMP_NONE;
+    // Longest first: lokr_w2_a / lokr_w2_b must not be swallowed by lokr_w2.
+    if (strcmp(s, "lokr_w2_a") == 0) {
+        c = MM3_LM_COMP_W2A;
+    } else if (strcmp(s, "lokr_w2_b") == 0) {
+        c = MM3_LM_COMP_W2B;
+    } else if (strcmp(s, "lokr_w1") == 0) {
+        c = MM3_LM_COMP_W1;
+    } else if (strcmp(s, "lokr_w2") == 0) {
+        c = MM3_LM_COMP_W2;
+    } else if (strcmp(s, "alpha") == 0) {
+        c = MM3_LM_COMP_ALPHA;
+    } else {
+        return MM3_LM_COMP_NONE;
+    }
+    *layer  = (int) lyr;
+    *module = mod;
+    return c;
+}
+
+// One parse for both layouts. MM3_LM_COMP_NONE means "not an LM adapter key".
+static MM3LmAdapterComp mm3_lm_adapter_parse_any(const std::string & key, int * layer, int * module) {
+    bool is_a = false;
+    if (mm3_lm_adapter_parse_key(key, layer, module, &is_a)) {
+        return is_a ? MM3_LM_COMP_A : MM3_LM_COMP_B;
+    }
+    return mm3_lm_adapter_parse_lokr(key, layer, module);
+}
+
+// Where a component lands in the pair. ALPHA is a scalar, not a stored tensor,
+// so it has no slot and is handled during upload.
+static ggml_tensor ** mm3_lm_pair_slot(MM3LmAdapterPair & p, MM3LmAdapterComp c) {
+    switch (c) {
+        case MM3_LM_COMP_A:   return &p.a;
+        case MM3_LM_COMP_B:   return &p.b;
+        case MM3_LM_COMP_W1:  return &p.w1;
+        case MM3_LM_COMP_W2:  return &p.w2;
+        case MM3_LM_COMP_W2A: return &p.w2_a;
+        case MM3_LM_COMP_W2B: return &p.w2_b;
+        default:              return nullptr;
+    }
+}
+
 // Load a PEFT LM LoRA. Acquires its own backend reference (same shared pool
 // as every other module). Returns nullptr with a message on any structural
 // problem — a half-loaded adapter is worse than none (the LM-echo whitelist
@@ -196,22 +305,26 @@ static MM3LmAdapter * mm3_lm_adapter_load(const char * path, std::string * err) 
     ggml_backend_t backend = ad->bp.backend ? ad->bp.backend : ad->bp.cpu_backend;
 
     // Pass 1: count matched pairs so the ggml context can be sized exactly.
-    int matched = 0;
+    int matched = 0;   // tensor-backed components only (alpha is a scalar)
+    int n_alpha = 0;
     for (const STEntry & e : st.entries) {
-        int  layer, module;
-        bool is_a;
-        if (mm3_lm_adapter_parse_key(e.name, &layer, &module, &is_a)) {
+        int                    layer, module;
+        const MM3LmAdapterComp c = mm3_lm_adapter_parse_any(e.name, &layer, &module);
+        if (c == MM3_LM_COMP_ALPHA) {
+            n_alpha++;
+        } else if (c != MM3_LM_COMP_NONE) {
             matched++;
         }
     }
     if (matched == 0) {
         st_close(&st);
         if (err) {
-            *err = "no language_model LoRA keys found (is this a DiT adapter?)";
+            *err = "no language_model LoRA/LoKr keys found (is this a DiT adapter?)";
         }
         mm3_lm_adapter_free(ad);
         return nullptr;
     }
+    (void) n_alpha;
 
     ggml_init_params ip = {
         /*mem_size   =*/(size_t) (matched + 2) * ggml_tensor_overhead(),
@@ -223,27 +336,33 @@ static MM3LmAdapter * mm3_lm_adapter_load(const char * path, std::string * err) 
     // Pass 2: create tensors (f16, torch row-major maps directly onto ggml
     // [ne0 = innermost]): A [r, in] -> ggml [in, r]; B [out, r] -> ggml [r, out].
     for (const STEntry & e : st.entries) {
-        int  layer, module;
-        bool is_a;
-        if (!mm3_lm_adapter_parse_key(e.name, &layer, &module, &is_a)) {
-            continue;
+        int                    layer, module;
+        const MM3LmAdapterComp c = mm3_lm_adapter_parse_any(e.name, &layer, &module);
+        if (c == MM3_LM_COMP_NONE || c == MM3_LM_COMP_ALPHA) {
+            continue;   // alpha is read during upload; it gets no tensor
         }
         if (e.n_dims != 2) {
             if (err) {
-                *err = "unexpected LoRA tensor rank on " + e.name;
+                *err = "unexpected adapter tensor rank on " + e.name;
             }
             st_close(&st);
             mm3_lm_adapter_free(ad);
             return nullptr;
         }
-        // torch shape[0] = rows (r for A, out for B), shape[1] = cols
-        const int64_t ne0 = e.shape[1];  // innermost
+        // torch shape[0] = rows, shape[1] = cols; ggml ne0 is the innermost.
+        // LoRA:  A [r, in]     -> [in, r]      B [out, r]   -> [r, out]
+        // LoKr:  w1 [out_l, in_m] -> [in_m, out_l]; w2 [out_k, in_n] -> [in_n, out_k]
+        //        w2_a [out_k, dim] -> [dim, out_k];  w2_b [dim, in_n] -> [in_n, dim]
+        const int64_t ne0 = e.shape[1];
         const int64_t ne1 = e.shape[0];
         ggml_tensor * t   = ggml_new_tensor_2d(ad->ctx, GGML_TYPE_F16, ne0, ne1);
         ggml_set_name(t, e.name.c_str());
-        MM3LmAdapterPair & p = ad->mods[layer][module];
-        (is_a ? p.a : p.b) = t;
-        if (is_a) {
+        MM3LmAdapterPair & p    = ad->mods[layer][module];
+        ggml_tensor **     slot = mm3_lm_pair_slot(p, c);
+        if (slot) {
+            *slot = t;
+        }
+        if (c == MM3_LM_COMP_A) {
             ad->rank = (int) ne1;
         }
     }
@@ -262,14 +381,27 @@ static MM3LmAdapter * mm3_lm_adapter_load(const char * path, std::string * err) 
     std::vector<float>      f32;
     std::vector<ggml_fp16_t> f16;
     for (const STEntry & e : st.entries) {
-        int  layer, module;
-        bool is_a;
-        if (!mm3_lm_adapter_parse_key(e.name, &layer, &module, &is_a)) {
+        int                    layer, module;
+        const MM3LmAdapterComp c = mm3_lm_adapter_parse_any(e.name, &layer, &module);
+        if (c == MM3_LM_COMP_NONE) {
             continue;
         }
         MM3LmAdapterPair & p = ad->mods[layer][module];
-        ggml_tensor *      t = is_a ? p.a : p.b;
-        const int64_t      n = ggml_nelements(t);
+        if (c == MM3_LM_COMP_ALPHA) {
+            // A scalar (or 1-element tensor). Stored, not uploaded.
+            float av = 0.0f;
+            if (adapter_to_f32(st_data(st, e), &av, 1, e.dtype)) {
+                p.alpha_raw = av;
+                p.has_alpha = true;
+            }
+            continue;
+        }
+        ggml_tensor ** slot = mm3_lm_pair_slot(p, c);
+        ggml_tensor *  t    = slot ? *slot : nullptr;
+        if (!t) {
+            continue;
+        }
+        const int64_t n = ggml_nelements(t);
         f32.resize((size_t) n);
         if (!adapter_to_f32(st_data(st, e), f32.data(), n, e.dtype)) {
             st_close(&st);
@@ -286,6 +418,7 @@ static MM3LmAdapter * mm3_lm_adapter_load(const char * path, std::string * err) 
     st_close(&st);
 
     // Pass 4: validate pairing + count. Every module with an A must have a B.
+    int n_lokr = 0;
     for (int l = 0; l < MM3_LM_ADAPTER_LAYERS; l++) {
         for (int m = 0; m < MM3_LM_ADAPTER_MODULES; m++) {
             MM3LmAdapterPair & p = ad->mods[l][m];
@@ -296,12 +429,48 @@ static MM3LmAdapter * mm3_lm_adapter_load(const char * path, std::string * err) 
                 mm3_lm_adapter_free(ad);
                 return nullptr;
             }
-            if (p.a) {
+            // A LoKr module needs w1 and exactly one of {w2} or {w2_a, w2_b}.
+            // Half a module is worse than none: it would silently apply a
+            // different delta than the one that was trained.
+            const bool any_lokr = p.w1 || p.w2 || p.w2_a || p.w2_b;
+            if (any_lokr && !p.has_lokr()) {
+                if (err) {
+                    *err = "incomplete LoKr module at layer " + std::to_string(l) + " (need w1 plus w2 or w2_a/w2_b)";
+                }
+                mm3_lm_adapter_free(ad);
+                return nullptr;
+            }
+            if (p.has_lokr()) {
+                // scale = alpha / dim. Monolithic w2 carries no dim, but
+                // LyCORIS forces alpha == dim there, so the scale is exactly 1.
+                // Factorized: w2_a is [dim, out_k] in ggml, so dim is ne[0].
+                if (p.w2_a && p.has_alpha) {
+                    const double dim = (double) p.w2_a->ne[0];
+                    p.lokr_scale     = dim > 0.0 ? (float) (p.alpha_raw / dim) : 1.0f;
+                } else {
+                    p.lokr_scale = 1.0f;
+                }
+                // Geometry for the Kronecker apply, straight off the tensors.
+                p.in_m  = p.w1->ne[0];
+                p.out_l = p.w1->ne[1];
+                p.in_n  = p.w2 ? p.w2->ne[0] : p.w2_b->ne[0];
+                p.out_k = p.w2 ? p.w2->ne[1] : p.w2_a->ne[1];
+                n_lokr++;
+            }
+            if (p.a || p.has_lokr()) {
                 ad->n_loaded++;
             }
         }
     }
-    fprintf(stderr, "[MM3] LM adapter loaded: %s (%d modules, rank %d, %.1f MB)\n", path, ad->n_loaded, ad->rank,
-            (double) ggml_backend_buffer_get_size(ad->buf) / 1e6);
+    ad->is_lokr = n_lokr > 0;
+    if (ad->is_lokr && ad->rank != 0) {
+        if (err) {
+            *err = "adapter mixes LoRA and LoKr modules";
+        }
+        mm3_lm_adapter_free(ad);
+        return nullptr;
+    }
+    fprintf(stderr, "[MM3] LM adapter loaded: %s (%d modules, %s, %.1f MB)\n", path, ad->n_loaded,
+            ad->is_lokr ? "LoKr" : "LoRA", (double) ggml_backend_buffer_get_size(ad->buf) / 1e6);
     return ad;
 }

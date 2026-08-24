@@ -142,6 +142,26 @@ static void print_usage(void) {
             "                trains as AdamW and says nothing about it.\n"
             "                Checkpoints are PEFT dirs + a picker sidecar: point --out at\n"
             "                <adapters>/mm3-lm-adapters/<run> and they appear in the UI.\n"
+            "                [--optimizer adamw|muon|prodigy]. prodigy ESTIMATES ITS OWN\n"
+            "                step size, so there is no lr to tune: --lr becomes a pure\n"
+            "                schedule multiplier and is forced to 1.0. Costs two extra\n"
+            "                parameter-sized buffers over AdamW (s and the initial\n"
+            "                weights). [--prodigy-d0 D] initial estimate, default 1e-6;\n"
+            "                it only ever GROWS, so too small costs warm-up steps and\n"
+            "                too large cannot be undone. Prodigy cannot --resume: the\n"
+            "                state file carries m and v but not s/x0/d/r.\n"
+            "                [--adapter-type lora|lokr] default lora. lokr trains a\n"
+            "                Kronecker pair per slot (dW = kron(w1,w2)) and writes\n"
+            "                lokr_weights.safetensors instead of a PEFT dir.\n"
+            "                [--lokr-factor F] default 16 - THE size knob, and NOT the\n"
+            "                6 that train-lm defaults to: on MM3 dims factor 6 gives\n"
+            "                320.9M params (BIGGER than LoRA r64) where 16 gives 27.2M\n"
+            "                (109 MB f32, 6.4x smaller than r64). ACE 4B dims are\n"
+            "                smaller, which is why its default differs.\n"
+            "                [--lokr-dim D] [--lokr-alpha A] default 512/512, but INERT\n"
+            "                at factor 16: every w2 goes monolithic there and LyCORIS\n"
+            "                forces alpha == dim, so lokr_scale is exactly 1.\n"
+            "                [--lokr-w1-only] keep w2 monolithic-only (no w2_a/w2_b).\n"
             "  mm3-lm-loss   Teacher-forced training forward, scored. --lm --depth --codes\n"
             "                --caption [--lyrics] [--max-frames N] [--crop-offset N]\n"
             "                [--target-shift N] [--no-prompt]  (falsification diagnostics).\n"
@@ -1314,6 +1334,12 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--out"))           a.out_dir      = next("--out");
         else if (!strcmp(argv[i], "--rank"))          a.rank         = atoi(next("--rank"));
         else if (!strcmp(argv[i], "--alpha"))         a.alpha        = atoi(next("--alpha"));
+        else if (!strcmp(argv[i], "--adapter-type")) a.adapter_type = next("--adapter-type");
+        else if (!strcmp(argv[i], "--prodigy-d0")) a.prodigy_d0 = atof(next("--prodigy-d0"));
+        else if (!strcmp(argv[i], "--lokr-dim"))      a.lokr_dim     = atoi(next("--lokr-dim"));
+        else if (!strcmp(argv[i], "--lokr-alpha"))    a.lokr_alpha   = (float) atof(next("--lokr-alpha"));
+        else if (!strcmp(argv[i], "--lokr-factor"))   a.lokr_factor  = atoi(next("--lokr-factor"));
+        else if (!strcmp(argv[i], "--lokr-w1-only"))  a.lokr_decompose_both = false;
         else if (!strcmp(argv[i], "--lr"))            a.lr           = atof(next("--lr"));
         else if (!strcmp(argv[i], "--lr-end-frac"))   a.lr_end_frac  = atof(next("--lr-end-frac"));
         else if (!strcmp(argv[i], "--weight-decay"))  a.weight_decay = atof(next("--weight-decay"));
@@ -1376,8 +1402,8 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         ggml_time_init();
         return mm3_lm_fdcheck_main(a, fd_probes, fd_eps, fd_frames, fd_prompt, fd_f32);
     }
-    if (a.optimizer != "adamw" && a.optimizer != "muon") {
-        fprintf(stderr, "ace-train mm3-lm-train: --optimizer must be adamw or muon\n");
+    if (a.optimizer != "adamw" && a.optimizer != "muon" && a.optimizer != "prodigy") {
+        fprintf(stderr, "ace-train mm3-lm-train: --optimizer must be adamw, muon or prodigy\n");
         return 2;
     }
     if (a.crop_anchor != "song" && a.crop_anchor != "zero") {

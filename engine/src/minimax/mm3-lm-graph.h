@@ -150,6 +150,7 @@
 
 #include "mm3-align.h"
 #include "mm3-lm-adapter.h"
+#include "../qwen3-lora.h"
 #include "mm3-model.h"
 
 #include "backend.h"
@@ -166,7 +167,13 @@
 #include <vector>
 
 // 36 blocks x ~45 nodes + embedding/head plumbing measures ~1700; loose on purpose.
-#define MM3_LM_MAX_NODES 4096
+//
+// A LoKr adapter is the reason this is not 4096 any more. Its apply costs ~11
+// nodes per module against a LoRA's 3, and there are 7 modules x 36 layers, so
+// it adds ~2,000 nodes and lands around 3,700 — inside 4096, but with under 10%
+// headroom, which is not a margin worth defending. The cost of a bigger cap is
+// one pointer per slot in the node array.
+#define MM3_LM_MAX_NODES 8192
 // Attention-window quantum (design note C).
 #define MM3_LM_KV_BUCKET 256
 // MM3_MAX_BATCH_ROWS (mm3-model.h) is the MAXIMUM — the size every host-side
@@ -453,11 +460,30 @@ static ggml_tensor * mm3_lm_mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor 
     ggml_tensor * y = ggml_mul_mat(ctx, w, x);
     if (ad) {
         const MM3LmAdapterPair & p = ad->mods[layer][module];
-        if (p.a && p.b) {
+        if (p.has_lora()) {
             const float s = ad->effective(layer, module, sc);
             if (s != 0.0f) {
                 ggml_tensor * d = ggml_mul_mat(ctx, p.b, ggml_mul_mat(ctx, p.a, x));
                 y               = ggml_add(ctx, y, ggml_scale(ctx, d, s));
+            }
+        } else if (p.has_lokr()) {
+            const float s = ad->effective(layer, module, sc);
+            if (s != 0.0f) {
+                // Hand the shared apply a pair whose scale already carries this
+                // request's dial. qwen3_lokr_delta scales the kron OUTPUT, which
+                // is the same point the LoRA branch above scales, so the
+                // attn/mlp/early-mid-late sliders mean the same thing for both.
+                QwLoraPair kp;
+                kp.w1         = p.w1;
+                kp.w2         = p.w2;
+                kp.w2_a       = p.w2_a;
+                kp.w2_b       = p.w2_b;
+                kp.in_m       = p.in_m;
+                kp.in_n       = p.in_n;
+                kp.out_l      = p.out_l;
+                kp.out_k      = p.out_k;
+                kp.lokr_scale = p.lokr_scale * s;
+                y             = qwen3_lokr_delta(ctx, &kp, x, y);
             }
         }
     }

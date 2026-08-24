@@ -80,6 +80,19 @@ static bool mm3_lm_merge_apply(MM3Model * m, const MM3LmAdapter * ad, const MM3L
         }
         return false;
     }
+    // A LoKr delta is a Kronecker product, not a low-rank pair, and the loop
+    // below skips every module that has no lora_A/lora_B. Without this guard a
+    // LoKr adapter merges ZERO modules, reports success, and renders as the
+    // base model — which reads as "the adapter does nothing" and sends you
+    // debugging the training instead of the mode. Runtime mode applies LoKr
+    // properly (mm3_lm_mm -> qwen3_lokr_delta), so say so.
+    if (ad && ad->is_lokr) {
+        if (err) {
+            *err = "this is a LoKr adapter and merge mode only understands LoRA; "
+                   "use lm_adapter_mode=runtime (the default), which applies LoKr correctly";
+        }
+        return false;
+    }
     const auto t0 = std::chrono::steady_clock::now();
 
     BackendPair bp = backend_init("MM3-LM-Merge");
