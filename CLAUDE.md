@@ -106,9 +106,10 @@ only ever saw a rolling window and are lossy.
 
 | For… | Read |
 |------|------|
-| **Any maintenance task — start here** (per-domain procedures, gotchas, distilled institutional knowledge) | [.claude/skills/README.md](.claude/skills/README.md) — 15 skills (13 fact-checked + 2 MM3) |
+| **Any maintenance task — start here** (per-domain procedures, gotchas, distilled institutional knowledge) | [.claude/skills/README.md](.claude/skills/README.md) — 16 skills (13 fact-checked + 3 MM3) |
 | **MiniMax-Music3 backend** (second generation backend: engine port, /mm3 endpoints, backend registry/toggle, trap list) | [.claude/skills/mm3-backend/SKILL.md](.claude/skills/mm3-backend/SKILL.md) |
 | MM3 caption/prompt format (genre adherence) | [.claude/skills/mm3-captioning/SKILL.md](.claude/skills/mm3-captioning/SKILL.md) |
+| **Training an MM3 LM adapter** (album/artist clone: rank, steps, which checkpoint to ship, likeness-vs-coherence) | [.claude/skills/mm3-lm-adapter-training/SKILL.md](.claude/skills/mm3-lm-adapter-training/SKILL.md) |
 | **What the Discord working group said** (MM3 group: bghira, Serveurperso, testerf, Shaz…) — searchable transcripts of every channel | `node tools/discord-claude/read-log.mjs --list` — see [Discord transcripts](#discord-transcripts) |
 | Full feature catalogue (100+) | [FEATURES.md](FEATURES.md) |
 | Engine internals, CLI, request JSON, generation modes | [engine/docs/ARCHITECTURE.md](engine/docs/ARCHITECTURE.md) |

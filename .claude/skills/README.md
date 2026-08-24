@@ -30,10 +30,14 @@ file/function/string over the exact line.
 | Speed: TensorRT paths, profiling, quality/speed knobs | [engine-performance](engine-performance/SKILL.md) |
 | Anything MiniMax-Music3: engine port, /mm3 endpoints, backend toggle, MM3 debugging | [mm3-backend](mm3-backend/SKILL.md)* |
 | Format a MiniMax-Music3 caption; MM3 genre drift/adherence | [mm3-captioning](mm3-captioning/SKILL.md)* |
+| Train an MM3 LM style/album adapter; pick rank, steps, checkpoint | [mm3-lm-adapter-training](mm3-lm-adapter-training/SKILL.md)* |
 
 Feature-specific work (Stem Studio, Lyric Studio/lireek, mastering, cover art,
 VST, whisper, i18n, auth, …) starts at **project-map**'s feature table, which
 maps each feature to its route, service, UI folder, and engine piece.
+
+\* `mm3-lm-adapter-training` (added 2026-08-24) records the 6-album,
+30,000-step sweep that produced the current training recipe.
 
 \* `mm3-captioning` (added 2026-08-13) is a later addition outside the
 original thirteen's fact-check pass; its `upstream/` reference library
