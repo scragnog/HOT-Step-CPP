@@ -490,6 +490,36 @@ dropped and only a 30-line stderr tail survived, so any question asked after a
 run finished — "step 750 came out as noise, what happened at 750?" — had no
 loss curve, no Prodigy `d` and no warning left to read. Check these FIRST.
 
+## Preview history: everything before 2026-08-24 evening rendered on f16
+
+The preview renderer never pinned a base, so it rendered on the engine's
+best-first pick — f16, the one base adapters are garbled on. Fixed 8e42f8ba:
+adapter previews now pin q8_0 and record `renderBase` on the preview. A preview
+record WITHOUT that field predates the fix and is not evidence about its
+checkpoint — including "the early ones sounded fine" (small delta, little for
+the broken path to act on) and especially "the late ones are all the same
+garble" (the failure belongs to the path, so every large-delta checkpoint
+collapses onto the same output; measured pairwise spectral cosine 0.9999 across
+steps 311-1000, vs 0.896 for the same checkpoints on q8_0).
+
+## Structured crops and dataset size are COUPLED — 85/15 with no random share memorises
+
+The first structured-crop run (8 songs, crop 2496, start/end 0.85/0.15, 1000
+steps, AdamW 8e-5) hit train loss 0.0003 by step 800. That is recitation, and
+the arithmetic says why: frame-0 and flush-to-end are SINGLE positions, so
+85/15/0 collapses ~20,000 distinct random crops into **16 distinct samples**
+(2 per song), while the long crop multiplied exposure — 61 effective passes
+over the album against the ear-validated recipe's 7.8.
+
+Nested endpoints (vary E with c0=0) do NOT rescue this: a shorter prefix crop
+is contained in the longer one, so it is the same content at different lengths,
+not augmentation. When retuning, move at least one of: the random share (a
+c0=0 ANCHOR SHARE plus random remainder, not 85/15/0), the step count (~130
+steps matches the old exposure at crop 2496 on 8 songs — but warmup 50 then
+eats 38% of the run), or the corpus size. Ear evidence for where the damage
+starts: none yet; the q8_0 ladder from the memorised run is the first valid
+listen.
+
 ## A single gibberish preview is not necessarily a training fault
 
 Previews are ONE autoregressive sample at one seed. A 1-ULP logit change flips
