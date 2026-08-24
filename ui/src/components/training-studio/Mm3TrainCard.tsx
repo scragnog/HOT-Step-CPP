@@ -47,6 +47,7 @@ interface FormState {
   muonLrScale: number;
   adapterType: 'lora' | 'lokr';
   lokrFactor: number;
+  sharedCaption: string;
   gradAccum: number;
   seed: number;
   trigger: string;
@@ -126,6 +127,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     muonLrScale: status.defaults.muonLrScale ?? 64,
     adapterType: status.defaults.adapterType ?? 'lora',
     lokrFactor: status.defaults.lokrFactor ?? 6,
+    sharedCaption: status.sharedCaption ?? '',
     gradAccum: status.defaults.gradAccum ?? 1,
     seed: status.defaults.seed ?? 42,
     trigger: trigger ?? '',
@@ -200,6 +202,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         lr: form.lr, maxFrames: form.maxFrames, cropMode: form.cropMode,
         optimizer: form.optimizer, muonLrScale: form.muonLrScale,
         adapterType: form.adapterType, lokrFactor: form.lokrFactor,
+        sharedCaption: form.sharedCaption,
         gradAccum: form.gradAccum, seed: form.seed,
         basePrecision: form.basePrecision, holdout: form.holdout, evalEvery: form.evalEvery,
         cropAnchor: form.cropAnchor,
@@ -493,6 +496,26 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   <NumField label={t('trainingStudio.mm3.seed', 'Seed')} value={form.seed}
                     onChange={v => set('seed', v)} />
                 </div>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                    {t('trainingStudio.mm3.sharedCaption', 'Dataset-wide caption')}
+                  </span>
+                  <textarea className={INPUT} rows={4} value={form.sharedCaption}
+                    placeholder={'artist name, album name, genre, guitar character, vocal character, '
+                      + 'rhythm section, production character, tempo, structure'}
+                    onChange={e => set('sharedCaption', e.target.value)} />
+                  <span className="text-[10px] text-zinc-500 leading-snug">
+                    {t('trainingStudio.mm3.sharedCaptionHint',
+                      'ONE caption used for every track, and the single biggest quality lever there '
+                      + 'is. With the caption held constant across rows the adapter has nowhere to '
+                      + 'put the style except into itself, and the caption becomes the handle that '
+                      + 'summons the album. Start with the artist name so it doubles as the trigger. '
+                      + 'Aim for 60-80 tokens of comma-separated descriptors. Saved to '
+                      + '_shared-caption.txt beside the dataset. LEAVE BLANK to use per-song '
+                      + '.mm3.txt captions instead — but then every track needs one, and tracks '
+                      + 'without are skipped.')}
+                  </span>
+                </label>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">

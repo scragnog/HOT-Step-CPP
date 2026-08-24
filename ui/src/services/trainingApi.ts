@@ -34,6 +34,9 @@ export interface Mm3Status {
   codes: number;
   /** Which encoder produced them, from codes.json ('' = unknown). */
   encoder: string;
+  /** The dataset-wide caption currently in force ('' = none, so the trainer
+   *  falls back to per-song .mm3.txt and skips tracks that have none). */
+  sharedCaption?: string;
   /** Per-stage, because the two need different files. Non-empty = disable. */
   missingForCodes: string[];
   missingForTrain: string[];
@@ -128,6 +131,9 @@ export interface Mm3TrainLmRequest {
   maxFrames?: number;
   cropMode?: 'random' | 'beginning';
   optimizer?: 'muon' | 'adamw' | 'prodigy';
+  /** One caption used for EVERY track, persisted to
+   *  <dataset>/_shared-caption.txt. Empty = per-song .mm3.txt files. */
+  sharedCaption?: string;
   adapterType?: 'lora' | 'lokr';
   lokrFactor?: number;
   lokrDim?: number;

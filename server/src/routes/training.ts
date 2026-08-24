@@ -1735,9 +1735,18 @@ router.get('/datasets/:id/mm3', async (req: Request, res: Response) => {
       }
     } catch { /* engine down or CPU-only — leave it unknown */ }
 
+    // The dataset-wide caption, so the form can show what is actually in force
+    // rather than an empty box that silently means "use per-song captions".
+    let sharedCaption = '';
+    try {
+      const p = path.join(path.dirname(ds.datasetJsonPath || ''), '_shared-caption.txt');
+      if (ds.datasetJsonPath && fs.existsSync(p)) sharedCaption = fs.readFileSync(p, 'utf-8').trim();
+    } catch { /* unreadable — treat as absent */ }
+
     res.json({
       codesDir,
       codes,
+      sharedCaption,
       encoder,
       // Reported separately because the two stages need different files: the
       // codes job wants the encoders, training wants the F16 LM + depth.
@@ -1957,6 +1966,17 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
     const sharedCaptionPath = (() => {
       if (typeof b.captionFile === 'string' && b.captionFile.trim()) return b.captionFile.trim();
       const p = path.join(captionsDir, '_shared-caption.txt');
+      // A caption submitted with the job WINS and is persisted, so the file the
+      // engine reads, the preview renderer and any hand-run command all agree.
+      const typed = typeof b.sharedCaption === 'string' ? b.sharedCaption.trim() : '';
+      if (typed) {
+        try {
+          fs.writeFileSync(p, typed + '\n', 'utf-8');
+        } catch (e: any) {
+          throw new Error(`cannot write the shared caption to ${p}: ${e?.message || e}`);
+        }
+        return p;
+      }
       return fs.existsSync(p) ? p : undefined;
     })();
 
