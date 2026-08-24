@@ -1980,20 +1980,7 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       return fs.existsSync(p) ? p : undefined;
     })();
 
-    // Mid-training previews work by pausing and resuming, and Prodigy cannot
-    // resume: the state file carries m and v, but Prodigy also needs s, x0, d
-    // and r. Resuming would silently reset the step-size estimate to d0 and
-    // re-measure <g, x0-x> from the wrong origin, which reads as "the run got
-    // worse after a preview" rather than as a bug. Refuse the combination.
     const previewOpts = parseMm3PreviewOptions(b.preview);
-    if (previewOpts && optimizer === 'prodigy') {
-      res.status(400).json({
-        error: 'Mid-training previews are not available with the Prodigy optimizer: '
-             + 'Prodigy cannot resume from a pause. Choose AdamW for previews, or turn '
-             + 'previews off.',
-      });
-      return;
-    }
 
     // Resolved before the job is built so a bad regularisation corpus is a 400
     // the user can act on, not a 500 from inside the queue.

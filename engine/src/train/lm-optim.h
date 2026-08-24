@@ -121,6 +121,22 @@ struct LmOptim {
     int                    n_muon = 0;   // parameters actually on Muon
     int                    est_nodes = 0;  // sized in init, drives the graph cap
 
+    // ── Prodigy (optimizer == "prodigy") ───────────────────────────────────
+    //
+    // Estimates its own step size, so base_lr is gamma and stays at 1.0. Two
+    // extra parameter-sized buffers over AdamW: s, and x0 (the INITIAL weights,
+    // which the <g, x0 - x> numerator needs). d and r are scalars carried on
+    // the HOST between steps: computing max() and a scalar divide in-graph
+    // would need ops ggml does not have, and a 4-byte readback per step is
+    // already the pattern t_gnorm2 uses.
+    std::vector<ggml_tensor *> pg_s, pg_x0;
+    ggml_tensor * t_pnum = nullptr;  // [1] readback: sum over params of <g, x0-x>
+    ggml_tensor * t_ps1  = nullptr;  // [1] readback: sum over params of |s|
+    ggml_tensor * t_pdeps = nullptr; // [1] d*eps for the step's denominator
+    double        prodigy_d = 1e-6;  // the step-size estimate; never decreases
+    double        prodigy_r = 0.0;   // the running numerator
+    float         prodigy_d0 = 1e-6f;
+
     // scalars, allocated by the caller in its static buffer
     ggml_tensor * t_adamw    = nullptr;  // [7] {alpha,beta1,beta2,eps,wd,beta1h,beta2h}
     ggml_tensor * t_lossgrad = nullptr;  // [1] 1/grad_accum
@@ -276,8 +292,12 @@ static bool lm_optim_init(LmOptim * o, const std::vector<ggml_tensor *> & params
         ggml_init_params p = { (n + 8) * ggml_tensor_overhead(), nullptr, true };
         o->ctx_grad        = ggml_init(p);
     }
+    const bool want_prodigy = (o->optimizer == "prodigy");
     {
-        ggml_init_params p = { (2 * n + 8) * ggml_tensor_overhead(), nullptr, true };
+        // AdamW/Muon: m (+v). Prodigy: m, v, s, x0 — four per parameter, plus
+        // the two readback scalars.
+        const size_t per = want_prodigy ? 4 : 2;
+        ggml_init_params p = { (per * n + 16) * ggml_tensor_overhead(), nullptr, true };
         o->ctx_mom         = ggml_init(p);
     }
     if (!o->ctx_grad || !o->ctx_mom) {
@@ -291,6 +311,10 @@ static bool lm_optim_init(LmOptim * o, const std::vector<ggml_tensor *> & params
     o->rule.assign(n, (uint8_t) LM_RULE_ADAMW);
     o->n_muon = 0;
     const bool want_muon = (o->optimizer == "muon");
+    if (want_prodigy) {
+        o->pg_s.resize(n);
+        o->pg_x0.resize(n);
+    }
     for (size_t j = 0; j < n; j++) {
         ggml_tensor * pj = o->params[j];
         if (want_muon && lm_muon_eligible(pj, o->muon)) {
@@ -307,6 +331,10 @@ static bool lm_optim_init(LmOptim * o, const std::vector<ggml_tensor *> & params
         o->mom_v[j] = (o->rule[j] == LM_RULE_MUON)
                           ? nullptr
                           : ggml_new_tensor_2d(o->ctx_mom, GGML_TYPE_F32, pj->ne[0], pj->ne[1]);
+        if (want_prodigy) {
+            o->pg_s[j]  = ggml_new_tensor_2d(o->ctx_mom, GGML_TYPE_F32, pj->ne[0], pj->ne[1]);
+            o->pg_x0[j] = ggml_new_tensor_2d(o->ctx_mom, GGML_TYPE_F32, pj->ne[0], pj->ne[1]);
+        }
         char nm[96];
         snprintf(nm, sizeof(nm), "acc.%s", pj->name);
         ggml_set_name(o->acc[j], nm);
@@ -316,6 +344,15 @@ static bool lm_optim_init(LmOptim * o, const std::vector<ggml_tensor *> & params
             snprintf(nm, sizeof(nm), "v.%s", pj->name);
             ggml_set_name(o->mom_v[j], nm);
         }
+        // NAMES MATTER: the resume file and the x0 file key tensors BY NAME, so
+        // unnamed state all collapses onto one map entry and restores as "tensor
+        // \"\" is the wrong size".
+        if (want_prodigy) {
+            snprintf(nm, sizeof(nm), "pg_s.%s", pj->name);
+            ggml_set_name(o->pg_s[j], nm);
+            snprintf(nm, sizeof(nm), "pg_x0.%s", pj->name);
+            ggml_set_name(o->pg_x0[j], nm);
+        }
         GGML_ASSERT(ggml_are_same_shape(o->acc[j], pj));
         o->param_slot[pj] = (int) j;
     }
@@ -324,6 +361,16 @@ static bool lm_optim_init(LmOptim * o, const std::vector<ggml_tensor *> & params
     // to three shapes (352 x [512,512], 64 x [512,2432], 32 x [2432,512]) — the
     // difference between ~31k kernel launches per optimizer step and a few
     // hundred.
+    if (want_prodigy) {
+        // In ctx_mom so the existing alloc/clear covers them. ctx_mom was sized
+        // with +16 tensors of slack for exactly this.
+        o->t_pnum  = ggml_new_tensor_1d(o->ctx_mom, GGML_TYPE_F32, 1);
+        o->t_ps1   = ggml_new_tensor_1d(o->ctx_mom, GGML_TYPE_F32, 1);
+        o->t_pdeps = ggml_new_tensor_1d(o->ctx_mom, GGML_TYPE_F32, 1);
+        ggml_set_name(o->t_pnum, "prodigy.num");
+        ggml_set_name(o->t_ps1, "prodigy.s_l1");
+        ggml_set_name(o->t_pdeps, "prodigy.d_eps");
+    }
     o->muon_buckets.clear();
     if (want_muon) {
         const int cap = o->muon.bucket > 0 ? o->muon.bucket : 1;
@@ -362,6 +409,26 @@ static bool lm_optim_init(LmOptim * o, const std::vector<ggml_tensor *> & params
     ggml_backend_buffer_clear(o->buf_grad, 0);
     ggml_backend_buffer_clear(o->buf_mom, 0);  // exactly once, never again
 
+    if (want_prodigy) {
+        // x0 := the weights as they are RIGHT NOW. This runs after the clear,
+        // which would otherwise zero it, and before the first step. For a LoRA
+        // that means x0 holds A's kaiming draw and B's zeros — the numerator
+        // <g, x0 - x> is measured from wherever training actually began.
+        std::vector<float> tmp;
+        for (size_t j = 0; j < n; j++) {
+            const size_t cnt = (size_t) ggml_nelements(o->params[j]);
+            tmp.resize(cnt);
+            ggml_backend_tensor_get(o->params[j], tmp.data(), 0, cnt * sizeof(float));
+            ggml_backend_tensor_set(o->pg_x0[j], tmp.data(), 0, cnt * sizeof(float));
+        }
+        o->prodigy_d = (double) o->prodigy_d0;
+        o->prodigy_r = 0.0;
+        fprintf(stderr,
+                "[optim] prodigy: d0 %.3g, %zu parameters, +2 state buffers over AdamW; "
+                "lr is gamma (schedule only) and d sets the real step size%s",
+                (double) o->prodigy_d0, n, "\n");
+    }
+
     // Graph size. AdamW is ~6 nodes/param (392 params -> ~2400), for which 16 MB
     // was generous. Muon is ~50, and a LoKR dim512+MLP run has ~1000 parameters,
     // so both the node cap and the arena have to be derived rather than fixed —
@@ -371,7 +438,7 @@ static bool lm_optim_init(LmOptim * o, const std::vector<ggml_tensor *> & params
     // is a hard abort mid-run, and the headroom costs only address space.
     // Bucketed Muon pays ~(20 + 10*ns) per BUCKET, plus a small fixed cost per
     // parameter for the concat in and the view/scale/add/cpy out.
-    o->est_nodes = (int) (((double) n * 8.0
+    o->est_nodes = (int) (((double) n * (want_prodigy ? 24.0 : 8.0)
                            + (double) o->muon_buckets.size() * lm_muon_nodes_per_param(o->muon.ns_steps)
                            + (double) o->n_muon * 10.0)
                           * 1.25)
@@ -416,7 +483,179 @@ struct LmStepStats {
 
 // One optimizer step: global norm + clip + AdamW in a single graph, with no
 // host round-trip in the critical path. Zeroes the accumulators afterwards.
+// ── Prodigy ─────────────────────────────────────────────────────────────────
+//
+// `lr_now` is gamma_k: the SCHEDULE ONLY. Prodigy's own d carries the
+// magnitude, which is the entire point of using it.
+//
+// Built as GROUPED graphs rather than one big one. Prodigy needs ~10
+// intermediates per parameter where AdamW has a single fused node, and 504
+// parameters in one graph exhausts ggml-alloc's free-block list
+// (MAX_FREE_BLOCKS) long before the node cap matters.
+static bool lm_optim_step_prodigy(LmOptim * o, ggml_backend_sched_t sched, float lr_now, LmStepStats * out) {
+    const float  b1  = 0.9f;
+    const float  b2  = 0.999f;
+    const float  sb2 = sqrtf(b2);
+    const float  eps = 1e-8f;
+    const double d_k = o->prodigy_d;
+    const size_t n   = o->acc.size();
+    const size_t GROUP = 32;
+
+    auto tree = [](ggml_context * ctx, std::vector<ggml_tensor *> & v) -> ggml_tensor * {
+        while (v.size() > 1) {
+            std::vector<ggml_tensor *> nx;
+            nx.reserve((v.size() + 1) / 2);
+            for (size_t j = 0; j + 1 < v.size(); j += 2) {
+                nx.push_back(ggml_add(ctx, v[j], v[j + 1]));
+            }
+            if (v.size() % 2) {
+                nx.push_back(v.back());
+            }
+            v.swap(nx);
+        }
+        return v[0];
+    };
+
+    // ── pass 1: global ||g||^2, so the clip factor is a host constant ──────
+    double gn2 = 0.0;
+    for (size_t lo = 0; lo < n; lo += GROUP) {
+        const size_t hi = std::min(n, lo + GROUP);
+        ggml_init_params ip  = { o->arena.size(), o->arena.data(), true };
+        ggml_context *   ctx = ggml_init(ip);
+        if (!ctx) {
+            return false;
+        }
+        ggml_cgraph *              go = ggml_new_graph_custom(ctx, 4096, false);
+        std::vector<ggml_tensor *> sq;
+        sq.reserve(hi - lo);
+        for (size_t j = lo; j < hi; j++) {
+            sq.push_back(ggml_sum(ctx, ggml_sqr(ctx, o->acc[j])));
+        }
+        ggml_build_forward_expand(go, ggml_cpy(ctx, tree(ctx, sq), o->t_gnorm2));
+        ggml_backend_sched_reset(sched);
+        const bool ok = ggml_backend_sched_graph_compute(sched, go) == GGML_STATUS_SUCCESS;
+        ggml_free(ctx);
+        if (!ok) {
+            return false;
+        }
+        float part = 0.0f;
+        ggml_backend_tensor_get(o->t_gnorm2, &part, 0, sizeof(float));
+        gn2 += (double) part;
+    }
+    const float gnorm = (gn2 > 0.0) ? (float) sqrt(gn2) : 0.0f;
+    const float clipf = (o->grad_clip > 0.0f) ? std::min(1.0f, o->grad_clip / (gnorm + 1e-6f)) : 1.0f;
+
+    // ── pass 2: m, v, s at d_k + the two reductions ────────────────────────
+    const float dk  = (float) d_k;
+    const float dk2 = (float) (d_k * d_k);
+    double      num = 0.0, s1 = 0.0;
+    for (size_t lo = 0; lo < n; lo += GROUP) {
+        const size_t hi = std::min(n, lo + GROUP);
+        ggml_init_params ip  = { o->arena.size(), o->arena.data(), true };
+        ggml_context *   ctx = ggml_init(ip);
+        if (!ctx) {
+            return false;
+        }
+        ggml_cgraph *              go = ggml_new_graph_custom(ctx, 4096, false);
+        std::vector<ggml_tensor *> nums, l1s;
+        nums.reserve(hi - lo);
+        l1s.reserve(hi - lo);
+        for (size_t j = lo; j < hi; j++) {
+            ggml_tensor * g = (clipf != 1.0f) ? ggml_scale(ctx, o->acc[j], clipf) : o->acc[j];
+
+            // WRITE-AFTER-READ: each _new is an ancestor of its own cpy, so no
+            // write can be scheduled ahead of a node still reading the old value.
+            ggml_tensor * m_new =
+                ggml_add(ctx, ggml_scale(ctx, o->mom_m[j], b1), ggml_scale(ctx, g, (1.0f - b1) * dk));
+            ggml_tensor * v_new =
+                ggml_add(ctx, ggml_scale(ctx, o->mom_v[j], b2), ggml_scale(ctx, ggml_sqr(ctx, g), (1.0f - b2) * dk2));
+            ggml_tensor * s_new = ggml_add(ctx, ggml_scale(ctx, o->pg_s[j], sb2),
+                                           ggml_scale(ctx, g, (1.0f - sb2) * lr_now * dk2));
+
+            nums.push_back(ggml_sum(ctx, ggml_mul(ctx, g, ggml_sub(ctx, o->pg_x0[j], o->params[j]))));
+            l1s.push_back(ggml_sum(ctx, ggml_abs(ctx, s_new)));
+
+            ggml_build_forward_expand(go, ggml_cpy(ctx, m_new, o->mom_m[j]));
+            ggml_build_forward_expand(go, ggml_cpy(ctx, v_new, o->mom_v[j]));
+            ggml_build_forward_expand(go, ggml_cpy(ctx, s_new, o->pg_s[j]));
+        }
+        ggml_build_forward_expand(go, ggml_cpy(ctx, tree(ctx, nums), o->t_pnum));
+        ggml_build_forward_expand(go, ggml_cpy(ctx, tree(ctx, l1s), o->t_ps1));
+        ggml_backend_sched_reset(sched);
+        const bool ok = ggml_backend_sched_graph_compute(sched, go) == GGML_STATUS_SUCCESS;
+        ggml_free(ctx);
+        if (!ok) {
+            return false;
+        }
+        float pn = 0.0f, ps = 0.0f;
+        ggml_backend_tensor_get(o->t_pnum, &pn, 0, sizeof(float));
+        ggml_backend_tensor_get(o->t_ps1, &ps, 0, sizeof(float));
+        num += (double) pn;
+        s1  += (double) ps;
+    }
+
+    // ── d, on the host. It NEVER decreases: d is a lower bound on 1/L. ─────
+    o->prodigy_r = (double) sb2 * o->prodigy_r + (1.0 - (double) sb2) * (double) lr_now * d_k * d_k * num;
+    double d_new = d_k;
+    if (s1 > 0.0 && std::isfinite(o->prodigy_r)) {
+        const double d_hat = o->prodigy_r / s1;
+        if (std::isfinite(d_hat) && d_hat > d_new) {
+            d_new = d_hat;
+        }
+    }
+    o->prodigy_d = d_new;
+
+    // ── pass 3: the weight update at d_{k+1} ───────────────────────────────
+    {
+        const float deps = (float) d_new * eps;
+        ggml_backend_tensor_set(o->t_pdeps, &deps, 0, sizeof(float));
+    }
+    const float step = lr_now * (float) d_new;
+    for (size_t lo = 0; lo < n; lo += GROUP) {
+        const size_t hi = std::min(n, lo + GROUP);
+        ggml_init_params ip  = { o->arena.size(), o->arena.data(), true };
+        ggml_context *   ctx = ggml_init(ip);
+        if (!ctx) {
+            return false;
+        }
+        ggml_cgraph * go = ggml_new_graph_custom(ctx, 4096, false);
+        for (size_t j = lo; j < hi; j++) {
+            // t_pdeps is [1] and broadcasts (ggml_add1 is deprecated in favour
+            // of exactly this).
+            ggml_tensor * den = ggml_add(ctx, ggml_sqrt(ctx, o->mom_v[j]), o->t_pdeps);
+            ggml_tensor * upd = ggml_div(ctx, o->mom_m[j], den);
+            ggml_tensor * cur = (o->weight_decay > 0.0f)
+                                    ? ggml_scale(ctx, o->params[j], 1.0f - step * o->weight_decay)
+                                    : o->params[j];
+            ggml_build_forward_expand(go, ggml_cpy(ctx, ggml_sub(ctx, cur, ggml_scale(ctx, upd, step)), o->params[j]));
+        }
+        ggml_backend_sched_reset(sched);
+        const bool ok = ggml_backend_sched_graph_compute(sched, go) == GGML_STATUS_SUCCESS;
+        ggml_free(ctx);
+        if (!ok) {
+            return false;
+        }
+    }
+
+    // Report the EFFECTIVE step, gamma*d — reporting gamma alone would show a
+    // flat 1.0 for the whole run and tell you nothing.
+    out->lr        = step;
+    out->grad_norm = gnorm;
+    out->clip      = clipf;
+    lm_optim_zero_grad(o);
+    o->opt_step++;
+    o->opt_iter++;
+    return true;
+}
+
 static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats * out) {
+    if (o->optimizer == "prodigy") {
+        if (o->acc.empty()) {
+            return false;
+        }
+        const float g_k = o->base_lr * lm_lr_lambda(o->opt_step, o->total_steps, o->warmup_steps, o->lr_floor);
+        return lm_optim_step_prodigy(o, sched, g_k, out);
+    }
     ggml_init_params ip  = { o->arena.size(), o->arena.data(), true };
     ggml_context *   ctx = ggml_init(ip);
     if (!ctx) {

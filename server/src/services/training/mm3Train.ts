@@ -449,16 +449,19 @@ export const MM3_LM_DEFAULTS = {
    *  rank 256 (AdamW's second momentum buffer costs +2.66 GB there, +0.67 GB at
    *  rank 64) and it made `lr` meaningless — its update is normalised, so it
    *  needed a --muon-lr-scale that was never tuned past "best of four values". */
-  /** AdamW, because Prodigy cannot resume and mid-training previews are built
-   *  on pause/resume — and previews are on by default (see previewEverySteps).
+  /** Prodigy sets its own step size, so `lr` becomes a schedule multiplier only
+   *  and the trainer forces it to 1.0. On Green Day it converged to an effective
+   *  8.19e-5 against the 8e-5 tuned by hand — within 2.4%, from d0 = 1e-6 and no
+   *  guidance.
    *
-   *  Prodigy is otherwise the better default and IS selectable: it sets its own
-   *  step size, and on Green Day converged to an effective 8.19e-5 against the
-   *  8e-5 tuned by hand, within 2.4%. Making it work with previews needs the
-   *  resume format to carry s, d and r, plus x0 — and x0 never changes after
-   *  init, so it belongs in the run directory once rather than in every pause
-   *  state. That is one extra parameter-sized buffer per pause, not four. */
-  optimizer: 'adamw' as 'muon' | 'adamw' | 'prodigy',
+   *  It resumes as of resume format v2, so mid-training previews work: s, d and
+   *  r ride in the pause state and x0 lives once in the run directory (it never
+   *  changes after init, so copying it into every pause would be a parameter-
+   *  sized buffer per preview for nothing).
+   *
+   *  NOT YET VALIDATED BY EAR — its only comparison render was made on the f16
+   *  base and is void. */
+  optimizer: 'prodigy' as 'muon' | 'adamw' | 'prodigy',
   muonLrScale: 64,
   /** q8_0, not f16 — see the note on Mm3TrainModels. Same step time since the
    *  cpy-q-occupancy patch, ~8.5 GB less resident, and therefore the only one

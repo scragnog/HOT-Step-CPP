@@ -140,6 +140,40 @@ static std::string json_escape(const std::string & s);
 struct MM3LmTrainArgs {
     std::string lm_path, depth_path, manifest, captions_dir, codes_dir, out_dir;
     int         rank = 64, alpha = 64;
+
+    // ── Adapter parameterization: "lora" (default) or "lokr" ───────────────
+    //
+    // The LoKr parameterization already lives in lm-graph.h (lm_lokr_init) and
+    // lm-export.h (lm_export_lokr), shared with the ACE LM trainer. This
+    // backend only chooses it. dW = kron(w1, w2) instead of a low-rank B@A.
+    //
+    // FACTOR, NOT DIM, IS THE SIZE KNOB, and train-lm's default of 6 is WRONG
+    // HERE. Measured on MM3's dims (4096 / 1024 / 12288, 36 layers):
+    //
+    //     factor  6 -> 320.9M params (1283 MB f32)  <- BIGGER than LoRA r64
+    //     factor  8 -> 108.5M        ( 434 MB)
+    //     factor 16 ->  27.2M        ( 109 MB)      <- 6.4x smaller than r64
+    //     (LoRA r64 = 174.6M / 698 MB; r256 = 698.4M / 2793 MB)
+    //
+    // ACE's 4B LM has smaller dims, so factor 6 splits into small blocks there
+    // and into 1024x1024 blocks here. Copying that default would have shipped
+    // adapters LARGER than the LoRA they replace.
+    //
+    // At factor 16 every slot's w2 goes monolithic, and lm_lokr_init then
+    // forces a_eff = dim, making lokr_scale exactly 1.0 — so --lokr-dim and
+    // --lokr-alpha are INERT at this factor. Kept for CLI parity with train-lm
+    // and for lower factors, not because they do anything at 16.
+    /** Prodigy's initial step-size estimate. It only ever grows, so a d0 that
+     *  is too small costs a few warm-up steps; one that is too large cannot be
+     *  taken back. 1e-6 is the reference default. */
+    double      prodigy_d0          = 1e-6;
+    std::string adapter_type        = "lora";
+    int         lokr_dim            = 512;
+    float       lokr_alpha          = 512.0f;
+    int         lokr_factor         = 16;
+    bool        lokr_decompose_both = true;
+
+    bool        is_lokr() const { return adapter_type == "lokr"; }
     double      lr = 5e-5, weight_decay = 0.01, grad_clip = 1.0;
     int         steps = 1000, save_every = 100, warmup = 50;
     /** Cosine floor as a fraction of lr, i.e. SimpleTuner's `lr_end`: his
@@ -677,12 +711,42 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
     fprintf(stderr, "[mm3-fd] %s: prompt %lld (of %zu, truncated) + %lld frames = seq %lld, rank %d, eps %.3g\n",
             smp.id.c_str(), (long long) P, smp.prompt.size(), (long long) K, (long long) S, a.rank, eps);
 
-    LmLora lora;
-    if (!lm_lora_init(&lora, &t.lm, 0, c.n_layers, a.rank, (float) a.alpha, (uint64_t) a.seed,
-                      /*b_sigma=*/1e-2f, &err)) {
-        fprintf(stderr, "[mm3-fd] LoRA init failed: %s\n", err.c_str());
+    LmLora     lora;
+    const bool fd_lokr = a.is_lokr();
+    const bool fd_init_ok =
+        fd_lokr ? lm_lokr_init(&lora, &t.lm, 0, c.n_layers, a.lokr_dim, a.lokr_alpha, a.lokr_factor,
+                               a.lokr_decompose_both, (uint64_t) a.seed, &err)
+                : lm_lora_init(&lora, &t.lm, 0, c.n_layers, a.rank, (float) a.alpha, (uint64_t) a.seed,
+                               /*b_sigma=*/1e-2f, &err);
+    if (!fd_init_ok) {
+        fprintf(stderr, "[mm3-fd] %s init failed: %s\n", fd_lokr ? "LoKr" : "LoRA", err.c_str());
         mm3_train_lm_free(&t);
         return 1;
+    }
+    if (fd_lokr) {
+        // The LoKr equivalent of the LoRA path's b_sigma. lm_lokr_init zeroes w2
+        // (monolithic) or w2_b (factorized) so the delta starts at EXACTLY zero,
+        // which is right for training and useless for a gradient check: with
+        // dW = kron(w1, w2) and w2 == 0, dL/dw1 is identically zero, so a probe on
+        // w1 compares 0 against 0 and reports a pass while measuring nothing.
+        LmRng rng;
+        lm_rng_seed(&rng, (uint64_t) a.seed ^ 0xD1B54A32D192ED03ull);
+        std::vector<float> v;
+        size_t             perturbed = 0;
+        for (int l = 0; l < c.n_layers; l++) {
+            for (int sl = 0; sl < QW_LORA_NSLOTS; sl++) {
+                QwLoraPair & pr = lora.layers[l].p[sl];
+                ggml_tensor * z = pr.w2 ? pr.w2 : pr.w2_b;
+                if (!z) {
+                    continue;
+                }
+                v.assign((size_t) ggml_nelements(z), 0.0f);
+                lm_rng_fill_normal(&rng, v, 1e-2f);
+                ggml_backend_tensor_set(z, v.data(), 0, v.size() * sizeof(float));
+                perturbed++;
+            }
+        }
+        fprintf(stderr, "[mm3-fd] LoKr: perturbed %zu w2 tensors to sigma 1e-2 so the w1 gradient is not identically zero\n", perturbed);
     }
     LmOptim opt;
     opt.optimizer = "adamw";
@@ -849,6 +913,22 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
     // Probe a spread of layers, both factors and several module slots, so the
     // check also exercises the layer/slot indexing rather than one lucky spot.
     struct Probe { int layer, slot; bool is_a; };
+    // `is_a` means FIRST factor, whichever parameterization is in play:
+    //   LoRA -> A / B        LoKr -> w1 / (w2 | w2_a)
+    // Without this the probes address q.A and q.B, which are null on a LoKr
+    // pair, and grad_vec trips GGML_ASSERT on the param_slot lookup.
+    auto probe_tensor = [&](const QwLoraPair & q, bool first) -> ggml_tensor * {
+        if (q.has_lokr()) {
+            return first ? q.w1 : (q.w2 ? q.w2 : q.w2_a);
+        }
+        return first ? q.A : q.B;
+    };
+    auto probe_suffix = [&](const QwLoraPair & q, bool first) -> const char * {
+        if (q.has_lokr()) {
+            return first ? "lokr_w1" : (q.w2 ? "lokr_w2" : "lokr_w2_a");
+        }
+        return first ? "A" : "B";
+    };
     std::vector<Probe> probes;
     {
         const int layers[3] = { 0, c.n_layers / 2, c.n_layers - 1 };
@@ -874,7 +954,7 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
     std::vector<std::vector<float>> g_naive;
     for (const Probe & pr : probes) {
         const QwLoraPair & q = lora.layers[pr.layer].p[pr.slot];
-        g_naive.push_back(grad_vec(pr.is_a ? q.A : q.B));
+        g_naive.push_back(grad_vec(probe_tensor(q, pr.is_a)));
     }
 
     // Checkpointed gradients for the same probes.
@@ -898,7 +978,7 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
             if (backward_ckpt()) {
                 for (const Probe & pr : probes) {
                     const QwLoraPair & q = lora.layers[pr.layer].p[pr.slot];
-                    g_ckpt.push_back(grad_vec(pr.is_a ? q.A : q.B));
+                    g_ckpt.push_back(grad_vec(probe_tensor(q, pr.is_a)));
                 }
             } else {
                 fprintf(stderr, "[mm3-fd] checkpointed backward failed\n");
@@ -916,7 +996,7 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
     for (size_t i = 0; i < probes.size(); i++) {
         const Probe &      pr  = probes[i];
         const QwLoraPair & q   = lora.layers[pr.layer].p[pr.slot];
-        ggml_tensor *      par = pr.is_a ? q.A : q.B;
+        ggml_tensor *      par = probe_tensor(q, pr.is_a);
 
         const std::vector<float> & g = g_naive[i];
         double norm2 = 0.0;
@@ -940,7 +1020,8 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
 
         const double rel = std::abs(num - gnorm) / std::max(1e-12, gnorm);
         char         nm[64];
-        snprintf(nm, sizeof(nm), "L%d.%s.%s", pr.layer, lm_slot_peft_name(pr.slot), pr.is_a ? "A" : "B");
+        snprintf(nm, sizeof(nm), "L%d.%s.%s", pr.layer, lm_slot_peft_name(pr.slot),
+                 probe_suffix(q, pr.is_a));
         fprintf(stderr, "[mm3-fd] %-26s %10zu %13.6e %13.6e %8.3f\n", nm, g.size(), gnorm, num, rel);
         fd_rel.push_back(rel);
         if (!(rel < 0.15)) n_bad++;
@@ -1171,11 +1252,24 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
        a.optimizer == "muon" ? (double) a.muon_lr_scale : 1.0);
 
     // ── LoRA (attaches to the model) + optimizer ──
-    LmLora lora;
-    if (!lm_lora_init(&lora, &t.lm, 0, c.n_layers, a.rank, (float) a.alpha, (uint64_t) a.seed, 0.0f, &err)) {
-        fprintf(stderr, "[mm3-lm-train] LoRA init failed: %s\n", err.c_str());
+    LmLora     lora;
+    const bool want_lokr = a.is_lokr();
+    const bool init_ok =
+        want_lokr
+            ? lm_lokr_init(&lora, &t.lm, 0, c.n_layers, a.lokr_dim, a.lokr_alpha, a.lokr_factor,
+                           a.lokr_decompose_both, (uint64_t) a.seed, &err)
+            : lm_lora_init(&lora, &t.lm, 0, c.n_layers, a.rank, (float) a.alpha, (uint64_t) a.seed, 0.0f,
+                           &err);
+    if (!init_ok) {
+        fprintf(stderr, "[mm3-lm-train] %s init failed: %s\n", want_lokr ? "LoKr" : "LoRA", err.c_str());
         mm3_train_lm_free(&t);
         return 1;
+    }
+    if (want_lokr) {
+        fprintf(stderr, "[mm3-lm-train] LoKr: dim %d alpha %.0f factor %d, decompose %s\n", a.lokr_dim,
+                (double) a.lokr_alpha, a.lokr_factor, a.lokr_decompose_both ? "both" : "w1-only");
+        jl("{\"type\":\"adapter\",\"kind\":\"lokr\",\"dim\":%d,\"alpha\":%.0f,\"factor\":%d}", a.lokr_dim,
+           (double) a.lokr_alpha, a.lokr_factor);
     }
     LmOptim opt;
     opt.optimizer     = a.optimizer;
@@ -1271,6 +1365,20 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     opt.t_gnorm2     = t_gn2;
     opt.base_lr      = (float) a.lr;
     opt.lr_floor     = (float) a.lr_end_frac;
+    if (a.optimizer == "prodigy") {
+        // MUST come after the two lines above, which would otherwise overwrite it.
+        // Under Prodigy lr is GAMMA -- a schedule multiplier, not a step size --
+        // and d carries the magnitude. Leaving a hand-tuned 8e-5 here scales every
+        // step by 1e-4 and looks exactly like "Prodigy does not converge".
+        if (a.lr != 1.0) {
+            fprintf(stderr,
+                    "[mm3-lm-train] prodigy: --lr %.3g is IGNORED. Prodigy sets its own step size; "
+                    "lr is only a schedule multiplier and is forced to 1.0.\n",
+                    a.lr);
+        }
+        opt.base_lr    = 1.0f;
+        opt.prodigy_d0 = (float) a.prodigy_d0;
+    }
     opt.weight_decay = (float) a.weight_decay;
     opt.grad_clip    = (float) a.grad_clip;
     opt.total_steps  = a.steps;
@@ -1465,14 +1573,22 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         meta.saved_loss = loss;
         LmExportResult res;
         std::string    xerr;
-        if (!lm_export_peft(lora, c, meta, dir, &res, &xerr)) {
+        // LoKr writes lokr_weights.safetensors; LoRA writes a PEFT directory
+        // (adapter_config.json + adapter_model.safetensors). Same ckpt-<step>/
+        // directory, different file name — the sidecar below has to follow, and
+        // so does every consumer that hard-codes adapter_model.safetensors.
+        const bool lokr_out = a.is_lokr();
+        const bool exported = lokr_out ? lm_export_lokr(lora, meta, dir, &res, &xerr)
+                                       : lm_export_peft(lora, c, meta, dir, &res, &xerr);
+        if (!exported) {
             fprintf(stderr, "[mm3-lm-train] export failed: %s\n", xerr.c_str());
             return std::string();
         }
         // The sidecar the shipped MM3 adapter picker reads. Written beside the
         // safetensors so `<out>` pointed at <adapters>/mm3-lm-adapters/<run>
         // makes the checkpoint appear in the UI with no install step.
-        const std::string side = dir + "/adapter_model.safetensors.json";
+        const std::string side =
+            dir + (lokr_out ? "/lokr_weights.safetensors.json" : "/adapter_model.safetensors.json");
         FILE *            sf   = hs_fopen(side, "wb");
         if (sf) {
             fprintf(sf,
@@ -1647,7 +1763,32 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     rstate.n_params       = (int32_t) lora.params.size();
     rstate.n_samples      = (int32_t) samples.size();
     rstate.n_holdout      = (int32_t) holdout.size();
-    rstate.optimizer_muon = a.optimizer == "muon" ? 1 : 0;
+    // An optimizer CODE, not a muon flag: adamw and prodigy disagree about what
+    // m and v mean, so resuming one into the other must be refused rather than
+    // silently accepted the way a 0/1 flag would.
+    rstate.optimizer_muon = a.optimizer == "muon" ? 1 : (a.optimizer == "prodigy" ? 2 : 0);
+
+    // ── Prodigy x0 ─────────────────────────────────────────────────────────
+    //
+    // lm_optim_init seeded x0 from the weights as they are RIGHT NOW, which is
+    // correct for a fresh run and wrong for a resumed one: by then the weights
+    // have moved, and re-seeding would re-base the <g, x0 - x> numerator so the
+    // step-size estimate silently restarts from the pause point.
+    if (a.optimizer == "prodigy") {
+        const std::string x0p = mm3_prodigy_x0_path(a.out_dir);
+        std::string       x0e;
+        if (a.resume_path.empty()) {
+            if (!mm3_prodigy_x0_save(x0p, opt, &x0e)) {
+                fprintf(stderr, "[mm3-lm-train] cannot save prodigy x0: %s\n", x0e.c_str());
+                mm3_train_lm_free(&t);
+                return 1;
+            }
+        } else if (!mm3_prodigy_x0_load(x0p, opt, &x0e)) {
+            fprintf(stderr, "[mm3-lm-train] cannot restore prodigy x0: %s\n", x0e.c_str());
+            mm3_train_lm_free(&t);
+            return 1;
+        }
+    }
 
     int start_step = 0;
     if (!a.resume_path.empty()) {
@@ -1668,6 +1809,15 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             best_eval      = rstate.best_eval;
             best_eval_step = rstate.best_eval_step;
             opt.opt_step   = rstate.opt_step;
+            if (a.optimizer == "prodigy") {
+                // d only ever GROWS, so losing it does not perturb the run — it
+                // discards every step of estimation done so far and restarts the
+                // warm-up from d0, which reads as "the run got worse after a
+                // preview" rather than as a bug.
+                if (rstate.prodigy_d > 0.0) opt.prodigy_d = rstate.prodigy_d;
+                opt.prodigy_r = rstate.prodigy_r;
+                fprintf(stderr, "[mm3-lm-train] prodigy resumed at d %.6g\n", opt.prodigy_d);
+            }
             opt.opt_iter   = rstate.opt_iter;
             for (int i = 0; i < 4; i++) rng.s[i] = rstate.rng[i];
             fprintf(stderr,
@@ -2099,6 +2249,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             rstate.best_eval      = best_eval;
             rstate.best_eval_step = best_eval_step;
             rstate.opt_step       = opt.opt_step;
+            rstate.prodigy_d      = opt.prodigy_d;
+            rstate.prodigy_r      = opt.prodigy_r;
             rstate.opt_iter       = opt.opt_iter;
             for (int i = 0; i < 4; i++) rstate.rng[i] = rng.s[i];
 

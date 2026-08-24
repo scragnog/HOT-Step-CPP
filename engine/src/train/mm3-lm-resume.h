@@ -57,7 +57,15 @@
 #include "train/lm-optim.h"
 
 static const char     MM3_RESUME_MAGIC[8] = { 'M', 'M', '3', 'R', 'E', 'S', 'U', 'M' };
-static const uint32_t MM3_RESUME_VERSION  = 1;
+static const uint32_t MM3_RESUME_VERSION  = 2;   // v2 adds the Prodigy block
+static const uint32_t MM3_RESUME_VERSION_MIN = 1;   // v1 still readable
+
+/** Where a Prodigy run keeps x0 — the weights as they were at init, which the
+ *  <g, x0 - x> numerator needs. It never changes, so it lives beside the run
+ *  once instead of being copied into every pause state. */
+static inline std::string mm3_prodigy_x0_path(const std::string & out_dir) {
+    return out_dir + "/prodigy-x0.bin";
+}
 
 /** Everything about a paused run that is not a tensor. Tensors travel
  *  separately, keyed by ggml name, so a shape or ordering change in LmLora
@@ -88,6 +96,11 @@ struct MM3LmResumeState {
 
     // Crop RNG.
     uint64_t rng[4] = { 0, 0, 0, 0 };
+
+    // Prodigy (v2). d only ever grows, so restoring it wrong does not merely
+    // perturb the run — it throws away every step of estimation done so far.
+    double   prodigy_d = 0.0;
+    double   prodigy_r = 0.0;
 };
 
 // ── tiny binary IO ──────────────────────────────────────────────────────────
@@ -133,6 +146,72 @@ static bool mm3_rs_write_tensor(FILE * f, ggml_tensor * t, std::vector<uint8_t> 
 
 /** Write the whole pause state to `path` (via a .tmp + rename, so a crash
  *  mid-write cannot leave a truncated file that a resume would half-believe). */
+// ── Prodigy x0 ──────────────────────────────────────────────────────────────
+//
+// Written once, when a Prodigy run starts, and read back on every resume. It is
+// the weights as they were at init: on resume the live weights have moved, so
+// re-seeding x0 from them would silently re-base the <g, x0 - x> numerator and
+// the step-size estimate would restart from wherever the pause happened.
+static bool mm3_prodigy_x0_save(const std::string & path, const LmOptim & opt, std::string * err) {
+    FILE * f = hs_fopen(path, "wb");
+    if (!f) {
+        *err = "cannot open " + path + " for writing";
+        return false;
+    }
+    std::vector<uint8_t> scratch;
+    bool                 ok = true;
+    const uint32_t       n  = (uint32_t) opt.pg_x0.size();
+    ok = ok && mm3_rs_w(f, n);
+    for (uint32_t j = 0; ok && j < n; j++) {
+        ok = opt.pg_x0[j] ? mm3_rs_write_tensor(f, opt.pg_x0[j], &scratch) : false;
+    }
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        *err = "write failed on " + path;
+        hs_remove(path);
+        return false;
+    }
+    return true;
+}
+
+static bool mm3_prodigy_x0_load(const std::string & path, LmOptim & opt, std::string * err) {
+    FILE * f = hs_fopen(path, "rb");
+    if (!f) {
+        *err = "cannot open " + path + " — a Prodigy run cannot resume without the x0 it started from";
+        return false;
+    }
+    auto fail = [&](const std::string & why) {
+        *err = why;
+        fclose(f);
+        return false;
+    };
+    uint32_t n = 0;
+    if (!mm3_rs_r(f, &n) || n != (uint32_t) opt.pg_x0.size()) {
+        return fail(path + " holds " + std::to_string(n) + " x0 tensors, this run has "
+                    + std::to_string(opt.pg_x0.size()));
+    }
+    std::unordered_map<std::string, ggml_tensor *> live;
+    for (size_t j = 0; j < opt.pg_x0.size(); j++) {
+        if (opt.pg_x0[j]) live[ggml_get_name(opt.pg_x0[j])] = opt.pg_x0[j];
+    }
+    std::vector<uint8_t> scratch;
+    for (uint32_t i = 0; i < n; i++) {
+        std::string name;
+        uint64_t    bytes = 0;
+        if (!mm3_rs_r_str(f, &name) || !mm3_rs_r(f, &bytes)) return fail("truncated x0 record");
+        auto it = live.find(name);
+        if (it == live.end()) return fail("x0 file has tensor \"" + name + "\", this run does not");
+        if (ggml_nbytes(it->second) != (size_t) bytes) return fail("x0 tensor \"" + name + "\" is the wrong size");
+        scratch.resize((size_t) bytes);
+        if (fread(scratch.data(), 1, (size_t) bytes, f) != (size_t) bytes) {
+            return fail("truncated x0 data for \"" + name + "\"");
+        }
+        ggml_backend_tensor_set(it->second, scratch.data(), 0, (size_t) bytes);
+    }
+    fclose(f);
+    return true;
+}
+
 static bool mm3_lm_resume_save(const std::string & path, const MM3LmResumeState & st,
                                const LmLora & lora, const LmOptim & opt, std::string * err) {
     const std::string tmp = path + ".tmp";
@@ -155,6 +234,7 @@ static bool mm3_lm_resume_save(const std::string & path, const MM3LmResumeState 
     ok = ok && mm3_rs_w(f, st.best_eval) && mm3_rs_w(f, st.best_eval_step);
     ok = ok && mm3_rs_w(f, st.opt_step) && mm3_rs_w(f, st.opt_iter);
     for (int i = 0; i < 4; i++) ok = ok && mm3_rs_w(f, st.rng[i]);
+    ok = ok && mm3_rs_w(f, st.prodigy_d) && mm3_rs_w(f, st.prodigy_r);   // v2
     {
         const uint32_t n = (uint32_t) st.order.size();
         ok = ok && mm3_rs_w(f, n);
@@ -182,6 +262,18 @@ static bool mm3_lm_resume_save(const std::string & path, const MM3LmResumeState 
             if (ok && j < opt.mom_v.size() && opt.mom_v[j]) {
                 ok = mm3_rs_write_tensor(f, opt.mom_v[j], &scratch);
             }
+        }
+    }
+    // Prodigy's s (v2). Empty for every other optimizer, so the block header is
+    // 0 and the file stays the same shape.
+    {
+        uint32_t n = 0;
+        for (size_t j = 0; j < opt.pg_s.size(); j++) {
+            if (opt.pg_s[j]) n++;
+        }
+        ok = ok && mm3_rs_w(f, n);
+        for (size_t j = 0; ok && j < opt.pg_s.size(); j++) {
+            if (opt.pg_s[j]) ok = mm3_rs_write_tensor(f, opt.pg_s[j], &scratch);
         }
     }
     const uint32_t eof_marker = 0xD09EF00Du;   // "done", so a truncated tail is loud
@@ -225,8 +317,9 @@ static bool mm3_lm_resume_load(const std::string & path, MM3LmResumeState * st,
         return fail(path + " is not an mm3-lm-train resume file");
     }
     uint32_t ver = 0;
-    if (!mm3_rs_r(f, &ver) || ver != MM3_RESUME_VERSION) {
-        return fail("resume file version " + std::to_string(ver) + ", this build writes "
+    if (!mm3_rs_r(f, &ver) || ver < MM3_RESUME_VERSION_MIN || ver > MM3_RESUME_VERSION) {
+        return fail("resume file version " + std::to_string(ver) + ", this build reads "
+                    + std::to_string(MM3_RESUME_VERSION_MIN) + ".."
                     + std::to_string(MM3_RESUME_VERSION));
     }
     MM3LmResumeState in;
@@ -240,6 +333,9 @@ static bool mm3_lm_resume_load(const std::string & path, MM3LmResumeState * st,
     ok = ok && mm3_rs_r(f, &in.best_eval) && mm3_rs_r(f, &in.best_eval_step);
     ok = ok && mm3_rs_r(f, &in.opt_step) && mm3_rs_r(f, &in.opt_iter);
     for (int i = 0; i < 4; i++) ok = ok && mm3_rs_r(f, &in.rng[i]);
+    if (ver >= 2) {
+        ok = ok && mm3_rs_r(f, &in.prodigy_d) && mm3_rs_r(f, &in.prodigy_r);
+    }
     if (!ok) return fail("truncated resume header");
     {
         uint32_t n = 0;
@@ -256,6 +352,8 @@ static bool mm3_lm_resume_load(const std::string & path, MM3LmResumeState * st,
                     + " tensors, this run is rank " + std::to_string(st->rank) + "/alpha "
                     + std::to_string(st->alpha) + "/" + std::to_string(st->n_params) + ")");
     }
+    st->prodigy_d = in.prodigy_d;
+    st->prodigy_r = in.prodigy_r;
     if (in.n_samples != st->n_samples || in.n_holdout != st->n_holdout) {
         return fail("resume file was written over " + std::to_string(in.n_samples) + " training songs (+"
                     + std::to_string(in.n_holdout) + " held out), this run has "
@@ -270,9 +368,13 @@ static bool mm3_lm_resume_load(const std::string & path, MM3LmResumeState * st,
         if (opt.mom_m[j]) live[ggml_get_name(opt.mom_m[j])] = opt.mom_m[j];
         if (j < opt.mom_v.size() && opt.mom_v[j]) live[ggml_get_name(opt.mom_v[j])] = opt.mom_v[j];
     }
+    for (size_t j = 0; j < opt.pg_s.size(); j++) {
+        if (opt.pg_s[j]) live[ggml_get_name(opt.pg_s[j])] = opt.pg_s[j];
+    }
     std::vector<uint8_t> scratch;
     size_t               restored = 0;
-    for (int block = 0; block < 2; block++) {
+    const int n_blocks = (ver >= 2) ? 3 : 2;   // v2 appends Prodigy's s
+    for (int block = 0; block < n_blocks; block++) {
         uint32_t n = 0;
         if (!mm3_rs_r(f, &n)) return fail("truncated tensor block header");
         for (uint32_t i = 0; i < n; i++) {
