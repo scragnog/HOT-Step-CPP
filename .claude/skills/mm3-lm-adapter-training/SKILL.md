@@ -146,7 +146,32 @@ records it. Shape:
 character>, <rhythm section>, <production character>, <tempo>, <structure>
 ```
 
-At generation time the caption should look like the training caption. See
+At generation time the caption should look like the training caption — but
+**do not type the trigger yourself.**
+
+### The trigger duplicates at inference if you type it
+
+`ace-train` stamps the trigger into the adapter's safetensors metadata
+(`hot_step_trigger`, `hot_step_trigger_position=prepend`), `readAdapterTrigger`
+in `server/src/services/adapters/stMetadata.ts` reads it, and
+`translateParams.ts` applies it whenever an LM adapter is loaded — including the
+MM3 path. **It is applied unconditionally**: `applyTriggers` in
+`server/src/services/generation/triggerWords.ts` supports a `skipPresent` option
+that drops words the caption already contains, and translateParams calls it
+WITHOUT that option. So a caption that already opens with the artist name comes
+out as `green day, green day, warning album, ...`, which is not what was trained.
+
+Practical rule: the training caption opens with the trigger, so at generation
+**start your caption at the SECOND item** and let the app prepend the first:
+
+```
+training caption : green day, warning album, pop punk, bright major-key ...
+what you type    :            warning album, pop punk, bright major-key ...
+what the LM sees : green day, warning album, pop punk, bright major-key ...
+```
+
+Passing `{skipPresent: true}` at the translateParams call site would make this
+robust; it is not done today. See
 [mm3-captioning](../mm3-captioning/SKILL.md) for the MM3 Structured Caption
 format used elsewhere — note this recipe deliberately uses the short
 comma-separated style, not the three-section format, for the *training* caption.
