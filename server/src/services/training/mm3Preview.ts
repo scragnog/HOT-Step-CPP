@@ -42,7 +42,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { aceClient } from '../aceClient.js';
-import { mm3JobDetail, mm3Synth } from '../backends/minimax/client.js';
+import { mm3JobDetail, mm3SelectModel, mm3Synth } from '../backends/minimax/client.js';
 import { MM3_LM_ADAPTER_DEFAULT_SCALES } from '../backends/minimax/lmAdapter.js';
 import type { Mm3PreviewOptions, TrainingPreview } from './types.js';
 
@@ -255,6 +255,33 @@ export function planMm3Previews(o: {
   };
 }
 
+/** The base a preview renders its adapter on.
+ *
+ *  NOT the engine's own choice, which is best-first and therefore f16 — and an
+ *  adapter on f16 is garbled. This is the one render setting a preview is not
+ *  allowed to inherit from whatever the user last selected. */
+const PREVIEW_ADAPTER_BASE = 'q8_0';
+
+/** Pin the LM before an adapter render. Idempotent — posting the current
+ *  selection returns changed:false and touches nothing — so the cost is one
+ *  cheap POST per preview and a re-warm only on the first.
+ *
+ *  Deliberately NOT restored afterwards. The training runner restarts the engine
+ *  when the run ends, which resets the selection anyway, and q8_0 is the base
+ *  adapters are supposed to be rendered on regardless. Restoring it would mean
+ *  putting the engine back on a base we know is broken for the very next
+ *  preview. */
+async function pinPreviewBase(): Promise<string> {
+  try {
+    const r = await mm3SelectModel({ lm: PREVIEW_ADAPTER_BASE });
+    return r?.lm || PREVIEW_ADAPTER_BASE;
+  } catch (err: any) {
+    // Soft-fail: a preview on the wrong base is worth having with a warning
+    // attached. A preview that did not happen tells the user nothing at all.
+    return `SELECTION FAILED (${err?.message || String(err)}) — this preview may be garbled`;
+  }
+}
+
 /** A scale off the request body. 0 is MEANINGFUL — that component of the
  *  adapter off — so it is not treated as "unset" the way a falsy check would. */
 function clampScale(v: number | undefined, dflt: number): number {
@@ -315,7 +342,9 @@ export async function renderMm3Preview(r: Mm3RenderRequest): Promise<TrainingPre
       }
     } catch { /* left as given; the engine reports it */ }
   }
+  let renderBase = '';
   if (adapter) {
+    renderBase = await pinPreviewBase();
     // "runtime", not "merge". Merge is cheaper per render in the f16 case, but
     // it is not universally available: on an IQ-quantized base it refuses
     // outright (mm3-lm-merge.h needs an importance matrix), and on any other
@@ -372,6 +401,7 @@ export async function renderMm3Preview(r: Mm3RenderRequest): Promise<TrainingPre
     seconds: r.seconds,
     seed: r.seed,
     caption: r.spec.caption,
+    renderBase: renderBase || undefined,
     loss: r.loss,
     bytes: audio.length,
     ms: Date.now() - t0,

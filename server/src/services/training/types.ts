@@ -171,6 +171,11 @@ export interface TrainingPreview {
   seconds: number;
   seed: number;
   caption: string;
+  /** Which LM base this was rendered on. Recorded because it is NOT the base
+   *  the user has selected for generation: adapters are garbled on f16, so an
+   *  adapter preview pins q8_0. Absent on previews made before that fix, every
+   *  one of which rendered on f16 and should not be trusted. */
+  renderBase?: string;
   /** Training loss at the checkpoint this was rendered from. */
   loss?: number;
   bytes: number;
