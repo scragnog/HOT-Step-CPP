@@ -290,45 +290,60 @@ Write a FULL song's worth of lyrics even for a 40 s render. Tidy four-line
 stanzas produce mainstream rock and suppress the style; irregular line lengths
 matching the artist's own writing work far better.
 
-## THE BASE LM IS PART OF THE ADAPTER
+## RENDER ADAPTERS ON q8_0 ONLY — the f16 adapter path is broken
 
-**Train and render against the SAME `mm3-lm-*.gguf` variant.** An adapter
-trained on `mm3-lm-q8_0` and rendered on `mm3-lm-f16` produces garbled,
-incoherent audio — "like tuning a radio" — while the same adapter on q8_0 is
-clean. Verified by ear on identical requests, 2026-08-24.
+**Any LM adapter rendered on the `mm3-lm-f16` base produces garbled, incoherent
+audio.** Not subtly worse — "like tuning a radio". Measured by ear, 2026-08-24:
 
-This is counter-intuitive and the reasoning that says otherwise is wrong, so it
-is worth stating explicitly: q8_0 measures only **+0.02% loss** against f16, and
-that genuinely does mean they are near-equivalent *as language models*. It does
-NOT mean an adapter transfers between them. The adapter steers TOKEN CHOICES in
-an autoregressive rollout; a base whose logits differ even slightly picks a
-different token, and the generation diverges from there. Perplexity parity and
-rollout parity are different properties.
+| adapter | render base | result |
+|---|---|---|
+| none | f16 | fine |
+| none | q8_0 | fine |
+| trained on q8_0 | q8_0 | coherent |
+| trained on q8_0 | **f16** | **garbled** |
+| trained on f16 | **f16** | **garbled** (matched, and still broken) |
+| trained on f16 | q8_0 | **excellent** |
 
-A corollary worth internalising: **two renders differing 100% at sample level
-are not evidence of a bug.** Any numeric perturbation — a different graph node
-cap, a different arena layout — flips one sampled token and changes the whole
-song. Renders ARE bit-deterministic for a fixed binary, flags and seed (checked
-twice, and independently in-app), so use RMS and the ear to judge health, not
-sample equality.
+The matched f16 case being broken is what identifies this. It is not a
+train/render mismatch and not adapter portability: the base alone is fine on
+both, so **the adapter-apply path on an f16 base is defective**. Root cause not
+yet found.
 
-### How this bites
+**It is NOT caused by the LoKr work.** Reverting `mm3-lm-adapter.h`,
+`mm3-lm-graph.h` and `mm3-lm-merge.h` to their pre-LoKr state and rebuilding
+produced **bit-identical** renders on both bases. It is pre-existing, and was
+almost certainly never exercised because the app pins q8_0.
 
-`ace-server` started WITHOUT explicit model selection picks the best-quality
-variant it can find, which is **f16**. The app passes configuration that gets
-this right; a hand-started engine does not. So:
+### What this means in practice
+
+- The app is unaffected — the Node server selects q8_0.
+- Any script that starts its own `ace-server` MUST pin the base first, because a
+  bare engine picks the best-quality variant it can find, which is f16:
 
 ```
 POST /mm3/select-model {"lm": "q8_0"}      # BEFORE any /mm3/synth
 ```
 
-Any script that starts its own engine must pin the base, or it is silently
-testing something else. The `[MM3] LM:` line in the engine log says which
-variant is resident — check it before trusting a render.
+  Eight comparison renders were silently void before this was noticed. The
+  `[MM3] LM:` line in the engine log names the resident variant — check it
+  before trusting a render.
 
-Training default is `mm3-lm-q8_0`: half the VRAM of f16 (8.5 GB vs 16.0 GB) for
-a measured +0.02% loss. Note f16 is slightly FASTER per step (842 ms vs 924 at
-rank 128) because it skips dequantisation — the q8_0 win is memory, not speed.
+### Training base is a QUALITY lever, not just a compatibility one
+
+Training on f16 and rendering on q8_0 produced the best Green Day adapter of the
+whole sweep — **at 750 steps, beating the 2000-step q8_0-trained one by ear.**
+Unverified beyond one album and one listen, but if it holds it is worth the
+extra VRAM: f16 training measured 26.7 GB against q8_0's 17.5 GB at rank 128,
+and is slightly FASTER per step (842 ms vs 924) because it skips dequantisation.
+
+### Sample-level identity is not a health check
+
+Two renders differing 100% at sample level are NOT evidence of a bug. Renders
+are bit-deterministic for a fixed binary, flags and seed (verified twice here,
+and independently in-app), but any numeric perturbation flips one sampled token
+in the autoregressive rollout and changes the whole song. Judge by RMS and by
+ear. RMS is only a rough guide: `BASE_no_adapter_f16` at 0.1213 was fine while
+`f16trained_on_f16` at 0.1187 was garbled.
 
 ## Traps
 
