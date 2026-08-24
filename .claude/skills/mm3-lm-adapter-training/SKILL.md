@@ -22,7 +22,7 @@ eventually be dialled to, and `docs/plans/` is gitignored so nothing there
 survives a fresh clone.
 
 ```
---rank 256 --alpha 256
+--rank 128 --alpha 128
 --optimizer adamw --lr 8e-5 --lr-end-frac 0.005 --warmup 50
 --max-frames 128 --crop-mode random --crop-anchor song
 --rank-dropout 0.1
@@ -32,10 +32,17 @@ survives a fresh clone.
 --holdout 0.15 --eval-every 250 --eval-crop 128
 ```
 
-**At render: MLP scale 0.50, attention 1.00, global 1.00. Ship ~ck2000.**
+**At render: MLP scale 0.63-0.75, attention 1.00, global 1.00. Ship ~ck2000.**
 
-Measured: 22.9 GB VRAM, 992 ms/step, so 2500 steps is ~40 min/album, and each
-checkpoint is 2.7 GB.
+Measured: 17.5 GB VRAM, 924 ms/step, ~39 min/album, 1.4 GB per checkpoint.
+
+**This LoRA configuration is FROZEN as of 2026-08-24** — settled by ear over a
+rank sweep at 64/128/256 with a full MLP dial at each. Further LoRA tuning is
+not planned; the open work is LoKr, Prodigy and the Muon step-size sweep.
+
+Rank 128 was chosen over 256 because it matches by ear at **5.4 GB less VRAM,
+7% less step time and half the checkpoint size** (1.4 GB vs 2.7 GB) — which is
+what decides whether a six-album overnight sweep fits on disk.
 
 Started from bghira's published SimpleTuner config at rank 64 and moved by ear
 over a 6-album sweep plus a rank x optimizer 2x2 (2026-08-23/24).
@@ -47,13 +54,29 @@ circles.
 
 | axis | what it controls | setting |
 |---|---|---|
-| **rank** | separating the style from the LM's *language ability* | **256** |
-| **MLP dial** (render) | vocal identity vs audio fidelity | **0.50** |
+| **rank** | separating the style from the LM's *language ability* | **128** |
+| **MLP dial** (render) | vocal identity vs audio fidelity | **0.63–0.75** *(rank-dependent)* |
 | **steps** | how much likeness | 750–2000 |
+
+### The MLP dial is RANK-DEPENDENT — never carry it between adapters
+
+Measured on the same album, same checkpoint, two seeds each:
+
+| rank | 0.50 | 0.75 | 0.85 | 1.00 |
+|---|---|---|---|---|
+| 128 | coherent, **voice missing** | **best** | worse than 0.75 | voice, degraded |
+| 256 | **best** | worse than 0.50 | — | degraded |
+
+The optimum moves UP the dial as rank comes DOWN. That fits total delta
+magnitude scaling with rank and the dial scaling it back: less rank needs less
+scaling back. So **every shipped adapter needs its own `recommendedScales` in
+its sidecar** — a house default of 0.50 would gut the voice on a rank-128
+adapter, and 1.00 would degrade a rank-256 one.
 
 - **Rank 64 produces gibberish lyrics.** Fantastic likeness, good audio, but the
   words stop being words. With only 64 directions the adapter commandeers ones
-  that also carry linguistic competence. Rank 256 has room to separate them.
+  that also carry linguistic competence. **128 is enough to separate them**;
+  256 is not needed for it.
 - **Rank 256 alone degrades audio quality** — and the MLP dial fixes it.
   `mm3-lm-adapter.h` already documented why: attention carries the plan/genre,
   the MLPs carry vocal identity AND the fidelity damage. At MLP 0.50 the
@@ -95,7 +118,7 @@ copy. It still carries the pre-sweep recipe. When testing ends:
 
 | field | current | target | why |
 |---|---|---|---|
-| `rank` / `alpha` | 64 / 64 | **256 / 256** | 64 eats the lyrics |
+| `rank` / `alpha` | 64 / 64 | **128 / 128** | 64 eats the lyrics; 256 costs 5.4 GB for no audible gain |
 | `lr` | 5e-5 | **8e-5** | bghira's published value; ours was stale |
 | `steps` | 1000 | **2500** | ear picks land 750–2000; nothing improves after |
 | `saveEvery` | 100 | **250** | the ladder is auditioned, so rungs must exist |
@@ -106,11 +129,11 @@ copy. It still carries the pre-sweep recipe. When testing ends:
 | `lrEndFrac` | 0.008 | **0.005** | matches the runs above |
 | `optimizer` | adamw | adamw | keep; do not offer Muon until it is retuned |
 
-Render-side default for a shipped adapter: **scaleMlp 0.50**, scaleAttn 1.00.
+Render-side default for a rank-128 adapter: **scaleMlp 0.75** (0.63 worth
+trying), scaleAttn 1.00. Rank-dependent — see the dial table above.
 
-Anything still under test and NOT ready to promote: rank 128 (does half the rank
-still separate style from language, at 17.4 GB / 811 ms and a 1.4 GB checkpoint
-instead of 2.7 GB), LoKr, Prodigy, the Muon scale sweep.
+Anything still under test and NOT ready to promote: LoKr, Prodigy, the Muon
+step-size sweep.
 
 ## Do this first or nothing works
 
