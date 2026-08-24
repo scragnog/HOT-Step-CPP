@@ -463,10 +463,11 @@ export const MM3_LM_DEFAULTS = {
    *
    *  1200 steps x ~15.5 s is ~5.2 hours. NOT tuned by ear yet; it is reasoning
    *  from the step-size change, not a measured optimum. */
-  steps: 1200,
-  /** 100, so a 1200-step run still yields 12 checkpoints to audition. At 250 it
-   *  would yield four, and the ear-optimum has never landed on a round number. */
-  saveEvery: 100,
+  steps: 500,
+  /** 50, so a 500-step run yields 10 checkpoints to audition — the memorised
+   *  run put the plausible ear-optimum somewhere in 150-350, and checkpoints
+   *  every 250 would straddle it blind. */
+  saveEvery: 50,
   /** OFF: previews run on the clock instead (previewEveryMinutes). A preview
    *  costs a pause, a full engine restart and a render — roughly a minute — so
    *  pinning it to the checkpoint cadence tied preview cost to a number chosen
@@ -478,7 +479,9 @@ export const MM3_LM_DEFAULTS = {
   previewEveryMinutes: 10,
   /** His lr_warmup_steps. Note step 1 still runs at lr 0 — the shared schedule
    *  is 0-based, which costs one step out of a thousand. */
-  warmup: 50,
+  /** 25, scaled to the shorter run: 50 would be 10% of a 500-step run spent at
+   *  near-zero lr. bghira's 50 belongs to his 1000+-step schedules. */
+  warmup: 25,
   gradAccum: 1,
   seed: 42,
   /** 4272 frames = 171 s, which is 84% of a 204 s track — the most the card
@@ -511,25 +514,18 @@ export const MM3_LM_DEFAULTS = {
    *  spaced starts, with the last crop flush to the end so the set always
    *  includes a real ending"). Training simply never got the same treatment. */
   cropMode: 'structured' as 'random' | 'beginning' | 'structured',
-  /** 85% anchored at frame 0, 15% flush to the track's end, NO random crops.
+  /** 40% anchored at frame 0, 15% flush to the track's end, 45% random.
    *
-   *  Frame-0 anchoring is the point, and it is a stronger claim than "cover the
-   *  song evenly". A random crop presents the prompt followed immediately by
-   *  mid-song audio with nothing in front of it, and supervises that — which
-   *  teaches the model that audio may legitimately begin at an arbitrary
-   *  position. Anchored at 0, every supervised position carries the song's real
-   *  history, which is the condition it will actually be in at inference; at
-   *  maxFrames 4272 that is every position up to 171 s.
+   *  The random share is NOT optional, and 85/15/0 proved it the hard way:
+   *  frame-0 and flush-to-end are SINGLE positions per song, so a split with no
+   *  random remainder collapses an 8-song dataset to 16 distinct samples, and
+   *  the first such run recited (train loss 0.0003 by step 800, audible quality
+   *  loss from ~ck550). Random crops are what put ~20k distinct samples back.
    *
-   *  The 15% tail share buys the one thing frame-0 anchoring cannot: `at_end`
-   *  below is true only when a crop reaches n_frames, so a flush-to-the-end crop
-   *  is the ONLY place EOS is supervised, and 9 of 10 reference tracks are
-   *  longer than the window.
-   *
-   *  Both positions are DETERMINISTIC per song, so this is repeated exposure to
-   *  the same spans rather than augmentation — the standard trade for start
-   *  truncation, and what SimpleTuner's truncation_mode does. */
-  cropStartFrac: 0.85,
+   *  The anchored shares keep what the structured mode exists for: frame-0
+   *  crops give supervised positions the song's real history (the condition at
+   *  inference), and end crops are the only place EOS is supervised. */
+  cropStartFrac: 0.40,
   cropEndFrac: 0.15,
   /** AdamW, matching `adamw_bf16`. Muon was only ever chosen because it FIT at
    *  rank 256 (AdamW's second momentum buffer costs +2.66 GB there, +0.67 GB at

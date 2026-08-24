@@ -490,6 +490,41 @@ dropped and only a 30-line stderr tail survived, so any question asked after a
 run finished — "step 750 came out as noise, what happened at 750?" — had no
 loss curve, no Prodigy `d` and no warning left to read. Check these FIRST.
 
+## The "sped up and higher pitched" renders: NOT a sample-rate error — measured and closed
+
+Adapter renders of a drop-C# band read as the artist sped up and pitched up,
+and a linked 0.9188 (=44.1/48) resample in a DAW "fixes" them. The obvious
+conclusion — a 48kHz/44.1kHz clock error — is WRONG, and was excluded three
+ways on 2026-08-24:
+
+1. **Encode timing**: all 10 dataset songs' .codes run at 24.97 fps of true
+   FLAC time (a rate mix-up would give 22.97 or 27.2).
+2. **Pitch grid**: every render sits 0-3 cents ON the A440 semitone grid. A
+   real 48/44.1 shift parks everything +47 cents off-grid — verified by
+   simulating the error on a real track, which measured +45.
+3. **Unison replay**: the engine accepts `forced_semantic` + `forced_acoustic`
+   in /mm3/synth (mm3-request.h) — feed a song's stored .codes straight through
+   cond→DiT→voc with the planner bypassed. The reconstruction came back at
+   tempo x1.000, 0 cents, +0.00 semitones vs the FLAC (spectral corr 0.998).
+   The codec loop is transparent end-to-end.
+
+What remains: the PLANNER free-runs faster and higher-registered than the
+band. Teacher-forced it is exact; sampled, it drifts to prior pacing (exposure
+bias). Note the shared caption feeds that prior: tempo WORDS ("mid-to-fast
+tempo", "double-kick bursts") are MM3's only real tempo control (bpm/key are
+dead caption knobs), so an accelerant-stuffed caption is self-inflicted.
+A linked DAW resample "fixing" it only proves the correction lands in the
+right zone, not that a clock error exists — linked-vs-linked A/Bs cannot
+separate the axes. Use the replay recipe above before ever re-opening this.
+
+## Structured crops v2: the random share is load-bearing
+
+85/15/0 (start/end/random) memorised: two DETERMINISTIC positions per song =
+16 distinct samples on an 8-song album, train loss 0.0003 by step 800, audible
+degradation from ~ck550. Defaults are now **40/15/45** with **steps 500,
+saveEvery 50, warmup 25** — variety restored, checkpoint grid fine enough to
+catch a 150-350 ear-optimum.
+
 ## Preview history: everything before 2026-08-24 evening rendered on f16
 
 The preview renderer never pinned a base, so it rendered on the engine's
