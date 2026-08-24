@@ -55,7 +55,10 @@ export interface Mm3Status {
    *  rank and crop length move without carrying its own copy of measurements
    *  taken server-side. */
   vramModel: Mm3VramModel;
-  defaults: Mm3TrainLmRequest & { maxFrames: number; cropMode: string };
+  /** previewEverySteps rides along so the form can default the preview cadence
+   *  to the checkpoint cadence without hardcoding a second copy of it. */
+  defaults: Mm3TrainLmRequest & { maxFrames: number; cropMode: string;
+                                  previewEverySteps?: number };
   /** Datasets usable as a prior-preservation corpus: they have RVQ codes and
    *  are not this one. Absent on an older server. */
   regCandidates?: Array<{ id: string; name: string; songs: number }>;

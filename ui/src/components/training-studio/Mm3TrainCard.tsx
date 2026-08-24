@@ -136,14 +136,19 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     // 32 GB card and on a 12 GB one it is simply wrong. The server picks the
     // highest-fidelity base that fits THIS GPU, and falls back to the default
     // when it cannot read the card.
-    basePrecision: status.recommended?.base || status.defaults.basePrecision || 'q8_0',
+    // The configured default WINS over the VRAM recommender's pick. The
+    // recommender walks bases by fidelity and falls through to a smaller one
+    // whenever the best does not fit its budget, which silently downgraded
+    // f16 to q8_0. It still sets `rank` and still raises overBudget, so the
+    // user is warned rather than quietly given a different base.
+    basePrecision: status.defaults.basePrecision || status.recommended?.base || 'f16',
     holdout: status.defaults.holdout ?? 0.15,
     evalEvery: status.defaults.evalEvery ?? 50,
     cropAnchor: (status.defaults.cropAnchor as 'song' | 'zero') ?? 'song',
     // Previews default OFF. They are the fastest way to learn whether a run is
     // worth finishing, but each one costs about a minute, so opting in is the
     // user's call rather than a surprise on the clock.
-    previewEverySteps: 0,
+    previewEverySteps: status.defaults.previewEverySteps ?? status.defaults.saveEvery ?? 250,
     previewEveryMinutes: 0,
     previewSeconds: 24,
     previewSeed: 424242,
