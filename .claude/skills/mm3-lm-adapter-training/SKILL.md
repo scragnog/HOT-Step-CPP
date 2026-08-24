@@ -290,6 +290,46 @@ Write a FULL song's worth of lyrics even for a 40 s render. Tidy four-line
 stanzas produce mainstream rock and suppress the style; irregular line lengths
 matching the artist's own writing work far better.
 
+## THE BASE LM IS PART OF THE ADAPTER
+
+**Train and render against the SAME `mm3-lm-*.gguf` variant.** An adapter
+trained on `mm3-lm-q8_0` and rendered on `mm3-lm-f16` produces garbled,
+incoherent audio — "like tuning a radio" — while the same adapter on q8_0 is
+clean. Verified by ear on identical requests, 2026-08-24.
+
+This is counter-intuitive and the reasoning that says otherwise is wrong, so it
+is worth stating explicitly: q8_0 measures only **+0.02% loss** against f16, and
+that genuinely does mean they are near-equivalent *as language models*. It does
+NOT mean an adapter transfers between them. The adapter steers TOKEN CHOICES in
+an autoregressive rollout; a base whose logits differ even slightly picks a
+different token, and the generation diverges from there. Perplexity parity and
+rollout parity are different properties.
+
+A corollary worth internalising: **two renders differing 100% at sample level
+are not evidence of a bug.** Any numeric perturbation — a different graph node
+cap, a different arena layout — flips one sampled token and changes the whole
+song. Renders ARE bit-deterministic for a fixed binary, flags and seed (checked
+twice, and independently in-app), so use RMS and the ear to judge health, not
+sample equality.
+
+### How this bites
+
+`ace-server` started WITHOUT explicit model selection picks the best-quality
+variant it can find, which is **f16**. The app passes configuration that gets
+this right; a hand-started engine does not. So:
+
+```
+POST /mm3/select-model {"lm": "q8_0"}      # BEFORE any /mm3/synth
+```
+
+Any script that starts its own engine must pin the base, or it is silently
+testing something else. The `[MM3] LM:` line in the engine log says which
+variant is resident — check it before trusting a render.
+
+Training default is `mm3-lm-q8_0`: half the VRAM of f16 (8.5 GB vs 16.0 GB) for
+a measured +0.02% loss. Note f16 is slightly FASTER per step (842 ms vs 924 at
+rank 128) because it skips dequantisation — the q8_0 win is memory, not speed.
+
 ## Traps
 
 - **`--eval-crop` defaults to 400 and is pinned independently of `--max-frames`.**
