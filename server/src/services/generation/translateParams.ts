@@ -259,7 +259,10 @@ export function translateParams(params: any): AceRequest {
 
   const triggerSpecs = resolveAdapterTriggers(adapterPaths, resolveTriggerSpecs(params), readAdapterTrigger);
   if (triggerSpecs.length && adapterPaths.length) {
-    req.caption = applyTriggers(req.caption || '', triggerSpecs).caption;
+    // skipPresent: the caption a user writes for an album adapter usually already
+    // opens with the artist name, and without this they get it twice —
+    // "green day, green day, warning album, ..." — which was never trained.
+    req.caption = applyTriggers(req.caption || '', triggerSpecs, { skipPresent: true }).caption;
   }
 
   // Solver sub-parameters

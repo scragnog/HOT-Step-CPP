@@ -1940,10 +1940,40 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       return Number.isFinite(v) && v >= lo && v <= hi ? v : d;
     };
     const D = MM3_LM_DEFAULTS;
-    const optimizer = b.optimizer === 'adamw' ? 'adamw' : D.optimizer;
+    // Three-way now. The old two-way collapsed anything that was not 'adamw'
+    // onto the default, which with a prodigy default would have silently
+    // ignored a request for muon.
+    const optimizer: 'muon' | 'adamw' | 'prodigy' =
+      b.optimizer === 'adamw' || b.optimizer === 'muon' || b.optimizer === 'prodigy'
+        ? b.optimizer
+        : D.optimizer;
     const basePrecision: Mm3BasePrecision = chosenBase;
     const cropMode  = b.cropMode === 'beginning' ? 'beginning' : D.cropMode;
     const runName   = mm3RunName(ds.slug);
+    // One shared caption for the whole album is the single biggest quality lever
+    // found in the 2026-08-23/24 sweep. Convention: `_shared-caption.txt` beside
+    // the dataset. Absent = per-song captions, which is the regime that produced
+    // adapters with a trace of the artist over a degraded backing track.
+    const sharedCaptionPath = (() => {
+      if (typeof b.captionFile === 'string' && b.captionFile.trim()) return b.captionFile.trim();
+      const p = path.join(captionsDir, '_shared-caption.txt');
+      return fs.existsSync(p) ? p : undefined;
+    })();
+
+    // Mid-training previews work by pausing and resuming, and Prodigy cannot
+    // resume: the state file carries m and v, but Prodigy also needs s, x0, d
+    // and r. Resuming would silently reset the step-size estimate to d0 and
+    // re-measure <g, x0-x> from the wrong origin, which reads as "the run got
+    // worse after a preview" rather than as a bug. Refuse the combination.
+    const previewOpts = parseMm3PreviewOptions(b.preview);
+    if (previewOpts && optimizer === 'prodigy') {
+      res.status(400).json({
+        error: 'Mid-training previews are not available with the Prodigy optimizer: '
+             + 'Prodigy cannot resume from a pause. Choose AdamW for previews, or turn '
+             + 'previews off.',
+      });
+      return;
+    }
 
     // Resolved before the job is built so a bad regularisation corpus is a 400
     // the user can act on, not a 500 from inside the queue.
@@ -1975,6 +2005,17 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       basePrecision,
       holdout:     num('holdout', D.holdout, 0, 0.5),
       evalEvery:   num('evalEvery', D.evalEvery, 0, 100000),
+      // Clamped to maxFrames: a larger eval crop than the training crop cannot
+      // fit the sequence limit and every eval is silently skipped.
+      evalCrop:    Math.min(num('evalCrop', D.evalCrop, 8, 9000),
+                            num('maxFrames', D.maxFrames, 64, 9000)),
+      rankDropout: num('rankDropout', D.rankDropout, 0, 0.9),
+      captionFile: sharedCaptionPath,
+      adapterType: b.adapterType === 'lora' || b.adapterType === 'lokr'
+        ? b.adapterType : D.adapterType,
+      lokrFactor:  num('lokrFactor', D.lokrFactor, 1, 64),
+      lokrDim:     num('lokrDim', D.lokrDim, 1, 8192),
+      lokrAlpha:   num('lokrAlpha', D.lokrAlpha, 1, 8192),
       trigger:     typeof b.trigger === 'string' ? b.trigger.trim() : (ds.customTag || ''),
       triggerPrepend: b.triggerPrepend !== false,
       datasetName: ds.name || ds.slug,
@@ -1983,7 +2024,7 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       cropAnchor:  b.cropAnchor === 'zero' ? 'zero' : 'song',
       lrEndFrac:   num('lrEndFrac', D.lrEndFrac, 0, 1),
       ...reg,
-      preview:     parseMm3PreviewOptions(b.preview),
+      preview:     previewOpts,
     });
     res.json({ jobId: job.id, kind: job.kind, runName, outDir: mm3AdapterRunDir(runName) });
   } catch (err: any) {

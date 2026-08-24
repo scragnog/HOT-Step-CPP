@@ -52,7 +52,13 @@ export interface Mm3TrainLmRequest {
   maxFrames?: number;
   /** `beginning` reproduces the intros-only failure on purpose; do not ship it. */
   cropMode?: 'random' | 'beginning';
-  optimizer?: 'muon' | 'adamw';
+  optimizer?: 'muon' | 'adamw' | 'prodigy';
+  /** 'lora' (default) or 'lokr'. LoKr writes lokr_weights.safetensors
+   *  instead of a PEFT directory. */
+  adapterType?: 'lora' | 'lokr';
+  lokrFactor?: number;
+  lokrDim?: number;
+  lokrAlpha?: number;
   muonLrScale?: number;
   /** The trigger word. Recorded in the adapter sidecar either way; whether it is
    *  TRAINED depends on `triggerPrepend`. */

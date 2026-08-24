@@ -205,11 +205,17 @@ export const MM3_VRAM_MODEL = {
  *  numbers over there would drift from the measurements that produced them. */
 export function estimateMm3PeakMb(baseBytes: number, rank: number, maxFrames: number,
                                   extraMb = 0,
-                                  optimizer: 'muon' | 'adamw' = MM3_LM_DEFAULTS.optimizer): number {
+                                  optimizer: 'muon' | 'adamw' | 'prodigy' = MM3_LM_DEFAULTS.optimizer): number {
   const M      = MM3_VRAM_MODEL;
   const loaded = baseBytes / 1048576 + M.loadedOverheadMb;
   const S      = M.promptTokens + Math.max(0, maxFrames);
-  const perRank = M.perRankMb + (optimizer === 'adamw' ? M.adamwPerRankMb : 0);
+  // Muon carries one momentum buffer, AdamW two, Prodigy four (m, v, s and x0 —
+  // the initial weights, which the <g, x0-x> numerator needs). Each extra buffer
+  // is one adamwPerRankMb, so Prodigy is 3x AdamW's surcharge. Measured at rank
+  // 128: Muon 14.2 GB, AdamW 17.5, Prodigy 20.2 — a 2.7 GB Prodigy-over-AdamW
+  // gap against 2.66 predicted.
+  const extraBuffers = optimizer === 'adamw' ? 1 : optimizer === 'prodigy' ? 3 : 0;
+  const perRank = M.perRankMb + extraBuffers * M.adamwPerRankMb;
   return Math.round(loaded + perRank * rank + M.perTokenMb * S + M.perTokenSqMb * S * S
                     + M.constMb + extraMb);
 }
@@ -414,11 +420,11 @@ export const MM3_LM_DEFAULTS = {
   //
   // The full reasoning, and the two of his settings we deliberately do NOT
   // copy, are on MM3LmTrainArgs in engine/src/train/mm3-lm-train-run.h.
-  rank: 64,
-  alpha: 64,
-  lr: 5e-5,
-  steps: 1000,
-  saveEvery: 100,
+  rank: 128,
+  alpha: 128,
+  lr: 8e-5,
+  steps: 2500,
+  saveEvery: 250,
   /** His lr_warmup_steps. Note step 1 still runs at lr 0 — the shared schedule
    *  is 0-based, which costs one step out of a thousand. */
   warmup: 50,
@@ -427,27 +433,58 @@ export const MM3_LM_DEFAULTS = {
   /** 4096 frames = 164 s. With cropMode `beginning` this is his
    *  `minimax_music_lm_max_frames: 0` — the whole track where it fits, and
    *  otherwise truncated FROM THE START. */
-  maxFrames: 4096,
+  maxFrames: 128,
   /** `beginning` is now correct, not the trap it used to be. It was a trap at
    *  maxFrames 1500, where it meant "the first 60 seconds of every song" — an
    *  intros-only trainer, which is what the lm2 run became. At 4096 frames it
    *  is start-truncation of most of a track, and it is what keeps the lyrics in
    *  the prompt aligned with the audio being supervised. Random crops break
    *  that alignment on every crop with a non-zero offset. */
-  cropMode: 'beginning' as 'random' | 'beginning',
+  cropMode: 'random' as 'random' | 'beginning',
   /** AdamW, matching `adamw_bf16`. Muon was only ever chosen because it FIT at
    *  rank 256 (AdamW's second momentum buffer costs +2.66 GB there, +0.67 GB at
    *  rank 64) and it made `lr` meaningless — its update is normalised, so it
    *  needed a --muon-lr-scale that was never tuned past "best of four values". */
-  optimizer: 'adamw' as 'muon' | 'adamw',
+  /** Prodigy sets its own step size, so `lr` below becomes a pure schedule
+   *  multiplier and the trainer forces it to 1.0. On Green Day it converged to
+   *  an effective 8.19e-5 against the 8e-5 bghira tuned by hand — within 2.4%.
+   *  NOTE: Prodigy cannot resume, so it is incompatible with mid-training
+   *  previews until the resume format carries s/x0/d/r. */
+  optimizer: 'prodigy' as 'muon' | 'adamw' | 'prodigy',
   muonLrScale: 64,
   /** q8_0, not f16 — see the note on Mm3TrainModels. Same step time since the
    *  cpy-q-occupancy patch, ~8.5 GB less resident, and therefore the only one
    *  of the two that survives a GPU shared with a desktop session. Pick f16
    *  only to reproduce a pre-patch run exactly. */
-  basePrecision: 'q8_0' as Mm3BasePrecision,
+  /** f16, not q8_0. A 750-step adapter trained on f16 and rendered on q8_0 beat
+   *  a 2000-step q8_0-trained one by ear. Costs 26.7 GB against 17.5 GB at rank
+   *  128, and is slightly FASTER per step (842 vs 924 ms) because it skips
+   *  dequantisation. The rank ladder downgrades automatically on smaller cards.
+   *  RENDER on q8_0 regardless: adapters are garbled on an f16 base. */
+  basePrecision: 'f16' as Mm3BasePrecision,
   holdout: 0.15,
-  evalEvery: 50,
+  evalEvery: 250,
+  /** MUST be <= maxFrames. The engine default is 400 and is pinned independently
+   *  of the crop, so at a 128-frame crop EVERY eval crop exceeds the sequence
+   *  limit, all of them are skipped, and run_eval returns "no result" silently —
+   *  the run reports an eval plan at startup and then never evaluates. */
+  evalCrop: 128,
+  /** LyCORIS-style rank masking, part of bghira's published config. */
+  rankDropout: 0.1,
+  /** LoKr: dW = kron(w1, w2) instead of a low-rank pair.
+   *
+   *  FACTOR IS THE SIZE KNOB and 6 is chosen for a ~528 MB file, matching the
+   *  AS1.5 DiT LoKr budget. The engine's own default of 16 gives 27.2M params
+   *  (109 MB) which is FEWER than rank 64 — and rank 64 was the setting that
+   *  turned lyrics to gibberish. Factor 6 / dim 512 gives 264M, between rank 64
+   *  and rank 128.
+   *
+   *  UNVALIDATED BY EAR: no LoKr adapter has been auditioned. Default on at
+   *  Rob's request so it can be tested in-app. */
+  adapterType: 'lokr' as 'lora' | 'lokr',
+  lokrFactor: 6,
+  lokrDim: 512,
+  lokrAlpha: 512,
   /** Each crop is presented at its TRUE position in the track.
    *
    *  This is a RECIPE CHANGE as of 2026-08-23 and runs before it used `zero`,
@@ -466,7 +503,7 @@ export const MM3_LM_DEFAULTS = {
   triggerPrepend: true,
   /** SimpleTuner's `lr_end: 4e-7` over a 5e-5 base. Our shared cosine bottomed
    *  at 0.1 of base, running the tail of the schedule twelve times hotter. */
-  lrEndFrac: 0.008,
+  lrEndFrac: 0.005,
   /** Prior preservation, OFF until a regularisation dataset is chosen — it
    *  needs a corpus the user has to supply. `regEvery: 3` is bghira's 1:2 ratio
    *  and is what the UI offers the moment one is picked. */
@@ -520,10 +557,20 @@ export interface ResolvedMm3TrainLmOptions {
   seed: number;
   maxFrames: number;
   cropMode: 'random' | 'beginning';
-  optimizer: 'muon' | 'adamw';
+  optimizer: 'muon' | 'adamw' | 'prodigy';
   muonLrScale: number;
   holdout: number;
   evalEvery: number;
+  evalCrop: number;
+  rankDropout: number;
+  adapterType: 'lora' | 'lokr';
+  lokrFactor: number;
+  lokrDim: number;
+  lokrAlpha: number;
+  /** One caption for EVERY track. The mechanism that binds a style to the
+   *  prompt: with the caption constant across rows the adapter has nowhere
+   *  to put the style except into itself. Empty = per-song captions. */
+  captionFile?: string;
   trigger: string;
   /** Whether the trigger is injected into the training captions (and therefore
    *  learned at all). See Mm3TrainLmRequest.triggerPrepend. */
@@ -572,6 +619,15 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   if (o.optimizer === 'muon') args.push('--muon-lr-scale', String(o.muonLrScale));
   args.push('--holdout', String(o.holdout));
   args.push('--eval-every', String(o.evalEvery));
+  args.push('--eval-crop', String(o.evalCrop));
+  if (o.rankDropout > 0) args.push('--rank-dropout', String(o.rankDropout));
+  if (o.adapterType === 'lokr') {
+    args.push('--adapter-type', 'lokr');
+    args.push('--lokr-factor', String(o.lokrFactor));
+    args.push('--lokr-dim', String(o.lokrDim));
+    args.push('--lokr-alpha', String(o.lokrAlpha));
+  }
+  if (o.captionFile) args.push('--caption-file', o.captionFile);
   if (o.trigger) {
     args.push('--trigger', o.trigger);
     // Without this the word is recorded and never trained — the failure the

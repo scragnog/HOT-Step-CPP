@@ -266,7 +266,11 @@ export async function renderMm3Preview(r: Mm3RenderRequest): Promise<TrainingPre
   if (adapter) {
     try {
       if (fs.statSync(adapter).isDirectory()) {
-        adapter = path.join(adapter, 'adapter_model.safetensors');
+        // LoKr writes lokr_weights.safetensors; LoRA writes a PEFT directory.
+        // Same ckpt-<step>/ folder, different file name.
+        const peft = path.join(adapter, 'adapter_model.safetensors');
+        const lokr = path.join(adapter, 'lokr_weights.safetensors');
+        adapter = fs.existsSync(peft) ? peft : lokr;
       }
     } catch { /* left as given; the engine reports it */ }
   }

@@ -43,8 +43,10 @@ interface FormState {
   lr: number;
   maxFrames: number;
   cropMode: 'random' | 'beginning';
-  optimizer: 'muon' | 'adamw';
+  optimizer: 'muon' | 'adamw' | 'prodigy';
   muonLrScale: number;
+  adapterType: 'lora' | 'lokr';
+  lokrFactor: number;
   gradAccum: number;
   seed: number;
   trigger: string;
@@ -120,8 +122,10 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     lr: status.defaults.lr ?? 8e-5,
     maxFrames: status.defaults.maxFrames ?? 1500,
     cropMode: (status.defaults.cropMode as 'random' | 'beginning') ?? 'random',
-    optimizer: status.defaults.optimizer ?? 'muon',
+    optimizer: status.defaults.optimizer ?? 'adamw',
     muonLrScale: status.defaults.muonLrScale ?? 64,
+    adapterType: status.defaults.adapterType ?? 'lora',
+    lokrFactor: status.defaults.lokrFactor ?? 6,
     gradAccum: status.defaults.gradAccum ?? 1,
     seed: status.defaults.seed ?? 42,
     trigger: trigger ?? '',
@@ -195,6 +199,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         steps: form.steps, saveEvery: form.saveEvery, rank: form.rank, alpha: form.alpha,
         lr: form.lr, maxFrames: form.maxFrames, cropMode: form.cropMode,
         optimizer: form.optimizer, muonLrScale: form.muonLrScale,
+        adapterType: form.adapterType, lokrFactor: form.lokrFactor,
         gradAccum: form.gradAccum, seed: form.seed,
         basePrecision: form.basePrecision, holdout: form.holdout, evalEvery: form.evalEvery,
         cropAnchor: form.cropAnchor,
@@ -494,19 +499,48 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       {t('trainingStudio.mm3.optimizer', 'Optimizer')}
                     </span>
                     <select className={INPUT} value={form.optimizer}
-                      onChange={e => set('optimizer', e.target.value as 'muon' | 'adamw')}>
-                      <option value="muon">Muon</option>
+                      onChange={e => set('optimizer', e.target.value as 'muon' | 'adamw' | 'prodigy')}>
+                      <option value="prodigy">Prodigy (sets its own LR)</option>
                       <option value="adamw">AdamW</option>
+                      <option value="muon">Muon</option>
                     </select>
                     <span className="text-[10px] text-zinc-500 leading-snug">
                       {t('trainingStudio.mm3.optimizerHint',
-                        'AdamW is the default and matches the published SimpleTuner recipe. Muon was '
-                        + 'only ever chosen here because it FIT at rank 256, where AdamW carries a '
-                        + 'second momentum buffer costing an extra 2.7 GB; at rank 64 that is 0.7 GB '
-                        + 'and the constraint is gone. Muon also makes the learning rate meaningless — '
-                        + 'its update is normalised, so it needs a scale factor instead.')}
+                        'Prodigy estimates its own step size, so the learning rate below becomes a '
+                        + 'schedule multiplier only. On Green Day it converged to 8.19e-5 against the '
+                        + '8e-5 tuned by hand. It costs two extra state buffers (about +2.7 GB at rank '
+                        + '128) and CANNOT resume, so it is unavailable when mid-training previews are '
+                        + 'on. AdamW matches the published SimpleTuner recipe. Muon is NOT recommended: '
+                        + 'at the default LR scale of 64 it produced an adapter that rendered digital '
+                        + 'silence, because that value was tuned on a different model.')}
                     </span>
                   </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                      {t('trainingStudio.mm3.adapterType', 'Adapter type')}
+                    </span>
+                    <select className={INPUT} value={form.adapterType}
+                      onChange={e => set('adapterType', e.target.value as 'lora' | 'lokr')}>
+                      <option value="lokr">LoKr</option>
+                      <option value="lora">LoRA</option>
+                    </select>
+                    <span className="text-[10px] text-zinc-500 leading-snug">
+                      {t('trainingStudio.mm3.adapterTypeHint',
+                        'LoKr trains a Kronecker pair per slot instead of a low-rank pair, for a '
+                        + 'smaller file: about 528 MB at factor 6 against a rank-128 LoRA\'s 1.4 GB. '
+                        + 'NOT YET VALIDATED BY EAR — no LoKr adapter has been auditioned, so treat a '
+                        + 'LoKr run as an experiment. FACTOR is the size knob, not dim: factor 16 gives '
+                        + 'only 27M parameters, fewer than rank 64, and rank 64 was the setting that '
+                        + 'turned lyrics to gibberish.')}
+                    </span>
+                  </label>
+                  {form.adapterType === 'lokr' && (
+                    <NumField label={t('trainingStudio.mm3.lokrFactor', 'LoKr factor')}
+                      value={form.lokrFactor} onChange={v => set('lokrFactor', v)}
+                      hint={t('trainingStudio.mm3.lokrFactorHint',
+                        '6 gives ~528 MB and 264M parameters. Higher is smaller and less capable: '
+                        + '8 -> 274 MB, 16 -> 109 MB.') as string} />
+                  )}
                   {form.optimizer === 'muon' && (
                     <NumField label={t('trainingStudio.mm3.muonLrScale', 'Muon LR scale')}
                       value={form.muonLrScale} onChange={v => set('muonLrScale', v)}
