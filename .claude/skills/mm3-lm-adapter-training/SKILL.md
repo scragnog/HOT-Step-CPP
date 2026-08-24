@@ -15,10 +15,14 @@ System Of A Down, Lagwagon, White Stripes, Outkast, Alkaline Trio), each album
 laddered by ear across 20 checkpoints. Working log: `docs/plans/
 2026-08-23-mm3-soad-style-adapter-findings.md` *(gitignored, local only)*.
 
-## The recipe
+## THE CURRENT BEST RECIPE
+
+Keep this block up to date — it is the thing the in-app trainer should
+eventually be dialled to, and `docs/plans/` is gitignored so nothing there
+survives a fresh clone.
 
 ```
---rank 64 --alpha 64
+--rank 256 --alpha 256
 --optimizer adamw --lr 8e-5 --lr-end-frac 0.005 --warmup 50
 --max-frames 128 --crop-mode random --crop-anchor song
 --rank-dropout 0.1
@@ -28,9 +32,85 @@ laddered by ear across 20 checkpoints. Working log: `docs/plans/
 --holdout 0.15 --eval-every 250 --eval-crop 128
 ```
 
-This is bghira's published SimpleTuner configuration, adapted. It measured
-~800 ms/step and ~14.7 GB VRAM at rank 64 on a 32 GB card, so a 2500-step run
-is roughly **35 minutes per album**.
+**At render: MLP scale 0.50, attention 1.00, global 1.00. Ship ~ck2000.**
+
+Measured: 22.9 GB VRAM, 992 ms/step, so 2500 steps is ~40 min/album, and each
+checkpoint is 2.7 GB.
+
+Started from bghira's published SimpleTuner config at rank 64 and moved by ear
+over a 6-album sweep plus a rank x optimizer 2x2 (2026-08-23/24).
+
+### The three axes, which are separable
+
+This is the load-bearing insight. Earlier work conflated them and went in
+circles.
+
+| axis | what it controls | setting |
+|---|---|---|
+| **rank** | separating the style from the LM's *language ability* | **256** |
+| **MLP dial** (render) | vocal identity vs audio fidelity | **0.50** |
+| **steps** | how much likeness | 750–2000 |
+
+- **Rank 64 produces gibberish lyrics.** Fantastic likeness, good audio, but the
+  words stop being words. With only 64 directions the adapter commandeers ones
+  that also carry linguistic competence. Rank 256 has room to separate them.
+- **Rank 256 alone degrades audio quality** — and the MLP dial fixes it.
+  `mm3-lm-adapter.h` already documented why: attention carries the plan/genre,
+  the MLPs carry vocal identity AND the fidelity damage. At MLP 0.50 the
+  degradation lifts and lyric coherence survives (confirmed on two independent
+  seeds). MLP 0.75 was worse than 0.50 on both.
+- **The loss cannot see any of this.** r64 and r256 have near-identical held-out
+  curves (min 2.536 vs 2.569) and r256 ends *better*. "The lyrics became
+  gibberish" is invisible to cross-entropy over codes.
+
+### DO NOT USE MUON at the default scale
+
+`--optimizer muon --muon-lr-scale 64` on MM3 produces an adapter whose B
+matrices are **27x larger** than AdamW's, a 31x stronger delta, and at rank 64 it
+renders **digital silence** (all 800,000 samples exactly 0, verified — not
+quiet, zero). Rank 256 Muon survives but is audibly damaged.
+
+Weights are finite; there is no NaN. The scale is simply wrong: 64 was measured
+on the **ACE** planner LM, and Muon's update is normalised, so the scale IS the
+step size and does not transfer across models. This is not a verdict on Muon —
+it is an untuned hyperparameter. A sweep of {1, 4, 16} at rank 64 is pencilled
+in. Until then AdamW is also 21% faster and needs no tuning.
+
+The training log says so before you ever render: Muon's epoch loss ROSE before
+falling, mean |grad| was 11.6 vs AdamW's 4.5, and peak |grad| hit 300 vs 14.
+
+### Known confound
+
+Every rank above ran at lr 8e-5, which bghira tuned at **rank 64**. Higher rank
+generally wants a different LR, so rank and learning rate are confounded in
+these results. Either sweep the LR per rank, or adopt an optimizer that sets its
+own (Prodigy — not implemented; `lm-optim.h` branches on a single `want_muon`
+bool and only knows adamw/muon).
+
+### Dialling in the in-app trainer
+
+`MM3_LM_DEFAULTS` in `server/src/services/training/mm3Train.ts` is the single
+source of truth — the Jobs form is a VIEW of it and must never hold a second
+copy. It still carries the pre-sweep recipe. When testing ends:
+
+| field | current | target | why |
+|---|---|---|---|
+| `rank` / `alpha` | 64 / 64 | **256 / 256** | 64 eats the lyrics |
+| `lr` | 5e-5 | **8e-5** | bghira's published value; ours was stale |
+| `steps` | 1000 | **2500** | ear picks land 750–2000; nothing improves after |
+| `saveEvery` | 100 | **250** | the ladder is auditioned, so rungs must exist |
+| `maxFrames` | 4096 | **128** | random short windows; 4096 is the old regime |
+| `cropMode` | `beginning` | **`random`** | pairs with the 128-frame window |
+| `evalEvery` | 50 | **250** | eval is only a divergence alarm now |
+| *(new)* `evalCrop` | — | **128** | MUST be <= maxFrames or eval silently dies |
+| `lrEndFrac` | 0.008 | **0.005** | matches the runs above |
+| `optimizer` | adamw | adamw | keep; do not offer Muon until it is retuned |
+
+Render-side default for a shipped adapter: **scaleMlp 0.50**, scaleAttn 1.00.
+
+Anything still under test and NOT ready to promote: rank 128 (does half the rank
+still separate style from language, at 17.4 GB / 811 ms and a 1.4 GB checkpoint
+instead of 2.7 GB), LoKr, Prodigy, the Muon scale sweep.
 
 ## Do this first or nothing works
 
@@ -67,6 +147,10 @@ early and then rises for the rest of the run — but the checkpoint that actuall
 eval on as a divergence alarm only. Save every 250 and audition the ladder.
 
 Beyond ~2500 steps nothing improved in any album. 5000 steps is ~2x wasted time.
+
+The table above is from the rank-64 sweep. Rank 256 was auditioned at ck1000
+and ck2000 only; ck2000 won, and the finer rungs have not been walked at that
+rank. Do not assume the rank-64 optimum transfers.
 
 ## The two axes: likeness vs coherence
 
