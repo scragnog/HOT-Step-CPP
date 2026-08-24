@@ -51,7 +51,11 @@ export interface Mm3TrainLmRequest {
    *  like: an MM3 prompt is ~1,100 tokens, so the sequence is prompt-dominated. */
   maxFrames?: number;
   /** `beginning` reproduces the intros-only failure on purpose; do not ship it. */
-  cropMode?: 'random' | 'beginning';
+  cropMode?: 'random' | 'beginning' | 'structured';
+  /** `structured` only: the share of steps pinned to frame 0 and the share
+   *  pinned flush to the track's end. */
+  cropStartFrac?: number;
+  cropEndFrac?: number;
   optimizer?: 'muon' | 'adamw' | 'prodigy';
   /** 'lora' (default) or 'lokr'. LoKr writes lokr_weights.safetensors
    *  instead of a PEFT directory. */
@@ -140,6 +144,17 @@ export interface Mm3PreviewOptions {
   controlCaption?: string;
   /** Render both captions with NO adapter before step 1, as the reference. */
   baseline?: boolean;
+  /** Adapter MLP scale for the preview render, INDEPENDENT of what generation
+   *  uses. A preview is a progress read-out, not a release render: the MLP dial
+   *  trades identity against fidelity and is rank-dependent, so the scale that
+   *  best shows "is identity arriving yet" is not necessarily the one you would
+   *  ship at. Pinning it here also keeps the step-to-step comparison honest — if
+   *  the shipped generation default moved mid-campaign, previews from before and
+   *  after would stop being comparable. */
+  scaleMlp?: number;
+  /** Companion to scaleMlp. Left at 1.0 by default: attention is where identity
+   *  lives, and turning it down is a different experiment. */
+  scaleAttn?: number;
 }
 
 /** One rendered preview. The audio is served by

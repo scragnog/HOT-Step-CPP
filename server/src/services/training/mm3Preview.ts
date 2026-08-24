@@ -68,6 +68,13 @@ export const MM3_PREVIEW_DEFAULTS = {
   seed: 424242,
   baseline: true,
   control: true,
+  /** 0.65, and NOT the 0.5 that MM3_LM_ADAPTER_DEFAULT_SCALES ships for
+   *  generation. Previews were silently inheriting that 0.5 — a half-strength
+   *  MLP delta — so an adapter read as weaker in its own preview than in the
+   *  render the user then made by hand, and "identity is not arriving" is
+   *  exactly the wrong conclusion to draw from a dial. */
+  scaleMlp: 0.65,
+  scaleAttn: 1.0,
 } as const;
 
 /** Wall-clock bound on one preview render. A 24 s sample measures ~16 s of GPU
@@ -89,6 +96,10 @@ export interface Mm3PreviewPlan {
   everySteps: number;
   everyMinutes: number;
   baseline: boolean;
+  /** Adapter scales every preview in this run renders at. Fixed for the run so
+   *  step-to-step comparison stays legible. */
+  scaleMlp: number;
+  scaleAttn: number;
   /** Where the WAVs go: <run dir>/previews. */
   dir: string;
 }
@@ -238,8 +249,16 @@ export function planMm3Previews(o: {
     everySteps,
     everyMinutes,
     baseline: p?.baseline ?? MM3_PREVIEW_DEFAULTS.baseline,
+    scaleMlp: clampScale(p?.scaleMlp, MM3_PREVIEW_DEFAULTS.scaleMlp),
+    scaleAttn: clampScale(p?.scaleAttn, MM3_PREVIEW_DEFAULTS.scaleAttn),
     dir: path.join(o.outDir, 'previews'),
   };
+}
+
+/** A scale off the request body. 0 is MEANINGFUL — that component of the
+ *  adapter off — so it is not treated as "unset" the way a falsy check would. */
+function clampScale(v: number | undefined, dflt: number): number {
+  return Number.isFinite(v) ? Math.min(2, Math.max(0, v as number)) : dflt;
 }
 
 // ── rendering ───────────────────────────────────────────────────────────────

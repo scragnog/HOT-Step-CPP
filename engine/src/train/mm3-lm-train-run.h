@@ -190,7 +190,23 @@ struct MM3LmTrainArgs {
      *  supervised audio came from a minute in. --crop-anchor at least tells the
      *  model WHERE it is now; start-truncation removes the mismatch instead. */
     int64_t     max_frames = 4096;
-    std::string crop_mode = "beginning";  // random | beginning
+    std::string crop_mode = "beginning";  // random | beginning | structured
+    /** `structured` only. The share of training steps whose crop is pinned to
+     *  frame 0, and the share pinned flush to the track's end.
+     *
+     *  The end share is the one that buys EOS: `at_end` below is true only when
+     *  c0 + K reaches n_frames, so a random crop supervises an ending at rate
+     *  K/(n_frames-K+1) - 2.6% on a 204 s track at K=128. The start share buys
+     *  the opening, which a random crop hits at rate 1/(n_frames-K+1), i.e.
+     *  0.02%. Those two numbers are why a trained adapter renders a song that
+     *  begins mid-flow and never resolves.
+     *
+     *  Both pinned crops are DETERMINISTIC per song (c0 = 0 and c0 = n-K are
+     *  single positions, not ranges), so a large share of them is repeated
+     *  exposure to the same few seconds. 0.2 each is deliberately short of the
+     *  point where intros and outros start to memorise. */
+    double      crop_start_frac = 0.2;
+    double      crop_end_frac   = 0.2;
     int         grad_accum = 1, seed = 42;
     // ADAMW BY DEFAULT as of 2026-08-23, because the recipe it belongs to is
     // now rank 64.
@@ -1534,6 +1550,15 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             anchor_song ? "song (crops carry their true position)"
                         : "zero (every crop presented as the opening — the legacy convention)");
     jl("{\"type\":\"cropAnchor\",\"mode\":\"%s\"}", anchor_song ? "song" : "zero");
+    if (a.crop_mode == "structured") {
+        fprintf(stderr,
+                "[mm3-lm-train] crop policy: structured - %.0f%% at the opening, "
+                "%.0f%% flush to the end (where EOS is supervised), %.0f%% random\n",
+                a.crop_start_frac * 100.0, a.crop_end_frac * 100.0,
+                (1.0 - a.crop_start_frac - a.crop_end_frac) * 100.0);
+    }
+    jl("{\"type\":\"cropPolicy\",\"mode\":\"%s\",\"startFrac\":%.3f,\"endFrac\":%.3f}",
+       a.crop_mode.c_str(), a.crop_start_frac, a.crop_end_frac);
     std::vector<int32_t> sem_in, ac_in, tgt, pos;
     std::vector<float>   msk;
     int                  last_mask_S = 0;
@@ -2037,7 +2062,25 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             int64_t K = std::min<int64_t>(K_max, s.n_frames);
             int64_t c0 = 0;
             if (!is_reg && a.crop_mode != "beginning" && s.n_frames > K) {
-                c0 = (int64_t) (lm_rng_next(&rng) % (uint64_t) (s.n_frames - K + 1));
+                const int64_t span = s.n_frames - K;          // largest legal c0
+                if (a.crop_mode == "structured") {
+                    // One draw picks the bucket, a second places a random crop,
+                    // so the number of draws varies per step. That is safe for
+                    // resume - the crop RNG rides in the resume state, so the
+                    // sequence continues from wherever it actually got to - but
+                    // it does mean a run is only bit-reproducible against the
+                    // same crop mode, which was already true of the crop itself.
+                    const double u = (double) (lm_rng_next(&rng) % 1000000u) / 1000000.0;
+                    if (u < a.crop_start_frac) {
+                        c0 = 0;                               // the opening
+                    } else if (u < a.crop_start_frac + a.crop_end_frac) {
+                        c0 = span;                            // flush to the end: EOS
+                    } else {
+                        c0 = (int64_t) (lm_rng_next(&rng) % (uint64_t) (span + 1));
+                    }
+                } else {
+                    c0 = (int64_t) (lm_rng_next(&rng) % (uint64_t) (span + 1));
+                }
             }
             const bool    at_end = (c0 + K) >= s.n_frames;
             const int64_t Fin    = at_end ? K : K - 1;      // frames used as INPUT

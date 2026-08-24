@@ -218,9 +218,18 @@ static void print_usage(void) {
             "                learned the genre marginal again.  [--eval-n K] default 24\n"
             "                [--eval-crop F] default 689; PINNED independently of --crop so a\n"
             "                run at a different crop is still comparable. 0 = follow --crop.\n"
-            "                [--crop-mode random|beginning] default random, which covers the\n"
-            "                whole song. `beginning` always starts at 0 — what SimpleTuner's\n"
-            "                truncation_mode does, so it only ever sees each track's head.\n"
+            "                [--crop-mode random|beginning|structured] default random,\n"
+            "                which covers the whole song but leaves the opening and the\n"
+            "                ending to chance: on a 204 s track a 128-frame random crop\n"
+            "                reaches the end (the only place EOS is supervised) 2.6%% of\n"
+            "                the time and starts at frame 0 0.02%% of the time, so renders\n"
+            "                begin mid-song and never resolve. `beginning` always starts\n"
+            "                at 0 - what SimpleTuner's truncation_mode does - so it only\n"
+            "                ever sees each track's head and never an ending.\n"
+            "                `structured` pins a share of steps to each end and\n"
+            "                randomises the rest: [--crop-start-frac 0.2]\n"
+            "                [--crop-end-frac 0.2]. Costs nothing - same crop length,\n"
+            "                same memory.\n"
             "                [--ckpt-segments N] gradient checkpointing over the block stack.\n"
             "                Peak attention is n_blk*n_heads*S^2*4 B, so crop 2584 (30 s) needs\n"
             "                ~30.8 GB monolithic and is impossible without this; 6 segments\n"
@@ -1349,6 +1358,8 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--warmup"))        a.warmup       = atoi(next("--warmup"));
         else if (!strcmp(argv[i], "--max-frames"))    a.max_frames   = atoll(next("--max-frames"));
         else if (!strcmp(argv[i], "--crop-mode"))     a.crop_mode    = next("--crop-mode");
+        else if (!strcmp(argv[i], "--crop-start-frac")) a.crop_start_frac = atof(next("--crop-start-frac"));
+        else if (!strcmp(argv[i], "--crop-end-frac"))   a.crop_end_frac   = atof(next("--crop-end-frac"));
         else if (!strcmp(argv[i], "--crop-anchor"))   a.crop_anchor  = next("--crop-anchor");
         else if (!strcmp(argv[i], "--resume"))        a.resume_path  = next("--resume");
         else if (!strcmp(argv[i], "--pause-file"))    a.pause_file   = next("--pause-file");
@@ -1408,6 +1419,16 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     }
     if (a.crop_anchor != "song" && a.crop_anchor != "zero") {
         fprintf(stderr, "ace-train mm3-lm-train: --crop-anchor must be song or zero\n");
+        return 2;
+    }
+    if (a.crop_mode != "random" && a.crop_mode != "beginning" && a.crop_mode != "structured") {
+        fprintf(stderr, "ace-train mm3-lm-train: --crop-mode must be random, beginning or structured\n");
+        return 2;
+    }
+    if (a.crop_start_frac < 0.0 || a.crop_end_frac < 0.0
+        || a.crop_start_frac + a.crop_end_frac > 1.0) {
+        fprintf(stderr, "ace-train mm3-lm-train: --crop-start-frac and --crop-end-frac must be >= 0 "
+                        "and sum to <= 1\n");
         return 2;
     }
     if (a.rank_dropout < 0.0 || a.rank_dropout >= 1.0) {

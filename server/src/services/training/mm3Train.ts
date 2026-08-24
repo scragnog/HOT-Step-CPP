@@ -434,24 +434,69 @@ export const MM3_LM_DEFAULTS = {
   warmup: 50,
   gradAccum: 1,
   seed: 42,
-  /** 4096 frames = 164 s. With cropMode `beginning` this is his
-   *  `minimax_music_lm_max_frames: 0` — the whole track where it fits, and
-   *  otherwise truncated FROM THE START. */
-  maxFrames: 128,
-  /** `beginning` is now correct, not the trap it used to be. It was a trap at
-   *  maxFrames 1500, where it meant "the first 60 seconds of every song" — an
-   *  intros-only trainer, which is what the lm2 run became. At 4096 frames it
-   *  is start-truncation of most of a track, and it is what keeps the lyrics in
-   *  the prompt aligned with the audio being supervised. Random crops break
-   *  that alignment on every crop with a non-zero offset. */
-  cropMode: 'random' as 'random' | 'beginning',
+  /** 4272 frames = 171 s, which is 84% of a 204 s track — the most the card
+   *  holds at q8_0 / rank 128 / AdamW inside a 30 GB ceiling (est. 29.1 GB,
+   *  against a 27.16 GB MEASURED anchor at rank 64 / 4096 frames).
+   *
+   *  It was 128 — 5.1 SECONDS — because f16 + rank 128 + Prodigy costs 26.9 GB
+   *  before a single frame of crop, and the S term is quadratic. At that window
+   *  the adapter could not learn any structure longer than five seconds, and the
+   *  two positions that decide whether a render sounds like a song were left to
+   *  chance: EOS supervised on 2.6% of steps, frame 0 on 0.02%. Renders began
+   *  mid-flow and never resolved.
+   *
+   *  Whole-track training is NOT reachable here: 9 of 10 tracks in the reference
+   *  dataset exceed 4096 frames, and the median (5099) would need ~17 GB of
+   *  attention scores alone. cropMode `structured` is what covers the gap. */
+  maxFrames: 4272,
+  /** `structured`: a fixed share of steps pinned to frame 0, a fixed share
+   *  flush to the track's end, the rest random.
+   *
+   *  Neither of the other two modes can work here, and for opposite reasons.
+   *  `random` leaves the opening and the ending to chance — 0.02% and 2.6% of
+   *  steps on a 204 s track. `beginning` always starts at 0, so it teaches the
+   *  opening perfectly and an ending NEVER, because EOS is only supervised when
+   *  a crop reaches n_frames and no track here fits in the window. That is the
+   *  intros-only trainer the lm2 run became.
+   *
+   *  `structured` costs nothing over `random` — same crop length, same memory —
+   *  and it is what the EVAL plan in mm3-lm-train-run.h has always done ("evenly
+   *  spaced starts, with the last crop flush to the end so the set always
+   *  includes a real ending"). Training simply never got the same treatment. */
+  cropMode: 'structured' as 'random' | 'beginning' | 'structured',
+  /** 85% anchored at frame 0, 15% flush to the track's end, NO random crops.
+   *
+   *  Frame-0 anchoring is the point, and it is a stronger claim than "cover the
+   *  song evenly". A random crop presents the prompt followed immediately by
+   *  mid-song audio with nothing in front of it, and supervises that — which
+   *  teaches the model that audio may legitimately begin at an arbitrary
+   *  position. Anchored at 0, every supervised position carries the song's real
+   *  history, which is the condition it will actually be in at inference; at
+   *  maxFrames 4272 that is every position up to 171 s.
+   *
+   *  The 15% tail share buys the one thing frame-0 anchoring cannot: `at_end`
+   *  below is true only when a crop reaches n_frames, so a flush-to-the-end crop
+   *  is the ONLY place EOS is supervised, and 9 of 10 reference tracks are
+   *  longer than the window.
+   *
+   *  Both positions are DETERMINISTIC per song, so this is repeated exposure to
+   *  the same spans rather than augmentation — the standard trade for start
+   *  truncation, and what SimpleTuner's truncation_mode does. */
+  cropStartFrac: 0.85,
+  cropEndFrac: 0.15,
   /** AdamW, matching `adamw_bf16`. Muon was only ever chosen because it FIT at
    *  rank 256 (AdamW's second momentum buffer costs +2.66 GB there, +0.67 GB at
    *  rank 64) and it made `lr` meaningless — its update is normalised, so it
    *  needed a --muon-lr-scale that was never tuned past "best of four values". */
-  /** Prodigy sets its own step size, so `lr` becomes a schedule multiplier only
-   *  and the trainer forces it to 1.0. On Green Day it converged to an effective
-   *  8.19e-5 against the 8e-5 tuned by hand — within 2.4%, from d0 = 1e-6 and no
+  /** AdamW, because Prodigy's three extra parameter-sized buffers cost ~2.6 GB
+   *  and that is 800 frames of crop — and crop length is the axis that decides
+   *  whether the adapter learns song structure at all, while Prodigy has never
+   *  once been validated by ear. Prodigy remains selectable and still resumes.
+   *
+   *  What Prodigy buys, when the budget is not the binding constraint: it sets
+   *  its own step size, so `lr` becomes a schedule multiplier only and the
+   *  trainer forces it to 1.0. On Green Day it converged to an effective 8.19e-5
+   *  against the 8e-5 tuned by hand — within 2.4%, from d0 = 1e-6 and no
    *  guidance.
    *
    *  It resumes as of resume format v2, so mid-training previews work: s, d and
@@ -461,25 +506,39 @@ export const MM3_LM_DEFAULTS = {
    *
    *  NOT YET VALIDATED BY EAR — its only comparison render was made on the f16
    *  base and is void. */
-  optimizer: 'prodigy' as 'muon' | 'adamw' | 'prodigy',
+  optimizer: 'adamw' as 'muon' | 'adamw' | 'prodigy',
   muonLrScale: 64,
   /** q8_0, not f16 — see the note on Mm3TrainModels. Same step time since the
    *  cpy-q-occupancy patch, ~8.5 GB less resident, and therefore the only one
    *  of the two that survives a GPU shared with a desktop session. Pick f16
    *  only to reproduce a pre-patch run exactly. */
-  /** f16, not q8_0. A 750-step adapter trained on f16 and rendered on q8_0 beat
-   *  a 2000-step q8_0-trained one by ear. Costs 26.7 GB against 17.5 GB at rank
-   *  128, and is slightly FASTER per step (842 vs 924 ms) because it skips
-   *  dequantisation. The rank ladder downgrades automatically on smaller cards.
+  /** q8_0, and this REVERSES an ear result — deliberately, with the reasoning
+   *  on the record so it can be re-tested.
+   *
+   *  The result: a 750-step f16-trained adapter beat a 2000-step q8_0-trained
+   *  one, rendered on q8_0 both times. The reason it does not decide this: it
+   *  was collected at maxFrames 128, where both candidates had been trained on
+   *  5-second fragments and neither had learned how a song starts or ends. It
+   *  compared two structurally broken adapters, so it says nothing about which
+   *  base is better once the crop is fixed.
+   *
+   *  What f16 costs HERE is 8.0 GB, and 8.0 GB is 2600 frames of crop — the
+   *  difference between covering a third of a track and covering 84% of one.
+   *  Re-run the comparison at this crop before spending it again.
+   *
    *  RENDER on q8_0 regardless: adapters are garbled on an f16 base. */
-  basePrecision: 'f16' as Mm3BasePrecision,
+  basePrecision: 'q8_0' as Mm3BasePrecision,
   holdout: 0.15,
   evalEvery: 250,
   /** MUST be <= maxFrames. The engine default is 400 and is pinned independently
    *  of the crop, so at a 128-frame crop EVERY eval crop exceeds the sequence
    *  limit, all of them are skipped, and run_eval returns "no result" silently —
-   *  the run reports an eval plan at startup and then never evaluates. */
-  evalCrop: 128,
+   *  the run reports an eval plan at startup and then never evaluates.
+   *
+   *  Held at 1024 rather than tracking maxFrames: eval is forward-only and reuses
+   *  the training arena, so a long eval crop is affordable, but held-out CE is
+   *  only comparable ACROSS runs while the crop it is measured at stays put. */
+  evalCrop: 1024,
   /** LyCORIS-style rank masking, part of bghira's published config. */
   rankDropout: 0.1,
   /** LoKr: dW = kron(w1, w2) instead of a low-rank pair.
@@ -567,7 +626,9 @@ export interface ResolvedMm3TrainLmOptions {
   gradAccum: number;
   seed: number;
   maxFrames: number;
-  cropMode: 'random' | 'beginning';
+  cropMode: 'random' | 'beginning' | 'structured';
+  cropStartFrac: number;
+  cropEndFrac: number;
   optimizer: 'muon' | 'adamw' | 'prodigy';
   muonLrScale: number;
   holdout: number;
@@ -627,6 +688,10 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
     '--crop-mode', o.cropMode,
     '--optimizer', o.optimizer,
   ];
+  if (o.cropMode === 'structured') {
+    args.push('--crop-start-frac', String(o.cropStartFrac));
+    args.push('--crop-end-frac', String(o.cropEndFrac));
+  }
   if (o.optimizer === 'muon') args.push('--muon-lr-scale', String(o.muonLrScale));
   args.push('--holdout', String(o.holdout));
   args.push('--eval-every', String(o.evalEvery));

@@ -42,7 +42,9 @@ interface FormState {
   alpha: number;
   lr: number;
   maxFrames: number;
-  cropMode: 'random' | 'beginning';
+  cropMode: 'random' | 'beginning' | 'structured';
+  cropStartFrac: number;
+  cropEndFrac: number;
   optimizer: 'muon' | 'adamw' | 'prodigy';
   muonLrScale: number;
   adapterType: 'lora' | 'lokr';
@@ -63,6 +65,7 @@ interface FormState {
   previewCaption: string;
   previewControl: boolean;
   previewBaseline: boolean;
+  previewScaleMlp: number;
   regDatasetId: string;
   regEvery: number;
   regTopK: number;
@@ -122,7 +125,9 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     alpha: status.defaults.alpha ?? 256,
     lr: status.defaults.lr ?? 8e-5,
     maxFrames: status.defaults.maxFrames ?? 1500,
-    cropMode: (status.defaults.cropMode as 'random' | 'beginning') ?? 'random',
+    cropMode: (status.defaults.cropMode as 'random' | 'beginning' | 'structured') ?? 'structured',
+    cropStartFrac: status.defaults.cropStartFrac ?? 0.85,
+    cropEndFrac: status.defaults.cropEndFrac ?? 0.15,
     optimizer: status.defaults.optimizer ?? 'adamw',
     muonLrScale: status.defaults.muonLrScale ?? 64,
     adapterType: status.defaults.adapterType ?? 'lora',
@@ -155,6 +160,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     previewCaption: '',
     previewControl: true,
     previewBaseline: true,
+    previewScaleMlp: 0.65,
     // Prior preservation is off until a corpus is chosen: it needs a second
     // dataset the user has to nominate, and defaulting it on would silently
     // train a different objective than the form otherwise describes.
@@ -205,6 +211,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
       const body: Mm3TrainLmRequest = {
         steps: form.steps, saveEvery: form.saveEvery, rank: form.rank, alpha: form.alpha,
         lr: form.lr, maxFrames: form.maxFrames, cropMode: form.cropMode,
+        cropStartFrac: form.cropStartFrac, cropEndFrac: form.cropEndFrac,
         optimizer: form.optimizer, muonLrScale: form.muonLrScale,
         adapterType: form.adapterType, lokrFactor: form.lokrFactor,
         sharedCaption: form.sharedCaption,
@@ -229,6 +236,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
             seed: form.previewSeed,
             control: form.previewControl,
             baseline: form.previewBaseline,
+            scaleMlp: form.previewScaleMlp,
             ...(form.previewCaption.trim() ? { caption: form.previewCaption.trim() } : {}),
           },
         } : {}),
@@ -309,6 +317,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 onChange={v => set('rank', v)} />
               <NumField label={t('trainingStudio.mm3.maxFrames', 'Crop (frames)')} value={form.maxFrames}
                 onChange={v => set('maxFrames', v)} step={50} />
+              <NumField label={t('trainingStudio.mm3.cropStartFrac', 'Crops at song start')}
+                value={form.cropStartFrac} onChange={v => set('cropStartFrac', v)} step={0.05}
+                hint={t('trainingStudio.mm3.cropStartFracHint',
+                  'Share anchored at frame 0. `structured` only.') as string} />
+              <NumField label={t('trainingStudio.mm3.cropEndFrac', 'Crops at song end')}
+                value={form.cropEndFrac} onChange={v => set('cropEndFrac', v)} step={0.05}
+                hint={t('trainingStudio.mm3.cropEndFracHint',
+                  'Share flush to the track end — the only place EOS is taught.') as string} />
             </div>
             <label className="flex flex-col gap-1 mt-3">
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
@@ -369,6 +385,11 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   value={form.previewSeed} onChange={v => set('previewSeed', v)}
                   hint={t('trainingStudio.mm3.previewSeedHint',
                     'Fixed across the run') as string} />
+                <NumField label={t('trainingStudio.mm3.previewScaleMlp', 'Preview MLP scale')}
+                  value={form.previewScaleMlp} onChange={v => set('previewScaleMlp', v)}
+                  step={0.05} hint={t('trainingStudio.mm3.previewScaleMlpHint',
+                    'How hard the adapter’s MLP delta is applied in previews only. '
+                    + '1 = full, 0 = attention only.') as string} />
               </div>
               <label className="flex flex-col gap-1 mt-3">
                 <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
@@ -619,24 +640,34 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     {t('trainingStudio.mm3.cropMode', 'Crop mode')}
                   </span>
                   <select className={INPUT} value={form.cropMode}
-                    onChange={e => set('cropMode', e.target.value as 'random' | 'beginning')}>
+                    onChange={e => set('cropMode', e.target.value as 'random' | 'beginning' | 'structured')}>
+                    <option value="structured">structured</option>
                     <option value="random">random</option>
                     <option value="beginning">beginning</option>
                   </select>
                   <span className={`text-[10px] leading-snug ${
-                    form.cropMode === 'beginning' && form.maxFrames < 2500
+                    form.cropMode !== 'structured'
                       ? 'text-amber-600/80 dark:text-amber-400/80' : 'text-zinc-500'
                   }`}>
-                    {form.cropMode === 'beginning' && form.maxFrames < 2500
-                      ? t('trainingStudio.mm3.cropModeIntros',
-                          'At this crop length `beginning` means the first minute of every song — an '
-                          + 'intros-only trainer, which is the failure the lm2 run hit. Either raise the '
-                          + 'crop to 4096 frames or switch to random.')
-                      : t('trainingStudio.mm3.cropModeHint',
-                          '`beginning` takes each track from the start, which keeps the lyrics in the '
-                          + 'prompt aligned with the audio being supervised. That is what SimpleTuner '
-                          + 'does and it is the default. `random` samples a window from anywhere in the '
-                          + 'track, which breaks that alignment on every crop that does not start at zero.')}
+                    {form.cropMode === 'random'
+                      ? t('trainingStudio.mm3.cropModeRandom',
+                          '`random` hands the model a prompt followed straight by mid-song audio with '
+                          + 'no history in front of it, and supervises it — so it learns that a song may '
+                          + 'begin at any position. It also leaves the ending to chance: EOS is only '
+                          + 'supervised by a crop that reaches the track end, which on a 3-minute song '
+                          + 'is under 3% of steps. Renders begin mid-flow and never resolve.')
+                      : form.cropMode === 'beginning'
+                        ? t('trainingStudio.mm3.cropModeIntros',
+                            '`beginning` takes every track from frame 0, so every supervised position '
+                            + 'has the song’s real history in front of it. What it can never teach is an '
+                            + 'ending: EOS is only supervised by a crop that reaches the track end, and '
+                            + 'it never does unless the whole song fits in the window.')
+                        : t('trainingStudio.mm3.cropModeStructured',
+                            '`structured` anchors most crops at frame 0, so every supervised position '
+                            + 'carries the song’s real history exactly as it will at generation time, '
+                            + 'and pins the rest flush to the track end — the only place EOS is '
+                            + 'supervised. This is the default and the two others are each broken at '
+                            + 'one end.')}
                   </span>
                 </label>
                 <label className="flex flex-col gap-1">

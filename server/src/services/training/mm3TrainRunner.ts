@@ -216,6 +216,26 @@ function relay(job: TrainingJob, ev: Record<string, unknown>, st: RelayState): v
  *  Returns the relay state so a caller can see whether the child PAUSED rather
  *  than finished — the engine is back up by then, which is exactly the window a
  *  preview render needs. */
+/** Open the run's log files. The directory comes from `--out` in the argument
+ *  list rather than from a parameter, so both job kinds get it without every
+ *  caller having to thread it through. A log that cannot be opened is not a
+ *  reason to fail a training run, so every failure here is swallowed and the
+ *  run proceeds without a trace. */
+function openRunLog(args: string[]): { jsonl: fs.WriteStream | null; console: fs.WriteStream | null } {
+  const i = args.indexOf('--out');
+  const dir = i >= 0 ? args[i + 1] : '';
+  if (!dir) return { jsonl: null, console: null };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    return {
+      jsonl:   fs.createWriteStream(path.join(dir, 'train-log.jsonl'), { flags: 'a' }),
+      console: fs.createWriteStream(path.join(dir, 'train-console.log'), { flags: 'a' }),
+    };
+  } catch {
+    return { jsonl: null, console: null };
+  }
+}
+
 async function runMm3AceTrain(
   job: TrainingJob,
   kind: 'mm3-codes' | 'mm3-lm-train',
@@ -260,11 +280,25 @@ async function runMm3AceTrain(
     const child = spawn(exe, args, { windowsHide: true });
     job.child = child;
 
+    // The run's own log, beside its checkpoints. Without this the trainer's
+    // JSONL is parsed into job events and dropped, and only the 30-line stderr
+    // tail below survives — so a question asked after the fact ("step 750 came
+    // out as noise, what happened at 750?") has nothing to read: no loss curve,
+    // no Prodigy d, no warning. Opened in APPEND mode because a run that pauses
+    // for a preview re-enters this function per segment, and truncating would
+    // leave only the last one.
+    const sinks = openRunLog(args);
+    const record = (stream: fs.WriteStream | null, line: string): void => {
+      if (!stream) return;
+      try { stream.write(line + '\n'); } catch { /* a full disk must not kill a run */ }
+    };
+
     const stderrTail: string[] = [];
     child.stderr?.on('data', (buf: Buffer) => {
       for (const raw of buf.toString('utf-8').split(/[\r\n]+/)) {
         const line = raw.trim();
         if (!line) continue;
+        record(sinks.console, line);
         stderrTail.push(line);
         if (stderrTail.length > 30) stderrTail.shift();
       }
@@ -272,6 +306,7 @@ async function runMm3AceTrain(
 
     const rl = readline.createInterface({ input: child.stdout! });
     rl.on('line', (line) => {
+      record(sinks.jsonl, line);
       try {
         const ev = JSON.parse(line) as Record<string, unknown>;
         if (ev && typeof ev === 'object') relay(job, ev, st);
@@ -291,6 +326,8 @@ async function runMm3AceTrain(
     }).finally(() => {
       clearTimeout(killer);
       try { rl.close(); } catch { /* already closed */ }
+      try { sinks.jsonl?.end(); } catch { /* already closed */ }
+      try { sinks.console?.end(); } catch { /* already closed */ }
       job.child = undefined;
     });
 
@@ -412,6 +449,7 @@ async function renderPreviewSet(
       const preview = await renderMm3Preview({
         spec, seconds: plan.seconds, seed: plan.seed, adapterPath,
         step, totalSteps, dir: plan.dir, loss,
+        scaleMlp: plan.scaleMlp, scaleAttn: plan.scaleAttn,
       });
       pushEvent(job, { type: 'preview', run: runName, preview });
       log(job, 'info',

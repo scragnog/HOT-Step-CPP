@@ -132,7 +132,9 @@ export interface Mm3TrainLmRequest {
   gradAccum?: number;
   seed?: number;
   maxFrames?: number;
-  cropMode?: 'random' | 'beginning';
+  cropMode?: 'random' | 'beginning' | 'structured';
+  cropStartFrac?: number;
+  cropEndFrac?: number;
   optimizer?: 'muon' | 'adamw' | 'prodigy';
   /** One caption used for EVERY track, persisted to
    *  <dataset>/_shared-caption.txt. Empty = per-song .mm3.txt files. */
@@ -204,6 +206,10 @@ export interface Mm3PreviewOptions {
   control?: boolean;
   controlCaption?: string;
   baseline?: boolean;
+  /** Adapter MLP scale for the preview render, independent of the scale
+   *  generation uses. Defaults to 0.65 server-side. */
+  scaleMlp?: number;
+  scaleAttn?: number;
 }
 
 /** One rendered preview; the audio is at

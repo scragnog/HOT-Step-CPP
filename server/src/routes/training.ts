@@ -1830,6 +1830,12 @@ function parseMm3PreviewOptions(raw: unknown): Mm3PreviewOptions | undefined {
   if (everySteps <= 0 && everyMinutes <= 0) return undefined;
   const str = (k: string): string | undefined =>
     typeof p[k] === 'string' ? (p[k] as string) : undefined;
+  // undefined, not a default: the planner owns the default, and substituting one
+  // here would mean two places to change it.
+  const flt = (k: string): number | undefined => {
+    const v = Number(p[k]);
+    return Number.isFinite(v) ? Math.min(2, Math.max(0, v)) : undefined;
+  };
   return {
     everySteps,
     everyMinutes,
@@ -1840,6 +1846,8 @@ function parseMm3PreviewOptions(raw: unknown): Mm3PreviewOptions | undefined {
     control: p.control !== false,
     controlCaption: str('controlCaption'),
     baseline: p.baseline !== false,
+    scaleMlp: flt('scaleMlp'),
+    scaleAttn: flt('scaleAttn'),
   };
 }
 
@@ -1957,7 +1965,14 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
         ? b.optimizer
         : D.optimizer;
     const basePrecision: Mm3BasePrecision = chosenBase;
-    const cropMode  = b.cropMode === 'beginning' ? 'beginning' : D.cropMode;
+    // Enumerated, not a two-way test. The old form collapsed anything that was
+    // not 'beginning' onto the default, so a request for 'structured' would have
+    // been silently ignored — the same manual-whitelist shape that has already
+    // produced a set of dead-looking knobs elsewhere in this file.
+    const cropMode: 'random' | 'beginning' | 'structured' =
+      b.cropMode === 'beginning' || b.cropMode === 'random' || b.cropMode === 'structured'
+        ? b.cropMode
+        : D.cropMode;
     const runName   = mm3RunName(ds.slug);
     // One shared caption for the whole album is the single biggest quality lever
     // found in the 2026-08-23/24 sweep. Convention: `_shared-caption.txt` beside
@@ -2007,6 +2022,8 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       seed:        num('seed', D.seed, 0, 2 ** 31 - 1),
       maxFrames:   num('maxFrames', D.maxFrames, 64, 9000),
       cropMode,
+      cropStartFrac: num('cropStartFrac', D.cropStartFrac, 0, 1),
+      cropEndFrac:   num('cropEndFrac', D.cropEndFrac, 0, 1),
       optimizer,
       muonLrScale: num('muonLrScale', D.muonLrScale, 0.01, 4096),
       basePrecision,
