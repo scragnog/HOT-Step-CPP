@@ -22,19 +22,105 @@ eventually be dialled to, and `docs/plans/` is gitignored so nothing there
 survives a fresh clone.
 
 ```
+--lm mm3-lm-q8_0.gguf
 --rank 128 --alpha 128
 --optimizer adamw --lr 8e-5 --lr-end-frac 0.005 --warmup 50
---max-frames 128 --crop-mode random --crop-anchor song
+--max-frames 4272 --crop-mode structured --crop-start-frac 0.85 --crop-end-frac 0.15
+--crop-anchor song
 --rank-dropout 0.1
 --steps 2500 --save-every 250
 --caption-file <one shared caption for the whole album>
 --trigger "<artist>" --trigger-prepend
---holdout 0.15 --eval-every 250 --eval-crop 128
+--holdout 0.15 --eval-every 250 --eval-crop 1024
 ```
 
 **At render: MLP scale 0.63-0.75, attention 1.00, global 1.00. Ship ~ck2000.**
 
-Measured: 17.5 GB VRAM, 924 ms/step, ~39 min/album, 1.4 GB per checkpoint.
+Est. 29.1 GB VRAM. **The crop settings changed on 2026-08-24 and everything
+auditioned before that date was trained at `--max-frames 128 --crop-mode
+random` — five seconds per step. Treat pre-2026-08-24 ear results about the
+BASE and the OPTIMIZER as void** (see below); the rank and MLP-dial findings
+stand, because they were measured against each other under the same broken
+crop.
+
+### The crop is the axis that decides whether it sounds like a song
+
+Found 2026-08-24 after every checkpoint of an ADTR run rendered a track that
+began part-way through a song and faded out mid-render without resolving.
+
+The crop was **128 frames — 5.12 seconds — against a 204 s median track.** Two
+separate defects came out of that, and the second is the one that bites:
+
+**1. Under-coverage.** Measured on the reference dataset (10 tracks, median
+5099 frames):
+
+| | |
+|---|---|
+| crops reaching the track end, the ONLY place EOS is supervised | **2.6%** |
+| crops starting at frame 0 | **0.02%** |
+
+So the model was asked at render time to produce an opening and an ending it
+had essentially never been shown.
+
+**2. Random crops teach the wrong lesson.** A random crop presents the prompt
+followed immediately by mid-song audio *with no history in front of it*, and
+supervises it. Every one of those teaches "a song may legitimately begin at
+position c0". A render that starts mid-flow, or stops and restarts, is the
+model doing what it was trained to do. This framing is ScragBot's and it is
+better than "under-coverage" — it explains the fades, which under-coverage
+alone does not.
+
+Hence `--crop-mode structured`: 85% of steps anchored at frame 0, so every
+supervised position carries the song's real history exactly as it will at
+generation time, and 15% flush to the track end, which is the only place EOS
+is supervised. `beginning` cannot do the second and `random` cannot do either.
+
+**Whole-track training is not reachable on a 32 GB card.** 9 of 10 reference
+tracks exceed 4096 frames and the median would need ~17 GB of attention scores
+alone.
+
+### Crop length is QUADRATIC in VRAM, and that is why f16 lost
+
+Peak is `loaded + perRank*rank + 0.2679*S + 0.00044765*S^2 + const`, with
+`S = 1142 + frames`. The backward retains `[S, S, heads]` attention scores and
+**ggml's flash-attn has no backward**, so there is no cheaper path. What fits
+in 30 GB:
+
+| config | max crop | covers a 204 s track |
+|---|---|---|
+| f16 r128 prodigy | 1650 fr / 66 s | 32% |
+| f16 r128 adamw | 2496 fr / 100 s | 49% |
+| f16 r64 adamw | 3190 fr / 128 s | 63% |
+| **q8_0 r128 adamw** | **4272 fr / 171 s** | **84%** |
+| q8_0 r64 adamw | 4771 fr / 191 s | 94% |
+
+f16 and Prodigy together were holding 10.6 GB, which is ~2600 frames of crop.
+Both were dropped for the crop.
+
+**This reverses the f16-over-q8_0 ear result deliberately.** That test (a
+750-step f16-trained adapter beating a 2000-step q8_0-trained one) was run at
+the 128-frame crop, where *both* candidates had been trained on five-second
+fragments and neither had learned how a song starts or ends. It compared two
+structurally broken adapters. **Re-run it at this crop before spending 8 GB on
+f16 again.**
+
+### Supervising fewer positions does NOT buy VRAM
+
+Worth writing down because it is an intuitive and wrong idea. Restricting the
+*supervised* span while keeping the visible prefix saves **compute, not memory**:
+
+- peak is driven by the **visible** span S, not by `s_tr`;
+- the CE head is already chunked — `lm_ckpt_head_chunked` loops
+  `for (i = 0; i < s_tr; i += CH)` allocating per chunk from an arena sized by
+  `s_max`, so the supervised count drives iteration count;
+- allocation happens upfront at `s_max` regardless of the actual S per step.
+
+The version that WOULD buy the memory is a **no-grad frozen-KV prefix** —
+condition on 0..E without retaining prefix activations, supervise only the
+tail. That turns O(S^2) into O(S) plus a small window, and it is an engine
+project (split forward: frozen prefix -> trained tail), not a config change.
+It also costs exactness: the adapter stops getting gradient for how it shapes
+the prefix. NOT BUILT.
 
 **This LoRA configuration is FROZEN as of 2026-08-24** — settled by ear over a
 rank sweep at 64/128/256 with a full MLP dial at each. Further LoRA tuning is
@@ -360,6 +446,22 @@ ear. RMS is only a rough guide: `BASE_no_adapter_f16` at 0.1213 was fine while
   wildly between adjacent checkpoints. Use the epoch mean.
 - Windows file-locks `ace-train.exe` while training; you cannot rebuild the
   engine mid-run.
+
+## Every run keeps its own log (since 2026-08-24)
+
+`<run dir>/train-log.jsonl` and `<run dir>/train-console.log`, beside the
+checkpoints. Before this the trainer's JSONL was parsed into job events and
+dropped and only a 30-line stderr tail survived, so any question asked after a
+run finished — "step 750 came out as noise, what happened at 750?" — had no
+loss curve, no Prodigy `d` and no warning left to read. Check these FIRST.
+
+## A single gibberish preview is not necessarily a training fault
+
+Previews are ONE autoregressive sample at one seed. A 1-ULP logit change flips
+a token and diverges the whole render, so an isolated bad checkpoint between
+two good ones is as likely to be the sampling lottery as a real instability.
+**Re-render that checkpoint at two other seeds before believing it.** The
+checkpoint is on disk; it costs about a minute.
 
 ## Verify a run started correctly
 
