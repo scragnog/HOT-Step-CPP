@@ -299,7 +299,7 @@
     "trainingStudio.drawer.captionPlaceholder": "Describe the groove, instruments, production…",
     "trainingStudio.drawer.mm3Caption": "MM3 caption",
     "trainingStudio.drawer.mm3Placeholder": "MM3 Structured Caption (Global Metadata / Vocal Details / Arrangement)…",
-    "trainingStudio.drawer.mm3Missing": "No MM3 caption yet — run labeling with MOSS to generate one.",
+    "trainingStudio.drawer.mm3Missing": "No MM3 caption yet — run labeling with MOSS or Gemini (hears the audio) to generate one.",
     "trainingStudio.drawer.lyricsPlaceholder": "[Verse]\n…",
     "trainingStudio.drawer.instrumental": "Instrumental (no lyrics)",
     "trainingStudio.drawer.close": "Close",

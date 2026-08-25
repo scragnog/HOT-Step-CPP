@@ -997,9 +997,9 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
               };
               const fields = await captionLimiter.run(() => enhanceCaption(promptSample, ds, {
                 provider: opts.caption?.provider || config.lireek.defaultProvider,
-                // MOSS only: emit the MM3 Structured Caption alongside the AS1.5
-                // block. One extra decode off an encode already paid for, and it
-                // is what `ace-train mm3-condition` reads.
+                // Emit the MM3 Structured Caption alongside the AS1.5 block —
+                // MOSS does it as a second decode, Gemini as a second audio
+                // call. It is what `ace-train mm3-condition` reads.
                 wantMm3: true,
                 model: opts.caption?.model,
                 includeLyricsExcerpt: true,

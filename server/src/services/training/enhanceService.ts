@@ -16,7 +16,9 @@ import { searchSongLyrics } from '../lireek/geniusService.js';
 import { getProvider } from '../lireek/llm/registry.js';
 import { sanitizeHeaders } from './lyricsSanitizer.js';
 import { buildUserPrompt, parseStructuredResponse, CAPTION_INSTRUCTIONS, CAPTION_TOP_P } from './captionPrompt.js';
-import { captionWithMoss, correctFactsInProse } from './mossCaption.js';
+import {
+  applyFactSubstitution, captionWithMoss, correctFactsInProse, MM3_INSTRUCTIONS,
+} from './mossCaption.js';
 import type { TrainingDatasetRow, TrainingSample } from './types.js';
 
 const MAX_CAPTION_CHARS = 4000;
@@ -310,18 +312,28 @@ async function captionWithMossProvider(
   }
 
   if (result.mm3?.trim()) {
-    const stem = sample.audioPath.replace(/\.[^.\\/]+$/, '');
-    const dst = `${stem}.mm3.txt`;
-    try {
-      if (fs.existsSync(dst) && !fs.existsSync(`${dst}.prev`)) fs.renameSync(dst, `${dst}.prev`);
-      fs.writeFileSync(dst, result.mm3, 'utf8');
-      opts.log?.('info', `wrote MM3 structured caption (${path.basename(dst)})`);
-    } catch (err: any) {
-      opts.log?.('warn', `MM3 caption not written: ${String(err?.message || err).slice(0, 160)}`);
-    }
+    writeMm3Sidecar(sample, result.mm3, opts.log);
   }
 
   return out;
+}
+
+/** Write `<stem>.mm3.txt` with the one-time `.prev` backup. Shared by the MOSS
+ *  and cloud caption paths so both leave identical files behind. */
+function writeMm3Sidecar(
+  sample: TrainingSample,
+  mm3: string,
+  log?: (level: 'info' | 'warn', message: string) => void,
+): void {
+  const stem = sample.audioPath.replace(/\.[^.\\/]+$/, '');
+  const dst = `${stem}.mm3.txt`;
+  try {
+    if (fs.existsSync(dst) && !fs.existsSync(`${dst}.prev`)) fs.renameSync(dst, `${dst}.prev`);
+    fs.writeFileSync(dst, mm3, 'utf8');
+    log?.('info', `wrote MM3 structured caption (${path.basename(dst)})`);
+  } catch (err: any) {
+    log?.('warn', `MM3 caption not written: ${String(err?.message || err).slice(0, 160)}`);
+  }
 }
 
 /**
@@ -373,6 +385,38 @@ export async function enhanceCaption(
           { temperature: opts.temperature, topP: CAPTION_TOP_P }, opts.signal);
         if (text.trim()) {
           opts.log?.('info', `captioned from audio (${(mp3.length / 1048576).toFixed(1)} MB mp3)`);
+        }
+        // ── the MM3 Structured Caption, from the same audio ──
+        //
+        // MM3 emission was a MOSS-only feature by accident of history (the MM3
+        // tooling shipped while MOSS was the captioner). Same proven prompt,
+        // second call on the same mp3 buffer — the transcode is paid once and
+        // the audio upload is the only real per-call cost. Low temperature:
+        // captions are facts, not prose style (MOSS runs greedy for the same
+        // reason). The result gets the exact post-processing MOSS output gets:
+        // fact substitution rewrites Basic Attributes from LOCAL analysis, so
+        // the model's bpm/key guesses never reach the trainer.
+        if (opts.wantMm3 !== false && text.trim()) {
+          try {
+            const mm3raw = await callGeminiWithAudio(model, MM3_INSTRUCTIONS, mp3,
+              { temperature: 0.2, topP: CAPTION_TOP_P }, opts.signal);
+            if (mm3raw.trim()) {
+              const mm3 = applyFactSubstitution(mm3raw, {
+                bpm: sample.bpm,
+                keyscale: sample.key,
+                signature: sample.signature,
+                genre: sample.genre,
+                observedCaption: sample.caption,
+              });
+              writeMm3Sidecar(sample, mm3, opts.log);
+            } else {
+              opts.log?.('warn', 'MM3 caption call returned nothing — .mm3.txt not written');
+            }
+          } catch (err: any) {
+            if ((err as NodeJS.ErrnoException)?.name === 'AbortError') throw err;
+            opts.log?.('warn',
+              `MM3 caption failed (${String(err?.message || err).slice(0, 160)}) — AS1.5 caption kept`);
+          }
         }
       } else {
         opts.log?.('warn', 'audio attach unavailable (no ffmpeg or file too large) — captioning from text only');
