@@ -59,6 +59,11 @@ try { sessions = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8')); } catch { 
 const saveSessions = () => fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 1));
 
 const busy = new Set();    // channelId — one invocation at a time per channel
+// channelId -> [Message]. A ping that lands mid-reply used to get an hourglass
+// and nothing else: the reaction was an apology, not a promise. It is a promise
+// now — the ping waits its turn and is answered when the current one finishes.
+const pending = new Map();
+const QUEUE_MAX = Number(process.env.PING_QUEUE_MAX || 5);
 
 // Every message in an allowed channel is written to logs/discord/ as it lands
 // — bots and our own replies included. That log replaces the old in-memory
@@ -207,43 +212,88 @@ client.on('messageCreate', async (msg) => {
 
   if (!msg.mentions.has(client.user)) return;
   if (!fromAllowed) return; // silent — no toy for trolls
-  if (busy.has(msg.channelId)) {
-    await msg.react('⏳').catch(() => {});
+  enqueuePing(msg);
+});
+
+// Queue one ping and make sure a drainer is running. Reacting here rather than
+// inside the drain keeps the acknowledgement instant even when the queue is
+// several deep.
+function enqueuePing(msg) {
+  const q = pending.get(msg.channelId) ?? [];
+  if (q.length >= QUEUE_MAX) {
+    // Past this the backlog is stale by the time it runs; say so out loud
+    // rather than silently dropping it, which is the bug this replaces.
+    console.warn(`[bridge] queue full (${QUEUE_MAX}) for ${msg.channelId} — dropping ping from ${msg.author?.username}`);
+    msg.react('🚫').catch(() => {});
     return;
   }
+  q.push(msg);
+  pending.set(msg.channelId, q);
+  if (busy.has(msg.channelId) || q.length > 1) msg.react('⏳').catch(() => {});
+  drainPings(msg.channelId);
+}
 
-  busy.add(msg.channelId);
-  try {
-    await msg.channel.sendTyping().catch(() => {});
-    const context = await buildContext(msg.channel);
-    // persona.md is re-read per reply so edits apply live. It leads the
-    // prompt; the fixed footer below it names the docs entry points and
-    // restates the respond-to-the-ping task so a persona edit can't
-    // accidentally delete the operating instructions.
-    let persona = '';
-    try { persona = fs.readFileSync(path.join(HERE, 'persona.md'), 'utf-8').trim(); } catch { /* optional */ }
-    const prompt =
-      (persona ? persona + '\n\n---\n\n' : '') +
-      `Project state, if needed: start with docs/plans/2026-08-20-mm3-training-studio.md and ` +
-      `docs/plans/2026-08-18-encoder-training-plan.md (encoder scoreboard). ` +
-      `Recent thread messages for context:\n\n${context}\n\n` +
-      mentions.rosterBlock() + `\n` +
-      `The last message mentions you — respond to it.
-
-` +
-      `REMINDER, and it outranks the length of anything above: 700 characters MAX, one Discord ` +
-      `message, aim for 300. The long replies in that context buffer are yours and they are the ` +
-      `problem, not the template. Answer, one fact, one jab, stop. Full sass, fewer words. Go long ` +
-      `ONLY if the message you are answering explicitly asked for detail.`;
-    const { text } = await runClaude(prompt, msg.channelId);
-    await replyChunked(msg, text);
-  } catch (e) {
-    await msg.reply({ content: `(bridge error: ${String(e).slice(0, 300)})`, allowedMentions: { repliedUser: false } })
-      .catch(() => {});
-  } finally {
-    busy.delete(msg.channelId);
+// Single drainer per channel. The busy guard is the re-entrancy lock: JS is
+// single-threaded, so a drainPings() called during an await below sees busy
+// set and returns immediately rather than starting a second loop.
+async function drainPings(channelId) {
+  if (busy.has(channelId)) return;
+  const q = pending.get(channelId);
+  while (q?.length) {
+    const msg = q.shift();
+    busy.add(channelId);
+    try {
+      await handlePing(msg);
+    } catch (e) {
+      await msg.reply({ content: `(bridge error: ${String(e).slice(0, 300)})`, allowedMentions: { repliedUser: false } })
+        .catch(() => {});
+    } finally {
+      busy.delete(channelId);
+      // The hourglass meant "queued". It has been answered, so retract it.
+      // Belt and braces: anything thrown in a finally would break the loop
+      // and strand the rest of the queue, which is the bug this replaces.
+      try { msg.reactions?.cache?.get('⏳')?.users?.remove(client.user.id)?.catch(() => {}); }
+      catch { /* reaction gone, message deleted, missing perms — all fine */ }
+    }
   }
-});
+  pending.delete(channelId);
+}
+
+async function handlePing(msg) {
+  await msg.channel.sendTyping().catch(() => {});
+  const context = await buildContext(msg.channel);
+  // persona.md is re-read per reply so edits apply live. It leads the
+  // prompt; the fixed footer below it names the docs entry points and
+  // restates the respond-to-the-ping task so a persona edit can't
+  // accidentally delete the operating instructions.
+  let persona = '';
+  try { persona = fs.readFileSync(path.join(HERE, 'persona.md'), 'utf-8').trim(); } catch { /* optional */ }
+  const author = msg.member?.displayName ?? msg.author?.username ?? 'someone';
+  const target = (msg.cleanContent ?? msg.content ?? '').trim().slice(0, 1500);
+  // Anything newer in the channel means this ping waited in the queue.
+  const stale = Boolean(msg.channel?.lastMessageId && msg.channel.lastMessageId !== msg.id);
+  const prompt =
+    (persona ? persona + '\n\n---\n\n' : '') +
+    `Project state, if needed: start with docs/plans/2026-08-20-mm3-training-studio.md and ` +
+    `docs/plans/2026-08-18-encoder-training-plan.md (encoder scoreboard). ` +
+    `Recent thread messages for context:\n\n${context}\n\n` +
+    mentions.rosterBlock() + `\n` +
+    // Name the target message explicitly. "The last message mentions you"
+    // held only while the bot answered instantly; a queued ping can be
+    // several messages back by the time it runs, and that instruction would
+    // aim the reply at the wrong line.
+    `Respond to this message from ${author}:\n\n"${target}"\n\n` +
+    (stale
+      ? `You were mid-reply when it arrived, so it is NOT the last message in the thread above. ` +
+        `Answer it anyway, and account for anything said since.\n\n`
+      : '') +
+    `REMINDER, and it outranks the length of anything above: 700 characters MAX, one Discord ` +
+    `message, aim for 300. The long replies in that context buffer are yours and they are the ` +
+    `problem, not the template. Answer, one fact, one jab, stop. Full sass, fewer words. Go long ` +
+    `ONLY if the message you are answering explicitly asked for detail.`;
+  const { text } = await runClaude(prompt, msg.channelId);
+  await replyChunked(msg, text);
+}
 
 // ── Local interject endpoint ────────────────────────────────────────────────
 //

@@ -30,7 +30,10 @@ files or run commands.
 - `!model` shows the current model; `!model fable|opus|sonnet|<full-id>`
   switches it (allowlisted users only).
 - Non-allowlisted pings: silently ignored by design.
-- One invocation at a time per channel (⏳ reaction while busy).
+- One invocation at a time per channel. A ping that lands mid-reply gets ⏳
+  and is answered in turn once the current reply finishes; the ⏳ is removed
+  when its turn comes. Past `PING_QUEUE_MAX` (5) waiting, further pings get
+  🚫 and are dropped, because by then the answer would be archaeology.
 
 ## Notes / guardrails
 
