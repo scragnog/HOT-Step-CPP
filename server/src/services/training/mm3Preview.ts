@@ -64,10 +64,13 @@ export const MM3_CONTROL_CAPTION =
 export const MM3_PREVIEW_DEFAULTS = {
   everySteps: 0,
   everyMinutes: 0,
-  seconds: 24,
+  seconds: 40,
   seed: 424242,
-  baseline: true,
-  control: true,
+  /** Both OFF by default (Rob, 2026-08-25): at a preview per checkpoint the
+   *  baseline and control takes double the pause cost for renders that rarely
+   *  get listened to. The form re-enables either with a checkbox. */
+  baseline: false,
+  control: false,
   /** 0.65, and NOT the 0.5 that MM3_LM_ADAPTER_DEFAULT_SCALES ships for
    *  generation. Previews were silently inheriting that 0.5 — a half-strength
    *  MLP delta — so an adapter read as weaker in its own preview than in the

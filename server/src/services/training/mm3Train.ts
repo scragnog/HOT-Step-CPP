@@ -468,15 +468,14 @@ export const MM3_LM_DEFAULTS = {
    *  run put the plausible ear-optimum somewhere in 150-350, and checkpoints
    *  every 250 would straddle it blind. */
   saveEvery: 50,
-  /** OFF: previews run on the clock instead (previewEveryMinutes). A preview
-   *  costs a pause, a full engine restart and a render — roughly a minute — so
-   *  pinning it to the checkpoint cadence tied preview cost to a number chosen
-   *  for a completely different reason. On a clock the overhead is a known,
-   *  fixed fraction of the run whatever the step size does next. */
-  previewEverySteps: 0,
-  /** Every 10 minutes: ~31 previews over a 5.2-hour run at ~1 minute each, so
-   *  about 10% overhead for a continuous read on how the adapter is arriving. */
-  previewEveryMinutes: 10,
+  /** One preview per checkpoint (Rob, 2026-08-25). The clock cadence made
+   *  sense at 15 s steps and a 250-step save interval; at saveEvery 50 the
+   *  checkpoint grid IS the cadence you want the ear to track. */
+  previewEverySteps: 50,
+  /** Cadence follows checkpoints instead of the clock (Rob, 2026-08-25): a
+   *  preview per checkpoint means every audition candidate on disk has an ear
+   *  sample attached, and none are rendered twice. */
+  previewEveryMinutes: 0,
   /** His lr_warmup_steps. Note step 1 still runs at lr 0 — the shared schedule
    *  is 0-based, which costs one step out of a thousand. */
   /** 25, scaled to the shorter run: 50 would be 10% of a 500-step run spent at
@@ -498,7 +497,13 @@ export const MM3_LM_DEFAULTS = {
    *  Whole-track training is NOT reachable here: 9 of 10 tracks in the reference
    *  dataset exceed 4096 frames, and the median (5099) would need ~17 GB of
    *  attention scores alone. cropMode `structured` is what covers the gap. */
-  maxFrames: 4272,
+  /** 750 frames = 30 s, set by ear (Rob, 2026-08-25) over the 4272-frame
+   *  window this default previously held. The long window bought track
+   *  coverage; the listening said shorter crops train better here, and the
+   *  song-structure duties the long window carried are now covered elsewhere
+   *  — structured start/end crops teach openings and EOS, and the acoustic
+   *  loss holds timbre. ~5.4 GB of activations at q8/r128 instead of ~19. */
+  maxFrames: 750,
   /** `structured`: a fixed share of steps pinned to frame 0, a fixed share
    *  flush to the track's end, the rest random.
    *
@@ -593,7 +598,9 @@ export const MM3_LM_DEFAULTS = {
    *  Held at 1024 rather than tracking maxFrames: eval is forward-only and reuses
    *  the training arena, so a long eval crop is affordable, but held-out CE is
    *  only comparable ACROSS runs while the crop it is measured at stays put. */
-  evalCrop: 1024,
+  /** = maxFrames (the route clamps it there anyway; stating it avoids the
+   *  silently-skipped-eval trap this comment block documents). */
+  evalCrop: 750,
   /** LyCORIS-style rank masking, part of bghira's published config. */
   rankDropout: 0.1,
   /** LoKr: dW = kron(w1, w2) instead of a low-rank pair.

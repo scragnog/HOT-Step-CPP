@@ -1839,7 +1839,7 @@ function parseMm3PreviewOptions(raw: unknown): Mm3PreviewOptions | undefined {
   return {
     everySteps,
     everyMinutes,
-    seconds: int('seconds', 24, 8, 120),
+    seconds: int('seconds', 40, 8, 120),
     seed: int('seed', 424242, 0, 2 ** 31 - 1),
     caption: str('caption'),
     lyrics: str('lyrics'),

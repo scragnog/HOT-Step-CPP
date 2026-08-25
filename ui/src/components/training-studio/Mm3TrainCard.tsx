@@ -157,13 +157,19 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     // Previews default OFF. They are the fastest way to learn whether a run is
     // worth finishing, but each one costs about a minute, so opting in is the
     // user's call rather than a surprise on the clock.
-    previewEverySteps: status.defaults.previewEverySteps ?? 0,
-    previewEveryMinutes: status.defaults.previewEveryMinutes ?? 10,
-    previewSeconds: 24,
+    // Cadence follows checkpoints (Rob, 2026-08-25): a preview per checkpoint,
+    // no minutes clock. `||` on purpose — a server default of 0 ("off") falls
+    // back to the checkpoint cadence rather than disabling previews.
+    previewEverySteps: status.defaults.previewEverySteps || (status.defaults.saveEvery ?? 50),
+    previewEveryMinutes: 0,
+    previewSeconds: 40,
     previewSeed: 424242,
     previewCaption: '',
-    previewControl: true,
-    previewBaseline: true,
+    // Off by default (Rob, 2026-08-25): with a preview at every checkpoint the
+    // control and baseline renders would double the pause cost for takes that
+    // rarely get listened to. Both remain a checkbox away.
+    previewControl: false,
+    previewBaseline: false,
     previewScaleMlp: 0.65,
     // Prior preservation is off until a corpus is chosen: it needs a second
     // dataset the user has to nominate, and defaulting it on would silently
