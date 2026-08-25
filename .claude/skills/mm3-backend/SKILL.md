@@ -26,6 +26,27 @@ caption+lyrics → Qwen2 BPE → Global LM 8.59B (Qwen3 arch, semantic codes @ i
   → overlap-crop stitch
 ```
 
+## LM sampling knobs (2026-08-25)
+
+The AR stage's semantic draw takes the full knob set (engine fields on
+`MM3GenRequest`, wire names `lm_*`, UI via the minimax backend param registry
+keys `mm3Lm*`): `lm_temperature`, `lm_top_k` (0 = the checkpoint's 50),
+`lm_top_p` (nucleus over the top-k survivors), and `lm_rep_penalty` with the
+ACE LM's three modes ported (`dry` default / `frequency` / `presence`).
+
+- **Time constants are 25fps-rescaled**: window 320 (~12.8 s), DRY min-match
+  15 frames (0.6 s). Never copy ACE's 5 Hz numbers (64 / 3-6) literally.
+- **DRY** punishes only codes that would extend a verbatim recent cycle — the
+  memorising-adapter loop failure — and leaves musical restatement alone.
+  Useful range 1.05-1.15.
+- **Parity is proven**: at default knobs the sampler takes the exact pre-knob
+  code path; fixed-seed renders hash bit-identical across the change
+  (da869838…, old and new builds, identical launch). Knobs at defaults are
+  omitted from the wire so the engine recipe stays authoritative.
+- The **depth decoder's sampler is untouched** on purpose: loops do not live
+  in the per-frame acoustic codes, and perturbing its input distribution
+  re-opens the timbre question the acoustic loss closed (training skill).
+
 ## File map
 
 | Piece | Where |

@@ -2,6 +2,17 @@
 
 *The complete map of HOT-Step's native training system (Training Studio). Written as the handoff/continuation doc: everything an agent or contributor needs to keep working on this subsystem in a fresh session. Built 2026-07-27/28; all measurements from an RTX 5090 (32 GB, sm_120).*
 
+## MiniMax-Music3 (MM3) LM adapters
+
+MM3 planner-LM adapter training is a separate pipeline from everything below
+(ace-train `mm3-codes` / `mm3-lm-train`, Training Studio's MM3 card). Its
+recipe, defaults, and the institutional knowledge behind them — the acoustic
+loss that keeps vocal timbre intact, structured/tiled crops, the fd gradient
+tripwire, render dials — live in
+[.claude/skills/mm3-lm-adapter-training/SKILL.md](../.claude/skills/mm3-lm-adapter-training/SKILL.md).
+Backend/runtime facts (endpoints, sampling knobs, replay) are in
+[.claude/skills/mm3-backend/SKILL.md](../.claude/skills/mm3-backend/SKILL.md).
+
 ## What it is
 
 End-to-end adapter training **entirely in C++/GGML — no Python anywhere**:

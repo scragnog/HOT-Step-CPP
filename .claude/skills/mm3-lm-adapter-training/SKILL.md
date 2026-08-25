@@ -23,23 +23,33 @@ survives a fresh clone.
 
 ```
 --lm mm3-lm-q8_0.gguf
---rank 128 --alpha 128
---optimizer adamw --lr 8e-5 --lr-end-frac 0.005 --warmup 50
---max-frames 4272 --crop-mode structured --crop-start-frac 0.85 --crop-end-frac 0.15
---crop-anchor song
+--rank 128 --alpha 128 --adapter-type lokr --lokr-factor 6 --lokr-dim 512 --lokr-alpha 512
+--optimizer adamw --lr 8e-5 --lr-end-frac 0.005 --warmup 25
+--max-frames 750 --crop-mode structured --crop-start-frac 0.55 --crop-end-frac 0.15
+--crop-start-tiles 3 --crop-anchor song
 --rank-dropout 0.1
---steps 2500 --save-every 250
+--steps 500 --save-every 50
+--depth-loss-weight 1.0 --depth-loss-frames 128
 --caption-file <one shared caption for the whole album>
 --trigger "<artist>" --trigger-prepend
---holdout 0.15 --eval-every 250 --eval-crop 1024
+--holdout 0.15 --eval-every 250 --eval-crop 750
 ```
+
+Previews: every 50 steps (= every checkpoint), 40 s, control + baseline off,
+rendered on q8_0 at MLP 1.0 — the same dials generation uses.
+
+**Rob, 2026-08-25, on this configuration: "the closest we've ever gotten to
+artist replication."** Crop 750 = 30 s = ~3 s/step; he set it by ear after
+finding 15 s steps at crop 4272 unworkable and the shorter crop *better*, not
+merely faster.
 
 **At render: everything 1.0 for adapters trained WITH the acoustic loss
 (2026-08-25 onward) — previews and generation now default there. The old
 "MLP 0.63-0.75" dial was damage control for the timbre fault and applies only
 to PRE-FIX adapters (their sidecar recommendedScales override the defaults).**
 
-Est. 29.1 GB VRAM. **The crop settings changed on 2026-08-24 and everything
+19.7 GB VRAM measured at crop 750 (the acoustic loss adds its frozen depth
+decoder, ~1.2 GB). **The crop settings changed on 2026-08-24 and everything
 auditioned before that date was trained at `--max-frames 128 --crop-mode
 random` — five seconds per step. Treat pre-2026-08-24 ear results about the
 BASE and the OPTIMIZER as void** (see below); the rank and MLP-dial findings
@@ -539,14 +549,42 @@ ways on 2026-08-24:
    tempo x1.000, 0 cents, +0.00 semitones vs the FLAC (spectral corr 0.998).
    The codec loop is transparent end-to-end.
 
-What remains: the PLANNER free-runs faster and higher-registered than the
-band. Teacher-forced it is exact; sampled, it drifts to prior pacing (exposure
+What remained was then SPLIT by the 2026-08-25 findings: the formant half
+("chipmunk"/"goblin" voices) was the depth-decoder hidden-state drift — fixed
+by the acoustic loss (see its section) — and the residual pitch/register reads
+made on pre-acoustic-loss adapters are void with the rest of their timbre.
+The original framing for reference: the planner free-runs faster and
+higher-registered than the band. Teacher-forced it is exact; sampled, it drifts to prior pacing (exposure
 bias). Note the shared caption feeds that prior: tempo WORDS ("mid-to-fast
 tempo", "double-kick bursts") are MM3's only real tempo control (bpm/key are
 dead caption knobs), so an accelerant-stuffed caption is self-inflicted.
 A linked DAW resample "fixing" it only proves the correction lands in the
 right zone, not that a clock error exists — linked-vs-linked A/Bs cannot
 separate the axes. Use the replay recipe above before ever re-opening this.
+
+## Structured crops v3: the CONTENT MIX decides whether songs open like songs
+
+Found 2026-08-25 on the best-ever fightstar run (crop 750): renders jumped in
+"like a cut" — no intro — despite `--crop-anchor song` and 40% of steps
+anchored at frame 0. Mechanism, confirmed by Rob's render-MLP A/B (lowering
+MLP restores intros and spends identity):
+
+**Adapter weight deltas are position-independent.** A LoRA/LoKr cannot store
+"intro at position 0, chug at position 2000" — it mostly encodes a CONTENT
+prior that follows the overall supervised mix. At crop 750 under 40/15/45,
+~60% of supervised audio was mid-flow material with no arc, so generations
+lean mid-flow from bar one. The position anchor cannot carry this alone: the
+base model was pretrained with frames starting right after the prompt, so
+anchored mid-song positions are patterns it has no strong machinery for.
+
+Fixes, in the shipped defaults:
+- **Shares 55/15/30** (start/end/random — random is the implicit REMAINDER of
+  the two UI fields, now displayed in the end-frac hint).
+- **Tiled starts** (`--crop-start-tiles 3`): half the start share stays at
+  frame 0 (openings must dominate), half lands on aligned tiles at K and 2K at
+  their true positions — the intro→build→verse ARC taught in order at
+  3-second-step prices. `1` = the old frame-0-only behaviour. Effective mix at
+  defaults: ~27.5% true openings, ~27.5% arc tiles, 15% endings, 30% random.
 
 ## Structured crops v2: the random share is load-bearing
 
@@ -555,6 +593,21 @@ separate the axes. Use the replay recipe above before ever re-opening this.
 degradation from ~ck550. Defaults are now **40/15/45** with **steps 500,
 saveEvery 50, warmup 25** — variety restored, checkpoint grid fine enough to
 catch a 150-350 ear-optimum.
+
+## SimpleTuner's nextlat is NOT our acoustic loss (read the source before agreeing)
+
+The Discord thread concluded SimpleTuner's `xm`+`nextlat` was "the constraint
+we're missing." Reading `origin/main`'s `helpers/training/nextlat.py`: nextlat
+is **hidden-state SELF-prediction** — a small trained head predicts
+`hidden[t+1]` from `hidden[t]`, target detached but still the model's own
+(drifting) state. **No ground truth anywhere in the loss.** It is a trajectory
+-smoothness prior (bghira's "belief system"), softens drift indirectly, and by
+construction cannot anchor register or formants — if the manifold drifts, the
+predictor drifts with it. bghira's own "nextlat needs xm to keep semantic
+coherence" is what a blunt smoothness prior does. Our acoustic loss anchors
+the depth interface to ground-truth codebooks — the targeted constraint. A
+nextlat-style smoothness term MAY compose with it; that is an ablation for
+later, not a rescue.
 
 ## Preview history: everything before 2026-08-24 evening rendered on f16
 
