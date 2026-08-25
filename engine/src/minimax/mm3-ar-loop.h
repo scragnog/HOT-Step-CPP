@@ -192,6 +192,10 @@ struct MM3ArOptions {
     int64_t  max_frames = 300;
     uint64_t seed       = 42;
 
+    // Semantic-stream sampling knobs (mm3-sample.h). Defaults = the reference
+    // recipe, bit-identical to the pre-knob build.
+    MM3SamplerKnobs knobs;
+
     // Ensemble takes: how many independent songs to decode in lockstep from
     // this one prompt (mm3-model.h). 1 is the single-song path and every shape
     // in the loop reduces to what it always was. Take t is seeded `seed + t`.
@@ -685,6 +689,13 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 }
             }
 
+            // ── repetition penalty on the guided candidates (knobs at
+            // defaults: no-op). History = this take's emitted codes. ──
+            if (!forced && opt.knobs.rep_penalty > 1.0f) {
+                mm3_apply_rep_penalty(cand_guided.data(), NCAND, outs[t].semantic_all.data(),
+                                      (int64_t) outs[t].semantic_all.size(), opt.knobs);
+            }
+
             // ── sample (or replay) ──
             if (forced) {
                 const int32_t fs = opt.forced_semantic[it];
@@ -698,7 +709,11 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 }
                 sem_code[(size_t) t] = fs;
             } else {
-                const int64_t idx = mm3_sample_top_k(cand_guided.data(), NCAND, TOPK, rngs[(size_t) t], &samp_scratch);
+                const int64_t idx = opt.knobs.any_active()
+                                        ? mm3_sample_knobbed(cand_guided.data(), NCAND, TOPK, opt.knobs,
+                                                             rngs[(size_t) t], &samp_scratch)
+                                        : mm3_sample_top_k(cand_guided.data(), NCAND, TOPK, rngs[(size_t) t],
+                                                           &samp_scratch);
                 if (idx == 0) {
                     // EOS. This take is finished; the others carry on. Its rows
                     // keep being computed (the batch shape is fixed for the run)

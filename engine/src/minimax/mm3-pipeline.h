@@ -561,6 +561,16 @@ struct MM3GenRequest {
     std::vector<int32_t> ids_uncond;
 
     int64_t  max_frames = 300;
+
+    // Semantic-stream sampling knobs (mm3-sample.h); defaults = reference.
+    float       lm_temperature = 1.0f;
+    int         lm_top_k       = 0;
+    float       lm_top_p       = 0.0f;
+    float       lm_rep_penalty = 1.0f;
+    int         lm_rep_window  = 320;
+    std::string lm_rep_mode    = "dry";
+    float       lm_dry_base    = 1.75f;
+    int         lm_dry_min_len = 15;
     uint64_t seed       = 42;
     int      steps      = 30;
     float    cfg_flow   = 1.7f;
@@ -796,6 +806,20 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
     // ── stage 1: AR plan ──
     MM3ArOptions aopt;
     aopt.max_frames        = req.max_frames;
+    aopt.knobs.temperature = req.lm_temperature;
+    aopt.knobs.top_k       = req.lm_top_k;
+    aopt.knobs.top_p       = req.lm_top_p;
+    aopt.knobs.rep_penalty = req.lm_rep_penalty;
+    aopt.knobs.rep_window  = req.lm_rep_window;
+    aopt.knobs.rep_mode    = mm3_rep_mode_from_name(req.lm_rep_mode);
+    aopt.knobs.dry_base    = req.lm_dry_base;
+    aopt.knobs.dry_min_len = req.lm_dry_min_len;
+    if (aopt.knobs.any_active()) {
+        fprintf(stderr,
+                "[MM3-AR] sampler knobs: temp %.2f top_k %d top_p %.2f rep %.3f (%s, window %d)" "\n",
+                aopt.knobs.temperature, aopt.knobs.top_k, aopt.knobs.top_p, aopt.knobs.rep_penalty,
+                req.lm_rep_mode.c_str(), aopt.knobs.rep_window);
+    }
     aopt.seed              = req.ar_seed_set ? req.ar_seed : req.seed;
     aopt.collect_hiddens   = true;  // the whole point: the condition encoder eats these
     aopt.lm_adapter        = req.lm_adapter;

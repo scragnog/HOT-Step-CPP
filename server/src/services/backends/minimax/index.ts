@@ -301,6 +301,79 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 0.1,
       },
       {
+        key: 'mm3LmRepPenalty',
+        type: 'slider',
+        label: 'LM Repetition Penalty',
+        hint: 'Breaks verbatim code loops in the planner — the "same riff forever" '
+            + 'failure, which sharpened adapters make likelier. 1.0 = off (the '
+            + 'reference recipe); 1.05-1.15 is the useful range. Uses the DRY mode '
+            + 'by default: only codes that would EXTEND a verbatim recent cycle are '
+            + 'punished, so ordinary musical restatement is untouched.',
+        default: 1.0,
+        min: 1.0,
+        max: 1.5,
+        step: 0.01,
+      },
+      {
+        key: 'mm3LmRepMode',
+        type: 'select',
+        label: 'Repetition Mode',
+        hint: 'dry: annihilates verbatim loops only (recommended). frequency: '
+            + 'penalises codes by how often they recurred. presence: flat penalty '
+            + 'on anything recent — bluntest, also flattens legitimate restatement.',
+        default: 'dry',
+        options: [
+          { value: 'dry', label: 'DRY (verbatim loops only)' },
+          { value: 'frequency', label: 'Frequency' },
+          { value: 'presence', label: 'Presence' },
+        ],
+      },
+      {
+        key: 'mm3LmRepWindow',
+        type: 'slider',
+        label: 'Repetition Window',
+        hint: 'How far back the penalty looks, in 25fps semantic frames. '
+            + '320 = 12.8 s. (The ACE LM used 64 at 5 Hz — same duration.)',
+        default: 320,
+        min: 25,
+        max: 2000,
+        step: 25,
+      },
+      {
+        key: 'mm3LmTemperature',
+        type: 'slider',
+        label: 'LM Temperature',
+        hint: 'Sampling temperature on the planner. The reference recipe has '
+            + 'none (1.0). Below 1 is safer/more repetitive; above 1 is wilder. '
+            + 'Small moves — 0.9 or 1.1 — are already audible.',
+        default: 1.0,
+        min: 0.5,
+        max: 1.6,
+        step: 0.05,
+      },
+      {
+        key: 'mm3LmTopK',
+        type: 'slider',
+        label: 'LM Top-K',
+        hint: '0 = the checkpoint\'s own 50. Lower narrows the planner to safer '
+            + 'choices; higher lets rarer codes through.',
+        default: 0,
+        min: 0,
+        max: 500,
+        step: 5,
+      },
+      {
+        key: 'mm3LmTopP',
+        type: 'slider',
+        label: 'LM Top-P',
+        hint: 'Nucleus sampling over the top-K survivors. 0 = off (reference). '
+            + '0.9-0.95 trims the improbable tail adaptively.',
+        default: 0,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      {
         // Backend-NEUTRAL key: BackendGenerationDropdown reads it to decide
         // whether to render the shared solver/scheduler/guidance pickers, and
         // that component must stay free of MM3-specific names. Any future

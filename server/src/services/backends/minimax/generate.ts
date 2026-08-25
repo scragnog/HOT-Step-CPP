@@ -287,6 +287,22 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           Number(params.mm3CfgFlow) <= 5.0
             ? { cfg_flow: Number(params.mm3CfgFlow) }
             : {}),
+      // ── LM sampling knobs. Omitted from the wire at their defaults so the
+      // engine's reference recipe stays authoritative (and bit-identical). ──
+      ...(Number.isFinite(Number(params.mm3LmTemperature)) && Number(params.mm3LmTemperature) !== 1.0
+            ? { lm_temperature: Number(params.mm3LmTemperature) } : {}),
+      ...(Number.isFinite(Number(params.mm3LmTopK)) && Number(params.mm3LmTopK) > 0
+            ? { lm_top_k: Number(params.mm3LmTopK) } : {}),
+      ...(Number.isFinite(Number(params.mm3LmTopP)) && Number(params.mm3LmTopP) > 0
+            ? { lm_top_p: Number(params.mm3LmTopP) } : {}),
+      ...(Number.isFinite(Number(params.mm3LmRepPenalty)) && Number(params.mm3LmRepPenalty) > 1.0
+            ? {
+                lm_rep_penalty: Number(params.mm3LmRepPenalty),
+                lm_rep_mode: typeof params.mm3LmRepMode === 'string' ? params.mm3LmRepMode : 'dry',
+                ...(Number.isFinite(Number(params.mm3LmRepWindow)) && Number(params.mm3LmRepWindow) > 0
+                      ? { lm_rep_window: Number(params.mm3LmRepWindow) } : {}),
+              }
+            : {}),
       get_wav_bits: 16,
       // LRC timestamps ride the same toggle ACE uses (skipLrc inverted).
       // Instrumentals are filtered engine-side, so no check is needed here.
