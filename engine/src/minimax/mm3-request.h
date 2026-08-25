@@ -881,24 +881,6 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
 
     // ── Runtime LM LoRA ──
     {
-    {
-        double dv = 0.0;
-        if (!mm3_req_num(root, "lm_temperature", &dv, &present, err)) { return false; }
-        if (present) { out->gen.lm_temperature = (float) (dv < 0.05 ? 0.05 : dv > 4.0 ? 4.0 : dv); }
-        if (!mm3_req_num(root, "lm_top_k", &dv, &present, err)) { return false; }
-        if (present) { out->gen.lm_top_k = (int) (dv < 0 ? 0 : dv > 16385 ? 16385 : dv); }
-        if (!mm3_req_num(root, "lm_top_p", &dv, &present, err)) { return false; }
-        if (present) { out->gen.lm_top_p = (float) (dv < 0.0 ? 0.0 : dv > 1.0 ? 1.0 : dv); }
-        if (!mm3_req_num(root, "lm_rep_penalty", &dv, &present, err)) { return false; }
-        if (present) { out->gen.lm_rep_penalty = (float) (dv < 1.0 ? 1.0 : dv > 2.0 ? 2.0 : dv); }
-        if (!mm3_req_num(root, "lm_rep_window", &dv, &present, err)) { return false; }
-        if (present) { out->gen.lm_rep_window = (int) (dv < 0 ? 0 : dv > 4000 ? 4000 : dv); }
-        if (!mm3_req_num(root, "lm_dry_base", &dv, &present, err)) { return false; }
-        if (present) { out->gen.lm_dry_base = (float) (dv < 1.05 ? 1.05 : dv > 4.0 ? 4.0 : dv); }
-        if (!mm3_req_num(root, "lm_dry_min_len", &dv, &present, err)) { return false; }
-        if (present) { out->gen.lm_dry_min_len = (int) (dv < 1 ? 1 : dv > 200 ? 200 : dv); }
-        if (!mm3_req_str(root, "lm_rep_mode", &out->gen.lm_rep_mode, &present, err)) { return false; }
-    }
         yyjson_val * v = yyjson_obj_get(root, "lm_adapter");
         if (v && !yyjson_is_null(v)) {
             if (!yyjson_is_str(v)) {
@@ -1127,6 +1109,30 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     // lifetime — a path string must never be dereferenced this early because
     // parse runs on the HTTP thread and load must run on the GPU worker.
     out->gen.lm_adapter_scales = out->lm_adapter_scales;
+
+    // Sampling knobs parse LAST, after the finalize above REBUILDS out->gen
+    // from scratch (out->gen = MM3GenRequest{}). Parsed any earlier they are
+    // silently wiped — which is exactly what shipped, and what the identical-
+    // output-at-any-penalty report was.
+    {
+        double dv = 0.0;
+        if (!mm3_req_num(root, "lm_temperature", &dv, &present, err)) { return false; }
+        if (present) { out->gen.lm_temperature = (float) (dv < 0.05 ? 0.05 : dv > 4.0 ? 4.0 : dv); }
+        if (!mm3_req_num(root, "lm_top_k", &dv, &present, err)) { return false; }
+        if (present) { out->gen.lm_top_k = (int) (dv < 0 ? 0 : dv > 16385 ? 16385 : dv); }
+        if (!mm3_req_num(root, "lm_top_p", &dv, &present, err)) { return false; }
+        if (present) { out->gen.lm_top_p = (float) (dv < 0.0 ? 0.0 : dv > 1.0 ? 1.0 : dv); }
+        if (!mm3_req_num(root, "lm_rep_penalty", &dv, &present, err)) { return false; }
+        if (present) { out->gen.lm_rep_penalty = (float) (dv < 1.0 ? 1.0 : dv > 2.0 ? 2.0 : dv); }
+        if (!mm3_req_num(root, "lm_rep_window", &dv, &present, err)) { return false; }
+        if (present) { out->gen.lm_rep_window = (int) (dv < 0 ? 0 : dv > 4000 ? 4000 : dv); }
+        if (!mm3_req_num(root, "lm_dry_base", &dv, &present, err)) { return false; }
+        if (present) { out->gen.lm_dry_base = (float) (dv < 1.05 ? 1.05 : dv > 4.0 ? 4.0 : dv); }
+        if (!mm3_req_num(root, "lm_dry_min_len", &dv, &present, err)) { return false; }
+        if (present) { out->gen.lm_dry_min_len = (int) (dv < 1 ? 1 : dv > 200 ? 200 : dv); }
+        if (!mm3_req_str(root, "lm_rep_mode", &out->gen.lm_rep_mode, &present, err)) { return false; }
+    }
+
     return true;
 }
 
