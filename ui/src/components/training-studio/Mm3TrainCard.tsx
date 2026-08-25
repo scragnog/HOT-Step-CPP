@@ -134,7 +134,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     cropStartTiles: status.defaults.cropStartTiles ?? 3,
     depthLossWeight: status.defaults.depthLossWeight ?? 1.0,
     depthLossFrames: status.defaults.depthLossFrames ?? 128,
-    optimizer: status.defaults.optimizer ?? 'adamw',
+    optimizer: status.defaults.optimizer ?? 'prodigy',
     muonLrScale: status.defaults.muonLrScale ?? 64,
     adapterType: status.defaults.adapterType ?? 'lora',
     lokrFactor: status.defaults.lokrFactor ?? 6,

@@ -24,7 +24,7 @@ survives a fresh clone.
 ```
 --lm mm3-lm-q8_0.gguf
 --rank 128 --alpha 128 --adapter-type lokr --lokr-factor 6 --lokr-dim 512 --lokr-alpha 512
---optimizer adamw --lr 8e-5 --lr-end-frac 0.005 --warmup 25
+--optimizer prodigy --lr-end-frac 0.005 --warmup 25   # prodigy sets its own lr
 --max-frames 750 --crop-mode structured --crop-start-frac 0.55 --crop-end-frac 0.15
 --crop-start-tiles 3 --crop-anchor song
 --rank-dropout 0.1
