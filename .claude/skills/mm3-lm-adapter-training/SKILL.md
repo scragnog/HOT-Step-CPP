@@ -34,7 +34,10 @@ survives a fresh clone.
 --holdout 0.15 --eval-every 250 --eval-crop 1024
 ```
 
-**At render: MLP scale 0.63-0.75, attention 1.00, global 1.00. Ship ~ck2000.**
+**At render: everything 1.0 for adapters trained WITH the acoustic loss
+(2026-08-25 onward) — previews and generation now default there. The old
+"MLP 0.63-0.75" dial was damage control for the timbre fault and applies only
+to PRE-FIX adapters (their sidecar recommendedScales override the defaults).**
 
 Est. 29.1 GB VRAM. **The crop settings changed on 2026-08-24 and everything
 auditioned before that date was trained at `--max-frames 128 --crop-mode
