@@ -30,6 +30,11 @@ files or run commands.
 - `!model` shows the current model; `!model fable|opus|sonnet|<full-id>`
   switches it (allowlisted users only).
 - Non-allowlisted pings: silently ignored by design.
+- Other bots: ignored unless their id is in `ALLOWED_BOT_IDS`. A listed bot
+  gets `BOT_EXCHANGE_MAX` (5) consecutive replies, then 🛑 and silence until
+  a human posts in the channel. Two LLM bots that can ping each other will,
+  forever, and every round is a full invocation on both sides. `!model`
+  stays human-only regardless: an allowlisted bot is still untrusted text.
 - One invocation at a time per channel. A ping that lands mid-reply gets ⏳
   and is answered in turn once the current reply finishes; the ⏳ is removed
   when its turn comes. Past `PING_QUEUE_MAX` (5) waiting, further pings get

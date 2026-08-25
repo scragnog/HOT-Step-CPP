@@ -34,6 +34,10 @@ const REPO = path.resolve(HERE, '..', '..');
 const TOKEN = process.env.DISCORD_TOKEN;
 const ALLOWED_USERS = new Set((process.env.ALLOWED_USER_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean));
 const ALLOWED_CHANNELS = new Set((process.env.ALLOWED_CHANNEL_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean));
+// Bot ids allowed to ping the bot. Empty by default, and it should stay small:
+// see claimBotRound() for why an open door here is expensive.
+const ALLOWED_BOTS = new Set((process.env.ALLOWED_BOT_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean));
+const BOT_EXCHANGE_MAX = Number(process.env.BOT_EXCHANGE_MAX || 5);
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const CONTEXT_MESSAGES = Number(process.env.CONTEXT_MESSAGES || 30);
 const TIMEOUT_MS = Number(process.env.CLAUDE_TIMEOUT_MS || 300000);
@@ -64,6 +68,8 @@ const busy = new Set();    // channelId — one invocation at a time per channel
 // now — the ping waits its turn and is answered when the current one finishes.
 const pending = new Map();
 const QUEUE_MAX = Number(process.env.PING_QUEUE_MAX || 5);
+// channelId -> consecutive pings from bots, reset by any human message.
+const botRounds = new Map();
 
 // Every message in an allowed channel is written to logs/discord/ as it lands
 // — bots and our own replies included. That log replaces the old in-memory
@@ -194,12 +200,26 @@ client.on('messageCreate', async (msg) => {
   // session state at all - the bot reads its own last replies back out of
   // the transcript like any other participant's.
   log(msg);
-  if (msg.author.bot) return;
 
-  const fromAllowed = ALLOWED_USERS.has(msg.author.id);
+  // Never answer ourselves. Everything below can let a bot through, and this
+  // is the one that would be an instant self-loop.
+  if (msg.author.id === client.user.id) return;
+
+  const isBot = Boolean(msg.author.bot);
+  // Bots are ignored unless explicitly listed. ClaudeClanker pings ScragBot
+  // and ScragBot can ping back, so an open door here is two LLMs talking to
+  // each other until someone notices the bill.
+  if (isBot && !ALLOWED_BOTS.has(msg.author.id)) return;
+  // Any human turn ends the machine conversation and resets its budget.
+  if (!isBot) botRounds.delete(msg.channelId);
+
+  // !model stays human-only. An allowlisted bot is still untrusted text, and
+  // this one flips the model for every subsequent reply.
+  const fromHuman = !isBot && ALLOWED_USERS.has(msg.author.id);
+  const fromAllowed = fromHuman || (isBot && ALLOWED_BOTS.has(msg.author.id));
 
   // !model — allowlisted control of the runtime default.
-  if (fromAllowed && msg.content.startsWith('!model')) {
+  if (fromHuman && msg.content.startsWith('!model')) {
     const arg = msg.content.split(/\s+/)[1];
     if (arg) {
       currentModel = MODEL_ALIASES[arg.toLowerCase()] ?? arg;
@@ -212,8 +232,22 @@ client.on('messageCreate', async (msg) => {
 
   if (!msg.mentions.has(client.user)) return;
   if (!fromAllowed) return; // silent — no toy for trolls
+  if (isBot && !claimBotRound(msg)) return;
   enqueuePing(msg);
 });
+
+// Bot-to-bot rounds are budgeted, not banned. Each ping from an allowlisted
+// bot spends one; the budget refills only when a human says something in the
+// channel. Without this the pair runs until the API keys give out, and every
+// round is a full invocation on both sides.
+function claimBotRound(msg) {
+  const n = (botRounds.get(msg.channelId) ?? 0) + 1;
+  botRounds.set(msg.channelId, n);
+  if (n <= BOT_EXCHANGE_MAX) return true;
+  console.warn(`[bridge] bot exchange cap (${BOT_EXCHANGE_MAX}) hit in ${msg.channelId} — muted until a human speaks`);
+  msg.react('🛑').catch(() => {});
+  return false;
+}
 
 // Queue one ping and make sure a drainer is running. Reacting here rather than
 // inside the drain keeps the acknowledgement instant even when the queue is
@@ -269,6 +303,7 @@ async function handlePing(msg) {
   let persona = '';
   try { persona = fs.readFileSync(path.join(HERE, 'persona.md'), 'utf-8').trim(); } catch { /* optional */ }
   const author = msg.member?.displayName ?? msg.author?.username ?? 'someone';
+  const fromBot = Boolean(msg.author?.bot);
   const target = (msg.cleanContent ?? msg.content ?? '').trim().slice(0, 1500);
   // Anything newer in the channel means this ping waited in the queue.
   const stale = Boolean(msg.channel?.lastMessageId && msg.channel.lastMessageId !== msg.id);
@@ -283,6 +318,11 @@ async function handlePing(msg) {
     // several messages back by the time it runs, and that instruction would
     // aim the reply at the wrong line.
     `Respond to this message from ${author}:\n\n"${target}"\n\n` +
+    (fromBot
+      ? `${author} is another AI bot in this channel, not a person. Talk to it like a peer, not a user: ` +
+        `no offers of help, no asking what it needs. Disagree with it if it is wrong. Keep it SHORT - ` +
+        `these exchanges are capped and a human is reading them.\n\n`
+      : '') +
     (stale
       ? `You were mid-reply when it arrived, so it is NOT the last message in the thread above. ` +
         `Answer it anyway, and account for anything said since.\n\n`
