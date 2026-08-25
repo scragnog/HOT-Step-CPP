@@ -490,6 +490,34 @@ dropped and only a 30-line stderr tail survived, so any question asked after a
 run finished — "step 750 came out as noise, what happened at 750?" — had no
 loss curve, no Prodigy `d` and no warning left to read. Check these FIRST.
 
+## The acoustic loss (2026-08-25): WHY adapters wrecked vocal timbre, and the fix
+
+**Root cause of chipmunk/goblin renders, found and fixed.** The depth decoder
+generates every acoustic codebook — the timbre — conditioned on the LM's
+`last_hidden_state` (mm3-ar-loop.h: `depth_decode(last_hidden, sampled)`).
+Semantic-only training leaves that hidden state unconstrained; the frozen depth
+decoder then decodes states it never saw, and vocals come out formant-shifted.
+Direction is unconstrained drift — ADTR came out chipmunk, Fightstar goblin,
+base model always clean. The ear-validated "MLP 0.5" render dial was this fault
+being managed empirically. It affects EVERY planner-only MM3 adapter, including
+bghira's SimpleTuner recipe (worth reporting to the working group).
+
+Fix (f50c0753): `--depth-loss-weight 1.0` (DEFAULT ON) supervises books 1..7
+through the FROZEN depth decoder, teacher-forced (one causal 8-token pass per
+sampled frame, 128 frames/step), gradient into the adapter via last_hidden.
+Cost: ~nil step time, +0.4 GB measured at crop 2496. `depthLoss` rides the
+step JSONL. 0 disables — A/B only.
+
+**The fd tripwire runs at step 1 of every run and ABORTS on mismatch.** It
+caught three real bugs in this very feature before any could train, including
+ggml's accumulator contract: `ggml_build_backward_expand` with no accumulator
+array leaves dL/dL unseeded and every gradient computes as exactly zero,
+silently. Never bypass it.
+
+Adapters trained BEFORE this fix carry the timbre fault baked in; retrain
+rather than re-dial. Whether MLP-at-render can go back to 1.0 with the loss on
+is an open ear question.
+
 ## The "sped up and higher pitched" renders: NOT a sample-rate error — measured and closed
 
 Adapter renders of a drop-C# band read as the artist sped up and pitched up,
