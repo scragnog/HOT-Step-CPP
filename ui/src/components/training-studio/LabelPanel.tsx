@@ -46,6 +46,10 @@ export const LabelPanel: React.FC = () => {
   // Default to MOSS when present: it is local, free, and describes what it hears
   // rather than rewriting the local analysis. Cloud stays available via Enhance.
   const [captionProvider, setCaptionProvider] = useState('');
+  // '' = the provider's default model (config-level). The server has always
+  // accepted caption.model; this panel just never offered it, which made the
+  // Settings-page default look hardcoded.
+  const [captionModel, setCaptionModel] = useState('');
   const [mergePolicy, setMergePolicy] = useState<MergePolicy>('fill_missing');
   const [starting, setStarting] = useState(false);
 
@@ -66,7 +70,10 @@ export const LabelPanel: React.FC = () => {
         useCaption: effectiveCaption,
         // Without this the server falls back to config.lireek.defaultProvider,
         // which is why labeling always went to Gemini even with MOSS installed.
-        caption: { provider: captionProvider || (mossOk ? 'moss' : undefined) },
+        caption: {
+          provider: captionProvider || (mossOk ? 'moss' : undefined),
+          ...(captionModel ? { model: captionModel } : {}),
+        },
         mergePolicy,
       });
     } finally {
@@ -149,19 +156,41 @@ export const LabelPanel: React.FC = () => {
             />
             {t('trainingStudio.label.useCaption')}
           </label>
-          {effectiveCaption && (mossOk && caps?.llm.configured) && (
-            <div className="ml-6 flex items-center gap-2">
-              <span className="text-[11px] text-zinc-500">Captioner</span>
-              <select
-                value={captionProvider || 'moss'}
-                onChange={(e) => setCaptionProvider(e.target.value)}
-                className="text-[11px] rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5"
-              >
-                <option value="moss">MOSS — local, hears the audio</option>
-                <option value={caps!.llm.defaultProvider}>{caps!.llm.defaultProvider} (cloud)</option>
-              </select>
-            </div>
-          )}
+          {effectiveCaption && (mossOk || caps?.llm.configured) && (() => {
+            const cloud = caps?.llm.providers.filter(pr => pr.available) ?? [];
+            const sel = captionProvider || (mossOk ? 'moss' : caps?.llm.defaultProvider || '');
+            const active = cloud.find(pr => pr.id === sel);
+            return (
+              <div className="ml-6 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] text-zinc-500">Captioner</span>
+                <select
+                  value={sel}
+                  onChange={(e) => { setCaptionProvider(e.target.value); setCaptionModel(''); }}
+                  className="text-[11px] rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5"
+                >
+                  {mossOk && <option value="moss">MOSS — local, hears the audio</option>}
+                  {cloud.map(pr => (
+                    <option key={pr.id} value={pr.id}>
+                      {pr.id === 'gemini' ? `${pr.name} (cloud, hears the audio)` : `${pr.name} (cloud, text only)`}
+                    </option>
+                  ))}
+                </select>
+                {/* Model picker for cloud providers — Gemini's list is fetched
+                    live from the API, so new models appear by themselves. */}
+                {active && active.models.length > 0 && (
+                  <select
+                    value={captionModel || active.defaultModel}
+                    onChange={(e) => setCaptionModel(e.target.value)}
+                    className="text-[11px] rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5"
+                  >
+                    {active.models.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            );
+          })()}
           {captionOk ? (
             <div className="ml-6 text-[11px] text-zinc-500">{t('trainingStudio.label.useCaptionHint')}</div>
           ) : (
