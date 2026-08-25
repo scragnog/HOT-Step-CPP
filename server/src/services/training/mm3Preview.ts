@@ -71,12 +71,10 @@ export const MM3_PREVIEW_DEFAULTS = {
    *  get listened to. The form re-enables either with a checkbox. */
   baseline: false,
   control: false,
-  /** 0.65, and NOT the 0.5 that MM3_LM_ADAPTER_DEFAULT_SCALES ships for
-   *  generation. Previews were silently inheriting that 0.5 — a half-strength
-   *  MLP delta — so an adapter read as weaker in its own preview than in the
-   *  render the user then made by hand, and "identity is not arriving" is
-   *  exactly the wrong conclusion to draw from a dial. */
-  scaleMlp: 0.65,
+  /** 1.0, matching the generation default: a preview should predict what the
+   *  user will hear, and with the acoustic loss holding timbre there is no
+   *  longer a reason to derate MLP anywhere. */
+  scaleMlp: 1.0,
   scaleAttn: 1.0,
 } as const;
 

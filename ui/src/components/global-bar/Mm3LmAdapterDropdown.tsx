@@ -76,7 +76,7 @@ interface Mm3LmAdapterCatalogue {
 /** Matches MM3_LM_ADAPTER_DEFAULT_SCALES server-side; used only until the
  *  catalogue lands (or if it fails to), so the sliders are never NaN. */
 const FALLBACK_SCALES: Mm3LmAdapterScales = {
-  scale: 1.0, scaleAttn: 1.0, scaleMlp: 0.5, scaleEarly: 1.0, scaleMid: 1.0, scaleLate: 1.0,
+  scale: 1.0, scaleAttn: 1.0, scaleMlp: 1.0, scaleEarly: 1.0, scaleMid: 1.0, scaleLate: 1.0,
 };
 
 /** Fetched once per mount; the list only changes when files are installed. */

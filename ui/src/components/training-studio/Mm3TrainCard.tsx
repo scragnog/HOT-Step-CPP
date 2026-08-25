@@ -170,7 +170,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     // rarely get listened to. Both remain a checkbox away.
     previewControl: false,
     previewBaseline: false,
-    previewScaleMlp: 0.65,
+    previewScaleMlp: 1.0,
     // Prior preservation is off until a corpus is chosen: it needs a second
     // dataset the user has to nominate, and defaulting it on would silently
     // train a different objective than the form otherwise describes.

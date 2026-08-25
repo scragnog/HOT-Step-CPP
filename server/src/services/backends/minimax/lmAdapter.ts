@@ -43,7 +43,13 @@ export interface Mm3LmAdapterScales {
 export const MM3_LM_ADAPTER_DEFAULT_SCALES: Mm3LmAdapterScales = {
   scale: 1.0,
   scaleAttn: 1.0,
-  scaleMlp: 0.5,   // the ablation-validated production dial
+  /** 1.0 as of 2026-08-25. The old 0.5 was the ear-validated crutch for the
+   *  timbre fault — semantic-only training let adapters drift the hidden state
+   *  the depth decoder reads, and halving MLP was what kept vocals human. The
+   *  acoustic loss now holds that state during training, so adapters trained
+   *  with it run at full strength. PRE-FIX adapters still want ~0.5-0.75: use
+   *  their sidecar recommendedScales, or retrain. */
+  scaleMlp: 1.0,
   scaleEarly: 1.0,
   scaleMid: 1.0,
   scaleLate: 1.0,
