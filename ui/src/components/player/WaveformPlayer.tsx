@@ -24,7 +24,7 @@ export interface WaveformPlayerHandle {
   playPause: () => void;
   seekTo: (fraction: number) => void;
   setVolume: (v: number) => void;
-  setPlaybackRate: (r: number) => void;
+  setPlaybackRate: (r: number, preservePitch?: boolean) => void;
   loadUrl: (url: string) => void;
   getCurrentTime: () => number;
   getDuration: () => number;
@@ -55,6 +55,10 @@ interface WaveformPlayerProps {
   volume?: number;
   /** Initial playback rate */
   playbackRate?: number;
+  /** Keep pitch constant while the rate changes. Default true, which is the
+   *  browser's own default — pass false to let the rate detune the audio
+   *  (the 44.1 kHz-vs-48 kHz replay test). */
+  preservePitch?: boolean;
 }
 
 export const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerProps>(
@@ -68,6 +72,7 @@ export const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerPro
       onWaveformClick,
       volume = 0.8,
       playbackRate = 1.0,
+      preservePitch = true,
     },
     ref
   ) => {
@@ -190,8 +195,8 @@ export const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerPro
 
     // Sync playback rate changes
     useEffect(() => {
-      wsRef.current?.setPlaybackRate(playbackRate);
-    }, [playbackRate]);
+      wsRef.current?.setPlaybackRate(playbackRate, preservePitch);
+    }, [playbackRate, preservePitch]);
 
     // Imperative API
     const loadUrl = useCallback((url: string) => {
@@ -218,7 +223,8 @@ export const WaveformPlayer = forwardRef<WaveformPlayerHandle, WaveformPlayerPro
         playPause: () => wsRef.current?.playPause(),
         seekTo: (fraction: number) => wsRef.current?.seekTo(fraction),
         setVolume: (v: number) => wsRef.current?.setVolume(v),
-        setPlaybackRate: (r: number) => wsRef.current?.setPlaybackRate(r),
+        setPlaybackRate: (r: number, preservePitch?: boolean) =>
+          wsRef.current?.setPlaybackRate(r, preservePitch),
         loadUrl,
         getCurrentTime: () => wsRef.current?.getCurrentTime() ?? 0,
         getDuration: () => wsRef.current?.getDuration() ?? 0,

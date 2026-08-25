@@ -28,6 +28,8 @@ interface PlayerProps {
   onVolumeChange: (v: number) => void;
   playbackRate: number;
   onPlaybackRateChange: (r: number) => void;
+  pitch441: boolean;
+  onTogglePitch441: () => void;
   audioRef: React.RefObject<HTMLAudioElement | null>;
   isShuffle: boolean;
   onToggleShuffle: () => void;
@@ -113,6 +115,8 @@ export const Player: React.FC<PlayerProps> = ({
   onVolumeChange,
   playbackRate,
   onPlaybackRateChange,
+  pitch441,
+  onTogglePitch441,
   isShuffle,
   onToggleShuffle,
   repeatMode,
@@ -239,6 +243,23 @@ export const Player: React.FC<PlayerProps> = ({
           title={t('player.playbackSpeed')}
         >
           {playbackRate}x
+        </button>
+
+        {/* 44.1 kHz replay test — plays the 48 kHz render on a 44.1 kHz clock.
+            Unlike the speed button this does NOT preserve pitch: rate and pitch
+            both drop by 44100/48000, the way a sample-rate mismatch would. */}
+        <button
+          onClick={onTogglePitch441}
+          className={`text-xs px-1.5 py-0.5 rounded font-mono transition-colors ${
+            pitch441
+              ? 'text-amber-400 bg-amber-500/10'
+              : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
+          }`}
+          title={pitch441
+            ? 'Playing at 44.1 kHz (0.91875x, pitch down ~1.47 semitones) — click for 48 kHz'
+            : 'Play the 48 kHz render at 44.1 kHz (0.91875x, pitch drops with it)'}
+        >
+          {pitch441 ? '44.1k' : '48k'}
         </button>
 
         {/* Variant switch — no-adapter reference / unmastered / mastered.

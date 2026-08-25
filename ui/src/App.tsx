@@ -65,6 +65,8 @@ import {
   previous as pbPrevious,
   setVolume as pbSetVolume,
   setPlaybackRate as pbSetPlaybackRate,
+  setPitch441 as pbSetPitch441,
+  effectivePlaybackRate,
   setShuffle as pbSetShuffle,
   cycleRepeat as pbCycleRepeat,
   setSpectrumEnabled as pbSetSpectrumEnabled,
@@ -282,6 +284,10 @@ const AppContent: React.FC = () => {
   const duration = usePlaybackSelector(s => s.duration);
   const volume = usePlaybackSelector(s => s.volume);
   const playbackRate = usePlaybackSelector(s => s.playbackRate);
+  const pitch441 = usePlaybackSelector(s => s.pitch441);
+  // What the decks actually run at — the speed pick, scaled by the 44.1 kHz
+  // test when it is on. The store applies the same value imperatively.
+  const deckRate = usePlaybackSelector(effectivePlaybackRate);
   const playMastered = usePlaybackSelector(s => s.playMastered);
   const playNoAdapter = usePlaybackSelector(s => s.playNoAdapter);
   const spectrumEnabled = usePlaybackSelector(s => s.spectrumEnabled);
@@ -1468,7 +1474,8 @@ const AppContent: React.FC = () => {
               <WaveformPlayer
                 ref={wavesurferRef}
                 volume={(playMastered || playNoAdapter) ? 0 : volume}
-                playbackRate={playbackRate}
+                playbackRate={deckRate}
+                preservePitch={!pitch441}
                 onTimeUpdate={pbSetCurrentTime}
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
@@ -1491,7 +1498,8 @@ const AppContent: React.FC = () => {
               <WaveformPlayer
                 ref={wavesurferAltRef}
                 volume={playMastered ? volume : 0}
-                playbackRate={playbackRate}
+                playbackRate={deckRate}
+                preservePitch={!pitch441}
                 onTimeUpdate={pbSetCurrentTime}
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
@@ -1514,7 +1522,8 @@ const AppContent: React.FC = () => {
               <WaveformPlayer
                 ref={wavesurferNoAdapterRef}
                 volume={playNoAdapter ? volume : 0}
-                playbackRate={playbackRate}
+                playbackRate={deckRate}
+                preservePitch={!pitch441}
                 onTimeUpdate={pbSetCurrentTime}
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
@@ -1553,6 +1562,8 @@ const AppContent: React.FC = () => {
           onVolumeChange={pbSetVolume}
           playbackRate={playbackRate}
           onPlaybackRateChange={pbSetPlaybackRate}
+          pitch441={pitch441}
+          onTogglePitch441={() => pbSetPitch441(!pitch441)}
           audioRef={wavesurferRef as any}
           isShuffle={shuffle}
           onToggleShuffle={() => pbSetShuffle(!shuffle)}

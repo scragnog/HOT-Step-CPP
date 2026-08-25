@@ -175,6 +175,51 @@ export function repairMm3CaptionHeadings(caption: string): { caption: string; re
   return { caption: restored.length ? lines.join('\n') : caption, restored };
 }
 
+/** Labels whose VALUES describe the sound rather than the performance or the
+ *  timeline. SA3 gets 256 tokens and refines an instrumental — the Arrangement
+ *  and Vocal Details sections are neither affordable nor relevant. */
+const MM3_STYLE_LABELS: ReadonlyArray<RegExp> = [
+  /^Basic Attributes\s*:\s*/i,
+  /^Sonics & Production Profile\s*:\s*/i,
+];
+
+/** Roughly 150 tokens of style text, leaving SA3's 256-token window room for
+ *  the "Instrumental only… Length: N seconds" suffix buildStableStepPrompt
+ *  appends — the tokenizer truncates from the END, so an overlong style would
+ *  eat the duration hint. */
+const SA3_STYLE_MAX_CHARS = 600;
+
+/**
+ * MM3 Structured Caption → a StableStep/SA3 style prompt.
+ *
+ * The two backends disagree about what a "caption" is: ACE's is already a
+ * comma-separated style line, so it goes to SA3 verbatim, while MM3's is a
+ * three-section document whose bulk (Arrangement, Vocal Details) is useless to
+ * an instrumental refiner and would blow the 256-token window on its own. So
+ * pull the style-bearing lines out of Global Metadata and send only those.
+ *
+ * A plain non-structured caption ("energetic synthwave, 120 BPM" — legal MM3
+ * input) is passed straight through.
+ */
+export function mm3CaptionToSa3Style(caption: string): string {
+  const lines = (caption || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const picked = lines
+    .map(l => {
+      const re = MM3_STYLE_LABELS.find(r => r.test(l));
+      return re ? l.replace(re, '').trim() : null;
+    })
+    .filter((v): v is string => !!v && v.length > 0);
+
+  let text = picked.length > 0 ? picked.join(' ') : (caption || '').trim();
+  if (text.length > SA3_STYLE_MAX_CHARS) {
+    // Cut on a comma or sentence boundary so the tail is not a half word.
+    const head = text.slice(0, SA3_STYLE_MAX_CHARS);
+    const cut = Math.max(head.lastIndexOf('. '), head.lastIndexOf(', '));
+    text = (cut > SA3_STYLE_MAX_CHARS / 2 ? head.slice(0, cut) : head).trim();
+  }
+  return text;
+}
+
 // ── Param mapping ────────────────────────────────────────────────────────────
 
 export interface MinimaxParamMapping {
@@ -930,6 +975,11 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
           // native-rate branch in postProcessing.ts), so nothing here needs the
           // 48 kHz plumbing.
           instrumental: sub.instrumental,
+          // StableStep's prompt. Without this the SA3 refine gets an empty
+          // caption and falls back to a bare "Instrumental track", i.e. it
+          // refines with no idea what the music is — the ACE path fills this in
+          // from the LM caption and MM3 was simply never wired to it.
+          stableStepCaptions: [mm3CaptionToSa3Style(req.caption)],
         };
         // No "is anything actually on?" pre-check needed: the chain copies the
         // WAV, runs whatever is enabled, and if NOTHING ran it deletes the copy

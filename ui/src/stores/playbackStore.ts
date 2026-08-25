@@ -167,6 +167,11 @@ export interface PlaybackState {
   shuffle: boolean;
   repeat: 'none' | 'all' | 'one';
   playbackRate: number;
+  /** 44.1 kHz replay of a 48 kHz render: rate ×0.91875 with pitch shifting
+   *  ENABLED (the browser preserves pitch by default, which is exactly what
+   *  this test needs to defeat). Not persisted — it is a diagnostic, and a
+   *  sticky one would silently detune every future listen. */
+  pitch441: boolean;
   spectrumEnabled: boolean;
 
   // ── Trim Mode ──
@@ -335,6 +340,8 @@ let _state: PlaybackState = {
   abMode: false,
   abTrackA: null,
   abTrackB: null,
+
+  pitch441: false,
 
   ...prefs,
 };
@@ -597,10 +604,25 @@ function applyVolumes(): void {
   _wsNoAdapterRef.current?.setVolume(audible === 'noadapter' ? _state.volume : 0);
 }
 
+/** 44100/48000 exactly. A 48 kHz render replayed on a 44.1 kHz clock runs at
+ *  this rate and drops ~1.47 semitones with it. */
+export const SR_44K_48K_RATIO = 44100 / 48000;   // 0.91875
+
+/** The rate actually handed to the decks: the user's speed pick, times the
+ *  44.1 kHz ratio when that toggle is on. */
+export function effectivePlaybackRate(s: PlaybackState = _state): number {
+  return s.pitch441 ? s.playbackRate * SR_44K_48K_RATIO : s.playbackRate;
+}
+
 function applyPlaybackRate(): void {
-  _wsOriginalRef.current?.setPlaybackRate(_state.playbackRate);
-  _wsAltRef.current?.setPlaybackRate(_state.playbackRate);
-  _wsNoAdapterRef.current?.setPlaybackRate(_state.playbackRate);
+  const rate = effectivePlaybackRate();
+  // Second arg is WaveSurfer's preservePitch. Omitting it leaves the browser
+  // default (true) in place, which is why the speed buttons never changed
+  // pitch; the 44.1 kHz test needs it explicitly off.
+  const preserve = !_state.pitch441;
+  _wsOriginalRef.current?.setPlaybackRate(rate, preserve);
+  _wsAltRef.current?.setPlaybackRate(rate, preserve);
+  _wsNoAdapterRef.current?.setPlaybackRate(rate, preserve);
 }
 
 function persistTrackList(): void {
@@ -1288,6 +1310,12 @@ export function setPlaybackRate(r: number): void {
   setState({ playbackRate: r });
   applyPlaybackRate();
   persistPrefs();
+}
+
+/** Toggle 44.1 kHz replay of the 48 kHz render (speed AND pitch drop). */
+export function setPitch441(v: boolean): void {
+  setState({ pitch441: v });
+  applyPlaybackRate();
 }
 
 export function setShuffle(v: boolean): void {
