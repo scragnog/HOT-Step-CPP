@@ -1714,14 +1714,19 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         const std::string side =
             dir + (lokr_out ? "/lokr_weights.safetensors.json" : "/adapter_model.safetensors.json");
         FILE *            sf   = hs_fopen(side, "wb");
+        // The recommended MLP dial depends on the OBJECTIVE this run used: with
+        // the acoustic loss the hidden state stays where the depth decoder
+        // expects it and full strength is correct; without it the old 0.5
+        // crutch remains the honest recommendation, because the timbre fault
+        // is baked into the weights.
         if (sf) {
             fprintf(sf,
                     "{\"name\":\"%s ckpt-%d\",\"trigger\":\"%s\",\"rank\":%d,\"dataset\":\"%s\","
-                    "\"trainedSteps\":%d,\"recommendedScales\":{\"scaleMlp\":0.5},"
+                    "\"trainedSteps\":%d,\"recommendedScales\":{\"scaleMlp\":%.1f},"
                     "\"notes\":\"ace-train mm3-lm-train, loss %.4f; render captions must carry the "
                     "artist's true bpm/tuning\"}\n",
                     a.dataset_name.empty() ? "MM3 LM" : a.dataset_name.c_str(), step, a.trigger.c_str(), a.rank,
-                    a.dataset_name.c_str(), step, loss);
+                    a.dataset_name.c_str(), step, a.depth_loss_weight > 0.0 ? 1.0 : 0.5, loss);
             fclose(sf);
         }
         fprintf(stderr, "[mm3-lm-train] saved %s (loss %.4f)\n", dir.c_str(), loss);
