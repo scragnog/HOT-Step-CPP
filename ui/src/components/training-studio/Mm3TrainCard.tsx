@@ -128,7 +128,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     lr: status.defaults.lr ?? 8e-5,
     maxFrames: status.defaults.maxFrames ?? 1500,
     cropMode: (status.defaults.cropMode as 'random' | 'beginning' | 'structured') ?? 'structured',
-    cropStartFrac: status.defaults.cropStartFrac ?? 0.40,
+    cropStartFrac: status.defaults.cropStartFrac ?? 0.55,
     cropEndFrac: status.defaults.cropEndFrac ?? 0.15,
     depthLossWeight: status.defaults.depthLossWeight ?? 1.0,
     depthLossFrames: status.defaults.depthLossFrames ?? 128,
@@ -331,11 +331,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               <NumField label={t('trainingStudio.mm3.cropStartFrac', 'Crops at song start')}
                 value={form.cropStartFrac} onChange={v => set('cropStartFrac', v)} step={0.05}
                 hint={t('trainingStudio.mm3.cropStartFracHint',
-                  'Share anchored at frame 0. `structured` only.') as string} />
+                  'Share anchored at frame 0 — what teaches songs to OPEN like songs. '
+                  + 'Too low and renders jump in mid-flow.') as string} />
               <NumField label={t('trainingStudio.mm3.cropEndFrac', 'Crops at song end')}
                 value={form.cropEndFrac} onChange={v => set('cropEndFrac', v)} step={0.05}
                 hint={t('trainingStudio.mm3.cropEndFracHint',
-                  'Share flush to the track end — the only place EOS is taught.') as string} />
+                  'Share flush to the track end — the only place EOS is taught. The '
+                  + 'REMAINDER of these two is the random share (currently '
+                  + `${Math.max(0, Math.round((1 - form.cropStartFrac - form.cropEndFrac) * 100))}% mid-song crops).`) as string} />
               <NumField label={t('trainingStudio.mm3.depthLossWeight', 'Acoustic loss weight')}
                 value={form.depthLossWeight} onChange={v => set('depthLossWeight', v)} step={0.1}
                 hint={t('trainingStudio.mm3.depthLossWeightHint',

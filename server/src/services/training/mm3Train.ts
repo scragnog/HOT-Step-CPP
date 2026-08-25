@@ -530,7 +530,14 @@ export const MM3_LM_DEFAULTS = {
    *  The anchored shares keep what the structured mode exists for: frame-0
    *  crops give supervised positions the song's real history (the condition at
    *  inference), and end crops are the only place EOS is supervised. */
-  cropStartFrac: 0.40,
+  /** 55/15 (random = the remainder, 30%). Raised from 40/15/45 on 2026-08-25:
+   *  at crop 750 the random+end shares made ~60% of supervised audio mid-flow
+   *  material with no arc, and the adapter's content prior followed it —
+   *  renders jumped in "like a cut", and lowering render-MLP brought intros
+   *  back at the cost of identity (Rob's A/B). Adapter deltas are position-
+   *  independent, so the CONTENT MIX is the dial that decides whether songs
+   *  open like songs; the position anchor alone cannot carry it. */
+  cropStartFrac: 0.55,
   cropEndFrac: 0.15,
   /** The acoustic loss: teacher-forced CE through the FROZEN depth decoder,
    *  gradient into the adapter via last_hidden — the 2026-08-25 fix for
