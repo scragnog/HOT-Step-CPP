@@ -578,7 +578,13 @@ export const MM3_LM_DEFAULTS = {
    *
    *  NOT YET VALIDATED BY EAR — its only comparison render was made on the f16
    *  base and is void. */
-  optimizer: 'adamw' as 'muon' | 'adamw' | 'prodigy',
+  /** Prodigy again (Rob, 2026-08-25). It was demoted to AdamW only to buy
+   *  crop VRAM at 4272 frames; at crop 750 there is >12 GB of headroom and its
+   *  ~2.7 GB of extra buffers stop mattering. It sets its own step size (on
+   *  Green Day it converged within 2.4% of the hand-tuned 8e-5), resumes as of
+   *  format v2 so checkpoint-cadence previews work, and `lr` becomes a
+   *  schedule multiplier the trainer forces to 1.0. */
+  optimizer: 'prodigy' as 'muon' | 'adamw' | 'prodigy',
   muonLrScale: 64,
   /** q8_0, not f16 — see the note on Mm3TrainModels. Same step time since the
    *  cpy-q-occupancy patch, ~8.5 GB less resident, and therefore the only one
