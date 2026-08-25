@@ -88,6 +88,7 @@
 #include "train/mm3-lm-prior.h"
 #include "train/mm3-f32-isolate.h"
 #include "train/mm3-lm-load.h"
+#include "train/mm3-depth-train.h"
 #include "minimax/mm3-request.h"
 #include "minimax/mm3-tokenizer.h"
 
@@ -312,6 +313,14 @@ struct MM3LmTrainArgs {
      *  It CHANGES THE TRAINED WEIGHTS: activation gradients are BF16-rounded at
      *  every layer. That is the trade, and it is recorded in the run log. */
     std::string weights    = "f32-window";   // f32-window | bf16
+    /** The acoustic loss (mm3-depth-train.h): teacher-forced CE through the
+     *  FROZEN depth decoder, gradient into the adapter via last_hidden. This
+     *  is the fix for adapters that shift vocal timbre ("chipmunk"/"goblin"):
+     *  the depth decoder consumes the LM's hidden state at render, and a
+     *  semantic-only objective leaves that state unconstrained. 0 disables —
+     *  which restores the old, known-broken objective; do that only for A/B. */
+    double      depth_loss_weight = 1.0;
+    int         depth_loss_frames = 128;
     bool        ckpt       = true;
     int         ckpt_chunk = 128;
 
@@ -1455,6 +1464,39 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     LmCkptState ckpt_st;
     LmCkptRun   ckpt_run;
     MM3EmbedCtx embed_ctx;
+
+    // ── the acoustic loss (see MM3LmTrainArgs::depth_loss_weight) ───────────
+    //
+    // Loads the FULL depth decoder (~1.2 GB f16) beside the audio_embd slice
+    // the trainer always loaded. A load failure is FATAL rather than a warning:
+    // silently training without the term would reintroduce the timbre fault
+    // this exists to fix, wearing a fixed-trainer label.
+    MM3DepthTrain depth;
+    bool          depth_fd_done = false;
+    if (a.depth_loss_weight > 0.0 && a.ckpt) {
+        if (!mm3_depth_train_load(&depth, a.depth_path.c_str(), t.lm.backend, &err)) {
+            fprintf(stderr, "[mm3-lm-train] acoustic loss: %s\n", err.c_str());
+            mm3_train_lm_free(&t);
+            return 1;
+        }
+        depth.lm_embed    = t.lm.embed_tokens;
+        depth.audio_embd  = t.audio_embd;
+        depth.sem_offset  = (int64_t) t.semantic_vocab_offset;
+        depth.audio_vocab = (int64_t) t.acoustic_vocab_size;
+        depth.K           = a.depth_loss_frames;
+        depth.lambda      = (float) a.depth_loss_weight;
+        depth.seed        = (uint64_t) a.seed;
+        fprintf(stderr,
+                "[mm3-lm-train] acoustic loss: ON — weight %.3g, %d frames/step through the frozen "
+                "depth decoder\n",
+                a.depth_loss_weight, a.depth_loss_frames);
+    } else if (a.ckpt) {
+        fprintf(stderr,
+                "[mm3-lm-train] acoustic loss: OFF — adapters trained this way shift vocal timbre "
+                "at render (the depth decoder reads the LM hidden state); use only for A/B\n");
+    }
+    jl("{\"type\":\"depthLossCfg\",\"weight\":%.6g,\"frames\":%d}",
+       a.ckpt ? a.depth_loss_weight : 0.0, a.depth_loss_frames);
     if (a.ckpt) {
         // Quantized bases are allowed ONLY on the f32-window path, where
         // lm_linear casts every weight to F32 in-graph so the backward never
@@ -2136,6 +2178,19 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             const int64_t S      = P + Fin;
             const int64_t anchor0 = anchor_song ? c0 : 0;
 
+            // Acoustic loss inputs for this micro-step. Reg steps opt out: the
+            // prior path scores soft targets from the base model and has no
+            // aligned acoustic ground truth.
+            if (depth.wctx && depth.lambda > 0.0f) {
+                ckpt_run.aux_head = mm3_depth_train_head;
+                ckpt_run.aux_user = &depth;
+                depth.codes       = is_reg ? nullptr : s.codes.data();
+                depth.c0          = c0;
+                depth.n_sup       = n_sup;
+                depth.at_end      = at_end;
+                depth.opt_step    = step;
+            }
+
             sem_in.resize((size_t) Fin);
             ac_in.resize((size_t) (Fin * NC));
             for (int64_t i = 0; i < Fin; i++) {
@@ -2197,6 +2252,19 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                     smp.s_tr     = std::min<int>(smp.s_tr, prior->n_pos);
                 }
                 ok = lm_ckpt_micro_step(ckpt_run, smp, true, &ce);
+                // The gradient tripwire, once, on the first real step: central
+                // finite differences against the exact scatter-added dL/dh.
+                // The runtime-LoKR audit taught that unvalidated reimplemented
+                // math ships confident and wrong; this one refuses to.
+                if (ok && depth.wctx && depth.lambda > 0.0f && !depth_fd_done && !is_reg) {
+                    depth_fd_done = true;
+                    std::string fderr;
+                    if (!mm3_depth_train_fdcheck(depth, ckpt_run, smp, &fderr)) {
+                        fprintf(stderr, "[mm3-lm-train] %s\n", fderr.c_str());
+                        mm3_train_lm_free(&t);
+                        return 1;
+                    }
+                }
             } else {
                 ggml_init_params gip = { arena.size(), arena.data(), true };
                 ggml_context *   ctx = ggml_init(gip);
@@ -2254,9 +2322,11 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         // one-hot code — so plotting the two on one series would draw a curve
         // that means two things. Consumers filter on this flag.
         jl("{\"type\":\"step\",\"step\":%d,\"totalSteps\":%d,\"loss\":%.6f,\"lr\":%.9g,"
-           "\"gradNorm\":%.6f,\"clipScale\":%.6f,\"ms\":%lld,\"stepMs\":%lld,\"reg\":%s}",
+           "\"gradNorm\":%.6f,\"clipScale\":%.6f,\"ms\":%lld,\"stepMs\":%lld,\"reg\":%s,"
+           "\"depthLoss\":%.6f}",
            step, a.steps, win, (double) stats.lr, (double) stats.grad_norm, (double) stats.clip,
-           (long long) (now_ms - t_start), (long long) step_ms, is_reg ? "true" : "false");
+           (long long) (now_ms - t_start), (long long) step_ms, is_reg ? "true" : "false",
+           depth.last_loss);
         jl("{\"type\":\"progress\",\"completed\":%d,\"total\":%d,\"phase\":\"train\"}", step, a.steps);
         if (step == 1 || step % 10 == 0 || step == a.steps) {
             fprintf(stderr, "[mm3-lm-train] step %d/%d loss %.4f lr %.3g |g| %.3f clip %.3f %lld s\n", step,

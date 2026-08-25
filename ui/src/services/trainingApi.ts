@@ -136,6 +136,9 @@ export interface Mm3TrainLmRequest {
   cropMode?: 'random' | 'beginning' | 'structured';
   cropStartFrac?: number;
   cropEndFrac?: number;
+  /** Acoustic loss through the frozen depth decoder; 0 = old objective (A/B only). */
+  depthLossWeight?: number;
+  depthLossFrames?: number;
   optimizer?: 'muon' | 'adamw' | 'prodigy';
   /** One caption used for EVERY track, persisted to
    *  <dataset>/_shared-caption.txt. Empty = per-song .mm3.txt files. */

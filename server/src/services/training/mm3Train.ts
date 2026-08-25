@@ -527,6 +527,18 @@ export const MM3_LM_DEFAULTS = {
    *  inference), and end crops are the only place EOS is supervised. */
   cropStartFrac: 0.40,
   cropEndFrac: 0.15,
+  /** The acoustic loss: teacher-forced CE through the FROZEN depth decoder,
+   *  gradient into the adapter via last_hidden — the 2026-08-25 fix for
+   *  adapters shifting vocal timbre ("chipmunk"/"goblin" renders). The depth
+   *  decoder generates every acoustic codebook from the LM's hidden state at
+   *  render, and the old semantic-only objective left that state completely
+   *  unconstrained; the ear-validated "MLP 0.5" render dial was this fault
+   *  being managed by hand. 0 restores the old objective, for A/B only.
+   *
+   *  Costs the full depth decoder resident during training (+1.2 GB f16) plus
+   *  a small per-step pass over depthLossFrames sampled frames. */
+  depthLossWeight: 1.0,
+  depthLossFrames: 128,
   /** AdamW, matching `adamw_bf16`. Muon was only ever chosen because it FIT at
    *  rank 256 (AdamW's second momentum buffer costs +2.66 GB there, +0.67 GB at
    *  rank 64) and it made `lr` meaningless — its update is normalised, so it
@@ -672,6 +684,8 @@ export interface ResolvedMm3TrainLmOptions {
   cropMode: 'random' | 'beginning' | 'structured';
   cropStartFrac: number;
   cropEndFrac: number;
+  depthLossWeight: number;
+  depthLossFrames: number;
   optimizer: 'muon' | 'adamw' | 'prodigy';
   muonLrScale: number;
   holdout: number;
@@ -742,6 +756,8 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
     args.push('--crop-start-frac', String(o.cropStartFrac));
     args.push('--crop-end-frac', String(o.cropEndFrac));
   }
+  args.push('--depth-loss-weight', String(o.depthLossWeight));
+  args.push('--depth-loss-frames', String(o.depthLossFrames));
   if (o.optimizer === 'muon') args.push('--muon-lr-scale', String(o.muonLrScale));
   args.push('--holdout', String(o.holdout));
   args.push('--eval-every', String(o.evalEvery));

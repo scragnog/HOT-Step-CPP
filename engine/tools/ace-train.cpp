@@ -237,6 +237,14 @@ static void print_usage(void) {
             "                and a BF16-native base (convert-mm3.py --quant bf16); falls\n"
             "                back with a warning otherwise. It CHANGES the trained weights\n"
             "                — activation gradients are BF16-rounded at every layer.\n"
+            "                [--depth-loss-weight 1.0] the acoustic loss: teacher-forced CE\n"
+            "                through the FROZEN depth decoder, gradient into the adapter via\n"
+            "                last_hidden. The depth decoder generates every acoustic codebook\n"
+            "                from the LM hidden state at render, so a semantic-only objective\n"
+            "                lets adapters shift vocal timbre (chipmunk/goblin renders). 0\n"
+            "                restores the old objective, for A/B only. [--depth-loss-frames\n"
+            "                128] frames sampled per step; the term needs the full depth\n"
+            "                decoder resident (+1.2 GB f16).\n"
             "                [--ckpt-segments N] gradient checkpointing over the block stack.\n"
             "                Peak attention is n_blk*n_heads*S^2*4 B, so crop 2584 (30 s) needs\n"
             "                ~30.8 GB monolithic and is impossible without this; 6 segments\n"
@@ -1366,6 +1374,8 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--max-frames"))    a.max_frames   = atoll(next("--max-frames"));
         else if (!strcmp(argv[i], "--crop-mode"))     a.crop_mode    = next("--crop-mode");
         else if (!strcmp(argv[i], "--weights"))       a.weights      = next("--weights");
+        else if (!strcmp(argv[i], "--depth-loss-weight")) a.depth_loss_weight = atof(next("--depth-loss-weight"));
+        else if (!strcmp(argv[i], "--depth-loss-frames")) a.depth_loss_frames = atoi(next("--depth-loss-frames"));
         else if (!strcmp(argv[i], "--crop-start-frac")) a.crop_start_frac = atof(next("--crop-start-frac"));
         else if (!strcmp(argv[i], "--crop-end-frac"))   a.crop_end_frac   = atof(next("--crop-end-frac"));
         else if (!strcmp(argv[i], "--crop-anchor"))   a.crop_anchor  = next("--crop-anchor");
@@ -1435,6 +1445,11 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     }
     if (a.weights != "f32-window" && a.weights != "bf16") {
         fprintf(stderr, "ace-train mm3-lm-train: --weights must be f32-window or bf16\n");
+        return 2;
+    }
+    if (a.depth_loss_weight < 0.0 || a.depth_loss_frames < 1 || a.depth_loss_frames > 1024) {
+        fprintf(stderr, "ace-train mm3-lm-train: --depth-loss-weight must be >= 0 and "
+                        "--depth-loss-frames 1..1024\n");
         return 2;
     }
     if (a.crop_start_frac < 0.0 || a.crop_end_frac < 0.0

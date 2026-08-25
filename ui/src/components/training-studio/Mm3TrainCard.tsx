@@ -45,6 +45,8 @@ interface FormState {
   cropMode: 'random' | 'beginning' | 'structured';
   cropStartFrac: number;
   cropEndFrac: number;
+  depthLossWeight: number;
+  depthLossFrames: number;
   optimizer: 'muon' | 'adamw' | 'prodigy';
   muonLrScale: number;
   adapterType: 'lora' | 'lokr';
@@ -126,8 +128,10 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     lr: status.defaults.lr ?? 8e-5,
     maxFrames: status.defaults.maxFrames ?? 1500,
     cropMode: (status.defaults.cropMode as 'random' | 'beginning' | 'structured') ?? 'structured',
-    cropStartFrac: status.defaults.cropStartFrac ?? 0.85,
+    cropStartFrac: status.defaults.cropStartFrac ?? 0.40,
     cropEndFrac: status.defaults.cropEndFrac ?? 0.15,
+    depthLossWeight: status.defaults.depthLossWeight ?? 1.0,
+    depthLossFrames: status.defaults.depthLossFrames ?? 128,
     optimizer: status.defaults.optimizer ?? 'adamw',
     muonLrScale: status.defaults.muonLrScale ?? 64,
     adapterType: status.defaults.adapterType ?? 'lora',
@@ -212,6 +216,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         steps: form.steps, saveEvery: form.saveEvery, rank: form.rank, alpha: form.alpha,
         lr: form.lr, maxFrames: form.maxFrames, cropMode: form.cropMode,
         cropStartFrac: form.cropStartFrac, cropEndFrac: form.cropEndFrac,
+        depthLossWeight: form.depthLossWeight, depthLossFrames: form.depthLossFrames,
         optimizer: form.optimizer, muonLrScale: form.muonLrScale,
         adapterType: form.adapterType, lokrFactor: form.lokrFactor,
         sharedCaption: form.sharedCaption,
@@ -325,6 +330,16 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 value={form.cropEndFrac} onChange={v => set('cropEndFrac', v)} step={0.05}
                 hint={t('trainingStudio.mm3.cropEndFracHint',
                   'Share flush to the track end — the only place EOS is taught.') as string} />
+              <NumField label={t('trainingStudio.mm3.depthLossWeight', 'Acoustic loss weight')}
+                value={form.depthLossWeight} onChange={v => set('depthLossWeight', v)} step={0.1}
+                hint={t('trainingStudio.mm3.depthLossWeightHint',
+                  'Trains the adapter to keep vocal timbre intact: acoustic codebooks are '
+                  + 'supervised through the frozen depth decoder. 0 disables — renders then '
+                  + 'drift into chipmunk/goblin voices. Leave at 1.') as string} />
+              <NumField label={t('trainingStudio.mm3.depthLossFrames', 'Acoustic frames/step')}
+                value={form.depthLossFrames} onChange={v => set('depthLossFrames', v)} step={16}
+                hint={t('trainingStudio.mm3.depthLossFramesHint',
+                  'Frames sampled per step for the acoustic loss.') as string} />
             </div>
             <label className="flex flex-col gap-1 mt-3">
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">

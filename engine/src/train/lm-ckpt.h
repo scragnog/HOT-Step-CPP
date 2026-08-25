@@ -554,6 +554,15 @@ struct LmCkptRun {
 
     int grad_accum = 1;
 
+    // Optional extra loss head, run AFTER the CE head has filled t_G and
+    // BEFORE the backward segments consume it. The hook may ADD gradient
+    // contributions into t_G (st->Gh[0]) at any supervised column; the
+    // segment backward then carries them to the adapter with no further
+    // changes here. Introduced for the MM3 acoustic (depth-decoder) loss;
+    // null for every other trainer, which keeps ACE byte-identical.
+    bool (*aux_head)(LmCkptRun &, const LmSample &, void *) = nullptr;
+    void * aux_user = nullptr;
+
     // Self-test only (§3.6): the un-chunked CE head. Needs a full [V, s_tr]
     // label buffer, which is exactly why D4 exists — never a production path.
     bool          naive_head    = false;
@@ -980,6 +989,12 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
     // Evaluation stops here: the loss is what it came for.
     if (r.forward_only) {
         return true;
+    }
+
+    // Auxiliary loss head (see the field comment): adds into t_G between the
+    // CE head and the backward segments — the only window where that is legal.
+    if (r.aux_head && !r.aux_head(r, s, r.aux_user)) {
+        return false;
     }
 
     // ── P6/P7: backward segments, l = Hi-1 .. Lo ─────────────────────────
