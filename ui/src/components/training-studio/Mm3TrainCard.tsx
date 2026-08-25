@@ -45,6 +45,7 @@ interface FormState {
   cropMode: 'random' | 'beginning' | 'structured';
   cropStartFrac: number;
   cropEndFrac: number;
+  cropStartTiles: number;
   depthLossWeight: number;
   depthLossFrames: number;
   optimizer: 'muon' | 'adamw' | 'prodigy';
@@ -130,6 +131,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     cropMode: (status.defaults.cropMode as 'random' | 'beginning' | 'structured') ?? 'structured',
     cropStartFrac: status.defaults.cropStartFrac ?? 0.55,
     cropEndFrac: status.defaults.cropEndFrac ?? 0.15,
+    cropStartTiles: status.defaults.cropStartTiles ?? 3,
     depthLossWeight: status.defaults.depthLossWeight ?? 1.0,
     depthLossFrames: status.defaults.depthLossFrames ?? 128,
     optimizer: status.defaults.optimizer ?? 'adamw',
@@ -222,6 +224,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         steps: form.steps, saveEvery: form.saveEvery, rank: form.rank, alpha: form.alpha,
         lr: form.lr, maxFrames: form.maxFrames, cropMode: form.cropMode,
         cropStartFrac: form.cropStartFrac, cropEndFrac: form.cropEndFrac,
+        cropStartTiles: form.cropStartTiles,
         depthLossWeight: form.depthLossWeight, depthLossFrames: form.depthLossFrames,
         optimizer: form.optimizer, muonLrScale: form.muonLrScale,
         adapterType: form.adapterType, lokrFactor: form.lokrFactor,
@@ -333,6 +336,12 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 hint={t('trainingStudio.mm3.cropStartFracHint',
                   'Share anchored at frame 0 — what teaches songs to OPEN like songs. '
                   + 'Too low and renders jump in mid-flow.') as string} />
+              <NumField label={t('trainingStudio.mm3.cropStartTiles', 'Start tiles')}
+                value={form.cropStartTiles} onChange={v => set('cropStartTiles', v)} step={1}
+                hint={t('trainingStudio.mm3.cropStartTilesHint',
+                  'Half the start share stays at frame 0; the rest lands on aligned tiles '
+                  + 'after it, teaching the intro→build→verse arc under short crops. '
+                  + '1 = frame 0 only.') as string} />
               <NumField label={t('trainingStudio.mm3.cropEndFrac', 'Crops at song end')}
                 value={form.cropEndFrac} onChange={v => set('cropEndFrac', v)} step={0.05}
                 hint={t('trainingStudio.mm3.cropEndFracHint',

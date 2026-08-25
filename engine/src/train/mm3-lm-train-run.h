@@ -208,6 +208,15 @@ struct MM3LmTrainArgs {
      *  point where intros and outros start to memorise. */
     double      crop_start_frac = 0.2;
     double      crop_end_frac   = 0.2;
+    /** Tiled starts (2026-08-25). The start share does not have to mean "frame
+     *  0 only": with short crops that starves the model of the intro->build->
+     *  verse ARC, and the adapter's content prior follows the mix — renders
+     *  jump in mid-flow. With N tiles, HALF the start share stays at frame 0
+     *  (openings must dominate) and the rest lands on aligned tiles K, 2K, ..
+     *  (N-1)K at their true positions, teaching the arc in order. 1 = the old
+     *  behaviour exactly. 3 at crop 750 covers what crop 2496's start share
+     *  used to. */
+    int         crop_start_tiles = 3;
     int         grad_accum = 1, seed = 42;
     // ADAMW BY DEFAULT as of 2026-08-23, because the recipe it belongs to is
     // now rank 64.
@@ -1642,9 +1651,9 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     jl("{\"type\":\"cropAnchor\",\"mode\":\"%s\"}", anchor_song ? "song" : "zero");
     if (a.crop_mode == "structured") {
         fprintf(stderr,
-                "[mm3-lm-train] crop policy: structured - %.0f%% at the opening, "
-                "%.0f%% flush to the end (where EOS is supervised), %.0f%% random\n",
-                a.crop_start_frac * 100.0, a.crop_end_frac * 100.0,
+                "[mm3-lm-train] crop policy: structured - %.0f%% start share (half at frame 0, "
+                "half over %d aligned tiles), %.0f%% flush to the end (EOS), %.0f%% random\n",
+                a.crop_start_frac * 100.0, a.crop_start_tiles, a.crop_end_frac * 100.0,
                 (1.0 - a.crop_start_frac - a.crop_end_frac) * 100.0);
     }
     jl("{\"type\":\"cropPolicy\",\"mode\":\"%s\",\"startFrac\":%.3f,\"endFrac\":%.3f}",
@@ -2162,7 +2171,20 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                     // same crop mode, which was already true of the crop itself.
                     const double u = (double) (lm_rng_next(&rng) % 1000000u) / 1000000.0;
                     if (u < a.crop_start_frac) {
-                        c0 = 0;                               // the opening
+                        // Tiled starts: half the share at the true opening, the
+                        // rest across the aligned tiles after it (see the field
+                        // comment). Extra RNG draws are fine for resume — the
+                        // crop RNG rides the resume state.
+                        const int64_t max_tiles =
+                            std::min<int64_t>((int64_t) a.crop_start_tiles, span / K + 1);
+                        if (max_tiles <= 1) {
+                            c0 = 0;
+                        } else {
+                            const double v = (double) (lm_rng_next(&rng) % 1000000u) / 1000000.0;
+                            c0 = v < 0.5
+                                     ? 0
+                                     : K * (1 + (int64_t) (lm_rng_next(&rng) % (uint64_t) (max_tiles - 1)));
+                        }
                     } else if (u < a.crop_start_frac + a.crop_end_frac) {
                         c0 = span;                            // flush to the end: EOS
                     } else {

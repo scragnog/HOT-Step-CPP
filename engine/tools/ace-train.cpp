@@ -230,6 +230,9 @@ static void print_usage(void) {
             "                randomises the rest: [--crop-start-frac 0.2]\n"
             "                [--crop-end-frac 0.2]. Costs nothing - same crop length,\n"
             "                same memory.\n"
+            "                [--crop-start-tiles 3] the start share puts half its weight at\n"
+            "                frame 0 and half across aligned tiles K,2K,..: teaches the\n"
+            "                intro->build->verse arc under short crops. 1 = frame 0 only.\n"
             "                [--weights f32-window|bf16] default f32-window. `bf16` is\n"
             "                Lever A: the raw BF16 weight goes to mul_mat and the\n"
             "                backward's out_prod nodes are rewritten to mul_mat, so both\n"
@@ -1378,6 +1381,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--depth-loss-frames")) a.depth_loss_frames = atoi(next("--depth-loss-frames"));
         else if (!strcmp(argv[i], "--crop-start-frac")) a.crop_start_frac = atof(next("--crop-start-frac"));
         else if (!strcmp(argv[i], "--crop-end-frac"))   a.crop_end_frac   = atof(next("--crop-end-frac"));
+        else if (!strcmp(argv[i], "--crop-start-tiles")) a.crop_start_tiles = atoi(next("--crop-start-tiles"));
         else if (!strcmp(argv[i], "--crop-anchor"))   a.crop_anchor  = next("--crop-anchor");
         else if (!strcmp(argv[i], "--resume"))        a.resume_path  = next("--resume");
         else if (!strcmp(argv[i], "--pause-file"))    a.pause_file   = next("--pause-file");
@@ -1450,6 +1454,10 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     if (a.depth_loss_weight < 0.0 || a.depth_loss_frames < 1 || a.depth_loss_frames > 1024) {
         fprintf(stderr, "ace-train mm3-lm-train: --depth-loss-weight must be >= 0 and "
                         "--depth-loss-frames 1..1024\n");
+        return 2;
+    }
+    if (a.crop_start_tiles < 1 || a.crop_start_tiles > 64) {
+        fprintf(stderr, "ace-train mm3-lm-train: --crop-start-tiles must be 1..64\n");
         return 2;
     }
     if (a.crop_start_frac < 0.0 || a.crop_end_frac < 0.0

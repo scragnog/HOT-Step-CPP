@@ -539,6 +539,11 @@ export const MM3_LM_DEFAULTS = {
    *  open like songs; the position anchor alone cannot carry it. */
   cropStartFrac: 0.55,
   cropEndFrac: 0.15,
+  /** Tiled starts: half the start share at frame 0, half across aligned tiles
+   *  at K, 2K — so short crops still teach the intro→build→verse ARC in order,
+   *  at true positions. 1 = frame-0 only (the old behaviour). 3 × crop 750
+   *  covers what crop 2496's start share used to. */
+  cropStartTiles: 3,
   /** The acoustic loss: teacher-forced CE through the FROZEN depth decoder,
    *  gradient into the adapter via last_hidden — the 2026-08-25 fix for
    *  adapters shifting vocal timbre ("chipmunk"/"goblin" renders). The depth
@@ -698,6 +703,7 @@ export interface ResolvedMm3TrainLmOptions {
   cropMode: 'random' | 'beginning' | 'structured';
   cropStartFrac: number;
   cropEndFrac: number;
+  cropStartTiles: number;
   depthLossWeight: number;
   depthLossFrames: number;
   optimizer: 'muon' | 'adamw' | 'prodigy';
@@ -769,6 +775,7 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   if (o.cropMode === 'structured') {
     args.push('--crop-start-frac', String(o.cropStartFrac));
     args.push('--crop-end-frac', String(o.cropEndFrac));
+    args.push('--crop-start-tiles', String(o.cropStartTiles));
   }
   args.push('--depth-loss-weight', String(o.depthLossWeight));
   args.push('--depth-loss-frames', String(o.depthLossFrames));

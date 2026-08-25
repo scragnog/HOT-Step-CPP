@@ -136,6 +136,7 @@ export interface Mm3TrainLmRequest {
   cropMode?: 'random' | 'beginning' | 'structured';
   cropStartFrac?: number;
   cropEndFrac?: number;
+  cropStartTiles?: number;
   /** Acoustic loss through the frozen depth decoder; 0 = old objective (A/B only). */
   depthLossWeight?: number;
   depthLossFrames?: number;
