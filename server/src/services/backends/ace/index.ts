@@ -29,9 +29,12 @@ async function capabilities(): Promise<BackendCapabilities> {
     backend: 'ace',
     up,
     core: {
-      // 240 matches the UI's long-standing ACE duration ceiling — the slider
-      // max is now capability-driven, so this value IS the user-visible limit.
-      duration: { max: 240 },
+      // The LM's constrained-decoding FSM builds a duration prefix tree over
+      // 10..600 s (metadata-fsm.h) and clamps anything above 600, so 600 is
+      // the engine's real ceiling. 240 was a UI number with nothing behind it
+      // (issue #101). The slider max is capability-driven, so this value IS
+      // the user-visible limit. Quality past a few minutes is the user's call.
+      duration: { max: 600 },
       bpm: true,
       keyscale: true,
       negativePrompt: true,
