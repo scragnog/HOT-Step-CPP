@@ -1,4 +1,4 @@
-# CLAUDE.md — HOT-Step CPP
+# AGENTS.md — HOT-Step CPP
 
 Orientation map for agents. Keep this short and navigational — point at the deep docs, don't duplicate them.
 
@@ -29,7 +29,7 @@ LAUNCH.bat → Node server (Express :3001)
 
 ## Environment
 
-- **Windows 11 + PowerShell.** This repo's primary dev environment is Windows. The Claude Code harness also gives you a Bash (POSIX) tool — each takes its own syntax. In PowerShell use `;` not `&&`.
+- **Windows 11 + PowerShell.** This repo's primary dev environment is Windows. The Codex harness also gives you a Bash (POSIX) tool — each takes its own syntax. In PowerShell use `;` not `&&`.
 - **Node 18–22 LTS only.** Node 24+ breaks dependencies (`engines` field enforces `<24`).
 
 ## Build & run rules (IMPORTANT — learned the hard way)
@@ -87,30 +87,30 @@ Solvers (17), schedulers (9), guidance modes, and postprocess are **hot-loadable
 ## Discord transcripts
 
 The MM3 working group lives in Discord, and a lot of project-relevant decisions
-happen there. [tools/discord-claude/](tools/discord-claude/) bridges that thread to
-Claude *and* logs every message to `logs/discord/<channelId>.jsonl` (gitignored —
+happen there. [tools/discord-Codex/](tools/discord-Codex/) bridges that thread to
+Codex *and* logs every message to `logs/discord/<channelId>.jsonl` (gitignored —
 it is other people's chat). Read it with:
 
 ```
-node tools/discord-claude/read-log.mjs --list                     # channels + message counts
-node tools/discord-claude/read-log.mjs --since 12h                # busiest channel, recent
-node tools/discord-claude/read-log.mjs --channel all-for-one --last 200
-node tools/discord-claude/read-log.mjs --all --grep "encoder|NVFP4" --context 3
+node tools/discord-Codex/read-log.mjs --list                     # channels + message counts
+node tools/discord-Codex/read-log.mjs --since 12h                # busiest channel, recent
+node tools/discord-Codex/read-log.mjs --channel all-for-one --last 200
+node tools/discord-Codex/read-log.mjs --all --grep "encoder|NVFP4" --context 3
 ```
 
 `backfill.mjs` pulls history from the Discord API (safe to re-run; dedupes by message id).
-**Do not** reconstruct the thread by scraping `~/.claude/projects/*.jsonl` — those sessions
+**Do not** reconstruct the thread by scraping `~/.Codex/projects/*.jsonl` — those sessions
 only ever saw a rolling window and are lossy.
 
 ## Read-Y-for-X index
 
 | For… | Read |
 |------|------|
-| **Any maintenance task — start here** (per-domain procedures, gotchas, distilled institutional knowledge) | [.claude/skills/README.md](.claude/skills/README.md) — 16 skills (13 fact-checked + 3 MM3) |
-| **MiniMax-Music3 backend** (second generation backend: engine port, /mm3 endpoints, backend registry/toggle, trap list) | [.claude/skills/mm3-backend/SKILL.md](.claude/skills/mm3-backend/SKILL.md) |
-| MM3 caption/prompt format (genre adherence) | [.claude/skills/mm3-captioning/SKILL.md](.claude/skills/mm3-captioning/SKILL.md) |
-| **Training an MM3 LM adapter** (album/artist clone: rank, steps, which checkpoint to ship, likeness-vs-coherence) | [.claude/skills/mm3-lm-adapter-training/SKILL.md](.claude/skills/mm3-lm-adapter-training/SKILL.md) |
-| **What the Discord working group said** (MM3 group: bghira, Serveurperso, testerf, Shaz…) — searchable transcripts of every channel | `node tools/discord-claude/read-log.mjs --list` — see [Discord transcripts](#discord-transcripts) |
+| **Any maintenance task — start here** (per-domain procedures, gotchas, distilled institutional knowledge) | [.Codex/skills/README.md](.Codex/skills/README.md) — 16 skills (13 fact-checked + 3 MM3) |
+| **MiniMax-Music3 backend** (second generation backend: engine port, /mm3 endpoints, backend registry/toggle, trap list) | [.Codex/skills/mm3-backend/SKILL.md](.Codex/skills/mm3-backend/SKILL.md) |
+| MM3 caption/prompt format (genre adherence) | [.Codex/skills/mm3-captioning/SKILL.md](.Codex/skills/mm3-captioning/SKILL.md) |
+| **Training an MM3 LM adapter** (album/artist clone: rank, steps, which checkpoint to ship, likeness-vs-coherence) | [.Codex/skills/mm3-lm-adapter-training/SKILL.md](.Codex/skills/mm3-lm-adapter-training/SKILL.md) |
+| **What the Discord working group said** (MM3 group: bghira, Serveurperso, testerf, Shaz…) — searchable transcripts of every channel | `node tools/discord-Codex/read-log.mjs --list` — see [Discord transcripts](#discord-transcripts) |
 | **Writing anything a human reads** (issue replies, commits, PR bodies, release notes, docs) | [docs/WRITING-STYLE.md](docs/WRITING-STYLE.md) — no emojis, no AI tells, honest confidence |
 | Full feature catalogue (100+) | [FEATURES.md](FEATURES.md) |
 | Engine internals, CLI, request JSON, generation modes | [engine/docs/ARCHITECTURE.md](engine/docs/ARCHITECTURE.md) |
@@ -121,4 +121,4 @@ only ever saw a rolling window and are lossy.
 | Internal design/investigation docs (perf, adapters, upstream sync, feature designs) | `docs/plans/` *(gitignored, local-only)* |
 | In-app assistant behaviour/KB | [server/src/data/assistant-knowledge.md](server/src/data/assistant-knowledge.md) |
 
-> **Doc convention:** committed contributor-facing docs = `README.md`, `FEATURES.md`, `docs/PLUGINS.md`, `engine/docs/ARCHITECTURE.md`. Internal planning/investigation docs live in `docs/plans/`, which is **gitignored** (local only). This file (`CLAUDE.md`) is committed.
+> **Doc convention:** committed contributor-facing docs = `README.md`, `FEATURES.md`, `docs/PLUGINS.md`, `engine/docs/ARCHITECTURE.md`. Internal planning/investigation docs live in `docs/plans/`, which is **gitignored** (local only). This file (`AGENTS.md`) is committed.
