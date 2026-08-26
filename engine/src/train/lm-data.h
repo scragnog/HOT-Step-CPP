@@ -32,6 +32,14 @@ struct LmSample {
     int                  n_masked = 0;
     int                  s_tr     = 0;  // == (int)tokens.size() - n_masked
 
+    // Leading positions that must stay BLIND to a frozen KV prefix — the
+    // caption, which the history FOLLOWS rather than precedes. It is not the
+    // same number as n_masked: with history in front of a crop, the row that
+    // predicts the first supervised frame is the previous FRAME's, so
+    // n_masked is one further along. -1 means "same as n_masked", which is the
+    // right answer for every trainer that has no prefix.
+    int                  n_prompt = -1;
+
     // ── Prior preservation (soft targets) ──────────────────────────────────
     //
     // When soft_k > 0 the head scores against a DISTRIBUTION per position
@@ -273,6 +281,41 @@ struct LmChunkLabelGuard {
 // ─── causal mask ────────────────────────────────────────────────────────────
 
 // [S, S] f32, 0 / -INF. Row i = query, col j = key.
+// Rectangular causal mask for a window that attends to a FROZEN NO-GRAD
+// PREFIX in front of it (train/lm-kvprefix.h). Layout is [n_kv, S] row-major
+// with n_kv = n_pfx + S, which is what ggml_soft_max_ext wants: ne[0] must
+// equal the score tensor's ne[0], and the scores are mul_mat(k, q).
+//
+// Column j < n_pfx is a stored prefix key; column n_pfx + t is window
+// position t.
+//
+//   pfx_lo    store columns below this are ALWAYS blind. The prefill runs
+//             [prompt ; history] as one causal stream and stores K/V for all
+//             of it, so the window must skip the prompt columns — it carries
+//             the prompt itself and would otherwise softmax over it twice.
+//   n_prompt  leading WINDOW positions that are prompt rather than audio.
+//             They stay blind to the whole prefix: the prefix is audio that
+//             follows them, and a blind prompt has hidden states identical to
+//             the no-prefix case.
+//
+// The prefill's own chunks use pfx_lo = 0, n_prompt = 0 — a plain causal
+// stream against everything stored so far.
+static void lm_causal_mask_prefix(int n_pfx, int pfx_lo, int S, int n_prompt, std::vector<float> * out) {
+    const size_t n_kv = (size_t) n_pfx + (size_t) S;
+    out->assign(n_kv * (size_t) S, 0.0f);
+    float * m = out->data();
+    for (int i = 0; i < S; i++) {
+        float *    row      = m + (size_t) i * n_kv;
+        const bool sees_pfx = (i >= n_prompt);
+        for (int j = 0; j < n_pfx; j++) {
+            row[j] = (sees_pfx && j >= pfx_lo) ? 0.0f : -INFINITY;
+        }
+        for (int t = 0; t < S; t++) {
+            row[(size_t) n_pfx + (size_t) t] = (t <= i) ? 0.0f : -INFINITY;
+        }
+    }
+}
+
 static void lm_causal_mask(int S, std::vector<float> * out) {
     out->assign((size_t) S * (size_t) S, 0.0f);
     float * m = out->data();

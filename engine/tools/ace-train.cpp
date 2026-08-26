@@ -1307,7 +1307,9 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 //       [--optimizer adamw|muon] [--muon-*] [--trigger word] [--trigger-prepend]
 //       [--caption-dropout 0.2] [--rank-dropout 0.1] [--caption-file <txt>]
 //       [--seed 42]
-//       [--crop-anchor song|zero] [--resume <state>] [--pause-file <path>]
+//       [--crop-anchor song|zero] [--prefix-frames N] [--prefix-chunk N]
+//       [--prefix-selftest]
+//       [--resume <state>] [--pause-file <path>]
 //       [--no-pause]
 //       [--reg-manifest <json> --reg-captions <dir> --reg-codes <dir>
 //        --reg-every 3 [--reg-topk 64] [--reg-prior <dir>]]
@@ -1316,6 +1318,13 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 // track. `zero` is the legacy convention, where every crop claimed to be the
 // song's opening — a train/inference mismatch, since generation always starts
 // at frame 0. Kept only so a pre-2026-08-23 run can be reproduced.
+//
+// --prefix-frames N places N frames of REAL history in front of every crop,
+// run forward-only with no gradient (train/lm-kvprefix.h). Without it a crop
+// carries its true RoPE position but an EMPTY context, which is what teaches
+// the middle third of the stack to fake long-horizon behaviour from a
+// short-horizon view. Costs one forward pass over the prefix per micro-step
+// plus ~288 KB of K/V per prefix frame; needs --crop-anchor song. 0 = off.
 //
 // --reg-* turns on PRIOR PRESERVATION: every --reg-every'th step trains on an
 // unrelated corpus against the FROZEN BASE MODEL'S OWN next-token distribution
@@ -1383,6 +1392,9 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--crop-end-frac"))   a.crop_end_frac   = atof(next("--crop-end-frac"));
         else if (!strcmp(argv[i], "--crop-start-tiles")) a.crop_start_tiles = atoi(next("--crop-start-tiles"));
         else if (!strcmp(argv[i], "--crop-anchor"))   a.crop_anchor  = next("--crop-anchor");
+        else if (!strcmp(argv[i], "--prefix-frames")) a.prefix_frames = atoll(next("--prefix-frames"));
+        else if (!strcmp(argv[i], "--prefix-chunk"))  a.prefix_chunk  = atoi(next("--prefix-chunk"));
+        else if (!strcmp(argv[i], "--prefix-selftest")) a.prefix_selftest = true;
         else if (!strcmp(argv[i], "--resume"))        a.resume_path  = next("--resume");
         else if (!strcmp(argv[i], "--pause-file"))    a.pause_file   = next("--pause-file");
         else if (!strcmp(argv[i], "--no-pause"))      a.no_pause     = true;
@@ -1441,6 +1453,10 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     }
     if (a.crop_anchor != "song" && a.crop_anchor != "zero") {
         fprintf(stderr, "ace-train mm3-lm-train: --crop-anchor must be song or zero\n");
+        return 2;
+    }
+    if (a.prefix_frames < 0 || a.prefix_chunk < 1) {
+        fprintf(stderr, "ace-train mm3-lm-train: --prefix-frames must be >= 0, --prefix-chunk >= 1\n");
         return 2;
     }
     if (a.crop_mode != "random" && a.crop_mode != "beginning" && a.crop_mode != "structured") {

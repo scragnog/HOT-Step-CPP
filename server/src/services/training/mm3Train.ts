@@ -222,7 +222,29 @@ export const MM3_VRAM_MODEL = {
   /** Typical MM3 prompt. Added to maxFrames to get the sequence length. */
   promptTokens: 1142,
   constMb: 441,
+  /** Frozen KV prefix (engine train/lm-kvprefix.h). NOT fitted — this one is
+   *  arithmetic: 36 layers x K and V x n_kv_heads*head_dim (1024) x 4 bytes is
+   *  exactly 0.28125 MB per stored column, and the store spans the prefill
+   *  stream plus the window (the window splices its own K/V onto the end).
+   *  Predicted 848 MB at 750 prefix frames against 856 measured. */
+  prefixMbPerColumn: 0.28125,
 } as const;
+
+/** Extra peak VRAM from a frozen KV prefix, in MB. 0 when it is off.
+ *
+ *  Linear in the prefix, which is the whole point: the quadratic term above is
+ *  the backward retaining [S, S, heads] attention scores, and a prefix has no
+ *  backward. 750 frames of history cost about what 60 frames of crop do. */
+export function estimateMm3PrefixMb(prefixFrames: number, maxFrames: number,
+                                    chunk = 256,
+                                    promptTokens = MM3_VRAM_MODEL.promptTokens): number {
+  if (!(prefixFrames > 0)) return 0;
+  const qMax = promptTokens + prefixFrames;
+  const sMax = promptTokens + maxFrames + 1;   // +1: the window's lead frame
+  const w    = Math.max(sMax, chunk);
+  const mask = (qMax + w) * w * 4 / 1048576;
+  return Math.round(MM3_VRAM_MODEL.prefixMbPerColumn * (qMax + sMax + chunk) + mask);
+}
 
 /** Peak VRAM for a configuration, in MB.
  *
@@ -231,7 +253,8 @@ export const MM3_VRAM_MODEL = {
  *  numbers over there would drift from the measurements that produced them. */
 export function estimateMm3PeakMb(baseBytes: number, rank: number, maxFrames: number,
                                   extraMb = 0,
-                                  optimizer: 'muon' | 'adamw' | 'prodigy' = MM3_LM_DEFAULTS.optimizer): number {
+                                  optimizer: 'muon' | 'adamw' | 'prodigy' = MM3_LM_DEFAULTS.optimizer,
+                                  prefixFrames = 0): number {
   const M      = MM3_VRAM_MODEL;
   const loaded = baseBytes / 1048576 + M.loadedOverheadMb;
   const S      = M.promptTokens + Math.max(0, maxFrames);
@@ -243,7 +266,7 @@ export function estimateMm3PeakMb(baseBytes: number, rank: number, maxFrames: nu
   const extraBuffers = optimizer === 'adamw' ? 1 : optimizer === 'prodigy' ? 3 : 0;
   const perRank = M.perRankMb + extraBuffers * M.adamwPerRankMb;
   return Math.round(loaded + perRank * rank + M.perTokenMb * S + M.perTokenSqMb * S * S
-                    + M.constMb + extraMb);
+                    + M.constMb + extraMb + estimateMm3PrefixMb(prefixFrames, maxFrames));
 }
 
 /** Every installed base, best quality first.

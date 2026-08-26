@@ -39,6 +39,7 @@
 #include "train/lm-common.h"
 #include "train/lm-data.h"
 #include "train/lm-graph.h"
+#include "train/lm-kvprefix.h"
 #include "train/lm-optim.h"
 
 #include <algorithm>
@@ -189,6 +190,15 @@ struct LmCkptCfg {
     // subnetwork. The caller must leave it all-ones (or clear it) for eval and
     // for any forward whose output is treated as the frozen base.
     ggml_tensor * rank_mask = nullptr;
+
+    // ── FROZEN KV PREFIX (train/lm-kvprefix.h) ─────────────────────────────
+    //
+    // Non-null => every layer graph attends to `kv->n` stored history columns
+    // in front of the window, and the mask becomes rectangular. The caller
+    // fills the store before the micro-step; nothing here writes to it.
+    //
+    // nullptr (the default) => square self-attention, emitted verbatim.
+    LmKvPrefix * kv = nullptr;
 };
 
 // The scored head and its width, resolved. One place, so no call site can
@@ -554,6 +564,18 @@ struct LmCkptRun {
 
     int grad_accum = 1;
 
+    /** Leave t_pos alone — the caller has already uploaded the positions.
+     *
+     *  The micro-step's own fill is `0 .. S-1`, which is correct for a trainer
+     *  whose sequence IS the whole example. MM3's is not: a crop taken at frame
+     *  c0 must be presented at RoPE position P + c0, and `--crop-anchor song`
+     *  computes exactly that and uploads it — and this function then silently
+     *  overwrote it. Every MM3 LM adapter trained before 2026-08-26 therefore
+     *  saw each crop as if it were the song's opening.
+     *
+     *  Default false, so the ACE trainer is byte-identical. */
+    bool pos_external = false;
+
     // Optional extra loss head, run AFTER the CE head has filled t_G and
     // BEFORE the backward segments consume it. The hook may ADD gradient
     // contributions into t_G (st->Gh[0]) at any supervised column; the
@@ -612,14 +634,47 @@ struct LmCkptRun {
     std::vector<float>   * capture_p   = nullptr;
 };
 
-static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S) {
+// Rows of the attention mask, i.e. how many keys a query can reach: S on the
+// square path, kv->n + S once a frozen prefix sits in front of the window.
+static inline int lm_ckpt_n_kv(const LmCkptState & st, int S) {
+    return st.cfg.kv ? st.cfg.kv->n + S : S;
+}
+
+static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S, int n_prompt) {
+    std::vector<float> m;
+    if (r.st->cfg.kv) {
+        // The prefix length moves with the crop, so there is nothing stable to
+        // cache on — rebuild every micro-step. It is a host memset of a few
+        // tens of MB against a multi-second step.
+        //
+        // The store's stream is [prompt ; history], and the window carries its
+        // own prompt, so the prompt's stored columns are skipped: pfx_lo =
+        // n_prompt. Prompt ROWS stay blind to the whole prefix, which is what
+        // keeps their hidden states identical to the no-prefix case.
+        lm_causal_mask_prefix(r.st->cfg.kv->n, n_prompt, S, n_prompt, &m);
+        ggml_backend_tensor_set(r.t_msk, m.data(), 0, m.size() * sizeof(float));
+        r.st->last_mask_S = -1;
+        return;
+    }
     if (S == r.st->last_mask_S) {
         return;
     }
-    std::vector<float> m;
     lm_causal_mask(S, &m);
     ggml_backend_tensor_set(r.t_msk, m.data(), 0, m.size() * sizeof(float));
     r.st->last_mask_S = S;
+}
+
+// The per-layer view of the shared opts: identical to `base` unless a frozen
+// prefix is configured, in which case it names that layer's store.
+static inline LmLayerOpts lm_ckpt_layer_kv(const LmCkptState & st, const LmLayerOpts & base, int l) {
+    if (!st.cfg.kv) {
+        return base;
+    }
+    LmLayerOpts o = base;
+    o.kv_k        = st.cfg.kv->k[(size_t) l];
+    o.kv_v        = st.cfg.kv->v[(size_t) l];
+    o.kv_pfx      = st.cfg.kv->n;
+    return o;
 }
 
 static inline LmLayerOpts lm_ckpt_layer_opts(const LmCkptState & st) {
@@ -848,7 +903,14 @@ static int lm_ckpt_probe_segment_nodes(LmCkptRun & r, int S, LmBf16Counts * coun
     ggml_cgraph *     gf   = ggml_new_graph_custom(ctx, 8192, /*grads=*/true);
 
     ggml_tensor * pos_v = ggml_view_1d(ctx, r.t_pos, S, 0);
-    ggml_tensor * mask  = ggml_view_2d(ctx, r.t_msk, S, S, (size_t) S * sizeof(float), 0);
+    // Worst case is a FULL prefix: it adds the splice nodes to every segment.
+    const int     nkv   = st.cfg.kv ? (int) st.cfg.kv->q_max + S : S;
+    if (st.cfg.kv) {
+        opts.kv_k   = st.cfg.kv->k[(size_t) l];
+        opts.kv_v   = st.cfg.kv->v[(size_t) l];
+        opts.kv_pfx = (int) st.cfg.kv->q_max;
+    }
+    ggml_tensor * mask  = ggml_view_2d(ctx, r.t_msk, nkv, S, (size_t) nkv * sizeof(float), 0);
     ggml_tensor * X     = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
     ggml_tensor * Y     = lm_train_layer(ctx, c, &r.lm->layers[l], X, pos_v, mask, S, opts);
     Y                   = lm_rms(ctx, Y, r.lm->final_norm, c.rms_norm_eps);
@@ -883,16 +945,19 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
     GGML_ASSERT(S <= st.cfg.s_max && Hi > Lo);
 
     // ── P0: inputs ───────────────────────────────────────────────────────
-    lm_ckpt_upload_mask(r, S);
+    lm_ckpt_upload_mask(r, S, s.n_prompt >= 0 ? s.n_prompt : s.n_masked);
+    const int NKV = lm_ckpt_n_kv(st, S);
     // `tokens` still SIZES the sequence, but with an embedding override its
     // contents are meaningless and t_tok is never read — do not pretend.
     if (!r.embed_build) {
         ggml_backend_tensor_set(r.t_tok, s.tokens.data(), 0, (size_t) S * 4);
     }
-    for (int i = 0; i < S; i++) {
-        st.pos_scratch[(size_t) i] = i;
+    if (!r.pos_external) {
+        for (int i = 0; i < S; i++) {
+            st.pos_scratch[(size_t) i] = i;
+        }
+        ggml_backend_tensor_set(r.t_pos, st.pos_scratch.data(), 0, (size_t) S * 4);
     }
-    ggml_backend_tensor_set(r.t_pos, st.pos_scratch.data(), 0, (size_t) S * 4);
 
     const LmLayerOpts opts = lm_ckpt_layer_opts(st);
 
@@ -941,10 +1006,10 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_context *   ctx = ggml_init(ip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 2048, /*grads=*/false);
         ggml_tensor *    pv  = ggml_view_1d(ctx, r.t_pos, S, 0);
-        ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, S, S, (size_t) S * sizeof(float), 0);
+        ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * sizeof(float), 0);
         ggml_tensor *    X   = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
         // D13: SAME opts as the P7 recompute. Not an optimisation opportunity.
-        ggml_tensor * Y = lm_train_layer(ctx, c, &lm.layers[l], X, pv, mv, S, opts);
+        ggml_tensor * Y = lm_train_layer(ctx, c, &lm.layers[l], X, pv, mv, S, lm_ckpt_layer_kv(st, opts, l));
         ggml_build_forward_expand(
             gf, ggml_cpy(ctx, Y, ggml_view_2d(ctx, st.C[(size_t) (l + 1)], H, S, st.C[(size_t) (l + 1)]->nb[1], 0)));
         const bool ok = run_graph(gf);
@@ -960,9 +1025,9 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_context *   ctx = ggml_init(ip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 2048, /*grads=*/false);
         ggml_tensor *    pv  = ggml_view_1d(ctx, r.t_pos, S, 0);
-        ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, S, S, (size_t) S * sizeof(float), 0);
+        ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * sizeof(float), 0);
         ggml_tensor *    X   = ggml_view_2d(ctx, st.C[(size_t) (Hi - 1)], H, S, st.C[(size_t) (Hi - 1)]->nb[1], 0);
-        ggml_tensor *    Y   = lm_train_layer(ctx, c, &lm.layers[Hi - 1], X, pv, mv, S, opts);
+        ggml_tensor *    Y   = lm_train_layer(ctx, c, &lm.layers[Hi - 1], X, pv, mv, S, lm_ckpt_layer_kv(st, opts, Hi - 1));
         ggml_tensor *    hN  = lm_rms(ctx, Y, lm.final_norm, c.rms_norm_eps);
         ggml_build_forward_expand(gf, ggml_cpy(ctx, hN, ggml_view_2d(ctx, st.t_H, H, S, st.t_H->nb[1], 0)));
         const bool ok = run_graph(gf);
@@ -1018,9 +1083,9 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         }
 
         ggml_tensor * pv = ggml_view_1d(ctx, r.t_pos, S, 0);
-        ggml_tensor * mv = ggml_view_2d(ctx, r.t_msk, S, S, (size_t) S * sizeof(float), 0);
+        ggml_tensor * mv = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * sizeof(float), 0);
         ggml_tensor * X  = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
-        ggml_tensor * Y  = lm_train_layer(ctx, c, &lm.layers[l], X, pv, mv, S, sopts);
+        ggml_tensor * Y  = lm_train_layer(ctx, c, &lm.layers[l], X, pv, mv, S, lm_ckpt_layer_kv(st, sopts, l));
         if (l == Hi - 1) {
             Y = lm_rms(ctx, Y, lm.final_norm, c.rms_norm_eps);
         }

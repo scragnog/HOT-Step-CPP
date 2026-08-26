@@ -366,6 +366,31 @@ struct MM3LmTrainArgs {
     // under "zero" is not comparable with one trained under "song".
     std::string crop_anchor = "song";     // song | zero
 
+    // ── FROZEN KV PREFIX (train/lm-kvprefix.h) ─────────────────────────────
+    //
+    // Frames of REAL history placed in front of the crop, forward-only and
+    // with no gradient: the crop then attends back over the song as it will at
+    // generation time instead of starting from an empty context labelled with
+    // a late position. 0 disables it and the trainer is unchanged.
+    //
+    // Costs Nkv*D floats per position per layer (288 KB/position across MM3's
+    // 36 layers in F32) plus one forward pass over the prefix per micro-step.
+    // No backward, so the O(S^2) attention-score retention that caps --max-
+    // frames does not apply.
+    int64_t     prefix_frames = 0;
+    int         prefix_chunk  = 256;   // prefill positions per graph
+
+    /** Prove the prefix before training on it.
+     *
+     *  Attention over [prefix ; window] is mathematically identical to
+     *  attention over one long crop covering both, so the CE of a supervised
+     *  span must not care which way it was produced. Any difference is an
+     *  implementation error — a mask off by one column, a stale store, RoPE
+     *  applied at the wrong positions. Same discipline as --fd-check: the
+     *  runtime-LoKR audit is the standing reminder that "the math reads right"
+     *  is not evidence. */
+    bool        prefix_selftest = false;
+
     // ── Pause / resume (mm3-lm-resume.h) ───────────────────────────────────
     //
     // Empty pause_file disables the check entirely. The server uses this to
@@ -456,8 +481,12 @@ static ggml_tensor * mm3_lm_build_embed(ggml_context * ctx, const MM3EmbedCtx & 
     const int64_t      H   = t.lm.cfg.hidden_size;
     const int64_t      NC  = (int64_t) t.num_codebooks - 1;
 
-    ggml_tensor * e_prompt = ggml_get_rows(ctx, t.lm.embed_tokens, ggml_view_1d(ctx, e.t_prompt, e.P, 0));
+    // P == 0 is reachable only from the KV prefill, whose chunks can land
+    // wholly inside the audio; every training crop carries its prompt.
+    ggml_tensor * e_prompt =
+        e.P > 0 ? ggml_get_rows(ctx, t.lm.embed_tokens, ggml_view_1d(ctx, e.t_prompt, e.P, 0)) : nullptr;
     if (e.Fin <= 0) {
+        GGML_ASSERT(e_prompt && "an embedding of nothing was requested");
         return e_prompt;
     }
     ggml_tensor * e_sem = ggml_get_rows(ctx, t.lm.embed_tokens, ggml_view_1d(ctx, e.t_sem, e.Fin, 0));
@@ -468,13 +497,65 @@ static ggml_tensor * mm3_lm_build_embed(ggml_context * ctx, const MM3EmbedCtx & 
         acc = ggml_add(ctx, acc, ggml_view_2d(ctx, e_ac, H, e.Fin, e_ac->nb[1], (size_t) k * e_ac->nb[2]));
     }
     ggml_tensor * frames = ggml_scale(ctx, ggml_add(ctx, e_sem, acc), t.embedding_scale);
-    return ggml_concat(ctx, e_prompt, frames, 1);
+    return e_prompt ? ggml_concat(ctx, e_prompt, frames, 1) : frames;
 }
 
 // The LmCkptRun hook. P1 calls this instead of get_rows on token ids.
 static ggml_tensor * mm3_lm_ckpt_embed(ggml_context * ctx, LmCkptRun & r, int S) {
     const MM3EmbedCtx & e = *(const MM3EmbedCtx *) r.embed_user;
     GGML_ASSERT(e.P + e.Fin == (int64_t) S);
+    return mm3_lm_build_embed(ctx, e);
+}
+
+// ── FROZEN KV PREFIX (train/lm-kvprefix.h) ──────────────────────────────────
+//
+// The prefill stream is [prompt ; frames pfx_lo .. c0-1] and lm_kvprefix_run
+// walks it in chunks, so this builder has to answer for an ARBITRARY [i0, i0+n)
+// slice of it: part prompt and part audio, or either alone. Stream position P
+// is frame pfx_lo.
+//
+// Its own t_sem / t_ac, sized for one chunk, because the window's are live with
+// the crop for the whole micro-step.
+struct MM3PrefixCtx {
+    ggml_tensor *        t_sem = nullptr, * t_ac = nullptr;
+    const int32_t *      prompt = nullptr;   // P ids
+    const int32_t *      codes  = nullptr;   // the song's [n_frames, 8]
+    int64_t              P = 0, pfx_lo = 0;
+    int64_t              NC = 0, AV = 0, sem_off = 0;
+    std::vector<int32_t> sem, ac;
+    MM3EmbedCtx          e;                  // t / t_prompt shared with the window
+};
+
+static ggml_tensor * mm3_lm_prefix_embed(ggml_context * ctx, void * user, int64_t i0, int64_t n) {
+    MM3PrefixCtx & c   = *(MM3PrefixCtx *) user;
+    const int64_t  p_n = std::max<int64_t>(0, std::min<int64_t>(c.P - i0, n));
+    const int64_t  f_n = n - p_n;
+
+    if (p_n > 0) {
+        ggml_backend_tensor_set(c.e.t_prompt, c.prompt + i0, 0, (size_t) p_n * sizeof(int32_t));
+    }
+    if (f_n > 0) {
+        const int64_t f0 = c.pfx_lo + (i0 + p_n - c.P);
+        c.sem.resize((size_t) f_n);
+        c.ac.resize((size_t) (f_n * c.NC));
+        for (int64_t i = 0; i < f_n; i++) {
+            const int32_t * f  = &c.codes[(size_t) ((f0 + i) * 8)];
+            c.sem[(size_t) i]  = f[0] + (int32_t) c.sem_off;
+            for (int64_t k = 0; k < c.NC; k++) {
+                c.ac[(size_t) (k * f_n + i)] = f[1 + k] + (int32_t) (k * c.AV);
+            }
+        }
+        ggml_backend_tensor_set(c.t_sem, c.sem.data(), 0, c.sem.size() * sizeof(int32_t));
+        ggml_backend_tensor_set(c.t_ac, c.ac.data(), 0, c.ac.size() * sizeof(int32_t));
+    }
+    // The window's ctx names the window's t_sem/t_ac; swap in the prefill's for
+    // this build and put them back, so one MM3EmbedCtx keeps describing the
+    // frame layout in exactly one place.
+    MM3EmbedCtx e = c.e;
+    e.t_sem       = c.t_sem;
+    e.t_ac        = c.t_ac;
+    e.P           = p_n;
+    e.Fin         = f_n;
     return mm3_lm_build_embed(ctx, e);
 }
 
@@ -1283,7 +1364,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     for (const auto & s : samples) max_prompt = std::max(max_prompt, (int64_t) s.prompt.size());
     for (const auto & s : holdout) max_prompt = std::max(max_prompt, (int64_t) s.prompt.size());
     const int64_t K_max = a.max_frames > 0 ? a.max_frames : 4096;
-    const int64_t S_max = max_prompt + K_max;
+    // A crop that reaches the track end uses all K frames as INPUT, and with a
+    // prefix the window takes one more in front of them (see `lead`). So the
+    // widest input span is K_max + 1, and every buffer sized off the sequence
+    // has to know that or the last crop of a flush-to-the-end step writes one
+    // frame past the end of t_sem.
+    const int64_t F_max = K_max + (a.prefix_frames > 0 ? 1 : 0);
+    const int64_t S_max = max_prompt + F_max;
     fprintf(stderr, "[mm3-lm-train] %zu training songs (+%zu held out), longest prompt %lld tok, "
                     "crop <= %lld frames, seq <= %lld\n",
             samples.size(), holdout.size(), (long long) max_prompt, (long long) K_max, (long long) S_max);
@@ -1354,10 +1441,29 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         ctx_static         = ggml_init(p);
     }
     ggml_tensor * t_prompt = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, max_prompt);
-    ggml_tensor * t_sem    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, K_max);
-    ggml_tensor * t_ac     = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, K_max * NC);
+    ggml_tensor * t_sem    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, F_max);
+    ggml_tensor * t_ac     = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, F_max * NC);
+    // With a frozen prefix the mask is rectangular, [n_pfx + S, S] — see
+    // lm_causal_mask_prefix. Size for the worst case up front; the prefill's
+    // own chunk masks live in its store, not here.
+    const int64_t PFX_Q   = a.prefix_frames > 0 ? max_prompt + a.prefix_frames : 0;
+    const int64_t MSK_CAP = (PFX_Q + S_max) * S_max;
     ggml_tensor * t_pos    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, S_max);
-    ggml_tensor * t_msk    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, S_max * S_max);
+    ggml_tensor * t_msk    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, MSK_CAP);
+    // Prefill inputs, one chunk wide. SEPARATE from the window's, and not an
+    // optimisation to undo: the prefill embeds its chunks while the window's
+    // own ids are already uploaded, so sharing a buffer means the prefill
+    // overwrites the caption the window is about to embed. That cost 0.215
+    // nats on the equivalence self-test.
+    ggml_tensor * t_pfx_prompt = a.prefix_frames > 0
+                                ? ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, a.prefix_chunk)
+                                : nullptr;
+    ggml_tensor * t_pfx_sem = a.prefix_frames > 0
+                                ? ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, a.prefix_chunk)
+                                : nullptr;
+    ggml_tensor * t_pfx_ac  = a.prefix_frames > 0
+                                ? ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, a.prefix_chunk * NC)
+                                : nullptr;
     // The [SL, K_max+1] one-hot buffer is a NAIVE-path structure (98 MB at
     // K_max 1500). The checkpointed head chunks its own labels into a
     // [SL, chunk] buffer inside LmCkptState, so allocating this too would be
@@ -1385,6 +1491,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     ggml_tensor * t_tok    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, S_max);
     for (ggml_tensor * x : { t_prompt, t_sem, t_ac, t_pos, t_msk, t_tok }) ggml_set_input(x);
     if (t_lab) ggml_set_input(t_lab);
+    if (t_pfx_sem) { ggml_set_input(t_pfx_prompt); ggml_set_input(t_pfx_sem); ggml_set_input(t_pfx_ac); }
 
     ggml_backend_buffer_t buf_static = ggml_backend_alloc_ctx_tensors(ctx_static, t.lm.backend);
     if (!buf_static) {
@@ -1470,9 +1577,12 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                          : "f32-window (weights dequantized to F32 in-graph)");
     jl("{\"type\":\"weights\",\"mode\":\"%s\"}", weights_used.c_str());
 
-    LmCkptState ckpt_st;
-    LmCkptRun   ckpt_run;
-    MM3EmbedCtx embed_ctx;
+    LmCkptState  ckpt_st;
+    LmCkptRun    ckpt_run;
+    MM3EmbedCtx  embed_ctx;
+    LmKvPrefix   kvpfx;
+    MM3PrefixCtx pfx_ctx;
+    const bool   kv_on = a.prefix_frames > 0;
 
     // ── the acoustic loss (see MM3LmTrainArgs::depth_loss_weight) ───────────
     //
@@ -1520,7 +1630,15 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             mm3_train_lm_free(&t);
             return 1;
         }
+        if (kv_on && !lm_kvprefix_alloc(&kvpfx, &t.lm, 0, c.n_layers, PFX_Q, S_max, a.prefix_chunk, &err)) {
+            fprintf(stderr, "[mm3-lm-train] kv prefix setup failed: %s\n", err.c_str());
+            lm_lora_detach(&lora, &t.lm);
+            lm_lora_free(&lora);
+            mm3_train_lm_free(&t);
+            return 1;
+        }
         LmCkptCfg cc;
+        cc.kv           = kv_on ? &kvpfx : nullptr;
         cc.chunk        = a.ckpt_chunk;
         cc.weights_bf16 = weights_bf16;                 // Lever A
         cc.rank_mask = t_rankmask;
@@ -1554,6 +1672,17 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         ckpt_run.grad_accum  = std::max(1, a.grad_accum);
         ckpt_run.embed_build = mm3_lm_ckpt_embed;
         ckpt_run.embed_user  = &embed_ctx;
+        // MM3 uploads song-anchored positions itself; without this the
+        // micro-step overwrites them with 0..S-1 and --crop-anchor is a no-op.
+        ckpt_run.pos_external = true;
+
+        pfx_ctx.e          = embed_ctx;
+        pfx_ctx.e.t_prompt = t_pfx_prompt;   // never the window's — see above
+        pfx_ctx.t_sem    = t_pfx_sem;
+        pfx_ctx.t_ac     = t_pfx_ac;
+        pfx_ctx.NC       = NC;
+        pfx_ctx.AV       = AV;
+        pfx_ctx.sem_off  = (int64_t) t.semantic_vocab_offset;
     }
 
     // ── graph sizing + scheduler ──
@@ -1589,7 +1718,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         // scheduler by ~L x. embed_ctx must describe a real crop first: the
         // probe builds P1, which calls the override.
         embed_ctx.P   = max_prompt;
-        embed_ctx.Fin = K_max;
+        embed_ctx.Fin = F_max;
         ckpt_run.sched = nullptr;
         graph_nodes    = lm_ckpt_probe_segment_nodes(ckpt_run, (int) S_max);
     } else {
@@ -1597,7 +1726,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         ggml_context *   ctx = ggml_init(gip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, true);
         ggml_tensor *    loss = nullptr;
-        build_graph(ctx, gf, max_prompt, K_max, K_max + 1, &loss);
+        build_graph(ctx, gf, max_prompt, F_max, K_max + 1, &loss);
         std::vector<ggml_tensor *> gacc;
         lm_optim_fill_gacc(&opt, gf, &gacc);
         ggml_build_backward_expand(ctx, gf, gacc.data());
@@ -1649,6 +1778,27 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             anchor_song ? "song (crops carry their true position)"
                         : "zero (every crop presented as the opening — the legacy convention)");
     jl("{\"type\":\"cropAnchor\",\"mode\":\"%s\"}", anchor_song ? "song" : "zero");
+    if (kv_on) {
+        // Both are hard requirements, not preferences. The non-checkpointed
+        // path builds one whole-trunk graph and has no place to splice a store
+        // into; and a prefix under `zero` anchoring would sit at positions the
+        // window then re-uses, which is not a history, it is a contradiction.
+        if (!a.ckpt) {
+            fprintf(stderr, "[mm3-lm-train] --prefix-frames needs the checkpointed path (drop --no-ckpt)\n");
+            lm_kvprefix_free(&kvpfx);
+            return 1;
+        }
+        if (!anchor_song) {
+            fprintf(stderr, "[mm3-lm-train] --prefix-frames needs --crop-anchor song\n");
+            lm_kvprefix_free(&kvpfx);
+            return 1;
+        }
+        fprintf(stderr,
+                "[mm3-lm-train] kv prefix: up to %lld frames (%.1f s) of no-grad history in front of each crop\n",
+                (long long) a.prefix_frames, (double) a.prefix_frames / 25.0);
+        jl("{\"type\":\"kvPrefix\",\"frames\":%lld,\"chunk\":%d}", (long long) a.prefix_frames,
+           a.prefix_chunk);
+    }
     if (a.crop_mode == "structured") {
         fprintf(stderr,
                 "[mm3-lm-train] crop policy: structured - %.0f%% start share (half at frame 0, "
@@ -1658,7 +1808,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     }
     jl("{\"type\":\"cropPolicy\",\"mode\":\"%s\",\"startFrac\":%.3f,\"endFrac\":%.3f}",
        a.crop_mode.c_str(), a.crop_start_frac, a.crop_end_frac);
-    std::vector<int32_t> sem_in, ac_in, tgt, pos;
+    std::vector<int32_t> sem_in, ac_in, tgt, pos, pfx_pos;
     std::vector<float>   msk;
     int                  last_mask_S = 0;
     double               running = 0.0;
@@ -1830,6 +1980,138 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         ckpt_run.forward_only = false;
         return n > 0 ? sum / (double) n : -1.0;
     };
+
+
+    // ── prefix equivalence self-test (see MM3LmTrainArgs::prefix_selftest) ──
+    //
+    //   A   one square crop  [prompt ; frames c0-N .. c0+K-2]
+    //   B   prefix           [prompt ; frames c0-N .. c0-2  ]
+    //       window           [prompt ; frames c0-1 .. c0+K-2]
+    //
+    // Both supervise the SAME K positions with the same targets, and in both
+    // the row that predicts frame c0 is frame c0-1's — which is why B's window
+    // starts one frame early (see `lead` in the training loop). If the store,
+    // the rectangular mask and the position anchoring are right, the two
+    // cross-entropies are the same number.
+    if (kv_on && a.prefix_selftest) {
+        const MM3LmSample * ss = nullptr;
+        int64_t             P = 0, N = std::min<int64_t>(a.prefix_frames, 96), K = 96;
+        for (const MM3LmSample & cand : samples) {
+            const int64_t p = (int64_t) cand.prompt.size();
+            if (cand.n_frames > N + K && p + N + K <= S_max) {
+                ss = &cand;
+                P  = p;
+                break;
+            }
+        }
+        if (!ss) {
+            fprintf(stderr, "[mm3-lm-train] --prefix-selftest: no sample is long enough (need > %lld frames)\n",
+                    (long long) (N + K));
+            rc = 1;
+        } else {
+            const MM3LmSample & sx = *ss;
+            const int64_t       c0 = N;
+
+            // Targets are the same for both runs: frames c0 .. c0+K-1.
+            tgt.resize((size_t) K);
+            for (int64_t j = 0; j < K; j++) {
+                tgt[(size_t) j] = mm3_lm_train_slice_index(t, sx.codes[(size_t) ((c0 + j) * 8)]);
+            }
+            ggml_backend_tensor_set(t_prompt, sx.prompt.data(), 0, (size_t) P * sizeof(int32_t));
+
+            // f0 = first INPUT frame, Fin = how many, n_masked = unsupervised
+            // lead, n_prompt = rows that stay blind to the prefix.
+            auto run = [&](int64_t f0, int64_t Fin, int64_t n_masked, int64_t n_prompt) -> double {
+                const int64_t S = P + Fin;
+                sem_in.resize((size_t) Fin);
+                ac_in.resize((size_t) (Fin * NC));
+                for (int64_t i = 0; i < Fin; i++) {
+                    const int32_t * f  = &sx.codes[(size_t) ((f0 + i) * 8)];
+                    sem_in[(size_t) i] = f[0] + (int32_t) t.semantic_vocab_offset;
+                    for (int64_t k = 0; k < NC; k++) {
+                        ac_in[(size_t) (k * Fin + i)] = f[1 + k] + (int32_t) (k * AV);
+                    }
+                }
+                pos.resize((size_t) S);
+                for (int64_t i = 0; i < P; i++) {
+                    pos[(size_t) i] = (int32_t) i;
+                }
+                for (int64_t j = 0; j < Fin; j++) {
+                    pos[(size_t) (P + j)] = (int32_t) (P + f0 + j);
+                }
+                ggml_backend_tensor_set(t_sem, sem_in.data(), 0, sem_in.size() * sizeof(int32_t));
+                ggml_backend_tensor_set(t_ac, ac_in.data(), 0, ac_in.size() * sizeof(int32_t));
+                ggml_backend_tensor_set(t_pos, pos.data(), 0, pos.size() * sizeof(int32_t));
+                embed_ctx.P   = P;
+                embed_ctx.Fin = Fin;
+                LmSample smp;
+                smp.tokens.assign((size_t) S, 0);
+                smp.targets  = tgt;
+                smp.n_masked = (int) n_masked;
+                smp.n_prompt = (int) n_prompt;
+                smp.s_tr     = (int) K;
+                double ce    = 0.0;
+                return lm_ckpt_micro_step(ckpt_run, smp, true, &ce) ? ce : NAN;
+            };
+
+            ckpt_run.forward_only = true;
+            set_rank_mask(false);   // a random subnetwork would differ between runs
+            std::string perr;
+
+            // A: no prefix. Q == 0 also clears the store, which is what makes
+            // this a genuine square run rather than one with stale history.
+            double ce_a = NAN, ce_b = NAN;
+            if (lm_kvprefix_run(&kvpfx, &t.lm, sched, arena, lm_ckpt_layer_opts(ckpt_st), mm3_lm_prefix_embed,
+                                &pfx_ctx, nullptr, 0, &perr)) {
+                ce_a = run(c0 - N, N + K - 1, P + N, P + N);
+            }
+
+            // B: prefix [prompt ; frames c0-N .. c0-1], window from c0.
+            pfx_ctx.prompt = sx.prompt.data();
+            pfx_ctx.codes  = sx.codes.data();
+            pfx_ctx.P      = P;
+            pfx_ctx.pfx_lo       = c0 - N;
+            const int64_t Qb     = P + N - 1;   // history stops at frame c0-2
+            pfx_pos.resize((size_t) Qb);
+            for (int64_t i = 0; i < P; i++) {
+                pfx_pos[(size_t) i] = (int32_t) i;
+            }
+            for (int64_t i = 0; i < N - 1; i++) {
+                pfx_pos[(size_t) (P + i)] = (int32_t) (P + (c0 - N) + i);
+            }
+            if (lm_kvprefix_run(&kvpfx, &t.lm, sched, arena, lm_ckpt_layer_opts(ckpt_st), mm3_lm_prefix_embed,
+                                &pfx_ctx, pfx_pos.data(), Qb, &perr)) {
+                ce_b = run(c0 - 1, K, P + 1, P);
+            }
+
+            ckpt_run.forward_only = false;
+            set_rank_mask(true);
+
+            // The two runs differ in summation order across a 36-layer F32
+            // trunk, so they will not be bit-equal. A real defect — a mask
+            // column, a stale store, RoPE at the wrong offset — moves the CE
+            // by whole nats, not by the sixth decimal.
+            const double d   = std::fabs(ce_a - ce_b);
+            const double tol = 2e-3 * std::max(1.0, std::fabs(ce_a));
+            fprintf(stderr,
+                    "[mm3-lm-train] prefix self-test: square %.6f vs prefix %.6f  (|d| %.2e, tol %.2e) -> %s\n",
+                    ce_a, ce_b, d, tol, (std::isfinite(d) && d <= tol) ? "PASS" : "FAIL");
+            jl("{\"type\":\"prefixSelftest\",\"square\":%.6f,\"prefix\":%.6f,\"delta\":%.3e,\"pass\":%s}",
+               ce_a, ce_b, d, (std::isfinite(d) && d <= tol) ? "true" : "false");
+            if (!(std::isfinite(d) && d <= tol)) {
+                fprintf(stderr, "[mm3-lm-train] refusing to train on an unproven prefix\n");
+                rc = 1;
+            }
+        }
+        if (rc != 0) {
+            lm_kvprefix_free(&kvpfx);
+            lm_ckpt_free(&ckpt_st);
+            lm_lora_detach(&lora, &t.lm);
+            lm_lora_free(&lora);
+            mm3_train_lm_free(&t);
+            return rc;
+        }
+    }
 
     // ── epoch order ────────────────────────────────────────────────────────
     //
@@ -2202,8 +2484,19 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             const bool    at_end = (c0 + K) >= s.n_frames;
             const int64_t Fin    = at_end ? K : K - 1;      // frames used as INPUT
             const int64_t n_sup  = at_end ? K + 1 : K;      // supervised positions
-            const int64_t S      = P + Fin;
-            const int64_t anchor0 = anchor_song ? c0 : 0;
+            // ONE EXTRA INPUT FRAME WHEN THERE IS HISTORY.
+            //
+            // Without a prefix the row that predicts frame c0 is the caption's
+            // last token — which is the "a song may begin at c0" lesson the
+            // crop work exists to remove, and it is only the right predictor
+            // at frame 0. With history in front, frame c0-1 comes in as an
+            // input and becomes that row instead; the caption stays blind to
+            // the prefix, so its own states are unchanged.
+            const int64_t lead   = (kv_on && !is_reg && c0 > 0) ? 1 : 0;
+            const int64_t f0     = c0 - lead;               // first INPUT frame
+            const int64_t Finw   = Fin + lead;
+            const int64_t S      = P + Finw;
+            const int64_t anchor0 = anchor_song ? f0 : 0;
 
             // Acoustic loss inputs for this micro-step. Reg steps opt out: the
             // prior path scores soft targets from the base model and has no
@@ -2218,13 +2511,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 depth.opt_step    = step;
             }
 
-            sem_in.resize((size_t) Fin);
-            ac_in.resize((size_t) (Fin * NC));
-            for (int64_t i = 0; i < Fin; i++) {
-                const int32_t * f = &s.codes[(size_t) ((c0 + i) * 8)];
+            sem_in.resize((size_t) Finw);
+            ac_in.resize((size_t) (Finw * NC));
+            for (int64_t i = 0; i < Finw; i++) {
+                const int32_t * f = &s.codes[(size_t) ((f0 + i) * 8)];
                 sem_in[(size_t) i] = f[0] + (int32_t) t.semantic_vocab_offset;
                 for (int64_t k = 0; k < NC; k++) {
-                    ac_in[(size_t) (k * Fin + i)] = f[1 + k] + (int32_t) (k * AV);
+                    ac_in[(size_t) (k * Finw + i)] = f[1 + k] + (int32_t) (k * AV);
                 }
             }
             // Targets: position P-1+j predicts frame c0+j, and the last one is
@@ -2246,11 +2539,48 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             // frames restart at P, which is what every crop used to claim.
             pos.resize((size_t) S);
             for (int64_t i = 0; i < P; i++) pos[(size_t) i] = (int32_t) i;
-            for (int64_t j = 0; j < Fin; j++) pos[(size_t) (P + j)] = (int32_t) (P + anchor0 + j);
+            for (int64_t j = 0; j < Finw; j++) pos[(size_t) (P + j)] = (int32_t) (P + anchor0 + j);
             ggml_backend_tensor_set(t_prompt, prompt_ids.data(), 0, (size_t) P * sizeof(int32_t));
             ggml_backend_tensor_set(t_sem, sem_in.data(), 0, sem_in.size() * sizeof(int32_t));
             ggml_backend_tensor_set(t_ac, ac_in.data(), 0, ac_in.size() * sizeof(int32_t));
             ggml_backend_tensor_set(t_pos, pos.data(), 0, pos.size() * sizeof(int32_t));
+
+            // ── frozen KV prefix ──────────────────────────────────────
+            //
+            // A regularisation step gets NO prefix: its teacher distribution
+            // was captured with none, and scoring against it through a
+            // different context would be measuring drift that is not there.
+            if (kv_on) {
+                int64_t Q = 0;
+                if (!is_reg) {
+                    // History runs up to f0, because frame f0 itself is an
+                    // input to the window (see `lead`).
+                    const int64_t pfx_lo = std::max<int64_t>(0, f0 - a.prefix_frames);
+                    const int64_t npfx   = f0 - pfx_lo;
+                    pfx_ctx.prompt       = prompt_ids.data();
+                    pfx_ctx.codes        = s.codes.data();
+                    pfx_ctx.P            = P;
+                    pfx_ctx.pfx_lo       = pfx_lo;
+                    Q                    = P + npfx;
+                    pfx_pos.resize((size_t) Q);
+                    for (int64_t i = 0; i < P; i++) {
+                        pfx_pos[(size_t) i] = (int32_t) i;
+                    }
+                    for (int64_t i = 0; i < npfx; i++) {
+                        pfx_pos[(size_t) (P + i)] = (int32_t) (P + pfx_lo + i);
+                    }
+                }
+                // Q == 0 still runs, because it is what CLEARS the store: the
+                // window accs its own K/V over columns n..n+S and stale values
+                // there from a longer previous prefix would be read as history.
+                std::string perr;
+                if (!lm_kvprefix_run(&kvpfx, &t.lm, sched, arena, lm_ckpt_layer_opts(ckpt_st),
+                                     mm3_lm_prefix_embed, &pfx_ctx, pfx_pos.data(), Q, &perr)) {
+                    fprintf(stderr, "[mm3-lm-train] %s\n", perr.c_str());
+                    rc = 1;
+                    break;
+                }
+            }
 
             if (drop_caption) n_dropped++;
             // A fresh subnetwork per micro-step, uploaded BEFORE the forward so
@@ -2263,11 +2593,12 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 // span from (n_masked, s_tr); the ids themselves are never read
                 // because the embedding is overridden.
                 embed_ctx.P   = P;
-                embed_ctx.Fin = Fin;
+                embed_ctx.Fin = Finw;
                 LmSample smp;
                 smp.tokens.assign((size_t) S, 0);
                 smp.targets  = tgt;
-                smp.n_masked = (int) P;
+                smp.n_masked = (int) (P + lead);
+                smp.n_prompt = (int) P;
                 smp.s_tr     = (int) n_sup;
                 if (prior) {
                     // Score against what the base model itself predicted here,
@@ -2297,7 +2628,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 ggml_context *   ctx = ggml_init(gip);
                 ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, true);
                 ggml_tensor *    loss = nullptr;
-                build_graph(ctx, gf, P, Fin, n_sup, &loss);
+                build_graph(ctx, gf, P, Finw, n_sup, &loss);
                 std::vector<ggml_tensor *> gacc;
                 lm_optim_fill_gacc(&opt, gf, &gacc);
                 ggml_build_backward_expand(ctx, gf, gacc.data());
@@ -2500,6 +2831,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
 
     ggml_backend_sched_free(sched);
     if (a.ckpt) {
+        lm_kvprefix_free(&kvpfx);
         lm_ckpt_free(&ckpt_st);
     }
     ggml_backend_buffer_free(buf_static);

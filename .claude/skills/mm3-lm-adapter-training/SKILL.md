@@ -163,12 +163,51 @@ Worth writing down because it is an intuitive and wrong idea. Restricting the
   `s_max`, so the supervised count drives iteration count;
 - allocation happens upfront at `s_max` regardless of the actual S per step.
 
-The version that WOULD buy the memory is a **no-grad frozen-KV prefix** —
-condition on 0..E without retaining prefix activations, supervise only the
-tail. That turns O(S^2) into O(S) plus a small window, and it is an engine
-project (split forward: frozen prefix -> trained tail), not a config change.
-It also costs exactness: the adapter stops getting gradient for how it shapes
-the prefix. NOT BUILT.
+The version that buys the memory is a **no-grad frozen-KV prefix** — condition
+on 0..E without retaining prefix activations, supervise only the tail. **BUILT
+2026-08-26, `--prefix-frames N`** — see below.
+
+### `--prefix-frames N`: real history in front of the crop
+
+Built 2026-08-26 (`engine/src/train/lm-kvprefix.h`; working notes in
+`docs/plans/2026-08-26-lm-frozen-kv-prefix.md`, gitignored). **Off by default,
+never ear-tested, no UI** — a run has to be launched by hand.
+
+The problem it solves is not coverage, it is CONTEXT. A crop at frame 3000
+carries its true RoPE position with ~750 keys of evidence in front of it, so
+the middle third of the stack — the layers doing long-range aggregation — is
+trained to produce position-3000 behaviour from a position-750 view. That is
+the band Rob switches off at render time with `scaleMid 0`.
+
+A prefix needs no backward, so it escapes the quadratic term entirely: K and V
+cost **0.28125 MB per column** across MM3's 36 layers. Measured at crop 750,
+rank 64, AdamW: **+856 MB and about +60% step time for 750 frames (30 s) of
+history**.
+
+Two things it changes that are worth knowing:
+
+* **The window takes one extra input frame.** With history present, the row that
+  predicts frame c0 must be frame c0-1's, not the caption's last token. Without
+  that shift, every crop still teaches "a song may begin at c0" — the exact
+  lesson the crop work exists to remove — and the equivalence self-test catches
+  it as a 0.083-nat gap.
+* **`--prefix-selftest` is the gate.** Attention over `[prefix ; window]` is
+  mathematically identical to one long crop covering both, so the supervised CE
+  must not care which way it was produced. It found two real bugs before it
+  passed. Run it before trusting a prefix run.
+
+### `--crop-anchor song` did nothing until 2026-08-26
+
+Found while building the above, and it applies to **every MM3 LM adapter trained
+before that date**. The trainer computed song-anchored RoPE positions and
+uploaded them; `lm_ckpt_micro_step` then overwrote `t_pos` with `0..S-1` before
+building any graph. Only the non-checkpointed path honoured them, and nothing
+uses that path because it does not fit in VRAM.
+
+So the 2026-08-24 crop work fixed where crops were TAKEN but not where they were
+PRESENTED: the model still saw every crop as the song's opening. Fixed via
+`LmCkptRun::pos_external`. `--crop-anchor zero` reproduces the old behaviour
+exactly, and pre-2026-08-26 runs are not comparable with later ones.
 
 **This LoRA configuration is FROZEN as of 2026-08-24** — settled by ear over a
 rank sweep at 64/128/256 with a full MLP dial at each. Further LoRA tuning is
@@ -504,6 +543,15 @@ run finished — "step 750 came out as noise, what happened at 750?" — had no
 loss curve, no Prodigy `d` and no warning left to read. Check these FIRST.
 
 ## The acoustic loss (2026-08-25): WHY adapters wrecked vocal timbre, and the fix
+
+> **NOT SUFFICIENT — re-opened 2026-08-25 evening.** Both Fightstar adapters
+> trained post-fix with `acoustic loss: ON — weight 1, 128 frames/step`
+> (train-console.log verified) still render Charlie Simpson chipmunked at 1.0×,
+> correct at ~0.9188×. The mechanism below is still the best-supported theory
+> (formant shift with pitch on-grid cannot be a resample error), but the
+> teacher-forced anchor did not stop the drift — likely because it constrains
+> last_hidden on the real-codes manifold while inference free-runs (the same
+> exposure-bias shape as the tempo drift). Do NOT tell the user this is fixed.
 
 **Root cause of chipmunk/goblin renders, found and fixed.** The depth decoder
 generates every acoustic codebook — the timbre — conditioned on the LM's

@@ -462,6 +462,14 @@ static void lm_lora_detach(LmLora * L, Qwen3LM * lm) {
 //     weight through qwen3_f32(), which returns an already-F32 tensor unchanged
 //     (qwen3-enc.h:87-92), so the naive path (F32 mirror) emits no cast node.
 //   * attn_head_block == 0 selects the verbatim whole-head attention span.
+// Destination views plus the ggml_cpy nodes that fill them; see
+// LmLayerOpts::kv_cap and train/lm-kvprefix.h.
+struct LmKvCapture {
+    ggml_tensor *              k_dst = nullptr;  // [Nkv*D, S] view of the store
+    ggml_tensor *              v_dst = nullptr;
+    std::vector<ggml_tensor *> nodes;
+};
+
 struct LmLayerOpts {
     bool          cast_weights    = false;    // true when the base is BF16/F16 and
                                               // the per-segment F32 window is live
@@ -504,6 +512,31 @@ struct LmLayerOpts {
     // therefore read the same bytes. A freshly-drawn mask per pass would
     // silently compute gradients for a different network than the loss.
     ggml_tensor * rank_mask = nullptr;
+
+    // ── FROZEN KV PREFIX (train/lm-kvprefix.h) ─────────────────────────────
+    //
+    // Optional no-grad history in front of the trained window. kv_k / kv_v are
+    // [Nkv*D, >= kv_pfx + S] F32 leaves whose first kv_pfx columns hold the
+    // prefix's post-QK-norm, post-RoPE K and its raw V, and whose remaining
+    // columns are ZERO — so splicing the window's own K/V in with ggml_acc is
+    // exactly a copy.
+    //
+    // WHY ACC AND NOT CONCAT. GGML_OP_CONCAT has no backward (the note above
+    // lm_attn_head_blocked); GGML_OP_ACC does, and its src1 gradient is a view
+    // of the incoming gradient. The store is a frozen leaf with no grad, so the
+    // prefix adds no backward nodes at all — which is the entire point of it.
+    //
+    // The caller sets these PER LAYER. nullptr => the shipped square
+    // self-attention, emitted verbatim.
+    ggml_tensor * kv_k   = nullptr;
+    ggml_tensor * kv_v   = nullptr;
+    int           kv_pfx = 0;
+
+    // PREFILL CAPTURE. Set by the prefix pass only: lm_train_layer appends two
+    // ggml_cpy nodes that write THIS call's post-QK-norm post-RoPE K and its
+    // raw V into the store, and the caller expands them into the graph (the
+    // same collector shape as LmWtCollect — lm_train_layer has no graph).
+    LmKvCapture * kv_cap = nullptr;
 };
 
 // F32 bytes of ONE transformer layer's trainable-graph weights (7 projections +
@@ -597,6 +630,17 @@ static ggml_tensor * lm_rms(ggml_context * ctx, ggml_tensor * x, ggml_tensor * w
 // reshape span with `Nh/gq` independent blocks, so at most `3 * gq * S^2 * 4`
 // bytes of [S,S] score/softmax state is live at once instead of `3 * Nh * S^2`.
 // Blocks are reassembled with ggml_acc into a persistent ZERO base:
+// Splice a window's K (or V) into the tail of a frozen prefix store and return
+// the whole [Nkv*D, n_pfx + S] span as one tensor. The store's tail columns are
+// zero, so the ggml_acc is a copy; see LmLayerOpts::kv_k for why it is an acc.
+static ggml_tensor * lm_kv_splice(ggml_context * ctx, ggml_tensor * store, ggml_tensor * win, int64_t row,
+                                  int64_t n_pfx, int64_t S) {
+    GGML_ASSERT(store->ne[0] == row && store->ne[1] >= n_pfx + S);
+    ggml_tensor * base = ggml_view_2d(ctx, store, row, n_pfx + S, store->nb[1], 0);
+    ggml_tensor * w2   = ggml_reshape_2d(ctx, win, row, S);
+    return ggml_acc(ctx, base, w2, base->nb[1], base->nb[2], base->nb[3], (size_t) n_pfx * store->nb[1]);
+}
+
 // GGML_OP_CONCAT has no backward (it would hit ggml_compute_backward's
 // GGML_ABORT default), GGML_OP_ACC does, and its src1 branch already inserts a
 // ggml_cont before ggml_reshape so the strided gradient view is legal.
@@ -608,6 +652,11 @@ static ggml_tensor * lm_attn_head_blocked(ggml_context * ctx, const Qwen3LMConfi
     const int D = c.head_dim, Nh = c.n_heads, Nkv = c.n_kv_heads;
     const int gq = opts.attn_head_block;
 
+    // The blocked path ropes per head-block, so sharing one roped K with a
+    // prefix store would mean hoisting that out and changing the shipped graph.
+    // MM3 never sets attn_head_block; refuse rather than differ silently.
+    GGML_ASSERT(opts.kv_k == nullptr && opts.kv_cap == nullptr &&
+                "attn_head_block is not supported with a frozen KV prefix");
     GGML_ASSERT(gq > 0 && gq < Nh && Nh % gq == 0);
     GGML_ASSERT(((int64_t) gq * (int64_t) Nkv) % (int64_t) Nh == 0);
     const int gkv = gq * Nkv / Nh;
@@ -664,6 +713,9 @@ static ggml_tensor * lm_train_layer(ggml_context * ctx, const Qwen3LMConfig & c,
     if (opts.attn_head_block > 0 && opts.attn_head_block < Nh) {
         attn = lm_attn_head_blocked(ctx, c, ly, q, k, v, positions, mask, S, opts);
     } else {
+        const int64_t n_pfx = opts.kv_k ? (int64_t) opts.kv_pfx : 0;
+        const int64_t n_kv  = n_pfx + S;
+
         q = ggml_reshape_3d(ctx, q, D, Nh, S);
         k = ggml_reshape_3d(ctx, k, D, Nkv, S);
         v = ggml_reshape_3d(ctx, v, D, Nkv, S);
@@ -674,8 +726,25 @@ static ggml_tensor * lm_train_layer(ggml_context * ctx, const Qwen3LMConfig & c,
         q = ggml_rope_ext(ctx, q, positions, NULL, D, 2, 0, c.rope_theta, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f);
         k = ggml_rope_ext(ctx, k, positions, NULL, D, 2, 0, c.rope_theta, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f);
 
-        q = ggml_permute(ctx, q, 0, 2, 1, 3);  // [D, S, Nh]
-        k = ggml_permute(ctx, k, 0, 2, 1, 3);
+        // Prefill: record what this call computed BEFORE the splice, so a later
+        // window sees exactly the K/V a single long crop would have produced.
+        if (opts.kv_cap) {
+            opts.kv_cap->nodes.push_back(
+                ggml_cpy(ctx, ggml_reshape_2d(ctx, k, (int64_t) Nkv * D, S), opts.kv_cap->k_dst));
+            opts.kv_cap->nodes.push_back(
+                ggml_cpy(ctx, ggml_reshape_2d(ctx, v, (int64_t) Nkv * D, S), opts.kv_cap->v_dst));
+        }
+
+        // The window's K/V are spliced in AFTER RoPE, because the store already
+        // holds the prefix roped at ITS positions — which is what makes the
+        // relative offsets seen here identical to a single long crop's.
+        if (opts.kv_k) {
+            k = ggml_reshape_3d(ctx, lm_kv_splice(ctx, opts.kv_k, k, (int64_t) Nkv * D, n_pfx, S), D, Nkv, n_kv);
+            v = ggml_reshape_3d(ctx, lm_kv_splice(ctx, opts.kv_v, v, (int64_t) Nkv * D, n_pfx, S), D, Nkv, n_kv);
+        }
+
+        q = ggml_permute(ctx, q, 0, 2, 1, 3);  // [D, S,    Nh ]
+        k = ggml_permute(ctx, k, 0, 2, 1, 3);  // [D, n_kv, Nkv]
         v = ggml_permute(ctx, v, 0, 2, 1, 3);
 
         attn = qwen3_attn_f32(ctx, q, k, v, mask, 1.0f / sqrtf((float) D));
