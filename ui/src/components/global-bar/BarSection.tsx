@@ -42,6 +42,23 @@ interface BarSectionProps {
 
 const HOVER_CLOSE_DELAY = 400; // ms
 
+/** True when the browser window itself has focus.
+ *
+ *  A native OS file picker takes focus away from the page, which fires
+ *  mouseleave on whatever the pointer was over. For a hover-close panel that
+ *  reads as "the user left", so the panel unmounts, taking the
+ *  <input type="file"> with it, and the file the user then picks is delivered
+ *  to a detached element that nobody is listening to (issue #117, reported on
+ *  Wayland/Firefox but not platform-specific). Suppressing the close while the
+ *  window is unfocused keeps the input mounted until the picker returns. */
+function windowHasFocus(): boolean {
+  try {
+    return typeof document !== 'undefined' && document.hasFocus();
+  } catch {
+    return true; // never let a focus probe be the reason a panel sticks open
+  }
+}
+
 export const BarSection: React.FC<BarSectionProps> = ({
   id, label, icon, badge, accentColor = 'pink', children,
   isOpen, onOpen, onClose, headerToggle,
@@ -58,9 +75,23 @@ export const BarSection: React.FC<BarSectionProps> = ({
     }
   }, []);
 
+  // Set when the user opened this section by clicking the header rather than
+  // by hovering over it. A clicked-open panel stays open until it is clicked
+  // shut, so moving the pointer away to a file dialog, a colour picker or a
+  // second monitor cannot collapse work in progress (issue #117).
+  const pinned = useRef(false);
+
   const scheduleClose = useCallback(() => {
     cancelClose();
+    if (pinned.current) return;
     closeTimer.current = setTimeout(() => {
+      // Focus left the page (file picker, alt-tab). Wait rather than close:
+      // the mouseleave that got us here was a side effect of losing focus,
+      // not the user walking away from the panel.
+      if (!windowHasFocus()) {
+        scheduleClose();
+        return;
+      }
       onClose();
     }, HOVER_CLOSE_DELAY);
   }, [onClose, cancelClose]);
@@ -75,12 +106,49 @@ export const BarSection: React.FC<BarSectionProps> = ({
   }, [scheduleClose]);
 
   const handleClick = useCallback(() => {
-    if (isOpen) {
+    if (isOpen && pinned.current) {
+      pinned.current = false;
+      cancelClose();
       onClose();
     } else {
+      // Covers both "closed, so open it" and "hover-opened, so pin it".
+      pinned.current = true;
+      cancelClose();
       onOpen();
     }
-  }, [isOpen, onOpen, onClose]);
+  }, [isOpen, onOpen, onClose, cancelClose]);
+
+  // The parent owns which section is open, so a different section opening
+  // closes this one without any of our handlers running. Drop the pin then,
+  // otherwise it survives into the next time this section opens by hover.
+  useEffect(() => {
+    if (!isOpen) pinned.current = false;
+  }, [isOpen]);
+
+  // A pinned panel still has to close on click-outside, or there is no way to
+  // dismiss it without going back to the header.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onDocPointerDown = (e: PointerEvent) => {
+      if (!containerRef.current) return;
+      if (containerRef.current.contains(e.target as Node)) return;
+      pinned.current = false;
+      cancelClose();
+      onClose();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      pinned.current = false;
+      cancelClose();
+      onClose();
+    };
+    document.addEventListener('pointerdown', onDocPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onDocPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isOpen, onClose, cancelClose]);
 
   // Clean up timer on unmount
   useEffect(() => {

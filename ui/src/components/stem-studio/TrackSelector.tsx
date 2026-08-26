@@ -96,7 +96,7 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
             borderColor: mode === 'supersep' ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)',
           }}
         >
-          🧠 SuperSep (ONNX)
+          🧠 SuperSep (GGML)
         </button>
       </div>
 

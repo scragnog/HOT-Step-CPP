@@ -5,7 +5,7 @@
 // a new source for iterative composition.
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Play, ArrowUp } from 'lucide-react';
+import { Play, ArrowUp, Trash2 } from 'lucide-react';
 import { songApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
@@ -39,6 +39,7 @@ export const RecentBuilds: React.FC<RecentBuildsProps> = ({
   const { token } = useAuth();
   const [builds, setBuilds] = useState<RecentBuild[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadBuilds = useCallback(async () => {
     if (!token) return;
@@ -83,6 +84,27 @@ export const RecentBuilds: React.FC<RecentBuildsProps> = ({
   }, [token]);
 
   useEffect(() => { loadBuilds(); }, [loadBuilds, refreshTrigger]);
+
+  /** Delete a build. A stem build is an ordinary song row (source
+   *  'stem-builder'), so the normal song delete removes the DB row and the
+   *  audio file together. Without this the only routes out were the Library
+   *  tab or deleting WAVs from data/audio by hand (issue #110). */
+  const handleDelete = useCallback(async (build: RecentBuild) => {
+    if (!token) return;
+    if (!window.confirm(`Delete "${build.title}"? This removes the audio file too.`)) return;
+    setDeletingId(build.id);
+    // Drop it from the list first so the sidebar feels immediate; a failure
+    // puts it back via the reload below.
+    setBuilds(prev => prev.filter(b => b.id !== build.id));
+    try {
+      await songApi.delete(build.id, token);
+    } catch (err) {
+      console.error('[RecentBuilds] Delete failed:', err);
+      loadBuilds();
+    } finally {
+      setDeletingId(null);
+    }
+  }, [token, loadBuilds]);
 
   if (loading && builds.length === 0) {
     return (
@@ -131,6 +153,15 @@ export const RecentBuilds: React.FC<RecentBuildsProps> = ({
             title="Use as source"
           >
             <ArrowUp size={10} className="text-zinc-400" />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDelete(build)}
+            disabled={deletingId === build.id}
+            className="flex-shrink-0 w-6 h-6 rounded-full bg-white/[0.06] flex items-center justify-center hover:bg-red-500/20 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-30"
+            title="Delete build"
+          >
+            <Trash2 size={10} className="text-zinc-400" />
           </button>
         </div>
       ))}
