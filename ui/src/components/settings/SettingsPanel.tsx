@@ -623,7 +623,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <SelectRow
           id="setting-gen-timeout"
           label="Generation Timeout"
-          description="Maximum time to wait for a single generation before it's considered timed out. Increase if you use high step counts or have slower hardware."
+          description="Maximum time to wait for a single generation before it's considered timed out. Increase if you use high step counts or have slower hardware. This is per track, not per batch — the clock starts when the engine picks a track up, so a 9-track batch gets this budget nine times over."
           value={settings.generationTimeoutMinutes}
           options={[
             { value: 10, label: '10 minutes' },
@@ -634,6 +634,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             { value: 60, label: '60 minutes' },
             { value: 90, label: '90 minutes' },
             { value: 120, label: '120 minutes' },
+            { value: 180, label: '3 hours' },
+            { value: 240, label: '4 hours' },
+            { value: 360, label: '6 hours' },
           ]}
           onChange={(v) => update('generationTimeoutMinutes', parseInt(v))}
         />

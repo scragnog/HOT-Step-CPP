@@ -15,14 +15,23 @@
  */
 
 /** Read the generation timeout (minutes) from localStorage settings.
- *  Mirrors SettingsPanel's clamp/default (30 min, [10, 120]). */
+ *  Mirrors SettingsPanel's clamp/default (30 min, [10, 360]).
+ *
+ *  The upper bound must stay >= the largest option SettingsPanel offers, or a
+ *  saved value above it is silently discarded and the user drops back to 30
+ *  (issue #107 — the old [10, 120] range made 120 both the maximum the UI
+ *  offered and the ceiling the server clamped to, so the setting could never
+ *  buy more than two hours). */
+const TIMEOUT_MIN_MINUTES = 10;
+const TIMEOUT_MAX_MINUTES = 360;
+
 export function getGenerationTimeoutMinutes(): number {
   try {
     const raw = localStorage.getItem('ace-settings');
     if (raw) {
       const parsed = JSON.parse(raw);
       const val = parsed.generationTimeoutMinutes;
-      if (typeof val === 'number' && val >= 10 && val <= 120) return val;
+      if (typeof val === 'number' && val >= TIMEOUT_MIN_MINUTES && val <= TIMEOUT_MAX_MINUTES) return val;
     }
   } catch { /* ignore parse errors */ }
   return 30;

@@ -4,6 +4,7 @@
 // Each method is standalone — import only what you need.
 
 import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthState, AceModels, BrowseEntry, AdapterFile, ModelRegistry } from '../types';
+import { getGenerationTimeoutMinutes } from '../utils/generationTimer';
 
 const BASE = '/api';
 
@@ -148,9 +149,25 @@ export const songApi = {
 };
 
 // ── Generation ──────────────────────────────────────────────
+
+/** Stamp the user's configured generation timeout onto an outbound request.
+ *
+ *  The server clamps `generationTimeoutMinutes` and falls back to 45 min when
+ *  the field is absent (routes/generate.ts pollUntilDone). Only the Create
+ *  queue used to set it, so Cover Studio, Repaint Studio, InstaGen and Song
+ *  Builder all silently ran on the 45 min default no matter what Settings said
+ *  (issue #97). Stamping it here means every caller of submit() gets it, and a
+ *  new studio can't reintroduce the same gap.
+ *
+ *  A caller that already set the field keeps its own value. */
+function withTimeout(params: GenerationParams): GenerationParams {
+  if (typeof (params as any).generationTimeoutMinutes === 'number') return params;
+  return { ...params, generationTimeoutMinutes: getGenerationTimeoutMinutes() } as GenerationParams;
+}
+
 export const generateApi = {
   submit: (params: GenerationParams, token: string) =>
-    post<{ jobId: string; status: string }>('/generate', params, token),
+    post<{ jobId: string; status: string }>('/generate', withTimeout(params), token),
   status: (jobId: string) => get<GenerationJob>(`/generate/status/${jobId}`),
   cancel: (jobId: string) => post<{ success: boolean }>(`/generate/cancel/${jobId}`),
   cancelAll: () => post<{ success: boolean; cancelled: number }>('/generate/cancel-all'),
