@@ -50,6 +50,9 @@ export function sampleHeap(label = 'tick'): Record<string, unknown> | null {
   if (!firstUsed) firstUsed = m.usedJSHeapSize;
   if (m.usedJSHeapSize > peakUsed) peakUsed = m.usedJSHeapSize;
 
+  // Only elements actually in the document. WaveSurfer builds its <audio> with
+  // createElement and never appends it, so its decks do not appear here — a
+  // reading of 0 while music is playing is expected, not a bug.
   const media = document.querySelectorAll('audio, video').length;
   const canvases = document.querySelectorAll('canvas').length;
   const reading = {
@@ -70,7 +73,7 @@ export function sampleHeap(label = 'tick'): Record<string, unknown> | null {
     + ` | 30s ${delta(m.usedJSHeapSize - (lastUsed || m.usedJSHeapSize))}`
     + ` | total ${delta(m.usedJSHeapSize - firstUsed)}`
     + ` | peak ${mb(peakUsed)}`
-    + ` | media ${media} canvas ${canvases}`
+    + ` | domAudio ${media} canvas ${canvases}`
     + (label !== 'tick' ? ` | ${label}` : '')
   );
 
@@ -89,6 +92,11 @@ export function startHeapWatch(): void {
   timer = setInterval(() => sampleHeap('tick'), SAMPLE_MS);
   (window as Window & { __heap?: typeof sampleHeap }).__heap = sampleHeap;
   console.log(`[Heap] sampling every ${SAMPLE_MS / 1000}s — call __heap() for a reading on demand`);
+  console.log(
+    '[Heap] note: this is the JS heap only. Decoded audio, canvas backing stores'
+    + ' and image bitmaps are not in it. For the number that includes them, watch'
+    + " this tab's row in Chrome's task manager (Shift+Esc)."
+  );
 }
 
 export function stopHeapWatch(): void {
