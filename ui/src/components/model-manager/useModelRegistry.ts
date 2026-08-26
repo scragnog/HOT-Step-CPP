@@ -49,6 +49,15 @@ export function useModelRegistry() {
   const getPackFiles = useCallback((packId: string): RegistryFile[] => {
     const pack = registry?.packs.find(p => p.id === packId);
     if (!pack || !registry) return [];
+    // fileIds is data from model-registry.json, so a hand-edited catalogue can
+    // ship a pack without it. That used to throw on undefined.map during
+    // render and take the whole Model Manager down with it, which is a very
+    // large blast radius for one bad entry (issue #120). One empty pack is a
+    // better failure than a blank page.
+    if (!Array.isArray(pack.fileIds)) {
+      console.warn(`[ModelRegistry] Pack "${packId}" has no fileIds array — nothing to download.`);
+      return [];
+    }
     return pack.fileIds.map(id => registry.files.find(f => f.id === id)).filter(Boolean) as RegistryFile[];
   }, [registry]);
 
