@@ -27,6 +27,7 @@ import type { Mm3TrainLmRequest } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { JobProgress } from './JobProgress';
 import { Mm3PreviewStrip } from './Mm3PreviewStrip';
+import { Mm3RunsPanel } from './Mm3RunsPanel';
 import { useMm3Status } from './useMm3Status';
 import { TrainingChart } from './TrainingChart';
 
@@ -41,6 +42,10 @@ const BTN_SM = 'shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border
 
 interface FormState {
   steps: number;
+  stopMode: 'steps' | 'loss';
+  targetLoss: number;
+  targetLossMetric: 'train' | 'eval';
+  targetLossWindow: number;
   saveEvery: number;
   rank: number;
   alpha: number;
@@ -104,6 +109,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   const trainLmEpochs = useTrainingStore(s => s.trainLmEpochs);
   const trainEvalSeries = useTrainingStore(s => s.trainEvalSeries);
   const trainMaxEpochs = useTrainingStore(s => s.trainMaxEpochs);
+  const trainTargetLoss = useTrainingStore(s => s.trainTargetLoss);
 
   const { status, error: statusError } = useMm3Status(datasetId);
   const [busy, setBusy] = useState(false);
@@ -125,6 +131,10 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
 
   const form: FormState | null = status ? {
     steps: status.defaults.steps ?? 800,
+    stopMode: status.defaults.stopMode ?? 'steps',
+    targetLoss: status.defaults.targetLoss ?? 0.4,
+    targetLossMetric: status.defaults.targetLossMetric ?? 'train',
+    targetLossWindow: status.defaults.targetLossWindow ?? 25,
     saveEvery: status.defaults.saveEvery ?? 100,
     // Rank follows the recommendation for the same reason as the base: at the
     // default 256 nothing fits below ~24 GB, so a 16 GB card would open on a
@@ -240,6 +250,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         gradAccum: form.gradAccum, seed: form.seed,
         basePrecision: form.basePrecision, holdout: form.holdout, evalEvery: form.evalEvery,
         cropAnchor: form.cropAnchor,
+        // `steps` above is the cap in BOTH modes, so nothing about it changes
+        // here — only whether a target is allowed to end the run sooner.
+        stopMode: form.stopMode,
+        ...(form.stopMode === 'loss' ? {
+          targetLoss: form.targetLoss,
+          targetLossMetric: form.targetLossMetric,
+          targetLossWindow: form.targetLossWindow,
+        } : {}),
         // The engine refuses a prefix under `zero` anchoring, and the control
         // is disabled there — belt and braces so a stale form cannot send it.
         ...(form.prefixFrames > 0 && form.cropAnchor === 'song'
@@ -334,9 +352,83 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
           </div>
         ) : form && (
           <>
+            {/* -- Stopping strategy ---------------------------------------
+                Two ways to answer "when is this run done": a step count, or a
+                loss to reach. The step field never goes away, because in loss
+                mode it is the CAP - a target that is never met still has to end
+                the run somewhere. */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                  {t('trainingStudio.mm3.stopMode', 'Train until')}
+                </span>
+                <select className={INPUT} value={form.stopMode}
+                  onChange={e => set('stopMode', e.target.value as 'steps' | 'loss')}>
+                  <option value="steps">{t('trainingStudio.mm3.stopSteps', 'Step count')}</option>
+                  <option value="loss">{t('trainingStudio.mm3.stopLoss', 'Target loss')}</option>
+                </select>
+              </label>
+              <NumField
+                label={form.stopMode === 'loss'
+                  ? t('trainingStudio.mm3.maxSteps', 'Max steps')
+                  : t('trainingStudio.mm3.steps', 'Steps')}
+                value={form.steps}
+                onChange={v => set('steps', v)}
+                hint={form.stopMode === 'loss'
+                  ? t('trainingStudio.mm3.maxStepsHint',
+                      'The cap. If the target never arrives, the run ends here.') as string
+                  : undefined} />
+              {form.stopMode === 'loss' && (
+                <>
+                  <NumField label={t('trainingStudio.mm3.targetLoss', 'Target loss')}
+                    value={form.targetLoss} onChange={v => set('targetLoss', v)} step={0.05}
+                    hint={t('trainingStudio.mm3.targetLossHint',
+                      'Stops as soon as the loss reaches this. Down is NOT automatically '
+                      + 'better: under ~0.05 training loss the runs that got there had '
+                      + 'memorised the songs.') as string} />
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                      {t('trainingStudio.mm3.targetLossMetric', 'Measured on')}
+                    </span>
+                    <select className={INPUT} value={form.targetLossMetric}
+                      onChange={e => set('targetLossMetric', e.target.value as 'train' | 'eval')}>
+                      <option value="train">
+                        {t('trainingStudio.mm3.metricTrain', 'Training loss (trailing mean)')}
+                      </option>
+                      <option value="eval">
+                        {t('trainingStudio.mm3.metricEval', 'Held-out loss')}
+                      </option>
+                    </select>
+                    <span className="text-[10px] text-zinc-500 leading-snug">
+                      {form.targetLossMetric === 'eval'
+                        ? t('trainingStudio.mm3.metricEvalHint',
+                            'The number that says the adapter GENERALISES rather than memorised. '
+                            + 'It only lands on evaluation steps, so with Evaluate every set at '
+                            + '{{n}} it can only fire every {{n}} steps — lower that first, and '
+                            + 'keep a hold-out fraction above 0.',
+                            { n: form.evalEvery })
+                        : t('trainingStudio.mm3.metricTrainHint',
+                            'The mean of the last {{n}} steps, because one step is one crop of one '
+                            + 'song and swings more than the whole run does. Available on every '
+                            + 'run, but it cannot tell learning from memorising.',
+                            { n: form.targetLossWindow })}
+                    </span>
+                  </label>
+                </>
+              )}
+            </div>
+            {form.stopMode === 'loss' && form.targetLossMetric === 'eval'
+              && (form.holdout <= 0 || form.evalEvery <= 0) && (
+              <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 mb-3">
+                <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+                <span>
+                  {t('trainingStudio.mm3.targetNeedsEval',
+                    'Targeting the held-out loss needs a hold-out fraction above 0 and Evaluate '
+                    + 'every above 0 — both are in Advanced. The run will be refused otherwise.')}
+                </span>
+              </div>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <NumField label={t('trainingStudio.mm3.steps', 'Steps')} value={form.steps}
-                onChange={v => set('steps', v)} />
               <NumField label={t('trainingStudio.mm3.saveEvery', 'Checkpoint every')} value={form.saveEvery}
                 onChange={v => set('saveEvery', v)} />
               <NumField label={t('trainingStudio.mm3.rank', 'Rank')} value={form.rank}
@@ -679,6 +771,11 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     hint={t('trainingStudio.mm3.holdoutHint',
                       '0 disables evaluation — the training loss then cannot tell learning from '
                       + 'memorising. Ignored below 6 songs.') as string} />
+                  <NumField label={t('trainingStudio.mm3.evalEvery', 'Evaluate every')}
+                    value={form.evalEvery} onChange={v => set('evalEvery', v)} step={25}
+                    hint={t('trainingStudio.mm3.evalEveryHint',
+                      'Steps between held-out evaluations. 0 = off. This is also the finest '
+                      + 'grain a held-out target can stop on.') as string} />
                 </div>
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
@@ -790,6 +887,9 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         )}
       </div>
 
+      {/* ── Previous runs, and continuing one ── */}
+      <Mm3RunsPanel datasetId={datasetId} />
+
       {/* ── Live run: the shared job machinery, unchanged ── */}
       {mine && activeJob && (
         <div className={CARD}>
@@ -839,16 +939,18 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
           {jobKind === 'mm3-train-lm' && <Mm3PreviewStrip />}
           {jobKind === 'mm3-train-lm' && trainStepSeries.length > 1 && (
             <div className="mt-3">
-              {/* Four series now, on one fractional-epoch axis: per-step noise,
-                  the epoch mean, its 5-epoch average, and — the one that
-                  matters — held-out loss. No target line: MM3 has no
-                  target-loss auto-stop. */}
+              {/* Four series on one fractional-epoch axis: per-step noise, the
+                  epoch mean, its 5-epoch average, and — the one that matters —
+                  held-out loss. The target line is drawn only when the run is
+                  actually stopping on one; the store seeds it from the engine's
+                  own announcement, so a run adopted after a reload still has
+                  it. */}
               <TrainingChart
                 epochs={trainLmEpochs}
                 steps={trainStepSeries}
                 milestones={trainMilestones}
                 evals={trainEvalSeries}
-                target={0}
+                target={trainTargetLoss}
                 maxEpochs={trainMaxEpochs}
               />
             </div>

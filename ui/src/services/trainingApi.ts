@@ -204,6 +204,84 @@ export interface Mm3TrainLmRequest {
   preview?: Mm3PreviewOptions;
   /** Prior preservation. Omitted, or no datasetId, = off. */
   regularisation?: Mm3RegularisationOptions;
+  /** Which question the run answers. 'steps' runs a fixed number of them.
+   *  'loss' runs until the loss reaches `targetLoss` — with `steps` demoted to
+   *  a CAP, so a target that never arrives still ends the run. */
+  stopMode?: 'steps' | 'loss';
+  targetLoss?: number;
+  /** 'train' is the trailing mean of the last `targetLossWindow` style steps
+   *  and is always available. 'eval' is the held-out loss — the number that
+   *  distinguishes learning from memorising — and needs holdout + evalEvery. */
+  targetLossMetric?: 'train' | 'eval';
+  targetLossWindow?: number;
+}
+
+// -- previous runs, and continuing one ---------------------------------------
+
+export interface Mm3RunCheckpoint {
+  step: number;
+  name: string;
+  dir: string;
+  loss?: number;
+}
+
+export interface Mm3RunSummary {
+  runName: string;
+  dir: string;
+  datasetId?: string;
+  datasetName?: string;
+  startedAt?: number;
+  updatedAt: number;
+  /** How many times this directory has been trained into. >1 = resumed. */
+  launches: number;
+  /** The step cap the last launch was given. */
+  configuredSteps: number;
+  lastStep: number;
+  lastLoss?: number;
+  outcome: 'completed' | 'target-reached' | 'halted' | 'failed' | 'unknown';
+  failure?: string;
+  checkpoints: Mm3RunCheckpoint[];
+  best?: { step: number; loss: number };
+  targetLoss?: number;
+  targetLossMetric?: string;
+  /** Absent = this run cannot be continued (no saved optimizer state). */
+  resume?: {
+    step: number;
+    /** 'final' = saved on a clean exit, so continuing loses nothing. 'pause' =
+     *  saved at a preview point the run then carried on past. */
+    reason: 'pause' | 'final';
+    savedAt: number;
+    statePath: string;
+    /** Steps that would be retrained, because the state is behind the last one
+     *  the run reached. */
+    behindBy: number;
+    rank: number;
+    alpha: number;
+    optimizer: string;
+    adapterType: string;
+    samples: number;
+    holdout: number;
+    bestEval?: number;
+  };
+  /** 'manifest' = the run's own recorded recipe. 'log' = reconstructed from its
+   *  training log, with today's defaults filling what the log does not carry. */
+  optionsSource: 'manifest' | 'log' | 'none';
+  sizeBytes: number;
+  running?: boolean;
+}
+
+export interface Mm3ResumeRequest {
+  runName: string;
+  /** Steps to add on top of where the state sits. Ignored if `steps` is set. */
+  addSteps?: number;
+  /** The new total cap, absolute. */
+  steps?: number;
+  saveEvery?: number;
+  stopMode?: 'steps' | 'loss';
+  targetLoss?: number;
+  targetLossMetric?: 'train' | 'eval';
+  targetLossWindow?: number;
+  preview?: Mm3PreviewOptions;
 }
 
 /** Prior preservation: some steps train against the FROZEN BASE MODEL'S OWN
@@ -775,7 +853,10 @@ export interface TrainingMetricEvent {
   type: 'metric';
   /** `eval` is held-out loss — the only series that can distinguish learning
    *  from memorising, and therefore the one worth watching. */
-  metric: 'vram' | 'data' | 'step' | 'epoch' | 'milestone' | 'eval';
+  /** `target` announces a target-loss run's stopping line once, at the top of
+   *  the run, carrying `loss` (the target) and `totalSteps` (the cap the run
+   *  still ends at if the target never arrives). */
+  metric: 'vram' | 'data' | 'step' | 'epoch' | 'milestone' | 'eval' | 'target';
   ts: number;
   // epoch / step
   epoch?: number;
@@ -1242,6 +1323,27 @@ export async function startMm3TrainLm(
 ): Promise<{ jobId: string; runName: string; outDir: string }> {
   return request<{ jobId: string; runName: string; outDir: string }>(
     `/datasets/${encodeURIComponent(id)}/mm3-train-lm`,
+    { method: 'POST', ...jsonBody(opts) },
+  );
+}
+
+/** Previous MM3 LM runs for a dataset, newest first. Read off disk each time —
+ *  a run directory is the source of truth, not a database row. */
+export async function listMm3Runs(id: string): Promise<{ runs: Mm3RunSummary[]; busy: boolean }> {
+  return request<{ runs: Mm3RunSummary[]; busy: boolean }>(
+    `/datasets/${encodeURIComponent(id)}/mm3-runs`,
+  );
+}
+
+/** Continue a previous run: same adapter directory, same recipe, more steps.
+ *  Everything not named here comes from what that run was trained with. */
+export async function resumeMm3TrainLm(
+  id: string, opts: Mm3ResumeRequest,
+): Promise<{ jobId: string; runName: string; outDir: string; from: number; steps: number;
+             optionsSource: string }> {
+  return request<{ jobId: string; runName: string; outDir: string; from: number; steps: number;
+                   optionsSource: string }>(
+    `/datasets/${encodeURIComponent(id)}/mm3-resume-lm`,
     { method: 'POST', ...jsonBody(opts) },
   );
 }

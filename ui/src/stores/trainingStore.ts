@@ -281,6 +281,10 @@ interface TrainingState {
   startMm3Codes(): Promise<void>;
   /** MiniMax-Music3: codes + captions -> an LM LoRA. */
   startMm3TrainLm(opts: trainingApi.Mm3TrainLmRequest): Promise<void>;
+  /** MiniMax-Music3: carry on training into an existing run directory. Same
+   *  adapter, same recipe, more steps — the optimizer state comes back off
+   *  disk, so it continues rather than restarts. */
+  resumeMm3TrainLm(opts: trainingApi.Mm3ResumeRequest): Promise<void>;
   loadTrainDitStatus(q?: { variantKey?: string; adapterName?: string }): Promise<void>;
   startTrainDit(opts: TrainDitOptions): Promise<void>;
   loadAuditions(): Promise<void>;
@@ -777,7 +781,26 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       // MM3 reports STEPS, not epochs, so the epoch series stays empty and the
       // chart draws the step layer alone. blankTrainSeries() clears whatever a
       // previous ACE run left behind.
-      set({ jobLog: [], error: null, ...blankTrainSeries(), trainTargetLoss: 0, trainMaxEpochs: 0 });
+      set({ jobLog: [], error: null, ...blankTrainSeries(), trainMaxEpochs: 0,
+        // Drawn immediately rather than waiting for the engine's own
+        // announcement, which arrives a model load later.
+        trainTargetLoss: opts.stopMode === 'loss' ? (opts.targetLoss ?? 0) : 0 });
+      await adoptJob(set, get, jobId);
+    } catch (err) {
+      set({ error: errMessage(err) });
+    }
+  },
+
+  resumeMm3TrainLm: async (opts) => {
+    const id = get().selectedDatasetId;
+    if (!id) return;
+    try {
+      const { jobId } = await trainingApi.resumeMm3TrainLm(id, opts);
+      // The chart starts empty and refills from the resumed run's own step
+      // events, which carry on from where it left off — so the curve picks up
+      // at step N rather than redrawing the whole history.
+      set({ jobLog: [], error: null, ...blankTrainSeries(), trainMaxEpochs: 0,
+        trainTargetLoss: opts.stopMode === 'loss' ? (opts.targetLoss ?? 0) : 0 });
       await adoptJob(set, get, jobId);
     } catch (err) {
       set({ error: errMessage(err) });
@@ -1107,6 +1130,12 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
                 get().trainStepSeries, { step: ev.step, loss: ev.loss, ep: epPos },
               ),
             });
+          }
+          // The stopping line of a target-loss run, announced once at the top
+          // of it. Set from the EVENT rather than from the form so a run
+          // adopted after a page reload still draws its target.
+          if (ev.metric === 'target' && typeof ev.loss === 'number' && ev.loss > 0) {
+            if (get().trainTargetLoss !== ev.loss) set({ trainTargetLoss: ev.loss });
           }
           if (ev.metric === 'milestone') {
             const path = typeof ev.path === 'string' ? ev.path : '';

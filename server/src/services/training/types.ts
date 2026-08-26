@@ -372,7 +372,11 @@ export interface TrainingMetricEvent {
   type: 'metric';
   /** `eval` is held-out loss — the only series that can distinguish learning
    *  from memorising, and therefore the one worth watching. */
-  metric: 'vram' | 'data' | 'step' | 'epoch' | 'milestone' | 'eval';
+  /** `target` announces a target-loss run's stopping line ONCE, at the top
+   *  of the run, so the chart can draw it. It carries `loss` (the target)
+   *  and `totalSteps` (the cap the run still ends at if the target never
+   *  arrives). */
+  metric: 'vram' | 'data' | 'step' | 'epoch' | 'milestone' | 'eval' | 'target';
   ts: number;
   // epoch / step
   epoch?: number;

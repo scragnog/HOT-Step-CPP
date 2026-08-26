@@ -89,6 +89,9 @@ import {
   mm3RunName,
   type Mm3BasePrecision,
 } from '../services/training/mm3Train.js';
+import {
+  listMm3Runs, readMm3Run, resolveMm3RunDir, resumeOptionsFor,
+} from '../services/training/mm3Runs.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
 import { essentiaAvailable } from '../services/training/essentiaClient.js';
 import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services/training/understandClient.js';
@@ -2007,6 +2010,21 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       return;
     }
 
+    // The engine refuses `eval` targeting without a held-out set, and it does so
+    // with exit code 2 five minutes into a model load. Catch it here, where it
+    // is a 400 with the fix in it.
+    if (b.stopMode === 'loss' && b.targetLossMetric === 'eval') {
+      const hold = num('holdout', D.holdout, 0, 0.5);
+      const ev   = num('evalEvery', D.evalEvery, 0, 100000);
+      if (hold <= 0 || ev <= 0) {
+        res.status(400).json({
+          error: 'Targeting the held-out loss needs a hold-out fraction above 0 and evaluation '
+               + 'switched on. Either raise both, or target the training loss instead.',
+        });
+        return;
+      }
+    }
+
     const job = queue.startMm3TrainLmJob(ds.id, {
       manifest:    ds.datasetJsonPath,
       captionsDir,
@@ -2056,10 +2074,173 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       prefixChunk:  num('prefixChunk', D.prefixChunk, 32, 2048),
       prefixSelftest: b.prefixSelftest !== false,
       lrEndFrac:   num('lrEndFrac', D.lrEndFrac, 0, 1),
+      // Stopping strategy. `steps` above is the cap in BOTH modes, which is the
+      // whole reason it is still sent in loss mode: a target that never arrives
+      // has to end somewhere.
+      stopMode:    b.stopMode === 'loss' ? 'loss' : D.stopMode,
+      targetLoss:  num('targetLoss', D.targetLoss, 0, 100),
+      targetLossMetric: b.targetLossMetric === 'eval' ? 'eval' : 'train',
+      targetLossWindow: num('targetLossWindow', D.targetLossWindow, 1, 10000),
       ...reg,
       preview:     previewOpts,
     });
     res.json({ jobId: job.id, kind: job.kind, runName, outDir: mm3AdapterRunDir(runName) });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+// -- continuing a previous run ----------------------------------------------
+//
+//   GET  /datasets/:id/mm3-runs        what previous runs exist and their state
+//   POST /datasets/:id/mm3-resume-lm   train more steps into one of them
+//
+// The engine has taken --resume since the preview loop was built; what was
+// missing was any way to ask for it after the job that owned the run had ended.
+// See services/training/mm3Runs.ts for what is read off disk and why.
+
+/** GET /datasets/:id/mm3-runs */
+router.get('/datasets/:id/mm3-runs', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) {
+      res.status(404).json({ error: 'Dataset not found' });
+      return;
+    }
+    const runs = listMm3Runs(ds.id, ds.slug);
+    // A run whose job is live right now is not "halted", whatever its log tail
+    // says - the log tail of a running job always looks like an interrupted one.
+    const active = queue.activeJobForDataset(ds.id);
+    const activeDir = active && active.kind === 'mm3-train-lm'
+      ? String((active.opts as { outDir?: string } | undefined)?.outDir || '') : '';
+    const out = runs.map(r => (
+      activeDir && path.resolve(activeDir) === path.resolve(r.dir)
+        ? { ...r, outcome: 'unknown' as const, running: true }
+        : { ...r, running: false }
+    ));
+    res.json({ runs: out, busy: !!active });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** POST /datasets/:id/mm3-resume-lm
+ *
+ *  Body: { runName, addSteps? | steps?, saveEvery?, stopMode?, targetLoss?,
+ *          targetLossMetric?, targetLossWindow?, preview? }
+ *
+ *  Everything else comes from the run's own manifest, deliberately. A resume
+ *  that quietly re-derived rank, optimizer or the held-out split from today's
+ *  form would be refused by the engine's fingerprint check at best, and at
+ *  worst would train a different recipe under the same adapter name.
+ */
+router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
+  try {
+    const ds = mm3Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+    const dir = resolveMm3RunDir(String(b.runName || ''));
+    if (!dir) {
+      res.status(404).json({ error: 'No such training run' });
+      return;
+    }
+    const run = readMm3Run(dir);
+    if (!run) {
+      res.status(404).json({ error: 'No such training run' });
+      return;
+    }
+    if (!run.resume) {
+      res.status(400).json({
+        error: 'This run has no saved optimizer state, so there is nothing to continue from. A run '
+             + 'is resumable from its last preview pause, or - for runs that finished after this '
+             + 'feature shipped - from the step it ended on.',
+      });
+      return;
+    }
+
+    // The recipe: the run's own if it recorded one, otherwise reconstructed
+    // from its log with today's defaults filling the gaps the log does not
+    // carry. resumeOptionsFor returns null when neither exists.
+    const base = resumeOptionsFor(dir);
+    if (!base) {
+      res.status(400).json({
+        error: 'This run directory has neither a recorded recipe nor a training log, so there is '
+             + 'no way to know what it was trained with.',
+      });
+      return;
+    }
+    // The DATA paths always come from the dataset as it is NOW, not from the
+    // manifest: a dataset re-scanned since has a new manifest path, and
+    // pointing at the old one would train on a stale song list. A changed song
+    // COUNT is refused by the engine outright, which is the check that matters.
+    const opts = {
+      ...base,
+      manifest:    ds.datasetJsonPath,
+      captionsDir: ds.sourceDir,
+      codesDir:    path.join(mm3CodesDir(ds.slug), 'codes'),
+      outDir:      dir,
+      datasetName: ds.name || ds.slug,
+    };
+
+    const missing = missingMm3TrainModels('train', opts.basePrecision);
+    if (missing.length) {
+      res.status(400).json({
+        error: `MiniMax-Music3 training models are missing: ${missing.join(', ')}. A resume has to `
+             + 'run on the same base the run was trained on.',
+      });
+      return;
+    }
+
+    // How much further. `addSteps` is the natural way to ask ("another 250");
+    // `steps` sets the new total outright. Either way the cap has to be ahead
+    // of where the state sits, or the engine loads 22 GB of model to do nothing.
+    const from = run.resume.step;
+    const addSteps = Number(b.addSteps);
+    const total = Number.isFinite(Number(b.steps)) && Number(b.steps) > 0
+      ? Math.trunc(Number(b.steps))
+      : from + (Number.isFinite(addSteps) && addSteps > 0 ? Math.trunc(addSteps) : 250);
+    if (total <= from) {
+      res.status(400).json({
+        error: `That run already reached step ${from} - ask for a step cap above it.`,
+      });
+      return;
+    }
+    opts.steps = Math.min(total, 100000);
+    if (Number.isFinite(Number(b.saveEvery))) {
+      opts.saveEvery = Math.max(0, Math.trunc(Number(b.saveEvery)));
+    }
+    // The stopping strategy is re-decidable on a resume: "run it 250 more" and
+    // "run it until the loss reaches 0.4, capped at 1000" are both reasonable
+    // ways to continue, and neither should be forced by what the first launch
+    // happened to choose.
+    if (b.stopMode === 'loss' || b.stopMode === 'steps') opts.stopMode = b.stopMode;
+    if (Number.isFinite(Number(b.targetLoss))) {
+      opts.targetLoss = Math.max(0, Number(b.targetLoss));
+    }
+    if (b.targetLossMetric === 'eval' || b.targetLossMetric === 'train') {
+      opts.targetLossMetric = b.targetLossMetric;
+    }
+    if (Number.isFinite(Number(b.targetLossWindow))) {
+      opts.targetLossWindow = Math.max(1, Math.trunc(Number(b.targetLossWindow)));
+    }
+    if (opts.stopMode === 'loss' && opts.targetLossMetric === 'eval'
+        && (opts.holdout <= 0 || opts.evalEvery <= 0)) {
+      res.status(400).json({
+        error: 'Targeting the held-out loss needs the hold-out set and the evaluation cadence this '
+             + 'run was trained with, and this one has neither. Target the training loss instead.',
+      });
+      return;
+    }
+    // Previews are a per-launch choice too. Absent = whatever the run used.
+    if (b.preview !== undefined) opts.preview = parseMm3PreviewOptions(b.preview);
+    opts.resumeFrom = run.resume.statePath;
+    opts.resumeStep = from;
+
+    const job = queue.startMm3TrainLmJob(ds.id, opts);
+    res.json({
+      jobId: job.id, kind: job.kind, runName: run.runName, outDir: dir,
+      from, steps: opts.steps, optionsSource: run.optionsSource,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

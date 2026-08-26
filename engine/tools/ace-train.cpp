@@ -1309,7 +1309,8 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 //       [--seed 42]
 //       [--crop-anchor song|zero] [--prefix-frames N] [--prefix-chunk N]
 //       [--prefix-selftest]
-//       [--resume <state>] [--pause-file <path>]
+//       [--target-loss <f>] [--target-loss-window 25] [--target-loss-metric train|eval]
+//       [--resume <state>] [--pause-file <path>] [--no-final-state]
 //       [--no-pause]
 //       [--reg-manifest <json> --reg-captions <dir> --reg-codes <dir>
 //        --reg-every 3 [--reg-topk 64] [--reg-prior <dir>]]
@@ -1332,6 +1333,18 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 // changing its mind about material that has nothing to do with the artist. The
 // base distributions are captured once before step 1 (while the adapter is
 // still inert) and cached; see train/mm3-lm-prior.h. Off by default.
+//
+// --target-loss is the second stopping strategy: instead of "run N steps", run
+// until the loss reaches a number. --steps STAYS THE HARD CAP, so a target that
+// is never met still ends the run — the same relationship --epochs has with
+// --target-loss in the ACE trainers. The metric is either the trailing mean of
+// the last --target-loss-window style steps (default) or the held-out loss,
+// which needs --holdout and --eval-every. The cosine schedule is still laid out
+// over --steps, so an early stop stops part-way down the LR curve.
+//
+// --no-final-state suppresses the resume state a clean exit otherwise writes.
+// That state is what makes "continue this finished run for another N steps"
+// land on the step it actually reached rather than on its last preview point.
 //
 // --resume / --pause-file drive the preview loop: the server touches the
 // sentinel, this program saves LoRA + optimizer momentum + RNG + epoch cursor
@@ -1395,6 +1408,12 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--prefix-frames")) a.prefix_frames = atoll(next("--prefix-frames"));
         else if (!strcmp(argv[i], "--prefix-chunk"))  a.prefix_chunk  = atoi(next("--prefix-chunk"));
         else if (!strcmp(argv[i], "--prefix-selftest")) a.prefix_selftest = true;
+        else if (!strcmp(argv[i], "--target-loss"))   a.target_loss  = (float) atof(next("--target-loss"));
+        else if (!strcmp(argv[i], "--target-loss-window"))
+                                                     a.target_loss_window = atoi(next("--target-loss-window"));
+        else if (!strcmp(argv[i], "--target-loss-metric"))
+                                                     a.target_loss_metric = next("--target-loss-metric");
+        else if (!strcmp(argv[i], "--no-final-state")) a.final_state = false;
         else if (!strcmp(argv[i], "--resume"))        a.resume_path  = next("--resume");
         else if (!strcmp(argv[i], "--pause-file"))    a.pause_file   = next("--pause-file");
         else if (!strcmp(argv[i], "--no-pause"))      a.no_pause     = true;
@@ -1457,6 +1476,22 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     }
     if (a.prefix_frames < 0 || a.prefix_chunk < 1) {
         fprintf(stderr, "ace-train mm3-lm-train: --prefix-frames must be >= 0, --prefix-chunk >= 1\n");
+        return 2;
+    }
+    if (a.target_loss_metric != "train" && a.target_loss_metric != "eval") {
+        fprintf(stderr, "ace-train mm3-lm-train: --target-loss-metric must be train or eval\n");
+        return 2;
+    }
+    if (a.target_loss_window < 1) {
+        fprintf(stderr, "ace-train mm3-lm-train: --target-loss-window must be >= 1\n");
+        return 2;
+    }
+    // A target on a metric the run never computes would never fire, and the run
+    // would silently become an ordinary --steps run. Refuse instead.
+    if (a.target_loss > 0.0f && a.target_loss_metric == "eval"
+        && (a.eval_every <= 0 || a.holdout <= 0.0f)) {
+        fprintf(stderr, "ace-train mm3-lm-train: --target-loss-metric eval needs --holdout > 0 and "
+                        "--eval-every > 0\n");
         return 2;
     }
     if (a.crop_mode != "random" && a.crop_mode != "beginning" && a.crop_mode != "structured") {

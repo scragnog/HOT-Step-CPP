@@ -391,6 +391,59 @@ The table above is from the rank-64 sweep. Rank 256 was auditioned at ck1000
 and ck2000 only; ck2000 won, and the finer rungs have not been walked at that
 rank. Do not assume the rank-64 optimum transfers.
 
+## Target loss as a stopping rule (2026-08-26) — available, and a trap here
+
+`ace-train mm3-lm-train` now takes `--target-loss <f>`, with
+`--target-loss-metric train|eval` and `--target-loss-window N` (default 25), and
+the Training Studio exposes it as **Train until: Target loss**. `--steps` stays
+the hard cap in that mode, so a target that never arrives still ends the run.
+
+Read the section above before reaching for it. **For an album clone, loss is not
+the quantity you want to minimise**: held-out CE bottoms out 1-8x earlier than
+the checkpoint that sounds right, and a training loss under ~0.05 was pure
+sequence memorisation on the runs that got there. A target-loss run is therefore
+a way to say "stop wasting GPU once it plateaus", not a way to pick a
+checkpoint - the ladder still decides that.
+
+Where it earns its place: an unfamiliar album where you do not yet know the step
+count, run it with a generous cap and a target read off a previous album's
+curve, then audition the ladder as usual.
+
+The trailing mean exists because one step here is one crop of one song and
+swings further than the whole run's improvement. The `eval` metric only fires on
+evaluation steps, so at the default `--eval-every 250` it can fire once in a
+250-step run - lower it first or the target is decorative.
+
+**The LR schedule does not shorten with the run.** The cosine is laid out over
+`--steps`, so a run that stops at 300 of a 1000-step cap stops with the learning
+rate still high. Two runs that both ended at step 300 - one capped there, one
+stopped there by a target - are not the same run.
+
+## Continuing a finished or halted run (2026-08-26)
+
+Every run directory holds `resume-state.bin` (weights + optimizer momentum + RNG
++ the shuffled pass) and, as of this change, `resume-state.json` describing it
+and `hotstep-run.json` recording the recipe. Training Studio -> the dataset ->
+Train now lists previous runs with a **Continue** control: pick one, say how many
+more steps, and it carries on in the same directory under the same adapter name.
+
+Two things to know before using it:
+
+* **The engine now saves state on a clean exit, not only at preview pauses.**
+  Runs finished BEFORE this change hold state from their last preview pause, so
+  continuing one retrains the steps between that pause and where it stopped -
+  50 of them at the usual `--save-every 50` cadence. The UI says how many.
+* **Raising the cap restarts the tail of the cosine.** Continuing a 250-step run
+  to 500 does not extend the old schedule; it lays a 500-step schedule over a
+  run that is already 250 steps in, so the LR jumps back up. That is a real
+  difference from having asked for 500 in the first place, and it is why a
+  continued run is not interchangeable with a longer one.
+
+The engine refuses a resume whose rank, alpha, tensor count, optimizer or
+train/held-out split differs from the state file, so a mismatched continuation
+fails loudly rather than training on a half-restored adapter. Prodigy resumes
+too (state format v2), and its `x0` lives once in the run directory.
+
 ## The two axes: likeness vs coherence
 
 They move in opposite directions with training length, and conflating them is

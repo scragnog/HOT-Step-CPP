@@ -493,6 +493,32 @@ export const MM3_LM_DEFAULTS = {
    *  ear-optimum under this regime is UNKNOWN - the 750-2000 range was measured
    *  on adapters trained with no history at all. Ladder the checkpoints. */
   steps: 250,
+  /** ── Stopping strategy ──────────────────────────────────────────────────
+   *
+   *  'steps' is the default and the one every measured recipe was run under.
+   *  'loss' trains until the loss reaches `targetLoss` instead, with `steps`
+   *  demoted to a CAP so a target that never arrives still ends the run.
+   *
+   *  There is no validated target number for MM3 — loss here is CE over RVQ
+   *  codes and its absolute value depends on the crop length, the prefix, the
+   *  acoustic-loss weight and the dataset, so a target that suits one album is
+   *  meaningless on another. The default 0 is honest about that: pick the
+   *  target by reading the curve of a run you have already done.
+   *
+   *  A NOTE THE UI REPEATS: at 1.0 held-out these adapters were already good,
+   *  and a training loss under ~0.05 was pure sequence memorisation on the
+   *  runs that got there. Down is not automatically better. */
+  stopMode: 'steps' as 'steps' | 'loss',
+  targetLoss: 0,
+  /** 'train' is available on every run. 'eval' is the number that means the
+   *  adapter GENERALISES rather than memorised, but it only lands on eval
+   *  steps, so with the default evalEvery of 250 it fires at most once in a
+   *  250-step run — lower evalEvery before targeting it. */
+  targetLossMetric: 'train' as 'train' | 'eval',
+  /** One step's loss is one crop of one song and swings by more than the whole
+   *  run's improvement, so the target is checked against a trailing mean. 25 is
+   *  ~2.5 epochs on a 10-song album. */
+  targetLossWindow: 25,
   /** 50, so a 500-step run yields 10 checkpoints to audition — the memorised
    *  run put the plausible ear-optimum somewhere in 150-350, and checkpoints
    *  every 250 would straddle it blind. */
@@ -817,8 +843,23 @@ export interface ResolvedMm3TrainLmOptions {
   regTopK?: number;
   /** Mid-run audio previews. Undefined = off; the runner resolves the plan. */
   preview?: Mm3PreviewOptions;
-  /** Set by the runner when relaunching a paused run — never by a route. */
+  /** Which question the run is answering: "train for N steps" or "train until
+   *  the loss reaches X". `steps` is the cap in BOTH modes — a target that is
+   *  never met has to end somewhere. */
+  stopMode: 'steps' | 'loss';
+  /** Only read when stopMode is 'loss'. 0 = off. */
+  targetLoss: number;
+  /** 'train' averages the last `targetLossWindow` style steps; 'eval' waits for
+   *  a fresh held-out loss and needs holdout + evalEvery on. */
+  targetLossMetric: 'train' | 'eval';
+  targetLossWindow: number;
+  /** Set by the runner when relaunching a paused run, and by the RESUME route
+   *  when continuing a finished or halted one — never by the start route. */
   resumeFrom?: string;
+  /** Where a resumed run is picking up from. Only used for the segment loop's
+   *  preview cadence and its timeout budget; the engine reads the step out of
+   *  the state file itself. */
+  resumeStep?: number;
 }
 
 export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
@@ -855,6 +896,14 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
     args.push('--crop-start-frac', String(o.cropStartFrac));
     args.push('--crop-end-frac', String(o.cropEndFrac));
     args.push('--crop-start-tiles', String(o.cropStartTiles));
+  }
+  // The second stopping strategy. --steps is still passed above and is still
+  // the cap: a target the run never reaches has to end somewhere, and "runs
+  // forever" is not an acceptable answer to "train until the loss is 0.2".
+  if (o.stopMode === 'loss' && o.targetLoss > 0) {
+    args.push('--target-loss', String(o.targetLoss));
+    args.push('--target-loss-metric', o.targetLossMetric);
+    args.push('--target-loss-window', String(o.targetLossWindow));
   }
   args.push('--depth-loss-weight', String(o.depthLossWeight));
   args.push('--depth-loss-frames', String(o.depthLossFrames));
@@ -898,10 +947,11 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   // Previews pause the trainer through a sentinel file. When they are off, say
   // so explicitly: a stray PAUSE left behind by a killed run would otherwise
   // stop the next run at its first step.
-  if (o.preview) {
-    if (o.resumeFrom) args.push('--resume', o.resumeFrom);
-  } else {
-    args.push('--no-pause');
-  }
+  if (!o.preview) args.push('--no-pause');
+  // NOT gated on previews. It was, back when the only thing that produced a
+  // state file was a preview pause — but continuing a finished run resumes from
+  // a state written at the end of it, and that run may well have had previews
+  // off. Gating here silently ignored the resume and retrained from step 1.
+  if (o.resumeFrom) args.push('--resume', o.resumeFrom);
   return args;
 }

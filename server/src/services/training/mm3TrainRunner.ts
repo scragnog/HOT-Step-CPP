@@ -27,6 +27,7 @@ import {
   buildMm3CodesArgs, buildMm3TrainLmArgs, missingMm3TrainModels,
   type Mm3CodesArgs, type ResolvedMm3TrainLmOptions,
 } from './mm3Train.js';
+import { writeMm3RunManifest } from './mm3Runs.js';
 import {
   emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, type TrainingJob,
 } from './labelingQueue.js';
@@ -60,6 +61,12 @@ interface RelayState {
   pausedAt?: number;
   pauseState?: string;
   pauseCkpt?: string;
+  /** Set when the run stopped because it reached its target loss rather than
+   *  its step cap. Terminal, like `done`. */
+  targetHitAt?: number;
+  /** Set when the engine wrote a resume state on its way out, i.e. this run can
+   *  be continued later. */
+  resumableAt?: number;
   /** Last checkpoint directory this segment exported, paused or not. */
   lastCkpt?: string;
   lastLoss?: number;
@@ -190,6 +197,29 @@ function relay(job: TrainingJob, ev: Record<string, unknown>, st: RelayState): v
       log(job, 'info',
         `Resumed at step ${int(ev.step)}/${int(ev.totalSteps)} (epoch ${int(ev.epoch)}) with optimizer `
         + 'state intact.');
+      break;
+    case 'targetLoss':
+      // Published as a metric so the loss chart can draw the target line, and
+      // as a log line so the run says out loud which of the two strategies it
+      // is under.
+      pushEvent(job, {
+        type: 'metric', metric: 'target', ts: Date.now(),
+        loss: optNum(ev, 'target'), totalSteps: optNum(ev, 'capSteps'),
+      });
+      log(job, 'info',
+        `Stopping at ${text(ev.metric) === 'eval' ? 'held-out loss' : `a trailing ${int(ev.window)}-step `
+          + 'mean training loss'} of ${(optNum(ev, 'target') ?? 0).toFixed(4)} or less, or at step `
+        + `${int(ev.capSteps)} — whichever comes first.`);
+      break;
+    case 'target_stop':
+      st.targetHitAt = int(ev.step);
+      log(job, 'info',
+        `Target loss reached at step ${int(ev.step)}: ${text(ev.metric) === 'eval' ? 'held-out' : 'trailing mean'} `
+        + `${(optNum(ev, 'value') ?? 0).toFixed(4)} ≤ ${(optNum(ev, 'targetLoss') ?? 0).toFixed(4)}. `
+        + 'Stopping here rather than running out the step cap.');
+      break;
+    case 'resumable':
+      st.resumableAt = int(ev.step);
       break;
     case 'paused':
       // NOT a terminal state — the segment loop relaunches with --resume once
@@ -488,6 +518,15 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
   }
 
   const runName = path.basename(opts.outDir);
+  // Record the recipe BEFORE the first step, not after the last: a run that
+  // crashes at step 3 is exactly the one someone will want to continue, and a
+  // manifest written on success would not be there.
+  const ds = getDataset(job.datasetId);
+  writeMm3RunManifest(opts, {
+    datasetId: job.datasetId,
+    datasetSlug: ds?.slug || '',
+    datasetName: opts.datasetName || ds?.name || ds?.slug || '',
+  });
   const plan = planMm3Previews({
     preview: opts.preview,
     manifest: opts.manifest,
@@ -535,8 +574,23 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
       }
     }
 
-    let resumeFrom = '';
-    let lastStep = 0;
+    // A CONTINUATION starts where the state file left off. Everything below is
+    // then the ordinary segment loop: preview cadence, the timeout budget and
+    // the progress bar all measure against the same step axis the first launch
+    // used, because the engine keeps counting from the resumed step rather than
+    // restarting at 1.
+    // Whether the engine actually wrote a continuation state on its way out.
+    // The claim "you can pick this up later" is only made when it did — a state
+    // save can fail on a full disk, and a promise the directory cannot keep is
+    // worse than no promise.
+    let resumable = false;
+    let resumeFrom = opts.resumeFrom || '';
+    let lastStep = resumeFrom ? Math.max(0, opts.resumeStep || 0) : 0;
+    if (resumeFrom) {
+      log(job, 'info',
+        `Continuing this run from step ${lastStep} to ${opts.steps} — weights, optimizer momentum, `
+        + 'the shuffled pass and the crop RNG all come back from the saved state.');
+    }
     for (;;) {
       if (isCancelled(job)) return;
 
@@ -596,6 +650,14 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
         continue;
       }
 
+      resumable = resumable || st.resumableAt !== undefined;
+      if (st.targetHitAt) {
+        // Reported here rather than only in the log line, because the run
+        // ending 300 steps short of its cap looks like a failure otherwise.
+        log(job, 'info',
+          `Run stopped at step ${st.targetHitAt} of a ${opts.steps}-step cap: the target loss was met.`);
+      }
+
       // Not paused = the run is over. Render the final checkpoint now, while
       // the engine is up, so the last thing in the strip is the finished
       // adapter rather than the last preview point before it.
@@ -609,6 +671,11 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
     if (!isCancelled(job)) {
       log(job, 'info',
         'Checkpoints are in the MM3 adapter folder — they appear in the adapter picker with no install step.');
+      if (resumable) {
+        log(job, 'info',
+          'This run can be continued later from the Previous runs list on this tab — its optimizer '
+          + 'state is saved beside the checkpoints.');
+      }
       finishJob(job, 'done');
     }
   } catch (err: any) {

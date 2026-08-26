@@ -349,6 +349,50 @@ struct MM3LmTrainArgs {
                                      // short crop keeps the cost off the run.
     int         eval_crops = 3;      // deterministic crops per held-out song
 
+    // ── Target-loss stopping (2026-08-26) ──────────────────────────────────
+    //
+    // The second training strategy. `--steps` alone answers "how long do I
+    // want to wait"; this answers "how far down do I want the loss", which is
+    // the question a user actually has when they do not yet know how many
+    // steps this album needs. `--steps` REMAINS the hard cap — a target that
+    // is never reached must end the run rather than run forever — exactly as
+    // --epochs caps --target-loss in the ACE trainers.
+    //
+    // WHICH LOSS. A single step's loss here is one crop of one song and swings
+    // by more than the whole run's improvement, so stopping on it would stop on
+    // noise. Two honest choices, both offered:
+    //
+    //   train — trailing mean of the last `target_loss_window` STYLE steps
+    //           (prior-preservation steps excluded: soft-target CE against the
+    //           frozen base is a different quantity and averaging the two
+    //           describes neither). Always available. Cannot tell learning from
+    //           memorising, which is the standing caveat on the training curve.
+    //   eval  — the held-out loss, checked only on the steps that produce a
+    //           fresh one. This is the number that means "the adapter
+    //           generalises to this artist", and it needs --holdout and
+    //           --eval-every to be on.
+    //
+    // The window must be FULL before the target can fire, so a resume (which
+    // starts the window empty) cannot stop on two lucky steps.
+    //
+    // NOTE THE SCHEDULE. The cosine decays over `--steps`, so a run that stops
+    // early stops with the learning rate still part-way down its curve. That is
+    // the same trade the ACE trainers make and it is recorded in the run log.
+    float       target_loss        = 0.0f;   // 0 = off (run to --steps)
+    int         target_loss_window = 25;     // trailing style steps averaged
+    std::string target_loss_metric = "train";  // train | eval
+
+    // ── Final resume state ─────────────────────────────────────────────────
+    //
+    // Pause/resume was built for previews, so state was only ever written when
+    // a preview asked for it — which left a FINISHED run holding a state file
+    // from its last preview point, tens of steps behind the weights it just
+    // exported. "Continue this run for 250 more steps" then silently rewound.
+    // Writing the state once more on a clean exit costs one file write of a few
+    // seconds and is what makes a completed run resumable at the step it
+    // actually reached.
+    bool        final_state = true;          // --no-final-state to skip
+
     // ── Crop position anchoring ────────────────────────────────────────────
     //
     // "song": a crop taken at frame c0 is presented at RoPE positions
@@ -2244,6 +2288,51 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 start_step, a.steps);
     }
 
+    // Everything that makes a resumed run identical to an uninterrupted one,
+    // collected in one place. It was inline in the pause branch until the run's
+    // clean exit needed the same snapshot (see a.final_state) — and two copies
+    // of this list is exactly how a resume ends up restoring fifteen of sixteen
+    // things and looking like a training bug.
+    auto snapshot_state = [&](int step) {
+        rstate.steps_done     = step;
+        rstate.n_micro        = n_micro;
+        rstate.running        = running;
+        rstate.epoch          = epoch;
+        rstate.epoch_n        = epoch_n;
+        rstate.epoch_loss_sum = epoch_loss_sum;
+        rstate.order.assign(order.begin(), order.end());
+        rstate.order_pos      = (int32_t) order_pos;
+        rstate.best_eval      = best_eval;
+        rstate.best_eval_step = best_eval_step;
+        rstate.opt_step       = opt.opt_step;
+        rstate.prodigy_d      = opt.prodigy_d;
+        rstate.prodigy_r      = opt.prodigy_r;
+        rstate.opt_iter       = opt.opt_iter;
+        for (int i = 0; i < 4; i++) rstate.rng[i] = rng.s[i];
+    };
+
+    // ── target-loss stopping state ─────────────────────────────────────────
+    //
+    // The trailing window of STYLE step losses, the last held-out loss, and
+    // where the run actually got to — the loop variable is out of scope by the
+    // time the clean-exit state is written.
+    std::vector<double> tl_hist;
+    double              last_eval      = -1.0;
+    int                 last_step_done = start_step;
+    double              last_win       = 0.0;
+    const bool          target_on      = a.target_loss > 0.0f;
+    const bool          target_on_eval = target_on && a.target_loss_metric == "eval";
+    if (target_on) {
+        const std::string how = target_on_eval
+                                    ? std::string("held-out loss")
+                                    : "trailing " + std::to_string(a.target_loss_window)
+                                          + "-step mean training loss";
+        fprintf(stderr, "[mm3-lm-train] stopping at %s <= %.4f, or at step %d, whichever comes first\n",
+                how.c_str(), (double) a.target_loss, a.steps);
+        jl("{\"type\":\"targetLoss\",\"target\":%.6g,\"metric\":\"%s\",\"window\":%d,\"capSteps\":%d}",
+           (double) a.target_loss, target_on_eval ? "eval" : "train", a.target_loss_window, a.steps);
+    }
+
     // ── prior preservation: load the corpus and capture the base's answers ──
     //
     // ORDER MATTERS. The capture has to happen here — after the checkpoint
@@ -2667,6 +2756,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             break;
         }
         const double win = acc_loss / std::max(1, a.grad_accum);
+        last_step_done = step;
+        last_win       = win;
         // Every step, unlike the human log: the chart wants them all, and one
         // JSON line per step is nothing next to a 3.9 s step.
         // stepMs is the PER-STEP time, not elapsed: it is the number that makes a
@@ -2715,6 +2806,11 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         if (!is_reg) {
             epoch_loss_sum += win;
             epoch_n++;
+            // The target-loss window. STYLE steps only: a prior-preservation
+            // step's loss is soft-target CE against the frozen base, so letting
+            // one into this mean would move the stopping point by an amount
+            // that has nothing to do with the artist.
+            if (target_on) tl_hist.push_back(win);
         }
         if (!is_reg && order_pos >= order.size() && !order.empty()) {
             epoch++;
@@ -2727,10 +2823,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         }
 
         // ── held-out evaluation ───────────────────────────────────────────
+        bool eval_fresh = false;
         if (a.eval_every > 0 && !eval_plan.empty()
             && (step % a.eval_every == 0 || step == a.steps)) {
             const double ev = run_eval();
             if (ev >= 0.0) {
+                last_eval  = ev;
+                eval_fresh = true;
                 jl("{\"type\":\"eval\",\"step\":%d,\"loss\":%.6f,\"crops\":%zu}", step, ev,
                    eval_plan.size());
                 fprintf(stderr, "[mm3-lm-train] step %d: held-out loss %.4f (train %.4f)\n", step, ev, win);
@@ -2747,6 +2846,47 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             ckpt_dir = save_ckpt(step, win);
         }
 
+        // ── target loss reached? ──────────────────────────────────────────
+        //
+        // Checked AFTER the checkpoint so the step that hits the target has
+        // one, and before the pause check so a target hit ends the run rather
+        // than paying for a preview it will never resume from.
+        //
+        // The window has to be FULL. Without that guard a resumed run — whose
+        // window starts empty — could stop on its first two lucky steps, and a
+        // fresh run could stop inside warmup.
+        if (target_on) {
+            double     value = -1.0;
+            const bool ready = target_on_eval
+                                   ? (eval_fresh && last_eval >= 0.0)
+                                   : (int) tl_hist.size() >= a.target_loss_window;
+            if (ready) {
+                if (target_on_eval) {
+                    value = last_eval;
+                } else {
+                    double sum = 0.0;
+                    for (int i = 0; i < a.target_loss_window; i++) {
+                        sum += tl_hist[tl_hist.size() - 1 - (size_t) i];
+                    }
+                    value = sum / a.target_loss_window;
+                }
+            }
+            if (ready && value <= (double) a.target_loss) {
+                if (!saved_here && a.save_every > 0) {
+                    ckpt_dir = save_ckpt(step, win);
+                }
+                fprintf(stderr,
+                        "[mm3-lm-train] target loss reached at step %d: %s %.4f <= %.4f — stopping\n",
+                        step, target_on_eval ? "held-out" : "trailing mean", value,
+                        (double) a.target_loss);
+                jl("{\"type\":\"target_stop\",\"step\":%d,\"value\":%.6f,"
+                   "\"targetLoss\":%.6g,\"metric\":\"%s\",\"ckpt\":\"%s\"}",
+                   step, value, (double) a.target_loss, target_on_eval ? "eval" : "train",
+                   json_escape(ckpt_dir).c_str());
+                break;
+            }
+        }
+
         // ── pause for an audio preview ────────────────────────────────────
         //
         // One stat() per step, against a ~4 s step. The checkpoint is exported
@@ -2757,21 +2897,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             if (!saved_here) {
                 ckpt_dir = save_ckpt(step, win);
             }
-            rstate.steps_done     = step;
-            rstate.n_micro        = n_micro;
-            rstate.running        = running;
-            rstate.epoch          = epoch;
-            rstate.epoch_n        = epoch_n;
-            rstate.epoch_loss_sum = epoch_loss_sum;
-            rstate.order.assign(order.begin(), order.end());
-            rstate.order_pos      = (int32_t) order_pos;
-            rstate.best_eval      = best_eval;
-            rstate.best_eval_step = best_eval_step;
-            rstate.opt_step       = opt.opt_step;
-            rstate.prodigy_d      = opt.prodigy_d;
-            rstate.prodigy_r      = opt.prodigy_r;
-            rstate.opt_iter       = opt.opt_iter;
-            for (int i = 0; i < 4; i++) rstate.rng[i] = rng.s[i];
+            snapshot_state(step);
 
             const int64_t t_save0 = ggml_time_ms();
             std::string   serr;
@@ -2783,6 +2909,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 rc        = 1;
                 break;
             }
+            mm3_lm_resume_meta_write(a.out_dir, state_path, rstate, "pause", a.optimizer.c_str(),
+                                     a.adapter_type.c_str(), a.steps, win);
             mm3_lm_pause_clear(pause_file);
             fprintf(stderr, "[mm3-lm-train] paused at step %d/%d — state saved in %lld ms, %s\n", step,
                     a.steps, (long long) (ggml_time_ms() - t_save0), state_path.c_str());
@@ -2794,6 +2922,37 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         }
     }
 
+    // ── the state a CONTINUATION resumes from ──────────────────────────────
+    //
+    // Until this existed, state was written only when a preview asked for it,
+    // so a finished run left a state file from its last preview point — tens of
+    // steps behind the checkpoint it had just exported. "Run this for 250 more
+    // steps" then silently rewound to step 200 and retrained ground it had
+    // already covered, which is indistinguishable from the run being worse the
+    // second time.
+    //
+    // Only on a CLEAN exit. A run that died mid-step has an optimizer whose
+    // momentum and weights disagree about which step they are on, and freezing
+    // that would hand back a resume that trains on a lie; the last pause state
+    // is behind but true, so it is left alone to be resumed from instead.
+    if (rc == 0 && !paused && a.final_state && last_step_done > start_step) {
+        snapshot_state(last_step_done);
+        const int64_t t_fin0 = ggml_time_ms();
+        std::string   ferr;
+        if (mm3_lm_resume_save(state_path, rstate, lora, opt, &ferr)) {
+            mm3_lm_resume_meta_write(a.out_dir, state_path, rstate, "final", a.optimizer.c_str(),
+                                     a.adapter_type.c_str(), a.steps, last_win);
+            fprintf(stderr, "[mm3-lm-train] resume state written at step %d in %lld ms — this run can be continued\n",
+                    last_step_done, (long long) (ggml_time_ms() - t_fin0));
+            jl("{\"type\":\"resumable\",\"step\":%d,\"state\":\"%s\"}",
+               last_step_done, json_escape(state_path).c_str());
+        } else {
+            // Not fatal: the checkpoints are on disk and the run succeeded. The
+            // user loses the ability to continue it, and should be told which.
+            fprintf(stderr, "[mm3-lm-train] could not write the final resume state: %s\n",
+                    ferr.c_str());
+        }
+    }
     if (n_dropped > 0) {
         fprintf(stderr, "[mm3-lm-train] caption dropout: %d of %d style steps THIS SEGMENT "
                         "used the trigger alone (%.1f%%, asked for %.1f%%)\n",

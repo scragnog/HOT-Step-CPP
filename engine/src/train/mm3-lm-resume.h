@@ -43,6 +43,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -417,6 +418,73 @@ static bool mm3_lm_resume_load(const std::string & path, MM3LmResumeState * st,
     st->n_params = keep_np; st->n_samples = keep_ns; st->n_holdout = keep_nh;
     st->optimizer_muon = keep_muon;
     return true;
+}
+
+// ── the readable sidecar ────────────────────────────────────────────────────
+//
+// resume-state.bin is a 4 GB host-endian tensor dump. The server needs one
+// sentence out of it — "this run reached step N of M, here is what it was" —
+// to offer "continue this training run" without opening a file that large, or
+// worse, hard-coding its binary layout in TypeScript where a format bump would
+// break silently.
+//
+// So every state save writes a small JSON beside it. Truth stays in the .bin:
+// this file is a description of it, and if the two ever disagree the engine's
+// own fingerprint check is what refuses the resume.
+
+static inline std::string mm3_lm_resume_meta_path(const std::string & out_dir) {
+    return out_dir + "/resume-state.json";
+}
+
+/** `reason` is "pause" (a preview is about to render) or "final" (the run
+ *  ended cleanly and this is the state to continue FROM). Failure is silent on
+ *  purpose — losing the description must never fail a run that saved its
+ *  state. */
+static inline void mm3_lm_resume_meta_write(const std::string & out_dir,
+                                            const std::string & state_path,
+                                            const MM3LmResumeState & st,
+                                            const char * reason,
+                                            const char * optimizer,
+                                            const char * adapter_type,
+                                            int total_steps, double last_loss) {
+    FILE * f = hs_fopen(mm3_lm_resume_meta_path(out_dir), "wb");
+    if (!f) {
+        return;
+    }
+    // Forward slashes: this path is read back by Node out of a JSON string,
+    // where a Windows backslash is an escape character.
+    // A diverged run can hand us a NaN, and "nan" is not JSON — the server
+    // would fail to parse the whole file and report the run as unresumable.
+    if (!(last_loss == last_loss)) last_loss = 0.0;
+    std::string sp = state_path;
+    for (char & c : sp) {
+        if (c == '\\') c = '/';
+    }
+    fprintf(f,
+            "{\n"
+            "  \"reason\": \"%s\",\n"
+            "  \"state\": \"%s\",\n"
+            "  \"step\": %d,\n"
+            "  \"totalSteps\": %d,\n"
+            "  \"epoch\": %d,\n"
+            "  \"lastLoss\": %.6f,\n"
+            "  \"meanLoss\": %.6f,\n"
+            "  \"bestEval\": %.6f,\n"
+            "  \"bestEvalStep\": %d,\n"
+            "  \"rank\": %d,\n"
+            "  \"alpha\": %d,\n"
+            "  \"seed\": %d,\n"
+            "  \"samples\": %d,\n"
+            "  \"holdout\": %d,\n"
+            "  \"optimizer\": \"%s\",\n"
+            "  \"adapterType\": \"%s\",\n"
+            "  \"savedAt\": %lld\n"
+            "}\n",
+            reason, sp.c_str(), st.steps_done, total_steps, st.epoch, last_loss,
+            st.n_micro ? st.running / st.n_micro : 0.0, st.best_eval, st.best_eval_step,
+            st.rank, st.alpha, st.seed, st.n_samples, st.n_holdout, optimizer, adapter_type,
+            (long long) time(NULL) * 1000LL);
+    fclose(f);
 }
 
 // ── the pause sentinel ──────────────────────────────────────────────────────
