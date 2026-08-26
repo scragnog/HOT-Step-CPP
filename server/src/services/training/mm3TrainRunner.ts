@@ -173,6 +173,19 @@ function relay(job: TrainingJob, ev: Record<string, unknown>, st: RelayState): v
         ? 'Crop anchor: zero — every crop is presented as the song\'s opening (the legacy convention).'
         : 'Crop anchor: song — each crop carries its true position in the track.');
       break;
+    case 'kvPrefix':
+      log(job, 'info',
+        `KV prefix: ${int(ev.frames)} frames (${(int(ev.frames) / 25).toFixed(1)} s) of no-grad history `
+        + 'in front of each crop.');
+      break;
+    case 'prefixSelftest': {
+      const pass = ev.pass === true;
+      log(job, pass ? 'info' : 'error',
+        `Prefix self-test: square ${optNum(ev, 'square')?.toFixed(6)} vs prefix `
+        + `${optNum(ev, 'prefix')?.toFixed(6)} (delta ${optNum(ev, 'delta')?.toExponential(2)}) — `
+        + (pass ? 'PASS' : 'FAIL, refusing to train'));
+      break;
+    }
     case 'resumed':
       log(job, 'info',
         `Resumed at step ${int(ev.step)}/${int(ev.totalSteps)} (epoch ${int(ev.epoch)}) with optimizer `

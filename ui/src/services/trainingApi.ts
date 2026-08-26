@@ -97,13 +97,30 @@ export interface Mm3VramModel {
   perTokenSqMb?: number;
   promptTokens: number;
   constMb: number;
+  /** Frozen KV prefix, MB per stored column. Optional: an older server does not
+   *  send it, and without it a prefix estimate is simply 0. */
+  prefixMbPerColumn?: number;
 }
 
 /** Peak VRAM in MB. The coefficients come from the server, which fitted them to
  *  measured configurations; this is only the arithmetic. */
+/** Extra peak from a frozen KV prefix, MB. Linear, which is the whole point:
+ *  the quadratic term above is the backward retaining attention scores, and a
+ *  prefix has no backward. Mirrors estimateMm3PrefixMb server-side. */
+export function estimateMm3PrefixMb(prefixFrames: number, maxFrames: number, m: Mm3VramModel,
+                                    chunk = 256): number {
+  if (!(prefixFrames > 0) || !m.prefixMbPerColumn) return 0;
+  const qMax = m.promptTokens + prefixFrames;
+  const sMax = m.promptTokens + maxFrames + 1;   // +1: the window's lead frame
+  const w    = Math.max(sMax, chunk);
+  const mask = (qMax + w) * w * 4 / 1048576;
+  return Math.round(m.prefixMbPerColumn * (qMax + sMax + chunk) + mask);
+}
+
 export function estimateMm3PeakMb(baseBytes: number, rank: number, maxFrames: number,
                                   m: Mm3VramModel,
-                                  optimizer: 'muon' | 'adamw' | 'prodigy' = 'adamw'): number {
+                                  optimizer: 'muon' | 'adamw' | 'prodigy' = 'adamw',
+                                  prefixFrames = 0, prefixChunk = 256): number {
   const loaded  = baseBytes / 1048576 + m.loadedOverheadMb;
   const S       = m.promptTokens + Math.max(0, maxFrames);
   // The S term is QUADRATIC — the backward retains [S, S, heads] attention
@@ -114,7 +131,8 @@ export function estimateMm3PeakMb(baseBytes: number, rank: number, maxFrames: nu
   const extraBuffers = optimizer === 'adamw' ? 1 : optimizer === 'prodigy' ? 3 : 0;
   const perRank = m.perRankMb + extraBuffers * (m.adamwPerRankMb ?? 0);
   const sq      = (m.perTokenSqMb ?? 0) * S * S;
-  return Math.round(loaded + perRank * rank + m.perTokenMb * S + sq + m.constMb);
+  return Math.round(loaded + perRank * rank + m.perTokenMb * S + sq + m.constMb
+                    + estimateMm3PrefixMb(prefixFrames, maxFrames, m, prefixChunk));
 }
 
 export interface Mm3CodesRequest {
@@ -178,6 +196,10 @@ export interface Mm3TrainLmRequest {
    *  song's opening — a train/inference mismatch, since generation always
    *  starts at frame 0. Kept only to reproduce an older run. */
   cropAnchor?: 'song' | 'zero';
+  /** Frames of no-grad history in front of each crop. 0 = off. Needs 'song'. */
+  prefixFrames?: number;
+  prefixChunk?: number;
+  prefixSelftest?: boolean;
   /** Mid-run audio previews. Both cadence fields zero = off. */
   preview?: Mm3PreviewOptions;
   /** Prior preservation. Omitted, or no datasetId, = off. */

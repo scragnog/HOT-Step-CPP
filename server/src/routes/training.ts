@@ -2049,6 +2049,12 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       // `song` is the default and the correct convention; `zero` exists only to
       // reproduce a pre-2026-08-23 run. See Mm3TrainLmRequest.cropAnchor.
       cropAnchor:  b.cropAnchor === 'zero' ? 'zero' : 'song',
+      // 0 = off. The upper bound is the engine's own sequence ceiling; the
+      // store is linear in this, so a long prefix is affordable in a way a
+      // long crop is not.
+      prefixFrames: num('prefixFrames', D.prefixFrames, 0, 9000),
+      prefixChunk:  num('prefixChunk', D.prefixChunk, 32, 2048),
+      prefixSelftest: b.prefixSelftest !== false,
       lrEndFrac:   num('lrEndFrac', D.lrEndFrac, 0, 1),
       ...reg,
       preview:     previewOpts,

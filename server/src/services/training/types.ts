@@ -88,6 +88,11 @@ export interface Mm3TrainLmRequest {
    *  opening, which is a train/inference mismatch (generation always starts at
    *  frame 0). Kept only to reproduce an older run. */
   cropAnchor?: 'song' | 'zero';
+  /** Frames of no-grad history in front of each crop. 0 = off, and off is the
+   *  default. Requires cropAnchor 'song'. See MM3_LM_DEFAULTS.prefixFrames. */
+  prefixFrames?: number;
+  prefixChunk?: number;
+  prefixSelftest?: boolean;
   /** Mid-run audio previews. Omitted or all-zero cadence = off. */
   preview?: Mm3PreviewOptions;
   /** Prior preservation. Omitted or `every: 0` = off. */

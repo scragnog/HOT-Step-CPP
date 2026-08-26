@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { estimateMm3PeakMb } from '../../services/trainingApi';
+import { estimateMm3PeakMb, estimateMm3PrefixMb } from '../../services/trainingApi';
 import type { Mm3TrainLmRequest } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { JobProgress } from './JobProgress';
@@ -34,6 +34,10 @@ const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dar
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
             + 'dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none '
             + 'focus:border-amber-500/50';
+
+const BTN_SM = 'shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-zinc-300 '
+             + 'dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 '
+             + 'dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 interface FormState {
   steps: number;
@@ -61,6 +65,7 @@ interface FormState {
   holdout: number;
   evalEvery: number;
   cropAnchor: 'song' | 'zero';
+  prefixFrames: number;
   previewEverySteps: number;
   previewEveryMinutes: number;
   previewSeconds: number;
@@ -156,6 +161,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     holdout: status.defaults.holdout ?? 0.15,
     evalEvery: status.defaults.evalEvery ?? 50,
     cropAnchor: (status.defaults.cropAnchor as 'song' | 'zero') ?? 'song',
+    // OFF by default, because nothing trained with a prefix has been heard yet.
+    prefixFrames: status.defaults.prefixFrames ?? 0,
     // Previews default OFF. They are the fastest way to learn whether a run is
     // worth finishing, but each one costs about a minute, so opting in is the
     // user's call rather than a surprise on the clock.
@@ -189,7 +196,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   const peak = (() => {
     if (!form || !status?.vramModel || !chosen) return null;
     const mb    = estimateMm3PeakMb(chosen.bytes, form.rank, form.maxFrames, status.vramModel,
-                                    form.optimizer)
+                                    form.optimizer,
+                                    form.cropAnchor === 'song' ? form.prefixFrames : 0)
                 + (chosen.extraMb || 0);
     const total = status.gpuTotalMb || 0;
     const gb    = (mb / 1024).toFixed(1);
@@ -232,6 +240,10 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         gradAccum: form.gradAccum, seed: form.seed,
         basePrecision: form.basePrecision, holdout: form.holdout, evalEvery: form.evalEvery,
         cropAnchor: form.cropAnchor,
+        // The engine refuses a prefix under `zero` anchoring, and the control
+        // is disabled there — belt and braces so a stale form cannot send it.
+        ...(form.prefixFrames > 0 && form.cropAnchor === 'song'
+          ? { prefixFrames: form.prefixFrames } : {}),
         ...(form.trigger.trim()
           ? { trigger: form.trigger.trim(), triggerPrepend: form.triggerPrepend }
           : {}),
@@ -720,6 +732,47 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       + 'anywhere, and shows up as sound arriving instantly at 0:00 and as tempo '
                       + 'drifting mid-track. "song" labels each crop with where it actually is. Runs '
                       + 'trained under the two are not comparable.')}
+                  </span>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                    {t('trainingStudio.mm3.prefixFrames', 'History before crop (frames)')}
+                  </span>
+                  <div className="flex gap-2">
+                    <input type="number" className={INPUT} step={50} min={0}
+                      value={form.prefixFrames}
+                      disabled={form.cropAnchor === 'zero'}
+                      onChange={e => set('prefixFrames', Math.max(0, Number(e.target.value)))} />
+                    <button type="button" className={BTN_SM}
+                      disabled={form.cropAnchor === 'zero'}
+                      onClick={() => set('prefixFrames',
+                        form.prefixFrames > 0 ? 0 : form.maxFrames)}>
+                      {form.prefixFrames > 0
+                        ? t('trainingStudio.mm3.prefixOff', 'Off')
+                        : t('trainingStudio.mm3.prefixMatch', 'Match crop')}
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-zinc-500 leading-snug">
+                    {form.cropAnchor === 'zero'
+                      ? t('trainingStudio.mm3.prefixNeedsSong',
+                          'Needs crop position "song". History placed at positions the crop then '
+                          + 're-uses is not a history.')
+                      : form.prefixFrames > 0
+                        ? t('trainingStudio.mm3.prefixOn',
+                            '{{sec}} s of the track before each crop is run through the model first, '
+                            + 'with no gradient, so the crop attends back over real history instead of '
+                            + 'starting from nothing. Adds about {{gb}} GB and roughly 60% to step '
+                            + 'time. UNHEARD: no adapter trained this way has been auditioned.',
+                            { sec: (form.prefixFrames / 25).toFixed(1),
+                              gb: (estimateMm3PrefixMb(form.prefixFrames, form.maxFrames,
+                                                       status!.vramModel) / 1024).toFixed(1) })
+                        : t('trainingStudio.mm3.prefixOff2',
+                            'Off. Each crop is presented at its true position in the track with an '
+                            + 'EMPTY context, so the middle third of the planner learns to produce '
+                            + 'late-song behaviour from a 30-second view. That is the band that renders '
+                            + 'better with the Middle Third dial at 0. History is LINEAR in VRAM where '
+                            + 'crop length is quadratic, so it buys context far more cheaply than a '
+                            + 'longer crop does.')}
                   </span>
                 </label>
               </div>

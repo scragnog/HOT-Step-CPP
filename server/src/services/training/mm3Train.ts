@@ -670,6 +670,32 @@ export const MM3_LM_DEFAULTS = {
    *  windowed crops fix the pacing. `zero` is kept only to reproduce an older
    *  run; the two are not comparable. */
   cropAnchor: 'song' as 'song' | 'zero',
+  /** Frames of REAL, no-grad history placed in front of every crop
+   *  (engine train/lm-kvprefix.h). OFF at 0, and off is the default because
+   *  NOTHING TRAINED WITH IT HAS BEEN HEARD.
+   *
+   *  What it is for: without it a crop is presented at its true position in
+   *  the track with an EMPTY context, so the middle third of the planner — the
+   *  layers doing long-range aggregation — is trained to produce late-song
+   *  behaviour from a 30-second view. That is the band that renders better
+   *  with the Middle Third dial at 0.
+   *
+   *  A prefix has no backward, so it escapes the quadratic VRAM term that
+   *  makes crop length expensive: 0.28125 MB per stored column, measured at
+   *  +856 MB and about +60% step time for 750 frames. Matching prefixFrames to
+   *  maxFrames doubles the history the model sees for a fraction of what
+   *  doubling the crop would cost. */
+  prefixFrames: 0,
+  /** Prefill positions per graph. Trades host graph-build overhead against the
+   *  transient attention scores of one chunk; 256 is a middle setting and has
+   *  no effect on the result, only on speed and peak. */
+  prefixChunk: 256,
+  /** Prove the prefix before training on it. Attention over [prefix ; window]
+   *  is mathematically identical to one long crop covering both, so the
+   *  supervised CE must not care which way it was produced. It caught two real
+   *  bugs during bring-up; it costs one forward pass and it refuses to train if
+   *  it fails. Leave it on. */
+  prefixSelftest: true,
   /** ON, and it did not used to exist. A trigger that is only in the sidecar is
    *  not a trigger — it is an unseen token sequence you then paste in front of
    *  your prompts at render time, which is worse than not having one. */
@@ -756,6 +782,10 @@ export interface ResolvedMm3TrainLmOptions {
   datasetName: string;
   basePrecision: Mm3BasePrecision;
   cropAnchor: 'song' | 'zero';
+  /** Frozen KV prefix. 0 = off. See MM3_LM_DEFAULTS.prefixFrames. */
+  prefixFrames: number;
+  prefixChunk: number;
+  prefixSelftest: boolean;
   /** Cosine floor as a fraction of lr (SimpleTuner's lr_end / lr). */
   lrEndFrac: number;
   /** Prior preservation. All four move together or none of them do. */
@@ -828,6 +858,13 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   }
   if (o.datasetName) args.push('--dataset-name', o.datasetName);
   args.push('--crop-anchor', o.cropAnchor);
+  // The engine refuses a prefix under `zero` anchoring (a history at positions
+  // the window then reuses is a contradiction), so never emit that pair.
+  if (o.prefixFrames > 0 && o.cropAnchor === 'song') {
+    args.push('--prefix-frames', String(o.prefixFrames));
+    args.push('--prefix-chunk', String(o.prefixChunk));
+    if (o.prefixSelftest) args.push('--prefix-selftest');
+  }
   // Prior preservation. Guarded on the whole set, not on `regEvery` alone: the
   // engine refuses a partial set, and it should never see one from here.
   if (o.regEvery && o.regEvery > 0 && o.regManifest && o.regCaptionsDir && o.regCodesDir) {
