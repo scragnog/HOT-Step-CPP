@@ -4430,8 +4430,23 @@ int main(int argc, char ** argv) {
             if (result) {
                 job->result = result;
                 job->status.store(1);
-                fprintf(stderr, "[Server] SuperSep job %s done (%d stems)\n",
-                        job->id.c_str(), result->n_stems);
+                // n_stems includes hidden stems: Stage 1 holds a copy of
+                // Vocals (and Drums) back to feed Stage 2/3, flagged hidden so
+                // the UI never lists them. Reporting the raw count made a Vocal
+                // Split say "8 stems extracted" when 7 files reached the user,
+                // with no way to tell where the 8th went (issue #105).
+                int n_visible = 0;
+                for (int i = 0; i < result->n_stems; i++) {
+                    if (!result->stems[i].hidden) n_visible++;
+                }
+                const int n_internal = result->n_stems - n_visible;
+                if (n_internal > 0) {
+                    fprintf(stderr, "[Server] SuperSep job %s done (%d stems, %d internal)\n",
+                            job->id.c_str(), n_visible, n_internal);
+                } else {
+                    fprintf(stderr, "[Server] SuperSep job %s done (%d stems)\n",
+                            job->id.c_str(), n_visible);
+                }
             } else {
                 // Capture the last progress message as the error
                 {
