@@ -20,6 +20,7 @@ import {
   mm3StreamSilence,
   mm3StreamSeek, mm3StreamSetVolume,
 } from './mm3StreamStore';
+import { isPitchShiftReady, onPitchShiftReady, setPitchRatio } from '../audio/pitchShift';
 
 /** VST monitoring and the global player are mutually exclusive — they'd play
  *  two tracks at once. Whenever global playback starts, stop the VST monitor. */
@@ -167,10 +168,9 @@ export interface PlaybackState {
   shuffle: boolean;
   repeat: 'none' | 'all' | 'one';
   playbackRate: number;
-  /** 44.1 kHz replay of a 48 kHz render: rate ×0.91875 with pitch shifting
-   *  ENABLED (the browser preserves pitch by default, which is exactly what
-   *  this test needs to defeat). Not persisted — it is a diagnostic, and a
-   *  sticky one would silently detune every future listen. */
+  /** 44.1 kHz replay of a 48 kHz render: pitch down ×0.91875 through the
+   *  WSOLA shifter, tempo left where it was. Not persisted — it is a
+   *  diagnostic, and a sticky one would silently detune every future listen. */
   pitch441: boolean;
   spectrumEnabled: boolean;
 
@@ -604,26 +604,41 @@ function applyVolumes(): void {
   _wsNoAdapterRef.current?.setVolume(audible === 'noadapter' ? _state.volume : 0);
 }
 
-/** 44100/48000 exactly. A 48 kHz render replayed on a 44.1 kHz clock runs at
- *  this rate and drops ~1.47 semitones with it. */
+/** 44100/48000 exactly — the pitch ratio between a 48 kHz render and the same
+ *  samples clocked out at 44.1 kHz, about 1.47 semitones down. */
 export const SR_44K_48K_RATIO = 44100 / 48000;   // 0.91875
 
-/** The rate actually handed to the decks: the user's speed pick, times the
- *  44.1 kHz ratio when that toggle is on. */
+/** The rate actually handed to the decks.
+ *
+ *  With the pitch shifter in the graph this is just the user's speed pick: the
+ *  44.1 kHz toggle moves pitch alone and leaves the transport at speed, which
+ *  is the point — a tempo change makes an A/B comparison much harder to judge
+ *  than the pitch difference it is meant to expose.
+ *
+ *  Without it (worklet failed to load) we fall back to the old behaviour and
+ *  detune by slowing the deck down, which does move tempo with it. */
 export function effectivePlaybackRate(s: PlaybackState = _state): number {
-  return s.pitch441 ? s.playbackRate * SR_44K_48K_RATIO : s.playbackRate;
+  return s.pitch441 && !isPitchShiftReady() ? s.playbackRate * SR_44K_48K_RATIO : s.playbackRate;
 }
 
 function applyPlaybackRate(): void {
+  const shifted = _state.pitch441;
+  const viaShifter = shifted && isPitchShiftReady();
+  setPitchRatio(viaShifter ? SR_44K_48K_RATIO : 1);
+
   const rate = effectivePlaybackRate();
-  // Second arg is WaveSurfer's preservePitch. Omitting it leaves the browser
-  // default (true) in place, which is why the speed buttons never changed
-  // pitch; the 44.1 kHz test needs it explicitly off.
-  const preserve = !_state.pitch441;
+  // Second arg is WaveSurfer's preservePitch. Only the fallback path wants it
+  // off — that is the one where the rate change IS the detune.
+  const preserve = !(shifted && !viaShifter);
   _wsOriginalRef.current?.setPlaybackRate(rate, preserve);
   _wsAltRef.current?.setPlaybackRate(rate, preserve);
   _wsNoAdapterRef.current?.setPlaybackRate(rate, preserve);
 }
+
+// The shifter installs itself asynchronously once the first deck is ready. If
+// the toggle was already on we are mid-fallback, so re-apply and move onto the
+// good path.
+onPitchShiftReady(() => { if (_state.pitch441) { applyPlaybackRate(); notify(); } });
 
 function persistTrackList(): void {
   saveTrackList({
@@ -1312,7 +1327,7 @@ export function setPlaybackRate(r: number): void {
   persistPrefs();
 }
 
-/** Toggle 44.1 kHz replay of the 48 kHz render (speed AND pitch drop). */
+/** Toggle 44.1 kHz replay of the 48 kHz render — pitch only, tempo held. */
 export function setPitch441(v: boolean): void {
   setState({ pitch441: v });
   applyPlaybackRate();

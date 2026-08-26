@@ -12,6 +12,7 @@
 import { useEffect, useRef } from 'react';
 import AudioMotionAnalyzer from 'audiomotion-analyzer';
 import { registerAudioMotion } from '../../stores/discoStore';
+import { installPitchShifter } from '../../audio/pitchShift';
 
 interface SpectrumAnalyzerProps {
   /** The HTMLMediaElement to analyze (from wavesurfer's getMediaElement) */
@@ -81,6 +82,11 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
       analyzerRef.current = analyzer;
       connectedElementRef.current = mediaElement;
       registerAudioMotion(analyzer);
+      // This instance owns the only path from the file decks to the speakers,
+      // so it is also the only place the 44.1 kHz pitch shifter can sit. Async
+      // and best-effort: the play bar falls back to rate-based detune if the
+      // worklet never arrives.
+      void installPitchShifter(analyzer);
       console.log('[SpectrumAnalyzer] Created + registered audioMotion');
     } catch (err) {
       console.error('[SpectrumAnalyzer] Failed to initialize:', err);
