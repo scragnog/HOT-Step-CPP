@@ -485,8 +485,14 @@ export const MM3_LM_DEFAULTS = {
    *  earlier in step count and harder overfitting past it.
    *
    *  1200 steps x ~15.5 s is ~5.2 hours. NOT tuned by ear yet; it is reasoning
-   *  from the step-size change, not a measured optimum. */
-  steps: 500,
+   *  from the step-size change, not a measured optimum.
+   *
+   *  250 as of 2026-08-26 (Rob), alongside a 2250-frame history prefix. A step
+   *  that carries 90 s of real context is a bigger step in learning terms and a
+   *  slower one in wall-clock, so the same hour buys fewer, richer steps. The
+   *  ear-optimum under this regime is UNKNOWN - the 750-2000 range was measured
+   *  on adapters trained with no history at all. Ladder the checkpoints. */
+  steps: 250,
   /** 50, so a 500-step run yields 10 checkpoints to audition — the memorised
    *  run put the plausible ear-optimum somewhere in 150-350, and checkpoints
    *  every 250 would straddle it blind. */
@@ -671,8 +677,11 @@ export const MM3_LM_DEFAULTS = {
    *  run; the two are not comparable. */
   cropAnchor: 'song' as 'song' | 'zero',
   /** Frames of REAL, no-grad history placed in front of every crop
-   *  (engine train/lm-kvprefix.h). OFF at 0, and off is the default because
-   *  NOTHING TRAINED WITH IT HAS BEEN HEARD.
+   *  (engine train/lm-kvprefix.h). OFF at 0.
+   *
+   *  DEFAULT 2250 (90 s) as of 2026-08-26, at Rob's request, so it is what the
+   *  form opens on and what gets tested. NOTHING TRAINED WITH IT HAS BEEN HEARD
+   *  YET - this is a default chosen to be exercised, not one validated by ear.
    *
    *  What it is for: without it a crop is presented at its true position in
    *  the track with an EMPTY context, so the middle third of the planner — the
@@ -685,7 +694,7 @@ export const MM3_LM_DEFAULTS = {
    *  +856 MB and about +60% step time for 750 frames. Matching prefixFrames to
    *  maxFrames doubles the history the model sees for a fraction of what
    *  doubling the crop would cost. */
-  prefixFrames: 0,
+  prefixFrames: 2250,
   /** Prefill positions per graph. Trades host graph-build overhead against the
    *  transient attention scores of one chunk; 256 is a middle setting and has
    *  no effect on the result, only on speed and peak. */
