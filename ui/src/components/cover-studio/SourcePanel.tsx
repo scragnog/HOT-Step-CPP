@@ -467,12 +467,24 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
             </select>
 
             {hasStems ? (
-              <button
-                onClick={onConfigureStems}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-500 text-white text-xs font-semibold shadow-lg hover:shadow-cyan-500/25 transition-all"
-              >
-                🎛️ Configure Stems
-              </button>
+              <>
+                <button
+                  onClick={onConfigureStems}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-500 text-white text-xs font-semibold shadow-lg hover:shadow-cyan-500/25 transition-all"
+                >
+                  🎛️ Configure Stems
+                </button>
+                {/* Splitting on its own changes nothing: the stems are
+                    recombined at full volume at generation time, which is the
+                    source audio again. The mixer is where the feature lives,
+                    and the button silently becoming a different button did not
+                    say so (issue #119). */}
+                <p className="text-[10px] text-zinc-500 leading-tight">
+                  Stems are ready. Mute or lower one in the mixer to keep it out of
+                  the cover. Left untouched they recombine at full volume, which is
+                  the original audio.
+                </p>
+              </>
             ) : (
               <button
                 onClick={onSeparate}
@@ -488,6 +500,12 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
                   '✂ Split Stems'
                 )}
               </button>
+            )}
+            {!hasStems && (
+              <p className="text-[10px] text-zinc-500 leading-tight">
+                Step 1 of 2. Separates the source, then a mixer opens here for
+                muting or attenuating individual stems.
+              </p>
             )}
           </div>
         )}
