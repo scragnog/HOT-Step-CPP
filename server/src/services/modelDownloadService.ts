@@ -163,6 +163,9 @@ class ModelDownloadService extends EventEmitter {
         installed: installed.has(f.filename),
       }));
 
+    /** Ids of the files a client on THIS platform can actually see. */
+    const visibleFileIds = new Set<string>(filteredFiles.map((f: RegistryFile) => f.id));
+
     // Filter packs: hide CUDA-only packs, strip CUDA file IDs from remaining
     // Also hide the wrong-version CUDA runtime pack and remap IDs in model packs
     const filteredPacks = registry.packs
@@ -210,7 +213,22 @@ class ModelDownloadService extends EventEmitter {
           };
         }
         return { ...p, fileIds: packFileIds };
-      });
+      })
+      // Final pass: no pack may reference a file that did not survive the
+      // filters above. The per-branch stripping only covers the non-CUDA case,
+      // so a Linux CUDA install kept cuda-rt-* ids in mixed packs like
+      // quick-start while the files themselves had just been hidden by the
+      // Windows-only rule — 12 dangling ids, which the UI renders as a pack
+      // that can never reach "installed". Reconciling against the filtered
+      // list here means a new platform rule cannot reintroduce the same skew.
+      .map((p: any) => {
+        const ids: string[] = Array.isArray(p.fileIds) ? p.fileIds : [];
+        const kept = ids.filter((id: string) => visibleFileIds.has(id));
+        if (kept.length === ids.length) return p;
+        return { ...p, fileIds: kept };
+      })
+      // A pack left with nothing is not a pack.
+      .filter((p: any) => !Array.isArray(p.fileIds) || p.fileIds.length > 0);
 
     return {
       packs: filteredPacks,
