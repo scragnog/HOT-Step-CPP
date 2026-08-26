@@ -225,6 +225,24 @@ export const StemBuilder: React.FC = () => {
         ppVaeReencode: false,
         stableStepOn: false,
         denoiseStrength: 0,
+        // ── Force-neutralise the sampler knobs that were still leaking ──
+        // guidanceScale 1.0 algebraically cancels APG, but it does NOT cancel
+        // any of these, and every one of them passes straight through from the
+        // user's global settings. A lego run therefore still inherited whatever
+        // DCW, latent shift, custom schedule or step-skipping the user happened
+        // to have set for text2music, which is the remaining "rhythmic but
+        // musically wrong" output in issue #56. Inference steps stays the one
+        // knob deliberately left to the user.
+        dcwEnabled: false,
+        dcwMode: undefined,
+        dcwLowScaler: undefined,
+        dcwHighScaler: undefined,
+        latentShift: 0.0,
+        latentRescale: 1.0,
+        customTimesteps: '',
+        cfgCutoffRatio: 1.0,      // 1.0 = guidance over the whole schedule
+        lmCfgCutoffRatio: 1.0,
+        cacheRatio: 0,            // no velocity reuse — every step is computed
         // ── Source conditioning ──
         audioCoverStrength: 1.0,  // full source conditioning for lego
         // ── Clear metadata — let engine infer from source audio ──
