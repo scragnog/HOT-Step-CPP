@@ -167,14 +167,24 @@ function readLog(dir: string): LogFacts {
       const v = Number(ev[k]);
       return Number.isFinite(v) ? v : undefined;
     };
+    // CONFIGURATION events are FIRST-WINS; progress events below are last-wins.
+    //
+    // The log is append-only across launches, so a resume writes a second
+    // `init`. Taking the newest would mean reading the shape of the most recent
+    // ATTEMPT — including one that was refused before it trained a step — when
+    // what a resume needs is the shape the saved state was written under, which
+    // is the original launch's. A failed resume that misread the split would
+    // otherwise poison every later attempt with its own bad numbers.
     switch (ev.type) {
-      case 'init':          out.init = ev; break;
-      case 'adapter':       out.adapter = ev; break;
-      case 'cropAnchor':    out.cropAnchor = typeof ev.mode === 'string' ? ev.mode : undefined; break;
-      case 'cropPolicy':    out.cropPolicy = ev; break;
-      case 'kvPrefix':      out.kvPrefix = ev; break;
-      case 'depthLossCfg':  out.depthLoss = ev; break;
-      case 'targetLoss':    out.targetLoss = ev; break;
+      case 'init':          out.init ??= ev; break;
+      case 'adapter':       out.adapter ??= ev; break;
+      case 'cropAnchor':
+        if (out.cropAnchor === undefined && typeof ev.mode === 'string') out.cropAnchor = ev.mode;
+        break;
+      case 'cropPolicy':    out.cropPolicy ??= ev; break;
+      case 'kvPrefix':      out.kvPrefix ??= ev; break;
+      case 'depthLossCfg':  out.depthLoss ??= ev; break;
+      case 'targetLoss':    out.targetLoss ??= ev; break;
       case 'step':
         out.lastStep = Math.max(out.lastStep, num('step') ?? 0);
         out.lastLoss = num('loss') ?? out.lastLoss;
@@ -302,6 +312,25 @@ function checkpointsIn(dir: string, milestones: Map<number, number>): Mm3RunChec
   return out.sort((a, b) => a.step - b.step);
 }
 
+/** The hold-out FRACTION that reproduces a known split of `train` + `held`.
+ *
+ *  The engine splits with `ceil(holdout * total)`, so any fraction inside
+ *  ((h-1)/total, h/total] gives the same two counts — and those counts are what
+ *  the resume fingerprint checks.
+ *
+ *  Take the MIDDLE of that interval, never its top edge. h/total is exactly the
+ *  value ceil() sits on the boundary of, and the arithmetic does not stay on
+ *  the boundary: the engine holds the fraction in a float, so 2/13 becomes
+ *  0.15384615957, times 13 is 2.0000000745, and ceil gives 3. A run that held
+ *  out 2 songs was then resumed as one holding out 3 and the engine refused it
+ *  — correctly, over a difference this file had invented. The midpoint
+ *  reproduces every split from 6 to 60 songs exactly; the top edge got 541 of
+ *  them wrong. */
+function holdoutFractionFor(trainSongs: number, heldOut: number): number {
+  const total = trainSongs + heldOut;
+  return total > 0 && heldOut > 0 ? (heldOut - 0.5) / total : 0;
+}
+
 /** Rebuild the options of a run that predates hotstep-run.json.
  *
  *  Only the FINGERPRINTED fields matter for the resume to be accepted — rank,
@@ -319,10 +348,7 @@ function optionsFromLog(dir: string, facts: LogFacts): ResolvedMm3TrainLmOptions
   };
   const trainSongs = n(init.samples, 0);
   const heldOut    = n(init.holdout, 0);
-  // ceil(holdout * total) is how the engine splits, so h/total reproduces the
-  // same two counts exactly — and the counts are what the fingerprint checks.
-  const total   = trainSongs + heldOut;
-  const holdout = total > 0 && heldOut > 0 ? heldOut / total : 0;
+  const holdout = holdoutFractionFor(trainSongs, heldOut);
   const adapterType = facts.adapter?.kind === 'lokr' ? 'lokr' : 'lora';
   const optimizer = init.optimizer === 'muon' || init.optimizer === 'prodigy'
     || init.optimizer === 'adamw' ? init.optimizer : D.optimizer;
@@ -501,9 +527,33 @@ export function readMm3RunManifest(dir: string): Mm3RunManifest | null {
  *  otherwise a reconstruction from its log. Null when the directory holds
  *  neither — there is then no honest way to continue it. */
 export function resumeOptionsFor(dir: string): ResolvedMm3TrainLmOptions | null {
+  const facts = readLog(dir);
   const manifest = readMm3RunManifest(dir);
-  if (manifest?.options) return { ...manifest.options };
-  return optionsFromLog(dir, readLog(dir));
+  const opts = manifest?.options ? { ...manifest.options } : optionsFromLog(dir, facts);
+  if (!opts) return null;
+
+  // The hold-out fraction is re-derived from the counts the run ACTUALLY
+  // trained under, even when a manifest states one, because the manifest can be
+  // wrong about it in a way nothing else is: a resume writes a manifest before
+  // it launches, so a resume that computed the fraction badly persisted that
+  // mistake and every later attempt inherited it. The log's `init` line is the
+  // engine's own report of the split the state file was written against, so it
+  // is the better authority here.
+  //
+  // This does NOT paper over a dataset that has genuinely changed: the fraction
+  // reproduces the OLD counts, applying it to a new song total yields a
+  // different split, and the fingerprint refuses the resume — which is the
+  // correct outcome.
+  //
+  // Authority order: the state's own sidecar first (it reports the split stored
+  // IN the state file), then the log's first `init`.
+  const meta = readJson<Mm3ResumeMeta>(path.join(dir, 'resume-state.json'));
+  const trainSongs = Number(meta?.samples ?? facts.init?.samples);
+  const heldOut    = Number(meta?.holdout ?? facts.init?.holdout);
+  if (Number.isFinite(trainSongs) && Number.isFinite(heldOut) && trainSongs + heldOut > 0) {
+    opts.holdout = holdoutFractionFor(trainSongs, heldOut);
+  }
+  return opts;
 }
 
 /** Resolve one run by name, refusing anything that is not a direct child of the
