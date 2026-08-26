@@ -286,23 +286,30 @@ function pointAt(url: string, opts: { startAt: number; resume: boolean; token: n
  * there, the element says so and `state.error` carries it; the caller decides
  * whether that means skip to the next track.
  */
-export function load(track: EngineTrack, opts: { autoplay?: boolean } = {}): void {
+export function load(
+  track: EngineTrack,
+  opts: { autoplay?: boolean; startAt?: number; variant?: Variant } = {}
+): void {
   const token = ++loadToken;
+  const available = availableOf(track);
 
   state.trackId = track.id;
   state.title = track.title ?? '';
-  state.available = availableOf(track);
-  // A new track always starts on its default variant. Mastered when there is
-  // one, because that is what the old player did and what people expect to
-  // hear; never the no-adapter reference, which is a diagnostic.
-  state.variant = track.mastered ? 'mastered' : 'original';
-  state.currentTime = 0;
+  state.available = available;
+  // A new track starts on its default variant: mastered when there is one,
+  // because that is what people expect to hear, and never the no-adapter
+  // reference, which is a diagnostic. A caller can override — the A/B
+  // comparison needs both sides on the same variant to be a fair test.
+  state.variant = opts.variant && available.includes(opts.variant)
+    ? opts.variant
+    : track.mastered ? 'mastered' : 'original';
+  state.currentTime = opts.startAt ?? 0;
   state.duration = 0;
   lastEmittedTime = 0;
 
   current = track;
   pointAt(urlFor(track, state.variant), {
-    startAt: 0,
+    startAt: opts.startAt ?? 0,
     resume: opts.autoplay !== false,
     token,
   });

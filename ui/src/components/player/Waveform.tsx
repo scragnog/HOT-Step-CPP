@@ -24,12 +24,17 @@ interface WaveformProps {
    *  and the boundaries get a coloured edge. */
   trimIn?: number | null;
   trimOut?: number | null;
+  /** Takes over what a click means. Trim mode uses it to place IN/OUT points
+   *  instead of seeking. Without it, a click seeks. */
+  onClickTime?: (seconds: number) => void;
 }
 
 const BAR_W = 2;
 const BAR_GAP = 1;
 
-export const Waveform: React.FC<WaveformProps> = ({ height = 56, trimIn, trimOut }) => {
+export const Waveform: React.FC<WaveformProps> = ({
+  height = 56, trimIn, trimOut, onClickTime,
+}) => {
   const state = useSyncExternalStore(subscribe, getSnapshot);
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -203,7 +208,9 @@ export const Waveform: React.FC<WaveformProps> = ({ height = 56, trimIn, trimOut
         const wrap = wrapRef.current;
         if (!wrap || !duration) return;
         const rect = wrap.getBoundingClientRect();
-        seekFraction((e.clientX - rect.left) / rect.width);
+        const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        if (onClickTime) onClickTime(frac * duration);
+        else seekFraction(frac);
       }}
       onMouseMove={(e) => {
         const wrap = wrapRef.current;

@@ -2,12 +2,11 @@
 //
 // Renders above the waveform when trim mode is active. Shows contextual
 // instructions, IN/OUT time readout, and Crop/Reset/Cancel buttons.
-// Syncs trim markers to wavesurfer regions.
+// The waveform draws the IN/OUT markers itself from store state.
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { Scissors, X, RotateCcw, Check, AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { WaveformPlayerHandle } from './WaveformPlayer';
 import { songApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
@@ -15,11 +14,8 @@ interface TrimControlsProps {
   trimInPoint: number | null;
   trimOutPoint: number | null;
   trimClickCount: number;
-  duration: number;
   songId: string | null;
   audioUrl: string | null;
-  wavesurferRef: React.RefObject<WaveformPlayerHandle | null>;
-  wavesurferAltRef: React.RefObject<WaveformPlayerHandle | null>;
   onReload: (newDuration?: number) => void;
   onCancel: () => void;
 }
@@ -36,11 +32,8 @@ export const TrimControls: React.FC<TrimControlsProps> = ({
   trimInPoint,
   trimOutPoint,
   trimClickCount,
-  duration,
   songId,
   audioUrl,
-  wavesurferRef,
-  wavesurferAltRef,
   onReload,
   onCancel,
 }) => {
@@ -49,25 +42,9 @@ export const TrimControls: React.FC<TrimControlsProps> = ({
   const [isCropping, setIsCropping] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const prevMarkersRef = useRef<string>('');
 
-  // Sync trim markers to wavesurfer regions whenever they change
-  useEffect(() => {
-    const key = `${trimInPoint}-${trimOutPoint}-${duration}`;
-    if (key === prevMarkersRef.current) return;
-    prevMarkersRef.current = key;
-
-    wavesurferRef.current?.setTrimRegions(trimInPoint, trimOutPoint, duration);
-    wavesurferAltRef.current?.setTrimRegions(trimInPoint, trimOutPoint, duration);
-  }, [trimInPoint, trimOutPoint, duration, wavesurferRef, wavesurferAltRef]);
-
-  // Clear trim regions on unmount
-  useEffect(() => {
-    return () => {
-      wavesurferRef.current?.clearTrimRegions();
-      wavesurferAltRef.current?.clearTrimRegions();
-    };
-  }, [wavesurferRef, wavesurferAltRef]);
+  // The IN/OUT markers are drawn by the waveform itself, which reads them from
+  // the store. Nothing to push anywhere.
 
   const canCrop = trimInPoint !== null && trimOutPoint !== null && songId;
 
@@ -156,8 +133,6 @@ export const TrimControls: React.FC<TrimControlsProps> = ({
           {trimClickCount > 0 && (
             <button
               onClick={() => {
-                wavesurferRef.current?.clearTrimRegions();
-                wavesurferAltRef.current?.clearTrimRegions();
                 onCancel();
                 // Re-enter trim mode (cancel + re-enable handled by parent)
               }}

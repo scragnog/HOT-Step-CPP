@@ -31,7 +31,6 @@ interface PlayerProps {
   onPlaybackRateChange: (r: number) => void;
   pitch441: boolean;
   onTogglePitch441: () => void;
-  audioRef: React.RefObject<HTMLAudioElement | null>;
   isShuffle: boolean;
   onToggleShuffle: () => void;
   repeatMode: 'none' | 'all' | 'one';

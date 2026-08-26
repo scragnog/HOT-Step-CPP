@@ -22,12 +22,12 @@ import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinish
 import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
 import { Player } from './components/player/Player';
-import { WaveformPlayer, type WaveformPlayerHandle } from './components/player/WaveformPlayer';
+import { Waveform } from './components/player/Waveform';
+import { getElement as getPlayerElement, subscribeFrame } from './audio/engine';
 import { SectionMarkers } from './components/player/SectionMarkers';
 import { LyricsBar } from './components/player/LyricsBar';
 import { TrimControls } from './components/player/TrimControls';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
-import { pitchAttachElement } from './audio/pitchShift';
 import { StreamSpectrum } from './components/player/StreamSpectrum';
 import { RightSidebar } from './components/details/RightSidebar';
 import { MetadataEditorModal } from './components/details/MetadataEditorModal';
@@ -52,14 +52,6 @@ import { InstaGenPanel } from './components/insta-gen/InstaGenPanel';
 import { PlaylistSidebar } from './components/playlist/PlaylistSidebar';
 import {
   usePlaybackSelector,
-  registerPlayers,
-  getActiveMediaElement,
-  handleOriginalReady,
-  handleAltReady,
-  handleNoAdapterReady,
-  handleFinish as pbHandleFinish,
-  setCurrentTime as pbSetCurrentTime,
-  setIsPlaying as pbSetIsPlaying,
   togglePlay as pbTogglePlay,
   seek as pbSeek,
   next as pbNext,
@@ -67,7 +59,6 @@ import {
   setVolume as pbSetVolume,
   setPlaybackRate as pbSetPlaybackRate,
   setPitch441 as pbSetPitch441,
-  effectivePlaybackRate,
   setShuffle as pbSetShuffle,
   cycleRepeat as pbCycleRepeat,
   setSpectrumEnabled as pbSetSpectrumEnabled,
@@ -286,9 +277,6 @@ const AppContent: React.FC = () => {
   const volume = usePlaybackSelector(s => s.volume);
   const playbackRate = usePlaybackSelector(s => s.playbackRate);
   const pitch441 = usePlaybackSelector(s => s.pitch441);
-  // What the decks actually run at — the speed pick, scaled by the 44.1 kHz
-  // test when it is on. The store applies the same value imperatively.
-  const deckRate = usePlaybackSelector(effectivePlaybackRate);
   const playMastered = usePlaybackSelector(s => s.playMastered);
   const playNoAdapter = usePlaybackSelector(s => s.playNoAdapter);
   const spectrumEnabled = usePlaybackSelector(s => s.spectrumEnabled);
@@ -300,9 +288,6 @@ const AppContent: React.FC = () => {
   const trimClickCount = usePlaybackSelector(s => s.trimClickCount);
   const abMode = usePlaybackSelector(s => s.abMode);
   const abActiveLabel = usePlaybackSelector(s => s.playMastered && s.abMode ? 'B' as const : 'A' as const);
-  const wavesurferRef = useRef<WaveformPlayerHandle>(null);
-  const wavesurferAltRef = useRef<WaveformPlayerHandle>(null);
-  const wavesurferNoAdapterRef = useRef<WaveformPlayerHandle>(null);
   const discoMode = useDiscoMode();
 
   // Disco hue assignments per panel (0-360)
@@ -320,19 +305,9 @@ const AppContent: React.FC = () => {
     trainingStudio: 60,   // amber
   };
 
-  // Register WaveSurfer ref objects with playback store.
-  // We pass the refs themselves (not .current) so the store always gets
-  // the latest handle even if useImperativeHandle hasn't committed yet.
-  useEffect(() => {
-    registerPlayers(wavesurferRef, wavesurferAltRef, wavesurferNoAdapterRef);
-  }, []);
-
-  // Track spectrum analyzer media element — updates on variant toggle
-  const [spectrumMediaEl, setSpectrumMediaEl] = useState<HTMLMediaElement | null>(null);
-  useEffect(() => {
-    const el = getActiveMediaElement();
-    if (el) setSpectrumMediaEl(el);
-  }, [playMastered, playNoAdapter, currentTrack, isPlaying]);
+  // The analyser's source. One element for the life of the page now, so there
+  // is nothing to re-point when the variant or the track changes.
+  const spectrumMediaEl = getPlayerElement();
 
   // Sync disco beat detection with playback state
   useEffect(() => {
@@ -340,12 +315,17 @@ const AppContent: React.FC = () => {
     syncStems(isPlaying ? 'play' : 'pause', currentTime);
   }, [isPlaying]);
 
-  // Feed current time to disco store every frame — this is the sync backbone.
-  // Pre-analyzed stems look up energy at this time, so it's always in sync
-  // with the main player regardless of seek, pause, rate changes.
+  // Feed current time to the disco store every frame — this is the sync
+  // backbone. Pre-analyzed stems look up energy at this time, so it stays in
+  // step with the audio through seeks, pauses and rate changes.
+  //
+  // The engine's frame channel really is per-frame, and deliberately does not
+  // go through React. The store's currentTime, which updates ten times a
+  // second, covers the live MM3 render, where there is no engine to ask.
+  useEffect(() => subscribeFrame((t) => updateMainTime(t)), []);
   useEffect(() => {
-    updateMainTime(currentTime);
-  }, [currentTime]);
+    if (isStreamTrack) updateMainTime(currentTime);
+  }, [currentTime, isStreamTrack]);
 
   // Load disco data JSON when track changes — trigger on-demand extraction if missing
   useEffect(() => {
@@ -392,13 +372,6 @@ const AppContent: React.FC = () => {
       return () => { cancelled = true; };
     }
   }, [currentTrack?.id, currentTrack?.discoDataUrl, settings.discoKickExtract]);
-
-  // ── Trim mode waveform click handler ──
-  const handleWaveformClick = useCallback((timeSec: number) => {
-    if (trimMode) {
-      pbHandleTrimClick(timeSec);
-    }
-  }, [trimMode]);
 
   // Wrap seek to also sync kick stem
   const handleSeek = useCallback((time: number) => {
@@ -1446,98 +1419,26 @@ const AppContent: React.FC = () => {
               trimInPoint={trimInPoint}
               trimOutPoint={trimOutPoint}
               trimClickCount={trimClickCount}
-              duration={duration}
               songId={currentTrack?.id ?? null}
               audioUrl={currentTrack?.audioUrl ?? null}
-              wavesurferRef={wavesurferRef}
-              wavesurferAltRef={wavesurferAltRef}
               onReload={pbReloadCurrentTrack}
               onCancel={() => pbSetTrimMode(false)}
             />
           )}
-          {/* Triple waveform: original + mastered + no-adapter reference stacked,
-              opacity-switched — plus the live-render canvas, which REPLACES them
-              rather than stacking. WaveSurfer needs a media element with a known
-              length; a track that is still being written has neither, so its
-              waveform is drawn from the envelope mm3StreamStore accumulates. */}
+          {/* One waveform. The live-render canvas replaces it rather than
+              stacking: a track still being written has no file to draw peaks
+              from, so its envelope comes from mm3StreamStore as windows land. */}
           <div className="relative" style={{ height: 56 }}>
-            {isStreamTrack && (
-              <div className="absolute inset-0 z-10">
-                <StreamWaveform height={56} />
-              </div>
+            {isStreamTrack ? (
+              <StreamWaveform height={56} />
+            ) : (
+              <Waveform
+                height={56}
+                trimIn={trimMode ? trimInPoint : null}
+                trimOut={trimMode ? trimOutPoint : null}
+                onClickTime={trimMode ? pbHandleTrimClick : undefined}
+              />
             )}
-            <div style={{
-              position: 'absolute', inset: 0,
-              opacity: (isStreamTrack || playMastered || playNoAdapter) ? 0 : 1,
-              pointerEvents: (isStreamTrack || playMastered || playNoAdapter) ? 'none' : 'auto',
-              transition: 'opacity 0.15s ease',
-            }}>
-              <WaveformPlayer
-                ref={wavesurferRef}
-                volume={(playMastered || playNoAdapter) ? 0 : volume}
-                playbackRate={deckRate}
-                onTimeUpdate={pbSetCurrentTime}
-                onDurationChange={() => {}}
-                onPlayChange={pbSetIsPlaying}
-                onFinish={() => pbHandleFinish('original')}
-                onWaveformClick={handleWaveformClick}
-                onReady={(dur) => {
-                  handleOriginalReady(dur);
-                  const el = wavesurferRef.current?.getMediaElement() ?? null;
-                  // Every deck joins the shared chain, not just the audible one
-                  // — a muted deck feeds silence, and a variant switch must not
-                  // land on one that was never captured.
-                  pitchAttachElement(el);
-                  if (!playMastered && !playNoAdapter) setSpectrumMediaEl(el);
-                }}
-              />
-            </div>
-            <div style={{
-              position: 'absolute', inset: 0,
-              opacity: playMastered ? 1 : 0,
-              pointerEvents: playMastered ? 'auto' : 'none',
-              transition: 'opacity 0.15s ease',
-            }}>
-              <WaveformPlayer
-                ref={wavesurferAltRef}
-                volume={playMastered ? volume : 0}
-                playbackRate={deckRate}
-                onTimeUpdate={pbSetCurrentTime}
-                onDurationChange={() => {}}
-                onPlayChange={pbSetIsPlaying}
-                onFinish={() => pbHandleFinish('alt')}
-                onWaveformClick={handleWaveformClick}
-                onReady={(dur) => {
-                  handleAltReady(dur);
-                  const el = wavesurferAltRef.current?.getMediaElement() ?? null;
-                  pitchAttachElement(el);
-                  if (playMastered) setSpectrumMediaEl(el);
-                }}
-              />
-            </div>
-            <div style={{
-              position: 'absolute', inset: 0,
-              opacity: playNoAdapter ? 1 : 0,
-              pointerEvents: playNoAdapter ? 'auto' : 'none',
-              transition: 'opacity 0.15s ease',
-            }}>
-              <WaveformPlayer
-                ref={wavesurferNoAdapterRef}
-                volume={playNoAdapter ? volume : 0}
-                playbackRate={deckRate}
-                onTimeUpdate={pbSetCurrentTime}
-                onDurationChange={() => {}}
-                onPlayChange={pbSetIsPlaying}
-                onFinish={() => pbHandleFinish('noadapter')}
-                onWaveformClick={handleWaveformClick}
-                onReady={(dur) => {
-                  handleNoAdapterReady(dur);
-                  const el = wavesurferNoAdapterRef.current?.getMediaElement() ?? null;
-                  pitchAttachElement(el);
-                  if (playNoAdapter) setSpectrumMediaEl(el);
-                }}
-              />
-            </div>
           </div>
           </div>
           {/* /inner overflow wrapper */}
@@ -1565,7 +1466,6 @@ const AppContent: React.FC = () => {
           onPlaybackRateChange={pbSetPlaybackRate}
           pitch441={pitch441}
           onTogglePitch441={() => pbSetPitch441(!pitch441)}
-          audioRef={wavesurferRef as any}
           isShuffle={shuffle}
           onToggleShuffle={() => pbSetShuffle(!shuffle)}
           repeatMode={repeat}
