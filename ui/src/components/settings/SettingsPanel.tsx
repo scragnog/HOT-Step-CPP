@@ -162,6 +162,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [envLoading, setEnvLoading] = useState(true);
   const [envSaving, setEnvSaving] = useState(false);
   const [envStatus, setEnvStatus] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+  // Keys saved to .env that the running engine will not pick up until it is
+  // restarted. Non-empty means the value shown above is NOT the value in use
+  // (issue #99), and the Restart now button below is the way to reconcile them.
+  const [pendingRestartKeys, setPendingRestartKeys] = useState<string[]>([]);
+  const [restarting, setRestarting] = useState(false);
+  /** Keys the server marks as restart-required (RESTART_REQUIRED_KEYS). */
+  const [restartKeys, setRestartKeys] = useState<string[]>([]);
 
   // Detected GPUs for the GPU selector dropdown
   const [detectedGpus, setDetectedGpus] = useState<Array<{ index: number; name: string; memoryMB: number }>>([]);
@@ -187,6 +194,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ]);
       setEnvValues(data.values);
       setEnvOriginal(data.values);
+      setRestartKeys(data.restartKeys || []);
       setDetectedGpus(gpuData.gpus);
     } catch (err: any) {
       console.error('[Settings] Failed to load .env:', err.message);
@@ -221,14 +229,39 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       const res = await settingsApi.updateEnv(diff);
       setEnvOriginal({ ...envValues });
       if (res.restartRequired) {
-        setEnvStatus({ type: 'warning', text: `Saved ${res.updated.length} setting(s). Some changes require a restart.` });
+        // Name them. "Some changes require a restart" left the user to work out
+        // which value on screen is a lie about what the engine is running.
+        const stale = res.updated.filter(k => restartKeys.includes(k));
+        setPendingRestartKeys(stale);
+        setEnvStatus({
+          type: 'warning',
+          text: stale.length
+            ? `Saved. The engine is still running the old ${stale.join(', ')} until you restart.`
+            : `Saved ${res.updated.length} setting(s). Some changes require a restart.`,
+        });
       } else {
+        setPendingRestartKeys([]);
         setEnvStatus({ type: 'success', text: `Saved ${res.updated.length} setting(s). Changes are live.` });
       }
     } catch (err: any) {
       setEnvStatus({ type: 'error', text: `Failed to save: ${err.message}` });
     } finally {
       setEnvSaving(false);
+    }
+  };
+
+  /** Apply restart-required settings by restarting, from where they were saved.
+   *  The restart control already existed in the sidebar, but nothing in the
+   *  Save Environment flow pointed at it, so a saved value could sit on screen
+   *  looking active while the engine ran on the old one indefinitely (#99). */
+  const handleRestartNow = async () => {
+    setRestarting(true);
+    setEnvStatus({ type: 'warning', text: 'Restarting…' });
+    try {
+      await fetch('/api/shutdown/restart', { method: 'POST' });
+    } catch {
+      // The server tears the connection down as it goes, so a rejected fetch
+      // here is the expected outcome and not an error worth reporting.
     }
   };
 
@@ -397,6 +430,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   {envStatus.text}
                 </span>
               )}
+            {pendingRestartKeys.length > 0 && (
+              <button
+                className="env-save-btn"
+                onClick={handleRestartNow}
+                disabled={restarting}
+                title="Restart so the saved values take effect"
+              >
+                {restarting ? 'Restarting…' : 'Restart now'}
+              </button>
+            )}
               <button
                 className="env-save-btn"
                 onClick={handleEnvSave}
@@ -519,6 +562,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       <div className="env-save-bar">
         {envStatus && (
           <span className={`env-save-status env-save-status--${envStatus.type}`}>{envStatus.text}</span>
+        )}
+        {pendingRestartKeys.length > 0 && (
+          <button
+            className="env-save-btn"
+            onClick={handleRestartNow}
+            disabled={restarting}
+            title="Restart so the saved values take effect"
+          >
+            {restarting ? 'Restarting…' : 'Restart now'}
+          </button>
         )}
         <button className="env-save-btn" onClick={handleEnvSave} disabled={!envDirty || envSaving}>
           {envSaving ? (
