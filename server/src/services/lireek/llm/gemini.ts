@@ -19,6 +19,15 @@ export class GeminiProvider extends LLMProvider {
 
   /** Fetch available models from the Gemini API, filtered to those that support generateContent */
   private async getRemoteModels(): Promise<string[]> {
+    // listProviders() calls toInfoAsync() on every provider to populate the
+    // model dropdowns, and this ran regardless of whether Gemini was
+    // configured. With no key the request still went out to
+    // generativelanguage.googleapis.com and came back 403, which is both a
+    // pointless round trip and the app contacting Google on behalf of a user
+    // who never opted in. isAvailable() already knows the answer; nothing was
+    // asking it. Reported alongside #101.
+    if (!this.isAvailable()) return this.availableModels;
+
     const now = Date.now();
     if (this._cachedModels && now < this._cacheExpiry) return this._cachedModels;
 
