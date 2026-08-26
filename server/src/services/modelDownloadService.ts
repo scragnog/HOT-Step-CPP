@@ -52,6 +52,24 @@ const CUDA_MAJOR = detectCudaMajorVersion();
 
 // IDs of CUDA-only file entries
 const CUDA_ONLY_FILE_PREFIXES = ['cuda-rt-', 'supersep-rt-'];
+
+/** True for catalogue entries that can only ever run on Windows.
+ *
+ *  Every cuda-rt-* and supersep-rt-* entry is a .dll. Until now the only
+ *  gating was by engine variant (cuda / vulkan / cpu), which says nothing
+ *  about the operating system, so a Linux box running the CUDA variant was
+ *  offered cublas64_13.dll and friends, downloaded them, and dropped them
+ *  next to a Linux binary where they sit inert (issue #81). There are no
+ *  Linux or macOS equivalents in the catalogue: on those platforms the CUDA
+ *  runtime comes from the distro or the toolkit, so the right behaviour is
+ *  to hide these entries rather than substitute anything.
+ *
+ *  Keyed off the filename rather than a new registry field so an entry added
+ *  later cannot forget to declare itself. */
+const IS_WINDOWS = process.platform === 'win32';
+function isWindowsOnlyFile(f: { filename?: string }): boolean {
+  return typeof f.filename === 'string' && f.filename.toLowerCase().endsWith('.dll');
+}
 // IDs of CUDA-only packs (hidden entirely for non-CUDA)
 const CUDA_ONLY_PACKS = ['cuda-runtime', 'cuda12-runtime', 'supersep-runtime', 'blackwell'];
 
@@ -138,6 +156,7 @@ class ModelDownloadService extends EventEmitter {
     // and hide wrong-CUDA-version entries
     const filteredFiles = registry.files
       .filter((f: RegistryFile) => isCuda || !CUDA_ONLY_FILE_PREFIXES.some(p => f.id.startsWith(p)))
+      .filter((f: RegistryFile) => IS_WINDOWS || !isWindowsOnlyFile(f))
       .filter((f: RegistryFile) => !f.tags?.includes(wrongCudaTag))
       .map((f: RegistryFile) => ({
         ...f,
@@ -148,6 +167,18 @@ class ModelDownloadService extends EventEmitter {
     // Also hide the wrong-version CUDA runtime pack and remap IDs in model packs
     const filteredPacks = registry.packs
       .filter((p: any) => isCuda || !CUDA_ONLY_PACKS.includes(p.id))
+      // A pack whose every file is a Windows DLL has nothing to offer on
+      // Linux or macOS. Without this the pack survives the isCuda gate on a
+      // Linux CUDA install and renders with all of its files filtered away.
+      .filter((p: any) => {
+        if (IS_WINDOWS) return true;
+        const ids: string[] = Array.isArray(p.fileIds) ? p.fileIds : [];
+        if (ids.length === 0) return true;
+        return !ids.every((id: string) => {
+          const f = registry.files.find((x: RegistryFile) => x.id === id);
+          return f ? isWindowsOnlyFile(f) : false;
+        });
+      })
       .filter((p: any) => {
         // Show only the correct CUDA runtime pack
         if (p.id === 'cuda-runtime') return CUDA_MAJOR >= 13;
@@ -155,14 +186,22 @@ class ModelDownloadService extends EventEmitter {
         return true;
       })
       .map((p: any) => {
+        // fileIds comes from model-registry.json, so a hand-edited catalogue
+        // can ship a pack without it. Unguarded, that threw here and took the
+        // whole /registry response down on every non-CUDA install, and threw
+        // again in the UI's getPackFiles on CUDA (issue #120).
+        const packFileIds: string[] = Array.isArray(p.fileIds) ? p.fileIds : [];
+        if (!Array.isArray(p.fileIds)) {
+          console.warn(`[Models] Pack "${p.id}" has no fileIds array — listing it empty.`);
+        }
         if (!isCuda) {
-          return { ...p, fileIds: p.fileIds.filter((id: string) => !CUDA_ONLY_FILE_PREFIXES.some(pfx => id.startsWith(pfx))) };
+          return { ...p, fileIds: packFileIds.filter((id: string) => !CUDA_ONLY_FILE_PREFIXES.some(pfx => id.startsWith(pfx))) };
         }
         // Remap cuda-rt-* IDs in packs to version-specific ones for CUDA 12
         if (CUDA_MAJOR <= 12) {
           return {
             ...p,
-            fileIds: p.fileIds.map((id: string) => {
+            fileIds: packFileIds.map((id: string) => {
               if (['cuda-rt-cublas', 'cuda-rt-cublaslt', 'cuda-rt-cudart'].includes(id)) {
                 return `${id}-12`;
               }
@@ -170,7 +209,7 @@ class ModelDownloadService extends EventEmitter {
             }),
           };
         }
-        return p;
+        return { ...p, fileIds: packFileIds };
       });
 
     return {
@@ -417,6 +456,18 @@ class ModelDownloadService extends EventEmitter {
       this.emit('progress');
 
       const repoPath = file.repoPath || file.filename;
+      // A catalogue entry with no repo builds the URL
+      // huggingface.co/undefined/resolve/main/<file>. Hugging Face answers a
+      // request for a repo that does not exist with 401 rather than 404, so
+      // this surfaced to users as "Unauthorised" and sent them hunting for a
+      // token that could never have helped (issues #87, #74). Say what is
+      // actually wrong instead.
+      if (!file.repo) {
+        throw new Error(
+          `${file.filename} has no download source in the model catalogue — ` +
+          `the weights are not published yet. This is not an authentication problem.`
+        );
+      }
       const url = `https://huggingface.co/${file.repo}/resolve/main/${repoPath}`;
 
       try {

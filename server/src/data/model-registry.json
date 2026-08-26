@@ -121,6 +121,13 @@
       "id": "minimax-music3-balanced",
       "name": "MiniMax-Music3 (Balanced mix)",
       "description": "The split format's point: LM at Q8_0 (quality lives in the language model) with the DiT at Q4_K_M (VRAM lives in the flow stack), depth at Q8_0, frontends near-native. ~12 GB download.",
+      "fileIds": [
+        "mm3-lm-q8_0",
+        "mm3-dit-Q4_K_M",
+        "mm3-depth-q8_0",
+        "mm3-cond-f16",
+        "mm3-voc-f16"
+      ],
       "components": [
         "mm3-lm-q8_0",
         "mm3-dit-Q4_K_M",
