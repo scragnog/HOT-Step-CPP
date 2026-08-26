@@ -137,6 +137,8 @@
     "settings.ai.ollamaUrlDesc": "Базовый URL для API Ollama.",
     "settings.ai.lmstudioUrl": "URL LM Studio",
     "settings.ai.lmstudioUrlDesc": "Базовый URL для API LM Studio.",
+    "settings.ai.lmstudioApiKey": "Ключ API LM Studio",
+    "settings.ai.lmstudioApiKeyDesc": "Bearer-токен для сервера LM Studio с включённой аутентификацией. Оставьте пустым для обычной локальной установки.",
     "settings.ai.unslothUrl": "URL Unsloth",
     "settings.ai.unslothUrlDesc": "Базовый URL для API Unsloth.",
     "settings.ai.unslothUsername": "Имя пользователя Unsloth",
@@ -685,7 +687,6 @@
     "instaGen.preview.back": "Назад к редактированию",
     "instaGen.preview.editCaption": "Изменить описание",
     "instaGen.clearAll": "Очистить всё",
-
     "coverArt.subjectTitle": "Обложка",
     "coverArt.subjectLabel": "Тема изображения",
     "coverArt.subjectPlaceholder": "Авто — генерируется из текста и стиля",

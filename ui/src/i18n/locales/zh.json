@@ -137,6 +137,8 @@
     "settings.ai.ollamaUrlDesc": "Ollama API 的基础 URL。",
     "settings.ai.lmstudioUrl": "LM Studio URL",
     "settings.ai.lmstudioUrlDesc": "LM Studio API 的基础 URL。",
+    "settings.ai.lmstudioApiKey": "LM Studio API 密钥",
+    "settings.ai.lmstudioApiKeyDesc": "用于已启用身份验证的 LM Studio 服务器的 Bearer 令牌。默认本地安装请留空。",
     "settings.ai.unslothUrl": "Unsloth URL",
     "settings.ai.unslothUrlDesc": "Unsloth API 的基础 URL。",
     "settings.ai.unslothUsername": "Unsloth 用户名",
@@ -686,7 +688,6 @@
     "instaGen.preview.back": "返回编辑",
     "instaGen.preview.editCaption": "编辑描述",
     "instaGen.clearAll": "全部清除",
-
     "coverArt.subjectTitle": "封面艺术",
     "coverArt.subjectLabel": "图像主题",
     "coverArt.subjectPlaceholder": "自动 — 根据歌词和风格生成",

@@ -137,6 +137,8 @@
     "settings.ai.ollamaUrlDesc": "Ollama API의 기본 URL입니다.",
     "settings.ai.lmstudioUrl": "LM Studio URL",
     "settings.ai.lmstudioUrlDesc": "LM Studio API의 기본 URL입니다.",
+    "settings.ai.lmstudioApiKey": "LM Studio API 키",
+    "settings.ai.lmstudioApiKeyDesc": "인증이 활성화된 LM Studio 서버용 베어러 토큰입니다. 기본 로컬 설치에서는 비워 두세요.",
     "settings.ai.unslothUrl": "Unsloth URL",
     "settings.ai.unslothUrlDesc": "Unsloth API의 기본 URL입니다.",
     "settings.ai.unslothUsername": "Unsloth 사용자 이름",
@@ -685,7 +687,6 @@
     "instaGen.preview.back": "편집으로 돌아가기",
     "instaGen.preview.editCaption": "캡션 편집",
     "instaGen.clearAll": "모두 지우기",
-
     "coverArt.subjectTitle": "커버 아트",
     "coverArt.subjectLabel": "이미지 주제",
     "coverArt.subjectPlaceholder": "자동 — 가사와 스타일에서 생성",

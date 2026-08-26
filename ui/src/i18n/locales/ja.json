@@ -137,6 +137,8 @@
     "settings.ai.ollamaUrlDesc": "Ollama API のベース URL。",
     "settings.ai.lmstudioUrl": "LM Studio URL",
     "settings.ai.lmstudioUrlDesc": "LM Studio API のベース URL。",
+    "settings.ai.lmstudioApiKey": "LM Studio API キー",
+    "settings.ai.lmstudioApiKeyDesc": "認証を有効にした LM Studio サーバー用のベアラートークン。ローカルの既定インストールでは空欄のままにしてください。",
     "settings.ai.unslothUrl": "Unsloth URL",
     "settings.ai.unslothUrlDesc": "Unsloth API のベース URL。",
     "settings.ai.unslothUsername": "Unsloth ユーザー名",
@@ -685,7 +687,6 @@
     "instaGen.preview.back": "編集に戻る",
     "instaGen.preview.editCaption": "キャプションを編集",
     "instaGen.clearAll": "すべてクリア",
-
     "coverArt.subjectTitle": "カバーアート",
     "coverArt.subjectLabel": "画像テーマ",
     "coverArt.subjectPlaceholder": "自動 — 歌詞とスタイルから生成",

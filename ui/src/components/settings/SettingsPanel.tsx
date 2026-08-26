@@ -542,6 +542,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           value={envValues.OLLAMA_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://localhost:11434" />
         <EnvTextRow envKey="LMSTUDIO_BASE_URL" label={t('settings.ai.lmstudioUrl')} description={t('settings.ai.lmstudioUrlDesc')}
           value={envValues.LMSTUDIO_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://localhost:1234/v1" />
+        <EnvPasswordRow envKey="LMSTUDIO_API_KEY" label={t('settings.ai.lmstudioApiKey')} description={t('settings.ai.lmstudioApiKeyDesc')}
+          value={envValues.LMSTUDIO_API_KEY || ''} onChange={handleEnvChange} />
         <EnvTextRow envKey="UNSLOTH_BASE_URL" label={t('settings.ai.unslothUrl')} description={t('settings.ai.unslothUrlDesc')}
           value={envValues.UNSLOTH_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://127.0.0.1:8888" />
         <EnvTextRow envKey="UNSLOTH_USERNAME" label={t('settings.ai.unslothUsername')} description={t('settings.ai.unslothUsernameDesc')}

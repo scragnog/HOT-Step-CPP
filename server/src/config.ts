@@ -219,6 +219,10 @@ export const config = {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
     lmstudioBaseUrl: process.env.LMSTUDIO_BASE_URL || 'http://localhost:1234/v1',
+    // LM Studio can require a bearer token once its server has Authentication
+    // switched on, which is what you need for its MCP features (issue #121).
+    // Empty means anonymous, which is how a default LM Studio install answers.
+    lmstudioApiKey: process.env.LMSTUDIO_API_KEY || '',
     unslothBaseUrl: process.env.UNSLOTH_BASE_URL || 'http://127.0.0.1:8888',
     unslothUsername: process.env.UNSLOTH_USERNAME || '',
     unslothPassword: process.env.UNSLOTH_PASSWORD || '',
@@ -305,7 +309,7 @@ export const EXPOSED_ENV_KEYS = [
   'GEMINI_MODEL', 'OPENAI_MODEL', 'ANTHROPIC_MODEL',
   'OLLAMA_MODEL', 'LMSTUDIO_MODEL', 'UNSLOTH_MODEL',
   // LLM endpoints
-  'OLLAMA_BASE_URL', 'LMSTUDIO_BASE_URL',
+  'OLLAMA_BASE_URL', 'LMSTUDIO_BASE_URL', 'LMSTUDIO_API_KEY',
   'UNSLOTH_BASE_URL', 'UNSLOTH_USERNAME', 'UNSLOTH_PASSWORD',
   'LLAMACPP_BASE_URL', 'LLAMACPP_MODEL',
   'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_MODEL', 'OPENAI_COMPAT_NAME',
@@ -394,6 +398,8 @@ export function reloadEnvConfig(): string[] {
     () => config.lireek.ollamaBaseUrl);
   apply('LMSTUDIO_BASE_URL', v => { config.lireek.lmstudioBaseUrl = v || 'http://localhost:1234/v1'; },
     () => config.lireek.lmstudioBaseUrl);
+  apply('LMSTUDIO_API_KEY', v => { config.lireek.lmstudioApiKey = v; },
+    () => config.lireek.lmstudioApiKey);
   apply('UNSLOTH_BASE_URL', v => { config.lireek.unslothBaseUrl = v || 'http://127.0.0.1:8888'; },
     () => config.lireek.unslothBaseUrl);
   apply('UNSLOTH_USERNAME', v => { config.lireek.unslothUsername = v; },

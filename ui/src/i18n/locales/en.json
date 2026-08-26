@@ -908,6 +908,8 @@
     "settings.ai.ollamaUrlDesc": "Base URL for the Ollama API.",
     "settings.ai.lmstudioUrl": "LM Studio URL",
     "settings.ai.lmstudioUrlDesc": "Base URL for the LM Studio API.",
+    "settings.ai.lmstudioApiKey": "LM Studio API Key",
+    "settings.ai.lmstudioApiKeyDesc": "Bearer token for an LM Studio server with Authentication enabled. Leave blank for a default local install.",
     "settings.ai.unslothUrl": "Unsloth URL",
     "settings.ai.unslothUrlDesc": "Base URL for the Unsloth API.",
     "settings.ai.unslothUsername": "Unsloth username",

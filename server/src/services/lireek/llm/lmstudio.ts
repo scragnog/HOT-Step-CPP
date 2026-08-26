@@ -11,10 +11,20 @@ export class LMStudioProvider extends LLMProvider {
 
   isAvailable() { return true; }
 
+  /** Bearer header for an LM Studio server with Authentication enabled.
+   *  Empty object when no key is set, which is the default install (#121). */
+  private authHeaders(): Record<string, string> {
+    const key = config.lireek.lmstudioApiKey;
+    return key ? { Authorization: `Bearer ${key}` } : {};
+  }
+
   private async getLocalModels(): Promise<string[]> {
     try {
       const baseUrl = config.lireek.lmstudioBaseUrl.replace('/v1', '');
-      const resp = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(3000) });
+      const resp = await fetch(`${baseUrl}/v1/models`, {
+        headers: this.authHeaders(),
+        signal: AbortSignal.timeout(3000),
+      });
       if (!resp.ok) return [];
       const data = await resp.json();
       this.availableModels = data.data?.map((m: any) => m.id).sort().reverse() || [];
@@ -69,7 +79,7 @@ export class LMStudioProvider extends LLMProvider {
 
     const doFetch = () => fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(300_000),
     });
