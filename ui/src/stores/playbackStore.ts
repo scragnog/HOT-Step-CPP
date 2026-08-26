@@ -20,7 +20,7 @@ import {
   mm3StreamSilence,
   mm3StreamSeek, mm3StreamSetVolume,
 } from './mm3StreamStore';
-import { isPitchShiftReady, onPitchShiftReady, setPitchRatio } from '../audio/pitchShift';
+import { pitchResume, setPitchRatio } from '../audio/pitchShift';
 
 /** VST monitoring and the global player are mutually exclusive — they'd play
  *  two tracks at once. Whenever global playback starts, stop the VST monitor. */
@@ -499,6 +499,9 @@ function startBothPlayers(token: number = _loadToken): void {
   // A file deck starting means the file deck owns the audio.
   if (_audible.kind !== 'file') setAudible({ kind: 'file' });
   if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+  // The decks reach the speakers through our own AudioContext now, and a
+  // suspended one is just silence.
+  pitchResume();
 
   const wsOrig = _wsOriginalRef.current;
   const wsAlt = _wsAltRef.current;
@@ -608,37 +611,27 @@ function applyVolumes(): void {
  *  samples clocked out at 44.1 kHz, about 1.47 semitones down. */
 export const SR_44K_48K_RATIO = 44100 / 48000;   // 0.91875
 
-/** The rate actually handed to the decks.
+/** The rate handed to the decks — the user's speed pick, nothing else.
  *
- *  With the pitch shifter in the graph this is just the user's speed pick: the
- *  44.1 kHz toggle moves pitch alone and leaves the transport at speed, which
- *  is the point — a tempo change makes an A/B comparison much harder to judge
- *  than the pitch difference it is meant to expose.
- *
- *  Without it (worklet failed to load) we fall back to the old behaviour and
- *  detune by slowing the deck down, which does move tempo with it. */
+ *  The 44.1 kHz toggle deliberately does NOT come into this. Detuning by
+ *  slowing the deck down is how this used to work, and it dragged tempo along
+ *  with the pitch, which puts two variables into a comparison meant to isolate
+ *  one. Pitch is the shifter's job now; the transport stays where the user put
+ *  it. If the shifter is unavailable the toggle does nothing at all rather than
+ *  quietly reintroducing the tempo change. */
 export function effectivePlaybackRate(s: PlaybackState = _state): number {
-  return s.pitch441 && !isPitchShiftReady() ? s.playbackRate * SR_44K_48K_RATIO : s.playbackRate;
+  return s.playbackRate;
 }
 
 function applyPlaybackRate(): void {
-  const shifted = _state.pitch441;
-  const viaShifter = shifted && isPitchShiftReady();
-  setPitchRatio(viaShifter ? SR_44K_48K_RATIO : 1);
-
-  const rate = effectivePlaybackRate();
-  // Second arg is WaveSurfer's preservePitch. Only the fallback path wants it
-  // off — that is the one where the rate change IS the detune.
-  const preserve = !(shifted && !viaShifter);
-  _wsOriginalRef.current?.setPlaybackRate(rate, preserve);
-  _wsAltRef.current?.setPlaybackRate(rate, preserve);
-  _wsNoAdapterRef.current?.setPlaybackRate(rate, preserve);
+  setPitchRatio(_state.pitch441 ? SR_44K_48K_RATIO : 1);
+  const rate = _state.playbackRate;
+  // Second arg is WaveSurfer's preservePitch, on for every path now: the speed
+  // buttons are meant to hold pitch, and 44.1 kHz no longer touches the rate.
+  _wsOriginalRef.current?.setPlaybackRate(rate, true);
+  _wsAltRef.current?.setPlaybackRate(rate, true);
+  _wsNoAdapterRef.current?.setPlaybackRate(rate, true);
 }
-
-// The shifter installs itself asynchronously once the first deck is ready. If
-// the toggle was already on we are mid-fallback, so re-apply and move onto the
-// good path.
-onPitchShiftReady(() => { if (_state.pitch441) { applyPlaybackRate(); notify(); } });
 
 function persistTrackList(): void {
   saveTrackList({

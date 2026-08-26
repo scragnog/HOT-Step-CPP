@@ -4,15 +4,19 @@
 // Connects to the audio source via an HTMLMediaElement from wavesurfer.
 //
 // IMPORTANT: This component must stay mounted once created — never conditionally
-// render it. audioMotion calls createMediaElementSource() which permanently
-// redirects the audio element through the Web Audio API graph. Unmounting
-// would call destroy(), disconnecting that graph and breaking audio playback.
-// Use the `visible` prop to show/hide instead.
+// render it. destroy() would tear down its end of the audio graph. Use the
+// `visible` prop to show/hide instead.
+//
+// It does NOT capture the media element. pitchShift.ts owns the decks' route to
+// the speakers (an element can only be captured once, and the pitch shifter has
+// to sit in that route), so this reads the tap node it exposes. That also means
+// the analyser shows what you are actually hearing, pitch shift included, and
+// that it never needs reconnecting when the deck changes — the tap does not.
 
 import { useEffect, useRef } from 'react';
 import AudioMotionAnalyzer from 'audiomotion-analyzer';
 import { registerAudioMotion } from '../../stores/discoStore';
-import { installPitchShifter } from '../../audio/pitchShift';
+import { pitchAttachElement, pitchTapNode } from '../../audio/pitchShift';
 
 interface SpectrumAnalyzerProps {
   /** The HTMLMediaElement to analyze (from wavesurfer's getMediaElement) */
@@ -39,29 +43,24 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
       return;
     }
 
-    // Already connected to this element — nothing to do
-    if (analyzerRef.current && connectedElementRef.current === mediaElement) return;
-
-    // Media element changed — we need to reconnect.
-    // Note: we do NOT destroy the old instance here because that would
-    // disconnect the MediaElementSourceNode and break audio.
-    // audioMotion can handle reconnecting via connectInput.
+    // Make sure this deck is in the shared chain, then read the one node that
+    // carries every deck. A later deck changes nothing here.
+    pitchAttachElement(mediaElement);
+    const source = pitchTapNode();
     if (analyzerRef.current) {
-      try {
-        analyzerRef.current.connectInput(mediaElement);
-      } catch {
-        // If reconnect fails, try creating fresh
-        // (this shouldn't normally happen)
-      }
       connectedElementRef.current = mediaElement;
-      registerAudioMotion(analyzerRef.current);
-      console.log('[SpectrumAnalyzer] Reconnected + registered audioMotion');
+      return;
+    }
+    if (!source) {
+      console.error('[SpectrumAnalyzer] no audio graph to analyse');
       return;
     }
 
     try {
       const analyzer = new AudioMotionAnalyzer(containerRef.current, {
-        source: mediaElement,
+        source,
+        // The tap already feeds the speakers; a second path would double it.
+        connectSpeakers: false,
         mode: 1,              // 1/48th octave bands — very dense thin bars
         roundBars: true,
         colorMode: 'bar-level',
@@ -82,11 +81,6 @@ export const SpectrumAnalyzer: React.FC<SpectrumAnalyzerProps> = ({
       analyzerRef.current = analyzer;
       connectedElementRef.current = mediaElement;
       registerAudioMotion(analyzer);
-      // This instance owns the only path from the file decks to the speakers,
-      // so it is also the only place the 44.1 kHz pitch shifter can sit. Async
-      // and best-effort: the play bar falls back to rate-based detune if the
-      // worklet never arrives.
-      void installPitchShifter(analyzer);
       console.log('[SpectrumAnalyzer] Created + registered audioMotion');
     } catch (err) {
       console.error('[SpectrumAnalyzer] Failed to initialize:', err);

@@ -27,6 +27,7 @@ import { SectionMarkers } from './components/player/SectionMarkers';
 import { LyricsBar } from './components/player/LyricsBar';
 import { TrimControls } from './components/player/TrimControls';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
+import { pitchAttachElement } from './audio/pitchShift';
 import { StreamSpectrum } from './components/player/StreamSpectrum';
 import { RightSidebar } from './components/details/RightSidebar';
 import { MetadataEditorModal } from './components/details/MetadataEditorModal';
@@ -1475,7 +1476,6 @@ const AppContent: React.FC = () => {
                 ref={wavesurferRef}
                 volume={(playMastered || playNoAdapter) ? 0 : volume}
                 playbackRate={deckRate}
-                preservePitch={!pitch441}
                 onTimeUpdate={pbSetCurrentTime}
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
@@ -1483,9 +1483,12 @@ const AppContent: React.FC = () => {
                 onWaveformClick={handleWaveformClick}
                 onReady={(dur) => {
                   handleOriginalReady(dur);
-                  if (!playMastered && !playNoAdapter) {
-                    setSpectrumMediaEl(wavesurferRef.current?.getMediaElement() ?? null);
-                  }
+                  const el = wavesurferRef.current?.getMediaElement() ?? null;
+                  // Every deck joins the shared chain, not just the audible one
+                  // — a muted deck feeds silence, and a variant switch must not
+                  // land on one that was never captured.
+                  pitchAttachElement(el);
+                  if (!playMastered && !playNoAdapter) setSpectrumMediaEl(el);
                 }}
               />
             </div>
@@ -1499,7 +1502,6 @@ const AppContent: React.FC = () => {
                 ref={wavesurferAltRef}
                 volume={playMastered ? volume : 0}
                 playbackRate={deckRate}
-                preservePitch={!pitch441}
                 onTimeUpdate={pbSetCurrentTime}
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
@@ -1507,9 +1509,9 @@ const AppContent: React.FC = () => {
                 onWaveformClick={handleWaveformClick}
                 onReady={(dur) => {
                   handleAltReady(dur);
-                  if (playMastered) {
-                    setSpectrumMediaEl(wavesurferAltRef.current?.getMediaElement() ?? null);
-                  }
+                  const el = wavesurferAltRef.current?.getMediaElement() ?? null;
+                  pitchAttachElement(el);
+                  if (playMastered) setSpectrumMediaEl(el);
                 }}
               />
             </div>
@@ -1523,7 +1525,6 @@ const AppContent: React.FC = () => {
                 ref={wavesurferNoAdapterRef}
                 volume={playNoAdapter ? volume : 0}
                 playbackRate={deckRate}
-                preservePitch={!pitch441}
                 onTimeUpdate={pbSetCurrentTime}
                 onDurationChange={() => {}}
                 onPlayChange={pbSetIsPlaying}
@@ -1531,9 +1532,9 @@ const AppContent: React.FC = () => {
                 onWaveformClick={handleWaveformClick}
                 onReady={(dur) => {
                   handleNoAdapterReady(dur);
-                  if (playNoAdapter) {
-                    setSpectrumMediaEl(wavesurferNoAdapterRef.current?.getMediaElement() ?? null);
-                  }
+                  const el = wavesurferNoAdapterRef.current?.getMediaElement() ?? null;
+                  pitchAttachElement(el);
+                  if (playNoAdapter) setSpectrumMediaEl(el);
                 }}
               />
             </div>

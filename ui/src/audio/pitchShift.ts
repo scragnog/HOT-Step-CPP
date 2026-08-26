@@ -1,42 +1,54 @@
 /**
- * pitchShift.ts — owns the one pitch-shifting node in the play bar's graph.
+ * pitchShift.ts — the file decks' route to the speakers, with a pitch shifter
+ * in it.
  *
- * The file decks' audio already runs through a Web Audio graph: audioMotion
- * takes the media element with createMediaElementSource() and pushes the result
- * at the speakers. So rather than build a second graph and fight it for the
- * element, we splice into the one that exists:
+ *     deck <audio> ──┐
+ *     deck <audio> ──┼─> input ─> [shifter] ─> tap ─> destination
+ *     deck <audio> ──┘                          └──> audioMotion (analyser)
  *
- *     media element -> audioMotion -> [pitch shifter] -> destination
+ * This module owns the AudioContext and the MediaElementSourceNodes, and hands
+ * `tap` to the spectrum analyser as its source. It used to be the other way
+ * round — audioMotion captured the elements and we spliced in behind it — but
+ * that made the shifter's existence depend on the analyser being constructed,
+ * which is a thing that can fail (double capture of an element after an HMR
+ * remount, for one) and take the shifter down with it silently.
  *
- * The node stays in the chain for the life of the page and bypasses itself at
- * ratio 1, so nothing about ordinary playback changes — no reconnect races, no
- * chance of ending up with a graph that has no path to the speakers.
+ * An element can only be captured once for the life of the page, so ownership
+ * has to sit in exactly one place. This is that place.
  *
- * Installing needs an AudioWorklet module, which loads asynchronously and can
- * fail (old browser, blocked asset). Callers ask isPitchShiftReady() and keep
- * a fallback for the answer being no; onPitchShiftReady() fires once when it
- * flips, so a store can re-apply itself at that point.
+ * All three decks are attached, not just the audible one. They run in lockstep
+ * with volume deciding who is heard, and a muted element contributes true
+ * silence (volume is applied ahead of the source node), so summing them costs
+ * nothing and means a variant switch cannot land on an unattached deck.
+ *
+ * The chain is built synchronously; the worklet loads async and splices itself
+ * between input and tap when it arrives. Until then — or forever, if it fails
+ * — the chain is a plain pass-through and isPitchShiftReady() reports false.
  */
 
 import workletUrl from './pitchShiftWorklet.js?url';
 
-/** Minimal slice of the audioMotion instance we need. */
-interface AnalyzerLike {
-  audioCtx: AudioContext;
-  connectOutput(node?: AudioNode): void;
-  disconnectOutput(node?: AudioNode): void;
-}
-
+let ctx: AudioContext | null = null;
+let input: GainNode | null = null;
+let tap: GainNode | null = null;
 let node: AudioWorkletNode | null = null;
 let installing = false;
+let failure: string | null = null;
 let ratio = 1;
+
+const attached = new WeakSet<HTMLMediaElement>();
 const readyListeners = new Set<() => void>();
 
 export function isPitchShiftReady(): boolean {
   return node !== null;
 }
 
-/** Fires once the shifter is in the graph. Returns an unsubscribe. */
+/** Why the shifter is not available, or null if it is (or is still loading). */
+export function pitchShiftError(): string | null {
+  return failure;
+}
+
+/** Fires once the shifter is in the chain. Returns an unsubscribe. */
 export function onPitchShiftReady(fn: () => void): () => void {
   if (node) { fn(); return () => {}; }
   readyListeners.add(fn);
@@ -53,16 +65,36 @@ export function setPitchRatio(r: number): void {
   node?.port.postMessage({ type: 'ratio', value: r });
 }
 
-/**
- * Splice the shifter in after `analyzer`. Idempotent — later calls are no-ops,
- * which matters because the analyzer is created once but its effect can run
- * again on a deck change.
- */
-export async function installPitchShifter(analyzer: AnalyzerLike): Promise<void> {
-  if (node || installing) return;
+function ensureGraph(): boolean {
+  if (ctx) return true;
+  try {
+    ctx = new AudioContext();
+    input = ctx.createGain();
+    tap = ctx.createGain();
+    input.connect(tap);
+    tap.connect(ctx.destination);
+    // Autoplay policy: the context starts suspended and only a gesture lifts
+    // it. audioMotion used to do this for us, back when it owned the context.
+    const unlock = () => {
+      if (ctx && ctx.state === 'suspended') {
+        void ctx.resume().then(() => window.removeEventListener('click', unlock));
+      }
+    };
+    window.addEventListener('click', unlock);
+    void loadWorklet();
+    return true;
+  } catch (err) {
+    failure = `AudioContext unavailable: ${String(err)}`;
+    console.error('[pitchShift]', failure);
+    return false;
+  }
+}
+
+async function loadWorklet(): Promise<void> {
+  if (node || installing || !ctx || !input || !tap) return;
   installing = true;
   try {
-    const ctx = analyzer.audioCtx;
+    if (!ctx.audioWorklet) throw new Error('AudioWorklet missing (page is not a secure context?)');
     await ctx.audioWorklet.addModule(workletUrl);
     const n = new AudioWorkletNode(ctx, 'hot-pitch-shift', {
       numberOfInputs: 1,
@@ -72,19 +104,52 @@ export async function installPitchShifter(analyzer: AnalyzerLike): Promise<void>
       channelCountMode: 'explicit',
       channelInterpretation: 'speakers',
     });
-    // Add before removing, so the analyzer is never momentarily output-less —
-    // audioMotion tears down its internal connections when its last output
-    // goes away.
-    analyzer.connectOutput(n);
-    analyzer.disconnectOutput(ctx.destination);
-    n.connect(ctx.destination);
     n.port.postMessage({ type: 'ratio', value: ratio });
+    input.disconnect(tap);
+    input.connect(n);
+    n.connect(tap);
     node = n;
+    failure = null;
+    console.log('[pitchShift] shifter online');
     for (const fn of readyListeners) fn();
     readyListeners.clear();
   } catch (err) {
-    console.error('[pitchShift] worklet unavailable, falling back to rate-based detune:', err);
+    failure = String(err);
+    console.error('[pitchShift] shifter unavailable — the 44.1 kHz toggle will do nothing:', err);
   } finally {
     installing = false;
   }
+}
+
+/**
+ * Route one deck's media element through the chain. Idempotent per element —
+ * a second capture of the same element throws, and there is no way to undo the
+ * first, so the WeakSet is load-bearing.
+ */
+export function pitchAttachElement(el: HTMLMediaElement | null): void {
+  if (!el || attached.has(el)) return;
+  if (!ensureGraph() || !ctx || !input) return;
+  try {
+    ctx.createMediaElementSource(el).connect(input);
+    attached.add(el);
+    if (ctx.state === 'suspended') void ctx.resume();
+  } catch (err) {
+    // Already captured by something else. Leave it playing direct to the
+    // speakers rather than losing its audio entirely.
+    attached.add(el);
+    console.error('[pitchShift] could not capture deck element:', err);
+  }
+}
+
+/** Lift the autoplay suspension. Called whenever the decks start, because a
+ *  suspended context means silence, and the context is now ours to unlock. */
+export function pitchResume(): void {
+  if (ctx && ctx.state === 'suspended') void ctx.resume();
+}
+
+/** The node the spectrum analyser should read, or null if there is no graph
+ *  yet. Reading here rather than the raw element keeps capture in one place —
+ *  and means the analyser sees post-shift audio. */
+export function pitchTapNode(): AudioNode | null {
+  return tap;
 }

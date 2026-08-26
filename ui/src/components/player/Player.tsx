@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { DiscoIcon } from './DiscoIcon';
 import { useTranslation } from 'react-i18next';
+import { isPitchShiftReady } from '../../audio/pitchShift';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
@@ -256,9 +257,11 @@ export const Player: React.FC<PlayerProps> = ({
               ? 'text-amber-400 bg-amber-500/10'
               : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
           }`}
-          title={pitch441
-            ? 'Pitched down ~1.47 semitones (44.1 kHz clock), tempo unchanged — click for 48 kHz'
-            : 'Hear the 48 kHz render at 44.1 kHz pitch (down ~1.47 semitones, same tempo)'}
+          title={!isPitchShiftReady()
+            ? 'Pitch shifter unavailable in this browser — see the console'
+            : pitch441
+              ? 'Pitched down ~1.47 semitones (44.1 kHz clock), tempo unchanged — click for 48 kHz'
+              : 'Hear the 48 kHz render at 44.1 kHz pitch (down ~1.47 semitones, same tempo)'}
         >
           {pitch441 ? '44.1k' : '48k'}
         </button>
