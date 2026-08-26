@@ -101,6 +101,13 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     this.midBuf = new Float32Array(IN_CAP);
     this.tmpl = new Float32Array(this.corr);
 
+    // Counters for the diagnostics probe. `starves` is the one that matters:
+    // it climbs only if the shifter is producing slower than realtime, which
+    // is the one way this node could ever drag the tempo.
+    this.starves = 0;
+    this.framesOut = 0;
+    this.calls = 0;
+
     this.ratio = 1;         // requested shift
     this.active = false;    // is the DSP path currently the audible one
     this.want = false;
@@ -111,7 +118,19 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
 
     this.port.onmessage = (e) => {
       const d = e.data;
-      if (!d || d.type !== 'ratio') return;
+      if (!d) return;
+      if (d.type === 'stats') {
+        this.port.postMessage({
+          type: 'stats',
+          ratio: this.ratio, want: this.want, active: this.active,
+          gain: this.gain, fade: this.fade,
+          inWrite: this.inWrite, sWrite: this.sWrite, rPos: this.rPos,
+          starves: this.starves, framesOut: this.framesOut, calls: this.calls,
+          ctxTime: currentTime, sr: sampleRate, win: this.win, seek: this.seek,
+        });
+        return;
+      }
+      if (d.type !== 'ratio') return;
       const r = Number(d.value);
       if (!isFinite(r) || r <= 0.25 || r >= 4) return;
       this.ratio = r;
@@ -215,6 +234,8 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     }
 
     const nch = Math.min(MAX_CH, nIn, nOut);
+    this.calls++;
+    this.framesOut += frames;
 
     // Mode changes ride a fade so the ~50 ms latency step cannot click.
     if (this.want !== this.active && this.fade === 0) this.fade = -1;
@@ -249,6 +270,7 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
         if (n0 + HALF >= this.sWrite) {
           // Priming, or starved. Hold silence rather than repeat.
           for (let c = 0; c < nch; c++) output[c][i] = 0;
+          this.starves++;
           continue;
         }
         const off = (((this.rPos - n0) * PHASES) | 0) * TAPS;

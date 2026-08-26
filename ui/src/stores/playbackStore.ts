@@ -20,7 +20,7 @@ import {
   mm3StreamSilence,
   mm3StreamSeek, mm3StreamSetVolume,
 } from './mm3StreamStore';
-import { pitchResume, setPitchRatio } from '../audio/pitchShift';
+import { pitchResume, registerDeckProbe, setPitchRatio } from '../audio/pitchShift';
 
 /** VST monitoring and the global player are mutually exclusive — they'd play
  *  two tracks at once. Whenever global playback starts, stop the VST monitor. */
@@ -632,6 +632,35 @@ function applyPlaybackRate(): void {
   _wsAltRef.current?.setPlaybackRate(rate, true);
   _wsNoAdapterRef.current?.setPlaybackRate(rate, true);
 }
+
+// Hand the audio-graph diagnostics everything this side knows: which engine is
+// actually audible, and what each deck's media element is really doing. If the
+// pitch button ever seems to change tempo, one of these numbers says why.
+registerDeckProbe(() => {
+  const deck = (name: string, ref: typeof _wsOriginalRef) => {
+    const m = ref.current?.getMediaElement() as HTMLMediaElement | null | undefined;
+    if (!m) return [name, 'no deck'] as const;
+    return [name, {
+      playbackRate: m.playbackRate,
+      preservesPitch: (m as HTMLMediaElement & { preservesPitch?: boolean }).preservesPitch,
+      volume: m.volume,
+      paused: m.paused,
+      currentTime: Number(m.currentTime.toFixed(3)),
+      src: m.currentSrc.slice(-48),
+    }] as const;
+  };
+  return {
+    audibleEngine: _audible.kind,
+    pitch441: _state.pitch441,
+    storePlaybackRate: _state.playbackRate,
+    effectiveDeckRate: effectivePlaybackRate(),
+    ...Object.fromEntries([
+      deck('original', _wsOriginalRef),
+      deck('mastered', _wsAltRef),
+      deck('noAdapter', _wsNoAdapterRef),
+    ]),
+  };
+});
 
 function persistTrackList(): void {
   saveTrackList({

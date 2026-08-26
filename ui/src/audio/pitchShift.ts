@@ -61,8 +61,16 @@ export function onPitchShiftReady(fn: () => void): () => void {
  * worklet finishes loading; the value is applied on arrival.
  */
 export function setPitchRatio(r: number): void {
+  const changed = r !== ratio;
   ratio = r;
   node?.port.postMessage({ type: 'ratio', value: r });
+  // Dump the state a few seconds after a change, once the shifter has settled.
+  // `starves` is the number to watch: it should stop climbing after priming,
+  // and a figure that keeps rising means audio is being produced slower than
+  // realtime — the only way this node could drag the tempo.
+  if (changed && r !== 1) {
+    setTimeout(() => { void pitchDiagnostics().then(d => console.log('[pitchShift] 3s after enabling', d)); }, 3000);
+  }
 }
 
 function ensureGraph(): boolean {
@@ -145,6 +153,57 @@ export function pitchAttachElement(el: HTMLMediaElement | null): void {
  *  suspended context means silence, and the context is now ours to unlock. */
 export function pitchResume(): void {
   if (ctx && ctx.state === 'suspended') void ctx.resume();
+}
+
+// ── Diagnostics ─────────────────────────────────────────────────────────────
+//
+// The play bar has four things that can make sound and three AudioContexts
+// between them, so "the pitch button did the wrong thing" has more than one
+// possible author. This dumps every one of them at once, on demand:
+// window.__hotPitch() in the console.
+
+type DeckProbe = () => Record<string, unknown>;
+let deckProbe: DeckProbe | null = null;
+
+/** Let the playback store contribute what it knows about the decks. */
+export function registerDeckProbe(fn: DeckProbe): void {
+  deckProbe = fn;
+}
+
+export async function pitchDiagnostics(): Promise<Record<string, unknown>> {
+  const worklet = await new Promise<unknown>((resolve) => {
+    if (!node) { resolve('no worklet node'); return; }
+    const timer = setTimeout(() => resolve('worklet did not answer'), 500);
+    const once = (e: MessageEvent) => {
+      if (e.data?.type !== 'stats') return;
+      clearTimeout(timer);
+      node?.port.removeEventListener('message', once);
+      resolve(e.data);
+    };
+    node.port.addEventListener('message', once);
+    node.port.start();
+    node.port.postMessage({ type: 'stats' });
+  });
+
+  return {
+    graph: {
+      contextRate: ctx?.sampleRate ?? null,
+      contextState: ctx?.state ?? 'no context',
+      shifterInChain: node !== null,
+      requestedRatio: ratio,
+      installError: failure,
+    },
+    worklet,
+    decks: deckProbe ? deckProbe() : 'no deck probe registered',
+  };
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__hotPitch = async () => {
+    const d = await pitchDiagnostics();
+    console.log('[pitchShift] diagnostics', d);
+    return d;
+  };
 }
 
 /** The node the spectrum analyser should read, or null if there is no graph
