@@ -649,7 +649,12 @@ registerDeckProbe(() => {
       src: m.currentSrc.slice(-48),
     }] as const;
   };
+  const audibleRef = _state.playNoAdapter ? _wsNoAdapterRef
+    : _state.playMastered ? _wsAltRef
+    : _wsOriginalRef;
   return {
+    // The element the measurement clocks against — whichever deck is unmuted.
+    audibleElement: audibleRef.current?.getMediaElement() ?? null,
     audibleEngine: _audible.kind,
     pitch441: _state.pitch441,
     storePlaybackRate: _state.playbackRate,

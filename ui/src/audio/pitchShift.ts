@@ -69,7 +69,7 @@ export function setPitchRatio(r: number): void {
   // and a figure that keeps rising means audio is being produced slower than
   // realtime — the only way this node could drag the tempo.
   if (changed && r !== 1) {
-    setTimeout(() => { void pitchDiagnostics().then(d => console.log('[pitchShift] 3s after enabling', d)); }, 3000);
+    setTimeout(() => { void pitchMeasure(); }, 1500);
   }
 }
 
@@ -168,6 +168,80 @@ let deckProbe: DeckProbe | null = null;
 /** Let the playback store contribute what it knows about the decks. */
 export function registerDeckProbe(fn: DeckProbe): void {
   deckProbe = fn;
+}
+
+/** Ask the worklet for its counters. Null if there is no node to ask. */
+async function workletStats(): Promise<Record<string, number> | null> {
+  if (!node) return null;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 500);
+    const once = (e: MessageEvent) => {
+      if (e.data?.type !== 'stats') return;
+      clearTimeout(timer);
+      node?.port.removeEventListener('message', once);
+      resolve(e.data);
+    };
+    node!.port.addEventListener('message', once);
+    node!.port.start();
+    node!.port.postMessage({ type: 'stats' });
+  });
+}
+
+/**
+ * Watch the audio path for a few seconds and report RATES rather than state.
+ * State has said "all correct" twice while the tempo moved anyway, so this
+ * measures the three clocks that could disagree:
+ *
+ *   - the media element's own currentTime, against the wall clock
+ *   - the worklet's output frames, against the context rate
+ *   - the worklet's input consumption, against the same
+ *
+ * Whichever one reads ~0.919 instead of ~1.0 is the culprit, and they are
+ * mutually exclusive, so this narrows it to one line.
+ */
+export async function pitchMeasure(seconds = 4): Promise<void> {
+  const el = deckProbe ? (deckProbe().audibleElement as HTMLMediaElement | null) : null;
+  const a = await workletStats();
+  const t0 = performance.now();
+  const m0 = el?.currentTime ?? NaN;
+  const c0 = ctx?.currentTime ?? NaN;
+
+  await new Promise((r) => setTimeout(r, seconds * 1000));
+
+  const b = await workletStats();
+  const wall = (performance.now() - t0) / 1000;
+  const m1 = el?.currentTime ?? NaN;
+  const c1 = ctx?.currentTime ?? NaN;
+  const sr = ctx?.sampleRate ?? 48000;
+
+  const mediaRate = (m1 - m0) / wall;
+  const ctxRate = (c1 - c0) / wall;
+  const outRate = a && b ? (b.framesOut - a.framesOut) / wall / sr : NaN;
+  const inRate = a && b ? (b.inWrite - a.inWrite) / wall / sr : NaN;
+  const starveRate = a && b ? (b.starves - a.starves) / wall : NaN;
+
+  const f = (x: number) => (Number.isFinite(x) ? x.toFixed(4) : 'n/a');
+  console.log('[pitchShift] ── measured over ' + wall.toFixed(2) + ' s ──');
+  console.log('  media element advances     ' + f(mediaRate) + ' s/s   (1.0 = deck at normal speed)');
+  console.log('  audio context advances     ' + f(ctxRate) + ' s/s');
+  console.log('  worklet output             ' + f(outRate) + ' x realtime');
+  console.log('  worklet input consumed     ' + f(inRate) + ' x realtime');
+  console.log('  starved frames             ' + f(starveRate) + ' /s   (0 = healthy, >0 = producing too slowly)');
+  console.log('  ratio ' + ratio + '  active ' + String(b?.active) + '  ctx ' + sr + ' Hz');
+
+  if (Number.isFinite(mediaRate) && mediaRate < 0.97 && mediaRate > 0.85) {
+    console.warn('  VERDICT: the media element itself is running slow — the deck, not the shifter.');
+  } else if (Number.isFinite(starveRate) && starveRate > sr * 0.02) {
+    console.warn('  VERDICT: the shifter is starving — it cannot produce at realtime.');
+  } else if (Number.isFinite(outRate) && outRate < 0.97) {
+    console.warn('  VERDICT: the shifter is emitting fewer frames than realtime.');
+  } else {
+    console.warn('  VERDICT: every clock reads normal speed. Nothing here is changing tempo.');
+  }
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__hotMeasure = pitchMeasure;
 }
 
 export async function pitchDiagnostics(): Promise<Record<string, unknown>> {
