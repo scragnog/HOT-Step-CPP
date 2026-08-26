@@ -159,6 +159,17 @@ struct MM3PluginRun {
     // and ONLY on this: false means the original code runs untouched.
     bool active = false;
 
+    // Model context handed to every Lua plugin call so a plugin can branch on
+    // the real sample rate / latent geometry instead of assuming ACE's. The
+    // defaults here are MM3's fixed ones; mm3_plugins_set_geometry() fills in
+    // the two that are read off the loaded model.
+    LuaModelContext lua_ctx = [] {
+        LuaModelContext c;
+        c.native_sr = 44100;   // MM3 renders at 44.1 kHz, not ACE's 48 kHz
+        c.model_id  = "mm3";
+        return c;
+    }();
+
     // Extra DiT forwards charged by multi-eval solvers and post_step(), counted
     // PER WINDOW (reset by begin_window) and folded into MM3FlowStats::forwards
     // so the log stays honest about NFE instead of reporting a flat 2/step.
@@ -333,10 +344,24 @@ static MM3PluginRun mm3_plugins_resolve(const MM3PluginSel & sel) {
 // the value fed to the DiT and to the overlap blend is sigma itself.
 //
 // The caller has already sized both vectors; this only fills them.
+// Fill in the parts of the Lua model context that are only known once the
+// model is loaded: the flow DiT's channel count, and the flow LATENT rate.
+//
+// The latent rate is deliberately not the AR frame rate (25). The conditioning
+// resampler turns F AR frames into mm3_cond_latent_length(F) latents — 200 ->
+// 689, so ~86/s — and it is those latents the plugins actually step over.
+// Reporting 25 here would hand plugins a number three and a half times off.
+static void mm3_plugins_set_geometry(MM3PluginRun & run, int64_t latent_channels, int latent_fps) {
+    run.lua_ctx.latent_channels = (int) latent_channels;
+    if (latent_fps > 0) {
+        run.lua_ctx.latent_fps = latent_fps;
+    }
+}
+
 static void mm3_plugins_schedule(MM3PluginRun & run, int steps, std::vector<float> * sigmas,
                                  std::vector<float> * timesteps) {
     std::vector<float> t_ace((size_t) steps, 0.0f);
-    lua_call_scheduler(*run.scheduler, t_ace.data(), steps, run.sel.shift, run.sel.params);
+    lua_call_scheduler(*run.scheduler, t_ace.data(), steps, run.sel.shift, run.sel.params, run.lua_ctx);
 
     sigmas->assign((size_t) steps + 1, 0.0f);
     timesteps->assign((size_t) steps, 0.0f);
@@ -392,7 +417,7 @@ static void mm3_plugins_guide(MM3PluginRun & run, const float * pred_c, const fl
                         run.sel.apg_norm_threshold, run.apg_ws);
         } else {
             lua_call_guidance(*run.guidance, run.tm_c.data(), run.tm_u.data(), cfg_scale, run.mbuf, run.tm_v.data(),
-                              (int) C, (int) L, ctx, run.sel.apg_norm_threshold, run.sel.params);
+                              (int) C, (int) L, ctx, run.sel.apg_norm_threshold, run.sel.params, run.lua_ctx);
         }
         mm3_plug_from_ace_view(run.tm_v.data(), out_v, C, L, /*negate=*/true);
     } else {
@@ -437,7 +462,7 @@ static void mm3_plugins_solver_step(MM3PluginRun & run, float * xt, int64_t C, i
 
     run.solver_state.step_index = step_idx;
     lua_call_solver_step(*run.solver, run.tm_x.data(), vt_readonly, t_curr, t_next, (int) N, run.solver_state,
-                         model_fn, run.tm_v.data(), run.sel.params);
+                         model_fn, run.tm_v.data(), run.sel.params, run.lua_ctx);
 
     mm3_plug_from_ace_view(run.tm_x.data(), xt, C, L, /*negate=*/false);
 }
@@ -462,7 +487,7 @@ static void mm3_plugins_post_step(MM3PluginRun & run, float * xt, int64_t C, int
     ctx.t_curr      = t_next;
 
     lua_call_post_step(*run.guidance, run.tm_x.data(), t_next, (int) (C * L), eval_cond, eval_uncond, run.tm_c.data(),
-                       run.tm_u.data(), ctx, run.sel.params);
+                       run.tm_u.data(), ctx, run.sel.params, run.lua_ctx);
 
     mm3_plug_from_ace_view(run.tm_x.data(), xt, C, L, /*negate=*/false);
 }

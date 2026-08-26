@@ -435,6 +435,35 @@ static void lua_inject_params(lua_State * L,
     lua_setglobal(L, "params");
 }
 
+// -- Model context injection ------------------------------------------------
+// Injects a 'model_context' global table before every plugin call so Lua
+// plugins can adapt to the active model's native sample rate and latent
+// geometry instead of hardcoding ACE-Step's. The caller constructs the values:
+// hot-step-sampler.h leaves the defaults for ACE, mm3-plugins.h passes MM3's,
+// sa3-refine.h passes SA3's.
+//
+// Lua-side usage:
+//   local sr = (model_context and model_context.native_sr) or 48000
+//
+// The `or 48000` fallback keeps every existing plugin working unchanged on
+// ACE. Only plugins that want to be model-aware need to read it.
+
+struct LuaModelContext {
+    int          native_sr       = 48000;  // audio sample rate (48000 ACE, 44100 MM3/SA3)
+    int          latent_fps      = 25;     // latent frames per second
+    int          latent_channels = 64;     // Oc (64 ACE, 128 MM3, 256 SA3)
+    const char * model_id        = "ace";  // "ace", "mm3", "sa3"
+};
+
+static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx) {
+    lua_newtable(L);
+    lua_pushinteger(L, ctx.native_sr);       lua_setfield(L, -2, "native_sr");
+    lua_pushinteger(L, ctx.latent_fps);      lua_setfield(L, -2, "latent_fps");
+    lua_pushinteger(L, ctx.latent_channels); lua_setfield(L, -2, "latent_channels");
+    lua_pushstring(L, ctx.model_id);         lua_setfield(L, -2, "model_id");
+    lua_setglobal(L, "model_context");
+}
+
 // Call a Lua solver's step() function
 static void lua_call_solver_step(LuaPlugin & plugin,
                                  float * xt, const float * vt,
@@ -442,11 +471,13 @@ static void lua_call_solver_step(LuaPlugin & plugin,
                                  SolverState & state,
                                  SolverModelFn model_fn,
                                  float * vt_buf,
-                                 const std::unordered_map<std::string, std::string> & params) {
+                                 const std::unordered_map<std::string, std::string> & params,
+                                 const LuaModelContext & model_ctx = LuaModelContext{}) {
     lua_State * L = plugin.L;
     if (!L) return;
 
     lua_inject_params(L, params, plugin.name);
+    lua_inject_model_context(L, model_ctx);
 
     // Set state globals
     lua_pushinteger(L, state.step_index);
@@ -539,12 +570,14 @@ static void lua_call_solver_loop(
     int          Oc,
     LoopModelFn  model_fn,
     LoopOnStepFn on_step_fn,
-    const std::unordered_map<std::string, std::string> & params)
+    const std::unordered_map<std::string, std::string> & params,
+    const LuaModelContext & model_ctx = LuaModelContext{})
 {
     lua_State * L = plugin.L;
     if (!L) return;
 
     lua_inject_params(L, params, plugin.name);
+    lua_inject_model_context(L, model_ctx);
 
     // Set globals
     lua_pushinteger(L, num_steps);  lua_setglobal(L, "num_steps");
@@ -607,11 +640,13 @@ static void lua_call_solver_loop(
 // Call a Lua scheduler's schedule() function
 static void lua_call_scheduler(LuaPlugin & plugin,
                                float * output, int num_steps, float shift,
-                               const std::unordered_map<std::string, std::string> & params) {
+                               const std::unordered_map<std::string, std::string> & params,
+                               const LuaModelContext & model_ctx = LuaModelContext{}) {
     lua_State * L = plugin.L;
     if (!L) return;
 
     lua_inject_params(L, params, plugin.name);
+    lua_inject_model_context(L, model_ctx);
 
     lua_getglobal(L, "schedule");
     if (!lua_isfunction(L, -1)) {
@@ -676,11 +711,13 @@ static void lua_call_guidance(LuaPlugin & plugin,
                               float guidance_scale, APGMomentumBuffer & mbuf,
                               float * result, int Oc, int T,
                               const GuidanceCtx & ctx, float norm_threshold,
-                              const std::unordered_map<std::string, std::string> & params) {
+                              const std::unordered_map<std::string, std::string> & params,
+                              const LuaModelContext & model_ctx = LuaModelContext{}) {
     lua_State * L = plugin.L;
     if (!L) return;
 
     lua_inject_params(L, params, plugin.name);
+    lua_inject_model_context(L, model_ctx);
 
     int n = Oc * T;
 
@@ -739,11 +776,13 @@ static void lua_call_post_step(LuaPlugin & plugin,
                                PostStepModelFn eval_uncond_fn,
                                float * vt_cond_buf, float * vt_uncond_buf,
                                const GuidanceCtx & ctx,
-                               const std::unordered_map<std::string, std::string> & params) {
+                               const std::unordered_map<std::string, std::string> & params,
+                               const LuaModelContext & model_ctx = LuaModelContext{}) {
     lua_State * L = plugin.L;
     if (!L) return;
 
     lua_inject_params(L, params, plugin.name);
+    lua_inject_model_context(L, model_ctx);
 
     // Set context globals (same as guide())
     lua_pushinteger(L, ctx.step_idx);    lua_setglobal(L, "step_idx");
@@ -826,12 +865,14 @@ static int lua_call_postprocess(
     float *       audio_out,   // output: [2 * T_audio] interleaved by channel
     int           max_T_audio,
     PostprocessVaeDecodeFn vae_decode_fn,
-    const std::unordered_map<std::string, std::string> & params)
+    const std::unordered_map<std::string, std::string> & params,
+    const LuaModelContext & model_ctx = LuaModelContext{})
 {
     lua_State * L = plugin.L;
     if (!L) return -1;
 
     lua_inject_params(L, params, plugin.name);
+    lua_inject_model_context(L, model_ctx);
 
     // Push process() function
     lua_getglobal(L, "process");

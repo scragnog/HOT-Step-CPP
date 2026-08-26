@@ -347,6 +347,15 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     const int   T     = L;            // ACE-view time frames
     const int   n_lat = Oc * T;
 
+    // Model context for the Lua plugins: SA3 is 44.1 kHz with a 256-channel
+    // latent at SA3_SR/SA3_DS frames per second, none of which match ACE's
+    // defaults. Plugins that don't read model_context are unaffected.
+    LuaModelContext sa3_lua_ctx;
+    sa3_lua_ctx.native_sr       = SA3_SR;
+    sa3_lua_ctx.latent_fps      = SA3_SR / SA3_DS;
+    sa3_lua_ctx.latent_channels = Oc;
+    sa3_lua_ctx.model_id        = "sa3";
+
     LuaPlugin * solver_plugin    = nullptr;
     LuaPlugin * guidance_plugin  = nullptr;
     bool        use_lua_solver    = false;
@@ -475,7 +484,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         } else {
             lua_call_guidance(*guidance_plugin, tm_c.data(), tm_c.data(), sp->guidance_scale,
                               apg_mbuf, tm_v.data(), Oc, T, g_ctx, sp->apg_norm_threshold,
-                              sp->plugin_params);
+                              sp->plugin_params, sa3_lua_ctx);
         }
         sa3_from_ace_view(tm_v.data(), v.data(), Oc, T);
     };
@@ -508,7 +517,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
 
         lua_call_solver_loop(*solver_plugin, x.data(), v.data(), sigmas.data(), steps,
                              n_lat, /*N=*/1, T, Oc, loop_model_fn, loop_on_step,
-                             sp->plugin_params);
+                             sp->plugin_params, sa3_lua_ctx);
     } else {
         SolverState solver_state;
         if (use_lua_solver) {
@@ -543,7 +552,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                 solver_state.step_index = i;
                 lua_call_solver_step(*solver_plugin, x.data(), vt_readonly, t_curr, t_next,
                                      n_lat, solver_state, sa3_model_fn, v.data(),
-                                     sp->plugin_params);
+                                     sp->plugin_params, sa3_lua_ctx);
             } else if (pingpong) {
                 // denoised = x - t*v; x = (1-t_next)*denoised + t_next*randn
                 for (size_t k = 0; k < x.size(); k++) {

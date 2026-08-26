@@ -261,6 +261,18 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
 
     const int64_t C = (int64_t) m.synth_cfg.dit.in_channels;
     const int64_t N = C * L;
+
+    // Hand the Lua plugins MM3's real geometry. The latent rate is the flow
+    // latent rate, derived the same way mm3_cond_latent_length() derives L —
+    // one second of AR frames run through the conditioning resampler.
+    if (plugins) {
+        const MM3CondConfig & lc  = m.synth_cfg.cond;
+        int                   fps = 0;
+        if (lc.input_sampling_rate && lc.output_hop_length && m.lm_cfg.frame_rate) {
+            fps = (int) mm3_cond_latent_length(lc, (int64_t) m.lm_cfg.frame_rate);
+        }
+        mm3_plugins_set_geometry(*plugins, C, fps);
+    }
     out_latents.assign((size_t) N, 0.0f);
     memcpy(out_latents.data(), noise, (size_t) N * sizeof(float));
 
