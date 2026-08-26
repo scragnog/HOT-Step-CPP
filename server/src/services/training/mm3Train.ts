@@ -679,9 +679,20 @@ export const MM3_LM_DEFAULTS = {
   /** Frames of REAL, no-grad history placed in front of every crop
    *  (engine train/lm-kvprefix.h). OFF at 0.
    *
-   *  DEFAULT 2250 (90 s) as of 2026-08-26, at Rob's request, so it is what the
-   *  form opens on and what gets tested. NOTHING TRAINED WITH IT HAS BEEN HEARD
-   *  YET - this is a default chosen to be exercised, not one validated by ear.
+   *  DEFAULT 4096 (164 s) as of 2026-08-26. Chosen off the measured corpus (202
+   *  tracks, 14 datasets, median 203 s): it is the point where the coverage
+   *  curve flattens. The share of supervised steps that see as much history as
+   *  they will at render runs 48.9% at 750, 73.5% at 2250, 87.7% at 4096, then
+   *  94.4% at 5000 for 13% more compute and 98.0% at 6000 for 6% more again --
+   *  quadratic spend chasing the tail of a length distribution whose top end is
+   *  one 438 s track in 202.
+   *
+   *  This is a CEILING, not a fixed cost: a crop near the song's start has
+   *  little history to load. Mean prefix actually used at 4096 is ~1450 frames.
+   *
+   *  NOTHING TRAINED WITH IT HAS BEEN HEARD YET - the number optimises
+   *  train/render context match, which is the mechanism believed to be broken.
+   *  It is not a measured coherence optimum.
    *
    *  What it is for: without it a crop is presented at its true position in
    *  the track with an EMPTY context, so the middle third of the planner — the
@@ -694,7 +705,7 @@ export const MM3_LM_DEFAULTS = {
    *  +856 MB and about +60% step time for 750 frames. Matching prefixFrames to
    *  maxFrames doubles the history the model sees for a fraction of what
    *  doubling the crop would cost. */
-  prefixFrames: 2250,
+  prefixFrames: 4096,
   /** Prefill positions per graph. Trades host graph-build overhead against the
    *  transient attention scores of one chunk; 256 is a middle setting and has
    *  no effect on the result, only on speed and peak. */

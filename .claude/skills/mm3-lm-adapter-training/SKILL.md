@@ -184,6 +184,24 @@ cost **0.28125 MB per column** across MM3's 36 layers. Measured at crop 750,
 rank 64, AdamW: **+856 MB and about +60% step time for 750 frames (30 s) of
 history**.
 
+**How much history.** Measured over the corpus (202 tracks, 14 datasets, median
+203 s), as the share of supervised steps whose crop sees as much history as it
+will at render:
+
+| prefix | | full-context steps | mean prefix used | prefill cost |
+|---|---|---|---|---|
+| 750 | 30 s | 48.9% | 505 fr | 1.0x |
+| 2250 | 90 s | 73.5% | 1088 fr | 2.8x |
+| **4096** | **164 s** | **87.7%** | 1453 fr | 4.8x |
+| 5000 | 200 s | 94.4% | 1532 fr | 5.4x |
+| 6000 | 240 s | 98.0% | 1566 fr | 5.7x |
+
+**4096 is the default**: past it the curve flattens and you are spending
+quadratically to chase the tail. The flag is a CEILING, not a fixed cost -- a
+crop near the song's start has little history to load, which is why the mean at
+4096 is only ~1450 frames. VRAM is linear and never the binding constraint (1.7
+GB at 4096).
+
 Two things it changes that are worth knowing:
 
 * **The window takes one extra input frame.** With history present, the row that
@@ -195,6 +213,31 @@ Two things it changes that are worth knowing:
   mathematically identical to one long crop covering both, so the supervised CE
   must not care which way it was produced. It found two real bugs before it
   passed. Run it before trusting a prefix run.
+
+### Do NOT set `--crop-start-frac` to 0 once a prefix is on
+
+Tempting, because the start bucket's ORIGINAL justification was history:
+anchoring at frame 0 was the only way a supervised position got the song's real
+past in front of it, and the prefix now does that everywhere. But the bucket has
+a second job the prefix does not touch.
+
+**Frame 0 is the only place the caption-to-first-frame transition is trained.**
+With a prefix, `lead` makes the previous FRAME the predictor of every supervised
+position -- correct for mid-song, and exactly what generation does after t=0. At
+`c0 == 0` there is no previous frame, `lead` is 0, and the caption's last token
+is the predictor. That is the one case generation faces at t=0, and a uniform
+draw lands on it with probability 1/span, about 0.02%. Setting the share to 0
+reintroduces the 2026-08-24 bug (renders that begin mid-flow) by a different
+route.
+
+What the prefix DOES retire is the tiles. `--crop-start-tiles 3` put half the
+start share on aligned tiles to teach the intro-build-verse arc, because a crop
+at 1500 otherwise had no past. It has one now, so a tile crop is just an
+ordinary crop. **`--crop-start-frac 0.20 --crop-start-tiles 1`** is the
+reallocation: the opening keeps a share comparable to the ending's 0.15 (both
+are one event per song), and the freed 27% goes to random crops. Costs ~1.35x
+the prefill, because more steps land late where the prefix is longest.
+UNTESTED -- change it on its own run, not alongside a prefix change.
 
 ### `--crop-anchor song` did nothing until 2026-08-26
 
