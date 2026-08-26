@@ -1496,6 +1496,28 @@ static int run_transcribe(MidiModel * m, const std::string & audio_path,
 
 // ---------------------------------------------------------------------------
 
+/** Release everything load_model() allocated, in reverse order.
+ *
+ *  Order matters: the scheduler references both backends, and each buffer is
+ *  owned by the backend it was allocated on, so the backends go last. Every
+ *  ggml_* free here tolerates null, and the handles are cleared so a second
+ *  call is harmless. */
+static void free_model(MidiModel * m) {
+    if (!m) return;
+    if (m->sched)  { ggml_backend_sched_free(m->sched);   m->sched  = nullptr; }
+    if (m->kv_buf) { ggml_backend_buffer_free(m->kv_buf); m->kv_buf = nullptr; }
+    if (m->kv_ctx) { ggml_free(m->kv_ctx);                m->kv_ctx = nullptr; }
+    if (m->wbuf)   { ggml_backend_buffer_free(m->wbuf);   m->wbuf   = nullptr; }
+    if (m->wctx)   { ggml_free(m->wctx);                  m->wctx   = nullptr; }
+    // backend.h refcounts the shared backend pair, and already handles the
+    // case where the best backend IS the CPU one and both handles are the
+    // same pointer. Calling ggml_backend_free directly would bypass the
+    // refcount and double free.
+    backend_release(m->backend, m->cpu_backend);
+    m->backend     = nullptr;
+    m->cpu_backend = nullptr;
+}
+
 int main(int argc, char ** argv) {
     std::string model_dir, validate_dir, validate_decode_dir, validate_midi_dir;
     std::string audio_path, out_path = "out.mid";
@@ -1546,11 +1568,22 @@ int main(int argc, char ** argv) {
     MidiModel m;
     if (!load_model(&m, model_dir)) return 1;
 
-    if (!validate_dir.empty()) return run_validate(&m, validate_dir, tol);
-    if (!validate_decode_dir.empty()) return run_validate_decode(&m, validate_decode_dir);
-    if (!validate_midi_dir.empty()) return run_validate_midi(&m, validate_midi_dir);
-    if (!dump_dir.empty()) return run_dump_logits(&m, dump_dir, out_path);
-    if (!audio_path.empty()) return run_transcribe(&m, audio_path, out_path, jsonl, is_raw);
-    fprintf(stderr, "[ace-midi] no mode given\n");
-    return 2;
+    // Every mode used to `return run_*(...)` straight out of main, leaving the
+    // scheduler, backends and buffers alive. On Metal the device lives in a
+    // static vector whose destructor runs during __cxa_finalize_ranges and
+    // asserts GGML_ASSERT([rsets->data count] == 0) inside
+    // ggml_metal_rsets_free, which aborts with SIGABRT. Transcription had
+    // already finished and written its MIDI by then, so the abnormal exit made
+    // the Node side report FAILED and throw away a good result (issues #102,
+    // #86). Free before returning.
+    int rc = 2;
+    if      (!validate_dir.empty())        rc = run_validate(&m, validate_dir, tol);
+    else if (!validate_decode_dir.empty()) rc = run_validate_decode(&m, validate_decode_dir);
+    else if (!validate_midi_dir.empty())   rc = run_validate_midi(&m, validate_midi_dir);
+    else if (!dump_dir.empty())            rc = run_dump_logits(&m, dump_dir, out_path);
+    else if (!audio_path.empty())          rc = run_transcribe(&m, audio_path, out_path, jsonl, is_raw);
+    else fprintf(stderr, "[ace-midi] no mode given\n");
+
+    free_model(&m);
+    return rc;
 }
