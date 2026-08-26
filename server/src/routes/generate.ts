@@ -135,9 +135,15 @@ setInterval(() => {
 async function pollUntilDone(aceJobId: string, job: GenerationJob, signal: AbortSignal, timeoutMinutes?: number): Promise<void> {
   const POLL_INTERVAL = 500;          // ms — 500ms is tight enough for UI, avoids hammering
   // User-configurable wall-clock timeout, clamped to [5, 120] min. Default 45 min.
-  const clampedTimeout = Math.max(5, Math.min(120, timeoutMinutes || 45));
+  const clampedTimeout = Math.max(5, Math.min(360, timeoutMinutes || 45));
   const MAX_WALL_MS = clampedTimeout * 60 * 1000;
   const STALE_TIMEOUT_MS = 120_000;   // 2 min with no progress = stalled
+  // VAE decode reports once per tile and nothing in between, so its quiet
+  // period is a whole tile. At chunk=1024 that is minutes on slower hardware,
+  // and the flat 2 min window cancelled live decodes as wedged (#96). The
+  // engine then finished the track anyway and the user was left with a job
+  // marked red and no way to reach the audio.
+  const STALE_TIMEOUT_VAE_MS = 900_000;  // 15 min — one tile, generously
   const startedAt = Date.now();
   let lastProgressAt = Date.now();
   let lastStage = job.stage;
@@ -156,9 +162,11 @@ async function pollUntilDone(aceJobId: string, job: GenerationJob, signal: Abort
       lastProgress = job.progress;
     }
 
-    // Stall detection: no progress update for STALE_TIMEOUT_MS
+    // Stall detection: no progress update for the window this stage allows
     const stalledFor = Date.now() - lastProgressAt;
-    if (stalledFor > STALE_TIMEOUT_MS) {
+    const inVaeDecode = typeof lastStage === 'string' && lastStage.startsWith('Decoding audio (VAE)');
+    const staleLimit = inVaeDecode ? STALE_TIMEOUT_VAE_MS : STALE_TIMEOUT_MS;
+    if (stalledFor > staleLimit) {
       await aceClient.cancelJob(aceJobId).catch(() => {});
       throw new Error(
         `Generation stalled — no progress for ${Math.round(stalledFor / 1000)}s ` +
@@ -802,6 +810,12 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       let ditLastStepAt = 0;
       let vaeStartAt = 0;
       let vaeEndAt = 0;           // [VAE-Decode Batch0] Decode: marks actual decode end
+      // Tile counters for the decode stage label. The stall watchdog only sees
+      // progress when job.stage or job.progress CHANGES, and every VAE line
+      // used to set the identical string, so a decode that legitimately took
+      // longer than the 120 s stale window was cancelled as wedged (#96).
+      let vaeTileTotal = 0;
+      let vaeTileDone = 0;
       let adapterMergeAt = 0;
       let ditLoadAt = 0;          // [DiT-TRT] Load + refit complete
       let ditLoadCompleteAt = 0;  // when DiT model load finished
@@ -857,8 +871,22 @@ async function runGeneration(job: GenerationJob): Promise<void> {
             line.text.includes('[VAE] Graph:')) {
           // Only trigger on actual decode start, not VAE model loading
           // [VAE] alone fires during model load (e.g. "[VAE] Loaded: 5 blocks")
-          if (!vaeStartAt) vaeStartAt = now;
-          job.stage = `Decoding audio (VAE)${trackLabel}...`;
+          if (!vaeStartAt) { vaeStartAt = now; vaeTileDone = 0; vaeTileTotal = 0; }
+
+          // "[VAE] Tiled decode: 5 tiles (chunk=1024, ...)" announces the plan.
+          const tilePlan = line.text.match(/Tiled decode:\s*(\d+)\s+tiles/);
+          if (tilePlan) vaeTileTotal = parseInt(tilePlan[1], 10);
+          // "[VAE] Graph: 539 nodes, T_latent=960" fires once per tile.
+          if (line.text.includes('[VAE] Graph:')) vaeTileDone++;
+
+          // The label MUST differ between tiles. Setting the same string every
+          // time is what made a live decode look wedged to the watchdog (#96):
+          // an 80-step cover on Apple Silicon spends over two minutes in here
+          // and was cancelled at 120 s, after which the engine finished the
+          // track anyway and the user could not reach it.
+          job.stage = vaeTileTotal > 0
+            ? `Decoding audio (VAE)${trackLabel}: tile ${Math.min(vaeTileDone, vaeTileTotal)}/${vaeTileTotal}...`
+            : `Decoding audio (VAE)${trackLabel}...`;
           job.progress = Math.round(trackProgressBase + progressPerTrack * 0.9);
         } else if (line.text.includes('[VAE-Decode Batch') && line.text.includes('Decode:')) {
           // End of actual VAE decode (e.g. "[VAE-Decode Batch0] Decode: 442.0 ms (ORT)")
