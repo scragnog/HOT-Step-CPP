@@ -14,6 +14,7 @@ import { promisify } from 'util';
 import multer from 'multer';
 import { config, getFFmpegPath } from '../config.js';
 import { getUserId } from './auth.js';
+import { precomputePeaks } from '../services/audio/peaks.js';
 import { getDb } from '../db/database.js';
 
 const execFileAsync = promisify(execFile);
@@ -309,6 +310,10 @@ router.post('/run', async (req, res) => {
     // Update DB with mastered URL
     getDb().prepare('UPDATE songs SET mastered_audio_url = ? WHERE id = ?')
       .run(masteredUrl, songId);
+
+    // Build the waveform for the new file now, so switching to the mastered
+    // variant in the player does not wait on it.
+    precomputePeaks(masteredPath);
 
     console.log(`[Mastering] Song ${songId} mastered → ${masteredUrl}`);
     res.json({

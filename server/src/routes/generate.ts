@@ -16,6 +16,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { aceClient, type AceRequest } from '../services/aceClient.js';
 import { getDb } from '../db/database.js';
 import { config } from '../config.js';
+import { precomputePeaks } from '../services/audio/peaks.js';
 import { getUserId } from './auth.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
 import { engineReady, engineBootStatus } from '../engineState.js';
@@ -1384,6 +1385,12 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         const measured = wavDurationSec(wavPath);
         if (measured > 0) trackDuration = Math.round(measured);
       }
+
+      // Post-processing is done and this file will not change again, so build
+      // its waveform now. The player reads peaks instead of downloading and
+      // decoding the audio, and doing it here means the first listen never
+      // waits for it.
+      precomputePeaks(path.join(config.data.audioDir, path.basename(audioUrl)));
 
       // Per-track generation_params. job.params.seed/lmSeed only reflect the
       // job-level (first-track) value — when randomSeed varies the DiT seed
