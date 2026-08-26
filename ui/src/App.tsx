@@ -19,6 +19,7 @@ import { SongList } from './components/library/SongList';
 import { StreamWaveform } from './components/player/StreamWaveform';
 import { mm3StreamEnsureTakes, useMm3StreamAudio } from './stores/mm3StreamStore';
 import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
+import { RestoredQueueBanner } from './components/shared/RestoredQueueBanner';
 import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
 import { Player } from './components/player/Player';
@@ -1235,6 +1236,11 @@ const AppContent: React.FC = () => {
     <div className="flex flex-col h-screen bg-white dark:bg-suno text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-all duration-300">
       {/* Global Parameter Bar — full width, above everything */}
       <GlobalParamBar />
+
+      {/* Asks before running a generation queue restored from a previous
+          session, rather than starting it unattended (issue #100). Renders
+          nothing when there is nothing waiting. */}
+      <RestoredQueueBanner />
 
       <div className="flex-1 flex overflow-hidden">
         <DiscoPulseWrapper hue={DISCO.sidebar}>

@@ -92,6 +92,10 @@ export interface AudioQueueItem {
 export interface AudioGenQueueState {
   items: AudioQueueItem[];
   completionCounter: number;
+  /** Number of never-submitted items found in storage on this page load and
+   *  held back rather than started. Zero once the user answers, and zero on any
+   *  load where there was nothing waiting. See resumeQueue(). */
+  awaitingResume: number;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -310,6 +314,9 @@ async function _restoreFromIDB(): Promise<void> {
       _state = {
         items: _sanitizeItems(data.items),
         completionCounter: data.completionCounter || 0,
+        // Never restored from storage. resumeQueue() decides it fresh on every
+        // page load, from what it actually finds waiting.
+        awaitingResume: 0,
       };
       // Notify UI of restored state
       _state = { ..._state, items: [..._state.items] };
@@ -324,7 +331,7 @@ async function _restoreFromIDB(): Promise<void> {
 // NOTE: _state and _listeners MUST be declared before _idbReady because
 // _restoreFromIDB() writes to _state and notifies _listeners.
 
-let _state: AudioGenQueueState = { items: [], completionCounter: 0 };
+let _state: AudioGenQueueState = { items: [], completionCounter: 0, awaitingResume: 0 };
 const _listeners = new Set<() => void>();
 
 /** Ready gate — resolves when IDB restore is complete.
@@ -349,6 +356,16 @@ function _genId(): string { return `aq-${Date.now()}-${_nextId++}`; }
 // ── Resume tracking ──────────────────────────────────────────────────────────
 
 let _resumeCalled = false;
+
+/** Ids of restored items the runner must not touch until the user says so.
+ *
+ *  Kept out of AudioQueueStatus deliberately: a sixth status would have to be
+ *  handled by every render site that switches on it, and a missed one shows a
+ *  blank row. These items stay 'pending' and simply are not selected. */
+const _heldIds = new Set<string>();
+
+/** True while restored items are waiting on the user's answer. */
+export function isHeldQueueItem(id: string): boolean { return _heldIds.has(id); }
 
 /** Last auth token the queue was handed. Lets actions that aren't wired to the
  *  auth context — the Retry button — restart the runner. */
@@ -389,6 +406,7 @@ export async function enqueueAudioGen(
 
 export function removeFromAudioQueue(id: string): void {
   _state.items = _state.items.filter(i => i.id !== id);
+  if (_heldIds.delete(id)) _state.awaitingResume = _heldIds.size;
   _emit(true);
 }
 
@@ -795,15 +813,63 @@ export async function resumeQueue(token: string): Promise<void> {
 
   _pruneDeletedSongs(token);
 
-  const hasPending = _state.items.some(i => i.status === 'pending');
-  if (!hasPending) return;
+  // Items that were mid-flight when the page went away are RECONNECTED, not
+  // resubmitted: the server is already running that job and reattaching to it
+  // costs nothing and loses nothing. Those are handled by the runner's
+  // _tryReconnect path and need no permission.
+  //
+  // Items that were never submitted are a different question. The queue is
+  // persisted, so it survives a browser restart, an OS reboot, or a tab the
+  // browser restores by itself days later. Auto-starting them meant a full
+  // generation could begin with nobody at the machine and nothing clicked
+  // (issue #100: a reporter's tab came back after an OS update and started a
+  // render on stale Lyric Studio state). Hold them and ask instead.
+  // _sanitizeItems() has already turned anything that was in flight back into
+  // 'pending', so status cannot tell the two apart. The jobId can: an item that
+  // reached the server has one, an item that never left the browser does not.
+  const pending = _state.items.filter(i => i.status === 'pending');
+  const reconnectable = pending.filter(i => i.jobId);
+  const neverSubmitted = pending.filter(i => !i.jobId);
+
+  if (neverSubmitted.length > 0) {
+    for (const i of neverSubmitted) _heldIds.add(i.id);
+    _state.awaitingResume = neverSubmitted.length;
+    console.log(`[AudioQueue] ${neverSubmitted.length} unstarted item(s) restored from a previous session — waiting for the user`);
+    _emit(true);
+  }
+
+  if (reconnectable.length === 0) return;
 
   // Start the runner unconditionally. If the engine is still booting it answers
   // 503 and the runner parks the item and waits for it — deliberately NOT gated
   // on a health check here, because a slow or hanging /api/health would then be
   // able to stop the queue from ever starting.
-  console.log(`[AudioQueue] Resuming — ${_state.items.filter(i => i.status === 'pending').length} pending`);
+  console.log(`[AudioQueue] Resuming — ${reconnectable.length} to reconnect, ${neverSubmitted.length} held`);
   _processQueue(token);
+}
+
+/** User answered the restored-queue prompt with Resume. Release the held items
+ *  and start the runner. */
+export function resumeRestoredQueue(token?: string): void {
+  if (_state.awaitingResume === 0) return;
+  console.log(`[AudioQueue] Resuming ${_heldIds.size} restored item(s) on user request`);
+  _heldIds.clear();
+  _state.awaitingResume = 0;
+  const t = token ?? _lastToken;
+  _emit(true);
+  if (t) { _lastToken = t; _processQueue(t); }
+}
+
+/** User answered the restored-queue prompt with Discard. Drop only the items
+ *  that were held. Anything reconnected or added since is untouched. */
+export function discardRestoredQueue(): void {
+  if (_state.awaitingResume === 0) return;
+  const before = _state.items.length;
+  _state.items = _state.items.filter(i => !_heldIds.has(i.id));
+  _heldIds.clear();
+  _state.awaitingResume = 0;
+  console.log(`[AudioQueue] Discarded ${before - _state.items.length} restored item(s)`);
+  _emit(true);
 }
 
 /**
@@ -902,7 +968,7 @@ async function _processQueue(token: string): Promise<void> {
 
   try {
     while (true) {
-      const pending = _state.items.filter(i => i.status === 'pending');
+      const pending = _state.items.filter(i => i.status === 'pending' && !_heldIds.has(i.id));
       if (pending.length === 0) break;
 
       // Artist batching: prefer items with same adapter as last completed
