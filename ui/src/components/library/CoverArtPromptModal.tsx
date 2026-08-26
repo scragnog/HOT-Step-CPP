@@ -102,6 +102,19 @@ export const CoverArtPromptModal: React.FC = () => {
       .then(async r => {
         if (!r.ok) {
           const d = await r.json().catch(() => ({}));
+          // 503 means the weights are absent, not that anything went wrong.
+          // "Cover art not installed" on its own sent people hunting through
+          // Settings and the Model Manager for a download that lives in the
+          // Post-Processing menu instead (issue #108), so say where it is and
+          // which files are missing.
+          if (r.status === 503) {
+            const missing: string[] = Array.isArray(d.missingFiles) ? d.missingFiles : [];
+            throw new Error(
+              'Cover art models are not downloaded yet. Open the Cover Art section '
+              + 'of the Post-Processing menu in the top bar and download a model there.'
+              + (missing.length ? ` Missing: ${missing.join(', ')}.` : '')
+            );
+          }
           throw new Error(d.error || 'Failed to start generation');
         }
         const { jobId } = await r.json();
