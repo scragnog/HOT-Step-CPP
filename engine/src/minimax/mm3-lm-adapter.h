@@ -411,6 +411,56 @@ static MM3LmAdapter * mm3_lm_adapter_load(const char * path, std::string * err) 
             mm3_lm_adapter_free(ad);
             return nullptr;
         }
+        // THE F16 STORE IS LOSSY AT THE TOP OF THE RANGE, AND SILENTLY SO.
+        //
+        // Every checkpoint the MM3 LM trainer writes is BF16, whose exponent
+        // reaches ~3.4e38. F16 stops at 65504. A factor above that converts to
+        // +inf, and an inf in a LoKr factor turns the whole delta into inf, then
+        // the residual add into NaN -- which is exactly the failure the AR loop
+        // has been reporting as "N non-finite candidate logits were clamped to
+        // -inf" (mm3-ar-loop.h) on training-preview renders. The generation then
+        // completes "successfully" and returns noise.
+        //
+        // A checkpoint containing values that large has diverged; there is no
+        // sensible rescue, so the load fails here with the tensor named rather
+        // than a stderr line nobody reads. Non-finite input is caught the same
+        // way: it means the trainer saved a broken step.
+        {
+            int64_t n_nonfinite = 0, n_overflow = 0;
+            float   worst = 0.0f;
+            for (int64_t i = 0; i < n; i++) {
+                const float v = f32[(size_t) i];
+                if (!std::isfinite(v)) {
+                    n_nonfinite++;
+                } else if (std::fabs(v) > 65504.0f) {
+                    n_overflow++;
+                    if (std::fabs(v) > worst) {
+                        worst = std::fabs(v);
+                    }
+                }
+            }
+            if (n_nonfinite || n_overflow) {
+                char buf[352];
+                if (n_nonfinite) {
+                    snprintf(buf, sizeof(buf),
+                             "adapter tensor '%s' holds %lld non-finite values - this checkpoint diverged during "
+                             "training and would generate noise",
+                             e.name.c_str(), (long long) n_nonfinite);
+                } else {
+                    snprintf(buf, sizeof(buf),
+                             "adapter tensor '%s' holds %lld values above the f16 limit (largest %.3g); they would "
+                             "become +inf on load and turn every generation into noise",
+                             e.name.c_str(), (long long) n_overflow, (double) worst);
+                }
+                st_close(&st);
+                if (err) {
+                    *err = buf;
+                }
+                mm3_lm_adapter_free(ad);
+                return nullptr;
+            }
+        }
+
         f16.resize((size_t) n);
         ggml_fp32_to_fp16_row(f32.data(), f16.data(), n);
         ggml_backend_tensor_set(t, f16.data(), 0, (size_t) n * sizeof(ggml_fp16_t));

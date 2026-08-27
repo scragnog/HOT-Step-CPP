@@ -28,6 +28,9 @@
 //                         latent-rate DiT conditioning out
 //   POST /mm3/lm-plan     the AR planning stage end to end: prompt (or token ids)
 //                         in -> RVQ codes + the [F, 8, 4096] conditioning block
+//   POST /mm3/imatrix     arm/disarm activation-importance collection over the
+//                         LM and write the GGUF that `quantize --imatrix` eats.
+//                         Calibration loop: start -> N x /mm3/lm-plan -> save.
 //   POST /mm3/tokenize-check  caption + lyrics in -> assembled-prompt token
 //                         count vs the 5,000 limit. Cold-capable, no VRAM.
 //   POST /mm3/synth-e2e   DEPRECATED BRING-UP: the WHOLE pipeline on an httplib
@@ -52,6 +55,7 @@
 #include "mm3-cond-graph.h"
 #include "mm3-depth-graph.h"
 #include "mm3-dit-graph.h"
+#include "mm3-imatrix.h"
 #include "mm3-lm-graph.h"
 #include "mm3-model.h"
 #include "mm3-pipeline.h"
@@ -1162,6 +1166,49 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
     // pass (mm3-ar-loop.h). Clamped inside mm3_ar_plan_takes to the row budget.
     opt.n_takes         = (int) mm3_json_i64(root, "takes", 1);
 
+    // ── LM adapter, runtime deltas only ──
+    //
+    // NO MERGE MODE HERE, deliberately. Merging bakes the delta into the
+    // resident weights and would leave the engine in a state the caller never
+    // asked for; a debug endpoint that silently mutates the loaded model is a
+    // trap. Runtime deltas are undone by simply not passing an adapter next
+    // time, which is what makes this usable for A/B-ing a checkpoint against
+    // the pristine base in one session.
+    //
+    // mm3_json_str / mm3_json_f64 are declared further down this file than this
+    // handler, so the reads below go through yyjson directly.
+    {
+        yyjson_val *      apv = root ? yyjson_obj_get(root, "lm_adapter") : nullptr;
+        const std::string ad_path =
+            (apv && yyjson_is_str(apv)) ? std::string(yyjson_get_str(apv), yyjson_get_len(apv)) : std::string();
+        if (!ad_path.empty()) {
+            if (!g_mm3_lm_adapter || g_mm3_lm_adapter->path != ad_path) {
+                mm3_lm_adapter_drop();
+                std::string aerr;
+                g_mm3_lm_adapter = mm3_lm_adapter_load(ad_path.c_str(), &aerr);
+                if (!g_mm3_lm_adapter) {
+                    mm3_json_error(res, 400, aerr.empty() ? "LM adapter load failed" : aerr);
+                    return;
+                }
+            }
+            opt.lm_adapter = g_mm3_lm_adapter;
+
+            const auto num = [&](const char * key, float dflt) -> float {
+                yyjson_val * v = root ? yyjson_obj_get(root, key) : nullptr;
+                return (v && yyjson_is_num(v)) ? (float) yyjson_get_num(v) : dflt;
+            };
+            opt.lm_adapter_scales.global = num("lm_adapter_scale", 1.0f);
+            opt.lm_adapter_scales.attn   = num("lm_adapter_scale_attn", 1.0f);
+            opt.lm_adapter_scales.mlp    = num("lm_adapter_scale_mlp", 1.0f);
+            opt.lm_adapter_scales.early  = num("lm_adapter_scale_early", 1.0f);
+            opt.lm_adapter_scales.mid    = num("lm_adapter_scale_mid", 1.0f);
+            opt.lm_adapter_scales.late   = num("lm_adapter_scale_late", 1.0f);
+        } else if (yyjson_obj_get(root, "lm_adapter_clear")) {
+            // Explicit "run the pristine base" after an adapter has been cached.
+            mm3_lm_adapter_drop();
+        }
+    }
+
     std::vector<int32_t> f_sem, f_ac;
     bool                 has_sem = false, has_ac = false;
     if (!mm3_json_int_array(root, "forced_semantic", &f_sem, &has_sem) ||
@@ -1199,6 +1246,19 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
         mm3_json_error(res, 500, err.empty() ? "AR planning failed" : err);
         return;
     }
+    // One lm-plan call is one imatrix "chunk". Counted here rather than inside
+    // the AR loop so a failed plan does not count toward the total.
+    if (g_mm3_imatrix.armed) {
+        g_mm3_imatrix.runs++;
+        yyjson_val *      pv    = root ? yyjson_obj_get(root, "prompt") : nullptr;
+        const std::string label = (pv && yyjson_is_str(pv)) ? std::string(yyjson_get_str(pv), yyjson_get_len(pv))
+                                                            : std::string();
+        if (g_mm3_imatrix.sources.size() < 256) {
+            g_mm3_imatrix.sources.push_back(label.empty() ? ("ids[" + std::to_string(ids_cond.size()) + "]")
+                                                          : label.substr(0, 200));
+        }
+    }
+
     // Take 0 carries the shared stage timings, so every existing header and the
     // binary body keep meaning exactly what they meant before takes existed.
     MM3ArResult & r = rs[0];
@@ -1882,6 +1942,175 @@ static void mm3_handle_select_model(const httplib::Request & req, httplib::Respo
     }
 }
 
+// POST /mm3/imatrix — activation-importance collection for quantization.
+//
+// See minimax/mm3-imatrix.h for what an imatrix is, why 2-3 bit quants need one,
+// and why IQ2_XXS/IQ2_XS refuse to run without it.
+//
+//   {"action":"start"}                  arm; clears anything already collected
+//   {"action":"start","keep":true}      arm and ADD to what is already there
+//   {"action":"stop"}                   disarm, keep the accumulator
+//   {"action":"status"}                 counts, no state change
+//   {"action":"reset"}                  disarm and throw the accumulator away
+//   {"action":"save","path":"out.gguf"} write it out (does NOT disarm)
+//
+// The calibration loop is: start -> N x POST /mm3/lm-plan -> save. lm-plan is
+// the right driver because it runs the LM and nothing else; a full /mm3/synth
+// would spend most of its time in the DiT, whose weights this does not collect.
+//
+// Two things this handler refuses to let you get wrong silently: collecting
+// through an already-quantized LM (the statistics would describe that
+// checkpoint's damage, not the model being quantized), and collecting with an
+// adapter merged in (the activations belong to a model the base GGUF is not).
+// Both are warnings in the response rather than hard errors, because a
+// deliberate "what does Q8 look like" run is a legitimate thing to want.
+static void mm3_handle_imatrix(const httplib::Request & req, httplib::Response & res) {
+    std::lock_guard<std::mutex> lock(g_mm3_mutex);
+
+    yyjson_doc * doc  = req.body.empty() ? nullptr : yyjson_read(req.body.data(), req.body.size(), 0);
+    yyjson_val * root = doc ? yyjson_doc_get_root(doc) : nullptr;
+    if (!req.body.empty() && (!root || !yyjson_is_obj(root))) {
+        if (doc) {
+            yyjson_doc_free(doc);
+        }
+        mm3_json_error(res, 400, "body must be a JSON object");
+        return;
+    }
+    struct DocGuard {
+        yyjson_doc * d;
+        ~DocGuard() {
+            if (d) {
+                yyjson_doc_free(d);
+            }
+        }
+    } guard{ doc };
+
+    std::string action = mm3_json_str(root, "action");
+    if (action.empty()) {
+        action = "status";
+    }
+
+    std::vector<std::string> warnings;
+    std::string              saved_path;
+
+    if (action == "start") {
+        if (!g_mm3.loaded || !g_mm3.lm_resident) {
+            mm3_json_error(res, 503, "the LM is not resident — POST /mm3/warm first");
+            return;
+        }
+        if (!mm3_json_bool(root, "keep", false)) {
+            mm3_imatrix_reset();
+        }
+
+        // Only names that came out of the LM GGUF are collectable, and only the
+        // 2-D ones can ever be a matmul weight. Deriving the set from tmap_lm
+        // rather than from a name pattern is what keeps LoRA factors and KV
+        // views out without a filter that can drift.
+        g_mm3_imatrix.allow.clear();
+        for (const auto & kv : g_mm3.tmap_lm) {
+            if (kv.second && ggml_n_dims(kv.second) >= 2) {
+                g_mm3_imatrix.allow.insert(kv.first);
+            }
+        }
+        if (g_mm3_imatrix.allow.empty()) {
+            mm3_json_error(res, 500, "no LM weight names to collect — tmap_lm is empty");
+            return;
+        }
+
+        if (g_mm3.lm.output && ggml_is_quantized(g_mm3.lm.output->type)) {
+            warnings.push_back(std::string("the resident LM is ") + ggml_type_name(g_mm3.lm.output->type) +
+                               " — collect on the f16 or bf16 LM, or the imatrix describes this "
+                               "checkpoint's quantization damage instead of the model");
+        }
+        if (!g_mm3.lm_merge_tag.empty()) {
+            warnings.push_back("an LM adapter is merged into the resident weights — the activations "
+                               "belong to the adapted model, not the base GGUF being quantized");
+        }
+        g_mm3_imatrix.armed = true;
+        fprintf(stderr, "[MM3-IMAT] Armed over %zu LM tensors (LM = %s). Expect the LM to run much slower.\n",
+                g_mm3_imatrix.allow.size(), g_mm3.lm_file.found ? g_mm3.lm_file.name.c_str() : "?");
+    } else if (action == "stop") {
+        g_mm3_imatrix.armed = false;
+    } else if (action == "reset") {
+        g_mm3_imatrix.armed = false;
+        mm3_imatrix_reset();
+    } else if (action == "save") {
+        saved_path = mm3_json_str(root, "path");
+        if (saved_path.empty()) {
+            mm3_json_error(res, 400, "save needs a \"path\"");
+            return;
+        }
+        std::string err;
+        if (!mm3_imatrix_save(saved_path, &err)) {
+            mm3_json_error(res, 500, err.empty() ? "imatrix save failed" : err);
+            return;
+        }
+        fprintf(stderr, "[MM3-IMAT] Wrote %s (%zu tensors, %lld rows, %lld runs)\n", saved_path.c_str(),
+                g_mm3_imatrix.ent.size(), (long long) mm3_imatrix_total_rows(), (long long) g_mm3_imatrix.runs);
+    } else if (action != "status") {
+        mm3_json_error(res, 400, "action must be start, stop, status, reset or save");
+        return;
+    }
+
+    // A collected-but-empty accumulator is the one failure that looks like
+    // success from the outside, so surface the tensor count and row total on
+    // every reply, not just on save.
+    // token_embd.weight is reached by get_rows, never by a matmul, so it is
+    // never collectable and never needs to be: it is pinned to a K-quant by
+    // quantize.cpp's embedding rule. 253 of 254 is therefore full coverage, and
+    // saying otherwise would train the reader to ignore this warning.
+    const size_t collectable = g_mm3_imatrix.allow.size() - (g_mm3.tmap_lm.count("token_embd.weight") ? 1 : 0);
+    if (g_mm3_imatrix.ent.size() && g_mm3_imatrix.ent.size() < collectable) {
+        char buf[176];
+        snprintf(buf, sizeof(buf), "only %zu of %zu matmul weights have been seen — run more calibration prompts",
+                 g_mm3_imatrix.ent.size(), collectable);
+        warnings.push_back(buf);
+    }
+    // The one that actually invalidates a run: a tensor can be "seen" and still
+    // have every row rejected as non-finite, which writes as all zeros.
+    const size_t usable = mm3_imatrix_usable();
+    if (g_mm3_imatrix.ent.size() && usable < g_mm3_imatrix.ent.size()) {
+        char buf[200];
+        snprintf(buf, sizeof(buf),
+                 "%zu of %zu seen tensors have NO finite rows and will be omitted — the LM forward is producing "
+                 "non-finite activations",
+                 g_mm3_imatrix.ent.size() - usable, g_mm3_imatrix.ent.size());
+        warnings.push_back(buf);
+    }
+
+    yyjson_mut_doc * o    = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val * orot = yyjson_mut_obj(o);
+    yyjson_mut_doc_set_root(o, orot);
+    yyjson_mut_obj_add_bool(o, orot, "armed", g_mm3_imatrix.armed);
+    yyjson_mut_obj_add_uint(o, orot, "runs", (uint64_t) g_mm3_imatrix.runs);
+    yyjson_mut_obj_add_uint(o, orot, "tensors", (uint64_t) g_mm3_imatrix.ent.size());
+    yyjson_mut_obj_add_uint(o, orot, "tensors_expected", (uint64_t) g_mm3_imatrix.allow.size());
+    yyjson_mut_obj_add_uint(o, orot, "rows", (uint64_t) mm3_imatrix_total_rows());
+    yyjson_mut_obj_add_uint(o, orot, "usable_tensors", (uint64_t) mm3_imatrix_usable());
+    yyjson_mut_obj_add_uint(o, orot, "bad_rows", (uint64_t) g_mm3_imatrix.bad_rows);
+    yyjson_mut_obj_add_uint(o, orot, "matmuls", (uint64_t) g_mm3_imatrix.nodes);
+    yyjson_mut_obj_add_uint(o, orot, "skipped_type", (uint64_t) g_mm3_imatrix.skipped_type);
+    yyjson_mut_obj_add_uint(o, orot, "skipped_stride", (uint64_t) g_mm3_imatrix.skipped_stride);
+    yyjson_mut_obj_add_uint(o, orot, "skipped_shape", (uint64_t) g_mm3_imatrix.skipped_shape);
+    yyjson_mut_obj_add_strcpy(o, orot, "lm", g_mm3.lm_file.found ? g_mm3.lm_file.name.c_str() : "");
+    if (!saved_path.empty()) {
+        yyjson_mut_obj_add_strcpy(o, orot, "path", saved_path.c_str());
+    }
+    if (!warnings.empty()) {
+        yyjson_mut_val * w = yyjson_mut_arr(o);
+        for (const auto & s : warnings) {
+            yyjson_mut_arr_add_strcpy(o, w, s.c_str());
+        }
+        yyjson_mut_obj_add_val(o, orot, "warnings", w);
+    }
+    char * json = yyjson_mut_write(o, 0, NULL);
+    yyjson_mut_doc_free(o);
+    res.set_content(json ? json : "{}", "application/json");
+    if (json) {
+        free(json);
+    }
+}
+
 static void mm3_register_routes(httplib::Server & svr, const char * models_dir) {
     mm3_discover(&g_mm3, models_dir);
 
@@ -1895,6 +2124,7 @@ static void mm3_register_routes(httplib::Server & svr, const char * models_dir) 
     svr.Post("/mm3/depth-frame", mm3_handle_depth_frame);
     svr.Post("/mm3/cond-encode", mm3_handle_cond_encode);
     svr.Post("/mm3/lm-plan", mm3_handle_lm_plan);
+    svr.Post("/mm3/imatrix", mm3_handle_imatrix);
     svr.Post("/mm3/tokenize-check", mm3_handle_tokenize_check);
     svr.Post("/mm3/synth-e2e", mm3_handle_synth_e2e);
     // POST /mm3/synth and GET /mm3/job are registered separately by

@@ -1050,9 +1050,44 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             out->prefill_ms, out->lm_ms, (long long) out->lm_steps,
             out->lm_steps ? out->lm_ms / (double) out->lm_steps : 0.0, out->depth_ms,
             out->n_iterations ? out->depth_ms / (double) out->n_iterations : 0.0, out->host_ms);
+    // ── Non-finite logits: warn, or refuse ──────────────────────────────────
+    //
+    // `fix()` clamps a NaN/+inf candidate to -inf so the draw stays well
+    // defined. That is the right local behaviour and it is why a run like this
+    // still finishes -- but finishing is not the same as being worth anything.
+    //
+    // The observed failure is not a scatter of bad values: it is a whole
+    // candidate row going non-finite on EVERY iteration, so the count comes out
+    // as an exact multiple of (SV + 1) per iteration. One dead row means the CFG
+    // blend has nothing to blend; two means the plan is pure noise. Either way
+    // the caller was being handed a "successful" generation built out of -inf,
+    // with a stderr line as the only clue.
+    //
+    // So: below one full row's worth per iteration, warn and continue -- that is
+    // a regime nothing has ever been observed in, and clamping may well be
+    // enough. At or above it, fail with the cause named. The overwhelmingly
+    // likely cause is an LM adapter whose factors overflowed the f16 store
+    // (mm3-lm-adapter.h now refuses those at load), so the message says so.
+    const int64_t candidates_per_row = SV + 1;
+    const int64_t row_equivalents    = out->n_iterations * (int64_t) K * (int64_t) P;
+    const int64_t budget             = candidates_per_row * row_equivalents;
     if (out->nonfinite_logits) {
-        fprintf(stderr, "[MM3-AR] WARNING: %lld non-finite candidate logits were clamped to -inf\n",
-                (long long) out->nonfinite_logits);
+        fprintf(stderr, "[MM3-AR] WARNING: %lld non-finite candidate logits were clamped to -inf (%.1f%% of %lld)\n",
+                (long long) out->nonfinite_logits, budget ? 100.0 * (double) out->nonfinite_logits / (double) budget : 0.0,
+                (long long) budget);
+    }
+    if (budget > 0 && out->nonfinite_logits * (int64_t) P >= budget) {
+        char buf[352];
+        snprintf(buf, sizeof(buf),
+                 "the LM produced non-finite logits for %lld of %lld candidates - at least one whole CFG row is dead "
+                 "on every step, so this plan is noise. If an LM adapter is loaded, that checkpoint has diverged; "
+                 "try a different one or the pristine base.",
+                 (long long) out->nonfinite_logits, (long long) budget);
+        fprintf(stderr, "[MM3-AR] FATAL: %s\n", buf);
+        if (err) {
+            *err = buf;
+        }
+        return false;
     }
     return true;
 }
