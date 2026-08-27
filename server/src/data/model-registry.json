@@ -3610,6 +3610,46 @@
           "repoPath": "LICENSE"
         }
       ]
+    },
+    {
+      "id": "mm3-lm-IQ2_XS-imat",
+      "filename": "mm3-lm-IQ2_XS-imat.gguf",
+      "role": "mm3",
+      "subdir": "mm3",
+      "displayName": "MM3 Language Model (IQ2_XS, imatrix)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "IQ2_XS-imat",
+      "sizeBytes": 2958236128,
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "description": "MiniMax-Music3 autoregressive language model, quantized to IQ2_XS (2.31 bits per weight) against an importance matrix — a little more headroom than IQ2_XXS. The IQ formats cannot be built without one at all, and it is what makes them listenable rather than a curiosity. Note they decode through a codebook lookup rather than a simple scale, so they are slower per token on CPU than a K-quant of the same size; pick them for a memory ceiling, not for speed.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "mm3-lm-IQ4_XS-imat",
+      "filename": "mm3-lm-IQ4_XS-imat.gguf",
+      "role": "mm3",
+      "subdir": "mm3",
+      "displayName": "MM3 Language Model (IQ4_XS, imatrix)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "IQ4_XS-imat",
+      "sizeBytes": 5042366944,
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "description": "MiniMax-Music3 autoregressive language model, quantized to IQ4_XS (4.25 bits per weight) against an importance matrix — Q4-class quality at slightly under Q4_K_S size. The IQ formats cannot be built without one at all, and it is what makes them listenable rather than a curiosity. Note they decode through a codebook lookup rather than a simple scale, so they are slower per token on CPU than a K-quant of the same size; pick them for a memory ceiling, not for speed.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
     }
   ]
 }
