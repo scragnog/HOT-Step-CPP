@@ -1252,7 +1252,7 @@
       "scale": "standard",
       "variant": "turbo",
       "quant": "MXFP4",
-      "sizeBytes": 1281885888,
+      "sizeBytes": 1281885952,
       "repo": "scragnog/Ace-Step-1.5-MXFP4-Quants",
       "description": "Turbo in MXFP4 — fastest possible generation with minimal VRAM.",
       "tags": [
@@ -1615,6 +1615,8 @@
       "variant": "DreamVAE",
       "quant": null,
       "sizeBytes": 206905696,
+      "repo": "daydreamlive/DreamVAE",
+      "repoPath": "onnx/model.onnx",
       "description": "DreamVAE in ONNX format — alternative decoder architecture, runs via ORT decode path.",
       "tags": []
     },
