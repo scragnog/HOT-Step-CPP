@@ -392,7 +392,7 @@ function optionsFromLog(dir: string, facts: LogFacts): ResolvedMm3TrainLmOptions
     stopMode: facts.targetLoss ? 'loss' : 'steps',
     targetLoss: n(facts.targetLoss?.target, 0),
     targetLossMetric: facts.targetLoss?.metric === 'eval' ? 'eval' : 'train',
-    targetLossWindow: n(facts.targetLoss?.window, D.targetLossWindow),
+    targetLossEpochs: n(facts.targetLoss?.epochs, D.targetLossEpochs),
   };
 }
 

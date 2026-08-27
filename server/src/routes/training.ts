@@ -2080,7 +2080,7 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       stopMode:    b.stopMode === 'loss' ? 'loss' : D.stopMode,
       targetLoss:  num('targetLoss', D.targetLoss, 0, 100),
       targetLossMetric: b.targetLossMetric === 'eval' ? 'eval' : 'train',
-      targetLossWindow: num('targetLossWindow', D.targetLossWindow, 1, 10000),
+      targetLossEpochs: num('targetLossEpochs', D.targetLossEpochs, 1, 10000),
       ...reg,
       preview:     previewOpts,
     });
@@ -2127,7 +2127,7 @@ router.get('/datasets/:id/mm3-runs', (req: Request, res: Response) => {
 /** POST /datasets/:id/mm3-resume-lm
  *
  *  Body: { runName, addSteps? | steps?, saveEvery?, stopMode?, targetLoss?,
- *          targetLossMetric?, targetLossWindow?, preview? }
+ *          targetLossMetric?, targetLossEpochs?, preview? }
  *
  *  Everything else comes from the run's own manifest, deliberately. A resume
  *  that quietly re-derived rank, optimizer or the held-out split from today's
@@ -2220,8 +2220,8 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
     if (b.targetLossMetric === 'eval' || b.targetLossMetric === 'train') {
       opts.targetLossMetric = b.targetLossMetric;
     }
-    if (Number.isFinite(Number(b.targetLossWindow))) {
-      opts.targetLossWindow = Math.max(1, Math.trunc(Number(b.targetLossWindow)));
+    if (Number.isFinite(Number(b.targetLossEpochs))) {
+      opts.targetLossEpochs = Math.max(1, Math.trunc(Number(b.targetLossEpochs)));
     }
     if (opts.stopMode === 'loss' && opts.targetLossMetric === 'eval'
         && (opts.holdout <= 0 || opts.evalEvery <= 0)) {

@@ -362,11 +362,21 @@ struct MM3LmTrainArgs {
     // by more than the whole run's improvement, so stopping on it would stop on
     // noise. Two honest choices, both offered:
     //
-    //   train — trailing mean of the last `target_loss_window` STYLE steps
-    //           (prior-preservation steps excluded: soft-target CE against the
-    //           frozen base is a different quantity and averaging the two
-    //           describes neither). Always available. Cannot tell learning from
-    //           memorising, which is the standing caveat on the training curve.
+    //   train — the mean of the last `target_loss_epochs` COMPLETED PASSES over
+    //           the album (prior-preservation steps excluded: soft-target CE
+    //           against the frozen base is a different quantity and averaging
+    //           the two describes neither). Always available. Cannot tell
+    //           learning from memorising, the standing caveat on this curve.
+    //
+    //           EPOCHS, NOT STEPS, and that is not a cosmetic choice. A fixed
+    //           25-step window on an 11-song album spans two passes plus three
+    //           songs, so three tracks weigh triple and eight weigh double —
+    //           and tracks differ in loss by more than a run improves in fifty
+    //           steps. The window would then rise and fall with WHICH songs it
+    //           happened to catch, a sawtooth tied to the phase of the pass. A
+    //           whole number of passes counts every song identically. It is
+    //           also what the DiT trainer's ma5 already does with the same
+    //           decision (dit-train-run.h).
     //   eval  — the held-out loss, checked only on the steps that produce a
     //           fresh one. This is the number that means "the adapter
     //           generalises to this artist", and it needs --holdout and
@@ -379,7 +389,7 @@ struct MM3LmTrainArgs {
     // early stops with the learning rate still part-way down its curve. That is
     // the same trade the ACE trainers make and it is recorded in the run log.
     float       target_loss        = 0.0f;   // 0 = off (run to --steps)
-    int         target_loss_window = 25;     // trailing style steps averaged
+    int         target_loss_epochs = 5;      // completed passes averaged
     std::string target_loss_metric = "train";  // train | eval
 
     // ── Final resume state ─────────────────────────────────────────────────
@@ -1862,6 +1872,10 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     int64_t              t_step0 = t_start;
     double               best_eval = -1.0;
     int                  best_eval_step = 0;
+    // Completed epoch means, oldest first — the window the target-loss stop
+    // averages. Declared up here with the other run-spanning statistics because
+    // the resume block and the state snapshot below both touch it.
+    std::vector<double>  ep_means;
     // Prior-preservation steps are accounted separately throughout: their loss
     // is soft-target CE against the frozen base, not CE against a code, and
     // averaging the two together produces a number that describes neither.
@@ -2263,6 +2277,9 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             order_pos      = (size_t) rstate.order_pos;
             best_eval      = rstate.best_eval;
             best_eval_step = rstate.best_eval_step;
+            // Empty from a v1/v2 file, which simply means the target window
+            // refills over the next few epochs.
+            ep_means.assign(rstate.epoch_means.begin(), rstate.epoch_means.end());
             opt.opt_step   = rstate.opt_step;
             if (a.optimizer == "prodigy") {
                 // d only ever GROWS, so losing it does not perturb the run — it
@@ -2309,14 +2326,21 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         rstate.prodigy_r      = opt.prodigy_r;
         rstate.opt_iter       = opt.opt_iter;
         for (int i = 0; i < 4; i++) rstate.rng[i] = rng.s[i];
+        // Only the tail the stop can ask for. The whole history would grow
+        // without bound in a file already measured in gigabytes, and nothing
+        // reads the older entries.
+        const size_t keep = (size_t) std::max(1, a.target_loss_epochs);
+        rstate.epoch_means.assign(
+            ep_means.size() > keep ? ep_means.end() - (long) keep : ep_means.begin(),
+            ep_means.end());
     };
 
     // ── target-loss stopping state ─────────────────────────────────────────
     //
-    // The trailing window of STYLE step losses, the last held-out loss, and
-    // where the run actually got to — the loop variable is out of scope by the
-    // time the clean-exit state is written.
-    std::vector<double> tl_hist;
+    // ep_means is declared with the other run-spanning statistics above (the
+    // resume block restores it). What is left here is the last held-out loss
+    // and where the run actually got to — the loop variable is out of scope by
+    // the time the clean-exit state is written.
     double              last_eval      = -1.0;
     int                 last_step_done = start_step;
     double              last_win       = 0.0;
@@ -2325,12 +2349,12 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     if (target_on) {
         const std::string how = target_on_eval
                                     ? std::string("held-out loss")
-                                    : "trailing " + std::to_string(a.target_loss_window)
-                                          + "-step mean training loss";
+                                    : std::to_string(a.target_loss_epochs)
+                                          + "-epoch mean training loss";
         fprintf(stderr, "[mm3-lm-train] stopping at %s <= %.4f, or at step %d, whichever comes first\n",
                 how.c_str(), (double) a.target_loss, a.steps);
-        jl("{\"type\":\"targetLoss\",\"target\":%.6g,\"metric\":\"%s\",\"window\":%d,\"capSteps\":%d}",
-           (double) a.target_loss, target_on_eval ? "eval" : "train", a.target_loss_window, a.steps);
+        jl("{\"type\":\"targetLoss\",\"target\":%.6g,\"metric\":\"%s\",\"epochs\":%d,\"capSteps\":%d}",
+           (double) a.target_loss, target_on_eval ? "eval" : "train", a.target_loss_epochs, a.steps);
     }
 
     // ── prior preservation: load the corpus and capture the base's answers ──
@@ -2806,15 +2830,16 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         if (!is_reg) {
             epoch_loss_sum += win;
             epoch_n++;
-            // The target-loss window. STYLE steps only: a prior-preservation
-            // step's loss is soft-target CE against the frozen base, so letting
-            // one into this mean would move the stopping point by an amount
-            // that has nothing to do with the artist.
-            if (target_on) tl_hist.push_back(win);
         }
+        bool epoch_closed = false;
         if (!is_reg && order_pos >= order.size() && !order.empty()) {
             epoch++;
             const double emean = epoch_loss_sum / std::max(1, epoch_n);
+            // The target-loss window, one entry per COMPLETE pass. Reg steps
+            // never reach here: their loss is soft-target CE against the frozen
+            // base, a different quantity, and they do not consume a style epoch.
+            ep_means.push_back(emean);
+            epoch_closed = true;
             jl("{\"type\":\"epoch\",\"epoch\":%d,\"loss\":%.6f,\"step\":%d,\"lr\":%.9g,\"ms\":%lld}",
                epoch, emean, step, (double) stats.lr, (long long) (ggml_time_ms() - epoch_t0));
             epoch_loss_sum = 0.0;
@@ -2852,23 +2877,29 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         // one, and before the pause check so a target hit ends the run rather
         // than paying for a preview it will never resume from.
         //
-        // The window has to be FULL. Without that guard a resumed run — whose
-        // window starts empty — could stop on its first two lucky steps, and a
-        // fresh run could stop inside warmup.
+        // The window has to be FULL — and it survives a pause, because the
+        // history rides in the resume state. Without both, a run previewing
+        // every 50 steps closes only ~4 epochs per segment, a 5-epoch window
+        // would never fill, and the stop would silently never fire.
         if (target_on) {
             double     value = -1.0;
+            // Each metric is only asked when it has just MOVED: a fresh
+            // held-out number, or a pass that has just closed. Re-testing a
+            // stale value every step would stop the run at an arbitrary point
+            // after the real crossing rather than at it.
             const bool ready = target_on_eval
                                    ? (eval_fresh && last_eval >= 0.0)
-                                   : (int) tl_hist.size() >= a.target_loss_window;
+                                   : (epoch_closed
+                                      && (int) ep_means.size() >= a.target_loss_epochs);
             if (ready) {
                 if (target_on_eval) {
                     value = last_eval;
                 } else {
                     double sum = 0.0;
-                    for (int i = 0; i < a.target_loss_window; i++) {
-                        sum += tl_hist[tl_hist.size() - 1 - (size_t) i];
+                    for (int i = 0; i < a.target_loss_epochs; i++) {
+                        sum += ep_means[ep_means.size() - 1 - (size_t) i];
                     }
-                    value = sum / a.target_loss_window;
+                    value = sum / a.target_loss_epochs;
                 }
             }
             if (ready && value <= (double) a.target_loss) {
@@ -2877,7 +2908,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 }
                 fprintf(stderr,
                         "[mm3-lm-train] target loss reached at step %d: %s %.4f <= %.4f — stopping\n",
-                        step, target_on_eval ? "held-out" : "trailing mean", value,
+                        step, target_on_eval ? "held-out" : "epoch mean", value,
                         (double) a.target_loss);
                 jl("{\"type\":\"target_stop\",\"step\":%d,\"value\":%.6f,"
                    "\"targetLoss\":%.6g,\"metric\":\"%s\",\"ckpt\":\"%s\"}",

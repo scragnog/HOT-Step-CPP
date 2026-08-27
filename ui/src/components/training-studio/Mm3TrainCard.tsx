@@ -45,7 +45,7 @@ interface FormState {
   stopMode: 'steps' | 'loss';
   targetLoss: number;
   targetLossMetric: 'train' | 'eval';
-  targetLossWindow: number;
+  targetLossEpochs: number;
   saveEvery: number;
   rank: number;
   alpha: number;
@@ -134,7 +134,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     stopMode: status.defaults.stopMode ?? 'steps',
     targetLoss: status.defaults.targetLoss ?? 0.4,
     targetLossMetric: status.defaults.targetLossMetric ?? 'train',
-    targetLossWindow: status.defaults.targetLossWindow ?? 25,
+    targetLossEpochs: status.defaults.targetLossEpochs ?? 5,
     saveEvery: status.defaults.saveEvery ?? 100,
     // Rank follows the recommendation for the same reason as the base: at the
     // default 256 nothing fits below ~24 GB, so a 16 GB card would open on a
@@ -256,7 +256,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         ...(form.stopMode === 'loss' ? {
           targetLoss: form.targetLoss,
           targetLossMetric: form.targetLossMetric,
-          targetLossWindow: form.targetLossWindow,
+          targetLossEpochs: form.targetLossEpochs,
         } : {}),
         // The engine refuses a prefix under `zero` anchoring, and the control
         // is disabled there — belt and braces so a stale form cannot send it.
@@ -408,10 +408,13 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             + 'keep a hold-out fraction above 0.',
                             { n: form.evalEvery })
                         : t('trainingStudio.mm3.metricTrainHint',
-                            'The mean of the last {{n}} steps, because one step is one crop of one '
-                            + 'song and swings more than the whole run does. Available on every '
-                            + 'run, but it cannot tell learning from memorising.',
-                            { n: form.targetLossWindow })}
+                            'The mean of the last {{n}} full passes over the dataset, because one '
+                            + 'step is one crop of one song and swings more than the whole run '
+                            + 'does. Whole passes, not a step count: a window that is not a '
+                            + 'multiple of your {{songs}} songs weighs some tracks more than '
+                            + 'others. Available on every run, but it cannot tell learning from '
+                            + 'memorising.',
+                            { n: form.targetLossEpochs, songs: status?.codes ?? 0 })}
                     </span>
                   </label>
                 </>

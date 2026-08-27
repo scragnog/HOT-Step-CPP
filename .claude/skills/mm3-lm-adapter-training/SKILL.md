@@ -394,9 +394,21 @@ rank. Do not assume the rank-64 optimum transfers.
 ## Target loss as a stopping rule (2026-08-26) — available, and a trap here
 
 `ace-train mm3-lm-train` now takes `--target-loss <f>`, with
-`--target-loss-metric train|eval` and `--target-loss-window N` (default 25), and
+`--target-loss-metric train|eval` and `--target-loss-epochs N` (default 5), and
 the Training Studio exposes it as **Train until: Target loss**. `--steps` stays
 the hard cap in that mode, so a target that never arrives still ends the run.
+
+**Defaults as of 2026-08-27: target loss 0.1 on the training metric, cap 1000
+steps.** Measured trajectories at the shipped recipe (5-epoch mean):
+
+| step | 25 | 100 | 250 | 500 |
+|---|---|---|---|---|
+| fightstar_grandunification | 3.14 | 2.50 | 1.43 | 0.59 |
+| johnnycash_american4 | 3.28 | 2.23 | 0.92 | 0.31 |
+| limbizkit_starfish | 3.62 | 2.72 | 2.03 | - |
+
+So 0.1 binds past step 500 on albums that converge fast and never arrives on the
+slow ones. The cap is doing real work, not decoration.
 
 Read the section above before reaching for it. **For an album clone, loss is not
 the quantity you want to minimise**: held-out CE bottoms out 1-8x earlier than
@@ -409,10 +421,30 @@ Where it earns its place: an unfamiliar album where you do not yet know the step
 count, run it with a generous cap and a target read off a previous album's
 curve, then audition the ladder as usual.
 
-The trailing mean exists because one step here is one crop of one song and
-swings further than the whole run's improvement. The `eval` metric only fires on
-evaluation steps, so at the default `--eval-every 250` it can fire once in a
-250-step run - lower it first or the target is decorative.
+**The window is whole PASSES, not a step count, and the difference is not
+cosmetic.** One step here is one crop of one song and swings further than a
+whole run's improvement, so the target has to be checked against an average -
+that much is obvious. What is less obvious: a 25-step window on an 11-song album
+covers two passes plus three songs, so three tracks weigh triple and eight weigh
+double, and the window then rises and falls with WHICH songs it caught, a
+sawtooth tied to the phase of the pass. A whole number of passes counts every
+song identically. Same reasoning as the DiT trainer's ma5, which is the same
+decision on the same kind of curve.
+
+The consequence is that the window's LENGTH IN STEPS follows the dataset: 5
+epochs is ~55 steps on an 11-song album and 225 on a 45-song one. That is
+correct - it is 5 passes either way - but it means a small dataset can stop
+sooner in wall-clock than a large one at the same target.
+
+The epoch history rides in the resume state (format v3). It has to: previews
+pause the trainer every 50 steps by default, which closes only ~4 epochs per
+segment on a 10-song album, so a window that restarted empty each segment would
+never fill and the target would silently never fire. Pre-v3 state files load
+fine and simply refill the window over the next few epochs.
+
+The `eval` metric only fires on evaluation steps, so at the default
+`--eval-every 250` it can fire once in a 250-step run - lower it first or the
+target is decorative.
 
 **The LR schedule does not shorten with the run.** The cosine is laid out over
 `--steps`, so a run that stops at 300 of a 1000-step cap stops with the learning

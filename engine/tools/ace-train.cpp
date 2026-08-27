@@ -1309,7 +1309,7 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 //       [--seed 42]
 //       [--crop-anchor song|zero] [--prefix-frames N] [--prefix-chunk N]
 //       [--prefix-selftest]
-//       [--target-loss <f>] [--target-loss-window 25] [--target-loss-metric train|eval]
+//       [--target-loss <f>] [--target-loss-epochs 5] [--target-loss-metric train|eval]
 //       [--resume <state>] [--pause-file <path>] [--no-final-state]
 //       [--no-pause]
 //       [--reg-manifest <json> --reg-captions <dir> --reg-codes <dir>
@@ -1337,9 +1337,11 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 // --target-loss is the second stopping strategy: instead of "run N steps", run
 // until the loss reaches a number. --steps STAYS THE HARD CAP, so a target that
 // is never met still ends the run — the same relationship --epochs has with
-// --target-loss in the ACE trainers. The metric is either the trailing mean of
-// the last --target-loss-window style steps (default) or the held-out loss,
-// which needs --holdout and --eval-every. The cosine schedule is still laid out
+// --target-loss in the ACE trainers. The metric is either the mean of the last
+// --target-loss-epochs completed passes over the album (default) or the
+// held-out loss, which needs --holdout and --eval-every. Whole passes, not a
+// step window: a step window that is not a multiple of the album weighs some
+// tracks more than others and swings with the phase of the pass. The cosine schedule is still laid out
 // over --steps, so an early stop stops part-way down the LR curve.
 //
 // --no-final-state suppresses the resume state a clean exit otherwise writes.
@@ -1409,8 +1411,8 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--prefix-chunk"))  a.prefix_chunk  = atoi(next("--prefix-chunk"));
         else if (!strcmp(argv[i], "--prefix-selftest")) a.prefix_selftest = true;
         else if (!strcmp(argv[i], "--target-loss"))   a.target_loss  = (float) atof(next("--target-loss"));
-        else if (!strcmp(argv[i], "--target-loss-window"))
-                                                     a.target_loss_window = atoi(next("--target-loss-window"));
+        else if (!strcmp(argv[i], "--target-loss-epochs"))
+                                                     a.target_loss_epochs = atoi(next("--target-loss-epochs"));
         else if (!strcmp(argv[i], "--target-loss-metric"))
                                                      a.target_loss_metric = next("--target-loss-metric");
         else if (!strcmp(argv[i], "--no-final-state")) a.final_state = false;
@@ -1482,8 +1484,8 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         fprintf(stderr, "ace-train mm3-lm-train: --target-loss-metric must be train or eval\n");
         return 2;
     }
-    if (a.target_loss_window < 1) {
-        fprintf(stderr, "ace-train mm3-lm-train: --target-loss-window must be >= 1\n");
+    if (a.target_loss_epochs < 1) {
+        fprintf(stderr, "ace-train mm3-lm-train: --target-loss-epochs must be >= 1\n");
         return 2;
     }
     // A target on a metric the run never computes would never fire, and the run

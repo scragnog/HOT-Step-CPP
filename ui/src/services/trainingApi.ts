@@ -209,11 +209,12 @@ export interface Mm3TrainLmRequest {
    *  a CAP, so a target that never arrives still ends the run. */
   stopMode?: 'steps' | 'loss';
   targetLoss?: number;
-  /** 'train' is the trailing mean of the last `targetLossWindow` style steps
-   *  and is always available. 'eval' is the held-out loss — the number that
-   *  distinguishes learning from memorising — and needs holdout + evalEvery. */
+  /** 'train' is the mean of the last `targetLossEpochs` completed passes over
+   *  the dataset and is always available. 'eval' is the held-out loss — the
+   *  number that distinguishes learning from memorising — and needs holdout +
+   *  evalEvery. */
   targetLossMetric?: 'train' | 'eval';
-  targetLossWindow?: number;
+  targetLossEpochs?: number;
 }
 
 // -- previous runs, and continuing one ---------------------------------------
@@ -280,7 +281,7 @@ export interface Mm3ResumeRequest {
   stopMode?: 'steps' | 'loss';
   targetLoss?: number;
   targetLossMetric?: 'train' | 'eval';
-  targetLossWindow?: number;
+  targetLossEpochs?: number;
   preview?: Mm3PreviewOptions;
 }
 

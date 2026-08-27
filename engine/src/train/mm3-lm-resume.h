@@ -58,7 +58,7 @@
 #include "train/lm-optim.h"
 
 static const char     MM3_RESUME_MAGIC[8] = { 'M', 'M', '3', 'R', 'E', 'S', 'U', 'M' };
-static const uint32_t MM3_RESUME_VERSION  = 2;   // v2 adds the Prodigy block
+static const uint32_t MM3_RESUME_VERSION  = 3;   // v3 adds the epoch-mean history
 static const uint32_t MM3_RESUME_VERSION_MIN = 1;   // v1 still readable
 
 /** Where a Prodigy run keeps x0 — the weights as they were at init, which the
@@ -87,6 +87,14 @@ struct MM3LmResumeState {
     double           epoch_loss_sum = 0.0;
     std::vector<int32_t> order;
     int32_t          order_pos = 0;
+
+    /** Completed epoch means, oldest first (v3). Carried because the target-loss
+     *  stop averages the last N of them, and a run that pauses for a preview
+     *  every 50 steps closes only ~4 epochs per segment on a 10-song album — so
+     *  a window that restarted empty each segment would never fill, and the
+     *  target would silently never fire. Only the tail the stop can ask for is
+     *  written; the rest is history no one reads. */
+    std::vector<double> epoch_means;
 
     // Held-out tracking, so "best step" is a whole-run statement.
     double   best_eval = -1.0;
@@ -241,6 +249,12 @@ static bool mm3_lm_resume_save(const std::string & path, const MM3LmResumeState 
         ok = ok && mm3_rs_w(f, n);
         ok = ok && (n == 0 || fwrite(st.order.data(), sizeof(int32_t), n, f) == n);
     }
+    // v3: the epoch-mean history the target-loss stop averages over.
+    {
+        const uint32_t n = (uint32_t) st.epoch_means.size();
+        ok = ok && mm3_rs_w(f, n);
+        ok = ok && (n == 0 || fwrite(st.epoch_means.data(), sizeof(double), n, f) == n);
+    }
 
     // Tensors: LoRA parameters, then momentum, each block prefixed by its count
     // so a reader knows what to expect without trusting the fingerprint alone.
@@ -343,6 +357,16 @@ static bool mm3_lm_resume_load(const std::string & path, MM3LmResumeState * st,
         if (!mm3_rs_r(f, &n) || n > (1u << 24)) return fail("bad epoch-order length");
         in.order.resize(n);
         if (n && fread(in.order.data(), sizeof(int32_t), n, f) != n) return fail("truncated epoch order");
+    }
+    // v3. A v1/v2 file simply has none, and the target window refills over the
+    // next few epochs rather than the resume being refused over it.
+    if (ver >= 3) {
+        uint32_t n = 0;
+        if (!mm3_rs_r(f, &n) || n > (1u << 20)) return fail("bad epoch-mean history length");
+        in.epoch_means.resize(n);
+        if (n && fread(in.epoch_means.data(), sizeof(double), n, f) != n) {
+            return fail("truncated epoch-mean history");
+        }
     }
 
     // Fingerprint. Every one of these changes what the stored tensors MEAN.

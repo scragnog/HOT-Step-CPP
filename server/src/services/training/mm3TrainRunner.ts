@@ -207,14 +207,14 @@ function relay(job: TrainingJob, ev: Record<string, unknown>, st: RelayState): v
         loss: optNum(ev, 'target'), totalSteps: optNum(ev, 'capSteps'),
       });
       log(job, 'info',
-        `Stopping at ${text(ev.metric) === 'eval' ? 'held-out loss' : `a trailing ${int(ev.window)}-step `
-          + 'mean training loss'} of ${(optNum(ev, 'target') ?? 0).toFixed(4)} or less, or at step `
+        `Stopping at ${text(ev.metric) === 'eval' ? 'held-out loss' : `a ${int(ev.epochs)}-epoch mean `
+          + 'training loss'} of ${(optNum(ev, 'target') ?? 0).toFixed(4)} or less, or at step `
         + `${int(ev.capSteps)} — whichever comes first.`);
       break;
     case 'target_stop':
       st.targetHitAt = int(ev.step);
       log(job, 'info',
-        `Target loss reached at step ${int(ev.step)}: ${text(ev.metric) === 'eval' ? 'held-out' : 'trailing mean'} `
+        `Target loss reached at step ${int(ev.step)}: ${text(ev.metric) === 'eval' ? 'held-out' : 'epoch mean'} `
         + `${(optNum(ev, 'value') ?? 0).toFixed(4)} ≤ ${(optNum(ev, 'targetLoss') ?? 0).toFixed(4)}. `
         + 'Stopping here rather than running out the step cap.');
       break;

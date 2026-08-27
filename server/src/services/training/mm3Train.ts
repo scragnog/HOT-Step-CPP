@@ -536,10 +536,17 @@ export const MM3_LM_DEFAULTS = {
    *  steps, so with the default evalEvery of 250 it fires at most once in a
    *  250-step run — lower evalEvery before targeting it. */
   targetLossMetric: 'train' as 'train' | 'eval',
-  /** One step's loss is one crop of one song and swings by more than the whole
-   *  run's improvement, so the target is checked against a trailing mean. 25 is
-   *  ~2.5 epochs on a 10-song album. */
-  targetLossWindow: 25,
+  /** Whole PASSES over the album, averaged — the DiT trainer's ma5 by another
+   *  name, and 5 for the same reason.
+   *
+   *  One step's loss is one crop of one song and swings by more than a whole
+   *  run's improvement, so a target has to be checked against an average. It
+   *  has to be an average over COMPLETE passes: a 25-step window on an 11-song
+   *  album covers two passes plus three songs, so three tracks weigh triple and
+   *  eight weigh double, and the window then rises and falls with which songs
+   *  it caught rather than with the model. A whole number of passes counts
+   *  every song identically. */
+  targetLossEpochs: 5,
   /** 50, so a 500-step run yields 10 checkpoints to audition — the memorised
    *  run put the plausible ear-optimum somewhere in 150-350, and checkpoints
    *  every 250 would straddle it blind. */
@@ -882,10 +889,11 @@ export interface ResolvedMm3TrainLmOptions {
   stopMode: 'steps' | 'loss';
   /** Only read when stopMode is 'loss'. 0 = off. */
   targetLoss: number;
-  /** 'train' averages the last `targetLossWindow` style steps; 'eval' waits for
-   *  a fresh held-out loss and needs holdout + evalEvery on. */
+  /** 'train' averages the last `targetLossEpochs` completed passes over the
+   *  dataset; 'eval' waits for a fresh held-out loss and needs holdout +
+   *  evalEvery on. */
   targetLossMetric: 'train' | 'eval';
-  targetLossWindow: number;
+  targetLossEpochs: number;
   /** Set by the runner when relaunching a paused run, and by the RESUME route
    *  when continuing a finished or halted one — never by the start route. */
   resumeFrom?: string;
@@ -936,7 +944,7 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   if (o.stopMode === 'loss' && o.targetLoss > 0) {
     args.push('--target-loss', String(o.targetLoss));
     args.push('--target-loss-metric', o.targetLossMetric);
-    args.push('--target-loss-window', String(o.targetLossWindow));
+    args.push('--target-loss-epochs', String(o.targetLossEpochs));
   }
   args.push('--depth-loss-weight', String(o.depthLossWeight));
   args.push('--depth-loss-frames', String(o.depthLossFrames));
