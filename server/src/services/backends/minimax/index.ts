@@ -186,7 +186,11 @@ async function capabilities(): Promise<BackendCapabilities> {
     backend: 'minimax-m3',
     up,
     core: {
-      duration: { max: MM3_MAX_DURATION_SEC },
+      // auto: the planner LM emits EOS when the song is over and the render
+      // stops there, so a duration is a ceiling rather than a target — and the
+      // LM never sees it either way (it is not in the assembled prompt).
+      // Asking for nothing means "end it where you think it ends".
+      duration: { max: MM3_MAX_DURATION_SEC, auto: true },
       // MM3 takes no structured musical metadata — tempo/key live inside the
       // Structured Caption prose, not as fields.
       bpm: false,

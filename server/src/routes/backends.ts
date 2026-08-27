@@ -169,7 +169,7 @@ router.get('/capabilities', async (req, res) => {
     res.json({
       backend: id,
       up: false,
-      core: { duration: { max: 0 }, bpm: false, keyscale: false, negativePrompt: false, batch: { max: 1 }, seed: false },
+      core: { duration: { max: 0, auto: false }, bpm: false, keyscale: false, negativePrompt: false, batch: { max: 1 }, seed: false },
       features: {
         models: false, lm: false, plugins: false, samplerPlugins: false, adapters: false,
         lmAdapters: false, postProcess: false,

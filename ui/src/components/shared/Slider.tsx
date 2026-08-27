@@ -12,15 +12,20 @@ interface SliderProps {
   step: number;
   suffix?: string;
   showInput?: boolean;
+  /** Extra control pinned to the right of the header row, beside the value.
+   *  For per-knob modes that aren't points on the scale — Duration's Auto,
+   *  where the backend decides the number instead of the user. */
+  headerRight?: React.ReactNode;
 }
 
 export const Slider: React.FC<SliderProps> = ({
-  label, value, onChange, min, max, step, suffix = '', showInput = false,
+  label, value, onChange, min, max, step, suffix = '', showInput = false, headerRight,
 }) => {
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
         <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{label}</label>
+        <div className="flex items-center gap-1.5">
         {showInput ? (
           <input
             type="number"
@@ -34,6 +39,8 @@ export const Slider: React.FC<SliderProps> = ({
         ) : (
           <span className="text-xs text-zinc-600 dark:text-zinc-400 font-mono">{value}{suffix}</span>
         )}
+        {headerRight}
+        </div>
       </div>
       <input
         type="range"

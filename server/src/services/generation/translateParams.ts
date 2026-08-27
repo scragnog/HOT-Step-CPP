@@ -58,7 +58,11 @@ export function translateParams(params: any): AceRequest {
 
   // Metadata
   if (params.bpm) req.bpm = params.bpm;
-  if (params.duration) {
+  // > 0, not truthy. The UI's Auto is -1 (MetadataSection's slider bottoms out
+  // there), and -1 is truthy — so Auto plus the default 15s trim buffer used to
+  // ask the engine for a 14-SECOND song. Auto means "send nothing and let the
+  // LM's metadata FSM choose", which is what omitting the field already does.
+  if (params.duration > 0) {
     const buffer = (params.autoTrimEnabled && params.durationBuffer) ? params.durationBuffer : 0;
     req.duration = params.duration + buffer;
   }

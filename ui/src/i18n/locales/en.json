@@ -816,6 +816,7 @@
     "metadataSection.musicParameters": "Music Parameters",
     "metadataSection.bpm": "BPM",
     "metadataSection.duration": "Duration",
+    "metadataSection.durationAutoHint": "The model ends the song itself. Hard stop at {{max}}s.",
     "metadataSection.key": "Key",
     "metadataSection.timeSig": "Time Sig",
     "metadataSection.vocalLanguage": "Vocal Language",

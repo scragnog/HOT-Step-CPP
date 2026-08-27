@@ -56,7 +56,15 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     // Metadata
     if (gen.bpm) write('hs-bpm', gen.bpm);
     if (gen.key) write('hs-keyScale', normalizeKeyScale(gen.key));
-    if (gen.duration || gen.bpm) {
+    // Duration. resolveDuration estimates a length from the lyrics and tempo,
+    // which is what ACE needs: its LM is TOLD a length and aims for it.
+    // MM3 works the other way round — the length never reaches the planner LM
+    // at all (it is not in the assembled prompt), so the request's duration is
+    // only a frame ceiling and the song ends on the LM's own stop token. An
+    // estimate there does nothing but cut the song off early, so send Auto.
+    if (useBackendStore.getState().activeBackendId === 'minimax-m3') {
+      write('hs-duration', -1);
+    } else if (gen.duration || gen.bpm) {
       write('hs-duration', resolveDuration(gen.duration, gen.lyrics || '', gen.bpm || 120));
     }
 

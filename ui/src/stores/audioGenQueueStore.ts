@@ -1145,7 +1145,14 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   params.caption = captionForBackend(gen, useBackendStore.getState().activeBackendId);
   params.title = gen.title || '';
   params.instrumental = false;
-  params.duration = resolveDuration(gen.duration, gen.lyrics || '', gen.bpm || 120);
+  // Same split as sendToCreate: an estimated length is a target for ACE and a
+  // guillotine for MM3, whose planner LM never sees the number and stops on its
+  // own EOS. -1 is Auto — send the ceiling, let the song end where it ends.
+  // Read LIVE from backendStore for the same reason the caption above does: the
+  // server routes on the backend active at DEQUEUE time, not at enqueue time.
+  params.duration = useBackendStore.getState().activeBackendId === 'minimax-m3'
+    ? -1
+    : resolveDuration(gen.duration, gen.lyrics || '', gen.bpm || 120);
   if (gen.bpm) params.bpm = gen.bpm;
   // Canonical spelling — the engine's metadata FSM only accepts a lower-case
   // mode, and 99.6% of stored generations carry a capitalised one.

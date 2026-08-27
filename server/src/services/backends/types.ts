@@ -32,7 +32,12 @@ export interface EngineBackendLifecycle {
  *  (index signature) so a backend can report extra core-ish knobs without a
  *  type churn every time the set grows. */
 export interface BackendCoreCapabilities {
-  duration: { max: number };
+  /** `max` is the hard ceiling. `auto` says the backend can decide the length
+   *  itself when no duration is asked for — MM3's planner LM emits a stop
+   *  token and the render ends there (engine mm3-ar-loop.h), so a requested
+   *  duration is only a CEILING, never a target. ACE has no such stop: its
+   *  metadata FSM is told a length and aims for it. */
+  duration: { max: number; auto: boolean };
   bpm: boolean;
   keyscale: boolean;
   negativePrompt: boolean;

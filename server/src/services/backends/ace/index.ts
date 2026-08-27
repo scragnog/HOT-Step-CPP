@@ -34,7 +34,9 @@ async function capabilities(): Promise<BackendCapabilities> {
       // the engine's real ceiling. 240 was a UI number with nothing behind it
       // (issue #101). The slider max is capability-driven, so this value IS
       // the user-visible limit. Quality past a few minutes is the user's call.
-      duration: { max: 600 },
+      // No auto: the LM is TOLD a length and the FSM aims for it — there is
+      // no stop token that ends the song where it wants to end.
+      duration: { max: 600, auto: false },
       bpm: true,
       keyscale: true,
       negativePrompt: true,

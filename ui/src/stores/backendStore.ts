@@ -44,7 +44,10 @@ export interface BackendInfo {
 }
 
 export interface BackendCoreCapabilities {
-  duration: { max: number };
+  /** `auto`: the backend picks the length itself when none is asked for (MM3's
+   *  planner LM stops on its own EOS token). Optional because a manifest cached
+   *  from a server older than the flag has no such field. */
+  duration: { max: number; auto?: boolean };
   bpm: boolean;
   keyscale: boolean;
   negativePrompt: boolean;

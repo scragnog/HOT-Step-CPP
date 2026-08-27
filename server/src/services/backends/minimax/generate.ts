@@ -71,7 +71,6 @@ export interface MinimaxGenerationDeps {
 
 /** MM3's own duration ceiling (mirrors the capability manifest). */
 const MM3_MAX_DURATION_SEC = 300;
-const MM3_DEFAULT_DURATION_SEC = 60;
 
 // ── Low-step schedule compensation ───────────────────────────────────────────
 //
@@ -226,6 +225,11 @@ export interface MinimaxParamMapping {
   req: Mm3SynthRequest;
   /** Non-fatal notes (clamps, ignored knobs) surfaced to the generation log. */
   notes: string[];
+  /** No length was asked for, so `req.duration` carries the CEILING and the
+   *  planner LM decides where the song ends. Everything downstream that would
+   *  otherwise report the requested length as the render's length has to know
+   *  the difference — the ceiling is not a prediction. */
+  autoDuration: boolean;
 }
 
 /**
@@ -261,10 +265,27 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // would be tokenized as literal lyric text.
   const lyrics: string = params.instrumental ? '' : (params.lyrics || '');
 
+  // ── Duration: a ceiling, not a target ──────────────────────────────────────
+  //
+  // The wire's `duration` becomes max_frames = min(round(duration x 25), 9000)
+  // in the engine (mm3-request.h) and does nothing else. It is NOT part of the
+  // assembled prompt (mm3_assemble_prompt takes caption + lyrics only), so the
+  // LM cannot aim for it: it plans until it samples EOS, and the render stops
+  // there or at max_frames, whichever comes first (mm3-ar-loop.h).
+  //
+  // So "auto" is not a mode the engine has to grow — it is what asking for the
+  // ceiling already means. duration <= 0 (the UI's Auto) sends the ceiling and
+  // lets the stop token end the song. The old behaviour, silently substituting
+  // 60s, capped the LM at a minute of music for anyone who never touched the
+  // slider.
   let duration = Number(params.duration);
-  if (!(duration > 0)) {
-    duration = MM3_DEFAULT_DURATION_SEC;
-    notes.push(`no duration supplied — defaulting to ${MM3_DEFAULT_DURATION_SEC}s`);
+  const autoDuration = !(duration > 0);
+  if (autoDuration) {
+    duration = MM3_MAX_DURATION_SEC;
+    notes.push(
+      `duration: auto — the planner LM ends the song where it wants (ceiling ${MM3_MAX_DURATION_SEC}s). `
+      + `If it never emits EOS the render runs to the ceiling and stops mid-phrase; set a length to bound it.`,
+    );
   }
   // The ACE duration buffer (autoTrimEnabled + durationBuffer) is deliberately
   // NOT added: nothing trims it back off on this path.
@@ -432,6 +453,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       })() : {}),
     },
     notes,
+    autoDuration,
   };
 }
 
@@ -623,7 +645,7 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
 
   if (job.status === 'cancelled') return;
 
-  const { req, notes } = mapMinimaxParams(job.params);
+  const { req, notes, autoDuration } = mapMinimaxParams(job.params);
 
   const abortController = new AbortController();
   (job as any)._abort = abortController;
@@ -693,7 +715,13 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     // The render's resolved length, known the instant the job is accepted. The
     // browser needs it BEFORE any audio arrives, so a streaming card can show
     // how much of the track is finished instead of an indeterminate spinner.
-    job.mm3Duration = sub.duration;
+    //
+    // On an auto render there is no such number: sub.duration echoes the
+    // CEILING, and painting a 5-minute scrub bar for a 2-minute song is a
+    // worse answer than admitting the length is unknown. 0 is the store's
+    // existing "unknown" (mm3StreamStore's `expected` defaults to it and is
+    // replaced by the true length the moment the engine finishes).
+    job.mm3Duration = autoDuration ? 0 : sub.duration;
     // How many songs this render will produce, published the instant the engine
     // accepts the job. The browser stands up one queue entry and one card per
     // take off this — waiting until the takes finish would put them all on
@@ -724,7 +752,8 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     job.params.randomSeed = false;
     log('INFO',
       `[MM3] Job ${sub.job_id} submitted — ${sub.prompt_tokens} prompt tokens, ${sub.max_frames} frames `
-      + `(${sub.duration.toFixed(1)}s), seed ${sub.seed}, ${sub.steps} steps, cfg ${sub.cfg_flow}`
+      + `(${autoDuration ? `auto, ceiling ${sub.duration.toFixed(1)}s` : `${sub.duration.toFixed(1)}s`}), `
+      + `seed ${sub.seed}, ${sub.steps} steps, cfg ${sub.cfg_flow}`
       + `${sub.instrumental ? ', instrumental' : ''}`);
     // Echoed by the engine only when a plugin was actually selected — the
     // difference between "I picked a solver" and "a solver ran".
@@ -906,9 +935,12 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
       // Duration from the actual WAV header (MM3 renders 44.1 kHz — the parser
       // reads the real rate, so no 48 kHz assumption leaks in here).
       const measured = wavDurationSec(filepath);
+      // The last-resort fallback is the REQUESTED length, which on an auto
+      // render is the ceiling — a number the song almost certainly isn't. Drop
+      // it there and let the row say 0 rather than claim five minutes.
       const duration = measured > 0
         ? Math.round(measured)
-        : Math.round(finalDetail?.result?.duration_sec || sub.duration || 0);
+        : Math.round(finalDetail?.result?.duration_sec || (autoDuration ? 0 : sub.duration) || 0);
 
       log('INFO', `[MM3] Saved ${filename} (${(audioBuffer.length / 1024).toFixed(0)} KB, ${duration}s)`);
       timing.push({ name: 'Save', ms: Math.round(performance.now() - saveStart) });
@@ -929,7 +961,10 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
         // song unreproducible.
         seed: takeSeed,
         ...(nTakes > 1 ? { mm3Take: takeIdx, mm3Takes: nTakes, mm3BaseSeed: sub.seed } : {}),
-        duration: sub.duration,
+        // -1 rather than the ceiling on an auto render: these params are what a
+        // reproduce/A-B re-submits, and stamping 300 would silently convert
+        // "let it end" into "300s, hard", which is a different render.
+        duration: autoDuration ? -1 : sub.duration,
         // The exact wire request, so a reproduce/A-B flow has the real inputs
         // rather than an ACE-shaped approximation of them.
         mm3Request: req,
@@ -1101,13 +1136,14 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
       audioUrls.push(masteredUrl || audioUrl);
       songIds.push(songId);
     }
-    // Every take is the same requested length unless one hit EOS early; report
-    // the longest, which is the render as a whole.
+    // Takes only share a length when one was asked for; on an auto render each
+    // take stops at its own EOS. Either way report the longest, which is the
+    // render as a whole.
     const duration = Math.max(
       1,
       ...(takeDetail.length
         ? takeDetail.map((d: any) => Math.round(Number(d?.duration_s) || 0))
-        : [Math.round(finalDetail?.result?.duration_sec || sub.duration || 0)]),
+        : [Math.round(finalDetail?.result?.duration_sec || (autoDuration ? 0 : sub.duration) || 0)]),
     );
 
     const totalMs = Math.round(performance.now() - pipelineStart);

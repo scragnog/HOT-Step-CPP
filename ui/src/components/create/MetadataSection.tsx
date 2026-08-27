@@ -24,6 +24,11 @@ import { useBackendStore } from '../../stores/backendStore';
  *  (undefined/loading) so the slider never grows or shrinks unexpectedly. */
 const DEFAULT_DURATION_MAX = 240;
 
+/** What the Auto chip drops to when it is switched OFF. Not the persisted
+ *  value: coming back from Auto with the old number restored would make the
+ *  chip look like it had done nothing. */
+const DURATION_ON_LEAVING_AUTO = 120;
+
 const KEY_SIGNATURES = [
   '', 'C major', 'C minor', 'C# major', 'C# minor',
   'D major', 'D minor', 'D# major', 'D# minor',
@@ -70,6 +75,26 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
   // undefined while loading, so DEFAULT_DURATION_MAX (the prior hardcoded
   // value) covers that gap.
   const durationMax = capabilities?.core.duration.max ?? DEFAULT_DURATION_MAX;
+  // Auto is a real option, not a magic -1 at the bottom of the slider: the
+  // backend either has a stop token of its own or it does not. MM3's planner LM
+  // emits EOS and the render ends there, so a duration is only a ceiling; ACE
+  // is told a length and aims for it, and has nothing to offer here.
+  const durationAuto = capabilities?.core.duration.auto === true;
+  const isAutoDuration = durationAuto && duration <= 0;
+  const autoChip = (
+    <button
+      type="button"
+      onClick={() => onDurationChange(isAutoDuration ? DURATION_ON_LEAVING_AUTO : -1)}
+      title={t('metadataSection.durationAutoHint', { max: durationMax })}
+      className={`px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-lg border transition-colors ${
+        isAutoDuration
+          ? 'text-pink-300 bg-pink-500/15 border-pink-500/30'
+          : 'text-zinc-500 bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-white/10 hover:text-zinc-700 dark:hover:text-zinc-300'
+      }`}
+    >
+      {t('metadataSection.auto')}
+    </button>
+  );
   return (
     <div className="space-y-3 pt-3 border-t border-zinc-200 dark:border-white/5">
       <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{t('metadataSection.musicParameters')}</h4>
@@ -84,9 +109,30 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
 
         {/* Duration */}
         <div>
-          <Slider label={t('metadataSection.duration')} value={duration} onChange={onDurationChange}
-            min={-1} max={durationMax} step={1} suffix="s" showInput />
-          {duration <= 0 && <span className="text-[10px] text-zinc-600">{t('metadataSection.auto')}</span>}
+          {durationAuto ? (
+            isAutoDuration ? (
+              <>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                    {t('metadataSection.duration')}
+                  </label>
+                  {autoChip}
+                </div>
+                <p className="text-[10px] leading-snug text-zinc-500">
+                  {t('metadataSection.durationAutoHint', { max: durationMax })}
+                </p>
+              </>
+            ) : (
+              <Slider label={t('metadataSection.duration')} value={duration} onChange={onDurationChange}
+                min={1} max={durationMax} step={1} suffix="s" showInput headerRight={autoChip} />
+            )
+          ) : (
+            <>
+              <Slider label={t('metadataSection.duration')} value={duration} onChange={onDurationChange}
+                min={-1} max={durationMax} step={1} suffix="s" showInput />
+              {duration <= 0 && <span className="text-[10px] text-zinc-600">{t('metadataSection.auto')}</span>}
+            </>
+          )}
         </div>
 
         {/* Key */}
