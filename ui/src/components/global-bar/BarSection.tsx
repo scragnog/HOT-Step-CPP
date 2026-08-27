@@ -6,6 +6,7 @@
 // Optionally shows a toggle switch in the header (for LM / Mastering).
 
 import React, { useRef, useCallback, useEffect } from 'react';
+import { hoverCardIsOpen } from '../shared/ParamLabel';
 
 // ── Accent color lookup ────────────────────────────────────────────────────
 // Tailwind JIT can't compile dynamic class names like `bg-${color}-500/10`,
@@ -92,6 +93,13 @@ export const BarSection: React.FC<BarSectionProps> = ({
         scheduleClose();
         return;
       }
+      // A ParamLabel help card is up. It is portalled to <body> and floats
+      // beside this panel, so the pointer moving to read it counts as leaving
+      // — closing now would unmount the card the user is reaching for.
+      if (hoverCardIsOpen()) {
+        scheduleClose();
+        return;
+      }
       onClose();
     }, HOVER_CLOSE_DELAY);
   }, [onClose, cancelClose]);
@@ -132,6 +140,9 @@ export const BarSection: React.FC<BarSectionProps> = ({
     const onDocPointerDown = (e: PointerEvent) => {
       if (!containerRef.current) return;
       if (containerRef.current.contains(e.target as Node)) return;
+      // A help card belongs to this panel even though it is portalled outside
+      // it — clicking into one to select its text is not clicking away.
+      if ((e.target as HTMLElement)?.closest?.('[role="tooltip"]')) return;
       pinned.current = false;
       cancelClose();
       onClose();
@@ -192,9 +203,14 @@ export const BarSection: React.FC<BarSectionProps> = ({
         </div>
       </button>
 
-      {/* Dropdown — matches section width */}
+      {/* Dropdown — matches section width.
+          data-hovercard-boundary tells ParamLabel to float its help card beside
+          this panel rather than under the label that opened it: a card anchored
+          to the label lands squarely on the knobs below it, and you have to
+          dismiss it before you can reach them. */}
       {isOpen && (
         <div
+          data-hovercard-boundary
           className="absolute top-full left-0 z-50 w-full min-w-[300px] max-h-[calc(100vh-120px)] overflow-y-auto
                      bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 border-t-0 rounded-b-xl shadow-2xl shadow-black/30 dark:shadow-black/60
                      global-bar-dropdown-enter hide-scrollbar"
