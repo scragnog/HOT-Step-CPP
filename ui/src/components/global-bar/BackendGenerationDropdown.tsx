@@ -50,7 +50,7 @@ export const BackendGenerationDropdown: React.FC = () => {
         />
       )}
 
-      <BackendExtensionControls group="generation" />
+      <BackendExtensionControls group="generation" accentColor="sky" />
 
       {/* Shared Lua sampler plugins, for a backend that runs them but does not
           render ACE's GenerationDropdown. Two conditions, both necessary: the

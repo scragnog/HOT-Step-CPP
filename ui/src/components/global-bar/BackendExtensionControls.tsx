@@ -14,6 +14,7 @@ import React from 'react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { Slider } from '../shared/Slider';
+import { ToggleSwitch } from './BarSection';
 import type { BackendExtensionGroup, BackendExtensionParam } from '../../stores/backendStore';
 
 export const backendInputClasses =
@@ -27,7 +28,14 @@ export function useBackendExtensions(group: BackendExtensionGroup): BackendExten
   return (capabilities?.extensions ?? []).filter(p => (p.group ?? 'generation') === group);
 }
 
-export const BackendExtensionControls: React.FC<{ group: BackendExtensionGroup }> = ({ group }) => {
+type Accent = 'pink' | 'emerald' | 'sky' | 'purple' | 'amber' | 'teal';
+
+export const BackendExtensionControls: React.FC<{
+  group: BackendExtensionGroup;
+  /** Cluster accent, so a declared toggle matches the section it lives in
+   *  (the same one BarSection is given in GlobalParamBar). */
+  accentColor?: Accent;
+}> = ({ group, accentColor = 'sky' }) => {
   const gp = useGlobalParams() as any;
   const params = useBackendExtensions(group);
 
@@ -51,15 +59,26 @@ export const BackendExtensionControls: React.FC<{ group: BackendExtensionGroup }
           );
         }
         if (p.type === 'toggle') {
+          // The app's toggle, not a raw checkbox — and the hint goes UNDER the
+          // label the way every other param type gets one. A declared toggle
+          // used to render neither, so knobs like Low-Step Compensation and
+          // Play While Rendering shipped their whole explanation to nobody.
           return (
-            <label key={p.key} className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{p.label}</span>
-              <input
-                type="checkbox"
-                checked={!!value}
-                onChange={(e) => gp.setBackendParam?.(p.key, e.target.checked)}
-              />
-            </label>
+            <div key={p.key} className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <span className="block text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                  {p.label}
+                </span>
+                {p.hint && <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">{p.hint}</p>}
+              </div>
+              <div className="pt-0.5">
+                <ToggleSwitch
+                  checked={!!value}
+                  onChange={(on) => gp.setBackendParam?.(p.key, on)}
+                  accentColor={accentColor}
+                />
+              </div>
+            </div>
           );
         }
         if (p.type === 'select') {

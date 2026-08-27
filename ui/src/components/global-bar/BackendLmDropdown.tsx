@@ -47,7 +47,7 @@ export const BackendLmDropdown: React.FC = () => {
         before a single sample is rendered — these are that planner's controls.
         It always runs; there is no render without it.
       </p>
-      <BackendExtensionControls group="lm" />
+      <BackendExtensionControls group="lm" accentColor="purple" />
     </div>
   );
 };
