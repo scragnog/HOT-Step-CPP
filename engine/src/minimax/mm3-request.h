@@ -680,6 +680,10 @@ static bool mm3_req_str(yyjson_val * root, const char * key, std::string * out, 
 //   seed       integer, default -1 (= draw one from std::random_device)
 //   cfg_flow   number, default = the checkpoint's flow.cfg_scale (1.7)
 //   steps      integer, default = the checkpoint's flow.steps (30)
+//   flow_uncond_interval  integer 1..16, default 1 — CFG guidance-delta
+//                cache. 1 is the exact reference; N >= 2 evaluates the
+//                unconditional branch only every Nth step (plus warmup and
+//                the final step) and holds the delta in between.
 //   get_wav_bits integer in {16, 24, 32}, default 16
 //   get_lrc      bool, default false — lyric timestamps (LRC) from the
 //                alignment heads; costs the manual attention path on 3 of
@@ -789,6 +793,18 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     if (!(cfg > 0.0) || cfg > 100.0) {
         if (err) {
             *err = "\"cfg_flow\" must be in (0, 100]";
+        }
+        return false;
+    }
+
+    // CFG guidance-delta cache. 1 = exact reference (both branches every step).
+    double uncond_iv = 1.0;
+    if (!mm3_req_num(root, "flow_uncond_interval", &uncond_iv, &present, err)) {
+        return false;
+    }
+    if (uncond_iv < 1.0 || uncond_iv > 16.0) {
+        if (err) {
+            *err = "\"flow_uncond_interval\" must be in 1..16";
         }
         return false;
     }
@@ -1167,6 +1183,7 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     out->gen.ar_seed     = ar_seed;
     out->gen.steps      = (int) nsteps;
     out->gen.cfg_flow   = (float) cfg;
+    out->gen.flow_uncond_interval = (int) llround(uncond_iv);
     out->gen.plugins    = plug;
     // MM3 Plank replay. MM3GenRequest holds these by value, and the job worker
     // takes the whole MM3SynthRequest by value too, so the copy chain is safe —

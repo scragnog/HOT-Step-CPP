@@ -225,12 +225,18 @@ static inline float mm3_clamp_sample(float v) {
 //                nullptr, or a run with `active == false`, leaves EVERY
 //                expression below exactly as the fixtures proved it — the
 //                plugin path is a branch, never a rewrite of the default.
+//   uncond_interval
+//                CFG guidance-delta cache. 1 (the default) = the exact
+//                reference: both branches every step. N >= 2 evaluates the
+//                UNCONDITIONAL branch only on the warmup steps (0, 1), the
+//                final step, and every Nth step, reconstructing it in between
+//                from the cached guidance delta. See the design note below.
 static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const float * cond, int64_t L, int steps,
                                   float cfg_scale, int64_t overlap, const float * prev_latent, int64_t prev_stride,
                                   std::vector<float> & out_latents, MM3FlowStats * stats,
                                   const std::function<void(int, int)> & on_step,
                                   const std::function<bool()> & should_cancel, std::string * err,
-                                  MM3PluginRun * plugins = nullptr) {
+                                  MM3PluginRun * plugins = nullptr, int uncond_interval = 1) {
     if (L <= 0 || L > MM3_DIT_MAX_FRAMES) {
         if (err) {
             *err = "frames must be in 1.." + std::to_string(MM3_DIT_MAX_FRAMES);
@@ -289,6 +295,41 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
     // rebuild the graph twice per step.
     const bool wants_post_step = use_plugins && plugins->guidance && plugins->guidance->has_post_step;
     const bool batched_cfg     = mm3_dit_cfg_batched() && !wants_post_step;
+
+    // -- CFG guidance-delta cache --------------------------------------------
+    //
+    // CFG is `v = u + s*(c - u)`, which is `v = c + (s-1)*delta` for the
+    // guidance delta `delta = c - u`. The conditional prediction `c` moves fast
+    // along the trajectory; `delta` moves slowly. So `delta` can be held for a
+    // step: evaluate the unconditional branch every Nth step, and in between
+    // rebuild `u = c - delta` from the FRESH `c` and the cached delta.
+    //
+    // That rebuild -- rather than a special-cased CFG combine -- is deliberate:
+    // every consumer downstream (the native combine, mm3_plugins_guide, APG)
+    // keeps receiving a coherent (cond, uncond) pair and needs no knowledge of
+    // this at all. The approximation it makes is exactly "the delta is one step
+    // stale", which is the whole claim being traded on.
+    //
+    // Steps 0 and 1 (warmup, where the delta is still moving) and the final
+    // step (which lands the sample) always evaluate both branches.
+    //
+    // Suppressed, not honoured-partially, in two cases:
+    //   - batched_cfg: both branches come out of ONE compute there, so skipping
+    //     the uncond half would mean swapping to a B=1 graph mid-loop. No win,
+    //     and a graph swap per step is its own hazard.
+    //   - post_step guidance plugins: those drive their own extra forwards of
+    //     each branch and are entitled to real ones.
+    const int  uncond_every = uncond_interval < 1 ? 1 : (uncond_interval > steps ? steps : uncond_interval);
+    const bool delta_cache  = uncond_every >= 2 && !batched_cfg && !wants_post_step;
+    if (uncond_every >= 2 && !delta_cache) {
+        fprintf(stderr, "[MM3-Flow] flow_uncond_interval=%d ignored (%s)\n", uncond_every,
+                batched_cfg ? "batched CFG" : "post_step guidance plugin");
+    }
+    std::vector<float> cfg_delta;
+    if (delta_cache) {
+        cfg_delta.assign((size_t) N, 0.0f);
+    }
+    int64_t n_uncond = 0;
 
     std::vector<float> sigmas, timesteps;
     if (plugins && plugins->scheduler) {
@@ -420,13 +461,29 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
                                   pred_u.data(), err)) {
                 return false;
             }
+            n_uncond++;
         } else {
             if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), i == 0 ? cond : nullptr, 1.0f, t, L, pred_c.data(),
                              err)) {
                 return false;
             }
-            if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), nullptr, 0.0f, t, L, pred_u.data(), err)) {
-                return false;
+            // Warmup, final step, and every Nth step evaluate the real
+            // unconditional branch and refresh the delta; the rest rebuild it.
+            const bool eval_uncond = !delta_cache || i < 2 || i == steps - 1 || (i % uncond_every) == 0;
+            if (eval_uncond) {
+                if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), nullptr, 0.0f, t, L, pred_u.data(), err)) {
+                    return false;
+                }
+                n_uncond++;
+                if (delta_cache) {
+                    for (int64_t j = 0; j < N; j++) {
+                        cfg_delta[(size_t) j] = pred_c[(size_t) j] - pred_u[(size_t) j];
+                    }
+                }
+            } else {
+                for (int64_t j = 0; j < N; j++) {
+                    pred_u[(size_t) j] = pred_c[(size_t) j] - cfg_delta[(size_t) j];
+                }
             }
         }
 
@@ -513,7 +570,7 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
     const double total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_all).count();
     // Multi-eval solvers and post_step() add forwards that a flat 2/step count
     // would hide, making a Heun run look as cheap as an Euler one.
-    const int64_t n_forwards = (int64_t) steps * 2 + (use_plugins ? plugins->extra_forwards : 0);
+    const int64_t n_forwards = (int64_t) steps + n_uncond + (use_plugins ? plugins->extra_forwards : 0);
     if (stats) {
         stats->steps         = steps;
         stats->forwards      = (int) n_forwards;
@@ -523,11 +580,12 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
         stats->last_ms       = last_ms;
         stats->compute_bytes = g_mm3_dit.compute_bytes;
     }
+    const std::string dc_tag = delta_cache ? (" dc" + std::to_string(uncond_every)) : std::string();
     fprintf(stderr,
-            "[MM3-Flow] Window: L=%lld, ov=%lld, %d steps, cfg %.2f%s, %lld forwards -> %.0f ms (%.0f ms/step, %.0f "
-            "ms/forward)\n",
+            "[MM3-Flow] Window: L=%lld, ov=%lld, %d steps, cfg %.2f%s%s, %lld forwards -> %.0f ms (%.0f ms/step, "
+            "%.0f ms/forward)\n",
             (long long) L, (long long) overlap, steps, (double) cfg_scale, batched_cfg ? " (batched)" : "",
-            (long long) n_forwards, total_ms, total_ms / (double) steps,
+            dc_tag.c_str(), (long long) n_forwards, total_ms, total_ms / (double) steps,
             fwd_ms / (double) (n_forwards > 0 ? n_forwards : 1));
     return true;
 }
@@ -586,6 +644,12 @@ struct MM3GenRequest {
     uint64_t seed       = 42;
     int      steps      = 30;
     float    cfg_flow   = 1.7f;
+
+    /** CFG guidance-delta cache (mm3_flow_sample_chunk). 1 = the exact
+     *  reference, both branches every step. N >= 2 evaluates the unconditional
+     *  branch on the warmup steps, the final step, and every Nth step, holding
+     *  the guidance delta in between. N=2 removes ~22% of the flow forwards. */
+    int      flow_uncond_interval = 1;
 
     // Seed for the AR stage ONLY. Unset (the default) ties it to `seed`, which
     // is what MM3 natively does — one seed drives both the code sampling and
@@ -1037,7 +1101,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
         };
         if (!mm3_flow_sample_chunk(m, noise.data(), cond.data(), L, req.steps, req.cfg_flow, overlap,
                                    overlap > 0 ? st.prev_latent.data() : nullptr, st.prev_len, lat, &fstats, on_step,
-                                   req.should_cancel, err, &st.plugin_run)) {
+                                   req.should_cancel, err, &st.plugin_run, req.flow_uncond_interval)) {
             return false;
         }
         out->flow_ms += fstats.total_ms;

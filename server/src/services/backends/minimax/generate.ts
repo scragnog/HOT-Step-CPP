@@ -399,6 +399,12 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           Number(params.mm3CfgFlow) <= 5.0
             ? { cfg_flow: Number(params.mm3CfgFlow) }
             : {}),
+      // CFG guidance-delta cache. Omitted at 1 so the default request is
+      // byte-for-byte the request we send today.
+      ...(Number.isFinite(Number(params.mm3FlowUncondInterval)) &&
+          Number(params.mm3FlowUncondInterval) >= 2 && Number(params.mm3FlowUncondInterval) <= 16
+            ? { flow_uncond_interval: Math.round(Number(params.mm3FlowUncondInterval)) }
+            : {}),
       // ── LM sampling knobs. Omitted from the wire at their defaults so the
       // engine's reference recipe stays authoritative (and bit-identical). ──
       ...(Number.isFinite(Number(params.mm3LmTemperature)) && Number(params.mm3LmTemperature) !== 1.0

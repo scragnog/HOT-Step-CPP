@@ -148,6 +148,11 @@ export interface Mm3SynthRequest {
   cfg_flow?: number;
   /** Default = the checkpoint's flow.steps (30). */
   steps?: number;
+  /** CFG guidance-delta cache, 1..16. 1 (the default) is the exact reference:
+   *  both CFG branches every step. N >= 2 evaluates the unconditional branch
+   *  only on the warmup steps, the final step, and every Nth step, holding the
+   *  guidance delta in between — N=2 removes ~22% of the flow forwards. */
+  flow_uncond_interval?: number;
   /** 16 | 24 | 32, default 16. */
   get_wav_bits?: number;
   /** Emit LRC lyric timestamps from the LM's alignment heads. Since the

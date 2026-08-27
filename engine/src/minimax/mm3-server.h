@@ -1503,6 +1503,9 @@ static void mm3_handle_tokenize_check(const httplib::Request & req, httplib::Res
 //   seed            noise + sampling seed (default 42).
 //   steps           Euler steps per window (default: the checkpoint's 30).
 //   cfg_flow        flow CFG scale (default: the checkpoint's 1.7).
+//   flow_uncond_interval  CFG guidance-delta cache, 1..16 (default 1 = the
+//                   exact reference). N >= 2 skips the unconditional forward
+//                   on non-Nth steps and reuses the held delta.
 //
 //   PARITY REPLAY (all optional; any subset):
 //   forced_semantic / forced_acoustic          inline int arrays, as /mm3/lm-plan
@@ -1568,6 +1571,7 @@ static void mm3_handle_synth_e2e(const httplib::Request & req, httplib::Response
     gr.cfg_flow   = (float) mm3_json_f64(root, "cfg_flow", g_mm3.synth_cfg.flow.cfg_scale > 0.0f
                                                                ? (double) g_mm3.synth_cfg.flow.cfg_scale
                                                                : 1.7);
+    gr.flow_uncond_interval = (int) mm3_json_i64(root, "flow_uncond_interval", 1);
     gr.keep_window_latents = req.has_param("dump_latents") && req.get_param_value("dump_latents") != "0";
 
     bool have_cond = false, have_uncond = false;

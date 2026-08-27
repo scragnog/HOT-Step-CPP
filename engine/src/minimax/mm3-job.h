@@ -405,9 +405,9 @@ static void mm3_arbitrate_vram(const MM3Model & m, int64_t n_ctx_needed, MM3JobS
 /** Every input that can change the frame-hidden block, in one exact string.
  *
  *  Deliberately NOT in here, because stage 2 consumes them and re-runs anyway:
- *  steps, cfg_flow, the solver/scheduler/guidance plugin selection and their
- *  params, flow_shift, forced_noise, wav_bits, and the cond/dit/voc model
- *  choices. Those are precisely the knobs this cache exists to let you tweak. */
+ *  steps, cfg_flow, flow_uncond_interval, the solver/scheduler/guidance plugin
+ *  selection and their params, flow_shift, forced_noise, wav_bits, and the
+ *  cond/dit/voc model choices. Those are precisely the knobs this cache exists to let you tweak. */
 // The half of the key that decides whether a hidden block MEANS anything under
 // the model that is loaded right now, split out from the half that decides what
 // the plan is. Nothing in here is a knob the AR cache exists to let you tweak —
@@ -1412,6 +1412,7 @@ static void mm3_handle_synth(const httplib::Request & hreq, httplib::Response & 
     yyjson_mut_obj_add_bool(o, orot, "instrumental", req.instrumental);
     yyjson_mut_obj_add_uint(o, orot, "steps", req.gen.steps);
     yyjson_mut_obj_add_real(o, orot, "cfg_flow", (double) req.gen.cfg_flow);
+    yyjson_mut_obj_add_uint(o, orot, "flow_uncond_interval", (unsigned) req.gen.flow_uncond_interval);
     yyjson_mut_obj_add_uint(o, orot, "wav_bits", req.wav_bits);
     // Echo the sampler-plugin selection back. Absent from the response == the
     // native flow loop ran, which is the answer to "did my picks actually

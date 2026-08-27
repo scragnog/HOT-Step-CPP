@@ -320,6 +320,24 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 0.1,
       },
       {
+        // Skips the UNCONDITIONAL half of CFG on most steps and reuses the held
+        // guidance delta. Off by default (1) until we have judged it by ear on
+        // our own renders; 1 stays byte-identical to the reference path.
+        key: 'mm3FlowUncondInterval',
+        type: 'slider',
+        label: 'CFG Delta Cache',
+        hint: 'CFG evaluates the model twice per step — with the caption and '
+            + 'without. The difference between the two moves slowly, so it can be '
+            + 'held for a step or two. 1 (default) computes both every step and is '
+            + 'the exact reference. 2 skips roughly a fifth of the flow work; 3 '
+            + 'skips a third. Warmup and the final step always compute both. '
+            + 'Ignored while a post-step guidance plugin is driving the sampler.',
+        default: 1,
+        min: 1,
+        max: 4,
+        step: 1,
+      },
+      {
         // Backend-NEUTRAL key: BackendGenerationDropdown reads it to decide
         // whether to render the shared solver/scheduler/guidance pickers, and
         // that component must stay free of MM3-specific names. Any future
