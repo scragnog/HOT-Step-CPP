@@ -139,7 +139,8 @@ gh run view <run-id>                  # per-job status + timings
 ```
 
 Expected jobs: `build-windows` × 5 variants (`cuda13.1`, `cuda12.8`,
-`cuda12-volta`, `vulkan`, `cpu`), `build-linux` × the same 5, `build-macos`
+`cuda12-volta`, `vulkan`, `cpu`), `build-linux` × 6 (the same 5 plus `rocm`),
+`build-macos`
 (Apple Silicon Metal, `macos-15`), then a final `release` job that collects
 artifacts, generates notes, and creates the draft. Warm-cache CUDA jobs run
 roughly 7–13 min; a cold cache means ~1.5 h per CUDA job (timings from workflow
@@ -162,17 +163,17 @@ that *failed*.
 ### 5. Verify the draft, then publish
 
 ```powershell
-gh release view vX.Y.Z --json assets --jq '.assets | length'   # expect 22
+gh release view vX.Y.Z --json assets --jq '.assets | length'   # expect 24
 gh release view vX.Y.Z --json body --jq .body                  # eyeball notes + download table
 gh release edit vX.Y.Z --draft=false --latest                  # publish — ONLY after explicit user approval (Golden rule 6)
 ```
 
-**Expect 22 assets** (11 archives + 11 `.sha256`) — verified live against
-v1.1.2. `docs/RELEASING.md` says 18; that count is **stale** (predates the
-`cuda12-volta` variant). Asset names:
+**Expect 24 assets** (12 archives + 12 `.sha256`). It was 22 until Linux
+gained a `rocm` variant; `docs/RELEASING.md` still says 18, which predates
+`cuda12-volta` as well. Asset names:
 
 - `HOT-Step-CPP-vX.Y.Z-win-x64-{cuda13.1,cuda12.8,cuda12-volta,vulkan,cpu}.zip`
-- `HOT-Step-CPP-vX.Y.Z-linux-x64-{same 5}.tar.gz`
+- `HOT-Step-CPP-vX.Y.Z-linux-x64-{same 5, plus rocm}.tar.gz`
 - `HOT-Step-CPP-vX.Y.Z-macOS-arm64.tar.gz`
 - one `.sha256` per archive
 
@@ -199,7 +200,7 @@ discipline on master directly becomes the release notes** — write
 |---|---|
 | `.github/workflows/release.yml` | The entire pipeline: 5 Windows + 5 Linux + 1 macOS builds, notes generation, draft creation. Only workflow triggered by `v*` tags. |
 | `.github/workflows/cache-warm.yml` | Builds the engine on master under the same cache keys release.yml uses, so tag runs can restore it (GitHub caches are ref-scoped; only master caches are visible to tag runs). Triggers: manual dispatch, or master push touching `engine/ggml` (submodule gitlink), `engine/CMakeLists.txt`, or itself. |
-| `docs/RELEASING.md` | Human runbook. Mostly accurate; asset count (18) and variant list (4/OS) are stale — reality is 22 assets, 5 variants per OS. |
+| `docs/RELEASING.md` | Human runbook. Mostly accurate; asset count (18) and variant list (4/OS) are stale — reality is 24 assets, 5 Windows variants and 6 Linux variants. |
 | `engine/tools/version.cmake` | Generates `version.h` with `ACE_VERSION "<git-hash> (<date>)"` at build time. Never hand-edit versions. |
 | `engine/CMakeLists.txt:9-15` | `version` custom target wiring for the above. |
 | `release/` | Packaging inputs used by CI: `esbuild.config.mjs` (bundles server to `server.mjs`), `HOT-Step.bat`/`HOT-Step.sh` launchers, `README.txt`. |
@@ -215,7 +216,7 @@ discipline on master directly becomes the release notes** — write
 | ninja loops `build.ninja still dirty ... system time is not set` | Future-dated mtimes from a cache written by a clock-ahead runner; handled by the mtime clamp (release.yml:254-261). |
 | Vulkan job loops `build.ninja still dirty after 100 tries` | Restored `vulkan-shaders-gen-prefix` ExternalProject; handled by the prefix nuke (release.yml:263-268). |
 | Release notes show only 2–3 commits | Changelog anchored to a stray **non-hyphenated** tag pushed between releases (the `--exclude '*-*'` guard only protects against hyphenated ones). Delete the stray tag, delete the draft, re-push the release tag. |
-| Draft has fewer than 22 assets | A build job failed (fail-fast cancelled siblings) or an artifact upload was missed. Don't publish; `gh run view <run-id>` and pull the failed job's log via the API command in step 4. |
+| Draft has fewer than 24 assets | A build job failed (fail-fast cancelled siblings) or an artifact upload was missed. Don't publish; `gh run view <run-id>` and pull the failed job's log via the API command in step 4. |
 | Whole matrix cancels when one variant fails | `fail-fast: true` on the release matrices — expected. Diagnose the variant that actually failed. |
 | `throw "Build failed: ace-server.exe not found"` in a Windows job | The engine build produced no binary — a real compile failure earlier in that job's log. To reproduce/fix locally, follow CLAUDE.md's build rules: `dev-rebuild.bat` (never `engine/build.cmd` directly) and never `cmake --clean-first` (20+ min CUDA recompile). |
 | Released binary crashes instantly (Windows `0xC0000409` / Linux SIGSEGV) right after `[Server] Models: ...`, but builds green and local build is fine | **Stale-object mixed-ABI binary from the build cache** (bit v1.1.3, 2026-07-16, issues #82/#83). The git-mtime-restore stamps sources with their *commit* time; any commit authored while the last Cache Warm was still running (or otherwise not in the warm build but committed before its cache-save time) gets an mtime OLDER than the cached `.obj` files, so ninja never rebuilds its dependents. If that commit changed a struct (e.g. `AceRequest` in `request.h`), TUs disagree on layout → memory corruption on first use (`/props` is the first endpoint to touch `AceRequest`, hit by the UI on load — hence "crashes on startup"). Only variants whose warm job SAVED after the stray commit's timestamp are affected (slow CUDA jobs), which is why cpu/vulkan variants work — check warm job `completedAt` vs `git log --pretty=%cI` of struct-touching commits. Since 2026-07-16 both workflows carry a `.built-commit` stamp guard (re-touches files changed since the cached build's commit; no stamp → touches all engine sources) and release.yml smoke-tests every packaged engine (`/health` + `/props` + `/plugins` against stub GGUFs) — so a recurrence should fail the build instead of shipping. If the guard itself is suspect, force cold builds by bumping the cache-generation comment atop `engine/CMakeLists.txt` (hashed into the cache key). |
@@ -244,6 +245,17 @@ Facts from the departing lead engineer, verified against the workflows on
   on checkout; jobs manually init `engine/ggml` and `engine/vendor/vst3sdk`
   with only the `base cmake pluginterfaces public.sdk` sub-submodules
   (release.yml:87-96) — vstgui4 is "fragile + unneeded".
+- **The Linux `rocm` variant ships no ROCm runtime.** rocBLAS unpacks to
+  ~3.9 GB and hipBLASLt to ~2.7 GB (per-architecture Tensile kernels), and
+  AMD's packages track the user's kernel driver, so the archive carries only
+  our binaries and `libggml-hip.so`. Users install ROCm themselves;
+  `engine/src/backend.h` dlopen()s each ROCm library on startup and prints the
+  per-distro install command when the HIP backend fails to load. `GPU_TARGETS`
+  is fat-binaried for RDNA2–RDNA4 (gfx1030, gfx1100/1101/1102, gfx1200/1201)
+  so one archive covers them; CDNA is deliberately excluded. Note ROCm needs
+  an apt pin (`Pin-Priority: 600` on `o=repo.radeon.com`) or Ubuntu jammy's
+  own 5.0.0-1 ROCm packages break the install, and ROCm must be ≥ 6.3 —
+  ggml's `vendors/hip.h` uses `__hip_fp8_e4m3`, which 6.2 does not have.
 - **VALIDATED — cuda12-volta exists for Tesla V100 (sm_70).** ggml's mma
   flash-attention and MMQ have no sm_70 device code, so that variant builds
   with `-DGGML_CUDA_FORCE_CUBLAS=ON -DHOT_STEP_DISABLE_FA=ON
@@ -268,7 +280,8 @@ recent test-tag naming history): see [reference.md](reference.md).
 ## Deeper reading
 
 - `docs/RELEASING.md` — committed human runbook. Trust it EXCEPT the asset
-  count (says 18, reality 22) and the variant list (missing `cuda12-volta`).
+  count (says 18, reality 24) and the variant list (missing `cuda12-volta`
+  and `rocm`).
 - `.github/workflows/release.yml` and `cache-warm.yml` — ground truth; when
   the doc and the workflow disagree, the workflow wins.
 - `docs/plans/2026-05-11-release-automation-design.md` — design doc referenced

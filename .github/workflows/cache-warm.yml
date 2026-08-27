@@ -258,7 +258,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [cuda13.1, cuda12.8, cuda12-volta, vulkan, cpu]
+        variant: [cuda13.1, cuda12.8, cuda12-volta, vulkan, rocm, cpu]
         include:
           - variant: cuda13.1
             cmake_flags: >-
@@ -288,6 +288,16 @@ jobs:
               -DGGML_BACKEND_DL=ON
               -DGGML_CPU_ALL_VARIANTS=ON
             cuda_version: ''
+          # Six GPU targets makes this the longest job in the matrix, which is
+          # exactly why its cache is worth warming. Flags must match release.yml.
+          - variant: rocm
+            cmake_flags: >-
+              -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
+              -DGGML_HIP=ON -DGGML_STATIC=OFF
+              -DGPU_TARGETS="gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
+              -DGGML_BACKEND_DL=ON
+              -DGGML_CPU_ALL_VARIANTS=ON
+            cuda_version: ''
           - variant: cpu
             cmake_flags: >-
               -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
@@ -295,6 +305,13 @@ jobs:
             cuda_version: ''
 
     steps:
+      - name: Free disk space
+        if: matrix.variant == 'rocm'
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h /
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -319,6 +336,27 @@ jobs:
         with:
           cuda: ${{ matrix.cuda_version }}
           method: 'network'
+
+      # Must match release.yml's build-linux ROCm step, pin included: Ubuntu
+      # jammy's own rocminfo/rocm-cmake/rocm-device-libs at 5.0.0-1 otherwise
+      # tie with repo.radeon.com's and break the dependency resolution.
+      - name: Install ROCm
+        if: matrix.variant == 'rocm'
+        env:
+          ROCM_VERSION: '6.4.4'
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          wget -qO- https://repo.radeon.com/rocm/rocm.gpg.key \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/rocm.gpg
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} jammy main" \
+            | sudo tee /etc/apt/sources.list.d/rocm.list
+          printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
+          sudo apt-get update
+          sudo apt-get install -y rocm-hip-sdk
+          echo "/opt/rocm/bin" >> "$GITHUB_PATH"
+          echo "HIPCXX=$(/opt/rocm/bin/hipconfig -l)/clang" >> "$GITHUB_ENV"
+          echo "HIP_PATH=$(/opt/rocm/bin/hipconfig -R)" >> "$GITHUB_ENV"
 
       - name: Install Vulkan SDK (headers + loader)
         if: matrix.variant == 'vulkan'
