@@ -58,8 +58,10 @@ const ROLE_SETTING: Record<Mm3Role, string> = {
 };
 
 /** The persisted per-role selection, with one-time migration from the legacy
- *  single-synth setting. */
-function persistedSelection(): { lm: string } & Record<Mm3Role, string> {
+ *  single-synth setting. Exported because anything posting a selection to the
+ *  engine must send EVERY role: an omitted role is auto, not "leave it alone",
+ *  so a partial post silently drops the user's picks (see selectModel below). */
+export function mm3PersistedSelection(): { lm: string } & Record<Mm3Role, string> {
   const legacy = getSetting(LEGACY_SYNTH_SETTING, '');
   const roleOf = (role: Mm3Role): string => {
     const v = getSetting(ROLE_SETTING[role], '');
@@ -90,7 +92,7 @@ async function reconcileSelection(props: Mm3Props | null, stale: boolean): Promi
   // guess.
   if (stale || !props?.variants) return;
 
-  const want = persistedSelection();
+  const want = mm3PersistedSelection();
   if (!want.lm && MM3_ROLES.every(r => !want[r])) return;  // never chosen — engine default is right
 
   // Only ask for a quant the engine can actually see; a file deleted since the
@@ -675,7 +677,7 @@ async function selectModel(selection: Record<string, string>) {
   // Measured as a mystery 2× LM slowdown on 2026-08-21 before the cause was
   // found. The UI already sends every role; this guards API callers and
   // future panels. An EXPLICIT "" still means auto.
-  const persisted = persistedSelection();
+  const persisted = mm3PersistedSelection();
   const sel = {
     lm:    selection.lm ?? persisted.lm,
     depth: selection.depth ?? persisted.depth,

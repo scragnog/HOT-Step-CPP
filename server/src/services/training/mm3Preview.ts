@@ -43,6 +43,7 @@ import path from 'path';
 
 import { aceClient } from '../aceClient.js';
 import { mm3JobDetail, mm3SelectModel, mm3Synth } from '../backends/minimax/client.js';
+import { mm3PersistedSelection } from '../backends/minimax/index.js';
 import { MM3_LM_ADAPTER_DEFAULT_SCALES } from '../backends/minimax/lmAdapter.js';
 import type { Mm3PreviewOptions, TrainingPreview } from './types.js';
 import { applyMm3Trigger } from '../backends/minimax/trigger.js';
@@ -256,14 +257,28 @@ const PREVIEW_ADAPTER_BASE = 'q8_0';
  *  selection returns changed:false and touches nothing — so the cost is one
  *  cheap POST per preview and a re-warm only on the first.
  *
- *  Deliberately NOT restored afterwards. The training runner restarts the engine
- *  when the run ends, which resets the selection anyway, and q8_0 is the base
- *  adapters are supposed to be rendered on regardless. Restoring it would mean
- *  putting the engine back on a base we know is broken for the very next
- *  preview. */
+ *  The LM is the ONLY role this overrides. Every other role is posted at the
+ *  user's own persisted quant, because an omitted role means auto — not "leave
+ *  it alone" — and auto is best-first, i.e. f16. Posting the LM alone used to
+ *  fall through to the legacy `{lm, synth}` shape, which the engine reads as
+ *  "set all four synth roles at once", so one preview quietly moved the DiT,
+ *  depth, cond and vocoder to f16 and left them there for the rest of the
+ *  session (garbled generations after every training run, found 2026-08-27).
+ *
+ *  The LM override is deliberately not restored between previews — q8_0 is the
+ *  base adapters are meant to render on, and putting the engine back on a base
+ *  we know is broken for the very next preview would be pointless churn. The
+ *  training runner restores the whole selection once the run is over. */
 async function pinPreviewBase(): Promise<string> {
   try {
-    const r = await mm3SelectModel({ lm: PREVIEW_ADAPTER_BASE });
+    const want = mm3PersistedSelection();
+    const r = await mm3SelectModel({
+      lm: PREVIEW_ADAPTER_BASE,
+      depth: want.depth,
+      cond: want.cond,
+      dit: want.dit,
+      voc: want.voc,
+    });
     return r?.lm || PREVIEW_ADAPTER_BASE;
   } catch (err: any) {
     // Soft-fail: a preview on the wrong base is worth having with a warning

@@ -160,7 +160,7 @@ if (fs.existsSync(uiDistPath)) {
 import { setEngineReady } from './engineState.js';
 import { restoreMm3Selection } from './services/backends/minimax/index.js';
 import { aceClient } from './services/aceClient.js';
-import { startAceServer, stopAceServer } from './services/aceEngineProcess.js';
+import { onEngineRestarted, startAceServer, stopAceServer } from './services/aceEngineProcess.js';
 import { killActiveChildren } from './services/training/labelingQueue.js';
 
 // ── Required runtime DLL bootstrap ──────────────────────────────────
@@ -335,6 +335,14 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   void restoreMm3Selection().catch(err => {
     console.warn('[Server] MM3 model restore failed:', err?.message || err);
   });
+
+  // Same restore, but for every LATER respawn. Training stops and restarts the
+  // engine on the way into and out of every run (and once per preview pause),
+  // and each of those respawns forgets the selection exactly as a cold boot
+  // does. Awaited inside restartAceServer, so a training run resumes on the
+  // user's own quants rather than whatever the next capabilities poll happens
+  // to reconcile after the fact.
+  onEngineRestarted(restoreMm3Selection);
 
   // Fire-and-forget warm-on-startup: once the engine /health is up, POST /warm
   // with the configured DiT + VAE + adapter so the first user /synth skips the

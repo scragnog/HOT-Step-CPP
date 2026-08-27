@@ -21,6 +21,7 @@ import { spawn } from 'child_process';
 
 import { pushLog } from '../../routes/logs.js';
 import { restartAceServer, stopAceServer } from '../aceEngineProcess.js';
+import { restoreMm3Selection } from '../backends/minimax/index.js';
 import { aceTrainExe } from './aceTrain.js';
 import { getDataset } from './datasetsRepo.js';
 import {
@@ -682,5 +683,12 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
     if (!isCancelled(job)) finishJob(job, 'failed', err?.message || String(err));
   } finally {
     clearPause(opts.outDir);
+    // Previews pin the LM to the quant adapters render on (mm3Preview.ts), and
+    // the last one runs after the final engine restart — so without this the
+    // run ends with the engine on the preview's base rather than the user's.
+    // Idempotent: nothing to do when they are already the same.
+    await restoreMm3Selection().catch(err => {
+      log(job, 'warn', `Could not put the model selection back: ${err?.message || err}`);
+    });
   }
 }

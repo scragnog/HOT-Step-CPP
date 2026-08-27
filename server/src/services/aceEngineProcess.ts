@@ -58,6 +58,38 @@ const CRASH_WINDOW_MS = 30_000; // 30 seconds
 /** How long restartAceServer() waits for /health after a respawn. */
 const RESTART_HEALTH_TIMEOUT_MS = 90_000;
 
+// ── Post-restart restore hooks ──────────────────────────────────────────────
+//
+// Some engine state is HELD IN THE ENGINE PROCESS and nowhere else, so a
+// respawn silently drops it. MiniMax-Music3's model selection is the one that
+// bites: the engine forgets which quant of each role was chosen and falls back
+// to best-first, which is f16 — and an MM3 render on an f16 stack is garbled.
+// A training run stops and restarts the engine several times, so without this
+// the user comes back from training on models they never picked.
+//
+// Registered from server/src/index.ts rather than imported here: this module is
+// imported BY the backends, so reaching into them would close an import cycle.
+// Hooks run after /health answers, before this function resolves, so a caller
+// that awaits the restart can rely on the restore having happened rather than
+// racing a capabilities poll. Failures are logged, never thrown — a failed
+// restore leaves the engine on its default, which still generates.
+type EngineRestoreHook = () => void | Promise<void>;
+const restoreHooks: EngineRestoreHook[] = [];
+
+export function onEngineRestarted(fn: EngineRestoreHook): void {
+  restoreHooks.push(fn);
+}
+
+async function runRestoreHooks(): Promise<void> {
+  for (const fn of restoreHooks) {
+    try {
+      await fn();
+    } catch (err: any) {
+      console.warn('[Server] engine restore hook failed:', err?.message || err);
+    }
+  }
+}
+
 /**
  * Spawn ace-server. Returns null when the binary is missing.
  * Also assigns the module-level current process.
@@ -335,6 +367,7 @@ export async function restartAceServer(): Promise<boolean> {
     console.warn('[Server] restartAceServer: an engine child is still live — not spawning a second one');
     const ok = await aceClient.isReachable();
     setEngineReady(ok, ok ? 'Ready' : 'Engine did not come back — restart the app');
+    if (ok) await runRestoreHooks();
     return ok;
   }
 
@@ -349,6 +382,7 @@ export async function restartAceServer(): Promise<boolean> {
     if (await aceClient.isReachable()) {
       setEngineReady(true, 'Ready');
       console.log('[Server] ace-server is back up');
+      await runRestoreHooks();
       return true;
     }
     await new Promise(r => setTimeout(r, 1000));
