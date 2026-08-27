@@ -25,6 +25,7 @@ import { useCapabilities } from '../../hooks/useCapabilities';
 import { CoverArtContent, CoverArtBadge } from './CoverArtDropdown';
 import { PluginControls } from './PluginControls';
 import { EditableSlider } from '../shared/EditableSlider';
+import { ParamLabel } from '../shared/ParamLabel';
 import { Sa3SamplerControls } from './Sa3SamplerControls';
 
 // LUFS normalization presets
@@ -41,6 +42,11 @@ const LUFS_PRESETS = [
 interface AccordionProps {
   icon: React.ReactNode;
   label: string;
+  /** What the section does. Each of these used to be a paragraph pinned to the
+   *  top of the open section, which meant every section cost three lines of
+   *  prose before its first control. It now hangs off a "?" beside the label,
+   *  readable while the section is still shut. */
+  info?: string;
   badge?: React.ReactNode;
   accentColor: string;
   toggle?: { checked: boolean; onChange: (v: boolean) => void };
@@ -49,7 +55,7 @@ interface AccordionProps {
 }
 
 const Accordion: React.FC<AccordionProps> = ({
-  icon, label, badge, accentColor, toggle, persistKey, children,
+  icon, label, info, badge, accentColor, toggle, persistKey, children,
 }) => {
   const [open, setOpen] = usePersistedState(persistKey, false);
 
@@ -74,7 +80,9 @@ const Accordion: React.FC<AccordionProps> = ({
         <span className={`flex-shrink-0 ${toggle?.checked ? `text-${accentColor}-400` : 'text-zinc-500'}`}>
           {icon}
         </span>
-        <span className="text-sm text-zinc-700 dark:text-zinc-300 font-medium flex-1">{label}</span>
+        <ParamLabel label={label} info={info} underline={false}
+          className="text-sm text-zinc-700 dark:text-zinc-300 font-medium"
+          rootClassName="flex-1" />
         {badge && <span className="flex-shrink-0">{badge}</span>}
         {toggle && (
           <span onClick={e => e.stopPropagation()}>
@@ -240,22 +248,14 @@ const MasteringContent: React.FC = () => {
           <div className="flex items-center justify-between mt-1">
             <div className="flex items-center gap-1.5">
               <Music2 size={14} className="text-teal-400" />
-              <span className="text-sm text-zinc-600 dark:text-zinc-400">{t('mastering.alsoTimbreRef')}</span>
+              <ParamLabel label={t('mastering.alsoTimbreRef')}
+                className="text-sm text-zinc-600 dark:text-zinc-400"
+                info="Also VAE-encodes the reference track and feeds it into the timbre conditioning pipeline, guiding the generation's tone and texture to match the reference." />
             </div>
             <ToggleSwitch checked={gp.timbreReference} onChange={gp.setTimbreReference} accentColor="amber" />
           </div>
         )
       )}
-      {gp.timbreReference && gp.masteringReference && !gp.timbreAudioPath && (
-        <p className="text-[10px] text-zinc-600 leading-relaxed">
-          The reference track will be VAE-encoded and fed into the timbre conditioning pipeline,
-          guiding the generation&apos;s tone and texture to match the reference.
-        </p>
-      )}
-
-      <p className="text-[10px] text-zinc-600 leading-relaxed">
-        Match the RMS level, frequency spectrum, and dynamic characteristics of the reference.
-      </p>
     </div>
   );
 };
@@ -371,15 +371,12 @@ export const PostProcessingDropdown: React.FC = () => {
       <Accordion
         icon={<Mic2 size={14} />}
         label="Whisper Lyrics"
+        info="Transcribes the actual sung lyrics with Whisper, at word-level timestamps, using the source lyrics as a spelling guide. Needs a Whisper model from the Model Manager."
         accentColor="sky"
         persistKey="hs-ppAccordion-whisper"
         toggle={{ checked: gp.whisperLyricsEnabled, onChange: gp.setWhisperLyricsEnabled }}
       >
         <div className="space-y-3 mt-2">
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
-            Transcribes actual sung lyrics using Whisper AI with word-level timestamps.
-            Uses source lyrics as a spelling guide. Requires a Whisper model from the Model Manager.
-          </p>
           {gp.whisperLyricsEnabled && (
             <div className="space-y-2 pt-1">
               {/* Model selector */}
@@ -429,17 +426,14 @@ export const PostProcessingDropdown: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <Mic2 size={14} className="text-sky-400" />
-                  <span className="text-sm text-zinc-600 dark:text-zinc-400">Isolate vocals first</span>
+                  <ParamLabel label="Isolate vocals first"
+                    className="text-sm text-zinc-600 dark:text-zinc-400"
+                    info={gp.stableStepOn
+                      ? "Shares StableStep's stem split — vocals are isolated once and used by both."
+                      : 'Runs stem separation to isolate vocals before transcription. May improve accuracy on busy mixes.'} />
                 </div>
                 <ToggleSwitch checked={gp.whisperIsolateVocals} onChange={gp.setWhisperIsolateVocals} accentColor="sky" />
               </div>
-              {gp.whisperIsolateVocals && (
-                <p className="text-[10px] text-sky-400/60 leading-relaxed">
-                  {gp.stableStepOn
-                    ? "Shares StableStep's stem split — vocals are isolated once and used by both."
-                    : 'Runs stem separation to isolate vocals before transcription. May improve accuracy for busy mixes.'}
-                </p>
-              )}
               {!gp.whisperIsolateVocals && gp.stableStepOn && (
                 <p className="text-[10px] text-sky-400/60 leading-relaxed">
                   StableStep is enabled — transcription automatically uses its isolated vocal stem (no extra split).
@@ -459,16 +453,12 @@ export const PostProcessingDropdown: React.FC = () => {
         <Accordion
           icon={<Zap size={14} />}
           label="Tiled Decoder"
+          info="Replaces the built-in VAE decoder with a tiled decode pipeline: OLA crossfading, optional dual-pass merge, latent channel suppression, and a DSP chain (hum notch, stereo width, soft clip)."
           accentColor="cyan"
           persistKey="hs-ppAccordion-tiled"
           toggle={{ checked: gp.postprocessEnabled, onChange: gp.setPostprocessEnabled }}
         >
           <div className="space-y-2 mt-2">
-            <p className="text-[10px] text-zinc-500 leading-relaxed">
-              Replaces the built-in VAE decoder with an advanced tiled decode pipeline.
-              Features OLA crossfading, optional dual-pass merge, latent channel suppression,
-              and a DSP chain (hum notch, stereo width, soft clip).
-            </p>
             {gp.postprocessEnabled && (
               <div className="space-y-2 pt-1">
                 {postprocessPlugins.length > 1 && (
@@ -483,9 +473,10 @@ export const PostProcessingDropdown: React.FC = () => {
                   </select>
                 )}
                 {selectedPostprocessPlugin && (
-                  <p className="text-[10px] text-cyan-400/60 leading-relaxed">
-                    ✓ {selectedPostprocessPlugin.display || selectedPostprocessPlugin.name} — {selectedPostprocessPlugin.description || 'Active'}
-                  </p>
+                  <ParamLabel
+                    label={`✓ ${selectedPostprocessPlugin.display || selectedPostprocessPlugin.name}`}
+                    info={selectedPostprocessPlugin.description}
+                    className="text-[10px] text-cyan-400/60 leading-relaxed" />
                 )}
                 {selectedPostprocessPlugin?.params?.length > 0 && (
                   <PluginControls
@@ -509,17 +500,12 @@ export const PostProcessingDropdown: React.FC = () => {
         <Accordion
           icon={<AudioWaveform size={14} />}
           label={t('pp.ppVaeReencode')}
+          info="Neural VAE re-encode pass. Runs the decoded audio through a higher-fidelity autoencoder to clean up spectral artifacts, fizz and high-frequency noise left by the primary VAE. Adds roughly 1-2s."
           accentColor="emerald"
           persistKey="hs-ppAccordion-ppvae"
           toggle={{ checked: gp.ppVaeReencode, onChange: gp.setPpVaeReencode }}
         >
           <div className="space-y-2 mt-2">
-            <p className="text-[10px] text-zinc-500 leading-relaxed">
-              Neural VAE re-encode pass. Runs the decoded audio through a
-              higher-fidelity autoencoder to clean up spectral artifacts,
-              fizz, and high-frequency noise from the primary VAE.
-              Adds ~1–2s processing time.
-            </p>
             {gp.ppVaeReencode && (
               <div className="space-y-2 pt-1">
                 <EditableSlider
@@ -534,15 +520,14 @@ export const PostProcessingDropdown: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Zap size={14} className={gp.ppVaeUseOnnx ? 'text-emerald-400' : 'text-zinc-500'} />
-                    <span className="text-sm text-zinc-600 dark:text-zinc-400">ONNX (ORT/TRT)</span>
+                    <ParamLabel label="ONNX (ORT/TRT)"
+                      className="text-sm text-zinc-600 dark:text-zinc-400"
+                      info={gp.ppVaeUseOnnx
+                        ? 'ONNX Runtime with TensorRT acceleration. Falls back to GGUF when the ONNX models are missing.'
+                        : 'GGUF (GGML) backend. Slower, but proven stable.'} />
                   </div>
                   <ToggleSwitch checked={gp.ppVaeUseOnnx} onChange={gp.setPpVaeUseOnnx} accentColor="emerald" />
                 </div>
-                <p className="text-[10px] text-zinc-500 leading-relaxed">
-                  {gp.ppVaeUseOnnx
-                    ? 'Using ONNX Runtime with TensorRT acceleration. Falls back to GGUF if ONNX models are missing.'
-                    : 'Using GGUF (GGML) backend. Slower but proven stable.'}
-                </p>
               </div>
             )}
           </div>
@@ -556,6 +541,7 @@ export const PostProcessingDropdown: React.FC = () => {
       <Accordion
         icon={<Sparkles size={14} />}
         label="StableStep"
+        info="Re-renders the instrumental through Stable Audio 3 to replace VAE fizz with real detail; vocals are split out, cleaned with PP-VAE, and remixed. Powered by Stability AI."
         accentColor="sky"
         persistKey="hs-ppAccordion-stablestep"
         toggle={stableStepAvailable
@@ -566,11 +552,6 @@ export const PostProcessingDropdown: React.FC = () => {
         ) : undefined}
       >
         <div className="space-y-2 mt-2">
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
-            Re-renders the instrumental through Stable Audio 3 to replace VAE fizz
-            with real detail; vocals are split out, cleaned with PP-VAE, and remixed.
-            {' '}<span className="text-zinc-600">Powered by Stability AI.</span>
-          </p>
           {!stableStepAvailable && (
             <div className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20">
               <span className="text-sky-400 text-xs mt-px">ⓘ</span>
@@ -589,15 +570,17 @@ export const PostProcessingDropdown: React.FC = () => {
                 min={0.10} max={0.60} step={0.05}
                 onChange={gp.setStableStepStrength}
                 formatDisplay={v => (v * 100).toFixed(0) + '%'}
-                tooltip="How much of the instrumental is re-rendered. Higher values re-interpret the instrumentation more; lower values stay closer to the original."
+                tooltip="How much of the instrumental is re-rendered. Higher values re-interpret the instrumentation more; lower values stay closer to the original. 30% is a good balance between cleanup and faithfulness."
               />
-              <p className="text-[10px] text-zinc-500 leading-relaxed">
-                Higher values re-interpret the instrumentation more. 30% is a good
-                balance between cleanup and faithfulness.
-              </p>
               {/* Backend selector: Auto / ONNX (TensorRT) / GGML */}
               <div>
-                <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1">Backend</label>
+                <ParamLabel label="Backend" rootClassName="flex mb-1"
+                  className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                  info={gp.stableStepBackend === 'onnx'
+                    ? 'ONNX Runtime with TensorRT (NVIDIA). The first run per song-length bucket builds the TensorRT engine — slow once, then cached.'
+                    : gp.stableStepBackend === 'gguf'
+                      ? 'GGML backend — runs on CUDA, Vulkan or CPU. Fastest option on NVIDIA in current testing.'
+                      : 'Auto lets the engine pick the best installed backend.'} />
                 <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800">
                   {([
                     { value: 'auto' as const, label: 'Auto', installed: true },
@@ -634,13 +617,6 @@ export const PostProcessingDropdown: React.FC = () => {
                     );
                   })}
                 </div>
-                <p className="mt-1 text-[10px] text-zinc-500 leading-relaxed">
-                  {gp.stableStepBackend === 'onnx'
-                    ? 'ONNX Runtime with TensorRT (NVIDIA). First run per song-length bucket builds the TensorRT engine (slow once, then cached).'
-                    : gp.stableStepBackend === 'gguf'
-                      ? 'GGML backend — runs on CUDA, Vulkan or CPU. Fastest option on NVIDIA in current testing.'
-                      : 'Auto lets the engine pick the best installed backend.'}
-                </p>
               </div>
 
               {/* StableStep adapters: per-adapter enable + strength (collapsed by default) */}
@@ -856,17 +832,12 @@ export const PostProcessingDropdown: React.FC = () => {
       <Accordion
         icon={<Zap size={14} />}
         label={t('pp.spectralLifter')}
+        info="Removes AI shimmer artifacts, reduces spectral noise and extends high-frequency content. Native C++ — runs in the engine's post-VAE pipeline."
         accentColor="cyan"
         persistKey="hs-ppAccordion-sl"
         toggle={{ checked: gp.spectralLifterEnabled, onChange: gp.setSpectralLifterEnabled }}
       >
         <div className="space-y-3 mt-2">
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
-            Removes AI shimmer artifacts, reduces spectral noise, and extends
-            high-frequency content. Native C++ processing — runs in the engine
-            post-VAE pipeline.
-          </p>
-
           {gp.spectralLifterEnabled && (
             <div className="space-y-2 pt-1">
               <div className="flex justify-end">
@@ -936,16 +907,12 @@ export const PostProcessingDropdown: React.FC = () => {
       <Accordion
         icon={<Mic2 size={14} />}
         label={t('pp.vocalNaturalizer')}
+        info="Five-stage DSP humanisation that pulls back robotic and auto-tune artifacts. It processes the full mix through frequency-band-targeted filters that land mostly on vocal content."
         accentColor="pink"
         persistKey="hs-ppAccordion-naturalizer"
         toggle={{ checked: gp.vocalNaturalizerEnabled, onChange: gp.setVocalNaturalizerEnabled }}
       >
         <div className="space-y-2 mt-2">
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
-            Applies 5-stage DSP humanisation to reduce robotic/auto-tune
-            artifacts. Processes the full mix using frequency-band-targeted
-            filters that primarily affect vocal content.
-          </p>
           {gp.vocalNaturalizerEnabled && (
             <div className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
               <span className="text-amber-400 text-xs mt-px">⚠</span>
@@ -1042,6 +1009,7 @@ export const PostProcessingDropdown: React.FC = () => {
       <Accordion
         icon={<AudioWaveform size={14} />}
         label="Gain Offset"
+        info="A volume offset applied to the unmastered track before the VST chain and the mastering stages. Negative values buy headroom for VST processing; positive values boost."
         accentColor="amber"
         persistKey="hs-ppAccordion-gain"
         badge={gp.gainOffsetDb !== 0 ? (
@@ -1051,11 +1019,6 @@ export const PostProcessingDropdown: React.FC = () => {
         ) : undefined}
       >
         <div className="space-y-2 mt-2">
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
-            Apply a volume offset to the unmastered track before the VST chain
-            and mastering stages. Use negative values to reduce volume (headroom
-            for VST processing), positive to boost.
-          </p>
           <EditableSlider
             label="Offset"
             value={gp.gainOffsetDb}
@@ -1098,6 +1061,7 @@ export const PostProcessingDropdown: React.FC = () => {
       <Accordion
         icon={<AudioWaveform size={14} />}
         label={t('pp.mastering')}
+        info="Matches the RMS level, frequency spectrum and dynamic characteristics of a reference track." 
         accentColor="amber"
         persistKey="hs-ppAccordion-master"
         toggle={{ checked: gp.masteringEnabled, onChange: gp.setMasteringEnabled }}
@@ -1115,6 +1079,7 @@ export const PostProcessingDropdown: React.FC = () => {
         <Accordion
           icon={<AudioWaveform size={14} />}
           label={t('pp.lufsNormalize')}
+          info="Measures integrated loudness (ITU-R BS.1770-4) and adjusts gain to hit the target, boosting quiet tracks and pulling down loud ones. Includes a true-peak limiter at -1 dBTP to stop clipping."
           accentColor="amber"
           persistKey="hs-ppAccordion-lufs"
           toggle={{ checked: gp.lufsEnabled, onChange: gp.setLufsEnabled }}
@@ -1125,12 +1090,6 @@ export const PostProcessingDropdown: React.FC = () => {
           ) : undefined}
         >
           <div className="space-y-3 mt-2">
-            <p className="text-[10px] text-zinc-500 leading-relaxed">
-              Measures integrated loudness (ITU-R BS.1770-4) and adjusts gain to hit
-              the target &mdash; boosting quiet tracks and reducing loud ones. Includes a
-              true-peak limiter at -1 dBTP to prevent clipping.
-            </p>
-
             {gp.lufsEnabled && (
               <div className="space-y-2 pt-1">
                 {/* Preset selector */}

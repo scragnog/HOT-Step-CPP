@@ -11,6 +11,7 @@ import { usePersistedState } from '../../hooks/usePersistedState';
 import { adapterApi, modelApi } from '../../services/api';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { Slider } from '../shared/Slider';
+import { ParamLabel } from '../shared/ParamLabel';
 import { ModelSelect, getModelFormat } from './ModelSelect';
 import { formatDitModel } from './modelLabels';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
@@ -293,6 +294,11 @@ export const AdaptersDropdown: React.FC = () => {
               {/* Sum / Blend toggle — only meaningful with 2+ adapters */}
               {multiStack && (
                 <>
+                  <ParamLabel label="Stack Mode" rootClassName="flex"
+                    className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider"
+                    info={isBlend
+                      ? 'Per-adapter sliders are relative weights; effective scales are normalised so they sum to the combined strength below. Total strength stays constant as you add adapters.'
+                      : 'Per-adapter sliders are absolute scales, summed directly. The total can exceed 1 to deliberately over-drive the stack.'} />
                   <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
                     <button
                       type="button"
@@ -313,11 +319,6 @@ export const AdaptersDropdown: React.FC = () => {
                       Sum
                     </button>
                   </div>
-                  <p className="text-[10px] text-zinc-600 -mt-1">
-                    {isBlend
-                      ? 'Per-adapter sliders are relative weights; effective scales are normalised so they sum to the combined strength below. Keeps total strength constant as you add adapters.'
-                      : 'Per-adapter sliders are absolute scales, summed directly. Σ can exceed 1 to deliberately over-drive the stack.'}
-                  </p>
 
                   {/* Combined strength budget (blend mode only) */}
                   {isBlend && (
@@ -402,11 +403,9 @@ export const AdaptersDropdown: React.FC = () => {
               {/* Per-section masking hint (2+ adapters) */}
               {multiStack && (
                 <div className="px-2.5 py-2 rounded-lg bg-sky-500/5 border border-sky-500/15 space-y-1">
-                  <div className="text-[10px] font-semibold text-sky-300/80 uppercase tracking-wider">Per-section influence</div>
-                  <p className="text-[10px] text-zinc-500 leading-relaxed">
-                    Vary each adapter by lyric section — add a directive after a section header,
-                    keyed by trigger word. Forces runtime mode.
-                  </p>
+                  <ParamLabel label="Per-section influence" underline={false}
+                    className="text-[10px] font-semibold text-sky-300/80 uppercase tracking-wider"
+                    info="Vary each adapter by lyric section — add a directive after a section header, keyed by trigger word. Forces runtime mode." />
                   <pre className="text-[9px] text-zinc-400 font-mono whitespace-pre-wrap leading-snug bg-black/20 rounded p-1.5 m-0">{`[Verse]{${stackTriggerWords.split(', ').map((w, i) => `${w}=${i === 0 ? '1' : '0'}`).join('; ')}}
 [Chorus]{${stackTriggerWords.split(', ').map((w, i) => `${w}=${i === 0 ? '0' : '1'}`).join('; ')}}`}</pre>
 
@@ -428,19 +427,15 @@ export const AdaptersDropdown: React.FC = () => {
       {/* ═══ PLANNER ADAPTER (LM) — song-structure LoRA on the 5Hz planner ═══ */}
       <div className="space-y-2 pt-2 border-t border-zinc-200 dark:border-white/5">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider">
-            Planner Adapter (LM)
-          </span>
+          <ParamLabel label="Planner Adapter (LM)" underline={false}
+            className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider"
+            info="An artist-trained song-structure adapter applied to the planner LM at runtime. Pairs with the matching DiT adapter, which carries timbre — same trigger word." />
           <button type="button" onClick={refreshLmAdapters}
             className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
             title="Rescan adapters/lm for new planner adapters">
             <RotateCcw size={12} />
           </button>
         </div>
-        <p className="text-[10px] text-zinc-500 leading-relaxed -mt-1">
-          Artist-trained song-structure adapter applied to the planner LM at runtime.
-          Pairs with the matching DiT adapter (timbre) — same trigger word.
-        </p>
         <input
           type="text"
           value={gp.lmAdapterFolder}
@@ -548,12 +543,12 @@ export const AdaptersDropdown: React.FC = () => {
           <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-zinc-100/50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/5">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{t('adapter.noAdapterRender', 'No-adapter reference')}</span>
+                <ParamLabel
+                  label={t('adapter.noAdapterRender', 'No-adapter reference')}
+                  info={t('adapter.noAdapterRenderHint', 'Adds a raw 20-step render with the DiT adapter bypassed (LM adapter kept, no post-processing) — hear the song without the adapter via the playbar switch.')}
+                  className="text-xs font-medium text-zinc-700 dark:text-zinc-300" />
                 {gp.noAdapterRender && <span className="w-1.5 h-1.5 rounded-full bg-purple-400" title="Reference render active" />}
               </div>
-              <p className="text-[10px] text-zinc-600 mt-0.5">
-                {t('adapter.noAdapterRenderHint', 'Adds a raw 20-step render with the DiT adapter bypassed (LM adapter kept, no post-processing) — hear the song without the adapter via the playbar switch.')}
-              </p>
             </div>
             <button
               type="button"
@@ -572,7 +567,13 @@ export const AdaptersDropdown: React.FC = () => {
 
           {/* Loading Mode */}
           <div>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('adapter.loadingMode')}</label>
+            <ParamLabel label={t('adapter.loadingMode')} rootClassName="flex mb-1.5"
+              className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+              info={gp.adapterMode === 'runtime_lowrank'
+                ? "Applies raw adapter factors per step, never materializing full deltas — the lowest VRAM option (LoRA and LoKr; DoRA needs Merge). Basin re-base still works."
+                : gp.adapterMode === 'runtime'
+                ? 'Keeps base weights intact and applies the adapter per step. Same quality, slower inference, saves VRAM.'
+                : 'Merges the adapter at F32 precision. Best quality and fast inference, but uses more VRAM during synthesis.'} />
             <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
               <button
                 type="button"
@@ -602,21 +603,14 @@ export const AdaptersDropdown: React.FC = () => {
                 Low-Rank 🪶
               </button>
             </div>
-            <p className="text-[10px] text-zinc-600 mt-1">
-              {gp.adapterMode === 'runtime_lowrank'
-                ? 'Applies raw adapter factors per-step, never materializing full deltas — lowest VRAM (LoRA & LoKr; DoRA needs Merge). Basin re-base still works.'
-                : gp.adapterMode === 'runtime'
-                ? 'Keeps base weights intact, applies adapter per-step. Same quality, slower inference, saves VRAM.'
-                : 'Merges adapter at F32 precision. Best quality, fast inference, but uses more VRAM during synthesis.'}
-            </p>
           </div>
 
           {/* Merge VRAM — merge mode only (storage precision of the merged weights) */}
           {gp.adapterMode === 'merge' && (
             <div>
-              <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-                {t('adapter.mergeVram', 'Merge VRAM')}
-              </label>
+              <ParamLabel label={t('adapter.mergeVram', 'Merge VRAM')} rootClassName="flex mb-1.5"
+                className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                info="HQ keeps merged weights at F32, which grows a Q8 base by roughly 4x in VRAM. Low re-encodes them back to the base's native quant — base-model VRAM, one extra quantization round trip. FP4 bases always take the low path." />
               <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
                 {([
                   { v: false, label: 'HQ',      sub: 'Merged weights stored as F32 (best quality, ~4× VRAM on a Q8 base)' },
@@ -637,11 +631,6 @@ export const AdaptersDropdown: React.FC = () => {
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-zinc-600 mt-1">
-                HQ keeps merged weights at F32 (a Q8 base grows ~4× in VRAM). Low re-encodes them
-                back to the base&apos;s native quant — base-model VRAM, one extra quantization
-                round-trip. FP4 bases always use the low path.
-              </p>
             </div>
           )}
 
@@ -651,9 +640,9 @@ export const AdaptersDropdown: React.FC = () => {
               server-side, so this knob governs VRAM even from Merge/Low-Rank. */}
           {(gp.adapterMode === 'runtime' || gp.adapterMode === 'runtime_lowrank' || stackHasWindows) && (
             <div>
-              <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-                {t('adapter.runtimeQuant', 'Adapter VRAM')}
-              </label>
+              <ParamLabel label={t('adapter.runtimeQuant', 'Adapter VRAM')} rootClassName="flex mb-1.5"
+                className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                info="Quantizes the runtime adapter deltas in VRAM; nothing is written to disk. Q8 halves and Q4 quarters the VRAM per adapter, which lets more stacked adapters fit. Small quality cost, and safe when the base model is already 4-bit (NVFP4)." />
               <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
                 {([
                   { v: 'bf16', label: 'Full',   sub: 'BF16' },
@@ -675,11 +664,6 @@ export const AdaptersDropdown: React.FC = () => {
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-zinc-600 mt-1">
-                Quantizes the runtime adapter deltas in VRAM (nothing written to disk). Q8 halves /
-                Q4 quarters VRAM per adapter — lets more stacked adapters fit. Small quality cost;
-                safe when the base model is already 4-bit (NVFP4).
-              </p>
             </div>
           )}
 
@@ -712,12 +696,11 @@ export const AdaptersDropdown: React.FC = () => {
               {gp.rebaseSource && (
                 <>
                   <Slider label="Re-base Strength (β)" value={gp.rebaseBeta}
-                    onChange={gp.setRebaseBeta} min={0} max={1} step={0.05} showInput />
-                  <p className="text-[10px] text-zinc-600">
-                    Nudges the loaded base toward the adapter's home base so a heavy cross-base adapter
-                    stays coherent at full strength. β=1 = home-base behavior; lower keeps more of the
-                    loaded base's character.
-                  </p>
+                    onChange={gp.setRebaseBeta} min={0} max={1} step={0.05} showInput
+                    infoMeta="0–1"
+                    info={"Nudges the loaded base toward the adapter's home base so a heavy cross-base "
+                      + "adapter stays coherent at full strength. At 1 you get home-base behaviour; "
+                      + "lower keeps more of the loaded base's character."} />
                 </>
               )}
           </div>
@@ -745,9 +728,8 @@ export const AdaptersDropdown: React.FC = () => {
               </div>
               {GROUP_INFO.map(({ key, label, help }) => (
                 <div key={key}>
-                  <Slider label={label} value={gp.adapterGroupScales[key]}
+                  <Slider label={label} info={help} value={gp.adapterGroupScales[key]}
                     onChange={v => handleGroupScaleChange(key, v)} min={0} max={4} step={0.05} showInput />
-                  <p className="text-[10px] text-zinc-600 mt-0.5 -mb-1">{help}</p>
                 </div>
               ))}
             </div>

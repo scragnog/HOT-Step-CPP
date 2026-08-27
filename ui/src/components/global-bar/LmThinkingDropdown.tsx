@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { Save } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
+import { ParamLabel } from '../shared/ParamLabel';
 import { ToggleSwitch } from './BarSection';
 import { SeedManagerDrawer } from './SeedManagerDrawer';
 import type { LmRepMode } from '../../types';
@@ -153,18 +154,16 @@ export const LmThinkingDropdown: React.FC = () => {
             </button>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-zinc-500">Use DiT Seed</span>
+            <ParamLabel label="Use DiT Seed" className="text-xs text-zinc-500"
+              info={gp.lmSeedFollowsDit
+                ? 'Tied to the Generation seed — a locked seed makes both deterministic, a random one makes both random.'
+                : 'Drives caption, lyric and audio-code sampling independently of the Generation seed.'} />
             <ToggleSwitch checked={gp.lmSeedFollowsDit} onChange={gp.setLmSeedFollowsDit} accentColor="sky" />
           </div>
         </div>
         {!gp.lmSeedFollowsDit && (
           <SeedInput value={gp.lmSeed} onChange={gp.setLmSeed} className={inputClasses} />
         )}
-        <p className="text-[10px] text-zinc-500 mt-1">
-          {gp.lmSeedFollowsDit
-            ? 'Tied to the Generation seed — locked seed means both are deterministic, random means both are random.'
-            : 'Drives caption/lyrics/audio-code sampling independently of the Generation seed.'}
-        </p>
         <SeedManagerDrawer
           isOpen={seedDrawerOpen}
           onClose={() => setSeedDrawerOpen(false)}

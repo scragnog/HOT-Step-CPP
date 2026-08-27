@@ -8,6 +8,7 @@ import { Image, Download, X, Check, Loader2 } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { useAuth } from '../../context/AuthContext';
 import { ToggleSwitch } from './BarSection';
+import { ParamLabel } from '../shared/ParamLabel';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -118,7 +119,9 @@ export const CoverArtContent: React.FC = () => {
     <div className="space-y-3 mt-2">
       {/* Auto-generate toggle */}
       <div className="flex items-center justify-between">
-        <span className="text-sm text-zinc-600 dark:text-zinc-400">Auto-generate after creation</span>
+        <ParamLabel label="Auto-generate after creation"
+          className="text-sm text-zinc-600 dark:text-zinc-400"
+          info="Generates 1024x1024 album cover art with FLUX.2-klein-4B, using the song's subject or lyrics as the brief. Runs once audio generation finishes." />
         <ToggleSwitch
           checked={gp.coverArtEnabled}
           onChange={gp.setCoverArtEnabled}
@@ -213,11 +216,6 @@ export const CoverArtContent: React.FC = () => {
         </div>
       )}
 
-      <p className="text-[10px] text-zinc-600 leading-relaxed">
-        Generate 1024×1024 album cover art using FLUX.2-klein-4B.
-        Uses the song&apos;s subject or lyrics to create relevant artwork.
-        Runs after audio generation completes.
-      </p>
     </div>
   );
 };

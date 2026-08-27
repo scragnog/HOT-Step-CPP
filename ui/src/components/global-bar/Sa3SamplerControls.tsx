@@ -25,6 +25,7 @@ import React from 'react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { usePluginRegistry } from '../../hooks/usePluginRegistry';
 import { PluginControls } from './PluginControls';
+import { ParamLabel } from '../shared/ParamLabel';
 import { EditableSlider } from '../shared/EditableSlider';
 
 const selectClasses =
@@ -49,6 +50,29 @@ export const Sa3SamplerControls: React.FC = () => {
   const singleNfe = solvers.filter((s: any) => (s.nfe ?? 1) === 1);
   const multiNfe = solvers.filter((s: any) => (s.nfe ?? 1) > 1);
 
+  // A picker's hover card is the selected plugin's own description plus
+  // whatever caveat that selection earns. These used to be stacked paragraphs
+  // under the <select> — three of them at once, in the deepest nested panel in
+  // the app.
+  const join = (...parts: (string | false | undefined)[]) =>
+    parts.filter(Boolean).join(' ') || undefined;
+
+  const solverInfo = join(
+    solverMeta?.description,
+    gp.stableStepSolver && 'A solver replaces the ping-pong re-noise rather than stacking with it, so the refine becomes deterministic in that stage.',
+    (solverMeta?.nfe ?? 1) > 1 && 'Multi-evaluation solvers run extra forward passes per step; the refine scales roughly with NFE.',
+  );
+
+  const schedInfo = join(
+    schedMeta?.description,
+    gp.stableStepScheduler && 'Schedulers are written for full denoising, starting at 1.0. The refine only partly re-noises, so the curve is rescaled onto the refine strength — its shape is kept, its starting point is not.',
+  );
+
+  const guideInfo = join(
+    guideMeta?.description,
+    gp.stableStepGuidanceMode && 'SA3 has no unconditional branch (it was trained without CFG), so guidance runs with the conditional prediction as both inputs. APG-style modes pass straight through unchanged; only plugins that enhance the conditional prediction on its own do anything here.',
+  );
+
   return (
     <div className="space-y-3 pt-1">
       <EditableSlider
@@ -59,17 +83,16 @@ export const Sa3SamplerControls: React.FC = () => {
         tooltip="Sampler steps for the refine. 8 is the tuned default; more steps cost time roughly linearly."
       />
 
-      <p className="text-[10px] text-zinc-500 leading-relaxed">
-        The same solver, scheduler and guidance plugins the generation sampler uses, applied to
-        the StableStep refine. Leaving a picker on <em>Native</em> keeps the original tested path.
-        These are separate from the Generation dropdown's picks.
-      </p>
+      <ParamLabel label="Refine Sampler" underline={false}
+        className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider"
+        info={"The same solver, scheduler and guidance plugins the generation sampler uses, "
+          + "applied to the StableStep refine. Leaving a picker on Native keeps the original "
+          + "tested path. These picks are separate from the Generation dropdown's."} />
 
       {/* Solver */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          Refine solver
-        </label>
+        <ParamLabel label="Refine solver" info={solverInfo} rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
         <select
           className={selectClasses}
           value={gp.stableStepSolver ?? NATIVE}
@@ -91,21 +114,6 @@ export const Sa3SamplerControls: React.FC = () => {
             </optgroup>
           )}
         </select>
-        {solverMeta?.description && (
-          <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{solverMeta.description}</p>
-        )}
-        {gp.stableStepSolver && (
-          <p className="text-[10px] text-amber-500/90 mt-1 leading-relaxed">
-            A solver replaces the ping-pong re-noise rather than stacking with it — the refine
-            becomes deterministic in that stage.
-          </p>
-        )}
-        {(solverMeta?.nfe ?? 1) > 1 && (
-          <p className="text-[10px] text-amber-500/90 mt-1 leading-relaxed">
-            Multi-evaluation solvers run extra forward passes per step; the refine will scale
-            roughly with NFE.
-          </p>
-        )}
       </div>
 
       {solverMeta && solverMeta.params?.length > 0 && (
@@ -122,9 +130,8 @@ export const Sa3SamplerControls: React.FC = () => {
 
       {/* Scheduler */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          Refine schedule
-        </label>
+        <ParamLabel label="Refine schedule" info={schedInfo} rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
         <select
           className={selectClasses}
           value={gp.stableStepScheduler ?? NATIVE}
@@ -135,16 +142,6 @@ export const Sa3SamplerControls: React.FC = () => {
             <option key={s.name} value={s.name}>{s.display}</option>
           ))}
         </select>
-        {schedMeta?.description && (
-          <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{schedMeta.description}</p>
-        )}
-        {gp.stableStepScheduler && (
-          <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
-            Schedulers are written for full denoising (starting at 1.0). The refine only partly
-            re-noises, so the curve is rescaled onto the refine strength — its shape is kept, its
-            starting point is not.
-          </p>
-        )}
       </div>
 
       {schedMeta && schedMeta.params?.length > 0 && (
@@ -161,9 +158,8 @@ export const Sa3SamplerControls: React.FC = () => {
 
       {/* Guidance */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          Refine guidance
-        </label>
+        <ParamLabel label="Refine guidance" info={guideInfo} rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
         <select
           className={selectClasses}
           value={gp.stableStepGuidanceMode ?? NATIVE}
@@ -174,16 +170,6 @@ export const Sa3SamplerControls: React.FC = () => {
             <option key={g.name} value={g.name}>{g.display}</option>
           ))}
         </select>
-        {guideMeta?.description && (
-          <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{guideMeta.description}</p>
-        )}
-        {gp.stableStepGuidanceMode && (
-          <p className="text-[10px] text-amber-500/90 mt-1.5 leading-relaxed">
-            SA3 has no unconditional branch (it was trained without CFG), so guidance runs with the
-            conditional prediction as both inputs. APG-style modes pass straight through unchanged;
-            only plugins that enhance the conditional prediction on its own will do anything here.
-          </p>
-        )}
       </div>
 
       {gp.stableStepGuidanceMode && (

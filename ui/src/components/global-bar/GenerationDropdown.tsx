@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { RotateCcw, ChevronDown, Music2, Upload, Trash2, Zap } from 'lucide-react';
 import { useGlobalParams, useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { Slider } from '../shared/Slider';
+import { ParamLabel } from '../shared/ParamLabel';
 import { ToggleSwitch } from './BarSection';
 import { formatScheduler, formatReferenceName } from './modelLabels';
 import { usePersistedState } from '../../hooks/usePersistedState';
@@ -77,6 +78,22 @@ export const GenerationDropdown: React.FC = () => {
     : gp.scheduler.startsWith('power:') ? 'power'
     : gp.scheduler;
 
+  // Hoisted because a plugin's own description is now the picker label's hover
+  // card rather than a paragraph under the <select>, so the label needs the
+  // metadata as well as the body.
+  const solverMeta = findSolver(gp.inferMethod);
+  const schedMeta = registry.schedulers.find(sc => sc.name === schedulerKey);
+  const guideMeta = findGuidance(gp.guidanceMode);
+
+  // The four DCW modes differ enough that one blurb cannot cover them all, so
+  // this hover card follows the selection.
+  const DCW_MODE_INFO: Record<string, string> = {
+    low: 'Corrects low-frequency wavelet bands - tightens bass, kick and rhythm without touching treble.',
+    high: 'Corrects high-frequency wavelet bands - sharpens hi-hats, vocals and presence.',
+    double: 'Independent correction on both low and high bands, with separate scalers for each.',
+    pix: 'Applies correction directly in latent space, bypassing wavelet decomposition. More uniform but less targeted.',
+  };
+
   return (
     <div className="space-y-3">
       <Slider label="Inference Steps" value={gp.inferenceSteps}
@@ -99,7 +116,9 @@ export const GenerationDropdown: React.FC = () => {
           <div className="flex items-center gap-2">
             <ChevronDown size={12} className={`text-amber-400 transition-transform duration-200 ${perfOpen ? 'rotate-180' : ''}`} />
             <Zap size={14} className={(gp.cfgCutoffRatio < 1 || gp.lmCfgCutoffRatio < 1 || gp.cacheRatio > 0) ? 'text-amber-400' : 'text-zinc-500'} />
-            <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Performance</span>
+            <ParamLabel label="Performance" underline={false}
+              className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider"
+              info="Three ways to buy speed with quality. All three are off by default, and all three are safe to leave alone." />
           </div>
           {(gp.cfgCutoffRatio < 1 || gp.lmCfgCutoffRatio < 1 || gp.cacheRatio > 0) && (
             <span className="text-[10px] text-amber-400/60 font-mono">
@@ -114,20 +133,17 @@ export const GenerationDropdown: React.FC = () => {
         {perfOpen && (
           <div className="px-3 pb-3 space-y-3 border-t border-zinc-200 dark:border-white/5">
             <Slider label="CFG Cutoff" value={gp.cfgCutoffRatio}
-              onChange={gp.setCfgCutoffRatio} min={0} max={1} step={0.05} showInput />
-            <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
-              Ratio of DiT steps using full guidance. Lower = faster but may reduce prompt adherence. 0.5 ≈ 20% speedup.
-            </p>
+              onChange={gp.setCfgCutoffRatio} min={0} max={1} step={0.05} showInput
+              infoMeta="0–1 · default 1"
+              info="Ratio of DiT steps using full guidance. Lower = faster but may reduce prompt adherence. 0.5 ≈ 20% speedup." />
             <Slider label="LM CFG Cutoff" value={gp.lmCfgCutoffRatio}
-              onChange={gp.setLmCfgCutoffRatio} min={0.3} max={1} step={0.05} showInput />
-            <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
-              Fraction of LM audio code tokens using guidance. Lower = faster but may reduce prompt adherence. 0.7 = ~15% LM speedup.
-            </p>
+              onChange={gp.setLmCfgCutoffRatio} min={0.3} max={1} step={0.05} showInput
+              infoMeta="0.3–1 · default 1"
+              info="Fraction of LM audio code tokens using guidance. Lower = faster but may reduce prompt adherence. 0.7 = ~15% LM speedup." />
             <Slider label="Step Cache" value={gp.cacheRatio}
-              onChange={gp.setCacheRatio} min={0} max={0.7} step={0.05} showInput />
-            <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
-              Skip redundant forward passes by reusing velocity. Higher = faster but may reduce quality. Try 0.3–0.5.
-            </p>
+              onChange={gp.setCacheRatio} min={0} max={0.7} step={0.05} showInput
+              infoMeta="0–0.7 · default 0"
+              info="Skip redundant forward passes by reusing velocity. Higher = faster but may reduce quality. Try 0.3–0.5." />
             <button type="button" onClick={() => { gp.setCfgCutoffRatio(1); gp.setLmCfgCutoffRatio(1); gp.setCacheRatio(0); }}
               className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 transition-colors">
               <RotateCcw size={10} /> Reset to defaults
@@ -139,7 +155,8 @@ export const GenerationDropdown: React.FC = () => {
       {/* Shift with Auto toggle */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Shift</label>
+          <ParamLabel label="Shift" className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+            info="Timestep shift (sigma). Biases the schedule toward the noisy end, trading fine detail for structure. Auto derives it from the duration and the step count." />
           <button
             onClick={() => {
               if (gp.shift === -1) {
@@ -177,7 +194,9 @@ export const GenerationDropdown: React.FC = () => {
 
       {/* Solver */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('gen.solver')}</label>
+        <ParamLabel label={t('gen.solver')} info={solverMeta?.description}
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          rootClassName="flex mb-1.5" />
         <select className={selectClasses} value={gp.inferMethod}
           onChange={e => gp.setInferMethod(e.target.value)}>
           {registry.solvers.length > 0 ? (
@@ -210,13 +229,6 @@ export const GenerationDropdown: React.FC = () => {
             </>
           )}
         </select>
-        {/* Solver description from Lua plugin metadata */}
-        {(() => {
-          const solver = findSolver(gp.inferMethod);
-          return solver?.description ? (
-            <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{solver.description}</p>
-          ) : null;
-        })()}
       </div>
 
       {/* ── Dynamic Solver Controls ── */}
@@ -238,7 +250,9 @@ export const GenerationDropdown: React.FC = () => {
 
       {/* Scheduler */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('gen.schedule')}</label>
+        <ParamLabel label={t('gen.schedule')} info={schedMeta?.description}
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          rootClassName="flex mb-1.5" />
         <select className={selectClasses} value={schedulerKey}
           onChange={e => {
             const v = e.target.value;
@@ -270,13 +284,6 @@ export const GenerationDropdown: React.FC = () => {
             </>
           )}
         </select>
-        {/* Scheduler description from Lua plugin metadata */}
-        {(() => {
-          const sched = registry.schedulers.find(s => s.name === schedulerKey);
-          return sched?.description ? (
-            <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{sched.description}</p>
-          ) : null;
-        })()}
       </div>
 
       {/* ── Dynamic Scheduler Controls ── */}
@@ -307,7 +314,9 @@ export const GenerationDropdown: React.FC = () => {
         return (
           <div className="rounded-xl border border-teal-500/20 bg-teal-500/5 p-3 space-y-3 transition-all">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider">Beta Distribution</span>
+              <ParamLabel label="Beta Distribution" underline={false}
+                className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider"
+                info="Lower alpha puts more density at the edges. Lower beta front-loads the schedule, favouring structure over detail." />
               <button type="button" onClick={() => updateBeta(0.5, 0.7)}
                 className="flex items-center gap-1 text-[10px] text-teal-400 hover:text-teal-300 transition-colors">
                 <RotateCcw size={10} /> Reset
@@ -317,7 +326,6 @@ export const GenerationDropdown: React.FC = () => {
               onChange={v => updateBeta(v, betaParam)} min={0.1} max={2.0} step={0.05} showInput />
             <Slider label="Beta (β)" value={betaParam}
               onChange={v => updateBeta(alpha, v)} min={0.1} max={2.0} step={0.05} showInput />
-            <p className="text-[10px] text-zinc-500">Lower α = more density at edges. Lower β = front-loaded (structural focus).</p>
           </div>
         );
       })()}
@@ -328,7 +336,9 @@ export const GenerationDropdown: React.FC = () => {
         return (
           <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-3 space-y-3 transition-all">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-orange-400 uppercase tracking-wider">Power Law</span>
+              <ParamLabel label="Power Law" underline={false}
+                className="text-[10px] font-semibold text-orange-400 uppercase tracking-wider"
+                info="Above 1 front-loads the schedule (structure). At 1 it is linear. Below 1 it back-loads (detail)." />
               <button type="button" onClick={() => gp.setScheduler('power:2.00')}
                 className="flex items-center gap-1 text-[10px] text-orange-400 hover:text-orange-300 transition-colors">
                 <RotateCcw size={10} /> Reset
@@ -336,7 +346,6 @@ export const GenerationDropdown: React.FC = () => {
             </div>
             <Slider label="Exponent" value={exponent}
               onChange={v => gp.setScheduler(`power:${v.toFixed(2)}`)} min={0.25} max={4.0} step={0.05} showInput />
-            <p className="text-[10px] text-zinc-500">p&gt;1 = front-loaded (structure), p=1 = linear, p&lt;1 = back-loaded (detail).</p>
           </div>
         );
       })()}
@@ -424,7 +433,9 @@ export const GenerationDropdown: React.FC = () => {
 
       {/* Guidance Mode */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('gen.guidance')}</label>
+        <ParamLabel label={t('gen.guidance')} info={guideMeta?.description}
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          rootClassName="flex mb-1.5" />
         <select className={selectClasses} value={gp.guidanceMode}
           onChange={e => gp.setGuidanceMode(e.target.value)}>
           {registry.guidance.length > 0 ? (
@@ -440,20 +451,15 @@ export const GenerationDropdown: React.FC = () => {
             </>
           )}
         </select>
-        {/* Guidance description from Lua plugin metadata */}
-        {(() => {
-          const guide = findGuidance(gp.guidanceMode);
-          return guide?.description ? (
-            <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{guide.description}</p>
-          ) : null;
-        })()}
       </div>
 
       {/* ── APG Sub-Controls (native C++ path — always show for APG) ── */}
       {gp.guidanceMode === 'apg' && (
         <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 space-y-3 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider">APG Parameters</span>
+            <ParamLabel label="APG Parameters" underline={false}
+              className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider"
+              info="Momentum smooths guidance across steps. Norm threshold clips gradient magnitude per channel." />
             <button type="button" onClick={() => {
               gp.setApgMomentum(0.75);
               gp.setApgNormThreshold(2.5);
@@ -465,7 +471,6 @@ export const GenerationDropdown: React.FC = () => {
             onChange={gp.setApgMomentum} min={0} max={1} step={0.01} showInput />
           <Slider label="Norm Threshold" value={gp.apgNormThreshold}
             onChange={gp.setApgNormThreshold} min={0} max={10} step={0.1} showInput />
-          <p className="text-[10px] text-zinc-500">Momentum smooths guidance across steps. Norm threshold clips gradient magnitude per channel.</p>
         </div>
       )}
 
@@ -496,7 +501,9 @@ export const GenerationDropdown: React.FC = () => {
           <div className="flex items-center gap-2">
             <ChevronDown size={12} className={`text-teal-400 transition-transform duration-200 ${timbreOpen ? 'rotate-180' : ''}`} />
             <Music2 size={14} className={gp.timbreAudioPath ? 'text-teal-400' : 'text-zinc-500'} />
-            <span className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider">Timbre Reference</span>
+            <ParamLabel label="Timbre Reference" underline={false}
+              className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider"
+              info="A dedicated audio track for timbre conditioning. The reference is VAE-encoded and fed into the DiT during synthesis, guiding tone and texture. With none set, the mastering reference is used instead whenever the timbre toggle is on." />
           </div>
           {gp.timbreAudioPath ? (
             <span className="text-[10px] text-teal-400/60 font-mono truncate max-w-[120px]">
@@ -510,12 +517,6 @@ export const GenerationDropdown: React.FC = () => {
         </button>
         {timbreOpen && (
           <div className="px-3 pb-3 space-y-3 border-t border-zinc-200 dark:border-white/5">
-            <p className="text-[10px] text-zinc-500 leading-relaxed mt-2">
-              Set a dedicated audio track for timbre conditioning. The reference is VAE-encoded
-              and fed into the DiT during synthesis, guiding tone and texture.
-              If not set, the mastering reference is used when the timbre toggle is enabled.
-            </p>
-
             {/* Reference selector */}
             {timbreRefs.length > 0 ? (
               <select
@@ -590,7 +591,9 @@ export const GenerationDropdown: React.FC = () => {
             <ChevronDown size={12} className={`text-emerald-400 transition-transform duration-200 ${dcwOpen ? 'rotate-180' : ''}`} />
             <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
               <ToggleSwitch checked={gp.dcwEnabled} onChange={gp.setDcwEnabled} accentColor="emerald" />
-              <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">DCW Correction</span>
+              <ParamLabel label="DCW Correction" underline={false}
+                className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider"
+                info="Wavelet-domain SNR-t bias correction (CVPR 2026). The scaler is dynamically modulated by timestep." />
             </div>
           </div>
           {gp.dcwEnabled && (
@@ -607,22 +610,15 @@ export const GenerationDropdown: React.FC = () => {
         {dcwOpen && gp.dcwEnabled && (
           <div className="px-3 pb-3 space-y-3">
             <div>
-              <label className="block text-[10px] text-emerald-400 mb-1">Correction Mode</label>
-              <div className="relative group/dcw">
-                <select className={selectClasses} value={gp.dcwMode}
-                  onChange={e => gp.setDcwMode(e.target.value)}>
-                  <option value="low">Low-Frequency</option>
-                  <option value="high">High-Frequency</option>
-                  <option value="double">Both (Low + High)</option>
-                  <option value="pix">Pixel-Space (No Wavelets)</option>
-                </select>
-                <div className="mt-1.5 text-[10px] text-zinc-500 leading-relaxed">
-                  {gp.dcwMode === 'low' && '🎵 Corrects low-frequency wavelet bands — tightens bass, kick and rhythm without touching treble.'}
-                  {gp.dcwMode === 'high' && '✨ Corrects high-frequency wavelet bands — sharpens hi-hats, vocals and presence.'}
-                  {gp.dcwMode === 'double' && '🎛️ Independent correction on both low and high bands with separate scalers.'}
-                  {gp.dcwMode === 'pix' && '📐 Applies correction directly in latent space, bypassing wavelet decomposition. More uniform but less targeted.'}
-                </div>
-              </div>
+              <ParamLabel label="Correction Mode" info={DCW_MODE_INFO[gp.dcwMode]}
+                className="text-[10px] text-emerald-400" rootClassName="flex mb-1" />
+              <select className={selectClasses} value={gp.dcwMode}
+                onChange={e => gp.setDcwMode(e.target.value)}>
+                <option value="low">Low-Frequency</option>
+                <option value="high">High-Frequency</option>
+                <option value="double">Both (Low + High)</option>
+                <option value="pix">Pixel-Space (No Wavelets)</option>
+              </select>
             </div>
             {(gp.dcwMode === 'low' || gp.dcwMode === 'double' || gp.dcwMode === 'pix') && (
               <Slider label={gp.dcwMode === 'double' ? 'Low-Freq Scaler' : 'Scaler'} value={gp.dcwLowScaler}
@@ -632,9 +628,6 @@ export const GenerationDropdown: React.FC = () => {
               <Slider label={gp.dcwMode === 'double' ? 'High-Freq Scaler' : 'Scaler'} value={gp.dcwHighScaler}
                 onChange={gp.setDcwHighScaler} min={0} max={1} step={0.01} showInput />
             )}
-            <p className="text-[10px] text-zinc-500">
-              Wavelet-domain SNR-t bias correction (CVPR 2026). Scaler is dynamically modulated by timestep.
-            </p>
           </div>
         )}
       </div>
@@ -650,7 +643,9 @@ export const GenerationDropdown: React.FC = () => {
             <ChevronDown size={12} className={`text-amber-400 transition-transform duration-200 ${autoTrimOpen ? 'rotate-180' : ''}`} />
             <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
               <ToggleSwitch checked={gp.autoTrimEnabled} onChange={gp.setAutoTrimEnabled} accentColor="amber" />
-              <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Auto-Trim Endings</span>
+              <ParamLabel label="Auto-Trim Endings" underline={false}
+                className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider"
+                info="Generates extra audio beyond the requested duration, then trims at the natural song ending. The fade-out only applies when no clean ending is found and the trim is forced at the original duration." />
             </div>
           </div>
           {gp.autoTrimEnabled && (
@@ -669,10 +664,6 @@ export const GenerationDropdown: React.FC = () => {
               onChange={gp.setDurationBuffer} min={5} max={30} step={1} showInput />
             <Slider label="Fade-Out (seconds)" value={gp.autoTrimFadeMs / 1000}
               onChange={(v: number) => gp.setAutoTrimFadeMs(Math.round(v * 1000))} min={0.5} max={5} step={0.1} showInput />
-            <p className="text-[10px] text-zinc-500">
-              Generates extra audio beyond the requested duration, then trims at the natural song ending.
-              Fade-out only applies when no clean ending is detected (forced trim at original duration).
-            </p>
           </div>
         )}
       </div>
@@ -704,11 +695,11 @@ export const GenerationDropdown: React.FC = () => {
             <Slider label="Latent Rescale" value={gp.latentRescale}
               onChange={gp.setLatentRescale} min={0.1} max={3} step={0.01} showInput />
             <div>
-              <label className="block text-[10px] text-indigo-400 mb-1">Custom Timesteps</label>
+              <ParamLabel label="Custom Timesteps" className="text-[10px] text-indigo-400" rootClassName="flex mb-1"
+                info="CSV of descending floats. Overrides the schedule and the step count when set." />
               <input className={inputClasses} value={gp.customTimesteps}
                 onChange={e => gp.setCustomTimesteps(e.target.value)}
                 placeholder="0.97,0.76,0.615,0.5,0.395,0.28,0.18,0.085,0" />
-              <p className="text-[10px] text-zinc-500 mt-1">CSV of descending floats. Overrides schedule + step count when set.</p>
             </div>
           </div>
         )}
@@ -725,7 +716,9 @@ export const GenerationDropdown: React.FC = () => {
             <ChevronDown size={12} className={`text-amber-400 transition-transform duration-200 ${denoiserOpen ? 'rotate-180' : ''}`} />
             <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
               <ToggleSwitch checked={gp.denoiseStrength > 0} onChange={(on) => gp.setDenoiseStrength(on ? 0.5 : 0)} accentColor="amber" />
-              <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Denoiser</span>
+              <ParamLabel label="Denoiser" underline={false}
+                className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider"
+                info="Spectral gate that removes VAE fuzz after decode. Higher strength = more aggressive noise suppression." />
             </div>
           </div>
           {gp.denoiseStrength > 0 && (
@@ -747,9 +740,6 @@ export const GenerationDropdown: React.FC = () => {
               onChange={gp.setDenoiseSmoothing} min={0} max={1} step={0.01} showInput />
             <Slider label="Mix" value={gp.denoiseMix}
               onChange={gp.setDenoiseMix} min={0} max={1} step={0.01} showInput />
-            <p className="text-[10px] text-zinc-500">
-              Spectral gate removes VAE fuzz after decode. Higher strength = more aggressive noise suppression.
-            </p>
           </div>
         )}
       </div>
@@ -765,7 +755,9 @@ export const GenerationDropdown: React.FC = () => {
             <ChevronDown size={12} className={`text-teal-400 transition-transform duration-200 ${lssOpen ? 'rotate-180' : ''}`} />
             <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
               <ToggleSwitch checked={lssStrength > 0} onChange={(on) => setLssStrength(on ? 0.65 : 0)} accentColor="teal" />
-              <span className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider">LSS</span>
+              <ParamLabel label="LSS" underline={false}
+                className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider"
+                info="Latent Spectral Suppressor (MDMAchine): gates quiet latent channels before VAE decode. Channels below the variance threshold are attenuated toward 1 minus strength." />
             </div>
           </div>
           {lssStrength > 0 && (
@@ -789,10 +781,6 @@ export const GenerationDropdown: React.FC = () => {
               <span className="text-xs text-zinc-500">DC Remove</span>
               <ToggleSwitch checked={lssDcRemove} onChange={setLssDcRemove} accentColor="teal" />
             </div>
-            <p className="text-[10px] text-zinc-500">
-              Latent Spectral Suppressor (MDMAchine): gates quiet latent channels before VAE decode.
-              Channels below the variance threshold are attenuated toward 1&minus;strength.
-            </p>
           </div>
         )}
       </div>

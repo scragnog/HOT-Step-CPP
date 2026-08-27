@@ -26,6 +26,7 @@ import {
   useBackendExtensions,
   useBackendExtensionSummary,
 } from './BackendExtensionControls';
+import { ParamLabel } from '../shared/ParamLabel';
 
 export const BackendLmDropdown: React.FC = () => {
   const displayName = useBackendStore(s =>
@@ -42,11 +43,11 @@ export const BackendLmDropdown: React.FC = () => {
 
   return (
     <div className="space-y-3">
-      <p className="text-[10px] text-zinc-500 leading-relaxed">
-        {displayName ?? 'This backend'} plans the whole song as a token stream
-        before a single sample is rendered — these are that planner's controls.
-        It always runs; there is no render without it.
-      </p>
+      <ParamLabel label="Planner" underline={false}
+        className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider"
+        info={`${displayName ?? 'This backend'} plans the whole song as a token stream before a `
+          + `single sample is rendered — these are that planner's controls. It always runs; `
+          + `there is no render without it.`} />
       <BackendExtensionControls group="lm" accentColor="purple" />
     </div>
   );

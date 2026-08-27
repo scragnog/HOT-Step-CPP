@@ -6,10 +6,16 @@
 //
 // Renders as a collapsible accordion, collapsed by default.
 // Open/closed state is persisted per-plugin via localStorage.
+//
+// A param's `hint` is its explanation and now lands in a hover card off a "?"
+// beside the label, not as a paragraph underneath. Plugins need no change for
+// this — the same `hint` field feeds it. `text` params keep using the hint as
+// placeholder text too, since an empty box with no example is hard to guess at.
 
 import React from 'react';
 import { RotateCcw, ChevronDown } from 'lucide-react';
 import { Slider } from '../shared/Slider';
+import { ParamLabel } from '../shared/ParamLabel';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import type { PluginParamSchema } from '../../types/pluginTypes';
 
@@ -112,6 +118,7 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
                   <div key={p.key}>
                     <Slider
                       label={p.label}
+                      info={p.hint}
                       value={parseFloat(val) || 0}
                       onChange={v => onChange(fullKey, String(v))}
                       min={p.min ?? 0}
@@ -119,14 +126,13 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
                       step={p.step ?? 0.01}
                       showInput
                     />
-                    {p.hint && <p className="text-[10px] text-zinc-500 mt-0.5">{p.hint}</p>}
                   </div>
                 );
 
               case 'select':
                 return (
                   <div key={p.key}>
-                    <label className={`block text-[10px] ${a.text} mb-1`}>{p.label}</label>
+                    <ParamLabel label={p.label} info={p.hint} className={`text-[10px] ${a.text}`} rootClassName="flex mb-1" />
                     <select
                       className={selectClasses}
                       value={val}
@@ -136,14 +142,13 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
-                    {p.hint && <p className="text-[10px] text-zinc-500 mt-0.5">{p.hint}</p>}
                   </div>
                 );
 
               case 'toggle':
                 return (
                   <div key={p.key} className="flex items-center justify-between">
-                    <span className="text-xs text-zinc-400">{p.label}</span>
+                    <ParamLabel label={p.label} info={p.hint} className="text-xs text-zinc-400" />
                     <button
                       type="button"
                       onClick={() => onChange(fullKey, val === 'true' ? 'false' : 'true')}
@@ -161,7 +166,7 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
               case 'text':
                 return (
                   <div key={p.key}>
-                    <label className={`block text-[10px] ${a.text} mb-1`}>{p.label}</label>
+                    <ParamLabel label={p.label} info={p.hint} className={`text-[10px] ${a.text}`} rootClassName="flex mb-1" />
                     <input
                       className={inputClasses}
                       value={val}

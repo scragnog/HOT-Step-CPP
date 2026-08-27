@@ -12,8 +12,14 @@
 // an absolutely-positioned card. Flips above the label near the bottom of the
 // viewport, and clamps to the horizontal edges.
 //
-// Keyboard/touch: the icon is a real <button>, so the card also opens on focus
-// and on tap, not hover alone.
+// Keyboard/touch: the icon is focusable and handles Enter/Space, so the card
+// also opens on focus and on tap, not hover alone. It is a <span role="button">
+// rather than a <button> on purpose — the global bar's accordion headers are
+// themselves <button>s, and a nested <button> is invalid HTML that the parser
+// reparents out of its ancestor, silently breaking the accordion's click
+// target. A span nests anywhere and keeps the same semantics for a screen
+// reader. Clicks stopPropagation for the same reason: pointing at "?" inside a
+// header must not toggle the section.
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
@@ -30,6 +36,14 @@ interface Props {
   meta?: string;
   /** Classes for the label text. Defaults to the studios' field-label style. */
   className?: string;
+  /** Layout classes for the wrapper (margins, `block`, alignment). Keep these
+   *  off `className`, which lands on the inner text span where a `block` or a
+   *  margin has no effect inside the flex row. */
+  rootClassName?: string;
+  /** Dotted underline hinting the label is explainable. Off for section
+   *  headings, where the whole row is already an affordance and the underline
+   *  reads as noise under uppercase tracking. */
+  underline?: boolean;
 }
 
 interface CardPos {
@@ -43,6 +57,8 @@ export const ParamLabel: React.FC<Props> = ({
   info,
   meta,
   className = 'text-xs font-semibold text-zinc-600 dark:text-zinc-400',
+  rootClassName = '',
+  underline = true,
 }) => {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<CardPos | null>(null);
@@ -88,31 +104,38 @@ export const ParamLabel: React.FC<Props> = ({
     };
   }, [open, measure]);
 
-  if (!info) return <span className={className}>{label}</span>;
+  if (!info) return <span className={`${className} ${rootClassName}`}>{label}</span>;
 
   const show = () => { cancelHide(); setOpen(true); };
 
   return (
     <span
       ref={anchorRef}
-      className="inline-flex items-center gap-1 w-fit"
+      className={`inline-flex items-center gap-1 w-fit ${rootClassName}`}
       onMouseEnter={show}
       onMouseLeave={scheduleHide}
     >
-      <span className={`${className} cursor-help decoration-dotted underline underline-offset-[3px] decoration-zinc-400/40`}>
+      <span className={`${className} cursor-help${underline ? ' decoration-dotted underline underline-offset-[3px] decoration-zinc-400/40' : ''}`}>
         {label}
       </span>
-      <button
-        type="button"
+      <span
+        role="button"
+        tabIndex={0}
         aria-label={`About ${label}`}
         aria-expanded={open}
         onFocus={show}
         onBlur={scheduleHide}
-        onClick={(e) => { e.preventDefault(); setOpen(o => !o); }}
-        className="shrink-0 text-zinc-400/70 hover:text-amber-500 focus:text-amber-500 outline-none transition-colors"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o); }}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(o => !o);
+        }}
+        className="shrink-0 inline-flex text-zinc-400/70 hover:text-amber-500 focus:text-amber-500 outline-none transition-colors cursor-help"
       >
         <HelpCircle size={12} />
-      </button>
+      </span>
 
       {open && pos && ReactDOM.createPortal(
         <div

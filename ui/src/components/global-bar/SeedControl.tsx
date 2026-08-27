@@ -11,6 +11,7 @@ import { Save } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { ToggleSwitch } from './BarSection';
 import { SeedManagerDrawer } from './SeedManagerDrawer';
+import { ParamLabel } from '../shared/ParamLabel';
 
 /** Seed input with local string buffer — prevents parseInt("-") snap-back. */
 const SeedInput: React.FC<{ value: number; onChange: (v: number) => void; className: string }> = ({
@@ -43,16 +44,14 @@ export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({
           </button>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-zinc-500">Random</span>
+          <ParamLabel label="Random" className="text-xs text-zinc-500"
+            info={hint ?? 'Drives audio synthesis (DiT). Varies per track during batch generation. See LM Seed for caption, lyrics and code sampling.'} />
           <ToggleSwitch checked={gp.randomSeed} onChange={gp.setRandomSeed} accentColor="sky" />
         </div>
       </div>
       {!gp.randomSeed && (
         <SeedInput value={gp.seed} onChange={gp.setSeed} className={inputClasses} />
       )}
-      <p className="text-[10px] text-zinc-500 mt-1">
-        {hint ?? 'Drives audio synthesis (DiT). Varies per track during batch generation. See LM Seed for caption/lyrics/code sampling.'}
-      </p>
       <SeedManagerDrawer
         isOpen={seedDrawerOpen}
         onClose={() => setSeedDrawerOpen(false)}

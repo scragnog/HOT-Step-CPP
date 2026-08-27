@@ -1,7 +1,13 @@
 // Slider.tsx — Reusable slider with label, value display, and optional number input
 // Ported to Tailwind styling.
+//
+// Pass `info` to explain the knob. The global param bar's dropdowns used to
+// print that explanation as a paragraph under every slider, which was useful
+// and enormous — five knobs of prose and the panel outgrew the screen. It now
+// hangs off a "?" beside the label instead (see ParamLabel).
 
 import React from 'react';
+import { ParamLabel } from './ParamLabel';
 
 interface SliderProps {
   label: string;
@@ -12,6 +18,10 @@ interface SliderProps {
   step: number;
   suffix?: string;
   showInput?: boolean;
+  /** What the knob does, shown in a hover card off a "?" beside the label. */
+  info?: string;
+  /** Optional one-liner above the explanation — default, range, units. */
+  infoMeta?: string;
   /** Extra control pinned to the right of the header row, beside the value.
    *  For per-knob modes that aren't points on the scale — Duration's Auto,
    *  where the backend decides the number instead of the user. */
@@ -20,11 +30,17 @@ interface SliderProps {
 
 export const Slider: React.FC<SliderProps> = ({
   label, value, onChange, min, max, step, suffix = '', showInput = false, headerRight,
+  info, infoMeta,
 }) => {
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{label}</label>
+        <ParamLabel
+          label={label}
+          info={info}
+          meta={infoMeta}
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+        />
         <div className="flex items-center gap-1.5">
         {showInput ? (
           <input

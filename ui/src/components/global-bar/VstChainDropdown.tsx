@@ -18,6 +18,7 @@ import {
   BookmarkPlus, Check, RefreshCw, AlertTriangle,
 } from 'lucide-react';
 import { useVstChainStore } from '../../stores/vstChainStore';
+import { ParamLabel } from '../shared/ParamLabel';
 import { usePlaybackSelector, togglePlay } from '../../stores/playbackStore';
 
 // Format seconds as mm:ss
@@ -364,9 +365,11 @@ export const VstChainDropdown: React.FC = () => {
       {safeChain.length > 0 ? (
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">
-              Plugin Chain ({enabledCount}/{safeChain.length} active)
-            </div>
+            <ParamLabel
+              label={`Plugin Chain (${enabledCount}/${safeChain.length} active)`}
+              underline={false}
+              className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium"
+              info="VST3 plugins are applied to the generated audio in chain order. Open a plugin's native UI with the link icon to configure it — settings are saved automatically when you close that window." />
             {monitoring && !pendingGuiChanges && (
               <button
                 onClick={handleRestart}
@@ -456,12 +459,6 @@ export const VstChainDropdown: React.FC = () => {
         </button>
       )}
 
-      {/* Info */}
-      <p className="text-[10px] text-zinc-600 leading-relaxed">
-        VST3 plugins are applied to generated audio in chain order.
-        Click <ExternalLink size={9} className="inline" /> to open the plugin's native UI
-        and configure settings — they're saved automatically when you close the window.
-      </p>
     </div>
   );
 };

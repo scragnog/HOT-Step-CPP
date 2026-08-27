@@ -10,6 +10,7 @@ import { modelApi } from '../../services/api';
 import { formatDitModel, formatLmModel, formatVaeModel, formatEmbeddingModel, getDitModelDescription, getLmModelDescription, getVaeModelDescription } from './modelLabels';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
 import { ModelSelect, getModelFormat } from './ModelSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 import type { AceModels } from '../../types';
 
 type ModelFormat = 'gguf' | 'safetensors' | 'onnx';
@@ -119,7 +120,8 @@ export const ModelsDropdown: React.FC = () => {
 
       {/* DiT Model */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('models.ditModel')}</label>
+        <ParamLabel label={t('models.ditModel')} info={getDitModelDescription(gp.ditModel)} rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
         <ModelSelect
           id="dit-model-select"
           value={gp.ditModel}
@@ -128,14 +130,12 @@ export const ModelsDropdown: React.FC = () => {
           formatLabel={formatDitModel}
           placeholder={t('common.loading')}
         />
-        {getDitModelDescription(gp.ditModel) && (
-          <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{getDitModelDescription(gp.ditModel)}</p>
-        )}
       </div>
 
       {/* LM Model */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('models.lmModel')}</label>
+        <ParamLabel label={t('models.lmModel')} info={getLmModelDescription(gp.lmModel)} rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
         <ModelSelect
           id="lm-model-select"
           value={gp.lmModel}
@@ -144,9 +144,6 @@ export const ModelsDropdown: React.FC = () => {
           formatLabel={formatLmModel}
           placeholder={t('common.loading')}
         />
-        {getLmModelDescription(gp.lmModel) && (
-          <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{getLmModelDescription(gp.lmModel)}</p>
-        )}
       </div>
 
       {/* Planner Adapter (LM) moved to the Adapters dropdown, alongside the
@@ -155,7 +152,8 @@ export const ModelsDropdown: React.FC = () => {
       {/* VAE Model — only show when multiple VAEs are available */}
       {vaeModels.length > 1 && (
         <div>
-          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('models.vaeDecoder')}</label>
+          <ParamLabel label={t('models.vaeDecoder')} info={getVaeModelDescription(gp.vaeModel)} rootClassName="flex mb-1.5"
+            className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
           <ModelSelect
             id="vae-model-select"
             value={gp.vaeModel}
@@ -164,9 +162,6 @@ export const ModelsDropdown: React.FC = () => {
             formatLabel={formatVaeModel}
             placeholder={t('common.loading')}
           />
-          {getVaeModelDescription(gp.vaeModel) && (
-            <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{getVaeModelDescription(gp.vaeModel)}</p>
-          )}
         </div>
       )}
 

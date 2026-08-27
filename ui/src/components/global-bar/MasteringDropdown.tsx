@@ -11,6 +11,7 @@ import { masteringApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { ToggleSwitch } from './BarSection';
 import { formatReferenceName } from './modelLabels';
+import { ParamLabel } from '../shared/ParamLabel';
 
 interface ReferenceTrack {
   name: string;
@@ -78,9 +79,9 @@ export const MasteringDropdown: React.FC = () => {
     <div className="space-y-3">
       {/* Reference selector */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          {t('mastering.referenceTrack')}
-        </label>
+        <ParamLabel label={t('mastering.referenceTrack')} rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          info="The generated audio is mastered to match the RMS level, frequency spectrum and dynamic characteristics of this track." />
         {references.length > 0 ? (
           <select
             className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 outline-none transition-colors cursor-pointer"
@@ -152,24 +153,14 @@ export const MasteringDropdown: React.FC = () => {
           <div className="flex items-center justify-between mt-1">
             <div className="flex items-center gap-1.5">
               <Music2 size={14} className="text-teal-400" />
-              <span className="text-sm text-zinc-600 dark:text-zinc-400">{t('mastering.alsoTimbreRef')}</span>
+              <ParamLabel label={t('mastering.alsoTimbreRef')}
+                className="text-sm text-zinc-600 dark:text-zinc-400"
+                info="Also VAE-encodes the reference track and feeds it into the timbre conditioning pipeline, guiding the generation's tone and texture to match the reference." />
             </div>
             <ToggleSwitch checked={gp.timbreReference} onChange={gp.setTimbreReference} accentColor="amber" />
           </div>
         )
       )}
-      {gp.timbreReference && gp.masteringReference && !gp.timbreAudioPath && (
-        <p className="text-[10px] text-zinc-600 leading-relaxed">
-          The reference track will be VAE-encoded and fed into the timbre conditioning pipeline,
-          guiding the generation&apos;s tone and texture to match the reference.
-        </p>
-      )}
-
-      {/* Info */}
-      <p className="text-[10px] text-zinc-600 leading-relaxed">
-        The generated audio will be mastered to match the RMS level, frequency spectrum,
-        and dynamic characteristics of the reference track.
-      </p>
     </div>
   );
 };

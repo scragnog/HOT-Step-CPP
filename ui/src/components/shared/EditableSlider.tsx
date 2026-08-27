@@ -1,4 +1,18 @@
+// EditableSlider.tsx — slider whose value is also typeable.
+//
+// `tooltip` is documentation and renders through ParamLabel's hover card off a
+// "?" beside the label. It replaces a hand-rolled hover div that painted
+// zinc-100 text on a zinc-100 background in light mode.
+//
+// `helpText` stays a visible line underneath. It reads like a sibling of
+// `tooltip` but is not one: Cover Studio uses it for live readouts of the
+// current value ("1.0 = original tempo (128 BPM)", "Source: C#m"), which are
+// worth seeing without hovering. `disabledReason` stays inline for the same
+// reason — a state warning about why the control is dead right now is not
+// documentation.
+
 import React, { useState, useEffect, useRef } from 'react';
+import { ParamLabel } from './ParamLabel';
 
 interface EditableSliderProps {
   label: string;
@@ -73,13 +87,12 @@ export const EditableSlider: React.FC<EditableSliderProps> = ({
   return (
     <div className={`space-y-2 ${disabled ? 'opacity-50' : ''}`}>
       <div className="flex items-center justify-between">
-        <div className="relative flex items-center group/tip">
-          <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300 cursor-default" title={title}>{label}</label>
-          {tooltip && (
-            <div className="absolute left-0 bottom-full mb-1.5 hidden group-hover/tip:block z-50 w-56 bg-zinc-100 dark:bg-zinc-800 text-zinc-100 text-[10px] leading-relaxed rounded-lg px-2.5 py-2 shadow-xl border border-zinc-300 dark:border-white/10 pointer-events-none">
-              {tooltip}
-            </div>
-          )}
+        <div className="relative flex items-center" title={title}>
+          <ParamLabel
+            label={label}
+            info={tooltip}
+            className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
+          />
         </div>
         {isEditing && !disabled ? (
           <input type="number" value={inputValue} onChange={handleInputChange}

@@ -28,6 +28,7 @@ import React from 'react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { usePluginRegistry } from '../../hooks/usePluginRegistry';
 import { PluginControls } from './PluginControls';
+import { ParamLabel } from '../shared/ParamLabel';
 
 const selectClasses =
   'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 ' +
@@ -50,18 +51,27 @@ export const SamplerPluginControls: React.FC = () => {
   const schedMeta = findScheduler(gp.scheduler);
   const guideMeta = findGuidance(gp.guidanceMode);
 
+  // Each picker's hover card is the selected plugin's own description plus any
+  // caveat that selection earns.
+  const join = (...parts: (string | false | undefined)[]) =>
+    parts.filter(Boolean).join(' ') || undefined;
+
+  const solverInfo = join(
+    solverMeta?.description,
+    (solverMeta?.nfe ?? 1) > 1 && 'Multi-evaluation solvers run extra forward passes per step. On this backend the flow stage is already the bulk of the render time, so expect it to scale roughly with NFE.',
+  );
+
   return (
     <div className="space-y-3">
-      <p className="text-[10px] text-zinc-500 leading-relaxed">
-        The same solver, scheduler and guidance plugins the ACE-Step backend uses. Leaving a
-        picker on <em>Native</em> keeps this backend's own, parity-tested sampling for that stage.
-      </p>
+      <ParamLabel label="Sampler Plugins" underline={false}
+        className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider"
+        info={"The same solver, scheduler and guidance plugins the ACE-Step backend uses. "
+          + "Leaving a picker on Native keeps this backend's own, parity-tested sampling for that stage."} />
 
       {/* Solver */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          Solver
-        </label>
+        <ParamLabel label="Solver" info={solverInfo} rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
         <select
           className={selectClasses}
           value={gp.inferMethod ?? NATIVE}
@@ -83,15 +93,6 @@ export const SamplerPluginControls: React.FC = () => {
             </optgroup>
           )}
         </select>
-        {solverMeta?.description && (
-          <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{solverMeta.description}</p>
-        )}
-        {(solverMeta?.nfe ?? 1) > 1 && (
-          <p className="text-[10px] text-amber-500/90 mt-1 leading-relaxed">
-            Multi-evaluation solvers run extra forward passes per step. On this backend the flow
-            stage is already the bulk of the render time, so expect it to scale roughly with NFE.
-          </p>
-        )}
       </div>
 
       {solverMeta && solverMeta.params?.length > 0 && (
@@ -108,9 +109,8 @@ export const SamplerPluginControls: React.FC = () => {
 
       {/* Scheduler */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          Schedule
-        </label>
+        <ParamLabel label="Schedule" info={schedMeta?.description} rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
         <select
           className={selectClasses}
           value={gp.scheduler ?? NATIVE}
@@ -121,9 +121,6 @@ export const SamplerPluginControls: React.FC = () => {
             <option key={s.name} value={s.name}>{s.display}</option>
           ))}
         </select>
-        {schedMeta?.description && (
-          <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{schedMeta.description}</p>
-        )}
       </div>
 
       {schedMeta && schedMeta.params?.length > 0 && (
@@ -140,9 +137,8 @@ export const SamplerPluginControls: React.FC = () => {
 
       {/* Guidance */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          Guidance
-        </label>
+        <ParamLabel label="Guidance" info={guideMeta?.description} rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
         <select
           className={selectClasses}
           value={gp.guidanceMode ?? NATIVE}
@@ -153,9 +149,6 @@ export const SamplerPluginControls: React.FC = () => {
             <option key={g.name} value={g.name}>{g.display}</option>
           ))}
         </select>
-        {guideMeta?.description && (
-          <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">{guideMeta.description}</p>
-        )}
       </div>
 
       {guideMeta && guideMeta.params?.length > 0 && (

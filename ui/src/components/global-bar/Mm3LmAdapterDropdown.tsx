@@ -28,6 +28,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { Slider } from '../shared/Slider';
+import { ParamLabel } from '../shared/ParamLabel';
 
 const inputClasses =
   'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 ' +
@@ -163,13 +164,21 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
     );
   }
 
+  // One sentence covers the Attention/MLP pair rather than either dial alone,
+  // so both labels open the same card.
+  const groupsHint = t('globalBar.mm3LmGroupsHint',
+    'Attention 1.0 with MLP 0.5 is the tested dial: the artist\'s timbre lives largely in the MLP projections, and halving them keeps the identity while holding the genre steady. Attention alone renders clean but generic; MLP alone keeps the voice and drifts genre.');
+
   return (
     <div className="space-y-3">
       {/* ── Picker ── */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          {t('globalBar.mm3LmAdapter', 'LM Adapter')}
-        </label>
+        <ParamLabel
+          label={t('globalBar.mm3LmAdapter', 'LM Adapter')}
+          info={t('globalBar.mm3LmAdapterHint',
+            'A LoRA on the MiniMax-Music3 planner LM — artist identity lives here. Applied at runtime, so these strengths are live per generation. An adapter that fails to load fails the job rather than silently rendering the base model.')}
+          rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
         <select
           className={inputClasses}
           value={selected}
@@ -180,10 +189,6 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             <option key={a.file} value={a.file}>{a.name || a.file}</option>
           ))}
         </select>
-        <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
-          {t('globalBar.mm3LmAdapterHint',
-            'A LoRA on the MiniMax-Music3 planner LM — artist identity lives here. Applied at runtime, so these strengths are live per generation. An adapter that fails to load fails the job rather than silently rendering the base model.')}
-        </p>
       </div>
 
       {/* ── What this adapter is ── */}
@@ -218,10 +223,11 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
                 onChange={e => setBackendParam(PARAM.trigger, e.target.checked)}
                 className="mt-0.5 accent-emerald-500"
               />
-              <span className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed">
-                {t('globalBar.mm3LmTriggerAuto',
-                  'Add the trigger to the caption automatically, in the position it was trained in. The identity is bound to it, so leave this on unless you are placing it yourself. A caption that already opens with the trigger is left alone.')}
-              </span>
+              <ParamLabel
+                label={t('globalBar.mm3LmTriggerAutoLabel', 'Add trigger to caption')}
+                info={t('globalBar.mm3LmTriggerAuto',
+                  'Adds the trigger to the caption automatically, in the position it was trained in. The identity is bound to it, so leave this on unless you are placing it yourself. A caption that already opens with the trigger is left alone.')}
+                className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed" />
             </label>
           )}
           {entry.notes && (
@@ -233,9 +239,15 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
       {/* ── Application mode ── */}
       {selected && (
         <div>
-          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-            {t('globalBar.mm3LmMode', 'Application')}
-          </label>
+          <ParamLabel
+            label={t('globalBar.mm3LmMode', 'Application')}
+            info={String(params[PARAM.mode] ?? 'runtime') === 'merge'
+              ? t('globalBar.mm3LmModeMergeHint',
+                  'Folded into the model weights once per adapter+dial combination — planning runs at full base-model speed. Changing any dial re-merges (a few seconds). On a quantized LM the merge re-quantizes; ear-check against Runtime if in doubt.')
+              : t('globalBar.mm3LmModeRuntimeHint',
+                  'Applied as live low-rank deltas every step — dial changes cost nothing, but planning runs ~25% slower at rank 256. Pick Merge when the dials are settled.')}
+            rootClassName="flex mb-1.5"
+            className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
           <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
             {(['runtime', 'merge'] as const).map(m => {
               const active = String(params[PARAM.mode] ?? 'runtime') === m;
@@ -258,13 +270,6 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
               );
             })}
           </div>
-          <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">
-            {String(params[PARAM.mode] ?? 'runtime') === 'merge'
-              ? t('globalBar.mm3LmModeMergeHint',
-                  'Folded into the model weights once per adapter+dial combination — planning runs at full base-model speed. Changing any dial re-merges (a few seconds). On a quantized LM the merge re-quantizes; ear-check against Runtime if in doubt.')
-              : t('globalBar.mm3LmModeRuntimeHint',
-                  'Applied as live low-rank deltas every step — dial changes cost nothing, but planning runs ~25% slower at rank 256. Pick Merge when the dials are settled.')}
-          </p>
         </div>
       )}
 
@@ -279,20 +284,20 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
           />
           <Slider
             label={t('globalBar.mm3LmAttention', 'Attention')}
+            info={groupsHint}
+            infoMeta="attention 1.0 · MLP 0.5"
             value={num(PARAM.attn, defaults.scaleAttn)}
             onChange={v => setBackendParam(PARAM.attn, v)}
             min={0} max={2} step={0.05} showInput
           />
           <Slider
             label={t('globalBar.mm3LmMlp', 'MLP')}
+            info={groupsHint}
+            infoMeta="attention 1.0 · MLP 0.5"
             value={num(PARAM.mlp, defaults.scaleMlp)}
             onChange={v => setBackendParam(PARAM.mlp, v)}
             min={0} max={2} step={0.05} showInput
           />
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
-            {t('globalBar.mm3LmGroupsHint',
-              'Attention 1.0 with MLP 0.5 is the tested dial: the artist\'s timbre lives largely in the MLP projections, and halving them keeps the identity while holding the genre steady. Attention alone renders clean but generic; MLP alone keeps the voice and drifts genre.')}
-          </p>
 
           <div className="flex items-center justify-between gap-2 pt-1">
             <button
@@ -318,10 +323,11 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             <div className="space-y-3 pl-3 border-l-2 border-amber-500/30">
               <div className="flex gap-2 items-start">
                 <AlertTriangle size={12} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                <p className="text-[10px] text-amber-500/90 leading-relaxed">
-                  {t('globalBar.mm3LmDepthWarning',
-                    'Leave these at 1.0 for production. The late third carries sequence termination — halving it produced fades and songs that end early or never; dialling the early third down produced runaway tempo and chaos. Useful for probing what the adapter learned, not for renders you want to keep.')}
-                </p>
+                <ParamLabel
+                  label={t('globalBar.mm3LmDepthWarningShort', 'Leave these at 1.0 for production.')}
+                  info={t('globalBar.mm3LmDepthWarning',
+                    'The late third carries sequence termination — halving it produced fades and songs that end early or never; dialling the early third down produced runaway tempo and chaos. Useful for probing what the adapter learned, not for renders you want to keep.')}
+                  className="text-[10px] text-amber-500/90 leading-relaxed" />
               </div>
               <Slider
                 label={t('globalBar.mm3LmEarly', 'Early third')}

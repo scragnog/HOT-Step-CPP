@@ -14,6 +14,7 @@ import React from 'react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { Slider } from '../shared/Slider';
+import { ParamLabel } from '../shared/ParamLabel';
 import { ToggleSwitch } from './BarSection';
 import type { BackendExtensionGroup, BackendExtensionParam } from '../../stores/backendStore';
 
@@ -65,28 +66,26 @@ export const BackendExtensionControls: React.FC<{
             <div key={p.key}>
               <Slider
                 label={p.label}
+                info={p.hint}
                 value={typeof value === 'number' ? value : Number(p.default ?? 0)}
                 onChange={(v: number) => gp.setBackendParam?.(p.key, v)}
                 min={p.min ?? 0}
                 max={p.max ?? 1}
                 step={p.step ?? 0.1}
               />
-              {p.hint && <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">{p.hint}</p>}
             </div>
           );
         }
         if (p.type === 'toggle') {
-          // The app's toggle, not a raw checkbox — and the hint goes UNDER the
-          // label the way every other param type gets one. A declared toggle
-          // used to render neither, so knobs like Low-Step Compensation and
-          // Play While Rendering shipped their whole explanation to nobody.
+          // The app's toggle, not a raw checkbox — and the hint is reachable
+          // the way every other param type's is. A declared toggle used to
+          // render neither, so knobs like Low-Step Compensation and Play While
+          // Rendering shipped their whole explanation to nobody.
           return (
             <div key={p.key} className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
-                <span className="block text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                  {p.label}
-                </span>
-                {p.hint && <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">{p.hint}</p>}
+                <ParamLabel label={p.label} info={p.hint}
+                  className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
               </div>
               <div className="pt-0.5">
                 <ToggleSwitch
@@ -101,9 +100,8 @@ export const BackendExtensionControls: React.FC<{
         if (p.type === 'select') {
           return (
             <div key={p.key}>
-              <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-                {p.label}
-              </label>
+              <ParamLabel label={p.label} info={p.hint} rootClassName="flex mb-1.5"
+                className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
               <select
                 className={backendInputClasses}
                 value={String(value ?? '')}
@@ -113,21 +111,18 @@ export const BackendExtensionControls: React.FC<{
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
-              {p.hint && <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">{p.hint}</p>}
             </div>
           );
         }
         return (
           <div key={p.key}>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-              {p.label}
-            </label>
+            <ParamLabel label={p.label} info={p.hint} rootClassName="flex mb-1.5"
+              className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
             <input
               className={backendInputClasses}
               value={String(value ?? '')}
               onChange={(e) => gp.setBackendParam?.(p.key, e.target.value)}
             />
-            {p.hint && <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">{p.hint}</p>}
           </div>
         );
       })}
