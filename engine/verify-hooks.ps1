@@ -207,6 +207,29 @@ if (Test-Path $cpyH) {
     Write-Host "  [WARN] $cpyH not found - ggml submodule not checked out?" -ForegroundColor Yellow
 }
 
+# -- Hook 11: ggml-cuda's F16 GEMM must accumulate in F32 --------------------
+#             Also a SUBMODULE file, and the WORST of the silent failures:
+#             without it, f16 weights run under CUBLAS_COMPUTE_16F, which
+#             accumulates and writes dst in half precision. Any partial sum
+#             past 65504 becomes +inf and everything after it NaN. Nothing
+#             errors - the GEMM succeeds and the render comes out garbled.
+#             The MM3 LM trips this whenever an LM adapter is loaded.
+$cudaCu = "$ggml\src\ggml-cuda\ggml-cuda.cu"
+if (Test-Path $cudaCu) {
+    $content = Get-Content $cudaCu -Raw
+    if ($content -match 'HOT-Step patch: f16-f32-accumulate') {
+        Write-Host "  [OK] ggml-cuda/ggml-cuda.cu has the F16 F32-accumulate patch" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] ggml-cuda/ggml-cuda.cu is missing the f16-f32-accumulate patch" -ForegroundColor Red
+        Write-Host "         SILENT: f16 + an LM adapter renders noise instead of music," -ForegroundColor Yellow
+        Write-Host "         because the f16 GEMM overflows its own half-precision accumulator." -ForegroundColor Yellow
+        Write-Host "         Fix (from the repo root): git apply engine\patches\f16-f32-accumulate.patch" -ForegroundColor Yellow
+        $errors++
+    }
+} else {
+    Write-Host "  [WARN] $cudaCu not found - ggml submodule not checked out?" -ForegroundColor Yellow
+}
+
 # ── Summary ───────────────────────────────────────────────────────────
 Write-Host ""
 if ($errors -gt 0) {

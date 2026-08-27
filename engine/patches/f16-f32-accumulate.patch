@@ -1,0 +1,39 @@
+diff --git a/engine/ggml/src/ggml-cuda/ggml-cuda.cu b/engine/ggml/src/ggml-cuda/ggml-cuda.cu
+index 7058a541..8defb07a 100644
+--- a/engine/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/engine/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -1506,7 +1506,33 @@ static void ggml_cuda_mul_mat_cublas_impl(ggml_backend_cuda_context & ctx, const
+     const int cc = ggml_cuda_info().devices[ctx.device].cc;
+     bool prefer_f32_output = false;
+     if (compute_type == GGML_TYPE_F16) {
+-        prefer_f32_output = cc == GGML_CUDA_CC_VOLTA || GGML_CUDA_CC_IS_RDNA4(cc) || GGML_CUDA_CC_IS_CDNA(cc);
++        // HOT-Step patch: f16-f32-accumulate - see engine/patches/f16-f32-accumulate.patch
++        //
++        // Always F32 accumulate + F32 output for F16, not just on
++        // Volta/RDNA4/CDNA as upstream has it.
++        //
++        // CUBLAS_COMPUTE_16F accumulates the dot product AND writes dst in half
++        // precision, so any partial sum past 65504 becomes +inf and everything
++        // downstream of it NaN. There is no in-band signal when that happens:
++        // the GEMM succeeds and returns garbage.
++        //
++        // It is not hypothetical. The MiniMax-Music3 LM (Qwen3-8B, K = 4096 and
++        // 12288) overflows here as soon as an LM LoRA/LoKr shifts the residual
++        // stream up, and only then -- which is why it looked like an adapter
++        // bug for months. Measured on an RTX 5090 (cc 12.0), same prompt, same
++        // seed, same adapter, one variable:
++        //
++        //     f16  LM + adapter -> one whole CFG row non-finite on EVERY step
++        //     bf16 LM + adapter -> clean      (BF16 already takes this branch)
++        //     q8_0 LM + adapter -> clean      (never reaches cuBLAS at all)
++        //
++        // bf16 is the control that matters: same value range as f16, same
++        // graph, and the ONLY difference is which compute type it lands on.
++        //
++        // The cost is close to nil on anything with tensor cores from Ampere
++        // on, where FP16 inputs with an FP32 accumulator run at full rate; and
++        // where it is not free, a slower right answer beats a fast wrong one.
++        prefer_f32_output = true;
+     } else if (compute_type == GGML_TYPE_BF16) {
+         prefer_f32_output = !GGML_CUDA_CC_IS_RDNA3(cc) && !GGML_CUDA_CC_IS_CDNA(cc);
+     }

@@ -41,6 +41,20 @@ an apparent post-model-swap "graph thrash" was actually the select-model API
 resetting an omitted LM role to auto/f16. **Losing this patch is benign** —
 no verify-hook guards it; reapply it when you next need the trace.
 
+`f16-f32-accumulate.patch` makes ggml-cuda's batched cuBLAS GEMM **accumulate and write F32 for an F16 `src0`**, which upstream only does on Volta, RDNA4 and CDNA. Everywhere else F16 lands on `CUBLAS_COMPUTE_16F`: the dot product accumulates in half precision *and* `dst` is written in half precision, so a partial sum past 65504 becomes `+inf` and everything downstream of it NaN. Nothing reports it — the GEMM succeeds and returns garbage. BF16 and F32 have always taken the F32 path; F16 was the odd one out.
+
+This is not theoretical. The MiniMax-Music3 LM is Qwen3-8B, with K of 4096 and 12288, and it clears that ceiling as soon as an LM LoRA/LoKr shifts the residual stream up — **and only then**, which is why it presented for months as "adapters are broken on f16, use q8" rather than as a matmul bug. Measured on an RTX 5090 (cc 12.0), same prompt, same seed, same adapter, one variable:
+
+| LM base | non-finite candidate logits |
+|---|---|
+| f16 | one whole CFG row dead on **every** step |
+| bf16 | none — already took the F32 branch |
+| q8_0 | none — never reaches cuBLAS |
+
+`bf16` is the control that settles it: same value range as `f16`, same graph, and the only difference is which compute type it lands on. Cost of the fix, MM3 LM decode on a 5090: 11.03 → 11.59 ms/step (+5 %), landing exactly on bf16's 11.59 — which is what you would expect once they share a path. FP16 inputs with an FP32 accumulator run at full tensor-core rate from Ampere on.
+
+**Losing this patch is silent and expensive** — no error, no crash, just noise instead of music on any f16 render with an adapter — so `verify-hooks.ps1` Hook 11 greps for the marker. The two guards in `mm3-ar-loop.h` (refuse a plan whose logits are wholesale non-finite) and `mm3-lm-adapter.h` (refuse a checkpoint whose factors would overflow the f16 store) are the second line of defence, and they live in the main repo rather than here.
+
 Reapply from the repo root — **apply all of them**. Two of them now touch `cpy.cu`, so they are no longer file-disjoint, but their hunks do not overlap and **both orders were verified to apply cleanly**; a full pristine→apply-all replay was checked to reproduce the tested bytes exactly. The glob below is what CI runs:
 
 ```sh
