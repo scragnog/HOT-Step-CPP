@@ -162,7 +162,11 @@ macro(link_ggml_backends target)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wshadow -Wconversion
                               -Wno-unused-parameter -Wno-unused-function -Wno-sign-conversion)
     endif()
-    target_link_libraries(${target} PRIVATE ggml Threads::Threads)
+    # CMAKE_DL_LIBS: backend.h's Linux HIP diagnosis dlopen()s the ROCm runtime
+    # to name what is missing. Empty on Windows, and on glibc >= 2.34 where
+    # dlopen moved into libc — but this repo still targets older glibc (see the
+    # Threads note above), which needs the explicit -ldl.
+    target_link_libraries(${target} PRIVATE ggml Threads::Threads ${CMAKE_DL_LIBS})
     if(TARGET ggml-base)
         target_link_libraries(${target} PRIVATE ggml-base)
     endif()

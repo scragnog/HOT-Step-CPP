@@ -20,6 +20,10 @@
 #    define NOMINMAX
 #  endif
 #  include <windows.h>
+#elif defined(__linux__)
+#  include <dlfcn.h>
+#  include <string>
+#  include <unistd.h>
 #endif
 
 struct BackendPair {
@@ -276,6 +280,93 @@ static BackendPair backend_init(const char * label) {
             // Vulkan build but Vulkan didn't load — different diagnosis
             fprintf(stderr, "[Load] WARNING: ggml-vulkan.dll found but Vulkan backend did not load.\n");
             fprintf(stderr, "[Load]   Check that your GPU drivers include Vulkan support.\n");
+        }
+    }
+#elif defined(__linux__)
+    // Same idea as the Windows diagnosis above, for the ROCm build.
+    //
+    // The ROCm archive deliberately does NOT bundle the ROCm runtime: rocBLAS
+    // alone unpacks to ~3.9 GB and hipBLASLt to ~2.7 GB, nearly all of it
+    // per-architecture Tensile kernels. So "user has not installed ROCm" is the
+    // EXPECTED first-run failure here, not an exotic one, and silently running
+    // on CPU is the worst possible way to report it.
+    if (best_is_cpu) {
+        std::string dir;
+        char        exe_path[4096];
+        ssize_t     n = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+        if (n > 0) {
+            exe_path[n] = '\0';
+            dir         = exe_path;
+            auto pos    = dir.find_last_of('/');
+            dir         = (pos == std::string::npos) ? std::string(".") : dir.substr(0, pos);
+        }
+
+        const std::string hip_so = dir + "/libggml-hip.so";
+        if (!dir.empty() && access(hip_so.c_str(), F_OK) == 0) {
+            fprintf(stderr, "[Load] WARNING: libggml-hip.so found but the HIP backend did not load.\n");
+            fprintf(stderr, "[Load]   Diagnosing the ROCm runtime...\n");
+
+            // Each entry is one library with the sonames worth trying, newest
+            // first. Sonames move between ROCm releases, so a miss on the
+            // versioned name is not conclusive on its own — hence the fallback
+            // to the unversioned name a -dev package would provide.
+            struct SoCheck { const char * name; const char * candidates[3]; };
+            const SoCheck deps[] = {
+                { "HIP runtime",   { "libamdhip64.so.6",      "libamdhip64.so",      nullptr } },
+                { "rocBLAS",       { "librocblas.so.4",       "librocblas.so",       nullptr } },
+                { "hipBLAS",       { "libhipblas.so.2",       "libhipblas.so",       nullptr } },
+                { "hipBLASLt",     { "libhipblaslt.so.0",     "libhipblaslt.so",     nullptr } },
+                { "ROCr runtime",  { "libhsa-runtime64.so.1", "libhsa-runtime64.so", nullptr } },
+                { "code object mgr", { "libamd_comgr.so.3",   "libamd_comgr.so",     nullptr } },
+            };
+
+            bool any_missing = false;
+            for (const auto & dep : deps) {
+                void *       h    = nullptr;
+                const char * used = nullptr;
+                for (int i = 0; i < 3 && dep.candidates[i]; i++) {
+                    h = dlopen(dep.candidates[i], RTLD_LAZY | RTLD_LOCAL);
+                    if (h) {
+                        used = dep.candidates[i];
+                        break;
+                    }
+                }
+                if (h) {
+                    fprintf(stderr, "[Load]   ok:   %s (%s)\n", dep.name, used);
+                    dlclose(h);
+                } else {
+                    // dlerror() CLEARS the error, so it gets read exactly once.
+                    const char * err = dlerror();
+                    fprintf(stderr, "[Load]   FAIL: %s — %s not found (%s)\n",
+                            dep.name, dep.candidates[0], err ? err : "no error reported");
+                    any_missing = true;
+                }
+            }
+
+            if (any_missing) {
+                fprintf(stderr, "[Load]   The ROCm runtime is not installed, or not on the loader path.\n");
+                fprintf(stderr, "[Load]   HOT-Step does not ship it: rocBLAS's kernel libraries alone are\n");
+                fprintf(stderr, "[Load]   several GB, and AMD's packages track your kernel driver.\n");
+                fprintf(stderr, "[Load]   Install it from AMD: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/\n");
+                fprintf(stderr, "[Load]   Ubuntu/Debian:  sudo apt install rocm-hip-runtime\n");
+                fprintf(stderr, "[Load]   Fedora/RHEL:    sudo dnf install rocm-hip\n");
+                fprintf(stderr, "[Load]   Arch:           sudo pacman -S rocm-hip-runtime\n");
+                fprintf(stderr, "[Load]   Already installed elsewhere? Point the loader at it:\n");
+                fprintf(stderr, "[Load]     export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH\n");
+            } else {
+                void * h = dlopen(hip_so.c_str(), RTLD_LAZY | RTLD_LOCAL);
+                if (h) {
+                    fprintf(stderr, "[Load]   Every ROCm library loads, and so does libggml-hip.so.\n");
+                    fprintf(stderr, "[Load]   GGML still found no HIP device — check that your GPU is\n");
+                    fprintf(stderr, "[Load]   supported and visible: rocminfo | grep gfx\n");
+                    fprintf(stderr, "[Load]   A GPU whose gfx arch this build does not target falls back to CPU.\n");
+                    dlclose(h);
+                } else {
+                    const char * err = dlerror();
+                    fprintf(stderr, "[Load]   libggml-hip.so itself will not load: %s\n",
+                            err ? err : "no error reported");
+                }
+            }
         }
     }
 #endif
