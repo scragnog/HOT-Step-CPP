@@ -124,12 +124,16 @@ static bool ends_with_ci(const std::string & s, const char * suf) {
 // dataset tracks are overwhelmingly FLAC.
 static bool transcode_to_wav16k(const std::string & ffmpeg, const std::string & src,
                                 std::string & out_path) {
-    char tmpl[L_tmpnam_s ? L_tmpnam_s : 260];
+    // L_tmpnam_s is MSVC's Annex K spelling and does not exist on glibc, so the
+    // buffer has to be declared inside the branch -- naming it outside broke the
+    // Linux build.
 #ifdef _WIN32
+    char tmpl[L_tmpnam_s];
     if (tmpnam_s(tmpl, sizeof(tmpl)) != 0) {
         return false;
     }
 #else
+    char tmpl[L_tmpnam];
     if (!tmpnam(tmpl)) {
         return false;
     }
