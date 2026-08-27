@@ -569,6 +569,21 @@ struct MM3SynthRequest {
     // 200 s song), which is why it is opt-in rather than always on.
     bool    reuse_ar = false;
 
+    // ── AR cache, on disk (mm3-hiddens-file.h) ─────────────────────────────
+    // The same block as `reuse_ar` above, written to and read from a
+    // `.mm3hiddens` file so a pinned plan survives a restart. Loading one
+    // PRIMES the in-memory slot rather than going round it, so every downstream
+    // decision a hit makes — skip the LM load, skip the staged handover, hand
+    // back the cached codes and LRC — is made identically here.
+    //
+    // The file carries the cache key with it and a model-side mismatch is
+    // refused, which is the whole reason this is safe to expose: a block made
+    // under a different LM quant has the same SHAPE and is numerically
+    // meaningless. See mm3-hiddens-file.h for what is refused and what warns.
+    std::string forced_frame_hiddens_file;
+    bool        save_frame_hiddens = false;
+    std::string frame_hiddens_save_path;
+
     // ── Streaming (mm3-job.h + GET /mm3/stream) ────────────────────────────
     // Emit each window's PCM as soon as it is vocoded and cropped, so a caller
     // can start playing before the render finishes. OPT-IN per request: it
@@ -879,6 +894,50 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
         }
     }
 
+    // ── AR cache on disk: replay from / save to a .mm3hiddens file ──
+    {
+        yyjson_val * v = yyjson_obj_get(root, "forced_frame_hiddens_file");
+        if (v && !yyjson_is_null(v)) {
+            if (!yyjson_is_str(v)) {
+                if (err) {
+                    *err = "\"forced_frame_hiddens_file\" must be a string path";
+                }
+                return false;
+            }
+            out->forced_frame_hiddens_file = yyjson_get_str(v);
+        }
+        yyjson_val * sv = yyjson_obj_get(root, "save_frame_hiddens");
+        if (sv && !yyjson_is_null(sv)) {
+            if (!yyjson_is_bool(sv)) {
+                if (err) {
+                    *err = "\"save_frame_hiddens\" must be a boolean";
+                }
+                return false;
+            }
+            out->save_frame_hiddens = yyjson_get_bool(sv);
+        }
+        yyjson_val * pv = yyjson_obj_get(root, "frame_hiddens_save_path");
+        if (pv && !yyjson_is_null(pv)) {
+            if (!yyjson_is_str(pv)) {
+                if (err) {
+                    *err = "\"frame_hiddens_save_path\" must be a string path";
+                }
+                return false;
+            }
+            out->frame_hiddens_save_path = yyjson_get_str(pv);
+        }
+        // A save with nowhere to put it is a caller bug, and silently dropping
+        // it would look exactly like a save that worked.
+        if (out->save_frame_hiddens && out->frame_hiddens_save_path.empty()) {
+            if (err) {
+                *err = "\"save_frame_hiddens\" needs \"frame_hiddens_save_path\"";
+            }
+            return false;
+        }
+        // The plank is parsed further down, so the "not both at once" check has
+        // to live there rather than here.
+    }
+
     // ── Runtime LM LoRA ──
     {
         yyjson_val * v = yyjson_obj_get(root, "lm_adapter");
@@ -1009,6 +1068,18 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
             }
             out->max_frames = (int64_t) out->forced_semantic.size() - 1;
             out->duration   = (double) out->max_frames / (double) frame_rate;
+        }
+        // A plank AND a hidden-block file is ambiguous rather than harmful: the
+        // plank pins the codes and then re-derives the hiddens from them, the
+        // file supplies the hiddens outright, so one of the two would silently
+        // win (the file, since it skips the AR stage the codes would drive).
+        // Say so instead of picking one behind the caller's back.
+        if (!out->forced_frame_hiddens_file.empty() && !out->forced_semantic.empty()) {
+            if (err) {
+                *err = "\"forced_frame_hiddens_file\" and \"forced_semantic\" are mutually exclusive "
+                       "(the hidden block already holds the plan the codes would rebuild)";
+            }
+            return false;
         }
     }
 

@@ -63,6 +63,7 @@
 // the library entry, mastering and stems are untouched.
 
 #include "mm3-ar-cache.h"
+#include "mm3-hiddens-file.h"
 #include "mm3-lm-merge.h"
 #include "mm3-request.h"
 #include "mm3-server.h"
@@ -219,6 +220,10 @@ struct MM3JobState {
     bool     instrumental = false;
     /** True when stage 1 was served from the AR cache (no LM, no AR compute). */
     bool     ar_cached  = false;
+    /** True when that cache was primed from a `.mm3hiddens` file rather than by
+     *  the previous render. Reported separately because the two feel identical
+     *  and are not: one is a cache working, the other is a plan the user chose. */
+    bool     ar_from_file = false;
     /** True when windows were dispatched WHILE the planner ran (co-resident).
      *  False on a streamed run means the audio starts after planning, which is
      *  the difference a user actually feels. */
@@ -403,10 +408,17 @@ static void mm3_arbitrate_vram(const MM3Model & m, int64_t n_ctx_needed, MM3JobS
  *  steps, cfg_flow, the solver/scheduler/guidance plugin selection and their
  *  params, flow_shift, forced_noise, wav_bits, and the cond/dit/voc model
  *  choices. Those are precisely the knobs this cache exists to let you tweak. */
-static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & req) {
-    std::string k;
-    k.reserve(req.prompt.size() + 1024);
-
+// The half of the key that decides whether a hidden block MEANS anything under
+// the model that is loaded right now, split out from the half that decides what
+// the plan is. Nothing in here is a knob the AR cache exists to let you tweak —
+// change any of it and the block is not merely stale, it is numerically
+// unrelated to what this binary would produce.
+//
+// Only the on-disk replay (mm3-hiddens-file.h) needs the two halves apart: the
+// in-memory slot cannot outlive the process, so a model swap already drops it.
+// A file can, and a mismatched file has exactly the right SHAPE, which is the
+// one thing a naive reader would have checked.
+static void mm3_ar_key_add_models(std::string & k, const MM3Model & m, const MM3SynthRequest & req) {
     auto add_s = [&](const char * n, const std::string & v) { k += n; k += '='; k += v; k += '\n'; };
     auto add_i = [&](const char * n, long long v) { k += n; k += '='; k += std::to_string(v); k += '\n'; };
     auto add_u = [&](const char * n, unsigned long long v) { k += n; k += '='; k += std::to_string(v); k += '\n'; };
@@ -415,6 +427,49 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
         snprintf(b, sizeof(b), "%.9g", v);
         k += n; k += '='; k += b; k += '\n';
     };
+
+    // LM adapter: identity (path + mtime, so a retrained checkpoint under the
+    // same name misses), how it is applied, and every dial.
+    if (!req.lm_adapter.empty()) {
+        struct stat sb {};
+        const bool  ok = stat(req.lm_adapter.c_str(), &sb) == 0;
+        add_s("ad", req.lm_adapter);
+        add_i("ad_mtime", ok ? (long long) sb.st_mtime : -1);
+        add_s("ad_mode", req.lm_adapter_mode);
+        const MM3LmAdapterScales & s = req.lm_adapter_scales;
+        add_f("ad_g", s.global); add_f("ad_a", s.attn);  add_f("ad_m", s.mlp);
+        add_f("ad_e", s.early);  add_f("ad_i", s.mid);   add_f("ad_l", s.late);
+    }
+
+    // The two models that produce the block. Quant flips borderline codes, so
+    // a role swap must miss — path alone is not enough when a file is replaced
+    // in place, hence the byte counts too.
+    add_s("lm", m.lm_file.path);
+    add_u("lm_b", (unsigned long long) m.lm_file.tensor_bytes);
+    add_u("lm_t", m.lm_file.file_type);
+    add_s("dp", m.role_file[MM3_R_DEPTH].path);
+    add_u("dp_b", (unsigned long long) m.role_file[MM3_R_DEPTH].tensor_bytes);
+    add_u("dp_t", m.role_file[MM3_R_DEPTH].file_type);
+    // The block's own geometry, so a config change that kept the same files
+    // still refuses rather than reading a differently-shaped file as valid.
+    add_i("cb", (long long) m.lm_cfg.num_codebooks);
+    add_i("emb", (long long) m.lm_cfg.embedding_length);
+}
+
+/** The model half alone — what a `.mm3hiddens` file must match to be usable. */
+static std::string mm3_ar_model_key(const MM3Model & m, const MM3SynthRequest & req) {
+    std::string k = "v=1\n";
+    mm3_ar_key_add_models(k, m, req);
+    return k;
+}
+
+static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & req) {
+    std::string k;
+    k.reserve(req.prompt.size() + 1024);
+
+    auto add_s = [&](const char * n, const std::string & v) { k += n; k += '='; k += v; k += '\n'; };
+    auto add_i = [&](const char * n, long long v) { k += n; k += '='; k += std::to_string(v); k += '\n'; };
+    auto add_u = [&](const char * n, unsigned long long v) { k += n; k += '='; k += std::to_string(v); k += '\n'; };
     // FNV-1a over a code array — the plank blobs are the one input too big to
     // inline, and a digest of them is enough to tell two planks apart.
     auto add_codes = [&](const char * n, const std::vector<int32_t> & v) {
@@ -430,7 +485,9 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
 
     // Bump when the AR path itself changes shape (new sampler behaviour, a
     // different hidden layout) so stale slots from an older binary can't hit.
-    add_i("v", 1);
+    // v=2: the model/adapter fields moved to mm3_ar_key_add_models() and now
+    // trail the forced codes rather than preceding them.
+    add_i("v", 2);
 
     // The prompt carries caption + lyrics + the instrumental substitution, and
     // the tokenizer is a pure function of it plus the LM GGUF (below).
@@ -442,34 +499,14 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
     // cached alongside, so a hit must not be able to hand back a missing one.
     add_i("lrc", (req.want_lrc && !req.instrumental) ? 1 : 0);
 
-    // LM adapter: identity (path + mtime, so a retrained checkpoint under the
-    // same name misses), how it is applied, and every dial.
-    if (!req.lm_adapter.empty()) {
-        struct stat sb {};
-        const bool  ok = stat(req.lm_adapter.c_str(), &sb) == 0;
-        add_s("ad", req.lm_adapter);
-        add_i("ad_mtime", ok ? (long long) sb.st_mtime : -1);
-        add_s("ad_mode", req.lm_adapter_mode);
-        const MM3LmAdapterScales & s = req.lm_adapter_scales;
-        add_f("ad_g", s.global); add_f("ad_a", s.attn);  add_f("ad_m", s.mlp);
-        add_f("ad_e", s.early);  add_f("ad_i", s.mid);   add_f("ad_l", s.late);
-    }
-
     // Plank replay pins the codes, which pins the hiddens with them.
     if (!req.forced_semantic.empty()) {
         add_codes("fs", req.forced_semantic);
         add_codes("fa", req.forced_acoustic);
     }
 
-    // The two models that produce the block. Quant flips borderline codes, so
-    // a role swap must miss — path alone is not enough when a file is replaced
-    // in place, hence the byte counts too.
-    add_s("lm", m.lm_file.path);
-    add_u("lm_b", (unsigned long long) m.lm_file.tensor_bytes);
-    add_u("lm_t", m.lm_file.file_type);
-    add_s("dp", m.role_file[MM3_R_DEPTH].path);
-    add_u("dp_b", (unsigned long long) m.role_file[MM3_R_DEPTH].tensor_bytes);
-    add_u("dp_t", m.role_file[MM3_R_DEPTH].file_type);
+    // The models and the adapter — the half a saved file is checked against.
+    mm3_ar_key_add_models(k, m, req);
     return k;
 }
 
@@ -608,6 +645,80 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     // LM weights, no KV cache, and the flow stack comes in up front instead of
     // through the mid-run handover.
     const std::string ar_key = mm3_ar_cache_key(g_mm3, req);
+
+    // ── AR cache, primed from disk ──────────────────────────────────────────
+    //
+    // A `.mm3hiddens` replay loads INTO the slot rather than around it, and
+    // everything below then treats it as an ordinary hit. That is deliberate:
+    // the LM skip, the depth skip, the un-staged load, the restored codes and
+    // LRC are all decided from `ar_hit` further down, so a replay that set
+    // `req.gen.cached_hiddens` directly would still stream 17 GB of LM weights
+    // it never calls, still do the staged handover, and still hand back an
+    // empty LRC. Going through the slot gets all of it for free — and leaves
+    // the block in memory, so the next render of the same request hits without
+    // touching the disk again.
+    bool ar_from_file = false;
+    if (!req.forced_frame_hiddens_file.empty()) {
+        if (st->n_takes > 1) {
+            // Same reason as the ensemble rule below, but worth its own message:
+            // silently ignoring the file would look like the picker was dead.
+            fprintf(stderr,
+                    "[MM3-Job] %s: WARNING: ignoring %s — a saved plan holds one take and this "
+                    "render wants %d, so all of them plan fresh\n",
+                    job->id.c_str(), req.forced_frame_hiddens_file.c_str(), st->n_takes);
+        } else {
+            MM3HiddensFile fh;
+            std::string    ferr;
+            if (!mm3_hiddens_read(req.forced_frame_hiddens_file, &fh, &ferr)) {
+                fprintf(stderr, "[MM3-Job] %s: WARNING: %s — planning fresh\n", job->id.c_str(), ferr.c_str());
+            } else if (fh.num_codebooks != (int64_t) g_mm3.lm_cfg.num_codebooks ||
+                       fh.embedding_len != (int64_t) g_mm3.lm_cfg.embedding_length) {
+                fprintf(stderr,
+                        "[MM3-Job] %s: WARNING: %s is [%lld, %lld, %lld] but this model wants "
+                        "[F, %lld, %lld] — planning fresh\n",
+                        job->id.c_str(), req.forced_frame_hiddens_file.c_str(), (long long) fh.frames,
+                        (long long) fh.num_codebooks, (long long) fh.embedding_len,
+                        (long long) g_mm3.lm_cfg.num_codebooks, (long long) g_mm3.lm_cfg.embedding_length);
+            } else if (fh.model_key != mm3_ar_model_key(g_mm3, req)) {
+                // THE refusal that makes this feature safe to expose. A block
+                // made under a different LM quant, or with a different adapter
+                // merged, has exactly the right shape and is meaningless. See
+                // mm3-hiddens-file.h for why this one refuses and the next warns.
+                fprintf(stderr,
+                        "[MM3-Job] %s: REFUSED %s — saved under a different LM, depth model or LM "
+                        "adapter than the one loaded now. Planning fresh rather than rendering from a "
+                        "block this model did not make.\n",
+                        job->id.c_str(), req.forced_frame_hiddens_file.c_str());
+            } else {
+                if (fh.full_key != ar_key) {
+                    fprintf(stderr,
+                            "[MM3-Job] %s: NOTE: %s was planned for a different prompt, length or seed. "
+                            "Replaying it anyway — the saved plan wins, so the caption and duration "
+                            "controls do not describe what you are about to hear.\n",
+                            job->id.c_str(), req.forced_frame_hiddens_file.c_str());
+                }
+                // Replaces whatever was in the slot. `key` is set to THIS
+                // request's key, not the file's: the user asked for this block
+                // for this render, and stamping it that way is what lets the
+                // next identical render hit in memory.
+                mm3_ar_cache_clear("superseded by a saved plan");
+                g_mm3_ar_cache.key          = ar_key;
+                g_mm3_ar_cache.frames       = fh.frames;
+                g_mm3_ar_cache.hiddens      = std::move(fh.hiddens);
+                g_mm3_ar_cache.semantic_all = std::move(fh.semantic_all);
+                g_mm3_ar_cache.acoustic_all = std::move(fh.acoustic_all);
+                g_mm3_ar_cache.lrc          = std::move(fh.lrc);
+                g_mm3_ar_cache.eos_hit      = fh.eos_hit;
+                g_mm3_ar_cache.hits         = 0;
+                ar_from_file                = true;
+                fprintf(stderr,
+                        "[MM3-Job] %s: AR file replay - %lld frames (%.0f MB) from %s, stage 1 skipped\n",
+                        job->id.c_str(), (long long) fh.frames, (double) mm3_ar_cache_bytes() / 1048576.0,
+                        req.forced_frame_hiddens_file.c_str());
+            }
+        }
+    }
+
     // THE CACHE HOLDS ONE PLAN, so it can only ever serve a one-take render.
     // Offering it to an ensemble skips stage 1 entirely and leaves takes 1..K-1
     // with no frame-hiddens at all — which surfaces as "the cached AR block
@@ -615,7 +726,12 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     // problem. An ensemble therefore always plans fresh; the block it produces
     // for take 0 is still cached below, so a later single-track render can
     // reuse it.
-    const bool        ar_hit = req.reuse_ar && st->n_takes <= 1 && !g_mm3_ar_cache.key.empty() &&
+    //
+    // `ar_from_file` stands in for `reuse_ar` here: loading a saved plan is an
+    // explicit request to skip stage 1, so it must not also require the toggle
+    // that governs the in-memory slot to be on.
+    const bool        ar_hit = (req.reuse_ar || ar_from_file) && st->n_takes <= 1 &&
+                        !g_mm3_ar_cache.key.empty() &&
                         g_mm3_ar_cache.key == ar_key && g_mm3_ar_cache.frames > 0 &&
                         (int64_t) g_mm3_ar_cache.hiddens.size() ==
                             g_mm3_ar_cache.frames * (int64_t) g_mm3.lm_cfg.num_codebooks *
@@ -637,7 +753,8 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     }
     {
         std::lock_guard<std::mutex> lock(st->mtx);
-        st->ar_cached = ar_hit;
+        st->ar_cached   = ar_hit;
+        st->ar_from_file = ar_from_file;
     }
 
     // ── VRAM arbitration + warm ──
@@ -961,7 +1078,13 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         r.ar.lrc          = g_mm3_ar_cache.lrc;
         r.ar.n_frames     = g_mm3_ar_cache.frames;
         r.ar.eos_hit      = g_mm3_ar_cache.eos_hit;
-    } else if (req.reuse_ar && r.frames > 0 && !r.ar.frame_hiddens.empty()) {
+    } else if ((req.reuse_ar || req.save_frame_hiddens) && r.frames > 0 && !r.ar.frame_hiddens.empty()) {
+        // `save_frame_hiddens` fills the slot too, and it has to: the save below
+        // writes FROM the slot, so gating the fill on `reuse_ar` alone would
+        // either write nothing or — worse, and this is the failure mode worth
+        // naming — write whatever an EARLIER render happened to leave in there,
+        // under the name the user just typed. Same move, no extra copy, and the
+        // next miss frees it as usual.
         // MOVED, not copied: the run is finished with the block and this is the
         // only reason host RAM never holds two of them.
         g_mm3_ar_cache.key          = ar_key;
@@ -974,6 +1097,52 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         g_mm3_ar_cache.hits         = 0;
         fprintf(stderr, "[MM3-Job] %s: AR cache filled - %lld frames, %.0f MB held for the next render\n",
                 job->id.c_str(), (long long) r.frames, (double) mm3_ar_cache_bytes() / 1048576.0);
+    }
+
+    // ── AR cache: write the slot to disk ───────────────────────────────────
+    //
+    // Written from the SLOT, not from `r.ar`, for two reasons: the block was
+    // moved out of `r.ar` by the fill above, and on a hit or a file replay the
+    // slot is the only place the data exists at all. Both branches leave the
+    // slot holding exactly what this render used, so saving after a replay
+    // simply copies a plan under a new name — which is the cheap way to fork one.
+    //
+    // A failed save is a WARNING, never a failure: the audio is already rendered
+    // and the file was a convenience.
+    if (req.save_frame_hiddens && !req.frame_hiddens_save_path.empty()) {
+        const int64_t want = g_mm3_ar_cache.frames * (int64_t) g_mm3.lm_cfg.num_codebooks *
+                             (int64_t) g_mm3.lm_cfg.embedding_length;
+        if (g_mm3_ar_cache.frames <= 0 || (int64_t) g_mm3_ar_cache.hiddens.size() != want) {
+            // Reachable when the run took a path that leaves no block — an
+            // ensemble, say. Better to say nothing was saved than to leave a
+            // file that looks like it worked.
+            fprintf(stderr,
+                    "[MM3-Job] %s: WARNING: nothing to save to %s — this render kept no hidden block "
+                    "(ensembles plan per take and do not fill the slot)\n",
+                    job->id.c_str(), req.frame_hiddens_save_path.c_str());
+        } else {
+            MM3HiddensFile fh;
+            fh.frames        = g_mm3_ar_cache.frames;
+            fh.num_codebooks = (int64_t) g_mm3.lm_cfg.num_codebooks;
+            fh.embedding_len = (int64_t) g_mm3.lm_cfg.embedding_length;
+            fh.model_key     = mm3_ar_model_key(g_mm3, req);
+            fh.full_key      = g_mm3_ar_cache.key;
+            fh.semantic_all  = g_mm3_ar_cache.semantic_all;
+            fh.acoustic_all  = g_mm3_ar_cache.acoustic_all;
+            fh.lrc           = g_mm3_ar_cache.lrc;
+            fh.eos_hit       = g_mm3_ar_cache.eos_hit;
+            // The block goes by pointer, straight out of the live slot — a copy
+            // just to pass it would be another 600 MB of host RAM for a 200 s song.
+            std::string werr;
+            if (mm3_hiddens_write(req.frame_hiddens_save_path, fh, g_mm3_ar_cache.hiddens.data(), &werr)) {
+                fprintf(stderr, "[MM3-Job] %s: plan saved - %lld frames (%.0f MB) -> %s\n", job->id.c_str(),
+                        (long long) fh.frames, (double) (want * (int64_t) sizeof(float)) / 1048576.0,
+                        req.frame_hiddens_save_path.c_str());
+            } else {
+                fprintf(stderr, "[MM3-Job] %s: WARNING: could not save the plan: %s\n", job->id.c_str(),
+                        werr.c_str());
+            }
+        }
     }
 
     // ── encode ──
@@ -1320,6 +1489,7 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
     // live (not only on the finished result) so a poller can say so while the
     // flow stage is still running.
     yyjson_mut_obj_add_bool(o, orot, "ar_cached", st->ar_cached);
+    yyjson_mut_obj_add_bool(o, orot, "ar_from_file", st->ar_from_file);
     // Streaming: whether GET /mm3/stream can serve this job, and how much has
     // gone out so far. Reported live so a poller can distinguish "streaming is
     // on but the AR stage has not produced a window yet" from "not streaming".

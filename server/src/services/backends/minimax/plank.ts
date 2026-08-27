@@ -14,8 +14,10 @@
 // rather than two different AR samplings. Sold as a speed feature it
 // disappoints; used as a reproducibility feature it does exactly what it says.
 //
-// (A real AR speedup would need the condition-encoder input hiddens captured
-// rather than the codes — a far larger blob, and unbuilt.)
+// (A real AR speedup needs the condition-encoder input HIDDENS captured rather
+// than the codes. That is ./hiddens.ts, and it is built — but the blob is 4096x
+// the size, so the two coexist: a plan for pinning a bed you are about to
+// iterate against, a plank for anything you want to keep, share or inspect.)
 //
 // ── ON-DISK FORMAT ──────────────────────────────────────────────────────────
 //

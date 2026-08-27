@@ -14,6 +14,7 @@ import { engineReady } from '../../../engineState.js';
 import { isEngineSuspended } from '../../aceEngineProcess.js';
 import { getSetting, setSetting } from '../../../db/lireekDb.js';
 import { listMm3Planks } from './plank.js';
+import { MM3_HIDDENS_EXT, listMm3Hiddens } from './hiddens.js';
 import { listMm3LmAdapters } from './lmAdapter.js';
 import { mm3Props, mm3PropsCached, mm3SelectModel, mm3Unload } from './client.js';
 import type { Mm3Props, Mm3RoleVariants } from './client.js';
@@ -154,6 +155,20 @@ function mm3PlankOptions(): { value: string; label: string }[] {
     const cap = p.caption ? p.caption.slice(0, 40) : p.file.replace('.mm3plank', '').slice(0, 8);
     const frames = Number.isFinite(p.frames) ? `${p.frames}f` : '';
     return { value: p.file, label: [when, cap, frames].filter(Boolean).join(' · ') };
+  })];
+}
+
+/** Saved plans for the picker. Same shape as mm3PlankOptions, plus the size —
+ *  a plan is hundreds of MB where a plank is hundreds of KB, so which one is
+ *  eating the disk is the first thing anyone will want from this list. The name
+ *  leads, because unlike a plank these are usually deliberately named. */
+function mm3HiddensOptions(): { value: string; label: string }[] {
+  const none = { value: '', label: 'None — plan fresh' };
+  return [none, ...listMm3Hiddens().map(p => {
+    const name = p.file.replace(MM3_HIDDENS_EXT, '');
+    const mb = Number.isFinite(p.sizeBytes) ? `${Math.round((p.sizeBytes as number) / (1024 * 1024))} MB` : '';
+    const when = typeof p.created === 'string' ? p.created.slice(0, 16).replace('T', ' ') : '';
+    return { value: p.file, label: [name, mb, when].filter(Boolean).join(' · ') };
   })];
 }
 
@@ -529,6 +544,45 @@ async function capabilities(): Promise<BackendCapabilities> {
             + 'emits the saved codes. Duration and lyrics come from the plank.',
         default: '',
         options: mm3PlankOptions(),
+      },
+      {
+        // ── Saved plans ──
+        // The plank's job, done properly: the same fixed bed, but it skips the
+        // planner instead of re-running it, and it survives a restart, which
+        // the in-memory cache above does not. The catch is size — 4096x a plank
+        // — so the hint leads with it and the picker shows MB per entry.
+        key: 'mm3SaveHiddens',
+        group: 'lm',
+        type: 'toggle',
+        label: 'Save Plan To Disk',
+        hint: 'Keep this render\'s planner output as a file, so it can be replayed '
+            + 'after a restart. Unlike a plank a replay SKIPS the planner, so it is '
+            + 'a real speedup — but the file is large: roughly 3 MB per second of '
+            + 'audio, so about 600 MB for a 200 s song.',
+        default: false,
+      },
+      {
+        key: 'mm3HiddensName',
+        group: 'lm',
+        type: 'text',
+        label: 'Plan Name',
+        hint: 'What to call the saved plan (debris_v1, say). Blank gets a uuid. '
+            + 'An existing plan of the same name is overwritten.',
+        default: '',
+        visible_when: { key: 'mm3SaveHiddens', equals: 'true' },
+      },
+      {
+        key: 'mm3HiddensPath',
+        group: 'lm',
+        type: 'select',
+        label: 'Replay Saved Plan',
+        hint: 'Render against a saved plan instead of planning fresh. Skips the AR '
+            + 'stage outright, so it is roughly half the render time — and the '
+            + 'plan\'s own caption, lyrics and length win over the controls above. '
+            + 'A plan saved under a different LM, depth model or LM adapter is '
+            + 'refused and the render plans fresh instead.',
+        default: '',
+        options: mm3HiddensOptions(),
       },
     ],
   };

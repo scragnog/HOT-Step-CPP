@@ -37,7 +37,24 @@ export const BackendExtensionControls: React.FC<{
   accentColor?: Accent;
 }> = ({ group, accentColor = 'sky' }) => {
   const gp = useGlobalParams() as any;
-  const params = useBackendExtensions(group);
+  const declared = useBackendExtensions(group);
+
+  // `visible_when`, same schema field the Lua plugin renderer honours: a param
+  // that only makes sense once another one is on (a name field under a save
+  // toggle) declares its dependency rather than the UI hardcoding the pair.
+  //
+  // Compared as STRINGS because that is what the schema can carry — a declared
+  // `equals: 'true'` has to match a real boolean `true` from backendParams.
+  // The dependency is looked up across ALL extensions, not just this group's,
+  // so a control can depend on one that renders in another cluster.
+  const { capabilities } = useCapabilities();
+  const all = capabilities?.extensions ?? [];
+  const valueOf = (key: string): unknown => {
+    const dep = all.find((d) => d.key === key);
+    return gp.backendParams?.[key] ?? dep?.default;
+  };
+  const params = declared.filter((p) =>
+    !p.visible_when || String(valueOf(p.visible_when.key) ?? '') === p.visible_when.equals);
 
   return (
     <>

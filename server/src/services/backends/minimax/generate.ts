@@ -46,6 +46,9 @@ import { getDb } from '../../../db/database.js';
 import { aceClient } from '../../aceClient.js';
 import { wavDurationSec } from '../../audioCrop.js';
 import { MM3_PLANK_EXT, mm3PlankDir, readMm3Plank } from './plank.js';
+import {
+  MM3_HIDDENS_EXT, ensureMm3HiddensDir, resolveMm3HiddensPath, sanitiseMm3HiddensName,
+} from './hiddens.js';
 import { MM3_LM_ADAPTER_DEFAULT_SCALES, resolveMm3LmAdapterPath } from './lmAdapter.js';
 import { applyMm3Trigger, readMm3AdapterTrigger } from './trigger.js';
 import { runPostProcessingChain } from '../../generation/postProcessing.js';
@@ -461,6 +464,48 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           forced_acoustic: codes.forced_acoustic,
         };
       })() : {}),
+      // ── Saved plans (engine mm3-hiddens-file.h) ──
+      //
+      // Replay. Unlike the plank above this IS a speedup — the hiddens are what
+      // the condition encoder eats, so stage 1 is skipped outright rather than
+      // re-run with its output pinned. A plan that will not load is a note and a
+      // normal AR pass, same as a plank; a plan saved under a different LM or
+      // adapter is refused ENGINE-side for the same reason, which is why nothing
+      // here tries to validate it beyond containment.
+      //
+      // A plank and a plan together is a 400 from the engine, so the plank wins
+      // here and says so — the two pin the same thing and the engine would
+      // otherwise reject the whole render over a UI state the user can reach.
+      ...(params.mm3HiddensPath && !params.mm3PlankPath ? (() => {
+        const resolved = resolveMm3HiddensPath(String(params.mm3HiddensPath));
+        if (!resolved || !fs.existsSync(resolved)) {
+          notes.push(`Saved plan not found (${params.mm3HiddensPath}) — planning fresh`);
+          return {};
+        }
+        const mb = fs.statSync(resolved).size / (1024 * 1024);
+        notes.push(
+          `Replaying the saved plan ${path.basename(resolved)} (${mb.toFixed(0)} MB) — `
+          + `the planner is skipped, so its caption and length win over the controls above`,
+        );
+        return { forced_frame_hiddens_file: resolved };
+      })() : {}),
+      ...(params.mm3HiddensPath && params.mm3PlankPath
+            ? (notes.push('A plank and a saved plan were both selected — using the plank, since it '
+                          + 'pins the same plan and the engine will not take both'), {})
+            : {}),
+      // Capture. The engine writes the blob itself; the sidecar is written here
+      // after the job finishes (there is no useful metadata engine-side).
+      ...(params.mm3SaveHiddens === true ? (() => {
+        const dir = ensureMm3HiddensDir();
+        const id = sanitiseMm3HiddensName(String(params.mm3HiddensName ?? '')) ?? uuidv4();
+        const savePath = path.join(dir, `${id}${MM3_HIDDENS_EXT}`);
+        // Stashed on params so the sidecar write after pollUntilDone knows what
+        // the engine was told, without re-deriving a name that may have been a
+        // uuid. Underscored: internal, never a user-facing knob.
+        (params as Record<string, unknown>)._mm3HiddensId = id;
+        (params as Record<string, unknown>)._mm3HiddensPath = savePath;
+        return { save_frame_hiddens: true, frame_hiddens_save_path: savePath };
+      })() : {}),
       ...samplerPlugins,
       // Runtime LM LoRA (engine mm3-lm-adapter.h). A reference that fails
       // containment is a NOTE + base-model render, never a silent partial —
@@ -856,8 +901,18 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
       // AR cache outcome. Worth a line of its own: a hit changes the shape of
       // the run (no LM load, no stage 1) and "why was that render so fast?" /
       // "why did it re-plan?" are the two questions this feature raises.
-      if (finalDetail.ar_cached) {
+      if (finalDetail.ar_from_file) {
+        log('INFO', '[MM3] Saved plan replayed — planner skipped, this render was flow-stage only');
+      } else if (finalDetail.ar_cached) {
         log('INFO', '[MM3] AR cache HIT — planner skipped, this render was flow-stage only');
+      } else if (req.forced_frame_hiddens_file) {
+        // The engine refused it or could not read it, and said why in
+        // ace_engine.log. Saying nothing here would leave the picker looking
+        // dead on the one path where it deliberately did nothing.
+        log('WARNING',
+          '[MM3] The saved plan was not used — most likely saved under a different LM, depth model '
+          + 'or LM adapter than the one loaded now. See ace_engine.log for the exact reason. '
+          + 'This render planned fresh.');
       } else if (req.reuse_ar) {
         log('INFO', '[MM3] AR cache miss — planned fresh; the result is held for the next render');
       }
@@ -906,6 +961,39 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
           }
         } catch (plankErr: any) {
           log('WARNING', `[MM3 Plank] AR code save failed (non-fatal): ${plankErr?.message ?? plankErr}`);
+        }
+      }
+
+      // Saved-plan sidecar. The engine already wrote the blob itself — this is
+      // only the picker's metadata, so it is written from what the request and
+      // the result know. Non-fatal for the same reason the plank capture is.
+      const hiddensPath = (job.params as Record<string, unknown>)._mm3HiddensPath as string | undefined;
+      const hiddensId = (job.params as Record<string, unknown>)._mm3HiddensId as string | undefined;
+      if (req.save_frame_hiddens && hiddensPath) {
+        try {
+          // Absent means the engine declined to write one — an ensemble keeps
+          // no single plan — and it logged why. Not an error here.
+          if (!fs.existsSync(hiddensPath)) {
+            log('WARNING', '[MM3 Plan] The engine wrote no plan for this render (see ace_engine.log)');
+          } else {
+            const sizeBytes = fs.statSync(hiddensPath).size;
+            fs.writeFileSync(`${hiddensPath}.json`, JSON.stringify({
+              id: hiddensId,
+              jobId: sub.job_id,
+              created: new Date().toISOString(),
+              caption: req.caption,
+              lyrics: req.lyrics || '',
+              duration: sub.duration,
+              seed: sub.seed,
+              frames: r.frames,
+              sizeBytes,
+            }, null, 2));
+            job.params.mm3LastHiddensPath = path.basename(hiddensPath);
+            log('INFO', `[MM3 Plan] Saved ${path.basename(hiddensPath)} `
+              + `(${(sizeBytes / (1024 * 1024)).toFixed(0)} MB, ${r.frames} frames)`);
+          }
+        } catch (hErr: any) {
+          log('WARNING', `[MM3 Plan] Sidecar write failed (non-fatal): ${hErr?.message ?? hErr}`);
         }
       }
     }

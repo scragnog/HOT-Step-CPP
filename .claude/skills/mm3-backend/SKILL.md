@@ -402,9 +402,15 @@ arithmetic.
 
 What it IS for: a fixed semantic bed, so an A/B of two flow-stage
 solver/scheduler/guidance settings compares those settings instead of two
-different AR samplings. It is also PORTABLE and survives a restart, which the
-AR cache below does not. For the speedup, see the AR cache — that is the
+different AR samplings. For the speedup, see the AR cache below — that is the
 `frame_hiddens` path this section used to describe as unbuilt.
+
+**Saved plans do the bed job better, and the plank still earns its keep.** A
+plan (`.mm3hiddens`, below) pins the same bed *and* skips the compute, so prefer
+it for A/B work. What the plank has that a plan does not: it is ~4096x smaller,
+and it is portable across a model change — forced codes replay through whatever
+LM is loaded, where a plan saved under a different quant or adapter is refused.
+Archive and share planks; pin plans.
 
 Frame arithmetic: entry 0 is the un-emitted iteration, so `I` codes render
 `I-1` frames. `mm3-request.h` derives `max_frames`/`duration` from the array and
@@ -631,6 +637,71 @@ Layers: `mm3-ar-cache.h` (slot) -> `mm3-job.h` (key + lookup + fill) ->
 `mm3-pipeline.h` (`cached_hiddens` borrowed, `HID` pointer) -> `client.ts`
 (`reuse_ar`/`ar_seed`/`ar_cached`) -> `generate.ts` (mapping + notes) ->
 `index.ts` (manifest params).
+
+## Saved plans: the AR cache on disk (built 2026-08-27 — compiles, NOT YET RUN)
+
+The slot above, serialised to a `.mm3hiddens` file, so a pinned plan survives a
+restart. Adapted from an MDMAchine drop; the engine side is his idea, the
+identity checking and the priming route are not. Opt in per request with
+`save_frame_hiddens` + `frame_hiddens_save_path` to write, or
+`forced_frame_hiddens_file` to replay. UI: **Save Plan To Disk** /
+**Plan Name** / **Replay Saved Plan** (`mm3SaveHiddens`, `mm3HiddensName`,
+`mm3HiddensPath`), all in the LM cluster beside the plank controls.
+
+**It loads INTO the slot, not around it.** This is the whole design and the one
+thing to preserve. Every decision a hit makes — `mm3_load_parts(lm=!ar_hit,
+depth=!ar_hit)`, `staged`, `stage2_only`, the adapter block, the byproduct
+restore — reads the local `ar_hit`, not `req.gen.cached_hiddens`. A replay that
+set the pointer directly (the obvious implementation, and the one in the
+original drop) still streams 17.2 GB of LM weights it never calls, still does
+the staged handover, and still hands back an empty LRC and no plank codes. So
+the file primes `g_mm3_ar_cache` and `ar_hit` is then computed as
+`(req.reuse_ar || ar_from_file) && …`. Nothing else needed changing.
+
+**Refusal vs warning, and why the file carries the key.** A blob made under a
+different LM quant has *exactly the right shape* and is numerically meaningless,
+so a dimension check waves it through and the render is silently wrong. The file
+therefore stores two keys (`mm3-hiddens-file.h`):
+
+| key | holds | mismatch |
+|---|---|---|
+| `mm3_ar_model_key` | LM + depth path/bytes/quant, adapter identity + all six dials, `[cb, emb]` | **REFUSED** — plans fresh |
+| `mm3_ar_cache_key` | the above + prompt, `max_frames`, `ar_seed`, LRC flag | **NOTE** — replays anyway |
+
+The soft half is deliberately soft: the caption only reaches the flow DiT
+*through* these hiddens, so replaying against an edited caption is legitimate —
+it just means the caption and duration controls no longer describe the output.
+`mm3_ar_cache_key` is `v=2` for the split; the model fields moved into
+`mm3_ar_key_add_models()` and now trail the forced codes.
+
+**Traps.**
+- **The save reads the SLOT, not `r.ar`** — the block was `std::move`d out of
+  `r.ar` by the fill. So `save_frame_hiddens` also has to *trigger* the fill
+  (`req.reuse_ar || req.save_frame_hiddens`), or the save either writes nothing
+  or writes whatever an earlier render left in the slot, under the name the user
+  just typed. That second one is the failure mode worth remembering.
+- **Written atomically** (`.tmp` + rename), because an interrupted 600 MB write
+  otherwise leaves a file that looks fine until the shape check.
+- **Passed to the writer by pointer.** Copying the slot to hand it to a function
+  is another 600 MB of host RAM for a 200 s song.
+- **Ensembles never save or replay** — the slot holds one plan, so `takes > 1`
+  gets a warning rather than a silently dead picker.
+- The blob never crosses the Node/engine wire in either direction; only paths
+  do. Server-side references go through `resolveMm3HiddensPath()`, same
+  containment rule as the plank.
+
+**Size is the whole reason the plank survives.** 128 KB/frame vs 32 B/frame is
+4096x: ~600 MB per 200 s song against ~150 KB. A plan is for pinning a bed you
+are about to iterate flow settings against; a plank is for anything you want to
+keep, share, or inspect, and it is portable across a quant or adapter change
+(forced codes replay *through* whatever LM is loaded) where a plan is refused.
+A "library of past songs as plans" does not fit on a disk — 100 songs is 60 GB.
+
+Layers: `mm3-hiddens-file.h` (format + I/O) -> `mm3-job.h` (prime + save) ->
+`mm3-request.h` (3 fields) -> `hiddens.ts` (dir, containment, list, delete) ->
+`generate.ts` (mapping + sidecar) -> `index.ts` (manifest) ->
+`routes/backends.ts` (`/api/mm3/plans`, `/plan-meta`, DELETE) ->
+`BackendExtensionControls.tsx` (`visible_when`).
 
 ## Performance budget (RTX 5090, f16, 12 s clip ≈ 12.4 s wall ≈ 1.0× realtime)
 

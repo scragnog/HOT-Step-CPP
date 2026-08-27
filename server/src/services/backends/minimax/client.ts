@@ -196,6 +196,25 @@ export interface Mm3SynthRequest {
    *  therefore the AR cache entry — stays put. */
   ar_seed?: number;
 
+  // ── Saved plans (engine: minimax/mm3-hiddens-file.h) ──────────────────────
+  // The AR cache above, on disk. The blob never crosses this wire in either
+  // direction — the engine reads and writes it itself, because at ~600 MB for a
+  // 200 s song a round trip through Node would cost more than the render it
+  // saves. These fields carry PATHS only.
+
+  /** Replay a saved plan: absolute path to a `.mm3hiddens` file. Primes the
+   *  engine's in-memory AR slot, so the run then behaves exactly like a cache
+   *  hit — no LM load, no staged handover, codes and LRC handed back. The
+   *  engine REFUSES a plan saved under a different LM, depth model or LM
+   *  adapter and plans fresh instead, so a stale file cannot render silently
+   *  wrong. Mutually exclusive with `forced_semantic`. */
+  forced_frame_hiddens_file?: string;
+  /** Write this render's plan to disk after it succeeds. Needs a path. */
+  save_frame_hiddens?: boolean;
+  /** Absolute path the engine writes the plan to. Written atomically (tmp +
+   *  rename), so an interrupted save leaves any previous file intact. */
+  frame_hiddens_save_path?: string;
+
   // ── Sampler plugins (engine: minimax/mm3-plugins.h) ───────────────────────
   // The SAME Lua solver/scheduler/guidance plugins the ACE DiT uses, driving
   // MM3's flow DiT through a convention adapter. Field names are ACE's, so one
@@ -282,6 +301,11 @@ export interface Mm3JobDetail {
   /** AR cache: true when stage 1 was skipped entirely for this job. Set as soon
    *  as the job starts, not only on the finished result. */
   ar_cached?: boolean;
+  /** True when that cache was primed from a saved plan rather than by the
+   *  previous render. Reported apart from `ar_cached` because the two are
+   *  indistinguishable from the outside and mean different things: one is the
+   *  cache working, the other is a plan the user picked. */
+  ar_from_file?: boolean;
   /** Streaming: true when this job was submitted with `stream: true`. */
   streaming?: boolean;
   /** True when windows were dispatched WHILE the planner was still running —

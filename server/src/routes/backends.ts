@@ -24,6 +24,9 @@ import {
 } from '../services/backends/registry.js';
 import { listMm3Planks, readMm3PlankMeta } from '../services/backends/minimax/plank.js';
 import {
+  listMm3Hiddens, readMm3HiddensMeta, deleteMm3Hiddens, mm3HiddensDir,
+} from '../services/backends/minimax/hiddens.js';
+import {
   listMm3LmAdapters,
   mm3LmAdapterDir,
   MM3_LM_ADAPTER_DEFAULT_SCALES,
@@ -209,6 +212,45 @@ router.get('/mm3/plank-meta', (req, res) => {
     return;
   }
   res.json(meta);
+});
+
+// ── MM3 saved plans ──────────────────────────────────────────────────────────
+//
+// The plans themselves never cross this boundary — at ~600 MB for a 200 s song
+// the engine reads and writes them itself and the server only ever hands it a
+// path. These routes exist so the picker can list them, preview one, and delete
+// the ones that are eating the disk.
+
+/** GET /api/mm3/plans — the saved plans, newest first, with sizes. */
+router.get('/mm3/plans', (_req, res) => {
+  res.json({ plans: listMm3Hiddens(), dir: mm3HiddensDir() });
+});
+
+/** GET /api/mm3/plan-meta?file=<name> — one plan's sidecar metadata. Same
+ *  containment rule as the plank route above: `file` comes from the browser. */
+router.get('/mm3/plan-meta', (req, res) => {
+  const ref = String(req.query.file ?? '').trim();
+  if (!ref) {
+    res.status(400).json({ error: 'missing ?file= parameter' });
+    return;
+  }
+  const meta = readMm3HiddensMeta(ref);
+  if (!meta) {
+    res.status(404).json({ error: 'plan sidecar not found or unreadable' });
+    return;
+  }
+  res.json(meta);
+});
+
+/** DELETE /api/mm3/plans/:file — drop a saved plan and its sidecar.
+ *  These are by far the largest artefacts the app writes, so reclaiming the
+ *  space has to be possible without going to the filesystem. */
+router.delete('/mm3/plans/:file', (req, res) => {
+  if (!deleteMm3Hiddens(String(req.params.file ?? ''))) {
+    res.status(404).json({ error: 'plan not found, or the reference left the plan directory' });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 // ── MM3 runtime LM adapters ──────────────────────────────────────────────────
