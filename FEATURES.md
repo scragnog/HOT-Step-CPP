@@ -2,6 +2,63 @@
 
 Everything HOT-Step CPP adds on top of the base [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) engine.
 
+Two music models run natively in the engine, switchable from the toolbar: **ACE-Step 1.5** and **MiniMax-Music3**. Most of what follows applies to both; the MiniMax-Music3 section covers what is specific to it.
+
+---
+
+## MiniMax-Music3 backend
+
+A native C++/GGML port of [MiniMax-Music3](https://huggingface.co/MiniMaxAI/MiniMax-Music3), to our knowledge the first implementation outside Python. Every stage runs in the engine and was checked against the reference before shipping.
+
+| Feature | Description |
+|---------|-------------|
+| **Full native pipeline** | 8B planner LM, flow-matching DiT, RVQ depth decoder, condition encoder and vocoder, all in C++/GGML. No Python at generation time. |
+| **Play while rendering** | Finished windows stream as they land, so playback starts while later windows are still being planned. First audio in roughly ten seconds on a warm model. A streaming render gets a grid card, play bar and live waveform like any other track. |
+| **Sliding pipeline** | Windows render while the planner is still planning ahead of them, rather than waiting for the whole plan. |
+| **Variations per render** | N takes come out of one batched pass through the planner instead of N sequential renders. Each take is its own queue entry, card and stream. |
+| **LRC lyric timestamps** | Timings are read from the model's own attention, so there is no Whisper pass and no second decode. Capture costs about a tenth of a second. |
+| **Caption Composer** | Plain English description in, MM3 Structured Caption out, with no language model in the path and nothing sent anywhere. |
+| **Split model format** | One GGUF per pipeline component, each selectable at its own quantisation. Mix a high-precision planner with a compact DiT, and swap one without reloading the other. |
+| **Importance-matrix quants** | Every planner quant below Q8 is built against an importance matrix measured from the full-precision model. Q2_K goes from unusable to close to Q8. Sizes run from 7.05 GB (Q6_K) down to 2.75 GB (IQ2_XXS), against 17.2 GB at f16. |
+| **LM and DiT adapters** | LoRA and LoKr on both, applied at runtime with live per-group strength dials, or merged into the weights for zero per-step cost. |
+| **AR plan cache** | Changing only flow-stage settings replays the cached plan instead of re-running the planner. Survives a restart, and refuses to load against a different model. |
+| **Guidance-distilled composers** | Depth-pruned, guidance-distilled planner LMs load and run, including single-row operation when the checkpoint bakes guidance in at CFG 1.0. |
+| **Low-step compensation** | The noise schedule adapts automatically below 30 steps, so short renders stay full-bodied instead of going thin. Minimum steps dropped from 8 to 2. |
+| **Shared tooling** | The Lua solver plugins, StableStep, VST effects and mastering all run on MM3 output. |
+
+---
+
+## Training Studio
+
+Fine-tunes style adapters for both models on your own GPU, with no Python and no external tools.
+
+| Feature | Description |
+|---------|-------------|
+| **Dataset creation** | Point it at a folder of songs. Local BPM/key analysis via Essentia, lyrics from Genius, captions from a captioning model that runs on your machine. Album and artist read from the audio tags when labels are absent. |
+| **Quantized-base training** | Training against a K-quant or MXFP4 base takes the VRAM floor from 31.4 GB to roughly 10 GB, which is what makes MM3 adapter training possible below a 32 GB card. |
+| **ACE-Step adapters** | Planner LM LoRA (0.6B/1.7B/4B) and DiT LoRA. |
+| **MiniMax-Music3 adapters** | Planner LM LoRA and LoKr, and flow-DiT LoRA, trained end to end in-engine from audio through RVQ codes. |
+| **Checkpoint previews** | Renders an audio preview at every checkpoint, so an adapter can be judged mid-run rather than after it. |
+| **Objective evaluation** | Calibration and evaluation passes score adapters, with the score shown in the adapter picker, so the best checkpoint is identifiable rather than assumed to be the last. |
+| **Pause, resume, survive** | Runs pause and resume, batch pipelines are restart-proof and resumable from their record, and a saved plan refuses to load against the wrong model. |
+| **Audition mode** | Hear what the planner learned with zero DiT influence, A/B against the base, with the dataset's own metadata pinned so the comparison is fair. |
+| **Validated defaults** | MM3 adapter defaults follow the recipe published by the SimpleTuner author, cross-checked against our own runs: prior preservation, caption dropout to the trigger word, rank dropout, and crops anchored where they truly sit in the song. |
+| **Target-loss stopping** | Stop on a target loss measured over whole passes rather than a step count, and continue a run that already stopped. |
+
+---
+
+## Local audio captioning
+
+[MOSS-Music-8B-Instruct](https://huggingface.co/OpenMOSS-Team/MOSS-Music-8B-Instruct) ported to GGML and shipped as the `ace-caption` CLI. Audio in, caption out, entirely on your machine.
+
+| Feature | Description |
+|---------|-------------|
+| **Native GGML port** | Whisper log-mel frontend, audio tower encoder and LM decode, all in C++. Parity against the reference at correlation 0.9999995 or better, with argmax exact. |
+| **One encode, every format** | A single encode emits all caption formats, rather than re-encoding per format. |
+| **Dataset mode** | `--src-list` loads the model once per dataset instead of once per track. |
+| **Hybrid captions** | What the model hears paired with what Essentia measures, so tempo and key come from analysis rather than the model's guess. |
+| **Both caption styles** | ACE-Step's reference caption style and MM3's Structured Caption format. |
+
 ---
 
 ## C++ Inference Engine

@@ -1,6 +1,6 @@
 # HOT-Step CPP
 
-A feature-rich UI for [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) — local AI music generation powered by GGML, with native safetensors support.
+A feature-rich UI for [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp), local AI music generation powered by GGML, with native safetensors support. Two music models run natively in the engine: **ACE-Step 1.5** and **MiniMax-Music3**, switchable from the toolbar.
 
 Describe a song with a text caption and lyrics, and get stereo 48kHz audio generated entirely on your local hardware. No cloud, no API keys, no subscriptions.
 
@@ -10,17 +10,31 @@ Describe a song with a text caption and lyrics, and get stereo 48kHz audio gener
 
 💬 **Questions, feedback, or want to share what you've made?** [Join the Discord](https://discord.gg/ezVtmg9GKX) — it's where I'm most active for HOT-Step discussion and support.
 
-> ### 🎓 New: Training Studio *(highly experimental — for the adventurous!)*
-> Train your own **style adapters entirely inside HOT-Step** — no Python, no external tools. Point it at a folder of songs and it walks you through the whole pipeline: **dataset creation** (local BPM/key analysis, lyrics from Genius, AI captions that actually listen to the audio), **tensor preprocessing**, and native **training** of both planner (LM LoRA, 0.6B/1.7B/4B) and **DiT LoRA** adapters — all in C++/GGML on your own GPU. There's even a pure-LM **audition mode** that lets you hear what the planner learned, A/B against the base model, with zero DiT influence.
+> ### 🎓 Training Studio *(experimental, but it works)*
+> Train your own **style adapters entirely inside HOT-Step**, with no Python and no external tools. Point it at a folder of songs and it walks the whole pipeline: **dataset creation** (local BPM/key analysis, lyrics from Genius, and AI captions from a captioning model that runs on your own machine), **tensor preprocessing**, then native **training** in C++/GGML on your GPU.
 >
-> This is **very much experimental right now** — it's brand new, GPU-hungry (16 GB+ recommended, 24 GB+ for full-depth DiT training), and rough edges are guaranteed. If you try it, we'd love to hear how it goes on the Discord. Find it in the sidebar as **Training**.
+> It trains adapters for **both models**. For ACE-Step that's planner LM LoRA (0.6B/1.7B/4B) and DiT LoRA. For MiniMax-Music3 it's planner LM LoRA/LoKr and flow-DiT LoRA.
+>
+> **It fits on a normal card.** Training against a quantized base takes the VRAM floor from 31.4 GB down to around 10 GB, which is what makes MM3 adapter training possible below a 32 GB card at all. Runs pause and resume, survive a server restart, render an audio preview at every checkpoint so you can hear an adapter mid-run, and score themselves so you can tell which checkpoint is actually best rather than assuming it is the last one.
+>
+> Still rough in places and still GPU-hungry. If you try it, we would like to hear how it goes on the Discord. Find it in the sidebar as **Training**.
 
-> ### 🧪 New: MiniMax-Music3 backend *(rudimentary — under heavy development)*
-> HOT-Step now contains a **native C++/GGML port of [MiniMax-Music3](https://huggingface.co/MiniMaxAI/MiniMax-Music3)** as a second generation backend alongside ACE-Step 1.5 — to our knowledge the first implementation of this model outside Python. A backend switch appears in the global bar once the models are installed (Model Manager → any **MiniMax-Music3** pack; **Q8_0 recommended**, ~13 GB download / ~13 GB VRAM; full-precision F16 is ~24 GB / ~24 GB; a Balanced mix pack squeezes to ~12 GB).
+> ### 🧪 MiniMax-Music3 backend
+> HOT-Step contains a **native C++/GGML port of [MiniMax-Music3](https://huggingface.co/MiniMaxAI/MiniMax-Music3)** as a second generation backend alongside ACE-Step 1.5, to our knowledge the first implementation of this model outside Python. Every stage runs in the engine: the 8B planner LM, the flow-matching DiT, the RVQ depth decoder, the condition encoder and the vocoder, each checked against the reference implementation before it shipped. A backend switch appears in the global bar once the models are installed (Model Manager, then any **MiniMax-Music3** pack).
 >
-> MM3 ships in a **split model format** — one GGUF per pipeline component (language model, flow DiT, depth decoder, condition encoder, vocoder), each selectable at its own quantisation from the global bar's Models section. Mix a high-precision language model with a compact DiT, and swap the DiT quant without reloading the 17 GB LM. The split-model design follows [minimaxmusic.cpp](https://github.com/ServeurpersoCom/minimaxmusic.cpp); older two-file installs keep working unchanged.
+> **Play while rendering.** MM3 streams finished windows as they land, so the opening bars play while the rest is still being planned. First audio arrives in about ten seconds on a warm model, and a streaming render is a real track from the start with a grid card, a play bar and a live waveform.
 >
-> Current support is **text-to-music with LRC lyric timestamps** (caption + lyrics + duration + seed): no covers, repaint, stems, adapters, or training for MM3 yet, and output is stored as raw 44.1 kHz WAV. Expect rough edges, breaking changes, and rapid movement. Feedback very welcome on the Discord.
+> **Variations per render.** Ask for several takes and you get several different songs out of one batched pass through the planner rather than one render after another. Each take gets its own queue entry, card and stream.
+>
+> **Lyric timestamps with no second pass.** LRC timings are read out of the model's own attention, so there is no Whisper decode.
+>
+> **Plain English prompts.** The Caption Composer turns an ordinary description into MM3's Structured Caption format with no language model in the path.
+>
+> **Adapters and training.** Both the planner LM and the flow DiT take LoRA and LoKr adapters, applied at runtime with live strength dials or merged into the weights. Training for both lives in the Training Studio.
+>
+> MM3 ships in a **split model format**, one GGUF per pipeline component, each selectable at its own quantisation from the global bar's Models section. Mix a high-precision language model with a compact DiT, and swap the DiT quant without reloading the 17 GB LM. Every planner quant below Q8 is built against an **importance matrix**, which is the difference between Q2 being unusable and Q2 sounding close to Q8. The split-model design follows [minimaxmusic.cpp](https://github.com/ServeurpersoCom/minimaxmusic.cpp); older two-file installs keep working unchanged.
+>
+> Your existing tooling applies to MM3 output too: the Lua solver plugins, StableStep, VST effects and mastering all run on it. Feedback very welcome on the Discord.
 
 ## Download
 
@@ -70,6 +84,14 @@ Pre-built portable releases — no installation required. Extract, run, done.
 ## Highlights
 
 HOT-Step CPP extends the base acestep.cpp engine with 100+ features across inference, audio processing, and creative tooling. Here are the big ones:
+
+🎹 **Two music models, one app** — ACE-Step 1.5 and MiniMax-Music3 both run natively in the C++/GGML engine, switchable from the toolbar. The UI hides controls that do not apply to the model you are on, so you are never adjusting a knob that does nothing.
+
+🎓 **Training Studio** — Fine-tune style adapters for either model on your own GPU, with no Python. Dataset creation, captioning, preprocessing and training all happen in-app. Training against a quantized base drops the VRAM floor from 31.4 GB to about 10 GB. Runs pause, resume, survive restarts, preview audio at every checkpoint, and score themselves so you can pick the best one.
+
+🎧 **Local audio captioning** — MOSS-Music-8B runs natively in the engine as `ace-caption`. Point it at audio, get a caption, with nothing sent anywhere. One encode produces every caption format at once, and hybrid mode pairs what the model hears with what Essentia measures so tempo and key come from analysis rather than a guess.
+
+📉 **Importance-matrix quantization** — Every MiniMax-Music3 planner quant below Q8 is built against an importance matrix measured from the full-precision model, so the quantizer spends its error budget on the weights that carry signal. Plain Q2_K produced mush; the same file rebuilt this way sits close to Q8. Formats go down to IQ2_XXS at 2.75 GB, against 17.2 GB at full precision.
 
 🎛️ **17 Solvers, 9 Schedulers, 7 Guidance Modes, Postprocess Plugins** — Fully extensible Lua plugin architecture for ODE/SDE solvers, noise schedulers, guidance modes, and postprocess pipelines. Drop a `.lua` file into `engine/plugins/` and it appears in the UI at next launch — no C++ rebuild needed. Includes research-derived modes like CFG-MP (manifold projection), SMC-CFG (sliding mode control), and CFG-Zero⋆ (zero-init). Each plugin can expose its own user-facing parameters (sliders, toggles, dropdowns). **[Create your own →](docs/PLUGINS.md)**
 
@@ -568,6 +590,45 @@ The engine component (`engine/`) is licensed under MIT. See [engine/LICENSE](eng
 > ### 💜 Special Thanks
 >
 > A heartfelt thank you to **Alexander Allan ([MDMAchine](https://github.com/MDMAchine))** for his ongoing and generous contributions to HOT-Step — from the STORM solver and MD Audio Tiled Core postprocess plugins to the real-time VST3 monitoring UX (chain presets, live monitor transport, pause/resume/restart) and a slew of JUCE VST3 hosting crash fixes in the engine. Your work has made this project meaningfully better. 🙏
+
+---
+
+> ### 🔬 The MiniMax-Music3 encoder effort
+>
+> MiniMax released MiniMax-Music3's weights but not its audio encoder, which is
+> the piece that turns audio into the RVQ codes the model is trained on. Without
+> one, nobody outside MiniMax could build a training set, so nobody could train
+> an adapter. A group in the Discord set about reconstructing it in the open, and
+> HOT-Step's MM3 training exists because they did.
+>
+> **[bghira](https://huggingface.co/bghira)** designed the encoder architecture
+> everyone else built on, and published the first working open encoder along with
+> the corpus to train it.
+>
+> **[PurpleOrc](https://huggingface.co/PurpleOrc)** trained that architecture from
+> scratch on a 53,000-track corpus built with a deliberate push on non-English
+> lyrics, which produced the encoder that took the crown and held it.
+>
+> **[Mothersuperior](https://huggingface.co/Mothersuperior)** (kytr.ai) generated
+> distillation corpora on rented L40S fleets and pooled them with everyone else's,
+> then published the pooled encoders back to the group.
+>
+> **[Serveurperso](https://huggingface.co/ServeurpersoCom)** contributed a pilot
+> corpus and hidden-state encoders, and did the measurement work that found the
+> real ceiling: decoding from the exact teacher hidden state scores 0.9326, so the
+> semantic top-1 wall everyone kept hitting was the teacher's own sampling
+> entropy, not something more data could train past. That saved the group a lot of
+> wasted compute.
+>
+> **testerf**, **redsitouwu** and **afkaf** ran evaluations, argued the metrics
+> into shape, and caught the trap that cross-entropy measures plausibility to the
+> frozen LM rather than fidelity to the audio, which is why the group's gate ended
+> up being CE as a sanity floor, code diversity as an alarm, and a listening test
+> as the verdict.
+>
+> Thank you, all of you. This was a genuinely collaborative piece of reverse
+> engineering, done in the open, and it unlocked a feature this project could not
+> have shipped alone.
 
 ---
 
