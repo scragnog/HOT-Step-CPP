@@ -305,79 +305,6 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 0.1,
       },
       {
-        key: 'mm3LmRepPenalty',
-        type: 'slider',
-        label: 'LM Repetition Penalty',
-        hint: 'Breaks verbatim code loops in the planner — the "same riff forever" '
-            + 'failure, which sharpened adapters make likelier. 1.0 = off (the '
-            + 'reference recipe); 1.05-1.15 is the useful range. Uses the DRY mode '
-            + 'by default: only codes that would EXTEND a verbatim recent cycle are '
-            + 'punished, so ordinary musical restatement is untouched.',
-        default: 1.0,
-        min: 1.0,
-        max: 1.5,
-        step: 0.01,
-      },
-      {
-        key: 'mm3LmRepMode',
-        type: 'select',
-        label: 'Repetition Mode',
-        hint: 'dry: annihilates verbatim loops only (recommended). frequency: '
-            + 'penalises codes by how often they recurred. presence: flat penalty '
-            + 'on anything recent — bluntest, also flattens legitimate restatement.',
-        default: 'dry',
-        options: [
-          { value: 'dry', label: 'DRY (verbatim loops only)' },
-          { value: 'frequency', label: 'Frequency' },
-          { value: 'presence', label: 'Presence' },
-        ],
-      },
-      {
-        key: 'mm3LmRepWindow',
-        type: 'slider',
-        label: 'Repetition Window',
-        hint: 'How far back the penalty looks, in 25fps semantic frames. '
-            + '320 = 12.8 s. (The ACE LM used 64 at 5 Hz — same duration.)',
-        default: 320,
-        min: 25,
-        max: 2000,
-        step: 25,
-      },
-      {
-        key: 'mm3LmTemperature',
-        type: 'slider',
-        label: 'LM Temperature',
-        hint: 'Sampling temperature on the planner. The reference recipe has '
-            + 'none (1.0). Below 1 is safer/more repetitive; above 1 is wilder. '
-            + 'Small moves — 0.9 or 1.1 — are already audible.',
-        default: 1.0,
-        min: 0.5,
-        max: 1.6,
-        step: 0.05,
-      },
-      {
-        key: 'mm3LmTopK',
-        type: 'slider',
-        label: 'LM Top-K',
-        hint: '0 = the checkpoint\'s own 50. Lower narrows the planner to safer '
-            + 'choices; higher lets rarer codes through.',
-        default: 0,
-        min: 0,
-        max: 500,
-        step: 5,
-      },
-      {
-        key: 'mm3LmTopP',
-        type: 'slider',
-        label: 'LM Top-P',
-        hint: 'Nucleus sampling over the top-K survivors. 0 = off (reference). '
-            + '0.9-0.95 trims the improbable tail adaptively.',
-        default: 0,
-        min: 0,
-        max: 1,
-        step: 0.01,
-      },
-      {
         // Backend-NEUTRAL key: BackendGenerationDropdown reads it to decide
         // whether to render the shared solver/scheduler/guidance pickers, and
         // that component must stay free of MM3-specific names. Any future
@@ -419,40 +346,6 @@ async function capabilities(): Promise<BackendCapabilities> {
             + 'stereo coherence and low end rather than just detail (measured at 10 '
             + 'steps: L/R correlation -0.07 vs +0.77, and -8 dB at 60 Hz). Solver and '
             + 'guidance stay native. No effect at 30 steps or above.',
-        default: true,
-      },
-      {
-        // ── MM3 Plank ──
-        // Read the hint carefully before believing this is a speed feature: it
-        // is not. The AR loop still runs every per-frame forward pass on a
-        // replay. What it buys is an IDENTICAL semantic bed, so that comparing
-        // two solver/scheduler/guidance settings compares those settings rather
-        // than two different AR samplings.
-        key: 'mm3SaveArCodes',
-        type: 'toggle',
-        label: 'Save AR Plan (Plank)',
-        hint: 'Save this render\'s AR planner output so it can be replayed later. '
-            + 'Costs nothing to enable — the codes already exist in memory.',
-        default: false,
-      },
-      {
-        // ── AR cache ──
-        // The speed feature the plank is NOT. Default ON: the engine only
-        // fills the slot when a render happens, and the whole point is that
-        // iterating on flow settings should not re-plan.
-        //
-        // NOTE the default must be mirrored in generate.ts as `!== false` —
-        // the UI sends nothing for an untouched control (see the comment
-        // there), so an absent value has to resolve the same way.
-        key: 'mm3ReuseAr',
-        type: 'toggle',
-        label: 'Reuse Planner Output',
-        hint: 'Skip the AR planner when nothing upstream of the flow stage changed — '
-            + 'roughly halves the render when you are only tweaking steps, CFG, solver '
-            + 'or scheduler. Any change to caption, lyrics, duration, seed, LM adapter '
-            + 'or LM/depth model re-plans automatically. Holds one block of engine RAM '
-            + '(~3 MB per second of audio, so roughly 600 MB for a 200 s song). Needs a '
-            + 'fixed seed to be able to hit.',
         default: true,
       },
       {
@@ -500,7 +393,87 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: 1,
       },
       {
+        key: 'mm3LmTemperature',
+        group: 'lm',
+        type: 'slider',
+        label: 'LM Temperature',
+        hint: 'Sampling temperature on the planner. The reference recipe has '
+            + 'none (1.0). Below 1 is safer/more repetitive; above 1 is wilder. '
+            + 'Small moves — 0.9 or 1.1 — are already audible.',
+        default: 1.0,
+        min: 0.5,
+        max: 1.6,
+        step: 0.05,
+      },
+      {
+        key: 'mm3LmTopK',
+        group: 'lm',
+        type: 'slider',
+        label: 'LM Top-K',
+        hint: '0 = the checkpoint\'s own 50. Lower narrows the planner to safer '
+            + 'choices; higher lets rarer codes through.',
+        default: 0,
+        min: 0,
+        max: 500,
+        step: 5,
+      },
+      {
+        key: 'mm3LmTopP',
+        group: 'lm',
+        type: 'slider',
+        label: 'LM Top-P',
+        hint: 'Nucleus sampling over the top-K survivors. 0 = off (reference). '
+            + '0.9-0.95 trims the improbable tail adaptively.',
+        default: 0,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      {
+        key: 'mm3LmRepPenalty',
+        group: 'lm',
+        type: 'slider',
+        label: 'LM Repetition Penalty',
+        hint: 'Breaks verbatim code loops in the planner — the "same riff forever" '
+            + 'failure, which sharpened adapters make likelier. 1.0 = off (the '
+            + 'reference recipe); 1.05-1.15 is the useful range. Uses the DRY mode '
+            + 'by default: only codes that would EXTEND a verbatim recent cycle are '
+            + 'punished, so ordinary musical restatement is untouched.',
+        default: 1.0,
+        min: 1.0,
+        max: 1.5,
+        step: 0.01,
+      },
+      {
+        key: 'mm3LmRepMode',
+        group: 'lm',
+        type: 'select',
+        label: 'Repetition Mode',
+        hint: 'dry: annihilates verbatim loops only (recommended). frequency: '
+            + 'penalises codes by how often they recurred. presence: flat penalty '
+            + 'on anything recent — bluntest, also flattens legitimate restatement.',
+        default: 'dry',
+        options: [
+          { value: 'dry', label: 'DRY (verbatim loops only)' },
+          { value: 'frequency', label: 'Frequency' },
+          { value: 'presence', label: 'Presence' },
+        ],
+      },
+      {
+        key: 'mm3LmRepWindow',
+        group: 'lm',
+        type: 'slider',
+        label: 'Repetition Window',
+        hint: 'How far back the penalty looks, in 25fps semantic frames. '
+            + '320 = 12.8 s. (The ACE LM used 64 at 5 Hz — same duration.)',
+        default: 320,
+        min: 25,
+        max: 2000,
+        step: 25,
+      },
+      {
         key: 'mm3ArSeed',
+        group: 'lm',
         type: 'text',
         label: 'Planner Seed',
         hint: 'Seed for the AR planner only. Blank ties it to the main seed, which is '
@@ -510,7 +483,44 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: '',
       },
       {
+        // ── AR cache ──
+        // The speed feature the plank is NOT. Default ON: the engine only
+        // fills the slot when a render happens, and the whole point is that
+        // iterating on flow settings should not re-plan.
+        //
+        // NOTE the default must be mirrored in generate.ts as `!== false` —
+        // the UI sends nothing for an untouched control (see the comment
+        // there), so an absent value has to resolve the same way.
+        key: 'mm3ReuseAr',
+        group: 'lm',
+        type: 'toggle',
+        label: 'Reuse Planner Output',
+        hint: 'Skip the AR planner when nothing upstream of the flow stage changed — '
+            + 'roughly halves the render when you are only tweaking steps, CFG, solver '
+            + 'or scheduler. Any change to caption, lyrics, duration, seed, LM adapter '
+            + 'or LM/depth model re-plans automatically. Holds one block of engine RAM '
+            + '(~3 MB per second of audio, so roughly 600 MB for a 200 s song). Needs a '
+            + 'fixed seed to be able to hit.',
+        default: true,
+      },
+      {
+        // ── MM3 Plank ──
+        // Read the hint carefully before believing this is a speed feature: it
+        // is not. The AR loop still runs every per-frame forward pass on a
+        // replay. What it buys is an IDENTICAL semantic bed, so that comparing
+        // two solver/scheduler/guidance settings compares those settings rather
+        // than two different AR samplings.
+        key: 'mm3SaveArCodes',
+        group: 'lm',
+        type: 'toggle',
+        label: 'Save AR Plan (Plank)',
+        hint: 'Save this render\'s AR planner output so it can be replayed later. '
+            + 'Costs nothing to enable — the codes already exist in memory.',
+        default: false,
+      },
+      {
         key: 'mm3PlankPath',
+        group: 'lm',
         type: 'select',
         label: 'Replay AR Plan',
         hint: 'Reuse a saved AR plan instead of generating a new one, fixing the '

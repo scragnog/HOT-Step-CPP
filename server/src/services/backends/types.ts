@@ -117,6 +117,20 @@ export interface BackendFeatureCapabilities {
 /** GET /api/capabilities response shape (plan §4.2). Shared code must only
  *  branch on these flags, never on `backend` id, outside this backend's own
  *  module. */
+/** Which top-bar cluster a declared knob belongs in.
+ *
+ *  The generic dropdowns render one flat list per group, so this is the ONLY
+ *  thing keeping a backend's planner-LM knobs out of the Generation panel.
+ *  Absent means 'generation' — the behaviour before groups existed, and the
+ *  right default for a backend that never thinks about it. */
+export type BackendExtensionGroup = 'generation' | 'lm';
+
+/** A backend-declared knob. Same schema the Lua plugins use (so one renderer
+ *  serves both), plus the cluster it belongs to. */
+export interface BackendExtensionParam extends PluginParamSchema {
+  group?: BackendExtensionGroup;
+}
+
 export interface BackendCapabilities {
   backend: string;
   up: boolean;
@@ -124,8 +138,8 @@ export interface BackendCapabilities {
   features: BackendFeatureCapabilities;
   /** Backend-specific knobs, rendered generically by the existing
    *  PluginControls schema renderer (reuses the Lua plugin param schema —
-   *  plan §4.2, §3.6). */
-  extensions: PluginParamSchema[];
+   *  plan §4.2, §3.6). `group` splits them across the top-bar clusters. */
+  extensions: BackendExtensionParam[];
 }
 
 /** Backend-shaped model catalogue. ACE has an {lm,dit,vae,embedding} split;

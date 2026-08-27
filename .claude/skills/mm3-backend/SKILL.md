@@ -47,6 +47,29 @@ ACE LM's three modes ported (`dry` default / `frequency` / `presence`).
   in the per-frame acoustic codes, and perturbing its input distribution
   re-opens the timbre question the acoustic loss closed (training skill).
 
+### Where the knobs render: the `group` field (2026-08-27)
+
+Declared knobs (`capabilities().extensions`) carry an optional
+`group: 'generation' | 'lm'`, and each generic top-bar dropdown renders its own
+group — `BackendGenerationDropdown` and `BackendLmDropdown`, both on the shared
+schema renderer in `BackendExtensionControls.tsx`. An untagged knob is a
+Generation knob, which is where every one of them lived before groups existed,
+so an older manifest still renders exactly as it did.
+
+MM3's `group: 'lm'` set is the six `mm3Lm*` sampling knobs plus the four that
+decide what happens to the planner's output: `mm3ArSeed`, `mm3ReuseAr`,
+`mm3SaveArCodes`, `mm3PlankPath`.
+
+Two things to know before touching the LM cluster:
+
+- **`features.lm` does not mean "has an LM."** It means "has ACE's CoT metadata
+  LM" — a stage that is genuinely optional. MM3 reports `lm: false` and still
+  has an LM; it is just an autoregressive planner that always runs. The bar
+  shows the LM tab on `features.lm || any knob tagged group:'lm'`.
+- **No global on/off in MM3 mode.** `GlobalParamBar` hangs the section's
+  `headerToggle` (`skipLm`) only when `features.lm` is true. There is no MM3
+  render without the planner, so a switch there would be a lie.
+
 ## File map
 
 | Piece | Where |

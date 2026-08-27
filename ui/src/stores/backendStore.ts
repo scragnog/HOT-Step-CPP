@@ -103,8 +103,16 @@ export interface BackendFeatureCapabilities {
 
 /** Backend-specific knob schema — rendered generically by PluginControls,
  *  same shape as the Lua plugin param schema (types/pluginTypes.ts). */
+/** Which top-bar cluster a declared knob belongs in. Absent means
+ *  'generation' — the behaviour before groups existed, and what a manifest
+ *  cached from an older server will look like. */
+export type BackendExtensionGroup = 'generation' | 'lm';
+
 export interface BackendExtensionParam {
   key: string;
+  /** Top-bar cluster this knob renders in. Optional: older manifests have no
+   *  such field and every knob falls back to the Generation panel. */
+  group?: BackendExtensionGroup;
   type: 'slider' | 'select' | 'toggle' | 'text';
   label: string;
   hint?: string;

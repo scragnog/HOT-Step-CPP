@@ -20,6 +20,7 @@ import { Mm3LmAdapterDropdown, Mm3LmAdapterBadge } from './Mm3LmAdapterDropdown'
 import { GenerationDropdown, GenerationBadge } from './GenerationDropdown';
 import { BackendGenerationDropdown, BackendGenerationBadge } from './BackendGenerationDropdown';
 import { LmThinkingDropdown, LmThinkingBadge } from './LmThinkingDropdown';
+import { BackendLmDropdown, BackendLmBadge } from './BackendLmDropdown';
 import { PostProcessingDropdown, PostProcessingBadge } from './PostProcessingDropdown';
 import { VramIndicator } from '../shared/VramIndicator';
 import { DiscoPulseWrapper } from '../shared/DiscoPulseWrapper';
@@ -116,7 +117,15 @@ export const GlobalParamBar: React.FC = () => {
   // it gets the generic seed + declared-extensions cluster instead.
   const useBackendGenPicker = !!capabilities && !capabilities.features.plugins;
 
-  const showLm = !capabilities || capabilities.features.lm;
+  // The LM cluster is not ACE-only. `features.lm` means "has ACE's CoT
+  // metadata LM" — a stage that is optional and can be switched off. A backend
+  // whose LM is an autoregressive planner has no such switch but very much has
+  // LM controls, and it says so by tagging declared knobs `group: 'lm'`. Both
+  // get the tab; only the first gets the on/off toggle, because only there does
+  // skipping mean anything.
+  const aceLm = !capabilities || capabilities.features.lm;
+  const backendLmParams = (capabilities?.extensions ?? []).some(p => p.group === 'lm');
+  const showLm = aceLm || backendLmParams;
 
   // ── Auto-select models when engine becomes ready ────────────────
   // Polls the engine until it returns a model list, then auto-selects
@@ -301,20 +310,20 @@ export const GlobalParamBar: React.FC = () => {
             id="lm"
             label={t('globalBar.lm')}
             icon={<Brain size={14} />}
-            badge={<LmThinkingBadge />}
+            badge={aceLm ? <LmThinkingBadge /> : <BackendLmBadge />}
             accentColor="purple"
             isOpen={openSection === 'lm'}
             onOpen={() => handleOpen('lm')}
             onClose={() => handleClose('lm')}
-            headerToggle={
+            headerToggle={aceLm ? (
               <ToggleSwitch
                 checked={!gp.skipLm}
                 onChange={(on) => gp.setSkipLm(!on)}
                 accentColor="purple"
               />
-            }
+            ) : undefined}
           >
-            <LmThinkingDropdown />
+            {aceLm ? <LmThinkingDropdown /> : <BackendLmDropdown />}
           </BarSection>
           </DiscoPulseWrapper>
           )}
