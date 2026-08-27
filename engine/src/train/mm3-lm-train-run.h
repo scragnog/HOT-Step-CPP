@@ -1928,12 +1928,19 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         // crutch remains the honest recommendation, because the timbre fault
         // is baked into the weights.
         if (sf) {
+            // `triggerPrepend` is not decoration: the server auto-prepends the
+            // trigger to render captions, and it must not do that for a run
+            // that recorded a trigger it never trained (see --trigger-prepend
+            // above). Sidecars written before this field existed are read as
+            // trained, which is right for every run the flag defaulted on for.
             fprintf(sf,
-                    "{\"name\":\"%s ckpt-%d\",\"trigger\":\"%s\",\"rank\":%d,\"dataset\":\"%s\","
+                    "{\"name\":\"%s ckpt-%d\",\"trigger\":\"%s\",\"triggerPrepend\":%s,"
+                    "\"rank\":%d,\"dataset\":\"%s\","
                     "\"trainedSteps\":%d,\"recommendedScales\":{\"scaleMlp\":%.1f},"
                     "\"notes\":\"ace-train mm3-lm-train, loss %.4f; render captions must carry the "
                     "artist's true bpm/tuning\"}\n",
-                    a.dataset_name.empty() ? "MM3 LM" : a.dataset_name.c_str(), step, a.trigger.c_str(), a.rank,
+                    a.dataset_name.empty() ? "MM3 LM" : a.dataset_name.c_str(), step, a.trigger.c_str(),
+                    a.trigger_prepend ? "true" : "false", a.rank,
                     a.dataset_name.c_str(), step, a.depth_loss_weight > 0.0 ? 1.0 : 0.5, loss);
             fclose(sf);
         }

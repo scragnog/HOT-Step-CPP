@@ -45,6 +45,7 @@ import { aceClient } from '../aceClient.js';
 import { mm3JobDetail, mm3SelectModel, mm3Synth } from '../backends/minimax/client.js';
 import { MM3_LM_ADAPTER_DEFAULT_SCALES } from '../backends/minimax/lmAdapter.js';
 import type { Mm3PreviewOptions, TrainingPreview } from './types.js';
+import { applyMm3Trigger } from '../backends/minimax/trigger.js';
 
 /** A neutral caption, deliberately nothing like any artist dataset we train on.
  *  Its job is to be a canary: if the adapter has damaged the planner's general
@@ -160,22 +161,10 @@ function holdoutRows(rows: ManifestRow[], holdout: number): ManifestRow[] {
   return rows.slice(rows.length - n);
 }
 
-/** Prepend the trigger the way the training rows carry it, and the way
- *  lm_apply_tag / applyTriggerTag write it: `trigger, ` at the very front of
- *  the caption's FIRST line, on the same line as `Global Metadata`.
- *
- *  This is not cosmetic. Nothing auto-injects a trigger on the MM3 path, and a
- *  trigger on its own line above the caption is a different token sequence from
- *  the one that was trained — it dilutes to nothing. A preview that got this
- *  wrong would report "the adapter does very little" for every checkpoint of a
- *  perfectly good run. */
-export function applyMm3Trigger(caption: string, trigger: string): string {
-  const t = trigger.trim().replace(/,+$/, '');
-  if (!t) return caption;
-  const body = caption.replace(/^﻿/, '').trimStart();
-  if (body.toLowerCase().startsWith(`${t.toLowerCase()},`)) return body;
-  return `${t}, ${body}`;
-}
+// The trigger goes on through the shared implementation so a preview and a
+// render can never disagree about what "triggered" means. Re-exported because
+// this module's callers already import it from here.
+export { applyMm3Trigger };
 
 /** Resolve the whole preview plan from the job's options and the dataset.
  *  Returns null when previews are switched off. */

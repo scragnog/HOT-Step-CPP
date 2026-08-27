@@ -43,6 +43,7 @@ const PARAM = {
   early:   'mm3LmAdapterScaleEarly',
   mid:     'mm3LmAdapterScaleMid',
   late:    'mm3LmAdapterScaleLate',
+  trigger: 'mm3LmAdapterTrigger',
 } as const;
 
 interface Mm3LmAdapterScales {
@@ -59,6 +60,9 @@ interface Mm3LmAdapterEntry {
   file: string;
   name?: string;
   trigger?: string;
+  /** false when the run recorded a trigger it never trained. Absent on every
+   *  sidecar written before the field existed, and absent means trained. */
+  triggerPrepend?: boolean;
   rank?: number;
   dataset?: string;
   encoder?: string;
@@ -200,11 +204,25 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
               entry.trainedSteps ? `${entry.trainedSteps} steps` : '',
             ].filter(Boolean).join(' · ')}
           </p>
-          {entry.trigger && (
-            <p className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed">
-              {t('globalBar.mm3LmTriggerHint',
-                'Put the trigger word in the caption — the identity is bound to it. A trigger with no caption around it is out-of-distribution and renders degraded.')}
+          {entry.trigger && entry.triggerPrepend === false && (
+            <p className="text-[10px] text-amber-600 dark:text-amber-500/80 leading-relaxed">
+              {t('globalBar.mm3LmTriggerUntrained',
+                'This run recorded a trigger but never trained it, so it is not added and typing it would only feed the model an unseen phrase.')}
             </p>
+          )}
+          {entry.trigger && entry.triggerPrepend !== false && (
+            <label className="flex items-start gap-2 pt-0.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={params[PARAM.trigger] !== false}
+                onChange={e => setBackendParam(PARAM.trigger, e.target.checked)}
+                className="mt-0.5 accent-emerald-500"
+              />
+              <span className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed">
+                {t('globalBar.mm3LmTriggerAuto',
+                  'Add the trigger to the caption automatically, in the position it was trained in. The identity is bound to it, so leave this on unless you are placing it yourself. A caption that already opens with the trigger is left alone.')}
+              </span>
+            </label>
           )}
           {entry.notes && (
             <p className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed italic">{entry.notes}</p>

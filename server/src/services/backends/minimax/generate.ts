@@ -47,6 +47,7 @@ import { aceClient } from '../../aceClient.js';
 import { wavDurationSec } from '../../audioCrop.js';
 import { MM3_PLANK_EXT, mm3PlankDir, readMm3Plank } from './plank.js';
 import { MM3_LM_ADAPTER_DEFAULT_SCALES, resolveMm3LmAdapterPath } from './lmAdapter.js';
+import { applyMm3Trigger, readMm3AdapterTrigger } from './trigger.js';
 import { runPostProcessingChain } from '../../generation/postProcessing.js';
 import type { PostProcessParams } from '../../generation/postProcessing.js';
 import {
@@ -250,14 +251,56 @@ export interface MinimaxParamMapping {
 export function mapMinimaxParams(params: any): MinimaxParamMapping {
   const notes: string[] = [];
 
+  // Resolved up here rather than where the request's adapter fields are built,
+  // because the trigger has to go into the caption and the caption is finished
+  // first. `null` covers both "no adapter selected" and "the reference escaped
+  // the adapter directory"; the fuller not-found handling stays below, where
+  // the wire fields are assembled.
+  const lmAdapterPath = params.mm3LmAdapter
+    ? resolveMm3LmAdapterPath(String(params.mm3LmAdapter))
+    : null;
+
   const rawCaption: string = params.prompt || params.songDescription || params.caption || params.style || '';
   const repaired = repairMm3CaptionHeadings(rawCaption);
-  const caption = repaired.caption;
+  let caption = repaired.caption;
   if (repaired.restored.length) {
     notes.push(
       `Structured Caption was missing its ${repaired.restored.map(h => `"${h}"`).join(' and ')} `
       + `heading line — restored before sending. All 1,000 of MiniMax's reference captions carry all three.`,
     );
+  }
+
+  // ── Trigger word ───────────────────────────────────────────────────────────
+  //
+  // An MM3 LM adapter binds its identity to the trigger it was trained with, so
+  // a caption without it renders most of the base model and a little of the
+  // adapter. We know the trigger (the sidecar records it) and we know the exact
+  // shape the trainer used (`<trigger>, ` at the front of the first line), so
+  // making the user retype it every render was a chore with no decision in it.
+  //
+  // AFTER heading repair, deliberately: repairMm3CaptionHeadings looks for a
+  // line that starts with `Global Metadata`, and the trigger lands on the front
+  // of that line. Trigger first and the repair would not recognise the heading,
+  // then insert a second one.
+  //
+  // applyMm3Trigger is idempotent, so a caption that already carries the
+  // trigger (typed by hand, or written by Lyric Studio) is left alone.
+  const triggerAuto = params.mm3LmAdapterTrigger !== false;
+  if (lmAdapterPath && triggerAuto) {
+    const tg = readMm3AdapterTrigger(lmAdapterPath);
+    if (tg.trigger && !tg.prepend) {
+      notes.push(
+        `LM adapter trigger "${tg.trigger}" NOT added: its sidecar says the trigger was never `
+        + `injected into the training captions (triggerPrepend: false), so the model has never seen it. `
+        + `Adding it would be an unseen token sequence.`,
+      );
+    } else if (tg.trigger) {
+      const tagged = applyMm3Trigger(caption, tg.trigger);
+      if (tagged !== caption) {
+        caption = tagged;
+        notes.push(`LM adapter trigger "${tg.trigger}" added to the front of the caption.`);
+      }
+    }
   }
 
   // Instrumental: MM3's contract is blank lyrics → the engine substitutes its
@@ -425,7 +468,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       // (an adapter that silently didn't load is indistinguishable from "the
       // adapter does nothing").
       ...(params.mm3LmAdapter ? (() => {
-        const resolved = resolveMm3LmAdapterPath(String(params.mm3LmAdapter));
+        const resolved = lmAdapterPath;
         if (!resolved || !fs.existsSync(resolved)) {
           notes.push(`LM adapter not found (${params.mm3LmAdapter}) — rendering with the base model`);
           return {};

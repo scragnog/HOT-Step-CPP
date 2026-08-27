@@ -554,23 +554,42 @@ records it. Shape:
 character>, <rhythm section>, <production character>, <tempo>, <structure>
 ```
 
-At generation time the caption should look like the training caption — but
-**do not type the trigger yourself.**
+At generation time the caption should look like the training caption. You do
+not have to type the trigger: the app adds it for you.
 
-### The trigger duplicates at inference if you type it
+### The trigger is added for you, and typing it anyway is harmless
 
-`ace-train` stamps the trigger into the adapter's safetensors metadata
-(`hot_step_trigger`, `hot_step_trigger_position=prepend`), `readAdapterTrigger`
-in `server/src/services/adapters/stMetadata.ts` reads it, and
-`translateParams.ts` applies it whenever an LM adapter is loaded — including the
-MM3 path. **It is applied unconditionally**: `applyTriggers` in
-`server/src/services/generation/triggerWords.ts` supports a `skipPresent` option
-that drops words the caption already contains, and translateParams calls it
-WITHOUT that option. So a caption that already opens with the artist name comes
-out as `green day, green day, warning album, ...`, which is not what was trained.
+`ace-train mm3-lm-train` writes the trigger into the adapter's
+`<file>.safetensors.json` sidecar. `readMm3AdapterTrigger` in
+`server/src/services/backends/minimax/trigger.ts` reads it, and
+`mapMinimaxParams` prepends it to the caption on every MM3 render, in the exact
+shape the trainer used: `<trigger>, ` at the front of the caption's FIRST line,
+which on a Structured Caption is the `Global Metadata` line.
 
-Practical rule: the training caption opens with the trigger, so at generation
-**start your caption at the SECOND item** and let the app prepend the first:
+```
+first caption line, as trained  : alk3_damnesia, Global Metadata
+first caption line, as you type :                Global Metadata
+first caption line, as LM sees  : alk3_damnesia, Global Metadata
+```
+
+It is IDEMPOTENT, case-insensitively (`applyMm3Trigger`), so a caption that
+already opens with the trigger is left alone rather than growing a second copy.
+Type it or don't; the render is the same either way. The Adapters panel has a
+checkbox to switch the injection off if you want to place the trigger yourself.
+
+Two things gate it:
+
+- **The sidecar must say the trigger was trained.** `--trigger` alone writes the
+  sidecar without teaching the model anything; `--trigger-prepend` is what
+  injects it into the captions. Runs now record `"triggerPrepend": true|false`
+  in the sidecar and the server refuses to auto-add an untrained trigger.
+  Sidecars written before that field existed are read as trained.
+- **ACE is a different code path with different rules.** ACE reads the trigger
+  from the adapter's safetensors `__metadata__` (`hot_step_trigger`) and
+  `translateParams.ts` applies it WITHOUT `skipPresent`, so on ACE a caption
+  that already opens with the artist name really does come out as
+  `green day, green day, warning album, ...`. There, start your caption at the
+  second item:
 
 ```
 training caption : green day, warning album, pop punk, bright major-key ...
@@ -654,7 +673,9 @@ ear. RMS is only a rough guide: `BASE_no_adapter_f16` at 0.1213 was fine while
   Always pass `--eval-crop <= --max-frames`; that always fits, because
   `S_max = max_prompt + max_frames` and `max_prompt` already includes holdout.
 - **`--trigger` alone only writes the sidecar.** It does not train the trigger.
-  `--trigger-prepend` is what injects it into the captions.
+  `--trigger-prepend` is what injects it into the captions — and the sidecar now
+  records which of the two happened, because the render path auto-prepends and
+  must not do that for a trigger the model never saw.
 - **`--crop-anchor song`** matters: without it every crop is taught as if it were
   the song's opening.
 - The milestone `loss` field is a single windowed value, not a mean — it swings

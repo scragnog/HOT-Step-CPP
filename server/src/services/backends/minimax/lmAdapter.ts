@@ -23,6 +23,10 @@ import { config } from '../../../config.js';
 export interface Mm3LmAdapterMeta {
   name: string;
   trigger?: string;
+  /** Whether `trigger` was injected into the training captions, and so learned
+   *  at all. Absent on every sidecar written before the field existed; see
+   *  minimax/trigger.ts for why absence means trained. */
+  triggerPrepend?: boolean;
   rank?: number;
   dataset?: string;
   encoder?: string;
