@@ -13,16 +13,25 @@
 #   - Not a functional test. GitHub-hosted runners have no AMD GPU, so this
 #     only proves the code COMPILES and LINKS under HIP. It cannot catch a
 #     wrong hipMemGetInfo result, only a wrong hipMemGetInfo signature.
-#   - Not a full-parity build. It skips the ONNX Runtime paths (sa3-refine and
-#     the ORT VAE/encoders — SuperSep itself is pure GGML and always built) and
-#     builds only the `ace-server` target, which is what actually pulls in the
-#     HIP-sensitive translation units (pipeline-synth.cpp via acestep-core, and
-#     hot-step-server.cpp). Widening this costs runner minutes for little gain.
+#   - Not a packaging job. It produces no artifacts. ROCm builds are not
+#     shipped; users build them with engine/buildhip.sh.
 #
-# NON-BLOCKING BY DESIGN
-#   continue-on-error: true. A community backend must never block a release or
-#   a merge to master. Read it as advisory: red here means "the ROCm path needs
-#   attention", not "stop".
+# BUILD PARITY
+#   Configured like build-linux in release.yml — ONNX Runtime present, backend
+#   DL on, all CPU variants, every target built. It used to build only
+#   `ace-server` with no ORT, which left most of the engine untested under HIP:
+#   ace-caption broke the ordinary Linux build for twelve days in 2026-08 and
+#   this job could not have caught it, because it never compiled that target.
+#
+#   One deliberate difference remains: GPU_TARGET is a single arch. HIP
+#   recompiles the whole ggml-cuda kernel set per target, so each extra arch is
+#   roughly another full kernel build.
+#
+# NON-BLOCKING FOR NOW
+#   continue-on-error: true, which is why a red job still shows the run as
+#   green. That masked a broken ROCm apt install for weeks. The intent is to
+#   make this blocking once it has been green for a while; until then, read it
+#   as advisory and CHECK THE JOB, not the run.
 
 name: ROCm Build (compile-only)
 
@@ -50,7 +59,16 @@ jobs:
     timeout-minutes: 120
 
     env:
-      ROCM_VERSION: '6.2.4'
+      # 6.4.4, not 6.2.4. ggml's vendors/hip.h guards its fp8 typedef on
+      # HIP_VERSION >= 60200000 and then uses __hip_fp8_e4m3 — but ROCm 6.2
+      # ships only the FNUZ spelling, __hip_fp8_e4m3_fnuz. The OCP type arrived
+      # in 6.3, so on 6.2.4 every ggml-cuda TU fails with "unknown type name
+      # '__hip_fp8_e4m3'". Upstream's guard is a minor version too low; bumping
+      # is cheaper than carrying a patch for it.
+      ROCM_VERSION: '6.4.4'
+      # Matches release.yml so the ORT paths (sa3-refine, the ORT VAE/encoders)
+      # actually get compiled here.
+      ORT_VERSION: '1.25.1'
       # Single GPU arch. HIP recompiles the whole ggml-cuda kernel set per
       # target, so each extra arch is roughly another full kernel build. gfx1030
       # (RDNA2) is the same default engine/buildhip.sh falls back to.
@@ -124,6 +142,25 @@ jobs:
           /opt/rocm/llvm/bin/clang++ --version
           df -h /
 
+      # ── ONNX Runtime ───────────────────────────────────────────
+      # Same package and version release.yml's build-linux uses. CMake
+      # auto-detects it at engine/deps/onnxruntime, which turns on
+      # HOT_STEP_ORT_PATHS — sa3-refine.h and the ORT VAE/encoder paths.
+      - name: Cache ONNX Runtime
+        id: cache-ort
+        uses: actions/cache@v4
+        with:
+          path: engine/deps/onnxruntime
+          key: ort-linux-x64-gpu-${{ env.ORT_VERSION }}
+
+      - name: Download ONNX Runtime
+        if: steps.cache-ort.outputs.cache-hit != 'true'
+        run: |
+          ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}.tgz"
+          mkdir -p engine/deps
+          curl -sL "$ORT_URL" | tar -xz -C engine/deps
+          mv "engine/deps/onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}" engine/deps/onnxruntime
+
       # HIPCXX/HIP_PATH is the invocation ggml documents for HIP builds; without
       # it CMake's enable_language(HIP) may not find the ROCm clang.
       # GGML_STATIC must stay OFF — ggml-hip raises a hard FATAL_ERROR on it.
@@ -136,6 +173,8 @@ jobs:
             -DGGML_HIP=ON \
             -DGPU_TARGETS="${GPU_TARGET}" \
             -DGGML_STATIC=OFF \
+            -DGGML_BACKEND_DL=ON \
+            -DGGML_CPU_ALL_VARIANTS=ON \
             -DCMAKE_BUILD_TYPE=Release 2>&1 | tee configure.log
 
       # Confirms the GGML_HIP gate in engine/CMakeLists.txt actually fired. The
@@ -150,14 +189,33 @@ jobs:
             || { echo "::error::ROCm gate did not fire — find_package(hip) failed inside the GGML_HIP block"; exit 1; }
           echo "GGML_HIP=ON and the ROCm gate fired"
 
-      - name: Build ace-server
-        run: cmake --build engine/build --target ace-server -j "$(nproc)"
+      - name: Assert the ONNX Runtime paths compiled
+        run: |
+          grep -q "ONNX Runtime paths: ENABLED" configure.log \
+            || { echo "::error::ORT paths did not compile — sa3-refine and the ORT VAE/encoders went untested"; exit 1; }
+          echo "HOT_STEP_ORT_PATHS is on"
+
+      # Every target, as release.yml's build-linux does. The tools are cheap
+      # next to the HIP kernels, which are already built by the time they start.
+      - name: Build engine
+        run: cmake --build engine/build -j "$(nproc)"
 
       # CMAKE_RUNTIME_OUTPUT_DIRECTORY is the build root (engine/CMakeLists.txt:48),
-      # so a single-config Linux build drops the binary at engine/build/ace-server.
-      - name: Confirm binary
+      # so a single-config Linux build drops the binaries at engine/build/<name>.
+      - name: Confirm binaries
         run: |
-          test -f engine/build/ace-server \
-            || { echo "::error::ace-server not found after build"; find engine/build -name 'ace-server*' -print; exit 1; }
-          ls -la engine/build/ace-server
+          missing=0
+          for b in ace-server ace-lm ace-synth ace-understand ace-train ace-caption \
+                   ace-midi quantize neural-codec mp3-codec mastering; do
+            if [ -f "engine/build/$b" ]; then
+              printf '  ok      %s\n' "$b"
+            else
+              printf '  MISSING %s\n' "$b"
+              missing=1
+            fi
+          done
+          [ "$missing" = "0" ] || { echo "::error::one or more engine binaries missing after build"; exit 1; }
           file engine/build/ace-server
+          # Proves the HIP backend is actually in the build, not silently absent.
+          ls -la engine/build/libggml-hip.so \
+            || { echo "::error::libggml-hip.so not produced — the build fell back to a non-HIP backend"; exit 1; }
