@@ -492,7 +492,12 @@ export const MM3_LM_DEFAULTS = {
    *  slower one in wall-clock, so the same hour buys fewer, richer steps. The
    *  ear-optimum under this regime is UNKNOWN - the 750-2000 range was measured
    *  on adapters trained with no history at all. Ladder the checkpoints. */
-  steps: 250,
+  /** 1000 — and under the default stopping strategy this is the CAP, not the
+   *  plan: the run ends here only if the target loss never arrives. Raised from
+   *  250 on 2026-08-26 to give a target-loss run room to reach one; a 250-step
+   *  cap would have ended almost every run before the target could bind, which
+   *  is the same as not having a target. */
+  steps: 1000,
   /** ── Stopping strategy ──────────────────────────────────────────────────
    *
    *  'steps' is the default and the one every measured recipe was run under.
@@ -508,8 +513,24 @@ export const MM3_LM_DEFAULTS = {
    *  A NOTE THE UI REPEATS: at 1.0 held-out these adapters were already good,
    *  and a training loss under ~0.05 was pure sequence memorisation on the
    *  runs that got there. Down is not automatically better. */
-  stopMode: 'steps' as 'steps' | 'loss',
-  targetLoss: 0,
+  stopMode: 'loss' as 'steps' | 'loss',
+  /** 0.1 on the trailing training mean — Rob, 2026-08-26.
+   *
+   *  Measured trajectories at the shipped recipe (trailing-25 mean):
+   *
+   *      step        25     100     250     500
+   *      fightstar   3.14   2.50    1.43    0.59
+   *      johnnycash  3.28   2.23    0.92    0.31
+   *      limbizkit   3.62   2.72    2.03      -
+   *
+   *  So 0.1 binds on the albums that converge fast, somewhere past 500, and
+   *  never arrives on the slow ones — which is what the 1000-step cap is for.
+   *  It sits just above the ~0.05 mark where runs had demonstrably memorised
+   *  their songs, and for an ALBUM CLONE that is the intended end of the range.
+   *  It is still not a checkpoint picker: the ear ladder decides that, and the
+   *  checkpoint that sounds right has landed 1-8x later than the held-out
+   *  minimum every time it has been walked. */
+  targetLoss: 0.1,
   /** 'train' is available on every run. 'eval' is the number that means the
    *  adapter GENERALISES rather than memorised, but it only lands on eval
    *  steps, so with the default evalEvery of 250 it fires at most once in a
@@ -585,20 +606,32 @@ export const MM3_LM_DEFAULTS = {
    *  The anchored shares keep what the structured mode exists for: frame-0
    *  crops give supervised positions the song's real history (the condition at
    *  inference), and end crops are the only place EOS is supervised. */
-  /** 55/15 (random = the remainder, 30%). Raised from 40/15/45 on 2026-08-25:
-   *  at crop 750 the random+end shares made ~60% of supervised audio mid-flow
-   *  material with no arc, and the adapter's content prior followed it —
-   *  renders jumped in "like a cut", and lowering render-MLP brought intros
-   *  back at the cost of identity (Rob's A/B). Adapter deltas are position-
-   *  independent, so the CONTENT MIX is the dial that decides whether songs
-   *  open like songs; the position anchor alone cannot carry it. */
-  cropStartFrac: 0.55,
+  /** 20/15 (random = the remainder, 65%) — Rob, 2026-08-26.
+   *
+   *  This REVERSES the 2026-08-25 raise to 55, and the reasoning for that raise
+   *  is kept below rather than deleted, because it was a real observation and
+   *  this is a re-weighting of it rather than a refutation. That day's
+   *  argument: at crop 750 the random+end shares made ~60% of supervised audio
+   *  mid-flow material with no arc, the adapter's content prior followed it,
+   *  and renders jumped in "like a cut".
+   *
+   *  What 0.55 costs is DISTINCTNESS. Frame-0 and flush-to-end are single
+   *  positions per song, so more than half of every run was repeated exposure
+   *  to the same few seconds of each track — the regime that recited on an
+   *  8-song dataset. 0.2 puts the random share back where the sample count
+   *  lives, while still supervising openings and endings far above what
+   *  `random` alone reaches (0.02% and 2.6%). */
+  cropStartFrac: 0.2,
   cropEndFrac: 0.15,
-  /** Tiled starts: half the start share at frame 0, half across aligned tiles
-   *  at K, 2K — so short crops still teach the intro→build→verse ARC in order,
-   *  at true positions. 1 = frame-0 only (the old behaviour). 3 × crop 750
-   *  covers what crop 2496's start share used to. */
-  cropStartTiles: 3,
+  /** 1 = the start share is frame 0 and nothing else — Rob, 2026-08-26.
+   *
+   *  Tiling spends part of the start share on aligned tiles at K, 2K … so short
+   *  crops teach the intro→build→verse ARC in order. That was worth having when
+   *  the start share was 0.55 and half of it went to one repeated position. At
+   *  a 0.2 start share there is little left to spread, and the arc is bought
+   *  more cheaply from the 65% random share, which covers those same positions
+   *  with far more distinct crops. Raise this again if the start share does. */
+  cropStartTiles: 1,
   /** The acoustic loss: teacher-forced CE through the FROZEN depth decoder,
    *  gradient into the adapter via last_hidden — the 2026-08-25 fix for
    *  adapters shifting vocal timbre ("chipmunk"/"goblin" renders). The depth
