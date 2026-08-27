@@ -202,7 +202,7 @@ else()
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ONNX Runtime (SuperSep stem separation + VAE-ORT TensorRT acceleration)
+# ONNX Runtime (StableStep's ONNX backend + the ORT VAE/encoder paths)
 # ─────────────────────────────────────────────────────────────────────────────
 # Pre-built ORT GPU package. Resolution order:
 #   1. ORT_ROOT cmake variable
@@ -213,10 +213,13 @@ endif()
 # CMAKE_CUDA_ARCHITECTURES, so on cached re-configures CUDAToolkit_FOUND
 # may be unset. Ensure it's always available for CUDA EP support.
 find_package(CUDAToolkit QUIET)
-# SuperSep itself is pure GGML and always built. This option now only controls
-# whether the ONNX Runtime-dependent paths (StableStep's ONNX backend and the
-# ONNX VAE/text-encoder) are compiled — they are the last ORT consumers.
-option(HOT_STEP_SUPERSEP "Build the ONNX Runtime paths (StableStep ONNX backend, ONNX VAE)" ON)
+# SuperSep itself is pure GGML and always built. This option controls the last
+# remaining ONNX Runtime consumers: sa3-refine.h (StableStep's ONNX backend) and
+# model-store.h's vae-ort / vae-enc-ort / cond-enc-ort / text-enc-ort.
+#
+# It was called HOT_STEP_SUPERSEP until SuperSep was rewritten on GGML and
+# stopped touching ORT, at which point the name described nothing it gated.
+option(HOT_STEP_ORT_PATHS "Build the ONNX Runtime paths (StableStep ONNX backend, ONNX VAE)" ON)
 
 set(ORT_ROOT "" CACHE PATH "Path to ONNX Runtime pre-built package")
 if(NOT ORT_ROOT AND DEFINED ENV{ONNXRUNTIME_ROOT})
@@ -231,10 +234,10 @@ if(NOT ORT_ROOT)
     endif()
 endif()
 
-set(SUPERSEP_ENABLED FALSE)
-if(HOT_STEP_SUPERSEP AND ORT_ROOT)
+set(ORT_PATHS_ENABLED FALSE)
+if(HOT_STEP_ORT_PATHS AND ORT_ROOT)
     if(EXISTS "${ORT_ROOT}/include/onnxruntime_cxx_api.h")
-        set(SUPERSEP_ENABLED TRUE)
+        set(ORT_PATHS_ENABLED TRUE)
     else()
         message(WARNING "ORT_ROOT set but onnxruntime_cxx_api.h not found at ${ORT_ROOT}/include")
     endif()
@@ -266,11 +269,8 @@ if(CUDAToolkit_FOUND)
     target_compile_definitions(supersep PUBLIC GGML_USE_CUDA)
 endif()
 
-# NOTE: SUPERSEP_ENABLED below is now a misnomer kept for the ORT plumbing that
-# OTHER features still need. SuperSep itself no longer touches ONNX Runtime —
-# but sa3-refine.h (StableStep's ONNX backend) and model-store.h's
-# vae-ort / cond-enc-ort / text-enc-ort / vae-enc-ort do, so ace-server still
-# links ORT and the runtime DLLs are still required by those paths.
+# ace-server still links ORT for those paths, so the runtime shared libraries
+# below are still required by a build that has them enabled.
 # TensorRT Native SDK (DiT TRT acceleration + LoRA refitting)
 # ─────────────────────────────────────────────────────────────────────────────
 # Platform-specific TRT detection:
@@ -336,7 +336,7 @@ link_ggml_backends(acestep-core)
 # backend) and model-store.h's vae-ort / cond-enc-ort / text-enc-ort /
 # vae-enc-ort. This used to arrive transitively from supersep, which is now
 # pure GGML — so acestep-core declares it directly.
-if(SUPERSEP_ENABLED)
+if(ORT_PATHS_ENABLED)
     target_compile_definitions(acestep-core PUBLIC HOT_STEP_ORT)
     target_include_directories(acestep-core PUBLIC "${ORT_ROOT}/include")
     target_link_directories(acestep-core PUBLIC "${ORT_ROOT}/lib")
@@ -504,7 +504,7 @@ if(CUDAToolkit_FOUND)
 endif()
 
 # Copy ONNX Runtime DLLs next to ace-server at build time
-if(SUPERSEP_ENABLED AND WIN32)
+if(ORT_PATHS_ENABLED AND WIN32)
     set(_ORT_DLL_DIR "${ORT_ROOT}/lib")
     foreach(_dll onnxruntime.dll onnxruntime_providers_shared.dll onnxruntime_providers_cuda.dll onnxruntime_providers_tensorrt.dll)
         if(EXISTS "${_ORT_DLL_DIR}/${_dll}")
@@ -519,7 +519,7 @@ if(SUPERSEP_ENABLED AND WIN32)
 endif()
 
 # Copy ONNX Runtime dylibs next to ace-server at build time (macOS)
-if(SUPERSEP_ENABLED AND APPLE)
+if(ORT_PATHS_ENABLED AND APPLE)
     set(_ORT_LIB_DIR "${ORT_ROOT}/lib")
     file(GLOB _ORT_DYLIBS "${_ORT_LIB_DIR}/libonnxruntime*.dylib")
     foreach(_dylib ${_ORT_DYLIBS})
@@ -532,7 +532,7 @@ if(SUPERSEP_ENABLED AND APPLE)
 endif()
 
 # Copy ONNX Runtime shared libs next to ace-server at build time (Linux)
-if(SUPERSEP_ENABLED AND UNIX AND NOT APPLE)
+if(ORT_PATHS_ENABLED AND UNIX AND NOT APPLE)
     set(_ORT_LIB_DIR "${ORT_ROOT}/lib")
     file(GLOB _ORT_SOLIBS "${_ORT_LIB_DIR}/libonnxruntime*.so*")
     foreach(_solib ${_ORT_SOLIBS})

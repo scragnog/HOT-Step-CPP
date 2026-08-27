@@ -13,7 +13,8 @@
 #   - Not a functional test. GitHub-hosted runners have no AMD GPU, so this
 #     only proves the code COMPILES and LINKS under HIP. It cannot catch a
 #     wrong hipMemGetInfo result, only a wrong hipMemGetInfo signature.
-#   - Not a full-parity build. It skips ONNX Runtime (SuperSep/sa3-refine) and
+#   - Not a full-parity build. It skips the ONNX Runtime paths (sa3-refine and
+#     the ORT VAE/encoders — SuperSep itself is pure GGML and always built) and
 #     builds only the `ace-server` target, which is what actually pulls in the
 #     HIP-sensitive translation units (pipeline-synth.cpp via acestep-core, and
 #     hot-step-server.cpp). Widening this costs runner minutes for little gain.

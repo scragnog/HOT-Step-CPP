@@ -61,7 +61,7 @@ Mirrors the GGML sampler (`hot-step-sampler.h`); only the forward pass differs. 
 
 ## 6. ORT + TRT-EP wrappers (VAE, PP-VAE, text/cond encoders)
 
-Files: `engine/src/vae-ort.h`, `vae-enc-ort.h`, `text-enc-ort.h`, `cond-enc-ort.h`. Ride on `HOT_STEP_SUPERSEP` (the pre-existing ONNX Runtime integration for stem separation).
+Files: `engine/src/vae-ort.h`, `vae-enc-ort.h`, `text-enc-ort.h`, `cond-enc-ort.h`. Gated on `HOT_STEP_ORT_PATHS` (option, `ORT_PATHS_ENABLED` internally) together with `sa3-refine.h` — these are the last ONNX Runtime consumers in the engine. The option was called `HOT_STEP_SUPERSEP` until SuperSep was rewritten on GGML; SuperSep no longer touches ORT and always builds.
 
 - Legacy **V1 TRT EP via C API** (`vae-ort.h:78`), fp16, engine cache written next to the ONNX, CUDA EP appended as fallback.
 - **Blackwell (sm_120) gotcha:** ORT-TRT VAE can segfault on RTX 50xx (Myelin fusion bug). Known workaround `builder_optimization_level=1` **cannot be expressed** through the V1 EP options (`vae-ort.h:95` NOTE) — fixing requires the V2 EP API.
