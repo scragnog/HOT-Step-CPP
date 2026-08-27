@@ -73,6 +73,7 @@
 #include <cstring>
 #include <filesystem>
 #include <random>
+#include <map>
 #include <vector>
 
 #ifdef __GNUC__
@@ -1992,6 +1993,7 @@ static void mm3_handle_imatrix(const httplib::Request & req, httplib::Response &
 
     std::vector<std::string> warnings;
     std::string              saved_path;
+    std::string              coverage;
 
     if (action == "start") {
         if (!g_mm3.loaded || !g_mm3.lm_resident) {
@@ -2002,14 +2004,27 @@ static void mm3_handle_imatrix(const httplib::Request & req, httplib::Response &
             mm3_imatrix_reset();
         }
 
-        // Only names that came out of the LM GGUF are collectable, and only the
-        // 2-D ones can ever be a matmul weight. Deriving the set from tmap_lm
+        // Only names that came out of an MM3 GGUF are collectable, and only the
+        // 2-D ones can ever be a matmul weight. Deriving the set from the tmaps
         // rather than from a name pattern is what keeps LoRA factors and KV
         // views out without a filter that can drift.
+        //
+        // BOTH tmaps, so ONE imatrix file covers every component. The names do
+        // not collide -- the LM's are bare (blk.N.*, output.weight) and the
+        // synth file's are prefixed (depth.*, dit.*) -- and quantize.cpp looks
+        // entries up by exact tensor name, so each GGUF picks out its own and
+        // ignores the rest. That also means the combined mm3-synth-*.gguf and
+        // the split mm3-dit/-depth files are served by the same file.
+        //
+        // Whatever this session does not exercise simply goes uncollected: an
+        // lm-plan run drives the LM and the depth decoder but never the DiT, so
+        // a DiT entry appears only once a render has been through the flow loop.
         g_mm3_imatrix.allow.clear();
-        for (const auto & kv : g_mm3.tmap_lm) {
-            if (kv.second && ggml_n_dims(kv.second) >= 2) {
-                g_mm3_imatrix.allow.insert(kv.first);
+        for (const auto * tm : { &g_mm3.tmap_lm, &g_mm3.tmap_synth }) {
+            for (const auto & kv : *tm) {
+                if (kv.second && ggml_n_dims(kv.second) >= 2) {
+                    g_mm3_imatrix.allow.insert(kv.first);
+                }
             }
         }
         if (g_mm3_imatrix.allow.empty()) {
@@ -2055,16 +2070,41 @@ static void mm3_handle_imatrix(const httplib::Request & req, httplib::Response &
     // A collected-but-empty accumulator is the one failure that looks like
     // success from the outside, so surface the tensor count and row total on
     // every reply, not just on save.
-    // token_embd.weight is reached by get_rows, never by a matmul, so it is
-    // never collectable and never needs to be: it is pinned to a K-quant by
-    // quantize.cpp's embedding rule. 253 of 254 is therefore full coverage, and
-    // saying otherwise would train the reader to ignore this warning.
-    const size_t collectable = g_mm3_imatrix.allow.size() - (g_mm3.tmap_lm.count("token_embd.weight") ? 1 : 0);
-    if (g_mm3_imatrix.ent.size() && g_mm3_imatrix.ent.size() < collectable) {
-        char buf[176];
-        snprintf(buf, sizeof(buf), "only %zu of %zu matmul weights have been seen — run more calibration prompts",
-                 g_mm3_imatrix.ent.size(), collectable);
-        warnings.push_back(buf);
+    // Per-component coverage, because "seen" only means anything against the
+    // component it belongs to. An lm-plan session legitimately collects the LM
+    // and the depth decoder and nothing else, so a global "N of M" would read as
+    // a failure every time and train the reader to ignore it.
+    //
+    // token_embd.weight can never appear: it is reached by get_rows, not by a
+    // matmul, and quantize.cpp pins it to a K-quant anyway.
+    {
+        std::map<std::string, std::pair<size_t, size_t>> cov;   // prefix -> seen/total
+        for (const auto & n : g_mm3_imatrix.allow) {
+            if (n == "token_embd.weight") {
+                continue;
+            }
+            const size_t dot = n.find('.');
+            std::string  key = "lm";
+            if (dot != std::string::npos) {
+                const std::string head = n.substr(0, dot);
+                if (head == "depth" || head == "dit" || head == "cond" || head == "voc") {
+                    key = head;
+                }
+            }
+            cov[key].second++;
+            if (g_mm3_imatrix.ent.count(n)) {
+                cov[key].first++;
+            }
+        }
+        std::string line;
+        for (const auto & kv : cov) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%s %zu/%zu", kv.first.c_str(), kv.second.first, kv.second.second);
+            line += (line.empty() ? "" : ", ") + std::string(buf);
+        }
+        if (!line.empty()) {
+            coverage = line;
+        }
     }
     // The one that actually invalidates a run: a tensor can be "seen" and still
     // have every row rejected as non-finite, which writes as all zeros.
@@ -2088,6 +2128,9 @@ static void mm3_handle_imatrix(const httplib::Request & req, httplib::Response &
     yyjson_mut_obj_add_uint(o, orot, "rows", (uint64_t) mm3_imatrix_total_rows());
     yyjson_mut_obj_add_uint(o, orot, "usable_tensors", (uint64_t) mm3_imatrix_usable());
     yyjson_mut_obj_add_uint(o, orot, "bad_rows", (uint64_t) g_mm3_imatrix.bad_rows);
+    if (!coverage.empty()) {
+        yyjson_mut_obj_add_strcpy(o, orot, "coverage", coverage.c_str());
+    }
     yyjson_mut_obj_add_uint(o, orot, "matmuls", (uint64_t) g_mm3_imatrix.nodes);
     yyjson_mut_obj_add_uint(o, orot, "skipped_type", (uint64_t) g_mm3_imatrix.skipped_type);
     yyjson_mut_obj_add_uint(o, orot, "skipped_stride", (uint64_t) g_mm3_imatrix.skipped_stride);

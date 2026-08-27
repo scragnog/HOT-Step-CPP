@@ -939,9 +939,26 @@ static int mm3_quant_rank(const std::string & q) {
                                     "Q6_K",  "Q5_K_M", "Q5_K_S", "Q4_K_M", "Q4_K_S",
                                     "IQ4_XS", "NVFP4", "MXFP4", "Q3_K_L", "Q3_K_M", "Q3_K_S",
                                     "IQ3_XXS", "Q2_K", "IQ2_XS", "IQ2_XXS" };
+    // An "-imat" suffix marks a file quantized against an importance matrix
+    // (engine/src/minimax/mm3-imatrix.h). It is the SAME type and the same size
+    // to within a few bytes -- only the solver's choices differ -- so it ranks
+    // beside its plain sibling rather than off the end of the list as an unknown
+    // token. It ranks one notch BETTER, because at the bit depths where the
+    // suffix exists at all the difference is not subtle: an imatrix Q2_K is
+    // listenable where the plain one is not.
+    //
+    // Scaled by 2 so "one notch better" has somewhere to sit between neighbours.
+    std::string base    = q;
+    int         bonus   = 1;
+    const std::string suffix = "-imat";
+    if (base.size() > suffix.size() && base.compare(base.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        base  = base.substr(0, base.size() - suffix.size());
+        bonus = 0;
+    }
+
     for (int i = 0; i < (int) (sizeof(order) / sizeof(order[0])); i++) {
-        if (q == order[i]) {
-            return i;
+        if (base == order[i]) {
+            return i * 2 + bonus;
         }
     }
     return 1000;   // unknown quant: offered, but never auto-selected over a known one

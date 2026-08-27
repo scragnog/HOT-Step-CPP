@@ -141,11 +141,11 @@
       "name": "MiniMax-Music3 (Q6_K)",
       "description": "LM and DiT at Q6_K, depth at Q8_0 (its validated floor), frontends near-native. ~10 GB download.",
       "fileIds": [
-        "mm3-lm-Q6_K",
+        "mm3-lm-Q6_K-imat",
         "mm3-synth-Q6_K"
       ],
       "components": [
-        "mm3-lm-Q6_K",
+        "mm3-lm-Q6_K-imat",
         "mm3-dit-Q6_K",
         "mm3-depth-q8_0",
         "mm3-cond-f16",
@@ -157,11 +157,11 @@
       "name": "MiniMax-Music3 (Q4_K_M)",
       "description": "LM and DiT at Q4_K_M, depth at Q8_0, frontends near-native — the compact option for limited VRAM. ~8 GB download.",
       "fileIds": [
-        "mm3-lm-Q4_K_M",
+        "mm3-lm-Q4_K_M-imat",
         "mm3-synth-Q4_K_M"
       ],
       "components": [
-        "mm3-lm-Q4_K_M",
+        "mm3-lm-Q4_K_M-imat",
         "mm3-dit-Q4_K_M",
         "mm3-depth-q8_0",
         "mm3-cond-f16",
@@ -2404,17 +2404,17 @@
       ]
     },
     {
-      "id": "mm3-lm-Q6_K",
-      "filename": "mm3-lm-Q6_K.gguf",
+      "id": "mm3-lm-Q6_K-imat",
+      "filename": "mm3-lm-Q6_K-imat.gguf",
       "role": "mm3",
       "subdir": "mm3",
-      "displayName": "MM3 Language Model (Q6_K)",
+      "displayName": "MM3 Language Model (Q6_K, imatrix)",
       "scale": null,
       "variant": "lm",
-      "quant": "Q6_K",
-      "sizeBytes": 7050127712,
+      "quant": "Q6_K-imat",
+      "sizeBytes": 7050127840,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Very close to q8_0 quality at a smaller footprint. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~7.1 GB.",
+      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Very close to q8_0 quality at a smaller footprint. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~7.1 GB. Quantized against an importance matrix collected from the f16 model, which is what makes the low-bit builds usable: the solver spends its error budget on the weights that carry signal instead of spreading it evenly.",
       "tags": [],
       "companions": [
         {
@@ -2424,17 +2424,17 @@
       ]
     },
     {
-      "id": "mm3-lm-Q5_K_M",
-      "filename": "mm3-lm-Q5_K_M.gguf",
+      "id": "mm3-lm-Q5_K_M-imat",
+      "filename": "mm3-lm-Q5_K_M-imat.gguf",
       "role": "mm3",
       "subdir": "mm3",
-      "displayName": "MM3 Language Model (Q5_K_M)",
+      "displayName": "MM3 Language Model (Q5_K_M, imatrix)",
       "scale": null,
       "variant": "lm",
-      "quant": "Q5_K_M",
-      "sizeBytes": 6257994080,
+      "quant": "Q5_K_M-imat",
+      "sizeBytes": 6257994208,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Good quality/size balance. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~6.3 GB.",
+      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Good quality/size balance. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~6.3 GB. Quantized against an importance matrix collected from the f16 model, which is what makes the low-bit builds usable: the solver spends its error budget on the weights that carry signal instead of spreading it evenly.",
       "tags": [],
       "companions": [
         {
@@ -2444,17 +2444,17 @@
       ]
     },
     {
-      "id": "mm3-lm-Q5_K_S",
-      "filename": "mm3-lm-Q5_K_S.gguf",
+      "id": "mm3-lm-Q5_K_S-imat",
+      "filename": "mm3-lm-Q5_K_S-imat.gguf",
       "role": "mm3",
       "subdir": "mm3",
-      "displayName": "MM3 Language Model (Q5_K_S)",
+      "displayName": "MM3 Language Model (Q5_K_S, imatrix)",
       "scale": null,
       "variant": "lm",
-      "quant": "Q5_K_S",
-      "sizeBytes": 6127642976,
+      "quant": "Q5_K_S-imat",
+      "sizeBytes": 6127643104,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Slightly smaller than Q5_K_M, marginally lower quality. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~6.1 GB.",
+      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Slightly smaller than Q5_K_M, marginally lower quality. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~6.1 GB. Quantized against an importance matrix collected from the f16 model, which is what makes the low-bit builds usable: the solver spends its error budget on the weights that carry signal instead of spreading it evenly.",
       "tags": [],
       "companions": [
         {
@@ -2464,17 +2464,17 @@
       ]
     },
     {
-      "id": "mm3-lm-Q4_K_M",
-      "filename": "mm3-lm-Q4_K_M.gguf",
+      "id": "mm3-lm-Q4_K_M-imat",
+      "filename": "mm3-lm-Q4_K_M-imat.gguf",
       "role": "mm3",
       "subdir": "mm3",
-      "displayName": "MM3 Language Model (Q4_K_M)",
+      "displayName": "MM3 Language Model (Q4_K_M, imatrix)",
       "scale": null,
       "variant": "lm",
-      "quant": "Q4_K_M",
-      "sizeBytes": 5512456544,
+      "quant": "Q4_K_M-imat",
+      "sizeBytes": 5512456672,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Compact. The usual choice for limited VRAM. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~5.5 GB.",
+      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Compact. The usual choice for limited VRAM. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~5.5 GB. Quantized against an importance matrix collected from the f16 model, which is what makes the low-bit builds usable: the solver spends its error budget on the weights that carry signal instead of spreading it evenly.",
       "tags": [],
       "companions": [
         {
@@ -2484,17 +2484,17 @@
       ]
     },
     {
-      "id": "mm3-lm-Q4_K_S",
-      "filename": "mm3-lm-Q4_K_S.gguf",
+      "id": "mm3-lm-Q4_K_S-imat",
+      "filename": "mm3-lm-Q4_K_S-imat.gguf",
       "role": "mm3",
       "subdir": "mm3",
-      "displayName": "MM3 Language Model (Q4_K_S)",
+      "displayName": "MM3 Language Model (Q4_K_S, imatrix)",
       "scale": null,
       "variant": "lm",
-      "quant": "Q4_K_S",
-      "sizeBytes": 5286685024,
+      "quant": "Q4_K_S-imat",
+      "sizeBytes": 5286685152,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Smaller than Q4_K_M with a little more quality loss. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~5.3 GB.",
+      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Smaller than Q4_K_M with a little more quality loss. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~5.3 GB. Quantized against an importance matrix collected from the f16 model, which is what makes the low-bit builds usable: the solver spends its error budget on the weights that carry signal instead of spreading it evenly.",
       "tags": [],
       "companions": [
         {
@@ -2546,17 +2546,17 @@
       ]
     },
     {
-      "id": "mm3-lm-Q3_K_L",
-      "filename": "mm3-lm-Q3_K_L.gguf",
+      "id": "mm3-lm-Q3_K_L-imat",
+      "filename": "mm3-lm-Q3_K_L-imat.gguf",
       "role": "mm3",
       "subdir": "mm3",
-      "displayName": "MM3 Language Model (Q3_K_L)",
+      "displayName": "MM3 Language Model (Q3_K_L, imatrix)",
       "scale": null,
       "variant": "lm",
-      "quant": "Q3_K_L",
-      "sizeBytes": 4998719840,
+      "quant": "Q3_K_L-imat",
+      "sizeBytes": 4998719968,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Aggressive. Quality loss is audible; verify before relying on it. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~5.0 GB.",
+      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Aggressive. Quality loss is audible; verify before relying on it. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~5.0 GB. Quantized against an importance matrix collected from the f16 model, which is what makes the low-bit builds usable: the solver spends its error budget on the weights that carry signal instead of spreading it evenly.",
       "tags": [],
       "companions": [
         {
@@ -2566,17 +2566,17 @@
       ]
     },
     {
-      "id": "mm3-lm-Q3_K_M",
-      "filename": "mm3-lm-Q3_K_M.gguf",
+      "id": "mm3-lm-Q3_K_M-imat",
+      "filename": "mm3-lm-Q3_K_M-imat.gguf",
       "role": "mm3",
       "subdir": "mm3",
-      "displayName": "MM3 Language Model (Q3_K_M)",
+      "displayName": "MM3 Language Model (Q3_K_M, imatrix)",
       "scale": null,
       "variant": "lm",
-      "quant": "Q3_K_M",
-      "sizeBytes": 4589971808,
+      "quant": "Q3_K_M-imat",
+      "sizeBytes": 4589971936,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Aggressive. Quality loss is audible; verify before relying on it. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~4.6 GB.",
+      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Aggressive. Quality loss is audible; verify before relying on it. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~4.6 GB. Quantized against an importance matrix collected from the f16 model, which is what makes the low-bit builds usable: the solver spends its error budget on the weights that carry signal instead of spreading it evenly.",
       "tags": [],
       "companions": [
         {
@@ -2586,17 +2586,17 @@
       ]
     },
     {
-      "id": "mm3-lm-Q3_K_S",
-      "filename": "mm3-lm-Q3_K_S.gguf",
+      "id": "mm3-lm-Q3_K_S-imat",
+      "filename": "mm3-lm-Q3_K_S-imat.gguf",
       "role": "mm3",
       "subdir": "mm3",
-      "displayName": "MM3 Language Model (Q3_K_S)",
+      "displayName": "MM3 Language Model (Q3_K_S, imatrix)",
       "scale": null,
       "variant": "lm",
-      "quant": "Q3_K_S",
-      "sizeBytes": 4336937312,
+      "quant": "Q3_K_S-imat",
+      "sizeBytes": 4336937440,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Very aggressive. Expect noticeable degradation. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~4.3 GB.",
+      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Very aggressive. Expect noticeable degradation. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~4.3 GB. Quantized against an importance matrix collected from the f16 model, which is what makes the low-bit builds usable: the solver spends its error budget on the weights that carry signal instead of spreading it evenly.",
       "tags": [],
       "companions": [
         {
@@ -2606,17 +2606,17 @@
       ]
     },
     {
-      "id": "mm3-lm-Q2_K",
-      "filename": "mm3-lm-Q2_K.gguf",
+      "id": "mm3-lm-Q2_K-imat",
+      "filename": "mm3-lm-Q2_K-imat.gguf",
       "role": "mm3",
       "subdir": "mm3",
-      "displayName": "MM3 Language Model (Q2_K)",
+      "displayName": "MM3 Language Model (Q2_K, imatrix)",
       "scale": null,
       "variant": "lm",
-      "quant": "Q2_K",
-      "sizeBytes": 3682625888,
+      "quant": "Q2_K-imat",
+      "sizeBytes": 3682626016,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. Smallest and lowest quality. Experimental — the flow model may not hold up. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~3.7 GB.",
+      "description": "MiniMax-Music3 autoregressive language model — generates the semantic/acoustic token sequence from the Structured Caption. NOTE: measured 5-6x slower than Q8_0 or NVFP4 in the autoregressive stage on CUDA — pick NVFP4 or Q8_0 for speed. Both mm3-lm and mm3-synth are required; this file is ~3.7 GB. Quantized against an importance matrix collected from the f16 model, which is what makes the low-bit builds usable: the solver spends its error budget on the weights that carry signal instead of spreading it evenly.",
       "tags": [],
       "companions": [
         {
@@ -3570,6 +3570,46 @@
       "repoPath": "ggml-base.bin",
       "description": "Fastest, smallest (141 MB). Good for quick previews but lower accuracy. ~1-3s per 30s track on GPU.",
       "tags": []
+    },
+    {
+      "id": "mm3-lm-IQ2_XXS-imat",
+      "filename": "mm3-lm-IQ2_XXS-imat.gguf",
+      "role": "mm3",
+      "subdir": "mm3",
+      "displayName": "MM3 Language Model (IQ2_XXS, imatrix)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "IQ2_XXS-imat",
+      "sizeBytes": 2747996640,
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "description": "MiniMax-Music3 autoregressive language model, quantized to IQ2_XXS (2.06 bits per weight) against an importance matrix — the smallest build that still holds together. The IQ formats cannot be built without one at all, and it is what makes them listenable rather than a curiosity. Note they decode through a codebook lookup rather than a simple scale, so they are slower per token on CPU than a K-quant of the same size; pick them for a memory ceiling, not for speed.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "mm3-lm-IQ3_XXS-imat",
+      "filename": "mm3-lm-IQ3_XXS-imat.gguf",
+      "role": "mm3",
+      "subdir": "mm3",
+      "displayName": "MM3 Language Model (IQ3_XXS, imatrix)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "IQ3_XXS-imat",
+      "sizeBytes": 3826129376,
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "description": "MiniMax-Music3 autoregressive language model, quantized to IQ3_XXS (3.06 bits per weight) against an importance matrix — between Q2_K and Q3_K_S on size, and better than either at it. The IQ formats cannot be built without one at all, and it is what makes them listenable rather than a curiosity. Note they decode through a codebook lookup rather than a simple scale, so they are slower per token on CPU than a K-quant of the same size; pick them for a memory ceiling, not for speed.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
     }
   ]
 }

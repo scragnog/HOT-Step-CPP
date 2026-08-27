@@ -24,7 +24,7 @@
 //
 // Usage: quantize <input.gguf> <output.gguf> <type> [--imatrix <file.gguf>]
 // Types: Q2_K Q3_K_S Q3_K_M Q3_K_L Q4_K_S Q4_K_M Q5_K_S Q5_K_M Q6_K Q8_0 NVFP4 MXFP4
-//        IQ2_XXS IQ2_XS IQ3_XXS IQ4_XS
+//        IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ3_XXS IQ4_XS
 //
 // IMPORTANCE MATRIX (--imatrix)
 // ----------------------------
@@ -98,6 +98,14 @@ static const QuantVariant VARIANTS[] = {
     // backends. It also drops below Q6_K here because at this end of the range
     // the 200k-row head and embedding are ~19 % of the file, and leaving them at
     // Q6_K puts a floor under the total that the block savings cannot get past.
+    // Sub-2-bit. IQ1_S cannot be built at all without an imatrix (ggml asserts),
+    // and IQ1_M is only nominally exempt -- upstream commented it out of the
+    // requires list, not out of needing one. The embedding drops to Q2_K here
+    // rather than Q4_K: at 1.5 bpw the 200k-row head and embedding would
+    // otherwise be over half the file, and the point of these two is a build
+    // that fits somewhere a 3.6 GB one does not.
+    { "IQ1_S",   GGML_TYPE_IQ1_S,   GGML_TYPE_IQ2_XXS, GGML_TYPE_Q2_K, 1, 4, 24 },
+    { "IQ1_M",   GGML_TYPE_IQ1_M,   GGML_TYPE_IQ2_XXS, GGML_TYPE_Q4_K, 1, 4, 31 },
     { "IQ2_XXS", GGML_TYPE_IQ2_XXS, GGML_TYPE_IQ3_XXS, GGML_TYPE_Q4_K, 1, 4, 19 },
     { "IQ2_XS",  GGML_TYPE_IQ2_XS,  GGML_TYPE_IQ3_XXS, GGML_TYPE_Q4_K, 1, 4, 20 },
     { "IQ3_XXS", GGML_TYPE_IQ3_XXS, GGML_TYPE_IQ4_XS,  GGML_TYPE_Q5_K, 1, 4, 23 },

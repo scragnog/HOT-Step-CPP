@@ -118,6 +118,7 @@
 // The obvious lever if the AR loop needs it is fewer, larger kernels — not a KV
 // cache, which would cut positions but not the seven weight sweeps.
 
+#include "mm3-imatrix.h"
 #include "mm3-model.h"
 #include "mm3-sample.h"
 
@@ -721,6 +722,7 @@ static bool mm3_depth_decode_takes(const MM3Model & m, const float * lm_hidden_r
         }
 
         const auto tc = now();
+        mm3_imatrix_hook(s->sched);
         if (ggml_backend_sched_graph_compute(s->sched, s->graph) != GGML_STATUS_SUCCESS) {
             if (err) {
                 *err = "depth graph compute failed at codebook " + std::to_string(cb);
