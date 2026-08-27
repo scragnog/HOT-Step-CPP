@@ -937,7 +937,8 @@ static void mm3_probe_file(const std::string & path, MM3FileInfo * fi, MM3LmConf
 static int mm3_quant_rank(const std::string & q) {
     static const char * order[] = { "f16",   "F16",   "bf16",  "BF16",  "q8_0",  "Q8_0",
                                     "Q6_K",  "Q5_K_M", "Q5_K_S", "Q4_K_M", "Q4_K_S",
-                                    "NVFP4", "MXFP4", "Q3_K_L", "Q3_K_M", "Q3_K_S", "Q2_K" };
+                                    "IQ4_XS", "NVFP4", "MXFP4", "Q3_K_L", "Q3_K_M", "Q3_K_S",
+                                    "IQ3_XXS", "Q2_K", "IQ2_XS", "IQ2_XXS" };
     for (int i = 0; i < (int) (sizeof(order) / sizeof(order[0])); i++) {
         if (q == order[i]) {
             return i;

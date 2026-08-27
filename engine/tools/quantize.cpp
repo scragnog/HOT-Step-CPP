@@ -22,9 +22,22 @@
 // touch F32" -- that reproduces the converter's policy exactly, with no name
 // list to drift out of sync. See engine/tools/convert-mm3.py.
 //
-// Usage: quantize <input.gguf> <output.gguf> <type>
+// Usage: quantize <input.gguf> <output.gguf> <type> [--imatrix <file.gguf>]
 // Types: Q2_K Q3_K_S Q3_K_M Q3_K_L Q4_K_S Q4_K_M Q5_K_S Q5_K_M Q6_K Q8_0 NVFP4 MXFP4
+//        IQ2_XXS IQ2_XS IQ3_XXS IQ4_XS
+//
+// IMPORTANCE MATRIX (--imatrix)
+// ----------------------------
+// Round-to-nearest minimises error in the WEIGHTS, which is the wrong target: a
+// weight column that multiplies a near-dead activation can be mangled for free,
+// one that multiplies a hot activation cannot. An imatrix supplies the missing
+// per-input-column weighting, measured by running the model. It is optional and
+// changes nothing above ~4 bits, but at 2-3 bits it is the difference between a
+// usable file and noise -- and IQ2_XXS/IQ2_XS REFUSE to run without one
+// (ggml_quantize_requires_imatrix). Collect one with POST /mm3/imatrix; the
+// format is documented in engine/src/minimax/mm3-imatrix.h.
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -80,6 +93,15 @@ static const QuantVariant VARIANTS[] = {
     { "Q8_0",   GGML_TYPE_Q8_0, GGML_TYPE_COUNT, GGML_TYPE_Q8_0, 0, 0,  7 },
     { "NVFP4",  GGML_TYPE_NVFP4, GGML_TYPE_COUNT, GGML_TYPE_Q8_0, 0, 0, FT_GUESSED },
     { "MXFP4",  GGML_TYPE_MXFP4, GGML_TYPE_COUNT, GGML_TYPE_Q8_0, 0, 0, 38 },
+    // i-quants. The embedding stays on a K-quant in every one of these: it is
+    // read by get_rows, not by a matmul, and get_rows has no IQ path on several
+    // backends. It also drops below Q6_K here because at this end of the range
+    // the 200k-row head and embedding are ~19 % of the file, and leaving them at
+    // Q6_K puts a floor under the total that the block savings cannot get past.
+    { "IQ2_XXS", GGML_TYPE_IQ2_XXS, GGML_TYPE_IQ3_XXS, GGML_TYPE_Q4_K, 1, 4, 19 },
+    { "IQ2_XS",  GGML_TYPE_IQ2_XS,  GGML_TYPE_IQ3_XXS, GGML_TYPE_Q4_K, 1, 4, 20 },
+    { "IQ3_XXS", GGML_TYPE_IQ3_XXS, GGML_TYPE_IQ4_XS,  GGML_TYPE_Q5_K, 1, 4, 23 },
+    { "IQ4_XS",  GGML_TYPE_IQ4_XS,  GGML_TYPE_COUNT,   GGML_TYPE_Q6_K, 0, 0, 30 },
 };
 
 static const QuantVariant * find_variant(const char * s) {
@@ -243,6 +265,116 @@ static bool should_promote_f32(int n_dims) {
     return n_dims < 2;
 }
 
+// ── Importance matrix ───────────────────────────────────────────────────────
+//
+// The file is GGUF, written by mm3_imatrix_save (engine/src/minimax/mm3-imatrix.h)
+// in llama.cpp's layout: for each collected weight, "<name>.in_sum2" F32 [n_in]
+// holding SUMMED squares and "<name>.counts" F32 [1] holding the number of rows
+// summed. Storing sums rather than means is what lets two collection runs be
+// merged by adding the tensors, so the division happens here at load.
+struct Imatrix {
+    std::map<std::string, std::vector<float>> col;   // weight name -> [n_in] mean square
+    int64_t                                   chunks = 0;
+    std::string                               path;
+};
+
+static bool imatrix_load(const char * path, Imatrix * im) {
+    struct ggml_context *   ctx    = nullptr;
+    struct gguf_init_params params = { /*no_alloc=*/false, /*ctx=*/&ctx };
+
+    struct gguf_context * g = gguf_init_from_file(path, params);
+    if (!g) {
+        fprintf(stderr, "[Quantize] Failed to read imatrix %s\n", path);
+        return false;
+    }
+    im->path = path;
+
+    int64_t k = gguf_find_key(g, "imatrix.chunk_count");
+    if (k >= 0) {
+        im->chunks = (int64_t) gguf_get_val_u32(g, (int) k);
+    }
+
+    static const char SUM[] = ".in_sum2";
+    const size_t      slen  = sizeof(SUM) - 1;
+
+    int n_missing_counts = 0;
+    int n_zero = 0, n_bad = 0;
+    for (int64_t i = 0; i < gguf_get_n_tensors(g); i++) {
+        const std::string tn = gguf_get_tensor_name(g, i);
+        if (tn.size() <= slen || tn.compare(tn.size() - slen, slen, SUM) != 0) {
+            continue;
+        }
+        const std::string base = tn.substr(0, tn.size() - slen);
+
+        struct ggml_tensor * ts = ggml_get_tensor(ctx, tn.c_str());
+        struct ggml_tensor * tc = ggml_get_tensor(ctx, (base + ".counts").c_str());
+        if (!ts || ts->type != GGML_TYPE_F32) {
+            continue;
+        }
+
+        // A missing or zero count means the sums were never normalised against
+        // anything. Using them raw would still "work" -- the solvers only care
+        // about relative magnitude within a row -- but it hides a collection bug
+        // that produced one entry from a single token, so say so.
+        double count = 1.0;
+        if (tc && tc->type == GGML_TYPE_F32 && ggml_nelements(tc) >= 1) {
+            count = (double) ((const float *) tc->data)[0];
+        } else {
+            n_missing_counts++;
+        }
+        if (count <= 0.0) {
+            count = 1.0;
+        }
+
+        const int64_t      n = ggml_nelements(ts);
+        std::vector<float> v((size_t) n);
+        const float *      sd = (const float *) ts->data;
+        bool               any = false;
+        bool               ok  = true;
+        for (int64_t j = 0; j < n; j++) {
+            const float x = (float) ((double) sd[j] / count);
+            if (!std::isfinite(x) || x < 0.0f) {
+                ok = false;
+                break;
+            }
+            any |= (x > 0.0f);
+            v[(size_t) j] = x;
+        }
+        // An all-zero vector tells the solver every column is worthless, which
+        // is strictly worse guidance than none; a non-finite one is a collection
+        // bug. Either way the tensor is better off on round-to-nearest, and the
+        // count is reported rather than swallowed.
+        if (!ok) {
+            n_bad++;
+            continue;
+        }
+        if (!any) {
+            n_zero++;
+            continue;
+        }
+        im->col[base] = std::move(v);
+    }
+
+    gguf_free(g);
+    ggml_free(ctx);
+
+    if (im->col.empty()) {
+        fprintf(stderr, "[Quantize] imatrix %s has no *.in_sum2 tensors\n", path);
+        return false;
+    }
+    fprintf(stderr, "[Quantize] imatrix: %zu tensors from %lld runs (%s)\n", im->col.size(),
+            (long long) im->chunks, path);
+    if (n_missing_counts) {
+        fprintf(stderr, "[Quantize] imatrix: %d entries had no .counts tensor, using raw sums\n", n_missing_counts);
+    }
+    if (n_zero || n_bad) {
+        fprintf(stderr, "[Quantize] imatrix: dropped %d all-zero and %d non-finite entries (those tensors fall back "
+                        "to round-to-nearest)\n",
+                n_zero, n_bad);
+    }
+    return true;
+}
+
 // Convert source data to F32
 static bool to_f32(const void * src, float * dst, int64_t n, enum ggml_type type) {
     switch (type) {
@@ -260,28 +392,56 @@ static bool to_f32(const void * src, float * dst, int64_t n, enum ggml_type type
     }
 }
 
+static void usage(const char * argv0) {
+    fprintf(stderr, "acestep.cpp %s\n\n", ACE_VERSION);
+    fprintf(stderr, "Usage: %s <input.gguf> <output.gguf> <type> [--imatrix <file.gguf>]\n", argv0);
+    fprintf(stderr, "Types:");
+    for (const auto & v : VARIANTS) {
+        fprintf(stderr, " %s", v.name);
+    }
+    fprintf(stderr, "\n");
+}
+
 int main(int argc, char ** argv) {
-    if (argc != 4) {
-        fprintf(stderr, "acestep.cpp %s\n\n", ACE_VERSION);
-        fprintf(stderr, "Usage: %s <input.gguf> <output.gguf> <type>\n", argv[0]);
-        fprintf(stderr, "Types:");
-        for (const auto & v : VARIANTS) {
-            fprintf(stderr, " %s", v.name);
-        }
-        fprintf(stderr, "\n");
+    if (argc < 4) {
+        usage(argv[0]);
         return 1;
     }
 
-    const char *         inp_path = argv[1];
-    const char *         out_path = argv[2];
-    const QuantVariant * variant  = find_variant(argv[3]);
+    const char * inp_path  = argv[1];
+    const char * out_path  = argv[2];
+    const char * imat_path = nullptr;
 
+    for (int i = 4; i < argc; i++) {
+        if ((strcmp(argv[i], "--imatrix") == 0 || strcmp(argv[i], "-m") == 0) && i + 1 < argc) {
+            imat_path = argv[++i];
+        } else {
+            fprintf(stderr, "[Quantize] Unknown argument: %s\n\n", argv[i]);
+            usage(argv[0]);
+            return 1;
+        }
+    }
+
+    const QuantVariant * variant = find_variant(argv[3]);
     if (!variant) {
         fprintf(stderr, "[Quantize] Unknown type: %s\n", argv[3]);
         return 1;
     }
 
-    fprintf(stderr, "[Quantize] %s -> %s (%s)\n", inp_path, out_path, variant->name);
+    Imatrix imat;
+    if (imat_path && !imatrix_load(imat_path, &imat)) {
+        return 1;
+    }
+    // Catch the impossible ask before spending minutes streaming a 17 GB file.
+    if (!imat_path && ggml_quantize_requires_imatrix(variant->base)) {
+        fprintf(stderr, "[Quantize] %s cannot be built without --imatrix (ggml refuses to quantize %s blind).\n",
+                variant->name, ggml_type_name(variant->base));
+        fprintf(stderr, "[Quantize] Collect one with POST /mm3/imatrix -- see engine/src/minimax/mm3-imatrix.h\n");
+        return 1;
+    }
+
+    fprintf(stderr, "[Quantize] %s -> %s (%s%s)\n", inp_path, out_path, variant->name,
+            imat_path ? " + imatrix" : "");
 
     // Mmap input file
 #ifdef _WIN32
@@ -395,6 +555,14 @@ int main(int argc, char ** argv) {
     // nothing. Keep the human-readable name on its own key instead.
     gguf_set_val_u32(out, "general.file_type", variant->ftype);
     gguf_set_val_str(out, "general.file_type_name", variant->name);
+    if (imat_path) {
+        // Provenance. Two Q2_K files quantized with and without an imatrix are
+        // indistinguishable from their types alone, and they are exactly the
+        // pair anyone will want to A/B.
+        gguf_set_val_bool(out, "quantize.imatrix", true);
+        gguf_set_val_str(out, "quantize.imatrix_file", imat.path.c_str());
+        gguf_set_val_u32(out, "quantize.imatrix_chunks", (uint32_t) imat.chunks);
+    }
 
     // Plan: for each tensor, decide target type
     struct TensorPlan {
@@ -449,6 +617,17 @@ int main(int argc, char ** argv) {
         bool aligned     = (t->ne[0] % ggml_blck_size(target) == 0);
 
         if (can_convert && aligned) {
+            // ggml asserts on a null imatrix for IQ2_XXS/IQ2_XS/IQ1_S. An assert
+            // three minutes into a stream write, with a half-written output file
+            // on disk, is a bad way to learn the calibration run missed a
+            // tensor -- so check every tensor up front instead.
+            if (ggml_quantize_requires_imatrix(target) && imat.col.find(name) == imat.col.end()) {
+                fprintf(stderr, "[Quantize] FATAL: %s needs an imatrix entry for '%s' and the file has none.\n",
+                        ggml_type_name(target), name);
+                fprintf(stderr, "[Quantize] Run more calibration prompts through POST /mm3/lm-plan, or pick a "
+                                "type that does not require one.\n");
+                return 1;
+            }
             gguf_set_tensor_type(out, name, target);
             plans[(size_t) i] = { target, true, false };
         }
@@ -470,6 +649,7 @@ int main(int argc, char ** argv) {
 
     const size_t alignment   = gguf_get_alignment(out);
     int          n_quantized = 0, n_promoted = 0;
+    int          n_with_imatrix = 0, n_imatrix_mismatch = 0;
     int64_t      bytes_in = 0, bytes_out = 0;
     size_t       data_pos = 0;
 
@@ -511,8 +691,27 @@ int main(int argc, char ** argv) {
             const int64_t nrows     = nel / n_per_row;
             const size_t  qsize     = ggml_row_size(plan.target, n_per_row) * (size_t) nrows;
 
+            // Column importances for THIS tensor, or null to fall back to
+            // round-to-nearest. A mismatched length means the imatrix was
+            // collected against a different checkpoint; using it would silently
+            // weight the wrong columns, so drop it and say so.
+            const float * iw = nullptr;
+            if (!imat.col.empty()) {
+                auto it = imat.col.find(name);
+                if (it != imat.col.end()) {
+                    if ((int64_t) it->second.size() == n_per_row) {
+                        iw = it->second.data();
+                        n_with_imatrix++;
+                    } else {
+                        fprintf(stderr, "[Quantize] imatrix entry for '%s' is %zu wide, tensor is %lld -- ignored\n",
+                                name, it->second.size(), (long long) n_per_row);
+                        n_imatrix_mismatch++;
+                    }
+                }
+            }
+
             std::vector<uint8_t> qbuf(qsize);
-            ggml_quantize_chunk(plan.target, f32.data(), qbuf.data(), 0, nrows, n_per_row, nullptr);
+            ggml_quantize_chunk(plan.target, f32.data(), qbuf.data(), 0, nrows, n_per_row, iw);
 
             fwrite(qbuf.data(), 1, qsize, fout);
             data_pos += qsize;
@@ -529,6 +728,18 @@ int main(int argc, char ** argv) {
     fclose(fout);
 
     fprintf(stderr, "[Quantize] Quantized %d/%d tensors, promoted %d to F32\n", n_quantized, n_tensors, n_promoted);
+    if (imat_path) {
+        // The interesting number is the SHORTFALL. A tensor quantized without an
+        // imatrix is not an error, it just did not get the benefit -- and that is
+        // invisible in the output file, so it gets said out loud here.
+        fprintf(stderr, "[Quantize] imatrix applied to %d/%d quantized tensors%s\n", n_with_imatrix, n_quantized,
+                n_quantized > n_with_imatrix ? " (the rest fell back to round-to-nearest)" : "");
+        if (n_imatrix_mismatch) {
+            fprintf(stderr, "[Quantize] WARNING: %d imatrix entries had the wrong width and were ignored -- is this "
+                            "imatrix from the same checkpoint?\n",
+                    n_imatrix_mismatch);
+        }
+    }
     fprintf(stderr, "[Quantize] %.1f GB -> %.1f GB (%.1fx)\n", (double) bytes_in / 1e9, (double) bytes_out / 1e9,
             bytes_out > 0 ? (double) bytes_in / (double) bytes_out : 0.0);
     fprintf(stderr, "[Quantize] Wrote %s\n", out_path);

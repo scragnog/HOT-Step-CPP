@@ -149,6 +149,7 @@
 // nearly free.
 
 #include "mm3-align.h"
+#include "mm3-imatrix.h"
 #include "mm3-lm-adapter.h"
 #include "../qwen3-lora.h"
 #include "mm3-model.h"
@@ -1084,6 +1085,7 @@ static bool mm3_lm_prefill(const MM3Model & m, MM3LmGraph * g, const int32_t * i
     ggml_backend_tensor_set(g->prefill.in_ids, g->ids_host.data(), 0, (size_t) (n_prompt * B) * sizeof(int32_t));
     mm3_lm_upload_step(g, &g->prefill, n_prompt, n_kv_pad);
 
+    mm3_imatrix_hook(g->prefill.sched);
     if (ggml_backend_sched_graph_compute(g->prefill.sched, g->prefill.graph) != GGML_STATUS_SUCCESS) {
         if (err) {
             *err = "MM3 LM prefill graph compute failed";
@@ -1142,6 +1144,7 @@ static bool mm3_lm_decode(const MM3Model & m, MM3LmGraph * g, const int32_t * se
     ggml_backend_tensor_set(g->decode.in_ids, g->ids_host.data(), 0, (size_t) (K * (NC + 1)) * sizeof(int32_t));
     mm3_lm_upload_step(g, &g->decode, 1, n_kv_pad);
 
+    mm3_imatrix_hook(g->decode.sched);
     if (ggml_backend_sched_graph_compute(g->decode.sched, g->decode.graph) != GGML_STATUS_SUCCESS) {
         if (err) {
             *err = "MM3 LM decode graph compute failed";
