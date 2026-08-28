@@ -10,7 +10,11 @@ import { performance } from 'perf_hooks';
 import { config } from '../../config.js';
 import { aceClient } from '../../services/aceClient.js';
 import { runMastering } from '../../routes/mastering.js';
-import { applyVstChain } from '../../routes/vst.js';
+import { applyVstChain, vstChainActive } from '../../routes/vst.js';
+import {
+  applyGainToFile, readWav, writeWav, measureLevels, limitPeaks,
+  type OverflowMode,
+} from './audioLevel.js';
 import { runVocalNaturalizer, type NaturalizerParams } from './vocalNaturalizer.js';
 import { evaluateAudioQuality, formatQualityLog, type QualityResult } from './audioQualityEvaluator.js';
 import { sa3ModelsInstalled, tokenizeForSa3, buildStableStepPrompt } from '../sa3Tokenizer.js';
@@ -61,6 +65,17 @@ const SEP_LEVEL_STABLESTEP  = 5;  // dual Leap Xe pass, both stems neural
 // SA3's native sample rate (engine/src/sa3-refine.h: SA3_SR 44100). A source
 // already at this rate needs no resampling anywhere in the StableStep path.
 const SA3_NATIVE_SR = 44100;
+
+// Ceiling for the Gain Offset stage when it is the last thing to touch the
+// audio and therefore has to own the ceiling itself. Deliberately close to
+// full scale: the job here is to stop the flat-topping, not to quietly
+// re-level a render. When anything runs after this stage, peaks pass through
+// and this value is unused.
+const GAIN_OFFSET_CEILING_DB = -0.3;
+
+// Ceiling for the final peak guard — the backstop that runs when a stage that
+// was supposed to own the ceiling failed. Only engages on a broken chain.
+const FINAL_CEILING_DB = -0.3;
 
 export interface PostProcessParams {
   postProcessingEnabled?: boolean;
@@ -225,6 +240,10 @@ export async function runPostProcessingChain(
   const spectralLifterOn = ppMasterOn && !!params.spectralLifterEnabled;
   const masteringRef = params.masteringReference;
   const masteringOn = ppMasterOn && !!masteringRef && !!params.masteringEnabled;
+  // Hoisted: earlier stages need to know whether anything runs after them
+  // before they decide what to do with peaks that exceed full scale.
+  const lufsWillRun = ppMasterOn && masteringOn
+    && !!params.lufsEnabled && params.lufsTarget !== undefined;
   const masteredUrls: string[] = [];
   const qualityScores: TrackQualityScores[] = [];
   const timing: Array<{ name: string; ms: number }> = [];
@@ -588,45 +607,59 @@ export async function runPostProcessingChain(
     }
 
     // ── Pre-VST Gain Offset ──
+    //
+    // This stage used to multiply 16-bit samples and hard-clamp the result to
+    // int16 range. Any positive offset that pushed past full scale was
+    // destructively squared off here, in 16 bits, before the VST chain — so a
+    // limiter or clipper in that chain received already-clipped audio and
+    // could not undo it. That is the whole "mastered sounds more clipped than
+    // the raw" complaint.
+    //
+    // Overflow is now decided by chain position, not by this stage. If
+    // anything audio-modifying runs afterwards, peaks pass through untouched
+    // in float and that stage owns the ceiling — which is the correct and only
+    // correct behaviour when the downstream stage is the user's own mastering
+    // chain in Ozone. Only when nothing follows does this stage limit.
     const gainDb = params.gainOffsetDb ?? 0;
     if (ppMasterOn && gainDb !== 0) {
       const gainStart = performance.now();
       setStage(`Gain offset ${gainDb > 0 ? '+' : ''}${gainDb} dB${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
       try {
-        const buf = fs.readFileSync(processedPath);
-        // Parse WAV: find 'data' chunk
-        let dataOffset = -1;
-        for (let off = 36; off < buf.length - 8; off++) {
-          if (buf[off] === 0x64 && buf[off+1] === 0x61 && buf[off+2] === 0x74 && buf[off+3] === 0x61) {
-            dataOffset = off;
-            break;
+        // Everything downstream of this point that touches audio.
+        const downstream: string[] = [];
+        if (vstChainActive()) downstream.push('VST chain');
+        if (masteringOn && masteringRef) downstream.push('mastering');
+        if (lufsWillRun) downstream.push('LUFS');
+
+        const mode: OverflowMode = downstream.length > 0 ? 'passthrough' : 'limit';
+
+        const res = applyGainToFile(processedPath, gainDb, mode, {
+          // f32 when handing on, so above-full-scale peaks actually survive
+          // the file. vst-host reads f32 (engine/src/wav.h) and already writes
+          // it, so this format is nothing new to the chain. When this stage is
+          // last, keep the source format — omitting outFormat does that.
+          ...(mode === 'passthrough' ? { outFormat: 'f32' as const } : {}),
+          limit: { ceilingDb: GAIN_OFFSET_CEILING_DB },
+        });
+
+        anyStageRan = true;
+        log('INFO', `[Gain] ${gainDb > 0 ? '+' : ''}${gainDb} dB to ${processedFilename} `
+          + `| peak ${res.before.samplePeakDb.toFixed(1)} → ${res.after.samplePeakDb.toFixed(1)} dBFS, `
+          + `true peak ${res.after.truePeakDb.toFixed(1)} dBTP`);
+        if (mode === 'passthrough') {
+          log('DEBUG', `[Gain] Peaks passed through in f32 — ${downstream.join(' + ')} `
+            + `${downstream.length > 1 ? 'run' : 'runs'} after this and own${downstream.length > 1 ? '' : 's'} the ceiling`);
+          if (res.after.samplePeakDb > 0) {
+            log('INFO', `[Gain] Output is ${res.after.samplePeakDb.toFixed(1)} dB over full scale. `
+              + `This is intentional: ${downstream[0]} receives the headroom instead of a clipped file.`);
           }
+        } else if (res.limit?.engaged) {
+          log('INFO', `[Gain] Nothing downstream — limited to ${GAIN_OFFSET_CEILING_DB} dBFS `
+            + `(${res.limit.maxReductionDb.toFixed(1)} dB reduction)`);
         }
-        if (dataOffset >= 0) {
-          const dataSize = buf.readUInt32LE(dataOffset + 4);
-          const pcmStart = dataOffset + 8;
-          const audioFormat = buf.readUInt16LE(20);
-          const bitsPerSample = buf.readUInt16LE(34);
-          const linearGain = Math.pow(10, gainDb / 20);
-
-          if (audioFormat === 1 && bitsPerSample === 16) {
-            // PCM 16-bit
-            for (let p = pcmStart; p + 1 < pcmStart + dataSize && p + 1 < buf.length; p += 2) {
-              let sample = buf.readInt16LE(p) * linearGain;
-              sample = Math.max(-32768, Math.min(32767, Math.round(sample)));
-              buf.writeInt16LE(sample, p);
-            }
-          } else if (audioFormat === 3 && bitsPerSample === 32) {
-            // IEEE float 32-bit
-            for (let p = pcmStart; p + 3 < pcmStart + dataSize && p + 3 < buf.length; p += 4) {
-              buf.writeFloatLE(buf.readFloatLE(p) * linearGain, p);
-            }
-          }
-          // else: unsupported format, skip silently
-
-          fs.writeFileSync(processedPath, buf);
-          anyStageRan = true;
-          log('INFO', `[Gain] Applied ${gainDb > 0 ? '+' : ''}${gainDb} dB to ${processedFilename}`);
+        if (res.before.longestClipRun >= 3) {
+          log('WARNING', `[Gain] Input was already clipped before this stage: `
+            + `${res.before.clippedSamples} samples at full scale, longest run ${res.before.longestClipRun}`);
         }
       } catch (gainErr: any) {
         log('WARNING', `[Gain] Offset failed (non-fatal): ${gainErr.message}`);
@@ -672,8 +705,7 @@ export async function runPostProcessingChain(
     }
 
     // ── LUFS Normalization (final audio-modifying stage) ──
-    const lufsOn = ppMasterOn && masteringOn && !!params.lufsEnabled && params.lufsTarget !== undefined;
-    if (lufsOn && params.lufsTarget !== undefined) {
+    if (lufsWillRun && params.lufsTarget !== undefined) {
       const lufsStart = performance.now();
       setStage(`LUFS normalization${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
       try {
@@ -685,6 +717,33 @@ export async function runPostProcessingChain(
         log('WARNING', `[LUFS] Normalization failed (non-fatal): ${lufsErr.message}`);
       }
       timing.push({ name: 'LUFS Normalize', ms: Math.round(performance.now() - lufsStart) });
+    }
+
+    // ── Final peak guard ──
+    //
+    // Earlier stages are allowed to hand on peaks above full scale when
+    // something downstream owns the ceiling. If that stage then did not run —
+    // a missing vst-host, a plugin that errored, mastering.exe failing, all of
+    // which are non-fatal and only logged — nothing limited and the
+    // deliverable would clip on playback.
+    //
+    // This does nothing on a healthy chain. A VST chain or mastering pass that
+    // ran properly leaves the file at or below full scale, and the guard
+    // measures, finds nothing, and moves on.
+    if (anyStageRan) {
+      try {
+        const wav = readWav(processedPath);
+        const m = measureLevels(wav, { skipTruePeak: true });
+        if (m.samplePeak > 1.0) {
+          const res = limitPeaks(wav, { ceilingDb: FINAL_CEILING_DB });
+          writeWav(processedPath, wav, wav.sourceFormat);
+          log('WARNING', `[Peak guard] ${processedFilename} was ${m.samplePeakDb.toFixed(1)} dB `
+            + `over full scale with nothing left to limit it — a downstream stage must have `
+            + `failed. Limited to ${FINAL_CEILING_DB} dBFS (${res.maxReductionDb.toFixed(1)} dB reduction).`);
+        }
+      } catch (guardErr: any) {
+        log('WARNING', `[Peak guard] Check failed (non-fatal): ${guardErr.message}`);
+      }
     }
 
     // ── Quality Evaluation: Mastered (after all PP stages) ──

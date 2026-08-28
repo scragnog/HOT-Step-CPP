@@ -572,6 +572,22 @@ router.post('/monitor/restart', async (_req, res) => {
  * Apply the VST chain to a WAV file in-place.
  * Returns true if processing was applied, false if skipped.
  */
+/** True if the VST chain would actually process audio — at least one enabled
+ *  plugin and a vst-host binary to run it.
+ *
+ *  The post-processing chain needs this *before* it reaches the VST stage: a
+ *  stage that has audio-modifying work after it must hand its peaks on
+ *  untouched rather than limiting or clipping them, and when the downstream
+ *  stage is the user's own VST chain, that chain owns the ceiling entirely.
+ *  See docs/plans/2026-08-28-post-processing-gain-staging.md. */
+export function vstChainActive(): boolean {
+  try {
+    return loadChain().plugins.some(p => p.enabled) && fs.existsSync(config.vst.exe);
+  } catch {
+    return false;
+  }
+}
+
 export async function applyVstChain(wavPath: string): Promise<boolean> {
   const chain = loadChain();
   const enabled = chain.plugins.filter(p => p.enabled);
