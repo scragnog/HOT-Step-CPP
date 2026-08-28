@@ -12,7 +12,7 @@ import { aceClient } from '../../services/aceClient.js';
 import { runMastering } from '../../routes/mastering.js';
 import { applyVstChain, vstChainActive } from '../../routes/vst.js';
 import {
-  applyGainToFile, readWav, writeWav, measureLevels, limitPeaks,
+  applyGainToFile, readWav, writeWav, parseWav, encodeWav, measureLevels, limitPeaks,
   type OverflowMode,
 } from './audioLevel.js';
 import { runVocalNaturalizer, type NaturalizerParams } from './vocalNaturalizer.js';
@@ -216,8 +216,9 @@ async function separateVocals(
   const instStem = stems.find(s => s.category === 'instruments' && !s.hidden);
   if (!vocalStem || !instStem) return null;
 
-  const instBuf = await aceClient.superSepStem(sepId, instStem.index);
-  const vocalBuf = await aceClient.superSepStem(sepId, vocalStem.index);
+  // f32 stems: these feed the SA3 refine and the recombine, both mid-chain.
+  const instBuf = await aceClient.superSepStem(sepId, instStem.index, 'f32');
+  const vocalBuf = await aceClient.superSepStem(sepId, vocalStem.index, 'f32');
   return { sepId, stems, vocalIndex: vocalStem.index, vocalBuf, instBuf };
 }
 
@@ -439,7 +440,7 @@ export async function runPostProcessingChain(
             const wavBuf = fs.readFileSync(processedPath);
             const refined = await aceClient.submitSa3Refine(wavBuf, {
               tokens: ids, nTokens, strength, backend, adapters, envMatch, seed: ssSeed,
-              ...blendOpts, ...sa3PluginOpts,
+              outFmt: 'f32', ...blendOpts, ...sa3PluginOpts,
             });
             fs.writeFileSync(processedPath, refined);
           } else if (!vocalSep) {
@@ -450,7 +451,7 @@ export async function runPostProcessingChain(
             const srcBuf = fs.readFileSync(processedPath);
             const refined = await aceClient.submitSa3Refine(srcBuf, {
               tokens: ids, nTokens, strength, backend, adapters, envMatch, seed: ssSeed,
-              ...blendOpts, ...sa3PluginOpts,
+              outFmt: 'f32', ...blendOpts, ...sa3PluginOpts,
             });
             fs.writeFileSync(processedPath, refined);
           } else {
@@ -464,7 +465,7 @@ export async function runPostProcessingChain(
             // path needs no out_sr override and no vocal resample at all —
             // which also means it never touches PP-VAE, an ACE-only model.
             const vs = vocalSep;
-            const srcRate = parseWavToFloat(fs.readFileSync(processedPath)).sampleRate;
+            const srcRate = parseWav(fs.readFileSync(processedPath)).sampleRate;
             const nativeRate = srcRate === SA3_NATIVE_SR;
             if (nativeRate) {
               log('INFO', `[StableStep] Source is ${srcRate} Hz — SA3 native; `
@@ -474,6 +475,7 @@ export async function runPostProcessingChain(
             setStage(`StableStep: refining instrumental${suffix}...`);
             const refinedInst = await aceClient.submitSa3Refine(vs.instBuf, {
               tokens: ids, nTokens, strength, backend, adapters, envMatch, seed: ssSeed,
+              outFmt: 'f32',
               // Omitted on the native path: the engine defaults out_sr to the
               // input rate, so asking for anything would force a resample.
               ...(nativeRate ? {} : { outSr: 48000 }),
@@ -489,7 +491,7 @@ export async function runPostProcessingChain(
             // level to within 0.01 dB — measured, not assumed.
             const rawVocalsAt48k = async (): Promise<Buffer> => {
               try {
-                return await aceClient.submitPpVaeReencode(vs.vocalBuf, 1.0);
+                return await aceClient.submitPpVaeReencode(vs.vocalBuf, 1.0, undefined, 'f32');
               } catch (rErr: any) {
                 // That endpoint 501s when no PP-VAE model is installed, even at
                 // blend=1.0. Fall back to a solo-stem recombine — it resamples,
@@ -499,7 +501,8 @@ export async function runPostProcessingChain(
                 log('WARNING', `[StableStep] 48 kHz resample via PP-VAE passthrough failed `
                   + `(${rErr.message}) — falling back to stem recombine`);
                 const recombined = await aceClient.superSepRecombine(vs.sepId,
-                  vs.stems.map(s => ({ index: s.index, volume: 1.0, muted: s.index !== vs.vocalIndex })));
+                  vs.stems.map(s => ({ index: s.index, volume: 1.0, muted: s.index !== vs.vocalIndex })),
+                  'f32');
                 return matchRms(recombined, vs.vocalBuf);
               }
             };
@@ -517,7 +520,7 @@ export async function runPostProcessingChain(
               cleanVocals = vs.vocalBuf;
             } else if (params.stableStepVocalPpVae) {
               try {
-                cleanVocals = await aceClient.submitPpVaeReencode(vs.vocalBuf, 0.0); // 48 kHz out
+                cleanVocals = await aceClient.submitPpVaeReencode(vs.vocalBuf, 0.0, undefined, 'f32'); // 48 kHz out
               } catch (vErr: any) {
                 log('WARNING', `[StableStep] Vocal PP-VAE failed, using raw vocal stem: ${vErr.message}`);
                 cleanVocals = await rawVocalsAt48k();
@@ -547,7 +550,7 @@ export async function runPostProcessingChain(
       try {
         const wavBuf = fs.readFileSync(processedPath);
         const blend = params.ppVaeBlend ?? 0;
-        const processed = await aceClient.submitPpVaeReencode(wavBuf, blend, params.ppVaeUseOnnx);
+        const processed = await aceClient.submitPpVaeReencode(wavBuf, blend, params.ppVaeUseOnnx, 'f32');
         fs.writeFileSync(processedPath, processed);
         anyStageRan = true;
         log('INFO', `[PP-VAE] Re-encoded ${audioFilename}`);
@@ -568,6 +571,7 @@ export async function runPostProcessingChain(
           hf_mix: params.slHfMix ?? 0.0,
           transient_boost: params.slTransientBoost ?? 0.0,
           shimmer_reduction: params.slShimmerReduction ?? 6.0,
+          outFmt: 'f32' as const,
         };
         const processed = await aceClient.submitSpectralLifter(wavBuf, slParams);
         fs.writeFileSync(processedPath, processed);
@@ -776,125 +780,65 @@ export async function runPostProcessingChain(
   return { masteredUrls, qualityScores, timing };
 }
 
-// ── WAV mix helpers (StableStep recombine) ──────────────────────────────────
-// No shared float-WAV parse/encode helper exists in server/src (audioCrop.ts
-// keeps its header parser private and operates in-place), so StableStep uses
-// this minimal local implementation: 16-bit PCM + 32-bit float, stereo/mono.
-
-interface ParsedWavAudio {
-  sampleRate: number;
-  numChannels: number;
-  /** Interleaved samples, normalized to [-1, 1] floats. */
-  samples: Float32Array;
-}
-
-function parseWavToFloat(buf: Buffer): ParsedWavAudio {
-  if (buf.length < 44 ||
-      buf.toString('ascii', 0, 4) !== 'RIFF' ||
-      buf.toString('ascii', 8, 12) !== 'WAVE') {
-    throw new Error('Not a valid WAV file');
-  }
-
-  let offset = 12;
-  let audioFormat = 0, numChannels = 0, sampleRate = 0, bitsPerSample = 0;
-  let dataOffset = -1, dataSize = 0;
-
-  while (offset + 8 <= buf.length) {
-    const chunkId = buf.toString('ascii', offset, offset + 4);
-    const chunkSize = buf.readUInt32LE(offset + 4);
-    if (chunkId === 'fmt ') {
-      audioFormat = buf.readUInt16LE(offset + 8);
-      numChannels = buf.readUInt16LE(offset + 10);
-      sampleRate = buf.readUInt32LE(offset + 12);
-      bitsPerSample = buf.readUInt16LE(offset + 22);
-    } else if (chunkId === 'data') {
-      dataOffset = offset + 8;
-      dataSize = Math.min(chunkSize, buf.length - dataOffset);
-      break;
-    }
-    offset += 8 + chunkSize + (chunkSize % 2);
-  }
-
-  if (dataOffset < 0 || sampleRate <= 0 || numChannels <= 0) {
-    throw new Error('WAV file missing fmt or data chunk');
-  }
-
-  let samples: Float32Array;
-  if (audioFormat === 1 && bitsPerSample === 16) {
-    const n = Math.floor(dataSize / 2);
-    samples = new Float32Array(n);
-    for (let s = 0; s < n; s++) {
-      samples[s] = buf.readInt16LE(dataOffset + s * 2) / 32768;
-    }
-  } else if (audioFormat === 3 && bitsPerSample === 32) {
-    const n = Math.floor(dataSize / 4);
-    samples = new Float32Array(n);
-    for (let s = 0; s < n; s++) {
-      samples[s] = buf.readFloatLE(dataOffset + s * 4);
-    }
-  } else {
-    throw new Error(`Unsupported WAV format (fmt=${audioFormat}, ${bitsPerSample}-bit)`);
-  }
-
-  return { sampleRate, numChannels, samples };
-}
-
-function encodeWav16(samples: Float32Array, sampleRate: number, numChannels: number): Buffer {
-  const dataSize = samples.length * 2;
-  const out = Buffer.alloc(44 + dataSize);
-  out.write('RIFF', 0, 'ascii');
-  out.writeUInt32LE(36 + dataSize, 4);
-  out.write('WAVE', 8, 'ascii');
-  out.write('fmt ', 12, 'ascii');
-  out.writeUInt32LE(16, 16);                                   // fmt chunk size
-  out.writeUInt16LE(1, 20);                                    // PCM
-  out.writeUInt16LE(numChannels, 22);
-  out.writeUInt32LE(sampleRate, 24);
-  out.writeUInt32LE(sampleRate * numChannels * 2, 28);         // byte rate
-  out.writeUInt16LE(numChannels * 2, 32);                      // block align
-  out.writeUInt16LE(16, 34);                                   // bits per sample
-  out.write('data', 36, 'ascii');
-  out.writeUInt32LE(dataSize, 40);
-  for (let s = 0; s < samples.length; s++) {
-    const v = Math.max(-32768, Math.min(32767, Math.round(samples[s] * 32767)));
-    out.writeInt16LE(v, 44 + s * 2);
-  }
-  return out;
-}
+// ── WAV mix helpers (StableStep recombine) ─────────────────────────
+// These used to carry their own WAV parser and a 16-bit encoder. Both now come
+// from audioLevel.ts, so the recombine keeps full float precision and stops
+// re-quantising the mix on its way to the next stage.
 
 /** Rescale `wav` so its RMS matches `reference`'s, capped so the result never
  *  exceeds the reference peak. Used to undo the -1 dBFS peak normalisation that
  *  supersep_recombine applies, which would otherwise change the vocal level
- *  relative to the instrumental. Sample rates may differ. */
+ *  relative to the instrumental. Sample rates may differ.
+ *
+ *  Note the cap can only ever REDUCE the gain, so a vocal that arrives quiet
+ *  stays quiet. That asymmetry is a known contributor to the vocal sitting low
+ *  in StableStep mixes and is addressed separately — see Phase 4 of
+ *  docs/plans/2026-08-28-post-processing-gain-staging.md. */
 function matchRms(wav: Buffer, reference: Buffer): Buffer {
-  const w = parseWavToFloat(wav);
-  const r = parseWavToFloat(reference);
-  const rms = (s: Float32Array) => {
-    let acc = 0;
-    for (let i = 0; i < s.length; i++) acc += s[i] * s[i];
-    return s.length ? Math.sqrt(acc / s.length) : 0;
+  const w = parseWav(wav);
+  const r = parseWav(reference);
+
+  const rmsOf = (chans: Float32Array[]) => {
+    let acc = 0, n = 0;
+    for (const ch of chans) {
+      for (let i = 0; i < ch.length; i++) { acc += ch[i] * ch[i]; n++; }
+    }
+    return n ? Math.sqrt(acc / n) : 0;
   };
-  const wRms = rms(w.samples);
-  const rRms = rms(r.samples);
+  const peakOf = (chans: Float32Array[]) => {
+    let p = 0;
+    for (const ch of chans) {
+      for (let i = 0; i < ch.length; i++) p = Math.max(p, Math.abs(ch[i]));
+    }
+    return p;
+  };
+
+  const wRms = rmsOf(w.channels);
+  const rRms = rmsOf(r.channels);
   if (wRms < 1e-8 || rRms < 1e-8) return wav;
 
   let gain = rRms / wRms;
-  let wPeak = 0, rPeak = 0;
-  for (let i = 0; i < w.samples.length; i++) wPeak = Math.max(wPeak, Math.abs(w.samples[i]));
-  for (let i = 0; i < r.samples.length; i++) rPeak = Math.max(rPeak, Math.abs(r.samples[i]));
+  const wPeak = peakOf(w.channels);
+  const rPeak = peakOf(r.channels);
   if (wPeak * gain > rPeak + 0.01) gain = rPeak / (wPeak + 1e-8);
 
-  const out = new Float32Array(w.samples.length);
-  for (let i = 0; i < w.samples.length; i++) out[i] = w.samples[i] * gain;
-  return encodeWav16(out, w.sampleRate, w.numChannels);
+  for (const ch of w.channels) {
+    for (let i = 0; i < ch.length; i++) ch[i] *= gain;
+  }
+  return encodeWav(w, 'f32');
 }
 
 /** Sum two WAV buffers sample-wise (missing tail treated as silence) with a
  *  peak guard: if |sum| exceeds 0.999 the whole mix is scaled down to fit.
- *  Both inputs must share sample rate and channel count. Returns 16-bit PCM. */
+ *  Both inputs must share sample rate and channel count. Returns f32.
+ *
+ *  The peak guard attenuates the whole mix rather than the stem that overshot,
+ *  which costs the vocal absolute level whenever the refined bed comes back
+ *  hot. Phase 4 replaces it; it is left in place here so the float conversion
+ *  can be judged on its own. */
 function mixWavBuffers(a: Buffer, b: Buffer): Buffer {
-  const wa = parseWavToFloat(a);
-  const wb = parseWavToFloat(b);
+  const wa = parseWav(a);
+  const wb = parseWav(b);
   if (wa.sampleRate !== wb.sampleRate) {
     throw new Error(`Sample rate mismatch (${wa.sampleRate} vs ${wb.sampleRate})`);
   }
@@ -902,19 +846,30 @@ function mixWavBuffers(a: Buffer, b: Buffer): Buffer {
     throw new Error(`Channel count mismatch (${wa.numChannels} vs ${wb.numChannels})`);
   }
 
-  const n = Math.max(wa.samples.length, wb.samples.length);
-  const mixed = new Float32Array(n);
+  const frames = Math.max(wa.channels[0]?.length ?? 0, wb.channels[0]?.length ?? 0);
+  const mixed: Float32Array[] = [];
   let peak = 0;
-  for (let s = 0; s < n; s++) {
-    const v = (s < wa.samples.length ? wa.samples[s] : 0)
-            + (s < wb.samples.length ? wb.samples[s] : 0);
-    mixed[s] = v;
-    const av = Math.abs(v);
-    if (av > peak) peak = av;
+  for (let c = 0; c < wa.numChannels; c++) {
+    const out = new Float32Array(frames);
+    const ca = wa.channels[c], cb = wb.channels[c];
+    for (let i = 0; i < frames; i++) {
+      const v = (i < ca.length ? ca[i] : 0) + (i < cb.length ? cb[i] : 0);
+      out[i] = v;
+      const av = Math.abs(v);
+      if (av > peak) peak = av;
+    }
+    mixed.push(out);
   }
+
   if (peak > 0.999) {
     const scale = 0.999 / peak;
-    for (let s = 0; s < n; s++) mixed[s] *= scale;
+    for (const ch of mixed) {
+      for (let i = 0; i < ch.length; i++) ch[i] *= scale;
+    }
   }
-  return encodeWav16(mixed, wa.sampleRate, wa.numChannels);
+
+  return encodeWav(
+    { channels: mixed, sampleRate: wa.sampleRate, numChannels: wa.numChannels, sourceFormat: 'f32' },
+    'f32',
+  );
 }

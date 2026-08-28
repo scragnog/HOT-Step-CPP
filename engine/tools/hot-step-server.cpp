@@ -559,6 +559,29 @@ static void json_error(httplib::Response & res, int status, const char * msg) {
     free(json);
 }
 
+// helper: sample format for a post-processing endpoint's WAV response.
+//
+// These endpoints have two very different callers. The Stem Studio and other
+// UI paths want a finished 16-bit file. The Node post-processing chain is
+// mid-pipeline: it hands each result straight to the next stage, and every
+// 16-bit hop there re-quantises and bakes in whatever the previous stage
+// clipped. That chain asks for out_fmt=f32 and carries float until the last
+// stage that touches audio.
+//
+// Default stays s16 so every existing caller is unaffected.
+// See docs/plans/2026-08-28-post-processing-gain-staging.md.
+static WavFormat wav_fmt_param(const httplib::Request & req) {
+    if (!req.has_param("out_fmt")) {
+        return WAV_S16;
+    }
+    const std::string v = req.get_param_value("out_fmt");
+    if (v == "f32")  return WAV_F32;
+    if (v == "s24")  return WAV_S24;
+    if (v == "s16")  return WAV_S16;
+    fprintf(stderr, "[Server] Unknown out_fmt '%s', using s16\n", v.c_str());
+    return WAV_S16;
+}
+
 // resolve model name: explicit request > already loaded > first in bucket
 static std::string resolve_name(const std::vector<ModelEntry> & bucket,
                                 const std::string &             requested,
@@ -3624,7 +3647,7 @@ int main(int argc, char ** argv) {
         // If blend is 1.0 (fully original), skip processing entirely
         if (blend >= 1.0f) {
             fprintf(stderr, "[Server] PP-VAE: blend=1.0, returning original audio\n");
-            std::string wav = audio_encode_wav(planar, T_audio, 48000, WAV_S16);
+            std::string wav = audio_encode_wav(planar, T_audio, 48000, wav_fmt_param(req));
             free(planar);
             res.set_content(wav, "audio/wav");
             return;
@@ -3832,8 +3855,8 @@ int main(int argc, char ** argv) {
 
         free(planar);
 
-        // Encode to WAV16 and return
-        std::string wav = audio_encode_wav(decoded.data(), T_decoded, 48000, WAV_S16);
+        // Encode and return (s16 by default, f32 for the PP chain)
+        std::string wav = audio_encode_wav(decoded.data(), T_decoded, 48000, wav_fmt_param(req));
         res.set_content(wav, "audio/wav");
     });
 
@@ -4299,7 +4322,7 @@ int main(int argc, char ** argv) {
             json_error(res, 500, "Resample to output rate failed");
             return;
         }
-        std::string wav = audio_encode_wav(out_native, T_out, sr_out, WAV_S16);
+        std::string wav = audio_encode_wav(out_native, T_out, sr_out, wav_fmt_param(req));
         free(out_native);
         res.set_content(wav, "audio/wav");
     });
@@ -4593,7 +4616,7 @@ int main(int argc, char ** argv) {
             planar[s.n_frames + i] = s.samples[i * 2 + 1];
         }
 
-        std::string wav = audio_encode_wav(planar, s.n_frames, 44100, WAV_S16);
+        std::string wav = audio_encode_wav(planar, s.n_frames, 44100, wav_fmt_param(req));
         free(planar);
         res.set_content(wav, "audio/wav");
     });
@@ -4707,7 +4730,7 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "[SuperSep] Recombined: %d frames @44.1k → %d frames @48k\n",
                 out_frames, out48_frames);
 
-        std::string wav = audio_encode_wav(planar48, out48_frames, 48000, WAV_S16);
+        std::string wav = audio_encode_wav(planar48, out48_frames, 48000, wav_fmt_param(req));
         free(planar48);
         res.set_content(wav, "audio/wav");
     });
@@ -4747,8 +4770,8 @@ int main(int argc, char ** argv) {
         // Process in-place
         spectral_lifter_process(planar, T_audio, 48000, &slp);
 
-        // Encode back to WAV16
-        std::string wav = audio_encode_wav(planar, T_audio, 48000, WAV_S16);
+        // Encode back (s16 by default, f32 for the PP chain)
+        std::string wav = audio_encode_wav(planar, T_audio, 48000, wav_fmt_param(req));
         free(planar);
 
         res.set_content(wav, "audio/wav");

@@ -20,6 +20,15 @@ const TIMEOUT_RESULT = 300_000;   // fetching large audio results (encode + tran
 const TIMEOUT_SA3    = 1_800_000; // /sa3-refine — first call may build a TensorRT engine (many minutes)
 
 /** Props response from GET /props */
+/** Sample format for a post-processing endpoint's WAV response (`out_fmt`).
+ *
+ *  Omitting it gives 16-bit, which is what every UI-facing caller wants. The
+ *  post-processing chain asks for 'f32' because it hands each result straight
+ *  to the next stage, and a 16-bit hop there re-quantises and bakes in
+ *  whatever the previous stage clipped.
+ *  See docs/plans/2026-08-28-post-processing-gain-staging.md. */
+export type WavOutFormat = 's16' | 's24' | 'f32';
+
 export interface AceProps {
   models: {
     lm: string[];
@@ -558,6 +567,10 @@ export const aceClient = {
       hf_mix?: number;
       transient_boost?: number;
       shimmer_reduction?: number;
+      /** Response sample format. Omitted = s16, which is what every UI-facing
+       *  caller wants. The post-processing chain passes 'f32' so its
+       *  intermediate files are not re-quantised at every hop. */
+      outFmt?: WavOutFormat;
     },
   ): Promise<Buffer> {
     const qs = new URLSearchParams();
@@ -566,6 +579,7 @@ export const aceClient = {
     if (params.hf_mix !== undefined) qs.set('hf_mix', String(params.hf_mix));
     if (params.transient_boost !== undefined) qs.set('transient_boost', String(params.transient_boost));
     if (params.shimmer_reduction !== undefined) qs.set('shimmer_reduction', String(params.shimmer_reduction));
+    if (params.outFmt) qs.set('out_fmt', params.outFmt);
     const qsStr = qs.toString();
     const path = qsStr ? `/spectral-lifter?${qsStr}` : '/spectral-lifter';
 
@@ -586,11 +600,13 @@ export const aceClient = {
   /** POST /pp-vae-reencode — synchronous PP-VAE re-encode processing.
    *  Sends WAV audio body. Returns processed WAV buffer with RMS-matched gain.
    *  blend: 0.0 = fully PP-VAE, 1.0 = fully original (wet/dry mix). */
-  async submitPpVaeReencode(wavBuffer: Buffer, blend = 0.0, useOnnx?: boolean): Promise<Buffer> {
+  async submitPpVaeReencode(wavBuffer: Buffer, blend = 0.0, useOnnx?: boolean,
+                            outFmt?: WavOutFormat): Promise<Buffer> {
     const params = new URLSearchParams();
     if (blend > 0) params.set('blend', blend.toFixed(3));
     if (useOnnx === true) params.set('backend', 'onnx');
     else if (useOnnx === false) params.set('backend', 'gguf');
+    if (outFmt) params.set('out_fmt', outFmt);
     const qs = params.toString();
     const url = qs ? `${BASE}/pp-vae-reencode?${qs}` : `${BASE}/pp-vae-reencode`;
     const res = await fetch(url, {
@@ -653,6 +669,8 @@ export const aceClient = {
       guidanceMode?: string;
       guidanceScale?: number;                          // only sent when > 1
       pluginParams?: Record<string, string | number>;  // "<plugin>:<key>" -> value
+      /** Response sample format. Omitted = s16. */
+      outFmt?: WavOutFormat;
     },
   ): Promise<Buffer> {
     const params = new URLSearchParams();
@@ -687,6 +705,7 @@ export const aceClient = {
     if (opts.pluginParams && Object.keys(opts.pluginParams).length > 0) {
       params.set('plugin_params', JSON.stringify(opts.pluginParams));
     }
+    if (opts.outFmt) params.set('out_fmt', opts.outFmt);
 
     const res = await fetch(`${BASE}/sa3-refine?${params.toString()}`, {
       method: 'POST',
@@ -742,8 +761,9 @@ export const aceClient = {
   },
 
   /** GET /supersep/serve?id=...&stem=N — download one stem as a 44.1 kHz WAV. */
-  async superSepStem(jobId: string, index: number): Promise<Buffer> {
-    const res = await fetch(`${BASE}/supersep/serve?id=${jobId}&stem=${index}`, {
+  async superSepStem(jobId: string, index: number, outFmt?: WavOutFormat): Promise<Buffer> {
+    const fmtQs = outFmt ? `&out_fmt=${outFmt}` : '';
+    const res = await fetch(`${BASE}/supersep/serve?id=${jobId}&stem=${index}${fmtQs}`, {
       signal: AbortSignal.timeout(TIMEOUT_RESULT),
     });
     if (!res.ok) {
@@ -759,8 +779,10 @@ export const aceClient = {
   async superSepRecombine(
     jobId: string,
     stems: Array<{ index: number; volume?: number; muted?: boolean }>,
+    outFmt?: WavOutFormat,
   ): Promise<Buffer> {
-    const res = await fetch(`${BASE}/supersep/recombine`, {
+    const fmtQs = outFmt ? `?out_fmt=${outFmt}` : '';
+    const res = await fetch(`${BASE}/supersep/recombine${fmtQs}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: jobId, stems }),
