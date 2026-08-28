@@ -13,7 +13,7 @@ import { runMastering } from '../../routes/mastering.js';
 import { applyVstChain, vstChainActive } from '../../routes/vst.js';
 import {
   applyGainToFile, applyGain, readWav, writeWav, parseWav, encodeWav,
-  measureLevels, limitPeaks, linToDb,
+  measureLevels, limitPeaks, linToDb, FLAT_TOP_RUN,
   type OverflowMode,
 } from './audioLevel.js';
 import { runVocalNaturalizer, type NaturalizerParams } from './vocalNaturalizer.js';
@@ -733,9 +733,10 @@ export async function runPostProcessingChain(
           log('INFO', `[Gain] Nothing downstream — limited to ${GAIN_OFFSET_CEILING_DB} dBFS `
             + `(${res.limit.maxReductionDb.toFixed(1)} dB reduction)`);
         }
-        if (res.before.longestClipRun >= 3) {
-          log('WARNING', `[Gain] Input was already clipped before this stage: `
-            + `${res.before.clippedSamples} samples at full scale, longest run ${res.before.longestClipRun}`);
+        if (res.before.longestClipRun >= FLAT_TOP_RUN) {
+          log('WARNING', `[Gain] Input arrived flat-topped: ${res.before.clippedSamples} samples `
+            + `pinned at the peak, longest run ${res.before.longestClipRun}. Something upstream `
+            + `hard-clipped it.`);
         }
       } catch (gainErr: any) {
         log('WARNING', `[Gain] Offset failed (non-fatal): ${gainErr.message}`);

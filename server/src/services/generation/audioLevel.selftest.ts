@@ -14,7 +14,7 @@ import os from 'os';
 import path from 'path';
 import {
   parseWav, encodeWav, measureLevels, truePeak, limitPeaks, applyGain,
-  integratedLufs, linToDb, dbToLin, formatLevels, type FloatWav,
+  integratedLufs, linToDb, dbToLin, formatLevels, FLAT_TOP_RUN, type FloatWav,
 } from './audioLevel.js';
 import { normalizeLufs } from './lufsNormalize.js';
 
@@ -206,19 +206,45 @@ check('clip flat-tops, limiter does not, both at 0 dBFS',
 // At the ceiling this chain actually uses, nothing should sit at full scale.
 const limited1 = burst(); limitPeaks(limited1, { ceilingDb: -1 });
 const m1 = measureLevels(limited1, { skipTruePeak: true });
-check('limiter at -1 dBFS leaves no full-scale samples at all',
-  m1.clippedSamples === 0, `${m1.clippedSamples} samples at FS`);
+check('limiter at -1 dBFS leaves no flat top',
+  m1.longestClipRun < FLAT_TOP_RUN, `longest run ${m1.longestClipRun}`);
 
-// ── 7. Clip detection ───────────────────────────────────────────────────────
+// ── 7. Flat-top detection ───────────────────────────────────────────────────
+// Measured against the signal's own peak, not full scale, so it means the same
+// thing on a finished 16-bit file and on a float file carrying +3 dBFS
+// mid-chain. A clipper leaves runs; a limiter leaves isolated samples.
 
 const hardClipped = makeTone(220, 0.3, 1.5);
 applyGain(hardClipped, 0, 'clip', { ceilingDb: 0 });
 const hcM = measureLevels(hardClipped, { skipTruePeak: true });
-check('clip runs detected', hcM.longestClipRun > 10 && hcM.clippedSamples > 100,
+check('flat tops detected', hcM.longestClipRun > 10 && hcM.clippedSamples > 100,
   `${hcM.clippedSamples} samples, longest run ${hcM.longestClipRun}`);
 
 const cleanM = measureLevels(makeTone(220, 0.3, 0.5), { skipTruePeak: true });
-check('no false clip detection', cleanM.clippedSamples === 0 && cleanM.longestClipRun === 0);
+// Every signal has a sample or two sitting on its own peak; that is not a
+// flat top, which is why the reporting threshold is a run length.
+check('no false positive on a clean tone', cleanM.longestClipRun < FLAT_TOP_RUN,
+  `longest run ${cleanM.longestClipRun}`);
+
+// Regression: the first version of this counted everything at or above 0.9999,
+// so a float file legitimately carrying peaks above full scale mid-chain
+// reported tens of thousands of "clipped" samples that were merely loud. That
+// warning fired on a real render before it was caught.
+const hotClean = makeTone(220, 1.0, 1.43);   // ~+3.1 dBFS, no clipping anywhere
+const hotM = measureLevels(hotClean, { skipTruePeak: true });
+check('a hot but unclipped float signal is not called clipped',
+  hotM.longestClipRun < FLAT_TOP_RUN,
+  `peak ${hotM.samplePeakDb.toFixed(1)} dBFS, longest run ${hotM.longestClipRun}`);
+
+// And a limiter's output: samples touch the ceiling but never in runs.
+// Heavy sustained limiting on a steady tone is the worst case for this: the
+// safety clamp pins samples exactly on the ceiling. It must still stay clear
+// of a clipper's signature by a wide margin.
+const limOut = makeTone(220, 1.0, 1.6);
+limitPeaks(limOut, { ceilingDb: -1 });
+const limM = measureLevels(limOut, { skipTruePeak: true });
+check('limiter output is not called flat-topped', limM.longestClipRun < FLAT_TOP_RUN,
+  `longest run ${limM.longestClipRun} vs a clipper's ${hcM.longestClipRun}`);
 
 // A 16-bit file clipped upstream reads back a hair under 1.0 — detection has
 // to see that, or the chain cannot tell it inherited damage.
@@ -281,7 +307,7 @@ check('LUFS of silence is -Infinity',
       `applied ${res.appliedGainDb.toFixed(2)} dB`);
     check('normalizeLufs holds its ceiling', out.samplePeak <= dbToLin(-1) + 1e-6,
       `peak ${linToDb(out.samplePeak).toFixed(3)} dBFS`);
-    check('normalizeLufs no longer flat-tops', out.longestClipRun === 0,
+    check('normalizeLufs no longer flat-tops', out.longestClipRun < FLAT_TOP_RUN,
       `longest run ${out.longestClipRun}`);
   } finally {
     try { fs.unlinkSync(tmp); } catch { /* best effort */ }

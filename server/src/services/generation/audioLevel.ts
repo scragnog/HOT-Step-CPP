@@ -52,10 +52,13 @@ export interface LevelMetrics {
   rmsDb: number;
   /** Sample peak over RMS, in dB. Low values indicate loudness-war density. */
   crestDb: number;
-  /** Samples at or beyond full scale. */
+  /** Samples pinned at the signal's own peak value. */
   clippedSamples: number;
-  /** Longest run of consecutive full-scale samples — the signature of a
-   *  hard clip, as distinct from a single sample that merely touched 0 dBFS. */
+  /** Longest run of consecutive samples pinned at the peak — the signature of
+   *  a hard clip. A limiter leaves isolated samples touching its ceiling; a
+   *  clipper leaves flat tops. Measured against the signal's OWN peak, not
+   *  against full scale, so it stays meaningful in a float file that carries
+   *  peaks above 0 dBFS mid-chain. */
   longestClipRun: number;
   durationSec: number;
 }
@@ -438,31 +441,42 @@ export function measureLevels(wav: FloatWav, opts: { skipTruePeak?: boolean } = 
   let samplePeak = 0;
   let sumSq = 0;
   let count = 0;
-  let clippedSamples = 0;
-  let longestClipRun = 0;
-  let currentRun = 0;
-
-  // A sample hard clipped upstream in 16-bit reads back as 32767/32768 =
-  // 0.9999695, not 1.0, so the threshold has to sit below that or inherited
-  // clipping counts as zero — which is the single thing this metering exists
-  // to catch. 0.9999 is ~0.0009 dB below full scale; combined with the
-  // run-length requirement in formatLevels it will not fire on ordinary peaks.
-  const FS = 0.9999;
 
   for (const ch of channels) {
-    currentRun = 0;
     for (let i = 0; i < ch.length; i++) {
       const v = ch[i];
       const a = Math.abs(v);
       if (a > samplePeak) samplePeak = a;
       sumSq += v * v;
       count++;
-      if (a >= FS) {
-        clippedSamples++;
-        currentRun++;
-        if (currentRun > longestClipRun) longestClipRun = currentRun;
-      } else {
-        currentRun = 0;
+    }
+  }
+
+  // Flat-top detection, against the signal's own peak rather than full scale.
+  //
+  // The earlier version counted everything at or above 0.9999. That reads
+  // correctly on a finished 16-bit file and is nonsense mid-chain: a float
+  // file legitimately carrying +3 dBFS peaks has tens of thousands of samples
+  // above 0.9999 that are merely loud, and it reported them as clipping.
+  //
+  // Pinning at the peak is the thing that actually distinguishes a clipper
+  // from a limiter. A limiter leaves isolated samples touching its ceiling; a
+  // clipper leaves runs. This also still catches 16-bit clipping, where the
+  // peak IS 32767/32768 and the flat tops sit exactly on it.
+  let clippedSamples = 0;
+  let longestClipRun = 0;
+  if (samplePeak > 0) {
+    const eps = samplePeak * 1e-4;
+    for (const ch of channels) {
+      let currentRun = 0;
+      for (let i = 0; i < ch.length; i++) {
+        if (Math.abs(Math.abs(ch[i]) - samplePeak) <= eps) {
+          clippedSamples++;
+          currentRun++;
+          if (currentRun > longestClipRun) longestClipRun = currentRun;
+        } else {
+          currentRun = 0;
+        }
       }
     }
   }
@@ -489,15 +503,22 @@ export function measureFile(filePath: string, opts?: { skipTruePeak?: boolean })
   return measureLevels(readWav(filePath), opts);
 }
 
+/** Run length at which pinned-at-peak samples are reported as flat-topping.
+ *
+ *  Not zero, and not three. Any signal has a sample or two sitting on its own
+ *  peak, and a limiter holding a ceiling through a loud passage can leave a
+ *  short run there legitimately. A clipper leaves runs an order of magnitude
+ *  longer — a real render measured 59 against a limiter's 0. Eight sits in the
+ *  gap with room on both sides. */
+export const FLAT_TOP_RUN = 8;
+
 const fmtDb = (db: number) => (Number.isFinite(db) ? db.toFixed(1) : '-inf');
 
 /** One-line level summary for the generation log. */
 export function formatLevels(m: LevelMetrics, label: string): string {
-  const clip = m.longestClipRun >= 3
-    ? ` | CLIPPED: ${m.clippedSamples} samples, longest run ${m.longestClipRun}`
-    : m.clippedSamples > 0
-      ? ` | ${m.clippedSamples} samples at FS`
-      : '';
+  const clip = m.longestClipRun >= FLAT_TOP_RUN
+    ? ` | FLAT-TOPPED: ${m.clippedSamples} samples pinned at peak, longest run ${m.longestClipRun}`
+    : '';
   return `${label}: peak ${fmtDb(m.samplePeakDb)} dBFS, true peak ${fmtDb(m.truePeakDb)} dBTP, `
     + `${fmtDb(m.lufs)} LUFS, crest ${m.crestDb.toFixed(1)} dB${clip}`;
 }
@@ -569,8 +590,12 @@ export function limitPeaks(wav: FloatWav, opts: LimitOptions = {}): LimitResult 
   const attackCoeff = Math.exp(-1 / attackSamples);
   const releaseCoeff = Math.exp(-1 / releaseSamples);
 
-  let g = 1;
-  let minGain = 1;
+  // Start at the envelope's first value rather than unity. Ramping down from
+  // 1.0 makes the safety clamp engage on the opening crests, which pins a run
+  // of samples exactly at the ceiling — a flat top of the limiter's own
+  // making, at the one moment it is least necessary.
+  let g = env[0];
+  let minGain = g;
   for (let i = 0; i < frames; i++) {
     const target = env[i];
     const coeff = target < g ? attackCoeff : releaseCoeff;
