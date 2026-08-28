@@ -147,5 +147,7 @@ if not exist "CMakeCache.txt" (
     )
 )
 cmake --build . --config Release -j %NUMBER_OF_PROCESSORS%
+set BUILD_RC=%ERRORLEVEL%
 
 cd ..
+exit /b %BUILD_RC%

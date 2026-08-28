@@ -1097,7 +1097,7 @@ export const PostProcessingDropdown: React.FC = () => {
         <Accordion
           icon={<AudioWaveform size={14} />}
           label={t('pp.lufsNormalize')}
-          info="Measures integrated loudness (ITU-R BS.1770-4) and adjusts gain to hit the target, boosting quiet tracks and pulling down loud ones. Includes a true-peak limiter at -1 dBTP to stop clipping."
+          info="Measures integrated loudness (ITU-R BS.1770-4) and adjusts gain to hit the target, boosting quiet tracks and pulling down loud ones. A look-ahead limiter holds the peak at -1 dBFS, and the resulting true peak is measured and reported in the generation log."
           accentColor="amber"
           persistKey="hs-ppAccordion-lufs"
           toggle={{ checked: gp.lufsEnabled, onChange: gp.setLufsEnabled }}
@@ -1144,7 +1144,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
                   <AudioWaveform size={14} className="text-amber-400 flex-shrink-0" />
                   <span className="text-[10px] text-amber-300">
-                    Target: {gp.lufsTarget} LUFS &middot; True-peak ceiling: -1.0 dBTP
+                    Target: {gp.lufsTarget} LUFS &middot; Peak ceiling: -1.0 dBFS
                   </span>
                 </div>
               </div>

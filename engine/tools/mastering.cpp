@@ -1,10 +1,11 @@
 // mastering.cpp — Reference-based audio mastering CLI tool
 //
 // Usage: mastering --target input.wav --reference ref.wav --output mastered.wav
-//                  [--no-limiter] [--pcm24]
+//                  [--no-limiter] [--ceiling <dBFS>] [--pcm24]
 //
 // Implements the matchering algorithm: spectral + RMS matching against a reference track.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -321,7 +322,7 @@ static bool wav_write(const char * path, const float * L, const float * R, int n
 static void print_usage(const char * prog) {
     fprintf(stderr,
         "Usage: %s --target input.wav --reference ref.wav --output mastered.wav\n"
-        "           [--pcm24] [--pcm32f]\n"
+        "           [--no-limiter] [--ceiling <dBFS>] [--pcm24] [--pcm32f]\n"
         "\n"
         "Reference-based audio mastering using the matchering algorithm.\n"
         "Matches the RMS level, frequency spectrum, and dynamic range\n"
@@ -331,9 +332,82 @@ static void print_usage(const char * prog) {
         "  --target    PATH   Input audio file to master (WAV)\n"
         "  --reference PATH   Reference track to match against (WAV)\n"
         "  --output    PATH   Output mastered file (WAV)\n"
+        "  --no-limiter       Skip peak limiting. wav_write still clamps, so\n"
+        "                     any overs become hard clipping.\n"
+        "  --ceiling   DBFS   Peak ceiling for the limiter (default: -0.3)\n"
         "  --pcm24            Write 24-bit PCM output (default: 16-bit)\n"
         "  --pcm32f           Write 32-bit float output\n",
         prog);
+}
+
+// ─── Look-ahead peak limiter ────────────────────────────────────────
+//
+// The usage banner has always advertised --no-limiter, but the flag was never
+// parsed and there was no limiter to disable: the only thing standing between
+// a hot master and the file was the std::clamp in wav_write, i.e. hard
+// clipping. Reference-based mastering matches a commercial reference's
+// loudness, so overshoot is the normal case, not the exception.
+//
+// Same construction as audioLevel.ts in the Node chain, deliberately: a
+// sliding minimum of the required gain over the look-ahead window, smoothed
+// with separate attack and release, then clamped per sample against the
+// requirement so the ceiling is a guarantee rather than an aspiration. The
+// envelope already accounts for the next lookahead_ms of signal, so the gain
+// is down before the peak arrives and the output needs no delay.
+//
+// Gain is derived from the louder channel at each sample, so stereo image is
+// preserved. See docs/plans/2026-08-28-post-processing-gain-staging.md.
+static void limit_peaks(std::vector<float> & L, std::vector<float> & R,
+                        int sample_rate, float ceiling_db,
+                        float lookahead_ms = 5.0f, float release_ms = 50.0f) {
+    const int n = (int) L.size();
+    if (n <= 0) return;
+
+    const float ceiling = powf(10.0f, ceiling_db / 20.0f);
+
+    std::vector<float> demand((size_t) n, 1.0f);
+    float peak_before = 0.0f;
+    for (int i = 0; i < n; i++) {
+        const float a = std::max(fabsf(L[i]), fabsf(R[i]));
+        if (a > peak_before) peak_before = a;
+        demand[(size_t) i] = a > ceiling ? ceiling / a : 1.0f;
+    }
+
+    if (peak_before <= ceiling) {
+        fprintf(stderr, "[Mastering] Limiter: peak %.2f dBFS is under the %.1f dBFS ceiling, not engaged\n",
+                20.0f * log10f(std::max(peak_before, 1e-10f)), ceiling_db);
+        return;
+    }
+
+    // Sliding minimum of demand over [i, i + look], via a monotonic deque.
+    const int look = std::max(1, (int) (sample_rate * lookahead_ms / 1000.0f));
+    std::vector<float> env((size_t) n, 1.0f);
+    std::vector<int>   dq((size_t) n, 0);
+    int head = 0, tail = 0;
+    for (int i = n - 1; i >= 0; i--) {
+        while (tail > head && demand[(size_t) dq[tail - 1]] >= demand[(size_t) i]) tail--;
+        dq[tail++] = i;
+        while (dq[head] > i + look) head++;
+        env[(size_t) i] = demand[(size_t) dq[head]];
+    }
+
+    const float attack_coeff  = expf(-1.0f / std::max(1.0f, look / 3.0f));
+    const float release_coeff = expf(-1.0f / std::max(1.0f, sample_rate * release_ms / 1000.0f));
+
+    float g = 1.0f, min_gain = 1.0f;
+    for (int i = 0; i < n; i++) {
+        const float target = env[(size_t) i];
+        const float coeff  = target < g ? attack_coeff : release_coeff;
+        g = target + (g - target) * coeff;
+        if (g > demand[(size_t) i]) g = demand[(size_t) i];   // ceiling guarantee
+        if (g < min_gain) min_gain = g;
+        L[i] *= g;
+        R[i] *= g;
+    }
+
+    fprintf(stderr, "[Mastering] Limiter: peak %.2f dBFS -> %.1f dBFS ceiling, %.2f dB max reduction\n",
+            20.0f * log10f(std::max(peak_before, 1e-10f)), ceiling_db,
+            -20.0f * log10f(std::max(min_gain, 1e-10f)));
 }
 
 int main(int argc, char ** argv) {
@@ -341,6 +415,8 @@ int main(int argc, char ** argv) {
     const char * ref_path    = nullptr;
     const char * output_path = nullptr;
     int          output_bits = 16;
+    bool         use_limiter = true;
+    float        ceiling_db  = -0.3f;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
@@ -349,6 +425,10 @@ int main(int argc, char ** argv) {
             ref_path = argv[++i];
         } else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
             output_path = argv[++i];
+        } else if (strcmp(argv[i], "--no-limiter") == 0) {
+            use_limiter = false;
+        } else if (strcmp(argv[i], "--ceiling") == 0 && i + 1 < argc) {
+            ceiling_db = (float) atof(argv[++i]);
         } else if (strcmp(argv[i], "--pcm24") == 0) {
             output_bits = 24;
         } else if (strcmp(argv[i], "--pcm32f") == 0) {
@@ -385,6 +465,14 @@ int main(int argc, char ** argv) {
     if (!result.success) {
         fprintf(stderr, "[Mastering] FAILED: %s\n", result.error ? result.error : "unknown");
         return 1;
+    }
+
+    // Limit before writing. Without this the only thing between a hot master
+    // and the file is the clamp in wav_write, which is hard clipping.
+    if (use_limiter) {
+        limit_peaks(result.L, result.R, target.sample_rate, ceiling_db);
+    } else {
+        fprintf(stderr, "[Mastering] Limiter disabled (--no-limiter); wav_write will clamp any overs\n");
     }
 
     // Write output
