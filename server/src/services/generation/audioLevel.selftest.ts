@@ -243,10 +243,14 @@ check('LUFS tracks a 10 dB level drop', Math.abs(lufsQuiet - lufs - -10) < 0.2,
 check('LUFS of silence is -Infinity',
   integratedLufs(makeTone(1000, 1.0, 0).channels, SR) === -Infinity);
 
-// The BS.1770 code here was lifted out of lufsNormalize.ts so the two can
-// share one implementation. Prove they agree before that file starts calling
-// into this one, on program material rather than a steady tone.
+// The BS.1770 code here was lifted out of lufsNormalize.ts, which now calls
+// into it, so the two agreeing proves nothing any more. What is worth pinning
+// is the value itself: -11.934 LUFS is what lufsNormalize.ts's own
+// implementation returned for this exact signal before the extraction
+// (verified at the time, commit 9aa28586). Any drift here is a regression in
+// the loudness measurement, not a new opinion about it.
 {
+  const PINNED_LUFS = -11.934;
   const music = (() => {
     const n = SR * 4;
     const l = new Float32Array(n), r = new Float32Array(n);
@@ -265,11 +269,20 @@ check('LUFS of silence is -Infinity',
   fs.writeFileSync(tmp, encodeWav(music, 's16'));
   try {
     const mine = integratedLufs(parseWav(fs.readFileSync(tmp)).channels, SR);
-    // normalizeLufs rewrites the file, so measure first, then compare its
-    // reported measurement against ours.
-    const theirs = normalizeLufs(tmp, -14).measuredLufs;
-    check('LUFS agrees with lufsNormalize.ts', Math.abs(mine - theirs) < 0.05,
-      `audioLevel ${mine.toFixed(3)} vs lufsNormalize ${theirs.toFixed(3)} LUFS`);
+    check('LUFS matches the pre-extraction implementation',
+      Math.abs(mine - PINNED_LUFS) < 0.01,
+      `${mine.toFixed(3)} vs pinned ${PINNED_LUFS} LUFS`);
+
+    // End-to-end: normalizeLufs should hit its target and hold the ceiling.
+    const res = normalizeLufs(tmp, -14, -1);
+    const out = measureLevels(parseWav(fs.readFileSync(tmp)), { skipTruePeak: true });
+    check('normalizeLufs reaches its target',
+      Math.abs(integratedLufs(parseWav(fs.readFileSync(tmp)).channels, SR) - -14) < 0.5,
+      `applied ${res.appliedGainDb.toFixed(2)} dB`);
+    check('normalizeLufs holds its ceiling', out.samplePeak <= dbToLin(-1) + 1e-6,
+      `peak ${linToDb(out.samplePeak).toFixed(3)} dBFS`);
+    check('normalizeLufs no longer flat-tops', out.longestClipRun === 0,
+      `longest run ${out.longestClipRun}`);
   } finally {
     try { fs.unlinkSync(tmp); } catch { /* best effort */ }
   }

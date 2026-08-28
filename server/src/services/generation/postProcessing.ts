@@ -677,15 +677,10 @@ export async function runPostProcessingChain(
       const lufsStart = performance.now();
       setStage(`LUFS normalization${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
       try {
-        const { normalizeLufs } = await import('./lufsNormalize.js');
+        const { normalizeLufs, formatLufsLog } = await import('./lufsNormalize.js');
         const result = normalizeLufs(processedPath, params.lufsTarget);
         anyStageRan = true;
-        log('INFO',
-          `[LUFS] ${processedFilename}: ${result.measuredLufs.toFixed(1)} → ${result.targetLufs.toFixed(1)} LUFS ` +
-          `(${result.appliedGainDb > 0 ? '+' : ''}${result.appliedGainDb.toFixed(1)} dB` +
-          `${result.limiterActive ? ', limiter active' : ''})` +
-          ` | Peak: ${(20 * Math.log10(Math.max(result.peakBefore, 1e-10))).toFixed(1)} → ${(20 * Math.log10(Math.max(result.peakAfter, 1e-10))).toFixed(1)} dBFS`
-        );
+        log('INFO', formatLufsLog(result, processedFilename));
       } catch (lufsErr: any) {
         log('WARNING', `[LUFS] Normalization failed (non-fatal): ${lufsErr.message}`);
       }
