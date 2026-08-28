@@ -290,7 +290,16 @@ static inline void sa3_from_ace_view(const float * tm, float * cm, int Oc, int T
 // sp: optional Lua solver/scheduler/guidance selection (nullptr = legacy path).
 //     NOTE: naming a solver replaces the pingpong renoise with that solver's
 //     own update — pingpong and a Lua solver are alternatives, not a stack.
-// out: planar stereo [2][T44] at 44.1kHz, clamped to [-1,1].
+// out: planar stereo [2][T44] at 44.1kHz, NOT clamped.
+//
+// The decode used to saturate to [-1,1] here. A separated instrumental stem at
+// any ordinary crest factor peaks above 1.0, so that flat-topped the refined
+// bed at the earliest possible point, before the caller's envelope/RMS/blend
+// maths and before the mix — where a vocal summed on top hides the damage from
+// anything measuring the finished track. The caller decides: hot-step-server's
+// sa3_sat saturates for integer responses, audio_encode_wav clamps s16/s24
+// regardless, and an f32 response carries the peaks through to whichever stage
+// owns the ceiling. See docs/plans/2026-08-28-post-processing-gain-staging.md.
 
 static inline bool sa3_refine_run_backend(Sa3Backend * be,
                                           const float * audio, int T44,
@@ -569,7 +578,8 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         }
     }
 
-    // Decode, zero padded region, trim to input length, clamp
+    // Decode, zero the padded region, trim to input length. No saturation —
+    // see the note on `out` above.
     std::vector<float> decoded;
     if (!sa3_decode_tiled(be, x.data(), L, decoded)) return false;
     int S_dec = L * SA3_DS;
@@ -580,8 +590,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         float * dst = out.data() + (size_t)chn * T44;
         int n = T44 < valid_samples ? T44 : valid_samples;
         for (int k = 0; k < n; k++) {
-            float vsm = src[k];
-            dst[k] = vsm < -1.0f ? -1.0f : (vsm > 1.0f ? 1.0f : vsm);
+            dst[k] = src[k];
         }
     }
     return true;

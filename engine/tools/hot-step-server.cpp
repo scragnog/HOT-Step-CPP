@@ -87,6 +87,7 @@ static volatile int * _hotstep_guard_ = &hotstep_sampler_linked_;
 
 #include <atomic>
 #include <condition_variable>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -4171,6 +4172,25 @@ int main(int argc, char ** argv) {
         // not crest factor. ~93 ms windows on a ~46 ms grid, per-sample
         // linear gain interpolation, combined-channel gain (stereo balance
         // preserved). Replaces the global RMS match when active.
+        // Response format decides whether the level maths below may saturate.
+        //
+        // These stages all used to hard-clamp to +/-1.0 unconditionally, which
+        // flat-tops the refined bed before it is ever mixed. That is invisible
+        // in the finished track once a vocal is summed on top, and it is pure
+        // damage: the instrumental stem of a normal render peaks above 1.0 at
+        // any ordinary crest factor. When the response is f32 there is no
+        // reason to destroy it — the Node chain carries the peaks and the last
+        // stage that can limit owns the ceiling. Integer formats still clamp,
+        // because audio_encode_wav would clamp them anyway.
+        const WavFormat sa3_out_fmt  = wav_fmt_param(req);
+        const bool      sa3_saturate = (sa3_out_fmt != WAV_F32);
+        auto sa3_sat = [sa3_saturate](float x) -> float {
+            return sa3_saturate ? std::fmax(-1.0f, std::fmin(1.0f, x)) : x;
+        };
+        if (!sa3_saturate) {
+            fprintf(stderr, "[Server] SA3 refine: f32 response, peaks above full scale preserved\n");
+        }
+
         bool env_match = req.has_param("env_match") && req.get_param_value("env_match") == "1";
         if (env_match) {
             const int64_t hop = 2048, win = 4096;   // @44.1k: ~46 ms grid, ~93 ms window
@@ -4207,7 +4227,7 @@ int main(int argc, char ** argv) {
                 float   g  = g0 + (g1 - g0) * fr;
                 for (int ch = 0; ch < 2; ch++) {
                     float v = out44[(size_t) ch * T44 + i] * g;
-                    out44[(size_t) ch * T44 + i] = v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);
+                    out44[(size_t) ch * T44 + i] = sa3_sat(v);
                 }
             }
             fprintf(stderr, "[Server] SA3 refine envelope match: %lld blocks, gain %.3f..%.3f\n",
@@ -4224,7 +4244,7 @@ int main(int argc, char ** argv) {
         if (mix >= 0.0f && mix < 1.0f) {
             for (int64_t i = 0; i < (int64_t) 2 * T44; i++) {
                 float v = p44[i] * (1.0f - mix) + out44[(size_t) i] * mix;
-                out44[(size_t) i] = v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);
+                out44[(size_t) i] = sa3_sat(v);
             }
             fprintf(stderr, "[Server] SA3 refine source mix: %.2f\n", mix);
         } else if (mix < 0.0f && req.has_param("band_blend") &&
@@ -4284,7 +4304,7 @@ int main(int argc, char ** argv) {
                 }
                 for (int64_t i = 0; i < T44; i++) {
                     float v = acc[(size_t) i] / (wsum[(size_t) i] + 1e-9f);
-                    r[i] = v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);
+                    r[i] = sa3_sat(v);
                 }
             }
             fprintf(stderr, "[Server] SA3 refine band splice: source < %.0f Hz, refined > %.0f Hz\n",
@@ -4302,7 +4322,7 @@ int main(int argc, char ** argv) {
                 float gain = in_rms / out_rms;
                 for (size_t i = 0; i < out44.size(); i++) {
                     float v = out44[i] * gain;
-                    out44[i] = v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);
+                    out44[i] = sa3_sat(v);
                 }
                 fprintf(stderr, "[Server] SA3 refine gain=%.3f (in_rms=%.4f, out_rms=%.4f)\n",
                         gain, in_rms, out_rms);
@@ -4322,7 +4342,7 @@ int main(int argc, char ** argv) {
             json_error(res, 500, "Resample to output rate failed");
             return;
         }
-        std::string wav = audio_encode_wav(out_native, T_out, sr_out, wav_fmt_param(req));
+        std::string wav = audio_encode_wav(out_native, T_out, sr_out, sa3_out_fmt);
         free(out_native);
         res.set_content(wav, "audio/wav");
     });
