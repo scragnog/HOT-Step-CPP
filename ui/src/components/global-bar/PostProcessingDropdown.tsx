@@ -726,6 +726,24 @@ export const PostProcessingDropdown: React.FC = () => {
                 </span>
               </label>
 
+              {/* Vocal level. The server already restores the source mix's own
+                  vocal-to-bed ratio after the refine; this is taste on top. */}
+              <div>
+                <EditableSlider
+                  label="Vocal level"
+                  value={gp.stableStepVocalTrimDb ?? 0}
+                  min={-6} max={6} step={0.5}
+                  onChange={gp.setStableStepVocalTrimDb}
+                  formatDisplay={v => v === 0 ? '0 dB (source balance)' : `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`}
+                  tooltip="Trim the vocal against the refined instrumental. 0 keeps the balance your generation had before separation."
+                />
+                <span className="block text-[10px] text-zinc-500 leading-relaxed mt-1">
+                  StableStep splits the track, refines only the instrumental, and mixes
+                  the vocal back in at the ratio the source had. Nudge here if the
+                  refined bed still crowds the vocal.
+                </span>
+              </div>
+
               {/* Source blend: crossover splice or full-band mix with the AS1.5 source */}
               <div>
                 <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1">Source blend</label>

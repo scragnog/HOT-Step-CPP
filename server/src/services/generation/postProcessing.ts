@@ -12,7 +12,8 @@ import { aceClient } from '../../services/aceClient.js';
 import { runMastering } from '../../routes/mastering.js';
 import { applyVstChain, vstChainActive } from '../../routes/vst.js';
 import {
-  applyGainToFile, readWav, writeWav, parseWav, encodeWav, measureLevels, limitPeaks,
+  applyGainToFile, applyGain, readWav, writeWav, parseWav, encodeWav,
+  measureLevels, limitPeaks, linToDb,
   type OverflowMode,
 } from './audioLevel.js';
 import { runVocalNaturalizer, type NaturalizerParams } from './vocalNaturalizer.js';
@@ -73,6 +74,11 @@ const SA3_NATIVE_SR = 44100;
 // and this value is unused.
 const GAIN_OFFSET_CEILING_DB = -0.3;
 
+// Largest bed-level correction the StableStep recombine will apply to restore
+// the source mix balance. A refine that moves the bed further than this has
+// something wrong with it, and silently applying a huge gain would hide that.
+const STABLESTEP_MAX_BALANCE_DB = 6;
+
 // Ceiling for the final peak guard — the backstop that runs when a stage that
 // was supposed to own the ceiling failed. Only engages on a broken chain.
 const FINAL_CEILING_DB = -0.3;
@@ -111,6 +117,11 @@ export interface PostProcessParams {
    *  stays available — but opt-in. Off = the original AS1.5 vocal stem is
    *  recombined with the SA3-refined instrumental untouched. */
   stableStepVocalPpVae?: boolean;
+  /** Taste trim on the vocal stem when StableStep recombines it with the
+   *  refined bed, in dB. Applied on top of the automatic balance restore,
+   *  which already puts the bed back at the level the source mix had it.
+   *  Default 0 — the restored ratio is the source's own. */
+  stableStepVocalTrimDb?: number;
   /** Preserve source dynamics: engine-side windowed envelope match of the
    *  refined audio to the pre-refine source (counters mastered-density
    *  "loudness war" character from adapters trained on commercial masters). */
@@ -531,7 +542,68 @@ export async function runPostProcessingChain(
             }
 
             setStage(`StableStep: recombining${suffix}...`);
-            const mixed = mixWavBuffers(refinedInst, cleanVocals);
+
+            // ── Balance restore ──
+            //
+            // The refine is meant to change the instrumental's timbre, not its
+            // level. The engine's env_match/rms_match should already hold the
+            // level, but not on every path: the envelope match caps its gain
+            // at 8x, and the mix/band-blend modes splice source content back
+            // in after it has run. When the bed comes back louder than it went
+            // in, summing at unity buries the vocal by exactly that much.
+            //
+            // So measure both stems as the separation produced them, measure
+            // the bed after the refine, and put the bed back where the source
+            // mix had it. Where the engine already preserved the level this is
+            // a no-op and logs as one. RMS is sample-rate independent, so the
+            // 44.1-vs-48 kHz difference on the resampled path does not matter.
+            const srcInst  = measureLevels(parseWav(vs.instBuf),  { skipTruePeak: true });
+            const srcVocal = measureLevels(parseWav(vs.vocalBuf), { skipTruePeak: true });
+            const refWav   = parseWav(refinedInst);
+            const refInst  = measureLevels(refWav, { skipTruePeak: true });
+
+            let balanceDb = 0;
+            if (srcInst.rms > 1e-8 && refInst.rms > 1e-8) {
+              balanceDb = linToDb(srcInst.rms) - linToDb(refInst.rms);
+            }
+            if (Math.abs(balanceDb) > STABLESTEP_MAX_BALANCE_DB) {
+              log('WARNING', `[StableStep] Bed level moved ${balanceDb.toFixed(1)} dB through the `
+                + `refine — clamping the correction to ${STABLESTEP_MAX_BALANCE_DB} dB. `
+                + `Something upstream is off; the mix balance will not be exact.`);
+              balanceDb = Math.sign(balanceDb) * STABLESTEP_MAX_BALANCE_DB;
+            }
+
+            // Correct the BED, not the vocal: this restores the ratio while
+            // leaving the vocal's absolute level exactly as the separation
+            // produced it.
+            let instForMix = refinedInst;
+            if (Math.abs(balanceDb) >= 0.05) {
+              applyGain(refWav, balanceDb, 'passthrough');
+              instForMix = encodeWav(refWav, 'f32');
+            }
+
+            // Optional taste trim on the vocal, on top of the restored ratio.
+            let vocalsForMix = cleanVocals;
+            const vocalTrimDb = params.stableStepVocalTrimDb ?? 0;
+            if (vocalTrimDb !== 0) {
+              const vw = parseWav(cleanVocals);
+              applyGain(vw, vocalTrimDb, 'passthrough');
+              vocalsForMix = encodeWav(vw, 'f32');
+            }
+
+            const srcRatioDb = linToDb(srcVocal.rms) - linToDb(srcInst.rms);
+            log('INFO', `[StableStep] Stem balance | vocal ${srcVocal.rmsDb.toFixed(1)} dB RMS, `
+              + `bed ${srcInst.rmsDb.toFixed(1)} → ${refInst.rmsDb.toFixed(1)} dB RMS through the refine `
+              + `| vocal-to-bed ${srcRatioDb.toFixed(1)} dB`);
+            log('INFO', `[StableStep] Balance restore ${balanceDb >= 0 ? '+' : ''}${balanceDb.toFixed(2)} dB on the bed`
+              + `${Math.abs(balanceDb) < 0.05 ? ' (engine already held it — no change)' : ''}`
+              + `${vocalTrimDb !== 0 ? `, vocal trim ${vocalTrimDb > 0 ? '+' : ''}${vocalTrimDb} dB` : ''}`);
+
+            const mixed = mixWavBuffers(instForMix, vocalsForMix);
+            const mixM = measureLevels(parseWav(mixed), { skipTruePeak: true });
+            log('INFO', `[StableStep] Recombined | peak ${mixM.samplePeakDb.toFixed(1)} dBFS, `
+              + `${mixM.rmsDb.toFixed(1)} dB RMS`
+              + `${mixM.samplePeak > 1 ? ' (over full scale — passed on for a later stage to limit)' : ''}`);
             fs.writeFileSync(processedPath, mixed);
           }
 
@@ -790,10 +862,7 @@ export async function runPostProcessingChain(
  *  supersep_recombine applies, which would otherwise change the vocal level
  *  relative to the instrumental. Sample rates may differ.
  *
- *  Note the cap can only ever REDUCE the gain, so a vocal that arrives quiet
- *  stays quiet. That asymmetry is a known contributor to the vocal sitting low
- *  in StableStep mixes and is addressed separately — see Phase 4 of
- *  docs/plans/2026-08-28-post-processing-gain-staging.md. */
+ *  Sample rates may differ; RMS does not care. */
 function matchRms(wav: Buffer, reference: Buffer): Buffer {
   const w = parseWav(wav);
   const r = parseWav(reference);
@@ -817,10 +886,12 @@ function matchRms(wav: Buffer, reference: Buffer): Buffer {
   const rRms = rmsOf(r.channels);
   if (wRms < 1e-8 || rRms < 1e-8) return wav;
 
-  let gain = rRms / wRms;
-  const wPeak = peakOf(w.channels);
-  const rPeak = peakOf(r.channels);
-  if (wPeak * gain > rPeak + 0.01) gain = rPeak / (wPeak + 1e-8);
+  // The gain is applied as measured. This used to be capped so the result
+  // could not exceed the reference peak, which could only ever REDUCE it —
+  // a vocal that came back quiet stayed quiet, and there was no path back up.
+  // That cap existed to avoid clipping a 16-bit file; the chain is float now
+  // and the ceiling belongs to the last stage, so it is gone.
+  const gain = rRms / wRms;
 
   for (const ch of w.channels) {
     for (let i = 0; i < ch.length; i++) ch[i] *= gain;
@@ -828,14 +899,14 @@ function matchRms(wav: Buffer, reference: Buffer): Buffer {
   return encodeWav(w, 'f32');
 }
 
-/** Sum two WAV buffers sample-wise (missing tail treated as silence) with a
- *  peak guard: if |sum| exceeds 0.999 the whole mix is scaled down to fit.
- *  Both inputs must share sample rate and channel count. Returns f32.
+/** Sum two WAV buffers sample-wise (missing tail treated as silence). Both
+ *  inputs must share sample rate and channel count. Returns f32.
  *
- *  The peak guard attenuates the whole mix rather than the stem that overshot,
- *  which costs the vocal absolute level whenever the refined bed comes back
- *  hot. Phase 4 replaces it; it is left in place here so the float conversion
- *  can be judged on its own. */
+ *  There is deliberately no peak guard. The old one scaled the WHOLE mix down
+ *  whenever the sum passed 0.999, so a hot bed cost the vocal absolute level
+ *  rather than being tamed itself. In float the sum can stay hot and the last
+ *  stage that can limit owns the ceiling — the Gain Offset stage, the VST
+ *  chain, or the final peak guard. */
 function mixWavBuffers(a: Buffer, b: Buffer): Buffer {
   const wa = parseWav(a);
   const wb = parseWav(b);
@@ -848,24 +919,13 @@ function mixWavBuffers(a: Buffer, b: Buffer): Buffer {
 
   const frames = Math.max(wa.channels[0]?.length ?? 0, wb.channels[0]?.length ?? 0);
   const mixed: Float32Array[] = [];
-  let peak = 0;
   for (let c = 0; c < wa.numChannels; c++) {
     const out = new Float32Array(frames);
     const ca = wa.channels[c], cb = wb.channels[c];
     for (let i = 0; i < frames; i++) {
-      const v = (i < ca.length ? ca[i] : 0) + (i < cb.length ? cb[i] : 0);
-      out[i] = v;
-      const av = Math.abs(v);
-      if (av > peak) peak = av;
+      out[i] = (i < ca.length ? ca[i] : 0) + (i < cb.length ? cb[i] : 0);
     }
     mixed.push(out);
-  }
-
-  if (peak > 0.999) {
-    const scale = 0.999 / peak;
-    for (const ch of mixed) {
-      for (let i = 0; i < ch.length; i++) ch[i] *= scale;
-    }
   }
 
   return encodeWav(

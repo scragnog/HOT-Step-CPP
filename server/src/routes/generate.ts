@@ -1319,6 +1319,10 @@ async function runGeneration(job: GenerationJob): Promise<void> {
       // PP-VAE re-encode of the vocal stem — default OFF (lossy round trip;
       // omitted = the original AS1.5 vocals are recombined untouched)
       stableStepVocalPpVae: job.params.stableStepVocalPpVae === true,
+      // Taste trim on the recombined vocal, dB. 0 = the source mix's own
+      // vocal-to-bed ratio, which the balance restore re-establishes.
+      stableStepVocalTrimDb: typeof job.params.stableStepVocalTrimDb === 'number'
+        ? job.params.stableStepVocalTrimDb : 0,
       // Source blending: 'off' | 'crossover' | 'mix'
       stableStepBlendMode: (job.params.stableStepBlendMode === 'crossover' || job.params.stableStepBlendMode === 'mix')
         ? job.params.stableStepBlendMode as 'crossover' | 'mix' : 'off' as const,

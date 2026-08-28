@@ -84,6 +84,7 @@ export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
       'natTransitionSmooth', 'ppVaeReencode', 'ppVaeBlend', 'ppVaeUseOnnx',
       'stableStepOn', 'stableStepStrength', 'stableStepBackend',
       'stableStepAdapters', 'stableStepPreserveDynamics', 'stableStepVocalPpVae',
+      'stableStepVocalTrimDb',
       'stableStepBlendMode', 'stableStepCrossoverHz', 'stableStepCrossoverWidthHz', 'stableStepMix',
       'stableStepSeed', 'stableStepSeedFollowsDit',
       'stableStepSteps', 'stableStepSolver', 'stableStepScheduler',

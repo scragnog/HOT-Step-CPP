@@ -292,6 +292,9 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // PP-VAE re-encode of the vocal stem — OFF by default: the round trip is
   // lossy above ~4 kHz (see stableStepVocalPpVae in postProcessing.ts)
   stableStepVocalPpVae: readKey("hs-stableStepVocalPpVae", false),
+  // Taste trim on the recombined vocal. 0 keeps the source mix's own
+  // vocal-to-bed ratio, which the server re-establishes after the refine.
+  stableStepVocalTrimDb: readKey("hs-stableStepVocalTrimDb", 0),
   // Source blending: 'off' | 'crossover' (source lows + refined highs) | 'mix'
   stableStepBlendMode: readKey("hs-stableStepBlendMode", 'off'),
   stableStepCrossoverHz: readKey("hs-stableStepCrossoverHz", 250),
@@ -490,6 +493,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setStableStepAdapters: (v: any) => { set({ stableStepAdapters: v }); writeKey("hs-stableStepAdapters", v); },
   setStableStepPreserveDynamics: (v: any) => { set({ stableStepPreserveDynamics: v }); writeKey("hs-stableStepPreserveDynamics", v); },
   setStableStepVocalPpVae: (v: any) => { set({ stableStepVocalPpVae: v }); writeKey("hs-stableStepVocalPpVae", v); },
+  setStableStepVocalTrimDb: (v: any) => { set({ stableStepVocalTrimDb: v }); writeKey("hs-stableStepVocalTrimDb", v); },
   setStableStepBlendMode: (v: any) => { set({ stableStepBlendMode: v }); writeKey("hs-stableStepBlendMode", v); },
   setStableStepCrossoverHz: (v: any) => { set({ stableStepCrossoverHz: v }); writeKey("hs-stableStepCrossoverHz", v); },
   setStableStepCrossoverWidthHz: (v: any) => { set({ stableStepCrossoverWidthHz: v }); writeKey("hs-stableStepCrossoverWidthHz", v); },
@@ -753,6 +757,8 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       // Opt-in only — omitted means "leave the AS1.5 vocals alone"
       stableStepVocalPpVae: (s.postProcessingEnabled && s.stableStepOn && s.stableStepVocalPpVae)
         || undefined,
+      stableStepVocalTrimDb: (s.postProcessingEnabled && s.stableStepOn && s.stableStepVocalTrimDb !== 0)
+        ? s.stableStepVocalTrimDb : undefined,
       stableStepBlendMode: (s.postProcessingEnabled && s.stableStepOn && s.stableStepBlendMode !== 'off')
         ? s.stableStepBlendMode : undefined,
       stableStepCrossoverHz: (s.postProcessingEnabled && s.stableStepOn && s.stableStepBlendMode === 'crossover')

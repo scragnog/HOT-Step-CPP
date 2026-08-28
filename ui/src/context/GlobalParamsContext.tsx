@@ -162,6 +162,7 @@ export interface GlobalParams {
   setStableStepAdapters: (v: Array<{ name: string; scale: number; enabled: boolean }>) => void;
   stableStepPreserveDynamics: boolean; setStableStepPreserveDynamics: (v: boolean) => void;
   stableStepVocalPpVae: boolean; setStableStepVocalPpVae: (v: boolean) => void;
+  stableStepVocalTrimDb: number; setStableStepVocalTrimDb: (v: number) => void;
   stableStepBlendMode: 'off' | 'crossover' | 'mix'; setStableStepBlendMode: (v: 'off' | 'crossover' | 'mix') => void;
   stableStepCrossoverHz: number; setStableStepCrossoverHz: (v: number) => void;
   stableStepCrossoverWidthHz: number; setStableStepCrossoverWidthHz: (v: number) => void;
