@@ -3285,6 +3285,13 @@ router.post('/datasets/:id/audition', async (req: Request, res: Response) => {
   try {
     const body = (req.body || {}) as AuditionOptions;
 
+    // A fresh server boot has an EMPTY model snapshot, and the audition's
+    // adapter-base derivation reads it (pickLmFor) — twice on 2026-08-29 a
+    // valid job died instantly with "needs a 4B LM base, but none is
+    // installed" because nothing had refreshed the cache yet. Same pre-flight
+    // the preprocess/train routes already do.
+    if (!getModelSnapshot().cachedAt && !isEngineSuspended()) await refreshModelSnapshot();
+
     // ── 1. dataset + queue ───────────────────────────────────────────────
     const ds = repo.getDataset(req.params.id as string);
     if (!ds) {
