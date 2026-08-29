@@ -44,11 +44,47 @@ export function planLoopStats(codesCsv: string): PlanLoopStats {
   return { count: n, loopFrac, loopPeriod, maxRun };
 }
 
+/** Worst 40 s window's repeat fraction over periods up to 30 s.
+ *
+ *  Added 2026-08-29 (president RCA): the global period-≤5 s scan above passed
+ *  a plan whose 40–80 s window repeated a 13-SECOND phrase at 84% — bar-level
+ *  musical loops live at longer periods than beat-level stuck loops, and a
+ *  local loop dissolves into a healthy-looking global average. Measured
+ *  separation on the day's corpus: every healthy plan (chorus-heavy styled
+ *  adapters included) stayed ≤ 30% worst-window; the broken president plan
+ *  sat at 84%. Overlapping stride so a loop straddling a boundary can't hide. */
+export interface PlanWindowStats {
+  worstFrac: number;
+  worstPeriod: number;  // codes
+  worstAtSec: number;
+}
+
+export function planWorstWindow(codesCsv: string): PlanWindowStats {
+  const codes = codesCsv.split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
+  const W = 200, STRIDE = 100, PMAX = 150;
+  let worstFrac = 0, worstPeriod = 0, worstAtSec = 0;
+  for (let lo = 0; lo < Math.max(1, codes.length - W + 1); lo += STRIDE) {
+    const seg = codes.slice(lo, lo + W);
+    const pTop = Math.min(PMAX, seg.length - 20);
+    for (let p = 1; p < pTop; p++) {
+      let hits = 0;
+      for (let i = p; i < seg.length; i++) if (seg[i] === seg[i - p]) hits++;
+      const frac = hits / (seg.length - p);
+      if (frac > worstFrac) { worstFrac = frac; worstPeriod = p; worstAtSec = lo / 5; }
+    }
+  }
+  return { worstFrac, worstPeriod, worstAtSec };
+}
+
 /**
  * Reason string when the plan is degenerate, null when it is healthy.
  * `durationSec` is the REQUESTED duration — a healthy planner counts to
  * duration*5 − 4 codes with metronomic reliability, so a big shortfall means
  * the adapter broke the stop behaviour (early im_end), not artistic intent.
+ *
+ * KNOWN BLIND SPOT (accepted): a plan that is code-diverse but musically
+ * empty — the "droning wash" half of the president failure — is invisible to
+ * every repetition statistic. Only ears catch that one.
  */
 export function degeneratePlanReason(codesCsv: string, durationSec: number): string | null {
   const s = planLoopStats(codesCsv);
@@ -60,6 +96,11 @@ export function degeneratePlanReason(codesCsv: string, durationSec: number): str
   }
   if (s.maxRun > 50) {
     return `stuck run — ${s.maxRun} consecutive period-${s.loopPeriod} repeats (~${(s.maxRun / 5).toFixed(0)}s)`;
+  }
+  const w = planWorstWindow(codesCsv);
+  if (w.worstFrac > 0.55) {
+    return `local loop — a window at ${w.worstAtSec}s repeats a ${(w.worstPeriod / 5).toFixed(1)}s phrase `
+      + `at ${(100 * w.worstFrac).toFixed(0)}% (healthy ceiling ~30%)`;
   }
   return null;
 }
