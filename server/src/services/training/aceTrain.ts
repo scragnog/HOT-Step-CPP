@@ -362,6 +362,12 @@ export interface ResolvedTrainDitOptions {
   // adapterType — buildTrainDitArgs only emits them when adapterType==='lokr'.
   lokrDim: number; lokrAlpha: number; lokrFactor: number; lokrDecomposeBoth: boolean;
   layers: number; crop: number; cropMin: number; cropMax: number;
+  /** Crop regime (2026-08-29): song-anchored RoPE positions + structured
+   *  start/end-weighted crop draws are the fixed defaults; 'zero'/'random'
+   *  reproduce the legacy behaviour. Emitted always so an older ace-train
+   *  rejects them loudly rather than silently training the old way. */
+  cropAnchor: 'song' | 'zero'; cropMode: 'structured' | 'random';
+  cropStartFrac: number; cropEndFrac: number;
   targetLoss: number; epochs: number; learningRate: number;
   gradAccum: number; gradClip: number; warmupRatio: number; weightDecay: number;
   lossWeighting: 'none' | 'flow_snr'; snrGamma: number; tBias: number;
@@ -484,6 +490,10 @@ export function buildTrainDitArgs(input: {
     '--crop', String(o.crop),
     '--crop-min', String(o.cropMin),
     '--crop-max', String(o.cropMax),
+    '--crop-anchor', o.cropAnchor,
+    '--crop-mode', o.cropMode,
+    '--crop-start-frac', String(o.cropStartFrac),
+    '--crop-end-frac', String(o.cropEndFrac),
     '--loss-weighting', o.lossWeighting,
     '--snr-gamma', String(o.snrGamma),
     '--t-bias', String(o.tBias),

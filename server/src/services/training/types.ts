@@ -783,6 +783,13 @@ export interface TrainDitOptions {
   crop?: number;                   // default 0 = auto-fit
   cropMin?: number;                // default 375
   cropMax?: number;                // default 1250
+  /** Crop regime (2026-08-29). Defaults ('song'/'structured') are the fix:
+   *  RoPE positions carry the crop's true offset and crop draws weight the
+   *  track's start/end. 'zero'/'random' reproduce the legacy behaviour. */
+  cropAnchor?: 'song' | 'zero';
+  cropMode?: 'structured' | 'random';
+  cropStartFrac?: number;          // default 0.2
+  cropEndFrac?: number;            // default 0.2
   targetLoss?: number;             // default 0.1;  0 disables auto-stop
   epochs?: number;                 // default 400 (hard cap)
   learningRate?: number;           // default 0.0005 (lora) / 0.01 (lokr, K2)

@@ -2876,6 +2876,17 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     const crop = numOpt(body.crop, 0);
     const cropMin = numOpt(body.cropMin, 375);
     const cropMax = numOpt(body.cropMax, 1250);
+    // Crop regime (2026-08-29): song-anchored positions + structured draws are
+    // the defaults for every run — the batch pipeline POSTs {} and inherits
+    // them. 'zero'/'random' remain reachable for A/B archaeology only.
+    const cropAnchor = body.cropAnchor === 'zero' ? 'zero' as const : 'song' as const;
+    const cropMode = body.cropMode === 'random' ? 'random' as const : 'structured' as const;
+    const cropStartFrac = numOpt(body.cropStartFrac, 0.2);
+    const cropEndFrac = numOpt(body.cropEndFrac, 0.2);
+    if (cropStartFrac < 0 || cropEndFrac < 0 || cropStartFrac + cropEndFrac > 1) {
+      res.status(400).json({ error: 'cropStartFrac/cropEndFrac must be >= 0 and sum to <= 1' });
+      return;
+    }
     // LoKR 2e-3 @ GA 4 (2026-07-30 retune) replaces 1e-2 @ GA 20. Side-Step
     // reaches an effective batch of 20 as batch 5 x GA 4; we reached it by
     // accumulating 20, which is the same effective LR per sample under linear
@@ -3077,6 +3088,10 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       crop: Math.trunc(crop),
       cropMin: Math.trunc(cropMin),
       cropMax: Math.trunc(cropMax),
+      cropAnchor,
+      cropMode,
+      cropStartFrac,
+      cropEndFrac,
       targetLoss,
       epochs: Math.trunc(epochs),
       learningRate,

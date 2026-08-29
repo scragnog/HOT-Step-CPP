@@ -88,6 +88,13 @@ struct DitTrainArgs {
     std::string order       = "shuffle";
 
     int   crop = 0, crop_min = 375, crop_max = 1250;
+    // Crop regime (2026-08-29): `song`/`structured` are the fixed defaults;
+    // `zero`/`random` reproduce the legacy run (positions lied, endpoints
+    // starved) for A/B archaeology. Runs across the divide are NOT comparable.
+    std::string crop_anchor = "song";        // song|zero
+    std::string crop_mode   = "structured";  // structured|random
+    float crop_start_frac = 0.2f;
+    float crop_end_frac   = 0.2f;
     int   vram_reserve_mb = 2048;
     float vram_safety     = 0.05f;
     // Frozen-weight mirror precision: "f32" (shipped) or "bf16" (halves the
@@ -999,6 +1006,10 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     bcfg.patch          = P;
     bcfg.sliding_window = c.sliding_window;
     bcfg.crop           = crop_len;
+    bcfg.anchor_song    = (a.crop_anchor != "zero");
+    bcfg.structured     = (a.crop_mode != "random");
+    bcfg.start_frac     = a.crop_start_frac;
+    bcfg.end_frac       = a.crop_end_frac;
     bcfg.weighted       = (a.loss_weighting == "flow_snr");
     bcfg.null_cond      = &M.null_cond;
     int graph_nodes = 0, sched_splits = 0, sched_copies = 0;
@@ -1779,6 +1790,10 @@ static int dit_train_main(const DitTrainArgs & a) {
     }
     log.crop_min        = a.crop_min;
     log.crop_max        = a.crop_max;
+    log.crop_anchor     = a.crop_anchor;
+    log.crop_mode       = a.crop_mode;
+    log.crop_start_frac = a.crop_start_frac;
+    log.crop_end_frac   = a.crop_end_frac;
     log.mirror          = a.mirror;
     log.bwd             = a.bwd;
     log.init_adapter    = a.init_adapter;

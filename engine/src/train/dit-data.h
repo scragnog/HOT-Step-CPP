@@ -31,6 +31,11 @@
 struct DitSample {
     std::string        path, id;
     int                T = 0, Oc = 0, Cc = 0;  // frames, 64, 128
+    // Preprocess hard-cut this song at --max-duration: the latent's last frame
+    // is an artificial cut, not the song's ending. End-anchored crops skip
+    // these songs — training "the ending" on a chop teaches an abrupt stop
+    // (2026-08-29; a third of the 240s-era corpus carried the cut).
+    bool               truncated = false;
     int                enc_S = 0, enc_H = 0;
     int                enc_S_genre = 0;
     std::vector<float> lat, ctxl, enc, enc_mask;    // frame-major
@@ -78,6 +83,15 @@ static bool dit_load_sample(const std::string & path, DitSample * s, std::string
     s->path  = path;
     s->T     = (int) e_lat->shape[0];
     s->Oc    = (int) e_lat->shape[1];
+    {
+        // Same convention as the LM extractor: duration is llround(T/25) of the
+        // STORED latent, so a capped song lands exactly on max_duration.
+        std::map<std::string, std::string> md;
+        stmd_read(path.c_str(), &md);
+        const int dur = atoi(md.count("duration") ? md["duration"].c_str() : "0");
+        const int cap = atoi(md.count("max_duration") ? md["max_duration"].c_str() : "0");
+        s->truncated  = cap > 0 && dur >= cap;
+    }
     s->Cc    = (int) e_ctx->shape[1];
     s->enc_S = (int) e_enc->shape[0];
     s->enc_H = (int) e_enc->shape[1];
@@ -294,6 +308,42 @@ static DitCrop dit_sample_crop(LmRng * rng, int T, int crop, int patch) {
     return c;
 }
 
+// Structured crop draw (2026-08-29, ported from the MM3 LM crop fix): a
+// uniform sampler sees the intro on ~6-20% of steps and the true ending almost
+// never, so the arc's endpoints train on starvation rations. `start_frac` of
+// draws pin the crop to frame 0 and `end_frac` land it flush against the track
+// end (skipped for truncated songs — their "end" is a preprocess chop); the
+// rest fall through to the uniform sampler.
+//
+// RNG DISCIPLINE: exactly TWO rng draws per call, on every branch — the resume
+// replay and the smoke probe both count on the crop stream advancing by a
+// fixed stride per element. `random` mode must keep calling dit_sample_crop
+// directly (ONE draw) so pre-2026-08-29 streams replay unchanged.
+static DitCrop dit_sample_crop_structured(LmRng * rng, int T, int crop, int patch, float start_frac, float end_frac,
+                                          bool truncated) {
+    // Draw the mode selector and the (possibly discarded) uniform start in a
+    // fixed order.
+    const double  u  = (double) lm_rng_below(rng, 1u << 24) / (double) (1u << 24);
+    const DitCrop un = dit_sample_crop(rng, T, crop, patch);
+    if (u < (double) start_frac) {
+        DitCrop c;
+        c.len   = un.len;
+        c.start = 0;
+        return c;
+    }
+    if (u < (double) start_frac + (double) end_frac && !truncated) {
+        DitCrop   c;
+        c.len          = un.len;
+        const int last = T - c.len;
+        c.start        = last - (last % patch);
+        if (c.start < 0) {
+            c.start = 0;
+        }
+        return c;
+    }
+    return un;
+}
+
 // ─── timestep (D12) ─────────────────────────────────────────────────────────
 
 // t = sigmoid(mu + sigma*z), clamped to [1e-5, 1-1e-5]; rejection-resampled
@@ -439,6 +489,12 @@ struct DitBatchCfg {
     int  crop           = 0;
     bool weighted       = true;  // --loss-weighting flow_snr
     const std::vector<float> * null_cond = nullptr;
+    // Crop regime (2026-08-29). Defaults are the FIXED behaviour; `zero` /
+    // `random` reproduce the legacy run byte-for-byte (see the sampler note).
+    bool  anchor_song = true;   // RoPE positions carry the crop's true offset
+    bool  structured  = true;   // start/end-weighted crop draws
+    float start_frac  = 0.2f;
+    float end_frac    = 0.2f;
 };
 
 static void dit_batch_assemble(const DitBatchCfg & cfg, std::vector<DitBatchElem> & els, LmRng * rng_crop,
@@ -449,7 +505,10 @@ static void dit_batch_assemble(const DitBatchCfg & cfg, std::vector<DitBatchElem
     // 1) crops, in element order.
     int padded = 0;
     for (int b = 0; b < B; b++) {
-        const DitCrop cr    = dit_sample_crop(rng_crop, els[(size_t) b].s->T, cfg.crop, cfg.patch);
+        const DitCrop cr = cfg.structured
+            ? dit_sample_crop_structured(rng_crop, els[(size_t) b].s->T, cfg.crop, cfg.patch, cfg.start_frac,
+                                         cfg.end_frac, els[(size_t) b].s->truncated)
+            : dit_sample_crop(rng_crop, els[(size_t) b].s->T, cfg.crop, cfg.patch);
         els[(size_t) b].crop_start = cr.start;
         els[(size_t) b].len        = cr.len;
         padded                     = std::max(padded, cr.len);
@@ -508,8 +567,14 @@ static void dit_batch_assemble(const DitBatchCfg & cfg, std::vector<DitBatchElem
         memcpy(&h->ca[(size_t) b * (size_t) cfg.enc_S * (size_t) h->S], ca_one.data(),
                ca_one.size() * sizeof(uint16_t));
 
+        // Song-anchored RoPE (the MM3 crop-anchor fix, ported 2026-08-29): a
+        // crop from 60 s in is PRESENTED at 60 s, not passed off as the song's
+        // opening. crop_start is patch-aligned, so the division is exact. The
+        // wrap-filled pad frames continue past the valid span; their loss
+        // weight is zero, same as before. `zero` reproduces the legacy lie.
+        const int pos0 = cfg.anchor_song ? e.crop_start / cfg.patch : 0;
         for (int i = 0; i < h->S; i++) {
-            h->pos[(size_t) b * (size_t) h->S + (size_t) i] = i;
+            h->pos[(size_t) b * (size_t) h->S + (size_t) i] = pos0 + i;
         }
     }
     // Self-attention mask: the shared [S,S] broadcast when every element fills

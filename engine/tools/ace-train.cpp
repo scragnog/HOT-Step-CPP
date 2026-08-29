@@ -500,6 +500,19 @@ static void print_usage(void) {
             "    --crop <n>                  0           latent frames; 0 = auto-fit\n"
             "    --crop-min <n>              375\n"
             "    --crop-max <n>              1250\n"
+            "    --crop-anchor <song|zero>   song        song = RoPE positions carry the crop's true\n"
+            "                                            offset in the track (the MM3 crop-anchor fix,\n"
+            "                                            ported 2026-08-29). zero = the legacy lie:\n"
+            "                                            every crop presented as the song's opening.\n"
+            "                                            Runs across this divide are NOT comparable.\n"
+            "    --crop-mode <structured|random> structured  structured pins --crop-start-frac of\n"
+            "                                            draws to frame 0 and --crop-end-frac flush\n"
+            "                                            to the track end (skipped for songs the\n"
+            "                                            preprocess cap truncated); the rest are\n"
+            "                                            uniform. random = the legacy sampler, which\n"
+            "                                            starves the arc's endpoints.\n"
+            "    --crop-start-frac <f>       0.2\n"
+            "    --crop-end-frac <f>         0.2\n"
             "    --vram-reserve-mb <n>       2048        desktop/OS headroom left unallocated\n"
             "    --vram-safety <f>           0.05        extra margin on the footprint model\n"
             "                                            (0.12 for --adapter-type lokr unless set)\n"
@@ -3812,6 +3825,10 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--crop") && i + 1 < argc) a.crop = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--crop-min") && i + 1 < argc) a.crop_min = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--crop-max") && i + 1 < argc) a.crop_max = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--crop-anchor") && i + 1 < argc) a.crop_anchor = argv[++i];
+        else if (!strcmp(argv[i], "--crop-mode") && i + 1 < argc) a.crop_mode = argv[++i];
+        else if (!strcmp(argv[i], "--crop-start-frac") && i + 1 < argc) a.crop_start_frac = (float) atof(argv[++i]);
+        else if (!strcmp(argv[i], "--crop-end-frac") && i + 1 < argc) a.crop_end_frac = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--vram-reserve-mb") && i + 1 < argc) a.vram_reserve_mb = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--vram-safety") && i + 1 < argc) { a.vram_safety = (float) atof(argv[++i]); safety_user = true; }
         else if (!strcmp(argv[i], "--mirror") && i + 1 < argc) a.mirror = argv[++i];
@@ -3889,6 +3906,18 @@ static int cmd_train_dit(int argc, char ** argv) {
     }
     if (a.order != "shuffle" && a.order != "fixed") {
         fprintf(stderr, "ace-train train-dit: --order must be shuffle|fixed\n");
+        return 2;
+    }
+    if (a.crop_anchor != "song" && a.crop_anchor != "zero") {
+        fprintf(stderr, "ace-train train-dit: --crop-anchor must be song or zero\n");
+        return 2;
+    }
+    if (a.crop_mode != "structured" && a.crop_mode != "random") {
+        fprintf(stderr, "ace-train train-dit: --crop-mode must be structured or random\n");
+        return 2;
+    }
+    if (a.crop_start_frac < 0.0f || a.crop_end_frac < 0.0f || a.crop_start_frac + a.crop_end_frac > 1.0f) {
+        fprintf(stderr, "ace-train train-dit: --crop-start-frac/--crop-end-frac must be >= 0 and sum to <= 1\n");
         return 2;
     }
     // "replace" never applies the tag during preprocessing (preprocess-run.h:203),
