@@ -193,6 +193,14 @@ export interface ResolvedTrainLmOptions {
   /** Absolute <adapters>/lm/<adapterName>-<lmSize>. */
   adapterDir: string;
   targetLoss: number;
+  /** Staged target-loss chain (2026-08-29). Each entry is one full ace-train
+   *  leg; legs after the first --init-adapter from the previous leg's export,
+   *  which resets the optimizer state and the LR schedule between stages.
+   *  Validated to prevent the straight-dive loop attractor AND to beat the
+   *  straight run on songwriting (nirvana E3, gojira chainfix — see the
+   *  2026-08-29 listening folders). The LAST entry equals `targetLoss`; a
+   *  single-entry array reproduces the legacy one-shot run. */
+  targetLossStages: number[];
   epochs: number;
   /** Adapter parameterization. 'lokr' emits the LyCORIS kron factors and makes
    *  rank/alpha inert; the exporter writes lokr_weights.safetensors. */

@@ -30,6 +30,11 @@
 struct LmCodeRow {
     std::string      file, caption, lyrics, keyscale, timesignature, language;
     int              bpm = 0, duration = 0;
+    // The preprocess hard-cut ate this song's real ending (duration reached
+    // --max-duration). The trainer then must NOT teach im_end at the cut —
+    // that is a lie about where songs end (2026-08-29; a third of the corpus
+    // carried it at the old 240 s cap).
+    bool             truncated = false;
     std::vector<int> codes;
     std::string      id, tok;  // _id, _tok
     long long        st_bytes = 0, st_mtime_ms = 0;
@@ -59,6 +64,9 @@ static std::string lm_codes_row_to_json(const LmCodeRow & r) {
     o += ",\"language\":\"" + lm_json_escape(r.language) + "\"";
     snprintf(b, sizeof(b), ",\"duration\":%d", r.duration);
     o += b;
+    if (r.truncated) {
+        o += ",\"truncated\":true";
+    }
     o += ",\"codes\":[";
     for (size_t i = 0; i < r.codes.size(); i++) {
         if (i) {
@@ -95,6 +103,7 @@ static bool lm_codes_parse_line(const char * data, size_t len, LmCodeRow * out) 
     out->language      = pm_js_str(r, "language");
     out->bpm           = pm_js_int(r, "bpm", 0);
     out->duration      = pm_js_int(r, "duration", 0);
+    out->truncated     = pm_js_bool(r, "truncated", false);
     out->id            = pm_js_str(r, "_id");
     out->tok           = pm_js_str(r, "_tok");
     out->st_bytes      = pm_js_i64(r, "_st_bytes", 0);
@@ -433,6 +442,13 @@ static bool lm_extract_run(const LmExtractOpts & o, std::string * err) {
         row.language      = lm_normalize_language(lm_md_get(md, "language"));
         row.bpm           = atoi(lm_md_get(md, "bpm").c_str());
         row.duration      = atoi(lm_md_get(md, "duration").c_str());
+        // duration is llround(T/25) of the STORED latent, so a capped song
+        // lands exactly on max_duration. A song naturally that long is a
+        // harmless false positive (its ending is at the cut anyway).
+        {
+            const int cap = atoi(lm_md_get(md, "max_duration").c_str());
+            row.truncated = cap > 0 && row.duration >= cap;
+        }
         row.id            = s.id.empty() ? lm_md_get(md, "sample_id") : s.id;
         row.tok           = tok_id;
         row.st_bytes      = bytes;

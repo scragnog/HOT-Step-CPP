@@ -1533,7 +1533,13 @@ router.post('/datasets/:id/preprocess', async (req: Request, res: Response) => {
     const textEnc = (typeof body.textEncoder === 'string' ? body.textEncoder.trim() : '')
       || snap.textEnc[0] || '';
 
-    const maxDuration = numOpt(body.maxDuration, 240);
+    // 600 (Rob, 2026-08-29) — was 240, which truncated 34% of the corpus and
+    // taught the LM a false mid-phrase song ending on every capped track (the
+    // hard-cut latent gets an im_end appended at extraction). 600 s matches the
+    // engine's own 10-minute generation ceiling; tracks longer than that are
+    // rejected elsewhere anyway. Longer songs cost preprocess storage and LM
+    // sequence length linearly — the trainer's max-len auto-fit absorbs it.
+    const maxDuration = numOpt(body.maxDuration, 600);
     const vaeChunk = numOpt(body.vaeChunk, 384);
     const vaeOverlap = numOpt(body.vaeOverlap, 48);
     // 512 / 2048, raised from Side-Step's 256 / 512 on 2026-07-30. Measured on
@@ -2359,6 +2365,39 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
     // per-stage defaults (`{}` in practice), so this fallback IS the number a
     // bulk run trains to, and it has to be the one the form shows.
     const targetLoss = numOpt(body.targetLoss, 0.1);
+    // ── Staged target chain (Rob, 2026-08-29: "this MUST be the new default") ─
+    // `targetLoss` is the FINAL target; the run always descends through the
+    // 2.0 → 1.5 ladder first, one full ace-train leg per rung with
+    // --init-adapter chaining between them. Resetting the optimizer state and
+    // LR schedule at each rung is what prevents the straight-dive loop
+    // attractor (gojira: 95.7% plan loops straight vs 4% chained, same data,
+    // same final CE) and measurably improves songwriting (nirvana E3 > D by
+    // ear). Rungs at or below the final target are dropped, so an explicit
+    // high target (e.g. 2.0) degenerates to the legacy single leg. A caller
+    // that genuinely wants one straight leg sends targetLossStages: [final].
+    const stageLadder = [2.0, 1.5];
+    let targetLossStages: number[];
+    if (Array.isArray(body.targetLossStages) && body.targetLossStages.length > 0) {
+      targetLossStages = body.targetLossStages.map((v: unknown) => Number(v));
+      if (targetLossStages.some(v => !Number.isFinite(v) || v < 0 || v > 20)) {
+        res.status(400).json({ error: 'targetLossStages entries must be numbers between 0 and 20' });
+        return;
+      }
+      // Stages must strictly descend (0 = "no auto-stop" is only legal last).
+      for (let i = 1; i < targetLossStages.length; i++) {
+        const prev = targetLossStages[i - 1], cur = targetLossStages[i];
+        if (prev === 0 || (cur !== 0 && cur >= prev)) {
+          res.status(400).json({ error: 'targetLossStages must strictly descend (0 only as the last entry)' });
+          return;
+        }
+      }
+    } else {
+      // targetLoss 0 = "no auto-stop": still rest at the ladder rungs first.
+      targetLossStages = [
+        ...stageLadder.filter(r => targetLoss === 0 || r > targetLoss),
+        targetLoss,
+      ];
+    }
     const rank = numOpt(body.rank, 16);
     // LoKr is the DEFAULT (Rob, 2026-07-30) — an omitted adapterType now means
     // LoKr, so a caller that wants the old LoRA path must say so explicitly.
@@ -2539,12 +2578,18 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
     // bake's factors carry the baked scale, so resuming one would train from
     // rescaled weights and shift the adapter's effective strength mid-lineage.
     //
-    // AN OMITTED initAdapter NOW MEANS 'latest' TOO (Rob, 2026-08-12), matching
-    // the form's now-ticked Continue checkbox. The batch pipeline POSTs `{}`, so
-    // without this a bulk re-run over already-trained datasets would restart
-    // every adapter from scratch while the identical manual run continued it —
-    // the same form-vs-pipeline split that once trained 0.6B adapters in bulk.
-    let initAdapter = typeof body.initAdapter === 'string' ? body.initAdapter.trim() : 'latest';
+    // An omitted initAdapter meant 'latest' from 2026-08-12 — SUPERSEDED
+    // 2026-08-29 by the staged-chain default: a chain MUST start from scratch
+    // (that is the validated procedure; the first smoke run proved the failure
+    // mode — 'latest' resumed an existing memorized adapter, every rung was
+    // instantly satisfied and the "chain" was three 1-epoch no-ops). An
+    // EXPLICIT initAdapter ('latest' or a path) is still honored as a resume,
+    // and a resume collapses the ladder to its final target below — re-running
+    // the 2.0/1.5 rungs on an adapter already past them is meaningless.
+    const initRequested = typeof body.initAdapter === 'string' && body.initAdapter.trim() !== '';
+    let initAdapter = initRequested
+      ? (body.initAdapter as string).trim()
+      : (targetLossStages.length > 1 ? '' : 'latest');
     if (initAdapter === 'latest') {
       const artistDir = path.dirname(adapterDir);
       let newest = '';
@@ -2574,6 +2619,11 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       });
       return;
     }
+    // A resume skips straight to the final target unless the caller pinned an
+    // explicit stage list — see the initAdapter note above.
+    if (initAdapter && !Array.isArray(body.targetLossStages)) {
+      targetLossStages = [targetLoss];
+    }
     // Calibration is OPT-IN (Rob, 2026-08-12) — it was default ON from
     // 2026-08-10. Only an explicit `true` runs it, so the batch pipeline's empty
     // bag no longer appends an eval pass to every adapter in a bulk sweep.
@@ -2602,6 +2652,7 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       adapterName,
       adapterDir,
       targetLoss,
+      targetLossStages,
       epochs: Math.trunc(epochs),
       // Only the exact string 'lokr' opts in; anything else is a LoRA.
       adapterType: lmIsLokr ? 'lokr' : 'lora',

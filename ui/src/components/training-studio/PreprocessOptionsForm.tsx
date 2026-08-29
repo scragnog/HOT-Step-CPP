@@ -38,7 +38,7 @@ export const PREPROCESS_DEFAULTS: PreprocessFormState = {
   ditModel: '',
   vaeModel: '',
   textEncoder: '',
-  maxDuration: 240,
+  maxDuration: 600,
   normalize: 'peak',
   targetDb: -1.0,
   dtype: 'f32',
@@ -156,7 +156,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
             step={10}
             value={value.maxDuration}
             disabled={!!disabled}
-            onChange={(e) => onChange({ maxDuration: num(e.target.value, 240) })}
+            onChange={(e) => onChange({ maxDuration: num(e.target.value, 600) })}
             className={FIELD}
           />
         </label>

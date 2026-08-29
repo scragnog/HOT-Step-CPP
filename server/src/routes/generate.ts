@@ -29,6 +29,7 @@ import { translateParams } from '../services/generation/translateParams.js';
 import { applyTriggers, resolveAdapterTriggers, resolveTriggerSpecs } from '../services/generation/triggerWords.js';
 import { readAdapterTrigger } from '../services/adapters/stMetadata.js';
 import { computeLmCacheKey, getLmCache, setLmCache, getLmCacheSize, type LmCacheEntry } from '../services/generation/lmCache.js';
+import { degeneratePlanReason } from '../services/generation/planGuard.js';
 import { loadSourceAudio, loadSourceLatent, applyTempoAndPitch, loadTimbreReference } from '../services/generation/sourceAudio.js';
 import { runPostProcessingChain } from '../services/generation/postProcessing.js';
 import { getCachedLatent, saveCachedLatent } from '../services/generation/sourceLatentCache.js';
@@ -410,6 +411,66 @@ async function runGeneration(job: GenerationJob): Promise<void> {
           lm_seed: lmOut.lm_seed,
         }));
         job.lmResults = lmResults;
+
+        // ── Plan guard (Rob, 2026-08-29) — adapter-led runs only ──────────
+        // Deep LM adapters are loop-fragile per RENDER, not per adapter: the
+        // same adapter emits clean plans on most seeds and a stuck loop on
+        // others. The degeneracy is fully visible in the raw code statistics,
+        // so catch it here — before the DiT burns minutes rendering a click
+        // track — and resample with a shifted seed + a firmer repetition
+        // penalty. Runs before the cache write so a degenerate plan is never
+        // cached. Base-planner runs skip the guard: base has never looped, and
+        // legitimately repetitive genres shouldn't fight a watchdog.
+        if (aceReq.lm_adapter) {
+          const requestedSec = Number(aceReq.duration) || 0;
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            const bad = lmResults
+              .map(r => degeneratePlanReason(r.audio_codes || '', requestedSec))
+              .map((reason, idx) => ({ reason, idx }))
+              .filter(x => x.reason);
+            if (!bad.length) break;
+            const penalty = Math.max(Number(aceReq.lm_rep_penalty) || 1.0, 1.0) + 0.05 * attempt;
+            const seed = (Number(aceReq.lm_seed) || 0) + 1009 * attempt;
+            for (const b of bad) {
+              logGeneration(job.id, 'WARNING',
+                `[Plan Guard] Degenerate plan (result ${b.idx}): ${b.reason} — retry ${attempt}/2 `
+                + `(seed ${seed}, rep penalty ${penalty.toFixed(2)})`);
+            }
+            job.stage = `Plan looked stuck — resampling (retry ${attempt}/2)...`;
+            const retryReq = { ...aceReq, lm_seed: seed, lm_rep_penalty: penalty };
+            const retryJobId = await aceClient.submitLm(retryReq, undefined, coResident);
+            job.aceJobId = retryJobId;
+            await pollUntilDone(retryJobId, job, abortController.signal, timeoutMinutes);
+            const retryRes = await aceClient.getJobResult(retryJobId);
+            const retryOut = await retryRes.json() as AceRequest[];
+            if (!Array.isArray(retryOut) || retryOut.length === 0) break;   // keep what we have
+            // Replace only the degenerate slots; keep healthy plans untouched.
+            for (const b of bad) {
+              const lmOut = retryOut[Math.min(b.idx, retryOut.length - 1)];
+              lmResults[b.idx] = {
+                ...aceReq,
+                audio_codes: lmOut.audio_codes,
+                caption: lmOut.caption,
+                lyrics: lmOut.lyrics,
+                bpm: lmOut.bpm,
+                duration: lmOut.duration,
+                keyscale: lmOut.keyscale,
+                timesignature: lmOut.timesignature,
+                lm_seed: lmOut.lm_seed,
+              };
+            }
+            job.lmResults = lmResults;
+          }
+          const still = lmResults
+            .map(r => degeneratePlanReason(r.audio_codes || '', requestedSec))
+            .filter(Boolean);
+          if (still.length) {
+            // Never hard-fail a generation over the guard: render the best we
+            // have and say so loudly — the user judges by ear anyway.
+            logGeneration(job.id, 'WARNING',
+              `[Plan Guard] Plan still degenerate after retries (${still[0]}) — rendering it anyway`);
+          }
+        }
 
         // Store only LM-generated fields in cache (never DiT/adapter/DCW/etc.)
         if (useLmCache) {

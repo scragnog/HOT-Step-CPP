@@ -284,7 +284,7 @@ static void print_usage(void) {
             "    --text-enc <name|path>     Qwen3-Embedding GGUF/dir (also supplies BPE vocab)\n"
             "\n"
             "  Options (defaults shown):\n"
-            "    --max-duration <sec>          240      0 = no truncation\n"
+            "    --max-duration <sec>          600      0 = no truncation\n"
             "    --normalize <none|peak>       peak\n"
             "    --target-db <db>              -1.0     peak-normalize target\n"
             "    --dtype <f32|bf16>            f32      storage dtype for every tensor\n"

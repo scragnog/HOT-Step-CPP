@@ -622,6 +622,11 @@ export interface TrainLmOptions {
    *  Omit = the dataset slug. */
   adapterName?: string;
   targetLoss?: number;             // default 0.1;  0 disables auto-stop
+  /** Explicit target-loss chain, one ace-train leg per entry, strictly
+   *  descending (0 legal only last). Omit for the default: targetLoss becomes
+   *  the FINAL stage of the 2.0 → 1.5 → final ladder (2026-08-29 — the staged
+   *  chain is the recipe; a single-entry array forces the legacy one-shot). */
+  targetLossStages?: number[];
   epochs?: number;                 // default 16 (hard cap)
   rank?: number;                   // default 16
   alpha?: number;                  // default 32

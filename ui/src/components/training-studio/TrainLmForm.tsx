@@ -318,7 +318,7 @@ export const TrainLmForm: React.FC<Props> = ({
 
         {/* ── Target loss ─────────────────────────────────────────────── */}
         <label className="flex flex-col gap-1.5">
-          {P('targetLoss', 'Default 0.1 · 0 = no auto-stop')}
+          {P('targetLoss', 'Final target · trains staged 2.0 → 1.5 → this · 0 = no auto-stop')}
           <input
             type="number"
             min={0}

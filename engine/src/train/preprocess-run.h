@@ -26,7 +26,10 @@
 
 struct PreprocessOpts {
     std::string dit_path, vae_path, text_enc_path, out_dir, ffmpeg;
-    int         max_duration   = 240;
+    // 600 (2026-08-29) — 240 truncated a third of the corpus and taught the
+    // LM a false mid-phrase ending on every capped track. Matches the
+    // engine's 10-minute generation ceiling.
+    int         max_duration   = 600;
     bool        normalize_peak = true;
     float       target_db      = -1.0f;
     STWDType    dtype          = STW_F32;

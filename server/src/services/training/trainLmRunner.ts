@@ -324,8 +324,6 @@ export async function runTrainLmJob(job: TrainingJob): Promise<void> {
         `${opts.lmModel} does not look like a BF16 base — quantized LM bases cannot be trained against`);
     }
 
-    const args = buildTrainLmArgs({ opts, modelsDir: config.aceServer.models });
-
     // ── 2. engine handoff (L19) ──────────────────────────────────────────
     let stopped = false;
     let engineExited = true;
@@ -351,68 +349,103 @@ export async function runTrainLmJob(job: TrainingJob): Promise<void> {
       }
       if (isCancelled(job)) return;
 
-      // ── 3. spawn + relay ───────────────────────────────────────────────
+      // ── 3. spawn + relay, once per target-loss stage ───────────────────
+      // One ace-train leg per stage, chained with --init-adapter (2026-08-29).
+      // Deliberately separate PROCESSES, not an in-engine loop: a fresh leg
+      // rebuilds the optimizer state and LR schedule from zero, which is the
+      // exact procedure the loop-attractor fix was validated with. All legs
+      // run inside ONE engine-stopped window. Intermediate legs export into
+      // <adapterDir>/stageN; the final leg exports into <adapterDir> itself so
+      // every status/preset/calibration reader keeps working unchanged.
+      const runLeg = async (legOpts: ResolvedTrainLmOptions, legLabel: string): Promise<void> => {
+        const args = buildTrainLmArgs({ opts: legOpts, modelsDir: config.aceServer.models });
+        pushLog(`[Training] train-lm job ${job.id}: ace-train ${legOpts.lmSize}${legLabel} → ${legOpts.adapterDir}`);
+
+        const child = spawn(exe, args, { windowsHide: true });
+        job.child = child;
+
+        const stderrTail: string[] = [];
+        child.stderr?.on('data', (buf: Buffer) => {
+          for (const raw of buf.toString('utf-8').split(/[\r\n]+/)) {
+            const line = raw.trim();
+            if (!line) continue;
+            stderrTail.push(line);
+            if (stderrTail.length > 30) stderrTail.shift();
+          }
+        });
+
+        const state: RelayState = { fatalMessage: '', doneSeen: false };
+        const rl = readline.createInterface({ input: child.stdout! });
+        rl.on('line', (line) => {
+          try {
+            const ev = JSON.parse(line) as Record<string, unknown>;
+            if (ev && typeof ev === 'object') relay(job, ev, state);
+          } catch { /* non-JSON noise */ }
+        });
+
+        const timeoutMs = trainLmTimeoutMs(songCount, legOpts.epochs);
+        let timedOut = false;
+        const killer = setTimeout(() => {
+          timedOut = true;
+          console.error(`[Training] train-lm job ${job.id}: timed out — killing ace-train`);
+          log(job, 'error', `Training exceeded its ${Math.round(timeoutMs / 60000)} min budget — stopping.`);
+          killJobChild(job);
+        }, timeoutMs);
+
+        const code: number | null = await new Promise<number | null>((resolve, reject) => {
+          child.on('error', err => reject(new Error(`Failed to launch ace-train: ${err.message}`)));
+          child.on('close', (c, signal) => resolve(signal ? null : c));
+        }).finally(() => {
+          clearTimeout(killer);
+          try { rl.close(); } catch { /* already closed */ }
+          job.child = undefined;
+        });
+
+        if (isCancelled(job)) return;
+        if (timedOut) {
+          // Checked BEFORE the exit-code branch: a killed child yields code null,
+          // which would otherwise surface as "ace-train exited with code null".
+          // Every finished epoch is already on disk (§3.5.4), so the partial
+          // adapter survives this.
+          throw new Error(
+            `LM training${legLabel} timed out after ${Math.round(timeoutMs / 60000)} min and was stopped` +
+            (stderrTail.length ? `: ${stderrTail.slice(-3).join(' | ')}` : ''));
+        }
+        if (code !== 0) {
+          throw new Error(state.fatalMessage
+            || `ace-train${legLabel} exited with code ${code === null ? 'null (killed)' : code}: ${stderrTail.slice(-5).join(' | ')}`);
+        }
+        // A structured `fatal` with a zero exit code should not happen, but if it
+        // does the reason is the truth and the exit code is the bug.
+        if (state.fatalMessage) throw new Error(state.fatalMessage);
+      };
+
       job.phase = 'loading-models';
       emitProgress(job);
-      pushLog(`[Training] train-lm job ${job.id}: ace-train ${opts.lmSize} → ${opts.adapterDir}`);
 
-      const child = spawn(exe, args, { windowsHide: true });
-      job.child = child;
-
-      const stderrTail: string[] = [];
-      child.stderr?.on('data', (buf: Buffer) => {
-        for (const raw of buf.toString('utf-8').split(/[\r\n]+/)) {
-          const line = raw.trim();
-          if (!line) continue;
-          stderrTail.push(line);
-          if (stderrTail.length > 30) stderrTail.shift();
+      // Legacy jobs recorded before the field existed carry no stages array.
+      const stages = Array.isArray(opts.targetLossStages) && opts.targetLossStages.length > 0
+        ? opts.targetLossStages
+        : [opts.targetLoss];
+      let prevLegDir = opts.initAdapter;
+      for (let i = 0; i < stages.length; i++) {
+        if (isCancelled(job)) return;
+        const lastLeg = i === stages.length - 1;
+        const legDir = lastLeg ? opts.adapterDir : path.join(opts.adapterDir, `stage${i + 1}`);
+        if (!lastLeg) fs.mkdirSync(legDir, { recursive: true });
+        if (stages.length > 1) {
+          job.phase = `train-stage-${i + 1}/${stages.length}`;
+          emitProgress(job);
+          log(job, 'info',
+            `Stage ${i + 1}/${stages.length}: training to target loss ${stages[i]}`
+            + (prevLegDir ? ` (from ${path.basename(prevLegDir)})` : ' (from scratch)'));
         }
-      });
-
-      const state: RelayState = { fatalMessage: '', doneSeen: false };
-      const rl = readline.createInterface({ input: child.stdout! });
-      rl.on('line', (line) => {
-        try {
-          const ev = JSON.parse(line) as Record<string, unknown>;
-          if (ev && typeof ev === 'object') relay(job, ev, state);
-        } catch { /* non-JSON noise */ }
-      });
-
-      const timeoutMs = trainLmTimeoutMs(songCount, opts.epochs);
-      let timedOut = false;
-      const killer = setTimeout(() => {
-        timedOut = true;
-        console.error(`[Training] train-lm job ${job.id}: timed out — killing ace-train`);
-        log(job, 'error', `Training exceeded its ${Math.round(timeoutMs / 60000)} min budget — stopping.`);
-        killJobChild(job);
-      }, timeoutMs);
-
-      const code: number | null = await new Promise<number | null>((resolve, reject) => {
-        child.on('error', err => reject(new Error(`Failed to launch ace-train: ${err.message}`)));
-        child.on('close', (c, signal) => resolve(signal ? null : c));
-      }).finally(() => {
-        clearTimeout(killer);
-        try { rl.close(); } catch { /* already closed */ }
-        job.child = undefined;
-      });
-
-      if (isCancelled(job)) return;
-      if (timedOut) {
-        // Checked BEFORE the exit-code branch: a killed child yields code null,
-        // which would otherwise surface as "ace-train exited with code null".
-        // Every finished epoch is already on disk (§3.5.4), so the partial
-        // adapter survives this.
-        throw new Error(
-          `LM training timed out after ${Math.round(timeoutMs / 60000)} min and was stopped` +
-          (stderrTail.length ? `: ${stderrTail.slice(-3).join(' | ')}` : ''));
+        await runLeg(
+          { ...opts, targetLoss: stages[i], adapterDir: legDir, initAdapter: prevLegDir },
+          stages.length > 1 ? ` stage ${i + 1}/${stages.length}` : '');
+        if (isCancelled(job)) return;
+        prevLegDir = legDir;
       }
-      if (code !== 0) {
-        throw new Error(state.fatalMessage
-          || `ace-train exited with code ${code === null ? 'null (killed)' : code}: ${stderrTail.slice(-5).join(' | ')}`);
-      }
-      // A structured `fatal` with a zero exit code should not happen, but if it
-      // does the reason is the truth and the exit code is the bug.
-      if (state.fatalMessage) throw new Error(state.fatalMessage);
 
       // ── 4. post-check ──────────────────────────────────────────────────
       if (opts.stages.includes('export')) {

@@ -127,7 +127,13 @@ static bool lm_build_sequence(BPETokenizer & bpe, const LmCodeRow & r, bool loss
     for (size_t i = 0; i < r.codes.size(); i++) {
         out->tokens.push_back((int32_t) (AUDIO_CODE_BASE + r.codes[i]));
     }
-    out->tokens.push_back((int32_t) TOKEN_IM_END);
+    // A truncated row's audio was hard-cut at preprocess --max-duration: the
+    // real ending never made it into the latents, so appending im_end would
+    // supervise "songs end mid-phrase at the cap". Codes still train; the stop
+    // token just goes unsupervised for this song (2026-08-29).
+    if (!r.truncated) {
+        out->tokens.push_back((int32_t) TOKEN_IM_END);
+    }
 
     out->n_masked = loss_on_cot ? n_think : (int) pre.size();
     out->s_tr     = (int) out->tokens.size() - out->n_masked;  // L6(a): NO "- 1"

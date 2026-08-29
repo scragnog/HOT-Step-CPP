@@ -158,6 +158,13 @@ export function translateParams(params: any): AceRequest {
   // filesystem paths from the /api/adapters/lm scan).
   if (params.lmAdapter) req.lm_adapter = mapPath(params.lmAdapter);
   if (params.lmAdapterScale !== undefined) req.lm_adapter_scale = params.lmAdapterScale;
+  // Adapter-led plans default to a mild repetition penalty (Rob, 2026-08-29).
+  // Deep LM adapters are loop-fragile at sampling time — a per-render lottery
+  // measured at CE~0.1 (46-code stuck plans on some seeds) — and rep 1.05
+  // fully healed the failing cell in the probe matrix. Applies ONLY when an
+  // LM adapter rides the request and the user didn't set a penalty; the base
+  // planner has never looped and keeps its untouched sampling.
+  if (req.lm_adapter && params.lmRepPenalty === undefined) req.lm_rep_penalty = 1.05;
   if (params.vaeModel) req.vae_model = params.vaeModel;
   if (params.embeddingModel) req.emb_model = params.embeddingModel;
   if (params.loraPath) req.adapter = mapPath(params.loraPath);
