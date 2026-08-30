@@ -79,6 +79,20 @@ const GAIN_OFFSET_CEILING_DB = -0.3;
 // something wrong with it, and silently applying a huge gain would hide that.
 const STABLESTEP_MAX_BALANCE_DB = 6;
 
+// Peak ceiling for the Final Normalizer's limiter. -1 dBFS is the streaming
+// convention and stays the default; the range allows a tighter ceiling when a
+// VST maximizer upstream is already sitting near full scale. Anything outside
+// the range is a typo or a stale preset, not an intent.
+const LUFS_CEILING_DEFAULT_DB = -1.0;
+const LUFS_CEILING_MIN_DB = -6.0;
+const LUFS_CEILING_MAX_DB = 0.0;
+
+/** Clamp a user/preset ceiling into the usable range, defaulting when absent. */
+function clampCeilingDb(v: number | undefined): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return LUFS_CEILING_DEFAULT_DB;
+  return Math.min(LUFS_CEILING_MAX_DB, Math.max(LUFS_CEILING_MIN_DB, v));
+}
+
 // Ceiling for the final peak guard — the backstop that runs when a stage that
 // was supposed to own the ceiling failed. Only engages on a broken chain.
 const FINAL_CEILING_DB = -0.3;
@@ -166,9 +180,13 @@ export interface PostProcessParams {
   // Audio Quality Evaluator
   qualityEvalEnabled?: boolean;
   qualityEvalTarget?: 'unmastered' | 'mastered' | 'both';
-  // LUFS Normalization (final stage after mastering)
+  // Final Normalizer — LUFS normalization, the last audio-modifying stage.
+  // Independent of the mastering stage: it runs after the VST chain and after
+  // mastering, whichever of those are on, so every deliverable lands on the
+  // same integrated loudness.
   lufsEnabled?: boolean;
   lufsTarget?: number;       // target integrated LUFS (e.g. -14)
+  lufsCeilingDb?: number;    // peak ceiling for its limiter, dBFS (default -1)
   // Pipeline parallelism
   parallelQualityEval?: boolean;
 }
@@ -254,8 +272,10 @@ export async function runPostProcessingChain(
   const masteringOn = ppMasterOn && !!masteringRef && !!params.masteringEnabled;
   // Hoisted: earlier stages need to know whether anything runs after them
   // before they decide what to do with peaks that exceed full scale.
-  const lufsWillRun = ppMasterOn && masteringOn
-    && !!params.lufsEnabled && params.lufsTarget !== undefined;
+  // The Final Normalizer is independent of the mastering stage — it is the
+  // last thing to touch the audio whatever ran before it, including a VST
+  // chain doing the actual mastering (the common case here is Ozone).
+  const lufsWillRun = ppMasterOn && !!params.lufsEnabled && params.lufsTarget !== undefined;
   const masteredUrls: string[] = [];
   const qualityScores: TrackQualityScores[] = [];
   const timing: Array<{ name: string; ms: number }> = [];
@@ -781,13 +801,14 @@ export async function runPostProcessingChain(
       timing.push({ name: 'Mastering', ms: Math.round(performance.now() - masterStart) });
     }
 
-    // ── LUFS Normalization (final audio-modifying stage) ──
+    // ── Final Normalizer (last audio-modifying stage) ──
     if (lufsWillRun && params.lufsTarget !== undefined) {
       const lufsStart = performance.now();
-      setStage(`LUFS normalization${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
+      setStage(`Final normalizer${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
       try {
         const { normalizeLufs, formatLufsLog } = await import('./lufsNormalize.js');
-        const result = normalizeLufs(processedPath, params.lufsTarget);
+        const ceilingDb = clampCeilingDb(params.lufsCeilingDb);
+        const result = normalizeLufs(processedPath, params.lufsTarget, ceilingDb);
         anyStageRan = true;
         log('INFO', formatLufsLog(result, processedFilename));
       } catch (lufsErr: any) {

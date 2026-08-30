@@ -334,10 +334,11 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // VAE backend selection (ONNX Runtime / TensorRT)
   useOrtVae: readKey('hs-useOrtVae', false),
 
-  // LUFS Normalization
+  // Final Normalizer (LUFS) — runs last, after the VST chain and mastering
   lufsEnabled: readKey('hs-lufsEnabled', false),
   lufsPreset: readKey('hs-lufsPreset', 'spotify'),
   lufsTarget: readKey('hs-lufsTarget', -14),
+  lufsCeilingDb: readKey('hs-lufsCeilingDb', -1),
 
   // -- Actions --
   setDitModel: (v: any) => { set({ ditModel: v }); writeKey("hs-ditModel", v); mirrorActiveModels({ ditModel: v }); },
@@ -531,6 +532,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
     }
   },
   setLufsTarget: (v: any) => { set({ lufsTarget: v }); writeKey('hs-lufsTarget', v); },
+  setLufsCeilingDb: (v: any) => { set({ lufsCeilingDb: v }); writeKey('hs-lufsCeilingDb', v); },
 
   // Plugin param helpers
   setPluginParam: (key: string, value: string) => {
@@ -796,8 +798,11 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       qualityEvalEnabled: (s.postProcessingEnabled && s.qualityEvalEnabled) || undefined,
       qualityEvalTarget: (s.postProcessingEnabled && s.qualityEvalEnabled) ? s.qualityEvalTarget : undefined,
       postprocessPlugin: (s.postProcessingEnabled && s.postprocessEnabled && s.postprocessPlugin) ? s.postprocessPlugin : undefined,
-      lufsEnabled: (s.postProcessingEnabled && s.masteringEnabled && s.lufsEnabled) || undefined,
-      lufsTarget: (s.postProcessingEnabled && s.masteringEnabled && s.lufsEnabled) ? s.lufsTarget : undefined,
+      // Independent of masteringEnabled: the Final Normalizer is the last stage
+      // in the chain whether or not the reference-mastering stage is on.
+      lufsEnabled: (s.postProcessingEnabled && s.lufsEnabled) || undefined,
+      lufsTarget: (s.postProcessingEnabled && s.lufsEnabled) ? s.lufsTarget : undefined,
+      lufsCeilingDb: (s.postProcessingEnabled && s.lufsEnabled) ? s.lufsCeilingDb : undefined,
       useOrtVae: s.useOrtVae || undefined,
       whisperLyricsEnabled: s.whisperLyricsEnabled,
       whisperModel: s.whisperLyricsEnabled ? s.whisperModel : undefined,

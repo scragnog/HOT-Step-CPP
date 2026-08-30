@@ -1026,8 +1026,8 @@ export const PostProcessingDropdown: React.FC = () => {
       {/* 2.5. Pre-VST Gain Offset */}
       <Accordion
         icon={<AudioWaveform size={14} />}
-        label="Gain Offset"
-        info="A volume offset applied to the unmastered track before the VST chain and the mastering stages. Negative values buy headroom for VST processing; positive values boost."
+        label="Pre-VST Gain Offset"
+        info="A volume offset applied to the unmastered track before the VST chain and the mastering stages. Negative values buy headroom for VST processing; positive values boost. This is a fixed offset, not a target — use the Final Normalizer to land every track on the same loudness."
         accentColor="amber"
         persistKey="hs-ppAccordion-gain"
         badge={gp.gainOffsetDb !== 0 ? (
@@ -1092,12 +1092,13 @@ export const PostProcessingDropdown: React.FC = () => {
         <MasteringContent />
       </Accordion>
 
-      {/* 3.5. LUFS Normalization (only visible when mastering is enabled) */}
-      {gp.masteringEnabled && (
-        <Accordion
+      {/* 3.5. Final Normalizer — the last audio-modifying stage, independent
+           of the mastering stage above: it runs after the VST chain and after
+           mastering, whichever of those are on. */}
+      <Accordion
           icon={<AudioWaveform size={14} />}
           label={t('pp.lufsNormalize')}
-          info="Measures integrated loudness (ITU-R BS.1770-4) and adjusts gain to hit the target, boosting quiet tracks and pulling down loud ones. A look-ahead limiter holds the peak at -1 dBFS, and the resulting true peak is measured and reported in the generation log."
+          info="Runs LAST, after the VST chain and after mastering. Measures integrated loudness (ITU-R BS.1770-4) and adjusts gain to hit the target, boosting quiet tracks and pulling down loud ones, so every render lands on the same loudness. A look-ahead limiter holds the peak at the ceiling, and the resulting true peak is measured and reported in the generation log."
           accentColor="amber"
           persistKey="hs-ppAccordion-lufs"
           toggle={{ checked: gp.lufsEnabled, onChange: gp.setLufsEnabled }}
@@ -1140,18 +1141,29 @@ export const PostProcessingDropdown: React.FC = () => {
                   />
                 )}
 
+                {/* Peak ceiling for the look-ahead limiter. Worth lowering
+                    when a VST maximizer upstream already sits near full
+                    scale; -1 dBFS is the streaming convention. */}
+                <EditableSlider
+                  label={t('pp.lufsCeiling')}
+                  value={gp.lufsCeilingDb}
+                  min={-6} max={0} step={0.1}
+                  onChange={gp.setLufsCeilingDb}
+                  formatDisplay={v => `${v.toFixed(1)} dBFS`}
+                  tooltip="Peak ceiling held by the look-ahead limiter after the loudness gain is applied. Lower this if a maximizer earlier in the chain is already close to full scale."
+                />
+
                 {/* Info about current target */}
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
                   <AudioWaveform size={14} className="text-amber-400 flex-shrink-0" />
                   <span className="text-[10px] text-amber-300">
-                    Target: {gp.lufsTarget} LUFS &middot; Peak ceiling: -1.0 dBFS
+                    Target: {gp.lufsTarget} LUFS &middot; Peak ceiling: {gp.lufsCeilingDb.toFixed(1)} dBFS
                   </span>
                 </div>
               </div>
             )}
           </div>
-        </Accordion>
-      )}
+      </Accordion>
 
       {/* 4. Cover Art */}
       <Accordion
@@ -1227,7 +1239,7 @@ export const PostProcessingBadge: React.FC = () => {
   if (gainOffsetDb !== 0) parts.push(`${gainOffsetDb > 0 ? '+' : ''}${gainOffsetDb}dB`);
   if (vstEnabled > 0) parts.push(`${vstEnabled} VST${vstEnabled !== 1 ? 's' : ''}`);
   if (masteringEnabled && masteringReference) parts.push('Master');
-  if (masteringEnabled && lufsEnabled) parts.push(`${lufsTarget} LUFS`);
+  if (lufsEnabled) parts.push(`${lufsTarget} LUFS`);
   if (coverArtEnabled) parts.push('Cover');
   if (qualityEvalEnabled) parts.push('QE');
   if (whisperLyricsEnabled) parts.push('Whisper');

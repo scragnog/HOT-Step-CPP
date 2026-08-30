@@ -90,7 +90,7 @@ export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
       'stableStepSteps', 'stableStepSolver', 'stableStepScheduler',
       'stableStepGuidanceMode', 'stableStepGuidanceScale',
       'postprocessEnabled', 'postprocessPlugin',
-      'lufsEnabled', 'lufsPreset', 'lufsTarget',
+      'lufsEnabled', 'lufsPreset', 'lufsTarget', 'lufsCeilingDb',
       'autoTrimEnabled', 'durationBuffer', 'autoTrimFadeMs',
     ],
   },
