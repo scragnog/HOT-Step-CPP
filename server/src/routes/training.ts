@@ -2882,7 +2882,11 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     const cropAnchor = body.cropAnchor === 'zero' ? 'zero' as const : 'song' as const;
     const cropMode = body.cropMode === 'random' ? 'random' as const : 'structured' as const;
     const cropStartFrac = numOpt(body.cropStartFrac, 0.2);
-    const cropEndFrac = numOpt(body.cropEndFrac, 0.2);
+    // 0 since 2026-08-30 (was 0.2). Under crop-anchor 'song' an end share
+    // taught 'songs end' at the training set's own absolute lengths, so
+    // adapter renders refused to resolve at the duration actually requested.
+    // The bare DiT already ends cleanly, so nothing is lost by dropping it.
+    const cropEndFrac = numOpt(body.cropEndFrac, 0);
     if (cropStartFrac < 0 || cropEndFrac < 0 || cropStartFrac + cropEndFrac > 1) {
       res.status(400).json({ error: 'cropStartFrac/cropEndFrac must be >= 0 and sum to <= 1' });
       return;

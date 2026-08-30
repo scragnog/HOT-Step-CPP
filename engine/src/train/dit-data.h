@@ -308,27 +308,67 @@ static DitCrop dit_sample_crop(LmRng * rng, int T, int crop, int patch) {
     return c;
 }
 
-// Structured crop draw (2026-08-29, ported from the MM3 LM crop fix): a
-// uniform sampler sees the intro on ~6-20% of steps and the true ending almost
-// never, so the arc's endpoints train on starvation rations. `start_frac` of
-// draws pin the crop to frame 0 and `end_frac` land it flush against the track
-// end (skipped for truncated songs — their "end" is a preprocess chop); the
-// rest fall through to the uniform sampler.
+// Structured crop draw (2026-08-29, ported from the MM3 LM crop fix; endpoint
+// spike repaired 2026-08-30): a uniform sampler sees the true ending almost
+// never, so the arc's endpoints can train on starvation rations. `start_frac`
+// of draws land on the song's OPENING REGION and `end_frac` flush against the
+// track end (skipped for truncated songs — their "end" is a preprocess chop);
+// the rest fall through to the uniform sampler.
+//
+// WHY THE START SHARE IS A REGION (the 2026-08-30 fix). The first port put the
+// whole start share on the single crop start 0. That is fine in the MM3 LM
+// trainer it came from, where the crop is ~82% of the song and there are only a
+// handful of legal starts — but the DiT crop is a few percent of the track, so
+// with patch=2 and a 418-frame crop of a 6625-frame song there are 3104 legal
+// starts and frame 0 was drawn 622x more often than any other. Bound to
+// absolute RoPE by `anchor_song`, that memorised the training set's openings at
+// position 0 and stamped them on every render (measured: the first 55 s of an
+// adapter render carried 0.14x the spectral flux of its own body, against 0.89x
+// for the bare DiT).
+//
+// MM3 splits this share "half at frame 0, half over aligned tiles", but tiles
+// land on a handful of exact positions, which at this coverage still leaves a
+// ~197x spike. What transfers is the INTENT, not the mechanic: spend the share
+// on every crop that TOUCHES the opening — start drawn uniformly over the
+// aligned starts in [0, start_window * len). At window=1 that is a 3.0x worst
+// spike (down from 622x) while the opening region still sees 18.5% of draws
+// against a natural 6.7%, so it is covered without being memorised.
+//
+// The share should also track how much of the song a crop covers: a uniform
+// draw already gives the opening region crop/T of the mass, which IS its fair
+// share, so at small crops the boost must stay small. `dit_crop_endpoint_frac`
+// below does that scaling; this function takes the already-scaled fracs.
 //
 // RNG DISCIPLINE: exactly TWO rng draws per call, on every branch — the resume
 // replay and the smoke probe both count on the crop stream advancing by a
-// fixed stride per element. `random` mode must keep calling dit_sample_crop
-// directly (ONE draw) so pre-2026-08-29 streams replay unchanged.
+// fixed stride per element. The in-window position is therefore folded out of
+// the start already drawn by dit_sample_crop rather than costing a third draw.
+// `random` mode must keep calling dit_sample_crop directly (ONE draw) so
+// pre-2026-08-29 streams replay unchanged.
 static DitCrop dit_sample_crop_structured(LmRng * rng, int T, int crop, int patch, float start_frac, float end_frac,
-                                          bool truncated) {
+                                          bool truncated, int start_window) {
     // Draw the mode selector and the (possibly discarded) uniform start in a
     // fixed order.
     const double  u  = (double) lm_rng_below(rng, 1u << 24) / (double) (1u << 24);
     const DitCrop un = dit_sample_crop(rng, T, crop, patch);
     if (u < (double) start_frac) {
         DitCrop c;
-        c.len   = un.len;
-        c.start = 0;
+        c.len = un.len;
+        // Opening REGION: uniform over the aligned starts in [0, window*len),
+        // i.e. every crop that still contains some of the song's opening. The
+        // position is folded out of the already-drawn uniform start, so this
+        // branch costs no extra draw.
+        const int span = T - c.len;
+        int       win  = std::max(1, start_window) * c.len;
+        if (win > span + patch) {
+            win = span + patch;
+        }
+        const int slots = std::max(1, win / patch);
+        int       st    = patch * ((un.start / patch) % slots);
+        if (st > span) {
+            st = span - (span % patch);
+        }
+        c.start = st > 0 ? st : 0;
         return c;
     }
     if (u < (double) start_frac + (double) end_frac && !truncated) {
@@ -342,6 +382,23 @@ static DitCrop dit_sample_crop_structured(LmRng * rng, int T, int crop, int patc
         return c;
     }
     return un;
+}
+
+// Scale an endpoint share to how much of the track a crop actually covers.
+//
+// The raw 0.2/0.2 defaults came from the MM3 LM trainer, where the crop is most
+// of the song. Here a crop is typically a few percent, and a uniform draw
+// already gives each endpoint region crop/T of the mass. Boosting past a small
+// multiple of that turns "cover the endpoints" into "memorise these eleven
+// openings". `k` is that multiple; the result is clamped to the requested frac
+// so the knob still means "at most this much".
+static float dit_crop_endpoint_frac(float requested, int crop, int T_median, float k) {
+    if (requested <= 0.0f || crop <= 0 || T_median <= 0) {
+        return 0.0f;
+    }
+    const float coverage = (float) crop / (float) T_median;
+    const float scaled   = k * coverage;
+    return scaled < requested ? scaled : requested;
 }
 
 // ─── timestep (D12) ─────────────────────────────────────────────────────────
@@ -493,8 +550,13 @@ struct DitBatchCfg {
     // `random` reproduce the legacy run byte-for-byte (see the sampler note).
     bool  anchor_song = true;   // RoPE positions carry the crop's true offset
     bool  structured  = true;   // start/end-weighted crop draws
+    // Effective shares — already scaled by dit_crop_endpoint_frac(). The
+    // trainer scales the user's request by crop coverage before filling these.
     float start_frac  = 0.2f;
-    float end_frac    = 0.2f;
+    float end_frac    = 0.0f;   // 0 by default: the base DiT already ends well
+    // Opening window the start share spreads over, in crop lengths. 1 = every
+    // crop that still touches the song's opening; larger dilutes the boost.
+    int   start_window = 1;
 };
 
 static void dit_batch_assemble(const DitBatchCfg & cfg, std::vector<DitBatchElem> & els, LmRng * rng_crop,
@@ -507,7 +569,7 @@ static void dit_batch_assemble(const DitBatchCfg & cfg, std::vector<DitBatchElem
     for (int b = 0; b < B; b++) {
         const DitCrop cr = cfg.structured
             ? dit_sample_crop_structured(rng_crop, els[(size_t) b].s->T, cfg.crop, cfg.patch, cfg.start_frac,
-                                         cfg.end_frac, els[(size_t) b].s->truncated)
+                                         cfg.end_frac, els[(size_t) b].s->truncated, cfg.start_window)
             : dit_sample_crop(rng_crop, els[(size_t) b].s->T, cfg.crop, cfg.patch);
         els[(size_t) b].crop_start = cr.start;
         els[(size_t) b].len        = cr.len;

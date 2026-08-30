@@ -93,8 +93,23 @@ struct DitTrainArgs {
     // starved) for A/B archaeology. Runs across the divide are NOT comparable.
     std::string crop_anchor = "song";        // song|zero
     std::string crop_mode   = "structured";  // structured|random
+    // Endpoint shares are a CEILING, not a quota: dit_crop_endpoint_frac()
+    // scales them down by how much of a track one crop actually covers, so a
+    // short crop relaxes toward the uniform sampler instead of spiking two
+    // positions. See the 2026-08-30 note on dit_sample_crop_structured.
     float crop_start_frac = 0.2f;
-    float crop_end_frac   = 0.2f;
+    // 0 by default (2026-08-30). The end share was pinning 20% of all draws on
+    // the single crop flush with each track's end; under `anchor_song` that
+    // taught "songs end" at the absolute RoPE positions of the training set's
+    // own lengths, and adapter renders then refused to resolve at whatever
+    // duration was asked for (measured: bare DiT decays to a -74 dBFS floor,
+    // the adapter stops at -13 dBFS, still at full body level). The base DiT
+    // already ends well on its own, so there is no capability to rescue here.
+    float crop_end_frac   = 0.0f;
+    // Opening window the start share spreads over, in crop lengths.
+    int   crop_start_window = 1;
+    // Endpoint share ceiling as a multiple of the crop's natural coverage.
+    float crop_endpoint_k  = 2.0f;
     int   vram_reserve_mb = 2048;
     float vram_safety     = 0.05f;
     // Frozen-weight mirror precision: "f32" (shipped) or "bf16" (halves the
@@ -1008,8 +1023,37 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     bcfg.crop           = crop_len;
     bcfg.anchor_song    = (a.crop_anchor != "zero");
     bcfg.structured     = (a.crop_mode != "random");
-    bcfg.start_frac     = a.crop_start_frac;
-    bcfg.end_frac       = a.crop_end_frac;
+    // Median track length drives the coverage scaling — mean would let one
+    // 6-minute outlier shrink the share for every other song in the set.
+    int T_median = 0;
+    {
+        std::vector<int> Ts;
+        Ts.reserve(samples.size());
+        for (size_t i = 0; i < samples.size(); i++) {
+            Ts.push_back(samples[i].T);
+        }
+        if (!Ts.empty()) {
+            std::nth_element(Ts.begin(), Ts.begin() + (long) (Ts.size() / 2), Ts.end());
+            T_median = Ts[Ts.size() / 2];
+        }
+    }
+    bcfg.start_window   = a.crop_start_window;
+    bcfg.start_frac     = dit_crop_endpoint_frac(a.crop_start_frac, crop_len, T_median, a.crop_endpoint_k);
+    bcfg.end_frac       = dit_crop_endpoint_frac(a.crop_end_frac, crop_len, T_median, a.crop_endpoint_k);
+    log->crop_start_frac_eff = bcfg.start_frac;
+    log->crop_end_frac_eff   = bcfg.end_frac;
+    if (bcfg.structured) {
+        char cb[256];
+        snprintf(cb, sizeof(cb),
+                 "crop policy: structured - start %.1f%% over a %d-crop opening window, "
+                 "end %.1f%%, random %.1f%% "
+                 "(requested %.0f/%.0f%%, scaled by crop coverage %d/%d = %.1f%%)",
+                 (double) bcfg.start_frac * 100.0, bcfg.start_window, (double) bcfg.end_frac * 100.0,
+                 (1.0 - (double) bcfg.start_frac - (double) bcfg.end_frac) * 100.0,
+                 (double) a.crop_start_frac * 100.0, (double) a.crop_end_frac * 100.0, crop_len, T_median,
+                 T_median > 0 ? 100.0 * (double) crop_len / (double) T_median : 0.0);
+        lm_log("info", cb);
+    }
     bcfg.weighted       = (a.loss_weighting == "flow_snr");
     bcfg.null_cond      = &M.null_cond;
     int graph_nodes = 0, sched_splits = 0, sched_copies = 0;
@@ -1794,6 +1838,8 @@ static int dit_train_main(const DitTrainArgs & a) {
     log.crop_mode       = a.crop_mode;
     log.crop_start_frac = a.crop_start_frac;
     log.crop_end_frac   = a.crop_end_frac;
+    log.crop_start_window    = a.crop_start_window;
+    log.crop_endpoint_k      = a.crop_endpoint_k;
     log.mirror          = a.mirror;
     log.bwd             = a.bwd;
     log.init_adapter    = a.init_adapter;

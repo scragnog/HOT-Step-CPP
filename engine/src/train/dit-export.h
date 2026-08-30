@@ -54,7 +54,12 @@ struct DitTrainLog {
     int         crop = 0, crop_min = 375, crop_max = 1250;
     std::string crop_source = "auto";
     std::string crop_anchor = "song", crop_mode = "structured";
-    float       crop_start_frac = 0.2f, crop_end_frac = 0.2f;
+    float       crop_start_frac = 0.2f, crop_end_frac = 0.0f;
+    // What the endpoint shares actually came out as after the crop-coverage
+    // scaling — the requested fracs alone no longer describe the run.
+    float       crop_start_frac_eff = 0.0f, crop_end_frac_eff = 0.0f;
+    int         crop_start_window = 1;
+    float       crop_endpoint_k  = 2.0f;
     std::string mirror      = "f32";  // frozen-weight mirror precision (f32|bf16)
     std::string bwd         = "outprod";  // MUL_MAT activation-gradient form (outprod|mm)
     double      lr = 5e-4;
@@ -120,7 +125,7 @@ static bool dit_write_train_log(const std::string & dir, const DitTrainLog & m) 
     yyjson_mut_val * root = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root);
 
-    yyjson_mut_obj_add_strcpy(doc, root, "format", "hot-step-dit-train-v1");
+    yyjson_mut_obj_add_strcpy(doc, root, "format", "hot-step-dit-train-v2");
     yyjson_mut_obj_add_strcpy(doc, root, "producer", m.producer.c_str());
     yyjson_mut_obj_add_strcpy(doc, root, "created_at", m.created_at.c_str());
 
@@ -151,6 +156,10 @@ static bool dit_write_train_log(const std::string & dir, const DitTrainLog & m) 
     yyjson_mut_obj_add_strcpy(doc, cfg, "crop_mode", m.crop_mode.c_str());
     yyjson_mut_obj_add_real(doc, cfg, "crop_start_frac", (double) m.crop_start_frac);
     yyjson_mut_obj_add_real(doc, cfg, "crop_end_frac", (double) m.crop_end_frac);
+    yyjson_mut_obj_add_real(doc, cfg, "crop_start_frac_eff", (double) m.crop_start_frac_eff);
+    yyjson_mut_obj_add_real(doc, cfg, "crop_end_frac_eff", (double) m.crop_end_frac_eff);
+    yyjson_mut_obj_add_int(doc, cfg, "crop_start_window", m.crop_start_window);
+    yyjson_mut_obj_add_real(doc, cfg, "crop_endpoint_k", (double) m.crop_endpoint_k);
     yyjson_mut_obj_add_strcpy(doc, cfg, "mirror", m.mirror.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "bwd", m.bwd.c_str());
     yyjson_mut_obj_add_real(doc, cfg, "lr", m.lr);

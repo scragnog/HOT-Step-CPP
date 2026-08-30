@@ -505,17 +505,30 @@ static void print_usage(void) {
             "                                            ported 2026-08-29). zero = the legacy lie:\n"
             "                                            every crop presented as the song's opening.\n"
             "                                            Runs across this divide are NOT comparable.\n"
-            "    --crop-mode <structured|random> structured  structured pins --crop-start-frac of\n"
-            "                                            draws to frame 0 and --crop-end-frac flush\n"
-            "                                            to the track end (skipped for songs the\n"
-            "                                            preprocess cap truncated); the rest are\n"
-            "                                            uniform. random = the legacy sampler, which\n"
-            "                                            starves the arc's endpoints.\n"
-            "    --crop-start-frac <f>       0.2\n"
-            "    --crop-end-frac <f>         0.2\n"
+            "    --crop-mode <structured|random> structured  structured spends --crop-start-frac of\n"
+            "                                            draws on the opening REGION (every crop\n"
+            "                                            that still touches it) and --crop-end-frac\n"
+            "                                            flush to the track end (skipped for a\n"
+            "                                            song the preprocess cap truncated); the\n"
+            "                                            rest are uniform.\n"
+            "                                            random = the legacy sampler.\n"
+            "    --crop-start-frac <f>       0.2         CEILING, not a quota: scaled down by the\n"
+            "                                            crop's coverage of a track (see\n"
+            "                                            --crop-endpoint-k), so a short crop relaxes\n"
+            "                                            toward uniform instead of spiking frame 0.\n"
+            "    --crop-end-frac <f>         0.0         0 since 2026-08-30: under --crop-anchor song\n"
+            "                                            an end share teaches 'songs end' at the\n"
+            "                                            training set's own absolute lengths, and\n"
+            "                                            adapter renders then never resolve at the\n"
+            "                                            duration actually asked for. The base DiT\n"
+            "                                            already ends well; nothing to rescue.\n"
+            "    --crop-start-window <n>     1           opening window the start share spreads over,\n"
+            "                                            in crop lengths.\n"
+            "    --crop-endpoint-k <f>       2.0         endpoint share ceiling as a multiple of the\n"
+            "                                            crop's natural coverage (crop / median T).\n"
             "    --vram-reserve-mb <n>       2048        desktop/OS headroom left unallocated\n"
             "    --vram-safety <f>           0.05        extra margin on the footprint model\n"
-            "                                            (0.12 for --adapter-type lokr unless set)\n"
+            "                                            (same 0.05 for lokr since 2026-08-30)\n"
             "    --mirror <f32|bf16>         f32         frozen-weight mirror precision. bf16 keeps\n"
             "                                            the trainable layers' matmul weights in the\n"
             "                                            base's native BF16 instead of promoting them\n"
@@ -3829,6 +3842,8 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--crop-mode") && i + 1 < argc) a.crop_mode = argv[++i];
         else if (!strcmp(argv[i], "--crop-start-frac") && i + 1 < argc) a.crop_start_frac = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--crop-end-frac") && i + 1 < argc) a.crop_end_frac = (float) atof(argv[++i]);
+        else if (!strcmp(argv[i], "--crop-start-window") && i + 1 < argc) a.crop_start_window = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--crop-endpoint-k") && i + 1 < argc) a.crop_endpoint_k = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--vram-reserve-mb") && i + 1 < argc) a.vram_reserve_mb = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--vram-safety") && i + 1 < argc) { a.vram_safety = (float) atof(argv[++i]); safety_user = true; }
         else if (!strcmp(argv[i], "--mirror") && i + 1 < argc) a.mirror = argv[++i];
@@ -3916,6 +3931,14 @@ static int cmd_train_dit(int argc, char ** argv) {
         fprintf(stderr, "ace-train train-dit: --crop-mode must be structured or random\n");
         return 2;
     }
+    if (a.crop_start_window < 1 || a.crop_start_window > 64) {
+        fprintf(stderr, "ace-train train-dit: --crop-start-window must be 1..64\n");
+        return 1;
+    }
+    if (a.crop_endpoint_k < 0.0f) {
+        fprintf(stderr, "ace-train train-dit: --crop-endpoint-k must be >= 0\n");
+        return 1;
+    }
     if (a.crop_start_frac < 0.0f || a.crop_end_frac < 0.0f || a.crop_start_frac + a.crop_end_frac > 1.0f) {
         fprintf(stderr, "ace-train train-dit: --crop-start-frac/--crop-end-frac must be >= 0 and sum to <= 1\n");
         return 2;
@@ -3953,11 +3976,22 @@ static int cmd_train_dit(int argc, char ** argv) {
         fprintf(stderr, "ace-train train-dit: --bwd must be outprod|mm\n");
         return 2;
     }
-    // LoKR's est-vs-peak gap measured ~13 % (the kron-matvec intermediates the
-    // fitted arena polynomial never saw — see dit-vram.h's K10 note), so 5 % is
-    // not enough margin for it. An explicit --vram-safety always wins.
+    // LoKR once needed 12 % here: the fitted arena polynomial never saw the
+    // kron-matvec intermediates, so the estimate ran LOW and a run at the
+    // "fitted" crop spilled into Windows' shared GPU memory. That gap is now an
+    // EXPLICIT term — dit_lokr_apply_arena_bytes(), see dit-vram.h's K10 note -
+    // and the 12 % was never retired, so the two margins stacked.
+    //
+    // Measured 2026-08-30 on a 32 GB 5090, LoKR dim 512 / factor 6 / 32 layers:
+    //   est 22818 MB vs 20866 MB actually held  (+9.4 %)
+    //   est 24903 MB vs 22104 MB actually held  (+12.7 %)
+    // The estimate is comfortably conservative on its own, and the doubled
+    // margin was costing crop length — the axis the auto-fit gives up FIRST.
+    // Dropping to the LoRA path's 5 % took the auto crop from 418 to 662 frames
+    // (16.7 s → 26.5 s) on that box, with 4.7 GB still free device-wide.
+    // An explicit --vram-safety always wins.
     if (!safety_user && a.adapter_type == "lokr") {
-        a.vram_safety = 0.12f;
+        a.vram_safety = 0.05f;
     }
 
     // ── required arguments ──────────────────────────────────────────────
