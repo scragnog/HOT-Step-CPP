@@ -286,6 +286,10 @@ def main():
 
     # 1-D tensors (norms, biases, embeddings) stay F32 even in f16 mode: they
     # are ~2% of the file and the cheapest possible place to lose precision.
+    # The positional tables stay F32 too, in ANY mode: they are bare ggml_add
+    # operands, and the CUDA binbcast kernel has no mixed-dtype path — an f16
+    # pos asserts (nb10 % sizeof(src1_t)) the moment the graph runs. Weights
+    # that only ever enter mul_mat are safe to halve.
     everything = dict(sd)
     if a.head:
         everything.update(extra)
@@ -293,7 +297,8 @@ def main():
         v = everything[k]
         if k in ("pos", "depth.pos"):
             v = v[0]                      # drop the leading batch axis
-        arr = v.astype(np.float16) if (a.quant == "f16" and v.ndim >= 2) else v.astype(np.float32)
+        keep_f32 = v.ndim < 2 or k in ("pos", "depth.pos")
+        arr = v.astype(np.float32) if (a.quant != "f16" or keep_f32) else v.astype(np.float16)
         w.add_tensor(k, arr)
 
     w.write_header_to_file()

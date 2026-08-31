@@ -3684,6 +3684,25 @@
       ]
     },
     {
+      "id": "mm3-rec7-f16",
+      "filename": "mm3-rec7-f16.gguf",
+      "role": "mm3",
+      "subdir": "mm3",
+      "displayName": "MM3 rec7 State Encoder (F16)",
+      "scale": null,
+      "variant": "rec7",
+      "quant": "F16",
+      "sizeBytes": 628342784,
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "description": "Audio → LM frame hiddens. TRAINING ONLY, and OPTIONAL: powers the codes stage's \"Cover-launder\" option, which renders each track back through the model before encoding so buried vocals reach the code targets — the ear-validated fix for dense-mix artists. PurpleOrc's rec7 encoder (170M, MIT) converted to GGUF, with the MM3 LM's two semantic table slices baked in so laundering never runs the 8B language model. Skip it if you never use laundered codes.",
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
       "id": "mm3-enc-f16",
       "filename": "mm3-enc-f16.gguf",
       "role": "mm3",
