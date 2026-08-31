@@ -679,18 +679,32 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
                         job->id.c_str(), req.forced_frame_hiddens_file.c_str(), (long long) fh.frames,
                         (long long) fh.num_codebooks, (long long) fh.embedding_len,
                         (long long) g_mm3.lm_cfg.num_codebooks, (long long) g_mm3.lm_cfg.embedding_length);
-            } else if (fh.model_key != mm3_ar_model_key(g_mm3, req)) {
+            } else if (fh.model_key != mm3_ar_model_key(g_mm3, req) && fh.model_key != "external") {
                 // THE refusal that makes this feature safe to expose. A block
                 // made under a different LM quant, or with a different adapter
                 // merged, has exactly the right shape and is meaningless. See
                 // mm3-hiddens-file.h for why this one refuses and the next warns.
+                //
+                // "external" is the one deliberate escape: a block whose writer
+                // DECLARES it was never LM-made at all (an audio→states encoder
+                // such as rec7 reading a real recording). That is not a stale-
+                // model accident — no real key ever equals the sentinel, so the
+                // accidental-reuse protection is intact — and the DiT demands
+                // nothing of its condition beyond shape, which is checked above.
                 fprintf(stderr,
                         "[MM3-Job] %s: REFUSED %s — saved under a different LM, depth model or LM "
                         "adapter than the one loaded now. Planning fresh rather than rendering from a "
                         "block this model did not make.\n",
                         job->id.c_str(), req.forced_frame_hiddens_file.c_str());
             } else {
-                if (fh.full_key != ar_key) {
+                if (fh.model_key == "external") {
+                    fprintf(stderr,
+                            "[MM3-Job] %s: EXTERNAL hiddens block %s — written by an audio→states "
+                            "encoder, not by this (or any) LM. Rendering it as supplied: the LM, LM "
+                            "adapters, caption and duration have no say in what you are about to "
+                            "hear.\n",
+                            job->id.c_str(), req.forced_frame_hiddens_file.c_str());
+                } else if (fh.full_key != ar_key) {
                     fprintf(stderr,
                             "[MM3-Job] %s: NOTE: %s was planned for a different prompt, length or seed. "
                             "Replaying it anyway — the saved plan wins, so the caption and duration "
