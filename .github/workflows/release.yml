@@ -514,10 +514,10 @@ jobs:
           # Data files
           $dataOut = "$serverOut/data"
           New-Item -ItemType Directory -Force $dataOut | Out-Null
-          Copy-Item "server/src/data/model-registry.json" "$dataOut/model-registry.json"
-          if (Test-Path "server/src/data/assistant-knowledge.md") {
-            Copy-Item "server/src/data/assistant-knowledge.md" "$dataOut/assistant-knowledge.md"
-          }
+          # Whole directory, not a list of names: every file in server/src/data
+          # is read at runtime in portable mode, and naming them one by one meant
+          # a new data file shipped missing (mm3-corpus.json, issue #139).
+          Copy-Item "server/src/data/*" $dataOut -Recurse -Force
 
           # UI
           if (Test-Path "ui/dist") {
@@ -858,8 +858,10 @@ jobs:
 
           # Data files
           mkdir -p "$SRVOUT/data"
-          cp server/src/data/model-registry.json "$SRVOUT/data/"
-          [ -f server/src/data/assistant-knowledge.md ] && cp server/src/data/assistant-knowledge.md "$SRVOUT/data/"
+          # Whole directory, not a list of names: every file in server/src/data
+          # is read at runtime in portable mode, and naming them one by one meant
+          # a new data file shipped missing (mm3-corpus.json, issue #139).
+          cp -R server/src/data/. "$SRVOUT/data/"
 
           # UI
           [ -d "ui/dist" ] && mkdir -p "$DIST/ui" && cp -r ui/dist "$DIST/ui/dist"
@@ -1361,8 +1363,10 @@ jobs:
 
           # Data files
           mkdir -p "$SRVOUT/data"
-          cp server/src/data/model-registry.json "$SRVOUT/data/"
-          [ -f server/src/data/assistant-knowledge.md ] && cp server/src/data/assistant-knowledge.md "$SRVOUT/data/"
+          # Whole directory, not a list of names: every file in server/src/data
+          # is read at runtime in portable mode, and naming them one by one meant
+          # a new data file shipped missing (mm3-corpus.json, issue #139).
+          cp -R server/src/data/. "$SRVOUT/data/"
 
           # UI
           [ -d "ui/dist" ] && mkdir -p "$DIST/ui" && cp -r ui/dist "$DIST/ui/dist"

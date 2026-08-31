@@ -16,6 +16,30 @@ release builds take ~10–15 min instead of ~1.5h for the CUDA jobs.
 - On `master`, working tree clean, everything committed **and pushed**.
 - Pick a semver version **without a hyphen**: `vX.Y.Z` (hyphens are reserved for
   test/pre-release tags — see gotchas).
+- **Prerequisites check passes** (below). This one is not optional.
+
+## 0. Check that users can actually get everything the build needs
+
+```bash
+node server/scripts/check-release-prereqs.mjs
+```
+
+Exit 0 or do not tag. It verifies that every model in the catalogue really
+exists in its Hugging Face repo at the size claimed, that the repos are public,
+that no pack points at a missing file id, and that every runtime data file is
+packaged by `release.yml`.
+
+**Why this is a hard gate.** A packaged build only ships code. Everything else —
+weights, catalogues, corpora — has to be either inside the archive or
+downloadable, and both routes are easy to forget because the failure is
+invisible here: the file is on the dev machine, so the feature works, tsc is
+clean, and CI is green. v1.3 shipped MM3 training gated on two GGUFs that had
+never been uploaded (#137) and an MM3 caption corpus that CI never copied into
+the archives (#139). Neither was catchable by any other check.
+
+If you added a model this cycle, uploading the weights is a separate deliberate
+step — see the `model-management` skill — and it must happen **before** the tag,
+not after the release goes live.
 
 ## 1. (Optional) Compile-test before releasing
 

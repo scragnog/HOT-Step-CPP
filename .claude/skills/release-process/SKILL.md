@@ -62,7 +62,16 @@ older shells — this repo's convention). `gh` is already authenticated as
    by CUDA 12.8/13.1 `nvcc` (`host_config.h`: "Only the versions between 2017
    and 2022 are supported"). The runner image is also baked into the build
    cache key on purpose.
-8. **Clean up hyphenated test tags after use** (release draft + remote tag +
+8. **Never tag until `check-release-prereqs.mjs` passes.** A packaged build
+   ships code only; weights and data files reach the user by download or by
+   being inside the archive, and both are easy to forget because the failure is
+   invisible on the dev machine. `node server/scripts/check-release-prereqs.mjs`
+   (exit 0 required) verifies every catalogue entry exists on Hugging Face at
+   the claimed size in a public repo, that packs reference real file ids, and
+   that every `server/src/data/` file is packaged. WHY: v1.3 shipped MM3
+   training gated on two GGUFs nobody could download (#137) and an MM3 caption
+   corpus CI never copied into the archives (#139). Green CI proves neither.
+9. **Clean up hyphenated test tags after use** (release draft + remote tag +
    local tag). WHY: leftover drafts clutter the release page, and tag hygiene
    protects the changelog logic.
 
@@ -76,6 +85,10 @@ older shells — this repo's convention). `gh` is already authenticated as
   `engine/verify-hooks.ps1` before tagging** — the sampler hook can be lost
   silently (compiles, but all solvers/schedulers/guidance go dead) and
   nothing in CI or the asset check catches it.
+- **`node server/scripts/check-release-prereqs.mjs` exits 0** (golden rule 8).
+  If this cycle added a model, its weights must already be uploaded and in
+  `server/src/data/model-registry.json` — uploading after the release is live
+  does not help anyone who already downloaded it.
 - Pick the version: look at the latest release
   (`gh release list --limit 3`) and bump semver appropriately.
 

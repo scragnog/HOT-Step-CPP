@@ -66,7 +66,16 @@ Deep API/log detail lives in [reference.md](reference.md) in this folder.
    screenshots. Browser/`Invoke-RestMethod` IS fine for non-visual API checks.
    WHY: the browser agent is too slow/unreliable in this environment.
 
-9. **Don't clobber the user's generation queue.** Jobs run one at a time on a single
+9. **A feature is not done until a USER can run it.** Anything the app resolves
+   at runtime — model weights, a data file, a binary — must be reachable by
+   someone who downloaded a release, not just present on this machine. Run
+   `node server/scripts/check-release-prereqs.mjs` before any push (§ Tier 6).
+   WHY: this has shipped broken twice. MM3 training asked for two GGUFs that
+   existed only on the dev box (#137), and the MM3 caption corpus was committed
+   but never copied into the archives (#139). Both passed tsc, both built green,
+   both were dead on arrival for every user.
+
+10. **Don't clobber the user's generation queue.** Jobs run one at a time on a single
    GPU. Check `GET /api/generate/queue` before submitting a smoke generation, and
    never call `POST /api/generate/reset-queue` (force-drains everything) without
    asking. WHY: it cancels the user's in-flight work.
@@ -239,6 +248,45 @@ Full request/response/log detail: [reference.md](reference.md).
 8. **Hand off to the human** (Tier 4): file path + seed + params. Do not delete
    the artifacts.
 
+## Tier 6 — Distributability (does it work for someone who is not you?)
+
+Bar: `node server/scripts/check-release-prereqs.mjs` exits 0.
+
+Applies to **any change that adds a file the app looks for at runtime** — a new
+model, a new data file, a new registry entry, a new packaged binary. This tier is
+invisible to every other bar: the path is resolved at runtime, so tsc passes, the
+build is green, and the feature is dead in every download.
+
+```powershell
+node D:\Ace-Step-Latest\hot-step-cpp\server\scripts\check-release-prereqs.mjs
+# --offline to skip the Hugging Face half
+```
+
+What it checks:
+
+1. **Weights** — every entry in `server/src/data/model-registry.json` exists in
+   the Hugging Face repo it names, at the size the registry claims, in a repo
+   that is public. Companion files (LICENSE) too.
+2. **Packs** — no pack references a file id that does not exist (that is how the
+   Model Manager blanked in #120).
+3. **Runtime data** — everything in `server/src/data/` is packaged by
+   `.github/workflows/release.yml`, which copies the directory wholesale for all
+   three platforms. Put new runtime data there and it ships automatically; put it
+   anywhere else and it will not.
+
+What it CANNOT check, so do it by hand:
+
+- A model resolved by prefix scan rather than by registry id. `resolveMm3TrainModels`
+  in `server/src/services/training/mm3Train.ts` takes the newest
+  `mm3-rvq-*.gguf` on disk — the registry has to publish something that matches
+  the prefix, and only a human knows that. **`fs.existsSync` or a directory scan
+  against a models dir is the smell**; grep for those when adding a feature.
+- Anything gated behind an HF token or a licence the user has to accept.
+- Weights you converted locally. Uploading is a deliberate act: `huggingface_hub`
+  is installed and the token is in `~/.cache/huggingface/token`, but ask before
+  pushing anything to a public repo, and credit the original author in the model
+  card if the weights are not ours.
+
 ## Key files
 
 | Path | Role |
@@ -291,6 +339,10 @@ Full request/response/log detail: [reference.md](reference.md).
   `translateParams.ts` but the cross-base fix is unvalidated — never report it working.
 - **DELIBERATE, not a bug:** draft-LM speculative decoding is disabled by a code
   comment in `server/src/config.ts` (~line 117).
+- **VALIDATED (twice, in production):** local presence is not distribution.
+  MM3 training required `mm3-rvq-*.gguf` + `mm3-enc-*.gguf` that had never been
+  uploaded (#137, fixed 96d442fb); `mm3-corpus.json` was committed but not copied
+  into release archives (#139). Tier 6 exists because of these.
 - **VALIDATED:** smoke generations queue globally one-at-a-time behind the user's
   jobs — check `GET /api/generate/queue` first; `reset-queue` is destructive.
 

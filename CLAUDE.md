@@ -51,6 +51,30 @@ LAUNCH.bat → Node server (Express :3001)
 - **Releases:** push a `vX.Y.Z` tag → the `Release` workflow builds all platforms and drafts a GitHub Release. **Any pushed `v*` tag triggers a build** — use a `-CI-Test` suffix for throwaway compile checks, and don't push local feature tags matching `v*`. Full process + gotchas: [docs/RELEASING.md](docs/RELEASING.md).
 - Use `gh` CLI for GitHub ops (authenticated as `scragnog`).
 
+## Shipping to users (works here ≠ works for them)
+
+This is a public app. A feature can pass every local check because **this machine**
+holds a file that was never part of the distribution — model weights sitting in
+`models/`, a data file that CI never copies into the archive. Nothing catches it:
+paths are resolved at runtime, so tsc is clean and the build is green, and the
+feature is simply dead for everyone who downloads it. It has shipped twice
+(MM3 training encoders, #137; the MM3 caption corpus, #139).
+
+- **Any new file the app resolves at runtime must be reachable by a user** —
+  weights uploaded to Hugging Face **and** listed in
+  [`server/src/data/model-registry.json`](server/src/data/model-registry.json);
+  runtime data files packaged by [`release.yml`](.github/workflows/release.yml)
+  (it copies `server/src/data/` wholesale, so put them there).
+- **Before pushing anything to `master`, and always before a release tag:**
+
+  ```
+  node server/scripts/check-release-prereqs.mjs
+  ```
+
+  It verifies every registry entry exists on HF at the claimed size, that packs
+  reference real files, and that every runtime data file gets packaged. Exit 1 =
+  do not ship. Details: [.claude/skills/validating-changes/SKILL.md](.claude/skills/validating-changes/SKILL.md) (Tier 6).
+
 ## Upstream sync (fork hooks that break silently)
 
 The C++ engine is a patched fork of acestep.cpp. Three upstream files carry HOT-Step `#include` hooks that break if overwritten during a sync:

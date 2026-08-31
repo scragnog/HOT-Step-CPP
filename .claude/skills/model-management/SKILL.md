@@ -33,7 +33,8 @@ All paths are repo-relative to the repo root (`d:\Ace-Step-Latest\hot-step-cpp`)
 4. **Quantize from BF16 sources only, and never quantize the VAE.** `quantize.exe` reads BF16 GGUF input; VAE-arch tensors and small/critical tensors (`silence_latent`, `scale_shift_table`, `null_condition_emb`, 1-D tensors, text-enc `embed_tokens`) are deliberately never quantized (`engine/tools/quantize.cpp:89-109`). WHY: quantizing these destroys audio quality or breaks generation outright.
 5. **Rebuild rules apply here too:** any change to `engine/src/model-registry.h`, `model-store.h`, `gguf-weights.h`, etc. means rebuild via `dev-rebuild.bat` at repo root — never `engine/build.cmd` directly (you cannot reliably tell whether the app is running; Node auto-respawns ace-server, and killing it uncleanly causes an infinite respawn + file-lock loop). Never `cmake --clean-first` (20+ min CUDA recompile).
 6. **Runtime DLLs do not go in `models/`.** Catalogue entries with `role: "runtime"` (cuBLAS, cudart, ONNX Runtime, cuDNN) install **next to `ace-server.exe`** (`modelDownloadService.ts:110-118`). WHY: missing DLLs there are the #1 cause of the "crashed 3 times within 30s — giving up" loop.
-7. **Model/adapters directory paths are restart-required config.** `ACESTEPCPP_MODELS` / `ACESTEPCPP_ADAPTERS` env vars override defaults `<repo>/models` and `<repo>/adapters` (`server/src/config.ts:53-54,100-101`); the engine gets them as spawn-time `--models`/`--adapters` flags.
+7. **A model that only exists on this machine does not exist.** Adding a model the app resolves at runtime is a three-part act: upload the weights to Hugging Face, add the entry to `server/src/data/model-registry.json`, and put it in a pack if a feature requires it. Do all three or none — a feature gated on a file that was never uploaded looks fine here and is dead for every user. Verify with `node server/scripts/check-release-prereqs.mjs`. WHY: MM3 training shipped in v1.3 demanding `mm3-rvq-*.gguf` and `mm3-enc-*.gguf` that had never left the dev box (#137, fixed 96d442fb).
+8. **Model/adapters directory paths are restart-required config.** `ACESTEPCPP_MODELS` / `ACESTEPCPP_ADAPTERS` env vars override defaults `<repo>/models` and `<repo>/adapters` (`server/src/config.ts:53-54,100-101`); the engine gets them as spawn-time `--models`/`--adapters` flags.
 
 ## Directory layout (expected)
 
@@ -117,6 +118,42 @@ First applied 2026-07-15: hrktxz xl_sft_turbo (plain int8) → `acestep-v15-xl-s
 3. Check the newest `logs\<session>\ace_engine.log` for `[Registry] <file> -> DiT` (or LM/VAE/...). A `WARNING: skipping X (unknown architecture)` means the GGUF header lacks a recognized `general.architecture` (`acestep-lm|acestep-dit|acestep-text-enc|acestep-vae|pp-vae`, `model-registry.h:99-130`).
 4. The file now appears in `GET /api/models` (Node proxies engine `/props`; buckets `lm`, `embedding`, `dit`, `vae` — `hot-step-server.cpp:2326-2329` — the compiled server, not the uncompiled ace-server.cpp).
 
+## Procedure: publish a new model so users can get it
+
+Local conversion/quantization is only half the job. Until these steps are done
+the model does not exist for anyone but you.
+
+1. **Upload the weights.** `huggingface_hub` is installed; the token lives in
+   `~/.cache/huggingface/token` (account `scragnog`). **Ask the user before
+   pushing to a public repo** — it is outward-facing and hard to walk back.
+
+   ```python
+   from huggingface_hub import HfApi
+   HfApi().upload_file(path_or_fileobj='models/mm3/<file>.gguf', path_in_repo='<file>.gguf',
+                       repo_id='scragnog/<repo>', repo_type='model',
+                       commit_message='Add <file>')
+   ```
+
+2. **Add the registry entry** to `server/src/data/model-registry.json` — `id`,
+   `filename`, `role`, `subdir`, `displayName`, `quant`, exact `sizeBytes`
+   (the downloader validates size ±5%), `repo`, `description`, `tags`, and a
+   `companions` LICENSE entry if the weights carry one. The JSON round-trips
+   exactly under `json.dumps(indent=2, ensure_ascii=False)`, so it can be edited
+   programmatically without reformatting the whole file.
+
+3. **Add it to a pack** if a feature needs it, and check the reverse: a feature
+   that resolves files by *prefix scan* rather than by registry id (e.g.
+   `resolveMm3TrainModels` takes the newest `mm3-rvq-*.gguf` on disk) will not
+   be satisfied unless a published filename matches the prefix.
+
+4. **Credit the author** in the HF model card if the weights are not ours, and
+   keep the upstream licence. Community encoders and adapters are other
+   people's work.
+
+5. **Verify**: `node server/scripts/check-release-prereqs.mjs` — checks every
+   entry resolves on HF at the claimed size, packs reference real ids, and
+   runtime data files are packaged. Exit 1 = do not ship.
+
 ## Procedure: drive the Model Manager via API
 
 Routes in `server/src/routes/modelManager.ts`, mounted at `/api/model-manager`:
@@ -166,9 +203,23 @@ Download mechanics: HuggingFace URL `https://huggingface.co/{repo}/resolve/main/
 
 ## Institutional knowledge
 
+- **VALIDATED (production incident, 2026-08-31):** the registry and Hugging Face
+  are the distribution boundary, not `models/`. MM3 training in v1.3 required
+  `mm3-rvq-*.gguf` + `mm3-enc-*.gguf`, which existed only on the dev machine and
+  in neither the catalogue nor any HF repo, so the Training Studio asked every
+  user for files that could not be obtained (#137). Fixed 96d442fb by publishing
+  both and adding a `minimax-music3-training` pack (which also carries
+  `mm3-depth-f16` — the trainer needs f16 depth while every generation pack ships
+  a quantised one). `node server/scripts/check-release-prereqs.mjs` now gates it.
+- **The RVQ encoder is not ours.** `mm3-rvq-53kpooled-f32.gguf` is PurpleOrc's
+  open-rvq (SimpleTuner v4 architecture, 53k-track corpus), mirrored to our repo
+  under the same MiniMax-Music3 community terms with credit in the model card.
+  Codes are encoder-specific: an adapter trained on these codes must keep using
+  this encoder, so replacing it means re-exporting every code cache.
+
 - **VALIDATED — subdir-GGUF blind spot:** engine scans root-only for `.gguf`; Node installed-check scans one subdir level. This mismatch is a real, recurring "installed but not selectable" source (code cited in golden rule 2).
 - **VALIDATED — truncation guard exists for a reason:** the byte-range check in `gf_load()` (`gguf-weights.h:132-150`) was added specifically because truncated downloads used to segfault deep in `cuMemcpyHtoDAsync`. Keep it if touching the loader.
-- **VALIDATED — catalogue entry without `repo`:** `vae-dreamvae-onnx` in `model-registry.json` has no `repo` field, so `startDownload` builds `https://huggingface.co/undefined/...` and fails. It exists locally on the dev machine; display-only. (The Regrind V9b entries had the same gap until 2026-07-29 — all 8 Regrind VAEs now carry `repo: mdmachine/ACEStep-XL-Regrind-V1` + `repoPath: vae/...`; that repo keeps files in `vae/`/`dit/`/`lora/` subfolders, so `repoPath` is mandatory for anything added from it.)
+- **CORRECTED 2026-08-31 — the `repo`-less entry is fixed.** `vae-dreamvae-onnx` used to have no `repo` field, so `startDownload` built `https://huggingface.co/undefined/...` and failed; it now carries `repo: daydreamlive/DreamVAE` + `repoPath: onnx/model.onnx` and resolves (verified by `check-release-prereqs.mjs`). The failure mode is still worth knowing: an entry missing `repo` is display-only, visible in the catalogue and undownloadable, which is exactly the class of fault the prereq check now catches. (The Regrind V9b entries had the same gap until 2026-07-29 — all 8 Regrind VAEs now carry `repo: mdmachine/ACEStep-XL-Regrind-V1` + `repoPath: vae/...`; that repo keeps files in `vae/`/`dit/`/`lora/` subfolders, so `repoPath` is mandatory for anything added from it.)
 - **VALIDATED — installed-check is name-only:** filename presence, no size/hash (`modelDownloadService.ts:177-208`). A stale/partial file with the right name shows "installed".
 - **VALIDATED — `--keep-loaded` trade-off:** default EVICT_STRICT reloads models per request; `ACESTEPCPP_KEEP_LOADED=1` → `--keep-loaded` (EVICT_NEVER) avoids ~17 s LoKr adapter precompute per request but pins ~13 GB VRAM (`config.ts:124-132`, `index.ts:177-184`). Warm-on-startup env vars (`ACESTEPCPP_WARM_DIT`/`_VAE`/`_ADAPTER`) only fire when keepLoaded is on.
 - **VALIDATED — DiT instances cache per adapter combo:** ModelKey includes adapter path/scale, per-group scales, basin re-base (`rebase_source`/`rebase_beta`), and multi-adapter `adapter_stack` signature (`model-store.h:83-103`) — different values = distinct cached DiTs, each costing VRAM under keep-loaded.
