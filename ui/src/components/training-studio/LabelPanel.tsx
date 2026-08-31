@@ -191,6 +191,18 @@ export const LabelPanel: React.FC = () => {
               </div>
             );
           })()}
+          {/* Say why MOSS is not on offer. The server already works out which
+              of the two causes it is — the binary is not there, or the weights
+              are not — because the user's next action is completely different
+              for each, and then the UI used to drop that on the floor and just
+              hide the option. Someone with 9.7 GB of MOSS weights correctly
+              installed had no way to discover that the missing piece was
+              ace-caption, which no release before v1.4 packaged at all. */}
+          {effectiveCaption && !mossOk && caps?.moss.missing && (
+            <div className="ml-6 text-[11px] text-zinc-500">
+              MOSS (local) unavailable: {caps.moss.missing}
+            </div>
+          )}
           {captionOk ? (
             <div className="ml-6 text-[11px] text-zinc-500">{t('trainingStudio.label.useCaptionHint')}</div>
           ) : (

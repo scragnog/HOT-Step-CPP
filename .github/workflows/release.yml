@@ -396,7 +396,7 @@ jobs:
           $engineFiles = @(
             "ace-server.exe", "mastering.exe", "mp3-codec.exe",
             "neural-codec.exe", "vst-host.exe", "quantize.exe",
-            "ace-midi.exe", "ace-train.exe",
+            "ace-midi.exe", "ace-train.exe", "ace-caption.exe",
             "ggml.dll", "ggml-base.dll", "ggml-cpu.dll"
           )
 
@@ -418,7 +418,11 @@ jobs:
           # v1.2.1 shipped without ace-train.exe — the Training Studio UI was
           # present but every job 503'd ("ace-train was not found next to
           # ace-server"). Warnings scroll past in a green log; this does not.
-          foreach ($req in @("ace-server.exe", "ace-train.exe")) {
+          # Then every release through v1.3 shipped without ace-caption.exe, so
+          # the MOSS captioner could never appear however many GB of MOSS
+          # weights a user downloaded. Same mistake, one binary along: a new
+          # tool must join BOTH this guard and the copy list above.
+          foreach ($req in @("ace-server.exe", "ace-train.exe", "ace-caption.exe")) {
             if (-not (Test-Path (Join-Path $engineOut $req))) {
               throw "FATAL: required engine binary missing from package: $req"
             }
@@ -807,7 +811,7 @@ jobs:
           # Engine binaries
           mkdir -p "$DIST/engine"
           BUILD_DIR="engine/build"
-          for bin in ace-server mastering mp3-codec neural-codec vst-host quantize ace-midi ace-train; do
+          for bin in ace-server mastering mp3-codec neural-codec vst-host quantize ace-midi ace-train ace-caption; do
             if [ -f "$BUILD_DIR/$bin" ]; then
               cp "$BUILD_DIR/$bin" "$DIST/engine/$bin"
             fi
@@ -816,8 +820,11 @@ jobs:
           # Required binaries: a missing one is a broken release, not a silent
           # skip. v1.2.1 shipped without ace-train — the Training Studio UI was
           # present but every job 503'd ("ace-train was not found next to
-          # ace-server"). Fail the build instead of packaging it.
-          for req in ace-server ace-train; do
+          # ace-server"). Then every release through v1.3 shipped without
+          # ace-caption, so the MOSS captioner could never appear however many
+          # GB of MOSS weights a user downloaded. A new tool must join BOTH this
+          # guard and the copy list above. Fail the build instead of packaging it.
+          for req in ace-server ace-train ace-caption; do
             if [ ! -f "$DIST/engine/$req" ]; then
               echo "FATAL: required engine binary missing from package: $req"
               exit 1
@@ -1303,7 +1310,7 @@ jobs:
           # Engine binaries
           mkdir -p "$DIST/engine"
           BUILD_DIR="engine/build"
-          for bin in ace-server mastering mp3-codec neural-codec vst-host quantize ace-midi ace-train; do
+          for bin in ace-server mastering mp3-codec neural-codec vst-host quantize ace-midi ace-train ace-caption; do
             if [ -f "$BUILD_DIR/$bin" ]; then
               cp "$BUILD_DIR/$bin" "$DIST/engine/$bin"
             fi
@@ -1312,8 +1319,11 @@ jobs:
           # Required binaries: a missing one is a broken release, not a silent
           # skip. v1.2.1 shipped without ace-train — the Training Studio UI was
           # present but every job 503'd ("ace-train was not found next to
-          # ace-server"). Fail the build instead of packaging it.
-          for req in ace-server ace-train; do
+          # ace-server"). Then every release through v1.3 shipped without
+          # ace-caption, so the MOSS captioner could never appear however many
+          # GB of MOSS weights a user downloaded. A new tool must join BOTH this
+          # guard and the copy list above. Fail the build instead of packaging it.
+          for req in ace-server ace-train ace-caption; do
             if [ ! -f "$DIST/engine/$req" ]; then
               echo "FATAL: required engine binary missing from package: $req"
               exit 1

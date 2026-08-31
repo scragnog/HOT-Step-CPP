@@ -151,10 +151,72 @@ function checkPackagedData() {
   }
 }
 
+// ── 3. Engine binaries the server spawns are packaged ───────────────────────
+//
+// Third instance of the same fault: v1.2.1 shipped without ace-train and every
+// Training Studio job 503'd; every release through v1.3 shipped without
+// ace-caption, so the MOSS captioner could never appear no matter how many GB
+// of MOSS weights a user downloaded. The engine builds sixteen executables and
+// the release packages nine of them, by hand, in three separate places.
+//
+// The rule enforced here: if server/src names a CMake executable target, that
+// binary must be in the package. Dev-only tools are listed below so a mention
+// in a comment cannot fail the check — anything else new defaults to "must
+// ship", which is the safe direction.
+
+const CMAKE = path.join(REPO_ROOT, 'engine', 'CMakeLists.txt');
+
+/** Tools that exist for development and are deliberately not distributed. */
+const DEV_ONLY = new Set([
+  'sa3-ggml-test', 'moss-ggml-test', 'bs-roformer-test', 'mdx23c-test',
+  'ace-synth', 'ace-lm', 'ace-understand',   // CLI equivalents of what ace-server does in-process
+]);
+
+function checkEngineBinaries() {
+  if (!fs.existsSync(CMAKE) || !fs.existsSync(WORKFLOW)) {
+    notes.push('CMakeLists.txt or release.yml not found — skipped the binary check');
+    return;
+  }
+  const cmake = fs.readFileSync(CMAKE, 'utf-8');
+  const wf = fs.readFileSync(WORKFLOW, 'utf-8');
+  const targets = [...cmake.matchAll(/^\s*add_executable\(([A-Za-z0-9_-]+)/gm)].map(m => m[1]);
+
+  // Server sources, flattened once — the reference test is a word match.
+  const srcDir = path.join(REPO_ROOT, 'server', 'src');
+  let src = '';
+  (function walk(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.ts')) src += fs.readFileSync(p, 'utf-8');
+    }
+  })(srcDir);
+
+  for (const t of targets) {
+    if (DEV_ONLY.has(t)) continue;
+    const referenced = new RegExp(`\\b${t.replace(/[-]/g, '\\-')}\\b`).test(src);
+    if (!referenced) {
+      notes.push(`engine target "${t}" is not referenced by the server — not checked`);
+      continue;
+    }
+    // Packaged if it appears in release.yml outside of prose. Both the
+    // PowerShell array and the shell for-loop name it bare or with .exe.
+    const packaged = new RegExp(`["\\s]${t}(\\.exe)?["\\s,]`).test(wf);
+    if (!packaged) {
+      problems.push(`engine binary "${t}" is spawned by the server but never packaged by release.yml — the feature that spawns it is dead in every download`);
+    } else {
+      console.log(`  ${t}: packaged`);
+    }
+  }
+}
+
 // ── Run ─────────────────────────────────────────────────────────────────────
 
 console.log('Registry pack ids');
 checkPackIds();
+
+console.log('\nEngine binaries');
+checkEngineBinaries();
 
 console.log('\nPackaged runtime data');
 checkPackagedData();

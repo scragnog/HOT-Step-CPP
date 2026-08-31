@@ -119,6 +119,15 @@ export const EnhancePanel: React.FC<EnhancePanelProps> = ({ selectedSampleIds, d
                       onChange={(v) => { setProvider(v); setModel(''); }}
                       options={providers.map(p => ({ value: p.id, label: p.name }))}
                     />
+                    {/* Same reason as LabelPanel: the server knows whether the
+                        binary or the weights are missing, and silently dropping
+                        that leaves the user hunting for a provider that cannot
+                        appear. */}
+                    {!caps?.moss.available && caps?.moss.missing && (
+                      <span className="text-[10px] text-zinc-500">
+                        MOSS (local) unavailable: {caps.moss.missing}
+                      </span>
+                    )}
                   </div>
                   {/* MOSS is one fixed local model — an empty picker beside it
                       reads as "still loading", so it is omitted entirely. */}
