@@ -1732,6 +1732,13 @@ router.get('/datasets/:id/mm3', async (req: Request, res: Response) => {
       const meta = JSON.parse(fs.readFileSync(path.join(inner, 'codes.json'), 'utf-8'));
       encoder = typeof meta?.encoder === 'string' ? path.basename(meta.encoder) : '';
     } catch { /* no cache yet */ }
+    // The laundered cache is a sibling, never a replacement — both counts are
+    // reported so the card can say which kinds exist.
+    let codesLaundered = 0;
+    try {
+      const innerL = path.join(mm3CodesDir(ds.slug, true), 'codes');
+      codesLaundered = fs.readdirSync(innerL).filter(f => f.endsWith('.codes')).length;
+    } catch { /* no laundered cache yet */ }
     // The card, from the engine's own reading rather than a guess. Short
     // timeout and a 0 fallback: this endpoint is polled, and a picker that
     // stalls because ace-server is restarting is worse than one without a fit
@@ -1760,7 +1767,9 @@ router.get('/datasets/:id/mm3', async (req: Request, res: Response) => {
       encoder,
       // Reported separately because the two stages need different files: the
       // codes job wants the encoders, training wants the F16 LM + depth.
+      codesLaundered,
       missingForCodes: missingMm3TrainModels('codes'),
+      missingForLaunder: missingMm3TrainModels('launder'),
       missingForTrain: missingMm3TrainModels('train'),
       // Only offer bases that are installed — a picker listing a file that is
       // not there just moves the failure to spawn time. Sized at the DEFAULT
@@ -1804,18 +1813,24 @@ router.post('/datasets/:id/mm3-codes', (req: Request, res: Response) => {
   try {
     const ds = mm3Preflight(req, res);
     if (!ds) return;
-    const missing = missingMm3TrainModels('codes');
+    const body = (req.body || {}) as { maxDuration?: unknown; launder?: unknown };
+    // The launder gate. Off (absent/false) = plain mm3-codes into mm3-codes/,
+    // byte-identical to the pipeline before the gate existed. On = ace-train
+    // mm3-launder into mm3-codes-laundered/ — a SEPARATE cache, so the toggle
+    // can never silently serve the other kind's codes.
+    const launder = body.launder === true;
+    const missing = missingMm3TrainModels(launder ? 'launder' : 'codes');
     if (missing.length) {
       res.status(400).json({ error: `MiniMax-Music3 encoder files are missing: ${missing.join(', ')}` });
       return;
     }
-    const body = (req.body || {}) as { maxDuration?: unknown };
     const maxDuration = Number(body.maxDuration);
     const job = queue.startMm3CodesJob(ds.id, {
       datasetSlug: ds.slug,
       datasetJson: ds.datasetJsonPath,
-      outDir: mm3CodesDir(ds.slug),
+      outDir: mm3CodesDir(ds.slug, launder),
       maxDuration: Number.isFinite(maxDuration) && maxDuration > 0 ? maxDuration : undefined,
+      launder,
     });
     res.json({ jobId: job.id, kind: job.kind });
   } catch (err: any) {
@@ -1946,12 +1961,18 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       return;
     }
 
-    const codesDir = mm3CodesDir(ds.slug);
+    // The training half of the launder gate: opt-in per run, and the two code
+    // caches are separate dirs, so an absent flag trains on exactly the codes
+    // it always has.
+    const trainLaunder = (req.body || {}).launder === true;
+    const codesDir = mm3CodesDir(ds.slug, trainLaunder);
     const codesInner = path.join(codesDir, 'codes');
     const nCodes = fs.existsSync(codesInner)
       ? fs.readdirSync(codesInner).filter(f => f.endsWith('.codes')).length : 0;
     if (nCodes === 0) {
-      res.status(400).json({ error: 'No RVQ codes for this dataset — run the codes export first' });
+      res.status(400).json({ error: trainLaunder
+        ? 'No laundered codes for this dataset — run the codes export with laundering enabled first'
+        : 'No RVQ codes for this dataset — run the codes export first' });
       return;
     }
 

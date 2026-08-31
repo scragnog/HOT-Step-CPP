@@ -151,7 +151,18 @@ def main():
                     help="f32 by default: the parity gate compares ARGMAX codes "
                          "against the python exporter, and near-tie logits flip "
                          "under f16. Ship f16 only once parity holds at f32.")
+    ap.add_argument("--head", default=None,
+                    help="rec7 state head (head.pt): adds hhead.* tensors and flags "
+                         "the file as a STATE encoder (audio -> LM frame hiddens)")
+    ap.add_argument("--m3", default=None,
+                    help="MiniMax-Music3 checkpoint dir; with --head, slices the "
+                         "LM's semantic lm_head/embed rows into the file so the "
+                         "cond builder never needs the 8B loaded")
     a = ap.parse_args()
+    if bool(a.head) != bool(a.m3):
+        print("error: --head and --m3 come together (a state encoder without the "
+              "LM tables cannot build the renderer condition)", file=sys.stderr)
+        return 2
 
     try:
         import gguf
@@ -173,8 +184,57 @@ def main():
               f"({len(missing)} missing, {len(extra)} extra, {len(bad)} mis-shaped)", file=sys.stderr)
         return 1
 
-    total = sum(v.size for v in sd.values())
-    print(f"[rvq] {a.src}: {len(sd)} tensors, {total/1e6:.1f}M params")
+    # rec7's state head (HHead: 1088 -> 2048 -> gelu -> 4096) + the two 16k-row
+    # LM table slices its cond builder needs (exactly rec7_model.py's
+    # lm_semantic_tables — sliced HERE, offline, so the engine side never touches
+    # the 8B). Stored under reserved names outside the V4 inventory.
+    H_DIM, SEM_OFFSET = 4096, 151675
+    extra = {}
+    if a.head:
+        hd = load_state(a.head)
+        want_h = {"net.0.weight": (2048, D_MODEL), "net.0.bias": (2048,),
+                  "net.2.weight": (H_DIM, 2048), "net.2.bias": (H_DIM,)}
+        bad_h = [k for k in want_h if k not in hd or tuple(hd[k].shape) != want_h[k]]
+        if bad_h or set(hd) - set(want_h):
+            print(f"error: head checkpoint does not match the HHead contract: {bad_h or sorted(set(hd)-set(want_h))}",
+                  file=sys.stderr)
+            return 1
+        for k, v in hd.items():
+            extra["hhead." + k] = v
+
+        import os
+        from safetensors import safe_open
+        root = None
+        for cand in ("language_model", os.path.join("qwen_7B", "qwen_7B")):
+            c = os.path.join(a.m3, cand)
+            if os.path.exists(os.path.join(c, "model.safetensors.index.json")) or                os.path.exists(os.path.join(c, "model.safetensors")):
+                root = c
+                break
+        if root is None:
+            print(f"error: language model safetensors not found under {a.m3}", file=sys.stderr)
+            return 1
+
+        def sem_slice(suffix):
+            idx = os.path.join(root, "model.safetensors.index.json")
+            if os.path.exists(idx):
+                import json
+                wm = json.load(open(idx, encoding="utf-8"))["weight_map"]
+                key = next(k for k in wm if k.endswith(suffix))
+                fp = os.path.join(root, wm[key])
+            else:
+                fp = os.path.join(root, "model.safetensors")
+                with safe_open(fp, framework="pt") as f:
+                    key = next(k for k in f.keys() if k.endswith(suffix))
+            with safe_open(fp, framework="pt") as f:
+                t = f.get_slice(key)[SEM_OFFSET: SEM_OFFSET + SEM_VOCAB]
+            return t.float().numpy()
+
+        extra["lm.sem_head"] = sem_slice("lm_head.weight")     # [16384, 4096]
+        extra["lm.sem_embd"] = sem_slice("embed_tokens.weight")
+
+    total = sum(v.size for v in sd.values()) + sum(v.size for v in extra.values())
+    print(f"[rvq] {a.src}: {len(sd)}+{len(extra)} tensors, {total/1e6:.1f}M params"
+          + (" (STATE encoder)" if a.head else ""))
 
     w = gguf.GGUFWriter(a.out, ARCH)
     w.add_name(a.name)
@@ -216,11 +276,21 @@ def main():
     # producing wrong codes.
     w.add_string(f"{ARCH}.norm_order", "pre")
     w.add_string(f"{ARCH}.activation", "gelu")
+    if a.head:
+        w.add_bool(f"{ARCH}.has_state_head", True)
+        w.add_uint32(f"{ARCH}.state_dim", H_DIM)
+        # rec7_model.read_states: 128-frame windows on hop (frames*9)//16 = 72,
+        # overlap-AVERAGED (not first-wins). Part of the model contract.
+        w.add_uint32(f"{ARCH}.states_hop", (FRAMES * 9) // 16)
+        w.add_uint32(f"{ARCH}.sem_offset", SEM_OFFSET)
 
     # 1-D tensors (norms, biases, embeddings) stay F32 even in f16 mode: they
     # are ~2% of the file and the cheapest possible place to lose precision.
-    for k in sorted(sd):
-        v = sd[k]
+    everything = dict(sd)
+    if a.head:
+        everything.update(extra)
+    for k in sorted(everything):
+        v = everything[k]
         if k in ("pos", "depth.pos"):
             v = v[0]                      # drop the leading batch axis
         arr = v.astype(np.float16) if (a.quant == "f16" and v.ndim >= 2) else v.astype(np.float32)

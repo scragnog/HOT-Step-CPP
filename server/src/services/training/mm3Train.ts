@@ -47,6 +47,9 @@ export interface Mm3TrainModels {
   rvq: string;
   /** DAV encoder (audio -> latents), the mm3-codes input stage. */
   enc: string;
+  /** rec7 state encoder (audio -> LM frame hiddens), the launder stage. Any
+   *  mm3-rec7-*.gguf; newest wins. Empty string when none is installed. */
+  rec7: string;
 }
 
 function mm3ModelDir(): string {
@@ -84,16 +87,25 @@ export function resolveMm3TrainModels(base: Mm3BasePrecision = 'f16'): Mm3TrainM
     depth: path.join(dir, 'mm3-depth-f16.gguf'),
     rvq:   newestMatching(dir, 'mm3-rvq-'),
     enc:   newestMatching(dir, 'mm3-enc-'),
+    rec7:  newestMatching(dir, 'mm3-rec7-'),
   };
 }
 
 /** Which of the required files are missing, as user-facing names. Empty = ready.
  *  `need` narrows the check: the codes job does not need the LM. */
-export function missingMm3TrainModels(need: 'codes' | 'train',
+export function missingMm3TrainModels(need: 'codes' | 'train' | 'launder',
                                       base: Mm3BasePrecision = 'f16'): string[] {
   const m = resolveMm3TrainModels(base);
   const wanted: Array<[string, string]> = need === 'codes'
     ? [[m.rvq, 'an RVQ encoder (mm3-rvq-*.gguf)'], [m.enc, 'the DAV encoder (mm3-enc-*.gguf)']]
+    : need === 'launder'
+    // The launder runs the whole render stack: DAV in, rec7 states, the
+    // released depth chain (which needs the LM's token embedding resident),
+    // the flow DiT, and the champion back out.
+    ? [[m.rvq, 'an RVQ encoder (mm3-rvq-*.gguf)'], [m.enc, 'the DAV encoder (mm3-enc-*.gguf)'],
+       [m.rec7, 'the rec7 state encoder (mm3-rec7-*.gguf)'],
+       [path.join(mm3ModelDir(), 'mm3-lm-q8_0.gguf'), 'mm3-lm-q8_0.gguf'],
+       [m.depth, 'mm3-depth-f16.gguf']]
     : [[m.lm, path.basename(m.lm)], [m.depth, 'mm3-depth-f16.gguf']];
   return wanted.filter(([p]) => !p || !fs.existsSync(p)).map(([, label]) => label);
 }
@@ -428,8 +440,10 @@ export function recommendMm3Config(gpuTotalMb: number,
  *  keeping them under the dataset means deleting a dataset takes its derived
  *  data with it. Re-encoding with a different encoder overwrites, and
  *  `codes.json` records which encoder produced what. */
-export function mm3CodesDir(slug: string): string {
-  return path.join(datasetDir(slug), 'mm3-codes');
+export function mm3CodesDir(slug: string, laundered = false): string {
+  // Two caches, never one dir with two producers: flipping the toggle must
+  // not silently reuse the other kind's codes.
+  return path.join(datasetDir(slug), laundered ? 'mm3-codes-laundered' : 'mm3-codes');
 }
 
 /** Adapters go straight where the picker looks. Writing anywhere else would
@@ -812,18 +826,37 @@ export interface Mm3CodesArgs {
   datasetJson: string;
   outDir: string;
   maxDuration?: number;
+  /** Cover-launder: real audio -> rec7 states -> flow DiT latents -> champion
+   *  codes (ace-train mm3-launder). Ear-validated for dense-mix artists
+   *  (deftones A/B, 2026-08-31). Off = plain mm3-codes, byte-identical to the
+   *  pipeline before this option existed. */
+  launder?: boolean;
 }
 
 export function buildMm3CodesArgs(a: Mm3CodesArgs): string[] {
   const m = resolveMm3TrainModels();
-  const args = [
-    'mm3-codes', '--jsonl',
-    '--dataset', a.datasetJson,
-    '--rvq', m.rvq,
-    '--enc', m.enc,
-    '--out', a.outDir,
-  ];
-  if (a.maxDuration && a.maxDuration > 0) args.push('--max-duration', String(Math.round(a.maxDuration)));
+  const args = a.launder
+    ? [
+        'mm3-launder', '--jsonl',
+        '--dataset', a.datasetJson,
+        '--rvq', m.rvq,
+        '--enc', m.enc,
+        '--rec7', m.rec7,
+        '--models', mm3ModelDir(),
+        '--out', a.outDir,
+      ]
+    : [
+        'mm3-codes', '--jsonl',
+        '--dataset', a.datasetJson,
+        '--rvq', m.rvq,
+        '--enc', m.enc,
+        '--out', a.outDir,
+      ];
+  // The launder renders through the DiT, so its 359 s ceiling is the engine's
+  // 9000-frame cap, not a preference — clamp rather than refuse.
+  const cap = a.launder ? 359 : Infinity;
+  const md = a.maxDuration && a.maxDuration > 0 ? Math.min(Math.round(a.maxDuration), cap) : (a.launder ? 359 : 0);
+  if (md > 0) args.push('--max-duration', String(md));
   return args;
 }
 

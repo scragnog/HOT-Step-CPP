@@ -852,3 +852,24 @@ grep -E "songs \(|evaluation:|caption begins|VRAM after" <train.log>
 
 Expect: sensible train/holdout split, a non-zero eval crop count, the caption
 starting with the trigger exactly once, and VRAM inside the card.
+
+## Cover-laundered codes for dense-mix artists (2026-08-31)
+
+The champion code encoder is balance-sensitive: on real dense mixes the vocal
+sinks out of the code targets, and the adapter clones the deficiency. The fix
+is `ace-train mm3-launder` — real audio -> rec7 states -> the flow DiT's own
+latents -> champion codes — which puts the vocal where the codes can carry it.
+**Ear-validated (Deftones White Pony A/B, identical recipes, only the training
+audio differed): the laundered arm won "on every metric I can hear".**
+
+In the app: the codes card's "Cover-launder" checkbox exports into a SIBLING
+cache (`mm3-codes-laundered/`), and the train form offers "Train on
+cover-laundered codes" only when that cache exists. Off = the standard
+pipeline, byte-identical. ~1.4x realtime per track, once per dataset, cached
+forever. Needs `mm3-rec7-*.gguf` installed (converted with
+`convert-rvq-encoder.py --head --m3` — the file carries the LM's semantic
+table slices, so laundering never runs the 8B's forward).
+
+When to use it: albums where the vocal or lead lines bury in the mix
+(nu-metal, shoegaze, dense punk). Unmeasured on sparse/acoustic corpora — do
+not assume it helps there; A/B before adopting it as a house default.

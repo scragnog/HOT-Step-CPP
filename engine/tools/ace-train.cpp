@@ -16,6 +16,7 @@
 #include "minimax/mm3-ar-loop.h"
 #include "minimax/mm3-cond-graph.h"
 #include "minimax/mm3-rvq-encode.h"  // audio -> RVQ codes (open-RVQ 169M)
+#include "minimax/mm3-rec7.h"        // audio -> LM frame hiddens (rec7 state encoder)
 #include "train/mm3-lm-load.h"          // MM3 LM -> the ACE LM trainer's struct
 #include "train/mm3-lm-train-run.h"     // MM3 LM LoRA trainer
 #include "train/mm3-dit-train-run.h"   // MM3 flow-DiT LoRA trainer
@@ -4050,6 +4051,527 @@ static int cmd_train_dit(int argc, char ** argv) {
 
 // ─── main ───────────────────────────────────────────────────────────────────
 
+// ─── mm3-launder ────────────────────────────────────────────────────────────
+//
+// Cover-launder a dataset for MM3 LM training: real audio -> rec7 states ->
+// the released depth chain -> the flow DiT's OWN latents -> champion RVQ
+// codes. The ear-validated route-1 pipeline (deftones A/B, 2026-08-31), fully
+// native, with the two audio round-trips removed: no vocode->re-encode between
+// the DiT and the champion (phase-0 measured the stitched flow latents at
+// cosine 0.9936 to the DAV re-encode of their own audio — the difference is
+// inside the champion's redundancy noise), and no FLAC covers on disk.
+//
+// The DiT windows ARE vocoded (mm3_generate is used untouched and the wav is
+// discarded) — a few wasted seconds per track, paid deliberately so this
+// subcommand changes NOTHING in the pipeline: with the gate off, training is
+// byte-identical to today because not one shared code path moved.
+//
+// The LM's weights load (mm3_load_parts wants token_embd for the depth chain)
+// but its forward never runs — stage 1 is skipped via cached_hiddens, which is
+// the entire compute saving of the states route.
+//
+// Output: the standard mm3-codes cache layout (<out>/codes/<id>.codes, warm-up
+// row 0), so the trainer consumes a laundered cache with zero changes.
+static int cmd_mm3_launder(int argc, char ** argv) {
+    std::string ds_path, rvq_path, enc_path, rec7_path, models_dir, out_dir, ffmpeg = "ffmpeg";
+    std::string lm_quant = "q8_0";
+    int         max_duration = 359, steps = 30;
+    uint64_t    seed = 42;
+
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * what) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", what); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--dataset"))      ds_path      = next("--dataset");
+        else if (!strcmp(argv[i], "--rvq"))          rvq_path     = next("--rvq");
+        else if (!strcmp(argv[i], "--enc"))          enc_path     = next("--enc");
+        else if (!strcmp(argv[i], "--rec7"))         rec7_path    = next("--rec7");
+        else if (!strcmp(argv[i], "--models"))       models_dir   = next("--models");
+        else if (!strcmp(argv[i], "--out"))          out_dir      = next("--out");
+        else if (!strcmp(argv[i], "--ffmpeg"))       ffmpeg       = next("--ffmpeg");
+        else if (!strcmp(argv[i], "--lm-quant"))     lm_quant     = next("--lm-quant");
+        else if (!strcmp(argv[i], "--max-duration")) max_duration = atoi(next("--max-duration"));
+        else if (!strcmp(argv[i], "--steps"))        steps        = atoi(next("--steps"));
+        else if (!strcmp(argv[i], "--seed"))         seed         = (uint64_t) atoll(next("--seed"));
+        else if (!strcmp(argv[i], "--jsonl"))        g_jsonl      = true;
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (ds_path.empty() || rvq_path.empty() || enc_path.empty() || rec7_path.empty() ||
+        models_dir.empty() || out_dir.empty()) {
+        fprintf(stderr, "ace-train mm3-launder: --dataset, --rvq, --enc, --rec7, --models and --out "
+                        "are all required\n");
+        return 2;
+    }
+#ifdef _WIN32
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+#else
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+#endif
+
+    std::string err;
+    MM3Rec7     r7 = {};
+    if (!mm3_rec7_load(&r7, rec7_path.c_str(), &err)) {
+        fprintf(stderr, "[mm3-launder] rec7 load failed: %s\n", err.c_str());
+        return 1;
+    }
+    MM3Rvq rvq = {};
+    if (!mm3_rvq_load(&rvq, rvq_path.c_str(), &err)) {
+        fprintf(stderr, "[mm3-launder] RVQ encoder load failed: %s\n", err.c_str());
+        return 1;
+    }
+    MM3Enc enc = {};
+    if (!mm3_enc_load(&enc, enc_path.c_str(), &err)) {
+        fprintf(stderr, "[mm3-launder] DAV encoder load failed: %s\n", err.c_str());
+        return 1;
+    }
+    static MM3Model model;
+    {
+        std::string roles[MM3_R_COUNT];
+        mm3_discover(&model, models_dir.c_str(), lm_quant, roles);
+        if (!mm3_load_parts(&model, /*lm*/ true, /*depth*/ true, /*rest*/ true, &err)) {
+            fprintf(stderr, "[mm3-launder] MM3 load failed: %s\n", err.c_str());
+            return 1;
+        }
+    }
+    const int64_t H   = (int64_t) model.lm_cfg.embedding_length;    // 4096
+    const int64_t LAY = (int64_t) model.lm_cfg.num_codebooks;       // 8
+    const int64_t NC  = LAY - 1;                                    // 7 depth streams
+    const int64_t SR  = (int64_t) enc.cfg.sampling_rate;
+    // Stage 1 is skipped, but the pipeline still assembles/tokenizes the
+    // prompt before it decides that — a null tokenizer fails the whole call
+    // with an empty error (found the hard way).
+    MM3Tokenizer tok;
+    if (!mm3_tokenizer_load(model, &tok, &err)) {
+        fprintf(stderr, "[mm3-launder] tokenizer: %s\n", err.c_str());
+        return 1;
+    }
+    if ((int64_t) r7.state_dim != H) {
+        fprintf(stderr, "[mm3-launder] rec7 state dim %u != LM hidden %lld\n", r7.state_dim, (long long) H);
+        return 1;
+    }
+    // 359 s at 25 fps — one under the pipeline's 9000-frame ceiling.
+    const int64_t T_CAP = (int64_t) max_duration * 25;
+
+    // dataset.json
+    FILE * df = hs_fopen(ds_path, "rb");
+    if (!df) { fprintf(stderr, "cannot open %s\n", ds_path.c_str()); return 1; }
+    fseek(df, 0, SEEK_END);
+    const long dsz = ftell(df);
+    fseek(df, 0, SEEK_SET);
+    std::string dbuf((size_t) dsz, '\0');
+    const bool  dread = fread(&dbuf[0], 1, (size_t) dsz, df) == (size_t) dsz;
+    fclose(df);
+    if (!dread) { fprintf(stderr, "short read on %s\n", ds_path.c_str()); return 1; }
+    yyjson_doc * doc = yyjson_read(dbuf.c_str(), dbuf.size(), 0);
+    yyjson_val * samples = doc ? yyjson_obj_get(yyjson_doc_get_root(doc), "samples") : nullptr;
+    if (!samples || !yyjson_is_arr(samples)) {
+        fprintf(stderr, "%s has no `samples` array\n", ds_path.c_str());
+        if (doc) yyjson_doc_free(doc);
+        return 1;
+    }
+    if (!pm_mkdir_p(out_dir) || !pm_mkdir_p(out_dir + "/codes")) {
+        yyjson_doc_free(doc);
+        fprintf(stderr, "cannot create %s\n", out_dir.c_str());
+        return 1;
+    }
+    auto jstr = [](yyjson_val * o, const char * k) -> std::string {
+        yyjson_val * v = yyjson_obj_get(o, k);
+        return (v && yyjson_is_str(v)) ? std::string(yyjson_get_str(v)) : std::string();
+    };
+
+    const MM3RvqConfig & rc  = rvq.cfg;
+    const int64_t        F   = (int64_t) rc.frames, D = (int64_t) rc.d_model;
+    const int64_t        CH  = (int64_t) rc.latent_channels, LMX = (int64_t) rc.latent_window_max;
+    const int64_t        NAC = (int64_t) rc.n_ac, SV = (int64_t) rc.sem_vocab;
+    std::vector<float>   wlat((size_t) (LMX * CH)), wpool((size_t) (F * LMX));
+    std::vector<float>   wfeats((size_t) (F * D)), wlogits((size_t) (F * SV));
+
+    const std::string tmp_wav = out_dir + "/_mm3_launder_tmp.wav";
+    size_t            idx = 0, ok_n = 0, fail_n = 0;
+    const size_t      n_samples = yyjson_arr_size(samples);
+
+    yyjson_val *    s2;
+    yyjson_arr_iter it = yyjson_arr_iter_with(samples);
+    while ((s2 = yyjson_arr_iter_next(&it))) {
+        idx++;
+        const std::string id      = jstr(s2, "id");
+        const std::string fname   = jstr(s2, "filename");
+        const std::string audio   = jstr(s2, "audio_path");
+        const std::string caption = jstr(s2, "caption");
+        const std::string stem    = id.empty() ? std::to_string(idx) : id;
+        const std::string cp      = out_dir + "/codes/" + stem + ".codes";
+        if (pm_file_exists(cp)) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu %s exists, skip\n", idx, n_samples, stem.c_str());
+            ok_n++;
+            continue;
+        }
+        if (audio.empty()) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu SKIP %s: no audio_path\n", idx, n_samples, fname.c_str());
+            fail_n++;
+            continue;
+        }
+        const int64_t t_song = ggml_time_ms();
+
+        // ── 1. audio (same transcode + planar reader as mm3-codes) ──
+        char cmd[4096];
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\" -y -v error -i \"%s\" -ac 2 -ar %lld -t %d -c:a pcm_f32le -f wav \"%s\"",
+                 ffmpeg.c_str(), audio.c_str(), (long long) SR, max_duration, tmp_wav.c_str());
+#ifdef _WIN32
+        const std::string wrapped = "\"" + std::string(cmd) + "\"";
+        const int         rcode   = hs_system(wrapped);
+#else
+        const int rcode = hs_system(cmd);
+#endif
+        if (rcode != 0 || !pm_file_exists(tmp_wav)) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu FAIL %s: ffmpeg exit %d\n", idx, n_samples,
+                    fname.c_str(), rcode);
+            fail_n++;
+            continue;
+        }
+        FILE * wf = hs_fopen(tmp_wav, "rb");
+        if (!wf) { fail_n++; continue; }
+        fseek(wf, 0, SEEK_END);
+        const long wsz = ftell(wf);
+        fseek(wf, 0, SEEK_SET);
+        std::vector<uint8_t> wbuf((size_t) wsz);
+        const bool           wread = fread(wbuf.data(), 1, (size_t) wsz, wf) == (size_t) wsz;
+        fclose(wf);
+        int     Tsamp = 0, got_sr = 0;
+        float * planar = wread ? audio_io_read_wav_buf(wbuf.data(), wbuf.size(), &Tsamp, &got_sr) : nullptr;
+        if (!planar || Tsamp <= 0 || got_sr != (int) SR) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu FAIL %s: cannot decode transcode\n", idx, n_samples,
+                    fname.c_str());
+            free(planar);
+            fail_n++;
+            continue;
+        }
+
+        // ── 2. DAV latents ──
+        const float *      chans[2] = { planar, planar + Tsamp };
+        std::vector<float> zlat;
+        int64_t            L = 0;
+        const bool         encoded = mm3_enc_encode(&enc, chans, (int64_t) Tsamp, &zlat, &L, &err);
+        free(planar);
+        if (!encoded) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu FAIL %s: DAV %s\n", idx, n_samples, fname.c_str(),
+                    err.c_str());
+            fail_n++;
+            continue;
+        }
+
+        // ── 3. rec7 states + semantic argmax ──
+        int64_t T = mm3_rec7_n_frames(L);
+        if (T < (int64_t) r7.rvq.cfg.frames + 2) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu SKIP %s: too short for rec7\n", idx, n_samples,
+                    fname.c_str());
+            fail_n++;
+            continue;
+        }
+        std::vector<float>   h((size_t) (T * H));
+        std::vector<int32_t> c0((size_t) T);
+        if (!mm3_rec7_read_states(&r7, zlat.data(), L, h.data(), c0.data(), &T, &err)) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu FAIL %s: rec7 %s\n", idx, n_samples, fname.c_str(),
+                    err.c_str());
+            fail_n++;
+            continue;
+        }
+        if (T > T_CAP) T = T_CAP;
+
+        // ── 4. renderer condition: [T, 8, 4096], stream 0 = the state, streams
+        //       1..7 = the released depth chain, greedy (rngs = nullptr) ──
+        std::vector<float> cond((size_t) (T * LAY * H));
+        bool               song_ok = true;
+        for (int64_t t = 0; t < T && song_ok; t++) {
+            float * dst = cond.data() + (size_t) (t * LAY * H);
+            memcpy(dst, h.data() + (size_t) (t * H), (size_t) H * sizeof(float));
+            MM3DepthFrame fr;
+            // cond == uncond: rec7 has no unconditional state, and a zero CFG
+            // delta reduces the guided argmax to the plain conditional argmax —
+            // exactly the reference's no-CFG depth chain (states_to_streams).
+            // decode_takes reads cfg_rows hidden rows, so a single row would be
+            // an out-of-bounds read on a CFG checkpoint (found the hard way).
+            const float * hrow = h.data() + (size_t) (t * H);
+            if (!mm3_depth_decode_frame(model, hrow, hrow, c0[(size_t) t], nullptr, &fr, &err)) {
+                fprintf(stderr, "[mm3-launder] %zu/%zu FAIL %s: depth frame %lld: %s\n", idx, n_samples,
+                        fname.c_str(), (long long) t, err.c_str());
+                song_ok = false;
+                break;
+            }
+            if ((int64_t) fr.hiddens.size() < NC * H) {
+                fprintf(stderr, "[mm3-launder] %s: depth returned %zu hiddens, want %lld\n", fname.c_str(),
+                        fr.hiddens.size(), (long long) (NC * H));
+                song_ok = false;
+                break;
+            }
+            memcpy(dst + H, fr.hiddens.data(), (size_t) (NC * H) * sizeof(float));
+        }
+        if (!song_ok) { fail_n++; continue; }
+
+        // ── 5. the flow DiT, stage 1 skipped, window latents kept ──
+        MM3GenRequest greq;
+        greq.prompt              = caption.empty() ? std::string("instrumental") : caption;
+        greq.max_frames          = T;
+        greq.seed                = seed;
+        greq.steps               = steps;
+        greq.cached_hiddens      = cond.data();
+        greq.cached_frames       = T;
+        greq.keep_window_latents = true;
+        MM3GenResult gres;
+        // A real no-op, not an empty std::function: two stage-1 progress calls
+        // are unguarded, and "stage 1 is always skipped here" is one refactor
+        // away from a bad_function_call.
+        const MM3ProgressCb prog = [](const MM3GenProgress &) {};
+        if (!mm3_generate(model, greq, &tok, prog, &gres, &err)) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu FAIL %s: flow %s\n", idx, n_samples, fname.c_str(),
+                    err.c_str());
+            fail_n++;
+            continue;
+        }
+        const int64_t NW = (int64_t) gres.window_latents.size();
+        if (NW == 0 || gres.window_L.size() != gres.window_latents.size()) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu FAIL %s: no window latents kept\n", idx, n_samples,
+                    fname.c_str());
+            fail_n++;
+            continue;
+        }
+
+        // ── 6. stitch: each window keeps exactly the span the vocode stitch
+        //       keeps (mm3_window_crop at UP=1 = latent granularity). Feeding
+        //       raw window tails would hand the champion pre-crossfade garbage
+        //       — phase 0 measured that tail at cosine 0.57. ──
+        int64_t L2 = 0;
+        for (int64_t k = 0; k < NW; k++) {
+            int64_t left = 0, len = 0;
+            mm3_window_crop(k, NW, gres.window_L[(size_t) k], 1, &left, &len);
+            L2 += len;
+        }
+        std::vector<float> z2((size_t) (CH * L2));
+        {
+            int64_t at = 0;
+            for (int64_t k = 0; k < NW; k++) {
+                const int64_t Lk = gres.window_L[(size_t) k];
+                int64_t       left = 0, len = 0;
+                mm3_window_crop(k, NW, Lk, 1, &left, &len);
+                const float * src = gres.window_latents[(size_t) k].data();   // [CH][Lk]
+                for (int64_t c = 0; c < CH; c++) {
+                    memcpy(z2.data() + (size_t) (c * L2 + at), src + (size_t) (c * Lk + left),
+                           (size_t) len * sizeof(float));
+                }
+                at += len;
+            }
+        }
+
+        // ── 7. champion codes on the stitched latents (the mm3-codes core,
+        //       with n_frames derived from the rendered frame count) ──
+        int64_t              n_frames = T;
+        std::vector<int64_t> starts = mm3_rvq_frame_starts(rc, n_frames);
+        while (n_frames > 0 && starts[(size_t) n_frames] > L2) {
+            n_frames--;
+        }
+        if (n_frames < F) {
+            fprintf(stderr, "[mm3-launder] %zu/%zu SKIP %s: %lld frames after stitch\n", idx, n_samples,
+                    fname.c_str(), (long long) n_frames);
+            fail_n++;
+            continue;
+        }
+        starts.resize((size_t) n_frames + 1);
+        std::vector<int64_t> win;
+        for (int64_t t0 = 0; t0 <= n_frames - F; t0 += F) {
+            win.push_back(t0);
+        }
+        if (win.back() != n_frames - F) {
+            win.push_back(n_frames - F);
+        }
+        std::vector<float>   feats((size_t) (n_frames * D));
+        std::vector<int32_t> sem((size_t) n_frames, 0);
+        std::vector<char>    done((size_t) n_frames, 0);
+        for (size_t wi = 0; wi < win.size() && song_ok; wi++) {
+            const int64_t        t0   = win[wi];
+            const int64_t        base = starts[(size_t) t0];
+            std::vector<int64_t> bounds((size_t) F + 1);
+            for (int64_t j = 0; j <= F; j++) {
+                bounds[(size_t) j] = starts[(size_t) (t0 + j)] - base;
+            }
+            const int64_t n_lat = bounds[(size_t) F];
+            if (n_lat > LMX || base + n_lat > L2) {
+                song_ok = false;
+                break;
+            }
+            std::fill(wlat.begin(), wlat.end(), 0.0f);
+            for (int64_t c = 0; c < CH; c++) {
+                memcpy(&wlat[(size_t) (c * LMX)], &z2[(size_t) (c * L2 + base)],
+                       (size_t) n_lat * sizeof(float));
+            }
+            mm3_rvq_pool_matrix(rc, bounds.data(), wpool.data());
+            if (!mm3_rvq_encode_window(&rvq, wlat.data(), wpool.data(), wfeats.data(), wlogits.data(),
+                                       &err)) {
+                fprintf(stderr, "[mm3-launder] %s: %s\n", fname.c_str(), err.c_str());
+                song_ok = false;
+                break;
+            }
+            for (int64_t j = 0; j < F; j++) {
+                const int64_t t = t0 + j;
+                if (done[(size_t) t]) continue;
+                memcpy(&feats[(size_t) (t * D)], &wfeats[(size_t) (j * D)], (size_t) D * sizeof(float));
+                const float * row = wlogits.data() + (size_t) (j * SV);
+                int64_t       best = 0;
+                float         bv   = row[0];
+                for (int64_t v = 1; v < SV; v++) {
+                    if (row[v] > bv) { bv = row[v]; best = v; }
+                }
+                sem[(size_t) t]  = (int32_t) best;
+                done[(size_t) t] = 1;
+            }
+        }
+        if (!song_ok) { fail_n++; continue; }
+        std::vector<int32_t> ac((size_t) (n_frames * NAC), 0);
+        for (int64_t b0 = 0; b0 < n_frames && song_ok; b0 += 1024) {
+            const int64_t nb = std::min<int64_t>(1024, n_frames - b0);
+            if (!mm3_rvq_depth_greedy(&rvq, &feats[(size_t) (b0 * D)], &sem[(size_t) b0], nb,
+                                      &ac[(size_t) (b0 * NAC)], &err)) {
+                fprintf(stderr, "[mm3-launder] %s: rvq depth %s\n", fname.c_str(), err.c_str());
+                song_ok = false;
+            }
+        }
+        if (!song_ok) { fail_n++; continue; }
+
+        std::vector<int32_t> rows((size_t) ((n_frames + 1) * 8));
+        for (int64_t t = 0; t < n_frames; t++) {
+            int32_t * dst = &rows[(size_t) ((t + 1) * 8)];
+            dst[0] = sem[(size_t) t];
+            for (int64_t k = 0; k < NAC; k++) {
+                dst[1 + k] = ac[(size_t) (t * NAC + k)];
+            }
+        }
+        memcpy(&rows[0], &rows[8], 8 * sizeof(int32_t));
+        FILE * cf = hs_fopen(cp, "wb");
+        if (!cf) { fprintf(stderr, "[mm3-launder] cannot write %s\n", cp.c_str()); fail_n++; continue; }
+        fwrite(rows.data(), sizeof(int32_t), rows.size(), cf);
+        fclose(cf);
+        ok_n++;
+        fprintf(stderr, "[mm3-launder] %zu/%zu %s  %lld frames in %.0f s -> %s\n", idx, n_samples,
+                stem.c_str(), (long long) n_frames, (double) (ggml_time_ms() - t_song) / 1000.0,
+                cp.c_str());
+        jl("{\"type\":\"progress\",\"completed\":%zu,\"total\":%zu,\"failed\":%zu,\"phase\":\"launder\"}",
+           idx, n_samples, fail_n);
+    }
+    yyjson_doc_free(doc);
+    remove(tmp_wav.c_str());
+
+    {
+        yyjson_mut_doc * cdoc  = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val * croot = yyjson_mut_obj(cdoc);
+        yyjson_mut_doc_set_root(cdoc, croot);
+        yyjson_mut_obj_add_str(cdoc, croot, "kind", "mm3_forced_codes");
+        yyjson_mut_obj_add_strcpy(cdoc, croot, "encoder", rvq_path.c_str());
+        yyjson_mut_obj_add_strcpy(cdoc, croot, "dav", enc_path.c_str());
+        yyjson_mut_obj_add_str(cdoc, croot, "producer", "ace-train mm3-launder");
+        yyjson_mut_obj_add_bool(cdoc, croot, "laundered", true);
+        yyjson_mut_obj_add_strcpy(cdoc, croot, "rec7", rec7_path.c_str());
+        yyjson_mut_obj_add_uint(cdoc, croot, "flow_steps", (uint64_t) steps);
+        yyjson_mut_obj_add_uint(cdoc, croot, "flow_seed", (uint64_t) seed);
+        yyjson_mut_obj_add_uint(cdoc, croot, "tracks", (uint64_t) ok_n);
+        yyjson_mut_obj_add_bool(cdoc, croot, "warmup_row", true);
+        yyjson_mut_obj_add_str(cdoc, croot, "columns", "semantic,acoustic1..7");
+        yyjson_mut_obj_add_str(cdoc, croot, "windowing", "their stitched frame_latent_starts");
+        const std::string cjp = out_dir + "/codes/codes.json";
+        yyjson_mut_write_file(cjp.c_str(), cdoc, YYJSON_WRITE_PRETTY, NULL, NULL);
+        yyjson_mut_doc_free(cdoc);
+    }
+    fprintf(stderr, "[mm3-launder] done: %zu ok, %zu failed -> %s\n", ok_n, fail_n, out_dir.c_str());
+    mm3_rec7_free(&r7);
+    mm3_rvq_free(&rvq);
+    mm3_enc_free(&enc);
+    return fail_n == 0 ? 0 : 1;
+}
+
+// ─── rec7-selftest ──────────────────────────────────────────────────────────
+//
+// Parity gate for the rec7 state-encoder port: run read_states over a fixture
+// clip's DAV latents and score per-frame cosine against the python reference's
+// states. The reference trunk ran under bf16 autocast, so the bar is cosine
+// (mean >= 0.999, min >= 0.99), not byte equality.
+static int cmd_rec7_selftest(int argc, char ** argv) {
+    std::string gguf_path, fix_dir;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * f) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "%s needs a value\n", f); exit(2); }
+            return argv[++i];
+        };
+        if (!strcmp(argv[i], "--gguf")) gguf_path = next("--gguf");
+        else if (!strcmp(argv[i], "--fixture")) fix_dir = next("--fixture");
+    }
+    if (gguf_path.empty() || fix_dir.empty()) {
+        fprintf(stderr, "usage: ace-train rec7-selftest --gguf <mm3-rec7-*.gguf> --fixture <dir>\n");
+        return 2;
+    }
+    auto read_all = [](const std::string & path, std::vector<float> * out) -> bool {
+        FILE * f = hs_fopen(path, "rb");
+        if (!f) return false;
+        fseek(f, 0, SEEK_END);
+        const long n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        out->resize((size_t) n / sizeof(float));
+        const bool ok = fread(out->data(), 1, (size_t) n, f) == (size_t) n;
+        fclose(f);
+        return ok;
+    };
+    std::vector<float> z, href;
+    if (!read_all(fix_dir + "/rec7_z.bin", &z) || !read_all(fix_dir + "/rec7_h.bin", &href)) {
+        fprintf(stderr, "[rec7-selftest] cannot read fixture bins in %s\n", fix_dir.c_str());
+        return 1;
+    }
+    const int64_t CH = 128, HD = 4096;
+    const int64_t L    = (int64_t) z.size() / CH;
+    const int64_t Tref = (int64_t) href.size() / HD;
+
+    MM3Rec7     r7 = {};
+    std::string err;
+    if (!mm3_rec7_load(&r7, gguf_path.c_str(), &err)) {
+        fprintf(stderr, "[rec7-selftest] load: %s\n", err.c_str());
+        return 1;
+    }
+    const int64_t T = mm3_rec7_n_frames(L);
+    if (T != Tref) {
+        fprintf(stderr, "[rec7-selftest] frame count %lld != reference %lld - windowing bug\n",
+                (long long) T, (long long) Tref);
+        return 1;
+    }
+    std::vector<float> h((size_t) (T * HD));
+    const int64_t      t0 = ggml_time_ms();
+    if (!mm3_rec7_read_states(&r7, z.data(), L, h.data(), nullptr, nullptr, &err)) {
+        fprintf(stderr, "[rec7-selftest] read_states: %s\n", err.c_str());
+        return 1;
+    }
+    const double ms = (double) (ggml_time_ms() - t0);
+
+    double  mean = 0.0, worst = 2.0;
+    int64_t worst_t = -1;
+    for (int64_t t = 0; t < T; t++) {
+        const float * a = h.data() + (size_t) (t * HD);
+        const float * b = href.data() + (size_t) (t * HD);
+        double        dot = 0.0, na = 0.0, nb = 0.0;
+        for (int64_t k = 0; k < HD; k++) {
+            dot += (double) a[k] * b[k];
+            na  += (double) a[k] * a[k];
+            nb  += (double) b[k] * b[k];
+        }
+        const double c = dot / (sqrt(na) * sqrt(nb) + 1e-12);
+        mean += c;
+        if (c < worst) { worst = c; worst_t = t; }
+    }
+    mean /= (double) T;
+    fprintf(stderr, "[rec7-selftest] %lld frames in %.1f s: cosine mean %.6f  worst %.6f (frame %lld)\n",
+            (long long) T, ms / 1000.0, mean, worst, (long long) worst_t);
+    mm3_rec7_free(&r7);
+    const bool pass = mean >= 0.999 && worst >= 0.99;
+    fprintf(stderr, "[rec7-selftest] %s\n", pass ? "PASS" : "FAIL");
+    return pass ? 0 : 1;
+}
+
 int main(int argc, char ** argv) {
     if (argc < 2) {
         print_usage();
@@ -4094,6 +4616,12 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "spike")) {
         return cmd_spike(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "rec7-selftest")) {
+        return cmd_rec7_selftest(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "mm3-launder")) {
+        return cmd_mm3_launder(argc - 1, argv + 1);
     }
     fprintf(stderr, "ace-train: unknown subcommand '%s'\n", argv[1]);
     print_usage();

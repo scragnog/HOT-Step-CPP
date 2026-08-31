@@ -40,6 +40,34 @@ Frozen contracts (types, routes, JSONL event schemas, CLI) are duplicated verbat
 
 Job model: one global promise-chain queue (`labelingQueue.ts`), SSE streams with replayable capped buffers, `_meta.json` persistence, `TrainingMetricEvent` for training numbers. GPU jobs stop the ace-server child first (`stopEngine`, default on) and restart it in a `finally`.
 
+### Cover-laundered codes (the dense-mix gate, 2026-08-31)
+
+`ace-train mm3-launder` is an alternative codes export for dense-mix artists:
+real audio -> rec7 state encoder (`mm3-rec7-*.gguf`) -> the released depth
+chain -> the flow DiT's own stitched window latents -> champion RVQ encode.
+The champion under-encodes buried vocals on real dense mixes; rendering the
+track back through the model first puts the vocal where the codes can carry
+it. Ear-validated A/B (Deftones, 2026-08-31): the laundered-codes adapter won
+on every axis at identical training curves.
+
+Fully native (no python at runtime; the rec7 GGUF carries the LM's two 16k-row
+semantic table slices so the 8B never runs — its weights load only for the
+depth chain's token embedding). ~1.4x realtime per track, 359 s cap (the
+pipeline's 9000-frame ceiling). Gated everywhere: the codes card has a
+"Cover-launder" checkbox writing to `mm3-codes-laundered/` (a sibling cache,
+never a replacement), and the train form only offers "Train on cover-laundered
+codes" when that cache exists. Both off = byte-identical to the pipeline
+before the gate existed — the launder is a new subcommand plus additive
+options; no shared code path moved.
+
+Parity gates: `ace-train rec7-selftest` (states vs the python reference,
+cosine 0.999999 measured) and the phase-0 latents-direct measurement (stitched
+flow latents vs DAV re-encode: cosine 0.9936 on owned spans; raw window tails
+are 0.57 — the stitch uses `mm3_window_crop` at latent granularity for exactly
+that reason). Convert encoders with
+`engine/tools/convert-rvq-encoder.py --head --m3` (adds the state head + LM
+slices to the standard V4 GGUF).
+
 ## Key design facts (the ones that bite)
 
 **Data & labeling**

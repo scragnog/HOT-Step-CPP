@@ -278,7 +278,7 @@ interface TrainingState {
   loadTrainLmStatus(q?: { variantKey?: string; adapterName?: string; lmSize?: LmSize }): Promise<void>;
   startTrainLm(opts: TrainLmOptions): Promise<void>;
   /** MiniMax-Music3: audio -> RVQ codes. */
-  startMm3Codes(): Promise<void>;
+  startMm3Codes(opts?: { launder?: boolean }): Promise<void>;
   /** MiniMax-Music3: codes + captions -> an LM LoRA. */
   startMm3TrainLm(opts: trainingApi.Mm3TrainLmRequest): Promise<void>;
   /** MiniMax-Music3: carry on training into an existing run directory. Same
@@ -761,11 +761,11 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }
   },
 
-  startMm3Codes: async () => {
+  startMm3Codes: async (opts?: { launder?: boolean }) => {
     const id = get().selectedDatasetId;
     if (!id) return;
     try {
-      const { jobId } = await trainingApi.startMm3Codes(id, {});
+      const { jobId } = await trainingApi.startMm3Codes(id, opts?.launder ? { launder: true } : {});
       set({ jobLog: [], error: null });
       await adoptJob(set, get, jobId);
     } catch (err) {

@@ -101,6 +101,9 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   const { t } = useTranslation();
   const activeJob = useTrainingStore(s => s.activeJob);
   const startMm3TrainLm = useTrainingStore(s => s.startMm3TrainLm);
+  // Which codes cache this run trains on. Off = the standard cache, exactly as
+  // every run before the launder gate existed.
+  const [trainLaunder, setTrainLaunder] = useState(false);
   const mm3Live = useTrainingStore(s => s.mm3Live);
   const storeError = useTrainingStore(s => s.error);
   const setPhase = useTrainingStore(s => s.setPhase);
@@ -272,6 +275,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
             topK: form.regTopK,
           },
         } : {}),
+        ...(trainLaunder ? { launder: true } : {}),
         ...(form.previewEverySteps > 0 || form.previewEveryMinutes > 0 ? {
           preview: {
             everySteps: form.previewEverySteps,
@@ -303,6 +307,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     setEdits(e => ({ ...e, [k]: v }));
 
   const hasCodes = (status?.codes ?? 0) > 0;
+  const hasLaundered = (status?.codesLaundered ?? 0) > 0;
   const trainBlocked = (status?.missingForTrain.length ?? 0) > 0;
 
   return (
@@ -336,7 +341,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               {t('trainingStudio.mm3.missing', 'Missing model files')}: {status?.missingForTrain.join(', ')}
             </span>
           </div>
-        ) : !hasCodes ? (
+        ) : !hasCodes && !hasLaundered ? (
           <div className="flex flex-col items-start gap-3">
             <div className="flex items-start gap-2 text-xs text-zinc-500">
               <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
@@ -352,6 +357,30 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
           </div>
         ) : form && (
           <>
+            {/* -- Codes cache (the launder gate) --------------------------
+                Only rendered when a laundered cache exists; a dataset without
+                one trains on the standard cache with no extra UI at all. */}
+            {hasLaundered && (
+              <label className="flex items-start gap-2 mb-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={trainLaunder}
+                  onChange={e => setTrainLaunder(e.target.checked)}
+                  disabled={!hasLaundered}
+                  className="mt-0.5 accent-amber-500"
+                />
+                <span className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                  <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                    {t('trainingStudio.mm3.trainLaunderLabel', 'Train on cover-laundered codes')}
+                  </span>
+                  {' — '}
+                  {t('trainingStudio.mm3.trainLaunderBlurb',
+                    'the vocal-forward code targets for dense mixes ({{n}} tracks laundered). Off = the '
+                    + 'standard cache, exactly as before.',
+                    { n: status?.codesLaundered ?? 0 })}
+                </span>
+              </label>
+            )}
             {/* -- Stopping strategy ---------------------------------------
                 Two ways to answer "when is this run done": a step count, or a
                 loss to reach. The step field never goes away, because in loss

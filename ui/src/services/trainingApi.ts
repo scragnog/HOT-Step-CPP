@@ -32,13 +32,16 @@ export interface Mm3Status {
   codesDir: string;
   /** How many .codes files the cache holds (0 = never exported). */
   codes: number;
+  /** Same, for the cover-laundered sibling cache. */
+  codesLaundered?: number;
   /** Which encoder produced them, from codes.json ('' = unknown). */
   encoder: string;
   /** The dataset-wide caption currently in force ('' = none, so the trainer
    *  falls back to per-song .mm3.txt and skips tracks that have none). */
   sharedCaption?: string;
-  /** Per-stage, because the two need different files. Non-empty = disable. */
+  /** Per-stage, because the stages need different files. Non-empty = disable. */
   missingForCodes: string[];
+  missingForLaunder?: string[];
   missingForTrain: string[];
   /** Bases actually installed, best fidelity first. The picker offers only
    *  these — listing a file that is not there moves the failure to spawn time. */
@@ -137,11 +140,17 @@ export function estimateMm3PeakMb(baseBytes: number, rank: number, maxFrames: nu
 
 export interface Mm3CodesRequest {
   maxDuration?: number;
+  /** Cover-launder the codes (rec7 states -> flow render -> champion encode).
+   *  Writes to a separate cache; off = the standard export, unchanged. */
+  launder?: boolean;
 }
 
 /** Every field optional: omitted means the validated recipe, which lives
  *  server-side in services/training/mm3Train.ts and nowhere else. */
 export interface Mm3TrainLmRequest {
+  /** Train on the cover-laundered codes cache instead of the standard one.
+   *  Requires a laundered export; absent/false = the standard cache. */
+  launder?: boolean;
   rank?: number;
   alpha?: number;
   lr?: number;

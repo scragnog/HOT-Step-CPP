@@ -27,6 +27,10 @@ export const Mm3CodesCard: React.FC<{ datasetId: string }> = ({ datasetId }) => 
   const storeError = useTrainingStore(s => s.error);
   const { status, error } = useMm3Status(datasetId);
   const [busy, setBusy] = useState(false);
+  // The launder gate. Off by default, and off means the export is the plain
+  // mm3-codes path, byte-identical to before the gate existed. The laundered
+  // export writes a SEPARATE sibling cache, so the two coexist.
+  const [launder, setLaunder] = useState(false);
 
   const kind = activeJob?.kind;
   const jobStatus = activeJob?.status;
@@ -42,12 +46,14 @@ export const Mm3CodesCard: React.FC<{ datasetId: string }> = ({ datasetId }) => 
   }
 
   const hasCodes = (status?.codes ?? 0) > 0;
-  const blocked = (status?.missingForCodes.length ?? 0) > 0;
+  const hasLaundered = (status?.codesLaundered ?? 0) > 0;
+  const missingNow = (launder ? status?.missingForLaunder : status?.missingForCodes) ?? [];
+  const blocked = missingNow.length > 0;
   const shown = error || storeError;
 
   const run = async () => {
     setBusy(true);
-    try { await startMm3Codes(); } finally { setBusy(false); }
+    try { await startMm3Codes(launder ? { launder: true } : undefined); } finally { setBusy(false); }
   };
 
   return (
@@ -82,26 +88,51 @@ export const Mm3CodesCard: React.FC<{ datasetId: string }> = ({ datasetId }) => 
           <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
             <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
             <span>
-              {t('trainingStudio.mm3.missing', 'Missing model files')}: {status?.missingForCodes.join(', ')}
+              {t('trainingStudio.mm3.missing', 'Missing model files')}: {missingNow.join(', ')}
             </span>
           </div>
         ) : (
           <>
+            <label className="flex items-start gap-2 mb-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={launder}
+                onChange={e => setLaunder(e.target.checked)}
+                className="mt-0.5 accent-amber-500"
+              />
+              <span className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                  {t('trainingStudio.mm3.launderLabel', 'Cover-launder the codes (dense mixes)')}
+                </span>
+                {' — '}
+                {t('trainingStudio.mm3.launderBlurb',
+                  'renders each track back through the model (rec7 states → flow DiT) before encoding, so '
+                  + 'buried vocals reach the code targets. Slower (~3 min/track, capped at 6 min of audio), '
+                  + 'writes a separate cache, and the training form chooses which cache a run uses.')}
+              </span>
+            </label>
             <div className="flex items-center gap-3 flex-wrap">
               <button
                 onClick={() => void run()}
                 disabled={busy || running}
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/25 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-40 transition-colors"
               >
-                {hasCodes
-                  ? t('trainingStudio.mm3.reexport', 'Re-export codes')
-                  : t('trainingStudio.mm3.export', 'Export codes')}
+                {launder
+                  ? (hasLaundered
+                    ? t('trainingStudio.mm3.reexportLaundered', 'Re-export laundered codes')
+                    : t('trainingStudio.mm3.exportLaundered', 'Export laundered codes'))
+                  : (hasCodes
+                    ? t('trainingStudio.mm3.reexport', 'Re-export codes')
+                    : t('trainingStudio.mm3.export', 'Export codes'))}
               </button>
               <span className="text-xs text-zinc-500">
                 {hasCodes
                   ? `${status?.codes} ${t('trainingStudio.mm3.codesReady', 'tracks encoded')}`
                     + (status?.encoder ? ` · ${status.encoder}` : '')
                   : t('trainingStudio.mm3.noCodes', 'no codes yet')}
+                {hasLaundered
+                  ? ` · ${status?.codesLaundered} ${t('trainingStudio.mm3.launderedReady', 'laundered')}`
+                  : ''}
               </span>
             </div>
             <p className="text-[11px] text-zinc-500 flex items-center gap-1.5 mt-3">

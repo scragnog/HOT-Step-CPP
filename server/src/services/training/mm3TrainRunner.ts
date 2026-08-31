@@ -282,7 +282,7 @@ function openRunLog(args: string[]): { jsonl: fs.WriteStream | null; console: fs
 
 async function runMm3AceTrain(
   job: TrainingJob,
-  kind: 'mm3-codes' | 'mm3-lm-train',
+  kind: 'mm3-codes' | 'mm3-launder' | 'mm3-lm-train',
   args: string[],
   timeoutMs: number,
   verifyOutput: () => string | null,
@@ -413,21 +413,24 @@ export async function runMm3CodesJob(job: TrainingJob): Promise<void> {
     finishJob(job, 'failed', 'mm3-codes job is missing its dataset or output path');
     return;
   }
-  const missing = missingMm3TrainModels('codes');
+  const missing = missingMm3TrainModels(opts.launder ? 'launder' : 'codes');
   if (missing.length) {
     finishJob(job, 'failed', `MiniMax-Music3 training models are missing: ${missing.join(', ')}`);
     return;
   }
 
   const args = buildMm3CodesArgs(opts);
-  // Encoding is DAV + a 169M encoder per track: minutes, not hours. The floor
-  // covers model load on a cold cache.
+  // Plain codes: DAV + a 169M encoder per track — minutes. Laundered codes
+  // render every track through the flow DiT (~0.7x realtime), so budget by
+  // song at the cover rate instead. Both floors cover a cold model cache.
   const ds = getDataset(job.datasetId);
   const songs = Math.max(1, ds?.sampleCount ?? 1);
-  const timeoutMs = Math.max(30 * 60 * 1000, songs * 60 * 1000);
+  const timeoutMs = opts.launder
+    ? Math.max(60 * 60 * 1000, songs * 6 * 60 * 1000)
+    : Math.max(30 * 60 * 1000, songs * 60 * 1000);
 
   try {
-    await runMm3AceTrain(job, 'mm3-codes', args, timeoutMs, () => {
+    await runMm3AceTrain(job, opts.launder ? 'mm3-launder' : 'mm3-codes', args, timeoutMs, () => {
       const dir = path.join(opts.outDir, 'codes');
       const n = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.codes')).length : 0;
       return n > 0 ? null : 'mm3-codes finished but wrote no .codes files';
