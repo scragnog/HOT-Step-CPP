@@ -7,6 +7,7 @@ import { skipThinkingSignal } from './types.js';
 
 export class OllamaProvider extends LLMProvider {
   id = 'ollama';
+  get local() { return true; }
   name = 'Ollama (Local)';
   get defaultModel() { return config.lireek.ollamaModel; }
   
@@ -27,7 +28,13 @@ export class OllamaProvider extends LLMProvider {
     return {
       ...this.toInfo(),
       models: models.length ? models : [this.defaultModel],
-      default_model: models.length ? models[0] : this.defaultModel,
+      // The model chosen on the Settings page wins whenever the server
+      // is actually serving it. This used to be `models[0]`, so the
+      // configured model was only ever used when the server was
+      // unreachable — i.e. the setting was dead exactly when it could
+      // have worked, and the picker silently defaulted to whatever the
+      // server happened to list first.
+      default_model: this.preferredModel(models),
     };
   }
 

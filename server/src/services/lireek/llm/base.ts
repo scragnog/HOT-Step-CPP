@@ -8,6 +8,10 @@ export abstract class LLMProvider {
   abstract name: string;
   abstract defaultModel: string;
   availableModels: string[] = [];
+  /** Runs on the user's machine. A getter rather than a field so a provider
+   *  whose locality depends on configuration (openai-compat, whose base URL
+   *  the user sets) can decide at call time. See ProviderInfo.local. */
+  get local(): boolean { return false; }
 
   abstract isAvailable(): boolean;
   
@@ -19,6 +23,21 @@ export abstract class LLMProvider {
     options?: CallOptions
   ): Promise<string>;
 
+  /** Which model the picker should land on, given what the server reports.
+   *
+   *  The configured model (Settings) wins whenever the server is actually
+   *  serving it. If it is configured but no longer loaded, the server's first
+   *  entry decides — the setting cannot be honoured either way, and failing the
+   *  run would punish anyone whose setting has gone stale. Keeping the answer
+   *  inside `models` also stops the UI rendering a <select> whose value is not
+   *  one of its options. */
+  protected preferredModel(models: string[]): string {
+    if (this.defaultModel && (models.length === 0 || models.includes(this.defaultModel))) {
+      return this.defaultModel;
+    }
+    return models[0] || this.defaultModel || '';
+  }
+
   toInfo(): ProviderInfo {
     return {
       id: this.id,
@@ -26,6 +45,7 @@ export abstract class LLMProvider {
       available: this.isAvailable(),
       models: this.availableModels.length ? this.availableModels : (this.defaultModel ? [this.defaultModel] : []),
       default_model: this.defaultModel,
+      local: this.local,
     };
   }
 }

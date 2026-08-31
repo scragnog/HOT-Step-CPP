@@ -245,6 +245,7 @@ router.get('/capabilities', async (_req: Request, res: Response) => {
       available: p.available,
       models: p.models,
       defaultModel: p.default_model,
+      local: p.local,
     }));
     caps.llm.configured = caps.llm.providers.some(p => p.available);
   } catch (err: any) {

@@ -6,6 +6,7 @@ import type { ProviderInfo, ChunkCallback, CallOptions } from './types.js';
 
 export class LMStudioProvider extends LLMProvider {
   id = 'lmstudio';
+  get local() { return true; }
   name = 'LM Studio';
   get defaultModel() { return config.lireek.lmstudioModel; }
 
@@ -37,7 +38,13 @@ export class LMStudioProvider extends LLMProvider {
     return {
       ...this.toInfo(),
       models: models.length ? models : (this.defaultModel ? [this.defaultModel] : []),
-      default_model: models.length ? models[0] : this.defaultModel,
+      // The model chosen on the Settings page wins whenever the server
+      // is actually serving it. This used to be `models[0]`, so the
+      // configured model was only ever used when the server was
+      // unreachable — i.e. the setting was dead exactly when it could
+      // have worked, and the picker silently defaulted to whatever the
+      // server happened to list first.
+      default_model: this.preferredModel(models),
     };
   }
 

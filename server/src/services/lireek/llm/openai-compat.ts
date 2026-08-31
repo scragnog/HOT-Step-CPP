@@ -14,6 +14,21 @@ export class OpenAICompatProvider extends LLMProvider {
 
   isAvailable() { return !!config.lireek.openaiCompatBaseUrl; }
 
+  /** Unlike the other providers this one's locality is not fixed — the user
+   *  supplies the base URL, and it is just as likely to be vLLM on this machine
+   *  as a hosted endpoint. Decided from the host rather than guessed, so the UI
+   *  does not call someone's localhost server "cloud". Anything unparseable or
+   *  routable counts as remote, which is the safer way to be wrong. */
+  get local(): boolean {
+    try {
+      const host = new URL(config.lireek.openaiCompatBaseUrl).hostname.toLowerCase();
+      return host === 'localhost' || host === '::1' || host.endsWith('.local')
+        || /^127\./.test(host) || /^0\.0\.0\.0$/.test(host)
+        || /^10\./.test(host) || /^192\.168\./.test(host)
+        || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+    } catch { return false; }
+  }
+
   private async getRemoteModels(): Promise<string[]> {
     try {
       const baseUrl = config.lireek.openaiCompatBaseUrl.replace(/\/+$/, '');
@@ -34,7 +49,13 @@ export class OpenAICompatProvider extends LLMProvider {
     return {
       ...this.toInfo(),
       models: models.length ? models : (this.defaultModel ? [this.defaultModel] : []),
-      default_model: models.length ? models[0] : this.defaultModel,
+      // The model chosen on the Settings page wins whenever the server
+      // is actually serving it. This used to be `models[0]`, so the
+      // configured model was only ever used when the server was
+      // unreachable — i.e. the setting was dead exactly when it could
+      // have worked, and the picker silently defaulted to whatever the
+      // server happened to list first.
+      default_model: this.preferredModel(models),
     };
   }
 

@@ -6,6 +6,7 @@ import type { ProviderInfo, ChunkCallback } from './types.js';
 
 export class UnslothProvider extends LLMProvider {
   id = 'unsloth';
+  get local() { return true; }
   name = 'Unsloth Studio';
   get defaultModel() { return config.lireek.unslothModel; }
   
@@ -70,7 +71,13 @@ export class UnslothProvider extends LLMProvider {
     return {
       ...this.toInfo(),
       models: models.length ? models : (this.defaultModel ? [this.defaultModel] : []),
-      default_model: models.length ? models[0] : this.defaultModel,
+      // The model chosen on the Settings page wins whenever the server
+      // is actually serving it. This used to be `models[0]`, so the
+      // configured model was only ever used when the server was
+      // unreachable — i.e. the setting was dead exactly when it could
+      // have worked, and the picker silently defaulted to whatever the
+      // server happened to list first.
+      default_model: this.preferredModel(models),
     };
   }
 

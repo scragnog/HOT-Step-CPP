@@ -169,9 +169,15 @@ export const LabelPanel: React.FC = () => {
                   className="text-[11px] rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5"
                 >
                   {mossOk && <option value="moss">MOSS — local, hears the audio</option>}
+                  {/* Two independent facts, and the label used to get one of
+                      them wrong for everyone: WHERE the model runs, which the
+                      provider now declares rather than the UI inferring from
+                      `id === 'gemini'` (that called a local LM Studio server
+                      "cloud"), and WHETHER it receives the audio, which only
+                      Gemini and MOSS do. */}
                   {cloud.map(pr => (
                     <option key={pr.id} value={pr.id}>
-                      {pr.id === 'gemini' ? `${pr.name} (cloud, hears the audio)` : `${pr.name} (cloud, text only)`}
+                      {`${pr.name} (${pr.local ? 'local' : 'cloud'}, ${pr.id === 'gemini' ? 'hears the audio' : 'text only'})`}
                     </option>
                   ))}
                 </select>

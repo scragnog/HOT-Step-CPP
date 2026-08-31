@@ -828,7 +828,7 @@ export interface TrainingCapabilities {
   llm: {
     configured: boolean;
     defaultProvider: string;
-    providers: Array<{ id: string; name: string; available: boolean; models: string[]; defaultModel: string }>;
+    providers: Array<{ id: string; name: string; available: boolean; models: string[]; defaultModel: string; local: boolean }>;
   };
   preprocess: {
     available: boolean;      // ace-train binary found on disk
