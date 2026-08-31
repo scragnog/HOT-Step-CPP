@@ -140,7 +140,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   // Portal to body: the global bar's backdrop-filter makes it the containing
   // block for fixed descendants, which would pin this overlay to the bar.
   return createPortal(
-    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+    <div data-portal-layer className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm"
          onClick={onClose}>
       <div className="w-full max-w-xl max-h-[80vh] flex flex-col bg-zinc-50 dark:bg-zinc-900/95 rounded-2xl border border-zinc-200 dark:border-white/10 shadow-2xl overflow-hidden"
            onClick={e => e.stopPropagation()}>

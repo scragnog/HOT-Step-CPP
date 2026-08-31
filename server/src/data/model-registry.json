@@ -185,6 +185,16 @@
       ]
     },
     {
+      "id": "minimax-music3-training",
+      "name": "MiniMax-Music3 Training",
+      "description": "Everything the Training Studio needs to train an MM3 artist adapter, on top of a generation pack. The two encoders turn your audio into codes; the F16 depth decoder is the one the trainer requires (the quantised depth files shipped with the generation packs are for generation only).",
+      "fileIds": [
+        "mm3-rvq-53kpooled",
+        "mm3-enc-f16",
+        "mm3-depth-f16"
+      ]
+    },
+    {
       "id": "stem-separation",
       "name": "Stem Separation",
       "description": "All 4 models for multi-stem audio separation in Cover Studio. Required for the SuperSep pipeline.",
@@ -3644,6 +3654,50 @@
       "repo": "scragnog/MiniMax-Music3-GGUF",
       "description": "MiniMax-Music3 autoregressive language model, quantized to IQ4_XS (4.25 bits per weight) against an importance matrix — Q4-class quality at slightly under Q4_K_S size. The IQ formats cannot be built without one at all, and it is what makes them listenable rather than a curiosity. Note they decode through a codebook lookup rather than a simple scale, so they are slower per token on CPU than a K-quant of the same size; pick them for a memory ceiling, not for speed.",
       "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "mm3-rvq-53kpooled",
+      "filename": "mm3-rvq-53kpooled-f32.gguf",
+      "role": "mm3",
+      "subdir": "mm3",
+      "displayName": "MM3 RVQ Encoder (open-rvq 53k-pooled)",
+      "scale": null,
+      "variant": "rvq",
+      "quant": "F32",
+      "sizeBytes": 676044352,
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "description": "Audio → RVQ codes. TRAINING ONLY — the Training Studio's MM3 codes stage needs this to turn your dataset's audio into the code streams the LM trains on; generation never loads it. MiniMax never released the official tokenizer, so this is PurpleOrc's open-rvq encoder (169M, SimpleTuner v4 architecture, trained from scratch on a 53k-track multilingual corpus), converted to GGUF. Codes are encoder-specific: an adapter trained on these codes must keep using this encoder. This file is ~0.7 GB.",
+      "tags": [
+        "required"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "mm3-enc-f16",
+      "filename": "mm3-enc-f16.gguf",
+      "role": "mm3",
+      "subdir": "mm3",
+      "displayName": "MM3 DAV Encoder (F16)",
+      "scale": null,
+      "variant": "enc",
+      "quant": "F16",
+      "sizeBytes": 89466528,
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "description": "MiniMax-Music3 DAV audio encoder — 44.1 kHz stereo into the 128-channel flow latents. TRAINING ONLY: it is the input stage of the Training Studio's MM3 codes job, paired with the RVQ encoder. Generation does not use it. This file is ~0.1 GB.",
+      "tags": [
+        "required"
+      ],
       "companions": [
         {
           "filename": "LICENSE",

@@ -108,7 +108,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
   // ── Render ──────────────────────────────────────────────────
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center">
+    <div data-portal-layer className="fixed inset-0 z-50 flex items-start justify-center">
       {/* Backdrop — does NOT close on click; only the X button closes the modal */}
       <div className="absolute inset-0 bg-black/20 dark:bg-black/40 dark:bg-black/70 backdrop-blur-sm" />
 

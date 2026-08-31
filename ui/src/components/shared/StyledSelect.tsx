@@ -285,6 +285,7 @@ export function StyledSelect<T extends string | number>({
       {panelOpen && pos && ReactDOM.createPortal(
         <div
           ref={panelRef}
+          data-portal-layer
           className="fixed z-[9999] rounded-xl bg-white dark:bg-zinc-800
                      border border-zinc-200 dark:border-white/10
                      shadow-lg shadow-black/20 overflow-hidden"

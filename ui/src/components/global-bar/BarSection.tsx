@@ -143,6 +143,14 @@ export const BarSection: React.FC<BarSectionProps> = ({
       // A help card belongs to this panel even though it is portalled outside
       // it — clicking into one to select its text is not clicking away.
       if ((e.target as HTMLElement)?.closest?.('[role="tooltip"]')) return;
+      // Same for anything else a panel opens through a portal: dropdown
+      // panels, the Model Manager, the file browser, the profiles dialog. They
+      // render under document.body, so containerRef never contains them and
+      // every click inside one read as "clicked away" — which closed the panel
+      // and unmounted the thing the user was clicking on, making the Model
+      // Manager and the adapter pickers impossible to use (#129, #126).
+      // Portalled UI opts in by tagging its root with data-portal-layer.
+      if ((e.target as HTMLElement)?.closest?.('[data-portal-layer]')) return;
       pinned.current = false;
       cancelClose();
       onClose();

@@ -133,6 +133,7 @@ export const VramIndicator: React.FC<VramIndicatorProps> = ({
 
       {open && pos && createPortal(
         <div
+          data-portal-layer
           className="fixed z-[9999] w-60 rounded-lg border border-white/10 bg-white dark:bg-zinc-900 shadow-2xl p-2"
           style={{ top: pos.top, right: pos.right }}
           onMouseEnter={openMenu}
