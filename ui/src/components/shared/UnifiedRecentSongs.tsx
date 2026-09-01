@@ -7,15 +7,14 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Play, Loader2, Music, Download, Trash2, ListPlus, Check } from 'lucide-react';
+import { Play, Loader2, Music, ListPlus, Check } from 'lucide-react';
 import { songApi } from '../../services/api';
 import type { UnifiedRecentSong } from '../../types';
-import type { Song } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { downloadTrack } from '../../utils/downloadTrack';
 import { usePlaylist } from '../lyric-studio/playlistStore';
 import { playFromList, unifiedRecentSongToTrack } from '../../stores/playbackStore';
-import { useABCompareSelector, setTrackA, setTrackB } from '../../stores/abCompareStore';
+import { SongActionsMenu, songFromRecent } from './SongActionsMenu';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
 interface UnifiedRecentSongsProps {
@@ -54,8 +53,6 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
   const [loading, setLoading] = useState(!cached);
   const mountedRef = useRef(true);
   const { disguiseArtist, disguiseTitle } = useDisguiseMode();
-  const abTrackAId = useABCompareSelector(s => s.trackA?.id ?? null);
-  const abTrackBId = useABCompareSelector(s => s.trackB?.id ?? null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -69,6 +66,25 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
     window.addEventListener(CACHE_CLEARED_EVENT, onCleared);
     return () => window.removeEventListener(CACHE_CLEARED_EVENT, onCleared);
   }, []);
+
+  // A post-processing re-run gives an existing row a mastered file. This list
+  // keeps its own module-level cache, so it has to be patched directly —
+  // App.tsx's song state is a different copy.
+  useEffect(() => {
+    const onProcessed = (e: Event) => {
+      const { songId, masteredAudioUrl } = (e as CustomEvent).detail || {};
+      if (!songId || !masteredAudioUrl) return;
+      setSongs(prev => {
+        const updated = prev.map(s =>
+          s.id === songId ? { ...s, mastered_audio_url: masteredAudioUrl } : s
+        );
+        _cache.set(cacheKey, { songs: updated, key: refreshKey });
+        return updated;
+      });
+    };
+    window.addEventListener('song-postprocessed', onProcessed);
+    return () => window.removeEventListener('song-postprocessed', onProcessed);
+  }, [cacheKey, refreshKey]);
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
@@ -106,8 +122,7 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
     playFromList(track, allTracks, playbackSource);
   }, [songs, source]);
 
-  const handleDelete = useCallback(async (e: React.MouseEvent, rs: UnifiedRecentSong) => {
-    e.stopPropagation();
+  const handleDelete = useCallback(async (rs: UnifiedRecentSong) => {
     if (!token || !rs.audio_url) return;
     try {
       await songApi.delete(rs.id, token);
@@ -122,24 +137,9 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
     }
   }, [token, showToast, cacheKey, refreshKey]);
 
-  const handleDownloadClick = useCallback(async (e: React.MouseEvent, rs: UnifiedRecentSong) => {
-    e.stopPropagation();
+  const handleDownload = useCallback((rs: UnifiedRecentSong) => {
     if (!rs.audio_url) return;
-    const song: Song = {
-      id: rs.id,
-      title: rs.title || 'Untitled',
-      style: rs.style || rs.caption || '',
-      caption: rs.caption || '',
-      lyrics: rs.lyrics || '',
-      audioUrl: rs.audio_url || '',
-      coverUrl: rs.cover_url || '',
-      duration: rs.duration || 0,
-      tags: [],
-      masteredAudioUrl: rs.mastered_audio_url || '',
-      latentUrl: rs.latent_url || '',
-      latent_url: rs.latent_url || '',
-    };
-    downloadTrack(song, { artistName: rs.artist_name || '' });
+    downloadTrack(songFromRecent(rs), { artistName: rs.artist_name || '' });
   }, []);
 
   if (loading && songs.length === 0) {
@@ -194,32 +194,19 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
                   <p className="text-[10px] text-zinc-600 font-mono mt-0.5">{mins}:{secs}</p>
                 )}
               </div>
-              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={(e) => { e.stopPropagation(); setTrackA(unifiedRecentSongToTrack(rs)); }}
-                  className={`p-1.5 rounded-md transition-colors ${
-                    rs.id === abTrackAId ? 'bg-blue-500/20 text-blue-400' : 'bg-zinc-100/80 dark:bg-zinc-800/80 hover:bg-blue-900/60 text-zinc-600 dark:text-zinc-400 hover:text-blue-400'
-                  }`}
-                  title="Set as Track A">
-                  <span className="text-[9px] font-bold w-3 h-3 flex items-center justify-center">A</span>
-                </button>
-                <button onClick={(e) => { e.stopPropagation(); setTrackB(unifiedRecentSongToTrack(rs)); }}
-                  className={`p-1.5 rounded-md transition-colors ${
-                    rs.id === abTrackBId ? 'bg-orange-500/20 text-orange-400' : 'bg-zinc-100/80 dark:bg-zinc-800/80 hover:bg-orange-900/60 text-zinc-600 dark:text-zinc-400 hover:text-orange-400'
-                  }`}
-                  title="Set as Track B">
-                  <span className="text-[9px] font-bold w-3 h-3 flex items-center justify-center">B</span>
-                </button>
+              {/* A/B pinning, download and delete used to be five buttons
+                  crammed into a 4.5rem row. They live on the shared menu now;
+                  only the playlist toggle stays out here, because it is the one
+                  that shows state (in / not in) rather than firing an action. */}
+              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <AddToPlaylistBtn rs={rs} />
-                <button onClick={(e) => handleDownloadClick(e, rs)}
-                  className="p-1.5 rounded-md bg-zinc-100/80 dark:bg-zinc-800/80 hover:bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400 hover:text-white transition-colors"
-                  title="Download">
-                  <Download className="w-3 h-3" />
-                </button>
-                <button onClick={(e) => handleDelete(e, rs)}
-                  className="p-1.5 rounded-md bg-zinc-100/80 dark:bg-zinc-800/80 hover:bg-red-900/60 text-zinc-600 dark:text-zinc-400 hover:text-red-400 transition-colors"
-                  title="Delete">
-                  <Trash2 className="w-3 h-3" />
-                </button>
+                <SongActionsMenu
+                  song={songFromRecent(rs)}
+                  size={14}
+                  className="bg-zinc-100/80 dark:bg-zinc-800/80 rounded-md"
+                  onDownload={() => handleDownload(rs)}
+                  onDelete={() => handleDelete(rs)}
+                />
               </div>
             </div>
           );

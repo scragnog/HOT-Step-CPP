@@ -686,6 +686,28 @@ const AppContent: React.FC = () => {
     return () => window.removeEventListener('cover-art-updated', handler);
   }, []);
 
+  // Listen for post-processing completion (fired by postProcessStore after a
+  // "Run Post-Processing" finishes). The song now has a mastered file, which
+  // the player prefers and which makes the menu item disable itself.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { songId, masteredAudioUrl } = (e as CustomEvent).detail;
+      if (!songId || !masteredAudioUrl) return;
+      setSongs(prev => prev.map(s =>
+        s.id === songId
+          ? { ...s, masteredAudioUrl, mastered_audio_url: masteredAudioUrl }
+          : s
+      ));
+      setSelectedSong(prev =>
+        prev?.id === songId
+          ? { ...prev, masteredAudioUrl, mastered_audio_url: masteredAudioUrl } as Song
+          : prev
+      );
+    };
+    window.addEventListener('song-postprocessed', handler);
+    return () => window.removeEventListener('song-postprocessed', handler);
+  }, []);
+
   // Listen for song-created events (fired by audioGenQueueStore on completion)
   // This covers Lyric Studio, Cover Studio, and resumed queue items.
   useEffect(() => {

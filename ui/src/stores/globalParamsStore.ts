@@ -552,8 +552,14 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   },
 
   // -- Derived: assemble generation params --
-  getGlobalParams: (): Partial<GenerationParams> => {
-    const s = get();
+  // `overrides` shadows store fields for this call only, without touching the
+  // real state. It exists for the forced post-processing re-run: every PP field
+  // below is gated on `s.postProcessingEnabled`, so building the payload for a
+  // song rendered with the master toggle OFF has to pretend it was on. Doing it
+  // here rather than in a second builder means a PP knob added later is picked
+  // up by both paths automatically.
+  getGlobalParams: (overrides?: Record<string, any>): Partial<GenerationParams> => {
+    const s = overrides ? { ...get(), ...overrides } : get();
     const settings: AppSettings = readKey('ace-settings', DEFAULT_SETTINGS);
 
     // Effective adapter stack: the multi-adapter list when in Advanced mode,

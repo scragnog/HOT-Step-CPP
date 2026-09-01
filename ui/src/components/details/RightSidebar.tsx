@@ -2,11 +2,11 @@
 // Ported from hot-step-9000's RightSidebar, simplified for current feature set.
 
 import React from 'react';
-import { X, Play, Pause, RotateCcw, Trash2, Music, Clock, Hash, Gauge, Download, Upload, Cpu, Terminal, Settings2, Zap, Radio, Activity, Layers, Sparkles, SlidersHorizontal, Pencil, Disc3, Tags, Image as ImageIcon } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Music, Clock, Hash, Gauge, Cpu, Terminal, Settings2, Zap, Radio, Activity, Layers, Sparkles, SlidersHorizontal, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 import { HoverFullText } from '../shared/HoverFullText';
-import { openCoverArtPrompt } from '../library/CoverArtPromptModal';
+import { SongActionsMenu } from '../shared/SongActionsMenu';
 import { formatDitModel, formatLmModel } from '../global-bar/modelLabels';
 
 interface RightSidebarProps {
@@ -140,68 +140,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           >
             <RotateCcw size={16} />
           </button>
-          <button
-            onClick={() => onDelete(song)}
-            className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-red-100 dark:hover:bg-red-900/50 text-zinc-700 dark:text-zinc-300 hover:text-red-400 transition-colors"
-            title={t('details.delete')}
-          >
-            <Trash2 size={16} />
-          </button>
-          {onDownload && (
-            <button
-              onClick={() => onDownload(song)}
-              className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-zinc-700 dark:text-zinc-300 hover:text-emerald-400 transition-colors"
-              title={t('details.download')}
-            >
-              <Download size={16} />
-            </button>
-          )}
-          <button
-            onClick={() => openCoverArtPrompt(song)}
-            className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-pink-100 dark:hover:bg-pink-900/50 text-zinc-700 dark:text-zinc-300 hover:text-pink-400 transition-colors"
-            title={(song.coverUrl || song.cover_url)
-              ? t('coverArt.regenerateTitle', 'Regenerate Cover Art')
-              : t('coverArt.generateTitle', 'Generate Cover Art')}
-          >
-            <ImageIcon size={16} />
-          </button>
-          {onSendToCover && (
-            <button
-              onClick={() => onSendToCover(song)}
-              className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 text-zinc-700 dark:text-zinc-300 hover:text-cyan-400 transition-colors"
-              title={t('library.sendToCover', 'Send to Cover Studio')}
-            >
-              <Disc3 size={16} />
-            </button>
-          )}
-          {onEditMetadata && (
-            <button
-              onClick={() => onEditMetadata(song)}
-              className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-zinc-700 dark:text-zinc-300 hover:text-amber-400 transition-colors"
-              title={t('metadata.editTitle', 'Edit Metadata')}
-            >
-              <Tags size={16} />
-            </button>
-          )}
-          {gp && (
-            <button
-              onClick={() => {
-                const params = song.generationParams || song.generation_params || {};
-                const exportData = { _format: 'hot-step-preset', _version: 1, ...params, title: song.title || '', caption: (params as any).caption || song.style || '', lyrics: (params as any).lyrics || song.lyrics || '' };
-                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${(song.title || 'song').slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_params.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-              className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-sky-100 dark:hover:bg-sky-900/50 text-zinc-700 dark:text-zinc-300 hover:text-sky-400 transition-colors"
-              title={t('details.exportParams')}
-            >
-              <Upload size={16} />
-            </button>
-          )}
+          {/* Everything below Play/Edit collapsed into the shared menu — the
+              row was seven icon buttons deep and still had no way to run
+              post-processing. */}
+          <SongActionsMenu
+            song={song}
+            size={16}
+            className="!p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
+            onDownload={onDownload ? () => onDownload(song) : undefined}
+            onSendToCover={onSendToCover ? () => onSendToCover(song) : undefined}
+            onEditMetadata={onEditMetadata ? () => onEditMetadata(song) : undefined}
+            onDelete={() => onDelete(song)}
+          />
         </div>
 
         {/* Metadata Badges */}

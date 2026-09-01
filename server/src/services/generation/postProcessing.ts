@@ -251,6 +251,65 @@ async function separateVocals(
   return { sepId, stems, vocalIndex: vocalStem.index, vocalBuf, instBuf };
 }
 
+/**
+ * Normalize a raw params object (a generation job's params, or a browser's
+ * live settings) into the shape runPostProcessingChain expects: flag aliases
+ * resolved, defaults filled, adapter lists cleaned.
+ *
+ * Both entry points into the chain go through here. The generation path and
+ * the after-the-fact re-run used to be free to disagree about what
+ * "stableStepBackend: undefined" meant, which is exactly the kind of drift
+ * that makes a knob look dead on one path and live on the other.
+ *
+ * `captions` is per-track and feeds StableStep prompt building — the LM
+ * caption when there is one, otherwise the user's style text.
+ */
+export function normalizePpParams(raw: any, captions: string[]): PostProcessParams {
+  return {
+    ...raw,
+    parallelQualityEval: !!raw.parallelQualityEval,
+    // StableStep (SA3 refine): normalize the flag (preset files may use the
+    // "stableStep" alias) and default the strength.
+    stableStepOn: !!(raw.stableStepOn ?? raw.stableStep),
+    stableStepStrength: typeof raw.stableStepStrength === 'number' ? raw.stableStepStrength : 0.3,
+    // Engine backend: 'onnx' (ONNX Runtime/TensorRT) | 'gguf' (GGML) —
+    // anything else normalizes to 'auto' (engine picks).
+    stableStepBackend: (raw.stableStepBackend === 'onnx' || raw.stableStepBackend === 'gguf')
+      ? raw.stableStepBackend as 'onnx' | 'gguf' : 'auto' as const,
+    // StableStep DoRA adapters: [{name, scale}] — normalized, disabled/zero
+    // entries dropped (engine forces GGUF backend when any are active).
+    stableStepAdapters: Array.isArray(raw.stableStepAdapters)
+      ? (raw.stableStepAdapters as Array<{ name?: string; scale?: number }>)
+          .filter(a => a && typeof a.name === 'string' && a.name.length > 0)
+          .map(a => ({ name: a.name as string, scale: typeof a.scale === 'number' ? a.scale : 1.0 }))
+          .filter(a => a.scale !== 0)
+      : [],
+    // Preserve source dynamics (envelope match) — default ON
+    stableStepPreserveDynamics: raw.stableStepPreserveDynamics !== false,
+    // PP-VAE re-encode of the vocal stem — default OFF (lossy round trip;
+    // omitted = the original AS1.5 vocals are recombined untouched)
+    stableStepVocalPpVae: raw.stableStepVocalPpVae === true,
+    // Taste trim on the recombined vocal, dB. 0 = the source mix's own
+    // vocal-to-bed ratio, which the balance restore re-establishes.
+    stableStepVocalTrimDb: typeof raw.stableStepVocalTrimDb === 'number' ? raw.stableStepVocalTrimDb : 0,
+    // Source blending: 'off' | 'crossover' | 'mix'
+    stableStepBlendMode: (raw.stableStepBlendMode === 'crossover' || raw.stableStepBlendMode === 'mix')
+      ? raw.stableStepBlendMode as 'crossover' | 'mix' : 'off' as const,
+    stableStepCrossoverHz: typeof raw.stableStepCrossoverHz === 'number' ? raw.stableStepCrossoverHz : 250,
+    stableStepCrossoverWidthHz: typeof raw.stableStepCrossoverWidthHz === 'number' ? raw.stableStepCrossoverWidthHz : 200,
+    stableStepMix: typeof raw.stableStepMix === 'number' ? raw.stableStepMix : 1,
+    // SA3 refine seed: follow the RESOLVED generation seed by default
+    // (raw.seed is back-filled from aceReq.seed, so this is deterministic per
+    // song even with a randomized master seed), or a fixed override when
+    // stableStepSeedFollowsDit === false.
+    stableStepSeed: raw.stableStepSeedFollowsDit === false
+      ? (typeof raw.stableStepSeed === 'number' ? raw.stableStepSeed : undefined)
+      : (typeof raw.seed === 'number' && raw.seed >= 0 ? raw.seed : undefined),
+    stableStepCaptions: captions,
+    whisperIsolateVocals: !!raw.whisperIsolateVocals,
+  };
+}
+
 /** Run the full post-processing chain on a list of audio files.
  *  onVocalStem (optional): requests the isolated vocal stem for Whisper
  *  transcription — see VocalStemFn. Fired per track as soon as the shared

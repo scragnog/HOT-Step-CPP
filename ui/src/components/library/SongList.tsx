@@ -2,23 +2,21 @@
 // Ported from hot-step-9000 visual design with Tailwind.
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import ReactDOM from 'react-dom';
 import {
-  Play, Pause, Trash2, RotateCcw, Music, MoreHorizontal,
-  Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus, Image,
-  LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Upload, Mic2, Loader2,
-  Check, Columns3, ChevronLeft, ChevronRight, Disc3, Tags, Radio,
+  Play, Pause, Trash2, RotateCcw, Music,
+  Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus,
+  LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Loader2,
+  Check, Columns3, ChevronLeft, ChevronRight, Radio,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 import { togglePlay, usePlaybackSelector } from '../../stores/playbackStore';
-import { songToTrack } from '../../stores/playbackStore';
 import { useMm3StreamAudio, mm3StreamTakeState } from '../../stores/mm3StreamStore';
-import { useABCompareSelector, setTrackA, setTrackB, playAB, openModal as openABModal, clear as clearAB } from '../../stores/abCompareStore';
+import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from '../../stores/abCompareStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { downloadAll } from '../../utils/downloadTrack';
 import { HoverFullText } from '../shared/HoverFullText';
-import { openCoverArtPrompt } from './CoverArtPromptModal';
+import { SongActionsMenu } from '../shared/SongActionsMenu';
 
 // ── Source filter definitions ────────────────────────────────────────────────
 
@@ -56,58 +54,7 @@ function savePageSize(v: number | 'all') {
   try { localStorage.setItem(PAGE_SIZE_KEY, String(v)); } catch { /* ignore */ }
 }
 
-/**
- * Manual per-track cover art (#67): open the prompt modal so the user can edit
- * the prompt before generating. The modal handles generation + polling and
- * dispatches `cover-art-updated` when done. Auto-generate-after-creation is a
- * separate server-side path and is unaffected.
- */
-function triggerCoverArtGeneration(song: Song): void {
-  openCoverArtPrompt(song);
-}
 
-// ── Portal Menu ──────────────────────────────────────────────────────────────
-// Renders dropdown menus at document.body level to escape overflow clipping.
-
-interface PortalMenuProps {
-  anchorRef: React.RefObject<HTMLElement | null>;
-  onClose: () => void;
-  children: React.ReactNode;
-}
-
-const PortalMenu: React.FC<PortalMenuProps> = ({ anchorRef, onClose, children }) => {
-  const [pos, setPos] = React.useState<{ top: number; left: number; flipped: boolean }>({ top: 0, left: 0, flipped: false });
-
-  React.useLayoutEffect(() => {
-    if (!anchorRef.current) return;
-    const rect = anchorRef.current.getBoundingClientRect();
-    const menuH = 360; // max estimated height
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const flipped = spaceBelow < menuH && rect.top > spaceBelow;
-    setPos({
-      top: flipped ? rect.top : rect.bottom + 4,
-      left: Math.max(8, rect.right - 168), // align right edge, min 8px from left
-      flipped,
-    });
-  }, [anchorRef]);
-
-  return ReactDOM.createPortal(
-    <>
-      <div className="fixed inset-0 z-[9998]" onClick={onClose} />
-      <div
-        className="fixed z-[9999] bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 rounded-xl shadow-xl py-1 min-w-[160px]"
-        style={{
-          top: pos.flipped ? undefined : pos.top,
-          bottom: pos.flipped ? (window.innerHeight - pos.top + 4) : undefined,
-          left: pos.left,
-        }}
-      >
-        {children}
-      </div>
-    </>,
-    document.body
-  );
-};
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -728,11 +675,9 @@ const SongItem: React.FC<SongItemProps> = ({
 }) => {
   const { isStreaming, frac: streamFrac, audible: streamAudible } = useStreamingSong(song);
   const { t } = useTranslation();
-  const [showMenu, setShowMenu] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
   const [editTitle, setEditTitle] = React.useState(song.title || '');
   const inputRef = React.useRef<HTMLInputElement>(null);
-  const menuBtnRef = React.useRef<HTMLButtonElement>(null);
   const { isDisguised, disguiseTitle } = useDisguiseMode();
 
   React.useEffect(() => {
@@ -919,127 +864,14 @@ const SongItem: React.FC<SongItemProps> = ({
               <ListPlus size={15} />
             </button>
           )}
-          <button
-            ref={menuBtnRef}
-            onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-            className="p-1.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
-          >
-            <MoreHorizontal size={16} />
-          </button>
-
-          {/* Context Menu — portaled to body to escape overflow clipping */}
-          {showMenu && (
-            <PortalMenu anchorRef={menuBtnRef} onClose={() => setShowMenu(false)}>
-                {onReuse && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
-                  >
-                    <RotateCcw size={14} /> {t('library.edit')}
-                  </button>
-                )}
-                {onDownload && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onDownload(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
-                  >
-                    <Download size={14} /> {t('library.download')}
-                  </button>
-                )}
-                {onSendToCover && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onSendToCover(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-cyan-400 hover:bg-cyan-500/10 transition-colors"
-                  >
-                    <Disc3 size={14} /> {t('library.sendToCover', 'Send to Cover Studio')}
-                  </button>
-                )}
-                {onEditMetadata && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onEditMetadata(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-amber-400 hover:bg-amber-500/10 transition-colors"
-                  >
-                    <Tags size={14} /> {t('metadata.editTitle', 'Edit Metadata')}
-                  </button>
-                )}
-                <button
-                  onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
-                >
-                  <Trash2 size={14} /> {t('library.delete')}
-                </button>
-
-                {/* Export Params */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowMenu(false);
-                    const params = song.generationParams || song.generation_params || {};
-                    const exportData = { _format: 'hot-step-preset', _version: 1, ...params, title: song.title || '', caption: (params as any).caption || song.style || '', lyrics: (params as any).lyrics || song.lyrics || '' };
-                    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `${(song.title || 'song').slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_params.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors"
-                >
-                  <Upload size={14} /> {t('library.exportParams')}
-                </button>
-
-                {/* Retranscribe Lyrics */}
-                <button
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    setShowMenu(false);
-                    try {
-                      const { retranscribeLyrics } = await import('../../services/api');
-                      const result = await retranscribeLyrics(song.id);
-                      console.log(`[Retranscribe] ${result.wordCount} words, ${result.lineCount} lines`);
-                    } catch (err: any) {
-                      console.error('[Retranscribe] Failed:', err.message);
-                    }
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-sky-400 hover:bg-sky-500/10 transition-colors"
-                >
-                  <Mic2 size={14} /> Retranscribe Lyrics
-                </button>
-
-                {/* Cover Art Generation */}
-                <div className="border-t border-zinc-200 dark:border-white/5 my-1" />
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowMenu(false);
-                    triggerCoverArtGeneration(song);
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-violet-400 hover:bg-violet-500/10 transition-colors"
-                >
-                  <Image size={14} /> {song.coverUrl ? 'Regenerate Cover Art' : 'Generate Cover Art'}
-                </button>
-
-                {/* A/B Comparison */}
-                <div className="border-t border-zinc-200 dark:border-white/5 my-1" />
-                <button
-                  onClick={(e) => { e.stopPropagation(); setTrackA(songToTrack(song)); setShowMenu(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
-                    song.id === abTrackAId ? 'text-blue-400 bg-blue-500/10' : 'text-blue-400/70 hover:bg-blue-500/10 hover:text-blue-400'
-                  }`}
-                >
-                  <ArrowLeftRight size={14} /> Set as Track A
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setTrackB(songToTrack(song)); setShowMenu(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
-                    song.id === abTrackBId ? 'text-orange-400 bg-orange-500/10' : 'text-orange-400/70 hover:bg-orange-500/10 hover:text-orange-400'
-                  }`}
-                >
-                  <ArrowLeftRight size={14} /> Set as Track B
-                </button>
-            </PortalMenu>
-          )}
+          <SongActionsMenu
+            song={song}
+            onReuse={onReuse}
+            onDownload={onDownload}
+            onSendToCover={onSendToCover}
+            onEditMetadata={onEditMetadata}
+            onDelete={onDelete}
+          />
         </div>
       )}
     </div>
@@ -1074,8 +906,6 @@ const SongCard: React.FC<SongCardProps> = ({
   abTrackAId: _abTrackAId, abTrackBId: _abTrackBId,
 }) => {
   const { t } = useTranslation();
-  const [showMenu, setShowMenu] = React.useState(false);
-  const menuBtnRef = React.useRef<HTMLButtonElement>(null);
   const [editing, setEditing] = React.useState(false);
   const [editTitle, setEditTitle] = React.useState(song.title || '');
   const renameInputRef = React.useRef<HTMLInputElement>(null);
@@ -1219,100 +1049,21 @@ const SongCard: React.FC<SongCardProps> = ({
         </>
       )}
 
-      {/* More menu — hidden on a live render: every item on it (download,
-          delete, send-to-cover, export) needs a file that does not exist yet. */}
+      {/* Actions — hidden on a live render: every item on it (download, delete,
+          send-to-cover, export) needs a file that does not exist yet. */}
       {!selectionMode && !isStreaming && (
         <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            ref={menuBtnRef}
-            onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-            className="w-7 h-7 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/60 transition-colors"
-          >
-            <MoreHorizontal size={14} />
-          </button>
-          {showMenu && (
-            <PortalMenu anchorRef={menuBtnRef} onClose={() => setShowMenu(false)}>
-                {onReuse && (
-                  <button onClick={(e) => { e.stopPropagation(); onReuse(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                    <RotateCcw size={12} /> {t('library.edit')}
-                  </button>
-                )}
-                {onAddToPlaylist && (
-                  <button onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                    <ListPlus size={12} /> {t('library.addToPlaylist')}
-                  </button>
-                )}
-                {onDownload && (
-                  <button onClick={(e) => { e.stopPropagation(); onDownload(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                    <Download size={12} /> {t('library.download')}
-                  </button>
-                )}
-                {onSendToCover && (
-                  <button onClick={(e) => { e.stopPropagation(); onSendToCover(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-cyan-400 hover:bg-cyan-500/10 transition-colors">
-                    <Disc3 size={12} /> {t('library.sendToCover', 'Send to Cover Studio')}
-                  </button>
-                )}
-                {onEditMetadata && (
-                  <button onClick={(e) => { e.stopPropagation(); onEditMetadata(); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-amber-400 hover:bg-amber-500/10 transition-colors">
-                    <Tags size={12} /> {t('metadata.editTitle', 'Edit Metadata')}
-                  </button>
-                )}
-                <button onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors">
-                  <Trash2 size={12} /> {t('library.delete')}
-                </button>
-
-                {/* Export Params */}
-                <button onClick={(e) => {
-                  e.stopPropagation();
-                  setShowMenu(false);
-                  const params = song.generationParams || song.generation_params || {};
-                  const exportData = { _format: 'hot-step-preset', _version: 1, ...params, title: song.title || '', caption: (params as any).caption || song.style || '', lyrics: (params as any).lyrics || song.lyrics || '' };
-                  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `${(song.title || 'song').slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_params.json`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-white/5 hover:text-white transition-colors">
-                  <Upload size={12} /> {t('library.exportParams')}
-                </button>
-
-                {/* Retranscribe Lyrics */}
-                <button onClick={async (e) => {
-                  e.stopPropagation();
-                  setShowMenu(false);
-                  try {
-                    const { retranscribeLyrics } = await import('../../services/api');
-                    const result = await retranscribeLyrics(song.id);
-                    console.log(`[Retranscribe] ${result.wordCount} words, ${result.lineCount} lines`);
-                  } catch (err: any) {
-                    console.error('[Retranscribe] Failed:', err.message);
-                  }
-                }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-sky-400 hover:bg-sky-500/10 transition-colors">
-                  <Mic2 size={12} /> Retranscribe Lyrics
-                </button>
-
-                {/* Cover Art Generation */}
-                <div className="border-t border-zinc-200 dark:border-white/5 my-1" />
-                <button onClick={(e) => {
-                  e.stopPropagation();
-                  setShowMenu(false);
-                  triggerCoverArtGeneration(song);
-                }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-violet-400 hover:bg-violet-500/10 transition-colors">
-                  <Image size={12} /> {song.coverUrl || song.cover_url ? 'Regenerate Cover' : 'Generate Cover'}
-                </button>
-            </PortalMenu>
-          )}
+          <SongActionsMenu
+            song={song}
+            size={14}
+            className="w-7 h-7 !p-0 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/60"
+            onReuse={onReuse}
+            onAddToPlaylist={onAddToPlaylist}
+            onDownload={onDownload}
+            onSendToCover={onSendToCover}
+            onEditMetadata={onEditMetadata}
+            onDelete={onDelete}
+          />
         </div>
       )}
 
@@ -1567,7 +1318,7 @@ function baseName(p?: string): string {
 const SongTable: React.FC<SongTableProps> = ({
   songs, currentSongId, isPlaying, selectionMode, selectedIds, onToggleSelect,
   onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onSendToCover, showSourceBadge,
-  abTrackAId, abTrackBId, topRight,
+  abTrackAId: _abTrackAId, abTrackBId: _abTrackBId, topRight,
 }) => {
   const { t } = useTranslation();
   const { isDisguised, disguiseTitle } = useDisguiseMode();
@@ -1815,38 +1566,23 @@ const SongTable: React.FC<SongTableProps> = ({
               lmSeedType: <span className="text-zinc-500">{gp?.lmSeedFollowsDit === true ? 'Tied to DiT' : (gp?.lmSeedFollowsDit === false ? 'Fixed' : '—')}</span>,
               actions: (
                 <div className="flex items-center justify-end gap-0.5 flex-nowrap flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Edit stays out here as the one-click action; everything
+                      else (download, send-to-cover, delete, A/B, and now
+                      post-processing) is on the shared menu. */}
                   {onReuse && (
                     <button onClick={(e) => { e.stopPropagation(); onReuse(song); }}
                       className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/10 transition-colors" title={t('library.edit')}>
                       <RotateCcw size={12} />
                     </button>
                   )}
-                  {onDownload && (
-                    <button onClick={(e) => { e.stopPropagation(); onDownload(song); }}
-                      className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/10 transition-colors" title={t('library.download')}>
-                      <Download size={12} />
-                    </button>
-                  )}
-                  {onSendToCover && (
-                    <button onClick={(e) => { e.stopPropagation(); onSendToCover(song); }}
-                      className="p-1 rounded text-zinc-500 hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors" title={t('library.sendToCover', 'Send to Cover Studio')}>
-                      <Disc3 size={12} />
-                    </button>
-                  )}
-                  <button onClick={(e) => { e.stopPropagation(); onDelete(song); }}
-                    className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors" title={t('library.delete')}>
-                    <Trash2 size={12} />
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); setTrackA(songToTrack(song)); }}
-                    className={`p-1 rounded transition-colors ${song.id === abTrackAId ? 'text-blue-400 bg-blue-500/10' : 'text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10'}`}
-                    title="Set as Track A">
-                    <span className="text-[9px] font-bold">A</span>
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); setTrackB(songToTrack(song)); }}
-                    className={`p-1 rounded transition-colors ${song.id === abTrackBId ? 'text-orange-400 bg-orange-500/10' : 'text-zinc-500 hover:text-orange-400 hover:bg-orange-500/10'}`}
-                    title="Set as Track B">
-                    <span className="text-[9px] font-bold">B</span>
-                  </button>
+                  <SongActionsMenu
+                    song={song}
+                    size={13}
+                    className="!p-1"
+                    onDownload={onDownload ? () => onDownload(song) : undefined}
+                    onSendToCover={onSendToCover ? () => onSendToCover(song) : undefined}
+                    onDelete={() => onDelete(song)}
+                  />
                 </div>
               ),
             };

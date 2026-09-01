@@ -198,7 +198,7 @@ export interface GlobalParams {
   whisperBeamSize: number; setWhisperBeamSize: (v: number) => void;
   whisperIsolateVocals: boolean; setWhisperIsolateVocals: (v: boolean) => void;
   // Derived
-  getGlobalParams: () => Partial<GenerationParams>;
+  getGlobalParams: (overrides?: Record<string, any>) => Partial<GenerationParams>;
 }
 
 // ── Provider (now a no-op wrapper — state lives in Zustand) ──

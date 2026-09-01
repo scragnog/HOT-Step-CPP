@@ -31,11 +31,12 @@ import { readAdapterTrigger } from '../services/adapters/stMetadata.js';
 import { computeLmCacheKey, getLmCache, setLmCache, getLmCacheSize, type LmCacheEntry } from '../services/generation/lmCache.js';
 import { degeneratePlanReason } from '../services/generation/planGuard.js';
 import { loadSourceAudio, loadSourceLatent, applyTempoAndPitch, loadTimbreReference } from '../services/generation/sourceAudio.js';
-import { runPostProcessingChain } from '../services/generation/postProcessing.js';
+import { runPostProcessingChain, normalizePpParams } from '../services/generation/postProcessing.js';
 import { getCachedLatent, saveCachedLatent } from '../services/generation/sourceLatentCache.js';
 import { getActiveBackendId } from '../services/backends/registry.js';
 import { runMinimaxGeneration, releaseMinimaxVramForAce } from '../services/backends/minimax/generate.js';
 import { mm3StreamUrl } from '../services/backends/minimax/client.js';
+import { runOnGpuLane, gpuLaneBusy, gpuLaneDepth, resetGpuLane } from '../services/generation/gpuLane.js';
 
 const router = Router();
 
@@ -1353,56 +1354,13 @@ async function runGeneration(job: GenerationJob): Promise<void> {
     job.progress = 89;
     job.stage = 'Post-processing...';
 
-    // Pass parallel flags to the PP chain
-    const ppParams = {
-      ...job.params,
-      parallelQualityEval: !!job.params.parallelQualityEval,
-      // StableStep (SA3 refine): normalize the flag (preset files may use the
-      // "stableStep" alias), default strength, and provide per-track captions
-      // for prompt building (LM caption preferred, user style as fallback).
-      stableStepOn: !!(job.params.stableStepOn ?? job.params.stableStep),
-      stableStepStrength: typeof job.params.stableStepStrength === 'number'
-        ? job.params.stableStepStrength : 0.3,
-      // Engine backend: 'onnx' (ONNX Runtime/TensorRT) | 'gguf' (GGML) —
-      // anything else normalizes to 'auto' (engine picks).
-      stableStepBackend: (job.params.stableStepBackend === 'onnx' || job.params.stableStepBackend === 'gguf')
-        ? job.params.stableStepBackend as 'onnx' | 'gguf' : 'auto' as const,
-      // StableStep DoRA adapters: [{name, scale}] — normalized, disabled/zero
-      // entries dropped (engine forces GGUF backend when any are active).
-      stableStepAdapters: Array.isArray(job.params.stableStepAdapters)
-        ? (job.params.stableStepAdapters as Array<{ name?: string; scale?: number }>)
-            .filter(a => a && typeof a.name === 'string' && a.name.length > 0)
-            .map(a => ({ name: a.name as string, scale: typeof a.scale === 'number' ? a.scale : 1.0 }))
-            .filter(a => a.scale !== 0)
-        : [],
-      // Preserve source dynamics (envelope match) — default ON
-      stableStepPreserveDynamics: job.params.stableStepPreserveDynamics !== false,
-      // PP-VAE re-encode of the vocal stem — default OFF (lossy round trip;
-      // omitted = the original AS1.5 vocals are recombined untouched)
-      stableStepVocalPpVae: job.params.stableStepVocalPpVae === true,
-      // Taste trim on the recombined vocal, dB. 0 = the source mix's own
-      // vocal-to-bed ratio, which the balance restore re-establishes.
-      stableStepVocalTrimDb: typeof job.params.stableStepVocalTrimDb === 'number'
-        ? job.params.stableStepVocalTrimDb : 0,
-      // Source blending: 'off' | 'crossover' | 'mix'
-      stableStepBlendMode: (job.params.stableStepBlendMode === 'crossover' || job.params.stableStepBlendMode === 'mix')
-        ? job.params.stableStepBlendMode as 'crossover' | 'mix' : 'off' as const,
-      stableStepCrossoverHz: typeof job.params.stableStepCrossoverHz === 'number'
-        ? job.params.stableStepCrossoverHz : 250,
-      stableStepCrossoverWidthHz: typeof job.params.stableStepCrossoverWidthHz === 'number'
-        ? job.params.stableStepCrossoverWidthHz : 200,
-      stableStepMix: typeof job.params.stableStepMix === 'number' ? job.params.stableStepMix : 1,
-      // SA3 refine seed: follow the RESOLVED generation seed by default
-      // (job.params.seed is back-filled from aceReq.seed, so this is
-      // deterministic per song even with a randomized master seed), or a
-      // fixed override when stableStepSeedFollowsDit === false.
-      stableStepSeed: job.params.stableStepSeedFollowsDit === false
-        ? (typeof job.params.stableStepSeed === 'number' ? job.params.stableStepSeed : undefined)
-        : (typeof job.params.seed === 'number' && job.params.seed >= 0 ? job.params.seed : undefined),
-      stableStepCaptions: audioUrls.map((_, ti) =>
+    // Normalized by the same helper the after-the-fact re-run uses, so both
+    // entry points into the chain agree on defaults and flag aliases.
+    const ppParams = normalizePpParams(
+      job.params,
+      audioUrls.map((_, ti) =>
         (lmResults[ti]?.caption || firstResult.caption || job.params.caption || '') as string),
-      whisperIsolateVocals: !!job.params.whisperIsolateVocals,
-    };
+    );
 
     // Stem-mode Whisper: fired by the PP chain as soon as a track's vocal stem
     // exists (before the SA3 refine) so CPU transcription overlaps GPU work.
@@ -1638,18 +1596,19 @@ async function runGeneration(job: GenerationJob): Promise<void> {
 }
 
 // ── Async generation queue ────────────────────────────────────────────
-// Serializes runGeneration calls so only one job runs at a time.
-// The C++ engine is single-GPU — concurrent runGeneration calls cause
-// log subscription callbacks to leak progress from one job into another
-// because subscribeLines() is a global pub/sub with no job tagging.
-const pendingQueue: (() => void)[] = [];
-let generationRunning = false;
-
+// Generations run one at a time on the shared GPU lane (services/generation/
+// gpuLane.ts). The C++ engine is single-GPU, and concurrent runGeneration
+// calls also leak progress between jobs because subscribeLines() is a global
+// pub/sub with no job tagging. The lane is shared rather than private because
+// post-processing re-runs are just as GPU-hungry and must not race a render.
 const MAX_RETRIES = 1; // retry once on transient failures
 
 function enqueueGeneration(job: GenerationJob): void {
-  const execute = async () => {
-    generationRunning = true;
+  if (gpuLaneBusy()) {
+    console.log(`[Generate] Job ${job.id} queued (${gpuLaneDepth() + 1} waiting)`);
+  }
+
+  void runOnGpuLane(async () => {
     let attempts = 0;
 
     while (attempts <= MAX_RETRIES) {
@@ -1692,17 +1651,11 @@ function enqueueGeneration(job: GenerationJob): void {
       }
     }
 
-    generationRunning = false;
-    const next = pendingQueue.shift();
-    if (next) next();
-  };
-
-  if (generationRunning) {
-    console.log(`[Generate] Job ${job.id} queued (${pendingQueue.length + 1} waiting)`);
-    pendingQueue.push(execute);
-  } else {
-    execute();
-  }
+  }).catch((err: any) => {
+    // The retry loop above swallows every generation failure, so reaching here
+    // means the lane itself broke. Never leave that silent.
+    console.error(`[Generate] Job ${job.id} lane error:`, err?.message || err);
+  });
 }
 
 // POST /api/generate — start a generation job
@@ -1895,7 +1848,7 @@ router.get('/queue', (_req, res) => {
 
   res.json({
     depth,
-    running: generationRunning,
+    running: gpuLaneBusy(),
     current: activeJob ? {
       id: activeJob.id,
       status: activeJob.status,
@@ -1904,7 +1857,7 @@ router.get('/queue', (_req, res) => {
       age: Math.round((Date.now() - activeJob.createdAt) / 1000),
       aceJobId: activeJob.aceJobId,
     } : null,
-    pending: pendingQueue.length,
+    pending: gpuLaneDepth(),
   });
 });
 
@@ -1929,9 +1882,7 @@ router.post('/reset-queue', (_req, res) => {
   }
 
   // Drain the pending execution queue
-  const drained = pendingQueue.length;
-  pendingQueue.length = 0;
-  generationRunning = false;
+  const drained = resetGpuLane();
 
   console.log(`[Generate] Queue reset: ${cancelled} job(s) cancelled, ${drained} pending drained`);
 

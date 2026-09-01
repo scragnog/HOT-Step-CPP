@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Play, Loader2, Music, Download, Trash2, ListPlus, Check } from 'lucide-react';
+import { Play, Loader2, Music, ListPlus, Check } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { songApi } from '../../services/api';
 import type { Song } from '../../types';
@@ -14,6 +14,7 @@ import { downloadTrack } from '../../utils/downloadTrack';
 import { usePlaylist } from '../lyric-studio/playlistStore';
 import { playFromList, songToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
+import { SongActionsMenu } from '../shared/SongActionsMenu';
 
 interface CoverRecentSongsProps {
   showToast: (msg: string, type?: 'success' | 'error') => void;
@@ -100,8 +101,7 @@ export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, r
     playFromList(songToTrack(song), songs.map(songToTrack), 'cover-studio');
   }, [songs]);
 
-  const handleDelete = useCallback(async (e: React.MouseEvent, song: Song) => {
-    e.stopPropagation();
+  const handleDelete = useCallback(async (song: Song) => {
     if (!token) return;
     try {
       await songApi.delete(song.id, token);
@@ -116,8 +116,7 @@ export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, r
     }
   }, [token, showToast]);
 
-  const handleDownloadClick = useCallback((e: React.MouseEvent, song: Song) => {
-    e.stopPropagation();
+  const handleDownload = useCallback((song: Song) => {
     const gp = song.generationParams as any;
     const targetArtist = gp?.artistName || song.artistName || '';
     downloadTrack(song, { artistName: targetArtist });
@@ -176,16 +175,13 @@ export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, r
               </div>
               <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <CoverAddToPlaylistBtn song={song} />
-                <button onClick={(e) => handleDownloadClick(e, song)}
-                  className="p-1.5 rounded-md bg-zinc-100/80 dark:bg-zinc-800/80 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 hover:text-white transition-colors"
-                  title="Download">
-                  <Download className="w-3 h-3" />
-                </button>
-                <button onClick={(e) => handleDelete(e, song)}
-                  className="p-1.5 rounded-md bg-zinc-100/80 dark:bg-zinc-800/80 hover:bg-red-100 dark:hover:bg-red-900/60 text-zinc-600 dark:text-zinc-400 hover:text-red-400 transition-colors"
-                  title="Delete">
-                  <Trash2 className="w-3 h-3" />
-                </button>
+                <SongActionsMenu
+                  song={song}
+                  size={14}
+                  className="bg-zinc-100/80 dark:bg-zinc-800/80 rounded-md"
+                  onDownload={() => handleDownload(song)}
+                  onDelete={() => handleDelete(song)}
+                />
               </div>
             </div>
           );

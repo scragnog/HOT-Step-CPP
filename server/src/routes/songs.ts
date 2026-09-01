@@ -11,6 +11,10 @@ import { getUserId } from './auth.js';
 import { deleteAudioGenerationsByJobIds } from '../db/lireekDb.js';
 import { cropWavFile, cropLrcFile } from '../services/audioCrop.js';
 import { analyzeAndSaveDiscoData } from '../services/disco-analyzer.js';
+import {
+  startRePostProcess, checkPpEligibility, requestedPpStages,
+  getRePostProcessJob, findRePostProcessJobBySong,
+} from '../services/generation/rePostProcess.js';
 
 const router = Router();
 
@@ -579,6 +583,62 @@ router.post('/:id/retranscribe', async (req, res) => {
     console.error('[Retranscribe] Error:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// POST /api/songs/:id/postprocess — run the PP chain on an existing render
+//
+// For the render you made with the global post-processing toggle off and then
+// decided you liked. The body carries the user's live PP settings; the master
+// switch is forced on server-side, because sending this request IS the
+// override. Returns immediately with a job id — the pass itself waits its turn
+// on the GPU lane behind any running generation.
+router.post('/:id/postprocess', (req, res) => {
+  try {
+    const song = getDb().prepare('SELECT * FROM songs WHERE id = ?').get(req.params.id) as any;
+
+    const eligibility = checkPpEligibility(song);
+    if (!eligibility.ok) {
+      res.status(eligibility.status).json({ error: eligibility.error });
+      return;
+    }
+
+    const params = (req.body && typeof req.body === 'object') ? req.body : {};
+
+    // A chain with nothing switched on copies the WAV, changes nothing, deletes
+    // the copy and reports success. Say so instead of spending a GPU slot on it.
+    const stages = requestedPpStages({ ...params, postProcessingEnabled: true });
+    if (stages.length === 0) {
+      res.status(400).json({
+        error: 'No post-processing stages are enabled. Turn on at least one (StableStep, PP-VAE, Spectral Lifter, Vocal Naturalizer, Gain Offset, a VST chain, Mastering or the Final Normalizer) and try again.',
+      });
+      return;
+    }
+
+    const job = startRePostProcess(song, params);
+    res.json({ jobId: job.id, status: job.status, stage: job.stage, stages });
+  } catch (err: any) {
+    console.error('[PostProcess] Start failed:', err.message);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// GET /api/songs/:id/postprocess — poll a re-run
+//
+// Scoped under the song rather than sitting at /postprocess/:jobId so it cannot
+// be shadowed by GET /:id. With no jobId it reports whatever is in flight for
+// this song, which is how a reloaded tab re-attaches to a running pass.
+router.get('/:id/postprocess', (req, res) => {
+  const jobId = req.query.jobId as string | undefined;
+  const job = jobId ? getRePostProcessJob(jobId) : findRePostProcessJobBySong(req.params.id);
+  if (!job) { res.status(404).json({ error: 'No post-processing job found' }); return; }
+  res.json({
+    jobId: job.id,
+    songId: job.songId,
+    status: job.status,
+    stage: job.stage,
+    error: job.error,
+    masteredAudioUrl: job.masteredAudioUrl,
+  });
 });
 
 // Track in-flight extractions to prevent duplicate SuperSep jobs

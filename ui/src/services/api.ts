@@ -447,6 +447,59 @@ export const modelManagerApi = {
 };
 
 // ── Retranscribe Lyrics ─────────────────────────────────────
+export interface PostProcessJobStatus {
+  jobId: string;
+  songId?: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  stage: string;
+  error?: string;
+  masteredAudioUrl?: string;
+}
+
+/**
+ * Run the post-processing chain over an already-rendered song.
+ *
+ * `params` is the full getGlobalParams() payload built with the master PP
+ * toggle forced on — deliberately not a hand-picked subset of PP keys, so a
+ * knob added later cannot go quietly missing on this path. The server forces
+ * the master switch itself and replaces the fields that belong to the song
+ * (instrumental, caption, seed) rather than trusting the current form.
+ *
+ * Refused with 409 when the song already has a mastered version: the chain is
+ * not idempotent and a second pass overcooks it.
+ */
+export async function runSongPostProcessing(
+  songId: string,
+  params: Record<string, any>
+): Promise<{ jobId: string; status: string; stage: string; stages: string[] }> {
+  const res = await fetch(`/api/songs/${songId}/postprocess`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Poll a post-processing re-run. Omit jobId to find whatever is in flight for
+ *  the song, which is how a reloaded tab re-attaches to a running pass. */
+export async function getSongPostProcessingStatus(
+  songId: string,
+  jobId?: string
+): Promise<PostProcessJobStatus | null> {
+  const qs = jobId ? `?jobId=${encodeURIComponent(jobId)}` : '';
+  const res = await fetch(`/api/songs/${songId}/postprocess${qs}`);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function retranscribeLyrics(
   songId: string,
   options?: { model?: string; language?: string; beamSize?: number }

@@ -9,6 +9,7 @@
 import React, { memo, useCallback, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, CheckCircle2, XCircle, X, Music, Play, Square, ListPlus, Check, Download, RotateCcw } from 'lucide-react';
+import { SongActionsMenu, songFromQueueItem } from '../shared/SongActionsMenu';
 import {
   useAudioGenQueue,
   removeFromAudioQueue,
@@ -201,6 +202,7 @@ interface QueueItemRowProps {
 }
 
 const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPlay, onDownload }) => {
+  const queueSong = songFromQueueItem(item);
   const { disguiseArtist } = useDisguiseMode();
   const isRunning = item.status === 'loading-adapter' || item.status === 'generating';
   const isSucceeded = item.status === 'succeeded';
@@ -279,12 +281,25 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
           )}
           {isSucceeded && item.audioUrl && (
             <>
-              <button onClick={() => onDownload?.(item)}
-                className="p-0.5 rounded hover:bg-emerald-500/20 text-zinc-500 hover:text-emerald-400 transition-colors"
-                title="Download Audio">
-                <Download className="w-3 h-3" />
-              </button>
               <QueueAddToPlaylistBtn item={item} />
+              {/* compact: this row is one line tall, so it skips the
+                  export/cover-art/AB block and keeps the actions that matter
+                  for a track that just finished. */}
+              {queueSong ? (
+                <SongActionsMenu
+                  song={queueSong}
+                  size={12}
+                  compact
+                  className="!p-0.5"
+                  onDownload={() => onDownload?.(item)}
+                />
+              ) : (
+                <button onClick={() => onDownload?.(item)}
+                  className="p-0.5 rounded hover:bg-emerald-500/20 text-zinc-500 hover:text-emerald-400 transition-colors"
+                  title="Download Audio">
+                  <Download className="w-3 h-3" />
+                </button>
+              )}
             </>
           )}
         </div>

@@ -9,13 +9,14 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Play, X, Trash2, ChevronUp, ChevronDown,
-  Music, ListPlus, ListMusic, Square, Download, DownloadCloud, Loader2,
+  Music, ListPlus, ListMusic, Square, DownloadCloud, Loader2,
 } from 'lucide-react';
 import { usePlaylist, type PlaylistItem } from '../lyric-studio/playlistStore';
 import { playFromList, playlistItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { downloadTrack, downloadAll } from '../../utils/downloadTrack';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
+import { SongActionsMenu, songFromPlaylistItem } from '../shared/SongActionsMenu';
 
 interface PlaylistSidebarProps {
   onClose: () => void;
@@ -162,25 +163,18 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
 
                   {/* Actions — appear on hover between title and duration */}
                   <div className="hidden group-hover:flex items-center gap-0 flex-shrink-0">
-                    <button onClick={(e) => {
-                        e.stopPropagation();
-                        downloadTrack({
-                          id: item.id,
-                          title: item.title || 'Untitled',
-                          style: item.style || '',
-                          caption: item.style || '',
-                          lyrics: '',
-                          audioUrl: item.audioUrl,
-                          masteredAudioUrl: item.masteredAudioUrl || '',
-                          coverUrl: item.coverUrl || '',
-                          duration: item.duration || 0,
-                          artistName: item.artistName || '',
-                          tags: [],
-                        }, { artistName: item.artistName || '' });
-                      }}
-                      className="p-0.5 text-zinc-600 hover:text-emerald-400 transition-colors" title={t('playlist.download')}>
-                      <Download className="w-3 h-3" />
-                    </button>
+                    {/* Download moved onto the shared menu; up/down/remove stay
+                        out here because they reorder the playlist rather than
+                        acting on the song. */}
+                    <SongActionsMenu
+                      song={songFromPlaylistItem(item)}
+                      size={12}
+                      className="!p-0.5"
+                      onDownload={() => downloadTrack(
+                        { ...songFromPlaylistItem(item), artistName: item.artistName || '' } as any,
+                        { artistName: item.artistName || '' },
+                      )}
+                    />
                     <button onClick={() => playlist.move(item.id, 'up')} disabled={idx === 0}
                       className="p-0.5 text-zinc-600 hover:text-white transition-colors disabled:opacity-20" title={t('playlist.moveUp')}>
                       <ChevronUp className="w-3 h-3" />
