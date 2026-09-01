@@ -62,6 +62,17 @@ struct DitTrainLog {
     float       crop_endpoint_k  = 2.0f;
     std::string mirror      = "f32";  // frozen-weight mirror precision (f32|bf16)
     std::string bwd         = "outprod";  // MUL_MAT activation-gradient form (outprod|mm)
+    // Attention formulation the run actually used (exact|flash). A config field,
+    // not a stream change: the format stays hot-step-dit-train-v3, and a reader
+    // that has never heard of it defaults to "exact", which is what every run
+    // before 2026-09-01 was.
+    std::string attn_mode   = "exact";
+    // Which footprint model priced this run's crop/depth/segments, and the
+    // dataset's padded encoder length it was priced at. `enc_S` was never
+    // recorded before 2026-09-01, and without it a past run's VRAM figures
+    // cannot be re-interpreted (fattn-train-spec.md §11.3).
+    std::string arena_model = "exact";  // exact|flash
+    int         enc_S       = 0;
     double      lr = 5e-4;
     int         epochs = 100, grad_accum = 4;
     // Effective micro-batch after the dataset-size and A1 repeat_back clamps —
@@ -164,6 +175,9 @@ static bool dit_write_train_log(const std::string & dir, const DitTrainLog & m) 
     yyjson_mut_obj_add_real(doc, cfg, "crop_endpoint_k", (double) m.crop_endpoint_k);
     yyjson_mut_obj_add_strcpy(doc, cfg, "mirror", m.mirror.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "bwd", m.bwd.c_str());
+    yyjson_mut_obj_add_strcpy(doc, cfg, "attn_mode", m.attn_mode.c_str());
+    yyjson_mut_obj_add_strcpy(doc, cfg, "arena_model", m.arena_model.c_str());
+    yyjson_mut_obj_add_int(doc, cfg, "enc_S", m.enc_S);
     yyjson_mut_obj_add_real(doc, cfg, "lr", m.lr);
     yyjson_mut_obj_add_int(doc, cfg, "epochs", m.epochs);
     yyjson_mut_obj_add_int(doc, cfg, "grad_accum", m.grad_accum);

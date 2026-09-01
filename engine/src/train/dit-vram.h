@@ -67,6 +67,12 @@ struct DitVramModel {
     int in_ch = 192, out_ch = 64, hidden = 2560, enc_H = 2048, enc_S = 0;
     // attention geometry — only the A1 expanded-KV term needs it
     int n_heads = 0, n_kv_heads = 0, head_dim = 0;
+    // Attention formulation the graph will be built with (--attn). false = the
+    // shipped `dit_attn_f32` chain, priced by dit_vram_arena_bytes(); true = the
+    // fused GGML_OP_FLASH_ATTN_TRAIN pair on BOTH attention sites, priced by
+    // dit_vram_arena_bytes_flash(). Default false so every existing caller
+    // (dit-selftest.h included) keeps the exact model to the byte.
+    bool flash_attn = false;
 };
 
 // arena (scheduler compute buffer), bytes.
@@ -109,6 +115,110 @@ static double dit_vram_arena_bytes(int S, int K, int B = 1) {
     const double dS = (double) S;
     const double mb = (double) K * (0.3274 * dS + 1.139e-4 * dS * dS) + (-0.125 * dS + 1.863e-4 * dS * dS);
     return (mb > 0.0 ? mb : 0.0) * 1048576.0 * (double) std::max(1, B);
+}
+
+// ─── flash-mode arena (--attn flash) ────────────────────────────────────────
+//
+// The exact polynomial above cannot be reused with a fudge factor: the term
+// `--attn flash` removes IS its per-layer quadratic, and the moment that is gone
+// the linear coefficient is the whole model, with an undeclared enc_S dependence
+// buried inside it (fattn-train-spec.md §11.1). So the flash branch is built term
+// by term, arithmetic wherever the arithmetic is knowable, with ONE fitted
+// headroom coefficient on the outside — never a refitted polynomial.
+//
+// Read the exact model's coefficients against the tensors they stand in for
+// (dit-xl-thirds: Nh 32, Nkv 8, D 128; 4 B per f32, 2^20 B per MB):
+//
+//   per-layer quadratic  1.139e-4 MB/S^2  vs  Nh*4/2^20 = 1.2207e-4  ->  that term
+//                        IS the retained self-attention softmax (93 % of the
+//                        arithmetic; ggml-alloc reuse is the rest).
+//   per-layer linear     0.3274 MB/token  ->  the retained CROSS-attention softmax
+//                        (enc_S*Nh*4/2^20 per token) plus every non-attention
+//                        activation, with no way to tell which is which — the
+//                        §11.1 gap.
+//
+// `--attn flash` flashes BOTH attention sites (dit-train-graph.h), so BOTH
+// retained softmaxes go. What the flash branch carries instead:
+//
+//   per layer, per batch element
+//     DIT_FLASH_ACT_MB_PER_TOKEN * S   the non-attention retained activations.
+//                        MEASURED, not arithmetic — the counterpart of the exact
+//                        model's 0.3274, and the only structural constant here.
+//     fused packed O+LSE * S           spec §11.2 term 2: [D,Nh,S,B] O plus
+//                        [Nh,S,B] LSE, per site, retained across the backward
+//                        because it is src[4] of the back op. ARITHMETIC.
+//     cross-attention K/V * enc_S      three [D,Nkv,enc_S,B] widths (ck, cv and
+//                        one live gradient). These scale with enc_S and not with
+//                        S, so they appear in NO term of the exact polynomial —
+//                        which has no K-only term at all — and were inside that
+//                        fit's residual. ARITHMETIC.
+//   K-independent, per batch element
+//     SCALE + ACC pair                 spec §11.2 term 3: ggml_acc_or_set builds
+//                        the packed tensor's gradient as ACC(SCALE(packed, 0), dO)
+//                        and neither can run in place, so two packed-size f32
+//                        buffers are live at once. ARITHMETIC.
+//     back op's dQ|dK|dV               spec §11.2 term 4, the larger of the two
+//                        sites (only one is live at a time). ARITHMETIC.
+//
+// The exact model's K-independent head/loss term (-0.125*S + 1.863e-4*S^2) is
+// NOT carried: the measured flash-mode K-independent residual is the gradient
+// machinery above and essentially nothing else (13.6 / 22.4 / 41.2 / 82.4 MB of
+// arithmetic against 15 / 25 / 41 / 77 MB measured at S = 187/375/750/1500),
+// while that polynomial would ask for 232 MB at S = 1500.
+//
+// MEASURED 2026-09-01 on an RTX 5090 (32 GB), dit-xl-thirds BF16, rank-16 LoRA,
+// --layers 32, --mirror bf16, B = 1, against `ace-train`'s own high-water arena
+// figure — 20 cells: {crop 375, 750, 1500, 3000} x {segments 1, 8, 32} on
+// `president` (enc_S 609), plus {crop 750, 1500} x {segments 1, 8} on
+// `joycemanor_neverhungoveragain` (enc_S 434) and `nwa_straightoutta`
+// (enc_S 1877), which is what separates the enc_S term from the rest. The raw
+// (pre-headroom) model reproduces all 20 within -2.0 % / +1.3 %; with the
+// headroom below every cell over-predicts, by +9.5 % to +13.4 %, none under.
+// UNMEASURED past this grid: B > 1, LoKR, rank > 16, --target-mlp, and any base
+// with a different Nh/Nkv/D. The backstop for those is unchanged — the mandatory
+// high-water probe and the NVML tripwire.
+//
+// docs/plans/2026-09-01-flash-attn-backward.md (MEASUREMENT 2), spec §11.
+
+// Non-attention retained activations, MB per token per layer. The flash-mode
+// counterpart of the exact model's 0.3274, measured the same way. (Sanity: 0.1978
+// MB is 20.3 hidden-widths at H = 2560, f32 — the qkv/o/mlp/norm/residual set of
+// one layer's forward plus the gradients ggml keeps live, which is the right
+// order of magnitude.)
+#define DIT_FLASH_ACT_MB_PER_TOKEN 0.19779
+
+// The ONE fitted number in this branch. It is a safety coefficient, not a shape:
+// the terms above already reproduce every measured cell to ±2 %, and this makes
+// the estimate land on the over-predicting side of all of them, which is the side
+// the reserve, the safety margin and the NVML tripwire are built to back up.
+#define DIT_FLASH_HEADROOM 1.12
+
+static double dit_vram_arena_bytes_flash(int S, int K, int B, int enc_S, int Nh, int Nkv, int D) {
+    const double dS  = (double) S;
+    const double dNh = (double) std::max(1, Nh);
+    const double dKv = (double) std::max(1, Nkv);
+    const double dD  = (double) std::max(1, D);
+    const double dE  = (double) std::max(1, enc_S);
+    const double MB  = 1048576.0;
+
+    // the fused op's packed output: [D,Nh,S,B] O + [Nh,S,B] LSE, per site.
+    const double packed_mb_per_token = (dD * dNh + dNh) * 4.0 / MB;
+
+    // per layer, per batch element.
+    const double act_mb   = DIT_FLASH_ACT_MB_PER_TOKEN * dS;
+    const double fused_mb = 2.0 /* self + cross */ * packed_mb_per_token * dS;
+    const double ckv_mb   = 3.0 * dD * dKv * 4.0 / MB * dE;
+    const double per_layer_mb = act_mb + fused_mb + ckv_mb;
+
+    // K-independent, per batch element: the gradient machinery of ONE site (the
+    // larger of the two — they are not live at the same time).
+    const double scale_acc_mb  = 2.0 * packed_mb_per_token * dS;
+    const double back_self_mb  = (dD * dNh * dS + 2.0 * dD * dKv * dS) * 4.0 / MB;
+    const double back_cross_mb = (dD * dNh * dS + 2.0 * dD * dKv * dE) * 4.0 / MB;
+    const double machinery_mb  = scale_acc_mb + std::max(back_self_mb, back_cross_mb);
+
+    const double mb = (double) std::max(0, K) * per_layer_mb + machinery_mb;
+    return (mb > 0.0 ? mb : 0.0) * DIT_FLASH_HEADROOM * MB * (double) std::max(1, B);
 }
 
 // Layers retained at once: the widest segment. Checkpointing off (segments <= 1)
@@ -187,7 +297,12 @@ static double dit_vram_fixed_bytes(const DitVramModel & vm, int K, int crop) {
 static double dit_vram_total_bytes(const DitVramModel & vm, int crop, int K) {
     const int S   = crop / vm.patch;
     const int Kr  = dit_vram_seg_layers(vm, K);  // retained layers (C4)
-    double    b   = dit_vram_fixed_bytes(vm, K, crop) + dit_vram_arena_bytes(S, Kr, vm.batch) +
+    // Which arena model prices this run. `flash_attn` defaults false, so every
+    // caller that has not opted in gets dit_vram_arena_bytes() to the byte.
+    const double arena = vm.flash_attn ? dit_vram_arena_bytes_flash(S, Kr, vm.batch, vm.enc_S, vm.n_heads,
+                                                                    vm.n_kv_heads, vm.head_dim)
+                                       : dit_vram_arena_bytes(S, Kr, vm.batch);
+    double    b   = dit_vram_fixed_bytes(vm, K, crop) + arena +
                dit_vram_kv_expand_bytes(vm, S, Kr) + dit_vram_boundary_bytes(vm, S);
     if (vm.is_lokr) {
         // The intermediates the fitted polynomial never saw. Added here rather

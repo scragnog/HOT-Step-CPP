@@ -770,6 +770,12 @@ export interface TrainDitOptions {
   stages?: TrainDitStage[];        // default ['train','export']
   overwrite?: boolean;             // default false
   stopEngine?: boolean;            // default TRUE
+  /** Attention backend (2026-09-01, docs/plans/2026-09-01-flash-attn-backward.md).
+   *  Default 'exact' keeps today's byte-identical dit_attn_f32 graph. 'flash'
+   *  routes through the fused ggml_flash_attn_train/_back kernels instead —
+   *  experimental, and it is what makes full-song (much longer) training crops
+   *  affordable, at some per-step speed cost. */
+  attnBackend?: 'exact' | 'flash'; // default 'exact'
 }
 
 /** Structurally identical to TrainLmEpoch so LossSparkline is reused unedited. */

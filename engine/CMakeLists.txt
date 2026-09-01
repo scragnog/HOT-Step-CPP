@@ -565,6 +565,12 @@ add_executable(sa3-ggml-test tools/sa3-ggml-test.cpp)
 target_link_libraries(sa3-ggml-test PRIVATE yyjson)
 link_ggml_backends(sa3-ggml-test)
 
+# fattn-train-test: parity for GGML_OP_FLASH_ATTN_TRAIN{,_BACK} against the
+# autodiff'd dit_attn_f32 chain. docs/plans/fattn-train-spec.md §7.
+add_executable(fattn-train-test tools/fattn-train-test.cpp)
+target_link_libraries(fattn-train-test PRIVATE yyjson)
+link_ggml_backends(fattn-train-test)
+
 # moss-ggml-test: parity tests for the MOSS-Music captioning port vs fp32
 # fixtures (engine/tools/moss-numpy-ref.py documents the same maths in numpy).
 add_executable(moss-ggml-test tools/moss-ggml-test.cpp)

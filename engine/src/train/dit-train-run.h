@@ -88,6 +88,9 @@ struct DitTrainArgs {
     std::string order       = "shuffle";
 
     int   crop = 0, crop_min = 375, crop_max = 1250;
+    // Set by the CLI parser when --crop-max was given explicitly. Only the
+    // DEFAULT cap is lifted in flash mode; a user's number is never moved.
+    bool  crop_max_user = false;
     // Crop regime (2026-08-29): `song`/`structured` are the fixed defaults;
     // `zero`/`random` reproduce the legacy run (positions lied, endpoints
     // starved) for A/B archaeology. Runs across the divide are NOT comparable.
@@ -127,6 +130,15 @@ struct DitTrainArgs {
     // server passes --bwd mm. Selected by setting GGML_BACKWARD_MM before any
     // backward graph is built (ace-train.cpp).
     std::string bwd = "outprod";
+
+    // Attention formulation (--attn, docs/plans/2026-09-01-flash-attn-backward.md):
+    //   "exact" = dit_attn_f32, the shipped graph, byte-identical to pre-flag runs
+    //   "flash" = the fused GGML_OP_FLASH_ATTN_TRAIN{,_BACK} pair on BOTH the
+    //             self- and cross-attention sites. EXPERIMENTAL. Lower VRAM per
+    //             token (nothing S_kv x S is ever materialised), currently SLOWER
+    //             per step, and its gradients differ from exact within a measured
+    //             drift band rather than matching bit for bit.
+    std::string attn = "exact";
 
     // Optimizer (2026-07-30). "adamw" is the shipped path and the default;
     // "muon" puts every 2-D parameter whose short side is >= muon_min_dim on
@@ -595,13 +607,40 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         lm_log("warn", bb);
     }
 
+    // Which arena model prices this run (--attn). The mode is resolved HERE, not
+    // at the probe below, because the footprint model and the crop walk are the
+    // whole point of the flag: flash removes both retained softmaxes, and pricing
+    // a flash run with the exact polynomial yields the exact run's crop.
+    const bool flash_attn = (a.attn == "flash");
+    vm.flash_attn         = flash_attn;
+
+    // ── flash mode lifts the crop_max cap (plan doc §"Flash-aware VRAM model" 2)
+    //
+    // crop_max defaults to 1250 and CLAMPS the walk (dit_vram_fit's `cap`), a
+    // number chosen when a 1250-frame crop was the most a 32 GB card could hold
+    // at full depth. With the S^2 term gone that cap, not the VRAM, is what
+    // decides the crop — the model would be moot. So in flash mode the DEFAULT
+    // cap lifts to the dataset's longest track; an explicit --crop-max always
+    // wins, in both directions.
+    int crop_max_eff = a.crop_max;
+    if (flash_attn && !a.crop_max_user && max_T > a.crop_max) {
+        crop_max_eff = max_T;
+        char cb[224];
+        snprintf(cb, sizeof(cb),
+                 "--attn flash: crop-max lifted from the %d default to the dataset's longest track (%d frames) — "
+                 "pass --crop-max to pin it",
+                 a.crop_max, max_T);
+        lm_log("info", cb);
+        fprintf(stderr, "[train-dit] %s\n", cb);
+    }
+
     // The C4 auto-fit ORDER at a fixed B: full depth, shrinking the crop; then
     // raising the segment count; then reducing B with a warn; and only when all
     // of that has failed, the depth ladder — depth is the quality axis (Rob's
     // rule), so it is the last thing given up. `depth_ladder=false` is what holds
     // the earlier steps ahead of it.
     auto run_fit = [&](bool allow_depth) {
-        return dit_vram_fit(vm, M.backend, a.vram_reserve_mb, a.vram_safety, a.crop, a.layers, a.crop_min, a.crop_max,
+        return dit_vram_fit(vm, M.backend, a.vram_reserve_mb, a.vram_safety, a.crop, a.layers, a.crop_min, crop_max_eff,
                             max_T, &gmem, a.ckpt, allow_depth);
     };
     auto ordered_fit = [&]() {
@@ -744,6 +783,51 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             dit_train_free(&M);
             return 1;
         }
+    }
+
+    // ── --attn flash: capability probe (spec §9.8) ─────────────────────
+    //
+    // Asked HERE, right after the scheduler exists and before a single graph is
+    // built. The scheduler above registers the CPU backend as a second backend,
+    // so an unsupported op does not fail: it silently splits onto the CPU, and a
+    // CPU-split run has low VRAM, a quiet NVML tripwire and correct-looking
+    // losses. Every measurement downstream would be poisoned while reading as a
+    // pass. Both directions are probed, at BOTH attention shapes the run will
+    // actually emit (self-attention S_kv = S, cross-attention S_kv = enc_S), with
+    // the effective Nkv: B > 1 pre-expands K/V to Nh (dit_expand_heads), B == 1
+    // leaves the GQA 4:1 shape intact.
+    const DitAttnMode attn_mode = flash_attn ? DIT_ATTN_FLASH : DIT_ATTN_EXACT;
+    if (attn_mode == DIT_ATTN_FLASH) {
+        const int   Nkv_eff = (B > 1) ? c.n_heads : c.n_kv_heads;
+        const float ascale  = 1.0f / sqrtf((float) c.head_dim);
+        bool        sf = false, sb = false, cf = false, cb = false;
+        dit_flash_probe(M.backend, c.head_dim, c.n_heads, Nkv_eff, S_max, S_max, B, ascale, &sf, &sb);
+        dit_flash_probe(M.backend, c.head_dim, c.n_heads, Nkv_eff, S_max, enc_S, B, ascale, &cf, &cb);
+        if (!(sf && sb && cf && cb)) {
+            char extra[224];
+            snprintf(extra, sizeof(extra),
+                     ",\"attn\":\"flash\",\"selfFwd\":%s,\"selfBwd\":%s,\"crossFwd\":%s,\"crossBwd\":%s",
+                     sf ? "true" : "false", sb ? "true" : "false", cf ? "true" : "false", cb ? "true" : "false");
+            char b[512];
+            snprintf(b, sizeof(b),
+                     "--attn flash: backend %s does not support the fused attention ops at this geometry "
+                     "(D %d, Nh %d, Nkv %d, S %d, enc_S %d, B %d) — self fwd %s / bwd %s, cross fwd %s / bwd %s. "
+                     "Refusing to start: the scheduler would silently run them on the CPU instead, which is "
+                     "correct, unusably slow, and looks like a pass on every number this run reports. Use "
+                     "--attn exact.",
+                     ggml_backend_name(M.backend), c.head_dim, c.n_heads, Nkv_eff, S_max, enc_S, B,
+                     sf ? "yes" : "NO", sb ? "yes" : "NO", cf ? "yes" : "NO", cb ? "yes" : "NO");
+            lm_fatal("attn-unsupported", b, extra);
+            dit_train_free(&M);
+            return 1;
+        }
+        char b[288];
+        snprintf(b, sizeof(b),
+                 "--attn flash: %s supports FLASH_ATTN_TRAIN and FLASH_ATTN_TRAIN_BACK at D %d, Nh %d, Nkv %d, "
+                 "S %d, enc_S %d, B %d — no CPU split",
+                 ggml_backend_name(M.backend), c.head_dim, c.n_heads, Nkv_eff, S_max, enc_S, B);
+        lm_log("info", b);
+        fprintf(stderr, "[train-dit] %s\n", b);
     }
 
     // ── static input buffers (1-D bases; every graph tensor is a CONTIGUOUS
@@ -1148,6 +1232,10 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             in.t_lw  = ggml_view_3d(gctx, b_lw, 1, len, nb, f32, (size_t) len * f32, 0);
             in.t_lwu = ggml_view_3d(gctx, b_lwu, 1, len, nb, f32, (size_t) len * f32, 0);
             in.t_cw  = t_cw;
+            // The ONLY place the mode enters the graph build; mk_inputs is shared
+            // by the monolithic path below and by the segment driver, so both get
+            // it from one line.
+            in.attn_mode = attn_mode;
             return in;
         };
 
@@ -1366,6 +1454,27 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                 "(est %lld MB), device-wide %zu MB\n",
                 graph_nodes, seg_note, lv, (long long) (ggml_time_ms() - tp0), tracker.base_mb,
                 (long long) (fit.est_bytes / 1048576.0), device_wide_mb);
+        // The arena on its own, measured against the arena term of whichever
+        // model priced the run. `trainer-owned` above bundles the mirror, the
+        // adapter, the optimizer state and the static inputs with it, and those
+        // are computed exactly rather than fitted — so the bundled figure cannot
+        // calibrate a polynomial. This line is what the flash-mode fit is read
+        // off (docs/plans/2026-09-01-flash-attn-backward.md, MEASUREMENT 2).
+        {
+            DitVramModel vmp = vm;
+            vmp.segments     = SEG;
+            const int    Kr  = dit_vram_seg_layers(vmp, K);
+            const double aest = flash_attn ? dit_vram_arena_bytes_flash(S_max, Kr, B, enc_S, c.n_heads, c.n_kv_heads,
+                                                                        c.head_dim)
+                                           : dit_vram_arena_bytes(S_max, Kr, B);
+            const size_t ameas = M.sched ? ggml_backend_sched_get_buffer_size(M.sched, M.backend) : 0;
+            fprintf(stderr,
+                    "[train-dit] arena %lld MB measured vs %lld MB est (%s model, S %d, K %d, Kr %d, seg %d, B %d, "
+                    "enc_S %d, fixed %lld MB, boundary %lld MB)\n",
+                    (long long) (ameas / 1048576), (long long) (aest / 1048576.0),
+                    flash_attn ? "flash" : "exact", S_max, K, Kr, SEG, B, enc_S,
+                    (long long) (fixed / 1048576), (long long) (ckbufs.bytes / 1048576));
+        }
         // The probe succeeding does NOT mean it fitted: on Windows an
         // over-subscribed CUDA allocation is silently backed by shared system
         // memory instead of failing, and the run then trains at a crawl. Only the
@@ -1398,6 +1507,13 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     log->layers_source  = fit.layers_user ? "user" : "auto";
     log->crop           = crop_len;
     log->crop_source    = fit.crop_user ? "user" : "auto";
+    // Which footprint model priced the crop/depth/segments above, and the enc_S
+    // it was priced at — both required to re-interpret this run's VRAM figures
+    // (fattn-train-spec.md §11.3). crop_max is the EFFECTIVE cap, so a flash run
+    // whose default cap was lifted records the number the walk actually used.
+    log->arena_model    = flash_attn ? "flash" : "exact";
+    log->enc_S          = enc_S;
+    log->crop_max       = crop_max_eff;
     log->batch          = B;
     log->ckpt           = SEG;
     log->samples        = n;
@@ -1845,6 +1961,7 @@ static int dit_train_main(const DitTrainArgs & a) {
     log.crop_endpoint_k      = a.crop_endpoint_k;
     log.mirror          = a.mirror;
     log.bwd             = a.bwd;
+    log.attn_mode       = a.attn;
     log.init_adapter    = a.init_adapter;
     log.init_from_ma5   = a.init_from_ma5;
     log.lr              = a.lr;

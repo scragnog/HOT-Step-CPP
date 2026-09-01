@@ -78,6 +78,12 @@ export interface TrainDitFormState {
   /** MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
    *  'mm' is the fast tensor-core backward and the server default. */
   bwd: 'outprod' | 'mm';
+  /** Attention backend (2026-09-01, docs/plans/2026-09-01-flash-attn-backward.md).
+   *  'exact' is today's byte-identical dit_attn_f32 graph, the default. 'flash'
+   *  routes through the fused ggml_flash_attn_train/_back kernels, which is
+   *  what makes full-song training crops affordable — experimental, and slower
+   *  per step. */
+  attnBackend: 'exact' | 'flash';
   optimizer: 'adamw' | 'muon';
   muonLrScale: number;
   muonNsSteps: number;
@@ -158,6 +164,9 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   // (2026-07-29): identical maths to out_prod but dtype-agnostic, so the BF16
   // mirror above rides BF16 tensor cores instead of being promoted to F32.
   bwd: 'mm',
+  // 'exact' (2026-09-01) — the byte-identical dit_attn_f32 graph. 'flash' is
+  // opt-in: experimental, and the only way to reach full-song crops.
+  attnBackend: 'exact',
   // Muon is the DEFAULT (2026-07-30). The 10-epoch comparison that suggested
   // parity was too short a window: over a full run Muon reached ma5 0.6 in 161
   // epochs against AdamW's 227, and once the Newton-Schulz was bucketed that
@@ -988,6 +997,20 @@ export const TrainDitForm: React.FC<Props> = ({
           <span className="text-[11px] text-zinc-500 sm:col-span-2 -mt-1">
             {t('trainingStudio.train.dit.mirrorHelp')}
           </span>
+
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+              <input
+                type="checkbox"
+                checked={value.attnBackend === 'flash'}
+                disabled={lock}
+                onChange={(e) => onChange({ attnBackend: e.target.checked ? 'flash' : 'exact' })}
+                className="accent-amber-500"
+              />
+              {P('attnBackend', 'Default off · exact attention', CHECK_LABEL)}
+            </label>
+            <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.dit.attnBackendHelp')}</span>
+          </div>
 
           <div className="flex flex-col gap-1.5">
             {/* Label key is shared with the LM form, so it is not one of P()'s

@@ -3030,6 +3030,13 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'bwd must be outprod or mm' });
       return;
     }
+    // Attention backend (2026-09-01 flash-attn-backward plan §11). Refused, not
+    // coerced, same rule as mirror/optimizer/bwd above. Default stays 'exact' —
+    // the byte-identical dit_attn_f32 graph — until a caller opts into 'flash'.
+    if (body.attnBackend !== undefined && body.attnBackend !== 'exact' && body.attnBackend !== 'flash') {
+      res.status(400).json({ error: 'attnBackend must be exact or flash' });
+      return;
+    }
     if (!Number.isFinite(learningRate) || learningRate <= 0 || learningRate > 1) {
       res.status(400).json({ error: 'learningRate must be greater than 0 and at most 1' });
       return;
@@ -3175,6 +3182,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       // empty bag no longer appends an eval pass to every adapter in a sweep.
       calibrate: body.calibrate === true,
       calibrateRepoint: body.calibrateRepoint !== false,
+      attnBackend: body.attnBackend === 'flash' ? 'flash' : 'exact',
     };
 
     const job = queue.startTrainDitJob(ds.id, opts);

@@ -396,6 +396,13 @@ export interface ResolvedTrainDitOptions {
   initAdapter: string;
   calibrate: boolean;
   calibrateRepoint: boolean;
+  /** Attention backend (2026-09-01, docs/plans/2026-09-01-flash-attn-backward.md).
+   *  'exact' is the byte-identical dit_attn_f32 graph; 'flash' routes through
+   *  the fused ggml_flash_attn_train/_back kernels, enabling much longer
+   *  training crops at some per-step speed cost. Always emitted so an
+   *  ace-train that predates --attn rejects it loudly rather than silently
+   *  running the other backend. */
+  attnBackend: 'exact' | 'flash';
 }
 
 /**
@@ -529,6 +536,10 @@ export function buildTrainDitArgs(input: {
     '--ckpt', String(o.ckptSegments),
     '--milestone-step', String(o.milestoneStep),
     '--milestone-keep', String(o.milestoneKeep),
+    // Always emitted, both sides: an ace-train that predates --attn rejects it
+    // loudly rather than silently running the other attention backend
+    // (2026-09-01 flash-attn-backward plan §11).
+    '--attn', o.attnBackend,
   ];
   // Flag-shaped options: only the non-default side is emitted (§2.1).
   // target-mlp is the exception — it is emitted on BOTH sides. Its default

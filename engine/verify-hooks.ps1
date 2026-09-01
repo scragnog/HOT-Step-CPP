@@ -230,6 +230,40 @@ if (Test-Path $cudaCu) {
     Write-Host "  [WARN] $cudaCu not found - ggml submodule not checked out?" -ForegroundColor Yellow
 }
 
+# -- Hook 12: ggml.c must carry the flash-attn-train autodiff case -----------
+#             SUBMODULE file. The two fused attention ops the DiT trainer's
+#             --attn flash mode runs on are registered in three places: the
+#             enum and constructors here, the CPU reference in ops.cpp, and
+#             the CUDA kernels in the two NEW files ggml-cuda/fattn-train.{cu,cuh}.
+#             Those two are new files, so a submodule re-checkout deletes them
+#             outright rather than reverting them - but the autodiff case in
+#             ggml.c is the piece that cannot be reconstructed from them.
+#             Failure is loud (ace-train stops compiling, or the trainer's
+#             supports_op probe aborts with attn-unsupported), so this hook is
+#             here to name the cause before someone spends a build cycle on it.
+$ggmlC2 = "$ggml\src\ggml.c"
+$fattnCu = "$ggml\src\ggml-cuda\fattn-train.cu"
+if (Test-Path $ggmlC2) {
+    $content = Get-Content $ggmlC2 -Raw
+    if ($content -match 'HOT-Step patch: flash-attn-train') {
+        if (Test-Path $fattnCu) {
+            Write-Host "  [OK] ggml.c has the flash-attn-train ops, and fattn-train.cu is present" -ForegroundColor Green
+        } else {
+            Write-Host "  [FAIL] ggml.c has the flash-attn-train ops but ggml-cuda/fattn-train.cu is GONE" -ForegroundColor Red
+            Write-Host "         The CUDA kernels are new files, so a submodule re-checkout deletes them." -ForegroundColor Yellow
+            Write-Host "         Fix (from the repo root): git apply engine\patches\flash-attn-train.patch" -ForegroundColor Yellow
+            $errors++
+        }
+    } else {
+        Write-Host "  [FAIL] ggml.c is missing the flash-attn-train patch" -ForegroundColor Red
+        Write-Host "         ace-train will not compile, and train-dit --attn flash is gone." -ForegroundColor Yellow
+        Write-Host "         Fix (from the repo root): git apply engine\patches\flash-attn-train.patch" -ForegroundColor Yellow
+        $errors++
+    }
+} else {
+    Write-Host "  [WARN] $ggmlC2 not found - ggml submodule not checked out?" -ForegroundColor Yellow
+}
+
 # ── Summary ───────────────────────────────────────────────────────────
 Write-Host ""
 if ($errors -gt 0) {

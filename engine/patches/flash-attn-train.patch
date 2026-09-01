@@ -1,0 +1,2100 @@
+diff --git a/engine/ggml/include/ggml.h b/engine/ggml/include/ggml.h
+index 35f0c44e..9df7adff 100644
+--- a/engine/ggml/include/ggml.h
++++ b/engine/ggml/include/ggml.h
+@@ -590,6 +590,10 @@ extern "C" {
+ 
+         GGML_OP_GLU,
+ 
++        // HOT-Step patch: flash-attn-train
++        GGML_OP_FLASH_ATTN_TRAIN,
++        GGML_OP_FLASH_ATTN_TRAIN_BACK,
++
+         GGML_OP_COUNT,
+     };
+ 
+@@ -2446,6 +2450,84 @@ extern "C" {
+            struct ggml_tensor  * d,
+            bool                  masked);
+ 
++    // HOT-Step patch: flash-attn-train
++    //
++    // Fused attention forward + backward for the DiT trainer.
++    // See docs/plans/fattn-train-spec.md. NOT on the inference path.
++    //
++    // q:    [D, S,    Nh,  B]   f32, nb[0] == sizeof(float)
++    // k:    [D, S_kv, Nkv, B]   f32, Nh % Nkv == 0
++    // v:    [D, S_kv, Nkv, B]   f32, !! not transposed !!
++    // mask: [S_kv, S, m2, m3]   f16 additive (0 or -INF) or NULL,
++    //                           Nh % m2 == 0, B % m3 == 0
++    //
++    // result: ONE contiguous 1-D f32 tensor packing
++    //   O   [D, Nh, S, B]  at byte offset 0
++    //   LSE [Nh, S, B]     at byte offset ggml_flash_attn_train_lse_offset(q)
++    // Use the view helpers below; never hand-compute the offsets.
++    //
++    // Deliberate deviation from ggml_soft_max_ext: a query row whose every key
++    // is masked yields O = 0 and LSE = 0 (soft_max emits NaN there). The packed
++    // tensor must stay finite because ggml builds its gradient as
++    // ggml_scale(packed, 0.0f), and 0 * NaN == NaN would poison dO.
++    //
++    // Load-bearing invariant: that ggml_scale must never run in place. It would
++    // zero O and LSE before GGML_OP_FLASH_ATTN_TRAIN_BACK reads them from
++    // src[4] -- silently wrong gradients, no crash, no NaN. Safe today only
++    // because `packed` always has >= 1 view and >= 3 children, so ggml-alloc's
++    // reuse test (n_children == 1 && n_views == 0) never fires.
++    GGML_API struct ggml_tensor * ggml_flash_attn_train(
++            struct ggml_context * ctx,
++            struct ggml_tensor  * q,
++            struct ggml_tensor  * k,
++            struct ggml_tensor  * v,
++            struct ggml_tensor  * mask,
++            float                 scale);
++
++    // Shared packing arithmetic -- the constructor, both view helpers and every
++    // backend impl go through these. Exported so the parity tool can too.
++    GGML_API size_t  ggml_flash_attn_train_lse_offset(const struct ggml_tensor * q);
++    GGML_API int64_t ggml_flash_attn_train_nelements (const struct ggml_tensor * q);
++
++    // [D, Nh, S, B] contiguous view of the O region -- drop-in for the
++    // dit_attn_f32 result.
++    GGML_API struct ggml_tensor * ggml_flash_attn_train_get_o  (struct ggml_context * ctx, struct ggml_tensor * packed);
++    // [Nh, S, B] contiguous view of the LSE region (diagnostics/tests only --
++    // the backward reads the region directly off `packed`).
++    GGML_API struct ggml_tensor * ggml_flash_attn_train_get_lse(struct ggml_context * ctx, struct ggml_tensor * packed);
++
++    // q, k, v, mask: exactly the tensors passed to ggml_flash_attn_train
++    // fwd:  the packed forward OUTPUT tensor  (supplies O and LSE)
++    // dfwd: the gradient of that packed tensor (dO lives in its O region; the
++    //       LSE region is zero and is not read)
++    //
++    // result: ONE contiguous 1-D f32 tensor packing dQ | dK | dV.
++    GGML_API struct ggml_tensor * ggml_flash_attn_train_back(
++            struct ggml_context * ctx,
++            struct ggml_tensor  * q,
++            struct ggml_tensor  * k,
++            struct ggml_tensor  * v,
++            struct ggml_tensor  * mask,
++            struct ggml_tensor  * fwd,
++            struct ggml_tensor  * dfwd,
++            float                 scale);
++
++    // Shared packing arithmetic for the backward's three regions.
++    GGML_API void ggml_flash_attn_train_back_offsets(
++            const struct ggml_tensor * q,
++            const struct ggml_tensor * k,
++            const struct ggml_tensor * v,
++            size_t  * offs_dq,
++            size_t  * offs_dk,
++            size_t  * offs_dv,
++            int64_t * nelem);
++
++    // Views with the same ne as q / k / v respectively. Each recovers all three
++    // shapes from the back node itself (packed->src[0..2]).
++    GGML_API struct ggml_tensor * ggml_flash_attn_train_back_get_dq(struct ggml_context * ctx, struct ggml_tensor * packed);
++    GGML_API struct ggml_tensor * ggml_flash_attn_train_back_get_dk(struct ggml_context * ctx, struct ggml_tensor * packed);
++    GGML_API struct ggml_tensor * ggml_flash_attn_train_back_get_dv(struct ggml_context * ctx, struct ggml_tensor * packed);
++
+     GGML_API struct ggml_tensor * ggml_ssm_conv(
+             struct ggml_context * ctx,
+             struct ggml_tensor  * sx,
+diff --git a/engine/ggml/src/ggml.c b/engine/ggml/src/ggml.c
+index 9a5c186a..5ff26fc6 100644
+--- a/engine/ggml/src/ggml.c
++++ b/engine/ggml/src/ggml.c
+@@ -1098,9 +1098,14 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
+     "OPT_STEP_SGD",
+ 
+     "GLU",
++
++    // HOT-Step patch: flash-attn-train
++    "FLASH_ATTN_TRAIN",
++    "FLASH_ATTN_TRAIN_BACK",
+ };
+ 
+-static_assert(GGML_OP_COUNT == 101, "GGML_OP_COUNT != 101");
++// HOT-Step patch: flash-attn-train (101 -> 103)
++static_assert(GGML_OP_COUNT == 103, "GGML_OP_COUNT != 103");
+ 
+ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
+     "none",
+@@ -1213,9 +1218,14 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
+     "sgd(x)",
+ 
+     "glu(x)",
++
++    // HOT-Step patch: flash-attn-train
++    "flash_attn_train(q,k,v,mask)",
++    "flash_attn_train_back(q,k,v,mask,o,do)",
+ };
+ 
+-static_assert(GGML_OP_COUNT == 101, "GGML_OP_COUNT != 101");
++// HOT-Step patch: flash-attn-train (101 -> 103)
++static_assert(GGML_OP_COUNT == 103, "GGML_OP_COUNT != 103");
+ 
+ static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
+ 
+@@ -5556,6 +5566,227 @@ struct ggml_tensor * ggml_flash_attn_back(
+     return result;
+ }
+ 
++// HOT-Step patch: flash-attn-train
++// ggml_flash_attn_train / ggml_flash_attn_train_back
++//
++// Fused attention forward+backward for the DiT trainer. See
++// docs/plans/fattn-train-spec.md -- section numbers referenced below.
++
++// Spec 2.2 packing: O [D,Nh,S,B] at 0, LSE [Nh,S,B] at a 128-byte aligned
++// offset. The 128-byte pad (rather than upstream's GGML_MEM_ALIGN) is
++// deliberate, for CUDA buffer alignment. Every consumer -- constructor, view
++// helpers, CPU impl, CUDA impl, tests -- MUST go through these two helpers.
++size_t ggml_flash_attn_train_lse_offset(const struct ggml_tensor * q) {
++    const int64_t n_o = q->ne[0]*q->ne[1]*q->ne[2]*q->ne[3];
++    return GGML_PAD((size_t) n_o * sizeof(float), 128);
++}
++
++int64_t ggml_flash_attn_train_nelements(const struct ggml_tensor * q) {
++    const int64_t n_lse  = q->ne[1]*q->ne[2]*q->ne[3];
++    const size_t  nbytes = ggml_flash_attn_train_lse_offset(q) + (size_t) n_lse * sizeof(float);
++    return (int64_t) (nbytes / sizeof(float));
++}
++
++struct ggml_tensor * ggml_flash_attn_train(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * q,
++        struct ggml_tensor  * k,
++        struct ggml_tensor  * v,
++        struct ggml_tensor  * mask,
++        float                 scale) {
++    GGML_ASSERT(q->type == GGML_TYPE_F32 && k->type == GGML_TYPE_F32 && v->type == GGML_TYPE_F32);
++    GGML_ASSERT(q->nb[0] == sizeof(float) && k->nb[0] == sizeof(float) && v->nb[0] == sizeof(float));
++    GGML_ASSERT(k->ne[0] == q->ne[0]);            // D
++    GGML_ASSERT(v->ne[0] == q->ne[0]);            // DV == D (v1 restriction)
++    GGML_ASSERT(v->ne[1] == k->ne[1]);            // S_kv
++    GGML_ASSERT(v->ne[2] == k->ne[2]);            // Nkv
++    GGML_ASSERT(q->ne[3] == k->ne[3] && q->ne[3] == v->ne[3]);
++    GGML_ASSERT(q->ne[2] % k->ne[2] == 0);        // GQA group size G = Nh/Nkv
++    if (mask) {
++        GGML_ASSERT(mask->type == GGML_TYPE_F16);
++        GGML_ASSERT(ggml_is_contiguous(mask));
++        GGML_ASSERT(mask->ne[0] == k->ne[1]);     // S_kv
++        GGML_ASSERT(mask->ne[1] >= q->ne[1]);     // >= S, as soft_max_ext allows
++        GGML_ASSERT(q->ne[2] % mask->ne[2] == 0);
++        GGML_ASSERT(q->ne[3] % mask->ne[3] == 0);
++    }
++    // Spec 9.4: the VIEW backward hands the O view's nb1..nb3 and offset to
++    // ggml_acc_impl, which stores them as int32_t. The binding value is the O
++    // view's nb[3] = 4*D*Nh*S -- NOT the packed tensor's total size, and NOT
++    // batch-dependent. 49 MB at D=128, Nh=32, S=3000; overflow needs S ~ 131k.
++    GGML_ASSERT(4 * q->ne[0] * q->ne[2] * q->ne[1] < INT32_MAX);
++
++    const int64_t nelem = ggml_flash_attn_train_nelements(q);
++    struct ggml_tensor * result = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, nelem);
++
++    float params[] = { scale, 0.0f /* reserved: max_bias */, 0.0f /* reserved: softcap */ };
++    ggml_set_op_params(result, params, sizeof(params));
++
++    result->op     = GGML_OP_FLASH_ATTN_TRAIN;
++    result->src[0] = q;
++    result->src[1] = k;
++    result->src[2] = v;
++    result->src[3] = mask;
++
++    return result;
++}
++
++struct ggml_tensor * ggml_flash_attn_train_get_o(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * packed) {
++    GGML_ASSERT(packed->op == GGML_OP_FLASH_ATTN_TRAIN);
++    const struct ggml_tensor * q = packed->src[0];
++    const int64_t D  = q->ne[0];
++    const int64_t S  = q->ne[1];
++    const int64_t Nh = q->ne[2];
++    const int64_t B  = q->ne[3];
++    return ggml_view_4d(ctx, packed, D, Nh, S, B,
++                        sizeof(float)*D,
++                        sizeof(float)*D*Nh,
++                        sizeof(float)*D*Nh*S,
++                        0);
++}
++
++struct ggml_tensor * ggml_flash_attn_train_get_lse(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * packed) {
++    GGML_ASSERT(packed->op == GGML_OP_FLASH_ATTN_TRAIN);
++    const struct ggml_tensor * q = packed->src[0];
++    const int64_t S  = q->ne[1];
++    const int64_t Nh = q->ne[2];
++    const int64_t B  = q->ne[3];
++    return ggml_view_3d(ctx, packed, Nh, S, B,
++                        sizeof(float)*Nh,
++                        sizeof(float)*Nh*S,
++                        ggml_flash_attn_train_lse_offset(q));
++}
++
++// Spec 3.2 packing: dQ | dK | dV, each contiguous in its source tensor's own
++// logical order (the sources are permuted views; the gradients are dense).
++void ggml_flash_attn_train_back_offsets(
++        const struct ggml_tensor * q,
++        const struct ggml_tensor * k,
++        const struct ggml_tensor * v,
++        size_t  * offs_dq,
++        size_t  * offs_dk,
++        size_t  * offs_dv,
++        int64_t * nelem) {
++    const int64_t n_q = q->ne[0]*q->ne[1]*q->ne[2]*q->ne[3];
++    const int64_t n_k = k->ne[0]*k->ne[1]*k->ne[2]*k->ne[3];
++    const int64_t n_v = v->ne[0]*v->ne[1]*v->ne[2]*v->ne[3];
++
++    const size_t o_dq = 0;
++    const size_t o_dk = GGML_PAD((size_t) n_q * sizeof(float), 128);
++    const size_t o_dv = o_dk + GGML_PAD((size_t) n_k * sizeof(float), 128);
++    const size_t end  = o_dv + (size_t) n_v * sizeof(float);
++
++    if (offs_dq) { *offs_dq = o_dq; }
++    if (offs_dk) { *offs_dk = o_dk; }
++    if (offs_dv) { *offs_dv = o_dv; }
++    if (nelem)   { *nelem   = (int64_t) (end / sizeof(float)); }
++}
++
++struct ggml_tensor * ggml_flash_attn_train_back(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * q,
++        struct ggml_tensor  * k,
++        struct ggml_tensor  * v,
++        struct ggml_tensor  * mask,
++        struct ggml_tensor  * fwd,
++        struct ggml_tensor  * dfwd,
++        float                 scale) {
++    GGML_ASSERT(q->type == GGML_TYPE_F32 && k->type == GGML_TYPE_F32 && v->type == GGML_TYPE_F32);
++    GGML_ASSERT(q->nb[0] == sizeof(float) && k->nb[0] == sizeof(float) && v->nb[0] == sizeof(float));
++    GGML_ASSERT(k->ne[0] == q->ne[0]);
++    GGML_ASSERT(v->ne[0] == q->ne[0]);
++    GGML_ASSERT(v->ne[1] == k->ne[1]);
++    GGML_ASSERT(v->ne[2] == k->ne[2]);
++    GGML_ASSERT(q->ne[3] == k->ne[3] && q->ne[3] == v->ne[3]);
++    GGML_ASSERT(q->ne[2] % k->ne[2] == 0);
++    if (mask) {
++        GGML_ASSERT(mask->type == GGML_TYPE_F16);
++        GGML_ASSERT(ggml_is_contiguous(mask));
++        GGML_ASSERT(mask->ne[0] == k->ne[1]);
++        GGML_ASSERT(mask->ne[1] >= q->ne[1]);
++        GGML_ASSERT(q->ne[2] % mask->ne[2] == 0);
++        GGML_ASSERT(q->ne[3] % mask->ne[3] == 0);
++    }
++    GGML_ASSERT(fwd->type  == GGML_TYPE_F32 && ggml_is_contiguous(fwd));
++    GGML_ASSERT(dfwd->type == GGML_TYPE_F32 && ggml_is_contiguous(dfwd));
++    GGML_ASSERT(ggml_nelements(fwd)  == ggml_flash_attn_train_nelements(q));
++    GGML_ASSERT(ggml_nelements(dfwd) == ggml_nelements(fwd));
++
++    size_t  offs_dq, offs_dk, offs_dv;
++    int64_t nelem;
++    ggml_flash_attn_train_back_offsets(q, k, v, &offs_dq, &offs_dk, &offs_dv, &nelem);
++
++    struct ggml_tensor * result = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, nelem);
++
++    float params[] = { scale, 0.0f /* reserved: max_bias */, 0.0f /* reserved: softcap */ };
++    ggml_set_op_params(result, params, sizeof(params));
++
++    result->op     = GGML_OP_FLASH_ATTN_TRAIN_BACK;
++    result->src[0] = q;      // slots 0/1/2 are load-bearing: ggml_compute_backward
++    result->src[1] = k;      // only computes isrc0/1/2, and its closing asserts
++    result->src[2] = v;      // are written against those three.
++    result->src[3] = mask;
++    result->src[4] = fwd;
++    result->src[5] = dfwd;
++
++    return result;
++}
++
++struct ggml_tensor * ggml_flash_attn_train_back_get_dq(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * packed) {
++    GGML_ASSERT(packed->op == GGML_OP_FLASH_ATTN_TRAIN_BACK);
++    const struct ggml_tensor * q = packed->src[0];
++    const struct ggml_tensor * k = packed->src[1];
++    const struct ggml_tensor * v = packed->src[2];
++    size_t offs_dq, offs_dk, offs_dv; int64_t nelem;
++    ggml_flash_attn_train_back_offsets(q, k, v, &offs_dq, &offs_dk, &offs_dv, &nelem);
++    const int64_t D = q->ne[0], S = q->ne[1], Nh = q->ne[2], B = q->ne[3];
++    return ggml_view_4d(ctx, packed, D, S, Nh, B,
++                        sizeof(float)*D,
++                        sizeof(float)*D*S,
++                        sizeof(float)*D*S*Nh,
++                        offs_dq);
++}
++
++struct ggml_tensor * ggml_flash_attn_train_back_get_dk(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * packed) {
++    GGML_ASSERT(packed->op == GGML_OP_FLASH_ATTN_TRAIN_BACK);
++    const struct ggml_tensor * q = packed->src[0];
++    const struct ggml_tensor * k = packed->src[1];
++    const struct ggml_tensor * v = packed->src[2];
++    size_t offs_dq, offs_dk, offs_dv; int64_t nelem;
++    ggml_flash_attn_train_back_offsets(q, k, v, &offs_dq, &offs_dk, &offs_dv, &nelem);
++    const int64_t D = k->ne[0], S_kv = k->ne[1], Nkv = k->ne[2], B = k->ne[3];
++    return ggml_view_4d(ctx, packed, D, S_kv, Nkv, B,
++                        sizeof(float)*D,
++                        sizeof(float)*D*S_kv,
++                        sizeof(float)*D*S_kv*Nkv,
++                        offs_dk);
++}
++
++struct ggml_tensor * ggml_flash_attn_train_back_get_dv(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * packed) {
++    GGML_ASSERT(packed->op == GGML_OP_FLASH_ATTN_TRAIN_BACK);
++    const struct ggml_tensor * q = packed->src[0];
++    const struct ggml_tensor * k = packed->src[1];
++    const struct ggml_tensor * v = packed->src[2];
++    size_t offs_dq, offs_dk, offs_dv; int64_t nelem;
++    ggml_flash_attn_train_back_offsets(q, k, v, &offs_dq, &offs_dk, &offs_dv, &nelem);
++    const int64_t D = v->ne[0], S_kv = v->ne[1], Nkv = v->ne[2], B = v->ne[3];
++    return ggml_view_4d(ctx, packed, D, S_kv, Nkv, B,
++                        sizeof(float)*D,
++                        sizeof(float)*D*S_kv,
++                        sizeof(float)*D*S_kv*Nkv,
++                        offs_dv);
++}
++
+ // ggml_ssm_conv
+ 
+ struct ggml_tensor * ggml_ssm_conv(
+@@ -7087,6 +7318,47 @@ static void ggml_compute_backward(
+                 } //break;
+             }
+         } break;
++        // HOT-Step patch: flash-attn-train
++        case GGML_OP_FLASH_ATTN_TRAIN: {
++            // `tensor` is the PACKED forward output; `grad` is its gradient,
++            // carrying dO in the O region and zeros in the LSE region (spec 5.2).
++            // The forward node's own output rides in as src[4] -- the same trick
++            // SOFT_MAX -> SOFT_MAX_BACK uses when it passes `tensor`.
++            struct ggml_tensor * src3 = tensor->src[3];   // mask, may be NULL
++            if (src0_needs_grads || src1_needs_grads || src2_needs_grads) {
++                float scale = 1.0f;
++                memcpy(&scale, (const float *) tensor->op_params + 0, sizeof(float));
++
++                struct ggml_tensor * bk = ggml_flash_attn_train_back(
++                        ctx, src0, src1, src2, src3, tensor, grad, scale);
++
++                if (src0_needs_grads) {
++                    ggml_add_or_set(ctx, cgraph, isrc0, ggml_flash_attn_train_back_get_dq(ctx, bk));
++                }
++                if (src1_needs_grads) {
++                    ggml_add_or_set(ctx, cgraph, isrc1, ggml_flash_attn_train_back_get_dk(ctx, bk));
++                }
++                if (src2_needs_grads) {
++                    ggml_add_or_set(ctx, cgraph, isrc2, ggml_flash_attn_train_back_get_dv(ctx, bk));
++                }
++            }
++            // Guard on the mask NEEDING a gradient, never on its mere presence:
++            // the trainer passes a mask at every self-attention site
++            // (in.t_sa / in.t_sa_pad, dit-train-graph.h:209), so
++            // GGML_ASSERT(!tensor->src[3]) would abort on every real run.
++            // This is GGML_OP_SOFT_MAX's own pattern, which guards on
++            // src1_needs_grads; ggml_compute_backward only computes
++            // isrc0..isrc2, so isrc3 is derived here.
++            {
++                const size_t isrc3 = src3 ? ggml_hash_find(hash_set, src3) : (size_t) -1;
++                GGML_ASSERT(!(src3 && isrc3 != GGML_HASHSET_FULL &&
++                              ggml_bitset_get(hash_set->used, isrc3) && grads_needed[isrc3]) &&
++                            "backward pass for attention mask not implemented");
++            }
++        } break;
++        case GGML_OP_FLASH_ATTN_TRAIN_BACK: {
++            GGML_ABORT("%s: FLASH_ATTN_TRAIN_BACK is not differentiable", __func__);
++        } break;
+         case GGML_OP_NONE: {
+             // noop
+         } break;
+diff --git a/engine/ggml/src/ggml-backend-meta.cpp b/engine/ggml/src/ggml-backend-meta.cpp
+index a5a3a58a..346244d8 100644
+--- a/engine/ggml/src/ggml-backend-meta.cpp
++++ b/engine/ggml/src/ggml-backend-meta.cpp
+@@ -967,6 +967,11 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
+             case GGML_OP_FLASH_ATTN_BACK: {
+                 split_state = handle_generic(src_ss, /*scalar_only =*/ true);
+             } break;
++            // HOT-Step patch: flash-attn-train
++            case GGML_OP_FLASH_ATTN_TRAIN:
++            case GGML_OP_FLASH_ATTN_TRAIN_BACK: {
++                split_state = handle_generic(src_ss, /*scalar_only =*/ true);
++            } break;
+             case GGML_OP_SSM_CONV: {
+                 split_state = handle_ssm_conv(src_ss);
+             } break;
+diff --git a/engine/ggml/src/ggml-cpu/ops.h b/engine/ggml/src/ggml-cpu/ops.h
+index ac15a716..50caafd2 100644
+--- a/engine/ggml/src/ggml-cpu/ops.h
++++ b/engine/ggml/src/ggml-cpu/ops.h
+@@ -23,6 +23,12 @@ static const size_t CACHE_LINE_SIZE_F32 = CACHE_LINE_SIZE/sizeof(float);
+ // Work buffer size for im2col operations in CONV2D
+ #define GGML_IM2COL_WORK_SIZE (16 * 1024 * 1024)
+ 
++// HOT-Step patch: flash-attn-train
++// CPU tile sizes for GGML_OP_FLASH_ATTN_TRAIN{,_BACK}. Shared with
++// ggml_graph_plan's work-size estimate -- keep the two in step.
++#define GGML_FA_TRAIN_BQ 16
++#define GGML_FA_TRAIN_BK 64
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -97,6 +103,9 @@ void ggml_compute_forward_flash_attn_back(
+         const struct ggml_compute_params * params,
+         const bool masked,
+         struct ggml_tensor * dst);
++// HOT-Step patch: flash-attn-train
++void ggml_compute_forward_flash_attn_train(const struct ggml_compute_params * params, struct ggml_tensor * dst);
++void ggml_compute_forward_flash_attn_train_back(const struct ggml_compute_params * params, struct ggml_tensor * dst);
+ void ggml_compute_forward_ssm_conv(const struct ggml_compute_params * params, struct ggml_tensor * dst);
+ void ggml_compute_forward_ssm_scan(const struct ggml_compute_params * params, struct ggml_tensor * dst);
+ void ggml_compute_forward_win_part(const struct ggml_compute_params * params, struct ggml_tensor * dst);
+diff --git a/engine/ggml/src/ggml-cpu/ops.cpp b/engine/ggml/src/ggml-cpu/ops.cpp
+index 504fd4e5..708e872c 100644
+--- a/engine/ggml/src/ggml-cpu/ops.cpp
++++ b/engine/ggml/src/ggml-cpu/ops.cpp
+@@ -9605,6 +9605,506 @@ void ggml_compute_forward_flash_attn_back(
+     }
+ }
+ 
++// HOT-Step patch: flash-attn-train
++// ggml_compute_forward_flash_attn_train / _back
++//
++// CPU reference implementation of GGML_OP_FLASH_ATTN_TRAIN{,_BACK}. Plain f32,
++// clarity over speed: correctness oracle for the CUDA kernels and the fallback
++// when no GPU backend claims the op. See docs/plans/fattn-train-spec.md.
++//
++// Deliberate deviation from ggml_soft_max_ext (spec 4.4): a query row whose
++// every key is masked yields O = 0 and LSE = 0, where soft_max emits NaN. The
++// packed forward tensor must stay finite -- ggml builds its gradient as
++// ggml_scale(packed, 0.0f) and 0 * NaN == NaN would poison dO.
++//
++// Load-bearing invariant (spec 5.2): that ggml_scale must never run in place;
++// it would zero O and LSE before the backward reads them from src[4]. The
++// backward asserts it is not aliasing the forward, which catches the adjacent
++// hazard.
++
++static inline float ggml_fa_train_mask_val(
++        const ggml_fp16_t * mp,
++        int64_t mne0, int64_t mne1, int64_t mne2, int64_t mne3,
++        int64_t h, int64_t b, int64_t i, int64_t j) {
++    if (mp == NULL) {
++        return 0.0f;
++    }
++    // modulo, not divide -- ggml_soft_max_ext's broadcast rule (spec 3.4)
++    const int64_t idx = j + mne0*(i + mne1*((h % mne2) + mne2*(b % mne3)));
++    return GGML_CPU_FP16_TO_FP32(mp[idx]);
++}
++
++static inline float ggml_fa_train_dot(const float * a, const float * b, int64_t n) {
++    float s = 0.0f;
++    for (int64_t i = 0; i < n; ++i) {
++        s += a[i]*b[i];
++    }
++    return s;
++}
++
++static void ggml_compute_forward_flash_attn_train_f32(
++        const ggml_compute_params * params,
++        ggml_tensor * dst) {
++
++    const ggml_tensor * q    = dst->src[0];
++    const ggml_tensor * k    = dst->src[1];
++    const ggml_tensor * v    = dst->src[2];
++    const ggml_tensor * mask = dst->src[3];
++
++    GGML_ASSERT(dst->type == GGML_TYPE_F32);
++    GGML_ASSERT(ggml_is_contiguous(dst));
++    GGML_ASSERT(q->type == GGML_TYPE_F32 && k->type == GGML_TYPE_F32 && v->type == GGML_TYPE_F32);
++    GGML_ASSERT(q->nb[0] == sizeof(float) && k->nb[0] == sizeof(float) && v->nb[0] == sizeof(float));
++
++    const int64_t D    = q->ne[0];
++    const int64_t S    = q->ne[1];
++    const int64_t Nh   = q->ne[2];
++    const int64_t Bn   = q->ne[3];
++    const int64_t S_kv = k->ne[1];
++    const int64_t Nkv  = k->ne[2];
++    const int64_t G    = Nh/Nkv;
++
++    GGML_ASSERT(Nkv > 0 && Nh % Nkv == 0);
++    GGML_ASSERT(ggml_nelements(dst) == ggml_flash_attn_train_nelements(q));
++
++    float scale = 1.0f;
++    float rsv1  = 0.0f;
++    float rsv2  = 0.0f;
++    memcpy(&scale, (const float *) dst->op_params + 0, sizeof(float));
++    memcpy(&rsv1,  (const float *) dst->op_params + 1, sizeof(float));
++    memcpy(&rsv2,  (const float *) dst->op_params + 2, sizeof(float));
++    GGML_ASSERT(rsv1 == 0.0f && rsv2 == 0.0f);   // reserved: max_bias, logit_softcap
++
++    const ggml_fp16_t * mp = mask ? (const ggml_fp16_t *) mask->data : NULL;
++    const int64_t mne0 = mask ? mask->ne[0] : 1;
++    const int64_t mne1 = mask ? mask->ne[1] : 1;
++    const int64_t mne2 = mask ? mask->ne[2] : 1;
++    const int64_t mne3 = mask ? mask->ne[3] : 1;
++
++    const int ith = params->ith;
++    const int nth = params->nth;
++
++    const size_t  offs_lse = ggml_flash_attn_train_lse_offset(q);
++    const int64_t n_o      = D*Nh*S*Bn;
++
++    float * const o_data   = (float *) dst->data;
++    float * const lse_data = (float *) ((char *) dst->data + offs_lse);
++
++    // Spec 2.2: zero the alignment gap between the O and LSE regions. No kernel
++    // would otherwise write it, ggml-alloc reuses buffers, and the packed
++    // tensor's gradient is ggml_scale(packed, 0.0f) -- 0 * inf/NaN is NaN.
++    // Zero-width at every production geometry, which is exactly why it ships.
++    if (ith == 0) {
++        const size_t gap_beg = (size_t) n_o * sizeof(float);
++        if (offs_lse > gap_beg) {
++            memset((char *) dst->data + gap_beg, 0, offs_lse - gap_beg);
++        }
++    }
++
++    const int64_t BQ = GGML_FA_TRAIN_BQ;
++    const int64_t BK = GGML_FA_TRAIN_BK;
++
++    // per-thread scratch, laid out to match ggml_graph_plan's estimate
++    const size_t  slab = (size_t) (BQ*BK + BQ*D + 3*BQ) + CACHE_LINE_SIZE_F32;
++    float * const wd   = (float *) params->wdata + slab*(size_t) ith;
++    float * const st   = wd;              // [BQ*BK] score tile
++    float * const acc  = st  + BQ*BK;     // [BQ*D]  unnormalised output
++    float * const mrun = acc + BQ*D;      // [BQ]    running row max
++    float * const lrun = mrun + BQ;       // [BQ]    running sum of exp
++                                          // [BQ]    reserved (rowmax scratch)
++
++    // work items: one query tile per (h, b, tile)
++    const int64_t ntq = (S + BQ - 1)/BQ;
++    const int64_t nr  = Nh*Bn*ntq;
++    const int64_t dr  = (nr + nth - 1)/nth;
++    const int64_t ir0 = dr*ith;
++    const int64_t ir1 = MIN(ir0 + dr, nr);
++
++    for (int64_t ir = ir0; ir < ir1; ++ir) {
++        const int64_t it = ir % ntq;
++        const int64_t hb = ir / ntq;
++        const int64_t h  = hb % Nh;
++        const int64_t b  = hb / Nh;
++        const int64_t hk = h/G;
++
++        const int64_t i0 = it*BQ;
++        const int64_t i1 = MIN(i0 + BQ, S);
++        const int64_t nq = i1 - i0;
++
++        for (int64_t ii = 0; ii < nq; ++ii) {
++            mrun[ii] = -INFINITY;
++            lrun[ii] = 0.0f;
++            memset(acc + ii*D, 0, (size_t) D*sizeof(float));
++        }
++
++        for (int64_t j0 = 0; j0 < S_kv; j0 += BK) {
++            const int64_t j1 = MIN(j0 + BK, S_kv);
++            const int64_t nk = j1 - j0;
++
++            // scores for the tile; a masked entry stays exactly -INF whatever
++            // the scale, because the mask is additive AFTER the scale.
++            bool any_finite = false;
++            for (int64_t ii = 0; ii < nq; ++ii) {
++                const float * qi = (const float *) ((const char *) q->data
++                        + (i0 + ii)*q->nb[1] + h*q->nb[2] + b*q->nb[3]);
++                float * srow = st + ii*BK;
++                for (int64_t jj = 0; jj < nk; ++jj) {
++                    const float mv = ggml_fa_train_mask_val(mp, mne0, mne1, mne2, mne3, h, b, i0 + ii, j0 + jj);
++                    if (mv == -INFINITY) {
++                        srow[jj] = -INFINITY;
++                        continue;
++                    }
++                    const float * kj = (const float *) ((const char *) k->data
++                            + (j0 + jj)*k->nb[1] + hk*k->nb[2] + b*k->nb[3]);
++                    srow[jj]   = scale*ggml_fa_train_dot(qi, kj, D) + mv;
++                    any_finite = true;
++                }
++            }
++
++            // whole tile dead (sliding window makes most tiles dead at large S)
++            if (!any_finite) {
++                continue;
++            }
++
++            for (int64_t ii = 0; ii < nq; ++ii) {
++                const float * srow = st + ii*BK;
++
++                float rowmax = -INFINITY;
++                for (int64_t jj = 0; jj < nk; ++jj) {
++                    if (srow[jj] > rowmax) {
++                        rowmax = srow[jj];
++                    }
++                }
++
++                const float m_new = MAX(mrun[ii], rowmax);
++                if (m_new == -INFINITY) {
++                    continue;   // still nothing seen on this row
++                }
++
++                // exp(-INF - finite) == 0.0f exactly in IEEE-754
++                const float corr = expf(mrun[ii] - m_new);
++                float * a = acc + ii*D;
++                lrun[ii] *= corr;
++                if (corr != 1.0f) {
++                    for (int64_t d = 0; d < D; ++d) {
++                        a[d] *= corr;
++                    }
++                }
++
++                for (int64_t jj = 0; jj < nk; ++jj) {
++                    if (srow[jj] == -INFINITY) {
++                        continue;   // p is exactly 0.0f -- contributes nothing
++                    }
++                    const float p = expf(srow[jj] - m_new);
++                    if (p == 0.0f) {
++                        continue;
++                    }
++                    lrun[ii] += p;
++                    const float * vj = (const float *) ((const char *) v->data
++                            + (j0 + jj)*v->nb[1] + hk*v->nb[2] + b*v->nb[3]);
++                    for (int64_t d = 0; d < D; ++d) {
++                        a[d] += p*vj[d];
++                    }
++                }
++
++                mrun[ii] = m_new;
++            }
++        }
++
++        for (int64_t ii = 0; ii < nq; ++ii) {
++            const int64_t s_idx = i0 + ii;
++            float * const orow  = o_data + D*(h + Nh*(s_idx + S*b));
++            const float * a     = acc + ii*D;
++            if (lrun[ii] > 0.0f) {
++                for (int64_t d = 0; d < D; ++d) {
++                    orow[d] = a[d]/lrun[ii];
++                }
++                lse_data[h + Nh*(s_idx + S*b)] = mrun[ii] + logf(lrun[ii]);
++            } else {
++                // spec 4.4: fully-masked row -- defined, finite, NOT NaN
++                for (int64_t d = 0; d < D; ++d) {
++                    orow[d] = 0.0f;
++                }
++                lse_data[h + Nh*(s_idx + S*b)] = 0.0f;
++            }
++        }
++    }
++}
++
++void ggml_compute_forward_flash_attn_train(
++        const ggml_compute_params * params,
++        ggml_tensor * dst) {
++
++    const ggml_tensor * q = dst->src[0];
++
++    switch (q->type) {
++        case GGML_TYPE_F32:
++            {
++                ggml_compute_forward_flash_attn_train_f32(params, dst);
++            } break;
++        default:
++            {
++                GGML_ABORT("fatal error");
++            }
++    }
++}
++
++// HOT-Step patch: flash-attn-train
++static void ggml_compute_forward_flash_attn_train_back_f32(
++        const ggml_compute_params * params,
++        ggml_tensor * dst) {
++
++    const ggml_tensor * q    = dst->src[0];
++    const ggml_tensor * k    = dst->src[1];
++    const ggml_tensor * v    = dst->src[2];
++    const ggml_tensor * mask = dst->src[3];
++    const ggml_tensor * fwd  = dst->src[4];
++    const ggml_tensor * dfwd = dst->src[5];
++
++    GGML_ASSERT(dst->type == GGML_TYPE_F32);
++    GGML_ASSERT(ggml_is_contiguous(dst));
++    GGML_ASSERT(q->type == GGML_TYPE_F32 && k->type == GGML_TYPE_F32 && v->type == GGML_TYPE_F32);
++    GGML_ASSERT(q->nb[0] == sizeof(float) && k->nb[0] == sizeof(float) && v->nb[0] == sizeof(float));
++    GGML_ASSERT(fwd->type == GGML_TYPE_F32 && ggml_is_contiguous(fwd));
++    GGML_ASSERT(dfwd->type == GGML_TYPE_F32 && ggml_is_contiguous(dfwd));
++    // spec 5.2: the back op must never alias the forward packed tensor
++    GGML_ASSERT(dst->data != fwd->data);
++
++    const int64_t D    = q->ne[0];
++    const int64_t S    = q->ne[1];
++    const int64_t Nh   = q->ne[2];
++    const int64_t Bn   = q->ne[3];
++    const int64_t S_kv = k->ne[1];
++    const int64_t Nkv  = k->ne[2];
++    const int64_t G    = Nh/Nkv;
++
++    GGML_ASSERT(Nkv > 0 && Nh % Nkv == 0);
++
++    float scale = 1.0f;
++    float rsv1  = 0.0f;
++    float rsv2  = 0.0f;
++    memcpy(&scale, (const float *) dst->op_params + 0, sizeof(float));
++    memcpy(&rsv1,  (const float *) dst->op_params + 1, sizeof(float));
++    memcpy(&rsv2,  (const float *) dst->op_params + 2, sizeof(float));
++    GGML_ASSERT(rsv1 == 0.0f && rsv2 == 0.0f);
++
++    const ggml_fp16_t * mp = mask ? (const ggml_fp16_t *) mask->data : NULL;
++    const int64_t mne0 = mask ? mask->ne[0] : 1;
++    const int64_t mne1 = mask ? mask->ne[1] : 1;
++    const int64_t mne2 = mask ? mask->ne[2] : 1;
++    const int64_t mne3 = mask ? mask->ne[3] : 1;
++
++    const int ith = params->ith;
++    const int nth = params->nth;
++
++    size_t  offs_dq, offs_dk, offs_dv;
++    int64_t nelem;
++    ggml_flash_attn_train_back_offsets(q, k, v, &offs_dq, &offs_dk, &offs_dv, &nelem);
++    GGML_ASSERT(ggml_nelements(dst) == nelem);
++
++    float * const dq_data = (float *) ((char *) dst->data + offs_dq);
++    float * const dk_data = (float *) ((char *) dst->data + offs_dk);
++    float * const dv_data = (float *) ((char *) dst->data + offs_dv);
++
++    const float * const o_data   = (const float *) fwd->data;
++    const float * const lse_data = (const float *) ((const char *) fwd->data + ggml_flash_attn_train_lse_offset(q));
++    const float * const do_data  = (const float *) dfwd->data;   // dO in the O region;
++                                                                 // the LSE region is ignored (spec 9.7)
++
++    // Spec 3.2: zero the two alignment gaps, same rule as the forward.
++    if (ith == 0) {
++        const int64_t n_q = D*S*Nh*Bn;
++        const int64_t n_k = D*S_kv*Nkv*Bn;
++        const size_t  g0  = (size_t) n_q*sizeof(float);
++        if (offs_dk > g0) {
++            memset((char *) dst->data + g0, 0, offs_dk - g0);
++        }
++        const size_t g1 = offs_dk + (size_t) n_k*sizeof(float);
++        if (offs_dv > g1) {
++            memset((char *) dst->data + g1, 0, offs_dv - g1);
++        }
++    }
++
++    const int64_t BQ = GGML_FA_TRAIN_BQ;
++    const int64_t BK = GGML_FA_TRAIN_BK;
++
++    // per-thread scratch, laid out to match ggml_graph_plan's estimate
++    const size_t  big  = (size_t) MAX(BQ*D, 2*BK*D);
++    const size_t  slab = (size_t) (2*BQ*BK) + big + (size_t) BQ + CACHE_LINE_SIZE_F32;
++    float * const wd   = (float *) params->wdata + slab*(size_t) ith;
++    float * const tile = wd + 2*BQ*BK;      // dQ tile [BQ*D], or dK|dV tiles [2*BK*D]
++    float * const di   = tile + big;        // [BQ] the row identity sum_d dO*O
++
++    // ---- pass A: dQ. One work item per (h, b, query tile). ----
++    {
++        const int64_t ntq = (S + BQ - 1)/BQ;
++        const int64_t nr  = Nh*Bn*ntq;
++        const int64_t dr  = (nr + nth - 1)/nth;
++        const int64_t ir0 = dr*ith;
++        const int64_t ir1 = MIN(ir0 + dr, nr);
++
++        for (int64_t ir = ir0; ir < ir1; ++ir) {
++            const int64_t it = ir % ntq;
++            const int64_t hb = ir / ntq;
++            const int64_t h  = hb % Nh;
++            const int64_t b  = hb / Nh;
++            const int64_t hk = h/G;
++
++            const int64_t i0 = it*BQ;
++            const int64_t i1 = MIN(i0 + BQ, S);
++            const int64_t nq = i1 - i0;
++
++            for (int64_t ii = 0; ii < nq; ++ii) {
++                const int64_t base = D*(h + Nh*((i0 + ii) + S*b));
++                di[ii] = ggml_fa_train_dot(do_data + base, o_data + base, D);
++            }
++            memset(tile, 0, (size_t) (nq*D)*sizeof(float));
++
++            for (int64_t j0 = 0; j0 < S_kv; j0 += BK) {
++                const int64_t j1 = MIN(j0 + BK, S_kv);
++
++                for (int64_t ii = 0; ii < nq; ++ii) {
++                    const int64_t i   = i0 + ii;
++                    const float * qi  = (const float *) ((const char *) q->data
++                            + i*q->nb[1] + h*q->nb[2] + b*q->nb[3]);
++                    const float * doi = do_data + D*(h + Nh*(i + S*b));
++                    const float   lse = lse_data[h + Nh*(i + S*b)];
++                    float * dqi = tile + ii*D;
++
++                    for (int64_t j = j0; j < j1; ++j) {
++                        const float mv = ggml_fa_train_mask_val(mp, mne0, mne1, mne2, mne3, h, b, i, j);
++                        if (mv == -INFINITY) {
++                            continue;   // P is exactly 0.0f -> dS exactly 0.0f
++                        }
++                        const float * kj = (const float *) ((const char *) k->data
++                                + j*k->nb[1] + hk*k->nb[2] + b*k->nb[3]);
++                        const float * vj = (const float *) ((const char *) v->data
++                                + j*v->nb[1] + hk*v->nb[2] + b*v->nb[3]);
++
++                        const float s  = scale*ggml_fa_train_dot(qi, kj, D) + mv;
++                        const float p  = expf(s - lse);
++                        if (p == 0.0f) {
++                            continue;
++                        }
++                        const float dp = ggml_fa_train_dot(doi, vj, D);
++                        const float ds = p*(dp - di[ii]);
++                        const float c  = scale*ds;
++                        for (int64_t d = 0; d < D; ++d) {
++                            dqi[d] += c*kj[d];
++                        }
++                    }
++                }
++            }
++
++            for (int64_t ii = 0; ii < nq; ++ii) {
++                float * out = dq_data + D*((i0 + ii) + S*(h + Nh*b));
++                memcpy(out, tile + ii*D, (size_t) D*sizeof(float));
++            }
++        }
++    }
++
++    // ---- pass B: dK, dV. One work item per (hk, b, kv tile). ----
++    // Reads only forward tensors, writes only regions pass A never touches, so
++    // no barrier is needed between the two passes.
++    {
++        const int64_t ntk = (S_kv + BK - 1)/BK;
++        const int64_t nr  = Nkv*Bn*ntk;
++        const int64_t dr  = (nr + nth - 1)/nth;
++        const int64_t ir0 = dr*ith;
++        const int64_t ir1 = MIN(ir0 + dr, nr);
++
++        for (int64_t ir = ir0; ir < ir1; ++ir) {
++            const int64_t it = ir % ntk;
++            const int64_t hb = ir / ntk;
++            const int64_t hk = hb % Nkv;
++            const int64_t b  = hb / Nkv;
++
++            const int64_t j0 = it*BK;
++            const int64_t j1 = MIN(j0 + BK, S_kv);
++            const int64_t nk = j1 - j0;
++
++            float * const dkt = tile;             // [nk*D]
++            float * const dvt = tile + BK*D;      // [nk*D]
++            memset(dkt, 0, (size_t) (nk*D)*sizeof(float));
++            memset(dvt, 0, (size_t) (nk*D)*sizeof(float));
++
++            // deterministic order: query heads ascending, then query tiles
++            for (int64_t g = 0; g < G; ++g) {
++                const int64_t h = hk*G + g;
++
++                for (int64_t i00 = 0; i00 < S; i00 += BQ) {
++                    const int64_t i11 = MIN(i00 + BQ, S);
++
++                    for (int64_t ii = 0; ii < i11 - i00; ++ii) {
++                        const int64_t base = D*(h + Nh*((i00 + ii) + S*b));
++                        di[ii] = ggml_fa_train_dot(do_data + base, o_data + base, D);
++                    }
++
++                    for (int64_t ii = 0; ii < i11 - i00; ++ii) {
++                        const int64_t i   = i00 + ii;
++                        const float * qi  = (const float *) ((const char *) q->data
++                                + i*q->nb[1] + h*q->nb[2] + b*q->nb[3]);
++                        const float * doi = do_data + D*(h + Nh*(i + S*b));
++                        const float   lse = lse_data[h + Nh*(i + S*b)];
++
++                        for (int64_t jj = 0; jj < nk; ++jj) {
++                            const int64_t j = j0 + jj;
++                            const float mv = ggml_fa_train_mask_val(mp, mne0, mne1, mne2, mne3, h, b, i, j);
++                            if (mv == -INFINITY) {
++                                continue;   // exactly zero contribution
++                            }
++                            const float * kj = (const float *) ((const char *) k->data
++                                    + j*k->nb[1] + hk*k->nb[2] + b*k->nb[3]);
++                            const float * vj = (const float *) ((const char *) v->data
++                                    + j*v->nb[1] + hk*v->nb[2] + b*v->nb[3]);
++
++                            const float s = scale*ggml_fa_train_dot(qi, kj, D) + mv;
++                            const float p = expf(s - lse);
++                            if (p == 0.0f) {
++                                continue;
++                            }
++                            const float dp = ggml_fa_train_dot(doi, vj, D);
++                            const float ds = p*(dp - di[ii]);
++                            const float c  = scale*ds;
++
++                            float * dkj = dkt + jj*D;
++                            float * dvj = dvt + jj*D;
++                            for (int64_t d = 0; d < D; ++d) {
++                                dvj[d] += p*doi[d];
++                                dkj[d] += c*qi[d];
++                            }
++                        }
++                    }
++                }
++            }
++
++            for (int64_t jj = 0; jj < nk; ++jj) {
++                const int64_t off = D*((j0 + jj) + S_kv*(hk + Nkv*b));
++                memcpy(dk_data + off, dkt + jj*D, (size_t) D*sizeof(float));
++                memcpy(dv_data + off, dvt + jj*D, (size_t) D*sizeof(float));
++            }
++        }
++    }
++}
++
++void ggml_compute_forward_flash_attn_train_back(
++        const ggml_compute_params * params,
++        ggml_tensor * dst) {
++
++    const ggml_tensor * q = dst->src[0];
++
++    switch (q->type) {
++        case GGML_TYPE_F32:
++            {
++                ggml_compute_forward_flash_attn_train_back_f32(params, dst);
++            } break;
++        default:
++            {
++                GGML_ABORT("fatal error");
++            }
++    }
++}
++
+ // ggml_compute_forward_ssm_conv
+ 
+ static void ggml_compute_forward_ssm_conv_f32(
+diff --git a/engine/ggml/src/ggml-cpu/ggml-cpu.c b/engine/ggml/src/ggml-cpu/ggml-cpu.c
+index 75d45016..3454bc96 100644
+--- a/engine/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/engine/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -2008,6 +2008,15 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
+                 bool masked = t != 0;
+                 ggml_compute_forward_flash_attn_back(params, masked, tensor);
+             } break;
++        // HOT-Step patch: flash-attn-train
++        case GGML_OP_FLASH_ATTN_TRAIN:
++            {
++                ggml_compute_forward_flash_attn_train(params, tensor);
++            } break;
++        case GGML_OP_FLASH_ATTN_TRAIN_BACK:
++            {
++                ggml_compute_forward_flash_attn_train_back(params, tensor);
++            } break;
+         case GGML_OP_SSM_CONV:
+             {
+                 ggml_compute_forward_ssm_conv(params, tensor);
+@@ -2397,6 +2406,9 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
+         case GGML_OP_TOP_K:
+         case GGML_OP_FLASH_ATTN_EXT:
+         case GGML_OP_FLASH_ATTN_BACK:
++        // HOT-Step patch: flash-attn-train
++        case GGML_OP_FLASH_ATTN_TRAIN:
++        case GGML_OP_FLASH_ATTN_TRAIN_BACK:
+         case GGML_OP_SSM_CONV:
+         case GGML_OP_SSM_SCAN:
+         case GGML_OP_LIGHTNING_INDEXER:
+@@ -2977,6 +2989,27 @@ struct ggml_cplan ggml_graph_plan(
+                         }
+                     } break;
+ 
++                // HOT-Step patch: flash-attn-train
++                case GGML_OP_FLASH_ATTN_TRAIN:
++                    {
++                        const int64_t D = node->src[0]->ne[0];
++                        // per thread: s tile [BQ*BK] + acc [BQ*D] + m/l/rowmax [3*BQ]
++                        cur += sizeof(float)*n_tasks*(GGML_FA_TRAIN_BQ*GGML_FA_TRAIN_BK
++                                                      + GGML_FA_TRAIN_BQ*D
++                                                      + 3*GGML_FA_TRAIN_BQ
++                                                      + CACHE_LINE_SIZE_F32);
++                    } break;
++                case GGML_OP_FLASH_ATTN_TRAIN_BACK:
++                    {
++                        const int64_t D = node->src[0]->ne[0];
++                        // per thread: P/dS tiles [2*BQ*BK], dQ tile [BQ*D] or
++                        // dK+dV tiles [2*BK*D] (whichever pass is larger), D_i [BQ]
++                        cur += sizeof(float)*n_tasks*(2*GGML_FA_TRAIN_BQ*GGML_FA_TRAIN_BK
++                                                      + MAX(GGML_FA_TRAIN_BQ*D, 2*GGML_FA_TRAIN_BK*D)
++                                                      + GGML_FA_TRAIN_BQ
++                                                      + CACHE_LINE_SIZE_F32);
++                    } break;
++
+                 case GGML_OP_CROSS_ENTROPY_LOSS:
+                     {
+                         cur = ggml_type_size(node->type)*(n_tasks + node->src[0]->ne[0]*n_tasks);
+diff --git a/engine/ggml/src/ggml-cuda/fattn-train.cuh b/engine/ggml/src/ggml-cuda/fattn-train.cuh
+new file mode 100644
+index 00000000..ef89a264
+--- /dev/null
++++ b/engine/ggml/src/ggml-cuda/fattn-train.cuh
+@@ -0,0 +1,23 @@
++// HOT-Step patch: flash-attn-train
++//
++// CUDA kernels for GGML_OP_FLASH_ATTN_TRAIN{,_BACK}. Self-contained on
++// purpose: no existing fattn-*.cu / fattn-common.cuh file is touched, so the
++// inference attention path keeps its exact object code and its recompile blast
++// radius. See docs/plans/fattn-train-spec.md sections 2, 4 and 8.
++#pragma once
++
++#include "common.cuh"
++
++// Forward: packed O | LSE, tiled online softmax, f32 in/out, f32 accumulate.
++void ggml_cuda_flash_attn_train(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
++
++// Capability check for ggml_backend_cuda_device_supports_op. Shape/type only --
++// it is called on graph nodes that have no data yet.
++bool ggml_cuda_flash_attn_train_supported(const ggml_tensor * op);
++
++// HOT-Step patch: flash-attn-train
++// Backward: three atomics-free kernels (delta / dK+dV / dQ), packed dQ|dK|dV.
++void ggml_cuda_flash_attn_train_back(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
++
++// Capability check for ggml_backend_cuda_device_supports_op. Shape/type only.
++bool ggml_cuda_flash_attn_train_back_supported(const ggml_tensor * op);
+diff --git a/engine/ggml/src/ggml-cuda/fattn-train.cu b/engine/ggml/src/ggml-cuda/fattn-train.cu
+new file mode 100644
+index 00000000..f4f97ebf
+--- /dev/null
++++ b/engine/ggml/src/ggml-cuda/fattn-train.cu
+@@ -0,0 +1,996 @@
++// HOT-Step patch: flash-attn-train
++//
++// CUDA forward for GGML_OP_FLASH_ATTN_TRAIN. Behavioural reference is the CPU
++// impl in ggml-cpu/ops.cpp (ggml_compute_forward_flash_attn_train_f32); the
++// maths is spec section 4.1, the kernel shape is spec section 8.1.
++//
++// Properties this kernel is required to hold, and how it holds them:
++//
++//   * f32 in / f32 out / f32 accumulate. No tensor cores, no TF32, no f16
++//     tiles -- correctness first (spec 8.3).
++//   * DETERMINISTIC. Every output element is written exactly once by exactly
++//     one thread from a private accumulator; every reduction runs in a fixed
++//     order (butterfly shuffle over the warp, then key tiles in ascending j,
++//     then lanes in ascending order inside a tile). There are no floating
++//     point atomics anywhere. Two runs on the same GPU with the same inputs
++//     are bitwise identical.
++//   * A -INF mask entry yields P EXACTLY 0.0f. The kernel never calls exp on
++//     -INFINITY: masked lanes are branched out and their p is assigned 0.0f
++//     literally. -use_fast_math is on for this backend, so leaning on
++//     __expf(-INFINITY) would be leaning on an approximation's edge case.
++//   * A fully masked query row yields O = 0 and LSE = 0, never NaN (spec 4.4).
++//     A NaN here is fatal: ggml builds the packed tensor's gradient as
++//     ggml_scale(packed, 0.0f) and 0 * NaN is NaN.
++//   * The alignment gap between the O and LSE regions is explicitly zeroed
++//     (spec 2.2). It is zero-width at every production geometry, which is
++//     exactly why forgetting it ships.
++//   * q/k/v are permuted, non-contiguous VIEWS. Only nb[0] == 4 is guaranteed;
++//     every other axis is walked through nb[1..3]. Nothing is ggml_cont'd --
++//     that would re-materialise Q/K/V and give back part of the win.
++//
++// Block shape: one block per (query tile, head, batch). FA_TRAIN_NWARPS warps
++// per block, one query ROW per warp, FA_TRAIN_BK keys staged in shared memory
++// per tile and shared by all the warps in the block. The running O accumulator
++// lives in registers, D/32 floats per lane.
++
++#include "fattn-train.cuh"
++
++#include <cstdint>
++#include <cstdlib>
++#include <cstring>
++
++// Env-gated trace, one line per direction per process. Spec 9.8 is emphatic
++// that a `false` from supports_op is a SILENT fallback to the CPU backend and
++// not a failure: the graph still runs, still gets the right answer, and is
++// merely unusably slow with a quiet VRAM tripwire -- i.e. it looks like a pass.
++// So "the kernel actually ran on the GPU" has to be checkable rather than
++// argued. FATTN_TRAIN_TRACE=1.
++static void fa_train_trace(
++        bool & once, const char * what,
++        int64_t D, int64_t S, int64_t S_kv, int64_t Nh, int64_t Nkv, int64_t Bn,
++        bool has_mask) {
++    static const bool on = getenv("FATTN_TRAIN_TRACE") != nullptr;
++    if (!on || once) {
++        return;
++    }
++    once = true;
++    GGML_LOG_INFO("fattn-train: CUDA %s  D=%d S=%d S_kv=%d Nh=%d Nkv=%d B=%d mask=%s\n",
++                  what, (int) D, (int) S, (int) S_kv, (int) Nh, (int) Nkv, (int) Bn,
++                  has_mask ? "yes" : "null");
++}
++
++#define FA_TRAIN_NWARPS 4    // query rows per block
++#define FA_TRAIN_BK     32   // keys staged per tile (one per lane)
++
++template <int D>
++static __global__ void __launch_bounds__(FA_TRAIN_NWARPS*WARP_SIZE, 1)
++fa_train_fwd_f32(
++        const char * __restrict__ q_base,
++        const char * __restrict__ k_base,
++        const char * __restrict__ v_base,
++        const half * __restrict__ mask,
++        float      * __restrict__ o_data,
++        float      * __restrict__ lse_data,
++        const int64_t q_nb1, const int64_t q_nb2, const int64_t q_nb3,
++        const int64_t k_nb1, const int64_t k_nb2, const int64_t k_nb3,
++        const int64_t v_nb1, const int64_t v_nb2, const int64_t v_nb3,
++        const int64_t mne0, const int64_t mne1, const int64_t mne2, const int64_t mne3,
++        const int64_t S, const int64_t S_kv, const int64_t Nh, const int64_t G,
++        const float scale) {
++
++    constexpr int NV = D/WARP_SIZE;      // accumulator floats per lane
++    constexpr int LD = D + 1;            // padded shared row stride (bank conflicts)
++
++    __shared__ float Ksh[FA_TRAIN_BK*LD];
++    __shared__ float Vsh[FA_TRAIN_BK*LD];
++    __shared__ float Qsh[FA_TRAIN_NWARPS*LD];
++    __shared__ int   sh_live[FA_TRAIN_NWARPS];
++
++    const int lane = threadIdx.x;
++    const int w    = threadIdx.y;
++    const int tid  = w*WARP_SIZE + lane;
++
++    const int64_t i  = (int64_t) blockIdx.x*FA_TRAIN_NWARPS + w;   // query row
++    const int64_t h  = blockIdx.y;
++    const int64_t b  = blockIdx.z;
++    const int64_t hk = h/G;                                        // GQA kv head
++
++    const bool active = i < S;
++
++    // Q row -> shared, read back as a warp-uniform broadcast in the dot loop.
++    if (active) {
++        const float * qrow = (const float *) (q_base + i*q_nb1 + h*q_nb2 + b*q_nb3);
++#pragma unroll
++        for (int c = 0; c < NV; ++c) {
++            Qsh[w*LD + lane + WARP_SIZE*c] = qrow[lane + WARP_SIZE*c];
++        }
++    }
++    __syncwarp();
++
++    float acc[NV];
++#pragma unroll
++    for (int c = 0; c < NV; ++c) {
++        acc[c] = 0.0f;
++    }
++    float mrun = -INFINITY;   // running row max
++    float lrun = 0.0f;        // running sum of exp
++
++    for (int64_t j0 = 0; j0 < S_kv; j0 += FA_TRAIN_BK) {
++        // (A) previous tile's compute is done: safe to overwrite K/V and flags
++        __syncthreads();
++
++        const int64_t j   = j0 + lane;
++        const bool    jok = active && (j < S_kv);
++
++        // spec 3.4: modulo broadcast, and mne1 (not S) is the mask row stride
++        float mv = 0.0f;
++        if (jok && mask) {
++            const int64_t midx = j + mne0*(i + mne1*((h % mne2) + mne2*(b % mne3)));
++            mv = __half2float(mask[midx]);
++        }
++        const bool live = jok && !(mv == -INFINITY);
++
++        const int anyw = __any_sync(0xffffffff, live);
++        if (lane == 0) {
++            sh_live[w] = anyw;
++        }
++
++        // (B) tile liveness known to the whole block
++        __syncthreads();
++
++        int block_live = 0;
++#pragma unroll
++        for (int t = 0; t < FA_TRAIN_NWARPS; ++t) {
++            block_live |= sh_live[t];
++        }
++        if (!block_live) {
++            // Whole tile dead. With sliding_window = 128 and S in the
++            // thousands this is the large majority of tiles.
++            continue;
++        }
++
++        const int64_t nk = min((int64_t) FA_TRAIN_BK, S_kv - j0);
++        for (int idx = tid; idx < FA_TRAIN_BK*D; idx += FA_TRAIN_NWARPS*WARP_SIZE) {
++            const int jj = idx/D;
++            const int dd = idx%D;
++            float kval = 0.0f;
++            float vval = 0.0f;
++            if (jj < nk) {
++                const float * krow = (const float *) (k_base + (j0 + jj)*k_nb1 + hk*k_nb2 + b*k_nb3);
++                const float * vrow = (const float *) (v_base + (j0 + jj)*v_nb1 + hk*v_nb2 + b*v_nb3);
++                kval = krow[dd];
++                vval = vrow[dd];
++            }
++            Ksh[jj*LD + dd] = kval;
++            Vsh[jj*LD + dd] = vval;
++        }
++
++        // (C) K/V tile staged
++        __syncthreads();
++
++        // Scores. The mask is additive AFTER the scale, so a -INF entry
++        // survives as -INF whatever the scale -- and the dot product for it is
++        // never even computed.
++        float s = -INFINITY;
++        if (live) {
++            const float * qs = Qsh + w*LD;
++            const float * ks = Ksh + lane*LD;
++            float dot = 0.0f;
++#pragma unroll 8
++            for (int d = 0; d < D; ++d) {
++                dot = fmaf(qs[d], ks[d], dot);
++            }
++            s = scale*dot + mv;
++        }
++
++        // warp-uniform after the reduction; mrun is warp-uniform by induction
++        const float tilemax = warp_reduce_max<WARP_SIZE>(s);
++        const float m_new   = fmaxf(mrun, tilemax);
++        if (m_new == -INFINITY) {
++            continue;   // still nothing seen on this row
++        }
++
++        // exp(-INF - finite) is 0 in IEEE-754; spelled out rather than
++        // evaluated, because -use_fast_math is on for this backend.
++        const float corr = (mrun == -INFINITY) ? 0.0f : __expf(mrun - m_new);
++        const float p    = (s    == -INFINITY) ? 0.0f : __expf(s    - m_new);
++
++        lrun = lrun*corr + warp_reduce_sum<WARP_SIZE>(p);
++#pragma unroll
++        for (int c = 0; c < NV; ++c) {
++            acc[c] *= corr;
++        }
++
++        // Fixed lane order, so the accumulation order is fixed too.
++#pragma unroll 4
++        for (int jj = 0; jj < WARP_SIZE; ++jj) {
++            const float pj = __shfl_sync(0xffffffff, p, jj);
++            if (pj == 0.0f) {
++                continue;   // masked or vanished: contributes exactly nothing
++            }
++            const float * vs = Vsh + jj*LD;
++#pragma unroll
++            for (int c = 0; c < NV; ++c) {
++                acc[c] = fmaf(pj, vs[lane + WARP_SIZE*c], acc[c]);
++            }
++        }
++
++        mrun = m_new;
++    }
++
++    if (!active) {
++        return;
++    }
++
++    float * orow = o_data + D*(h + Nh*(i + S*b));
++    if (lrun > 0.0f) {
++#pragma unroll
++        for (int c = 0; c < NV; ++c) {
++            orow[lane + WARP_SIZE*c] = acc[c]/lrun;
++        }
++        if (lane == 0) {
++            lse_data[h + Nh*(i + S*b)] = mrun + __logf(lrun);
++        }
++    } else {
++        // spec 4.4: fully-masked row -- defined, finite, NOT NaN
++#pragma unroll
++        for (int c = 0; c < NV; ++c) {
++            orow[lane + WARP_SIZE*c] = 0.0f;
++        }
++        if (lane == 0) {
++            lse_data[h + Nh*(i + S*b)] = 0.0f;
++        }
++    }
++}
++
++bool ggml_cuda_flash_attn_train_supported(const ggml_tensor * op) {
++    if (op->type != GGML_TYPE_F32) {
++        return false;
++    }
++
++    const ggml_tensor * q    = op->src[0];
++    const ggml_tensor * k    = op->src[1];
++    const ggml_tensor * v    = op->src[2];
++    const ggml_tensor * mask = op->src[3];
++
++    if (!q || !k || !v) {
++        return false;
++    }
++    if (q->type != GGML_TYPE_F32 || k->type != GGML_TYPE_F32 || v->type != GGML_TYPE_F32) {
++        return false;
++    }
++    if (q->nb[0] != sizeof(float) || k->nb[0] != sizeof(float) || v->nb[0] != sizeof(float)) {
++        return false;
++    }
++
++    const int64_t D = q->ne[0];
++    if (D != 64 && D != 128) {
++        return false;   // v1: the two head dims the trainer and the tests use
++    }
++    if (k->ne[0] != D || v->ne[0] != D) {
++        return false;
++    }
++    if (k->ne[1] != v->ne[1] || k->ne[2] != v->ne[2]) {
++        return false;
++    }
++    if (k->ne[2] <= 0 || q->ne[2] % k->ne[2] != 0) {
++        return false;
++    }
++    if (q->ne[3] != k->ne[3] || q->ne[3] != v->ne[3]) {
++        return false;
++    }
++    if (mask) {
++        if (mask->type != GGML_TYPE_F16 || !ggml_is_contiguous(mask)) {
++            return false;
++        }
++        if (mask->ne[0] != k->ne[1] || mask->ne[1] < q->ne[1]) {
++            return false;
++        }
++        if (mask->ne[2] <= 0 || mask->ne[3] <= 0) {
++            return false;
++        }
++        if (q->ne[2] % mask->ne[2] != 0 || q->ne[3] % mask->ne[3] != 0) {
++            return false;
++        }
++    }
++
++    // op_params slots 1 and 2 are reserved (max_bias, logit_softcap). Nothing
++    // sets them today; if something ever does, fall back rather than ignore it.
++    float rsv1 = 0.0f;
++    float rsv2 = 0.0f;
++    memcpy(&rsv1, (const float *) op->op_params + 1, sizeof(float));
++    memcpy(&rsv2, (const float *) op->op_params + 2, sizeof(float));
++    if (rsv1 != 0.0f || rsv2 != 0.0f) {
++        return false;
++    }
++
++    return true;
++}
++
++void ggml_cuda_flash_attn_train(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
++    const ggml_tensor * q    = dst->src[0];
++    const ggml_tensor * k    = dst->src[1];
++    const ggml_tensor * v    = dst->src[2];
++    const ggml_tensor * mask = dst->src[3];
++
++    GGML_ASSERT(ggml_cuda_flash_attn_train_supported(dst));
++    GGML_ASSERT(ggml_is_contiguous(dst));
++    GGML_ASSERT(ggml_nelements(dst) == ggml_flash_attn_train_nelements(q));
++
++    const int64_t D    = q->ne[0];
++    const int64_t S    = q->ne[1];
++    const int64_t Nh   = q->ne[2];
++    const int64_t Bn   = q->ne[3];
++    const int64_t S_kv = k->ne[1];
++    const int64_t Nkv  = k->ne[2];
++    const int64_t G    = Nh/Nkv;
++
++    static bool traced_fwd = false;
++    fa_train_trace(traced_fwd, "flash_attn_train (forward)", D, S, S_kv, Nh, Nkv, Bn, mask != nullptr);
++
++    float scale = 1.0f;
++    memcpy(&scale, (const float *) dst->op_params + 0, sizeof(float));
++
++    cudaStream_t stream = ctx.stream();
++
++    const size_t  offs_lse = ggml_flash_attn_train_lse_offset(q);
++    const int64_t n_o      = D*Nh*S*Bn;
++
++    float * o_data   = (float *) dst->data;
++    float * lse_data = (float *) ((char *) dst->data + offs_lse);
++
++    // spec 2.2: zero the alignment gap between the O and LSE regions. No
++    // kernel writes it, ggml-alloc hands out reused buffers, and the packed
++    // tensor's gradient is ggml_scale(packed, 0.0f) -- 0 * inf/NaN is NaN.
++    const size_t gap_beg = (size_t) n_o * sizeof(float);
++    if (offs_lse > gap_beg) {
++        CUDA_CHECK(cudaMemsetAsync((char *) dst->data + gap_beg, 0, offs_lse - gap_beg, stream));
++    }
++
++    if (S <= 0) {
++        return;
++    }
++
++    const dim3 grid((unsigned) ((S + FA_TRAIN_NWARPS - 1)/FA_TRAIN_NWARPS),
++                    (unsigned) Nh, (unsigned) Bn);
++    const dim3 block(WARP_SIZE, FA_TRAIN_NWARPS);
++
++    const char * q_base = (const char *) q->data;
++    const char * k_base = (const char *) k->data;
++    const char * v_base = (const char *) v->data;
++    const half * m_base = mask ? (const half *) mask->data : nullptr;
++
++    const int64_t mne0 = mask ? mask->ne[0] : 1;
++    const int64_t mne1 = mask ? mask->ne[1] : 1;
++    const int64_t mne2 = mask ? mask->ne[2] : 1;
++    const int64_t mne3 = mask ? mask->ne[3] : 1;
++
++    switch (D) {
++        case 128:
++            fa_train_fwd_f32<128><<<grid, block, 0, stream>>>(
++                q_base, k_base, v_base, m_base, o_data, lse_data,
++                (int64_t) q->nb[1], (int64_t) q->nb[2], (int64_t) q->nb[3],
++                (int64_t) k->nb[1], (int64_t) k->nb[2], (int64_t) k->nb[3],
++                (int64_t) v->nb[1], (int64_t) v->nb[2], (int64_t) v->nb[3],
++                mne0, mne1, mne2, mne3, S, S_kv, Nh, G, scale);
++            break;
++        case 64:
++            fa_train_fwd_f32<64><<<grid, block, 0, stream>>>(
++                q_base, k_base, v_base, m_base, o_data, lse_data,
++                (int64_t) q->nb[1], (int64_t) q->nb[2], (int64_t) q->nb[3],
++                (int64_t) k->nb[1], (int64_t) k->nb[2], (int64_t) k->nb[3],
++                (int64_t) v->nb[1], (int64_t) v->nb[2], (int64_t) v->nb[3],
++                mne0, mne1, mne2, mne3, S, S_kv, Nh, G, scale);
++            break;
++        default:
++            GGML_ABORT("ggml_cuda_flash_attn_train: unsupported head dim %d", (int) D);
++    }
++    CUDA_CHECK(cudaGetLastError());
++}
++
++// ─── backward ───────────────────────────────────────────────────────────────
++//
++// CUDA backward for GGML_OP_FLASH_ATTN_TRAIN_BACK. Behavioural reference is the
++// CPU impl in ggml-cpu/ops.cpp (ggml_compute_forward_flash_attn_train_back_f32);
++// the maths is spec section 4.2, the kernel split is spec section 8.2.
++//
++// Three kernels, no floating point atomics anywhere (spec 3.3):
++//
++//   1. delta   D_i = rowsum(dO * O), one warp per query row, into a [Nh,S,B]
++//              pool scratch. Computed once instead of twice, and unlike the
++//              CPU path a separate kernel costs no barrier.
++//   2. dkdv    one block per (kv tile, kv head, batch). GQA is folded here:
++//              the block loops g = 0..G-1 ASCENDING, then query tiles
++//              ascending, accumulating dK/dV in registers and writing each
++//              output element exactly once. This is where a factor-of-G error
++//              would live, and where atomics would destroy determinism.
++//   3. dq      one block per (query tile, head, batch), travelling in the
++//              FORWARD direction over kv tiles. Splitting dQ into its own
++//              same-direction kernel is precisely the atomics-free trick from
++//              flash-attention issue #1172.
++//
++// Neither 2 nor 3 materialises anything S**2: both recompute s and P per tile
++// from Q, K, LSE and the mask, and both skip a tile whose mask block is
++// entirely -INF (with sliding_window = 128 that is the large majority).
++//
++// Properties, and how they are held:
++//
++//   * MASKED POSITIONS CONTRIBUTE EXACTLY 0.0f, bitwise. A -INF mask entry is
++//     branched out before exp is ever called, so P is the literal 0.0f and
++//     dS = P*(dP - D_i) is the literal 0.0f. A dead key column therefore
++//     leaves dK/dV at the +0.0f they were initialised to.
++//   * DETERMINISTIC. Every output element is written once by one thread from a
++//     private register accumulator; every reduction runs in a fixed order
++//     (butterfly shuffle, then tiles ascending, then lanes ascending). Two runs
++//     on the same GPU with the same inputs are bitwise identical.
++//   * dfwd's LSE region is IGNORED rather than asserted zero (spec 9.7): a
++//     future differentiated consumer of the LSE view would make it non-zero and
++//     the backward would still be correct.
++//   * The two alignment gaps in the packed dQ|dK|dV output are explicitly
++//     zeroed (spec 3.2), for one rule rather than two.
++//
++// Block shape mirrors the forward: FA_TRAIN_BWD_NWARPS warps, one "own" row per
++// warp (a kv row in dkdv, a query row in dq), the OTHER side staged
++// FA_TRAIN_BWD_TILE rows at a time in shared memory. Inside a tile the lane is
++// the far-side index during the dot phase and the head-dim index during the
++// accumulate phase, the two connected by a __shfl_sync broadcast -- the same
++// two-role trick the forward kernel uses.
++
++#define FA_TRAIN_BWD_NWARPS 4          // "own" rows per block
++#define FA_TRAIN_BWD_TILE   WARP_SIZE  // staged far-side rows per tile
++
++// 1. delta[h,s,b] = sum_d dO[d,h,s,b] * O[d,h,s,b].
++//    O and dO share the packed forward's [D,Nh,S,B] layout, so row r of both is
++//    at D*r with r = h + Nh*(s + S*b) -- the very index LSE uses.
++template <int D>
++static __global__ void __launch_bounds__(FA_TRAIN_BWD_NWARPS*WARP_SIZE, 1)
++fa_train_bwd_delta_f32(
++        const float * __restrict__ o_data,
++        const float * __restrict__ do_data,
++        float       * __restrict__ delta,
++        const int64_t nrows) {
++
++    constexpr int NV = D/WARP_SIZE;
++
++    const int     lane = threadIdx.x;
++    const int64_t r    = (int64_t) blockIdx.x*FA_TRAIN_BWD_NWARPS + threadIdx.y;
++
++    // r is warp-uniform, so the whole warp leaves together and the reduction
++    // below never runs with a partially exited warp.
++    if (r >= nrows) {
++        return;
++    }
++
++    const float * orow = o_data  + (size_t) D*r;
++    const float * drow = do_data + (size_t) D*r;
++
++    float s = 0.0f;
++#pragma unroll
++    for (int c = 0; c < NV; ++c) {
++        s = fmaf(orow[lane + WARP_SIZE*c], drow[lane + WARP_SIZE*c], s);
++    }
++    s = warp_reduce_sum<WARP_SIZE>(s);
++
++    if (lane == 0) {
++        delta[r] = s;
++    }
++}
++
++// 2. dK / dV. One block per (kv tile, kv head, batch); one kv row per warp.
++template <int D>
++static __global__ void __launch_bounds__(FA_TRAIN_BWD_NWARPS*WARP_SIZE, 1)
++fa_train_bwd_dkdv_f32(
++        const char  * __restrict__ q_base,
++        const char  * __restrict__ k_base,
++        const char  * __restrict__ v_base,
++        const half  * __restrict__ mask,
++        const float * __restrict__ do_data,
++        const float * __restrict__ lse_data,
++        const float * __restrict__ delta,
++        float       * __restrict__ dk_data,
++        float       * __restrict__ dv_data,
++        const int64_t q_nb1, const int64_t q_nb2, const int64_t q_nb3,
++        const int64_t k_nb1, const int64_t k_nb2, const int64_t k_nb3,
++        const int64_t v_nb1, const int64_t v_nb2, const int64_t v_nb3,
++        const int64_t mne0, const int64_t mne1, const int64_t mne2, const int64_t mne3,
++        const int64_t S, const int64_t S_kv, const int64_t Nh, const int64_t Nkv,
++        const int64_t G, const float scale) {
++
++    constexpr int NV = D/WARP_SIZE;      // accumulator floats per lane
++    constexpr int LD = D + 1;            // odd stride: bank-conflict free
++    constexpr int BQ = FA_TRAIN_BWD_TILE;
++    constexpr int NW = FA_TRAIN_BWD_NWARPS;
++    constexpr int NT = NW*WARP_SIZE;
++
++    __shared__ float Qsh   [BQ*LD];
++    __shared__ float dOsh  [BQ*LD];
++    __shared__ float Ksh   [NW*LD];
++    __shared__ float Vsh   [NW*LD];
++    __shared__ float lse_sh[BQ];
++    __shared__ float del_sh[BQ];
++    __shared__ int   sh_live[NW];
++
++    const int lane = threadIdx.x;
++    const int w    = threadIdx.y;
++    const int tid  = w*WARP_SIZE + lane;
++
++    const int64_t j0b = (int64_t) blockIdx.x*NW;     // first kv row of the block
++    const int64_t j   = j0b + w;                     // this warp's kv row
++    const int64_t hk  = blockIdx.y;
++    const int64_t b   = blockIdx.z;
++
++    const bool jok = j < S_kv;
++
++    // The block's NW K/V rows are staged once and stay resident. Published by
++    // the first __syncthreads() inside the loop.
++    for (int idx = tid; idx < NW*D; idx += NT) {
++        const int     jj   = idx/D;
++        const int     dd   = idx%D;
++        const int64_t jrow = j0b + jj;
++        float kval = 0.0f;
++        float vval = 0.0f;
++        if (jrow < S_kv) {
++            const float * krow = (const float *) (k_base + jrow*k_nb1 + hk*k_nb2 + b*k_nb3);
++            const float * vrow = (const float *) (v_base + jrow*v_nb1 + hk*v_nb2 + b*v_nb3);
++            kval = krow[dd];
++            vval = vrow[dd];
++        }
++        Ksh[jj*LD + dd] = kval;
++        Vsh[jj*LD + dd] = vval;
++    }
++
++    float dk_acc[NV];
++    float dv_acc[NV];
++#pragma unroll
++    for (int c = 0; c < NV; ++c) {
++        dk_acc[c] = 0.0f;
++        dv_acc[c] = 0.0f;
++    }
++
++    // GQA (spec 3.3): query heads ASCENDING, then query tiles ascending. The
++    // order is the contract, not an implementation detail -- it is what makes
++    // an A/B against --attn exact interpretable.
++    for (int64_t g = 0; g < G; ++g) {
++        const int64_t h = hk*G + g;
++
++        for (int64_t i0 = 0; i0 < S; i0 += BQ) {
++            // (A) the previous tile's reads of Qsh/dOsh are done, and on the
++            //     very first pass this publishes the K/V staging above
++            __syncthreads();
++
++            const int64_t i   = i0 + lane;
++            const bool    iok = jok && (i < S);
++
++            // spec 3.4: modulo broadcast, and mne1 (not S) is the row stride
++            float mv = 0.0f;
++            if (iok && mask) {
++                const int64_t midx = j + mne0*(i + mne1*((h % mne2) + mne2*(b % mne3)));
++                mv = __half2float(mask[midx]);
++            }
++            const bool live = iok && !(mv == -INFINITY);
++
++            const int anyw = __any_sync(0xffffffff, live);
++            if (lane == 0) {
++                sh_live[w] = anyw;
++            }
++
++            // (B) tile liveness known to the whole block
++            __syncthreads();
++
++            int block_live = 0;
++#pragma unroll
++            for (int t = 0; t < NW; ++t) {
++                block_live |= sh_live[t];
++            }
++            if (!block_live) {
++                // block_live is block-uniform, so every thread takes this and
++                // the __syncthreads() at (A) stays uniform.
++                continue;
++            }
++
++            const int64_t nq = min((int64_t) BQ, S - i0);
++            for (int idx = tid; idx < BQ*D; idx += NT) {
++                const int ii = idx/D;
++                const int dd = idx%D;
++                float qval = 0.0f;
++                float oval = 0.0f;
++                if (ii < nq) {
++                    const float * qrow = (const float *) (q_base + (i0 + ii)*q_nb1 + h*q_nb2 + b*q_nb3);
++                    qval = qrow[dd];
++                    oval = do_data[(size_t) D*(h + Nh*((i0 + ii) + S*b)) + dd];
++                }
++                Qsh [ii*LD + dd] = qval;
++                dOsh[ii*LD + dd] = oval;
++            }
++            for (int idx = tid; idx < BQ; idx += NT) {
++                float lv = 0.0f;
++                float dv = 0.0f;
++                if (idx < nq) {
++                    const int64_t r = h + Nh*((i0 + idx) + S*b);
++                    lv = lse_data[r];
++                    dv = delta[r];
++                }
++                lse_sh[idx] = lv;
++                del_sh[idx] = dv;
++            }
++
++            // (C) query tile staged
++            __syncthreads();
++
++            float p  = 0.0f;
++            float cf = 0.0f;
++            if (live) {
++                const float * qs = Qsh + lane*LD;
++                const float * ks = Ksh + w*LD;
++                float dot = 0.0f;
++#pragma unroll 8
++                for (int d = 0; d < D; ++d) {
++                    dot = fmaf(qs[d], ks[d], dot);
++                }
++                // the mask is additive AFTER the scale, which is why dQ/dK
++                // carry a scale factor and dV does not
++                const float s = scale*dot + mv;
++                p = __expf(s - lse_sh[lane]);
++                if (p != 0.0f) {
++                    const float * os = dOsh + lane*LD;
++                    const float * vs = Vsh  + w*LD;
++                    float dp = 0.0f;
++#pragma unroll 8
++                    for (int d = 0; d < D; ++d) {
++                        dp = fmaf(os[d], vs[d], dp);
++                    }
++                    // dP is finite by construction and the multiply by P kills
++                    // it where P is 0. Never reordered into (dP - D_i) times
++                    // something that can be inf.
++                    cf = scale*(p*(dp - del_sh[lane]));
++                }
++            }
++
++            // Fixed lane order, so the accumulation order is fixed too. pj is
++            // warp-uniform, so the skip below never splits the warp.
++#pragma unroll 4
++            for (int jj = 0; jj < WARP_SIZE; ++jj) {
++                const float pj = __shfl_sync(0xffffffff, p, jj);
++                if (pj == 0.0f) {
++                    continue;   // masked, or vanished: contributes exactly nothing
++                }
++                const float cj = __shfl_sync(0xffffffff, cf, jj);
++                const float * os = dOsh + jj*LD;
++                const float * qs = Qsh  + jj*LD;
++#pragma unroll
++                for (int c = 0; c < NV; ++c) {
++                    dv_acc[c] = fmaf(pj, os[lane + WARP_SIZE*c], dv_acc[c]);
++                    dk_acc[c] = fmaf(cj, qs[lane + WARP_SIZE*c], dk_acc[c]);
++                }
++            }
++        }
++    }
++
++    if (!jok) {
++        return;
++    }
++
++    // written exactly once, by exactly this thread
++    const size_t off = (size_t) D*(j + S_kv*(hk + Nkv*b));
++#pragma unroll
++    for (int c = 0; c < NV; ++c) {
++        dk_data[off + lane + WARP_SIZE*c] = dk_acc[c];
++        dv_data[off + lane + WARP_SIZE*c] = dv_acc[c];
++    }
++}
++
++// 3. dQ. One block per (query tile, head, batch); one query row per warp;
++//    kv tiles walked in the FORWARD direction (issue #1172).
++template <int D>
++static __global__ void __launch_bounds__(FA_TRAIN_BWD_NWARPS*WARP_SIZE, 1)
++fa_train_bwd_dq_f32(
++        const char  * __restrict__ q_base,
++        const char  * __restrict__ k_base,
++        const char  * __restrict__ v_base,
++        const half  * __restrict__ mask,
++        const float * __restrict__ do_data,
++        const float * __restrict__ lse_data,
++        const float * __restrict__ delta,
++        float       * __restrict__ dq_data,
++        const int64_t q_nb1, const int64_t q_nb2, const int64_t q_nb3,
++        const int64_t k_nb1, const int64_t k_nb2, const int64_t k_nb3,
++        const int64_t v_nb1, const int64_t v_nb2, const int64_t v_nb3,
++        const int64_t mne0, const int64_t mne1, const int64_t mne2, const int64_t mne3,
++        const int64_t S, const int64_t S_kv, const int64_t Nh, const int64_t G,
++        const float scale) {
++
++    constexpr int NV = D/WARP_SIZE;
++    constexpr int LD = D + 1;
++    constexpr int BK = FA_TRAIN_BWD_TILE;
++    constexpr int NW = FA_TRAIN_BWD_NWARPS;
++    constexpr int NT = NW*WARP_SIZE;
++
++    __shared__ float Ksh [BK*LD];
++    __shared__ float Vsh [BK*LD];
++    __shared__ float Qsh [NW*LD];
++    __shared__ float dOsh[NW*LD];
++    __shared__ int   sh_live[NW];
++
++    const int lane = threadIdx.x;
++    const int w    = threadIdx.y;
++    const int tid  = w*WARP_SIZE + lane;
++
++    const int64_t i  = (int64_t) blockIdx.x*NW + w;   // query row
++    const int64_t h  = blockIdx.y;
++    const int64_t b  = blockIdx.z;
++    const int64_t hk = h/G;                           // GQA kv head
++
++    const bool active = i < S;
++
++    float lse_i = 0.0f;
++    float del_i = 0.0f;
++    if (active) {
++        const float * qrow = (const float *) (q_base + i*q_nb1 + h*q_nb2 + b*q_nb3);
++        const float * orow = do_data + (size_t) D*(h + Nh*(i + S*b));
++#pragma unroll
++        for (int c = 0; c < NV; ++c) {
++            Qsh [w*LD + lane + WARP_SIZE*c] = qrow[lane + WARP_SIZE*c];
++            dOsh[w*LD + lane + WARP_SIZE*c] = orow[lane + WARP_SIZE*c];
++        }
++        const int64_t r = h + Nh*(i + S*b);
++        lse_i = lse_data[r];
++        del_i = delta[r];
++    }
++    // Qsh/dOsh rows are read back only by the warp that wrote them.
++    __syncwarp();
++
++    float dq_acc[NV];
++#pragma unroll
++    for (int c = 0; c < NV; ++c) {
++        dq_acc[c] = 0.0f;
++    }
++
++    for (int64_t j0 = 0; j0 < S_kv; j0 += BK) {
++        // (A) previous tile's compute is done: safe to overwrite K/V and flags
++        __syncthreads();
++
++        const int64_t j   = j0 + lane;
++        const bool    jok = active && (j < S_kv);
++
++        float mv = 0.0f;
++        if (jok && mask) {
++            const int64_t midx = j + mne0*(i + mne1*((h % mne2) + mne2*(b % mne3)));
++            mv = __half2float(mask[midx]);
++        }
++        const bool live = jok && !(mv == -INFINITY);
++
++        const int anyw = __any_sync(0xffffffff, live);
++        if (lane == 0) {
++            sh_live[w] = anyw;
++        }
++
++        // (B) tile liveness known to the whole block
++        __syncthreads();
++
++        int block_live = 0;
++#pragma unroll
++        for (int t = 0; t < NW; ++t) {
++            block_live |= sh_live[t];
++        }
++        if (!block_live) {
++            continue;
++        }
++
++        const int64_t nk = min((int64_t) BK, S_kv - j0);
++        for (int idx = tid; idx < BK*D; idx += NT) {
++            const int jj = idx/D;
++            const int dd = idx%D;
++            float kval = 0.0f;
++            float vval = 0.0f;
++            if (jj < nk) {
++                const float * krow = (const float *) (k_base + (j0 + jj)*k_nb1 + hk*k_nb2 + b*k_nb3);
++                const float * vrow = (const float *) (v_base + (j0 + jj)*v_nb1 + hk*v_nb2 + b*v_nb3);
++                kval = krow[dd];
++                vval = vrow[dd];
++            }
++            Ksh[jj*LD + dd] = kval;
++            Vsh[jj*LD + dd] = vval;
++        }
++
++        // (C) K/V tile staged
++        __syncthreads();
++
++        float cf = 0.0f;
++        if (live) {
++            const float * qs = Qsh + w*LD;
++            const float * ks = Ksh + lane*LD;
++            float dot = 0.0f;
++#pragma unroll 8
++            for (int d = 0; d < D; ++d) {
++                dot = fmaf(qs[d], ks[d], dot);
++            }
++            const float s = scale*dot + mv;
++            const float p = __expf(s - lse_i);
++            if (p != 0.0f) {
++                const float * os = dOsh + w*LD;
++                const float * vs = Vsh  + lane*LD;
++                float dp = 0.0f;
++#pragma unroll 8
++                for (int d = 0; d < D; ++d) {
++                    dp = fmaf(os[d], vs[d], dp);
++                }
++                cf = scale*(p*(dp - del_i));
++            }
++        }
++
++#pragma unroll 4
++        for (int jj = 0; jj < WARP_SIZE; ++jj) {
++            const float cj = __shfl_sync(0xffffffff, cf, jj);
++            if (cj == 0.0f) {
++                continue;   // dS is exactly 0 here; adding 0*K changes nothing
++            }
++            const float * ks = Ksh + jj*LD;
++#pragma unroll
++            for (int c = 0; c < NV; ++c) {
++                dq_acc[c] = fmaf(cj, ks[lane + WARP_SIZE*c], dq_acc[c]);
++            }
++        }
++    }
++
++    if (!active) {
++        return;
++    }
++
++    float * out = dq_data + (size_t) D*(i + S*(h + Nh*b));
++#pragma unroll
++    for (int c = 0; c < NV; ++c) {
++        out[lane + WARP_SIZE*c] = dq_acc[c];
++    }
++}
++
++bool ggml_cuda_flash_attn_train_back_supported(const ggml_tensor * op) {
++    // src[0..3] and op_params are exactly the forward's, so the shape/type
++    // capability check is shared rather than duplicated.
++    if (!ggml_cuda_flash_attn_train_supported(op)) {
++        return false;
++    }
++
++    const ggml_tensor * fwd  = op->src[4];
++    const ggml_tensor * dfwd = op->src[5];
++    if (!fwd || !dfwd) {
++        return false;
++    }
++    if (fwd->type != GGML_TYPE_F32 || dfwd->type != GGML_TYPE_F32) {
++        return false;
++    }
++    if (!ggml_is_contiguous(fwd) || !ggml_is_contiguous(dfwd)) {
++        return false;
++    }
++    if (ggml_nelements(fwd) != ggml_nelements(dfwd)) {
++        return false;
++    }
++    if (ggml_nelements(fwd) != ggml_flash_attn_train_nelements(op->src[0])) {
++        return false;
++    }
++
++    return true;
++}
++
++void ggml_cuda_flash_attn_train_back(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
++    const ggml_tensor * q    = dst->src[0];
++    const ggml_tensor * k    = dst->src[1];
++    const ggml_tensor * v    = dst->src[2];
++    const ggml_tensor * mask = dst->src[3];
++    const ggml_tensor * fwd  = dst->src[4];
++    const ggml_tensor * dfwd = dst->src[5];
++
++    GGML_ASSERT(ggml_cuda_flash_attn_train_back_supported(dst));
++    GGML_ASSERT(ggml_is_contiguous(dst));
++    // spec 5.2: ggml_scale(packed, 0.0f) must never run in place, and this op
++    // must never alias the forward it reads O and LSE out of.
++    GGML_ASSERT(dst->data != fwd->data);
++
++    const int64_t D    = q->ne[0];
++    const int64_t S    = q->ne[1];
++    const int64_t Nh   = q->ne[2];
++    const int64_t Bn   = q->ne[3];
++    const int64_t S_kv = k->ne[1];
++    const int64_t Nkv  = k->ne[2];
++    const int64_t G    = Nh/Nkv;
++
++    static bool traced_bwd = false;
++    fa_train_trace(traced_bwd, "flash_attn_train_back (backward)", D, S, S_kv, Nh, Nkv, Bn, mask != nullptr);
++
++    float scale = 1.0f;
++    memcpy(&scale, (const float *) dst->op_params + 0, sizeof(float));
++
++    cudaStream_t stream = ctx.stream();
++
++    size_t  offs_dq = 0;
++    size_t  offs_dk = 0;
++    size_t  offs_dv = 0;
++    int64_t nelem   = 0;
++    ggml_flash_attn_train_back_offsets(q, k, v, &offs_dq, &offs_dk, &offs_dv, &nelem);
++    GGML_ASSERT(ggml_nelements(dst) == nelem);
++
++    float * dq_data = (float *) ((char *) dst->data + offs_dq);
++    float * dk_data = (float *) ((char *) dst->data + offs_dk);
++    float * dv_data = (float *) ((char *) dst->data + offs_dv);
++
++    const float * o_data   = (const float *) fwd->data;
++    const float * lse_data = (const float *) ((const char *) fwd->data + ggml_flash_attn_train_lse_offset(q));
++    const float * do_data  = (const float *) dfwd->data;   // dO in the O region; the
++                                                           // LSE region is ignored (spec 9.7)
++
++    // spec 3.2: zero the two alignment gaps, same rule as the forward. Lower
++    // stakes here (this output is read only through its three views and is
++    // never scaled by zero) -- one rule beats two.
++    const int64_t n_q = D*S*Nh*Bn;
++    const int64_t n_k = D*S_kv*Nkv*Bn;
++    {
++        const size_t g0 = (size_t) n_q*sizeof(float);
++        if (offs_dk > g0) {
++            CUDA_CHECK(cudaMemsetAsync((char *) dst->data + g0, 0, offs_dk - g0, stream));
++        }
++        const size_t g1 = offs_dk + (size_t) n_k*sizeof(float);
++        if (offs_dv > g1) {
++            CUDA_CHECK(cudaMemsetAsync((char *) dst->data + g1, 0, offs_dv - g1, stream));
++        }
++    }
++
++    if (S <= 0 || S_kv <= 0) {
++        // Degenerate, and outside the trainer's reach; the defined answer is an
++        // all-zero gradient rather than an unwritten buffer.
++        CUDA_CHECK(cudaMemsetAsync(dst->data, 0, ggml_nbytes(dst), stream));
++        return;
++    }
++
++    const char * q_base = (const char *) q->data;
++    const char * k_base = (const char *) k->data;
++    const char * v_base = (const char *) v->data;
++    const half * m_base = mask ? (const half *) mask->data : nullptr;
++
++    const int64_t mne0 = mask ? mask->ne[0] : 1;
++    const int64_t mne1 = mask ? mask->ne[1] : 1;
++    const int64_t mne2 = mask ? mask->ne[2] : 1;
++    const int64_t mne3 = mask ? mask->ne[3] : 1;
++
++    const int64_t nrows = Nh*S*Bn;
++    ggml_cuda_pool_alloc<float> delta(ctx.pool(), (size_t) nrows);
++
++    const dim3 block(WARP_SIZE, FA_TRAIN_BWD_NWARPS);
++    const dim3 grid_delta((unsigned) ((nrows + FA_TRAIN_BWD_NWARPS - 1)/FA_TRAIN_BWD_NWARPS), 1, 1);
++    const dim3 grid_dkdv ((unsigned) ((S_kv  + FA_TRAIN_BWD_NWARPS - 1)/FA_TRAIN_BWD_NWARPS),
++                          (unsigned) Nkv, (unsigned) Bn);
++    const dim3 grid_dq   ((unsigned) ((S     + FA_TRAIN_BWD_NWARPS - 1)/FA_TRAIN_BWD_NWARPS),
++                          (unsigned) Nh,  (unsigned) Bn);
++
++#define FA_TRAIN_BWD_LAUNCH(DD)                                                              \
++    do {                                                                                     \
++        fa_train_bwd_delta_f32<DD><<<grid_delta, block, 0, stream>>>(                         \
++                o_data, do_data, delta.get(), nrows);                                         \
++        fa_train_bwd_dkdv_f32<DD><<<grid_dkdv, block, 0, stream>>>(                           \
++                q_base, k_base, v_base, m_base, do_data, lse_data, delta.get(),               \
++                dk_data, dv_data,                                                             \
++                (int64_t) q->nb[1], (int64_t) q->nb[2], (int64_t) q->nb[3],                   \
++                (int64_t) k->nb[1], (int64_t) k->nb[2], (int64_t) k->nb[3],                   \
++                (int64_t) v->nb[1], (int64_t) v->nb[2], (int64_t) v->nb[3],                   \
++                mne0, mne1, mne2, mne3, S, S_kv, Nh, Nkv, G, scale);                          \
++        fa_train_bwd_dq_f32<DD><<<grid_dq, block, 0, stream>>>(                               \
++                q_base, k_base, v_base, m_base, do_data, lse_data, delta.get(),               \
++                dq_data,                                                                      \
++                (int64_t) q->nb[1], (int64_t) q->nb[2], (int64_t) q->nb[3],                   \
++                (int64_t) k->nb[1], (int64_t) k->nb[2], (int64_t) k->nb[3],                   \
++                (int64_t) v->nb[1], (int64_t) v->nb[2], (int64_t) v->nb[3],                   \
++                mne0, mne1, mne2, mne3, S, S_kv, Nh, G, scale);                               \
++    } while (0)
++
++    switch (D) {
++        case 128:
++            FA_TRAIN_BWD_LAUNCH(128);
++            break;
++        case 64:
++            FA_TRAIN_BWD_LAUNCH(64);
++            break;
++        default:
++            GGML_ABORT("ggml_cuda_flash_attn_train_back: unsupported head dim %d", (int) D);
++    }
++#undef FA_TRAIN_BWD_LAUNCH
++
++    CUDA_CHECK(cudaGetLastError());
++}
+diff --git a/engine/ggml/src/ggml-cuda/ggml-cuda.cu b/engine/ggml/src/ggml-cuda/ggml-cuda.cu
+index a0e6de78..26dd0419 100644
+--- a/engine/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/engine/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -25,6 +25,8 @@
+ #include "ggml-cuda/diagmask.cuh"
+ #include "ggml-cuda/diag.cuh"
+ #include "ggml-cuda/fattn.cuh"
++// HOT-Step patch: flash-attn-train
++#include "ggml-cuda/fattn-train.cuh"
+ #include "ggml-cuda/fwht.cuh"
+ #include "ggml-cuda/getrows.cuh"
+ #include "ggml-cuda/im2col.cuh"
+@@ -2305,6 +2307,13 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
+         case GGML_OP_FLASH_ATTN_EXT:
+             ggml_cuda_flash_attn_ext(ctx, dst);
+             break;
++        // HOT-Step patch: flash-attn-train
++        case GGML_OP_FLASH_ATTN_TRAIN:
++            ggml_cuda_flash_attn_train(ctx, dst);
++            break;
++        case GGML_OP_FLASH_ATTN_TRAIN_BACK:
++            ggml_cuda_flash_attn_train_back(ctx, dst);
++            break;
+         case GGML_OP_CROSS_ENTROPY_LOSS:
+             ggml_cuda_cross_entropy_loss(ctx, dst);
+             break;
+@@ -5140,6 +5149,17 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
+             return true;
+         case GGML_OP_LIGHTNING_INDEXER:
+             return ggml_cuda_lightning_indexer_supported(dev_ctx->device, op);
++        // HOT-Step patch: flash-attn-train
++        // Honest capability reporting matters here (spec 9.8): a `false` is
++        // not a failure, it is a SILENT fallback to the CPU backend that the
++        // trainer's scheduler registers alongside the GPU one -- correct,
++        // unusably slow, and with low VRAM and a quiet NVML tripwire, i.e. it
++        // looks like a pass. Both directions have CUDA kernels now, and both
++        // report their real shape/type capability rather than a blanket yes.
++        case GGML_OP_FLASH_ATTN_TRAIN:
++            return ggml_cuda_flash_attn_train_supported(op);
++        case GGML_OP_FLASH_ATTN_TRAIN_BACK:
++            return ggml_cuda_flash_attn_train_back_supported(op);
+ 
+         default:
+             return false;

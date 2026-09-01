@@ -32,6 +32,75 @@
 #include <utility>
 #include <vector>
 
+// ─── attention mode (docs/plans/2026-09-01-flash-attn-backward.md) ──────────
+//
+// DIT_ATTN_EXACT is the shipped graph and the default: dit_attn_f32's
+// mul_mat -> soft_max_ext -> mul_mat -> cont(permute) chain, retained
+// [S_kv,S,Nh,B] softmax and all. DIT_ATTN_FLASH routes BOTH attention sites
+// through the fused GGML_OP_FLASH_ATTN_TRAIN / _BACK pair, which never
+// materialises that softmax (docs/plans/fattn-train-spec.md §2, §3).
+//
+// Exact mode must emit the byte-identical graph it emitted before this flag
+// existed — the §2.3.1 anchor and the SC1-SC3 rungs are the proof — so the mode
+// is tested at the two dit_attn_* call sites and NOWHERE else. A ternary whose
+// false arm is the original call leaves the original node sequence untouched.
+enum DitAttnMode { DIT_ATTN_EXACT = 0, DIT_ATTN_FLASH = 1 };
+
+// The fused drop-in for dit_attn_f32. Same arguments, and the SAME result shape
+// and layout: ggml_flash_attn_train_get_o is a CONTIGUOUS [D,Nh,S,B] view, which
+// is what dit_attn_f32's closing ggml_cont(ggml_permute(...)) produces too, so
+// the ggml_reshape_3d(attn, Nh*D, S, B) at both call sites accepts it unchanged.
+//
+// Note what is NOT here: no ggml_cont on q/k/v. They arrive as permuted views
+// and the op reads them through nb[1..3] on purpose — materialising them would
+// hand back part of the saving (spec §1.1.3).
+static ggml_tensor * dit_attn_flash(ggml_context * ctx, ggml_tensor * q, ggml_tensor * k, ggml_tensor * v,
+                                    ggml_tensor * mask, float scale) {
+    ggml_tensor * packed = ggml_flash_attn_train(ctx, q, k, v, mask, scale);
+    return ggml_flash_attn_train_get_o(ctx, packed);  // [D,Nh,S,B]
+}
+
+// ─── spec §9.8: the supports_op probe ───────────────────────────────
+//
+// A `false` from ggml_backend_supports_op is not a failure the trainer would
+// ever see: backend_sched_new registers the CPU backend alongside the GPU one,
+// so the scheduler would simply SPLIT the graph — Q/K/V and the F16 mask copied
+// across PCIe for every layer of every step. Correct, unusably slow, and with
+// LOW VRAM and a silent NVML tripwire, i.e. indistinguishable from a pass on
+// every number the run reports. So flash mode asks the question explicitly, at
+// init, before the first graph, and refuses to start rather than fall back.
+//
+// The probe uses the run's real D / Nh / Nkv / S / S_kv / B because a capability
+// check is allowed to be shape-dependent, and ours is (D must be 64 or 128).
+// Contiguous probe tensors are faithful enough: the only stride the CUDA check
+// looks at is nb[0], which is sizeof(float) for the real permuted views too.
+static bool dit_flash_probe(ggml_backend_t backend, int D, int Nh, int Nkv, int S, int S_kv, int B, float scale,
+                            bool * fwd_ok, bool * bwd_ok) {
+    *fwd_ok = false;
+    *bwd_ok = false;
+    ggml_context * probe;
+    {
+        ggml_init_params p = { 64 * ggml_tensor_overhead(), nullptr, /*no_alloc=*/true };
+        probe              = ggml_init(p);
+    }
+    if (!probe) {
+        return false;
+    }
+    ggml_tensor * pq = ggml_new_tensor_4d(probe, GGML_TYPE_F32, D, S, Nh, B);
+    ggml_tensor * pk = ggml_new_tensor_4d(probe, GGML_TYPE_F32, D, S_kv, Nkv, B);
+    ggml_tensor * pv = ggml_new_tensor_4d(probe, GGML_TYPE_F32, D, S_kv, Nkv, B);
+    ggml_tensor * pm = ggml_new_tensor_2d(probe, GGML_TYPE_F16, S_kv, S);
+    ggml_tensor * pf = ggml_flash_attn_train(probe, pq, pk, pv, pm, scale);
+    *fwd_ok          = ggml_backend_supports_op(backend, pf);
+    // The back node needs a forward-shaped `fwd` and a same-sized `dfwd`; the
+    // forward node itself is exactly the former.
+    ggml_tensor * pd = ggml_new_tensor_1d(probe, GGML_TYPE_F32, ggml_flash_attn_train_nelements(pq));
+    ggml_tensor * pb = ggml_flash_attn_train_back(probe, pq, pk, pv, pm, pf, pd, scale);
+    *bwd_ok          = ggml_backend_supports_op(backend, pb);
+    ggml_free(probe);
+    return *fwd_ok && *bwd_ok;
+}
+
 // ─── graph inputs (every one re-uploaded EVERY micro-step, §3.0) ────────────
 //
 // Every shape below carries an OPTIONAL trailing batch axis B (design B1). B == 1
@@ -63,6 +132,12 @@ struct DitInputs {
     // Same shape, weight-free: the UNWEIGHTED masked mean, for the `rawLoss`
     // report only. Never flagged as a loss, so the backward pass skips it.
     ggml_tensor * t_lwu = nullptr;
+    // NOT a tensor. Which attention the graph builds (--attn), carried on the
+    // input struct so that threading it costs zero changes to dit_train_layer /
+    // _stack / _forward / the checkpoint driver's signatures — the exact-mode
+    // graph is textually the graph it always was. Default EXACT: every existing
+    // caller keeps today's behaviour without touching a line.
+    DitAttnMode attn_mode = DIT_ATTN_EXACT;
 };
 
 // Named probes for the §6.2 V1 forward diff. Populated only when non-null, so
@@ -206,7 +281,11 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
     // the batch has a padded element) — masking the pad only in the windowed
     // layers would leave every full-attention layer leaking it.
     ggml_tensor * sa_mask = (ly->layer_type == 0) ? in.t_sa : in.t_sa_pad;
-    ggml_tensor * attn    = dit_attn_f32(ctx, q, k, v, sa_mask, scale);  // [D,Nh,S,B]
+    // One of the two mode checks in the whole graph build. The false arm is the
+    // original call, unmoved, so --attn exact emits the identical node sequence.
+    ggml_tensor * attn    = (in.attn_mode == DIT_ATTN_FLASH)
+                                ? dit_attn_flash(ctx, q, k, v, sa_mask, scale)
+                                : dit_attn_f32(ctx, q, k, v, sa_mask, scale);  // [D,Nh,S,B]
     attn                  = ggml_reshape_3d(ctx, attn, (int64_t) Nh * D, S, B);
     if (tap0) {
         dit_tap(taps, "layer0_attn_out", attn);
@@ -247,7 +326,13 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
     cq                = ggml_permute(ctx, cq, 0, 2, 1, 3);
     ck                = ggml_permute(ctx, ck, 0, 2, 1, 3);
     cv                = ggml_permute(ctx, cv, 0, 2, 1, 3);
-    ggml_tensor * cattn = dit_attn_f32(ctx, cq, ck, cv, in.t_ca, scale);
+    // The second mode check. Cross-attention is the same op with S_kv = enc_S:
+    // at crop 1250 its retained softmax (enc_S x S) is already LARGER than
+    // self-attention's S^2, so flashing only self-attention would leave the
+    // bigger of the two walls standing (spec §0.1).
+    ggml_tensor * cattn = (in.attn_mode == DIT_ATTN_FLASH)
+                              ? dit_attn_flash(ctx, cq, ck, cv, in.t_ca, scale)
+                              : dit_attn_f32(ctx, cq, ck, cv, in.t_ca, scale);
     cattn               = ggml_reshape_3d(ctx, cattn, (int64_t) Nh * D, S, B);
     hidden              = ggml_add(ctx, hidden, ad->apply(ctx, ly->ca_o_proj, li, DIT_CA_O, cattn));
     if (tap0) {

@@ -2048,6 +2048,515 @@ static void dit_st_ckpt_gates(std::vector<DitSelfTestResult> & rs, DitTrainModel
     }
 }
 
+// ─── SF1 / SF2: fused attention (--attn flash) vs the exact graph ────────
+//
+// One trained sub-stack, built TWICE from the same uploads, the same seed and
+// the same adapter state, differing in exactly one field: DitInputs::attn_mode.
+// Arm A is dit_attn_f32 (mul_mat / soft_max_ext / mul_mat / cont(permute)); arm
+// B is GGML_OP_FLASH_ATTN_TRAIN plus its autodiff'd _BACK, on BOTH the self-
+// and cross-attention sites. Compared: the trained stack's OUTPUT (the deepest
+// hidden_after_layerN tap) and EVERY adapter gradient accumulator.
+//
+//   SF1  B = 1, native GQA (Nkv 8 < Nh 32), 2-D [S,S] window mask — the shape a
+//        default production run emits.
+//   SF2  B = 3, mixed lengths — K/V pre-expanded to Nh by dit_expand_heads, and
+//        per-element [S,S,1,B] / [enc_S,S,1,B] masks, so the op's ne2/ne3
+//        broadcast (modulo, not divide) is exercised rather than assumed.
+//
+// This is NOT a byte-identity rung and cannot be: flash recomputes the softmax
+// from Q/K/LSE in tiles instead of reading back a retained [S_kv,S,Nh,B] array,
+// so the two arms sum the same terms in a different order. Same class as
+// --bwd mm and --mirror bf16, and the reason --attn exact stays the default.
+//
+// WHERE THE COMPARISON IS MADE. The gate runs on a CPU-backend copy of the
+// base, the SB rungs' trick: there both arms run the same f32 kernels and the
+// fused op is the only thing left that differs. On CUDA the exact arm's two
+// attention mul_mats are cublasSgemm on TF32 tensor cores (common.cuh's
+// CUBLAS_TF32_TENSOR_OP_MATH, an 11-bit mantissa), so an exact-vs-flash delta
+// there measures the REFERENCE's rounding, not the thing under test — measured
+// 3.0e-3 / 9.7e-2 where the same case on CPU gives 2.5e-6 / 4.5e-4. The CUDA
+// numbers are reported; only the CPU ones are gated. (NVIDIA_TF32_OVERRIDE=0 is
+// not a way out: on this box it changes none of the CUDA figures, including
+// MU1's and SB2's, which are attributed to TF32 in their own rungs.)
+//
+// THREE BARS, not one, because the graph does not have one conditioning number.
+// Measured on dit-xl-thirds, LoRA rank 8 on the top 2 layers, T=64, seed 42:
+//
+//   layer output                      2.5e-6 (B=1) / 3.6e-6 (B=3)   bar 1e-4
+//   gradients, non-QK sites (v/o/mlp) 1.9e-5        / 1.7e-5        bar 1e-4
+//   gradients, q_proj / k_proj        4.5e-4        / 4.7e-4        bar 2e-3
+//
+// The split is not a convenience. q_proj and k_proj are the only projections
+// whose gradient returns through a QK rms_norm, whose backward subtracts a mean
+// of x*dx — the graph's worst-conditioned step, and T4's own note names
+// L30 self_attn.k_proj the worst site on this base while recording every
+// site without a QK-norm as clean. Both rungs land on exactly that parameter.
+// The fused op's own gradients are proven to 3e-6 against this same reference
+// chain by gate 1 (engine/tools/fattn-train-test.cpp, 49/49 with --extra
+// --large), so what these 4.5e-4 measure is amplification between the op's
+// output and the parameter, not the op. The 2e-3 bar leaves ~4x headroom over
+// the measurement; a regression in the op itself would move the forward and the
+// non-QK gradients too, and those bars are tight.
+//
+// The rung also reports the spec 9.8 capability probe. A GPU backend that says
+// `false` does not fail the graph — the scheduler splits the op onto the CPU and
+// the numbers still agree — so a silently-CPU flash arm would pass the parity
+// comparison while proving nothing about the kernels that ship. On a non-CPU
+// backend the probe is therefore part of the verdict.
+struct DitStFlashMeas {
+    bool        ran = false;
+    bool        probe_fwd = false, probe_bwd = false;
+    double      out_rel = 0.0, out_mag = 0.0;
+    double      grad_rel = 0.0, ref_mag = 0.0;
+    // Split by site. q_proj/k_proj are the only projections whose gradient comes
+    // back through a QK rms_norm, whose backward subtracts a mean of x*dx and is
+    // the graph's worst-conditioned step -- T4's own note names L30
+    // self_attn.k_proj as the worst site on this base and records every non-QK
+    // site as clean. Keeping the two buckets apart is what turns "the gradients
+    // differ" into a statement about WHERE.
+    double      grad_rel_qk = 0.0, grad_rel_ot = 0.0;
+    // |grad|max of the tensor each bucket's worst delta came from, so a large
+    // ratio on a near-zero tensor cannot be mistaken for a large error.
+    double      mag_qk = 0.0, mag_ot = 0.0;
+    std::string worst_qk = "-", worst_ot = "-";
+    double      loss_exact = 0.0, loss_flash = 0.0;
+    std::string worst = "-", tap = "-";
+    int         nodes_exact = 0, nodes_flash = 0;
+    int         lt0 = 0, lt1 = 0;  // layer_type counts inside the trained window
+    int         short_len = 0, pad_len = 0;
+};
+
+static bool dit_st_flash_measure(DitTrainModel * M, const std::vector<DitSample> & samples, uint64_t seed, int B,
+                                 int T, int enc_use, int n_train, bool mixed, DitStFlashMeas * o, std::string * err) {
+    const DiTGGMLConfig & c = M->m.cfg;
+    const int L = c.n_layers, H = c.hidden_size, Oc = c.out_channels, P = c.patch_size, Ic = c.in_channels;
+    const int enc_H = (int) M->m.cond_emb_w->ne[0];
+    const int S     = T / P;
+    const int lo    = std::max(0, L - n_train);
+
+    for (int i = lo; i < L; i++) {
+        (M->m.layers[i].layer_type == 0 ? o->lt0 : o->lt1)++;
+    }
+
+    // spec §9.8. Both directions, both attention shapes (self: S_kv = S, cross:
+    // S_kv = enc_S), at the effective Nkv — B > 1 pre-expands K/V to Nh.
+    {
+        const int   Nkv_eff = (B > 1) ? c.n_heads : c.n_kv_heads;
+        const float ascale  = 1.0f / sqrtf((float) c.head_dim);
+        bool        sf = false, sb = false, cf = false, cb = false;
+        dit_flash_probe(M->backend, c.head_dim, c.n_heads, Nkv_eff, S, S, B, ascale, &sf, &sb);
+        dit_flash_probe(M->backend, c.head_dim, c.n_heads, Nkv_eff, S, enc_use, B, ascale, &cf, &cb);
+        o->probe_fwd = sf && cf;
+        o->probe_bwd = sb && cb;
+    }
+
+    ggml_context * ctxs;
+    {
+        ggml_init_params p = { 32 * ggml_tensor_overhead(), nullptr, true };
+        ctxs               = ggml_init(p);
+    }
+    ggml_tensor * b_input = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, (int64_t) Ic * T * B);
+    ggml_tensor * b_enc   = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, (int64_t) enc_H * enc_use * B);
+    ggml_tensor * b_pos   = ggml_new_tensor_1d(ctxs, GGML_TYPE_I32, (int64_t) S * B);
+    ggml_tensor * b_temb  = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, (int64_t) H * B);
+    ggml_tensor * b_tproj = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, (int64_t) 6 * H * B);
+    ggml_tensor * b_sa    = ggml_new_tensor_1d(ctxs, GGML_TYPE_F16, (int64_t) S * S * B);
+    ggml_tensor * b_sapad = ggml_new_tensor_1d(ctxs, GGML_TYPE_F16, (int64_t) S * S * B);
+    ggml_tensor * b_ca    = ggml_new_tensor_1d(ctxs, GGML_TYPE_F16, (int64_t) enc_use * S * B);
+    ggml_tensor * b_vtgt  = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, (int64_t) Oc * T * B);
+    ggml_tensor * b_lw    = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, (int64_t) T * B);
+    ggml_tensor * b_lwu   = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, (int64_t) T * B);
+    ggml_tensor * t_adamw    = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, 7);
+    ggml_tensor * t_lossgrad = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, 1);
+    ggml_tensor * t_clip     = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, 1);
+    ggml_tensor * t_eps      = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, 1);
+    ggml_tensor * t_gnorm2   = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, 1);
+    for (ggml_tensor * t : { b_input, b_enc, b_pos, b_temb, b_tproj, b_sa, b_sapad, b_ca, b_vtgt, b_lw, b_lwu }) {
+        ggml_set_input(t);
+    }
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctxs, M->backend);
+    if (!buf) {
+        *err = "static input allocation failed";
+        ggml_free(ctxs);
+        return false;
+    }
+    {
+        const float epsv = 1e-6f, clipv = 1.0f, lg = 1.0f;
+        ggml_backend_tensor_set(t_eps, &epsv, 0, 4);
+        ggml_backend_tensor_set(t_clip, &clipv, 0, 4);
+        ggml_backend_tensor_set(t_lossgrad, &lg, 0, 4);
+    }
+
+    DitAdapterLora lora;
+    LmOptim        opt;
+    bool           have_opt = false;
+    auto           cleanup  = [&]() {
+        if (have_opt) {
+            lm_optim_free(&opt);
+        }
+        lora.free();
+        ggml_backend_buffer_free(buf);
+        ggml_free(ctxs);
+    };
+    {
+        DitAdapterCfg cfg;
+        cfg.rank       = 8;
+        cfg.alpha      = 16.0f;
+        cfg.seed       = seed ^ 0x5f1a5f1aull;
+        cfg.b_sigma    = 1e-2f;  // a zero B makes half the gradients trivially 0
+        cfg.target_mlp = true;
+        if (!lora.init(&M->m, M->backend, lo, L, cfg, err)) {
+            cleanup();
+            return false;
+        }
+        if (!lm_optim_init(&opt, lora.params(), M->backend, err)) {
+            cleanup();
+            return false;
+        }
+        have_opt = true;
+    }
+    DitAdapter * ad = (DitAdapter *) &lora;
+    opt.t_adamw     = t_adamw;
+    opt.t_lossgrad  = t_lossgrad;
+    opt.t_clip      = t_clip;
+    opt.t_eps       = t_eps;
+    opt.t_gnorm2    = t_gnorm2;
+
+    std::vector<uint8_t> arena((size_t) 512 << 20);
+
+    LmRng rng_t, rng_crop, rng_noise;
+    lm_rng_seed(&rng_t, seed);
+    DitBatchCfg bcfg;
+    bcfg.in_ch          = Ic;
+    bcfg.out_ch         = Oc;
+    bcfg.enc_H          = enc_H;
+    bcfg.enc_S          = enc_use;
+    bcfg.patch          = P;
+    bcfg.sliding_window = c.sliding_window;
+    bcfg.crop           = T;
+    bcfg.weighted       = true;
+    bcfg.null_cond      = &M->null_cond;
+
+    DitSample                 shortened;
+    std::vector<DitBatchElem> els((size_t) B);
+    {
+        double              wsum = 0.0;
+        std::vector<double> w((size_t) B, 1.0);
+        for (int b = 0; b < B; b++) {
+            els[(size_t) b].s = &samples[(size_t) b];
+            els[(size_t) b].t = dit_sample_t(&rng_t, -0.4f, 1.0f, 0.0f, 1.0f);
+            w[(size_t) b]     = (double) dit_flow_snr_w(els[(size_t) b].t, 0.5f, 5.0f);
+            wsum += w[(size_t) b];
+        }
+        const double wbar = wsum / (double) B;
+        for (int b = 0; b < B; b++) {
+            els[(size_t) b].w = (float) (w[(size_t) b] / (wbar > 0.0 ? wbar : 1.0));
+        }
+        if (mixed && B >= 2) {
+            // One song shorter than the crop: dit_batch_assemble pads it, which is
+            // what turns both masks into their per-element [.,.,1,B] form.
+            shortened    = samples[(size_t) (B - 1)];
+            const int Ts = std::max(P, T - 8 * P);
+            shortened.T  = Ts;
+            shortened.lat.resize((size_t) Ts * (size_t) shortened.Oc);
+            shortened.ctxl.resize((size_t) Ts * (size_t) shortened.Cc);
+            els[(size_t) (B - 1)].s = &shortened;
+        }
+    }
+    lm_rng_seed(&rng_crop, seed ^ 0xbf58476d1ce4e5b9ull);
+    lm_rng_seed(&rng_noise, seed ^ 0x9e3779b97f4a7c15ull);
+    DitBatchHost bh;
+    dit_batch_assemble(bcfg, els, &rng_crop, &rng_noise, &bh);
+    if (bh.len != T) {
+        char b2[128];
+        snprintf(b2, sizeof(b2), "batch assembled at len %d, expected %d", bh.len, T);
+        *err = b2;
+        cleanup();
+        return false;
+    }
+    o->short_len = els[(size_t) (B - 1)].len;
+    o->pad_len   = bh.len;
+
+    std::vector<float> temb_buf((size_t) H * B, 0.0f), tproj_buf((size_t) 6 * H * B, 0.0f);
+    {
+        std::vector<float> ts((size_t) B);
+        for (int b = 0; b < B; b++) {
+            ts[(size_t) b] = els[(size_t) b].t;
+        }
+        std::vector<std::vector<float>> tb, tp;
+        if (!dit_train_temb(M, ts, &tb, &tp)) {
+            *err = "temb precompute failed";
+            cleanup();
+            return false;
+        }
+        for (int b = 0; b < B; b++) {
+            memcpy(&temb_buf[(size_t) b * H], tb[(size_t) b].data(), (size_t) H * sizeof(float));
+            memcpy(&tproj_buf[(size_t) b * 6 * H], tp[(size_t) b].data(), (size_t) 6 * H * sizeof(float));
+        }
+    }
+
+    auto upload = [&]() {
+        ggml_backend_tensor_set(b_input, bh.input.data(), 0, bh.input.size() * sizeof(float));
+        ggml_backend_tensor_set(b_vtgt, bh.vtgt.data(), 0, bh.vtgt.size() * sizeof(float));
+        ggml_backend_tensor_set(b_enc, bh.enc.data(), 0, bh.enc.size() * sizeof(float));
+        ggml_backend_tensor_set(b_pos, bh.pos.data(), 0, bh.pos.size() * sizeof(int32_t));
+        ggml_backend_tensor_set(b_sa, bh.sa.data(), 0, bh.sa.size() * sizeof(uint16_t));
+        if (!bh.sa_pad.empty()) {
+            ggml_backend_tensor_set(b_sapad, bh.sa_pad.data(), 0, bh.sa_pad.size() * sizeof(uint16_t));
+        }
+        ggml_backend_tensor_set(b_ca, bh.ca.data(), 0, bh.ca.size() * sizeof(uint16_t));
+        ggml_backend_tensor_set(b_lw, bh.lw.data(), 0, bh.lw.size() * sizeof(float));
+        ggml_backend_tensor_set(b_lwu, bh.lwu.data(), 0, bh.lwu.size() * sizeof(float));
+        ggml_backend_tensor_set(b_temb, temb_buf.data(), 0, temb_buf.size() * sizeof(float));
+        ggml_backend_tensor_set(b_tproj, tproj_buf.data(), 0, tproj_buf.size() * sizeof(float));
+        const float lg = 1.0f;
+        ggml_backend_tensor_set(t_lossgrad, &lg, 0, sizeof(float));
+    };
+
+    const size_t f32b = sizeof(float), f16b = sizeof(ggml_fp16_t);
+    auto         mk_inputs = [&](ggml_context * ctx) {
+        DitInputs in;
+        in.t_input = ggml_view_3d(ctx, b_input, Ic, T, B, (size_t) Ic * f32b, (size_t) Ic * T * f32b, 0);
+        in.t_enc =
+            ggml_view_3d(ctx, b_enc, enc_H, enc_use, B, (size_t) enc_H * f32b, (size_t) enc_H * enc_use * f32b, 0);
+        in.t_pos   = ggml_view_1d(ctx, b_pos, (int64_t) S * B, 0);
+        in.t_temb  = ggml_view_3d(ctx, b_temb, H, 1, B, (size_t) H * f32b, (size_t) H * f32b, 0);
+        in.t_tproj = ggml_view_3d(ctx, b_tproj, 6 * H, 1, B, (size_t) 6 * H * f32b, (size_t) 6 * H * f32b, 0);
+        in.t_sa    = (bh.sa_B > 1) ? ggml_view_4d(ctx, b_sa, S, S, 1, B, (size_t) S * f16b, (size_t) S * S * f16b,
+                                                  (size_t) S * S * f16b, 0)
+                                   : ggml_view_2d(ctx, b_sa, S, S, (size_t) S * f16b, 0);
+        in.t_sa_pad = (bh.sa_B > 1) ? ggml_view_4d(ctx, b_sapad, S, S, 1, B, (size_t) S * f16b,
+                                                   (size_t) S * S * f16b, (size_t) S * S * f16b, 0)
+                                    : nullptr;
+        in.t_ca    = ggml_view_4d(ctx, b_ca, enc_use, S, 1, B, (size_t) enc_use * f16b, (size_t) enc_use * S * f16b,
+                                  (size_t) enc_use * S * f16b, 0);
+        in.t_vtgt  = ggml_view_3d(ctx, b_vtgt, Oc, T, B, (size_t) Oc * f32b, (size_t) Oc * T * f32b, 0);
+        in.t_lw    = ggml_view_3d(ctx, b_lw, 1, T, B, f32b, (size_t) T * f32b, 0);
+        in.t_lwu   = ggml_view_3d(ctx, b_lwu, 1, T, B, f32b, (size_t) T * f32b, 0);
+        return in;
+    };
+
+    auto read_accs = [&](std::vector<std::vector<float>> * dst) {
+        dst->assign(opt.acc.size(), std::vector<float>());
+        for (size_t j = 0; j < opt.acc.size(); j++) {
+            (*dst)[j].resize((size_t) ggml_nelements(opt.acc[j]));
+            ggml_backend_tensor_get(opt.acc[j], (*dst)[j].data(), 0, (*dst)[j].size() * sizeof(float));
+        }
+    };
+
+    // One arm. `mode` is the ONLY thing that differs between the two calls.
+    auto run = [&](DitAttnMode mode, double * loss_out, std::vector<std::vector<float>> * grads,
+                   std::vector<float> * out_vals, int * nodes) -> bool {
+        lm_optim_zero_grad(&opt);
+        upload();
+        ggml_init_params ip  = { arena.size(), arena.data(), true };
+        ggml_context *   ctx = ggml_init(ip);
+        ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, true);
+        DitInputs        in  = mk_inputs(ctx);
+        in.attn_mode         = mode;
+        DitTaps       taps;
+        ggml_tensor * vel = dit_train_forward(ctx, M, ad, in, T, enc_use, &taps, lo, L, B);
+        ggml_tensor * ls  = dit_train_loss(ctx, vel, in, Oc, T, false, bh.gscale);
+        ggml_set_loss(ls);
+        ggml_build_forward_expand(gf, ls);
+        std::vector<ggml_tensor *> ga;
+        lm_optim_fill_gacc(&opt, gf, &ga);
+        ggml_build_backward_expand(ctx, gf, ga.data());
+        *nodes = ggml_graph_n_nodes(gf);
+        ggml_backend_sched_reset(M->sched);
+        const bool good = ggml_backend_sched_graph_compute(M->sched, gf) == GGML_STATUS_SUCCESS;
+        if (good) {
+            float lv = 0.0f;
+            ggml_backend_tensor_get(ls, &lv, 0, sizeof(float));
+            *loss_out = (double) lv;
+            // The deepest hidden_after_layerN tap IS the trained stack's output.
+            // Read it back before ggml_free takes the context's tensors with it.
+            ggml_tensor * t = nullptr;
+            for (size_t i = 0; i < taps.v.size(); i++) {
+                if (taps.v[i].first.compare(0, 18, "hidden_after_layer") == 0) {
+                    t      = taps.v[i].second;
+                    o->tap = taps.v[i].first;
+                }
+            }
+            if (t) {
+                out_vals->resize((size_t) ggml_nelements(t));
+                ggml_backend_tensor_get(t, out_vals->data(), 0, out_vals->size() * sizeof(float));
+            }
+        }
+        ggml_free(ctx);
+        if (good) {
+            read_accs(grads);
+        }
+        return good && !out_vals->empty();
+    };
+
+    std::vector<std::vector<float>> gex, gfl;
+    std::vector<float>              oex, ofl;
+    if (!run(DIT_ATTN_EXACT, &o->loss_exact, &gex, &oex, &o->nodes_exact)) {
+        *err = "exact arm failed to compute";
+        cleanup();
+        return false;
+    }
+    if (!run(DIT_ATTN_FLASH, &o->loss_flash, &gfl, &ofl, &o->nodes_flash)) {
+        *err = "flash arm failed to compute";
+        cleanup();
+        return false;
+    }
+    if (oex.size() != ofl.size()) {
+        *err = "layer output shapes differ between arms";
+        cleanup();
+        return false;
+    }
+
+    {
+        double num = 0.0, den = 0.0;
+        for (size_t i = 0; i < oex.size(); i++) {
+            num = std::max(num, fabs((double) ofl[i] - (double) oex[i]));
+            den = std::max(den, fabs((double) oex[i]));
+        }
+        o->out_mag = den;
+        o->out_rel = num / std::max(den, 1e-30);
+    }
+    for (size_t j = 0; j < gex.size() && j < gfl.size(); j++) {
+        double num = 0.0, den = 0.0;
+        for (size_t k = 0; k < gex[j].size() && k < gfl[j].size(); k++) {
+            num = std::max(num, fabs((double) gfl[j][k] - (double) gex[j][k]));
+            den = std::max(den, fabs((double) gex[j][k]));
+        }
+        o->ref_mag       = std::max(o->ref_mag, den);
+        const double rel = num / std::max(den, 1e-30);
+        const std::string nm = opt.params[j]->name;
+        if (rel > o->grad_rel) {
+            o->grad_rel = rel;
+            o->worst    = nm;
+        }
+        const bool qk = (nm.find("q_proj") != std::string::npos) || (nm.find("k_proj") != std::string::npos);
+        if (qk) {
+            if (rel > o->grad_rel_qk) {
+                o->grad_rel_qk = rel;
+                o->worst_qk    = nm;
+                o->mag_qk      = den;
+            }
+        } else if (rel > o->grad_rel_ot) {
+            o->grad_rel_ot = rel;
+            o->worst_ot    = nm;
+            o->mag_ot      = den;
+        }
+    }
+
+    cleanup();
+    o->ran = true;
+    return true;
+}
+
+static void dit_st_flash_gates(std::vector<DitSelfTestResult> & rs, DitTrainModel * Mg,
+                               const std::string & dit_path, const std::vector<DitSample> & samples, uint64_t seed) {
+    const int    T      = 64;
+    const char * gname  = ggml_backend_name(Mg->backend);
+    const bool   gpu    = (strcmp(gname, "CPU") != 0);
+    const double bar    = 1e-4;   // layer output, and every gradient outside q/k
+    const double bar_qk = 2e-3;   // q_proj / k_proj, through the QK rms_norm back
+    char         d[3000];
+
+    if (samples.empty()) {
+        dit_st_report(rs, "SF1", false, "no cached songs");
+        dit_st_report(rs, "SF2", false, "no cached songs");
+        return;
+    }
+    const int B2    = 3;
+    const int enc_1 = std::min(64, samples[0].enc_S);
+    int       enc_3 = 64;
+    for (int b = 0; b < B2 && b < (int) samples.size(); b++) {
+        enc_3 = std::min(enc_3, samples[(size_t) b].enc_S);
+    }
+    const bool have_b2 = ((int) samples.size() >= B2);
+
+    // The training backend's arms. Reported, never gated on the numeric bars:
+    // see the TF32 paragraph above.
+    DitStFlashMeas g1, g2;
+    std::string    g1err = "-", g2err = "-";
+    const bool     g1ok  = dit_st_flash_measure(Mg, samples, seed, 1, T, enc_1, 2, false, &g1, &g1err);
+    const bool     g2ok  = have_b2 && dit_st_flash_measure(Mg, samples, seed, B2, T, enc_3, 2, true, &g2, &g2err);
+
+    // The CPU copy: the only place exact-vs-flash is a clean measurement.
+    // Mirrored at lora_lo = L-2 so just the two layers under test are promoted,
+    // with the A2c batched flag so proj_in / cond_emb are F32 like every other
+    // input-side weight. Same shape as the SB rungs' identity run.
+    DitTrainModel  Mc;
+    DitStFlashMeas c1, c2;
+    std::string    cerr = "-", c1err = "-", c2err = "-";
+    bool           c1ok = false, c2ok = false;
+    {
+        std::string err;
+        if (!dit_train_load(&Mc, dit_path.c_str(), 0, &err)) {
+            cerr = "CPU-backend copy failed to load: " + err;
+        } else {
+            Mc.backend = cpu_backend_new(16);
+            if (!Mc.backend) {
+                cerr = "no CPU backend available for the parity run";
+            } else if (!dit_build_mirror(&Mc, Mc.m.cfg.n_layers - 2, DIT_MIRROR_F32, &err, /*batched=*/true)) {
+                cerr = "CPU mirror failed: " + err;
+            } else {
+                BackendPair bp;
+                bp.backend     = Mc.backend;
+                bp.cpu_backend = Mc.backend;  // n == 1: nothing can silently land elsewhere
+                bp.has_gpu     = false;
+                Mc.sched       = backend_sched_new(bp, 65536);
+                c1ok           = dit_st_flash_measure(&Mc, samples, seed, 1, T, enc_1, 2, false, &c1, &c1err);
+                c2ok = have_b2 && dit_st_flash_measure(&Mc, samples, seed, B2, T, enc_3, 2, true, &c2, &c2err);
+            }
+        }
+    }
+    dit_train_free(&Mc);
+
+    const bool probe_ok = !gpu || (g1.probe_fwd && g1.probe_bwd && (!have_b2 || (g2.probe_fwd && g2.probe_bwd)));
+
+    // SF1 — B = 1: native GQA and the 2-D broadcast mask, i.e. the default run.
+    snprintf(d, sizeof(d),
+             "--attn flash vs exact, B=1 (GQA %d/%d, 2-D window mask), LoRA on the top 2 of %d layers "
+             "(layer_type 0 x%d, 1 x%d), S=%d enc_S=%d. CPU parity, both arms f32 so the fused op is the only "
+             "difference left: %s output %.3e (bar %.0e); gradients outside q/k %.3e on %s (bar %.0e, that "
+             "tensor's |grad|max %.3e); q/k, back through the QK rms_norm, %.3e on %s (bar %.0e, |grad|max %.3e); "
+             "losses %.9f vs %.9f [%s]. %s reports %.3e / %.3e over a %d-node exact graph vs %d-node flash "
+             "— REPORTED, not gated: the exact arm's attention mul_mats run on cuBLAS TF32 there, so that delta "
+             "sizes the reference's own rounding. supports_op on %s: fwd %s bwd %s%s%s",
+             Mg->m.cfg.n_kv_heads, Mg->m.cfg.n_heads, Mg->m.cfg.n_layers, c1.lt0, c1.lt1, T / Mg->m.cfg.patch_size,
+             enc_1, c1.tap.c_str(), c1.out_rel, bar, c1.grad_rel_ot, c1.worst_ot.c_str(), bar, c1.mag_ot,
+             c1.grad_rel_qk, c1.worst_qk.c_str(), bar_qk, c1.mag_qk, c1.loss_exact, c1.loss_flash,
+             c1ok ? "cpu ok" : (cerr != "-" ? cerr.c_str() : c1err.c_str()), gname, g1.out_rel, g1.grad_rel,
+             g1.nodes_exact, g1.nodes_flash, gname, g1.probe_fwd ? "yes" : "NO", g1.probe_bwd ? "yes" : "NO",
+             g1ok ? "" : " — GPU ARM FAILED: ", g1ok ? "" : g1err.c_str());
+    dit_st_report(rs, "SF1",
+                  g1ok && c1ok && probe_ok && c1.out_rel <= bar && c1.grad_rel_ot <= bar &&
+                      c1.grad_rel_qk <= bar_qk && c1.out_mag > 0.0 && c1.ref_mag > 0.0,
+                  d);
+
+    // SF2 — B = 3 mixed lengths: expanded heads (Nkv == Nh) and the per-element
+    // [.,.,1,B] masks, so the op's ne2/ne3 modulo broadcast is measured too.
+    if (!have_b2) {
+        snprintf(d, sizeof(d), "need >= %d cached songs for a B=%d batch of DIFFERENT songs, found %d", B2, B2,
+                 (int) samples.size());
+        dit_st_report(rs, "SF2", false, d);
+        return;
+    }
+    snprintf(d, sizeof(d),
+             "--attn flash vs exact, B=%d mixed length (one song %d of %d frames, %d padded, so both masks are "
+             "per-element [.,.,1,B] and K/V are pre-expanded to Nh). CPU parity: %s output %.3e (bar %.0e); "
+             "gradients outside q/k %.3e on %s (bar %.0e, |grad|max %.3e); q/k %.3e on %s (bar %.0e, |grad|max "
+             "%.3e); losses %.9f vs %.9f [%s]. %s reports %.3e / %.3e over a %d-node exact graph vs %d-node flash "
+             "— REPORTED, not gated (cuBLAS TF32 reference). supports_op on %s: fwd %s bwd %s%s%s",
+             B2, c2.short_len, c2.pad_len, c2.pad_len - c2.short_len, c2.tap.c_str(), c2.out_rel, bar,
+             c2.grad_rel_ot, c2.worst_ot.c_str(), bar, c2.mag_ot, c2.grad_rel_qk, c2.worst_qk.c_str(), bar_qk,
+             c2.mag_qk, c2.loss_exact, c2.loss_flash,
+             c2ok ? "cpu ok" : (cerr != "-" ? cerr.c_str() : c2err.c_str()), gname, g2.out_rel, g2.grad_rel,
+             g2.nodes_exact, g2.nodes_flash, gname, g2.probe_fwd ? "yes" : "NO", g2.probe_bwd ? "yes" : "NO",
+             g2ok ? "" : " — GPU ARM FAILED: ", g2ok ? "" : g2err.c_str());
+    dit_st_report(rs, "SF2",
+                  g2ok && c2ok && probe_ok && c2.out_rel <= bar && c2.grad_rel_ot <= bar &&
+                      c2.grad_rel_qk <= bar_qk && c2.out_mag > 0.0 && c2.ref_mag > 0.0,
+                  d);
+}
+
 // ─── LK5: export / parse roundtrip ──────────────────────────────────────────
 //
 // Parses the written file with yyjson directly rather than through the engine's
@@ -2315,6 +2824,18 @@ static int dit_self_test_impl(const std::string & dit_path, const std::string & 
         bp.has_gpu     = true;
         M.sched        = backend_sched_new(bp, 65536);
     }
+    // ── SF1 / SF2: --attn flash vs exact ───────────────────────────────
+    // Placed HERE, ahead of the full-depth crop fit, on purpose. These two
+    // rungs need the model, the backend, the mirror and the scheduler and
+    // nothing else: they build a 2-layer sub-stack at T=64 with their own
+    // small buffers. Behind the fit they would be skipped on any machine
+    // whose card cannot also hold a 32-layer activation set — which is
+    // exactly the machine most likely to want --attn flash in the first
+    // place.
+    if (!fd_only) {
+        dit_st_flash_gates(rs, &M, dit_path, samples, seed);
+    }
+
 
     // ── crop for the descent gates: auto-fit at full depth ───────────────
     DitVramModel vm;

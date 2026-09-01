@@ -549,6 +549,23 @@ static void print_usage(void) {
             "                                                      ~1.7-1.8x per layer per step on an\n"
             "                                                      RTX 5090. Needs the vendored patch\n"
             "                                                      engine/patches/mm-backward.patch.\n"
+            "    --attn <exact|flash>        exact       attention formulation.\n"
+            "                                            exact = dit_attn_f32 (mul_mat / soft_max_ext /\n"
+            "                                                    mul_mat). The shipped graph, identical\n"
+            "                                                    to what ran before this flag existed.\n"
+            "                                            flash = fused FLASH_ATTN_TRAIN forward+backward\n"
+            "                                                    on BOTH the self- and cross-attention\n"
+            "                                                    sites, so no [S_kv,S,Nh,B] softmax is\n"
+            "                                                    ever materialised. EXPERIMENTAL:\n"
+            "                                                    markedly lower VRAM per token, but\n"
+            "                                                    currently SLOWER per step, and its\n"
+            "                                                    gradients do NOT match exact bit for\n"
+            "                                                    bit — they differ within a measured\n"
+            "                                                    drift band, the same class as --bwd mm\n"
+            "                                                    and --mirror bf16. Aborts rather than\n"
+            "                                                    fall back when the backend cannot run\n"
+            "                                                    the ops: a CPU split would be correct,\n"
+            "                                                    unusably slow, and look like a pass.\n"
             "\n"
             "  Optimizer:\n"
             "    --optimizer <adamw|muon>    adamw       muon puts every 2-D parameter whose SHORT side is\n"
@@ -3841,7 +3858,7 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--ckpt") && i + 1 < argc) a.ckpt = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--crop") && i + 1 < argc) a.crop = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--crop-min") && i + 1 < argc) a.crop_min = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--crop-max") && i + 1 < argc) a.crop_max = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--crop-max") && i + 1 < argc) { a.crop_max = atoi(argv[++i]); a.crop_max_user = true; }
         else if (!strcmp(argv[i], "--crop-anchor") && i + 1 < argc) a.crop_anchor = argv[++i];
         else if (!strcmp(argv[i], "--crop-mode") && i + 1 < argc) a.crop_mode = argv[++i];
         else if (!strcmp(argv[i], "--crop-start-frac") && i + 1 < argc) a.crop_start_frac = (float) atof(argv[++i]);
@@ -3852,6 +3869,7 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--vram-safety") && i + 1 < argc) { a.vram_safety = (float) atof(argv[++i]); safety_user = true; }
         else if (!strcmp(argv[i], "--mirror") && i + 1 < argc) a.mirror = argv[++i];
         else if (!strcmp(argv[i], "--bwd") && i + 1 < argc) a.bwd = argv[++i];
+        else if (!strcmp(argv[i], "--attn") && i + 1 < argc) a.attn = argv[++i];
         else if (!strcmp(argv[i], "--profile-step") && i + 1 < argc) a.profile_step = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--profile-ops")) a.profile_ops = true;
         else if (!strcmp(argv[i], "--optimizer") && i + 1 < argc) a.optimizer = argv[++i];
@@ -3978,6 +3996,10 @@ static int cmd_train_dit(int argc, char ** argv) {
     }
     if (!bwd_valid(a.bwd)) {
         fprintf(stderr, "ace-train train-dit: --bwd must be outprod|mm\n");
+        return 2;
+    }
+    if (a.attn != "exact" && a.attn != "flash") {
+        fprintf(stderr, "ace-train train-dit: --attn must be exact|flash\n");
         return 2;
     }
     // LoKR once needed 12 % here: the fitted arena polynomial never saw the

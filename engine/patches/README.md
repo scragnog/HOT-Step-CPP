@@ -55,10 +55,49 @@ This is not theoretical. The MiniMax-Music3 LM is Qwen3-8B, with K of 4096 and 1
 
 **Losing this patch is silent and expensive** — no error, no crash, just noise instead of music on any f16 render with an adapter — so `verify-hooks.ps1` Hook 11 greps for the marker. The two guards in `mm3-ar-loop.h` (refuse a plan whose logits are wholesale non-finite) and `mm3-lm-adapter.h` (refuse a checkpoint whose factors would overflow the f16 store) are the second line of defence, and they live in the main repo rather than here.
 
-Reapply from the repo root — **apply all of them**. Two of them now touch `cpy.cu`, so they are no longer file-disjoint, but their hunks do not overlap and **both orders were verified to apply cleanly**; a full pristine→apply-all replay was checked to reproduce the tested bytes exactly. The glob below is what CI runs:
+`flash-attn-train.patch` adds two fused attention ops — `GGML_OP_FLASH_ATTN_TRAIN` and `GGML_OP_FLASH_ATTN_TRAIN_BACK`, appended at the tail of the op enum so every existing value stays put — with a CPU reference implementation, CUDA kernels in two new self-contained files (`ggml-cuda/fattn-train.{cu,cuh}`; no existing `fattn-*` file is touched), and an autodiff case so `ggml_build_backward_expand` emits the backward on its own.
+
+What it is for is the DiT trainer's retained softmax. `dit_attn_f32` materialises a `[S_kv, S, Nh, B]` f32 softmax at every attention site and the backward keeps it alive, so attention memory is quadratic in the crop. At `S = 3000` across 32 layers that is 36.9 GB of self-attention softmax plus 9.4 GB of cross-attention softmax — the arithmetic behind `docs/TRAINING.md`'s "full-song training is impossible" line. The fused forward emits one packed tensor holding `O` and the log-sum-exp and nothing of size S²; the fused backward recomputes tiles from Q/K/LSE using the row identity `D_i = rowsum(dO∘O)`. Both trainer attention sites go through it, so both quadratic terms go.
+
+The ops are deliberately generic rather than trainer-shaped — arbitrary additive F16 mask with `soft_max_ext`'s broadcast rule, GQA handled natively (`Nkv < Nh` with no pre-expansion), `S_kv != S`, `B >= 1`. That is what makes adoption by the other trainers call-site wiring rather than kernel work.
+
+Three properties are load-bearing, and all three are deliberate:
+
+- **A fully-masked query row is defined, not inherited.** `ggml_soft_max_ext` gives NaN there; these ops give `O = 0`, `LSE = 0`. It has to be that way: ggml forms the packed tensor's own gradient as `ggml_scale(packed, 0.0f)`, and `0 * NaN` is NaN, which would ride into `dO` and poison every parameter. Same reason the forward zeroes its alignment gap.
+- **No floating-point atomics.** Every element of dQ/dK/dV is written once, by one thread, out of a register accumulator; GQA folds by looping query heads ascending. Two runs on the same inputs give bit-identical gradients, which is the only thing that makes an A/B against `--attn exact` mean anything.
+- **Masked positions are bitwise zero**, not small. `exp(-INF - finite)` is exactly `0.0f`, so `dS = P * (dP - D_i)` is exactly zero wherever the mask is.
+
+Nothing here is reachable unless a caller asks. `ace-train train-dit --attn flash` is the only switch, and with `--attn exact` — the default — the emitted graph is byte-identical to before: the self-test's T3 tap comparison reports `0.00e+00` on every named tensor and SC1/SC2/SC3 report a `0.000e+00` gradient delta.
+
+Measured on an RTX 5090 with `fattn-train-test` (S in {64, 129, 198, 384, 1000} x B in {1, 2} x {no mask, window, window+pad, cross-attention dead column} x GQA 32/8 x D 128, forward and all three gradients against the autodiff'd `dit_attn_f32` chain, bar 1e-4):
+
+| run | cases | worst rel err | determinism |
+|---|---|---|---|
+| CPU | 36/36 | 3.517e-06 | n/a |
+| CUDA | 36/36 | 3.088e-06 | bitwise across two runs |
+| CUDA `--extra` | 48/48 | 3.088e-06 | bitwise |
+| CUDA `--large` (S = 3000) | 37/37 | 3.088e-06 | bitwise |
+
+`--bench` on CUDA, per attention site, forward + backward, 50 timed iterations (B 1, Nh 32 / Nkv 8, D 128, window mask):
+
+| S | manual chain | fused | manual VRAM | fused VRAM |
+|---|---|---|---|---|
+| 625 | 0.642 ms | 3.015 ms (4.7x) | 301.3 MB | 98.6 MB |
+| 1250 | 2.374 ms | 6.906 ms (2.9x) | 985.6 MB | 198.8 MB |
+| 3000 | 11.123 ms | 23.209 ms (2.1x) | 4939.0 MB | 487.0 MB |
+
+So v1 buys memory, not time. The kernels are f32 with no tensor-core tile pass yet; the ratio narrows as S grows only because the manual chain's own quadratic is catching up. A TF32/f16 tile pass is the obvious next lever and has not been started.
+
+What the memory buys is the crop. The trainer carries a second arena model (`dit_vram_arena_bytes_flash()` in `dit-vram.h`, selected by `DitVramModel::flash_attn`) built term by term rather than refitted, and in flash mode the auto-fit's `crop_max` default lifts from 1250 to the dataset's longest track. Over a 20-cell {crop, segments, dataset} grid on a 5090 the raw model reproduces measured arena high-water within -2.0 %/+1.3 %; with its one fitted headroom coefficient it over-predicts every cell by +9.2 % to +13.3 % and never under. On `fightstar_behinddevilsback` with no crop pins, exact auto-fits crop 1250 (its cap) and flash auto-fits **crop 3846 at full 32-layer depth** — 3.08x — estimated 24,660 MB against 22,912 MB measured, NVML tripwire silent. At `--ckpt 8` the same dataset walks to crop 6000, the whole song.
+
+Drift sits in the same documented non-identity class as `--bwd mm`: same dataset, same seed, 2 layers, crop 375, 2 epochs, probe loss 1.677639 exact against 1.677924 flash, about 1.7e-4.
+
+**Losing this patch is loud, not silent.** `ggml.h` loses the op declarations and `ace-train` stops compiling; lose only the CUDA half and the trainer's `supports_op` probe aborts at init with `attn-unsupported` rather than letting the scheduler quietly split attention onto the CPU. `verify-hooks.ps1` Hook 12 greps `ggml.c` for the marker anyway, because the autodiff registration is the one piece that cannot be reconstructed from the two new CUDA files if a submodule update takes it — and those two files are *new*, so a submodule re-checkout deletes them outright rather than reverting them.
+
+Reapply from the repo root — **apply all of them**. They are no longer file-disjoint: two touch `cpy.cu`, two touch `ggml.c`, and five now touch `ggml-cuda.cu`. Their hunks still do not overlap, and a full pristine→apply-all replay in glob order was re-checked when `flash-attn-train.patch` landed: every file that patch touches comes back byte-identical to the tested tree. The glob below is what CI runs:
 
 ```sh
 for p in engine/patches/*.patch; do git apply --verbose "$p"; done
 ```
 
-Verify they are still in place: `powershell -File engine\verify-hooks.ps1` (Hook 7 greps `out-prod.cu`, Hook 8 `ggml.c`, Hook 9 `cpy.cu`, Hook 10 `cpy.cuh`, each for its HOT-Step marker comment). **Hooks 9 and 10 matter most, because both failures are silent**: losing 9 leaves the numbers right and only the clock wrong, and losing 10 makes every sub-`q8_0` base vanish from the trainer rather than error. CI reapplies them in the "Apply engine patches" step of every build job, using the same glob loop.
+Verify they are still in place: `powershell -File engine\verify-hooks.ps1` (Hook 7 greps `out-prod.cu`, Hook 8 `ggml.c`, Hook 9 `cpy.cu`, Hook 10 `cpy.cuh`, Hook 11 `ggml-cuda.cu`, Hook 12 `ggml.c` again for the flash-attn-train autodiff case, each for its HOT-Step marker comment). **Hooks 9 and 10 matter most, because both failures are silent**: losing 9 leaves the numbers right and only the clock wrong, and losing 10 makes every sub-`q8_0` base vanish from the trainer rather than error. CI reapplies them in the "Apply engine patches" step of every build job, using the same glob loop.
