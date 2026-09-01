@@ -57,9 +57,22 @@ export function toRecord(msg) {
     bot: Boolean(msg.author?.bot),
     replyTo: msg.reference?.messageId ?? null,
     content: msg.cleanContent ?? msg.content ?? '',
-    attachments: [...(msg.attachments?.values?.() ?? [])].map(a => a.name).filter(Boolean),
+    // The URL is what makes an attachment more than a filename — media.mjs
+    // downloads from it so Claude can Read the thing. Older records in the
+    // log are bare name strings; everything consuming this handles both.
+    attachments: [...(msg.attachments?.values?.() ?? [])]
+      .filter(a => a?.name || a?.url)
+      .map(a => ({
+        name: a.name ?? '',
+        url: a.url ?? '',
+        type: a.contentType ?? '',
+        size: a.size ?? 0,
+      })),
   };
 }
+
+// Records written before attachments carried URLs stored a plain string.
+export const attachmentName = (a) => (typeof a === 'string' ? a : (a?.name ?? ''));
 
 export function readChannel(channelId) {
   try {
@@ -97,7 +110,8 @@ export function dedupeSort(channelId) {
 export function format(recs) {
   return recs.map(r => {
     const when = r.ts.slice(0, 16).replace('T', ' ');
-    const att = r.attachments?.length ? ` (attached: ${r.attachments.join(', ')})` : '';
+    const names = (r.attachments ?? []).map(attachmentName).filter(Boolean);
+    const att = names.length ? ` (attached: ${names.join(', ')})` : '';
     return `[${when}] ${r.author}${r.bot ? ' [bot]' : ''}: ${r.content}${att}`;
   }).join('\n');
 }

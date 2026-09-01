@@ -51,6 +51,9 @@ files or run commands.
 - Posting norm change: this bot speaks AS ITSELF (clearly a bot account),
   distinct from Rob's own posts. Rob's previous "I draft, Rob posts" norm
   still applies to Rob-authored messages.
+- Images and files posted in the channel are downloaded by the bridge and read
+  off disk; see Attachments below. Reading an image costs tokens, so the prompt
+  tells the bot to open only what the message it is answering depends on.
 - Conversation memory is the last `CONTEXT_MESSAGES` (200) entries of
   `logs/discord/<channelId>.jsonl`, rebuilt on every ping. There is no
   session state to reset. Raising the number is the only way to widen the
@@ -113,6 +116,37 @@ Note the ping is **one-way**: `messageCreate` returns early on `msg.author.bot`,
 so ClaudeClanker's answer is logged into the context buffer but does not wake
 ScragBot. It'll read the reply the next time a human pings it — there is no
 automatic bot-to-bot volley, by design.
+
+## Attachments and images (`logs/attachments/`)
+
+ScragBot can see pictures. Every image, PDF or text file posted in an allowed
+channel — plus any `cdn.discordapp.com` / `media.discordapp.net` link pasted as
+text — is downloaded to `logs/attachments/<channelId>/<messageId>-a0.png` as the
+message arrives, and the ping prompt hands Claude the local path. The Read tool
+renders images natively, so a posted loss curve arrives as a loss curve rather
+than the word `image.png`.
+
+The bridge does the fetching, not Claude. The headless session still has no
+network and still runs on `Read,Grep,Glob` only, so nothing an untrusted channel
+message says can turn it into a URL fetcher.
+
+Downloads happen at arrival time by necessity: Discord CDN URLs are signed and
+expire in roughly a day, so there is no fetching them later. Each ping also
+re-captures over a freshly fetched batch of the last 100 messages, which is what
+back-fills anything posted while the bridge was down.
+
+What it cannot do: **audio and video**. Read cannot decode them, so they are
+never downloaded — the transcript still names them, and the bot knows a track
+was posted and that it cannot hear it. Ear tests stay Scragnog's job.
+
+Knobs (all optional, `.env`): `MEDIA_MAX_BYTES` (12 MB), `MEDIA_LOOKBACK` (25
+messages per batch), `MEDIA_LIST_MAX` (12 files advertised per prompt),
+`MEDIA_RETENTION_DAYS` (21), `MEDIA_ALLOW_HOSTS` (Discord CDN only — widening
+this hands a chat-steered session an arbitrary-URL fetcher, so don't).
+
+Filenames on disk are derived from the message id and slot, never from the
+uploaded name, so a file called `../../.env` is just `<messageId>-a0.env`.
+`logs/` is gitignored; like the transcripts, these are other people's files.
 
 ## Transcripts (`logs/discord/`)
 

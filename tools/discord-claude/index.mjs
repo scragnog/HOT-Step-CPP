@@ -11,6 +11,9 @@
 //   - Every ping is a FRESH headless session (no --resume). Reach comes from
 //     CONTEXT_MESSAGES worth of transcript, not from session state. Why:
 //     see the comment in runClaude().
+//   - CAN SEE IMAGES: attachments and Discord CDN links are downloaded to
+//     logs/attachments/ as they arrive, and the prompt hands Claude the local
+//     paths. Read renders them, so screenshots land as pictures, not filenames.
 //   - CAN ping people back: mentions.mjs keeps a name <-> user-id roster, feeds
 //     it to Claude, and rewrites "@name" into a real mention on the way out.
 //   - `!model fable|opus|sonnet|<full-id>` (allowlisted only) switches the
@@ -27,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
 import * as transcript from './transcript.mjs';
 import * as mentions from './mentions.mjs';
+import * as media from './media.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -82,6 +86,10 @@ const log = (msg) => {
   // harvested from the live message object or they're gone.
   try { mentions.observe(msg); }
   catch (e) { console.error('[bridge] roster update failed:', String(e.message ?? e).slice(0, 200)); }
+  // Fetch attachments the moment they land. Discord's CDN URLs are signed and
+  // expire in about a day, so the window to grab a screenshot is now, not when
+  // someone finally asks about it.
+  media.captureAsync(msg);
 };
 
 // ── Claude invocation ───────────────────────────────────────────────────────
@@ -187,6 +195,10 @@ client.on('clientReady', () => {
   // Backfilled transcripts already name everyone who has ever posted; seed the
   // roster from them so pings work on the first reply, not the second.
   try { mentions.seedFromTranscripts([...ALLOWED_CHANNELS]); } catch { /* non-fatal */ }
+  // Downloaded attachments are a cache, not a record — the transcript keeps the
+  // filenames either way, and anything Discord still hosts can be re-fetched.
+  try { const k = media.prune(); if (k) console.log(`[media] pruned ${k} expired file(s)`); }
+  catch { /* non-fatal */ }
 });
 
 client.on('messageCreate', async (msg) => {
@@ -295,6 +307,9 @@ async function drainPings(channelId) {
 
 async function handlePing(msg) {
   await msg.channel.sendTyping().catch(() => {});
+  // The ping's own attachments, guaranteed on disk before the prompt names
+  // them. Idempotent, so the batch pass inside buildContext re-costs nothing.
+  await media.capture(msg).catch(() => {});
   const context = await buildContext(msg.channel);
   // persona.md is re-read per reply so edits apply live. It leads the
   // prompt; the fixed footer below it names the docs entry points and
@@ -311,7 +326,8 @@ async function handlePing(msg) {
     (persona ? persona + '\n\n---\n\n' : '') +
     `Project state, if needed: start with docs/plans/2026-08-20-mm3-training-studio.md and ` +
     `docs/plans/2026-08-18-encoder-training-plan.md (encoder scoreboard). ` +
-    `Recent thread messages for context:\n\n${context}\n\n` +
+    `Recent thread messages for context:\n\n${context.text}\n\n` +
+    (context.media ? context.media + `\n` : '') +
     mentions.rosterBlock() + `\n` +
     // Name the target message explicitly. "The last message mentions you"
     // held only while the bot answered instantly; a queued ping can be
@@ -354,8 +370,14 @@ async function buildContext(channel) {
     if (transcript.appendMany(channel.id, [...batch.values()].map(transcript.toRecord))) {
       transcript.dedupeSort(channel.id);
     }
+    // Capture off the LIVE batch, not the stored records: appendMany dedupes by
+    // id and never rewrites an existing row, so a URL logged yesterday is a
+    // dead signature by now. The batch straight off the API is freshly signed,
+    // which is what heals anything missed while the bridge was down.
+    await media.captureBatch([...batch.values()].reverse());
   } catch { /* offline or missing perms — fall through to what is already on disk */ }
-  return transcript.format(transcript.readChannel(channel.id).slice(-CONTEXT_MESSAGES));
+  const recs = transcript.readChannel(channel.id).slice(-CONTEXT_MESSAGES);
+  return { text: transcript.format(recs), media: media.promptBlock(channel.id, recs) };
 }
 
 async function interject(channelId, note) {
@@ -372,7 +394,8 @@ async function interject(channelId, note) {
       (persona ? persona + '\n\n---\n\n' : '') +
       `Project state, if needed: start with docs/plans/2026-08-20-mm3-training-studio.md and ` +
       `docs/plans/2026-08-18-encoder-training-plan.md (encoder scoreboard). ` +
-      `Recent thread messages, oldest first:\n\n${context}\n\n` +
+      `Recent thread messages, oldest first:\n\n${context.text}\n\n` +
+      (context.media ? context.media + `\n` : '') +
       mentions.rosterBlock() + `\n` +
       `Scragnog has asked you (from his console — this request is NOT visible in the thread) to interject ` +
       `in the conversation now. Compose ONE message that lands naturally in the discussion above` +
