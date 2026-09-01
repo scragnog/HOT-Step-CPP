@@ -25,6 +25,7 @@ import { resolveDuration } from '../utils/estimateDuration';
 import { createGenerationTimer, getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import { captionForBackend } from '../utils/captionForBackend';
 import { normalizeKeyScale } from '../utils/keyScale';
+import { useLmAdapterEnabled } from '../utils/lmAdapterPref';
 import { useBackendStore } from './backendStore';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -1243,9 +1244,19 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   // STRENGTH from globalParams (params.lmAdapterScale is already in the
   // snapshot — the global Adapters-menu slider governs preset adapters too).
   // A preset without one leaves the global Planner Adapter selection active.
-  if (preset?.lm_adapter_path) {
-    writePersistedState('hs-lmAdapter', preset.lm_adapter_path);
-    params.lmAdapter = preset.lm_adapter_path;
+  //
+  // Gated on the sidebar's "Use LM Adapter" toggle, which is OFF by default.
+  // When it is off the preset's LM adapter is skipped AND params.lmAdapter is
+  // cleared: this same function writes hs-lmAdapter, so the global carries the
+  // last preset's planner adapter, and skipping alone would silently keep
+  // applying it — the toggle would look broken.
+  if (useLmAdapterEnabled()) {
+    if (preset?.lm_adapter_path) {
+      writePersistedState('hs-lmAdapter', preset.lm_adapter_path);
+      params.lmAdapter = preset.lm_adapter_path;
+    }
+  } else {
+    delete params.lmAdapter;
   }
 
   // 4) Mastering reference from album preset (does NOT force-enable — respects global toggle)

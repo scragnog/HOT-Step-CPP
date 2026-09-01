@@ -17,6 +17,7 @@ import { resolveDuration } from '../../utils/estimateDuration';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { captionForBackend } from '../../utils/captionForBackend';
 import { normalizeKeyScale } from '../../utils/keyScale';
+import { useLmAdapterEnabled } from '../../utils/lmAdapterPref';
 import { useBackendStore } from '../../stores/backendStore';
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
@@ -83,9 +84,17 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     }
 
     // Planner-LM adapter from album preset (path only — strength stays with
-    // the global Adapters-menu slider, mirroring the DiT adapter semantics)
-    if (preset?.lm_adapter_path) {
-      gps.setLmAdapter(preset.lm_adapter_path);
+    // the global Adapters-menu slider, mirroring the DiT adapter semantics).
+    // Gated on the sidebar's "Use LM Adapter" toggle, OFF by default; when it
+    // is off the selection is cleared rather than merely skipped, since this
+    // path writes the global and a stale preset adapter would otherwise ride
+    // along into Create. See utils/lmAdapterPref.ts.
+    if (useLmAdapterEnabled()) {
+      if (preset?.lm_adapter_path) {
+        gps.setLmAdapter(preset.lm_adapter_path);
+      }
+    } else {
+      gps.setLmAdapter('');
     }
 
     // Mastering reference from album preset (does NOT force-enable — respects global toggle)

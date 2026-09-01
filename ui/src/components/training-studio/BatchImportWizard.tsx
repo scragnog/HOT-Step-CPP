@@ -38,8 +38,15 @@ const STAGE_LABEL_KEYS: Record<PipelineStage, string> = {
   'lyric-studio': 'trainingStudio.batch.stageLyricStudio',
 };
 
+// Every stage is on by default EXCEPT train-lm: planner-LM adapters have been
+// hurting more than helping next to a trained DiT adapter, so a bulk run no
+// longer trains one unless it is ticked back on.
+const STAGES_OFF_BY_DEFAULT: PipelineStage[] = ['train-lm'];
+
 function defaultStages(): Record<PipelineStage, boolean> {
-  return Object.fromEntries(PIPELINE_STAGES.map(s => [s, true])) as Record<PipelineStage, boolean>;
+  return Object.fromEntries(
+    PIPELINE_STAGES.map(s => [s, !STAGES_OFF_BY_DEFAULT.includes(s)]),
+  ) as Record<PipelineStage, boolean>;
 }
 
 function basename(dir: string): string {
