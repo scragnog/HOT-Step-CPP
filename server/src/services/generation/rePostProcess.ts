@@ -99,7 +99,14 @@ function safeParseGenerationParams(song: any): Record<string, any> {
 
 export type PpEligibility =
   | { ok: true; rawWavPath: string; audioUrl: string }
-  | { ok: false; status: number; error: string };
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      /** Set when the refusal is specifically "it already has a master". */
+      alreadyProcessed?: boolean;
+      masteredAudioUrl?: string;
+    };
 
 /**
  * Everything that must hold before a song can be post-processed after the fact.
@@ -112,6 +119,12 @@ export function checkPpEligibility(song: any): PpEligibility {
       ok: false,
       status: 409,
       error: 'This track has already been post-processed. Running the chain again would overcook it.',
+      // Handed back so a browser holding a stale copy of this song can correct
+      // itself. Without it the client keeps believing the track is unprocessed:
+      // it offers "Run Post-Processing" (which 409s) and hides "Remove
+      // Post-Processed Version" (which is the thing actually needed).
+      alreadyProcessed: true,
+      masteredAudioUrl: song.mastered_audio_url,
     };
   }
   if (inFlight.has(song.id)) {

@@ -479,7 +479,15 @@ export async function runSongPostProcessing(
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `HTTP ${res.status}`);
+    // The already-processed refusal carries the truth about this song, and the
+    // caller uses it to fix its own stale copy. Losing that detail to a bare
+    // Error string is what left the UI insisting a mastered track was
+    // unmastered.
+    throw Object.assign(new Error(data.error || `HTTP ${res.status}`), {
+      status: res.status,
+      alreadyProcessed: !!data.alreadyProcessed,
+      masteredAudioUrl: data.masteredAudioUrl as string | undefined,
+    });
   }
   return res.json();
 }

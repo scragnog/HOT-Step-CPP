@@ -39,6 +39,34 @@ export function clearRecentSongsCache(): void {
   window.dispatchEvent(new Event(CACHE_CLEARED_EVENT));
 }
 
+// Cache correction at MODULE scope, not inside the component.
+//
+// The per-source cache outlives every mount, so patching it only from a
+// mounted instance meant a post-processing pass that finished while you were
+// on another page left the cache claiming the track was still unprocessed.
+// The menu then offered "Run Post-Processing" (refused by the server) and hid
+// "Remove Post-Processed Version" — both decisions driven by the same stale
+// flag. Listening here fixes the cache whether or not anything is on screen.
+function patchCachedSong(songId: string, patch: Partial<UnifiedRecentSong>): void {
+  for (const [key, entry] of _cache) {
+    if (!entry.songs.some(s => s.id === songId)) continue;
+    _cache.set(key, {
+      ...entry,
+      songs: entry.songs.map(s => (s.id === songId ? { ...s, ...patch } : s)),
+    });
+  }
+}
+
+window.addEventListener('song-postprocessed', (e: Event) => {
+  const { songId, masteredAudioUrl } = (e as CustomEvent).detail || {};
+  if (songId && masteredAudioUrl) patchCachedSong(songId, { mastered_audio_url: masteredAudioUrl });
+});
+
+window.addEventListener('song-postprocess-reverted', (e: Event) => {
+  const { songId } = (e as CustomEvent).detail || {};
+  if (songId) patchCachedSong(songId, { mastered_audio_url: '' });
+});
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({

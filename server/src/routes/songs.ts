@@ -598,7 +598,11 @@ router.post('/:id/postprocess', (req, res) => {
 
     const eligibility = checkPpEligibility(song);
     if (!eligibility.ok) {
-      res.status(eligibility.status).json({ error: eligibility.error });
+      res.status(eligibility.status).json({
+        error: eligibility.error,
+        alreadyProcessed: eligibility.alreadyProcessed,
+        masteredAudioUrl: eligibility.masteredAudioUrl,
+      });
       return;
     }
 

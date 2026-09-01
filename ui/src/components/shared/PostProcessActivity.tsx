@@ -9,8 +9,8 @@
 // that completed while you were on another page still leaves evidence.
 
 import React from 'react';
-import { Loader2, CheckCircle2, XCircle, X, Sparkles } from 'lucide-react';
-import { usePostProcessRunList, dismissRun } from '../../stores/postProcessStore';
+import { Loader2, CheckCircle2, XCircle, X, Sparkles, Undo2 } from 'lucide-react';
+import { usePostProcessRunList, dismissRun, revertPostProcessingById } from '../../stores/postProcessStore';
 
 export const PostProcessActivity: React.FC = () => {
   const runs = usePostProcessRunList();
@@ -57,6 +57,20 @@ export const PostProcessActivity: React.FC = () => {
                     : (run.stage || 'Working...')}
               </p>
             </div>
+
+            {/* The remedy belongs next to the refusal. Being told a track is
+                already processed is useless if undoing that means hunting for
+                a menu item three surfaces away. */}
+            {run.alreadyProcessed && (
+              <button
+                onClick={() => { void revertPostProcessingById(run.songId); }}
+                className="px-1.5 py-1 rounded flex items-center gap-1 text-[9px] font-semibold
+                           text-amber-400 hover:bg-amber-500/15 transition-colors flex-shrink-0"
+                title="Delete the processed version so the chain can be run again. The raw render is untouched."
+              >
+                <Undo2 className="w-3 h-3" /> Undo
+              </button>
+            )}
 
             {/* Only a finished run can be dismissed — hiding a running one would
                 just lose track of GPU work that is still happening. */}

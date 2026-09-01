@@ -26,6 +26,9 @@ export interface PostProcessRun {
   stage: string;
   error?: string;
   masteredAudioUrl?: string;
+  /** The run was refused because a processed version already exists. The dock
+   *  offers the remedy inline, since that is where the refusal is seen. */
+  alreadyProcessed?: boolean;
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -173,7 +176,21 @@ export async function startPostProcessing(song: Song): Promise<void> {
     setRun(song.id, { jobId, status: 'pending', stage: stage || 'Queued' });
     startPolling(song.id, jobId);
   } catch (err: any) {
-    setRun(song.id, { status: 'failed', stage: 'Failed', error: err.message });
+    // A stale song object is the usual reason for this refusal — the list was
+    // fetched before the pass finished. Correct every surface holding this
+    // song, so "Remove Post-Processed Version" appears instead of staying
+    // hidden behind the same stale flag that allowed the click.
+    if (err?.alreadyProcessed && err.masteredAudioUrl) {
+      window.dispatchEvent(new CustomEvent('song-postprocessed', {
+        detail: { songId: song.id, masteredAudioUrl: err.masteredAudioUrl },
+      }));
+    }
+    setRun(song.id, {
+      status: 'failed',
+      stage: 'Failed',
+      error: err.message,
+      alreadyProcessed: !!err?.alreadyProcessed,
+    });
     throw err;
   }
 }
@@ -191,6 +208,22 @@ export async function revertPostProcessing(song: Song): Promise<boolean> {
   if (removed) {
     window.dispatchEvent(new CustomEvent('song-postprocess-reverted', {
       detail: { songId: song.id },
+    }));
+  }
+  return removed;
+}
+
+/**
+ * Same as revertPostProcessing but keyed by id — for callers like the activity
+ * dock that hold a run record rather than a Song.
+ */
+export async function revertPostProcessingById(songId: string): Promise<boolean> {
+  const { removed } = await revertSongPostProcessing(songId);
+  stopPolling(songId);
+  clearRun(songId);
+  if (removed) {
+    window.dispatchEvent(new CustomEvent('song-postprocess-reverted', {
+      detail: { songId },
     }));
   }
   return removed;
