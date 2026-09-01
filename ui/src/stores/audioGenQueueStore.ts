@@ -345,6 +345,32 @@ function _emit(immediate = false) {
   _listeners.forEach(fn => fn());
 }
 
+// Queue items cache the mastered URL from the generation that produced them,
+// and the queue is persisted, so a finished item outlives the page. A
+// post-processing pass (or a revert) run later has to reach it, or the item's
+// menu keeps deciding from a stale flag — offering a run the server refuses
+// and hiding the removal that would fix it.
+function _syncMastered(songId: string, masteredAudioUrl: string): void {
+  let touched = false;
+  for (const item of _state.items) {
+    if (item.songId === songId || item.id === songId) {
+      item.masteredAudioUrl = masteredAudioUrl;
+      touched = true;
+    }
+  }
+  if (touched) _emit(true);
+}
+
+window.addEventListener('song-postprocessed', (e: Event) => {
+  const { songId, masteredAudioUrl } = (e as CustomEvent).detail || {};
+  if (songId && masteredAudioUrl) _syncMastered(songId, masteredAudioUrl);
+});
+
+window.addEventListener('song-postprocess-reverted', (e: Event) => {
+  const { songId } = (e as CustomEvent).detail || {};
+  if (songId) _syncMastered(songId, '');
+});
+
 function _getSnapshot(): AudioGenQueueState { return _state; }
 function _subscribe(listener: () => void): () => void {
   _listeners.add(listener);

@@ -24,6 +24,27 @@ interface CoverRecentSongsProps {
 // ── Module-level cache ───────────────────────────────────────────────────────
 
 let _cachedCovers: Song[] = [];
+
+// Post-processing state changes have to reach this cache too, and at module
+// scope: it outlives every mount, so patching it only from a mounted instance
+// leaves a stale mastered URL behind whenever a pass (or a revert) happens
+// while Cover Studio is closed. A stale flag here both hides the removal
+// action and re-offers a run the server will refuse.
+function _patchCachedCover(songId: string, masteredAudioUrl: string): void {
+  _cachedCovers = _cachedCovers.map(s =>
+    s.id === songId ? { ...s, masteredAudioUrl, mastered_audio_url: masteredAudioUrl } : s
+  );
+}
+
+window.addEventListener('song-postprocessed', (e: Event) => {
+  const { songId, masteredAudioUrl } = (e as CustomEvent).detail || {};
+  if (songId && masteredAudioUrl) _patchCachedCover(songId, masteredAudioUrl);
+});
+
+window.addEventListener('song-postprocess-reverted', (e: Event) => {
+  const { songId } = (e as CustomEvent).detail || {};
+  if (songId) _patchCachedCover(songId, '');
+});
 let _cachedRefreshKey = -1;
 let _fetchInFlight = false;
 

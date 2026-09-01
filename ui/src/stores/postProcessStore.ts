@@ -202,31 +202,38 @@ export async function startPostProcessing(song: Song): Promise<void> {
  * no longer exists once this returns.
  */
 export async function revertPostProcessing(song: Song): Promise<boolean> {
-  const { removed } = await revertSongPostProcessing(song.id);
-  stopPolling(song.id);
-  clearRun(song.id);
-  if (removed) {
-    window.dispatchEvent(new CustomEvent('song-postprocess-reverted', {
-      detail: { songId: song.id },
-    }));
-  }
-  return removed;
+  return revertPostProcessingById(song.id, song.title);
 }
 
 /**
  * Same as revertPostProcessing but keyed by id — for callers like the activity
  * dock that hold a run record rather than a Song.
  */
-export async function revertPostProcessingById(songId: string): Promise<boolean> {
-  const { removed } = await revertSongPostProcessing(songId);
-  stopPolling(songId);
-  clearRun(songId);
-  if (removed) {
+export async function revertPostProcessingById(songId: string, title?: string): Promise<boolean> {
+  try {
+    const { removed } = await revertSongPostProcessing(songId);
+    stopPolling(songId);
+    clearRun(songId);
+    // Announced even when the server had nothing left to remove. `removed:
+    // false` means some other surface got there first, so this client is the
+    // stale one — exactly the case that most needs correcting.
     window.dispatchEvent(new CustomEvent('song-postprocess-reverted', {
       detail: { songId },
     }));
+    return removed;
+  } catch (err: any) {
+    // A revert that fails silently is indistinguishable from one that worked
+    // but did not redraw — which is precisely how a successful playlist revert
+    // read as a dead button. Put it where runs report themselves.
+    setRun(songId, {
+      title: title || _runs[songId]?.title || 'Untitled',
+      status: 'failed',
+      stage: 'Failed',
+      error: `Could not remove the processed version: ${err.message}`,
+      alreadyProcessed: false,
+    });
+    throw err;
   }
-  return removed;
 }
 
 /** Drop a finished run from the activity panel. */

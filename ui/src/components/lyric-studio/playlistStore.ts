@@ -91,6 +91,19 @@ export function isInPlaylist(id: string): boolean {
   return read().some(i => i.id === id);
 }
 
+/**
+ * Patch fields on an item already in the playlist.
+ *
+ * addToPlaylist() early-returns on a duplicate id, so before this there was no
+ * way at all to refresh an entry: a playlist item was whatever it happened to
+ * be when it was added, forever.
+ */
+export function updatePlaylistItem(id: string, patch: Partial<PlaylistItem>): void {
+  const list = read();
+  if (!list.some(i => i.id === id)) return;
+  write(list.map(i => (i.id === id ? { ...i, ...patch } : i)), true);
+}
+
 export function reorderPlaylist(items: PlaylistItem[]): void { write(items, true); }
 
 export function moveItem(id: string, direction: 'up' | 'down'): void {
@@ -132,3 +145,24 @@ export function usePlaylist() {
 
   return { items, add, remove, clear, isIn, move, reorder };
 }
+
+// ── Staying in step with post-processing ─────────────────────────────────────
+//
+// Playlist entries are snapshots in localStorage, and nothing used to update
+// them. So removing a track's post-processed version left the playlist still
+// advertising a mastered file that had just been deleted: the row kept
+// offering "Remove Post-Processed Version" (making a revert that had actually
+// succeeded look like it did nothing) and playback still had a dead URL to
+// reach for.
+//
+// Registered at module scope so it applies whether or not the playlist sidebar
+// is open.
+window.addEventListener('song-postprocessed', (e: Event) => {
+  const { songId, masteredAudioUrl } = (e as CustomEvent).detail || {};
+  if (songId && masteredAudioUrl) updatePlaylistItem(songId, { masteredAudioUrl });
+});
+
+window.addEventListener('song-postprocess-reverted', (e: Event) => {
+  const { songId } = (e as CustomEvent).detail || {};
+  if (songId) updatePlaylistItem(songId, { masteredAudioUrl: '' });
+});
