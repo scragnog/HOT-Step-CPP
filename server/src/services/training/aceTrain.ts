@@ -496,7 +496,12 @@ export function buildTrainDitArgs(input: {
     ...(o.initAdapter ? [] : ['--layers', String(o.layers)]),
     '--crop', String(o.crop),
     '--crop-min', String(o.cropMin),
-    '--crop-max', String(o.cropMax),
+    // 0 = don't pass the flag. The engine treats an EXPLICIT --crop-max as a
+    // user pin that must never be moved, and only lifts the default cap to the
+    // dataset's longest track in flash mode — so always emitting it would kill
+    // the lift for every server-launched run (the day-one-dead-feature trap,
+    // one level up).
+    ...(o.cropMax > 0 ? ['--crop-max', String(o.cropMax)] : []),
     '--crop-anchor', o.cropAnchor,
     '--crop-mode', o.cropMode,
     '--crop-start-frac', String(o.cropStartFrac),

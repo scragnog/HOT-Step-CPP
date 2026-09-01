@@ -132,7 +132,9 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   layers: 0,
   crop: 0,
   cropMin: 375,
-  cropMax: 1250,
+  // 0 = no pin: the engine lifts the cap to the dataset's longest track in
+  // flash mode. A number pins it in either mode (flash included).
+  cropMax: 0,
   learningRate: 0.0005,
   gradAccum: 4,
   gradClip: 1.0,
@@ -155,18 +157,21 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   milestoneStep: 0,
   milestoneKeep: 6,
   vramReserveMb: 2048,
-  // F32, not bf16 (Rob, 2026-07-30). TRAIN_DIT_LOKR_DEFAULTS spreads this object
-  // and doesn't override mirror, so LoKR inherits it too. Costs VRAM — the F32
-  // mirror is twice the BF16 one — and gives up BF16 tensor cores on the
-  // mirrored GEMMs. Precision over speed, same call as the LM's f32-window.
-  mirror: 'f32',
+  // bf16 unconditionally (Rob, 2026-09-01: "if bf16 will be faster and/or use
+  // less vram, that should be the default") — half the mirror VRAM, BF16
+  // tensor cores under bwd 'mm', ~7e-5 drift (docs/TRAINING.md). Supersedes
+  // the 2026-07-30 "F32, not bf16" call. TRAIN_DIT_LOKR_DEFAULTS spreads this
+  // object, so LoKR inherits it too.
+  mirror: 'bf16',
   // MUL_MAT activation-gradient formulation. 'mm' mirrors the server default
   // (2026-07-29): identical maths to out_prod but dtype-agnostic, so the BF16
   // mirror above rides BF16 tensor cores instead of being promoted to F32.
   bwd: 'mm',
-  // 'exact' (2026-09-01) — the byte-identical dit_attn_f32 graph. 'flash' is
-  // opt-in: experimental, and the only way to reach full-song crops.
-  attnBackend: 'exact',
+  // 'flash' by default (2026-09-01, Rob-directed after the smoke test): fused
+  // attention, full-song crops via the lifted crop cap. Unchecking the box
+  // returns to the byte-identical exact graph AND restores the exact-mode
+  // companions (f32 mirror, cropMax 1250) — see the checkbox handler.
+  attnBackend: 'flash',
   // Muon is the DEFAULT (2026-07-30). The 10-epoch comparison that suggested
   // parity was too short a window: over a full run Muon reached ma5 0.6 in 161
   // epochs against AdamW's 227, and once the Newton-Schulz was bucketed that
@@ -386,6 +391,9 @@ export const TrainDitForm: React.FC<Props> = ({
     quality: q,
     ...DIT_QUALITY_PRESETS[q],
     ...(value.adapterType === 'lokr' ? { targetLoss: DIT_LOKR_TARGET_LOSS[q], epochs: DIT_LOKR_EPOCHS[q] } : {}),
+    // Presets carry exact-mode crop caps; re-pinning cropMax in flash mode
+    // would silently kill the full-song lift.
+    ...(value.attnBackend === 'flash' ? { cropMax: 0 } : {}),
   });
 
   // §4: switching adapter type swaps the WHOLE form state to that type's
@@ -436,7 +444,9 @@ export const TrainDitForm: React.FC<Props> = ({
     : value.crop;
 
   // cropMax below cropMin is a 400 from the server (§4.5 step 7); flag it here.
-  const cropRangeOk = value.cropMax >= value.cropMin;
+  // 0 = unpinned (flash mode lifts the cap server-side), so only a real pin
+  // has to clear cropMin.
+  const cropRangeOk = value.cropMax === 0 || value.cropMax >= value.cropMin;
   const tWindowOk = value.tMin < value.tMax;
   const isLokr = value.adapterType === 'lokr';
   // Server range: -1 or [2,64] (§2.1). 0/1/negative-not-(-1) values are refused.
@@ -766,11 +776,13 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('cropMax', 'Default 1250 frames (≈50 s) · 128–8192')}
+            {P('cropMax', value.attnBackend === 'flash'
+              ? '0 = auto — lifts to the dataset’s longest track · set a number to pin'
+              : 'Default 1250 frames (≈50 s) · 128–8192')}
             <input
-              type="number" min={128} max={8192} step={1}
+              type="number" min={0} max={8192} step={1}
               value={value.cropMax} disabled={lock}
-              onChange={(e) => onChange({ cropMax: num(e.target.value, 1250) })}
+              onChange={(e) => onChange({ cropMax: num(e.target.value, value.attnBackend === 'flash' ? 0 : 1250) })}
               className={`${FIELD}${cropRangeOk ? '' : ' border-red-500/50'}`}
             />
           </label>
@@ -1004,10 +1016,16 @@ export const TrainDitForm: React.FC<Props> = ({
                 type="checkbox"
                 checked={value.attnBackend === 'flash'}
                 disabled={lock}
-                onChange={(e) => onChange({ attnBackend: e.target.checked ? 'flash' : 'exact' })}
+                // The toggle carries the crop cap with it: flash unpins it so
+                // the engine can lift to full-song; exact restores the classic
+                // 1250. The mirror is NOT coupled — bf16 is the default in
+                // both modes (Rob, 2026-09-01).
+                onChange={(e) => onChange(e.target.checked
+                  ? { attnBackend: 'flash', cropMax: 0 }
+                  : { attnBackend: 'exact', cropMax: 1250 })}
                 className="accent-amber-500"
               />
-              {P('attnBackend', 'Default off · exact attention', CHECK_LABEL)}
+              {P('attnBackend', 'Default on · full-song crops', CHECK_LABEL)}
             </label>
             <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.dit.attnBackendHelp')}</span>
           </div>

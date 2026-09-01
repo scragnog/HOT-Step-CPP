@@ -2897,7 +2897,12 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     const layers = numOpt(body.layers, 0);
     const crop = numOpt(body.crop, 0);
     const cropMin = numOpt(body.cropMin, 375);
-    const cropMax = numOpt(body.cropMax, 1250);
+    // Parsed early because cropMax's default depends on it. In flash mode the
+    // default is 0 = "no pin": aceTrain then omits --crop-max entirely and the
+    // engine lifts the cap to the dataset's longest track. An explicit number
+    // is a pin, in either mode.
+    const attnBackend = body.attnBackend === 'flash' ? 'flash' as const : 'exact' as const;
+    const cropMax = numOpt(body.cropMax, attnBackend === 'flash' ? 0 : 1250);
     // Crop regime (2026-08-29): song-anchored positions + structured draws are
     // the defaults for every run — the batch pipeline POSTs {} and inherits
     // them. 'zero'/'random' remain reachable for A/B archaeology only.
@@ -2974,7 +2979,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
         ? 'lokrFactor must be -1 or between 2 and 64' : null)
       ?? outOfRange('layers', layers, 0, 64)
       ?? outOfRange('cropMin', cropMin, 128, 8192)
-      ?? outOfRange('cropMax', cropMax, 128, 8192)
+      ?? (cropMax > 0 ? outOfRange('cropMax', cropMax, 128, 8192) : null)
       ?? outOfRange('gradAccum', gradAccum, 1, 64)
       ?? outOfRange('gradClip', gradClip, 0, 100)
       ?? outOfRange('warmupRatio', warmupRatio, 0, 0.5)
@@ -3007,7 +3012,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'crop must be 0 or between 128 and 8192 frames' });
       return;
     }
-    if (cropMax < cropMin) {
+    if (cropMax > 0 && cropMax < cropMin) {
       res.status(400).json({ error: 'cropMax must be greater than or equal to cropMin' });
       return;
     }
@@ -3156,7 +3161,10 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       // Frozen-weight mirror precision. Default is 'bf16' (2026-07-29); only
       // the exact string 'f32' opts back out. The engine itself falls back to
       // f32 with a warning on a non-CUDA backend (dit-train-run.h).
-      mirror: body.mirror === 'bf16' ? 'bf16' : 'f32',
+      // bf16 default (Rob, 2026-09-01): half the mirror VRAM and BF16 tensor
+      // cores under --bwd mm, at the documented ~7e-5 drift. Supersedes the
+      // 2026-07-30 f32 call; f32 stays reachable for exact-replica runs.
+      mirror: body.mirror === 'f32' ? 'f32' : 'bf16',
       // MUL_MAT activation-gradient formulation. Default 'mm' (2026-07-29);
       // only the exact string 'outprod' opts back out to upstream ggml's
       // F32-only out_prod backward.
@@ -3182,7 +3190,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       // empty bag no longer appends an eval pass to every adapter in a sweep.
       calibrate: body.calibrate === true,
       calibrateRepoint: body.calibrateRepoint !== false,
-      attnBackend: body.attnBackend === 'flash' ? 'flash' : 'exact',
+      attnBackend,
     };
 
     const job = queue.startTrainDitJob(ds.id, opts);
