@@ -13,11 +13,14 @@
 
 import { useSyncExternalStore } from 'react';
 import type { Song } from '../types';
-import { runSongPostProcessing, getSongPostProcessingStatus } from '../services/api';
+import { runSongPostProcessing, getSongPostProcessingStatus, revertSongPostProcessing } from '../services/api';
 import { useGlobalParamsStore } from './globalParamsStore';
 
 export interface PostProcessRun {
   songId: string;
+  /** Kept on the run so the activity panel can name it without holding the
+   *  whole song — the row the click came from may be unmounted by then. */
+  title: string;
   jobId?: string;
   status: 'starting' | 'pending' | 'running' | 'succeeded' | 'failed';
   stage: string;
@@ -37,7 +40,7 @@ function notify(): void {
 }
 
 function setRun(songId: string, patch: Partial<PostProcessRun>): void {
-  const prev = _runs[songId] || { songId, status: 'starting' as const, stage: '' };
+  const prev = _runs[songId] || { songId, title: '', status: 'starting' as const, stage: '' };
   _runs = { ..._runs, [songId]: { ...prev, ...patch, songId } };
   notify();
 }
@@ -127,11 +130,14 @@ function startPolling(songId: string, jobId: string): void {
         window.dispatchEvent(new CustomEvent('song-postprocessed', {
           detail: { songId, masteredAudioUrl: status.masteredAudioUrl },
         }));
-        // Leave the succeeded state up briefly so the surface can show it.
-        setTimeout(() => clearRun(songId), 4000);
       } else if (status.status === 'failed') {
         stopPolling(songId);
       }
+      // Finished runs are deliberately NOT auto-cleared. A pass takes minutes,
+      // and a state that evaporates on a timer means a run you were not
+      // watching at that exact moment leaves no evidence it ever happened —
+      // which is indistinguishable from the feature not working. The activity
+      // panel keeps them until dismissed.
     } catch (err: any) {
       stopPolling(songId);
       setRun(songId, { status: 'failed', stage: 'Failed', error: err.message });
@@ -154,7 +160,12 @@ export async function startPostProcessing(song: Song): Promise<void> {
   const availability = canPostProcess(song);
   if (!availability.enabled) throw new Error(availability.reason);
 
-  setRun(song.id, { status: 'starting', stage: 'Queueing...', error: undefined });
+  setRun(song.id, {
+    title: song.title || 'Untitled',
+    status: 'starting',
+    stage: 'Queueing...',
+    error: undefined,
+  });
 
   try {
     const params = useGlobalParamsStore.getState().getGlobalParams({ postProcessingEnabled: true });
@@ -167,8 +178,26 @@ export async function startPostProcessing(song: Song): Promise<void> {
   }
 }
 
-/** Drop a failed run from the UI once the user has read the error. */
-export function dismissPostProcessing(songId: string): void {
+/**
+ * Remove a song's post-processed version so it can be run again.
+ *
+ * Clears any local run record too — the "complete" badge describes a file that
+ * no longer exists once this returns.
+ */
+export async function revertPostProcessing(song: Song): Promise<boolean> {
+  const { removed } = await revertSongPostProcessing(song.id);
+  stopPolling(song.id);
+  clearRun(song.id);
+  if (removed) {
+    window.dispatchEvent(new CustomEvent('song-postprocess-reverted', {
+      detail: { songId: song.id },
+    }));
+  }
+  return removed;
+}
+
+/** Drop a finished run from the activity panel. */
+export function dismissRun(songId: string): void {
   stopPolling(songId);
   clearRun(songId);
 }
@@ -177,6 +206,12 @@ export function dismissPostProcessing(songId: string): void {
 
 export function usePostProcessRuns(): Record<string, PostProcessRun> {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/** Runs worth showing in the activity panel, newest interaction first. */
+export function usePostProcessRunList(): PostProcessRun[] {
+  const runs = usePostProcessRuns();
+  return Object.values(runs);
 }
 
 /** The active run for one song, or undefined. */

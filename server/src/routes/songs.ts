@@ -12,7 +12,7 @@ import { deleteAudioGenerationsByJobIds } from '../db/lireekDb.js';
 import { cropWavFile, cropLrcFile } from '../services/audioCrop.js';
 import { analyzeAndSaveDiscoData } from '../services/disco-analyzer.js';
 import {
-  startRePostProcess, checkPpEligibility, requestedPpStages,
+  startRePostProcess, checkPpEligibility, requestedPpStages, revertPostProcessing,
   getRePostProcessJob, findRePostProcessJobBySong,
 } from '../services/generation/rePostProcess.js';
 
@@ -639,6 +639,22 @@ router.get('/:id/postprocess', (req, res) => {
     error: job.error,
     masteredAudioUrl: job.masteredAudioUrl,
   });
+});
+
+// DELETE /api/songs/:id/postprocess — throw away the post-processed version
+//
+// The raw render is untouched; only the derived _mastered.wav goes. Exists so
+// the no-double-cook rule cannot trap a track: a pass you regret (or one run
+// with the wrong settings) can be undone and re-run properly.
+router.delete('/:id/postprocess', (req, res) => {
+  try {
+    const song = getDb().prepare('SELECT * FROM songs WHERE id = ?').get(req.params.id) as any;
+    const removed = revertPostProcessing(song);
+    res.json({ removed, songId: req.params.id });
+  } catch (err: any) {
+    console.error('[PostProcess] Revert failed:', err.message);
+    res.status(err.status || 500).json({ error: err.message });
+  }
 });
 
 // Track in-flight extractions to prevent duplicate SuperSep jobs

@@ -82,8 +82,23 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
         return updated;
       });
     };
+    const onReverted = (e: Event) => {
+      const { songId } = (e as CustomEvent).detail || {};
+      if (!songId) return;
+      setSongs(prev => {
+        const updated = prev.map(s =>
+          s.id === songId ? { ...s, mastered_audio_url: '' } : s
+        );
+        _cache.set(cacheKey, { songs: updated, key: refreshKey });
+        return updated;
+      });
+    };
     window.addEventListener('song-postprocessed', onProcessed);
-    return () => window.removeEventListener('song-postprocessed', onProcessed);
+    window.addEventListener('song-postprocess-reverted', onReverted);
+    return () => {
+      window.removeEventListener('song-postprocessed', onProcessed);
+      window.removeEventListener('song-postprocess-reverted', onReverted);
+    };
   }, [cacheKey, refreshKey]);
 
   useEffect(() => {

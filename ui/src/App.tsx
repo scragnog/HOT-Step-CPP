@@ -21,6 +21,7 @@ import { mm3StreamEnsureTakes, useMm3StreamAudio } from './stores/mm3StreamStore
 import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
 import { RestoredQueueBanner } from './components/shared/RestoredQueueBanner';
 import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
+import { PostProcessDock } from './components/shared/PostProcessActivity';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
 import { Player } from './components/player/Player';
 import { Waveform } from './components/player/Waveform';
@@ -706,6 +707,24 @@ const AppContent: React.FC = () => {
     };
     window.addEventListener('song-postprocessed', handler);
     return () => window.removeEventListener('song-postprocessed', handler);
+  }, []);
+
+  // ...and the reverse, when a processed version is thrown away.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { songId } = (e as CustomEvent).detail || {};
+      if (!songId) return;
+      setSongs(prev => prev.map(s =>
+        s.id === songId ? { ...s, masteredAudioUrl: '', mastered_audio_url: '' } : s
+      ));
+      setSelectedSong(prev =>
+        prev?.id === songId
+          ? { ...prev, masteredAudioUrl: '', mastered_audio_url: '' } as Song
+          : prev
+      );
+    };
+    window.addEventListener('song-postprocess-reverted', handler);
+    return () => window.removeEventListener('song-postprocess-reverted', handler);
   }, []);
 
   // Listen for song-created events (fired by audioGenQueueStore on completion)
@@ -1478,6 +1497,11 @@ const AppContent: React.FC = () => {
         />
         {/* Global A/B comparison mini-bar — visible from any view when both tracks are pinned */}
         <ABMiniBar />
+        {/* Post-processing runs for minutes with no other on-screen trace.
+            Docked at the root so it is visible from every view, Library
+            included. */}
+        <PostProcessDock />
+
         <Player
           currentSong={currentSong}
           isPlaying={isPlaying}

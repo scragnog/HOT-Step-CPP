@@ -132,6 +132,51 @@ export function checkPpEligibility(song: any): PpEligibility {
 }
 
 /**
+ * Throw away a song's post-processed version: delete the file and clear the
+ * column, leaving the raw render exactly as it was.
+ *
+ * This is the escape hatch for the no-double-cook rule. Refusing a second pass
+ * is right — the chain is not idempotent — but without a way back, one bad
+ * pass locks a keeper out of post-processing forever. That is not theoretical:
+ * a pass run with an empty params object produced a VST-chain-only master and
+ * blocked the real one.
+ *
+ * Returns false when the song had no mastered version to remove.
+ */
+export function revertPostProcessing(song: any): boolean {
+  if (!song) throw Object.assign(new Error('Song not found'), { status: 404 });
+  if (inFlight.has(song.id)) {
+    throw Object.assign(
+      new Error('Post-processing is still running for this track'),
+      { status: 409 },
+    );
+  }
+
+  const masteredUrl: string = song.mastered_audio_url || '';
+  if (!masteredUrl) return false;
+
+  // Clear the row first. A failed unlink (file locked by a player) must not
+  // leave the song pointing at a file we have decided is gone.
+  getDb().prepare("UPDATE songs SET mastered_audio_url = '' WHERE id = ?").run(song.id);
+
+  const filePath = path.join(config.data.audioDir, path.basename(masteredUrl));
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (err: any) {
+    console.warn(`[PostProcess] Could not delete ${filePath}: ${err.message}`);
+  }
+
+  // Any finished job record for this song is now describing a file that no
+  // longer exists; drop it so the UI cannot offer a stale "complete".
+  for (const [jobId, job] of jobs) {
+    if (job.songId === song.id) jobs.delete(jobId);
+  }
+
+  console.log(`[PostProcess] Reverted song ${song.id} (removed ${masteredUrl})`);
+  return true;
+}
+
+/**
  * Queue a post-processing pass for an already-rendered song and return its job
  * id immediately. The pass itself waits for the GPU lane, so it never competes
  * with a running generation.

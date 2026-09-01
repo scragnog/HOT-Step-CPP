@@ -22,14 +22,14 @@ import React, { useRef, useState, useLayoutEffect } from 'react';
 import ReactDOM from 'react-dom';
 import {
   MoreHorizontal, RotateCcw, Download, Disc3, Tags, Trash2, Upload,
-  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle,
+  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle, Undo2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song, UnifiedRecentSong } from '../../types';
 import { songToTrack } from '../../stores/playbackStore';
 import { useABCompareSelector, setTrackA, setTrackB } from '../../stores/abCompareStore';
 import {
-  startPostProcessing, canPostProcess, dismissPostProcessing, usePostProcessRun,
+  startPostProcessing, canPostProcess, revertPostProcessing, dismissRun, usePostProcessRun,
 } from '../../stores/postProcessStore';
 import { openCoverArtPrompt } from '../library/CoverArtPromptModal';
 
@@ -317,6 +317,17 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
   const close = () => setOpen(false);
   const act = (fn: () => void) => { fn(); close(); };
 
+  const hasMastered = !!(song.masteredAudioUrl || (song as any).mastered_audio_url);
+
+  const handleRevert = async () => {
+    close();
+    try {
+      await revertPostProcessing(song);
+    } catch (err: any) {
+      console.error('[PostProcess] Revert failed:', err.message);
+    }
+  };
+
   const handlePostProcess = async () => {
     close();
     try {
@@ -372,11 +383,23 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
               : pp.reason}
             tone="text-violet-400 hover:bg-violet-500/10"
           />
+          {/* The way back out. Without it a single bad pass — wrong settings,
+              or a chain that was half-configured — locks the track out of
+              post-processing for good. */}
+          {hasMastered && (
+            <Item
+              icon={<Undo2 size={14} />}
+              label={t('songActions.removePostProcess', 'Remove Post-Processed Version')}
+              onClick={handleRevert}
+              title="Deletes the processed file so the chain can be run again. The raw render is untouched."
+              tone="text-amber-400 hover:bg-amber-500/10"
+            />
+          )}
           {ppFailed && (
             <Item
               icon={<AlertCircle size={14} />}
               label="Dismiss PP error"
-              onClick={() => act(() => dismissPostProcessing(song.id))}
+              onClick={() => act(() => dismissRun(song.id))}
               title={run?.error}
               tone="text-red-400 hover:bg-red-500/10"
             />

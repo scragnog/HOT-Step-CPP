@@ -500,6 +500,23 @@ export async function getSongPostProcessingStatus(
   return res.json();
 }
 
+/**
+ * Throw away a song's post-processed version — the raw render is untouched.
+ *
+ * The escape hatch for the no-double-cook rule: refusing a second pass is
+ * right, but a track has to be able to get out of a bad first one.
+ */
+export async function revertSongPostProcessing(
+  songId: string
+): Promise<{ removed: boolean; songId: string }> {
+  const res = await fetch(`/api/songs/${songId}/postprocess`, { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function retranscribeLyrics(
   songId: string,
   options?: { model?: string; language?: string; beamSize?: number }
