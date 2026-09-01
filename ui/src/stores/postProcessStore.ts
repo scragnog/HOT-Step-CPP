@@ -109,6 +109,10 @@ export function canPostProcess(song: Song | null | undefined): PpAvailability {
 
 const POLL_MS = 1500;
 
+/** How long a completed run stays on the dock before retiring itself. Long
+ *  enough to notice the tick, short enough that a batch drains on its own. */
+const SUCCESS_LINGER_MS = 4000;
+
 function stopPolling(songId: string): void {
   const timer = _pollers.get(songId);
   if (timer) { clearInterval(timer); _pollers.delete(songId); }
@@ -133,14 +137,20 @@ function startPolling(songId: string, jobId: string): void {
         window.dispatchEvent(new CustomEvent('song-postprocessed', {
           detail: { songId, masteredAudioUrl: status.masteredAudioUrl },
         }));
+        // Show the tick briefly, then retire the run so the dock empties
+        // itself and disappears. Safe to do now that the dock exists: the run
+        // was visible for its whole duration, and the track itself carries the
+        // lasting evidence (a mastered version, and the M/O switch).
+        //
+        // FAILURES ARE NOT CLEARED HERE, deliberately. A success that
+        // disappears is tidy; an error that disappears is a bug you never find
+        // out about.
+        setTimeout(() => {
+          if (_runs[songId]?.status === 'succeeded') clearRun(songId);
+        }, SUCCESS_LINGER_MS);
       } else if (status.status === 'failed') {
         stopPolling(songId);
       }
-      // Finished runs are deliberately NOT auto-cleared. A pass takes minutes,
-      // and a state that evaporates on a timer means a run you were not
-      // watching at that exact moment leaves no evidence it ever happened —
-      // which is indistinguishable from the feature not working. The activity
-      // panel keeps them until dismissed.
     } catch (err: any) {
       stopPolling(songId);
       setRun(songId, { status: 'failed', stage: 'Failed', error: err.message });

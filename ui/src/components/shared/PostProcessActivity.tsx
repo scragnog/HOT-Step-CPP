@@ -5,8 +5,10 @@
 // turning into a spinner — so firing four of them and walking away looked
 // exactly like the feature doing nothing at all. That is the bug this fixes.
 //
-// Finished runs stay until dismissed rather than fading on a timer, so a pass
-// that completed while you were on another page still leaves evidence.
+// A completed run shows its tick for a moment and then retires itself, so a
+// batch drains the dock and the dock disappears. Failures stay put until
+// dismissed — a success that vanishes is tidy, an error that vanishes is a bug
+// you never hear about.
 
 import React from 'react';
 import { Loader2, CheckCircle2, XCircle, X, Sparkles, Undo2 } from 'lucide-react';
