@@ -99,6 +99,18 @@ jobs:
           cd engine/vendor/vst3sdk
           git submodule update --init base cmake pluginterfaces public.sdk
 
+      # Same step as release.yml. This used to be survivable to skip — every
+      # patch was optional behaviour — but flash-attn-train.patch adds ggml
+      # symbols the trainer source now REFERENCES, so an unpatched submodule
+      # no longer compiles at all.
+      - name: Apply engine patches
+        run: |
+          for p in engine/patches/*.patch; do
+            echo "== $p"
+            git apply --stat    "$p"
+            git apply --verbose "$p"
+          done
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
