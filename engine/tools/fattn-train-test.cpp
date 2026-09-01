@@ -26,8 +26,17 @@
 // Masks come from dit_sa_mask / dit_ca_mask in train/dit-data.h — the very
 // functions the trainer ships — never hand-rolled here.
 //
-// Usage: fattn-train-test [--backend cpu|cuda] [--extra] [--large] [--cheap]
-//                         [--quick] [--fwd-only] [--threads N] [--bench]
+// Usage: fattn-train-test [--backend cpu|cuda] [--prec f32|tf32] [--extra]
+//                         [--large] [--cheap] [--quick] [--fwd-only]
+//                         [--threads N] [--bench]
+//   --prec      f32 (default) runs v1's scalar kernels and gates at 1e-4; tf32
+//               sets GGML_PREC_DEFAULT on the op, which selects the tensor-core
+//               kernels on sm_80+, and gates at 5e-3 with a 1e-5 FLOOR -- below
+//               that the error is f32-sized and the TF32 kernel cannot have run.
+//               The default is what keeps archived command lines meaning what
+//               they meant. --prec tf32 without --backend cuda is an error, not
+//               an ignore: the CPU impl ignores the flag by design, so it would
+//               print a tf32 header over a run that never touched a tensor core.
 //   --backend cuda  run arm B on the GPU backend; arm A (the reference chain)
 //                   stays on the CPU backend, so the comparison is genuinely
 //                   CPU-vs-CUDA. Whether the gradients are compared too is NOT
@@ -38,9 +47,13 @@
 //                   TWICE and requires O, LSE, dQ, dK and dV to be bitwise
 //                   identical.
 //   --extra     append the cases the plan doc\'s gate-1 grid does not carry:
-//               S_kv != S (the cross-attention shape, spec 7.2) and hand-built
-//               fully-masked query rows (spec 4.4 / 7.3.9). Off by default so
-//               the gate-1 case count stays what the plan doc quotes.
+//               S_kv != S (the cross-attention shape, spec 7.2), hand-built
+//               fully-masked query rows (spec 4.4 / 7.3.9), and the three
+//               investigation-B2 rows — B = 3 at native GQA 8/32 against a
+//               reference that expands K/V to Nh inside its own graph, the
+//               pairing the trainer emits once flash mode stops calling
+//               dit_expand_heads. Off by default so the gate-1 case count stays
+//               what the plan doc quotes.
 //   --large     append the one case this whole project exists for: S = S_kv =
 //               3000, B = 1, Nh = 32, Nkv = 8, D = 128, window mask. The
 //               REFERENCE CHAIN IS NOT RUN THERE — a retained [3000,3000,32]
@@ -51,9 +64,11 @@
 //   --cheap     drop the S = 1000 null-mask cases (the two slowest cells)
 //   --quick     stop at S = 198
 //   --fwd-only  debug: skip the backward expansion entirely
-//   --bench     skip the parity grid entirely and instead time FORWARD+BACKWARD
-//               on the CUDA backend for the manual dit_attn_f32 chain (autodiff)
-//               vs the fused ops, at S = S_kv in {625, 1250, 3000}, B = 1,
+//   --bench     skip the parity grid entirely and instead time THREE arms on the
+//               CUDA backend -- the manual dit_attn_f32 chain (autodiff), the
+//               fused ops in f32 (v1's kernels) and the fused ops in tf32 -- so
+//               the regression against v1 is visible in the same table as the
+//               target. At S = S_kv in {625, 1250, 3000}, B = 1,
 //               Nh = 32, Nkv = 8, D = 128, window mask, 10 warm-up + 50 timed
 //               iterations. Graph build + allocation happen once, outside the
 //               timed loop. If the manual arm cannot allocate at a given S (the
@@ -92,8 +107,43 @@ static void jl(const char * fmt, ...) {
     (void) fmt;
 }
 
-static const float PASS_REL = 1e-4f;
+// HOT-Step patch: flash-attn-train (TF32 pass) -- not a constant any more.
+// --prec tf32 moves the bar, and the [triage] block at the bottom of run_case
+// compares against it too, so leaving it at 1e-4 would fire that stderr line for
+// every tf32 case and bury the real signal.
+static float PASS_REL = 1e-4f;
+
+// The tf32 bar has a FLOOR as well as a ceiling. A 50x-looser bar with no lower
+// bound cannot tell "TF32 ran and was accurate" from "TF32 never ran": if the
+// dispatch silently falls back to v1 the worst rel err comes back around 3e-6,
+// sails under 5e-3 and reports as a tf32 pass. Measured f32-vs-CPU is 1.7e-6 to
+// 3.5e-6 and the expected TF32 figures are three orders above that, so the band
+// is wide and unambiguous. Zero disables the check (f32 mode).
+static float PASS_FLOOR = 0.0f;
+
+// The precision flag SET on the op. GGML_PREC_F32 selects v1's scalar kernels;
+// GGML_PREC_DEFAULT selects the TF32 tensor-core path where the backend has it.
+static ggml_prec g_prec = GGML_PREC_F32;
+
 static bool g_fwd_only = false;   // debug: skip the backward expansion entirely
+
+// Which kernel the CUDA backend ACTUALLY ran, read back from the same helper the
+// dispatch used (fattn-train-tf32-design.md 3.3 / 5.3). Resolved through the
+// backend registry rather than linked, because ggml-cuda is a loadable module --
+// and restating the flag we asked for would assert nothing at all.
+typedef const char * (*fa_last_prec_fn)(int dir);
+static fa_last_prec_fn g_last_prec = nullptr;
+
+static const char * last_prec(int dir) {
+    return g_last_prec ? g_last_prec(dir) : "n/a";
+}
+
+// First token of a resolved label ("tf32", or "f32" out of "f32 (D != 128)").
+static std::string prec_short(const char * label) {
+    std::string s(label ? label : "n/a");
+    const size_t sp = s.find(' ');
+    return sp == std::string::npos ? s : s.substr(0, sp);
+}
 
 // ─── the reference attention chain ──────────────────────────────────────────
 //
@@ -171,6 +221,17 @@ struct Case {
     // thing being avoided: at S = 3000 it retains a [3000,3000,32] softmax plus
     // its backward, which is ~4.6 GB of graph before a single gradient exists.
     bool        ref_fused = false;
+    // HOT-Step patch: flash-attn-train (investigation B2). The REFERENCE arm
+    // tiles K/V from Nkv to Nh heads inside its own graph — dit_expand_heads,
+    // reproduced on this tool's [D,S_kv,Nkv,B] layout — while the flash arm is
+    // handed the native-GQA tensors untouched. That is the exact pairing the
+    // trainer now emits at B > 1: exact mode expands (it must, ggml's mul_mat
+    // backward aborts on a broadcast src0 at B > 1), flash mode does not.
+    // Because the expansion lives in the graph and `k`/`v` stay the parameters,
+    // ggml's own repeat_back folds the reference's dK/dV back to [D,S_kv,Nkv,B]
+    // — so both arms hand back gradients at the same shape and the comparison
+    // needs no manual folding to trust.
+    bool        expand_ref = false;
 };
 
 struct Result {
@@ -186,6 +247,8 @@ struct Result {
     size_t flash_dev_free = 0;  // device free bytes at the flash arm's peak
     std::string maskzero = "n/a";
     std::string det      = "n/a";
+    std::string prec     = "n/a";   // the kernel that RAN, not the flag we asked for
+    std::string prec_bwd = "n/a";   // ... and the same question for the backward
     std::string note;
 };
 
@@ -385,9 +448,33 @@ static bool arm_run(Arm &                       a,
 
     if (flash) {
         a.pkd = ggml_flash_attn_train(a.ctx, a.q, a.k, a.v, a.m, scale);
+        // The BACK node inherits this through ggml_compute_backward: prec is a
+        // property of the op PAIR, not of one node (design 2 / 3.2).
+        ggml_flash_attn_train_set_prec(a.pkd, g_prec);
         a.o   = ggml_flash_attn_train_get_o(a.ctx, a.pkd);
     } else {
-        a.o = ref_attn_f32(a.ctx, a.q, a.k, a.v, a.m, scale);
+        ggml_tensor * rk = a.k;
+        ggml_tensor * rv = a.v;
+        if (c.expand_ref && c.Nkv > 0 && c.Nh > c.Nkv) {
+            // dit_expand_heads' trick on this tool's layout. The trainer expands
+            // [D,Nkv,S,B] -> [D,Nh,S,B]; here K/V are already in the permuted
+            // [D,S_kv,Nkv,B] shape, so the run of elements to replicate is
+            // D*S_kv rather than D. Same identity either way: reshape to a
+            // degenerate G axis, repeat it, and reshape back so the new head
+            // index is g + G*kv, i.e. head h reads KV head h/G — ggml's own
+            // mul_mat broadcast rule, and the one host_attn and the fused
+            // kernels both use. ggml_repeat (h -> h % Nkv) is NOT that mapping
+            // and would silently pair every head with the wrong KV head.
+            const int64_t G   = c.Nh / c.Nkv;
+            const int64_t run = c.D * c.S_kv;
+            rk = ggml_reshape_4d(a.ctx, ggml_repeat_4d(a.ctx, ggml_reshape_4d(a.ctx, a.k, run, 1, c.Nkv, c.B),
+                                                       run, G, c.Nkv, c.B),
+                                 c.D, c.S_kv, c.Nh, c.B);
+            rv = ggml_reshape_4d(a.ctx, ggml_repeat_4d(a.ctx, ggml_reshape_4d(a.ctx, a.v, run, 1, c.Nkv, c.B),
+                                                       run, G, c.Nkv, c.B),
+                                 c.D, c.S_kv, c.Nh, c.B);
+        }
+        a.o = ref_attn_f32(a.ctx, a.q, rk, rv, a.m, scale);
     }
     ggml_set_name(a.o, "o");
 
@@ -569,9 +656,13 @@ struct BenchArm {
 // destructor cleans up whatever was created) on allocation failure — EXPECTED
 // for the manual arm at large S (that is the point of this whole project), so
 // the caller reports it as a result cell rather than treating it as a crash.
-static bool bench_build(BenchArm & a, bool flash, int64_t S, int64_t S_kv, int64_t B,
+// arm 0 = manual (the autodiff'd dit_attn_f32 chain), 1 = fused f32 (v1
+// kernels), 2 = fused tf32 (the tensor-core forward). Three arms rather than
+// two so the regression against v1 is visible in the same table as the target.
+static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t B,
                         int64_t Nh, int64_t Nkv, int64_t D, ggml_backend_t be,
                         std::string & err) {
+    const bool flash = arm != 0;
     const float scale = 1.0f / std::sqrt((float) D);
 
     const size_t mem = ggml_tensor_overhead() * 8192 +
@@ -606,6 +697,7 @@ static bool bench_build(BenchArm & a, bool flash, int64_t S, int64_t S_kv, int64
     ggml_tensor * o;
     if (flash) {
         ggml_tensor * pkd = ggml_flash_attn_train(a.ctx, q, k, v, m, scale);
+        ggml_flash_attn_train_set_prec(pkd, arm == 2 ? GGML_PREC_DEFAULT : GGML_PREC_F32);
         o                 = ggml_flash_attn_train_get_o(a.ctx, pkd);
     } else {
         o = ref_attn_f32(a.ctx, q, k, v, m, scale);
@@ -618,7 +710,9 @@ static bool bench_build(BenchArm & a, bool flash, int64_t S, int64_t S_kv, int64
 
     a.gf = ggml_new_graph_custom(a.ctx, GGML_DEFAULT_GRAPH_SIZE, true);
     ggml_build_forward_expand(a.gf, loss);
-    ggml_build_backward_expand(a.ctx, a.gf, nullptr);
+    if (!g_fwd_only) {
+        ggml_build_backward_expand(a.ctx, a.gf, nullptr);
+    }
 
     a.buf = ggml_backend_alloc_ctx_tensors(a.ctx, be);
     if (!a.buf) {
@@ -659,15 +753,16 @@ struct BenchResult {
     bool        ok     = false;   // built AND ran clean through the timed loop
     double      ms      = 0.0;    // ms/iter over the 50 timed iterations
     size_t      buf     = 0;      // backend buffer bytes (VRAM high-water)
+    std::string prec    = "n/a";  // the forward kernel that actually ran
     std::string note;
 };
 
-static BenchResult bench_run(bool flash, int64_t S, int64_t S_kv, int64_t B, int64_t Nh,
+static BenchResult bench_run(int arm, int64_t S, int64_t S_kv, int64_t B, int64_t Nh,
                              int64_t Nkv, int64_t D, ggml_backend_t be) {
     BenchResult r;
     BenchArm    a;
     std::string err;
-    if (!bench_build(a, flash, S, S_kv, B, Nh, Nkv, D, be, err)) {
+    if (!bench_build(a, arm, S, S_kv, B, Nh, Nkv, D, be, err)) {
         r.note = err;
         return r;
     }
@@ -690,36 +785,76 @@ static BenchResult bench_run(bool flash, int64_t S, int64_t S_kv, int64_t B, int
     const int64_t t1 = ggml_time_us();
     r.ms            = (double) (t1 - t0) / 1000.0 / 50.0;
     r.ok            = true;
+    r.prec          = (arm == 0) ? "n/a" : prec_short(last_prec(0));
     return r;
+}
+
+// Mean live keys per query row for dit_sa_mask(S, win) -- the symmetric
+// (2*win + 1)-wide band clipped at the sequence ends, then rounded up to whole
+// key tiles, which is what the kernel actually pays for. Printed beside the
+// timings because it is the number that separates "the tile skip is not firing"
+// from "the inner loop is slow" (design 6.2, item 5).
+static double live_keys_per_row(int64_t S, int64_t win, int64_t bk) {
+    double tot = 0.0;
+    for (int64_t i = 0; i < S; i++) {
+        const int64_t lo = i - win < 0 ? 0 : i - win;
+        const int64_t hi = i + win >= S ? S - 1 : i + win;
+        const int64_t t0 = lo / bk;
+        const int64_t t1 = hi / bk;
+        int64_t live = 0;
+        for (int64_t t = t0; t <= t1; t++) {
+            const int64_t beg = t * bk;
+            const int64_t end = beg + bk < S ? beg + bk : S;
+            live += end - beg;
+        }
+        tot += (double) live;
+    }
+    return S > 0 ? tot / (double) S : 0.0;
 }
 
 static int run_bench(ggml_backend_t be_cuda) {
     const int64_t S_list[] = { 625, 1250, 3000 };
     const int64_t B = 1, Nh = 32, Nkv = 8, D = 128;
 
-    printf("fattn-train-test --bench — FORWARD+BACKWARD timing on %s\n",
-           ggml_backend_name(be_cuda));
-    printf("B=%lld Nh=%lld Nkv=%lld D=%lld  window mask  10 warm-up + 50 timed iters\n\n",
+    printf("fattn-train-test --bench — %s timing on %s\n",
+           g_fwd_only ? "FORWARD-ONLY" : "FORWARD+BACKWARD", ggml_backend_name(be_cuda));
+    printf("B=%lld Nh=%lld Nkv=%lld D=%lld  window mask  10 warm-up + 50 timed iters\n",
            (long long) B, (long long) Nh, (long long) Nkv, (long long) D);
-    printf("%-6s %-8s %12s %10s   %12s %10s\n",
-           "S", "arm", "ms/iter", "bufMB", "status", "");
+    printf("live keys per query row (tile-granular, BQ 64 / BK 16) is printed per S;\n"
+           "it is what decides whether a miss is a tile-skip problem or a throughput one.\n\n");
+    printf("%-6s %-11s %6s %12s %9s %10s   %-10s %s\n",
+           "S", "arm", "prec", "ms/iter", "vs manual", "bufMB", "status", "");
 
     for (size_t si = 0; si < sizeof(S_list) / sizeof(S_list[0]); si++) {
         const int64_t S = S_list[si];
-        for (int arm = 0; arm < 2; arm++) {
-            const bool  flash = (arm == 1);
-            const char * name = flash ? "fused" : "manual";
-            const BenchResult r = bench_run(flash, S, S, B, Nh, Nkv, D, be_cuda);
-            if (!r.built) {
-                printf("%-6lld %-8s %12s %10s   %12s %s\n",
-                       (long long) S, name, "n/a", "n/a", "SKIP", r.note.c_str());
-            } else if (!r.ok) {
-                printf("%-6lld %-8s %12s %10.1f   %12s %s\n",
-                       (long long) S, name, "n/a", (double) r.buf / (1024.0 * 1024.0),
-                       "FAIL", r.note.c_str());
+        printf("S=%lld: live keys/row %.1f (mask window 128, tiles of 16)\n",
+               (long long) S, live_keys_per_row(S, 128, 16));
+        double ms_manual = 0.0;
+        for (int arm = 0; arm < 3; arm++) {
+            static const char * names[3] = { "manual", "fused-f32", "fused-tf32" };
+            const char * name = names[arm];
+            const BenchResult r = bench_run(arm, S, S, B, Nh, Nkv, D, be_cuda);
+            if (arm == 0 && r.ok) {
+                ms_manual = r.ms;
+            }
+            char ratio[16];
+            if (r.ok && ms_manual > 0.0 && arm != 0) {
+                snprintf(ratio, sizeof(ratio), "%.2fx", r.ms / ms_manual);
             } else {
-                printf("%-6lld %-8s %12.3f %10.1f   %12s\n",
-                       (long long) S, name, r.ms, (double) r.buf / (1024.0 * 1024.0), "ok");
+                snprintf(ratio, sizeof(ratio), "%s", arm == 0 ? "1.00x" : "n/a");
+            }
+            if (!r.built) {
+                printf("%-6lld %-11s %6s %12s %9s %10s   %-10s %s\n",
+                       (long long) S, name, r.prec.c_str(), "n/a", "n/a", "n/a", "SKIP",
+                       r.note.c_str());
+            } else if (!r.ok) {
+                printf("%-6lld %-11s %6s %12s %9s %10.1f   %-10s %s\n",
+                       (long long) S, name, r.prec.c_str(), "n/a", "n/a",
+                       (double) r.buf / (1024.0 * 1024.0), "FAIL", r.note.c_str());
+            } else {
+                printf("%-6lld %-11s %6s %12.3f %9s %10.1f   %-10s\n",
+                       (long long) S, name, r.prec.c_str(), r.ms, ratio,
+                       (double) r.buf / (1024.0 * 1024.0), "ok");
             }
             fflush(stdout);
         }
@@ -849,6 +984,8 @@ static Result run_case(const Case & c, ggml_backend_t be_ref, ggml_backend_t be_
         }
         r.flash_buf      = fl.buf ? ggml_backend_buffer_get_size(fl.buf) : 0;
         r.flash_dev_free = fl.dev_free_at_peak;
+        r.prec           = prec_short(last_prec(0));   // forward direction
+        r.prec_bwd       = prec_short(last_prec(1));   // backward direction
     }
 
     r.ms = (double) (ggml_time_us() - t0) / 1000.0;
@@ -1051,6 +1188,37 @@ static Result run_case(const Case & c, ggml_backend_t be_ref, ggml_backend_t be_
     if (!r.ok && r.note.empty()) {
         r.note = "tolerance";
     }
+
+    // A tf32 run that quietly ran the f32 kernels passes every tolerance above
+    // and proves nothing, so it is failed on TWO independent grounds: the
+    // backend's own answer about which kernel it launched, and an error too
+    // small to have come from 10 mantissa bits.
+    if (r.ok && g_prec != GGML_PREC_F32) {
+        if (r.prec != "tf32") {
+            r.ok   = false;
+            r.note = "dispatch did not select the TF32 kernel: " + std::string(last_prec(0));
+        } else if (with_grads && r.prec_bwd != "tf32") {
+            // The backward is its own dispatch and its own three kernels. A
+            // forward that went TF32 while the backward quietly stayed on v1
+            // would pass every tolerance here AND be a different function from
+            // the one the forward's LSE was computed for (design 2).
+            r.ok   = false;
+            r.note = "backward did not select the TF32 kernels: " + std::string(last_prec(1));
+        } else {
+            float worst = r.fwd_rel;
+            if (with_grads) {
+                worst = std::fmax(worst, std::fmax(r.dq_rel, std::fmax(r.dk_rel, r.dv_rel)));
+            }
+            if (worst < PASS_FLOOR) {
+                r.ok   = false;
+                char buf[160];
+                snprintf(buf, sizeof(buf),
+                         "worst rel err %.3e is below the tf32 floor %.0e -- f32-sized, "
+                         "so the TF32 kernel cannot have run", (double) worst, (double) PASS_FLOOR);
+                r.note = buf;
+            }
+        }
+    }
     // Say so in the table rather than in a footnote: a row whose oracle is the
     // CPU fused impl is a weaker claim than one measured against the autodiff'd
     // chain, and it should read that way.
@@ -1087,6 +1255,11 @@ int main(int argc, char ** argv) {
     bool        bench = false;
     int         nth   = 0;
     std::string want_backend = "cpu";
+    // DEFAULTS TO f32, and that is not a preference: the recorded regression
+    // check is `fattn-train-test --backend cuda`, and a tf32 default would
+    // silently change both the kernel and the bar for anyone re-running it.
+    // Whoever wants the new kernels asks for them (design 5.3).
+    std::string want_prec = "f32";
     for (int i = 1; i < argc; i++) {
         const std::string a = argv[i];
         if (a == "--cheap") {
@@ -1109,9 +1282,15 @@ int main(int argc, char ** argv) {
                 fprintf(stderr, "[fattn-train-test] --backend takes cpu or cuda\n");
                 return 2;
             }
+        } else if (a == "--prec" && i + 1 < argc) {
+            want_prec = argv[++i];
+            if (want_prec != "f32" && want_prec != "tf32") {
+                fprintf(stderr, "[fattn-train-test] --prec takes f32 or tf32\n");
+                return 2;
+            }
         } else {
-            fprintf(stderr, "usage: fattn-train-test [--backend cpu|cuda] [--extra] [--large]"
-                            " [--cheap] [--quick] [--fwd-only] [--threads N] [--bench]\n");
+            fprintf(stderr, "usage: fattn-train-test [--backend cpu|cuda] [--prec f32|tf32] [--extra]"
+                            " [--large] [--cheap] [--quick] [--fwd-only] [--threads N] [--bench]\n");
             return 2;
         }
     }
@@ -1129,6 +1308,16 @@ int main(int argc, char ** argv) {
             fprintf(stderr, "[fattn-train-test] --bench requires a CUDA backend "
                             "(is ggml-cuda.dll beside the exe?)\n");
             return 2;
+        }
+        // Same resolved-kernel query the parity grid uses, so the bench's own
+        // `prec` column reports what ran rather than what was requested.
+        {
+            ggml_backend_dev_t bdev = ggml_backend_get_device(be_cuda);
+            ggml_backend_reg_t breg = bdev ? ggml_backend_dev_backend_reg(bdev) : nullptr;
+            if (breg) {
+                g_last_prec = (fa_last_prec_fn) ggml_backend_reg_get_proc_address(
+                        breg, "ggml_backend_cuda_fattn_train_last_prec");
+            }
         }
         const int rc = run_bench(be_cuda);
         ggml_backend_free(be_cuda);
@@ -1159,6 +1348,43 @@ int main(int argc, char ** argv) {
         }
     }
     const bool cuda_mode = (be_flash != be);
+
+    // --prec tf32 on a non-CUDA flash arm is a HARD ERROR, never an ignore:
+    // ignoring it prints a tf32 header and a green table having never touched a
+    // tensor core, which is a non-run that reports as a pass (design 5.3).
+    if (want_prec == "tf32") {
+        if (!cuda_mode) {
+            fprintf(stderr, "[fattn-train-test] --prec tf32 needs --backend cuda "
+                            "(the CPU impl ignores the flag and always computes in f32)\n");
+            if (be_flash != be) {
+                ggml_backend_free(be_flash);
+            }
+            ggml_backend_free(be);
+            return 2;
+        }
+        g_prec     = GGML_PREC_DEFAULT;
+        PASS_REL   = 5e-3f;    // measured: the CUDA exact path's own cuBLAS-TF32 rounding
+        PASS_FLOOR = 1e-5f;    // and the floor that says the kernel really ran
+    }
+
+    // The resolved-kernel query lives in the CUDA backend, which is a loadable
+    // module -- reached through the registry, never linked.
+    if (cuda_mode) {
+        ggml_backend_dev_t fdev = ggml_backend_get_device(be_flash);
+        ggml_backend_reg_t freg = fdev ? ggml_backend_dev_backend_reg(fdev) : nullptr;
+        if (freg) {
+            g_last_prec = (fa_last_prec_fn) ggml_backend_reg_get_proc_address(
+                    freg, "ggml_backend_cuda_fattn_train_last_prec");
+        }
+        if (!g_last_prec && want_prec == "tf32") {
+            fprintf(stderr, "[fattn-train-test] this ggml-cuda build does not export "
+                            "ggml_backend_cuda_fattn_train_last_prec, so --prec tf32 could not "
+                            "be verified against the kernel that ran\n");
+            ggml_backend_free(be_flash);
+            ggml_backend_free(be);
+            return 2;
+        }
+    }
     if (nth <= 0) {
         nth = (int) std::thread::hardware_concurrency();
         if (nth <= 0) {
@@ -1186,6 +1412,12 @@ int main(int argc, char ** argv) {
     // That is exactly why the trainer pre-expands K/V with dit_expand_heads at
     // B > 1 (spec §1.1), so B = 2 is tested at the shape the trainer really
     // sends (Nkv == Nh) and GQA 32/8 is tested at B = 1, where it is real.
+    //
+    // HOT-Step patch: flash-attn-train (investigation B2) — "not testable" is
+    // about a reference fed native GQA, not about the geometry. Put the
+    // expansion INSIDE the reference graph and the broadcast disappears; the
+    // --extra `gqa-b2` rows do exactly that and test native GQA at B = 3, which
+    // is what flash mode now sends.
     const int64_t S_list[] = { 64, 129, 198, 384, 1000 };
 
     std::vector<Case> cases;
@@ -1251,6 +1483,49 @@ int main(int argc, char ** argv) {
                 }
             }
         }
+        // HOT-Step patch: flash-attn-train (investigation B2) — B > 1 GQA-native
+        // against the EXPANDED reference.
+        //
+        // The comment above the grid says GQA at B > 1 is not testable through
+        // the reference. That was true of a reference fed native GQA: mul_mat's
+        // backward asserts tmp->ne[3] == 1 when it folds a broadcast src0. It is
+        // NOT true of a reference that expands K/V first, because then there is
+        // no broadcast left to fold — which is precisely why the trainer's exact
+        // mode expands, and precisely the pairing B2 removes in flash mode. So
+        // these rows run arm A on the expanded chain (Nh == Nkv inside the
+        // attention) and arm B on the fused op at native Nkv 8, at B = 3, and
+        // compare the same three gradients at the same [D,S_kv,Nkv,B] shape.
+        // A wrong GQA head mapping in the kernels cannot survive this.
+        //
+        // Three shapes: the window mask (heads+batch broadcast), the per-element
+        // pad mask (ne3 == B, the 4-D broadcast the trainer sends at B > 1), and
+        // an S_kv != S cross-attention shape with dead key columns.
+        {
+            const int64_t Sb  = 198;
+            const int64_t Bb  = 3;
+            const int64_t Nkv8 = 8;
+            const struct { int64_t S, S_kv; MaskKind mk; } b2[3] = {
+                { Sb, Sb,  MASK_WIN },
+                { Sb, Sb,  MASK_WIN_PAD },
+                { Sb, 434, MASK_CA_COL },
+            };
+            for (int i = 0; i < 3; i++) {
+                Case c;
+                c.S    = b2[i].S;
+                c.S_kv = b2[i].S_kv;
+                c.B    = Bb;
+                c.Nh   = Nh;
+                c.Nkv  = Nkv8;
+                c.D    = D;
+                c.mask = b2[i].mk;
+                c.expand_ref = true;
+                char nm[96];
+                snprintf(nm, sizeof(nm), "S%lld:%lld/B%lld/%s/gqa-b2", (long long) c.S,
+                         (long long) c.S_kv, (long long) c.B, mask_name(c.mask));
+                c.name = nm;
+                cases.push_back(c);
+            }
+        }
         // fully-masked query rows (spec 4.4 / 7.3.9)
         const int64_t ds[2] = { 64, 198 };
         for (int di = 0; di < 2; di++) {
@@ -1294,10 +1569,19 @@ int main(int argc, char ** argv) {
                yn(probe_supports(be_flash, cases[0], false)),
                yn(probe_supports(be_flash, cases[0], true)));
     }
-    printf("Nh=%lld D=%lld   tol=%.0e   cases=%zu   determinism check: %s\n\n",
-           (long long) Nh, (long long) D, (double) PASS_REL, cases.size(), yn(cuda_mode));
-    printf("%-26s %5s %5s %3s %4s %11s  %10s %10s %10s %10s  %-14s %-12s %8s %8s  %s\n",
-           "case", "S", "S_kv", "B", "Nkv", "mask", "fwd_rel", "dQ_rel", "dK_rel", "dV_rel",
+    printf("Nh=%lld D=%lld   prec=%s   tol=%.0e%s   cases=%zu   determinism check: %s\n",
+           (long long) Nh, (long long) D, want_prec.c_str(), (double) PASS_REL,
+           PASS_FLOOR > 0.0f ? "  floor=1e-05" : "", cases.size(), yn(cuda_mode));
+    if (want_prec == "tf32") {
+        printf("the tf32 bar is the CUDA exact path's OWN measured rounding: its attention "
+               "mul_mats have always\nrun on cuBLAS TF32 (3.0e-3 on the SF1 selftest "
+               "where CPU shows 2.5e-6), so this is precision-par\nwith every adapter ever "
+               "trained in exact mode -- not a loosened gate. A tf32 row is NOT\ncomparable "
+               "with an archived f32 row and must not be pasted beside one.\n");
+    }
+    printf("\n");
+    printf("%-26s %5s %5s %3s %4s %11s %5s  %10s %10s %10s %10s  %-14s %-12s %8s %8s  %s\n",
+           "case", "S", "S_kv", "B", "Nkv", "mask", "prec", "fwd_rel", "dQ_rel", "dK_rel", "dV_rel",
            "masked-zero", "det", "ms", "flashMB", "verdict");
 
     // Device-level free memory, sampled once before anything is allocated, so
@@ -1326,9 +1610,9 @@ int main(int argc, char ** argv) {
         if (c.ref_fused && c.S >= 3000) {
             large_res = r;
         }
-        printf("%-26s %5lld %5lld %3lld %4lld %11s  %10.3e %s %s %s  %-14s %-12s %8.1f %8.1f  %s%s%s\n",
+        printf("%-26s %5lld %5lld %3lld %4lld %11s %5s  %10.3e %s %s %s  %-14s %-12s %8.1f %8.1f  %s%s%s\n",
                c.name.c_str(), (long long) c.S, (long long) c.S_kv, (long long) c.B,
-               (long long) c.Nkv, mask_name(c.mask),
+               (long long) c.Nkv, mask_name(c.mask), r.prec.c_str(),
                (double) r.fwd_rel,
                cell(r.grads, r.dq_rel).c_str(),
                cell(r.grads, r.dk_rel).c_str(),
@@ -1365,6 +1649,17 @@ int main(int argc, char ** argv) {
                    " (buffers + backend scratch + context)\n",
                    ((double) dev_free0 - (double) large_res.flash_dev_free) / (1024.0 * 1024.0));
         }
+    }
+
+    if (cuda_mode) {
+        // The two labels the DISPATCH produced, not the flag it was handed.
+        // They can differ: the backward has one constraint the forward does not
+        // (its dK/dV kernel stages dO with 8-byte loads), and a forward that
+        // rounded to TF32 paired with a backward that did not would recompute S
+        // in strict f32 against a TF32 forward's LSE -- two different functions,
+        // not two roundings. run_case fails that case rather than reporting it.
+        printf("\nkernels actually run on %s:  forward %s   backward %s\n",
+               ggml_backend_name(be_flash), last_prec(0), last_prec(1));
     }
 
     printf("\n%s — %d/%zu cases passed\n", failed == 0 ? "PASS" : "FAIL",

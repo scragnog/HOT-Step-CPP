@@ -54,9 +54,16 @@ enum DitAttnMode { DIT_ATTN_EXACT = 0, DIT_ATTN_FLASH = 1 };
 // Note what is NOT here: no ggml_cont on q/k/v. They arrive as permuted views
 // and the op reads them through nb[1..3] on purpose — materialising them would
 // hand back part of the saving (spec §1.1.3).
+//
+// HOT-Step patch: flash-attn-train — `prec` is the ARITHMETIC request, set on
+// the forward node only. ggml_compute_backward copies it onto the _BACK node it
+// builds, which is load-bearing: the backward recomputes S and reuses the
+// forward's LSE, so a backward rounding differently from its forward is not
+// rounding error, it is a different function (tf32 design §3.2).
 static ggml_tensor * dit_attn_flash(ggml_context * ctx, ggml_tensor * q, ggml_tensor * k, ggml_tensor * v,
-                                    ggml_tensor * mask, float scale) {
+                                    ggml_tensor * mask, float scale, ggml_prec prec) {
     ggml_tensor * packed = ggml_flash_attn_train(ctx, q, k, v, mask, scale);
+    ggml_flash_attn_train_set_prec(packed, prec);
     return ggml_flash_attn_train_get_o(ctx, packed);  // [D,Nh,S,B]
 }
 
@@ -101,6 +108,38 @@ static bool dit_flash_probe(ggml_backend_t backend, int D, int Nh, int Nkv, int 
     return *fwd_ok && *bwd_ok;
 }
 
+// HOT-Step patch: flash-attn-train
+//
+// Which arithmetic the backend's LAST fused-attention launch actually used
+// (dir 0 = forward, 1 = backward): "tf32", or "f32 (<reason>)" when the request
+// was overridden, or "n/a" when the backend has no such kernels or none has run.
+//
+// This is not a restatement of --attn. The request is a request: the CUDA
+// dispatch drops to v1's scalar kernels on pre-Ampere devices, at D != 128, and
+// on an 8-byte-unaligned view (tf32 design §3.3), so two runs whose logs both
+// say "flash" can differ in arithmetic depending on the GPU they landed on.
+// Resolved through the backend registry rather than linked, because ggml-cuda is
+// a loadable module and the trainer must build without it.
+static const char * dit_flash_last_prec(ggml_backend_t backend, int dir) {
+    typedef const char * (*fa_last_prec_fn)(int);
+    ggml_backend_dev_t dev = backend ? ggml_backend_get_device(backend) : nullptr;
+    ggml_backend_reg_t reg = dev ? ggml_backend_dev_backend_reg(dev) : nullptr;
+    if (!reg) {
+        return "n/a";
+    }
+    fa_last_prec_fn fn =
+        (fa_last_prec_fn) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cuda_fattn_train_last_prec");
+    return fn ? fn(dir) : "n/a";
+}
+
+// The two directions collapsed into one log field. They resolve through the same
+// helper and normally agree; when they do not, say so rather than pick one.
+static std::string dit_flash_prec_label(ggml_backend_t backend) {
+    const std::string f = dit_flash_last_prec(backend, 0);
+    const std::string b = dit_flash_last_prec(backend, 1);
+    return (f == b) ? f : ("fwd " + f + " / bwd " + b);
+}
+
 // ─── graph inputs (every one re-uploaded EVERY micro-step, §3.0) ────────────
 //
 // Every shape below carries an OPTIONAL trailing batch axis B (design B1). B == 1
@@ -138,6 +177,13 @@ struct DitInputs {
     // graph is textually the graph it always was. Default EXACT: every existing
     // caller keeps today's behaviour without touching a line.
     DitAttnMode attn_mode = DIT_ATTN_EXACT;
+    // HOT-Step patch: flash-attn-train — the arithmetic REQUESTED of the fused
+    // ops (--attn flash => GGML_PREC_DEFAULT, i.e. TF32 tensor cores where the
+    // backend has them; --attn flash-f32 => GGML_PREC_F32, v1's scalar kernels).
+    // Named for the request because the backend may override it (pre-sm_80,
+    // D != 128, unaligned view) and dit_train_log.json records the RESOLVED
+    // answer separately (tf32 design §3.5). Ignored entirely in exact mode.
+    ggml_prec attn_prec_req = GGML_PREC_DEFAULT;
 };
 
 // Named probes for the §6.2 V1 forward diff. Populated only when non-null, so
@@ -207,6 +253,24 @@ static ggml_tensor * dit_expand_heads(ggml_context * ctx, ggml_tensor * x, int D
     return ggml_reshape_4d(ctx, r, D, Nh, S, B);
 }
 
+// HOT-Step patch: flash-attn-train (investigation B2) — WHO still needs it.
+//
+// Everything the comment above describes is a workaround for ONE thing: ggml's
+// MUL_MAT backward aborts on a broadcast src0 at B > 1. The fused ops are not
+// mul_mats. They take native GQA directly — gate 1's grid runs Nkv 8 / Nh 32 and
+// the backward folds the G query heads into each KV head inside the dkdv kernel
+// — so in flash mode the expansion buys nothing and costs three things: K/V
+// activations x(Nh/Nkv) (dit_vram_kv_expand_bytes), a repeat + repeat_back node
+// per attention site per layer, and DIT_REPEAT_BACK_MAX's hard cap on B, which
+// is a constraint of the REPEAT_BACK kernel and of nothing else.
+//
+// Exact mode is untouched: `B > 1` is the original condition, unmoved, so the
+// --attn exact graph is still the graph it always was (gate T3's byte-identity
+// anchor covers it).
+static bool dit_attn_needs_kv_expand(const DitInputs & in, int B) {
+    return B > 1 && in.attn_mode != DIT_ATTN_FLASH;
+}
+
 // One [H,1,B] adaLN slot out of the [6H,1,B] adaln tensor. ggml_cont because the
 // stride-6H view is not contiguous and every consumer broadcasts it against
 // [H,S,B]; the copy is H*B floats and carries no gradient (neither
@@ -268,7 +332,7 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
     }
     q = ggml_reshape_4d(ctx, q, D, Nh, S, B);
     k = ggml_reshape_4d(ctx, k, D, Nkv, S, B);
-    if (B > 1) {
+    if (dit_attn_needs_kv_expand(in, B)) {
         k = dit_expand_heads(ctx, k, D, Nkv, Nh, S, B);
         v = dit_expand_heads(ctx, v, D, Nkv, Nh, S, B);
     }
@@ -284,7 +348,7 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
     // One of the two mode checks in the whole graph build. The false arm is the
     // original call, unmoved, so --attn exact emits the identical node sequence.
     ggml_tensor * attn    = (in.attn_mode == DIT_ATTN_FLASH)
-                                ? dit_attn_flash(ctx, q, k, v, sa_mask, scale)
+                                ? dit_attn_flash(ctx, q, k, v, sa_mask, scale, in.attn_prec_req)
                                 : dit_attn_f32(ctx, q, k, v, sa_mask, scale);  // [D,Nh,S,B]
     attn                  = ggml_reshape_3d(ctx, attn, (int64_t) Nh * D, S, B);
     if (tap0) {
@@ -319,7 +383,7 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
     cv                = ggml_reshape_4d(ctx, cv, D, Nkv, enc_S, B);
     cq                = ggml_mul(ctx, ggml_rms_norm(ctx, cq, c.rms_norm_eps), dit_ggml_f32(ctx, ly->ca_q_norm));
     ck                = ggml_mul(ctx, ggml_rms_norm(ctx, ck, c.rms_norm_eps), dit_ggml_f32(ctx, ly->ca_k_norm));
-    if (B > 1) {
+    if (dit_attn_needs_kv_expand(in, B)) {
         ck = dit_expand_heads(ctx, ck, D, Nkv, Nh, enc_S, B);
         cv = dit_expand_heads(ctx, cv, D, Nkv, Nh, enc_S, B);
     }
@@ -331,7 +395,7 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
     // self-attention's S^2, so flashing only self-attention would leave the
     // bigger of the two walls standing (spec §0.1).
     ggml_tensor * cattn = (in.attn_mode == DIT_ATTN_FLASH)
-                              ? dit_attn_flash(ctx, cq, ck, cv, in.t_ca, scale)
+                              ? dit_attn_flash(ctx, cq, ck, cv, in.t_ca, scale, in.attn_prec_req)
                               : dit_attn_f32(ctx, cq, ck, cv, in.t_ca, scale);
     cattn               = ggml_reshape_3d(ctx, cattn, (int64_t) Nh * D, S, B);
     hidden              = ggml_add(ctx, hidden, ad->apply(ctx, ly->ca_o_proj, li, DIT_CA_O, cattn));

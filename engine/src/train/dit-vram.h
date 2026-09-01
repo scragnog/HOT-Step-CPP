@@ -252,7 +252,16 @@ static double dit_vram_boundary_bytes(const DitVramModel & vm, int S) {
 // totals to the same margin as the arena term above — not independently
 // isolated, since it and the arena term only separate cleanly by algebra, but
 // nothing in the grid suggests it is the source of any cell's error.
+// HOT-Step patch: flash-attn-train (investigation B2) — flash mode does not pay
+// this term at all. dit_attn_needs_kv_expand() skips the expansion when the graph
+// is built with the fused ops, so charging for it would over-price every B > 1
+// flash run and hand the crop walk a smaller crop than the card can hold. The
+// flash arena polynomial was already written in terms of Nkv (dKv), i.e. the
+// native-GQA K/V widths, so the two halves agree.
 static double dit_vram_kv_expand_bytes(const DitVramModel & vm, int S, int K) {
+    if (vm.flash_attn) {
+        return 0.0;
+    }
     if (vm.batch <= 1 || vm.n_heads <= 0 || vm.n_kv_heads <= 0 || vm.n_heads == vm.n_kv_heads) {
         return 0.0;
     }
@@ -333,11 +342,18 @@ static double dit_vram_total_bytes(const DitVramModel & vm, int crop, int K) {
 // Returns the largest batch that satisfies it; `want` when unconstrained
 // (Nh == Nkv means no expansion happens at all, and neither does B == 1 —
 // dit_train_layer only calls dit_expand_heads when B > 1).
+//
+// HOT-Step patch: flash-attn-train (investigation B2) — `flash` lifts it
+// entirely. The cap is a property of ggml's REPEAT_BACK CUDA kernel, and in
+// flash mode there is no repeat and therefore no repeat_back: the fused ops
+// consume native GQA. Passing the mode in rather than reading a global keeps
+// this a pure function of its arguments, which is what dit_vram_fit's callers
+// and the selftest both assume.
 #define DIT_REPEAT_BACK_MAX 32768
 
-static int dit_vram_max_batch(int n_heads, int n_kv_heads, int S, int enc_S, int want) {
+static int dit_vram_max_batch(int n_heads, int n_kv_heads, int S, int enc_S, int want, bool flash) {
     const int tok = std::max(S, enc_S);
-    if (want <= 1 || n_kv_heads <= 0 || n_heads == n_kv_heads || tok <= 0) {
+    if (flash || want <= 1 || n_kv_heads <= 0 || n_heads == n_kv_heads || tok <= 0) {
         return want;
     }
     const long long per = (long long) n_kv_heads * (long long) tok;

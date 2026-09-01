@@ -67,6 +67,16 @@ struct DitTrainLog {
     // that has never heard of it defaults to "exact", which is what every run
     // before 2026-09-01 was.
     std::string attn_mode   = "exact";
+    // HOT-Step patch: flash-attn-train — the arithmetic the fused kernels
+    // ACTUALLY ran in ("tf32", or "f32 (<reason>)" when the request was
+    // overridden), read back from the backend rather than restated from the
+    // flag. `attn_mode` alone cannot say: the CUDA dispatch falls back to the
+    // strict scalar kernels on pre-Ampere devices, at D != 128 and on unaligned
+    // views, so two runs whose logs both say "flash" can differ in arithmetic
+    // depending on which GPU they landed on — and every flash run recorded
+    // BEFORE this field existed also says "flash" and meant strict f32.
+    // "n/a" in exact mode, where no fused kernel runs at all.
+    std::string attn_prec   = "n/a";
     // Which footprint model priced this run's crop/depth/segments, and the
     // dataset's padded encoder length it was priced at. `enc_S` was never
     // recorded before 2026-09-01, and without it a past run's VRAM figures
@@ -176,6 +186,7 @@ static bool dit_write_train_log(const std::string & dir, const DitTrainLog & m) 
     yyjson_mut_obj_add_strcpy(doc, cfg, "mirror", m.mirror.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "bwd", m.bwd.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "attn_mode", m.attn_mode.c_str());
+    yyjson_mut_obj_add_strcpy(doc, cfg, "attn_prec", m.attn_prec.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "arena_model", m.arena_model.c_str());
     yyjson_mut_obj_add_int(doc, cfg, "enc_S", m.enc_S);
     yyjson_mut_obj_add_real(doc, cfg, "lr", m.lr);

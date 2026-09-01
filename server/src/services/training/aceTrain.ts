@@ -401,8 +401,12 @@ export interface ResolvedTrainDitOptions {
    *  the fused ggml_flash_attn_train/_back kernels, enabling much longer
    *  training crops at some per-step speed cost. Always emitted so an
    *  ace-train that predates --attn rejects it loudly rather than silently
-   *  running the other backend. */
-  attnBackend: 'exact' | 'flash';
+   *  running the other backend.
+   *
+   *  'flash-f32' is the same fused ops pinned to strict f32 — the scalar
+   *  kernels rather than the TF32 tensor-core ones 'flash' selects. API-only:
+   *  the Training Studio checkbox never produces it. */
+  attnBackend: 'exact' | 'flash' | 'flash-f32';
 }
 
 /**

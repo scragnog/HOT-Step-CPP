@@ -549,7 +549,8 @@ static void print_usage(void) {
             "                                                      ~1.7-1.8x per layer per step on an\n"
             "                                                      RTX 5090. Needs the vendored patch\n"
             "                                                      engine/patches/mm-backward.patch.\n"
-            "    --attn <exact|flash>        exact       attention formulation.\n"
+            "    --attn <exact|flash|        exact       attention formulation.\n"
+            "            flash-f32>\n"
             "                                            exact = dit_attn_f32 (mul_mat / soft_max_ext /\n"
             "                                                    mul_mat). The shipped graph, identical\n"
             "                                                    to what ran before this flag existed.\n"
@@ -566,6 +567,16 @@ static void print_usage(void) {
             "                                                    fall back when the backend cannot run\n"
             "                                                    the ops: a CPU split would be correct,\n"
             "                                                    unusably slow, and look like a pass.\n"
+            "                                            flash-f32 = the same fused ops pinned to strict\n"
+            "                                                    f32 (GGML_PREC_F32), i.e. the original\n"
+            "                                                    scalar kernels instead of the TF32\n"
+            "                                                    tensor-core ones `flash` selects.\n"
+            "                                                    Slower; it exists to separate 'did\n"
+            "                                                    fusion move the training' from 'did\n"
+            "                                                    TF32 move it'. Note exact mode is NOT\n"
+            "                                                    the tighter of the two on CUDA: its\n"
+            "                                                    attention mul_mats have always run on\n"
+            "                                                    cuBLAS TF32 tensor cores.\n"
             "\n"
             "  Optimizer:\n"
             "    --optimizer <adamw|muon>    adamw       muon puts every 2-D parameter whose SHORT side is\n"
@@ -3998,8 +4009,8 @@ static int cmd_train_dit(int argc, char ** argv) {
         fprintf(stderr, "ace-train train-dit: --bwd must be outprod|mm\n");
         return 2;
     }
-    if (a.attn != "exact" && a.attn != "flash") {
-        fprintf(stderr, "ace-train train-dit: --attn must be exact|flash\n");
+    if (a.attn != "exact" && a.attn != "flash" && a.attn != "flash-f32") {
+        fprintf(stderr, "ace-train train-dit: --attn must be exact|flash|flash-f32\n");
         return 2;
     }
     // LoKR once needed 12 % here: the fitted arena polynomial never saw the

@@ -2901,8 +2901,12 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     // default is 0 = "no pin": aceTrain then omits --crop-max entirely and the
     // engine lifts the cap to the dataset's longest track. An explicit number
     // is a pin, in either mode.
-    const attnBackend = body.attnBackend === 'flash' ? 'flash' as const : 'exact' as const;
-    const cropMax = numOpt(body.cropMax, attnBackend === 'flash' ? 0 : 1250);
+    // 'flash-f32' is the same fused graph as 'flash' — only the kernels'
+    // arithmetic differs — so it takes the flash crop-cap default too.
+    const attnBackend = body.attnBackend === 'flash' ? 'flash' as const
+      : body.attnBackend === 'flash-f32' ? 'flash-f32' as const
+      : 'exact' as const;
+    const cropMax = numOpt(body.cropMax, attnBackend === 'exact' ? 1250 : 0);
     // Crop regime (2026-08-29): song-anchored positions + structured draws are
     // the defaults for every run — the batch pipeline POSTs {} and inherits
     // them. 'zero'/'random' remain reachable for A/B archaeology only.
@@ -3038,8 +3042,11 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     // Attention backend (2026-09-01 flash-attn-backward plan §11). Refused, not
     // coerced, same rule as mirror/optimizer/bwd above. Default stays 'exact' —
     // the byte-identical dit_attn_f32 graph — until a caller opts into 'flash'.
-    if (body.attnBackend !== undefined && body.attnBackend !== 'exact' && body.attnBackend !== 'flash') {
-      res.status(400).json({ error: 'attnBackend must be exact or flash' });
+    // 'flash-f32' is the API-only strict-f32 variant of 'flash' (the scalar
+    // kernels instead of the TF32 tensor-core ones); the UI never sends it.
+    if (body.attnBackend !== undefined && body.attnBackend !== 'exact' && body.attnBackend !== 'flash' &&
+        body.attnBackend !== 'flash-f32') {
+      res.status(400).json({ error: 'attnBackend must be exact, flash or flash-f32' });
       return;
     }
     if (!Number.isFinite(learningRate) || learningRate <= 0 || learningRate > 1) {

@@ -775,7 +775,10 @@ export interface TrainDitOptions {
    *  routes through the fused ggml_flash_attn_train/_back kernels instead —
    *  experimental, and it is what makes full-song (much longer) training crops
    *  affordable, at some per-step speed cost. */
-  attnBackend?: 'exact' | 'flash'; // default 'exact'
+  // 'flash-f32' is the API-only strict-f32 variant of 'flash' (the fused ops
+  // pinned to the scalar kernels instead of the TF32 tensor-core ones). The
+  // Training Studio checkbox is two-state and never produces it.
+  attnBackend?: 'exact' | 'flash' | 'flash-f32'; // default 'exact'
 }
 
 /** Structurally identical to TrainLmEpoch so LossSparkline is reused unedited. */

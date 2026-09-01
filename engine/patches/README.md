@@ -67,37 +67,50 @@ Three properties are load-bearing, and all three are deliberate:
 - **No floating-point atomics.** Every element of dQ/dK/dV is written once, by one thread, out of a register accumulator; GQA folds by looping query heads ascending. Two runs on the same inputs give bit-identical gradients, which is the only thing that makes an A/B against `--attn exact` mean anything.
 - **Masked positions are bitwise zero**, not small. `exp(-INF - finite)` is exactly `0.0f`, so `dS = P * (dP - D_i)` is exactly zero wherever the mask is.
 
-Nothing here is reachable unless a caller asks. `ace-train train-dit --attn flash` is the only switch, and with `--attn exact` — the default — the emitted graph is byte-identical to before: the self-test's T3 tap comparison reports `0.00e+00` on every named tensor and SC1/SC2/SC3 report a `0.000e+00` gradient delta.
+Nothing here is reachable unless a caller asks. `ace-train train-dit --attn <exact|flash|flash-f32>` is the only switch, and with `--attn exact` — the default — the emitted graph is byte-identical to before: the self-test's T3 tap comparison reports `0.00e+00` on every named tensor and SC1/SC2/SC3 report a `0.000e+00` gradient delta.
 
-Measured on an RTX 5090 with `fattn-train-test` (S in {64, 129, 198, 384, 1000} x B in {1, 2} x {no mask, window, window+pad, cross-attention dead column} x GQA 32/8 x D 128, forward and all three gradients against the autodiff'd `dit_attn_f32` chain, bar 1e-4):
+Each op carries a precision request in `op_params` slot 3 (`ggml_flash_attn_train_set_prec`), resolved once per dispatch in `fa_train_resolve_prec()`. `GGML_PREC_F32` pins the original scalar FFMA kernels; the default selects `m16n8k8` TF32 tensor-core kernels for both directions, guarded on `AMPERE_MMA_AVAILABLE` and on the alignment contract, and falling back to the scalar path (with the reason in the resolved label) on anything else. A forward that rounds to TF32 can never be paired with a scalar backward: the resolver decides once and both directions read the same answer. `--attn flash` asks for TF32, `--attn flash-f32` pins the scalar kernels.
 
-| run | cases | worst rel err | determinism |
-|---|---|---|---|
-| CPU | 36/36 | 3.517e-06 | n/a |
-| CUDA | 36/36 | 3.088e-06 | bitwise across two runs |
-| CUDA `--extra` | 48/48 | 3.088e-06 | bitwise |
-| CUDA `--large` (S = 3000) | 37/37 | 3.088e-06 | bitwise |
+That distinction only matters against the CPU, not against what shipped: the exact-mode CUDA path has *always* run its attention `mul_mat`s on cuBLAS TF32 — the self-test measures that reference rounding at ~3e-3 on CUDA against ~2.5e-6 for the same case on CPU. A TF32 fused kernel is therefore precision-par with every adapter this project has ever trained in exact mode, and the strict-f32 kernels are *tighter* than the historical path. So the parity tool gates TF32 at 5e-3 and strict f32 at 1e-4. The looser bar also has a **floor**: a run that silently fell back to the scalar kernels would sail under 5e-3 and report as a TF32 pass, so the tool refuses any TF32 case whose error is f32-sized, and asserts through the backend registry (`ggml_backend_cuda_fattn_train_last_prec`) that the kernel it asked for is the kernel that ran, in both directions.
+
+Measured on an RTX 5090 with `fattn-train-test` (S in {64, 129, 198, 384, 1000} x B in {1, 2} x {no mask, window, window+pad, cross-attention dead column} x GQA 32/8 x D 128, forward and all three gradients against the autodiff'd `dit_attn_f32` chain):
+
+| run | bar | cases | worst rel err | determinism |
+|---|---|---|---|---|
+| CPU | 1e-4 | 36/36 | 3.517e-06 | n/a |
+| CUDA f32 | 1e-4 | 36/36 | 3.088e-06 | bitwise across two runs |
+| CUDA f32 `--extra` | 1e-4 | 51/51 | 3.088e-06 | bitwise |
+| CUDA f32 `--large` (S = 3000) | 1e-4 | 37/37 | 3.088e-06 | bitwise |
+| CUDA `--prec tf32` | 5e-3 | 36/36 | 4.732e-04 | bitwise |
+| CUDA `--prec tf32 --extra` | 5e-3 | 51/51 | 4.732e-04 | bitwise |
+| CUDA `--prec tf32 --large` | 5e-3 | 37/37 | 4.732e-04 | bitwise |
 
 `--bench` on CUDA, per attention site, forward + backward, 50 timed iterations (B 1, Nh 32 / Nkv 8, D 128, window mask):
 
-| S | manual chain | fused | manual VRAM | fused VRAM |
-|---|---|---|---|---|
-| 625 | 0.642 ms | 3.015 ms (4.7x) | 301.3 MB | 98.6 MB |
-| 1250 | 2.374 ms | 6.906 ms (2.9x) | 985.6 MB | 198.8 MB |
-| 3000 | 11.123 ms | 23.209 ms (2.1x) | 4939.0 MB | 487.0 MB |
+| S | manual chain | fused f32 | fused tf32 | manual VRAM | fused VRAM |
+|---|---|---|---|---|---|
+| 625 | 0.645 ms | 3.004 ms (4.66x) | **0.604 ms (0.94x)** | 301.3 MB | 98.6 MB |
+| 1250 | 2.370 ms | 6.931 ms (2.92x) | **1.518 ms (0.64x)** | 985.6 MB | 198.8 MB |
+| 3000 | 11.143 ms | 23.300 ms (2.09x) | **5.449 ms (0.49x)** | 4939.0 MB | 487.0 MB |
 
-So v1 buys memory, not time. The kernels are f32 with no tensor-core tile pass yet; the ratio narrows as S grows only because the manual chain's own quadratic is catching up. A TF32/f16 tile pass is the obvious next lever and has not been started.
+The TF32 pass is what turned the feature from a memory trade into a straight win. The scalar kernels bought 3x-10x less attention VRAM at 2.1x-4.7x the time; the tensor-core kernels keep the identical memory (the same tiling, only the two products moved onto `mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32`) and are now faster than the cuBLAS chain everywhere measured — level at S = 625, 1.6x at 1250, 2.0x at 3000. The margin grows with S because the manual chain still pays a dense S² softmax where the fused kernel skips whole tiles the window mask has killed; the bench prints live keys/row per S so a miss reads as a tile-skip problem or a throughput one rather than a mystery.
+
+End to end that shows up as parity rather than a penalty. Same dataset, same seed, 32 layers, crop 1250, 20 epochs: exact 44,160 ms at 21,950 MB peak, `--attn flash` 46,493 ms at 18,938 MB, `--attn flash-f32` 89,845 ms at the same 18,938 MB. So TF32 flash costs about 5 % of wall clock at a crop the exact model can still afford, and buys 14 % of the peak back — and unlike exact it is not capped there.
 
 What the memory buys is the crop. The trainer carries a second arena model (`dit_vram_arena_bytes_flash()` in `dit-vram.h`, selected by `DitVramModel::flash_attn`) built term by term rather than refitted, and in flash mode the auto-fit's `crop_max` default lifts from 1250 to the dataset's longest track. Over a 20-cell {crop, segments, dataset} grid on a 5090 the raw model reproduces measured arena high-water within -2.0 %/+1.3 %; with its one fitted headroom coefficient it over-predicts every cell by +9.2 % to +13.3 % and never under. On `fightstar_behinddevilsback` with no crop pins, exact auto-fits crop 1250 (its cap) and flash auto-fits **crop 3846 at full 32-layer depth** — 3.08x — estimated 24,660 MB against 22,912 MB measured, NVML tripwire silent. At `--ckpt 8` the same dataset walks to crop 6000, the whole song.
 
-Drift sits in the same documented non-identity class as `--bwd mm`: same dataset, same seed, 2 layers, crop 375, 2 epochs, probe loss 1.677639 exact against 1.677924 flash, about 1.7e-4.
+Flash mode also drops `dit_expand_heads` — the fused ops do GQA natively — and with it the `repeat`/`repeat_back` node pair per attention site per layer, the x(Nh/Nkv) K/V activation blow-up, and ggml's CUDA `REPEAT_BACK` cap of 32768 on `n_kv_heads * max(S, enc_S) * B`. That cap is a correctness constraint on the micro-batch, not a memory one, and in exact mode it is what refuses `--batch 4` on a dataset with `enc_S = 1877` (8 * 1877 * 4 = 60,064). In flash mode the clamp is disarmed and only VRAM decides.
+
+Drift sits in the same documented non-identity class as `--bwd mm` and `--mirror bf16`, and it does not compound. Same dataset, same seed, 2 layers, crop 374: at 2 epochs exact 1.416741139 against flash 1.416809989 (6.9e-5); at 200 epochs exact 1.130100180 against flash 1.130353922 (2.5e-4) and flash-f32 1.130287604 (1.9e-4). Deeper, at 32 layers and crop 1250 over 20 epochs: exact 0.883770987, flash 0.888023981 (4.3e-3), flash-f32 0.885164537 (1.4e-3).
 
 **Losing this patch is loud, not silent.** `ggml.h` loses the op declarations and `ace-train` stops compiling; lose only the CUDA half and the trainer's `supports_op` probe aborts at init with `attn-unsupported` rather than letting the scheduler quietly split attention onto the CPU. `verify-hooks.ps1` Hook 12 greps `ggml.c` for the marker anyway, because the autodiff registration is the one piece that cannot be reconstructed from the two new CUDA files if a submodule update takes it — and those two files are *new*, so a submodule re-checkout deletes them outright rather than reverting them.
 
-Reapply from the repo root — **apply all of them**. They are no longer file-disjoint: two touch `cpy.cu`, two touch `ggml.c`, and five now touch `ggml-cuda.cu`. Their hunks still do not overlap, and a full pristine→apply-all replay in glob order was re-checked when `flash-attn-train.patch` landed: every file that patch touches comes back byte-identical to the tested tree. The glob below is what CI runs:
+Reapply from the repo root — **apply all of them**. They are no longer file-disjoint: two touch `cpy.cu`, two touch `ggml.c`, and five now touch `ggml-cuda.cu`. Their hunks still do not overlap, and a full pristine→apply-all replay in glob order was re-checked when the TF32 pass landed (2026-09-01): all seven apply clean in glob order, and every file `flash-attn-train.patch` touches comes back byte-identical to the tested tree. The glob below is what CI runs:
 
 ```sh
 for p in engine/patches/*.patch; do git apply --verbose "$p"; done
 ```
+
+Every patch here is authored against **LF** sources, so on Windows the tree you apply to must be LF too. A checkout under `core.autocrlf=true` — the setting this repo uses, and what a bare `git archive` reproduces — hands `git apply` CRLF files and every hunk fails to locate its context, including hunks that are perfectly correct. That is the whole of the "`quant-cpy-kquant.patch` does not apply in a scratch directory" report from 2026-09-01: rebuild the scratch tree with `git -c core.autocrlf=false -c core.eol=lf archive HEAD` and all seven apply clean. CI's Linux runners never see it.
 
 Verify they are still in place: `powershell -File engine\verify-hooks.ps1` (Hook 7 greps `out-prod.cu`, Hook 8 `ggml.c`, Hook 9 `cpy.cu`, Hook 10 `cpy.cuh`, Hook 11 `ggml-cuda.cu`, Hook 12 `ggml.c` again for the flash-attn-train autodiff case, each for its HOT-Step marker comment). **Hooks 9 and 10 matter most, because both failures are silent**: losing 9 leaves the numbers right and only the clock wrong, and losing 10 makes every sub-`q8_0` base vanish from the trainer rather than error. CI reapplies them in the "Apply engine patches" step of every build job, using the same glob loop.

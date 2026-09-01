@@ -138,6 +138,14 @@ struct DitTrainArgs {
     //             token (nothing S_kv x S is ever materialised), currently SLOWER
     //             per step, and its gradients differ from exact within a measured
     //             drift band rather than matching bit for bit.
+    //
+    // HOT-Step patch: flash-attn-train — a third value, "flash-f32". Same fused
+    // ops, but GGML_PREC_F32 instead of the default, which pins the CUDA dispatch
+    // to v1's strict scalar kernels instead of the TF32 tensor-core ones. It is
+    // the A/B partner that separates "did fusion change the training" from "did
+    // TF32 change it", and the escape hatch if TF32 ever turns out to matter. A
+    // CLI/API surface: the Training Studio checkbox emits "flash" or "exact"
+    // (tf32 design §3.5).
     std::string attn = "exact";
 
     // Optimizer (2026-07-30). "adamw" is the shipped path and the default;
@@ -611,8 +619,12 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // at the probe below, because the footprint model and the crop walk are the
     // whole point of the flag: flash removes both retained softmaxes, and pricing
     // a flash run with the exact polynomial yields the exact run's crop.
-    const bool flash_attn = (a.attn == "flash");
+    // "flash" and "flash-f32" are the same GRAPH and the same VRAM footprint —
+    // they differ only in the arithmetic op_params slot 3 asks the kernels for —
+    // so both take the flash arena model and the lifted crop cap.
+    const bool flash_attn = (a.attn == "flash" || a.attn == "flash-f32");
     vm.flash_attn         = flash_attn;
+    const ggml_prec attn_prec_req = (a.attn == "flash-f32") ? GGML_PREC_F32 : GGML_PREC_DEFAULT;
 
     // ── flash mode lifts the crop_max cap (plan doc §"Flash-aware VRAM model" 2)
     //
@@ -627,9 +639,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         crop_max_eff = max_T;
         char cb[224];
         snprintf(cb, sizeof(cb),
-                 "--attn flash: crop-max lifted from the %d default to the dataset's longest track (%d frames) — "
+                 "--attn %s: crop-max lifted from the %d default to the dataset's longest track (%d frames) — "
                  "pass --crop-max to pin it",
-                 a.crop_max, max_T);
+                 a.attn.c_str(), a.crop_max, max_T);
         lm_log("info", cb);
         fprintf(stderr, "[train-dit] %s\n", cb);
     }
@@ -669,9 +681,14 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // tokens, cross-attention over enc_S, and enc_S is dataset geometry the crop
     // walk never touches. Terminates: vm.batch strictly decreases and
     // dit_vram_max_batch never returns below 1, at which point it is a no-op.
+    //
+    // HOT-Step patch: flash-attn-train (investigation B2) — `flash_attn` disarms
+    // the whole loop. There is no expansion in flash mode, so there is no
+    // repeat_back node and no kernel cap to respect; the only thing left holding
+    // B down is VRAM, which ordered_fit() already prices.
     for (int it = 0; it < 8 && fit.ok && fit.crop > 0; it++) {
         const int S_fit = fit.crop / P;
-        const int cap   = dit_vram_max_batch(c.n_heads, c.n_kv_heads, S_fit, enc_S, vm.batch);
+        const int cap   = dit_vram_max_batch(c.n_heads, c.n_kv_heads, S_fit, enc_S, vm.batch, flash_attn);
         if (cap >= vm.batch) {
             break;
         }
@@ -690,7 +707,7 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // conservative) at the smaller batch.
     if (fit.ok && fit.crop > 0) {
         const int S_fit = fit.crop / P;
-        const int cap   = dit_vram_max_batch(c.n_heads, c.n_kv_heads, S_fit, enc_S, vm.batch);
+        const int cap   = dit_vram_max_batch(c.n_heads, c.n_kv_heads, S_fit, enc_S, vm.batch, flash_attn);
         if (cap < vm.batch) {
             char bb[288];
             snprintf(bb, sizeof(bb),
@@ -737,7 +754,15 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // abort() inside the CUDA backward — the process dies with no JSONL, no
     // `fatal`, and no way for the server to say why. A clean fatal beats that
     // even if the branch is never taken. Only B > 1 expands K/V at all.
-    if (B > 1 && c.n_heads != c.n_kv_heads) {
+    //
+    // HOT-Step patch: flash-attn-train (investigation B2) — and only EXACT mode.
+    // This is the last of three places the cap is applied (the other two are the
+    // re-fit loop and its hard clamp above); leaving it armed in flash mode would
+    // refuse exactly the batches the fused ops make legal. On this dataset that
+    // is not hypothetical: enc_S is 1877, so 8*1877*4 = 60064 and B = 4 was
+    // refused outright, at any crop, because cross-attention's expanded K/V — not
+    // the crop, not the VRAM — blew the REPEAT_BACK kernel's limit.
+    if (B > 1 && !flash_attn && c.n_heads != c.n_kv_heads) {
         const long long tok  = (long long) std::max(S_max, enc_S);
         const long long prod = (long long) c.n_kv_heads * tok * (long long) B;
         if (prod > DIT_REPEAT_BACK_MAX) {
@@ -794,38 +819,46 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // losses. Every measurement downstream would be poisoned while reading as a
     // pass. Both directions are probed, at BOTH attention shapes the run will
     // actually emit (self-attention S_kv = S, cross-attention S_kv = enc_S), with
-    // the effective Nkv: B > 1 pre-expands K/V to Nh (dit_expand_heads), B == 1
-    // leaves the GQA 4:1 shape intact.
+    // the effective Nkv.
+    //
+    // HOT-Step patch: flash-attn-train (investigation B2) — that Nkv is now
+    // c.n_kv_heads at EVERY B. The expansion to Nh only ever existed to keep
+    // ggml's mul_mat backward alive at B > 1, and dit_attn_needs_kv_expand()
+    // no longer performs it in flash mode, so the shape the probe asks about has
+    // to be the native GQA one or it is probing a geometry the run never emits.
     const DitAttnMode attn_mode = flash_attn ? DIT_ATTN_FLASH : DIT_ATTN_EXACT;
     if (attn_mode == DIT_ATTN_FLASH) {
-        const int   Nkv_eff = (B > 1) ? c.n_heads : c.n_kv_heads;
+        const int   Nkv_eff = c.n_kv_heads;
         const float ascale  = 1.0f / sqrtf((float) c.head_dim);
         bool        sf = false, sb = false, cf = false, cb = false;
         dit_flash_probe(M.backend, c.head_dim, c.n_heads, Nkv_eff, S_max, S_max, B, ascale, &sf, &sb);
         dit_flash_probe(M.backend, c.head_dim, c.n_heads, Nkv_eff, S_max, enc_S, B, ascale, &cf, &cb);
         if (!(sf && sb && cf && cb)) {
-            char extra[224];
+            char extra[256];
             snprintf(extra, sizeof(extra),
-                     ",\"attn\":\"flash\",\"selfFwd\":%s,\"selfBwd\":%s,\"crossFwd\":%s,\"crossBwd\":%s",
-                     sf ? "true" : "false", sb ? "true" : "false", cf ? "true" : "false", cb ? "true" : "false");
+                     ",\"attn\":\"%s\",\"selfFwd\":%s,\"selfBwd\":%s,\"crossFwd\":%s,\"crossBwd\":%s",
+                     a.attn.c_str(), sf ? "true" : "false", sb ? "true" : "false", cf ? "true" : "false",
+                     cb ? "true" : "false");
             char b[512];
             snprintf(b, sizeof(b),
-                     "--attn flash: backend %s does not support the fused attention ops at this geometry "
+                     "--attn %s: backend %s does not support the fused attention ops at this geometry "
                      "(D %d, Nh %d, Nkv %d, S %d, enc_S %d, B %d) — self fwd %s / bwd %s, cross fwd %s / bwd %s. "
                      "Refusing to start: the scheduler would silently run them on the CPU instead, which is "
                      "correct, unusably slow, and looks like a pass on every number this run reports. Use "
                      "--attn exact.",
-                     ggml_backend_name(M.backend), c.head_dim, c.n_heads, Nkv_eff, S_max, enc_S, B,
-                     sf ? "yes" : "NO", sb ? "yes" : "NO", cf ? "yes" : "NO", cb ? "yes" : "NO");
+                     a.attn.c_str(), ggml_backend_name(M.backend), c.head_dim, c.n_heads, Nkv_eff, S_max, enc_S,
+                     B, sf ? "yes" : "NO", sb ? "yes" : "NO", cf ? "yes" : "NO", cb ? "yes" : "NO");
             lm_fatal("attn-unsupported", b, extra);
             dit_train_free(&M);
             return 1;
         }
-        char b[288];
+        char b[448];
         snprintf(b, sizeof(b),
-                 "--attn flash: %s supports FLASH_ATTN_TRAIN and FLASH_ATTN_TRAIN_BACK at D %d, Nh %d, Nkv %d, "
-                 "S %d, enc_S %d, B %d — no CPU split",
-                 ggml_backend_name(M.backend), c.head_dim, c.n_heads, Nkv_eff, S_max, enc_S, B);
+                 "--attn %s: %s supports FLASH_ATTN_TRAIN and FLASH_ATTN_TRAIN_BACK at D %d, Nh %d, Nkv %d, "
+                 "S %d, enc_S %d, B %d — no CPU split. Requested arithmetic: %s (the backend resolves it per "
+                 "launch; dit_train_log.json records what actually ran)",
+                 a.attn.c_str(), ggml_backend_name(M.backend), c.head_dim, c.n_heads, Nkv_eff, S_max, enc_S, B,
+                 attn_prec_req == GGML_PREC_F32 ? "strict f32" : "tf32 where available");
         lm_log("info", b);
         fprintf(stderr, "[train-dit] %s\n", b);
     }
@@ -1235,7 +1268,8 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             // The ONLY place the mode enters the graph build; mk_inputs is shared
             // by the monolithic path below and by the segment driver, so both get
             // it from one line.
-            in.attn_mode = attn_mode;
+            in.attn_mode     = attn_mode;
+            in.attn_prec_req = attn_prec_req;
             return in;
         };
 
@@ -1726,6 +1760,13 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             rec.grad_norm = last_stats.grad_norm;
             rec.ms        = ems;
             log->epochs_log.push_back(rec);
+            // HOT-Step patch: flash-attn-train — the RESOLVED arithmetic, asked
+            // of the backend that just ran an epoch's worth of graphs rather
+            // than restated from the flag. Refreshed each epoch so the field is
+            // populated even if the run is cancelled after the first one.
+            if (attn_mode == DIT_ATTN_FLASH) {
+                log->attn_prec = dit_flash_prec_label(M.backend);
+            }
             log->epochs_run = out->epochs_run;
             log->final_loss = out->final_loss;
             log->best_loss  = out->best_loss;

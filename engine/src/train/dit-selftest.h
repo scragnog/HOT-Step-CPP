@@ -571,9 +571,15 @@ static void dit_st_muon(std::vector<DitSelfTestResult> & rs, ggml_backend_t back
             }
         }
     }
-    if (cpu_be) {
-        ggml_backend_free(cpu_be);
-    }
+    // NOTE (2026-09-01, found while wiring the TF32 trainer surface): the
+    // ggml_backend_free(cpu_be) that used to sit HERE was a use-after-free. The
+    // bucket case below allocates its tensors on cpu_be, builds a scheduler over
+    // it and runs an optimizer step through it — all on a freed backend. It
+    // survived by luck of heap layout for as long as it existed; an unrelated
+    // allocation change elsewhere in the self-test turned it into a hard
+    // GGML_ASSERT(device) abort in ggml_backend_dev_buffer_type, which killed
+    // the run before MU1/SC1-3/SB1-3 could report. The free now happens after
+    // the last use.
 
     // ── the bucket case ──────────────────────────────────────────────────────
     //
@@ -684,6 +690,11 @@ static void dit_st_muon(std::vector<DitSelfTestResult> & rs, ggml_backend_t back
             snprintf(why, sizeof(why), "3 same-shape params formed %d buckets, expected 1", n_buckets);
             all_ok = false;
         }
+    }
+    // Last use of cpu_be is above. See the NOTE where this free used to be.
+    if (cpu_be) {
+        ggml_backend_free(cpu_be);
+        cpu_be = nullptr;
     }
 
     // Classification: a LoKR w1 shape must NOT be picked up.
@@ -2059,9 +2070,21 @@ static void dit_st_ckpt_gates(std::vector<DitSelfTestResult> & rs, DitTrainModel
 //
 //   SF1  B = 1, native GQA (Nkv 8 < Nh 32), 2-D [S,S] window mask — the shape a
 //        default production run emits.
-//   SF2  B = 3, mixed lengths — K/V pre-expanded to Nh by dit_expand_heads, and
-//        per-element [S,S,1,B] / [enc_S,S,1,B] masks, so the op's ne2/ne3
-//        broadcast (modulo, not divide) is exercised rather than assumed.
+//   SF2  B = 3, mixed lengths, per-element [S,S,1,B] / [enc_S,S,1,B] masks, so
+//        the op's ne2/ne3 broadcast (modulo, not divide) is exercised rather
+//        than assumed.
+//
+//        HOT-Step patch: flash-attn-train (investigation B2) — SF2 is now the
+//        asymmetric rung, and that is the point. The EXACT arm still pre-expands
+//        K/V to Nh with dit_expand_heads (it must: ggml's mul_mat backward
+//        aborts on a broadcast src0 at B > 1); the FLASH arm no longer does, and
+//        feeds native GQA 8/32 straight into the fused ops. So this rung reads
+//        "B = 3 GQA-native vs the expanded reference" — exactly the claim B2
+//        rests on, measured end-to-end through a trained sub-stack rather than
+//        argued from the kernel grid. The two are mathematically the same
+//        computation (the expansion is a repeat), so the bars below are the
+//        SF1 bars unchanged; a wrong GQA head mapping would blow straight
+//        through them.
 //
 // This is NOT a byte-identity rung and cannot be: flash recomputes the softmax
 // from Q/K/LSE in tiles instead of reading back a retained [S_kv,S,Nh,B] array,
@@ -2098,6 +2121,17 @@ static void dit_st_ckpt_gates(std::vector<DitSelfTestResult> & rs, DitTrainModel
 // the measurement; a regression in the op itself would move the forward and the
 // non-QK gradients too, and those bars are tight.
 //
+// HOT-Step patch: flash-attn-train — TWO flash arms on the GPU, not one. The op
+// pair carries an arithmetic request (op_params slot 3): GGML_PREC_F32 runs the
+// original scalar kernels, GGML_PREC_DEFAULT the TF32 tensor-core ones on
+// sm_80+. Both are diffed against the SAME exact arm and both columns are
+// printed, with the backend's own answer about which kernel each direction
+// launched — because a dispatch that quietly fell back to the scalar path would
+// otherwise print two identical columns and read as a pass. The GATE is still
+// the CPU f32 measurement and nothing else: the CPU impl ignores the flag by
+// design (it is the oracle), so there is nothing to gate a second column on
+// there, and on CUDA the reference itself is TF32.
+//
 // The rung also reports the spec 9.8 capability probe. A GPU backend that says
 // `false` does not fail the graph — the scheduler splits the op onto the CPU and
 // the numbers still agree — so a silently-CPU flash arm would pass the parity
@@ -2124,10 +2158,26 @@ struct DitStFlashMeas {
     int         nodes_exact = 0, nodes_flash = 0;
     int         lt0 = 0, lt1 = 0;  // layer_type counts inside the trained window
     int         short_len = 0, pad_len = 0;
+    // HOT-Step patch: flash-attn-train — the SECOND flash arm. The op pair now
+    // carries an arithmetic request in op_params slot 3: GGML_PREC_F32 runs the
+    // original scalar kernels, GGML_PREC_DEFAULT the TF32 tensor-core ones on
+    // sm_80+. Both arms are diffed against the SAME exact arm, so the two
+    // columns are directly comparable and the tf32-vs-f32 question is answered
+    // by a measurement rather than by an argument. Only run where a second
+    // arithmetic actually exists — the CPU impl ignores the flag by design (it
+    // is the oracle, and an oracle that moves with the thing it checks is not
+    // one), so running it twice there would print the same number twice.
+    bool        ran_tf32 = false;
+    double      out_rel_tf32 = 0.0, grad_rel_qk_tf32 = 0.0, grad_rel_ot_tf32 = 0.0;
+    double      loss_flash_tf32 = 0.0;
+    std::string worst_ot_tf32 = "-";
+    // What the backend says it LAUNCHED for that arm, not what was asked.
+    std::string prec_fwd = "n/a", prec_bwd = "n/a";
 };
 
 static bool dit_st_flash_measure(DitTrainModel * M, const std::vector<DitSample> & samples, uint64_t seed, int B,
-                                 int T, int enc_use, int n_train, bool mixed, DitStFlashMeas * o, std::string * err) {
+                                 int T, int enc_use, int n_train, bool mixed, bool second_prec, DitStFlashMeas * o,
+                                 std::string * err) {
     const DiTGGMLConfig & c = M->m.cfg;
     const int L = c.n_layers, H = c.hidden_size, Oc = c.out_channels, P = c.patch_size, Ic = c.in_channels;
     const int enc_H = (int) M->m.cond_emb_w->ne[0];
@@ -2139,9 +2189,14 @@ static bool dit_st_flash_measure(DitTrainModel * M, const std::vector<DitSample>
     }
 
     // spec §9.8. Both directions, both attention shapes (self: S_kv = S, cross:
-    // S_kv = enc_S), at the effective Nkv — B > 1 pre-expands K/V to Nh.
+    // S_kv = enc_S), at the effective Nkv.
+    //
+    // HOT-Step patch: flash-attn-train (investigation B2) — the flash arm no
+    // longer pre-expands K/V at B > 1 (dit_attn_needs_kv_expand), so the shape
+    // to probe is native GQA at every B. Probing Nh here would ask the backend
+    // about a geometry this rung's flash arm never builds.
     {
-        const int   Nkv_eff = (B > 1) ? c.n_heads : c.n_kv_heads;
+        const int   Nkv_eff = c.n_kv_heads;
         const float ascale  = 1.0f / sqrtf((float) c.head_dim);
         bool        sf = false, sb = false, cf = false, cb = false;
         dit_flash_probe(M->backend, c.head_dim, c.n_heads, Nkv_eff, S, S, B, ascale, &sf, &sb);
@@ -2344,8 +2399,9 @@ static bool dit_st_flash_measure(DitTrainModel * M, const std::vector<DitSample>
         }
     };
 
-    // One arm. `mode` is the ONLY thing that differs between the two calls.
-    auto run = [&](DitAttnMode mode, double * loss_out, std::vector<std::vector<float>> * grads,
+    // One arm. `mode` (and, in flash mode, `prec`) is the ONLY thing that
+    // differs between the calls.
+    auto run = [&](DitAttnMode mode, ggml_prec prec, double * loss_out, std::vector<std::vector<float>> * grads,
                    std::vector<float> * out_vals, int * nodes) -> bool {
         lm_optim_zero_grad(&opt);
         upload();
@@ -2354,6 +2410,7 @@ static bool dit_st_flash_measure(DitTrainModel * M, const std::vector<DitSample>
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, true);
         DitInputs        in  = mk_inputs(ctx);
         in.attn_mode         = mode;
+        in.attn_prec_req     = prec;
         DitTaps       taps;
         ggml_tensor * vel = dit_train_forward(ctx, M, ad, in, T, enc_use, &taps, lo, L, B);
         ggml_tensor * ls  = dit_train_loss(ctx, vel, in, Oc, T, false, bh.gscale);
@@ -2392,12 +2449,12 @@ static bool dit_st_flash_measure(DitTrainModel * M, const std::vector<DitSample>
 
     std::vector<std::vector<float>> gex, gfl;
     std::vector<float>              oex, ofl;
-    if (!run(DIT_ATTN_EXACT, &o->loss_exact, &gex, &oex, &o->nodes_exact)) {
+    if (!run(DIT_ATTN_EXACT, GGML_PREC_DEFAULT, &o->loss_exact, &gex, &oex, &o->nodes_exact)) {
         *err = "exact arm failed to compute";
         cleanup();
         return false;
     }
-    if (!run(DIT_ATTN_FLASH, &o->loss_flash, &gfl, &ofl, &o->nodes_flash)) {
+    if (!run(DIT_ATTN_FLASH, GGML_PREC_F32, &o->loss_flash, &gfl, &ofl, &o->nodes_flash)) {
         *err = "flash arm failed to compute";
         cleanup();
         return false;
@@ -2408,39 +2465,82 @@ static bool dit_st_flash_measure(DitTrainModel * M, const std::vector<DitSample>
         return false;
     }
 
-    {
+    // One flash arm against the exact arm. Called once per precision, so both
+    // columns are computed the same way from the same reference.
+    auto compare = [&](const std::vector<float> & of, const std::vector<std::vector<float>> & gf, double * out_rel,
+                       double * out_mag, double * grad_rel, std::string * worst, double * ref_mag,
+                       double * rel_qk, std::string * worst_qk, double * mag_qk, double * rel_ot,
+                       std::string * worst_ot, double * mag_ot) {
         double num = 0.0, den = 0.0;
-        for (size_t i = 0; i < oex.size(); i++) {
-            num = std::max(num, fabs((double) ofl[i] - (double) oex[i]));
+        for (size_t i = 0; i < oex.size() && i < of.size(); i++) {
+            num = std::max(num, fabs((double) of[i] - (double) oex[i]));
             den = std::max(den, fabs((double) oex[i]));
         }
-        o->out_mag = den;
-        o->out_rel = num / std::max(den, 1e-30);
-    }
-    for (size_t j = 0; j < gex.size() && j < gfl.size(); j++) {
-        double num = 0.0, den = 0.0;
-        for (size_t k = 0; k < gex[j].size() && k < gfl[j].size(); k++) {
-            num = std::max(num, fabs((double) gfl[j][k] - (double) gex[j][k]));
-            den = std::max(den, fabs((double) gex[j][k]));
+        if (out_mag) {
+            *out_mag = den;
         }
-        o->ref_mag       = std::max(o->ref_mag, den);
-        const double rel = num / std::max(den, 1e-30);
-        const std::string nm = opt.params[j]->name;
-        if (rel > o->grad_rel) {
-            o->grad_rel = rel;
-            o->worst    = nm;
-        }
-        const bool qk = (nm.find("q_proj") != std::string::npos) || (nm.find("k_proj") != std::string::npos);
-        if (qk) {
-            if (rel > o->grad_rel_qk) {
-                o->grad_rel_qk = rel;
-                o->worst_qk    = nm;
-                o->mag_qk      = den;
+        *out_rel = num / std::max(den, 1e-30);
+        for (size_t j = 0; j < gex.size() && j < gf.size(); j++) {
+            double gnum = 0.0, gden = 0.0;
+            for (size_t k = 0; k < gex[j].size() && k < gf[j].size(); k++) {
+                gnum = std::max(gnum, fabs((double) gf[j][k] - (double) gex[j][k]));
+                gden = std::max(gden, fabs((double) gex[j][k]));
             }
-        } else if (rel > o->grad_rel_ot) {
-            o->grad_rel_ot = rel;
-            o->worst_ot    = nm;
-            o->mag_ot      = den;
+            if (ref_mag) {
+                *ref_mag = std::max(*ref_mag, gden);
+            }
+            const double      rel = gnum / std::max(gden, 1e-30);
+            const std::string nm  = opt.params[j]->name;
+            if (grad_rel && rel > *grad_rel) {
+                *grad_rel = rel;
+                *worst    = nm;
+            }
+            const bool qk = (nm.find("q_proj") != std::string::npos) || (nm.find("k_proj") != std::string::npos);
+            if (qk) {
+                if (rel > *rel_qk) {
+                    *rel_qk = rel;
+                    if (worst_qk) {
+                        *worst_qk = nm;
+                    }
+                    if (mag_qk) {
+                        *mag_qk = gden;
+                    }
+                }
+            } else if (rel > *rel_ot) {
+                *rel_ot = rel;
+                if (worst_ot) {
+                    *worst_ot = nm;
+                }
+                if (mag_ot) {
+                    *mag_ot = gden;
+                }
+            }
+        }
+    };
+
+    compare(ofl, gfl, &o->out_rel, &o->out_mag, &o->grad_rel, &o->worst, &o->ref_mag, &o->grad_rel_qk, &o->worst_qk,
+            &o->mag_qk, &o->grad_rel_ot, &o->worst_ot, &o->mag_ot);
+
+    // HOT-Step patch: flash-attn-train — the TF32 arm. Same graph, same seed,
+    // same adapter state; only op_params slot 3 differs. Its numbers are
+    // reported beside the f32 arm's so "TF32 costs this much accuracy" is a
+    // measured delta rather than an assumption, and prec_fwd/prec_bwd carry the
+    // backend's own answer about which kernel it launched — a run where the
+    // dispatch quietly fell back to the scalar kernels would otherwise print two
+    // identical columns and look like a pass.
+    if (second_prec) {
+        std::vector<std::vector<float>> gt;
+        std::vector<float>              ot;
+        int                             nt = 0;
+        if (run(DIT_ATTN_FLASH, GGML_PREC_DEFAULT, &o->loss_flash_tf32, &gt, &ot, &nt) && ot.size() == oex.size()) {
+            double dummy_qk_worst_mag = 0.0, dummy_ot_worst_mag = 0.0, dummy_qk = 0.0;
+            std::string dummy_worst;
+            compare(ot, gt, &o->out_rel_tf32, nullptr, nullptr, &dummy_worst, nullptr, &o->grad_rel_qk_tf32,
+                    nullptr, &dummy_qk_worst_mag, &o->grad_rel_ot_tf32, &o->worst_ot_tf32, &dummy_ot_worst_mag);
+            (void) dummy_qk;
+            o->prec_fwd  = dit_flash_last_prec(M->backend, 0);
+            o->prec_bwd  = dit_flash_last_prec(M->backend, 1);
+            o->ran_tf32  = true;
         }
     }
 
@@ -2456,7 +2556,26 @@ static void dit_st_flash_gates(std::vector<DitSelfTestResult> & rs, DitTrainMode
     const bool   gpu    = (strcmp(gname, "CPU") != 0);
     const double bar    = 1e-4;   // layer output, and every gradient outside q/k
     const double bar_qk = 2e-3;   // q_proj / k_proj, through the QK rms_norm back
-    char         d[3000];
+    char         d[4096];
+
+    // HOT-Step patch: flash-attn-train — both arithmetics on one line, plus the
+    // backend's own answer about which kernel each direction launched. Reported,
+    // never gated: see the TF32 paragraph above for why the CUDA delta measures
+    // the reference's rounding rather than the op's.
+    auto gpu_prec_line = [](const DitStFlashMeas & g) {
+        char t[640];
+        if (!g.ran_tf32) {
+            snprintf(t, sizeof(t), "prec f32 %.3e out / %.3e q-k / %.3e other (no second arithmetic here)",
+                     g.out_rel, g.grad_rel_qk, g.grad_rel_ot);
+        } else {
+            snprintf(t, sizeof(t),
+                     "prec f32 %.3e out / %.3e q-k / %.3e other, loss %.9f; prec tf32 %.3e / %.3e / %.3e, "
+                     "loss %.9f (kernels launched: fwd %s, bwd %s)",
+                     g.out_rel, g.grad_rel_qk, g.grad_rel_ot, g.loss_flash, g.out_rel_tf32, g.grad_rel_qk_tf32,
+                     g.grad_rel_ot_tf32, g.loss_flash_tf32, g.prec_fwd.c_str(), g.prec_bwd.c_str());
+        }
+        return std::string(t);
+    };
 
     if (samples.empty()) {
         dit_st_report(rs, "SF1", false, "no cached songs");
@@ -2475,8 +2594,12 @@ static void dit_st_flash_gates(std::vector<DitSelfTestResult> & rs, DitTrainMode
     // see the TF32 paragraph above.
     DitStFlashMeas g1, g2;
     std::string    g1err = "-", g2err = "-";
-    const bool     g1ok  = dit_st_flash_measure(Mg, samples, seed, 1, T, enc_1, 2, false, &g1, &g1err);
-    const bool     g2ok  = have_b2 && dit_st_flash_measure(Mg, samples, seed, B2, T, enc_3, 2, true, &g2, &g2err);
+    // `second_prec` = gpu: the TF32 arm only exists where the CUDA dispatch can
+    // select it. On a CPU-only box the flag is ignored by design, so asking for
+    // it would print the f32 column twice.
+    const bool     g1ok  = dit_st_flash_measure(Mg, samples, seed, 1, T, enc_1, 2, false, gpu, &g1, &g1err);
+    const bool     g2ok =
+        have_b2 && dit_st_flash_measure(Mg, samples, seed, B2, T, enc_3, 2, true, gpu, &g2, &g2err);
 
     // The CPU copy: the only place exact-vs-flash is a clean measurement.
     // Mirrored at lora_lo = L-2 so just the two layers under test are promoted,
@@ -2502,8 +2625,9 @@ static void dit_st_flash_gates(std::vector<DitSelfTestResult> & rs, DitTrainMode
                 bp.cpu_backend = Mc.backend;  // n == 1: nothing can silently land elsewhere
                 bp.has_gpu     = false;
                 Mc.sched       = backend_sched_new(bp, 65536);
-                c1ok           = dit_st_flash_measure(&Mc, samples, seed, 1, T, enc_1, 2, false, &c1, &c1err);
-                c2ok = have_b2 && dit_st_flash_measure(&Mc, samples, seed, B2, T, enc_3, 2, true, &c2, &c2err);
+                c1ok = dit_st_flash_measure(&Mc, samples, seed, 1, T, enc_1, 2, false, false, &c1, &c1err);
+                c2ok =
+                    have_b2 && dit_st_flash_measure(&Mc, samples, seed, B2, T, enc_3, 2, true, false, &c2, &c2err);
             }
         }
     }
@@ -2517,13 +2641,13 @@ static void dit_st_flash_gates(std::vector<DitSelfTestResult> & rs, DitTrainMode
              "(layer_type 0 x%d, 1 x%d), S=%d enc_S=%d. CPU parity, both arms f32 so the fused op is the only "
              "difference left: %s output %.3e (bar %.0e); gradients outside q/k %.3e on %s (bar %.0e, that "
              "tensor's |grad|max %.3e); q/k, back through the QK rms_norm, %.3e on %s (bar %.0e, |grad|max %.3e); "
-             "losses %.9f vs %.9f [%s]. %s reports %.3e / %.3e over a %d-node exact graph vs %d-node flash "
+             "losses %.9f vs %.9f [%s]. %s reports %s over a %d-node exact graph vs %d-node flash "
              "— REPORTED, not gated: the exact arm's attention mul_mats run on cuBLAS TF32 there, so that delta "
              "sizes the reference's own rounding. supports_op on %s: fwd %s bwd %s%s%s",
              Mg->m.cfg.n_kv_heads, Mg->m.cfg.n_heads, Mg->m.cfg.n_layers, c1.lt0, c1.lt1, T / Mg->m.cfg.patch_size,
              enc_1, c1.tap.c_str(), c1.out_rel, bar, c1.grad_rel_ot, c1.worst_ot.c_str(), bar, c1.mag_ot,
              c1.grad_rel_qk, c1.worst_qk.c_str(), bar_qk, c1.mag_qk, c1.loss_exact, c1.loss_flash,
-             c1ok ? "cpu ok" : (cerr != "-" ? cerr.c_str() : c1err.c_str()), gname, g1.out_rel, g1.grad_rel,
+             c1ok ? "cpu ok" : (cerr != "-" ? cerr.c_str() : c1err.c_str()), gname, gpu_prec_line(g1).c_str(),
              g1.nodes_exact, g1.nodes_flash, gname, g1.probe_fwd ? "yes" : "NO", g1.probe_bwd ? "yes" : "NO",
              g1ok ? "" : " — GPU ARM FAILED: ", g1ok ? "" : g1err.c_str());
     dit_st_report(rs, "SF1",
@@ -2531,8 +2655,9 @@ static void dit_st_flash_gates(std::vector<DitSelfTestResult> & rs, DitTrainMode
                       c1.grad_rel_qk <= bar_qk && c1.out_mag > 0.0 && c1.ref_mag > 0.0,
                   d);
 
-    // SF2 — B = 3 mixed lengths: expanded heads (Nkv == Nh) and the per-element
-    // [.,.,1,B] masks, so the op's ne2/ne3 modulo broadcast is measured too.
+    // SF2 — B = 3 mixed lengths: per-element [.,.,1,B] masks, so the op's ne2/ne3
+    // modulo broadcast is measured too, and (patch B2) an ASYMMETRIC pair — the
+    // exact arm expands K/V to Nh, the flash arm keeps native GQA 8/32.
     if (!have_b2) {
         snprintf(d, sizeof(d), "need >= %d cached songs for a B=%d batch of DIFFERENT songs, found %d", B2, B2,
                  (int) samples.size());
@@ -2541,14 +2666,15 @@ static void dit_st_flash_gates(std::vector<DitSelfTestResult> & rs, DitTrainMode
     }
     snprintf(d, sizeof(d),
              "--attn flash vs exact, B=%d mixed length (one song %d of %d frames, %d padded, so both masks are "
-             "per-element [.,.,1,B] and K/V are pre-expanded to Nh). CPU parity: %s output %.3e (bar %.0e); "
+             "per-element [.,.,1,B]; B2: the EXACT arm pre-expands K/V to Nh, the FLASH arm runs native GQA). "
+             "CPU parity: %s output %.3e (bar %.0e); "
              "gradients outside q/k %.3e on %s (bar %.0e, |grad|max %.3e); q/k %.3e on %s (bar %.0e, |grad|max "
-             "%.3e); losses %.9f vs %.9f [%s]. %s reports %.3e / %.3e over a %d-node exact graph vs %d-node flash "
+             "%.3e); losses %.9f vs %.9f [%s]. %s reports %s over a %d-node exact graph vs %d-node flash "
              "— REPORTED, not gated (cuBLAS TF32 reference). supports_op on %s: fwd %s bwd %s%s%s",
              B2, c2.short_len, c2.pad_len, c2.pad_len - c2.short_len, c2.tap.c_str(), c2.out_rel, bar,
              c2.grad_rel_ot, c2.worst_ot.c_str(), bar, c2.mag_ot, c2.grad_rel_qk, c2.worst_qk.c_str(), bar_qk,
              c2.mag_qk, c2.loss_exact, c2.loss_flash,
-             c2ok ? "cpu ok" : (cerr != "-" ? cerr.c_str() : c2err.c_str()), gname, g2.out_rel, g2.grad_rel,
+             c2ok ? "cpu ok" : (cerr != "-" ? cerr.c_str() : c2err.c_str()), gname, gpu_prec_line(g2).c_str(),
              g2.nodes_exact, g2.nodes_flash, gname, g2.probe_fwd ? "yes" : "NO", g2.probe_bwd ? "yes" : "NO",
              g2ok ? "" : " — GPU ARM FAILED: ", g2ok ? "" : g2err.c_str());
     dit_st_report(rs, "SF2",

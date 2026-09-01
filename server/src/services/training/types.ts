@@ -878,8 +878,17 @@ export interface TrainDitOptions {
    *  Default 'exact' keeps today's byte-identical dit_attn_f32 graph. 'flash'
    *  routes through the fused ggml_flash_attn_train/_back kernels instead —
    *  experimental, and it is what makes full-song (much longer) training crops
-   *  affordable, at some per-step speed cost. */
-  attnBackend?: 'exact' | 'flash'; // default 'exact'
+   *  affordable, at some per-step speed cost.
+   *
+   *  'flash-f32' is the same fused ops pinned to strict f32 (GGML_PREC_F32),
+   *  i.e. the original scalar kernels rather than the TF32 tensor-core ones
+   *  'flash' selects. It is a POWER-USER API value with no UI: the Training
+   *  Studio checkbox is two-state and emits 'exact' or 'flash'. It exists to
+   *  separate "did fusion change the training" from "did TF32 change it", and
+   *  as an escape hatch if TF32 ever turns out to matter. It is markedly
+   *  slower — measured 2.8x the exact graph's per-epoch time at 32 layers /
+   *  crop 1250, against 1.07x for 'flash'. */
+  attnBackend?: 'exact' | 'flash' | 'flash-f32'; // default 'exact'
 }
 
 /** Structurally identical to TrainLmEpoch so LossSparkline is reused unedited. */
