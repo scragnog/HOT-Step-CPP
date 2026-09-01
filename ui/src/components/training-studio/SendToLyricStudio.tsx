@@ -3,7 +3,8 @@
 // One card + one confirm modal. The server detects artist/album (audio-tag
 // majority vote → dataset defaults → folder name); both fields are editable
 // before committing. An existing artist+album set is updated in place, and the
-// dataset's trained adapters can be linked as the album preset.
+// dataset's trained adapters plus one of its own tracks (the timbre /
+// mastering reference) can be linked as the album preset.
 
 import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Mic2, RefreshCw, X } from 'lucide-react';
@@ -18,6 +19,7 @@ const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dar
 const INPUT = 'rounded-lg px-3 py-2 text-sm bg-zinc-100 dark:bg-black/20 border border-zinc-300 dark:border-white/10 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500';
 
 const lastFolder = (p: string) => p.split(/[\\/]/).filter(Boolean).slice(-2).join('/');
+const fileName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 
 export const SendToLyricStudio: React.FC = () => {
   const { t } = useTranslation();
@@ -72,7 +74,7 @@ export const SendToLyricStudio: React.FC = () => {
     }
   };
 
-  const hasAdapters = !!(preview?.ditAdapter || preview?.lmAdapter);
+  const hasPresetAssets = !!(preview?.ditAdapter || preview?.lmAdapter || preview?.referenceTrack);
   const canSend = !!preview && preview.songs.length > 0 && !!artist.trim() && !!album.trim() && !sending;
 
   return (
@@ -196,7 +198,7 @@ export const SendToLyricStudio: React.FC = () => {
                   )}
 
                   {/* Adapters → album preset */}
-                  {hasAdapters ? (
+                  {hasPresetAssets ? (
                     <label className="flex items-start gap-2.5 cursor-pointer">
                       <input
                         type="checkbox"
@@ -214,6 +216,11 @@ export const SendToLyricStudio: React.FC = () => {
                         {preview.lmAdapter && (
                           <span className="block text-[11px] font-mono text-zinc-500 mt-0.5" title={preview.lmAdapter.path}>
                             {t('trainingStudio.lyricStudio.adapterLm', { name: lastFolder(preview.lmAdapter.path), detail: preview.lmAdapter.detail })}
+                          </span>
+                        )}
+                        {preview.referenceTrack && (
+                          <span className="block text-[11px] font-mono text-zinc-500 mt-0.5" title={preview.referenceTrack}>
+                            {t('trainingStudio.lyricStudio.adapterReference', { name: fileName(preview.referenceTrack) })}
                           </span>
                         )}
                       </span>

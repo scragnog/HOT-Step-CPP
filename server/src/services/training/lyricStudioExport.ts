@@ -4,7 +4,8 @@
 // needs: Genius lyrics, LLM caption+genre, Essentia bpm/key/signature, plus
 // embedded audio tags. This service turns one dataset into (or refreshes) one
 // lyrics_set, enriched per song, and optionally wires the dataset's trained
-// adapters into the album preset so generation is one click away.
+// adapters AND one of its source tracks (the timbre/mastering reference) into
+// the album preset so generation is one click away.
 //
 // Artist/album detection is a majority vote over the embedded tags — the most
 // reliable source we have and already scanned into every sample — falling back
@@ -162,6 +163,46 @@ function toStoredSong(s: TrainingSample, ds: TrainingDatasetRow, setAlbum: strin
   return song;
 }
 
+// ── Reference track ────────────────────────────────────────────────
+
+/** Longest track the engine will take as reference audio, in seconds.
+ *  /synth 413s at MAX_T_LATENT frames — 600 s at 48 kHz — and
+ *  generation/sourceAudio.ts enforces the same bound at render time. Mirrored
+ *  (not imported) because that module pulls in the whole mastering route. */
+const REFERENCE_MAX_SECONDS = 598;
+
+/**
+ * One of the dataset's own tracks, to hang on the album preset as the timbre /
+ * mastering reference.
+ *
+ * Any track off the album is a valid answer — the point is that the preset
+ * carries the artist's real recorded sound, not that one particular song does.
+ * Two preferences make the automatic pick less likely to be a bad one:
+ *
+ *  - vocal tracks over instrumentals, because vocal timbre is most of what the
+ *    reference is being asked for;
+ *  - the MEDIAN duration rather than the first track, because the front of an
+ *    album's file order is where intros, skits and 40-second interludes live.
+ *
+ * Over-long tracks are skipped outright: the engine rejects reference audio at
+ * 600 s and a 21-minute closer would fail every render that rolled onto it.
+ *
+ * Note this also seeds "Randomize timbre reference", which re-rolls across the
+ * WHOLE folder the picked file sits in (sourceAudio.ts) — so the pick doubles
+ * as pointing the preset at this dataset's audio.
+ */
+export function pickReferenceTrack(samples: TrainingSample[]): string | null {
+  const usable = samples.filter(s =>
+    !s.excluded && !s.fileMissing
+    && !(typeof s.duration === 'number' && s.duration >= REFERENCE_MAX_SECONDS));
+  const pool = usable.filter(s => !s.isInstrumental);
+  const candidates = (pool.length ? pool : usable)
+    .slice()
+    .sort((a, b) => (a.duration || 0) - (b.duration || 0) || a.relPath.localeCompare(b.relPath));
+  if (!candidates.length) return null;
+  return candidates[Math.floor((candidates.length - 1) / 2)].audioPath;
+}
+
 // ── Public API ───────────────────────────────────────────────────────────
 
 export async function previewLyricStudioExport(
@@ -198,6 +239,9 @@ export async function previewLyricStudioExport(
     existingSongCount: existingSet ? existingSet.total_songs : 0,
     ditAdapter: findDitAdapter(ds),
     lmAdapter: findLmAdapter(ds),
+    // Whole sample list, not split.included: a reference track needs audio on
+    // disk, not lyrics, so instrumentals and un-Geniused tracks still count.
+    referenceTrack: pickReferenceTrack(samples),
     geniusConfigured: !!config.lireek.geniusAccessToken,
   };
 }
@@ -337,17 +381,24 @@ export async function commitLyricStudioExport(
     } catch { /* portrait stays empty */ }
   }
 
-  // Album preset: wire the dataset's trained adapters in, preserving whatever
-  // the user already dialed in (upsertPreset overwrites EVERY column, so an
-  // existing preset must be read back and merged, not patched blind).
+  // Album preset: wire the dataset's trained adapters and one of its own
+  // tracks in, preserving whatever the user already dialed in (upsertPreset
+  // overwrites EVERY column, so an existing preset must be read back and
+  // merged, not patched blind).
   let presetUpdated = false;
   if (input.linkAdapters !== false) {
     const dit = findDitAdapter(ds);
     const lm = findLmAdapter(ds);
-    if (dit || lm) {
-      const data = presetDataFromRow(getPreset(lyricsSetId));
+    const data = presetDataFromRow(getPreset(lyricsSetId));
+    // A reference the user chose by hand outranks our pick; one pointing at
+    // a file that has since gone does not.
+    const refStale = !data.referenceTrackPath
+      || !fs.existsSync(data.referenceTrackPath);
+    const ref = refStale ? pickReferenceTrack(samples) : null;
+    if (dit || lm || ref) {
       if (dit) data.adapterPath = dit.path;
       if (lm) data.lmAdapterPath = lm.path;
+      if (ref) data.referenceTrackPath = ref;
       upsertPreset(lyricsSetId, data);
       presetUpdated = true;
     }

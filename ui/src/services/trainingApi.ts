@@ -1082,13 +1082,16 @@ export interface LyricStudioExportPreview {
   existingSongCount: number;
   ditAdapter: LyricStudioAdapterHit | null;
   lmAdapter: LyricStudioAdapterHit | null;
+  referenceTrack: string | null;    // dataset track offered as the preset's
+                                    // timbre/mastering reference; null = none usable
   geniusConfigured: boolean;  // album/artist art fetch will be attempted
 }
 
 export interface LyricStudioExportInput {
   artist?: string;            // override; omit/'' = detected value
   album?: string;
-  linkAdapters?: boolean;     // default true — write the album preset from trained adapters
+  linkAdapters?: boolean;     // default true — write the album preset from the
+                              // trained adapters + a dataset reference track
 }
 
 export interface LyricStudioExportResult {
