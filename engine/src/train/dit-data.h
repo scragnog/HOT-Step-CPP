@@ -320,11 +320,28 @@ static DitCrop dit_sample_crop(LmRng * rng, int T, int crop, int patch) {
 // trainer it came from, where the crop is ~82% of the song and there are only a
 // handful of legal starts — but the DiT crop is a few percent of the track, so
 // with patch=2 and a 418-frame crop of a 6625-frame song there are 3104 legal
-// starts and frame 0 was drawn 622x more often than any other. Bound to
-// absolute RoPE by `anchor_song`, that memorised the training set's openings at
-// position 0 and stamped them on every render (measured: the first 55 s of an
-// adapter render carried 0.14x the spectral flux of its own body, against 0.89x
-// for the bare DiT).
+// starts and frame 0 was drawn 622x more often than any other, so the adapter
+// memorised the training set's eleven opening WINDOWS and stamped them on every
+// render (measured: the first 55 s of an adapter render carried 0.14x the
+// spectral flux of its own body, against 0.89x for the bare DiT).
+//
+// A CORRECTION TO THE 2026-08-30 THEORY (2026-09-01). That commit blamed
+// "absolute RoPE positions" for both spikes and zeroed the end share on that
+// basis. The theory is mechanically impossible: RoPE is applied to q/k only
+// (cross-attn is unroped, nothing else consumes t_pos), and rotation-composed
+// attention scores depend on q-k position DELTAS alone — the graph is exactly
+// shift-invariant in the crop offset, so `anchor_song` vs `zero` cannot change
+// a single output. What the pinned draws actually did was oversample the same
+// few WINDOWS 622x (content overfit); what zeroing the end share actually did
+// was leave endings unsupervised — a flush-end draw then only arrives through
+// the uniform sampler's single legal start, ~0.03% of draws, ~1.4 times in a
+// 500-epoch run. Every adapter of the 2026-08-31 overnight batch trained that
+// way still cut off mid-stream with no ending, which is what refuted the
+// "base DiT already ends well, nothing to rescue" assumption: a dim-512 LoKr
+// across 32 layers freely damages a mapping it never receives gradient on.
+// The ending signal the adapter must learn is CONTENT — the ctxl frames of a
+// real ending — and that generalises to any render duration precisely because
+// position cannot enter.
 //
 // MM3 splits this share "half at frame 0, half over aligned tiles", but tiles
 // land on a handful of exact positions, which at this coverage still leaves a
@@ -333,6 +350,21 @@ static DitCrop dit_sample_crop(LmRng * rng, int T, int crop, int patch) {
 // aligned starts in [0, start_window * len). At window=1 that is a 3.0x worst
 // spike (down from 622x) while the opening region still sees 18.5% of draws
 // against a natural 6.7%, so it is covered without being memorised.
+//
+// THE END SHARE (restored 2026-09-01) needs a different diversifier, because
+// unlike the opening the payload is pinned to one boundary: only a crop whose
+// right edge IS the track end contains the decay-to-silence. Spreading over a
+// region the way the start share does would hand the flush window ~1/198th of
+// the share and starve the one lesson that matters. So the share splits:
+//   - flush-jitter (first half): flush against the track end, length jittered
+//     over the patch-aligned lengths in [crop/2, crop]. Every draw carries the
+//     real ending; the moving left edge varies the window (~100 distinct crops
+//     per song at crop=396) so no exact window repeats often enough to memorise.
+//   - closing region (second half): full-length crops uniform over the aligned
+//     starts in [T - len - win + patch, T - len], the mirror of the opening
+//     region — context coverage for the approach to the ending.
+// Both fold their variety out of the already-drawn uniform start, keeping the
+// two-draw stride.
 //
 // The share should also track how much of the song a crop covers: a uniform
 // draw already gives the opening region crop/T of the mass, which IS its fair
@@ -372,13 +404,45 @@ static DitCrop dit_sample_crop_structured(LmRng * rng, int T, int crop, int patc
         return c;
     }
     if (u < (double) start_frac + (double) end_frac && !truncated) {
-        DitCrop   c;
-        c.len          = un.len;
+        DitCrop      c;
+        const double mid = (double) start_frac + (double) end_frac * 0.5;
+        if (u < mid) {
+            // Flush-jitter: the crop's right edge is the track's true end; the
+            // length (and so the left edge) is folded out of the uniform start,
+            // costing no extra draw. len stays patch-aligned because un.len and
+            // patch*k both are.
+            int len_min = un.len / 2;
+            len_min -= len_min % patch;
+            if (len_min < patch) {
+                len_min = patch;
+            }
+            const int len_opts = (un.len - len_min) / patch + 1;
+            c.len              = un.len - patch * ((un.start / patch) % std::max(1, len_opts));
+        } else {
+            // Closing region: full-length crop, start uniform over the aligned
+            // starts whose window still touches the closing region — the mirror
+            // of the opening branch above.
+            c.len          = un.len;
+            const int span = T - c.len;
+            int       win  = std::max(1, start_window) * c.len;
+            if (win > span + patch) {
+                win = span + patch;
+            }
+            const int slots = std::max(1, win / patch);
+            int       st    = span - patch * ((un.start / patch) % slots);
+            if (st < 0) {
+                st = 0;
+            }
+            c.start = st - (st % patch);
+            GGML_ASSERT(c.len > 0 && c.start >= 0 && c.start + c.len <= T);
+            return c;
+        }
         const int last = T - c.len;
         c.start        = last - (last % patch);
         if (c.start < 0) {
             c.start = 0;
         }
+        GGML_ASSERT(c.len > 0 && c.start + c.len <= T);
         return c;
     }
     return un;

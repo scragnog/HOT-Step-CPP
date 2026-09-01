@@ -54,7 +54,7 @@ struct DitTrainLog {
     int         crop = 0, crop_min = 375, crop_max = 1250;
     std::string crop_source = "auto";
     std::string crop_anchor = "song", crop_mode = "structured";
-    float       crop_start_frac = 0.2f, crop_end_frac = 0.0f;
+    float       crop_start_frac = 0.2f, crop_end_frac = 0.2f;
     // What the endpoint shares actually came out as after the crop-coverage
     // scaling — the requested fracs alone no longer describe the run.
     float       crop_start_frac_eff = 0.0f, crop_end_frac_eff = 0.0f;
@@ -125,7 +125,9 @@ static bool dit_write_train_log(const std::string & dir, const DitTrainLog & m) 
     yyjson_mut_val * root = yyjson_mut_obj(doc);
     yyjson_mut_doc_set_root(doc, root);
 
-    yyjson_mut_obj_add_strcpy(doc, root, "format", "hot-step-dit-train-v2");
+    // v3 (2026-09-01): the end share is back on (split flush-jitter / closing
+    // region), so a v2 run's crop stream no longer replays at the same seed.
+    yyjson_mut_obj_add_strcpy(doc, root, "format", "hot-step-dit-train-v3");
     yyjson_mut_obj_add_strcpy(doc, root, "producer", m.producer.c_str());
     yyjson_mut_obj_add_strcpy(doc, root, "created_at", m.created_at.c_str());
 

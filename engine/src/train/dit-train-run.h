@@ -98,14 +98,17 @@ struct DitTrainArgs {
     // short crop relaxes toward the uniform sampler instead of spiking two
     // positions. See the 2026-08-30 note on dit_sample_crop_structured.
     float crop_start_frac = 0.2f;
-    // 0 by default (2026-08-30). The end share was pinning 20% of all draws on
-    // the single crop flush with each track's end; under `anchor_song` that
-    // taught "songs end" at the absolute RoPE positions of the training set's
-    // own lengths, and adapter renders then refused to resolve at whatever
-    // duration was asked for (measured: bare DiT decays to a -74 dBFS floor,
-    // the adapter stops at -13 dBFS, still at full body level). The base DiT
-    // already ends well on its own, so there is no capability to rescue here.
-    float crop_end_frac   = 0.0f;
+    // Restored to 0.2 (2026-09-01) after a day at 0. The 2026-08-30 zeroing
+    // rested on a positional theory that pure-RoPE attention makes impossible
+    // (see the correction note on dit_sample_crop_structured), and on "the
+    // base DiT already ends well, nothing to rescue" — refuted by the
+    // 2026-08-31 overnight batch: every adapter trained with the end share at
+    // 0 still cut off mid-stream, because endings then get ~1.4 supervised
+    // draws per 500-epoch run and the LoKr freely damages the base's
+    // ending behaviour. The share now splits flush-jitter / closing-region
+    // draws, which keeps the real decay-to-silence in every flush draw while
+    // varying the window enough to avoid the 08-29 memorisation.
+    float crop_end_frac   = 0.2f;
     // Opening window the start share spreads over, in crop lengths.
     int   crop_start_window = 1;
     // Endpoint share ceiling as a multiple of the crop's natural coverage.
@@ -1046,7 +1049,7 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         char cb[256];
         snprintf(cb, sizeof(cb),
                  "crop policy: structured - start %.1f%% over a %d-crop opening window, "
-                 "end %.1f%%, random %.1f%% "
+                 "end %.1f%% (half flush-jitter, half closing region), random %.1f%% "
                  "(requested %.0f/%.0f%%, scaled by crop coverage %d/%d = %.1f%%)",
                  (double) bcfg.start_frac * 100.0, bcfg.start_window, (double) bcfg.end_frac * 100.0,
                  (1.0 - (double) bcfg.start_frac - (double) bcfg.end_frac) * 100.0,

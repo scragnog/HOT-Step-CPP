@@ -2904,11 +2904,13 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     const cropAnchor = body.cropAnchor === 'zero' ? 'zero' as const : 'song' as const;
     const cropMode = body.cropMode === 'random' ? 'random' as const : 'structured' as const;
     const cropStartFrac = numOpt(body.cropStartFrac, 0.2);
-    // 0 since 2026-08-30 (was 0.2). Under crop-anchor 'song' an end share
-    // taught 'songs end' at the training set's own absolute lengths, so
-    // adapter renders refused to resolve at the duration actually requested.
-    // The bare DiT already ends cleanly, so nothing is lost by dropping it.
-    const cropEndFrac = numOpt(body.cropEndFrac, 0);
+    // Back to 0.2 (2026-09-01, was 0 for a day). The 2026-08-30 zeroing left
+    // song endings unsupervised (~1.4 flush-end draws per 500-epoch run), and
+    // every adapter of the 2026-08-31 overnight batch cut off mid-stream with
+    // no ending. The engine's end share now splits flush-jitter /
+    // closing-region draws — see dit_sample_crop_structured in
+    // engine/src/train/dit-data.h for the corrected story.
+    const cropEndFrac = numOpt(body.cropEndFrac, 0.2);
     if (cropStartFrac < 0 || cropEndFrac < 0 || cropStartFrac + cropEndFrac > 1) {
       res.status(400).json({ error: 'cropStartFrac/cropEndFrac must be >= 0 and sum to <= 1' });
       return;

@@ -789,7 +789,7 @@ export interface TrainDitOptions {
   cropAnchor?: 'song' | 'zero';
   cropMode?: 'structured' | 'random';
   cropStartFrac?: number;          // default 0.2
-  cropEndFrac?: number;            // default 0 (see the 2026-08-30 note in training.ts)
+  cropEndFrac?: number;            // default 0.2 (see the 2026-09-01 note in training.ts)
   targetLoss?: number;             // default 0.1;  0 disables auto-stop
   epochs?: number;                 // default 400 (hard cap)
   learningRate?: number;           // default 0.0005 (lora) / 0.01 (lokr, K2)
