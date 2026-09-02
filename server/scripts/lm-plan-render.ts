@@ -93,6 +93,9 @@ async function main(): Promise<void> {
   const sides = (args.get('sides') ?? 'gt,base,adapter').split(',').filter(Boolean);
   const synthModel = args.get('synth-model') ?? '';
   const nSamples = Math.trunc(Number(args.get('samples')) || 0);
+  // --label renames the 'adapter' side in the manifest/filenames, so a second runs.json made with
+  // a different adapter (e.g. a chain stage) can share one renders dir with the primary run.
+  const label = args.get('label') ?? '';
 
   const rows = new Map(runs.rows.map(r => [r.id, r]));
   let rowIds = runs.rows.map(r => r.id);
@@ -113,7 +116,8 @@ async function main(): Promise<void> {
   }
   for (const g of runs.gens) {
     if (!sides.includes(g.side) || !keep.has(g.rowId)) continue;
-    work.push({ side: g.side, row: rows.get(g.rowId)!, seed: g.seed, codes: g.codes });
+    const side = (g.side === 'adapter' && label) ? label : g.side;
+    work.push({ side, row: rows.get(g.rowId)!, seed: g.seed, codes: g.codes });
   }
   const stemOf = (f: string) => path.basename(f).replace(/\.safetensors$/i, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
   const manifestPath = path.join(outDir, 'renders.json');

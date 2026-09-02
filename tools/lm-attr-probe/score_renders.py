@@ -75,21 +75,35 @@ def main() -> None:
         runs = json.load(open(rp, encoding="utf-8"))
         rows = {r["id"]: r for r in runs["rows"]}
         gens = {(g["rowId"], g["side"], g["seed"]): np.asarray(g["codes"], dtype=np.int64) for g in runs["gens"]}
+        # sides: gt / base / adapter, plus any extra arm rendered with lm-plan-render --label
+        # (chain stages: stage1, stage2). Extra arms need their own plans dir for the codes.
         sides: dict[str, list[np.ndarray]] = {"gt": [], "base": [], "adapter": []}
         by_song: dict[str, dict[str, np.ndarray]] = {}
-        deg = {"base": [], "adapter": []}
+        deg: dict[str, list] = {"base": [], "adapter": []}
+        extra_gens: dict[str, dict] = {}
         for m in manifest:
             npz = (rd / m["wav"]).with_suffix(".npz")
-            if not npz.exists() or m["side"] not in sides:
+            if not npz.exists():
                 continue
+            side = m["side"]
+            if side not in sides:
+                sides[side] = []
+                deg[side] = []
+                sp = v.attr_dir / f"plans_{side}" / "runs.json"
+                if sp.exists():
+                    sr = json.load(open(sp, encoding="utf-8"))
+                    extra_gens[side] = {(g["rowId"], g["seed"]): np.asarray(g["codes"], dtype=np.int64)
+                                        for g in sr["gens"] if g["side"] == "adapter"}
             X, _ = load_attr(npz)
             Xz = (X - mu) / sd
-            sides[m["side"]].append(Xz)
-            by_song.setdefault(m["rowId"], {})[m["side"]] = Xz
-            if m["side"] in deg:
-                codes = gens.get((m["rowId"], m["side"], m["seed"]))
+            sides[side].append(Xz)
+            by_song.setdefault(m["rowId"], {})[side] = Xz
+            if side in deg:
+                codes = (gens.get((m["rowId"], side, m["seed"])) if side in ("base", "adapter")
+                         else extra_gens.get(side, {}).get((m["rowId"], m["seed"])))
                 if codes is not None:
-                    deg[m["side"]].append(degeneracy(codes, int(rows[m["rowId"]]["durUsed"] * 5)))
+                    deg[side].append(degeneracy(codes, int(rows[m["rowId"]]["durUsed"] * 5)))
+        extra_sides = [s for s in sides if s not in ("gt", "base", "adapter") and sides[s]]
         if len(sides["gt"]) < a.min_songs or not sides["base"] or not sides["adapter"]:
             continue
         # real audio, windowed to durUsed, keyed by row so gt-render and real pair per song
@@ -153,6 +167,9 @@ def main() -> None:
             if name in express:
                 rec.update({"express_r": express[name]["r"], "express_r10": express[name]["r10"],
                             "express_null_r": express[name]["null_r"]})
+            for s in extra_sides:
+                E = np.concatenate(sides[s])
+                rec[f"ratio_{s}"] = w1(E[:, j], GT[:, j]) / max(d_b, 1e-9)
             attrs[name] = rec
         axes = {}
         for ax, cols in AXES.items():
@@ -169,6 +186,8 @@ def main() -> None:
                         "median_real_ratio": float(np.nanmedian(rrat)),
                         "express_r": float(np.nanmedian(ex)), "express_r10": float(np.nanmedian(ex10)),
                         "express_null_r": float(np.nanmedian(exn)),
+                        **{f"median_ratio_{s}": float(np.median([attrs[c][f"ratio_{s}"] for c in cols]))
+                           for s in extra_sides},
                         "d_base": float(np.mean([attrs[c]["d_base"] for c in cols])),
                         "d_adapter": float(np.mean([attrs[c]["d_adapter"] for c in cols])),
                         "floor": float(np.mean([attrs[c]["floor"] for c in cols]))}
@@ -176,6 +195,7 @@ def main() -> None:
                      for s in deg if deg[s]}
         per_artist.append({"slug": v.slug, "adapter": runs["adapterPath"], "n_gt": len(sides["gt"]),
                            "n_base": len(sides["base"]), "n_adapter": len(sides["adapter"]),
+                           "extra_sides": extra_sides,
                            "axes": axes, "attrs": attrs, "degenerate_frac": degs_flag})
         print(f"{v.slug:<32} " + "  ".join(f"{ax[:8]}={axes[ax]['median_ratio']:.2f}" for ax in AXES) +
               f"  degen(adapter)={degs_flag.get('adapter', 0):.2f}", flush=True)
@@ -211,6 +231,31 @@ def main() -> None:
                      f"{c['matched_artists_adapter_closer']:.2f} | {c['matched_median_ratio']:.3f} | "
                      f"{c['real_artists_adapter_closer']:.2f} | {c['real_median_ratio']:.3f} | "
                      f"{c['mean_d_base']:.3f} | {c['mean_d_adapter']:.3f} | {c['mean_floor']:.3f} |")
+    all_extra = sorted({s for p in per_artist for s in p.get("extra_sides", [])})
+    if all_extra:
+        lines.append("\n## Chain-stage ladder (median ratio vs gt render, per axis; base = 1.0 by construction)\n")
+        lines.append("| axis | " + " | ".join(all_extra + ["adapter (final)"]) + " |")
+        lines.append("|---|" + "---|" * (len(all_extra) + 1))
+        for ax in AXES:
+            cells = []
+            for s in all_extra:
+                vals = [p["axes"][ax][f"median_ratio_{s}"] for p in per_artist if f"median_ratio_{s}" in p["axes"][ax]]
+                cells.append(f"{np.median(vals):.3f} (n={len(vals)})" if vals else "-")
+            cells.append(f"{corpus[ax]['median_ratio']:.3f}")
+            lines.append(f"| {ax} | " + " | ".join(cells) + " |")
+        lines.append("\n| artist | " + " | ".join(f"{s} / final" for s in all_extra) + " | degenerate " +
+                     " / ".join(all_extra + ["final"]) + " |")
+        lines.append("|---|" + "---|" * (len(all_extra) + 1))
+        for p in per_artist:
+            cells = []
+            for s in all_extra:
+                if f"median_ratio_{s}" in p["axes"]["timbre"]:
+                    cells.append("  ".join(f"{ax[:4]} {p['axes'][ax][f'median_ratio_{s}']:.2f}/{p['axes'][ax]['median_ratio']:.2f}"
+                                           for ax in AXES))
+                else:
+                    cells.append("-")
+            degs = " / ".join(f"{p['degenerate_frac'].get(s, float('nan')):.2f}" for s in all_extra + ["adapter"])
+            lines.append(f"| {p['slug']} | " + " | ".join(cells) + f" | {degs} |")
     lines.append("\n## What the codes express through the base DiT\n")
     lines.append("Per-song Pearson r between the render of the song's OWN codes and the song's real audio, "
                  "per attribute (median over songs, then artists). `null` pairs the render with a different song of "
