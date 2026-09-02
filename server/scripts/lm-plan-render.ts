@@ -108,10 +108,15 @@ async function main(): Promise<void> {
 
   type Work = { side: string; row: EvalRow; seed: number; codes: number[] };
   const work: Work[] = [];
+  // --seeds-extra 143,244 : render the gt plan again with these seeds (same codes, same caption), to
+  // separate what the plan fixes from what the DiT's noise path fixes.
+  const seedsExtra = (args.get('seeds-extra') ?? '').split(',').map(s => Math.trunc(Number(s))).filter(s => Number.isFinite(s) && s > 0);
   if (sides.includes('gt')) {
     for (const id of rowIds) {
       const r = rows.get(id)!;
-      work.push({ side: 'gt', row: r, seed: seedBase, codes: r.gtCodes.slice(0, r.durUsed * 5) });
+      for (const seed of [seedBase, ...seedsExtra]) {
+        work.push({ side: 'gt', row: r, seed, codes: r.gtCodes.slice(0, r.durUsed * 5) });
+      }
     }
   }
   for (const g of runs.gens) {
