@@ -264,6 +264,27 @@ if (Test-Path $ggmlC2) {
     Write-Host "  [WARN] $ggmlC2 not found - ggml submodule not checked out?" -ForegroundColor Yellow
 }
 
+# -- Hook 13: ggml-alloc.c must carry the enlarged free-block table ----------
+#             SUBMODULE file. MAX_FREE_BLOCKS 256 -> 1024. Without it the DiT
+#             trainer's LoKR at dim 256 (a ~19k-node graph) trips
+#             "out of free blocks" in ggml_dyn_tallocr_insert_block a few
+#             epochs in. Failure is loud (GGML_ASSERT), but it only shows on
+#             that configuration, so a lost patch looks like a LoKR bug.
+$ggmlAlloc = "$ggml\src\ggml-alloc.c"
+if (Test-Path $ggmlAlloc) {
+    $content = Get-Content $ggmlAlloc -Raw
+    if ($content -match 'HOT-Step patch: alloc-free-blocks') {
+        Write-Host "  [OK] ggml-alloc.c has the alloc-free-blocks patch" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] ggml-alloc.c is missing the alloc-free-blocks patch" -ForegroundColor Red
+        Write-Host "         LoKR dim 256 training will abort with 'out of free blocks'." -ForegroundColor Yellow
+        Write-Host "         Fix (from the repo root): git apply engine\patches\alloc-free-blocks.patch" -ForegroundColor Yellow
+        $errors++
+    }
+} else {
+    Write-Host "  [WARN] $ggmlAlloc not found - ggml submodule not checked out?" -ForegroundColor Yellow
+}
+
 # ── Summary ───────────────────────────────────────────────────────────
 Write-Host ""
 if ($errors -gt 0) {

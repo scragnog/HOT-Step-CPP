@@ -1,0 +1,20 @@
+diff --git a/engine/ggml/src/ggml-alloc.c b/engine/ggml/src/ggml-alloc.c
+index 3bda9abb..f9b4f124 100644
+--- a/engine/ggml/src/ggml-alloc.c
++++ b/engine/ggml/src/ggml-alloc.c
+@@ -11,7 +11,14 @@
+ #include <string.h>
+ 
+ #define MAX(a, b) ((a) > (b) ? (a) : (b))
+-#define MAX_FREE_BLOCKS 256
++// HOT-Step patch: alloc-free-blocks - 256 -> 1024. The DiT trainer's LoKR at
++// dim 256 / factor 6 puts 224 matrices through factorized w2, a ~19k-node
++// fwd+bwd graph whose many small short-lived tensors fragment a chunk past 256
++// free blocks and trip the assert in ggml_dyn_tallocr_insert_block (seen
++// 2026-09-02, epoch 8 at crop 936 and epoch 17 at crop 850). Capacity only:
++// the table is a per-chunk array, so this costs 768 * 16 B per chunk and
++// changes no allocation decision. See engine/patches/alloc-free-blocks.patch.
++#define MAX_FREE_BLOCKS 1024
+ 
+ //#define GGML_ALLOCATOR_DEBUG
+ 
