@@ -146,7 +146,10 @@ async function main(): Promise<void> {
   if (!slug || !arm) die('needs --dataset <slug> and --arm <name>');
 
   let opts: Record<string, unknown> = {};
-  const optsRaw = args.get('opts');
+  // --opts-b64 exists because PowerShell strips the inner quotes of a JSON object passed as a
+  // native-command argument ({"regEvery":3} arrives as {regEvery:3}); the .ps1 runner uses it.
+  const optsB64 = args.get('opts-b64');
+  const optsRaw = optsB64 ? Buffer.from(optsB64, 'base64').toString('utf-8') : args.get('opts');
   if (optsRaw) {
     try { opts = JSON.parse(optsRaw) as Record<string, unknown>; } catch { die(`--opts is not valid JSON: ${optsRaw}`); }
   }

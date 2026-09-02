@@ -123,7 +123,8 @@ foreach ($slug in $slugList) {
 
     # -- 1. train ------------------------------------------------------------
     $trainArgs = @('tsx', 'scripts/lm-train-arm.ts', '--dataset', $slug, '--arm', $arm,
-                   '--opts', $opts, '--variant', $variant, '--ledger', $Ledger)
+                   '--opts-b64', [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($opts)),
+                   '--variant', $variant, '--ledger', $Ledger)
     if ($DryRun) { $trainArgs += '--dry-run' }
     Push-Location "$repo\server"
     try { Invoke-Logged 'npx' $trainArgs "train $slug/$arm" }
