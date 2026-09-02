@@ -66,7 +66,7 @@ gives back the VRAM win).
 
 | Trainer | Files | Specifics |
 |---|---|---|
-| **AS1.5 LM** (R2) | `engine/src/train/lm-graph.h`, `lm-train-run.h`, `lm-vram.h`, `lm-selftest.h` | Causal = one triangular −INF mask. The kernel skips all-−INF tiles, so causal gets ~half its compute skipped free. Qwen GQA at B=1 is the tested path. Add the LM VRAM model's flash branch (same over-predict rule). |
+| **AS1.5 LM** (R2) — **DONE 2026-09-02** | `engine/src/train/lm-graph.h`, `lm-train-run.h`, `lm-vram.h`, `lm-selftest.h`, `flash-prec.h` | Causal = one triangular −INF mask; the kernel skips all-−INF tiles, so causal gets ~half its compute skipped free. Qwen GQA at B=1 is the tested path. Ships **off by default** (CLI and Training Studio checkbox); 4B low-VRAM is 5.5% faster than the shipped head-blocked arm and 1.2% faster at equal graph shape (opposite split from the DiT — there the fused kernel is the whole win, here the head-block copies are); naive 0.6B roughly doubles auto-fit `maxLen`, 1.7B only 1.27×. Not yet ear-validated — see `project-flash-attn-backward.md` in memory and §7/§8 below for the full numbers and open items. |
 | **MM3 LM** (R3) | `mm3-lm-train-run.h`, `mm3-lm-load.h`, `lm-kvprefix.h` | The "sequence term was quadratic all along" retained softmax is exactly what goes. `--prefix-frames` (no-grad frozen K/V) composes but the fused backward computes dK/dV for the prefix columns and discards them — harmless, wasted; measure before building a no-dK/dV variant. Re-derive crop/prefix budgets afterwards. |
 | **MM3 DiT** (R4) | `mm3-dit-train-*.h` | Bidirectional like the AS DiT; smallest win (shorter sequences). |
 
@@ -163,6 +163,26 @@ For each: (a) sibling `xxx_attn_flash()` returning exactly the shape the manual 
     cast alive and silently spends the ~8 GB back.
 16. **Disk.** Probe runs write adapters; a campaign filled D: to 2.4 GB free and artifacts were
     deleted for space. Clean scratch dirs between grid cells.
+17. **A bench tool's own reference arm can be non-contiguous where the trainer's never is.**
+    `fattn-train-test --bench-lm`'s `blocked` arm fed a `ggml_cont(view)` straight into the
+    reference attention chain, whose backward hands back a transposed (non-contiguous) gradient
+    — `GGML_OP_CONT`'s backward asserts on that and the tool produced no table at all. The
+    trainer never hits it because a `ggml_reshape` always sits between the cont and the chain,
+    and RESHAPE's backward re-conts. Fix: wrap each bench-arm tensor in a shape-preserving
+    `ggml_reshape` too, so the bench pays the same backward copy the trainer pays. Any bench
+    harness that hand-builds a reference graph needs to mirror the trainer's node shapes, not
+    just its op sequence.
+18. **`--max-len` filters, it does not truncate.** Songs longer than it are skipped outright, so
+    `alloc_seq = min(max_len, longest SURVIVING sample)` — pinning a value above the whole
+    corpus's longest track yields an empty dataset (`no-samples`), and a VRAM-model cell "at
+    S=1024" is really whatever the longest surviving song happens to be. Pick the dataset for
+    the S you want, then report the actual S; don't trust the flag to hit a number.
+19. **The exact-mode naive auto-fit can pick a `maxLen` whose own `estMb` already exceeds free
+    VRAM**, then die on `cudaMalloc` with a hard access violation (0xC0000005) instead of a
+    clean `lm_fatal` — reproduces identically on a pre-flash binary, so it is not new. Root
+    cause is the same non-attention polynomial (`c2f`/`c2h`) the flash branch's
+    `naive_nonattn_scale` now corrects around; the exact-mode fix is owed (see §8) and needs its
+    own gate since it moves every shipped run's `estMb`.
 
 ## 7. Numbers worth remembering (5090)
 
@@ -176,13 +196,31 @@ For each: (a) sibling `xxx_attn_flash()` returning exactly the shape the manual 
 | Done-gate auto-fit, production LoKR, unpinned | nwa 1498 (enc_S 1877), fightstar 1616 (enc_S 640); LoRA r16 ~3400 |
 | LoKR apply reorder | −10% step, LoKR:LoRA 1.35→1.21; the two copies are unavoidable, ~7% of step |
 | 12 GB emulated card, flash+bf16+LoRA r16 | full 32-layer depth, crop 410, 4 segments |
+| **LM, 4B low-VRAM, flash vs shipped (`exact --attn-head-block 8`)** | **5.5% faster/micro-step, 3.8% lower peak VRAM** (paired, interleaved, kinks_somethingelse substitute) |
+| LM, 4B low-VRAM, flash vs equal-shape (`exact --attn-head-block 0`) | 1.2% faster — the head-block copies are almost the whole DiT-vs-LM difference |
+| LM attention-only bound (`fattn-train-test --bench-lm` vs blocked) | 0.74×/0.79×/0.80× at S=1024/2113/3500 |
+| LM naive auto-fit `maxLen` lift, flash vs exact | 0.6B ~2.0× (3136→6208 tok); 1.7B ~1.27× (2624→3328 tok) |
+| LM 50-epoch same-seed drift, flash vs exact | same class as `--weights bf16`; smaller on 2/3 measures, ~20% larger on final CE (1 seed, no error bar) |
 
 ## 8. Open items (as of 2026-09-02)
 
-- R2/R3/R4 ports (this skill is their brief).
+- R3/R4 ports (this skill is their brief) — R2 (AS1.5 LM) is DONE, off by default pending ear test.
 - Cross-attention backward kernel: dK/dV role split blocked by smem; a dQ split exists in
   the plan doc (reverted, −2.7%).
 - `DIT_FLASH_LOKR_RETENTION` refit after the apply reorder; batch>1 VRAM term.
 - Exact-mode arena polynomial under-predicts 13–18% (masked by LoKR over-count; fix gated to flash).
+- **LM exact-mode `c2f`/`c2h` non-attention polynomial is ~2.2× light on the naive path**
+  (−11.9% to −12.9% measured, same class as the DiT's exact-mode item above); the flash branch's
+  `naive_nonattn_scale` corrects around it but the exact-mode fix itself is owed and needs its
+  own gate, since it would move every shipped run's `estMb`/auto-fit `maxLen`.
+- LM G5/G6 ran on `kinks_somethingelse`, not nirvana — the box has no `nirvana*` tensor dir, and
+  the plan's ear pair (G7) is specified on nirvana/E3 lineage. Nirvana codes need Preprocess +
+  Extract via the Training Studio batch pipeline before G7 can run as written.
+- LM G7 ear test (twin nirvana adapters, staged in `_experiments/_LISTENING`) — not run, needs
+  Rob; the flash checkbox stays off until it lands.
+- Pre-existing bugs surfaced while porting R2, neither fixed (both reproduce on a pre-flash
+  binary): `mm3-lm-train` crashes at export with a `ggml-backend.cpp` tensor-write-out-of-bounds
+  assert; the LM exact-mode naive auto-fit can pick a `maxLen` that OOMs via access violation
+  instead of a clean fatal (trap 19).
 - Ear validation of anything trained since the first flash adapter, and of the LoKR reorder.
 - Low-VRAM training profiles for users (B1) — deferred by Rob until the 32 GB path is nailed.

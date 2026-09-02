@@ -532,11 +532,92 @@ static inline bool lm_ckpt_head_block_ok(const Qwen3LMConfig & c, int g) {
 
 // Default heads-per-attention-block when --low-vram is active:
 //   n_heads <= 16 -> 0 (off), else 8.
-static inline int lm_ckpt_default_head_block(const Qwen3LMConfig & c) {
+//
+// `attn_flash` (D3) forces 0. Head blocking exists to cap the `3*hb*S^2*4`
+// score/softmax transient, and the fused op has no S^2 term at all — so under
+// --attn flash the blocking would buy nothing and cost four ggml_acc copies per
+// layer, and lm_attn_head_blocked has no fused arm (it asserts). The default
+// argument is false, so every existing caller resolves exactly as it shipped.
+static inline int lm_ckpt_default_head_block(const Qwen3LMConfig & c, bool attn_flash = false) {
+    if (attn_flash) {
+        return 0;
+    }
     if (c.n_heads <= 16) {
         return 0;
     }
     return lm_ckpt_head_block_ok(c, 8) ? 8 : 0;
+}
+
+// ─── attention mask allocation / upload (--attn flash, D4) ──────────────────
+//
+// The exact path's mask is an F32 [S_kv*S] flat buffer that ggml_soft_max_ext
+// reads through a contiguous [S_kv, S] view. The fused op will not take that:
+// ggml_flash_attn_train asserts `mask->type == GGML_TYPE_F16` (engine/ggml/src/
+// ggml.c). So flash mode allocates the SAME flat layout in F16 and converts on
+// upload; exact mode allocates F32 and uploads byte-identical bytes.
+//
+// WHY NOT AN IN-GRAPH CAST. A ggml_cast of the mask would be S^2 elements per
+// layer per graph — at 4B/S 3500 that is 24 MB of extra traffic 36 times a
+// forward, to reproduce a buffer that never changes within a micro-step. The
+// conversion belongs at the one host-side upload.
+//
+// EVERY view of the buffer must therefore size its row stride with
+// ggml_element_size(t) instead of sizeof(float). That expression is IDENTICAL
+// for an F32 tensor, which is what keeps exact mode byte-identical, and is the
+// only reason it is safe to change the shipped view sites.
+static inline ggml_tensor * lm_mask_alloc(ggml_context * ctx, int64_t n, bool flash) {
+    return ggml_new_tensor_1d(ctx, flash ? GGML_TYPE_F16 : GGML_TYPE_F32, n);
+}
+
+// Upload a host F32 mask into `t`, converting per element when `t` is F16.
+// -INFINITY survives the conversion as F16 -inf (0xFC00), which is what the
+// fused op's tile-skip test looks for — the same convention dit-data.h uses.
+static inline void lm_mask_set(ggml_tensor * t, const std::vector<float> & m) {
+    GGML_ASSERT(t != nullptr);
+    GGML_ASSERT((int64_t) m.size() <= ggml_nelements(t));
+    if (t->type == GGML_TYPE_F32) {
+        ggml_backend_tensor_set(t, m.data(), 0, m.size() * sizeof(float));
+        return;
+    }
+    GGML_ASSERT(t->type == GGML_TYPE_F16);
+    std::vector<ggml_fp16_t> h(m.size());
+    for (size_t i = 0; i < m.size(); i++) {
+        h[i] = ggml_fp32_to_fp16(m[i]);
+    }
+    ggml_backend_tensor_set(t, h.data(), 0, h.size() * sizeof(ggml_fp16_t));
+}
+
+// ─── graph signature (self-test T22, --attn flag-off structural identity) ───
+//
+// A 64-bit FNV-1a over the graph's OP SEQUENCE and every node's shape. This is
+// the D2 tripwire in a form that survives without a reverted-tree baseline
+// binary: with --attn exact the emitted graph must be the pre-flash graph to the
+// byte, and "same op sequence, same shapes, same node count" is a check the
+// trainer can make against a recorded constant on any later build.
+//
+// Deliberately NOT hashing tensor DATA (nothing has run) or pointers/names
+// (allocation-order dependent). What it catches is the failure this flag makes
+// possible: an accidentally-emitted extra node, a reordered builder, or a cast
+// that only appears in one arm.
+static inline uint64_t lm_graph_op_hash(ggml_cgraph * gf) {
+    uint64_t   h = 1469598103934665603ull;  // FNV-1a offset basis
+    auto       mix = [&h](uint64_t v) {
+        for (int b = 0; b < 8; b++) {
+            h ^= (v >> (b * 8)) & 0xffull;
+            h *= 1099511628211ull;  // FNV-1a prime
+        }
+    };
+    const int n = ggml_graph_n_nodes(gf);
+    mix((uint64_t) n);
+    for (int i = 0; i < n; i++) {
+        const ggml_tensor * t = ggml_graph_node(gf, i);
+        mix((uint64_t) t->op);
+        mix((uint64_t) t->type);
+        for (int d = 0; d < GGML_MAX_DIMS; d++) {
+            mix((uint64_t) t->ne[d]);
+        }
+    }
+    return h;
 }
 
 // ─── misc ───────────────────────────────────────────────────────────────────

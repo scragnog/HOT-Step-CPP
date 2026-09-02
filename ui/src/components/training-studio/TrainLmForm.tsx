@@ -75,6 +75,20 @@ export interface TrainLmFormState {
   regEvery: number;
   regTopk: number;
   regSongs: number;
+  /** Attention backend (2026-09-02, docs/plans/2026-09-02-lm-flash-attn.md
+   *  Stream B) — the DiT's attnBackend ported to train-lm. 'exact' is
+   *  today's byte-identical graph; 'flash' routes through the fused
+   *  ggml_flash_attn_train/_back kernels the DiT trainer already uses.
+   *  DEFAULT OFF (Rob, 2026-09-02) — unlike the DiT's on-by-default, this is
+   *  new and unvalidated by ear on the LM. 'flash-f32' is API-only; this
+   *  form never produces it. */
+  attnBackend: 'exact' | 'flash';
+  /** Per-layer attention head block size — 0 = engine picks. No control in
+   *  this form exposes a nonzero value today (the field exists so the flash
+   *  checkbox can disable itself if a value ever arrives from stored
+   *  per-stage defaults): flash has no S² term for head-blocking to cut, and
+   *  the server 400s the pair. */
+  attnHeadBlock: number;
 }
 
 export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
@@ -166,6 +180,10 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   regEvery: 0,
   regTopk: 64,
   regSongs: 24,
+  // 'exact' (Rob, 2026-09-02) — the DiT ships 'flash' on by default, but the
+  // LM port is new and unvalidated by ear; a user must opt in.
+  attnBackend: 'exact',
+  attnHeadBlock: 0,
 };
 
 const ALL_STAGES: TrainLmStage[] = ['extract', 'train', 'export'];
@@ -453,6 +471,30 @@ export const TrainLmForm: React.FC<Props> = ({
               />
             </label>
           </div>
+        )}
+      </div>
+
+      {/* ── Attention backend (2026-09-02) ───────────────────────────────
+          The DiT's flash-attention port to train-lm. Unlike the DiT's
+          checkbox, this ships OFF: it is new and unvalidated by ear on the
+          LM. Disabled when a nonzero attnHeadBlock is in effect — flash has
+          no S² term for head-blocking to cut, and the server 400s the pair. */}
+      <div className="flex flex-col gap-1.5 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
+        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+          <input
+            type="checkbox"
+            checked={value.attnBackend === 'flash'}
+            disabled={lock || value.attnHeadBlock > 0}
+            onChange={(e) => onChange({ attnBackend: e.target.checked ? 'flash' : 'exact' })}
+            className="accent-amber-500"
+          />
+          {P('lm.attnBackend', 'Default off', CHECK_LABEL)}
+        </label>
+        <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.lm.attnBackendHelp')}</span>
+        {value.attnHeadBlock > 0 && (
+          <span className="text-[11px] text-amber-500 pl-6">
+            {t('trainingStudio.train.lm.attnBackendHeadBlockHint')}
+          </span>
         )}
       </div>
 

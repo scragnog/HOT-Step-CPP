@@ -383,6 +383,35 @@ static void print_usage(void) {
             "                                                      ~1.7-1.8x per layer per step on an\n"
             "                                                      RTX 5090. Needs the vendored patch\n"
             "                                                      engine/patches/mm-backward.patch.\n"
+            "    --attn <exact|flash|flash-f32>  exact   attention formulation.\n"
+            "                                            exact = the shipped manual chain (mul_mat ->\n"
+            "                                                    soft_max_ext -> mul_mat), which retains\n"
+            "                                                    an [S,S,Nh] softmax per layer. Identical\n"
+            "                                                    to what ran before this flag existed.\n"
+            "                                            flash = fused FLASH_ATTN_TRAIN forward+backward,\n"
+            "                                                    so that softmax is never materialised\n"
+            "                                                    and attention memory is LINEAR in S. On\n"
+            "                                                    the naive 0.6B/1.7B path the retained\n"
+            "                                                    softmax is ~2034*S^2 bytes (29 GB at\n"
+            "                                                    S 3800), which is what caps their\n"
+            "                                                    sequence length today. EXPERIMENTAL: the\n"
+            "                                                    gradients do NOT match exact bit for bit\n"
+            "                                                    — they differ within a measured drift\n"
+            "                                                    band, the same class as --bwd mm and\n"
+            "                                                    --weights bf16. Aborts rather than fall\n"
+            "                                                    back when the backend cannot run the\n"
+            "                                                    ops: a CPU split would be correct,\n"
+            "                                                    unusably slow, and look like a pass.\n"
+            "                                                    Cannot be combined with\n"
+            "                                                    --attn-head-block > 0 (exit 2).\n"
+            "                                            flash-f32 = the same fused ops pinned to strict\n"
+            "                                                    f32 (GGML_PREC_F32), i.e. the scalar\n"
+            "                                                    kernels instead of the TF32 tensor-core\n"
+            "                                                    ones `flash` selects. Slower; it exists\n"
+            "                                                    to separate 'did fusion move the\n"
+            "                                                    training' from 'did TF32 move it'.\n"
+            "                                            lm_train_log.json records the requested mode AND\n"
+            "                                            the arithmetic the backend actually launched.\n"
             "    --optimizer <adamw|muon>    adamw       muon puts every 2-D parameter whose SHORT side is\n"
             "                                            >= --muon-min-dim on orthogonalized-momentum\n"
             "                                            (Newton-Schulz) updates. FOR A LoRA THE SHORT\n"
@@ -3678,6 +3707,7 @@ static int cmd_train_lm(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--lokr-factor") && i + 1 < argc) { a.lokr_factor = atoi(argv[++i]); saw.lokr_factor = true; }
         else if (!strcmp(argv[i], "--no-lokr-decompose-both")) a.lokr_decompose_both = false;
         else if (!strcmp(argv[i], "--bwd") && i + 1 < argc) a.bwd = argv[++i];
+        else if (!strcmp(argv[i], "--attn") && i + 1 < argc) a.attn = argv[++i];
         else if (!strcmp(argv[i], "--batch") && i + 1 < argc) a.batch = argv[++i];
         else if (!strcmp(argv[i], "--trigger") && i + 1 < argc) a.trigger = argv[++i];
         else if (!strcmp(argv[i], "--trigger-position") && i + 1 < argc) a.trigger_position = argv[++i];
@@ -3880,6 +3910,30 @@ static int cmd_train_lm(int argc, char ** argv) {
     }
     if (!bwd_valid(a.bwd)) {
         fprintf(stderr, "ace-train train-lm: --bwd must be outprod|mm\n");
+        return 2;
+    }
+    if (a.attn != "exact" && a.attn != "flash" && a.attn != "flash-f32") {
+        fprintf(stderr, "ace-train train-lm: --attn must be exact|flash|flash-f32\n");
+        return 2;
+    }
+    // D3: COLLISION, refused rather than coerced — the same shape as the
+    // --weights bf16 / --bwd mm refusal below.
+    //
+    // Head blocking exists for one reason: to cap the `3 * hb * S^2 * 4` bytes
+    // of score/softmax state soft_max_ext_back holds live. The fused op has no
+    // S^2 term at all, so under --attn flash the blocking would buy nothing and
+    // cost four ggml_acc reassembly copies per layer — and there is no fused
+    // head-blocked graph to run either way (lm_attn_head_blocked asserts).
+    // Refused HERE, before the model load, rather than silently ignored: a flag
+    // that reads as "set" in the log while doing nothing is the dead-knob
+    // failure mode this codebase has been burned by repeatedly.
+    if (a.attn != "exact" && a.attn_head_block > 0) {
+        fprintf(stderr,
+                "ace-train train-lm: --attn %s cannot be combined with --attn-head-block %d.\n"
+                "  Head blocking caps the [S,S] score/softmax transient; the fused attention ops never\n"
+                "  materialise one, so blocking costs four acc copies per layer and saves nothing.\n"
+                "  Drop --attn-head-block (or pass 0), or use --attn exact.\n",
+                a.attn.c_str(), a.attn_head_block);
         return 2;
     }
     // COLLISION, refused rather than coerced.

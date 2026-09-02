@@ -436,6 +436,15 @@ export interface TrainingMetricEvent {
   padTokens?: number;    // data: padding tokens added by batching
   // NB `samples` (declared above under `data`) is reused by `step` as the
   // per-optimizer-step sample count (micro * B_cur); no new field needed.
+  // Attention backend additions (2026-09-02 lm-flash-attn plan, Stream B).
+  // `attn` is the requested mode ('exact'|'flash'|'flash-f32'); `attnPrec` is
+  // the RESOLVED precision the flash kernels actually ran at ('tf32' vs
+  // 'f32') — op_params zero-init is GGML_PREC_DEFAULT, so the requested mode
+  // alone cannot say which. Both optional and additive on the `vram` event;
+  // neither trainer's engine-side vram JSONL carries them yet, so this is
+  // plumbing ahead of the emitter (see aceTrain.ts attnBackend doc).
+  attn?: string;
+  attnPrec?: string;
 }
 
 export type TrainingStreamEvent =
@@ -742,6 +751,20 @@ export interface TrainLmOptions {
    *  aceTrain.ts. An explicit array must be absolute paths to lm_codes.jsonl
    *  files under data/training/tensors/. Meaningless when regEvery is 0. */
   regCorpora?: 'auto' | string[];    // default 'auto'
+  /** Attention backend (2026-09-02, docs/plans/2026-09-02-lm-flash-attn.md
+   *  Stream B — the DiT's `attnBackend` ported to train-lm). 'exact' keeps
+   *  today's byte-identical attention graph; 'flash' routes through the fused
+   *  ggml_flash_attn_train/_back kernels, the same op the DiT trainer uses.
+   *  Experimental and unvalidated by ear on the LM — the Training Studio
+   *  checkbox ships OFF (Rob, 2026-09-02), unlike the DiT's on-by-default.
+   *
+   *  'flash-f32' pins the fused ops to strict f32 (GGML_PREC_F32) instead of
+   *  TF32. API-only, same as the DiT's value — no UI surfaces it.
+   *
+   *  Mutually exclusive with attnHeadBlock > 0: the fused op has no S² term
+   *  to cut, so head-blocking under flash is refused with a 400 (the engine
+   *  itself exits 2 on the pair, the same shape as `weights bf16` + `bwd mm`). */
+  attnBackend?: 'exact' | 'flash' | 'flash-f32'; // default 'exact'
 }
 
 export interface TrainLmEpoch {

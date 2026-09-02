@@ -169,6 +169,26 @@ struct LmCkptCfg {
     // default LmLayerOpts and every graph below is emitted verbatim (§6.0).
     bool weights_bf16   = false;
 
+    // ── --attn flash (D1/D3, docs/plans/2026-09-02-lm-flash-attn.md) ───────
+    //
+    // Copied straight into LmLayerOpts by lm_ckpt_layer_opts(), which is the
+    // ONLY place the segment graphs get their options — so P2 (forward
+    // collect), P3 (tail forward), P7 (backward segment) and
+    // lm_ckpt_probe_segment_nodes() cannot disagree about the attention
+    // formulation. D13's "the recomputed forward must use the same
+    // LmLayerOpts as the collect pass" already depended on that; this rides on
+    // the same guarantee.
+    //
+    // Default OFF, and off is byte-identical. MM3's trainer shares this struct
+    // and never sets either field (D12), so it keeps its F32 mask and its exact
+    // graph in R2.
+    //
+    // `attn_flash` also implies attn_head_block == 0 — the combination has no
+    // fused arm and lm_attn_head_blocked asserts on it. The CLI refuses the pair
+    // at exit 2 and lm_ckpt_default_head_block(c, true) returns 0.
+    bool      attn_flash = false;
+    ggml_prec attn_prec  = GGML_PREC_DEFAULT;
+
     // ── OUTPUT-HEAD OVERRIDE (MiniMax-Music3) ──────────────────────────────
     //
     // ACE's planner LM ties its head to embed_tokens and scores the whole
@@ -399,6 +419,13 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
     st->t_H = ggml_new_tensor_2d(st->ctx_misc, GGML_TYPE_F32, H, S);
     ggml_set_name(st->t_H, "ckpt.H");
     ggml_set_input(st->t_H);
+    // D3: t_zero_attn is the permanently-zero ggml_acc base the head-blocked
+    // path reassembles into. Flash mode never blocks, so it is never allocated
+    // (Nh*D*S*4 = 57 MB at 4B/S 3500 that the flash path does not spend). The
+    // guard is the head-block test alone because attn_flash forces it to 0;
+    // asserting that here rather than relying on it.
+    GGML_ASSERT(!(st->cfg.attn_flash && st->cfg.attn_head_block > 0) &&
+                "--attn flash with --attn-head-block > 0 is refused at the CLI");
     if (st->cfg.attn_head_block > 0) {
         st->t_zero_attn = ggml_new_tensor_2d(st->ctx_misc, GGML_TYPE_F32, (int64_t) Nh * D, S);
         ggml_set_name(st->t_zero_attn, "ckpt.attn_zero");
@@ -558,6 +585,10 @@ struct LmCkptRun {
 
     ggml_tensor * t_tok = nullptr;
     ggml_tensor * t_pos = nullptr;
+    // F32 (exact) or F16 (--attn flash, D4) — allocate it with lm_mask_alloc and
+    // upload through lm_ckpt_upload_mask, which converts. Every view of it in
+    // this header sizes its row stride with ggml_element_size(), so the F32 case
+    // is byte-identical to the shipped one.
     ggml_tensor * t_msk = nullptr;
     ggml_tensor * t_gs  = nullptr;  // [1] per-chunk upstream scalar
     ggml_tensor * t_one = nullptr;  // [1] == 1.0f, the segment surrogate's loss grad
@@ -652,7 +683,10 @@ static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S, int n_prompt) {
         // n_prompt. Prompt ROWS stay blind to the whole prefix, which is what
         // keeps their hidden states identical to the no-prefix case.
         lm_causal_mask_prefix(r.st->cfg.kv->n, n_prompt, S, n_prompt, &m);
-        ggml_backend_tensor_set(r.t_msk, m.data(), 0, m.size() * sizeof(float));
+        // lm_mask_set converts to F16 when the buffer is F16 (--attn flash, D4)
+        // and is a plain ggml_backend_tensor_set of the same bytes when it is
+        // F32 — which every current caller of this path is.
+        lm_mask_set(r.t_msk, m);
         r.st->last_mask_S = -1;
         return;
     }
@@ -660,7 +694,7 @@ static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S, int n_prompt) {
         return;
     }
     lm_causal_mask(S, &m);
-    ggml_backend_tensor_set(r.t_msk, m.data(), 0, m.size() * sizeof(float));
+    lm_mask_set(r.t_msk, m);
     r.st->last_mask_S = S;
 }
 
@@ -684,6 +718,8 @@ static inline LmLayerOpts lm_ckpt_layer_opts(const LmCkptState & st) {
     o.attn_zero       = st.t_zero_attn;
     o.weights_bf16    = st.cfg.weights_bf16;
     o.rank_mask       = st.cfg.rank_mask;
+    o.attn_flash      = st.cfg.attn_flash;
+    o.attn_prec       = st.cfg.attn_prec;
     // o.wt stays nullptr: P2/P3 are forward-only, so a transposed weight there
     // would be a node nothing consumes. Only the P7 backward segment sets it.
     return o;
@@ -894,7 +930,11 @@ static bool lm_ckpt_head_naive(LmCkptRun & r, const LmSample & s, bool count_los
 // Build (but do not run) one P7 segment to size the scheduler.
 // `counts` (T16) makes the Lever A surgery REPORT instead of abort, so the
 // self-test can print the tripwire numbers rather than take the process down.
-static int lm_ckpt_probe_segment_nodes(LmCkptRun & r, int S, LmBf16Counts * counts = nullptr) {
+//
+// `op_hash` (self-test T22) is filled with lm_graph_op_hash(gf) when non-null.
+// Additive and default-null: it reads the finished graph and changes nothing.
+static int lm_ckpt_probe_segment_nodes(LmCkptRun & r, int S, LmBf16Counts * counts = nullptr,
+                                       uint64_t * op_hash = nullptr) {
     LmCkptState &         st = *r.st;
     const Qwen3LMConfig & c  = r.lm->cfg;
     const int             H  = c.hidden_size;
@@ -920,7 +960,7 @@ static int lm_ckpt_probe_segment_nodes(LmCkptRun & r, int S, LmBf16Counts * coun
         opts.kv_v   = st.cfg.kv->v[(size_t) l];
         opts.kv_pfx = (int) st.cfg.kv->q_max;
     }
-    ggml_tensor * mask  = ggml_view_2d(ctx, r.t_msk, nkv, S, (size_t) nkv * sizeof(float), 0);
+    ggml_tensor * mask  = ggml_view_2d(ctx, r.t_msk, nkv, S, (size_t) nkv * ggml_element_size(r.t_msk), 0);
     ggml_tensor * X     = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
     ggml_tensor * Y     = lm_train_layer(ctx, c, &r.lm->layers[l], X, pos_v, mask, S, opts);
     Y                   = lm_rms(ctx, Y, r.lm->final_norm, c.rms_norm_eps);
@@ -940,6 +980,9 @@ static int lm_ckpt_probe_segment_nodes(LmCkptRun & r, int S, LmBf16Counts * coun
         }
     }
     const int n = ggml_graph_n_nodes(gf);
+    if (op_hash) {
+        *op_hash = lm_graph_op_hash(gf);
+    }
     ggml_free(ctx);
     return n;
 }
@@ -1016,7 +1059,7 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_context *   ctx = ggml_init(ip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 2048, /*grads=*/false);
         ggml_tensor *    pv  = ggml_view_1d(ctx, r.t_pos, S, 0);
-        ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * sizeof(float), 0);
+        ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * ggml_element_size(r.t_msk), 0);
         ggml_tensor *    X   = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
         // D13: SAME opts as the P7 recompute. Not an optimisation opportunity.
         ggml_tensor * Y = lm_train_layer(ctx, c, &lm.layers[l], X, pv, mv, S, lm_ckpt_layer_kv(st, opts, l));
@@ -1035,7 +1078,7 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_context *   ctx = ggml_init(ip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 2048, /*grads=*/false);
         ggml_tensor *    pv  = ggml_view_1d(ctx, r.t_pos, S, 0);
-        ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * sizeof(float), 0);
+        ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * ggml_element_size(r.t_msk), 0);
         ggml_tensor *    X   = ggml_view_2d(ctx, st.C[(size_t) (Hi - 1)], H, S, st.C[(size_t) (Hi - 1)]->nb[1], 0);
         ggml_tensor *    Y   = lm_train_layer(ctx, c, &lm.layers[Hi - 1], X, pv, mv, S, lm_ckpt_layer_kv(st, opts, Hi - 1));
         ggml_tensor *    hN  = lm_rms(ctx, Y, lm.final_norm, c.rms_norm_eps);
@@ -1093,7 +1136,7 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         }
 
         ggml_tensor * pv = ggml_view_1d(ctx, r.t_pos, S, 0);
-        ggml_tensor * mv = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * sizeof(float), 0);
+        ggml_tensor * mv = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * ggml_element_size(r.t_msk), 0);
         ggml_tensor * X  = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
         ggml_tensor * Y  = lm_train_layer(ctx, c, &lm.layers[l], X, pv, mv, S, lm_ckpt_layer_kv(st, sopts, l));
         if (l == Hi - 1) {

@@ -73,6 +73,26 @@ struct LmTrainArgs {
     // backward graph is built (ace-train.cpp).
     std::string bwd = "outprod";
 
+    // Attention formulation (docs/plans/2026-09-02-lm-flash-attn.md, R2 of the
+    // flash-attn roadmap):
+    //   "exact"     = qwen3_attn_f32 — mul_mat -> soft_max_ext -> mul_mat ->
+    //                 cont(permute), retained [S_kv,S,Nh] softmax and all. The
+    //                 shipped graph, byte-identical to pre-flag runs (D2/G0).
+    //   "flash"     = the fused GGML_OP_FLASH_ATTN_TRAIN / _BACK pair at the
+    //                 whole-head attention site, so that softmax is never
+    //                 materialised and attention memory is linear in S. On the
+    //                 naive 0.6B/1.7B path that is the difference between
+    //                 2034*S^2 bytes (29 GB at S 3800) and a per-token term.
+    //   "flash-f32" = the same fused ops pinned to GGML_PREC_F32, i.e. the
+    //                 scalar v1 kernels instead of the TF32 tensor-core ones
+    //                 "flash" selects. Slower; it separates "did fusion move the
+    //                 training" from "did TF32 move it".
+    //
+    // ENGINE DEFAULT IS "exact" (D8). Flash gradients are NOT bit-identical to
+    // exact — same drift family as --bwd mm and --mirror bf16 — so the default
+    // must stay the shipped arithmetic until the ear test (G7) says otherwise.
+    std::string attn = "exact";
+
     // Optimizer (2026-07-30, ported from the DiT trainer — lm-optim.h is shared,
     // so the rule split, batched Newton-Schulz and shape bucketing were already
     // sitting underneath this trainer unused). "adamw" is the default and the
@@ -222,6 +242,23 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     jl("{\"type\":\"model\",\"stage\":\"lm\",\"path\":\"%s\",\"ms\":%lld,\"layers\":%d,\"hidden\":%d,\"vocab\":%d}",
        lm_json_escape(a.lm_path).c_str(), (long long) (ggml_time_ms() - t_lm0), c.n_layers, H, V);
 
+    // ── --attn: resolve the mode and the arithmetic request (D1/D5) ──────
+    //
+    // Resolved HERE, before the head-block decision and before either footprint
+    // model runs, because both depend on it: flash forces head blocking off (D3)
+    // and prices attention as a per-token linear term instead of c1*Nh*S^2 (D9).
+    //
+    // attn_prec_req is a REQUEST. GGML_PREC_DEFAULT is 0, which is also what
+    // op_params zero-init gives, and on sm_80+ it resolves to the TF32 kernels —
+    // so "flash" already means TF32 unless the user says otherwise. What
+    // actually ran is read back from the backend after the first epoch and
+    // logged as attn_prec; the flag alone cannot say.
+    const bool      attn_flash    = (a.attn == "flash" || a.attn == "flash-f32");
+    const ggml_prec attn_prec_req = (a.attn == "flash-f32") ? GGML_PREC_F32 : GGML_PREC_DEFAULT;
+    if (meta) {
+        meta->attn_mode = a.attn;
+    }
+
     // ── mode selection (§3.2) ────────────────────────────────────────────
     //
     // DEVIATION vs §3.2's step order, with justification. The plan evaluates the
@@ -326,6 +363,11 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     vm.n_heads      = c.n_heads;
     vm.vocab        = V;
     vm.mirror_bytes = mirror.bytes;
+    // D9. head_dim / n_kv_heads are read ONLY by the flash branch; with
+    // attn_flash false the polynomial is the shipped one to the byte.
+    vm.attn_flash   = attn_flash;
+    vm.head_dim     = c.head_dim;
+    vm.n_kv_heads   = c.n_kv_heads;
     {
         // The fit charges 4 buffers per parameter (param + acc + m + v), so this
         // count has to match the parameterization actually built or the budget
@@ -351,13 +393,18 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         vm.lora_params = np * (size_t) c.n_layers;
     }
 
-    int head_block = (a.attn_head_block >= 0) ? a.attn_head_block : lm_ckpt_default_head_block(c);
+    // D3: flash forces head blocking off. `--attn flash --attn-head-block N>0`
+    // already exited 2 in cmd_train_lm, so a.attn_head_block is -1 or 0 here and
+    // the default resolver returns 0 for flash — the explicit zero below is the
+    // belt to that braces, and it is what keeps t_zero_attn unallocated.
+    int head_block =
+        attn_flash ? 0 : ((a.attn_head_block >= 0) ? a.attn_head_block : lm_ckpt_default_head_block(c, attn_flash));
     if (!lm_ckpt_head_block_ok(c, head_block)) {
         char b[192];
         snprintf(b, sizeof(b), "--attn-head-block %d is not valid for n_heads %d / n_kv_heads %d — falling back to %d",
-                 head_block, c.n_heads, c.n_kv_heads, lm_ckpt_default_head_block(c));
+                 head_block, c.n_heads, c.n_kv_heads, lm_ckpt_default_head_block(c, attn_flash));
         lm_log("warn", b);
-        head_block = lm_ckpt_default_head_block(c);
+        head_block = lm_ckpt_default_head_block(c, attn_flash);
     }
     LmVramLowCfg lc;
     lc.attn_head_block = head_block;
@@ -368,6 +415,8 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     lc.layer_w_bytes   = lm_layer_weight_bytes(c);
     lc.layer_wt_bytes  = lm_layer_proj_bytes(c, GGML_TYPE_BF16);  // §3.5
     lc.weights_bf16    = weights_bf16;
+    lc.attn_flash      = attn_flash;                              // D9
+    lc.n_kv_heads      = c.n_kv_heads;
 
     LmVramFit fit;
     if (mode == LM_VRAM_NAIVE) {
@@ -635,6 +684,60 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         alloc_s_tr = std::max(alloc_s_tr, reg_samples[i].s_tr);
     }
 
+    // ── --attn flash: capability probe (D6, spec §9.8) ───────────────────
+    //
+    // Asked HERE: after alloc_seq is known (so the geometry is the one this run
+    // will actually emit) and before a single graph is built or a single buffer
+    // allocated. A `false` from ggml_backend_supports_op is NOT an error this
+    // trainer would otherwise notice — backend_sched_new registers the CPU
+    // backend alongside CUDA, so the scheduler would silently SPLIT the fused
+    // ops onto the CPU: Q/K/V and the F16 mask over PCIe for every layer of
+    // every micro-step. Correct, unusably slow, LOW VRAM, and a quiet NVML
+    // tripwire — i.e. indistinguishable from a pass on every number this run
+    // reports. So we ask, and refuse rather than fall back.
+    //
+    // ONE attention shape, unlike the DiT's two: the LM has no cross-attention,
+    // so S_kv == S == alloc_seq. Nkv is the NATIVE GQA width (Qwen3 4B is 32/8)
+    // — the fused op takes GQA directly and lm_train_layer never expands heads,
+    // so probing Nh would ask about a geometry this run never builds.
+    //
+    // NOTE the frozen KV prefix (lm-kvprefix.h) makes S_kv = kv->n + S, which is
+    // LARGER than what is probed here. That path is MM3-only in R2 (D12: MM3
+    // gains no flag), so no flash graph in this trainer ever emits it. R3 must
+    // extend this probe before wiring the prefix to flash.
+    if (attn_flash) {
+        const float ascale = 1.0f / sqrtf((float) c.head_dim);
+        bool        pf = false, pb = false;
+        dit_flash_probe(lm.backend, c.head_dim, c.n_heads, c.n_kv_heads, alloc_seq, alloc_seq, /*B=*/1, ascale, &pf,
+                        &pb);
+        if (!(pf && pb)) {
+            char extra[224];
+            snprintf(extra, sizeof(extra), ",\"attn\":\"%s\",\"fwd\":%s,\"bwd\":%s", a.attn.c_str(),
+                     pf ? "true" : "false", pb ? "true" : "false");
+            char b[512];
+            snprintf(b, sizeof(b),
+                     "--attn %s: backend %s does not support the fused attention ops at this geometry "
+                     "(D %d, Nh %d, Nkv %d, S %d, S_kv %d, B 1) — fwd %s / bwd %s. Refusing to start: the "
+                     "scheduler would silently run them on the CPU instead, which is correct, unusably slow, "
+                     "and looks like a pass on every number this run reports. Use --attn exact.",
+                     a.attn.c_str(), ggml_backend_name(lm.backend), c.head_dim, c.n_heads, c.n_kv_heads, alloc_seq,
+                     alloc_seq, pf ? "yes" : "NO", pb ? "yes" : "NO");
+            lm_fatal("attn-unsupported", b, extra);
+            lm_mirror_free(&mirror);
+            qw3lm_free(&lm);
+            return 1;
+        }
+        char b[448];
+        snprintf(b, sizeof(b),
+                 "--attn %s: %s supports FLASH_ATTN_TRAIN and FLASH_ATTN_TRAIN_BACK at D %d, Nh %d, Nkv %d, "
+                 "S %d, B 1 — no CPU split. Requested arithmetic: %s (the backend resolves it per launch; "
+                 "lm_train_log.json records what actually ran)",
+                 a.attn.c_str(), ggml_backend_name(lm.backend), c.head_dim, c.n_heads, c.n_kv_heads, alloc_seq,
+                 attn_prec_req == GGML_PREC_F32 ? "strict f32" : "tf32 where available");
+        lm_log("info", b);
+        fprintf(stderr, "[train-lm] %s\n", b);
+    }
+
     const int n = (int) samples.size();
     // Micro-steps per epoch. With prior preservation on, every reg_every'th
     // micro-step is a reg step INSERTED into the pass rather than replacing a
@@ -695,11 +798,27 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     const double ckpt_bytes = low ? (double) c.n_layers * (double) H * (double) alloc_seq * 4.0 : 0.0;
     const double seg_bytes  = low ? lm_vram_lowvram_transient(vm, lc, alloc_seq) : 0.0;
 
+    // The attention share of estMb, printed beside the total. Skill §5: an
+    // arena line that showed only the total once cost a whole refit chasing an
+    // under-prediction that did not exist.
+    const double attn_bytes = lm_vram_attn_term_bytes(vm, lc, alloc_seq, low);
+    // D5. `attnPrec` here is the REQUESTED arithmetic, not the resolved one:
+    // nothing has launched a fused kernel yet at this point in the run (the
+    // capability probe above builds no_alloc nodes and computes nothing), so
+    // asking the backend what it last ran would print "n/a" every time. The
+    // RESOLVED answer is read back after each epoch and lands in
+    // lm_train_log.json's attn_prec — that pair, requested here and resolved
+    // there, is the whole point of logging two fields (skill §2 point 6).
+    // Same wording as dit-node-profile.h uses for the requested label.
+    const char * attn_prec_req_label =
+        attn_flash ? (attn_prec_req == GGML_PREC_F32 ? "f32" : "tf32-where-available") : "n/a";
+
     // §2.2: five additive fields. In "naive" mode they read "naive", the mirror
     // size and three zeros, so the event stays byte-compatible with [P] §2.9.
     jl("{\"type\":\"vram\",\"freeMb\":%lld,\"totalMb\":%lld,\"reserveMb\":%d,\"mirrorMb\":%lld,\"maxLen\":%d,"
        "\"estMb\":%lld,\"source\":\"%s\",\"mode\":\"%s\",\"baseMb\":%lld,\"ckptMb\":%lld,\"segPeakMb\":%lld,"
-       "\"attnHeadBlock\":%d,\"chunk\":%d,\"weights\":\"%s\",\"batch\":%d,\"batchSource\":\"%s\"}",
+       "\"attnHeadBlock\":%d,\"chunk\":%d,\"weights\":\"%s\",\"batch\":%d,\"batchSource\":\"%s\","
+       "\"attn\":\"%s\",\"attnPrec\":\"%s\",\"attnMb\":%lld}",
        (long long) fit.free_mb, (long long) fit.total_mb, a.vram_reserve_mb,
        (long long) (low ? 0 : mirror.bytes / 1048576), max_len, (long long) (est_bytes / 1048576.0),
        a.max_len > 0 ? "user" : "auto", low ? "lowvram" : "naive",
@@ -711,7 +830,10 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
        // and [P] §2.9's SSE mapping needs no change. weights_used (not
        // a.weights) so a CUDA/base-dtype fallback reports "f32-window", the
        // mode actually run, not the "bf16" the caller requested.
-       weights_used.c_str(), 1, "user");
+       weights_used.c_str(), 1, "user",
+       // D5: three more additive fields. A default run reads "exact", "n/a" and
+       // the exact model's own c1*Nh*S^2 attention term.
+       a.attn.c_str(), attn_prec_req_label, (long long) (attn_bytes / 1048576.0));
 
     // `skippedBad` is additive (§2.2: consumers ignore unknown fields) and keeps
     // `skippedLong` meaning what its name says.
@@ -738,7 +860,11 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     }
     ggml_tensor * t_tok = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, alloc_seq);
     ggml_tensor * t_pos = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, alloc_seq);
-    ggml_tensor * t_msk = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, (int64_t) alloc_seq * alloc_seq);
+    // D4: F32 under --attn exact (byte-identical to the shipped allocation),
+    // F16 under flash — the fused op asserts an F16 contiguous mask. Same flat
+    // [S_max*S_max] layout either way, so every view below is unchanged apart
+    // from sizing its row stride with ggml_element_size().
+    ggml_tensor * t_msk = lm_mask_alloc(ctx_static, (int64_t) alloc_seq * alloc_seq, attn_flash);
     // The [V, s_tr_max] label buffer is a naive-path structure: 1,184 MiB at
     // 4B / s_tr 1556. Low-vram sparse-writes a [V, chunk] buffer instead (D4).
     ggml_tensor * t_lab      = low ? nullptr : ggml_new_tensor_2d(ctx_static, GGML_TYPE_F32, V, alloc_s_tr);
@@ -863,6 +989,8 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         cc.layer_lo        = 0;
         cc.layer_hi        = c.n_layers;
         cc.weights_bf16    = weights_bf16;  // Lever A
+        cc.attn_flash      = attn_flash;    // D1 — reaches P2/P3/P7 and the node
+        cc.attn_prec       = attn_prec_req; //      probe via lm_ckpt_layer_opts
         std::string err;
         if (!lm_ckpt_alloc(&ckpt, &lm, cc, &err) || !lm_ckpt_build_embed_t(&ckpt, &err)) {
             lm_fatal("vram", err.empty() ? std::string("low-vram allocation failed") : err);
@@ -882,6 +1010,16 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // ── graph arena + scheduler sized from a real node count ─────────────
     std::vector<uint8_t> arena((size_t) 128 << 20);
 
+    // The naive trunk's layer options. EVERY field is at its default when
+    // --attn exact, so lm_build_trunk's opts overload emits exactly the node
+    // sequence the no-opts overload emits (the two builder bodies differ only in
+    // whether they forward `opts`, and lm_train_layer's 7-argument form
+    // constructs precisely this default). That equality is what G0 checks and is
+    // the reason the naive path can carry the flag without moving its graph.
+    LmLayerOpts naive_opts;
+    naive_opts.attn_flash = attn_flash;
+    naive_opts.attn_prec  = attn_prec_req;
+
     int  last_mask_S = 0;
     auto upload_mask = [&](int S) {
         if (S == last_mask_S) {
@@ -889,7 +1027,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         }
         std::vector<float> m;
         lm_causal_mask(S, &m);
-        ggml_backend_tensor_set(t_msk, m.data(), 0, m.size() * sizeof(float));
+        lm_mask_set(t_msk, m);  // converts to F16 when t_msk is F16 (D4)
         last_mask_S = S;
     };
 
@@ -910,7 +1048,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, /*grads=*/true);
 
         const LmSample & s      = samples[0];
-        ggml_tensor *    hidden = lm_build_trunk(ctx, &lm, t_tok, t_pos, t_msk, alloc_seq);
+        ggml_tensor *    hidden = lm_build_trunk(ctx, &lm, t_tok, t_pos, t_msk, alloc_seq, 0, c.n_layers, naive_opts);
         ggml_tensor *    hd     = ggml_cont(
             ctx, ggml_view_2d(ctx, hidden, H, s.s_tr, hidden->nb[1], (size_t) (s.n_masked - 1) * hidden->nb[1]));
         ggml_tensor * logits = ggml_mul_mat(ctx, lm.embed_tokens, hd);
@@ -974,7 +1112,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         ggml_context *   ctx = ggml_init(gip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, /*grads=*/true);
 
-        ggml_tensor * hidden = lm_build_trunk(ctx, &lm, t_tok, t_pos, t_msk, S);
+        ggml_tensor * hidden = lm_build_trunk(ctx, &lm, t_tok, t_pos, t_msk, S, 0, c.n_layers, naive_opts);
         ggml_tensor * hd =
             ggml_cont(ctx, ggml_view_2d(ctx, hidden, H, s_tr, hidden->nb[1], (size_t) (s.n_masked - 1) * hidden->nb[1]));
         ggml_tensor * logits = ggml_mul_mat(ctx, lm.embed_tokens, hd);  // [V, s_tr] (tied head)
@@ -1069,10 +1207,19 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
             fixed += ggml_backend_buffer_get_size(opt.buf_mom);
         }
         tracker.probe_baseline(lm.backend, sched, fixed);
+        // BOTH TERMS, not just the total (skill §5). The number this line exists
+        // to let you read is `measured / est`; when that ratio looks wrong the
+        // very next question is "which term", and a line that printed only the
+        // total once sent a whole DiT refit chasing an under-prediction that was
+        // really a 73 % OVER-prediction in a term nobody had printed. `attn` is
+        // the c1*Nh*S^2 retained softmax in exact mode and the fused op's
+        // per-token state under --attn flash; `rest` is everything else.
         fprintf(stderr,
-                "[train-lm] high-water probe at S=%d s_tr=%d: trainer VRAM %zu MB (est %lld MB, device %zu MB)\n",
+                "[train-lm] high-water probe at S=%d s_tr=%d: trainer VRAM %zu MB (est %lld MB = attn %lld MB + "
+                "rest %lld MB, --attn %s, device %zu MB)\n",
                 alloc_seq, alloc_s_tr, tracker.base_mb, (long long) (est_bytes / 1048576.0),
-                lm_vram_used_mb(lm.backend));
+                (long long) (attn_bytes / 1048576.0), (long long) ((est_bytes - attn_bytes) / 1048576.0),
+                a.attn.c_str(), lm_vram_used_mb(lm.backend));
     }
 
     // ── Lever D: capture the frozen base's own answers ───────────────────
@@ -1468,6 +1615,14 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         rec.ms        = ems;
         meta->epoch_log.push_back(rec);
 
+        // D5 — the RESOLVED arithmetic, asked of the backend that has just run
+        // an epoch's worth of fused launches rather than restated from the flag.
+        // Refreshed every epoch so the field is populated even if the run is
+        // cancelled after the first one. Mirrors dit-train-run.h.
+        if (attn_flash) {
+            meta->attn_prec = dit_flash_prec_label(lm.backend);
+        }
+
         // Export the BEST epoch, not the last one (2026-07-30) — mirrors the
         // same change in dit-train-run.h. This used to export unconditionally
         // every epoch, so a run that never reached its target shipped whatever
@@ -1682,6 +1837,9 @@ static int lm_train_main(const LmTrainArgs & a) {
     meta.seed           = a.seed;
     meta.loss_on_cot    = a.loss_on_cot;
     meta.bwd            = a.bwd;
+    // D5. The REQUESTED mode; lm_train_stage fills meta.attn_prec with what the
+    // backend actually launched once an epoch has run.
+    meta.attn_mode      = a.attn;
     meta.adapter_type   = a.adapter_type;
     meta.lokr_dim       = a.lokr_dim;
     meta.lokr_alpha     = a.lokr_alpha;

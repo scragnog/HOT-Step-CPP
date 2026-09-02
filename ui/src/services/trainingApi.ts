@@ -629,6 +629,13 @@ export interface TrainLmOptions {
   /** 'auto' picks up to 6 other 600s-cap artists server-side; an explicit
    *  array must be absolute lm_codes.jsonl paths. */
   regCorpora?: 'auto' | string[];    // default 'auto'
+  /** Attention backend (2026-09-02, docs/plans/2026-09-02-lm-flash-attn.md
+   *  Stream B) — the DiT's attnBackend ported to train-lm. 'exact' is the
+   *  byte-identical graph; 'flash' routes through the fused
+   *  ggml_flash_attn_train/_back kernels. Experimental and unvalidated by ear
+   *  on the LM — the Training Studio checkbox ships OFF, unlike the DiT's
+   *  on-by-default. Mutually exclusive with attnHeadBlock > 0 (400). */
+  attnBackend?: 'exact' | 'flash' | 'flash-f32'; // default 'exact'
 }
 
 export interface TrainLmEpoch {
@@ -959,6 +966,13 @@ export interface TrainingMetricEvent {
   padTokens?: number;    // data: padding tokens added by batching
   // NB `samples` (declared above under `data`) is reused by `step` as the
   // per-optimizer-step sample count (micro * B_cur); no new field needed.
+  // Attention backend additions (2026-09-02 lm-flash-attn plan, Stream B).
+  // `attn` is the requested mode; `attnPrec` is the RESOLVED precision the
+  // flash kernels actually ran at ('tf32' vs 'f32') — op_params zero-init is
+  // GGML_PREC_DEFAULT, so the requested mode alone cannot say which. Both
+  // optional and additive on the `vram` event.
+  attn?: string;
+  attnPrec?: string;
 }
 
 export type TrainingStreamEvent =

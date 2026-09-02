@@ -369,6 +369,14 @@ export interface ResolvedTrainLmOptions {
    *  chain shares the same cache and it is captured only once. '' when
    *  regEvery is 0. */
   regPriorDir: string;
+  /** Attention backend (2026-09-02 lm-flash-attn plan, Stream B) — the DiT's
+   *  attnBackend ported to train-lm. 'exact' is the byte-identical graph;
+   *  'flash' routes through the fused ggml_flash_attn_train/_back kernels.
+   *  See ResolvedTrainDitOptions.attnBackend for the shared background;
+   *  unlike the DiT's, this one is emitted ONLY when non-default (see
+   *  buildTrainLmArgs), matching `weights`'s older-exe compatibility rule —
+   *  train-lm does not parse --attn on every ace-train build yet. */
+  attnBackend: 'exact' | 'flash' | 'flash-f32';
 }
 
 /** Full argv for `ace-train train-lm` (§2.1 order). */
@@ -460,6 +468,14 @@ export function buildTrainLmArgs(input: {
     args.push('--reg-topk', String(o.regTopk));
     args.push('--reg-prior-dir', o.regPriorDir);
   }
+  // Attention backend (2026-09-02 lm-flash-attn plan, Stream B). Only the
+  // non-default value is emitted — unlike train-dit's --attn, which is always
+  // sent — so an ace-train build that predates the LM's --attn parsing (every
+  // build so far) stays compatible for the default 'exact' run every caller
+  // still makes. Emitted on every leg of a staged chain, resumes included:
+  // this is a recipe knob (which attention formulation ran), not an
+  // adapter-identity flag the engine would need to adopt from a resumed run.
+  if (o.attnBackend && o.attnBackend !== 'exact') args.push('--attn', o.attnBackend);
   // `--loss-on-cot` is the CLI default; only the negation needs emitting.
   if (!o.lossOnCot) args.push('--no-loss-on-cot');
   if (o.overwrite) args.push('--overwrite');

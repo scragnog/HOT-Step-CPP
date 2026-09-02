@@ -95,6 +95,26 @@ struct LmExportMeta {
     // change the quantity being computed — both arms compute the same gradient,
     // one via out_prod and one via mul_mat — so it is NOT a resume barrier.
     std::string bwd = "outprod";
+
+    // Attention formulation (--attn, docs/plans/2026-09-02-lm-flash-attn.md D5).
+    // Additive; readers default `attn_mode` to "exact" and `attn_prec` to "n/a".
+    //
+    // NOT a resume barrier, the same call as `bwd`: flash computes the same
+    // gradient by a different summation order, within a measured drift band, so
+    // a resume records it and refuses nothing (D7).
+    //
+    // TWO FIELDS, not one, and this is the point of the whole logging rule.
+    // `attn_mode` is what was REQUESTED. `attn_prec` is what the backend
+    // actually launched, read back through the registry after an epoch has run
+    // (dit_flash_prec_label). The CUDA dispatch drops to the scalar f32 kernels
+    // on pre-Ampere devices, at D != 128 and on unaligned views, so two runs
+    // whose logs both say "flash" can differ in arithmetic. And because
+    // op_params zero-init IS GGML_PREC_DEFAULT, every "flash" run on Ampere+ was
+    // already TF32 before the knob existed and said nothing about it — the exact
+    // blind spot this field closes (skill §2 point 6).
+    std::string attn_mode = "exact";
+    std::string attn_prec = "n/a";
+
     // Adapter parameterization and optimizer (2026-07-30). Recorded because a
     // finished run could not otherwise tell you whether it was a LoRA or a
     // LoKr, or AdamW or Muon — the same blind spot the DiT's `runtime` block
@@ -208,6 +228,10 @@ static bool lm_write_train_log(const std::string & dir, const LmExportMeta & m) 
     yyjson_mut_obj_add_strcpy(doc, cfg, "weights", m.weights.c_str());
     yyjson_mut_obj_add_int(doc, cfg, "batch", m.batch);
     yyjson_mut_obj_add_strcpy(doc, cfg, "bwd", m.bwd.c_str());
+    // Always written, in both modes: "which attention did this adapter train
+    // under, and in what arithmetic" has to be answerable from the log alone.
+    yyjson_mut_obj_add_strcpy(doc, cfg, "attn_mode", m.attn_mode.c_str());
+    yyjson_mut_obj_add_strcpy(doc, cfg, "attn_prec", m.attn_prec.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "adapter_type", m.adapter_type.c_str());
     if (m.adapter_type == "lokr") {
         yyjson_mut_obj_add_int(doc, cfg, "lokr_dim", m.lokr_dim);

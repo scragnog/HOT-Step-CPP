@@ -28,6 +28,17 @@
 //     ("36 layers but model has 28"); refuse up front. A different file of
 //     the SAME size only warns — quant/bf16 variants of one base are fine.
 //
+// NOT identity, deliberately: `bwd` and `attn` (--attn exact|flash|flash-f32,
+// D7). Both change the SUMMATION ORDER of a gradient, not the gradient — flash
+// recomputes the softmax from Q/K/LSE in tiles instead of reading back a
+// retained array, and over 200 same-seed DiT epochs it drifted LESS than
+// `--bwd mm` does. So neither is read from the source log, neither is adopted,
+// and a CLI value that differs from the source run's is not a contradiction to
+// refuse. They are RECORDED in lm_train_log.json (lm-export.h attn_mode /
+// attn_prec) so a finished run can still say which it used; `weights` is the
+// only lever in this family that IS a barrier, because bf16 rounds the
+// activation gradient at every layer and changes what the loss curve means.
+//
 // The honest gate: a resumed run's FIRST epoch loss should land near the
 // source's saved_loss (teacher-forced, same data). lm-train-run.h logs the
 // comparison; a large gap means the init mapping or the dataset changed.

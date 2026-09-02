@@ -26,6 +26,7 @@
 #include "qwen3-lora.h"
 #include "train/lm-bf16.h"  // LmWtCollect — Lever A (--weights bf16)
 #include "train/lm-common.h"
+#include "train/flash-prec.h"  // dit_flash_probe / dit_flash_prec_label (--attn flash)
 
 #include <string>
 #include <vector>
@@ -537,7 +538,50 @@ struct LmLayerOpts {
     // raw V into the store, and the caller expands them into the graph (the
     // same collector shape as LmWtCollect — lm_train_layer has no graph).
     LmKvCapture * kv_cap = nullptr;
+
+    // ── FUSED ATTENTION (--attn flash, D1/D2) ──────────────────────────────
+    //
+    // false (the default) means the whole-head branch of lm_train_layer emits
+    // the ORIGINAL qwen3_attn_f32 call and nothing else in this header moves —
+    // that is what G0's byte-identity gate checks, and it is why the switch is a
+    // ternary at one call site rather than a restructure.
+    //
+    // true routes that site through lm_attn_flash: GGML_OP_FLASH_ATTN_TRAIN plus
+    // the _BACK node ggml's autodiff builds from it, so the [S_kv,S,Nh] softmax
+    // is never materialised and attention memory becomes linear in S.
+    //
+    // `attn_prec` is the ARITHMETIC REQUEST, set on the forward node only;
+    // ggml_compute_backward copies it onto the _BACK node it builds, which is
+    // load-bearing (a backward rounding differently from its forward is not
+    // rounding error, it is a different function). GGML_PREC_DEFAULT resolves to
+    // the TF32 kernels on sm_80+, GGML_PREC_F32 pins the scalar v1 kernels.
+    // NOTE the zero-init trap: GGML_PREC_DEFAULT == 0, so "unset" IS "tf32 where
+    // available" — which is why the run log records the RESOLVED precision from
+    // dit_flash_prec_label() and not just the flag (skill §2 point 6).
+    //
+    // The head-blocked branch has no fused arm and asserts; the CLI refuses the
+    // pair (--attn flash with --attn-head-block > 0 is exit 2, D3).
+    bool      attn_flash = false;
+    ggml_prec attn_prec  = GGML_PREC_DEFAULT;
 };
+
+// The fused drop-in for qwen3_attn_f32 at the whole-head site. Same arguments,
+// and the SAME result shape and layout: ggml_flash_attn_train_get_o is a
+// CONTIGUOUS [D,Nh,S] view, which is exactly what qwen3_attn_f32's closing
+// ggml_cont(ggml_permute(...)) produces — so the call site's
+// ggml_reshape_2d(attn, Nh*D, S) accepts it unchanged (B1).
+//
+// Note what is NOT here: no ggml_cont on q/k/v. They arrive as permuted views
+// and the op reads them through nb[1..3] on purpose (only nb[0] == 4 is
+// required); materialising them would hand back part of the saving.
+//
+// Mirrors dit_attn_flash in train/dit-train-graph.h op for op.
+static ggml_tensor * lm_attn_flash(ggml_context * ctx, ggml_tensor * q, ggml_tensor * k, ggml_tensor * v,
+                                   ggml_tensor * mask, float scale, ggml_prec prec) {
+    ggml_tensor * packed = ggml_flash_attn_train(ctx, q, k, v, mask, scale);
+    ggml_flash_attn_train_set_prec(packed, prec);
+    return ggml_flash_attn_train_get_o(ctx, packed);  // [D,Nh,S]
+}
 
 // F32 bytes of ONE transformer layer's trainable-graph weights (7 projections +
 // 4 norms) — the size of the per-segment F32 window (§3.8 `w_layer_f32`).
@@ -657,6 +701,12 @@ static ggml_tensor * lm_attn_head_blocked(ggml_context * ctx, const Qwen3LMConfi
     // MM3 never sets attn_head_block; refuse rather than differ silently.
     GGML_ASSERT(opts.kv_k == nullptr && opts.kv_cap == nullptr &&
                 "attn_head_block is not supported with a frozen KV prefix");
+    // D3: there is no fused head-blocked arm, and there is no reason to build
+    // one — blocking exists to cap the 3*hb*S^2 score/softmax transient, which
+    // the fused op does not have. The CLI refuses the pair at exit 2 and
+    // lm_ckpt_default_head_block returns 0 under flash, so reaching here means a
+    // caller constructed the combination directly.
+    GGML_ASSERT(!opts.attn_flash && "--attn flash is not supported with --attn-head-block > 0");
     GGML_ASSERT(gq > 0 && gq < Nh && Nh % gq == 0);
     GGML_ASSERT(((int64_t) gq * (int64_t) Nkv) % (int64_t) Nh == 0);
     const int gkv = gq * Nkv / Nh;
@@ -747,7 +797,12 @@ static ggml_tensor * lm_train_layer(ggml_context * ctx, const Qwen3LMConfig & c,
         k = ggml_permute(ctx, k, 0, 2, 1, 3);  // [D, n_kv, Nkv]
         v = ggml_permute(ctx, v, 0, 2, 1, 3);
 
-        attn = qwen3_attn_f32(ctx, q, k, v, mask, 1.0f / sqrtf((float) D));
+        // D1/D2 — THE ONE MODE SWITCH. The false arm is the original call,
+        // untouched, so with the flag off this layer emits the byte-identical
+        // node sequence it emitted before the flag existed.
+        attn = opts.attn_flash
+                   ? lm_attn_flash(ctx, q, k, v, mask, 1.0f / sqrtf((float) D), opts.attn_prec)
+                   : qwen3_attn_f32(ctx, q, k, v, mask, 1.0f / sqrtf((float) D));
         attn = ggml_reshape_2d(ctx, attn, Nh * D, S);
     }
 
@@ -770,8 +825,14 @@ static inline ggml_tensor * lm_train_layer(ggml_context * ctx, const Qwen3LMConf
 }
 
 // `t_msk_flat` is the persistent [S_MAX*S_MAX] mask buffer; the graph views a
-// CONTIGUOUS [S, S] block of it (nb1 = S*4), because ggml_soft_max_ext asserts
-// ggml_is_contiguous(mask) && mask->ne[0] == scores->ne[0].
+// CONTIGUOUS [S, S] block of it, because ggml_soft_max_ext asserts
+// ggml_is_contiguous(mask) && mask->ne[0] == scores->ne[0] — and so does
+// ggml_flash_attn_train, which additionally requires F16.
+//
+// The row stride is `S * ggml_element_size(t_msk_flat)`, not `S * 4`: under
+// --attn flash the buffer is F16 with the same flat layout (D4, lm_mask_alloc).
+// For an F32 buffer the two expressions are the same number, which is what keeps
+// exact mode byte-identical.
 //
 // layer_lo/layer_hi let the self-test build a 2-layer slice (T5).
 static ggml_tensor * lm_build_trunk(ggml_context * ctx, Qwen3LM * lm, ggml_tensor * tokens, ggml_tensor * pos,
@@ -782,7 +843,7 @@ static ggml_tensor * lm_build_trunk(ggml_context * ctx, Qwen3LM * lm, ggml_tenso
     ggml_tensor * tok_v = (tokens->ne[0] == S) ? tokens : ggml_view_1d(ctx, tokens, S, 0);
     ggml_tensor * pos_v = (pos->ne[0] == S) ? pos : ggml_view_1d(ctx, pos, S, 0);
 
-    ggml_tensor * mask = ggml_view_2d(ctx, t_msk_flat, S, S, (size_t) S * sizeof(float), 0);
+    ggml_tensor * mask = ggml_view_2d(ctx, t_msk_flat, S, S, (size_t) S * ggml_element_size(t_msk_flat), 0);
     ggml_tensor * h    = ggml_get_rows(ctx, lm->embed_tokens, tok_v);  // [H, S]
     for (int l = layer_lo; l < layer_hi; l++) {
         h = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S, opts);
@@ -801,7 +862,7 @@ static ggml_tensor * lm_build_trunk(ggml_context * ctx, Qwen3LM * lm, ggml_tenso
     ggml_tensor * tok_v = (tokens->ne[0] == S) ? tokens : ggml_view_1d(ctx, tokens, S, 0);
     ggml_tensor * pos_v = (pos->ne[0] == S) ? pos : ggml_view_1d(ctx, pos, S, 0);
 
-    ggml_tensor * mask = ggml_view_2d(ctx, t_msk_flat, S, S, (size_t) S * sizeof(float), 0);
+    ggml_tensor * mask = ggml_view_2d(ctx, t_msk_flat, S, S, (size_t) S * ggml_element_size(t_msk_flat), 0);
     ggml_tensor * h    = ggml_get_rows(ctx, lm->embed_tokens, tok_v);  // [H, S]
     for (int l = layer_lo; l < layer_hi; l++) {
         h = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S);
@@ -834,7 +895,7 @@ static ggml_tensor * lm_build_trunk_embeds(ggml_context * ctx, Qwen3LM * lm, ggm
     const Qwen3LMConfig & c = lm->cfg;
 
     ggml_tensor * pos_v = (pos->ne[0] == S) ? pos : ggml_view_1d(ctx, pos, S, 0);
-    ggml_tensor * mask  = ggml_view_2d(ctx, t_msk_flat, S, S, (size_t) S * sizeof(float), 0);
+    ggml_tensor * mask  = ggml_view_2d(ctx, t_msk_flat, S, S, (size_t) S * ggml_element_size(t_msk_flat), 0);
     for (int l = layer_lo; l < layer_hi; l++) {
         h = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S, opts);
     }

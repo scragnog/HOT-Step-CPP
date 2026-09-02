@@ -75,6 +75,27 @@
 //               point of this project), that cell is reported SKIP rather than
 //               crashing the rest of the grid. --backend is ignored: both arms
 //               run on CUDA. Ignores --extra/--large/--cheap/--quick/--fwd-only.
+//   --bench-lm  the AS1.5 LM trainer's geometry instead of the DiT's, and with
+//               THREE arms rather than two: the whole-head cuBLAS chain
+//               ("manual"), that same chain run as Nh/gq sequential blocks of
+//               gq heads reassembled with ggml_acc ("blocked" — what
+//               `train-lm` on the 4B actually runs today, `--attn-head-block 8`)
+//               and the fused tf32 ops. The blocked arm is the one the speed
+//               claim has to be made against; measuring flash against the
+//               whole-head chain flatters it by whatever the four extra
+//               head-block copies cost. Geometry: B = 1, D = 128, a causal
+//               additive F16 mask, Nh 32 / Nkv 8 (Qwen3-4B) or Nh 16 / Nkv 8
+//               with --lm-small (0.6B / 1.7B), S in {1024, 2113, 3500}
+//               (--lm-S 1024,3500 overrides). Forward and backward are timed
+//               separately (a forward-only build, then total minus forward,
+//               same subtraction --bench-tr uses), 10 warm-up + 50 timed
+//               iterations, and the table closes with an "x L layers" step-share
+//               estimate: attention pays fwd + checkpoint recompute + bwd per
+//               micro-step, i.e. 2*fwd + bwd per layer. That estimate is an
+//               ATTENTION-ONLY upper bound on what the flag can move — it is not
+//               a step time. Flags: --lm-S <list> --lm-small --lm-nh N
+//               --lm-gq N --lm-layers N --lm-only manual|blocked|fused.
+//               Ignores --extra/--large/--cheap/--quick, same as --bench.
 // Exit code 0 only if every case passes (n/a to --bench, which always exits 0
 // unless CUDA itself is unavailable or a compute call fails outright).
 //
@@ -659,6 +680,10 @@ struct BenchArm {
 // arm 0 = manual (the autodiff'd dit_attn_f32 chain), 1 = fused f32 (v1
 // kernels), 2 = fused tf32 (the tensor-core forward). Three arms rather than
 // two so the regression against v1 is visible in the same table as the target.
+// arm 3 = the SAME manual chain cut into Nh/gq sequential head blocks and
+// reassembled with ggml_acc — lm_attn_head_blocked's shape, and the only arm
+// --bench-lm's speed claim may be made against, because it is what the 4B LM
+// trainer runs today. `gq` is ignored by every other arm.
 // HOT-Step patch: flash-attn-train (stream B2) -- the three geometries the DiT
 // trainer actually emits, so the bench stops measuring only the one of them that
 // happens to be fastest. `--bench`'s grid is BENCH_MASK_WIN at S == S_kv; the
@@ -668,14 +693,51 @@ enum BenchMask {
     BENCH_MASK_WIN = 0,   // dit_sa_mask(S, 128) -- windowed self-attention
     BENCH_MASK_NONE,      // no mask at all -- full self-attention at B == 1
     BENCH_MASK_CA,        // dit_ca_mask(enc_S, S, keep) -- cross-attention
+    // HOT-Step patch: flash-attn-train (R2 / --bench-lm). The LM's ONLY mask:
+    // a square lower-triangular additive mask, 0 where the query may see the
+    // key and -INF above the diagonal. Appended at the END of the enum so the
+    // three values --bench and --bench-tr pass keep their meaning.
+    BENCH_MASK_CAUSAL,
 };
+
+// The F16 form of train/lm-data.h's lm_causal_mask(S), laid out exactly as
+// ggml wants an additive mask: ne[0] == S_kv is the fastest axis, so element
+// (query i, key j) lives at j + i*S. Built here rather than converted from
+// lm_causal_mask's F32 vector so this tool keeps pulling in dit-data.h only —
+// the values are the same 0 / -INF either way, and -INF is exactly
+// representable in F16.
+static void bench_causal_mask_f16(int64_t S, std::vector<uint16_t> * out) {
+    const uint16_t zero = ggml_fp32_to_fp16(0.0f);
+    const uint16_t ninf = ggml_fp32_to_fp16(-INFINITY);
+    out->assign((size_t) (S * S), ninf);
+    for (int64_t i = 0; i < S; i++) {
+        uint16_t * row = out->data() + (size_t) (i * S);
+        for (int64_t j = 0; j <= i; j++) {
+            row[j] = zero;
+        }
+    }
+}
 
 static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t B,
                         int64_t Nh, int64_t Nkv, int64_t D, ggml_backend_t be,
                         std::string & err, BenchMask mk = BENCH_MASK_WIN,
-                        double enc_real = 1.0, bool fwd_only = false) {
-    const bool flash = arm != 0;
+                        double enc_real = 1.0, bool fwd_only = false,
+                        int64_t gq = 0) {
+    const bool flash = (arm == 1 || arm == 2);
     const float scale = 1.0f / std::sqrt((float) D);
+
+    if (mk == BENCH_MASK_CAUSAL && S_kv != S) {
+        err = "causal mask requires S_kv == S";
+        return false;
+    }
+    if (arm == 3) {
+        // The blocked arm's constraints are lm_attn_head_blocked's own
+        // (lm-graph.h): whole blocks of heads, and a KV block per Q block.
+        if (gq <= 0 || gq > Nh || Nh % gq != 0 || (gq * Nkv) % Nh != 0 || (gq * Nkv) / Nh < 1) {
+            err = "head-block size does not divide the head layout";
+            return false;
+        }
+    }
 
     const size_t mem = ggml_tensor_overhead() * 8192 +
                        ggml_graph_overhead_custom(GGML_DEFAULT_GRAPH_SIZE, true) + (1u << 20);
@@ -709,11 +771,82 @@ static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t 
         ggml_set_input(m);
     }
 
+    // Blocked arm only: the permanently-zero base every head block accs into,
+    // lm-graph.h's `opts.attn_zero`. It is an INPUT, uploaded as zeros below —
+    // a freshly allocated buffer holds garbage, and the rows a block does not
+    // write would carry it straight into the loss.
+    ggml_tensor * zero = nullptr;
+
     ggml_tensor * o;
     if (flash) {
         ggml_tensor * pkd = ggml_flash_attn_train(a.ctx, q, k, v, m, scale);
         ggml_flash_attn_train_set_prec(pkd, arm == 2 ? GGML_PREC_DEFAULT : GGML_PREC_F32);
         o                 = ggml_flash_attn_train_get_o(a.ctx, pkd);
+    } else if (arm == 3) {
+        // lm_attn_head_blocked, on this tool's already-permuted layout.
+        //
+        // The trainer slices [Nh*D, S] on its fastest axis and must ggml_cont
+        // each slice; here q is [D, S, Nh, B] so a head block is a slice on
+        // dim 2. The ggml_cont is KEPT anyway: it is one of the four copies the
+        // blocked path pays for, and dropping it would measure a graph the
+        // trainer does not emit. Each block's chain is the same ref_attn_f32
+        // the manual arm runs, at gq query heads and gkv KV heads, so the GQA
+        // broadcast inside mul_mat is the same one (gq % gkv == 0).
+        const int64_t nblk = Nh / gq;
+        const int64_t gkv  = gq * Nkv / Nh;
+
+        zero = ggml_new_tensor_4d(a.ctx, GGML_TYPE_F32, D, Nh, S, B);
+        ggml_set_name(zero, "attn_zero");
+        ggml_set_input(zero);
+
+        ggml_tensor * acc = zero;
+        for (int64_t bi = 0; bi < nblk; bi++) {
+            // cont(view) THEN reshape, in that order, because that is the pair
+            // lm_attn_head_blocked emits (`ggml_cont(ggml_view_2d(...))` then
+            // `ggml_reshape_3d`) and because without the reshape this graph does
+            // not build at all.
+            //
+            // GGML_OP_CONT's backward asserts its incoming gradient is
+            // contiguous (ggml.c:7203). The gradient that reaches `vb` has come
+            // back through ref_attn_f32's `ggml_cont(ggml_transpose(v))`, and
+            // TRANSPOSE's backward is another ggml_transpose — non-contiguous by
+            // construction — so the assert fires and the arm aborts. The trainer
+            // never hits it because GGML_OP_RESHAPE's backward inserts a
+            // `ggml_cont` on a non-contiguous gradient before passing it on, and
+            // the trainer always has a reshape between the cont and the
+            // attention chain.
+            //
+            // The reshape is shape-preserving here (a view node, zero forward
+            // cost), so what it adds to this arm is exactly the backward copy
+            // the trainer's own reshape pays — not a copy invented for the
+            // benchmark. Charging it is the honest choice: the blocked arm is
+            // the reference a speed claim is made against, and it must cost what
+            // `train-lm --attn-head-block 8` costs.
+            ggml_tensor * qb = ggml_reshape_4d(
+                a.ctx,
+                ggml_cont(a.ctx, ggml_view_4d(a.ctx, q, D, S, gq, B, q->nb[1], q->nb[2], q->nb[3],
+                                              (size_t) bi * (size_t) gq * q->nb[2])),
+                D, S, gq, B);
+            ggml_tensor * kb = ggml_reshape_4d(
+                a.ctx,
+                ggml_cont(a.ctx, ggml_view_4d(a.ctx, k, D, S_kv, gkv, B, k->nb[1], k->nb[2], k->nb[3],
+                                              (size_t) bi * (size_t) gkv * k->nb[2])),
+                D, S_kv, gkv, B);
+            ggml_tensor * vb = ggml_reshape_4d(
+                a.ctx,
+                ggml_cont(a.ctx, ggml_view_4d(a.ctx, v, D, S_kv, gkv, B, v->nb[1], v->nb[2], v->nb[3],
+                                              (size_t) bi * (size_t) gkv * v->nb[2])),
+                D, S_kv, gkv, B);
+
+            ggml_tensor * ab = ref_attn_f32(a.ctx, qb, kb, vb, m, scale);   // [D, gq, S, B]
+            // `acc` is contiguous [D, Nh, S, B], so the base's own strides are
+            // exactly the strides ab must be written with, and the head offset
+            // is bi*gq rows of D floats. GGML_OP_CONCAT has no backward; ACC
+            // does — the reason lm_attn_head_blocked assembles this way.
+            acc = ggml_acc(a.ctx, acc, ab, zero->nb[1], zero->nb[2], zero->nb[3],
+                           (size_t) bi * (size_t) gq * zero->nb[1]);
+        }
+        o = acc;
     } else {
         o = ref_attn_f32(a.ctx, q, k, v, m, scale);
     }
@@ -757,6 +890,9 @@ static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t 
             keep[(size_t) j] = 1.0f;
         }
         dit_ca_mask((int) S_kv, (int) S, keep, &hm);
+    } else if (mk == BENCH_MASK_CAUSAL) {
+        // Square by construction: the LM's mask is [S, S] and nothing else.
+        bench_causal_mask_f16(S, &hm);
     }
 
     ggml_backend_tensor_set(q, hq.data(), 0, ggml_nbytes(q));
@@ -765,6 +901,10 @@ static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t 
     ggml_backend_tensor_set(w, hw.data(), 0, ggml_nbytes(w));
     if (m) {
         ggml_backend_tensor_set(m, hm.data(), 0, ggml_nbytes(m));
+    }
+    if (zero) {
+        const std::vector<float> hz((size_t) (D * Nh * S * B), 0.0f);
+        ggml_backend_tensor_set(zero, hz.data(), 0, ggml_nbytes(zero));
     }
 
     // ggml_set_loss only allocates grad_accs[loss]; it never initialises it
@@ -789,11 +929,11 @@ struct BenchResult {
 static BenchResult bench_run(int arm, int64_t S, int64_t S_kv, int64_t B, int64_t Nh,
                              int64_t Nkv, int64_t D, ggml_backend_t be,
                              BenchMask mk = BENCH_MASK_WIN, double enc_real = 1.0,
-                             bool fwd_only = false) {
+                             bool fwd_only = false, int64_t gq = 0) {
     BenchResult r;
     BenchArm    a;
     std::string err;
-    if (!bench_build(a, arm, S, S_kv, B, Nh, Nkv, D, be, err, mk, enc_real, fwd_only)) {
+    if (!bench_build(a, arm, S, S_kv, B, Nh, Nkv, D, be, err, mk, enc_real, fwd_only, gq)) {
         r.note = err;
         return r;
     }
@@ -816,7 +956,10 @@ static BenchResult bench_run(int arm, int64_t S, int64_t S_kv, int64_t B, int64_
     const int64_t t1 = ggml_time_us();
     r.ms            = (double) (t1 - t0) / 1000.0 / 50.0;
     r.ok            = true;
-    r.prec          = (arm == 0) ? "n/a" : prec_short(last_prec(0));
+    // Only the fused arms have a resolved kernel to report; last_prec() is a
+    // global "what ran last", so asking it after a cuBLAS arm would print the
+    // PREVIOUS arm's label.
+    r.prec          = (arm == 0 || arm == 3) ? "n/a" : prec_short(last_prec(0));
     return r;
 }
 
@@ -919,6 +1062,173 @@ static int run_bench_trainer(ggml_backend_t be_cuda, int64_t S_q, int64_t enc_S,
     printf("\nattention ms per micro-step at 32 layers (16 win + 16 full + 32 cross):\n"
            "  manual %8.1f ms\n  fused  %8.1f ms   delta %+.1f ms\n",
            step_manual, step_fused, step_fused - step_manual);
+    return 0;
+}
+
+// HOT-Step patch: flash-attn-train (R2 / stream B, P1). --bench-lm: the AS1.5 LM
+// trainer's attention geometry, forward and backward split, THREE arms —
+// whole-head cuBLAS chain, the same chain in head blocks (what the 4B runs
+// today), and the fused tf32 ops. docs/plans/2026-09-02-lm-flash-attn.md §B3 P1.
+//
+// Mean live keys per query row for a causal mask, rounded UP to whole key tiles
+// — the fused kernel skips a tile only when EVERY key in it is -INF, so a
+// causal row pays for ceil((i+1)/bk) tiles, not i+1 keys. Printed for the same
+// reason live_keys_per_row is printed by --bench: it separates "the tile skip
+// is not firing" from "the inner loop is slow".
+static double causal_live_keys_per_row(int64_t S, int64_t bk) {
+    if (S <= 0) {
+        return 0.0;
+    }
+    double tot = 0.0;
+    for (int64_t i = 0; i < S; i++) {
+        const int64_t end = ((i / bk) + 1) * bk;
+        tot += (double) (end < S ? end : S);
+    }
+    return tot / (double) S;
+}
+
+static int run_bench_lm(ggml_backend_t be_cuda, const std::vector<int64_t> & S_list, int64_t Nh,
+                        int64_t Nkv, int64_t gq, int64_t layers, const char * only) {
+    const int64_t B = 1, D = 128;
+
+    static const char * names[4] = { "manual", "fused-f32", "fused-tf32", "blocked" };
+    // Presentation order: the whole-head chain, the chain the trainer really
+    // runs, then the candidate. v1's scalar kernels (arm 1) are not the
+    // question here, exactly as in --bench-tr.
+    const int arm_ids[3] = { 0, 3, 2 };
+
+    printf("fattn-train-test --bench-lm — AS1.5 LM trainer geometry on %s\n",
+           ggml_backend_name(be_cuda));
+    printf("B=%lld D=%lld Nh=%lld Nkv=%lld  causal mask  head-block %lld (%lld blocks)  "
+           "%lld layers  10 warm-up + 50 timed iters\n",
+           (long long) B, (long long) D, (long long) Nh, (long long) Nkv, (long long) gq,
+           (long long) (gq > 0 ? Nh / gq : 0), (long long) layers);
+    printf("arms: manual = ONE cuBLAS chain over all %lld heads; blocked = %lld sequential\n"
+           "chains of %lld heads reassembled with ggml_acc, i.e. what `train-lm` on the 4B runs\n"
+           "today (--attn-head-block %lld) and the ONLY honest reference for a speed claim;\n"
+           "fused-tf32 = ggml_flash_attn_train{,_back}. bwd ms is total minus a forward-only\n"
+           "build of the same arm, the same subtraction --bench-tr makes.\n\n",
+           (long long) Nh, (long long) (gq > 0 ? Nh / gq : 0), (long long) gq, (long long) gq);
+    printf("%-6s %-11s %6s %9s %9s %9s %9s %9s %9s   %s\n",
+           "S", "arm", "prec", "fwd ms", "bwd ms", "tot ms", "vs man", "vs blk", "bufMB",
+           "status");
+
+    struct LmRow {
+        bool        ok  = false;
+        double      fwd = 0.0;
+        double      bwd = 0.0;
+        double      tot = 0.0;
+        double      buf = 0.0;
+        std::string prec = "n/a";
+        std::string note;
+    };
+
+    std::vector<LmRow> rows((size_t) (S_list.size() * 3));
+
+    for (size_t si = 0; si < S_list.size(); si++) {
+        const int64_t S = S_list[si];
+        printf("S=%lld: live keys/row %.1f of %lld (causal, key tiles of 16) — the fused kernel\n"
+               "       skips whole -INF tiles, so it pays ~%.0f%% of the full-attention work here.\n",
+               (long long) S, causal_live_keys_per_row(S, 16), (long long) S,
+               100.0 * causal_live_keys_per_row(S, 16) / (double) S);
+
+        for (int ai = 0; ai < 3; ai++) {
+            const int    arm  = arm_ids[ai];
+            const char * name = names[arm];
+            LmRow &      row  = rows[si * 3 + (size_t) ai];
+            if (only && *only && strcmp(only, name) != 0 &&
+                !(strcmp(only, "fused") == 0 && arm == 2)) {
+                row.note = "not selected (--lm-only)";
+                continue;
+            }
+            const BenchResult tot = bench_run(arm, S, S, B, Nh, Nkv, D, be_cuda, BENCH_MASK_CAUSAL,
+                                              1.0, /*fwd_only=*/false, gq);
+            const BenchResult fwd = bench_run(arm, S, S, B, Nh, Nkv, D, be_cuda, BENCH_MASK_CAUSAL,
+                                              1.0, /*fwd_only=*/true, gq);
+            row.prec = tot.prec;
+            row.buf  = (double) tot.buf / (1024.0 * 1024.0);
+            if (!tot.ok || !fwd.ok) {
+                row.note = tot.ok ? fwd.note : tot.note;
+                continue;
+            }
+            row.ok  = true;
+            row.fwd = fwd.ms;
+            row.bwd = tot.ms - fwd.ms;
+            row.tot = tot.ms;
+        }
+
+        // Ratios are computed only once every arm at this S has run, so a row
+        // never quotes a ratio against an arm that OOM'd or has not run yet.
+        const LmRow & man = rows[si * 3 + 0];
+        const LmRow & blk = rows[si * 3 + 1];
+        for (int ai = 0; ai < 3; ai++) {
+            const int     arm = arm_ids[ai];
+            const LmRow & row = rows[si * 3 + (size_t) ai];
+            char vm[16], vb[16];
+            if (row.ok && man.ok && man.tot > 0.0) {
+                snprintf(vm, sizeof(vm), "%.2fx", row.tot / man.tot);
+            } else {
+                snprintf(vm, sizeof(vm), "%s", "n/a");
+            }
+            if (row.ok && blk.ok && blk.tot > 0.0) {
+                snprintf(vb, sizeof(vb), "%.2fx", row.tot / blk.tot);
+            } else {
+                snprintf(vb, sizeof(vb), "%s", "n/a");
+            }
+            if (!row.ok) {
+                printf("%-6lld %-11s %6s %9s %9s %9s %9s %9s %9s   %s\n", (long long) S,
+                       names[arm], row.prec.c_str(), "n/a", "n/a", "n/a", "n/a", "n/a",
+                       "n/a", row.note.empty() ? "SKIP" : row.note.c_str());
+            } else {
+                printf("%-6lld %-11s %6s %9.4f %9.4f %9.4f %9s %9s %9.1f   ok\n", (long long) S,
+                       names[arm], row.prec.c_str(), row.fwd, row.bwd, row.tot, vm, vb, row.buf);
+            }
+            fflush(stdout);
+        }
+    }
+
+    // The step-share estimate. In the 4B's checkpointed path every attention
+    // site is evaluated TWICE per micro-step — once in the collect forward and
+    // once in the segment recompute — before its backward runs, so the per-step
+    // attention cost is layers * (2*fwd + bwd). This is ATTENTION ONLY: it is an
+    // upper bound on what --attn flash can move, not a step time, and the only
+    // number that turns a per-site ratio into "is this worth 3% of a step".
+    printf("\nattention ms per micro-step at %lld layers (fwd + checkpoint recompute + bwd,\n"
+           "i.e. 2*fwd + bwd per layer) — ATTENTION ONLY, an upper bound on the flag's reach.\n"
+           "The recompute term is the LOW-VRAM path's (4B, and any run that checkpoints); the\n"
+           "naive full-trunk path (0.6B / 1.7B when they fit) evaluates each site ONCE, so for\n"
+           "that path subtract one fwd per layer from every column below.\n",
+           (long long) layers);
+    printf("%-6s %12s %12s %12s %12s %12s\n", "S", "manual", "blocked", "fused-tf32",
+           "fused/blk", "delta ms");
+    for (size_t si = 0; si < S_list.size(); si++) {
+        const LmRow & man = rows[si * 3 + 0];
+        const LmRow & blk = rows[si * 3 + 1];
+        const LmRow & fus = rows[si * 3 + 2];
+        auto step = [&](const LmRow & r) { return (double) layers * (2.0 * r.fwd + r.bwd); };
+        const double sm = man.ok ? step(man) : 0.0;
+        const double sb = blk.ok ? step(blk) : 0.0;
+        const double sf = fus.ok ? step(fus) : 0.0;
+        char cm[16], cb[16], cf[16], cr[16], cd[16];
+        // Formatted through explicit branches rather than a chosen format
+        // string: a non-literal format with a spare argument is exactly the
+        // shape -Wformat-nonliteral exists to complain about.
+        if (man.ok) { snprintf(cm, sizeof(cm), "%.1f", sm); } else { snprintf(cm, sizeof(cm), "%s", "n/a"); }
+        if (blk.ok) { snprintf(cb, sizeof(cb), "%.1f", sb); } else { snprintf(cb, sizeof(cb), "%s", "n/a"); }
+        if (fus.ok) { snprintf(cf, sizeof(cf), "%.1f", sf); } else { snprintf(cf, sizeof(cf), "%s", "n/a"); }
+        if (blk.ok && fus.ok && sb > 0.0) {
+            snprintf(cr, sizeof(cr), "%.2fx", sf / sb);
+            snprintf(cd, sizeof(cd), "%+.1f", sf - sb);
+        } else {
+            snprintf(cr, sizeof(cr), "%s", "n/a");
+            snprintf(cd, sizeof(cd), "%s", "n/a");
+        }
+        printf("%-6lld %12s %12s %12s %12s %12s\n", (long long) S_list[si], cm, cb, cf, cr, cd);
+    }
+    printf("\nbufMB is each arm's ggml backend buffer high-water with ggml-alloc reuse OFF (one\n"
+           "allocation per tensor), so it over-states what the same graph costs inside the\n"
+           "trainer — same convention as --bench. A SKIP on the manual or blocked arm at large S\n"
+           "is that over-statement OOMing, not a claim about the trainer's own footprint.\n");
     return 0;
 }
 
@@ -1369,6 +1679,16 @@ int main(int argc, char ** argv) {
     double      tr_real = 1.0;
     std::string tr_only;
     bool        tr_fused_only = false;
+    // HOT-Step patch: flash-attn-train (R2 / --bench-lm). Qwen3-4B by default —
+    // 32 query heads, 8 KV heads, 36 layers, head-block 8, which is what
+    // `ace-train train-lm` runs on that model today.
+    bool                 bench_lm = false;
+    int64_t              lm_nh     = 32;
+    int64_t              lm_nkv    = 8;
+    int64_t              lm_gq     = 8;
+    int64_t              lm_layers = 36;
+    std::vector<int64_t> lm_S;
+    std::string          lm_only;
     int         nth   = 0;
     std::string want_backend = "cpu";
     // DEFAULTS TO f32, and that is not a preference: the recorded regression
@@ -1403,6 +1723,53 @@ int main(int argc, char ** argv) {
             tr_only = argv[++i];
         } else if (a == "--tr-fused") {
             tr_fused_only = true;
+        } else if (a == "--bench-lm") {
+            bench    = true;
+            bench_lm = true;
+        } else if (a == "--lm-S" && i + 1 < argc) {
+            // "1024,2113,3500" or "1024 2113 3500" as one argument.
+            const std::string list = argv[++i];
+            size_t            p    = 0;
+            while (p < list.size()) {
+                while (p < list.size() && (list[p] == ',' || list[p] == ' ')) {
+                    p++;
+                }
+                size_t e = p;
+                while (e < list.size() && list[e] != ',' && list[e] != ' ') {
+                    e++;
+                }
+                if (e > p) {
+                    const int64_t s = atoll(list.substr(p, e - p).c_str());
+                    if (s <= 0) {
+                        fprintf(stderr, "[fattn-train-test] --lm-S takes positive integers\n");
+                        return 2;
+                    }
+                    lm_S.push_back(s);
+                }
+                p = e;
+            }
+            if (lm_S.empty()) {
+                fprintf(stderr, "[fattn-train-test] --lm-S needs at least one S\n");
+                return 2;
+            }
+        } else if (a == "--lm-small") {
+            lm_nh     = 16;   // 0.6B and 1.7B: 16 query heads, 8 KV heads, 28 layers
+            lm_nkv    = 8;
+            lm_layers = 28;
+        } else if (a == "--lm-nh" && i + 1 < argc) {
+            lm_nh = atoll(argv[++i]);
+        } else if (a == "--lm-nkv" && i + 1 < argc) {
+            lm_nkv = atoll(argv[++i]);
+        } else if (a == "--lm-gq" && i + 1 < argc) {
+            lm_gq = atoll(argv[++i]);
+        } else if (a == "--lm-layers" && i + 1 < argc) {
+            lm_layers = atoll(argv[++i]);
+        } else if (a == "--lm-only" && i + 1 < argc) {
+            lm_only = argv[++i];
+            if (lm_only != "manual" && lm_only != "blocked" && lm_only != "fused") {
+                fprintf(stderr, "[fattn-train-test] --lm-only takes manual, blocked or fused\n");
+                return 2;
+            }
         } else if (a == "--threads" && i + 1 < argc) {
             nth = atoi(argv[++i]);
         } else if (a == "--backend" && i + 1 < argc) {
@@ -1419,7 +1786,33 @@ int main(int argc, char ** argv) {
             }
         } else {
             fprintf(stderr, "usage: fattn-train-test [--backend cpu|cuda] [--prec f32|tf32] [--extra]"
-                            " [--large] [--cheap] [--quick] [--fwd-only] [--threads N] [--bench]\n");
+                            " [--large] [--cheap] [--quick] [--fwd-only] [--threads N] [--bench]\n"
+                            "       [--bench-lm [--lm-S 1024,2113,3500] [--lm-small] [--lm-nh N]"
+                            " [--lm-nkv N] [--lm-gq N] [--lm-layers N]\n"
+                            "        [--lm-only manual|blocked|fused]]\n");
+            return 2;
+        }
+    }
+
+    if (bench_lm) {
+        if (lm_S.empty()) {
+            // S = prompt + 5 Hz codes: ~1024 short, 2113 the common crop, 3500
+            // the 600 s cap (plan B1: 3000 codes + a 400-800 token prompt).
+            lm_S.push_back(1024);
+            lm_S.push_back(2113);
+            lm_S.push_back(3500);
+        }
+        if (lm_nh <= 0 || lm_nkv <= 0 || lm_nh % lm_nkv != 0) {
+            fprintf(stderr, "[fattn-train-test] --lm-nh must be a positive multiple of --lm-nkv\n");
+            return 2;
+        }
+        if (lm_gq <= 0 || lm_gq > lm_nh || lm_nh % lm_gq != 0 || (lm_gq * lm_nkv) % lm_nh != 0) {
+            fprintf(stderr, "[fattn-train-test] --lm-gq must divide Nh (%lld) and give a whole KV "
+                            "block (gq*Nkv %% Nh == 0)\n", (long long) lm_nh);
+            return 2;
+        }
+        if (lm_layers <= 0) {
+            fprintf(stderr, "[fattn-train-test] --lm-layers must be positive\n");
             return 2;
         }
     }
@@ -1448,9 +1841,14 @@ int main(int argc, char ** argv) {
                         breg, "ggml_backend_cuda_fattn_train_last_prec");
             }
         }
-        const int rc = bench_tr ? run_bench_trainer(be_cuda, tr_S, tr_enc, tr_real,
-                                                   tr_only.c_str(), tr_fused_only)
-                                : run_bench(be_cuda);
+        int rc;
+        if (bench_lm) {
+            rc = run_bench_lm(be_cuda, lm_S, lm_nh, lm_nkv, lm_gq, lm_layers, lm_only.c_str());
+        } else if (bench_tr) {
+            rc = run_bench_trainer(be_cuda, tr_S, tr_enc, tr_real, tr_only.c_str(), tr_fused_only);
+        } else {
+            rc = run_bench(be_cuda);
+        }
         ggml_backend_free(be_cuda);
         return rc;
     }

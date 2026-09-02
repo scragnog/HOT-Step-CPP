@@ -14,6 +14,13 @@
 //  T6 AdamW vs host reference    rel err < 1e-5 per element
 //  T7 clip                       ratio 0.1 +- 1e-3, gnorm2 100.0 +- 1e-2
 //  T8 label hygiene (L3)         exact
+//
+// Later ladders, added as the trainer grew: T9-T13 the low-VRAM/checkpointed
+// path, T14-T17 Lever A (--weights bf16), T18-T22 --attn flash. The flash
+// rungs split by which arithmetic they need — T18/T21 run in the full-f32
+// child (both arms f32, so a delta means something about the FUSION); T19/T20/
+// T22 run here on shipping numerics. See LM_ST_FLASH_BAR_* and the T22
+// constants, both of which are honest about not having been measured yet.
 
 #include "backend.h"
 #include "bpe.h"
@@ -204,6 +211,13 @@ struct LmStRig {
     std::vector<uint8_t>  arena;
 
     ggml_tensor *t_tok = nullptr, *t_pos = nullptr, *t_msk = nullptr, *t_lab = nullptr;
+    // T18-T21: the SAME causal mask in F16, for the --attn flash arms (the fused
+    // op asserts an F16 contiguous mask, D4). A second buffer rather than a
+    // dtype switch on t_msk, because every flash rung runs an exact arm and a
+    // flash arm back to back against the same uploads — a single buffer would
+    // have to be reallocated between them, and then the two arms would not be
+    // sharing the inputs the comparison is built on. 512 KB at ST_S = 512.
+    ggml_tensor * t_msk16 = nullptr;
     ggml_tensor *t_adamw = nullptr, *t_lossgrad = nullptr, *t_clip = nullptr, *t_eps = nullptr, *t_gnorm2 = nullptr;
     ggml_tensor *t_gs = nullptr, *t_one = nullptr;
 };
@@ -256,6 +270,7 @@ static bool lm_st_rig_init(LmStRig * g, const std::string & lm_path, bool with_m
     g->t_tok      = ggml_new_tensor_1d(g->ctx_static, GGML_TYPE_I32, S);
     g->t_pos      = ggml_new_tensor_1d(g->ctx_static, GGML_TYPE_I32, S);
     g->t_msk      = ggml_new_tensor_1d(g->ctx_static, GGML_TYPE_F32, (int64_t) S * S);
+    g->t_msk16    = lm_mask_alloc(g->ctx_static, (int64_t) S * S, /*flash=*/true);
     g->t_lab      = ggml_new_tensor_2d(g->ctx_static, GGML_TYPE_F32, V, s_tr);
     g->t_adamw    = ggml_new_tensor_1d(g->ctx_static, GGML_TYPE_F32, 7);
     g->t_lossgrad = ggml_new_tensor_1d(g->ctx_static, GGML_TYPE_F32, 1);
@@ -267,6 +282,7 @@ static bool lm_st_rig_init(LmStRig * g, const std::string & lm_path, bool with_m
     ggml_set_input(g->t_tok);
     ggml_set_input(g->t_pos);
     ggml_set_input(g->t_msk);
+    ggml_set_input(g->t_msk16);
     ggml_set_input(g->t_lab);
 
     g->buf_static = ggml_backend_alloc_ctx_tensors(g->ctx_static, g->lm.backend);
@@ -342,6 +358,138 @@ static bool lm_st_naive_micro(LmStRig & g, const LmSample & s, double * ce_out) 
     return ok;
 }
 
+// T21's naive arm. A deliberate near-duplicate of lm_st_naive_micro above
+// rather than an extra parameter on it: lm_st_naive_micro is arm A of T9, a
+// BITWISE gate (max rel 1e-5, median 1e-7), and the one thing that must not
+// happen while adding a flag is a change to the reference arm every other rung
+// is measured against. This function takes the layer window, the mask tensor
+// and the layer options; nothing else differs.
+static bool lm_st_naive_micro_arm(LmStRig & g, const LmSample & s, int layer_hi, ggml_tensor * msk,
+                                  const LmLayerOpts & opts, double * ce_out) {
+    const Qwen3LMConfig & c    = g.lm.cfg;
+    const int             H    = c.hidden_size, V = c.vocab_size;
+    const int             S    = (int) s.tokens.size();
+    const int             s_tr = s.s_tr;
+
+    ggml_init_params gip = { g.arena.size(), g.arena.data(), true };
+    ggml_context *   ctx = ggml_init(gip);
+    ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, /*grads=*/true);
+
+    ggml_tensor * hidden = lm_build_trunk(ctx, &g.lm, g.t_tok, g.t_pos, msk, S, 0, layer_hi, opts);
+    ggml_tensor * hd =
+        ggml_cont(ctx, ggml_view_2d(ctx, hidden, H, s_tr, hidden->nb[1], (size_t) (s.n_masked - 1) * hidden->nb[1]));
+    ggml_tensor * logits = ggml_mul_mat(ctx, qwen3_f32(ctx, g.lm.embed_tokens), hd);
+    ggml_tensor * labv   = ggml_view_2d(ctx, g.t_lab, V, s_tr, g.t_lab->nb[1], 0);
+    ggml_tensor * loss   = ggml_cross_entropy_loss(ctx, logits, labv);
+    ggml_set_loss(loss);
+    ggml_set_output(loss);
+    ggml_build_forward_expand(gf, loss);
+    std::vector<ggml_tensor *> gacc;
+    lm_optim_fill_gacc(&g.opt, gf, &gacc);
+    ggml_build_backward_expand(ctx, gf, gacc.data());
+
+    bool ok = false;
+    {
+        LmLabelGuard guard(g.t_lab, s.targets.data(), s_tr, V);
+        ggml_backend_sched_reset(g.sched);
+        ok = ggml_backend_sched_graph_compute(g.sched, gf) == GGML_STATUS_SUCCESS;
+        if (ok && ce_out) {
+            float ce = 0.0f;
+            ggml_backend_tensor_get(loss, &ce, 0, sizeof(float));
+            *ce_out = (double) ce;
+        }
+    }
+    ggml_free(ctx);
+    return ok;
+}
+
+// ─── T18-T22 shared bars (--attn flash parity) ──────────────────────────────
+//
+// STARTING VALUES, TAKEN FROM THE DiT's SF1/SF2 RUNGS, AND THEY MUST BE
+// RE-MEASURED ON THIS TRAINER BEFORE THEY MEAN ANYTHING. They are not derived
+// from LM measurements — none exist yet — they are the DiT's measured numbers
+// with the DiT's headroom, carried over because the graphs are cousins and
+// because starting from a bar is better than starting from none.
+//
+// The three-way split is the load-bearing part and it does transfer: q_proj and
+// k_proj are the only projections whose gradient returns through a QK rms_norm,
+// whose backward subtracts a mean of x*dx — the worst-conditioned step in the
+// graph. Lumping them in with the rest would either slacken the other bars to
+// meet them or fail on the one site that is expected to be loose.
+//
+//   DiT measurement (dit-xl-thirds, LoRA r8, T=64, CPU f32 arms):
+//     layer output                        2.5e-6      bar 1e-4
+//     gradients, non-QK sites             1.9e-5      bar 1e-4
+//     gradients, q_proj / k_proj          4.5e-4      bar 2e-3
+//
+// The LM's numbers will differ: 28-36 layers of causal self-attention rather
+// than 2 trained DiT layers with cross-attention, so amplification through depth
+// is a different quantity. If T18/T21 measure OVER these bars, the first
+// question is whether the bar was ever right for this graph — check the
+// non-QK/output columns, which are the tight ones and where a real defect in the
+// op would show first.
+static const double LM_ST_FLASH_BAR_OUT   = 1e-4;  // deepest hidden tap / CE
+static const double LM_ST_FLASH_BAR_GRAD  = 1e-4;  // v/o/gate/up/down accumulators
+static const double LM_ST_FLASH_BAR_QK    = 2e-3;  // q_proj / k_proj accumulators
+
+// Split an accumulator snapshot into {q_proj, k_proj} and everything else, over
+// the TRAINED layer window only.
+//
+// lm_lora_init pushes A,B per slot in layer-major slot order, so accumulator j
+// belongs to layer (j/2)/QW_LORA_NSLOTS and slot (j/2)%QW_LORA_NSLOTS. LoKr
+// would push 2 OR 3 tensors per slot and break that arithmetic — every flash
+// rung uses the LoRA rigs, and the assert says so rather than silently
+// mis-attributing tensors.
+//
+// `layer_hi` is not cosmetic. The rigs put a LoRA on every layer but the flash
+// rungs build a 2-layer slice, so the accumulators above the slice are exactly
+// zero in BOTH arms. Including them leaves max_rel alone (0 never wins a max)
+// but floods the MEDIAN with zeros, which would make a bad arm read clean on
+// the one statistic that is supposed to describe the typical tensor.
+static void lm_st_split_qk(const LmStAcc & in, int layer_hi, LmStAcc * qk, LmStAcc * other) {
+    GGML_ASSERT(in.t.size() % (size_t) (2 * QW_LORA_NSLOTS) == 0 &&
+                "lm_st_split_qk assumes the LoRA A/B accumulator layout");
+    qk->t.clear();
+    other->t.clear();
+    for (size_t j = 0; j < in.t.size(); j++) {
+        const int layer = (int) ((j / 2) / (size_t) QW_LORA_NSLOTS);
+        if (layer_hi > 0 && layer >= layer_hi) {
+            continue;
+        }
+        const int slot = (int) ((j / 2) % (size_t) QW_LORA_NSLOTS);
+        ((slot == QW_LORA_Q || slot == QW_LORA_K) ? qk : other)->t.push_back(in.t[j]);
+    }
+}
+
+// Max relative difference between two host-side float vectors, normalised the
+// same way lm_st_cmp normalises a tensor (by the larger of the two maxima).
+static double lm_st_vec_rel(const std::vector<float> & a, const std::vector<float> & b, int * nonfinite) {
+    GGML_ASSERT(a.size() == b.size());
+    double ma = 0.0, mb = 0.0, md = 0.0;
+    for (size_t i = 0; i < a.size(); i++) {
+        if (!std::isfinite(a[i]) || !std::isfinite(b[i])) {
+            if (nonfinite) {
+                (*nonfinite)++;
+            }
+            continue;
+        }
+        ma = std::max(ma, fabs((double) a[i]));
+        mb = std::max(mb, fabs((double) b[i]));
+        md = std::max(md, fabs((double) a[i] - (double) b[i]));
+    }
+    return md / std::max(std::max(ma, mb), 1e-8);
+}
+
+// True when the backend that will run the arms is the CPU one. On CPU a `false`
+// from the capability probe is meaningless (there is nothing to split onto) and
+// the fused op is the f32 reference implementation; on any other backend a
+// `false` means the scheduler WOULD split, and a flash arm that silently ran on
+// the CPU would pass a parity comparison while proving nothing about the kernels
+// that ship. Skill §2 point 3.
+static inline bool lm_st_backend_is_cpu(ggml_backend_t b) {
+    return b == nullptr || strncmp(ggml_backend_name(b), "CPU", 3) == 0;
+}
+
 static void lm_st_upload_inputs(LmStRig & g, const LmSample & s) {
     const int S = (int) s.tokens.size();
     ggml_backend_tensor_set(g.t_tok, s.tokens.data(), 0, (size_t) S * 4);
@@ -353,6 +501,40 @@ static void lm_st_upload_inputs(LmStRig & g, const LmSample & s) {
     std::vector<float> m;
     lm_causal_mask(S, &m);
     ggml_backend_tensor_set(g.t_msk, m.data(), 0, m.size() * sizeof(float));
+    // Same mask, F16, for the --attn flash arms. Uploaded unconditionally so an
+    // exact arm and a flash arm are provably reading the same causal structure
+    // — "same uploads" is the whole basis of the T14-template comparison.
+    if (g.t_msk16) {
+        lm_mask_set(g.t_msk16, m);
+    }
+}
+
+// The T9-T13 shared sample, as its own function so the parent's flash rungs
+// (T19/T20) can build the identical one without reaching into lm_self_test_ckpt.
+// A tokenizer-free construction is fine: the trunk only cares that token ids are
+// in range, and T1 already validates the real layout.
+static void lm_st_build_sample(const std::string & lm_path, const std::string & codes_path, int S, int n_mask,
+                               LmSample * out) {
+    LmCodeRow row = lm_st_synth_row();
+    if (!codes_path.empty() && pm_file_exists(codes_path)) {
+        std::vector<LmCodeRow> rows;
+        std::string            warn;
+        if (lm_codes_read_file(codes_path.c_str(), &rows, &warn) && !rows.empty()) {
+            row = rows[0];
+        }
+    }
+    BPETokenizer bpe;
+    LmSample     full;
+    std::string  why;
+    if (load_bpe_from_gguf(&bpe, lm_path.c_str()) && lm_build_sequence(bpe, row, true, 1 << 20, &full, &why)) {
+        out->tokens.assign(full.tokens.begin(), full.tokens.begin() + std::min((size_t) S, full.tokens.size()));
+    }
+    while ((int) out->tokens.size() < S) {
+        out->tokens.push_back((int32_t) (AUDIO_CODE_BASE + (int) out->tokens.size()));
+    }
+    out->n_masked = n_mask;
+    out->s_tr     = S - n_mask;
+    out->targets.assign(out->tokens.begin() + n_mask, out->tokens.end());
 }
 
 // ─── T9-T13 (4B plan §4 a / a' / a" / b / c) ────────────────────────────────
@@ -1182,8 +1364,185 @@ static void lm_self_test_ckpt(const std::string & lm_path, const std::string & c
                      d);
     }
 
+    // ── T18: --attn exact vs flash-f32 on the low-VRAM segment path ──────
+    //
+    // The T14 template: one 2-layer slice, built TWICE from the same uploads,
+    // the same seed and the same adapter state, differing in exactly one field —
+    // LmCkptCfg::attn_flash. Compared: the deepest hidden tap (ckpt.t_H, the
+    // trunk output after final_norm) and EVERY LoRA gradient accumulator.
+    //
+    // WHY flash-f32 AND WHY THIS PROCESS. This rung runs in the T9-T13 child,
+    // where NVIDIA_TF32_OVERRIDE=0 is already set — so the exact arm's attention
+    // mul_mats are cuBLAS at full f32 rather than TF32, and pinning the fused
+    // arm to GGML_PREC_F32 puts both arms on f32 arithmetic. That is the only
+    // configuration in which a delta measures THE FUSION rather than the
+    // reference's own rounding. The TF32 pair is T19, in the parent, reported
+    // and not gated for exactly that reason.
+    //
+    // This is NOT a byte-identity rung and cannot be: the fused op recomputes
+    // the softmax from Q/K/LSE in tiles instead of reading back a retained
+    // [S,S,Nh] array, so the two arms sum the same terms in a different order.
+    // Same class as --bwd mm and --weights bf16, and the reason --attn exact
+    // stays the default.
+    {
+        const int T18_HI = std::min(2, bc.n_layers);
+        lm_st_upload_inputs(B, s512);
+        ckpt.last_mask_S         = 0;
+        ckpt.cfg.layer_hi        = T18_HI;
+        ckpt.cfg.attn_head_block = 0;  // D3: flash has no head-blocked arm
+        ckpt.cfg.chunk           = 64;
+        ckpt.cfg.weights_bf16    = false;
+        run.naive_head           = false;
+        run.grad_accum           = 1;
+        run.head_f32_embed       = false;  // production head in both arms
+
+        // The probe, at THIS rung's geometry. On a non-CPU backend a `false`
+        // makes the whole rung fail: the numbers would still agree (the CPU
+        // fallback is correct), and they would be measuring nothing.
+        bool        pf = false, pb = false;
+        const float ascale = 1.0f / sqrtf((float) bc.head_dim);
+        dit_flash_probe(B.lm.backend, bc.head_dim, bc.n_heads, bc.n_kv_heads, ST_S, ST_S, 1, ascale, &pf, &pb);
+        const bool cpu_backend = lm_st_backend_is_cpu(B.lm.backend);
+        const bool probe_ok    = cpu_backend || (pf && pb);
+
+        auto arm = [&](bool flash, std::vector<float> * tap, double * ce, LmStAcc * out) -> bool {
+            ckpt.cfg.attn_flash = flash;
+            ckpt.cfg.attn_prec  = GGML_PREC_F32;   // pinned in BOTH arms; only read when flash
+            run.t_msk           = flash ? B.t_msk16 : B.t_msk;
+            ckpt.last_mask_S    = 0;               // the buffer changed under it
+            lm_optim_zero_grad(&B.opt);
+            const bool ok = lm_ckpt_micro_step(run, s512, true, ce);
+            if (ok) {
+                tap->resize((size_t) ggml_nelements(ckpt.t_H));
+                ggml_backend_tensor_get(ckpt.t_H, tap->data(), 0, tap->size() * sizeof(float));
+                if (out) {
+                    lm_st_read_accs(B.opt, out);
+                }
+            }
+            return ok;
+        };
+
+        std::vector<float> tapE, tapF;
+        LmStAcc            aE, aF;
+        double             ceE = 0.0, ceF = 0.0;
+        const bool         ok = arm(false, &tapE, &ceE, &aE) && arm(true, &tapF, &ceF, &aF);
+
+        // Leave the rig as the following rungs expect it.
+        ckpt.cfg.attn_flash = false;
+        ckpt.cfg.attn_prec  = GGML_PREC_DEFAULT;
+        run.t_msk           = B.t_msk;
+        ckpt.last_mask_S    = 0;
+        ckpt.cfg.layer_hi   = bc.n_layers;
+
+        if (!ok) {
+            lm_st_report(rs, "T18", false, "segment micro-step failed (exact or flash-f32 arm)");
+        } else {
+            int    nf      = 0;
+            const double out_rel = lm_st_vec_rel(tapE, tapF, &nf);
+            LmStAcc qkE, otE, qkF, otF;
+            lm_st_split_qk(aE, T18_HI, &qkE, &otE);
+            lm_st_split_qk(aF, T18_HI, &qkF, &otF);
+            const LmStCmp cqk = lm_st_cmp(qkE, qkF);
+            const LmStCmp cot = lm_st_cmp(otE, otF);
+            const double  ce_rel = fabs(ceE - ceF) / std::max(fabs(ceE), 1e-30);
+            const bool    pass = nf == 0 && cqk.nonfinite == 0 && cot.nonfinite == 0 && probe_ok &&
+                              out_rel <= LM_ST_FLASH_BAR_OUT && cot.max_rel <= LM_ST_FLASH_BAR_GRAD &&
+                              cqk.max_rel <= LM_ST_FLASH_BAR_QK;
+            char d[736];
+            snprintf(d, sizeof(d),
+                     "layers [0,%d) S=%d hb=0 chunk=64, exact vs flash-f32 (both arms f32: this child runs with "
+                     "NVIDIA_TF32_OVERRIDE=0): hidden tap max rel=%.4e (bar %.0e) | grads non-QK max rel=%.4e "
+                     "(bar %.0e) median=%.4e | grads q/k max rel=%.4e (bar %.0e) median=%.4e | cosine non-QK=%.9f "
+                     "q/k=%.9f | CE exact=%.9f flash=%.9f (rel %.3e) | probe fwd=%s bwd=%s on %s%s | "
+                     "BARS ARE THE DiT's SF1 NUMBERS CARRIED OVER — re-measure before trusting them",
+                     T18_HI, ST_S, out_rel, LM_ST_FLASH_BAR_OUT, cot.max_rel, LM_ST_FLASH_BAR_GRAD, cot.median_rel,
+                     cqk.max_rel, LM_ST_FLASH_BAR_QK, cqk.median_rel, cot.cosine, cqk.cosine, ceE, ceF, ce_rel,
+                     pf ? "yes" : "NO", pb ? "yes" : "NO", ggml_backend_name(B.lm.backend),
+                     cpu_backend ? " (CPU: probe not gated)" : "");
+            lm_st_report(rs, "T18", pass, d);
+        }
+    }
+
     lm_ckpt_free(&ckpt);
     lm_st_rig_free(&B);
+
+    // ── T21: the same comparison on the NAIVE trunk builder ──────────────
+    //
+    // A DIFFERENT GRAPH BUILDER, which is the entire reason this rung exists.
+    // T18 exercises lm_ckpt_micro_step's P2/P3/P7 segments; the 0.6B and 1.7B
+    // bases never touch those — they run lm_build_trunk whole, with ggml's
+    // autodiff building one backward for the entire stack rather than one per
+    // layer. That is also the path flash buys the most on (the retained softmax
+    // is ~2034*S^2 bytes there, 29 GB at S 3800), so leaving it unmeasured would
+    // mean gating the mode on the path it matters least for.
+    //
+    // Its own mirrored rig: arm A of T9 was freed, and the naive path needs the
+    // F32 mirror (lm_build_f32_mirror), not the BF16 base arm B holds.
+    {
+        const int   T21_HI = 2;  // 2-layer slice, as T18
+        LmStRig     N;
+        std::string nerr;
+        if (!lm_st_rig_init(&N, lm_path, /*with_mirror=*/true, ST_S, ST_TR, 16, seed, &nerr)) {
+            lm_st_report(rs, "T21", false, "naive rig setup failed: " + nerr);
+            lm_st_rig_free(&N);
+        } else {
+            const Qwen3LMConfig & nc  = N.lm.cfg;
+            const int             hi  = std::min(T21_HI, nc.n_layers);
+            lm_st_upload_inputs(N, s512);
+
+            bool        pf = false, pb = false;
+            const float ascale = 1.0f / sqrtf((float) nc.head_dim);
+            dit_flash_probe(N.lm.backend, nc.head_dim, nc.n_heads, nc.n_kv_heads, ST_S, ST_S, 1, ascale, &pf, &pb);
+            const bool cpu_backend = lm_st_backend_is_cpu(N.lm.backend);
+            const bool probe_ok    = cpu_backend || (pf && pb);
+
+            auto arm = [&](bool flash, double * ce, LmStAcc * out) -> bool {
+                LmLayerOpts o;
+                o.attn_flash = flash;
+                o.attn_prec  = GGML_PREC_F32;
+                lm_optim_zero_grad(&N.opt);
+                const bool ok =
+                    lm_st_naive_micro_arm(N, s512, hi, flash ? N.t_msk16 : N.t_msk, o, ce);
+                if (ok && out) {
+                    lm_st_read_accs(N.opt, out);
+                }
+                return ok;
+            };
+
+            LmStAcc aE, aF;
+            double  ceE = 0.0, ceF = 0.0;
+            const bool ok = arm(false, &ceE, &aE) && arm(true, &ceF, &aF);
+            if (!ok) {
+                lm_st_report(rs, "T21", false, "naive micro-step failed (exact or flash-f32 arm)");
+            } else {
+                LmStAcc qkE, otE, qkF, otF;
+                lm_st_split_qk(aE, hi, &qkE, &otE);
+                lm_st_split_qk(aF, hi, &qkF, &otF);
+                const LmStCmp cqk = lm_st_cmp(qkE, qkF);
+                const LmStCmp cot = lm_st_cmp(otE, otF);
+                const double  ce_rel = fabs(ceE - ceF) / std::max(fabs(ceE), 1e-30);
+                // The CE itself stands in for T18's hidden tap here: the naive
+                // path has no persistent t_H to read, and the loss is the only
+                // scalar both arms produce from the same graph root.
+                const bool pass = cqk.nonfinite == 0 && cot.nonfinite == 0 && probe_ok &&
+                                  ce_rel <= LM_ST_FLASH_BAR_OUT && cot.max_rel <= LM_ST_FLASH_BAR_GRAD &&
+                                  cqk.max_rel <= LM_ST_FLASH_BAR_QK;
+                char d[736];
+                snprintf(d, sizeof(d),
+                         "NAIVE trunk (lm_build_trunk, whole-stack autodiff), layers [0,%d) S=%d, exact vs "
+                         "flash-f32 both f32: CE exact=%.9f flash=%.9f (rel %.4e, bar %.0e) | grads non-QK max "
+                         "rel=%.4e (bar %.0e) median=%.4e | grads q/k max rel=%.4e (bar %.0e) median=%.4e | "
+                         "cosine non-QK=%.9f q/k=%.9f | probe fwd=%s bwd=%s on %s%s | BARS CARRIED OVER FROM "
+                         "THE DiT — re-measure",
+                         hi, ST_S, ceE, ceF, ce_rel, LM_ST_FLASH_BAR_OUT, cot.max_rel, LM_ST_FLASH_BAR_GRAD,
+                         cot.median_rel, cqk.max_rel, LM_ST_FLASH_BAR_QK, cqk.median_rel, cot.cosine, cqk.cosine,
+                         pf ? "yes" : "NO", pb ? "yes" : "NO", ggml_backend_name(N.lm.backend),
+                         cpu_backend ? " (CPU: probe not gated)" : "");
+                lm_st_report(rs, "T21", pass, d);
+            }
+            lm_st_rig_free(&N);
+        }
+    }
 }
 
 // ─── T9-T13 run in a full-F32 child process ─────────────────────────────────
@@ -1300,6 +1659,345 @@ static int lm_st_spawn_ckpt(const std::string & lm_path, const std::string & cod
     }
     return (WIFEXITED(st) && WEXITSTATUS(st) == 0) ? 0 : 1;
 #endif
+}
+
+// ─── T22 constants: the flag-off structural anchor ──────────────────────────
+//
+// D2 says --attn exact must emit the graph the trainer emitted before the flag
+// existed. G0 proves that against `ace-train.pre.exe` (the copy taken at P4),
+// but that binary is a scratch artefact — it will be gone in a month, and the
+// claim has to stay checkable. T22 records the same fact as two numbers.
+//
+// RECORDED 2026-09-02 from `ace-train train-lm --self-test --lm
+// acestep-5Hz-lm-0.6B-BF16.gguf` on the first build that carries --attn, AFTER
+// G0 had confirmed that build's --attn exact mode byte-for-byte against the
+// pre-change binary (ace-train.preflash.exe, commit c6951f47): 4B low-VRAM and
+// 0.6B naive JSONL identical bar additive keys, adapter tensor bytes identical,
+// mm3-lm-train identical. So these four numbers ARE the pre-flash graph; the
+// scratch baseline exe is no longer load-bearing.
+//
+// THEY ARE MODEL-SPECIFIC. Both graphs depend on n_layers / hidden / n_heads /
+// n_kv_heads, so a constant recorded on the 0.6B ladder base means nothing on a
+// 4B one. T22 prints the geometry beside the numbers; record the pair for the
+// base the self-test is normally run against and re-record if that changes.
+// Geometry these were taken at: L=28 H=1024 Nh=16 Nkv=8 D=128 (0.6B).
+static const int      LM_ST_T22_NAIVE_NODES = 396;   // naive trunk, layers [0,2) S=96
+static const uint64_t LM_ST_T22_NAIVE_HASH  = 0x7a7c1166503375bdull;
+static const int      LM_ST_T22_SEG_NODES   = 221;   // P7 segment, S=512 hb=0
+static const uint64_t LM_ST_T22_SEG_HASH    = 0x6265a271acf80f01ull;
+
+// ─── T19 / T20 / T22: the parent-process flash rungs ────────────────────────
+//
+// T18/T21 live in the T9-T13 child, where NVIDIA_TF32_OVERRIDE=0 makes both arms
+// f32 and a delta means something about the fusion. These three need the
+// opposite: SHIPPING numerics, i.e. the arithmetic a real run uses.
+//
+//   T19  exact vs flash (TF32), same protocol as T18. REPORTED, NOT GATED —
+//        with TF32 on, the exact arm's attention mul_mats are cuBLAS on an
+//        11-bit mantissa, so the delta sizes the REFERENCE's rounding, not the
+//        fused op. The one thing it DOES gate is the capability probe: on a
+//        non-CPU backend a `false` fails the rung, because a flash arm the
+//        scheduler quietly moved to the CPU would agree beautifully and prove
+//        nothing about the kernels that ship.
+//   T20  finite differences UNDER --attn flash, at production precision. The
+//        only check that measures the shipped flash arithmetic against its own
+//        loss rather than against another implementation — the DiT never had
+//        one. GATED, at T17's bars.
+//   T22  flag-off structural identity, the D2 tripwire (see the constants).
+//
+// `naive_nodes` / `naive_hash` are the naive-trunk signature, measured by the
+// caller inside the T5 rig (which owns the F32 mirror the naive path needs);
+// this function measures the P7 segment half itself.
+static void lm_self_test_flash_parent(const std::string & lm_path, const std::string & codes_path, uint64_t seed,
+                                      int naive_nodes, uint64_t naive_hash, int naive_S, int naive_layers,
+                                      std::vector<LmSelfTestResult> & rs) {
+    const int ST_S = 512, ST_NMASK = 256, ST_TR = ST_S - ST_NMASK;
+
+    LmSample s512;
+    lm_st_build_sample(lm_path, codes_path, ST_S, ST_NMASK, &s512);
+
+    LmStRig     B;
+    std::string err;
+    if (!lm_st_rig_init(&B, lm_path, /*with_mirror=*/false, ST_S, ST_TR, 16, seed, &err)) {
+        lm_st_report(rs, "T19", false, "flash rig setup failed: " + err);
+        lm_st_rig_free(&B);
+        return;
+    }
+    const Qwen3LMConfig & bc = B.lm.cfg;
+
+    LmCkptState ckpt;
+    {
+        LmCkptCfg cc;
+        cc.chunk           = 64;
+        cc.attn_head_block = 0;  // D3: every arm here is flash-capable
+        cc.s_max           = ST_S;
+        cc.layer_lo        = 0;
+        cc.layer_hi        = bc.n_layers;
+        if (!lm_ckpt_alloc(&ckpt, &B.lm, cc, &err) || !lm_ckpt_build_embed_t(&ckpt, &err)) {
+            lm_st_report(rs, "T19", false, "flash checkpoint alloc failed: " + err);
+            lm_ckpt_free(&ckpt);
+            lm_st_rig_free(&B);
+            return;
+        }
+    }
+
+    LmCkptRun run;
+    run.lm             = &B.lm;
+    run.opt            = &B.opt;
+    run.sched          = B.sched;
+    run.st             = &ckpt;
+    run.t_tok          = B.t_tok;
+    run.t_pos          = B.t_pos;
+    run.t_msk          = B.t_msk;
+    run.t_gs           = B.t_gs;
+    run.t_one          = B.t_one;
+    run.t_lab_full     = B.t_lab;
+    run.grad_accum     = 1;
+    run.naive_head     = false;
+    run.head_f32_embed = false;
+
+    lm_st_upload_inputs(B, s512);
+
+    bool        pf = false, pb = false;
+    const float ascale = 1.0f / sqrtf((float) bc.head_dim);
+    dit_flash_probe(B.lm.backend, bc.head_dim, bc.n_heads, bc.n_kv_heads, ST_S, ST_S, 1, ascale, &pf, &pb);
+    const bool cpu_backend = lm_st_backend_is_cpu(B.lm.backend);
+    const bool probe_ok    = cpu_backend || (pf && pb);
+
+    const int T19_HI = std::min(2, bc.n_layers);
+
+    // ── T19: exact vs flash at production precision (REPORTED) ───────────
+    {
+        ckpt.cfg.layer_hi = T19_HI;
+        ckpt.last_mask_S  = 0;
+
+        auto arm = [&](bool flash, std::vector<float> * tap, double * ce, LmStAcc * out) -> bool {
+            ckpt.cfg.attn_flash = flash;
+            ckpt.cfg.attn_prec  = GGML_PREC_DEFAULT;  // production: TF32 where available
+            run.t_msk           = flash ? B.t_msk16 : B.t_msk;
+            ckpt.last_mask_S    = 0;
+            lm_optim_zero_grad(&B.opt);
+            const bool ok = lm_ckpt_micro_step(run, s512, true, ce);
+            if (ok) {
+                tap->resize((size_t) ggml_nelements(ckpt.t_H));
+                ggml_backend_tensor_get(ckpt.t_H, tap->data(), 0, tap->size() * sizeof(float));
+                if (out) {
+                    lm_st_read_accs(B.opt, out);
+                }
+            }
+            return ok;
+        };
+
+        std::vector<float> tapE, tapF;
+        LmStAcc            aE, aF;
+        double             ceE = 0.0, ceF = 0.0;
+        const bool         ok = arm(false, &tapE, &ceE, &aE) && arm(true, &tapF, &ceF, &aF);
+
+        ckpt.cfg.attn_flash = false;
+        run.t_msk           = B.t_msk;
+        ckpt.last_mask_S    = 0;
+
+        if (!ok) {
+            lm_st_report(rs, "T19", false, "segment micro-step failed (exact or flash arm)");
+        } else {
+            int          nf      = 0;
+            const double out_rel = lm_st_vec_rel(tapE, tapF, &nf);
+            LmStAcc qkE, otE, qkF, otF;
+            lm_st_split_qk(aE, T19_HI, &qkE, &otE);
+            lm_st_split_qk(aF, T19_HI, &qkF, &otF);
+            const LmStCmp cqk = lm_st_cmp(qkE, qkF);
+            const LmStCmp cot = lm_st_cmp(otE, otF);
+            // The RESOLVED arithmetic, asked of the backend after the flash arm
+            // ran. Two runs whose logs both say "flash" can differ here, and a
+            // dispatch that quietly fell back to the scalar kernels would
+            // otherwise be invisible.
+            const std::string prec = dit_flash_prec_label(B.lm.backend);
+            char d[800];
+            snprintf(d, sizeof(d),
+                     "layers [0,%d) S=%d, exact vs flash at PRODUCTION precision: hidden tap max rel=%.4e | "
+                     "grads non-QK max rel=%.4e | grads q/k max rel=%.4e | cosine non-QK=%.9f q/k=%.9f | CE "
+                     "exact=%.9f flash=%.9f | resolved arithmetic: %s | probe fwd=%s bwd=%s on %s. "
+                     "[REPORTED, NOT GATED: with TF32 on, the EXACT arm's attention mul_mats are cuBLAS at an "
+                     "11-bit mantissa, so this delta sizes the reference's rounding, not the fused op — T18 in "
+                     "the full-f32 child is the gate. The PROBE is gated%s.]",
+                     T19_HI, ST_S, out_rel, cot.max_rel, cqk.max_rel, cot.cosine, cqk.cosine, ceE, ceF,
+                     prec.c_str(), pf ? "yes" : "NO", pb ? "yes" : "NO", ggml_backend_name(B.lm.backend),
+                     cpu_backend ? " (CPU backend: nothing to split onto, so not gated here)" : "");
+            // nonfinite is a real failure in any arithmetic; the probe is the
+            // other half of the verdict. Everything else is characterisation.
+            lm_st_report(rs, "T19", probe_ok && nf == 0 && cot.nonfinite == 0 && cqk.nonfinite == 0, d);
+        }
+    }
+
+    // ── T20: finite differences under --attn flash (GATED, T17 bars) ─────
+    //
+    // T17's template, with the BF16 lever off and the flash flag on. Perturb
+    // each probed LoRA tensor along its own normalised gradient direction and
+    // check the central difference against ||g||: the same directional-probe
+    // design T5 documents, for the same signal-to-noise reason.
+    {
+        const int T20_S = 96, T20_NMASK = 32, T20_TR = T20_S - T20_NMASK;
+        LmSample  s96;
+        s96.tokens.assign(s512.tokens.begin(), s512.tokens.begin() + T20_S);
+        s96.n_masked = T20_NMASK;
+        s96.s_tr     = T20_TR;
+        s96.targets.assign(s96.tokens.begin() + T20_NMASK, s96.tokens.end());
+        lm_st_upload_inputs(B, s96);
+
+        const int T20_HI         = std::min(2, bc.n_layers);
+        ckpt.last_mask_S         = 0;
+        ckpt.cfg.layer_hi        = T20_HI;
+        ckpt.cfg.attn_head_block = 0;
+        ckpt.cfg.chunk           = 32;
+        ckpt.cfg.weights_bf16    = false;
+        ckpt.cfg.attn_flash      = true;
+        ckpt.cfg.attn_prec       = GGML_PREC_DEFAULT;  // what a real --attn flash run uses
+        run.t_msk                = B.t_msk16;
+        run.naive_head           = false;
+        run.grad_accum           = 1;
+        run.head_f32_embed       = false;
+
+        auto fwd = [&]() -> double {
+            double ce = 0.0;
+            lm_optim_zero_grad(&B.opt);
+            const bool ok = lm_ckpt_micro_step(run, s96, true, &ce);
+            GGML_ASSERT(ok);
+            return ce;
+        };
+
+        lm_optim_zero_grad(&B.opt);
+        double     ce0 = 0.0;
+        const bool ok0 = lm_ckpt_micro_step(run, s96, true, &ce0);
+        std::vector<double> rels;
+        bool                all_finite = ok0;
+        if (ok0) {
+            LmStAcc an;
+            lm_st_read_accs(B.opt, &an);
+            double lmin = 0.0, lmax = 0.0;
+            for (int k = 0; k < 3; k++) {
+                const double l = fwd();
+                if (k == 0 || l < lmin) lmin = l;
+                if (k == 0 || l > lmax) lmax = l;
+            }
+            const double sigma = lmax - lmin;
+
+            for (int is_b = 0; is_b < 2; is_b++) {
+                for (int p = 0; p < 12; p++) {
+                    const int combo = (is_b ? (p + 2) : p) % (T20_HI * QW_LORA_NSLOTS);
+                    const int layer = combo / QW_LORA_NSLOTS;
+                    const int slot  = combo % QW_LORA_NSLOTS;
+                    ggml_tensor * t = is_b ? B.lora.layers[layer].p[slot].B : B.lora.layers[layer].p[slot].A;
+                    const size_t  n = (size_t) ggml_nelements(t);
+                    const int     gi =
+                        (int) (std::find(B.lora.params.begin(), B.lora.params.end(), t) - B.lora.params.begin());
+                    const std::vector<float> & g = an.t[(size_t) gi];
+                    double                     gn = 0.0;
+                    for (size_t k = 0; k < n; k++) {
+                        gn += (double) g[k] * (double) g[k];
+                    }
+                    gn = sqrt(gn);
+                    std::vector<float> base(n), pert(n);
+                    ggml_backend_tensor_get(t, base.data(), 0, n * sizeof(float));
+                    double       best       = 1e30;
+                    const double targets[6] = { 0.64, 0.32, 0.16, 0.08, 0.04, 0.02 };
+                    for (int ti = 0; ti < 6; ti++) {
+                        const double hh = (gn > 0.0) ? targets[ti] / gn : 1e-3;
+                        for (size_t k = 0; k < n; k++) {
+                            pert[k] = (float) ((double) base[k] + hh * (double) g[k] / std::max(gn, 1e-30));
+                        }
+                        ggml_backend_tensor_set(t, pert.data(), 0, n * sizeof(float));
+                        const double la = fwd();
+                        for (size_t k = 0; k < n; k++) {
+                            pert[k] = (float) ((double) base[k] - hh * (double) g[k] / std::max(gn, 1e-30));
+                        }
+                        ggml_backend_tensor_set(t, pert.data(), 0, n * sizeof(float));
+                        const double lb = fwd();
+                        const double f  = (la - lb) / (2.0 * hh);
+                        const double rl = fabs(f - gn) / std::max(std::max(fabs(f), gn), 1e-6);
+                        if (!std::isfinite(f) || !std::isfinite(gn)) {
+                            all_finite = false;
+                        }
+                        best = std::min(best, rl);
+                    }
+                    ggml_backend_tensor_set(t, base.data(), 0, n * sizeof(float));
+                    rels.push_back(best);
+                }
+            }
+            std::sort(rels.begin(), rels.end());
+            const double mx  = rels.empty() ? 1.0 : rels.back();
+            const double med = rels.empty() ? 1.0
+                                            : (rels.size() % 2
+                                                   ? rels[rels.size() / 2]
+                                                   : 0.5 * (rels[rels.size() / 2 - 1] + rels[rels.size() / 2]));
+            const std::string prec = dit_flash_prec_label(B.lm.backend);
+            char d[512];
+            snprintf(d, sizeof(d),
+                     "--attn flash: %zu directional probes, layers [0,%d) S=%d chunk=32 hb=0, noise floor %.3e: "
+                     "max rel=%.4e (bar 5e-2) median=%.4e (bar 1e-2) finite=%s | resolved arithmetic: %s | "
+                     "probe fwd=%s bwd=%s. GATED at T17's bars — this is the only check that measures the "
+                     "SHIPPED flash arithmetic against its own loss rather than against another implementation.",
+                     rels.size(), T20_HI, T20_S, sigma, mx, med, all_finite ? "yes" : "NO", prec.c_str(),
+                     pf ? "yes" : "NO", pb ? "yes" : "NO");
+            lm_st_report(rs, "T20", all_finite && probe_ok && mx < 5e-2 && med < 1e-2, d);
+        } else {
+            lm_st_report(rs, "T20", false, "segment micro-step failed at S=96 under --attn flash");
+        }
+
+        ckpt.cfg.attn_flash = false;
+        ckpt.cfg.attn_prec  = GGML_PREC_DEFAULT;
+        run.t_msk           = B.t_msk;
+        ckpt.last_mask_S    = 0;
+        ckpt.cfg.layer_hi   = bc.n_layers;
+    }
+
+    // ── T22: flag-off structural identity (D2 tripwire) ──────────────────
+    {
+        lm_st_upload_inputs(B, s512);
+        ckpt.cfg.layer_hi        = bc.n_layers;
+        ckpt.cfg.attn_head_block = 0;
+        ckpt.cfg.chunk           = 64;
+        ckpt.cfg.weights_bf16    = false;
+        ckpt.cfg.attn_flash      = false;   // THE POINT: measure the flag-OFF graph
+        ckpt.cfg.attn_prec       = GGML_PREC_DEFAULT;
+        run.t_msk                = B.t_msk;
+        ckpt.last_mask_S         = 0;
+
+        uint64_t  seg_hash  = 0;
+        const int seg_nodes = lm_ckpt_probe_segment_nodes(run, ST_S, /*counts=*/nullptr, &seg_hash);
+
+        const bool placeholders = (LM_ST_T22_NAIVE_NODES < 0 || LM_ST_T22_SEG_NODES < 0);
+        char       d[832];
+        if (placeholders) {
+            snprintf(d, sizeof(d),
+                     "SKIPPED — the anchor constants are still TODO placeholders in lm-selftest.h. MEASURED NOW, "
+                     "with --attn exact: naive trunk (layers [0,%d) S=%d) nodes=%d hash=0x%016llx; P7 segment "
+                     "(S=%d hb=0) nodes=%d hash=0x%016llx. Geometry: L=%d H=%d Nh=%d Nkv=%d D=%d. Paste these "
+                     "into LM_ST_T22_NAIVE_NODES / _HASH and LM_ST_T22_SEG_NODES / _HASH once G0 has confirmed "
+                     "this build's exact mode against ace-train.pre.exe, and this rung starts gating.",
+                     naive_layers, naive_S, naive_nodes, (unsigned long long) naive_hash, ST_S, seg_nodes,
+                     (unsigned long long) seg_hash, bc.n_layers, bc.hidden_size, bc.n_heads, bc.n_kv_heads,
+                     bc.head_dim);
+            lm_st_report(rs, "T22", true, d);
+            fprintf(stderr, "[self-test] T22 SKIPPED: anchor constants are placeholders — see the line above.\n");
+        } else {
+            const bool nv_ok  = (naive_nodes == LM_ST_T22_NAIVE_NODES && naive_hash == LM_ST_T22_NAIVE_HASH);
+            const bool sg_ok  = (seg_nodes == LM_ST_T22_SEG_NODES && seg_hash == LM_ST_T22_SEG_HASH);
+            snprintf(d, sizeof(d),
+                     "--attn exact graph anchor: naive trunk nodes=%d (want %d) hash=0x%016llx (want 0x%016llx) "
+                     "%s; P7 segment nodes=%d (want %d) hash=0x%016llx (want 0x%016llx) %s. A mismatch means the "
+                     "flag-off graph MOVED — D2 says it must not. Geometry: L=%d H=%d Nh=%d Nkv=%d D=%d (the "
+                     "constants are for THIS base; a different base needs its own).",
+                     naive_nodes, LM_ST_T22_NAIVE_NODES, (unsigned long long) naive_hash,
+                     (unsigned long long) LM_ST_T22_NAIVE_HASH, nv_ok ? "OK" : "MISMATCH", seg_nodes,
+                     LM_ST_T22_SEG_NODES, (unsigned long long) seg_hash, (unsigned long long) LM_ST_T22_SEG_HASH,
+                     sg_ok ? "OK" : "MISMATCH", bc.n_layers, bc.hidden_size, bc.n_heads, bc.n_kv_heads,
+                     bc.head_dim);
+            lm_st_report(rs, "T22", nv_ok && sg_ok, d);
+        }
+    }
+
+    lm_ckpt_free(&ckpt);
+    lm_st_rig_free(&B);
 }
 
 static int lm_self_test(const std::string & lm_path, const std::string & codes_path, uint64_t seed) {
@@ -2035,6 +2733,40 @@ static int lm_self_test(const std::string & lm_path, const std::string & codes_p
         ggml_free(kc);
     }
 
+    // ── T22, half one: the NAIVE trunk's flag-off signature ──────────────
+    //
+    // Measured here because this is the only place that owns an F32 mirror —
+    // the naive production graph needs one, and a signature taken against a
+    // BF16 base would carry qwen3_f32's cast nodes and anchor the wrong graph.
+    // Built, never run. The other half (the P7 segment) and the verdict are in
+    // lm_self_test_flash_parent below.
+    int      st_naive_nodes = 0;
+    uint64_t st_naive_hash  = 0;
+    {
+        ggml_init_params ip  = { arena.size(), arena.data(), true };
+        ggml_context *   ctx = ggml_init(ip);
+        ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 16384, /*grads=*/true);
+        // A default LmLayerOpts IS --attn exact, and the opts overload is the
+        // one the production naive path now calls — so this anchors the builder
+        // that actually ships, not a second spelling of it.
+        const LmLayerOpts nopts;
+        ggml_tensor * hidden = lm_build_trunk(ctx, &lm, t_tok, t_pos, t_msk, S, 0, LAYERS, nopts);
+        ggml_tensor * hd =
+            ggml_cont(ctx, ggml_view_2d(ctx, hidden, H, S_TR, hidden->nb[1], (size_t) (NMASK - 1) * hidden->nb[1]));
+        ggml_tensor * logits = ggml_mul_mat(ctx, lm.embed_tokens, hd);
+        ggml_tensor * labv   = ggml_view_2d(ctx, t_lab, V, S_TR, t_lab->nb[1], 0);
+        ggml_tensor * loss   = ggml_cross_entropy_loss(ctx, logits, labv);
+        ggml_set_loss(loss);
+        ggml_set_output(loss);
+        ggml_build_forward_expand(gf, loss);
+        std::vector<ggml_tensor *> gacc;
+        lm_optim_fill_gacc(&opt, gf, &gacc);
+        ggml_build_backward_expand(ctx, gf, gacc.data());
+        st_naive_nodes = ggml_graph_n_nodes(gf);
+        st_naive_hash  = lm_graph_op_hash(gf);
+        ggml_free(ctx);
+    }
+
     // ── teardown ─────────────────────────────────────────────────────────
     ggml_backend_sched_free(sched);
     lm_optim_free(&opt);
@@ -2057,13 +2789,22 @@ static int lm_self_test(const std::string & lm_path, const std::string & codes_p
             // ungated), so the failure text must name the whole range or it
             // sends whoever is triaging a red run to the wrong five tests.
             lm_st_report(rs, "T9+", crc == 0,
-                         crc == 0 ? "T9-T17 (checkpointing, head blocking, chunked CE + D9 scaling, segment FD, "
-                                    "segment leak, bf16 rewrite tripwire + bf16 FD) measured in the full-f32 "
-                                    "child process (NVIDIA_TF32_OVERRIDE=0) — all gated checks passed"
-                                  : "the low-VRAM ladder FAILED in the full-f32 child process — see its T9-T17 "
-                                    "lines above (T14/T15 are ungated and cannot cause this)");
+                         crc == 0 ? "T9-T18 and T21 (checkpointing, head blocking, chunked CE + D9 scaling, "
+                                    "segment FD, segment leak, bf16 rewrite tripwire + bf16 FD, and the two "
+                                    "exact-vs-flash-f32 parity rungs) measured in the full-f32 child process "
+                                    "(NVIDIA_TF32_OVERRIDE=0) — all gated checks passed"
+                                  : "the low-VRAM ladder FAILED in the full-f32 child process — see its "
+                                    "T9-T18/T21 lines above (T14/T15 are ungated and cannot cause this)");
         }
     }
+
+    // ── T19/T20/T22: the flash rungs that need SHIPPING numerics ─────────
+    //
+    // Last, and in THIS process on purpose. T18/T21 measure the fusion in the
+    // full-f32 child; these three measure what a real --attn flash run does,
+    // with TF32 live. Runs after the teardown above so only one model is
+    // resident at a time.
+    lm_self_test_flash_parent(lm_path, codes_path, seed, st_naive_nodes, st_naive_hash, S, LAYERS, rs);
 
     int failed = 0;
     for (size_t i = 0; i < rs.size(); i++) {

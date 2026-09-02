@@ -262,6 +262,10 @@ export const TrainPanel: React.FC = () => {
       ...(form.regEvery > 0
         ? { regEvery: form.regEvery, regTopk: form.regTopk, regSongs: form.regSongs }
         : {}),
+      // Attention backend (2026-09-02). Sent only when moved off default, same
+      // rule as the speed levers above — an ace-train build that predates the
+      // LM's --attn parsing never sees the flag on a normal (exact) run.
+      ...(form.attnBackend !== 'exact' ? { attnBackend: form.attnBackend } : {}),
     };
     setStarting(true);
     try { await startTrainLm(opts); } finally { setStarting(false); }

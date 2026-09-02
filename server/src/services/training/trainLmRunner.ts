@@ -129,6 +129,13 @@ function relay(job: TrainingJob, ev: Record<string, unknown>, state: RelayState)
         weights: typeof ev.weights === 'string' ? ev.weights : undefined,
         batch: optNum(ev, 'batch'),
         batchSource: typeof ev.batchSource === 'string' ? ev.batchSource : undefined,
+        // Attention backend (2026-09-02 lm-flash-attn plan, Stream B). Same
+        // DEVIATION reasoning as the fields above: an un-listed field is
+        // dropped by this whitelist. The engine does not emit these on the
+        // `vram` line yet (D5 in the plan doc); wired ahead of it so the
+        // relay needs no further change once it does.
+        attn: typeof ev.attn === 'string' ? ev.attn : undefined,
+        attnPrec: typeof ev.attnPrec === 'string' ? ev.attnPrec : undefined,
       });
       log(job, 'info',
         ev.mode === 'lowvram'

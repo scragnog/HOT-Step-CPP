@@ -2529,6 +2529,31 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       return;
     }
 
+    // Attention backend (2026-09-02 lm-flash-attn plan, Stream B — the DiT's
+    // attnBackend ported to train-lm). Refused, not coerced, same rule as
+    // mirror/optimizer/bwd on the DiT route. Default stays 'exact'.
+    const attnBackend = body.attnBackend === 'flash' ? 'flash' as const
+      : body.attnBackend === 'flash-f32' ? 'flash-f32' as const
+      : 'exact' as const;
+    if (body.attnBackend !== undefined && body.attnBackend !== 'exact' && body.attnBackend !== 'flash' &&
+        body.attnBackend !== 'flash-f32') {
+      res.status(400).json({ error: 'attnBackend must be exact, flash or flash-f32' });
+      return;
+    }
+    // The fused flash op has no S² term to cut, so head-blocking is meaningless
+    // under it — the engine exits 2 on this exact pair (D3 in the plan doc, the
+    // same shape as the `weights bf16` + `bwd mm` refusal above). Caught here so
+    // the runner never stops ace-server for a combination ace-train would only
+    // reject after the engine is already down.
+    if (attnBackend !== 'exact' && attnHeadBlock > 0) {
+      res.status(400).json({
+        error: 'attnBackend flash/flash-f32 and attnHeadBlock > 0 cannot be combined — the fused attention '
+             + 'op has no S² term for head-blocking to cut, and the engine exits 2 on the pair. Leave '
+             + 'attnHeadBlock at 0 (engine picks) when training with flash attention.',
+      });
+      return;
+    }
+
     // ── speed levers (2026-07-28 plan §2.5) ──────────────────────────────
     // 'weights' went bf16 (2026-07-29) and back to 'f32-window' (Rob,
     // 2026-07-30, final) to match the DiT's F32 mirror. That is once again the
@@ -2789,6 +2814,7 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       regSongs,
       regCodes,
       regPriorDir,
+      attnBackend,
     };
 
     const job = queue.startTrainLmJob(ds.id, opts);
