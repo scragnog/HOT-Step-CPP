@@ -255,6 +255,13 @@ export const TrainPanel: React.FC = () => {
       ...(form.adapterType === 'lokr'
         ? { lokrDim: form.lokrDim, lokrAlpha: form.lokrAlpha, lokrFactor: form.lokrFactor }
         : {}),
+      // Caption dropout + prior preservation (2026-09-02). Sent only when
+      // moved off default, same rule as the speed levers above — a normal
+      // start posts the same body it always did.
+      ...(form.captionDropout > 0 ? { captionDropout: form.captionDropout } : {}),
+      ...(form.regEvery > 0
+        ? { regEvery: form.regEvery, regTopk: form.regTopk, regSongs: form.regSongs }
+        : {}),
     };
     setStarting(true);
     try { await startTrainLm(opts); } finally { setStarting(false); }

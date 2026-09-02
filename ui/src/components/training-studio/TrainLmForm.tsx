@@ -64,6 +64,17 @@ export interface TrainLmFormState {
   /** MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
    *  'mm' is the fast tensor-core backward and the server default. */
   bwd: 'outprod' | 'mm';
+  /** Fraction of style steps trained with the caption dropped, forcing the
+   *  planner to lean on the artist's own code statistics instead of
+   *  memorising caption -> codes (2026-09-02, ported from the MM3 LM
+   *  trainer). 0 = off. */
+  captionDropout: number;
+  /** Prior preservation (2026-09-02): every Nth step regularises against an
+   *  UNRELATED corpus's own base-model predictions instead of the artist's
+   *  codes. 0 = off. The corpus is picked automatically server-side. */
+  regEvery: number;
+  regTopk: number;
+  regSongs: number;
 }
 
 export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
@@ -149,6 +160,12 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   // aborts when --bwd mm leaves it none — and the server refuses the pair with
   // a 400. Choosing 'mm' here means also choosing weights 'f32-window'.
   bwd: 'outprod',
+  // Off by default (2026-09-02) — both levers are new and unvalidated by ear;
+  // an existing run must opt in rather than silently changing objective.
+  captionDropout: 0,
+  regEvery: 0,
+  regTopk: 64,
+  regSongs: 24,
 };
 
 const ALL_STAGES: TrainLmStage[] = ['extract', 'train', 'export'];
@@ -387,6 +404,55 @@ export const TrainLmForm: React.FC<Props> = ({
             />
             {P('calibrateRepoint', 'Default on', CHECK_LABEL)}
           </label>
+        )}
+      </div>
+
+      {/* ── Caption dropout + prior preservation (2026-09-02) ───────────
+          Ported from the MM3 LM trainer's two levers — see
+          docs/plans/lm-attr-probe/HANDOFF.md. Both default off: neither has
+          been validated by ear yet on this trainer. */}
+      <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
+        <label className="flex flex-col gap-1.5">
+          {P('captionDropout', 'Default 0% · 0–100')}
+          <input
+            type="number" min={0} max={100} step={1}
+            value={Math.round(value.captionDropout * 100)}
+            disabled={lock}
+            onChange={(e) => onChange({ captionDropout: Math.min(1, Math.max(0, num(e.target.value, 0) / 100)) })}
+            className={FIELD}
+          />
+        </label>
+        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 mt-1">
+          <input
+            type="checkbox"
+            checked={value.regEvery > 0}
+            disabled={lock}
+            onChange={(e) => onChange({ regEvery: e.target.checked ? 3 : 0 })}
+            className="accent-amber-500"
+          />
+          {P('priorPreservation', 'Default off', CHECK_LABEL)}
+        </label>
+        {value.regEvery > 0 && (
+          <div className="grid grid-cols-2 gap-3 pl-6">
+            <label className="flex flex-col gap-1.5">
+              {P('regEvery', 'Default 3 · every Nth step, min 2')}
+              <input
+                type="number" min={2} max={50} step={1}
+                value={value.regEvery} disabled={lock}
+                onChange={(e) => onChange({ regEvery: Math.max(2, num(e.target.value, 3)) })}
+                className={FIELD}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              {P('regTopk', 'Default 64 · 1–256')}
+              <input
+                type="number" min={1} max={256} step={1}
+                value={value.regTopk} disabled={lock}
+                onChange={(e) => onChange({ regTopk: num(e.target.value, 64) })}
+                className={FIELD}
+              />
+            </label>
+          </div>
         )}
       </div>
 

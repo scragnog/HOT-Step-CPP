@@ -90,6 +90,90 @@ slices to the standard V4 GGUF).
 - Defaults (Side-Step parity, from Rob's real runs): target loss **4.0** (not 0.4!), GA 2, epochs 75, milestone step 1.0, lr 1e-4.
 - Self-test: `ace-train train-lm --self-test` — T1–T13 (+T14–T17 bf16, report-not-gate). T5/T4 finite differences run **TF32-off in a child process** (cuBLAS TF32 noise defeats central differences; gradients were always right). Known pre-existing 4B rough edges: T11e/T12 slightly over bars (BF16-dtype-resolution class).
 
+**LM trainer — caption dropout and prior preservation** (2026-09-02, both DEFAULT OFF)
+
+The 2026-09-02 attribute study (`docs/plans/lm-attr-probe/`) found that everything an ACE
+planner-LM adapter measurably does is done by CE ~2.0, and that training deeper past it mostly
+buys looping plans. These are the two levers the MM3 LM trainer already had and this one did not.
+Both are opt-in; with both off the trainer emits the same graphs, consumes the same RNG and
+produces the same loss trajectory it did before they existed (verified against a purpose-built
+pre-change binary: same 4B run, `--order fixed --epochs 1 --limit 4`, per-step `loss`/`gradNorm`/
+`clipScale` identical to the last printed digit). The only flags-off output change is an additive
+`"captionDropout":0` on the `start` event and a `caption_dropout` key in `lm_train_log.json`.
+
+- **`--caption-dropout <p>`** (0..1, default 0). Each style micro-step draws from a per-epoch
+  seed-derived stream and, with probability p, trains the row with its caption replaced by **the
+  trigger word alone**. The point is to make the trigger carry the style by itself, which is the
+  only way a bare-trigger prompt works at inference. The variant is built by the same
+  `lm_build_sequence()` the real sample uses, so the whole prompt — **including the CoT YAML,
+  whose `caption:` line IS the caption** — is what the engine’s own prompt code produces for a
+  bare trigger, and `n_masked`/`s_tr` differ from the full-caption row accordingly. That is the
+  one place this deviates from MM3, whose prompt has no CoT. Requires a trigger (`--trigger`, else
+  the variant’s `custom_tag`); `p > 0` with none resolvable is **exit 2**, deliberately, rather
+  than dropping to an empty caption that is far out of distribution for this prompt format. Do not
+  set 1.0 — the descriptor path would go untrained and the adapter could summon the album but
+  never be steered. Per-epoch usage count lands in stderr and a `caption_dropout` JSONL event.
+  Treated as NON-identity on resume (like `--bwd`): a `--init-adapter` run neither adopts nor
+  refuses on it.
+
+- **Prior preservation** (`--reg-codes`, `--reg-songs` 24, `--reg-every` 0=off, `--reg-topk` 64,
+  `--reg-prior-dir` `<out>/prior`). Every `reg_every`th micro-step trains on **another artist’s**
+  song against the frozen base’s own cached top-K next-token distribution instead of that song’s
+  ground-truth codes, so the adapter is punished for changing its mind about material that has
+  nothing to do with this artist. `--reg-every 3` is bghira’s ratio (one prior step per two style
+  steps). The distributions are captured **once, before the first optimizer step**, while the
+  LoRA/LoKR delta is exactly zero and a forward pass therefore IS the base, and cached to
+  `<reg-prior-dir>/<artist>_<path hash>_<row id>.<lm stem>.k<K>.prior` (`train/lm-prior.h`, the
+  MM3 layout with an `ACEPRIOR` magic). A `--init-adapter` resume **cannot** regenerate them and
+  refuses on a missing or stale cache. Reg rows always use their own full captions — never caption
+  dropout.
+  - **A reg step is INSERTED into the epoch, not swapped in for a song.** An ACE epoch is one
+    teacher-forced pass over the album and both target-loss and best-epoch selection read its mean,
+    so an epoch that quietly saw two-thirds of the songs would corrupt the number the run is
+    steered by. (MM3 is step-driven and has no such contract, which is why it can simply replace.)
+    The cost is visible: `--reg-every 3` runs 1.5× the micro-steps per epoch. Reg steps count
+    toward the step counter and are excluded from the reported style loss; their own CE is the
+    `reg_epoch` event’s `regCe`.
+  - **Low-VRAM/checkpointed path only.** The capture reuses the chunked head’s top-K readback
+    (`lm_ckpt_capture_topk`), which the naive path does not have. `--reg-every` on the naive path
+    exits 2 with that message; `--low-vram off` is refused at parse time. In practice 4B works out
+    of the box and 0.6B/1.7B need `--low-vram on`.
+  - **Label rows must sum to 1, and how they are brought there matters.** ggml’s cross-entropy
+    backward is hard-wired to `(softmax(z) − labels)·d/nr`, which is the true gradient of the
+    forward loss only when the label row sums to 1. Hand it a row summing to `S` and the gradient
+    it computes is the true one **plus** `(1−S)·softmax_j` — the gradient of `(1−S)·logsumexp(z)`,
+    a pull on the raw logit scale that changes no probability at all and is unbounded below. At
+    MM3’s `S ≈ 0.99` that is a 1% perturbation, which is why the code survived the port; at ACE’s
+    `S ≈ 0.2` it would have carried ~80% of the gradient. The ACE trainer brings each row to 1 by
+    adding a **uniform tail**: the captured top-K keep their true probabilities and the missing
+    mass `1−S` is spread flat over the 65,535 audio-code tokens (`LmSample::soft_tail`,
+    `lm_soft_labels_write`). It deliberately does **not** rescale the top-K to sum to 1: at 18–24%
+    coverage that would hold the adapter to a target 4–5× sharper than the base, and sharpening is
+    the loop attractor the term exists to resist. The `.prior` cache and the reported coverage stay
+    **raw**, and MM3’s shared capture code (`lm_ckpt_capture_topk`) is untouched.
+  - **READ THE COVERAGE NUMBER — ACE is not MM3 here.** MM3 scores 16,385 classes and its top-64
+    routinely covers >99% of the base’s probability mass. ACE scores **217,204** and its base sits
+    at CE ~9 on another artist’s codes, i.e. thousands of effective classes: measured on
+    president-vs-boston, top-64 covers **18.5%** and top-256 only **24.0%**. With the uniform tail
+    the target is then mostly floor: it says "stay flat" much more than "stay the base". Whether
+    that still buys anything is **unmeasured** past a smoke test. The trainer logs a `warn` below
+    50%. `--reg-topk` (max 256) sharpens the picture a little; the real fix is a live teacher
+    forward (the frozen base evaluated on each reg step, full distribution, no cache), which is
+    designed but not built.
+
+Usage (4B, low-VRAM by default):
+
+```
+ace-train train-lm --stages train,export ^
+  --codes  server\data\training\tensors\president\<variant>\lm_codes.jsonl ^
+  --out    <run dir> --models models --lm acestep-5Hz-lm-4B-BF16.gguf ^
+  --caption-dropout 0.25 ^
+  --reg-every 3 --reg-codes <other artist>\lm_codes.jsonl,<another>\lm_codes.jsonl ^
+  --reg-songs 24 --reg-topk 64
+```
+
+`ace-train train-lm --help` carries the same flags with their defaults.
+
 **DiT trainer**
 - Trainable graph is **bit-identical** to the inference forward (17 debug-tensor diff = 0.0). Unfused load via `g_dit_load_no_fuse` (mirrors `g_qwen3_load_no_fuse`; the zero-stub-adapter trick is dead).
 - F32 mirror streamed from the GGUF via CPU-backend load (a GPU-copy mirror transiently costs +5–8 GB and OOMs cards the steady state fits).

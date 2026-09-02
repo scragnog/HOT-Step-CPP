@@ -51,9 +51,32 @@ struct LmSample {
     // used to" rather than "learn this other song too" — the difference between
     // an adapter that stays surgical and one that bleeds its style into every
     // prompt.
+    //
+    // EACH ROW MUST SUM TO 1, and that is a hard requirement, not tidiness.
+    // ggml's cross-entropy backward computes (softmax(z) - labels) * d/nr,
+    // which is the true gradient of -SUM_j y_j log softmax_j only when
+    // SUM_j y_j == 1. A row summing to S adds (1 - S) * softmax_j to every
+    // gradient — the gradient of (1 - S) * logsumexp(z), a pull on the raw
+    // logit scale that changes no probability and is unbounded below. The
+    // producer renormalises the captured top-K before it gets here; the capture
+    // itself keeps the raw mass because that is the coverage diagnostic.
+    //
+    // The ACE trainer (lm-train-run.h) does this. The MM3 trainer
+    // (mm3-lm-train-run.h) still hands over the raw capture: its coverage is
+    // ~0.99, so the spurious term is a ~1% perturbation and it has been left
+    // alone rather than re-validated mid-review. It is a real if small bug
+    // there, not a case the contract exempts.
     std::vector<int32_t> soft_idx;  // s_tr * soft_k, column indices into V
-    std::vector<float>   soft_p;    // s_tr * soft_k, each row sums to 1
+    std::vector<float>   soft_p;    // s_tr * soft_k, the captured probabilities (raw)
     int                  soft_k = 0;
+    // Per-row leftover mass (1 - sum of the captured top-K), spread uniformly
+    // over token range [soft_tail_lo, soft_tail_hi) by lm_soft_labels_write so
+    // the row sums to 1 WITHOUT rescaling the captured entries (see the note on
+    // that function). Empty = no tail: the producer guarantees rows sum to 1
+    // itself (MM3's ~0.99-coverage capture is left as it was).
+    std::vector<float>   soft_tail;
+    int                  soft_tail_lo = 0;
+    int                  soft_tail_hi = 0;
 };
 
 // Load lm_codes.jsonl into rows (thin wrapper over lm-extract.h's reader).
@@ -225,14 +248,32 @@ struct LmLabelGuard {
 // sending it in ONE transfer is ~8 MB per chunk — about a millisecond of PCIe —
 // and its cost no longer depends on K at all, which is what makes a larger K a
 // free choice rather than a trade.
+//
+// UNIFORM TAIL (HOT-Step, 2026-09-02). `tail`, when non-null, holds per row the
+// probability mass the top-K did NOT capture (1 - S). It is spread uniformly
+// over the token range [tail_lo, tail_hi) BEFORE the K captured entries are
+// written on top, so every row sums to 1 without rescaling the captured
+// probabilities. This matters when coverage is low (ACE's 217k-way head: top-64
+// holds ~18% of the base's mass at a code position): renormalising the top-K
+// would hold the adapter to a distribution far SHARPER than the base's, which
+// is the opposite of what a prior term is for. A flat tail is an approximation
+// of the base's real tail, but it keeps the target's entropy honest.
 static inline void lm_soft_labels_write(ggml_tensor * t_lab, const int32_t * idx, const float * p,
-                                        int n, int K, int V, bool set) {
+                                        int n, int K, int V, bool set,
+                                        const float * tail = nullptr, int tail_lo = 0, int tail_hi = 0) {
     // Reused across chunks and steps; sized by the largest chunk seen.
     static std::vector<float> dense;
     dense.assign((size_t) n * (size_t) V, 0.0f);
     if (set) {
+        const int  lo    = std::max(0, tail_lo);
+        const int  hi    = std::min(V, tail_hi);
+        const bool flat  = tail != nullptr && hi > lo;
         for (int i = 0; i < n; i++) {
             float * row = dense.data() + (size_t) i * (size_t) V;
+            if (flat && tail[i] > 0.0f) {
+                const float floor_v = tail[i] / (float) (hi - lo);
+                std::fill(row + lo, row + hi, floor_v);
+            }
             for (int k = 0; k < K; k++) {
                 const size_t  j = (size_t) i * (size_t) K + (size_t) k;
                 const int32_t c = idx[j];
@@ -267,7 +308,8 @@ struct LmChunkLabelGuard {
         if (K > 0) {
             idx = s.soft_idx.data() + (size_t) off * (size_t) K;
             p   = s.soft_p.data()   + (size_t) off * (size_t) K;
-            lm_soft_labels_write(t, idx, p, n, K, V, true);
+            const float * tail = s.soft_tail.empty() ? nullptr : s.soft_tail.data() + (size_t) off;
+            lm_soft_labels_write(t, idx, p, n, K, V, true, tail, s.soft_tail_lo, s.soft_tail_hi);
         } else {
             idx = s.targets.data() + off;
             lm_labels_set(t, idx, n, V);

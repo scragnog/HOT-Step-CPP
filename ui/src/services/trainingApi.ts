@@ -618,6 +618,17 @@ export interface TrainLmOptions {
    *  out_prod nodes in place (lm-bf16.h), and that rewrite aborts when --bwd mm
    *  leaves it nothing to rewrite. The pair is refused with a 400. */
   bwd?: 'outprod' | 'mm';            // default 'outprod' (train-dit defaults to 'mm')
+  // ── Caption dropout + prior preservation (2026-09-02) ────────────────────
+  /** Fraction of style steps trained with the caption dropped. 0 = off. */
+  captionDropout?: number;           // default 0, 0..1
+  /** Prior-preservation cadence: every Nth step regularises against an
+   *  unrelated corpus instead of the artist's codes. 0 = off; >=2 when on. */
+  regEvery?: number;                 // default 0 (off)
+  regTopk?: number;                  // default 64
+  regSongs?: number;                 // default 24
+  /** 'auto' picks up to 6 other 600s-cap artists server-side; an explicit
+   *  array must be absolute lm_codes.jsonl paths. */
+  regCorpora?: 'auto' | string[];    // default 'auto'
 }
 
 export interface TrainLmEpoch {

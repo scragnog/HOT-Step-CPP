@@ -711,6 +711,37 @@ export interface TrainLmOptions {
    *  On the f32-window path 'mm' also buys nothing — the transposed weight is
    *  the F32 window, so the GEMM stays TF32 and the extra cont is pure cost. */
   bwd?: 'outprod' | 'mm';            // default 'outprod' (train-dit defaults to 'mm')
+  // ── Caption dropout + prior preservation (2026-09-02) ────────────────────
+  // The AS1.5 planner-LM adapter study (docs/plans/lm-attr-probe/) found every
+  // measurable gain of a straight adapter run is in by CE ~2.0 and deeper
+  // training only makes plans loop — the trainer overfits the caption→codes
+  // map instead of learning anything the extra epochs could still teach. The
+  // MM3 LM trainer already carries two levers against exactly this failure
+  // (mm3-lm-train-run.h, mm3-lm-prior.h); this ports both to the ACE trainer.
+  /** Fraction of style steps trained with the caption dropped (trigger word
+   *  only, when the dataset has one). Forces the planner to lean on the
+   *  artist's own code statistics instead of memorising caption -> codes.
+   *  0 = off (the CLI default). */
+  captionDropout?: number;           // default 0, range 0..1
+  /** Prior preservation cadence: every Nth step is scored against an
+   *  UNRELATED corpus's own base-model predictions instead of the artist's
+   *  codes, penalising the adapter for drifting on material that has nothing
+   *  to do with the artist — the only term in the objective that separates
+   *  "learned the artist" from "rewrote the planner". 0 = off. >=2 when on
+   *  (at 1 every step would be a regularisation step and nothing would learn
+   *  the artist — same rule as the MM3 route's resolveMm3Regularisation). */
+  regEvery?: number;                 // default 0 (off)
+  /** Classes kept per position in the captured prior distributions. */
+  regTopk?: number;                  // default 64
+  /** Songs drawn per regularisation corpus to build the prior cache. */
+  regSongs?: number;                 // default 24
+  /** Which OTHER artists' lm_codes.jsonl feed the regularisation cache.
+   *  'auto' (default) picks up to 6 other artists whose tensors were
+   *  preprocessed at the 600 s cap, deterministically per dataset (so
+   *  different artists draw different reg sets) — see findRegCorpora in
+   *  aceTrain.ts. An explicit array must be absolute paths to lm_codes.jsonl
+   *  files under data/training/tensors/. Meaningless when regEvery is 0. */
+  regCorpora?: 'auto' | string[];    // default 'auto'
 }
 
 export interface TrainLmEpoch {

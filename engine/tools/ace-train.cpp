@@ -416,6 +416,63 @@ static void print_usage(void) {
             "    --trigger-position <prepend|append>     where the trigger sat in the training\n"
             "                                            captions. Default: that file's tag_position.\n"
             "\n"
+            "  Caption dropout (default OFF; with it off the run is byte-identical to before it existed):\n"
+            "    --caption-dropout <p>       0           probability that a micro-step swaps the song's\n"
+            "                                            full caption for THE TRIGGER WORD ALONE. The\n"
+            "                                            prompt (and its CoT, whose `caption:` line IS\n"
+            "                                            the caption) is rebuilt by the engine's own\n"
+            "                                            prompt code, so a dropped row is exactly the\n"
+            "                                            sequence a bare-trigger prompt makes at\n"
+            "                                            inference. Requires a trigger — from --trigger\n"
+            "                                            or the variant's custom_tag; without one this\n"
+            "                                            exits 2 rather than dropping to an empty\n"
+            "                                            caption, which is far out of distribution.\n"
+            "                                            0.1-0.5 is the useful range; 1.0 would leave\n"
+            "                                            the descriptor path untrained, so the adapter\n"
+            "                                            could summon the album but never be steered.\n"
+            "                                            Drawn from a per-epoch seed-derived stream, so\n"
+            "                                            it is reproducible and survives a resume; the\n"
+            "                                            per-epoch count is logged.\n"
+            "\n"
+            "  Prior preservation (default OFF; low-VRAM/checkpointed path only):\n"
+            "    --reg-codes <path[,path...]>            one or more OTHER artists' lm_codes.jsonl.\n"
+            "                                            A reg step trains on one of those rows against\n"
+            "                                            the FROZEN BASE's own cached top-K next-token\n"
+            "                                            distribution instead of its ground-truth codes,\n"
+            "                                            so the adapter is punished for changing its\n"
+            "                                            mind about material that has nothing to do with\n"
+            "                                            this artist. Reg rows always use their own full\n"
+            "                                            captions — never caption dropout.\n"
+            "    --reg-songs <n>             24          rows sampled across those files (seed-derived)\n"
+            "    --reg-every <n>             0           0 = off. n = every nth micro-step is a prior\n"
+            "                                            step, INSERTED into the epoch rather than\n"
+            "                                            replacing a song, so an epoch still means one\n"
+            "                                            pass over the album. 3 = bghira's ratio (one\n"
+            "                                            prior step per two style steps) and costs 1.5x\n"
+            "                                            the micro-steps per epoch. Reg steps count\n"
+            "                                            toward the step counter and are EXCLUDED from\n"
+            "                                            the reported style loss (see the reg_epoch\n"
+            "                                            event's regCe). Must be 2..<usable songs> and\n"
+            "                                            needs --grad-accum >= 2; both are refused rather\n"
+            "                                            than silently scheduling zero prior steps or\n"
+            "                                            reporting a style loss nothing measured.\n"
+            "    --reg-topk <k>              64          classes kept per position, 1-256. The capture\n"
+            "                                            logs the probability mass the top-K covers, and\n"
+            "                                            that number matters on ACE: a 217k-class head\n"
+            "                                            gives 18-24%%, so the target row is the captured\n"
+            "                                            K at their TRUE probabilities plus the missing\n"
+            "                                            mass spread flat over the audio-code range. That\n"
+            "                                            keeps the adapter flat rather than pinning it to\n"
+            "                                            the base's exact distribution; raising k sharpens\n"
+            "                                            the picture a little (a live teacher would fix it).\n"
+            "    --reg-prior-dir <dir>       <out>/prior where the captured distributions are cached.\n"
+            "                                            Capture happens ONCE, before the first\n"
+            "                                            optimizer step, while the adapter delta is\n"
+            "                                            exactly zero. A --init-adapter resume cannot\n"
+            "                                            regenerate it (the model is no longer the\n"
+            "                                            base), so a missing or stale cache is a hard\n"
+            "                                            refusal — point this at the original.\n"
+            "\n"
             "  Run management:\n"
             "    --milestone-step <f>        0.1         0 = disabled\n"
             "    --milestone-keep <n>        6\n"
@@ -3624,6 +3681,25 @@ static int cmd_train_lm(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--batch") && i + 1 < argc) a.batch = argv[++i];
         else if (!strcmp(argv[i], "--trigger") && i + 1 < argc) a.trigger = argv[++i];
         else if (!strcmp(argv[i], "--trigger-position") && i + 1 < argc) a.trigger_position = argv[++i];
+        else if (!strcmp(argv[i], "--caption-dropout") && i + 1 < argc) a.caption_dropout = (float) atof(argv[++i]);
+        else if (!strcmp(argv[i], "--reg-codes") && i + 1 < argc) {
+            // Comma-separated so one flag can name several artists. Windows
+            // paths carry ':' and '\' but never ',' in practice, and an empty
+            // field is dropped rather than turned into a bogus lookup.
+            const std::string csv = argv[++i];
+            size_t            p0  = 0;
+            while (p0 <= csv.size()) {
+                const size_t      p1 = csv.find(',', p0);
+                const std::string one = csv.substr(p0, (p1 == std::string::npos ? csv.size() : p1) - p0);
+                if (!one.empty()) a.reg_codes.push_back(one);
+                if (p1 == std::string::npos) break;
+                p0 = p1 + 1;
+            }
+        }
+        else if (!strcmp(argv[i], "--reg-songs") && i + 1 < argc) a.reg_songs = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--reg-every") && i + 1 < argc) a.reg_every = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--reg-topk") && i + 1 < argc) a.reg_topk = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--reg-prior-dir") && i + 1 < argc) a.reg_prior_dir = argv[++i];
         else if (!strcmp(argv[i], "--milestone-step") && i + 1 < argc) a.milestone_step = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--milestone-keep") && i + 1 < argc) a.milestone_keep = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--limit") && i + 1 < argc) a.limit = atoi(argv[++i]);
@@ -3712,6 +3788,86 @@ static int cmd_train_lm(int argc, char ** argv) {
     if (a.attn_head_block < -1 || a.attn_head_block > 128 || a.chunk < 16 || a.chunk > 1024) {
         fprintf(stderr, "ace-train train-lm: --attn-head-block must be -1..128 and --lm-chunk 16..1024\n");
         return 2;
+    }
+
+    // ── Levers C and D (2026-09-02) ─────────────────────────────────────
+    //
+    // Everything checkable without a model load is checked here, so the server
+    // never pays an engine stop/restart for a typo. The two that cannot be:
+    // "--caption-dropout needs a trigger" (the trigger may come from the
+    // variant's preprocess_meta.json, read in lm_train_main) and "prior
+    // preservation needs the low-VRAM path" (the mode is chosen against live
+    // free VRAM). Both refuse at exit 2 from there instead.
+    if (a.caption_dropout < 0.0f || a.caption_dropout > 1.0f) {
+        fprintf(stderr, "ace-train train-lm: --caption-dropout must be 0..1\n");
+        return 2;
+    }
+    if (!a.reg_codes.empty() && a.reg_every <= 0) {
+        fprintf(stderr, "ace-train train-lm: --reg-codes was given but --reg-every is 0 (prior preservation off) — "
+                        "pass --reg-every 3 for bghira's 1 prior step per 2 style steps\n");
+        return 2;
+    }
+    if (a.reg_every > 0) {
+        if (a.reg_codes.empty()) {
+            fprintf(stderr, "ace-train train-lm: --reg-every %d needs --reg-codes <path[,path...]> — one or more "
+                            "OTHER artists' lm_codes.jsonl to hold the base still against\n", a.reg_every);
+            return 2;
+        }
+        // reg_every 1 would make EVERY step a prior step and train no style at
+        // all; 2 is the densest ratio that still trains the album.
+        if (a.reg_every < 2) {
+            fprintf(stderr, "ace-train train-lm: --reg-every must be 0 (off) or >= 2 — at 1 every micro-step "
+                            "would be a prior step and the album would never be trained\n");
+            return 2;
+        }
+        // At --grad-accum 1 every reg micro-step is its OWN optimizer window, so
+        // that window contains zero style micro-steps and `step.loss` — the
+        // number the Training Studio charts — would be published as a fabricated
+        // 0.0 between real losses. From 2 up it cannot happen: reg steps are at
+        // least 2 apart, so a window of >= 2 always holds a style step, and the
+        // final short window lands on the last micro-step, which is a style step
+        // by construction (micro_per_ep is never a multiple of reg_every).
+        // Refused rather than papered over, because the alternative is inventing
+        // a loss to report for a window that measured none.
+        if (a.grad_accum < 2) {
+            fprintf(stderr, "ace-train train-lm: --reg-every needs --grad-accum >= 2 (got %d) — at 1 every "
+                            "prior step is its own optimizer step, so that step would report a style loss "
+                            "it never measured\n",
+                    a.grad_accum);
+            return 2;
+        }
+        if (a.reg_songs < 1 || a.reg_songs > 512) {
+            fprintf(stderr, "ace-train train-lm: --reg-songs must be 1..512\n");
+            return 2;
+        }
+        if (a.reg_topk < 1 || a.reg_topk > LM_CAPTURE_K_MAX) {
+            fprintf(stderr, "ace-train train-lm: --reg-topk must be 1..%d\n", LM_CAPTURE_K_MAX);
+            return 2;
+        }
+        for (size_t i = 0; i < a.reg_codes.size(); i++) {
+            if (!pm_file_exists(a.reg_codes[i])) {
+                fprintf(stderr, "ace-train train-lm: --reg-codes entry not found: %s\n", a.reg_codes[i].c_str());
+                return 2;
+            }
+            // --codes is defaulted from --tensors further down, so compare
+            // against both spellings or the check misses the common invocation.
+            const std::string own = a.codes_path.empty()
+                                        ? (a.tensors_dir.empty() ? std::string()
+                                                                 : lm_join(a.tensors_dir, "lm_codes.jsonl"))
+                                        : a.codes_path;
+            if (!own.empty() && a.reg_codes[i] == own) {
+                fprintf(stderr, "ace-train train-lm: --reg-codes names the SAME file as --codes (%s). Prior "
+                                "preservation exists to hold the base still on OTHER material; regularising "
+                                "against the album being trained is a no-op dressed as a safeguard.\n",
+                        own.c_str());
+                return 2;
+            }
+        }
+        if (a.low_vram == "off") {
+            fprintf(stderr, "ace-train train-lm: --reg-every requires the low-VRAM/checkpointed path (the base "
+                            "distribution capture reuses its chunked head) — drop --low-vram off\n");
+            return 2;
+        }
     }
 
     // ── speed levers (2026-07-28 plan §2.1) ─────────────────────────────

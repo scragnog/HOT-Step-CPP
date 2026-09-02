@@ -53,6 +53,94 @@ export function tensorsDir(slug: string, variantKey: string): string {
   return path.join(tensorsRoot(slug), variantKeyFor(variantKey));
 }
 
+// ── Prior-preservation corpus discovery (2026-09-02) ─────────────────────
+
+/** One other artist's regularisation corpus: the newest 600 s-cap variant
+ *  that has an extracted lm_codes.jsonl. */
+export interface RegCorpusCandidate {
+  slug: string;
+  variantKey: string;
+  codesPath: string;
+}
+
+/** FNV-1a-ish string hash, used only to pick a deterministic-but-varying
+ *  rotation offset per dataset — not for anything security-sensitive. */
+function stableHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Up to `max` OTHER artists' lm_codes.jsonl for the --reg-codes corpus.
+ *
+ * Only variants whose preprocess_meta.json records max_duration 600 qualify
+ * (§A-1: the 53 files extracted under the old 240 s cap taught truncated
+ * endings — a regularisation corpus is exactly the wrong place to reintroduce
+ * that). One variant per artist (the newest qualifying one). The excluded
+ * slug is the dataset being trained — regularising against your own songs
+ * cancels the objective (same rule as resolveMm3Regularisation in training.ts).
+ *
+ * Order is deterministic per call (sorted slugs) but the SELECTION rotates by
+ * a hash of `excludeSlug`, so two different artists' auto-picked reg sets
+ * differ from each other rather than every artist regularising against the
+ * same fixed six.
+ */
+export function findRegCorpora(excludeSlug: string, max = 6): RegCorpusCandidate[] {
+  const root = path.join(trainingBaseDir, 'tensors');
+  const excluded = slugify(excludeSlug);
+  let slugs: string[] = [];
+  try {
+    slugs = fs.readdirSync(root, { withFileTypes: true })
+      .filter(e => e.isDirectory() && e.name !== excluded)
+      .map(e => e.name)
+      .sort();
+  } catch {
+    return [];
+  }
+
+  const candidates: RegCorpusCandidate[] = [];
+  for (const slug of slugs) {
+    const slugRoot = path.join(root, slug);
+    let variants: string[] = [];
+    try {
+      variants = fs.readdirSync(slugRoot, { withFileTypes: true })
+        .filter(e => e.isDirectory())
+        .map(e => e.name)
+        .sort();
+    } catch {
+      continue;
+    }
+    // Newest-first: the last sorted entry is usually newest (timestamp-ish
+    // variant keys), but sort by preprocess_meta.json created_at properly.
+    let best: { variantKey: string; codesPath: string; createdAt: string } | null = null;
+    for (const variantKey of variants) {
+      const vdir = path.join(slugRoot, variantKey);
+      const metaPath = path.join(vdir, 'preprocess_meta.json');
+      const codesPath = path.join(vdir, 'lm_codes.jsonl');
+      if (!fs.existsSync(metaPath) || !fs.existsSync(codesPath)) continue;
+      let meta: { max_duration?: unknown; created_at?: unknown };
+      try {
+        meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      } catch {
+        continue;
+      }
+      if (Number(meta.max_duration) !== 600) continue;
+      const createdAt = typeof meta.created_at === 'string' ? meta.created_at : '';
+      if (!best || createdAt > best.createdAt) best = { variantKey, codesPath, createdAt };
+    }
+    if (best) candidates.push({ slug, variantKey: best.variantKey, codesPath: best.codesPath });
+  }
+  if (candidates.length <= max) return candidates;
+
+  const start = stableHash(excludeSlug) % candidates.length;
+  const rotated = [...candidates.slice(start), ...candidates.slice(0, start)];
+  return rotated.slice(0, max);
+}
+
 // ── Cached /props model snapshot (P28) ───────────────────────────────────
 
 export interface ModelSnapshot {
@@ -264,6 +352,23 @@ export interface ResolvedTrainLmOptions {
    *  so the route refuses that pair. train-dit, which has no such surgery,
    *  defaults to 'mm'. */
   bwd: 'outprod' | 'mm';
+  /** Caption dropout fraction, 0..1. 0 = off, no flag emitted. Emitted on
+   *  every leg of a staged chain, including resumes — this is a recipe knob
+   *  like --lr, not an adapter-identity flag. */
+  captionDropout: number;
+  /** Regularisation cadence. 0 = off, no --reg-* flags emitted at all. */
+  regEvery: number;
+  regTopk: number;
+  regSongs: number;
+  /** Comma-separated absolute paths to other artists' lm_codes.jsonl, already
+   *  resolved by the route (findRegCorpora for 'auto', or the caller's
+   *  explicit list). '' when regEvery is 0. */
+  regCodes: string;
+  /** Where the captured base-model prior distributions are cached. Fixed at
+   *  the TOP-LEVEL adapter dir (not per-stage-leg) so every leg of a staged
+   *  chain shares the same cache and it is captured only once. '' when
+   *  regEvery is 0. */
+  regPriorDir: string;
 }
 
 /** Full argv for `ace-train train-lm` (§2.1 order). */
@@ -341,6 +446,20 @@ export function buildTrainLmArgs(input: {
   // Always emitted, both sides: an ace-train that predates --bwd rejects it
   // loudly rather than silently running the slow out_prod backward.
   args.push('--bwd', o.bwd);
+  // Caption dropout + prior preservation (2026-09-02). Both are recipe knobs,
+  // not adapter-identity flags, so — unlike rank/alpha/adapter-type/weights —
+  // they are emitted on EVERY leg of a staged chain, resumes included: the
+  // point is that every leg trains under the same regularised objective, not
+  // just the first one. Only-non-default emission (same rule as --weights)
+  // keeps an older ace-train.exe that predates these flags working.
+  if (o.captionDropout > 0) args.push('--caption-dropout', String(o.captionDropout));
+  if (o.regEvery > 0 && o.regCodes) {
+    args.push('--reg-codes', o.regCodes);
+    args.push('--reg-songs', String(o.regSongs));
+    args.push('--reg-every', String(o.regEvery));
+    args.push('--reg-topk', String(o.regTopk));
+    args.push('--reg-prior-dir', o.regPriorDir);
+  }
   // `--loss-on-cot` is the CLI default; only the negation needs emitting.
   if (!o.lossOnCot) args.push('--no-loss-on-cot');
   if (o.overwrite) args.push('--overwrite');

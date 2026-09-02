@@ -39,12 +39,20 @@ import { getModelSnapshot, pickLmFor, refreshModelSnapshot, tensorsRoot } from '
 import { newestVariantKey } from '../src/services/training/trainLmStatus.js';
 import { hasWeights, lmAdapterRoots, runStamp } from '../src/services/training/adapterLayout.js';
 import { bakeFile } from './lm-adapter-calibrate.js';
+import { planWorstWindow } from '../src/services/generation/planGuard.js';
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require2 = createRequire(path.join(SERVER_DIR, 'package.json'));
 
 const GUARD_MEM_SEC = 5;
 const GUARD_LEN_RATIO = 0.6;
+// Loop gate (2026-09-02, docs/plans/lm-attr-probe/): planWorstWindow's
+// worst-40s-window repeat fraction separates healthy plans (<=30% on the
+// probe corpus, chorus-heavy adapters included) from stuck-loop plans
+// (measured 53-99%). 0.15 sits well inside the healthy band — a candidate
+// whose adapter-side plans average above it is looping often enough that
+// shipping it would ship the loop, not the artist.
+const GUARD_LOOP_SHARE = 0.15;
 const SIDECAR = 'hot_step_eval.json';
 
 function die(msg: string): never {
@@ -196,6 +204,9 @@ interface CandScore {
   label: string; adapterDir: string; scale: number;
   score: number; marginal: number; transition: number; unigram: number; unigramDelta: number;
   dimsWon: number; transWon: number; memSec: number; lenRatio: number; verdict: string;
+  /** Mean worst-40s-window repeat fraction (planGuard.planWorstWindow) over
+   *  this candidate's adapter-side generated plans. 0 when there were none. */
+  loopShare: number;
   excluded: string;
 }
 
@@ -235,9 +246,18 @@ function scoreOf(cand: Candidate): CandScore | null {
     const baseLen = lens('base');
     const lenRatio = baseLen > 0 ? lens('adapter') / baseLen : 0;
     const memSec = results.memorization?.maxSec?.adapter ?? 99;
+    // Loop gate (2026-09-02): worst-40s-window repeat fraction over every
+    // adapter-side plan this candidate generated, averaged. `codes` here is
+    // the array lm-adapter-eval.ts wrote (see GenResult), not a CSV string —
+    // planGuard's functions take the CSV the engine itself emits, so join it.
+    const adapterGens = (runs.gens as any[]).filter((x: any) => x.side === 'adapter' && x.codes?.length > 0);
+    const loopShare = adapterGens.length
+      ? adapterGens.reduce((s: number, g: any) => s + planWorstWindow(g.codes.join(',')).worstFrac, 0) / adapterGens.length
+      : 0;
     let excluded = '';
     if (memSec > GUARD_MEM_SEC) excluded = `memorization ${memSec.toFixed(1)}s`;
     else if (lenRatio < GUARD_LEN_RATIO) excluded = `degenerate (lenRatio ${lenRatio.toFixed(2)})`;
+    else if (loopShare > GUARD_LOOP_SHARE) excluded = `looping (loopShare ${loopShare.toFixed(2)})`;
     return {
       label: cand.label, adapterDir: cand.adapterDir, scale: cand.scale,
       score: results.marginalMean.adapter + results.transitionMean.adapter,
@@ -246,7 +266,7 @@ function scoreOf(cand: Candidate): CandScore | null {
       unigram: results.unigram.adapter,
       unigramDelta: results.unigram.base - results.unigram.adapter,
       dimsWon: results.verdict.dimsWon, transWon: results.verdict.transWon,
-      memSec, lenRatio, verdict: results.verdict.status, excluded,
+      memSec, lenRatio, loopShare, verdict: results.verdict.status, excluded,
     };
   } catch { return null; }
 }
@@ -267,6 +287,10 @@ function writeSidecar(dir: string, a: Artist, s: CandScore, extra: Record<string
     unigramDelta: Number(s.unigramDelta.toFixed(4)),
     dimsWon: s.dimsWon, transWon: s.transWon,
     memMaxSec: s.memSec,
+    /** Mean worst-40s-window repeat fraction over this candidate's
+     *  adapter-side plans (planGuard.planWorstWindow) — the loop gate.
+     *  Candidates above 0.15 are excluded from picking, see GUARD_LOOP_SHARE. */
+    loopShare: Number(s.loopShare.toFixed(4)),
     verdict: s.verdict,
     /** Runtime scale this score was measured at (1.0 for baked adapters). */
     measuredAtScale: s.scale,
@@ -330,6 +354,18 @@ async function calibrateArtist(a: Artist, newRunDir: string, scales: number[],
     snapshots.push({ label: 'old', dir: a.sourceRun });
   }
   snapshots.push({ label: 'new', dir: tr.runDir });
+  // Stage exports (2026-09-02): the default target-loss ladder (2.0 -> 1.5 ->
+  // final) writes each non-final leg at <run>/stage1, <run>/stage2 — earlier,
+  // possibly-less-overfit snapshots that the sweep would otherwise never see.
+  // Include any that carry weights and aren't already a snapshot (a
+  // single-leg chain writes no stage dirs at all, so this is a no-op there).
+  for (const stageName of ['stage1', 'stage2']) {
+    const stageDir = path.join(tr.runDir, stageName);
+    if (fs.existsSync(stageDir) && hasWeights(stageDir)
+        && !snapshots.some(sn => path.resolve(sn.dir) === path.resolve(stageDir))) {
+      snapshots.push({ label: stageName, dir: stageDir });
+    }
+  }
   const msRoot = path.join(tr.runDir, 'milestones');
   if (fs.existsSync(msRoot)) {
     for (const e of fs.readdirSync(msRoot, { withFileTypes: true })) {
@@ -362,7 +398,8 @@ async function calibrateArtist(a: Artist, newRunDir: string, scales: number[],
   const oldBest = eligible.filter(s => s.label.startsWith('old')).sort((x, y) => x.score - y.score)[0] ?? null;
   const newBest = eligible.filter(s => !s.label.startsWith('old')).sort((x, y) => x.score - y.score)[0] ?? null;
   for (const s of scores) {
-    console.log(`      ${s.label.padEnd(14)} score ${s.score.toFixed(4)}${s.excluded ? `  EXCLUDED: ${s.excluded}` : ''}`);
+    console.log(`      ${s.label.padEnd(14)} score ${s.score.toFixed(4)}  loopShare ${s.loopShare.toFixed(2)}`
+      + `${s.excluded ? `  EXCLUDED: ${s.excluded}` : ''}`);
   }
   if (!oldBest && !newBest) return out('failed', '', null, null, '', 'every candidate failed eval or guards');
 

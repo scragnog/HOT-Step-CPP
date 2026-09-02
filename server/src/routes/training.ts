@@ -98,7 +98,7 @@ import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services
 import * as queue from '../services/training/labelingQueue.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import {
-  aceTrainExe, getModelSnapshot, pickBf16, pickDitBaseFor, pickLmFor, refreshModelSnapshot,
+  aceTrainExe, findRegCorpora, getModelSnapshot, pickBf16, pickDitBaseFor, pickLmFor, refreshModelSnapshot,
   tensorsDir, tensorsRoot, variantKeyFor,
   type ResolvedPreprocessOptions, type ResolvedTrainDitOptions, type ResolvedTrainLmOptions,
 } from '../services/training/aceTrain.js';
@@ -2601,6 +2601,67 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       return;
     }
 
+    // ── caption dropout + prior preservation (2026-09-02) ────────────────
+    // Ported from the MM3 LM trainer's two levers (mm3-lm-train-run.h,
+    // mm3-lm-prior.h) — see docs/plans/lm-attr-probe/HANDOFF.md. Both are
+    // recipe knobs like --lr, so they are validated here and carried
+    // unchanged through every leg of the staged chain (opts is spread as-is
+    // into each leg by trainLmRunner.ts).
+    const captionDropout = numOpt(body.captionDropout, 0);
+    if (outOfRange('captionDropout', captionDropout, 0, 1)) {
+      res.status(400).json({ error: outOfRange('captionDropout', captionDropout, 0, 1) });
+      return;
+    }
+    const regEvery = Math.trunc(numOpt(body.regEvery, 0));
+    const regTopk = Math.trunc(numOpt(body.regTopk, 64));
+    const regSongs = Math.trunc(numOpt(body.regSongs, 24));
+    let regCodes = '';
+    let regPriorDir = '';
+    if (regEvery > 0) {
+      if (regEvery < 2) {
+        res.status(400).json({
+          error: 'regEvery must be at least 2 — at 1 every step would be a regularisation step and '
+               + 'nothing would learn the artist.',
+        });
+        return;
+      }
+      if (outOfRange('regTopk', regTopk, 1, 256) || outOfRange('regSongs', regSongs, 1, 200)) {
+        res.status(400).json({ error: outOfRange('regTopk', regTopk, 1, 256) ?? outOfRange('regSongs', regSongs, 1, 200) });
+        return;
+      }
+      const rawCorpora = body.regCorpora;
+      if (Array.isArray(rawCorpora)) {
+        const paths = rawCorpora.filter((p): p is string => typeof p === 'string' && p.trim() !== '');
+        const allTensorsRoot = path.join(trainingBaseDir, 'tensors');
+        const bad = paths.find(p => !isInside(allTensorsRoot, path.resolve(p)) || path.basename(p) !== 'lm_codes.jsonl'
+          || !fs.existsSync(p));
+        if (!paths.length || bad) {
+          res.status(400).json({
+            error: bad
+              ? `regCorpora entry "${bad}" must be an existing lm_codes.jsonl under data/training/tensors/`
+              : 'regCorpora must list at least one lm_codes.jsonl path when not "auto"',
+          });
+          return;
+        }
+        regCodes = paths.map(p => path.resolve(p)).join(',');
+      } else {
+        const picked = findRegCorpora(ds.slug, 6);
+        if (!picked.length) {
+          res.status(400).json({
+            error: 'Prior preservation needs at least one OTHER artist preprocessed at the 600 s cap — '
+                 + 'none were found. Preprocess another dataset first, or set regEvery to 0.',
+          });
+          return;
+        }
+        console.log(`[Training] train-lm ${ds.slug}: auto reg corpus — ${picked.map(p => p.slug).join(', ')}`);
+        regCodes = picked.map(p => p.codesPath).join(',');
+      }
+      // Fixed at the TOP-LEVEL adapter dir, not per-stage — every leg of a
+      // staged chain must share one cache, captured once (see aceTrain.ts
+      // ResolvedTrainLmOptions.regPriorDir).
+      regPriorDir = path.join(adapterDir, 'reg-prior');
+    }
+
     // ── resume + post-training calibration (2026-08-10) ─────────────────
     // initAdapter must be a real adapter run dir BEFORE the runner stops the
     // engine — the engine would also refuse it, but only after a full engine
@@ -2722,6 +2783,12 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       weights,
       batch,
       bwd,
+      captionDropout,
+      regEvery,
+      regTopk,
+      regSongs,
+      regCodes,
+      regPriorDir,
     };
 
     const job = queue.startTrainLmJob(ds.id, opts);

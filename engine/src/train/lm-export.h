@@ -114,6 +114,19 @@ struct LmExportMeta {
     // saved_loss — the loss this run's factors started from.
     std::string init_adapter;
     double      init_from_loss = -1.0;
+
+    // Levers C and D (2026-09-02). Additive; readers default each field.
+    // NEITHER IS A RESUME BARRIER — like `bwd` and unlike `weights`, they do
+    // not change what the gradient IS, only which rows it is taken over, so a
+    // resume adopts nothing and refuses nothing on their account. Recorded
+    // anyway: a finished run could not otherwise tell you whether its trigger
+    // was ever trained alone, or what it was regularised against.
+    float                    caption_dropout = 0.0f;
+    int                      reg_every       = 0;
+    int                      reg_songs       = 0;
+    int                      reg_topk        = 0;
+    std::vector<std::string> reg_codes;
+    std::string              reg_prior_dir;
 };
 
 // ─── adapter_config.json (frozen literal, §2.4) ─────────────────────────────
@@ -212,6 +225,19 @@ static bool lm_write_train_log(const std::string & dir, const LmExportMeta & m) 
     }
     yyjson_mut_obj_add_strcpy(doc, cfg, "trigger", m.trigger.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "trigger_position", m.trigger_position.c_str());
+    // Always written (0.0 = off) — the question "was this adapter's trigger
+    // ever trained on its own?" has to be answerable from the log alone.
+    yyjson_mut_obj_add_real(doc, cfg, "caption_dropout", (double) m.caption_dropout);
+    if (m.reg_every > 0) {
+        yyjson_mut_obj_add_int(doc, cfg, "reg_every", m.reg_every);
+        yyjson_mut_obj_add_int(doc, cfg, "reg_songs", m.reg_songs);
+        yyjson_mut_obj_add_int(doc, cfg, "reg_topk", m.reg_topk);
+        yyjson_mut_obj_add_strcpy(doc, cfg, "reg_prior_dir", m.reg_prior_dir.c_str());
+        yyjson_mut_val * rc = yyjson_mut_obj_add_arr(doc, cfg, "reg_codes");
+        for (size_t i = 0; i < m.reg_codes.size(); i++) {
+            yyjson_mut_arr_add_strcpy(doc, rc, m.reg_codes[i].c_str());
+        }
+    }
     if (!m.init_adapter.empty()) {
         yyjson_mut_obj_add_strcpy(doc, cfg, "init_adapter", m.init_adapter.c_str());
         yyjson_mut_obj_add_real(doc, cfg, "init_from_loss", m.init_from_loss);

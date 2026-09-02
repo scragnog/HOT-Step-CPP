@@ -42,9 +42,13 @@ const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 import { tensorsRoot } from '../src/services/training/aceTrain.js';
 import { newestVariantKey } from '../src/services/training/trainLmStatus.js';
 import { hasWeights, latestRunDir, lmAdapterRoots, runStamp } from '../src/services/training/adapterLayout.js';
+import { planWorstWindow } from '../src/services/generation/planGuard.js';
 
 const GUARD_MEM_SEC = 5;
 const GUARD_LEN_RATIO = 0.6;
+// Loop gate (2026-09-02, docs/plans/lm-attr-probe/) — see lm-adapter-rollout.ts
+// for the measured separation this threshold sits inside.
+const GUARD_LOOP_SHARE = 0.15;
 
 function die(msg: string): never {
   console.error(`\nERROR: ${msg}`);
@@ -96,6 +100,13 @@ interface Candidate {
 
 function candidatesFor(evalRoot: string, adapterRun: string, scales: number[]): Candidate[] {
   const snapshots: Array<{ label: string; dir: string }> = [{ label: 'run', dir: adapterRun }];
+  // Stage exports (2026-09-02): the default target-loss ladder writes each
+  // non-final leg at <run>/stage1, <run>/stage2 — include them as candidates
+  // if they carry weights (a single-leg chain writes neither, a no-op here).
+  for (const stageName of ['stage1', 'stage2']) {
+    const stageDir = path.join(adapterRun, stageName);
+    if (fs.existsSync(stageDir) && hasWeights(stageDir)) snapshots.push({ label: stageName, dir: stageDir });
+  }
   const msRoot = path.join(adapterRun, 'milestones');
   if (fs.existsSync(msRoot)) {
     for (const e of fs.readdirSync(msRoot, { withFileTypes: true })) {
@@ -192,6 +203,9 @@ interface Scored {
   key: string; dir: string; adapterDir: string; scale: number;
   score: number; marginal: number; transition: number; unigram: number;
   memSec: number; lenRatio: number;
+  /** Mean worst-40s-window repeat fraction (planGuard.planWorstWindow) over
+   *  this candidate's adapter-side generated plans — the loop gate. */
+  loopShare: number;
   excluded: string;
 }
 
@@ -213,9 +227,17 @@ function scoreCandidates(evalRoot: string): Scored[] {
       const memSec = results.memorization?.maxSec?.adapter ?? 99;
       const baseLen = meanGenLen(runs, 'base');
       const lenRatio = baseLen > 0 ? meanGenLen(runs, 'adapter') / baseLen : 0;
+      // Loop gate (2026-09-02): `codes` on each gen is the array
+      // lm-adapter-eval.ts wrote, not a CSV string — planGuard's functions
+      // take the CSV the engine itself emits, so join it.
+      const adapterGens = (runs.gens as any[]).filter((g: any) => g.side === 'adapter' && g.codes?.length > 0);
+      const loopShare = adapterGens.length
+        ? adapterGens.reduce((s: number, g: any) => s + planWorstWindow(g.codes.join(',')).worstFrac, 0) / adapterGens.length
+        : 0;
       let excluded = '';
       if (memSec > GUARD_MEM_SEC) excluded = `memorization ${memSec.toFixed(1)}s > ${GUARD_MEM_SEC}s`;
       else if (lenRatio < GUARD_LEN_RATIO) excluded = `degenerate generations (len ratio ${lenRatio.toFixed(2)} < ${GUARD_LEN_RATIO})`;
+      else if (loopShare > GUARD_LOOP_SHARE) excluded = `looping (loop share ${loopShare.toFixed(2)} > ${GUARD_LOOP_SHARE})`;
       out.push({
         key: e.name.replace(/^calib-/, ''),
         dir,
@@ -225,7 +247,7 @@ function scoreCandidates(evalRoot: string): Scored[] {
         transition: results.transitionMean.adapter,
         unigram: results.unigram.adapter,
         score: results.marginalMean.adapter + results.transitionMean.adapter,
-        memSec, lenRatio, excluded,
+        memSec, lenRatio, loopShare, excluded,
       });
     } catch { /* candidate without results yet */ }
   }
@@ -241,10 +263,10 @@ function cmdPick(args: Map<string, string>): Scored | null {
   if (!scored.length) die(`no calib-* results under ${evalRoot} — run sweep first`);
 
   console.log(`\nCandidates for ${dataset} (score = marginal+transition JS to artist, lower = closer):\n`);
-  console.log('  candidate            score    marginal  transit.  unigram  memMax  lenRatio');
+  console.log('  candidate            score    marginal  transit.  unigram  memMax  lenRatio  loopShare');
   for (const s of scored) {
     const flag = s.excluded ? `  EXCLUDED: ${s.excluded}` : '';
-    console.log(`  ${s.key.padEnd(20)} ${s.score.toFixed(4)}  ${s.marginal.toFixed(4)}    ${s.transition.toFixed(4)}   ${s.unigram.toFixed(3)}    ${s.memSec.toFixed(1)}s   ${s.lenRatio.toFixed(2)}${flag}`);
+    console.log(`  ${s.key.padEnd(20)} ${s.score.toFixed(4)}  ${s.marginal.toFixed(4)}    ${s.transition.toFixed(4)}   ${s.unigram.toFixed(3)}    ${s.memSec.toFixed(1)}s   ${s.lenRatio.toFixed(2)}      ${s.loopShare.toFixed(2)}${flag}`);
   }
   const eligible = scored.filter(s => !s.excluded);
   if (!eligible.length) die('every candidate failed a guard — the adapter needs retraining, not calibration');

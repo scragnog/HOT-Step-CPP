@@ -689,20 +689,30 @@ static inline LmLayerOpts lm_ckpt_layer_opts(const LmCkptState & st) {
     return o;
 }
 
-/** Read one chunk's logits back and append each row's top-K as a normalised
- *  distribution.
+/** Read one chunk's logits back and append each row's top-K, as probabilities
+ *  under the FULL softmax.
  *
- *  Softmax is taken over the WHOLE scored width and only then truncated to K,
- *  so p reflects the base's real confidence — renormalising the top-K to sum to
- *  1 afterwards would turn a flat, uncertain prediction into a confident one and
- *  teach the adapter to be more certain than the model it is protecting. The
- *  leftover mass is simply dropped: rows sum to <= 1, and the cross-entropy
- *  treats the missing mass as unconstrained, which is exactly right — we have no
- *  opinion about the 16,000 codes the base considered and rejected.
+ *  Softmax is taken over the WHOLE scored width and only then truncated to K, so
+ *  what lands here is the base's real confidence in those K codes and the row
+ *  sums to the captured mass, not to 1. That is deliberate, and it is a CAPTURE
+ *  format, not a training label:
  *
- *  K = 64 at 16,385 classes typically captures well over 99% of the mass; the
- *  producer logs the measured coverage so a pathological case is visible rather
- *  than assumed. */
+ *    * the row sum is the coverage diagnostic — how much of the base this K
+ *      actually recorded — and it is what gets cached to disk and reported;
+ *    * a consumer that feeds these rows to ggml_cross_entropy_loss MUST
+ *      bring each row to sum 1 first. ggml's backward is
+ *      (softmax(z) - labels) * d/nr, which is the true gradient only for labels
+ *      summing to 1; an unnormalised row adds (1 - S) * softmax_j, i.e. the
+ *      gradient of a logit-scale term that changes no probability at all.
+ *
+ *  HOW the row is completed matters. Rescaling the K to sum to 1 makes the
+ *  target SHARPER than the base — the dropped tail is asked for probability 0
+ *  and the surviving K absorb its mass; at MM3's >99% coverage that is a
+ *  rounding error, at ACE's 18-24% (K=64 over 217,204) it is a different and
+ *  peakier teacher. The ACE trainer therefore keeps the K at their captured
+ *  probabilities and spreads the missing mass flat over the audio-code range
+ *  (LmSample::soft_tail in train/lm-data.h; train/lm-train-run.h), and the
+ *  producer logs the measured coverage and warns below 50%. */
 #define LM_CAPTURE_K_MAX 256
 
 static void lm_ckpt_capture_topk(LmCkptRun & r, ggml_tensor * lg, int V, int Sc) {
