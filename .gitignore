@@ -76,6 +76,7 @@ tools/*
 !tools/mcp-lyricstudio/
 tools/mcp-lyricstudio/node_modules/
 !tools/discord-claude/
+!tools/lm-attr-probe/
 tools/discord-claude/node_modules/
 tools/discord-claude/.env
 tools/discord-claude/sessions.json

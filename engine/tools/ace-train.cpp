@@ -121,6 +121,8 @@ static void print_usage(void) {
             "                --enc <mm3-enc-*.gguf> --audio <in.f32> [--channels 2]\n"
             "                [--out <out.f32>] [--ref <latents.f32> : parity-gate against it]\n"
             "                [--tf32 on|off]  default off — TF32 costs ~5e-3 on the targets\n"
+            "  detok-table   Dump the FSQ detokenizer output for every code: --dit <dit.gguf>\n"
+            "                --out <table.f32>  (raw f32 [64000][5][64]; tools/lm-attr-probe)\n"
             "  mm3-lm-train  MiniMax-Music3 LM LoRA training. --lm --depth --manifest\n"
             "                --fd-check N instead: finite-difference gradient gate over N\n"
             "                probes (a falling loss is NOT evidence the backward is right\n"
@@ -1365,6 +1367,70 @@ static int cmd_mm3_encode(int argc, char ** argv) {
 
     mm3_enc_free(&enc);
     return rc;
+}
+
+// ─── detok-table ────────────────────────────────────────────────────────────
+//
+// Dump the FSQ detokenizer's output for EVERY code (0..63999) once, so a
+// render-free probe can represent a planner-LM code by what the model itself
+// says it means (tools/lm-attr-probe). The detokenizer is per-token — one code
+// in, 5 latent frames of 64 channels out, no cross-token context — so this table
+// is the exact function, not an approximation.
+//
+//   ace-train detok-table --dit <dit-*.gguf> --out <table.f32>
+//
+// Output: raw little-endian f32, [64000][5][64] (82 MB). No header; the reader
+// knows the shape from FSQ_LEVELS.
+static int cmd_detok_table(int argc, char ** argv) {
+    std::string dit_path, out_path;
+    for (int i = 1; i < argc; i++) {
+        if      (!strcmp(argv[i], "--dit") && i + 1 < argc) dit_path = argv[++i];
+        else if (!strcmp(argv[i], "--out") && i + 1 < argc) out_path = argv[++i];
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (dit_path.empty() || out_path.empty()) {
+        fprintf(stderr, "ace-train detok-table: --dit and --out are required\n");
+        return 2;
+    }
+    int n_codes = 1;
+    for (int d = 0; d < FSQ_NDIMS; d++) {
+        n_codes *= FSQ_LEVELS[d];
+    }
+    DetokGGML detok = {};
+    if (!detok_ggml_load(&detok, dit_path.c_str())) {
+        fprintf(stderr, "[detok-table] cannot load the detokenizer from %s\n", dit_path.c_str());
+        return 1;
+    }
+    std::vector<int>   codes((size_t) n_codes);
+    for (int i = 0; i < n_codes; i++) {
+        codes[(size_t) i] = i;
+    }
+    std::vector<float> out((size_t) n_codes * 5 * 64);
+    const int64_t      t0 = ggml_time_ms();
+    // Chunked so one graph loop never holds the whole table's output tensor.
+    const int chunk = 4096;
+    for (int c0 = 0; c0 < n_codes; c0 += chunk) {
+        const int n = std::min(chunk, n_codes - c0);
+        if (detok_ggml_decode(&detok, codes.data() + c0, n, out.data() + (size_t) c0 * 5 * 64) < 0) {
+            fprintf(stderr, "[detok-table] decode failed at code %d\n", c0);
+            detok_ggml_free(&detok);
+            return 1;
+        }
+    }
+    fprintf(stderr, "[detok-table] %d codes -> [%d][5][64] in %lld ms\n", n_codes, n_codes,
+            (long long) (ggml_time_ms() - t0));
+    FILE * f = fopen(out_path.c_str(), "wb");
+    if (!f) {
+        fprintf(stderr, "[detok-table] cannot write %s\n", out_path.c_str());
+        detok_ggml_free(&detok);
+        return 1;
+    }
+    fwrite(out.data(), sizeof(float), out.size(), f);
+    fclose(f);
+    fprintf(stderr, "[detok-table] wrote %s (%zu floats)\n", out_path.c_str(), out.size());
+    detok_ggml_free(&detok);
+    return 0;
 }
 
 // ─── mm3-lm-train ───────────────────────────────────────────────────────────
@@ -4652,6 +4718,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "mm3-encode")) {
         return cmd_mm3_encode(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "detok-table")) {
+        return cmd_detok_table(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "mm3-lm-train")) {
         return cmd_mm3_lm_train(argc - 1, argv + 1);
