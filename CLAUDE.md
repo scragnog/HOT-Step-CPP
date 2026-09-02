@@ -139,6 +139,7 @@ only ever saw a rolling window and are lossy.
 | Full feature catalogue (100+) | [FEATURES.md](FEATURES.md) |
 | Engine internals, CLI, request JSON, generation modes | [engine/docs/ARCHITECTURE.md](engine/docs/ARCHITECTURE.md) |
 | **Training system** (dataset→preprocess→LM/DiT training→audition; ace-train, FSQ, ggml training gotchas) | [docs/TRAINING.md](docs/TRAINING.md) |
+| **Flash-attention training** (fused attention backward: porting `--attn flash` to a trainer, VRAM-model branches, measurement traps) | [.claude/skills/flash-attn-training/SKILL.md](.claude/skills/flash-attn-training/SKILL.md) |
 | Writing a Lua plugin | [docs/PLUGINS.md](docs/PLUGINS.md) |
 | Build / install / releases | [README.md](README.md) |
 | Cutting & publishing a release (agent runbook) | [docs/RELEASING.md](docs/RELEASING.md) |
