@@ -166,32 +166,80 @@ static double dit_vram_arena_bytes(int S, int K, int B = 1) {
 // arithmetic against 15 / 25 / 41 / 77 MB measured at S = 187/375/750/1500),
 // while that polynomial would ask for 232 MB at S = 1500.
 //
-// MEASURED 2026-09-01 on an RTX 5090 (32 GB), dit-xl-thirds BF16, rank-16 LoRA,
-// --layers 32, --mirror bf16, B = 1, against `ace-train`'s own high-water arena
-// figure — 20 cells: {crop 375, 750, 1500, 3000} x {segments 1, 8, 32} on
-// `president` (enc_S 609), plus {crop 750, 1500} x {segments 1, 8} on
-// `joycemanor_neverhungoveragain` (enc_S 434) and `nwa_straightoutta`
-// (enc_S 1877), which is what separates the enc_S term from the rest. The raw
-// (pre-headroom) model reproduces all 20 within -2.0 % / +1.3 %; with the
-// headroom below every cell over-predicts, by +9.5 % to +13.4 %, none under.
-// UNMEASURED past this grid: B > 1, LoKR, rank > 16, --target-mlp, and any base
-// with a different Nh/Nkv/D. The backstop for those is unchanged — the mandatory
-// high-water probe and the NVML tripwire.
+// ─── REFIT 2026-09-02 (overnight-sweep defect 1) ────────────────────────────
+//
+// The original fit is superseded. It was taken mid-development on a binary that
+// predates the TF32 fused kernels and the final graph, and on today's `ace-train`
+// it UNDER-predicts on every cell — the opposite of what this model promises.
+// The refit below is measured against the shipped binary; the numbers the old
+// coefficients produce are in the `est_old` column so the regression is on the
+// record rather than in a commit message.
+//
+// What the residuals said (48 rank-16 LoRA cells, {enc_S 434, 609, 640, 1188,
+// 1877} x {S 187, 375, 425, 750, 1250, 1500} x {K 4, 8, 16, 32}, --mirror bf16,
+// B = 1, both --bwd formulations, RTX 5090, dit-xl-thirds BF16):
+//
+//   * the cross-attention enc_S term is RIGHT. Measured d(arena)/d(enc_S) is
+//     0.376-0.389 MB per encoder token against the term's 0.383 — so the
+//     "cross-attention priced at self-attention shapes" hypothesis is dead, and
+//     the enc_S half of the model needs no change at all.
+//   * the per-token activation coefficient was simply too small: the residual is
+//     linear in K*S with no enc_S content whatsoever (the implied coefficient is
+//     0.2447-0.2549 at every one of the 48 cells, flat across enc_S). 0.19779 ->
+//     0.2463, i.e. +24.5 %.
+//   * headroom does NOT need to scale with anything. It comes down, because the
+//     refitted arithmetic is tight enough not to need 12 %.
+//   * one term was missing: `--bwd mm` costs a flat ~52 MB the outprod
+//     formulation does not pay (measured as a K- and S-independent offset
+//     between matched op/mm cells). Charged unconditionally, so an outprod run
+//     is over-priced by 52 MB — the safe direction, and negligible next to the
+//     headroom.
+//
+// Raw (pre-headroom) the refit reproduces all 48 cells at +0.0 % to +9.7 %, none
+// under; with the headroom, +5.0 % to +15.2 %, and every `--bwd mm` cell (what
+// the server and the trainer actually run) lands +5.0 % to +5.8 %.
+//
+//   dataset  enc_S     S   K   meas  est_old        est_new
+//   joyce      434   187  32   1880     1733 -7.8%     1984 +5.5%
+//   joyce      434  1250  32  11345    10531 -7.2%    11965 +5.5%
+//   fight      640   187  32   1960     1821 -7.1%     2067 +5.4%
+//   fight      640  1250  32  11454    10618 -7.3%    12046 +5.2%
+//   ladis     1188   425  32   4289     4024 -6.2%     4520 +5.4%
+//   ladis     1188  1250  32  11618    10848 -6.6%    12262 +5.5%
+//   nwa       1877   187  32   2441     2351 -3.7%     2564 +5.0%
+//   nwa       1877   425  32   4558     4320 -5.2%     4797 +5.2%
+//   nwa       1877  1250  32  11900    11143 -6.4%    12538 +5.4%
+//   pres/op    609  1500  32  13570    12674 -6.6%    14382 +6.0%
+//   fight      640   187   4    302      241 -20.1%     319 +5.6%
+//   fight      640  1250   8   2947     2712 -8.0%     3107 +5.4%
+//   nwa       1877   750  16   3775     3532 -6.4%     3977 +5.3%
+//
+// (full 48-cell table and the raw logs: _experiments/fattn-arena-refit/)
+//
+// UNMEASURED past this grid: B > 1, rank > 16, and any base with a different
+// Nh/Nkv/D. The backstop for those is unchanged — the mandatory high-water probe
+// and the NVML tripwire.
 //
 // docs/plans/2026-09-01-flash-attn-backward.md (MEASUREMENT 2), spec §11.
 
 // Non-attention retained activations, MB per token per layer. The flash-mode
-// counterpart of the exact model's 0.3274, measured the same way. (Sanity: 0.1978
-// MB is 20.3 hidden-widths at H = 2560, f32 — the qkv/o/mlp/norm/residual set of
+// counterpart of the exact model's 0.3274, measured the same way. (Sanity: 0.2463
+// MB is 25.2 hidden-widths at H = 2560, f32 — the qkv/o/mlp/norm/residual set of
 // one layer's forward plus the gradients ggml keeps live, which is the right
 // order of magnitude.)
-#define DIT_FLASH_ACT_MB_PER_TOKEN 0.19779
+#define DIT_FLASH_ACT_MB_PER_TOKEN 0.2463
 
-// The ONE fitted number in this branch. It is a safety coefficient, not a shape:
-// the terms above already reproduce every measured cell to ±2 %, and this makes
-// the estimate land on the over-predicting side of all of them, which is the side
-// the reserve, the safety margin and the NVML tripwire are built to back up.
-#define DIT_FLASH_HEADROOM 1.12
+// `--bwd mm`'s flat surcharge, MB. Measured as the offset between matched
+// `--bwd mm` and `--bwd outprod` cells: 47-51 MB at every K and S, so it is a
+// scratch buffer of the MUL_MAT activation-gradient formulation and not an
+// activation. `--bwd` is not part of DitVramModel, so it is charged always.
+#define DIT_FLASH_BWD_MM_MB 52.0
+
+// The ONE fitted safety coefficient in this branch. It is not a shape: the terms
+// above already reproduce every measured cell to +0.0/+9.7 %, and this keeps the
+// estimate on the over-predicting side of all of them with room to spare, which
+// is the side the reserve, the safety margin and the NVML tripwire back up.
+#define DIT_FLASH_HEADROOM 1.05
 
 static double dit_vram_arena_bytes_flash(int S, int K, int B, int enc_S, int Nh, int Nkv, int D) {
     const double dS  = (double) S;
@@ -215,10 +263,99 @@ static double dit_vram_arena_bytes_flash(int S, int K, int B, int enc_S, int Nh,
     const double scale_acc_mb  = 2.0 * packed_mb_per_token * dS;
     const double back_self_mb  = (dD * dNh * dS + 2.0 * dD * dKv * dS) * 4.0 / MB;
     const double back_cross_mb = (dD * dNh * dS + 2.0 * dD * dKv * dE) * 4.0 / MB;
-    const double machinery_mb  = scale_acc_mb + std::max(back_self_mb, back_cross_mb);
+    const double machinery_mb  = scale_acc_mb + std::max(back_self_mb, back_cross_mb) + DIT_FLASH_BWD_MM_MB;
 
     const double mb = (double) std::max(0, K) * per_layer_mb + machinery_mb;
     return (mb > 0.0 ? mb : 0.0) * DIT_FLASH_HEADROOM * MB * (double) std::max(1, B);
+}
+
+// ─── flash-mode LoKR apply arena ────────────────────────────────────────────
+//
+// dit_lokr_apply_arena_bytes() (dit-adapter-lokr.h) is the term that actually
+// caused the reported defect, and it is not the flash model: on
+// `nwa_straightoutta` at crop 850 the flash arena is 4319 MB of a 13,536 MB
+// estimate and the LoKR apply term is the other 9217 MB, against 7824 MB
+// measured for the whole arena. The diagnostic line only printed the flash half,
+// which is what made a 73 % OVER-prediction read as a 45 % under-prediction.
+//
+// That function says of itself "deliberately conservative ... we err high", and
+// the measurements say how high: it over-prices the arena by 46-93 % across 21
+// LoKR cells. It is wrong in two ways.
+//
+//   1. Retention. It charges 2x (T1 + T2) per site on the assumption that each
+//      kron intermediate is followed by a live ggml_cont and that the backward
+//      adds gradient buffers of the same shapes. Measured, the simultaneously
+//      live set is 0.61x of ONE copy of (T1 + T2 + the factorized-w2
+//      intermediate) — ggml_gallocr reuses far more aggressively than the
+//      comment assumed. That is a 3.3x difference.
+//   2. Token count. It bills EVERY site at S tokens. The cross-attention K and V
+//      sites contract against the encoder states, so they see enc_S tokens, not
+//      S. That is why the measured LoKR surcharge rises with enc_S (1998 ->
+//      2186 MB from enc_S 434 to 1877 at K 8 / S 1250) while the old term is
+//      completely flat in enc_S.
+//
+// So this is the same site walk, with the cross-K/V sites moved onto enc_S and
+// ONE fitted retention factor replacing the factor 2. Measured against
+// `measured LoKR arena - measured LoRA arena` at matched (K, S, enc_S) — 21
+// cells, {enc_S 434, 640, 1188, 1877} x {S 187, 425, 750, 1250} x {K 4, 8, 16,
+// 32}, dim 512 / factor 6 / target-mlp plus one dim-128 cell — it lands +0.0 %
+// to +6.0 % over, none under, where the old term was +46 % to +93 % over.
+//
+// WHY THE EXACT PATH KEEPS THE OLD TERM. Exact mode's own arena polynomial
+// currently under-predicts too (measured on the same binary: 2533 MB vs 2069 est
+// at K 32 / S 187, 5838 vs 5091 at S 425 — 13-18 % under), and its LoKR
+// over-count is silently covering for that. Refitting the exact polynomial is
+// explicitly out of this task's scope, so removing the compensation on that path
+// would turn exact-mode LoKR runs into OOMs. Flash mode does not need the
+// compensation: its arena term above is now measured and over-predicting on its
+// own. One follow-up, not two changes at once.
+//
+// Grid, flash arena TOTAL (flash term + this one) vs measured arena:
+//
+//   enc_S     S   K  dim   meas   est_old         est_new
+//     640   187   4  512    477      748 +56.8%      511 +7.2%
+//     640  1250   4  512   2567     4783 +86.3%     2736 +6.6%
+//     640  1250   8  512   4997     9489 +89.9%     5346 +7.0%
+//     640   425  32  512   7023    13006 +85.2%     7500 +6.8%
+//     434  1250   8  512   4917     9468 +92.6%     5307 +7.9%
+//    1188  1250   8  512   5089     9547 +87.6%     5450 +7.1%
+//    1877   187   8  512   1109     1621 +46.2%     1198 +8.1%
+//    1877  1250   8  512   5259     9625 +83.0%     5586 +6.2%
+//    1877   425  32  512   7824    13537 +73.0%     8450 +8.0%   <- the defect
+//     640  1250   8  128   4937     9470 +91.8%     5317 +7.7%
+//
+// UNMEASURED: lokr_dim other than 512 (one dim-128 cell only), lokr_factor other
+// than 6, decompose_both off, B > 1. High-water probe and tripwire as ever.
+#define DIT_FLASH_LOKR_RETENTION 0.62
+
+// `S_tok` and `encS_tok` are token counts that already carry the batch factor,
+// matching dit_lokr_apply_arena_bytes' `S` argument.
+static double dit_vram_lokr_apply_bytes_flash(const DiTGGMLConfig & c, int lo, int hi, int lokr_dim, int lokr_factor,
+                                              bool target_mlp, double S_tok, double encS_tok) {
+    if (hi <= lo || S_tok <= 0.0) {
+        return 0.0;
+    }
+    int64_t sites[DIT_NSITES][2];
+    dit_lokr_site_dims(c, sites);
+    const int n_sites = target_mlp ? DIT_NSITES : DIT_NSITES_ATTN;
+    double    per_S   = 0.0;  // elements per activation token, per layer
+    double    per_E   = 0.0;  // elements per ENCODER token, per layer
+    for (int s = 0; s < n_sites; s++) {
+        int64_t out_l, out_k, in_m, in_n;
+        dit_lokr_factorization(sites[s][1], lokr_factor, &out_l, &out_k);
+        dit_lokr_factorization(sites[s][0], lokr_factor, &in_m, &in_n);
+        double e = (double) (out_k * in_m + out_l * out_k);
+        if (!dit_lokr_w2_mono(lokr_dim, out_k, in_n)) {
+            e += (double) ((int64_t) lokr_dim * in_m);
+        }
+        // dit_lokr_site_dims' order is self q/k/v/o, cross q/k/v/o, gate/up/down:
+        // sites 5 and 6 are the cross-attention K and V projections, and they
+        // contract against the encoder states.
+        ((s == 5 || s == 6) ? per_E : per_S) += e;
+    }
+    const double mb = DIT_FLASH_LOKR_RETENTION * (per_S * S_tok + per_E * encS_tok) * 4.0 / 1048576.0 *
+                      (double) (hi - lo);
+    return mb * DIT_FLASH_HEADROOM * 1048576.0;
 }
 
 // Layers retained at once: the widest segment. Checkpointing off (segments <= 1)
@@ -319,8 +456,12 @@ static double dit_vram_total_bytes(const DitVramModel & vm, int crop, int K) {
         // ladder, the `vram` JSONL est and dit_train_log.json — sees them too.
         // C4: its `S` is already "tokens seen by apply()", which batching multiplies,
         // and its layer range is the RETAINED one, which checkpointing divides.
-        b += dit_lokr_apply_arena_bytes(vm.m->cfg, vm.n_layers - Kr, vm.n_layers, vm.lokr_dim, vm.lokr_factor,
-                                        vm.target_mlp, S * std::max(1, vm.batch));
+        const double Bf = (double) std::max(1, vm.batch);
+        b += vm.flash_attn ? dit_vram_lokr_apply_bytes_flash(vm.m->cfg, vm.n_layers - Kr, vm.n_layers, vm.lokr_dim,
+                                                             vm.lokr_factor, vm.target_mlp, (double) S * Bf,
+                                                             (double) std::max(1, vm.enc_S) * Bf)
+                           : dit_lokr_apply_arena_bytes(vm.m->cfg, vm.n_layers - Kr, vm.n_layers, vm.lokr_dim,
+                                                        vm.lokr_factor, vm.target_mlp, S * std::max(1, vm.batch));
     }
     return b;
 }

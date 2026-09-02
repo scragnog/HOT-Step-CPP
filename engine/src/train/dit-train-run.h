@@ -1498,9 +1498,23 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             DitVramModel vmp = vm;
             vmp.segments     = SEG;
             const int    Kr  = dit_vram_seg_layers(vmp, K);
-            const double aest = flash_attn ? dit_vram_arena_bytes_flash(S_max, Kr, B, enc_S, c.n_heads, c.n_kv_heads,
+            double       aest = flash_attn ? dit_vram_arena_bytes_flash(S_max, Kr, B, enc_S, c.n_heads, c.n_kv_heads,
                                                                         c.head_dim)
                                            : dit_vram_arena_bytes(S_max, Kr, B);
+            // The LoKR kron intermediates live in the SAME scheduler buffer the
+            // measured figure counts, so leaving them out of the estimate made a
+            // LoKR run's line unreadable — that is how the 2026-09-02 refit's
+            // defect report ended up quoting a 73 % over-prediction as a 45 %
+            // under-prediction (dit-vram.h, flash LoKR apply arena). Same term
+            // dit_vram_total_bytes charges, same arguments.
+            if (vm.is_lokr) {
+                const double Bf = (double) std::max(1, B);
+                aest += flash_attn ? dit_vram_lokr_apply_bytes_flash(c, L - Kr, L, vm.lokr_dim, vm.lokr_factor,
+                                                                    vm.target_mlp, (double) S_max * Bf,
+                                                                    (double) std::max(1, enc_S) * Bf)
+                                   : dit_lokr_apply_arena_bytes(c, L - Kr, L, vm.lokr_dim, vm.lokr_factor,
+                                                                vm.target_mlp, S_max * std::max(1, B));
+            }
             const size_t ameas = M.sched ? ggml_backend_sched_get_buffer_size(M.sched, M.backend) : 0;
             fprintf(stderr,
                     "[train-dit] arena %lld MB measured vs %lld MB est (%s model, S %d, K %d, Kr %d, seg %d, B %d, "
