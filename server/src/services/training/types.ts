@@ -930,7 +930,12 @@ export interface TrainDitCapabilities {
   available: boolean;              // ace-train binary found
   adapterTypes: DitAdapterType[];  // ['lora','lokr']
   adaptersRoot: string;            // <adapters>
-  /** Minimum total VRAM this build will accept, MB. v1: 16384 (D9). */
+  /** Advisory floor for the UI banner, MB — NOT a gate. Was 16384 while the
+   *  engine hard-refused any card under 16 GB (D9); that refusal was retired
+   *  2026-09-02 in favour of a per-run floor the engine solves once the base is
+   *  loaded (dit-vram.h, `floor_bytes` vs `budget_bytes`), which moves with the
+   *  mirror precision, `--attn`, `--ckpt`, depth and adapter size. Nothing on
+   *  either side of the wire may refuse a run on this number. */
   minVramMb: number;
 }
 

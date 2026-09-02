@@ -18,6 +18,7 @@
 // re-applies alpha/r from adapter_config.json (D19). Never bake it into B.
 
 #include "dit.h"
+#include "train/dit-node-profile.h"
 #include "train/lm-common.h"
 #include "train/st-write.h"
 #include "version.h"
@@ -60,6 +61,16 @@ static const char * dit_site_peft(int s) {
         case DIT_MLP_UP:   return "mlp.up_proj";
         default:           return "mlp.down_proj";
     }
+}
+
+// Site name used by the node profiler's construction scopes (dit-node-profile.h).
+// Layer-independent on purpose: 32 layers collapse onto 11 rows.
+static const char * dit_site_scope(int s) {
+    static const char * const n[DIT_NSITES] = { "apply.sa_q",      "apply.sa_k",    "apply.sa_v",
+                                                "apply.sa_o",      "apply.ca_q",    "apply.ca_k",
+                                                "apply.ca_v",      "apply.ca_o",    "apply.mlp_gate",
+                                                "apply.mlp_up",    "apply.mlp_down" };
+    return (s >= 0 && s < DIT_NSITES) ? n[s] : "apply.unknown";
 }
 
 static ggml_tensor * dit_site_weight(DiTGGMLLayer * ly, int s) {
@@ -116,6 +127,15 @@ struct DitAdapter {
     /** In-graph: y = W*x + delta(x). Returns W*x unchanged when the site is untrained. */
     virtual ggml_tensor * apply(ggml_context * ctx, ggml_tensor * w, int layer, int site,
                                 ggml_tensor * x) const                                              = 0;
+    /** apply(), wrapped in the node profiler's per-site construction scope. The
+     *  graph builder calls THIS one so every adapter/base-projection node can be
+     *  attributed without shape guessing; with DIT_PROFILE_NODES unset the scope
+     *  is one null-pointer test in and one out, and the emitted graph is
+     *  identical (a scope tags tensors, it never creates any). */
+    inline ggml_tensor *  applyP(ggml_context * ctx, ggml_tensor * w, int layer, int site, ggml_tensor * x) const {
+        DnpScope _dnp(ctx, dit_site_scope(site));
+        return apply(ctx, w, layer, site, x);
+    }
     virtual bool          exportDir(const char * dir, const DitExportMeta & meta, DitExportResult * res,
                                     std::string * err) const                                        = 0;
     virtual size_t        nParams() const                                                           = 0;

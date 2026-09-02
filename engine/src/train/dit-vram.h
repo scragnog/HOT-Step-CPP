@@ -344,10 +344,13 @@ static double dit_vram_lokr_apply_bytes_flash(const DiTGGMLConfig & c, int lo, i
         int64_t out_l, out_k, in_m, in_n;
         dit_lokr_factorization(sites[s][1], lokr_factor, &out_l, &out_k);
         dit_lokr_factorization(sites[s][0], lokr_factor, &in_m, &in_n);
-        double e = (double) (out_k * in_m + out_l * out_k);
-        if (!dit_lokr_w2_mono(lokr_dim, out_k, in_n)) {
-            e += (double) ((int64_t) lokr_dim * in_m);
-        }
+        // 2026-09-02: the per-site live set follows whichever contraction order
+        // dit_lokr_pick_order() gives this site, so this estimate cannot drift
+        // from the graph apply() builds. Sites still on DIT_LOKR_ORDER_W2 keep
+        // the expression this replaced, element for element.
+        const bool mono = dit_lokr_w2_mono(lokr_dim, out_k, in_n);
+        const int  ord  = dit_lokr_pick_order(mono, in_m, in_n, out_l, out_k, lokr_dim);
+        double     e    = dit_lokr_site_live_elems(ord, mono, in_m, in_n, out_l, out_k, lokr_dim);
         // dit_lokr_site_dims' order is self q/k/v/o, cross q/k/v/o, gate/up/down:
         // sites 5 and 6 are the cross-attention K and V projections, and they
         // contract against the encoder states.
@@ -517,8 +520,32 @@ struct DitVramFit {
     bool   crop_user    = false;
     bool   layers_user  = false;
     bool   lowered      = false;  // the ladder had to reduce depth
-    double floor_bytes  = 0.0;    // fixed footprint at K=2, crop_min — the refusal number
+    // The refusal number: the cheapest configuration this walk can express, and
+    // the configuration itself so a refusal can name it. See the block that
+    // fills these in inside dit_vram_fit.
+    double floor_bytes    = 0.0;
+    int    floor_crop     = 0;
+    int    floor_layers   = 0;
+    int    floor_segments = 1;
+    // What the walk was actually allowed to spend: free - reserve, less safety.
+    // Reported so a refusal can show the subtraction rather than just its result.
+    double budget_bytes   = 0.0;
 };
+
+// The widest segment count the walk would try at depth K — the last element of
+// dit_vram_fit's seg_candidates(K). Hoisted out so the floor below and the walk
+// cannot drift apart: a floor priced at a segment count the walk would never
+// reach is either a refusal that lies or a gate that lets an OOM through.
+static int dit_vram_widest_segments(int ckpt_mode, int K) {
+    const int kmax = std::max(1, K);
+    if (ckpt_mode == 0) {
+        return 1;  // --ckpt 0 pins the monolithic graph; segments are not an axis
+    }
+    if (ckpt_mode >= 2) {
+        return std::min(ckpt_mode, kmax);  // a pinned N is never changed behind the user's back
+    }
+    return std::min(32, kmax);  // auto: the { 1, 2, 4, 8, 16, 32 } ladder's last rung
+}
 
 // Largest patch-aligned crop in [crop_min, cap] whose footprint fits `budget`.
 // 0 when even crop_min does not fit.
@@ -576,8 +603,51 @@ static DitVramFit dit_vram_fit(const DitVramModel & vm, ggml_backend_t backend, 
         cmin = cap;  // a dataset shorter than crop_min still trains on whole songs
     }
 
-    v.segments    = (ckpt_mode == 0) ? 1 : std::max(1, ckpt_mode);
-    r.floor_bytes = dit_vram_total_bytes(v, cmin, 2);
+    r.budget_bytes = budget;
+
+    // ── the floor: the cheapest configuration this walk can express ─────────
+    //
+    // This is the refusal number, and since 2026-09-02 it is also the GATE (the
+    // flat 16 GB card check it replaced is retired at the bottom of this file).
+    // It has to be the walk's own last rung or it is worthless in both
+    // directions — priced too high and it refuses a card the walk could have
+    // fitted, too low and it waves through a run that OOMs three ladder rungs
+    // later. So every axis here mirrors the search below, decision for decision:
+    //
+    //   depth     K = 2 (the ladder's bottom rung) when --layers is auto; the
+    //             PINNED depth when it is not, because the ladder is not allowed
+    //             to go under a user's number.
+    //   crop      crop_min when --crop is auto; the pinned crop otherwise, with
+    //             the same max_T clamp the crop_user path applies.
+    //   segments  the widest rung seg_candidates() would reach at that depth.
+    //   batch     1, because ordered_fit() walks B down to 1 before it gives up.
+    //
+    // Adapter type/rank/dim, mirror precision and --attn are NOT floored: they
+    // are the run's own choices, not axes the fit is allowed to move. That is
+    // exactly why they are the levers a refusal should name.
+    {
+        DitVramModel f  = vm;
+        f.batch         = 1;
+        const int Kf    = r.layers_user ? std::max(1, std::min(user_layers, vm.n_layers))
+                                        : std::min(2, std::max(1, vm.n_layers));
+        int       cf    = cmin;
+        if (r.crop_user) {
+            cf = user_crop - (user_crop % vm.patch);
+            if (cf > max_T) {
+                cf = max_T - (max_T % vm.patch);
+            }
+        }
+        if (cf < vm.patch) {
+            cf = vm.patch;
+        }
+        f.segments       = dit_vram_widest_segments(ckpt_mode, Kf);
+        r.floor_crop     = cf;
+        r.floor_layers   = Kf;
+        r.floor_segments = f.segments;
+        r.floor_bytes    = dit_vram_total_bytes(f, cf, Kf);
+    }
+
+    v.segments = (ckpt_mode == 0) ? 1 : std::max(1, ckpt_mode);
 
     const int ladder[] = { vm.n_layers, 16, 8, 4, 2 };
     const int n_rungs  = (int) (sizeof(ladder) / sizeof(ladder[0]));
@@ -697,10 +767,160 @@ static DitVramFit dit_vram_fit(const DitVramModel & vm, ggml_backend_t backend, 
     return r;
 }
 
-// D9: 12 GB does not fit at ANY depth (the K=2 floor alone exceeds the budget).
-// Refuse it by name rather than letting the ladder produce a cryptic vram fatal.
-#define DIT_MIN_VRAM_MB 16384
+// ─── D9 RETIRED (2026-09-02) ────────────────────────────────────────────────
+//
+// What used to live here:
+//
+//   #define DIT_MIN_VRAM_MB 16384
+//   static bool dit_vram_card_supported(size_t total_mb) { ... }
+//
+// — a flat refusal of any card reporting under 16 GB TOTAL, on the grounds that
+// "the K=2 floor alone (~8.3 GB of F32 mirror) exceeds a 12 GB budget". That
+// sentence was true of the trainer D9 was written for. It has not been true for
+// some time: `--mirror bf16` halves the term the number was derived from,
+// `--ckpt` splits the activation set, the --layers ladder trims the mirror and
+// the optimizer state with the depth, `--attn flash` deletes both retained
+// softmaxes, and rank/dim move the adapter and its Adam state. The gate could
+// not see any of that, because it ran on `total_mb` alone, BEFORE the footprint
+// model had been asked what this particular run costs.
+//
+// The replacement is `DitVramFit::floor_bytes` versus `DitVramFit::budget_bytes`
+// — the walk's own bottom rung against what the card actually has free. It is
+// strictly better informed than a constant: it moves with the run's settings,
+// it is the same arithmetic that sizes the run, and by construction it refuses
+// exactly when the walk finds nothing (floor > budget <=> !fit.ok), so there is
+// one refusal path instead of two that could disagree.
+//
+// WHAT THIS DOES NOT TOUCH. The floor is an ESTIMATE, and the estimate is not
+// the safety net. The mandatory high-water probe (dit-train-run.h §"high-water
+// probe") still builds and runs the widest graph before epoch 1, and the NVML
+// tripwire still compares device-wide usage against the device total afterwards.
+// Both are unchanged. Lowering an estimate-based gate is only defensible
+// BECAUSE those two are there to catch the cells the polynomial gets wrong.
 
-static bool dit_vram_card_supported(size_t total_mb) {
-    return total_mb + 512 >= (size_t) DIT_MIN_VRAM_MB;  // 512 MB slack for reporting rounding
+// Advisory only, and not consulted by any refusal: the number the server hands
+// the UI for its "this build wants a card at least this big" banner. Not a
+// floor — the engine's floor is per-run and computed above.
+#define DIT_ADVISORY_VRAM_MB 8192
+
+// The two or three settings that would lower this run's floor most, as text:
+//   "--mirror bf16 (-6104 MB), --attn flash (-2411 MB), --lokr-dim 64 (-822 MB)"
+//
+// Every candidate is PRICED, never ranked by folklore — the floor configuration
+// is re-costed with that one lever flipped and the difference is what gets
+// printed. Levers the run has already taken are not offered, and neither is one
+// that saves nothing. `allow_bf16` is the caller's business because the BF16
+// mirror is CUDA-only (dit-train-run.h falls back to f32 elsewhere, so
+// suggesting it on a Vulkan build would be advice that does nothing).
+//
+// `all_bytes` is the floor with EVERY offered lever pulled at once, priced the
+// same way rather than by adding the individual savings (they interact — the
+// arena term is not separable). It exists because "-47 MB" against a 3645 MB
+// shortfall is advice that wastes somebody's afternoon: the caller compares
+// `all_bytes` to the budget and, when even that does not fit, says so instead of
+// implying the flags are worth trying. Measured on this base (2026-09-02), an
+// emulated 8 GB card is exactly that case — the bf16 mirror of the frozen base
+// is 7956 MB of an 8351 MB floor, so no combination of run settings reaches it.
+struct DitVramAdvice {
+    std::string text;
+    double      all_bytes = 0.0;  // the floor with every offered lever applied
+    int         n         = 0;    // how many levers were offered at all
+};
+
+static DitVramAdvice dit_vram_floor_advice(const DitVramModel & vm, const DitVramFit & fit, int ckpt_mode,
+                                           bool allow_bf16, int top_n = 3) {
+    struct Cand {
+        std::string label;
+        double      saves = 0.0;
+    };
+    const int    K0   = std::max(1, fit.floor_layers);
+    const int    c0   = std::max(vm.patch, fit.floor_crop);
+    const int    cmin = std::max(vm.patch, 128 - (128 % std::max(1, vm.patch)));
+    DitVramModel base = vm;
+    base.batch        = 1;
+    base.segments     = fit.floor_segments;
+    const double b0   = fit.floor_bytes;
+
+    // Which levers apply. Decided once, so the individual pricing below and the
+    // all-at-once pricing cannot disagree about what was offered.
+    const bool lv_bf16  = allow_bf16 && base.mirror != DIT_MIRROR_BF16;
+    const bool lv_flash = !base.flash_attn;
+    const bool lv_ckpt  = ckpt_mode == 0 && K0 > 1;
+    const bool lv_dim   = base.is_lokr && base.lokr_dim > 64;
+    const bool lv_rank  = !base.is_lokr && base.rank > 8;
+    const bool lv_mlp   = base.target_mlp;
+    const bool lv_depth = K0 > 2;  // only reachable when --layers was PINNED above the bottom rung
+    const bool lv_crop  = c0 > cmin;
+
+    // `all` accumulates every applicable lever; each individual candidate is a
+    // fresh copy of `base` with exactly one flipped.
+    DitVramModel all    = base;
+    int          all_K  = K0;
+    int          all_c  = c0;
+
+    std::vector<Cand> cands;
+    auto price = [&](const char * label, DitVramModel m, int crop, int K) {
+        m.batch        = 1;
+        const double b = dit_vram_total_bytes(m, crop, K);
+        if (b0 - b > 8.0 * 1048576.0) {  // below ~8 MB it is noise, not advice
+            Cand cd;
+            cd.label = label;
+            cd.saves = b0 - b;
+            cands.push_back(cd);
+        }
+    };
+
+    if (lv_bf16) {
+        DitVramModel m = base;
+        m.mirror = all.mirror = DIT_MIRROR_BF16;
+        price("--mirror bf16", m, c0, K0);
+    }
+    if (lv_flash) {
+        DitVramModel m = base;
+        m.flash_attn = all.flash_attn = true;
+        price("--attn flash", m, c0, K0);
+    }
+    if (lv_ckpt) {
+        DitVramModel m = base;
+        m.segments = all.segments = dit_vram_widest_segments(1, K0);
+        price("--ckpt 1 (auto gradient checkpointing)", m, c0, K0);
+    }
+    if (lv_dim) {
+        DitVramModel m = base;
+        m.lokr_dim = all.lokr_dim = 64;
+        price("--lokr-dim 64", m, c0, K0);
+    } else if (lv_rank) {
+        DitVramModel m = base;
+        m.rank = all.rank = 8;
+        price("--rank 8", m, c0, K0);
+    }
+    if (lv_mlp) {
+        DitVramModel m = base;
+        m.target_mlp = all.target_mlp = false;
+        price("--no-target-mlp", m, c0, K0);
+    }
+    if (lv_depth) {
+        DitVramModel m = base;
+        m.segments = dit_vram_widest_segments(ckpt_mode, 2);
+        all_K      = 2;
+        all.segments = m.segments;
+        price("--layers 2", m, c0, 2);
+    }
+    if (lv_crop) {
+        all_c = cmin;
+        price(fit.crop_user ? "--crop 128" : "--crop-min 128", base, cmin, K0);
+    }
+
+    DitVramAdvice out;
+    out.all_bytes = dit_vram_total_bytes(all, all_c, all_K);
+    out.n         = (int) cands.size();
+    std::sort(cands.begin(), cands.end(), [](const Cand & a, const Cand & b) { return a.saves > b.saves; });
+    const int n = std::min((int) cands.size(), std::max(1, top_n));
+    for (int i = 0; i < n; i++) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%s%s (-%lld MB)", i ? ", " : "", cands[(size_t) i].label.c_str(),
+                 (long long) (cands[(size_t) i].saves / 1048576.0));
+        out.text += buf;
+    }
+    return out;
 }

@@ -3943,7 +3943,15 @@ static int cmd_train_dit(int argc, char ** argv) {
         a.weight_decay > 1.0f || a.target_loss < 0.0f || a.target_loss > 20.0f || a.milestone_keep < 0 ||
         a.batch < 1 || a.batch > 16 || a.ckpt < 0 || a.ckpt > 32 ||
         a.milestone_keep > 64 || a.milestone_step < 0.0f || a.milestone_step > 5.0f || a.vram_reserve_mb < 0 ||
-        a.vram_reserve_mb > 16384 || a.vram_safety < 0.0f || a.vram_safety >= 1.0f || a.layers < 0 || a.layers > 64 ||
+        // Reserve cap raised 16384 -> 131072 (2026-09-02). 16 GB was a plausible
+        // ceiling for "desktop/OS headroom" and nothing else, and it made the
+        // sub-16 GB floor untestable on the hardware we have: emulating a 12/8/6
+        // GB card means reserving 20-27 GB of a 32 GB one, which the old bound
+        // rejected outright. It is also wrong on its own terms for anyone sharing
+        // a 48/96 GB card with something else. A reserve larger than free VRAM is
+        // already handled — the fit's budget goes negative and the floor gate
+        // refuses with the usual message — so there is nothing to protect here.
+        a.vram_reserve_mb > 131072 || a.vram_safety < 0.0f || a.vram_safety >= 1.0f || a.layers < 0 || a.layers > 64 ||
         (a.crop != 0 && (a.crop < 128 || a.crop > 8192)) || a.crop_min < 128 || a.crop_min > 8192 ||
         a.crop_max < a.crop_min || a.crop_max > 8192 || a.snr_gamma < 1.0f || a.snr_gamma > 100.0f ||
         a.t_bias < 0.0f || a.t_bias > 4.0f || a.timestep_mu < -4.0f || a.timestep_mu > 4.0f ||

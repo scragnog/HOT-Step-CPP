@@ -659,9 +659,21 @@ struct BenchArm {
 // arm 0 = manual (the autodiff'd dit_attn_f32 chain), 1 = fused f32 (v1
 // kernels), 2 = fused tf32 (the tensor-core forward). Three arms rather than
 // two so the regression against v1 is visible in the same table as the target.
+// HOT-Step patch: flash-attn-train (stream B2) -- the three geometries the DiT
+// trainer actually emits, so the bench stops measuring only the one of them that
+// happens to be fastest. `--bench`'s grid is BENCH_MASK_WIN at S == S_kv; the
+// trainer's other two sites are a NULL-mask full self-attention (16 of 32 layers
+// at B == 1) and cross-attention at S_kv == enc_S with the encoder pad mask.
+enum BenchMask {
+    BENCH_MASK_WIN = 0,   // dit_sa_mask(S, 128) -- windowed self-attention
+    BENCH_MASK_NONE,      // no mask at all -- full self-attention at B == 1
+    BENCH_MASK_CA,        // dit_ca_mask(enc_S, S, keep) -- cross-attention
+};
+
 static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t B,
                         int64_t Nh, int64_t Nkv, int64_t D, ggml_backend_t be,
-                        std::string & err) {
+                        std::string & err, BenchMask mk = BENCH_MASK_WIN,
+                        double enc_real = 1.0, bool fwd_only = false) {
     const bool flash = arm != 0;
     const float scale = 1.0f / std::sqrt((float) D);
 
@@ -690,9 +702,12 @@ static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t 
     ggml_set_param(v);
     ggml_set_input(w);
 
-    ggml_tensor * m = ggml_new_tensor_4d(a.ctx, GGML_TYPE_F16, S_kv, S, 1, 1);
-    ggml_set_name(m, "mask");
-    ggml_set_input(m);
+    ggml_tensor * m = nullptr;
+    if (mk != BENCH_MASK_NONE) {
+        m = ggml_new_tensor_4d(a.ctx, GGML_TYPE_F16, S_kv, S, 1, 1);
+        ggml_set_name(m, "mask");
+        ggml_set_input(m);
+    }
 
     ggml_tensor * o;
     if (flash) {
@@ -710,7 +725,7 @@ static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t 
 
     a.gf = ggml_new_graph_custom(a.ctx, GGML_DEFAULT_GRAPH_SIZE, true);
     ggml_build_forward_expand(a.gf, loss);
-    if (!g_fwd_only) {
+    if (!g_fwd_only && !fwd_only) {
         ggml_build_backward_expand(a.ctx, a.gf, nullptr);
     }
 
@@ -730,13 +745,27 @@ static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t 
     fill(hv, 0xB0001003u + (uint64_t) S);
     fill(hw, 0xB0001004u + (uint64_t) S);
     std::vector<uint16_t> hm;
-    dit_sa_mask((int) S, 128, &hm);   // bench grid keeps S_kv == S (self-attn shape)
+    if (mk == BENCH_MASK_WIN) {
+        dit_sa_mask((int) S, 128, &hm);
+    } else if (mk == BENCH_MASK_CA) {
+        // Encoder pad mask: the first `enc_real` fraction of the KV axis is real
+        // and the tail is -INF, which is exactly how dit_ca_mask lays a padded
+        // caption out (the pad is a contiguous tail, so whole key tiles die).
+        std::vector<float> keep((size_t) S_kv, 0.0f);
+        const int64_t      nreal = (int64_t) ((double) S_kv * enc_real + 0.5);
+        for (int64_t j = 0; j < nreal && j < S_kv; j++) {
+            keep[(size_t) j] = 1.0f;
+        }
+        dit_ca_mask((int) S_kv, (int) S, keep, &hm);
+    }
 
     ggml_backend_tensor_set(q, hq.data(), 0, ggml_nbytes(q));
     ggml_backend_tensor_set(k, hk.data(), 0, ggml_nbytes(k));
     ggml_backend_tensor_set(v, hv.data(), 0, ggml_nbytes(v));
     ggml_backend_tensor_set(w, hw.data(), 0, ggml_nbytes(w));
-    ggml_backend_tensor_set(m, hm.data(), 0, ggml_nbytes(m));
+    if (m) {
+        ggml_backend_tensor_set(m, hm.data(), 0, ggml_nbytes(m));
+    }
 
     // ggml_set_loss only allocates grad_accs[loss]; it never initialises it
     // (same trap arm_run guards against above).
@@ -758,11 +787,13 @@ struct BenchResult {
 };
 
 static BenchResult bench_run(int arm, int64_t S, int64_t S_kv, int64_t B, int64_t Nh,
-                             int64_t Nkv, int64_t D, ggml_backend_t be) {
+                             int64_t Nkv, int64_t D, ggml_backend_t be,
+                             BenchMask mk = BENCH_MASK_WIN, double enc_real = 1.0,
+                             bool fwd_only = false) {
     BenchResult r;
     BenchArm    a;
     std::string err;
-    if (!bench_build(a, arm, S, S_kv, B, Nh, Nkv, D, be, err)) {
+    if (!bench_build(a, arm, S, S_kv, B, Nh, Nkv, D, be, err, mk, enc_real, fwd_only)) {
         r.note = err;
         return r;
     }
@@ -810,6 +841,85 @@ static double live_keys_per_row(int64_t S, int64_t win, int64_t bk) {
         tot += (double) live;
     }
     return S > 0 ? tot / (double) S : 0.0;
+}
+
+// HOT-Step patch: flash-attn-train (stream B2). --bench-tr: the DiT trainer's
+// THREE attention geometries, forward and backward split, manual vs fused-tf32.
+// This is the loop the stream-B node profile named -- cross-attention backward
+// -- reproduced in ~20 s instead of a 10-epoch training run.
+struct BenchGeo {
+    const char * name;
+    int64_t      S;
+    int64_t      S_kv;
+    BenchMask    mk;
+    double       enc_real;
+    int          sites;   // per micro-step in a 32-layer run, for the ms/step column
+};
+
+static int run_bench_trainer(ggml_backend_t be_cuda, int64_t S_q, int64_t enc_S, double enc_real,
+                             const char * only, bool fused_only) {
+    const int64_t B = 1, Nh = 32, Nkv = 8, D = 128;
+
+    const BenchGeo geos[] = {
+        { "self-win",  S_q, S_q,   BENCH_MASK_WIN,  1.0,      16 },
+        { "self-full", S_q, S_q,   BENCH_MASK_NONE, 1.0,      16 },
+        { "cross",     S_q, enc_S, BENCH_MASK_CA,   enc_real, 32 },
+    };
+
+    printf("fattn-train-test --bench-tr — trainer geometries on %s\n", ggml_backend_name(be_cuda));
+    printf("B=%lld Nh=%lld Nkv=%lld D=%lld  S=%lld  enc_S=%lld (%.0f%% real)  "
+           "10 warm-up + 50 timed iters\n\n",
+           (long long) B, (long long) Nh, (long long) Nkv, (long long) D,
+           (long long) S_q, (long long) enc_S, enc_real * 100.0);
+    printf("%-10s %-11s %9s %9s %9s %9s %9s\n",
+           "geometry", "arm", "fwd ms", "bwd ms", "tot ms", "bwd x", "tot x");
+
+    double step_manual = 0.0, step_fused = 0.0;
+    for (size_t gi = 0; gi < sizeof(geos) / sizeof(geos[0]); gi++) {
+        const BenchGeo & g = geos[gi];
+        if (only && *only && strcmp(only, g.name) != 0) {
+            continue;
+        }
+        double mf = 0.0, mb = 0.0, mt = 0.0;
+        for (int arm = 0; arm < 3; arm++) {
+            if (arm == 1) {
+                continue;   // v1 scalar kernels are not the question here
+            }
+            if (fused_only && arm == 0) {
+                continue;
+            }
+            static const char * names[3] = { "manual", "fused-f32", "fused-tf32" };
+            const BenchResult tot = bench_run(arm, g.S, g.S_kv, B, Nh, Nkv, D, be_cuda,
+                                              g.mk, g.enc_real, /*fwd_only=*/false);
+            const BenchResult fwd = bench_run(arm, g.S, g.S_kv, B, Nh, Nkv, D, be_cuda,
+                                              g.mk, g.enc_real, /*fwd_only=*/true);
+            if (!tot.ok || !fwd.ok) {
+                printf("%-10s %-11s %9s %9s %9s %9s %9s  %s\n", g.name, names[arm],
+                       "n/a", "n/a", "n/a", "n/a", "n/a",
+                       tot.ok ? fwd.note.c_str() : tot.note.c_str());
+                continue;
+            }
+            const double bwd = tot.ms - fwd.ms;
+            if (arm == 0) {
+                mf = fwd.ms;
+                mb = bwd;
+                mt = tot.ms;
+                step_manual += tot.ms * g.sites;
+                printf("%-10s %-11s %9.4f %9.4f %9.4f %9s %9s\n", g.name, names[arm],
+                       fwd.ms, bwd, tot.ms, "1.00x", "1.00x");
+            } else {
+                step_fused += tot.ms * g.sites;
+                printf("%-10s %-11s %9.4f %9.4f %9.4f %8.2fx %8.2fx\n", g.name, names[arm],
+                       fwd.ms, bwd, tot.ms, mb > 0 ? bwd / mb : 0.0, mt > 0 ? tot.ms / mt : 0.0);
+            }
+            (void) mf;
+            fflush(stdout);
+        }
+    }
+    printf("\nattention ms per micro-step at 32 layers (16 win + 16 full + 32 cross):\n"
+           "  manual %8.1f ms\n  fused  %8.1f ms   delta %+.1f ms\n",
+           step_manual, step_fused, step_fused - step_manual);
+    return 0;
 }
 
 static int run_bench(ggml_backend_t be_cuda) {
@@ -1253,6 +1363,12 @@ int main(int argc, char ** argv) {
     bool        extra = false;
     bool        large = false;
     bool        bench = false;
+    bool        bench_tr = false;
+    int64_t     tr_S   = 625;
+    int64_t     tr_enc = 1877;
+    double      tr_real = 1.0;
+    std::string tr_only;
+    bool        tr_fused_only = false;
     int         nth   = 0;
     std::string want_backend = "cpu";
     // DEFAULTS TO f32, and that is not a preference: the recorded regression
@@ -1274,6 +1390,19 @@ int main(int argc, char ** argv) {
             large = true;
         } else if (a == "--bench") {
             bench = true;
+        } else if (a == "--bench-tr") {
+            bench    = true;
+            bench_tr = true;
+        } else if (a == "--tr-s" && i + 1 < argc) {
+            tr_S = atoll(argv[++i]);
+        } else if (a == "--tr-enc" && i + 1 < argc) {
+            tr_enc = atoll(argv[++i]);
+        } else if (a == "--tr-real" && i + 1 < argc) {
+            tr_real = atof(argv[++i]);
+        } else if (a == "--tr-only" && i + 1 < argc) {
+            tr_only = argv[++i];
+        } else if (a == "--tr-fused") {
+            tr_fused_only = true;
         } else if (a == "--threads" && i + 1 < argc) {
             nth = atoi(argv[++i]);
         } else if (a == "--backend" && i + 1 < argc) {
@@ -1319,7 +1448,9 @@ int main(int argc, char ** argv) {
                         breg, "ggml_backend_cuda_fattn_train_last_prec");
             }
         }
-        const int rc = run_bench(be_cuda);
+        const int rc = bench_tr ? run_bench_trainer(be_cuda, tr_S, tr_enc, tr_real,
+                                                   tr_only.c_str(), tr_fused_only)
+                                : run_bench(be_cuda);
         ggml_backend_free(be_cuda);
         return rc;
     }

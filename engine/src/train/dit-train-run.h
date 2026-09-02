@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <map>
+#include "train/dit-node-profile.h"
 #include "train/dit-train-graph.h"
 #include "train/dit-vram.h"
 #include "train/lm-optim.h"
@@ -373,6 +374,28 @@ static void dit_op_prof_print(DitOpProf & p) {
                 tot > 0 ? 100.0 * (double) v[i].second.first / (double) tot : 0.0, v[i].second.second,
                 v[i].first.c_str());
     }
+    // Per-OP roll-up. The shape-keyed table above scatters one op across dozens
+    // of rows (a LoKR step has 235 keys), so "how much does CONT cost" is not
+    // answerable from it. This collapses the key at the first space.
+    std::map<std::string, std::pair<long long, int>> byop;
+    for (size_t i = 0; i < v.size(); i++) {
+        const size_t sp = v[i].first.find(' ');
+        std::pair<long long, int> & e = byop[v[i].first.substr(0, sp == std::string::npos ? v[i].first.size() : sp)];
+        e.first += v[i].second.first;
+        e.second += v[i].second.second;
+    }
+    std::vector<std::pair<std::string, std::pair<long long, int>>> o(byop.begin(), byop.end());
+    std::sort(o.begin(), o.end(),
+              [](const std::pair<std::string, std::pair<long long, int>> & a,
+                 const std::pair<std::string, std::pair<long long, int>> & b) {
+                  return a.second.first > b.second.first;
+              });
+    fprintf(stderr, "[train-dit] op profile by OP:");
+    for (size_t i = 0; i < o.size(); i++) {
+        fprintf(stderr, " %s %.1f (%.1f%%, x%d)", o[i].first.c_str(), (double) o[i].second.first / 1000.0,
+                tot > 0 ? 100.0 * (double) o[i].second.first / (double) tot : 0.0, o[i].second.second);
+    }
+    fprintf(stderr, "\n");
 }
 
 struct DitTrainOutcome {
@@ -569,21 +592,15 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // Everything that sizes or polices the run reads NVML when it is available.
     const DitGpuMem gmem = dit_gpu_mem_query(M.backend);
 
-    // ── card support gate (D9) ───────────────────────────────────────────
-    const size_t total_mb = gmem.total_mb();
-    if (!dit_vram_card_supported(total_mb)) {
-        char extra[128];
-        snprintf(extra, sizeof(extra), ",\"needMb\":%d,\"freeMb\":%lld", DIT_MIN_VRAM_MB,
-                 (long long) gmem.free_mb());
-        char b[320];
-        snprintf(b, sizeof(b),
-                 "DiT LoRA training needs a 16 GB card or larger; this one reports %lld MB. Even the 2-layer floor "
-                 "(~8.3 GB of F32 mirror) does not fit a 12 GB budget — see the plan's D9 / R1.",
-                 (long long) total_mb);
-        lm_fatal("vram", b, extra);
-        dit_train_free(&M);
-        return 1;
-    }
+    // ── card support gate: NOT HERE ANY MORE (D9 retired 2026-09-02) ─────
+    //
+    // A flat `total_mb >= 16384` check used to sit at this line and refuse the
+    // card before the footprint model had priced anything. It is gone: the gate
+    // is now the auto-fit's own floor (dit_vram_fit's floor_bytes vs
+    // budget_bytes) and it is applied at the `!fit.ok` refusal below, where the
+    // run's mirror precision, attention formulation, checkpoint segments, depth
+    // and adapter size are all known and all count. See the retirement note at
+    // the bottom of dit-vram.h for why the constant stopped being true.
 
     // ── VRAM auto-fit (D10/D11) ──────────────────────────────────────────
     DitVramModel vm;
@@ -718,16 +735,73 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             vm.batch = cap;
         }
     }
+    // ── the refusal, and the ONLY VRAM gate (D9's flat 16 GB check retired) ─
+    //
+    // `!fit.ok` means the walk exhausted every axis it is allowed to move, which
+    // is the same statement as "floor_bytes does not fit budget_bytes" — so this
+    // is the fit-derived gate, not merely its error path. Three things it must
+    // say, because a refusal that only prints a number leaves the user guessing
+    // which of a dozen flags to reach for:
+    //   1. the floor and the CONFIGURATION it is (depth/crop/segments/batch, plus
+    //      the choices the fit is not allowed to move: adapter, mirror, attn);
+    //   2. the measured free VRAM and the subtraction that turned it into a
+    //      budget (reserve, safety) — the reserve in particular is a knob;
+    //   3. the two or three settings that would lower the floor most, PRICED.
     if (!fit.ok) {
-        char extra[160];
-        snprintf(extra, sizeof(extra), ",\"needMb\":%lld,\"freeMb\":%lld",
-                 (long long) (fit.est_bytes / 1048576.0), (long long) fit.free_mb);
-        char b[320];
+        const bool          bf16_ok = strncmp(ggml_backend_name(M.backend), "CUDA", 4) == 0;
+        const DitVramAdvice adv     = dit_vram_floor_advice(vm, fit, a.ckpt, bf16_ok);
+        // How much of the floor is the frozen base itself. When this is most of
+        // it — and on a 32-layer XL base with a bf16 mirror it is ~7.9 GB of an
+        // ~8.3 GB floor — no run setting can help and the message must not
+        // pretend otherwise; the only routes left are a bigger card or a
+        // smaller/quantised base.
+        const long long mirror_mb =
+            (long long) (dit_mirror_bytes_for(&M.m, L - fit.floor_layers, mirror_mode, false) / 1048576);
+        const long long floor_mb  = (long long) (fit.floor_bytes / 1048576.0);
+        const long long budget_mb = (long long) (fit.budget_bytes / 1048576.0);
+        const long long short_mb  = floor_mb - budget_mb;
+        const long long all_mb    = (long long) (adv.all_bytes / 1048576.0);
+        char            extra[352];
+        snprintf(extra, sizeof(extra),
+                 ",\"needMb\":%lld,\"freeMb\":%lld,\"floorMb\":%lld,\"budgetMb\":%lld,\"totalMb\":%lld,"
+                 "\"mirrorMb\":%lld,\"allLeversMb\":%lld,\"floorCrop\":%d,\"floorLayers\":%d,\"floorSegments\":%d",
+                 floor_mb, (long long) fit.free_mb, floor_mb, budget_mb, (long long) fit.total_mb, mirror_mb, all_mb,
+                 fit.floor_crop, fit.floor_layers, fit.floor_segments);
+        char adapter[96];
+        if (is_lokr) {
+            snprintf(adapter, sizeof(adapter), "LoKR dim %d/factor %d%s", a.lokr_dim, a.lokr_factor,
+                     a.target_mlp ? "+MLP" : "");
+        } else {
+            snprintf(adapter, sizeof(adapter), "LoRA rank %d%s", a.rank, a.target_mlp ? "+MLP" : "");
+        }
+        // The closing sentence: either the levers can close the gap, or they
+        // cannot and the base is the wall.
+        char tail[352];
+        if (adv.n == 0) {
+            snprintf(tail, sizeof(tail), "Nothing left to trade: every VRAM lever this trainer has is already pulled, "
+                                         "and %lld MB of the floor is the frozen base's mirror. A bigger card or a "
+                                         "smaller (or quantised) base is the only way from here.",
+                     mirror_mb);
+        } else if (all_mb > budget_mb) {
+            snprintf(tail, sizeof(tail),
+                     "Biggest levers left: %s — but all of them together only reach %lld MB, still %lld MB over, and "
+                     "%lld MB of the floor is the frozen base's mirror. That is the wall here, not the run's settings.",
+                     adv.text.c_str(), all_mb, all_mb - budget_mb, mirror_mb);
+        } else {
+            snprintf(tail, sizeof(tail), "Biggest levers left: %s (%lld MB short; all of them together reach %lld MB, "
+                                         "which fits).",
+                     adv.text.c_str(), short_mb, all_mb);
+        }
+        char b[900];
         snprintf(b, sizeof(b),
-                 "not enough free VRAM: the smallest configuration that would run needs ~%lld MB, %lld MB free "
-                 "(reserve %d MB, safety %.0f%%)",
-                 (long long) (fit.est_bytes / 1048576.0), (long long) fit.free_mb, a.vram_reserve_mb,
-                 (double) a.vram_safety * 100.0);
+                 "not enough free VRAM: the smallest configuration this run can express needs ~%lld MB and the budget "
+                 "is %lld MB (%lld MB short). Floor = %d layers, crop %d, %d checkpoint segment%s, batch 1, %s, %s "
+                 "mirror, --attn %s — of which the frozen-weight mirror is %lld MB. Card %lld MB total, %lld MB free "
+                 "(%s), minus %d MB reserve, minus %.0f%% safety. %s",
+                 floor_mb, budget_mb, short_mb, fit.floor_layers, fit.floor_crop, fit.floor_segments,
+                 fit.floor_segments == 1 ? "" : "s", adapter, mirror_mode == DIT_MIRROR_BF16 ? "bf16" : "f32",
+                 a.attn.c_str(), mirror_mb, (long long) fit.total_mb, (long long) fit.free_mb, fit.free_source,
+                 a.vram_reserve_mb, (double) a.vram_safety * 100.0, tail);
         lm_fatal("vram", b, extra);
         dit_train_free(&M);
         return 1;
@@ -1131,6 +1205,29 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         prf.on = false;
     }
     DitOpProf            opprof;
+    // Per-NODE profile with site attribution (dit-node-profile.h). Env-gated:
+    // DIT_PROFILE_NODES=1 profiles micro-step 15, =N profiles micro-step N.
+    // Nothing below runs, and no callback is installed, when the var is unset.
+    DitNodeProfile nodeprof;
+    dit_node_prof_init(&nodeprof, a.out_dir.c_str(), a.attn.c_str());
+    if (nodeprof.enabled) {
+        nodeprof.attn_prec = (attn_prec_req == GGML_PREC_F32) ? "f32" : "tf32-where-available";
+        nodeprof.adapter   = ad->typeName();
+        nodeprof.enc_S     = enc_S;
+        nodeprof.D         = c.head_dim;
+        nodeprof.Nh        = c.n_heads;
+        nodeprof.Nkv       = c.n_kv_heads;
+        nodeprof.layers    = L - lora_lo;
+        nodeprof.crop      = crop_len;
+        const std::vector<ggml_tensor *> & pv = ad->params();
+        for (size_t i = 0; i < pv.size(); i++) {
+            nodeprof.params.insert(pv[i]);
+        }
+        if (SEG > 1) {
+            lm_log("warn", "DIT_PROFILE_NODES is only instrumented for the unsegmented graph; run it with --ckpt 0");
+            nodeprof.enabled = false;
+        }
+    }
     std::vector<uint8_t> arena((size_t) 512 << 20);
     DitBatchHost         bh;
     DitBatchCfg          bcfg;
@@ -1302,6 +1399,18 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             return cok;
         }
 
+        // Node profiler: armed BEFORE the build, because the site tags are laid
+        // down by construction scopes inside the graph builder (dit-node-profile.h).
+        const bool node_now = nodeprof.enabled && backward && prf.tot_steps >= (long long) nodeprof.at_step &&
+                              prf.tot_steps < (long long) (nodeprof.at_step + nodeprof.n_steps);
+        if (node_now) {
+            nodeprof.reset();
+            nodeprof.S       = S;
+            nodeprof.B       = nb;
+            nodeprof.tagging = true;
+            g_dnp            = &nodeprof;
+        }
+
         ggml_init_params ip  = { arena.size(), arena.data(), true };
         ggml_context *   ctx = ggml_init(ip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, /*grads=*/backward);
@@ -1321,6 +1430,12 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             ggml_build_forward_expand(gf, report);
         }
         const long long p_t3 = prf.t();  // end of forward build
+        if (node_now) {
+            // Everything in the graph right now is FORWARD; anything appended
+            // below belongs to the backward pass. That split is what tells a
+            // node's fwd cost from its bwd cost.
+            dit_node_prof_mark_forward(&nodeprof, gf);
+        }
         if (backward) {
             // AFTER both forward expansions: gacc is indexed by forward-node index.
             std::vector<ggml_tensor *> gacc;
@@ -1331,10 +1446,21 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         graph_nodes = ggml_graph_n_nodes(gf);
         GGML_ASSERT(graph_nodes < 65536);
 
-        // Arm the op profiler on one warmed-up micro-step, then disarm.
-        const bool op_now = (a.profile_ops && prf.tot_steps == 15);
+        if (node_now) {
+            nodeprof.tagging     = false;  // the graph is built; no more tagging
+            g_dnp                = nullptr;
+            nodeprof.graph_nodes = graph_nodes;
+        }
+
+        // Arm the op profiler on one warmed-up micro-step, then disarm. Only one
+        // eval callback can be installed, and the node profiler is the superset
+        // (it carries the op roll-up too), so it wins when both are asked for.
+        const bool op_now = (a.profile_ops && !node_now && prf.tot_steps == 15);
         if (op_now) {
             ggml_backend_sched_set_eval_callback(M.sched, dit_op_eval_cb, &opprof);
+        }
+        if (node_now) {
+            ggml_backend_sched_set_eval_callback(M.sched, dnp_eval_cb, &nodeprof);
         }
         ggml_backend_sched_reset(M.sched);
         const long long p_t5 = prf.t();
@@ -1355,6 +1481,15 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             ggml_backend_sched_set_eval_callback(M.sched, nullptr, nullptr);
             dit_op_prof_print(opprof);
             opprof.agg.clear();
+        }
+        if (node_now) {
+            ggml_backend_sched_set_eval_callback(M.sched, nullptr, nullptr);
+            nodeprof.step_compute_us += p_t7 - p_t6;  // this step's whole compute bucket, serialised
+            nodeprof.captured = true;
+            nodeprof.done++;
+            if (nodeprof.done >= nodeprof.n_steps) {
+                dit_node_prof_print(nodeprof);
+            }
         }
         if (ok && loss_out) {
             float lv = 0.0f;
@@ -1377,6 +1512,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         // recorded whether or not profiling is on, so every run carries them.
         sched_splits = ggml_backend_sched_get_n_splits(M.sched);
         sched_copies = ggml_backend_sched_get_n_copies(M.sched);
+        if (node_now) {
+            nodeprof.sched_splits = sched_splits;
+        }
         ggml_free(ctx);
         const long long p_t9 = prf.t();
 
@@ -1899,6 +2037,17 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         }
 
         dit_prof_report(prf);  // flush a partial window, if any
+        if (nodeprof.captured) {
+            // The reference the serialised numbers are read against: mean compute
+            // bucket over every micro-step EXCEPT the profiled one, whose own
+            // cost is subtracted rather than averaged away.
+            const long long other_steps = prf.tot_steps - nodeprof.done;
+            nodeprof.real_steps         = other_steps;
+            nodeprof.real_compute_ms =
+                other_steps > 0 ? (double) (prf.tot[DPB_COMPUTE] - nodeprof.step_compute_us) / other_steps / 1000.0
+                                : 0.0;
+            dit_node_prof_write(nodeprof);
+        }
         log->vram_peak_mb = tracker.peak_mb;
         out->samples      = n;
         out->ms           = (long long) (ggml_time_ms() - t_stage0);

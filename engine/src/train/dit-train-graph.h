@@ -311,9 +311,9 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
         dit_tap(taps, "layer0_sa_input", nsa);
     }
 
-    ggml_tensor * q = ad->apply(ctx, ly->sa_q_proj, li, DIT_SA_Q, nsa);
-    ggml_tensor * k = ad->apply(ctx, ly->sa_k_proj, li, DIT_SA_K, nsa);
-    ggml_tensor * v = ad->apply(ctx, ly->sa_v_proj, li, DIT_SA_V, nsa);
+    ggml_tensor * q = ad->applyP(ctx, ly->sa_q_proj, li, DIT_SA_Q, nsa);
+    ggml_tensor * k = ad->applyP(ctx, ly->sa_k_proj, li, DIT_SA_K, nsa);
+    ggml_tensor * v = ad->applyP(ctx, ly->sa_v_proj, li, DIT_SA_V, nsa);
 
     q = ggml_reshape_4d(ctx, q, D, Nh, S, B);
     k = ggml_reshape_4d(ctx, k, D, Nkv, S, B);
@@ -336,25 +336,36 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
         k = dit_expand_heads(ctx, k, D, Nkv, Nh, S, B);
         v = dit_expand_heads(ctx, v, D, Nkv, Nh, S, B);
     }
-    q = ggml_permute(ctx, q, 0, 2, 1, 3);
-    k = ggml_permute(ctx, k, 0, 2, 1, 3);
-    v = ggml_permute(ctx, v, 0, 2, 1, 3);
-
     // layer_type 0 = sliding window, 1 = full attention (dit.h:656). Full
     // attention still takes the PAD mask when one exists (t_sa_pad is null unless
     // the batch has a padded element) — masking the pad only in the windowed
     // layers would leave every full-attention layer leaking it.
     ggml_tensor * sa_mask = (ly->layer_type == 0) ? in.t_sa : in.t_sa_pad;
-    // One of the two mode checks in the whole graph build. The false arm is the
-    // original call, unmoved, so --attn exact emits the identical node sequence.
-    ggml_tensor * attn    = (in.attn_mode == DIT_ATTN_FLASH)
-                                ? dit_attn_flash(ctx, q, k, v, sa_mask, scale, in.attn_prec_req)
-                                : dit_attn_f32(ctx, q, k, v, sa_mask, scale);  // [D,Nh,S,B]
-    attn                  = ggml_reshape_3d(ctx, attn, (int64_t) Nh * D, S, B);
+    ggml_tensor * attn    = nullptr;
+    {
+        // Node-profiler site (dit-node-profile.h). It starts at the permutes, not
+        // at the attention call, because the permuted q/k/v ARE srcs of the
+        // attention backward in exact mode — tagging them is what lets those
+        // out_prod nodes be attributed to attention instead of `other`. The scope
+        // creates no tensors and reorders none: sa_mask above is a plain pointer
+        // choice, so --attn exact still emits the identical node sequence.
+        // Windowed and full layers are named apart because they are not the same
+        // work: the fused kernel skips tiles a window mask killed and the manual
+        // chain computes the dense S^2 either way (plan investigation B4).
+        DnpScope _dnp(ctx, ly->layer_type == 0 ? "attn.self.win" : "attn.self.full");
+        q = ggml_permute(ctx, q, 0, 2, 1, 3);
+        k = ggml_permute(ctx, k, 0, 2, 1, 3);
+        v = ggml_permute(ctx, v, 0, 2, 1, 3);
+        // One of the two mode checks in the whole graph build. The false arm is
+        // the original call, unmoved, so --attn exact emits the identical nodes.
+        attn = (in.attn_mode == DIT_ATTN_FLASH) ? dit_attn_flash(ctx, q, k, v, sa_mask, scale, in.attn_prec_req)
+                                                : dit_attn_f32(ctx, q, k, v, sa_mask, scale);  // [D,Nh,S,B]
+        attn = ggml_reshape_3d(ctx, attn, (int64_t) Nh * D, S, B);
+    }
     if (tap0) {
         dit_tap(taps, "layer0_attn_out", attn);
     }
-    ggml_tensor * sa_out = ad->apply(ctx, ly->sa_o_proj, li, DIT_SA_O, attn);
+    ggml_tensor * sa_out = ad->applyP(ctx, ly->sa_o_proj, li, DIT_SA_O, attn);
     if (tap0) {
         dit_tap(taps, "layer0_sa_output", sa_out);
     }
@@ -365,9 +376,9 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
 
     // ── cross-attention (no gate, plain residual) ──
     ggml_tensor * nca = dit_ggml_rms_norm_weighted(ctx, hidden, ly->cross_attn_norm, c.rms_norm_eps);
-    ggml_tensor * cq  = ad->apply(ctx, ly->ca_q_proj, li, DIT_CA_Q, nca);
-    ggml_tensor * ck  = ad->apply(ctx, ly->ca_k_proj, li, DIT_CA_K, enc);
-    ggml_tensor * cv  = ad->apply(ctx, ly->ca_v_proj, li, DIT_CA_V, enc);
+    ggml_tensor * cq  = ad->applyP(ctx, ly->ca_q_proj, li, DIT_CA_Q, nca);
+    ggml_tensor * ck  = ad->applyP(ctx, ly->ca_k_proj, li, DIT_CA_K, enc);
+    ggml_tensor * cv  = ad->applyP(ctx, ly->ca_v_proj, li, DIT_CA_V, enc);
     // QK-norm BEFORE the permute. The inference graph (dit-graph.h:534-547) and
     // the spike both normalise AFTER it; rms_norm acts on ne0 == D, which stays
     // contiguous under permute(0,2,1,3), so the FORWARD is bit-identical either
@@ -387,18 +398,21 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
         ck = dit_expand_heads(ctx, ck, D, Nkv, Nh, enc_S, B);
         cv = dit_expand_heads(ctx, cv, D, Nkv, Nh, enc_S, B);
     }
-    cq                = ggml_permute(ctx, cq, 0, 2, 1, 3);
-    ck                = ggml_permute(ctx, ck, 0, 2, 1, 3);
-    cv                = ggml_permute(ctx, cv, 0, 2, 1, 3);
-    // The second mode check. Cross-attention is the same op with S_kv = enc_S:
-    // at crop 1250 its retained softmax (enc_S x S) is already LARGER than
-    // self-attention's S^2, so flashing only self-attention would leave the
-    // bigger of the two walls standing (spec §0.1).
-    ggml_tensor * cattn = (in.attn_mode == DIT_ATTN_FLASH)
-                              ? dit_attn_flash(ctx, cq, ck, cv, in.t_ca, scale, in.attn_prec_req)
-                              : dit_attn_f32(ctx, cq, ck, cv, in.t_ca, scale);
-    cattn               = ggml_reshape_3d(ctx, cattn, (int64_t) Nh * D, S, B);
-    hidden              = ggml_add(ctx, hidden, ad->apply(ctx, ly->ca_o_proj, li, DIT_CA_O, cattn));
+    ggml_tensor * cattn = nullptr;
+    {
+        DnpScope _dnp(ctx, "attn.cross");  // see the self-attention scope above
+        cq = ggml_permute(ctx, cq, 0, 2, 1, 3);
+        ck = ggml_permute(ctx, ck, 0, 2, 1, 3);
+        cv = ggml_permute(ctx, cv, 0, 2, 1, 3);
+        // The second mode check. Cross-attention is the same op with S_kv = enc_S:
+        // at crop 1250 its retained softmax (enc_S x S) is already LARGER than
+        // self-attention's S^2, so flashing only self-attention would leave the
+        // bigger of the two walls standing (spec §0.1).
+        cattn = (in.attn_mode == DIT_ATTN_FLASH) ? dit_attn_flash(ctx, cq, ck, cv, in.t_ca, scale, in.attn_prec_req)
+                                                 : dit_attn_f32(ctx, cq, ck, cv, in.t_ca, scale);
+        cattn = ggml_reshape_3d(ctx, cattn, (int64_t) Nh * D, S, B);
+    }
+    hidden              = ggml_add(ctx, hidden, ad->applyP(ctx, ly->ca_o_proj, li, DIT_CA_O, cattn));
     if (tap0) {
         dit_tap(taps, "layer0_after_cross_attn", hidden);
     }
@@ -407,10 +421,10 @@ static ggml_tensor * dit_train_layer(ggml_context * ctx, DitTrainModel * M, int 
     res               = hidden;
     ggml_tensor * nff = dit_ggml_rms_norm_weighted(ctx, hidden, ly->mlp_norm, c.rms_norm_eps);
     nff               = dit_ggml_adaln(ctx, nff, scale_ff, shift_ff, M->m.scalar_one);
-    ggml_tensor * g   = ad->apply(ctx, ly->gate_proj, li, DIT_MLP_GATE, nff);
-    ggml_tensor * u   = ad->apply(ctx, ly->up_proj, li, DIT_MLP_UP, nff);
+    ggml_tensor * g   = ad->applyP(ctx, ly->gate_proj, li, DIT_MLP_GATE, nff);
+    ggml_tensor * u   = ad->applyP(ctx, ly->up_proj, li, DIT_MLP_UP, nff);
     ggml_tensor * ff  = ggml_swiglu_split(ctx, g, u);  // fused ggml_swiglu has NO backward
-    ggml_tensor * fo  = ad->apply(ctx, ly->down_proj, li, DIT_MLP_DOWN, ff);
+    ggml_tensor * fo  = ad->applyP(ctx, ly->down_proj, li, DIT_MLP_DOWN, ff);
     return dit_ggml_gated_add(ctx, res, fo, gate_ff);
 }
 

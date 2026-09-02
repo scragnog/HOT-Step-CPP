@@ -208,7 +208,11 @@ router.get('/capabilities', async (_req: Request, res: Response) => {
       defaultLmBySize: { '0.6B': '', '1.7B': '', '4B': '' }, adaptersRoot: '',
     },
     trainDit: {
-      available: false, adapterTypes: ['lora', 'lokr'], adaptersRoot: '', minVramMb: 16384,
+      // 8192 is ADVISORY and deliberately below what a comfortable run wants:
+      // the engine decides, per run, and it can now express configurations that
+      // fit well under this (bf16 mirror + --attn flash + --ckpt + a shallow
+      // top-K). See the comment on TrainDitCapabilities.minVramMb.
+      available: false, adapterTypes: ['lora', 'lokr'], adaptersRoot: '', minVramMb: 8192,
     },
   };
 
@@ -291,7 +295,9 @@ router.get('/capabilities', async (_req: Request, res: Response) => {
   // chosen preprocess variant was made against (§4.2 base-match guard), so
   // there is nothing for the UI to pick. `minVramMb` is ADVISORY — the real
   // gate is ace-train's own footprint solve, which can only run once the base
-  // is loaded and the engine is already down (§4.5).
+  // is loaded and the engine is already down (§4.5). Since 2026-09-02 that
+  // solve is the ONLY gate: the engine's flat 16 GB card refusal is retired,
+  // so this number dropped to 8192 and must never be used to block a run.
   try { caps.trainDit.available = !!aceTrainExe(); } catch { /* stays false */ }
   try { caps.trainDit.adaptersRoot = adapterDitRoot(); } catch { /* stays '' */ }
 
@@ -3112,7 +3118,10 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     // ── 9. queue ─────────────────────────────────────────────────────────
     // No VRAM gating here (§4.5): only ace-train knows the mirror size, and only
     // after the base is loaded with the engine already stopped.
-    // capabilities.trainDit.minVramMb is advisory for the UI banner alone.
+    // capabilities.trainDit.minVramMb is advisory for the UI banner alone — and
+    // since the engine's flat 16 GB refusal was retired (2026-09-02) it is not
+    // even a floor, just a hint. ace-train's per-run footprint solve refuses,
+    // and its message names the settings that would make the run fit.
     const opts: ResolvedTrainDitOptions = {
       variantKey,
       tensorsDir: tensorsPath,
