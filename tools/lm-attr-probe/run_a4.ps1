@@ -10,6 +10,8 @@ param(
   [int]$MaxDuration = 150,
   [int]$Steps = 8,
   [string]$Only = '',
+  [string]$Slugs = '',        # comma-separated subset, e.g. "nas_illmatic,kinks_somethingelse"
+  [string]$SynthModel = '',   # pin the base DiT by engine name; empty = engine default
   [int]$Limit = 0,
   [switch]$SkipRender,
   [string]$Inventory = "$PSScriptRoot\..\..\docs\plans\lm-attr-probe\inventory.json"
@@ -20,8 +22,11 @@ if (-not (Test-Path $Inventory)) { python "$PSScriptRoot\inventory.py" --json $I
 $inv = Get-Content $Inventory -Raw | ConvertFrom-Json
 $n = 0
 $t0 = Get-Date
+$want = @{}
+foreach ($s in ($Slugs -split ',')) { if ($s.Trim()) { $want[$s.Trim()] = $true } }
 foreach ($a in $inv) {
   if ($Only -and $a.slug -ne $Only) { continue }
+  if ($want.Count -gt 0 -and -not $want.ContainsKey($a.slug)) { continue }
   if (-not $a.preset_adapter) { Write-Host "skip $($a.slug): no shipped adapter"; continue }
   $plans = Join-Path $repo "server\data\training\tensors\$($a.slug)\$($a.variant)\lm-attr\plans"
   $renders = Join-Path $repo "server\data\training\tensors\$($a.slug)\$($a.variant)\lm-attr\renders"
@@ -33,7 +38,8 @@ foreach ($a in $inv) {
     npx tsx scripts/lm-adapter-eval.ts generate --dataset $a.slug --variant $a.variant `
       --adapter "$($a.preset_adapter)" --seeds 1 --samples $Samples --max-duration $MaxDuration --out "$plans"
     if (-not $SkipRender) {
-      npx tsx scripts/lm-plan-render.ts --runs "$plans" --out "$renders" --steps $Steps
+      $sm = @(); if ($SynthModel) { $sm = @('--synth-model', $SynthModel) }
+      npx tsx scripts/lm-plan-render.ts --runs "$plans" --out "$renders" --steps $Steps @sm
     }
   } finally { Pop-Location }
   if (-not $SkipRender) {
