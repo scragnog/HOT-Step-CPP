@@ -1,8 +1,8 @@
 diff --git a/engine/ggml/src/ggml.c b/engine/ggml/src/ggml.c
-index b43016c8..55d50ad8 100644
+index 9a5c186a..2967052b 100644
 --- a/engine/ggml/src/ggml.c
 +++ b/engine/ggml/src/ggml.c
-@@ -6597,6 +6597,52 @@ static void ggml_compute_backward(
+@@ -6802,6 +7054,86 @@ static void ggml_compute_backward(
                  ggml_add_or_set(ctx, cgraph, isrc0, tmp);
              }
              if (src1_needs_grads) {
@@ -45,17 +45,51 @@ index b43016c8..55d50ad8 100644
 +                    const char * hs_e = getenv("GGML_BACKWARD_MM");
 +                    hs_bwd_mm = (hs_e && hs_e[0] && strcmp(hs_e, "0") != 0) ? 1 : 0;
 +                }
++                // HOT-Step patch: mm-backward — TRANSIENT-CAST RE-EMISSION
++                // (--mirror bf16-f32, 2026-09-02).
++                //
++                // The DiT trainer's third mirror mode stores frozen trainable-layer
++                // weights as BF16 and promotes each one to F32 with an in-graph
++                // ggml_cast at its mul_mat site, so the GEMM is f32 while residency
++                // stays bf16. That only works if the cast's F32 output dies right
++                // after the FORWARD matmul. Referencing `src0` below would make it
++                // a source of a BACKWARD node too, and ggml_gallocr would then keep
++                // every one of the 32 layers' F32 copies alive from the forward
++                // pass until its own backward ran — which is the entire ~8 GB the
++                // mode exists to avoid. The mode would silently save nothing.
++                //
++                // So when src0 is exactly that node — a ggml_cast (CPY with the
++                // self-referencing src[1]) to F32, off a gradient-free BF16 LEAF —
++                // re-cast the leaf here instead. The backward's cast is its own
++                // node with its own short lifetime, the value is identical (BF16 ->
++                // F32 is exact and deterministic), and the forward cast is free to
++                // be reclaimed the moment its matmul is done.
++                //
++                // Deliberately narrow: F32 destination, BF16 leaf source, leaf is
++                // an op-less non-parameter needing no gradient. Nothing else in the
++                // engine matches, so no other graph changes shape. The out_prod arm
++                // below is left alone — it is the non-contiguous-grad fallback and
++                // takes the forward cast's F32 output as-is, correct but without
++                // the residency win.
++                struct ggml_tensor * hs_mm_w = src0;
++                if (hs_bwd_mm && !src0_needs_grads &&
++                    src0->op == GGML_OP_CPY && src0->type == GGML_TYPE_F32 && src0->src[1] == src0 &&
++                    src0->src[0] && src0->src[0]->op == GGML_OP_NONE &&
++                    src0->src[0]->type == GGML_TYPE_BF16 &&
++                    !(src0->src[0]->flags & GGML_TENSOR_FLAG_PARAM)) {
++                    hs_mm_w = ggml_cast(ctx, src0->src[0], GGML_TYPE_F32);
++                }
 +                if (hs_bwd_mm && ggml_is_contiguous(grad)) {
 +                    ggml_add_or_set(ctx, cgraph, isrc1,
-+                            ggml_mul_mat(ctx,                   // [n,p,qq,rr]
-+                                ggml_cont(ctx,                  // [m,n,q1,r1]
-+                                    ggml_transpose(ctx, src0)), // [m,n,q1,r1]
-+                                grad));                         // [m,p,qq,rr]
++                            ggml_mul_mat(ctx,                      // [n,p,qq,rr]
++                                ggml_cont(ctx,                     // [m,n,q1,r1]
++                                    ggml_transpose(ctx, hs_mm_w)), // [m,n,q1,r1]
++                                grad));                            // [m,p,qq,rr]
 +                } else {
                  ggml_add_or_set(ctx, cgraph, isrc1,
                          // ggml_mul_mat(ctx,                   // [n,p,qq,rr]
                          //     ggml_cont(ctx,                  // [m,n,q1,r1]
-@@ -6610,6 +6656,7 @@ static void ggml_compute_backward(
+@@ -6815,6 +7147,7 @@ static void ggml_compute_backward(
                              src0,               // [n,m,q1,r1]
                              ggml_transpose(ctx, // [p,m,qq,rr]
                                  grad)));        // [m,p,qq,rr]

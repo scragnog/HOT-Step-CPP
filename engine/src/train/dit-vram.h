@@ -54,6 +54,8 @@ struct DitVramModel {
     int  lokr_factor = 6;
     // Mirror precision: the fixed term is the mirror, so this is the single
     // largest lever in the whole model (--mirror bf16 roughly halves it).
+    // DIT_MIRROR_BF16_F32 shares bf16's fixed term exactly (same stored bytes)
+    // and adds one transient arena term — see dit_vram_total_bytes.
     DitMirrorMode mirror = DIT_MIRROR_F32;
     // Micro-batch size (design C4). Every activation/arena/static term scales
     // with it; mirror and optimizer state do not.
@@ -451,7 +453,19 @@ static double dit_vram_total_bytes(const DitVramModel & vm, int crop, int K) {
     const double arena = vm.flash_attn ? dit_vram_arena_bytes_flash(S, Kr, vm.batch, vm.enc_S, vm.n_heads,
                                                                     vm.n_kv_heads, vm.head_dim)
                                        : dit_vram_arena_bytes(S, Kr, vm.batch);
-    double    b   = dit_vram_fixed_bytes(vm, K, crop) + arena +
+    // --mirror bf16-f32's transient F32 window (2026-09-02). The mirror term
+    // inside dit_vram_fixed_bytes already prices this mode as bf16, because
+    // dit_mirror_bytes_for walks the same slot list the builder walks and
+    // bf16-f32 stores exactly what bf16 stores. What it cannot see is the
+    // in-graph ggml_cast at each trainable-layer mul_mat site, whose F32 output
+    // lives in the ARENA. Arithmetic, not fitted: the largest single trainable
+    // layer's eleven projections at 4 B/element (~0.5 GB on a 32-layer XL base,
+    // against the ~8 GB this mode saves versus a full F32 mirror). Added on both
+    // the exact and the flash path, since the cast sites are the same in each and
+    // neither arena polynomial was fitted with a run that emitted them. Zero for
+    // every other mirror mode, so no existing estimate moves by a byte.
+    const double cast_window = (double) dit_mirror_cast_window_bytes(vm.m, vm.n_layers - K, vm.mirror);
+    double    b   = dit_vram_fixed_bytes(vm, K, crop) + arena + cast_window +
                dit_vram_kv_expand_bytes(vm, S, Kr) + dit_vram_boundary_bytes(vm, S);
     if (vm.is_lokr) {
         // The intermediates the fitted polynomial never saw. Added here rather

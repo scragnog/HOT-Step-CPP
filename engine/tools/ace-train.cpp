@@ -533,12 +533,28 @@ static void print_usage(void) {
             "    --vram-reserve-mb <n>       2048        desktop/OS headroom left unallocated\n"
             "    --vram-safety <f>           0.05        extra margin on the footprint model\n"
             "                                            (same 0.05 for lokr since 2026-08-30)\n"
-            "    --mirror <f32|bf16>         f32         frozen-weight mirror precision. bf16 keeps\n"
-            "                                            the trainable layers' matmul weights in the\n"
-            "                                            base's native BF16 instead of promoting them\n"
-            "                                            to F32, roughly halving the mirror. CUDA only\n"
-            "                                            (engine/patches/bf16-out-prod.patch);\n"
-            "                                            EXPERIMENTAL, adapter quality unvalidated.\n"
+            "    --mirror <f32|bf16|         f32         frozen-weight mirror precision.\n"
+            "              bf16-f32>\n"
+            "                                            f32       = every trainable layer's weight is\n"
+            "                                                        promoted to F32. Storage and\n"
+            "                                                        arithmetic both f32; ~8 GB more\n"
+            "                                                        resident on a 32-layer XL base,\n"
+            "                                                        which costs crop under --attn flash.\n"
+            "                                            bf16      = those weights stay in the base's\n"
+            "                                                        native BF16, roughly halving the\n"
+            "                                                        mirror. CUDA only\n"
+            "                                                        (engine/patches/bf16-out-prod.patch).\n"
+            "                                                        Note this also rounds ACTIVATIONS\n"
+            "                                                        and GRADIENTS to bf16 at every\n"
+            "                                                        trainable-layer GEMM.\n"
+            "                                            bf16-f32  = bf16 storage, f32 compute. Same\n"
+            "                                                        mirror bytes as bf16, but the graph\n"
+            "                                                        casts each weight to F32 at its\n"
+            "                                                        mul_mat site, so the arithmetic\n"
+            "                                                        matches --mirror f32 while the\n"
+            "                                                        residency matches --mirror bf16.\n"
+            "                                                        Costs one transient F32 layer of\n"
+            "                                                        arena (~0.5 GB). CUDA only.\n"
             "    --bwd <outprod|mm>          outprod     MUL_MAT activation-gradient formulation.\n"
             "                                            outprod = upstream ggml out_prod (F32-only on\n"
             "                                                      CUDA; forces an F32 weight, so the\n"
@@ -4009,8 +4025,8 @@ static int cmd_train_dit(int argc, char ** argv) {
         fprintf(stderr, "ace-train train-dit: --lokr-dim 4-4096, --lokr-alpha 0-8192, --lokr-factor -1 or 2-64\n");
         return 2;
     }
-    if (a.mirror != "f32" && a.mirror != "bf16") {
-        fprintf(stderr, "ace-train train-dit: --mirror must be f32|bf16\n");
+    if (a.mirror != "f32" && a.mirror != "bf16" && a.mirror != "bf16-f32") {
+        fprintf(stderr, "ace-train train-dit: --mirror must be f32|bf16|bf16-f32\n");
         return 2;
     }
     if (!bwd_valid(a.bwd)) {

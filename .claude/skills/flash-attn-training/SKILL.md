@@ -153,7 +153,15 @@ For each: (a) sibling `xxx_attn_flash()` returning exactly the shape the manual 
     Now 1024 via `alloc-free-blocks.patch`. Inference-shared → smoke generation after touching.
 14. **Workflows die with the VSCode/Claude process.** Long unattended runs need the window open;
     machine sleep is "never" on this box (checked).
-15. **Disk.** Probe runs write adapters; a campaign filled D: to 2.4 GB free and artifacts were
+15. **`--mirror bf16` means bf16 COMPUTE, not just bf16 storage** — it rounds activations and
+    gradients at every trainable-layer GEMM, and the adapters it trains are audibly coarse
+    ("bitty", Rob 2026-09-02). Use **`--mirror bf16-f32`**: same BF16 residency, an in-graph
+    `ggml_cast` to F32 at each `mul_mat` site, and over 12 same-seed epochs on mika it is
+    bit-identical to `--mirror f32` while `bf16` drifts to 7.8e-3. It costs ~180 MB of transient
+    arena and ~25% step time against f32 at equal crop, and buys 2.5× the flash auto-fit crop
+    (1542 vs 610). Only `--bwd mm` carries it — the `out_prod` fallback arm keeps the forward
+    cast alive and silently spends the ~8 GB back.
+16. **Disk.** Probe runs write adapters; a campaign filled D: to 2.4 GB free and artifacts were
     deleted for space. Clean scratch dirs between grid cells.
 
 ## 7. Numbers worth remembering (5090)

@@ -119,8 +119,16 @@ struct DitTrainArgs {
     float crop_endpoint_k  = 2.0f;
     int   vram_reserve_mb = 2048;
     float vram_safety     = 0.05f;
-    // Frozen-weight mirror precision: "f32" (shipped) or "bf16" (halves the
-    // mirror; needs the patched CUDA out_prod — engine/patches/bf16-out-prod.patch).
+    // Frozen-weight mirror precision:
+    //   "f32"      shipped — every trainable-layer weight promoted to F32.
+    //   "bf16"     halves the mirror; needs the patched CUDA out_prod
+    //              (engine/patches/bf16-out-prod.patch). Stores AND computes bf16.
+    //   "bf16-f32" bf16 storage, f32 compute (2026-09-02): same mirror bytes as
+    //              "bf16", but each trainable-layer weight is cast to F32 in the
+    //              graph at its mul_mat site, so activations and gradients are
+    //              never rounded to bf16. Rob: bf16 compute audibly coarsened
+    //              renders; this is the mode that fixes it without paying the
+    //              f32 mirror's ~8 GB (and the crop it costs).
     std::string mirror = "f32";
 
     // MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch):
@@ -445,7 +453,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     const bool          is_lokr  = (a.adapter_type == "lokr");
     // Not const: the CUDA-only guard below downgrades this to DIT_MIRROR_F32
     // on a non-CUDA backend instead of refusing the run outright.
-    DitMirrorMode mirror_mode = (a.mirror == "bf16") ? DIT_MIRROR_BF16 : DIT_MIRROR_F32;
+    DitMirrorMode mirror_mode = (a.mirror == "bf16")       ? DIT_MIRROR_BF16
+                                : (a.mirror == "bf16-f32") ? DIT_MIRROR_BF16_F32
+                                                           : DIT_MIRROR_F32;
     jl("{\"type\":\"stage\",\"stage\":\"train\",\"state\":\"begin\",\"total\":%d}", a.epochs);
 
     // ── samples (host-resident for the whole run) ────────────────────────
@@ -575,12 +585,22 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // dit_train_log.json) must reflect the ACTUAL mode used, never the
     // requested one — hence reassigning mirror_mode/log->mirror here rather
     // than just skipping the refusal.
-    if (mirror_mode == DIT_MIRROR_BF16 && strncmp(ggml_backend_name(M.backend), "CUDA", 4) != 0) {
-        char b[256];
+    //
+    // `bf16-f32` falls back for a different reason and is held to the same rule.
+    // It never reaches out_prod with a BF16 tensor (the graph hands the matmul an
+    // F32 cast), but it does need the backend to run a BF16 -> F32 CPY at weight
+    // shapes. ggml-cuda does (cpy.cu / supports_op); Vulkan's coverage is not
+    // established, and a `false` there does NOT abort — backend_sched would split
+    // those casts onto the CPU and the run would look fine while crawling. Rather
+    // than ship that trap, non-CUDA takes the same graceful f32 fallback.
+    if (dit_mirror_stores_bf16(mirror_mode) && strncmp(ggml_backend_name(M.backend), "CUDA", 4) != 0) {
+        char b[320];
         snprintf(b, sizeof(b),
-                 "BF16 mirror requires CUDA — falling back to f32 mirror (this run picked '%s'; only ggml-cuda's "
-                 "out_prod carries the BF16 patch — see engine/patches/bf16-out-prod.patch).",
-                 ggml_backend_name(M.backend));
+                 "%s mirror requires CUDA — falling back to f32 mirror (this run picked '%s'; %s).",
+                 dit_mirror_mode_name(mirror_mode), ggml_backend_name(M.backend),
+                 mirror_mode == DIT_MIRROR_BF16
+                     ? "only ggml-cuda's out_prod carries the BF16 patch — see engine/patches/bf16-out-prod.patch"
+                     : "only ggml-cuda is known to run the in-graph BF16 -> F32 weight cast on the device");
         lm_log("warn", b);
         mirror_mode  = DIT_MIRROR_F32;
         log->mirror  = "f32";
@@ -799,7 +819,7 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                  "mirror, --attn %s — of which the frozen-weight mirror is %lld MB. Card %lld MB total, %lld MB free "
                  "(%s), minus %d MB reserve, minus %.0f%% safety. %s",
                  floor_mb, budget_mb, short_mb, fit.floor_layers, fit.floor_crop, fit.floor_segments,
-                 fit.floor_segments == 1 ? "" : "s", adapter, mirror_mode == DIT_MIRROR_BF16 ? "bf16" : "f32",
+                 fit.floor_segments == 1 ? "" : "s", adapter, dit_mirror_mode_name(mirror_mode),
                  a.attn.c_str(), mirror_mb, (long long) fit.total_mb, (long long) fit.free_mb, fit.free_source,
                  a.vram_reserve_mb, (double) a.vram_safety * 100.0, tail);
         lm_fatal("vram", b, extra);
@@ -1016,6 +1036,11 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             dit_train_free(&M);
             return 1;
         }
+        // --mirror bf16-f32: tell the parameterization seam which layers get the
+        // in-graph BF16 -> F32 weight cast. Set here, once, from the RESOLVED
+        // mirror mode (the CUDA fallback above may already have downgraded it),
+        // and left at INT_MAX in every other mode so the graph is unchanged.
+        adapter->f32_cast_lo = dit_mirror_casts_in_graph(mirror_mode) ? lora_lo : INT_MAX;
         const size_t expect =
             is_lokr ? dit_lokr_expected_params(c, lora_lo, L, a.lokr_dim, a.lokr_factor, a.target_mlp)
                     : dit_lora_expected_params(c, lora_lo, L, a.rank, a.target_mlp);

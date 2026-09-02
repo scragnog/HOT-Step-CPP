@@ -55,13 +55,53 @@ struct DitTrainModel {
 
 // ─── mirror precision policy ────────────────────────────────────────────────
 
+// DIT_MIRROR_BF16_F32 (Rob, 2026-09-02) exists because the two shipped modes
+// bundle two independent decisions that turned out to pull opposite ways:
+//
+//   STORAGE  — what precision the frozen weight sits in for the whole run.
+//   COMPUTE  — what precision its GEMM runs at, forward and backward.
+//
+// `bf16` picks BF16 for both. The GGUF is BF16 anyway, so the storage half is
+// lossless — but the compute half rounds the ACTIVATIONS on the way in and the
+// GRADIENTS on the way back to bf16's 8-bit mantissa at every trainable-layer
+// matmul, and Rob hears that: adapters trained under `--mirror bf16` render
+// coarse/"bitty" audio where the same recipe at `--mirror f32` does not.
+//
+// `f32` picks F32 for both and sounds right, but the storage half costs ~8 GB
+// more on a 32-layer XL base, which on a 32 GB card collapses the flash-mode
+// auto-fit crop from ~1500 to ~552 — a worse adapter for a different reason.
+//
+// `bf16-f32` takes the storage of the first and the compute of the second: the
+// mirror is byte-for-byte the bf16 mirror, and the graph inserts a per-site
+// ggml_cast(w, F32) IN FRONT of each trainable layer's mul_mat (see
+// DitAdapter::applyP in dit-adapter.h). The cast is transient — one weight's
+// worth, freed by the allocator after its forward consumer — so residency
+// tracks bf16 while the arithmetic tracks f32.
 enum DitMirrorMode {
     DIT_MIRROR_F32 = 0,  // shipped behaviour: every trainable-layer weight -> F32
     DIT_MIRROR_BF16,     // trainable-layer matmul weights keep their native BF16
+    DIT_MIRROR_BF16_F32, // BF16 storage, F32 compute (in-graph cast at each site)
 };
 
 static inline const char * dit_mirror_mode_name(DitMirrorMode mode) {
-    return mode == DIT_MIRROR_BF16 ? "bf16" : "f32";
+    switch (mode) {
+        case DIT_MIRROR_BF16:     return "bf16";
+        case DIT_MIRROR_BF16_F32: return "bf16-f32";
+        default:                  return "f32";
+    }
+}
+
+// Does this mode leave a trainable layer's native-BF16 matmul weight in BF16?
+// True for both bf16 modes — they differ only in what the GRAPH does with it,
+// never in what the mirror BUILDER stores, so dit_mirror_bytes_for() and the
+// auto-fit's fixed term are identical between them by construction.
+static inline bool dit_mirror_stores_bf16(DitMirrorMode mode) {
+    return mode == DIT_MIRROR_BF16 || mode == DIT_MIRROR_BF16_F32;
+}
+
+// Does the graph promote each trainable-layer weight to F32 at its mul_mat site?
+static inline bool dit_mirror_casts_in_graph(DitMirrorMode mode) {
+    return mode == DIT_MIRROR_BF16_F32;
 }
 
 // ─── slot enumeration (shared by the sizing model and the builder) ──────────
@@ -95,9 +135,12 @@ static void dit_mirror_slots(DiTGGML * m, int lora_lo, DitMirrorMode mode, std::
     // touches, and only when the base actually stores it as BF16 — the patched
     // out_prod takes F32 or BF16 src0 and nothing else, so an F16 base still gets
     // the F32 promotion (and a quantized one is refused outright, below).
+    //
+    // DIT_MIRROR_BF16_F32 stores exactly what DIT_MIRROR_BF16 stores — the
+    // difference lives in the graph, not here (dit_mirror_stores_bf16).
     auto add_mm = [&](ggml_tensor ** f, bool trainable) {
         const bool native_bf16 = (f && *f && (*f)->type == GGML_TYPE_BF16);
-        add(f, trainable && !(mode == DIT_MIRROR_BF16 && native_bf16));
+        add(f, trainable && !(dit_mirror_stores_bf16(mode) && native_bf16));
     };
 
     // Globals: proj_in / cond_emb consume graph INPUTS (never an activation
@@ -164,6 +207,42 @@ static size_t dit_mirror_bytes_for(DiTGGML * m, int lora_lo, DitMirrorMode mode,
         total += f32 ? ne * 4 : ggml_nbytes(s);
     }
     return total;
+}
+
+// The transient F32 window DIT_MIRROR_BF16_F32 adds on top of the bf16 mirror,
+// in bytes: the largest single trainable layer's projection set, promoted to F32.
+//
+// Why one LAYER and not one WEIGHT: the casts are per-site nodes with the layer's
+// own lifetime pattern, and ggml_gallocr is free to keep several of them live at
+// once (sa q/k/v are built back to back before the first is consumed, and the
+// LoKR apply branch lengthens every site's live range). Charging the whole layer
+// is the cheap conservative answer — ~0.5 GB on a 32-layer XL base against the
+// ~8 GB the mode saves against a full F32 mirror.
+//
+// Only the eleven weights that reach DitAdapter::applyP are counted, because
+// those are the only mul_mat src0s the graph casts. Norms, tables and the head
+// are already F32 in the mirror and are never cast.
+static size_t dit_mirror_cast_window_bytes(DiTGGML * m, int lora_lo, DitMirrorMode mode) {
+    if (!dit_mirror_casts_in_graph(mode) || !m) {
+        return 0;
+    }
+    size_t worst = 0;
+    for (int i = (lora_lo < 0 ? 0 : lora_lo); i < m->cfg.n_layers; i++) {
+        DiTGGMLLayer & ly = m->layers[i];
+        ggml_tensor *  w[11] = { ly.sa_q_proj, ly.sa_k_proj, ly.sa_v_proj, ly.sa_o_proj,
+                                 ly.ca_q_proj, ly.ca_k_proj, ly.ca_v_proj, ly.ca_o_proj,
+                                 ly.gate_proj, ly.up_proj,   ly.down_proj };
+        size_t         sum = 0;
+        for (int j = 0; j < 11; j++) {
+            if (w[j] && w[j]->type == GGML_TYPE_BF16) {
+                sum += (size_t) ggml_nelements(w[j]) * 4;
+            }
+        }
+        if (sum > worst) {
+            worst = sum;
+        }
+    }
+    return worst;
 }
 
 // ─── the §3.2 post-load assertion ───────────────────────────────────────────

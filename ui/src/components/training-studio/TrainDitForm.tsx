@@ -74,7 +74,9 @@ export interface TrainDitFormState {
   milestoneStep: number;
   milestoneKeep: number;
   vramReserveMb: number;
-  mirror: 'f32' | 'bf16';
+  /** Frozen-weight mirror precision — storage and compute are separate choices
+   *  (see trainingApi.ts). 'bf16-f32' is bf16 storage with f32 arithmetic. */
+  mirror: 'f32' | 'bf16' | 'bf16-f32';
   /** MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
    *  'mm' is the fast tensor-core backward and the server default. */
   bwd: 'outprod' | 'mm';
@@ -157,12 +159,17 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   milestoneStep: 0,
   milestoneKeep: 6,
   vramReserveMb: 2048,
-  // bf16 unconditionally (Rob, 2026-09-01: "if bf16 will be faster and/or use
-  // less vram, that should be the default") — half the mirror VRAM, BF16
-  // tensor cores under bwd 'mm', ~7e-5 drift (docs/TRAINING.md). Supersedes
-  // the 2026-07-30 "F32, not bf16" call. TRAIN_DIT_LOKR_DEFAULTS spreads this
-  // object, so LoKR inherits it too.
-  mirror: 'bf16',
+  // 'bf16-f32' (Rob, 2026-09-02). Supersedes the 2026-09-01 plain-'bf16'
+  // default, which was taken on VRAM alone: bf16 storage is lossless (the GGUF
+  // is BF16), but bf16 COMPUTE also rounded the activations and the gradients
+  // at every trainable-layer GEMM, and adapters trained that way rendered
+  // coarse and "bitty" where the same recipe at 'f32' did not. 'bf16-f32'
+  // keeps bf16's storage — so the flash-mode crop stays long (1556 vs f32's
+  // 610 on mika_lifeincartoonmotion) — and casts each weight to F32 in the
+  // graph, which measured bit-identical loss and gnorm to the f32 mirror over
+  // three epochs. TRAIN_DIT_LOKR_DEFAULTS spreads this object, so LoKR
+  // inherits it too.
+  mirror: 'bf16-f32',
   // MUL_MAT activation-gradient formulation. 'mm' mirrors the server default
   // (2026-07-29): identical maths to out_prod but dtype-agnostic, so the BF16
   // mirror above rides BF16 tensor cores instead of being promoted to F32.
@@ -993,13 +1000,14 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <div className="flex flex-col gap-1.5">
-            {P('mirror', 'Default BF16 · CUDA only')}
+            {P('mirror', 'Default BF16 + F32 compute · CUDA only')}
             <StyledSelect
               accent="amber"
               value={value.mirror}
               disabled={lock}
               onChange={(v) => onChange({ mirror: v })}
               options={[
+                { value: 'bf16-f32' as const, label: t('trainingStudio.train.dit.mirrorBf16F32') },
                 { value: 'f32' as const, label: t('trainingStudio.train.dit.mirrorF32') },
                 { value: 'bf16' as const, label: t('trainingStudio.train.dit.mirrorBf16') },
               ]}
@@ -1018,8 +1026,8 @@ export const TrainDitForm: React.FC<Props> = ({
                 disabled={lock}
                 // The toggle carries the crop cap with it: flash unpins it so
                 // the engine can lift to full-song; exact restores the classic
-                // 1250. The mirror is NOT coupled — bf16 is the default in
-                // both modes (Rob, 2026-09-01).
+                // 1250. The mirror is NOT coupled — 'bf16-f32' is the default
+                // in both modes (Rob, 2026-09-02).
                 onChange={(e) => onChange(e.target.checked
                   ? { attnBackend: 'flash', cropMax: 0 }
                   : { attnBackend: 'exact', cropMax: 1250 })}

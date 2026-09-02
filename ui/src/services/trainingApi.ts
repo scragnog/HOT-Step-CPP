@@ -723,14 +723,25 @@ export interface TrainDitOptions {
   calibrate?: boolean;
   /** Let calibration repoint this artist's album preset(s). Default TRUE. */
   calibrateRepoint?: boolean;
-  /** Frozen-weight mirror precision. Default 'bf16' (2026-07-29) — keeps the
-   *  trainable layers' matmul weights in the base's native BF16 instead of
-   *  promoting them to F32, roughly halving the mirror's VRAM. Needs the
-   *  patched out_prod in engine/patches/bf16-out-prod.patch and the CUDA
-   *  backend; on CPU/Vulkan the engine warns and falls back to 'f32' itself
-   *  (dit-train-run.h), so an explicit 'f32' request is the only way to opt
-   *  out deliberately. */
-  mirror?: 'f32' | 'bf16';         // default 'bf16'
+  /** Frozen-weight mirror precision. Three values covering two independent
+   *  decisions — what a frozen trainable-layer weight is STORED as, and what
+   *  its matmul is COMPUTED in:
+   *    'f32'      store f32, compute f32. The original path. ~8 GB more
+   *               resident on a 32-layer XL base, and under --attn flash that
+   *               is crop: measured on mika_lifeincartoonmotion, auto-fit 610
+   *               against 1632 for bf16.
+   *    'bf16'     store bf16, compute bf16 (2026-07-29). Halves the mirror, but
+   *               rounds ACTIVATIONS and GRADIENTS to bf16 at every
+   *               trainable-layer GEMM — which Rob hears as coarse, "bitty"
+   *               renders (2026-09-02).
+   *    'bf16-f32' store bf16, compute f32 (2026-09-02). Same mirror bytes as
+   *               'bf16'; the graph casts each weight to F32 at its mul_mat
+   *               site, so the arithmetic is the f32 mirror's — measured
+   *               bit-identical loss and gnorm over three epochs — for ~180 MB
+   *               of transient arena and ~5 % of bf16's crop (1556 vs 1632).
+   *  The bf16 half needs the CUDA backend either way; on CPU/Vulkan the engine
+   *  warns and falls back to 'f32' itself (dit-train-run.h). */
+  mirror?: 'f32' | 'bf16' | 'bf16-f32';   // server default 'bf16'; the UI sends 'bf16-f32'
   /** MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
    *  'outprod' is upstream ggml's out_prod(W, transpose(grad)), which ggml-cuda
    *  implements F32-only. 'mm' emits mul_mat(cont(transpose(W)), grad) — the

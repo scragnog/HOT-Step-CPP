@@ -24,6 +24,7 @@
 #include "version.h"
 
 #include <array>
+#include <climits>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -120,6 +121,18 @@ struct DitExportResult {
 // ─── the seam ───────────────────────────────────────────────────────────────
 
 struct DitAdapter {
+    // --mirror bf16-f32 (Rob, 2026-09-02): lowest layer index whose base weight
+    // is promoted to F32 IN THE GRAPH, at its mul_mat site, rather than in the
+    // mirror. INT_MAX = never, which is what --mirror f32 and --mirror bf16 both
+    // set, so their emitted graph is byte-identical to what it was before this
+    // field existed. dit_train_stage sets it to lora_lo under bf16-f32 only.
+    //
+    // Frozen layers (index < this) are deliberately excluded: they keep their
+    // native BF16 in BOTH shipped modes already — dit_mirror_slots only ever
+    // promotes a TRAINABLE layer's matmul weight — so casting them would change
+    // arithmetic the f32 mirror never changed either.
+    int f32_cast_lo = INT_MAX;
+
     virtual ~DitAdapter() = default;
     virtual bool init(DiTGGML * m, ggml_backend_t backend, int lo, int hi, const DitAdapterCfg & cfg,
                       std::string * err)                                                            = 0;
@@ -134,6 +147,14 @@ struct DitAdapter {
      *  identical (a scope tags tensors, it never creates any). */
     inline ggml_tensor *  applyP(ggml_context * ctx, ggml_tensor * w, int layer, int site, ggml_tensor * x) const {
         DnpScope _dnp(ctx, dit_site_scope(site));
+        // --mirror bf16-f32: the ONE place the weight enters a mul_mat, so the
+        // one place the storage/compute split has to be made. A fresh cast per
+        // weight per micro-step; ggml_gallocr frees it after the forward mul_mat
+        // that consumes it, which is what keeps residency at bf16 (and is what
+        // the mm-backward guard in ggml.c exists to protect — see there).
+        if (layer >= f32_cast_lo && w && w->type == GGML_TYPE_BF16) {
+            w = ggml_cast(ctx, w, GGML_TYPE_F32);
+        }
         return apply(ctx, w, layer, site, x);
     }
     virtual bool          exportDir(const char * dir, const DitExportMeta & meta, DitExportResult * res,

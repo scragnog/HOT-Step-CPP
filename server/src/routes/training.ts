@@ -3030,8 +3030,11 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     // silently land on either side. 'bf16' halves the frozen-weight mirror
     // and is the default (2026-07-29); the engine falls back to 'f32' itself
     // on a non-CUDA backend, so an explicit 'f32' remains the opt-out.
-    if (body.mirror !== undefined && body.mirror !== 'f32' && body.mirror !== 'bf16') {
-      res.status(400).json({ error: 'mirror must be f32 or bf16' });
+    // 'bf16-f32' (2026-09-02) stores like 'bf16' and computes like 'f32' — see
+    // the trainingApi.ts doc comment; it is the Training Studio's default now.
+    if (body.mirror !== undefined && body.mirror !== 'f32' && body.mirror !== 'bf16' &&
+        body.mirror !== 'bf16-f32') {
+      res.status(400).json({ error: 'mirror must be f32, bf16 or bf16-f32' });
       return;
     }
     // Same rule for the MUL_MAT activation-gradient formulation: refused, not
@@ -3177,10 +3180,15 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       // Frozen-weight mirror precision. Default is 'bf16' (2026-07-29); only
       // the exact string 'f32' opts back out. The engine itself falls back to
       // f32 with a warning on a non-CUDA backend (dit-train-run.h).
-      // bf16 default (Rob, 2026-09-01): half the mirror VRAM and BF16 tensor
-      // cores under --bwd mm, at the documented ~7e-5 drift. Supersedes the
-      // 2026-07-30 f32 call; f32 stays reachable for exact-replica runs.
-      mirror: body.mirror === 'f32' ? 'f32' : 'bf16',
+      // Default 'bf16-f32' (Rob, 2026-09-02): bf16 storage, f32 compute — the
+      // f32 mirror's numerics (measured bit-identical over 12 epochs) at the
+      // bf16 mirror's VRAM, so the flash-mode crop stays long. History: f32 was
+      // Rob's 2026-07-30 call for precision; 'bf16' became the default on
+      // 2026-09-01 for VRAM, but it also ran the GEMMs in bf16 and adapters
+      // trained that way rendered coarse and "bitty". 'bf16' is reachable only
+      // by name now; callers that omit the field (batch pipeline, stored
+      // presets) get the clean mode.
+      mirror: body.mirror === 'f32' ? 'f32' : body.mirror === 'bf16' ? 'bf16' : 'bf16-f32',
       // MUL_MAT activation-gradient formulation. Default 'mm' (2026-07-29);
       // only the exact string 'outprod' opts back out to upstream ggml's
       // F32-only out_prod backward.

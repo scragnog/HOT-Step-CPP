@@ -60,7 +60,7 @@ struct DitTrainLog {
     float       crop_start_frac_eff = 0.0f, crop_end_frac_eff = 0.0f;
     int         crop_start_window = 1;
     float       crop_endpoint_k  = 2.0f;
-    std::string mirror      = "f32";  // frozen-weight mirror precision (f32|bf16)
+    std::string mirror      = "f32";  // frozen-weight mirror precision (f32|bf16|bf16-f32)
     std::string bwd         = "outprod";  // MUL_MAT activation-gradient form (outprod|mm)
     // Attention formulation the run actually used (exact|flash). A config field,
     // not a stream change: the format stays hot-step-dit-train-v3, and a reader

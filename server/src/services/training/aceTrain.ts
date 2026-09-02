@@ -375,7 +375,10 @@ export interface ResolvedTrainDitOptions {
   tMin: number; tMax: number; cfgRatio: number; genreRatio: number;
   seed: number; order: 'shuffle' | 'fixed';
   milestoneStep: number; milestoneKeep: number; vramReserveMb: number;
-  mirror: 'f32' | 'bf16';
+  /** Frozen-weight mirror precision, passed straight to `--mirror`. 'bf16-f32'
+   *  (2026-09-02) is bf16 storage with f32 arithmetic — see
+   *  StartDitTrainingRequest.mirror in types.ts for the full comparison. */
+  mirror: 'f32' | 'bf16' | 'bf16-f32';
   /** MUL_MAT activation-gradient formulation — see ResolvedTrainLmOptions.bwd.
    *  ace-train defaults to 'outprod'; the SERVER default is 'mm'. */
   bwd: 'outprod' | 'mm';

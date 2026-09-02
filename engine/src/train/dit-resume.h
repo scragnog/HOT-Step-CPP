@@ -18,7 +18,7 @@
 //     timesteps and crop windows, so its loss is stochastic and will not
 //     reproduce the source's saved ma5 the way the LM's teacher-forced pass
 //     reproduces saved_loss.
-//   - `mirror` (f32|bf16) and `bwd` are NOT identity: both are measured at
+//   - `mirror` (f32|bf16|bf16-f32) and `bwd` are NOT identity: both are measured at
 //     ~7e-5 loss drift (docs/TRAINING.md), so a resume may switch them.
 //     target_mlp and the adapter shape params ARE identity — they change
 //     which tensors exist.
