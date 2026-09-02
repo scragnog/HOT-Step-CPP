@@ -77,7 +77,9 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   // 0.1 (Rob, 2026-08-12) — was 0.2, and 2.0 before that. The server route's
   // own fallback tracks this number so a batch-pipeline run (which POSTs an
   // empty option bag) stops at the same loss a manual run does.
-  targetLoss: 0.1,
+  // 1.5, not 0.1 (Rob, 2026-09-02): the render-scored stage ladder showed everything an LM adapter
+  // can do is in by CE ~2.0, and the last leg to 0.1 only doubled the looping-plan rate.
+  targetLoss: 1.5,
   epochs: 150,
   adapterType: 'lokr',
   optimizer: 'muon',
@@ -318,7 +320,7 @@ export const TrainLmForm: React.FC<Props> = ({
 
         {/* ── Target loss ─────────────────────────────────────────────── */}
         <label className="flex flex-col gap-1.5">
-          {P('targetLoss', 'Final target · trains staged 2.0 → 1.5 → this · 0 = no auto-stop')}
+          {P('targetLoss', 'Final target · default 1.5 (trains 2.0 → 1.5) · lower rungs loop · 0 = no auto-stop')}
           <input
             type="number"
             min={0}
@@ -326,7 +328,7 @@ export const TrainLmForm: React.FC<Props> = ({
             step={0.05}
             value={value.targetLoss}
             disabled={lock}
-            onChange={(e) => onChange({ targetLoss: num(e.target.value, 0.1) })}
+            onChange={(e) => onChange({ targetLoss: num(e.target.value, 1.5) })}
             className={FIELD}
           />
         </label>

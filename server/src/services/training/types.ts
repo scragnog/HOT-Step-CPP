@@ -621,7 +621,7 @@ export interface TrainLmOptions {
   /** Adapter directory stem; final dir is `<adapterName>-<lmSize>`.
    *  Omit = the dataset slug. */
   adapterName?: string;
-  targetLoss?: number;             // default 0.1;  0 disables auto-stop
+  targetLoss?: number;             // default 1.5 (was 0.1 until 2026-09-02);  0 disables auto-stop
   /** Explicit target-loss chain, one ace-train leg per entry, strictly
    *  descending (0 legal only last). Omit for the default: targetLoss becomes
    *  the FINAL stage of the 2.0 → 1.5 → final ladder (2026-08-29 — the staged
@@ -790,7 +790,7 @@ export interface TrainDitOptions {
   cropMode?: 'structured' | 'random';
   cropStartFrac?: number;          // default 0.2
   cropEndFrac?: number;            // default 0.2 (see the 2026-09-01 note in training.ts)
-  targetLoss?: number;             // default 0.1;  0 disables auto-stop
+  targetLoss?: number;             // default 1.5 (was 0.1 until 2026-09-02);  0 disables auto-stop
   epochs?: number;                 // default 400 (hard cap)
   learningRate?: number;           // default 0.0005 (lora) / 0.01 (lokr, K2)
   gradAccum?: number;              // default 4 (lora) / 20 (lokr — Side-Step's effective batch 20, which the lokr lr assumes)

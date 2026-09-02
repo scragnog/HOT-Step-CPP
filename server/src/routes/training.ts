@@ -2388,11 +2388,16 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
 
     // ── numeric clamps (§4.5 step 8) ─────────────────────────────────────
     const epochs = numOpt(body.epochs, 150);
-    // 0.1 (Rob, 2026-08-12) — was 0.2 earlier the same day, 2.0 before that.
+    // 1.5 (Rob, 2026-09-02) — was 0.1 from 2026-08-12, 0.2 earlier that day, 2.0
+    // before that. The render-scored stage ladder (docs/plans/lm-attr-probe/
+    // RESULTS.md §4, 9 artists) showed every measurable gain of an LM adapter is
+    // in by CE ~2.0 and the last leg to 0.1 only doubled the looping-plan rate
+    // (26 % vs 11 % at 1.5). With the ladder below, 1.5 means one 2.0 leg then
+    // one 1.5 leg.
     // Tracks TRAIN_LM_DEFAULTS.targetLoss: the batch pipeline POSTs the STORED
     // per-stage defaults (`{}` in practice), so this fallback IS the number a
     // bulk run trains to, and it has to be the one the form shows.
-    const targetLoss = numOpt(body.targetLoss, 0.1);
+    const targetLoss = numOpt(body.targetLoss, 1.5);
     // ── Staged target chain (Rob, 2026-08-29: "this MUST be the new default") ─
     // `targetLoss` is the FINAL target; the run always descends through the
     // 2.0 → 1.5 ladder first, one full ace-train leg per rung with
