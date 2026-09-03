@@ -518,6 +518,8 @@
     "trainingStudio.train.dit.attnBackend": "Flash attention (full-song crops)",
     "trainingStudio.train.dit.attnBackendInfo": "Routes attention through fused kernels so training crops can reach full-song length instead of the ~50 s cap — the auto-fit picks the crop, and the max-crop cap lifts to the dataset's longest track. On by default; ticking it unpins the crop cap, and unticking restores the exact graph with the classic 1250-frame cap. Costs some per-step speed.",
     "trainingStudio.train.dit.attnBackendHelp": "Full-song training crops via fused attention. Untick for the pre-2026-09 exact graph (bit-identical to older runs).",
+    "trainingStudio.train.dit.cropJitter": "Crop-length jitter",
+    "trainingStudio.train.dit.cropJitterHelp": "Each training draw picks a crop length between Min crop and the fitted crop, so a long crop cap still gives quiet intros and breakdowns whole optimizer steps of their own. Long crops without this under-render quiet passages (measured 2026-09-03). Experimental.",
     "trainingStudio.train.dit.layers": "Layers to train",
     "trainingStudio.train.dit.layersAuto": "0 = fit automatically to free VRAM.",
     "trainingStudio.train.dit.layersHelp": "Anything below the full depth trains only the top layers. It fits smaller cards, but whether a part-depth adapter sounds good is not yet established.",

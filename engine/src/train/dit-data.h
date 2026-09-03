@@ -621,6 +621,11 @@ struct DitBatchCfg {
     // Opening window the start share spreads over, in crop lengths. 1 = every
     // crop that still touches the song's opening; larger dilutes the boost.
     int   start_window = 1;
+    // Crop-length jitter (2026-09-03): when on, each element's crop length is
+    // drawn uniformly over the patch-aligned lengths in [jitter_min, crop]
+    // BEFORE the position sampler runs (one extra RNG draw, only when on).
+    bool  jitter      = false;
+    int   jitter_min  = 375;
 };
 
 static void dit_batch_assemble(const DitBatchCfg & cfg, std::vector<DitBatchElem> & els, LmRng * rng_crop,
@@ -631,10 +636,22 @@ static void dit_batch_assemble(const DitBatchCfg & cfg, std::vector<DitBatchElem
     // 1) crops, in element order.
     int padded = 0;
     for (int b = 0; b < B; b++) {
+        int crop_b = cfg.crop;
+        if (cfg.jitter && crop_b > 0) {
+            const int patch = std::max(1, cfg.patch);
+            int lo = std::min(std::max(cfg.jitter_min, patch), crop_b);
+            lo -= lo % patch;
+            if (lo < patch) {
+                lo = patch;
+            }
+            const int hi   = crop_b - (crop_b % patch);
+            const int opts = std::max(1, (hi - lo) / patch + 1);
+            crop_b         = lo + patch * (int) lm_rng_below(rng_crop, (uint64_t) opts);
+        }
         const DitCrop cr = cfg.structured
-            ? dit_sample_crop_structured(rng_crop, els[(size_t) b].s->T, cfg.crop, cfg.patch, cfg.start_frac,
+            ? dit_sample_crop_structured(rng_crop, els[(size_t) b].s->T, crop_b, cfg.patch, cfg.start_frac,
                                          cfg.end_frac, els[(size_t) b].s->truncated, cfg.start_window)
-            : dit_sample_crop(rng_crop, els[(size_t) b].s->T, cfg.crop, cfg.patch);
+            : dit_sample_crop(rng_crop, els[(size_t) b].s->T, crop_b, cfg.patch);
         els[(size_t) b].crop_start = cr.start;
         els[(size_t) b].len        = cr.len;
         padded                     = std::max(padded, cr.len);

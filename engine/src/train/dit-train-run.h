@@ -88,7 +88,12 @@ struct DitTrainArgs {
     float       target_loss = 0.4f;
     std::string order       = "shuffle";
 
-    int   crop = 0, crop_min = 375, crop_max = 1250;
+    // crop_max 600 (2026-09-03): adapters trained at auto-fit crops of ~1500
+    // frames under-render sparse material (intros 7-15 dB quiet, hiss) — the
+    // quiet frames are diluted inside a long crop's mean loss. Every adapter
+    // that passed the ear was trained at ~550-820. An explicit --crop-max
+    // still raises it (pair with --crop-jitter).
+    int   crop = 0, crop_min = 375, crop_max = 600;
     // Set by the CLI parser when --crop-max was given explicitly. Only the
     // DEFAULT cap is lifted in flash mode; a user's number is never moved.
     bool  crop_max_user = false;
@@ -117,6 +122,12 @@ struct DitTrainArgs {
     int   crop_start_window = 1;
     // Endpoint share ceiling as a multiple of the crop's natural coverage.
     float crop_endpoint_k  = 2.0f;
+    // --crop-jitter (2026-09-03): each draw's length is uniform over the
+    // patch-aligned lengths in [crop_min, crop], so a long-cap run still gets
+    // whole optimizer steps that are ONLY a quiet intro or breakdown (the
+    // thing short crops gave for free) while keeping long-context draws.
+    // Off = byte-identical to the two-draw sampler.
+    bool  crop_jitter = false;
     int   vram_reserve_mb = 2048;
     float vram_safety     = 0.05f;
     // Frozen-weight mirror precision:
@@ -674,13 +685,16 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // decides the crop — the model would be moot. So in flash mode the DEFAULT
     // cap lifts to the dataset's longest track; an explicit --crop-max always
     // wins, in both directions.
+    // 2026-09-03: the lift is GONE. Long auto-fit crops (~1500) produced
+    // adapters that under-render sparse material (measured: intros 7-15 dB
+    // quiet, hiss in fine detail); the cap is a quality guard now, not a VRAM
+    // one. An explicit --crop-max still wins in both directions.
     int crop_max_eff = a.crop_max;
     if (flash_attn && !a.crop_max_user && max_T > a.crop_max) {
-        crop_max_eff = max_T;
         char cb[224];
         snprintf(cb, sizeof(cb),
-                 "--attn %s: crop-max lifted from the %d default to the dataset's longest track (%d frames) — "
-                 "pass --crop-max to pin it",
+                 "--attn %s: crop-max stays at the %d default (longest track %d frames) — long crops under-train "
+                 "quiet passages; pass --crop-max to raise it, ideally with --crop-jitter",
                  a.attn.c_str(), a.crop_max, max_T);
         lm_log("info", cb);
         fprintf(stderr, "[train-dit] %s\n", cb);
@@ -1284,6 +1298,8 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     bcfg.crop           = crop_len;
     bcfg.anchor_song    = (a.crop_anchor != "zero");
     bcfg.structured     = (a.crop_mode != "random");
+    bcfg.jitter         = a.crop_jitter;
+    bcfg.jitter_min     = a.crop_min;
     // Median track length drives the coverage scaling — mean would let one
     // 6-minute outlier shrink the share for every other song in the set.
     int T_median = 0;
@@ -1314,6 +1330,13 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                  (double) a.crop_start_frac * 100.0, (double) a.crop_end_frac * 100.0, crop_len, T_median,
                  T_median > 0 ? 100.0 * (double) crop_len / (double) T_median : 0.0);
         lm_log("info", cb);
+    }
+    if (bcfg.jitter) {
+        char cb[160];
+        snprintf(cb, sizeof(cb), "crop jitter: each draw's length uniform over [%d, %d] frames", bcfg.jitter_min,
+                 crop_len);
+        lm_log("info", cb);
+        fprintf(stderr, "[train-dit] %s\n", cb);
     }
     bcfg.weighted       = (a.loss_weighting == "flow_snr");
     bcfg.null_cond      = &M.null_cond;
@@ -2210,6 +2233,7 @@ static int dit_train_main(const DitTrainArgs & a) {
     log.crop_end_frac   = a.crop_end_frac;
     log.crop_start_window    = a.crop_start_window;
     log.crop_endpoint_k      = a.crop_endpoint_k;
+    log.crop_jitter          = a.crop_jitter;
     log.mirror          = a.mirror;
     log.bwd             = a.bwd;
     log.attn_mode       = a.attn;

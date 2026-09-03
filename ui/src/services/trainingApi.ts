@@ -814,6 +814,9 @@ export interface TrainDitOptions {
   // pinned to the scalar kernels instead of the TF32 tensor-core ones). The
   // Training Studio checkbox is two-state and never produces it.
   attnBackend?: 'exact' | 'flash' | 'flash-f32'; // default 'exact'
+  /** --crop-jitter (2026-09-03, experimental): per-draw crop length uniform over
+   *  [cropMin, crop], so a long crop cap still trains quiet intros/breakdowns. */
+  cropJitter?: boolean; // default false
 }
 
 /** Structurally identical to TrainLmEpoch so LossSparkline is reused unedited. */

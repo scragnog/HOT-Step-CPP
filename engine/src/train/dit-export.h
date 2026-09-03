@@ -64,6 +64,7 @@ struct DitTrainLog {
     float       crop_start_frac_eff = 0.0f, crop_end_frac_eff = 0.0f;
     int         crop_start_window = 1;
     float       crop_endpoint_k  = 2.0f;
+    bool        crop_jitter      = false;
     std::string mirror      = "f32";  // frozen-weight mirror precision (f32|bf16|bf16-f32)
     std::string bwd         = "outprod";  // MUL_MAT activation-gradient form (outprod|mm)
     // Attention formulation the run actually used (exact|flash). A config field,
@@ -187,6 +188,7 @@ static bool dit_write_train_log(const std::string & dir, const DitTrainLog & m) 
     yyjson_mut_obj_add_real(doc, cfg, "crop_end_frac_eff", (double) m.crop_end_frac_eff);
     yyjson_mut_obj_add_int(doc, cfg, "crop_start_window", m.crop_start_window);
     yyjson_mut_obj_add_real(doc, cfg, "crop_endpoint_k", (double) m.crop_endpoint_k);
+    yyjson_mut_obj_add_bool(doc, cfg, "crop_jitter", m.crop_jitter);
     yyjson_mut_obj_add_strcpy(doc, cfg, "mirror", m.mirror.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "bwd", m.bwd.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "attn_mode", m.attn_mode.c_str());

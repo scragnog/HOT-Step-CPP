@@ -509,6 +509,9 @@ export interface ResolvedTrainDitOptions {
    *  rejects them loudly rather than silently training the old way. */
   cropAnchor: 'song' | 'zero'; cropMode: 'structured' | 'random';
   cropStartFrac: number; cropEndFrac: number;
+  /** --crop-jitter (2026-09-03, experimental): per-draw crop length uniform
+   *  over [cropMin, crop]. Off = the engine's two-draw sampler, byte-identical. */
+  cropJitter: boolean;
   targetLoss: number; epochs: number; learningRate: number;
   gradAccum: number; gradClip: number; warmupRatio: number; weightDecay: number;
   lossWeighting: 'none' | 'flow_snr'; snrGamma: number; tBias: number;
@@ -654,6 +657,7 @@ export function buildTrainDitArgs(input: {
     '--crop-mode', o.cropMode,
     '--crop-start-frac', String(o.cropStartFrac),
     '--crop-end-frac', String(o.cropEndFrac),
+    ...(o.cropJitter ? ['--crop-jitter'] : []),
     '--loss-weighting', o.lossWeighting,
     '--snr-gamma', String(o.snrGamma),
     '--t-bias', String(o.tBias),

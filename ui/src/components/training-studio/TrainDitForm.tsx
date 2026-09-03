@@ -86,6 +86,7 @@ export interface TrainDitFormState {
    *  what makes full-song training crops affordable — experimental, and slower
    *  per step. */
   attnBackend: 'exact' | 'flash';
+  cropJitter: boolean;
   optimizer: 'adamw' | 'muon' | 'prodigy';
   muonLrScale: number;
   muonNsSteps: number;
@@ -119,7 +120,7 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   // "use the whole horizon". The train-dit route's own fallback tracks this
   // number so a batch-pipeline run (which POSTs an empty option bag) stops at
   // the same loss a manual run does.
-  targetLoss: 0.1,
+  targetLoss: 0.3,
   epochs: 500,
   adapterType: 'lora',
   rank: 128,
@@ -179,6 +180,7 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   // returns to the byte-identical exact graph AND restores the exact-mode
   // companions (f32 mirror, cropMax 1250) — see the checkbox handler.
   attnBackend: 'flash',
+  cropJitter: false,
   // Muon is the DEFAULT (2026-07-30). The 10-epoch comparison that suggested
   // parity was too short a window: over a full run Muon reached ma5 0.6 in 161
   // epochs against AdamW's 227, and once the Newton-Schulz was bucketed that
@@ -260,7 +262,7 @@ export const TRAIN_DIT_LOKR_DEFAULTS: TrainDitFormState = {
   // you get the whole cosine decay and still keep the best point on it.
   epochs: 500,
   lossWeighting: 'none',
-  targetLoss: 0.1,
+  targetLoss: 0.3,
   weightDecay: 0.001,
   crop: 0,
 };
@@ -288,9 +290,11 @@ const deriveCropMode = (state: TrainDitFormState): CropMode => {
 // 0.3/0.2/0.15): Balanced must equal TRAIN_DIT_DEFAULTS.targetLoss, and
 // Thorough has to stay below it to keep the dial monotone.
 const DIT_QUALITY_PRESETS: Record<DitQuality, Partial<TrainDitFormState>> = {
-  fast:     { epochs: 150, cropMax: 750,  milestoneStep: 0, targetLoss: 0.2 },
-  balanced: { epochs: 500, cropMax: 1250, milestoneStep: 0, targetLoss: 0.1 },
-  thorough: { epochs: 900, cropMax: 1250, milestoneStep: 0, targetLoss: 0.05 },
+  // cropMax 0 = the engine's cap (600 since 2026-09-03); the old 750/1250 pins
+  // went with the long-crop regression. Targets 0.3/0.3/0.2 (Rob, same day).
+  fast:     { epochs: 150, cropMax: 0, milestoneStep: 0, targetLoss: 0.3 },
+  balanced: { epochs: 500, cropMax: 0, milestoneStep: 0, targetLoss: 0.3 },
+  thorough: { epochs: 900, cropMax: 0, milestoneStep: 0, targetLoss: 0.2 },
 };
 
 /** LoKR's targets were 0.6/0.6/0.5 — its validated auto-stop under the old
@@ -299,7 +303,7 @@ const DIT_QUALITY_PRESETS: Record<DitQuality, Partial<TrainDitFormState>> = {
  *  equal TRAIN_DIT_LOKR_DEFAULTS.targetLoss so the already-highlighted button
  *  is a no-op. */
 const DIT_LOKR_TARGET_LOSS: Record<DitQuality, number> = {
-  fast: 0.2, balanced: 0.1, thorough: 0.05,
+  fast: 0.3, balanced: 0.3, thorough: 0.2,
 };
 
 /** Same reasoning for the epoch counts: the presets above are LoRA's 100/400/800,
@@ -791,7 +795,7 @@ export const TrainDitForm: React.FC<Props> = ({
             <input
               type="number" min={0} max={8192} step={1}
               value={value.cropMax} disabled={lock}
-              onChange={(e) => onChange({ cropMax: num(e.target.value, value.attnBackend === 'flash' ? 0 : 1250) })}
+              onChange={(e) => onChange({ cropMax: num(e.target.value, 0) })}
               className={`${FIELD}${cropRangeOk ? '' : ' border-red-500/50'}`}
             />
           </label>
@@ -1032,12 +1036,26 @@ export const TrainDitForm: React.FC<Props> = ({
                 // in both modes (Rob, 2026-09-02).
                 onChange={(e) => onChange(e.target.checked
                   ? { attnBackend: 'flash', cropMax: 0 }
-                  : { attnBackend: 'exact', cropMax: 1250 })}
+                  : { attnBackend: 'exact', cropMax: 0 })}
                 className="accent-amber-500"
               />
-              {P('attnBackend', 'Default on · full-song crops', CHECK_LABEL)}
+              {P('attnBackend', 'Default on · fused attention', CHECK_LABEL)}
             </label>
             <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.dit.attnBackendHelp')}</span>
+          </div>
+
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+              <input
+                type="checkbox"
+                checked={value.cropJitter}
+                disabled={lock}
+                onChange={(e) => onChange({ cropJitter: e.target.checked })}
+                className="accent-amber-500"
+              />
+              {P('cropJitter', 'Experimental · off', CHECK_LABEL)}
+            </label>
+            <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.dit.cropJitterHelp')}</span>
           </div>
 
           <div className="flex flex-col gap-1.5">

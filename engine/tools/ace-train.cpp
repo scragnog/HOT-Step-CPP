@@ -619,7 +619,12 @@ static void print_usage(void) {
             "  Crop / memory:\n"
             "    --crop <n>                  0           latent frames; 0 = auto-fit\n"
             "    --crop-min <n>              375\n"
-            "    --crop-max <n>              1250\n"
+            "    --crop-max <n>              600         cap on the auto-fit walk, in EVERY attention\n"
+            "                                            mode. Was 1250, and flash used to lift it to\n"
+            "                                            the longest track: adapters trained at ~1500\n"
+            "                                            under-render quiet passages (2026-09-03,\n"
+            "                                            measured 7-15 dB). Raise it deliberately, and\n"
+            "                                            pair it with --crop-jitter.\n"
             "    --crop-anchor <song|zero>   song        song = RoPE positions carry the crop's true\n"
             "                                            offset in the track (the MM3 crop-anchor fix,\n"
             "                                            ported 2026-08-29). zero = the legacy lie:\n"
@@ -649,6 +654,10 @@ static void print_usage(void) {
             "                                            in crop lengths.\n"
             "    --crop-endpoint-k <f>       2.0         endpoint share ceiling as a multiple of the\n"
             "                                            crop's natural coverage (crop / median T).\n"
+            "    --crop-jitter               off         each draw's length uniform over the aligned\n"
+            "                                            lengths in [--crop-min, crop]: a long-cap run\n"
+            "                                            still gets optimizer steps that are ONLY a quiet\n"
+            "                                            intro or breakdown. Experimental (2026-09-03).\n"
             "    --vram-reserve-mb <n>       2048        desktop/OS headroom left unallocated\n"
             "    --vram-safety <f>           0.05        extra margin on the footprint model\n"
             "                                            (same 0.05 for lokr since 2026-08-30)\n"
@@ -4221,6 +4230,7 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--crop-end-frac") && i + 1 < argc) a.crop_end_frac = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--crop-start-window") && i + 1 < argc) a.crop_start_window = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--crop-endpoint-k") && i + 1 < argc) a.crop_endpoint_k = (float) atof(argv[++i]);
+        else if (!strcmp(argv[i], "--crop-jitter")) a.crop_jitter = true;
         else if (!strcmp(argv[i], "--vram-reserve-mb") && i + 1 < argc) a.vram_reserve_mb = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--vram-safety") && i + 1 < argc) { a.vram_safety = (float) atof(argv[++i]); safety_user = true; }
         else if (!strcmp(argv[i], "--mirror") && i + 1 < argc) a.mirror = argv[++i];

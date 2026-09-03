@@ -967,6 +967,9 @@ export interface TrainDitOptions {
    *  slower — measured 2.8x the exact graph's per-epoch time at 32 layers /
    *  crop 1250, against 1.07x for 'flash'. */
   attnBackend?: 'exact' | 'flash' | 'flash-f32'; // default 'exact'
+  /** --crop-jitter (2026-09-03, experimental): per-draw crop length uniform over
+   *  [cropMin, crop] so a long crop cap still trains quiet intros/breakdowns. */
+  cropJitter?: boolean; // default false
 }
 
 /** Structurally identical to TrainLmEpoch so LossSparkline is reused unedited. */

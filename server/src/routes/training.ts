@@ -3095,7 +3095,9 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     // TRAIN_DIT_DEFAULTS.targetLoss: the batch pipeline POSTs the STORED
     // per-stage defaults (`{}` in practice), so this fallback IS the number a
     // bulk run trains to, and it has to be the one the form shows.
-    const targetLoss = numOpt(body.targetLoss, 0.1);
+    // 0.3 (Rob, 2026-09-03): R1's loss-0.3 milestone and its final adapter were
+    // indistinguishable by ear; 0.3 -> 0.1 is mostly memorising the set.
+    const targetLoss = numOpt(body.targetLoss, 0.3);
     const rank = numOpt(body.rank, 128);
     const alpha = numOpt(body.alpha, 256);
     const lokrDim = numOpt(body.lokrDim, 512);
@@ -3114,7 +3116,9 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     const attnBackend = body.attnBackend === 'flash' ? 'flash' as const
       : body.attnBackend === 'flash-f32' ? 'flash-f32' as const
       : 'exact' as const;
-    const cropMax = numOpt(body.cropMax, attnBackend === 'exact' ? 1250 : 0);
+    // 0 = engine default cap (600 since 2026-09-03, every attention mode). A
+    // number is an explicit pin the engine honours in both directions.
+    const cropMax = numOpt(body.cropMax, 0);
     // Crop regime (2026-08-29): song-anchored positions + structured draws are
     // the defaults for every run — the batch pipeline POSTs {} and inherits
     // them. 'zero'/'random' remain reachable for A/B archaeology only.
@@ -3128,6 +3132,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     // closing-region draws — see dit_sample_crop_structured in
     // engine/src/train/dit-data.h for the corrected story.
     const cropEndFrac = numOpt(body.cropEndFrac, 0.2);
+    const cropJitter = body.cropJitter === true;
     if (cropStartFrac < 0 || cropEndFrac < 0 || cropStartFrac + cropEndFrac > 1) {
       res.status(400).json({ error: 'cropStartFrac/cropEndFrac must be >= 0 and sum to <= 1' });
       return;
@@ -3354,6 +3359,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       cropMode,
       cropStartFrac,
       cropEndFrac,
+      cropJitter,
       targetLoss,
       epochs: Math.trunc(epochs),
       learningRate,
