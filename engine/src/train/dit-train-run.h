@@ -24,6 +24,7 @@
 #include "train/dit-data.h"
 #include "train/dit-export.h"
 #include "train/dit-pissa.h"
+#include "train/dit-hra.h"
 #include "train/dit-resume.h"
 #include "train/dit-selftest.h"
 #include "train/dit-train-ckpt.h"
@@ -82,6 +83,9 @@ struct DitTrainArgs {
     // only, not with DoRA/HiRA/LoHa, not resumable (the residual base is
     // rebuilt from the run's own init files, which a resume does not carry).
     bool        pissa            = false;
+    // HRA: orthogonal fine-tuning by --rank Householder reflections (even);
+    // exported as an exact rank-r LoRA (dit-hra.h). Plain LoRA slot only.
+    bool        hra              = false;
     int         pissa_oversample = 8;
     int         pissa_iters      = 2;
     // LoRA+ (Hayou 2024): B at ratio x A's learning rate; 1 = off. AdamW-rule
@@ -698,6 +702,8 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     vm.hira        = a.hira;
     vm.loha        = a.loha;
     vm.full_stack_ckpt = art_k > 0;
+    vm.hra         = a.hra;
+    vm.hra_r       = a.rank;
     vm.lokr_dim    = a.lokr_dim;
     vm.lokr_factor = a.lokr_factor;
     vm.mirror      = mirror_mode;
@@ -1118,6 +1124,11 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         cfg.hira                = a.hira;
         cfg.loha                = a.loha;
         cfg.pissa               = a.pissa;
+        cfg.hra                 = a.hra;
+        if (a.hra && (a.adapter_type != "lora" || a.dora || a.hira || a.loha || a.pissa || a.rslora)) {
+            lm_fatal("args", "--hra is its own parameterization: plain LoRA slot, not with --dora/--hira/--loha/--pissa/--rslora");
+            return 1;
+        }
         if (a.pissa && (a.adapter_type != "lora" || a.dora || a.hira || a.loha)) {
             lm_fatal("args", "--pissa applies to the plain LoRA parameterization only");
             return 1;
@@ -1157,6 +1168,7 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             dit_train_free(&M);
             return 1;
         }
+        lora.sched = M.sched;  // HRA export builds W U on it
         if (a.pissa && a.adapter_type == "lora") {
             // Overwrites A/B in place and moves s*BA out of the mirror's base
             // weights, so every later consumer (training graph, FD rungs, the
@@ -1190,6 +1202,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                     : dit_lora_expected_params(c, lora_lo, L, a.rank, a.target_mlp);
         if (a.loha && !is_lokr) {
             expect *= 2;  // the second (A2, B2) pair mirrors the first exactly
+        }
+        if (a.hra && !is_lokr) {
+            expect = dit_hra_expected_params(c, lora_lo, L, a.rank, a.target_mlp);
         }
         if (a.dora && !is_lokr) {
             // DoRA adds one magnitude per output row at every trained site. The
@@ -1967,6 +1982,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                                    : dit_lokr_apply_arena_bytes(c, L - Kr, L, vm.lokr_dim, vm.lokr_factor,
                                                                 vm.target_mlp, S_max * std::max(1, B));
             }
+            if (vm.hra) {
+                aest += dit_hra_apply_arena_bytes(c, L - Kr, L, vm.target_mlp, vm.hra_r, S_max, B);
+            }
             if (vm.hira || vm.loha) {
                 aest += dit_hira_apply_arena_bytes(c, L - Kr, L, vm.target_mlp, vm.hira ? 2.0 : 3.0);
             }
@@ -2283,6 +2301,7 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                 DitExportResult xr;
                 std::string     xerr;
                 if (!(a.pissa && a.adapter_type == "lora" ? dit_pissa_export(lora, a.out_dir.c_str(), xmeta, &xr, &xerr)
+                      : a.hra && a.adapter_type == "lora" ? dit_hra_export(lora, a.out_dir.c_str(), xmeta, &xr, &xerr)
                                                           : dit_export_peft(*ad, xmeta, a.out_dir.c_str(), &xr, &xerr))) {
                     lm_fatal("export", xerr);
                     rc = 1;
@@ -2321,6 +2340,7 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                     DitExportResult   mr;
                     std::string       merr;
                     if (a.pissa && a.adapter_type == "lora" ? dit_pissa_export(lora, mdir.c_str(), xmeta, &mr, &merr)
+                        : a.hra && a.adapter_type == "lora" ? dit_hra_export(lora, mdir.c_str(), xmeta, &mr, &merr)
                                                             : dit_export_peft(*ad, xmeta, mdir.c_str(), &mr, &merr)) {
                         // A milestone without its token would be an adapter that
                         // silently expects conditioning rows it does not ship.

@@ -860,6 +860,8 @@ export interface TrainDitOptions {
   loha?: boolean;
   /** PiSSA init: A/B start on the weight's principal directions; exported as a rank-2r LoRA. Plain LoRA only; not resumable. */
   pissa?: boolean;
+  /** HRA: orthogonal fine-tuning by `rank` Householder reflections (even); exported as an exact rank-r LoRA. Plain LoRA slot only. */
+  hra?: boolean;
   /** rsLoRA: alpha/sqrt(r) scaling; written as use_rslora and honoured by merge + runtime. LoRA only. */
   rslora?: boolean;
   /** LoRA+: B tensors at ratio x A's learning rate. 1 = off. AdamW-rule tensors only. */

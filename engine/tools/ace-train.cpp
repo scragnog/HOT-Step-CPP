@@ -640,6 +640,9 @@ static void print_usage(void) {
             "    --lora-plus-ratio <f>       1           LoRA+: B at f x A's learning rate (paper: ~16).\n"
             "                                            Fixes the A=kaiming/B=zero asymmetry; AdamW-rule\n"
             "                                            tensors only, Muon ignores it.\n"
+            "    --hra                                   HRA: orthogonal fine-tuning by --rank Householder\n"
+            "                                            reflections (even) on each site's input. Exported\n"
+            "                                            as an exact rank-r LoRA; loaders need nothing.\n"
             "    --pissa                                 PiSSA init: A/B start on the weight's top-r singular\n"
             "                                            directions (GPU randomized SVD), base keeps the\n"
             "                                            residual. Exports a rank-2r plain LoRA. Plain LoRA\n"
@@ -4306,6 +4309,7 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--hira")) a.hira = true;
         else if (!strcmp(argv[i], "--loha")) a.loha = true;
         else if (!strcmp(argv[i], "--pissa")) a.pissa = true;
+        else if (!strcmp(argv[i], "--hra")) a.hra = true;
         else if (!strcmp(argv[i], "--pissa-oversample") && i + 1 < argc) a.pissa_oversample = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--pissa-iters") && i + 1 < argc) a.pissa_iters = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--rslora")) a.rslora = true;

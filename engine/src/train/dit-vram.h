@@ -36,6 +36,23 @@
 // F32, per trained site, and both are retained for the backward. That is a
 // weight-sized pair per site the fitted arena polynomial never saw — exactly
 // the class of term dit_lokr_apply_arena_bytes exists for. Independent of S.
+// HRA: r reflections per site, each retaining ~3 activation-sized F32 tensors
+// ([in, S, B]: the running x, the broadcast v, the correction) for backward.
+static double dit_hra_apply_arena_bytes(const DiTGGMLConfig & c, int lo, int hi, bool target_mlp, int r, int S,
+                                        int B) {
+    if (hi <= lo) {
+        return 0.0;
+    }
+    int64_t sites[DIT_NSITES][2];
+    dit_lokr_site_dims(c, sites);
+    const int n_sites   = target_mlp ? DIT_NSITES : DIT_NSITES_ATTN;
+    double    per_layer = 0.0;
+    for (int s = 0; s < n_sites; s++) {
+        per_layer += 3.0 * (double) r * (double) sites[s][0] * (double) S * (double) std::max(1, B) * 4.0;  // [0] = in
+    }
+    return per_layer * (double) (hi - lo);
+}
+
 // n_full = weight-sized F32 tensors retained per site: HiRA 2 (delta, W (.) delta),
 // LoHa 3 (two products and their Hadamard).
 static double dit_hira_apply_arena_bytes(const DiTGGMLConfig & c, int lo, int hi, bool target_mlp,
@@ -73,6 +90,8 @@ struct DitVramModel {
     bool is_lokr     = false;
     bool hira        = false;  // HiRA: [in,out] delta + Hadamard per site retained for backward
     bool loha        = false;  // LoHa: two [in,out] products + Hadamard per site
+    bool hra         = false;  // HRA: r reflections on the activations per site
+    int  hra_r       = 0;
     // A trained cond leaf (artist token) forces the checkpoint plan over the
     // WHOLE stack with the same layers-per-segment: more boundaries, same
     // widest segment. See dit-train-run.h at the plan.
@@ -511,6 +530,9 @@ static double dit_vram_total_bytes(const DitVramModel & vm, int crop, int K) {
                                                              (double) std::max(1, vm.enc_S) * Bf)
                            : dit_lokr_apply_arena_bytes(vm.m->cfg, vm.n_layers - Kr, vm.n_layers, vm.lokr_dim,
                                                         vm.lokr_factor, vm.target_mlp, S * std::max(1, vm.batch));
+    }
+    if (vm.hra) {
+        b += dit_hra_apply_arena_bytes(vm.m->cfg, vm.n_layers - Kr, vm.n_layers, vm.target_mlp, vm.hra_r, S, vm.batch);
     }
     if (vm.hira || vm.loha) {
         b += dit_hira_apply_arena_bytes(vm.m->cfg, vm.n_layers - Kr, vm.n_layers, vm.target_mlp, vm.hira ? 2.0 : 3.0);

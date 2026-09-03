@@ -721,6 +721,7 @@ export interface TrainDitOptions {
   hira?: boolean;
   loha?: boolean;
   pissa?: boolean;                 // principal-direction init; plain LoRA only
+  hra?: boolean;                   // Householder reflections; rank must be even
   loraPlusRatio?: number;          // 1 = off
   layers?: number;                 // default 0 = auto (top-K depth)
   crop?: number;                   // default 0 = auto-fit

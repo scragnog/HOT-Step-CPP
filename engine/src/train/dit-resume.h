@@ -169,10 +169,39 @@ static bool dit_resume_load_lora(DitAdapterLora * ad, const std::string & dir, D
         *err = "cannot open " + path;
         return false;
     }
+    // HRA keeps its reflection vectors in hra_vectors.safetensors beside the
+    // rank-r LoRA the export wrote for the loaders; that is the resume source.
+    STFile hst;
+    bool   have_hst = false;
+    if (ad->hra) {
+        const std::string vpath = dir + "/hra_vectors.safetensors";
+        if (!st_open(&hst, vpath.c_str())) {
+            *err = "HRA resume: cannot open " + vpath;
+            st_close(&st);
+            return false;
+        }
+        have_hst = true;
+    }
     bool ok = true;
     for (int l = ad->lo; l < ad->hi && ok; l++) {
         for (int s = 0; s < ad->n_sites && ok; s++) {
             DitLoraPair & pr = ad->layers[(size_t) (l - ad->lo)][(size_t) s];
+            if (ad->hra) {
+                if (!pr.A) {
+                    continue;
+                }
+                char hn[208];
+                snprintf(hn, sizeof(hn), "L%d.%s.hra_v", l, dit_site_peft(s));
+                const int rv = dit_resume_fill(hst, hn, pr.A, err);
+                if (rv < 0) {
+                    ok = false;
+                } else if (rv == 1) {
+                    out->loaded += 1;
+                } else {
+                    out->fresh_sites++;
+                }
+                continue;
+            }
             if (!pr.A || !pr.B) {
                 continue;
             }
@@ -250,6 +279,9 @@ static bool dit_resume_load_lora(DitAdapterLora * ad, const std::string & dir, D
                 out->skipped_file++;
             }
         }
+    }
+    if (have_hst) {
+        st_close(&hst);
     }
     st_close(&st);
     return ok;

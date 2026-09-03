@@ -58,6 +58,7 @@ export interface TrainDitFormState {
   hira: boolean;
   loha: boolean;
   pissa: boolean;            // init only; plain LoRA
+  hra: boolean;              // orthogonal (reflections); excludes the others
   loraPlusRatio: number;     // 1 = off
   layers: number;            // 0 = auto (top-K depth)
   crop: number;              // 0 = auto-fit
@@ -146,6 +147,7 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   hira: false,
   loha: false,
   pissa: false,
+  hra: false,
   loraPlusRatio: 1,
   layers: 0,
   crop: 0,
@@ -1207,18 +1209,23 @@ export const TrainDitForm: React.FC<Props> = ({
               <span className="text-[11px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.dit.paramGroup')}</span>
               <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
                 <input type="checkbox" checked={value.dora} disabled={lock} className="accent-amber-500"
-                  onChange={(e) => onChange({ dora: e.target.checked, hira: false, loha: false })} />
+                  onChange={(e) => onChange({ dora: e.target.checked, hira: false, loha: false, hra: false })} />
                 {P('dora', 'Default off', CHECK_LABEL)}
               </label>
               <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
                 <input type="checkbox" checked={value.hira} disabled={lock} className="accent-amber-500"
-                  onChange={(e) => onChange({ hira: e.target.checked, dora: false, loha: false })} />
+                  onChange={(e) => onChange({ hira: e.target.checked, dora: false, loha: false, hra: false })} />
                 {P('hira', 'Default off · merge mode only', CHECK_LABEL)}
               </label>
               <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
                 <input type="checkbox" checked={value.loha} disabled={lock} className="accent-amber-500"
-                  onChange={(e) => onChange({ loha: e.target.checked, dora: false, hira: false })} />
+                  onChange={(e) => onChange({ loha: e.target.checked, dora: false, hira: false, hra: false })} />
                 {P('loha', 'Default off · merge mode only', CHECK_LABEL)}
+              </label>
+              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                <input type="checkbox" checked={value.hra} disabled={lock} className="accent-amber-500"
+                  onChange={(e) => onChange({ hra: e.target.checked, dora: false, hira: false, loha: false, pissa: false, rslora: false })} />
+                {P('hra', 'Default off · rank = reflections, even', CHECK_LABEL)}
               </label>
               <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
                 <input type="checkbox" checked={value.pissa} disabled={lock || value.dora || value.hira || value.loha} className="accent-amber-500"

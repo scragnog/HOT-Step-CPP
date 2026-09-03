@@ -115,6 +115,10 @@ struct DitAdapterCfg {
     // base keeps the residual. The SVD itself runs in dit_pissa_init (needs
     // the scheduler); init() only records the flag.
     bool     pissa      = false;
+    // HRA (Householder reflections): y = W (R x), R = product of `rank`
+    // reflections whose vectors sit in DitLoraPair::A as [in, rank]. Even
+    // rank only (pairs start equal so R = I). dit-hra.h has the export.
+    bool     hra        = false;
     // LoKR (dit-adapter-lokr.h); ignored by the LoRA implementation.
     int   lokr_dim            = 512;
     float lokr_alpha          = 512.0f;
@@ -238,6 +242,8 @@ struct DitAdapterLora final : DitAdapter {
     bool      hira  = false;
     bool      loha  = false;
     bool        pissa = false;
+    bool        hra   = false;
+    ggml_backend_sched_t sched = nullptr;  // set by the trainer after init; HRA export runs W U on it
     std::string pissa_dir;  // where dit_pissa_init left pissa_init.L<l>.safetensors
     DiTGGML * model = nullptr;  // the base weights, for the DoRA norm pass
     std::vector<uint8_t> norm_arena;
@@ -279,6 +285,11 @@ struct DitAdapterLora final : DitAdapter {
         hira    = cfg.hira;
         loha    = cfg.loha;
         pissa   = cfg.pissa;
+        hra     = cfg.hra;
+        if (hra && (rank < 2 || (rank % 2) != 0)) {
+            *err = "HRA needs an even number of reflections (--rank), so that pairs start as the identity";
+            return false;
+        }
         // rsLoRA: alpha/sqrt(r). Applied IN-GRAPH here and re-derived by the
         // merge path from use_rslora in adapter_config.json — the two must
         // agree or every adapter merges at the wrong strength, silently.
@@ -288,7 +299,7 @@ struct DitAdapterLora final : DitAdapter {
         model   = m;
         layers.assign((size_t) (hi - lo), std::array<DitLoraPair, DIT_NSITES>{});
 
-        const int n_ten = (hi - lo) * n_sites * ((dora ? 4 : 2) + (loha ? 2 : 0));
+        const int n_ten = (hi - lo) * n_sites * (hra ? 1 : ((dora ? 4 : 2) + (loha ? 2 : 0)));
         {
             ggml_init_params p = { (size_t) (n_ten + 8) * ggml_tensor_overhead(), nullptr, true };
             ctx                = ggml_init(p);
@@ -308,6 +319,15 @@ struct DitAdapterLora final : DitAdapter {
                     return false;
                 }
                 DitLoraPair & pr = layers[(size_t) (l - lo)][(size_t) s];
+                if (hra) {
+                    pr.A = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, w->ne[0], rank);  // [in, r] reflection vectors
+                    char hn[112];
+                    snprintf(hn, sizeof(hn), "L%d.%s.hra_v", l, dit_site_peft(s));
+                    ggml_set_name(pr.A, hn);
+                    ggml_set_param(pr.A);
+                    par.push_back(pr.A);
+                    continue;
+                }
                 pr.A             = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, w->ne[0], rank);
                 pr.B             = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, rank, w->ne[1]);
                 char nm[112];
@@ -373,6 +393,28 @@ struct DitAdapterLora final : DitAdapter {
         for (int l = lo; l < hi; l++) {
             for (int s = 0; s < n_sites; s++) {
                 DitLoraPair & pr = layers[(size_t) (l - lo)][(size_t) s];
+                if (hra) {
+                    // Column pairs equal: H_v H_v = I, so R = I at step 0. b_sigma > 0
+                    // (the FD rung) nudges the second of each pair so R != I and every
+                    // vector's gradient is non-trivial.
+                    const int in = (int) pr.A->ne[0];
+                    a.assign((size_t) in * (size_t) rank, 0.0f);
+                    std::vector<float> col((size_t) in), nz((size_t) in);
+                    for (int k = 0; k < rank; k += 2) {
+                        lm_rng_fill_normal(&rng, col, 1.0f / sqrtf((float) in));
+                        std::copy(col.begin(), col.end(), a.begin() + (ptrdiff_t) ((size_t) k * (size_t) in));
+                        if (cfg.b_sigma > 0.0f) {
+                            lm_rng_fill_normal(&rng, nz, cfg.b_sigma / sqrtf((float) in));
+                            for (int i = 0; i < in; i++) {
+                                col[(size_t) i] += nz[(size_t) i];
+                            }
+                        }
+                        std::copy(col.begin(), col.end(), a.begin() + (ptrdiff_t) ((size_t) (k + 1) * (size_t) in));
+                    }
+                    ggml_backend_tensor_set(pr.A, a.data(), 0, a.size() * sizeof(float));
+                    n_params += a.size();
+                    continue;
+                }
                 a.assign((size_t) ggml_nelements(pr.A), 0.0f);
                 b.assign((size_t) ggml_nelements(pr.B), 0.0f);
                 lm_rng_fill_normal(&rng, a, 1.0f / sqrtf((float) pr.A->ne[0]));  // A ~ N(0, 1/sqrt(in))
@@ -497,6 +539,34 @@ struct DitAdapterLora final : DitAdapter {
     }
 
     ggml_tensor * apply(ggml_context * ctx_g, ggml_tensor * w, int layer, int site, ggml_tensor * x) const override {
+        if (hra && layer >= lo && layer < hi && site >= 0 && site < n_sites) {
+            const DitLoraPair & h = layers[(size_t) (layer - lo)][(size_t) site];
+            if (h.A) {
+                // y = W (H_{r-1} ... H_0 x): each reflection x <- x - 2 v (v^T x) / ||v||^2
+                // as a matvec, a broadcast divide and a rank-1 correction. Every
+                // intermediate x is retained for backward (dit-vram.h hra term).
+                ggml_tensor * xr = x;
+                for (int k = 0; k < rank; k++) {
+                    ggml_tensor * v  = ggml_view_2d(ctx_g, h.A, h.A->ne[0], 1, h.A->nb[1], (size_t) k * h.A->nb[1]);
+                    // v^T x as a broadcast multiply + row sum, not mul_mat: the matmul's
+                    // backward for a [in,1] src0 is a cuBLAS out_prod call that
+                    // rejects these shapes (CUBLAS invalid value).
+                    ggml_tensor * t  = ggml_sum_rows(ctx_g, ggml_mul(ctx_g, xr, v));  // [1, S, B]
+                    ggml_tensor * n2 = ggml_sum(ctx_g, ggml_sqr(ctx_g, v));       // [1]
+                    // 1/||v||^2 as exp(-log n2): DIV's backward has no broadcast
+                    // reduction for src1 (asserts), MUL's does (repeat_back).
+                    ggml_tensor * inv = ggml_exp(ctx_g, ggml_neg(ctx_g, ggml_log(ctx_g, n2)));  // [1]
+                    ggml_tensor * t2  = ggml_mul(ctx_g, t, inv);                 // broadcast [1] over [1,S,B]
+                    // Outer product v t2^T: v broadcast to [in,S,B] by an explicit-shape
+                    // repeat (ggml_repeat's template tensor may not need gradients,
+                    // and xr does), then MUL's src1 broadcast of t2 over `in`.
+                    ggml_tensor * vb = ggml_repeat_4d(ctx_g, v, v->ne[0], xr->ne[1], xr->ne[2], 1);
+                    ggml_tensor * cr = ggml_mul(ctx_g, vb, t2);                     // [in, S, B]
+                    xr               = ggml_sub(ctx_g, xr, ggml_scale(ctx_g, cr, 2.0f));
+                }
+                return ggml_mul_mat(ctx_g, w, xr);
+            }
+        }
         ggml_tensor *       y = ggml_mul_mat(ctx_g, w, x);
         const DitLoraPair * p = pair(layer, site);
         if (p && loha && p->A2 && p->B2) {

@@ -306,6 +306,7 @@ export const TrainPanel: React.FC = () => {
       ...(ditForm.adapterType === 'lora' && ditForm.loha ? { loha: true } : {}),
       ...(ditForm.adapterType === 'lora' && ditForm.rslora ? { rslora: true } : {}),
       ...(ditForm.adapterType === 'lora' && ditForm.pissa && !ditForm.dora && !ditForm.hira && !ditForm.loha ? { pissa: true } : {}),
+      ...(ditForm.adapterType === 'lora' && ditForm.hra && !ditForm.dora && !ditForm.hira && !ditForm.loha && !ditForm.pissa ? { hra: true } : {}),
       ...(ditForm.adapterType === 'lora' && ditForm.loraPlusRatio !== 1 ? { loraPlusRatio: ditForm.loraPlusRatio } : {}),
       layers: ditForm.layers,
       crop: ditForm.crop,

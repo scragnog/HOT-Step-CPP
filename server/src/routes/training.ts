@@ -3363,6 +3363,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       hira: body.hira === true,
       loha: body.loha === true,
       pissa: body.pissa === true,
+      hra: body.hra === true,
       rslora: body.rslora === true,
       loraPlusRatio: numOpt(body.loraPlusRatio, 1),
       layers: Math.trunc(layers),
