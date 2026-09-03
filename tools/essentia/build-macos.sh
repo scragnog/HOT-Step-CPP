@@ -49,8 +49,16 @@ git fetch --quiet origin "$ESSENTIA_COMMIT" 2>/dev/null || git fetch --quiet ori
 git checkout --quiet "$ESSENTIA_COMMIT"
 echo "essentia $(git describe --tags --always)"
 
-python3 waf configure --mode=release --build-static --with-example=streaming_extractor_music
-python3 waf -j"$JOBS"
+# Essentia's waf imports distutils, which Python 3.12 removed; the macos-15
+# runner's python3 is 3.13. A venv with setuptools puts the shim back.
+PY="$WORK/venv/bin/python"
+if ! "$PY" -c 'import distutils.sysconfig' 2>/dev/null; then
+  python3 -m venv "$WORK/venv"
+  "$PY" -m pip install -q --upgrade pip setuptools
+fi
+"$PY" waf distclean > /dev/null 2>&1 || true
+"$PY" waf configure --mode=release --build-static --with-example=streaming_extractor_music
+"$PY" waf -j"$JOBS"
 
 # The example is named essentia_streaming_extractor_music at the 2020 commit and
 # streaming_extractor_music on master; accept either.

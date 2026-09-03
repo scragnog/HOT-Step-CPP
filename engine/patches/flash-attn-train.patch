@@ -1159,7 +1159,7 @@ new file mode 100644
 index 00000000..8d15bf53
 --- /dev/null
 +++ b/engine/ggml/src/ggml-cuda/fattn-train.cu
-@@ -0,0 +1,2538 @@
+@@ -0,0 +1,2542 @@
 +// HOT-Step patch: flash-attn-train
 +//
 +// CUDA forward for GGML_OP_FLASH_ATTN_TRAIN. Behavioural reference is the CPU
@@ -1370,7 +1370,9 @@ index 00000000..8d15bf53
 +            Qsh[w*LD + lane + WARP_SIZE*c] = qrow[lane + WARP_SIZE*c];
 +        }
 +    }
-+    __syncwarp();
++#ifndef GGML_USE_HIP
++    __syncwarp();   // a HIP wavefront runs in lockstep, so the barrier is implicit there
++#endif // GGML_USE_HIP
 +
 +    float acc[NV];
 +#pragma unroll
@@ -1469,7 +1471,7 @@ index 00000000..8d15bf53
 +        // Fixed lane order, so the accumulation order is fixed too.
 +#pragma unroll 4
 +        for (int jj = 0; jj < WARP_SIZE; ++jj) {
-+            const float pj = __shfl_sync(0xffffffff, p, jj);
++            const float pj = __shfl_sync(0xffffffff, p, jj, WARP_SIZE);
 +            if (pj == 0.0f) {
 +                continue;   // masked or vanished: contributes exactly nothing
 +            }
@@ -2395,11 +2397,11 @@ index 00000000..8d15bf53
 +            // warp-uniform, so the skip below never splits the warp.
 +#pragma unroll 4
 +            for (int jj = 0; jj < WARP_SIZE; ++jj) {
-+                const float pj = __shfl_sync(0xffffffff, p, jj);
++                const float pj = __shfl_sync(0xffffffff, p, jj, WARP_SIZE);
 +                if (pj == 0.0f) {
 +                    continue;   // masked, or vanished: contributes exactly nothing
 +                }
-+                const float cj = __shfl_sync(0xffffffff, cf, jj);
++                const float cj = __shfl_sync(0xffffffff, cf, jj, WARP_SIZE);
 +                const float * os = dOsh + jj*LD;
 +                const float * qs = Qsh  + jj*LD;
 +#pragma unroll
@@ -2482,7 +2484,9 @@ index 00000000..8d15bf53
 +        del_i = delta[r];
 +    }
 +    // Qsh/dOsh rows are read back only by the warp that wrote them.
-+    __syncwarp();
++#ifndef GGML_USE_HIP
++    __syncwarp();   // a HIP wavefront runs in lockstep, so the barrier is implicit there
++#endif // GGML_USE_HIP
 +
 +    float dq_acc[NV];
 +#pragma unroll
@@ -2565,7 +2569,7 @@ index 00000000..8d15bf53
 +
 +#pragma unroll 4
 +        for (int jj = 0; jj < WARP_SIZE; ++jj) {
-+            const float cj = __shfl_sync(0xffffffff, cf, jj);
++            const float cj = __shfl_sync(0xffffffff, cf, jj, WARP_SIZE);
 +            if (cj == 0.0f) {
 +                continue;   // dS is exactly 0 here; adding 0*K changes nothing
 +            }
@@ -3698,7 +3702,6 @@ index 00000000..8d15bf53
 +
 +    CUDA_CHECK(cudaGetLastError());
 +}
-
 diff --git a/engine/ggml/src/ggml-cuda/fattn-train.cuh b/engine/ggml/src/ggml-cuda/fattn-train.cuh
 new file mode 100644
 index 00000000..203bafb4
