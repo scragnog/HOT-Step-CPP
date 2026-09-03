@@ -20,6 +20,7 @@
 //                the RESOLVED pair is `vram.batch` / `vram.ckptSegments`.
 //   data.batch   the resolved B (unchanged in name; it never carried the request).
 
+#include "train/artist-token-io.h"
 #include "train/dit-data.h"
 #include "train/dit-export.h"
 #include "train/dit-resume.h"
@@ -54,6 +55,14 @@ struct DitTrainArgs {
     float lokr_alpha          = 512.0f;
     int   lokr_factor         = 6;
     bool  lokr_decompose_both = true;
+    // ── Artist token (textual inversion), V1: conditioning soft prompt ──────
+    //
+    // k learned rows appended to the padded encoder sequence, so they reach the
+    // DiT through cross-attention having passed the same frozen cond_emb a real
+    // caption row does. Touches no weight. Off unless --artist-token names one.
+    std::string artist_token = "";
+    int         artist_k     = 8;
+    bool        artist_only  = false;  // freeze the adapter, train only the rows
     // ON by default: an attention-only LoRA leaves the MLP projections — where
     // most of the timbre lives — frozen. --no-target-mlp turns it back off.
     bool        target_mlp = true;
@@ -526,15 +535,31 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         lm_log("warn", eb);
         fprintf(stderr, "[train-dit] %s\n", eb);
     }
+    // Artist token: k EXTRA encoder positions on the end of every sample. They
+    // are zero in enc (the parameter is accumulated into them in-graph) but
+    // UNMASKED in enc_mask — the opposite of ordinary padding. dit_ca_mask
+    // writes -INFINITY wherever the mask says padding, so leaving these at 0
+    // would mask the token out of every cross-attention and hand it exactly
+    // zero gradient, which reads as "the learning rate is too low" rather than
+    // as a wiring bug.
+    const int art_k      = a.artist_token.empty() ? 0 : a.artist_k;
+    const int enc_S_base = enc_S;
+    enc_S += art_k;
     for (size_t i = 0; i < samples.size(); i++) {
         DitSample & s = samples[i];
         s.enc.resize((size_t) enc_S * (size_t) enc_H, 0.0f);
         s.enc_mask.resize((size_t) enc_S, 0.0f);
         s.enc_S = enc_S;
+        for (int j = 0; j < art_k; j++) {
+            s.enc_mask[(size_t) (enc_S_base + j)] = 1.0f;
+        }
         if (!s.enc_genre.empty()) {
             s.enc_genre.resize((size_t) enc_S * (size_t) enc_H, 0.0f);
             s.enc_mask_genre.resize((size_t) enc_S, 0.0f);
             s.enc_S_genre = enc_S;
+            for (int j = 0; j < art_k; j++) {
+                s.enc_mask_genre[(size_t) (enc_S_base + j)] = 1.0f;
+            }
         }
     }
     const int n = (int) samples.size();
@@ -1107,6 +1132,74 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     }
     const DitAdapter * ad = adapter;
 
+    // ── Artist token parameter ────────────────────────────────────────────
+    //
+    // [enc_H, k] F32, zero-init. Zero means the appended encoder rows are all
+    // zeros, which after the frozen cond_emb is a constant bias row — so step 0
+    // is a well-defined starting point rather than noise, and a run that never
+    // moved is visibly distinct from one that moved wrongly.
+    ggml_tensor *         t_art   = nullptr;
+    ggml_context *        art_ctx = nullptr;
+    ggml_backend_buffer_t art_buf = nullptr;
+    if (art_k > 0) {
+        ggml_init_params ap = { 2 * ggml_tensor_overhead(), nullptr, true };
+        art_ctx             = ggml_init(ap);
+        if (!art_ctx) {
+            lm_fatal("vram", "cannot create the artist-token context");
+            adapter->free();
+            dit_train_free(&M);
+            return 1;
+        }
+        t_art = ggml_new_tensor_2d(art_ctx, GGML_TYPE_F32, enc_H, art_k);
+        ggml_set_name(t_art, "artist_token");
+        ggml_set_param(t_art);
+        art_buf = ggml_backend_alloc_ctx_tensors(art_ctx, M.backend);
+        if (!art_buf) {
+            lm_fatal("vram", "artist-token parameter buffer allocation failed");
+            ggml_free(art_ctx);
+            adapter->free();
+            dit_train_free(&M);
+            return 1;
+        }
+        std::vector<float> z((size_t) ggml_nelements(t_art), 0.0f);
+        ggml_backend_tensor_set(t_art, z.data(), 0, z.size() * sizeof(float));
+        char ab[192];
+        snprintf(ab, sizeof(ab), "artist token \"%s\": k=%d at encoder rows [%d,%d)%s", a.artist_token.c_str(), art_k,
+                 enc_S_base, enc_S_base + art_k, a.artist_only ? ", adapter frozen" : ", trained with the adapter");
+        lm_log("info", ab);
+    }
+
+    // Optimizer parameter set. Freezing the adapter means CLEARING
+    // GGML_TENSOR_FLAG_PARAM, not just omitting it here: lm_optim_fill_gacc
+    // asserts every PARAM-flagged graph node has an optimizer slot
+    // (lm-optim.h:470), so flagged-but-unoptimized aborts the run.
+    std::vector<ggml_tensor *> train_params;
+    if (art_k > 0 && a.artist_only) {
+        const std::vector<ggml_tensor *> & pv0 = adapter->params();
+        for (size_t i = 0; i < pv0.size(); i++) {
+            pv0[i]->flags &= ~(int32_t) GGML_TENSOR_FLAG_PARAM;
+        }
+    } else {
+        train_params = adapter->params();
+    }
+    if (t_art) {
+        train_params.push_back(t_art);
+    }
+
+    // Artist token export. Shares artist-token-io.h with the LM trainer so the
+    // two sites cannot drift into two formats.
+    auto art_export = [&](const std::string & dir, std::string * e) -> bool {
+        if (!t_art) {
+            return true;
+        }
+        ArtistTokenMeta m;
+        m.name       = a.artist_token;
+        m.site       = "as15_dit";
+        m.base_model = a.dit_path;
+        m.k          = art_k;
+        return artist_token_write(t_art, m, dir, e);
+    };
+
     LmOptim opt;
     // BEFORE init: the per-parameter rule split and the optimizer-state
     // allocation are both decided there (a Muon parameter gets no v buffer).
@@ -1122,7 +1215,7 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     opt.prodigy_d0     = (float) a.prodigy_d0;
     {
         std::string err;
-        if (!lm_optim_init(&opt, adapter->params(), M.backend, &err)) {
+        if (!lm_optim_init(&opt, train_params, M.backend, &err)) {
             lm_fatal("vram", err);
             adapter->free();
             ggml_backend_buffer_free(buf_static);
@@ -1435,6 +1528,10 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             // it from one line.
             in.attn_mode     = attn_mode;
             in.attn_prec_req = attn_prec_req;
+            // Same reasoning as attn_mode: one line, and both the monolithic
+            // path and the segment driver pick it up.
+            in.t_art = t_art;
+            in.art_k = art_k;
             return in;
         };
 
@@ -1610,6 +1707,12 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         dit_ckpt_free(&ckbufs);
         lm_optim_free(&opt);
         adapter->free();
+        if (art_buf) {
+            ggml_backend_buffer_free(art_buf);
+        }
+        if (art_ctx) {
+            ggml_free(art_ctx);
+        }
         ggml_backend_buffer_free(buf_static);
         ggml_free(ctx_static);
         dit_train_free(&M);
@@ -2026,6 +2129,11 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                     rc = 1;
                     break;
                 }
+                if (!art_export(a.out_dir, &xerr)) {
+                    lm_fatal("export", xerr);
+                    rc = 1;
+                    break;
+                }
                 out->exported       = true;
                 out->export_tensors = xr.tensors;
                 out->saved_ma5      = best_ma5 ? ma5 : out->saved_ma5;
@@ -2054,6 +2162,11 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                     DitExportResult   mr;
                     std::string       merr;
                     if (dit_export_peft(*ad, xmeta, mdir.c_str(), &mr, &merr)) {
+                        // A milestone without its token would be an adapter that
+                        // silently expects conditioning rows it does not ship.
+                        if (!art_export(mdir, &merr)) {
+                            lm_log("warn", "milestone artist token not written: " + merr);
+                        }
                         DitMilestoneRec ms;
                         ms.loss  = lval;
                         ms.epoch = epoch + 1;

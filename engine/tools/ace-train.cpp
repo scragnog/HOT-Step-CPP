@@ -589,6 +589,23 @@ static void print_usage(void) {
             "    --lokr-decompose-both / --no-lokr-decompose-both   default ON (parity knob;\n"
             "                                                inert at dim 512 — w1 is always monolithic)\n"
             "    --target-mlp / --no-target-mlp   default ON  also LoRA mlp gate/up/down\n"
+            "\n"
+            "  Artist token (textual inversion), V1 — conditioning soft prompt:\n"
+            "    --artist-token <name>       \"\"          learn k EXTRA encoder rows, appended to the\n"
+            "                                            padded encoder sequence and read by every\n"
+            "                                            cross-attention through the same frozen\n"
+            "                                            cond_emb a real caption row passes. Touches no\n"
+            "                                            weight, so it cannot damage the base.\n"
+            "                                            enc_S grows by k; the rows are UNMASKED, unlike\n"
+            "                                            ordinary padding.\n"
+            "                                            UNVERIFIED UNDER CHECKPOINTING: dit_train_cond\n"
+            "                                            is recomputed per segment, so the parameter\n"
+            "                                            takes one gradient contribution per segment.\n"
+            "                                            The sum is believed correct but has no\n"
+            "                                            finite-difference rung yet — it will train to\n"
+            "                                            something plausible either way.\n"
+            "    --artist-token-k <n>        8           rows, 1-64\n"
+            "    --artist-token-only                     freeze the adapter and train only the rows\n"
             "    --layers <n>                0               0 = auto; else train the top n layers\n"
             "\n"
             "  Objective (design 4.5):\n"
@@ -4223,6 +4240,9 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--layers") && i + 1 < argc) { a.layers = atoi(argv[++i]); saw.layers = true; }
         else if (!strcmp(argv[i], "--target-mlp")) { a.target_mlp = true; saw.target_mlp = true; }
         else if (!strcmp(argv[i], "--no-target-mlp")) { a.target_mlp = false; saw.target_mlp = true; }
+        else if (!strcmp(argv[i], "--artist-token") && i + 1 < argc) a.artist_token = argv[++i];
+        else if (!strcmp(argv[i], "--artist-token-k") && i + 1 < argc) a.artist_k = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--artist-token-only")) a.artist_only = true;
         else if (!strcmp(argv[i], "--loss-weighting") && i + 1 < argc) a.loss_weighting = argv[++i];
         else if (!strcmp(argv[i], "--snr-gamma") && i + 1 < argc) a.snr_gamma = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--t-bias") && i + 1 < argc) a.t_bias = (float) atof(argv[++i]);

@@ -115,6 +115,20 @@ struct DitInputs {
     // graph is textually the graph it always was. Default EXACT: every existing
     // caller keeps today's behaviour without touching a line.
     DitAttnMode attn_mode = DIT_ATTN_EXACT;
+
+    // ── Artist token (textual inversion), [enc_H, k] parameter ─────────────
+    //
+    // Carried here for the same reason attn_mode is: dit_train_cond is called
+    // from three places (the monolithic forward and both phases of the
+    // checkpoint driver) and none of their signatures have to change.
+    //
+    // dit-data.h pads t_enc with k EXTRA rows that are zero and, unlike the
+    // rest of the padding, UNMASKED in enc_mask. The parameter is accumulated
+    // into exactly those rows, so the token is a genuine extra conditioning
+    // position that every cross-attention reads — and it passes through the
+    // same frozen cond_emb projection a real caption row does.
+    ggml_tensor * t_art = nullptr;
+    int           art_k = 0;
     // HOT-Step patch: flash-attn-train — the arithmetic REQUESTED of the fused
     // ops (--attn flash => GGML_PREC_DEFAULT, i.e. TF32 tensor cores where the
     // backend has them; --attn flash-f32 => GGML_PREC_F32, v1's scalar kernels).
@@ -387,8 +401,33 @@ static ggml_tensor * dit_train_proj_in(ggml_context * ctx, DitTrainModel * M, co
 // storing an encoder boundary. cond_emb is frozen and enc carries no useful
 // gradient, so the recompute is exact and cheaper than another [enc_H,enc_S,B]
 // buffer.
+//
+// AN ARTIST TOKEN INVALIDATES A4's PREMISE. With in.t_art set, `enc` DOES carry
+// a useful gradient, and because this function is recomputed inside every
+// checkpoint segment the parameter receives one contribution per segment.
+// Summing them is believed correct — each segment's surrogate loss carries the
+// true boundary gradient, and ggml's caller-supplied accumulators are in-place
+// adds into the same LmOptim::acc[] that adapter gradients already accumulate
+// across segments — but "believed" is the operative word. Until a
+// finite-difference rung compares checkpointed against monolithic gradients for
+// this leaf, treat a token trained with checkpointing on as unverified: it will
+// train to something plausible either way, which is the hardest kind of wrong
+// to hear.
 static ggml_tensor * dit_train_cond(ggml_context * ctx, DitTrainModel * M, const DitInputs & in, DitTaps * taps) {
-    ggml_tensor * enc = ggml_add(ctx, ggml_mul_mat(ctx, M->m.cond_emb_w, in.t_enc), M->m.cond_emb_b);
+    ggml_tensor * enc_in = in.t_enc;
+    if (in.t_art && in.art_k > 0) {
+        // The token rows are the LAST k of the padded encoder sequence.
+        GGML_ASSERT(in.t_art->ne[0] == in.t_enc->ne[0] && in.t_art->ne[1] == in.art_k);
+        GGML_ASSERT(in.t_enc->ne[1] > in.art_k);
+        const int64_t B   = in.t_enc->ne[2];
+        ggml_tensor * a   = (B > 1) ? ggml_repeat_4d(ctx, in.t_art, in.t_art->ne[0], in.art_k, B, 1) : in.t_art;
+        const size_t  off = (size_t) (in.t_enc->ne[1] - in.art_k) * in.t_enc->nb[1];
+        // ggml_acc, not ggml_concat: concat has no backward (it appears in
+        // ggml.c only as a constructor), so a concat here would abort the
+        // moment the parameter needed a gradient.
+        enc_in = ggml_acc(ctx, in.t_enc, a, in.t_enc->nb[1], in.t_enc->nb[2], in.t_enc->nb[3], off);
+    }
+    ggml_tensor * enc = ggml_add(ctx, ggml_mul_mat(ctx, M->m.cond_emb_w, enc_in), M->m.cond_emb_b);
     dit_tap(taps, "enc_after_cond_emb", enc);
     return enc;  // [H,enc_S,B]
 }
