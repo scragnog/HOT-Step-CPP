@@ -619,17 +619,12 @@ static void print_usage(void) {
             "  Crop / memory:\n"
             "    --crop <n>                  0           latent frames; 0 = auto-fit\n"
             "    --crop-min <n>              375\n"
-            "    --crop-max <n>              800         cap on the auto-fit walk, in EVERY attention
-"
-            "                                            mode. Was 1250, and flash used to lift it to
-"
-            "                                            the longest track: adapters trained at ~1500
-"
-            "                                            lost three clean ear A/Bs to ~550 ones
-"
-            "                                            (2026-09-03). Raise it deliberately.
-"
-            "    --crop-anchor <song|zero>   song        song = RoPE positions carry the crop's true\n"
+            "    --crop-max <n>              800         cap on the auto-fit walk, in EVERY attention\n"
+            "                                            mode. Was 1250, and flash used to lift it to\n"
+            "                                            the longest track: adapters trained at ~1500\n"
+            "                                            lost three clean ear A/Bs to ~550 ones\n"
+            "                                            (2026-09-03). Raise it deliberately.\n"
+            "    --crop-anchor <song|zero>   song       song = RoPE positions carry the crop's true\n"
             "                                            offset in the track (the MM3 crop-anchor fix,\n"
             "                                            ported 2026-08-29). zero = the legacy lie:\n"
             "                                            every crop presented as the song's opening.\n"
