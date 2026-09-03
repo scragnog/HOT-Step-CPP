@@ -127,8 +127,24 @@ async function resolveDatasetId(server: string, slug: string): Promise<string> {
 async function pollJob(server: string, jobId: string): Promise<JobSummary> {
   const deadline = Date.now() + JOB_DEADLINE_MS;
   let lastPrint = 0;
+  let consecutiveErrors = 0;
   for (;;) {
-    const job = await fetchJson<JobSummary>(`${server}/api/training/jobs/${jobId}`);
+    // A transient fetch failure (the engine restarting inside the job, a brief
+    // server hiccup) must not kill a multi-hour experiment: the 2026-09-03
+    // overnight run lost eight arms to exactly that. Retry for ~5 minutes.
+    let job: JobSummary;
+    try {
+      job = await fetchJson<JobSummary>(`${server}/api/training/jobs/${jobId}`);
+      consecutiveErrors = 0;
+    } catch (e) {
+      consecutiveErrors++;
+      if (consecutiveErrors >= 60) die(`job ${jobId}: ${consecutiveErrors} consecutive poll failures — ${(e as Error).message}`);
+      if (consecutiveErrors === 1 || consecutiveErrors % 12 === 0) {
+        process.stdout.write(`  [job ${jobId}] poll error (${consecutiveErrors}): ${(e as Error).message} — retrying\n`);
+      }
+      await new Promise(r => setTimeout(r, POLL_MS));
+      continue;
+    }
     if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') return job;
     if (Date.now() - lastPrint > 30_000) {
       process.stdout.write(`  [job ${jobId}] ${job.status} phase=${job.phase} ${job.done}/${job.total || '?'}\n`);
