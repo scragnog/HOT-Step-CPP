@@ -94,7 +94,11 @@ export async function analyzeWithEssentia(
 
     const data = JSON.parse(fs.readFileSync(tmpJson, 'utf-8')) as any;
     const rawBpm = data?.rhythm?.bpm;
-    const keyData = data?.tonal?.key_edma ?? {};
+    // key_edma is the 2.1_beta5+ field the shipped builds emit; key_key/key_scale
+    // is the older layout, kept so a hand-dropped 2.1_beta2 extractor still yields a key.
+    const tonal = data?.tonal ?? {};
+    const keyData = tonal.key_edma ?? (typeof tonal.key_key === 'string'
+      ? { key: tonal.key_key, scale: tonal.key_scale } : {});
     const loud = data?.lowlevel?.average_loudness;
     const dance = data?.highlevel?.danceability?.all?.danceable;
 

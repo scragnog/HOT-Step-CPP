@@ -655,6 +655,7 @@ jobs:
   # macOS build (Apple Silicon / Metal)
   # ─────────────────────────────────────────────────────────────────────────
   build-macos:
+    needs: [essentia-macos]
     runs-on: macos-15  # Apple Silicon — needs Xcode 16+ for std::from_chars<float>
     steps:
       - name: Checkout
@@ -794,6 +795,12 @@ jobs:
           mkdir -p /tmp/node-portable
           curl -sL "$NODE_URL" | tar -xz -C /tmp/node-portable --strip-components=1
 
+      - name: Fetch the Essentia bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: essentia-macos-arm64
+          path: essentia-artifact
+
       - name: Assemble release
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -877,6 +884,17 @@ jobs:
           FFMPEG_SRC="server/node_modules/ffmpeg-static/ffmpeg"
           if [ -f "$FFMPEG_SRC" ]; then
             cp "$FFMPEG_SRC" "$SRVOUT/ffmpeg"
+          fi
+
+          # Essentia — the bundle the essentia-macos job built from tools/essentia/
+          # (binary + its Homebrew dylibs). Never the repo's Essentia/ folder: that is the
+          # Windows .exe, which is what every v1.3 Linux archive shipped (#144).
+          # The tarball keeps the executable bits that upload-artifact drops.
+          tar -xzf essentia-artifact/essentia-macos-arm64.tar.gz -C "$DIST"
+          mv "$DIST/Essentia-macos-arm64" "$DIST/Essentia"
+          if [ ! -x "$DIST/Essentia/essentia_streaming_extractor_music" ]; then
+            echo "ERROR: Essentia bundle missing from the release staging dir"
+            exit 1
           fi
 
           # Noise samples
@@ -976,6 +994,7 @@ jobs:
   # Linux builds (CUDA / Vulkan / CPU) — run in parallel via matrix strategy
   # ─────────────────────────────────────────────────────────────────────────
   build-linux:
+    needs: [essentia-linux]
     runs-on: ubuntu-22.04   # 22.04 for wider glibc compatibility across distros
     strategy:
       fail-fast: true
@@ -1292,6 +1311,12 @@ jobs:
           cd ui && npm install && npx vite build
 
       # ── Assemble Release Package ───────────────────────────────
+      - name: Fetch the Essentia bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: essentia-linux-x64
+          path: essentia-artifact
+
       - name: Assemble release
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -1387,8 +1412,16 @@ jobs:
             cp "$FFMPEG_SRC" "$SRVOUT/ffmpeg"
           fi
 
-          # Essentia (if Linux-compatible binaries exist)
-          [ -d "Essentia" ] && cp -r Essentia "$DIST/Essentia"
+          # Essentia — the bundle the essentia-linux job built from tools/essentia/
+          # (binary + its shared libraries under lib/). Never the repo's Essentia/ folder: that is the
+          # Windows .exe, which is what every v1.3 Linux archive shipped (#144).
+          # The tarball keeps the executable bits that upload-artifact drops.
+          tar -xzf essentia-artifact/essentia-linux-x64.tar.gz -C "$DIST"
+          mv "$DIST/Essentia-linux-x64" "$DIST/Essentia"
+          if [ ! -x "$DIST/Essentia/essentia_streaming_extractor_music" ]; then
+            echo "ERROR: Essentia bundle missing from the release staging dir"
+            exit 1
+          fi
 
           # Noise samples
           [ -d "noise_samples" ] && cp -r noise_samples "$DIST/noise_samples"
@@ -1492,6 +1525,84 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   # Release — collect all artifacts, generate notes, create draft release
   # ─────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────
+  # Essentia (BPM / key detection) for the non-Windows archives.
+  #
+  # The repo's Essentia/ folder holds only the Windows .exe, so until these
+  # jobs existed every Linux and macOS release shipped with BPM/key detection
+  # dead (#104), and v1.3's Linux archives contained the Windows binary (#144).
+  # Both are built from source by tools/essentia/ and cached on the recipe's
+  # hash, so a release with an unchanged recipe pays nothing here. The bundle
+  # is a tarball because upload-artifact drops executable bits.
+  # ─────────────────────────────────────────────────────────────────────────
+  essentia-linux:
+    runs-on: ubuntu-22.04   # same glibc floor as build-linux
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Cache the bundle
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: essentia-linux-x64.tar.gz
+          key: essentia-linux-x64-${{ hashFiles('tools/essentia/build-linux.sh', 'tools/essentia/smoke-test.sh') }}
+
+      - name: Build Essentia
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          bash tools/essentia/build-linux.sh "$PWD/Essentia-linux-x64"
+          tar -czf essentia-linux-x64.tar.gz Essentia-linux-x64
+
+      - name: Smoke-test the cached bundle
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: |
+          tar -xzf essentia-linux-x64.tar.gz
+          bash tools/essentia/smoke-test.sh Essentia-linux-x64/essentia_streaming_extractor_music
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: essentia-linux-x64
+          path: essentia-linux-x64.tar.gz
+          if-no-files-found: error
+
+  essentia-macos:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Cache the bundle
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: essentia-macos-arm64.tar.gz
+          key: essentia-macos-arm64-${{ hashFiles('tools/essentia/build-macos.sh', 'tools/essentia/bundle-dylibs.py', 'tools/essentia/smoke-test.sh') }}
+
+      - name: Build Essentia
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          bash tools/essentia/build-macos.sh "$PWD/Essentia-macos-arm64"
+          tar -czf essentia-macos-arm64.tar.gz Essentia-macos-arm64
+
+      - name: Smoke-test the cached bundle
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: |
+          tar -xzf essentia-macos-arm64.tar.gz
+          bash tools/essentia/smoke-test.sh Essentia-macos-arm64/essentia_streaming_extractor_music
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: essentia-macos-arm64
+          path: essentia-macos-arm64.tar.gz
+          if-no-files-found: error
+
   release:
     needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
@@ -1510,7 +1621,7 @@ jobs:
       - name: Collect release assets
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.sha256" \) -exec cp {} release-assets/ \;
+          find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.sha256" \) ! -name "essentia-*" -exec cp {} release-assets/ \;
           echo "=== Release assets ==="
           ls -lah release-assets/
 

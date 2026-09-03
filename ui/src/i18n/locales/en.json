@@ -670,7 +670,7 @@
     "trainingStudio.chart.legendEval": "held-out",
     "trainingStudio.caps.engineDown": "Engine offline — local labeling is unavailable. BPM and key analysis still works.",
     "trainingStudio.caps.modelsMissing": "The engine is missing ACE models ({{models}}), so local labeling with ace-understand is unavailable. MiniMax-Music3 training does not use them; install them in the Model Manager only if you want ACE labeling.",
-    "trainingStudio.caps.essentiaMissing": "Essentia binary not found — BPM and key detection is unavailable.",
+    "trainingStudio.caps.essentiaMissing": "Essentia binary not found — BPM and key detection is unavailable. Release builds include it in Essentia/; from source, run tools/essentia/build-linux.sh or build-macos.sh, or point ESSENTIA_BIN at your own copy.",
     "trainingStudio.caps.queueDepth": "Engine busy — {{count}} job(s) ahead of yours.",
     "trainingStudio.error.load": "Couldn't load the Training studio: {{message}}",
     "trainingStudio.error.retry": "Retry",

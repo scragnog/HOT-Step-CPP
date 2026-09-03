@@ -319,6 +319,7 @@ Then open `http://localhost:3000`.
 | CMake | 3.14+ | `brew install cmake` |
 | Node.js | 18–22 LTS | `brew install node@22` — **Node 24+ is not supported** |
 | Git | Any | Included with Xcode CLI tools |
+| Essentia (optional) | — | BPM/key detection. Release archives include it; from source run `bash tools/essentia/build-macos.sh Essentia` (builds from source via Homebrew, ~10 min) or set `ESSENTIA_BIN` |
 
 > **Note:** Xcode provides the Metal SDK and C++ compiler. No separate GPU toolkit is needed — Metal support is built into macOS.
 
@@ -383,6 +384,7 @@ Then open `http://localhost:3000`.
 | CMake | 3.14+ | `sudo apt install cmake` |
 | Node.js | 18–22 LTS | **Node 24+ is not supported** |
 | Git | Any | `sudo apt install git` |
+| Essentia (optional) | — | BPM/key detection. Release archives include it; from source run `bash tools/essentia/build-linux.sh Essentia` (apt deps + ~10 min compile) or set `ESSENTIA_BIN` |
 | CUDA Toolkit (optional) | 12.x+ | For NVIDIA GPU acceleration |
 | Vulkan SDK (optional) | Latest | For AMD / Intel GPU acceleration |
 

@@ -283,9 +283,16 @@ Facts from the departing lead engineer, verified against the workflows on
   `GH_TOKEN: ${{ github.token }}` is all `gh release create` needs; no PAT.
 - **UNVALIDATED — exact timings.** The 7–13 min warm / ~1.5 h cold CUDA figures
   come from workflow and doc comments, not re-measurement.
-- **UNVALIDATED — Essentia dir in CI.** `release.yml` copies an `Essentia/`
-  dir if present (guarded `if exists`); whether it exists in a CI checkout was
-  not verified. Harmless either way.
+- **VALIDATED (2026-09-03) — Essentia is built in CI for Linux and macOS.**
+  The repo's `Essentia/` folder holds only the Windows `.exe`, and copying it
+  wholesale is what put a Windows binary in every v1.3 Linux archive (#144).
+  `essentia-linux` / `essentia-macos` jobs now build
+  `essentia_streaming_extractor_music` from source via `tools/essentia/`
+  (cached on the recipe hash), upload it as a tarball, and the packaging steps
+  fail if the bundle is missing. Windows still ships the committed `.exe`.
+  The Linux recipe was rehearsed in an `ubuntu:22.04` container; the macOS
+  one is @beaudamion's #122 recipe and had not run on a CI runner at the time
+  of writing — check the first `essentia-macos` job log.
 
 Deeper detail (packaging contents, cache keys per OS, pinned tool versions,
 recent test-tag naming history): see [reference.md](reference.md).

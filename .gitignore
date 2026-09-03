@@ -173,3 +173,6 @@ agentcoordination.md
 /x
 /debug.log
 /*.lnk
+
+# tools/essentia/ is the Essentia BUILD RECIPE (scripts), not a binary drop like Essentia/
+!tools/essentia/

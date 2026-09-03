@@ -117,7 +117,11 @@ router.post('/', async (req: Request, res: Response) => {
         const data = JSON.parse(raw);
 
         const bpm = Math.round(data?.rhythm?.bpm ?? 0);
-        const keyData = data?.tonal?.key_edma ?? {};
+        // key_edma is the 2.1_beta5+ field; key_key/key_scale is the older layout
+        // (see essentiaClient.ts).
+        const tonal = data?.tonal ?? {};
+        const keyData = tonal.key_edma ?? (typeof tonal.key_key === 'string'
+            ? { key: tonal.key_key, scale: tonal.key_scale } : {});
         const key = keyData.key ?? '';
         const scale = keyData.scale ?? '';
 
