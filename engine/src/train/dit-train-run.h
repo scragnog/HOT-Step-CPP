@@ -88,12 +88,14 @@ struct DitTrainArgs {
     float       target_loss = 0.4f;
     std::string order       = "shuffle";
 
-    // crop_max 600 (2026-09-03): adapters trained at auto-fit crops of ~1500
-    // frames under-render sparse material (intros 7-15 dB quiet, hiss) — the
-    // quiet frames are diluted inside a long crop's mean loss. Every adapter
-    // that passed the ear was trained at ~550-820. An explicit --crop-max
-    // still raises it (pair with --crop-jitter).
-    int   crop = 0, crop_min = 375, crop_max = 600;
+    // crop_max 800 (2026-09-03): three clean ear A/Bs (nirvana 438 vs 1544,
+    // mika 552 vs 1516 on its own track and on a foreign track) all preferred
+    // the short-crop adapter. Long crops reach low loss 2-3x faster and export
+    // deep memorisers of 60 s windows (coarse/bitty); short crops memorise
+    // quiet windows too faithfully (fuzz in quiet passages). 800 is the middle
+    // Rob's best-liked adapter came from (fightstar, 824). Explicit --crop-max
+    // still wins in both directions.
+    int   crop = 0, crop_min = 375, crop_max = 800;
     // Set by the CLI parser when --crop-max was given explicitly. Only the
     // DEFAULT cap is lifted in flash mode; a user's number is never moved.
     bool  crop_max_user = false;
@@ -685,10 +687,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // decides the crop — the model would be moot. So in flash mode the DEFAULT
     // cap lifts to the dataset's longest track; an explicit --crop-max always
     // wins, in both directions.
-    // 2026-09-03: the lift is GONE. Long auto-fit crops (~1500) produced
-    // adapters that under-render sparse material (measured: intros 7-15 dB
-    // quiet, hiss in fine detail); the cap is a quality guard now, not a VRAM
-    // one. An explicit --crop-max still wins in both directions.
+    // 2026-09-03: the lift is GONE. Long auto-fit crops (~1500) lost three
+    // clean ear A/Bs to short ones (see crop_max above); the cap is a quality
+    // guard now, not a VRAM one. An explicit --crop-max still wins both ways.
     int crop_max_eff = a.crop_max;
     if (flash_attn && !a.crop_max_user && max_T > a.crop_max) {
         char cb[224];

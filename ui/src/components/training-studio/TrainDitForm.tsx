@@ -290,7 +290,7 @@ const deriveCropMode = (state: TrainDitFormState): CropMode => {
 // 0.3/0.2/0.15): Balanced must equal TRAIN_DIT_DEFAULTS.targetLoss, and
 // Thorough has to stay below it to keep the dial monotone.
 const DIT_QUALITY_PRESETS: Record<DitQuality, Partial<TrainDitFormState>> = {
-  // cropMax 0 = the engine's cap (600 since 2026-09-03); the old 750/1250 pins
+  // cropMax 0 = the engine's cap (800 since 2026-09-03); the old 750/1250 pins
   // went with the long-crop regression. Targets 0.3/0.3/0.2 (Rob, same day).
   fast:     { epochs: 150, cropMax: 0, milestoneStep: 0, targetLoss: 0.3 },
   balanced: { epochs: 500, cropMax: 0, milestoneStep: 0, targetLoss: 0.3 },

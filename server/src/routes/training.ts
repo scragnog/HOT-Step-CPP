@@ -3116,7 +3116,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     const attnBackend = body.attnBackend === 'flash' ? 'flash' as const
       : body.attnBackend === 'flash-f32' ? 'flash-f32' as const
       : 'exact' as const;
-    // 0 = engine default cap (600 since 2026-09-03, every attention mode). A
+    // 0 = engine default cap (800 since 2026-09-03, every attention mode). A
     // number is an explicit pin the engine honours in both directions.
     const cropMax = numOpt(body.cropMax, 0);
     // Crop regime (2026-08-29): song-anchored positions + structured draws are
