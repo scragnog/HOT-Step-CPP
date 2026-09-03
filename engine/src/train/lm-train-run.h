@@ -54,6 +54,17 @@ struct LmTrainArgs {
     int  vram_reserve_mb = 1024;
     bool loss_on_cot     = true;
 
+    // ── Artist token (textual inversion) ───────────────────────────────────
+    //
+    // Trains k embedding-space vectors bound to a trigger, instead of (or
+    // alongside) a LoRA. Off unless --artist-token names one: k == 0 keeps the
+    // prompt builder on its single-append path and every sequence byte-identical
+    // to a pre-feature run.
+    std::string artist_token = "";        // "" = disabled; otherwise the token's name
+    int         artist_k     = 8;         // vectors; image-gen practice is 1-16
+    std::string artist_init  = "band";    // seed word -> placeholder id; the delta starts at 0 from its embedding
+    bool        artist_only  = false;     // freeze the LoRA and train only the vectors
+
     // 4B low-VRAM path (2026-07-28 plan §2.1)
     std::string low_vram        = "auto";  // auto|on|off
     int         attn_head_block = -1;      // -1 = engine picks (lm_ckpt_default_head_block)
@@ -377,6 +388,37 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         return 1;
     }
 
+    // ── Artist token: resolve the placeholder id ──────────────────────────
+    //
+    // The learned tensor is a delta on this token's embedding, so the seed word
+    // is the run's starting point in embedding space. Only its FIRST id is used:
+    // a multi-token seed would make k and the span disagree, and picking the
+    // first piece of "band" is more predictable than silently using a different
+    // count than the user asked for.
+    AceArtistToken art;
+    if (!a.artist_token.empty()) {
+        if (a.artist_k < 1 || a.artist_k > 64) {
+            lm_fatal("args", "--artist-token-k must be 1-64");
+            lm_mirror_free(&mirror);
+            qw3lm_free(&lm);
+            return 1;
+        }
+        const std::vector<int> seed_ids = bpe_encode(&bpe, a.artist_init, false);
+        if (seed_ids.empty()) {
+            lm_fatal("args", "--artist-token-init \"" + a.artist_init + "\" encodes to no tokens");
+            lm_mirror_free(&mirror);
+            qw3lm_free(&lm);
+            return 1;
+        }
+        art.k           = a.artist_k;
+        art.placeholder = seed_ids[0];
+        char ab[224];
+        snprintf(ab, sizeof(ab), "artist token \"%s\": k=%d placeholder=%d (from \"%s\", %zu ids, first used)%s",
+                 a.artist_token.c_str(), art.k, art.placeholder, a.artist_init.c_str(), seed_ids.size(),
+                 a.artist_only ? ", LoRA frozen" : ", trained alongside the LoRA");
+        lm_log("info", ab);
+    }
+
     // ── VRAM auto-fit (L8) ───────────────────────────────────────────────
     LmVramModel vm;
     vm.n_layers     = c.n_layers;
@@ -536,7 +578,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         LmSample    s;
         std::string why;
         bool        over = false;
-        if (!lm_build_sequence(bpe, rows[i], a.loss_on_cot, max_len, &s, &why, &over)) {
+        if (!lm_build_sequence(bpe, rows[i], a.loss_on_cot, max_len, &s, &why, &over, &art)) {
             // Counting a malformed row as "too long" would point the user at
             // --max-len instead of at the data.
             if (over) {
@@ -569,7 +611,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
             tr_row.caption     = cd_trigger;
             LmSample    tv;
             std::string tw;
-            if (lm_build_sequence(bpe, tr_row, a.loss_on_cot, max_len, &tv, &tw)) {
+            if (lm_build_sequence(bpe, tr_row, a.loss_on_cot, max_len, &tv, &tw, nullptr, &art)) {
                 cd_variants.push_back(tv);
             } else {
                 // Falling back to the full-caption sample keeps the two vectors
@@ -816,6 +858,20 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // sequence — not at maxLen, which is only the skip threshold. That is the
     // quantity G4 compares against the observed peak.
     const bool   low  = (mode == LM_VRAM_LOWVRAM);
+    // The low-VRAM path builds its own embedding inside the segmented driver
+    // (lm-ckpt.h P1) on the stated assumption that "embed_tokens is frozen and
+    // GET_ROWS' row indices are not differentiable", so it neither applies the
+    // token nor carries a gradient back to it. Running there would train
+    // nothing and report a perfectly healthy falling loss from the LoRA — so
+    // refuse instead of producing a zero vector with a plausible log.
+    if (art.active() && low) {
+        lm_fatal("args",
+                 "--artist-token needs the naive graph: the low-VRAM segmented path does not propagate a gradient to "
+                 "the embedding. Re-run with --low-vram off (or on a model that fits without it).");
+        lm_mirror_free(&mirror);
+        qw3lm_free(&lm);
+        return 1;
+    }
     const double est_bytes =
         low ? lm_vram_bytes_lowvram(vm, lc, alloc_seq, alloc_s_tr) : lm_vram_bytes(vm, alloc_seq, alloc_s_tr);
     const double ckpt_bytes = low ? (double) c.n_layers * (double) H * (double) alloc_seq * 4.0 : 0.0;
@@ -966,6 +1022,68 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         lm_log("warn", b);
     }
 
+    // ── Artist token parameter ────────────────────────────────────────────
+    //
+    // Its own context and buffer, not the LoRA's: --artist-token-only has to be
+    // able to train the vectors with the adapter frozen, and a shared buffer
+    // would tie their lifetimes together for no benefit. [H, k], F32, zero-init
+    // — zero means "identical to the placeholder token", so step 0 changes
+    // nothing and a run that never moved is visibly distinct from one that
+    // moved wrongly.
+    LmArtistTok   artp;
+    ggml_context * art_ctx = nullptr;
+    ggml_backend_buffer_t art_buf = nullptr;
+    if (art.active()) {
+        ggml_init_params ap = { 2 * ggml_tensor_overhead(), nullptr, true };
+        art_ctx             = ggml_init(ap);
+        if (!art_ctx) {
+            lm_fatal("vram", "cannot create the artist-token context");
+            return 1;
+        }
+        artp.t = ggml_new_tensor_2d(art_ctx, GGML_TYPE_F32, H, art.k);
+        ggml_set_name(artp.t, "artist_token");
+        ggml_set_param(artp.t);
+        art_buf = ggml_backend_alloc_ctx_tensors(art_ctx, lm.backend);
+        if (!art_buf) {
+            lm_fatal("vram", "artist-token parameter buffer allocation failed");
+            ggml_free(art_ctx);
+            return 1;
+        }
+        std::vector<float> z((size_t) ggml_nelements(artp.t), 0.0f);
+        ggml_backend_tensor_set(artp.t, z.data(), 0, z.size() * sizeof(float));
+        artp.k = art.k;
+        // `off` is per-sample and set on each micro-step; every sample shares the
+        // same value in practice (everything before the caption is fixed text),
+        // but nothing here depends on that.
+        artp.off = -1;
+    }
+
+    // Optimizer parameter set. --artist-token-only drops the LoRA factors so the
+    // adapter stays at its exactly-zero init and the run is a pure token train.
+    //
+    // Freezing means CLEARING GGML_TENSOR_FLAG_PARAM, not merely leaving the
+    // tensors out of the optimizer: lm_optim_fill_gacc walks the forward graph
+    // and asserts that every PARAM-flagged node has an optimizer slot
+    // (lm-optim.h:470), so a flagged-but-unoptimized tensor aborts the run.
+    // Clearing the flag also stops the backward computing gradients nobody
+    // consumes. The tensors stay in the graph and still apply — at their
+    // exactly-zero init, so the delta is zero.
+    std::vector<ggml_tensor *> train_params;
+    if (art.active() && a.artist_only) {
+        for (size_t i = 0; i < lora.params.size(); i++) {
+            lora.params[i]->flags &= ~(int32_t) GGML_TENSOR_FLAG_PARAM;
+        }
+    } else {
+        train_params = lora.params;
+    }
+    if (artp.t) {
+        train_params.push_back(artp.t);
+    }
+    if (train_params.empty()) {
+        lm_fatal("args", "nothing to train: --artist-token-only without an artist token");
+        return 1;
+    }
+
     LmOptim opt;
     {
         std::string err;
@@ -981,7 +1099,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         // Prodigy's d0 is consumed INSIDE lm_optim_init (o->prodigy_d = d0), so
         // it must be set here, not with base_lr below.
         opt.prodigy_d0    = (float) a.prodigy_d0;
-        if (!lm_optim_init(&opt, lora.params, lm.backend, &err)) {
+        if (!lm_optim_init(&opt, train_params, lm.backend, &err)) {
             lm_fatal("vram", err);
             return 1;
         }
@@ -1096,7 +1214,9 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, /*grads=*/true);
 
         const LmSample & s      = samples[0];
-        ggml_tensor *    hidden = lm_build_trunk(ctx, &lm, t_tok, t_pos, t_msk, alloc_seq, 0, c.n_layers, naive_opts);
+        artp.off                = s.artist_off;
+        ggml_tensor *    hidden =
+            lm_build_trunk(ctx, &lm, t_tok, t_pos, t_msk, alloc_seq, 0, c.n_layers, naive_opts, &artp);
         ggml_tensor *    hd     = ggml_cont(
             ctx, ggml_view_2d(ctx, hidden, H, s.s_tr, hidden->nb[1], (size_t) (s.n_masked - 1) * hidden->nb[1]));
         ggml_tensor * logits = ggml_mul_mat(ctx, lm.embed_tokens, hd);
@@ -1160,7 +1280,13 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         ggml_context *   ctx = ggml_init(gip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 65536, /*grads=*/true);
 
-        ggml_tensor * hidden = lm_build_trunk(ctx, &lm, t_tok, t_pos, t_msk, S, 0, c.n_layers, naive_opts);
+        // Per sample: a regularisation row carries no trigger, so its
+        // artist_off is -1 and the token is simply absent from that graph —
+        // which is the intended semantics. Prior preservation asks the adapter
+        // to keep the base's behaviour on ORDINARY prompts, and an ordinary
+        // prompt has no artist token in it.
+        artp.off             = s.artist_off;
+        ggml_tensor * hidden = lm_build_trunk(ctx, &lm, t_tok, t_pos, t_msk, S, 0, c.n_layers, naive_opts, &artp);
         ggml_tensor * hd =
             ggml_cont(ctx, ggml_view_2d(ctx, hidden, H, s_tr, hidden->nb[1], (size_t) (s.n_masked - 1) * hidden->nb[1]));
         ggml_tensor * logits = ggml_mul_mat(ctx, lm.embed_tokens, hd);  // [V, s_tr] (tied head)
@@ -1956,6 +2082,12 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
                 rc = 1;
                 break;
             }
+            if (artp.t && !lm_export_artist_token(artp.t, a.artist_token, art.placeholder, art.k, meta->lm_path,
+                                                  a.out_dir, &export_err)) {
+                lm_fatal("export", export_err);
+                rc = 1;
+                break;
+            }
             out->exported       = true;
             out->export_tensors = xr.tensors;
         }
@@ -1974,6 +2106,15 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
                 std::string       merr;
                 const bool mok = lora.is_lokr ? lm_export_lokr(lora, *meta, mdir, &mr, &merr)
                                               : lm_export_peft(lora, c, *meta, mdir, &mr, &merr);
+                // A milestone without its token would be a LoRA that silently
+                // expects a trigger it does not ship.
+                if (mok && artp.t) {
+                    std::string aerr;
+                    if (!lm_export_artist_token(artp.t, a.artist_token, art.placeholder, art.k, meta->lm_path, mdir,
+                                                &aerr)) {
+                        lm_log("warn", "milestone artist token not written: " + aerr);
+                    }
+                }
                 if (mok) {
                     LmMilestoneRec ms;
                     ms.loss  = lval;
@@ -2051,6 +2192,12 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     lm_optim_free(&opt);
     lm_lora_detach(&lora, &lm);
     lm_lora_free(&lora);
+    if (art_buf) {
+        ggml_backend_buffer_free(art_buf);
+    }
+    if (art_ctx) {
+        ggml_free(art_ctx);
+    }
     lm_ckpt_free(&ckpt);
     ggml_backend_buffer_free(buf_static);
     ggml_free(ctx_static);

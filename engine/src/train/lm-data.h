@@ -40,6 +40,17 @@ struct LmSample {
     // right answer for every trainer that has no prefix.
     int                  n_prompt = -1;
 
+    // ── Artist token (textual inversion) ───────────────────────────────────
+    //
+    // Index of the first spliced placeholder id inside `tokens`, or -1 when the
+    // run trains no token. It is always < n_masked: the tokens sit in the
+    // caption, which is prompt, which is unsupervised. That is the design, not
+    // an oversight — the vectors learn from the gradient that arrives through
+    // attention from the supervised span, exactly as textual inversion does in
+    // an autoregressive model. A token placed in the supervised region would
+    // instead be learning to predict itself.
+    int                  artist_off = -1;
+
     // ── Prior preservation (soft targets) ──────────────────────────────────
     //
     // When soft_k > 0 the head scores against a DISTRIBUTION per position
@@ -121,7 +132,8 @@ static inline AcePrompt lm_prompt_from_row(const LmCodeRow & r) {
 // (empty prompt / nothing trainable / n_masked < 1), which point at malformed
 // data, not at --max-len.
 static bool lm_build_sequence(BPETokenizer & bpe, const LmCodeRow & r, bool loss_on_cot, int max_len, LmSample * out,
-                              std::string * why_skipped, bool * over_length = nullptr) {
+                              std::string * why_skipped, bool * over_length = nullptr,
+                              AceArtistToken * art = nullptr) {
     *out = LmSample{};
     out->file = r.file;
     if (over_length) {
@@ -130,7 +142,7 @@ static bool lm_build_sequence(BPETokenizer & bpe, const LmCodeRow & r, bool loss
 
     const AcePrompt        p   = lm_prompt_from_row(r);
     const std::string      cot = build_cot_yaml(p);
-    const std::vector<int> pre = build_lm_prompt_with_cot(bpe, p, cot);
+    const std::vector<int> pre = build_lm_prompt_with_cot(bpe, p, cot, art);
 
     if (pre.empty()) {
         *why_skipped = "empty prompt";
@@ -180,6 +192,24 @@ static bool lm_build_sequence(BPETokenizer & bpe, const LmCodeRow & r, bool loss
     if (out->n_masked < 1) {
         *why_skipped = "n_masked < 1";
         return false;
+    }
+
+    // Artist token: record where the builder put the placeholder span, and
+    // refuse the sample if it did not land in the unsupervised prompt region.
+    // Both failures below are silent-wrong rather than loud: a token inside the
+    // supervised span trains against its own next-token loss, and a token past
+    // the sequence end would have the graph write a parameter into whatever
+    // buffer follows.
+    if (art && art->active()) {
+        out->artist_off = art->offset;
+        if (out->artist_off < 0 || out->artist_off + art->k > (int) out->tokens.size()) {
+            *why_skipped = "artist token span outside the sequence";
+            return false;
+        }
+        if (out->artist_off + art->k > out->n_masked) {
+            *why_skipped = "artist token span reaches into the supervised region";
+            return false;
+        }
     }
 
     out->targets.resize((size_t) out->s_tr);

@@ -442,6 +442,27 @@ static void print_usage(void) {
             "    --loss-on-cot                           default ON\n"
             "    --no-loss-on-cot\n"
             "\n"
+            "  Artist token (textual inversion):\n"
+            "    --artist-token <name>       \"\"          train k embedding vectors bound to a trigger\n"
+            "                                            instead of, or alongside, the LoRA. Touches no\n"
+            "                                            weight: the vectors are spliced into the\n"
+            "                                            caption span and learn from the gradient that\n"
+            "                                            arrives through attention. Off by default, and\n"
+            "                                            when off the prompt is byte-identical to a\n"
+            "                                            pre-feature run (enabling it splits one\n"
+            "                                            tokenizer call in two, which changes ids).\n"
+            "                                            NOT SUPPORTED with the low-VRAM path, which\n"
+            "                                            carries no gradient to the embedding — the run\n"
+            "                                            is refused rather than silently training zero.\n"
+            "    --artist-token-k <n>        8           vectors, 1-64. More capacity, faster overfit.\n"
+            "    --artist-token-init <word>  band        seed word; its FIRST token id becomes the\n"
+            "                                            placeholder, and the learned tensor is a DELTA\n"
+            "                                            on that token's embedding (zero-init = behaves\n"
+            "                                            exactly like the seed word).\n"
+            "    --artist-token-only                     freeze the LoRA and train only the vectors.\n"
+            "                                            The adapter stays at its exactly-zero init, so\n"
+            "                                            the run is a pure token train.\n"
+            "\n"
             "  Adapter identity:\n"
             "    --trigger <word>            \"\"          trigger word embedded in the adapter's\n"
             "                                            metadata. Default: custom_tag from the\n"
@@ -3780,6 +3801,10 @@ static int cmd_train_lm(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--limit") && i + 1 < argc) a.limit = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--loss-on-cot")) a.loss_on_cot = true;
         else if (!strcmp(argv[i], "--no-loss-on-cot")) a.loss_on_cot = false;
+        else if (!strcmp(argv[i], "--artist-token") && i + 1 < argc) a.artist_token = argv[++i];
+        else if (!strcmp(argv[i], "--artist-token-k") && i + 1 < argc) a.artist_k = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--artist-token-init") && i + 1 < argc) a.artist_init = argv[++i];
+        else if (!strcmp(argv[i], "--artist-token-only")) a.artist_only = true;
         else if (!strcmp(argv[i], "--no-milestones")) a.milestone_step = 0.0f;
         else if (!strcmp(argv[i], "--overwrite")) a.overwrite = true;
         else if (!strcmp(argv[i], "--self-test")) a.self_test = true;

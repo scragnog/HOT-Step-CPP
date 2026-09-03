@@ -22,6 +22,30 @@
 #define AUDIO_CODE_BASE  151669
 #define AUDIO_CODE_COUNT 65535
 
+// ─── Artist token (textual inversion) ───────────────────────────────────────
+//
+// k learned embedding rows spliced into the caption span at a KNOWN offset, so
+// the trainer can point a [H, k] parameter at exactly those positions and the
+// sampler can reproduce the same layout. The ids themselves are a real token
+// (`placeholder`) repeated k times: the learned tensor is a DELTA on that
+// token's embedding, so zero-init means "behave exactly like the placeholder"
+// and a run that never moved is distinguishable from one that moved wrongly.
+//
+// `offset` is an OUTPUT — the builder fills it with the index of the first
+// spliced id inside the returned prompt.
+//
+// k == 0 (or a null pointer) must leave the prompt BYTE-IDENTICAL to the
+// pre-feature builder. See the note in build_lm_prompt_with_cot: enabling the
+// splice changes tokenization, and doing that unconditionally would silently
+// shift every training sequence against every adapter already trained.
+struct AceArtistToken {
+    int k           = 0;
+    int placeholder = -1;
+    int offset      = -1;  // out
+
+    bool active() const { return k > 0 && placeholder >= 0; }
+};
+
 // ACE-Step prompt
 struct AcePrompt {
     std::string caption;
@@ -297,8 +321,36 @@ static bool parse_cot_and_lyrics(const std::string & text, AcePrompt * out) {
     return (out->bpm > 0 || out->duration > 0);
 }
 
+// The user turn's caption/lyric span, shared by every builder so the training
+// prompt and the sampling prompt can never drift apart.
+//
+// THE SPLIT MATTERS. `append(a + b)` and `append(a); append(b)` do NOT produce
+// the same ids: byte-level BPE merges across the boundary, so tokenizing the
+// header and the caption separately can differ from tokenizing them joined.
+// The artist-token branch has to split (it needs an exact index to point a
+// parameter at); the disabled branch therefore keeps the single joined append
+// verbatim, and is the only path any pre-existing adapter has ever seen.
+static void lm_append_user_span(std::vector<int> & ids, BPETokenizer & bpe, const AcePrompt & prompt,
+                                AceArtistToken * art) {
+    auto append = [&](const std::string & text) {
+        auto t = bpe_encode(&bpe, text, false);
+        ids.insert(ids.end(), t.begin(), t.end());
+    };
+    if (art && art->active()) {
+        append("user\n# Caption\n");
+        art->offset = (int) ids.size();
+        for (int i = 0; i < art->k; i++) {
+            ids.push_back(art->placeholder);
+        }
+        append(prompt.caption + "\n\n# Lyric\n" + prompt.lyrics + "\n");
+    } else {
+        append("user\n# Caption\n" + prompt.caption + "\n\n# Lyric\n" + prompt.lyrics + "\n");
+    }
+}
+
 // Prompt building (Qwen3 chat template)
-static std::vector<int> build_lm_prompt(BPETokenizer & bpe, const AcePrompt & prompt) {
+static std::vector<int> build_lm_prompt(BPETokenizer & bpe, const AcePrompt & prompt,
+                                        AceArtistToken * art = nullptr) {
     std::vector<int> ids;
     auto             append = [&](const std::string & text) {
         auto t = bpe_encode(&bpe, text, false);
@@ -309,7 +361,7 @@ static std::vector<int> build_lm_prompt(BPETokenizer & bpe, const AcePrompt & pr
     ids.push_back(TOKEN_IM_END);
     append("\n");
     ids.push_back(TOKEN_IM_START);
-    append("user\n# Caption\n" + prompt.caption + "\n\n# Lyric\n" + prompt.lyrics + "\n");
+    lm_append_user_span(ids, bpe, prompt, art);
     ids.push_back(TOKEN_IM_END);
     append("\n");
     ids.push_back(TOKEN_IM_START);
@@ -399,7 +451,8 @@ static std::string build_cot_yaml(const AcePrompt & prompt) {
 // and emits im_end itself as stop.
 static std::vector<int> build_lm_prompt_with_cot(BPETokenizer &      bpe,
                                                  const AcePrompt &   prompt,
-                                                 const std::string & cot_yaml) {
+                                                 const std::string & cot_yaml,
+                                                 AceArtistToken *    art = nullptr) {
     std::vector<int> ids;
     auto             append = [&](const std::string & text) {
         auto t = bpe_encode(&bpe, text, false);
@@ -410,7 +463,7 @@ static std::vector<int> build_lm_prompt_with_cot(BPETokenizer &      bpe,
     ids.push_back(TOKEN_IM_END);
     append("\n");
     ids.push_back(TOKEN_IM_START);
-    append("user\n# Caption\n" + prompt.caption + "\n\n# Lyric\n" + prompt.lyrics + "\n");
+    lm_append_user_span(ids, bpe, prompt, art);
     ids.push_back(TOKEN_IM_END);
     append("\n");
     ids.push_back(TOKEN_IM_START);

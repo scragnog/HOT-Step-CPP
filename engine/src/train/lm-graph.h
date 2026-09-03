@@ -858,10 +858,30 @@ static inline ggml_tensor * lm_train_layer(ggml_context * ctx, const Qwen3LMConf
 // For an F32 buffer the two expressions are the same number, which is what keeps
 // exact mode byte-identical.
 //
+// ─── Artist token (textual inversion) ───────────────────────────────────────
+//
+// A [H, k] parameter added onto the embeddings of k contiguous positions —
+// the placeholder ids that prompt.h spliced into the caption span. Learning a
+// DELTA rather than a replacement means zero-init starts the run at a real
+// token the model already understands, and it needs no `ggml_set` semantics:
+// ggml_acc's backward hands src1 a strided view of the output gradient at the
+// same offset, which is exactly this parameter's gradient.
+//
+// Nothing here touches a weight. The base model, and any LoRA layered on top of
+// it, are untouched — which is the whole reason this parameterization cannot
+// produce the loop/early-EOS degeneracies that adapter training can.
+struct LmArtistTok {
+    ggml_tensor * t   = nullptr;  // [H, k] F32 param
+    int           k   = 0;
+    int           off = -1;       // first placeholder position in the sequence
+
+    bool active() const { return t && k > 0 && off >= 0; }
+};
+
 // layer_lo/layer_hi let the self-test build a 2-layer slice (T5).
 static ggml_tensor * lm_build_trunk(ggml_context * ctx, Qwen3LM * lm, ggml_tensor * tokens, ggml_tensor * pos,
                                     ggml_tensor * t_msk_flat, int S, int layer_lo, int layer_hi,
-                                    const LmLayerOpts & opts) {
+                                    const LmLayerOpts & opts, const LmArtistTok * art = nullptr) {
     const Qwen3LMConfig & c = lm->cfg;
 
     ggml_tensor * tok_v = (tokens->ne[0] == S) ? tokens : ggml_view_1d(ctx, tokens, S, 0);
@@ -869,6 +889,11 @@ static ggml_tensor * lm_build_trunk(ggml_context * ctx, Qwen3LM * lm, ggml_tenso
 
     ggml_tensor * mask = ggml_view_2d(ctx, t_msk_flat, S, S, (size_t) S * ggml_element_size(t_msk_flat), 0);
     ggml_tensor * h    = ggml_get_rows(ctx, lm->embed_tokens, tok_v);  // [H, S]
+    if (art && art->active()) {
+        GGML_ASSERT(art->off + art->k <= S);
+        GGML_ASSERT(art->t->ne[0] == h->ne[0] && art->t->ne[1] == art->k);
+        h = ggml_acc(ctx, h, art->t, h->nb[1], h->nb[2], h->nb[3], (size_t) art->off * h->nb[1]);
+    }
     for (int l = layer_lo; l < layer_hi; l++) {
         h = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S, opts);
     }
