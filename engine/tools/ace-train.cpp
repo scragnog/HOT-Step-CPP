@@ -451,9 +451,10 @@ static void print_usage(void) {
             "                                            when off the prompt is byte-identical to a\n"
             "                                            pre-feature run (enabling it splits one\n"
             "                                            tokenizer call in two, which changes ids).\n"
-            "                                            NOT SUPPORTED with the low-VRAM path, which\n"
-            "                                            carries no gradient to the embedding — the run\n"
-            "                                            is refused rather than silently training zero.\n"
+            "                                            Works on BOTH the naive and the low-VRAM path;\n"
+            "                                            the latter runs lm-ckpt.h's P1B backward over\n"
+            "                                            the embedding stage, whose gradient has no\n"
+            "                                            finite-difference rung yet.\n"
             "    --artist-token-k <n>        8           vectors, 1-64. More capacity, faster overfit.\n"
             "    --artist-token-init <word>  band        seed word; its FIRST token id becomes the\n"
             "                                            placeholder, and the learned tensor is a DELTA\n"
@@ -1735,6 +1736,10 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--jsonl"))         g_jsonl        = true;
         else if (!strcmp(argv[i], "--no-ckpt"))       a.ckpt         = false;
         else if (!strcmp(argv[i], "--fd-check"))      fd_probes      = atoi(next("--fd-check"));
+        else if (!strcmp(argv[i], "--artist-token"))      a.artist_token = next("--artist-token");
+        else if (!strcmp(argv[i], "--artist-token-k"))    a.artist_k     = atoi(next("--artist-token-k"));
+        else if (!strcmp(argv[i], "--artist-token-init")) a.artist_init  = next("--artist-token-init");
+        else if (!strcmp(argv[i], "--artist-token-only")) a.artist_only  = true;
         else if (!strcmp(argv[i], "--fd-eps"))        fd_eps         = atof(next("--fd-eps"));
         else if (!strcmp(argv[i], "--fd-frames"))     fd_frames      = atoll(next("--fd-frames"));
         else if (!strcmp(argv[i], "--fd-prompt"))     fd_prompt      = atoll(next("--fd-prompt"));

@@ -279,6 +279,22 @@ struct MM3LmTrainArgs {
      *  Drawn from the training RNG, so it is reproducible and survives a resume
      *  along with everything else. */
     double      caption_dropout = 0.0;
+
+    /** Artist token (textual inversion), V3. k learned vectors accumulated onto
+     *  the first k prompt positions, whose ids are placeholder copies spliced at
+     *  the front of the tokenised prompt.
+     *
+     *  Front insertion, not a string splice: MM3 tokenises the assembled prompt
+     *  in one call, so putting the trigger in the caption text would give an
+     *  unpredictable id count. Inserting ids post-tokenisation fixes both the
+     *  count and the offset, and survives `prompt_cap` truncation, which keeps
+     *  the FIRST P ids.
+     *
+     *  Empty name = off, and the whole feature is then unreachable. */
+    std::string artist_token = "";
+    int         artist_k     = 8;
+    std::string artist_init  = "band";
+    bool        artist_only  = false;
     /** Fraction of LoRA rank components zeroed each step (survivors rescaled by
      *  1/(1-p)). 0 = off. bghira runs lora_dropout 0.1.
      *
@@ -528,6 +544,14 @@ struct MM3EmbedCtx {
     const MM3TrainLm * t   = nullptr;
     ggml_tensor *      t_prompt = nullptr, * t_sem = nullptr, * t_ac = nullptr;
     int64_t            P = 0, Fin = 0;
+
+    // Artist token (textual inversion): [H, k], accumulated onto the FIRST k
+    // prompt positions. The placeholder ids were spliced at the front of
+    // sm.prompt, which is also what makes this truncation-safe — a prompt
+    // clipped to `prompt_cap` keeps its first P ids, so the token survives a
+    // caption long enough to be cut.
+    ggml_tensor *      t_art = nullptr;
+    int                art_k = 0;
 };
 
 static ggml_tensor * mm3_lm_build_embed(ggml_context * ctx, const MM3EmbedCtx & e) {
@@ -551,7 +575,19 @@ static ggml_tensor * mm3_lm_build_embed(ggml_context * ctx, const MM3EmbedCtx & 
         acc = ggml_add(ctx, acc, ggml_view_2d(ctx, e_ac, H, e.Fin, e_ac->nb[1], (size_t) k * e_ac->nb[2]));
     }
     ggml_tensor * frames = ggml_scale(ctx, ggml_add(ctx, e_sem, acc), t.embedding_scale);
-    return e_prompt ? ggml_concat(ctx, e_prompt, frames, 1) : frames;
+    ggml_tensor * out    = e_prompt ? ggml_concat(ctx, e_prompt, frames, 1) : frames;
+
+    // Artist token, applied AFTER the concat and deliberately so. ggml_concat
+    // has no backward — it appears in ggml.c only as a constructor — so accing
+    // onto e_prompt before the concat would put a parameter upstream of a
+    // non-differentiable op and abort. Downstream of it, the concat's own
+    // sources still need no gradient and it is never differentiated.
+    if (e.t_art && e.art_k > 0 && e.P > 0) {
+        GGML_ASSERT(e.t_art->ne[0] == H && e.t_art->ne[1] == e.art_k);
+        GGML_ASSERT(e.P >= e.art_k && "the prompt was clipped shorter than the artist token span");
+        out = ggml_acc(ctx, out, e.t_art, out->nb[1], out->nb[2], out->nb[3], 0);
+    }
+    return out;
 }
 
 // The LmCkptRun hook. P1 calls this instead of get_rows on token ids.
@@ -1389,6 +1425,57 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         return 1;
     }
 
+    // ── Artist token: splice k placeholder ids at the front of every prompt ──
+    //
+    // Post-tokenisation, deliberately. MM3 encodes the assembled prompt in one
+    // call, so putting a trigger in the caption TEXT would tokenise to an
+    // unpredictable number of ids and leave the parameter's span unknowable.
+    // Inserting ids fixes both count and offset, and the front position is what
+    // makes it survive `prompt_cap` — truncation keeps the first P ids.
+    int art_placeholder = -1;
+    const int art_k     = a.artist_token.empty() ? 0 : a.artist_k;
+    if (art_k > 0) {
+        if (a.artist_k < 1 || a.artist_k > 64) {
+            fprintf(stderr, "[mm3-lm-train] --artist-token-k must be 1-64\n");
+            mm3_train_lm_free(&t);
+            return 1;
+        }
+        // The tokenizer is loaded per use, the same way mm3_lm_load_samples_from
+        // does it — MM3TrainLm does not carry one.
+        MM3Model tok_stub = {};
+        tok_stub.lm_file.found = true;
+        tok_stub.lm_file.path  = a.lm_path;
+        tok_stub.lm_file.name  = a.lm_path;
+        tok_stub.lm_cfg.semantic_vocab_offset = t.semantic_vocab_offset;
+        MM3Tokenizer art_tok = {};
+        std::string  tok_err;
+        if (!mm3_tokenizer_load(tok_stub, &art_tok, &tok_err)) {
+            fprintf(stderr, "[mm3-lm-train] artist token: %s\n", tok_err.c_str());
+            mm3_train_lm_free(&t);
+            return 1;
+        }
+        std::vector<int32_t> seed_ids;
+        mm3_tokenizer_encode(art_tok, a.artist_init, &seed_ids);
+        if (seed_ids.empty()) {
+            fprintf(stderr, "[mm3-lm-train] --artist-token-init \"%s\" encodes to no tokens\n",
+                    a.artist_init.c_str());
+            mm3_train_lm_free(&t);
+            return 1;
+        }
+        art_placeholder = seed_ids[0];
+        for (size_t i = 0; i < samples.size(); i++) {
+            samples[i].prompt.insert(samples[i].prompt.begin(), (size_t) art_k, (int32_t) art_placeholder);
+            if (!samples[i].prompt_trigger_only.empty()) {
+                samples[i].prompt_trigger_only.insert(samples[i].prompt_trigger_only.begin(), (size_t) art_k,
+                                                      (int32_t) art_placeholder);
+            }
+        }
+        fprintf(stderr,
+                "[mm3-lm-train] artist token \"%s\": k=%d placeholder=%d (from \"%s\", %zu ids, first used)%s\n",
+                a.artist_token.c_str(), art_k, art_placeholder, a.artist_init.c_str(), seed_ids.size(),
+                a.artist_only ? ", adapter frozen" : ", trained alongside the adapter");
+    }
+
     // ── train / held-out split ─────────────────────────────────────────────
     //
     // Deterministic: the LAST ceil(holdout * n) songs by manifest order. Not
@@ -1459,6 +1546,55 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         jl("{\"type\":\"adapter\",\"kind\":\"lokr\",\"dim\":%d,\"alpha\":%.0f,\"factor\":%d}", a.lokr_dim,
            (double) a.lokr_alpha, a.lokr_factor);
     }
+    // ── Artist token parameter ────────────────────────────────────────────
+    //
+    // [H, k] F32, zero-init: zero means "behave exactly like the placeholder
+    // token", so step 0 is a no-op and a run that never moved is visibly
+    // distinct from one that moved wrongly.
+    ggml_tensor *         t_art   = nullptr;
+    ggml_context *        art_ctx = nullptr;
+    ggml_backend_buffer_t art_buf = nullptr;
+    if (art_k > 0) {
+        ggml_init_params ap = { 2 * ggml_tensor_overhead(), nullptr, true };
+        art_ctx             = ggml_init(ap);
+        if (!art_ctx) {
+            fprintf(stderr, "[mm3-lm-train] cannot create the artist-token context\n");
+            lm_lora_detach(&lora, &t.lm);
+            lm_lora_free(&lora);
+            mm3_train_lm_free(&t);
+            return 1;
+        }
+        t_art = ggml_new_tensor_2d(art_ctx, GGML_TYPE_F32, t.lm.cfg.hidden_size, art_k);
+        ggml_set_name(t_art, "artist_token");
+        ggml_set_param(t_art);
+        art_buf = ggml_backend_alloc_ctx_tensors(art_ctx, t.lm.backend);
+        if (!art_buf) {
+            fprintf(stderr, "[mm3-lm-train] artist-token buffer allocation failed\n");
+            ggml_free(art_ctx);
+            lm_lora_detach(&lora, &t.lm);
+            lm_lora_free(&lora);
+            mm3_train_lm_free(&t);
+            return 1;
+        }
+        std::vector<float> z((size_t) ggml_nelements(t_art), 0.0f);
+        ggml_backend_tensor_set(t_art, z.data(), 0, z.size() * sizeof(float));
+    }
+
+    // Freezing the adapter means CLEARING GGML_TENSOR_FLAG_PARAM, not merely
+    // omitting it here: lm_ckpt_fill_gacc asserts every PARAM-flagged graph node
+    // has an optimizer slot, so flagged-but-unoptimized aborts the run.
+    std::vector<ggml_tensor *> train_params;
+    if (art_k > 0 && a.artist_only) {
+        for (size_t i = 0; i < lora.params.size(); i++) {
+            lora.params[i]->flags &= ~(int32_t) GGML_TENSOR_FLAG_PARAM;
+        }
+    } else {
+        train_params = lora.params;
+    }
+    if (t_art) {
+        train_params.push_back(t_art);
+    }
+
     LmOptim opt;
     opt.optimizer     = a.optimizer;
     opt.muon.lr_scale = a.muon_lr_scale;
@@ -1467,7 +1603,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     opt.muon.nesterov = a.muon_nesterov;
     opt.muon.min_dim  = a.muon_min_dim;
     opt.muon.bucket   = a.muon_bucket;
-    if (!lm_optim_init(&opt, lora.params, t.lm.backend, &err)) {
+    if (!lm_optim_init(&opt, train_params, t.lm.backend, &err)) {
         fprintf(stderr, "[mm3-lm-train] optimizer init failed: %s\n", err.c_str());
         lm_lora_detach(&lora, &t.lm);
         lm_lora_free(&lora);
@@ -1714,6 +1850,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         embed_ctx.t_prompt = t_prompt;
         embed_ctx.t_sem    = t_sem;
         embed_ctx.t_ac     = t_ac;
+        embed_ctx.t_art    = t_art;
+        embed_ctx.art_k    = art_k;
 
         ckpt_run.lm          = &t.lm;
         ckpt_run.opt         = &opt;
@@ -1726,6 +1864,12 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         ckpt_run.grad_accum  = std::max(1, a.grad_accum);
         ckpt_run.embed_build = mm3_lm_ckpt_embed;
         ckpt_run.embed_user  = &embed_ctx;
+        // P1 is forward-only and grads=false unless told otherwise, and its
+        // header states the embed_build override "must be frozen and
+        // gradient-free". An artist token breaks exactly that contract, so the
+        // driver has to run its P1B backward or the vectors get zero gradient
+        // while the adapter's loss falls convincingly.
+        ckpt_run.embed_trainable = (t_art != nullptr);
         // MM3 uploads song-anchored positions itself; without this the
         // micro-step overwrites them with 0..S-1 and --crop-anchor is a no-op.
         ckpt_run.pos_external = true;
@@ -1750,7 +1894,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     auto build_graph = [&](ggml_context * ctx, ggml_cgraph * gf, int64_t P, int64_t Fin, int64_t n_sup,
                            ggml_tensor ** out_loss) {
         const int64_t S = P + Fin;
-        MM3EmbedCtx   ec{ &t, t_prompt, t_sem, t_ac, P, Fin };
+        MM3EmbedCtx   ec{ &t, t_prompt, t_sem, t_ac, P, Fin, t_art, art_k };
         ggml_tensor * h_in = mm3_lm_build_embed(ctx, ec);
 
         ggml_tensor * hidden = lm_build_trunk_embeds(ctx, &t.lm, h_in, t_pos, t_msk, (int) S);
@@ -1915,6 +2059,23 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         if (!exported) {
             fprintf(stderr, "[mm3-lm-train] export failed: %s\n", xerr.c_str());
             return std::string();
+        }
+        // The artist token rides in the same checkpoint dir. A checkpoint
+        // without it would be an adapter that silently expects a trigger it
+        // does not ship. Shared writer with the ACE trainers (artist-token-io.h)
+        // so the three sites cannot drift into three formats.
+        if (t_art) {
+            ArtistTokenMeta am;
+            am.name        = a.artist_token;
+            am.site        = "mm3_lm";
+            am.base_model  = a.lm_path;
+            am.k           = art_k;
+            am.placeholder = art_placeholder;
+            std::string aerr;
+            if (!artist_token_write(t_art, am, dir, &aerr)) {
+                fprintf(stderr, "[mm3-lm-train] artist token export failed: %s\n", aerr.c_str());
+                return std::string();
+            }
         }
         // The sidecar the shipped MM3 adapter picker reads. Written beside the
         // safetensors so `<out>` pointed at <adapters>/mm3-lm-adapters/<run>
@@ -3034,6 +3195,12 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     ggml_backend_buffer_free(buf_static);
     ggml_free(ctx_static);
     lm_optim_free(&opt);
+    if (art_buf) {
+        ggml_backend_buffer_free(art_buf);
+    }
+    if (art_ctx) {
+        ggml_free(art_ctx);
+    }
     lm_lora_detach(&lora, &t.lm);
     lm_lora_free(&lora);
     mm3_train_lm_free(&t);

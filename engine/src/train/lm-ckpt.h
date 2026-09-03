@@ -708,6 +708,32 @@ struct LmCkptRun {
     ggml_tensor * (*embed_build)(ggml_context * ctx, LmCkptRun & r, int S) = nullptr;
     void *          embed_user = nullptr;
 
+    /** The override still reads t_tok, so keep uploading the ids to it.
+     *
+     *  MM3's override builds frames from its own code tensors and never touches
+     *  t_tok, which is why P0 stops maintaining it as soon as embed_build is
+     *  set. An ACE artist-token hook is the opposite: it IS the default
+     *  get_rows plus an acc, so without this it gathers rows out of a stale
+     *  buffer and produces a confidently wrong forward — measured as loss 24.5
+     *  against the naive path's 9.35 on the same data, with no error anywhere. */
+    bool embed_uses_tok = false;
+
+    /** The embedding stage is NO LONGER frozen — run a backward over it (P1B).
+     *
+     *  P1 is forward-only and grads=false, on the stated contract that
+     *  embed_tokens is frozen and GET_ROWS' indices are not differentiable. An
+     *  artist token (textual inversion) breaks that: `embed_build` then contains
+     *  a real parameter, and without this flag it would receive exactly zero
+     *  gradient while the loss fell perfectly convincingly on the adapter.
+     *
+     *  The gradient P1B needs already exists and was already being thrown away —
+     *  the segment loop ends with Gh[cur] holding dL/d(embedding output). This
+     *  flag just stops discarding it.
+     *
+     *  Default false, so every trainer that has no embedding parameter emits the
+     *  graph it always did and pays one predictable branch. */
+    bool embed_trainable = false;
+
     /** Stop after the CE head — no backward segments, no gradient accumulation.
      *
      *  This is how held-out EVALUATION runs without a second graph: the forward
@@ -1226,7 +1252,7 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
     const int NKV = lm_ckpt_n_kv(st, S);
     // `tokens` still SIZES the sequence, but with an embedding override its
     // contents are meaningless and t_tok is never read — do not pretend.
-    if (!r.embed_build) {
+    if (!r.embed_build || r.embed_uses_tok) {
         ggml_backend_tensor_set(r.t_tok, s.tokens.data(), 0, (size_t) S * 4);
     }
     if (!r.pos_external) {
@@ -1411,8 +1437,39 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         }
         cur = nxt;
     }
-    // Gh[cur] now holds dL/d(embedding output) and is DISCARDED: embed_tokens is
-    // frozen and carries no LoRA site.
+    // ── P1B: backward over the embedding stage ───────────────────────────
+    //
+    // Gh[cur] holds dL/d(embedding output). It is DISCARDED in the ordinary
+    // case — embed_tokens is frozen and carries no LoRA site — but when
+    // `embed_trainable` says the builder contains a parameter (an artist token),
+    // that discarded tensor is precisely the seed its gradient needs.
+    //
+    // Same surrogate as every segment above: L' = SUM(h0 (.) dY) has gradient
+    // w.r.t. h0 of exactly dY, so backprop from L' gives the parameter its true
+    // gradient and the loss seed is 1.0, NOT the micro-batch scale — dY already
+    // carries it. Seeding again would square it.
+    //
+    // No ckpt_in/g_out here: nothing below the embedding needs a gradient, so
+    // fill_gacc is handed nullptr for both and its `nd == ckpt_in` test simply
+    // never fires.
+    if (r.embed_trainable && r.embed_build && !r.forward_only) {
+        ggml_init_params ip  = { st.arena.size(), st.arena.data(), true };
+        ggml_context *   ctx = ggml_init(ip);
+        ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 512, /*grads=*/true);
+        ggml_tensor *    h0  = r.embed_build(ctx, r, S);
+        ggml_tensor *    dY  = ggml_view_2d(ctx, st.Gh[cur], H, S, st.Gh[cur]->nb[1], 0);
+        ggml_tensor *    Lsur = ggml_sum(ctx, ggml_mul(ctx, h0, dY));
+        ggml_set_loss(Lsur);
+        ggml_set_output(Lsur);
+        ggml_build_forward_expand(gf, Lsur);
+        lm_ckpt_fill_gacc(r.opt, gf, nullptr, nullptr, r.t_one, &st.gacc);
+        ggml_build_backward_expand(ctx, gf, st.gacc.data());
+        const bool ok = run_graph(gf);
+        ggml_free(ctx);
+        if (!ok) {
+            return false;
+        }
+    }
     if (phase_tm) {
         g_lm_phase.total_us += ggml_time_us() - step_t0;
         g_lm_phase.steps++;

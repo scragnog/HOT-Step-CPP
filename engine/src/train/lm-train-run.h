@@ -28,6 +28,29 @@
 #include <string>
 #include <vector>
 
+// ─── Artist token under gradient checkpointing (P1B) ────────────────────────
+//
+// The ckpt driver's P1 stage builds the embedding forward-only. With a token
+// present it must instead go through an embed_build hook, so lm-ckpt.h's P1B
+// backward has a graph to differentiate. The hook reproduces P1's default
+// branch EXACTLY and then accs the parameter; a run with no token never
+// installs it and P1 emits the graph it always did.
+struct LmArtistEmbedCtx {
+    ggml_tensor * t   = nullptr;  // [H, k] parameter
+    int           k   = 0;
+    int           off = -1;       // first placeholder position, per sample
+};
+
+static ggml_tensor * lm_artist_ckpt_embed(ggml_context * ctx, LmCkptRun & r, int S) {
+    const LmArtistEmbedCtx & e = *(const LmArtistEmbedCtx *) r.embed_user;
+    ggml_tensor * h = ggml_get_rows(ctx, r.lm->embed_tokens, ggml_view_1d(ctx, r.t_tok, S, 0));
+    if (e.t && e.k > 0 && e.off >= 0) {
+        GGML_ASSERT(e.off + e.k <= S);
+        h = ggml_acc(ctx, h, e.t, h->nb[1], h->nb[2], h->nb[3], (size_t) e.off * h->nb[1]);
+    }
+    return h;
+}
+
 struct LmTrainArgs {
     std::vector<std::string> stages{ "extract", "train", "export" };
 
@@ -858,20 +881,6 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // sequence — not at maxLen, which is only the skip threshold. That is the
     // quantity G4 compares against the observed peak.
     const bool   low  = (mode == LM_VRAM_LOWVRAM);
-    // The low-VRAM path builds its own embedding inside the segmented driver
-    // (lm-ckpt.h P1) on the stated assumption that "embed_tokens is frozen and
-    // GET_ROWS' row indices are not differentiable", so it neither applies the
-    // token nor carries a gradient back to it. Running there would train
-    // nothing and report a perfectly healthy falling loss from the LoRA — so
-    // refuse instead of producing a zero vector with a plausible log.
-    if (art.active() && low) {
-        lm_fatal("args",
-                 "--artist-token needs the naive graph: the low-VRAM segmented path does not propagate a gradient to "
-                 "the embedding. Re-run with --low-vram off (or on a model that fits without it).");
-        lm_mirror_free(&mirror);
-        qw3lm_free(&lm);
-        return 1;
-    }
     const double est_bytes =
         low ? lm_vram_bytes_lowvram(vm, lc, alloc_seq, alloc_s_tr) : lm_vram_bytes(vm, alloc_seq, alloc_s_tr);
     const double ckpt_bytes = low ? (double) c.n_layers * (double) H * (double) alloc_seq * 4.0 : 0.0;
@@ -1031,6 +1040,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // nothing and a run that never moved is visibly distinct from one that
     // moved wrongly.
     LmArtistTok   artp;
+    LmArtistEmbedCtx art_embed;
     ggml_context * art_ctx = nullptr;
     ggml_backend_buffer_t art_buf = nullptr;
     if (art.active()) {
@@ -1051,7 +1061,9 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         }
         std::vector<float> z((size_t) ggml_nelements(artp.t), 0.0f);
         ggml_backend_tensor_set(artp.t, z.data(), 0, z.size() * sizeof(float));
-        artp.k = art.k;
+        artp.k       = art.k;
+        art_embed.t  = artp.t;
+        art_embed.k  = art.k;
         // `off` is per-sample and set on each micro-step; every sample shares the
         // same value in practice (everything before the caption is fixed text),
         // but nothing here depends on that.
@@ -1171,6 +1183,16 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         run.t_gs       = t_gs;
         run.t_one      = t_one;
         run.grad_accum = a.grad_accum;
+        // Only with a token: leaving embed_build null keeps P1 on its default
+        // branch, so a run without one is byte-identical to before this existed.
+        if (artp.t) {
+            run.embed_build     = lm_artist_ckpt_embed;
+            run.embed_user      = &art_embed;
+            run.embed_trainable = true;
+            // The hook IS the default get_rows plus an acc, so P0 must keep
+            // uploading the ids it reads.
+            run.embed_uses_tok  = true;
+        }
     }
 
     // ── graph arena + scheduler sized from a real node count ─────────────
@@ -1316,6 +1338,11 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     };
 
     auto micro_step = [&](const LmSample & s, bool count_loss, double * ce_out) -> bool {
+        // Per sample, for BOTH paths. A regularisation row carries no trigger,
+        // so its artist_off is -1 and the token is simply absent from that
+        // graph — which is the intended semantics on the ckpt path too.
+        artp.off      = s.artist_off;
+        art_embed.off = s.artist_off;
         return low ? lm_ckpt_micro_step(run, s, count_loss, ce_out) : micro_step_naive(s, count_loss, ce_out);
     };
 
