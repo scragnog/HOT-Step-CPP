@@ -1612,9 +1612,15 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     }
     // A run where Muon classified ZERO parameters trains as AdamW and says
     // nothing about it. Print the split so that is visible.
-    fprintf(stderr, "[mm3-lm-train] %zu LoRA tensors (rank %d, alpha %d) — %d on Muon in %zu buckets, %zu on AdamW\n",
-            lora.params.size(), a.rank, a.alpha, opt.n_muon, opt.muon_buckets.size(),
-            lora.params.size() - (size_t) opt.n_muon);
+    // Counts come from the OPTIMIZER, not from lora.params. Those were the same
+    // number until --artist-token-only made it possible to build the LoRA and
+    // then not train it: reporting the tensor count would have said "504 on
+    // AdamW" for a run whose optimizer holds exactly one parameter.
+    fprintf(stderr,
+            "[mm3-lm-train] %zu LoRA tensors (rank %d, alpha %d) — optimizing %zu: %d on Muon in %zu buckets, %zu on "
+            "AdamW\n",
+            lora.params.size(), a.rank, a.alpha, opt.params.size(), opt.n_muon, opt.muon_buckets.size(),
+            opt.params.size() - (size_t) opt.n_muon);
     // The split is an EVENT, not just a log line: a run that put zero
     // parameters on Muon trained as AdamW, and the UI should be able to say so.
     jl("{\"type\":\"optimizer\",\"name\":\"%s\",\"tensors\":%zu,\"muon\":%d,\"buckets\":%zu,\"lrScale\":%.4f}",
