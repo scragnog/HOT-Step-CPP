@@ -9,6 +9,7 @@
 #include "bpe.h"
 #include "metadata-fsm.h"
 #include "model-store.h"
+#include "artist-token-runtime.h"
 #include "prompt.h"
 #include "qwen3-lm.h"
 #include "sampling.h"
@@ -64,6 +65,19 @@ struct AceLm {
 // When TRT is active, the GGML model pointer is unused (nullptr).
 
 #ifdef HOT_STEP_TRT
+
+// The prompt-side half of the artist token. Returns an inactive descriptor when
+// no token is loaded, in which case lm_append_user_span keeps its single joined
+// append and the ids are byte-identical to a run without the feature.
+static AceArtistToken lm_art_spec() {
+    AceArtistToken a;
+    if (art_rt().loaded) {
+        a.k           = art_rt().k;
+        a.placeholder = art_rt().placeholder;
+    }
+    return a;
+}
+
 static bool s_use_trt = false;  // set during ace_lm_load, read during generate
 static LmTrt * s_trt_ctx = nullptr;
 #endif
@@ -516,7 +530,8 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
         if (i == 0) {
             fprintf(stderr, "[LM-Phase2] N=%d, CoT[0]:\n%s", N, cot.c_str());
         }
-        prompts[i] = build_lm_prompt_with_cot(bpe, a, cot);
+        AceArtistToken art_spec = lm_art_spec();
+        prompts[i] = build_lm_prompt_with_cot(bpe, a, cot, &art_spec);
         if (use_cfg) {
             unconds[i] = build_lm_prompt_uncond_with_cot(bpe, a, negative_prompt);
         }
@@ -811,7 +826,8 @@ static std::vector<std::string> run_phase2_trtllm(
     std::string cot = build_cot_yaml(ace);
     fprintf(stderr, "[LM-Phase2-TRTLLM] CoT:\n%s", cot.c_str());
 
-    std::vector<int> cond_prompt = build_lm_prompt_with_cot(bpe, ace, cot);
+    AceArtistToken art_spec = lm_art_spec();
+        std::vector<int> cond_prompt = build_lm_prompt_with_cot(bpe, ace, cot, &art_spec);
     std::vector<int> uncond_prompt;
     if (use_cfg) {
         uncond_prompt = build_lm_prompt_uncond_with_cot(bpe, ace, negative_prompt);
@@ -949,7 +965,8 @@ static std::vector<std::string> run_phase2_speculative(Qwen3LM *      target,
 
     // Build prompts
     std::string       cot    = build_cot_yaml(ace);
-    std::vector<int>  prompt = build_lm_prompt_with_cot(bpe, ace, cot);
+    AceArtistToken art_spec = lm_art_spec();
+        std::vector<int>  prompt = build_lm_prompt_with_cot(bpe, ace, cot, &art_spec);
     int max_tokens = (int)(ace.duration * 5) + 100;
 
     fprintf(stderr, "[LM-Phase2] Speculative decode: draft=%dL/%d, target=%dL/%d, max_tokens=%d, CFG=%.2f\n",

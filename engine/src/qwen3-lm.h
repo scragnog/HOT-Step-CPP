@@ -6,6 +6,7 @@
 #include "concept-steer.h"
 #include "config-json.h"
 #include "graph-arena.h"
+#include "artist-token-runtime.h"
 #include "qwen3-enc.h"  // Qwen3Layer, Qwen3Config, layer build helpers
 #include "static-graph.h"
 #include "weight-source.h"
@@ -354,6 +355,12 @@ static bool qw3lm_load(Qwen3LM * m, const char * path, int max_seq_len, int n_kv
     m->embed_tokens = ws_load_tensor(&m->wctx, ws, "model.embed_tokens.weight");
     m->final_norm   = ws_load_tensor_f32(&m->wctx, ws, "model.norm.weight");
 
+    // HOTSTEP_ARTIST_TOKEN=<dir>, checked once. Unset on every ordinary run, so
+    // this is a getenv and nothing else. The hidden size is passed so a token
+    // trained against a different LM size fails loudly instead of adding a
+    // meaningless vector.
+    artist_token_load_env("as15_lm", c.hidden_size);
+
     for (int i = 0; i < c.n_layers; i++) {
         char prefix[64];
         snprintf(prefix, sizeof(prefix), "model.layers.%d", i);
@@ -647,6 +654,19 @@ static void qw3lm_forward(Qwen3LM * m, const int * token_ids, int n_tokens, int 
     ggml_set_input(token_ids_t);
 
     struct ggml_tensor * hidden = ggml_get_rows(ctx, m->embed_tokens, token_ids_t);
+    // Artist token (textual inversion). The prompt builder spliced k copies of a
+    // placeholder id into the caption; those positions get the learned vectors
+    // added to the placeholder's embedding. The CFG uncond prompt is built
+    // WITHOUT the splice, so it contains no such run and is untouched here —
+    // the token conditions the positive branch only, by construction.
+    {
+        const int     art_off = artist_token_find(token_ids, n_tokens);
+        ggml_tensor * art     = art_off >= 0 ? artist_token_tensor(m->backend) : nullptr;
+        if (art) {
+            hidden = ggml_acc(ctx, hidden, art, hidden->nb[1], hidden->nb[2], hidden->nb[3],
+                              (size_t) art_off * hidden->nb[1]);
+        }
+    }
 
     // KV write positions as data: identical topology at every step, pure
     // CUDA graph replay across the decode loop.
@@ -791,6 +811,19 @@ static void qw3lm_forward_verify(Qwen3LM * m, const int * token_ids, int n_token
     ggml_set_input(token_ids_t);
 
     struct ggml_tensor * hidden = ggml_get_rows(ctx, m->embed_tokens, token_ids_t);
+    // Artist token (textual inversion). The prompt builder spliced k copies of a
+    // placeholder id into the caption; those positions get the learned vectors
+    // added to the placeholder's embedding. The CFG uncond prompt is built
+    // WITHOUT the splice, so it contains no such run and is untouched here —
+    // the token conditions the positive branch only, by construction.
+    {
+        const int     art_off = artist_token_find(token_ids, n_tokens);
+        ggml_tensor * art     = art_off >= 0 ? artist_token_tensor(m->backend) : nullptr;
+        if (art) {
+            hidden = ggml_acc(ctx, hidden, art, hidden->nb[1], hidden->nb[2], hidden->nb[3],
+                              (size_t) art_off * hidden->nb[1]);
+        }
+    }
 
     // KV write positions as data (set_rows destinations)
     struct ggml_tensor * kv_rows = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, n_tokens);
@@ -967,7 +1000,20 @@ static void qw3lm_forward_batch(Qwen3LM *   m,
         ggml_set_name(kv_rows, "kv_rows");
         ggml_set_input(kv_rows);
 
-        struct ggml_tensor * hidden = ggml_get_rows(ctx, m->embed_tokens, token_ids_t);
+            struct ggml_tensor * hidden = ggml_get_rows(ctx, m->embed_tokens, token_ids_t);
+        // Artist token (textual inversion). The prompt builder spliced k copies of a
+        // placeholder id into the caption; those positions get the learned vectors
+        // added to the placeholder's embedding. The CFG uncond prompt is built
+        // WITHOUT the splice, so it contains no such run and is untouched here —
+        // the token conditions the positive branch only, by construction.
+        {
+            const int     art_off = artist_token_find(token_ids, N);
+            ggml_tensor * art     = art_off >= 0 ? artist_token_tensor(m->backend) : nullptr;
+            if (art) {
+                hidden = ggml_acc(ctx, hidden, art, hidden->nb[1], hidden->nb[2], hidden->nb[3],
+                                  (size_t) art_off * hidden->nb[1]);
+            }
+        }
 
         for (int l = 0; l < c.n_layers; l++) {
             Qwen3Layer * ly = &m->layers[l];
