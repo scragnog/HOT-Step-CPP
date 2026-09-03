@@ -73,6 +73,10 @@ struct DitVramModel {
     bool is_lokr     = false;
     bool hira        = false;  // HiRA: [in,out] delta + Hadamard per site retained for backward
     bool loha        = false;  // LoHa: two [in,out] products + Hadamard per site
+    // A trained cond leaf (artist token) forces the checkpoint plan over the
+    // WHOLE stack with the same layers-per-segment: more boundaries, same
+    // widest segment. See dit-train-run.h at the plan.
+    bool full_stack_ckpt = false;
     int  lokr_dim    = 512;
     int  lokr_factor = 6;
     // Mirror precision: the fixed term is the mirror, so this is the single
@@ -399,12 +403,17 @@ static int dit_vram_seg_layers(const DitVramModel & vm, int K) {
 // allocation size. S-C2 (2026-07-29) confirms it: every grid cell's reported
 // boundaryMb equalled this formula to the rounded MB (e.g. B=5/crop=750/segments=4
 // -> 2560*375*5*4 * 6B = 109 MB, exactly what the run logged).
-static double dit_vram_boundary_bytes(const DitVramModel & vm, int S) {
-    if (vm.segments <= 1) {
+static double dit_vram_boundary_bytes(const DitVramModel & vm, int S, int K) {
+    if (vm.segments <= 1 && !vm.full_stack_ckpt) {
         return 0.0;
     }
-    const double one = (double) vm.hidden * (double) S * (double) std::max(1, vm.batch) * 4.0;
-    return one * (double) (vm.segments + 2);
+    const double one   = (double) vm.hidden * (double) S * (double) std::max(1, vm.batch) * 4.0;
+    int          n_bnd = vm.segments;
+    if (vm.full_stack_ckpt) {
+        const int seg_len = std::max(1, dit_vram_seg_layers(vm, K));
+        n_bnd             = (vm.n_layers + seg_len - 1) / seg_len;
+    }
+    return one * (double) (n_bnd + 2);
 }
 
 // A1's expanded-KV surcharge, bytes. At B > 1 the K/V activations are tiled from
@@ -489,7 +498,7 @@ static double dit_vram_total_bytes(const DitVramModel & vm, int crop, int K) {
     // every other mirror mode, so no existing estimate moves by a byte.
     const double cast_window = (double) dit_mirror_cast_window_bytes(vm.m, vm.n_layers - K, vm.mirror);
     double    b   = dit_vram_fixed_bytes(vm, K, crop) + arena + cast_window +
-               dit_vram_kv_expand_bytes(vm, S, Kr) + dit_vram_boundary_bytes(vm, S);
+               dit_vram_kv_expand_bytes(vm, S, Kr) + dit_vram_boundary_bytes(vm, S, K);
     if (vm.is_lokr) {
         // The intermediates the fitted polynomial never saw. Added here rather
         // than at any one call site so every consumer — the crop walk, the depth

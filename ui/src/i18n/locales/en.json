@@ -532,6 +532,8 @@
     "trainingStudio.train.dit.rsloraInfo": "Rank-stabilised scaling alpha/√r instead of alpha/r. Lets higher ranks train at a sane strength. Written to the adapter config so it merges at the trained strength.",
     "trainingStudio.train.dit.loraPlusRatio": "LoRA+ ratio",
     "trainingStudio.train.dit.loraPlusRatioInfo": "B tensors learn at this multiple of A's learning rate (the paper's 16). Fixes the A-random / B-zero asymmetry. 1 = off. AdamW-rule optimizers only; Muon ignores it.",
+    "trainingStudio.train.dit.pissa": "PiSSA init",
+    "trainingStudio.train.dit.pissaInfo": "Starts A and B on the weight's own top-r singular directions and keeps the residual in the base, so training fine-tunes the principal subspace from step one. Exports as a normal LoRA of rank 2r. Plain LoRA only; a PiSSA run cannot be resumed.",
     "trainingStudio.train.softPromptGroup": "Soft prompt + parameterization",
     "trainingStudio.train.softPromptGroupHelp": "A named token adds k learned vectors behind a placeholder in every caption; the prefix adds n key/value columns per layer. Both train with the LoRA, ship in the same adapter file and apply automatically at generation. They learn ~50× faster than the LoRA, so the target loss fires early — set it to 0 for a joint run. On the mj_dangerous probe k=32 beat k=8 on every code-distribution metric; neither is ear-validated yet.",
     "trainingStudio.train.artistToken": "Artist token",

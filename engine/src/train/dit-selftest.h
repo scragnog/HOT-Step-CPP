@@ -1625,6 +1625,9 @@ struct DitStCkptMeas {
     double      pad_loss_in = 0.0, pad_grad_in = 0.0;  // the padded-INPUT (KV-mask) pair
     std::string worst = "-";
     int         nodes_mono = 0, nodes_seg = 0, graphs = 0;
+    double      art_rel = -1.0, art_mag = 0.0;  // V1 artist-token leaf (HOTSTEP_DIT_ST_ARTIST)
+    double      art_ratio = 0.0, art_norm = 0.0;  // <seg,mono>/<mono,mono>, ||seg||/||mono||
+    int         art_k   = 0;
     int         short_len = 0, pad_len = 0;
 };
 
@@ -1636,6 +1639,15 @@ static bool dit_st_ckpt_measure(DitTrainModel * M, const std::vector<DitSample> 
     const int enc_H = (int) M->m.cond_emb_w->ne[0];
     const int S     = T / P;
     const int lo    = std::max(0, L - n_train);
+    // V1 gate: HOTSTEP_DIT_ST_ARTIST=<k> adds a k-row artist token to the packed
+    // cond (dit_train_cond) as one more trained leaf. Under checkpointing the
+    // cond is recomputed inside every segment and the token receives one
+    // gradient add per segment; this rung decides whether that sum equals the
+    // monolithic gradient. Reported and gated on its own, not under the
+    // adapter slots' 1e-6 bar: N in-place adds carry N roundings.
+    const int art_k = getenv("HOTSTEP_DIT_ST_ARTIST")
+                          ? std::max(1, std::min(8, atoi(getenv("HOTSTEP_DIT_ST_ARTIST"))))
+                          : 0;
 
     ggml_context * ctxs;
     {
@@ -1660,6 +1672,12 @@ static bool dit_st_ckpt_measure(DitTrainModel * M, const std::vector<DitSample> 
     ggml_tensor * t_clip     = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, 1);
     ggml_tensor * t_eps      = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, 1);
     ggml_tensor * t_gnorm2   = ggml_new_tensor_1d(ctxs, GGML_TYPE_F32, 1);
+    ggml_tensor * t_art      = nullptr;
+    if (art_k > 0) {
+        t_art = ggml_new_tensor_2d(ctxs, GGML_TYPE_F32, enc_H, art_k);
+        ggml_set_name(t_art, "artist_token");
+        ggml_set_param(t_art);
+    }
     for (ggml_tensor * t : { b_input, b_enc, b_pos, b_temb, b_tproj, b_sa, b_sapad, b_ca, b_vtgt, b_lw, b_lwu }) {
         ggml_set_input(t);
     }
@@ -1674,6 +1692,13 @@ static bool dit_st_ckpt_measure(DitTrainModel * M, const std::vector<DitSample> 
         ggml_backend_tensor_set(t_eps, &epsv, 0, 4);
         ggml_backend_tensor_set(t_clip, &clipv, 0, 4);
         ggml_backend_tensor_set(t_lossgrad, &lg, 0, 4);
+    }
+    if (t_art) {
+        LmRng ar;
+        lm_rng_seed(&ar, seed ^ 0xa7a7a7a7ull);
+        std::vector<float> av((size_t) enc_H * (size_t) art_k, 0.0f);
+        lm_rng_fill_normal(&ar, av, 0.05f);
+        ggml_backend_tensor_set(t_art, av.data(), 0, av.size() * sizeof(float));
     }
 
     DitAdapterLora lora;
@@ -1706,7 +1731,11 @@ static bool dit_st_ckpt_measure(DitTrainModel * M, const std::vector<DitSample> 
             cleanup();
             return false;
         }
-        if (!lm_optim_init(&opt, ad->params(), M->backend, err)) {
+        std::vector<ggml_tensor *> plist = ad->params();
+    if (t_art) {
+        plist.push_back(t_art);  // last slot; cmp_accs skips it, the token gets its own line
+    }
+    if (!lm_optim_init(&opt, plist, M->backend, err)) {
             cleanup();
             return false;
         }
@@ -1834,6 +1863,8 @@ static bool dit_st_ckpt_measure(DitTrainModel * M, const std::vector<DitSample> 
         in.t_vtgt  = ggml_view_3d(ctx, b_vtgt, Oc, T, B, (size_t) Oc * f32b, (size_t) Oc * T * f32b, 0);
         in.t_lw    = ggml_view_3d(ctx, b_lw, 1, T, B, f32b, (size_t) T * f32b, 0);
         in.t_lwu   = ggml_view_3d(ctx, b_lwu, 1, T, B, f32b, (size_t) T * f32b, 0);
+        in.t_art   = t_art;
+        in.art_k   = art_k;
         return in;
     };
 
@@ -1848,7 +1879,8 @@ static bool dit_st_ckpt_measure(DitTrainModel * M, const std::vector<DitSample> 
                         std::string * worst, double * mag) {
         double best = 0.0;
         *worst      = "-";
-        for (size_t j = 0; j < y.size() && j < x.size(); j++) {
+        const size_t n_cmp = std::min(x.size(), y.size()) - (size_t) (t_art ? 1 : 0);
+        for (size_t j = 0; j < n_cmp; j++) {
             double num = 0.0, den = 0.0;
             for (size_t k = 0; k < y[j].size() && k < x[j].size(); k++) {
                 num = std::max(num, fabs((double) x[j][k] - (double) y[j][k]));
@@ -1897,7 +1929,9 @@ static bool dit_st_ckpt_measure(DitTrainModel * M, const std::vector<DitSample> 
     };
 
     // ── segmented (--ckpt N): the PRODUCTION driver ───────────────────────
-    const DitCkptPlan plan = dit_ckpt_plan(lo, L, segments);
+    // A trained cond leaf needs the plan over the whole stack (see the
+    // trainer); the adapter window stays `lo`.
+    const DitCkptPlan plan = dit_ckpt_plan(art_k > 0 ? 0 : lo, L, segments);
     if (!dit_ckpt_alloc(&ckb, M->backend, H, S, B, plan.segments, err)) {
         cleanup();
         return false;
@@ -1944,6 +1978,29 @@ static bool dit_st_ckpt_measure(DitTrainModel * M, const std::vector<DitSample> 
         return false;
     }
     o->grad_rel = cmp_accs(gseg, gmono, &o->worst, &o->ref_mag);
+    if (t_art) {
+        const std::vector<float> & xs = gseg.back();
+        const std::vector<float> & ym = gmono.back();
+        double                     num = 0.0, den = 0.0;
+        for (size_t k = 0; k < ym.size() && k < xs.size(); k++) {
+            num = std::max(num, fabs((double) xs[k] - (double) ym[k]));
+            den = std::max(den, fabs((double) ym[k]));
+        }
+        o->art_rel = num / std::max(den, 1e-30);
+        o->art_mag = den;
+        o->art_k   = art_k;
+        // Scalar projection <seg, mono> / <mono, mono>: 2 = double-counted,
+        // 0 = dropped, 1/N = one segment's share, 1 = right magnitude but wrong
+        // direction (then the rel says how wrong).
+        double sm = 0.0, mm = 0.0, ss = 0.0;
+        for (size_t k = 0; k < ym.size() && k < xs.size(); k++) {
+            sm += (double) xs[k] * (double) ym[k];
+            mm += (double) ym[k] * (double) ym[k];
+            ss += (double) xs[k] * (double) xs[k];
+        }
+        o->art_ratio = sm / std::max(mm, 1e-300);
+        o->art_norm  = sqrt(ss) / std::max(sqrt(mm), 1e-150);
+    }
 
     // ── the masked-loss property, THROUGH the segmented path ──────────────
     //
@@ -2024,7 +2081,43 @@ static void dit_st_ckpt_gates(std::vector<DitSelfTestResult> & rs, DitTrainModel
                  "grad delta %.3e on %s (bar 1e-6), reference |grad|max %.3e%s",
                  bk, B, M->m.cfg.n_layers, m.nodes_mono, m.loss_mono, m.graphs, m.nodes_seg, m.loss_seg, m.bnd_mag,
                  m.grad_rel, m.worst.c_str(), m.ref_mag, ok ? "" : (" — FAILED: " + err).c_str());
-        dit_st_report(rs, "SC1", ok && m.grad_rel <= 1e-6 && m.bnd_mag > 0.0 && m.ref_mag > 0.0, d);
+        std::string d1(d);
+        if (m.art_k > 0) {
+            // V1: the artist-token leaf is summed across segments (one add per
+            // recomputed cond); its own bar allows the extra roundings.
+            char ab[224];
+            snprintf(ab, sizeof(ab),
+                     "; artist token (k=%d rows of the packed cond, recomputed per segment): segmented vs "
+                     "monolithic grad max rel %.3e (bar 1e-3: eight in-place adds through the whole stack), |grad|max %.3e, <seg,mono>/<mono,mono> = %.4f, "
+                     "||seg||/||mono|| = %.4f",
+                     m.art_k, m.art_rel, m.art_mag, m.art_ratio, m.art_norm);
+            d1 += ab;
+        }
+        dit_st_report(rs, "SC1",
+                      ok && m.grad_rel <= 1e-6 && m.bnd_mag > 0.0 && m.ref_mag > 0.0 &&
+                          (m.art_k == 0 || (m.art_rel >= 0.0 && m.art_rel <= 1e-3 && m.art_mag > 0.0)),
+                      d1.c_str());
+        if (m.art_k > 0) {
+            // Bisect: the same measurement at 1 and 2 segments. One segment is the
+            // checkpoint machinery (boundary PARAM, surrogate, accumulators) with
+            // no cross-segment summation; two adds one sum.
+            // (n_train, segments): 4/1 and 4/2 isolate the machinery from the
+            // summation; L/8 puts the checkpoint window over the WHOLE stack, which
+            // is the only way the token's gradient through the frozen lower layers
+            // (every layer's cross-attention reads the cond) can be included.
+            const int bis[3][2] = { { 4, 1 }, { 4, 2 }, { M->m.cfg.n_layers, 8 } };
+            for (int bi = 0; bi < 3; bi++) {
+                DitStCkptMeas mb;
+                std::string   eb = "-";
+                const bool    okb = dit_st_ckpt_measure(M, samples, seed, B, T, enc_use, bis[bi][0], bis[bi][1], false,
+                                                        false, &mb, &eb);
+                fprintf(stderr,
+                        "[self-test] SC1 bisect: window %d layers, --ckpt %d, artist token: max rel %.3e, "
+                        "<seg,mono>/<mono,mono> = %.4f, ||seg||/||mono|| = %.4f; adapter slots max rel %.3e%s\n",
+                        bis[bi][0], bis[bi][1], mb.art_rel, mb.art_ratio, mb.art_norm, mb.grad_rel,
+                        okb ? "" : (" FAILED: " + eb).c_str());
+            }
+        }
     }
 
     // SC2 — gate 6, the SB side: the masked-loss invariant re-measured with

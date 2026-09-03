@@ -111,6 +111,10 @@ struct DitAdapterCfg {
     // path. LoRA only; not with DoRA.
     bool     hira       = false;
     bool     loha       = false;  // LoHa (LyCORIS): (B1A1) (.) (B2A2); rank = dim
+    // PiSSA (Meng 2024): A/B start on W's top-r singular directions and the
+    // base keeps the residual. The SVD itself runs in dit_pissa_init (needs
+    // the scheduler); init() only records the flag.
+    bool     pissa      = false;
     // LoKR (dit-adapter-lokr.h); ignored by the LoRA implementation.
     int   lokr_dim            = 512;
     float lokr_alpha          = 512.0f;
@@ -233,6 +237,8 @@ struct DitAdapterLora final : DitAdapter {
     bool      rslora = false;
     bool      hira  = false;
     bool      loha  = false;
+    bool        pissa = false;
+    std::string pissa_dir;  // where dit_pissa_init left pissa_init.L<l>.safetensors
     DiTGGML * model = nullptr;  // the base weights, for the DoRA norm pass
     std::vector<uint8_t> norm_arena;
 
@@ -272,6 +278,7 @@ struct DitAdapterLora final : DitAdapter {
         rslora  = cfg.rslora;
         hira    = cfg.hira;
         loha    = cfg.loha;
+        pissa   = cfg.pissa;
         // rsLoRA: alpha/sqrt(r). Applied IN-GRAPH here and re-derived by the
         // merge path from use_rslora in adapter_config.json — the two must
         // agree or every adapter merges at the wrong strength, silently.

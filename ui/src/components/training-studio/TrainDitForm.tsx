@@ -57,6 +57,7 @@ export interface TrainDitFormState {
   rslora: boolean;
   hira: boolean;
   loha: boolean;
+  pissa: boolean;            // init only; plain LoRA
   loraPlusRatio: number;     // 1 = off
   layers: number;            // 0 = auto (top-K depth)
   crop: number;              // 0 = auto-fit
@@ -144,6 +145,7 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   rslora: false,
   hira: false,
   loha: false,
+  pissa: false,
   loraPlusRatio: 1,
   layers: 0,
   crop: 0,
@@ -1217,6 +1219,11 @@ export const TrainDitForm: React.FC<Props> = ({
                 <input type="checkbox" checked={value.loha} disabled={lock} className="accent-amber-500"
                   onChange={(e) => onChange({ loha: e.target.checked, dora: false, hira: false })} />
                 {P('loha', 'Default off · merge mode only', CHECK_LABEL)}
+              </label>
+              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                <input type="checkbox" checked={value.pissa} disabled={lock || value.dora || value.hira || value.loha} className="accent-amber-500"
+                  onChange={(e) => onChange({ pissa: e.target.checked })} />
+                {P('pissa', 'Default off · plain LoRA only', CHECK_LABEL)}
               </label>
               <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
                 <input type="checkbox" checked={value.rslora} disabled={lock} className="accent-amber-500"

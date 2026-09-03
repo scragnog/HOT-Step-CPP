@@ -640,6 +640,12 @@ static void print_usage(void) {
             "    --lora-plus-ratio <f>       1           LoRA+: B at f x A's learning rate (paper: ~16).\n"
             "                                            Fixes the A=kaiming/B=zero asymmetry; AdamW-rule\n"
             "                                            tensors only, Muon ignores it.\n"
+            "    --pissa                                 PiSSA init: A/B start on the weight's top-r singular\n"
+            "                                            directions (GPU randomized SVD), base keeps the\n"
+            "                                            residual. Exports a rank-2r plain LoRA. Plain LoRA\n"
+            "                                            only; not resumable.\n"
+            "    --pissa-oversample <n>      8           extra SVD columns beyond the rank.\n"
+            "    --pissa-iters <n>           2           power iterations (0-4).\n"
             "    --loha                                  LoHa (LyCORIS): W + (B1A1) (.) (B2A2). Two LoRA\n"
             "                                            pairs, effective rank up to r^2. Exported in\n"
             "                                            the LyCORIS hada_w* layout; merge mode only\n"
@@ -4299,6 +4305,9 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--dora")) a.dora = true;
         else if (!strcmp(argv[i], "--hira")) a.hira = true;
         else if (!strcmp(argv[i], "--loha")) a.loha = true;
+        else if (!strcmp(argv[i], "--pissa")) a.pissa = true;
+        else if (!strcmp(argv[i], "--pissa-oversample") && i + 1 < argc) a.pissa_oversample = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--pissa-iters") && i + 1 < argc) a.pissa_iters = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--rslora")) a.rslora = true;
         else if (!strcmp(argv[i], "--lora-plus-ratio") && i + 1 < argc) a.lora_plus_ratio = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--artist-token") && i + 1 < argc) a.artist_token = argv[++i];

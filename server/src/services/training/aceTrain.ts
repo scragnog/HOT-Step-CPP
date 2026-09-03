@@ -517,7 +517,7 @@ export interface ResolvedTrainDitOptions {
   ditModel: string; ditPath: string;
   adapterName: string; adapterDir: string;
   adapterType: DitAdapterType; rank: number; alpha: number; targetMlp: boolean; dora?: boolean;
-  rslora?: boolean; loraPlusRatio?: number; hira?: boolean; loha?: boolean;
+  rslora?: boolean; loraPlusRatio?: number; hira?: boolean; loha?: boolean; pissa?: boolean;
   // LyCORIS LoKR factors (K2 / plan §2.1). Always resolved regardless of
   // adapterType — buildTrainDitArgs only emits them when adapterType==='lokr'.
   lokrDim: number; lokrAlpha: number; lokrFactor: number; lokrDecomposeBoth: boolean;
@@ -652,6 +652,7 @@ export function buildTrainDitArgs(input: {
     ...(o.rslora && o.adapterType === 'lora' ? ['--rslora'] : []),
     ...(o.hira && o.adapterType === 'lora' && !o.dora ? ['--hira'] : []),
     ...(o.loha && o.adapterType === 'lora' && !o.dora && !o.hira ? ['--loha'] : []),
+    ...(o.pissa && o.adapterType === 'lora' && !o.dora && !o.hira && !o.loha && !o.initAdapter ? ['--pissa'] : []),
     ...(o.loraPlusRatio && o.loraPlusRatio !== 1 ? ['--lora-plus-ratio', String(o.loraPlusRatio)] : []),
     // §2.1: lora trains via --rank/--alpha; lokr via the four --lokr-* flags.
     // The two are mutually exclusive on the CLI side, so only one set is ever

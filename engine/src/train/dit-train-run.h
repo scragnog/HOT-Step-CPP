@@ -23,6 +23,7 @@
 #include "train/artist-token-io.h"
 #include "train/dit-data.h"
 #include "train/dit-export.h"
+#include "train/dit-pissa.h"
 #include "train/dit-resume.h"
 #include "train/dit-selftest.h"
 #include "train/dit-train-ckpt.h"
@@ -76,6 +77,13 @@ struct DitTrainArgs {
     // LoHa (LyCORIS): (B1A1) (.) (B2A2). LoRA-shaped pairs x2, exported in the
     // LyCORIS layout. Not with DoRA or HiRA. Same VRAM class as HiRA plus one.
     bool        loha         = false;
+    // PiSSA init: A/B from W's top-r singular directions, base keeps the
+    // residual; exported as a rank-2r plain LoRA on the original base. LoRA
+    // only, not with DoRA/HiRA/LoHa, not resumable (the residual base is
+    // rebuilt from the run's own init files, which a resume does not carry).
+    bool        pissa            = false;
+    int         pissa_oversample = 8;
+    int         pissa_iters      = 2;
     // LoRA+ (Hayou 2024): B at ratio x A's learning rate; 1 = off. AdamW-rule
     // tensors only — Muon scales its own update and ignores lr_mul.
     float       lora_plus_ratio = 1.0f;
@@ -689,6 +697,7 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     vm.is_lokr     = is_lokr;
     vm.hira        = a.hira;
     vm.loha        = a.loha;
+    vm.full_stack_ckpt = art_k > 0;
     vm.lokr_dim    = a.lokr_dim;
     vm.lokr_factor = a.lokr_factor;
     vm.mirror      = mirror_mode;
@@ -899,7 +908,27 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     // hold no adapter parameter, so no gradient flows through them and a segment
     // that spanned only those would trip build_backward_expand's any_params
     // assert. dit_ckpt_plan clamps the count to that range.
-    const DitCkptPlan ckplan = dit_ckpt_plan(lora_lo, L, (a.ckpt == 0) ? 1 : std::max(1, fit.segments));
+    // ...except when a cond leaf is trained (artist token): every layer's
+    // cross-attention reads the cond, so the token's gradient flows through the
+    // frozen layers too and a window plan drops ~96% of it (SC1 with
+    // HOTSTEP_DIT_ST_ARTIST, 2026-09-04: rel 1.01 vs monolithic). Plan from
+    // layer 0 with the same layers-per-segment; --ckpt 0 is forced on as well,
+    // since the monolithic graph would retain all 32 layers' activations the
+    // VRAM model never budgeted.
+    int plan_lo   = lora_lo;
+    int plan_segs = (a.ckpt == 0) ? 1 : std::max(1, fit.segments);
+    if (art_k > 0) {
+        const int seg_len = std::max(1, (K + plan_segs - 1) / plan_segs);
+        plan_lo           = 0;
+        plan_segs         = (L + seg_len - 1) / seg_len;
+        char pb[224];
+        snprintf(pb, sizeof(pb),
+                 "artist token: checkpoint plan spans all %d layers in %d segments of %d (the token's gradient "
+                 "flows through the frozen layers too); the backward is correspondingly longer",
+                 L, plan_segs, seg_len);
+        lm_log(a.ckpt == 0 ? "warn" : "info", pb);
+    }
+    const DitCkptPlan ckplan = dit_ckpt_plan(plan_lo, L, plan_segs);
     const int         SEG    = ckplan.segments;
     out->ckpt                = SEG;
 
@@ -1088,6 +1117,15 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         cfg.rslora              = a.rslora;
         cfg.hira                = a.hira;
         cfg.loha                = a.loha;
+        cfg.pissa               = a.pissa;
+        if (a.pissa && (a.adapter_type != "lora" || a.dora || a.hira || a.loha)) {
+            lm_fatal("args", "--pissa applies to the plain LoRA parameterization only");
+            return 1;
+        }
+        if (a.pissa && !a.init_adapter.empty()) {
+            lm_fatal("args", "--pissa cannot resume: the residual base is rebuilt from the run's own init");
+            return 1;
+        }
         if (a.loha && (a.adapter_type != "lora" || a.dora || a.hira)) {
             lm_fatal("args", "--loha applies to the LoRA parameterization only and cannot combine with --dora or --hira");
             return 1;
@@ -1118,6 +1156,29 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             ggml_free(ctx_static);
             dit_train_free(&M);
             return 1;
+        }
+        if (a.pissa && a.adapter_type == "lora") {
+            // Overwrites A/B in place and moves s*BA out of the mirror's base
+            // weights, so every later consumer (training graph, FD rungs, the
+            // DoRA norm pass) sees the residual. Init files go to out_dir.
+            pm_mkdir_p(a.out_dir);
+            DitPissaStats ps;
+            if (!dit_pissa_init(&lora, M.backend, M.sched, a.out_dir, a.pissa_oversample, a.pissa_iters, &ps,
+                                &err)) {
+                lm_fatal("pissa", err);
+                ggml_backend_buffer_free(buf_static);
+                ggml_free(ctx_static);
+                dit_train_free(&M);
+                return 1;
+            }
+            lora.pissa_dir = a.out_dir;
+            char pb[224];
+            snprintf(pb, sizeof(pb),
+                     "PiSSA: rank %d (+%d oversample, %d power iterations) captured %.1f%% of the weight energy on "
+                     "average (min %.1f%%) over %d sites; a random rank-%d subspace would capture ~%.2f%%",
+                     a.rank, a.pissa_oversample, a.pissa_iters, 100.0 * ps.energy_mean, 100.0 * ps.energy_min,
+                     ps.sites, a.rank, 100.0 * (double) a.rank / (double) M.m.cfg.hidden_size);
+            lm_log("info", pb);
         }
         // --mirror bf16-f32: tell the parameterization seam which layers get the
         // in-graph BF16 -> F32 weight cast. Set here, once, from the RESOLVED
@@ -2221,7 +2282,8 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             if (best_ma5 || hit_target) {
                 DitExportResult xr;
                 std::string     xerr;
-                if (!dit_export_peft(*ad, xmeta, a.out_dir.c_str(), &xr, &xerr)) {
+                if (!(a.pissa && a.adapter_type == "lora" ? dit_pissa_export(lora, a.out_dir.c_str(), xmeta, &xr, &xerr)
+                                                          : dit_export_peft(*ad, xmeta, a.out_dir.c_str(), &xr, &xerr))) {
                     lm_fatal("export", xerr);
                     rc = 1;
                     break;
@@ -2258,7 +2320,8 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                     const std::string mdir  = lm_join(a.out_dir, rel);
                     DitExportResult   mr;
                     std::string       merr;
-                    if (dit_export_peft(*ad, xmeta, mdir.c_str(), &mr, &merr)) {
+                    if (a.pissa && a.adapter_type == "lora" ? dit_pissa_export(lora, mdir.c_str(), xmeta, &mr, &merr)
+                                                            : dit_export_peft(*ad, xmeta, mdir.c_str(), &mr, &merr)) {
                         // A milestone without its token would be an adapter that
                         // silently expects conditioning rows it does not ship.
                         if (!art_export(mdir, &merr)) {

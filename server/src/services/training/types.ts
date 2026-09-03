@@ -858,6 +858,8 @@ export interface TrainDitOptions {
   hira?: boolean;
   /** LoHa (LyCORIS): two LoRA pairs, Hadamard-combined. LoRA type only; not with dora/hira. */
   loha?: boolean;
+  /** PiSSA init: A/B start on the weight's principal directions; exported as a rank-2r LoRA. Plain LoRA only; not resumable. */
+  pissa?: boolean;
   /** rsLoRA: alpha/sqrt(r) scaling; written as use_rslora and honoured by merge + runtime. LoRA only. */
   rslora?: boolean;
   /** LoRA+: B tensors at ratio x A's learning rate. 1 = off. AdamW-rule tensors only. */

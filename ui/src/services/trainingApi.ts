@@ -720,6 +720,7 @@ export interface TrainDitOptions {
   rslora?: boolean;
   hira?: boolean;
   loha?: boolean;
+  pissa?: boolean;                 // principal-direction init; plain LoRA only
   loraPlusRatio?: number;          // 1 = off
   layers?: number;                 // default 0 = auto (top-K depth)
   crop?: number;                   // default 0 = auto-fit
