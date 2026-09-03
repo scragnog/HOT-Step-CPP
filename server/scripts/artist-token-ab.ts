@@ -68,6 +68,7 @@ async function main() {
   // the production path; HOTSTEP_ARTIST_TOKEN is only the standalone override.
   const lmAdapter = args.get('lm-adapter');
   const lmScale = Number(args.get('lm-adapter-scale') || 1);
+  const lmModel = args.get('lm-model') || LM_MODEL;  // a 0.6B-trained adapter needs the 0.6B
 
   const aceReq: AceRequest = {
     caption, lyrics, duration, seed,
@@ -76,7 +77,7 @@ async function main() {
     lm_negative_prompt: 'NO USER INPUT',
     use_cot_caption: true,
     task_type: 'text2music',
-    synth_model: SYNTH_MODEL, lm_model: LM_MODEL, vae_model: VAE_MODEL, emb_model: EMB_MODEL,
+    synth_model: SYNTH_MODEL, lm_model: lmModel, vae_model: VAE_MODEL, emb_model: EMB_MODEL,
     ...P50,
     ...(lmAdapter ? { lm_adapter: lmAdapter, lm_adapter_scale: lmScale, lm_rep_penalty: 1.05 } : {}),
   };

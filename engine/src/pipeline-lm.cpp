@@ -10,6 +10,8 @@
 #include "metadata-fsm.h"
 #include "model-store.h"
 #include "artist-token-runtime.h"
+#include "lm-adapter.h"         // LMLora complete: the prefix half of a unified adapter
+#include "lm-prefix-runtime.h"  // qw3lm_seed_prefix
 #include "prompt.h"
 #include "qwen3-lm.h"
 #include "sampling.h"
@@ -115,6 +117,26 @@ static inline void lm_copy_kv(Qwen3LM * m, int src, int dst) {
     if (s_use_trt) { lm_trt_copy_kv(s_trt_ctx, src, dst); return; }
 #endif
     qw3lm_copy_kv(m, src, dst);
+}
+
+// Seed a KV set with the adapter's trained prefix (prefix tuning), if it has
+// one. Called for Phase-2 COND sets only: Phase 1 never trained with a prefix,
+// and the CFG uncond branch must stay clean for guidance to steer.
+static inline void lm_seed_prefix(Qwen3LM * m, int kv_set) {
+#ifdef HOT_STEP_TRT
+    if (s_use_trt) {
+        if (qw3lm_has_prefix(m)) {
+            static bool said = false;
+            if (!said) {
+                said = true;
+                fprintf(stderr, "%s", "[LM-Prefix] TRT LM path: prefix not supported, ignored");
+                fputc(10, stderr);
+            }
+        }
+        return;
+    }
+#endif
+    qw3lm_seed_prefix(m, kv_set);
 }
 
 static inline void lm_forward(Qwen3LM * m, const int * tokens, int n, int kv_set, float * logits) {
@@ -550,6 +572,7 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
     // Reset all KV sets: cond [0..N-1], uncond [N..2N-1]
     for (int i = 0; i < N; i++) {
         lm_reset_kv(m, i);
+        lm_seed_prefix(m, i);  // cond only; the uncond sets below stay clean
     }
     if (use_cfg) {
         for (int i = 0; i < N; i++) {
@@ -976,6 +999,7 @@ static std::vector<std::string> run_phase2_speculative(Qwen3LM *      target,
 
     // Reset KV caches: target cond=0, uncond=1; draft cond=0
     lm_reset_kv(target, 0);
+    lm_seed_prefix(target, 0);  // cond only
     if (use_cfg) lm_reset_kv(target, 1);
     qw3lm_reset_kv(draft, 0);  // draft stays on GGML always
 

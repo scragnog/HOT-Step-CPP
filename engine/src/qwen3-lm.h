@@ -101,6 +101,12 @@ struct Qwen3LM {
     struct ggml_tensor *  kv_k[QW3LM_MAX_KV_SETS][QW3LM_MAX_LAYERS];
     struct ggml_tensor *  kv_v[QW3LM_MAX_KV_SETS][QW3LM_MAX_LAYERS];
     int                   kv_pos[QW3LM_MAX_KV_SETS];
+    // Prefix tuning (lm-prefix-runtime.h): columns [0, kv_base) of a set hold a
+    // trained K/V prefix that carries NO RoPE position. Real tokens start at
+    // kv_pos = kv_base but are roped from 0, so positions are computed as
+    // (kv_pos - kv_base) + i while kv_rows and the mask stay absolute. 0 on
+    // every set that was not seeded, which keeps the shipped arithmetic exact.
+    int                   kv_base[QW3LM_MAX_KV_SETS];
     int                   n_kv_sets;
 
     // Persistent graph arenas, one per graph shape class: stable node
@@ -272,7 +278,8 @@ static void qw3lm_alloc_kv_cache(Qwen3LM * m, int n_sets) {
         }
     }
     for (int s = 0; s < n_sets; s++) {
-        m->kv_pos[s] = 0;
+        m->kv_pos[s]  = 0;
+        m->kv_base[s] = 0;
     }
 
     m->kv_buf = ggml_backend_alloc_ctx_tensors(m->kv_ctx, m->backend);
@@ -293,7 +300,8 @@ static void qw3lm_alloc_kv_cache(Qwen3LM * m, int n_sets) {
 
 // Clear KV cache for a given set
 static void qw3lm_reset_kv(Qwen3LM * m, int kv_set) {
-    m->kv_pos[kv_set] = 0;
+    m->kv_pos[kv_set]  = 0;
+    m->kv_base[kv_set] = 0;
     // No rezero needed: stale values past kv_pos are finite (zeroed at
     // alloc, then overwritten by real K/V) and the mask carries neg inf
     // over the padded attention tail.
@@ -305,7 +313,8 @@ static void qw3lm_copy_kv(Qwen3LM * m, int src, int dst) {
         ggml_backend_tensor_copy(m->kv_k[src][l], m->kv_k[dst][l]);
         ggml_backend_tensor_copy(m->kv_v[src][l], m->kv_v[dst][l]);
     }
-    m->kv_pos[dst] = m->kv_pos[src];
+    m->kv_pos[dst]  = m->kv_pos[src];
+    m->kv_base[dst] = m->kv_base[src];
 }
 
 // Load model weights from GGUF or safetensors
@@ -733,7 +742,7 @@ static void qw3lm_forward(Qwen3LM * m, const int * token_ids, int n_tokens, int 
     {
         std::vector<int> pos_data(n_tokens);
         for (int i = 0; i < n_tokens; i++) {
-            pos_data[i] = kv_pos + i;
+            pos_data[i] = (kv_pos - m->kv_base[kv_set]) + i;  // prefix columns carry no position
         }
         ggml_backend_tensor_set(positions, pos_data.data(), 0, n_tokens * sizeof(int));
 
@@ -883,7 +892,7 @@ static void qw3lm_forward_verify(Qwen3LM * m, const int * token_ids, int n_token
     {
         std::vector<int> pos_data(n_tokens);
         for (int i = 0; i < n_tokens; i++) {
-            pos_data[i] = kv_pos + i;
+            pos_data[i] = (kv_pos - m->kv_base[kv_set]) + i;  // prefix columns carry no position
         }
         ggml_backend_tensor_set(positions, pos_data.data(), 0, n_tokens * sizeof(int));
 
@@ -1183,7 +1192,7 @@ static void qw3lm_forward_batch(Qwen3LM *   m,
     ggml_backend_tensor_set(token_ids_t, token_ids, 0, N * sizeof(int));
 
     for (int i = 0; i < N; i++) {
-        m->batch_graph.pos_data[(size_t) i]  = m->kv_pos[kv_sets[i]];
+        m->batch_graph.pos_data[(size_t) i]  = m->kv_pos[kv_sets[i]] - m->kv_base[kv_sets[i]];
         m->batch_graph.rows_data[(size_t) i] = (int64_t) m->kv_pos[kv_sets[i]];
     }
     ggml_backend_tensor_set(positions, m->batch_graph.pos_data.data(), 0, (size_t) N * sizeof(int));
