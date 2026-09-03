@@ -30,7 +30,8 @@ survives a fresh clone.
 --rank-dropout 0.1
 --steps 500 --save-every 50
 --depth-loss-weight 1.0 --depth-loss-frames 128
---caption-file <one shared caption for the whole album>
+# captions: per-track <stem>.mm3.txt from MOSS/Gemini (the default input);
+# --caption-file <shared caption> is the FALLBACK when tracks have none
 --trigger "<artist>" --trigger-prepend
 --holdout 0.15 --eval-every 250 --eval-crop 750
 ```
@@ -540,14 +541,26 @@ keep 250-granularity checkpoints rather than assuming 2500 transfers.
   "more tracks = later optimum" trend across five albums was flatly contradicted
   by the sixth. Do not plan around it.
 
-## Captions: one shared caption for the whole album
+## Captions: per-track .mm3.txt first, shared caption as the fallback
 
-Per-song MOSS captions were the original regime and it "hardly worked". Caption
-*constancy* across rows is what binds the style to the prompt.
+**Rob's direction, 2026-09-03: the correct input is a per-track
+`<stem>.mm3.txt` Structured Caption generated in the Training Studio's Enhance
+panel with MOSS (local, hears the audio) or Gemini (hears the audio). The
+Dataset-wide caption (`_shared-caption.txt`, `--caption-file`) is a FALLBACK
+for datasets whose tracks have no `.mm3.txt`, not the recommendation.** Never
+suggest renaming ACE sidecar `.txt` files to `.mm3.txt`: the trainer's skip
+exists because an ACE caption trains the wrong genre, and the rename also
+puts the lyrics in the prompt twice. The server now refuses a run with no
+captions at all and says so (2026-09-03).
 
-Write ONE caption, ~60–80 tokens, comma-separated descriptors, **opening with
-the trigger** so `--trigger-prepend` is a no-op on the text and only the sidecar
-records it. Shape:
+Historical note: the 2026-08-23/24 sweep found per-song MOSS captions "hardly
+worked" and shared captions bound the style better. That verdict predates the
+crop fix and the acoustic loss, and Rob's direction above supersedes it.
+
+When you DO fall back to a shared caption: ONE caption, ~60–80 tokens,
+comma-separated descriptors, **opening with the trigger** so
+`--trigger-prepend` is a no-op on the text and only the sidecar records it.
+Shape:
 
 ```
 <artist>, <album> album, <genre>, <guitar/instrument character>, <vocal

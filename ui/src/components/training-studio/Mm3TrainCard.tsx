@@ -693,7 +693,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 </div>
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                    {t('trainingStudio.mm3.sharedCaption', 'Dataset-wide caption')}
+                    {t('trainingStudio.mm3.sharedCaption', 'Dataset-wide caption (fallback)')}
                   </span>
                   <textarea className={INPUT} rows={4} value={form.sharedCaption}
                     placeholder={'artist name, album name, genre, guitar character, vocal character, '
@@ -701,14 +701,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     onChange={e => set('sharedCaption', e.target.value)} />
                   <span className="text-[10px] text-zinc-500 leading-snug">
                     {t('trainingStudio.mm3.sharedCaptionHint',
-                      'ONE caption used for every track, and the single biggest quality lever there '
-                      + 'is. With the caption held constant across rows the adapter has nowhere to '
-                      + 'put the style except into itself, and the caption becomes the handle that '
-                      + 'summons the album. Start with the artist name so it doubles as the trigger. '
-                      + 'Aim for 60-80 tokens of comma-separated descriptors. Saved to '
-                      + '_shared-caption.txt beside the dataset. LEAVE BLANK to use per-song '
-                      + '.mm3.txt captions instead — but then every track needs one, and tracks '
-                      + 'without are skipped.')}
+                      'LEAVE BLANK to train on the per-track .mm3.txt captions generated in the '
+                      + 'Enhance panel with MOSS or Gemini, which is the intended input. Fill this in '
+                      + 'only as a fallback for a dataset without them: ONE caption then replaces '
+                      + 'every track\'s caption, so the adapter has nowhere to put the style except '
+                      + 'into itself and the caption becomes the handle that summons the album. '
+                      + 'Start with the artist name so it doubles as the trigger. Aim for 60-80 '
+                      + 'tokens of comma-separated descriptors. Saved to _shared-caption.txt beside '
+                      + 'the dataset.')}
                   </span>
                 </label>
                 <div className="grid grid-cols-2 gap-3">

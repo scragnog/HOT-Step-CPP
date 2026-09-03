@@ -1720,6 +1720,28 @@ function mm3Preflight(req: Request, res: Response): TrainingDatasetRow | null {
   return ds;
 }
 
+/** How many manifest rows have a `<stem>.mm3.txt` beside their audio. Mirrors
+ *  the trainer's own rule (mm3-lm-train-run.h): stem = filename minus its last
+ *  extension, caption = `<captionsDir>/<stem>.mm3.txt`. Never throws. */
+function countMm3Captions(manifest: string, captionsDir: string): { total: number; captioned: number } {
+  let rows: unknown[] = [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifest, 'utf-8'));
+    rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.samples) ? parsed.samples : [];
+  } catch {
+    return { total: 0, captioned: 0 };
+  }
+  let total = 0, captioned = 0;
+  for (const raw of rows) {
+    const filename = (raw as { filename?: unknown })?.filename;
+    if (typeof filename !== 'string' || !filename) continue;
+    total++;
+    const stem = filename.replace(/\.[^.]*$/, '');
+    if (fs.existsSync(path.join(captionsDir, `${stem}.mm3.txt`))) captioned++;
+  }
+  return { total, captioned };
+}
+
 /** GET /datasets/:id/mm3 — codes cache state + which model files are missing.
  *  Cheap and never throws: the UI polls it to decide what to enable. */
 router.get('/datasets/:id/mm3', async (req: Request, res: Response) => {
@@ -2011,10 +2033,10 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
         ? b.cropMode
         : D.cropMode;
     const runName   = mm3RunName(ds.slug);
-    // One shared caption for the whole album is the single biggest quality lever
-    // found in the 2026-08-23/24 sweep. Convention: `_shared-caption.txt` beside
-    // the dataset. Absent = per-song captions, which is the regime that produced
-    // adapters with a trace of the artist over a degraded backing track.
+    // Per-track `<stem>.mm3.txt` captions (Enhance panel: MOSS or Gemini) are
+    // the intended input. One shared caption for the whole album is the
+    // FALLBACK for datasets without them. Convention: `_shared-caption.txt`
+    // beside the dataset.
     const sharedCaptionPath = (() => {
       if (typeof b.captionFile === 'string' && b.captionFile.trim()) return b.captionFile.trim();
       const p = path.join(captionsDir, '_shared-caption.txt');
@@ -2031,6 +2053,28 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       }
       return fs.existsSync(p) ? p : undefined;
     })();
+
+    // The trainer skips every row without a `.mm3.txt` and, with no rows left,
+    // exits 1 with nothing but SKIP lines in the log. A user read that as "the
+    // file needs .mm3 in its name", renamed the ACE sidecars, and trained on
+    // ACE captions. Count here and say what to do instead.
+    if (!sharedCaptionPath) {
+      const c = countMm3Captions(ds.datasetJsonPath, captionsDir);
+      if (c.total > 0 && c.captioned === 0) {
+        res.status(400).json({
+          error: `None of the ${c.total} tracks has a MiniMax-Music3 caption (<stem>.mm3.txt beside `
+               + 'the audio). Generate them in the Enhance panel with MOSS (local) or Gemini, '
+               + 'both of which hear the audio. As a fallback, fill in the Dataset-wide caption '
+               + 'under Advanced. Renaming ACE sidecar .txt files does not work: the trainer '
+               + 'needs the MM3 Structured Caption format.',
+        });
+        return;
+      }
+      if (c.captioned < c.total) {
+        console.warn(`[Training] mm3-train-lm: ${c.total - c.captioned} of ${c.total} tracks have no `
+                   + '.mm3.txt and will be skipped by the trainer');
+      }
+    }
 
     const previewOpts = parseMm3PreviewOptions(b.preview);
 
