@@ -26,6 +26,7 @@
 #include <array>
 #include <climits>
 #include <cmath>
+#include <cstring>  // memcpy in the DoRA host-side column norm
 #include <string>
 #include <vector>
 
@@ -98,6 +99,8 @@ struct DitAdapterCfg {
     bool     target_mlp = false;
     uint64_t seed       = 42;
     float    b_sigma    = 0.0f;  // >0 only for the finite-difference self-test
+    // DoRA: learned per-output-row magnitude over the LoRA direction. LoRA only.
+    bool     dora       = false;
     // LoKR (dit-adapter-lokr.h); ignored by the LoRA implementation.
     int   lokr_dim            = 512;
     float lokr_alpha          = 512.0f;
@@ -163,6 +166,16 @@ struct DitAdapter {
     virtual int           nSites() const                                                            = 0;
     virtual const char *  typeName() const                                                          = 0;
     virtual void          free()                                                                    = 0;
+    /** Once per optimizer window, BEFORE its first micro-batch: refresh any
+     *  per-step constants the graph reads (DoRA's per-site weight norms). A/B
+     *  only move at optimizer steps, so a window-level refresh is exact for
+     *  every micro-batch inside it. Default: nothing to refresh. */
+    virtual bool          preWindow(ggml_backend_t backend, ggml_backend_sched_t sched, std::string * err) {
+        (void) backend;
+        (void) sched;
+        (void) err;
+        return true;
+    }
 };
 
 // ─── LoRA ───────────────────────────────────────────────────────────────────
@@ -170,6 +183,14 @@ struct DitAdapter {
 struct DitLoraPair {
     ggml_tensor * A = nullptr;  // [in, r]
     ggml_tensor * B = nullptr;  // [r, out]
+    // DoRA (Liu et al. 2024): W' = m * (W + s*BA) / ||W + s*BA||_col. `m` is
+    // the learned per-output-row magnitude, a PARAM; `nrm` holds the column
+    // norm of the current W + s*BA, an INPUT refreshed once per optimizer window
+    // by preWindow() — PEFT computes the same quantity from a detached
+    // lora_weight per forward, so no gradient flows through the norm either
+    // way. Both nullptr unless cfg.dora.
+    ggml_tensor * m   = nullptr;  // [out] param, init ||W||_col
+    ggml_tensor * nrm = nullptr;  // [out] constant per window
 };
 
 struct DitAdapterLora final : DitAdapter {
@@ -180,6 +201,9 @@ struct DitAdapterLora final : DitAdapter {
     int    lo = 0, hi = 0, rank = 0, n_sites = DIT_NSITES_ATTN;
     float  alpha = 0.0f, scale = 1.0f;
     size_t n_params = 0;
+    bool      dora  = false;
+    DiTGGML * model = nullptr;  // the base weights, for the DoRA norm pass
+    std::vector<uint8_t> norm_arena;
 
     const std::vector<ggml_tensor *> & params() const override { return par; }
     size_t                             nParams() const override { return n_params; }
@@ -216,9 +240,11 @@ struct DitAdapterLora final : DitAdapter {
         alpha   = cfg.alpha;
         scale   = cfg.alpha / (float) cfg.rank;
         n_sites = cfg.target_mlp ? DIT_NSITES : DIT_NSITES_ATTN;
+        dora    = cfg.dora;
+        model   = m;
         layers.assign((size_t) (hi - lo), std::array<DitLoraPair, DIT_NSITES>{});
 
-        const int n_ten = (hi - lo) * n_sites * 2;
+        const int n_ten = (hi - lo) * n_sites * (dora ? 4 : 2);
         {
             ggml_init_params p = { (size_t) (n_ten + 8) * ggml_tensor_overhead(), nullptr, true };
             ctx                = ggml_init(p);
@@ -249,6 +275,17 @@ struct DitAdapterLora final : DitAdapter {
                 ggml_set_param(pr.B);
                 par.push_back(pr.A);
                 par.push_back(pr.B);
+                if (dora) {
+                    pr.m   = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, w->ne[1]);
+                    pr.nrm = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, w->ne[1]);
+                    snprintf(nm, sizeof(nm), "L%d.%s.dora_m", l, dit_site_peft(s));
+                    ggml_set_name(pr.m, nm);
+                    snprintf(nm, sizeof(nm), "L%d.%s.dora_nrm", l, dit_site_peft(s));
+                    ggml_set_name(pr.nrm, nm);
+                    ggml_set_param(pr.m);
+                    ggml_set_input(pr.nrm);
+                    par.push_back(pr.m);
+                }
 
                 // Exportability is CHECKED, not assumed (§3.6). Round 1's LoRA sat
                 // on the fused sa_qkv, which is not expressible as a PEFT q/k/v
@@ -291,6 +328,92 @@ struct DitAdapterLora final : DitAdapter {
                 n_params += a.size() + b.size();
             }
         }
+        if (dora) {
+            // m = nrm = ||W||_col, so the first step is EXACTLY the plain LoRA
+            // forward (B is zero, the ratio is 1). Computed on the host once: the
+            // weights come down in whatever storage type the mirror kept.
+            std::vector<uint8_t> raw;
+            std::vector<float>   col;
+            for (int l = lo; l < hi; l++) {
+                for (int s = 0; s < n_sites; s++) {
+                    DitLoraPair & pr = layers[(size_t) (l - lo)][(size_t) s];
+                    ggml_tensor * w  = dit_site_weight(&m->layers[l], s);
+                    const int64_t in = w->ne[0], out = w->ne[1];
+                    raw.resize(ggml_nbytes(w));
+                    ggml_backend_tensor_get(w, raw.data(), 0, raw.size());
+                    col.assign((size_t) out, 0.0f);
+                    for (int64_t o = 0; o < out; o++) {
+                        double acc = 0.0;
+                        for (int64_t i = 0; i < in; i++) {
+                            float v;
+                            if (w->type == GGML_TYPE_F32) {
+                                v = ((const float *) raw.data())[o * in + i];
+                            } else if (w->type == GGML_TYPE_BF16) {
+                                const uint32_t bits = (uint32_t) ((const uint16_t *) raw.data())[o * in + i] << 16;
+                                memcpy(&v, &bits, 4);
+                            } else if (w->type == GGML_TYPE_F16) {
+                                v = ggml_fp16_to_fp32(((const ggml_fp16_t *) raw.data())[o * in + i]);
+                            } else {
+                                *err = "DoRA needs an F32/BF16/F16 base weight to take its column norm";
+                                return false;
+                            }
+                            acc += (double) v * (double) v;
+                        }
+                        col[(size_t) o] = (float) sqrt(acc);
+                    }
+                    ggml_backend_tensor_set(pr.m, col.data(), 0, col.size() * sizeof(float));
+                    ggml_backend_tensor_set(pr.nrm, col.data(), 0, col.size() * sizeof(float));
+                    n_params += col.size();
+                }
+            }
+        }
+        return true;
+    }
+
+    // DoRA: refresh nrm = ||W + s*BA||_col for every site, in one forward-only
+    // graph on the backend. Called once per optimizer window; A/B are constant
+    // between optimizer steps, so this is exact for every micro-batch inside.
+    bool preWindow(ggml_backend_t backend, ggml_backend_sched_t sched, std::string * err) override {
+        (void) backend;
+        if (!dora || !model) {
+            return true;
+        }
+        // One graph PER LAYER, not one for the whole adapter: the scheduler is
+        // sized for the training graph (ggml asserts hash_set.size >= nodes +
+        // leafs), and 32 layers x 11 sites x ~12 nodes would be a second graph
+        // class it was never sized against. Per layer it is ~130 nodes.
+        const size_t n_nodes = (size_t) n_sites * 12 + 64;
+        const size_t need    = ggml_tensor_overhead() * n_nodes + ggml_graph_overhead_custom(n_nodes, false);
+        if (norm_arena.size() < need) {
+            norm_arena.resize(need);
+        }
+        for (int l = lo; l < hi; l++) {
+            ggml_init_params ip  = { norm_arena.size(), norm_arena.data(), true };
+            ggml_context *   ctx = ggml_init(ip);
+            if (!ctx) {
+                *err = "DoRA norm pass: cannot create context";
+                return false;
+            }
+            ggml_cgraph * gf = ggml_new_graph_custom(ctx, n_nodes, false);
+            for (int s = 0; s < n_sites; s++) {
+                const DitLoraPair & pr = layers[(size_t) (l - lo)][(size_t) s];
+                ggml_tensor *       w  = dit_site_weight(&model->layers[l], s);
+                ggml_tensor *       wf = (w->type == GGML_TYPE_F32) ? w : ggml_cast(ctx, w, GGML_TYPE_F32);
+                // delta[in, out] = A[in, r] . B[r, out]: mul_mat contracts ne0, so
+                // the left operand is A transposed to [r, in].
+                ggml_tensor * delta = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, pr.A)), pr.B);
+                ggml_tensor * wd    = ggml_add(ctx, wf, ggml_scale(ctx, delta, scale));
+                ggml_tensor * nr    = ggml_sqrt(ctx, ggml_sum_rows(ctx, ggml_sqr(ctx, wd)));  // [1, out]
+                ggml_build_forward_expand(gf, ggml_cpy(ctx, nr, ggml_reshape_2d(ctx, pr.nrm, 1, pr.nrm->ne[0])));
+            }
+            ggml_backend_sched_reset(sched);
+            const bool ok = ggml_backend_sched_graph_compute(sched, gf) == GGML_STATUS_SUCCESS;
+            ggml_free(ctx);
+            if (!ok) {
+                *err = "DoRA norm pass: graph compute failed";
+                return false;
+            }
+        }
         return true;
     }
 
@@ -300,6 +423,11 @@ struct DitAdapterLora final : DitAdapter {
         if (p) {
             ggml_tensor * t = ggml_scale(ctx_g, ggml_mul_mat(ctx_g, p->A, x), scale);  // alpha/rank in-graph
             y               = ggml_add(ctx_g, y, ggml_mul_mat(ctx_g, p->B, t));
+            if (dora && p->m && p->nrm) {
+                // y is [out, S]; m/nrm is [out] and broadcasts over S. Gradient
+                // reaches m through the div and A/B through y; nrm is an input.
+                y = ggml_mul(ctx_g, y, ggml_div(ctx_g, p->m, p->nrm));
+            }
         }
         return y;
     }
@@ -315,7 +443,8 @@ struct DitAdapterLora final : DitAdapter {
         }
         // adapter_config.json is written FIRST (D19): a missing/unparseable file
         // silently degrades the scale to 1.0 with only a warning.
-        if (!dit_write_adapter_config(d, rank, (int) (alpha + 0.5f), n_sites == DIT_NSITES, meta.base_model_path)) {
+        if (!dit_write_adapter_config(d, rank, (int) (alpha + 0.5f), n_sites == DIT_NSITES, meta.base_model_path,
+                                      dora)) {
             *err = "cannot write adapter_config.json in " + d;
             return false;
         }
@@ -341,6 +470,21 @@ struct DitAdapterLora final : DitAdapter {
                     STWTensor st;
                     st.name  = nm;
                     st.shape = { t->ne[1], t->ne[0] };  // row-major (rows, cols)
+                    st.data  = bufv.data();
+                    tensors.push_back(st);
+                }
+                if (dora && pr.m) {
+                    // PEFT's lora_magnitude_vector — the key adapter-merge.h already
+                    // reads (lora_is_magnitude) and rescales by at merge time.
+                    store.push_back(std::vector<float>((size_t) ggml_nelements(pr.m)));
+                    std::vector<float> & bufv = store.back();
+                    ggml_backend_tensor_get(pr.m, bufv.data(), 0, bufv.size() * sizeof(float));
+                    char nm[208];
+                    snprintf(nm, sizeof(nm), "base_model.model.layers.%d.%s.lora_magnitude_vector.weight", l,
+                             dit_site_peft(s));
+                    STWTensor st;
+                    st.name  = nm;
+                    st.shape = { pr.m->ne[0] };
                     st.data  = bufv.data();
                     tensors.push_back(st);
                 }
@@ -386,7 +530,7 @@ struct DitAdapterLora final : DitAdapter {
 
     // ─── adapter_config.json (§2.3 literal) ─────────────────────────────────
     static bool dit_write_adapter_config(const std::string & dir, int r, int lora_alpha, bool target_mlp,
-                                         const std::string & base_model) {
+                                         const std::string & base_model, bool dora = false) {
         std::string j;
         char        b[96];
         j += "{\n";
@@ -403,7 +547,7 @@ struct DitAdapterLora final : DitAdapter {
         j += "  \"fan_in_fan_out\": false,\n";
         j += "  \"inference_mode\": true,\n";
         j += "  \"init_lora_weights\": true,\n";
-        j += "  \"use_dora\": false,\n";
+        j += std::string("  \"use_dora\": ") + (dora ? "true" : "false") + ",\n";
         j += "  \"use_rslora\": false,\n";
         j += "  \"rank_pattern\": {},\n";
         j += "  \"alpha_pattern\": {},\n";

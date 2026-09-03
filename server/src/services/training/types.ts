@@ -837,6 +837,9 @@ export interface TrainDitOptions {
   /** Engine CLI default stays 'lora' for back-compat; the UI form defaults
    *  to 'lokr' (K1). */
   adapterType?: DitAdapterType;    // default 'lora'
+  /** DoRA: learn a per-output-row magnitude over the LoRA direction (LoRA only).
+   *  Exported as lora_magnitude_vector, which the merge path already reads. */
+  dora?: boolean;
   rank?: number;                   // default 128 (adapterType==='lora' only)
   alpha?: number;                  // default 256 (adapterType==='lora' only)
   /** LyCORIS LoKR factors, per Rob's Uber-LoKR-4 preset (K2). Ignored unless

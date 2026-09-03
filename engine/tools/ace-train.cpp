@@ -620,6 +620,15 @@ static void print_usage(void) {
             "                                            something plausible either way.\n"
             "    --artist-token-k <n>        8           rows, 1-64\n"
             "    --artist-token-only                     freeze the adapter and train only the rows\n"
+            "\n"
+            "  DoRA (weight-decomposed LoRA):\n"
+            "    --dora                                  learn a per-output-row magnitude m on top of\n"
+            "                                            the LoRA direction: y = (m / ||W + BA||) (W+BA)x.\n"
+            "                                            m starts at ||W||, so step 0 is a no-op. The\n"
+            "                                            norm is refreshed once per optimizer window\n"
+            "                                            (A/B do not change between), PEFT's detached\n"
+            "                                            form. Exported as lora_magnitude_vector, which\n"
+            "                                            adapter-merge.h already reads. LoRA only.\n"
             "    --layers <n>                0               0 = auto; else train the top n layers\n"
             "\n"
             "  Objective (design 4.5):\n"
@@ -4262,6 +4271,7 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--layers") && i + 1 < argc) { a.layers = atoi(argv[++i]); saw.layers = true; }
         else if (!strcmp(argv[i], "--target-mlp")) { a.target_mlp = true; saw.target_mlp = true; }
         else if (!strcmp(argv[i], "--no-target-mlp")) { a.target_mlp = false; saw.target_mlp = true; }
+        else if (!strcmp(argv[i], "--dora")) a.dora = true;
         else if (!strcmp(argv[i], "--artist-token") && i + 1 < argc) a.artist_token = argv[++i];
         else if (!strcmp(argv[i], "--artist-token-k") && i + 1 < argc) a.artist_k = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--artist-token-only")) a.artist_only = true;

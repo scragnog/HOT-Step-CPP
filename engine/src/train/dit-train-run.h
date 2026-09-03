@@ -63,6 +63,10 @@ struct DitTrainArgs {
     std::string artist_token = "";
     int         artist_k     = 8;
     bool        artist_only  = false;  // freeze the adapter, train only the rows
+    // DoRA (weight-decomposed LoRA): a learned per-output-row magnitude on top
+    // of the LoRA direction. The merge path already reads it
+    // (adapter-merge.h lora_magnitude_vector); this is the trainer half.
+    bool        dora         = false;
     // ON by default: an attention-only LoRA leaves the MLP projections — where
     // most of the timbre lives — frozen. --no-target-mlp turns it back off.
     bool        target_mlp = true;
@@ -1066,6 +1070,16 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         cfg.rank                = a.rank;
         cfg.alpha               = (float) a.alpha;
         cfg.target_mlp          = a.target_mlp;
+        cfg.dora                = a.dora;
+        if (a.dora && a.adapter_type != "lora") {
+            lm_fatal("args", "--dora applies to the LoRA parameterization only (LoKr has no per-row direction to rescale)");
+            return 1;
+        }
+        if (a.dora && !a.init_adapter.empty()) {
+            // dit-resume.h restores A/B only. m is re-derived as ||W||_col here, so
+            // at resume the ratio m/||W+BA|| is not the 1.0 a fresh run starts from.
+            lm_log("warn", "DoRA: lora_magnitude_vector is NOT resumed from --init-adapter; m restarts at ||W||_col");
+        }
         cfg.seed                = (uint64_t) a.seed;
         cfg.lokr_dim            = a.lokr_dim;
         cfg.lokr_alpha          = a.lokr_alpha;
@@ -1084,9 +1098,21 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         // mirror mode (the CUDA fallback above may already have downgraded it),
         // and left at INT_MAX in every other mode so the graph is unchanged.
         adapter->f32_cast_lo = dit_mirror_casts_in_graph(mirror_mode) ? lora_lo : INT_MAX;
-        const size_t expect =
+        size_t expect =
             is_lokr ? dit_lokr_expected_params(c, lora_lo, L, a.lokr_dim, a.lokr_factor, a.target_mlp)
                     : dit_lora_expected_params(c, lora_lo, L, a.rank, a.target_mlp);
+        if (a.dora && !is_lokr) {
+            // DoRA adds one magnitude per output row at every trained site. The
+            // VRAM model is left unaware: ~1.3M floats on the 32-layer DiT, and
+            // its optimizer state, is noise against the LoRA itself.
+            const int n_sites = a.target_mlp ? DIT_NSITES : DIT_NSITES_ATTN;
+            for (int l = lora_lo; l < L; l++) {
+                for (int s2 = 0; s2 < n_sites; s2++) {
+                    ggml_tensor * w = dit_site_weight(&M.m.layers[l], s2);
+                    expect += w ? (size_t) w->ne[1] : 0;
+                }
+            }
+        }
         if (adapter->nParams() != expect) {
             char b[192];
             snprintf(b, sizeof(b), "%s parameter count %zu != expected %zu", adapter->typeName(), adapter->nParams(),
@@ -1922,7 +1948,19 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             lm_optim_zero_grad(&opt);
 
             // A WINDOW is one optimizer step: grad_accum micro-batches of B songs.
+            // DoRA: refresh the per-site weight norms ONCE per epoch here and once
+            // per window below — A/B only change at optimizer steps, so the norm
+            // is exact for every micro-batch in between (PEFT computes it from a
+            // detached lora_weight per forward; same quantity, fewer passes).
             for (int w0 = 0; w0 < n && rc == 0; w0 += win_songs) {
+                {
+                    std::string perr;
+                    if (!adapter->preWindow(M.backend, M.sched, &perr)) {
+                        lm_fatal("train", "adapter preWindow failed: " + perr);
+                        rc = 1;
+                        break;
+                    }
+                }
                 const int wlen = std::min(win_songs, n - w0);      // songs in this window
                 const int n_mb = (wlen + B - 1) / B;               // micro-batches (the last may be short)
 

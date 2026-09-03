@@ -966,6 +966,11 @@ static bool dit_st_batch_measure(DitTrainModel * M, const std::vector<DitSample>
         cfg.alpha   = (float) (2 * rank);
         cfg.seed    = seed ^ 0x1234ull;
         cfg.b_sigma = 1e-2f;  // B == 0 would make dL/dA identically zero
+        // HOTSTEP_DIT_ST_DORA=1 runs this rung under DoRA: the magnitude
+        // tensors join params() and the A/B gradients are taken through the
+        // m/||W+BA|| rescale. An env var, not a flag, so the FD child process
+        // (dit_st_spawn_fd) inherits it unchanged.
+        cfg.dora    = getenv("HOTSTEP_DIT_ST_DORA") != nullptr;
         if (!lora.init(&M->m, M->backend, lo, hi, cfg, err)) {
             cleanup();
             return false;
@@ -3763,6 +3768,13 @@ static int dit_self_test_impl(const std::string & dit_path, const std::string & 
             cfg.alpha   = 32.0f;
             cfg.seed    = seed ^ 0x1234ull;
             cfg.b_sigma = 1e-2f;  // otherwise T6 makes dL/dA trivially zero
+            // HOTSTEP_DIT_ST_DORA=1: THIS is the rung the FD child runs, so the
+            // switch has to be here. Under it the magnitude tensors join
+            // params() and every A/B probe is taken through the m/||W+BA||
+            // rescale. (The probe labels assume the A,B,A,B slot order and will
+            // be off by the interleaved m tensors — the numeric bars are per
+            // tensor and unaffected.)
+            cfg.dora    = getenv("HOTSTEP_DIT_ST_DORA") != nullptr;
             std::string err;
             if (!fd.init(&M.m, M.backend, L - 2, L, cfg, &err)) {
                 dit_st_report(rs, "T4", false, err);

@@ -3351,6 +3351,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       // where most of the timbre lives — frozen. Same !== false shape as
       // channelBalance/stopEngine, so an omitting client gets the default.
       targetMlp: body.targetMlp !== false,
+      dora: body.dora === true,
       layers: Math.trunc(layers),
       crop: Math.trunc(crop),
       cropMin: Math.trunc(cropMin),

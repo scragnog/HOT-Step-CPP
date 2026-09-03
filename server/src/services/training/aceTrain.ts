@@ -498,7 +498,7 @@ export interface ResolvedTrainDitOptions {
   variantKey: string; tensorsDir: string;
   ditModel: string; ditPath: string;
   adapterName: string; adapterDir: string;
-  adapterType: DitAdapterType; rank: number; alpha: number; targetMlp: boolean;
+  adapterType: DitAdapterType; rank: number; alpha: number; targetMlp: boolean; dora?: boolean;
   // LyCORIS LoKR factors (K2 / plan §2.1). Always resolved regardless of
   // adapterType — buildTrainDitArgs only emits them when adapterType==='lokr'.
   lokrDim: number; lokrAlpha: number; lokrFactor: number; lokrDecomposeBoth: boolean;
@@ -629,6 +629,7 @@ export function buildTrainDitArgs(input: {
     // as buildTrainLmArgs.
     ...(o.initAdapter ? ['--init-adapter', o.initAdapter] : []),
     ...(o.initAdapter ? [] : ['--adapter-type', o.adapterType]),
+    ...(o.dora && o.adapterType === 'lora' ? ['--dora'] : []),
     // §2.1: lora trains via --rank/--alpha; lokr via the four --lokr-* flags.
     // The two are mutually exclusive on the CLI side, so only one set is ever
     // emitted — sending both would be harmless (ace-train ignores the unused

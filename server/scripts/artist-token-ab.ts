@@ -106,6 +106,18 @@ async function main() {
     lm_seed: lmOut.lm_seed,
   };
 
+  // --dit-adapter <dir|name>: attach a DiT adapter to the synth request (the
+  // LM half is untouched). Used to check that a trainer's export merges — e.g.
+  // that a DoRA adapter's lora_magnitude_vector entries are picked up, which the
+  // engine logs as "[Adapter] LoRA merged N pairs (N with DoRA ...)".
+  const ditAdapter = args.get('dit-adapter');
+  if (ditAdapter) {
+    const scale = Number(args.get('dit-adapter-scale') || 1);
+    synthReq.adapter = ditAdapter;
+    synthReq.adapter_scale = scale;
+    synthReq.adapters = [{ name: ditAdapter, scale }];
+  }
+
   console.log(`[${tag}] synth ...`);
   const sJob = await aceClient.submitSynth(synthReq, 'wav16');
   await awaitJob(sJob, `synth (${tag})`);
