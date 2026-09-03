@@ -19,6 +19,7 @@
 //
 // Local HOT-Step feature — not upstream acestep.cpp.
 
+#include "artist-token-runtime.h"  // the token half of a unified adapter file
 #include "qwen3-lora.h"
 #include "safetensors.h"
 #include "yyjson.h"
@@ -38,6 +39,22 @@ struct LMLora {
     int                   max_layer = -1;
     std::string           path;
     float                 user_scale = 1.0f;
+
+    // ── Soft-prompt halves that travel in the same file (train/lm-export.h) ──
+    //
+    // The artist token is installed into the process-wide runtime
+    // (artist-token-runtime.h) at load and cleared at free; this flag says this
+    // adapter is the one that owns it, so freeing a DIFFERENT adapter cannot
+    // evict a token that came from elsewhere.
+    bool owns_artist_token = false;
+
+    // Per-layer K/V prefix, kept on the HOST as F32 and written into a KV set
+    // by qw3lm_seed_prefix at Phase-2 reset. Indexed by absolute layer; empty
+    // vectors outside [pfx_lo, pfx_hi). Row layout [Nkv*D] per column, n columns.
+    std::vector<std::vector<float>> pfx_k, pfx_v;
+    int                             pfx_n  = 0;
+    int                             pfx_lo = 0, pfx_hi = 0;
+    int64_t                         pfx_row = 0;  // Nkv * D, as written
 };
 
 // Map a module substring to a slot. Order matters: check longer names first.
@@ -91,6 +108,9 @@ static float lm_adapter_read_alpha_ratio(const std::string & dir) {
 
 static void lm_adapter_free(LMLora * l) {
     if (!l) return;
+    if (l->owns_artist_token) {
+        artist_token_clear();  // never leave a stale token behind an adapter switch
+    }
     if (l->buf) ggml_backend_buffer_free(l->buf);
     if (l->ctx) ggml_free(l->ctx);
     delete l;
@@ -176,6 +196,85 @@ static float lm_adapter_read_alpha(const STFile & st, const STEntry & e) {
 
 // Returns nullptr on failure (caller must treat this as a load failure —
 // never fall back silently to the base LM under an adapter-bearing key).
+// ─── The soft-prompt half of a unified adapter file ──────────────────────────
+//
+// train/lm-export.h writes hot_step.artist_token.{vec,meta} and
+// hot_step.prefix.{L<l>.k,L<l>.v,meta} into the same adapter_model.safetensors
+// as the LoRA pairs. Read them here, while `st` is still open, so a token or a
+// prefix loads with the adapter it was trained with and never has to be found
+// separately. Absent entries are simply absent — an adapter written before this
+// existed loads exactly as it did.
+//
+// site: 1 = as15_lm (this runtime), 2 = mm3_lm. An mm3 token loaded into the
+// ACE LM would add a vector that means nothing; refuse it by name.
+static void lm_adapter_read_soft_prompt(const STFile & st, LMLora * l) {
+    const STEntry * vec  = st_find(st, "hot_step.artist_token.vec");
+    const STEntry * meta = st_find(st, "hot_step.artist_token.meta");
+    if (vec && meta && meta->n_dims == 1 && meta->shape[0] == 4 && meta->dtype == "F32" && vec->dtype == "F32" &&
+        vec->n_dims == 2) {
+        const float * m = (const float *) st_data(st, *meta);
+        const int k = (int) m[0], placeholder = (int) m[1], hidden = (int) m[2], site = (int) m[3];
+        if (site != 1) {
+            fprintf(stderr, "[LM-Adapter] artist token in %s is site %d, not as15_lm — ignored\n", l->path.c_str(),
+                    site);
+        } else if (vec->shape[0] != k || vec->shape[1] != hidden || k < 1 || placeholder < 0) {
+            fprintf(stderr, "[LM-Adapter] artist token in %s has inconsistent shape/meta — ignored\n",
+                    l->path.c_str());
+        } else {
+            std::string nm = l->path;
+            size_t      sl = nm.find_last_of("/\\");
+            if (sl != std::string::npos) {
+                nm = nm.substr(sl + 1);
+            }
+            artist_token_set((const float *) st_data(st, *vec), k, placeholder, hidden, "as15_lm", nm.c_str());
+            l->owns_artist_token = true;
+        }
+    }
+
+    const STEntry * pm = st_find(st, "hot_step.prefix.meta");
+    if (pm && pm->n_dims == 1 && pm->shape[0] == 4 && pm->dtype == "F32") {
+        const float * m  = (const float *) st_data(st, *pm);
+        const int     n  = (int) m[0];
+        const int64_t row = (int64_t) m[1];
+        const int     lo = (int) m[2], hi = (int) m[3];
+        if (n > 0 && row > 0 && hi > lo && lo >= 0 && hi <= QWEN3_LORA_MAX_LAYERS) {
+            l->pfx_k.assign((size_t) hi, {});
+            l->pfx_v.assign((size_t) hi, {});
+            int got = 0;
+            for (int ly = lo; ly < hi; ly++) {
+                char nk[64], nv[64];
+                snprintf(nk, sizeof(nk), "hot_step.prefix.L%d.k", ly);
+                snprintf(nv, sizeof(nv), "hot_step.prefix.L%d.v", ly);
+                const STEntry * ek = st_find(st, nk);
+                const STEntry * ev = st_find(st, nv);
+                if (!ek || !ev || ek->dtype != "F32" || ev->dtype != "F32" || ek->n_dims != 2 ||
+                    ek->shape[0] != n || ek->shape[1] != row || ev->shape[0] != n || ev->shape[1] != row) {
+                    fprintf(stderr, "[LM-Adapter] prefix layer %d missing or malformed in %s — prefix ignored\n", ly,
+                            l->path.c_str());
+                    got = -1;
+                    break;
+                }
+                const float * pk = (const float *) st_data(st, *ek);
+                const float * pv = (const float *) st_data(st, *ev);
+                l->pfx_k[(size_t) ly].assign(pk, pk + (size_t) n * (size_t) row);
+                l->pfx_v[(size_t) ly].assign(pv, pv + (size_t) n * (size_t) row);
+                got++;
+            }
+            if (got > 0) {
+                l->pfx_n   = n;
+                l->pfx_lo  = lo;
+                l->pfx_hi  = hi;
+                l->pfx_row = row;
+                fprintf(stderr, "[LM-Adapter] prefix installed: n=%d over layers [%d,%d), row %lld\n", n, lo, hi,
+                        (long long) row);
+            } else {
+                l->pfx_k.clear();
+                l->pfx_v.clear();
+            }
+        }
+    }
+}
+
 static LMLora * lm_adapter_load(const char * path, float user_scale, ggml_backend_t backend) {
     std::string p = path;
     std::string dir;
@@ -316,6 +415,7 @@ static LMLora * lm_adapter_load(const char * path, float user_scale, ggml_backen
             ggml_backend_tensor_set(*pd.dst, st_data(st, *pd.e), 0, ggml_nbytes(*pd.dst));
         }
         l->n_tensors = (int) lkp.size();
+        lm_adapter_read_soft_prompt(st, l);  // a LoKr adapter can carry the token half too
         st_close(&st);
 
         int sites = 0, mono = 0, fact = 0;
@@ -436,6 +536,7 @@ static LMLora * lm_adapter_load(const char * path, float user_scale, ggml_backen
         ggml_backend_tensor_set(pd.t, st_data(st, *pd.e), 0, ggml_nbytes(pd.t));
     }
     l->n_tensors = (int) pending.size();
+    lm_adapter_read_soft_prompt(st, l);  // token / prefix halves, while the file is still mapped
     st_close(&st);
 
     // Finalize pairs: both halves present, per-pair scale = ratio * user_scale

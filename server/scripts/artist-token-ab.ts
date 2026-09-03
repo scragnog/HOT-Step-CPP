@@ -63,6 +63,12 @@ async function main() {
   const health = await fetch(`http://127.0.0.1:${config.aceServer.port}/health`).then(r => r.ok).catch(() => false);
   if (!health) die('ace-server is not reachable');
 
+  // --lm-adapter <dir>: a unified adapter (LoRA + token in one file) goes through
+  // the normal request field, and the engine installs its token at load. This is
+  // the production path; HOTSTEP_ARTIST_TOKEN is only the standalone override.
+  const lmAdapter = args.get('lm-adapter');
+  const lmScale = Number(args.get('lm-adapter-scale') || 1);
+
   const aceReq: AceRequest = {
     caption, lyrics, duration, seed,
     vocal_language: 'en',
@@ -72,6 +78,7 @@ async function main() {
     task_type: 'text2music',
     synth_model: SYNTH_MODEL, lm_model: LM_MODEL, vae_model: VAE_MODEL, emb_model: EMB_MODEL,
     ...P50,
+    ...(lmAdapter ? { lm_adapter: lmAdapter, lm_adapter_scale: lmScale, lm_rep_penalty: 1.05 } : {}),
   };
 
   const t0 = Date.now();

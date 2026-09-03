@@ -440,6 +440,18 @@ Qwen3LM * store_require_lm(ModelStore * s, const ModelKey & k) {
             delete m;
             return nullptr;
         }
+        // A unified adapter may carry an artist token; it is a delta in THIS
+        // model's embedding space and nowhere else. Same cache-key law as the
+        // adapter itself: a mismatch is a refusal, never a base-only fallback.
+        if (m->lora->owns_artist_token && art_rt().hidden != m->cfg.hidden_size) {
+            fprintf(stderr, "[Store] LM adapter's artist token is %d-wide but the model is %d — refusing\n",
+                    art_rt().hidden, m->cfg.hidden_size);
+            lm_adapter_free(m->lora);
+            m->lora = nullptr;
+            qw3lm_free(m);
+            delete m;
+            return nullptr;
+        }
         if (m->lora->max_layer >= m->cfg.n_layers) {
             fprintf(stderr, "[Store] LM adapter has %d layers but model has %d — mismatch, refusing\n",
                     m->lora->max_layer + 1, m->cfg.n_layers);

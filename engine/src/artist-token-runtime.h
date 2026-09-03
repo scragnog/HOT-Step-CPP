@@ -233,3 +233,36 @@ inline ggml_tensor * artist_token_tensor(ggml_backend_t backend) {
     ggml_backend_tensor_set(a.t, a.vec.data(), 0, a.vec.size() * sizeof(float));
     return a.t;
 }
+
+// Drop the loaded token and its backend copy. Called when the adapter that
+// carried it is freed, so an adapter switch cannot leave a stale token behind.
+inline void artist_token_clear() {
+    ArtistTokenRT & a = art_rt();
+    if (a.buf) {
+        ggml_backend_buffer_free(a.buf);
+    }
+    if (a.ctx) {
+        ggml_free(a.ctx);
+    }
+    const bool tried = a.tried;
+    a       = ArtistTokenRT{};
+    a.tried = tried;  // the env-var probe happens once per process, not per adapter
+}
+
+// Install a token from an adapter file (lm-adapter.h reads the hot_step.* entries
+// and hands the rows over here). `site` is already checked by the caller against
+// the runtime it is loading into; this only owns the state.
+inline void artist_token_set(const float * vec, int k, int placeholder, int hidden, const char * site,
+                             const char * name) {
+    artist_token_clear();
+    ArtistTokenRT & a = art_rt();
+    a.k           = k;
+    a.placeholder = placeholder;
+    a.hidden      = hidden;
+    a.site        = site ? site : "";
+    a.name        = name ? name : "";
+    a.vec.assign(vec, vec + (size_t) k * (size_t) hidden);
+    a.loaded      = true;
+    fprintf(stderr, "[ArtistToken] installed from adapter: \"%s\" (%s) k=%d placeholder=%d hidden=%d\n",
+            a.name.c_str(), a.site.c_str(), a.k, a.placeholder, a.hidden);
+}

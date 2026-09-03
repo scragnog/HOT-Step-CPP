@@ -17,6 +17,7 @@
 #include "train/lm-extract.h"
 #include "train/lm-graph.h"
 #include "train/lm-optim.h"
+#include "train/lm-prefix.h"
 #include "train/lm-prior.h"
 #include "train/lm-resume.h"
 #include "train/lm-selftest.h"
@@ -91,6 +92,10 @@ struct LmTrainArgs {
     // inversion conventionally runs ~50x hotter than a LoRA; with one LR a
     // joint run either undertrains the token or overcooks the adapter.
     float       artist_lr    = 0.0f;
+    // Trainable per-layer K/V prefix (lm-prefix.h). 0 = off, byte-identical.
+    // Shares --artist-token-lr with the token: both are soft-prompt parameters.
+    int         prefix_n     = 0;
+    float       prefix_sigma = 0.02f;
 
     // 4B low-VRAM path (2026-07-28 plan §2.1)
     std::string low_vram        = "auto";  // auto|on|off
@@ -956,7 +961,12 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // F16 under flash — the fused op asserts an F16 contiguous mask. Same flat
     // [S_max*S_max] layout either way, so every view below is unchanged apart
     // from sizing its row stride with ggml_element_size().
-    ggml_tensor * t_msk = lm_mask_alloc(ctx_static, (int64_t) alloc_seq * alloc_seq, attn_flash);
+    if (a.prefix_n > 0 && attn_flash) {
+        lm_fatal("args", "--prefix-n needs --attn exact: S_kv != S is outside what the flash probe covers");
+        return 1;
+    }
+    // A trainable prefix widens the mask to [n + S, S]; the flat buffer is sized for it.
+    ggml_tensor * t_msk = lm_mask_alloc(ctx_static, (int64_t) (alloc_seq + a.prefix_n) * alloc_seq, attn_flash);
     // The [V, s_tr_max] label buffer is a naive-path structure: 1,184 MiB at
     // 4B / s_tr 1556. Low-vram sparse-writes a [V, chunk] buffer instead (D4).
     ggml_tensor * t_lab      = low ? nullptr : ggml_new_tensor_2d(ctx_static, GGML_TYPE_F32, V, alloc_s_tr);
@@ -1075,6 +1085,22 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         artp.off = -1;
     }
 
+    // ── Trainable KV prefix (the 70x) ────────────────────────────────────
+    LmPrefix pfx;
+    if (a.prefix_n > 0) {
+        std::string perr;
+        if (!lm_prefix_init(&pfx, &lm, 0, c.n_layers, a.prefix_n, alloc_seq, (uint64_t) a.seed, a.prefix_sigma,
+                            &perr)) {
+            lm_fatal("vram", perr);
+            return 1;
+        }
+        char pb[192];
+        snprintf(pb, sizeof(pb), "prefix: n=%d over %d layers, row %lld -> %zu params (%.1f MB), sigma %.3g",
+                 pfx.n, c.n_layers, (long long) pfx.row, pfx.n_params, pfx.n_params * 4.0 / 1048576.0,
+                 a.prefix_sigma);
+        lm_log("info", pb);
+    }
+
     // Optimizer parameter set. --artist-token-only drops the LoRA factors so the
     // adapter stays at its exactly-zero init and the run is a pure token train.
     //
@@ -1096,9 +1122,28 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     if (artp.t) {
         train_params.push_back(artp.t);
     }
+    for (size_t i = 0; i < pfx.params.size(); i++) {
+        train_params.push_back(pfx.params[i]);
+    }
     if (train_params.empty()) {
         lm_fatal("args", "nothing to train: --artist-token-only without an artist token");
         return 1;
+    }
+
+    // The soft-prompt half rides inside adapter_model.safetensors (lm-export.h).
+    LmExtraExport lm_extra;
+    if (artp.t) {
+        lm_extra.art_t           = artp.t;
+        lm_extra.art_k           = art.k;
+        lm_extra.art_placeholder = art.placeholder;
+        lm_extra.site            = 1;  // as15_lm
+    }
+    if (pfx.active()) {
+        lm_extra.pfx_k  = pfx.k;
+        lm_extra.pfx_v  = pfx.v;
+        lm_extra.pfx_n  = pfx.n;
+        lm_extra.pfx_lo = pfx.layer_lo;
+        lm_extra.pfx_hi = pfx.layer_hi;
     }
 
     LmOptim opt;
@@ -1116,19 +1161,31 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         // Prodigy's d0 is consumed INSIDE lm_optim_init (o->prodigy_d = d0), so
         // it must be set here, not with base_lr below.
         opt.prodigy_d0    = (float) a.prodigy_d0;
+        // Soft-prompt parameters (token + prefix) are pinned to AdamW and share
+        // one LR group; a [H, k] or [Nkv*D, n] matrix is not a weight.
         if (artp.t) {
             opt.adamw_only.push_back(artp.t);
+        }
+        for (size_t i = 0; i < pfx.params.size(); i++) {
+            opt.adamw_only.push_back(pfx.params[i]);
         }
         if (!lm_optim_init(&opt, train_params, lm.backend, &err)) {
             lm_fatal("vram", err);
             return 1;
         }
-        if (artp.t && a.artist_lr > 0.0f && a.artist_lr != a.lr) {
+        const bool soft_any = artp.t || !pfx.params.empty();
+        if (soft_any && a.artist_lr > 0.0f && a.artist_lr != a.lr) {
             opt.t_adamw_alt = t_adamw_alt;
-            lm_optim_set_lr_mul(&opt, artp.t, a.artist_lr / a.lr);
+            const float mul = a.artist_lr / a.lr;
+            if (artp.t) {
+                lm_optim_set_lr_mul(&opt, artp.t, mul);
+            }
+            for (size_t i = 0; i < pfx.params.size(); i++) {
+                lm_optim_set_lr_mul(&opt, pfx.params[i], mul);
+            }
             char lb[160];
-            snprintf(lb, sizeof(lb), "artist token LR %.3g (x%.1f the LoRA's %.3g)", a.artist_lr, a.artist_lr / a.lr,
-                     a.lr);
+            snprintf(lb, sizeof(lb), "soft-prompt LR %.3g (x%.1f the LoRA's %.3g) on %zu tensors", a.artist_lr, mul,
+                     a.lr, (size_t) (artp.t ? 1 : 0) + pfx.params.size());
             lm_log("info", lb);
         }
     }
@@ -1173,6 +1230,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         cc.attn_head_block = lc.attn_head_block;
         cc.s_max           = alloc_seq;
         cc.layer_lo        = 0;
+        cc.pfx             = pfx.active() ? &pfx : nullptr;
         cc.layer_hi        = c.n_layers;
         cc.weights_bf16    = weights_bf16;  // Lever A
         cc.attn_flash      = attn_flash;    // D1 — reaches P2/P3/P7 and the node
@@ -1221,6 +1279,12 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // constructs precisely this default). That equality is what G0 checks and is
     // the reason the naive path can carry the flag without moving its graph.
     LmLayerOpts naive_opts;
+    if (pfx.active()) {
+        naive_opts.pfx_k_all = &pfx.k;
+        naive_opts.pfx_v_all = &pfx.v;
+        naive_opts.pfx_zero  = pfx.zero;
+        naive_opts.pfx_n     = pfx.n;
+    }
     naive_opts.attn_flash = attn_flash;
     naive_opts.attn_prec  = attn_prec_req;
 
@@ -1230,7 +1294,11 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
             return;
         }
         std::vector<float> m;
-        lm_causal_mask(S, &m);
+        if (pfx.active()) {
+            lm_causal_mask_prefix(pfx.n, /*pfx_lo=*/0, S, /*n_prompt=*/0, &m);  // every row sees the prefix
+        } else {
+            lm_causal_mask(S, &m);
+        }
         lm_mask_set(t_msk, m);  // converts to F16 when t_msk is F16 (D4)
         last_mask_S = S;
     };
@@ -2119,7 +2187,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
 
             LmExportResult xr;
             const bool xok = lora.is_lokr ? lm_export_lokr(lora, *meta, a.out_dir, &xr, &export_err)
-                                          : lm_export_peft(lora, c, *meta, a.out_dir, &xr, &export_err);
+                                          : lm_export_peft(lora, c, *meta, a.out_dir, &xr, &export_err, &lm_extra);
             if (!xok) {
                 lm_fatal("export", export_err);
                 rc = 1;
@@ -2148,7 +2216,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
                 LmExportResult    mr;
                 std::string       merr;
                 const bool mok = lora.is_lokr ? lm_export_lokr(lora, *meta, mdir, &mr, &merr)
-                                              : lm_export_peft(lora, c, *meta, mdir, &mr, &merr);
+                                              : lm_export_peft(lora, c, *meta, mdir, &mr, &merr, &lm_extra);
                 // A milestone without its token would be a LoRA that silently
                 // expects a trigger it does not ship.
                 if (mok && artp.t) {
@@ -2235,6 +2303,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     lm_optim_free(&opt);
     lm_lora_detach(&lora, &lm);
     lm_lora_free(&lora);
+    lm_prefix_free(&pfx);
     if (art_buf) {
         ggml_backend_buffer_free(art_buf);
     }

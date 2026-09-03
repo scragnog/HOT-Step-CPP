@@ -2073,9 +2073,17 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         // (adapter_config.json + adapter_model.safetensors). Same ckpt-<step>/
         // directory, different file name — the sidecar below has to follow, and
         // so does every consumer that hard-codes adapter_model.safetensors.
+        // Soft-prompt half, inside the same safetensors as the LoRA (lm-export.h).
+        LmExtraExport mx;
+        if (t_art) {
+            mx.art_t           = t_art;
+            mx.art_k           = art_k;
+            mx.art_placeholder = art_placeholder;
+            mx.site            = 2;  // mm3_lm
+        }
         const bool lokr_out = a.is_lokr();
         const bool exported = lokr_out ? lm_export_lokr(lora, meta, dir, &res, &xerr)
-                                       : lm_export_peft(lora, c, meta, dir, &res, &xerr);
+                                       : lm_export_peft(lora, c, meta, dir, &res, &xerr, &mx);
         if (!exported) {
             fprintf(stderr, "[mm3-lm-train] export failed: %s\n", xerr.c_str());
             return std::string();

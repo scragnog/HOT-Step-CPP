@@ -40,6 +40,7 @@
 #include "train/lm-data.h"
 #include "train/lm-graph.h"
 #include "train/lm-kvprefix.h"
+#include "train/lm-prefix.h"
 #include "train/lm-optim.h"
 
 #include <algorithm>
@@ -168,6 +169,12 @@ struct LmCkptCfg {
     // Lever A (--weights bf16). Default OFF => lm_ckpt_layer_opts() returns a
     // default LmLayerOpts and every graph below is emitted verbatim (§6.0).
     bool weights_bf16   = false;
+
+    // Trainable KV prefix (train/lm-prefix.h). nullptr = off, byte-identical.
+    // Every row of the mask sees the whole prefix (pfx_lo = 0, n_prompt = 0):
+    // this prefix is conditioning the caption must read, unlike the frozen
+    // history below, which the caption is deliberately blind to.
+    const LmPrefix * pfx = nullptr;
 
     // ── --attn flash (D1/D3, docs/plans/2026-09-02-lm-flash-attn.md) ───────
     //
@@ -795,7 +802,13 @@ struct LmCkptRun {
 // Rows of the attention mask, i.e. how many keys a query can reach: S on the
 // square path, kv->n + S once a frozen prefix sits in front of the window.
 static inline int lm_ckpt_n_kv(const LmCkptState & st, int S) {
-    return st.cfg.kv ? st.cfg.kv->n + S : S;
+    if (st.cfg.kv) {
+        return st.cfg.kv->n + S;
+    }
+    if (st.cfg.pfx) {
+        return st.cfg.pfx->n + S;
+    }
+    return S;
 }
 
 static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S, int n_prompt) {
@@ -820,7 +833,11 @@ static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S, int n_prompt) {
     if (S == r.st->last_mask_S) {
         return;
     }
-    lm_causal_mask(S, &m);
+    if (r.st->cfg.pfx) {
+        lm_causal_mask_prefix(r.st->cfg.pfx->n, /*pfx_lo=*/0, S, /*n_prompt=*/0, &m);
+    } else {
+        lm_causal_mask(S, &m);
+    }
     lm_mask_set(r.t_msk, m);
     r.st->last_mask_S = S;
 }
@@ -828,6 +845,14 @@ static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S, int n_prompt) {
 // The per-layer view of the shared opts: identical to `base` unless a frozen
 // prefix is configured, in which case it names that layer's store.
 static inline LmLayerOpts lm_ckpt_layer_kv(const LmCkptState & st, const LmLayerOpts & base, int l) {
+    if (st.cfg.pfx) {
+        LmLayerOpts o = base;
+        o.pfx_k       = st.cfg.pfx->k[(size_t) l];
+        o.pfx_v       = st.cfg.pfx->v[(size_t) l];
+        o.pfx_zero    = st.cfg.pfx->zero;
+        o.pfx_n       = st.cfg.pfx->n;
+        return o;
+    }
     if (!st.cfg.kv) {
         return base;
     }
@@ -1204,11 +1229,16 @@ static int lm_ckpt_probe_segment_nodes(LmCkptRun & r, int S, LmBf16Counts * coun
 
     ggml_tensor * pos_v = ggml_view_1d(ctx, r.t_pos, S, 0);
     // Worst case is a FULL prefix: it adds the splice nodes to every segment.
-    const int     nkv   = st.cfg.kv ? (int) st.cfg.kv->q_max + S : S;
+    const int     nkv   = st.cfg.kv ? (int) st.cfg.kv->q_max + S : (st.cfg.pfx ? st.cfg.pfx->n + S : S);
     if (st.cfg.kv) {
         opts.kv_k   = st.cfg.kv->k[(size_t) l];
         opts.kv_v   = st.cfg.kv->v[(size_t) l];
         opts.kv_pfx = (int) st.cfg.kv->q_max;
+    } else if (st.cfg.pfx) {
+        opts.pfx_k    = st.cfg.pfx->k[(size_t) l];
+        opts.pfx_v    = st.cfg.pfx->v[(size_t) l];
+        opts.pfx_zero = st.cfg.pfx->zero;
+        opts.pfx_n    = st.cfg.pfx->n;
     }
     ggml_tensor * mask  = ggml_view_2d(ctx, r.t_msk, nkv, S, (size_t) nkv * ggml_element_size(r.t_msk), 0);
     ggml_tensor * X     = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);

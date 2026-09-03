@@ -533,6 +533,24 @@ struct LmLayerOpts {
     ggml_tensor * kv_v   = nullptr;
     int           kv_pfx = 0;
 
+    // ── TRAINABLE KV PREFIX (train/lm-prefix.h, prefix tuning) ─────────────
+    //
+    // The same [prefix ; window] attention as the frozen store above, except
+    // the prefix columns are PARAMETERS. Built in-graph as
+    //   store = acc(pfx_zero[row, n+S], pfx_k, off 0)
+    // and then spliced exactly as kv_k is; ggml_acc's src1 backward is what
+    // gives pfx_k / pfx_v their gradient. Mutually exclusive with kv_k.
+    //
+    // Resolved PER LAYER by lm_build_trunk* / lm_ckpt_layer_kv from the *_all
+    // tables — lm_train_layer itself has no layer index. nullptr => the shipped
+    // graph, emitted verbatim.
+    ggml_tensor *                      pfx_k     = nullptr;  // [Nkv*D, n]
+    ggml_tensor *                      pfx_v     = nullptr;
+    ggml_tensor *                      pfx_zero  = nullptr;  // [Nkv*D, >= n + S], permanently zero
+    int                                pfx_n     = 0;
+    const std::vector<ggml_tensor *> * pfx_k_all = nullptr;  // indexed by absolute layer
+    const std::vector<ggml_tensor *> * pfx_v_all = nullptr;
+
     // PREFILL CAPTURE. Set by the prefix pass only: lm_train_layer appends two
     // ggml_cpy nodes that write THIS call's post-QK-norm post-RoPE K and its
     // raw V into the store, and the caller expands them into the graph (the
@@ -787,7 +805,9 @@ static ggml_tensor * lm_train_layer(ggml_context * ctx, const Qwen3LMConfig & c,
     if (opts.attn_head_block > 0 && opts.attn_head_block < Nh) {
         attn = lm_attn_head_blocked(ctx, c, ly, q, k, v, positions, mask, S, opts);
     } else {
-        const int64_t n_pfx = opts.kv_k ? (int64_t) opts.kv_pfx : 0;
+        GGML_ASSERT(!(opts.kv_k && opts.pfx_k) && "frozen and trainable KV prefixes are mutually exclusive");
+        GGML_ASSERT(!(opts.pfx_k && opts.attn_flash) && "trainable prefix: S_kv != S is outside the flash probe");
+        const int64_t n_pfx = opts.kv_k ? (int64_t) opts.kv_pfx : (opts.pfx_k ? (int64_t) opts.pfx_n : 0);
         const int64_t n_kv  = n_pfx + S;
 
         q = ggml_reshape_3d(ctx, q, D, Nh, S);
@@ -815,6 +835,18 @@ static ggml_tensor * lm_train_layer(ggml_context * ctx, const Qwen3LMConfig & c,
         if (opts.kv_k) {
             k = ggml_reshape_3d(ctx, lm_kv_splice(ctx, opts.kv_k, k, (int64_t) Nkv * D, n_pfx, S), D, Nkv, n_kv);
             v = ggml_reshape_3d(ctx, lm_kv_splice(ctx, opts.kv_v, v, (int64_t) Nkv * D, n_pfx, S), D, Nkv, n_kv);
+        } else if (opts.pfx_k) {
+            // Trainable prefix: the store is built from the zero base and the
+            // parameter, then the window is spliced in behind it. Prefix K is
+            // NOT roped — it has no position (lm-prefix.h contract 1).
+            const int64_t row = (int64_t) Nkv * D;
+            GGML_ASSERT(opts.pfx_zero && opts.pfx_zero->ne[0] == row && opts.pfx_zero->ne[1] >= n_pfx + S);
+            GGML_ASSERT(opts.pfx_k->ne[0] == row && opts.pfx_k->ne[1] == n_pfx);
+            ggml_tensor * zb = ggml_view_2d(ctx, opts.pfx_zero, row, n_pfx + S, opts.pfx_zero->nb[1], 0);
+            ggml_tensor * sk = ggml_acc(ctx, zb, opts.pfx_k, zb->nb[1], zb->nb[2], zb->nb[3], 0);
+            ggml_tensor * sv = ggml_acc(ctx, zb, opts.pfx_v, zb->nb[1], zb->nb[2], zb->nb[3], 0);
+            k = ggml_reshape_3d(ctx, lm_kv_splice(ctx, sk, k, row, n_pfx, S), D, Nkv, n_kv);
+            v = ggml_reshape_3d(ctx, lm_kv_splice(ctx, sv, v, row, n_pfx, S), D, Nkv, n_kv);
         }
 
         q = ggml_permute(ctx, q, 0, 2, 1, 3);  // [D, S,    Nh ]
@@ -887,7 +919,9 @@ static ggml_tensor * lm_build_trunk(ggml_context * ctx, Qwen3LM * lm, ggml_tenso
     ggml_tensor * tok_v = (tokens->ne[0] == S) ? tokens : ggml_view_1d(ctx, tokens, S, 0);
     ggml_tensor * pos_v = (pos->ne[0] == S) ? pos : ggml_view_1d(ctx, pos, S, 0);
 
-    ggml_tensor * mask = ggml_view_2d(ctx, t_msk_flat, S, S, (size_t) S * ggml_element_size(t_msk_flat), 0);
+    // A trainable prefix widens the key axis: the mask is [n_pfx + S, S].
+    const int     nkv_m = S + (opts.pfx_k_all ? opts.pfx_n : 0);
+    ggml_tensor * mask  = ggml_view_2d(ctx, t_msk_flat, nkv_m, S, (size_t) nkv_m * ggml_element_size(t_msk_flat), 0);
     ggml_tensor * h    = ggml_get_rows(ctx, lm->embed_tokens, tok_v);  // [H, S]
     if (art && art->active()) {
         GGML_ASSERT(art->off + art->k <= S);
@@ -895,7 +929,14 @@ static ggml_tensor * lm_build_trunk(ggml_context * ctx, Qwen3LM * lm, ggml_tenso
         h = ggml_acc(ctx, h, art->t, h->nb[1], h->nb[2], h->nb[3], (size_t) art->off * h->nb[1]);
     }
     for (int l = layer_lo; l < layer_hi; l++) {
-        h = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S, opts);
+        if (opts.pfx_k_all) {
+            LmLayerOpts o = opts;
+            o.pfx_k       = (*opts.pfx_k_all)[(size_t) l];
+            o.pfx_v       = (*opts.pfx_v_all)[(size_t) l];
+            h             = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S, o);
+        } else {
+            h = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S, opts);
+        }
     }
     return lm_rms(ctx, h, lm->final_norm, c.rms_norm_eps);
 }
@@ -944,9 +985,18 @@ static ggml_tensor * lm_build_trunk_embeds(ggml_context * ctx, Qwen3LM * lm, ggm
     const Qwen3LMConfig & c = lm->cfg;
 
     ggml_tensor * pos_v = (pos->ne[0] == S) ? pos : ggml_view_1d(ctx, pos, S, 0);
-    ggml_tensor * mask  = ggml_view_2d(ctx, t_msk_flat, S, S, (size_t) S * ggml_element_size(t_msk_flat), 0);
+    // A trainable prefix widens the key axis: the mask is [n_pfx + S, S].
+    const int     nkv_m = S + (opts.pfx_k_all ? opts.pfx_n : 0);
+    ggml_tensor * mask  = ggml_view_2d(ctx, t_msk_flat, nkv_m, S, (size_t) nkv_m * ggml_element_size(t_msk_flat), 0);
     for (int l = layer_lo; l < layer_hi; l++) {
-        h = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S, opts);
+        if (opts.pfx_k_all) {
+            LmLayerOpts o = opts;
+            o.pfx_k       = (*opts.pfx_k_all)[(size_t) l];
+            o.pfx_v       = (*opts.pfx_v_all)[(size_t) l];
+            h             = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S, o);
+        } else {
+            h = lm_train_layer(ctx, c, &lm->layers[l], h, pos_v, mask, S, opts);
+        }
     }
     return lm_rms(ctx, h, lm->final_norm, c.rms_norm_eps);
 }

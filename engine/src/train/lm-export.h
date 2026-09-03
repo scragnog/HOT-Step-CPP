@@ -349,8 +349,40 @@ struct LmExportResult {
 };
 
 // Writes adapter_config.json then adapter_model.safetensors into `out_dir`.
+// ─── Soft-prompt tensors that ride INSIDE adapter_model.safetensors ──────────
+//
+// Rob, 2026-09-03: the LM LoRA and the artist token are two halves of one
+// thing and always travel together, so they live in one file. We are the only
+// AS1.5 app that loads LM adapters, so the layout is ours to define:
+//
+//   hot_step.artist_token.vec    F32 [k, H]
+//   hot_step.artist_token.meta   F32 [4]  {k, placeholder, hidden, site}    site 1=as15_lm 2=mm3_lm
+//   hot_step.prefix.L<l>.k       F32 [n, Nkv*D]   post-QK-norm, NO RoPE
+//   hot_step.prefix.L<l>.v       F32 [n, Nkv*D]
+//   hot_step.prefix.meta         F32 [4]  {n, Nkv*D, layer_lo, layer_hi}
+//
+// Self-describing from the tensors alone: safetensors.h skips __metadata__, so
+// nothing a loader needs may live only there. The `hot_step.` prefix keeps the
+// keys out of every PEFT module-name pattern, and lm-resume.h looks tensors up
+// by exact name, so a resume ignores them. The placeholder id and the site are
+// load-bearing, not bookkeeping — a token is a DELTA on one specific token's
+// embedding in one specific vocabulary, and applying it anywhere else adds a
+// meaningless vector rather than failing.
+struct LmExtraExport {
+    ggml_tensor *              art_t           = nullptr;  // [H, k]
+    int                        art_k           = 0;
+    int                        art_placeholder = -1;
+    int                        site            = 1;  // 1 = as15_lm, 2 = mm3_lm
+    std::vector<ggml_tensor *> pfx_k, pfx_v;             // indexed by absolute layer; null = none
+    int                        pfx_n           = 0;
+    int                        pfx_lo          = 0, pfx_hi = 0;
+
+    bool any() const { return art_t || pfx_n > 0; }
+};
+
 static bool lm_export_peft(const LmLora & L, const Qwen3LMConfig & cfg, const LmExportMeta & meta,
-                           const std::string & out_dir, LmExportResult * res, std::string * err) {
+                           const std::string & out_dir, LmExportResult * res, std::string * err,
+                           const LmExtraExport * extra = nullptr) {
     (void) cfg;
     if (!pm_mkdir_p(out_dir)) {
         *err = "cannot create " + out_dir;
@@ -397,6 +429,65 @@ static bool lm_export_peft(const LmLora & L, const Qwen3LMConfig & cfg, const Lm
     GGML_ASSERT(store.size() == tensors.size());
     for (size_t i = 0; i < tensors.size(); i++) {
         tensors[i].data = store[i].data();
+    }
+
+    // Soft-prompt halves, appended AFTER the re-point above so the LoRA entries'
+    // pointers are already final. Each extra tensor owns its buffer here; they
+    // all outlive st_write_file below.
+    std::vector<float>              art_buf, art_meta, pfx_meta;
+    std::vector<std::vector<float>> pfx_bufs;
+    if (extra && extra->art_t) {
+        ggml_tensor * t = extra->art_t;
+        art_buf.assign((size_t) ggml_nelements(t), 0.0f);
+        ggml_backend_tensor_get(t, art_buf.data(), 0, art_buf.size() * sizeof(float));
+        STWTensor st;
+        st.name  = "hot_step.artist_token.vec";
+        st.shape = { t->ne[1], t->ne[0] };  // torch [k, H]
+        st.data  = art_buf.data();
+        tensors.push_back(st);
+        art_meta = { (float) extra->art_k, (float) extra->art_placeholder, (float) t->ne[0], (float) extra->site };
+        STWTensor sm;
+        sm.name  = "hot_step.artist_token.meta";
+        sm.shape = { 4 };
+        sm.data  = art_meta.data();
+        tensors.push_back(sm);
+    }
+    if (extra && extra->pfx_n > 0) {
+        int64_t row = 0;
+        for (int l = extra->pfx_lo; l < extra->pfx_hi; l++) {
+            ggml_tensor * both[2] = { extra->pfx_k[(size_t) l], extra->pfx_v[(size_t) l] };
+            const char *  nm2[2]  = { "k", "v" };
+            for (int w = 0; w < 2; w++) {
+                ggml_tensor * t = both[w];
+                if (!t) {
+                    continue;
+                }
+                row = t->ne[0];
+                pfx_bufs.emplace_back((size_t) ggml_nelements(t), 0.0f);
+                std::vector<float> & b = pfx_bufs.back();
+                ggml_backend_tensor_get(t, b.data(), 0, b.size() * sizeof(float));
+                char nm[64];
+                snprintf(nm, sizeof(nm), "hot_step.prefix.L%d.%s", l, nm2[w]);
+                STWTensor st;
+                st.name  = nm;
+                st.shape = { t->ne[1], t->ne[0] };  // torch [n, Nkv*D]
+                st.data  = nullptr;                 // re-pointed below: pfx_bufs may still grow
+                tensors.push_back(st);
+            }
+        }
+        // pfx_bufs has stopped growing: point the prefix entries at their buffers.
+        size_t bi = 0;
+        for (size_t i = 0; i < tensors.size(); i++) {
+            if (tensors[i].name.rfind("hot_step.prefix.L", 0) == 0) {
+                tensors[i].data = pfx_bufs[bi++].data();
+            }
+        }
+        pfx_meta = { (float) extra->pfx_n, (float) row, (float) extra->pfx_lo, (float) extra->pfx_hi };
+        STWTensor sm;
+        sm.name  = "hot_step.prefix.meta";
+        sm.shape = { 4 };
+        sm.data  = pfx_meta.data();
+        tensors.push_back(sm);
     }
 
     std::vector<std::pair<std::string, std::string>> md;

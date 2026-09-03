@@ -468,6 +468,14 @@ static void print_usage(void) {
             "                                            so a joint run with one LR undertrains the\n"
             "                                            token or overcooks the adapter. Always AdamW,\n"
             "                                            never Muon, whatever --optimizer says.\n"
+            "    --prefix-n <n>              0           trainable K/V prefix, n columns per layer\n"
+            "                                            (prefix tuning). 0 = off. Learns 2*L*n vectors\n"
+            "                                            of Nkv*D at DEPTH — ~60x a k=8 token's\n"
+            "                                            parameters — and touches no weight. Shares\n"
+            "                                            --artist-token-lr. Exact attention only.\n"
+            "                                            Rides in the same adapter file as the LoRA.\n"
+            "    --prefix-sigma <f>          0.02        init sigma for BOTH K and V (zero V would\n"
+            "                                            give K exactly zero gradient forever).\n"
             "\n"
             "  Adapter identity:\n"
             "    --trigger <word>            \"\"          trigger word embedded in the adapter's\n"
@@ -3834,6 +3842,8 @@ static int cmd_train_lm(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--artist-token-init") && i + 1 < argc) a.artist_init = argv[++i];
         else if (!strcmp(argv[i], "--artist-token-only")) a.artist_only = true;
         else if (!strcmp(argv[i], "--artist-token-lr") && i + 1 < argc) a.artist_lr = (float) atof(argv[++i]);
+        else if (!strcmp(argv[i], "--prefix-n") && i + 1 < argc) a.prefix_n = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--prefix-sigma") && i + 1 < argc) a.prefix_sigma = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--no-milestones")) a.milestone_step = 0.0f;
         else if (!strcmp(argv[i], "--overwrite")) a.overwrite = true;
         else if (!strcmp(argv[i], "--self-test")) a.self_test = true;
