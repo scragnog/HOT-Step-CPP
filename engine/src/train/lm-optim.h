@@ -137,6 +137,24 @@ struct LmOptim {
     double        prodigy_r = 0.0;   // the running numerator
     float         prodigy_d0 = 1e-6f;
 
+    // ── Per-parameter learning-rate groups (P1b, 2026-09-03) ───────────────
+    //
+    // ggml_opt_step_adamw reads alpha from a [7] tensor per call, so one shared
+    // t_adamw means one LR for everything. Two groups need two tensors. `lr_mul`
+    // is a per-parameter multiplier on base_lr, 1.0 for every parameter by
+    // default; any parameter whose multiplier is not 1.0 is stepped with
+    // t_adamw_alt, whose alpha is base * mul. ONE distinct alternate multiplier
+    // is supported — enough for "the soft-prompt parameters run hot while the
+    // LoRA runs at its usual rate", which is what joint token+LoRA training
+    // needs (TI wants ~50x the LoRA's LR). More groups = more tensors; not yet.
+    //
+    // `adamw_only` pins a parameter to AdamW regardless of Muon eligibility.
+    // A [H, k] token or an [Nkv*D, n] prefix is a 2-D matrix and would
+    // otherwise be orthogonalised as if it were a weight — which it is not.
+    std::vector<float>         lr_mul;
+    std::vector<ggml_tensor *> adamw_only;
+    ggml_tensor *              t_adamw_alt = nullptr;  // [7], caller-allocated when used
+
     // scalars, allocated by the caller in its static buffer
     ggml_tensor * t_adamw    = nullptr;  // [7] {alpha,beta1,beta2,eps,wd,beta1h,beta2h}
     ggml_tensor * t_lossgrad = nullptr;  // [1] 1/grad_accum
@@ -315,9 +333,19 @@ static bool lm_optim_init(LmOptim * o, const std::vector<ggml_tensor *> & params
         o->pg_s.resize(n);
         o->pg_x0.resize(n);
     }
+    if (o->lr_mul.size() != n) {
+        o->lr_mul.assign(n, 1.0f);
+    }
     for (size_t j = 0; j < n; j++) {
         ggml_tensor * pj = o->params[j];
-        if (want_muon && lm_muon_eligible(pj, o->muon)) {
+        bool pinned = false;
+        for (size_t q = 0; q < o->adamw_only.size(); q++) {
+            if (o->adamw_only[q] == pj) {
+                pinned = true;
+                break;
+            }
+        }
+        if (want_muon && !pinned && lm_muon_eligible(pj, o->muon)) {
             o->rule[j] = (uint8_t) LM_RULE_MUON;
             o->n_muon++;
         }
@@ -473,6 +501,17 @@ static void lm_optim_fill_gacc(const LmOptim * o, ggml_cgraph * gf, std::vector<
             (*gacc)[(size_t) i] = o->t_lossgrad;
         }
     }
+}
+
+// Per-parameter LR multiplier, set AFTER lm_optim_init (which sizes lr_mul).
+// Returns false when `t` is not an optimizer parameter.
+static bool lm_optim_set_lr_mul(LmOptim * o, ggml_tensor * t, float mul) {
+    auto it = o->param_slot.find(t);
+    if (it == o->param_slot.end()) {
+        return false;
+    }
+    o->lr_mul[(size_t) it->second] = mul;
+    return true;
 }
 
 struct LmStepStats {
@@ -705,8 +744,10 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
         ggml_tensor * g = c ? ggml_mul(ctx, o->acc[j], c) : o->acc[j];  // [1] broadcasts
 
         if (o->rule[j] != LM_RULE_MUON) {
-            ggml_build_forward_expand(
-                go, ggml_opt_step_adamw(ctx, o->params[j], g, o->mom_m[j], o->mom_v[j], o->t_adamw));
+            const bool    alt = (o->lr_mul[j] != 1.0f);
+            ggml_tensor * pa  = alt ? o->t_adamw_alt : o->t_adamw;
+            GGML_ASSERT(pa && "a parameter has lr_mul != 1 but no t_adamw_alt was allocated");
+            ggml_build_forward_expand(go, ggml_opt_step_adamw(ctx, o->params[j], g, o->mom_m[j], o->mom_v[j], pa));
         }
         // Muon parameters are handled below, a whole shape bucket at a time.
     }
@@ -775,6 +816,21 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
                           1.0f / (1.0f - powf(0.9f, (float) o->opt_iter)),
                           1.0f / (1.0f - powf(0.999f, (float) o->opt_iter)) };
     ggml_backend_tensor_set(o->t_adamw, p7, 0, sizeof(p7));
+    if (o->t_adamw_alt) {
+        // One alternate multiplier. If two parameters disagree that is a wiring
+        // bug, not a configuration — say so instead of silently using one.
+        float mul = 1.0f;
+        for (size_t j = 0; j < o->lr_mul.size(); j++) {
+            if (o->lr_mul[j] != 1.0f) {
+                GGML_ASSERT((mul == 1.0f || mul == o->lr_mul[j]) && "more than one distinct lr_mul; only one alt group");
+                mul = o->lr_mul[j];
+            }
+        }
+        float p7a[7];
+        memcpy(p7a, p7, sizeof(p7a));
+        p7a[0] = lr * mul;
+        ggml_backend_tensor_set(o->t_adamw_alt, p7a, 0, sizeof(p7a));
+    }
 
     ggml_backend_sched_reset(sched);
     const bool ok = ggml_backend_sched_graph_compute(sched, go) == GGML_STATUS_SUCCESS;

@@ -295,6 +295,7 @@ struct MM3LmTrainArgs {
     int         artist_k     = 8;
     std::string artist_init  = "band";
     bool        artist_only  = false;
+    float       artist_lr    = 0.0f;  // soft-prompt LR; 0 = same as --lr (P1b)
     /** Fraction of LoRA rank components zeroed each step (survivors rescaled by
      *  1/(1-p)). 0 = off. bghira runs lora_dropout 0.1.
      *
@@ -993,6 +994,7 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
     ggml_tensor * t_epsT   = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_gn2    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_adamw  = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 7);
+    ggml_tensor * t_adamw_alt = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 7);  // P1b soft-prompt LR group
     ggml_tensor * t_gs     = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_one    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_tok    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_I32, S);
@@ -1603,6 +1605,9 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     opt.muon.nesterov = a.muon_nesterov;
     opt.muon.min_dim  = a.muon_min_dim;
     opt.muon.bucket   = a.muon_bucket;
+    if (t_art) {
+        opt.adamw_only.push_back(t_art);  // a [H, k] matrix is not a weight; keep it off Muon
+    }
     if (!lm_optim_init(&opt, train_params, t.lm.backend, &err)) {
         fprintf(stderr, "[mm3-lm-train] optimizer init failed: %s\n", err.c_str());
         lm_lora_detach(&lora, &t.lm);
@@ -1612,6 +1617,13 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     }
     // A run where Muon classified ZERO parameters trains as AdamW and says
     // nothing about it. Print the split so that is visible.
+    if (t_art && a.artist_lr > 0.0f && a.artist_lr != a.lr) {
+        // opt.t_adamw_alt is attached below with the other scalars — in this
+        // trainer the optimizer is built BEFORE the static tensors exist.
+        lm_optim_set_lr_mul(&opt, t_art, a.artist_lr / a.lr);
+        fprintf(stderr, "[mm3-lm-train] artist token LR %.3g (x%.1f the LoRA's %.3g)\n", a.artist_lr,
+                a.artist_lr / a.lr, a.lr);
+    }
     // Counts come from the OPTIMIZER, not from lora.params. Those were the same
     // number until --artist-token-only made it possible to build the LoRA and
     // then not train it: reporting the tensor count would have said "504 on
@@ -1667,6 +1679,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     ggml_tensor * t_lab    = a.ckpt ? nullptr
                                     : ggml_new_tensor_2d(ctx_static, GGML_TYPE_F32, SL, K_max + 1);
     ggml_tensor * t_adamw  = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 7);
+    ggml_tensor * t_adamw_alt = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 7);  // P1b soft-prompt LR group
     ggml_tensor * t_lg     = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_clip   = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_eps    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
@@ -1709,6 +1722,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         ggml_backend_tensor_set(t_one, &one, 0, sizeof(float));
     }
     opt.t_adamw      = t_adamw;
+    opt.t_adamw_alt  = t_adamw_alt;  // read only for parameters whose lr_mul != 1
     opt.t_lossgrad   = t_lg;
     opt.t_clip       = t_clip;
     opt.t_eps        = t_eps;

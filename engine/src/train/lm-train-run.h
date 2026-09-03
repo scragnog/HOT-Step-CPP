@@ -87,6 +87,10 @@ struct LmTrainArgs {
     int         artist_k     = 8;         // vectors; image-gen practice is 1-16
     std::string artist_init  = "band";    // seed word -> placeholder id; the delta starts at 0 from its embedding
     bool        artist_only  = false;     // freeze the LoRA and train only the vectors
+    // Soft-prompt learning rate (token AND prefix). 0 = same as --lr. Textual
+    // inversion conventionally runs ~50x hotter than a LoRA; with one LR a
+    // joint run either undertrains the token or overcooks the adapter.
+    float       artist_lr    = 0.0f;
 
     // 4B low-VRAM path (2026-07-28 plan §2.1)
     std::string low_vram        = "auto";  // auto|on|off
@@ -957,6 +961,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // 4B / s_tr 1556. Low-vram sparse-writes a [V, chunk] buffer instead (D4).
     ggml_tensor * t_lab      = low ? nullptr : ggml_new_tensor_2d(ctx_static, GGML_TYPE_F32, V, alloc_s_tr);
     ggml_tensor * t_adamw    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 7);
+    ggml_tensor * t_adamw_alt = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 7);  // P1b: soft-prompt LR group
     ggml_tensor * t_lossgrad = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_clip     = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_eps      = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
@@ -1111,9 +1116,20 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         // Prodigy's d0 is consumed INSIDE lm_optim_init (o->prodigy_d = d0), so
         // it must be set here, not with base_lr below.
         opt.prodigy_d0    = (float) a.prodigy_d0;
+        if (artp.t) {
+            opt.adamw_only.push_back(artp.t);
+        }
         if (!lm_optim_init(&opt, train_params, lm.backend, &err)) {
             lm_fatal("vram", err);
             return 1;
+        }
+        if (artp.t && a.artist_lr > 0.0f && a.artist_lr != a.lr) {
+            opt.t_adamw_alt = t_adamw_alt;
+            lm_optim_set_lr_mul(&opt, artp.t, a.artist_lr / a.lr);
+            char lb[160];
+            snprintf(lb, sizeof(lb), "artist token LR %.3g (x%.1f the LoRA's %.3g)", a.artist_lr, a.artist_lr / a.lr,
+                     a.lr);
+            lm_log("info", lb);
         }
     }
     // The rule split is only knowable AFTER lm_optim_init classifies, and it is

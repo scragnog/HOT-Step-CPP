@@ -463,6 +463,11 @@ static void print_usage(void) {
             "    --artist-token-only                     freeze the LoRA and train only the vectors.\n"
             "                                            The adapter stays at its exactly-zero init, so\n"
             "                                            the run is a pure token train.\n"
+            "    --artist-token-lr <f>       0           soft-prompt LR when training WITH the LoRA.\n"
+            "                                            0 = same as --lr. TI wants ~50x a LoRA's rate,\n"
+            "                                            so a joint run with one LR undertrains the\n"
+            "                                            token or overcooks the adapter. Always AdamW,\n"
+            "                                            never Muon, whatever --optimizer says.\n"
             "\n"
             "  Adapter identity:\n"
             "    --trigger <word>            \"\"          trigger word embedded in the adapter's\n"
@@ -1740,6 +1745,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--artist-token-k"))    a.artist_k     = atoi(next("--artist-token-k"));
         else if (!strcmp(argv[i], "--artist-token-init")) a.artist_init  = next("--artist-token-init");
         else if (!strcmp(argv[i], "--artist-token-only")) a.artist_only  = true;
+        else if (!strcmp(argv[i], "--artist-token-lr"))   a.artist_lr    = (float) atof(next("--artist-token-lr"));
         else if (!strcmp(argv[i], "--fd-eps"))        fd_eps         = atof(next("--fd-eps"));
         else if (!strcmp(argv[i], "--fd-frames"))     fd_frames      = atoll(next("--fd-frames"));
         else if (!strcmp(argv[i], "--fd-prompt"))     fd_prompt      = atoll(next("--fd-prompt"));
@@ -3827,6 +3833,7 @@ static int cmd_train_lm(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--artist-token-k") && i + 1 < argc) a.artist_k = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--artist-token-init") && i + 1 < argc) a.artist_init = argv[++i];
         else if (!strcmp(argv[i], "--artist-token-only")) a.artist_only = true;
+        else if (!strcmp(argv[i], "--artist-token-lr") && i + 1 < argc) a.artist_lr = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--no-milestones")) a.milestone_step = 0.0f;
         else if (!strcmp(argv[i], "--overwrite")) a.overwrite = true;
         else if (!strcmp(argv[i], "--self-test")) a.self_test = true;
