@@ -48,12 +48,16 @@ struct DitResumeSource {
     double      saved_ma5  = -1.0;
     int         saved_epoch = 0;
     std::string trigger, trigger_position;
+    // Prodigy's final step-size estimate from the source run (0 = not prodigy
+    // or an older log); adopted as this run's --prodigy-d0 unless given.
+    double      prodigy_d  = 0.0;
 };
 
 struct DitResumeExplicit {
     bool adapter_type = false, rank = false, alpha = false;
     bool lokr_dim = false, lokr_alpha = false, lokr_factor = false;
     bool target_mlp = false, layers = false;
+    bool prodigy_d0 = false;   // not identity: only decides whether the source's d is adopted
 };
 
 static bool dit_resume_read_log(const std::string & dir, DitResumeSource * src, std::string * err) {
@@ -94,6 +98,10 @@ static bool dit_resume_read_log(const std::string & dir, DitResumeSource * src, 
     }
     src->layers           = i("layers", 0);
     src->dit_name         = s("dit_name");
+    {
+        yyjson_val * v = yyjson_obj_get(cfg, "prodigy_d");
+        src->prodigy_d = yyjson_is_num(v) ? yyjson_get_num(v) : 0.0;
+    }
     src->trigger          = s("trigger");
     src->trigger_position = s("trigger_position");
     {
@@ -322,6 +330,13 @@ static bool dit_resume_prepare(ArgsT * a, const DitResumeExplicit & saw, DitResu
     // Layer window: adopt the source's --layers ARG unless the user pinned one.
     // The loader is coverage-tolerant either way (see header).
     if (!saw.layers && src->layers > 0) a->layers = src->layers;
+    // Prodigy: carry the learned step size into the resumed run. Not an
+    // identity check — a run that switched optimizer simply ignores it.
+    if (a->optimizer == "prodigy" && !saw.prodigy_d0 && src->prodigy_d > 0.0) {
+        a->prodigy_d0 = src->prodigy_d;
+        fprintf(stderr, "[train-dit] resume: adopting the source run's Prodigy step size d = %.3g as --prodigy-d0\n",
+                src->prodigy_d);
+    }
     if (a->trigger.empty() && !src->trigger.empty()) {
         a->trigger          = src->trigger;
         a->trigger_position = src->trigger_position;

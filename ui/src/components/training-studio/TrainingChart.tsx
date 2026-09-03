@@ -21,15 +21,28 @@
 // so it would need a second axis this card has no room to label honestly. Both
 // the LM and DiT cards already show the live lr as a metric tile directly
 // underneath.
+//
+// HOVER (2026-09-03): moving the mouse over the plot snaps a vertical cursor to
+// the nearest point (a step when the step layer exists, else an epoch) and
+// shows a tooltip with the step, epoch, loss, the epoch's MA5, lr / grad norm /
+// step time when the series carries them, and the time from the start of the
+// run to that point. Elapsed comes from the server clock on live runs
+// (TrainStepPoint.elapsedMs) and from the summed per-epoch `ms` on finished
+// runs, whose logs keep only the epoch series.
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TrainStepPoint } from '../../stores/trainingStore';
 
-/** Structural shape of TrainLmEpoch / TrainDitEpoch — the two are identical. */
+/** Structural shape of TrainLmEpoch / TrainDitEpoch — the two are identical.
+ *  `ms` is the epoch's wall time when the caller has it (both live and persisted
+ *  epoch records carry it); it feeds the tooltip's elapsed readout. */
 export interface ChartEpochPoint {
   epoch: number;
   loss: number;
+  ms?: number;
+  lr?: number;
+  gradNorm?: number;
 }
 
 export interface ChartMilestone {
@@ -61,6 +74,32 @@ function movingAverage(values: number[], window = MA_WINDOW): number[] {
   return out;
 }
 
+function fmtElapsed(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+    : `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+function fmtSci(v: number): string {
+  return v !== 0 && (Math.abs(v) < 1e-3 || Math.abs(v) >= 1e4) ? v.toExponential(2) : v.toFixed(4);
+}
+
+/** Index of the element of `xs` (ascending) closest to `x`. */
+function nearestIndex(xs: number[], x: number): number {
+  if (!xs.length) return -1;
+  let lo = 0, hi = xs.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (xs[mid] < x) lo = mid + 1; else hi = mid;
+  }
+  if (lo > 0 && Math.abs(xs[lo - 1] - x) <= Math.abs(xs[lo] - x)) return lo - 1;
+  return lo;
+}
+
 interface Props {
   epochs: ChartEpochPoint[];
   /** Per-step loss — the faint noise layer. Omitted on the done-state cards,
@@ -83,6 +122,8 @@ export const TrainingChart: React.FC<Props> = ({
   epochs, steps = [], milestones = [], target, maxEpochs = 0, evals = [],
 }) => {
   const { t } = useTranslation();
+  /** Cursor position as a fraction of the plot width, null when not hovering. */
+  const [hoverFrac, setHoverFrac] = useState<number | null>(null);
 
   const epochPts = epochs.filter(e => Number.isFinite(e.loss));
   const stepPts = steps.filter(s => Number.isFinite(s.loss));
@@ -139,11 +180,75 @@ export const TrainingChart: React.FC<Props> = ({
   // Only ticks for milestones that actually landed inside the drawn range.
   const ticks = milestones.filter(m => m.epoch > 0 && m.epoch <= xMax);
 
+  // ── hover: snap to the nearest point and describe it ───────────────────
+  // Cumulative epoch wall time, for the elapsed readout when no step carries a
+  // server-clock elapsed (finished runs, whose logs keep only the epoch series).
+  const epochCumMs: number[] = [];
+  {
+    let acc = 0;
+    let known = true;
+    for (const e of epochPts) {
+      if (typeof e.ms === 'number' && Number.isFinite(e.ms)) acc += e.ms; else known = false;
+      epochCumMs.push(known ? acc : NaN);
+    }
+  }
+  type Hover = {
+    x: number; y: number;
+    lines: string[];
+  } | null;
+  let hover: Hover = null;
+  if (hoverFrac !== null) {
+    const epPos = hoverFrac * xMax;
+    const epIdx = nearestIndex(epochPts.map(e => e.epoch), epPos);
+    const stIdx = stepPts.length >= 2 ? nearestIndex(stepPts.map(s => s.ep), epPos) : -1;
+    const lines: string[] = [];
+    let x = 0, y = 0;
+    if (stIdx >= 0) {
+      const s = stepPts[stIdx];
+      x = xFor(s.ep); y = yFor(s.loss);
+      lines.push(t('trainingStudio.chart.hoverStep', { step: s.step, epoch: s.ep.toFixed(2), defaultValue: 'step {{step}} · epoch {{epoch}}' }));
+      lines.push(t('trainingStudio.chart.hoverLoss', { loss: s.loss.toFixed(4), defaultValue: 'loss {{loss}}' }));
+      if (typeof s.lr === 'number') lines.push(`lr ${fmtSci(s.lr)}`);
+      if (typeof s.gradNorm === 'number') lines.push(`grad norm ${s.gradNorm.toFixed(3)}`);
+      if (typeof s.stepMs === 'number') lines.push(`${(s.stepMs / 1000).toFixed(2)} s / step`);
+      // The nearest completed epoch on or before this step, with its MA5.
+      let prevEp = -1;
+      for (let i = 0; i < epochPts.length; i++) if (epochPts[i].epoch <= s.ep + 1e-9) prevEp = i;
+      if (prevEp >= 0) {
+        lines.push(t('trainingStudio.chart.hoverEpochLine', {
+          epoch: epochPts[prevEp].epoch, loss: epochPts[prevEp].loss.toFixed(4), ma5: ma[prevEp].toFixed(4),
+          defaultValue: 'epoch #{{epoch}} · {{loss}} · ma5 {{ma5}}',
+        }));
+      }
+      const elapsed = typeof s.elapsedMs === 'number' ? s.elapsedMs
+        : (prevEp >= 0 && Number.isFinite(epochCumMs[prevEp]) ? epochCumMs[prevEp] : NaN);
+      if (Number.isFinite(elapsed)) lines.push(t('trainingStudio.chart.hoverElapsed', { time: fmtElapsed(elapsed), defaultValue: '{{time}} from start' }));
+    } else if (epIdx >= 0) {
+      const e = epochPts[epIdx];
+      x = xFor(e.epoch); y = yFor(e.loss);
+      lines.push(t('trainingStudio.chart.hoverEpoch', { epoch: e.epoch, defaultValue: 'epoch #{{epoch}}' }));
+      lines.push(t('trainingStudio.chart.hoverLoss', { loss: e.loss.toFixed(4), defaultValue: 'loss {{loss}}' }));
+      lines.push(`ma5 ${ma[epIdx].toFixed(4)}`);
+      if (typeof e.lr === 'number') lines.push(`lr ${fmtSci(e.lr)}`);
+      if (typeof e.gradNorm === 'number') lines.push(`grad norm ${e.gradNorm.toFixed(3)}`);
+      if (typeof e.ms === 'number') lines.push(`${fmtElapsed(e.ms)} this epoch`);
+      if (Number.isFinite(epochCumMs[epIdx])) lines.push(t('trainingStudio.chart.hoverElapsed', { time: fmtElapsed(epochCumMs[epIdx]), defaultValue: '{{time}} from start' }));
+    }
+    if (lines.length) hover = { x, y, lines };
+  }
+
   const LABEL = 'absolute text-[10px] tabular-nums pointer-events-none';
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="relative w-full h-[180px] rounded-lg bg-zinc-100 dark:bg-black/30 overflow-hidden">
+      <div
+        className="relative w-full h-[180px] rounded-lg bg-zinc-100 dark:bg-black/30 overflow-hidden cursor-crosshair"
+        onMouseMove={(ev) => {
+          const r = ev.currentTarget.getBoundingClientRect();
+          if (r.width > 0) setHoverFrac(Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)));
+        }}
+        onMouseLeave={() => setHoverFrac(null)}
+      >
         <svg
           viewBox={`0 0 ${VB} ${VB}`}
           preserveAspectRatio="none"
@@ -228,20 +333,17 @@ export const TrainingChart: React.FC<Props> = ({
             />
           )}
 
-          {/* Transparent hit columns carry the per-epoch tooltip. A rect stays a
-              rect under preserveAspectRatio="none"; a circle would not. */}
-          {epochPts.map((e, i) => (
-            <rect
-              key={e.epoch}
-              x={xFor(e.epoch) - (VB / epochPts.length) / 2}
-              y={0}
-              width={VB / epochPts.length}
-              height={VB}
-              fill="transparent"
-            >
-              <title>{`#${e.epoch} · ${e.loss.toFixed(4)} · ma5 ${ma[i].toFixed(4)}`}</title>
-            </rect>
-          ))}
+          {/* (h) hover cursor — a vertical hairline snapped to the nearest point */}
+          {hover && (
+            <line
+              x1={hover.x} y1={0} x2={hover.x} y2={VB}
+              className="text-zinc-500 dark:text-zinc-400"
+              stroke="currentColor"
+              strokeWidth={1}
+              strokeOpacity={0.8}
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
         </svg>
 
         {/* (b) epoch dots — HTML so they stay round under the stretched viewBox */}
@@ -252,6 +354,27 @@ export const TrainingChart: React.FC<Props> = ({
             style={{ left: `${xFor(e.epoch)}%`, top: `${yFor(e.loss)}%` }}
           />
         ))}
+
+        {/* (h) hover marker + tooltip. The tooltip flips to the left of the
+            cursor past the 60 % mark so it never runs off the right edge. */}
+        {hover && (
+          <>
+            <span
+              className="absolute w-[7px] h-[7px] -ml-[3.5px] -mt-[3.5px] rounded-full border-2 border-violet-500 bg-white dark:bg-zinc-900 pointer-events-none"
+              style={{ left: `${hover.x}%`, top: `${hover.y}%` }}
+            />
+            <div
+              className="absolute top-2 z-10 rounded-md border border-zinc-300 dark:border-white/10 bg-white/95 dark:bg-zinc-900/95 px-2 py-1.5 text-[10px] leading-4 tabular-nums text-zinc-700 dark:text-zinc-200 shadow-sm pointer-events-none whitespace-nowrap"
+              style={hover.x > 60
+                ? { right: `${100 - hover.x + 1}%` }
+                : { left: `${hover.x + 1}%` }}
+            >
+              {hover.lines.map((l, i) => (
+                <div key={i} className={i === 0 ? 'font-semibold text-zinc-800 dark:text-zinc-100' : ''}>{l}</div>
+              ))}
+            </div>
+          </>
+        )}
 
         {/* (f) axis labels */}
         <span className={`${LABEL} left-1.5 top-1 text-zinc-500`}>{hi.toFixed(3)}</span>

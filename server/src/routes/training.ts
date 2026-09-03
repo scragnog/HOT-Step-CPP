@@ -3198,8 +3198,9 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
     // Same rule for the MUL_MAT activation-gradient formulation: refused, not
     // coerced. Default is 'mm' (engine/patches/mm-backward.patch), not
     // ace-train's own 'outprod'.
-    if (body.optimizer !== undefined && body.optimizer !== 'adamw' && body.optimizer !== 'muon') {
-      res.status(400).json({ error: 'optimizer must be adamw or muon' });
+    if (body.optimizer !== undefined && body.optimizer !== 'adamw' && body.optimizer !== 'muon'
+        && body.optimizer !== 'prodigy') {
+      res.status(400).json({ error: 'optimizer must be adamw, muon or prodigy' });
       return;
     }
     if (body.bwd !== undefined && body.bwd !== 'outprod' && body.bwd !== 'mm') {
@@ -3355,8 +3356,11 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       // 'adamw' opts back out. Measured on gunship_unicorn: 161 epochs to ma5
       // 0.6 vs AdamW's 227, and with bucketing that is ~1.23x on wall-clock —
       // Rob's own run reached 0.6 in ~5 minutes and the adapter was judged
-      // perfect by ear, which is what made this a default rather than a flag.
-      optimizer: body.optimizer === 'adamw' ? 'adamw' : 'muon',
+      // perfect by ear, which is what made Muon a default rather than a flag.
+      // Prodigy replaced it as the default on 2026-09-03 (Rob): the step size
+      // is estimated online, so there is no per-artist LR to tune. Muon and
+      // AdamW remain one select away.
+      optimizer: body.optimizer === 'adamw' ? 'adamw' : body.optimizer === 'muon' ? 'muon' : 'prodigy',
       muonLrScale,
       muonMomentum,
       muonNsSteps: Math.trunc(muonNsSteps),

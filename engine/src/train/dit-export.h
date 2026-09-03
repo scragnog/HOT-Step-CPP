@@ -47,6 +47,10 @@ struct DitTrainLog {
     int   lokr_factor         = 6;
     bool  lokr_decompose_both = true;
     bool        target_mlp = false;
+    // Optimizer rule set and, under Prodigy, its final step-size estimate d
+    // (0 otherwise) so a resumed run can seed its --prodigy-d0 (2026-09-03).
+    std::string optimizer  = "adamw";
+    double      prodigy_d  = 0.0;
     int         layers = 0, n_layers_total = 0;
     std::string layers_source = "auto";
     std::string dit_path, dit_name, tensors;
@@ -186,6 +190,10 @@ static bool dit_write_train_log(const std::string & dir, const DitTrainLog & m) 
     yyjson_mut_obj_add_strcpy(doc, cfg, "mirror", m.mirror.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "bwd", m.bwd.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "attn_mode", m.attn_mode.c_str());
+    yyjson_mut_obj_add_strcpy(doc, cfg, "optimizer", m.optimizer.c_str());
+    if (m.optimizer == "prodigy") {
+        yyjson_mut_obj_add_real(doc, cfg, "prodigy_d", m.prodigy_d);
+    }
     yyjson_mut_obj_add_strcpy(doc, cfg, "attn_prec", m.attn_prec.c_str());
     yyjson_mut_obj_add_strcpy(doc, cfg, "arena_model", m.arena_model.c_str());
     yyjson_mut_obj_add_int(doc, cfg, "enc_S", m.enc_S);

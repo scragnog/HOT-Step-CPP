@@ -648,7 +648,7 @@ export interface TrainLmOptions {
    *  orthogonalized-momentum updates — FOR A LoRA THE SHORT SIDE IS THE RANK,
    *  so at rank 16 every matrix qualifies and at rank 8 none would. On the DiT
    *  Muon measured 1.41x fewer epochs to target; on the LM it is unproven. */
-  optimizer?: 'adamw' | 'muon' | 'prodigy';    // LM default 'prodigy' (2026-09-03); DiT default 'adamw'
+  optimizer?: 'adamw' | 'muon' | 'prodigy';    // default 'prodigy' for both LM and DiT (Rob, 2026-09-03)
   muonLrScale?: number;            // default 20 (the DiT's measured value)
   muonNsSteps?: number;            // default 5
   lokrDim?: number;                // default 512  (adapterType==='lokr' only)
@@ -928,7 +928,7 @@ export interface TrainDitOptions {
    *  ONE momentum buffer where AdamW carries two (~870 MB less at LoKR
    *  dim512). NOTE: dit-vram.h still charges for both, so the auto-fit is
    *  conservative rather than wrong. */
-  optimizer?: 'adamw' | 'muon' | 'prodigy';    // LM default 'prodigy' (2026-09-03); DiT default 'adamw'
+  optimizer?: 'adamw' | 'muon' | 'prodigy';    // default 'prodigy' for both LM and DiT (Rob, 2026-09-03)
   /** Multiplies the shared LR schedule, for MUON PARAMETERS ONLY. Muon's update
    *  is normalized by construction, so its LR does not mean AdamW's: measured
    *  parity with AdamW around 20 on a LoKR dim512 run (5 undershoots, 50

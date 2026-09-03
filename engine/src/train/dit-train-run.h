@@ -164,6 +164,9 @@ struct DitTrainArgs {
     // does NOT mean AdamW's, hence a multiplier on the shared schedule rather
     // than a second absolute rate.
     std::string optimizer       = "adamw";
+    // Prodigy (2026-09-03, same contract as train-lm / mm3-lm-train): lr is a
+    // schedule multiplier forced to 1.0; the step size is estimated from d0.
+    double      prodigy_d0      = 1e-6;
     float       muon_lr_scale   = 1.0f;
     float       muon_momentum   = 0.95f;
     int         muon_ns_steps   = 5;
@@ -1099,6 +1102,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     opt.muon.nesterov  = a.muon_nesterov;
     opt.muon.min_dim   = a.muon_min_dim;
     opt.muon.bucket    = a.muon_bucket;
+    // Consumed INSIDE lm_optim_init (o->prodigy_d = d0): set it before, not
+    // with base_lr below.
+    opt.prodigy_d0     = (float) a.prodigy_d0;
     {
         std::string err;
         if (!lm_optim_init(&opt, adapter->params(), M.backend, &err)) {
@@ -1116,6 +1122,19 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     opt.t_eps        = t_eps;
     opt.t_gnorm2     = t_gnorm2;
     opt.base_lr      = a.lr;
+    if (a.optimizer == "prodigy") {
+        // Under Prodigy lr is GAMMA, a schedule multiplier; d carries the
+        // magnitude. A hand-tuned 5e-4 left here would scale every step by
+        // 5e-4 and read as "Prodigy does not converge".
+        if (a.lr != 1.0f) {
+            char pb[192];
+            snprintf(pb, sizeof(pb),
+                     "prodigy: --lr %.3g is IGNORED. Prodigy sets its own step size; lr is only a schedule "
+                     "multiplier and is forced to 1.0.", (double) a.lr);
+            lm_log("warn", pb);
+        }
+        opt.base_lr = 1.0f;
+    }
     opt.weight_decay = a.weight_decay;
     opt.grad_clip    = a.grad_clip;
 
@@ -1946,6 +1965,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             }
             log->epochs_run = out->epochs_run;
             log->final_loss = out->final_loss;
+            // Latest Prodigy step-size estimate, exported so a resumed run can
+            // seed its --prodigy-d0 from it (dit-resume.h). 0 for other optimizers.
+            log->prodigy_d  = (a.optimizer == "prodigy") ? opt.prodigy_d : 0.0;
             log->best_loss  = out->best_loss;
             log->best_epoch = out->best_epoch;
 
@@ -2191,6 +2213,8 @@ static int dit_train_main(const DitTrainArgs & a) {
     log.mirror          = a.mirror;
     log.bwd             = a.bwd;
     log.attn_mode       = a.attn;
+    log.optimizer       = a.optimizer;
+    // log.prodigy_d is filled by dit_train_stage, where the optimizer lives.
     log.init_adapter    = a.init_adapter;
     log.init_from_ma5   = a.init_from_ma5;
     log.lr              = a.lr;

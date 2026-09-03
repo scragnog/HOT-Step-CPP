@@ -86,7 +86,7 @@ export interface TrainDitFormState {
    *  what makes full-song training crops affordable — experimental, and slower
    *  per step. */
   attnBackend: 'exact' | 'flash';
-  optimizer: 'adamw' | 'muon';
+  optimizer: 'adamw' | 'muon' | 'prodigy';
   muonLrScale: number;
   muonNsSteps: number;
   /** Crops per micro-batch, from that many DIFFERENT songs (design §2.2). */
@@ -184,7 +184,9 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   // epochs against AdamW's 227, and once the Newton-Schulz was bucketed that
   // became ~1.23x on wall-clock. Ear-validated before the flip.
   // muonMomentum/muonMinDim/muonBucket are left to the engine defaults.
-  optimizer: 'muon',
+  // Prodigy (Rob, 2026-09-03): automatic step size, so learningRate is ignored
+  // under it. Muon (ear-validated 2026-07-30) and AdamW remain selectable.
+  optimizer: 'prodigy',
   muonLrScale: 20,
   muonNsSteps: 5,
   // Micro-batching + checkpointing defaults (design §2.2 / C3/C5) — the engine's
@@ -799,7 +801,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </span>
 
           <label className="flex flex-col gap-1.5">
-            {P('learningRate', isLokr ? 'LoKR default 0.01' : 'LoRA default 5e-4')}
+            {P('learningRate', value.optimizer === 'prodigy' ? 'Ignored under Prodigy (auto step size)' : isLokr ? 'LoKR default 0.01' : 'LoRA default 5e-4')}
             <input
               type="number" min={0.00001} max={1} step={0.00001}
               value={value.learningRate} disabled={lock}
@@ -1062,15 +1064,16 @@ export const TrainDitForm: React.FC<Props> = ({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            {P('optimizer', 'Default Muon · AdamW to compare')}
+            {P('optimizer', 'Default Prodigy (auto step size) · Muon and AdamW to compare')}
             <StyledSelect
               accent="amber"
               value={value.optimizer}
               disabled={lock}
               onChange={(v) => onChange({ optimizer: v })}
               options={[
-                { value: 'adamw' as const, label: t('trainingStudio.train.dit.optimizerAdamw') },
+                { value: 'prodigy' as const, label: t('trainingStudio.train.dit.optimizerProdigy') },
                 { value: 'muon' as const, label: t('trainingStudio.train.dit.optimizerMuon') },
+                { value: 'adamw' as const, label: t('trainingStudio.train.dit.optimizerAdamw') },
               ]}
             />
             <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.dit.optimizerHint')}</span>

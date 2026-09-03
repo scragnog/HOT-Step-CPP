@@ -714,7 +714,11 @@ static void print_usage(void) {
             "                                                    cuBLAS TF32 tensor cores.\n"
             "\n"
             "  Optimizer:\n"
-            "    --optimizer <adamw|muon>    adamw       muon puts every 2-D parameter whose SHORT side is\n"
+            "    --optimizer <adamw|muon|prodigy>  adamw  prodigy ESTIMATES ITS OWN step size (--lr is then a\n"
+            "                                            schedule multiplier forced to 1.0; --prodigy-d0 <d>\n"
+            "                                            seeds the estimate, default 1e-6) — the Training\n"
+            "                                            Studio's default since 2026-09-03.\n"
+            "                                            muon puts every 2-D parameter whose SHORT side is\n"
             "                                            >= --muon-min-dim on orthogonalized-momentum\n"
             "                                            (Newton-Schulz) updates, and leaves the rest on\n"
             "                                            AdamW — a LoKR w1 is [4,5], where orthogonalizing\n"
@@ -4225,6 +4229,7 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--profile-step") && i + 1 < argc) a.profile_step = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--profile-ops")) a.profile_ops = true;
         else if (!strcmp(argv[i], "--optimizer") && i + 1 < argc) a.optimizer = argv[++i];
+        else if (!strcmp(argv[i], "--prodigy-d0") && i + 1 < argc) { a.prodigy_d0 = atof(argv[++i]); saw.prodigy_d0 = true; }
         else if (!strcmp(argv[i], "--muon-lr-scale") && i + 1 < argc) a.muon_lr_scale = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--muon-momentum") && i + 1 < argc) a.muon_momentum = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--muon-ns-steps") && i + 1 < argc) a.muon_ns_steps = atoi(argv[++i]);
@@ -4303,6 +4308,14 @@ static int cmd_train_dit(int argc, char ** argv) {
     }
     if (a.order != "shuffle" && a.order != "fixed") {
         fprintf(stderr, "ace-train train-dit: --order must be shuffle|fixed\n");
+        return 2;
+    }
+    if (a.optimizer != "adamw" && a.optimizer != "muon" && a.optimizer != "prodigy") {
+        fprintf(stderr, "ace-train train-dit: --optimizer must be adamw, muon or prodigy (got %s)\n", a.optimizer.c_str());
+        return 2;
+    }
+    if (a.prodigy_d0 <= 0.0) {
+        fprintf(stderr, "ace-train train-dit: --prodigy-d0 must be > 0\n");
         return 2;
     }
     if (a.crop_anchor != "song" && a.crop_anchor != "zero") {

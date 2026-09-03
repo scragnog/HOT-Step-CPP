@@ -54,6 +54,15 @@ export interface TrainStepPoint {
   loss: number;
   /** Fractional epoch position — the x-domain the epoch series also lives in. */
   ep: number;
+  // Hover-tooltip detail (2026-09-03). All optional: older persisted series and
+  // engines that omit a field still draw.
+  lr?: number;
+  gradNorm?: number;
+  /** Wall time of THIS step. */
+  stepMs?: number;
+  /** Server-clock time since the first metric of this job, so the tooltip can
+   *  say how long the run took to reach a point. */
+  elapsedMs?: number;
 }
 
 /** One `metric:'milestone'` frame — a tick on the chart's x-axis. */
@@ -93,6 +102,9 @@ let ditVram = { crop: 0, layers: 0 };
 // re-inserted, out of order and double-counted. Steps are monotonic within a
 // run, so the high-water mark is the idempotency key instead.
 let lastStepSeen = -1;
+/** Server timestamp of the first metric frame of the current job; the
+ *  tooltip's "elapsed" is measured from it. Reset with lastStepSeen. */
+let runStartTs = 0;
 
 /** The chart slice, blanked. Every place that starts or swaps a job spreads
  *  this, and it is the only thing that may reset `lastStepSeen`.
@@ -111,6 +123,7 @@ export function blankTrainSeries(): {
   trainPreviews: TrainingPreviewRow[];
 } {
   lastStepSeen = -1;
+  runStartTs = 0;
   return {
     trainStepSeries: [],
     trainMilestones: [],
@@ -1118,6 +1131,10 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
             && ev.epochs !== get().trainMaxEpochs) {
             set({ trainMaxEpochs: ev.epochs });
           }
+          // Elapsed time is measured from the first metric frame the job emits
+          // (the vram/data frames arrive before step 1), on the SERVER clock, so
+          // it survives reconnects and replays unchanged.
+          if (typeof ev.ts === 'number' && ev.ts > 0 && runStartTs === 0) runStartTs = ev.ts;
           if (ev.metric === 'step' && typeof ev.step === 'number' && typeof ev.loss === 'number'
             && ev.step > lastStepSeen) {
             lastStepSeen = ev.step;
@@ -1125,9 +1142,16 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
             // Without stepsPerEpoch the integer epoch is the best x available;
             // the layer then draws as short flat runs rather than a smooth line.
             const epPos = perEpoch > 0 ? ev.step / perEpoch : (ev.epoch ?? 0);
+            const stepMs = typeof ev.stepMs === 'number' ? ev.stepMs : (typeof ev.ms === 'number' ? ev.ms : undefined);
             set({
               trainStepSeries: appendStepPoint(
-                get().trainStepSeries, { step: ev.step, loss: ev.loss, ep: epPos },
+                get().trainStepSeries, {
+                  step: ev.step, loss: ev.loss, ep: epPos,
+                  ...(typeof ev.lr === 'number' ? { lr: ev.lr } : {}),
+                  ...(typeof ev.gradNorm === 'number' ? { gradNorm: ev.gradNorm } : {}),
+                  ...(stepMs !== undefined ? { stepMs } : {}),
+                  ...(runStartTs > 0 && typeof ev.ts === 'number' ? { elapsedMs: Math.max(0, ev.ts - runStartTs) } : {}),
+                },
               ),
             });
           }
