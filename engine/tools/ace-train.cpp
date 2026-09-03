@@ -412,7 +412,11 @@ static void print_usage(void) {
             "                                                    training' from 'did TF32 move it'.\n"
             "                                            lm_train_log.json records the requested mode AND\n"
             "                                            the arithmetic the backend actually launched.\n"
-            "    --optimizer <adamw|muon>    adamw       muon puts every 2-D parameter whose SHORT side is\n"
+            "    --optimizer <adamw|muon|prodigy>  adamw  prodigy ESTIMATES ITS OWN step size (--lr is then a\n"
+            "                                            schedule multiplier forced to 1.0; --prodigy-d0 <d>\n"
+            "                                            is the initial estimate, default 1e-6) — the\n"
+            "                                            Training Studio's default since 2026-09-03.\n"
+            "                                            muon puts every 2-D parameter whose SHORT side is\n"
             "                                            >= --muon-min-dim on orthogonalized-momentum\n"
             "                                            (Newton-Schulz) updates. FOR A LoRA THE SHORT\n"
             "                                            SIDE IS THE RANK, so at rank 16 (the default)\n"
@@ -3722,6 +3726,7 @@ static int cmd_train_lm(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--lm-chunk") && i + 1 < argc) a.chunk = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--weights") && i + 1 < argc) { a.weights = argv[++i]; saw.weights = true; }
         else if (!strcmp(argv[i], "--optimizer") && i + 1 < argc) a.optimizer = argv[++i];
+        else if (!strcmp(argv[i], "--prodigy-d0") && i + 1 < argc) { a.prodigy_d0 = atof(argv[++i]); saw.prodigy_d0 = true; }
         else if (!strcmp(argv[i], "--muon-lr-scale") && i + 1 < argc) a.muon_lr_scale = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--muon-momentum") && i + 1 < argc) a.muon_momentum = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--muon-ns-steps") && i + 1 < argc) a.muon_ns_steps = atoi(argv[++i]);
@@ -3871,6 +3876,14 @@ static int cmd_train_lm(int argc, char ** argv) {
     if (!a.reg_codes.empty() && a.reg_every <= 0) {
         fprintf(stderr, "ace-train train-lm: --reg-codes was given but --reg-every is 0 (prior preservation off) — "
                         "pass --reg-every 3 for bghira's 1 prior step per 2 style steps\n");
+        return 2;
+    }
+    if (a.optimizer != "adamw" && a.optimizer != "muon" && a.optimizer != "prodigy") {
+        fprintf(stderr, "ace-train train-lm: --optimizer must be adamw, muon or prodigy (got %s)\n", a.optimizer.c_str());
+        return 2;
+    }
+    if (a.prodigy_d0 <= 0.0) {
+        fprintf(stderr, "ace-train train-lm: --prodigy-d0 must be > 0\n");
         return 2;
     }
     if (a.reg_every > 0) {

@@ -105,7 +105,12 @@ render-scored experiment (`docs/plans/lm-attr-probe/RESULTS.md` §6–7) that co
 loudness and timbre at the control's loop rate; caption dropout alone hurt, and the live teacher was
 worse than the cached flat-tail prior. The server drops prior preservation to off with a warning when no
 other 600 s corpus exists, and drops caption dropout when the variant has no trigger word, so a default
-run never fails on those two refusals. Neither lever is ear-validated yet. The only flags-off output change is an additive
+run never fails on those two refusals. Neither lever is ear-validated yet. The same day's other default
+changes for `train-lm` (Rob): **LoRA rank 128 / alpha 256** (LoKr dim 128 remains selectable),
+**Prodigy** as the optimizer (`--optimizer prodigy`, ported into train-lm from mm3-lm-train: the step
+size is estimated online, `--lr` becomes a schedule multiplier forced to 1.0, `--prodigy-d0` seeds the
+estimate at 1e-6), **`--weights bf16`** (the DiT's bf16-mirror counterpart, 1.256× at 4B) and
+**`--attn flash`** on. Explicit values still win, and resumes adopt the source run's identity. The only flags-off output change is an additive
 `"captionDropout":0` on the `start` event and a `caption_dropout` key in `lm_train_log.json`.
 
 - **`--caption-dropout <p>`** (0..1, default 0). Each style micro-step draws from a per-epoch

@@ -24,7 +24,7 @@ export interface TrainLmFormState {
   targetLoss: number;
   epochs: number;
   adapterType: 'lora' | 'lokr';
-  optimizer: 'adamw' | 'muon';
+  optimizer: 'adamw' | 'muon' | 'prodigy';
   muonLrScale: number;
   rank: number;
   alpha: number;
@@ -112,11 +112,13 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   // can do is in by CE ~2.0, and the last leg to 0.1 only doubled the looping-plan rate.
   targetLoss: 1.5,
   epochs: 150,
-  adapterType: 'lokr',
-  optimizer: 'muon',
+  // LoRA r128/a256 + Prodigy (Rob, 2026-09-03). Prodigy estimates the step
+  // size itself, so `learningRate` is ignored under it (schedule multiplier 1).
+  adapterType: 'lora',
+  optimizer: 'prodigy',
   muonLrScale: 20,
-  rank: 16,
-  alpha: 32,
+  rank: 128,
+  alpha: 256,
   // dim 128, NOT the DiT's 512 (Rob, 2026-07-30). At 512 every attention site
   // is monolithic and every MLP site factorized; at 128 EVERY site factorizes
   // (the mono test is dim >= max(out_k,in_n)/2, and the smallest max on a 4B
@@ -171,7 +173,11 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   // transposed weight IS the F32 window, so the GEMM stays TF32 and you only
   // pay an extra cont. Expect LM training to be meaningfully slower than it was
   // under bf16; that is the trade being made, not a regression.
-  weights: 'f32-window',
+  // bf16 (Rob, 2026-09-03): the LM's counterpart of the DiT's bf16 mirror —
+  // BF16 transposed projection window + patched BF16 out_prod, 1.256x at 4B,
+  // gradient error in the class the DiT already accepted (T14/T15 report it).
+  // The engine falls back to f32-window on non-CUDA / non-BF16 bases.
+  weights: 'bf16',
   batch: 1,
   // MUL_MAT activation-gradient formulation. 'outprod' here, unlike train-dit's
   // 'mm': `weights: 'bf16'` above ALREADY gives this base the mul_mat backward,
@@ -193,7 +199,7 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   regTeacher: 'cached',
   // 'exact' (Rob, 2026-09-02) — the DiT ships 'flash' on by default, but the
   // LM port is new and unvalidated by ear; a user must opt in.
-  attnBackend: 'exact',
+  attnBackend: 'flash',   // on by default (Rob, 2026-09-03) after the gated port; server fallback matches
   attnHeadBlock: 0,
 };
 
@@ -513,7 +519,7 @@ export const TrainLmForm: React.FC<Props> = ({
             onChange={(e) => onChange({ attnBackend: e.target.checked ? 'flash' : 'exact' })}
             className="accent-amber-500"
           />
-          {P('lm.attnBackend', 'Default off', CHECK_LABEL)}
+          {P('lm.attnBackend', 'Default on · untick for the exact graph (bit-identical to older runs)', CHECK_LABEL)}
         </label>
         <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.lm.attnBackendHelp')}</span>
         {value.attnHeadBlock > 0 && (
@@ -546,15 +552,16 @@ export const TrainLmForm: React.FC<Props> = ({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            {P('lm.optimizer', 'Default Muon · AdamW remains fully supported')}
+            {P('lm.optimizer', 'Default Prodigy (auto step size) · Muon and AdamW supported')}
             <StyledSelect
               accent="amber"
               value={value.optimizer}
               disabled={lock}
               onChange={(v) => onChange({ optimizer: v })}
               options={[
-                { value: 'adamw' as const, label: t('trainingStudio.train.lm.optimizerAdamw') },
+                { value: 'prodigy' as const, label: t('trainingStudio.train.lm.optimizerProdigy') },
                 { value: 'muon' as const, label: t('trainingStudio.train.lm.optimizerMuon') },
+                { value: 'adamw' as const, label: t('trainingStudio.train.lm.optimizerAdamw') },
               ]}
             />
             <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.lm.optimizerHint')}</span>
@@ -635,7 +642,7 @@ export const TrainLmForm: React.FC<Props> = ({
           )}
 
           <label className="flex flex-col gap-1.5">
-            {P('learningRate', 'Default 1e-4')}
+            {P('learningRate', value.optimizer === 'prodigy' ? 'Ignored under Prodigy (auto step size)' : 'Default 1e-4')}
             <input
               type="number" min={0} max={1} step={0.00001}
               value={value.learningRate} disabled={lock}

@@ -103,6 +103,9 @@ struct LmTrainArgs {
     // rank 16 that is exactly muon_min_dim, and a rank-8 adapter would fall
     // entirely through to AdamW — lm_optim_init logs the split, so check it.
     std::string optimizer     = "adamw";
+    // Prodigy (2026-09-03, same rule set as mm3-lm-train): lr becomes a schedule
+    // multiplier forced to 1.0 and the step size is estimated online from d0.
+    double      prodigy_d0    = 1e-6;
     float       muon_lr_scale = 1.0f;
     float       muon_momentum = 0.95f;
     int         muon_ns_steps = 5;
@@ -975,6 +978,9 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         opt.muon.nesterov = a.muon_nesterov;
         opt.muon.min_dim  = a.muon_min_dim;
         opt.muon.bucket   = a.muon_bucket;
+        // Prodigy's d0 is consumed INSIDE lm_optim_init (o->prodigy_d = d0), so
+        // it must be set here, not with base_lr below.
+        opt.prodigy_d0    = (float) a.prodigy_d0;
         if (!lm_optim_init(&opt, lora.params, lm.backend, &err)) {
             lm_fatal("vram", err);
             return 1;
@@ -993,6 +999,20 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     opt.t_eps        = t_eps;
     opt.t_gnorm2     = t_gnorm2;
     opt.base_lr      = a.lr;
+    if (a.optimizer == "prodigy") {
+        // Same contract as mm3-lm-train-run.h: under Prodigy `lr` is GAMMA, a
+        // schedule multiplier, not a step size — d carries the magnitude. A
+        // hand-tuned 1e-4 left here would scale every step by 1e-4 and look
+        // exactly like "Prodigy does not converge".
+        if (a.lr != 1.0f) {
+            char pb[192];
+            snprintf(pb, sizeof(pb),
+                     "prodigy: --lr %.3g is IGNORED. Prodigy sets its own step size; lr is only a schedule "
+                     "multiplier and is forced to 1.0.", (double) a.lr);
+            lm_log("warn", pb);
+        }
+        opt.base_lr    = 1.0f;
+    }
     opt.weight_decay = a.weight_decay;
     opt.grad_clip    = a.grad_clip;
     opt.total_steps  = total_steps;
@@ -1880,6 +1900,9 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         }
         out->final_loss = avg;
         out->epochs_run = epoch + 1;
+        // Latest Prodigy step-size estimate, exported so a chained leg can
+        // seed its --prodigy-d0 from it (lm-resume.h). 0 for other optimizers.
+        meta->prodigy_d = (a.optimizer == "prodigy") ? opt.prodigy_d : 0.0;
 
         LmEpochRec rec;
         rec.epoch     = epoch + 1;
@@ -2119,6 +2142,7 @@ static int lm_train_main(const LmTrainArgs & a) {
     meta.lokr_alpha     = a.lokr_alpha;
     meta.lokr_factor    = a.lokr_factor;
     meta.optimizer      = a.optimizer;
+    // meta.prodigy_d is filled by lm_train_stage, where the optimizer lives.
     meta.muon_lr_scale  = a.muon_lr_scale;
     meta.muon_ns_steps  = a.muon_ns_steps;
     meta.caption_dropout = a.caption_dropout;

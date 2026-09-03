@@ -67,6 +67,10 @@ struct LmResumeSource {
     std::string trigger, trigger_position;
     double      saved_loss  = -1.0;
     int         saved_epoch = 0;
+    // Prodigy's final step-size estimate from the source run (0 = not prodigy
+    // or an older log). Adopted as this leg's --prodigy-d0 unless the user set
+    // one, so a chained leg does not restart its warm-up from 1e-6.
+    double      prodigy_d   = 0.0;
 };
 
 /** Which identity flags the user typed explicitly (tracked by cmd_train_lm's
@@ -75,6 +79,7 @@ struct LmResumeExplicit {
     bool rank = false, alpha = false, adapter_type = false;
     bool lokr_dim = false, lokr_alpha = false, lokr_factor = false;
     bool weights = false;
+    bool prodigy_d0 = false;   // not identity: only decides whether the source's d is adopted
 };
 
 static bool lm_resume_read_log(const std::string & dir, LmResumeSource * src, std::string * err) {
@@ -110,6 +115,10 @@ static bool lm_resume_read_log(const std::string & dir, LmResumeSource * src, st
         src->lokr_alpha = yyjson_is_num(v) ? (float) yyjson_get_num(v) : 0.0f;
     }
     src->weights          = s("weights").empty() ? "f32-window" : s("weights");
+    {
+        yyjson_val * v = yyjson_obj_get(cfg, "prodigy_d");
+        src->prodigy_d = yyjson_is_num(v) ? yyjson_get_num(v) : 0.0;
+    }
     src->lm_size          = s("lm_size");
     src->lm_path          = s("lm_path");
     src->trigger          = s("trigger");
@@ -320,6 +329,13 @@ static bool lm_resume_prepare(ArgsT * a, const LmResumeExplicit & saw, LmResumeS
     }
     if (!src->weights.empty()) {
         a->weights = src->weights;
+    }
+    // Prodigy: carry the learned step size into this leg. Not an identity
+    // check — a run that switched optimizer simply ignores it.
+    if (a->optimizer == "prodigy" && !saw.prodigy_d0 && src->prodigy_d > 0.0) {
+        a->prodigy_d0 = src->prodigy_d;
+        fprintf(stderr, "[train-lm] resume: adopting the source run's Prodigy step size d = %.3g as --prodigy-d0\n",
+                src->prodigy_d);
     }
     if (a->trigger.empty() && !src->trigger.empty()) {
         a->trigger          = src->trigger;

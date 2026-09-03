@@ -295,7 +295,7 @@ export interface ResolvedTrainLmOptions {
   adapterType: 'lora' | 'lokr';
   /** Optimizer rule set. 'muon' orthogonalizes 2-D parameters (short side >=
    *  16, which for a LoRA is the RANK) and leaves the rest on AdamW. */
-  optimizer: 'adamw' | 'muon';
+  optimizer: 'adamw' | 'muon' | 'prodigy';
   muonLrScale: number;
   muonNsSteps: number;
   rank: number;
@@ -526,7 +526,7 @@ export interface ResolvedTrainDitOptions {
   /** Optimizer rule set (2026-07-30). 'adamw' is the shipped path; 'muon' is
    *  per-parameter — 2-D parameters with a short side >= muonMinDim get
    *  orthogonalized-momentum updates, the rest stay on AdamW. */
-  optimizer: 'adamw' | 'muon';
+  optimizer: 'adamw' | 'muon' | 'prodigy';
   muonLrScale: number;
   muonMomentum: number;
   muonNsSteps: number;

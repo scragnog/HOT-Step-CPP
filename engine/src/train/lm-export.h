@@ -124,6 +124,10 @@ struct LmExportMeta {
     float       lokr_alpha   = 0.0f;
     int         lokr_factor  = 0;
     std::string optimizer     = "adamw";
+    // Prodigy's final step-size estimate d (0 = not prodigy). Recorded so a
+    // chained leg (--init-adapter) can seed its own d0 from it instead of
+    // restarting at 1e-6 and crawling through a fresh warm-up (2026-09-03).
+    double      prodigy_d     = 0.0;
     float       muon_lr_scale = 1.0f;
     int         muon_ns_steps = 0;
     int         muon_params   = 0;   // parameters actually on Muon
@@ -244,6 +248,9 @@ static bool lm_write_train_log(const std::string & dir, const LmExportMeta & m) 
         yyjson_mut_obj_add_int(doc, cfg, "lokr_factor", m.lokr_factor);
     }
     yyjson_mut_obj_add_strcpy(doc, cfg, "optimizer", m.optimizer.c_str());
+    if (m.optimizer == "prodigy") {
+        yyjson_mut_obj_add_real(doc, cfg, "prodigy_d", m.prodigy_d);
+    }
     if (m.optimizer == "muon") {
         yyjson_mut_obj_add_real(doc, cfg, "muon_lr_scale", (double) m.muon_lr_scale);
         yyjson_mut_obj_add_int(doc, cfg, "muon_ns_steps", m.muon_ns_steps);

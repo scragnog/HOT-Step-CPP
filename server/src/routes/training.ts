@@ -2431,17 +2431,18 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
         targetLoss,
       ];
     }
-    const rank = numOpt(body.rank, 16);
-    // LoKr is the DEFAULT (Rob, 2026-07-30) — an omitted adapterType now means
-    // LoKr, so a caller that wants the old LoRA path must say so explicitly.
-    // NOTE the sense: `!== 'lora'`, not `=== 'lokr'`. The batch pipeline stores
-    // partial option bags, and an absent field there has to land on the default
-    // a user would have seen in the form, not on the other branch.
-    const lmIsLokr = body.adapterType !== 'lora';
+    // LoRA rank 128 / alpha 256 is the DEFAULT (Rob, 2026-09-03; LoKr dim 128
+    // was the default from 2026-07-30). An omitted adapterType means LoRA, so a
+    // caller that wants LoKr must say so. The batch pipeline stores partial
+    // option bags, and an absent field there lands on the same default a user
+    // sees in the form (TRAIN_LM_DEFAULTS).
+    const rank = numOpt(body.rank, 128);
+    const lmIsLokr = body.adapterType === 'lokr';
     const lmMuonLrScale = numOpt(body.muonLrScale, 20.0);
     const lmMuonNsSteps = numOpt(body.muonNsSteps, 5);
-    if (body.optimizer !== undefined && body.optimizer !== 'adamw' && body.optimizer !== 'muon') {
-      res.status(400).json({ error: 'optimizer must be adamw or muon' });
+    if (body.optimizer !== undefined && body.optimizer !== 'adamw' && body.optimizer !== 'muon'
+        && body.optimizer !== 'prodigy') {
+      res.status(400).json({ error: 'optimizer must be adamw, muon or prodigy' });
       return;
     }
     if (lmMuonLrScale < 0.001 || lmMuonLrScale > 1000) {
@@ -2467,7 +2468,7 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'lokrFactor must be -1 or between 2 and 64' });
       return;
     }
-    const alpha = numOpt(body.alpha, 32);
+    const alpha = numOpt(body.alpha, 256);
     const learningRate = numOpt(body.learningRate, 0.0001);
     const gradAccum = numOpt(body.gradAccum, 2);
     const gradClip = numOpt(body.gradClip, 1.0);
@@ -2531,10 +2532,12 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
 
     // Attention backend (2026-09-02 lm-flash-attn plan, Stream B — the DiT's
     // attnBackend ported to train-lm). Refused, not coerced, same rule as
-    // mirror/optimizer/bwd on the DiT route. Default stays 'exact'.
-    const attnBackend = body.attnBackend === 'flash' ? 'flash' as const
+    // mirror/optimizer/bwd on the DiT route. Default 'flash' since 2026-09-03
+    // (Rob), after the gated port: byte-identical off, 5.5 % faster at 4B,
+    // drift in the bf16 class. An explicit 'exact' is honoured.
+    const attnBackend = body.attnBackend === 'exact' ? 'exact' as const
       : body.attnBackend === 'flash-f32' ? 'flash-f32' as const
-      : 'exact' as const;
+      : 'flash' as const;
     if (body.attnBackend !== undefined && body.attnBackend !== 'exact' && body.attnBackend !== 'flash' &&
         body.attnBackend !== 'flash-f32') {
       res.status(400).json({ error: 'attnBackend must be exact, flash or flash-f32' });
@@ -2567,7 +2570,11 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
     // The engine owns the semantic rules (bf16 needs a BF16 base; batch>1
     // implies low-VRAM) — this is a value whitelist only, so a stale UI can
     // never make the runner stop ace-server for an argument ace-train rejects.
-    const weights = body.weights === undefined ? 'f32-window' : body.weights;
+    // 'bf16' (Rob, 2026-09-03) — the LM's equivalent of the DiT's bf16 mirror:
+    // BF16 transposed projection window + the patched BF16 out_prod, 1.256x at
+    // 4B, same gradient-error class the DiT accepted. The engine falls back to
+    // f32-window on a non-CUDA backend or a non-BF16 base with a warning.
+    const weights = body.weights === undefined ? 'bf16' : body.weights;
     if (weights !== 'f32-window' && weights !== 'bf16') {
       res.status(400).json({ error: 'weights must be f32-window or bf16' });
       return;
@@ -2825,8 +2832,10 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       epochs: Math.trunc(epochs),
       // Only the exact string 'lokr' opts in; anything else is a LoRA.
       adapterType: lmIsLokr ? 'lokr' : 'lora',
-      // Only the exact string 'muon' opts in; anything else is AdamW.
-      optimizer: body.optimizer === 'adamw' ? 'adamw' : 'muon',
+      // Prodigy is the LM default (Rob, 2026-09-03): the step size is estimated
+      // online, so there is no hand-tuned LR to get wrong per artist. The
+      // exact strings 'adamw' / 'muon' opt out.
+      optimizer: body.optimizer === 'adamw' ? 'adamw' : body.optimizer === 'muon' ? 'muon' : 'prodigy',
       muonLrScale: lmMuonLrScale,
       muonNsSteps: Math.trunc(lmMuonNsSteps),
       rank: Math.trunc(rank),
