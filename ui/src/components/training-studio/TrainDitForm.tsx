@@ -50,6 +50,14 @@ export interface TrainDitFormState {
   lokrFactor: number;
   lokrDecomposeBoth: boolean;
   targetMlp: boolean;
+  /** Parameterization (2026-09-04): DoRA / HiRA / LoHa are mutually exclusive
+   *  reshapings of the LoRA update; rsLoRA and LoRA+ stack with any of them.
+   *  All inert under 'lokr'. None ear-validated yet — measured gates only. */
+  dora: boolean;
+  rslora: boolean;
+  hira: boolean;
+  loha: boolean;
+  loraPlusRatio: number;     // 1 = off
   layers: number;            // 0 = auto (top-K depth)
   crop: number;              // 0 = auto-fit
   cropMin: number;
@@ -132,6 +140,11 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   lokrFactor: 6,
   lokrDecomposeBoth: true,
   targetMlp: true,
+  dora: false,
+  rslora: false,
+  hira: false,
+  loha: false,
+  loraPlusRatio: 1,
   layers: 0,
   crop: 0,
   cropMin: 375,
@@ -1182,6 +1195,46 @@ export const TrainDitForm: React.FC<Props> = ({
             {P('targetMlp', 'Default on', CHECK_LABEL)}
           </label>
           <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.dit.targetMlpHelp')}</span>
+
+          {/* ── Parameterization (2026-09-04) ── DoRA / HiRA / LoHa reshape the
+              update and exclude each other; rsLoRA and LoRA+ stack with any.
+              Each is gated by finite differences (T4) and a merge check, not
+              by ear — docs/plans/adapter-parameterizations-roadmap.md. */}
+          {!isLokr && (
+            <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5 mt-1">
+              <span className="text-[11px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.dit.paramGroup')}</span>
+              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                <input type="checkbox" checked={value.dora} disabled={lock} className="accent-amber-500"
+                  onChange={(e) => onChange({ dora: e.target.checked, hira: false, loha: false })} />
+                {P('dora', 'Default off', CHECK_LABEL)}
+              </label>
+              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                <input type="checkbox" checked={value.hira} disabled={lock} className="accent-amber-500"
+                  onChange={(e) => onChange({ hira: e.target.checked, dora: false, loha: false })} />
+                {P('hira', 'Default off · merge mode only', CHECK_LABEL)}
+              </label>
+              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                <input type="checkbox" checked={value.loha} disabled={lock} className="accent-amber-500"
+                  onChange={(e) => onChange({ loha: e.target.checked, dora: false, hira: false })} />
+                {P('loha', 'Default off · merge mode only', CHECK_LABEL)}
+              </label>
+              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                <input type="checkbox" checked={value.rslora} disabled={lock} className="accent-amber-500"
+                  onChange={(e) => onChange({ rslora: e.target.checked })} />
+                {P('rslora', 'Default off', CHECK_LABEL)}
+              </label>
+              <label className="flex flex-col gap-1.5">
+                {P('loraPlusRatio', 'Default 1 = off · paper 16 · AdamW/Prodigy only')}
+                <input
+                  type="number" min={1} max={64} step={1}
+                  value={value.loraPlusRatio} disabled={lock}
+                  onChange={(e) => onChange({ loraPlusRatio: Math.max(1, num(e.target.value, 1)) })}
+                  className={FIELD}
+                />
+              </label>
+              <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.dit.paramGroupHelp')}</span>
+            </div>
+          )}
 
           <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
             <input

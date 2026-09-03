@@ -48,6 +48,7 @@ struct LmExportMeta {
     std::string producer, created_at;
     std::string lm_path, lm_size, codes_path, tensors_dir, order;
     int         rank = 16, alpha = 32;
+    bool        rslora = false;  // alpha/sqrt(r) scaling; mirrored by lm-adapter.h at load
     double      lr = 1e-4, grad_clip = 1.0, weight_decay = 0.01, warmup_ratio = 0.05, target_loss = 0.4;
     int         epochs = 16, grad_accum = 4, seed = 42;
     bool        loss_on_cot = true;
@@ -163,7 +164,8 @@ struct LmExportMeta {
 //
 // Written by hand rather than via yyjson_mut so the emitted bytes match §2.4
 // key-for-key and order-for-order (deviation noted in the handoff report).
-static bool lm_write_adapter_config(const std::string & dir, int rank, int alpha, const std::string & base_model) {
+static bool lm_write_adapter_config(const std::string & dir, int rank, int alpha, const std::string & base_model,
+                                    bool rslora = false) {
     std::string j;
     j += "{\n";
     j += "  \"alpha_pattern\": {},\n";
@@ -194,7 +196,7 @@ static bool lm_write_adapter_config(const std::string & dir, int rank, int alpha
     j += "    \"q_proj\",\n    \"o_proj\"\n  ],\n";
     j += "  \"task_type\": \"CAUSAL_LM\",\n";
     j += "  \"use_dora\": false,\n";
-    j += "  \"use_rslora\": false\n";
+    j += std::string("  \"use_rslora\": ") + (rslora ? "true" : "false") + "\n";
     j += "}\n";
     return pm_write_atomic(lm_join(dir, "adapter_config.json"), j);
 }
@@ -388,7 +390,7 @@ static bool lm_export_peft(const LmLora & L, const Qwen3LMConfig & cfg, const Lm
         *err = "cannot create " + out_dir;
         return false;
     }
-    if (!lm_write_adapter_config(out_dir, L.rank, (int) (L.alpha + 0.5f), meta.lm_path)) {
+    if (!lm_write_adapter_config(out_dir, L.rank, (int) (L.alpha + 0.5f), meta.lm_path, meta.rslora)) {
         *err = "cannot write adapter_config.json in " + out_dir;
         return false;
     }

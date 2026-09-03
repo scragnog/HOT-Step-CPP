@@ -3775,6 +3775,8 @@ static int dit_self_test_impl(const std::string & dit_path, const std::string & 
             // be off by the interleaved m tensors — the numeric bars are per
             // tensor and unaffected.)
             cfg.dora    = getenv("HOTSTEP_DIT_ST_DORA") != nullptr;
+            cfg.hira    = getenv("HOTSTEP_DIT_ST_HIRA") != nullptr;  // same rung, same reason
+            cfg.loha    = getenv("HOTSTEP_DIT_ST_LOHA") != nullptr;
             std::string err;
             if (!fd.init(&M.m, M.backend, L - 2, L, cfg, &err)) {
                 dit_st_report(rs, "T4", false, err);

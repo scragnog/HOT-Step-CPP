@@ -195,6 +195,22 @@ struct LmLora {
     bool  lokr_decompose = true;
 };
 
+// rsLoRA: switch a freshly initialised LoRA to alpha/sqrt(r). Every pair
+// carries its own copy of the scale (the inference runtime shares QwLoraPair),
+// so both the bank and the pairs are rewritten. LoKr is untouched — its scale
+// is alpha/dim by LyCORIS rule and lives on lokr_scale.
+static void lm_lora_apply_rslora(LmLora * L) {
+    if (L->is_lokr || L->rank <= 0) {
+        return;
+    }
+    L->scale = L->alpha / sqrtf((float) L->rank);
+    for (int l = L->layer_lo; l < L->layer_hi; l++) {
+        for (int s = 0; s < QW_LORA_NSLOTS; s++) {
+            L->layers[l].p[s].scale = L->scale;
+        }
+    }
+}
+
 static void lm_lora_free(LmLora * L) {
     if (L->buf) {
         ggml_backend_buffer_free(L->buf);

@@ -235,6 +235,81 @@ static int adapter_read_alpha(const char * dir) {
     return alpha;
 }
 
+// rsLoRA: "use_rslora": true in adapter_config.json means the trainer scaled
+// the delta by alpha/sqrt(r), not alpha/r, and the merge must match. At r128
+// the two differ by 11x; getting it wrong produces an adapter that is simply
+// far too strong or too weak, with nothing in the log to say so.
+static bool adapter_read_rslora(const char * dir) {
+    std::string path = std::string(dir) + "/adapter_config.json";
+    FILE *      f    = fopen(path.c_str(), "rb");
+    if (!f) {
+        return false;
+    }
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<char> buf((size_t) len + 1);
+    size_t            nr = fread(buf.data(), 1, (size_t) len, f);
+    fclose(f);
+    if (nr != (size_t) len) {
+        return false;
+    }
+    buf[(size_t) len] = 0;
+    const char * p = strstr(buf.data(), "\"use_rslora\"");
+    if (!p) {
+        return false;
+    }
+    p = strchr(p, ':');
+    if (!p) {
+        return false;
+    }
+    p++;
+    while (*p == ' ' || *p == 9) {
+        p++;
+    }
+    const bool on = strncmp(p, "true", 4) == 0;
+    if (on) {
+        fprintf(stderr, "%s", "[Adapter] adapter_config.json: use_rslora=true (alpha/sqrt(r) scaling)");
+        fputc(10, stderr);
+    }
+    return on;
+}
+
+// peft_type from adapter_config.json ("LORA", "HIRA", ...). Empty when absent.
+// HiRA's delta is W (.) (BA) — it DEPENDS ON THE BASE — so a HiRA file merged
+// as a plain LoRA produces a wrong (and much smaller) delta with no error.
+static std::string adapter_read_peft_type(const char * dir) {
+    std::string path = std::string(dir) + "/adapter_config.json";
+    FILE *      f    = fopen(path.c_str(), "rb");
+    if (!f) {
+        return std::string();
+    }
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<char> buf((size_t) len + 1);
+    size_t            nr = fread(buf.data(), 1, (size_t) len, f);
+    fclose(f);
+    if (nr != (size_t) len) {
+        return std::string();
+    }
+    buf[(size_t) len] = 0;
+    const char * p = strstr(buf.data(), "\"peft_type\"");
+    if (!p) {
+        return std::string();
+    }
+    p = strchr(p + 11, '"');
+    if (!p) {
+        return std::string();
+    }
+    p++;
+    const char * e = strchr(p, '"');
+    if (!e) {
+        return std::string();
+    }
+    return std::string(p, (size_t) (e - p));
+}
+
 // Read per-module "alpha_pattern" from adapter_config.json (written by PEFT
 // when modules train with individual ranks/alphas, e.g. rank-pruned DoRAs).
 // Keys are module paths ("layers.0.self_attn.q_proj"); values override the
@@ -533,7 +608,8 @@ static bool adapter_merge_on_backend(WeightCtx *                                
                                      const std::function<adapter_delta_build(struct ggml_context *)> & build_delta,
                                      bool                                                              promote_f32 = false,
                                      const float *                                                     rebase_f32 = nullptr,
-                                     float                                                             rebase_beta = 0.0f) {
+                                     float                                                             rebase_beta = 0.0f,
+                                     bool                                                              hadamard_with_base = false) {
     // torch.finfo(torch.bfloat16).eps, used verbatim in LyCORIS apply_weight_decompose
     const float eps = 7.8125e-3f;
 
@@ -575,6 +651,14 @@ static bool adapter_merge_on_backend(WeightCtx *                                
         // ─── Split path for types without GPU cast (NVFP4, MXFP4) ───
         // Step 1: compute delta on GPU only (adapter factors are small, fast upload)
         std::vector<float> delta_f32;
+        if (hadamard_with_base) {
+            // HiRA's delta is W (.) (BA); the split path computes deltas without
+            // the base and cannot express it. Refuse rather than merge a LoRA.
+            fprintf(stderr, "%s", "[Adapter] HiRA adapter needs the unified merge path (F32/BF16/F16/K-quant base); "
+                                  "this base takes the split (NVFP4/MXFP4) path - refusing");
+            fputc(10, stderr);
+            return false;
+        }
         if (!adapter_compute_delta(build_delta, ne0, ne1, backend, delta_f32)) {
             ggml_free(ctx);
             return false;
@@ -666,6 +750,10 @@ static bool adapter_merge_on_backend(WeightCtx *                                
 
     // caller builds the delta subgraph and returns its upload closure
     adapter_delta_build db = build_delta(ctx);
+    if (hadamard_with_base) {
+        // HiRA: the low-rank product modulates the (rebased) base elementwise.
+        db.tdelta = ggml_mul(ctx, tbase_f32, db.tdelta);
+    }
 
     // BF16 round mirrors LyCORIS diff.to(base.dtype) and PEFT merge_and_unload
     // intermediate cast. Cast chain runs entirely on backend.
@@ -808,7 +896,13 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
                                bool                promote_f32 = false,
                                const STFile *      rebase_src = nullptr,
                                float               rebase_beta = 0.0f) {
-    int alpha_cfg = adapter_read_alpha(cfg_dir.c_str());
+    int        alpha_cfg  = adapter_read_alpha(cfg_dir.c_str());
+    const bool rslora_cfg = adapter_read_rslora(cfg_dir.c_str());
+    const bool hira_cfg   = adapter_read_peft_type(cfg_dir.c_str()) == "HIRA";
+    if (hira_cfg) {
+        fprintf(stderr, "%s", "[Adapter] adapter_config.json: peft_type=HIRA (delta = W (.) BA, merge-only)");
+        fputc(10, stderr);
+    }
 
     // group lora_A and lora_B entries by their GGUF base tensor name.
     // also collect per tensor alpha scalars (ComfyUI baked format) and
@@ -950,7 +1044,8 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
         } else {
             alpha = (float) rank;
         }
-        float scaling = (alpha / (float) rank) * scale;
+        const float rank_div = rslora_cfg ? sqrtf((float) rank) : (float) rank;  // rsLoRA
+        float       scaling  = (alpha / rank_div) * scale;
 
         // HOT-Step: apply per-group adapter scale from sideband
         float g_scale = adapter_group_scale_for(g_hotstep_params.adapter_group_scales,
@@ -982,7 +1077,7 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
                             eds->dtype.c_str(), gguf_name.c_str());
                 } else {
                     ds_ptr               = ds_f32.data();
-                    scaling              = alpha / (float) rank;
+                    scaling              = alpha / rank_div;
                     effective_user_scale = scale * g_scale;
                 }
             }
@@ -1035,7 +1130,7 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
         const float *      rebase_ptr = adapter_rebase_fetch(rebase_src, rebase_beta, gguf_name.c_str(), ne0, ne1, rebase_buf);
 
         if (!adapter_merge_on_backend(wctx, pending_idx, base_ptr, ttype, ne0, ne1, ds_ptr, effective_user_scale, backend,
-                                      gguf_name.c_str(), build, promote_f32, rebase_ptr, rebase_beta)) {
+                                      gguf_name.c_str(), build, promote_f32, rebase_ptr, rebase_beta, hira_cfg)) {
             skipped++;
             continue;
         }
@@ -1088,6 +1183,218 @@ static bool adapter_merge_lora(WeightCtx *            wctx,
 // (1, 3, 0, 2). The fast pair (d, b) then collapses into in_feat and the
 // slow pair (c, a) into out_feat under reshape_2d. Net effect:
 //   delta_rm[aa*c + cc, bb*d + dd] = W1[aa, bb] * W2[cc, dd]
+
+// Detect a LyCORIS LoHa pack: "*.hada_w1_a" never appears in a LoRA or LoKr
+// payload, so a single match is sufficient. Checked AFTER LoKr in the dispatch.
+static bool adapter_detect_loha(const STFile & st) {
+    for (const auto & e : st.entries) {
+        if (e.name.find(".hada_w1_a") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// LoHa (LyCORIS): delta = (w1_a . w1_b) (.) (w2_a . w2_b) * alpha / dim.
+// Row-major shapes: w?_a (out, dim), w?_b (dim, in). Written by ace-train
+// --loha (dit-adapter.h) and by LyCORIS itself. Mirrors adapter_merge_lokr's
+// flow: prefix grouping, reverse name map, pending-copy base lookup, Conv1d
+// tiling, then adapter_merge_on_backend with the delta built in-graph.
+static bool adapter_merge_loha(WeightCtx *          wctx,
+                               const WeightSource & ws,
+                               const STFile &    st,
+                               float             user_scale,
+                               ggml_backend_t    backend,
+                               bool              promote_f32 = false,
+                               const STFile *    rebase_src = nullptr,
+                               float             rebase_beta = 0.0f) {
+    struct LoHaEntry {
+        const STEntry * w1a   = nullptr;
+        const STEntry * w1b   = nullptr;
+        const STEntry * w2a   = nullptr;
+        const STEntry * w2b   = nullptr;
+        const STEntry * alpha = nullptr;
+    };
+
+    std::map<std::string, LoHaEntry> modules;
+    for (const auto & e : st.entries) {
+        std::string prefix, suffix;
+        if (!adapter_split_suffix(e.name, &prefix, &suffix)) {
+            continue;
+        }
+        if (prefix.compare(0, 8, "lycoris_") != 0) {
+            continue;
+        }
+        LoHaEntry & m = modules[prefix];
+        if (suffix == "hada_w1_a") {
+            m.w1a = &e;
+        } else if (suffix == "hada_w1_b") {
+            m.w1b = &e;
+        } else if (suffix == "hada_w2_a") {
+            m.w2a = &e;
+        } else if (suffix == "hada_w2_b") {
+            m.w2b = &e;
+        } else if (suffix == "alpha") {
+            m.alpha = &e;
+        }
+    }
+
+    std::unordered_map<std::string, std::string> name_map = lokr_build_reverse_map(ws);
+
+    std::unordered_map<const void *, size_t> pending_idx;
+    pending_idx.reserve(wctx->pending.size());
+    for (size_t i = 0; i < wctx->pending.size(); i++) {
+        pending_idx[wctx->pending[i].src] = i;
+    }
+
+    int merged  = 0;
+    int skipped = 0;
+    int nudged  = 0;
+
+    for (const auto & kv : modules) {
+        const std::string & lyc_prefix = kv.first;
+        const LoHaEntry &   m          = kv.second;
+
+        if (!m.w1a || !m.w1b || !m.w2a || !m.w2b || !m.alpha) {
+            fprintf(stderr, "[Adapter] WARNING: incomplete LoHa module %s, skipping\n", lyc_prefix.c_str());
+            skipped++;
+            continue;
+        }
+
+        auto nm_it = name_map.find(lyc_prefix);
+        if (nm_it == name_map.end()) {
+            fprintf(stderr, "[Adapter] WARNING: no GGUF tensor for %s, skipping\n", lyc_prefix.c_str());
+            skipped++;
+            continue;
+        }
+        const std::string & gguf_name = nm_it->second;
+
+        if (!ws.exists(gguf_name.c_str())) {
+            fprintf(stderr, "[Adapter] WARNING: tensor %s not in base model, skipping\n", gguf_name.c_str());
+            skipped++;
+            continue;
+        }
+        if ((promote_f32 || g_hotstep_params.adapter_merge_lowvram) && adapter_hq_should_skip(gguf_name)) {
+            fprintf(stderr, "[Adapter-HQ] Skipping non-layer weight: %s\n", gguf_name.c_str());
+            skipped++;
+            continue;
+        }
+        enum ggml_type ttype = ws.type(gguf_name.c_str());
+        int n_dims; int64_t ne_arr[4];
+        ws.shape(gguf_name.c_str(), n_dims, ne_arr);
+        int64_t ne0 = ne_arr[0];
+        int64_t ne1 = ne_arr[1];
+        ggml_type data_type;
+        const void * base_ptr = ws.data(gguf_name.c_str(), data_type);
+
+        // Same rule as the LoKr merge: the CURRENT pending copy is the base, so
+        // stacks accumulate and pre-permuted Conv1d tensors carry their 2D shape.
+        for (size_t pi = 0; pi < wctx->pending.size(); pi++) {
+            auto & pc = wctx->pending[pi];
+            if (pc.tensor && pc.tensor->name && gguf_name == pc.tensor->name) {
+                if (n_dims >= 3) {
+                    ne0 = pc.tensor->ne[0];
+                    ne1 = pc.tensor->ne[1];
+                }
+                ttype    = pc.tensor->type;
+                base_ptr = pc.src;
+                break;
+            }
+        }
+
+        const int64_t out = m.w1a->shape[0];
+        const int64_t dim = m.w1a->shape[1];
+        const int64_t in  = m.w1b->shape[1];
+        if (m.w1b->shape[0] != dim || m.w2a->shape[0] != out || m.w2a->shape[1] != dim || m.w2b->shape[0] != dim ||
+            m.w2b->shape[1] != in) {
+            fprintf(stderr, "[Adapter] WARNING: LoHa factor shapes disagree for %s, skipping\n", lyc_prefix.c_str());
+            skipped++;
+            continue;
+        }
+
+        int64_t conv_expand = 1;
+        if (out == ne1 && in == ne0) {
+            // exact match — normal 2D weight
+        } else if (out == ne1 && ne0 > 0 && (ne0 % in) == 0) {
+            conv_expand = ne0 / in;
+            fprintf(stderr, "[Adapter] Conv1d %s: tiling delta [%lld, %lld] x%lld -> [%lld, %lld]\n", gguf_name.c_str(),
+                    (long long) in, (long long) out, (long long) conv_expand, (long long) ne0, (long long) ne1);
+        } else {
+            fprintf(stderr, "[Adapter] WARNING: LoHa shape mismatch for %s: (%lld x %lld) vs GGUF out=%lld in=%lld\n",
+                    gguf_name.c_str(), (long long) out, (long long) in, (long long) ne1, (long long) ne0);
+            skipped++;
+            continue;
+        }
+
+        float alpha = 0.0f;
+        if (!adapter_to_f32(st_data(st, *m.alpha), &alpha, 1, m.alpha->dtype)) {
+            fprintf(stderr, "[Adapter] WARNING: unsupported alpha dtype %s for %s, skipping\n", m.alpha->dtype.c_str(),
+                    lyc_prefix.c_str());
+            skipped++;
+            continue;
+        }
+
+        const int64_t      na = out * dim, nb = dim * in;
+        std::vector<float> w1a_f32((size_t) na), w1b_f32((size_t) nb), w2a_f32((size_t) na), w2b_f32((size_t) nb);
+        if (!adapter_to_f32(st_data(st, *m.w1a), w1a_f32.data(), na, m.w1a->dtype) ||
+            !adapter_to_f32(st_data(st, *m.w1b), w1b_f32.data(), nb, m.w1b->dtype) ||
+            !adapter_to_f32(st_data(st, *m.w2a), w2a_f32.data(), na, m.w2a->dtype) ||
+            !adapter_to_f32(st_data(st, *m.w2b), w2b_f32.data(), nb, m.w2b->dtype)) {
+            fprintf(stderr, "[Adapter] WARNING: unsupported dtype in LoHa module %s, skipping\n", lyc_prefix.c_str());
+            skipped++;
+            continue;
+        }
+
+        const float scaling = alpha / (float) dim;
+        float g_scale = adapter_group_scale_for(g_hotstep_params.adapter_group_scales, adapter_determine_group(gguf_name));
+        float effective_user_scale = user_scale * g_scale;
+
+        auto build = [&](struct ggml_context * ctx) {
+            // ggml ne = (cols, rows) of the row-major payload: w?_b (dim, in) ->
+            // [in, dim] plays A, w?_a (out, dim) -> [dim, out] plays B, so each
+            // product is mul_mat(cont(transpose(A)), B) = [in, out], exactly the
+            // trainer's graph (dit-adapter.h apply, loha branch).
+            struct ggml_tensor * tA1 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, in, dim);
+            struct ggml_tensor * tB1 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, dim, out);
+            struct ggml_tensor * tA2 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, in, dim);
+            struct ggml_tensor * tB2 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, dim, out);
+            struct ggml_tensor * d1  = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, tA1)), tB1);
+            struct ggml_tensor * d2  = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, tA2)), tB2);
+            struct ggml_tensor * tdelta = ggml_scale(ctx, ggml_mul(ctx, d1, d2), scaling);
+            if (conv_expand > 1) {
+                struct ggml_tensor * ttile = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, in * conv_expand, out);
+                tdelta                     = ggml_repeat(ctx, tdelta, ttile);
+            }
+            adapter_delta_build db;
+            db.tdelta = tdelta;
+            db.upload = [=]() {
+                ggml_backend_tensor_set(tA1, w1b_f32.data(), 0, (size_t) nb * sizeof(float));
+                ggml_backend_tensor_set(tB1, w1a_f32.data(), 0, (size_t) na * sizeof(float));
+                ggml_backend_tensor_set(tA2, w2b_f32.data(), 0, (size_t) nb * sizeof(float));
+                ggml_backend_tensor_set(tB2, w2a_f32.data(), 0, (size_t) na * sizeof(float));
+            };
+            return db;
+        };
+
+        std::vector<float> rebase_buf;
+        const float *      rebase_ptr = adapter_rebase_fetch(rebase_src, rebase_beta, gguf_name.c_str(), ne0, ne1, rebase_buf);
+
+        if (!adapter_merge_on_backend(wctx, pending_idx, base_ptr, ttype, ne0, ne1, nullptr, effective_user_scale,
+                                      backend, gguf_name.c_str(), build, promote_f32, rebase_ptr, rebase_beta)) {
+            skipped++;
+            continue;
+        }
+        if (rebase_ptr) {
+            nudged++;
+        }
+        merged++;
+    }
+
+    fprintf(stderr, "[Adapter] LoHa merged %d modules (%d skipped, %d basin-nudged) scale=%.2f\n", merged, skipped, nudged,
+            user_scale);
+    return merged > 0;
+}
+
 static bool adapter_merge_lokr(WeightCtx *          wctx,
                                const WeightSource & ws,
                                const STFile &    st,
@@ -1529,6 +1836,8 @@ static bool adapter_merge(WeightCtx *          wctx,
     bool ok;
     if (adapter_detect_lokr(st)) {
         ok = adapter_merge_lokr(wctx, ws, st, scale, backend, promote_f32, rebase_ptr, rebase_beta);
+    } else if (adapter_detect_loha(st)) {
+        ok = adapter_merge_loha(wctx, ws, st, scale, backend, promote_f32, rebase_ptr, rebase_beta);
     } else {
         ok = adapter_merge_lora(wctx, ws, st, cfg_dir, scale, backend, promote_f32, rebase_ptr, rebase_beta);
     }

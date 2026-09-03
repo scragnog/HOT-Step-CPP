@@ -268,7 +268,16 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
                                   const AdapterGroupScales & gs,
                                   ggml_backend_t             backend,
                                   bool                       zero_corr = false) {
-    int alpha_cfg = adapter_read_alpha(cfg_dir.c_str());
+    int        alpha_cfg  = adapter_read_alpha(cfg_dir.c_str());
+    const bool rslora_cfg = adapter_read_rslora(cfg_dir.c_str());
+    if (adapter_read_peft_type(cfg_dir.c_str()) == "HIRA") {
+        // The runtime low-rank path applies B(Ax) per forward; HiRA's delta is
+        // W (.) (BA) and cannot be factored that way. Merge mode only.
+        fprintf(stderr, "%s", "[Adapter] HiRA adapter cannot use the runtime low-rank path (delta depends on W) - "
+                              "use merge mode; refusing");
+        fputc(10, stderr);
+        return false;
+    }
 
     std::map<std::string, const STEntry *> a_map, b_map;
     std::map<std::string, float>           alpha_map;
@@ -397,7 +406,8 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
         else                               alpha = (float) rank;
 
         float g_scale = adapter_group_scale_for(gs, adapter_determine_group(gguf_name));
-        float scaling = (alpha / (float) rank) * scale * g_scale;
+        const float rank_div = rslora_cfg ? sqrtf((float) rank) : (float) rank;  // rsLoRA
+        float       scaling  = (alpha / rank_div) * scale * g_scale;
 
         // Per-tensor detail suppressed (uncomment for debugging)
         // fprintf(stderr, "[Adapter-RT]   %s → scaling=%.4f\n", gguf_name.c_str(), scaling);
@@ -791,6 +801,11 @@ static bool adapter_runtime_stage_file(DiTLoRA *                  lora,
     bool ok;
     if (adapter_detect_lokr(st)) {
         ok = adapter_runtime_lokr(lora, wctx, ws, st, adapter_scale, gs, backend, zero_corr);
+    } else if (adapter_detect_loha(st)) {
+        // A LoHa delta is a Hadamard of two products — not low-rank, so there
+        // is no factored runtime form. Merge mode materialises it instead.
+        fprintf(stderr, "[Adapter-RT] LoHa adapters have no runtime path (delta is not low-rank); use merge mode\n");
+        ok = false;
     } else {
         std::string cfg_dir;
         size_t slash = path_str.find_last_of("/\\");

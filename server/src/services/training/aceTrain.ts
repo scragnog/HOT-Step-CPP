@@ -356,6 +356,14 @@ export interface ResolvedTrainLmOptions {
    *  every leg of a staged chain, including resumes — this is a recipe knob
    *  like --lr, not an adapter-identity flag. */
   captionDropout: number;
+  rslora: boolean;
+  loraPlusRatio: number;
+  /** Soft prompt: '' = no token. Emitted on every leg; the engine adopts the
+   *  trained token/prefix from --init-adapter on a resume. */
+  artistToken: string;
+  artistTokenK: number;
+  artistTokenLr: number;
+  prefixN: number;
   /** Regularisation cadence. 0 = off, no --reg-* flags emitted at all. */
   regEvery: number;
   regTopk: number;
@@ -466,6 +474,16 @@ export function buildTrainLmArgs(input: {
   // just the first one. Only-non-default emission (same rule as --weights)
   // keeps an older ace-train.exe that predates these flags working.
   if (o.captionDropout > 0) args.push('--caption-dropout', String(o.captionDropout));
+  if (o.rslora && o.adapterType === 'lora') args.push('--rslora');
+  if (o.loraPlusRatio && o.loraPlusRatio !== 1) args.push('--lora-plus-ratio', String(o.loraPlusRatio));
+  // Soft prompt (token + prefix). These ARE adapter-identity flags, but they
+  // are emitted on every leg on purpose: the engine reads the trained vectors
+  // out of --init-adapter and only uses these to know the token is wanted.
+  if (o.artistToken) {
+    args.push('--artist-token', o.artistToken, '--artist-token-k', String(o.artistTokenK),
+              '--artist-token-lr', String(o.artistTokenLr));
+  }
+  if (o.prefixN > 0) args.push('--prefix-n', String(o.prefixN));
   if (o.regEvery > 0 && o.regCodes) {
     args.push('--reg-codes', o.regCodes);
     args.push('--reg-songs', String(o.regSongs));
@@ -499,6 +517,7 @@ export interface ResolvedTrainDitOptions {
   ditModel: string; ditPath: string;
   adapterName: string; adapterDir: string;
   adapterType: DitAdapterType; rank: number; alpha: number; targetMlp: boolean; dora?: boolean;
+  rslora?: boolean; loraPlusRatio?: number; hira?: boolean; loha?: boolean;
   // LyCORIS LoKR factors (K2 / plan §2.1). Always resolved regardless of
   // adapterType — buildTrainDitArgs only emits them when adapterType==='lokr'.
   lokrDim: number; lokrAlpha: number; lokrFactor: number; lokrDecomposeBoth: boolean;
@@ -630,6 +649,10 @@ export function buildTrainDitArgs(input: {
     ...(o.initAdapter ? ['--init-adapter', o.initAdapter] : []),
     ...(o.initAdapter ? [] : ['--adapter-type', o.adapterType]),
     ...(o.dora && o.adapterType === 'lora' ? ['--dora'] : []),
+    ...(o.rslora && o.adapterType === 'lora' ? ['--rslora'] : []),
+    ...(o.hira && o.adapterType === 'lora' && !o.dora ? ['--hira'] : []),
+    ...(o.loha && o.adapterType === 'lora' && !o.dora && !o.hira ? ['--loha'] : []),
+    ...(o.loraPlusRatio && o.loraPlusRatio !== 1 ? ['--lora-plus-ratio', String(o.loraPlusRatio)] : []),
     // §2.1: lora trains via --rank/--alpha; lokr via the four --lokr-* flags.
     // The two are mutually exclusive on the CLI side, so only one set is ever
     // emitted — sending both would be harmless (ace-train ignores the unused

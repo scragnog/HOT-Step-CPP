@@ -153,7 +153,15 @@ struct LmOptim {
     // otherwise be orthogonalised as if it were a weight — which it is not.
     std::vector<float>         lr_mul;
     std::vector<ggml_tensor *> adamw_only;
-    ggml_tensor *              t_adamw_alt = nullptr;  // [7], caller-allocated when used
+    // Alternate-LR groups: one [7] AdamW parameter tensor per DISTINCT non-1
+    // multiplier, owned here and assigned at each step. Four is enough for
+    // "soft prompt at 50x, LoRA+ B at 16x" with room to spare.
+    static const int           LM_ALT_MAX = 4;
+    ggml_context *             ctx_alt = nullptr;
+    ggml_backend_buffer_t      buf_alt = nullptr;
+    ggml_tensor *              alt_t[4] = { nullptr, nullptr, nullptr, nullptr };
+    float                      alt_mul[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    int                        n_alt = 0;
 
     // scalars, allocated by the caller in its static buffer
     ggml_tensor * t_adamw    = nullptr;  // [7] {alpha,beta1,beta2,eps,wd,beta1h,beta2h}
@@ -286,6 +294,15 @@ static void lm_optim_free(LmOptim * o) {
     if (o->ctx_mom) {
         ggml_free(o->ctx_mom);
     }
+    if (o->buf_alt) {
+        ggml_backend_buffer_free(o->buf_alt);
+    }
+    if (o->ctx_alt) {
+        ggml_free(o->ctx_alt);
+    }
+    o->buf_alt  = nullptr;
+    o->ctx_alt  = nullptr;
+    o->n_alt    = 0;
     o->buf_grad = nullptr;
     o->ctx_grad = nullptr;
     o->buf_mom  = nullptr;
@@ -321,6 +338,23 @@ static bool lm_optim_init(LmOptim * o, const std::vector<ggml_tensor *> & params
     if (!o->ctx_grad || !o->ctx_mom) {
         *err = "cannot create the optimizer contexts";
         return false;
+    }
+    {
+        ggml_init_params p = { (size_t) (LmOptim::LM_ALT_MAX + 2) * ggml_tensor_overhead(), nullptr, true };
+        o->ctx_alt         = ggml_init(p);
+        if (!o->ctx_alt) {
+            *err = "cannot create the optimizer alt-LR context";
+            return false;
+        }
+        for (int k = 0; k < LmOptim::LM_ALT_MAX; k++) {
+            o->alt_t[k] = ggml_new_tensor_1d(o->ctx_alt, GGML_TYPE_F32, 7);
+            ggml_set_input(o->alt_t[k]);
+        }
+        o->buf_alt = ggml_backend_alloc_ctx_tensors(o->ctx_alt, backend);
+        if (!o->buf_alt) {
+            *err = "cannot allocate the optimizer alt-LR tensors";
+            return false;
+        }
     }
 
     o->acc.resize(n);
@@ -702,6 +736,27 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
     }
     ggml_cgraph * go = ggml_new_graph_custom(ctx, (size_t) (o->est_nodes > 0 ? o->est_nodes : 8192), /*grads=*/false);
 
+    // Assign each DISTINCT non-1 multiplier an alt tensor, before any node is
+    // built, so the choice below is stable and the fill after the graph agrees.
+    o->n_alt = 0;
+    for (size_t j = 0; j < o->lr_mul.size(); j++) {
+        const float m = o->lr_mul[j];
+        if (m == 1.0f) {
+            continue;
+        }
+        bool seen = false;
+        for (int k = 0; k < o->n_alt; k++) {
+            if (o->alt_mul[k] == m) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) {
+            GGML_ASSERT(o->n_alt < LmOptim::LM_ALT_MAX && "more distinct lr_mul values than alt-LR slots");
+            o->alt_mul[o->n_alt++] = m;
+        }
+    }
+
     // (a) global squared L2 norm of every accumulator.
     //
     // Reduced as a BALANCED TREE, not the plan's left-fold: a left-fold is a
@@ -744,9 +799,15 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
         ggml_tensor * g = c ? ggml_mul(ctx, o->acc[j], c) : o->acc[j];  // [1] broadcasts
 
         if (o->rule[j] != LM_RULE_MUON) {
-            const bool    alt = (o->lr_mul[j] != 1.0f);
-            ggml_tensor * pa  = alt ? o->t_adamw_alt : o->t_adamw;
-            GGML_ASSERT(pa && "a parameter has lr_mul != 1 but no t_adamw_alt was allocated");
+            ggml_tensor * pa = o->t_adamw;
+            if (o->lr_mul[j] != 1.0f) {
+                for (int k = 0; k < o->n_alt; k++) {
+                    if (o->alt_mul[k] == o->lr_mul[j]) {
+                        pa = o->alt_t[k];
+                        break;
+                    }
+                }
+            }
             ggml_build_forward_expand(go, ggml_opt_step_adamw(ctx, o->params[j], g, o->mom_m[j], o->mom_v[j], pa));
         }
         // Muon parameters are handled below, a whole shape bucket at a time.
@@ -816,20 +877,11 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
                           1.0f / (1.0f - powf(0.9f, (float) o->opt_iter)),
                           1.0f / (1.0f - powf(0.999f, (float) o->opt_iter)) };
     ggml_backend_tensor_set(o->t_adamw, p7, 0, sizeof(p7));
-    if (o->t_adamw_alt) {
-        // One alternate multiplier. If two parameters disagree that is a wiring
-        // bug, not a configuration — say so instead of silently using one.
-        float mul = 1.0f;
-        for (size_t j = 0; j < o->lr_mul.size(); j++) {
-            if (o->lr_mul[j] != 1.0f) {
-                GGML_ASSERT((mul == 1.0f || mul == o->lr_mul[j]) && "more than one distinct lr_mul; only one alt group");
-                mul = o->lr_mul[j];
-            }
-        }
+    for (int k = 0; k < o->n_alt; k++) {
         float p7a[7];
         memcpy(p7a, p7, sizeof(p7a));
-        p7a[0] = lr * mul;
-        ggml_backend_tensor_set(o->t_adamw_alt, p7a, 0, sizeof(p7a));
+        p7a[0] = lr * o->alt_mul[k];
+        ggml_backend_tensor_set(o->alt_t[k], p7a, 0, sizeof(p7a));
     }
 
     ggml_backend_sched_reset(sched);

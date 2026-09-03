@@ -67,6 +67,18 @@ struct DitTrainArgs {
     // of the LoRA direction. The merge path already reads it
     // (adapter-merge.h lora_magnitude_vector); this is the trainer half.
     bool        dora         = false;
+    // rsLoRA: alpha/sqrt(r) scaling. Trainer and merge path read the same
+    // use_rslora flag from adapter_config.json; never set one without the other.
+    bool        rslora       = false;
+    // HiRA: W + W (.) (BA). LoRA only, not with DoRA. Wants the checkpointed
+    // path (a full [in,out] delta per site is retained for backward).
+    bool        hira         = false;
+    // LoHa (LyCORIS): (B1A1) (.) (B2A2). LoRA-shaped pairs x2, exported in the
+    // LyCORIS layout. Not with DoRA or HiRA. Same VRAM class as HiRA plus one.
+    bool        loha         = false;
+    // LoRA+ (Hayou 2024): B at ratio x A's learning rate; 1 = off. AdamW-rule
+    // tensors only — Muon scales its own update and ignores lr_mul.
+    float       lora_plus_ratio = 1.0f;
     // ON by default: an attention-only LoRA leaves the MLP projections — where
     // most of the timbre lives — frozen. --no-target-mlp turns it back off.
     bool        target_mlp = true;
@@ -675,6 +687,8 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
     vm.rank        = a.rank;
     vm.target_mlp  = a.target_mlp;
     vm.is_lokr     = is_lokr;
+    vm.hira        = a.hira;
+    vm.loha        = a.loha;
     vm.lokr_dim    = a.lokr_dim;
     vm.lokr_factor = a.lokr_factor;
     vm.mirror      = mirror_mode;
@@ -1071,6 +1085,21 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         cfg.alpha               = (float) a.alpha;
         cfg.target_mlp          = a.target_mlp;
         cfg.dora                = a.dora;
+        cfg.rslora              = a.rslora;
+        cfg.hira                = a.hira;
+        cfg.loha                = a.loha;
+        if (a.loha && (a.adapter_type != "lora" || a.dora || a.hira)) {
+            lm_fatal("args", "--loha applies to the LoRA parameterization only and cannot combine with --dora or --hira");
+            return 1;
+        }
+        if (a.hira && (a.adapter_type != "lora" || a.dora)) {
+            lm_fatal("args", "--hira applies to the LoRA parameterization only and cannot combine with --dora");
+            return 1;
+        }
+        if (a.rslora && a.adapter_type != "lora") {
+            lm_fatal("args", "--rslora applies to the LoRA parameterization only");
+            return 1;
+        }
         if (a.dora && a.adapter_type != "lora") {
             lm_fatal("args", "--dora applies to the LoRA parameterization only (LoKr has no per-row direction to rescale)");
             return 1;
@@ -1101,6 +1130,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
         size_t expect =
             is_lokr ? dit_lokr_expected_params(c, lora_lo, L, a.lokr_dim, a.lokr_factor, a.target_mlp)
                     : dit_lora_expected_params(c, lora_lo, L, a.rank, a.target_mlp);
+        if (a.loha && !is_lokr) {
+            expect *= 2;  // the second (A2, B2) pair mirrors the first exactly
+        }
         if (a.dora && !is_lokr) {
             // DoRA adds one magnitude per output row at every trained site. The
             // VRAM model is left unaware: ~1.3M floats on the 32-layer DiT, and
@@ -1248,6 +1280,33 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             ggml_free(ctx_static);
             dit_train_free(&M);
             return 1;
+        }
+        if (a.lora_plus_ratio != 1.0f && !is_lokr) {
+            // B tensors are recognised by name (".lora_B"), which is adapter-
+            // agnostic and leaves DoRA's magnitude vectors alone.
+            int n_b = 0, n_muon_b = 0;
+            const std::vector<ggml_tensor *> & pv = adapter->params();
+            for (size_t i = 0; i < pv.size(); i++) {
+                const char * nm = ggml_get_name(pv[i]);
+                const size_t ln = strlen(nm);
+                if (ln < 7 || strcmp(nm + ln - 7, ".lora_B") != 0) {
+                    continue;
+                }
+                auto it = opt.param_slot.find(pv[i]);
+                if (it == opt.param_slot.end()) {
+                    continue;
+                }
+                if (opt.rule[(size_t) it->second] == LM_RULE_MUON) {
+                    n_muon_b++;
+                    continue;
+                }
+                lm_optim_set_lr_mul(&opt, pv[i], a.lora_plus_ratio);
+                n_b++;
+            }
+            char lp[192];
+            snprintf(lp, sizeof(lp), "LoRA+: B at x%.1f the base LR on %d tensors%s", a.lora_plus_ratio, n_b,
+                     n_muon_b ? " (Muon-rule B tensors ignore it)" : "");
+            lm_log("info", lp);
         }
     }
     opt.t_adamw      = t_adamw;
@@ -1849,6 +1908,9 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                                                                     (double) std::max(1, enc_S) * Bf)
                                    : dit_lokr_apply_arena_bytes(c, L - Kr, L, vm.lokr_dim, vm.lokr_factor,
                                                                 vm.target_mlp, S_max * std::max(1, B));
+            }
+            if (vm.hira || vm.loha) {
+                aest += dit_hira_apply_arena_bytes(c, L - Kr, L, vm.target_mlp, vm.hira ? 2.0 : 3.0);
             }
             const size_t ameas = M.sched ? ggml_backend_sched_get_buffer_size(M.sched, M.backend) : 0;
             fprintf(stderr,

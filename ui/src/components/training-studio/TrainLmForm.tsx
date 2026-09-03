@@ -69,6 +69,14 @@ export interface TrainLmFormState {
    *  memorising caption -> codes (2026-09-02, ported from the MM3 LM
    *  trainer). 0 = off. */
   captionDropout: number;
+  /** Parameterization + soft prompt (2026-09-04). LoRA type only. The artist
+   *  token and prefix train WITH the LoRA and ship in the same file. */
+  rslora: boolean;
+  loraPlusRatio: number;
+  artistToken: string;
+  artistTokenK: number;
+  artistTokenLr: number;
+  prefixN: number;
   /** Prior preservation (2026-09-02): every Nth step regularises against an
    *  UNRELATED corpus's own base-model predictions instead of the artist's
    *  codes. 0 = off. The corpus is picked automatically server-side. */
@@ -193,6 +201,14 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   // than the cached prior. The server route's fallbacks track these numbers so
   // a batch-pipeline run (empty option bag) trains the same recipe.
   captionDropout: 0.3,
+  rslora: false,
+  loraPlusRatio: 1,
+  // Off until named. k=32 / lr 5e-3 / prefix 8 is the measured recipe
+  // (mj_dangerous, 2026-09-04): k=32 beat k=8 on every eval metric.
+  artistToken: '',
+  artistTokenK: 32,
+  artistTokenLr: 0.005,
+  prefixN: 8,
   regEvery: 3,
   regTopk: 64,
   regSongs: 24,
@@ -441,6 +457,56 @@ export const TrainLmForm: React.FC<Props> = ({
           </label>
         )}
       </div>
+
+      {/* ── Soft prompt + parameterization (2026-09-04) ──────────────────
+          A named artist token adds k learned embedding vectors behind a
+          placeholder in every caption; a prefix adds n K/V columns per
+          layer. Both train alongside the LoRA and live in the same adapter
+          file; the engine applies them automatically at generation. The
+          soft prompt learns ~50x faster than the LoRA, so the 1.5 target
+          loss fires early — 0 (no auto-stop) is the honest setting here. */}
+      {value.adapterType === 'lora' && (
+      <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
+        <span className="text-[11px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.softPromptGroup')}</span>
+        <label className="flex flex-col gap-1.5">
+          {P('artistToken', 'Off when blank · letters, digits, _ -')}
+          <input
+            type="text" maxLength={64} placeholder="e.g. mjdangerous"
+            value={value.artistToken} disabled={lock}
+            onChange={(e) => onChange({ artistToken: e.target.value.replace(/[^A-Za-z0-9_-]/g, '') })}
+            className={FIELD}
+          />
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          <label className="flex flex-col gap-1.5">
+            {P('artistTokenK', 'Default 32 · 1–256')}
+            <input type="number" min={1} max={256} step={1} value={value.artistTokenK} disabled={lock || !value.artistToken}
+              onChange={(e) => onChange({ artistTokenK: num(e.target.value, 32) })} className={FIELD} />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            {P('artistTokenLr', 'Default 0.005')}
+            <input type="number" min={0} max={1} step={0.0005} value={value.artistTokenLr} disabled={lock || !value.artistToken}
+              onChange={(e) => onChange({ artistTokenLr: num(e.target.value, 0.005) })} className={FIELD} />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            {P('prefixN', 'Default 8 · 0 = off · 0–64')}
+            <input type="number" min={0} max={64} step={1} value={value.prefixN} disabled={lock}
+              onChange={(e) => onChange({ prefixN: num(e.target.value, 0) })} className={FIELD} />
+          </label>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 mt-1">
+          <input type="checkbox" checked={value.rslora} disabled={lock} className="accent-amber-500"
+            onChange={(e) => onChange({ rslora: e.target.checked })} />
+          {P('rslora', 'Default off', CHECK_LABEL)}
+        </label>
+        <label className="flex flex-col gap-1.5">
+          {P('loraPlusRatio', 'Default 1 = off · paper 16 · AdamW/Prodigy only')}
+          <input type="number" min={1} max={64} step={1} value={value.loraPlusRatio} disabled={lock}
+            onChange={(e) => onChange({ loraPlusRatio: Math.max(1, num(e.target.value, 1)) })} className={FIELD} />
+        </label>
+        <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.softPromptGroupHelp')}</span>
+      </div>
+      )}
 
       {/* ── Caption dropout + prior preservation (2026-09-02) ───────────
           Ported from the MM3 LM trainer's two levers — see

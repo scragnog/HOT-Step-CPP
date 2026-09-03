@@ -643,6 +643,20 @@ export interface TrainLmOptions {
    *  default. 'lokr' writes lokr_weights.safetensors in the SAME LyCORIS layout
    *  the DiT trainer writes, gated by the LK1/LK2 rungs. */
   adapterType?: 'lora' | 'lokr';   // default 'lora'
+  /** Learned artist token (2026-09-03): k embedding vectors behind a placeholder
+   *  spliced into every training caption, trained WITH the LoRA and stored in
+   *  the same adapter_model.safetensors (hot_step.artist_token.*). Applied at
+   *  inference automatically when the adapter loads. '' = off. */
+  artistToken?: string;
+  artistTokenK?: number;           // default 32 (k=32 beat k=8 on every eval metric, 2026-09-04), 1..256
+  artistTokenLr?: number;          // default 5e-3 — the soft prompt wants ~50x the LoRA's LR
+  /** Prefix tuning: n trainable K/V columns per layer, same file
+   *  (hot_step.prefix.*). 0 = off. Forces head-blocked attention off. */
+  prefixN?: number;                // default 0; 8 is the measured recipe
+  /** rsLoRA: alpha/sqrt(r) scaling; written as use_rslora and honoured at load. LoRA only. */
+  rslora?: boolean;
+  /** LoRA+: B tensors at ratio x A's learning rate. 1 = off. AdamW-rule tensors only. */
+  loraPlusRatio?: number;
   /** Optimizer (2026-07-30). 'adamw' is the default and the shipped path.
    *  'muon' puts every 2-D parameter whose short side is >= 16 on
    *  orthogonalized-momentum updates — FOR A LoRA THE SHORT SIDE IS THE RANK,
@@ -840,6 +854,14 @@ export interface TrainDitOptions {
   /** DoRA: learn a per-output-row magnitude over the LoRA direction (LoRA only).
    *  Exported as lora_magnitude_vector, which the merge path already reads. */
   dora?: boolean;
+  /** HiRA: W + W (.) (BA). LoRA only, not with dora; merge-only at load. */
+  hira?: boolean;
+  /** LoHa (LyCORIS): two LoRA pairs, Hadamard-combined. LoRA type only; not with dora/hira. */
+  loha?: boolean;
+  /** rsLoRA: alpha/sqrt(r) scaling; written as use_rslora and honoured by merge + runtime. LoRA only. */
+  rslora?: boolean;
+  /** LoRA+: B tensors at ratio x A's learning rate. 1 = off. AdamW-rule tensors only. */
+  loraPlusRatio?: number;
   rank?: number;                   // default 128 (adapterType==='lora' only)
   alpha?: number;                  // default 256 (adapterType==='lora' only)
   /** LyCORIS LoKR factors, per Rob's Uber-LoKR-4 preset (K2). Ignored unless

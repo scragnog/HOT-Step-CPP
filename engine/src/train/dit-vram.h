@@ -31,6 +31,27 @@
 // docs/plans/2026-07-28-dit-trainer-implementation.md §3.7
 
 #include "train/dit-adapter-lokr.h"
+
+// HiRA's apply() materialises delta = A.B and wd = W (.) delta, both [in,out]
+// F32, per trained site, and both are retained for the backward. That is a
+// weight-sized pair per site the fitted arena polynomial never saw — exactly
+// the class of term dit_lokr_apply_arena_bytes exists for. Independent of S.
+// n_full = weight-sized F32 tensors retained per site: HiRA 2 (delta, W (.) delta),
+// LoHa 3 (two products and their Hadamard).
+static double dit_hira_apply_arena_bytes(const DiTGGMLConfig & c, int lo, int hi, bool target_mlp,
+                                         double n_full = 2.0) {
+    if (hi <= lo) {
+        return 0.0;
+    }
+    int64_t sites[DIT_NSITES][2];
+    dit_lokr_site_dims(c, sites);
+    const int n_sites   = target_mlp ? DIT_NSITES : DIT_NSITES_ATTN;
+    double    per_layer = 0.0;
+    for (int s = 0; s < n_sites; s++) {
+        per_layer += n_full * (double) sites[s][0] * (double) sites[s][1] * 4.0;
+    }
+    return per_layer * (double) (hi - lo);
+}
 #include "train/dit-adapter.h"
 #include "train/dit-mirror.h"
 #include "train/gpu-mem.h"
@@ -50,6 +71,8 @@ struct DitVramModel {
     // Adapter parameterization: the params term is the only footprint that
     // differs, and the arena polynomial is reused as-is (K10).
     bool is_lokr     = false;
+    bool hira        = false;  // HiRA: [in,out] delta + Hadamard per site retained for backward
+    bool loha        = false;  // LoHa: two [in,out] products + Hadamard per site
     int  lokr_dim    = 512;
     int  lokr_factor = 6;
     // Mirror precision: the fixed term is the mirror, so this is the single
@@ -479,6 +502,9 @@ static double dit_vram_total_bytes(const DitVramModel & vm, int crop, int K) {
                                                              (double) std::max(1, vm.enc_S) * Bf)
                            : dit_lokr_apply_arena_bytes(vm.m->cfg, vm.n_layers - Kr, vm.n_layers, vm.lokr_dim,
                                                         vm.lokr_factor, vm.target_mlp, S * std::max(1, vm.batch));
+    }
+    if (vm.hira || vm.loha) {
+        b += dit_hira_apply_arena_bytes(vm.m->cfg, vm.n_layers - Kr, vm.n_layers, vm.target_mlp, vm.hira ? 2.0 : 3.0);
     }
     return b;
 }

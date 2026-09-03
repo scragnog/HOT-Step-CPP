@@ -2912,6 +2912,14 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       batch,
       bwd,
       captionDropout,
+      rslora: body.rslora === true,
+      loraPlusRatio: numOpt(body.loraPlusRatio, 1),
+      // Soft prompt: the name becomes a safetensors key, so keep it to a slug.
+      artistToken: typeof body.artistToken === 'string'
+        ? body.artistToken.trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) : '',
+      artistTokenK: Math.min(256, Math.max(1, Math.trunc(numOpt(body.artistTokenK, 32)))),
+      artistTokenLr: Math.min(1, Math.max(0, numOpt(body.artistTokenLr, 0.005))),
+      prefixN: Math.min(64, Math.max(0, Math.trunc(numOpt(body.prefixN, 0)))),
       regEvery,
       regTopk,
       regSongs,
@@ -3352,6 +3360,10 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       // channelBalance/stopEngine, so an omitting client gets the default.
       targetMlp: body.targetMlp !== false,
       dora: body.dora === true,
+      hira: body.hira === true,
+      loha: body.loha === true,
+      rslora: body.rslora === true,
+      loraPlusRatio: numOpt(body.loraPlusRatio, 1),
       layers: Math.trunc(layers),
       crop: Math.trunc(crop),
       cropMin: Math.trunc(cropMin),

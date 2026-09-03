@@ -101,6 +101,16 @@ struct DitAdapterCfg {
     float    b_sigma    = 0.0f;  // >0 only for the finite-difference self-test
     // DoRA: learned per-output-row magnitude over the LoRA direction. LoRA only.
     bool     dora       = false;
+    // rsLoRA (Kalajdzievski 2023): scale alpha/sqrt(r) instead of alpha/r, so
+    // the update does not shrink with rank. At r128 that is an 11x difference.
+    bool     rslora     = false;
+    // HiRA (Huang et al., ICLR 2025): W' = W + W (.) (s*BA). Same A/B and
+    // parameter count as LoRA, but the update is modulated elementwise by the
+    // base, so its effective rank is high. Materialises a [in,out] delta per
+    // site in-graph — retained for backward — so it wants the checkpointed
+    // path. LoRA only; not with DoRA.
+    bool     hira       = false;
+    bool     loha       = false;  // LoHa (LyCORIS): (B1A1) (.) (B2A2); rank = dim
     // LoKR (dit-adapter-lokr.h); ignored by the LoRA implementation.
     int   lokr_dim            = 512;
     float lokr_alpha          = 512.0f;
@@ -180,6 +190,19 @@ struct DitAdapter {
 
 // ─── LoRA ───────────────────────────────────────────────────────────────────
 
+// LyCORIS key stem "lycoris_layers_<l>_<site>" (dots in the PEFT site name
+// become underscores). Shared by the LoHa export below and the LoKr exporter in
+// dit-adapter-lokr.h, which is included after this header.
+static inline std::string dit_lycoris_key_stem(int l, int s) {
+    std::string site_key(dit_site_peft(s));
+    for (size_t i = 0; i < site_key.size(); i++) {
+        if (site_key[i] == '.') {
+            site_key[i] = '_';
+        }
+    }
+    return "lycoris_layers_" + std::to_string(l) + "_" + site_key;
+}
+
 struct DitLoraPair {
     ggml_tensor * A = nullptr;  // [in, r]
     ggml_tensor * B = nullptr;  // [r, out]
@@ -191,6 +214,11 @@ struct DitLoraPair {
     // way. Both nullptr unless cfg.dora.
     ggml_tensor * m   = nullptr;  // [out] param, init ||W||_col
     ggml_tensor * nrm = nullptr;  // [out] constant per window
+    // LoHa (LyCORIS, Hyeon-Woo 2021): delta = (A1 B1) (.) (A2 B2). The second
+    // pair shares A/B's shapes; both products are materialised in-graph like
+    // HiRA's delta. Both nullptr unless cfg.loha.
+    ggml_tensor * A2 = nullptr;  // [in, r]
+    ggml_tensor * B2 = nullptr;  // [r, out]
 };
 
 struct DitAdapterLora final : DitAdapter {
@@ -202,6 +230,9 @@ struct DitAdapterLora final : DitAdapter {
     float  alpha = 0.0f, scale = 1.0f;
     size_t n_params = 0;
     bool      dora  = false;
+    bool      rslora = false;
+    bool      hira  = false;
+    bool      loha  = false;
     DiTGGML * model = nullptr;  // the base weights, for the DoRA norm pass
     std::vector<uint8_t> norm_arena;
 
@@ -238,13 +269,19 @@ struct DitAdapterLora final : DitAdapter {
         hi      = hi_;
         rank    = cfg.rank;
         alpha   = cfg.alpha;
-        scale   = cfg.alpha / (float) cfg.rank;
+        rslora  = cfg.rslora;
+        hira    = cfg.hira;
+        loha    = cfg.loha;
+        // rsLoRA: alpha/sqrt(r). Applied IN-GRAPH here and re-derived by the
+        // merge path from use_rslora in adapter_config.json — the two must
+        // agree or every adapter merges at the wrong strength, silently.
+        scale   = rslora ? cfg.alpha / sqrtf((float) cfg.rank) : cfg.alpha / (float) cfg.rank;
         n_sites = cfg.target_mlp ? DIT_NSITES : DIT_NSITES_ATTN;
         dora    = cfg.dora;
         model   = m;
         layers.assign((size_t) (hi - lo), std::array<DitLoraPair, DIT_NSITES>{});
 
-        const int n_ten = (hi - lo) * n_sites * (dora ? 4 : 2);
+        const int n_ten = (hi - lo) * n_sites * ((dora ? 4 : 2) + (loha ? 2 : 0));
         {
             ggml_init_params p = { (size_t) (n_ten + 8) * ggml_tensor_overhead(), nullptr, true };
             ctx                = ggml_init(p);
@@ -275,6 +312,18 @@ struct DitAdapterLora final : DitAdapter {
                 ggml_set_param(pr.B);
                 par.push_back(pr.A);
                 par.push_back(pr.B);
+                if (loha) {
+                    pr.A2 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, w->ne[0], rank);
+                    pr.B2 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, rank, w->ne[1]);
+                    snprintf(nm, sizeof(nm), "L%d.%s.hada_A2", l, dit_site_peft(s));
+                    ggml_set_name(pr.A2, nm);
+                    snprintf(nm, sizeof(nm), "L%d.%s.hada_B2", l, dit_site_peft(s));
+                    ggml_set_name(pr.B2, nm);
+                    ggml_set_param(pr.A2);
+                    ggml_set_param(pr.B2);
+                    par.push_back(pr.A2);
+                    par.push_back(pr.B2);
+                }
                 if (dora) {
                     pr.m   = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, w->ne[1]);
                     pr.nrm = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, w->ne[1]);
@@ -326,6 +375,29 @@ struct DitAdapterLora final : DitAdapter {
                 ggml_backend_tensor_set(pr.A, a.data(), 0, a.size() * sizeof(float));
                 ggml_backend_tensor_set(pr.B, b.data(), 0, b.size() * sizeof(float));  // true PEFT init: B = 0
                 n_params += a.size() + b.size();
+                if (loha && pr.A2 && pr.B2) {
+                    // LyCORIS's own init, mapped (w?_b -> A, w?_a -> B): w1_b ~ N(0,1),
+                    // w1_a ~ N(0,0.1), w2_b ~ N(0,1), w2_a = 0. The zero B2 makes the
+                    // first forward exactly the base; a NON-zero B1 is what gives B2 a
+                    // gradient at all (its grad carries A1B1), so the plain-LoRA fill
+                    // above is overwritten for pair 1 here.
+                    lm_rng_fill_normal(&rng, a, 1.0f);
+                    lm_rng_fill_normal(&rng, b, 0.1f);
+                    ggml_backend_tensor_set(pr.A, a.data(), 0, a.size() * sizeof(float));
+                    ggml_backend_tensor_set(pr.B, b.data(), 0, b.size() * sizeof(float));
+                    lm_rng_fill_normal(&rng, a, 1.0f);
+                    // b_sigma > 0 is the finite-difference rung asking for a non-zero
+                    // B2: with B2 == 0 the whole delta is 0 and dL/dA1, dL/dB1,
+                    // dL/dA2 are exactly zero, which FD can only compare to noise.
+                    if (cfg.b_sigma > 0.0f) {
+                        lm_rng_fill_normal(&rng, b, cfg.b_sigma);
+                    } else {
+                        std::fill(b.begin(), b.end(), 0.0f);
+                    }
+                    ggml_backend_tensor_set(pr.A2, a.data(), 0, a.size() * sizeof(float));
+                    ggml_backend_tensor_set(pr.B2, b.data(), 0, b.size() * sizeof(float));
+                    n_params += a.size() + b.size();
+                }
             }
         }
         if (dora) {
@@ -420,6 +492,28 @@ struct DitAdapterLora final : DitAdapter {
     ggml_tensor * apply(ggml_context * ctx_g, ggml_tensor * w, int layer, int site, ggml_tensor * x) const override {
         ggml_tensor *       y = ggml_mul_mat(ctx_g, w, x);
         const DitLoraPair * p = pair(layer, site);
+        if (p && loha && p->A2 && p->B2) {
+            // LoHa: y += (s * (A1B1) (.) (A2B2)) x. Two full [in, out] products
+            // and their Hadamard, all retained for backward — the same cost class
+            // as HiRA plus one more weight-sized tensor (dit-vram.h n_full = 3).
+            ggml_tensor * d1 = ggml_mul_mat(ctx_g, ggml_cont(ctx_g, ggml_transpose(ctx_g, p->A)), p->B);
+            ggml_tensor * d2 = ggml_mul_mat(ctx_g, ggml_cont(ctx_g, ggml_transpose(ctx_g, p->A2)), p->B2);
+            ggml_tensor * wd = ggml_scale(ctx_g, ggml_mul(ctx_g, d1, d2), scale);
+            y                = ggml_add(ctx_g, y, ggml_mul_mat(ctx_g, wd, x));
+            return y;
+        }
+        if (p && hira) {
+            // HiRA: y += (W (.) s*BA) x. The delta is a full [in, out] tensor:
+            // delta = A[in,r] . B[r,out] via mul_mat(cont(transpose(A)), B),
+            // then the Hadamard with W (cast to F32 if the mirror kept BF16).
+            // Both mul_mat srcs need grads (A/B through delta), which ggml
+            // provides via out_prod on src0 — the same path a LoRA's A uses.
+            ggml_tensor * wf    = (w->type == GGML_TYPE_F32) ? w : ggml_cast(ctx_g, w, GGML_TYPE_F32);
+            ggml_tensor * delta = ggml_scale(ctx_g, ggml_mul_mat(ctx_g, ggml_cont(ctx_g, ggml_transpose(ctx_g, p->A)), p->B), scale);
+            ggml_tensor * wd    = ggml_mul(ctx_g, wf, delta);
+            y                   = ggml_add(ctx_g, y, ggml_mul_mat(ctx_g, wd, x));
+            return y;
+        }
         if (p) {
             ggml_tensor * t = ggml_scale(ctx_g, ggml_mul_mat(ctx_g, p->A, x), scale);  // alpha/rank in-graph
             y               = ggml_add(ctx_g, y, ggml_mul_mat(ctx_g, p->B, t));
@@ -444,7 +538,7 @@ struct DitAdapterLora final : DitAdapter {
         // adapter_config.json is written FIRST (D19): a missing/unparseable file
         // silently degrades the scale to 1.0 with only a warning.
         if (!dit_write_adapter_config(d, rank, (int) (alpha + 0.5f), n_sites == DIT_NSITES, meta.base_model_path,
-                                      dora)) {
+                                      dora, rslora, loha ? "LOHA" : hira ? "HIRA" : "LORA")) {
             *err = "cannot write adapter_config.json in " + d;
             return false;
         }
@@ -457,6 +551,33 @@ struct DitAdapterLora final : DitAdapter {
         for (int l = lo; l < hi; l++) {
             for (int s = 0; s < n_sites; s++) {
                 const DitLoraPair & pr = layers[(size_t) (l - lo)][(size_t) s];
+                if (loha && pr.A2 && pr.B2) {
+                    // LyCORIS LoHa layout, the one adapter-merge.h's LoHa branch and
+                    // LyCORIS itself read: lycoris_layers_<l>_<site>.hada_w{1,2}_{a,b}
+                    // + .alpha. Row-major w?_a = (out, dim) is our B, w?_b = (dim, in)
+                    // is our A. Stem shared with the LoKr exporter.
+                    const std::string stem    = dit_lycoris_key_stem(l, s);
+                    ggml_tensor *     four[4] = { pr.B, pr.A, pr.B2, pr.A2 };
+                    const char *      sfx[4]  = { "hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b" };
+                    for (int k = 0; k < 4; k++) {
+                        ggml_tensor * t = four[k];
+                        store.push_back(std::vector<float>((size_t) ggml_nelements(t)));
+                        std::vector<float> & bufv = store.back();
+                        ggml_backend_tensor_get(t, bufv.data(), 0, bufv.size() * sizeof(float));
+                        STWTensor st;
+                        st.name  = stem + "." + sfx[k];
+                        st.shape = { t->ne[1], t->ne[0] };
+                        st.data  = bufv.data();
+                        tensors.push_back(st);
+                    }
+                    store.push_back(std::vector<float>(1, alpha));
+                    STWTensor sa;
+                    sa.name  = stem + ".alpha";
+                    sa.shape = { 1 };
+                    sa.data  = store.back().data();
+                    tensors.push_back(sa);
+                    continue;
+                }
                 ggml_tensor *       both[2] = { pr.A, pr.B };
                 const char *        suffix[2] = { "lora_A", "lora_B" };
                 for (int k = 0; k < 2; k++) {
@@ -530,11 +651,12 @@ struct DitAdapterLora final : DitAdapter {
 
     // ─── adapter_config.json (§2.3 literal) ─────────────────────────────────
     static bool dit_write_adapter_config(const std::string & dir, int r, int lora_alpha, bool target_mlp,
-                                         const std::string & base_model, bool dora = false) {
+                                         const std::string & base_model, bool dora = false, bool rslora = false,
+                                         const char * peft_type = "LORA") {
         std::string j;
         char        b[96];
         j += "{\n";
-        j += "  \"peft_type\": \"LORA\",\n";
+        j += std::string("  \"peft_type\": \"") + peft_type + "\",\n";
         j += "  \"task_type\": null,\n";
         j += "  \"auto_mapping\": null,\n";
         j += "  \"base_model_name_or_path\": \"" + lm_json_escape(base_model) + "\",\n";
@@ -548,7 +670,7 @@ struct DitAdapterLora final : DitAdapter {
         j += "  \"inference_mode\": true,\n";
         j += "  \"init_lora_weights\": true,\n";
         j += std::string("  \"use_dora\": ") + (dora ? "true" : "false") + ",\n";
-        j += "  \"use_rslora\": false,\n";
+        j += std::string("  \"use_rslora\": ") + (rslora ? "true" : "false") + ",\n";
         j += "  \"rank_pattern\": {},\n";
         j += "  \"alpha_pattern\": {},\n";
         j += "  \"modules_to_save\": null,\n";

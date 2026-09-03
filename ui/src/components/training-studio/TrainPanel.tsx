@@ -259,6 +259,14 @@ export const TrainPanel: React.FC = () => {
       // moved off default, same rule as the speed levers above — a normal
       // start posts the same body it always did.
       ...(form.captionDropout > 0 ? { captionDropout: form.captionDropout } : {}),
+      // Parameterization + soft prompt (2026-09-04): only when moved off
+      // default, LoRA type only — the server ignores them under lokr anyway.
+      ...(form.adapterType === 'lora' && form.rslora ? { rslora: true } : {}),
+      ...(form.adapterType === 'lora' && form.loraPlusRatio !== 1 ? { loraPlusRatio: form.loraPlusRatio } : {}),
+      ...(form.adapterType === 'lora' && form.artistToken
+        ? { artistToken: form.artistToken, artistTokenK: form.artistTokenK, artistTokenLr: form.artistTokenLr }
+        : {}),
+      ...(form.adapterType === 'lora' && form.prefixN > 0 ? { prefixN: form.prefixN } : {}),
       ...(form.regEvery > 0
         ? {
             regEvery: form.regEvery, regTopk: form.regTopk, regSongs: form.regSongs,
@@ -293,6 +301,11 @@ export const TrainPanel: React.FC = () => {
           }
         : { rank: ditForm.rank, alpha: ditForm.alpha }),
       targetMlp: ditForm.targetMlp,
+      ...(ditForm.adapterType === 'lora' && ditForm.dora ? { dora: true } : {}),
+      ...(ditForm.adapterType === 'lora' && ditForm.hira ? { hira: true } : {}),
+      ...(ditForm.adapterType === 'lora' && ditForm.loha ? { loha: true } : {}),
+      ...(ditForm.adapterType === 'lora' && ditForm.rslora ? { rslora: true } : {}),
+      ...(ditForm.adapterType === 'lora' && ditForm.loraPlusRatio !== 1 ? { loraPlusRatio: ditForm.loraPlusRatio } : {}),
       layers: ditForm.layers,
       crop: ditForm.crop,
       cropMin: ditForm.cropMin,

@@ -476,6 +476,10 @@ static void print_usage(void) {
             "                                            Rides in the same adapter file as the LoRA.\n"
             "    --prefix-sigma <f>          0.02        init sigma for BOTH K and V (zero V would\n"
             "                                            give K exactly zero gradient forever).\n"
+            "    --rslora                                alpha/sqrt(r) scaling (see train-dit). Written as\n"
+            "                                            use_rslora; lm-adapter.h re-derives it at load.\n"
+            "    --lora-plus-ratio <f>       1           LoRA+: B at f x A's learning rate (paper: ~16).\n"
+            "                                            AdamW-rule tensors only, Muon ignores it.\n"
             "\n"
             "  Adapter identity:\n"
             "    --trigger <word>            \"\"          trigger word embedded in the adapter's\n"
@@ -629,6 +633,24 @@ static void print_usage(void) {
             "                                            (A/B do not change between), PEFT's detached\n"
             "                                            form. Exported as lora_magnitude_vector, which\n"
             "                                            adapter-merge.h already reads. LoRA only.\n"
+            "    --rslora                                alpha/sqrt(r) scaling instead of alpha/r, so the\n"
+            "                                            update does not shrink with rank (11x at r128).\n"
+            "                                            Written as use_rslora and honoured by the merge\n"
+            "                                            and runtime paths. LoRA only.\n"
+            "    --lora-plus-ratio <f>       1           LoRA+: B at f x A's learning rate (paper: ~16).\n"
+            "                                            Fixes the A=kaiming/B=zero asymmetry; AdamW-rule\n"
+            "                                            tensors only, Muon ignores it.\n"
+            "    --loha                                  LoHa (LyCORIS): W + (B1A1) (.) (B2A2). Two LoRA\n"
+            "                                            pairs, effective rank up to r^2. Exported in\n"
+            "                                            the LyCORIS hada_w* layout; merge mode only\n"
+            "                                            (no low-rank runtime form). Not with --dora/--hira.\n"
+            "    --hira                                  HiRA (ICLR 2025): W + W (.) (BA). Same A/B as\n"
+            "                                            LoRA, high effective rank because the base\n"
+            "                                            modulates the update. Materialises a full\n"
+            "                                            [in,out] delta per site in-graph: needs the\n"
+            "                                            checkpointed path and more arena. Merge-only\n"
+            "                                            (no runtime low-rank path, no NVFP4/MXFP4\n"
+            "                                            split merge). LoRA only, not with --dora.\n"
             "    --layers <n>                0               0 = auto; else train the top n layers\n"
             "\n"
             "  Objective (design 4.5):\n"
@@ -1763,6 +1785,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--artist-token-init")) a.artist_init  = next("--artist-token-init");
         else if (!strcmp(argv[i], "--artist-token-only")) a.artist_only  = true;
         else if (!strcmp(argv[i], "--artist-token-lr"))   a.artist_lr    = (float) atof(next("--artist-token-lr"));
+        else if (!strcmp(argv[i], "--lora-plus-ratio"))   a.lora_plus_ratio = (float) atof(next("--lora-plus-ratio"));
         else if (!strcmp(argv[i], "--fd-eps"))        fd_eps         = atof(next("--fd-eps"));
         else if (!strcmp(argv[i], "--fd-frames"))     fd_frames      = atoll(next("--fd-frames"));
         else if (!strcmp(argv[i], "--fd-prompt"))     fd_prompt      = atoll(next("--fd-prompt"));
@@ -3853,6 +3876,8 @@ static int cmd_train_lm(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--artist-token-lr") && i + 1 < argc) a.artist_lr = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--prefix-n") && i + 1 < argc) a.prefix_n = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--prefix-sigma") && i + 1 < argc) a.prefix_sigma = (float) atof(argv[++i]);
+        else if (!strcmp(argv[i], "--rslora")) a.rslora = true;
+        else if (!strcmp(argv[i], "--lora-plus-ratio") && i + 1 < argc) a.lora_plus_ratio = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--no-milestones")) a.milestone_step = 0.0f;
         else if (!strcmp(argv[i], "--overwrite")) a.overwrite = true;
         else if (!strcmp(argv[i], "--self-test")) a.self_test = true;
@@ -4272,6 +4297,10 @@ static int cmd_train_dit(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--target-mlp")) { a.target_mlp = true; saw.target_mlp = true; }
         else if (!strcmp(argv[i], "--no-target-mlp")) { a.target_mlp = false; saw.target_mlp = true; }
         else if (!strcmp(argv[i], "--dora")) a.dora = true;
+        else if (!strcmp(argv[i], "--hira")) a.hira = true;
+        else if (!strcmp(argv[i], "--loha")) a.loha = true;
+        else if (!strcmp(argv[i], "--rslora")) a.rslora = true;
+        else if (!strcmp(argv[i], "--lora-plus-ratio") && i + 1 < argc) a.lora_plus_ratio = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--artist-token") && i + 1 < argc) a.artist_token = argv[++i];
         else if (!strcmp(argv[i], "--artist-token-k") && i + 1 < argc) a.artist_k = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--artist-token-only")) a.artist_only = true;

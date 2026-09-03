@@ -303,6 +303,29 @@ Same again with the live teacher (drop `--reg-topk`, it does nothing here):
 - A/B = two `/lm` calls, same explicit `lm_seed`, base side **must** byte-match an adapterless run (V5 hard gate). Base LM auto-derived from the adapter's `-<size>` suffix (`pickLmFor`) — never let the engine's `resolve_name` fallback pick (sticky 0.6B met a 4B adapter: "36 layers but model has 28").
 - LM-echo sideband trap: never forward the `/lm` reply into another request — build requests fresh (see `generation-request-flow` skill).
 
+**Adapter parameterizations beyond LoRA/LoKr (2026-09-04)**
+All are `train-dit --adapter-type lora` variants (rsLoRA and LoRA+ also in `train-lm`); DoRA, HiRA and LoHa exclude each other, rsLoRA and LoRA+ stack with any. None is ear-validated yet — every one passed the gates below and nothing more. Plan and results: `docs/plans/adapter-parameterizations-roadmap.md` (local).
+
+| flag | delta | export / load | gate that passed |
+|---|---|---|---|
+| `--dora` | LoRA + learned per-output magnitude `m`, detached column norm refreshed once per optimizer window (`DitAdapter::preWindow`, one graph PER LAYER — a whole-adapter graph overflows the scheduler hash set) | PEFT `lora_magnitude_vector`; merge path already read it | `HOTSTEP_DIT_ST_DORA=1 --self-test` T4, 24/24 |
+| `--rslora` | scale `alpha/sqrt(r)` in-graph | `use_rslora: true`; honoured by merge, runtime and the LM loader — trainer and loaders MUST agree or every adapter merges at the wrong strength silently | config + merge log |
+| `--lora-plus-ratio f` | B tensors at `f x` A's LR (paper 16). AdamW-rule tensors only; Muon ignores `lr_mul` | none (training-only) | per-tensor group log |
+| `--hira` | `W + W (.) (BA)` — a full `[in,out]` delta per site, materialised in-graph | `peft_type: HIRA`; merge = Hadamard with the base; runtime low-rank path REFUSES | `HOTSTEP_DIT_ST_HIRA=1` T4; merge 352 pairs |
+| `--loha` | `W + (B1A1) (.) (B2A2)` (LyCORIS LoHa), rank = `--rank`, effective rank up to r^2 | LyCORIS `lycoris_layers_<l>_<site>.hada_w{1,2}_{a,b}` + `.alpha` inside `adapter_model.safetensors`, `peft_type: LOHA`; `adapter_merge_loha` mirrors the LoKr merge; runtime REFUSES | `HOTSTEP_DIT_ST_LOHA=1` T4; merge 352 modules |
+
+- HiRA and LoHa hold weight-sized F32 tensors per site for backward: `dit_hira_apply_arena_bytes(..., n_full)` (2 for HiRA, 3 for LoHa) is in the VRAM model and the auto-fit.
+- **FD-gate trap (hit twice):** an init that pins one factor to exactly zero (LoRA B, LoHa B2) makes the other factors' gradients exactly 0, and T4's `rel = |fd-g| / max(|fd|,|g|,1e-6)` then scores f32 noise against zero and fails. The rung sets `cfg.b_sigma`; every new parameterization's init must honour it. The self-test switches live in the FD child's cfg block (dit-selftest.h ~3770), not the first `b_sigma` block — the wrong block validates nothing.
+- Not resumable yet: DoRA's `m`, HiRA/LoHa second factors are loaded by name like LoRA A/B only where `lm_resume_load`/the DiT resume already enumerate them — check before promising a resume.
+
+**Soft prompts on the AS1.5 LM (artist tokens + KV prefix, 2026-09-03/04)**
+- `train-lm --artist-token <name> [--artist-token-k 32] [--artist-token-init <caption word>] [--artist-token-lr 5e-3] [--prefix-n 8]`. The token is k learned embedding rows behind a placeholder spliced into every caption (`prompt.h` `lm_append_user_span`, shared with inference so the k==0 prompt is byte-identical); the prefix is n trainable K/V columns per layer riding the frozen-KV-prefix machinery (no RoPE on prefix K; every row sees it; forces head-blocked attention OFF — the 4B's blocked path asserts on a prefix mask).
+- **One file:** everything lands in `adapter_model.safetensors` — `hot_step.artist_token.{vec,meta}`, `hot_step.prefix.L<l>.{k,v}`, `hot_step.prefix.meta` (site 1 = as15_lm, 2 = mm3_lm). The LM loader installs them when the adapter is selected; the engine applies the token at the prompt offset and seeds the prefix into the Phase-2 KV cache. `HOTSTEP_ARTIST_TOKEN` is only a standalone override.
+- Soft-prompt tensors get their own LR group (`--artist-token-lr`, always AdamW, even under Muon/Prodigy). They learn ~50x faster than the LoRA, so `--target-loss 1.5` fires early on a joint run — use 0.
+- **Resume:** `--init-adapter` adopts the trained token/prefix from the file (lm-train-run.h, after the prefix init). The server therefore emits the soft-prompt flags on EVERY leg of a staged chain; a k/n that differs from the source run is refused as a shape mismatch.
+- Measured (mj_dangerous, 4B, `lm-adapter-eval.ts`, one run each): joint LoRA+token+prefix and LoRA-only both TOWARD; k=8 edged LoRA-only on transitions only; **k=32 won every metric** (unigram JS 0.739 vs 0.771; transitions 0.0121 vs 0.0177, under the album's own 0.0178 floor). Ear tests staged, unheard. Both trainers' Training Studio controls exist; the DiT-side contextualised token (V4) still needs the preprocess-stage encoders differentiated.
+- Gradient sanity for anything touching the embedding stage: pin the token with `--lr 1e-12` and compare naive vs checkpointed loss/gnorm (9.354661/9.354632 agreed). `LmCkptRun::embed_build` alone STOPS uploading token ids — a get_rows hook needs `embed_uses_tok` or it reads a stale buffer (loss 24.5 vs 9.35, no error).
+
 ## Build & verification rules
 
 - `ace-train`-only changes: `cmake --build engine/build --config Release --target ace-train` — safe with the app running **if no ace-train.exe process is live** (training runs spawn it). New `train/*.h` headers need **no CMake change**.

@@ -621,6 +621,13 @@ export interface TrainLmOptions {
   // ── Caption dropout + prior preservation (2026-09-02) ────────────────────
   /** Fraction of style steps trained with the caption dropped. 0 = off. */
   captionDropout?: number;           // default 0.3 (2026-09-03; was 0), 0..1
+  // ── Parameterization + soft prompt (2026-09-04). LoRA type only. ────────
+  rslora?: boolean;                  // alpha/sqrt(r) scaling
+  loraPlusRatio?: number;            // B at ratio x A's LR; 1 = off
+  artistToken?: string;              // '' = off; trained with the LoRA, same file
+  artistTokenK?: number;             // default 32
+  artistTokenLr?: number;            // default 5e-3
+  prefixN?: number;                  // K/V prefix columns per layer; 0 = off
   /** Prior-preservation cadence: every Nth step regularises against an
    *  unrelated corpus instead of the artist's codes. 0 = off; >=2 when on. */
   regEvery?: number;                 // default 3 (2026-09-03; was 0 = off)
@@ -708,6 +715,12 @@ export interface TrainDitOptions {
   lokrFactor?: number;             // default 6, -1 or [2,64]
   lokrDecomposeBoth?: boolean;     // default true (parity knob; inert at dim 512)
   targetMlp?: boolean;             // default true
+  // ── Parameterization (2026-09-04). LoRA type only; dora/hira/loha exclusive.
+  dora?: boolean;
+  rslora?: boolean;
+  hira?: boolean;
+  loha?: boolean;
+  loraPlusRatio?: number;          // 1 = off
   layers?: number;                 // default 0 = auto (top-K depth)
   crop?: number;                   // default 0 = auto-fit
   cropMin?: number;                // default 375

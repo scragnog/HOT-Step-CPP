@@ -95,14 +95,20 @@ static float lm_adapter_read_alpha_ratio(const std::string & dir) {
     if (!doc) return -1.0f;
     yyjson_val * root  = yyjson_doc_get_root(doc);
     double       alpha = 0.0, r = 0.0;
+    bool         rslora = false;
     if (root && yyjson_is_obj(root)) {
         yyjson_val * a = yyjson_obj_get(root, "lora_alpha");
         yyjson_val * rv = yyjson_obj_get(root, "r");
+        yyjson_val * rs = yyjson_obj_get(root, "use_rslora");
         if (a && yyjson_is_num(a)) alpha = yyjson_get_num(a);
         if (rv && yyjson_is_num(rv)) r = yyjson_get_num(rv);
+        if (rs && yyjson_is_true(rs)) rslora = true;
     }
     yyjson_doc_free(doc);
-    if (alpha > 0.0 && r > 0.0) return (float) (alpha / r);
+    // rsLoRA (use_rslora): the trainer applied alpha/sqrt(r) in-graph, so the
+    // runtime must too, or the adapter comes in at sqrt(r) times the wrong
+    // strength — 11x at r128 — with nothing in the log to say so.
+    if (alpha > 0.0 && r > 0.0) return (float) (rslora ? alpha / sqrt(r) : alpha / r);
     return -1.0f;
 }
 

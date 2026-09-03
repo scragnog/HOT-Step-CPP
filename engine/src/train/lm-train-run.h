@@ -96,6 +96,12 @@ struct LmTrainArgs {
     // Shares --artist-token-lr with the token: both are soft-prompt parameters.
     int         prefix_n     = 0;
     float       prefix_sigma = 0.02f;
+    // rsLoRA: alpha/sqrt(r). Written to adapter_config.json as use_rslora and
+    // re-derived by lm-adapter.h; never set one side without the other.
+    bool        rslora       = false;
+    // LoRA+ (Hayou 2024): B at ratio x A's learning rate. 1 = off. Only
+    // parameters on the AdamW rule honour it — Muon scales its own update.
+    float       lora_plus_ratio = 1.0f;
 
     // 4B low-VRAM path (2026-07-28 plan §2.1)
     std::string low_vram        = "auto";  // auto|on|off
@@ -984,7 +990,6 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // 4B / s_tr 1556. Low-vram sparse-writes a [V, chunk] buffer instead (D4).
     ggml_tensor * t_lab      = low ? nullptr : ggml_new_tensor_2d(ctx_static, GGML_TYPE_F32, V, alloc_s_tr);
     ggml_tensor * t_adamw    = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 7);
-    ggml_tensor * t_adamw_alt = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 7);  // P1b: soft-prompt LR group
     ggml_tensor * t_lossgrad = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_clip     = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
     ggml_tensor * t_eps      = ggml_new_tensor_1d(ctx_static, GGML_TYPE_F32, 1);
@@ -1034,6 +1039,13 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
             lm_fatal("vram", err);
             return 1;
         }
+    }
+    if (a.rslora) {
+        lm_lora_apply_rslora(&lora);
+        char rb[128];
+        snprintf(rb, sizeof(rb), "rsLoRA: scale alpha/sqrt(r) = %.4f (alpha/r would be %.4f)", lora.scale,
+                 lora.alpha / (float) lora.rank);
+        lm_log("info", rb);
     }
     // Resume: overwrite the fresh init with the source run's factors. After
     // lm_lora_init/lm_lokr_init so the tensors exist and the RNG stream stays
@@ -1114,6 +1126,58 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         lm_log("info", pb);
     }
 
+    // A resume adopts the trained soft prompt from the same file the LoRA came
+    // from. The --artist-token/--prefix-n flags on a resumed leg only say the
+    // token and prefix are wanted (and size them); the vectors come from
+    // --init-adapter, else every leg after the first would restart them from
+    // zero while the LoRA carried on. Entries missing from the file mean the
+    // source run had none: those start fresh, and say so.
+    if (!a.init_adapter.empty() && (artp.t || pfx.active())) {
+        STFile            sst;
+        const std::string spath = lm_join(a.init_adapter, "adapter_model.safetensors");
+        if (st_open(&sst, spath.c_str())) {
+            int         n_soft = 0, n_fresh = 0;
+            std::string serr;
+            if (artp.t) {
+                if (st_find(sst, "hot_step.artist_token.vec")) {
+                    if (!lm_resume_fill(sst, "hot_step.artist_token.vec", artp.t, &serr)) {
+                        lm_fatal("resume", serr);
+                        st_close(&sst);
+                        return 1;
+                    }
+                    n_soft++;
+                } else {
+                    n_fresh++;
+                }
+            }
+            if (pfx.active()) {
+                for (int l = pfx.layer_lo; l < pfx.layer_hi; l++) {
+                    ggml_tensor * kv[2] = { pfx.k[(size_t) l], pfx.v[(size_t) l] };
+                    const char *  sfx[2] = { "k", "v" };
+                    for (int w = 0; w < 2; w++) {
+                        char nm[64];
+                        snprintf(nm, sizeof(nm), "hot_step.prefix.L%d.%s", l, sfx[w]);
+                        if (!st_find(sst, nm)) {
+                            n_fresh++;
+                            continue;
+                        }
+                        if (!lm_resume_fill(sst, nm, kv[w], &serr)) {
+                            lm_fatal("resume", serr);
+                            st_close(&sst);
+                            return 1;
+                        }
+                        n_soft++;
+                    }
+                }
+            }
+            st_close(&sst);
+            char sb[192];
+            snprintf(sb, sizeof(sb), "resumed %d soft-prompt tensors from %s (%d start fresh: not in the source run)",
+                     n_soft, a.init_adapter.c_str(), n_fresh);
+            lm_log("info", sb);
+        }
+    }
+
     // Optimizer parameter set. --artist-token-only drops the LoRA factors so the
     // adapter stays at its exactly-zero init and the run is a pure token train.
     //
@@ -1188,7 +1252,6 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         }
         const bool soft_any = artp.t || !pfx.params.empty();
         if (soft_any && a.artist_lr > 0.0f && a.artist_lr != a.lr) {
-            opt.t_adamw_alt = t_adamw_alt;
             const float mul = a.artist_lr / a.lr;
             if (artp.t) {
                 lm_optim_set_lr_mul(&opt, artp.t, mul);
@@ -1200,6 +1263,31 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
             snprintf(lb, sizeof(lb), "soft-prompt LR %.3g (x%.1f the LoRA's %.3g) on %zu tensors", a.artist_lr, mul,
                      a.lr, (size_t) (artp.t ? 1 : 0) + pfx.params.size());
             lm_log("info", lb);
+        }
+        if (a.lora_plus_ratio != 1.0f && !lora.is_lokr) {
+            int n_b = 0, n_muon_b = 0;
+            for (int l = lora.layer_lo; l < lora.layer_hi; l++) {
+                for (int sl = 0; sl < QW_LORA_NSLOTS; sl++) {
+                    ggml_tensor * B = lora.layers[l].p[sl].B;
+                    if (!B) {
+                        continue;
+                    }
+                    auto it = opt.param_slot.find(B);
+                    if (it == opt.param_slot.end()) {
+                        continue;  // frozen (--artist-token-only)
+                    }
+                    if (opt.rule[(size_t) it->second] == LM_RULE_MUON) {
+                        n_muon_b++;
+                        continue;
+                    }
+                    lm_optim_set_lr_mul(&opt, B, a.lora_plus_ratio);
+                    n_b++;
+                }
+            }
+            char lp[192];
+            snprintf(lp, sizeof(lp), "LoRA+: B at x%.1f the base LR on %d tensors%s", a.lora_plus_ratio, n_b,
+                     n_muon_b ? " (Muon-rule B tensors ignore it)" : "");
+            lm_log("info", lp);
         }
     }
     // The rule split is only knowable AFTER lm_optim_init classifies, and it is
@@ -2396,6 +2484,7 @@ static int lm_train_main(const LmTrainArgs & a) {
     meta.order          = a.order;
     meta.rank           = a.rank;
     meta.alpha          = a.alpha;
+    meta.rslora         = a.rslora;
     meta.lr             = a.lr;
     meta.grad_clip      = a.grad_clip;
     meta.weight_decay   = a.weight_decay;
