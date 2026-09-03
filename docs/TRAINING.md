@@ -96,10 +96,16 @@ slices to the standard V4 GGUF).
 The 2026-09-02 attribute study (`docs/plans/lm-attr-probe/`) found that everything an ACE
 planner-LM adapter measurably does is done by CE ~2.0, and that training deeper past it mostly
 buys looping plans. These are the two levers the MM3 LM trainer already had and this one did not.
-Both are opt-in; with both off the trainer emits the same graphs, consumes the same RNG and
+Both are opt-in at the CLI; with both off the trainer emits the same graphs, consumes the same RNG and
 produces the same loss trajectory it did before they existed (verified against a purpose-built
 pre-change binary: same 4B run, `--order fixed --epochs 1 --limit 4`, per-step `loss`/`gradNorm`/
-`clipScale` identical to the last printed digit). The only flags-off output change is an additive
+`clipScale` identical to the last printed digit). **The Training Studio and the batch pipeline default
+both ON since 2026-09-03** (`captionDropout 0.3`, `regEvery 3`, cached teacher): in the 3-artist
+render-scored experiment (`docs/plans/lm-attr-probe/RESULTS.md` §6–7) that combination measured best on
+loudness and timbre at the control's loop rate; caption dropout alone hurt, and the live teacher was
+worse than the cached flat-tail prior. The server drops prior preservation to off with a warning when no
+other 600 s corpus exists, and drops caption dropout when the variant has no trigger word, so a default
+run never fails on those two refusals. Neither lever is ear-validated yet. The only flags-off output change is an additive
 `"captionDropout":0` on the `start` event and a `caption_dropout` key in `lm_train_log.json`.
 
 - **`--caption-dropout <p>`** (0..1, default 0). Each style micro-step draws from a per-epoch

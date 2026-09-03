@@ -620,10 +620,10 @@ export interface TrainLmOptions {
   bwd?: 'outprod' | 'mm';            // default 'outprod' (train-dit defaults to 'mm')
   // ── Caption dropout + prior preservation (2026-09-02) ────────────────────
   /** Fraction of style steps trained with the caption dropped. 0 = off. */
-  captionDropout?: number;           // default 0, 0..1
+  captionDropout?: number;           // default 0.3 (2026-09-03; was 0), 0..1
   /** Prior-preservation cadence: every Nth step regularises against an
    *  unrelated corpus instead of the artist's codes. 0 = off; >=2 when on. */
-  regEvery?: number;                 // default 0 (off)
+  regEvery?: number;                 // default 3 (2026-09-03; was 0 = off)
   regTopk?: number;                  // default 64
   regSongs?: number;                 // default 24
   /** 'auto' picks up to 6 other 600s-cap artists server-side; an explicit

@@ -2632,12 +2632,21 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
     // recipe knobs like --lr, so they are validated here and carried
     // unchanged through every leg of the staged chain (opts is spread as-is
     // into each leg by trainLmRunner.ts).
-    const captionDropout = numOpt(body.captionDropout, 0);
+    // Defaults 0.3 / 3 (Rob, 2026-09-03; were 0 / 0): the measured best recipe,
+    // docs/plans/lm-attr-probe/RESULTS.md §6-7. Tracks TRAIN_LM_DEFAULTS in
+    // TrainLmForm.tsx — the batch pipeline POSTs an empty option bag, so these
+    // fallbacks ARE what a bulk run trains with. `*Explicit` records whether the
+    // caller chose the value: a DEFAULT that cannot be honoured (no trigger for
+    // caption dropout, no other 600 s corpus for prior preservation) is dropped
+    // with a warning; an EXPLICIT one is a 400, because the engine would exit 2.
+    const captionDropoutExplicit = body.captionDropout !== undefined;
+    let captionDropout = numOpt(body.captionDropout, 0.3);
     if (outOfRange('captionDropout', captionDropout, 0, 1)) {
       res.status(400).json({ error: outOfRange('captionDropout', captionDropout, 0, 1) });
       return;
     }
-    const regEvery = Math.trunc(numOpt(body.regEvery, 0));
+    const regEveryExplicit = body.regEvery !== undefined;
+    let regEvery = Math.trunc(numOpt(body.regEvery, 3));
     const regTopk = Math.trunc(numOpt(body.regTopk, 64));
     const regSongs = Math.trunc(numOpt(body.regSongs, 24));
     // Prior teacher (docs/plans/lm-attr-probe/OVERNIGHT.md "Live teacher
@@ -2680,19 +2689,52 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       } else {
         const picked = findRegCorpora(ds.slug, 6);
         if (!picked.length) {
-          res.status(400).json({
-            error: 'Prior preservation needs at least one OTHER artist preprocessed at the 600 s cap — '
-                 + 'none were found. Preprocess another dataset first, or set regEvery to 0.',
-          });
-          return;
+          if (regEveryExplicit) {
+            res.status(400).json({
+              error: 'Prior preservation needs at least one OTHER artist preprocessed at the 600 s cap — '
+                   + 'none were found. Preprocess another dataset first, or set regEvery to 0.',
+            });
+            return;
+          }
+          console.warn(`[Training] train-lm ${ds.slug}: prior preservation is the default but no other 600 s `
+                     + 'corpus exists — training WITHOUT it (regEvery 0). Preprocess another dataset to enable it.');
+          regEvery = 0;
+        } else {
+          console.log(`[Training] train-lm ${ds.slug}: auto reg corpus — ${picked.map(p => p.slug).join(', ')}`);
+          regCodes = picked.map(p => p.codesPath).join(',');
         }
-        console.log(`[Training] train-lm ${ds.slug}: auto reg corpus — ${picked.map(p => p.slug).join(', ')}`);
-        regCodes = picked.map(p => p.codesPath).join(',');
       }
       // Fixed at the TOP-LEVEL adapter dir, not per-stage — every leg of a
       // staged chain must share one cache, captured once (see aceTrain.ts
       // ResolvedTrainLmOptions.regPriorDir).
-      regPriorDir = path.join(adapterDir, 'reg-prior');
+      if (regEvery > 0) regPriorDir = path.join(adapterDir, 'reg-prior');
+    }
+
+    // Caption dropout needs a trigger word: the engine resolves it from the
+    // variant's preprocess_meta.json (custom_tag, and a `replace` position
+    // counts as none — lm_resolve_trigger) and exits 2 when --caption-dropout
+    // finds nothing to drop to. Mirror that here so a DEFAULT run on an
+    // untagged dataset degrades instead of failing after the model load.
+    if (captionDropout > 0) {
+      let trigger = '';
+      try {
+        const metaPath = path.join(tensorsDir(ds.slug, variantKey), 'preprocess_meta.json');
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as { custom_tag?: unknown; tag_position?: unknown };
+        const tag = typeof meta.custom_tag === 'string' ? meta.custom_tag.trim() : '';
+        trigger = (tag && meta.tag_position !== 'replace') ? tag : '';
+      } catch { trigger = ''; }
+      if (!trigger) {
+        if (captionDropoutExplicit) {
+          res.status(400).json({
+            error: 'captionDropout needs a trigger word (the variant\'s preprocess custom_tag, not in `replace` '
+                 + 'position) — this variant has none. Re-preprocess with a custom tag, or set captionDropout to 0.',
+          });
+          return;
+        }
+        console.warn(`[Training] train-lm ${ds.slug}: caption dropout is the default but the variant has no trigger `
+                   + 'word — training WITHOUT it (captionDropout 0). Preprocess with a custom tag to enable it.');
+        captionDropout = 0;
+      }
     }
 
     // ── resume + post-training calibration (2026-08-10) ─────────────────

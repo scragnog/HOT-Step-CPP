@@ -180,10 +180,14 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   // aborts when --bwd mm leaves it none — and the server refuses the pair with
   // a 400. Choosing 'mm' here means also choosing weights 'f32-window'.
   bwd: 'outprod',
-  // Off by default (2026-09-02) — both levers are new and unvalidated by ear;
-  // an existing run must opt in rather than silently changing objective.
-  captionDropout: 0,
-  regEvery: 0,
+  // ON by default (Rob, 2026-09-03): the render-scored 3-artist experiment
+  // (docs/plans/lm-attr-probe/RESULTS.md §6-7) ranked cached prior preservation
+  // every 3rd step + caption dropout 0.3 best on loudness and timbre at the
+  // control's loop rate; caption dropout alone hurt, the live teacher was worse
+  // than the cached prior. The server route's fallbacks track these numbers so
+  // a batch-pipeline run (empty option bag) trains the same recipe.
+  captionDropout: 0.3,
+  regEvery: 3,
   regTopk: 64,
   regSongs: 24,
   regTeacher: 'cached',
@@ -434,11 +438,12 @@ export const TrainLmForm: React.FC<Props> = ({
 
       {/* ── Caption dropout + prior preservation (2026-09-02) ───────────
           Ported from the MM3 LM trainer's two levers — see
-          docs/plans/lm-attr-probe/HANDOFF.md. Both default off: neither has
-          been validated by ear yet on this trainer. */}
+          docs/plans/lm-attr-probe/HANDOFF.md. Both default ON since
+          2026-09-03 (measured best recipe, RESULTS.md §6-7); not yet
+          validated by ear. */}
       <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
         <label className="flex flex-col gap-1.5">
-          {P('captionDropout', 'Default 0% · 0–100')}
+          {P('captionDropout', 'Default 30% · 0–100 · 0 = off')}
           <input
             type="number" min={0} max={100} step={1}
             value={Math.round(value.captionDropout * 100)}
@@ -455,7 +460,7 @@ export const TrainLmForm: React.FC<Props> = ({
             onChange={(e) => onChange({ regEvery: e.target.checked ? 3 : 0 })}
             className="accent-amber-500"
           />
-          {P('priorPreservation', 'Default off', CHECK_LABEL)}
+          {P('priorPreservation', 'Default on · every 3rd step', CHECK_LABEL)}
         </label>
         {value.regEvery > 0 && (
           <div className="grid grid-cols-2 gap-3 pl-6">

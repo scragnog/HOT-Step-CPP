@@ -731,7 +731,7 @@ export interface TrainLmOptions {
    *  only, when the dataset has one). Forces the planner to lean on the
    *  artist's own code statistics instead of memorising caption -> codes.
    *  0 = off (the CLI default). */
-  captionDropout?: number;           // default 0, range 0..1
+  captionDropout?: number;           // default 0.3 (2026-09-03; was 0), range 0..1
   /** Prior preservation cadence: every Nth step is scored against an
    *  UNRELATED corpus's own base-model predictions instead of the artist's
    *  codes, penalising the adapter for drifting on material that has nothing
@@ -739,7 +739,8 @@ export interface TrainLmOptions {
    *  "learned the artist" from "rewrote the planner". 0 = off. >=2 when on
    *  (at 1 every step would be a regularisation step and nothing would learn
    *  the artist — same rule as the MM3 route's resolveMm3Regularisation). */
-  regEvery?: number;                 // default 0 (off)
+  regEvery?: number;                 // default 3 (2026-09-03; was 0 = off). The server drops it to 0 with a
+                                     // warning when no other 600 s corpus exists, unless set explicitly.
   /** Classes kept per position in the captured prior distributions. */
   regTopk?: number;                  // default 64
   /** Songs drawn per regularisation corpus to build the prior cache. */
