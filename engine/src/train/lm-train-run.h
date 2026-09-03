@@ -495,6 +495,19 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // belt to that braces, and it is what keeps t_zero_attn unallocated.
     int head_block =
         attn_flash ? 0 : ((a.attn_head_block >= 0) ? a.attn_head_block : lm_ckpt_default_head_block(c, attn_flash));
+    // A trainable prefix widens S_kv to n + S; lm_attn_head_blocked scores over
+    // S alone and would hand soft_max a mask of the wrong width (ggml.c:4069).
+    // Blocking exists to cap the [S_kv, S, Nh] softmax transient on big
+    // models; with a prefix that cap is given up, and said so.
+    if (a.prefix_n > 0 && head_block != 0) {
+        char hb[192];
+        snprintf(hb, sizeof(hb),
+                 "prefix: attention head-blocking (%d) disabled — the blocked path does not splice a prefix; the "
+                 "per-layer softmax transient is uncapped",
+                 head_block);
+        lm_log("info", hb);
+        head_block = 0;
+    }
     if (!lm_ckpt_head_block_ok(c, head_block)) {
         char b[192];
         snprintf(b, sizeof(b), "--attn-head-block %d is not valid for n_heads %d / n_kv_heads %d — falling back to %d",

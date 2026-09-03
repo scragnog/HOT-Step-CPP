@@ -741,8 +741,8 @@ static ggml_tensor * lm_attn_head_blocked(ggml_context * ctx, const Qwen3LMConfi
     // The blocked path ropes per head-block, so sharing one roped K with a
     // prefix store would mean hoisting that out and changing the shipped graph.
     // MM3 never sets attn_head_block; refuse rather than differ silently.
-    GGML_ASSERT(opts.kv_k == nullptr && opts.kv_cap == nullptr &&
-                "attn_head_block is not supported with a frozen KV prefix");
+    GGML_ASSERT(opts.kv_k == nullptr && opts.kv_cap == nullptr && opts.pfx_k == nullptr &&
+                "attn_head_block is not supported with a KV prefix (frozen or trainable)");
     // D3: there is no fused head-blocked arm, and there is no reason to build
     // one — blocking exists to cap the 3*hb*S^2 score/softmax transient, which
     // the fused op does not have. The CLI refuses the pair at exit 2 and
