@@ -8,6 +8,7 @@
 #   bothlive = { regEvery: 3, regTeacher: "live", captionDropout: 0.3 }    (pplive + caption dropout)
 param(
   [string]$Slugs = 'kinks_somethingelse,inxs_kick,nas_illmatic',
+  [string]$ArmList = 'flash,pplive,bothlive',   # subset of the arms below, comma-separated
   [int]$Samples = 8,
   [int]$MaxDuration = 150,
   [int]$Steps = 8,
@@ -25,6 +26,8 @@ $Arms = [ordered]@{
   pplive   = '{"regEvery":3,"regTeacher":"live"}'
   bothlive = '{"regEvery":3,"regTeacher":"live","captionDropout":0.3}'
 }
+$armSet = @{}
+foreach ($a in ($ArmList -split ',')) { if ($a.Trim()) { $armSet[$a.Trim()] = $true } }
 
 function Write-Log([string]$msg) {
   $line = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg
@@ -97,6 +100,7 @@ foreach ($slug in $slugList) {
   $rendersDir = Join-Path $lmAttrDir 'renders'
 
   foreach ($arm in $Arms.Keys) {
+    if ($armSet.Count -gt 0 -and -not $armSet.ContainsKey($arm)) { continue }
     $opts = $Arms[$arm]
     $t1 = Get-Date
     Write-Log "== $slug / $arm  opts=$opts"
