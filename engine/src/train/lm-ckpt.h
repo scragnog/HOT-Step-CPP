@@ -219,6 +219,28 @@ struct LmCkptCfg {
     //
     // nullptr (the default) => square self-attention, emitted verbatim.
     LmKvPrefix * kv = nullptr;
+
+    // ── LIVE TEACHER (--reg-teacher live, 2026-09-03) ──────────────────────
+    //
+    // Allocates the two persistent tensors the live prior-preservation path
+    // needs and NOTHING else changes: `t_teach_h`, an [H, s_max] F32 stash of
+    // one forward pass's final hidden states, and `t_codemask`, a [V,1] F32
+    // additive mask that is 0 inside [teacher_lo, teacher_hi) and -INF outside.
+    //
+    // WHY A HIDDEN-STATE STASH AND NOT A PROBABILITY BUFFER. The teacher's
+    // answer is a [V, s_tr] distribution — 2.6 GB at ACE's 217k head and a
+    // 3000-frame song, and 786 MB even restricted to the audio-code range. The
+    // hidden states it is computed FROM are [H, S]: 42 MB at 4B. So the teacher
+    // pass runs P1-P3 with the adapter off, stashes t_H, and the student's
+    // chunked head re-derives that chunk's teacher logits from the stash with
+    // one extra head GEMM. Nothing crosses PCIe and nothing is held per-token.
+    //
+    // Default off: `live_teacher` false allocates neither tensor, so an
+    // untouched run's fixed_bytes() and every graph in this header are exactly
+    // what they were.
+    bool live_teacher = false;
+    int  teacher_lo   = 0;  // first scored class the teacher softmax spans
+    int  teacher_hi   = 0;  // one past the last; <= lo means "the whole width"
 };
 
 // The scored head and its width, resolved. One place, so no call site can
@@ -255,6 +277,11 @@ struct LmCkptState {
     ggml_tensor *              t_zero_attn = nullptr;
     ggml_tensor *              t_embT      = nullptr;
     ggml_tensor *              t_labc      = nullptr;
+    // --reg-teacher live only (LmCkptCfg::live_teacher); both stay null
+    // otherwise, and every consumer tests them rather than the flag.
+    ggml_tensor *              t_teach_h   = nullptr;  // [H, s_max] adapter-off hidden states
+    ggml_tensor *              t_codemask  = nullptr;  // [1, V] 0 in range, -1e30 outside
+    ggml_tensor *              t_teach_sel = nullptr;  // [1, chunk] 1 at code positions, 0 elsewhere
 
     std::vector<uint8_t>       arena;  // one reused 32 MiB graph arena
     std::vector<ggml_tensor *> gacc;
@@ -388,7 +415,7 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
     st->ctx_ckpt = mkctx(L);
     st->ctx_gh0  = mkctx(1);
     st->ctx_gh1  = mkctx(1);
-    st->ctx_misc = mkctx(2);
+    st->ctx_misc = mkctx(5);  // t_H, t_zero_attn, + the three live-teacher tensors
     st->ctx_embt = mkctx(1);
     st->ctx_labc = mkctx(1);
     if (!st->ctx_ckpt || !st->ctx_gh0 || !st->ctx_gh1 || !st->ctx_misc || !st->ctx_embt || !st->ctx_labc) {
@@ -432,6 +459,33 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
         ggml_set_input(st->t_zero_attn);
     }
 
+    // Live teacher (--reg-teacher live). All three tensors are additive and
+    // only exist when the mode is on.
+    if (st->cfg.live_teacher) {
+        if (st->cfg.teacher_hi <= st->cfg.teacher_lo) {
+            st->cfg.teacher_lo = 0;
+            st->cfg.teacher_hi = V;
+        }
+        st->cfg.teacher_lo = std::max(0, std::min(st->cfg.teacher_lo, V));
+        st->cfg.teacher_hi = std::max(st->cfg.teacher_lo, std::min(st->cfg.teacher_hi, V));
+        if (st->cfg.teacher_hi <= st->cfg.teacher_lo) {
+            *err = "the live teacher's class range is empty after clamping to the scored width";
+            return false;
+        }
+        st->t_teach_h = ggml_new_tensor_2d(st->ctx_misc, GGML_TYPE_F32, H, S);
+        ggml_set_name(st->t_teach_h, "ckpt.teachH");
+        ggml_set_input(st->t_teach_h);
+        // [1, V] rather than [V, 1]: it is the LEFT operand of an outer product
+        // with the per-position selector below, and ggml_mul_mat reduces over
+        // ne0. See lm_ckpt_teacher_labels for why the mask is per position.
+        st->t_codemask = ggml_new_tensor_2d(st->ctx_misc, GGML_TYPE_F32, 1, V);
+        ggml_set_name(st->t_codemask, "ckpt.codemask");
+        ggml_set_input(st->t_codemask);
+        st->t_teach_sel = ggml_new_tensor_2d(st->ctx_misc, GGML_TYPE_F32, 1, st->cfg.chunk);
+        ggml_set_name(st->t_teach_sel, "ckpt.teachSel");
+        ggml_set_input(st->t_teach_sel);
+    }
+
     // Dtype stays the base's own (D4): the chunked head never runs out_prod on
     // it, so no F32 copy is needed — 1,060 MiB instead of 2,120 MiB at 4B.
     // A quantized head cannot BE t_embT: the transpose below is a host-side
@@ -466,6 +520,24 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
     ggml_backend_buffer_clear(st->buf_gh1, 0);
     ggml_backend_buffer_clear(st->buf_misc, 0);  // t_zero_attn: once, then NEVER again
     ggml_backend_buffer_clear(st->buf_labc, 0);
+
+    // The additive class mask, uploaded ONCE — the clear above has just zeroed
+    // it, so this must follow it.
+    //
+    // -1e30f, NOT -INF: the mask is scaled by the per-position selector (0 or
+    // 1) before it is added, and 0 * -INF is NaN while 0 * -1e30 is exactly 0.
+    // As an added logit -1e30 is -INF for every practical purpose — after the
+    // softmax's max-subtraction expf() underflows to a hard zero.
+    if (st->t_codemask) {
+        std::vector<float> cm((size_t) V, -1e30f);
+        std::fill(cm.begin() + st->cfg.teacher_lo, cm.begin() + st->cfg.teacher_hi, 0.0f);
+        ggml_backend_tensor_set(st->t_codemask, cm.data(), 0, cm.size() * sizeof(float));
+        fprintf(stderr,
+                "[train-lm] live teacher: hidden stash [%d,%d] f32 (%.1f MB) + class mask over [%d,%d) of %d "
+                "(%.1f MB)\n",
+                H, S, (double) H * S * 4.0 / 1048576.0, st->cfg.teacher_lo, st->cfg.teacher_hi, V,
+                (double) V * 4.0 / 1048576.0);
+    }
 
     st->arena.resize((size_t) 32 << 20);
     st->pos_scratch.resize((size_t) S);
@@ -663,6 +735,35 @@ struct LmCkptRun {
     int                    capture_k   = 0;
     std::vector<int32_t> * capture_idx = nullptr;
     std::vector<float>   * capture_p   = nullptr;
+
+    // ── LIVE TEACHER (--reg-teacher live) ──────────────────────────────────
+    //
+    // Three per-pass switches, all default-off. A live reg micro-step is two
+    // calls to lm_ckpt_micro_step in this order:
+    //
+    //   1. teacher: adapter_off = true, teacher_fill = true, forward_only =
+    //      true. Runs P1-P3 only, copies t_H into st->t_teach_h and returns
+    //      BEFORE P4 — so it clears no gradient buffer, builds no backward and
+    //      accumulates nothing. The student pass immediately after overwrites
+    //      C[] and t_H, which is why the stash exists.
+    //   2. student: teacher_use = true. The chunked head derives each chunk's
+    //      teacher distribution from the stash and writes it into t_labc
+    //      instead of reading the sample's own labels.
+    //
+    // `adapter_off` is per PASS and reaches P2/P3/P7 through the single
+    // lm_ckpt_layer_opts() call in lm_ckpt_micro_step, so D13 still holds: one
+    // micro-step cannot disagree with itself about the adapter.
+    bool adapter_off  = false;
+    bool teacher_fill = false;
+    bool teacher_use  = false;
+
+    // One-shot diagnostic hook. When set, the chunked head keeps each chunk's
+    // logits alive and hands them to this callback after the chunk computes.
+    // Used by the step-0 teacher==student check in train/lm-train-run.h, which
+    // needs the base's own full-width logits to compute the entropy the live
+    // reg CE must equal. Null on every training path.
+    void (*logit_sink)(LmCkptRun &, ggml_tensor * lg, int V, int Sc, int off, void * user) = nullptr;
+    void * logit_user = nullptr;
 };
 
 // Rows of the attention mask, i.e. how many keys a query can reach: S on the
@@ -711,8 +812,15 @@ static inline LmLayerOpts lm_ckpt_layer_kv(const LmCkptState & st, const LmLayer
     return o;
 }
 
-static inline LmLayerOpts lm_ckpt_layer_opts(const LmCkptState & st) {
+// `adapter_off` is a PER-PASS argument rather than an LmCkptCfg field on
+// purpose: it is the one option that legitimately differs between two graphs of
+// the same run (the live teacher's forward vs the student's), and a cfg field
+// would have to be mutated and restored around every teacher pass — exactly the
+// shape of bug D13 exists to prevent. Defaulted, so every existing call site is
+// unchanged.
+static inline LmLayerOpts lm_ckpt_layer_opts(const LmCkptState & st, bool adapter_off = false) {
     LmLayerOpts o;
+    o.adapter_off     = adapter_off;
     o.cast_weights    = true;
     o.attn_head_block = st.cfg.attn_head_block;
     o.attn_zero       = st.t_zero_attn;
@@ -799,6 +907,100 @@ static void lm_ckpt_capture_topk(LmCkptRun & r, ggml_tensor * lg, int V, int Sc)
     }
 }
 
+/** LIVE TEACHER: fill t_labc with one chunk's frozen-base distribution.
+ *
+ *  Runs entirely on the device — the alternative was reading V floats per
+ *  position back to the host (869 KB x s_tr, ~2.6 GB per reg step at 4B) and
+ *  exp()-ing 229 M values single-threaded, which is seconds per step against
+ *  the ~1 ms this graph costs. There is no host round trip and no per-token
+ *  host buffer anywhere in the live path.
+ *
+ *  Four nodes and a copy:
+ *
+ *    lg  = mul_mat(head, teach_h[:, chunk])  the base's logits for this chunk,
+ *                                            re-derived from the stash the
+ *                                            adapter-off pass left behind
+ *    msk = mul_mat(codemask, sel)            outer product: -1e30 outside
+ *                                            [teacher_lo, teacher_hi) at the
+ *                                            positions sel marks, 0 elsewhere
+ *    soft_max(lg + msk)                      -> rows sum to 1
+ *    cpy -> t_labc[:, 0..Sc)                 the dense [V, Sc] label block the
+ *                                            student's CE head reads
+ *
+ *  WHY THE MASK IS PER POSITION AND NOT A CONSTANT. The obvious reading of
+ *  "softmax over the audio-code range only" is a [V,1] mask broadcast over the
+ *  chunk — and it is wrong here, because with `--loss-on-cot` (the default) the
+ *  supervised span of a reg row starts at the <think> token, so a large share
+ *  of its positions are CoT YAML TEXT, not codes. Measured on the boston reg
+ *  corpus at 4B: the base puts a mean of only 8.5% of its probability mass on
+ *  the code range across supervised positions (the step-0 check's reg CE
+ *  exceeded the teacher's own entropy by 2.47 nats), which is what a set of
+ *  positions that are mostly not code positions looks like. A code-only target
+ *  there is not "the base restricted"; it is a renormalisation of 65,535
+ *  logits the base has driven to near-zero — arbitrary noise — and worse, it
+ *  asks for total code probability 1.0 at a position where the base emits
+ *  text. On one micro-step in --reg-every that is a standing push toward
+ *  emitting codes instead of a plan, i.e. the exact degeneracy prior
+ *  preservation exists to prevent.
+ *
+ *  So: `sel[i]` is 1 exactly when the row's own ground-truth token at that
+ *  position IS an audio code, and the range mask applies only there. At every
+ *  other position the teacher is the base's full-width distribution, unaltered.
+ *  Both are the frozen base's real answer; neither is invented.
+ *
+ *  `off` is the chunk's first supervised position and is threaded through the
+ *  SAME `s.n_masked - 1 + off` column arithmetic the student head uses, so a
+ *  teacher row cannot land against the wrong student position. `s.targets[off
+ *  + i]` is the label for the same position — one indexing convention, used by
+ *  both.
+ *
+ *  Rows summing to 1 is what makes ggml's cross-entropy backward
+ *  (softmax - labels) the true gradient — the reason the cached path has to
+ *  renormalise its top-K with a flat tail, and the reason this path needs no
+ *  tail at all: it IS a full distribution. */
+static bool lm_ckpt_teacher_labels(LmCkptRun & r, const LmSample & s, int off, int Sc, int V) {
+    LmCkptState &         st = *r.st;
+    const Qwen3LMConfig & c  = r.lm->cfg;
+    const int             H  = c.hidden_size;
+    GGML_ASSERT(st.t_teach_h && st.t_codemask && st.t_teach_sel && "--reg-teacher live was not allocated");
+    GGML_ASSERT(off + Sc <= (int) s.targets.size() && "the live teacher needs the row's own targets");
+
+    // Which of this chunk's positions are code positions. Sc floats over PCIe.
+    {
+        std::vector<float> sel((size_t) Sc, 0.0f);
+        for (int i = 0; i < Sc; i++) {
+            const int32_t t = s.targets[(size_t) (off + i)];
+            sel[(size_t) i] = (t >= st.cfg.teacher_lo && t < st.cfg.teacher_hi) ? 1.0f : 0.0f;
+        }
+        ggml_backend_tensor_set(st.t_teach_sel, sel.data(), 0, sel.size() * sizeof(float));
+    }
+
+    ggml_init_params ip  = { st.arena.size(), st.arena.data(), true };
+    ggml_context *   ctx = ggml_init(ip);
+    ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 64, /*grads=*/false);
+
+    const size_t  col = (size_t) (s.n_masked - 1 + off);  // [P] L6a, same as the student head
+    ggml_tensor * hd =
+        ggml_cont(ctx, ggml_view_2d(ctx, st.t_teach_h, H, Sc, st.t_teach_h->nb[1], col * st.t_teach_h->nb[1]));
+    ggml_tensor * hw = lm_ckpt_head_src(r.lm, st.cfg);
+    if (st.cfg.head_w) {
+        hw = ggml_view_2d(ctx, hw, hw->ne[0], (int64_t) V, hw->nb[1], (size_t) st.cfg.head_row0 * hw->nb[1]);
+    }
+    ggml_tensor * emb = r.head_f32_embed ? qwen3_f32(ctx, hw) : hw;
+    ggml_tensor * lg  = ggml_mul_mat(ctx, emb, hd);  // [V, Sc]
+    // [1,V] x [1,Sc] -> [V,Sc]: the k = 1 outer product of the class mask with
+    // the position selector.
+    ggml_tensor * selv = ggml_view_2d(ctx, st.t_teach_sel, 1, Sc, st.t_teach_sel->nb[1], 0);
+    ggml_tensor * msk  = ggml_mul_mat(ctx, st.t_codemask, selv);
+    ggml_tensor * pr   = ggml_soft_max(ctx, ggml_add(ctx, lg, msk));
+    ggml_build_forward_expand(gf, ggml_cpy(ctx, pr, ggml_view_2d(ctx, st.t_labc, V, Sc, st.t_labc->nb[1], 0)));
+
+    ggml_backend_sched_reset(r.sched);
+    const bool ok = lm_phase_compute(r.sched, gf);
+    ggml_free(ctx);
+    return ok;
+}
+
 // P5 (production): per-chunk graphs, no autodiff, disjoint t_G column writes.
 static bool lm_ckpt_head_chunked(LmCkptRun & r, const LmSample & s, bool count_loss, double * ce_out) {
     LmCkptState &         st   = *r.st;
@@ -820,7 +1022,16 @@ static bool lm_ckpt_head_chunked(LmCkptRun & r, const LmSample & s, bool count_l
         const float gs = (float) Sc / ((float) s_tr * (float) GA);
         ggml_backend_tensor_set(r.t_gs, &gs, 0, sizeof(float));
 
-        LmChunkLabelGuard guard(st.t_labc, s, i, Sc, V);
+        // --reg-teacher live: the frozen base's own distribution for THIS
+        // chunk, written straight into t_labc on the device. The guard is then
+        // told the buffer is externally owned so it neither writes nor clears
+        // it; the whole buffer is cleared once when the head is done, which is
+        // what the next hard-label step's "starts from zero" assumption needs.
+        if (r.teacher_use && !lm_ckpt_teacher_labels(r, s, i, Sc, V)) {
+            ggml_backend_buffer_clear(st.buf_labc, 0);
+            return false;
+        }
+        LmChunkLabelGuard guard(st.t_labc, s, i, Sc, V, /*external=*/r.teacher_use);
 
         ggml_init_params ip  = { st.arena.size(), st.arena.data(), true };
         ggml_context *   ctx = ggml_init(ip);
@@ -842,7 +1053,7 @@ static bool lm_ckpt_head_chunked(LmCkptRun & r, const LmSample & s, bool count_l
         ggml_tensor * dl = ggml_cross_entropy_loss_back(ctx, r.t_gs, lg, lb);  // (grad, logits, labels)
         ggml_tensor * dh = ggml_mul_mat(ctx, ebt, dl);                         // [H, Sc]
         ggml_tensor * gv = ggml_view_2d(ctx, st.Gh[0], H, Sc, st.Gh[0]->nb[1], col * st.Gh[0]->nb[1]);
-        if (r.capture_k > 0) {
+        if (r.capture_k > 0 || r.logit_sink) {
             // The logits are an intermediate; without this the arena is free to
             // reuse their memory before the readback.
             ggml_set_output(lg);
@@ -866,10 +1077,23 @@ static bool lm_ckpt_head_chunked(LmCkptRun & r, const LmSample & s, bool count_l
         if (ok && r.capture_k > 0) {
             lm_ckpt_capture_topk(r, lg, V, Sc);
         }
+        if (ok && r.logit_sink) {
+            r.logit_sink(r, lg, V, Sc, i, r.logit_user);
+        }
         ggml_free(ctx);
         if (!ok) {
+            if (r.teacher_use) {
+                ggml_backend_buffer_clear(st.buf_labc, 0);
+            }
             return false;
         }
+    }
+    // The live teacher wrote dense blocks the guard did not clear. One
+    // whole-buffer clear per micro-step (a device memset of V*chunk floats)
+    // restores the invariant every other label path assumes: t_labc is zero
+    // before its first write.
+    if (r.teacher_use) {
+        ggml_backend_buffer_clear(st.buf_labc, 0);
     }
     if (count_loss && ce_out) {
         *ce_out = ce;
@@ -1012,7 +1236,10 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_backend_tensor_set(r.t_pos, st.pos_scratch.data(), 0, (size_t) S * 4);
     }
 
-    const LmLayerOpts opts = lm_ckpt_layer_opts(st);
+    // ONE opts for the whole micro-step (D13). `r.adapter_off` is the only
+    // field that can differ between micro-steps of the same run, and it is read
+    // exactly here, so P2, P3 and P7 cannot disagree about the adapter.
+    const LmLayerOpts opts = lm_ckpt_layer_opts(st, r.adapter_off);
 
     // §6.1: `build` is derived as total - reset - plan - submit - sync, so it absorbs every
     // remaining host cost (graph construction, ggml_free, input uploads, buffer
@@ -1088,6 +1315,20 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         if (!ok) {
             return false;
         }
+    }
+
+    // ── LIVE TEACHER: the pass ends here ─────────────────────────────────
+    //
+    // Stash the adapter-off final hidden states and get out BEFORE P4. That
+    // ordering is the contract: this pass clears no gradient buffer, runs no
+    // head, builds no backward and touches no accumulator, so the student pass
+    // that follows starts from exactly the state it would have started from
+    // without it. The only thing it leaves behind is C[] / t_H, which the
+    // student's own P1-P3 overwrites — hence the stash.
+    if (r.teacher_fill) {
+        GGML_ASSERT(r.st->t_teach_h && "teacher_fill without --reg-teacher live allocation");
+        ggml_backend_tensor_copy(st.t_H, st.t_teach_h);  // device-to-device, same shape
+        return true;
     }
 
     // ── P4: t_G := 0 (masked columns must stay exactly zero) ─────────────

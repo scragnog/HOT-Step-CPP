@@ -2640,6 +2640,14 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
     const regEvery = Math.trunc(numOpt(body.regEvery, 0));
     const regTopk = Math.trunc(numOpt(body.regTopk, 64));
     const regSongs = Math.trunc(numOpt(body.regSongs, 24));
+    // Prior teacher (docs/plans/lm-attr-probe/OVERNIGHT.md "Live teacher
+    // spec"). Refused, not coerced, same rule as attnBackend above. Default
+    // stays 'cached' — today's byte-identical top-K prior.
+    const regTeacher = body.regTeacher === 'live' ? 'live' as const : 'cached' as const;
+    if (body.regTeacher !== undefined && body.regTeacher !== 'cached' && body.regTeacher !== 'live') {
+      res.status(400).json({ error: 'regTeacher must be cached or live' });
+      return;
+    }
     let regCodes = '';
     let regPriorDir = '';
     if (regEvery > 0) {
@@ -2814,6 +2822,7 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       regSongs,
       regCodes,
       regPriorDir,
+      regTeacher,
       attnBackend,
     };
 

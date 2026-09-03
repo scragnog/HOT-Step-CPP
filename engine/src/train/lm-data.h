@@ -301,11 +301,21 @@ struct LmChunkLabelGuard {
     const int32_t * idx  = nullptr;
     const float *   p    = nullptr;
     int             n    = 0, K = 0, V = 0;
+    // DENSE ROWS ALREADY PROVIDED (--reg-teacher live). The caller has written
+    // the whole [V, n] block for this chunk itself — on the device, straight
+    // out of the frozen base's softmax (lm_ckpt_teacher_labels in
+    // train/lm-ckpt.h) — so the guard must neither write nor clear. It cannot
+    // clear: it does not know which entries are non-zero, and a live row is
+    // dense over 65,535 classes rather than sparse over K. The caller owns the
+    // whole-buffer clear when the micro-step's last chunk is done.
+    bool            external = false;
 
     /** `off` is the chunk's first supervised position within the sample. */
-    LmChunkLabelGuard(ggml_tensor * t_lab, const LmSample & s, int off, int n_, int vocab)
-        : t(t_lab), n(n_), K(s.soft_k), V(vocab) {
-        if (K > 0) {
+    LmChunkLabelGuard(ggml_tensor * t_lab, const LmSample & s, int off, int n_, int vocab, bool external_ = false)
+        : t(t_lab), n(n_), K(s.soft_k), V(vocab), external(external_) {
+        if (external) {
+            // nothing to write: the block is already in the buffer
+        } else if (K > 0) {
             idx = s.soft_idx.data() + (size_t) off * (size_t) K;
             p   = s.soft_p.data()   + (size_t) off * (size_t) K;
             const float * tail = s.soft_tail.empty() ? nullptr : s.soft_tail.data() + (size_t) off;
@@ -316,6 +326,9 @@ struct LmChunkLabelGuard {
         }
     }
     ~LmChunkLabelGuard() {
+        if (external) {
+            return;
+        }
         if (K > 0) {
             lm_soft_labels_write(t, idx, p, n, K, V, false);
         } else {

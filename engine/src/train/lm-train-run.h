@@ -171,6 +171,25 @@ struct LmTrainArgs {
     int                      reg_topk  = 64; // classes kept per position (<= LM_CAPTURE_K_MAX)
     std::string              reg_prior_dir;  // default <out>/prior
 
+    // Which teacher a reg step scores against (2026-09-03):
+    //
+    //   "cached" — the shipped path, and the default. The frozen base's top-K
+    //              is captured once before the first optimizer step and cached
+    //              to disk; the rest of each row is a flat floor over the
+    //              audio-code range. On ACE's 217k-class head K=64 covers only
+    //              18-24% of the base's mass, so most of the target is that
+    //              floor: the term says "stay flat" more than "stay the base".
+    //   "live"   — no cache, no K. Every reg micro-step runs one extra
+    //              FORWARD-ONLY pass of the same row with the adapter delta
+    //              switched off, and the softmax of THAT over the audio-code
+    //              range is the target. 100% coverage by construction, and it
+    //              works on a resume (there is nothing to have gone stale).
+    //              --reg-topk and --reg-prior-dir are unused.
+    //
+    // Default "cached" so a flags-off run and a plain --reg-every run are both
+    // byte-identical to the pre-flag binary.
+    std::string              reg_teacher = "cached";
+
     bool overwrite = false;
     int  limit     = 0;
     bool self_test = false;
@@ -580,7 +599,8 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // `alloc_seq`/`alloc_s_tr` below, which fold the reg set in. The REPORTED
     // data/vram numbers stay style-only, so `data.maxLen` still means "the
     // longest song being trained on".
-    const bool reg_on = (a.reg_every > 0 && !a.reg_codes.empty());
+    const bool reg_on   = (a.reg_every > 0 && !a.reg_codes.empty());
+    const bool reg_live = reg_on && a.reg_teacher == "live";
     std::vector<LmSample>     reg_samples;
     std::vector<LmPriorCache> reg_priors;
     std::vector<std::string>  reg_ids;
@@ -991,6 +1011,14 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         cc.weights_bf16    = weights_bf16;  // Lever A
         cc.attn_flash      = attn_flash;    // D1 — reaches P2/P3/P7 and the node
         cc.attn_prec       = attn_prec_req; //      probe via lm_ckpt_layer_opts
+        // --reg-teacher live: the hidden-state stash + the class mask. The
+        // range is the audio-code sub-vocabulary and nothing else — a reg
+        // target that put mass on the caption vocabulary would be teaching the
+        // adapter to keep predicting prompt tokens at code positions, which the
+        // base does not do and the sampler could not use.
+        cc.live_teacher    = reg_live;
+        cc.teacher_lo      = AUDIO_CODE_BASE;
+        cc.teacher_hi      = AUDIO_CODE_BASE + AUDIO_CODE_COUNT;
         std::string err;
         if (!lm_ckpt_alloc(&ckpt, &lm, cc, &err) || !lm_ckpt_build_embed_t(&ckpt, &err)) {
             lm_fatal("vram", err.empty() ? std::string("low-vram allocation failed") : err);
@@ -1145,6 +1173,50 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         return low ? lm_ckpt_micro_step(run, s, count_loss, ce_out) : micro_step_naive(s, count_loss, ce_out);
     };
 
+    // ── --reg-teacher live: one reg micro-step is TWO passes ─────────────
+    //
+    //   1. the frozen base: forward-only, adapter delta off, stopping after P3
+    //      and stashing the final hidden states. It clears no gradient buffer
+    //      and builds no backward (train/lm-ckpt.h, the teacher_fill early
+    //      return), so the student pass that follows is bit-for-bit the pass it
+    //      would have been on its own.
+    //   2. the student: an ordinary micro-step whose chunked head derives each
+    //      chunk's teacher distribution from that stash instead of reading the
+    //      sample's cached top-K.
+    //
+    // Every flag is set immediately before its call and cleared immediately
+    // after, so a style micro-step can never inherit one — the failure mode
+    // would be silent (a style step trained against the base) and would look
+    // like "the adapter barely learns".
+    //
+    // Live mode is refused outside the checkpointed path at the CLI and again
+    // in the Lever D block, so `run` is always initialised here.
+    typedef void (*LmLogitSink)(LmCkptRun &, ggml_tensor *, int, int, int, void *);
+    auto live_reg_step = [&](const LmSample & s, double * ce_out, bool train = true, LmLogitSink sink = nullptr,
+                             void * sink_user = nullptr) -> bool {
+        GGML_ASSERT(low && "--reg-teacher live requires the checkpointed path");
+        run.adapter_off  = true;
+        run.teacher_fill = true;
+        run.forward_only = true;
+        const bool t_ok  = lm_ckpt_micro_step(run, s, false, nullptr);
+        run.adapter_off  = false;
+        run.teacher_fill = false;
+        run.forward_only = false;
+        if (!t_ok) {
+            return false;
+        }
+        run.teacher_use  = true;
+        run.forward_only = !train;
+        run.logit_sink   = sink;
+        run.logit_user   = sink_user;
+        const bool s_ok  = lm_ckpt_micro_step(run, s, true, ce_out);
+        run.teacher_use  = false;
+        run.forward_only = false;
+        run.logit_sink   = nullptr;
+        run.logit_user   = nullptr;
+        return s_ok;
+    };
+
     // ── high-water probe (§3.7) ──────────────────────────────────────────
     //
     // The probe must bound the run's PEAK allocation, not merely its longest
@@ -1191,6 +1263,22 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         }
         lm_optim_zero_grad(&opt);
 
+        // --reg-teacher live adds a graph shape the pass above does not have:
+        // the per-chunk teacher head, whose [V, chunk] logits + softmax are
+        // transients the student's own head does not allocate. §3.7's whole
+        // argument applies to it — letting gallocr grow on the first reg step
+        // transiently holds the old and new arenas at once, and it invalidates
+        // the L10 leak baseline the tracker is about to take. So probe it here,
+        // at the same worst-case geometry.
+        if (reg_live) {
+            if (!live_reg_step(probe, &dummy, /*train=*/false)) {
+                lm_fatal("vram", "the live-teacher high-water probe failed to run — not enough VRAM for the "
+                                 "worst-case sequence with --reg-teacher live");
+                return 1;
+            }
+            lm_optim_zero_grad(&opt);
+        }
+
         // Trainer-owned footprint: the buffers we allocated plus the scheduler's
         // own compute arena. Device-wide (total - free) would fold in every other
         // process on the card and is not comparable with estMb.
@@ -1235,7 +1323,14 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
     // this point, so the model is no longer the base and a fresh capture would
     // teach the adapter its own output. The cache must be found on disk, and
     // this says so rather than capturing something contaminated.
-    if (reg_on) {
+    //
+    // --reg-teacher live has no capture and no cache: the teacher is recomputed
+    // on every reg step from the frozen base itself, so there is nothing to go
+    // stale and a resume needs nothing on disk. The `else if` below does the
+    // one thing that IS only possible in this window — checking that the live
+    // teacher's target really is the base's own distribution while the adapter
+    // is still provably inert.
+    if (reg_on && !reg_live) {
         std::string prior_dir = a.reg_prior_dir.empty() ? lm_join(a.out_dir, "prior") : a.reg_prior_dir;
         if (!pm_mkdir_p(prior_dir)) {
             lm_fatal("export", "cannot create the prior cache dir " + prior_dir);
@@ -1395,8 +1490,175 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
                 "%d micro-steps per epoch are the album\n",
                 a.reg_every, a.reg_every == 2 ? "nd" : a.reg_every == 3 ? "rd" : "th", n, micro_per_ep);
         jl("{\"type\":\"prior\",\"songs\":%d,\"captured\":%d,\"cached\":%d,\"topK\":%d,\"coverage\":%.6f,"
-           "\"regEvery\":%d,\"microPerEpoch\":%d,\"styleMicroPerEpoch\":%d}",
+           "\"regEvery\":%d,\"microPerEpoch\":%d,\"styleMicroPerEpoch\":%d,\"teacher\":\"cached\"}",
            n_ok, made, n_cached, a.reg_topk, n_ok ? cov_sum / (double) n_ok : 0.0, a.reg_every, micro_per_ep, n);
+    } else if (reg_live) {
+        // ── the step-0 teacher == student check ──────────────────────────
+        //
+        // This window — after every buffer exists, before the first optimizer
+        // step — is the ONLY place the student provably IS the base
+        // (lm_lora_init / lm_lokr_init leave the delta at exactly zero and the
+        // high-water probe zeroed its gradients without stepping). So it is the
+        // only place the live target can be checked against a quantity computed
+        // independently of it.
+        //
+        // WHAT IS BEING COMPARED, exactly. The head reports
+        //   CE = -SUM_j p_j log q_j
+        // with p the teacher's label row and q the student's softmax over the
+        // FULL scored width. Writing u_j for the logits shifted by their max:
+        //
+        //   * at a CODE position p is the softmax restricted to
+        //     [AUDIO_CODE_BASE, +AUDIO_CODE_COUNT), so
+        //       CE = log Z_full - (1/Z_range) SUM_range e^u u
+        //     = the teacher's own entropy PLUS log(Z_full / Z_range), the mass
+        //       the base leaks outside the code range there (near zero);
+        //   * at any OTHER position (the CoT span, which --loss-on-cot
+        //     supervises) p is the full-width softmax and CE is exactly H(p).
+        //
+        // The branch below mirrors lm_ckpt_teacher_labels position for
+        // position; if the two ever disagree about which positions are code
+        // positions, this check is what says so. Everything here is double
+        // precision on the host from the base's own logits, so a mismatch means
+        // the label pipeline is wrong, not that the arithmetic drifted.
+        //
+        // NOTE what this does NOT prove: with the delta at zero, `adapter_off`
+        // is a no-op, so the check cannot distinguish a working adapter_off
+        // from one that never fires. That is covered by the flags-off identity
+        // gate (the flag must not move a non-live run) and by the live run's
+        // reg CE rising off the base's entropy as the adapter trains.
+        struct LiveChk {
+            double            sum   = 0.0;  // SUM over positions of the CE the head must report
+            double            ent   = 0.0;  // SUM over positions of the teacher's own entropy
+            int               lo    = 0;
+            int               hi    = 0;
+            int               codes = 0;    // supervised positions whose target IS an audio code
+            const LmSample *  s     = nullptr;
+        } chk;
+        chk.lo = AUDIO_CODE_BASE;
+        chk.hi = std::min(AUDIO_CODE_BASE + AUDIO_CODE_COUNT, lm_ckpt_head_width(&lm, ckpt.cfg));
+
+        // The shortest reg row: the check reads every logit of every supervised
+        // position back to the host, and the answer does not depend on which
+        // row it is.
+        size_t ci = 0;
+        for (size_t i = 1; i < reg_samples.size(); i++) {
+            if (reg_samples[i].s_tr < reg_samples[ci].s_tr) {
+                ci = i;
+            }
+        }
+        const LmSample & rs = reg_samples[ci];
+        chk.s               = &rs;
+
+        LmLogitSink sink = [](LmCkptRun &, ggml_tensor * lg, int V, int Sc, int off, void * user) {
+            LiveChk *          c = (LiveChk *) user;
+            std::vector<float> row((size_t) V);
+            for (int i = 0; i < Sc; i++) {
+                ggml_backend_tensor_get(lg, row.data(), (size_t) i * (size_t) V * sizeof(float),
+                                        (size_t) V * sizeof(float));
+                // The same test lm_ckpt_teacher_labels applies, on the same
+                // position: is this row's ground-truth token an audio code?
+                const int32_t tgt  = c->s->targets[(size_t) (off + i)];
+                const bool    code = (tgt >= c->lo && tgt < c->hi);
+                c->codes += code ? 1 : 0;
+
+                double mx = -INFINITY;
+                for (int v = 0; v < V; v++) {
+                    if ((double) row[v] > mx) {
+                        mx = (double) row[v];
+                    }
+                }
+                double zf = 0.0, zr = 0.0, wf = 0.0, wr = 0.0;
+                for (int v = 0; v < V; v++) {
+                    const double u = (double) row[v] - mx;
+                    const double e = exp(u);
+                    zf += e;
+                    wf += e * u;
+                    if (v >= c->lo && v < c->hi) {
+                        zr += e;
+                        wr += e * u;
+                    }
+                }
+                // p = softmax over the code range at a code position, over the
+                // full width everywhere else.
+                const double zp = code ? (zr > 0.0 ? zr : 1.0) : zf;
+                const double m  = (code ? wr : wf) / zp;
+                c->sum += log(zf) - m;   // the CE the chunked head must report
+                c->ent += log(zp) - m;   // H(teacher)
+            }
+        };
+
+        // THE CHECK ONLY MEANS ANYTHING FROM SCRATCH. The sink reads the
+        // STUDENT's logits and derives the expected CE from them; the labels
+        // the head actually scored came from the TEACHER's. Those two agree
+        // only while the delta is zero. A --init-adapter resume loads trained
+        // factors well before this point, so running the check there would
+        // compare an adapted student against itself-as-if-base and abort a
+        // perfectly good run. Skipped, and said so, rather than made lenient —
+        // a tolerance wide enough to survive a resume would be too wide to
+        // catch anything.
+        const bool    can_check = a.init_adapter.empty();
+        const int64_t chk_t0    = ggml_time_ms();
+        double        measured = 0.0, predicted = 0.0, entropy = 0.0, diff = 0.0;
+        if (can_check) {
+            if (!live_reg_step(rs, &measured, /*train=*/false, sink, &chk)) {
+                lm_fatal("vram", "the live-teacher check pass failed to run");
+                return 1;
+            }
+            predicted = chk.sum / (double) std::max(1, rs.s_tr);
+            entropy   = chk.ent / (double) std::max(1, rs.s_tr);
+            diff      = fabs(measured - predicted);
+        }
+
+        char lb[720];
+        if (can_check) {
+            snprintf(lb, sizeof(lb),
+                     "live teacher: no cache, no top-K — the frozen base's own distribution, recomputed every reg "
+                     "step (one extra forward), restricted to the %d audio codes at code positions and full-width "
+                     "at the %.0f%% of supervised positions that are CoT text. Step-0 check on %s: reg CE %.6f vs "
+                     "the base's own answer %.6f (|diff| %.3e), teacher entropy %.6f, %lld ms",
+                     AUDIO_CODE_COUNT, 100.0 * (1.0 - (double) chk.codes / (double) std::max(1, rs.s_tr)),
+                     rs.file.c_str(), measured, predicted, diff, entropy, (long long) (ggml_time_ms() - chk_t0));
+        } else {
+            snprintf(lb, sizeof(lb),
+                     "live teacher: no cache, no top-K — the frozen base's own distribution, recomputed every reg "
+                     "step (one extra forward). The step-0 teacher==student check is SKIPPED on a resume: "
+                     "--init-adapter %s loaded a trained delta, so the student is no longer the base and the check "
+                     "has nothing to compare against. The teacher itself is unaffected — it runs with the delta "
+                     "switched off, which is exactly why live mode needs no cached capture on a resume.",
+                     a.init_adapter.c_str());
+        }
+        lm_log("info", lb);
+        fprintf(stderr, "[train-lm] %s\n", lb);
+
+        // 1e-3 is the gate the spec asks for and is far above f32 reduction
+        // noise on a CE of order 1-10 (measured 3e-6 at 4B). Above it the label
+        // pipeline is wrong — the wrong chunk offset, a stale label row, a
+        // range that does not match the mask — and that is worth stopping for,
+        // not warning about, because the run would train silently against a
+        // target nobody could name afterwards.
+        if (can_check && (!(diff <= 1e-3) || !std::isfinite(measured))) {
+            char fb[512];
+            snprintf(fb, sizeof(fb),
+                     "--reg-teacher live: at init the adapter delta is exactly zero, so the reg CE MUST equal the "
+                     "frozen base's own answer on that row. Measured %.6f, expected %.6f (|diff| %.3e > 1e-3). The "
+                     "teacher labels and the student's head disagree; training against them would optimise a "
+                     "target this run cannot name.",
+                     measured, predicted, diff);
+            lm_fatal("prior", fb);
+            return 1;
+        }
+
+        fprintf(stderr,
+                "[train-lm] every %d%s micro-step trains against the frozen base instead of the artist — %d of "
+                "%d micro-steps per epoch are the album\n",
+                a.reg_every, a.reg_every == 2 ? "nd" : a.reg_every == 3 ? "rd" : "th", n, micro_per_ep);
+        // coverage is 1.0 by construction: the target IS the base's distribution
+        // over the code range, not a top-K slice of it.
+        jl("{\"type\":\"prior\",\"songs\":%d,\"captured\":0,\"cached\":0,\"topK\":0,\"coverage\":1.0,"
+           "\"regEvery\":%d,\"microPerEpoch\":%d,\"styleMicroPerEpoch\":%d,\"teacher\":\"live\","
+           "\"checkCe\":%.6f,\"checkBase\":%.6f,\"checkEntropy\":%.6f,\"checkCodeShare\":%.6f,\"checked\":%s}",
+           (int) reg_samples.size(), a.reg_every, micro_per_ep, n, measured, predicted, entropy,
+           (double) chk.codes / (double) std::max(1, rs.s_tr), can_check ? "true" : "false");
     }
 
     // A previous run into the same <out> leaves its milestone dirs behind; they
@@ -1458,8 +1720,12 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
 
         double running = 0.0;
         int    n_micro = 0;
-        double reg_running = 0.0;
-        int    reg_micro   = 0;
+        double    reg_running = 0.0;
+        int       reg_micro   = 0;
+        // Wall time spent in reg micro-steps this epoch. stderr only, and
+        // deliberately NOT a new key on any JSONL event: the `reg_epoch` event
+        // is what a cached run emits today and the byte-identity gate compares.
+        long long reg_ms_sum  = 0;
         lm_optim_zero_grad(&opt);
         LmStepStats last_stats;
 
@@ -1507,12 +1773,18 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
                 j++;
             }
 
-            if (!micro_step(*sp, true, &ce)) {
+            // A live reg step is the teacher forward + the student step; a
+            // cached one (and every style step) is the shipped single call.
+            const int64_t t_reg0 = is_reg ? ggml_time_ms() : 0;
+            const bool    ok_micro =
+                (is_reg && reg_live) ? live_reg_step(*sp, &ce) : micro_step(*sp, true, &ce);
+            if (!ok_micro) {
                 lm_fatal("vram", "graph compute failed mid-epoch");
                 rc = 1;
                 break;
             }
             if (is_reg) {
+                reg_ms_sum += ggml_time_ms() - t_reg0;
                 // Kept out of the style loss on purpose: it is a different
                 // objective (soft targets against the frozen base), and folding
                 // it into the epoch mean would move target-loss and best-epoch
@@ -1577,8 +1849,10 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         }
         if (reg_on) {
             const double reg_avg = reg_running / std::max(1, reg_micro);
-            fprintf(stderr, "[train-lm] prior preservation: %d reg micro-step(s), reg CE %.6f\n", reg_micro,
-                    reg_avg);
+            fprintf(stderr, "[train-lm] prior preservation (%s teacher): %d reg micro-step(s), reg CE %.6f, "
+                            "%lld ms/reg step\n",
+                    reg_live ? "live" : "cached", reg_micro, reg_avg,
+                    (long long) (reg_ms_sum / std::max(1, reg_micro)));
             jl("{\"type\":\"reg_epoch\",\"epoch\":%d,\"micro\":%d,\"regCe\":%.6f}", epoch + 1, reg_micro,
                reg_avg);
         }
@@ -1795,10 +2069,10 @@ static int lm_train_main(const LmTrainArgs & a) {
             csv += "\"" + lm_json_escape(a.reg_codes[i]) + "\"";
         }
         jl("{\"type\":\"prior_config\",\"regEvery\":%d,\"regSongs\":%d,\"regTopK\":%d,\"regPriorDir\":\"%s\","
-           "\"regCodes\":[%s]}",
+           "\"regTeacher\":\"%s\",\"regCodes\":[%s]}",
            a.reg_every, a.reg_songs, a.reg_topk,
            lm_json_escape(a.reg_prior_dir.empty() ? lm_join(a.out_dir, "prior") : a.reg_prior_dir).c_str(),
-           csv.c_str());
+           a.reg_teacher.c_str(), csv.c_str());
     }
 
     // ── extract ──────────────────────────────────────────────────────────
@@ -1853,6 +2127,7 @@ static int lm_train_main(const LmTrainArgs & a) {
     meta.reg_topk        = a.reg_topk;
     meta.reg_codes       = a.reg_codes;
     meta.reg_prior_dir   = a.reg_prior_dir.empty() ? lm_join(a.out_dir, "prior") : a.reg_prior_dir;
+    meta.reg_teacher     = a.reg_teacher;
 
     // Trigger word (T5): CLI flags win, else the variant's preprocess_meta.json.
     // `--codes` always sits in the variant dir, so its parent is the fallback

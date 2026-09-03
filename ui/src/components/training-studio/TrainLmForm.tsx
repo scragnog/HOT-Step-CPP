@@ -75,6 +75,12 @@ export interface TrainLmFormState {
   regEvery: number;
   regTopk: number;
   regSongs: number;
+  /** Prior teacher (docs/plans/lm-attr-probe/OVERNIGHT.md "Live teacher
+   *  spec"). 'cached' is today's byte-identical top-K prior (~18% coverage of
+   *  the base's code-vocabulary mass); 'live' scores every reg step against
+   *  the frozen base's full live distribution instead — 100% coverage, no
+   *  cache, no K. Meaningless when regEvery is 0. */
+  regTeacher: 'cached' | 'live';
   /** Attention backend (2026-09-02, docs/plans/2026-09-02-lm-flash-attn.md
    *  Stream B) — the DiT's attnBackend ported to train-lm. 'exact' is
    *  today's byte-identical graph; 'flash' routes through the fused
@@ -180,6 +186,7 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   regEvery: 0,
   regTopk: 64,
   regSongs: 24,
+  regTeacher: 'cached',
   // 'exact' (Rob, 2026-09-02) — the DiT ships 'flash' on by default, but the
   // LM port is new and unvalidated by ear; a user must opt in.
   attnBackend: 'exact',
@@ -468,6 +475,19 @@ export const TrainLmForm: React.FC<Props> = ({
                 value={value.regTopk} disabled={lock}
                 onChange={(e) => onChange({ regTopk: num(e.target.value, 64) })}
                 className={FIELD}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 col-span-2">
+              {P('regTeacher', 'Default cached')}
+              <StyledSelect
+                accent="amber"
+                value={value.regTeacher}
+                disabled={lock}
+                onChange={(v) => onChange({ regTeacher: v as 'cached' | 'live' })}
+                options={[
+                  { value: 'cached', label: t('trainingStudio.train.regTeacherCached') },
+                  { value: 'live', label: t('trainingStudio.train.regTeacherLive') },
+                ]}
               />
             </label>
           </div>

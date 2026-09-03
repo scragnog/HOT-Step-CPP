@@ -260,7 +260,10 @@ export const TrainPanel: React.FC = () => {
       // start posts the same body it always did.
       ...(form.captionDropout > 0 ? { captionDropout: form.captionDropout } : {}),
       ...(form.regEvery > 0
-        ? { regEvery: form.regEvery, regTopk: form.regTopk, regSongs: form.regSongs }
+        ? {
+            regEvery: form.regEvery, regTopk: form.regTopk, regSongs: form.regSongs,
+            ...(form.regTeacher !== 'cached' ? { regTeacher: form.regTeacher } : {}),
+          }
         : {}),
       // Attention backend (2026-09-02). Sent only when moved off default, same
       // rule as the speed levers above — an ace-train build that predates the

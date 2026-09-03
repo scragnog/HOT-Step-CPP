@@ -158,9 +158,42 @@ pre-change binary: same 4B run, `--order fixed --epochs 1 --limit 4`, per-step `
     president-vs-boston, top-64 covers **18.5%** and top-256 only **24.0%**. With the uniform tail
     the target is then mostly floor: it says "stay flat" much more than "stay the base". Whether
     that still buys anything is **unmeasured** past a smoke test. The trainer logs a `warn` below
-    50%. `--reg-topk` (max 256) sharpens the picture a little; the real fix is a live teacher
-    forward (the frozen base evaluated on each reg step, full distribution, no cache), which is
-    designed but not built.
+    50%. `--reg-topk` (max 256) sharpens the picture a little; the real fix is `--reg-teacher live`
+    below.
+
+- **`--reg-teacher cached|live`** (2026-09-03, default `cached` = everything above, byte-identical).
+  `live` replaces the cached top-K with the frozen base's **own distribution, recomputed on every
+  reg micro-step**: no cache, no K, no coverage warning, 100% coverage by construction.
+  - **How.** A live reg step is two passes. First a forward-only pass of the same row with the
+    adapter delta switched off (`LmLayerOpts::adapter_off` makes `lm_linear` skip both the LoRA and
+    the LoKr term) that stops after P3 and stashes the final hidden states into an `[H, s_max]`
+    buffer (20.8 MB at 4B). Then the ordinary training micro-step, whose chunked head re-derives
+    that chunk's teacher logits from the stash with one extra head GEMM, softmaxes them **on the
+    GPU** and writes the dense `[V, chunk]` block straight into the label buffer. Nothing crosses
+    PCIe: reading the teacher's probabilities back to the host would be ~2.6 GB per reg step and a
+    host `exp()` over 229 M values.
+  - **The mask is PER POSITION, and that is not a detail.** "Softmax over the audio-code range
+    only" is right at a code position and wrong everywhere else: with `--loss-on-cot` (the default)
+    a reg row's supervised span starts at `<think>`, so ~13% of its positions are CoT YAML text
+    (measured on boston at 4B). A code-only target there renormalises 65,535 logits the base has
+    driven to near zero — noise — and demands total code probability 1.0 at a position where the
+    base emits text, i.e. it trains the model to emit codes instead of a plan. So the range mask is
+    applied only where the row's own ground-truth token IS an audio code; elsewhere the teacher is
+    the base's full-width distribution. Before this fix the step-0 check read reg CE 11.93 against a
+    teacher entropy of 9.46 (a 2.47-nat gap that is exactly this bug); after it, 8.6515 vs 8.6515.
+  - **The step-0 check.** At init the delta is exactly zero, so the student IS the base and the reg
+    CE must equal what the base's own logits say. The run computes both (the second on the host in
+    double precision) and **refuses to start** if they differ by more than 1e-3. Measured 1.3e-06
+    at 4B. Skipped with a log line on an `--init-adapter` resume, where the premise no longer holds.
+  - **`--reg-topk` and `--reg-prior-dir` are ignored** in live mode — nothing is captured and
+    nothing is written — so unlike the cached teacher a **resume needs no cache** and can never hit
+    the stale-cache refusal.
+  - **Cost.** One extra forward per reg step: measured 1177 → 1326 ms per reg micro-step at 4B
+    (+13%), epoch 4411 → 4561 ms at `--reg-every 3` (+3.4%), VRAM 12090 → 12112 MB. The VRAM model
+    does **not** yet carry the 21.6 MB stash+mask, so `estMb` under-predicts by that much in live
+    mode.
+  - **Not yet evidence.** Whether the live teacher trains a better adapter than the cached one is
+    unmeasured — the arms have not been run.
 
 Usage (4B, low-VRAM by default):
 
@@ -171,6 +204,12 @@ ace-train train-lm --stages train,export ^
   --caption-dropout 0.25 ^
   --reg-every 3 --reg-codes <other artist>\lm_codes.jsonl,<another>\lm_codes.jsonl ^
   --reg-songs 24 --reg-topk 64
+```
+
+Same again with the live teacher (drop `--reg-topk`, it does nothing here):
+
+```
+  --reg-every 3 --reg-codes <other artist>\lm_codes.jsonl --reg-songs 24 --reg-teacher live
 ```
 
 `ace-train train-lm --help` carries the same flags with their defaults.

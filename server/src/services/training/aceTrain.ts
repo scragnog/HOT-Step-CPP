@@ -369,6 +369,11 @@ export interface ResolvedTrainLmOptions {
    *  chain shares the same cache and it is captured only once. '' when
    *  regEvery is 0. */
   regPriorDir: string;
+  /** Prior teacher (docs/plans/lm-attr-probe/OVERNIGHT.md "Live teacher spec").
+   *  'cached' is today's byte-identical top-K prior; 'live' scores every reg
+   *  step against the frozen base's full live distribution instead. Only
+   *  emitted (as `--reg-teacher live`) when non-default AND regEvery > 0. */
+  regTeacher: 'cached' | 'live';
   /** Attention backend (2026-09-02 lm-flash-attn plan, Stream B) — the DiT's
    *  attnBackend ported to train-lm. 'exact' is the byte-identical graph;
    *  'flash' routes through the fused ggml_flash_attn_train/_back kernels.
@@ -467,6 +472,7 @@ export function buildTrainLmArgs(input: {
     args.push('--reg-every', String(o.regEvery));
     args.push('--reg-topk', String(o.regTopk));
     args.push('--reg-prior-dir', o.regPriorDir);
+    if (o.regTeacher === 'live') args.push('--reg-teacher', 'live');
   }
   // Attention backend (2026-09-02 lm-flash-attn plan, Stream B). Only the
   // non-default value is emitted — unlike train-dit's --attn, which is always

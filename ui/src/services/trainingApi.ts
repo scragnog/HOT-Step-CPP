@@ -629,6 +629,12 @@ export interface TrainLmOptions {
   /** 'auto' picks up to 6 other 600s-cap artists server-side; an explicit
    *  array must be absolute lm_codes.jsonl paths. */
   regCorpora?: 'auto' | string[];    // default 'auto'
+  /** Prior teacher (docs/plans/lm-attr-probe/OVERNIGHT.md "Live teacher spec").
+   *  'cached' is today's byte-identical top-K prior (~18% coverage of the
+   *  base's code-vocabulary mass). 'live' scores every reg step against the
+   *  frozen base's FULL live next-token distribution instead — 100% coverage,
+   *  no cache, no K. Meaningless when regEvery is 0. */
+  regTeacher?: 'cached' | 'live';     // default 'cached'
   /** Attention backend (2026-09-02, docs/plans/2026-09-02-lm-flash-attn.md
    *  Stream B) — the DiT's attnBackend ported to train-lm. 'exact' is the
    *  byte-identical graph; 'flash' routes through the fused

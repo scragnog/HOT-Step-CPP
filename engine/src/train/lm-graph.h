@@ -563,6 +563,23 @@ struct LmLayerOpts {
     // pair (--attn flash with --attn-head-block > 0 is exit 2, D3).
     bool      attn_flash = false;
     ggml_prec attn_prec  = GGML_PREC_DEFAULT;
+
+    // ── ADAPTER OFF (--reg-teacher live, 2026-09-03) ───────────────────────
+    //
+    // true makes lm_linear() emit the frozen base projection and NOTHING else:
+    // no LoRA A/B branch, no LoKr kron delta. It is how the live-teacher pass
+    // asks "what would the base have said here?" from inside a run whose
+    // adapter is already trained, without a second model load and without
+    // touching the adapter tensors.
+    //
+    // Default false, and false emits the shipped graph verbatim — the branch
+    // below wraps the existing delta block rather than restructuring it, so a
+    // flags-off run's node sequence is unchanged (the standing byte-identity
+    // rule for every lever in this header).
+    //
+    // It applies to the whole pass, not per module: a half-disabled adapter is
+    // not the base, and there is no use for one.
+    bool      adapter_off = false;
 };
 
 // The fused drop-in for qwen3_attn_f32 at the whole-head site. Same arguments,
@@ -649,17 +666,24 @@ static ggml_tensor * lm_linear(ggml_context * ctx, ggml_tensor * w, const QwLora
             opts.wt->nodes.push_back(wt);
         }
     }
-    if (pr && pr->A && pr->B) {
-        ggml_tensor * t = ggml_mul_mat(ctx, pr->A, x);  // [r, S]
-        if (opts.rank_mask) {
-            t = ggml_mul(ctx, t, opts.rank_mask);       // [r,1] broadcasts over S
+    // opts.adapter_off short-circuits BOTH parameterizations (--reg-teacher
+    // live's frozen-base pass). Guarding the whole block rather than each arm
+    // is deliberate: a future third adapter form added below would otherwise be
+    // silently left on in the teacher pass, and the teacher would quietly stop
+    // being the base.
+    if (!opts.adapter_off) {
+        if (pr && pr->A && pr->B) {
+            ggml_tensor * t = ggml_mul_mat(ctx, pr->A, x);  // [r, S]
+            if (opts.rank_mask) {
+                t = ggml_mul(ctx, t, opts.rank_mask);       // [r,1] broadcasts over S
+            }
+            t               = ggml_scale(ctx, t, pr->scale);
+            y               = ggml_add(ctx, y, ggml_mul_mat(ctx, pr->B, t));
+        } else if (pr && pr->has_lokr()) {
+            // Shared with the inference runtime (qwen3-lora.h) on purpose: one kron
+            // implementation, so the ne2 lesson cannot be learned twice.
+            y = qwen3_lokr_delta(ctx, pr, x, y);
         }
-        t               = ggml_scale(ctx, t, pr->scale);
-        y               = ggml_add(ctx, y, ggml_mul_mat(ctx, pr->B, t));
-    } else if (pr && pr->has_lokr()) {
-        // Shared with the inference runtime (qwen3-lora.h) on purpose: one kron
-        // implementation, so the ne2 lesson cannot be learned twice.
-        y = qwen3_lokr_delta(ctx, pr, x, y);
     }
     return y;
 }

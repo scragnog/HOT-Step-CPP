@@ -751,6 +751,18 @@ export interface TrainLmOptions {
    *  aceTrain.ts. An explicit array must be absolute paths to lm_codes.jsonl
    *  files under data/training/tensors/. Meaningless when regEvery is 0. */
   regCorpora?: 'auto' | string[];    // default 'auto'
+  /** Prior teacher (docs/plans/lm-attr-probe/OVERNIGHT.md "Live teacher spec").
+   *  'cached' (default) is today's behaviour, byte-identical: the reg step is
+   *  scored against a top-K prior distribution captured once per corpus and
+   *  cached to regPriorDir — ~18% coverage of the base's code-vocabulary mass
+   *  (RESULTS.md §6). 'live' instead runs a forward-only pass of the SAME reg
+   *  sample through the frozen base (adapter delta disabled) on every reg
+   *  step and scores against its FULL next-token distribution over the audio-
+   *  code sub-vocabulary — 100% coverage, no cache, no K. Meaningless when
+   *  regEvery is 0; emitted as `--reg-teacher live` only when both are set, so
+   *  an ace-train build that predates the flag stays compatible for the
+   *  default 'cached' run every caller still makes. */
+  regTeacher?: 'cached' | 'live';     // default 'cached'
   /** Attention backend (2026-09-02, docs/plans/2026-09-02-lm-flash-attn.md
    *  Stream B — the DiT's `attnBackend` ported to train-lm). 'exact' keeps
    *  today's byte-identical attention graph; 'flash' routes through the fused

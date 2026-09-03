@@ -147,6 +147,11 @@ struct LmExportMeta {
     int                      reg_topk        = 0;
     std::vector<std::string> reg_codes;
     std::string              reg_prior_dir;
+    // "cached" (top-K capture on disk) or "live" (the frozen base's full
+    // distribution recomputed per reg step). Recorded because the two are
+    // different objectives, not two speeds of the same one, and an adapter's
+    // log is the only place that difference survives.
+    std::string              reg_teacher = "cached";
 };
 
 // ─── adapter_config.json (frozen literal, §2.4) ─────────────────────────────
@@ -257,6 +262,7 @@ static bool lm_write_train_log(const std::string & dir, const LmExportMeta & m) 
         yyjson_mut_obj_add_int(doc, cfg, "reg_songs", m.reg_songs);
         yyjson_mut_obj_add_int(doc, cfg, "reg_topk", m.reg_topk);
         yyjson_mut_obj_add_strcpy(doc, cfg, "reg_prior_dir", m.reg_prior_dir.c_str());
+        yyjson_mut_obj_add_strcpy(doc, cfg, "reg_teacher", m.reg_teacher.c_str());
         yyjson_mut_val * rc = yyjson_mut_obj_add_arr(doc, cfg, "reg_codes");
         for (size_t i = 0; i < m.reg_codes.size(); i++) {
             yyjson_mut_arr_add_strcpy(doc, rc, m.reg_codes[i].c_str());

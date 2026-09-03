@@ -493,8 +493,35 @@ static void print_usage(void) {
             "                                            mass spread flat over the audio-code range. That\n"
             "                                            keeps the adapter flat rather than pinning it to\n"
             "                                            the base's exact distribution; raising k sharpens\n"
-            "                                            the picture a little (a live teacher would fix it).\n"
-            "    --reg-prior-dir <dir>       <out>/prior where the captured distributions are cached.\n"
+            "                                            the picture a little; --reg-teacher live fixes it.\n"
+            "    --reg-teacher <cached|live> cached      which teacher a reg step scores against.\n"
+            "                                            cached = the shipped path: the frozen base's\n"
+            "                                            top-K captured once before the first optimizer\n"
+            "                                            step and cached to disk, the rest of every row a\n"
+            "                                            flat floor over the audio-code range. On ACE's\n"
+            "                                            217k-class head that floor is 76-82%% of the\n"
+            "                                            target, so the term holds the adapter FLAT more\n"
+            "                                            than it holds it to the base.\n"
+            "                                            live = no cache, no K. Every reg micro-step runs\n"
+            "                                            one extra FORWARD-ONLY pass of the same row with\n"
+            "                                            the adapter delta switched off, and the softmax\n"
+            "                                            of that IS the target: over the audio-code range\n"
+            "                                            at code positions, full-width at the CoT text\n"
+            "                                            positions --loss-on-cot also supervises (a\n"
+            "                                            code-only target there would be noise, and would\n"
+            "                                            teach the model to emit codes instead of a\n"
+            "                                            plan). 100%% coverage. Costs one extra\n"
+            "                                            forward per reg step, and reg steps are 1 in\n"
+            "                                            --reg-every. --reg-topk and --reg-prior-dir are\n"
+            "                                            IGNORED in live mode: nothing is captured and\n"
+            "                                            nothing is written, so a --init-adapter resume\n"
+            "                                            needs no cache either (the teacher is the base\n"
+            "                                            itself, every time). At init the adapter delta is\n"
+            "                                            zero, so the run checks that the live reg CE\n"
+            "                                            equals the base's own answer on one row and\n"
+            "                                            refuses to start if it does not.\n"
+            "    --reg-prior-dir <dir>       <out>/prior where the captured distributions are cached\n"
+            "                                            (cached teacher only).\n"
             "                                            Capture happens ONCE, before the first\n"
             "                                            optimizer step, while the adapter delta is\n"
             "                                            exactly zero. A --init-adapter resume cannot\n"
@@ -3730,6 +3757,7 @@ static int cmd_train_lm(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--reg-every") && i + 1 < argc) a.reg_every = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--reg-topk") && i + 1 < argc) a.reg_topk = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--reg-prior-dir") && i + 1 < argc) a.reg_prior_dir = argv[++i];
+        else if (!strcmp(argv[i], "--reg-teacher") && i + 1 < argc) a.reg_teacher = argv[++i];
         else if (!strcmp(argv[i], "--milestone-step") && i + 1 < argc) a.milestone_step = (float) atof(argv[++i]);
         else if (!strcmp(argv[i], "--milestone-keep") && i + 1 < argc) a.milestone_keep = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--limit") && i + 1 < argc) a.limit = atoi(argv[++i]);
@@ -3830,6 +3858,14 @@ static int cmd_train_lm(int argc, char ** argv) {
     // free VRAM). Both refuse at exit 2 from there instead.
     if (a.caption_dropout < 0.0f || a.caption_dropout > 1.0f) {
         fprintf(stderr, "ace-train train-lm: --caption-dropout must be 0..1\n");
+        return 2;
+    }
+    // Checked even with prior preservation OFF: a preset that carries a typo'd
+    // --reg-teacher should say so rather than be silently ignored the day
+    // someone adds --reg-every next to it.
+    if (a.reg_teacher != "cached" && a.reg_teacher != "live") {
+        fprintf(stderr, "ace-train train-lm: --reg-teacher must be cached|live (got '%s')\n",
+                a.reg_teacher.c_str());
         return 2;
     }
     if (!a.reg_codes.empty() && a.reg_every <= 0) {
