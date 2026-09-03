@@ -143,7 +143,11 @@ what decides whether a render sounds like a song. Per supervised frame bf16 is
 only 1.15x ahead there.
 
 **Default stays q8_0.** Pick bf16 when coverage is not the binding constraint: a
-bigger card, a shorter corpus, or a deliberate speed run.
+bigger card, a shorter corpus, or a deliberate speed run. Since 2026-09-03 the
+base is downloadable: `mm3-lm-bf16` is on scragnog/MiniMax-Music3-GGUF and in
+the registry, and picking it in the train form's base picker is all it takes
+(the server maps a bf16 base to `--weights bf16`). Untested on Ampere (A40),
+where the F32 fallback is slowest and the gain should be largest.
 
 One loose thread: identical step-1 loss (3.5930 vs 3.5932) at a **29% lower
 gradient norm** (5.561 vs 7.870) is the quantizer's error appearing as gradient

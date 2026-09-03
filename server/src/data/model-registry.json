@@ -2372,6 +2372,26 @@
       "repoPath": "runtime/cuda12/cudart64_12.dll"
     },
     {
+      "id": "mm3-lm-bf16",
+      "filename": "mm3-lm-bf16.gguf",
+      "role": "mm3",
+      "subdir": "mm3",
+      "displayName": "MM3 Language Model (BF16, training)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "BF16",
+      "sizeBytes": 17176762656,
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "description": "MiniMax-Music3 language model in its source BF16 precision, for TRAINING adapters with BF16 tensor cores: pick it as the base in the MM3 train form and the trainer runs the projection GEMMs on the tensor cores instead of the F32 fallback. Measured 1.4x faster per step than q8_0 on a 5090 at matched crop, for about 9 GB more VRAM (needs a 40 GB+ card at the default crop). Same 17.2 GB as F16; not better than F16 for generation, where q8_0 is the pick.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
       "id": "mm3-lm-f16",
       "filename": "mm3-lm-f16.gguf",
       "role": "mm3",
