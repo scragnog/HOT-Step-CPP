@@ -1104,11 +1104,8 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
             lm_fatal("args", "--dora applies to the LoRA parameterization only (LoKr has no per-row direction to rescale)");
             return 1;
         }
-        if (a.dora && !a.init_adapter.empty()) {
-            // dit-resume.h restores A/B only. m is re-derived as ||W||_col here, so
-            // at resume the ratio m/||W+BA|| is not the 1.0 a fresh run starts from.
-            lm_log("warn", "DoRA: lora_magnitude_vector is NOT resumed from --init-adapter; m restarts at ||W||_col");
-        }
+        // DoRA's m and LoHa's second pair ARE resumed (dit-resume.h); the
+        // per-window norm is re-derived from the resumed A/B at the first window.
         cfg.seed                = (uint64_t) a.seed;
         cfg.lokr_dim            = a.lokr_dim;
         cfg.lokr_alpha          = a.lokr_alpha;

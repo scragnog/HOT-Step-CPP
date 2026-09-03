@@ -177,6 +177,37 @@ static bool dit_resume_load_lora(DitAdapterLora * ad, const std::string & dir, D
                 continue;
             }
             char nm[208];
+            if (ad->loha && pr.A2 && pr.B2) {
+                // LoHa exports in the LyCORIS layout (dit-adapter.h exportDir):
+                // w?_b is our A, w?_a our B. All four or none per site.
+                const std::string stem = dit_lycoris_key_stem(l, s);
+                ggml_tensor *     dst[4] = { pr.A, pr.B, pr.A2, pr.B2 };
+                const char *      sfx[4] = { "hada_w1_b", "hada_w1_a", "hada_w2_b", "hada_w2_a" };
+                int               got    = 0;
+                for (int k = 0; k < 4 && ok; k++) {
+                    const int r = dit_resume_fill(st, stem + "." + sfx[k], dst[k], err);
+                    if (r < 0) {
+                        ok = false;
+                    } else {
+                        got += r;
+                    }
+                }
+                if (!ok) {
+                    break;
+                }
+                if (got == 4) {
+                    out->loaded += 4;
+                } else if (got == 0) {
+                    out->fresh_sites++;
+                } else {
+                    char b[192];
+                    snprintf(b, sizeof(b), "layer %d site %s has %d of 4 LoHa factors in %s — corrupt export", l,
+                             dit_site_peft(s), got, path.c_str());
+                    *err = b;
+                    ok   = false;
+                }
+                continue;
+            }
             snprintf(nm, sizeof(nm), "base_model.model.layers.%d.%s.lora_A.weight", l, dit_site_peft(s));
             const int ra = dit_resume_fill(st, nm, pr.A, err);
             snprintf(nm, sizeof(nm), "base_model.model.layers.%d.%s.lora_B.weight", l, dit_site_peft(s));
@@ -185,6 +216,20 @@ static bool dit_resume_load_lora(DitAdapterLora * ad, const std::string & dir, D
                 ok = false;
             } else if (ra == 1 && rb == 1) {
                 out->loaded += 2;
+                if (ad->dora && pr.m) {
+                    // DoRA's magnitude. Absent from the file (a plain-LoRA source
+                    // resumed as DoRA) it keeps its ||W||_col init, which makes the
+                    // first step the plain-LoRA forward — the same start a fresh
+                    // DoRA run has, so silence is correct there.
+                    snprintf(nm, sizeof(nm), "base_model.model.layers.%d.%s.lora_magnitude_vector.weight", l,
+                             dit_site_peft(s));
+                    const int rm = dit_resume_fill(st, nm, pr.m, err);
+                    if (rm < 0) {
+                        ok = false;
+                    } else {
+                        out->loaded += rm;
+                    }
+                }
             } else if (ra == 0 && rb == 0) {
                 out->fresh_sites++;
             } else {
@@ -199,7 +244,8 @@ static bool dit_resume_load_lora(DitAdapterLora * ad, const std::string & dir, D
     // File layers outside the trained window (counted for the log line).
     for (size_t i = 0; i < st.entries.size() && ok; i++) {
         int fl = -1;
-        if (sscanf(st.entries[i].name.c_str(), "base_model.model.layers.%d.", &fl) == 1) {
+        if (sscanf(st.entries[i].name.c_str(), "base_model.model.layers.%d.", &fl) == 1 ||
+            sscanf(st.entries[i].name.c_str(), "lycoris_layers_%d_", &fl) == 1) {
             if (fl < ad->lo || fl >= ad->hi) {
                 out->skipped_file++;
             }
