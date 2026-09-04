@@ -34,8 +34,11 @@ export function loadSourceAudio(
   log('DEBUG', `[Synth Phase] Looking for source audio at: ${srcPath}`);
 
   if (!fs.existsSync(srcPath)) {
-    log('WARNING', `[Synth Phase] Source audio not found: ${srcPath}`);
-    return undefined;
+    // Warning-and-continue submitted a cover with no source at all, which the
+    // engine rejected as a bare "Generation failed" (#130). Fail here, with
+    // the path, so a stale upload reference is diagnosable from the UI.
+    log('ERROR', `[Synth Phase] Source audio not found: ${srcPath}`);
+    throw new Error(`Source audio file is missing (${path.basename(srcPath)}). The upload it referred to is gone; re-upload the track.`);
   }
 
   try {
@@ -190,8 +193,8 @@ export async function loadTimbreReference(
 
   log('DEBUG', `[Synth Phase] Looking for timbre ref at: ${refPath}`);
   if (!fs.existsSync(refPath)) {
-    log('WARNING', `[Synth Phase] Timbre reference file not found: ${refPath}`);
-    return undefined;
+    log('ERROR', `[Synth Phase] Timbre reference file not found: ${refPath}`);
+    throw new Error(`Timbre reference file is missing (${path.basename(refPath)}). The upload it referred to is gone; re-upload it or clear the reference.`);
   }
 
   const refExt = path.extname(refPath).toLowerCase();

@@ -300,6 +300,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       // 3. Essentia analysis
       setIsUploading(false); setIsAnalyzing(true);
       let bpm = 120, key = 'C major', scale: string | undefined;
+      let analysed = false;
       const anRes = await fetch('/api/analyze', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioUrl }),
@@ -307,10 +308,16 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       if (anRes.ok) {
         const d = await anRes.json();
         bpm = d.bpm || 120; key = `${d.key || 'C'} ${d.scale || 'major'}`; scale = d.scale;
+        analysed = true;
         setAnalysis({ bpm, key, scale });
       }
-      // 4. Cache
-      saveTrackCacheEntry(file.name, { artist: extractedArtist, title: extractedTitle, album: extractedAlbum, duration: extractedDuration, bpm, key, scale });
+      // 4. Cache. Only a real analysis goes in: with Essentia unavailable the
+      // 120 / C major fallback was cached and came back labelled "detected" on
+      // every later load of the same file (#131).
+      saveTrackCacheEntry(file.name, {
+        artist: extractedArtist, title: extractedTitle, album: extractedAlbum, duration: extractedDuration,
+        ...(analysed ? { bpm, key, scale } : {}),
+      });
     } catch (err: any) {
       showToast(`Error: ${err.message}`);
     } finally { setIsUploading(false); setIsAnalyzing(false); }

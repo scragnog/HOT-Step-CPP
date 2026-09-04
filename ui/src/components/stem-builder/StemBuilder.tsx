@@ -379,7 +379,18 @@ export const StemBuilder: React.FC = () => {
                 </button>
               </div>
             ) : (
-              <label className="flex flex-col items-center gap-2 px-4 py-6 rounded-xl border-2 border-dashed border-white/[0.08] hover:border-amber-500/30 cursor-pointer transition-colors group">
+              <label
+                // The zone said "Drop or click" but only click was wired, so a
+                // dropped file opened as a browser tab (#128).
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault();
+                  const files = e.dataTransfer?.files;
+                  if (files && files.length > 0 && !isUploading) {
+                    void handleFileSelected({ target: { files, value: '' } } as unknown as React.ChangeEvent<HTMLInputElement>);
+                  }
+                }}
+                className="flex flex-col items-center gap-2 px-4 py-6 rounded-xl border-2 border-dashed border-white/[0.08] hover:border-amber-500/30 cursor-pointer transition-colors group">
                 <input
                   type="file"
                   accept=".wav,.mp3,.flac,.ogg"

@@ -34,7 +34,9 @@ export type SeparationLevel = 0 | 1 | 2 | 3 | 4 | 5;
 export const SEPARATION_LEVELS: { value: SeparationLevel; label: string; description: string }[] = [
   { value: 0, label: 'Basic', description: '6 stems: vocals, bass, drums, guitar, piano, other' },
   { value: 1, label: 'Vocal Split', description: '8 stems: + lead/backing vocals' },
-  { value: 2, label: 'Full', description: '14 stems: + 6 drum components' },
+  // The engine emits 14 at this level, but the aggregate Vocals and Drums that
+  // feed the splits are hidden, so 12 reach the user (#134).
+  { value: 2, label: 'Full', description: '12 stems: + 6 drum components' },
   // Level 3 ("Maximum") is retired — its HTDemucs "Other" refinement pass was
   // removed. The enum value still exists engine-side and now behaves as Full,
   // so anyone with 3 persisted keeps working; it is just not offered any more.

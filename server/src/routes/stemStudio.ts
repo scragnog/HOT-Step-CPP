@@ -184,11 +184,9 @@ async function runSupersep(job: StemJob): Promise<void> {
 
       const stemBuf = Buffer.from(await stemRes.arrayBuffer());
       fs.writeFileSync(path.join(jobDir, `${safeName}.wav`), stemBuf);
-
-      // Also save into stage-N subfolder for raw per-stage debugging
-      const stageDir = path.join(jobDir, `stage-${stem.stage ?? 1}`);
-      fs.mkdirSync(stageDir, { recursive: true });
-      fs.writeFileSync(path.join(stageDir, `${safeName}.wav`), stemBuf);
+      // A second copy used to go into stage-N/ "for per-stage debugging" and
+      // nothing ever removed it, so every separation cost twice its disk
+      // (#133). The stage number is in _meta.json already.
 
       // Only track non-hidden stems for UI
       if (!stem.hidden) {
@@ -196,6 +194,13 @@ async function runSupersep(job: StemJob): Promise<void> {
       }
       console.log(`[StemStudio] SuperSep job ${job.id}: saved ${safeName} [stage ${stem.stage ?? 1}]${stem.hidden ? ' (hidden)' : ''} (${(stemBuf.length / 1024).toFixed(0)} KB)`);
     }
+
+    // The engine keeps every finished job resident (its /supersep/release
+    // comment says the pool has no eviction), and nothing called release, so
+    // each Full separation left about a gigabyte in ace-server until restart
+    // (#132). Stem Studio has its copies on disk now, so let the engine go.
+    await fetch(`${ACE_URL}/supersep/release?id=${aceJobId}`, { method: 'POST' })
+      .catch(err => console.warn(`[StemStudio] supersep/release failed for ${aceJobId}: ${err?.message || err}`));
 
     // 6. Write metadata
     // Build stem metadata for the result endpoint — only visible stems

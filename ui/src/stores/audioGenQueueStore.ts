@@ -1341,6 +1341,10 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
   let notFound = 0;
   while (true) {
     await new Promise(r => setTimeout(r, 2500));
+    // The user dismissed the row (forceFailQueueItem). The server cancel is
+    // already sent; keep polling and the clock keeps running on a row that
+    // says "Cancelled by user" until the engine acknowledges (#140).
+    if (item.status === 'failed') return;
     try {
       const status = await generateApi.status(jobId);
       const t = timer.tick(status.status);

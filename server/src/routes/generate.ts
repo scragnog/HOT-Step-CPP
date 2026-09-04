@@ -1445,6 +1445,9 @@ async function runGeneration(job: GenerationJob): Promise<void> {
         const wavPath = path.join(config.data.audioDir, path.basename(audioUrl));
         const measured = wavDurationSec(wavPath);
         if (measured > 0) trackDuration = Math.round(measured);
+        // The backfill only ever reached the song row; the job result and the
+        // "[Result] Duration" line kept the LM's 0 for cover and repaint (#124).
+        if (!(duration > 0) && trackDuration > 0) duration = trackDuration;
       }
 
       // Post-processing is done and this file will not change again, so build

@@ -15,6 +15,11 @@ import { promisify } from 'util';
 import { config } from '../config.js';
 
 const execFileAsync = promisify(execFile);
+// macOS objc runtime prints 'Class X is implemented in both A and B' for every
+// plugin that bundles a duplicate framework, and forwarding those verbatim grew
+// node_console.log past 100 MB on one machine (#125). Not ours, not logged.
+const isObjcNoise = (line: string): boolean => /^objc\[\d+\]: Class .* is implemented in both/.test(line.trim());
+
 const router = Router();
 
 // ── Types ───────────────────────────────────────────────────
@@ -94,7 +99,7 @@ router.get('/scan', async (_req, res) => {
 
     if (stderr) {
       for (const line of stderr.split('\n')) {
-        if (line.trim()) console.log(`[VST] ${line.trim()}`);
+        if (line.trim() && !isObjcNoise(line)) console.log(`[VST] ${line.trim()}`);
       }
     }
 
@@ -238,7 +243,7 @@ router.post('/process', async (req, res) => {
 
     if (stderr) {
       for (const line of stderr.split('\n')) {
-        if (line.trim()) console.log(`[VST] ${line.trim()}`);
+        if (line.trim() && !isObjcNoise(line)) console.log(`[VST] ${line.trim()}`);
       }
     }
 
@@ -366,7 +371,7 @@ router.post('/monitor/start', (req, res) => {
   // Log stderr
   child.stderr?.on('data', (data: Buffer) => {
     for (const line of data.toString().split('\n')) {
-      if (line.trim()) console.log(`[VST] ${line.trim()}`);
+      if (line.trim() && !isObjcNoise(line)) console.log(`[VST] ${line.trim()}`);
     }
   });
 
@@ -554,7 +559,7 @@ router.post('/monitor/restart', async (_req, res) => {
 
   child.stderr?.on('data', (data: Buffer) => {
     for (const line of data.toString().split('\n')) {
-      if (line.trim()) console.log(`[VST] ${line.trim()}`);
+      if (line.trim() && !isObjcNoise(line)) console.log(`[VST] ${line.trim()}`);
     }
   });
 
