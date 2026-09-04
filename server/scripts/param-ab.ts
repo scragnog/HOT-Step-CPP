@@ -72,6 +72,9 @@ function arms(rank: number): Arm[] {
     // LyCORIS LoKr at the form's own defaults (dim 512, alpha 512, factor 6,
     // decompose both) — the other shipped parameterization, for coverage.
     { key: 'lokr',     body: { adapterType: 'lokr' },                             note: 'LoKr dim 512 / factor 6 (form defaults)' },
+    // PiSSA again after the export moved to F32 (the BF16 rank-2r file carried
+    // ~10% cancellation noise); a new name so the route trains from scratch.
+    { key: 'pissa32',  body: { adapterType: 'lora', rank: 128, alpha: 256, pissa: true }, note: 'PiSSA, F32 export' },
   ];
 }
 
@@ -224,7 +227,7 @@ async function phaseLm(): Promise<void> {
 }
 
 // ── phase DiT: the matrix ──
-async function phaseDit(dsKeys: string[], target: number, epochs: number, rank: number): Promise<void> {
+async function phaseDit(dsKeys: string[], target: number, epochs: number, rank: number, only: string[] = []): Promise<void> {
   fs.mkdirSync(LST, { recursive: true });
   const readme = path.join(LST, 'README.md');
   if (!fs.existsSync(readme)) {
@@ -247,6 +250,7 @@ async function phaseDit(dsKeys: string[], target: number, epochs: number, rank: 
     let n = 0;
     for (const arm of arms(rank)) {
       n++;
+      if (only.length && !only.includes(arm.key)) continue;
       const wav = path.join(outDir, `${String(n).padStart(2, '0')}_${arm.key}.wav`);
       if (fs.existsSync(wav)) { log(`${dsKey}/${arm.key}: exists, skipping`); continue; }
       const name = `ab-${dsKey}-${arm.key}`;
@@ -310,7 +314,7 @@ async function phaseDit(dsKeys: string[], target: number, epochs: number, rank: 
 // ── phase render: full-length renders of every existing arm with one plan ──
 // Same caption/lyrics/seed for all, only the adapter changes. Partial adapters
 // (a stopped arm) render as they are; the README says which.
-async function phaseRender(dsKey: string, sub: string, ov: RenderOverride, rank: number): Promise<void> {
+async function phaseRender(dsKey: string, sub: string, ov: RenderOverride, rank: number, only: string[] = [], withBase = true): Promise<void> {
   const ds = DATASETS[dsKey];
   if (!ds) throw new Error(`unknown dataset ${dsKey}`);
   const outDir = path.join(LST, dsKey, sub);
@@ -324,7 +328,7 @@ async function phaseRender(dsKey: string, sub: string, ov: RenderOverride, rank:
   }
   await waitEngine();
   const baseWav = path.join(outDir, '00_base.wav');
-  if (!fs.existsSync(baseWav)) {
+  if (withBase && !fs.existsSync(baseWav)) {
     log(`${dsKey}/${sub}: base render`);
     await render(dsKey, null, baseWav, ov);
     fs.appendFileSync(readme, `| 0 | base | — | no adapter |\n`);
@@ -332,6 +336,7 @@ async function phaseRender(dsKey: string, sub: string, ov: RenderOverride, rank:
   let n = 0;
   for (const arm of arms(rank)) {
     n++;
+    if (only.length && !only.includes(arm.key)) continue;
     const wav = path.join(outDir, `${String(n).padStart(2, '0')}_${arm.key}.wav`);
     if (fs.existsSync(wav)) { log(`${dsKey}/${sub}/${arm.key}: exists, skipping`); continue; }
     const dir = newestRunDir('dit-', `ab-${dsKey}-${arm.key}`);
@@ -426,7 +431,8 @@ async function main() {
   const up = await fetch(`${API}/jobs`).then(r => r.ok).catch(() => false);
   if (!up) throw new Error('Node server not reachable on :3001 — start dev.bat');
   if (phase === 'lm' || phase === 'all') await phaseLm();
-  if (phase === 'dit' || phase === 'all') await phaseDit(dsKeys, target, epochs, rank);
+  const only = (a.get('arms') || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (phase === 'dit' || phase === 'all') await phaseDit(dsKeys, target, epochs, rank, only);
   if (phase === 'blind') {
     // --arms rslora,lora,hira,pissa,dora --songs 3 [--sub blind] [--seed n]
     const armKeys = (a.get('arms') || 'rslora,lora,hira,pissa,dora').split(',').map(x => x.trim()).filter(Boolean);
@@ -440,7 +446,7 @@ async function main() {
       lyrics: fs.readFileSync(lyricsFile, 'utf8'), caption: fs.readFileSync(captionFile, 'utf8').trim(),
       duration: Number(a.get('duration') || 240), seed: Number(a.get('seed') || 20260904), key: `${dsKeys[0]}:${a.get('sub') || 'full'}`,
     };
-    await phaseRender(dsKeys[0], a.get('sub') || 'full', ov, rank);
+    await phaseRender(dsKeys[0], a.get('sub') || 'full', ov, rank, only, a.get('base') !== '0');
   }
   log('done');
 }
