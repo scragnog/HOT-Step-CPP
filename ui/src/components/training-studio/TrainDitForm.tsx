@@ -198,7 +198,10 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
   // companions (f32 mirror, cropMax 1250) — see the checkbox handler.
   attnBackend: 'flash',
   cropJitter: false,
-  // Muon is the DEFAULT (2026-07-30). The 10-epoch comparison that suggested
+  // Prodigy is the DEFAULT (the 2026-07-30 Muon note below is history: Muon won
+  // the epoch race then, Prodigy replaced it as the shipped default and the
+  // route's absent-field fallback agrees). Kept for the record:
+  // Muon was the default from 2026-07-30. The 10-epoch comparison that suggested
   // parity was too short a window: over a full run Muon reached ma5 0.6 in 161
   // epochs against AdamW's 227, and once the Newton-Schulz was bucketed that
   // became ~1.23x on wall-clock. Ear-validated before the flip.
