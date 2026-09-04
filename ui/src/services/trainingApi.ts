@@ -624,7 +624,7 @@ export interface TrainLmOptions {
   // ── Parameterization + soft prompt (2026-09-04). LoRA type only. ────────
   rslora?: boolean;                  // alpha/sqrt(r) scaling
   loraPlusRatio?: number;            // B at ratio x A's LR; 1 = off
-  artistToken?: string;              // '' = off; trained with the LoRA, same file
+  artistToken?: string;              // absent = on, named after the adapter; '' = off
   artistTokenK?: number;             // default 32
   artistTokenLr?: number;            // default 5e-3
   prefixN?: number;                  // K/V prefix columns per layer; 0 = off

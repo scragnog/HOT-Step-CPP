@@ -73,7 +73,8 @@ export interface TrainLmFormState {
    *  token and prefix train WITH the LoRA and ship in the same file. */
   rslora: boolean;
   loraPlusRatio: number;
-  artistToken: string;
+  artistTokenOn: boolean;    // default on (Rob, 2026-09-04: arm 05 by ear)
+  artistToken: string;       // '' = the adapter's name
   artistTokenK: number;
   artistTokenLr: number;
   prefixN: number;
@@ -203,8 +204,10 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   captionDropout: 0.3,
   rslora: false,
   loraPlusRatio: 1,
-  // Off until named. k=32 / lr 5e-3 / prefix 8 is the measured recipe
-  // (mj_dangerous, 2026-09-04): k=32 beat k=8 on every eval metric.
+  // ON by default, named after the adapter. k=32 / lr 5e-3 / prefix 8 is the
+  // recipe Rob picked by ear (arm 05, 2026-09-04); k=32 also beat k=8 on every
+  // eval metric.
+  artistTokenOn: true,
   artistToken: '',
   artistTokenK: 32,
   artistTokenLr: 0.005,
@@ -468,11 +471,16 @@ export const TrainLmForm: React.FC<Props> = ({
       {value.adapterType === 'lora' && (
       <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
         <span className="text-[11px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.softPromptGroup')}</span>
+        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+          <input type="checkbox" checked={value.artistTokenOn} disabled={lock} className="accent-amber-500"
+            onChange={(e) => onChange({ artistTokenOn: e.target.checked })} />
+          {P('artistTokenOn', 'Default on', CHECK_LABEL)}
+        </label>
         <label className="flex flex-col gap-1.5">
-          {P('artistToken', 'Off when blank · letters, digits, _ -')}
+          {P('artistToken', 'Blank = the adapter name · letters, digits, _ -')}
           <input
-            type="text" maxLength={64} placeholder="e.g. mjdangerous"
-            value={value.artistToken} disabled={lock}
+            type="text" maxLength={64} placeholder={value.adapterName.replace(/[^A-Za-z0-9_-]/g, '') || 'same as the adapter name'}
+            value={value.artistToken} disabled={lock || !value.artistTokenOn}
             onChange={(e) => onChange({ artistToken: e.target.value.replace(/[^A-Za-z0-9_-]/g, '') })}
             className={FIELD}
           />
@@ -480,12 +488,12 @@ export const TrainLmForm: React.FC<Props> = ({
         <div className="grid grid-cols-3 gap-2">
           <label className="flex flex-col gap-1.5">
             {P('artistTokenK', 'Default 32 · 1–256')}
-            <input type="number" min={1} max={256} step={1} value={value.artistTokenK} disabled={lock || !value.artistToken}
+            <input type="number" min={1} max={256} step={1} value={value.artistTokenK} disabled={lock || !value.artistTokenOn}
               onChange={(e) => onChange({ artistTokenK: num(e.target.value, 32) })} className={FIELD} />
           </label>
           <label className="flex flex-col gap-1.5">
             {P('artistTokenLr', 'Default 0.005')}
-            <input type="number" min={0} max={1} step={0.0005} value={value.artistTokenLr} disabled={lock || !value.artistToken}
+            <input type="number" min={0} max={1} step={0.0005} value={value.artistTokenLr} disabled={lock || !value.artistTokenOn}
               onChange={(e) => onChange({ artistTokenLr: num(e.target.value, 0.005) })} className={FIELD} />
           </label>
           <label className="flex flex-col gap-1.5">

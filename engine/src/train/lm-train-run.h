@@ -85,7 +85,7 @@ struct LmTrainArgs {
     // prompt builder on its single-append path and every sequence byte-identical
     // to a pre-feature run.
     std::string artist_token = "";        // "" = disabled; otherwise the token's name
-    int         artist_k     = 8;         // vectors; image-gen practice is 1-16
+    int         artist_k     = 32;        // vectors; k=32 beat k=8 on every eval metric (2026-09-04)
     std::string artist_init  = "band";    // seed word -> placeholder id; the delta starts at 0 from its embedding
     bool        artist_only  = false;     // freeze the LoRA and train only the vectors
     // Soft-prompt learning rate (token AND prefix). 0 = same as --lr. Textual

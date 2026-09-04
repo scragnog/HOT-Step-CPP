@@ -646,7 +646,8 @@ export interface TrainLmOptions {
   /** Learned artist token (2026-09-03): k embedding vectors behind a placeholder
    *  spliced into every training caption, trained WITH the LoRA and stored in
    *  the same adapter_model.safetensors (hot_step.artist_token.*). Applied at
-   *  inference automatically when the adapter loads. '' = off. */
+   *  inference automatically when the adapter loads. Absent = ON, named after the
+   *  adapter (the default recipe since 2026-09-04); '' = off. */
   artistToken?: string;
   artistTokenK?: number;           // default 32 (k=32 beat k=8 on every eval metric, 2026-09-04), 1..256
   artistTokenLr?: number;          // default 5e-3 — the soft prompt wants ~50x the LoRA's LR

@@ -263,9 +263,10 @@ export const TrainPanel: React.FC = () => {
       // default, LoRA type only — the server ignores them under lokr anyway.
       ...(form.adapterType === 'lora' && form.rslora ? { rslora: true } : {}),
       ...(form.adapterType === 'lora' && form.loraPlusRatio !== 1 ? { loraPlusRatio: form.loraPlusRatio } : {}),
-      ...(form.adapterType === 'lora' && form.artistToken
-        ? { artistToken: form.artistToken, artistTokenK: form.artistTokenK, artistTokenLr: form.artistTokenLr }
-        : {}),
+      // The token is on by default server-side too; an explicit '' is the off switch.
+      ...(form.adapterType === 'lora' && form.artistTokenOn
+        ? { artistToken: form.artistToken || form.adapterName, artistTokenK: form.artistTokenK, artistTokenLr: form.artistTokenLr }
+        : { artistToken: '' }),
       ...(form.adapterType === 'lora' && form.prefixN > 0 ? { prefixN: form.prefixN } : {}),
       ...(form.regEvery > 0
         ? {

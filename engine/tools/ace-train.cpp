@@ -455,7 +455,7 @@ static void print_usage(void) {
             "                                            the latter runs lm-ckpt.h's P1B backward over\n"
             "                                            the embedding stage, whose gradient has no\n"
             "                                            finite-difference rung yet.\n"
-            "    --artist-token-k <n>        8           vectors, 1-64. More capacity, faster overfit.\n"
+            "    --artist-token-k <n>        32          vectors, 1-256. 32 beat 8 on every eval metric.\n"
             "    --artist-token-init <word>  band        seed word; its FIRST token id becomes the\n"
             "                                            placeholder, and the learned tensor is a DELTA\n"
             "                                            on that token's embedding (zero-init = behaves\n"

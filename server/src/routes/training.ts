@@ -2862,6 +2862,12 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       res.status(400).json({ error: `Unknown preprocess variant: ${variantKey}` });
       return;
     }
+    // Soft prompt defaults (Rob, 2026-09-04): the joint recipe is the default. A
+    // request that says nothing gets a token named after the adapter, k=32,
+    // LR 5e-3 and an 8-column prefix; an explicit artistToken: '' switches it off.
+    const artistTokenResolved = body.artistToken === undefined
+      ? (String(adapterName).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'artist')
+      : (typeof body.artistToken === 'string' ? body.artistToken.trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) : '');
     const opts: ResolvedTrainLmOptions = {
       lmSize,
       lmModel,
@@ -2915,11 +2921,10 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       rslora: body.rslora === true,
       loraPlusRatio: numOpt(body.loraPlusRatio, 1),
       // Soft prompt: the name becomes a safetensors key, so keep it to a slug.
-      artistToken: typeof body.artistToken === 'string'
-        ? body.artistToken.trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) : '',
+      artistToken: artistTokenResolved,
       artistTokenK: Math.min(256, Math.max(1, Math.trunc(numOpt(body.artistTokenK, 32)))),
       artistTokenLr: Math.min(1, Math.max(0, numOpt(body.artistTokenLr, 0.005))),
-      prefixN: Math.min(64, Math.max(0, Math.trunc(numOpt(body.prefixN, 0)))),
+      prefixN: Math.min(64, Math.max(0, Math.trunc(numOpt(body.prefixN, artistTokenResolved ? 8 : 0)))),
       regEvery,
       regTopk,
       regSongs,
