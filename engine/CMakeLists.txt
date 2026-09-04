@@ -141,6 +141,51 @@ endif()
 if(NOT DEFINED GGML_CUDA_GRAPHS)
     set(GGML_CUDA_GRAPHS_DEFAULT ON)
 endif()
+# ── HOT-Step's ggml patches ──────────────────────────────────────────────────
+# engine/patches/*.patch carry the ggml modifications the engine needs (the
+# training ops, BF16 out_prod, quant copies ...; see engine/patches/README.md).
+# A submodule checkout is pristine, and until 2026-09-04 the only thing that
+# applied them was the release workflow, so every from-source build stopped at
+# ace-train's link step with ggml_flash_attn_train undefined (#145). They are
+# applied here, from the repo root the way CI does it, before ggml is
+# configured. Idempotent: a patch that reverses cleanly is already in.
+option(HOT_STEP_APPLY_PATCHES "Apply engine/patches/*.patch to the ggml submodule at configure time" ON)
+if(HOT_STEP_APPLY_PATCHES)
+    find_package(Git QUIET)
+    file(GLOB HOT_STEP_PATCHES "${CMAKE_CURRENT_SOURCE_DIR}/patches/*.patch")
+    list(SORT HOT_STEP_PATCHES)
+    get_filename_component(HOT_STEP_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+    foreach(_hs_patch IN LISTS HOT_STEP_PATCHES)
+        get_filename_component(_hs_name "${_hs_patch}" NAME)
+        if(NOT GIT_EXECUTABLE)
+            message(FATAL_ERROR "[HOT-Step] git is needed to apply engine/patches/${_hs_name}. Install git, or apply the patches by hand (engine/patches/README.md) and configure with -DHOT_STEP_APPLY_PATCHES=OFF.")
+        endif()
+        # --ignore-whitespace: a Windows checkout under core.autocrlf=true hands
+        # git CRLF sources and every hunk would otherwise fail on its context.
+        execute_process(COMMAND "${GIT_EXECUTABLE}" apply --reverse --check --ignore-whitespace "${_hs_patch}"
+                        WORKING_DIRECTORY "${HOT_STEP_REPO_ROOT}"
+                        RESULT_VARIABLE _hs_applied OUTPUT_QUIET ERROR_QUIET)
+        if(_hs_applied EQUAL 0)
+            message(STATUS "[HOT-Step] patch already applied: ${_hs_name}")
+            continue()
+        endif()
+        execute_process(COMMAND "${GIT_EXECUTABLE}" apply --check --ignore-whitespace "${_hs_patch}"
+                        WORKING_DIRECTORY "${HOT_STEP_REPO_ROOT}"
+                        RESULT_VARIABLE _hs_can OUTPUT_QUIET ERROR_QUIET)
+        if(NOT _hs_can EQUAL 0)
+            message(WARNING "[HOT-Step] engine/patches/${_hs_name} neither applies nor reverses cleanly against engine/ggml. If the build later fails on ggml_flash_attn_train or an out_prod type, run engine/verify-hooks.ps1 and see engine/patches/README.md.")
+            continue()
+        endif()
+        execute_process(COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${_hs_patch}"
+                        WORKING_DIRECTORY "${HOT_STEP_REPO_ROOT}"
+                        RESULT_VARIABLE _hs_res ERROR_VARIABLE _hs_err OUTPUT_QUIET)
+        if(NOT _hs_res EQUAL 0)
+            message(FATAL_ERROR "[HOT-Step] engine/patches/${_hs_name} failed to apply:\n${_hs_err}")
+        endif()
+        message(STATUS "[HOT-Step] applied patch: ${_hs_name}")
+    endforeach()
+endif()
+
 add_subdirectory(ggml)
 
 # cpp-httplib (HTTP server library, used by ace-server)

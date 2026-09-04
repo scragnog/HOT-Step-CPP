@@ -219,6 +219,8 @@ cd HOT-Step-CPP
 
 #### 2. Build the engine
 
+> The engine's `ggml` submodule needs the patches in `engine/patches/` (training ops, BF16 matmuls, quant copies). CMake applies them at configure time, so a normal build needs nothing extra beyond `git` on the PATH. If configure warns that a patch neither applies nor reverses, or the build stops at `ace-train` with `ggml_flash_attn_train` undefined, see `engine/patches/README.md`.
+
 The easiest way:
 
 ```cmd
@@ -334,6 +336,8 @@ cd HOT-Step-CPP
 
 #### 2. Build the engine
 
+> The engine's `ggml` submodule needs the patches in `engine/patches/` (training ops, BF16 matmuls, quant copies). CMake applies them at configure time, so a normal build needs nothing extra beyond `git` on the PATH. If configure warns that a patch neither applies nor reverses, or the build stops at `ace-train` with `ggml_flash_attn_train` undefined, see `engine/patches/README.md`.
+
 ```bash
 cd engine
 mkdir build && cd build
@@ -398,6 +402,8 @@ cd HOT-Step-CPP
 > **Already cloned without `--recursive`?** Run `git submodule update --init --recursive` to fetch the ggml and vst3sdk submodules.
 
 #### 2. Build the engine
+
+> The engine's `ggml` submodule needs the patches in `engine/patches/` (training ops, BF16 matmuls, quant copies). CMake applies them at configure time, so a normal build needs nothing extra beyond `git` on the PATH. If configure warns that a patch neither applies nor reverses, or the build stops at `ace-train` with `ggml_flash_attn_train` undefined, see `engine/patches/README.md`.
 
 **CUDA (NVIDIA GPU):**
 ```bash
