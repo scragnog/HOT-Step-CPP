@@ -286,13 +286,15 @@ Facts from the departing lead engineer, verified against the workflows on
 - **VALIDATED (2026-09-03) — Essentia is built in CI for Linux and macOS.**
   The repo's `Essentia/` folder holds only the Windows `.exe`, and copying it
   wholesale is what put a Windows binary in every v1.3 Linux archive (#144).
-  `essentia-linux` / `essentia-macos` jobs now build
+  `essentia.yml` (reusable, called by `release.yml` as job `essentia`, and
+  dispatchable on its own: `gh workflow run essentia.yml`) builds
   `essentia_streaming_extractor_music` from source via `tools/essentia/`
-  (cached on the recipe hash), upload it as a tarball, and the packaging steps
-  fail if the bundle is missing. Windows still ships the committed `.exe`.
-  The Linux recipe was rehearsed in an `ubuntu:22.04` container; the macOS
-  one is @beaudamion's #122 recipe and had not run on a CI runner at the time
-  of writing — check the first `essentia-macos` job log.
+  (cached on the recipe hash), uploads it as a tarball, and the packaging
+  steps fail if the bundle is missing. Windows still ships the committed
+  `.exe`. Test a recipe change with the standalone workflow (~5 min), not a
+  `-CI-Test` tag. Verified 2026-09-03/04: all Linux variants packaged the
+  bundle; the macOS recipe's first passing run is recorded in
+  `docs/plans/` or the essentia.yml run history.
 
 Deeper detail (packaging contents, cache keys per OS, pinned tool versions,
 recent test-tag naming history): see [reference.md](reference.md).
