@@ -349,9 +349,75 @@ async function phaseRender(dsKey: string, sub: string, ov: RenderOverride, rank:
   log(`${dsKey}/${sub}: renders done`);
 }
 
+// ── phase blind: N songs x (base + chosen arms), letters shuffled per song ──
+// Files are song<k>_<letter>.wav; the letter->arm mapping is written ONLY to
+// _key/KEY.json (do not open before rating). RATE.md is the scoring sheet.
+function shuffled<T>(xs: T[], seed: number): T[] {
+  const a = xs.slice();
+  let x = seed >>> 0;
+  for (let i = a.length - 1; i > 0; i--) {
+    x = (x * 1664525 + 1013904223) >>> 0;
+    const j = x % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+async function phaseBlind(dsKey: string, sub: string, armKeys: string[], songs: number, seed: number, rank: number): Promise<void> {
+  const outDir = path.join(LST, dsKey, sub);
+  const keyDir = path.join(outDir, '_key');
+  fs.mkdirSync(keyDir, { recursive: true });
+  const keyPath = path.join(keyDir, 'KEY.json');
+  const key: Record<string, Record<string, string>> = fs.existsSync(keyPath) ? JSON.parse(fs.readFileSync(keyPath, 'utf8')) : {};
+  const items = ['base', ...armKeys];
+  const letters = 'ABCDEFGHIJ'.slice(0, items.length).split('');
+  const rate = path.join(outDir, 'RATE.md');
+  if (!fs.existsSync(rate)) {
+    fs.writeFileSync(rate, `# Blind rating — ${dsKey}\n\n${items.length} items per song (one is the base model, the rest are adapters), letters shuffled per song. ` +
+      `Same plan per song (seed ${seed}), thirds DiT, 50 steps, no post-processing. Score each 1-10 on quality / expressiveness / likeness, or just rank them. ` +
+      `Open _key/KEY.json only when done.\n\n`);
+  }
+  for (let k = 1; k <= songs; k++) {
+    const slug = `song${k}`;
+    const lyricsFile = path.join(outDir, `${slug}.lyrics.txt`);
+    const captionFile = path.join(outDir, `${slug}.caption.txt`);
+    if (!fs.existsSync(lyricsFile) || !fs.existsSync(captionFile)) throw new Error(`${slug}: lyrics/caption files missing in ${outDir}`);
+    const src = fs.existsSync(path.join(outDir, `${slug}.SOURCE.txt`)) ? fs.readFileSync(path.join(outDir, `${slug}.SOURCE.txt`), 'utf8').trim() : slug;
+    const durMatch = src.match(/(\d+) s\b/);
+    const ov: RenderOverride = {
+      lyrics: fs.readFileSync(lyricsFile, 'utf8'), caption: fs.readFileSync(captionFile, 'utf8').trim(),
+      duration: durMatch ? Number(durMatch[1]) : 240, seed, key: `${dsKey}:${sub}:${slug}`,
+    };
+    if (!key[slug]) {
+      const order = shuffled(items, seed * 7919 + k * 104729);
+      key[slug] = {};
+      letters.forEach((L, i) => { key[slug][L] = order[i]; });
+      fs.writeFileSync(keyPath, JSON.stringify(key, null, 2));
+    }
+    if (!fs.readFileSync(rate, 'utf8').includes(`## ${slug}`)) {
+      fs.appendFileSync(rate, `## ${slug} — ${src}\n\n| file | quality | expressiveness | likeness | notes |\n|---|---|---|---|---|\n` +
+        letters.map(L => `| ${slug}_${L}.wav |  |  |  |  |`).join('\n') + '\n\n');
+    }
+    for (const L of letters) {
+      const item = key[slug][L];
+      const wav = path.join(outDir, `${slug}_${L}.wav`);
+      if (fs.existsSync(wav)) { log(`${slug}_${L}: exists, skipping`); continue; }
+      let dir: string | null = null;
+      if (item !== 'base') {
+        dir = newestRunDir('dit-', `ab-${dsKey}-${item}`);
+        if (!dir) throw new Error(`${item}: no adapter`);
+      }
+      await waitEngine();
+      log(`${slug}_${L}: render`);
+      await render(dsKey, dir, wav, ov);
+    }
+    log(`${slug}: done`);
+  }
+  log(`${dsKey}/${sub}: blind set complete — key sealed in _key/KEY.json`);
+}
+
 async function main() {
   const a = args();
-  const phase = a.get('phase') || 'all';  // lm | dit | all | render
+  const phase = a.get('phase') || 'all';  // lm | dit | all | render | blind
   const dsKeys = (a.get('datasets') || 'mj_dangerous,dio_holydiver,carpenterbrut_trilogy').split(',').map(s => s.trim()).filter(Boolean);
   const target = Number(a.get('target') || 0.5);
   const epochs = Number(a.get('epochs') || 200);
@@ -361,6 +427,11 @@ async function main() {
   if (!up) throw new Error('Node server not reachable on :3001 — start dev.bat');
   if (phase === 'lm' || phase === 'all') await phaseLm();
   if (phase === 'dit' || phase === 'all') await phaseDit(dsKeys, target, epochs, rank);
+  if (phase === 'blind') {
+    // --arms rslora,lora,hira,pissa,dora --songs 3 [--sub blind] [--seed n]
+    const armKeys = (a.get('arms') || 'rslora,lora,hira,pissa,dora').split(',').map(x => x.trim()).filter(Boolean);
+    await phaseBlind(dsKeys[0], a.get('sub') || 'blind', armKeys, Number(a.get('songs') || 3), Number(a.get('seed') || 20260904), rank);
+  }
   if (phase === 'render') {
     // --lyrics-file <path> --caption-file <path> [--duration s] [--seed n] [--sub full]
     const lyricsFile = a.get('lyrics-file'); const captionFile = a.get('caption-file');
