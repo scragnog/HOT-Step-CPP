@@ -26,6 +26,18 @@
 #include <algorithm>
 #include <vector>
 
+// The VAE tile size a request actually gets. A request may carry its own
+// `vae_chunk` (Song Builder sends 256), which lands in the sideband as
+// vae_chunk_override. Until 2026-09-04 only the main decode honoured it; the
+// cover/reference encodes, the post-processing decode and the PP-VAE
+// re-encode/decode-back all read the spawn-time --vae-chunk, so a request that
+// had asked for smaller tiles to survive still ran those at 1024 and OOMed
+// there instead (#75). One accessor, every call site.
+static inline int hs_vae_chunk(const AceSynth * ctx) {
+    return g_hotstep_params.vae_chunk_override > 0 ? g_hotstep_params.vae_chunk_override
+                                                   : ctx->params.vae_chunk;
+}
+
 static const int FRAMES_PER_SECOND = 25;
 
 // ─── Determinism diagnostic ─────────────────────────────────────────────────
@@ -177,7 +189,7 @@ int ops_encode_src(const AceSynth * ctx,
         s.cover_latents.resize(max_T_lat * 64);
 
         s.T_cover = vae_enc_encode_tiled(vae_enc, src_audio, T_audio, s.cover_latents.data(), max_T_lat,
-                                         ctx->params.vae_chunk, ctx->params.vae_overlap);
+                                         hs_vae_chunk(ctx), ctx->params.vae_overlap);
         if (s.T_cover < 0) {
             fprintf(stderr, "[Encode-Src] FATAL: encode failed\n");
             return -1;
@@ -398,7 +410,7 @@ void ops_encode_timbre(const AceSynth * ctx,
         int                max_T_ref = (ref_len / 1920) + 64;
         std::vector<float> ref_lat_buf(max_T_ref * 64);
         int                T_ref = vae_enc_encode_tiled(ref_vae, ref_audio, ref_len, ref_lat_buf.data(), max_T_ref,
-                                                        ctx->params.vae_chunk, ctx->params.vae_overlap);
+                                                        hs_vae_chunk(ctx), ctx->params.vae_overlap);
         if (T_ref < 0) {
             fprintf(stderr, "[Encode-Timbre] WARNING: ref_audio encode failed, using silence\n");
             s.S_ref_timbre = 1;
@@ -1722,8 +1734,7 @@ int ops_vae_decode(const AceSynth * ctx,
         s.timer.reset();
         int T_audio;
         // Per-request VAE tile-size override (smaller = lower VAE-decode peak).
-        const int vchunk = g_hotstep_params.vae_chunk_override > 0
-                               ? g_hotstep_params.vae_chunk_override : ctx->params.vae_chunk;
+        const int vchunk = hs_vae_chunk(ctx);
         if (use_ort) {
             T_audio = vae_ort_decode_tiled(vae_ort, dit_out, T_latent, audio.data(), T_audio_max,
                                             vchunk, ctx->params.vae_overlap);
@@ -1860,7 +1871,7 @@ int ops_vae_decode_postprocess(const AceSynth * ctx,
         // This wraps vae_ggml_decode_tiled with the engine's VAE and chunk params
         PostprocessVaeDecodeFn decode_fn = [&](const float * latent, int T_lat, float * aud_out, int max_T) -> int {
             return vae_ggml_decode_tiled(vae, latent, T_lat, aud_out, max_T,
-                                         ctx->params.vae_chunk, ctx->params.vae_overlap,
+                                         hs_vae_chunk(ctx), ctx->params.vae_overlap,
                                          cancel, cancel_data);
         };
 
@@ -1877,7 +1888,7 @@ int ops_vae_decode_postprocess(const AceSynth * ctx,
             fprintf(stderr, "[Postprocess Batch%d] ERROR: plugin decode failed, falling back to built-in\n", b);
             // Fallback for this batch item
             T_audio = vae_ggml_decode_tiled(vae, dit_out, T_latent, audio.data(), T_audio_max,
-                                            ctx->params.vae_chunk, ctx->params.vae_overlap,
+                                            hs_vae_chunk(ctx), ctx->params.vae_overlap,
                                             cancel, cancel_data);
             if (T_audio < 0) {
                 out[b].samples     = NULL;
@@ -2029,11 +2040,11 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
             if (use_ort_enc) {
                 T_latent[b] = vae_enc_ort_encode_tiled(enc_ort, interleaved.data(), T_audio,
                                                         latents[b].data(), max_T,
-                                                        ctx->params.vae_chunk, ctx->params.vae_overlap);
+                                                        hs_vae_chunk(ctx), ctx->params.vae_overlap);
             } else {
                 T_latent[b] = vae_enc_encode_tiled(enc_ggml, interleaved.data(), T_audio,
                                                     latents[b].data(), max_T,
-                                                    ctx->params.vae_chunk, ctx->params.vae_overlap);
+                                                    hs_vae_chunk(ctx), ctx->params.vae_overlap);
             }
 
             if (T_latent[b] <= 0) {
@@ -2098,11 +2109,11 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
             if (use_ort_dec) {
                 T_audio = vae_ort_decode_tiled(dec_ort, latents[b].data(), T_latent[b],
                                                 audio.data(), T_audio_max,
-                                                ctx->params.vae_chunk, ctx->params.vae_overlap);
+                                                hs_vae_chunk(ctx), ctx->params.vae_overlap);
             } else {
                 T_audio = vae_ggml_decode_tiled(dec_ggml, latents[b].data(), T_latent[b],
                                                  audio.data(), T_audio_max,
-                                                 ctx->params.vae_chunk, ctx->params.vae_overlap, NULL, NULL);
+                                                 hs_vae_chunk(ctx), ctx->params.vae_overlap, NULL, NULL);
             }
 
             if (T_audio <= 0) {
@@ -2326,7 +2337,7 @@ int ops_stream_generate(const AceSynth* ctx, int batch_n, SynthState& s,
     stream_cfg.num_steps = s.num_steps;
     stream_cfg.shift     = s.shift;
     stream_cfg.denoise   = s.rr.cover_noise_strength > 0.0f ? s.rr.cover_noise_strength : 1.0f;
-    stream_cfg.vae_chunk   = ctx->params.vae_chunk;
+    stream_cfg.vae_chunk   = hs_vae_chunk(ctx);
     stream_cfg.vae_overlap = ctx->params.vae_overlap;
     stream_cfg.chunk_dir   = s.rr.stream_chunk_dir;
     // Intermediate previews disabled — previewing partially-denoised latents
