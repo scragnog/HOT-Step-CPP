@@ -292,9 +292,10 @@ Facts from the departing lead engineer, verified against the workflows on
   (cached on the recipe hash), uploads it as a tarball, and the packaging
   steps fail if the bundle is missing. Windows still ships the committed
   `.exe`. Test a recipe change with the standalone workflow (~5 min), not a
-  `-CI-Test` tag. Verified 2026-09-03/04: all Linux variants packaged the
-  bundle; the macOS recipe's first passing run is recorded in
-  `docs/plans/` or the essentia.yml run history.
+  `-CI-Test` tag. Verified 2026-09-04 by a fully green v1.3.1-CI-Test run
+  (33867682332): every archive built, and the macOS and linux-cpu tarballs
+  were opened and contain `Essentia/essentia_streaming_extractor_music`
+  (Linux with 14 libraries under `lib/`, macOS with its dylibs beside it).
 
 Deeper detail (packaging contents, cache keys per OS, pinned tool versions,
 recent test-tag naming history): see [reference.md](reference.md).
