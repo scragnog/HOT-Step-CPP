@@ -56,6 +56,26 @@ function registryDownloads() {
   return out;
 }
 
+/** Every file entry carries the fields the Model Manager reads without a
+ *  guard. `mm3-rec7-f16` shipped without a `tags` array (a62054f9) and
+ *  ModelRow's `file.tags.includes(...)` blanked the whole MiniMax-Music3 tab
+ *  (#137). The UI is guarded now too, but the catalogue is the contract. */
+function checkFileSchema() {
+  const reg = JSON.parse(fs.readFileSync(REGISTRY, 'utf-8'));
+  const seen = new Set();
+  for (const f of reg.files) {
+    const where = `file "${f.id ?? '?'}"`;
+    if (typeof f.id !== 'string' || !f.id) problems.push('a file entry has no id');
+    else if (seen.has(f.id)) problems.push(`${where}: duplicate id`);
+    seen.add(f.id);
+    if (typeof f.filename !== 'string' || !f.filename) problems.push(`${where}: no filename`);
+    if (typeof f.repo !== 'string' || !f.repo) problems.push(`${where}: no repo`);
+    if (typeof f.sizeBytes !== 'number' || !(f.sizeBytes > 0)) problems.push(`${where}: sizeBytes missing or not positive`);
+    if (!Array.isArray(f.tags)) problems.push(`${where}: no tags array (ModelRow reads it)`);
+    if (f.companions !== undefined && !Array.isArray(f.companions)) problems.push(`${where}: companions is not an array`);
+  }
+}
+
 /** Pack ids must resolve to real file entries, or the pack renders as a card
  *  that can never reach "installed" — how #120 started. */
 function checkPackIds() {
@@ -213,6 +233,7 @@ function checkEngineBinaries() {
 // ── Run ─────────────────────────────────────────────────────────────────────
 
 console.log('Registry pack ids');
+checkFileSchema();
 checkPackIds();
 
 console.log('\nEngine binaries');

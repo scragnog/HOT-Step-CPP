@@ -3715,6 +3715,7 @@
       "sizeBytes": 628342784,
       "repo": "scragnog/MiniMax-Music3-GGUF",
       "description": "Audio → LM frame hiddens. TRAINING ONLY, and OPTIONAL: powers the codes stage's \"Cover-launder\" option, which renders each track back through the model before encoding so buried vocals reach the code targets — the ear-validated fix for dense-mix artists. PurpleOrc's rec7 encoder (170M, MIT) converted to GGUF, with the MM3 LM's two semantic table slices baked in so laundering never runs the 8B language model. Skip it if you never use laundered codes.",
+      "tags": [],
       "companions": [
         {
           "filename": "LICENSE",

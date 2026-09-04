@@ -52,7 +52,7 @@ export const ModelRow: React.FC<Props> = ({ file, downloadJob, onDownload, onCan
                 {file.quant}
               </span>
             )}
-            {file.tags.includes('recommended') && (
+            {(file.tags ?? []).includes('recommended') && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-400 border border-pink-500/20 uppercase tracking-wider">
                 {t('models.recommended')}
               </span>
