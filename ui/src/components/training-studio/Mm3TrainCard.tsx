@@ -263,8 +263,11 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         } : {}),
         // The engine refuses a prefix under `zero` anchoring, and the control
         // is disabled there — belt and braces so a stale form cannot send it.
-        ...(form.prefixFrames > 0 && form.cropAnchor === 'song'
-          ? { prefixFrames: form.prefixFrames } : {}),
+        // Under `song` the value is ALWAYS sent, 0 included: the server resolves
+        // a missing key to its default (4096), so omitting 0 silently trained
+        // with the full prefix while the form said off (#142).
+        ...(form.cropAnchor === 'song'
+          ? { prefixFrames: Math.max(0, form.prefixFrames) } : {}),
         ...(form.trigger.trim()
           ? { trigger: form.trigger.trim(), triggerPrepend: form.triggerPrepend }
           : {}),

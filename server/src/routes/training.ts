@@ -2155,7 +2155,9 @@ router.post('/datasets/:id/mm3-train-lm', (req: Request, res: Response) => {
       // Stopping strategy. `steps` above is the cap in BOTH modes, which is the
       // whole reason it is still sent in loss mode: a target that never arrives
       // has to end somewhere.
-      stopMode:    b.stopMode === 'loss' ? 'loss' : D.stopMode,
+      // Enumerated: with a 'loss' default, `=== 'loss' ? 'loss' : default`
+      // sent a request for 'steps' straight back to loss mode (#142).
+      stopMode:    b.stopMode === 'loss' || b.stopMode === 'steps' ? b.stopMode : D.stopMode,
       targetLoss:  num('targetLoss', D.targetLoss, 0, 100),
       targetLossMetric: b.targetLossMetric === 'eval' ? 'eval' : 'train',
       targetLossEpochs: num('targetLossEpochs', D.targetLossEpochs, 1, 10000),
