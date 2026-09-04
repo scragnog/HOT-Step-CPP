@@ -146,6 +146,15 @@ async function pollUntilDone(aceJobId: string, job: GenerationJob, signal: Abort
   // engine then finished the track anyway and the user was left with a job
   // marked red and no way to reach the audio.
   const STALE_TIMEOUT_VAE_MS = 900_000;  // 15 min — one tile, generously
+  // The same shape applies to every stage that is one fixed string for the
+  // whole of a long operation: model loads, the adapter merge (a LoKR with F32
+  // promotion can take minutes and prints nothing until it is done, #106), FSQ
+  // decode, DiT setup, the VAE encodes, and "Synthesizing..." before the first
+  // step line (#96). Only a stage that ticks ("... Step n/total") can be
+  // judged on a 2 min silence; everything else gets the quiet window, and the
+  // wall-clock timeout below remains the backstop for a genuine hang.
+  const STALE_TIMEOUT_QUIET_MS = STALE_TIMEOUT_VAE_MS;
+  const isTickingStage = (s: unknown): boolean => typeof s === 'string' && /: Step \d+/.test(s);
   const startedAt = Date.now();
   let lastProgressAt = Date.now();
   let lastStage = job.stage;
@@ -167,7 +176,8 @@ async function pollUntilDone(aceJobId: string, job: GenerationJob, signal: Abort
     // Stall detection: no progress update for the window this stage allows
     const stalledFor = Date.now() - lastProgressAt;
     const inVaeDecode = typeof lastStage === 'string' && lastStage.startsWith('Decoding audio (VAE)');
-    const staleLimit = inVaeDecode ? STALE_TIMEOUT_VAE_MS : STALE_TIMEOUT_MS;
+    const staleLimit = inVaeDecode ? STALE_TIMEOUT_VAE_MS
+                     : isTickingStage(lastStage) ? STALE_TIMEOUT_MS : STALE_TIMEOUT_QUIET_MS;
     if (stalledFor > staleLimit) {
       await aceClient.cancelJob(aceJobId).catch(() => {});
       throw new Error(

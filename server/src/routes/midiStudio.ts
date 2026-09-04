@@ -159,7 +159,7 @@ async function runTranscription(job: MidiJob): Promise<void> {
 
     if ((job.status as string) === 'cancelled') return;
     if (code !== 0) {
-      throw new Error(`ace-midi exited with code ${code}: ${stderrTail.slice(-5).join(' | ')}`);
+      throw new Error(`ace-midi exited with code ${code}: ${stderrTail.slice(-30).join(' | ')}`);
     }
     if (!fs.existsSync(midPath(job.id))) throw new Error('ace-midi finished but produced no MIDI file');
 
