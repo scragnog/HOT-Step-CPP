@@ -69,6 +69,9 @@ function arms(rank: number): Arm[] {
     { key: 'hira',     body: { ...base, hira: true },                              note: 'W (.) BA, merge-only' },
     { key: 'loha',     body: { ...base, loha: true },                              note: 'Hadamard of two pairs, merge-only' },
     { key: 'hra',      body: { adapterType: 'lora', rank: 8, alpha: 8, hra: true }, note: '8 Householder reflections, orthogonal' },
+    // LyCORIS LoKr at the form's own defaults (dim 512, alpha 512, factor 6,
+    // decompose both) — the other shipped parameterization, for coverage.
+    { key: 'lokr',     body: { adapterType: 'lokr' },                             note: 'LoKr dim 512 / factor 6 (form defaults)' },
   ];
 }
 
