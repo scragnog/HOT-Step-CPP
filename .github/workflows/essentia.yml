@@ -1,0 +1,86 @@
+name: Essentia
+
+# Builds essentia_streaming_extractor_music (BPM / key detection) for the
+# non-Windows archives. Called from release.yml on every release build, and
+# runnable on its own from the Actions tab so a recipe change can be tested in
+# minutes instead of a full multi-platform release build.
+#
+# The repo's Essentia/ folder holds only the Windows .exe, so until this
+# existed every Linux and macOS release shipped with BPM/key detection dead
+# (#104), and v1.3's Linux archives contained the Windows binary (#144).
+# Both bundles are built from source by tools/essentia/ and cached on the
+# recipe's hash, so a release with an unchanged recipe pays nothing here.
+# The bundle is a tarball because upload-artifact drops executable bits.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04   # same glibc floor as build-linux
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Cache the bundle
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: essentia-linux-x64.tar.gz
+          key: essentia-linux-x64-${{ hashFiles('tools/essentia/build-linux.sh', 'tools/essentia/smoke-test.sh') }}
+
+      - name: Build Essentia
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          bash tools/essentia/build-linux.sh "$PWD/Essentia-linux-x64"
+          tar -czf essentia-linux-x64.tar.gz Essentia-linux-x64
+
+      - name: Smoke-test the cached bundle
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: |
+          tar -xzf essentia-linux-x64.tar.gz
+          bash tools/essentia/smoke-test.sh Essentia-linux-x64/essentia_streaming_extractor_music
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: essentia-linux-x64
+          path: essentia-linux-x64.tar.gz
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Cache the bundle
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: essentia-macos-arm64.tar.gz
+          key: essentia-macos-arm64-${{ hashFiles('tools/essentia/build-macos.sh', 'tools/essentia/bundle-dylibs.py', 'tools/essentia/smoke-test.sh') }}
+
+      - name: Build Essentia
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          bash tools/essentia/build-macos.sh "$PWD/Essentia-macos-arm64"
+          tar -czf essentia-macos-arm64.tar.gz Essentia-macos-arm64
+
+      - name: Smoke-test the cached bundle
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: |
+          tar -xzf essentia-macos-arm64.tar.gz
+          bash tools/essentia/smoke-test.sh Essentia-macos-arm64/essentia_streaming_extractor_music
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: essentia-macos-arm64
+          path: essentia-macos-arm64.tar.gz
+          if-no-files-found: error

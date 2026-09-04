@@ -655,7 +655,7 @@ jobs:
   # macOS build (Apple Silicon / Metal)
   # ─────────────────────────────────────────────────────────────────────────
   build-macos:
-    needs: [essentia-macos]
+    needs: [essentia]
     runs-on: macos-15  # Apple Silicon — needs Xcode 16+ for std::from_chars<float>
     steps:
       - name: Checkout
@@ -994,7 +994,7 @@ jobs:
   # Linux builds (CUDA / Vulkan / CPU) — run in parallel via matrix strategy
   # ─────────────────────────────────────────────────────────────────────────
   build-linux:
-    needs: [essentia-linux]
+    needs: [essentia]
     runs-on: ubuntu-22.04   # 22.04 for wider glibc compatibility across distros
     strategy:
       fail-fast: true
@@ -1525,83 +1525,12 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   # Release — collect all artifacts, generate notes, create draft release
   # ─────────────────────────────────────────────────────────────────────────
-  # ─────────────────────────────────────────────────────────────────────────
-  # Essentia (BPM / key detection) for the non-Windows archives.
-  #
-  # The repo's Essentia/ folder holds only the Windows .exe, so until these
-  # jobs existed every Linux and macOS release shipped with BPM/key detection
-  # dead (#104), and v1.3's Linux archives contained the Windows binary (#144).
-  # Both are built from source by tools/essentia/ and cached on the recipe's
-  # hash, so a release with an unchanged recipe pays nothing here. The bundle
-  # is a tarball because upload-artifact drops executable bits.
-  # ─────────────────────────────────────────────────────────────────────────
-  essentia-linux:
-    runs-on: ubuntu-22.04   # same glibc floor as build-linux
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: false
-
-      - name: Cache the bundle
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: essentia-linux-x64.tar.gz
-          key: essentia-linux-x64-${{ hashFiles('tools/essentia/build-linux.sh', 'tools/essentia/smoke-test.sh') }}
-
-      - name: Build Essentia
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          bash tools/essentia/build-linux.sh "$PWD/Essentia-linux-x64"
-          tar -czf essentia-linux-x64.tar.gz Essentia-linux-x64
-
-      - name: Smoke-test the cached bundle
-        if: steps.cache.outputs.cache-hit == 'true'
-        run: |
-          tar -xzf essentia-linux-x64.tar.gz
-          bash tools/essentia/smoke-test.sh Essentia-linux-x64/essentia_streaming_extractor_music
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: essentia-linux-x64
-          path: essentia-linux-x64.tar.gz
-          if-no-files-found: error
-
-  essentia-macos:
-    runs-on: macos-15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: false
-
-      - name: Cache the bundle
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: essentia-macos-arm64.tar.gz
-          key: essentia-macos-arm64-${{ hashFiles('tools/essentia/build-macos.sh', 'tools/essentia/bundle-dylibs.py', 'tools/essentia/smoke-test.sh') }}
-
-      - name: Build Essentia
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          bash tools/essentia/build-macos.sh "$PWD/Essentia-macos-arm64"
-          tar -czf essentia-macos-arm64.tar.gz Essentia-macos-arm64
-
-      - name: Smoke-test the cached bundle
-        if: steps.cache.outputs.cache-hit == 'true'
-        run: |
-          tar -xzf essentia-macos-arm64.tar.gz
-          bash tools/essentia/smoke-test.sh Essentia-macos-arm64/essentia_streaming_extractor_music
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: essentia-macos-arm64
-          path: essentia-macos-arm64.tar.gz
-          if-no-files-found: error
+  # Essentia (BPM / key detection) for the non-Windows archives. The recipe
+  # lives in essentia.yml so it can also be run on its own from the Actions
+  # tab; both bundles are cached on the recipe hash and uploaded as tarballs
+  # the packaging steps below unpack. See tools/essentia/ and #104 / #144.
+  essentia:
+    uses: ./.github/workflows/essentia.yml
 
   release:
     needs: [build-windows, build-macos, build-linux]
