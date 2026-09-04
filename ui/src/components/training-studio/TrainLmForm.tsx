@@ -119,15 +119,22 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   // empty option bag) stops at the same loss a manual run does.
   // 1.5, not 0.1 (Rob, 2026-09-02): the render-scored stage ladder showed everything an LM adapter
   // can do is in by CE ~2.0, and the last leg to 0.1 only doubled the looping-plan rate.
-  targetLoss: 1.5,
+  // 4.0 (Rob, 2026-09-04): the default recipe now trains an artist token + KV
+  // prefix WITH the LoRA (arm 05 of the listening test, best by ear and on the
+  // eval). The soft prompt learns ~50x faster, so the same 1.5 target is reached
+  // in 17 epochs and the eval then shows a 6 s verbatim replay of training codes;
+  // arm 05 stopped at 3.87 (epoch 42) with no replay at all. The route's own
+  // fallback tracks this number.
+  targetLoss: 4.0,
   epochs: 150,
-  // LoRA r128/a256 + Prodigy (Rob, 2026-09-03). Prodigy estimates the step
-  // size itself, so `learningRate` is ignored under it (schedule multiplier 1).
+  // LoRA r16/a32 + AdamW 1e-4 (Rob, 2026-09-04): arm 05's recipe, replacing the
+  // 2026-09-03 r128/a256 + Prodigy default. With the soft prompt on, r128 +
+  // Prodigy overfits in a handful of epochs (see targetLoss above).
   adapterType: 'lora',
-  optimizer: 'prodigy',
+  optimizer: 'adamw',
   muonLrScale: 20,
-  rank: 128,
-  alpha: 256,
+  rank: 16,
+  alpha: 32,
   // dim 128, NOT the DiT's 512 (Rob, 2026-07-30). At 512 every attention site
   // is monolithic and every MLP site factorized; at 128 EVERY site factorizes
   // (the mono test is dim >= max(out_k,in_n)/2, and the smallest max on a 4B
@@ -195,6 +202,10 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   // aborts when --bwd mm leaves it none — and the server refuses the pair with
   // a 400. Choosing 'mm' here means also choosing weights 'f32-window'.
   bwd: 'outprod',
+  // OFF by default (Rob, 2026-09-04) for the joint token+prefix recipe: arm 05
+  // trained without it, and the form-default run that combined it with the
+  // soft prompt was the one that memorised. The 2026-09-03 finding below still
+  // holds for LoRA-only runs — turn it on for those.
   // ON by default (Rob, 2026-09-03): the render-scored 3-artist experiment
   // (docs/plans/lm-attr-probe/RESULTS.md §6-7) ranked cached prior preservation
   // every 3rd step + caption dropout 0.3 best on loudness and timbre at the
@@ -212,7 +223,7 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
   artistTokenK: 32,
   artistTokenLr: 0.005,
   prefixN: 8,
-  regEvery: 3,
+  regEvery: 0,
   regTopk: 64,
   regSongs: 24,
   regTeacher: 'cached',
@@ -391,7 +402,7 @@ export const TrainLmForm: React.FC<Props> = ({
 
         {/* ── Target loss ─────────────────────────────────────────────── */}
         <label className="flex flex-col gap-1.5">
-          {P('targetLoss', 'Final target · default 1.5 (trains 2.0 → 1.5) · lower rungs loop · 0 = no auto-stop')}
+          {P('targetLoss', 'Default 4.0 with the soft prompt (arm 05) · 1.5 for LoRA-only · lower rungs loop · 0 = no auto-stop')}
           <input
             type="number"
             min={0}

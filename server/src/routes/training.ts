@@ -2441,7 +2441,9 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
     // Tracks TRAIN_LM_DEFAULTS.targetLoss: the batch pipeline POSTs the STORED
     // per-stage defaults (`{}` in practice), so this fallback IS the number a
     // bulk run trains to, and it has to be the one the form shows.
-    const targetLoss = numOpt(body.targetLoss, 1.5);
+    // 4.0 (Rob, 2026-09-04): the default recipe trains the artist token + prefix
+    // with the LoRA (arm 05); 1.5 with a hot soft prompt memorises (6 s replay).
+    const targetLoss = numOpt(body.targetLoss, 4.0);
     // ── Staged target chain (Rob, 2026-08-29: "this MUST be the new default") ─
     // `targetLoss` is the FINAL target; the run always descends through the
     // 2.0 → 1.5 ladder first, one full ace-train leg per rung with
@@ -2480,7 +2482,7 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
     // caller that wants LoKr must say so. The batch pipeline stores partial
     // option bags, and an absent field there lands on the same default a user
     // sees in the form (TRAIN_LM_DEFAULTS).
-    const rank = numOpt(body.rank, 128);
+    const rank = numOpt(body.rank, 16);   // arm 05 (Rob, 2026-09-04); was 128
     const lmIsLokr = body.adapterType === 'lokr';
     const lmMuonLrScale = numOpt(body.muonLrScale, 20.0);
     const lmMuonNsSteps = numOpt(body.muonNsSteps, 5);
@@ -2512,7 +2514,7 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'lokrFactor must be -1 or between 2 and 64' });
       return;
     }
-    const alpha = numOpt(body.alpha, 256);
+    const alpha = numOpt(body.alpha, 32);  // arm 05 (Rob, 2026-09-04); was 256
     const learningRate = numOpt(body.learningRate, 0.0001);
     const gradAccum = numOpt(body.gradAccum, 2);
     const gradClip = numOpt(body.gradClip, 1.0);
@@ -2697,7 +2699,7 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       return;
     }
     const regEveryExplicit = body.regEvery !== undefined;
-    let regEvery = Math.trunc(numOpt(body.regEvery, 3));
+    let regEvery = Math.trunc(numOpt(body.regEvery, 0));  // off for the joint recipe (Rob, 2026-09-04); was 3
     const regTopk = Math.trunc(numOpt(body.regTopk, 64));
     const regSongs = Math.trunc(numOpt(body.regSongs, 24));
     // Prior teacher (docs/plans/lm-attr-probe/OVERNIGHT.md "Live teacher
@@ -2893,7 +2895,7 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       // Prodigy is the LM default (Rob, 2026-09-03): the step size is estimated
       // online, so there is no hand-tuned LR to get wrong per artist. The
       // exact strings 'adamw' / 'muon' opt out.
-      optimizer: body.optimizer === 'adamw' ? 'adamw' : body.optimizer === 'muon' ? 'muon' : 'prodigy',
+      optimizer: body.optimizer === 'muon' ? 'muon' : body.optimizer === 'prodigy' ? 'prodigy' : 'adamw',  // arm 05: AdamW
       muonLrScale: lmMuonLrScale,
       muonNsSteps: Math.trunc(lmMuonNsSteps),
       rank: Math.trunc(rank),
