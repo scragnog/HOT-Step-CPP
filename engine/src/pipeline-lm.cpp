@@ -66,8 +66,6 @@ struct AceLm {
 // These allow the pipeline to call a single API regardless of backend.
 // When TRT is active, the GGML model pointer is unused (nullptr).
 
-#ifdef HOT_STEP_TRT
-
 // The prompt-side half of the artist token. Returns an inactive descriptor when
 // no token is loaded, in which case lm_append_user_span keeps its single joined
 // append and the ids are byte-identical to a run without the feature.
@@ -79,6 +77,8 @@ static AceArtistToken lm_art_spec() {
     }
     return a;
 }
+
+#ifdef HOT_STEP_TRT
 
 static bool s_use_trt = false;  // set during ace_lm_load, read during generate
 static LmTrt * s_trt_ctx = nullptr;
