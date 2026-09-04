@@ -126,6 +126,23 @@ function newestRunDir(prefixGlob: string, name: string): string | null {
   return best?.dir ?? null;
 }
 
+// Completion state of a DiT run from its log: complete when the epoch cap was
+// reached or the target-loss stop fired; anything else is a partial run.
+function runState(dir: string): { complete: boolean; epochsRun: number; reason: string } {
+  try {
+    const jl = JSON.parse(fs.readFileSync(path.join(dir, 'dit_train_log.json'), 'utf8')) as {
+      epochs_run?: number; saved_reason?: string; epochs?: unknown[]; config?: { epochs?: number };
+    };
+    const run = jl.epochs_run ?? (jl.epochs?.length ?? 0);
+    const cap = jl.config?.epochs ?? 0;
+    const target = jl.saved_reason === 'target';
+    const complete = target || (cap > 0 && run >= cap);
+    return { complete, epochsRun: run, reason: target ? 'target reached' : complete ? 'epoch cap' : 'partial' };
+  } catch {
+    return { complete: false, epochsRun: 0, reason: 'no log' };
+  }
+}
+
 // ── renders (same recipe as artist-token-ab.ts; the LM pass is shared per dataset) ──
 const codesCache = new Map<string, AceRequest>();
 async function awaitAce(jobId: string, what: string): Promise<void> {
@@ -233,15 +250,29 @@ async function phaseDit(dsKeys: string[], target: number, epochs: number, rank: 
       const body = { adapterName: name, targetLoss: target, epochs, ...arm.body };
       let row: string;
       try {
-        // An adapter that already exists (a run a previous runner instance
-        // trained but never rendered) is reused: training is the expensive half.
+        // An adapter that already exists is either COMPLETE (a previous runner
+        // instance trained it but never rendered: reuse, training is the
+        // expensive half) or PARTIAL (a paused/cancelled run). The train-dit
+        // route resumes from the latest same-named adapter when initAdapter is
+        // omitted, so a partial arm is re-posted for its remaining epochs.
         let dir = newestRunDir('dit-', name);
         let secs = 0;
+        let priorEpochs = 0;
         if (dir) {
-          log(`${dsKey}/${arm.key}: adapter exists at ${dir}, rendering only`);
-        } else {
-          log(`${dsKey}/${arm.key}: posting train-dit ${JSON.stringify(arm.body)}`);
-          const jobId = await post(`/datasets/${ds.id}/train-dit`, body);
+          const st = runState(dir);
+          if (st.complete) {
+            log(`${dsKey}/${arm.key}: adapter complete at ${dir} (${st.epochsRun} epochs, ${st.reason}), rendering only`);
+          } else {
+            priorEpochs = st.epochsRun;
+            log(`${dsKey}/${arm.key}: partial adapter at ${dir} (${st.epochsRun}/${epochs} epochs), resuming for ${Math.max(1, epochs - st.epochsRun)} more`);
+            dir = null;
+          }
+        }
+        if (!dir) {
+          const remaining = Math.max(1, epochs - priorEpochs);
+          const postBody = { ...body, epochs: remaining };
+          log(`${dsKey}/${arm.key}: posting train-dit ${JSON.stringify(arm.body)} epochs=${remaining}`);
+          const jobId = await post(`/datasets/${ds.id}/train-dit`, postBody);
           const r = await waitJob(jobId, `${dsKey}/${arm.key}`);
           secs = r.secs;
           if (r.status !== 'done') {
@@ -256,7 +287,7 @@ async function phaseDit(dsKeys: string[], target: number, epochs: number, rank: 
         try {
           const jl = JSON.parse(fs.readFileSync(path.join(dir, 'dit_train_log.json'), 'utf8')) as { epochs?: { loss: number; ma5?: number }[] };
           const eps = jl.epochs ?? [];
-          ep = String(eps.length);
+          ep = priorEpochs > 0 ? `${priorEpochs}+${eps.length}` : String(eps.length);
           const last = eps[eps.length - 1];
           ma5 = last ? (last.ma5 ?? last.loss).toFixed(4) : '?';
         } catch { /* row keeps ? */ }
