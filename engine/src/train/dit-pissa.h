@@ -494,8 +494,13 @@ static bool dit_pissa_export(const DitAdapterLora & ad, const char * dir, const 
                        meta.trigger_position.empty() ? std::string("prepend") : meta.trigger_position });
         md.push_back({ "modelspec.trigger_phrase", meta.trigger });
     }
+    // F32, not BF16: the two halves [B, -B0][A; A0] are large and nearly
+    // cancel (each ~0.7 |W| at rank 128 on this DiT), so BF16's 3.9e-3 relative
+    // precision leaves a noise residual of the same order as the adapter's own
+    // delta. The blind test's "strangely louder" PiSSA render (2026-09-04) is
+    // the suspected symptom. Twice the file, exact merge.
     const std::string sf = lm_join(d, "adapter_model.safetensors");
-    if (!st_write_file(sf.c_str(), tensors, md, STW_BF16)) {
+    if (!st_write_file(sf.c_str(), tensors, md, STW_F32)) {
         *err = "cannot write " + sf;
         return false;
     }
