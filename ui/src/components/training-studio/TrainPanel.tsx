@@ -277,7 +277,8 @@ export const TrainPanel: React.FC = () => {
       // Attention backend (2026-09-02). Sent only when moved off default, same
       // rule as the speed levers above — an ace-train build that predates the
       // LM's --attn parsing never sees the flag on a normal (exact) run.
-      ...(form.attnBackend !== 'exact' ? { attnBackend: form.attnBackend } : {}),
+      // A KV prefix needs exact attention; the route coerces too, this keeps the request honest.
+      ...(form.attnBackend !== 'exact' && !(form.artistTokenOn && form.prefixN > 0) ? { attnBackend: form.attnBackend } : {}),
     };
     setStarting(true);
     try { await startTrainLm(opts); } finally { setStarting(false); }

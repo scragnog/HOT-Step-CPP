@@ -2868,6 +2868,14 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
     const artistTokenResolved = body.artistToken === undefined
       ? (String(adapterName).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'artist')
       : (typeof body.artistToken === 'string' ? body.artistToken.trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) : '');
+    const prefixNResolved = Math.min(64, Math.max(0, Math.trunc(numOpt(body.prefixN, artistTokenResolved ? 8 : 0))));
+    // A KV prefix runs under exact attention only (the flash probe does not cover
+    // S_kv != S), and the prefix is on by default now, so coerce rather than fail
+    // a default run 10 s in. Logged so a flash request knows why it went exact.
+    const attnBackendEff = (artistTokenResolved && prefixNResolved > 0 && attnBackend !== 'exact') ? 'exact' as const : attnBackend;
+    if (attnBackendEff !== attnBackend) {
+      console.log(`[Training] train-lm: attnBackend ${attnBackend} -> exact (a KV prefix of ${prefixNResolved} columns needs exact attention)`);
+    }
     const opts: ResolvedTrainLmOptions = {
       lmSize,
       lmModel,
@@ -2924,14 +2932,14 @@ router.post('/datasets/:id/train-lm', async (req: Request, res: Response) => {
       artistToken: artistTokenResolved,
       artistTokenK: Math.min(256, Math.max(1, Math.trunc(numOpt(body.artistTokenK, 32)))),
       artistTokenLr: Math.min(1, Math.max(0, numOpt(body.artistTokenLr, 0.005))),
-      prefixN: Math.min(64, Math.max(0, Math.trunc(numOpt(body.prefixN, artistTokenResolved ? 8 : 0)))),
+      prefixN: prefixNResolved,
       regEvery,
       regTopk,
       regSongs,
       regCodes,
       regPriorDir,
       regTeacher,
-      attnBackend,
+      attnBackend: attnBackendEff,
     };
 
     const job = queue.startTrainLmJob(ds.id, opts);
