@@ -2486,6 +2486,10 @@ static int lm_train_main(const LmTrainArgs & a) {
     meta.rank           = a.rank;
     meta.alpha          = a.alpha;
     meta.rslora         = a.rslora;
+    meta.artist_token   = a.artist_token;
+    meta.artist_k       = a.artist_token.empty() ? 0 : a.artist_k;
+    meta.artist_lr      = a.artist_lr;
+    meta.prefix_n       = a.prefix_n;
     meta.lr             = a.lr;
     meta.grad_clip      = a.grad_clip;
     meta.weight_decay   = a.weight_decay;

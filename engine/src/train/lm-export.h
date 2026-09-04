@@ -49,6 +49,11 @@ struct LmExportMeta {
     std::string lm_path, lm_size, codes_path, tensors_dir, order;
     int         rank = 16, alpha = 32;
     bool        rslora = false;  // alpha/sqrt(r) scaling; mirrored by lm-adapter.h at load
+    // Soft prompt provenance (2026-09-04): recorded so a run's log says what it trained.
+    std::string artist_token;
+    int         artist_k  = 0;
+    float       artist_lr = 0.0f;
+    int         prefix_n  = 0;
     double      lr = 1e-4, grad_clip = 1.0, weight_decay = 0.01, warmup_ratio = 0.05, target_loss = 0.4;
     int         epochs = 16, grad_accum = 4, seed = 42;
     bool        loss_on_cot = true;
@@ -273,6 +278,10 @@ static bool lm_write_train_log(const std::string & dir, const LmExportMeta & m) 
         yyjson_mut_obj_add_int(doc, cfg, "reg_topk", m.reg_topk);
         yyjson_mut_obj_add_strcpy(doc, cfg, "reg_prior_dir", m.reg_prior_dir.c_str());
         yyjson_mut_obj_add_strcpy(doc, cfg, "reg_teacher", m.reg_teacher.c_str());
+        yyjson_mut_obj_add_str(doc, cfg, "artist_token", m.artist_token.c_str());
+        yyjson_mut_obj_add_int(doc, cfg, "artist_token_k", m.artist_k);
+        yyjson_mut_obj_add_real(doc, cfg, "artist_token_lr", m.artist_lr);
+        yyjson_mut_obj_add_int(doc, cfg, "prefix_n", m.prefix_n);
         yyjson_mut_val * rc = yyjson_mut_obj_add_arr(doc, cfg, "reg_codes");
         for (size_t i = 0; i < m.reg_codes.size(); i++) {
             yyjson_mut_arr_add_strcpy(doc, rc, m.reg_codes[i].c_str());
