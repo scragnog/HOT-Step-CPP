@@ -1528,6 +1528,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         // graph — which is the intended semantics on the ckpt path too.
         artp.off      = s.artist_off;
         art_embed.off = s.artist_off;
+        run.embed_has_param = s.artist_off >= 0;  // reg samples carry no token
         return low ? lm_ckpt_micro_step(run, s, count_loss, ce_out) : micro_step_naive(s, count_loss, ce_out);
     };
 

@@ -228,18 +228,27 @@ async function phaseDit(dsKeys: string[], target: number, epochs: number, rank: 
       if (fs.existsSync(wav)) { log(`${dsKey}/${arm.key}: exists, skipping`); continue; }
       const name = `ab-${dsKey}-${arm.key}`;
       const body = { adapterName: name, targetLoss: target, epochs, ...arm.body };
-      log(`${dsKey}/${arm.key}: posting train-dit ${JSON.stringify(arm.body)}`);
       let row: string;
       try {
-        const jobId = await post(`/datasets/${ds.id}/train-dit`, body);
-        const r = await waitJob(jobId, `${dsKey}/${arm.key}`);
-        if (r.status !== 'done') {
-          row = `| ${dsKey} | ${n} | ${arm.key} | — | — | ${Math.round(r.secs)} | FAILED: ${r.error ?? r.status} |\n`;
-          fs.appendFileSync(readme, row);
-          continue;
+        // An adapter that already exists (a run a previous runner instance
+        // trained but never rendered) is reused: training is the expensive half.
+        let dir = newestRunDir('dit-', name);
+        let secs = 0;
+        if (dir) {
+          log(`${dsKey}/${arm.key}: adapter exists at ${dir}, rendering only`);
+        } else {
+          log(`${dsKey}/${arm.key}: posting train-dit ${JSON.stringify(arm.body)}`);
+          const jobId = await post(`/datasets/${ds.id}/train-dit`, body);
+          const r = await waitJob(jobId, `${dsKey}/${arm.key}`);
+          secs = r.secs;
+          if (r.status !== 'done') {
+            row = `| ${dsKey} | ${n} | ${arm.key} | — | — | ${Math.round(r.secs)} | FAILED: ${r.error ?? r.status} |\n`;
+            fs.appendFileSync(readme, row);
+            continue;
+          }
+          dir = newestRunDir('dit-', name);
+          if (!dir) throw new Error('no run dir');
         }
-        const dir = newestRunDir('dit-', name);
-        if (!dir) throw new Error('no run dir');
         let ep = '?', ma5 = '?';
         try {
           const jl = JSON.parse(fs.readFileSync(path.join(dir, 'dit_train_log.json'), 'utf8')) as { epochs?: { loss: number; ma5?: number }[] };
@@ -251,7 +260,7 @@ async function phaseDit(dsKeys: string[], target: number, epochs: number, rank: 
         await waitEngine();
         log(`${dsKey}/${arm.key}: render from ${dir}`);
         await render(dsKey, dir, wav);
-        row = `| ${dsKey} | ${n} | ${arm.key} | ${ep} | ${ma5} | ${Math.round(r.secs)} | ${arm.note} |\n`;
+        row = `| ${dsKey} | ${n} | ${arm.key} | ${ep} | ${ma5} | ${Math.round(secs)} | ${arm.note} |\n`;
       } catch (e: any) {
         row = `| ${dsKey} | ${n} | ${arm.key} | — | — | — | ERROR: ${String(e?.message ?? e).slice(0, 120)} |\n`;
       }

@@ -740,6 +740,11 @@ struct LmCkptRun {
      *  Default false, so every trainer that has no embedding parameter emits the
      *  graph it always did and pays one predictable branch. */
     bool embed_trainable = false;
+    // Per micro-step: does THIS sample's embedding graph contain the parameter?
+    // A prior-preservation sample has no artist token in its caption, so its
+    // embed stage is a param-less graph and ggml_build_backward_expand asserts
+    // (any_params). The caller sets this from the sample's token offset.
+    bool embed_has_param = true;
 
     /** Stop after the CE head — no backward segments, no gradient accumulation.
      *
@@ -1482,7 +1487,7 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
     // No ckpt_in/g_out here: nothing below the embedding needs a gradient, so
     // fill_gacc is handed nullptr for both and its `nd == ckpt_in` test simply
     // never fires.
-    if (r.embed_trainable && r.embed_build && !r.forward_only) {
+    if (r.embed_trainable && r.embed_has_param && r.embed_build && !r.forward_only) {
         ggml_init_params ip  = { st.arena.size(), st.arena.data(), true };
         ggml_context *   ctx = ggml_init(ip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 512, /*grads=*/true);
