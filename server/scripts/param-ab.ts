@@ -156,10 +156,12 @@ async function awaitAce(jobId: string, what: string): Promise<void> {
     await new Promise(r => setTimeout(r, 500));
   }
 }
-async function render(dsKey: string, adapterDir: string | null, out: string): Promise<void> {
+type RenderOverride = { caption?: string; lyrics?: string; duration?: number; seed?: number; key?: string };
+async function render(dsKey: string, adapterDir: string | null, out: string, ov: RenderOverride = {}): Promise<void> {
   const ds = DATASETS[dsKey];
+  const cacheKey = ov.key ?? dsKey;
   const aceReq: AceRequest = {
-    caption: ds.caption, lyrics: ds.lyrics, duration: 60, seed: 20260904,
+    caption: ov.caption ?? ds.caption, lyrics: ov.lyrics ?? ds.lyrics, duration: ov.duration ?? 60, seed: ov.seed ?? 20260904,
     vocal_language: 'en',
     lm_batch_size: 1, lm_temperature: 0.85, lm_cfg_scale: 2, lm_top_p: 0.9, lm_top_k: 0,
     lm_negative_prompt: 'NO USER INPUT',
@@ -167,14 +169,15 @@ async function render(dsKey: string, adapterDir: string | null, out: string): Pr
     synth_model: SYNTH_MODEL, lm_model: LM_MODEL, vae_model: VAE_MODEL, emb_model: EMB_MODEL,
     ...P50,
   };
-  let lmOut = codesCache.get(dsKey);
+  let lmOut = codesCache.get(cacheKey);
   if (!lmOut) {
     const lmJob = await aceClient.submitLm(aceReq);
-    await awaitAce(lmJob, `LM (${dsKey})`);
+    await awaitAce(lmJob, `LM (${cacheKey})`);
     const arr = await (await aceClient.getJobResult(lmJob)).json() as AceRequest[];
-    if (!Array.isArray(arr) || !arr.length || !arr[0].audio_codes) throw new Error(`LM returned no codes for ${dsKey}`);
+    if (!Array.isArray(arr) || !arr.length || !arr[0].audio_codes) throw new Error(`LM returned no codes for ${cacheKey}`);
     lmOut = arr[0];
-    codesCache.set(dsKey, lmOut);
+    codesCache.set(cacheKey, lmOut);
+    log(`LM plan (${cacheKey}): bpm=${lmOut.bpm} dur=${lmOut.duration} codes=${(lmOut.audio_codes || '').split(',').length}`);
   }
   const synthReq: AceRequest = {
     ...aceReq,
@@ -304,9 +307,51 @@ async function phaseDit(dsKeys: string[], target: number, epochs: number, rank: 
   }
 }
 
+// ── phase render: full-length renders of every existing arm with one plan ──
+// Same caption/lyrics/seed for all, only the adapter changes. Partial adapters
+// (a stopped arm) render as they are; the README says which.
+async function phaseRender(dsKey: string, sub: string, ov: RenderOverride, rank: number): Promise<void> {
+  const ds = DATASETS[dsKey];
+  if (!ds) throw new Error(`unknown dataset ${dsKey}`);
+  const outDir = path.join(LST, dsKey, sub);
+  fs.mkdirSync(outDir, { recursive: true });
+  const readme = path.join(outDir, 'README.md');
+  if (!fs.existsSync(readme)) {
+    fs.writeFileSync(readme,
+      `# ${dsKey} — full-length renders (${sub})\n\nOne plan for all arms (same caption, lyrics, seed ${ov.seed ?? 20260904}, ` +
+      `duration ${ov.duration ?? '?'} s), thirds DiT, 50 steps, guidance 20, md_hamiltonian_v2 / linear_quadratic / dynamic_cfg, ` +
+      `no post-processing. Only the adapter changes. 00 = base.\n\n| # | arm | adapter | state |\n|---|---|---|---|\n`);
+  }
+  await waitEngine();
+  const baseWav = path.join(outDir, '00_base.wav');
+  if (!fs.existsSync(baseWav)) {
+    log(`${dsKey}/${sub}: base render`);
+    await render(dsKey, null, baseWav, ov);
+    fs.appendFileSync(readme, `| 0 | base | — | no adapter |\n`);
+  }
+  let n = 0;
+  for (const arm of arms(rank)) {
+    n++;
+    const wav = path.join(outDir, `${String(n).padStart(2, '0')}_${arm.key}.wav`);
+    if (fs.existsSync(wav)) { log(`${dsKey}/${sub}/${arm.key}: exists, skipping`); continue; }
+    const dir = newestRunDir('dit-', `ab-${dsKey}-${arm.key}`);
+    if (!dir) { log(`${dsKey}/${sub}/${arm.key}: no adapter, skipping`); fs.appendFileSync(readme, `| ${n} | ${arm.key} | — | not trained |\n`); continue; }
+    const st = runState(dir);
+    try {
+      await waitEngine();
+      log(`${dsKey}/${sub}/${arm.key}: render from ${dir} (${st.epochsRun} epochs, ${st.reason})`);
+      await render(dsKey, dir, wav, ov);
+      fs.appendFileSync(readme, `| ${n} | ${arm.key} | ${path.basename(path.dirname(dir))}/${path.basename(dir)} | ${st.epochsRun} epochs, ${st.reason} |\n`);
+    } catch (e: any) {
+      fs.appendFileSync(readme, `| ${n} | ${arm.key} | ${dir} | ERROR: ${String(e?.message ?? e).slice(0, 120)} |\n`);
+    }
+  }
+  log(`${dsKey}/${sub}: renders done`);
+}
+
 async function main() {
   const a = args();
-  const phase = a.get('phase') || 'all';
+  const phase = a.get('phase') || 'all';  // lm | dit | all | render
   const dsKeys = (a.get('datasets') || 'mj_dangerous,dio_holydiver,carpenterbrut_trilogy').split(',').map(s => s.trim()).filter(Boolean);
   const target = Number(a.get('target') || 0.5);
   const epochs = Number(a.get('epochs') || 200);
@@ -316,6 +361,16 @@ async function main() {
   if (!up) throw new Error('Node server not reachable on :3001 — start dev.bat');
   if (phase === 'lm' || phase === 'all') await phaseLm();
   if (phase === 'dit' || phase === 'all') await phaseDit(dsKeys, target, epochs, rank);
+  if (phase === 'render') {
+    // --lyrics-file <path> --caption-file <path> [--duration s] [--seed n] [--sub full]
+    const lyricsFile = a.get('lyrics-file'); const captionFile = a.get('caption-file');
+    if (!lyricsFile || !captionFile) throw new Error('--phase render needs --lyrics-file and --caption-file');
+    const ov: RenderOverride = {
+      lyrics: fs.readFileSync(lyricsFile, 'utf8'), caption: fs.readFileSync(captionFile, 'utf8').trim(),
+      duration: Number(a.get('duration') || 240), seed: Number(a.get('seed') || 20260904), key: `${dsKeys[0]}:${a.get('sub') || 'full'}`,
+    };
+    await phaseRender(dsKeys[0], a.get('sub') || 'full', ov, rank);
+  }
   log('done');
 }
 
