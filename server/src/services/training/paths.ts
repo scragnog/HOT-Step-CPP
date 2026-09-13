@@ -63,6 +63,17 @@ export function labelsDir(slug: string): string {
   return path.join(datasetDir(slug), 'labels');
 }
 
+/** <trainingBaseDir>/datasets/<slug>/mm3-retarget — edited audio for tracks that were over MM3's 6:00 cap. */
+export function mm3RetargetDir(slug: string): string {
+  return path.join(datasetDir(slug), 'mm3-retarget');
+}
+
+/** The derived dataset.json mm3-retarget writes. A build artifact at a known path, so the codes pass and the
+ *  trainer can both point at it without threading state between jobs. */
+export function mm3RetargetManifest(slug: string): string {
+  return path.join(mm3RetargetDir(slug), 'dataset.json');
+}
+
 /** <trainingBaseDir>/jobs */
 export function jobsDir(): string {
   return path.join(trainingBaseDir, 'jobs');

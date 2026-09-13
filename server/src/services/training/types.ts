@@ -49,7 +49,7 @@ export interface Mm3TrainLmRequest {
    *  the run stops short. */
   keepResumeState?: boolean;
   /** Tracks longer than the window (maxFrames): exclude (default) or crop. */
-  longTracks?: 'exclude' | 'crop';
+  longTracks?: 'exclude' | 'crop' | 'excise';
   /** Engine --verify-export (round-trip every checkpoint through the runtime loader). */
   verifyExport?: boolean;
   warmup?: number;

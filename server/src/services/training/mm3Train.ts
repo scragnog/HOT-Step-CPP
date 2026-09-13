@@ -680,8 +680,15 @@ export const MM3_LM_DEFAULTS = {
    *  structured crops of maxFrames, which is the pre-2026-09-11 behaviour and
    *  puts their tail at positions past the base's 10240-token range. About
    *  6.5% of the catalogue's tracks exceed 360 s; the route refuses a run that
-   *  exclusion would empty by more than half. */
-  longTracks: 'exclude' as 'exclude' | 'crop',
+   *  exclusion would empty by more than half.
+   *
+   *  `excise` instead cuts one repeated section out of each over-length track
+   *  so the intro and the real ending both survive, and trains the result
+   *  whole (ace-train mm3-retarget). It still passes --drop-over-frames,
+   *  because a track the excision refuses -- no clean repeat to skip, or the
+   *  removal would have to cross a vocal -- must stay excluded rather than be
+   *  cropped behind the user's back. */
+  longTracks: 'exclude' as 'exclude' | 'crop' | 'excise',
   /** `structured`: a fixed share of steps pinned to frame 0, a fixed share
    *  flush to the track's end, the rest random.
    *
@@ -1136,9 +1143,10 @@ export interface ResolvedMm3TrainLmOptions {
   scoreLastEndOnly?: boolean;
   /** Server-side only (no engine flag): keep resume-state.bin after completion. */
   keepResumeState?: boolean;
-  /** Tracks longer than maxFrames: exclude (engine --drop-over-frames) or crop.
+  /** Tracks longer than maxFrames: exclude (engine --drop-over-frames), crop,
+   *  or excise (cut a repeated section out and train the result whole).
    *  See MM3_LM_DEFAULTS.longTracks. Absent = exclude. */
-  longTracks?: 'exclude' | 'crop';
+  longTracks?: 'exclude' | 'crop' | 'excise';
   /** Engine --verify-export: after every checkpoint, load it back through the
    *  RUNTIME loader and compare against the live trainer (mm3-lm-verify-export.h).
    *  Opt-in: it briefly holds a second copy of the adapter on the card. */
@@ -1336,7 +1344,9 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   // Whole-song recipe (2026-09-11): tracks that do not fit the window are left
   // out rather than trained in pieces. Emitted only for 'exclude' so an older
   // engine never sees the flag for the 'crop' behaviour it already has.
-  if ((o.longTracks ?? 'exclude') === 'exclude') args.push('--drop-over-frames', String(o.maxFrames));
+  // 'excise' keeps the flag too: the retarget pass shortens what it can, and whatever it refused must still be
+  // left out rather than silently falling back to crops.
+  if ((o.longTracks ?? 'exclude') !== 'crop') args.push('--drop-over-frames', String(o.maxFrames));
   // Soft prompt. Uses the SAME flag names the parser already accepts
   // (--artist-token/-k/-lr) — this is not a new engine surface, just a
   // previously-unwired one.

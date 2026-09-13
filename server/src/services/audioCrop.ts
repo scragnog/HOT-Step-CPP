@@ -13,7 +13,7 @@ import fs from 'fs';
 
 // ── WAV parsing ──────────────────────────────────────────────────────────────
 
-interface WavInfo {
+export interface WavInfo {
   sampleRate: number;
   numChannels: number;
   bitsPerSample: number;
@@ -21,7 +21,7 @@ interface WavInfo {
   dataSize: number;
 }
 
-function parseWavHeader(buf: Buffer): WavInfo {
+export function parseWavHeader(buf: Buffer): WavInfo {
   if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') {
     throw new Error('Not a valid WAV file');
   }

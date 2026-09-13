@@ -2265,8 +2265,11 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
     // out of the run by default. Refuse a request that exclusion would gut —
     // a custom crop of 750 frames with the default 'exclude' would otherwise
     // drop every track and train on nothing; the user meant 'crop'.
-    const longTracksResolved: 'exclude' | 'crop' = b.longTracks === 'crop' ? 'crop' : D.longTracks;
+    const longTracksResolved: 'exclude' | 'crop' | 'excise' =
+      b.longTracks === 'crop' ? 'crop' : b.longTracks === 'excise' ? 'excise' : D.longTracks;
     const maxFramesResolved = num('maxFrames', D.maxFrames, 64, 9000);
+    // 'excise' is exempt from the gutting check: shortening the long tracks is the whole point of it, and how
+    // many survive is not knowable until the retarget pass has run.
     if (longTracksResolved === 'exclude') {
       const known = (await buildSamples(ds)).filter(s => !s.excluded && !s.fileMissing && s.duration > 0);
       const over  = known.filter(s => s.duration * 25 > maxFramesResolved);
