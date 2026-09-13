@@ -67,9 +67,12 @@ XFADE_MS = opt('--xfade', 30.0)
 SNIPPET  = opt('--snippet', 10.0)
 N_ALTS   = opt('--alts', 3, int)
 NO_VOCAL = '--no-vocal' in argv
-NO_LYRIC = '--no-lyrics' in argv or NO_VOCAL
+ALIGN_MIX = '--align-mix' in argv   # align lyrics against the full mix when no stem is available. Degraded: the
+                                    # backing track pulls word boundaries around. Debug and no-SuperSep fallback.
+NO_LYRIC = '--no-lyrics' in argv or (NO_VOCAL and not ALIGN_MIX)
+FORCE_CPU = '--cpu' in argv         # keep off a GPU that a training run is using
 OUT      = os.environ.get('MM3_RETARGET_OUT', opt('--out', os.path.join(HERE, 'out'), str))
-FLAGS    = {'--no-vocal', '--no-lyrics'}
+FLAGS    = {'--no-vocal', '--no-lyrics', '--align-mix', '--cpu'}
 VALUED   = {'--target', '--margin', '--bpb', '--phase', '--lookback', '--max-cost',
             '--guard', '--xfade', '--snippet', '--alts', '--out'}
 files = [a for i, a in enumerate(argv)
@@ -259,7 +262,7 @@ def align_lines(stem, sr, lines):
     """Per-line (start, end) seconds via torchaudio MMS_FA on the vocal stem. None when it cannot align."""
     import torch, torchaudio
     from torchaudio.pipelines import MMS_FA as B
-    dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+    dev = 'cpu' if FORCE_CPU else ('cuda' if torch.cuda.is_available() else 'cpu')
     model = B.get_model().to(dev).eval()
     tokenizer, aligner = B.get_tokenizer(), B.get_aligner()
     if sr != 16000:
@@ -298,26 +301,34 @@ def align_lines(stem, sr, lines):
     except Exception as e:
         print(f'  [align] failed: {e}', file=sys.stderr)
         return None
-    per_line = {}
+    acc = {}
     for wi, sp in enumerate(spans):
         if not sp:
             continue
         t0 = float(ftime[min(sp[0].start, len(ftime) - 1)])
         t1 = float(ftime[min(sp[-1].end, len(ftime) - 1)])
+        sc = float(np.mean([getattr(t, 'score', 1.0) for t in sp]))
         li = owner[wi]
-        cur = per_line.get(li)
-        per_line[li] = (t0 if cur is None else min(cur[0], t0), t1 if cur is None else max(cur[1], t1))
-    return per_line
+        cur = acc.get(li)
+        if cur is None:
+            acc[li] = [t0, t1, [sc]]
+        else:
+            cur[0] = min(cur[0], t0); cur[1] = max(cur[1], t1); cur[2].append(sc)
+    # CTC forced alignment places EVERY word somewhere, absent or not — the score is what separates a line the
+    # singer actually sang from one the path was forced through. It is the only honest confidence here.
+    return {li: (v[0], v[1], float(np.mean(v[2]))) for li, v in acc.items()}
 
 
-def edit_lyrics(lines, per_line, t_a, t_b):
-    """Drop lyric lines that were sung inside the removed span; drop section tags left with nothing under them."""
+def edit_lyrics(lines, per_line, t_a, t_b, min_score=0.0):
+    """Drop lyric lines mostly sung inside the removed span; drop section tags left with nothing under them."""
     keep, dropped = [], []
     for li, line in enumerate(lines):
         sp = per_line.get(li) if per_line else None
-        if sp and sp[0] >= t_a - 0.25 and sp[1] <= t_b + 0.25:
-            dropped.append((li, line, round(sp[0], 1), round(sp[1], 1)))
-            continue
+        if sp and sp[2] >= min_score:
+            ov = max(0.0, min(sp[1], t_b) - max(sp[0], t_a))
+            if ov > 0.5 * max(sp[1] - sp[0], 1e-6):    # a half-cut line mismatches the audio either way
+                dropped.append((li, line, round(sp[0], 1), round(sp[1], 1)))
+                continue
         keep.append((li, line))
     out = [l for _, l in keep]
     pruned = []
@@ -343,6 +354,18 @@ def splice(path, t_a, t_b, xfade_ms):
     fade = y[sa - h:sa + h] * np.cos(ramp * np.pi / 2) ** 1 + y[sb - h:sb + h] * np.sin(ramp * np.pi / 2) ** 1
     out = np.concatenate([y[:sa - h], fade, y[sb + h:]], axis=0)
     return out, sr, (sa - h) / sr
+
+
+def splice_mono(y, sr, t_a, t_b, xfade_ms):
+    """The same cut applied to a mono analysis signal, so the edited vocal stem needs no second separation."""
+    h = max(1, int(sr * xfade_ms / 2000.0))
+    sa, sb = int(round(t_a * sr)), int(round(t_b * sr))
+    sa = max(h, min(sa, len(y) - h)); sb = max(h, min(sb, len(y) - h))
+    if sb - sa < 4 * h:
+        return None
+    r = (np.arange(2 * h) / (2 * h - 1)).astype(np.float32)
+    fade = y[sa - h:sa + h] * np.cos(r * np.pi / 2) + y[sb - h:sb + h] * np.sin(r * np.pi / 2)
+    return np.concatenate([y[:sa - h], fade, y[sb + h:]])
 
 
 def main():
@@ -402,8 +425,14 @@ def main():
                    seam_at=round(seam_t, 2), best=best, alts=cands[1:1 + N_ALTS], n_candidates=n_all)
         head, lyr = read_sidecar(path)
         if lyr and not NO_LYRIC:
-            print('  forced-aligning lyrics to the vocal stem...')
-            per_line = align_lines(stem, stem_sr, lyr)
+            if stem is not None:
+                a_y, a_sr, a_src = stem, stem_sr, 'vocal stem'
+            else:
+                import librosa
+                a_y, a_sr, a_src = librosa.load(path, sr=16000, mono=True), 16000, 'FULL MIX (degraded)'
+                a_y = a_y[0] if isinstance(a_y, tuple) else a_y
+            print(f'  forced-aligning lyrics to the {a_src}...')
+            per_line = align_lines(a_y, a_sr, lyr)
             if per_line is None:
                 print('  alignment unavailable — lyrics left untouched (FLAG: they no longer match the audio)')
                 rec['lyrics'] = 'align-failed'
@@ -418,6 +447,26 @@ def main():
                     print(f'    ... and {len(dropped)-8} more')
                 rec['lyrics'] = dict(dropped=len(dropped), kept=len(kept),
                                      lines=[d[1].strip() for d in dropped])
+                # Verify rather than assume. Re-align the KEPT sheet against the EDITED audio: a sheet that still
+                # matches scores about as well as it did before. This is what catches a lyric sheet whose repeats
+                # were written once (so the removed span's words are still sung elsewhere and must NOT be dropped)
+                # and the reverse, a line half-removed and left in.
+                ed = splice_mono(a_y, a_sr, best['t_a'], best['t_b'], XFADE_MS)
+                if ed is not None:
+                    print('  verifying: re-aligning the edited sheet to the edited audio...')
+                    v = align_lines(ed, a_sr, kept)
+                    if v:
+                        before = [per_line[li][2] for li in per_line
+                                  if lyr[li].strip() and not lyr[li].strip().startswith('[')]
+                        after = [x[2] for x in v.values()]
+                        bad = sorted(((sc, kept[li]) for li, (_, _, sc) in v.items()), key=lambda z: z[0])[:3]
+                        print(f'  alignment score {np.mean(before):.3f} before -> {np.mean(after):.3f} after '
+                              f'({len(after)} lines)')
+                        for sc, line in bad:
+                            print(f'    weakest {sc:.3f}  {line.strip()[:64]}')
+                        rec['lyrics']['score_before'] = round(float(np.mean(before)), 4)
+                        rec['lyrics']['score_after'] = round(float(np.mean(after)), 4)
+                        rec['lyrics']['weakest'] = [[round(sc, 4), l.strip()] for sc, l in bad]
         report.append(rec)
         print(f'  wrote {dst}  ({len(out_audio)/sr/60:.2f} min)')
     with open(os.path.join(OUT, 'report.json'), 'w', encoding='utf-8') as f:
