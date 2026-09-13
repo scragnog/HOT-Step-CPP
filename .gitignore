@@ -83,6 +83,8 @@ tools/mcp-lyricstudio/node_modules/
 !tools/mm3-trim-silence/
 !tools/vocal-end/
 tools/vocal-end/out/
+!tools/mm3-retarget/
+tools/mm3-retarget/out/
 !tools/mm3-runtime-probes/
 !tools/mm3-trt-export/
 !tools/tensorrt-sdk/
