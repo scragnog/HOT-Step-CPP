@@ -21,7 +21,8 @@
 //   GET  /yue2/props            <- yue2_handle_props
 //   POST /yue2/warm             <- yue2_handle_warm
 //   POST /yue2/unload           <- yue2_handle_unload
-//   POST /yue2/select-model     <- yue2_handle_select_model   (VAE variant picker)
+//   POST /yue2/select-model     <- yue2_handle_select_model   (VAE variant + LM quant
+//                                   pin + NAR adapter set; see the handler's own comment)
 //   POST /yue2/tokenize-check   <- yue2_handle_tokenize_check (bring-up, cheap)
 //   POST /yue2/synth            <- yue2_handle_synth          (production; returns the
 //                                   shared engine job id — poll/fetch via GET/POST /job)
@@ -126,6 +127,20 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
         yyjson_mut_obj_add_strcpy(doc, lm_v, "requested", g_yue2.lm_type_want.c_str());
     }
 
+    // NAR LoRA state. `requested` is what /yue2/select-model was last told;
+    // `merged` is what is actually baked into the resident weights (empty
+    // whenever the LM is not resident, since yue2_unload clears it). The two
+    // differ exactly between a selection and the next warm/synth, and a UI
+    // that shows only one of them would be lying for that window.
+    {
+        yyjson_mut_val * ad = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_val(doc, root, "adapter", ad);
+        yyjson_mut_obj_add_strcpy(doc, ad, "requested", yue2_adapter_key(g_yue2.lm_adapter_want).c_str());
+        yyjson_mut_obj_add_strcpy(doc, ad, "merged", g_yue2.lm_adapter_desc.c_str());
+        yyjson_mut_obj_add_uint(doc, ad, "tensors", (uint64_t) g_yue2.lm_adapter_tensors);
+        yyjson_mut_obj_add_bool(doc, ad, "in_force", g_yue2.lm_resident && !g_yue2.lm_adapter_desc.empty());
+    }
+
     yyjson_mut_val * vram = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_val(doc, root, "vram", vram);
     yyjson_mut_obj_add_uint(doc, vram, "lm_bytes", g_yue2.vram_lm);
@@ -186,21 +201,131 @@ static void yue2_handle_unload(const httplib::Request &, httplib::Response & res
     res.set_content("{\"unloaded\":true}", "application/json");
 }
 
-// POST /yue2/select-model — {"vae_variant": "standard"|"legacy", "lm_type": "<token>"}.
-// Both fields optional/independent. vae_variant: only the active variant is
-// ever resident (yue2_load_parts's own contract); if a VAE is currently
-// loaded this reloads it, otherwise it just records the pick for the next
-// warm/synth. lm_type: "" (or omitted) means auto/best-first
+// Parse the optional `lm_adapter` field of POST /yue2/select-model into a spec
+// list. Three accepted shapes, because all three are things a caller will
+// plausibly send:
+//
+//   "lm_adapter": "D:/loras/foo.safetensors"          one path, scale from
+//                                                     `lm_adapter_scale` (default 1.0)
+//   "lm_adapter": ""                                  explicit clear
+//   "lm_adapter": ["a.safetensors", "b.safetensors"]  a stack, shared scale
+//   "lm_adapter": [{"path": "a.safetensors", "scale": 0.7}, ...]  per-adapter scale
+//
+// `*given` distinguishes an OMITTED field (leave the current pick alone) from
+// an explicit "" (clear it) — the same distinction lm_type already makes, and
+// the reason it matters is that a client serialising its whole option struct
+// would otherwise clear an adapter it never meant to touch.
+static bool yue2_parse_adapter_field(yyjson_val * root, std::vector<Yue2AdapterSpec> * out, bool * given,
+                                     std::string * err) {
+    *given         = false;
+    float dflt     = 1.0f;
+    if (yyjson_val * sv = yyjson_obj_get(root, "lm_adapter_scale")) {
+        if (yyjson_is_num(sv)) {
+            dflt = (float) yyjson_get_num(sv);
+        } else {
+            *err = "lm_adapter_scale must be a number";
+            return false;
+        }
+    }
+
+    yyjson_val * v = yyjson_obj_get(root, "lm_adapter");
+    if (!v) {
+        return true;
+    }
+    *given = true;
+
+    if (yyjson_is_null(v)) {
+        return true;  // explicit clear
+    }
+    if (yyjson_is_str(v)) {
+        const std::string p = yyjson_get_str(v);
+        if (!p.empty()) {
+            out->push_back({ p, dflt });
+        }
+        return true;
+    }
+    if (!yyjson_is_arr(v)) {
+        *err = "lm_adapter must be a string, null, or an array of strings/{path,scale} objects";
+        return false;
+    }
+
+    size_t       idx = 0, max = 0;
+    yyjson_val * e   = nullptr;
+    yyjson_arr_foreach(v, idx, max, e) {
+        if (yyjson_is_str(e)) {
+            const std::string p = yyjson_get_str(e);
+            if (!p.empty()) {
+                out->push_back({ p, dflt });
+            }
+            continue;
+        }
+        if (!yyjson_is_obj(e)) {
+            *err = "lm_adapter array entries must be strings or {path,scale} objects";
+            return false;
+        }
+        yyjson_val * pv = yyjson_obj_get(e, "path");
+        if (!pv || !yyjson_is_str(pv)) {
+            *err = "lm_adapter array entry is missing a string \"path\"";
+            return false;
+        }
+        Yue2AdapterSpec spec;
+        spec.path = yyjson_get_str(pv);
+        spec.scale = dflt;
+        if (yyjson_val * sv = yyjson_obj_get(e, "scale")) {
+            if (!yyjson_is_num(sv)) {
+                *err = "lm_adapter entry \"scale\" must be a number";
+                return false;
+            }
+            spec.scale = (float) yyjson_get_num(sv);
+        }
+        if (!spec.path.empty()) {
+            out->push_back(spec);
+        }
+    }
+    return true;
+}
+
+// POST /yue2/select-model — {"vae_variant": "standard"|"legacy", "lm_type": "<token>",
+//                            "lm_adapter": <path|array|null>, "lm_adapter_scale": <number>}.
+// All fields optional, and each one absent means LEAVE THAT ALONE — a body
+// carrying only `lm_adapter` (which is exactly what an adapter picker posts)
+// must not disturb the VAE pick or the LM pin. That independence is not free:
+// an earlier draft defaulted `variant` to YUE2_VAE_STANDARD whenever
+// `vae_variant` was absent, which silently evicted a resident legacy VAE and
+// reloaded the standard one. Hence `vae_given` below, mirroring
+// `lm_type_given`.
+//
+// vae_variant: only the active variant is ever resident (yue2_load_parts's own
+// contract); if a VAE is currently loaded and the pick CHANGES this reloads
+// it, otherwise it just records the pick for the next warm/synth. An empty
+// string counts as absent — "" is not a variant, unlike lm_type where it means
+// auto. lm_type: present-and-"" means auto/best-first
 // (yue2_quant_rank order); a specific token (e.g. "Q4_K_M", "Q4_K_M-imat")
 // pins discovery to yue2-lm-<token>.gguf. Changing it from the current pick
 // unloads the model (yue2_unload has no LM-only free — mirrors mm3's
 // full-teardown-then-lazy-reload contract) and re-discovers; the next
 // warm/synth loads the new file. Not yet exposed by any UI; added for
 // standalone-server quant A/B (docs/plans/yue2/07-quant-ladder.md).
+//
+// lm_adapter: the NAR LoRA set merged into the LM at load (yue2-adapter.h).
+// Same lifecycle as lm_type and for a harder reason — the delta is BAKED into
+// the resident weights, so there is no way to change it in place and merging
+// again on top of an already-merged model would double it. Changing the set
+// therefore takes the identical full-teardown path (yue2_unload, then a lazy
+// reload on the next warm/synth), and selecting the SAME set twice is a no-op
+// that does not disturb a resident model.
+//
+// This is deliberately more than MM3 got: MM3's merge-at-load is driven only
+// by getenv("MM3_ADAPTER") (mm3-model.h:1604) with no runtime change path at
+// all, which is unusable from a UI and effectively untestable in a running
+// server.
 static void yue2_handle_select_model(const httplib::Request & req, httplib::Response & res) {
-    std::string variant_str;
-    std::string lm_type_str;
-    bool        lm_type_given = false;
+    std::string                  variant_str;
+    bool                         vae_given     = false;
+    std::string                  lm_type_str;
+    bool                         lm_type_given = false;
+    std::vector<Yue2AdapterSpec> adapters;
+    bool                         adapter_given = false;
     if (!req.body.empty()) {
         yyjson_doc * d = yyjson_read(req.body.data(), req.body.size(), 0);
         if (d) {
@@ -208,24 +333,39 @@ static void yue2_handle_select_model(const httplib::Request & req, httplib::Resp
             yyjson_val * v    = yyjson_obj_get(root, "vae_variant");
             if (v && yyjson_is_str(v)) {
                 variant_str = yyjson_get_str(v);
+                vae_given   = !variant_str.empty();
             }
             yyjson_val * lt = yyjson_obj_get(root, "lm_type");
             if (lt && yyjson_is_str(lt)) {
                 lm_type_str   = yyjson_get_str(lt);
                 lm_type_given = true;
             }
+            std::string aerr;
+            const bool  aok = yyjson_is_obj(root) &&
+                             yue2_parse_adapter_field(root, &adapters, &adapter_given, &aerr);
             yyjson_doc_free(d);
+            if (!aok && !aerr.empty()) {
+                yue2_json_error(res, 400, aerr);
+                return;
+            }
         }
     }
-    Yue2VaeVariant variant = YUE2_VAE_STANDARD;
+    Yue2VaeVariant variant_req = YUE2_VAE_STANDARD;
     if (variant_str == "legacy") {
-        variant = YUE2_VAE_LEGACY;
+        variant_req = YUE2_VAE_LEGACY;
     } else if (!variant_str.empty() && variant_str != "standard") {
         yue2_json_error(res, 400, "vae_variant must be \"standard\"|\"legacy\"");
         return;
     }
 
     std::lock_guard<std::mutex> lock(g_yue2_mutex);
+
+    // No vae_variant in the body means the caller said nothing about the VAE,
+    // so the effective variant is the one already picked. Defaulting to
+    // STANDARD here instead would make an `lm_adapter`-only POST tear down a
+    // resident legacy VAE (yue2_load_parts's variant-changed branch) or
+    // overwrite the pending pick when none is resident.
+    const Yue2VaeVariant variant = vae_given ? variant_req : g_yue2.vae_loaded_variant;
 
     if (lm_type_given && lm_type_str != g_yue2.lm_type_want) {
         // Full teardown: yue2_unload() drops LM+VAE together (no LM-only
@@ -235,6 +375,19 @@ static void yue2_handle_select_model(const httplib::Request & req, httplib::Resp
         yue2_unload(&g_yue2);
         g_yue2.lm_type_want = lm_type_str;
         yue2_discover(&g_yue2, g_yue2.models_dir.c_str(), lm_type_str.empty() ? nullptr : lm_type_str.c_str());
+    }
+
+    // Adapter set. Compared through yue2_adapter_key so a repeat selection —
+    // the same paths at the same scales, in the same order — is free and does
+    // not evict a resident model. A real change forces the same full teardown
+    // lm_type does, because that is the ONLY thing standing between a second
+    // selection and a doubled merge (see Yue2Model::lm_adapter_want). No
+    // re-discover: the GGUF pin has not moved. The merge itself happens on the
+    // next warm/synth, and a bad path or an unmergeable quant fails THAT call
+    // loudly rather than this one.
+    if (adapter_given && yue2_adapter_key(adapters) != yue2_adapter_key(g_yue2.lm_adapter_want)) {
+        yue2_unload(&g_yue2);
+        g_yue2.lm_adapter_want = adapters;
     }
 
     const bool   want_vae = g_yue2.vae_resident;  // only reload if one is already resident
@@ -256,6 +409,10 @@ static void yue2_handle_select_model(const httplib::Request & req, httplib::Resp
     yyjson_mut_obj_add_strcpy(doc, root, "lm_type_want", g_yue2.lm_type_want.c_str());
     yyjson_mut_obj_add_strcpy(doc, root, "lm_file", g_yue2.lm_file.found ? g_yue2.lm_file.name.c_str() : "");
     yyjson_mut_obj_add_bool(doc, root, "lm_found", g_yue2.lm_file.found);
+    // The request, and what is actually merged right now — which is "" until
+    // the next warm/synth whenever this call just tore the model down.
+    yyjson_mut_obj_add_strcpy(doc, root, "lm_adapter_want", yue2_adapter_key(g_yue2.lm_adapter_want).c_str());
+    yyjson_mut_obj_add_strcpy(doc, root, "lm_adapter_merged", g_yue2.lm_adapter_desc.c_str());
     char * json = yyjson_mut_write(doc, 0, NULL);
     res.set_content(json ? json : "{}", "application/json");
     yyjson_mut_doc_free(doc);
@@ -392,6 +549,15 @@ static void yue2_handle_imatrix(const httplib::Request & req, httplib::Response 
             warnings.push_back(std::string("the resident LM is ") + ggml_type_name(g_yue2.lm.output->type) +
                                " — collect on the f16 or bf16 LM, or the imatrix describes this "
                                "checkpoint's quantization damage instead of the model");
+        }
+        if (!g_yue2.lm_adapter_desc.empty()) {
+            // Live since phase 3 of 08-nar-lora-trainer.md: collecting through
+            // a merged adapter measures the ADAPTED model, and quantize.cpp
+            // would then apply those importances to the base GGUF. MM3 warns
+            // for the same reason (mm3-server.h:2138-2141).
+            warnings.push_back("a NAR adapter is merged into the resident LM (" + g_yue2.lm_adapter_desc +
+                               ") — the activations belong to the adapted model, not the base GGUF being "
+                               "quantized");
         }
         g_yue2_imatrix.armed = true;
         fprintf(stderr, "[YUE2-IMAT] Armed over %zu LM tensors (LM = %s). Expect synth to run much slower.\n",

@@ -22,11 +22,16 @@
 //
 // ── Divergence from MM3 worth flagging ───────────────────────────────────────
 //
-//   1. NO ADAPTER WARNING. MM3's handler warns when an LM adapter is merged
-//      in, because collecting through one measures the adapted model instead
-//      of the base checkpoint. YuE2 v1 has no runtime LoRA/LoKr adapters at
-//      all (yue2-lm-graph.h's own header note), so that warning has nothing
-//      to check and is omitted rather than kept as dead code.
+//   1. THE ADAPTER WARNING IS LIVE AGAIN. This note used to say YuE2 had no
+//      adapters at all, so MM3's "an LM adapter is merged in" warning had
+//      nothing to check. Phase 3 of docs/plans/yue2/08-nar-lora-trainer.md
+//      expired that reasoning: yue2-adapter.h merges NAR LoRAs into the
+//      resident LM at load time, and collecting an imatrix through one
+//      measures the ADAPTED model while quantize.cpp would apply the result
+//      to the base GGUF. yue2-server.h's arm path warns on
+//      g_yue2.lm_adapter_desc, the way mm3-server.h:2138-2141 does. There is
+//      still no RUNTIME (unmerged) adapter path, so there is nothing else to
+//      check.
 //
 //   2. ONE hook per call site, armed on THREE schedulers instead of MM3's two
 //      (prefill + decode) plus a depth-graph twin: yue2_ar_prefill's sched,

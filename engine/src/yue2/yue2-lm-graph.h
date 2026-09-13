@@ -22,8 +22,11 @@
 // rows supplied as data) -> attention -> residual add -> RMSNorm -> SwiGLU
 // (down(silu(gate)*up)) -> residual add. `yue2_ar_block` below copies that
 // shape verbatim from `mm3_lm_block`, stripped of everything MM3-only that
-// YuE2 v1 has no equivalent for: runtime LoRA/LoKr adapters (none exist yet
-// for YuE2), the artist-token soft prompt, the ensemble-take/CFG batch axis,
+// YuE2 v1 has no equivalent for: RUNTIME LoRA/LoKr adapters (still none — but
+// note that since phase 3 of docs/plans/yue2/08-nar-lora-trainer.md, YuE2 does
+// have MERGE-at-load adapters in yue2-adapter.h, which bake the delta into the
+// weights before wctx_alloc and so need no graph support at all), the
+// artist-token soft prompt, the ensemble-take/CFG batch axis,
 // and the mul-fold-rows decode-step optimization (fold_rows only pays off at
 // T=1 per-step decode, which this one-shot full-sequence forward never does).
 // `yue2_lm_attn_f32` is `mm3_lm_attn_f32` with the batch axis dropped (always

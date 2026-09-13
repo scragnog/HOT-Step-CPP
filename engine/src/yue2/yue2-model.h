@@ -52,6 +52,7 @@
 #include "backend.h"
 #include "gguf-weights.h"
 #include "weight-ctx.h"
+#include "yue2-adapter.h"  // NAR LoRA merge-at-load (Yue2AdapterSpec lives there)
 
 #ifdef _WIN32
 #    include <windows.h>
@@ -302,6 +303,31 @@ struct Yue2Model {
     // change forces yue2_unload() + re-discover so the next warm/synth picks
     // it up (mirrors mm3-server.h's want_lm_quant contract).
     std::string    lm_type_want;
+
+    // NAR LoRA adapters to merge into the LM's weights at load time
+    // (yue2-adapter.h). Empty = pristine base, which is what every caller that
+    // never touches this field gets — and there are several: yue2-probe.cpp
+    // and train/yue2-nar-train-run.h call yue2_load_parts on their OWN local
+    // Yue2Model, not on g_yue2, so the selection has to live on the model
+    // rather than in a global or an env var (MM3 reads getenv("MM3_ADAPTER")
+    // and gets away with it only because its model is effectively the one
+    // global). Set by POST /yue2/select-model.
+    //
+    // COMPOUNDING: a merge bakes the delta into the resident weights, so
+    // merging twice would double it. The only thing that prevents that is that
+    // the merge runs exclusively inside yue2_load_parts's `need_lm` branch,
+    // and `need_lm` is false whenever the LM is already resident — so a
+    // changed adapter set MUST go through yue2_unload() first. That is the
+    // same full-teardown contract lm_type_want already relies on, and
+    // yue2_handle_select_model enforces it for both.
+    std::vector<Yue2AdapterSpec> lm_adapter_want;
+    // What is actually merged into the RESIDENT weights, "path@scale; ..." as
+    // rendered by yue2_adapter_key(), plus how many tensors it patched. Echoed
+    // by /yue2/props: without it there is no way to tell from outside whether
+    // the loaded model is adapted, which is precisely the state a debug
+    // surface must not hide (MM3 keeps rest_adapter_desc for the same reason).
+    std::string    lm_adapter_desc;
+    int            lm_adapter_tensors = 0;
 
     bool           backend_ref = false;
     ggml_backend_t backend     = nullptr;
@@ -1083,6 +1109,11 @@ static void yue2_unload(Yue2Model * m) {
     m->load_ms     = 0.0;
     m->lm_resident  = false;
     m->vae_resident = false;
+    // The merged-adapter description belongs to the RESIDENT weights, which
+    // have just gone away. lm_adapter_want (the request) deliberately
+    // survives, so the next warm/synth re-merges the same set.
+    m->lm_adapter_desc.clear();
+    m->lm_adapter_tensors = 0;
     if (m->backend_ref) {
         backend_release(m->backend, m->cpu_backend);
         m->backend     = nullptr;
@@ -1090,6 +1121,53 @@ static void yue2_unload(Yue2Model * m) {
         m->backend_ref = false;
     }
     fprintf(stderr, "[YuE2] Unloaded\n");
+}
+
+// Merge every requested NAR LoRA into the LM's staged weights. Call site is
+// the seam inside yue2_load_parts: after yue2_load_lm_tensors() has staged
+// every PendingCopy with `src` pointing straight into the GGUF mmap
+// (gf_load_tensor, gguf-weights.h:159-200) and BEFORE wctx_alloc() walks
+// `pending` and uploads (weight-ctx.h:53-71). Patching pc->src in that window
+// costs no extra VRAM and needs no second pass — and it has to happen while
+// `gf` is still open, since those pointers live in its mmap.
+//
+// Returns false (and fills `errs`) on a refusal or a failed merge. That is
+// deliberately FATAL to the whole load: a user who asked for an adapter and
+// silently got the base model has no way to tell, and the whole point of the
+// quantized-base guard in yue2-adapter.h is not to ship a wrong-but-quiet
+// model. yue2_load_parts's own all-or-nothing contract then unloads.
+static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector<std::string> * errs) {
+    m->lm_adapter_desc.clear();
+    m->lm_adapter_tensors = 0;
+    if (m->lm_adapter_want.empty()) {
+        return true;
+    }
+
+    int total = 0;
+    for (const Yue2AdapterSpec & spec : m->lm_adapter_want) {
+        std::string err;
+        const int   n = yue2_adapter_merge(&m->wctx_lm, gf, spec.path.c_str(), spec.scale, m->backend, &err);
+        if (n < 0) {
+            errs->push_back("adapter " + spec.path + ": " + (err.empty() ? "merge failed" : err));
+            return false;
+        }
+        if (n == 0) {
+            // Zero matched tensors is not a partial merge, it is a no-op — and
+            // an adapter that changes nothing is far more likely to be the
+            // wrong file than a deliberate choice. Refuse rather than load a
+            // model the caller will believe is adapted.
+            errs->push_back("adapter " + spec.path +
+                            " matched no YuE2 NAR tensors — wrong file, or exported with keys this loader "
+                            "does not recognise (expected yue2.blk.N.nar_*.lora_A.weight)");
+            return false;
+        }
+        total += n;
+    }
+    m->lm_adapter_tensors = total;
+    m->lm_adapter_desc    = yue2_adapter_key(m->lm_adapter_want);
+    fprintf(stderr, "[YuE2-Adapter] %d tensor(s) patched across %zu adapter(s)\n", total,
+            m->lm_adapter_want.size());
+    return true;
 }
 
 // Load a chosen subset of the two parts into backend buffers. Parts already
@@ -1148,6 +1226,17 @@ static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeV
             errs.push_back("cannot open " + m->lm_file.path);
         } else {
             ok = yue2_load_lm_tensors(m, gf, &errs);
+            if (ok) {
+                // Adapter merge goes HERE — between staging and upload, the
+                // same seam MM3 uses (mm3-model.h:1766) and ACE uses in dit.h,
+                // and inside the `gf` lifetime because the staged pointers are
+                // into its mmap. VAE-only loads never reach this branch, which
+                // is the whole of "adapters apply to the LM part only": the
+                // VAE part has no adaptable tensors and a vae_variant switch
+                // (the early-out at the top of this function) frees only
+                // wctx_vae, leaving an already-merged wctx_lm untouched.
+                ok = yue2_apply_adapters(m, gf, &errs);
+            }
             if (ok) {
                 ok = wctx_alloc(&m->wctx_lm, m->backend);
                 if (!ok) {
