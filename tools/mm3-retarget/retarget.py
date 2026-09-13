@@ -61,8 +61,12 @@ PHRASE   = opt('--phrase', 4, int)   # removal must be a whole number of THIS ma
 LOOKBACK = opt('--lookback', 8, int)
 MAX_COST = opt('--max-cost', 0.45)
 GUARD    = opt('--guard', 1.0)
-PROTECT  = opt('--protect', 45.0)    # seconds at each end no cut may enter: the opening and the ending are the
-                                     # two things whole-song training is FOR, so they are not what gets removed
+# Head and tail are NOT symmetric. Removing from 27 s in still leaves the song opening the way it opens, and Rob
+# judged those early cuts good on 2026-09-13 ("it neatly cuts and puts the sections back together"), so the head is
+# barely protected. The tail is different: a removal running to near the end deletes the approach to the ending, and
+# the ending is the whole reason these tracks are being saved.
+PROTECT_HEAD = opt('--protect-head', 8.0)
+PROTECT_TAIL = opt('--protect-tail', 45.0)
 XFADE_MS = opt('--xfade', 30.0)
 SNIPPET  = opt('--snippet', 10.0)
 N_ALTS   = opt('--alts', 3, int)
@@ -74,7 +78,7 @@ FORCE_CPU = '--cpu' in argv         # keep off a GPU that a training run is usin
 OUT      = os.environ.get('MM3_RETARGET_OUT', opt('--out', os.path.join(HERE, 'out'), str))
 FLAGS    = {'--no-vocal', '--no-lyrics', '--align-mix', '--cpu'}
 VALUED   = {'--target', '--margin', '--bpb', '--phase', '--lookback', '--max-cost',
-            '--guard', '--xfade', '--snippet', '--alts', '--out'}
+            '--guard', '--xfade', '--snippet', '--alts', '--out', '--protect-head', '--protect-tail'}
 files = [a for i, a in enumerate(argv)
          if not a.startswith('--') and (i == 0 or argv[i - 1] not in VALUED)]
 os.makedirs(OUT, exist_ok=True)
@@ -208,7 +212,7 @@ def find_cuts(an, need, act, hop, n_keep=8):
     nb = len(beat_t)
     end_t = float(beat_t[-1]) if nb else 0.0
     dbs = [i for i in range(phase, nb, BPB)
-           if i - LOOKBACK >= 0 and beat_t[i] >= PROTECT and beat_t[i] <= end_t - PROTECT]
+           if i - LOOKBACK >= 0 and beat_t[i] >= PROTECT_HEAD and beat_t[i] <= end_t - PROTECT_TAIL]
     w = np.array([0.9 ** k for k in range(LOOKBACK)]); w /= w.sum()
     out = []
     for a in dbs:
