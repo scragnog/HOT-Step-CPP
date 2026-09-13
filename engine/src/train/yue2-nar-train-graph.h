@@ -178,8 +178,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -429,16 +429,37 @@ struct Yue2NarTrainHostInputs {
 // the sinusoid itself (:384-389, 415-417) and the solver passes logit(t)
 // at :602-603. Getting this wrong trains against a different time
 // parameterisation than inference samples with, and nothing would report it.
-static void yue2_nt_host_inputs(const Yue2LmConfig & c, int64_t ar_len, int64_t n_nar,
+//
+// A size mismatch is REPORTED, never absorbed: substituting a zero x_t would
+// hand the caller a well-formed input block describing a latent nobody asked
+// for, and the FD gate downstream would read it as a broken backward. Same
+// posture yue2_nar_velocity takes on its own state-size check
+// (yue2-nar-graph.h:404-409).
+static bool yue2_nt_host_inputs(const Yue2LmConfig & c, int64_t ar_len, int64_t n_nar,
                                 const std::vector<float> & x_t, double raw_t,
-                                Yue2NarTrainHostInputs * out) {
+                                Yue2NarTrainHostInputs * out, std::string * err = nullptr) {
     const int64_t LD = (int64_t) c.latent_dim;
     const int64_t T  = n_nar - 2;
 
-    out->x_nar.assign((size_t) (n_nar * LD), 0.0f);   // boundary rows stay zero
-    if (T > 0 && (int64_t) x_t.size() == T * LD) {
-        memcpy(out->x_nar.data() + (size_t) LD, x_t.data(), (size_t) (T * LD) * sizeof(float));
+    if (T <= 0) {
+        if (err) {
+            *err = "yue2_nt_host_inputs: n_nar must be >= 3 (two boundary rows plus at least one frame)";
+        }
+        return false;
     }
+    if ((int64_t) x_t.size() != T * LD) {
+        if (err) {
+            char buf[192];
+            snprintf(buf, sizeof(buf),
+                     "yue2_nt_host_inputs: x_t size mismatch (got %zu, expected (n_nar-2)*latent_dim = %lld)",
+                     x_t.size(), (long long) (T * LD));
+            *err = buf;
+        }
+        return false;
+    }
+
+    out->x_nar.assign((size_t) (n_nar * LD), 0.0f);   // boundary rows stay zero
+    memcpy(out->x_nar.data() + (size_t) LD, x_t.data(), (size_t) (T * LD) * sizeof(float));
 
     const double shifted = yue2_nar_shift_t(raw_t, (double) c.timestep_shift);
     yue2_nar_time_features(shifted, &out->time_feat);
@@ -450,6 +471,7 @@ static void yue2_nt_host_inputs(const Yue2LmConfig & c, int64_t ar_len, int64_t 
         out->local_idx[(size_t) i] = (int32_t) std::min<int64_t>(i, max_idx);
         out->rope_pos[(size_t) i]  = (int32_t) (ar_len + i);
     }
+    return true;
 }
 
 // ── One trainable NAR block: mirrors yue2_nar_block op for op ──────────────
@@ -786,12 +808,54 @@ static size_t yue2_nt_adapter_tensor_count(int n_layers, Yue2NtTarget target) {
     return ((size_t) n_layers * per_layer + heads) * 2u;
 }
 
+// The one random stream this file has. splitmix64 + Box-Muller, byte-for-byte
+// the generator mm3_fill_noise_train uses (mm3-dit-train-run.h:316-334), and
+// deliberately NOT <random>: std::normal_distribution and
+// std::uniform_real_distribution are specified only by their distribution, not
+// their byte stream, so the same seed gives different weights under a
+// different stdlib and a "reproduce it with --seed 42" report means nothing
+// across builds (trap #8 in the mm3-backend skill).
+struct Yue2NtRng {
+    uint64_t s;
+    bool     has_spare = false;
+    double   spare     = 0.0;
+
+    explicit Yue2NtRng(uint64_t seed) : s(seed) {}
+
+    // U(0,1), 53 bits.
+    double u01() {
+        s += 0x9E3779B97F4A7C15ULL;
+        uint64_t z = s;
+        z          = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+        z          = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+        z ^= (z >> 31);
+        return ((z >> 11) + 0.5) * (1.0 / 9007199254740992.0);
+    }
+
+    // N(0,1). Box-Muller draws in pairs; the sine half is cached rather than
+    // discarded, so a caller that wants an odd count does not silently skip a
+    // draw and shift every value after it.
+    double normal() {
+        if (has_spare) {
+            has_spare = false;
+            return spare;
+        }
+        const double u1 = std::max(1e-12, u01()), u2 = u01();
+        const double r = std::sqrt(-2.0 * std::log(u1)), th = 6.283185307179586 * u2;
+        spare     = r * std::sin(th);
+        has_spare = true;
+        return r * std::cos(th);
+    }
+};
+
 // Init, run AFTER ggml_backend_alloc_ctx_tensors.
 //
 // MM3's MECHANISM, upstream's DISTRIBUTION (contract §6). The mechanism is
 // mm3-dit-train-run.h:600-612: one loop over `params`, keyed on the LAST
-// CHARACTER of the tensor name ('A' -> fill, anything else -> zero), seeded
-// std::mt19937_64. The distribution is upstream's kaiming-uniform
+// CHARACTER of the tensor name ('A' -> fill, anything else -> zero), from one
+// seeded stream — Yue2NtRng here, where MM3 used std::mt19937_64, because a
+// stdlib-independent byte stream is what makes "--seed 42" mean the same
+// adapter on every build. The distribution is upstream's kaiming-uniform
 // (lora.py:56-57 — kaiming_uniform_(a=sqrt(5)) is PyTorch's nn.Linear default,
 // which works out to U(-1/sqrt(fan_in), +1/sqrt(fan_in))) rather than MM3's
 // N(0, 0.02).
@@ -803,9 +867,8 @@ static size_t yue2_nt_adapter_tensor_count(int n_layers, Yue2NtTarget target) {
 // ||g|| = 0 and pass vacuously (mm3-dit-train-run.h:452-455 hits the same
 // thing). The gate passes a non-zero b_sigma; a real run passes 0.
 static void yue2_nt_init_adapters(const std::vector<ggml_tensor *> & params, uint64_t seed, float b_sigma) {
-    std::mt19937_64                 rng(seed);
-    std::normal_distribution<float> bd(0.0f, b_sigma > 0.0f ? b_sigma : 1.0f);
-    std::vector<float>              v;
+    Yue2NtRng          rng(seed);
+    std::vector<float> v;
     for (ggml_tensor * t : params) {
         const size_t n    = (size_t) ggml_nelements(t);
         const char * nm   = ggml_get_name(t);
@@ -814,41 +877,25 @@ static void yue2_nt_init_adapters(const std::vector<ggml_tensor *> & params, uin
         v.assign(n, 0.0f);
         if (is_a) {
             // fan_in is ne0 for an [in, rank] A factor.
-            const float                           bound = 1.0f / std::sqrt((float) t->ne[0]);
-            std::uniform_real_distribution<float> ud(-bound, bound);
+            const double bound = 1.0 / std::sqrt((double) t->ne[0]);
             for (size_t i = 0; i < n; i++) {
-                v[i] = ud(rng);
+                v[i] = (float) (bound * (2.0 * rng.u01() - 1.0));  // U(-bound, +bound)
             }
         } else if (b_sigma > 0.0f) {
             for (size_t i = 0; i < n; i++) {
-                v[i] = bd(rng);
+                v[i] = (float) ((double) b_sigma * rng.normal());
             }
         }
         ggml_backend_tensor_set(t, v.data(), 0, n * sizeof(float));
     }
 }
 
-// Deterministic standard normal. NOT std::normal_distribution — its byte
-// stream is stdlib-dependent, which makes a "same seed" run unreproducible
-// across builds (trap #8 in the mm3-backend skill). splitmix64 + Box-Muller,
-// same generator mm3_fill_noise_train uses (mm3-dit-train-run.h:316-334).
+// Deterministic standard normal, through the same Yue2NtRng stream the
+// adapter init uses — see that struct for why <random> is not an option here.
 static void yue2_nt_fill_normal(std::vector<float> * out, uint64_t seed) {
-    uint64_t s   = seed;
-    auto     nxt = [&]() -> double {
-        s += 0x9E3779B97F4A7C15ULL;
-        uint64_t z = s;
-        z          = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
-        z          = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
-        z ^= (z >> 31);
-        return ((z >> 11) + 0.5) * (1.0 / 9007199254740992.0);
-    };
-    for (size_t i = 0; i < out->size(); i += 2) {
-        const double u1 = std::max(1e-12, nxt()), u2 = nxt();
-        const double r = std::sqrt(-2.0 * std::log(u1)), th = 6.283185307179586 * u2;
-        (*out)[i] = (float) (r * std::cos(th));
-        if (i + 1 < out->size()) {
-            (*out)[i + 1] = (float) (r * std::sin(th));
-        }
+    Yue2NtRng rng(seed);
+    for (size_t i = 0; i < out->size(); i++) {
+        (*out)[i] = (float) rng.normal();
     }
 }
 

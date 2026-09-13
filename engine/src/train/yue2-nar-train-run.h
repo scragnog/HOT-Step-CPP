@@ -677,7 +677,10 @@ static int yue2_nar_fdcheck_main(const Yue2NarTrainArgs & a) {
     yue2_nt_make_xt_target(z, noise, t_val, &x_t, &vtarget);
 
     Yue2NarTrainHostInputs hin;
-    yue2_nt_host_inputs(c, kv.ar_len, kv.n_nar, x_t, raw_t, &hin);
+    if (!yue2_nt_host_inputs(c, kv.ar_len, kv.n_nar, x_t, raw_t, &hin, &err)) {
+        fprintf(stderr, "[yue2-fd] %s\n", err.c_str());
+        return 1;
+    }
     fprintf(stderr, "[yue2-fd] t sampling %s: raw_t %.6f -> t %.6f (shift %.3f)\n", a.t_sampling.c_str(),
             raw_t, (double) t_val, (double) c.timestep_shift);
 
@@ -766,13 +769,16 @@ static int yue2_nar_fdcheck_main(const Yue2NarTrainArgs & a) {
     // at a different signal-to-noise ratio, in direct proportion to ||g||.
     // mm3-lm-train-run.h:1459-1500 has the measured sweep behind this rule.
     const double dl_min = std::max(1e-4, 1e-3 * std::fabs(l0));
-    fprintf(stderr, "[yue2-fd] step floor: dL >= %.2e; a probe whose 2*eps*||g|| clears it keeps eps %.3g\n",
+    fprintf(stderr,
+            "[yue2-fd] step floor: dL >= %.2e; a probe whose 2*eps*||g|| clears it keeps eps %.3g, and a "
+            "raised step is capped at 0.05*||w||\n",
             dl_min, a.fd_eps);
 
-    fprintf(stderr, "\n[yue2-fd] %-24s %10s %13s %9s %13s %8s\n", "probe (whole tensor)", "n", "||g||",
-            "step", "numeric", "rel");
+    fprintf(stderr, "\n[yue2-fd] %-24s %10s %13s %9s %9s %13s %8s\n", "probe (whole tensor)", "n", "||g||",
+            "step", "h/||w||", "numeric", "rel");
     double              worst    = 0.0;
     int                 n_raised = 0;
+    std::vector<bool>   fd_clamped;
     std::vector<double> fd_rel;
     for (const Probe & pr : probes) {
         const std::vector<float> g = grad_vec(pr.par);
@@ -786,14 +792,36 @@ static int yue2_nar_fdcheck_main(const Yue2NarTrainArgs & a) {
         // directional derivative is exactly ||g|| and the loss change is
         // ~2*h*||g||, thousands of times the f32 floor; a per-entry difference
         // measures rounding only (mm3-lm-train-run.h:1104-1117).
-        double h = a.fd_eps;
+        std::vector<float> w0((size_t) ggml_nelements(pr.par)), wtmp(w0.size());
+        ggml_backend_tensor_get(pr.par, w0.data(), 0, w0.size() * sizeof(float));
+        double wnorm2 = 0.0;
+        for (float x : w0) {
+            wnorm2 += (double) x * (double) x;
+        }
+        const double wnorm = std::sqrt(wnorm2);
+
+        // ...AND THE RAISE NEEDS A CEILING. A probe whose gradient is
+        // suppressed by the zero-ish B init lands at ||g|| ~ 1e-3, and
+        // dl_min/(2*||g||) is then a step of order 1 — far outside the linear
+        // regime the central difference assumes, so the O(h^2 f''') truncation
+        // term swamps the measurement and the probe FAILS in a way that looks
+        // exactly like a broken backward. Cap the step at 5% of the probed
+        // tensor's own norm. "Could not reach the signal floor" is a different
+        // statement from "the gradient is wrong", so it gets reported as a
+        // different one: INCONCLUSIVE below, and h/||w|| in the table — any
+        // row sitting at 0.05 is capped.
+        double     h       = a.fd_eps;
+        bool       clamped = false;
         if (gnorm > 0.0 && 2.0 * a.fd_eps * gnorm < dl_min) {
             h = dl_min / (2.0 * gnorm);
             n_raised++;
+            const double h_max = 0.05 * wnorm;
+            if (wnorm > 0.0 && h > h_max) {
+                h       = h_max;
+                clamped = true;
+            }
         }
-
-        std::vector<float> w0((size_t) ggml_nelements(pr.par)), wtmp(w0.size());
-        ggml_backend_tensor_get(pr.par, w0.data(), 0, w0.size() * sizeof(float));
+        const double h_over_w = wnorm > 0.0 ? h / wnorm : std::nan("");
 
         double num = std::nan("");
         if (gnorm > 0.0) {
@@ -812,10 +840,16 @@ static int yue2_nar_fdcheck_main(const Yue2NarTrainArgs & a) {
         ggml_backend_tensor_set(pr.par, w0.data(), 0, w0.size() * sizeof(float));
 
         const double rel = std::fabs(num - gnorm) / std::max(1e-12, gnorm);
-        fprintf(stderr, "[yue2-fd] %-24s %10zu %13.6e %9.3g %13.6e %8.3f\n", pr.name, g.size(), gnorm, h, num,
-                rel);
+        fprintf(stderr, "[yue2-fd] %-24s %10zu %13.6e %9.3g %9.3g %13.6e %8.3f%s\n", pr.name, g.size(), gnorm,
+                h, h_over_w, num, rel,
+                clamped ? "  <- step CAPPED at 0.05*||w||: could not reach the signal floor" : "");
         fd_rel.push_back(rel);
-        worst = std::max(worst, rel);
+        fd_clamped.push_back(clamped);
+        // `worst` is the verdict's headline number, so a capped probe must not
+        // feed it — see the INCONCLUSIVE note below.
+        if (!clamped) {
+            worst = std::max(worst, rel);
+        }
     }
 
     // The bar is MM3's, unchanged, and it is a VERDICT only under isolation.
@@ -824,24 +858,51 @@ static int yue2_nar_fdcheck_main(const Yue2NarTrainArgs & a) {
     // variation without admitting a real scale error — a wrong gradient scale
     // misses by a FACTOR, not by a percent.
     const double bar = isolated ? 2e-2 : 0.15;
-    int          n_bad = 0;
-    for (double r : fd_rel) {
+    int          n_bad          = 0;
+    int          n_inconclusive = 0;
+    for (size_t i = 0; i < fd_rel.size(); i++) {
+        // A CAPPED PROBE IS INCONCLUSIVE, NOT A FAILURE. Its step never
+        // reached the loss change the forward can resolve, so its `rel` is
+        // measuring the forward's noise floor and truncation error, not the
+        // backward. Counting it as bad would print "do NOT train past it" over
+        // a measurement that says nothing — the exact spurious verdict the cap
+        // exists to prevent. It is subtracted from the verdict instead, and
+        // said out loud below.
+        if (fd_clamped[i]) {
+            n_inconclusive++;
+            continue;
+        }
         // NaN fails: `!(r < bar)` rather than `r >= bar`, so a probe whose
         // numeric side came back NaN (a failed forward, or ||g|| == 0 with a
         // measurable loss change) counts against the gate instead of sliding
         // through a comparison that is false for NaN either way.
-        if (!(r < bar)) {
+        if (!(fd_rel[i] < bar)) {
             n_bad++;
         }
     }
+    const int n_checked = (int) fd_rel.size() - n_inconclusive;
+
+    if (n_inconclusive) {
+        fprintf(stderr,
+                "\n[yue2-fd] %d/%zu probes INCONCLUSIVE: the step needed to move the loss by %.2e would\n"
+                "[yue2-fd]   have exceeded 5%% of the tensor's own norm, which is outside the linear\n"
+                "[yue2-fd]   regime a central difference assumes. Their ||g|| is too small to measure\n"
+                "[yue2-fd]   this way (the 1e-2 B init at :610 is what suppresses it); raise that init or\n"
+                "[yue2-fd]   probe another site — do NOT read a capped probe as a wrong gradient.\n",
+                n_inconclusive, probes.size(), dl_min);
+    }
 
     if (isolated) {
+        const bool verdict_pass = (n_bad == 0 && n_checked > 0);
         fprintf(stderr,
                 "\n[yue2-fd] GATE %s: finite differences, F32-isolated to %d NAR layers, bar %.0e, "
-                "%d/%zu probes, worst %.4f (step raised on %d)\n",
-                n_bad == 0 ? "PASS" : "FAIL", n_layers, bar, (int) probes.size() - n_bad, probes.size(),
-                worst, n_raised);
-        if (n_bad) {
+                "%d/%d measurable probes, worst %.4f (step raised on %d, capped on %d)\n",
+                n_checked == 0 ? "NO VERDICT" : (verdict_pass ? "PASS" : "FAIL"), n_layers, bar,
+                n_checked - n_bad, n_checked, worst, n_raised, n_inconclusive);
+        if (n_checked == 0) {
+            fprintf(stderr,
+                    "[yue2-fd]   Every probe was capped, so NOTHING was measured. This is not a pass.\n");
+        } else if (n_bad) {
             fprintf(stderr,
                     "[yue2-fd]   The analytic gradient disagrees with the measured loss change. With\n"
                     "[yue2-fd]   segments = 1 there is no second backward route to cross-check against,\n"
@@ -849,16 +910,18 @@ static int yue2_nar_fdcheck_main(const Yue2NarTrainArgs & a) {
         }
     } else {
         fprintf(stderr,
-                "\n[yue2-fd] %d/%zu probes within %.0f%% (worst %.4f) — INDICATIVE ONLY (no F32 "
+                "\n[yue2-fd] %d/%d measurable probes within %.0f%% (worst %.4f) — INDICATIVE ONLY (no F32 "
                 "isolation).\n"
                 "[yue2-fd]   Add --nar-layers 2 to turn this into a verdict.\n",
-                (int) probes.size() - n_bad, probes.size(), bar * 100.0, worst);
+                n_checked - n_bad, n_checked, bar * 100.0, worst);
     }
 
     ggml_backend_sched_free(sched);
     yue2_nt_kv_free(&kv);
     yue2_nt_f32_free(&iso);
-    return (isolated && n_bad) ? 1 : 0;
+    // No measurable probe is not a pass: exit non-zero so a script cannot read
+    // "every probe was capped" as a green gate.
+    return (isolated && (n_bad || n_checked == 0)) ? 1 : 0;
 }
 
 // ── TODO stubs — errors, never silent no-ops ───────────────────────────────

@@ -353,7 +353,12 @@ static void print_usage(void) {
             "                [--fd-eps E] default 1e-2, and a FLOOR on the step rather than the\n"
             "                step: each probe perturbs its WHOLE tensor along v = g/||g|| and\n"
             "                the step is raised if 2*eps*||g|| would not clear the forward's\n"
-            "                own resolution.\n"
+            "                own resolution. A raised step is CAPPED at 5%% of the probed\n"
+            "                tensor's own norm -- past that the central difference leaves the\n"
+            "                linear regime -- and a probe that hits the cap is reported\n"
+            "                INCONCLUSIVE, not FAIL. Read h/||w|| in the table.\n"
+            "                TF32 is forced off here and there is no --tf32 escape hatch: the\n"
+            "                gate is the only thing phase 2 runs and it requires F32.\n"
             "                [--frames T] default 250 (10 s at 25 fps). Contract §8: the\n"
             "                T x S_kv x Nh attention term is why 10 s clips are structural\n"
             "                here, not a default someone picked -- MM3's whole-song lesson\n"
@@ -4199,11 +4204,17 @@ static int cmd_mm3_train_dit(int argc, char ** argv) {
 //     TF32 makes an F32 matmul ~1e-3 accurate, the same order as the defect
 //     --fd-check looks for.
 //
+// The other trainers take a `--tf32 on` escape hatch; this one deliberately
+// does NOT. Phase 2 runs nothing but the gate, contract §10 requires TF32 off
+// for it, and yue2_nar_fdcheck_main sets the variable itself — so the flag
+// could only ever be parsed and then overridden, which is a knob that lies.
+// Add it back with the training loop, threaded through Yue2NarTrainArgs and
+// gated so it applies to the loop and never to --fd-check.
+//
 // Phase 2 of docs/plans/yue2/08-nar-lora-trainer.md. Only --fd-check runs;
 // everything else returns an error naming what is missing.
 static int cmd_yue2_nar_train(int argc, char ** argv) {
     Yue2NarTrainArgs a;
-    bool             tf32 = false;
     for (int i = 1; i < argc; i++) {
         auto next = [&](const char * w) -> const char * {
             if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
@@ -4230,7 +4241,6 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--fd-check"))    a.fd_check   = atoi(next("--fd-check"));
         else if (!strcmp(argv[i], "--fd-eps"))      a.fd_eps     = atof(next("--fd-eps"));
         else if (!strcmp(argv[i], "--nar-layers"))  a.nar_layers = atoi(next("--nar-layers"));
-        else if (!strcmp(argv[i], "--tf32"))        tf32         = !strcmp(next("--tf32"), "on");
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }
@@ -4243,13 +4253,11 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         fprintf(stderr, "ace-train: --t-sampling must be logit-normal or uniform\n");
         return 2;
     }
-    if (!tf32) {
 #ifdef _WIN32
-        _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
 #else
-        setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
 #endif
-    }
 #ifdef _WIN32
     _putenv("GGML_BACKWARD_MM=1");
 #else
