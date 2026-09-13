@@ -13,6 +13,7 @@
 //   yue2-probe --decode-parity <fixture-root-dir> --stage plan|semantic --models <dir>
 //   yue2-probe --generate --cot off --style <s> --lyrics <s> [--max-tokens <n>] [--seed <n>] --models <dir>
 //   yue2-probe --vae-parity <fixture-root-dir> --models <dir> [--variant standard|legacy]
+//   yue2-probe --encode-parity <fixture-dir> --models <dir> [--vae standard|legacy]
 //
 // --info: header-only probe (no weights loaded) — prints config, tensor
 //         count/bytes per file, and any missing/unexpected tensor vs what
@@ -63,6 +64,7 @@
 #include "yue2/yue2-nar-graph.h"
 #include "yue2/yue2-sample.h"
 #include "yue2/yue2-tokenizer.h"
+#include "yue2/yue2-vae-encode.h"
 #include "yue2/yue2-vae-graph.h"
 
 #include <algorithm>
@@ -98,6 +100,7 @@ static void usage() {
             "       yue2-probe --decode-parity <fixture-root-dir> --stage plan|semantic --models <dir>\n"
             "       yue2-probe --nar-parity <fixture-root-dir> --models <dir>\n"
             "       yue2-probe --vae-parity <fixture-root-dir> --models <dir> [--variant standard|legacy]\n"
+            "       yue2-probe --encode-parity <fixture-dir> --models <dir> [--vae standard|legacy]\n"
             "       yue2-probe --generate --cot off --style <s> --lyrics <s> --max-tokens <n> --seed <n> "
             "--models <dir>\n");
 }
@@ -2075,6 +2078,380 @@ static int run_vae_parity(const std::string & models_dir, const std::string & fi
     return rc;
 }
 
+// ── --encode-parity: NAR-LoRA trainer phase 1 gate ──────────────────────────
+//
+// Checks yue2-vae-encode.h's forward (audio -> posterior-mean latents)
+// against a Python oracle dump, per docs/plans/yue2/08-nar-lora-trainer.md
+// §6 row 1. This is the half of the VAE the trainer needs and generation
+// never touches, so it gets its own fixture and its own gate.
+//
+// FIXTURE FORMAT (the oracle dumper in K:/yue2 writes this; if <dir>/
+// manifest.json is absent the defaults below are assumed):
+//
+//   <dir>/audio.f32        raw little-endian f32, PLANAR [channels, S]
+//                          (index = ch*S + s). The reference's own audio
+//                          tensor is [1, 2, S], so
+//                          `audio[0].cpu().numpy().tofile(...)` writes it
+//                          in exactly this order with no transpose.
+//   <dir>/latent_mean.f32  raw little-endian f32, the posterior MEAN only
+//                          (YuE2VAE.encode(sample=False) -> [1, 64, T]).
+//                          K:/yue2/scripts/export_encode_fixture.py writes it
+//                          FRAME-MAJOR [T, latent_dim] (index = t*64 + c) —
+//                          `mean[0].transpose(0,1).contiguous()` — matching
+//                          04_vae/input_latents.bin, so one reader serves both
+//                          fixtures. yue2_vae_encode's own output is the other
+//                          way round (channel-major [64, T], the layout
+//                          yue2_vae_decode consumes), so this file gets
+//                          transposed on the way in.
+//   <dir>/manifest.json    {"sample_rate":48000, "channels":2,
+//                           "samples":S, "frames":T, "latent_dim":64,
+//                           "latent_layout":"tc"}
+//                          Every field is optional and sizes are cross-checked
+//                          against the .f32 byte counts either way — EXCEPT the
+//                          latent axis order, which the byte count cannot
+//                          reveal. When a manifest is present it must pin that
+//                          down (explicit "latent_layout", or a two-element
+//                          files["latent_mean.f32"].shape, or the prose in
+//                          layouts["latent_mean.f32"]); otherwise the probe
+//                          fails loudly rather than guess. See
+//                          yue2_enc_resolve_latent_layout below for why.
+
+// Gates, both in one place. rel-L2 1e-3 is the plan's own phase-1 bar (§6
+// row 1) — looser than the decoder's 1e-4 because the encoder is 6 strided
+// convs deep with no reference-side tiled/untiled baseline to calibrate
+// against yet. Tiled-vs-untiled is an INTERNAL consistency check (same
+// weights, same math, only the tile geometry differs) so it gets the tight
+// number; anything above it means the halo is too small or the crop
+// arithmetic is off, which no oracle comparison would localize.
+static constexpr double YUE2_ENC_REL_L2_GATE       = 1e-3;
+static constexpr double YUE2_ENC_TILED_MAXABS_GATE = 1e-4;
+
+// Probe-side tiling geometry: 30 s cores (750 frames), halo from the
+// encoder's own receptive field (yue2-vae-encode.h computes it as 10 frames;
+// the default doubles that).
+static constexpr int64_t YUE2_ENC_PROBE_CORE_SAMPLES = YUE2_VAE_ENC_DEFAULT_CORE_SAMPLES;  // 750 frames = 30 s
+static constexpr int64_t YUE2_ENC_PROBE_HALO_SAMPLES = YUE2_VAE_ENC_DEFAULT_HALO_SAMPLES;
+
+static std::string yue2_json_str(yyjson_val * root, const char * key, const char * defv) {
+    if (!root) {
+        return defv;
+    }
+    yyjson_val * v = yyjson_obj_get(root, key);
+    const char * s = v ? yyjson_get_str(v) : nullptr;
+    return s ? std::string(s) : std::string(defv);
+}
+
+// manifest["files"][name]["shape"] as int64s; empty when absent or malformed.
+static std::vector<int64_t> yue2_json_file_shape(yyjson_val * root, const char * name) {
+    yyjson_val * files = root ? yyjson_obj_get(root, "files") : nullptr;
+    yyjson_val * ent   = files ? yyjson_obj_get(files, name) : nullptr;
+    return yue2_json_int_arr(ent, "shape");
+}
+
+// Which way round latent_mean.f32 is stored:
+//   "ct" = channel-major [64, T], index c*T + t — what yue2_vae_encode emits.
+//   "tc" = frame-major   [T, 64], index t*64 + c — what K:/yue2's
+//          export_encode_fixture.py writes (matching 04_vae/input_latents.bin).
+//
+// Getting this wrong is SILENT: both orders are the same 64*T floats, so the
+// size guard passes and the only symptom is a rel_l2 around 1.4 against a 1e-3
+// gate — indistinguishable from a genuinely broken encoder graph. So a present
+// manifest must pin the layout down and we never fall back to a hardcoded
+// assumption: explicit key -> declared shape -> declared prose -> fail.
+// Returns false with *why set when nothing in the manifest settles it.
+static bool yue2_enc_resolve_latent_layout(yyjson_val * root, int64_t latent_dim, std::string * layout,
+                                           std::string * why) {
+    const std::string declared = yue2_json_str(root, "latent_layout", "");
+    if (declared == "ct" || declared == "tc") {
+        *layout = declared;
+        *why    = "manifest \"latent_layout\"";
+        return true;
+    }
+    if (!declared.empty()) {
+        *why = "manifest \"latent_layout\":\"" + declared + "\" is neither \"ct\" nor \"tc\"";
+        return false;
+    }
+
+    // The shipped fixture declares no latent_layout but does record
+    // files["latent_mean.f32"].shape = [750, 64], which says it outright.
+    const std::vector<int64_t> shape = yue2_json_file_shape(root, "latent_mean.f32");
+    if (shape.size() == 2 && shape[0] != shape[1]) {
+        if (shape[0] == latent_dim) {
+            *layout = "ct";
+            *why    = "manifest files[\"latent_mean.f32\"].shape";
+            return true;
+        }
+        if (shape[1] == latent_dim) {
+            *layout = "tc";
+            *why    = "manifest files[\"latent_mean.f32\"].shape";
+            return true;
+        }
+    }
+
+    // Last resort: the human-readable layouts[] note the exporter also writes.
+    yyjson_val *      layouts = root ? yyjson_obj_get(root, "layouts") : nullptr;
+    const std::string prose   = yue2_json_str(layouts, "latent_mean.f32", "");
+    const bool        is_tc   = prose.find("frame-major") != std::string::npos;
+    const bool        is_ct   = prose.find("channel-major") != std::string::npos;
+    if (is_tc != is_ct) {
+        *layout = is_tc ? "tc" : "ct";
+        *why    = "manifest layouts[\"latent_mean.f32\"]";
+        return true;
+    }
+
+    *why = "manifest.json declares no \"latent_layout\", no usable files[\"latent_mean.f32\"].shape, and no "
+           "conclusive layouts[\"latent_mean.f32\"]";
+    return false;
+}
+
+// [T, C] frame-major -> [C, T] channel-major (the mirror of
+// yue2_transpose_latents_tc_to_ct's job, used only when the fixture's layout
+// resolves to "tc").
+static std::vector<float> yue2_enc_tc_to_ct(const std::vector<float> & tc, int64_t T, int64_t C) {
+    std::vector<float> ct((size_t) (T * C));
+    for (int64_t t = 0; t < T; t++) {
+        for (int64_t c = 0; c < C; c++) {
+            ct[(size_t) (c * T + t)] = tc[(size_t) (t * C + c)];
+        }
+    }
+    return ct;
+}
+
+static int run_encode_parity(const std::string & models_dir, const std::string & fixture_dir, Yue2VaeVariant variant) {
+    Yue2Model m;
+    yue2_discover(&m, models_dir.c_str(), g_yue2_lm_type.empty() ? nullptr : g_yue2_lm_type.c_str());
+    if (!m.vae_file[variant].found) {
+        fprintf(stderr, "FATAL: YuE2 VAE (%s) GGUF not found under %s\n", YUE2_VAE_VARIANT_NAME[variant],
+                models_dir.c_str());
+        return 1;
+    }
+
+    std::string err;
+    if (!yue2_load_parts(&m, /*want_lm=*/false, /*want_vae=*/true, variant, /*want_encoder=*/true, &err)) {
+        fprintf(stderr, "FATAL: VAE (%s) load failed: %s\n", YUE2_VAE_VARIANT_NAME[variant], err.c_str());
+        yue2_unload(&m);
+        return 1;
+    }
+    printf("=== VAE encode parity: %s (%s) ===\n", YUE2_VAE_VARIANT_NAME[variant], fixture_dir.c_str());
+    printf("precision: TF32 %s\n", yue2_vae_enc_tf32_disabled() ? "off (NVIDIA_TF32_OVERRIDE=0)" : "ON — expect ~5e-2");
+    printf("Loaded VAE (%s): %.2f GB, encoder=%s downsampling_ratio=%u latent_dim=%u\n",
+           YUE2_VAE_VARIANT_NAME[variant], (double) m.vram_vae / (1024.0 * 1024.0 * 1024.0),
+           m.vae.enc_loaded ? "yes" : "NO", m.vae_cfg.downsampling_ratio, m.vae_cfg.latent_dim);
+    if (!m.vae.enc_loaded) {
+        fprintf(stderr, "FATAL: encoder tensors did not load (want_encoder=true was requested)\n");
+        yue2_unload(&m);
+        return 1;
+    }
+
+    yyjson_doc * doc  = nullptr;
+    yyjson_val * root = yue2_json_read_root(fixture_dir + "/manifest.json", &doc);
+    if (!root) {
+        printf("NOTE  manifest.json not found — assuming planar [2,S] audio and frame-major [T,64] latents\n");
+    }
+    const int64_t man_channels   = root ? (int64_t) yue2_json_int(root, "channels", m.vae_cfg.audio_channels) : 0;
+    const int64_t man_samples    = root ? (int64_t) yue2_json_int(root, "samples", 0) : 0;
+    const int64_t man_frames     = root ? (int64_t) yue2_json_int(root, "frames", 0) : 0;
+    const int64_t man_latent_dim = root ? (int64_t) yue2_json_int(root, "latent_dim", m.vae_cfg.latent_dim) : 0;
+
+    // Only the dumper's own layout is safe here; see
+    // yue2_enc_resolve_latent_layout. "tc" is the assumption of last resort
+    // (no manifest at all) because it is what the one existing dumper writes.
+    std::string                latent_layout = "tc";
+    std::string                layout_why    = "no manifest.json; assumed the exporter's layout";
+    const std::vector<int64_t> man_audio_shape = yue2_json_file_shape(root, "audio.f32");
+    bool                       layout_ok       = true;
+    if (root) {
+        layout_ok = yue2_enc_resolve_latent_layout(root, (int64_t) m.vae_cfg.latent_dim, &latent_layout, &layout_why);
+    }
+    if (doc) {
+        yyjson_doc_free(doc);
+    }
+    if (!layout_ok) {
+        fprintf(stderr,
+                "FATAL: cannot tell which axis order %s/latent_mean.f32 uses: %s.\n"
+                "       Both orders hold the same number of floats, so guessing would report a layout\n"
+                "       mismatch as an encoder-parity failure. Add \"latent_layout\": \"tc\" (frame-major\n"
+                "       [T,64], what export_encode_fixture.py writes) or \"ct\" (channel-major [64,T]).\n",
+                fixture_dir.c_str(), layout_why.c_str());
+        yue2_unload(&m);
+        return 1;
+    }
+    printf("latents: oracle is %s, per %s\n",
+           latent_layout == "tc" ? "frame-major [T,64] (transposed on read)" : "channel-major [64,T]",
+           layout_why.c_str());
+
+    const int64_t AC = (int64_t) m.vae_cfg.audio_channels;
+    const int64_t LD = (int64_t) m.vae_cfg.latent_dim;
+    if (man_channels > 0 && man_channels != AC) {
+        fprintf(stderr, "FATAL: manifest channels=%lld but the VAE config says %lld\n", (long long) man_channels,
+                (long long) AC);
+        yue2_unload(&m);
+        return 1;
+    }
+    if (man_latent_dim > 0 && man_latent_dim != LD) {
+        fprintf(stderr, "FATAL: manifest latent_dim=%lld but the VAE config says %lld\n",
+                (long long) man_latent_dim, (long long) LD);
+        yue2_unload(&m);
+        return 1;
+    }
+    // audio.f32 has the same silent-transpose hazard, minus the ambiguity: the
+    // reader only supports planar [C, S], and a declared shape of [S, C] means
+    // an interleaved dump that would decode as noise. Say so instead.
+    if (man_audio_shape.size() == 2 && man_audio_shape[0] != man_audio_shape[1] && man_audio_shape[0] != AC &&
+        man_audio_shape[1] == AC) {
+        fprintf(stderr,
+                "FATAL: manifest files[\"audio.f32\"].shape is [%lld, %lld], i.e. INTERLEAVED [S, channels];\n"
+                "       this reader only handles planar [channels, S].\n",
+                (long long) man_audio_shape[0], (long long) man_audio_shape[1]);
+        yue2_unload(&m);
+        return 1;
+    }
+
+    std::vector<float> audio;
+    if (!yue2_read_f32_bin(fixture_dir + "/audio.f32", &audio)) {
+        fprintf(stderr, "FATAL: cannot read %s/audio.f32\n", fixture_dir.c_str());
+        yue2_unload(&m);
+        return 1;
+    }
+    if (audio.size() % (size_t) AC != 0) {
+        fprintf(stderr, "FATAL: audio.f32 size %zu not a multiple of channels=%lld\n", audio.size(), (long long) AC);
+        yue2_unload(&m);
+        return 1;
+    }
+    const int64_t S = (int64_t) audio.size() / AC;
+    if (man_samples > 0 && man_samples != S) {
+        fprintf(stderr, "FATAL: manifest samples=%lld but audio.f32 holds %lld per channel\n",
+                (long long) man_samples, (long long) S);
+        yue2_unload(&m);
+        return 1;
+    }
+
+    std::vector<float> oracle_raw;
+    const bool have_oracle = yue2_read_f32_bin(fixture_dir + "/latent_mean.f32", &oracle_raw);
+    if (!have_oracle) {
+        fprintf(stderr, "FATAL: cannot read %s/latent_mean.f32\n", fixture_dir.c_str());
+        yue2_unload(&m);
+        return 1;
+    }
+    if (oracle_raw.size() % (size_t) LD != 0) {
+        fprintf(stderr, "FATAL: latent_mean.f32 size %zu not a multiple of latent_dim=%lld\n", oracle_raw.size(),
+                (long long) LD);
+        yue2_unload(&m);
+        return 1;
+    }
+    const int64_t T_oracle = (int64_t) oracle_raw.size() / LD;
+    std::vector<float> oracle_ct =
+        latent_layout == "tc" ? yue2_enc_tc_to_ct(oracle_raw, T_oracle, LD) : std::move(oracle_raw);
+
+    int total = 0, passed = 0;
+
+    // ── frame-count model ──
+    //
+    // T = floor((floor(S/64) + 1)/30) for the shipped strides [2,2,4,4,5,6]
+    // — yue2_vae_enc_frames() derives it from the config's own strides. For
+    // frame-aligned S this is floor(S/1920); the oracle's own frame count is
+    // the independent observation.
+    const int64_t T_pred = yue2_vae_enc_frames(m.vae_cfg, S);
+    printf("audio: S=%lld samples/ch (%.2f s), channels=%lld\n", (long long) S,
+           (double) S / (double) (m.vae_cfg.sample_rate ? m.vae_cfg.sample_rate : 48000), (long long) AC);
+    {
+        const bool ok = (T_pred == T_oracle) && (man_frames <= 0 || man_frames == T_oracle);
+        total++;
+        if (ok) {
+            passed++;
+        }
+        printf("%s %-32s predicted=%lld oracle=%lld manifest=%lld (floor(S/1920)=%lld)\n", ok ? "OK  " : "FAIL",
+               "enc_frames", (long long) T_pred, (long long) T_oracle, (long long) man_frames,
+               (long long) (m.vae_cfg.downsampling_ratio ? S / (int64_t) m.vae_cfg.downsampling_ratio : 0));
+    }
+
+    // ── untiled encode vs oracle ──
+    std::vector<float> got_full;
+    int64_t            T_full  = 0;
+    bool               full_ok = false;
+    {
+        const auto   t0 = std::chrono::steady_clock::now();
+        const bool   ok_run =
+            yue2_vae_encode(m, audio.data(), S, &got_full, &T_full, &err);
+        const double ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        total++;
+        if (!ok_run) {
+            printf("FAIL %-32s encode error: %s\n", "enc_full", err.c_str());
+        } else {
+            const double sec_audio = (double) S / (double) (m.vae_cfg.sample_rate ? m.vae_cfg.sample_rate : 48000);
+            printf("enc_full: T=%lld, %.1f ms (%.2f ms/s audio)\n", (long long) T_full, ms,
+                   sec_audio > 0 ? ms / sec_audio : 0.0);
+            if (got_full.size() != oracle_ct.size()) {
+                printf("FAIL %-32s size mismatch: got %zu expected %zu\n", "enc_full", got_full.size(),
+                       oracle_ct.size());
+            } else {
+                const double rl2 = yue2_rel_l2(got_full.data(), oracle_ct.data(), (int64_t) got_full.size());
+                const double mx  = yue2_max_abs_diff(got_full.data(), oracle_ct.data(), (int64_t) got_full.size());
+                full_ok          = rl2 <= YUE2_ENC_REL_L2_GATE;
+                if (full_ok) {
+                    passed++;
+                }
+                printf("%s %-32s rel_l2=%.6g max_abs=%.6g (gate %.6g, n=%zu)\n", full_ok ? "OK  " : "FAIL",
+                       "enc_full_vs_oracle", rl2, mx, YUE2_ENC_REL_L2_GATE, got_full.size());
+            }
+        }
+    }
+
+    // ── tiled encode vs untiled ──
+    //
+    // The default core is 30 s. A fixture clip that is itself ~30 s would
+    // then produce ONE tile spanning the whole thing, and "tiled == untiled"
+    // would pass without ever exercising a seam — so when the clip is not
+    // longer than the core, halve it into frame-aligned cores instead. The
+    // geometry under test is the crop/halo arithmetic, not the literal 30.
+    const int64_t ratio     = (int64_t) m.vae_cfg.downsampling_ratio;
+    int64_t       core_used = YUE2_ENC_PROBE_CORE_SAMPLES;
+    if (S <= core_used && T_pred >= 2) {
+        core_used = std::max<int64_t>(ratio, (T_pred / 2) * ratio);
+    }
+    if (T_pred < 2) {
+        printf("SKIP %-32s clip is a single frame; no seam to test\n", "enc_tiled_vs_full");
+    } else {
+        std::vector<float>          got_tiled;
+        std::vector<Yue2VaeEncTile> tb;
+        int64_t                     T_tiled = 0;
+        const auto                  t0      = std::chrono::steady_clock::now();
+        const bool ok_run = yue2_vae_encode_tiled(m, audio.data(), S, core_used, YUE2_ENC_PROBE_HALO_SAMPLES,
+                                                  &got_tiled, &T_tiled, &tb, &err);
+        const double ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        total++;
+        if (!ok_run) {
+            printf("FAIL %-32s encode error: %s\n", "enc_tiled", err.c_str());
+        } else {
+            printf("enc_tiled: T=%lld, %zu tiles (core %lld / halo %lld samples), %.1f ms\n", (long long) T_tiled,
+                   tb.size(), (long long) core_used, (long long) YUE2_ENC_PROBE_HALO_SAMPLES, ms);
+            if (got_full.empty()) {
+                printf("FAIL %-32s untiled encode did not run, nothing to compare against\n", "enc_tiled_vs_full");
+            } else if (got_tiled.size() != got_full.size()) {
+                printf("FAIL %-32s size mismatch: tiled %zu vs untiled %zu\n", "enc_tiled_vs_full", got_tiled.size(),
+                       got_full.size());
+            } else {
+                const double mx =
+                    yue2_max_abs_diff(got_tiled.data(), got_full.data(), (int64_t) got_tiled.size());
+                const double rl2 = yue2_rel_l2(got_tiled.data(), got_full.data(), (int64_t) got_tiled.size());
+                const bool   ok  = mx <= YUE2_ENC_TILED_MAXABS_GATE;
+                if (ok) {
+                    passed++;
+                }
+                printf("%s %-32s max_abs=%.6g rel_l2=%.6g (gate %.6g, n=%zu)\n", ok ? "OK  " : "FAIL",
+                       "enc_tiled_vs_full", mx, rl2, YUE2_ENC_TILED_MAXABS_GATE, got_tiled.size());
+            }
+        }
+    }
+
+    printf("RESULT (encode-parity %s/%s): %d/%d gates passed\n", YUE2_VAE_VARIANT_NAME[variant], fixture_dir.c_str(),
+           passed, total);
+    yue2_unload(&m);
+    return (total > 0 && passed == total) ? 0 : 1;
+}
+
 // ── Free-running generation smoke test ──────────────────────────────────────
 
 // --generate: builds the request prefix, prefills it into a fresh KV cache,
@@ -2262,6 +2639,7 @@ int main(int argc, char ** argv) {
     std::string     nar_parity_dir;
     std::string     vae_parity_dir;
     std::string     vae_parity_variant;
+    std::string     encode_parity_dir;
     bool            do_generate      = false;
     std::string     gen_style;
     std::string     gen_lyrics;
@@ -2300,6 +2678,8 @@ int main(int argc, char ** argv) {
             nar_parity_dir = argv[++i];
         } else if (!strcmp(argv[i], "--vae-parity") && i + 1 < argc) {
             vae_parity_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--encode-parity") && i + 1 < argc) {
+            encode_parity_dir = argv[++i];
         } else if (!strcmp(argv[i], "--variant") && i + 1 < argc) {
             vae_parity_variant = argv[++i];
         } else if (!strcmp(argv[i], "--generate")) {
@@ -2391,6 +2771,25 @@ int main(int argc, char ** argv) {
             return 2;
         }
         return run_vae_parity(models_dir, vae_parity_dir, vae_parity_variant);
+    }
+    if (!encode_parity_dir.empty()) {
+        if (models_dir.empty()) {
+            fprintf(stderr, "--encode-parity requires --models <dir>\n");
+            return 2;
+        }
+        // TF32 OFF, before the first CUDA context (no model has been loaded
+        // yet at this point — only argv has been read). The oracle was
+        // captured under torch's "highest" FP32 regime with allow_tf32=False
+        // on both matmul and cuDNN, and this encoder turns TF32's 11-bit
+        // mantissa into a 5e-2 rel-L2 by the time it reaches the latents.
+        // See yue2-vae-encode.h's "Precision" section for the measurements.
+        // Scoped to this mode on purpose: the other gates were calibrated
+        // with ggml's default TF32 on, and silently re-baselining them is not
+        // this change's business.
+        yue2_vae_enc_disable_tf32();
+        // Variant selection reuses --vae here (not --variant): this mode
+        // loads exactly one VAE, the same way --load does.
+        return run_encode_parity(models_dir, encode_parity_dir, variant);
     }
     if (do_generate) {
         if (models_dir.empty()) {

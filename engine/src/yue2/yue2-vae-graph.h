@@ -377,15 +377,21 @@ static ggml_tensor * yue2_vae_snake_beta(ggml_context * ctx, ggml_tensor * x, co
     return ggml_add(ctx, x, d);
 }
 
-// Conv1d (+bias), stride 1. w [K, IC, OC], x [T, IC] -> [T_out, OC]. `b` may
-// be nullptr (dec.conv_out has none — the one bias=False WNConv1d in the
-// whole decoder). Explicit F32 im2col (never ggml_conv_1d's forced F16 path)
-// — the VAE precision contract (03-reference-numerics.md §6: autocast
-// explicitly disabled, TF32 explicitly disabled) is identical to MM3's own
-// vocoder rationale, verbatim-copied.
+// Conv1d (+bias). w [K, IC, OC], x [T, IC] -> [T_out, OC]. `b` may be
+// nullptr (dec.conv_out has none — the one bias=False WNConv1d in the whole
+// decoder). Explicit F32 im2col (never ggml_conv_1d's forced F16 path) — the
+// VAE precision contract (03-reference-numerics.md §6: autocast explicitly
+// disabled, TF32 explicitly disabled) is identical to MM3's own vocoder
+// rationale, verbatim-copied.
+//
+// `stride` defaults to 1: every conv in the DECODER is stride 1 (its only
+// resampling is the ConvTranspose1d below). The ENCODER's six downsamples
+// are strided, so yue2-vae-encode.h passes a real stride here, which
+// ggml_im2col's own s0 argument already supports — output length follows
+// PyTorch's floor((L + 2p - d(k-1) - 1)/s) + 1 either way.
 static ggml_tensor * yue2_vae_conv1d(ggml_context * ctx, ggml_tensor * w, ggml_tensor * b, ggml_tensor * x, int pad,
-                                     int dilation) {
-    ggml_tensor * col = ggml_im2col(ctx, w, x, /*s0*/ 1, /*s1*/ 0, pad, 0, dilation, 0, /*is_2D*/ false,
+                                     int dilation, int stride = 1) {
+    ggml_tensor * col = ggml_im2col(ctx, w, x, /*s0*/ stride, /*s1*/ 0, pad, 0, dilation, 0, /*is_2D*/ false,
                                     GGML_TYPE_F32);  // [IC*K, OL, 1, 1]
     ggml_tensor * y = ggml_mul_mat(ctx, ggml_reshape_2d(ctx, col, col->ne[0], col->ne[1] * col->ne[2]),
                                    ggml_reshape_2d(ctx, w, w->ne[0] * w->ne[1], w->ne[2]));  // [OL, OC]
