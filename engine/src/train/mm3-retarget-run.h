@@ -499,7 +499,9 @@ static int mm3_retarget_run(const MM3RetargetArgs & a) {
                     continue;
                 }
                 yyjson_mut_obj_remove_key(ms, "audio_path");
-                yyjson_mut_obj_add_str(mdoc, ms, "audio_path", yyjson_mut_strcpy(mdoc, r.edited_path.c_str()));
+                // _strcpy, not _str: add_str stores the pointer, and r.edited_path is a std::string that does not
+                // outlive this loop.
+                yyjson_mut_obj_add_strcpy(mdoc, ms, "audio_path", r.edited_path.c_str());
                 yyjson_mut_obj_remove_key(ms, "duration");
                 yyjson_mut_obj_add_real(mdoc, ms, "duration", r.edited);
             }

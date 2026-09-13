@@ -23,12 +23,6 @@
 #include <cstdint>
 #include <vector>
 
-// MSVC does not define M_PI unless _USE_MATH_DEFINES is set before <cmath>, and this header may be pulled
-// in after some other TU already included <cmath> without it. Carry our own constant (see moss-mel.h).
-// A namespace-scope constexpr has internal linkage by default, so this is safe even if some future TU
-// includes both files.
-constexpr double kRetargetPi = 3.14159265358979323846;
-
 // One candidate cut: jump from downbeat `a` to downbeat `b`, removing [t_a, t_b).
 struct RetargetCut {
     int    a = 0, b = 0;          // beat indices
@@ -258,11 +252,16 @@ inline bool rt_splice(const float* in, int64_t n_frames, int channels, int sr,
     }
     w_off += pre;
 
+    // MSVC does not define M_PI. Function-local, so this header stays independent of retarget-dsp.h -- which
+    // carries its own copy at namespace scope. Two namespace-scope definitions of ONE name is a redefinition in
+    // any TU that includes both headers, and ace-train.cpp includes both. Internal linkage does not help: that
+    // governs clashes ACROSS translation units, not a name defined twice inside one.
+    const double kSplicePi = 3.14159265358979323846;
     const double denom = static_cast<double>(mid - 1);  // mid >= 2 always (h >= 1), so denom >= 1
     for (int64_t i = 0; i < mid; ++i) {
         const double r = static_cast<double>(i) / denom;
-        const double gain_out = std::cos(r * kRetargetPi / 2.0);
-        const double gain_in  = std::sin(r * kRetargetPi / 2.0);
+        const double gain_out = std::cos(r * kSplicePi / 2.0);
+        const double gain_in  = std::sin(r * kSplicePi / 2.0);
         const float* src_out = in + ((sa - h + i) * ch);
         const float* src_in  = in + ((sb - h + i) * ch);
         for (int64_t c = 0; c < ch; ++c) {
