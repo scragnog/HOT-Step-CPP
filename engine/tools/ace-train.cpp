@@ -25,6 +25,10 @@
 // Header-only like everything else here; pulls the yue2/ loader, LM graph and
 // NAR graph in transitively. Phase 2 ships --fd-check only.
 #include "train/yue2-nar-train-run.h"
+// YuE2 preprocess (phase 4 data path): audio folder -> cached VAE latents +
+// the manifest the trainer reads. Pulls yue2/yue2-vae-encode.h and the repo's
+// own audio decode/resample path (audio-io.h) in transitively.
+#include "train/yue2-preprocess-run.h"
 #include "model-registry.h"
 #include "train/dit-train-run.h"   // pulls in every dit-*.h (DiT LoRA trainer)
 #include "train/lm-train-run.h"    // pulls in every lm-*.h (LM LoRA trainer)
@@ -336,10 +340,68 @@ static void print_usage(void) {
             "                [--bwd outprod] restore the slow CPU mul_mat backward (510x slower)\n"
             "                [--tf32 on|off] default off\n"
             "                Writes <out>/mm3_lora.safetensors; load with MM3_ADAPTER=<path>.\n"
+            "  yue2-preprocess  Folder of audio -> cached YuE2 VAE latents + the manifest\n"
+            "                yue2-nar-train reads. Encodes each source ONCE (posterior mean,\n"
+            "                [64, frames] f32 channel-major) and cuts fixed clips out of the\n"
+            "                cache, so a rerun over an unchanged folder re-encodes nothing.\n"
+            "                --audio <folder>  flat scan for .wav/.flac/.mp3/.ogg/.m4a\n"
+            "                --out <dir>       holds latents/ and yue2_preprocess.json\n"
+            "                --models <dir>    (or --vae <path to a yue2-vae-*.gguf>)\n"
+            "                [--vae standard|legacy|<path>]  default standard. A path also\n"
+            "                pins the variant, and is refused if discovery would pick a\n"
+            "                different quant than the one named.\n"
+            "                [--clip-seconds <f>]  default 10 (= 250 frames at 25 fps). The\n"
+            "                short tail of each file is dropped and a file shorter than one\n"
+            "                clip is skipped with a warning, as upstream does.\n"
+            "                [--caption-mode txt|default|none]  default txt: the same-named\n"
+            "                .txt beside the audio. `default` uses --default-caption for\n"
+            "                every clip; `none` trains on the empty-style prefix.\n"
+            "                [--default-caption \"...\"]\n"
+            "                [--decode auto|ffmpeg]  auto = the repo's own WAV/MP3 decoder\n"
+            "                (+ its polyphase resampler) for those two, ffmpeg for the rest.\n"
+            "                `ffmpeg` forces one resampler across a mixed corpus.\n"
+            "                [--ffmpeg <path>]  default \"ffmpeg\"; required for FLAC/OGG/M4A\n"
+            "                [--only <substr>] [--limit <n>]  case-insensitive name filter\n"
+            "                [--tile-frames <n>] [--halo-frames <n>]  encoder tiling, default\n"
+            "                750 / 20; the halo floor is the encoder's own receptive field.\n"
+            "                [--force]  re-cut over an existing manifest built with a\n"
+            "                different --clip-seconds. Cheap: the cached latents are\n"
+            "                clip-length independent, so nothing is re-encoded.\n"
+            "                TF32 is forced off (the encoder is 50x outside its parity gate\n"
+            "                on a TF32 cuBLAS handle) and there is no escape hatch.\n"
             "  yue2-nar-train  YuE2 NAR-half LoRA training (rectified flow; AR stays frozen).\n"
-            "                PHASE 2: only --fd-check works. The loop, preprocess, ckpt/resume\n"
-            "                and export are not written yet and say so instead of no-op'ing.\n"
             "                --lm <yue2-lm-<type>.gguf> (or --models <dir>)\n"
+            "                --manifest <yue2_preprocess.json>  the clip set to train on\n"
+            "                --out <dir>  checkpoints, snapshots and the exported adapter\n"
+            "                --trigger <word>  prepended to every caption, and the word the\n"
+            "                trained style is addressed by at generation time. Without one the\n"
+            "                adapter has no handle; the loop warns.\n"
+            "                [--name yue2_nar_lora]  export stem\n"
+            "                [--rank 16] [--alpha 16] [--lr 1e-4] [--steps 800] [--warmup 50]\n"
+            "                [--lr-scheduler cosine|constant] [--grad-accum 1]\n"
+            "                [--max-grad-norm 1.0] [--weight-decay 0.01] [--seed 42]\n"
+            "                [--caption-dropout 0.1]  chance per micro-step of swapping in the\n"
+            "                EMPTY-style prefix, which is what keeps the base style reachable.\n"
+            "                [--t-sampling logit-normal|uniform]\n"
+            "                [--clip-seconds 10]  clip length; --frames wins, and an unset one\n"
+            "                takes the manifest's own clip_frames.\n"
+            "                [--save-every N]  <out>/yue2_nar_ckpt.bin (adapter + AdamW moments\n"
+            "                + step) plus a <name>_stepN.safetensors snapshot.\n"
+            "                [--resume]  continue that checkpoint. EXACT within one machine and\n"
+            "                build: every draw is a pure function of (seed, micro-step), so no\n"
+            "                RNG state has to travel. A different GPU/driver/ggml build, base\n"
+            "                GGUF or manifest breaks it and cannot be detected here.\n"
+            "                REFUSED: rank/alpha/target/grad-accum/frames/seed, and a change to\n"
+            "                --trigger/--lyrics/--t-sampling/--caption-dropout (they move the\n"
+            "                conditioning or the draw stream). NOTED, not refused: --steps/--lr/\n"
+            "                --warmup/--lr-scheduler/--weight-decay/--max-grad-norm, which only\n"
+            "                reshape the schedule from here on.\n"
+            "                [--log-every 10] [--kv-cache 8]  cached AR-prefix K/V canvases,\n"
+            "                ~104 MB each at 10 s clips; over the cap the least recently used\n"
+            "                one is freed and rebuilt on demand.\n"
+            "                Writes <out>/<name>.safetensors in the 08 §4 / 10 §3 key scheme\n"
+            "                (yue2.blk.N.nar_*.lora_{A,B}.weight); load it through\n"
+            "                /yue2/select-model's adapter field.\n"
             "                --fd-check N   finite-difference gradient gate over N probes, then\n"
             "                exit. A falling loss is NOT evidence of a correct backward, and\n"
             "                with segments = 1 there is no second backward route to cross-check\n"
@@ -358,7 +420,8 @@ static void print_usage(void) {
             "                linear regime -- and a probe that hits the cap is reported\n"
             "                INCONCLUSIVE, not FAIL. Read h/||w|| in the table.\n"
             "                TF32 is forced off here and there is no --tf32 escape hatch: the\n"
-            "                gate is the only thing phase 2 runs and it requires F32.\n"
+            "                gate requires F32, and a knob whose only honest setting is off is\n"
+            "                a knob that lies.\n"
             "                [--frames T] default 250 (10 s at 25 fps). Contract §8: the\n"
             "                T x S_kv x Nh attention term is why 10 s clips are structural\n"
             "                here, not a default someone picked -- MM3's whole-song lesson\n"
@@ -366,10 +429,11 @@ static void print_usage(void) {
             "                [--target nar_attn|nar_attn_mlp|nar_attn_mlp_proj] default\n"
             "                nar_attn_mlp; --fd-check promotes it to ..._proj unless given\n"
             "                explicitly, so the flow-head probes have tensors to address.\n"
-            "                [--rank 16] [--alpha 16] [--seed 42] [--style \"text\"]\n"
-            "                [--lyrics \"text\"] conditioning for the gate's cot=off prefix.\n"
-            "                [--vae-dir <dir>] accepted and IGNORED until phase 1 lands; the\n"
-            "                gate uses z ~ N(0,1) as a stand-in latent.\n"
+            "                [--style \"text\"] [--lyrics \"text\"] conditioning for the gate's\n"
+            "                cot=off prefix (the loop takes captions from the manifest, and\n"
+            "                --lyrics only as the fallback for a clip that states none).\n"
+            "                [--vae-dir <dir>] accepted and IGNORED: latents reach the trainer\n"
+            "                through the preprocess manifest, never by encoding audio here.\n"
             "                YUE2_FD_LOSSGRAD=2 is the negative control: every probe must then\n"
             "                report rel ~= 0.5 and the gate must FAIL.\n"
             "                Weights are CC BY-NC 4.0; trained adapters inherit NC.\n"
@@ -4205,14 +4269,13 @@ static int cmd_mm3_train_dit(int argc, char ** argv) {
 //     --fd-check looks for.
 //
 // The other trainers take a `--tf32 on` escape hatch; this one deliberately
-// does NOT. Phase 2 runs nothing but the gate, contract §10 requires TF32 off
-// for it, and yue2_nar_fdcheck_main sets the variable itself — so the flag
-// could only ever be parsed and then overridden, which is a knob that lies.
-// Add it back with the training loop, threaded through Yue2NarTrainArgs and
-// gated so it applies to the loop and never to --fd-check.
+// does NOT. Contract §10 requires TF32 off for the gate, yue2_nar_fdcheck_main
+// sets the variable itself, and the loop trains against latents that were
+// encoded with it off (yue2-preprocess refuses otherwise) — so the flag could
+// only ever be parsed and then overridden, which is a knob that lies.
 //
-// Phase 2 of docs/plans/yue2/08-nar-lora-trainer.md. Only --fd-check runs;
-// everything else returns an error naming what is missing.
+// Phases 2 and 4 of docs/plans/yue2/08-nar-lora-trainer.md: --fd-check runs the
+// gradient gate, anything else runs the training loop over --manifest.
 static int cmd_yue2_nar_train(int argc, char ** argv) {
     Yue2NarTrainArgs a;
     for (int i = 1; i < argc; i++) {
@@ -4232,12 +4295,26 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--target"))    { a.target = next("--target"); a.target_set = true; }
         else if (!strcmp(argv[i], "--rank"))        a.rank       = atoll(next("--rank"));
         else if (!strcmp(argv[i], "--alpha"))       a.alpha      = (float) atof(next("--alpha"));
-        else if (!strcmp(argv[i], "--frames"))      a.frames     = atoll(next("--frames"));
+        // frames_set, not just frames: the loop promotes an UNSET clip length
+        // to the manifest's own clip_frames, and must not override one typed.
+        else if (!strcmp(argv[i], "--frames"))    { a.frames = atoll(next("--frames")); a.frames_set = true; }
+        else if (!strcmp(argv[i], "--clip-seconds")) a.clip_seconds = atof(next("--clip-seconds"));
         else if (!strcmp(argv[i], "--seed"))        a.seed       = (uint64_t) atoll(next("--seed"));
         else if (!strcmp(argv[i], "--lr"))          a.lr         = (float) atof(next("--lr"));
         else if (!strcmp(argv[i], "--steps"))       a.steps      = atoll(next("--steps"));
+        else if (!strcmp(argv[i], "--warmup"))      a.warmup     = atoll(next("--warmup"));
+        else if (!strcmp(argv[i], "--lr-scheduler")) a.lr_scheduler = next("--lr-scheduler");
         else if (!strcmp(argv[i], "--grad-accum"))  a.grad_accum = atoll(next("--grad-accum"));
         else if (!strcmp(argv[i], "--t-sampling"))  a.t_sampling = next("--t-sampling");
+        else if (!strcmp(argv[i], "--max-grad-norm")) a.max_grad_norm = (float) atof(next("--max-grad-norm"));
+        else if (!strcmp(argv[i], "--weight-decay")) a.weight_decay = (float) atof(next("--weight-decay"));
+        else if (!strcmp(argv[i], "--caption-dropout")) a.caption_dropout = (float) atof(next("--caption-dropout"));
+        else if (!strcmp(argv[i], "--trigger"))     a.trigger    = next("--trigger");
+        else if (!strcmp(argv[i], "--name"))        a.name       = next("--name");
+        else if (!strcmp(argv[i], "--save-every"))  a.save_every = atoll(next("--save-every"));
+        else if (!strcmp(argv[i], "--log-every"))   a.log_every  = atoll(next("--log-every"));
+        else if (!strcmp(argv[i], "--kv-cache"))    a.kv_cache   = atoll(next("--kv-cache"));
+        else if (!strcmp(argv[i], "--resume"))      a.resume     = true;
         else if (!strcmp(argv[i], "--fd-check"))    a.fd_check   = atoi(next("--fd-check"));
         else if (!strcmp(argv[i], "--fd-eps"))      a.fd_eps     = atof(next("--fd-eps"));
         else if (!strcmp(argv[i], "--nar-layers"))  a.nar_layers = atoi(next("--nar-layers"));
@@ -4266,6 +4343,69 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
     // MANDATORY: ggml_time_ms() divides by an uninitialised frequency otherwise.
     ggml_time_init();
     return yue2_nar_train_run(a);
+}
+
+// ─── yue2-preprocess ────────────────────────────────────────────────────────
+//
+// Folder of audio -> cached YuE2 VAE latents + yue2_preprocess.json, the
+// manifest yue2-nar-train reads. Phase 4 of docs/plans/yue2/08-nar-lora-trainer.md,
+// native port of the upstream trainer's trainer_core/data.py. All the detail
+// (decode routes, cache identity, the channel-major latent layout, the reserved
+// codec_ids slot) lives in train/yue2-preprocess-run.h's header.
+//
+// TF32 IS TURNED OFF HERE, AS THE FIRST STATEMENT, AND THAT PLACEMENT IS LOAD
+// BEARING. The CUDA driver reads NVIDIA_TF32_OVERRIDE when the context is
+// CREATED, so setting it after anything has touched a backend is a silent
+// no-op. On a TF32 cuBLAS handle the YuE2 encoder measures rel-L2 5.0e-2
+// against the oracle — 50x its own parity gate, snowballed through six blocks
+// (yue2-vae-encode.h's "Precision" note) — and every cached latent would carry
+// that with no symptom but a trainer quietly learning the wrong target.
+// yue2_preprocess_run() re-checks and REFUSES if it is not set, so moving this
+// line fails loudly rather than corrupting a corpus.
+//
+// No --tf32 escape hatch, for the same reason cmd_yue2_nar_train has none: a
+// knob whose only honest setting is "off" is a knob that lies.
+static int cmd_yue2_preprocess(int argc, char ** argv) {
+#ifdef _WIN32
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+#else
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+#endif
+    Yue2PreprocessArgs a;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--audio"))           a.audio_dir       = next("--audio");
+        else if (!strcmp(argv[i], "--out"))             a.out_dir         = next("--out");
+        else if (!strcmp(argv[i], "--models"))          a.models_dir      = next("--models");
+        else if (!strcmp(argv[i], "--vae"))             a.vae_arg         = next("--vae");
+        else if (!strcmp(argv[i], "--caption-mode"))    a.caption_mode    = next("--caption-mode");
+        else if (!strcmp(argv[i], "--default-caption")) a.default_caption = next("--default-caption");
+        else if (!strcmp(argv[i], "--only"))            a.only            = next("--only");
+        else if (!strcmp(argv[i], "--ffmpeg"))          a.ffmpeg          = next("--ffmpeg");
+        else if (!strcmp(argv[i], "--decode"))          a.decode          = next("--decode");
+        else if (!strcmp(argv[i], "--clip-seconds"))    a.clip_seconds    = atof(next("--clip-seconds"));
+        else if (!strcmp(argv[i], "--tile-frames"))     a.tile_frames     = atoll(next("--tile-frames"));
+        else if (!strcmp(argv[i], "--halo-frames"))     a.halo_frames     = atoll(next("--halo-frames"));
+        else if (!strcmp(argv[i], "--limit"))           a.limit           = atoi(next("--limit"));
+        else if (!strcmp(argv[i], "--force"))           a.force           = true;
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (a.audio_dir.empty() || a.out_dir.empty()) {
+        fprintf(stderr, "ace-train yue2-preprocess: --audio <folder> and --out <dir> are required\n");
+        return 2;
+    }
+    if (a.models_dir.empty() && a.vae_arg.find("yue2-vae-") == std::string::npos) {
+        fprintf(stderr, "ace-train yue2-preprocess: --models <dir> is required "
+                        "(or pass --vae <path to a yue2-vae-*.gguf>)\n");
+        return 2;
+    }
+    // MANDATORY: ggml_time_ms() divides by an uninitialised frequency otherwise.
+    ggml_time_init();
+    return yue2_preprocess_run(a);
 }
 
 static int cmd_train_lm(int argc, char ** argv) {
@@ -5680,6 +5820,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "mm3-train-dit")) {
         return cmd_mm3_train_dit(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-preprocess")) {
+        return cmd_yue2_preprocess(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-nar-train")) {
         return cmd_yue2_nar_train(argc - 1, argv + 1);

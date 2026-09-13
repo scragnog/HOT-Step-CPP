@@ -269,8 +269,19 @@ static int run_info(const std::string & models_dir, Yue2VaeVariant variant, bool
     return 0;
 }
 
+// --adapter, repeatable. The OFFLINE way to prove a trained adapter actually
+// merges. ace-server is the only other caller of the merge path, and rebuilding
+// and restarting it just to discover that an exporter wrote a key the parser
+// does not recognise is a long way round — and a genuinely dangerous one,
+// because a LoRA whose keys are ALL wrong is not an error anywhere in the
+// system. It merges zero tensors, the load succeeds, and the model simply
+// sounds unchanged. So `merged N tensor(s)` is the assertion that matters
+// here, not the exit code.
+static std::vector<Yue2AdapterSpec> g_yue2_probe_adapters;
+
 static int run_load(const std::string & models_dir, Yue2VaeVariant variant, bool want_encoder) {
     Yue2Model m;
+    m.lm_adapter_want = g_yue2_probe_adapters;
     yue2_discover(&m, models_dir.c_str(), g_yue2_lm_type.empty() ? nullptr : g_yue2_lm_type.c_str());
 
     if (!m.lm_file.found) {
@@ -292,6 +303,11 @@ static int run_load(const std::string & models_dir, Yue2VaeVariant variant, bool
     }
 
     printf("OK: loaded in %.0f ms\n", m.load_ms);
+    if (!m.lm_adapter_want.empty()) {
+        printf("  adapter : %s\n",
+               m.lm_adapter_desc.empty() ? "(REQUESTED, BUT NOTHING MERGED)" : m.lm_adapter_desc.c_str());
+        printf("  merged  : %d tensor(s)\n", m.lm_adapter_tensors);
+    }
     printf("  LM  VRAM: %.3f GB (%zu tensors)\n", (double) m.vram_lm / (1024.0 * 1024.0 * 1024.0),
            m.tmap_lm.size());
     printf("  VAE VRAM: %.3f GB (%zu tensors)%s\n", (double) m.vram_vae / (1024.0 * 1024.0 * 1024.0),
@@ -2704,6 +2720,21 @@ int main(int argc, char ** argv) {
                 fprintf(stderr, "--vae must be 'standard' or 'legacy', got '%s'\n", v.c_str());
                 return 2;
             }
+        } else if (!strcmp(argv[i], "--adapter") && i + 1 < argc) {
+            // "<path>" or "<path>@<scale>" — the same spelling yue2_adapter_key()
+            // renders, so a /yue2/props string pastes straight back in.
+            Yue2AdapterSpec spec;
+            spec.path       = argv[++i];
+            const size_t at = spec.path.rfind('@');
+            if (at != std::string::npos && at + 1 < spec.path.size()) {
+                char *      endp = nullptr;
+                const float sc   = strtof(spec.path.c_str() + at + 1, &endp);
+                if (endp && *endp == '\0') {
+                    spec.scale = sc;
+                    spec.path.resize(at);
+                }
+            }
+            g_yue2_probe_adapters.push_back(spec);
         } else if (!strcmp(argv[i], "--encoder")) {
             want_encoder = true;
         } else {
