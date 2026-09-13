@@ -325,6 +325,12 @@ inline void rt_mfcc(const float * mag, int n_frames, int n_bins, int sr, int n_f
             for (int b = 0; b < n_bins; ++b) {
                 s += row[b] * (double) col[b];
             }
+            // Second, independent divergence from librosa (the first being magnitude vs power, noted above):
+            // librosa runs its mel spectrogram through power_to_db, which floors each frame at its own max minus
+            // 80 dB, not at a flat amin. This is a flat floor only. The log-vs-log10 scale difference does cancel
+            // under rt_feature_stack's per-row z-score, but the missing per-frame relative floor does not — it
+            // drifts on quiet mel bins inside otherwise loud frames. Both matter to whoever recalibrates
+            // --max-cost against the Python numbers.
             log_mel[(size_t) m] = std::log(std::max(s, 1e-10));
         }
         float * out_col = out->data() + (size_t) t * (size_t) n_out;
@@ -341,10 +347,22 @@ inline void rt_mfcc(const float * mag, int n_frames, int n_bins, int sr, int n_f
 
 // ─── beat-synchronous pooling ───────────────────────────────────────────────
 
-// Pool per-frame columns into per-beat columns: beat i takes every frame
-// whose centre time (j * frame_hop_s) lies in [beat_t[i], beat_t[i+1]), and
-// the last beat takes everything from beat_t[n_beats-1] to the end of the
-// track. median=true reproduces librosa.util.sync(..., aggregate=np.median)
+// Pool per-frame columns into per-beat columns, matching librosa.util.sync's PADDED column convention, which is
+// the one the oracle's cost arithmetic is written against.
+//
+// sync(data, beats) defaults to pad=True, so it prepends 0 and appends the frame count before slicing: column 0 is
+// everything before the first beat, and column i is [beat[i-1], beat[i]) — the interval ENDING at beat i, not
+// starting at it. retarget.py's cost term dist[a-1-k, b-1-k] then reads the beats leading INTO the cut, which is
+// the whole criterion.
+//
+// Bucketing by [beat_t[i], beat_t[i+1]) instead — the obvious reading — shifts every column by one and silently
+// slides the whole lookback window one beat closer to the cut. Nothing crashes and the output still looks
+// plausible; it just scores a different window than the one that was validated by ear.
+//
+// Frames past the last beat belong to sync's trailing padded column, which the search never indexes (its beat
+// indices are all < n_beats), so they are dropped rather than folded into the last bucket.
+//
+// median=true reproduces librosa.util.sync(..., aggregate=np.median)
 // (used for chroma in the oracle); false reproduces aggregate=np.mean (used
 // for MFCC). An empty beat (no frame centres fall in its window — short beats
 // near a tempo change) copies the previous beat's pooled column, or is left
@@ -362,15 +380,14 @@ inline void rt_beat_sync(const float * frames, int D, int n_frames, double frame
     std::vector<int> beat_of_frame((size_t) std::max(n_frames, 0), -1);
     for (int j = 0; j < n_frames; ++j) {
         const double t = (double) j * frame_hop_s;
-        // Find the last beat whose start time is <= t. Frame counts per track
-        // (thousands) times beat counts (hundreds-low-thousands) is the same
-        // O(frames*beats) cost the reference pays inside librosa.util.sync,
-        // so a linear scan here is not a regression worth a binary search for.
-        int b = -1;
+        // Find the FIRST beat whose time is > t: that is the column [beat_t[i-1], beat_t[i]) the frame falls in,
+        // with column 0 taking everything before the first beat. Frame counts per track (thousands) times beat
+        // counts (hundreds-low-thousands) is the same O(frames*beats) cost the reference pays inside
+        // librosa.util.sync, so a linear scan here is not a regression worth a binary search for.
+        int b = -1;   // -1 = past the last beat, i.e. sync's trailing padded column; dropped
         for (int i = 0; i < n_beats; ++i) {
-            if (t >= beat_t[i]) {
+            if (t < beat_t[i]) {
                 b = i;
-            } else {
                 break;
             }
         }
