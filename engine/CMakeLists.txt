@@ -680,6 +680,13 @@ add_executable(ace-train tools/ace-train.cpp)
 # linking acestep-core; ace-train deliberately does not link acestep-core (the
 # comment above), so it has to name lua54 itself. Without this the build fails
 # with "Cannot open include file: 'lua.h'" from lua-plugin.h.
+#
+# The YuE2 NAR trainer (train/yue2-nar-train-run.h, subcommand yue2-nar-train)
+# needs NOTHING extra: engine/src/yue2/ is header-only, link_ggml_backends
+# already puts ${CMAKE_CURRENT_SOURCE_DIR}/src on the include path, and the one
+# library dependency it drags in — yyjson, via yue2-tokenizer.h -> bpe.h — is
+# already named here. yue2-probe links exactly yyjson + ggml, so ace-train's
+# dependency set is a strict superset.
 target_link_libraries(ace-train PRIVATE yyjson lua54)
 link_ggml_backends(ace-train)
 
