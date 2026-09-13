@@ -20,6 +20,11 @@
 #include "train/mm3-lm-load.h"          // MM3 LM -> the ACE LM trainer's struct
 #include "train/mm3-lm-train-run.h"     // MM3 LM LoRA trainer
 #include "train/mm3-dit-train-run.h"   // MM3 flow-DiT LoRA trainer
+#include "train/mm3-retarget-run.h"  // over-length track excision (repeat-skip)
+// YuE2 NAR LoRA trainer (docs/plans/yue2/08-nar-lora-trainer.md phase 2).
+// Header-only like everything else here; pulls the yue2/ loader, LM graph and
+// NAR graph in transitively. Phase 2 ships --fd-check only.
+#include "train/yue2-nar-train-run.h"
 #include "model-registry.h"
 #include "train/dit-train-run.h"   // pulls in every dit-*.h (DiT LoRA trainer)
 #include "train/lm-train-run.h"    // pulls in every lm-*.h (LM LoRA trainer)
@@ -219,6 +224,15 @@ static void print_usage(void) {
             "                [--tokens a,b,c] [--layers N] [--depth <mm3-depth-*.gguf>].\n"
             "                Runs the two sides\n"
             "                SEQUENTIALLY: two 17 GB copies do not fit on one card.\n"
+            "  mm3-retarget  Rescue dataset tracks over MM3's 6:00 cap by removing one\n"
+            "                repeated section, keeping the intro and the real ending.\n"
+            "                --dataset <dataset.json> --out <dir> --essentia <extractor>\n"
+            "                --vocal-dir <dir of <id>.json> [--ffmpeg <path>] [--dry]\n"
+            "                [--target 360] [--margin 4] [--max-cost 0.45] [--guard 1.0]\n"
+            "                [--protect-head 8] [--protect-tail 45] [--phrase 4]\n"
+            "                Refuses any cut whose removed span contains singing, so the\n"
+            "                lyric sheet stays valid. Writes <out>/dataset.json for\n"
+            "                mm3-codes and mm3-lm-train, plus .seam.wav audition clips.\n"
             "  mm3-codes     MiniMax-Music3 dataset -> RVQ codes (LM training input).\n"
             "                --dataset <dataset.json> --rvq <mm3-rvq-*.gguf>\n"
             "                --enc <mm3-enc-*.gguf> --out <dir>\n"
@@ -322,6 +336,38 @@ static void print_usage(void) {
             "                [--bwd outprod] restore the slow CPU mul_mat backward (510x slower)\n"
             "                [--tf32 on|off] default off\n"
             "                Writes <out>/mm3_lora.safetensors; load with MM3_ADAPTER=<path>.\n"
+            "  yue2-nar-train  YuE2 NAR-half LoRA training (rectified flow; AR stays frozen).\n"
+            "                PHASE 2: only --fd-check works. The loop, preprocess, ckpt/resume\n"
+            "                and export are not written yet and say so instead of no-op'ing.\n"
+            "                --lm <yue2-lm-<type>.gguf> (or --models <dir>)\n"
+            "                --fd-check N   finite-difference gradient gate over N probes, then\n"
+            "                exit. A falling loss is NOT evidence of a correct backward, and\n"
+            "                with segments = 1 there is no second backward route to cross-check\n"
+            "                against, so this is the ONLY gradient gate this trainer has.\n"
+            "                [--nar-layers K] default 2, and REQUIRED for a verdict: it\n"
+            "                truncates the NAR stack to K blocks and mirrors them (plus the\n"
+            "                final norm and the four flow heads) to F32, so the residual floor\n"
+            "                is F32 reassociation rather than BF16 rounding. K=0 skips\n"
+            "                isolation and REPORTS only. Refused on a quantized base -- it\n"
+            "                would measure the quantizer.\n"
+            "                [--fd-eps E] default 1e-2, and a FLOOR on the step rather than the\n"
+            "                step: each probe perturbs its WHOLE tensor along v = g/||g|| and\n"
+            "                the step is raised if 2*eps*||g|| would not clear the forward's\n"
+            "                own resolution.\n"
+            "                [--frames T] default 250 (10 s at 25 fps). Contract §8: the\n"
+            "                T x S_kv x Nh attention term is why 10 s clips are structural\n"
+            "                here, not a default someone picked -- MM3's whole-song lesson\n"
+            "                does NOT transfer.\n"
+            "                [--target nar_attn|nar_attn_mlp|nar_attn_mlp_proj] default\n"
+            "                nar_attn_mlp; --fd-check promotes it to ..._proj unless given\n"
+            "                explicitly, so the flow-head probes have tensors to address.\n"
+            "                [--rank 16] [--alpha 16] [--seed 42] [--style \"text\"]\n"
+            "                [--lyrics \"text\"] conditioning for the gate's cot=off prefix.\n"
+            "                [--vae-dir <dir>] accepted and IGNORED until phase 1 lands; the\n"
+            "                gate uses z ~ N(0,1) as a stand-in latent.\n"
+            "                YUE2_FD_LOSSGRAD=2 is the negative control: every probe must then\n"
+            "                report rel ~= 0.5 and the gate must FAIL.\n"
+            "                Weights are CC BY-NC 4.0; trained adapters inherit NC.\n"
             "\n"
             "ace-train preprocess  (all paths absolute; long options only; \"--flag value\" form)\n"
             "\n"
@@ -2728,6 +2774,42 @@ static int cmd_mm3_lm_probe(int argc, char ** argv) {
     return pass ? 0 : 1;
 }
 
+// ─── mm3-retarget ────────────────────────────────────────────────────────────
+//
+// Rescue dataset tracks longer than MM3's 6:00 cap by excising one repeated section, and write a derived
+// dataset.json that mm3-codes and mm3-lm-train both read. See train/mm3-retarget-run.h.
+static int cmd_mm3_retarget(int argc, char ** argv) {
+    MM3RetargetArgs a;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * what) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", what); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--dataset"))          a.dataset         = next("--dataset");
+        else if (!strcmp(argv[i], "--out"))              a.out_dir         = next("--out");
+        else if (!strcmp(argv[i], "--ffmpeg"))           a.ffmpeg          = next("--ffmpeg");
+        else if (!strcmp(argv[i], "--essentia"))         a.essentia        = next("--essentia");
+        else if (!strcmp(argv[i], "--vocal-dir"))        a.vocal_dir       = next("--vocal-dir");
+        else if (!strcmp(argv[i], "--target"))           a.target          = atof(next("--target"));
+        else if (!strcmp(argv[i], "--margin"))           a.margin          = atof(next("--margin"));
+        else if (!strcmp(argv[i], "--protect-head"))     a.protect_head    = atof(next("--protect-head"));
+        else if (!strcmp(argv[i], "--protect-tail"))     a.protect_tail    = atof(next("--protect-tail"));
+        else if (!strcmp(argv[i], "--max-cost"))         a.max_cost        = atof(next("--max-cost"));
+        else if (!strcmp(argv[i], "--guard"))            a.guard           = atof(next("--guard"));
+        else if (!strcmp(argv[i], "--xfade"))            a.xfade_ms        = atof(next("--xfade"));
+        else if (!strcmp(argv[i], "--snippet"))          a.snippet         = atof(next("--snippet"));
+        else if (!strcmp(argv[i], "--bpb"))              a.bpb             = atoi(next("--bpb"));
+        else if (!strcmp(argv[i], "--phrase"))           a.phrase          = atoi(next("--phrase"));
+        else if (!strcmp(argv[i], "--lookback"))         a.lookback        = atoi(next("--lookback"));
+        else if (!strcmp(argv[i], "--alts"))             a.alts            = atoi(next("--alts"));
+        else if (!strcmp(argv[i], "--dry"))              a.dry             = true;
+        else if (!strcmp(argv[i], "--jsonl"))            g_jsonl           = true;
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    return mm3_retarget_run(a);
+}
+
 // ─── mm3-codes ──────────────────────────────────────────────────────────────
 //
 // Audio -> RVQ codes, the input side of MM3 LM training. Replaces the WSL
@@ -4100,6 +4182,82 @@ static int cmd_mm3_train_dit(int argc, char ** argv) {
 #endif
     }
     return mm3_train_dit_run(a);
+}
+
+// ─── yue2-nar-train ─────────────────────────────────────────────────────────
+//
+// YuE2 NAR-half LoRA trainer. Modelled on cmd_mm3_train_dit above, including
+// the two environment latches, which are NOT optional here either:
+//
+//   * GGML_BACKWARD_MM=1 rewrites the activation-gradient arm of MUL_MAT's
+//     backward from OUT_PROD into an equivalent mul_mat (engine/patches/
+//     mm-backward.patch). ggml-cuda implements OUT_PROD F32-only, so without
+//     it every frozen-weight backward falls to the CPU with a round trip each
+//     way — 46 s/step on MM3. The patch latches it into a static on FIRST USE,
+//     so it has to be set before any backward is built.
+//   * NVIDIA_TF32_OVERRIDE=0 (set inside the gate as well, belt and braces):
+//     TF32 makes an F32 matmul ~1e-3 accurate, the same order as the defect
+//     --fd-check looks for.
+//
+// Phase 2 of docs/plans/yue2/08-nar-lora-trainer.md. Only --fd-check runs;
+// everything else returns an error naming what is missing.
+static int cmd_yue2_nar_train(int argc, char ** argv) {
+    Yue2NarTrainArgs a;
+    bool             tf32 = false;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--lm"))          a.lm_path    = next("--lm");
+        else if (!strcmp(argv[i], "--models"))      a.models_dir = next("--models");
+        else if (!strcmp(argv[i], "--vae-dir"))     a.vae_dir    = next("--vae-dir");
+        else if (!strcmp(argv[i], "--manifest"))    a.manifest   = next("--manifest");
+        else if (!strcmp(argv[i], "--out"))         a.out_dir    = next("--out");
+        else if (!strcmp(argv[i], "--style"))       a.style      = next("--style");
+        else if (!strcmp(argv[i], "--lyrics"))      a.lyrics     = next("--lyrics");
+        // target_set, not just target: --fd-check promotes an UNSET preset to
+        // nar_attn_mlp_proj, and must not override a preset the user typed.
+        else if (!strcmp(argv[i], "--target"))    { a.target = next("--target"); a.target_set = true; }
+        else if (!strcmp(argv[i], "--rank"))        a.rank       = atoll(next("--rank"));
+        else if (!strcmp(argv[i], "--alpha"))       a.alpha      = (float) atof(next("--alpha"));
+        else if (!strcmp(argv[i], "--frames"))      a.frames     = atoll(next("--frames"));
+        else if (!strcmp(argv[i], "--seed"))        a.seed       = (uint64_t) atoll(next("--seed"));
+        else if (!strcmp(argv[i], "--lr"))          a.lr         = (float) atof(next("--lr"));
+        else if (!strcmp(argv[i], "--steps"))       a.steps      = atoll(next("--steps"));
+        else if (!strcmp(argv[i], "--grad-accum"))  a.grad_accum = atoll(next("--grad-accum"));
+        else if (!strcmp(argv[i], "--t-sampling"))  a.t_sampling = next("--t-sampling");
+        else if (!strcmp(argv[i], "--fd-check"))    a.fd_check   = atoi(next("--fd-check"));
+        else if (!strcmp(argv[i], "--fd-eps"))      a.fd_eps     = atof(next("--fd-eps"));
+        else if (!strcmp(argv[i], "--nar-layers"))  a.nar_layers = atoi(next("--nar-layers"));
+        else if (!strcmp(argv[i], "--tf32"))        tf32         = !strcmp(next("--tf32"), "on");
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (a.lm_path.empty() && a.models_dir.empty()) {
+        fprintf(stderr, "ace-train yue2-nar-train: one of --lm <yue2-lm-*.gguf> or --models <dir> "
+                        "is required\n");
+        return 2;
+    }
+    if (a.t_sampling != "logit-normal" && a.t_sampling != "uniform") {
+        fprintf(stderr, "ace-train: --t-sampling must be logit-normal or uniform\n");
+        return 2;
+    }
+    if (!tf32) {
+#ifdef _WIN32
+        _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+#else
+        setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+#endif
+    }
+#ifdef _WIN32
+    _putenv("GGML_BACKWARD_MM=1");
+#else
+    setenv("GGML_BACKWARD_MM", "1", 1);
+#endif
+    // MANDATORY: ggml_time_ms() divides by an uninitialised frequency otherwise.
+    ggml_time_init();
+    return yue2_nar_train_run(a);
 }
 
 static int cmd_train_lm(int argc, char ** argv) {
@@ -5503,6 +5661,9 @@ int main(int argc, char ** argv) {
     if (!strcmp(argv[1], "mm3-codes")) {
         return cmd_mm3_codes(argc - 1, argv + 1);
     }
+    if (!strcmp(argv[1], "mm3-retarget")) {
+        return cmd_mm3_retarget(argc - 1, argv + 1);
+    }
     if (!strcmp(argv[1], "mm3-preprocess")) {
         return cmd_mm3_preprocess(argc - 1, argv + 1);
     }
@@ -5511,6 +5672,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "mm3-train-dit")) {
         return cmd_mm3_train_dit(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-nar-train")) {
+        return cmd_yue2_nar_train(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "spike")) {
         return cmd_spike(argc - 1, argv + 1);
