@@ -37,7 +37,8 @@ show_help() {
 Usage: ./update.sh [options]
 
 Options:
-  --force         Discard local changes before pulling (with confirmation)
+  --force         Discard changes to tracked files before pulling (with confirmation)
+                  Never deletes untracked files: adapters/, models/, data/ are safe.
   --clean         Force clean engine rebuild
   --skip-engine   Skip engine rebuild (UI/server changes only)
   --help, -h      Show this help
@@ -99,35 +100,46 @@ echo "  All prerequisites found."
 echo ""
 echo -e "${CYAN}[2/5] Pre-flight checks...${NC}"
 
-# Save current HEAD for changelog later
+# Save current HEAD (and the ggml submodule pointer) for later
 OLD_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+OLD_GGML=$(git rev-parse HEAD:engine/ggml 2>/dev/null || echo "unknown")
 
-# Check for uncommitted changes
-if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+# Check for uncommitted changes to TRACKED files only.
+#
+#   --ignore-submodules=dirty: engine/ggml is a submodule that every build
+#   modifies on purpose — CMake applies engine/patches/*.patch into it at
+#   configure time. Without this flag git reports " m engine/ggml" on every
+#   source builder's machine and the update refuses to run.
+#
+#   Untracked files never count. adapters/, models/, data/ and anything else
+#   the app writes are not "changes" and this script never deletes them.
+if ! git diff --quiet --ignore-submodules=dirty 2>/dev/null || ! git diff --cached --quiet --ignore-submodules=dirty 2>/dev/null; then
     if [ "$FORCE" = "1" ]; then
         echo ""
-        echo -e "  ${YELLOW}WARNING: You have uncommitted changes. --force will DISCARD them.${NC}"
+        echo -e "  ${YELLOW}WARNING: You have uncommitted changes to tracked files.${NC}"
+        echo "  --force will DISCARD them. Untracked files (adapters, models, data) are kept."
         echo ""
         echo "  Modified files:"
-        git status --short
+        git status --short --ignore-submodules=dirty --untracked-files=no
         echo ""
-        read -p "  Discard all local changes and continue? [y/N] " confirm
+        read -p "  Discard these changes and continue? [y/N] " confirm
         if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
             echo "  Aborted by user."
             exit 1
         fi
-        echo "  Resetting working tree..."
+        echo "  Resetting tracked files..."
+        # reset --hard restores tracked files only. Never add "git clean" here:
+        # it deletes untracked files, and that once wiped a user's adapters/.
         git reset --hard
-        git clean -fd
     else
         echo ""
-        echo -e "  ${RED}ERROR: You have uncommitted changes:${NC}"
+        echo -e "  ${RED}ERROR: You have uncommitted changes to tracked files:${NC}"
         echo ""
-        git status --short
+        git status --short --ignore-submodules=dirty --untracked-files=no
         echo ""
         echo "  Options:"
         echo "    1. Commit or stash your changes first"
-        echo "    2. Run: ./update.sh --force  (discards ALL local changes)"
+        echo "    2. Run: ./update.sh --force  (discards changes to tracked files only)"
         echo ""
         exit 1
     fi
@@ -175,7 +187,43 @@ if ! git pull --ff-only origin master; then
     exit 1
 fi
 
+# engine/ggml carries HOT-Step's patches as uncommitted edits (plus two new
+# files from flash-attn-train.patch). If the pull moved the submodule pointer,
+# git checkout would refuse to switch over those edits, so restore the pristine
+# tree first. This runs INSIDE engine/ggml only — it cannot touch anything else
+# in the repo. The patches are reapplied just below.
+NEW_GGML=$(git rev-parse HEAD:engine/ggml 2>/dev/null || echo "unknown")
+if [ "$OLD_GGML" != "$NEW_GGML" ] && [ -e engine/ggml/.git ]; then
+    echo "  ggml submodule moved — restoring its pristine tree before checkout..."
+    git -C engine/ggml checkout -- . || true
+    git -C engine/ggml clean -fd || true
+fi
+
 git submodule update --init --recursive || echo "  WARNING: Submodule update had issues."
+
+# Reapply the ggml patches (same idempotent loop CMake runs at configure time,
+# but configure does not always rerun after a pull). A patch that reverses
+# cleanly is already in and is skipped.
+PATCHES_APPLIED=0
+PATCHES_FAILED=0
+for p in engine/patches/*.patch; do
+    [ -e "$p" ] || continue
+    if git apply --reverse --check --ignore-whitespace "$p" >/dev/null 2>&1; then
+        continue
+    fi
+    if git apply --ignore-whitespace "$p" >/dev/null 2>&1; then
+        echo "  Applied $p"
+        PATCHES_APPLIED=$((PATCHES_APPLIED + 1))
+    else
+        echo -e "  ${YELLOW}WARNING: $p neither applies nor is already present.${NC}"
+        PATCHES_FAILED=$((PATCHES_FAILED + 1))
+    fi
+done
+if [ "$PATCHES_FAILED" -gt 0 ]; then
+    echo "  See engine/patches/README.md — the engine build may fail without them."
+elif [ "$PATCHES_APPLIED" -eq 0 ]; then
+    echo "  ggml patches already in place."
+fi
 
 # Show what changed
 NEW_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")

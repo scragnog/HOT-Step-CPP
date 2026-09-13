@@ -94,40 +94,51 @@ REM ── Phase 1: Pre-flight safety ──────────────
 echo.
 echo [2/5] Pre-flight checks...
 
-REM Save current HEAD for changelog later
+REM Save current HEAD (and the ggml submodule pointer) for later
 for /f "tokens=*" %%h in ('git rev-parse HEAD 2^>nul') do set "OLD_HEAD=%%h"
+for /f "tokens=*" %%h in ('git rev-parse HEAD:engine/ggml 2^>nul') do set "OLD_GGML=%%h"
 
-REM Check for uncommitted changes
-git diff --quiet 2>nul
+REM Check for uncommitted changes to TRACKED files only.
+REM
+REM   --ignore-submodules=dirty: engine/ggml is a submodule that every build
+REM   modifies on purpose — CMake applies engine/patches/*.patch into it at
+REM   configure time. Without this flag git reports " m engine/ggml" on every
+REM   source builder's machine and the update refuses to run.
+REM
+REM   Untracked files never count. adapters/, models/, data/ and anything else
+REM   the app writes are not "changes" and this script never deletes them.
+git diff --quiet --ignore-submodules=dirty 2>nul
 set "DIFF_ERR=%errorlevel%"
-git diff --cached --quiet 2>nul
+git diff --cached --quiet --ignore-submodules=dirty 2>nul
 set "STAGED_ERR=%errorlevel%"
 
 if "%DIFF_ERR%%STAGED_ERR%" neq "00" (
     if "%FORCE%"=="1" (
         echo.
-        echo   WARNING: You have uncommitted changes. --force will DISCARD them.
+        echo   WARNING: You have uncommitted changes to tracked files.
+        echo   --force will DISCARD them. Untracked files (adapters, models, data) are kept.
         echo.
         echo   Modified files:
-        git status --short
+        git status --short --ignore-submodules=dirty --untracked-files=no
         echo.
-        choice /C YN /M "  Discard all local changes and continue"
+        choice /C YN /M "  Discard these changes and continue"
         if errorlevel 2 (
             echo   Aborted by user.
             goto :fail
         )
-        echo   Resetting working tree...
+        echo   Resetting tracked files...
+        REM reset --hard restores tracked files only. Never add "git clean" here:
+        REM it deletes untracked files, and that once wiped a user's adapters/.
         git reset --hard
-        git clean -fd
     ) else (
         echo.
-        echo   ERROR: You have uncommitted changes:
+        echo   ERROR: You have uncommitted changes to tracked files:
         echo.
-        git status --short
+        git status --short --ignore-submodules=dirty --untracked-files=no
         echo.
         echo   Options:
         echo     1. Commit or stash your changes first
-        echo     2. Run: update.bat --force  (discards ALL local changes)
+        echo     2. Run: update.bat --force  (discards changes to tracked files only)
         echo.
         goto :fail
     )
@@ -185,9 +196,47 @@ if errorlevel 1 (
     goto :fail
 )
 
+REM engine/ggml carries HOT-Step's patches as uncommitted edits (plus two new
+REM files from flash-attn-train.patch). If the pull moved the submodule
+REM pointer, git checkout would refuse to switch over those edits, so restore
+REM the pristine tree first. This runs INSIDE engine\ggml only — it cannot
+REM touch anything else in the repo. The patches are reapplied just below.
+for /f "tokens=*" %%h in ('git rev-parse HEAD:engine/ggml 2^>nul') do set "NEW_GGML=%%h"
+if "%OLD_GGML%" neq "%NEW_GGML%" (
+    if exist "engine\ggml\.git" (
+        echo   ggml submodule moved — restoring its pristine tree before checkout...
+        git -C engine\ggml checkout -- .
+        git -C engine\ggml clean -fd
+    )
+)
+
 git submodule update --init --recursive
 if errorlevel 1 (
     echo   WARNING: Submodule update had issues. Build may fail.
+)
+
+REM Reapply the ggml patches (same idempotent loop CMake runs at configure
+REM time, but configure does not always rerun after a pull). A patch that
+REM reverses cleanly is already in and is skipped.
+set "PATCHES_APPLIED=0"
+set "PATCHES_FAILED=0"
+for %%p in ("engine\patches\*.patch") do (
+    git apply --reverse --check --ignore-whitespace "%%~p" >nul 2>&1
+    if errorlevel 1 (
+        git apply --ignore-whitespace "%%~p" >nul 2>&1
+        if errorlevel 1 (
+            echo   WARNING: engine\patches\%%~nxp neither applies nor is already present.
+            set /A PATCHES_FAILED+=1
+        ) else (
+            echo   Applied engine\patches\%%~nxp
+            set /A PATCHES_APPLIED+=1
+        )
+    )
+)
+if "!PATCHES_FAILED!" neq "0" (
+    echo   See engine\patches\README.md — the engine build may fail without them.
+) else if "!PATCHES_APPLIED!"=="0" (
+    echo   ggml patches already in place.
 )
 
 REM Show what changed
@@ -374,7 +423,8 @@ echo.
 echo Usage: update.bat [options]
 echo.
 echo Options:
-echo   --force         Discard local changes before pulling (with confirmation)
+echo   --force         Discard changes to tracked files before pulling (with confirmation)
+echo                   Never deletes untracked files: adapters/, models/, data/ are safe.
 echo   --clean         Force clean engine rebuild (CUDA: 20+ min warning)
 echo   --skip-engine   Skip engine rebuild (UI/server changes only)
 echo   --help, -h      Show this help

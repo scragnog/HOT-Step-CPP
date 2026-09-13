@@ -13,6 +13,8 @@ server/server/data/
 # anchored to root: server/src/data/ and ui/src/data/ are tracked source
 /data/
 /models/
+# Trained/downloaded adapters (server/src/config.ts DEFAULT_ADAPTERS writes here)
+/adapters/
 # Local machine config
 /.mcp.json
 /SafeSettings.json
