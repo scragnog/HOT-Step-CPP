@@ -4173,7 +4173,12 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             }
         }
 
-        const bool saved_here = a.save_every > 0 && (step % a.save_every == 0 || step == a.steps);
+        // --save-every 0 means "no intermediate checkpoints", never "no
+        // adapter": the final step always exports. A 2.4 h albumY run
+        // (2026-09-13) ended with nothing on disk because this condition
+        // gated the last step too, and the server then removed the resume
+        // state as a finished run's leftovers.
+        const bool saved_here = (a.save_every > 0 && step % a.save_every == 0) || step == a.steps;
         std::string ckpt_dir;
         if (saved_here) {
             ckpt_dir = save_ckpt(step, win);
@@ -4211,7 +4216,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 }
             }
             if (ready && value <= (double) a.target_loss) {
-                if (!saved_here && a.save_every > 0) {
+                if (!saved_here) {
                     ckpt_dir = save_ckpt(step, win);
                 }
                 fprintf(stderr,

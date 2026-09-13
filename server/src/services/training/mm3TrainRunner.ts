@@ -723,6 +723,15 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
             'This run can be continued later from the Previous runs list on this tab — its optimizer '
             + 'state is saved beside the checkpoints.');
         }
+      } else if (!finalCkpt) {
+        // A finished run with no checkpoint on disk has nothing else to show
+        // for its hours; the resume state is then the only copy of the
+        // weights. Keep it and say so. (albumY 2026-09-13: saveEvery 0 plus a
+        // trainer that gated the final export on it, and this branch deleted
+        // the one recoverable artifact.)
+        log(job, 'warn',
+          'The run ended without exporting a checkpoint. Its resume state has been KEPT so the '
+          + 'weights can be recovered by continuing the run — do not delete it by hand.');
       } else {
         let freed = 0;
         for (const name of ['resume-state.bin', 'resume-state.json']) {

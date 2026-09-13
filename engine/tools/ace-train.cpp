@@ -245,6 +245,12 @@ static void print_usage(void) {
             "                codebooks, leaving timbre unspecified so a style adapter must\n"
             "                learn it. Full alignment describes the target so completely that\n"
             "                the adapter learns nothing (measured: identical to base).\n"
+            "                [--lm-adapter <adapter_model.safetensors>] roll out through a\n"
+            "                trained planner adapter (runtime path, same loader as /mm3/synth)\n"
+            "                so the DiT trains on the hiddens a STACKED render feeds it.\n"
+            "                [--lm-adapter-scale 1] [--lm-adapter-scale-attn 1]\n"
+            "                [--lm-adapter-scale-mlp 1] [--trigger <word>] prepends\n"
+            "                \"<word>, \" to every caption, the shape --trigger-prepend trained.\n"
             "  mm3-train-dit MiniMax-Music3 flow-DiT LoRA training.\n"
             "                --cache <dir from mm3-condition> --models <dir> --out <dir>\n"
             "                [--rank 32] [--alpha 32] [--lr 1e-4] [--steps 200] [--crop 689]\n"
@@ -3527,8 +3533,14 @@ static int cmd_mm3_condition(int argc, char ** argv) {
     std::string manifest_path, models_dir, captions_dir, codes_dir, codes_mode = "full";
     std::string dit_quant = "Q2_K", lm_quant;
     int64_t     seed        = 42;
-    double      segment_sec = 60.0;   // 0 = one rollout for the whole song
+    double      segment_sec = 60.0;   // 0 = one rollout per song
     bool        tf32        = false;
+    // Stacked-adapter conditioning (2026-09-13): roll out through a trained
+    // planner adapter so the DiT trains on the hiddens it will actually be fed
+    // when the two are used together. The old caches (base LM) were the
+    // conditioning the DiT never sees once an LM adapter is on.
+    std::string        lm_adapter_path, trigger;
+    MM3LmAdapterScales lm_scales;
 
     for (int i = 1; i < argc; i++) {
         auto next = [&](const char * what) -> const char * {
@@ -3545,6 +3557,11 @@ static int cmd_mm3_condition(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--seed"))      seed          = atoll(next("--seed"));
         else if (!strcmp(argv[i], "--segment-sec")) segment_sec = atof(next("--segment-sec"));
         else if (!strcmp(argv[i], "--tf32"))      tf32          = !strcmp(next("--tf32"), "on");
+        else if (!strcmp(argv[i], "--lm-adapter")) lm_adapter_path = next("--lm-adapter");
+        else if (!strcmp(argv[i], "--lm-adapter-scale"))      lm_scales.global = (float) atof(next("--lm-adapter-scale"));
+        else if (!strcmp(argv[i], "--lm-adapter-scale-attn")) lm_scales.attn   = (float) atof(next("--lm-adapter-scale-attn"));
+        else if (!strcmp(argv[i], "--lm-adapter-scale-mlp"))  lm_scales.mlp    = (float) atof(next("--lm-adapter-scale-mlp"));
+        else if (!strcmp(argv[i], "--trigger"))   trigger       = next("--trigger");
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }
@@ -3611,6 +3628,30 @@ static int cmd_mm3_condition(int argc, char ** argv) {
         return 1;
     }
 
+    // Planner adapter: the same loader and the same global the server's
+    // /mm3/synth runtime path uses, so the rollout here is the rollout a
+    // stacked render performs. Runtime-only — LoHa/HiRA deltas are not low
+    // rank and have no runtime path.
+    if (!lm_adapter_path.empty()) {
+        g_mm3_lm_adapter = mm3_lm_adapter_load(lm_adapter_path.c_str(), &err,
+                                               model.lm_file.found ? model.lm_file.path.c_str() : nullptr);
+        if (!g_mm3_lm_adapter) {
+            fprintf(stderr, "[mm3-condition] --lm-adapter: %s\n", err.c_str());
+            return 1;
+        }
+        if (g_mm3_lm_adapter->is_loha || g_mm3_lm_adapter->is_hira) {
+            fprintf(stderr, "[mm3-condition] --lm-adapter: LoHa/HiRA adapters have no runtime path\n");
+            mm3_lm_adapter_drop();
+            return 1;
+        }
+        fprintf(stderr, "[mm3-condition] lm adapter: %s (rank %d) scales global %.2f attn %.2f mlp %.2f\n",
+                lm_adapter_path.c_str(), g_mm3_lm_adapter->rank, (double) lm_scales.global,
+                (double) lm_scales.attn, (double) lm_scales.mlp);
+    }
+    if (!trigger.empty()) {
+        fprintf(stderr, "[mm3-condition] trigger: every caption becomes \"%s, <caption>\"\n", trigger.c_str());
+    }
+
     const int64_t H   = (int64_t) model.lm_cfg.embedding_length;
     const int64_t LAY = (int64_t) model.lm_cfg.num_codebooks;   // 8 = LM hidden + 7 depth
     const int64_t FPS = (int64_t) model.lm_cfg.frame_rate;
@@ -3663,6 +3704,11 @@ static int cmd_mm3_condition(int argc, char ** argv) {
             size_t r;
             while ((r = fread(b, 1, sizeof(b), cf)) > 0) caption.append(b, r);
             fclose(cf);
+        }
+        // The training-row shape mm3-lm-train --trigger-prepend teaches:
+        // "<trigger>, Global Metadata..." on the same line. Idempotent.
+        if (!trigger.empty() && caption.compare(0, trigger.size() + 2, trigger + ", ") != 0) {
+            caption = trigger + ", " + caption;
         }
 
         // ── segmented AR rollout ──
@@ -3770,6 +3816,9 @@ static int cmd_mm3_condition(int argc, char ** argv) {
             aopt.max_frames      = n_iter - 1;
             aopt.seed            = (uint64_t) seed;
             aopt.collect_hiddens = true;
+            aopt.lm_adapter        = g_mm3_lm_adapter;
+            aopt.lm_adapter_scales = lm_scales;
+            aopt.lm_soft           = g_mm3_lm_adapter;
             aopt.forced_semantic = fsem.data();
             // --codes-mode semantic pins CONTENT (what happens when) to the real
             // audio but lets the depth decoder sample TIMBRE from its own
@@ -3817,6 +3866,9 @@ static int cmd_mm3_condition(int argc, char ** argv) {
             // identical conditioning, which is a degenerate signal to train on.
             aopt.seed            = (uint64_t) (seed + sg);
             aopt.collect_hiddens = true;
+            aopt.lm_adapter        = g_mm3_lm_adapter;
+            aopt.lm_adapter_scales = lm_scales;
+            aopt.lm_soft           = g_mm3_lm_adapter;
             MM3ArResult ar;
             if (!mm3_ar_plan(model, req.gen.ids_cond.data(), req.gen.ids_uncond.data(),
                              (int64_t) req.gen.ids_cond.size(), aopt, &ar, &err)) {
@@ -3934,9 +3986,16 @@ static int cmd_mm3_condition(int argc, char ** argv) {
     yyjson_mut_obj_add_int(odoc, oroot, "seed", seed);
     yyjson_mut_obj_add_strcpy(odoc, oroot, "lm", model.lm_file.name.c_str());
     yyjson_mut_obj_add_str(odoc, oroot, "dtype", "f16");
+    yyjson_mut_obj_add_strcpy(odoc, oroot, "codes_mode", codes_dir.empty() ? "sampled" : codes_mode.c_str());
+    yyjson_mut_obj_add_strcpy(odoc, oroot, "lm_adapter", lm_adapter_path.c_str());
+    yyjson_mut_obj_add_real(odoc, oroot, "lm_adapter_scale", (double) lm_scales.global);
+    yyjson_mut_obj_add_real(odoc, oroot, "lm_adapter_scale_attn", (double) lm_scales.attn);
+    yyjson_mut_obj_add_real(odoc, oroot, "lm_adapter_scale_mlp", (double) lm_scales.mlp);
+    yyjson_mut_obj_add_strcpy(odoc, oroot, "trigger", trigger.c_str());
     yyjson_mut_obj_add_uint(odoc, oroot, "n_ok", (uint64_t) n_ok);
     yyjson_mut_obj_add_uint(odoc, oroot, "n_failed", (uint64_t) n_fail);
     yyjson_mut_obj_add_val(odoc, oroot, "samples", oarr);
+    mm3_lm_adapter_drop();
 
     const std::string opath = out_dir + "/mm3_condition.json";
     size_t            olen  = 0;
