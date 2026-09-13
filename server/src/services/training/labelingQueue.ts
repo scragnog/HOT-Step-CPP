@@ -358,6 +358,8 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
     case 'dit-calibrate':  // drives /synth + /vae — same rule
     case 'mm3-codes':      // DAV + RVQ encode, whole-card
     case 'mm3-train-lm':   // peaks at 31.7 GB of 32 — nothing else may run
+    case 'yue2-preprocess':  // YuE2 VAE encode, 3.7 GB compute buffer + the VAE
+    case 'yue2-nar-train':   // 19.6 GB at rank 256 with a bf16 base
       return 'gpu';
     case 'label':
       return (job.opts as LabelOptions | undefined)?.useUnderstand === true ? 'gpu' : 'net';
@@ -1383,6 +1385,31 @@ export function startMm3TrainLmJob(datasetId: string, opts: unknown): TrainingJo
   enqueue(job, async (j) => {
     const { runMm3TrainLmJob } = await import('./mm3TrainRunner.js');
     await runMm3TrainLmJob(j);
+  });
+  return job;
+}
+
+/**
+ * YuE2 latent cache (audio -> VAE latents + the manifest the NAR trainer
+ * reads). `sampleIds` is empty for mm3-codes' reason and one more: the engine
+ * scans the source FOLDER rather than the dataset manifest, so the files it
+ * encodes are not the dataset's rows and there is no per-row state to mark.
+ */
+export function startYue2PreprocessJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-preprocess', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2PreprocessJob } = await import('./yue2TrainRunner.js');
+    await runYue2PreprocessJob(j);
+  });
+  return job;
+}
+
+/** YuE2 NAR-half LoRA training (docs/plans/yue2/08-nar-lora-trainer.md §6). */
+export function startYue2TrainJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-nar-train', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2TrainJob } = await import('./yue2TrainRunner.js');
+    await runYue2TrainJob(j);
   });
   return job;
 }

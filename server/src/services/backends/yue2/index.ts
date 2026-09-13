@@ -13,14 +13,18 @@
 // below is additive on BackendCapabilities so the UI has one place to read it
 // from rather than hardcoding the string a second time.
 
+import fs from 'fs';
+import path from 'path';
+
 import { engineReady } from '../../../engineState.js';
 import { isEngineSuspended } from '../../aceEngineProcess.js';
 import { getSetting, setSetting } from '../../../db/lireekDb.js';
+import { listAllYue2Runs } from '../../training/yue2Runs.js';
 import { runYue2Generation } from './generate.js';
 import {
   yue2Props, yue2PropsCached, yue2SelectModel, yue2Unload,
 } from './client.js';
-import type { Yue2Selection } from './client.js';
+import type { Yue2Props, Yue2Selection } from './client.js';
 import type {
   EngineBackend,
   BackendCapabilities,
@@ -47,13 +51,61 @@ export const YUE2_LICENSE_NOTICE =
 
 const LM_TYPE_SETTING = 'yue2_lm_type';
 const VAE_VARIANT_SETTING = 'yue2_vae_variant';
+/** Absolute path to the NAR LoRA to merge, '' for none. Absolute because the
+ *  engine opens the path as given (yue2-adapter.h) — see Yue2Selection. */
+const LM_ADAPTER_SETTING = 'yue2_lm_adapter';
+const LM_ADAPTER_SCALE_SETTING = 'yue2_lm_adapter_scale';
+
+const YUE2_ADAPTER_DEFAULT_SCALE = 1.0;
+
+export interface Yue2PersistedSelection {
+  lm: string;
+  vae_variant: string;
+  /** '' = base model, no adapter merged. */
+  lm_adapter: string;
+  lm_adapter_scale: number;
+}
 
 /** The persisted selection. '' = auto (engine best-first / standard). */
-export function yue2PersistedSelection(): { lm: string; vae_variant: string } {
+export function yue2PersistedSelection(): Yue2PersistedSelection {
+  const scale = Number(getSetting(LM_ADAPTER_SCALE_SETTING, ''));
   return {
     lm: getSetting(LM_TYPE_SETTING, ''),
     vae_variant: getSetting(VAE_VARIANT_SETTING, ''),
+    lm_adapter: getSetting(LM_ADAPTER_SETTING, ''),
+    lm_adapter_scale: Number.isFinite(scale) && scale > 0 ? scale : YUE2_ADAPTER_DEFAULT_SCALE,
   };
+}
+
+/** The engine's own key spelling for an adapter set (yue2_adapter_key):
+ *  `<path>@<scale to 4dp>`, `; `-joined for a stack. Built here so the
+ *  persisted pick can be compared against what GET /yue2/props reports without
+ *  guessing at formatting. */
+function yue2AdapterKey(adapterPath: string, scale: number): string {
+  if (!adapterPath) return '';
+  return `${adapterPath}@${scale.toFixed(4)}`;
+}
+
+/** An adapter reference the engine can actually open, or null.
+ *
+ *  Deliberately NOT confined to the training root: a hand-trained or copied
+ *  adapter anywhere on disk is a legitimate pick, and the reference comes from
+ *  the local user either way. What is refused is a reference that would fail
+ *  silently later — a relative path (the engine would resolve it against
+ *  ace-server's working directory, which is nobody's intent), a missing file,
+ *  or something that is not a .safetensors. A bad path must fail the pick, not
+ *  the next generation. */
+function resolveYue2Adapter(ref: string): string | null {
+  const trimmed = ref.trim();
+  if (!trimmed) return null;
+  if (!path.isAbsolute(trimmed)) return null;
+  if (!/\.safetensors$/i.test(trimmed)) return null;
+  try {
+    if (!fs.statSync(trimmed).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return path.normalize(trimmed);
 }
 
 const YUE2_OPERATIONS: readonly GenerationOperation[] = ['text2music'];
@@ -82,10 +134,21 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     ...(typeof submission.randomSeed === 'boolean' ? { randomSeed: submission.randomSeed } : {}),
     ...(typeof submission.title === 'string' ? { title: submission.title } : {}),
   };
+  const picked = yue2PersistedSelection();
   return {
     operation: 'text2music',
     common,
-    models: yue2PersistedSelection(),
+    // BackendModelSelection is string-valued, so the adapter scale is
+    // stringified rather than dropped: the snapshot is a record of what the
+    // request was resolved against, and a merged adapter's strength is part of
+    // that. Omitted entirely when no adapter is picked.
+    models: {
+      lm: picked.lm,
+      vae_variant: picked.vae_variant,
+      ...(picked.lm_adapter
+        ? { lm_adapter: picked.lm_adapter, lm_adapter_scale: String(picked.lm_adapter_scale) }
+        : {}),
+    },
     options,
     policy: { retry: { maxAttempts: 2, reseedOnRetry: true } },
   };
@@ -115,6 +178,11 @@ function status(): BackendLifecycleStatus {
 
 async function capabilities(): Promise<BackendCapabilities> {
   const { props, stale } = await yue2Props();
+  // Self-healing restore, same as MM3's: the UI polls this, so a crash-respawn
+  // that reset the in-memory selection is repaired without anyone reopening
+  // the picker. Fire-and-forget — capabilities must stay fast and must never
+  // fail over a residency concern.
+  void reconcileSelection(props, stale);
   const synthReady = props?.synth_ready === true;
   const up = engineReady && !isEngineSuspended() && synthReady;
 
@@ -152,7 +220,14 @@ async function capabilities(): Promise<BackendCapabilities> {
       plugins: false,
       samplerPlugins: false,
       adapters: false,
-      lmAdapters: false,
+      // NAR LoRAs trained by the Training Studio, merged into the LM at load.
+      // Not ACE's DiT stack (no masking, no group scales, no runtime mode) —
+      // hence lmAdapters and not `adapters`.
+      lmAdapters: true,
+      // ...and held as ENGINE STATE: the delta is baked into the resident
+      // weights, so the pick is a POST that evicts the model rather than a
+      // field on the next generation request.
+      lmAdapterSelectable: true,
       postProcess: true,
       stableStep: true,
       whisper: true,
@@ -222,6 +297,52 @@ async function capabilities(): Promise<BackendCapabilities> {
   };
 }
 
+/** Every trained NAR adapter on disk, newest run first, each checkpoint
+ *  labelled with what its own safetensors header records.
+ *
+ *  The run directories are enumerated by training/yue2Runs.ts — the same
+ *  scanner the Training Studio reads — rather than a second walk of the same
+ *  tree that could disagree with it about what counts as a checkpoint. Paths
+ *  are ABSOLUTE because that is what the engine needs (see Yue2Selection). */
+function yue2LmAdapterCatalogue(): {
+  paths: string[];
+  meta: NonNullable<BackendModels['lmAdapterMeta']>;
+} {
+  const paths: string[] = [];
+  const meta: NonNullable<BackendModels['lmAdapterMeta']> = {};
+  for (const run of listAllYue2Runs()) {
+    // Newest checkpoint first within a run: the final export is what anyone
+    // wants by default, and the snapshot ladder is the "it was better at 4000
+    // steps" escape hatch below it.
+    for (const ckpt of [...run.checkpoints].reverse()) {
+      const trigger = ckpt.meta?.trigger || run.trigger || '';
+      const rank = ckpt.meta?.rank ?? run.rank;
+      const steps = ckpt.meta?.steps ?? (ckpt.final ? run.configuredSteps : ckpt.step);
+      // Absolute, always: the adapter root is absolute by default but an
+      // ACESTEPCPP_ADAPTERS override need not be, and a relative path would be
+      // read by the ENGINE against ace-server's working directory.
+      const abs = path.resolve(ckpt.path);
+      paths.push(abs);
+      meta[abs] = {
+        label: [
+          run.runName,
+          ckpt.final ? 'final' : `step ${ckpt.step}`,
+          trigger ? `"${trigger}"` : '',
+        ].filter(Boolean).join(' · '),
+        runName: run.runName,
+        trigger: trigger || undefined,
+        rank,
+        steps: Number.isFinite(steps) && steps > 0 && steps < Number.MAX_SAFE_INTEGER ? steps : undefined,
+        bytes: ckpt.bytes,
+        dataset: run.datasetName,
+        final: ckpt.final,
+        loss: ckpt.loss,
+      };
+    }
+  }
+  return { paths, meta };
+}
+
 async function models(): Promise<BackendModels> {
   const { props } = await yue2Props();
   const v = props?.variants;
@@ -232,6 +353,9 @@ async function models(): Promise<BackendModels> {
     for (const f of v.lm.available) meta.lm[f.type] = { label: f.filename, bytes: f.bytes };
   }
 
+  const adapters = yue2LmAdapterCatalogue();
+  const persisted = yue2PersistedSelection();
+
   return {
     buckets: {
       lm: (v?.lm?.available ?? []).map(f => f.type),
@@ -241,10 +365,19 @@ async function models(): Promise<BackendModels> {
       vae: ['standard', 'legacy'],
     },
     adapters: [],
-    lmAdapters: [],
+    lmAdapters: adapters.paths,
+    lmAdapterMeta: adapters.meta,
     defaults: {
       lm: v?.lm?.selected ?? '',
       vae: props?.files?.vae_standard?.found ? 'standard' : (props?.files?.vae_legacy?.found ? 'legacy' : ''),
+      // The persisted pick, not props.adapter.merged: `merged` is empty for
+      // the whole window between a selection and the next warm/synth, and a
+      // picker that blanked itself there would read as "the choice was lost".
+      // What is actually IN FORCE right now is reported separately below.
+      lmAdapter: persisted.lm_adapter,
+      lmAdapterScale: persisted.lm_adapter_scale,
+      lmAdapterMerged: props?.adapter?.merged ?? '',
+      lmAdapterInForce: props?.adapter?.in_force === true,
     },
     meta,
   };
@@ -256,18 +389,126 @@ async function selectModel(selection: Record<string, string>) {
     lm: selection.lm ?? persisted.lm,
     vae_variant: (selection.vae as Yue2Selection['vae_variant']) ?? (persisted.vae_variant as Yue2Selection['vae_variant']),
   };
+
+  // The adapter bucket. An absent key means "leave it alone" — which here also
+  // means "keep the persisted pick in force", so it is resent rather than
+  // dropped whenever we hold one. An EXPLICIT '' is a clear, and is the only
+  // thing that sends null. Nothing is sent at all when the caller said nothing
+  // and we hold nothing: that is the omitted case the engine's
+  // omitted-vs-null distinction exists for, and it keeps a VAE-only POST from
+  // disturbing an adapter someone selected out-of-band.
+  const adapterGiven = typeof selection.lmAdapter === 'string';
+  const wantAdapterRef = adapterGiven ? selection.lmAdapter.trim() : persisted.lm_adapter;
+  const scaleRaw = Number(selection.lmAdapterScale);
+  const wantScale = Number.isFinite(scaleRaw) && scaleRaw > 0 ? scaleRaw : persisted.lm_adapter_scale;
+  let wantAdapter = '';
+  if (wantAdapterRef) {
+    const resolved = resolveYue2Adapter(wantAdapterRef);
+    if (!resolved) {
+      if (adapterGiven) {
+        // Fail the pick loudly (the route answers 400). Merging nothing while
+        // the UI shows an adapter is exactly the silent-failure this whole
+        // path exists to avoid.
+        throw new Error(`YuE2 LM adapter not usable: ${wantAdapterRef} `
+          + '(needs an absolute path to an existing .safetensors)');
+      }
+      // A persisted pick whose file has since moved or been deleted: clear it
+      // rather than wedge every later selection on a 400.
+      console.warn(`[Backends] YuE2 LM adapter gone, clearing persisted pick: ${wantAdapterRef}`);
+    } else {
+      wantAdapter = resolved;
+    }
+  }
+  if (adapterGiven || persisted.lm_adapter) {
+    sel.lm_adapter = wantAdapter || null;
+    if (wantAdapter) sel.lm_adapter_scale = wantScale;
+  }
+
   // `changed` isn't part of the engine's own response (yue2_handle_select_model
   // returns {selected, vae_variant, lm_type_want, lm_file, lm_found} — no
   // `changed`/`lm` field, unlike mm3SelectModel's shape); EngineBackend's
   // interface requires it, so it's derived here from the persisted values.
-  const changed = (sel.lm ?? '') !== persisted.lm || (sel.vae_variant ?? '') !== persisted.vae_variant;
+  const changed = (sel.lm ?? '') !== persisted.lm
+    || (sel.vae_variant ?? '') !== persisted.vae_variant
+    || wantAdapter !== persisted.lm_adapter
+    || (wantAdapter !== '' && wantScale !== persisted.lm_adapter_scale);
   const result = await yue2SelectModel(sel);
   setSetting(LM_TYPE_SETTING, sel.lm ?? '');
   setSetting(VAE_VARIANT_SETTING, sel.vae_variant ?? '');
+  // Persist only after the engine accepted it — a refused pick that was
+  // written back would be replayed on every boot from then on.
+  setSetting(LM_ADAPTER_SETTING, wantAdapter);
+  setSetting(LM_ADAPTER_SCALE_SETTING, wantAdapter ? String(wantScale) : '');
   if (changed) {
-    console.log(`[Backends] YuE2 models: lm_type=${result.lm_type_want || '(auto)'} vae_variant=${result.vae_variant} lm_found=${result.lm_found}`);
+    console.log(`[Backends] YuE2 models: lm_type=${result.lm_type_want || '(auto)'} vae_variant=${result.vae_variant}`
+      + ` lm_found=${result.lm_found} lm_adapter=${wantAdapter ? path.basename(wantAdapter) : '(none)'}`);
   }
   return { ...result, changed };
+}
+
+// ── Persisted selection replay ──────────────────────────────────────────────
+
+/** Push the persisted selection back into the engine if it has drifted.
+ *
+ *  Same contract as MM3's reconcileSelection(), for the same reason: the
+ *  engine's own `requested` fields reset to '' when ace-server restarts, which
+ *  makes them an exact drift signal rather than a guess. Without this a
+ *  restart silently drops the adapter pick and the next generation renders the
+ *  base model while the picker still shows the adapter — the MM3 trap
+ *  (project-mm3-selection-engine-only), one family over.
+ *
+ *  Idempotent, so it is safe on both a cold boot and a crash-respawn. */
+async function reconcileSelection(props: Yue2Props | null, stale: boolean): Promise<void> {
+  // A stale manifest means the props probe timed out, which nearly always
+  // means a generation holds the engine mutex. Re-selecting then would block
+  // and could evict weights out from under the running job.
+  if (stale || !props) return;
+
+  const want = yue2PersistedSelection();
+  const adapter = want.lm_adapter ? resolveYue2Adapter(want.lm_adapter) : null;
+  if (!want.lm && !want.vae_variant && !adapter) return;  // never chosen — the engine default is right
+
+  // Only ask for an LM type the engine can actually see; a file deleted since
+  // the choice was made must fall back, not wedge the poll on a 400.
+  const lmSeen = !want.lm
+    || (props.variants?.lm?.available?.some(f => f.type === want.lm) ?? false);
+  const targetLm = lmSeen ? want.lm : '';
+
+  const lmDrifted = targetLm !== (props.variants?.lm?.requested ?? '');
+  const adapterDrifted = yue2AdapterKey(adapter ?? '', want.lm_adapter_scale)
+    !== (props.adapter?.requested ?? '');
+  if (!lmDrifted && !adapterDrifted) return;
+
+  const sel: Yue2Selection = { lm: targetLm };
+  if (want.vae_variant === 'standard' || want.vae_variant === 'legacy') {
+    sel.vae_variant = want.vae_variant;
+  }
+  // Only speak about the adapter when there is something to say: replaying a
+  // pick we hold, or clearing one the engine has but we do not.
+  if (adapter) {
+    sel.lm_adapter = adapter;
+    sel.lm_adapter_scale = want.lm_adapter_scale;
+  } else if (props.adapter?.requested) {
+    sel.lm_adapter = null;
+  }
+
+  try {
+    await yue2SelectModel(sel);
+    console.log('[Backends] YuE2 restored persisted models:'
+      + ` lm_type=${targetLm || '(auto)'} lm_adapter=${adapter ? path.basename(adapter) : '(none)'}`);
+  } catch (err: any) {
+    // Advisory: a failed restore leaves the engine on its defaults, which
+    // still generate. Logging beats throwing out of a capability poll.
+    console.warn('[Backends] YuE2 selection restore failed:', err?.message || err);
+  }
+}
+
+/** Called once when the engine reports ready, and again after every engine
+ *  restart (server/src/index.ts), so the persisted choice is in force before
+ *  the first generation rather than after the UI happens to poll. */
+export async function restoreYue2Selection(): Promise<void> {
+  const { props, stale } = await yue2Props();
+  await reconcileSelection(props, stale);
 }
 
 export const yue2Backend: EngineBackend = {

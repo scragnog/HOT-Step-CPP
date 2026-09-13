@@ -21,7 +21,10 @@ export type TrainingJobKind =
   | 'audition' | 'lm-calibrate' | 'dit-calibrate'
   // MiniMax-Music3. Both GPU-lane and engine-stopping — an MM3 training step
   // peaks at 31.7 GB of a 32 GB card.
-  | 'mm3-codes' | 'mm3-train-lm';
+  | 'mm3-codes' | 'mm3-train-lm'
+  // YuE2 NAR LoRA. Both GPU-lane and engine-stopping: preprocess holds a 3.7 GB
+  // encode buffer on top of the VAE, training peaks at 19.6 GB at rank 256.
+  | 'yue2-preprocess' | 'yue2-nar-train';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -418,6 +421,235 @@ export interface TrainingPreview {
   bytes: number;
   ms: number;
   ts: number;
+}
+
+// ─── YuE2 NAR LoRA training (mirrors services/training/yue2Train.ts) ──────
+//
+// A second trainer pair, not a variant of the MM3 one: `yue2-preprocess` turns
+// a FOLDER of audio into cached VAE latents, and `yue2-nar-train` trains a LoRA
+// on the frozen NAR half from that cache's manifest. Neither reads dataset.json,
+// so neither takes a dataset manifest, codes directory or tensor cache — which
+// is why none of the Mm3* shapes above are reused.
+//
+// Every default and every coefficient below arrives from the server; nothing in
+// the UI carries its own copy of a measurement.
+
+export type Yue2NarTarget = 'nar_attn' | 'nar_attn_mlp' | 'nar_attn_mlp_proj';
+export type Yue2CaptionMode = 'txt' | 'default' | 'none';
+export type Yue2VaeVariant = 'standard' | 'legacy';
+export type Yue2PresetName = 'fast' | 'balanced' | 'thorough';
+
+/** What `yue2_preprocess.json` says it holds. */
+export interface Yue2CacheSummary {
+  sources: number;
+  clips: number;
+  clipFrames: number;
+  captionMode: string;
+  totalAudioSec: number;
+  skipped: number;
+  failed: number;
+}
+
+/** An installed `yue2-lm-*.gguf`. DELIBERATELY NOT a quality ladder like
+ *  Mm3BaseInfo: no YuE2 quant other than bf16 has been trained on, and
+ *  `proven` marks the one that has rather than inventing a ranking. */
+export interface Yue2BaseInfo {
+  id: string;
+  file: string;
+  bytes: number;
+  peakMb: number;
+  proven: boolean;
+}
+
+/** Coefficients for estimateYue2PeakMb, fitted to two measured anchors
+ *  (rank 128 -> 17.0 GB, rank 256 -> 19.6 GB, bf16 base included in both). */
+export interface Yue2VramModel {
+  perRankMb: number;
+  constMb: number;
+  fallbackBaseMb: number;
+  /** The preprocess encode compute buffer — 3.7 GB measured. */
+  encodeComputeMb: number;
+  /** Measured seconds per optimizer step at those anchors. */
+  secondsPerStep: number;
+}
+
+/** The measured recipe, shipped rather than duplicated client-side. */
+export interface Yue2Defaults {
+  lmType: string;
+  vaeVariant: Yue2VaeVariant;
+  rank: number;
+  alpha: number;
+  target: Yue2NarTarget;
+  lr: number;
+  lrScheduler: 'cosine' | 'constant';
+  warmup: number;
+  steps: number;
+  saveEvery: number;
+  gradAccum: number;
+  maxGradNorm: number;
+  weightDecay: number;
+  captionDropout: number;
+  tSampling: 'logit-normal' | 'uniform';
+  seed: number;
+  kvCache: number;
+  logEvery: number;
+  /** The engine deletes its resume state on a clean export. Reported, not
+   *  offered — there is no server-side way to keep it. */
+  deletesResumeStateOnFinish: boolean;
+  clipSeconds: number;
+  captionMode: Yue2CaptionMode;
+  defaultCaption: string;
+  decode: 'auto' | 'ffmpeg';
+  tileFrames: number;
+  haloFrames: number;
+}
+
+/** GET /api/training/datasets/:id/yue2 */
+export interface Yue2Status {
+  latentsDir: string;
+  manifestPath: string;
+  /** Null = nothing encoded yet. */
+  cache: Yue2CacheSummary | null;
+  sourceDir: string;
+  recursive: boolean;
+  /** What `yue2-preprocess`'s FLAT scan sees. Can legitimately differ from
+   *  `datasetSamples` (subfolders, exclusions, .opus/.aac) and the card shows
+   *  both rather than picking one. */
+  scannableFiles: number;
+  unsupportedFiles: number;
+  filesNeedingFfmpeg: number;
+  datasetSamples: number;
+  datasetExcluded: number;
+  ffmpeg: boolean;
+  missingForPreprocess: string[];
+  missingForTrain: string[];
+  bases: Yue2BaseInfo[];
+  vaeFile: string;
+  /** 0 = UNKNOWN (engine down or CPU-only), never "no VRAM". */
+  gpuTotalMb: number;
+  preprocessPeakMb: number;
+  vramModel: Yue2VramModel;
+  defaults: Yue2Defaults;
+  presets: Record<Yue2PresetName, { steps: number; saveEvery: number }>;
+  defaultPreset: Yue2PresetName;
+  targetTensors: Record<Yue2NarTarget, number>;
+  /** The dataset's own trigger word, which the trainer defaults to. */
+  trigger: string;
+  /** CC BY-NC 4.0 notice, verbatim from the backend module. Rendered as sent —
+   *  never truncated, reworded or paraphrased. */
+  license: string;
+}
+
+/** Peak VRAM in MB for a training configuration. Linear in rank, not quadratic
+ *  in sequence length like MM3's: clip length is fixed by the manifest and the
+ *  AR prefix is cached, so nothing scales with a crop the user can drag. */
+export function estimateYue2PeakMb(baseBytes: number, rank: number, m: Yue2VramModel): number {
+  const loaded = baseBytes > 0 ? baseBytes / 1048576 : m.fallbackBaseMb;
+  return Math.round(loaded + m.perRankMb * Math.max(0, rank) + m.constMb);
+}
+
+/** POST /api/training/datasets/:id/yue2-preprocess */
+export interface Yue2PreprocessRequest {
+  vaeVariant?: Yue2VaeVariant;
+  clipSeconds?: number;
+  captionMode?: Yue2CaptionMode;
+  defaultCaption?: string;
+  decode?: 'auto' | 'ffmpeg';
+  tileFrames?: number;
+  haloFrames?: number;
+  only?: string;
+  limit?: number;
+  /** Re-cut an existing manifest at a different clip length. Cheap: the cached
+   *  latents themselves are clip-length independent. */
+  force?: boolean;
+  /** `captionMode: 'txt'` is refused without this — the .txt beside each track
+   *  is the ACE sidecar, and it is read raw and whole. */
+  acknowledgeSidecarFormat?: boolean;
+}
+
+/** POST /api/training/datasets/:id/yue2-train */
+export interface Yue2TrainRequest {
+  /** Informational: the route lays a named preset UNDER the fields below, so
+   *  sending both trains the preset with those overrides. */
+  preset?: Yue2PresetName;
+  lmType?: string;
+  trigger?: string;
+  allowNoTrigger?: boolean;
+  rank?: number;
+  alpha?: number;
+  target?: Yue2NarTarget;
+  lr?: number;
+  lrScheduler?: 'cosine' | 'constant';
+  steps?: number;
+  warmup?: number;
+  saveEvery?: number;
+  logEvery?: number;
+  gradAccum?: number;
+  maxGradNorm?: number;
+  weightDecay?: number;
+  captionDropout?: number;
+  tSampling?: 'logit-normal' | 'uniform';
+  seed?: number;
+  kvCache?: number;
+}
+
+/** A safetensors `__metadata__` block, as the exporter wrote it. */
+export interface Yue2AdapterMeta {
+  format?: string;
+  rank?: number;
+  alpha?: number;
+  targets?: string;
+  steps?: number;
+  clipFrames?: number;
+  trigger?: string;
+  baseSha?: string;
+  raw: Record<string, string>;
+}
+
+/** A checkpoint is a FILE here, not a directory: `<stem>_step<N>.safetensors`
+ *  for the snapshots and `<stem>.safetensors` for the final export. */
+export interface Yue2RunCheckpoint {
+  step: number;
+  name: string;
+  /** Absolute. `/yue2/select-model`'s `lm_adapter` opens the path AS GIVEN. */
+  path: string;
+  bytes: number;
+  final: boolean;
+  loss?: number;
+  meta?: Yue2AdapterMeta;
+}
+
+export interface Yue2RunSummary {
+  runName: string;
+  dir: string;
+  datasetId?: string;
+  datasetName?: string;
+  startedAt?: number;
+  updatedAt: number;
+  launches: number;
+  configuredSteps: number;
+  lastStep: number;
+  lastLoss?: number;
+  outcome: 'completed' | 'halted' | 'failed' | 'unknown';
+  failure?: string;
+  checkpoints: Yue2RunCheckpoint[];
+  best?: { step: number; loss: number };
+  trigger?: string;
+  rank?: number;
+  alpha?: number;
+  target?: string;
+  /** Present only while `yue2_nar_ckpt.bin` is still on disk, which means the
+   *  run stopped BEFORE its clean finish — the engine deletes it on export. */
+  resume?: {
+    step: number;
+    savedAt: number;
+    statePath: string;
+    behindBy: number;
+    exactWithinBuildOnly: true;
+  };
+  optionsSource: 'manifest' | 'checkpoint' | 'none';
+  sizeBytes: number;
+  running?: boolean;
 }
 
 export type SampleLabelStatus =
@@ -1507,6 +1739,48 @@ export async function resumeMm3TrainLm(
                    optionsSource: string }>(
     `/datasets/${encodeURIComponent(id)}/mm3-resume-lm`,
     { method: 'POST', ...jsonBody(opts) },
+  );
+}
+
+// ── YuE2 NAR LoRA training ───────────────────────────────────────────────
+
+export async function getYue2Status(id: string): Promise<Yue2Status> {
+  return request<Yue2Status>(`/datasets/${encodeURIComponent(id)}/yue2`);
+}
+
+/** Audio -> cached VAE latents. Scans the dataset's source folder FLAT: the
+ *  engine takes `--audio <folder>` and no manifest, so subfolders and the
+ *  dataset's exclusions do not reach it. */
+export async function startYue2Preprocess(
+  id: string, opts: Yue2PreprocessRequest = {},
+): Promise<{ jobId: string; outDir: string; scannableFiles: number; datasetSamples: number;
+             datasetExcluded: number; unsupportedFiles: number }> {
+  return request(
+    `/datasets/${encodeURIComponent(id)}/yue2-preprocess`,
+    { method: 'POST', ...jsonBody(opts) },
+  );
+}
+
+/** Latents + a trigger word -> a NAR LoRA. Checkpoints land in the YuE2 adapter
+ *  root as plain safetensors files, which is what `/yue2/select-model`'s
+ *  `lm_adapter` field takes. */
+export async function startYue2Train(
+  id: string, opts: Yue2TrainRequest = {},
+): Promise<{ jobId: string; runName: string; outDir: string; clips: number; lmType: string;
+             target: Yue2NarTarget; tensors: number; estimatedMs: number; license: string }> {
+  return request(
+    `/datasets/${encodeURIComponent(id)}/yue2-train`,
+    { method: 'POST', ...jsonBody(opts) },
+  );
+}
+
+/** Previous YuE2 runs and their checkpoint ladders, newest first. Read off disk
+ *  each time — the run directory is the source of truth, not a database row. */
+export async function listYue2Runs(
+  id: string,
+): Promise<{ runs: Yue2RunSummary[]; busy: boolean; adapterRoot: string }> {
+  return request<{ runs: Yue2RunSummary[]; busy: boolean; adapterRoot: string }>(
+    `/datasets/${encodeURIComponent(id)}/yue2-runs`,
   );
 }
 

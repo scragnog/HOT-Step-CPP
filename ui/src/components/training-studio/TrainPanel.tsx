@@ -24,6 +24,7 @@ import { JobProgress } from './JobProgress';
 import { TrainingChart } from './TrainingChart';
 import { TrainingRunStats } from './TrainingRunStats';
 import { Mm3TrainCard } from './Mm3TrainCard';
+import { Yue2TrainCard } from './Yue2TrainCard';
 import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from './TrainDitForm';
 import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from './TrainLmForm';
 import { useTrainingStream } from './useTrainingStream';
@@ -50,6 +51,9 @@ export const TrainPanel: React.FC = () => {
   // than inventing a flag that would have to mean "which of two unrelated UIs".
   const backendId = useBackendStore(s => s.activeBackendId);
   const mm3Mode = backendId === 'minimax-m3';
+  // Same rule, one backend along: YuE2 trains a NAR LoRA from cached VAE
+  // latents and has no DiT path, no tensor cache and no preprocess variant.
+  const yue2Mode = backendId === 'yue2';
   const capabilities = useTrainingStore(s => s.capabilities);
   const datasets = useTrainingStore(s => s.datasets);
   const detail = useTrainingStore(s => s.detail);
@@ -451,6 +455,26 @@ export const TrainPanel: React.FC = () => {
           <XCircle size={16} className="mt-0.5 flex-shrink-0" />
           {t('trainingStudio.train.noBinary')}
         </div>
+      </div>
+    );
+  }
+
+  // ── YuE2 branch ─────────────────────────────────────────────────────────
+  // Placed BEFORE the built gate, unlike MM3's, and that is a server fact
+  // rather than a preference: `mm3-lm-train --manifest` reads dataset.json, so
+  // MM3 genuinely needs a built dataset, while neither YuE2 tool reads it —
+  // `yue2-preprocess` takes a FOLDER of audio. Falling through would block a
+  // run the server would have accepted.
+  //
+  // The card handles "the weights are not installed" itself, per stage, from
+  // the same status payload it reads everything else out of: preprocess needs
+  // the VAE, training needs the LM, and demanding both up here would hide the
+  // encode stage from someone who has only the VAE so far.
+  if (yue2Mode) {
+    return (
+      <div className="flex flex-col gap-4">
+        {header}
+        <Yue2TrainCard datasetId={detail.id} trigger={detail.customTag || ''} />
       </div>
     );
   }

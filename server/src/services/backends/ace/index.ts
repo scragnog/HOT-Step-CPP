@@ -63,6 +63,7 @@ async function capabilities(): Promise<BackendCapabilities> {
       // (lmAdapter/lmAdapterScale globals), not the generic picker this flag
       // gates — so false here means "not that UI", not "no LM adapters".
       lmAdapters: false,
+      lmAdapterSelectable: false,
       postProcess: true,
       stableStep: true,
       whisper: true,

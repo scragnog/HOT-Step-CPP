@@ -159,6 +159,7 @@ if (fs.existsSync(uiDistPath)) {
 // training preprocess job can borrow the GPU. §4.1 of the preprocess plan.
 import { setEngineReady } from './engineState.js';
 import { restoreMm3Selection } from './services/backends/minimax/index.js';
+import { restoreYue2Selection } from './services/backends/yue2/index.js';
 import { aceClient } from './services/aceClient.js';
 import { onEngineRestarted, startAceServer, stopAceServer } from './services/aceEngineProcess.js';
 import { killActiveChildren } from './services/training/labelingQueue.js';
@@ -343,6 +344,16 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   // user's own quants rather than whatever the next capabilities poll happens
   // to reconcile after the fact.
   onEngineRestarted(restoreMm3Selection);
+
+  // YuE2 holds the same kind of state — its LM quant, its VAE variant, and the
+  // NAR LoRA merged into the resident weights — and loses all three on a
+  // restart. The adapter is the one that matters most: without this a user
+  // trains an adapter, picks it, restarts, and gets base-model renders while
+  // the picker still shows their pick.
+  void restoreYue2Selection().catch(err => {
+    console.warn('[Server] YuE2 model restore failed:', err?.message || err);
+  });
+  onEngineRestarted(restoreYue2Selection);
 
   // Fire-and-forget warm-on-startup: once the engine /health is up, POST /warm
   // with the configured DiT + VAE + adapter so the first user /synth skips the

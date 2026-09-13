@@ -60,7 +60,11 @@ export const LabelPanel: React.FC = () => {
   // Only MOSS and the legacy /understand step need the engine, and only those
   // keep the button disabled while a trainer runs. Any other active job
   // (preprocess, codes, another label) still blocks, as before.
-  const TRAINER_KINDS = ['train-lm', 'train-dit', 'mm3-train-lm', 'audition', 'lm-calibrate', 'dit-calibrate'];
+  // Mirrors the server's own TRAINER_KINDS (routes/training.ts). `yue2-nar-train`
+  // joins it and `yue2-preprocess` does not, for the same reason the ACE
+  // preprocess step does not: it is a GPU pass over the dataset's own audio, not
+  // a trainer that leaves the files alone.
+  const TRAINER_KINDS = ['train-lm', 'train-dit', 'mm3-train-lm', 'yue2-nar-train', 'audition', 'lm-calibrate', 'dit-calibrate'];
   const trainerRunning = jobRunning && TRAINER_KINDS.includes(String(activeJob?.kind));
   const effectiveEssentia = useEssentia && essentiaOk;
   const effectiveGenius = useGenius && geniusOk;

@@ -192,6 +192,15 @@ interface TrainingState {
     step: number; totalSteps: number; loss: number; lr: number; gradNorm: number;
     stepMs: number; usedMb: number; totalMb: number;
   } | null;
+  /** YuE2 NAR live run stats. Same shape as mm3Live and still its own field:
+   *  the two trainers can never run at once, but one slice meaning "whichever
+   *  of them last spoke" is exactly the kind of field that ends up showing a
+   *  stale run's numbers. `runMean` is the trainer's own whole-run average,
+   *  which it prints beside the step loss. */
+  yue2Live: {
+    step: number; totalSteps: number; loss: number; runMean: number; lr: number;
+    gradNorm: number; stepMs: number; usedMb: number; totalMb: number;
+  } | null;
   /** Held-out loss, in the same fractional-epoch x domain as the other series. */
   trainEvalSeries: Array<{ step: number; loss: number; ep: number }>;
   /** From the one `data` metric — songs skipped for exceeding max sequence
@@ -298,6 +307,10 @@ interface TrainingState {
    *  adapter, same recipe, more steps — the optimizer state comes back off
    *  disk, so it continues rather than restarts. */
   resumeMm3TrainLm(opts: trainingApi.Mm3ResumeRequest): Promise<void>;
+  /** YuE2: audio -> cached VAE latents. */
+  startYue2Preprocess(opts?: trainingApi.Yue2PreprocessRequest): Promise<void>;
+  /** YuE2: cached latents + a trigger word -> a NAR LoRA. */
+  startYue2Train(opts: trainingApi.Yue2TrainRequest): Promise<void>;
   loadTrainDitStatus(q?: { variantKey?: string; adapterName?: string }): Promise<void>;
   startTrainDit(opts: TrainDitOptions): Promise<void>;
   loadAuditions(): Promise<void>;
@@ -348,6 +361,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   trainLmEpochs: [],
   trainLmLast: null,
   mm3Live: null,
+  yue2Live: null,
   trainEvalSeries: [],
   trainLmSkippedLong: 0,
   trainLmVram: null,
@@ -404,6 +418,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     trainLmEpochs: [],
     trainLmLast: null,
     mm3Live: null,
+    yue2Live: null,
     trainEvalSeries: [],
     trainLmSkippedLong: 0,
     trainLmVram: null,
@@ -484,6 +499,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
               trainLmEpochs: [],
               trainLmLast: null,
               mm3Live: null,
+              yue2Live: null,
               trainEvalSeries: [],
               trainLmSkippedLong: 0,
               trainLmVram: null,
@@ -820,6 +836,34 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }
   },
 
+  startYue2Preprocess: async (opts) => {
+    const id = get().selectedDatasetId;
+    if (!id) return;
+    try {
+      const { jobId } = await trainingApi.startYue2Preprocess(id, opts ?? {});
+      set({ jobLog: [], error: null });
+      await adoptJob(set, get, jobId);
+    } catch (err) {
+      set({ error: errMessage(err) });
+    }
+  },
+
+  startYue2Train: async (opts) => {
+    const id = get().selectedDatasetId;
+    if (!id) return;
+    try {
+      const { jobId } = await trainingApi.startYue2Train(id, opts);
+      // Steps, not epochs — same as MM3 — so the epoch series stays empty and
+      // the chart draws the step layer alone. There is no target-loss mode in
+      // the YuE2 trainer, so no target line is seeded.
+      set({ jobLog: [], error: null, ...blankTrainSeries(), trainMaxEpochs: 0,
+        trainTargetLoss: 0, yue2Live: null });
+      await adoptJob(set, get, jobId);
+    } catch (err) {
+      set({ error: errMessage(err) });
+    }
+  },
+
   startTrainLm: async (opts) => {
     const id = get().selectedDatasetId;
     if (!id) return;
@@ -1083,7 +1127,12 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         // mm3-train-lm emits the SAME step/milestone metrics (the binary speaks
         // train-lm's JSONL vocabulary), so it draws on the same chart with no
         // other change.
-        if (chartKind === 'train-lm' || chartKind === 'train-dit' || chartKind === 'mm3-train-lm') {
+        // yue2-nar-train has no JSONL of its own — its relay parses the
+        // trainer's stderr into these same step/milestone/data metrics
+        // (services/training/yue2TrainRunner.ts), so it draws on the same
+        // chart with no other change either.
+        if (chartKind === 'train-lm' || chartKind === 'train-dit' || chartKind === 'mm3-train-lm'
+          || chartKind === 'yue2-nar-train') {
           if (ev.metric === 'data' && typeof ev.stepsPerEpoch === 'number' && ev.stepsPerEpoch > 0) {
             set({ trainStepsPerEpoch: ev.stepsPerEpoch });
           }
@@ -1125,6 +1174,24 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
                 totalMb: typeof ev.totalMb === 'number' ? ev.totalMb : base.totalMb,
               } });
             }
+          }
+          // YuE2's live tiles. Unlike MM3 there is no separate `vram` frame:
+          // the trainer prints used/total VRAM on the step line itself, so the
+          // whole slice is written from one event.
+          if (chartKind === 'yue2-nar-train' && ev.metric === 'step') {
+            const prev = get().yue2Live;
+            set({ yue2Live: {
+              step: typeof ev.step === 'number' ? ev.step : (prev?.step ?? 0),
+              totalSteps: (typeof ev.totalSteps === 'number' ? ev.totalSteps : 0)
+                || (prev?.totalSteps ?? 0),
+              loss: typeof ev.loss === 'number' ? ev.loss : (prev?.loss ?? 0),
+              runMean: typeof ev.ma5 === 'number' ? ev.ma5 : (prev?.runMean ?? 0),
+              lr: typeof ev.lr === 'number' ? ev.lr : (prev?.lr ?? 0),
+              gradNorm: typeof ev.gradNorm === 'number' ? ev.gradNorm : (prev?.gradNorm ?? 0),
+              stepMs: typeof ev.stepMs === 'number' ? ev.stepMs : (prev?.stepMs ?? 0),
+              usedMb: typeof ev.usedMb === 'number' ? ev.usedMb : (prev?.usedMb ?? 0),
+              totalMb: typeof ev.totalMb === 'number' ? ev.totalMb : (prev?.totalMb ?? 0),
+            } });
           }
           if ((ev.metric === 'epoch' || ev.metric === 'step')
             && typeof ev.epochs === 'number' && ev.epochs > 0

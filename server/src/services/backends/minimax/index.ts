@@ -341,6 +341,10 @@ async function capabilities(): Promise<BackendCapabilities> {
       // catalogue is GET /api/mm3/lm-adapters; the request fields are
       // params.mm3LmAdapter + mm3LmAdapterScale* (backends/minimax/generate.ts).
       lmAdapters: true,
+      // Applied per generation from the request, not held as engine state —
+      // MM3's merge-at-load path is getenv-only (mm3-model.h) and unreachable
+      // from a running server, so the picker writes to the request bag.
+      lmAdapterSelectable: false,
       // Model-agnostic post stages: the VST chain reads the rate from the WAV,
       // mastering reads and writes it, and SA3 is natively 44.1 kHz — none of
       // the three assume ACE's 48 kHz output. PP-VAE and Spectral Lifter stay

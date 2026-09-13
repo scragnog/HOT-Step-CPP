@@ -113,6 +113,12 @@ export interface BackendFeatureCapabilities {
    *  DiT adapter stack UI. Optional here because a backend registered by an
    *  older server won't send it. */
   lmAdapters?: boolean;
+  /** The LM adapter is ENGINE STATE (POST /api/backends/models, `lmAdapter`
+   *  bucket) rather than a per-request parameter — YuE2 merges the delta into
+   *  the resident weights at load, so picking one evicts the model instead of
+   *  riding along on the next generation. Optional: absent means the
+   *  per-request kind (MiniMax-Music3). */
+  lmAdapterSelectable?: boolean;
   /** Model-agnostic post stages (VST chain, reference mastering) run for this
    *  backend. Separate from `plugins`, which also gates the ACE-VAE-coupled
    *  stages (PP-VAE re-encode, Spectral Lifter). */
@@ -182,6 +188,20 @@ export interface BackendModelCatalogue {
   buckets: Record<string, string[]>;
   adapters?: string[];
   lmAdapters?: string[];
+  /** Optional per-entry detail for `lmAdapters`, keyed by the same reference
+   *  the list carries. `trigger` is the load-bearing one: a YuE2 NAR adapter
+   *  does nothing unless its trigger word leads the style prompt. */
+  lmAdapterMeta?: Record<string, {
+    label?: string;
+    runName?: string;
+    trigger?: string;
+    rank?: number;
+    steps?: number;
+    bytes?: number;
+    dataset?: string;
+    final?: boolean;
+    loss?: number;
+  }>;
   /** What is actually in force right now, per bucket. */
   defaults?: Record<string, unknown>;
   /** Optional cosmetic per-option metadata, bucket -> option -> {label,bytes}. */

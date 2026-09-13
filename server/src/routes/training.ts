@@ -51,6 +51,10 @@
 //   GET    /datasets/:id/mm3                            — MM3 codes cache + model readiness
 //   POST   /datasets/:id/mm3-codes                      — audio -> RVQ codes (MM3)
 //   POST   /datasets/:id/mm3-train-lm                   — start an MM3 LM LoRA training job
+//   GET    /datasets/:id/yue2                           — YuE2 latent cache + model readiness
+//   POST   /datasets/:id/yue2-preprocess                — audio -> cached YuE2 VAE latents
+//   POST   /datasets/:id/yue2-train                     — start a YuE2 NAR LoRA training job
+//   GET    /datasets/:id/yue2-runs                      — previous YuE2 runs + their adapters
 //   POST   /datasets/:id/train-lm                       — start an LM LoRA training job
 //   GET    /datasets/:id/train-lm                       — LM adapter / codes status
 //   POST   /datasets/:id/train-dit                      — start a DiT LoRA training job
@@ -64,7 +68,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config, PORTABLE_MODE, PROJECT_ROOT } from '../config.js';
+import { config, getFFmpegPath, PORTABLE_MODE, PROJECT_ROOT } from '../config.js';
 import { engineReady } from '../engineState.js';
 import { aceClient } from '../services/aceClient.js';
 import { listProviders, getProvider } from '../services/lireek/llm/registry.js';
@@ -73,7 +77,7 @@ import {
   buildSamples, loadSidecarMetadata, sampleFromParts,
   scanPreview as scanPreviewFolder, ScanLimitError,
 } from '../services/training/datasetScan.js';
-import { isInside, trainingBaseDir } from '../services/training/paths.js';
+import { AUDIO_EXTENSIONS, isInside, trainingBaseDir } from '../services/training/paths.js';
 import { resolveMossPaths } from '../services/training/mossCaption.js';
 import { deleteLabel, deleteLabels, patchLabel, readLabel } from '../services/training/labelStore.js';
 import { listDatasetsWithAssets } from '../services/training/datasetAssets.js';
@@ -94,6 +98,16 @@ import {
 import {
   listMm3Runs, mm3AdapterRoot, readMm3Run, resolveMm3RunDir, resumeOptionsFor,
 } from '../services/training/mm3Runs.js';
+import {
+  applyYue2Preset, availableYue2Bases, estimateYue2PreprocessMb, estimateYue2RunMs,
+  isYue2CaptionMode, isYue2Target, isYue2VaeVariant, missingYue2TrainModels,
+  readYue2PreprocessSummary, resolveYue2TrainModels,
+  YUE2_DEFAULT_PRESET, YUE2_NAR_DEFAULTS, YUE2_PRESETS,
+  YUE2_TARGET_TENSORS, YUE2_VRAM_MODEL, yue2AdapterRunDir, yue2LatentsDir,
+  yue2PreprocessManifest, yue2RunName,
+} from '../services/training/yue2Train.js';
+import { listYue2Runs, yue2AdapterRoot } from '../services/training/yue2Runs.js';
+import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
@@ -1122,7 +1136,11 @@ function pickTargets(
  *  does labelling while a job that reads or writes the same files is active
  *  (preprocess, codes, another label/enhance/build). Returns the blocking job
  *  or undefined. */
-const TRAINER_KINDS = new Set<string>(['train-lm', 'train-dit', 'mm3-train-lm', 'audition', 'lm-calibrate', 'dit-calibrate']);
+// `yue2-nar-train` joins them and `yue2-preprocess` does not, for the same
+// split mm3 makes: the trainer reads the latent cache and never touches a
+// caption or a sidecar, while preprocess reads the source folder the labeller
+// writes into.
+const TRAINER_KINDS = new Set<string>(['train-lm', 'train-dit', 'mm3-train-lm', 'yue2-nar-train', 'audition', 'lm-calibrate', 'dit-calibrate']);
 function labelBlockedBy(datasetId: string, needsEngine: boolean): ReturnType<typeof queue.activeJobForDataset> {
   const active = queue.activeJobForDataset(datasetId);
   if (!active) return undefined;
@@ -2712,6 +2730,393 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
       jobId: job.id, kind: job.kind, runName: run.runName, outDir: dir,
       from, steps: opts.steps, optionsSource: run.optionsSource,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+// ─── YuE2 NAR LoRA training (docs/plans/yue2/08-nar-lora-trainer.md phase 5) ─
+//
+// Two stages, both GPU-lane and both engine-stopping, mirroring MM3's pair:
+//   POST /datasets/:id/yue2-preprocess   audio -> cached VAE latents
+//   POST /datasets/:id/yue2-train        latents + a trigger -> a NAR LoRA
+//   GET  /datasets/:id/yue2              what exists and what is missing
+//   GET  /datasets/:id/yue2-runs         previous runs and their adapters
+//
+// The MM3 routes above are untouched. Three things differ here and all three
+// are engine-CLI facts, not choices (survey: docs/plans/yue2/11-training-studio-notes.md):
+//
+//   * `yue2-preprocess` takes --audio <folder> and scans it FLAT. The
+//     dataset's `recursive` flag and its excluded rows cannot reach it, so the
+//     status endpoint reports the flat audio count BESIDE the dataset's own
+//     count and the preprocess route warns when they disagree. Hiding that
+//     would mean a user training on tracks they excluded and never knowing.
+//   * There is no `--captions <dir>`. `--caption-mode txt` would read the ACE
+//     Option-A sidecar raw, field syntax and lyrics included, so the default
+//     is `none` (style = the trigger word alone) and `txt` is refused unless
+//     the caller opts in explicitly.
+//   * YuE2 weights are CC BY-NC 4.0 and a trained adapter inherits it. The
+//     notice is shipped by the status route, read from the backend module's
+//     exported constant rather than retyped.
+
+/** Shared guards for both YuE2 stages: dataset exists, nothing else is running
+ *  on it, ace-train is in the build. Returns the dataset or null after
+ *  answering.
+ *
+ *  Deliberately NOT mm3Preflight: MM3 requires a BUILT dataset because
+ *  `mm3-lm-train --manifest` reads `dataset.json`. Neither YuE2 tool reads it,
+ *  so demanding a build would refuse a run that would have worked. The build
+ *  state is reported by the status route instead, because the count it gives
+ *  is the only cross-check on the flat scan. */
+function yue2Preflight(req: Request, res: Response): TrainingDatasetRow | null {
+  const ds = repo.getDataset(req.params.id as string);
+  if (!ds) {
+    res.status(404).json({ error: 'Dataset not found' });
+    return null;
+  }
+  if (queue.activeJobForDataset(ds.id)) {
+    res.status(409).json({ error: 'A job is already running for this dataset' });
+    return null;
+  }
+  if (!aceTrainExe()) {
+    res.status(503).json({ error: 'ace-train was not found next to ace-server — rebuild the engine' });
+    return null;
+  }
+  return ds;
+}
+
+/** Audio files `yue2-preprocess` will actually see: a FLAT, non-recursive scan
+ *  of the source folder filtered to the five extensions the engine accepts
+ *  (yue2-preprocess-run.h's list — note .opus and .aac are NOT among them,
+ *  though the dataset scanner accepts both).
+ *
+ *  This is the number the tool works from, and it is reported so the card can
+ *  set it against `sampleCount`. Never throws. */
+const YUE2_AUDIO_EXTS = new Set(['.wav', '.flac', '.mp3', '.ogg', '.m4a']);
+function countYue2ScannableAudio(dir: string): { files: number; unsupported: number; needFfmpeg: number } {
+  let files = 0, unsupported = 0, needFfmpeg = 0;
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isFile()) continue;
+      const ext = path.extname(e.name).toLowerCase();
+      if (YUE2_AUDIO_EXTS.has(ext)) {
+        files++;
+        // The repo's own decoder covers WAV and MP3; everything else goes
+        // through ffmpeg, and a missing ffmpeg turns into a per-file SKIP.
+        if (ext !== '.wav' && ext !== '.mp3') needFfmpeg++;
+      } else if (AUDIO_EXTENSIONS.has(ext)) {
+        unsupported++;
+      }
+    }
+  } catch { /* folder gone or unreadable — 0 is the honest answer */ }
+  return { files, unsupported, needFfmpeg };
+}
+
+/** GET /datasets/:id/yue2 — latent cache state, model readiness and the
+ *  defaults the form is a view of. Cheap and never throws: the UI polls it to
+ *  decide what to enable. */
+router.get('/datasets/:id/yue2', async (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) {
+      res.status(404).json({ error: 'Dataset not found' });
+      return;
+    }
+    const latentsDir = yue2LatentsDir(ds.slug);
+    const manifestPath = yue2PreprocessManifest(ds.slug);
+    const cache = readYue2PreprocessSummary(manifestPath);
+    const scan = countYue2ScannableAudio(ds.sourceDir);
+
+    let gpuTotalMb = 0;
+    try {
+      const r = await fetch(`${config.aceServer.url}/vram`, { signal: AbortSignal.timeout(1500) });
+      if (r.ok) {
+        const v: any = await r.json();
+        gpuTotalMb = Number(v?.total_mb) || 0;
+      }
+    } catch { /* engine down or CPU-only — 0 means UNKNOWN, never "no VRAM" */ }
+
+    const bases = availableYue2Bases();
+    const vae = resolveYue2TrainModels(YUE2_NAR_DEFAULTS.lmType, 'standard');
+    let vaeBytes = 0;
+    try { vaeBytes = vae.vae ? fs.statSync(vae.vae).size : 0; } catch { /* missing */ }
+
+    res.json({
+      latentsDir,
+      manifestPath,
+      /** Null when nothing has been encoded yet. */
+      cache: cache ?? null,
+      /** What the FLAT scan sees versus what the dataset holds. The two can
+       *  legitimately differ (subfolders, exclusions, .opus/.aac), and the
+       *  card is expected to show both rather than pick one. */
+      sourceDir: ds.sourceDir,
+      recursive: ds.recursive,
+      scannableFiles: scan.files,
+      unsupportedFiles: scan.unsupported,
+      filesNeedingFfmpeg: scan.needFfmpeg,
+      datasetSamples: ds.sampleCount,
+      datasetExcluded: ds.excludedCount,
+      ffmpeg: !!getFFmpegPath(),
+      missingForPreprocess: missingYue2TrainModels('preprocess', { vaeVariant: 'standard' }),
+      missingForTrain: missingYue2TrainModels('train'),
+      bases,
+      vaeFile: vae.vae ? path.basename(vae.vae) : '',
+      gpuTotalMb,
+      preprocessPeakMb: estimateYue2PreprocessMb(vaeBytes),
+      /** Coefficients, not just an answer — the form re-estimates as rank
+       *  moves and must not carry a second copy of the measurements. */
+      vramModel: YUE2_VRAM_MODEL,
+      defaults: YUE2_NAR_DEFAULTS,
+      presets: YUE2_PRESETS,
+      defaultPreset: YUE2_DEFAULT_PRESET,
+      targetTensors: YUE2_TARGET_TENSORS,
+      /** The dataset's trigger word, which is what the trainer defaults to.
+       *  Without one the adapter has no handle at generation time. */
+      trigger: ds.customTag || '',
+      /** Rendered verbatim. A trained adapter is a derivative of CC BY-NC
+       *  weights and inherits the restriction. */
+      license: YUE2_LICENSE_NOTICE,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** POST /datasets/:id/yue2-preprocess */
+router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+    // Absent means absent: a present 0 or false is an ANSWER. Same rule the
+    // MM3 route learned the hard way (#142's silently-defaulted history).
+    const num = (k: string, d: number, lo: number, hi: number): number => {
+      if (b[k] === undefined || b[k] === null) return d;
+      const v = Number(b[k]);
+      return Number.isFinite(v) && v >= lo && v <= hi ? v : d;
+    };
+    const D = YUE2_NAR_DEFAULTS;
+
+    const vaeVariant = isYue2VaeVariant(b.vaeVariant) ? b.vaeVariant : D.vaeVariant;
+    const missing = missingYue2TrainModels('preprocess', { vaeVariant });
+    if (missing.length) {
+      res.status(400).json({
+        error: `YuE2 model files are missing: ${missing.join(', ')}. Install the VAE from the Model Manager.`,
+      });
+      return;
+    }
+
+    const scan = countYue2ScannableAudio(ds.sourceDir);
+    if (scan.files === 0) {
+      res.status(400).json({
+        error: `No .wav/.flac/.mp3/.ogg/.m4a files directly in ${ds.sourceDir}. yue2-preprocess scans that `
+             + 'folder flat — it does not search subfolders, whatever the dataset\'s recursive setting says.',
+      });
+      return;
+    }
+
+    // Enumerated, never `=== x ? x : default`: that shape silently discards a
+    // request for whatever the default happens to be, and has already produced
+    // a set of dead-looking knobs elsewhere in this file.
+    const decode: 'auto' | 'ffmpeg' =
+      b.decode === 'auto' || b.decode === 'ffmpeg' ? b.decode : D.decode;
+    // The engine refuses `--decode ffmpeg` with an empty --ffmpeg, and under
+    // `auto` a missing ffmpeg turns every FLAC/OGG/M4A into a per-file SKIP.
+    // Both are worth a sentence here rather than a confusing clip count later.
+    if (!getFFmpegPath()) {
+      if (decode === 'ffmpeg') {
+        res.status(400).json({
+          error: 'Decode mode "ffmpeg" needs an ffmpeg binary and this install has none. Use "auto" and a '
+               + 'WAV/MP3 corpus, or install ffmpeg.',
+        });
+        return;
+      }
+      if (scan.needFfmpeg > 0) {
+        res.status(400).json({
+          error: `${scan.needFfmpeg} of the ${scan.files} audio files are FLAC/OGG/M4A, which need ffmpeg to `
+               + 'decode, and this install has none. They would all be skipped.',
+        });
+        return;
+      }
+    }
+
+    const captionMode = isYue2CaptionMode(b.captionMode) ? b.captionMode : D.captionMode;
+    const defaultCaption = typeof b.defaultCaption === 'string' ? b.defaultCaption.trim() : '';
+    if (captionMode === 'default' && !defaultCaption) {
+      res.status(400).json({ error: 'Caption mode "default" needs a caption to use for every clip.' });
+      return;
+    }
+    // `txt` is offered but never defaulted: the same-named .txt beside the
+    // audio is the ACE Option-A sidecar (`caption: …`, `genre: …`, then every
+    // remaining line as lyrics) and yue2-preprocess reads it RAW AND WHOLE, so
+    // it would train the style encoder on field syntax. Refuse unless the
+    // caller says it means it.
+    if (captionMode === 'txt' && b.acknowledgeSidecarFormat !== true) {
+      res.status(400).json({
+        error: 'Caption mode "txt" feeds the whole .txt beside each track in as the style prompt, and in a '
+             + 'HOT-Step dataset that file is the ACE sidecar — "caption:", "genre:", then the lyrics. There '
+             + 'is no YuE2 caption sidecar yet. Use "none" (the style is the trigger word alone) or '
+             + '"default", or resend with acknowledgeSidecarFormat to train on the sidecars as they are.',
+      });
+      return;
+    }
+
+    const outDir = yue2LatentsDir(ds.slug);
+    const job = queue.startYue2PreprocessJob(ds.id, {
+      audioDir: ds.sourceDir,
+      outDir,
+      manifestPath: yue2PreprocessManifest(ds.slug),
+      vaeVariant,
+      clipSeconds: num('clipSeconds', D.clipSeconds, 1, 60),
+      captionMode,
+      defaultCaption,
+      decode,
+      tileFrames: num('tileFrames', D.tileFrames, 1, 100000),
+      haloFrames: num('haloFrames', D.haloFrames, 12, 4096),
+      only: typeof b.only === 'string' ? b.only.trim() : '',
+      limit: num('limit', 0, 0, 100000),
+      force: b.force === true,
+      datasetSlug: ds.slug,
+    });
+    res.json({
+      jobId: job.id, kind: job.kind, outDir,
+      // Echoed so the card can show the mismatch the engine cannot see. Not a
+      // warning string: the card decides how loudly to say it.
+      scannableFiles: scan.files,
+      datasetSamples: ds.sampleCount,
+      datasetExcluded: ds.excludedCount,
+      unsupportedFiles: scan.unsupported,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** POST /datasets/:id/yue2-train */
+router.post('/datasets/:id/yue2-train', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+    const num = (k: string, d: number, lo: number, hi: number): number => {
+      if (b[k] === undefined || b[k] === null) return d;
+      const v = Number(b[k]);
+      return Number.isFinite(v) && v >= lo && v <= hi ? v : d;
+    };
+    // A named preset sits UNDER the request's own fields: {preset:'thorough'}
+    // trains Thorough, {preset:'thorough', steps: 8000} trains Thorough for
+    // 8000 steps. No name = the defaults = Balanced.
+    const D = applyYue2Preset(YUE2_NAR_DEFAULTS, b.preset);
+
+    // Any installed base is offered; only bf16 has been measured. Anything
+    // unknown falls back to the default rather than reaching spawn.
+    const installed = availableYue2Bases();
+    const askedBase = String(b.lmType || '');
+    const lmType = installed.some(x => x.id === askedBase) ? askedBase : YUE2_NAR_DEFAULTS.lmType;
+    const missing = missingYue2TrainModels('train', { lmType });
+    if (missing.length) {
+      res.status(400).json({
+        error: `YuE2 training models are missing: ${missing.join(', ')}. Install one from the Model Manager, `
+             + 'or pick a base that is already present.',
+      });
+      return;
+    }
+
+    const manifest = yue2PreprocessManifest(ds.slug);
+    const cache = readYue2PreprocessSummary(manifest);
+    if (!cache || cache.clips <= 0) {
+      res.status(400).json({
+        error: 'No YuE2 latent cache for this dataset — run the preprocess stage first.',
+      });
+      return;
+    }
+
+    // The trigger is not optional in practice: without one the adapter has no
+    // word to address it by and the engine only WARNS. Default to the
+    // dataset's custom tag, as the MM3 route does, and refuse when there is
+    // neither — a silent warning inside a 12-minute run is not a warning.
+    const trigger = typeof b.trigger === 'string' ? b.trigger.trim() : (ds.customTag || '');
+    if (!trigger && b.allowNoTrigger !== true) {
+      res.status(400).json({
+        error: 'A trigger word is required: it is prepended to every caption in training and is the only '
+             + 'handle the trained style has at generation time. Set the dataset\'s trigger word, or send '
+             + 'one with the request.',
+      });
+      return;
+    }
+
+    const target = isYue2Target(b.target) ? b.target : D.target;
+    const steps = num('steps', D.steps, 1, 1000000);
+    const runName = yue2RunName(ds.slug);
+    const outDir = yue2AdapterRunDir(runName);
+
+    const job = queue.startYue2TrainJob(ds.id, {
+      manifest,
+      outDir,
+      lmType,
+      trigger,
+      rank:  num('rank', D.rank, 1, 512),
+      alpha: num('alpha', D.alpha, 1, 2048),
+      target,
+      lr:    num('lr', D.lr, 1e-7, 1e-2),
+      // Enumerated against the default, not tested against one value — see
+      // the note on `decode` above.
+      lrScheduler: b.lrScheduler === 'cosine' || b.lrScheduler === 'constant'
+        ? b.lrScheduler : D.lrScheduler,
+      steps,
+      warmup: num('warmup', D.warmup, 0, 100000),
+      // Clamped to the run length: a save-every past the step count writes no
+      // snapshot at all, and the ladder is the whole point of the run.
+      saveEvery: Math.min(num('saveEvery', D.saveEvery, 0, 1000000), steps),
+      logEvery: num('logEvery', D.logEvery, 1, 10000),
+      gradAccum: num('gradAccum', D.gradAccum, 1, 64),
+      maxGradNorm: num('maxGradNorm', D.maxGradNorm, 0, 1000),
+      weightDecay: num('weightDecay', D.weightDecay, 0, 1),
+      captionDropout: num('captionDropout', D.captionDropout, 0, 1),
+      tSampling: b.tSampling === 'logit-normal' || b.tSampling === 'uniform'
+        ? b.tSampling : D.tSampling,
+      seed: num('seed', D.seed, 0, 2 ** 31 - 1),
+      kvCache: num('kvCache', D.kvCache, 1, 256),
+      // A NEW run never resumes: outDir is minted per run and holds no state.
+      // Continuing an existing one is a separate ask (the engine refuses a
+      // changed rank/alpha/target/trigger and is exact only within one build),
+      // and there is no route for it yet.
+      resume: false,
+      datasetSlug: ds.slug,
+      datasetName: ds.name || ds.slug,
+    });
+    res.json({
+      jobId: job.id, kind: job.kind, runName, outDir,
+      clips: cache.clips, lmType, target,
+      tensors: YUE2_TARGET_TENSORS[target],
+      estimatedMs: estimateYue2RunMs(steps),
+      license: YUE2_LICENSE_NOTICE,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** GET /datasets/:id/yue2-runs — previous runs and their checkpoint ladders. */
+router.get('/datasets/:id/yue2-runs', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) {
+      res.status(404).json({ error: 'Dataset not found' });
+      return;
+    }
+    const runs = listYue2Runs(ds.id, ds.slug);
+    // A run whose job is live right now is not "halted", whatever its log tail
+    // says — a running job's log tail always looks like an interrupted one.
+    const active = queue.activeJobForDataset(ds.id);
+    const activeDir = active && active.kind === 'yue2-nar-train'
+      ? String((active.opts as { outDir?: string } | undefined)?.outDir || '') : '';
+    const out = runs.map(r => (
+      activeDir && path.resolve(activeDir) === path.resolve(r.dir)
+        ? { ...r, outcome: 'unknown' as const, running: true }
+        : { ...r, running: false }
+    ));
+    res.json({ runs: out, busy: !!active, adapterRoot: yue2AdapterRoot() });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

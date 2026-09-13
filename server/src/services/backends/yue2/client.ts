@@ -70,6 +70,20 @@ export interface Yue2LmVariants {
   requested: string;
 }
 
+/** The NAR LoRA state block of GET /yue2/props (yue2-server.h's props handler).
+ *
+ *  `requested` is the adapter key the engine was last TOLD to use — the
+ *  `<path>@<scale, 4dp>` spelling yue2_adapter_key() builds, `;`-joined for a
+ *  stack. `merged` is what is actually baked into the resident weights, which
+ *  is empty until the next warm/synth after a selection (the merge happens at
+ *  load). A UI showing only one of them lies for exactly that window. */
+export interface Yue2PropsAdapter {
+  requested?: string;
+  merged?: string;
+  tensors?: number;
+  in_force?: boolean;
+}
+
 export interface Yue2Props {
   backend: string;                 // 'yue2'
   model: string;                   // 'YuE2'
@@ -85,6 +99,7 @@ export interface Yue2Props {
   variants?: {
     lm?: Yue2LmVariants;
   };
+  adapter?: Yue2PropsAdapter;
   vram?: Record<string, number>;
   errors?: string[];
   [k: string]: unknown;
@@ -105,6 +120,26 @@ export interface Yue2PropsResult {
 export interface Yue2Selection {
   lm?: string;
   vae_variant?: 'standard' | 'legacy';
+  /** A NAR LoRA to merge into the LM at load, as an ABSOLUTE path.
+   *
+   *  The engine opens the path AS GIVEN — yue2-adapter.h resolves it against
+   *  nothing, unlike MM3's root-relative adapter references — so a relative
+   *  path here means "relative to ace-server's working directory", which is
+   *  not a promise anyone should make.
+   *
+   *  Three states, and the difference between the last two is the point:
+   *    undefined (key omitted)  leave whatever the engine has alone
+   *    null (or '')             explicitly clear a merged adapter
+   *    '<abs path>'             merge this one
+   *
+   *  A caller that serialises its whole option struct would otherwise clear an
+   *  adapter it never meant to touch, which is why yue2_parse_adapter_field
+   *  tracks `given` separately from the value. */
+  lm_adapter?: string | null;
+  /** Merge strength, default 1.0 engine-side. Only sent alongside lm_adapter —
+   *  on its own it would change the key the engine compares against and force
+   *  a needless teardown. */
+  lm_adapter_scale?: number;
 }
 
 /** Mirrors yue2_handle_select_model's actual response body
@@ -116,6 +151,12 @@ export interface Yue2SelectModelResult {
   lm_type_want: string;
   lm_file: string;
   lm_found: boolean;
+  /** The adapter key now requested, and the one actually merged right now —
+   *  the latter is '' whenever the call itself tore the model down, because
+   *  the merge happens on the next warm/synth. Optional: an engine built
+   *  before the adapter field existed answers without them. */
+  lm_adapter_want?: string;
+  lm_adapter_merged?: string;
   error?: string;
 }
 
@@ -281,12 +322,28 @@ export async function yue2Unload(timeoutMs = TIMEOUT_QUICK): Promise<Yue2UnloadR
  *  Wire field is `lm_type`, not `lm` — matches the engine's
  *  yue2_handle_select_model (engine/src/yue2/yue2-server.h), which reads
  *  `req.lm_type` and otherwise silently keeps lm_type_given false, i.e. a
- *  picked LM would never actually apply. */
+ *  picked LM would never actually apply.
+ *
+ *  `lm_adapter` is written into the body ONLY when the caller named one (see
+ *  Yue2Selection): sending `null` on every call would clear a merged adapter
+ *  every time anyone changed the VAE variant, and the omitted-vs-null
+ *  distinction is the whole reason the engine parses the field the way it
+ *  does. Changing the adapter set costs a full teardown + lazy reload
+ *  engine-side, so a no-op repeat must stay a no-op. */
 export async function yue2SelectModel(sel: Yue2Selection): Promise<Yue2SelectModelResult> {
-  return yue2Post<Yue2SelectModelResult>('/yue2/select-model', {
+  const body: Record<string, unknown> = {
     lm_type: sel.lm ?? '',
     vae_variant: sel.vae_variant ?? '',
-  }, TIMEOUT_QUICK);
+  };
+  if (sel.lm_adapter !== undefined) {
+    // '' and null both clear; send null, which is the engine's documented
+    // explicit-clear spelling and cannot be mistaken for "auto".
+    body.lm_adapter = sel.lm_adapter === null || sel.lm_adapter === '' ? null : sel.lm_adapter;
+    if (typeof sel.lm_adapter_scale === 'number' && Number.isFinite(sel.lm_adapter_scale)) {
+      body.lm_adapter_scale = sel.lm_adapter_scale;
+    }
+  }
+  return yue2Post<Yue2SelectModelResult>('/yue2/select-model', body, TIMEOUT_QUICK);
 }
 
 // ── Generation ──

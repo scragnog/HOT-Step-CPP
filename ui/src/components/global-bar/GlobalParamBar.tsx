@@ -18,6 +18,7 @@ import { BackendModelsDropdown, BackendModelsBadge } from './BackendModelsDropdo
 import { BackendToggle } from './BackendToggle';
 import { AdaptersDropdown, AdaptersBadge } from './AdaptersDropdown';
 import { Mm3LmAdapterDropdown, Mm3LmAdapterBadge } from './Mm3LmAdapterDropdown';
+import { Yue2LmAdapterDropdown, Yue2LmAdapterBadge } from './Yue2LmAdapterDropdown';
 import { GenerationDropdown, GenerationBadge } from './GenerationDropdown';
 import { BackendGenerationDropdown, BackendGenerationBadge } from './BackendGenerationDropdown';
 import { LmThinkingDropdown, LmThinkingBadge } from './LmThinkingDropdown';
@@ -98,6 +99,13 @@ export const GlobalParamBar: React.FC = () => {
   // UI (no merge/runtime modes, no per-section masking, no DiT group scales).
   // So the cluster has a third state between "ACE's panel" and "not yet".
   const lmAdaptersSupported = !!capabilities && capabilities.features.lmAdapters === true;
+  // ...and a second split inside that third state. MM3's LM LoRA rides on the
+  // generation request (dials are live per render); YuE2's is merged into the
+  // resident weights at load, so choosing one is a POST that evicts the model.
+  // Same cluster, different panel — keyed on the capability, never the backend
+  // id (plan §2 principle 2).
+  const lmAdaptersAreEngineState = lmAdaptersSupported
+    && capabilities.features.lmAdapterSelectable === true;
   // Post-processing is NOT all-or-nothing. The VST chain, reference mastering
   // and StableStep read the sample rate from the audio rather than assuming
   // ACE's 48 kHz, so they work for any backend; only PP-VAE re-encode and
@@ -280,6 +288,7 @@ export const GlobalParamBar: React.FC = () => {
             label={t('globalBar.adapters')}
             icon={<Plug size={14} />}
             badge={adaptersSupported ? <AdaptersBadge />
+                 : lmAdaptersAreEngineState ? <Yue2LmAdapterBadge />
                  : lmAdaptersSupported ? <Mm3LmAdapterBadge />
                  : <UnsupportedBadge />}
             accentColor="emerald"
@@ -289,6 +298,8 @@ export const GlobalParamBar: React.FC = () => {
           >
             {adaptersSupported
               ? <AdaptersDropdown />
+              : lmAdaptersAreEngineState
+              ? <Yue2LmAdapterDropdown />
               : lmAdaptersSupported
               ? <Mm3LmAdapterDropdown />
               : <NotYetPanel feature="Adapters" />}

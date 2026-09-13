@@ -82,6 +82,17 @@ export interface BackendFeatureCapabilities {
    *  Required like the rest of the manifest: "we don't have this" is a
    *  statement, not an omission. */
   lmAdapters: boolean;
+  /** The LM adapter is ENGINE STATE, chosen through POST /api/backends/models
+   *  (`lmAdapter` bucket), not a per-request parameter.
+   *
+   *  Both kinds exist and they need different UI. MiniMax-Music3 applies its
+   *  LoRA per generation from the request, so its picker writes to the
+   *  request bag and nothing is posted until Generate. YuE2 MERGES the delta
+   *  into the resident weights at load (yue2-adapter.h) — there is no way to
+   *  change it in place, so picking one is a POST that evicts the model and
+   *  the next generation pays a reload. Reading only `lmAdapters` cannot tell
+   *  the two apart, and the UI must not branch on a backend id. */
+  lmAdapterSelectable: boolean;
   /** The model-agnostic post-processing stages run for this backend: the VST
    *  chain and reference mastering, both of which read the sample rate from
    *  the WAV rather than assuming one. Separate from `plugins`, which gates
@@ -157,6 +168,23 @@ export interface BackendModels {
   buckets: Record<string, string[]>;
   adapters?: string[];
   lmAdapters?: string[];
+  /** Optional per-entry detail for `lmAdapters`, keyed by the SAME reference
+   *  the list carries (YuE2: the absolute .safetensors path). Everything here
+   *  is cosmetic — a picker with none of it still works — except `trigger`,
+   *  which is load-bearing: a YuE2 NAR adapter does nothing unless its trigger
+   *  word leads the style prompt, so the user has to be able to read it. */
+  lmAdapterMeta?: Record<string, {
+    label?: string;
+    runName?: string;
+    trigger?: string;
+    rank?: number;
+    steps?: number;
+    bytes?: number;
+    dataset?: string;
+    /** The run's final export rather than a mid-run snapshot. */
+    final?: boolean;
+    loss?: number;
+  }>;
   defaults?: Record<string, unknown>;
   /** Optional per-bucket display metadata (size on disk, filename), keyed
    *  bucket -> option value. Purely cosmetic; the UI renders the bare option

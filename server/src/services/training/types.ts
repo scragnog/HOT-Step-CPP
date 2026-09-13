@@ -22,7 +22,12 @@ export type TrainingJobKind =
   // MiniMax-Music3 (docs/plans/2026-08-20-mm3-training-server-design.md §2.1).
   // Both are GPU-lane and both stop the engine: an MM3 training step peaks at
   // 31.7 GB of a 32 GB card, so nothing else may be resident.
-  | 'mm3-codes' | 'mm3-train-lm';
+  | 'mm3-codes' | 'mm3-train-lm'
+  // YuE2 NAR LoRA (docs/plans/yue2/08-nar-lora-trainer.md phase 5). Both are
+  // GPU-lane and both stop the engine: training peaks at 19.6 GB at rank 256
+  // and the preprocess encode holds a 3.7 GB compute buffer, and either way
+  // ace-train owns the card.
+  | 'yue2-preprocess' | 'yue2-nar-train';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
