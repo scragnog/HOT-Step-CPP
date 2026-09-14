@@ -81,6 +81,15 @@ export interface ImportOptions {
   sourcePath: string;
   /** The name the user's file had, used for the extension and the fallback title. */
   originalName: string;
+  /**
+   * What the track sounds like, in the style of a generation caption
+   * ("dark synthwave, analog bass, 4/4"). Optional, but it is what StableStep
+   * refines towards — a generated track has one from the prompt it came from
+   * and an imported one has nothing, so this is the only chance to supply it
+   * up front. Falls back to the file's genre tag, and can be changed later in
+   * Edit Metadata.
+   */
+  description?: string;
 }
 
 /**
@@ -92,6 +101,7 @@ export interface ImportOptions {
  */
 export async function importTrackFile(opts: ImportOptions): Promise<any> {
   const { userId, sourcePath, originalName } = opts;
+  const description = (opts.description || '').trim().slice(0, 1000);
 
   const ext = path.extname(originalName).toLowerCase();
   if (!IMPORT_EXTENSIONS.includes(ext)) {
@@ -133,12 +143,17 @@ export async function importTrackFile(opts: ImportOptions): Promise<any> {
     ...(meta.album ? { album: meta.album } : {}),
   };
 
+  // caption is the description the chain reads (see rePostProcess.ts); style is
+  // the short label the library shows. The genre tag serves as both when the
+  // user typed nothing, which is enough to keep StableStep out of its
+  // "Instrumental track" fallback.
   getDb().prepare(`
     INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
                        duration, bpm, tags, generation_params, backend)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    songId, userId, title, '', meta.genre || '', '', `/audio/${filename}`,
+    songId, userId, title, '', meta.genre || '', description || meta.genre || '',
+    `/audio/${filename}`,
     duration, meta.bpm || 0, JSON.stringify([]), JSON.stringify(generationParams), 'import',
   );
 

@@ -53,6 +53,7 @@ export const ImportTracksModal: React.FC = () => {
   const [failures, setFailures] = useState<{ file: string; error: string }[]>([]);
   const [importedCount, setImportedCount] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [description, setDescription] = useState('');
   const [runPp, setRunPp] = useState(() => {
     try { return localStorage.getItem(PP_PREF_KEY) === '1'; } catch { return false; }
   });
@@ -110,6 +111,12 @@ export const ImportTracksModal: React.FC = () => {
     });
   }, [t]);
 
+  // StableStep refines towards a text description. A generated track gets one
+  // from the prompt it came from; an imported one has only this field and the
+  // file's own genre tag, and with neither the server refuses that stage
+  // rather than refining towards a generic "Instrumental track".
+  const ppNeedsDescription = runPp && !description.trim();
+
   const doImport = useCallback(async () => {
     if (!token || files.length === 0) return;
     setError('');
@@ -118,11 +125,14 @@ export const ImportTracksModal: React.FC = () => {
     setProgress(0);
 
     try {
-      const { songs, errors } = await songApi.importTracks(files, token, (fraction) => {
-        setProgress(fraction);
-        // The upload finishing is the server starting work, and conversion is
-        // the part with no progress to report.
-        if (fraction >= 1) setPhase('converting');
+      const { songs, errors } = await songApi.importTracks(files, token, {
+        description,
+        onProgress: (fraction) => {
+          setProgress(fraction);
+          // The upload finishing is the server starting work, and conversion is
+          // the part with no progress to report.
+          if (fraction >= 1) setPhase('converting');
+        },
       });
 
       // App keeps the library list; it already listens for this.
@@ -147,7 +157,7 @@ export const ImportTracksModal: React.FC = () => {
       setError(err.message || 'Import failed');
       setPhase('picking');
     }
-  }, [token, files, runPp, close]);
+  }, [token, files, runPp, description, close]);
 
   if (!open) return null;
 
@@ -237,6 +247,26 @@ export const ImportTracksModal: React.FC = () => {
             </div>
           )}
 
+          {/* What the track sounds like */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-zinc-500">
+              {t('library.importDescription', 'Description (optional)')}
+            </label>
+            <input
+              type="text"
+              value={description}
+              disabled={busy}
+              onChange={e => setDescription(e.target.value)}
+              placeholder={t('library.importDescriptionPlaceholder', 'dark synthwave, analog bass, driving 4/4')}
+              className="w-full px-3 py-2 rounded-lg text-xs bg-transparent border border-zinc-200 dark:border-white/10 text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-pink-400/60 disabled:opacity-50"
+            />
+            <p className="text-[11px] text-zinc-500">
+              {t('library.importDescriptionHint',
+                'Applied to every file in this batch, and used as the genre tag when the file has none. '
+                + 'StableStep refines towards it — without one, that stage is refused.')}
+            </p>
+          </div>
+
           {/* Post-processing opt-in */}
           <label className={`flex items-start gap-2 text-xs ${busy ? 'opacity-50' : 'cursor-pointer'}`}>
             <input
@@ -258,6 +288,17 @@ export const ImportTracksModal: React.FC = () => {
               </span>
             </span>
           </label>
+
+          {ppNeedsDescription && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-500">
+              <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+              <span>
+                {t('library.importPpNoDescription',
+                  'No description given. If StableStep is on in your chain it will be refused for any '
+                  + 'file without a genre tag of its own — every other stage still runs.')}
+              </span>
+            </div>
+          )}
 
           {/* Progress */}
           {busy && (

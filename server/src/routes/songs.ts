@@ -215,6 +215,10 @@ router.post('/import', importUpload.array('audio', 50), async (req, res) => {
   const files = (req.files as Express.Multer.File[] | undefined) || [];
   if (files.length === 0) { res.status(400).json({ error: 'No files uploaded' }); return; }
 
+  // One description for the batch — what StableStep would refine these towards.
+  // Per-track edits happen afterwards in Edit Metadata.
+  const description = typeof req.body?.description === 'string' ? req.body.description : '';
+
   const songs: any[] = [];
   const errors: { file: string; error: string }[] = [];
 
@@ -224,6 +228,7 @@ router.post('/import', importUpload.array('audio', 50), async (req, res) => {
         userId,
         sourcePath: file.path,
         originalName: file.originalname,
+        description,
       });
       songs.push({ ...song, tags: JSON.parse(song.tags || '[]'), is_public: !!song.is_public });
     } catch (err: any) {

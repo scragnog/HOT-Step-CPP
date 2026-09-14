@@ -223,7 +223,11 @@ export function startRePostProcess(song: any, params: PostProcessParams): RePost
   //   caption      — the StableStep/SA3 refine prompt
   //   seed         — what stableStepSeedFollowsDit follows
   const genParams = safeParseGenerationParams(song);
-  const songCaption: string = genParams.caption || song.style || '';
+  // The description SA3 refines against, best source first: what the track was
+  // generated from, then what the Metadata Editor put on the row (the only
+  // way an imported track — or any track whose caption was wrong — can get
+  // one), then the style text.
+  const songCaption: string = genParams.caption || song.caption || song.style || '';
   const ppParams: PostProcessParams = normalizePpParams(
     {
       ...params,
@@ -236,6 +240,27 @@ export function startRePostProcess(song: any, params: PostProcessParams): RePost
     [songCaption],
   );
   const stages = requestedPpStages(ppParams);
+
+  // StableStep is the one stage that is CONDITIONED: SA3 refines the audio
+  // towards a text prompt built from this description. With nothing to build
+  // from, buildStableStepPrompt() falls back to a bare "Instrumental track",
+  // and the refine pulls the track towards a generic instrumental instead of
+  // towards itself. That is not a stage running badly, it is a stage running
+  // on the wrong input — so say so rather than spend a GPU slot on it.
+  // Imports are where this bites: nothing generated them, so nothing wrote a
+  // caption.
+  if (stages.includes('StableStep') && !songCaption.trim()) {
+    inFlight.delete(song.id);
+    jobs.delete(jobId);
+    throw Object.assign(
+      new Error(
+        'StableStep needs a description of this track to refine towards, and this one has none. '
+        + 'Add a genre or style in Edit Metadata (the "Genre / Style" field), or turn StableStep off '
+        + 'and run the rest of the chain.'
+      ),
+      { status: 400 },
+    );
+  }
   // Gain, a VST chain, reference mastering and the normalizer are CPU work;
   // only StableStep, the PP-VAE re-encode, the Spectral Lifter and the Vocal
   // Naturalizer touch the engine. A chain made only of CPU stages does not

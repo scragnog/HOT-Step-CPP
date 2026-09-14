@@ -157,9 +157,12 @@ export const songApi = {
   importTracks: async (
     files: File[],
     token: string,
-    onProgress?: (fraction: number) => void,
+    opts?: { description?: string; onProgress?: (fraction: number) => void },
   ): Promise<{ songs: Song[]; errors: { file: string; error: string }[] }> => {
+    const onProgress = opts?.onProgress;
     const form = new FormData();
+    // Before the files, so it is parsed early whatever the server does with it.
+    if (opts?.description) form.append('description', opts.description);
     for (const file of files) form.append('audio', file, file.name);
 
     // XHR rather than fetch: an album of FLACs is a long upload, and a
