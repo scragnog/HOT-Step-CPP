@@ -89,6 +89,7 @@
 #include "train/preprocess-io.h"  // pm_mkdir_p, pm_js_*, pm_file_exists
 #include "train/st-write.h"       // the exporter
 #include "train/yue2-nar-train-graph.h"
+#include "train/yue2-sidecar.h"  // yue2_style_string: the style template shared with yue2-ar-train
 
 #include "hot-step-fsutf8.h"
 #include "yue2/yue2-lm-graph.h"
@@ -167,6 +168,8 @@ struct Yue2NarTrainArgs {
     // It is what the trained style is addressed by at generation time, so it
     // is written into the exported adapter's metadata as well.
     std::string trigger;
+    // "upstream" (default) or "bare" — see Yue2ArTrainArgs::style_template.
+    std::string style_template = "upstream";
 
     int64_t     save_every = 0;   // 0 = only the final export
     int64_t     log_every  = 10;
@@ -1109,6 +1112,7 @@ struct Yue2TrainClip {
     std::string          source;   // informational: the file the clip was cut from
     std::string          caption;
     std::string          lyrics;   // upstream always trains lyrics=""; honoured if present
+    std::string          genre, bpm, key;  // sidecar fields for the style template
     std::string          latents;  // resolved path to the cached latent file
     int64_t              offset = 0;  // frame offset INTO that file
     int64_t              frames = 0;  // frames this clip covers
@@ -1335,6 +1339,9 @@ static bool yue2_nt_load_manifest(const std::string & path, Yue2TrainSet * out, 
         cl.source  = yue2_nt_jstr(it, { "source", "file", "audio", "filename", "path" });
         cl.caption = yue2_nt_jstr(it, { "caption", "text", "prompt", "style" });
         cl.lyrics  = yue2_nt_jstr(it, { "lyrics" });
+        cl.genre   = yue2_nt_jstr(it, { "genre" });
+        cl.bpm     = yue2_nt_jstr(it, { "bpm" });
+        cl.key     = yue2_nt_jstr(it, { "key" });
         const std::string lat = yue2_nt_jstr(it, { "latents", "latent", "latent_file", "latents_file",
                                                    "latent_path", "cache" });
         if (lat.empty()) {
@@ -1727,7 +1734,8 @@ static uint64_t yue2_nt_cond_hash(const Yue2NarTrainArgs & a) {
         const uint8_t sep = 0xFF;
         mix_bytes(&sep, 1);
     };
-    mix_str(a.trigger);       // prefixes every caption (yue2_nt_style)
+    mix_str(a.trigger);       // prefixes every caption (yue2_style_string)
+    mix_str(a.style_template);
     mix_str(a.lyrics);        // the fallback when a clip carries none
     mix_str(a.t_sampling);    // re-parameterises t off the same seeded stream
     mix_bytes(&a.caption_dropout, sizeof(a.caption_dropout));  // ditto, the dropout draw
@@ -2089,6 +2097,7 @@ static bool yue2_nt_export(const Yue2TrainAdapters & ad, const Yue2NarTrainArgs 
     snprintf(buf, sizeof(buf), "%lld", (long long) clip_frames);
     md.emplace_back("clip_frames", buf);
     md.emplace_back("trigger", a.trigger);
+    md.emplace_back("style_template", a.style_template);
     // No sha is computed anywhere in this tree, so `base_sha` carries the
     // identity we actually have: the base LM file it trained against. The
     // loader only prints it (yue2-adapter.h:504-508), so a breadcrumb is
@@ -2391,7 +2400,9 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
                 Yue2NtRng r_drop(yue2_nt_seed_mix(a.seed, k, YUE2_NT_TAG_DROPOUT));
                 dropped = r_drop.u01() < (double) a.caption_dropout;
             }
-            const std::string style  = dropped ? std::string() : yue2_nt_style(a.trigger, cl.caption);
+            const std::string style  = dropped ? std::string()
+                                               : yue2_style_string(a.trigger, cl.caption, cl.genre, cl.bpm, cl.key,
+                                                                   a.style_template != "bare");
             const std::string lyrics = dropped ? std::string() : (cl.lyrics.empty() ? a.lyrics : cl.lyrics);
             const std::string            key    = cond_key(style, lyrics, cl.codec_ids);
             const std::vector<int32_t> * ar_ids = cond_ids_for(key, style, lyrics, cl.codec_ids);

@@ -51,14 +51,21 @@
 // richer prompt.
 
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
 
 // Parse an Option-A sidecar body. Returns true when at least one of the two
 // interesting fields was found. `caption` and `lyrics` are always assigned
-// (possibly empty), so a caller need not clear them first.
-static bool yue2_sidecar_parse(const std::string & text, std::string * caption, std::string * lyrics) {
+// (possibly empty), so a caller need not clear them first. `meta_out`, when
+// given, receives every parsed field (lower-cased keys, trimmed values) —
+// `genre`, `bpm`, `key` included — for the style TEMPLATE below, which is
+// the one legitimate consumer: prose, not a field dump.
+static bool yue2_sidecar_parse_meta(const std::string & text, std::string * caption, std::string * lyrics,
+                                    std::map<std::string, std::string> * meta_out) {
     caption->clear();
     lyrics->clear();
     if (text.empty()) {
@@ -162,7 +169,99 @@ static bool yue2_sidecar_parse(const std::string & text, std::string * caption, 
     };
     *caption = get("caption");
     *lyrics  = get("lyrics");
+    if (meta_out) {
+        *meta_out = meta;
+    }
     return !caption->empty() || !lyrics->empty();
+}
+
+static bool yue2_sidecar_parse(const std::string & text, std::string * caption, std::string * lyrics) {
+    return yue2_sidecar_parse_meta(text, caption, lyrics, nullptr);
+}
+
+// ── The style string, in upstream's TRAINING TEMPLATE ──────────────────────
+//
+// Mothersuperior's AR/NAR recipes address the artist as
+//
+//     <trigger>, in the style of <trigger>. <caption>. <genre>, <bpm> BPM, key of <key>.
+//
+// (make_layout.py / the trainer README's "xyzq, in the style of xyzq." form,
+// with the genre/BPM/key tail from the sidecar as prose, joined by ", " and
+// closed with a full stop; whitespace collapsed). Measured 2026-09-14
+// (_LISTENING/2026-09-14/RESULTS.md, "the template x adapter x seed grid"):
+// the SAME adapter ends and sounds like the artist under this template and
+// caps under the bare "<trigger>, <caption>" — the template is a first-class
+// control, so both trainers build it here and the app must compose the
+// identical string at generation. `bare` keeps the old behaviour for
+// adapters trained before this existed.
+//
+// An empty caption yields the trigger alone (upstream's train.py:192 rule);
+// an empty trigger yields the caption plus tail with no "in the style of".
+// --style-template's two legal spellings; anything else is a typo that would
+// otherwise silently train the bare template (the != "bare" test).
+static const char * yue2_style_template_check(const char * v) {
+    if (v && (!strcmp(v, "upstream") || !strcmp(v, "bare"))) {
+        return v;
+    }
+    fprintf(stderr, "--style-template must be `upstream` or `bare` (got \"%s\")\n", v ? v : "");
+    exit(2);
+}
+
+static std::string yue2_style_string(const std::string & trigger, const std::string & caption,
+                                     const std::string & genre, const std::string & bpm, const std::string & key,
+                                     bool upstream_template) {
+    auto squash = [](const std::string & s) {
+        std::string o;
+        bool        sp = false;
+        for (char c : s) {
+            const bool ws = (c == ' ' || c == '\t' || c == '\r' || c == '\n');
+            if (ws) {
+                sp = true;
+                continue;
+            }
+            if (sp && !o.empty()) {
+                o += ' ';
+            }
+            sp = false;
+            o += c;
+        }
+        return o;
+    };
+    const std::string cap = squash(caption);
+    if (!upstream_template) {
+        if (cap.empty()) {
+            return trigger;
+        }
+        if (trigger.empty()) {
+            return cap;
+        }
+        return trigger + ", " + cap;
+    }
+    if (cap.empty()) {
+        return trigger;
+    }
+    std::string tail;
+    auto        bit = [&](const std::string & s) {
+        if (s.empty()) {
+            return;
+        }
+        if (!tail.empty()) {
+            tail += ", ";
+        }
+        tail += s;
+    };
+    bit(squash(genre));
+    if (!squash(bpm).empty()) {
+        bit(squash(bpm) + " BPM");
+    }
+    if (!squash(key).empty()) {
+        bit("key of " + squash(key));
+    }
+    if (!tail.empty()) {
+        tail += ".";
+    }
+    std::string head = trigger.empty() ? std::string() : trigger + ", in the style of " + trigger + ". ";
+    return squash(head + cap + " " + tail);
 }
 
 // Replace the last extension with ".txt" (data.py's `file.with_suffix(".txt")`).

@@ -431,6 +431,13 @@ static void print_usage(void) {
             "                --lm <yue2-lm-<type>.gguf> (or --models <dir>)\n"
             "                --manifest <yue2_preprocess.json>  the clip set to train on\n"
             "                --out <dir>  checkpoints, snapshots and the exported adapter\n"
+            "                --style-template upstream|bare  (default upstream) how the artist\n"
+            "                style string is built from trigger + caption: upstream's\n"
+            "                \"<trig>, in the style of <trig>. <caption>. <genre>, <bpm> BPM,\n"
+            "                key of <key>.\" (genre/bpm/key from the manifest, written by\n"
+            "                preprocess from the ACE sidecar), or the bare \"<trig>, <caption>\".\n"
+            "                Generation must compose the SAME string; the choice is stored in\n"
+            "                the adapter's metadata as style_template.\n"
             "                --trigger <word>  prepended to every caption, and the word the\n"
             "                trained style is addressed by at generation time. Without one the\n"
             "                adapter has no handle; the loop warns.\n"
@@ -502,6 +509,13 @@ static void print_usage(void) {
             "                --manifest <yue2_preprocess.json>  read as SOURCES, not clips:\n"
             "                the source-level codec_ids file is the whole-song code array.\n"
             "                --out <dir>  checkpoints, the ladder snapshots and the adapter\n"
+            "                --style-template upstream|bare  (default upstream) how the artist\n"
+            "                style string is built from trigger + caption: upstream's\n"
+            "                \"<trig>, in the style of <trig>. <caption>. <genre>, <bpm> BPM,\n"
+            "                key of <key>.\" (genre/bpm/key from the manifest, written by\n"
+            "                preprocess from the ACE sidecar), or the bare \"<trig>, <caption>\".\n"
+            "                Generation must compose the SAME string; the choice is stored in\n"
+            "                the adapter's metadata as style_template.\n"
             "                --trigger <word>  prepended to every caption, and the word the\n"
             "                trained style is addressed by at generation time.\n"
             "                --minted <manifest.json>  THE REGULARIZER, and it is structural,\n"
@@ -4481,6 +4495,7 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--weight-decay")) a.weight_decay = (float) atof(next("--weight-decay"));
         else if (!strcmp(argv[i], "--caption-dropout")) a.caption_dropout = (float) atof(next("--caption-dropout"));
         else if (!strcmp(argv[i], "--trigger"))     a.trigger    = next("--trigger");
+        else if (!strcmp(argv[i], "--style-template")) a.style_template = yue2_style_template_check(next("--style-template"));
         else if (!strcmp(argv[i], "--name"))        a.name       = next("--name");
         else if (!strcmp(argv[i], "--save-every"))  a.save_every = atoll(next("--save-every"));
         else if (!strcmp(argv[i], "--log-every"))   a.log_every  = atoll(next("--log-every"));
@@ -4739,6 +4754,7 @@ static int cmd_yue2_ar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--style"))         a.style      = next("--style");
         else if (!strcmp(argv[i], "--lyrics"))        a.lyrics     = next("--lyrics");
         else if (!strcmp(argv[i], "--trigger"))       a.trigger    = next("--trigger");
+        else if (!strcmp(argv[i], "--style-template")) a.style_template = yue2_style_template_check(next("--style-template"));
         else if (!strcmp(argv[i], "--sidecars"))      a.sidecars   = strcmp(next("--sidecars"), "off") != 0;
         else if (!strcmp(argv[i], "--target"))        a.target     = next("--target");
         else if (!strcmp(argv[i], "--rank"))          a.rank       = atoll(next("--rank"));

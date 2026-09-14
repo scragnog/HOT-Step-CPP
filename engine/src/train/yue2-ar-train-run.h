@@ -173,6 +173,11 @@ struct Yue2ArTrainArgs {
     // metadata as well, so half a run under a different one is a different
     // adapter.
     std::string trigger;
+    // "upstream" (default): the artist style string is upstream's training
+    // template, trigger + "in the style of" + caption + genre/BPM/key tail
+    // (yue2_style_string). "bare": the old "<trigger>, <caption>". Written to
+    // the adapter's metadata so generation composes the same string.
+    std::string style_template = "upstream";
 
     std::string target = "attn_mlp";  // attn | attn_mlp   (attn_mlp_embed: refused, contract §2.3)
     int64_t     rank   = 64;          // upstream's rank, and the FD gate's (contract §6.4)
@@ -472,6 +477,7 @@ struct Yue2ArSong {
     std::string          source;   // the audio file the codes came from
     std::string          style;    // what goes in [Tags]
     std::string          lyrics;   // what goes in [Lyrics]
+    std::string          genre, bpm, key;  // sidecar fields for the style template (artist rows only)
     std::string          codes_path;
     int64_t              codes_off = 0;  // FRAMES into codes_path; blob-packed sets only
     int64_t              codes_n   = 0;  // FRAMES to read; 0 = the whole file
@@ -747,6 +753,9 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
         s.source = jstr(it, { "source", "file", "audio", "path" });
         const std::string cap = jstr(it, { "caption", "style", "text", "prompt" });
         s.lyrics              = jstr(it, { "lyrics" });
+        s.genre               = jstr(it, { "genre" });
+        s.bpm                 = jstr(it, { "bpm" });
+        s.key                 = jstr(it, { "key" });
         s.cursor_words        = jstr(it, { "cursor_words" });
         const std::string cd  = jstr(it, { "codec_ids", "codec", "codes" });
         if (cd.empty()) {
@@ -811,7 +820,14 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
                 caption = a.style;
             }
         }
-        s.style  = yue2_at_squash(want_minted ? caption : yue2_at_style(a.trigger, caption), 1500);
+        // Artist rows get the style TEMPLATE (yue2_style_string, sidecar.h):
+        // upstream's "<trigger>, in the style of <trigger>. <caption>. <genre>,
+        // <bpm> BPM, key of <key>." unless --style-template bare. Minted rows
+        // keep their own style verbatim, as before.
+        s.style  = yue2_at_squash(want_minted ? caption
+                                              : yue2_style_string(a.trigger, caption, s.genre, s.bpm, s.key,
+                                                                  a.style_template != "bare"),
+                                  1500);
         s.minted = want_minted;
         if (want_minted) {
             const std::string src = jstr(it, { "src" });
@@ -1156,6 +1172,7 @@ static uint64_t yue2_at_cond_hash(const Yue2ArTrainArgs & a) {
     mix_str(a.manifest);
     mix_str(a.minted);
     mix_str(a.trigger);
+    mix_str(a.style_template);
     mix_str(a.style);
     mix_str(a.lyrics);
     mix_str(a.attn);
@@ -1509,6 +1526,7 @@ static bool yue2_at_export(const Yue2AtAdapters & ad, const Yue2ArTrainArgs & a,
     snprintf(buf, sizeof(buf), "%lld", (long long) song_frames);
     md.emplace_back("song_frames", buf);
     md.emplace_back("trigger", a.trigger);
+    md.emplace_back("style_template", a.style_template);
     // No sha is computed anywhere in this tree, so `base_sha` carries the
     // identity we actually have: the base LM file it trained against. An
     // invented hash would be worse than none.

@@ -381,15 +381,37 @@ static std::string yp_caption_path(const std::string & audio_path) {
 // and its first line of substance is "Basic Attributes: bpm is 121. key is D,
 // and scale is major." — exactly the shape a YuE2 style must not carry. The ACE
 // sidecar's `caption:` line is already the descriptive prose.
+// The three sidecar fields the style TEMPLATE consumes (yue2_style_string).
+// Carried through the manifest as their own keys so a trainer on a machine
+// without the dataset (the living-room box has no M:) can still build the
+// template; they never enter `caption` itself.
+struct YpStyleMeta {
+    std::string genre, bpm, key;
+};
+
 static void yp_resolve_caption(const Yue2PreprocessArgs & a, const std::string & audio_path,
-                               std::string * caption, std::string * lyrics, bool * sidecar_hit) {
+                               std::string * caption, std::string * lyrics, bool * sidecar_hit,
+                               YpStyleMeta * sm = nullptr) {
     caption->clear();
     lyrics->clear();
     *sidecar_hit = false;
+    if (sm) {
+        *sm = YpStyleMeta{};
+    }
     if (a.caption_mode == "ace") {
         std::string raw;
         if (yp_read_text(yp_caption_path(audio_path), &raw)) {
-            *sidecar_hit = yue2_sidecar_parse(raw, caption, lyrics);
+            std::map<std::string, std::string> meta;
+            *sidecar_hit = yue2_sidecar_parse_meta(raw, caption, lyrics, &meta);
+            if (sm) {
+                auto get = [&](const char * k) {
+                    auto it = meta.find(k);
+                    return it == meta.end() ? std::string() : it->second;
+                };
+                sm->genre = get("genre");
+                sm->bpm   = get("bpm");
+                sm->key   = get("key");
+            }
         }
     } else if (a.caption_mode == "txt") {
         std::string cap;
@@ -644,6 +666,7 @@ struct Yue2PpSource {
     std::string path;         // full path as scanned
     std::string caption;      // the STYLE string: descriptive prose, no field noise
     std::string lyrics;       // the tagged lyric sheet, or empty for an instrumental
+    YpStyleMeta sm;           // genre / bpm / key for the style template, kept OUT of caption
     // pm_safe_stem(name) + "_" + cache key. The KEY is part of it on purpose:
     // the sanitized stem alone collides (a.wav and a.flac both sanitize to
     // "a"), which would give two different songs the same clip ids and the
@@ -727,6 +750,15 @@ static int yue2_preprocess_captions_only(const Yue2PreprocessArgs & a) {
     struct YpCapRow {
         std::string caption;
         std::string lyrics;
+        YpStyleMeta sm;
+    };
+    auto put_sm = [&](yyjson_mut_val * obj, const YpStyleMeta & sm) {
+        for (const auto & kv : { std::pair<const char *, const std::string *>{ "genre", &sm.genre },
+                                 std::pair<const char *, const std::string *>{ "bpm", &sm.bpm },
+                                 std::pair<const char *, const std::string *>{ "key", &sm.key } }) {
+            yyjson_mut_obj_remove_str(obj, kv.first);
+            yyjson_mut_obj_add_strcpy(mdoc, obj, kv.first, kv.second->c_str());
+        }
     };
     std::map<std::string, YpCapRow> by_latent;
     int64_t n_src = 0, n_cap = 0, n_lyr = 0, n_missing = 0;
@@ -752,7 +784,7 @@ static int yue2_preprocess_captions_only(const Yue2PreprocessArgs & a) {
             n_src++;
             YpCapRow row;
             bool     hit = false;
-            yp_resolve_caption(a, apath, &row.caption, &row.lyrics, &hit);
+            yp_resolve_caption(a, apath, &row.caption, &row.lyrics, &hit, &row.sm);
             if (a.caption_mode == "ace" && !hit) {
                 fprintf(stderr, "[yue2-preprocess]   no readable ACE sidecar beside %s\n", apath.c_str());
                 n_missing++;
@@ -767,6 +799,7 @@ static int yue2_preprocess_captions_only(const Yue2PreprocessArgs & a) {
             yyjson_mut_obj_add_strcpy(mdoc, it, "caption", row.caption.c_str());
             yyjson_mut_obj_remove_str(it, "lyrics");
             yyjson_mut_obj_add_strcpy(mdoc, it, "lyrics", row.lyrics.c_str());
+            put_sm(it, row.sm);
             if (lv && yyjson_mut_is_str(lv)) {
                 by_latent[yyjson_mut_get_str(lv)] = row;
             }
@@ -798,6 +831,7 @@ static int yue2_preprocess_captions_only(const Yue2PreprocessArgs & a) {
                 yyjson_mut_obj_add_strcpy(mdoc, it, "caption", f->second.caption.c_str());
                 yyjson_mut_obj_remove_str(it, "lyrics");
                 yyjson_mut_obj_add_strcpy(mdoc, it, "lyrics", f->second.lyrics.c_str());
+                put_sm(it, f->second.sm);
             }
         }
     }
@@ -1058,7 +1092,7 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         s.name = name;
         s.path = path;
         bool sidecar_hit = false;
-        yp_resolve_caption(a, path, &s.caption, &s.lyrics, &sidecar_hit);
+        yp_resolve_caption(a, path, &s.caption, &s.lyrics, &sidecar_hit, &s.sm);
         (void) sidecar_hit;
 
         const std::string key = yp_key_hex(name + "|" + std::to_string(fbytes) + "|" + std::to_string(fmtime) + "|" +
@@ -1269,6 +1303,9 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         // Per SOURCE as well as per clip: the AR trainer reads sources[] (whole
         // songs), the NAR trainer reads clips[]. Both need the same two strings.
         yyjson_mut_obj_add_strcpy(doc, so, "lyrics", s.lyrics.c_str());
+        yyjson_mut_obj_add_strcpy(doc, so, "genre", s.sm.genre.c_str());
+        yyjson_mut_obj_add_strcpy(doc, so, "bpm", s.sm.bpm.c_str());
+        yyjson_mut_obj_add_strcpy(doc, so, "key", s.sm.key.c_str());
         yyjson_mut_obj_add_strcpy(doc, so, "latents", s.latent_rel.c_str());
         yyjson_mut_obj_add_int(doc, so, "frames", s.frames);
         yyjson_mut_obj_add_int(doc, so, "clips", s.clips);
@@ -1284,6 +1321,9 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
             yyjson_mut_obj_add_strcpy(doc, co, "source", s.path.c_str());
             yyjson_mut_obj_add_strcpy(doc, co, "caption", s.caption.c_str());
             yyjson_mut_obj_add_strcpy(doc, co, "lyrics", s.lyrics.c_str());
+            yyjson_mut_obj_add_strcpy(doc, co, "genre", s.sm.genre.c_str());
+            yyjson_mut_obj_add_strcpy(doc, co, "bpm", s.sm.bpm.c_str());
+            yyjson_mut_obj_add_strcpy(doc, co, "key", s.sm.key.c_str());
             yyjson_mut_obj_add_strcpy(doc, co, "latents", s.latent_rel.c_str());
             // The reader needs source_frames as well as offset_frames: it
             // BOUNDS the clip's contiguous read against the file it came from
