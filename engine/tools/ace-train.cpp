@@ -34,6 +34,11 @@
 // yue2/yue2-tok-head.h in transitively; must follow yue2-preprocess-run.h,
 // whose decode helpers it reuses rather than re-implementing.
 #include "train/yue2-tokenize-run.h"
+// YuE2 native forced aligner (docs/plans/yue2/17-mms-fa-port.md §5): fills the
+// cursor_words slot the AR trainer's lyric-cursor loss reads, replacing
+// engine/tools/yue2-cursor-bridge.py and the torchaudio install behind it.
+// Pulls yue2/yue2-mmsfa.h and yue2/yue2-ctc-align.h in transitively.
+#include "train/yue2-align-run.h"
 // YuE2 AR LoRA trainer (docs/plans/yue2/14-ar-lora-contract.md). The AR half is
 // YuE2's COMPOSER — it writes the semantic token stream that fixes melody,
 // phrasing and structure — and training it needed ground-truth codec tokens for
@@ -408,6 +413,20 @@ static void print_usage(void) {
             "                Codes are RAW, in [0, 32768). The + codec_offset (151853) is\n"
             "                added once, at conditioning time, by the trainer.\n"
             "                TF32 is forced off, same rule as yue2-preprocess.\n"
+            "  yue2-align     Fill the cursor_words slot the AR trainer's lyric-cursor loss\n"
+            "                reads: CTC forced alignment (native MMS_FA) of each source's\n"
+            "                own lyrics against its vocal stem, writing per-word spans to\n"
+            "                <cache>/cursor/<name>.f32. Retires yue2-cursor-bridge.py and\n"
+            "                the torchaudio install behind it.\n"
+            "                --manifest <yue2_preprocess.json>  rewritten in place (.bak kept)\n"
+            "                --mmsfa <mms-fa-f32.gguf>  the converted MMS_FA weights\n"
+            "                --stems <dir>  holding <source name>/vocals.wav (Demucs htdemucs\n"
+            "                layout). A source with no stem, or no lyrics, is skipped by name.\n"
+            "                [--only <substr>] [--limit <n>]  case-insensitive name filter\n"
+            "                [--cpu]  pin the backend to CPU (default: best available)\n"
+            "                Each track runs as ONE forward: MMS_FA normalises the waveform\n"
+            "                per utterance, so a chunked track is a different model input.\n"
+            "                Budget ~5 GB and ~100 s per 4 minutes on 16 CPU threads.\n"
             "  yue2-nar-train  YuE2 NAR-half LoRA training (rectified flow; AR stays frozen).\n"
             "                --lm <yue2-lm-<type>.gguf> (or --models <dir>)\n"
             "                --manifest <yue2_preprocess.json>  the clip set to train on\n"
@@ -4627,6 +4646,59 @@ static int cmd_yue2_tokenize(int argc, char ** argv) {
     return yue2_tokenize_run(a);
 }
 
+// ─── yue2-align ─────────────────────────────────────────────────────────────
+//
+// Native forced alignment: fill the `cursor_words` slot the AR trainer's
+// lyric-cursor loss reads, from each source's vocal stem and the manifest's own
+// lyrics. This is engine/tools/yue2-cursor-bridge.py and upstream's
+// cursor_prep.py — and the torchaudio install behind them — retired.
+//
+// All the detail (the whole-track rule, the codepoint offsets, why there is no
+// cache-skip) lives in train/yue2-align-run.h's header.
+//
+// --cpu pins the backend BEFORE any context exists, which is the only moment
+// it can be pinned: ggml_backend_init_best() is called the first time a model
+// is loaded and there is no later override. TF32 is forced off for the GPU
+// default, exactly as cmd_yue2_tokenize does it and for the same reason — the
+// driver reads NVIDIA_TF32_OVERRIDE when the CUDA context is CREATED, and the
+// MMS_FA port's stage gates (14/14) were measured in fp32 with it off.
+static int cmd_yue2_align(int argc, char ** argv) {
+    Yue2AlignArgs a;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--cpu")) {
+            a.cpu = true;
+        }
+    }
+#ifdef _WIN32
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+    if (a.cpu) {
+        _putenv_s("GGML_BACKEND", "CPU");
+    }
+#else
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+    if (a.cpu) {
+        setenv("GGML_BACKEND", "CPU", 1);
+    }
+#endif
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--manifest")) a.manifest = next("--manifest");
+        else if (!strcmp(argv[i], "--mmsfa"))    a.mmsfa    = next("--mmsfa");
+        else if (!strcmp(argv[i], "--stems"))    a.stems    = next("--stems");
+        else if (!strcmp(argv[i], "--only"))     a.only     = next("--only");
+        else if (!strcmp(argv[i], "--limit"))    a.limit    = atoi(next("--limit"));
+        else if (!strcmp(argv[i], "--cpu"))      a.cpu      = true;  // already consumed above
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    // MANDATORY: ggml_time_ms() divides by an uninitialised frequency otherwise.
+    ggml_time_init();
+    return yue2_align_run(a);
+}
+
 // ─── yue2-ar-train ──────────────────────────────────────────────────────────
 //
 // YuE2 AR-half LoRA trainer — the branch that could never be trained before.
@@ -6145,6 +6217,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "yue2-tokenize")) {
         return cmd_yue2_tokenize(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-align")) {
+        return cmd_yue2_align(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-nar-train")) {
         return cmd_yue2_nar_train(argc - 1, argv + 1);

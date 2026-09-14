@@ -64,6 +64,7 @@
 
 #include "yue2/yue2-lm-graph.h"
 #include "yue2/yue2-mert.h"
+#include "yue2/yue2-mmsfa.h"
 #include "yue2/yue2-model.h"
 #include "yue2/yue2-nar-graph.h"
 #include "yue2/yue2-sample.h"
@@ -117,7 +118,13 @@ static void usage() {
             "       (the whole encoder: 21 Conformer blocks, interpolation to T25 and the instance norm,\n"
             "        diffed per block against stages-30s/04_block*_out or a whole-track hidden_*/featnorm set)\n"
             "       yue2-probe --generate --cot off --style <s> --lyrics <s> --max-tokens <n> --seed <n> "
-            "--models <dir>\n");
+            "--models <dir>\n"
+            "       yue2-probe mmsfa-stages <mms-fa.gguf> <fixture-dir> [--gelu erf|tanh|both] [--dump <dir>]\n"
+            "                              [--attn-budget <KB>] [--allow-gpu]\n"
+            "       (the MMS_FA forced aligner, stage by stage against ex_*.npy; CPU backend unless --allow-gpu)\n"
+            "       yue2-probe mmsfa-emit <mms-fa.gguf> <input16k.npy> <out.npy> [--ref <emissions.npy>] "
+            "[--allow-gpu]\n"
+            "       (full-track emissions + argmax agreement; --ref defaults to the _emissions.npy sibling)\n");
 }
 
 // List every tensor name the GGUF file actually has but the config-driven
@@ -3735,7 +3742,695 @@ static int run_mert_block_parity(const std::string & models_dir, const std::stri
     return (total > 0 && passed == total) ? 0 : 1;
 }
 
+// ── --mmsfa-stages / --mmsfa-emit: the MMS_FA forced-aligner acoustic model ──
+//
+// AUTHORITY: docs/plans/yue2/17-mms-fa-port.md §3 (fixtures) and §4 (gates).
+// The port itself is engine/src/yue2/yue2-mmsfa.h; this is its gate.
+//
+// --mmsfa-stages <gguf> <fixture-dir> runs the 10 s excerpt
+// (ex_input16k.npy, 160000 samples) through the whole chain with every stage
+// tapped, and diffs each one against its ex_<stage>.npy. --mmsfa-emit
+// <gguf> <input.npy> <out.npy> runs a full track and reports argmax agreement
+// against the reference emissions.
+//
+// ── LAYOUT: NO TRANSPOSE, AND WHY THAT IS NOT AN OVERSIGHT ──
+//
+// The fixtures are row-major [T, C] float32 .npy. The port's activations are
+// ggml ne = [C, T] — ne0 = channel, which is the FASTEST-varying axis in ggml
+// just as C is the fastest-varying axis in a row-major [T, C] numpy array. The
+// two are therefore byte-identical and the comparison below is elementwise
+// with no permutation. The shapes are still checked against the .npy header,
+// so a layout change fails loudly ("shape mismatch") instead of scoring as a
+// numeric miss.
+//
+// ── THE BARS (plan doc §4) ──
+//
+// Max-abs error, F32 weights, CPU backend, fp32 on both sides:
+//
+//     conv0..conv6              abs 1e-4
+//     feat_proj, pos_conv       abs 1e-4
+//     layer0                    abs 2e-4
+//     layer1, layer11           INFO — §4 pins no bar for them (see below)
+//     layer23                   rel-L2 1e-4 AND abs 5e-3   (§0.1)
+//     final_ln (ex_pre_layers)  rel-L2 1e-4 AND abs 5e-3   (§0.1; it is a
+//                               depth-23 stage, not the pre-transformer one
+//                               the doc used to name it for)
+//     logits, emissions         abs 2e-3
+//
+// The fixtures were captured with forward hooks on the live torchaudio module
+// and reproduce its emissions exactly, so anything above ~1e-4 at a
+// pre-transformer stage is a port bug, never tolerance. A failing stage is
+// investigated, never widened — same discipline as the MERT pin. The two
+// depth-23 bars were corrected in §0.1 on evidence ABOUT THE FIXTURE (its own
+// fp32 noise there is 2.4e-3 against a float64 oracle, and this port is
+// closer to that oracle than the fixture is), not to cover this port: every
+// shallower stage is unchanged and still passes with three to four orders of
+// margin.
+//
+// ── THREE THINGS THE PLAN DOC HAS WRONG (found by this gate) ──
+//
+// Every one of them was localised by the first stage that broke, and settled
+// against an independent float64 recomputation from the same GGUF weights.
+// The full argument lives in engine/src/yue2/yue2-mmsfa.h (notes A, B, C);
+// the short version:
+//
+//   A. The waveform is layer-normed over the whole utterance before conv0
+//      (torchaudio's bundle does it). Raw input: conv0 off by 9.80.
+//      Normalised: 3.4e-06. §1 and pin.json never mention it.
+//   B. The encoder is PRE-LN, not post-LN, whatever `layer_norm_first: false`
+//      says. layer0 from the same input: pre-LN 1.6e-05, post-LN 19.5.
+//   C. `mmsfa.enc.ln` is the FINAL norm, after all 24 layers — so
+//      ex_pre_layers.npy is the HEAD'S INPUT, not "the transformer input".
+//      Provable from the shipped fixtures alone: LayerNorm(ex_layer23) ==
+//      ex_pre_layers to 2.2e-07, head(ex_pre_layers) == ex_logits to 2.4e-06,
+//      head(ex_layer23) misses ex_logits by 324.
+//
+// ── GELU, MEASURED RATHER THAN ASSUMED ──
+//
+// The plan doc says exact erf everywhere and explicitly asks for it to be
+// measured at conv0 and at layer0, because the MERT port found tanh in one
+// head and erf in the other. --gelu both runs the whole chain twice and prints
+// both columns; the erf column is the one the gates use.
+//
+// ── CPU ONLY ──
+//
+// Both modes force GGML_BACKEND=CPU before the first backend_init unless
+// --allow-gpu is passed. The gates are an fp32-vs-fp32 comparison and a GPU
+// backend would add its own reduction order to the argument; the full track
+// also wants a couple of GB of compute buffer that a busy GPU may not have.
+
+// Minimal .npy reader: version 1.0/2.0 header, '<f4' or '|f4' descr, C order.
+// Deliberately strict — this is a gate, and a silently-misread fixture is the
+// one failure mode that would look like a port bug.
+static bool yue2_read_npy_f32(const std::string & path, std::vector<float> * out, std::vector<int64_t> * shape,
+                              std::string * err) {
+    std::vector<uint8_t> raw;
+    if (!yue2_read_raw_bin(path, &raw)) {
+        if (err) {
+            *err = "cannot read " + path;
+        }
+        return false;
+    }
+    if (raw.size() < 12 || memcmp(raw.data(), "\x93NUMPY", 6) != 0) {
+        if (err) {
+            *err = path + ": not a .npy file (bad magic)";
+        }
+        return false;
+    }
+    const int major = raw[6];
+    size_t    hlen  = 0;
+    size_t    hoff  = 0;
+    if (major == 1) {
+        hlen = (size_t) raw[8] | ((size_t) raw[9] << 8);
+        hoff = 10;
+    } else if (major == 2) {
+        hlen = (size_t) raw[8] | ((size_t) raw[9] << 8) | ((size_t) raw[10] << 16) | ((size_t) raw[11] << 24);
+        hoff = 12;
+    } else {
+        if (err) {
+            *err = path + ": .npy version " + std::to_string(major) + " is not supported";
+        }
+        return false;
+    }
+    if (hoff + hlen > raw.size()) {
+        if (err) {
+            *err = path + ": truncated .npy header";
+        }
+        return false;
+    }
+    const std::string hdr((const char *) raw.data() + hoff, hlen);
+    if (hdr.find("'descr': '<f4'") == std::string::npos && hdr.find("'descr': '|f4'") == std::string::npos &&
+        hdr.find("\"descr\": \"<f4\"") == std::string::npos) {
+        if (err) {
+            *err = path + ": dtype is not little-endian float32 (header: " + hdr + ")";
+        }
+        return false;
+    }
+    if (hdr.find("'fortran_order': False") == std::string::npos &&
+        hdr.find("\"fortran_order\": false") == std::string::npos) {
+        if (err) {
+            *err = path + ": fortran_order is not False — this reader only does C order";
+        }
+        return false;
+    }
+    const size_t sp = hdr.find("'shape':");
+    const size_t lp = sp == std::string::npos ? std::string::npos : hdr.find('(', sp);
+    const size_t rp = lp == std::string::npos ? std::string::npos : hdr.find(')', lp);
+    if (rp == std::string::npos) {
+        if (err) {
+            *err = path + ": cannot parse the shape tuple (header: " + hdr + ")";
+        }
+        return false;
+    }
+    shape->clear();
+    int64_t total = 1;
+    {
+        const std::string tup = hdr.substr(lp + 1, rp - lp - 1);
+        size_t            i   = 0;
+        while (i < tup.size()) {
+            while (i < tup.size() && (tup[i] == ' ' || tup[i] == ',')) {
+                i++;
+            }
+            if (i >= tup.size() || tup[i] < '0' || tup[i] > '9') {
+                break;
+            }
+            int64_t v = 0;
+            while (i < tup.size() && tup[i] >= '0' && tup[i] <= '9') {
+                v = v * 10 + (tup[i++] - '0');
+            }
+            shape->push_back(v);
+            total *= v;
+        }
+    }
+    const size_t body = raw.size() - (hoff + hlen);
+    if (body != (size_t) total * sizeof(float)) {
+        if (err) {
+            *err = path + ": body is " + std::to_string(body) + " bytes, shape implies " +
+                   std::to_string((size_t) total * sizeof(float));
+        }
+        return false;
+    }
+    out->resize((size_t) total);
+    memcpy(out->data(), raw.data() + hoff + hlen, body);
+    return true;
+}
+
+// Write a [rows, cols] float32 array as a v1.0 .npy — for --mmsfa-emit's
+// output, so the emissions can be diffed in numpy without a shape guess.
+static bool yue2_write_npy_f32(const std::string & path, const float * data, int64_t rows, int64_t cols,
+                               std::string * err) {
+    char dict[256];
+    snprintf(dict, sizeof(dict), "{'descr': '<f4', 'fortran_order': False, 'shape': (%lld, %lld), }",
+             (long long) rows, (long long) cols);
+    std::string hdr = dict;
+    // The header (magic + 4 + 2 + hdr + '\n') must be a multiple of 64 bytes.
+    while ((10 + hdr.size() + 1) % 64 != 0) {
+        hdr += ' ';
+    }
+    hdr += '\n';
+    FILE * f = fopen(path.c_str(), "wb");
+    if (!f) {
+        if (err) {
+            *err = "cannot write " + path;
+        }
+        return false;
+    }
+    const uint8_t magic[8] = { 0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0 };
+    const uint16_t hl      = (uint16_t) hdr.size();
+    bool ok = fwrite(magic, 1, 8, f) == 8 && fwrite(&hl, 1, 2, f) == 2 &&
+              fwrite(hdr.data(), 1, hdr.size(), f) == hdr.size() &&
+              fwrite(data, sizeof(float), (size_t) (rows * cols), f) == (size_t) (rows * cols);
+    fclose(f);
+    if (!ok && err) {
+        *err = "short write to " + path;
+    }
+    return ok;
+}
+
+// Peak working set of this process, in bytes. Resolved dynamically out of
+// kernel32 (K32GetProcessMemoryInfo) so the probe gains no new link
+// dependency; 0 when unavailable, which every caller prints as "n/a".
+static uint64_t yue2_peak_rss_bytes() {
+#ifdef _WIN32
+    struct PMC {
+        DWORD  cb;
+        DWORD  PageFaultCount;
+        SIZE_T PeakWorkingSetSize;
+        SIZE_T WorkingSetSize;
+        SIZE_T QuotaPeakPagedPoolUsage;
+        SIZE_T QuotaPagedPoolUsage;
+        SIZE_T QuotaPeakNonPagedPoolUsage;
+        SIZE_T QuotaNonPagedPoolUsage;
+        SIZE_T PagefileUsage;
+        SIZE_T PeakPagefileUsage;
+    };
+    typedef BOOL(WINAPI * GetPMI)(HANDLE, PMC *, DWORD);
+    HMODULE k32 = GetModuleHandleA("kernel32.dll");
+    if (!k32) {
+        return 0;
+    }
+    GetPMI fn = (GetPMI) GetProcAddress(k32, "K32GetProcessMemoryInfo");
+    if (!fn) {
+        return 0;
+    }
+    PMC pmc = {};
+    pmc.cb  = sizeof(pmc);
+    if (!fn(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+        return 0;
+    }
+    return (uint64_t) pmc.PeakWorkingSetSize;
+#else
+    return 0;
+#endif
+}
+
+static constexpr double YUE2_MMSFA_CONV_GATE   = 1e-4;
+static constexpr double YUE2_MMSFA_PRE_GATE    = 1e-4;
+static constexpr double YUE2_MMSFA_LAYER0_GATE = 2e-4;
+static constexpr double YUE2_MMSFA_DEEP_GATE   = 2e-3;   // logits, emissions
+// layer23 and the final norm, per §0.1's correction: rel-L2 ≤ 1e-4 AND
+// abs ≤ 5e-3. Two criteria, both required. The absolute one still has to be
+// there — rel-L2 alone would not notice a handful of frames going badly wrong
+// in a tensor whose norm is dominated by 499x1024 healthy ones — but at depth
+// 23 it is set above the fp32 FIXTURE's own noise (2.4e-3 against a float64
+// recomputation) rather than below it, which is what the old 2e-3 did.
+static constexpr double YUE2_MMSFA_DEEP_REL_GATE = 1e-4;
+static constexpr double YUE2_MMSFA_DEEP_ABS_GATE = 5e-3;
+static constexpr double YUE2_MMSFA_ARGMAX_GATE = 0.999;
+
+struct Yue2MmsfaStageDiff {
+    double max_abs = 0.0;
+    double rel_l2  = 0.0;
+    bool   shape_ok = true;
+};
+
+static Yue2MmsfaStageDiff yue2_mmsfa_diff(const std::vector<float> & got, const std::vector<float> & want) {
+    Yue2MmsfaStageDiff d;
+    if (got.size() != want.size()) {
+        d.shape_ok = false;
+        return d;
+    }
+    double num = 0.0, den = 0.0;
+    for (size_t i = 0; i < got.size(); i++) {
+        const double e = (double) got[i] - (double) want[i];
+        num += e * e;
+        den += (double) want[i] * (double) want[i];
+        d.max_abs = std::max(d.max_abs, std::fabs(e));
+    }
+    d.rel_l2 = den > 0.0 ? std::sqrt(num / den) : (num > 0.0 ? 1.0 : 0.0);
+    return d;
+}
+
+// One stage row. The fixture's .npy shape is [T, C]; the port's tensor is
+// [C, T] in ne order, which is the same bytes (see the LAYOUT note above).
+// `gate <= 0` prints the row as INFO and gates nothing — used where the plan
+// doc pins no bar and inventing one would be taste, not measurement.
+static bool yue2_mmsfa_stage_row(const char * label, const std::vector<float> & got, const std::string & fixture,
+                                 double gate, Yue2MmsfaStageDiff * out, const std::string & dump_dir = "",
+                                 double rel_gate = -1.0) {
+    std::vector<float>   want;
+    std::vector<int64_t> shape;
+    std::string          err;
+    if (!yue2_read_npy_f32(fixture, &want, &shape, &err)) {
+        printf("FAIL %-12s %s\n", label, err.c_str());
+        return false;
+    }
+    // --dump writes this port's own value out under the fixture's shape, so a
+    // residual can be attributed: diff it against an independent float64
+    // recomputation and you learn whether the gap is ours or the fp32
+    // reference's. Same purpose as --ar-parity's --dump-dir.
+    if (!dump_dir.empty() && shape.size() == 2 && got.size() == want.size()) {
+        std::string werr;
+        if (!yue2_write_npy_f32(dump_dir + "/got_" + label + ".npy", got.data(), shape[0], shape[1], &werr)) {
+            fprintf(stderr, "WARNING: %s\n", werr.c_str());
+        }
+    }
+    const Yue2MmsfaStageDiff d = yue2_mmsfa_diff(got, want);
+    if (out) {
+        *out = d;
+    }
+    if (!d.shape_ok) {
+        printf("FAIL %-12s port produced %zu floats, fixture has %zu (shape mismatch, not a numeric miss)\n", label,
+               got.size(), want.size());
+        return false;
+    }
+    const bool  info = gate <= 0.0;
+    const bool  ok   = info || (d.max_abs <= gate && (rel_gate <= 0.0 || d.rel_l2 <= rel_gate));
+    std::string dims = "[";
+    for (size_t i = 0; i < shape.size(); i++) {
+        dims += std::to_string((long long) shape[i]) + (i + 1 < shape.size() ? ", " : "");
+    }
+    dims += "]";
+    char gatetxt[64];
+    if (info) {
+        snprintf(gatetxt, sizeof(gatetxt), "no bar pinned");
+    } else if (rel_gate > 0.0) {
+        snprintf(gatetxt, sizeof(gatetxt), "gate rel %.1e + abs %.1e", rel_gate, gate);
+    } else {
+        snprintf(gatetxt, sizeof(gatetxt), "gate %.1e", gate);
+    }
+    printf("%s %-12s max_abs=%.3e rel_l2=%.3e  (fixture %s, %s)\n", info ? "INFO" : (ok ? "PASS" : "FAIL"), label,
+           d.max_abs, d.rel_l2, dims.c_str(), gatetxt);
+    return ok;
+}
+
+static int run_mmsfa_stages(const std::string & gguf_path, const std::string & fixture_dir,
+                            const std::string & gelu_mode, const std::string & dump_dir, int attn_budget_kb) {
+    Yue2MmsfaModel m;
+    std::string    err;
+    if (!yue2_mmsfa_load(&m, gguf_path, &err)) {
+        fprintf(stderr, "FATAL: MMS_FA load failed: %s\n", err.c_str());
+        return 1;
+    }
+
+    printf("=== MMS_FA stage parity: %s ===\n", fixture_dir.c_str());
+    printf("gguf: %s (%.1f MB, weights %s)\n", yue2_basename(gguf_path).c_str(), (double) m.vram / (1024.0 * 1024.0),
+           yue2_mmsfa_weights_are_f32(m) ? "F32" : "NARROWED — the bars below assume F32");
+    printf("config: sr=%u conv=%u embed=%u layers=%u heads=%ux%u ffn=%u ln_eps=%.0e post-LN=%s pos_conv k=%u g=%u "
+           "remove=%u labels=%u\n",
+           m.cfg.sample_rate, m.cfg.n_conv, m.cfg.embed, m.cfg.n_layers, m.cfg.n_heads, m.cfg.head_dim, m.cfg.ffn,
+           (double) m.cfg.ln_eps, m.cfg.layer_norm_first ? "NO" : "yes", m.cfg.pos_conv_kernel, m.cfg.pos_conv_groups,
+           m.cfg.pos_conv_num_remove, m.cfg.n_labels);
+    printf("backend: %s\n", ggml_backend_name(m.backend));
+
+    std::vector<float>   pcm;
+    std::vector<int64_t> pcm_shape;
+    if (!yue2_read_npy_f32(fixture_dir + "/ex_input16k.npy", &pcm, &pcm_shape, &err)) {
+        fprintf(stderr, "FATAL: %s\n", err.c_str());
+        yue2_mmsfa_free(&m);
+        return 1;
+    }
+    const int64_t T = yue2_mmsfa_frames(m.cfg, (int64_t) pcm.size());
+    printf("input: %zu samples (%.2f s) -> %lld frames at %.0f Hz\n\n", pcm.size(),
+           (double) pcm.size() / (double) m.cfg.sample_rate, (long long) T,
+           (double) m.cfg.sample_rate / 320.0);
+
+    const bool want_erf  = (gelu_mode == "erf" || gelu_mode == "both");
+    const bool want_tanh = (gelu_mode == "tanh" || gelu_mode == "both");
+
+    // Layer taps and their bars. The plan doc §4 pins exactly two of them:
+    // layer0 at 2e-4 and layer23 at 2e-3 ("24 layers compound"). layer1 and
+    // layer11 are printed as INFO rather than gated, because the doc pins no
+    // bar for them and inventing one here would be taste, not measurement —
+    // and because the doc's bars are ABSOLUTE while the activation scale is
+    // not: |ex_layer11| peaks at 486, where a float64 recomputation from the
+    // same weights already differs from the fp32 fixture by 7.9e-3 (rel-L2
+    // 6.4e-6). Their printed numbers are what localises a fault.
+    const int    tap_layers[4]  = { 0, 1, 11, 23 };
+    const char * tap_labels[4]  = { "layer0", "layer1", "layer11", "layer23" };
+    const double tap_gates[4]   = { YUE2_MMSFA_LAYER0_GATE, -1.0, -1.0, YUE2_MMSFA_DEEP_ABS_GATE };
+    const double tap_rel[4]     = { -1.0, -1.0, -1.0, YUE2_MMSFA_DEEP_REL_GATE };
+
+    Yue2MmsfaOptions opt;
+    opt.want_stages = true;
+    opt.tap_layers.assign(tap_layers, tap_layers + 4);
+    // --attn-budget shrinks the per-head score block so attention is forced
+    // into several query chunks even on a 10 s clip. Chunking is supposed to
+    // be arithmetically identical to the unchunked form (softmax normalises
+    // over the key axis, so query rows are independent); running the gate at
+    // 128 KB (8 chunks per head on a 499-frame clip) and at the default and
+    // getting the same numbers is what turns "supposed to be" into a
+    // measurement. In KB, because one head-chunk of a 10 s clip is 2 KB per
+    // query frame and a megabyte would not split it at all.
+    if (attn_budget_kb > 0) {
+        opt.attn_score_budget = (size_t) attn_budget_kb << 10;
+        printf("attention score budget forced to %d KB per head-chunk\n", attn_budget_kb);
+    }
+
+    int    passed = 0, total = 0;
+    double erf_conv0 = 0.0, tanh_conv0 = 0.0, erf_layer0 = 0.0, tanh_layer0 = 0.0;
+
+    Yue2MmsfaGraph g;
+    for (int pass = 0; pass < 2; pass++) {
+        const bool tanh_gelu = (pass == 1);
+        if (tanh_gelu ? !want_tanh : !want_erf) {
+            continue;
+        }
+        opt.gelu_tanh = tanh_gelu;
+
+        std::vector<float> emissions;
+        Yue2MmsfaStages    st;
+        const auto         t0 = std::chrono::steady_clock::now();
+        if (!yue2_mmsfa_emissions(m, &g, pcm.data(), (int64_t) pcm.size(), &emissions, opt, &st, &err)) {
+            fprintf(stderr, "FATAL: MMS_FA forward failed: %s\n", err.c_str());
+            yue2_mmsfa_graph_free(&g);
+            yue2_mmsfa_free(&m);
+            return 1;
+        }
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+
+        printf("── GELU %s ── (%.0f ms, %d nodes, compute %.0f MB)\n", tanh_gelu ? "tanh (control)" : "erf",
+               ms, g.n_nodes, (double) g.compute_bytes / (1024.0 * 1024.0));
+
+        const bool         gated = !tanh_gelu;  // the tanh pass is a control, not a gate
+        Yue2MmsfaStageDiff d;
+        auto               row = [&](const char * label, const std::vector<float> & got, const std::string & file,
+                       double gate, double rel_gate = -1.0) {
+            const bool ok = yue2_mmsfa_stage_row(label, got, fixture_dir + "/" + file, gate, &d,
+                                                 tanh_gelu ? "" : dump_dir, rel_gate);
+            if (gated && gate > 0.0) {
+                total++;
+                passed += ok ? 1 : 0;
+            }
+        };
+
+        for (size_t i = 0; i < st.conv.size(); i++) {
+            char label[16], file[32];
+            snprintf(label, sizeof(label), "conv%zu", i);
+            snprintf(file, sizeof(file), "ex_conv%zu.npy", i);
+            row(label, st.conv[i], file, YUE2_MMSFA_CONV_GATE);
+            if (i == 0) {
+                (tanh_gelu ? tanh_conv0 : erf_conv0) = d.max_abs;
+            }
+        }
+        row("feat_proj", st.feat_proj, "ex_feat_proj.npy", YUE2_MMSFA_PRE_GATE);
+        row("pos_conv", st.pos_conv, "ex_pos_conv.npy", YUE2_MMSFA_PRE_GATE);
+        for (int i = 0; i < 4; i++) {
+            char file[32];
+            snprintf(file, sizeof(file), "ex_layer%d.npy", tap_layers[i]);
+            row(tap_labels[i], st.layers[(size_t) i], file, tap_gates[i], tap_rel[i]);
+            if (tap_layers[i] == 0) {
+                (tanh_gelu ? tanh_layer0 : erf_layer0) = d.max_abs;
+            }
+        }
+        // ex_pre_layers.npy is the FINAL norm's output — the head's input, 24
+        // layers deep — not the transformer's input the doc used to name it
+        // for (§0.1 item 3). So it carries the same depth-23 bar as layer23,
+        // not a pre-transformer 1e-4: a float64 recomputation from the same
+        // weights already lands at 1.1e-4 there.
+        row("final_ln", st.pre_layers, "ex_pre_layers.npy", YUE2_MMSFA_DEEP_ABS_GATE, YUE2_MMSFA_DEEP_REL_GATE);
+        row("logits", st.logits, "ex_logits.npy", YUE2_MMSFA_DEEP_GATE);
+        row("emissions", emissions, "ex_emissions.npy", YUE2_MMSFA_DEEP_GATE);
+        printf("     final_ln is scored against ex_pre_layers.npy (the doc's name for it); layer1/layer11 are\n"
+               "     INFO because §4 pins no bar for them and |ex_layer11| peaks at 486.\n");
+        if (gated) {
+            // Printed on every run, not only on a failure: anyone reading a
+            // depth-23 number needs to know what the fixture's own noise is
+            // before deciding whether a result is good.
+            printf("     NOTE on layer23/final_ln: a float64 recomputation from these same GGUF weights scores\n"
+                   "     2.439e-03 max-abs against ex_layer23.npy (rel-L2 2.55e-05) — the fp32 fixture's own\n"
+                   "     noise at that depth. This port sits 2.8x CLOSER to that float64 oracle (rel-L2\n"
+                   "     9.0e-06) than the fixture does. Hence §0.1's corrected bar: rel-L2 <= 1e-4 with\n"
+                   "     abs <= 5e-3, above the fixture's noise instead of below it.\n");
+        }
+        printf("\n");
+    }
+
+    if (want_erf && want_tanh) {
+        printf("GELU flavour, measured where the plan doc asks for it (max-abs vs the fixture):\n");
+        printf("     conv0    erf %.3e   tanh %.3e   -> %s\n", erf_conv0, tanh_conv0,
+               erf_conv0 < tanh_conv0 ? "ERF" : "TANH");
+        printf("     layer0   erf %.3e   tanh %.3e   -> %s\n", erf_layer0, tanh_layer0,
+               erf_layer0 < tanh_layer0 ? "ERF" : "TANH");
+        printf("     torchaudio's LayerNormConvLayer and FeedForward both call F.gelu / nn.GELU with\n"
+               "     approximate='none' (exact erf), and there is no fused encoder kernel here that\n"
+               "     could substitute tanh the way nn.TransformerEncoderLayer does in the YuE2 head.\n\n");
+    }
+
+    printf("RESULT (mmsfa-stages %s): %d/%d gates passed\n", fixture_dir.c_str(), passed, total);
+    yue2_mmsfa_graph_free(&g);
+    yue2_mmsfa_free(&m);
+    return (total > 0 && passed == total) ? 0 : 1;
+}
+
+// Full-track gate: emissions for one .npy waveform, written out as .npy, and
+// compared against a reference emissions file when one can be found. The bar
+// is argmax agreement >= 99.9% of frames (plan doc §4a) — the thing CTC
+// actually consumes — with the max-abs on the log-probs printed beside it.
+static int run_mmsfa_emit(const std::string & gguf_path, const std::string & input_npy, const std::string & out_npy,
+                          const std::string & ref_npy_arg) {
+    Yue2MmsfaModel m;
+    std::string    err;
+    if (!yue2_mmsfa_load(&m, gguf_path, &err)) {
+        fprintf(stderr, "FATAL: MMS_FA load failed: %s\n", err.c_str());
+        return 1;
+    }
+
+    std::vector<float>   pcm;
+    std::vector<int64_t> shape;
+    if (!yue2_read_npy_f32(input_npy, &pcm, &shape, &err)) {
+        fprintf(stderr, "FATAL: %s\n", err.c_str());
+        yue2_mmsfa_free(&m);
+        return 1;
+    }
+
+    // Default reference: the sibling that replaces _input16k.npy with
+    // _emissions.npy, which is how K:/yue2/fixtures/mms-fa names them.
+    std::string ref_npy = ref_npy_arg;
+    if (ref_npy.empty()) {
+        const std::string suffix = "_input16k.npy";
+        if (input_npy.size() > suffix.size() &&
+            input_npy.compare(input_npy.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            ref_npy = input_npy.substr(0, input_npy.size() - suffix.size()) + "_emissions.npy";
+        }
+    }
+
+    printf("=== MMS_FA emit: %s ===\n", input_npy.c_str());
+    printf("gguf: %s (%.1f MB)  backend: %s\n", yue2_basename(gguf_path).c_str(),
+           (double) m.vram / (1024.0 * 1024.0), ggml_backend_name(m.backend));
+    printf("input: %zu samples (%.1f s) -> %lld frames\n", pcm.size(),
+           (double) pcm.size() / (double) m.cfg.sample_rate,
+           (long long) yue2_mmsfa_frames(m.cfg, (int64_t) pcm.size()));
+
+    Yue2MmsfaGraph     g;
+    std::vector<float> em;
+    const auto         t0 = std::chrono::steady_clock::now();
+    if (!yue2_mmsfa_emissions(m, &g, pcm.data(), (int64_t) pcm.size(), &em, Yue2MmsfaOptions{}, nullptr, &err)) {
+        fprintf(stderr, "FATAL: MMS_FA forward failed: %s\n", err.c_str());
+        yue2_mmsfa_graph_free(&g);
+        yue2_mmsfa_free(&m);
+        return 1;
+    }
+    const double ms   = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    const int64_t NL  = (int64_t) m.cfg.n_labels;
+    const int64_t T   = (int64_t) em.size() / NL;
+    const uint64_t    rss     = yue2_peak_rss_bytes();
+    const std::string rss_str = rss ? std::to_string((long long) (rss / (1024 * 1024))) + " MB" : std::string("n/a");
+    printf("forward: %.1f s wall (%.2fx realtime), %d nodes, compute buffer %.0f MB, peak RSS %s\n", ms / 1000.0,
+           ((double) pcm.size() / (double) m.cfg.sample_rate) / (ms / 1000.0), g.n_nodes,
+           (double) g.compute_bytes / (1024.0 * 1024.0), rss_str.c_str());
+
+    if (!out_npy.empty() && !yue2_write_npy_f32(out_npy, em.data(), T, NL, &err)) {
+        fprintf(stderr, "WARNING: %s\n", err.c_str());
+    } else if (!out_npy.empty()) {
+        printf("wrote %s [%lld, %lld] float32\n", out_npy.c_str(), (long long) T, (long long) NL);
+    }
+
+    if (ref_npy.empty()) {
+        printf("no reference emissions named or inferred — nothing to gate against\n");
+        yue2_mmsfa_graph_free(&g);
+        yue2_mmsfa_free(&m);
+        return 0;
+    }
+
+    std::vector<float>   want;
+    std::vector<int64_t> wshape;
+    if (!yue2_read_npy_f32(ref_npy, &want, &wshape, &err)) {
+        fprintf(stderr, "FATAL: %s\n", err.c_str());
+        yue2_mmsfa_graph_free(&g);
+        yue2_mmsfa_free(&m);
+        return 1;
+    }
+    if (want.size() != em.size()) {
+        printf("FAIL frame count: port produced %lld x %lld, reference %s has %zu floats\n", (long long) T,
+               (long long) NL, yue2_basename(ref_npy).c_str(), want.size());
+        yue2_mmsfa_graph_free(&g);
+        yue2_mmsfa_free(&m);
+        return 1;
+    }
+
+    const Yue2MmsfaStageDiff d = yue2_mmsfa_diff(em, want);
+    int64_t                  agree = 0;
+    double                   worst_margin = 1e30;
+    int64_t                  worst_frame  = -1;
+    for (int64_t t = 0; t < T; t++) {
+        const float * a = em.data() + t * NL;
+        const float * b = want.data() + t * NL;
+        int64_t       ia = 0, ib = 0;
+        for (int64_t i = 1; i < NL; i++) {
+            if (a[i] > a[ia]) {
+                ia = i;
+            }
+            if (b[i] > b[ib]) {
+                ib = i;
+            }
+        }
+        if (ia == ib) {
+            agree++;
+        } else {
+            // How close the reference's own top-2 was: a disagreement on a
+            // frame the reference itself nearly tied is rounding, not a bug.
+            double top = -1e30, second = -1e30;
+            for (int64_t i = 0; i < NL; i++) {
+                if ((double) b[i] > top) {
+                    second = top;
+                    top    = (double) b[i];
+                } else if ((double) b[i] > second) {
+                    second = (double) b[i];
+                }
+            }
+            if (top - second < worst_margin) {
+                worst_margin = top - second;
+                worst_frame  = t;
+            }
+        }
+    }
+    const double rate = T ? (double) agree / (double) T : 0.0;
+    const bool   ok   = rate >= YUE2_MMSFA_ARGMAX_GATE && d.max_abs <= YUE2_MMSFA_DEEP_GATE;
+    printf("%s argmax_agree %lld/%lld = %.5f  (gate %.4f)\n", rate >= YUE2_MMSFA_ARGMAX_GATE ? "PASS" : "FAIL", agree,
+           (long long) T, rate, YUE2_MMSFA_ARGMAX_GATE);
+    printf("%s log_probs    max_abs=%.3e rel_l2=%.3e  (gate %.1e, vs %s)\n",
+           d.max_abs <= YUE2_MMSFA_DEEP_GATE ? "PASS" : "FAIL", d.max_abs, d.rel_l2, YUE2_MMSFA_DEEP_GATE,
+           yue2_basename(ref_npy).c_str());
+    if (agree < T) {
+        printf("     %lld disagreeing frame(s); the tightest reference top-2 margin among them is %.3e at frame "
+               "%lld\n",
+               (long long) (T - agree), worst_margin, (long long) worst_frame);
+    }
+    printf("RESULT (mmsfa-emit %s): %s\n", yue2_basename(input_npy).c_str(), ok ? "PASS" : "FAIL");
+
+    yue2_mmsfa_graph_free(&g);
+    yue2_mmsfa_free(&m);
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char ** argv) {
+    // ── mmsfa-*: positional subcommands, dispatched ahead of the flag parser ─
+    //
+    // They take a GGUF PATH rather than a --models dir (the MMS_FA file lives
+    // beside the YuE2 fixtures, not in the app's model tree), so they do not
+    // share the vocabulary below. Both spellings are accepted: `mmsfa-stages`
+    // as a bare subcommand (what docs/plans/yue2/17-mms-fa-port.md §5 names)
+    // and `--mmsfa-stages` for consistency with every other mode here.
+    //
+    // CPU BY DEFAULT, and that is load-bearing: these are fp32-vs-fp32 gates
+    // against a CPU PyTorch reference, and the full track wants a couple of GB
+    // of compute buffer. --allow-gpu leaves GGML_BACKEND alone for anyone who
+    // wants to measure the GPU path against the same fixtures.
+    if (argc >= 2 && (!strcmp(argv[1], "mmsfa-stages") || !strcmp(argv[1], "--mmsfa-stages") ||
+                      !strcmp(argv[1], "mmsfa-emit") || !strcmp(argv[1], "--mmsfa-emit"))) {
+        const bool               stages = strstr(argv[1], "stages") != nullptr;
+        std::vector<std::string> pos;
+        std::string              gelu      = "both";
+        std::string              ref;
+        std::string              dump_dir;
+        int                      attn_budget_kb = 0;  // 0 = the port's own default
+        bool                     allow_gpu      = false;
+        for (int i = 2; i < argc; i++) {
+            if (!strcmp(argv[i], "--gelu") && i + 1 < argc) {
+                gelu = argv[++i];
+            } else if (!strcmp(argv[i], "--ref") && i + 1 < argc) {
+                ref = argv[++i];
+            } else if (!strcmp(argv[i], "--dump") && i + 1 < argc) {
+                dump_dir = argv[++i];
+            } else if (!strcmp(argv[i], "--attn-budget") && i + 1 < argc) {
+                attn_budget_kb = atoi(argv[++i]);
+            } else if (!strcmp(argv[i], "--allow-gpu")) {
+                allow_gpu = true;
+            } else {
+                pos.push_back(argv[i]);
+            }
+        }
+        if (gelu != "erf" && gelu != "tanh" && gelu != "both") {
+            fprintf(stderr, "--gelu must be 'erf', 'tanh' or 'both', got '%s'\n", gelu.c_str());
+            return 2;
+        }
+        const size_t need = stages ? 2 : 2;  // emit's <out.npy> is optional
+        if (pos.size() < need) {
+            usage();
+            return 2;
+        }
+        if (!allow_gpu) {
+#ifdef _WIN32
+            _putenv_s("GGML_BACKEND", "CPU");
+#else
+            setenv("GGML_BACKEND", "CPU", 1);
+#endif
+        }
+        return stages ? run_mmsfa_stages(pos[0], pos[1], gelu, dump_dir, attn_budget_kb)
+                      : run_mmsfa_emit(pos[0], pos[1], pos.size() > 2 ? pos[2] : std::string(), ref);
+    }
+
     std::string     models_dir;
     std::string     tokenizer_dir_arg;
     Yue2VaeVariant  variant       = YUE2_VAE_STANDARD;
