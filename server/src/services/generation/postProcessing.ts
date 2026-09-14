@@ -20,6 +20,7 @@ import { runVocalNaturalizer, type NaturalizerParams } from './vocalNaturalizer.
 import { evaluateAudioQuality, formatQualityLog, type QualityResult } from './audioQualityEvaluator.js';
 import { sa3ModelsInstalled, tokenizeForSa3, buildStableStepPrompt } from '../sa3Tokenizer.js';
 import { wavDurationSec } from '../audioCrop.js';
+import { stemCacheKey, readStemCache, writeStemCache } from './stemCache.js';
 
 type LogFn = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
 type StageFn = (stage: string) => void;
@@ -213,6 +214,10 @@ interface VocalSeparation {
   vocalIndex: number;
   vocalBuf: Buffer;
   instBuf: Buffer;
+  /** Which SuperSep strategy produced these stems — carried so a later stage
+   *  can redo the split the same way without reaching back for the flags that
+   *  chose it. */
+  level: number;
 }
 
 /** Run a 2-stem (Vocals + Instrumental) split via the engine's SuperSep API and
@@ -248,7 +253,43 @@ async function separateVocals(
   // f32 stems: these feed the SA3 refine and the recombine, both mid-chain.
   const instBuf = await aceClient.superSepStem(sepId, instStem.index, 'f32');
   const vocalBuf = await aceClient.superSepStem(sepId, vocalStem.index, 'f32');
-  return { sepId, stems, vocalIndex: vocalStem.index, vocalBuf, instBuf };
+  return { sepId, stems, vocalIndex: vocalStem.index, vocalBuf, instBuf, level };
+}
+
+/**
+ * separateVocals(), but served from disk when this exact audio has been split
+ * this way before.
+ *
+ * The chain separates the raw render, before any stage has modified it, so the
+ * separator sees identical bytes on every run over a track — and a
+ * run-listen-tweak-run loop paid ~22 s of GPU per iteration to be told the
+ * same thing again. A miss behaves exactly as before, including the caching of
+ * a null result, which costs a full separation to discover.
+ */
+async function separateVocalsCached(
+  srcBuf: Buffer,
+  level: number,
+  log: LogFn,
+  /** Run only when the split really has to happen — the stage message and the
+   *  VRAM the separator needs are both wasted on a hit, and the eviction in
+   *  particular costs an SA3 reload for nothing. */
+  onMiss?: () => Promise<void>,
+): Promise<VocalSeparation | null> {
+  const key = stemCacheKey(srcBuf, level);
+  const hit = readStemCache(key);
+  if (hit) {
+    if ('empty' in hit) {
+      log('INFO', '[SuperSep] Cached split for this audio: no vocal to separate');
+      return null;
+    }
+    log('INFO', `[SuperSep] Reusing the cached split for this audio (${key.slice(-8)}) — no separation needed`);
+    return { ...hit, level };
+  }
+
+  if (onMiss) await onMiss();
+  const sep = await separateVocals(srcBuf, level);
+  writeStemCache(key, sep, level);
+  return sep;
 }
 
 /**
@@ -416,16 +457,20 @@ export async function runPostProcessingChain(
         log('INFO', '[SuperSep] Leap Xe models not installed — using the 6-stem '
           + 'BS-RoFormer pass (instrumental derived as mix − vocals)');
       }
-      setStage(`Separating vocals${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
+      // Only when the split is actually going to run — on a cache hit there is
+      // no separator to make room for, and evicting SA3 would just buy it a
+      // cold reload for the refine two steps later.
+      const prepareForSeparation = async (): Promise<void> => {
+        setStage(`Separating vocals${totalTracks > 1 ? ` (${i+1}/${totalTracks})` : ''}...`);
 
-      // A previous track's refine can leave the SA3 DiT resident (~2.8 GB),
-      // while BS-RoFormer wants ~2.6 GB CONTIGUOUS for its attention matrix.
-      // Fragmentation, not total free VRAM, is what fails there — so evict SA3
-      // before the split rather than after an allocation failure. It reloads
-      // on demand when the refine runs a few lines below. Best-effort by
-      // design: in_use modules are skipped and any error here is non-fatal,
-      // because the separation may well succeed without the eviction.
-      if (stableStepWantsStems) {
+        // A previous track's refine can leave the SA3 DiT resident (~2.8 GB),
+        // while BS-RoFormer wants ~2.6 GB CONTIGUOUS for its attention matrix.
+        // Fragmentation, not total free VRAM, is what fails there — so evict SA3
+        // before the split rather than after an allocation failure. It reloads
+        // on demand when the refine runs a few lines below. Best-effort by
+        // design: in_use modules are skipped and any error here is non-fatal,
+        // because the separation may well succeed without the eviction.
+        if (!stableStepWantsStems) return;
         try {
           const loaded = await aceClient.listLoadedModels();
           for (const m of loaded.filter(x => x.label.toLowerCase().includes('sa3') && !x.in_use)) {
@@ -436,12 +481,14 @@ export async function runPostProcessingChain(
         } catch (evErr: any) {
           log('DEBUG', `[StableStep] SA3 eviction before separation failed (non-fatal): ${evErr?.message ?? evErr}`);
         }
-      }
+      };
 
       try {
         log('INFO', `[SuperSep] Vocal split via level ${sepLevel}`
           + `${useLeap ? ' (dual BS-Roformer-Leap Xe)' : ' (BS-RoFormer 6-stem)'}`);
-        vocalSep = await separateVocals(fs.readFileSync(processedPath), sepLevel);
+        vocalSep = await separateVocalsCached(
+          fs.readFileSync(processedPath), sepLevel, log, prepareForSeparation,
+        );
         if (!vocalSep) {
           log('INFO', '[SuperSep] No vocal/instrumental split (no vocal energy detected)');
         }
@@ -590,10 +637,28 @@ export async function runPostProcessingChain(
                 // the instrumental. Undo that by matching the source RMS.
                 log('WARNING', `[StableStep] 48 kHz resample via PP-VAE passthrough failed `
                   + `(${rErr.message}) — falling back to stem recombine`);
-                const recombined = await aceClient.superSepRecombine(vs.sepId,
-                  vs.stems.map(s => ({ index: s.index, volume: 1.0, muted: s.index !== vs.vocalIndex })),
+
+                // The recombine is the one consumer that needs the engine-side
+                // separation job rather than the stems themselves, so a split
+                // that came out of the cache cannot serve it: the job it names
+                // belongs to an engine run that has since moved on. Redo the
+                // split for real — the slow path, but only ever reached when
+                // PP-VAE is missing AND the stems were cached.
+                let live = vs;
+                try {
+                  await aceClient.superSepProgress(vs.sepId);
+                } catch {
+                  log('WARNING', '[StableStep] Cached split has no live separation to recombine '
+                    + '— separating again for the vocal resample');
+                  const fresh = await separateVocals(fs.readFileSync(processedPath), vs.level);
+                  if (!fresh) throw new Error('Re-separation for the vocal resample found no vocal stem');
+                  live = fresh;
+                }
+
+                const recombined = await aceClient.superSepRecombine(live.sepId,
+                  live.stems.map(s => ({ index: s.index, volume: 1.0, muted: s.index !== live.vocalIndex })),
                   'f32');
-                return matchRms(recombined, vs.vocalBuf);
+                return matchRms(recombined, live.vocalBuf);
               }
             };
 
