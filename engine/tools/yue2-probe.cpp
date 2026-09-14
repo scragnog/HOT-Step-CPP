@@ -1100,6 +1100,12 @@ static int run_ar_parity_semantic(const Yue2Model & m, const std::string & fixtu
 
 static int run_ar_parity(const std::string & models_dir, const std::string & fixture_dir, const std::string & stage) {
     Yue2Model m;
+    // --adapter applies here too, so a fixture captured from a Python model
+    // with the same LoRA merged gates the ENGINE'S merged forward — the one
+    // comparison no gate covered while the AR ladders were being blamed on
+    // the trainer (2026-09-14). Without this line the flag was silently
+    // ignored in parity modes and the run compared base against merged.
+    m.lm_adapter_want = g_yue2_probe_adapters;
     yue2_discover(&m, models_dir.c_str(), g_yue2_lm_type.empty() ? nullptr : g_yue2_lm_type.c_str());
     if (!yue2_available(m)) {
         fprintf(stderr, "FATAL: YuE2 LM GGUF not found/probe failed under %s\n", models_dir.c_str());
