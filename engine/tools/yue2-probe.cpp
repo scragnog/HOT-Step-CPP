@@ -14,6 +14,7 @@
 //   yue2-probe --generate --cot off --style <s> --lyrics <s> [--max-tokens <n>] [--seed <n>] --models <dir>
 //   yue2-probe --vae-parity <fixture-root-dir> --models <dir> [--variant standard|legacy]
 //   yue2-probe --encode-parity <fixture-dir> --models <dir> [--vae standard|legacy]
+//   yue2-probe --tok-head-parity <stages-30s-dir> --models <dir> [--tok-gguf <file>] [--tf32]
 //
 // --info: header-only probe (no weights loaded) — prints config, tensor
 //         count/bytes per file, and any missing/unexpected tensor vs what
@@ -60,9 +61,11 @@
 // sampler/decode loop yet).
 
 #include "yue2/yue2-lm-graph.h"
+#include "yue2/yue2-mert.h"
 #include "yue2/yue2-model.h"
 #include "yue2/yue2-nar-graph.h"
 #include "yue2/yue2-sample.h"
+#include "yue2/yue2-tok-head.h"
 #include "yue2/yue2-tokenizer.h"
 #include "yue2/yue2-vae-encode.h"
 #include "yue2/yue2-vae-graph.h"
@@ -101,6 +104,12 @@ static void usage() {
             "       yue2-probe --nar-parity <fixture-root-dir> --models <dir>\n"
             "       yue2-probe --vae-parity <fixture-root-dir> --models <dir> [--variant standard|legacy]\n"
             "       yue2-probe --encode-parity <fixture-dir> --models <dir> [--vae standard|legacy]\n"
+            "       yue2-probe --tok-head-parity <stages-30s-dir> --models <dir> [--tok-gguf <file>] [--tf32]\n"
+            "       (--tok-gguf pins one yue2-tok-*.gguf; discovery ranks f16 above f32, so name the\n"
+            "        f32 file explicitly to bisect without storage rounding in the way)\n"
+            "       (--tf32 leaves ggml's TF32 tensor cores ON, for measuring what they cost)\n"
+            "       yue2-probe --mert-front-parity <stages-30s-dir> --models <dir> [--tok-gguf <file>] [--tf32]\n"
+            "       (MERT's mel frontend + ConvNext subsampling + RoPE tables vs 01_mel/02_subsampled/03_rope_*)\n"
             "       yue2-probe --generate --cot off --style <s> --lyrics <s> --max-tokens <n> --seed <n> "
             "--models <dir>\n");
 }
@@ -2468,6 +2477,379 @@ static int run_encode_parity(const std::string & models_dir, const std::string &
     return (total > 0 && passed == total) ? 0 : 1;
 }
 
+// ── --tok-head-parity: the semantic tokenizer's HEAD, with no MERT in it ────
+//
+// Gates engine/src/yue2/yue2-tok-head.h against the MERT-FREE unit fixture in
+// docs/plans/yue2/12-tokenizer-oracle-pin.md §5:
+//
+//   <dir>/07_head_unit_input.f32        [512, 1024] f32, seeded torch.randn
+//                                       (manual_seed(20260914)) — NOT real
+//                                       features, so this isolates the head
+//                                       from every frontend stage.
+//   <dir>/07_head_unit_logits_first8.f32 [8, 32768] f32, FP32 reference logits
+//                                       for the first 8 frames only.
+//   <dir>/07_head_unit_argmax.i32       [512] int32, FP32 reference argmax.
+//
+// All three are raw C-contiguous little-endian dumps, row-major in the listed
+// shape (manifest.json "layouts"."all"), which is exactly the layout
+// yue2_tok_head_forward takes and returns. Nothing is transposed here.
+//
+// ── The two bars, and why they are what they are ───────────────────────────
+//
+// ARGMAX AGREEMENT: gated at 99%. This is NOT the fp32-vs-bf16 ceiling from
+// pin §4.2 (97.66%) — that number is about the reference's own PRODUCTION path
+// running under CUDA bf16 autocast. This fixture was captured in FP32 with
+// autocast off and this port runs FP32, so the two agree everywhere.
+// MEASURED: 512/512 = 100.00%, on both the f16 and the f32 GGUF.
+//
+// LOGIT rel-L2: chosen from the GGUF's OWN stored type, because F16 storage is
+// a property of the file and not of the port. Both bars sit ~10x above the
+// measured value — first-gate slack, not a hedge:
+//
+//   tok.head.weight stored F32 -> 1e-5. MEASURED 8.62e-07. There is nothing
+//        between the reference and this graph but F32 accumulation order.
+//        Cross-checked from the other side too: this port's logits against an
+//        independent float64 numpy replay of the same .pt weights land at
+//        5.45e-07 with 512/512 argmax — i.e. the port is CLOSER to exact
+//        arithmetic than the CUDA-captured fixture is (the fixture is 1.60e-03
+//        from float64 when the erf GELU is used, 5.52e-06 with tanh).
+//
+//   tok.head.weight stored F16 -> 8e-4. MEASURED 3.63e-04, so 2.2x of slack —
+//        less than the F32 bar has, deliberately: this one has to stay under
+//        the erf-GELU regression below (1.60e-03) to be worth having, and 8e-4
+//        clears that by 2x from the other side. convert-yue2-tok.py puts F16
+//        storage at 2.07e-4 rel-L2 per tensor and the head comes out at 1.8x
+//        that — 8 residual layers accumulate, and every LayerNorm rescales
+//        most of it back off.
+//
+// Ship an --outtype f32 GGUF for the tight bar; the mode prints which bar it
+// picked and why, so a loose pass is never silent.
+//
+// BOTH NUMBERS ASSUME TF32 IS OFF, which is why this mode turns it off before
+// the first CUDA context. Same fixture, same f32 file, TF32 left at ggml's
+// default: rel-L2 5.35e-04 instead of 8.62e-07 — 620x, and enough on its own
+// to fail the F32 bar. The argmax survives it (512/512 either way), which is
+// the trap: a TF32 run looks perfect on the gate everyone quotes.
+//
+// WHAT THE LOGIT BAR ACTUALLY CATCHES, from deliberately breaking this graph
+// three ways and re-running. The sabotage harness was temporary; the numbers
+// are not:
+//
+//   q/k/v slice order swapped   rel-L2 9.27e-01, argmax 8/512    caught, hard
+//   erf GELU instead of tanh    rel-L2 1.60e-03, argmax 510/512  caught (160x the
+//                                                                f32 bar, 3x the f16 bar)
+//   a phantom enc.norm added    rel-L2 1.60e-03  NOT CAUGHT as a structural error,
+//                               and worth knowing why: the phantom sits immediately
+//                               before Tok.norm, and a LayerNorm of an already-
+//                               LayerNormed vector is the identity up to eps. So pin
+//                               §1.4's "wrong by one LayerNorm" worry is, AT THAT
+//                               POSITION ONLY, mathematically benign. Anywhere else it
+//                               is not. No numeric gate here can see it; the
+//                               converter's unconsumed-tensor check is what actually
+//                               proves there is no enc.norm.* to load.
+//
+// Three structural gates ride along, all free:
+//   * window geometry — yue2_tok_head_window_starts against pin §1.7's own
+//     worked example (T=2946), plus a coverage proof that the write ranges
+//     tile [0, T) with no hole, over seven track lengths.
+//   * predict()-vs-forward on the fixture's own T=512, which must be EXACTLY
+//     equal: at T == WIN predict() runs a single untrimmed window, so any
+//     difference is a bug in the stitch and not a tolerance question.
+//   * the code -> token bridge (+151853), taken from the file's own KV.
+
+// --tok-dump-dir: where run_tok_head_parity writes its own logits/argmax.
+// Empty = no dump. Read after main() has parsed argv, like g_yue2_dump_dir.
+static std::string g_yue2_tok_dump_dir;
+
+static constexpr double YUE2_TOK_HEAD_REL_L2_GATE_F32 = 1e-5;
+static constexpr double YUE2_TOK_HEAD_REL_L2_GATE_F16 = 8e-4;
+static constexpr double YUE2_TOK_HEAD_ARGMAX_GATE     = 0.99;
+
+// Replays pin §1.7's worked example and proves the write ranges tile [0, T).
+// Pure arithmetic — no weights, no graph — so it runs even when the GGUF is
+// missing, and it localises a stitch bug that an all-512 fixture cannot.
+static bool yue2_tok_head_check_geometry(int64_t win, int64_t stride, int64_t trim) {
+    bool ok = true;
+
+    // §1.7: "T = 2946, so range(0, 2435, 256) gives ten strided starts
+    // [0, 256, ..., 2304], and since 2304 + 512 = 2816 < 2946 a flush-right
+    // window is appended at 2946 - 512 = 2434."
+    {
+        std::vector<int64_t> starts;
+        yue2_tok_head_window_starts(win, stride, 2946, &starts);
+        const std::vector<int64_t> want = { 0, 256, 512, 768, 1024, 1280, 1536, 1792, 2048, 2304, 2434 };
+        const bool                 hit  = (starts == want);
+        ok                              = ok && hit;
+        printf("%s %-32s %zu starts, last=%lld (pin §1.7 wants 11, last 2434)\n", hit ? "OK  " : "FAIL",
+               "tok_head_starts_T2946", starts.size(), starts.empty() ? -1LL : (long long) starts.back());
+    }
+
+    // Coverage: walk the same trim rule predict() uses over a spread of track
+    // lengths and assert every frame is written at least once. A hole here is
+    // the failure mode the trims exist to avoid.
+    for (int64_t T : { (int64_t) 1, (int64_t) 255, (int64_t) 512, (int64_t) 513, (int64_t) 767, (int64_t) 2946,
+                       (int64_t) 4019 }) {
+        std::vector<int64_t> starts;
+        yue2_tok_head_window_starts(win, stride, T, &starts);
+        std::vector<uint8_t> seen((size_t) T, 0);
+        for (int64_t s0 : starts) {
+            const int64_t n  = std::min<int64_t>(win, T - s0);
+            const int64_t lo = s0 + (s0 == 0 ? 0 : trim);
+            const int64_t hi = s0 + n - ((s0 + n >= T) ? 0 : trim);
+            for (int64_t i = lo; i < hi; i++) {
+                seen[(size_t) i] = 1;
+            }
+        }
+        int64_t holes = 0;
+        for (int64_t i = 0; i < T; i++) {
+            holes += (seen[(size_t) i] == 0);
+        }
+        const bool hit = (holes == 0);
+        ok             = ok && hit;
+        printf("%s %-32s T=%-5lld windows=%-3zu unwritten=%lld\n", hit ? "OK  " : "FAIL", "tok_head_coverage",
+               (long long) T, starts.size(), (long long) holes);
+    }
+    return ok;
+}
+
+static int run_tok_head_parity(const std::string & models_dir, const std::string & fixture_dir,
+                               const std::string & gguf_override) {
+    std::string gguf_path = gguf_override;
+    if (gguf_path.empty() && !yue2_tok_head_find(models_dir, &gguf_path)) {
+        fprintf(stderr, "FATAL: no yue2-tok-*.gguf under %s or %s%syue2\n", models_dir.c_str(), models_dir.c_str(),
+                YUE2_SEP);
+        return 1;
+    }
+
+    Yue2TokHead h;
+    std::string err;
+    if (!yue2_tok_head_load(gguf_path, &h, &err)) {
+        fprintf(stderr, "FATAL: %s\n", err.c_str());
+        return 1;
+    }
+
+    const int64_t DIN = (int64_t) h.cfg.din;
+    const int64_t V   = (int64_t) h.cfg.vocab;
+    const int64_t WIN = (int64_t) h.cfg.win;
+
+    std::vector<float> x;
+    if (!yue2_read_f32_bin(fixture_dir + "/07_head_unit_input.f32", &x)) {
+        fprintf(stderr, "FATAL: cannot read %s/07_head_unit_input.f32\n", fixture_dir.c_str());
+        yue2_tok_head_free(&h);
+        return 1;
+    }
+    if ((int64_t) x.size() % DIN != 0) {
+        fprintf(stderr, "FATAL: 07_head_unit_input.f32 has %zu floats, not a multiple of din=%lld\n", x.size(),
+                (long long) DIN);
+        yue2_tok_head_free(&h);
+        return 1;
+    }
+    const int64_t T = (int64_t) x.size() / DIN;
+
+    std::vector<float> exp_logits;
+    if (!yue2_read_f32_bin(fixture_dir + "/07_head_unit_logits_first8.f32", &exp_logits)) {
+        fprintf(stderr, "FATAL: cannot read %s/07_head_unit_logits_first8.f32\n", fixture_dir.c_str());
+        yue2_tok_head_free(&h);
+        return 1;
+    }
+    std::vector<uint8_t> raw_argmax;
+    if (!yue2_read_raw_bin(fixture_dir + "/07_head_unit_argmax.i32", &raw_argmax) || raw_argmax.size() % 4 != 0) {
+        fprintf(stderr, "FATAL: cannot read %s/07_head_unit_argmax.i32\n", fixture_dir.c_str());
+        yue2_tok_head_free(&h);
+        return 1;
+    }
+    std::vector<int32_t> exp_codes(raw_argmax.size() / 4);
+    memcpy(exp_codes.data(), raw_argmax.data(), raw_argmax.size());
+
+    const double rel_gate = (h.store_type == GGML_TYPE_F32) ? YUE2_TOK_HEAD_REL_L2_GATE_F32
+                                                            : YUE2_TOK_HEAD_REL_L2_GATE_F16;
+    printf("tok head: %s (tok.head.weight stored %s -> F32 in VRAM), T=%lld, din=%lld, vocab=%lld\n",
+           yue2_basename(gguf_path).c_str(), ggml_type_name(h.store_type), (long long) T, (long long) DIN,
+           (long long) V);
+    printf("gates: logits rel_l2 <= %.1e (%s-stored file), argmax agreement >= %.2f%%; TF32 %s\n", rel_gate,
+           ggml_type_name(h.store_type), YUE2_TOK_HEAD_ARGMAX_GATE * 100.0,
+           yue2_tok_tf32_disabled() ? "OFF" : "ON (ggml default) — expect a looser rel_l2");
+
+    int total = 0, passed = 0;
+
+    // ── window geometry (no weights involved) ──
+    {
+        const bool ok = yue2_tok_head_check_geometry(WIN, (int64_t) h.cfg.stride, (int64_t) h.cfg.trim);
+        total++;
+        passed += ok ? 1 : 0;
+    }
+
+    // ── forward ──
+    std::vector<float>   got_logits;
+    std::vector<int32_t> got_codes;
+    {
+        const auto   t0 = std::chrono::steady_clock::now();
+        const bool   ok = yue2_tok_head_forward(&h, x.data(), T, &got_logits, &got_codes, &err);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        if (!ok) {
+            printf("FAIL %-32s forward error: %s\n", "tok_head_forward", err.c_str());
+            printf("RESULT (tok-head-parity %s): %d/%d gates passed\n", fixture_dir.c_str(), passed, total + 1);
+            yue2_tok_head_free(&h);
+            return 1;
+        }
+        printf("tok_head_forward: T=%lld in %.1f ms (%.3f ms/frame, includes graph build)\n", (long long) T, ms,
+               ms / (double) T);
+    }
+
+    // ── logits vs the FP32 reference, first 8 frames ──
+    {
+        total++;
+        const int64_t rows = (int64_t) exp_logits.size() / V;
+        if ((int64_t) exp_logits.size() % V != 0 || rows < 1 || rows > T) {
+            printf("FAIL %-32s logits fixture has %zu floats, not rows*%lld with 1 <= rows <= %lld\n",
+                   "tok_head_logits", exp_logits.size(), (long long) V, (long long) T);
+        } else {
+            // Both sides are row-major [rows, vocab] and frame 0 is at offset
+            // 0, so the comparison is a straight prefix — no striding.
+            const double rl2 = yue2_rel_l2(got_logits.data(), exp_logits.data(), rows * V);
+            const double mx  = yue2_max_abs_diff(got_logits.data(), exp_logits.data(), rows * V);
+            const bool   ok  = rl2 <= rel_gate;
+            passed += ok ? 1 : 0;
+            printf("%s %-32s rel_l2=%.6g max_abs=%.6g (gate %.1e, rows=%lld, n=%lld)\n", ok ? "OK  " : "FAIL",
+                   "tok_head_logits_vs_fp32", rl2, mx, rel_gate, (long long) rows, (long long) (rows * V));
+        }
+    }
+
+    // ── argmax agreement over all T frames ──
+    {
+        total++;
+        if ((int64_t) exp_codes.size() != T) {
+            printf("FAIL %-32s argmax fixture has %zu entries, expected %lld\n", "tok_head_argmax", exp_codes.size(),
+                   (long long) T);
+        } else {
+            int64_t agree = 0, first_bad = -1;
+            for (int64_t i = 0; i < T; i++) {
+                if (got_codes[(size_t) i] == exp_codes[(size_t) i]) {
+                    agree++;
+                } else if (first_bad < 0) {
+                    first_bad = i;
+                }
+            }
+            const double rate = (double) agree / (double) T;
+            const bool   ok   = rate >= YUE2_TOK_HEAD_ARGMAX_GATE;
+            passed += ok ? 1 : 0;
+            printf("%s %-32s %lld/%lld = %.4f (gate %.4f)", ok ? "OK  " : "FAIL", "tok_head_argmax_vs_fp32",
+                   (long long) agree, (long long) T, rate, YUE2_TOK_HEAD_ARGMAX_GATE);
+            if (first_bad >= 0) {
+                printf("  first mismatch frame %lld: got %d want %d", (long long) first_bad,
+                       got_codes[(size_t) first_bad], exp_codes[(size_t) first_bad]);
+            }
+            printf("\n");
+        }
+    }
+
+    // ── predict() vs forward at T == WIN: must be EXACT ──
+    {
+        total++;
+        std::vector<int32_t> pred;
+        if (!yue2_tok_head_predict(&h, x.data(), T, &pred, &err)) {
+            printf("FAIL %-32s predict error: %s\n", "tok_head_predict", err.c_str());
+        } else if ((int64_t) pred.size() != T) {
+            printf("FAIL %-32s predict returned %zu codes, expected %lld\n", "tok_head_predict", pred.size(),
+                   (long long) T);
+        } else {
+            int64_t diff = 0;
+            for (int64_t i = 0; i < T; i++) {
+                diff += (pred[(size_t) i] != got_codes[(size_t) i]);
+            }
+            const bool ok = (diff == 0);
+            passed += ok ? 1 : 0;
+            printf("%s %-32s %lld/%lld differ (T == WIN is one untrimmed window; must be exact)\n",
+                   ok ? "OK  " : "FAIL", "tok_head_predict_vs_forward", (long long) diff, (long long) T);
+        }
+    }
+
+    // ── multi-window stitch, executed for real ──
+    //
+    // Every gate above runs a single 512-frame window, so the memcpy offsets,
+    // the zero-pad and the trim writes in predict() are never exercised. Tile
+    // the fixture's own 512 frames up to 1636 and run it: six windows — five
+    // strided starts (0, 256, 512, 768, 1024) plus a flush-right 1124, whose
+    // 126-frame overlap with its predecessor is the ascending-order overwrite
+    // the reference relies on.
+    //
+    // The check is exact, not statistical. Window 0's input is bit-identical
+    // to the single-window forward's, and window 0 writes [0, 384) — a range
+    // no later window touches, because the next window starts at 256 and its
+    // own left trim puts its first write at 384. So codes[0:384) MUST equal
+    // the forward's codes[0:384) with zero differences. An off-by-one in the
+    // source offset, the trim, or the pad shows up here and nowhere else.
+    {
+        total++;
+        const int64_t      T2 = 3 * WIN + 100;  // 1636: exercises the flush-right tail too
+        std::vector<float> tiled((size_t) (T2 * DIN));
+        for (int64_t t = 0; t < T2; t++) {
+            std::memcpy(tiled.data() + t * DIN, x.data() + (t % T) * DIN, (size_t) DIN * sizeof(float));
+        }
+        std::vector<int64_t> starts;
+        yue2_tok_head_window_starts(WIN, (int64_t) h.cfg.stride, T2, &starts);
+        std::vector<int32_t> pred;
+        if (!yue2_tok_head_predict(&h, tiled.data(), T2, &pred, &err)) {
+            printf("FAIL %-32s predict error: %s\n", "tok_head_stitch", err.c_str());
+        } else if ((int64_t) pred.size() != T2) {
+            printf("FAIL %-32s predict returned %zu codes, expected %lld\n", "tok_head_stitch", pred.size(),
+                   (long long) T2);
+        } else {
+            const int64_t keep = WIN - (int64_t) h.cfg.trim;  // 384: window 0's exclusive range
+            int64_t       diff = 0;
+            for (int64_t i = 0; i < keep && i < T; i++) {
+                diff += (pred[(size_t) i] != got_codes[(size_t) i]);
+            }
+            const bool ok = (diff == 0);
+            passed += ok ? 1 : 0;
+            printf("%s %-32s T=%lld over %zu windows, %lld/%lld differ in the first window's exclusive "
+                   "range\n",
+                   ok ? "OK  " : "FAIL", "tok_head_stitch", (long long) T2, starts.size(), (long long) diff,
+                   (long long) keep);
+        }
+    }
+
+    // ── token-id bridge (cheap, and the offset is easy to leave out) ──
+    {
+        total++;
+        const int32_t want = got_codes.empty() ? 0 : got_codes[0] + (int32_t) h.cfg.codec_off;
+        const int32_t got  = got_codes.empty() ? -1 : yue2_tok_code_to_token(h, got_codes[0]);
+        const bool    ok   = (got == want) && h.cfg.codec_off == 151853;
+        passed += ok ? 1 : 0;
+        printf("%s %-32s code %d -> token %d (codec_offset %u)\n", ok ? "OK  " : "FAIL", "tok_head_token_bridge",
+               got_codes.empty() ? -1 : got_codes[0], got, h.cfg.codec_off);
+    }
+
+    // --tok-dump-dir: write this port's OWN rows out, same posture as
+    // --dump-dir on --ar-parity. The shipped fixture is not the only thing
+    // worth diffing against, and in this case it is not even the tightest:
+    // see the "two bars" note above for the float64 replay these files were
+    // used to calibrate.
+    if (!g_yue2_tok_dump_dir.empty()) {
+        const std::string lp = g_yue2_tok_dump_dir + "/tok_head_logits_first8.f32";
+        const std::string ap = g_yue2_tok_dump_dir + "/tok_head_argmax.i32";
+        const int64_t     rows = std::min<int64_t>(8, T);
+        if (FILE * f = fopen(lp.c_str(), "wb")) {
+            fwrite(got_logits.data(), sizeof(float), (size_t) (rows * V), f);
+            fclose(f);
+            printf("dumped %s (%lld x %lld f32)\n", lp.c_str(), (long long) rows, (long long) V);
+        } else {
+            printf("WARN  could not write %s\n", lp.c_str());
+        }
+        if (FILE * f = fopen(ap.c_str(), "wb")) {
+            fwrite(got_codes.data(), sizeof(int32_t), got_codes.size(), f);
+            fclose(f);
+            printf("dumped %s (%zu i32)\n", ap.c_str(), got_codes.size());
+        } else {
+            printf("WARN  could not write %s\n", ap.c_str());
+        }
+    }
+
+    printf("RESULT (tok-head-parity %s): %d/%d gates passed\n", fixture_dir.c_str(), passed, total);
+    yue2_tok_head_free(&h);
+    return (total > 0 && passed == total) ? 0 : 1;
+}
+
 // ── Free-running generation smoke test ──────────────────────────────────────
 
 // --generate: builds the request prefix, prefills it into a fresh KV cache,
@@ -2638,6 +3020,298 @@ static int run_generate_cli(const std::string & models_dir, const std::string & 
     return rc;
 }
 
+// ── --mert-front-parity: MERT's mel frontend + ConvNext subsampling + RoPE ──
+//
+// Gates engine/src/yue2/yue2-mert.h against the FP32 stage fixtures in
+// K:/yue2/fixtures/tokenizer-v1/stages-30s (docs/plans/yue2/12-tokenizer-
+// oracle-pin.md §5). One 30 s clip, no autocast anywhere in the reference for
+// this half of the chain, so these are exact targets:
+//
+//   00_mono24.f32   [720000]     -> our input
+//   01_mel.f32      [3000, 128]  -> yue2_mert_mel()
+//   02_subsampled   [750, 1024]  -> yue2_mert_subsample()
+//   03_rope_{cos,sin}.f32 [750, 64] -> yue2_mert_rope_tables()
+//
+// AXIS ORDER comes from the fixture manifest, not from an assumption: every
+// file is a "raw C-contiguous little-endian dump, no header, row-major in the
+// listed shape". Row-major [T, C] is byte-identical to this port's ne = [C, T]
+// ggml layout, so nothing is transposed on either side of the comparison — the
+// shapes are still checked against the config so a layout change fails loudly
+// instead of scoring as a numeric miss.
+//
+// ── THE BARS, AND WHY ──
+//
+// rel-L2 = ||got - want||_2 / ||want||_2 over the whole stage.
+//
+//   mel        1e-5.  Nothing in this stage is approximate: the window and the
+//                     filterbank are loaded from the checkpoint verbatim, the
+//                     dB stage is a closed-form 10*log10, and our FFT runs in
+//                     double where the reference runs fp32. The only residual
+//                     is fp32 rounding of the final store, so anything above
+//                     1e-5 is a real defect, not tolerance. MEASURED 6.78e-7.
+//   rope       1e-5.  Pure arithmetic, replicated in the reference's own fp32
+//                     (see yue2_mert_rope_tables) — same argument.
+//                     MEASURED 2.4e-8 / 3.0e-8, i.e. exact to fp32 rounding.
+//   subsampled 1e-3 (F32 file) / 1.5e-3 (F16 file). Read the next paragraph
+//                     before calling that loose: neither number is slack for
+//                     the port, and both are dominated by things measured, not
+//                     guessed.
+//
+// ── WHY THE SUBSAMPLED BAR IS 1e-3 AND NOT 1e-5: THE FIXTURE'S OWN TF32 ──
+//
+// 02_subsampled.f32 was dumped by K:/yue2/scripts/tokenizer/stage_fixtures.py,
+// which sets no TF32 flags at all, so PyTorch's DEFAULTS applied — and those
+// defaults are not symmetric:
+//
+//     torch.backends.cuda.matmul.allow_tf32 = False   (Linear: true fp32)
+//     torch.backends.cudnn.allow_tf32       = True    (Conv1d: TF32!)
+//
+// The subsampling stack is 2 resampling Conv1d plus 12 depthwise Conv1d, all
+// of which therefore ran on cuDNN at TF32's 10-bit mantissa. The fixture is
+// "FP32, no autocast" as its manifest says, and still carries that rounding.
+//
+// Proven, not inferred, by re-running the same torch code on the same mel:
+//
+//     cudnn.allow_tf32=True   -> rel_l2 vs the shipped fixture 0.000e+00 (bit-exact)
+//     cudnn.allow_tf32=False  -> rel_l2 vs the shipped fixture 5.593e-04
+//
+// and our port scores 5.593e-04 against the shipped fixture — the same number,
+// to four digits. Against the cudnn.allow_tf32=False re-dump the port scores
+// 2.05e-06. So the whole 5.6e-4 is the reference's own convolution rounding,
+// and the port's own error is two orders of magnitude below it.
+//
+// Decomposition, all measured on this clip:
+//
+//     port vs true-fp32 reference, F32 weights        2.05e-06
+//     + F16 storage of pw_up/pw_down                  2.50e-04
+//     + the shipped fixture's cuDNN TF32              5.59e-04
+//     ------------------------------------------------------------
+//     what this mode prints, F32 file                 5.59e-04
+//     what this mode prints, F16 file                 6.13e-04
+//
+// The gates sit just under 2x those, so a real defect still trips them while
+// the shipped fixtures pass out of the box. TO GATE THE PORT ITSELF at 1e-4,
+// re-dump 02_subsampled.f32 with torch.backends.cudnn.allow_tf32 = False and
+// point this mode at that directory; nothing here needs changing.
+//
+// Our own TF32 is disabled by the dispatcher before the first CUDA context,
+// for the same reason as --tok-head-parity. --tf32 leaves it on to measure the
+// cost — which on this stage is nil (4.7e-4 vs 5.6e-4, i.e. it moves the
+// result slightly TOWARDS the TF32-dumped fixture), because ggml does not run
+// these shapes through a TF32 cuBLAS path in the first place.
+static constexpr double YUE2_MERT_MEL_REL_L2_GATE      = 1e-5;
+static constexpr double YUE2_MERT_ROPE_REL_L2_GATE     = 1e-5;
+static constexpr double YUE2_MERT_SUB_REL_L2_GATE_F32  = 1e-3;
+static constexpr double YUE2_MERT_SUB_REL_L2_GATE_F16  = 1.5e-3;
+// Below this, the fixture was dumped with cuDNN TF32 off (or is not a cuDNN
+// dump at all) and the port is being measured against true fp32. Printed as a
+// note so a 5e-4 result is never mistaken for a loose pass.
+static constexpr double YUE2_MERT_SUB_TF32_FLOOR       = 1e-4;
+
+struct Yue2MertDiff {
+    double rel_l2  = 0.0;
+    double max_abs = 0.0;
+};
+
+static Yue2MertDiff yue2_mert_diff(const std::vector<float> & got, const std::vector<float> & want) {
+    Yue2MertDiff d;
+    double       num = 0.0, den = 0.0;
+    const size_t n   = std::min(got.size(), want.size());
+    for (size_t i = 0; i < n; i++) {
+        const double e = (double) got[i] - (double) want[i];
+        num += e * e;
+        den += (double) want[i] * (double) want[i];
+        d.max_abs = std::max(d.max_abs, std::fabs(e));
+    }
+    d.rel_l2 = den > 0.0 ? std::sqrt(num / den) : (num > 0.0 ? 1.0 : 0.0);
+    return d;
+}
+
+// Report one stage. Returns true when it passed.
+static bool yue2_mert_report(const char * label, const std::vector<float> & got, const std::vector<float> & want,
+                             int64_t want_rows, int64_t want_cols, double gate, Yue2MertDiff * out = nullptr) {
+    if ((int64_t) want.size() != want_rows * want_cols) {
+        printf("FAIL %-22s fixture has %zu floats, expected %lld x %lld = %lld\n", label, want.size(),
+               (long long) want_rows, (long long) want_cols, (long long) (want_rows * want_cols));
+        return false;
+    }
+    if (got.size() != want.size()) {
+        printf("FAIL %-22s port produced %zu floats, fixture has %zu (shape mismatch, not a numeric miss)\n", label,
+               got.size(), want.size());
+        return false;
+    }
+    const Yue2MertDiff d  = yue2_mert_diff(got, want);
+    if (out) {
+        *out = d;
+    }
+    const bool ok = d.rel_l2 <= gate;
+    printf("%s %-22s rel_l2=%.3e max_abs=%.3e  (%lld x %lld, gate %.1e)\n", ok ? "PASS" : "FAIL", label, d.rel_l2,
+           d.max_abs, (long long) want_rows, (long long) want_cols, gate);
+    return ok;
+}
+
+static int run_mert_front_parity(const std::string & models_dir, const std::string & fixture_dir,
+                                 const std::string & gguf_override) {
+    std::string gguf_path = gguf_override;
+    if (gguf_path.empty() && !yue2_tok_head_find(models_dir, &gguf_path)) {
+        fprintf(stderr, "FATAL: no yue2-tok-*.gguf under %s (or %s/yue2). Run engine/tools/convert-yue2-tok.py.\n",
+                models_dir.c_str(), models_dir.c_str());
+        return 1;
+    }
+
+    Yue2MertModel m;
+    std::string   err;
+    // want_blocks=false: the 21 Conformer blocks are ~2.1 GiB and this mode
+    // stops before them. The loader validates their names either way when a
+    // caller asks for them; not asking keeps the probe at ~46 MiB.
+    if (!yue2_mert_load(&m, gguf_path, /*want_blocks=*/false, &err)) {
+        fprintf(stderr, "FATAL: MERT load failed: %s\n", err.c_str());
+        return 1;
+    }
+
+    const int64_t NM  = (int64_t) m.cfg.num_mel_bins;
+    const int64_t DIM = (int64_t) m.cfg.embedding_length;
+    const int64_t RD  = (int64_t) m.cfg.rope_dim;
+    const bool    f32 = yue2_mert_weights_are_f32(m);
+    const double  sub_gate = f32 ? YUE2_MERT_SUB_REL_L2_GATE_F32 : YUE2_MERT_SUB_REL_L2_GATE_F16;
+
+    printf("=== MERT front-half parity: %s ===\n", fixture_dir.c_str());
+    printf("gguf: %s (%.1f MB, ConvNext matmul weights stored %s)\n", yue2_basename(gguf_path).c_str(),
+           (double) m.vram / (1024.0 * 1024.0), f32 ? "F32" : "F16");
+    printf("config: sr=%u n_fft=%u hop=%u n_mel=%u | sub channels/strides/depths from KV | ln_eps %.0e sub %.0e\n",
+           m.cfg.sample_rate, m.cfg.n_fft, m.cfg.hop_length, m.cfg.num_mel_bins, (double) m.cfg.ln_eps,
+           (double) m.cfg.sub_ln_eps);
+    printf("gates: mel %.1e, rope %.1e, subsampled %.1e (%s file); TF32 %s\n", YUE2_MERT_MEL_REL_L2_GATE,
+           YUE2_MERT_ROPE_REL_L2_GATE, sub_gate, f32 ? "F32" : "F16",
+           yue2_tok_tf32_disabled() ? "OFF" : "ON (ggml default) — expect a looser rel_l2");
+
+    std::vector<float> pcm, want_mel, want_sub, want_cos, want_sin;
+    if (!yue2_read_f32_bin(fixture_dir + "/00_mono24.f32", &pcm)) {
+        fprintf(stderr, "FATAL: cannot read %s/00_mono24.f32\n", fixture_dir.c_str());
+        yue2_mert_free(&m);
+        return 1;
+    }
+    const bool have_mel  = yue2_read_f32_bin(fixture_dir + "/01_mel.f32", &want_mel);
+    const bool have_sub  = yue2_read_f32_bin(fixture_dir + "/02_subsampled.f32", &want_sub);
+    const bool have_cos  = yue2_read_f32_bin(fixture_dir + "/03_rope_cos.f32", &want_cos);
+    const bool have_sin  = yue2_read_f32_bin(fixture_dir + "/03_rope_sin.f32", &want_sin);
+
+    int total = 0, passed = 0;
+
+    // ── frame-count arithmetic, before any float is compared ──
+    // Trap 3 (dropped last mel frame) and trap 4 (kernel-2 resample with no
+    // padding) are both integer bugs. They show up here as a shape mismatch
+    // rather than as a numeric miss, which is a far more useful failure.
+    const int64_t T_mel = yue2_mert_mel_frames(m.cfg, (int64_t) pcm.size());
+    const int64_t T_sub = yue2_mert_sub_out_len(m.cfg, T_mel);
+    {
+        total++;
+        const int64_t exp_mel = (int64_t) pcm.size() / (int64_t) m.cfg.hop_length;
+        const int64_t exp_sub = (int64_t) pcm.size() / (int64_t) m.cfg.samples_per_frame;
+        const bool    ok      = (T_mel == exp_mel) && (T_sub == exp_sub);
+        printf("%s %-22s %lld samples -> %lld mel (want %lld) -> %lld sub (want %lld = samples/%u)\n",
+               ok ? "PASS" : "FAIL", "frame_geometry", (long long) pcm.size(), (long long) T_mel, (long long) exp_mel,
+               (long long) T_sub, (long long) exp_sub, m.cfg.samples_per_frame);
+        passed += ok ? 1 : 0;
+    }
+    {
+        // The 30 s clip above is even at every stage, so it cannot catch trap 4
+        // (kernel-2 resample with NO padding: floor((L-2)/s)+1, not L/2). The
+        // pin's own worked example is an odd tail: §3.4 records a 27.8 s chunk
+        // going 2783 -> 1391 -> 695, and says 695 is what the reference
+        // produced. Pure integer arithmetic, so it is checked here rather than
+        // requiring a second fixture.
+        total++;
+        const int64_t tail_sub = yue2_mert_sub_out_len(m.cfg, 2783);
+        const bool    ok       = (tail_sub == 695);
+        printf("%s %-22s odd tail 2783 mel -> %lld sub (pin §3.4 worked example: 695, NOT 2783/4=695.75)\n",
+               ok ? "PASS" : "FAIL", "odd_tail_geometry", (long long) tail_sub);
+        passed += ok ? 1 : 0;
+    }
+
+    // ── 01_mel ──
+    std::vector<float> mel;
+    int64_t            got_T_mel = 0;
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        const bool ok = yue2_mert_mel(m, pcm.data(), (int64_t) pcm.size(), &mel, &got_T_mel, &err);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        if (!ok) {
+            printf("FAIL %-22s %s\n", "mel", err.c_str());
+            yue2_mert_free(&m);
+            return 1;
+        }
+        printf("yue2_mert_mel: %lld frames in %.1f ms\n", (long long) got_T_mel, ms);
+        if (have_mel) {
+            total++;
+            passed += yue2_mert_report("mel", mel, want_mel, got_T_mel, NM, YUE2_MERT_MEL_REL_L2_GATE) ? 1 : 0;
+        } else {
+            printf("SKIP %-22s 01_mel.f32 not present\n", "mel");
+        }
+    }
+
+    // ── 02_subsampled ──
+    {
+        Yue2MertSubGraph   g;
+        std::vector<float> sub;
+        int64_t            got_T_sub = 0;
+        const auto         t0 = std::chrono::steady_clock::now();
+        const bool         ok = yue2_mert_subsample(m, &g, mel.data(), got_T_mel, &sub, &got_T_sub, &err);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        if (!ok) {
+            printf("FAIL %-22s %s\n", "subsampled", err.c_str());
+            yue2_mert_sub_graph_free(&g);
+            yue2_mert_free(&m);
+            return 1;
+        }
+        printf("yue2_mert_subsample: %lld -> %lld frames in %.1f ms (includes graph build)\n", (long long) got_T_mel,
+               (long long) got_T_sub, ms);
+        if (have_sub) {
+            total++;
+            Yue2MertDiff d;
+            passed += yue2_mert_report("subsampled", sub, want_sub, got_T_sub, DIM, sub_gate, &d) ? 1 : 0;
+            // Say out loud which regime the FIXTURE is in, so a 5e-4 pass is
+            // never read as the port being sloppy — see this mode's header.
+            if (d.rel_l2 > YUE2_MERT_SUB_TF32_FLOOR) {
+                printf("                            ^ %.3e is the cuDNN-TF32 signature of the shipped fixture\n"
+                       "                              (5.59e-4 measured; against a cudnn.allow_tf32=False re-dump\n"
+                       "                              this port scores 2.05e-6). Reference rounding, not ours.\n",
+                       d.rel_l2);
+            } else {
+                printf("                            ^ fixture looks TF32-free: this is the port's own error\n"
+                       "                              against true fp32.\n");
+            }
+        } else {
+            printf("SKIP %-22s 02_subsampled.f32 not present\n", "subsampled");
+        }
+        yue2_mert_sub_graph_free(&g);
+    }
+
+    // ── 03_rope_{cos,sin} ──
+    // The tables are built from the POST-SUBSAMPLING length (the Conformer
+    // stack's own sequence length), and positions restart at 0 in every chunk.
+    {
+        std::vector<float> cs, sn;
+        yue2_mert_rope_tables(m.cfg, T_sub, &cs, &sn);
+        if (have_cos) {
+            total++;
+            passed += yue2_mert_report("rope_cos", cs, want_cos, T_sub, RD, YUE2_MERT_ROPE_REL_L2_GATE) ? 1 : 0;
+        } else {
+            printf("SKIP %-22s 03_rope_cos.f32 not present\n", "rope_cos");
+        }
+        if (have_sin) {
+            total++;
+            passed += yue2_mert_report("rope_sin", sn, want_sin, T_sub, RD, YUE2_MERT_ROPE_REL_L2_GATE) ? 1 : 0;
+        } else {
+            printf("SKIP %-22s 03_rope_sin.f32 not present\n", "rope_sin");
+        }
+    }
+
+    printf("RESULT (mert-front-parity %s): %d/%d gates passed\n", fixture_dir.c_str(), passed, total);
+    yue2_mert_free(&m);
+    return (total > 0 && passed == total) ? 0 : 1;
+}
+
 int main(int argc, char ** argv) {
     std::string     models_dir;
     std::string     tokenizer_dir_arg;
@@ -2656,6 +3330,10 @@ int main(int argc, char ** argv) {
     std::string     vae_parity_dir;
     std::string     vae_parity_variant;
     std::string     encode_parity_dir;
+    std::string     tok_head_parity_dir;
+    std::string     tok_head_gguf;
+    bool            tok_head_keep_tf32 = false;
+    std::string     mert_front_parity_dir;
     bool            do_generate      = false;
     std::string     gen_style;
     std::string     gen_lyrics;
@@ -2696,6 +3374,16 @@ int main(int argc, char ** argv) {
             vae_parity_dir = argv[++i];
         } else if (!strcmp(argv[i], "--encode-parity") && i + 1 < argc) {
             encode_parity_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--tok-head-parity") && i + 1 < argc) {
+            tok_head_parity_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--tok-gguf") && i + 1 < argc) {
+            tok_head_gguf = argv[++i];
+        } else if (!strcmp(argv[i], "--tok-dump-dir") && i + 1 < argc) {
+            g_yue2_tok_dump_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--mert-front-parity") && i + 1 < argc) {
+            mert_front_parity_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--tf32")) {
+            tok_head_keep_tf32 = true;
         } else if (!strcmp(argv[i], "--variant") && i + 1 < argc) {
             vae_parity_variant = argv[++i];
         } else if (!strcmp(argv[i], "--generate")) {
@@ -2821,6 +3509,40 @@ int main(int argc, char ** argv) {
         // Variant selection reuses --vae here (not --variant): this mode
         // loads exactly one VAE, the same way --load does.
         return run_encode_parity(models_dir, encode_parity_dir, variant);
+    }
+    if (!tok_head_parity_dir.empty()) {
+        if (models_dir.empty()) {
+            fprintf(stderr, "--tok-head-parity requires --models <dir>\n");
+            return 2;
+        }
+        // TF32 OFF by default, before the first CUDA context — same reasoning
+        // as --encode-parity above, and the same hard requirement that it
+        // happen here and not inside the loader. The unit fixture is FP32 with
+        // autocast explicitly disabled, so the port should be compared in the
+        // same regime. --tf32 leaves ggml's default on, which exists purely so
+        // the cost can be MEASURED rather than assumed; the mode prints which
+        // regime it ran in either way.
+        if (!tok_head_keep_tf32) {
+            yue2_tok_disable_tf32();
+        }
+        return run_tok_head_parity(models_dir, tok_head_parity_dir, tok_head_gguf);
+    }
+    if (!mert_front_parity_dir.empty()) {
+        if (models_dir.empty()) {
+            fprintf(stderr, "--mert-front-parity requires --models <dir>\n");
+            return 2;
+        }
+        // Same reasoning and the same hard ordering constraint as
+        // --tok-head-parity above: this MUST happen before the first CUDA
+        // context is created, because the driver reads NVIDIA_TF32_OVERRIDE
+        // when the context is built. The ConvNext stack is all F32
+        // ggml_mul_mat, which ggml runs through cuBLAS on TF32 tensor cores by
+        // default — an 11-bit mantissa against an FP32 fixture. --tf32 leaves
+        // it on so the cost can be measured rather than assumed.
+        if (!tok_head_keep_tf32) {
+            yue2_tok_disable_tf32();
+        }
+        return run_mert_front_parity(models_dir, mert_front_parity_dir, tok_head_gguf);
     }
     if (do_generate) {
         if (models_dir.empty()) {

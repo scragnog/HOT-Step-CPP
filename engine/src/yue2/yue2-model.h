@@ -451,6 +451,16 @@ struct Yue2Loader {
     const GGUFModel *                      gf     = nullptr;
     std::map<std::string, ggml_tensor *> * tmap   = nullptr;
     std::vector<std::string> *             errors = nullptr;
+    // Promote every loaded tensor to F32 at load time (gf_load_tensor_f32)
+    // instead of keeping the file's stored type. Off for the LM and the VAE,
+    // which want the quantized/F16 weights they were converted to. ON for
+    // yue2-tok's head (yue2-tok-head.h): 42.8 M parameters is 171 MB at F32,
+    // and an F32 src0 is the one ggml_mul_mat path that lands on a plain
+    // cublasSgemm with no F16 round trip — which is what the FP32 stage
+    // fixtures were captured against. It does NOT undo the F16 STORAGE
+    // rounding already baked into a --outtype f16 file; it only stops a
+    // second narrowing happening inside the matmul.
+    bool                                   force_f32 = false;
 
     void fail(const std::string & msg) const {
         if (errors && errors->size() < 24) {
@@ -481,7 +491,8 @@ struct Yue2Loader {
                 return nullptr;
             }
         }
-        ggml_tensor * t = gf_load_tensor(wctx, *gf, name);  // safe: presence verified above
+        // safe: presence verified above
+        ggml_tensor * t = force_f32 ? gf_load_tensor_f32(wctx, *gf, name) : gf_load_tensor(wctx, *gf, name);
         if (t && tmap) {
             (*tmap)[name] = t;
         }
