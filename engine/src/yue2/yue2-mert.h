@@ -10,11 +10,16 @@
 //            [21 Conformer blocks] -> hidden_states[20] -> interpolate to T25 ->
 //            per-track instance norm -> 8-layer head -> argmax -> code
 //
-// THIS FILE COVERS the mel frontend, the ConvNext subsampling stack and the
-// RoPE tables the Conformer blocks share. The Conformer blocks themselves and
-// the head are separate stages; their weights ARE loaded here (the tensor
-// names are fully pinned by the converter, so there is no design freedom left
-// in the loader) but nothing here runs them.
+// THIS FILE COVERS everything on that line except the head: the mel frontend,
+// the ConvNext subsampling stack, the RoPE tables, all 21 Conformer blocks,
+// the interpolation to T25 and the per-track instance norm. yue2_mert_encode()
+// is the whole chain, audio in and the head's input out. The head itself is
+// yue2-tok-head.h; its weights are loaded from the same GGUF by a separate
+// loader, and this file never touches them.
+//
+// Gated by yue2-probe --mert-front-parity (mel/subsampling/RoPE) and
+// --mert-block-parity (the blocks, the whole-track chain, and the end-to-end
+// code agreement). Numbers live in those modes' headers, not here.
 //
 // AUTHORITY: docs/plans/yue2/12-tokenizer-oracle-pin.md. That document was
 // produced by RUNNING the reference implementation, not by reading it, and it
@@ -1144,8 +1149,11 @@ static ggml_tensor * cnx_layer(ggml_context * ctx, const Yue2MertCnxLayer & L, g
 }  // namespace yue2_mert_detail
 
 // The whole subsampling stack. `mel` is [128, T_mel] (ne0 = mel bin),
-// returns [1024, T_out].
-static ggml_tensor * yue2_mert_sub_build(ggml_context * ctx, const Yue2MertModel & m, const Yue2MertSubGraph & g,
+// returns [1024, T_out]. `grn_eps` is the shared [1,1] F32 constant; it is
+// passed in rather than read off a graph struct so the encoder graph
+// (yue2_mert_enc_build, below) can reuse this builder verbatim instead of
+// growing a second, divergent copy of the stack.
+static ggml_tensor * yue2_mert_sub_build(ggml_context * ctx, const Yue2MertModel & m, ggml_tensor * grn_eps,
                                          ggml_tensor * mel) {
     using namespace yue2_mert_detail;
     const Yue2MertConfig & c = m.cfg;
@@ -1163,7 +1171,7 @@ static ggml_tensor * yue2_mert_sub_build(ggml_context * ctx, const Yue2MertModel
             x = ggml_cont(ctx, ggml_transpose(ctx, x));                                  // [Cout, T']
         }
         for (const auto & cl : sb.cnx) {
-            x = cnx_layer(ctx, cl, x, (int) c.sub_convnext_padding, c.sub_ln_eps, g.grn_eps);
+            x = cnx_layer(ctx, cl, x, (int) c.sub_convnext_padding, c.sub_ln_eps, grn_eps);
         }
     }
     return x;
@@ -1269,7 +1277,7 @@ static bool yue2_mert_sub_ensure_graph(const Yue2MertModel & m, Yue2MertSubGraph
     ggml_set_name(g->input, "mert_mel_in");
     ggml_set_input(g->input);
 
-    g->output = yue2_mert_sub_build(ctx, m, *g, g->input);
+    g->output = yue2_mert_sub_build(ctx, m, g->grn_eps, g->input);
     ggml_set_name(g->output, "mert_sub_out");
     ggml_set_output(g->output);
 
@@ -1343,5 +1351,734 @@ static bool yue2_mert_subsample(const Yue2MertModel & m, Yue2MertSubGraph * g, c
     if (out_frames) {
         *out_frames = T;
     }
+    return true;
+}
+
+// ── Conformer blocks (pin §3.5) ─────────────────────────────────────────────
+//
+// 21 identical pre-norm blocks, run on the subsampling stack's output at
+// ne = [1024, T_sub]. The residual structure, verbatim from
+// MERT-v2-FullSong/modeling_mert2.py::ConformerBlock.forward:
+//
+//   h = h + 0.5 * ffn1(ffn1_layer_norm(h))       macaron half-step
+//   h = attn(attn_layer_norm(h), (cos, sin)) + h 16 heads, RoPE, NO mask
+//   h = conv_module(h) + h
+//   h = h + 0.5 * ffn2(ffn2_layer_norm(h))       macaron half-step
+//   h = final_layer_norm(h)                      NOT a residual
+//
+// `hidden_states[k]` is the value returned by block k — i.e. POST
+// final_layer_norm — so hidden_states[20] is simply what block 20 returns
+// (pin §3.1; the GGUF's hidden_state_index KV says 20 and block_count says 21,
+// and yue2_mert_validate_config already refuses a file where those disagree).
+//
+// ── GELU: DETERMINED, NOT ASSUMED ──────────────────────────────────────────
+//
+// yue2-tok-head.h documents a genuine departure — the tokenizer HEAD's fixture
+// matches the TANH approximation, because nn.TransformerEncoderLayer routes
+// through PyTorch's fused encoder kernel, which hardcodes tanh regardless of
+// the activation="gelu" string.
+//
+// MERT is NOT that. Its blocks are hand-written modules, and all three GELU
+// sites in MERT-v2-FullSong/modeling_mert2.py are the plain API:
+//
+//     FeedForward.forward     : self.w_2(F.gelu(self.w_1(x)))      (line 209)
+//     ConvolutionModule       : nn.GELU()                          (line 224)
+//     ConvNextLayer pointwise : nn.GELU()                          (line 98)
+//
+// F.gelu and nn.GELU() both default to approximate='none', the EXACT erf form,
+// and there is no fused path here that could override them.
+//
+// That is still an argument from source, so the flavour is a runtime switch
+// (Yue2MertEncodeOptions::gelu_tanh) and yue2-probe's --mert-block-parity runs
+// BOTH and prints both columns. Measured against the TRUE fp32 block fixtures
+// (real-30s, F32 GGUF, TF32 off), rel-L2:
+//
+//     block00    erf 1.718e-06   tanh 3.939e-04     229x
+//     block10    erf 2.259e-06   tanh 3.931e-03    1740x
+//     block20    erf 3.261e-06   tanh 2.801e-03     859x
+//
+// Erf wins at every depth by two to three orders of magnitude, and the tanh
+// error GROWS with depth while the erf error stays flat — the signature of a
+// systematic per-block bias rather than rounding. Source and fixtures agree
+// here. The head remains the one place in this port where they do not.
+//
+// ── RoPE ────────────────────────────────────────────────────────────────────
+//
+// ggml_rope_ext with GGML_ROPE_TYPE_NEOX is exactly MERT's convention: NEOX
+// rotates element i against element i + n_dims/2 (ggml.h's own "[ccccssss]"
+// diagram), which is rotate_half — cat((-second, first)) — and its theta is
+// pos * freq_base^(-2i/n_dims), which is inv_freq. The standalone
+// yue2_mert_rope_tables() above stays as the gated reference for the tables
+// themselves (03_rope_{cos,sin}.f32, 2.4e-8); the graph does not feed it in,
+// it lets the rope op rebuild the same angles on the device.
+//
+// POSITIONS RESTART AT 0 IN EVERY CHUNK. The positions tensor is filled with
+// 0..T_sub-1 per chunk and never carries a song offset — pin §3.6, and the
+// reason 30 s chunking is legitimate at all.
+
+#define YUE2_MERT_ENC_MAX_NODES 16384
+
+namespace yue2_mert_detail {
+
+// MERT's own GELU. Default (tanh_approx=false) is the exact erf form, which is
+// what F.gelu/nn.GELU do with approximate='none' — see the section above.
+static ggml_tensor * mert_gelu(ggml_context * ctx, ggml_tensor * x, bool tanh_approx) {
+    return tanh_approx ? ggml_gelu(ctx, x) : ggml_gelu_erf(ctx, x);
+}
+
+// FeedForward: w_2(gelu(w_1(x))), 1024 -> 4096 -> 1024, both with bias. The
+// 0.5 macaron factor is applied by the caller, on the residual branch.
+static ggml_tensor * mert_ffn(ggml_context * ctx, ggml_tensor * x, ggml_tensor * up_w, ggml_tensor * up_b,
+                              ggml_tensor * dn_w, ggml_tensor * dn_b, bool tanh_gelu) {
+    ggml_tensor * h = ggml_add(ctx, ggml_mul_mat(ctx, up_w, x), up_b);
+    h               = mert_gelu(ctx, h, tanh_gelu);
+    return ggml_add(ctx, ggml_mul_mat(ctx, dn_w, h), dn_b);
+}
+
+// SelfAttention. Four SEPARATE projections with bias (pin §3.5) — MERT does
+// not fuse qkv, unlike the head. RoPE on q and k only, never v. Then SDPA with
+// is_causal=False and no mask of any kind: every frame sees every other frame,
+// scale 1/sqrt(head_dim).
+//
+// `h` is the pre-normed input, ne [D, T]. Returns the out_proj result, ne
+// [D, T]; the caller adds the residual.
+static ggml_tensor * mert_attn(ggml_context * ctx, const Yue2MertConfig & c, const Yue2MertBlock & w, ggml_tensor * h,
+                               ggml_tensor * pos) {
+    const int64_t D  = (int64_t) c.embedding_length;
+    const int64_t HD = (int64_t) c.key_length;
+    const int64_t NH = (int64_t) c.head_count;
+    const int64_t T  = h->ne[1];
+
+    ggml_tensor * q = ggml_add(ctx, ggml_mul_mat(ctx, w.attn_q_w, h), w.attn_q_b);
+    ggml_tensor * k = ggml_add(ctx, ggml_mul_mat(ctx, w.attn_k_w, h), w.attn_k_b);
+    ggml_tensor * v = ggml_add(ctx, ggml_mul_mat(ctx, w.attn_v_w, h), w.attn_v_b);
+
+    // [D, T] -> [head_dim, head, frame], which is the layout ggml_rope_ext
+    // wants (positions index ne2).
+    q = ggml_reshape_3d(ctx, q, HD, NH, T);
+    k = ggml_reshape_3d(ctx, k, HD, NH, T);
+    q = ggml_rope_ext(ctx, q, pos, nullptr, (int) HD, GGML_ROPE_TYPE_NEOX, 0, c.rope_freq_base, 1.0f, 0.0f, 1.0f, 0.0f,
+                      0.0f);
+    k = ggml_rope_ext(ctx, k, pos, nullptr, (int) HD, GGML_ROPE_TYPE_NEOX, 0, c.rope_freq_base, 1.0f, 0.0f, 1.0f, 0.0f,
+                      0.0f);
+
+    q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));  // [hd, t, head]
+    k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
+    ggml_tensor * v3 = ggml_cont(ctx, ggml_permute(ctx, ggml_reshape_3d(ctx, v, HD, NH, T), 1, 2, 0, 3));
+
+    ggml_tensor * kq = ggml_mul_mat(ctx, k, q);  // [t_k, t_q, head]
+    kq = ggml_soft_max_ext(ctx, kq, /*mask*/ nullptr, 1.0f / std::sqrt((float) HD), /*max_bias*/ 0.0f);
+
+    ggml_tensor * kqv = ggml_mul_mat(ctx, v3, kq);           // [hd, t, head]
+    kqv               = ggml_permute(ctx, kqv, 0, 2, 1, 3);  // [hd, head, t]
+    ggml_tensor * att = ggml_cont_2d(ctx, kqv, D, T);        // [D, T]
+    return ggml_add(ctx, ggml_mul_mat(ctx, w.attn_o_w, att), w.attn_o_b);
+}
+
+// ConvolutionModule (pin §3.5). `x` is the block state, ne [D, T]; the
+// LayerNorm is INSIDE this function (conv_module(h) = conv_block(layer_norm(h)))
+// and the residual is added by the caller.
+//
+// The reference's Transpose modules exist because torch Conv1d wants [B, C, T].
+// In this file's [C, T] layout the two kernel-1 convs are plain matmuls and
+// need no transpose at all; only the depthwise k=31 conv does, because
+// ggml_im2col reads time along ne0.
+//
+// GLU SPLIT ORDER — the coin flip the pin calls out explicitly: nn.GLU(dim=1)
+// on [B, 2048, T] returns first_half * sigmoid(second_half). The FIRST 1024
+// channels are the linear branch, the SECOND 1024 are the gate. Swapping them
+// produces plausible-looking, wrong features.
+//
+// The three convs here have NO bias.
+static ggml_tensor * mert_conv_module(ggml_context * ctx, const Yue2MertConfig & c, const Yue2MertBlock & w,
+                                      ggml_tensor * x, bool tanh_gelu) {
+    const int64_t D = x->ne[0];
+    const int64_t T = x->ne[1];
+
+    ggml_tensor * h = ln(ctx, x, w.conv_norm_w, w.conv_norm_b, c.ln_eps);
+    h               = ggml_mul_mat(ctx, w.conv_pw1_w, h);  // Conv1d(D, 2D, k=1) == matmul -> [2D, T]
+
+    const size_t  es   = ggml_element_size(h);
+    ggml_tensor * lin  = ggml_cont(ctx, ggml_view_2d(ctx, h, D, T, h->nb[1], 0));
+    ggml_tensor * gate = ggml_cont(ctx, ggml_view_2d(ctx, h, D, T, h->nb[1], (size_t) D * es));
+    h                  = ggml_mul(ctx, lin, ggml_sigmoid(ctx, gate));  // [D, T]
+
+    ggml_tensor * ht = ggml_cont(ctx, ggml_transpose(ctx, h));  // [T, D]
+    ht               = conv1d_dw_t(ctx, w.conv_dw_w, /*bias*/ nullptr, ht, (int) c.conv_dw_padding);
+    h                = ggml_cont(ctx, ggml_transpose(ctx, ht));  // [D, T]
+
+    h = ln(ctx, h, w.conv_dw_norm_w, w.conv_dw_norm_b, c.ln_eps);
+    h = mert_gelu(ctx, h, tanh_gelu);
+    return ggml_mul_mat(ctx, w.conv_pw2_w, h);  // Conv1d(D, D, k=1) == matmul -> [D, T]
+}
+
+// One Conformer block. `x` is [D, T]; the return value is what
+// hidden_states[k] holds for this block.
+static ggml_tensor * mert_block(ggml_context * ctx, const Yue2MertConfig & c, const Yue2MertBlock & w, ggml_tensor * x,
+                                ggml_tensor * pos, bool tanh_gelu) {
+    const float eps = c.ln_eps;  // 1e-5 here, 1e-6 in the subsampling stack — trap 6
+
+    ggml_tensor * f1 = mert_ffn(ctx, ln(ctx, x, w.ffn1_norm_w, w.ffn1_norm_b, eps), w.ffn1_up_w, w.ffn1_up_b,
+                                w.ffn1_down_w, w.ffn1_down_b, tanh_gelu);
+    x = ggml_add(ctx, x, ggml_scale(ctx, f1, 0.5f));
+
+    x = ggml_add(ctx, mert_attn(ctx, c, w, ln(ctx, x, w.attn_norm_w, w.attn_norm_b, eps), pos), x);
+
+    x = ggml_add(ctx, mert_conv_module(ctx, c, w, x, tanh_gelu), x);
+
+    ggml_tensor * f2 = mert_ffn(ctx, ln(ctx, x, w.ffn2_norm_w, w.ffn2_norm_b, eps), w.ffn2_up_w, w.ffn2_up_b,
+                                w.ffn2_down_w, w.ffn2_down_b, tanh_gelu);
+    x = ggml_add(ctx, x, ggml_scale(ctx, f2, 0.5f));
+
+    // final_layer_norm: NOT a residual. The block OUTPUT is normed, and that is
+    // what lands in hidden_states.
+    return ln(ctx, x, w.final_norm_w, w.final_norm_b, eps);
+}
+
+}  // namespace yue2_mert_detail
+
+// ── Encoder graph: mel -> subsampling -> 21 blocks, ONE graph per chunk ─────
+//
+// Everything from the mel spectrogram to hidden_states[20] lives in a single
+// cached graph, built once per (T_mel, gelu flavour, tap set) and reused. A
+// full-length song presents exactly two shapes — 3000 mel frames for every
+// 30 s chunk and one odd tail — so a 4-minute track pays for two graph builds
+// and nothing more. Rebuilding per block, or per chunk, would dominate the
+// runtime: the build allocates and schedules ~1900 nodes.
+struct Yue2MertEncGraph {
+    ggml_backend_t       backend       = nullptr;
+    ggml_backend_t       cpu_backend   = nullptr;
+    bool                 backend_ref   = false;
+    ggml_backend_sched_t sched         = nullptr;
+    WeightCtx            prep          = {};
+    const void *         weights_token = nullptr;
+
+    ggml_tensor * grn_eps = nullptr;  // [1,1] F32, shared by every GRN in the sub stack
+
+    ggml_context * gctx   = nullptr;
+    uint8_t *      gbuf   = nullptr;
+    ggml_cgraph *  graph  = nullptr;
+    ggml_tensor *  input  = nullptr;  // [n_mel, T_mel]  F32
+    ggml_tensor *  pos    = nullptr;  // [T_sub]         I32, always 0..T_sub-1
+    ggml_tensor *  sub    = nullptr;  // [1024, T_sub]   subsampling output (optional tap)
+    ggml_tensor *  output = nullptr;  // [1024, T_sub]   hidden_states[20]
+
+    // Per-block taps, parallel to tap_blocks. Empty in production; the parity
+    // mode asks for blocks 0, 1, 10, 19 and 20.
+    std::vector<int>           tap_blocks;
+    std::vector<ggml_tensor *> taps;
+
+    int64_t          graph_T_mel     = 0;
+    bool             graph_gelu_tanh = false;
+    bool             graph_want_sub  = false;
+    std::vector<int> graph_taps;
+};
+
+static void yue2_mert_enc_free_graph(Yue2MertEncGraph * g) {
+    if (g->gctx) {
+        if (g->sched) {
+            ggml_backend_sched_reset(g->sched);
+        }
+        ggml_free(g->gctx);
+        free(g->gbuf);
+    }
+    g->gctx   = nullptr;
+    g->gbuf   = nullptr;
+    g->graph  = nullptr;
+    g->input  = nullptr;
+    g->pos    = nullptr;
+    g->sub    = nullptr;
+    g->output = nullptr;
+    g->taps.clear();
+    g->graph_T_mel = 0;
+    g->graph_taps.clear();
+}
+
+static void yue2_mert_enc_graph_free(Yue2MertEncGraph * g) {
+    yue2_mert_enc_free_graph(g);
+    if (g->sched) {
+        ggml_backend_sched_free(g->sched);
+        g->sched = nullptr;
+    }
+    wctx_free(&g->prep);
+    g->grn_eps       = nullptr;
+    g->weights_token = nullptr;
+    if (g->backend_ref) {
+        backend_release(g->backend, g->cpu_backend);
+        g->backend     = nullptr;
+        g->cpu_backend = nullptr;
+        g->backend_ref = false;
+    }
+}
+
+static bool yue2_mert_enc_prepare(const Yue2MertModel & m, Yue2MertEncGraph * g, std::string * err) {
+    const void * token = m.wctx.buffer;
+    if (g->sched && g->weights_token == token) {
+        return true;
+    }
+    yue2_mert_enc_graph_free(g);
+
+    BackendPair bp = backend_init("YuE2-MERT-enc");
+    g->backend     = bp.backend;
+    g->cpu_backend = bp.cpu_backend;
+    g->backend_ref = true;
+
+    wctx_init(&g->prep, 2);
+    g->grn_eps = ggml_new_tensor_2d(g->prep.ctx, GGML_TYPE_F32, 1, 1);
+    ggml_set_name(g->grn_eps, "mert.enc.grn_eps");
+    auto eps = std::make_unique<float[]>(1);
+    eps[0]   = m.cfg.sub_grn_eps;
+    g->prep.pending.push_back({ g->grn_eps, eps.get(), sizeof(float), 0 });
+    g->prep.staging.push_back(std::move(eps));
+    if (!wctx_alloc(&g->prep, g->backend)) {
+        if (err) {
+            *err = "backend buffer allocation failed for the MERT encoder constants";
+        }
+        yue2_mert_enc_graph_free(g);
+        return false;
+    }
+
+    g->sched         = backend_sched_new(bp, YUE2_MERT_ENC_MAX_NODES * 2);
+    g->weights_token = token;
+    return true;
+}
+
+static bool yue2_mert_enc_ensure_graph(const Yue2MertModel & m, Yue2MertEncGraph * g, int64_t T_mel, bool gelu_tanh,
+                                       bool want_sub, std::string * err) {
+    if (g->gctx && g->graph_T_mel == T_mel && g->graph_gelu_tanh == gelu_tanh && g->graph_want_sub == want_sub &&
+        g->graph_taps == g->tap_blocks) {
+        return true;
+    }
+    yue2_mert_enc_free_graph(g);
+
+    if (!m.blocks_loaded) {
+        if (err) {
+            *err = "the MERT Conformer blocks are not loaded — call yue2_mert_load(want_blocks=true)";
+        }
+        return false;
+    }
+    const int64_t T_sub = yue2_mert_sub_out_len(m.cfg, T_mel);
+    if (T_sub <= 0) {
+        if (err) {
+            *err = "T_mel=" + std::to_string(T_mel) + " is too short for the subsampling stack";
+        }
+        return false;
+    }
+
+    const size_t ctx_bytes = ggml_tensor_overhead() * (YUE2_MERT_ENC_MAX_NODES + 256) +
+                             ggml_graph_overhead_custom(YUE2_MERT_ENC_MAX_NODES, false);
+    g->gbuf = (uint8_t *) malloc(ctx_bytes);
+    if (!g->gbuf) {
+        if (err) {
+            *err = "out of host memory allocating the MERT encoder graph context";
+        }
+        return false;
+    }
+    ggml_init_params ip  = { ctx_bytes, g->gbuf, /*no_alloc*/ true };
+    ggml_context *   ctx = ggml_init(ip);
+    if (!ctx) {
+        free(g->gbuf);
+        g->gbuf = nullptr;
+        if (err) {
+            *err = "ggml_init failed for the MERT encoder graph context";
+        }
+        return false;
+    }
+
+    g->input = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, (int64_t) m.cfg.num_mel_bins, T_mel);
+    ggml_set_name(g->input, "mert_enc_mel");
+    ggml_set_input(g->input);
+
+    g->pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, T_sub);
+    ggml_set_name(g->pos, "mert_enc_pos");
+    ggml_set_input(g->pos);
+
+    ggml_tensor * x = yue2_mert_sub_build(ctx, m, g->grn_eps, g->input);
+    if (want_sub) {
+        g->sub = x;
+        ggml_set_name(g->sub, "mert_enc_sub");
+        ggml_set_output(g->sub);
+    }
+
+    g->taps.assign(g->tap_blocks.size(), nullptr);
+    for (size_t n = 0; n < m.w.blk.size(); n++) {
+        x = yue2_mert_detail::mert_block(ctx, m.cfg, m.w.blk[n], x, g->pos, gelu_tanh);
+        for (size_t ti = 0; ti < g->tap_blocks.size(); ti++) {
+            if (g->tap_blocks[ti] >= 0 && (size_t) g->tap_blocks[ti] == n) {
+                char nm[48];
+                snprintf(nm, sizeof(nm), "mert_enc_block%02d", (int) n);
+                ggml_set_name(x, nm);
+                ggml_set_output(x);
+                g->taps[ti] = x;
+            }
+        }
+    }
+    g->output = x;  // hidden_states[20]: the last block's own return value
+    ggml_set_name(g->output, "mert_enc_hidden");
+    ggml_set_output(g->output);
+
+    g->graph = ggml_new_graph_custom(ctx, YUE2_MERT_ENC_MAX_NODES, false);
+    ggml_build_forward_expand(g->graph, g->output);
+    if (g->sub) {
+        ggml_build_forward_expand(g->graph, g->sub);
+    }
+    for (ggml_tensor * t : g->taps) {
+        if (t) {
+            ggml_build_forward_expand(g->graph, t);
+        }
+    }
+
+    ggml_backend_sched_reset(g->sched);
+    if (!ggml_backend_sched_alloc_graph(g->sched, g->graph)) {
+        ggml_free(ctx);
+        free(g->gbuf);
+        g->gbuf   = nullptr;
+        g->graph  = nullptr;
+        g->output = nullptr;
+        if (err) {
+            *err = "MERT encoder graph allocation failed (out of VRAM?) for T_mel=" + std::to_string(T_mel);
+        }
+        return false;
+    }
+
+    g->gctx            = ctx;
+    g->graph_T_mel     = T_mel;
+    g->graph_gelu_tanh = gelu_tanh;
+    g->graph_want_sub  = want_sub;
+    g->graph_taps      = g->tap_blocks;
+    const size_t compute_bytes = ggml_backend_sched_get_buffer_size(g->sched, g->backend);
+    fprintf(stderr,
+            "[YuE2-MERT] Encoder graph: T_mel=%lld -> %lld frames, %zu blocks, %d nodes, %d splits, compute %.0f MB\n",
+            (long long) T_mel, (long long) T_sub, m.w.blk.size(), ggml_graph_n_nodes(g->graph),
+            ggml_backend_sched_get_n_splits(g->sched), (double) compute_bytes / (1024.0 * 1024.0));
+    return true;
+}
+
+// Run one chunk's mel through the subsampling stack and all 21 Conformer
+// blocks. `mel` is row-major [T_mel, n_mel]; `out` is resized to
+// T_sub * 1024, row-major [T_sub, 1024] — the hidden_20.f32 fixture layout.
+//
+// ONE CHUNK AT A TIME, ALWAYS (trap 5). GRN reduces over the whole time axis
+// of whatever it is handed, so batching two chunks or padding a tail up to
+// 30 s changes the features for every frame of it, not just the padding.
+//
+// Not thread-safe: one cached graph per Yue2MertEncGraph.
+static bool yue2_mert_encode_chunk(const Yue2MertModel & m, Yue2MertEncGraph * g, const float * mel, int64_t T_mel,
+                                   bool gelu_tanh, std::vector<float> * out, int64_t * out_frames,
+                                   std::vector<float> * sub_out, std::vector<std::vector<float>> * taps_out,
+                                   std::string * err) {
+    if (T_mel <= 0) {
+        if (err) {
+            *err = "T_mel must be > 0";
+        }
+        return false;
+    }
+    if (!yue2_mert_enc_prepare(m, g, err)) {
+        return false;
+    }
+    if (!yue2_mert_enc_ensure_graph(m, g, T_mel, gelu_tanh, sub_out != nullptr, err)) {
+        return false;
+    }
+
+    const int64_t T_sub = g->output->ne[1];
+    ggml_backend_tensor_set(g->input, mel, 0, ggml_nbytes(g->input));
+
+    // Positions restart at 0 in every chunk (pin §3.6).
+    std::vector<int32_t> pos((size_t) T_sub);
+    for (int64_t t = 0; t < T_sub; t++) {
+        pos[(size_t) t] = (int32_t) t;
+    }
+    ggml_backend_tensor_set(g->pos, pos.data(), 0, pos.size() * sizeof(int32_t));
+
+    if (ggml_backend_sched_graph_compute(g->sched, g->graph) != GGML_STATUS_SUCCESS) {
+        if (err) {
+            *err = "MERT encoder graph compute failed";
+        }
+        return false;
+    }
+
+    const int64_t C = g->output->ne[0];
+    out->resize((size_t) (C * T_sub));
+    ggml_backend_tensor_get(g->output, out->data(), 0, out->size() * sizeof(float));
+    if (sub_out && g->sub) {
+        sub_out->resize((size_t) (g->sub->ne[0] * g->sub->ne[1]));
+        ggml_backend_tensor_get(g->sub, sub_out->data(), 0, sub_out->size() * sizeof(float));
+    }
+    if (taps_out) {
+        taps_out->assign(g->taps.size(), {});
+        for (size_t i = 0; i < g->taps.size(); i++) {
+            if (!g->taps[i]) {
+                continue;
+            }
+            (*taps_out)[i].resize((size_t) (g->taps[i]->ne[0] * g->taps[i]->ne[1]));
+            ggml_backend_tensor_get(g->taps[i], (*taps_out)[i].data(), 0, (*taps_out)[i].size() * sizeof(float));
+        }
+    }
+    if (out_frames) {
+        *out_frames = T_sub;
+    }
+    return true;
+}
+
+// ── Whole-track encode (pin §3.7 + ar_prep.py's instance norm) ──────────────
+
+struct Yue2MertEncodeOptions {
+    // MERT's own GELU flavour. false = exact erf, which is what the source
+    // says and what the block fixtures confirm. See "GELU: DETERMINED, NOT
+    // ASSUMED" above before flipping this.
+    bool gelu_tanh = false;
+
+    // The reference's production path rounds the interpolated features to
+    // float16 before the instance norm (interpolate(...).half() in
+    // prep_real.py). It is part of the reference chain, not an optimisation,
+    // and the head was trained on features that went through it — but the FP32
+    // oracle (docs/plans/yue2/13-tokenizer-fp32-fixtures.md) deliberately drops
+    // it, so its feat25.f32/featnorm.f32 are pure fp32 while stages-30s's
+    // 05_head_input.f32 has it ON. Default off; the parity mode sets it per
+    // fixture set. Measured cost either way: 0.03-0.13% of frames change
+    // argmax (13-tokenizer-fp32-fixtures.md, codes_f16store.i32).
+    bool fp16_feature_store = false;
+
+    // Block indices whose output to also return, for bisection. Empty in
+    // production — every tap is a live tensor the allocator cannot reuse plus
+    // an extra device-to-host copy per chunk.
+    std::vector<int> tap_blocks;
+
+    bool want_hidden_raw = false;  // keep the pre-interpolation [T_raw, 1024]
+    bool want_feat25     = false;  // keep the post-interpolation, pre-norm [T25, 1024]
+    bool want_subsample  = false;  // keep the concatenated subsampling output
+};
+
+struct Yue2MertEncodeResult {
+    std::vector<float> feat;  // [T25, 1024] instance-normed — the head's input
+    int64_t            T25 = 0;
+
+    std::vector<float>              hidden_raw;  // [T_raw, 1024] if want_hidden_raw
+    int64_t                         T_raw = 0;
+    std::vector<float>              feat25;     // [T25, 1024]   if want_feat25
+    std::vector<float>              subsample;  // [T_raw, 1024] if want_subsample
+    std::vector<std::vector<float>> taps;       // parallel to Yue2MertEncodeOptions::tap_blocks
+
+    std::vector<Yue2MertChunk> chunks;
+    double                     mel_ms   = 0.0;
+    double                     graph_ms = 0.0;
+    double                     post_ms  = 0.0;
+    double                     total_ms = 0.0;
+};
+
+namespace yue2_mert_detail {
+
+// Python's round(): half to EVEN, not half away from zero. T25 is
+// round(n_samples / sample_rate * frame_rate), and a .5 lands on it whenever
+// the track is an exact odd multiple of 20 ms, which is not rare.
+static inline int64_t round_half_even(double v) {
+    const double f = std::floor(v);
+    const double d = v - f;
+    int64_t      r = (int64_t) f;
+    if (d > 0.5) {
+        r += 1;
+    } else if (d == 0.5) {
+        r += (r & 1) ? 1 : 0;  // ties go to the even neighbour
+    }
+    return r;
+}
+
+// torch's F.interpolate(mode="linear", align_corners=False) along time, on a
+// [1, C, T_src] tensor. `src`/`dst` are row-major [T, C] here, which is the
+// same bytes on both sides of the reference's .T dance.
+//
+// The mapping is torch's area_pixel_compute_source_index with align_corners
+// false: real = scale*(i + 0.5) - 0.5, CLAMPED AT ZERO (not reflected), then a
+// two-tap lerp with the right neighbour clamped to T_src-1. This is not a
+// no-op to skip: pin §3.7 measures 2945 raw frames becoming 2946, so it runs
+// on every track that is not an exact multiple of 30 s.
+static void interp_linear_time(const float * src, int64_t T_src, int64_t C, int64_t T_dst, std::vector<float> * dst) {
+    dst->assign((size_t) (T_dst * C), 0.0f);
+    if (T_src <= 0 || T_dst <= 0) {
+        return;
+    }
+    const double scale = (double) T_src / (double) T_dst;
+    for (int64_t i = 0; i < T_dst; i++) {
+        double real = scale * ((double) i + 0.5) - 0.5;
+        if (real < 0.0) {
+            real = 0.0;
+        }
+        int64_t      i0  = (int64_t) std::floor(real);
+        const double lam = real - (double) i0;
+        if (i0 > T_src - 1) {
+            i0 = T_src - 1;
+        }
+        const int64_t i1 = std::min<int64_t>(i0 + 1, T_src - 1);
+        const float * a  = src + i0 * C;
+        const float * b  = src + i1 * C;
+        float *       o  = dst->data() + i * C;
+        const float   w1 = (float) lam;
+        const float   w0 = 1.0f - w1;
+        for (int64_t k = 0; k < C; k++) {
+            o[k] = w0 * a[k] + w1 * b[k];
+        }
+    }
+}
+
+}  // namespace yue2_mert_detail
+
+// The full audio -> head-input chain (pin §3.7 plus ar_prep.py's instance
+// norm):
+//
+//   chunk at 30 s, dropping a tail under 1 s
+//   per chunk: mel (CPU, fp32) -> subsampling -> 21 Conformer blocks
+//   concatenate hidden_states[20] over chunks, in chunk order
+//   interpolate along time to T25 = round(S / sample_rate * frame_rate)
+//   [optional fp16 round trip]
+//   per-channel instance norm over the WHOLE track:
+//       (x - mean_over_time) / (std_over_time + 1e-5)
+//
+// `pcm` is mono at the model's sample rate (24 kHz), `n_samples` long.
+// `out->feat` is resized to T25 * 1024, row-major [T25, 1024] — exactly what
+// yue2_tok_head_predict() reads, and exactly the featnorm.f32 fixture layout.
+//
+// THREE THINGS THAT ARE NOT INTERCHANGEABLE WITH SOMETHING SIMPLER:
+//
+//  * Full chunks and short tails go through the same per-chunk path, but never
+//    the same forward. GRN and the convolutions would otherwise see another
+//    chunk's frames (trap 5).
+//  * The raw concatenation is generally one or two frames SHORT of T25, and
+//    the interpolation closes that gap at sub-frame resolution. Padding or
+//    truncating instead shifts the whole time axis.
+//  * The instance norm is a whole-track statistic. It cannot be streamed
+//    without either two passes or accepting a normalisation the head was not
+//    trained for. This function does the two passes.
+static bool yue2_mert_encode(const Yue2MertModel & m, Yue2MertEncGraph * g, const float * pcm, int64_t n_samples,
+                             const Yue2MertEncodeOptions & opt, Yue2MertEncodeResult * out, std::string * err) {
+    using namespace yue2_mert_detail;
+    const auto t_start = std::chrono::steady_clock::now();
+
+    if (!m.blocks_loaded) {
+        if (err) {
+            *err = "the MERT Conformer blocks are not loaded — call yue2_mert_load(want_blocks=true)";
+        }
+        return false;
+    }
+    const Yue2MertConfig & c = m.cfg;
+    const int64_t          C = (int64_t) c.embedding_length;
+
+    *out        = Yue2MertEncodeResult{};
+    out->chunks = yue2_mert_chunk_plan(c, n_samples);
+    if (out->chunks.empty()) {
+        if (err) {
+            *err = "audio is " + std::to_string(n_samples) +
+                   " samples; the reference drops every chunk under one second, leaving nothing to encode";
+        }
+        return false;
+    }
+
+    g->tap_blocks = opt.tap_blocks;
+    out->taps.assign(opt.tap_blocks.size(), {});
+
+    std::vector<float>              hidden;  // [T_raw, 1024], chunks concatenated in order
+    std::vector<float>              sub_all;
+    std::vector<float>              mel, chunk_out, chunk_sub;
+    std::vector<std::vector<float>> chunk_taps;
+    int64_t                         T_raw = 0;
+
+    for (const Yue2MertChunk & ch : out->chunks) {
+        int64_t    T_mel = 0;
+        const auto t0    = std::chrono::steady_clock::now();
+        if (!yue2_mert_mel(m, pcm + ch.start, ch.length, &mel, &T_mel, err)) {
+            return false;
+        }
+        const auto t1 = std::chrono::steady_clock::now();
+        out->mel_ms += std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+        int64_t T_sub = 0;
+        if (!yue2_mert_encode_chunk(m, g, mel.data(), T_mel, opt.gelu_tanh, &chunk_out, &T_sub,
+                                    opt.want_subsample ? &chunk_sub : nullptr,
+                                    opt.tap_blocks.empty() ? nullptr : &chunk_taps, err)) {
+            return false;
+        }
+        out->graph_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
+
+        hidden.insert(hidden.end(), chunk_out.begin(), chunk_out.end());
+        if (opt.want_subsample) {
+            sub_all.insert(sub_all.end(), chunk_sub.begin(), chunk_sub.end());
+        }
+        for (size_t i = 0; i < out->taps.size() && i < chunk_taps.size(); i++) {
+            out->taps[i].insert(out->taps[i].end(), chunk_taps[i].begin(), chunk_taps[i].end());
+        }
+        T_raw += T_sub;
+    }
+
+    const auto t_post = std::chrono::steady_clock::now();
+    out->T_raw        = T_raw;
+    if (opt.want_subsample) {
+        out->subsample = std::move(sub_all);
+    }
+
+    // T25 comes from the FULL input length, including any sub-second tail the
+    // chunk planner dropped — prep_real.py computes it from len(m24), not from
+    // the frames it actually encoded.
+    const int64_t T25 = round_half_even((double) n_samples / (double) c.sample_rate * (double) c.frame_rate);
+    if (T25 <= 0) {
+        if (err) {
+            *err = "T25 computed as " + std::to_string(T25);
+        }
+        return false;
+    }
+    out->T25 = T25;
+
+    std::vector<float> feat25;
+    interp_linear_time(hidden.data(), T_raw, C, T25, &feat25);
+
+    if (opt.fp16_feature_store) {
+        for (float & v : feat25) {
+            v = ggml_fp16_to_fp32(ggml_fp32_to_fp16(v));
+        }
+    }
+
+    // Per-channel instance norm over the whole track. Two passes, in double:
+    // the reference is float32 numpy (pairwise-summed), so this is strictly
+    // more accurate, not differently accurate. Note `std + 1e-5`, NOT
+    // clamp_min — the mel frontend uses clamp_min and this one does not, and
+    // they are one keystroke apart.
+    out->feat.assign((size_t) (T25 * C), 0.0f);
+    std::vector<double> mean((size_t) C, 0.0), var((size_t) C, 0.0);
+    for (int64_t t = 0; t < T25; t++) {
+        const float * row = feat25.data() + t * C;
+        for (int64_t k = 0; k < C; k++) {
+            mean[(size_t) k] += (double) row[k];
+        }
+    }
+    for (int64_t k = 0; k < C; k++) {
+        mean[(size_t) k] /= (double) T25;
+    }
+    for (int64_t t = 0; t < T25; t++) {
+        const float * row = feat25.data() + t * C;
+        for (int64_t k = 0; k < C; k++) {
+            const double d = (double) row[k] - mean[(size_t) k];
+            var[(size_t) k] += d * d;
+        }
+    }
+    std::vector<double> inv((size_t) C);
+    for (int64_t k = 0; k < C; k++) {
+        const double sd = std::sqrt(var[(size_t) k] / (double) T25);  // population std, ddof=0
+        inv[(size_t) k] = 1.0 / (sd + 1e-5);
+    }
+    for (int64_t t = 0; t < T25; t++) {
+        const float * row = feat25.data() + t * C;
+        float *       dst = out->feat.data() + t * C;
+        for (int64_t k = 0; k < C; k++) {
+            dst[k] = (float) (((double) row[k] - mean[(size_t) k]) * inv[(size_t) k]);
+        }
+    }
+
+    if (opt.want_hidden_raw) {
+        out->hidden_raw = std::move(hidden);
+    }
+    if (opt.want_feat25) {
+        out->feat25 = std::move(feat25);
+    }
+
+    out->post_ms  = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_post).count();
+    out->total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_start).count();
     return true;
 }

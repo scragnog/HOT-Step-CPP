@@ -29,6 +29,11 @@
 // the manifest the trainer reads. Pulls yue2/yue2-vae-encode.h and the repo's
 // own audio decode/resample path (audio-io.h) in transitively.
 #include "train/yue2-preprocess-run.h"
+// YuE2 real-audio semantic tokenizer (docs/plans/yue2/12-tokenizer-oracle-pin.md):
+// fills the codec_ids slot yue2-preprocess reserves. Pulls yue2/yue2-mert.h and
+// yue2/yue2-tok-head.h in transitively; must follow yue2-preprocess-run.h,
+// whose decode helpers it reuses rather than re-implementing.
+#include "train/yue2-tokenize-run.h"
 #include "model-registry.h"
 #include "train/dit-train-run.h"   // pulls in every dit-*.h (DiT LoRA trainer)
 #include "train/lm-train-run.h"    // pulls in every lm-*.h (LM LoRA trainer)
@@ -369,6 +374,24 @@ static void print_usage(void) {
             "                clip-length independent, so nothing is re-encoded.\n"
             "                TF32 is forced off (the encoder is 50x outside its parity gate\n"
             "                on a TF32 cuBLAS handle) and there is no escape hatch.\n"
+            "  yue2-tokenize  Fill the codec_ids slot yue2-preprocess reserves: run the YuE2\n"
+            "                real-audio semantic tokenizer (MERT-v2-FullSong block 20 + the\n"
+            "                8-layer head) over every source the manifest lists, write the\n"
+            "                codes beside the latents, and add each clip its own sliced\n"
+            "                codec_ids. The NAR trainer then conditions exactly as inference\n"
+            "                does instead of training text-only.\n"
+            "                --manifest <yue2_preprocess.json>  rewritten in place\n"
+            "                --tok <yue2-tok-*.gguf>  (or --models <dir> to discover one)\n"
+            "                [--only <substr>] [--limit <n>]  case-insensitive name filter.\n"
+            "                A partial run leaves the rest of the clips text-only, which the\n"
+            "                trainer accepts and says so.\n"
+            "                [--decode auto|ffmpeg] [--ffmpeg <path>]  the same two routes\n"
+            "                yue2-preprocess uses, at 48 kHz, so codes and latents come from\n"
+            "                identical decoded samples.\n"
+            "                [--force]  re-encode sources whose codes are already cached\n"
+            "                Codes are RAW, in [0, 32768). The + codec_offset (151853) is\n"
+            "                added once, at conditioning time, by the trainer.\n"
+            "                TF32 is forced off, same rule as yue2-preprocess.\n"
             "  yue2-nar-train  YuE2 NAR-half LoRA training (rectified flow; AR stays frozen).\n"
             "                --lm <yue2-lm-<type>.gguf> (or --models <dir>)\n"
             "                --manifest <yue2_preprocess.json>  the clip set to train on\n"
@@ -4408,6 +4431,59 @@ static int cmd_yue2_preprocess(int argc, char ** argv) {
     return yue2_preprocess_run(a);
 }
 
+// ─── yue2-tokenize ──────────────────────────────────────────────────────────
+//
+// The second half of the yue2-preprocess data path: run Mothersuperior's
+// real-audio semantic tokenizer over every source the manifest lists and fill
+// the `codec_ids` slot yue2-preprocess reserved and left empty. With it, the
+// NAR trainer conditions on ground-truth codes exactly as inference does;
+// without it, it trains in the upstream text-only regime.
+//
+// All the detail — the per-clip slicing, the one-frame alignment resize, the
+// RAW-codes-not-token-ids rule, and why the source-level array is a cache and
+// never what a clip names — lives in train/yue2-tokenize-run.h's header.
+//
+// TF32 IS TURNED OFF HERE, AS THE FIRST STATEMENT, for the same load-bearing
+// reason cmd_yue2_preprocess does it: the CUDA driver reads
+// NVIDIA_TF32_OVERRIDE when the context is CREATED. The tokenizer's parity run
+// (yue2-probe --mert-block-parity, 7/7 at 4.0e-3) was gated with it off.
+// yue2_tokenize_run() re-checks and REFUSES otherwise.
+static int cmd_yue2_tokenize(int argc, char ** argv) {
+#ifdef _WIN32
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+#else
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+#endif
+    Yue2TokenizeArgs a;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--manifest")) a.manifest   = next("--manifest");
+        else if (!strcmp(argv[i], "--tok"))      a.tok_path   = next("--tok");
+        else if (!strcmp(argv[i], "--models"))   a.models_dir = next("--models");
+        else if (!strcmp(argv[i], "--only"))     a.only       = next("--only");
+        else if (!strcmp(argv[i], "--ffmpeg"))   a.ffmpeg     = next("--ffmpeg");
+        else if (!strcmp(argv[i], "--decode"))   a.decode     = next("--decode");
+        else if (!strcmp(argv[i], "--limit"))    a.limit      = atoi(next("--limit"));
+        else if (!strcmp(argv[i], "--force"))    a.force      = true;
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (a.manifest.empty()) {
+        fprintf(stderr, "ace-train yue2-tokenize: --manifest <yue2_preprocess.json> is required\n");
+        return 2;
+    }
+    if (a.tok_path.empty() && a.models_dir.empty()) {
+        fprintf(stderr, "ace-train yue2-tokenize: one of --tok <yue2-tok-*.gguf> or --models <dir> is required\n");
+        return 2;
+    }
+    // MANDATORY: ggml_time_ms() divides by an uninitialised frequency otherwise.
+    ggml_time_init();
+    return yue2_tokenize_run(a);
+}
+
 static int cmd_train_lm(int argc, char ** argv) {
     LmTrainArgs      a;
     LmResumeExplicit saw;   // which identity flags were typed (resume adopt-or-refuse)
@@ -5823,6 +5899,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "yue2-preprocess")) {
         return cmd_yue2_preprocess(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-tokenize")) {
+        return cmd_yue2_tokenize(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-nar-train")) {
         return cmd_yue2_nar_train(argc - 1, argv + 1);

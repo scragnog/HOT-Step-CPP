@@ -15,6 +15,8 @@
 //   yue2-probe --vae-parity <fixture-root-dir> --models <dir> [--variant standard|legacy]
 //   yue2-probe --encode-parity <fixture-dir> --models <dir> [--vae standard|legacy]
 //   yue2-probe --tok-head-parity <stages-30s-dir> --models <dir> [--tok-gguf <file>] [--tf32]
+//   yue2-probe --mert-front-parity <stages-30s-dir> --models <dir> [--tok-gguf <file>] [--tf32]
+//   yue2-probe --mert-block-parity <fixture-dir> --models <dir> [--tok-gguf <file>] [--gelu erf|tanh|both]
 //
 // --info: header-only probe (no weights loaded) — prints config, tensor
 //         count/bytes per file, and any missing/unexpected tensor vs what
@@ -110,6 +112,10 @@ static void usage() {
             "       (--tf32 leaves ggml's TF32 tensor cores ON, for measuring what they cost)\n"
             "       yue2-probe --mert-front-parity <stages-30s-dir> --models <dir> [--tok-gguf <file>] [--tf32]\n"
             "       (MERT's mel frontend + ConvNext subsampling + RoPE tables vs 01_mel/02_subsampled/03_rope_*)\n"
+            "       yue2-probe --mert-block-parity <fixture-dir> --models <dir> [--tok-gguf <file>] "
+            "[--gelu erf|tanh|both] [--tf32]\n"
+            "       (the whole encoder: 21 Conformer blocks, interpolation to T25 and the instance norm,\n"
+            "        diffed per block against stages-30s/04_block*_out or a whole-track hidden_*/featnorm set)\n"
             "       yue2-probe --generate --cot off --style <s> --lyrics <s> --max-tokens <n> --seed <n> "
             "--models <dir>\n");
 }
@@ -3312,6 +3318,422 @@ static int run_mert_front_parity(const std::string & models_dir, const std::stri
     return (total > 0 && passed == total) ? 0 : 1;
 }
 
+// ── --mert-block-parity: MERT's 21 Conformer blocks, end to end ─────────────
+//
+// Picks up where --mert-front-parity stops. Runs the whole encoder —
+// mel frontend, ConvNext subsampling, all 21 Conformer blocks, the
+// interpolation to T25 and the per-track instance norm — from the fixture's
+// own mono 24 kHz audio, and diffs EVERY checked stage, not just the last one.
+//
+// Diffing only hidden_states[20] would be a trap: one wrong block leaves a
+// plausible-looking tensor that still has the right shape and roughly the
+// right scale, and the error only becomes unmistakable after the head. Blocks
+// 0, 1, 10, 19 and 20 localise it to a five-block window on the first run.
+//
+// ── TWO FIXTURE LAYOUTS, AUTODETECTED ──
+//
+// stages-30s (docs/plans/yue2/12-tokenizer-oracle-pin.md §5) — one 30 s clip:
+//   00_mono24.f32 [720000] -> 04_block{00,01,10,19,20}_out.f32 [750,1024]
+//   -> 05_head_input.f32 [750,1024]   (fp16 feature store ON — see below)
+//
+// real-30s / yue2-gen (13-tokenizer-fp32-fixtures.md) — whole tracks:
+//   audio24.f32 -> subsample.f32 -> hidden_{00,10,20}.f32 -> feat25.f32
+//   -> featnorm.f32 -> codes.i32 (+ truth.i32 on yue2-gen)
+//
+// The second set is worth pointing this mode at even though it carries fewer
+// block taps: `yue2-gen` is 117.8 s, so it exercises the 30 s chunk grouping,
+// the odd-length tail, the interpolation from 2945 raw frames to 2946, and
+// whole-track instance-norm statistics — none of which a single even 30 s clip
+// can reach. It also carries `truth.i32`, the tokens YuE2 itself emitted, which
+// is the only gate in this file that proves the chain rather than a stage of it.
+//
+// ── THE FP16 FEATURE STORE DIFFERS BETWEEN THE TWO SETS ──
+//
+// prep_real.py stores the interpolated features as float16 before the instance
+// norm. stages-30s kept that (its 05_head_input.f32 is "after fp16 store +
+// instance norm"); the FP32 oracle deliberately dropped it, so real-30s and
+// yue2-gen are pure fp32 and ship codes_f16store.i32 as a separate diagnostic.
+// This mode sets the flag per layout. Getting it backwards costs ~0.1% of
+// frames, which is small enough to be mistaken for tolerance.
+//
+// ── THE BARS, AND WHY THEY DIFFER BY LAYOUT ──
+//
+// Same story as --mert-front-parity, one layer deeper. stage_fixtures.py sets
+// no TF32 flags, and torch's default `cudnn.allow_tf32 = True` put every
+// Conv1d in the chain on TF32 — the 14 in the subsampling stack AND the three
+// per Conformer block (pointwise k=1, depthwise k=31, pointwise k=1). So
+// stages-30s carries 21 blocks' worth of accumulated cuDNN rounding on top of
+// the 5.6e-4 the subsampling stage already showed, and the residual grows with
+// depth for reasons that are the reference's, not ours.
+//
+// tok_oracle_fp32.py (the real-30s / yue2-gen runner) disables TF32
+// explicitly, so those fixtures are true fp32 and get the tight bar. When the
+// two layouts disagree about this port, believe the fp32 one.
+// Every gate below sits 2.5x to 4x above what this port actually measures, so
+// a real defect trips it while the shipped fixtures pass out of the box.
+// Measured, F32 GGUF, TF32 off on our side:
+//
+//                    stages-30s (TF32 fixture)   real-30s      yue2-gen
+//     subsampled           5.593e-04             1.283e-06     3.887e-06
+//     block00              8.150e-04             1.718e-06     5.395e-06
+//     block01              7.747e-04                 -             -
+//     block10              1.675e-03             2.259e-06     7.044e-06
+//     block19              8.569e-04                 -             -
+//     block20              8.937e-04             3.261e-06     5.555e-06
+//     feat25                   -                 3.261e-06     3.435e-05
+//     head_input           1.402e-03             4.743e-06     5.137e-05
+//
+// Two things to read out of that table. The stages-30s column is two to three
+// orders of magnitude worse than the other two and does NOT improve with a
+// better port -- it is the fixture's own cuDNN TF32, exactly as
+// --mert-front-parity documents for the subsampling stage, carried through 21
+// blocks' worth of Conv1d. And feat25/head_input are ~10x worse than block20
+// on yue2-gen but identical to it on real-30s, because real-30s is an exact
+// multiple of 30 s: 2945 -> 2946 is a real resample, 750 -> 750 is a copy.
+//
+// With the F16 GGUF, yue2-gen's head_input lands at 8.289e-04 -- pure storage
+// rounding of the matmul weights, and still 2944/2946 codes and the same
+// 16.12% truth rate.
+static constexpr double YUE2_MERT_BLK_GATE_TF32 = 4e-3;    // stages-30s: cuDNN TF32 in the fixture
+static constexpr double YUE2_MERT_BLK_GATE_FP32 = 2e-4;    // real-30s / yue2-gen: true fp32 fixture
+static constexpr double YUE2_MERT_BLK_GATE_F16W = 2.5e-3;  // ... with an F16 GGUF's storage rounding on top
+// Whole-track code agreement. The head's own fp32-vs-bf16 disagreement is
+// 2.34% (pin §4.2) and this port is fp32 on both sides, so the bar is high —
+// but never 100%: argmax over a 32768-wide row flips on the last bit.
+static constexpr double YUE2_MERT_CODE_AGREE_GATE = 0.97;
+// truth.i32 is the chain-integrity gate, not a checksum.
+// 13-tokenizer-fp32-fixtures.md §"Suggested port gate": demand >= 15%.
+static constexpr double YUE2_MERT_TRUTH_GATE = 0.15;
+
+struct Yue2MertTapSpec {
+    int         block;  // -1 = the subsampling output rather than a block
+    const char * file;
+    const char * label;
+};
+
+// One GELU flavour's run over a fixture directory. Kept as a struct so the
+// mode can run erf and tanh back to back and print them side by side rather
+// than asserting which one MERT uses.
+struct Yue2MertBlockRun {
+    bool                      ok = false;
+    std::vector<Yue2MertDiff> tap_diff;   // parallel to the tap spec list
+    Yue2MertDiff              feat25_diff;
+    Yue2MertDiff              featnorm_diff;
+    bool                      have_feat25   = false;
+    bool                      have_featnorm = false;  // false ALSO means "shape mismatch", never "passed"
+    int64_t                    T_raw = 0, T25 = 0;
+    std::vector<Yue2MertChunk> chunks;
+    size_t                     n_tail = 0;
+    double                     mel_ms = 0, graph_ms = 0, post_ms = 0, total_ms = 0;
+    std::vector<float>        feat;  // the head input, kept for the code gate
+};
+
+static bool yue2_mert_block_run(const Yue2MertModel & m, Yue2MertEncGraph * g, const std::vector<float> & pcm,
+                                const std::vector<Yue2MertTapSpec> & taps, bool fp16_store, bool gelu_tanh,
+                                const std::vector<std::vector<float>> & want_taps,
+                                const std::vector<float> & want_feat25, const std::vector<float> & want_featnorm,
+                                Yue2MertBlockRun * run) {
+    Yue2MertEncodeOptions opt;
+    opt.gelu_tanh          = gelu_tanh;
+    opt.fp16_feature_store = fp16_store;
+    opt.want_feat25        = !want_feat25.empty();
+    opt.want_subsample     = false;
+    for (const auto & t : taps) {
+        if (t.block < 0) {
+            opt.want_subsample = true;
+        } else {
+            opt.tap_blocks.push_back(t.block);
+        }
+    }
+
+    Yue2MertEncodeResult res;
+    std::string          err;
+    if (!yue2_mert_encode(m, g, pcm.data(), (int64_t) pcm.size(), opt, &res, &err)) {
+        printf("FAIL %-22s %s\n", "encode", err.c_str());
+        return false;
+    }
+
+    run->T_raw  = res.T_raw;
+    run->T25    = res.T25;
+    run->chunks = res.chunks;
+    run->n_tail = 0;
+    for (const auto & ch : res.chunks) {
+        run->n_tail += ch.is_tail ? 1 : 0;
+    }
+    run->mel_ms   = res.mel_ms;
+    run->graph_ms = res.graph_ms;
+    run->post_ms  = res.post_ms;
+    run->total_ms = res.total_ms;
+    run->feat     = res.feat;
+
+    run->tap_diff.assign(taps.size(), Yue2MertDiff{});
+    size_t tap_i = 0;
+    for (size_t i = 0; i < taps.size(); i++) {
+        const std::vector<float> & got = (taps[i].block < 0) ? res.subsample : res.taps[tap_i];
+        if (taps[i].block >= 0) {
+            tap_i++;
+        }
+        if (i < want_taps.size() && !want_taps[i].empty() && got.size() == want_taps[i].size()) {
+            run->tap_diff[i] = yue2_mert_diff(got, want_taps[i]);
+        } else if (i < want_taps.size() && !want_taps[i].empty()) {
+            run->tap_diff[i].rel_l2  = -1.0;  // shape mismatch marker
+            run->tap_diff[i].max_abs = (double) got.size();
+        }
+    }
+    if (!want_feat25.empty() && res.feat25.size() == want_feat25.size()) {
+        run->feat25_diff = yue2_mert_diff(res.feat25, want_feat25);
+        run->have_feat25 = true;
+    }
+    if (!want_featnorm.empty() && res.feat.size() == want_featnorm.size()) {
+        run->featnorm_diff  = yue2_mert_diff(res.feat, want_featnorm);
+        run->have_featnorm  = true;
+    } else if (!want_featnorm.empty()) {
+        printf("FAIL %-22s port produced %zu floats, fixture has %zu (shape mismatch, not a numeric miss)\n",
+               "head_input", res.feat.size(), want_featnorm.size());
+    }
+    run->ok = true;
+    return true;
+}
+
+static int run_mert_block_parity(const std::string & models_dir, const std::string & fixture_dir,
+                                 const std::string & gguf_override, const std::string & gelu_mode) {
+    std::string gguf_path = gguf_override;
+    if (gguf_path.empty() && !yue2_tok_head_find(models_dir, &gguf_path)) {
+        fprintf(stderr, "FATAL: no yue2-tok-*.gguf under %s (or %s/yue2). Run engine/tools/convert-yue2-tok.py.\n",
+                models_dir.c_str(), models_dir.c_str());
+        return 1;
+    }
+
+    // Layout autodetect, by the one file every layout must have.
+    std::vector<float> pcm;
+    bool               stages = true;
+    if (yue2_read_f32_bin(fixture_dir + "/00_mono24.f32", &pcm)) {
+        stages = true;
+    } else if (yue2_read_f32_bin(fixture_dir + "/audio24.f32", &pcm)) {
+        stages = false;
+    } else {
+        fprintf(stderr, "FATAL: neither %s/00_mono24.f32 nor %s/audio24.f32 is readable\n", fixture_dir.c_str(),
+                fixture_dir.c_str());
+        return 1;
+    }
+
+    std::vector<Yue2MertTapSpec> taps;
+    if (stages) {
+        taps = { { -1, "02_subsampled.f32", "subsampled" },  { 0, "04_block00_out.f32", "block00" },
+                 { 1, "04_block01_out.f32", "block01" },     { 10, "04_block10_out.f32", "block10" },
+                 { 19, "04_block19_out.f32", "block19" },    { 20, "04_block20_out.f32", "block20" } };
+    } else {
+        taps = { { -1, "subsample.f32", "subsampled" },
+                 { 0, "hidden_00.f32", "block00" },
+                 { 10, "hidden_10.f32", "block10" },
+                 { 20, "hidden_20.f32", "block20" } };
+    }
+    const char * featnorm_file = stages ? "05_head_input.f32" : "featnorm.f32";
+    const bool   fp16_store    = stages;  // stages-30s kept prep_real's .half(); the fp32 oracle dropped it
+
+    Yue2MertModel m;
+    std::string   err;
+    if (!yue2_mert_load(&m, gguf_path, /*want_blocks=*/true, &err)) {
+        fprintf(stderr, "FATAL: MERT load failed: %s\n", err.c_str());
+        return 1;
+    }
+
+    const int64_t DIM      = (int64_t) m.cfg.embedding_length;
+    const bool    f32w     = yue2_mert_weights_are_f32(m);
+    const double  gate     = stages ? YUE2_MERT_BLK_GATE_TF32 : (f32w ? YUE2_MERT_BLK_GATE_FP32 : YUE2_MERT_BLK_GATE_F16W);
+
+    printf("=== MERT block parity: %s ===\n", fixture_dir.c_str());
+    printf("gguf: %s (%.1f MB, matmul weights stored %s), blocks=%zu\n", yue2_basename(gguf_path).c_str(),
+           (double) m.vram / (1024.0 * 1024.0), f32w ? "F32" : "F16", m.w.blk.size());
+    printf("layout: %s | audio %zu samples (%.2f s) | fp16 feature store %s | TF32 %s\n",
+           stages ? "stages-30s (cuDNN TF32 in the fixture)" : "fp32 whole-track (TF32 off in the fixture)",
+           pcm.size(), (double) pcm.size() / (double) m.cfg.sample_rate, fp16_store ? "ON" : "OFF",
+           yue2_tok_tf32_disabled() ? "OFF" : "ON (ggml default)");
+    printf("gate: rel_l2 <= %.1e per stage\n", gate);
+
+    // Load every fixture we are going to diff against.
+    std::vector<std::vector<float>> want_taps(taps.size());
+    for (size_t i = 0; i < taps.size(); i++) {
+        if (!yue2_read_f32_bin(fixture_dir + "/" + taps[i].file, &want_taps[i])) {
+            printf("SKIP %-22s %s not present\n", taps[i].label, taps[i].file);
+        }
+    }
+    std::vector<float> want_feat25, want_featnorm;
+    if (!stages) {
+        yue2_read_f32_bin(fixture_dir + "/feat25.f32", &want_feat25);
+    }
+    const bool have_featnorm = yue2_read_f32_bin(fixture_dir + "/" + featnorm_file, &want_featnorm);
+
+    Yue2MertEncGraph g;
+    Yue2MertBlockRun erf_run, tanh_run;
+    const bool       want_erf  = (gelu_mode != "tanh");
+    const bool       want_tanh = (gelu_mode == "tanh" || gelu_mode == "both");
+
+    if (want_erf &&
+        !yue2_mert_block_run(m, &g, pcm, taps, fp16_store, /*gelu_tanh=*/false, want_taps, want_feat25, want_featnorm,
+                             &erf_run)) {
+        yue2_mert_enc_graph_free(&g);
+        yue2_mert_free(&m);
+        return 1;
+    }
+    if (want_tanh &&
+        !yue2_mert_block_run(m, &g, pcm, taps, fp16_store, /*gelu_tanh=*/true, want_taps, want_feat25, want_featnorm,
+                             &tanh_run)) {
+        yue2_mert_enc_graph_free(&g);
+        yue2_mert_free(&m);
+        return 1;
+    }
+
+    const Yue2MertBlockRun & main_run = want_erf ? erf_run : tanh_run;
+    printf("chunks: %zu (%zu full + %zu short tail, each run alone) | T_raw=%lld -> T25=%lld\n",
+           main_run.chunks.size(), main_run.chunks.size() - main_run.n_tail, main_run.n_tail,
+           (long long) main_run.T_raw, (long long) main_run.T25);
+    printf("time: mel %.0f ms (CPU) + graph %.0f ms (GPU) + post %.0f ms = %.0f ms, %.0fx realtime\n",
+           main_run.mel_ms, main_run.graph_ms, main_run.post_ms, main_run.total_ms,
+           (double) pcm.size() / (double) m.cfg.sample_rate / (main_run.total_ms / 1000.0));
+
+    int total = 0, passed = 0;
+
+    // ── per-stage diffs, in chain order ──
+    for (size_t i = 0; i < taps.size(); i++) {
+        if (want_taps[i].empty()) {
+            continue;
+        }
+        const int64_t rows = (int64_t) want_taps[i].size() / DIM;
+        total++;
+        const Yue2MertDiff & d = main_run.tap_diff[i];
+        if (d.rel_l2 < 0.0) {
+            printf("FAIL %-22s port produced %lld floats, fixture has %zu (shape mismatch, not a numeric miss)\n",
+                   taps[i].label, (long long) d.max_abs, want_taps[i].size());
+            continue;
+        }
+        const bool ok = d.rel_l2 <= gate;
+        passed += ok ? 1 : 0;
+        if (want_erf && want_tanh) {
+            printf("%s %-22s rel_l2=%.3e max_abs=%.3e  (%lld x %lld, gate %.1e)   [tanh GELU: %.3e]\n",
+                   ok ? "PASS" : "FAIL", taps[i].label, d.rel_l2, d.max_abs, (long long) rows, (long long) DIM, gate,
+                   tanh_run.tap_diff[i].rel_l2);
+        } else {
+            printf("%s %-22s rel_l2=%.3e max_abs=%.3e  (%lld x %lld, gate %.1e)\n", ok ? "PASS" : "FAIL",
+                   taps[i].label, d.rel_l2, d.max_abs, (long long) rows, (long long) DIM, gate);
+        }
+    }
+
+    if (!want_feat25.empty() && main_run.have_feat25) {
+        total++;
+        const bool ok = main_run.feat25_diff.rel_l2 <= gate;
+        passed += ok ? 1 : 0;
+        printf("%s %-22s rel_l2=%.3e max_abs=%.3e  (%lld x %lld, gate %.1e)\n", ok ? "PASS" : "FAIL", "feat25",
+               main_run.feat25_diff.rel_l2, main_run.feat25_diff.max_abs, (long long) main_run.T25, (long long) DIM,
+               gate);
+    }
+    if (have_featnorm) {
+        total++;
+        const bool ok = main_run.have_featnorm && main_run.featnorm_diff.rel_l2 <= gate;
+        passed += ok ? 1 : 0;
+        if (want_erf && want_tanh) {
+            printf("%s %-22s rel_l2=%.3e max_abs=%.3e  (%lld x %lld, gate %.1e)   [tanh GELU: %.3e]\n",
+                   ok ? "PASS" : "FAIL", "head_input", main_run.featnorm_diff.rel_l2, main_run.featnorm_diff.max_abs,
+                   (long long) main_run.T25, (long long) DIM, gate, tanh_run.featnorm_diff.rel_l2);
+        } else {
+            printf("%s %-22s rel_l2=%.3e max_abs=%.3e  (%lld x %lld, gate %.1e)\n", ok ? "PASS" : "FAIL", "head_input",
+                   main_run.featnorm_diff.rel_l2, main_run.featnorm_diff.max_abs, (long long) main_run.T25,
+                   (long long) DIM, gate);
+        }
+    }
+
+    // ── end to end: run the head over our own features ──
+    //
+    // Only where the fixture carries whole-track codes. stages-30s's
+    // 06_argmax_*.i32 are one 512-frame window, not a track, and the windowed
+    // stitch in yue2_tok_head_predict() is already gated by --tok-head-parity.
+    std::vector<int> want_codes, want_truth;
+    const bool       have_codes = yue2_read_i32_bin(fixture_dir + "/codes.i32", &want_codes);
+    const bool       have_truth = yue2_read_i32_bin(fixture_dir + "/truth.i32", &want_truth);
+    if (have_codes) {
+        Yue2TokHead head;
+        if (!yue2_tok_head_load(gguf_path, &head, &err)) {
+            printf("SKIP %-22s head load failed: %s\n", "codes", err.c_str());
+        } else {
+            std::vector<int32_t> got;
+            const auto           t0 = std::chrono::steady_clock::now();
+            if (!yue2_tok_head_predict(&head, main_run.feat.data(), main_run.T25, &got, &err)) {
+                printf("FAIL %-22s %s\n", "codes", err.c_str());
+            } else {
+                const double head_ms =
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                const size_t n = std::min(got.size(), want_codes.size());
+                size_t       agree = 0;
+                for (size_t i = 0; i < n; i++) {
+                    agree += (got[i] == want_codes[i]) ? 1 : 0;
+                }
+                const double rate = n ? (double) agree / (double) n : 0.0;
+                total++;
+                const bool ok = (got.size() == want_codes.size()) && rate >= YUE2_MERT_CODE_AGREE_GATE;
+                passed += ok ? 1 : 0;
+                printf("%s %-22s %zu/%zu = %.4f  (gate %.2f, head %.0f ms)\n", ok ? "PASS" : "FAIL", "codes_agree",
+                       agree, n, rate, YUE2_MERT_CODE_AGREE_GATE, head_ms);
+
+                // Cheap sanity statistics the pin calls out (§4.3): a broken
+                // frontend shows up as an adjacent-repeat ratio near 1.0 long
+                // before the truth rate is worth computing.
+                size_t uniq_rep = 0;
+                std::set<int32_t> uniq;
+                for (size_t i = 0; i < got.size(); i++) {
+                    uniq.insert(got[i]);
+                    if (i && got[i] == got[i - 1]) {
+                        uniq_rep++;
+                    }
+                }
+                printf("     %-22s unique-code ratio %.4f, adjacent-repeat ratio %.4f\n", "codes_stats",
+                       got.empty() ? 0.0 : (double) uniq.size() / (double) got.size(),
+                       got.size() > 1 ? (double) uniq_rep / (double) (got.size() - 1) : 0.0);
+
+                if (have_truth) {
+                    const size_t tn = std::min(got.size(), want_truth.size());
+                    size_t       th = 0;
+                    for (size_t i = 0; i < tn; i++) {
+                        // truth.i32 holds YuE2's own emitted tokens; ours are
+                        // codes, so the CODEC_OFFSET has to come off one side.
+                        const int32_t truth_code = want_truth[i] >= (int) head.cfg.codec_off
+                                                       ? want_truth[i] - (int32_t) head.cfg.codec_off
+                                                       : want_truth[i];
+                        th += (got[i] == truth_code) ? 1 : 0;
+                    }
+                    const double trate = tn ? (double) th / (double) tn : 0.0;
+                    total++;
+                    const bool tok = trate >= YUE2_MERT_TRUTH_GATE;
+                    passed += tok ? 1 : 0;
+                    printf("%s %-22s %zu/%zu = %.4f  (gate %.2f, chance 3.05e-5; the chain-integrity gate)\n",
+                           tok ? "PASS" : "FAIL", "truth_agree", th, tn, trate, YUE2_MERT_TRUTH_GATE);
+                }
+            }
+            yue2_tok_head_free(&head);
+        }
+    }
+
+    // ── the GELU determination, printed rather than asserted ──
+    if (want_erf && want_tanh) {
+        printf("\nGELU flavour for MERT's own FFN and conv module (block fixtures decide):\n");
+        for (size_t i = 0; i < taps.size(); i++) {
+            if (want_taps[i].empty() || taps[i].block < 0) {
+                continue;
+            }
+            printf("     %-12s erf %.3e   tanh %.3e   -> %s\n", taps[i].label, erf_run.tap_diff[i].rel_l2,
+                   tanh_run.tap_diff[i].rel_l2,
+                   erf_run.tap_diff[i].rel_l2 < tanh_run.tap_diff[i].rel_l2 ? "ERF" : "TANH");
+        }
+        printf("     modeling_mert2.py uses F.gelu / nn.GELU with approximate='none' at all three sites\n"
+               "     (FeedForward:209, ConvolutionModule:224, ConvNextLayer:98) and, unlike the head,\n"
+               "     has no fused encoder kernel that could silently substitute tanh.\n");
+    }
+
+    printf("RESULT (mert-block-parity %s): %d/%d gates passed\n", fixture_dir.c_str(), passed, total);
+    yue2_mert_enc_graph_free(&g);
+    yue2_mert_free(&m);
+    return (total > 0 && passed == total) ? 0 : 1;
+}
+
 int main(int argc, char ** argv) {
     std::string     models_dir;
     std::string     tokenizer_dir_arg;
@@ -3334,6 +3756,8 @@ int main(int argc, char ** argv) {
     std::string     tok_head_gguf;
     bool            tok_head_keep_tf32 = false;
     std::string     mert_front_parity_dir;
+    std::string     mert_block_parity_dir;
+    std::string     mert_gelu_mode = "both";
     bool            do_generate      = false;
     std::string     gen_style;
     std::string     gen_lyrics;
@@ -3382,6 +3806,10 @@ int main(int argc, char ** argv) {
             g_yue2_tok_dump_dir = argv[++i];
         } else if (!strcmp(argv[i], "--mert-front-parity") && i + 1 < argc) {
             mert_front_parity_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--mert-block-parity") && i + 1 < argc) {
+            mert_block_parity_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--gelu") && i + 1 < argc) {
+            mert_gelu_mode = argv[++i];
         } else if (!strcmp(argv[i], "--tf32")) {
             tok_head_keep_tf32 = true;
         } else if (!strcmp(argv[i], "--variant") && i + 1 < argc) {
@@ -3543,6 +3971,25 @@ int main(int argc, char ** argv) {
             yue2_tok_disable_tf32();
         }
         return run_mert_front_parity(models_dir, mert_front_parity_dir, tok_head_gguf);
+    }
+    if (!mert_block_parity_dir.empty()) {
+        if (models_dir.empty()) {
+            fprintf(stderr, "--mert-block-parity requires --models <dir>\n");
+            return 2;
+        }
+        if (mert_gelu_mode != "erf" && mert_gelu_mode != "tanh" && mert_gelu_mode != "both") {
+            fprintf(stderr, "--gelu must be 'erf', 'tanh' or 'both', got '%s'\n", mert_gelu_mode.c_str());
+            return 2;
+        }
+        // TF32 OFF before the first CUDA context, for exactly the reasons
+        // --mert-front-parity gives: the driver reads NVIDIA_TF32_OVERRIDE when
+        // the context is created, so this cannot move into the loader. 21
+        // Conformer blocks are a far longer TF32 accumulation than the
+        // subsampling stack, and the fp32 fixture set was captured with it off.
+        if (!tok_head_keep_tf32) {
+            yue2_tok_disable_tf32();
+        }
+        return run_mert_block_parity(models_dir, mert_block_parity_dir, tok_head_gguf, mert_gelu_mode);
     }
     if (do_generate) {
         if (models_dir.empty()) {
