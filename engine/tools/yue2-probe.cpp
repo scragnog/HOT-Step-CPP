@@ -321,7 +321,8 @@ static int run_load(const std::string & models_dir, Yue2VaeVariant variant, bool
     if (!m.lm_adapter_want.empty()) {
         printf("  adapter : %s\n",
                m.lm_adapter_desc.empty() ? "(REQUESTED, BUT NOTHING MERGED)" : m.lm_adapter_desc.c_str());
-        printf("  merged  : %d tensor(s)\n", m.lm_adapter_tensors);
+        printf("  merged  : %d tensor(s) (%s)\n", m.lm_adapter_tensors,
+               m.lm_adapter_family.empty() ? "?" : m.lm_adapter_family.c_str());
     }
     printf("  LM  VRAM: %.3f GB (%zu tensors)\n", (double) m.vram_lm / (1024.0 * 1024.0 * 1024.0),
            m.tmap_lm.size());

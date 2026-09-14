@@ -1302,20 +1302,19 @@ static bool yue2_at_ckpt_load(const std::string & path, const Yue2AtCkptState & 
 // reading the ACTUAL base shape, which is what makes it correct for attn_k/v at
 // [2048, 1024] under GQA.
 //
-// ── ONE THING THIS EXPORT CANNOT DO YET ────────────────────────────────────
+// ── THE LOADER SIDE, AND WHY `format` IS NOT DECORATION ────────────────────
 //
-// `yue2_lora_site_ok` (yue2-adapter.h:220-241) accepts `nar_*` sites ONLY, and
-// its comment says why: "blk.N.attn_q (the AR twin) exists too, and merging
-// into it because an adapter happened to name it would quietly adapt the frozen
-// half of the model." That guard was correct when nothing could train the AR
-// half. Contract §7.3 is the change that lifts it (extend the tail list with
-// the seven AR spellings, add `yue2-ar-lora.safetensors` to the directory
-// probe, and GATE THE SITE FAMILY ON __metadata__.format so a NAR file with one
-// mis-spelled key is an error rather than a silent AR merge). That change is
-// phase 7 and is NOT in this file. Until it lands, an exported AR adapter is a
-// well-formed file that the merge path will reject key by key — which is the
-// correct failure, and it is stated here so nobody reads the rejection as a bug
-// in the exporter.
+// `yue2_lora_site_family` (yue2-adapter.h) accepted `nar_*` sites only until
+// phase 7 (contract §7.3) extended it with the seven AR spellings, added
+// `yue2-ar-lora.safetensors` to the directory probe, and GATED THE FAMILY ON
+// `__metadata__.format`. That gate is the replacement for the guard the
+// extension removed: both halves' sites are now legal keys, so a single
+// mis-spelled `nar_` would otherwise land on whichever half the trainer did not
+// touch, silently. The loader refuses a key whose family contradicts `format`,
+// and refuses an unlabelled file that names both halves.
+//
+// So `format: "yue2-ar-lora-v1"` below is load-bearing, not a label. Write it,
+// and do not write a NAR site from this exporter.
 static bool yue2_at_export(const Yue2AtAdapters & ad, const Yue2ArTrainArgs & a, Yue2AtTarget target,
                            int64_t steps_done, int64_t song_frames, const std::string & base_id,
                            bool minted_present, const std::string & path, std::string * err) {

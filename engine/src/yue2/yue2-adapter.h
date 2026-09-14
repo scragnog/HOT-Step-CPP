@@ -59,11 +59,45 @@
 //     rather than refuse: the mapping is unambiguous, and the shape check below
 //     would catch a wrong guess anyway ([256,2048] vs [2048,2048]).
 //
-// The 200 merge targets (28 blocks x 7 + 4 flow heads) are enumerated in
-// yue2_lora_site_ok. That allow-list is deliberate, not a leftover: the AR half
-// is frozen by the recipe, `latent_pos_embed` is read by ggml_get_rows and must
-// never carry a delta, and the norms/biases are 1-D. A key outside the list is
-// counted and reported, never merged on the strength of "the tensor exists".
+// The merge targets are enumerated in yue2_lora_site_family. That allow-list is
+// deliberate, not a leftover: `latent_pos_embed` is read by ggml_get_rows and
+// must never carry a delta, and the norms/biases are 1-D. A key outside the
+// list is counted and reported, never merged on the strength of "the tensor
+// exists".
+//
+// ── Two families, and why they cannot be told apart by key alone ────────────
+//
+// There are now TWO trainable halves, so two families of site:
+//
+//   NAR  196 block sites (28 x `nar_attn_{q,k,v,output}`, `nar_ffn_{gate,up,down}`)
+//        + 4 flat flow heads (`vae2llm`, `llm2vae`, `time_embd.{0,1}`) = 200
+//   AR   196 block sites (28 x `attn_{q,k,v,output}`, `ffn_{gate,up,down}`)
+//        and nothing flat — the flow heads have no part in the AR forward
+//        (docs/plans/yue2/14-ar-lora-contract.md §2.2)
+//
+// AR and NAR are a Mixture of Transformers with ZERO weight sharing
+// (yue2-model.h:155-157), so `blk.7.attn_q.weight` and `blk.7.nar_attn_q.weight`
+// are disjoint tensors: an AR adapter and a NAR adapter stack cleanly into one
+// model through the caller's multi-spec list, with independent scales, and
+// neither touches the other's half.
+//
+// The cost of accepting both is that this file lost the guarantee its original
+// comment named — "merging into `blk.N.attn_q` because an adapter happened to
+// name it would quietly adapt the frozen half of the model". One mis-spelled
+// key in a NAR export (`attn_q` for `nar_attn_q`) is now a legal site, and a
+// silent landing on the other half is exactly the failure this loader exists to
+// prevent. So the family is GATED ON `__metadata__.format` (contract §7.3):
+//
+//   format "yue2-nar-lora-v1"  -> only NAR block sites and the flat heads are
+//                                 legal; an AR site is a REFUSAL, not a warning
+//   format "yue2-ar-lora-v1"   -> only AR block sites are legal; a `nar_*` or a
+//                                 flat site is a REFUSAL
+//   format absent/unrecognised -> either family is accepted, but a file naming
+//                                 BOTH is refused, with one key from each named
+//
+// A file spanning both halves is either a joint adapter nobody has designed or a
+// corrupted export; refusing it is the same posture as two modules resolving to
+// one tensor below.
 //
 // ── Fused qkv: YuE2 has none ───────────────────────────────────────────────
 //
@@ -213,33 +247,59 @@ static bool yue2a_starts(const std::string & s, const char * p) {
     return s.size() >= n && s.compare(0, n, p) == 0;
 }
 
-// Is this module one of the 200 sites yue2_nt_make_adapters can produce?
+// Which trainable half a site belongs to. YUE2_FAM_NONE is "not a site we
+// merge"; YUE2_FAM_ANY is only ever a REQUEST (an adapter that declares no
+// format), never the answer for a concrete module.
+enum Yue2LoraFamily { YUE2_FAM_NONE = 0, YUE2_FAM_NAR, YUE2_FAM_AR, YUE2_FAM_ANY };
+
+static const char * yue2_family_name(Yue2LoraFamily f) {
+    switch (f) {
+        case YUE2_FAM_NAR: return "nar";
+        case YUE2_FAM_AR:  return "ar";
+        case YUE2_FAM_ANY: return "any";
+        default:           return "none";
+    }
+}
+
+// Is this module one of the sites a YuE2 trainer can produce, and which half?
 //
-// The list is the trainer's, tag for tag (yue2-nar-train-graph.h:780-803), and
-// is the whole reason this file does not merge on the strength of "ws.exists
-// says the tensor is there". `blk.N.attn_q` (the AR twin) exists too, and
-// merging into it because an adapter happened to name it would quietly adapt
-// the frozen half of the model.
-static bool yue2_lora_site_ok(const std::string & mod) {
+// The two lists are the trainers', tag for tag — NAR from
+// yue2-nar-train-graph.h:780-803, AR from yue2-ar-train-graph.h's own site table
+// (contract §2.1) — and they are the whole reason this file does not merge on
+// the strength of "ws.exists says the tensor is there". Both halves' tensors
+// exist in every LM GGUF, so the key alone cannot say which half an adapter
+// MEANT; the format gate in yue2_adapter_merge_st is what answers that.
+//
+// The FLAT sites are NAR-only and stay that way: `vae2llm`, `llm2vae` and
+// `time_embd.{0,1}` belong to the flow head and have no part in the AR forward,
+// so an AR adapter that names one is malformed (contract §2.2).
+static Yue2LoraFamily yue2_lora_site_family(const std::string & mod) {
     if (mod == "vae2llm" || mod == "llm2vae" || mod == "time_embd.0" || mod == "time_embd.1") {
-        return true;
+        return YUE2_FAM_NAR;
     }
     if (!yue2a_starts(mod, "blk.")) {
-        return false;
+        return YUE2_FAM_NONE;
     }
     size_t d = 4, e = 4;
     while (e < mod.size() && isdigit((unsigned char) mod[e])) {
         e++;
     }
     if (e == d || e >= mod.size() || mod[e] != '.') {
-        return false;
+        return YUE2_FAM_NONE;
     }
     // Block index is decimal and unpadded on BOTH sides (yue2_fmt("blk.%d..."),
     // model.h:932; "blk." + std::to_string(i), graph.h:756) — the kind of thing
     // that would otherwise bite at block 10.
     const std::string tail = mod.substr(e + 1);
-    return tail == "nar_attn_q" || tail == "nar_attn_k" || tail == "nar_attn_v" || tail == "nar_attn_output" ||
-           tail == "nar_ffn_gate" || tail == "nar_ffn_up" || tail == "nar_ffn_down";
+    if (tail == "nar_attn_q" || tail == "nar_attn_k" || tail == "nar_attn_v" || tail == "nar_attn_output" ||
+        tail == "nar_ffn_gate" || tail == "nar_ffn_up" || tail == "nar_ffn_down") {
+        return YUE2_FAM_NAR;
+    }
+    if (tail == "attn_q" || tail == "attn_k" || tail == "attn_v" || tail == "attn_output" ||
+        tail == "ffn_gate" || tail == "ffn_up" || tail == "ffn_down") {
+        return YUE2_FAM_AR;
+    }
+    return YUE2_FAM_NONE;
 }
 
 // Why a key was not mapped. The caller reports these separately: an unknown
@@ -250,6 +310,7 @@ enum Yue2LoraReject { YUE2_LR_OK = 0, YUE2_LR_UNKNOWN, YUE2_LR_FUSED_QKV, YUE2_L
 struct Yue2LoraTarget {
     std::string     gguf_name;              // empty => not merged
     Yue2LoraReject  why = YUE2_LR_UNKNOWN;
+    Yue2LoraFamily  family = YUE2_FAM_NONE;  // meaningful only when gguf_name is set
     bool            renamed_time_embed = false;  // came in as plan §4's `time_embed.`
 };
 
@@ -302,11 +363,13 @@ static Yue2LoraTarget yue2_lora_target(const std::string & raw_module) {
         }
     }
 
-    if (!yue2_lora_site_ok(m)) {
+    const Yue2LoraFamily fam = yue2_lora_site_family(m);
+    if (fam == YUE2_FAM_NONE) {
         t.why = YUE2_LR_UNKNOWN;
         return t;
     }
     t.gguf_name = m + ".weight";
+    t.family    = fam;
     t.why       = YUE2_LR_OK;
     return t;
 }
@@ -473,33 +536,58 @@ struct Yue2LoraFactor {
 //
 // Returns the number of GGUF tensors patched, or -1 on a refusal (which writes
 // `err_out` and patches NOTHING). Zero means the adapter matched nothing; the
-// caller decides whether that is fatal.
+// caller decides whether that is fatal. `family_out`, when non-null, is set to
+// the half this file actually merged into ("ar" or "nar") — /yue2/props reports
+// it next to the count so a user who loaded the wrong file can see it without
+// reading stderr.
 static int yue2_adapter_merge_st(WeightCtx *         wctx,
                                  const GGUFModel &   gf,
                                  const STFile &      st,
                                  const std::string & cfg_dir,
                                  float               scale,
                                  ggml_backend_t      backend,
-                                 std::string *       err_out) {
+                                 std::string *       err_out,
+                                 std::string *       family_out = nullptr) {
     WeightSource ws = {};
     ws.is_st        = false;
     ws.gf           = const_cast<GGUFModel *>(&gf);
 
     const Yue2AdapterMeta md = yue2_adapter_read_meta(st);
 
-    // `format` is a guard, not decoration: an MM3 or ACE adapter pointed at
-    // this path would otherwise fail only as "0 tensors matched", which reads
-    // like an empty adapter rather than a wrong one.
-    if (!md.format.empty() && !yue2a_starts(md.format, "yue2-nar-lora")) {
-        if (err_out) {
-            *err_out = "adapter __metadata__ says format=\"" + md.format +
-                       "\"; this loader merges yue2-nar-lora-v1 files only";
-        }
-        return -1;
-    }
+    // `format` is a guard, not decoration, and since the AR family landed it
+    // does TWO jobs.
+    //
+    // The old one: an MM3 or ACE adapter pointed at this path would otherwise
+    // fail only as "0 tensors matched", which reads like an empty adapter
+    // rather than a wrong one.
+    //
+    // The new one: it decides which half is legal. Both halves' sites are now
+    // accepted by yue2_lora_site_family, so `blk.7.attn_q` in a NAR export —
+    // one missing `nar_` — would land on the frozen AR half and change the
+    // audio in a way nothing reports. The format says which family the trainer
+    // MEANT, and a key from the other one is an error (contract §7.3).
+    Yue2LoraFamily want_fam = YUE2_FAM_ANY;
     if (md.format.empty()) {
         fprintf(stderr, "[YuE2-Adapter] NOTE: no `format` in __metadata__ — merging on the strength of the "
-                        "key names alone\n");
+                        "key names alone, and refusing the file if it names both halves\n");
+    } else if (yue2a_starts(md.format, "yue2-nar-lora")) {
+        want_fam = YUE2_FAM_NAR;
+    } else if (yue2a_starts(md.format, "yue2-ar-lora")) {
+        want_fam = YUE2_FAM_AR;
+    } else if (!yue2a_starts(md.format, "yue2-")) {
+        // Not ours at all. Refuse by name rather than by an empty merge.
+        if (err_out) {
+            *err_out = "adapter __metadata__ says format=\"" + md.format +
+                       "\"; this loader merges yue2-nar-lora-v1 / yue2-ar-lora-v1 files only";
+        }
+        return -1;
+    } else {
+        // A `yue2-` format this build does not know (a later revision, say).
+        // Treated as unlabelled: either family, never both.
+        fprintf(stderr,
+                "[YuE2-Adapter] NOTE: unrecognised format=\"%s\" — merging on the key names alone, and "
+                "refusing the file if it names both halves\n",
+                md.format.c_str());
     }
     if (!md.base_sha.empty()) {
         // Nothing here knows the resident LM's sha, so this is a breadcrumb for
@@ -544,6 +632,11 @@ static int yue2_adapter_merge_st(WeightCtx *         wctx,
     std::map<std::string, Yue2LoraFactor> targets;  // gguf name -> factors
     int                                   n_unknown = 0, n_fused = 0, n_foreign = 0, n_time_embed = 0;
     std::string                           orphan;
+    // First key seen from each half, for the mixed-file refusal below. Kept as
+    // names rather than counts because the message has to be actionable: "this
+    // file names both halves" without saying which keys is a bug report nobody
+    // can act on.
+    std::string                           first_ar, first_nar;
 
     for (const auto & kv : a_by_module) {
         const std::string & mod = kv.first;
@@ -568,6 +661,24 @@ static int yue2_adapter_merge_st(WeightCtx *         wctx,
         }
         if (t.renamed_time_embed) {
             n_time_embed++;
+        }
+        // The family gate. A declared format makes the other half an ERROR, not
+        // an ignored key: the whole hazard is that the wrong half merges
+        // cleanly, renders audio and tells nobody.
+        if (want_fam != YUE2_FAM_ANY && t.family != want_fam) {
+            if (err_out) {
+                *err_out = std::string("adapter __metadata__ says format=\"") + md.format + "\" (the " +
+                           yue2_family_name(want_fam) + " half), but module \"" + mod + "\" belongs to the " +
+                           yue2_family_name(t.family) + " half (it targets " + t.gguf_name +
+                           "). Merging it would adapt the half the trainer never touched, which is the exact "
+                           "failure this check exists to prevent — refusing the whole file";
+            }
+            return -1;
+        }
+        if (t.family == YUE2_FAM_AR && first_ar.empty()) {
+            first_ar = mod;
+        } else if (t.family == YUE2_FAM_NAR && first_nar.empty()) {
+            first_nar = mod;
         }
         if (targets.count(t.gguf_name)) {
             // Two adapter modules resolving to one tensor can only mean a
@@ -607,7 +718,20 @@ static int yue2_adapter_merge_st(WeightCtx *         wctx,
     if (n_foreign) {
         if (err_out) {
             *err_out = "this adapter's keys carry a foreign namespace (diffusers/ComfyUI/LyCORIS) — it was "
-                       "not trained against the YuE2 NAR module tree";
+                       "not trained against the YuE2 module tree";
+        }
+        return -1;
+    }
+    // An unlabelled file naming both halves. Nothing in this tree trains both at
+    // once, so it is a corrupted export or a joint adapter nobody has designed;
+    // either way, guessing which half the author meant is not this loader's job.
+    if (!first_ar.empty() && !first_nar.empty()) {
+        if (err_out) {
+            *err_out = "this adapter names BOTH halves of the model (\"" + first_ar + "\" is an AR site, \"" +
+                       first_nar +
+                       "\" is a NAR site) and carries no __metadata__ format saying which it meant. Nothing "
+                       "trains both halves at once, so this is a corrupted export — refusing rather than "
+                       "adapting a half the trainer never touched";
         }
         return -1;
     }
@@ -617,11 +741,17 @@ static int yue2_adapter_merge_st(WeightCtx *         wctx,
                 n_time_embed);
     }
     if (n_unknown) {
-        fprintf(stderr, "[YuE2-Adapter] %d adapter module(s) name sites we do not merge (AR blocks, norms, "
+        fprintf(stderr, "[YuE2-Adapter] %d adapter module(s) name sites we do not merge (norms, biases, "
                         "latent_pos_embed) — ignored\n", n_unknown);
     }
     if (targets.empty()) {
         return 0;
+    }
+    // Resolved, not declared: this is the half the merge is about to touch, and
+    // it is what /yue2/props reports next to the tensor count.
+    const Yue2LoraFamily fam = first_ar.empty() ? YUE2_FAM_NAR : YUE2_FAM_AR;
+    if (family_out) {
+        *family_out = yue2_family_name(fam);
     }
 
     // ── Preflight: shapes, dtypes, extents, and the quantized-base guard ─────
@@ -912,7 +1042,8 @@ static int yue2_adapter_merge(WeightCtx *       wctx,
                               const char *      path,
                               float             scale,
                               ggml_backend_t    backend,
-                              std::string *     err_out) {
+                              std::string *     err_out,
+                              std::string *     family_out = nullptr) {
     // hs_stat, not stat: MSVC's narrow stat is _stat64i32, whose 32-bit st_size
     // returns -1 for any file >= 2 GiB — so a large adapter reads as MISSING
     // rather than as itself (commit ae64b19c). It is also the UTF-8-correct
@@ -929,8 +1060,11 @@ static int yue2_adapter_merge(WeightCtx *       wctx,
     std::string cfg_dir;
     if (S_ISDIR(sb.st_mode)) {
         // A directory is accepted for symmetry with MM3/PEFT layouts, but our
-        // own exporter writes one file; the first name is what phase 4 writes.
-        const char * cands[] = { "/adapter_model.safetensors", "/yue2-nar-lora.safetensors" };
+        // own exporters write one file each — the NAR trainer's and the AR
+        // trainer's default names are both probed, since either half can be the
+        // thing in the directory.
+        const char * cands[] = { "/adapter_model.safetensors", "/yue2-nar-lora.safetensors",
+                                 "/yue2-ar-lora.safetensors" };
         bool         found   = false;
         for (const char * c : cands) {
             sf_path = std::string(path) + c;
@@ -941,7 +1075,9 @@ static int yue2_adapter_merge(WeightCtx *       wctx,
         }
         if (!found) {
             if (err_out) {
-                *err_out = std::string("no adapter_model.safetensors (or yue2-nar-lora.safetensors) in ") + path;
+                *err_out = std::string("no adapter_model.safetensors (or yue2-nar-lora.safetensors, or "
+                                       "yue2-ar-lora.safetensors) in ") +
+                           path;
             }
             return -1;
         }
@@ -960,8 +1096,9 @@ static int yue2_adapter_merge(WeightCtx *       wctx,
         return -1;
     }
 
-    Timer     t;
-    const int merged = yue2_adapter_merge_st(wctx, gf, st, cfg_dir, scale, backend, err_out);
+    Timer       t;
+    std::string fam;
+    const int   merged = yue2_adapter_merge_st(wctx, gf, st, cfg_dir, scale, backend, err_out, &fam);
     st_close(&st);
 
     if (merged < 0) {
@@ -969,7 +1106,13 @@ static int yue2_adapter_merge(WeightCtx *       wctx,
                 (err_out && !err_out->empty()) ? err_out->c_str() : "unknown reason");
         return -1;
     }
-    fprintf(stderr, "[YuE2-Adapter] %s: merged %d tensor(s) at scale %.3f in %.1f ms\n", sf_path.c_str(),
-            merged, scale, t.ms());
+    if (family_out) {
+        *family_out = fam;
+    }
+    // The family is on this line on purpose: "196 tensors" alone reads the same
+    // whichever half it landed on, and which half it landed on is the thing a
+    // wrong file gets wrong.
+    fprintf(stderr, "[YuE2-Adapter] %s: merged %d tensor(s) into the %s half at scale %.3f in %.1f ms\n",
+            sf_path.c_str(), merged, fam.empty() ? "?" : fam.c_str(), scale, t.ms());
     return merged;
 }

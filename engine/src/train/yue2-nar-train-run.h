@@ -2001,10 +2001,14 @@ static bool yue2_nt_ckpt_load(const std::string & path, const Yue2NtCkptState & 
 //   * module names          -> `blk.N.nar_attn_{q,k,v,output}`,
 //                              `blk.N.nar_ffn_{gate,up,down}`, `vae2llm`,
 //                              `llm2vae`, `time_embd.{0,1}` — exactly
-//                              yue2_lora_site_ok's list (yue2-adapter.h:224-241),
-//                              and exactly the trainer's own tags, so the
-//                              mapping is "prefix with yue2., suffix with
-//                              .lora_X.weight" and nothing else.
+//                              yue2_lora_site_family's NAR list, and exactly
+//                              the trainer's own tags, so the mapping is
+//                              "prefix with yue2., suffix with .lora_X.weight"
+//                              and nothing else. The AR twins (`attn_q` without
+//                              the `nar_`) are legal keys there too now, so the
+//                              `format: "yue2-nar-lora-v1"` this exporter
+//                              writes is what makes a mis-spelled key an error
+//                              rather than a silent merge into the other half.
 //
 // SHAPES. safetensors shapes are PyTorch order, outermost first, and ggml's ne
 // is the reverse — so a ggml A of [in, rank] IS torch [rank, in], and a ggml B

@@ -127,17 +127,23 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
         yyjson_mut_obj_add_strcpy(doc, lm_v, "requested", g_yue2.lm_type_want.c_str());
     }
 
-    // NAR LoRA state. `requested` is what /yue2/select-model was last told;
+    // LoRA state. `requested` is what /yue2/select-model was last told;
     // `merged` is what is actually baked into the resident weights (empty
     // whenever the LM is not resident, since yue2_unload clears it). The two
     // differ exactly between a selection and the next warm/synth, and a UI
     // that shows only one of them would be lying for that window.
+    //
+    // `family` is "ar", "nar" or "ar+nar". Both halves are merge targets now,
+    // and a bare tensor count reads the same whichever one it landed on — so a
+    // user who loaded an AR file expecting a NAR one can see it here instead of
+    // in stderr (contract 14 §7.3).
     {
         yyjson_mut_val * ad = yyjson_mut_obj(doc);
         yyjson_mut_obj_add_val(doc, root, "adapter", ad);
         yyjson_mut_obj_add_strcpy(doc, ad, "requested", yue2_adapter_key(g_yue2.lm_adapter_want).c_str());
         yyjson_mut_obj_add_strcpy(doc, ad, "merged", g_yue2.lm_adapter_desc.c_str());
         yyjson_mut_obj_add_uint(doc, ad, "tensors", (uint64_t) g_yue2.lm_adapter_tensors);
+        yyjson_mut_obj_add_strcpy(doc, ad, "family", g_yue2.lm_adapter_family.c_str());
         yyjson_mut_obj_add_bool(doc, ad, "in_force", g_yue2.lm_resident && !g_yue2.lm_adapter_desc.empty());
     }
 
@@ -555,7 +561,9 @@ static void yue2_handle_imatrix(const httplib::Request & req, httplib::Response 
             // a merged adapter measures the ADAPTED model, and quantize.cpp
             // would then apply those importances to the base GGUF. MM3 warns
             // for the same reason (mm3-server.h:2138-2141).
-            warnings.push_back("a NAR adapter is merged into the resident LM (" + g_yue2.lm_adapter_desc +
+            warnings.push_back("a " + (g_yue2.lm_adapter_family.empty() ? std::string("LoRA")
+                                                                        : g_yue2.lm_adapter_family) +
+                               " adapter is merged into the resident LM (" + g_yue2.lm_adapter_desc +
                                ") — the activations belong to the adapted model, not the base GGUF being "
                                "quantized");
         }

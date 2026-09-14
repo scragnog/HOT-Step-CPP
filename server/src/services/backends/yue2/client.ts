@@ -81,6 +81,12 @@ export interface Yue2PropsAdapter {
   requested?: string;
   merged?: string;
   tensors?: number;
+  /** Which half the merged adapters landed on: 'ar', 'nar', or 'ar+nar' when a
+   *  stack covers both. AR and NAR share no weights, so both are merge targets
+   *  and a bare tensor count reads identically whichever one it patched —
+   *  which is exactly what loading the wrong file gets wrong. Absent from
+   *  engines older than the AR-family loader. */
+  family?: string;
   in_force?: boolean;
 }
 

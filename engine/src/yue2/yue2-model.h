@@ -328,6 +328,13 @@ struct Yue2Model {
     // surface must not hide (MM3 keeps rest_adapter_desc for the same reason).
     std::string    lm_adapter_desc;
     int            lm_adapter_tensors = 0;
+    // Which half the merged adapters landed on: "ar", "nar", or "ar+nar" when a
+    // stack covers both (AR and NAR are a Mixture of Transformers with zero
+    // weight sharing, so that stack is legal and disjoint). A bare tensor count
+    // reads identically whichever half it patched, and which half it patched is
+    // precisely what loading the wrong file gets wrong — so /yue2/props reports
+    // this next to the count (contract 14 §7.3).
+    std::string    lm_adapter_family;
 
     bool           backend_ref = false;
     ggml_backend_t backend     = nullptr;
@@ -1125,6 +1132,7 @@ static void yue2_unload(Yue2Model * m) {
     // survives, so the next warm/synth re-merges the same set.
     m->lm_adapter_desc.clear();
     m->lm_adapter_tensors = 0;
+    m->lm_adapter_family.clear();
     if (m->backend_ref) {
         backend_release(m->backend, m->cpu_backend);
         m->backend     = nullptr;
@@ -1150,14 +1158,18 @@ static void yue2_unload(Yue2Model * m) {
 static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector<std::string> * errs) {
     m->lm_adapter_desc.clear();
     m->lm_adapter_tensors = 0;
+    m->lm_adapter_family.clear();
     if (m->lm_adapter_want.empty()) {
         return true;
     }
 
-    int total = 0;
+    int  total  = 0;
+    bool has_ar = false, has_nar = false;
     for (const Yue2AdapterSpec & spec : m->lm_adapter_want) {
         std::string err;
-        const int   n = yue2_adapter_merge(&m->wctx_lm, gf, spec.path.c_str(), spec.scale, m->backend, &err);
+        std::string fam;
+        const int   n =
+            yue2_adapter_merge(&m->wctx_lm, gf, spec.path.c_str(), spec.scale, m->backend, &err, &fam);
         if (n < 0) {
             errs->push_back("adapter " + spec.path + ": " + (err.empty() ? "merge failed" : err));
             return false;
@@ -1168,16 +1180,28 @@ static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector
             // wrong file than a deliberate choice. Refuse rather than load a
             // model the caller will believe is adapted.
             errs->push_back("adapter " + spec.path +
-                            " matched no YuE2 NAR tensors — wrong file, or exported with keys this loader "
-                            "does not recognise (expected yue2.blk.N.nar_*.lora_A.weight)");
+                            " matched no YuE2 tensors — wrong file, or exported with keys this loader does "
+                            "not recognise (expected yue2.blk.N.nar_*.lora_A.weight for a NAR adapter, or "
+                            "yue2.blk.N.attn_q/ffn_*.lora_A.weight for an AR one)");
             return false;
+        }
+        if (fam == "ar") {
+            has_ar = true;
+        } else if (fam == "nar") {
+            has_nar = true;
         }
         total += n;
     }
     m->lm_adapter_tensors = total;
     m->lm_adapter_desc    = yue2_adapter_key(m->lm_adapter_want);
-    fprintf(stderr, "[YuE2-Adapter] %d tensor(s) patched across %zu adapter(s)\n", total,
-            m->lm_adapter_want.size());
+    // A stack covering both halves is legal and disjoint, so say so rather than
+    // picking one — the AR and NAR blocks share no weights (this file's own
+    // Mixture-of-Transformers note), which is what makes an AR + NAR pair merge
+    // into two non-overlapping sets of tensors.
+    m->lm_adapter_family = (has_ar && has_nar) ? "ar+nar" : has_ar ? "ar" : has_nar ? "nar" : "";
+    fprintf(stderr, "[YuE2-Adapter] %d tensor(s) patched across %zu adapter(s) [%s]\n", total,
+            m->lm_adapter_want.size(),
+            m->lm_adapter_family.empty() ? "?" : m->lm_adapter_family.c_str());
     return true;
 }
 
