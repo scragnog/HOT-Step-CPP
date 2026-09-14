@@ -12,13 +12,17 @@
 //
 //   ace-train yue2-preprocess --audio <folder> --out <cache dir>
 //                             --models <dir> [--vae standard|legacy|<path>]
-//                             [--clip-seconds 10] [--caption-mode txt]
+//                             [--clip-seconds 10] [--caption-mode ace|txt|default|none]
 //                             [--default-caption "..."] [--only <substr>]
 //                             [--ffmpeg <path>] [--force]
+//                             [--captions-only]   refill caption/lyrics in an
+//                                                 existing manifest; no VAE, no
+//                                                 decode, nothing else touched
 //
 //   1. Flat scan of --audio for .wav/.flac/.mp3/.ogg/.m4a (no recursion —
 //      data.py iterates one directory and so do we).
-//   2. Caption from the same-named .txt, or a fixed --default-caption, or none.
+//   2. Caption (and, in `ace` mode, lyrics) from the same-named .txt, or a
+//      fixed --default-caption, or none.
 //   3. Decode to 48 kHz stereo f32 PLANAR (see "Decoding" below).
 //   4. yue2_vae_encode_tiled -> posterior MEAN, transposed to [frames, 64] and
 //      cached per SOURCE FILE as raw f32 under <out>/latents/.
@@ -142,6 +146,45 @@
 // change. A consumer that sees `codec_ids_present: true` but no per-clip field
 // on some clip should treat that clip as text-only rather than guess.
 //
+// ── `caption` and `lyrics`: the AR prefix's two halves ─────────────────────
+//
+// Same posture as `codec_ids`, and for the same reason: optional fields whose
+// contract lives in the file, not in a plan document. Added after the v1
+// manifest shipped, so `format` does not move.
+//
+//   * per SOURCE and per CLIP: `caption` — the STYLE string, the descriptive
+//     prose that goes in the AR prefix's `[Tags]` block — and `lyrics`, the
+//     tagged sheet that goes in `[Lyrics]`. The AR trainer reads sources[]
+//     (whole songs, docs/plans/yue2/14-ar-lora-contract.md §5.1) and the NAR
+//     trainer reads clips[], so both rows carry both strings.
+//   * top level: `caption_format`, one of
+//       "ace-sidecar"  parsed out of an ACE Option-A `<stem>.txt`: genre, bpm,
+//                      key and the rest are stripped, and `lyrics` is filled
+//                      where the sidecar had a lyric sheet.
+//       "plain"        a free-form caption, no lyrics (--caption-mode txt or
+//                      default). A consumer must REFUSE such a caption if it
+//                      contains a `lyrics:` line, because that is a whole
+//                      sidecar fed in as a style — see below.
+//       "none"         the empty-style text-only prefix.
+//   * top level: `caption_note`, the same contract in prose, plus
+//     `caption_producer` / `caption_updated_at` when --captions-only wrote them.
+//
+// BACKWARDS COMPATIBLE BY CONSTRUCTION. A manifest written before these fields
+// existed simply has no `lyrics` and no `caption_format`; every reader in this
+// tree resolves a missing string to "" and treats an absent format as "plain".
+// Nothing is refused for being old.
+//
+// The reason `caption_format` is WRITTEN rather than inferred is contract §5.2
+// item 3: a caption that happens to contain a whole ACE sidecar trains at full
+// speed on a mangled prefix — `bpm: 121` and the entire lyric sheet inside
+// `[Tags]`, `[Lyrics]` empty — and nothing downstream can catch it. Declaring
+// the shape is the same move `latent_layout` makes, for the same reason.
+//
+// `--captions-only` refills exactly these fields in an existing manifest and
+// carries every other key through untouched, so a corpus that already cost a
+// VAE pass and a tokenizer pass does not have to be rebuilt to gain a style
+// and a lyric sheet. See yue2_preprocess_captions_only().
+//
 // ── TF32 must be off before the first CUDA context ─────────────────────────
 //
 // yue2-vae-encode.h's header measures it: with ggml's default TF32 cuBLAS
@@ -162,6 +205,7 @@
 #include "yyjson.h"
 
 #include "train/preprocess-io.h"  // pm_* path/string/atomic-write helpers
+#include "train/yue2-sidecar.h"      // the ACE Option-A sidecar parser, shared with yue2-ar-train
 #include "yue2/yue2-model.h"
 #include "yue2/yue2-vae-encode.h"
 
@@ -171,6 +215,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -188,7 +233,7 @@ struct Yue2PreprocessArgs {
     // A path also supplies --models when that was not given.
     std::string vae_arg = "standard";
 
-    std::string caption_mode    = "txt";  // txt | default | none
+    std::string caption_mode    = "txt";  // ace | txt | default | none
     std::string default_caption;          // --default-caption, used by caption-mode=default
     std::string only;                     // --only <substr>, case-insensitive, on the basename
     std::string ffmpeg = "ffmpeg";        // --ffmpeg, "" disables the non-WAV/MP3 route
@@ -201,6 +246,11 @@ struct Yue2PreprocessArgs {
     int64_t halo_frames  = 20;    // --halo-frames
     int     limit        = 0;     // --limit N, debug: first N matching files
     bool    force        = false; // --force, re-cut over a manifest with a different clip length
+    // --captions-only: touch NOTHING but the caption/lyrics fields of an
+    // existing <out>/yue2_preprocess.json. No VAE, no decode, no CUDA context,
+    // and every other field — codec_ids included — is carried through byte for
+    // byte. See yue2_preprocess_captions_only().
+    bool    captions_only = false;
 };
 
 // ── Small helpers ──────────────────────────────────────────────────────────
@@ -308,6 +358,77 @@ static std::string yp_caption_path(const std::string & audio_path) {
     }
     return audio_path.substr(0, dot) + ".txt";
 }
+
+// ── caption / lyrics, per source (contract §5.2) ───────────────────────────
+//
+// Four modes, and the difference between the first two is the whole point:
+//
+//   ace      parse `<stem>.txt` as an ACE Option-A sidecar (train/yue2-sidecar.h)
+//            and take its `caption:` prose as the STYLE and its `lyrics:` sheet
+//            as the LYRICS. `genre`, `bpm`, `key` and the rest are parsed and
+//            then DISCARDED — they are separate fields, and a YuE2 style prompt
+//            carrying them is the field-noise problem, not a richer prompt.
+//   txt      the whole `<stem>.txt` becomes the caption, verbatim. That is
+//            data.py's behaviour and it is right for a corpus whose .txt files
+//            hold nothing but a description. Against a HOT-Step dataset sidecar
+//            it is wrong in the expensive way: `bpm: 121` and the entire lyric
+//            sheet land inside [Tags] and [Lyrics] comes out empty, which
+//            trains at full speed on a mangled prefix.
+//   default  --default-caption for every source; no lyrics.
+//   none     empty style, empty lyrics — the upstream text-only prefix.
+//
+// Why `<stem>.mm3.txt` is NOT read here: it is a MiniMax Structured Caption,
+// and its first line of substance is "Basic Attributes: bpm is 121. key is D,
+// and scale is major." — exactly the shape a YuE2 style must not carry. The ACE
+// sidecar's `caption:` line is already the descriptive prose.
+static void yp_resolve_caption(const Yue2PreprocessArgs & a, const std::string & audio_path,
+                               std::string * caption, std::string * lyrics, bool * sidecar_hit) {
+    caption->clear();
+    lyrics->clear();
+    *sidecar_hit = false;
+    if (a.caption_mode == "ace") {
+        std::string raw;
+        if (yp_read_text(yp_caption_path(audio_path), &raw)) {
+            *sidecar_hit = yue2_sidecar_parse(raw, caption, lyrics);
+        }
+    } else if (a.caption_mode == "txt") {
+        std::string cap;
+        if (yp_read_text(yp_caption_path(audio_path), &cap)) {
+            *caption = cap;
+        }
+    } else if (a.caption_mode == "default") {
+        *caption = pm_trim(a.default_caption);
+    }
+    // "none" -> both empty, which is the empty-style prefix at training time
+}
+
+// What the manifest DECLARES about the shape of `caption`. A consumer branches
+// on this rather than sniffing the string: yue2-ar-train refuses a caption
+// containing a `lyrics:` line unless the format says "ace-sidecar", because a
+// whole sidecar fed in as a style is the one mistake nothing downstream can
+// catch (yue2-ar-train-run.h's yue2_at_load_manifest).
+static const char * yp_caption_format(const std::string & caption_mode) {
+    if (caption_mode == "ace") {
+        return "ace-sidecar";
+    }
+    if (caption_mode == "none") {
+        return "none";
+    }
+    return "plain";
+}
+
+// The manifest's own note for the caption/lyrics pair, written beside
+// codec_ids_note for the same reason that one exists: the fields are optional,
+// so a consumer needs the contract in the file rather than in a plan document.
+#define YP_CAPTION_NOTE                                                                                          \
+    "\"caption\" is the STYLE string that goes in the AR prefix's [Tags] block and \"lyrics\" is the tagged "     \
+    "sheet that goes in [Lyrics]; both are written per source AND per clip. \"caption_format\" says what shape "  \
+    "\"caption\" is in: \"ace-sidecar\" = parsed out of an ACE Option-A <stem>.txt, so it is descriptive prose "  \
+    "with genre/bpm/key stripped and \"lyrics\" is populated where the sidecar had a lyric sheet; \"plain\" = a " \
+    "free-form caption with no lyrics field (--caption-mode txt or default), and a consumer must REFUSE one "     \
+    "that contains a `lyrics:` line, because that is a whole sidecar fed in as a style; \"none\" = the "          \
+    "empty-style text-only prefix. Both fields and caption_format are OPTIONAL: a manifest written before they "  \
+    "existed simply has no lyrics and no caption_format, and a reader treats that as \"plain\"."
 
 // ── Decode to 48 kHz planar stereo ─────────────────────────────────────────
 
@@ -521,7 +642,8 @@ static bool yp_check_existing(const std::string & manifest_path, int64_t clip_fr
 struct Yue2PpSource {
     std::string name;         // basename
     std::string path;         // full path as scanned
-    std::string caption;
+    std::string caption;      // the STYLE string: descriptive prose, no field noise
+    std::string lyrics;       // the tagged lyric sheet, or empty for an instrumental
     // pm_safe_stem(name) + "_" + cache key. The KEY is part of it on purpose:
     // the sanitized stem alone collides (a.wav and a.flac both sanitize to
     // "a"), which would give two different songs the same clip ids and the
@@ -534,9 +656,194 @@ struct Yue2PpSource {
     double      seconds   = 0.0;
 };
 
+// ── `--captions-only`: refill the text fields of an existing manifest ──────
+//
+// The cache behind `<out>/yue2_preprocess.json` costs a VAE pass and, once
+// `ace-train yue2-tokenize` has run, a MERT + head pass on top. Re-running the
+// full preprocess to pick up a caption mode that did not exist when the corpus
+// was built would rewrite the manifest from scratch and take `codec_ids`,
+// `codec_ids_present` and the whole tokenizer provenance block with it — the
+// latents on disk would survive, the codes on disk would survive, and the
+// manifest that names them would not.
+//
+// So this path does what `yue2-tokenize` does for its own field: read the
+// manifest, MUTATE the fields it owns, write it back. It touches
+//
+//     root      caption_mode, default_caption, caption_format, caption_note,
+//               caption_producer, caption_updated_at
+//     sources[] caption, lyrics
+//     clips[]   caption, lyrics
+//
+// and nothing else. Every other key is carried through by value. No model is
+// loaded, no audio is decoded, and no CUDA context is created, so the TF32 rule
+// that governs the encode path does not apply here and is deliberately not
+// re-asserted (asserting it would be theatre — there is nothing to corrupt).
+//
+// Sources are matched to clips on `latents`, which is unique per source by
+// construction (the cache key is in the stem). A clip whose `latents` names no
+// source is left exactly as it was rather than guessed at.
+static int yue2_preprocess_captions_only(const Yue2PreprocessArgs & a) {
+    if (a.out_dir.empty()) {
+        fprintf(stderr, "[yue2-preprocess] --captions-only needs --out <dir> (the cache holding the manifest)\n");
+        return 1;
+    }
+    if (a.caption_mode != "ace" && a.caption_mode != "txt" && a.caption_mode != "default" &&
+        a.caption_mode != "none") {
+        fprintf(stderr, "[yue2-preprocess] --caption-mode must be ace, txt, default or none\n");
+        return 1;
+    }
+    if (a.caption_mode == "default" && pm_trim(a.default_caption).empty()) {
+        fprintf(stderr, "[yue2-preprocess] --caption-mode default needs a non-empty --default-caption\n");
+        return 1;
+    }
+    const std::string manifest_path = a.out_dir + "/yue2_preprocess.json";
+    if (!pm_file_exists(manifest_path)) {
+        fprintf(stderr,
+                "[yue2-preprocess] --captions-only needs an existing manifest; %s does not exist. Run a normal "
+                "preprocess first.\n",
+                manifest_path.c_str());
+        return 1;
+    }
+
+    yyjson_read_err rerr;
+    memset(&rerr, 0, sizeof(rerr));
+    yyjson_doc * rdoc = yyjson_read_file(manifest_path.c_str(), 0, nullptr, &rerr);
+    if (!rdoc) {
+        fprintf(stderr, "[yue2-preprocess] cannot parse %s: %s\n", manifest_path.c_str(),
+                rerr.msg ? rerr.msg : "unknown error");
+        return 1;
+    }
+    yyjson_mut_doc * mdoc  = yyjson_mut_doc_new(nullptr);
+    yyjson_mut_val * mroot = yyjson_val_mut_copy(mdoc, yyjson_doc_get_root(rdoc));
+    yyjson_doc_free(rdoc);
+    if (!mroot || !yyjson_mut_is_obj(mroot)) {
+        fprintf(stderr, "[yue2-preprocess] %s has no top-level object\n", manifest_path.c_str());
+        yyjson_mut_doc_free(mdoc);
+        return 1;
+    }
+    yyjson_mut_doc_set_root(mdoc, mroot);
+
+    // sources[]: resolve from each row's own `source` audio path.
+    struct YpCapRow {
+        std::string caption;
+        std::string lyrics;
+    };
+    std::map<std::string, YpCapRow> by_latent;
+    int64_t n_src = 0, n_cap = 0, n_lyr = 0, n_missing = 0;
+    {
+        yyjson_mut_val * sarr = yyjson_mut_obj_get(mroot, "sources");
+        if (!sarr || !yyjson_mut_is_arr(sarr)) {
+            fprintf(stderr, "[yue2-preprocess] %s has no sources[] array\n", manifest_path.c_str());
+            yyjson_mut_doc_free(mdoc);
+            return 1;
+        }
+        size_t           i, n;
+        yyjson_mut_val * it = nullptr;
+        yyjson_mut_arr_foreach(sarr, i, n, it) {
+            if (!yyjson_mut_is_obj(it)) {
+                continue;
+            }
+            yyjson_mut_val * pv = yyjson_mut_obj_get(it, "source");
+            yyjson_mut_val * lv = yyjson_mut_obj_get(it, "latents");
+            if (!pv || !yyjson_mut_is_str(pv)) {
+                continue;
+            }
+            const std::string apath = yyjson_mut_get_str(pv);
+            n_src++;
+            YpCapRow row;
+            bool     hit = false;
+            yp_resolve_caption(a, apath, &row.caption, &row.lyrics, &hit);
+            if (a.caption_mode == "ace" && !hit) {
+                fprintf(stderr, "[yue2-preprocess]   no readable ACE sidecar beside %s\n", apath.c_str());
+                n_missing++;
+            }
+            if (!row.caption.empty()) {
+                n_cap++;
+            }
+            if (!row.lyrics.empty()) {
+                n_lyr++;
+            }
+            yyjson_mut_obj_remove_str(it, "caption");
+            yyjson_mut_obj_add_strcpy(mdoc, it, "caption", row.caption.c_str());
+            yyjson_mut_obj_remove_str(it, "lyrics");
+            yyjson_mut_obj_add_strcpy(mdoc, it, "lyrics", row.lyrics.c_str());
+            if (lv && yyjson_mut_is_str(lv)) {
+                by_latent[yyjson_mut_get_str(lv)] = row;
+            }
+        }
+    }
+
+    int64_t n_clip = 0, n_clip_unmatched = 0;
+    {
+        yyjson_mut_val * carr = yyjson_mut_obj_get(mroot, "clips");
+        size_t           i, n;
+        yyjson_mut_val * it = nullptr;
+        if (carr && yyjson_mut_is_arr(carr)) {
+            yyjson_mut_arr_foreach(carr, i, n, it) {
+                if (!yyjson_mut_is_obj(it)) {
+                    continue;
+                }
+                yyjson_mut_val * lv = yyjson_mut_obj_get(it, "latents");
+                if (!lv || !yyjson_mut_is_str(lv)) {
+                    n_clip_unmatched++;
+                    continue;
+                }
+                auto f = by_latent.find(yyjson_mut_get_str(lv));
+                if (f == by_latent.end()) {
+                    n_clip_unmatched++;
+                    continue;
+                }
+                n_clip++;
+                yyjson_mut_obj_remove_str(it, "caption");
+                yyjson_mut_obj_add_strcpy(mdoc, it, "caption", f->second.caption.c_str());
+                yyjson_mut_obj_remove_str(it, "lyrics");
+                yyjson_mut_obj_add_strcpy(mdoc, it, "lyrics", f->second.lyrics.c_str());
+            }
+        }
+    }
+
+    yyjson_mut_obj_remove_str(mroot, "caption_mode");
+    yyjson_mut_obj_add_strcpy(mdoc, mroot, "caption_mode", a.caption_mode.c_str());
+    yyjson_mut_obj_remove_str(mroot, "default_caption");
+    yyjson_mut_obj_add_strcpy(mdoc, mroot, "default_caption", a.default_caption.c_str());
+    yyjson_mut_obj_remove_str(mroot, "caption_format");
+    yyjson_mut_obj_add_strcpy(mdoc, mroot, "caption_format", yp_caption_format(a.caption_mode));
+    yyjson_mut_obj_remove_str(mroot, "caption_note");
+    yyjson_mut_obj_add_strcpy(mdoc, mroot, "caption_note", YP_CAPTION_NOTE);
+    yyjson_mut_obj_remove_str(mroot, "caption_producer");
+    yyjson_mut_obj_add_strcpy(mdoc, mroot, "caption_producer",
+                              (std::string("ace-train yue2-preprocess --captions-only ") + ACE_VERSION).c_str());
+    yyjson_mut_obj_remove_str(mroot, "caption_updated_at");
+    yyjson_mut_obj_add_strcpy(mdoc, mroot, "caption_updated_at", pm_iso8601_utc_now().c_str());
+
+    size_t mlen  = 0;
+    char * mjson = yyjson_mut_write(mdoc, YYJSON_WRITE_PRETTY, &mlen);
+    yyjson_mut_doc_free(mdoc);
+    if (!mjson) {
+        fprintf(stderr, "[yue2-preprocess] cannot serialize the rewritten manifest\n");
+        return 1;
+    }
+    const bool wrote = pm_write_atomic(manifest_path, std::string(mjson, mlen));
+    free(mjson);
+    if (!wrote) {
+        fprintf(stderr, "[yue2-preprocess] cannot write %s\n", manifest_path.c_str());
+        return 1;
+    }
+    fprintf(stderr,
+            "[yue2-preprocess] captions-only: %lld source(s) updated (%lld with a caption, %lld with lyrics, "
+            "%lld with no readable sidecar), %lld clip(s) updated, %lld clip(s) unmatched. caption_format=%s. "
+            "Latents, codes and codec_ids untouched -> %s\n",
+            (long long) n_src, (long long) n_cap, (long long) n_lyr, (long long) n_missing, (long long) n_clip,
+            (long long) n_clip_unmatched, yp_caption_format(a.caption_mode), manifest_path.c_str());
+    return 0;
+}
+
 // ── The run ────────────────────────────────────────────────────────────────
 
 static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
+    if (a.captions_only) {
+        return yue2_preprocess_captions_only(a);
+    }
     // ── argument validation ────────────────────────────────────────────
     if (a.audio_dir.empty()) {
         fprintf(stderr, "[yue2-preprocess] --audio <folder> is required\n");
@@ -546,8 +853,9 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         fprintf(stderr, "[yue2-preprocess] --out <dir> is required\n");
         return 1;
     }
-    if (a.caption_mode != "txt" && a.caption_mode != "default" && a.caption_mode != "none") {
-        fprintf(stderr, "[yue2-preprocess] --caption-mode must be txt, default or none\n");
+    if (a.caption_mode != "ace" && a.caption_mode != "txt" && a.caption_mode != "default" &&
+        a.caption_mode != "none") {
+        fprintf(stderr, "[yue2-preprocess] --caption-mode must be ace, txt, default or none\n");
         return 1;
     }
     if (a.decode != "auto" && a.decode != "ffmpeg") {
@@ -749,14 +1057,9 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         Yue2PpSource s;
         s.name = name;
         s.path = path;
-        if (a.caption_mode == "txt") {
-            std::string cap;
-            if (yp_read_text(yp_caption_path(path), &cap)) {
-                s.caption = cap;
-            }
-        } else if (a.caption_mode == "default") {
-            s.caption = pm_trim(a.default_caption);
-        }  // "none" -> empty, which is the empty-style prefix at training time
+        bool sidecar_hit = false;
+        yp_resolve_caption(a, path, &s.caption, &s.lyrics, &sidecar_hit);
+        (void) sidecar_hit;
 
         const std::string key = yp_key_hex(name + "|" + std::to_string(fbytes) + "|" + std::to_string(fmtime) + "|" +
                                            variant_name + "|" + vae_base + "|v1");
@@ -881,9 +1184,10 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         total_clips += s.clips;
         total_sec   += s.seconds;
         sources.push_back(s);
-        fprintf(stderr, "[yue2-preprocess] %zu/%zu %s %-44s %7.1f s -> %lld frames, %lld clip(s)%s\n", i + 1,
+        fprintf(stderr, "[yue2-preprocess] %zu/%zu %s %-44s %7.1f s -> %lld frames, %lld clip(s)%s%s\n", i + 1,
                 picked.size(), s.cache_hit ? "cached " : "encoded", name.c_str(), s.seconds, (long long) frames,
-                (long long) s.clips, s.caption.empty() ? " [no caption]" : "");
+                (long long) s.clips, s.caption.empty() ? " [no caption]" : "",
+                (a.caption_mode == "ace" && s.lyrics.empty()) ? " [no lyrics]" : "");
     }
 
     if (tmp_dir_made) {
@@ -931,6 +1235,10 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
     yyjson_mut_obj_add_int(doc, root, "clip_frames", clip_frames);
     yyjson_mut_obj_add_strcpy(doc, root, "caption_mode", a.caption_mode.c_str());
     yyjson_mut_obj_add_strcpy(doc, root, "default_caption", a.default_caption.c_str());
+    // The SHAPE of `caption`, stated rather than left to be sniffed. See the
+    // header's "caption / lyrics" note and yp_caption_format().
+    yyjson_mut_obj_add_strcpy(doc, root, "caption_format", yp_caption_format(a.caption_mode));
+    yyjson_mut_obj_add_strcpy(doc, root, "caption_note", YP_CAPTION_NOTE);
     // RESERVED slot, 08-nar-lora-trainer.md §5. False = the text-only regime;
     // a later producer sets it true and adds a per-clip "codec_ids" path
     // WITHOUT bumping `format`.
@@ -952,12 +1260,15 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
     yyjson_mut_val * carr = yyjson_mut_arr(doc);
     yyjson_mut_obj_add_val(doc, root, "clips", carr);
 
-    int64_t captioned = 0;
+    int64_t captioned = 0, lyriced = 0;
     for (const auto & s : sources) {
         yyjson_mut_val * so = yyjson_mut_obj(doc);
         yyjson_mut_obj_add_strcpy(doc, so, "name", s.name.c_str());
         yyjson_mut_obj_add_strcpy(doc, so, "source", s.path.c_str());
         yyjson_mut_obj_add_strcpy(doc, so, "caption", s.caption.c_str());
+        // Per SOURCE as well as per clip: the AR trainer reads sources[] (whole
+        // songs), the NAR trainer reads clips[]. Both need the same two strings.
+        yyjson_mut_obj_add_strcpy(doc, so, "lyrics", s.lyrics.c_str());
         yyjson_mut_obj_add_strcpy(doc, so, "latents", s.latent_rel.c_str());
         yyjson_mut_obj_add_int(doc, so, "frames", s.frames);
         yyjson_mut_obj_add_int(doc, so, "clips", s.clips);
@@ -972,6 +1283,7 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
             yyjson_mut_obj_add_strcpy(doc, co, "id", idbuf);
             yyjson_mut_obj_add_strcpy(doc, co, "source", s.path.c_str());
             yyjson_mut_obj_add_strcpy(doc, co, "caption", s.caption.c_str());
+            yyjson_mut_obj_add_strcpy(doc, co, "lyrics", s.lyrics.c_str());
             yyjson_mut_obj_add_strcpy(doc, co, "latents", s.latent_rel.c_str());
             // The reader needs source_frames as well as offset_frames: it
             // BOUNDS the clip's contiguous read against the file it came from
@@ -984,6 +1296,9 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         }
         if (!s.caption.empty()) {
             captioned += s.clips;
+        }
+        if (!s.lyrics.empty()) {
+            lyriced++;
         }
     }
 
@@ -1003,9 +1318,9 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
 
     fprintf(stderr,
             "[yue2-preprocess] done: %zu sources (%zu encoded, %zu cached, %zu skipped, %zu failed), %lld clips "
-            "x %.1f s, %lld with a caption, %.2f min of audio -> %s\n",
+            "x %.1f s, %lld with a caption, %lld/%zu source(s) with lyrics, %.2f min of audio -> %s\n",
             sources.size(), n_encoded, n_cached, n_skipped, n_failed, (long long) total_clips, a.clip_seconds,
-            (long long) captioned, total_sec / 60.0, manifest_path.c_str());
+            (long long) captioned, (long long) lyriced, sources.size(), total_sec / 60.0, manifest_path.c_str());
     // Partial success is still success: the failures are named above and the
     // manifest only lists what actually cached. A run where NOTHING worked
     // already returned 1.
@@ -1024,12 +1339,16 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
 //          f16, so omitting this reads every latent as noise), latent_layout=
 //          "frame_major", latent_index, codec_ids_present=false, plus the
 //          provenance and counts nothing parses.
-//   clips[] id, source, caption, latents (relative to the manifest's dir),
-//          offset_frames, frames, source_frames (a bounds check for the
+//   clips[] id, source, caption, lyrics, latents (relative to the manifest's
+//          dir), offset_frames, frames, source_frames (a bounds check for the
 //          reader; the row stride is latent_dim, not this).
-//   sources[] one row per input file. Informational — a per-file summary for
-//          logs and the Training Studio; the trainer reads clips[] only.
+//   sources[] one row per input file, carrying the same caption/lyrics pair.
+//          Informational for the NAR trainer, which reads clips[] only.
 //
-// `sources[]` is listed last on purpose: a consumer that reads it instead of
+// `sources[]` was listed last on purpose: a consumer that read it instead of
 // `clips[]` would train on whole songs, and its `frames` is the SOURCE's, not
-// a clip's.
+// a clip's. That is no longer a hazard but a second reader — the AR trainer
+// (`train/yue2-ar-train-run.h`) reads sources[] DELIBERATELY, because whole
+// songs are exactly what it trains on (contract §4.4: no crop policy) and the
+// source-level `codec_ids` is the whole-song code array. The two readers want
+// different arrays of the same manifest; both get the same two text fields.

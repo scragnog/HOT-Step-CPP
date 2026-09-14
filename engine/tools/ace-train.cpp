@@ -365,10 +365,19 @@ static void print_usage(void) {
             "                [--clip-seconds <f>]  default 10 (= 250 frames at 25 fps). The\n"
             "                short tail of each file is dropped and a file shorter than one\n"
             "                clip is skipped with a warning, as upstream does.\n"
-            "                [--caption-mode txt|default|none]  default txt: the same-named\n"
-            "                .txt beside the audio. `default` uses --default-caption for\n"
-            "                every clip; `none` trains on the empty-style prefix.\n"
+            "                [--caption-mode ace|txt|default|none]  default txt: the whole\n"
+            "                same-named .txt as the caption. `ace` parses it as a HOT-Step\n"
+            "                Option-A dataset sidecar instead, taking `caption:` as the STYLE\n"
+            "                and `lyrics:` as the LYRICS and discarding genre/bpm/key — which\n"
+            "                is what the YuE2 AR prefix needs and what `txt` gets wrong, by\n"
+            "                putting bpm and the whole lyric sheet inside [Tags]. `default`\n"
+            "                uses --default-caption for every clip; `none` trains on the\n"
+            "                empty-style prefix. The mode is recorded as `caption_format`.\n"
             "                [--default-caption \"...\"]\n"
+            "                [--captions-only]  refill `caption` and `lyrics` in an EXISTING\n"
+            "                <out>/yue2_preprocess.json and change nothing else. No VAE, no\n"
+            "                decode, no CUDA; latents, codes and codec_ids are carried\n"
+            "                through untouched. Only --out and --caption-mode apply.\n"
             "                [--decode auto|ffmpeg]  auto = the repo's own WAV/MP3 decoder\n"
             "                (+ its polyphase resampler) for those two, ffmpeg for the rest.\n"
             "                `ffmpeg` forces one resampler across a mixed corpus.\n"
@@ -484,10 +493,12 @@ static void print_usage(void) {
             "                start unless --allow-no-minted is also passed, and then it prints\n"
             "                a banner, exports minted: \"absent\" in the metadata, and has NO\n"
             "                minted_val loss to watch. The pack is Mothersuperior/\n"
-            "                yue2-minted-corpus -> minted_regularizer_pack.pt (~100 MB), a\n"
-            "                torch pickle: convert it once to a sources[] manifest with\n"
-            "                codec_ids pointing at .i32 files. A .pt path is REFUSED, not\n"
-            "                half-read.\n"
+            "                yue2-minted-corpus -> regularizer/minted_regularizer_pack.pt\n"
+            "                (~100 MB, 4,732 songs), a torch pickle: convert it once with\n"
+            "                engine/tools/convert-yue2-minted.py and pass the\n"
+            "                minted_manifest.json it writes. A .pt path is REFUSED, not\n"
+            "                half-read. --trigger is NOT applied to minted styles and the\n"
+            "                minted_val hold-out is excluded from training, both as upstream.\n"
             "                [--artist-frac 0.5]  one draw per micro-step.\n"
             "                [--rank 64] [--alpha 64] [--lr 1e-4] [--steps 1600] [--warmup 50]\n"
             "                [--sched-steps 3000]  the cosine HORIZON (upstream's SCHED_STEPS),\n"
@@ -549,6 +560,15 @@ static void print_usage(void) {
             "                [--fd-frames 128] synthetic codec stream length for the gate.\n"
             "                YUE2_FD_LOSSGRAD=2 is the negative control: every probe must then\n"
             "                report rel ~= 0.5 and the gate must FAIL.\n"
+            "                --forward-check N  the two checks FD CANNOT SEE, over a real\n"
+            "                manifest song ([--fc-song K], default 0), then exit. FD verifies\n"
+            "                the backward against the forward, so a WRONG FORWARD passes it.\n"
+            "                (1) zero-init identity: with B == 0 the trainer's logits must\n"
+            "                match yue2_ar_forward's at N supervised rows, to within the F16\n"
+            "                KV round trip the trainer drops -- a tolerance, not equality.\n"
+            "                (2) step-0 loss, to run against YUE2_AT_SUP_SHIFT=-1: shifting\n"
+            "                the supervised window one row must move the loss well clear of\n"
+            "                ln(32769)=10.397. A loss that does not move is the finding.\n"
             "                Writes <out>/<name>.safetensors as yue2.blk.N.{attn_*,ffn_*}.\n"
             "                lora_{A,B}.weight with __metadata__.format \"yue2-ar-lora-v1\".\n"
             "                NOTE: yue2-adapter.h maps nar_* sites ONLY today, so the merge\n"
@@ -4509,8 +4529,22 @@ static int cmd_yue2_preprocess(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--halo-frames"))     a.halo_frames     = atoll(next("--halo-frames"));
         else if (!strcmp(argv[i], "--limit"))           a.limit           = atoi(next("--limit"));
         else if (!strcmp(argv[i], "--force"))           a.force           = true;
+        else if (!strcmp(argv[i], "--captions-only"))   a.captions_only   = true;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    // --captions-only rewrites the caption/lyrics fields of an EXISTING manifest
+    // and nothing else. No audio is read and no VAE is loaded, so --audio and
+    // --models are not part of the job: every source row already carries its own
+    // path. Demanding them would be a lie about what the run does.
+    if (a.captions_only) {
+        if (a.out_dir.empty()) {
+            fprintf(stderr, "ace-train yue2-preprocess --captions-only: --out <dir> is required "
+                            "(the cache holding yue2_preprocess.json)\n");
+            return 2;
+        }
+        ggml_time_init();
+        return yue2_preprocess_run(a);
     }
     if (a.audio_dir.empty() || a.out_dir.empty()) {
         fprintf(stderr, "ace-train yue2-preprocess: --audio <folder> and --out <dir> are required\n");
@@ -4650,6 +4684,8 @@ static int cmd_yue2_ar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--fd-eps"))        a.fd_eps       = atof(next("--fd-eps"));
         else if (!strcmp(argv[i], "--ar-layers"))     a.ar_layers    = atoi(next("--ar-layers"));
         else if (!strcmp(argv[i], "--fd-frames"))     a.fd_frames    = atoll(next("--fd-frames"));
+        else if (!strcmp(argv[i], "--forward-check")) a.fwd_check    = atoi(next("--forward-check"));
+        else if (!strcmp(argv[i], "--fc-song"))       a.fc_song      = atoll(next("--fc-song"));
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }

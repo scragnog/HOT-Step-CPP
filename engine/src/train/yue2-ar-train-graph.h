@@ -166,6 +166,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>  // getenv/atoi — YUE2_AT_SUP_SHIFT, the supervised-slice control
 #include <cstring>
 #include <string>
 #include <vector>
@@ -197,6 +198,40 @@ using Yue2AtLora = Yue2TrainLora;
 // every eval for exactly that reason.
 static const int64_t YUE2_AT_SLICE_ROW0 = (int64_t) YUE2_MUSIC_END;                        // 151852
 static const int64_t YUE2_AT_SLICE_ROWS = (int64_t) YUE2_LATENT_START - (int64_t) YUE2_MUSIC_END;  // 32769
+
+// ── YUE2_AT_SUP_SHIFT: the supervised-slice negative control (contract §6.5) ─
+//
+// Finite differences verify the BACKWARD against the FORWARD, so a forward that
+// is off by one row passes the FD gate happily: both arms move together. The
+// off-by-one in contract §3.1 — the hidden state at row r predicts ids[r+1], so
+// the supervised span starts at row P-1 and NOT at P — is the mistake in this
+// design most likely to be made and least likely to be noticed, because a loss
+// that falls from a wrong starting point still falls.
+//
+// This env var shifts the column the head reads (and writes dL/dh back into) by
+// N rows without touching the targets, in the same spirit as YUE2_FD_LOSSGRAD.
+// -1 is contract §6.5's control: h[P-2 : S-2] against targets ids[P:]. The loss
+// must then jump well clear of ln(32769) = 10.397 and stay there. It is read
+// once, banners once, and a real run never sets it.
+static int yue2_at_sup_shift_env() {
+    static int  shift  = 0;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded          = true;
+        const char * ev = std::getenv("YUE2_AT_SUP_SHIFT");
+        if (ev && ev[0]) {
+            shift = atoi(ev);
+            if (shift != 0) {
+                fprintf(stderr,
+                        "[yue2-at] NEGATIVE CONTROL: YUE2_AT_SUP_SHIFT=%d — the CE head reads hidden rows "
+                        "[P-1%+d .. ] against UNSHIFTED targets ids[P..]. The supervision window is "
+                        "deliberately wrong; a loss that does not move is the finding.\n",
+                        shift, shift);
+            }
+        }
+    }
+    return shift;
+}
 
 // ── Attention mode (contract §1.3) ─────────────────────────────────────────
 //
@@ -997,6 +1032,12 @@ struct Yue2AtRun {
     // gate sets it from YUE2_FD_LOSSGRAD.
     float      lossgrad   = 1.0f;
 
+    // Contract §6.5's forward-side negative control. 0 for every real run; the
+    // head reads hidden columns P-1+sup_shift+i and writes dL/dh back into the
+    // SAME columns, so the gradient stays self-consistent and the FD gate stays
+    // PASS — which is the entire point: this is a fault FD cannot see.
+    int sup_shift = 0;
+
     bool forward_only = false;  // evaluation: stop after the head
     // When non-null the head downloads each chunk's logits and re-aggregates
     // the CE on the HOST IN DOUBLE (contract §6.2). The in-graph
@@ -1052,6 +1093,17 @@ static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool coun
     const int64_t CH    = st.chunk;
     const int64_t GA    = std::max<int64_t>(1, r.grad_accum);
 
+    // The supervised span's first hidden column. P-1 for every real run; the
+    // control shifts it and leaves the targets alone (contract §6.5).
+    const int64_t S    = (int64_t) seq.ids.size();
+    const int64_t col0 = seq.prefix - 1 + (int64_t) r.sup_shift;
+    if (col0 < 0 || col0 + n_sup > S) {
+        fprintf(stderr, "[yue2-at] supervised span [%lld, %lld) with shift %d falls outside the %lld-token "
+                        "sequence\n",
+                (long long) col0, (long long) (col0 + n_sup), r.sup_shift, (long long) S);
+        return false;
+    }
+
     double ce      = 0.0;
     double ce_host = 0.0;
     std::vector<float> lg_host;
@@ -1075,7 +1127,7 @@ static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool coun
 
         // Column of t_H the chunk starts at: the supervised span begins at
         // row P-1 (the hidden state that predicts ids[P]).
-        const size_t  col = (size_t) (seq.prefix - 1 + i);
+        const size_t  col = (size_t) (col0 + i);
         ggml_tensor * hd  = ggml_cont(ctx, ggml_view_2d(ctx, st.t_H, H, Sc, st.t_H->nb[1], col * st.t_H->nb[1]));
         ggml_tensor * lg  = ggml_mul_mat(ctx, st.t_head, hd);  // [SL, Sc]
         ggml_tensor * lb  = ggml_view_2d(ctx, st.t_labc, YUE2_AT_SLICE_ROWS, Sc, st.t_labc->nb[1], 0);
@@ -1156,7 +1208,7 @@ static bool yue2_at_head_fullvocab_ce(Yue2AtRun & r, const Yue2AtSeq & seq, int6
         ggml_init_params ip  = { st.arena.size(), st.arena.data(), /*no_alloc*/ true };
         ggml_context *   ctx = ggml_init(ip);
         ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 64, /*grads=*/false);
-        const size_t     col = (size_t) (seq.prefix - 1 + i);
+        const size_t     col = (size_t) (seq.prefix - 1 + (int64_t) r.sup_shift + i);
         ggml_tensor *    hd =
             ggml_cont(ctx, ggml_view_2d(ctx, st.t_H, H, Sc, st.t_H->nb[1], col * st.t_H->nb[1]));
         ggml_tensor * lg = ggml_mul_mat(ctx, m.lm.output, hd);  // [V, Sc]

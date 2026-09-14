@@ -45,13 +45,22 @@
 // stream at micro-step k is a pure function of k, so a run that pauses at 300
 // and resumes sees exactly the draws the uninterrupted run would have seen.
 //
-// ── THE MINTED REGULARIZER IS NOT ON THIS MACHINE ──────────────────────────
+// ── THE MINTED REGULARIZER ─────────────────────────────────────────────────
 //
-// `minted_regularizer_pack.pt` (Mothersuperior/yue2-minted-corpus, ~100 MB,
-// 4,732 YuE2-generated songs) is the other half of upstream's recipe and it was
-// not found on D:, M:, K: or the session scratchpad. Nothing has been
-// fabricated in its place. What the trainer does instead is contract §5.3's
-// design, and it is deliberately loud:
+// `minted_regularizer_pack.pt` (Mothersuperior/yue2-minted-corpus, dataset repo,
+// path `regularizer/minted_regularizer_pack.pt`, 101,878,861 bytes, sha256
+// bdd9b978…dc4e) is the other half of upstream's recipe: 4,732 YuE2-generated
+// songs, each {name, src, style, lyrics, codec} with `codec` an int32 array of
+// RAW codes in [0, 32768). 4,516 are `minted` and 216 are `minted_val`, held
+// out by md5(name) % 20 == 0 (verified against all 4,732 records).
+//
+// Downloaded and converted 2026-09-14 to K:/yue2/models/yue2-minted/ by
+// engine/tools/convert-yue2-minted.py; format spec at
+// docs/plans/yue2/15-minted-pack.md. `--minted` takes the converted
+// minted_manifest.json, never the .pt.
+//
+// Its ABSENCE remains an explicit state, and contract §5.3's refusal is
+// unchanged and deliberately loud:
 //
 //   1. `--minted <path>` is accepted; its ABSENCE is an explicit state.
 //   2. Without it the run REFUSES TO START unless `--allow-no-minted` is also
@@ -75,6 +84,19 @@
 // takes a JSON manifest in the same shape yue2-preprocess writes (sources[]
 // with style/lyrics/codec_ids and a per-source `src` of "minted"/"minted_val"),
 // and a `.pt` path is refused with a message saying so rather than half-read.
+// The converted pack adds two optional per-source fields, `codec_ids_offset`
+// and `codec_ids_frames` (both in FRAMES), so all 4,732 songs slice out of one
+// 86 MB blob instead of 4,732 small files. Absent, they mean "the whole file",
+// which is what yue2-tokenize writes.
+//
+// Two things the regularizer set does NOT inherit from the artist set, because
+// upstream does not give them to it either (`ar_prep.py` takes the minted style
+// from request.json verbatim): --trigger is not prepended to a minted style,
+// and --style / --lyrics are not used as its fallbacks. Teaching the trigger
+// word on 4,516 songs that are not the artist would undo the one thing the
+// trigger is for. And the minted_val hold-out is excluded from the TRAINING
+// pool, not merely reported: training on it would make the number this run
+// watches flat for the wrong reason.
 //
 // ── The other honest gap: lyrics (contract §5.2) ───────────────────────────
 //
@@ -104,6 +126,7 @@
 #include "train/preprocess-io.h"  // pm_mkdir_p, pm_file_exists, pm_stat_file
 #include "train/st-write.h"       // the exporter
 #include "train/yue2-ar-train-graph.h"
+#include "train/yue2-sidecar.h"  // the ACE sidecar parser, shared with yue2-preprocess
 
 #include "hot-step-fsutf8.h"
 #include "yue2/yue2-model.h"
@@ -193,6 +216,12 @@ struct Yue2ArTrainArgs {
     double cursor_weight = 0.0;
 
     // --fd-check N: run the gradient gate over N probes instead of training.
+    // --forward-check N: the two checks the FD gate cannot see (contract
+    // §§6.5-6.6), over a REAL manifest song rather than the gate's synthetic
+    // stream. N is how many supervised rows to compare against yue2_ar_forward.
+    int     fwd_check = 0;
+    int64_t fc_song   = 0;  // which manifest source to run them on
+
     int    fd_check  = 0;
     double fd_eps    = 1e-2;
     int    ar_layers = 2;    // F32 isolation depth / stack truncation; 0 = no isolation (report only)
@@ -422,6 +451,8 @@ struct Yue2ArSong {
     std::string          style;    // what goes in [Tags]
     std::string          lyrics;   // what goes in [Lyrics]
     std::string          codes_path;
+    int64_t              codes_off = 0;  // FRAMES into codes_path; blob-packed sets only
+    int64_t              codes_n   = 0;  // FRAMES to read; 0 = the whole file
     std::string          cursor_words;  // contract §3.4's seam; loaded by nothing yet
     std::vector<int32_t> codec;   // RAW ids, [0, 32768); lazily loaded for the minted set
     std::vector<int32_t> prefix;  // tokenized once
@@ -456,122 +487,14 @@ static std::string yue2_at_dirname(const std::string & p) {
 
 // ── The ACE dataset sidecar (contract §5.2, and the deviation named above) ──
 //
-// `<stem>.txt` beside the source audio, in HOT-Step's own Option-A format. The
-// canonical parser is server/src/services/training/sidecarIO.ts:58-82 and its
-// ONE non-obvious rule is copied exactly:
-//
-//     ONCE `lyrics:` STARTS, EVERY SUBSEQUENT LINE IS LYRICS — INCLUDING LINES
-//     CONTAINING COLONS.
-//
-// That is safe because the writer always emits lyrics last (:147-162). Getting
-// it wrong would put `bpm: 121` and the whole lyric sheet inside the style
-// string and leave [Lyrics] empty, which trains and is wrong — the worst
-// combination, and the reason this is transcribed rather than approximated.
-//
-// A line starting with '[' is NEVER a key, so a `[Verse 1]` heading inside a
-// value cannot open a new field.
+// `<stem>.txt` beside the source audio, in HOT-Step's own Option-A format.
+// The rules — and the one that matters, `lyrics:` running to end of file — live
+// in train/yue2-sidecar.h, which `yue2-preprocess --caption-mode ace` parses
+// with as well. ONE implementation, because two copies of a parser whose
+// failure mode is "trains at full speed on a mangled prefix" is the drift
+// contract §5.2 is written against.
 static bool yue2_at_parse_sidecar(const std::string & text, std::string * caption, std::string * lyrics) {
-    if (text.empty()) {
-        return false;
-    }
-    size_t i = 0;
-    if (text.size() >= 3 && (unsigned char) text[0] == 0xEF && (unsigned char) text[1] == 0xBB &&
-        (unsigned char) text[2] == 0xBF) {
-        i = 3;  // UTF-8 BOM
-    }
-    std::string              cur_key;
-    std::vector<std::string> cur_lines;
-    std::map<std::string, std::string> meta;
-    auto flush = [&]() {
-        if (!cur_key.empty()) {
-            std::string v;
-            for (size_t k = 0; k < cur_lines.size(); k++) {
-                if (k) {
-                    v += '\n';
-                }
-                v += cur_lines[k];
-            }
-            // trim
-            size_t b = v.find_first_not_of(" \t\r\n");
-            size_t e = v.find_last_not_of(" \t\r\n");
-            meta[cur_key] = (b == std::string::npos) ? std::string() : v.substr(b, e - b + 1);
-        }
-        cur_key.clear();
-        cur_lines.clear();
-    };
-    while (i <= text.size()) {
-        size_t nl = text.find('\n', i);
-        if (nl == std::string::npos) {
-            nl = text.size();
-        }
-        std::string line = text.substr(i, nl - i);
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        i = nl + 1;
-        if (cur_key == "lyrics") {
-            while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) {
-                line.pop_back();
-            }
-            cur_lines.push_back(line);
-            if (nl >= text.size()) {
-                break;
-            }
-            continue;
-        }
-        std::string ls = line;
-        ls.erase(0, ls.find_first_not_of(" \t") == std::string::npos ? ls.size() : ls.find_first_not_of(" \t"));
-        const size_t colon = ls.find(':');
-        if (colon != std::string::npos && !ls.empty() && ls[0] != '[') {
-            std::string key = ls.substr(0, colon);
-            size_t      ke  = key.find_last_not_of(" \t");
-            key             = (ke == std::string::npos) ? std::string() : key.substr(0, ke + 1);
-            for (char & ch : key) {
-                ch = (char) tolower((unsigned char) ch);
-            }
-            // A known-field whitelist, like sidecarIO.ts's FIELD_ORDER set.
-            // Without it a caption that wraps onto a second line containing a
-            // colon would open a bogus field and silently truncate the style.
-            static const char * fields[] = { "caption", "genre",     "bpm",        "key",
-                                             "mood",    "instruments", "vocals",   "language",
-                                             "tags",    "style",     "duration",   "custom_tag",
-                                             "repeat",  "prompt_override", "title", "artist",
-                                             "album",   "year",      "energy",     "time_signature",
-                                             "lyrics" };
-            bool known = false;
-            for (const char * fkey : fields) {
-                if (key == fkey) {
-                    known = true;
-                    break;
-                }
-            }
-            if (known) {
-                flush();
-                cur_key = key;
-                std::string rest = ls.substr(colon + 1);
-                size_t      rb   = rest.find_first_not_of(" \t");
-                cur_lines.push_back(rb == std::string::npos ? std::string() : rest.substr(rb));
-                if (nl >= text.size()) {
-                    break;
-                }
-                continue;
-            }
-        }
-        if (!cur_key.empty()) {
-            cur_lines.push_back(ls);
-        }
-        if (nl >= text.size()) {
-            break;
-        }
-    }
-    flush();
-    auto get = [&](const char * k) {
-        auto it = meta.find(k);
-        return it == meta.end() ? std::string() : it->second;
-    };
-    *caption = get("caption");
-    *lyrics  = get("lyrics");
-    return !caption->empty() || !lyrics->empty();
+    return yue2_sidecar_parse(text, caption, lyrics);
 }
 
 static bool yue2_at_read_text(const std::string & path, std::string * out) {
@@ -590,15 +513,17 @@ static bool yue2_at_read_text(const std::string & path, std::string * out) {
 }
 
 static std::string yue2_at_sidecar_path(const std::string & audio) {
-    const size_t dot   = audio.find_last_of('.');
-    const size_t slash = audio.find_last_of("/\\");
-    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
-        return audio + ".txt";
-    }
-    return audio.substr(0, dot) + ".txt";
+    return yue2_sidecar_path(audio);
 }
 
-static bool yue2_at_read_i32_file(const std::string & path, std::vector<int32_t> * out, std::string * err) {
+// One song's raw codes. `n_frames == 0` means "the whole file", which is the
+// yue2-preprocess case: one .i32 per source, written by `ace-train
+// yue2-tokenize`. A non-zero `n_frames` reads a slice out of a shared blob at
+// `off_frames`, which is how the converted minted pack stores 4,732 songs in
+// one 86 MB file instead of 4,732 small ones (docs/plans/yue2/15-minted-pack.md).
+// Both offsets are in FRAMES — i32 elements — never bytes.
+static bool yue2_at_read_i32_file(const std::string & path, int64_t off_frames, int64_t n_frames,
+                                  std::vector<int32_t> * out, std::string * err) {
     FILE * f = hs_fopen(path, "rb");
     if (!f) {
         *err = "cannot open codec_ids file " + path;
@@ -612,7 +537,26 @@ static bool yue2_at_read_i32_file(const std::string & path, std::vector<int32_t>
         *err = path + " is not a whole number of i32 codec ids (" + std::to_string((long long) n) + " bytes)";
         return false;
     }
-    out->assign((size_t) (n / 4), 0);
+    const int64_t have = (int64_t) (n / 4);
+    if (n_frames <= 0) {
+        off_frames = 0;
+        n_frames   = have;
+    } else if (off_frames < 0 || off_frames + n_frames > have) {
+        fclose(f);
+        // A blob index that points past the end is a converter bug, and reading
+        // a neighbouring song's codes instead would train silently on the wrong
+        // target. Refuse rather than clamp.
+        *err = path + ": codec_ids_offset " + std::to_string((long long) off_frames) + " + " +
+               std::to_string((long long) n_frames) + " frames runs past the file's " +
+               std::to_string((long long) have) + " frames";
+        return false;
+    }
+    if (off_frames && fseek(f, (long) (off_frames * 4), SEEK_SET) != 0) {
+        fclose(f);
+        *err = path + ": cannot seek to frame " + std::to_string((long long) off_frames);
+        return false;
+    }
+    out->assign((size_t) n_frames, 0);
     const bool ok = out->empty() || fread(out->data(), 4, out->size(), f) == out->size();
     fclose(f);
     if (!ok) {
@@ -685,6 +629,10 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
         }
         return std::string();
     };
+    auto jint = [](yyjson_val * o, const char * k) -> int64_t {
+        yyjson_val * v = o ? yyjson_obj_get(o, k) : nullptr;
+        return (v && yyjson_is_int(v)) ? (int64_t) yyjson_get_sint(v) : 0;
+    };
 
     out->dir            = yue2_at_dirname(path);
     out->format         = jstr(root, { "format" });
@@ -726,6 +674,15 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
             break;
         }
         s.codes_path = yue2_at_join(out->dir, cd);
+        // Blob-packed sets (the converted minted pack) point every source at
+        // one shared .i32 and slice it. Absent fields mean "whole file", which
+        // is what yue2-tokenize writes.
+        s.codes_off = jint(it, "codec_ids_offset");
+        s.codes_n   = jint(it, "codec_ids_frames");
+        if (s.codes_n < 0 || s.codes_off < 0) {
+            ferr = "source \"" + s.name + "\" has a negative codec_ids_offset/codec_ids_frames";
+            break;
+        }
         if (!s.cursor_words.empty()) {
             s.cursor_words = yue2_at_join(out->dir, s.cursor_words);
         }
@@ -759,13 +716,21 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
                    "--caption-mode ace, or strip the caption.";
             break;
         }
-        if (s.lyrics.empty()) {
-            s.lyrics = a.lyrics;
+        // --style / --lyrics / --trigger describe THE ARTIST. Applying any of
+        // them to the regularizer would teach the trigger word on 4,516 songs
+        // that are not the artist, which is the one thing the trigger exists to
+        // avoid — and upstream does not do it: `ar_prep.py` takes the minted
+        // style from `request.json` verbatim, and only the artist caption
+        // carries the trigger phrase.
+        if (!want_minted) {
+            if (s.lyrics.empty()) {
+                s.lyrics = a.lyrics;
+            }
+            if (caption.empty()) {
+                caption = a.style;
+            }
         }
-        if (caption.empty()) {
-            caption = a.style;
-        }
-        s.style  = yue2_at_squash(yue2_at_style(a.trigger, caption), 1500);
+        s.style  = yue2_at_squash(want_minted ? caption : yue2_at_style(a.trigger, caption), 1500);
         s.minted = want_minted;
         if (want_minted) {
             const std::string src = jstr(it, { "src" });
@@ -776,6 +741,8 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
         }
         out->songs.push_back(std::move(s));
     }
+    const std::string blob         = jstr(root, { "codec_ids_blob" });
+    const int64_t     total_frames = jint(root, "total_frames");
     yyjson_doc_free(doc);
     if (!ferr.empty()) {
         *err = path + ": " + ferr;
@@ -784,6 +751,35 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
     if (out->songs.empty()) {
         *err = path + " holds no sources";
         return false;
+    }
+    // A blob-packed set says how big its blob should be. Check it ONCE, here,
+    // rather than discovering a truncated or stale blob when song 4,000 is
+    // first drawn several hundred steps in — and a blob that is the wrong file
+    // entirely reads as valid i32 at every offset, so the size is the only
+    // cheap thing that can catch it.
+    if (!blob.empty() && total_frames > 0) {
+        int64_t sum = 0;
+        for (const Yue2ArSong & s : out->songs) {
+            sum += s.codes_n;
+        }
+        const std::string bpath = yue2_at_join(out->dir, blob);
+        int64_t           have  = -1;
+        if (FILE * bf = hs_fopen(bpath, "rb")) {
+            fseek(bf, 0, SEEK_END);
+            have = (int64_t) ftell(bf);
+            fclose(bf);
+        }
+        if (have != total_frames * 4 || sum != total_frames) {
+            char b[512];
+            snprintf(b, sizeof(b),
+                     "%s: codec blob %s is %lld bytes but the manifest claims %lld frames "
+                     "(%lld bytes), and the sources index %lld. The manifest and the blob are not "
+                     "from the same conversion — re-run engine/tools/convert-yue2-minted.py.",
+                     path.c_str(), bpath.c_str(), (long long) have, (long long) total_frames,
+                     (long long) total_frames * 4, (long long) sum);
+            *err = b;
+            return false;
+        }
     }
     if (!want_minted) {
         fprintf(stderr, "[yue2-ar-train] %zu song(s); lyrics from the manifest for %d, from ACE sidecars "
@@ -800,7 +796,7 @@ static bool yue2_at_song_codes(Yue2ArSong * s, std::string * err) {
     if (s->loaded) {
         return true;
     }
-    if (!yue2_at_read_i32_file(s->codes_path, &s->codec, err)) {
+    if (!yue2_at_read_i32_file(s->codes_path, s->codes_off, s->codes_n, &s->codec, err)) {
         return false;
     }
     s->loaded = true;
@@ -1626,6 +1622,11 @@ static int yue2_ar_fdcheck_main(const Yue2ArTrainArgs & a) {
     // seed reaches a device scalar the backward never reads, every probe comes
     // back byte-identical to the positive run, and the gate cannot fail.
     r.lossgrad         = C.lossgrad;
+    // Contract §6.5's other control. The gate's stream is SYNTHETIC, so the
+    // shifted loss here is a weak signal by construction — random codes carry
+    // no information for a neighbouring hidden state to lose. `--forward-check`
+    // runs the same control over a real song, which is where it has teeth.
+    r.sup_shift        = yue2_at_sup_shift_env();
 
     // ── numeric arm: forward only, loss re-aggregated ON THE HOST IN DOUBLE ──
     //
@@ -1924,6 +1925,312 @@ static int yue2_ar_fdcheck_main(const Yue2ArTrainArgs & a) {
     return (isolated && (n_bad || n_checked == 0)) ? 1 : 0;
 }
 
+// ── --forward-check: the two checks FD cannot see (contract §§6.5-6.6) ─────
+//
+// FINITE DIFFERENCES VERIFY THE BACKWARD AGAINST THE FORWARD. A wrong FORWARD
+// therefore passes the gate happily: both arms move together, and the gate is
+// measuring their agreement, not their correctness. These are the two cheap
+// checks that cover that hole, and both want a REAL prefix and REAL codes —
+// the gate's synthetic stream is correct for a gradient check and useless here,
+// because random codes carry no information for a neighbouring hidden state to
+// lose.
+//
+//   CHECK 1, zero-init identity (§6.6). With B == 0 the LoRA branch is an exact
+//   no-op, so the trainer's forward must reproduce `yue2_ar_forward`'s logits
+//   at the supervised rows. NOT bit-for-bit: the trainer dropped the KV cache
+//   (SET_ROWS has no backward) and inference keeps K/V in F16, so the expected
+//   answer is "an F16-sized delta", stated as a tolerance rather than asserted
+//   as equality (§1.2). Two further named divergences, both in the trainer's
+//   favour: the frozen projections are widened to F32 in-graph
+//   (Yue2AtOpts::weights_f32), and the head is an F32 copy of the slice rather
+//   than the base's native type. `YUE2_LM_NO_FLASH=1` puts the reference on the
+//   same manual soft_max path the trainer's `--attn exact` uses, which is what
+//   separates the F16-KV delta from the fused kernel's.
+//
+//   CHECK 2, the supervised-slice off-by-one (§6.5). Run twice with
+//   YUE2_AT_SUP_SHIFT=0 and =-1 and compare the step-0 losses. If shifting the
+//   window by one row does NOT move the loss, the supervision window is not
+//   where the contract says it is, and that is a finding, not a formality.
+static int yue2_ar_forwardcheck_main(const Yue2ArTrainArgs & a) {
+#ifdef _WIN32
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+#else
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+#endif
+    std::string err;
+
+    if (a.manifest.empty()) {
+        fprintf(stderr, "ace-train yue2-ar-train --forward-check: --manifest <yue2_preprocess.json> is "
+                        "required. These checks are about REAL data: the gate's synthetic stream cannot "
+                        "show either fault.\n");
+        return 2;
+    }
+    Yue2AtTarget target = YUE2_AT_T_ATTN_MLP;
+    std::string  why;
+    if (!yue2_at_parse_target(a.target, &target, &why)) {
+        fprintf(stderr, "[yue2-ar-fwd] %s\n", why.c_str());
+        return 2;
+    }
+    Yue2AtAttnMode attn = YUE2_AT_FA_EXACT;
+    if (!yue2_at_parse_attn(a.attn, &attn)) {
+        fprintf(stderr, "[yue2-ar-fwd] --attn must be exact, flash or flash-f32\n");
+        return 2;
+    }
+
+    Yue2ArSet artist;
+    if (!yue2_at_load_manifest(a.manifest, /*want_minted=*/false, a, &artist, &err)) {
+        fprintf(stderr, "[yue2-ar-fwd] %s\n", err.c_str());
+        return 1;
+    }
+    if (artist.songs.empty()) {
+        fprintf(stderr, "[yue2-ar-fwd] the manifest has no sources\n");
+        return 1;
+    }
+    if (a.fc_song < 0 || a.fc_song >= (int64_t) artist.songs.size()) {
+        fprintf(stderr, "[yue2-ar-fwd] --fc-song %lld is outside [0, %zu)\n", (long long) a.fc_song,
+                artist.songs.size());
+        return 2;
+    }
+    Yue2ArSong & s = artist.songs[(size_t) a.fc_song];
+
+    static Yue2Model m;
+    if (!yue2_at_open_model(&m, a, "yue2-ar-fwd", &err)) {
+        fprintf(stderr, "[yue2-ar-fwd] %s\n", err.c_str());
+        return 1;
+    }
+    const Yue2LmConfig & c = m.lm_cfg;
+
+    BPETokenizer tok;
+    if (!yue2_tokenizer_load_from_gguf(&tok, m.lm_file.path)) {
+        fprintf(stderr, "[yue2-ar-fwd] tokenizer: cannot read tokenizer.ggml.* from %s\n",
+                m.lm_file.path.c_str());
+        return 1;
+    }
+    try {
+        const std::vector<int> pre = yue2_token_prefixes(&tok, s.style, s.lyrics, YUE2_COT_OFF, nullptr);
+        s.prefix.assign(pre.begin(), pre.end());
+    } catch (const std::exception & e) {
+        fprintf(stderr, "[yue2-ar-fwd] prefix assembly failed for \"%s\": %s\n", s.name.c_str(), e.what());
+        return 1;
+    }
+    if (!yue2_at_song_codes(&s, &err)) {
+        fprintf(stderr, "[yue2-ar-fwd] %s\n", err.c_str());
+        return 1;
+    }
+    Yue2AtSeq seq;
+    if (!yue2_at_build_sequence(s.prefix, s.codec, a.max_len, &seq, &err)) {
+        fprintf(stderr, "[yue2-ar-fwd] %s\n", err.c_str());
+        return 1;
+    }
+    const int64_t S = (int64_t) seq.ids.size();
+    fprintf(stderr,
+            "[yue2-ar-fwd] song %lld/%zu \"%s\": prefix %lld (style %zu ch, lyrics %zu ch) + %lld codec%s "
+            "-> S %lld, supervised %lld\n",
+            (long long) a.fc_song, artist.songs.size(), s.name.c_str(), (long long) seq.prefix,
+            s.style.size(), s.lyrics.size(), (long long) (S - seq.prefix - (seq.has_end ? 1 : 0)),
+            seq.has_end ? " + MUSIC_END" : " (TRUNCATED, no MUSIC_END)", (long long) S,
+            (long long) seq.n_sup);
+
+    // ── the trainer's forward, with the adapter at an EXACT no-op ──
+    //
+    // b_sigma 0 is the production init and the whole point of check 1: with
+    // B == 0 the LoRA branch contributes nothing and any difference against
+    // yue2_ar_forward belongs to the graph, not to the adapter.
+    Yue2AtTrainCtx C;
+    if (!yue2_at_train_ctx_init(m, (int) c.block_count, a.rank, a.alpha, target, a.seed, /*b_sigma=*/0.0f,
+                                /*lossgrad=*/1.0f, /*grad_clip=*/1.0f, "yue2-ar-fwd", &C, &err)) {
+        fprintf(stderr, "[yue2-ar-fwd] %s\n", err.c_str());
+        return 1;
+    }
+    if (attn != YUE2_AT_FA_EXACT && !yue2_at_flash_probe(m.backend, c, S, &err)) {
+        fprintf(stderr, "[yue2-ar-fwd] %s\n", err.c_str());
+        return 1;
+    }
+    Yue2AtState st;
+    if (!yue2_at_state_alloc(&st, &m, S, a.chunk, C.sched, &err)) {
+        fprintf(stderr, "[yue2-ar-fwd] %s\n", err.c_str());
+        return 1;
+    }
+
+    Yue2AtRun r;
+    r.m                = &m;
+    r.opt              = &C.opt;
+    r.sched            = C.sched;
+    r.st               = &st;
+    r.ad               = &C.ad;
+    r.opts.attn        = attn;
+    r.opts.weights_f32 = a.weights_f32;
+    r.grad_accum       = 1;
+    r.n_layers         = (int) c.block_count;
+    r.lossgrad         = 1.0f;
+    r.sup_shift        = yue2_at_sup_shift_env();
+    r.forward_only     = true;
+
+    double host_ce = 0.0;
+    r.host_ce      = &host_ce;
+    if (!yue2_at_micro_step(r, seq, /*count_loss=*/false, nullptr, &err)) {
+        fprintf(stderr, "[yue2-ar-fwd] forward failed: %s\n", err.c_str());
+        return 1;
+    }
+    const double l0 = host_ce;
+    fprintf(stderr,
+            "\n[yue2-ar-fwd] ==== STEP-0 LOSS (contract §6.5) ====\n"
+            "[yue2-ar-fwd] sup_shift %d: sliced CE %.6f over %lld supervised rows "
+            "(ln(%lld) = %.4f is the uniform reference)\n",
+            r.sup_shift, l0, (long long) seq.n_sup, (long long) YUE2_AT_SLICE_ROWS,
+            std::log((double) YUE2_AT_SLICE_ROWS));
+
+    // ── check 1: the sampled supervised rows ──
+    const int n_cmp = (int) (a.fwd_check > 0 ? std::min<int64_t>(a.fwd_check, seq.n_sup) : 32);
+    std::vector<int32_t> cols((size_t) n_cmp, 0);
+    std::vector<int64_t> abs_rows((size_t) n_cmp, 0);
+    for (int k = 0; k < n_cmp; k++) {
+        const int64_t i = (n_cmp == 1) ? 0 : (int64_t) k * (seq.n_sup - 1) / (int64_t) (n_cmp - 1);
+        abs_rows[(size_t) k] = seq.prefix - 1 + i;
+        cols[(size_t) k]     = (int32_t) (seq.prefix - 1 + (int64_t) r.sup_shift + i);
+    }
+
+    // The trainer's logits at those rows, off the SAME t_H and the SAME sliced
+    // F32 head the loss uses. st.t_ids is reusable here: the forward is done
+    // with it, and get_rows wants an I32 index vector of exactly this shape.
+    std::vector<float> tr_logits((size_t) n_cmp * (size_t) YUE2_AT_SLICE_ROWS, 0.0f);
+    {
+        const int64_t H = (int64_t) c.embedding_length;
+        ggml_backend_tensor_set(st.t_ids, cols.data(), 0, (size_t) n_cmp * sizeof(int32_t));
+        ggml_init_params ip  = { st.arena.size(), st.arena.data(), /*no_alloc*/ true };
+        ggml_context *   ctx = ggml_init(ip);
+        ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 64, /*grads=*/false);
+        ggml_tensor *    idx = ggml_view_1d(ctx, st.t_ids, n_cmp, 0);
+        ggml_tensor *    hd  = ggml_get_rows(ctx, st.t_H, idx);          // [H, n_cmp]
+        ggml_tensor *    lg  = ggml_mul_mat(ctx, st.t_head, hd);         // [SL, n_cmp]
+        ggml_set_output(lg);
+        ggml_build_forward_expand(gf, lg);
+        ggml_backend_sched_reset(C.sched);
+        const bool ok = ggml_backend_sched_graph_compute(C.sched, gf) == GGML_STATUS_SUCCESS;
+        if (ok) {
+            ggml_backend_tensor_get(lg, tr_logits.data(), 0, tr_logits.size() * sizeof(float));
+        }
+        ggml_free(ctx);
+        (void) H;
+        if (!ok) {
+            fprintf(stderr, "[yue2-ar-fwd] gathering the trainer's logits failed\n");
+            return 1;
+        }
+    }
+
+    // Free the trainer's buffers BEFORE the reference forward: yue2_ar_forward
+    // allocates its own T-row KV cache and graph, and there is no reason for
+    // both to be resident at once.
+    yue2_at_state_free(&st);
+    yue2_at_train_ctx_free(&C);
+
+    Yue2ArForwardRequest req;
+    req.ids             = seq.ids;
+    req.logit_positions = abs_rows;
+    Yue2ArForwardResult res;
+    if (!yue2_ar_forward(m, req, &res, &err)) {
+        fprintf(stderr, "[yue2-ar-fwd] yue2_ar_forward failed: %s\n", err.c_str());
+        return 1;
+    }
+    const int64_t V = res.V;
+    if ((int64_t) res.logits.size() != (int64_t) n_cmp * V) {
+        fprintf(stderr, "[yue2-ar-fwd] reference returned %zu logits, expected %lld\n", res.logits.size(),
+                (long long) ((int64_t) n_cmp * V));
+        return 1;
+    }
+
+    // rel-L2 over the whole compared block, the worst single row, argmax
+    // agreement, and the CE the two heads disagree by at those rows.
+    double num2 = 0.0, den2 = 0.0, worst_row = 0.0, max_abs = 0.0, ref_absmax = 0.0;
+    int    agree = 0, agree_top5 = 0;
+    double ce_tr = 0.0, ce_ref = 0.0;
+    int    worst_k = -1;
+    for (int k = 0; k < n_cmp; k++) {
+        const float * tr  = tr_logits.data() + (size_t) k * (size_t) YUE2_AT_SLICE_ROWS;
+        const float * ref = res.logits.data() + (size_t) k * (size_t) V + (size_t) YUE2_AT_SLICE_ROW0;
+        double rn = 0.0, rd = 0.0;
+        int64_t am_tr = 0, am_ref = 0;
+        double  mx_tr = (double) tr[0], mx_ref = (double) ref[0];
+        for (int64_t j = 0; j < YUE2_AT_SLICE_ROWS; j++) {
+            const double d = (double) tr[j] - (double) ref[j];
+            rn += d * d;
+            rd += (double) ref[j] * (double) ref[j];
+            max_abs    = std::max(max_abs, std::fabs(d));
+            ref_absmax = std::max(ref_absmax, std::fabs((double) ref[j]));
+            if ((double) tr[j] > mx_tr) {
+                mx_tr = (double) tr[j];
+                am_tr = j;
+            }
+            if ((double) ref[j] > mx_ref) {
+                mx_ref = (double) ref[j];
+                am_ref = j;
+            }
+        }
+        num2 += rn;
+        den2 += rd;
+        const double rel_row = rd > 0.0 ? std::sqrt(rn / rd) : 0.0;
+        if (rel_row > worst_row) {
+            worst_row = rel_row;
+            worst_k   = k;
+        }
+        if (am_tr == am_ref) {
+            agree++;
+        }
+        // top-5 agreement on the REFERENCE's argmax: a tie between two nearly
+        // equal logits is not the same defect as a different distribution.
+        {
+            int better = 0;
+            for (int64_t j = 0; j < YUE2_AT_SLICE_ROWS; j++) {
+                if ((double) tr[j] > (double) tr[am_ref]) {
+                    better++;
+                    if (better >= 5) {
+                        break;
+                    }
+                }
+            }
+            if (better < 5) {
+                agree_top5++;
+            }
+        }
+        // the per-row CE at the true target, both heads
+        const int64_t tgt = (int64_t) seq.rows[(size_t) (abs_rows[(size_t) k] - (seq.prefix - 1))];
+        double sum_tr = 0.0, sum_ref = 0.0;
+        for (int64_t j = 0; j < YUE2_AT_SLICE_ROWS; j++) {
+            sum_tr += std::exp((double) tr[j] - mx_tr);
+            sum_ref += std::exp((double) ref[j] - mx_ref);
+        }
+        ce_tr += mx_tr + std::log(sum_tr) - (double) tr[tgt];
+        ce_ref += mx_ref + std::log(sum_ref) - (double) ref[tgt];
+    }
+    const double rel_l2 = den2 > 0.0 ? std::sqrt(num2 / den2) : 0.0;
+
+    fprintf(stderr,
+            "\n[yue2-ar-fwd] ==== ZERO-INIT IDENTITY vs yue2_ar_forward (contract §6.6) ====\n"
+            "[yue2-ar-fwd] %d supervised rows compared over the %lld-row scored slice, trainer --attn %s, "
+            "weights %s\n"
+            "[yue2-ar-fwd]   rel-L2 (all rows)   %.3e\n"
+            "[yue2-ar-fwd]   worst row rel-L2    %.3e (row %d of %d, abs position %lld)\n"
+            "[yue2-ar-fwd]   max |delta| logit   %.3e   (reference |logit| max %.3f)\n"
+            "[yue2-ar-fwd]   argmax agreement    %d/%d exact, %d/%d within the trainer's top-5\n"
+            "[yue2-ar-fwd]   CE at those rows    trainer %.6f vs reference %.6f (delta %.2e)\n",
+            n_cmp, (long long) YUE2_AT_SLICE_ROWS, yue2_at_attn_name(attn),
+            a.weights_f32 ? "f32-widened" : "native", rel_l2, worst_row, worst_k, n_cmp,
+            worst_k >= 0 ? (long long) abs_rows[(size_t) worst_k] : -1LL, max_abs, ref_absmax, agree, n_cmp,
+            agree_top5, n_cmp, ce_tr / (double) n_cmp, ce_ref / (double) n_cmp,
+            std::fabs(ce_tr - ce_ref) / (double) n_cmp);
+    fprintf(stderr,
+            "[yue2-ar-fwd] EXPECTED, and this is a TOLERANCE not an equality: inference keeps K and V in "
+            "F16 (yue2-lm-graph.h:265-266) and the trainer dropped the cache entirely, so an F16-sized "
+            "delta is the correct answer. F16 carries ~3 decimal digits, so a rel-L2 in the 1e-3 band is "
+            "the cache round trip and nothing else; 1e-1 or a broken argmax would be a different forward.\n");
+    if (r.sup_shift != 0) {
+        fprintf(stderr, "[yue2-ar-fwd] NOTE: YUE2_AT_SUP_SHIFT=%d was set, so the rows compared are the "
+                        "SHIFTED ones — the identity number above is only meaningful at shift 0.\n",
+                r.sup_shift);
+    }
+    return 0;
+}
+
 // ── The loop ───────────────────────────────────────────────────────────────
 
 static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
@@ -1997,9 +2304,10 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             fprintf(stderr,
                     "ace-train yue2-ar-train: --minted %s is a torch pickle. This trainer reads a JSON "
                     "manifest in the yue2-preprocess sources[] shape (style / lyrics / codec_ids path per "
-                    "song, plus \"src\": \"minted\"|\"minted_val\"). Convert the pack once with a Python "
-                    "script that extracts each record's `codec` to a little-endian .i32 file and writes "
-                    "that manifest; nothing here will half-read a pickle.\n",
+                    "song, plus \"src\": \"minted\"|\"minted_val\"). Convert the pack once with\n"
+                    "  python engine/tools/convert-yue2-minted.py <pack.pt> <out_dir>\n"
+                    "and pass the minted_manifest.json it writes (spec: docs/plans/yue2/15-minted-pack.md). "
+                    "Nothing here will half-read a pickle.\n",
                     a.minted.c_str());
             return 2;
         }
@@ -2166,6 +2474,7 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     r.opts.weights_f32 = a.weights_f32;
     r.grad_accum       = a.grad_accum;
     r.lossgrad         = C.lossgrad;  // 1.0; the 1/grad_accum lives in `gs` (D9)
+    r.sup_shift        = yue2_at_sup_shift_env();  // 0 unless the §6.5 control is set
 
     // ── resume ──
     Yue2AtCkptState want;
@@ -2238,18 +2547,39 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     }
 
     // ── the loop ──
+    // The training pools are POINTERS, and the minted one excludes minted_val.
+    // Upstream splits the same way (`minted=[x for x in data if x["src"]=="minted"]`,
+    // ar_lora_cursor.py) and it is the whole point of the hold-out: a minted_val
+    // song that also appears in training makes the one number this run is
+    // supposed to watch — "has YuE2's token grammar been damaged" — a training
+    // loss wearing a hold-out's name, and it would stay flat for the wrong
+    // reason.
+    std::vector<Yue2ArSong *> train_artist, train_minted;
+    for (Yue2ArSong & s : artist.songs) {
+        train_artist.push_back(&s);
+    }
+    for (Yue2ArSong & s : minted.songs) {
+        if (!s.minted_val) {
+            train_minted.push_back(&s);
+        }
+    }
+    if (minted_present) {
+        fprintf(stderr, "[yue2-ar-train] minted training pool: %zu song(s) (%zu minted_val held OUT of "
+                        "training)\n",
+                train_minted.size(), minted.songs.size() - train_minted.size());
+    }
     auto pick_song = [&](uint64_t k, bool * was_artist) -> Yue2ArSong * {
         bool use_artist = true;
-        if (minted_present && !minted.songs.empty()) {
+        if (minted_present && !train_minted.empty()) {
             Yue2NtRng rmix(yue2_at_seed_mix(a.seed, k, YUE2_AT_TAG_MIX));
             use_artist = rmix.u01() < a.artist_frac;
         }
-        std::vector<Yue2ArSong> & pool = use_artist ? artist.songs : minted.songs;
-        Yue2NtRng                 rsong(yue2_at_seed_mix(a.seed, k, YUE2_AT_TAG_SONG));
-        size_t                    idx = (size_t) (rsong.u01() * (double) pool.size());
-        idx                           = std::min(idx, pool.size() - 1);
-        *was_artist                   = use_artist;
-        return &pool[idx];
+        std::vector<Yue2ArSong *> & pool = use_artist ? train_artist : train_minted;
+        Yue2NtRng                   rsong(yue2_at_seed_mix(a.seed, k, YUE2_AT_TAG_SONG));
+        size_t                      idx = (size_t) (rsong.u01() * (double) pool.size());
+        idx                             = std::min(idx, pool.size() - 1);
+        *was_artist                     = use_artist;
+        return pool[idx];
     };
 
     // The held-out evals. minted_val answers "has YuE2's token grammar been
@@ -2473,6 +2803,9 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
 static int yue2_ar_train_run(const Yue2ArTrainArgs & a) {
     if (a.fd_check > 0) {
         return yue2_ar_fdcheck_main(a);
+    }
+    if (a.fwd_check > 0) {
+        return yue2_ar_forwardcheck_main(a);
     }
     return yue2_ar_train_loop(a);
 }
