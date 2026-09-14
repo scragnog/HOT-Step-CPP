@@ -151,9 +151,13 @@ export async function writeVocalSidecars(
     const s = samples[i];
     onProgress?.(i, samples.length, s.filename);
     const dst = path.join(vocalDir, `${s.id}.json`);
-    if (fs.existsSync(dst)) { ok++; continue; }
+    const stemPath = path.join(vocalDir, `${s.id}.vocals.wav`);
+    if (fs.existsSync(dst) && fs.existsSync(stemPath)) { ok++; continue; }
     try {
       const wav = await separateVocalStem(s.audioPath);
+      // Keep the stem. Separation is by far the expensive half of this, and the stem is what the lyric-alignment
+      // work needs next; throwing it away means paying for a second GPU pass to get back something we already had.
+      fs.writeFileSync(stemPath, wav);
       const { samples: mono, sampleRate } = wavToMono(wav);
       const runs = vocalRuns(mono, sampleRate);
       fs.writeFileSync(dst, JSON.stringify({ hop: VOCAL_HOP_S, runs }), 'utf-8');
