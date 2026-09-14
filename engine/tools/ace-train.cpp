@@ -34,6 +34,13 @@
 // yue2/yue2-tok-head.h in transitively; must follow yue2-preprocess-run.h,
 // whose decode helpers it reuses rather than re-implementing.
 #include "train/yue2-tokenize-run.h"
+// YuE2 AR LoRA trainer (docs/plans/yue2/14-ar-lora-contract.md). The AR half is
+// YuE2's COMPOSER — it writes the semantic token stream that fixes melody,
+// phrasing and structure — and training it needed ground-truth codec tokens for
+// real audio, which did not exist until the encoder landed (0b8c3f1c/b95540c0).
+// Must follow yue2-nar-train-run.h: it reuses that file's LoRA factor struct,
+// its splitmix64 RNG and its kaiming/zero adapter init verbatim.
+#include "train/yue2-ar-train-run.h"
 #include "model-registry.h"
 #include "train/dit-train-run.h"   // pulls in every dit-*.h (DiT LoRA trainer)
 #include "train/lm-train-run.h"    // pulls in every lm-*.h (LM LoRA trainer)
@@ -459,6 +466,94 @@ static void print_usage(void) {
             "                through the preprocess manifest, never by encoding audio here.\n"
             "                YUE2_FD_LOSSGRAD=2 is the negative control: every probe must then\n"
             "                report rel ~= 0.5 and the gate must FAIL.\n"
+            "                Weights are CC BY-NC 4.0; trained adapters inherit NC.\n"
+            "  yue2-ar-train  YuE2 AR-half LoRA training: the COMPOSER. Next-token cross-\n"
+            "                entropy over the CODEC POSITIONS ONLY of a whole song, never on\n"
+            "                the prefix. Needs codec_ids, so run `yue2-tokenize` first.\n"
+            "                --lm <yue2-lm-<type>.gguf> (or --models <dir>)\n"
+            "                --manifest <yue2_preprocess.json>  read as SOURCES, not clips:\n"
+            "                the source-level codec_ids file is the whole-song code array.\n"
+            "                --out <dir>  checkpoints, the ladder snapshots and the adapter\n"
+            "                --trigger <word>  prepended to every caption, and the word the\n"
+            "                trained style is addressed by at generation time.\n"
+            "                --minted <manifest.json>  THE REGULARIZER, and it is structural,\n"
+            "                not garnish: our encoder repeats adjacent codes 3.3-6.6%% of the\n"
+            "                time against YuE2's own 0.02-0.17%%, which is out of distribution\n"
+            "                in the direction that produces LOOPING, and the 50/50 mix of true\n"
+            "                YuE2 tokens is the counterweight. Without it the run REFUSES to\n"
+            "                start unless --allow-no-minted is also passed, and then it prints\n"
+            "                a banner, exports minted: \"absent\" in the metadata, and has NO\n"
+            "                minted_val loss to watch. The pack is Mothersuperior/\n"
+            "                yue2-minted-corpus -> minted_regularizer_pack.pt (~100 MB), a\n"
+            "                torch pickle: convert it once to a sources[] manifest with\n"
+            "                codec_ids pointing at .i32 files. A .pt path is REFUSED, not\n"
+            "                half-read.\n"
+            "                [--artist-frac 0.5]  one draw per micro-step.\n"
+            "                [--rank 64] [--alpha 64] [--lr 1e-4] [--steps 1600] [--warmup 50]\n"
+            "                [--sched-steps 3000]  the cosine HORIZON (upstream's SCHED_STEPS),\n"
+            "                which is longer than the run, so the cosine never reaches its\n"
+            "                floor of 0.2*lr. [--lr-scheduler cosine|constant]\n"
+            "                [--grad-accum 2] [--max-grad-norm 1.0] [--weight-decay 0.0]\n"
+            "                --steps > 1500 is REFUSED without --allow-overtrain: upstream's\n"
+            "                README is emphatic that past ~1500 steps the model MEMORISES the\n"
+            "                songs, and its own pick from the ladder was step 800.\n"
+            "                [--target attn|attn_mlp] default attn_mlp = upstream's own group\n"
+            "                (qkvo + gate/up/down on all 28 layers). attn_mlp_embed is NOT\n"
+            "                IMPLEMENTED and says so: the chunked head computes dL/dh by hand,\n"
+            "                so a trainable lm_head needs a different design.\n"
+            "                [--max-len 12288]  upstream's MAXLEN. A song over it truncates\n"
+            "                WITHOUT MUSIC_END, so a truncated song never teaches a fake\n"
+            "                ending. There are NO --crop-* flags: whole songs fit, and random\n"
+            "                crops teach that a song may begin mid-flow -- MM3 paid for that\n"
+            "                lesson twice. This also SIZES the buffers (one [H,S] F32 per\n"
+            "                layer), so lowering it is the VRAM lever.\n"
+            "                [--attn exact|flash|flash-f32] default exact. Flash removes the\n"
+            "                retained [S,S,Nh] softmax -- 6.0 GiB at S=10,001 -- and is probed\n"
+            "                at the run's real shapes with a HARD ERROR on an unsupported\n"
+            "                backend, because a silent CPU split looks like a pass on every\n"
+            "                number the run reports.\n"
+            "                [--weights f32|native] default f32: mul_mat's activation backward\n"
+            "                is out_prod, which is F32-only on CUDA.\n"
+            "                [--chunk 256] supervised rows per CE chunk. The loss is scored\n"
+            "                over a 32,769-row SLICE (MUSIC_END + the 32,768 codec tokens),\n"
+            "                which is exactly what the sampler draws from -- but it is a NAMED\n"
+            "                divergence from upstream's full 184,704-way softmax, so our CE\n"
+            "                numbers are not comparable to the README's. [--ce-slice] drops\n"
+            "                the full-vocab number each eval also logs for that reason.\n"
+            "                [--eval-every 100] [--log-every 20]\n"
+            "                [--save-every 200] [--ckpt-from 600]  upstream's ladder: pick the\n"
+            "                checkpoint BY EAR, not by held-out loss.\n"
+            "                [--sidecars on|off] default on: when the manifest carries no\n"
+            "                lyrics (it does not yet), read HOT-Step's ACE dataset sidecar\n"
+            "                <stem>.txt beside the source audio. Falls back to --style/\n"
+            "                --lyrics. A style-less, lyric-less prefix trains and is wrong, so\n"
+            "                the loop says so loudly rather than silently.\n"
+            "                [--cursor-weight 0]  the lyric-cursor auxiliary loss is DEFERRED\n"
+            "                and any value above 0 is REFUSED: it needs per-word forced\n"
+            "                alignment (Demucs + torchaudio MMS) this engine does not have.\n"
+            "                [--resume]  <out>/yue2_ar_ckpt.bin. EXACT within one machine and\n"
+            "                build. REFUSED across rank/alpha/target/grad-accum/seed and any\n"
+            "                change to --manifest/--minted/--trigger/--style/--lyrics/\n"
+            "                --sidecars/--artist-frac/--max-len/--attn. NOTED, not refused:\n"
+            "                the schedule knobs.\n"
+            "                --fd-check N   finite-difference gradient gate over N probes,\n"
+            "                then exit. A falling loss is NOT evidence of a correct backward.\n"
+            "                [--ar-layers K] default 2 and REQUIRED for a verdict: truncates\n"
+            "                the stack to K blocks and mirrors them (plus output_norm) to F32.\n"
+            "                K=0 REPORTS only. Refused on a quantized base.\n"
+            "                [--fd-eps E] default 1e-2, a FLOOR on the step, capped at 5%% of\n"
+            "                the probed tensor's norm; a capped probe is INCONCLUSIVE, not a\n"
+            "                FAIL. RUN THE GATE AT --rank 64, not 16 -- at low rank the cap\n"
+            "                sits below the step the loss floor needs and every probe comes\n"
+            "                back INCONCLUSIVE.\n"
+            "                [--fd-frames 128] synthetic codec stream length for the gate.\n"
+            "                YUE2_FD_LOSSGRAD=2 is the negative control: every probe must then\n"
+            "                report rel ~= 0.5 and the gate must FAIL.\n"
+            "                Writes <out>/<name>.safetensors as yue2.blk.N.{attn_*,ffn_*}.\n"
+            "                lora_{A,B}.weight with __metadata__.format \"yue2-ar-lora-v1\".\n"
+            "                NOTE: yue2-adapter.h maps nar_* sites ONLY today, so the merge\n"
+            "                path will reject an AR adapter key by key until contract §7.3\n"
+            "                lands. That is the correct failure, not an exporter bug.\n"
             "                Weights are CC BY-NC 4.0; trained adapters inherit NC.\n"
             "\n"
             "ace-train preprocess  (all paths absolute; long options only; \"--flag value\" form)\n"
@@ -4484,6 +4579,100 @@ static int cmd_yue2_tokenize(int argc, char ** argv) {
     return yue2_tokenize_run(a);
 }
 
+// ─── yue2-ar-train ──────────────────────────────────────────────────────────
+//
+// YuE2 AR-half LoRA trainer — the branch that could never be trained before.
+// The AR half is YuE2's COMPOSER: it writes the semantic token stream that
+// decides melody, phrasing and structure, and the NAR half and the VAE only
+// render what it decided. Training it needed ground-truth codec tokens for real
+// audio, which did not exist until `ace-train yue2-tokenize` landed.
+//
+// Implements docs/plans/yue2/14-ar-lora-contract.md; the recipe is
+// Mothersuperior's ar_lora_cursor.py (rank 64, lr 1e-4, ACC 2, cosine over
+// 3000, warmup 50, grad-norm 1.0, checkpoints from 600 every 200, 50/50 artist
+// vs minted). Every default below is that recipe's, unchanged, because nothing
+// has been heard yet.
+//
+// The two environment latches are NOT optional here either, for exactly the
+// reasons cmd_yue2_nar_train gives:
+//
+//   * GGML_BACKWARD_MM=1 rewrites the activation-gradient arm of MUL_MAT's
+//     backward from OUT_PROD into an equivalent mul_mat. It latches into a
+//     static on FIRST USE, so it has to be set before any backward is built.
+//   * NVIDIA_TF32_OVERRIDE=0 — TF32 makes an F32 matmul ~1e-3 accurate, the
+//     same order as the defect --fd-check looks for. No --tf32 escape hatch,
+//     because a knob whose only honest setting is off is a knob that lies.
+static int cmd_yue2_ar_train(int argc, char ** argv) {
+    Yue2ArTrainArgs a;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--lm"))            a.lm_path    = next("--lm");
+        else if (!strcmp(argv[i], "--models"))        a.models_dir = next("--models");
+        else if (!strcmp(argv[i], "--manifest"))      a.manifest   = next("--manifest");
+        else if (!strcmp(argv[i], "--minted"))        a.minted     = next("--minted");
+        else if (!strcmp(argv[i], "--allow-no-minted")) a.allow_no_minted = true;
+        else if (!strcmp(argv[i], "--out"))           a.out_dir    = next("--out");
+        else if (!strcmp(argv[i], "--name"))          a.name       = next("--name");
+        else if (!strcmp(argv[i], "--style"))         a.style      = next("--style");
+        else if (!strcmp(argv[i], "--lyrics"))        a.lyrics     = next("--lyrics");
+        else if (!strcmp(argv[i], "--trigger"))       a.trigger    = next("--trigger");
+        else if (!strcmp(argv[i], "--sidecars"))      a.sidecars   = strcmp(next("--sidecars"), "off") != 0;
+        else if (!strcmp(argv[i], "--target"))        a.target     = next("--target");
+        else if (!strcmp(argv[i], "--rank"))          a.rank       = atoll(next("--rank"));
+        else if (!strcmp(argv[i], "--alpha"))         a.alpha      = (float) atof(next("--alpha"));
+        else if (!strcmp(argv[i], "--seed"))          a.seed       = (uint64_t) atoll(next("--seed"));
+        else if (!strcmp(argv[i], "--lr"))            a.lr         = (float) atof(next("--lr"));
+        else if (!strcmp(argv[i], "--steps"))         a.steps      = atoll(next("--steps"));
+        else if (!strcmp(argv[i], "--warmup"))        a.warmup     = atoll(next("--warmup"));
+        else if (!strcmp(argv[i], "--lr-scheduler"))  a.lr_scheduler = next("--lr-scheduler");
+        else if (!strcmp(argv[i], "--sched-steps"))   a.sched_steps  = atoll(next("--sched-steps"));
+        else if (!strcmp(argv[i], "--grad-accum"))    a.grad_accum   = atoll(next("--grad-accum"));
+        else if (!strcmp(argv[i], "--max-grad-norm")) a.max_grad_norm = (float) atof(next("--max-grad-norm"));
+        else if (!strcmp(argv[i], "--weight-decay"))  a.weight_decay = (float) atof(next("--weight-decay"));
+        else if (!strcmp(argv[i], "--artist-frac"))   a.artist_frac  = atof(next("--artist-frac"));
+        else if (!strcmp(argv[i], "--max-len"))       a.max_len      = atoll(next("--max-len"));
+        else if (!strcmp(argv[i], "--allow-overtrain")) a.allow_overtrain = true;
+        else if (!strcmp(argv[i], "--attn"))          a.attn         = next("--attn");
+        else if (!strcmp(argv[i], "--weights"))       a.weights_f32  = strcmp(next("--weights"), "native") != 0;
+        else if (!strcmp(argv[i], "--ce-full"))       a.eval_full_vocab = true;
+        else if (!strcmp(argv[i], "--ce-slice"))      a.eval_full_vocab = false;
+        else if (!strcmp(argv[i], "--chunk"))         a.chunk        = atoll(next("--chunk"));
+        else if (!strcmp(argv[i], "--save-every"))    a.save_every   = atoll(next("--save-every"));
+        else if (!strcmp(argv[i], "--ckpt-from"))     a.ckpt_from    = atoll(next("--ckpt-from"));
+        else if (!strcmp(argv[i], "--eval-every"))    a.eval_every   = atoll(next("--eval-every"));
+        else if (!strcmp(argv[i], "--log-every"))     a.log_every    = atoll(next("--log-every"));
+        else if (!strcmp(argv[i], "--resume"))        a.resume       = true;
+        else if (!strcmp(argv[i], "--cursor-weight")) a.cursor_weight = atof(next("--cursor-weight"));
+        else if (!strcmp(argv[i], "--fd-check"))      a.fd_check     = atoi(next("--fd-check"));
+        else if (!strcmp(argv[i], "--fd-eps"))        a.fd_eps       = atof(next("--fd-eps"));
+        else if (!strcmp(argv[i], "--ar-layers"))     a.ar_layers    = atoi(next("--ar-layers"));
+        else if (!strcmp(argv[i], "--fd-frames"))     a.fd_frames    = atoll(next("--fd-frames"));
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (a.lm_path.empty() && a.models_dir.empty()) {
+        fprintf(stderr, "ace-train yue2-ar-train: one of --lm <yue2-lm-*.gguf> or --models <dir> "
+                        "is required\n");
+        return 2;
+    }
+#ifdef _WIN32
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+#else
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+#endif
+#ifdef _WIN32
+    _putenv("GGML_BACKWARD_MM=1");
+#else
+    setenv("GGML_BACKWARD_MM", "1", 1);
+#endif
+    // MANDATORY: ggml_time_ms() divides by an uninitialised frequency otherwise.
+    ggml_time_init();
+    return yue2_ar_train_run(a);
+}
+
 static int cmd_train_lm(int argc, char ** argv) {
     LmTrainArgs      a;
     LmResumeExplicit saw;   // which identity flags were typed (resume adopt-or-refuse)
@@ -5905,6 +6094,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "yue2-nar-train")) {
         return cmd_yue2_nar_train(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-ar-train")) {
+        return cmd_yue2_ar_train(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "spike")) {
         return cmd_spike(argc - 1, argv + 1);
