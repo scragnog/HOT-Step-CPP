@@ -175,6 +175,23 @@ struct LmOptim {
      *  trainer sets it from --lr-end-frac to match SimpleTuner's lr_end. */
     float lr_floor     = 0.1f;
     float weight_decay = 0.01f;
+    /** AdamW's betas. Defaulted to torch's own (0.9, 0.999), which is what
+     *  every trainer sharing this header was already getting as a hardcoded
+     *  literal — so leaving these alone changes nothing for anybody.
+     *
+     *  They are settable because a recipe can specify otherwise and the
+     *  difference is not cosmetic: beta2 sets how long the second moment
+     *  remembers, so it changes the effective step size on noisy gradients and
+     *  therefore how fast a small dataset is memorised. YuE2's AR LoRA recipe
+     *  uses (0.9, 0.95) (ar_lora_cursor.py:31), and our run descended visibly
+     *  faster than upstream's from an identical starting loss.
+     *
+     *  Bias correction reads these too — hardcoding 0.999 in the correction
+     *  while running beta2 = 0.95 would be silently wrong for the first few
+     *  hundred steps and then quietly converge, which is the worst shape of
+     *  bug to find later. */
+    float adam_beta1   = 0.9f;
+    float adam_beta2   = 0.999f;
     float grad_clip    = 1.0f;
     int   total_steps  = 1;
     int   warmup_steps = 1;
@@ -869,13 +886,15 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
     // schedule drives both rules, so a mixed run cannot drift between classes.
     o->opt_iter++;  // 1-based, matches ggml-opt's opt_ctx->iter
     const float lr = lr_now;
+    const float b1 = o->adam_beta1;
+    const float b2 = o->adam_beta2;
     const float p7[7] = { lr,
-                          0.9f,
-                          0.999f,
+                          b1,
+                          b2,
                           1e-8f,
                           o->weight_decay,
-                          1.0f / (1.0f - powf(0.9f, (float) o->opt_iter)),
-                          1.0f / (1.0f - powf(0.999f, (float) o->opt_iter)) };
+                          1.0f / (1.0f - powf(b1, (float) o->opt_iter)),
+                          1.0f / (1.0f - powf(b2, (float) o->opt_iter)) };
     ggml_backend_tensor_set(o->t_adamw, p7, 0, sizeof(p7));
     for (int k = 0; k < o->n_alt; k++) {
         float p7a[7];

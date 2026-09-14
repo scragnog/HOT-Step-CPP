@@ -189,6 +189,10 @@ struct Yue2ArTrainArgs {
     int64_t     grad_accum    = 2;         // upstream's ACC
     float       max_grad_norm = 1.0f;
     float       weight_decay  = 0.0f;
+    // upstream's AdamW betas (ar_lora_cursor.py:31). Overridable so the
+    // divergence that used to be silent can now be A/B'd on purpose.
+    float       adam_beta1    = 0.9f;
+    float       adam_beta2    = 0.95f;
     double      artist_frac   = 0.5;       // one draw per micro-step: random() < frac ? artist : minted
     int64_t     max_len       = 12288;     // upstream's MAXLEN
     bool        allow_overtrain = false;   // past ~1500 steps the model memorises the songs
@@ -204,16 +208,34 @@ struct Yue2ArTrainArgs {
     int64_t chunk           = 256;  // supervised rows per CE chunk
 
     int64_t     save_every = 200;  // upstream's CK_EVERY
-    int64_t     ckpt_from  = 600;  // upstream's CK_FROM
+    // upstream's CK_FROM is 600. Lowered: on a twelve-song set the artist loss
+    // is already 0.63 at step 500 and the coherent-sounding region of the
+    // ladder (Rob, 2026-09-14, on upstream's own renders) is 600 and EARLIER.
+    // A floor of 600 exports only the far side of that. Snapshots are cheap;
+    // a rung you never rendered is not.
+    int64_t     ckpt_from  = 200;
     int64_t     eval_every = 100;
     int64_t     log_every  = 20;
     bool        resume     = false;
 
-    // The lyric-cursor auxiliary loss (contract §3.4). DEFERRED: its targets
-    // need Demucs vocal separation plus a torchaudio MMS forced aligner, and
-    // the manifest carries no lyrics string for the char offsets to point into.
-    // Accepted and REFUSED above 0 rather than silently ignored.
-    double cursor_weight = 0.0;
+    // The lyric-cursor auxiliary loss (contract §3.4), upstream's CUR_W = 0.08.
+    // Its targets are per-source `cursor_words` files named in the manifest:
+    // little-endian f32 [n_words, 5] = (start_s, end_s, score, char0, char1),
+    // upstream's cursor_prep.py layout, char offsets in codepoints into the
+    // manifest's own `lyrics` string. Produced by a forced aligner outside this
+    // binary for now (the Python bridge; a native one is the follow-up).
+    //
+    // Why it is not optional: run side by side with the term on and off on the
+    // same twelve songs, the model's frame-to-lyric alignment loss FALLS from
+    // 12.3 to 1.6 with it and RISES from 10.8 to 16.3 without it — the AR
+    // spends its capacity memorising token streams and loses track of which
+    // words it is singing. That is the "structure broken, vocals incoherent,
+    // timbre fine" verdict on the first C++ ladder, which trained without it.
+    //
+    // > 0 with NO bound artist song is REFUSED: a run that binds nothing would
+    // print "cursor nan" forever and finish, which is the gate that cannot
+    // fail. 0 switches the term off explicitly.
+    double cursor_weight = 0.08;
 
     // --fd-check N: run the gradient gate over N probes instead of training.
     // --forward-check N: the two checks the FD gate cannot see (contract
@@ -453,7 +475,9 @@ struct Yue2ArSong {
     std::string          codes_path;
     int64_t              codes_off = 0;  // FRAMES into codes_path; blob-packed sets only
     int64_t              codes_n   = 0;  // FRAMES to read; 0 = the whole file
-    std::string          cursor_words;  // contract §3.4's seam; loaded by nothing yet
+    std::string          cursor_words;  // path to the f32 [n_words, 5] spans; empty = none
+    std::vector<float>   words5;        // those spans, loaded
+    Yue2AtCursor         cursor;        // the per-frame target block, built once
     std::vector<int32_t> codec;   // RAW ids, [0, 32768); lazily loaded for the minted set
     std::vector<int32_t> prefix;  // tokenized once
     bool                 minted     = false;
@@ -522,6 +546,63 @@ static std::string yue2_at_sidecar_path(const std::string & audio) {
 // `off_frames`, which is how the converted minted pack stores 4,732 songs in
 // one 86 MB file instead of 4,732 small ones (docs/plans/yue2/15-minted-pack.md).
 // Both offsets are in FRAMES — i32 elements — never bytes.
+// The cursor spans: raw little-endian f32, five per word, upstream's
+// cursor_words.npy body without the .npy header. Checked, not trusted: a
+// non-multiple-of-five file, a negative time, a word ending before it starts, a
+// char span outside the lyrics, or start times that run backwards each name
+// the file and refuse — a silently-wrong span shifts every target after it.
+static bool yue2_at_read_words5(const std::string & path, int64_t n_lyric_chars, std::vector<float> * out,
+                                std::string * err) {
+    FILE * f = hs_fopen(path, "rb");
+    if (!f) {
+        *err = "cannot open cursor_words file " + path;
+        return false;
+    }
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (n <= 0 || (n % (5 * 4)) != 0) {
+        fclose(f);
+        *err = path + " is not a whole number of (start, end, score, char0, char1) f32 rows (" +
+               std::to_string((long long) n) + " bytes)";
+        return false;
+    }
+    out->assign((size_t) (n / 4), 0.0f);
+    const size_t got = fread(out->data(), 1, (size_t) n, f);
+    fclose(f);
+    if (got != (size_t) n) {
+        *err = "short read on " + path;
+        return false;
+    }
+    const size_t nW = out->size() / 5;
+    float        prev = -1.0f;
+    for (size_t w = 0; w < nW; w++) {
+        const float * r = out->data() + w * 5;
+        if (!(r[0] >= 0.0f) || !(r[1] >= r[0]) || !(r[3] >= 0.0f) || !(r[4] >= r[3]) ||
+            (n_lyric_chars > 0 && r[4] > (float) n_lyric_chars) || r[0] < prev) {
+            char b[200];
+            snprintf(b, sizeof(b), "word %zu is malformed (start %.3f end %.3f chars [%.0f, %.0f) of %lld)",
+                     w, (double) r[0], (double) r[1], (double) r[3], (double) r[4], (long long) n_lyric_chars);
+            *err = path + ": " + b;
+            return false;
+        }
+        prev = r[0];
+    }
+    return true;
+}
+
+// Codepoints in a UTF-8 string: what Python's len() returns for it, and the
+// unit the cursor spans' char offsets are in.
+static int64_t yue2_at_utf8_len(const std::string & s) {
+    int64_t n = 0;
+    for (unsigned char c : s) {
+        if ((c & 0xC0) != 0x80) {
+            n++;
+        }
+    }
+    return n;
+}
+
 static bool yue2_at_read_i32_file(const std::string & path, int64_t off_frames, int64_t n_frames,
                                   std::vector<int32_t> * out, std::string * err) {
     FILE * f = hs_fopen(path, "rb");
@@ -810,6 +891,7 @@ struct Yue2AtTrainCtx {
     ggml_backend_buffer_t      abuf = nullptr;
     Yue2AtAdapters             ad;
     std::vector<ggml_tensor *> params;
+    ggml_tensor *              cursor_w   = nullptr;  // the [H, H] lyric-cursor head; null = term off
     ggml_tensor *              t_lossgrad = nullptr;
     ggml_tensor *              t_adamw    = nullptr;
     ggml_tensor *              t_clip     = nullptr;
@@ -861,9 +943,16 @@ static void yue2_at_train_ctx_free(Yue2AtTrainCtx * C) {
 // autodiffed graph). Yue2AtRun::lossgrad, multiplied into `gs`, is the live
 // path — the upload survives only so lm_optim_step's unconditional read finds
 // a real value.
+//
+// `cursor_head` adds upstream's [H, H] cursor_head (ar_lora_cursor.py:29:
+// `nn.Linear(H, H, bias=False)`, `nn.init.eye_`) to the trainable set — same
+// optimizer, same lr, same clip, wd 0, exactly as upstream's single param
+// group. It is named so as NOT to end in 'A' (yue2_nt_init_adapters keys
+// kaiming init on that) and is set to the identity after that init runs.
 static bool yue2_at_train_ctx_init(const Yue2Model & m, int n_layers, int64_t rank, float alpha,
                                    Yue2AtTarget target, uint64_t seed, float b_sigma, float lossgrad,
-                                   float grad_clip, const char * tag, Yue2AtTrainCtx * C, std::string * err) {
+                                   float grad_clip, const char * tag, Yue2AtTrainCtx * C, std::string * err,
+                                   bool cursor_head = false) {
     const size_t     n_tensors = yue2_at_adapter_tensor_count(n_layers, target);
     ggml_init_params aip       = { (n_tensors + 16) * ggml_tensor_overhead(), nullptr, /*no_alloc*/ true };
     C->actx                    = ggml_init(aip);
@@ -873,6 +962,17 @@ static bool yue2_at_train_ctx_init(const Yue2Model & m, int n_layers, int64_t ra
         snprintf(b, sizeof(b), "adapter allocation failed (%zu of %zu tensors)", C->params.size(), n_tensors);
         *err = b;
         return false;
+    }
+    if (cursor_head) {
+        const int64_t H = (int64_t) m.lm_cfg.embedding_length;
+        C->cursor_w     = ggml_new_tensor_2d(C->actx, GGML_TYPE_F32, H, H);
+        if (!C->cursor_w) {
+            *err = "cursor head allocation failed";
+            return false;
+        }
+        ggml_set_name(C->cursor_w, "cursor_head.W");
+        ggml_set_param(C->cursor_w);
+        C->params.push_back(C->cursor_w);
     }
     // The five host-owned optimizer scalars. LmOptim declares every one nullptr
     // and lm_optim_init creates NONE — each is written or read unconditionally
@@ -899,6 +999,15 @@ static bool yue2_at_train_ctx_init(const Yue2Model & m, int n_layers, int64_t ra
     ggml_backend_buffer_set_usage(C->abuf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
 
     yue2_nt_init_adapters(C->params, seed, b_sigma);
+    if (C->cursor_w) {
+        // nn.init.eye_: ggml [H_in, H_out], element (h, o) at o*H + h.
+        const int64_t      H = C->cursor_w->ne[0];
+        std::vector<float> I((size_t) (H * H), 0.0f);
+        for (int64_t h = 0; h < H; h++) {
+            I[(size_t) (h * H + h)] = 1.0f;
+        }
+        ggml_backend_tensor_set(C->cursor_w, I.data(), 0, I.size() * sizeof(float));
+    }
     C->lossgrad = lossgrad;
     {
         const float epsv = 1e-6f;
@@ -929,10 +1038,13 @@ static bool yue2_at_train_ctx_init(const Yue2Model & m, int n_layers, int64_t ra
         *err = "scheduler alloc failed";
         return false;
     }
+    const int64_t n_cur = C->cursor_w ? ggml_nelements(C->cursor_w) : 0;
     fprintf(stderr, "[%s] %zu LoRA tensors over %d AR layers, rank %lld, alpha %.1f, target %s (%.1fM "
-                    "trainable parameters)\n",
-            tag, C->params.size(), n_layers, (long long) rank, (double) alpha, yue2_at_target_name(target),
-            (double) yue2_at_param_count(m.lm_cfg, n_layers, rank, target) / 1e6);
+                    "trainable parameters%s)\n",
+            tag, C->params.size() - (C->cursor_w ? 1 : 0), n_layers, (long long) rank, (double) alpha,
+            yue2_at_target_name(target),
+            (double) (yue2_at_param_count(m.lm_cfg, n_layers, rank, target) + n_cur) / 1e6,
+            C->cursor_w ? ", of which 4.2M is the [H, H] cursor head" : "");
     return true;
 }
 
@@ -1003,7 +1115,10 @@ static double yue2_at_lr_at(const Yue2ArTrainArgs & a, int64_t step1) {
 //   * The state file is single-machine, host-endian and NOT a distribution
 //     format.
 static const char     YUE2_AT_CKPT_MAGIC[8] = { 'Y', '2', 'A', 'R', 'C', 'K', '1', '\0' };
-static const uint32_t YUE2_AT_CKPT_VERSION  = 1;
+// 2: AdamW betas joined the state. They were (0.9, 0.999) by omission and are
+// now (0.9, 0.95) to match upstream, which changes the update rule — so a v1
+// state must refuse rather than resume into different optimizer dynamics.
+static const uint32_t YUE2_AT_CKPT_VERSION  = 2;
 
 struct Yue2AtCkptState {
     int32_t  rank = 0, n_params = 0, n_layers = 0, target = 0;
@@ -1013,6 +1128,7 @@ struct Yue2AtCkptState {
     uint64_t cond_hash = 0;
     int32_t  warmup = 0, lr_sched = 0, sched_steps = 0;
     float    weight_decay = 0.0f, max_grad_norm = 0.0f;
+    float    adam_beta1 = 0.0f, adam_beta2 = 0.0f;
     int32_t  steps_done = 0;
     double   loss_sum   = 0.0;
     int64_t  n_micro    = 0;
@@ -1108,6 +1224,7 @@ static bool yue2_at_ckpt_save(const std::string & path, const Yue2AtCkptState & 
     ok      = ok && yue2_at_put(f, st.cond_hash) && yue2_at_put(f, st.warmup) && yue2_at_put(f, st.lr_sched);
     ok      = ok && yue2_at_put(f, st.sched_steps) && yue2_at_put(f, st.weight_decay) &&
          yue2_at_put(f, st.max_grad_norm);
+    ok = ok && yue2_at_put(f, st.adam_beta1) && yue2_at_put(f, st.adam_beta2);
     ok = ok && yue2_at_put(f, st.steps_done) && yue2_at_put(f, st.loss_sum) && yue2_at_put(f, st.n_micro);
     ok = ok && yue2_at_put(f, st.opt_step) && yue2_at_put(f, st.opt_iter);
     {
@@ -1183,7 +1300,9 @@ static bool yue2_at_ckpt_load(const std::string & path, const Yue2AtCkptState & 
               yue2_at_get(f, &st.alpha) && yue2_at_get(f, &st.lr) && yue2_at_get(f, &st.seed) &&
               yue2_at_get(f, &st.cond_hash) && yue2_at_get(f, &st.warmup) && yue2_at_get(f, &st.lr_sched) &&
               yue2_at_get(f, &st.sched_steps) && yue2_at_get(f, &st.weight_decay) &&
-              yue2_at_get(f, &st.max_grad_norm) && yue2_at_get(f, &st.steps_done) && yue2_at_get(f, &st.loss_sum) &&
+              yue2_at_get(f, &st.max_grad_norm) && yue2_at_get(f, &st.adam_beta1) &&
+              yue2_at_get(f, &st.adam_beta2) &&
+              yue2_at_get(f, &st.steps_done) && yue2_at_get(f, &st.loss_sum) &&
               yue2_at_get(f, &st.n_micro) && yue2_at_get(f, &st.opt_step) && yue2_at_get(f, &st.opt_iter);
     if (!ok) {
         return fail("truncated header");
@@ -1209,14 +1328,20 @@ static bool yue2_at_ckpt_load(const std::string & path, const Yue2AtCkptState & 
     }
     if (st.total_steps != want.total_steps || st.lr != want.lr || st.warmup != want.warmup ||
         st.lr_sched != want.lr_sched || st.sched_steps != want.sched_steps ||
-        st.weight_decay != want.weight_decay || st.max_grad_norm != want.max_grad_norm) {
+        st.weight_decay != want.weight_decay || st.max_grad_norm != want.max_grad_norm ||
+        st.adam_beta1 != want.adam_beta1 || st.adam_beta2 != want.adam_beta2) {
         fprintf(stderr,
                 "[yue2-ar-train] NOTE: resuming with a different schedule (--steps %d, --lr %.3g, --warmup "
-                "%d, --sched-steps %d) into a checkpoint written at (%d, %.3g, %d, %d). The schedule and "
-                "the update rule change from here; the weights do not, and the resumed run is no longer "
-                "bit-identical to the uninterrupted one.\n",
-                want.total_steps, (double) want.lr, want.warmup, want.sched_steps, st.total_steps,
-                (double) st.lr, st.warmup, st.sched_steps);
+                "%d, --sched-steps %d, betas %.3g/%.3g) into a checkpoint written at (%d, %.3g, %d, %d, "
+                "%.3g/%.3g). The schedule and the update rule change from here; the weights do not, and "
+                "the resumed run is no longer bit-identical to the uninterrupted one. Note that the AdamW "
+                "moments carried in this state were ACCUMULATED under the old betas — beta2 in particular "
+                "sets how long the second moment remembers, so the first steps after a beta change are "
+                "running on a history that does not match the new decay.\n",
+                want.total_steps, (double) want.lr, want.warmup, want.sched_steps,
+                (double) want.adam_beta1, (double) want.adam_beta2, st.total_steps,
+                (double) st.lr, st.warmup, st.sched_steps,
+                (double) st.adam_beta1, (double) st.adam_beta2);
     }
 
     std::unordered_map<std::string, ggml_tensor *> live;
@@ -1315,9 +1440,14 @@ static bool yue2_at_ckpt_load(const std::string & path, const Yue2AtCkptState & 
 //
 // So `format: "yue2-ar-lora-v1"` below is load-bearing, not a label. Write it,
 // and do not write a NAR site from this exporter.
+// `cursor_md` is the metadata value for `cursor`: "off", or
+// "on:w=<weight>,bound=<n>/<m>". The cursor head itself is NOT exported: it has
+// no inference role (nothing at generation time scores frames against lyric
+// tokens), and the loader would refuse an unknown key.
 static bool yue2_at_export(const Yue2AtAdapters & ad, const Yue2ArTrainArgs & a, Yue2AtTarget target,
                            int64_t steps_done, int64_t song_frames, const std::string & base_id,
-                           bool minted_present, const std::string & path, std::string * err) {
+                           bool minted_present, const std::string & path, std::string * err,
+                           const std::string & cursor_md = "off") {
     struct Ent {
         std::string         name;
         const ggml_tensor * t;
@@ -1385,7 +1515,10 @@ static bool yue2_at_export(const Yue2AtAdapters & ad, const Yue2ArTrainArgs & a,
     md.emplace_back("base_sha", base_id);
     md.emplace_back("cot", "off");
     md.emplace_back("minted", minted_present ? "present" : "absent");
-    md.emplace_back("cursor", "off");
+    md.emplace_back("cursor", cursor_md);
+    // Recorded because it is a real recipe knob and adapters outlive their logs.
+    snprintf(buf, sizeof(buf), "%.4g,%.4g", (double) a.adam_beta1, (double) a.adam_beta2);
+    md.emplace_back("adam_betas", buf);
     if (a.steps > 1500) {
         md.emplace_back("overtrain", "acknowledged");
     }
@@ -1589,9 +1722,49 @@ static int yue2_ar_fdcheck_main(const Yue2ArTrainArgs & a) {
                         "every probe, and a FAIL\n",
                 (double) lg, (double) std::fabs(1.0f - lg) / (double) std::max(1e-6f, std::fabs(lg)));
     }
+    // ── the cursor term in the gate: SYNTHETIC spans over the REAL prefix ──
+    //
+    // The gate tests the graph, not the data, so the word spans are made up:
+    // six words spread evenly over the synthetic stream's duration and over
+    // the lyric sheet's characters. That still exercises the real target
+    // builder (tokenisation, codepoint offsets, carry-forward) and, more to the
+    // point, puts a non-trivial [L, nF] distribution behind four hand-derived
+    // transposes so `cursor_head.W` can be probed like any LoRA factor.
+    const bool   cursor_on = a.cursor_weight > 0.0 && !a.lyrics.empty();
+    Yue2AtCursor fd_cur;
+    if (cursor_on) {
+        const int64_t      nW = 6, nch = yue2_at_utf8_len(a.lyrics);
+        const double       dur = (double) codec.size() / 25.0;
+        std::vector<float> w5((size_t) (nW * 5), 0.0f);
+        for (int64_t w = 0; w < nW; w++) {
+            float * r5 = w5.data() + (size_t) w * 5;
+            r5[0] = (float) (dur * (double) w / (double) nW);
+            r5[1] = r5[0] + 0.3f;
+            r5[2] = 0.5f;
+            r5[3] = (float) (nch * w / nW);
+            r5[4] = (float) (nch * (w + 1) / nW);
+        }
+        fd_cur = yue2_at_cursor_build(&tok, a.style, a.lyrics, prefix, (int64_t) codec.size(), w5, seq.n_sup);
+        if (!fd_cur.bound) {
+            fprintf(stderr, "[yue2-ar-fd] cursor: could not bind synthetic spans (%s) — the term is NOT "
+                            "under test\n",
+                    fd_cur.why.c_str());
+        } else {
+            fprintf(stderr, "[yue2-ar-fd] cursor: weight %.3f, %lld lyric tokens at [%lld, %lld), %lld "
+                            "frames — cursor_head.W joins the probes\n",
+                    a.cursor_weight, (long long) fd_cur.L, (long long) fd_cur.j0,
+                    (long long) (fd_cur.j0 + fd_cur.L), (long long) fd_cur.nF);
+        }
+    } else if (a.cursor_weight > 0.0) {
+        fprintf(stderr, "[yue2-ar-fd] cursor: --lyrics is empty, so there is no lyric span to point at — "
+                        "the term is NOT under test\n");
+    }
+    const bool cursor_live = cursor_on && fd_cur.bound;
+
     Yue2AtTrainCtx C;
     if (!yue2_at_train_ctx_init(m, n_layers, a.rank, a.alpha, target, a.seed, /*b_sigma=*/1e-2f,
-                                /*lossgrad=*/lg, /*grad_clip=*/1.0f, "yue2-ar-fd", &C, &err)) {
+                                /*lossgrad=*/lg, /*grad_clip=*/1.0f, "yue2-ar-fd", &C, &err,
+                                /*cursor_head=*/cursor_live)) {
         fprintf(stderr, "[yue2-ar-fd] %s\n", err.c_str());
         return 1;
     }
@@ -1602,7 +1775,7 @@ static int yue2_ar_fdcheck_main(const Yue2ArTrainArgs & a) {
     }
 
     Yue2AtState st;
-    if (!yue2_at_state_alloc(&st, &m, S, a.chunk, C.sched, &err)) {
+    if (!yue2_at_state_alloc(&st, &m, S, a.chunk, C.sched, &err, cursor_live ? fd_cur.L : 0)) {
         fprintf(stderr, "[yue2-ar-fd] %s\n", err.c_str());
         return 1;
     }
@@ -1617,6 +1790,9 @@ static int yue2_ar_fdcheck_main(const Yue2ArTrainArgs & a) {
     r.opts.weights_f32 = a.weights_f32;
     r.grad_accum       = 1;
     r.n_layers         = n_layers;
+    r.cur              = cursor_live ? &fd_cur : nullptr;
+    r.cur_w            = C.cursor_w;
+    r.cursor_weight    = (float) a.cursor_weight;
     // The negative control's ONLY effective statement. Without this line the
     // seed reaches a device scalar the backward never reads, every probe comes
     // back byte-identical to the positive run, and the gate cannot fail.
@@ -1634,16 +1810,20 @@ static int yue2_ar_fdcheck_main(const Yue2ArTrainArgs & a) {
     // cancellation (mm3-lm-train-run.h:1445-1487 measured it). Aggregating in
     // double removes that floor and, as a bonus, makes the numeric arm an
     // INDEPENDENT implementation of the loss rather than the same kernel twice.
-    double host_ce = 0.0;
+    // The total the gate differences is upstream's `lm + CUR_W * cl` — both
+    // terms on the host in double, the cursor's via Yue2AtRun::host_cur.
+    double host_ce = 0.0, host_cur = 0.0;
     auto   forward_loss = [&]() -> double {
         r.forward_only = true;
         r.host_ce      = &host_ce;
+        r.host_cur     = cursor_live ? &host_cur : nullptr;
         std::string e2;
         if (!yue2_at_micro_step(r, seq, /*count_loss=*/false, nullptr, &e2)) {
             fprintf(stderr, "[yue2-ar-fd] forward failed: %s\n", e2.c_str());
             return std::nan("");
         }
-        return host_ce;
+        r.host_cur = nullptr;
+        return host_ce + (cursor_live ? a.cursor_weight * host_cur : 0.0);
     };
 
     const double l0 = forward_loss();
@@ -1660,13 +1840,16 @@ static int yue2_ar_fdcheck_main(const Yue2ArTrainArgs & a) {
     ggml_backend_buffer_clear(C.opt.buf_grad, 0);
     r.forward_only = false;
     r.host_ce      = nullptr;
-    double ce_graph = 0.0;
-    if (!yue2_at_micro_step(r, seq, /*count_loss=*/true, &ce_graph, &err)) {
+    double ce_graph = 0.0, cur_graph = std::nan("");
+    if (!yue2_at_micro_step(r, seq, /*count_loss=*/true, &ce_graph, &err, &cur_graph)) {
         fprintf(stderr, "[yue2-ar-fd] backward failed: %s\n", err.c_str());
         return 1;
     }
-    fprintf(stderr, "[yue2-ar-fd] in-graph loss %.6f vs host-double %.6f (|delta| %.2e)\n", ce_graph, l0,
-            std::fabs(ce_graph - l0));
+    // Compare like with like: the host-double figure is upstream's total,
+    // lm + CUR_W * cursor, so the in-graph one must be too.
+    const double total_graph = ce_graph + (cursor_live && cur_graph == cur_graph ? a.cursor_weight * cur_graph : 0.0);
+    fprintf(stderr, "[yue2-ar-fd] in-graph loss %.6f (lm %.6f%s) vs host-double %.6f (|delta| %.2e)\n",
+            total_graph, ce_graph, cursor_live ? " + w*cursor" : "", l0, std::fabs(total_graph - l0));
 
     auto find_param = [&](const char * name) -> ggml_tensor * {
         for (ggml_tensor * t : C.params) {
@@ -1689,12 +1872,20 @@ static int yue2_ar_fdcheck_main(const Yue2ArTrainArgs & a) {
     // Contract §6.3's seven, in order. Blocks 0 and 1 rather than 0/13/27
     // because --ar-layers 2 is what makes the check a verdict. The .A/.B mix is
     // deliberate: they exercise different arms of the LoRA branch's backward.
-    const char * probe_names[] = {
-        "blk.0.attn_q.A", "blk.0.attn_q.B",   "blk.0.ffn_down.B", "blk.1.attn_v.B",
-        "blk.1.ffn_gate.A", "blk.1.attn_output.B", "blk.0.ffn_up.A",
-    };
-    const int n_candidates = (int) (sizeof(probe_names) / sizeof(probe_names[0]));
-    const int n_want       = a.fd_check > 0 ? a.fd_check : 6;
+    // The cursor head goes SECOND when it is live: first stays a LoRA factor so
+    // the resolution measurement below is the usual one, and second guarantees
+    // the head is probed at any --fd-check >= 2 rather than falling off the
+    // end of a six-probe default.
+    std::vector<const char *> probe_names = { "blk.0.attn_q.A" };
+    if (cursor_live) {
+        probe_names.push_back("cursor_head.W");
+    }
+    for (const char * nm : { "blk.0.attn_q.B", "blk.0.ffn_down.B", "blk.1.attn_v.B", "blk.1.ffn_gate.A",
+                             "blk.1.attn_output.B", "blk.0.ffn_up.A" }) {
+        probe_names.push_back(nm);
+    }
+    const int n_candidates = (int) probe_names.size();
+    const int n_want       = a.fd_check > 0 ? a.fd_check : (cursor_live ? 7 : 6);
     struct Probe {
         const char *  name;
         ggml_tensor * par;
@@ -2261,16 +2452,8 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
         fprintf(stderr, "ace-train yue2-ar-train: --lr-scheduler must be cosine or constant\n");
         return 2;
     }
-    if (a.cursor_weight > 0.0) {
-        // Contract §3.4: accepted and REFUSED above 0 until the alignment
-        // producer exists. Silently ignoring it would be worse.
-        fprintf(stderr,
-                "ace-train yue2-ar-train: --cursor-weight %.3f is REFUSED. The lyric-cursor auxiliary loss "
-                "needs per-word forced-alignment targets (Demucs vocal separation + torchaudio MMS forced "
-                "alignment, upstream's cursor_prep.py) and this engine has neither a source separator nor "
-                "an aligner; the manifest also carries no lyrics string for the char offsets to point "
-                "into. The seam is in place (contract §3.4) — the producer is not.\n",
-                a.cursor_weight);
+    if (a.cursor_weight < 0.0 || !(a.cursor_weight == a.cursor_weight)) {
+        fprintf(stderr, "ace-train yue2-ar-train: --cursor-weight must be >= 0 (0 switches the term off)\n");
         return 2;
     }
     // The README, verbatim: "Do not train longer: past ~1,500 steps the model
@@ -2386,6 +2569,63 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
         }
     }
     const int64_t mean_frames = artist.songs.empty() ? 0 : frames_sum / (int64_t) artist.songs.size();
+
+    // ── the lyric-cursor targets, bound up front and reported per song ──
+    //
+    // Binding can fail per song for upstream's own reason (:39 — the prefix
+    // does not reconstruct from head + lyrics, usually a BPE merge across the
+    // [Lyrics] boundary) or because the manifest names no spans. Either is
+    // reported by name; a run with the term on and NOTHING bound is refused.
+    int64_t cursor_l_max = 0, n_bound = 0, n_with_spans = 0;
+    if (a.cursor_weight > 0.0) {
+        for (Yue2ArSong & s : artist.songs) {
+            if (s.cursor_words.empty()) {
+                fprintf(stderr, "[yue2-ar-train] cursor: \"%s\" names no cursor_words — no targets\n",
+                        s.name.c_str());
+                continue;
+            }
+            n_with_spans++;
+            std::string e2;
+            if (!yue2_at_read_words5(s.cursor_words, yue2_at_utf8_len(s.lyrics), &s.words5, &e2)) {
+                fprintf(stderr, "[yue2-ar-train] cursor: %s\n", e2.c_str());
+                return 1;
+            }
+            // nF = min(frames, n_sup): the sequence this song actually trains as.
+            Yue2AtSeq   probe;
+            if (!yue2_at_build_sequence(s.prefix, s.codec, a.max_len, &probe, &e2)) {
+                continue;  // the training loop names the skip itself
+            }
+            s.cursor = yue2_at_cursor_build(&tok, s.style, s.lyrics, s.prefix, (int64_t) s.codec.size(),
+                                            s.words5, probe.n_sup);
+            if (!s.cursor.bound) {
+                fprintf(stderr, "[yue2-ar-train] cursor: \"%s\" UNBOUND — %s\n", s.name.c_str(),
+                        s.cursor.why.c_str());
+                continue;
+            }
+            n_bound++;
+            cursor_l_max = std::max(cursor_l_max, s.cursor.L);
+            fprintf(stderr, "[yue2-ar-train] cursor: \"%s\" bound — %lld lyric tokens at [%lld, %lld), %lld "
+                            "frames, %zu words\n",
+                    s.name.c_str(), (long long) s.cursor.L, (long long) s.cursor.j0,
+                    (long long) (s.cursor.j0 + s.cursor.L), (long long) s.cursor.nF, s.words5.size() / 5);
+        }
+        if (n_bound == 0) {
+            fprintf(stderr,
+                    "\n[yue2-ar-train] --cursor-weight %.3f with NO artist song bound (%lld of %zu named "
+                    "spans). A run like this prints `cursor nan` on every step and finishes — the term it "
+                    "claims to train is not there. Produce the spans (the cursor bridge, or the aligner) "
+                    "and point the manifest's `cursor_words` at them, or pass --cursor-weight 0 to train "
+                    "without the term on purpose.\n",
+                    a.cursor_weight, (long long) n_with_spans, artist.songs.size());
+            return 2;
+        }
+        fprintf(stderr, "[yue2-ar-train] cursor: weight %.3f, %lld of %zu artist songs bound, longest lyric "
+                        "span %lld tokens\n",
+                a.cursor_weight, (long long) n_bound, artist.songs.size(), (long long) cursor_l_max);
+    } else {
+        fprintf(stderr, "[yue2-ar-train] cursor: OFF (--cursor-weight 0). Upstream trains with 0.08; without "
+                        "it the frame-to-lyric alignment degrades as the songs are memorised.\n");
+    }
     if (n_lyricless) {
         fprintf(stderr,
                 "\n[yue2-ar-train] ---- %lld of %zu songs have NO LYRICS in their prefix ----\n"
@@ -2431,11 +2671,22 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     // it.
     Yue2AtTrainCtx C;
     if (!yue2_at_train_ctx_init(m, n_layers, a.rank, a.alpha, target, a.seed, /*b_sigma=*/0.0f,
-                                /*lossgrad=*/1.0f, a.max_grad_norm, "yue2-ar-train", &C, &err)) {
+                                /*lossgrad=*/1.0f, a.max_grad_norm, "yue2-ar-train", &C, &err,
+                                /*cursor_head=*/n_bound > 0)) {
         fprintf(stderr, "[yue2-ar-train] %s\n", err.c_str());
         return 1;
     }
     C.opt.weight_decay = a.weight_decay;
+    // upstream's betas, not lm-optim.h's default (ar_lora_cursor.py:31:
+    // `betas=(0.9,0.95)`). This used to be a known, deliberate divergence, and
+    // it stopped being defensible once the two trainers were run side by side
+    // on the same twelve songs: from an identical step-0 artist loss (5.3658
+    // against upstream's 5.370) ours descended visibly faster, reaching 0.032
+    // by step 800 where upstream was still at 0.165. beta2 is the length of
+    // AdamW's second-moment memory, so it directly sets how hard a tiny dataset
+    // is memorised.
+    C.opt.adam_beta1   = a.adam_beta1;
+    C.opt.adam_beta2   = a.adam_beta2;
     // Neutralise LmOptim's own cosine — yue2_at_lr_at carries the schedule.
     C.opt.lr_floor     = 1.0f;
     C.opt.total_steps  = 1;
@@ -2455,7 +2706,7 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     }
 
     Yue2AtState st;
-    if (!yue2_at_state_alloc(&st, &m, s_max, a.chunk, C.sched, &err)) {
+    if (!yue2_at_state_alloc(&st, &m, s_max, a.chunk, C.sched, &err, cursor_l_max)) {
         fprintf(stderr, "[yue2-ar-train] %s\n", err.c_str());
         return 1;
     }
@@ -2474,6 +2725,15 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     r.grad_accum       = a.grad_accum;
     r.lossgrad         = C.lossgrad;  // 1.0; the 1/grad_accum lives in `gs` (D9)
     r.sup_shift        = yue2_at_sup_shift_env();  // 0 unless the §6.5 control is set
+    r.cur_w            = C.cursor_w;
+    r.cursor_weight    = (float) a.cursor_weight;
+    std::string cursor_md = "off";
+    if (C.cursor_w) {
+        char cb[96];
+        snprintf(cb, sizeof(cb), "on:w=%.4g,bound=%lld/%zu", a.cursor_weight, (long long) n_bound,
+                 artist.songs.size());
+        cursor_md = cb;
+    }
 
     // ── resume ──
     Yue2AtCkptState want;
@@ -2492,6 +2752,8 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     want.sched_steps   = (int32_t) a.sched_steps;
     want.weight_decay  = a.weight_decay;
     want.max_grad_norm = a.max_grad_norm;
+    want.adam_beta1    = a.adam_beta1;
+    want.adam_beta2    = a.adam_beta2;
 
     int64_t           step0    = 0;
     double            loss_sum = 0.0;
@@ -2533,12 +2795,15 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             (long long) a.steps, (long long) a.grad_accum, (double) a.max_grad_norm, (double) a.weight_decay,
             a.artist_frac, yue2_at_attn_name(attn), (long long) a.max_len, (long long) a.chunk,
             a.trigger.c_str());
-    // Named rather than hidden: lm_optim_step hard-codes AdamW's betas at
-    // (0.9, 0.999) where upstream uses (0.9, 0.95). Changing them is a change
-    // to a header four other trainers share, so it is reported instead of
-    // patched in passing.
-    fprintf(stderr, "[yue2-ar-train] AdamW betas are (0.9, 0.999) — lm-optim.h's, not upstream's "
-                    "(0.9, 0.95). A shared-header change, deliberately not made here.\n");
+    // Was a reported divergence, now a matched one. lm_optim_step used to
+    // hard-code (0.9, 0.999); LmOptim carries the betas as fields defaulting to
+    // exactly that, so the four other trainers sharing the header are
+    // unaffected, and this one sets upstream's (0.9, 0.95).
+    fprintf(stderr, "[yue2-ar-train] AdamW betas (%.3g, %.3g)%s\n",
+            (double) a.adam_beta1, (double) a.adam_beta2,
+            (a.adam_beta1 == 0.9f && a.adam_beta2 == 0.95f)
+                ? " — upstream's (ar_lora_cursor.py:31)"
+                : " — NOT upstream's (0.9, 0.95)");
     if (a.trigger.empty()) {
         fprintf(stderr, "[yue2-ar-train] WARNING: no --trigger. The adapter will have no word to address it "
                         "by at generation time, which is upstream's whole mechanism for reaching the "
@@ -2685,7 +2950,8 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
         lm_optim_zero_grad(&C.opt);
 
         double      step_loss  = 0.0;
-        int64_t     n_ok       = 0;
+        double      step_cur   = 0.0;  // upstream prints the LAST micro-step's cursor loss; we print the mean
+        int64_t     n_ok       = 0, n_cur = 0;
         int64_t     last_S     = 0;
         const char * last_id   = "";
         const char * last_pool = "";
@@ -2702,15 +2968,22 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
 
             r.forward_only = false;
             r.host_ce      = nullptr;
-            double ce      = 0.0;
-            if (!yue2_at_micro_step(r, seq, /*count_loss=*/true, &ce, &err)) {
+            // Artist songs carry targets; minted songs never do (ar_lora_cursor.py:84-86).
+            r.cur          = (was_artist && s->cursor.bound) ? &s->cursor : nullptr;
+            double ce = 0.0, cv = std::nan("");
+            if (!yue2_at_micro_step(r, seq, /*count_loss=*/true, &ce, &err, &cv)) {
                 fprintf(stderr, "[yue2-ar-train] step %lld: %s\n", (long long) step, err.c_str());
                 return 1;
             }
+            r.cur = nullptr;
             step_loss += ce;
             loss_sum += ce;
             n_micro++;
             n_ok++;
+            if (cv == cv) {
+                step_cur += cv;
+                n_cur++;
+            }
         }
         if (!n_ok) {
             fprintf(stderr, "[yue2-ar-train] step %lld: every drawn song was skipped\n", (long long) step);
@@ -2729,13 +3002,19 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
         if (a.log_every > 0 && (step % a.log_every == 0 || step == step0 + 1 || step == a.steps)) {
             const double    elapsed = (double) (ggml_time_ms() - t0_ms) / 1000.0;
             const DitGpuMem gm      = dit_gpu_mem_query(m.backend);
+            char curbuf[32];
+            if (n_cur > 0) {
+                snprintf(curbuf, sizeof(curbuf), "%.3f", step_cur / (double) n_cur);
+            } else {
+                snprintf(curbuf, sizeof(curbuf), "%s", C.cursor_w ? "nan" : "off");
+            }
             fprintf(stderr,
-                    "[yue2-ar-train] step %5lld/%lld  loss %.5f (win %.5f, run %.5f)  |g| %.4f  lr %.2e  "
-                    "S %lld  %.2fs/it  vram %zu/%zu MB (%s)  [%s %s]\n",
+                    "[yue2-ar-train] step %5lld/%lld  loss %.5f (win %.5f, run %.5f)  cursor %s  |g| %.4f  "
+                    "lr %.2e  S %lld  %.2fs/it  vram %zu/%zu MB (%s)  [%s %s]\n",
                     (long long) step, (long long) a.steps, mean, window_sum / (double) window_n,
-                    n_micro ? loss_sum / (double) n_micro : 0.0, (double) sstat.grad_norm, (double) sstat.lr,
-                    (long long) last_S, elapsed / (double) std::max<int64_t>(1, step - step0), gm.used_mb(),
-                    gm.total_mb(), gm.source(), last_pool, last_id);
+                    n_micro ? loss_sum / (double) n_micro : 0.0, curbuf, (double) sstat.grad_norm,
+                    (double) sstat.lr, (long long) last_S, elapsed / (double) std::max<int64_t>(1, step - step0),
+                    gm.used_mb(), gm.total_mb(), gm.source(), last_pool, last_id);
             window_sum = 0.0;
             window_n   = 0;
         }
@@ -2760,7 +3039,7 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             const std::string snap =
                 a.out_dir + "/" + a.name + "_step" + std::to_string((long long) step) + ".safetensors";
             if (!yue2_at_export(C.ad, a, target, step, mean_frames, m.lm_file.path, minted_present, snap,
-                                &err)) {
+                                &err, cursor_md)) {
                 fprintf(stderr, "[yue2-ar-train] snapshot export: %s\n", err.c_str());
                 return 1;
             }
@@ -2774,7 +3053,8 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     }
 
     const std::string out = a.out_dir + "/" + a.name + ".safetensors";
-    if (!yue2_at_export(C.ad, a, target, a.steps, mean_frames, m.lm_file.path, minted_present, out, &err)) {
+    if (!yue2_at_export(C.ad, a, target, a.steps, mean_frames, m.lm_file.path, minted_present, out, &err,
+                        cursor_md)) {
         fprintf(stderr, "[yue2-ar-train] export: %s\n", err.c_str());
         return 1;
     }

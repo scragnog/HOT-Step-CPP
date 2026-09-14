@@ -505,6 +505,12 @@ static void print_usage(void) {
             "                which is longer than the run, so the cosine never reaches its\n"
             "                floor of 0.2*lr. [--lr-scheduler cosine|constant]\n"
             "                [--grad-accum 2] [--max-grad-norm 1.0] [--weight-decay 0.0]\n"
+            "                [--adam-beta1 0.9] [--adam-beta2 0.95]  upstream's betas. NOT\n"
+            "                lm-optim.h's (0.9, 0.999) default: run side by side on the same\n"
+            "                twelve songs, ours descended from an identical step-0 loss to\n"
+            "                0.032 by step 800 where upstream was still at 0.165. beta2 is\n"
+            "                how long AdamW's second moment remembers, so it sets how hard a\n"
+            "                small set is memorised.\n"
             "                --steps > 1500 is REFUSED without --allow-overtrain: upstream's\n"
             "                README is emphatic that past ~1500 steps the model MEMORISES the\n"
             "                songs, and its own pick from the ladder was step 800.\n"
@@ -539,9 +545,17 @@ static void print_usage(void) {
             "                <stem>.txt beside the source audio. Falls back to --style/\n"
             "                --lyrics. A style-less, lyric-less prefix trains and is wrong, so\n"
             "                the loop says so loudly rather than silently.\n"
-            "                [--cursor-weight 0]  the lyric-cursor auxiliary loss is DEFERRED\n"
-            "                and any value above 0 is REFUSED: it needs per-word forced\n"
-            "                alignment (Demucs + torchaudio MMS) this engine does not have.\n"
+            "                [--cursor-weight 0.08]  upstream's CUR_W: the lyric-cursor auxiliary\n"
+            "                loss. A [H,H] cursor head scores every codec frame against the\n"
+            "                lyric tokens in the prefix and is trained to point at the words\n"
+            "                being sung, from per-word forced-alignment spans named per source\n"
+            "                as `cursor_words` in the manifest (f32 [n,5]: start, end, score,\n"
+            "                char0, char1; engine/tools/yue2-cursor-bridge.py produces them).\n"
+            "                REFUSED above 0 when NO artist song binds; 0 = off on purpose.\n"
+            "                Measured to matter: alignment loss 12.3 -> 1.6 with it, 10.8 -> 16.3\n"
+            "                without, on the same songs. The head is not exported.\n"
+            "                [--ckpt-from 200] [--save-every 200]  snapshot ladder; the floor is\n"
+            "                below upstream's 600 because the coherent rungs are early.\n"
             "                [--resume]  <out>/yue2_ar_ckpt.bin. EXACT within one machine and\n"
             "                build. REFUSED across rank/alpha/target/grad-accum/seed and any\n"
             "                change to --manifest/--minted/--trigger/--style/--lyrics/\n"
@@ -4666,6 +4680,10 @@ static int cmd_yue2_ar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--grad-accum"))    a.grad_accum   = atoll(next("--grad-accum"));
         else if (!strcmp(argv[i], "--max-grad-norm")) a.max_grad_norm = (float) atof(next("--max-grad-norm"));
         else if (!strcmp(argv[i], "--weight-decay"))  a.weight_decay = (float) atof(next("--weight-decay"));
+        // Default to upstream's (0.9, 0.95). Exposed so the divergence that
+        // used to be reported in the log can be measured rather than argued.
+        else if (!strcmp(argv[i], "--adam-beta1"))    a.adam_beta1   = (float) atof(next("--adam-beta1"));
+        else if (!strcmp(argv[i], "--adam-beta2"))    a.adam_beta2   = (float) atof(next("--adam-beta2"));
         else if (!strcmp(argv[i], "--artist-frac"))   a.artist_frac  = atof(next("--artist-frac"));
         else if (!strcmp(argv[i], "--max-len"))       a.max_len      = atoll(next("--max-len"));
         else if (!strcmp(argv[i], "--allow-overtrain")) a.allow_overtrain = true;

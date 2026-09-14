@@ -169,6 +169,7 @@
 #include <cstdlib>  // getenv/atoi — YUE2_AT_SUP_SHIFT, the supervised-slice control
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // The LoRA factor struct, the splitmix64 RNG and the kaiming/zero init are
@@ -739,6 +740,8 @@ struct Yue2AtState {
     ggml_backend_buffer_t buf_head = nullptr;
     ggml_context *        ctx_lab  = nullptr;  // t_labc
     ggml_backend_buffer_t buf_lab  = nullptr;
+    ggml_context *        ctx_cur  = nullptr;  // t_curT: the lyric-cursor target block
+    ggml_backend_buffer_t buf_cur  = nullptr;
 
     std::vector<ggml_tensor *> C;
     ggml_tensor *              Gh[2]   = { nullptr, nullptr };
@@ -751,17 +754,20 @@ struct Yue2AtState {
     ggml_tensor *              t_pos   = nullptr;
     ggml_tensor *              t_gs    = nullptr;
     ggml_tensor *              t_one   = nullptr;
+    ggml_tensor *              t_curT  = nullptr;  // [L_max, s_max] F32; a song uses a packed [L, nF] prefix of it
+    int64_t                    cur_l_max = 0;
 
     std::vector<uint8_t>  arena;  // one reused graph arena
     std::vector<uint16_t> mask_host;
     std::vector<int32_t>  pos_host;
     std::vector<ggml_tensor *> gacc;
     int64_t               last_mask_S = 0;
+    const void *          last_cur    = nullptr;  // which song's targets t_curT currently holds
 
     size_t fixed_bytes() const {
         size_t                      b       = 0;
-        const ggml_backend_buffer_t bufs[6] = { buf_ckpt, buf_gh0, buf_gh1, buf_misc, buf_head, buf_lab };
-        for (int i = 0; i < 6; i++) {
+        const ggml_backend_buffer_t bufs[7] = { buf_ckpt, buf_gh0, buf_gh1, buf_misc, buf_head, buf_lab, buf_cur };
+        for (int i = 0; i < 7; i++) {
             if (bufs[i]) {
                 b += ggml_backend_buffer_get_size(bufs[i]);
             }
@@ -771,15 +777,16 @@ struct Yue2AtState {
 };
 
 static void yue2_at_state_free(Yue2AtState * st) {
-    ggml_backend_buffer_t bufs[6] = { st->buf_ckpt, st->buf_gh0, st->buf_gh1,
-                                      st->buf_misc, st->buf_head, st->buf_lab };
-    for (int i = 0; i < 6; i++) {
+    ggml_backend_buffer_t bufs[7] = { st->buf_ckpt, st->buf_gh0, st->buf_gh1,
+                                      st->buf_misc, st->buf_head, st->buf_lab, st->buf_cur };
+    for (int i = 0; i < 7; i++) {
         if (bufs[i]) {
             ggml_backend_buffer_free(bufs[i]);
         }
     }
-    ggml_context * ctxs[6] = { st->ctx_ckpt, st->ctx_gh0, st->ctx_gh1, st->ctx_misc, st->ctx_head, st->ctx_lab };
-    for (int i = 0; i < 6; i++) {
+    ggml_context * ctxs[7] = { st->ctx_ckpt, st->ctx_gh0, st->ctx_gh1, st->ctx_misc,
+                               st->ctx_head, st->ctx_lab, st->ctx_cur };
+    for (int i = 0; i < 7; i++) {
         if (ctxs[i]) {
             ggml_free(ctxs[i]);
         }
@@ -837,16 +844,21 @@ static bool yue2_at_build_head(Yue2AtState * st, ggml_backend_sched_t sched, std
     return ok;
 }
 
+// `cursor_l_max` sizes the lyric-cursor target block: the largest lyric-token
+// span any artist song in this run carries. 0 = the cursor term is off and no
+// block is allocated, which leaves every graph byte-identical to a run that
+// never heard of it.
 static bool yue2_at_state_alloc(Yue2AtState * st, const Yue2Model * m, int64_t s_max, int64_t chunk,
-                                ggml_backend_sched_t sched, std::string * err) {
+                                ggml_backend_sched_t sched, std::string * err, int64_t cursor_l_max = 0) {
     const Yue2LmConfig & c = m->lm_cfg;
     const int64_t        H = (int64_t) c.embedding_length;
     const int            L = (int) c.block_count;
 
-    st->m     = m;
-    st->s_max = s_max;
-    st->chunk = std::max<int64_t>(1, chunk);
-    st->L     = L;
+    st->m         = m;
+    st->s_max     = s_max;
+    st->chunk     = std::max<int64_t>(1, chunk);
+    st->L         = L;
+    st->cur_l_max = std::max<int64_t>(0, cursor_l_max);
 
     auto mkctx = [](size_t n) {
         ggml_init_params p = { n * ggml_tensor_overhead() + 4096, nullptr, /*no_alloc*/ true };
@@ -858,7 +870,9 @@ static bool yue2_at_state_alloc(Yue2AtState * st, const Yue2Model * m, int64_t s
     st->ctx_misc = mkctx(16);
     st->ctx_head = mkctx(4);
     st->ctx_lab  = mkctx(4);
-    if (!st->ctx_ckpt || !st->ctx_gh0 || !st->ctx_gh1 || !st->ctx_misc || !st->ctx_head || !st->ctx_lab) {
+    st->ctx_cur  = st->cur_l_max > 0 ? mkctx(4) : nullptr;
+    if (!st->ctx_ckpt || !st->ctx_gh0 || !st->ctx_gh1 || !st->ctx_misc || !st->ctx_head || !st->ctx_lab ||
+        (st->cur_l_max > 0 && !st->ctx_cur)) {
         *err = "yue2_at_state_alloc: ggml_init failed";
         return false;
     }
@@ -913,19 +927,31 @@ static bool yue2_at_state_alloc(Yue2AtState * st, const Yue2Model * m, int64_t s
     st->t_labc = ggml_new_tensor_2d(st->ctx_lab, GGML_TYPE_F32, YUE2_AT_SLICE_ROWS, st->chunk);
     ggml_set_name(st->t_labc, "yue2_at_labels");
     ggml_set_input(st->t_labc);
+    if (st->cur_l_max > 0) {
+        // One block for the largest song; a smaller song packs its [L, nF]
+        // targets into the front of it and views exactly that much, so the
+        // view is contiguous whatever L_max is.
+        st->t_curT = ggml_new_tensor_2d(st->ctx_cur, GGML_TYPE_F32, st->cur_l_max, s_max);
+        ggml_set_name(st->t_curT, "yue2_at_cursorT");
+        ggml_set_input(st->t_curT);
+    }
 
     struct Pair {
         ggml_context **         ctx;
         ggml_backend_buffer_t * buf;
         const char *            tag;
     };
-    Pair pairs[6] = { { &st->ctx_ckpt, &st->buf_ckpt, "checkpoint boundaries" },
+    Pair pairs[7] = { { &st->ctx_ckpt, &st->buf_ckpt, "checkpoint boundaries" },
                       { &st->ctx_gh0, &st->buf_gh0, "gradient ping" },
                       { &st->ctx_gh1, &st->buf_gh1, "gradient pong" },
                       { &st->ctx_misc, &st->buf_misc, "hidden states + mask" },
                       { &st->ctx_head, &st->buf_head, "sliced output head" },
-                      { &st->ctx_lab, &st->buf_lab, "label chunk" } };
+                      { &st->ctx_lab, &st->buf_lab, "label chunk" },
+                      { &st->ctx_cur, &st->buf_cur, "lyric-cursor targets" } };
     for (Pair & p : pairs) {
+        if (!*p.ctx) {
+            continue;  // the cursor block is optional
+        }
         *p.buf = ggml_backend_alloc_ctx_tensors(*p.ctx, m->backend);
         if (!*p.buf) {
             *err = std::string("yue2_at_state_alloc: out of VRAM allocating the ") + p.tag;
@@ -1046,7 +1072,206 @@ struct Yue2AtRun {
     // which is the entire numeric arm of the FD gate. It is also an INDEPENDENT
     // implementation of the loss rather than the same kernel twice.
     double * host_ce = nullptr;
+
+    // ── the lyric-cursor auxiliary term (ar_lora_cursor.py:62-67) ──
+    //
+    // `cur` is this micro-step's targets (null = none: a minted song, an
+    // unbound artist song, or the term switched off). `cur_w` is the trainable
+    // [H, H] cursor head, owned by the optimizer like any LoRA factor.
+    // `cursor_weight` is upstream's CUR_W. The eval path never sets `cur`, so
+    // the reported artist/minted_val numbers stay the LM loss alone, exactly as
+    // upstream's evaluate() reports them.
+    //
+    // `host_cur`, when non-null, is the term re-aggregated ON THE HOST IN
+    // DOUBLE for the FD gate's numeric arm — the same reason `host_ce` exists.
+    const struct Yue2AtCursor * cur           = nullptr;
+    ggml_tensor *               cur_w         = nullptr;
+    float                       cursor_weight = 0.0f;
+    double *                    host_cur      = nullptr;
 };
+
+// ── The lyric-cursor targets (ar_lora_cursor.py:33-49, `cursor_targets`) ───
+//
+// Per artist song, a distribution over its lyric TOKENS for every codec frame:
+// which words is the singer on at frame i. Built once on the host and cached on
+// the song. The forced-alignment words come in as upstream's own
+// `cursor_words.npy` layout, [n_words, 5] = (start_s, end_s, score, char0,
+// char1), with the char offsets in CODEPOINTS into the exact lyrics string the
+// prefix was tokenized from.
+//
+// Layout: T is ggml [L, nF] — element (l, i) at i*L + l — so a frame's
+// distribution is one contiguous row, which is what ggml_cross_entropy_loss
+// consumes.
+struct Yue2AtCursor {
+    bool               bound = false;
+    int64_t            j0    = 0;  // first lyric-token column of t_H
+    int64_t            L     = 0;  // lyric tokens: columns [j0, j0+L)
+    int64_t            nF    = 0;  // frames carrying a target: hidden columns [P-1, P-1+nF)
+    std::vector<float> T;          // [L * nF]
+    std::string        why;        // when !bound: the reason, for the log
+};
+
+// GPT-2 byte-level BPE: a token's vocab string is a sequence of "byte-encoder"
+// codepoints, one per original byte. Inverting the encoder gives the bytes back;
+// counting lead bytes (anything but 10xxxxxx) counts Unicode codepoints in the
+// running decode, which is what Python's `len(tok.decode(...))` measures —
+// upstream's `offs` are codepoint offsets and the words' char0/char1 are too.
+// A token that splits a multi-byte character across itself and the next token
+// still counts right cumulatively: the lead byte is counted once, wherever it
+// falls, and Python's `errors="replace"` yields one U+FFFD for a dangling valid
+// prefix, which is also one.
+struct Yue2AtByteDecoder {
+    std::unordered_map<std::string, int> str2byte;
+    explicit Yue2AtByteDecoder(const BPETokenizer * tok) {
+        for (int b = 0; b < 256; b++) {
+            str2byte[tok->byte2str[b]] = b;
+        }
+    }
+    // Append the raw bytes of one token; returns the number of codepoints added.
+    int64_t append(const BPETokenizer * tok, int id, std::string * bytes) const {
+        if (id < 0 || id >= (int) tok->id_to_str.size()) {
+            return 0;
+        }
+        const std::string & s = tok->id_to_str[(size_t) id];
+        int64_t             n = 0;
+        size_t              p = 0;
+        while (p < s.size()) {
+            // one UTF-8 codepoint of the encoder string
+            const unsigned char c0 = (unsigned char) s[p];
+            size_t len = c0 < 0x80 ? 1 : (c0 >> 5) == 0x6 ? 2 : (c0 >> 4) == 0xE ? 3 : 4;
+            len        = std::min(len, s.size() - p);
+            auto it    = str2byte.find(s.substr(p, len));
+            p += len;
+            if (it == str2byte.end()) {
+                continue;
+            }
+            const unsigned char b = (unsigned char) it->second;
+            bytes->push_back((char) b);
+            if ((b & 0xC0) != 0x80) {
+                n++;  // a lead byte (or ASCII) starts a codepoint
+            }
+        }
+        return n;
+    }
+};
+
+// Transcribed from ar_lora_cursor.py:33-49. Every rule that decides a target is
+// upstream's, including the two that look like accidents and are not:
+//
+//   * a lyric token that overlaps no word falls to the token at
+//     searchsorted(offs, c0) — upstream's `or [min(len-1, searchsorted)]`;
+//   * frames before the first word are attributed to word 0, because
+//     `clip(searchsorted(..., side="right") - 1, 0, ...)` clips at 0. The
+//     carry-forward rule ("the last word that has started") is the whole
+//     mechanism, and it is deliberately blind to word END times.
+//
+// Returns bound=false, with `why`, when the prefix does not reconstruct from
+// head + lyrics — upstream's own silent `return None` at :39, made loud here
+// because a run that binds nothing prints "cursor nan" forever and finishes.
+static Yue2AtCursor yue2_at_cursor_build(const BPETokenizer * tok, const std::string & style,
+                                         const std::string & lyrics, const std::vector<int32_t> & prefix,
+                                         int64_t n_frames, const std::vector<float> & words5,
+                                         int64_t max_frames_hint = 0) {
+    Yue2AtCursor out;
+    const int64_t nW = (int64_t) (words5.size() / 5);
+    if (nW < 1) {
+        out.why = "no words";
+        return out;
+    }
+    // head = INSTRUCTIONS['off'] + "\n[Tags]\n" + style + "\n[Lyrics]\n"   (:35)
+    std::string head = yue2_instruction(YUE2_COT_OFF);
+    head += "\n[Tags]\n";
+    head += style;
+    head += "\n[Lyrics]\n";
+    std::vector<int> ids_head, ids_full;
+    try {
+        ids_head = yue2_bpe_encode(tok, head);
+        ids_full = yue2_bpe_encode(tok, yue2_assemble_text(style, lyrics, YUE2_COT_OFF));
+    } catch (const std::exception & e) {
+        out.why = std::string("tokenize: ") + e.what();
+        return out;
+    }
+    const size_t nh = ids_head.size();
+    if (ids_full.size() < nh || !std::equal(ids_head.begin(), ids_head.end(), ids_full.begin())) {
+        out.why = "the re-tokenised head is not a prefix of head+lyrics (a BPE merge crossed the [Lyrics] "
+                  "boundary)";
+        return out;
+    }
+    // prefix[1 : 1+len(ids_full)] == ids_full   (:39) — the +1 is the EOD/BOS.
+    if (prefix.size() < 1 + ids_full.size()) {
+        out.why = "prefix shorter than head+lyrics";
+        return out;
+    }
+    for (size_t k = 0; k < ids_full.size(); k++) {
+        if (prefix[1 + k] != (int32_t) ids_full[k]) {
+            out.why = "stored prefix differs from the re-tokenised head+lyrics at token " + std::to_string(k);
+            return out;
+        }
+    }
+    const int64_t j0 = 1 + (int64_t) nh;
+    const int64_t L  = (int64_t) ids_full.size() - (int64_t) nh;
+    if (L < 1) {
+        out.why = "no lyric tokens";
+        return out;
+    }
+
+    // char END offset of each lyric token, in codepoints (:42)
+    Yue2AtByteDecoder    dec(tok);
+    std::vector<int64_t> offs((size_t) L, 0);
+    {
+        std::string bytes;
+        int64_t     cum = 0;
+        for (int64_t k = 0; k < L; k++) {
+            cum += dec.append(tok, ids_full[nh + (size_t) k], &bytes);
+            offs[(size_t) k] = cum;
+        }
+    }
+    // starts = [0] + offs[:-1]; tok_of_word (:43-44)
+    std::vector<std::vector<int32_t>> tok_of_word((size_t) nW);
+    for (int64_t w = 0; w < nW; w++) {
+        const int64_t c0 = (int64_t) words5[(size_t) w * 5 + 3];
+        const int64_t c1 = (int64_t) words5[(size_t) w * 5 + 4];
+        std::vector<int32_t> & ks = tok_of_word[(size_t) w];
+        for (int64_t k = 0; k < L; k++) {
+            const int64_t start = k == 0 ? 0 : offs[(size_t) k - 1];
+            if (start < c1 && offs[(size_t) k] > c0) {
+                ks.push_back((int32_t) k);
+            }
+        }
+        if (ks.empty()) {
+            // np.searchsorted(offs, c0): first k with offs[k] >= c0
+            int64_t k = (int64_t) (std::lower_bound(offs.begin(), offs.end(), c0) - offs.begin());
+            ks.push_back((int32_t) std::min<int64_t>(L - 1, k));
+        }
+    }
+    // widx[i] = clip(searchsorted(wstart, i/25, side="right") - 1, 0, nW-1)  (:45)
+    const int64_t nF = max_frames_hint > 0 ? std::min(n_frames, max_frames_hint) : n_frames;
+    if (nF < 1) {
+        out.why = "no frames";
+        return out;
+    }
+    std::vector<float> wstart((size_t) nW);
+    for (int64_t w = 0; w < nW; w++) {
+        wstart[(size_t) w] = words5[(size_t) w * 5 + 0];
+    }
+    out.T.assign((size_t) (L * nF), 0.0f);
+    for (int64_t i = 0; i < nF; i++) {
+        const float   t  = (float) i / 25.0f;
+        // side="right": number of starts <= t, then -1
+        int64_t       w  = (int64_t) (std::upper_bound(wstart.begin(), wstart.end(), t) - wstart.begin()) - 1;
+        w                = std::max<int64_t>(0, std::min<int64_t>(nW - 1, w));
+        const std::vector<int32_t> & ks = tok_of_word[(size_t) w];
+        const float                  v  = 1.0f / (float) ks.size();
+        for (int32_t k : ks) {
+            out.T[(size_t) (i * L + k)] = v;
+        }
+    }
+    out.bound = true;
+    out.j0    = j0;
+    out.L     = L;
+    out.nF    = nF;
+    return out;
+}
 
 // One dense [SL, Sc] label block, set sparse and cleared sparse. A dense
 // one-hot at the full vocabulary would be 3.3 GB at n_sup = 4501; over the
@@ -1244,6 +1469,166 @@ static bool yue2_at_head_fullvocab_ce(Yue2AtRun & r, const Yue2AtSeq & seq, int6
     return true;
 }
 
+// ── P6: the lyric-cursor term (ar_lora_cursor.py:62-67) ────────────────────
+//
+// Upstream, with hn the post-final-norm hidden states, h = hn[Lp-1 : -1],
+// nF = min(frames, len(h)):
+//
+//     q    = cursor_head(h[:nF])                 [nF, H]   (nn.Linear, no bias)
+//     kh   = hn[j0:j1]                           [L, H]    the lyric tokens
+//     sc   = (q @ kh.T) * H^-0.5                 [nF, L]
+//     loss = -(T * log_softmax(sc)).sum(-1).mean()
+//
+// and total = lm + CUR_W * loss, over ACC micro-steps.
+//
+// Both operands live in t_H already: the supervised columns [P-1, P-1+nF) and
+// the lyric columns [j0, j0+L) — which the head never touches, and which is why
+// this term is not a bolt-on to the head but a second seed into the SAME Gh[0]
+// buffer. Gh[0] is [H, S_MAX], the trunk backward runs over all S columns, so
+// gradient landing in the lyric-prefix columns flows back through every layer
+// exactly as the supervised columns' does. Nothing about the segment backward
+// changes.
+//
+// NO AUTODIFF, same as the head: forward in ggml for the reported number,
+// backward by hand. Written out because four transposes is exactly where the
+// V-gradient bug hid in the NAR trainer, and the FD gate probes `cursor_head.W`
+// for that reason:
+//
+//     R    = mul_mat(hk, q)                      ggml [L, nF],  R[l,i] = Σ_h hk[h,l] q[h,i]
+//     sc   = s·R,  s = H^-0.5
+//     dsc  = CE_back(gs, sc, T)                  = gs·(softmax(sc) - T)/nF   (mean's 1/nF is inside)
+//     dR   = s·dsc
+//     dq   = mul_mat(hkᵀ, dR)                    [H, nF],  dq[h,i]  = Σ_l hk[h,l] dR[l,i]
+//     dhk  = mul_mat(qᵀ, dRᵀ)                    [H, L],   dhk[h,l] = Σ_i q[h,i]  dR[l,i]
+//     dhq  = mul_mat(Wᵀ, dq)                     [H, nF],  dhq[h,i] = Σ_o W[h,o]  dq[o,i]
+//     dW   = mul_mat(hqᵀ, dqᵀ)                   [H, H],   dW[h,o]  = Σ_i hq[h,i] dq[o,i]
+//
+// with q = mul_mat(W, hq), W ggml [H_in, H_out] (torch's Linear weight [out, in]
+// transposed by ggml's ne order, which is what makes identity init the same
+// tensor in both). gs = lossgrad · CUR_W / grad_accum: CE_back supplies the
+// mean's 1/nF, the head's `gs` convention supplies the 1/grad_accum, and
+// lossgrad is the FD gate's negative control, which must reach this term too
+// or the gate could not fail on it.
+//
+// Gh[0] columns [P-1, P-1+nF) already hold the head's dL/dh, so dhq is ADDED;
+// [j0, j0+L) are zero (P4 cleared the buffer) and are added for uniformity.
+static bool yue2_at_cursor_term(Yue2AtRun & r, const Yue2AtSeq & seq, bool count_loss, double * cur_out) {
+    Yue2AtState &        st = *r.st;
+    const Yue2AtCursor & cu = *r.cur;
+    const int64_t        H  = (int64_t) r.m->lm_cfg.embedding_length;
+    const int64_t        S  = (int64_t) seq.ids.size();
+    const int64_t        GA = std::max<int64_t>(1, r.grad_accum);
+    const int64_t        col0 = seq.prefix - 1 + (int64_t) r.sup_shift;
+    const int64_t        L  = cu.L, nF = std::min(cu.nF, seq.n_sup);
+
+    if (!st.t_curT || L > st.cur_l_max || nF < 1 || col0 < 0 || col0 + nF > S || cu.j0 + L > seq.prefix) {
+        fprintf(stderr, "[yue2-at] cursor: targets [L %lld, nF %lld] do not fit (L_max %lld, S %lld, P %lld)\n",
+                (long long) L, (long long) nF, (long long) st.cur_l_max, (long long) S, (long long) seq.prefix);
+        return false;
+    }
+    if (st.last_cur != (const void *) &cu) {
+        ggml_backend_tensor_set(st.t_curT, cu.T.data(), 0, (size_t) (L * nF) * sizeof(float));
+        st.last_cur = &cu;
+    }
+    const float s  = 1.0f / std::sqrt((float) H);
+    const float gs = r.lossgrad * r.cursor_weight / (float) GA;
+    ggml_backend_tensor_set(st.t_gs, &gs, 0, sizeof(float));
+
+    ggml_init_params ip  = { st.arena.size(), st.arena.data(), /*no_alloc*/ true };
+    ggml_context *   ctx = ggml_init(ip);
+    ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 256, /*grads=*/false);
+
+    ggml_tensor * hq = ggml_cont(ctx, ggml_view_2d(ctx, st.t_H, H, nF, st.t_H->nb[1], (size_t) col0 * st.t_H->nb[1]));
+    ggml_tensor * hk = ggml_cont(ctx, ggml_view_2d(ctx, st.t_H, H, L, st.t_H->nb[1], (size_t) cu.j0 * st.t_H->nb[1]));
+    ggml_tensor * T  = ggml_view_2d(ctx, st.t_curT, L, nF, (size_t) L * sizeof(float), 0);
+    ggml_tensor * q  = ggml_mul_mat(ctx, r.cur_w, hq);           // [H, nF]
+    ggml_tensor * sc = ggml_scale(ctx, ggml_mul_mat(ctx, hk, q), s);  // [L, nF]
+    ggml_tensor * lc = ggml_cross_entropy_loss(ctx, sc, T);       // scalar, mean over nF
+    ggml_set_output(lc);
+    ggml_build_forward_expand(gf, lc);
+    if (r.host_cur) {
+        ggml_set_output(hq);
+        ggml_set_output(hk);
+        ggml_build_forward_expand(gf, hq);
+        ggml_build_forward_expand(gf, hk);
+    }
+    if (!r.forward_only) {
+        auto slot = r.opt->param_slot.find(r.cur_w);
+        GGML_ASSERT(slot != r.opt->param_slot.end());
+        ggml_tensor * accW = r.opt->acc[(size_t) slot->second];
+
+        ggml_tensor * dR  = ggml_scale(ctx, ggml_cross_entropy_loss_back(ctx, st.t_gs, sc, T), s);  // [L, nF]
+        ggml_tensor * dq  = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, hk)), dR);          // [H, nF]
+        ggml_tensor * dhk = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, q)),
+                                         ggml_cont(ctx, ggml_transpose(ctx, dR)));                    // [H, L]
+        ggml_tensor * dhq = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, r.cur_w)), dq);     // [H, nF]
+        ggml_tensor * dW  = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, hq)),
+                                         ggml_cont(ctx, ggml_transpose(ctx, dq)));                    // [H, H]
+
+        ggml_tensor * gq = ggml_view_2d(ctx, st.Gh[0], H, nF, st.Gh[0]->nb[1], (size_t) col0 * st.Gh[0]->nb[1]);
+        ggml_tensor * gk = ggml_view_2d(ctx, st.Gh[0], H, L, st.Gh[0]->nb[1], (size_t) cu.j0 * st.Gh[0]->nb[1]);
+        // read-then-write on the same view inside one graph: the add depends
+        // on the view, the cpy depends on the add, so the order is forced.
+        ggml_build_forward_expand(gf, ggml_cpy(ctx, ggml_add(ctx, gq, dhq), gq));
+        ggml_build_forward_expand(gf, ggml_cpy(ctx, ggml_add(ctx, gk, dhk), gk));
+        ggml_build_forward_expand(gf, ggml_cpy(ctx, ggml_add(ctx, accW, dW), accW));
+    }
+
+    ggml_backend_sched_reset(r.sched);
+    const bool ok = ggml_backend_sched_graph_compute(r.sched, gf) == GGML_STATUS_SUCCESS;
+    if (ok && count_loss && cur_out) {
+        float lv = 0.0f;
+        ggml_backend_tensor_get(lc, &lv, 0, sizeof(float));
+        *cur_out = (double) lv;
+    }
+    if (ok && r.host_cur) {
+        // Independent, in double: download the two operands and the head, redo
+        // the forward on the host. The FD gate differences this, so it must
+        // not be the same f32 kernel twice.
+        std::vector<float> Hq((size_t) (H * nF)), Hk((size_t) (H * L)), W((size_t) (H * H));
+        ggml_backend_tensor_get(hq, Hq.data(), 0, Hq.size() * sizeof(float));
+        ggml_backend_tensor_get(hk, Hk.data(), 0, Hk.size() * sizeof(float));
+        ggml_backend_tensor_get(r.cur_w, W.data(), 0, W.size() * sizeof(float));
+        std::vector<double> qd((size_t) H), scd((size_t) L);
+        double              tot = 0.0;
+        for (int64_t i = 0; i < nF; i++) {
+            const float * x = Hq.data() + (size_t) i * (size_t) H;
+            for (int64_t o = 0; o < H; o++) {
+                double acc = 0.0;
+                const float * wcol = W.data() + (size_t) o * (size_t) H;  // W[h,o] at o*H + h
+                for (int64_t h = 0; h < H; h++) {
+                    acc += (double) wcol[h] * (double) x[h];
+                }
+                qd[(size_t) o] = acc;
+            }
+            double mx = -1e300;
+            for (int64_t l = 0; l < L; l++) {
+                const float * k = Hk.data() + (size_t) l * (size_t) H;
+                double        d = 0.0;
+                for (int64_t h = 0; h < H; h++) {
+                    d += (double) k[h] * qd[(size_t) h];
+                }
+                scd[(size_t) l] = d * (double) s;
+                mx              = std::max(mx, scd[(size_t) l]);
+            }
+            double z = 0.0;
+            for (int64_t l = 0; l < L; l++) {
+                z += std::exp(scd[(size_t) l] - mx);
+            }
+            const double lz = mx + std::log(z);
+            for (int64_t l = 0; l < L; l++) {
+                const float t = cu.T[(size_t) (i * L + l)];
+                if (t != 0.0f) {
+                    tot -= (double) t * (scd[(size_t) l] - lz);
+                }
+            }
+        }
+        *r.host_cur = tot / (double) nF;
+    }
+    ggml_free(ctx);
+    return ok;
+}
+
 // ── The micro-step (contract §4.3, lm-ckpt.h:15-30's shape) ────────────────
 //
 //   P0  upload ids, positions and the causal mask
@@ -1252,6 +1637,8 @@ static bool yue2_at_head_fullvocab_ce(Yue2AtRun & r, const Yue2AtSeq & seq, int6
 //   P3  tail forward: layer L-1 + final norm -> t_H            grads = false
 //   P4  t_G := 0   (masked columns must stay EXACTLY zero)
 //   P5  the chunked CE head writes dL/dh into t_G, no autodiff
+//   P6  the lyric-cursor term ADDS its dL/dh into t_G — supervised AND lyric
+//       columns — and its dW into the cursor head's accumulator, no autodiff
 //   P7  backward segments l = L-1 .. 0: recompute the layer from C[l], build
 //       the surrogate SUM(Y (.) dY), backward it, accumulate LoRA grads into
 //       opt.acc[] and dL/dC[l] into the other Gh ping-pong buffer.
@@ -1265,7 +1652,7 @@ static bool yue2_at_head_fullvocab_ce(Yue2AtRun & r, const Yue2AtSeq & seq, int6
 // D13: the recomputed forward MUST use the same `r.opts` as the collect pass.
 // It does, structurally: `opts` is read once, here, and passed to every call.
 static bool yue2_at_micro_step(Yue2AtRun & r, const Yue2AtSeq & seq, bool count_loss, double * ce_out,
-                               std::string * err) {
+                               std::string * err, double * cur_out = nullptr) {
     const Yue2Model &    m  = *r.m;
     Yue2AtState &        st = *r.st;
     const Yue2LmConfig & c  = m.lm_cfg;
@@ -1377,6 +1764,25 @@ static bool yue2_at_micro_step(Yue2AtRun & r, const Yue2AtSeq & seq, bool count_
             *err = "P5 (CE head) failed";
         }
         return false;
+    }
+
+    // ── P6: the lyric-cursor term ────────────────────────────────────────
+    //
+    // Skipped for a plain forward-only eval (upstream's evaluate() reports the
+    // LM loss alone); run for a training micro-step, and for the FD gate's
+    // numeric arm, which is forward-only but asks for the host-double value.
+    if (cur_out) {
+        *cur_out = std::nan("");
+    }
+    if (r.cur && r.cur->bound && r.cursor_weight > 0.0f && r.cur_w && (!r.forward_only || r.host_cur)) {
+        if (!yue2_at_cursor_term(r, seq, count_loss, cur_out)) {
+            if (err) {
+                *err = "P6 (lyric-cursor term) failed";
+            }
+            return false;
+        }
+    } else if (r.host_cur) {
+        *r.host_cur = 0.0;
     }
     if (r.forward_only) {
         return true;  // evaluation stops here: the loss is what it came for
