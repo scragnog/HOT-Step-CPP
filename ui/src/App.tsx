@@ -34,6 +34,7 @@ import { StreamSpectrum } from './components/player/StreamSpectrum';
 import { RightSidebar } from './components/details/RightSidebar';
 import { MetadataEditorModal } from './components/details/MetadataEditorModal';
 import { CoverArtPromptModal } from './components/library/CoverArtPromptModal';
+import { ImportTracksModal } from './components/library/ImportTracksModal';
 import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
 import { downloadTrack, downloadTrackVersion } from './utils/downloadTrack';
@@ -1056,6 +1057,7 @@ const AppContent: React.FC = () => {
               onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
               onDownload={handleDownload}
               onRename={handleRename}
+              showImport
               onAddToPlaylist={(song) => {
                 addToPlaylist({
                   id: song.id,
@@ -1577,6 +1579,9 @@ const AppContent: React.FC = () => {
 
       {/* Per-track cover art prompt modal (#67) — single instance, driven by window events */}
       <CoverArtPromptModal />
+
+      {/* "Upload into Library" — single instance, opened from the Library header */}
+      <ImportTracksModal />
 
       {metadataEditSong && token && (
         <MetadataEditorModal

@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
+import multer from 'multer';
 import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
@@ -15,8 +16,17 @@ import {
   startRePostProcess, checkPpEligibility, requestedPpStages, revertPostProcessing,
   getRePostProcessJob, findRePostProcessJobBySong,
 } from '../services/generation/rePostProcess.js';
+import { importTrackFile, IMPORT_EXTENSIONS } from '../services/library/importTrack.js';
 
 const router = Router();
+
+// Uploads land on disk rather than in memory: an album's worth of FLAC at
+// 100 MB a file is not something to hold in the heap while ffmpeg works.
+const importTempDir = path.join(config.data.dir, 'import_temp');
+const importUpload = multer({
+  dest: importTempDir,
+  limits: { fileSize: 500 * 1024 * 1024, files: 50 },
+});
 
 // GET /api/songs — list user's songs
 router.get('/', (req, res) => {
@@ -190,6 +200,48 @@ router.post('/', (req, res) => {
   res.json({
     song: { ...song, tags: JSON.parse(song.tags || '[]'), is_public: !!song.is_public },
   });
+});
+
+// POST /api/songs/import — bring existing audio files into the library
+//
+// Multipart, field "audio", one or more files. Each becomes a song row whose
+// audio_url is a raw WAV in data/audio — the shape every later stage expects,
+// post-processing included. Files are handled one at a time and reported one
+// at a time: one unreadable file in a folder-full must not lose the rest.
+router.post('/import', importUpload.array('audio', 50), async (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  const files = (req.files as Express.Multer.File[] | undefined) || [];
+  if (files.length === 0) { res.status(400).json({ error: 'No files uploaded' }); return; }
+
+  const songs: any[] = [];
+  const errors: { file: string; error: string }[] = [];
+
+  for (const file of files) {
+    try {
+      const song = await importTrackFile({
+        userId,
+        sourcePath: file.path,
+        originalName: file.originalname,
+      });
+      songs.push({ ...song, tags: JSON.parse(song.tags || '[]'), is_public: !!song.is_public });
+    } catch (err: any) {
+      console.error(`[Import] ${file.originalname} failed:`, err.message);
+      errors.push({ file: file.originalname, error: err.message });
+    } finally {
+      // The upload's temp copy has served its purpose either way.
+      try { fs.unlinkSync(file.path); } catch { /* already gone */ }
+    }
+  }
+
+  // Nothing got in — report it as the failure it is rather than as an empty
+  // success the UI has to squint at.
+  if (songs.length === 0) {
+    res.status(400).json({ error: errors[0]?.error || 'Import failed', errors });
+    return;
+  }
+  res.json({ songs, errors, accepted: IMPORT_EXTENSIONS });
 });
 
 // PATCH /api/songs/:id — update song

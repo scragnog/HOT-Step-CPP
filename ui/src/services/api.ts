@@ -146,6 +146,48 @@ export const songApi = {
     get<{ songs: UnifiedRecentSong[] }>(
       `/songs/recent?limit=${limit}${source && source !== 'all' ? `&source=${source}` : ''}`, token
     ),
+  /**
+   * Import audio files from disk into the library. Each becomes a song row
+   * backed by a raw WAV, which is what post-processing, stems and export all
+   * expect — nothing here touches the generation engine.
+   *
+   * A file that cannot be read comes back in `errors` while the rest still
+   * import; only an all-failed request rejects.
+   */
+  importTracks: async (
+    files: File[],
+    token: string,
+    onProgress?: (fraction: number) => void,
+  ): Promise<{ songs: Song[]; errors: { file: string; error: string }[] }> => {
+    const form = new FormData();
+    for (const file of files) form.append('audio', file, file.name);
+
+    // XHR rather than fetch: an album of FLACs is a long upload, and a
+    // progress bar is the difference between "working" and "hung".
+    const raw = await new Promise<any>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${BASE}/songs/import`);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(e.loaded / e.total);
+        };
+      }
+      xhr.onload = () => {
+        let body: any = {};
+        try { body = JSON.parse(xhr.responseText); } catch { /* non-JSON error page */ }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body);
+        else reject(new Error(body.error || `Import failed (HTTP ${xhr.status})`));
+      };
+      xhr.onerror = () => reject(new Error('Import failed — the server closed the connection'));
+      xhr.send(form);
+    });
+
+    return {
+      songs: (raw.songs || []).map(normalizeSong),
+      errors: raw.errors || [],
+    };
+  },
 };
 
 // ── Generation ──────────────────────────────────────────────

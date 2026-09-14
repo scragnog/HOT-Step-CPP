@@ -6,7 +6,7 @@ import {
   Play, Pause, Trash2, RotateCcw, Music,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus,
   LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Loader2,
-  Check, Columns3, ChevronLeft, ChevronRight, Radio,
+  Check, Columns3, ChevronLeft, ChevronRight, Radio, Upload,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
@@ -17,10 +17,11 @@ import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { downloadAll } from '../../utils/downloadTrack';
 import { HoverFullText } from '../shared/HoverFullText';
 import { SongActionsMenu } from '../shared/SongActionsMenu';
+import { openImportTracks } from './ImportTracksModal';
 
 // ── Source filter definitions ────────────────────────────────────────────────
 
-type SourceFilter = 'all' | 'create' | 'insta-gen' | 'lyric-studio' | 'cover-studio' | 'repaint' | 'stem-builder' | 'builder';
+type SourceFilter = 'all' | 'create' | 'insta-gen' | 'lyric-studio' | 'cover-studio' | 'repaint' | 'stem-builder' | 'builder' | 'import';
 
 const SOURCE_FILTERS: { id: SourceFilter; label: string; color: string }[] = [
   { id: 'all',           label: 'All',           color: 'text-zinc-700 dark:text-zinc-300 bg-white/10 border-zinc-300 dark:border-white/10' },
@@ -31,6 +32,7 @@ const SOURCE_FILTERS: { id: SourceFilter; label: string; color: string }[] = [
   { id: 'repaint',       label: 'Repaint',       color: 'text-amber-300 bg-amber-500/15 border-amber-500/25' },
   { id: 'stem-builder',  label: 'Stem Build',    color: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/25' },
   { id: 'builder',       label: 'Song Builder',  color: 'text-indigo-300 bg-indigo-500/15 border-indigo-500/25' },
+  { id: 'import',        label: 'Imported',      color: 'text-sky-300 bg-sky-500/15 border-sky-500/25' },
 ];
 
 function getSongSource(song: Song): string {
@@ -153,6 +155,10 @@ interface SongListProps {
   onEditMetadata?: (song: Song) => void;
   /** Show source filter tabs — true for Library page, false for Create page */
   showFilters?: boolean;
+  /** Offer "Upload into Library". Library only: importing is not tied to any
+   *  generation surface, and a track that arrives from disk belongs to all of
+   *  them or none of them. */
+  showImport?: boolean;
   /** Layout mode — 'list' for compact rows, 'grid' for rich cards, 'table' for data-dense */
   viewMode?: 'list' | 'grid' | 'table';
   /** Override the header title */
@@ -161,7 +167,8 @@ interface SongListProps {
 
 export const SongList: React.FC<SongListProps> = ({
   songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename, onAddToPlaylist,
-  onSendToCover, onEditMetadata, showFilters = true, viewMode = 'list', title = 'Library',
+  onSendToCover, onEditMetadata, showFilters = true, showImport = false,
+  viewMode = 'list', title = 'Library',
 }) => {
   const { t } = useTranslation();
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
@@ -272,6 +279,15 @@ export const SongList: React.FC<SongListProps> = ({
         <Music size={48} className="mb-4 opacity-30" />
         <div className="text-lg font-medium text-zinc-600 dark:text-zinc-400">{t('library.noSongsYet')}</div>
         <div className="text-sm text-zinc-600 mt-1">{t('library.createFirstTrack')}</div>
+        {showImport && (
+          <button
+            onClick={openImportTracks}
+            className="mt-5 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-pink-500/10 border border-pink-500/20 text-pink-400 hover:bg-pink-500/20 transition-colors"
+          >
+            <Upload size={13} />
+            {t('library.import', 'Upload into Library')}
+          </button>
+        )}
       </div>
     );
   }
@@ -288,6 +304,17 @@ export const SongList: React.FC<SongListProps> = ({
           <span className="text-xs text-zinc-500 font-medium">
             {filteredSongs.length}{showFilters && sourceFilter !== 'all' ? ` / ${songs.length}` : ''} song{filteredSongs.length !== 1 ? 's' : ''}
           </span>
+
+          {showImport && (
+            <button
+              onClick={openImportTracks}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-pink-500/10 border border-pink-500/20 text-pink-400 hover:bg-pink-500/20 transition-colors"
+              title={t('library.importTooltip', 'Add audio files you already have — they can be post-processed like any render')}
+            >
+              <Upload size={13} />
+              {t('library.import', 'Upload into Library')}
+            </button>
+          )}
 
           {/* View mode toggle */}
           <div className="flex items-center rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
