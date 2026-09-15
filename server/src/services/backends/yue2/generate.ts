@@ -72,6 +72,8 @@ export interface Yue2ParamMapping {
    *  and it is what the song row, the title and StableStep's own SA3 prompt
    *  should show — none of them want "albumA2, in the style of albumA2." */
   caption: string;
+  /** The two merged halves and the trigger each was trained on, for the log. */
+  halves: Yue2StyleHalves;
 }
 
 /**
@@ -89,9 +91,25 @@ export interface Yue2ParamMapping {
  * reconcileSelection replays — the one source that says what is merged into
  * the resident weights.
  */
-function yue2StyleForAdapter(caption: string, params: any): { style: string; notes: string[] } {
+/** What each merged half is addressed by, for the run log. One render sends ONE
+ *  style sentence, so these are not two prompts — they are the two triggers the
+ *  two adapters were TRAINED on, and the log exists so a disagreement between
+ *  them is visible at a glance instead of after a listening round. */
+export interface Yue2StyleHalves {
+  ar: { path: string; trigger: string };
+  nar: { path: string; trigger: string };
+}
+
+function yue2StyleForAdapter(
+  caption: string, params: any,
+): { style: string; notes: string[]; halves: Yue2StyleHalves } {
   const notes: string[] = [];
   const picked = yue2PersistedSelection().adapters;
+  const halfOf = (p: string) => ({
+    path: p,
+    trigger: p ? (readSafetensorsMeta(p)?.trigger ?? '').normalize('NFC').trim() : '',
+  });
+  const halves: Yue2StyleHalves = { ar: halfOf(picked.ar.path), nar: halfOf(picked.nar.path) };
 
   // TWO slots, ONE style sentence. The template composes a single trigger, so
   // when both halves are loaded one of them has to drive it, and that is the
@@ -102,7 +120,7 @@ function yue2StyleForAdapter(caption: string, params: any): { style: string; not
   // share a trigger and the question does not arise; when they differ, say so
   // rather than silently addressing one of them.
   const adapter = picked.nar.path || picked.ar.path;
-  if (!adapter) return { style: caption, notes };
+  if (!adapter) return { style: caption, notes, halves };
   const other = adapter === picked.nar.path ? picked.ar.path : '';
 
   const name = path.basename(adapter);
@@ -122,7 +140,7 @@ function yue2StyleForAdapter(caption: string, params: any): { style: string; not
   const trigger = (meta?.trigger ?? '').normalize('NFC').trim();
   if (!trigger) {
     notes.push(`LM adapter "${name}" records no trigger — the style prompt is sent exactly as typed.`);
-    return { style: caption, notes };
+    return { style: caption, notes, halves };
   }
 
   // The same opt-out MM3 gives (mm3LmAdapterTrigger): composing is a default,
@@ -132,7 +150,7 @@ function yue2StyleForAdapter(caption: string, params: any): { style: string; not
       `LM adapter trigger "${trigger}" NOT composed in (yue2LmAdapterTrigger: false) — this adapter `
       + 'only ever saw its trigger inside the training style sentence, so likeness will be weak.',
     );
-    return { style: caption, notes };
+    return { style: caption, notes, halves };
   }
 
   // Absent means a file exported before --style-template existed, and `bare`
@@ -159,7 +177,7 @@ function yue2StyleForAdapter(caption: string, params: any): { style: string; not
   } else {
     notes.push(`LM adapter trigger "${trigger}" composed into the style prompt (${template} template).`);
   }
-  return { style, notes };
+  return { style, notes, halves };
 }
 
 /**
@@ -237,7 +255,7 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
     ...(seed >= 0 ? { seed } : {}),
   };
 
-  return { req, notes, caption };
+  return { req, notes, caption, halves: styled.halves };
 }
 
 /** First non-empty line of the caption, for StableStep's own SA3 prompt —
@@ -249,10 +267,25 @@ function yue2CaptionToStyle(caption: string): string {
 }
 
 function yue2StageText(phase: string | undefined, step: number, total: number): { stage: string; progress: number } {
+  // KEYED ON THE WIRE STRINGS job_phase_str() emits (hot-step-server.cpp:327),
+  // not on the Yue2Stage enum names. `vae` was the enum's spelling and never
+  // matched anything: the VAE stage arrives as `vae_decode`, so the whole
+  // decode showed as "YuE2: Working". Both spellings are accepted now.
+  //
+  // "Decoding audio (VAE)" is load-bearing text, not a label — pollUntilDone
+  // matches it with startsWith() to grant the decode its 15-minute quiet window
+  // instead of the 2-minute one. Do not reword that entry.
+  //
+  // The other three are worded for what is HAPPENING rather than for which
+  // model is running. `semantic` is the AR writing the song's tokens and is the
+  // longest stage of a render by far; calling it "Planning (semantic)" was
+  // accurate and read as still-getting-ready, so a whole generation looked
+  // stuck in planning with no rendering stage ever named.
   const names: Record<string, string> = {
     plan: 'YuE2: Planning (ABC)',
-    semantic: 'YuE2: Planning (semantic)',
-    nar: 'YuE2: Synthesizing',
+    semantic: 'YuE2: Composing',
+    nar: 'YuE2: Rendering',
+    vae_decode: 'Decoding audio (VAE)',
     vae: 'Decoding audio (VAE)',
   };
   const label = (phase && names[phase]) || 'YuE2: Working';
@@ -265,7 +298,7 @@ function yue2StageText(phase: string | undefined, step: number, total: number): 
   // Coarse cross-stage progress estimate — four stages, evenly weighted; no
   // richer per-stage detail is available without a /yue2/job route, which
   // the plan explicitly says not to add.
-  const order = ['plan', 'semantic', 'nar', 'vae'];
+  const order = ['plan', 'semantic', 'nar', 'vae_decode'];
   const idx = phase ? order.indexOf(phase) : -1;
   const base = idx >= 0 ? idx / order.length : 0;
   const within = total > 0 ? (step / total) / order.length : 0;
@@ -281,7 +314,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
 
   if (job.status === 'cancelled') return;
 
-  const { req, notes, caption } = mapYue2Params(job.params);
+  const { req, notes, caption, halves } = mapYue2Params(job.params);
 
   startGenerationLog(job.id, 'yue2-text2music');
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
@@ -289,6 +322,23 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
 
   console.log(`[Generate] Job ${job.id} — backend=yue2, cot=${req.cot}, seed=${req.seed ?? -1}, `
     + `caption=${req.style.length} chars, lyrics=${req.lyrics ? `${req.lyrics.length} chars` : '(instrumental)'}`);
+
+  // THE PROMPT THAT ACTUALLY WENT OUT, in full, next to the trigger each merged
+  // half was trained on. A style that misses its adapter's trigger costs a whole
+  // listening round to notice by ear and is obvious here in one line, which is
+  // the entire reason this is logged rather than counted in characters.
+  const half = (h: { path: string; trigger: string }) =>
+    (h.path ? `${path.basename(h.path)} trigger="${h.trigger || '(none recorded)'}"` : '(none)');
+  log('INFO', `[YuE2] AR  ${half(halves.ar)}`);
+  log('INFO', `[YuE2] NAR ${half(halves.nar)}`);
+  if (halves.ar.path && halves.nar.path && halves.ar.trigger !== halves.nar.trigger) {
+    log('WARNING', '[YuE2] The two halves were trained on DIFFERENT triggers — one style sentence '
+      + 'carries one trigger, so the half whose trigger is absent is being prompted with a string it '
+      + 'never saw.');
+  }
+  log('INFO', `[YuE2] Style sent: ${req.style}`);
+  if (req.lyrics) log('DEBUG', `[YuE2] Lyrics sent (${req.lyrics.length} chars):
+${req.lyrics}`);
 
   let detailTimer: NodeJS.Timeout | undefined;
 

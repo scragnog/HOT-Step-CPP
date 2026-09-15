@@ -26,7 +26,8 @@ import {
 } from '../../utils/mm3CaptionSource';
 import {
   YUE2_BACKEND_ID, ensureYue2SourceTracks, pickNearestBpmTrack as pickNearestYue2Track,
-  readYue2CaptionSelection, resolveYue2Caption, writeYue2CaptionSelection, yue2TrackBpm,
+  readYue2CaptionSelection, resolveYue2Caption, writeYue2CaptionSelection, yue2CaptionAdapterPath,
+  yue2TrackBpm,
   type Yue2CaptionSelection, type Yue2SourceTrack,
 } from '../../utils/yue2CaptionSource';
 import type { GenerationParams, Song } from '../../types';
@@ -136,7 +137,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // that are in distribution for it. Default is Custom — unlike the MM3 control,
   // this one can appear over a caption the user typed.
   const yue2Mode = useBackendStore(s => s.activeBackendId) === YUE2_BACKEND_ID;
-  const yue2Adapter = useBackendStore(s => String(s.models[YUE2_BACKEND_ID]?.defaults?.lmAdapter ?? ''));
+  const yue2Adapter = useBackendStore(
+    s => yue2CaptionAdapterPath(s.models[YUE2_BACKEND_ID]?.defaults as Record<string, unknown> | undefined));
   const yue2HasCatalogue = useBackendStore(s => !!s.models[YUE2_BACKEND_ID]);
   const fetchBackendModels = useBackendStore(s => s.fetchModels);
   const [yue2Tracks, setYue2Tracks] = useState<Yue2SourceTrack[]>([]);

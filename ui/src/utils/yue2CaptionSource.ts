@@ -149,12 +149,31 @@ export async function ensureYue2SourceTracks(adapterPath: string): Promise<Yue2S
   return fetchYue2SourceTracks(adapterPath);
 }
 
-/** The adapter currently selected for YuE2, absolute path, '' for the base
- *  model. The catalogue is the one authority for this — it is what the picker
- *  POSTs to and re-reads, so a mirror of our own could only ever disagree. */
+/** Which adapter's training dataset the caption list comes from, absolute path,
+ *  '' for the base model. The catalogue is the one authority — it is what the
+ *  picker POSTs to and re-reads, so a mirror of our own could only ever
+ *  disagree.
+ *
+ *  THE AR IS PREFERRED, and the order is not arbitrary: the AR half is the one
+ *  trained on each song's own caption under caption dropout, so its dataset's
+ *  captions are the in-distribution prompts this feature exists to offer. The
+ *  NAR is the fallback for a stack that has only that half.
+ *
+ *  `lmAdapter` is read last and only for compatibility: the picker carried one
+ *  slot until the AR/NAR split (58aff871), and a client reading the old key
+ *  against a split catalogue gets '' — which is how this control silently
+ *  stopped appearing in Create with both halves plainly loaded. */
+export function yue2CaptionAdapterPath(defaults: Record<string, unknown> | undefined): string {
+  const pick = (k: string): string => {
+    const v = defaults?.[k];
+    return typeof v === 'string' ? v.trim() : '';
+  };
+  return pick('lmAdapterAr') || pick('lmAdapterNar') || pick('lmAdapter');
+}
+
 export function activeYue2AdapterPath(): string {
   const catalogue = useBackendStore.getState().models[YUE2_BACKEND_ID];
-  return String(catalogue?.defaults?.lmAdapter ?? '');
+  return yue2CaptionAdapterPath(catalogue?.defaults as Record<string, unknown> | undefined);
 }
 
 // ── Resolution ───────────────────────────────────────────────────────────────
