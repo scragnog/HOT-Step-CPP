@@ -321,6 +321,18 @@
         "yue2-minted-manifest",
         "yue2-minted-codes"
       ]
+    },
+    {
+      "id": "yue2-ar-training",
+      "family": "yue2",
+      "name": "YuE2 Artist (AR) Training Pack",
+      "description": "Everything ace-train needs to train a YuE2 artist adapter beyond the base LM: the semantic tokenizer that writes the codec targets the AR learns to predict, the MMS_FA aligner behind the lyric-cursor loss, and the minted regulariser. Training only - none of it is needed to generate.",
+      "fileIds": [
+        "yue2-tok-f16",
+        "yue2-mms-fa",
+        "yue2-minted-manifest",
+        "yue2-minted-codes"
+      ]
     }
   ],
   "files": [
@@ -4211,7 +4223,6 @@
       "quant": "F16",
       "sizeBytes": 1211631392,
       "repo": "scragnog/YuE2-GGUF",
-      "todo": "NOT UPLOADED YET. This file exists only on the build machine; check-release-prereqs.mjs will report it as missing from Hugging Face until someone pushes it to scragnog/YuE2-GGUF, and no URL has been invented here to hide that. Two things to settle before the upload: confirm the redistribution terms for the MERT-v2-FullSong encoder weights this GGUF embeds alongside Mothersuperior's head, and add the matching THIRD_PARTY_NOTICES entry.",
       "description": "Turns real audio into YuE2 semantic tokens — the reverse of what the LM does. Optional, and only useful for training: with it, `ace-train yue2-tokenize` fills the codec_ids slot in a YuE2 preprocess cache so a NAR adapter trains on ground-truth codes exactly as inference conditions, instead of the text-only regime. Not needed to generate music. One file holds both halves of the chain: MERT-v2-FullSong's mel frontend, ConvNext subsampler and first 21 Conformer blocks, plus Mothersuperior's 8-layer tokenizer head (docs/plans/yue2/12-tokenizer-oracle-pin.md). Non-commercial use only: derived from YuE2-3B and licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
       "tags": [],
       "companions": [
@@ -4220,6 +4231,19 @@
           "repoPath": "LICENSE"
         }
       ]
+    },
+    {
+      "id": "yue2-mms-fa",
+      "filename": "mms-fa-f32.gguf",
+      "repoPath": "mms-fa/mms-fa-f32.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2 Lyric Aligner (MMS_FA, F32)",
+      "sizeBytes": 1261892736,
+      "repo": "scragnog/YuE2-GGUF",
+      "description": "Meta's MMS forced aligner, converted to GGUF (CC BY-NC-4.0 upstream). Training-only: ace-train yue2-align uses it to write per-word lyric spans into the preprocess manifest, which is what the AR trainer's --cursor-weight supervises. F32 because the port's stage gates were measured in fp32. Not used at generation.",
+      "tags": []
     },
     {
       "id": "yue2-minted-manifest",
