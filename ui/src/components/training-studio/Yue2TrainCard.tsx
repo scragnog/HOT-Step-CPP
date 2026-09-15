@@ -247,19 +247,32 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
               </span>
               <select className={INPUT} value={form.captionMode}
                 onChange={e => set('captionMode', e.target.value as Yue2CaptionMode)}>
-                <option value="none">{t('trainingStudio.yue2.captionNone', 'None (trigger word only)')}</option>
-                <option value="ace">{t('trainingStudio.yue2.captionAce', 'Parsed sidecar: caption + lyrics (needed for the AR half)')}</option>
-                <option value="default">{t('trainingStudio.yue2.captionDefault', 'One caption for every clip')}</option>
-                <option value="txt">{t('trainingStudio.yue2.captionTxt', 'The .txt beside each track')}</option>
+                <option value="ace">{t('trainingStudio.yue2.captionAce', 'Read the sidecars: caption and lyrics')}</option>
+                <option value="none">{t('trainingStudio.yue2.captionNone', 'Nothing: the trigger word is the whole style')}</option>
+                <option value="default">{t('trainingStudio.yue2.captionDefault', 'One caption I type here, on every clip')}</option>
+                <option value="txt">{t('trainingStudio.yue2.captionTxt', 'The raw sidecar file, field names and all')}</option>
               </select>
+              {(status.sidecarsWithLyrics ?? 0) > 0 && (
+                <span className={`text-[10px] leading-snug ${form.captionMode === 'ace'
+                  ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500'}`}>
+                  {form.captionMode === 'ace'
+                    ? t('trainingStudio.yue2.captionFound',
+                        '{{n}} of the scanned tracks ship a sidecar with lyrics, and this mode reads them.',
+                        { n: status.sidecarsWithLyrics })
+                    : t('trainingStudio.yue2.captionFoundIgnored',
+                        '{{n}} of the scanned tracks ship a sidecar with lyrics and this mode throws them '
+                        + 'away. The cursor-span stage and the AR half both need them.',
+                        { n: status.sidecarsWithLyrics })}
+                </span>
+              )}
               <span className="text-[10px] text-zinc-500 leading-snug">
                 {form.captionMode === 'ace'
                   ? t('trainingStudio.yue2.captionAceHint',
-                      'Reads the .txt beside each track as the fielded sidecar it is and carries the '
-                      + 'caption AND the lyric sheet into the manifest. Only this mode gives the later '
-                      + 'stages what they need: cursor spans align against the manifest\'s lyrics, and the '
-                      + 'AR half trains on the caption as its prefix. A cache built any other way makes '
-                      + 'both of them skip every source.')
+                      'Reads the .txt beside each track as the fielded sidecar it is, and carries the '
+                      + 'caption and the lyric sheet into the cache separately. This is the only mode the '
+                      + 'later stages can use: cursor spans align against those lyrics, and the AR half '
+                      + 'trains on that caption as its prefix. Any other mode and both skip every track. '
+                      + 'Pick one of the others only for a NAR-only run.')
                   : form.captionMode === 'txt'
                   ? t('trainingStudio.yue2.captionTxtHint',
                       'There is no YuE2 caption sidecar. The .txt beside each track is the ACE one — '

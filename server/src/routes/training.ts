@@ -2842,6 +2842,45 @@ function countYue2ScannableAudio(dir: string): { files: number; unsupported: num
   return { files, unsupported, needFfmpeg };
 }
 
+/** What the .txt beside each track actually holds.
+ *
+ *  The caption mode cannot sensibly default to "none" for a corpus that came
+ *  with captions and lyric sheets: that builds a cache carrying neither, which
+ *  the aligner and the AR trainer then both skip every source of. So the answer
+ *  is measured per dataset rather than assumed once in a constant.
+ *
+ *  Cheap by construction: a bounded read of the head of each sidecar, looking
+ *  for the two field keys that matter. Never throws — an unreadable folder
+ *  reports zeroes, which reads as "no sidecars" and keeps the old default.
+ */
+const SIDECAR_HEAD_BYTES = 4096;
+function countYue2Sidecars(dir: string): { withCaption: number; withLyrics: number } {
+  let withCaption = 0, withLyrics = 0;
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isFile()) continue;
+      if (!YUE2_AUDIO_EXTS.has(path.extname(e.name).toLowerCase())) continue;
+      const sidecar = path.join(dir, `${path.parse(e.name).name}.txt`);
+      let head = '';
+      try {
+        const fd = fs.openSync(sidecar, 'r');
+        try {
+          const buf = Buffer.alloc(SIDECAR_HEAD_BYTES);
+          const n = fs.readSync(fd, buf, 0, SIDECAR_HEAD_BYTES, 0);
+          head = buf.subarray(0, n).toString('utf8');
+        } finally {
+          fs.closeSync(fd);
+        }
+      } catch { continue; }
+      // `lyrics:` is last in the file and its body runs to EOF, so the head may
+      // hold the key without the words. The key is the claim being counted.
+      if (/^[ \t]*caption[ \t]*:/mi.test(head)) withCaption++;
+      if (/^[ \t]*lyrics[ \t]*:/mi.test(head)) withLyrics++;
+    }
+  } catch { /* folder gone or unreadable */ }
+  return { withCaption, withLyrics };
+}
+
 /** GET /datasets/:id/yue2 — latent cache state, model readiness and the
  *  defaults the form is a view of. Cheap and never throws: the UI polls it to
  *  decide what to enable. */
@@ -2856,6 +2895,7 @@ router.get('/datasets/:id/yue2', async (req: Request, res: Response) => {
     const manifestPath = yue2PreprocessManifest(ds.slug);
     const cache = readYue2PreprocessSummary(manifestPath);
     const scan = countYue2ScannableAudio(ds.sourceDir);
+    const sidecars = countYue2Sidecars(ds.sourceDir);
 
     let gpuTotalMb = 0;
     try {
@@ -2896,7 +2936,21 @@ router.get('/datasets/:id/yue2', async (req: Request, res: Response) => {
       /** Coefficients, not just an answer — the form re-estimates as rank
        *  moves and must not carry a second copy of the measurements. */
       vramModel: YUE2_VRAM_MODEL,
-      defaults: YUE2_NAR_DEFAULTS,
+      /** How many of the scanned tracks came with a sidecar that claims a
+       *  caption or a lyric sheet. Reported so the card can say what it found
+       *  rather than just silently picking a mode. */
+      sidecarsWithCaption: sidecars.withCaption,
+      sidecarsWithLyrics: sidecars.withLyrics,
+      /** The shared defaults, with ONE per-dataset override: a corpus that
+       *  shipped with captions or lyrics defaults to reading them. Defaulting
+       *  to `none` there builds a cache with neither, and every later stage
+       *  then skips every source — which is exactly what happened, quietly,
+       *  until the failure surfaced two stages downstream. */
+      defaults: {
+        ...YUE2_NAR_DEFAULTS,
+        captionMode: (sidecars.withLyrics > 0 || sidecars.withCaption > 0)
+          ? 'ace' : YUE2_NAR_DEFAULTS.captionMode,
+      },
       presets: YUE2_PRESETS,
       defaultPreset: YUE2_DEFAULT_PRESET,
       targetTensors: YUE2_TARGET_TENSORS,

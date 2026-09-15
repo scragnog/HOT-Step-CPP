@@ -540,6 +540,10 @@ export interface Yue2Status {
   gpuTotalMb: number;
   preprocessPeakMb: number;
   vramModel: Yue2VramModel;
+  /** How many scanned tracks came with a sidecar claiming a caption / a lyric
+   *  sheet. The caption-mode default follows these rather than a constant. */
+  sidecarsWithCaption?: number;
+  sidecarsWithLyrics?: number;
   defaults: Yue2Defaults;
   presets: Record<Yue2PresetName, { steps: number; saveEvery: number }>;
   defaultPreset: Yue2PresetName;
