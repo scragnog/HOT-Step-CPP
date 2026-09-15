@@ -460,6 +460,13 @@ export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
   const needsLatents = !status.stages.preprocess.done;
   const blocked = stage.missing.length > 0;
   const noStems = stage.stemsReady === 0;
+  // The other way this stage has nothing to do: the manifest carries no lyrics
+  // at all because the latent cache was built with caption mode `none`. That
+  // is the right build for a NAR-only run and unusable here, and the engine's
+  // answer to it is twelve identical "no lyrics in the manifest" lines and a
+  // failed job — true, and no help at all in working out that the fix is two
+  // stages further up the page.
+  const noLyrics = status.stages.preprocess.captionModeOk === false;
 
   const run = async () => {
     setBusy(true);
@@ -524,6 +531,20 @@ export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
               { n: stage.stemsReady, dir: stage.stemsDir })}
           </div>
 
+          {noLyrics && (
+            <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 mb-3">
+              <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+              <span>
+                {t('trainingStudio.yue2ar.alignNoLyrics',
+                  'The latent cache was built with clip captions set to "{{mode}}", so it carries no lyrics '
+                  + 'and this stage has nothing to align: it would skip every source and fail. Re-encode the '
+                  + 'latents with clip captions set to "ace" — the sidecars beside the audio already hold the '
+                  + 'lyrics, and the AR half needs the captions anyway, since the caption is its prefix.',
+                  { mode: status.stages.preprocess.captionMode || 'none' })}
+              </span>
+            </div>
+          )}
+
           {noStems && (
             <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 mb-3">
               <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
@@ -575,7 +596,7 @@ export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
 
           <div className="flex items-center gap-3 flex-wrap mt-3">
             <button onClick={() => void run()}
-              disabled={busy || jobRunning || needsLatents || (noStems && !form.stemsDir.trim())}
+              disabled={busy || jobRunning || needsLatents || noLyrics || (noStems && !form.stemsDir.trim())}
               className={BTN_STAGE}>
               {busy ? <Loader2 size={12} className="animate-spin" /> : null}
               {cursor && cursor.sourcesWithCursor > 0

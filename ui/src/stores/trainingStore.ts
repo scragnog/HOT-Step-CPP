@@ -987,11 +987,23 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     set({ yue2RunAllActive: true, yue2RunAllStage: null, error: null });
     try {
       // Stage 1: latent cache.
+      //
+      // captionMode 'ace', not the server default of 'none'. The default is
+      // right for a NAR-only run — the clip carries no caption and the style is
+      // the trigger alone — but this chain goes on to train the AR half, and
+      // there the caption IS the prefix and the aligner reads the manifest's
+      // lyrics. A cache built with 'none' carries neither, so cursor spans skip
+      // every source for having no lyrics and AR training exports something
+      // generic with nothing saying why.
+      //
+      // And re-encode when an EXISTING cache was built that way, rather than
+      // skipping the stage because latents are present: a cache the later
+      // stages cannot read is not a stage that is done.
       set({ yue2RunAllStage: 1 });
       let arStatus = await trainingApi.getYue2ArStatus(datasetId);
-      if (!arStatus.stages.preprocess.done) {
+      if (!arStatus.stages.preprocess.done || arStatus.stages.preprocess.captionModeOk === false) {
         const job = await startYue2JobAndAwait(set, get, {},
-          () => trainingApi.startYue2Preprocess(datasetId, {}));
+          () => trainingApi.startYue2Preprocess(datasetId, { captionMode: 'ace' }));
         if (job.status !== 'done') { set({ error: yue2StageFailure('Latent cache', job) }); return; }
       }
 

@@ -441,7 +441,11 @@ export interface TrainingPreview {
 // the UI carries its own copy of a measurement.
 
 export type Yue2NarTarget = 'nar_attn' | 'nar_attn_mlp' | 'nar_attn_mlp_proj';
-export type Yue2CaptionMode = 'txt' | 'default' | 'none';
+/** Mirrors the server's own union (services/training/yue2Train.ts). 'ace' was
+ *  missing here, so the one mode the AR half requires could not be typed, let
+ *  alone offered: it parses the ACE sidecar into its fields and carries the
+ *  caption AND the lyrics into the manifest, which is what the aligner reads. */
+export type Yue2CaptionMode = 'ace' | 'txt' | 'default' | 'none';
 export type Yue2VaeVariant = 'standard' | 'legacy';
 export type Yue2PresetName = 'fast' | 'balanced' | 'thorough';
 
@@ -765,7 +769,17 @@ export interface Yue2ArStatus {
   manifestPath: string;
   latentsDir: string;
   stages: {
-    preprocess: { done: boolean; cache: Yue2CacheSummary | null; missing: string[] };
+    preprocess: {
+      done: boolean;
+      cache: Yue2CacheSummary | null;
+      missing: string[];
+      /** What the cache was built with: 'ace', 'txt', 'default' or 'none'. */
+      captionMode: string;
+      /** False when the cache carries no captions and no lyrics, which is the
+       *  right build for a NAR-only run and useless for the AR half — the AR
+       *  prefix IS the caption, and the aligner reads the manifest's lyrics. */
+      captionModeOk: boolean;
+    };
     tokenize: {
       /** The engine's own flag says the stage RAN; `sourcesWithCodes` says how
        *  much of the corpus it covers. A partial run is legal, so neither is

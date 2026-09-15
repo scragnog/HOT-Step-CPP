@@ -248,11 +248,19 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
               <select className={INPUT} value={form.captionMode}
                 onChange={e => set('captionMode', e.target.value as Yue2CaptionMode)}>
                 <option value="none">{t('trainingStudio.yue2.captionNone', 'None (trigger word only)')}</option>
+                <option value="ace">{t('trainingStudio.yue2.captionAce', 'Parsed sidecar: caption + lyrics (needed for the AR half)')}</option>
                 <option value="default">{t('trainingStudio.yue2.captionDefault', 'One caption for every clip')}</option>
                 <option value="txt">{t('trainingStudio.yue2.captionTxt', 'The .txt beside each track')}</option>
               </select>
               <span className="text-[10px] text-zinc-500 leading-snug">
-                {form.captionMode === 'txt'
+                {form.captionMode === 'ace'
+                  ? t('trainingStudio.yue2.captionAceHint',
+                      'Reads the .txt beside each track as the fielded sidecar it is and carries the '
+                      + 'caption AND the lyric sheet into the manifest. Only this mode gives the later '
+                      + 'stages what they need: cursor spans align against the manifest\'s lyrics, and the '
+                      + 'AR half trains on the caption as its prefix. A cache built any other way makes '
+                      + 'both of them skip every source.')
+                  : form.captionMode === 'txt'
                   ? t('trainingStudio.yue2.captionTxtHint',
                       'There is no YuE2 caption sidecar. The .txt beside each track is the ACE one — '
                       + '"caption:", "genre:", then the lyrics — and it is fed in RAW AND WHOLE as the '
