@@ -4786,6 +4786,7 @@ static int cmd_yue2_ar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--log-every"))     a.log_every    = atoll(next("--log-every"));
         else if (!strcmp(argv[i], "--resume"))        a.resume       = true;
         else if (!strcmp(argv[i], "--cursor-weight")) a.cursor_weight = atof(next("--cursor-weight"));
+        else if (!strcmp(argv[i], "--caption-dropout")) a.caption_dropout = (float) atof(next("--caption-dropout"));
         else if (!strcmp(argv[i], "--fd-check"))      a.fd_check     = atoi(next("--fd-check"));
         else if (!strcmp(argv[i], "--fd-eps"))        a.fd_eps       = atof(next("--fd-eps"));
         else if (!strcmp(argv[i], "--ar-layers"))     a.ar_layers    = atoi(next("--ar-layers"));

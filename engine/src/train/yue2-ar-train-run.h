@@ -198,6 +198,13 @@ struct Yue2ArTrainArgs {
     // divergence that used to be silent can now be A/B'd on purpose.
     float       adam_beta1    = 0.9f;
     float       adam_beta2    = 0.95f;
+    // Probability that an ARTIST micro-step swaps the song's full style string
+    // for the trigger phrase alone. 0 = off, and the run is then byte-identical
+    // to before this existed. The dropped form is the SAME string for every
+    // song, which is the point: it gives the adapter a canonical prompt that
+    // was trained on, instead of one that appeared once beside a single song
+    // (_LISTENING/2026-09-14/RESULTS.md, arms 130-133). Minted rows never drop.
+    float       caption_dropout = 0.0f;
     double      artist_frac   = 0.5;       // one draw per micro-step: random() < frac ? artist : minted
     int64_t     max_len       = 12288;     // upstream's MAXLEN
     bool        allow_overtrain = false;   // past ~1500 steps the model memorises the songs
@@ -486,6 +493,15 @@ struct Yue2ArSong {
     Yue2AtCursor         cursor;        // the per-frame target block, built once
     std::vector<int32_t> codec;   // RAW ids, [0, 32768); lazily loaded for the minted set
     std::vector<int32_t> prefix;  // tokenized once
+    // --caption-dropout: the same song conditioned on the TRIGGER PHRASE ALONE
+    // ("<trigger>, in the style of <trigger>."), which is identical for every
+    // song in the set. Built once beside the full-caption pair; the cursor has
+    // to be rebuilt too because its targets are bound to the prefix length.
+    // Empty when dropout is off, and then nothing below it is ever read.
+    std::string          style_dropped;
+    std::vector<int32_t> prefix_dropped;
+    Yue2AtCursor         cursor_dropped;
+    bool                 use_dropped = false;  // set for the duration of one micro-step
     bool                 minted     = false;
     bool                 minted_val = false;
     bool                 loaded     = false;
@@ -1076,6 +1092,7 @@ static inline uint64_t yue2_at_seed_mix(uint64_t seed, uint64_t k, uint64_t tag)
 enum {
     YUE2_AT_TAG_MIX  = 1,  // artist vs minted
     YUE2_AT_TAG_SONG = 2,  // which song within the chosen pool
+    YUE2_AT_TAG_CAPD = 3,  // --caption-dropout: full style, or the trigger alone
 };
 
 // ── Learning rate ──────────────────────────────────────────────────────────
@@ -1179,6 +1196,10 @@ static uint64_t yue2_at_cond_hash(const Yue2ArTrainArgs & a) {
     mix_bytes(&a.sidecars, sizeof(a.sidecars));
     mix_bytes(&a.artist_frac, sizeof(a.artist_frac));
     mix_bytes(&a.max_len, sizeof(a.max_len));
+    // Resuming into a different dropout would silently change the conditioning
+    // half-way through a run, which is exactly the class of thing this guard
+    // exists to refuse.
+    mix_bytes(&a.caption_dropout, sizeof(a.caption_dropout));
     return h;
 }
 
@@ -1527,6 +1548,12 @@ static bool yue2_at_export(const Yue2AtAdapters & ad, const Yue2ArTrainArgs & a,
     md.emplace_back("song_frames", buf);
     md.emplace_back("trigger", a.trigger);
     md.emplace_back("style_template", a.style_template);
+    if (a.caption_dropout > 0.0f) {
+        // Generation can address this adapter by the trigger phrase alone, and
+        // the app needs to know that without being told.
+        snprintf(buf, sizeof(buf), "%.3f", (double) a.caption_dropout);
+        md.emplace_back("caption_dropout", buf);
+    }
     // No sha is computed anywhere in this tree, so `base_sha` carries the
     // identity we actually have: the base LM file it trained against. An
     // invented hash would be worse than none.
@@ -2561,6 +2588,16 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
         try {
             const std::vector<int> pre = yue2_token_prefixes(&tok, s.style, s.lyrics, YUE2_COT_OFF, nullptr);
             s.prefix.assign(pre.begin(), pre.end());
+            // --caption-dropout: the trigger-alone twin. Same lyrics, same
+            // codes; only the style differs, and it differs identically for
+            // every song, so the canonical prompt is one the adapter trained on.
+            if (a.caption_dropout > 0.0f && !s.minted) {
+                s.style_dropped = yue2_at_squash(
+                    yue2_style_string(a.trigger, "", "", "", "", a.style_template != "bare"), 1500);
+                const std::vector<int> pd =
+                    yue2_token_prefixes(&tok, s.style_dropped, s.lyrics, YUE2_COT_OFF, nullptr);
+                s.prefix_dropped.assign(pd.begin(), pd.end());
+            }
         } catch (const std::exception & e) {
             fprintf(stderr, "[yue2-ar-train] prefix assembly failed for \"%s\": %s\n", s.name.c_str(),
                     e.what());
@@ -2615,6 +2652,21 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             }
             s.cursor = yue2_at_cursor_build(&tok, s.style, s.lyrics, s.prefix, (int64_t) s.codec.size(),
                                             s.words5, probe.n_sup);
+            // The dropped twin needs its own targets: the cursor block is bound
+            // to where the lyrics sit in the prefix, and a shorter style moves
+            // them. An unbound twin simply trains without the cursor term on
+            // those micro-steps, exactly as an unbound song does today.
+            if (!s.prefix_dropped.empty()) {
+                Yue2AtSeq probe_d;
+                if (yue2_at_build_sequence(s.prefix_dropped, s.codec, a.max_len, &probe_d, &e2)) {
+                    s.cursor_dropped = yue2_at_cursor_build(&tok, s.style_dropped, s.lyrics, s.prefix_dropped,
+                                                            (int64_t) s.codec.size(), s.words5, probe_d.n_sup);
+                    if (!s.cursor_dropped.bound) {
+                        fprintf(stderr, "[yue2-ar-train] cursor: \"%s\" dropped-caption twin UNBOUND — %s\n",
+                                s.name.c_str(), s.cursor_dropped.why.c_str());
+                    }
+                }
+            }
             if (!s.cursor.bound) {
                 fprintf(stderr, "[yue2-ar-train] cursor: \"%s\" UNBOUND — %s\n", s.name.c_str(),
                         s.cursor.why.c_str());
@@ -2776,6 +2828,7 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     int64_t           step0    = 0;
     double            loss_sum = 0.0;
     int64_t           n_micro  = 0;
+    int64_t           n_dropped = 0;  // artist micro-steps conditioned on the trigger alone
     const std::string ckpt_path = yue2_at_ckpt_path(a.out_dir);
     if (a.resume) {
         Yue2AtCkptState got;
@@ -2813,6 +2866,14 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             (long long) a.steps, (long long) a.grad_accum, (double) a.max_grad_norm, (double) a.weight_decay,
             a.artist_frac, yue2_at_attn_name(attn), (long long) a.max_len, (long long) a.chunk,
             a.trigger.c_str());
+    if (a.caption_dropout > 0.0f) {
+        fprintf(stderr,
+                "[yue2-ar-train] caption dropout %.2f: that fraction of ARTIST micro-steps condition on "
+                "\"%s\" alone (the same string for every song)\n",
+                (double) a.caption_dropout,
+                yue2_at_squash(yue2_style_string(a.trigger, "", "", "", "", a.style_template != "bare"), 1500)
+                    .c_str());
+    }
     // Was a reported divergence, now a matched one. lm_optim_step used to
     // hard-code (0.9, 0.999); LmOptim carries the betas as fields defaulting to
     // exactly that, so the four other trainers sharing the header are
@@ -2886,7 +2947,9 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             fprintf(stderr, "[yue2-ar-train] %s\n", e2.c_str());
             return false;
         }
-        if (!yue2_at_build_sequence(s->prefix, s->codec, a.max_len, out, &e2)) {
+        const std::vector<int32_t> & pfx =
+            (s->use_dropped && !s->prefix_dropped.empty()) ? s->prefix_dropped : s->prefix;
+        if (!yue2_at_build_sequence(pfx, s->codec, a.max_len, out, &e2)) {
             // SKIP, with the song named — never crop (contract §4.4).
             fprintf(stderr, "[yue2-ar-train] SKIPPING \"%s\": %s\n", s->name.c_str(), e2.c_str());
             return false;
@@ -2977,7 +3040,16 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             const uint64_t k = (uint64_t) ((step - 1) * a.grad_accum + g);
             bool           was_artist = true;
             Yue2ArSong *   s          = pick_song(k, &was_artist);
+            // --caption-dropout: decide BEFORE the sequence is built, from the
+            // same counter the song pick uses, so a run is reproducible. Artist
+            // rows only; minted rows keep their own style verbatim.
+            s->use_dropped = false;
+            if (was_artist && a.caption_dropout > 0.0f && !s->prefix_dropped.empty()) {
+                Yue2NtRng rcap(yue2_at_seed_mix(a.seed, k, YUE2_AT_TAG_CAPD));
+                s->use_dropped = rcap.u01() < (double) a.caption_dropout;
+            }
             if (!build_seq(s, &seq)) {
+                s->use_dropped = false;
                 continue;  // the skip has already been named
             }
             last_id   = s->name.c_str();
@@ -2987,13 +3059,21 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             r.forward_only = false;
             r.host_ce      = nullptr;
             // Artist songs carry targets; minted songs never do (ar_lora_cursor.py:84-86).
-            r.cur          = (was_artist && s->cursor.bound) ? &s->cursor : nullptr;
+            // The dropped twin has its own cursor block (its lyrics sit at a
+            // different offset); either may be unbound, and unbound means the
+            // term is simply off for this micro-step.
+            const Yue2AtCursor & cur_use = s->use_dropped ? s->cursor_dropped : s->cursor;
+            r.cur                        = (was_artist && cur_use.bound) ? &cur_use : nullptr;
             double ce = 0.0, cv = std::nan("");
             if (!yue2_at_micro_step(r, seq, /*count_loss=*/true, &ce, &err, &cv)) {
                 fprintf(stderr, "[yue2-ar-train] step %lld: %s\n", (long long) step, err.c_str());
                 return 1;
             }
             r.cur = nullptr;
+            if (s->use_dropped) {
+                n_dropped++;
+                s->use_dropped = false;  // never leaves a micro-step set
+            }
             step_loss += ce;
             loss_sum += ce;
             n_micro++;
