@@ -1,1 +1,13 @@
 * text=auto eol=lf
+
+# ...except the Windows scripts, which must be CRLF in the working tree.
+#
+# cmd.exe does not reliably parse a batch file with LF-only line endings: it
+# runs, but multi-line blocks mis-parse and lines get their first characters
+# eaten, so build.cmd greeted every Windows build with "'local' is not
+# recognized as an internal or external command" and similar, from the middle
+# of its own REM comments. The rule above is inherited from upstream
+# acestep.cpp, which is Linux-first; these four extensions are the exception.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
