@@ -4539,16 +4539,56 @@ int main(int argc, char ** argv) {
                 return 2;
             }
         } else if (!strcmp(argv[i], "--adapter") && i + 1 < argc) {
-            // "<path>" or "<path>@<scale>" — the same spelling yue2_adapter_key()
-            // renders, so a /yue2/props string pastes straight back in.
+            // "<path>", "<path>@<scale>", or the full
+            // "<path>@<scale>,a<attn>,m<mlp>,e<early>,i<mid>,l<late>" that
+            // yue2_adapter_key() renders — so a /yue2/props string pastes
+            // straight back in, dials and all. Every dial is optional and
+            // defaults to 1.0; an unparseable tail leaves the path alone
+            // (a real filename may contain '@').
             Yue2AdapterSpec spec;
             spec.path       = argv[++i];
             const size_t at = spec.path.rfind('@');
             if (at != std::string::npos && at + 1 < spec.path.size()) {
-                char *      endp = nullptr;
-                const float sc   = strtof(spec.path.c_str() + at + 1, &endp);
-                if (endp && *endp == '\0') {
-                    spec.scale = sc;
+                const std::string tail = spec.path.substr(at + 1);
+                Yue2LmAdapterScales sc;
+                bool                ok = true;
+                size_t              p  = 0;
+                while (p < tail.size() && ok) {
+                    const size_t comma = tail.find(',', p);
+                    std::string  part  = tail.substr(p, comma == std::string::npos ? std::string::npos : comma - p);
+                    p                  = (comma == std::string::npos) ? tail.size() : comma + 1;
+                    if (part.empty()) {
+                        ok = false;
+                        break;
+                    }
+                    float * dst = nullptr;
+                    if (isdigit((unsigned char) part[0]) || part[0] == '-' || part[0] == '.') {
+                        dst = &sc.global;
+                    } else {
+                        switch (part[0]) {
+                            case 'a': dst = &sc.attn;  break;
+                            case 'm': dst = &sc.mlp;   break;
+                            case 'e': dst = &sc.early; break;
+                            case 'i': dst = &sc.mid;   break;
+                            case 'l': dst = &sc.late;  break;
+                            default:  ok  = false;     break;
+                        }
+                        part = part.substr(1);
+                    }
+                    if (!ok || !dst || part.empty()) {
+                        ok = false;
+                        break;
+                    }
+                    char *      endp = nullptr;
+                    const float v    = strtof(part.c_str(), &endp);
+                    if (!endp || *endp != '\0') {
+                        ok = false;
+                        break;
+                    }
+                    *dst = v;
+                }
+                if (ok) {
+                    spec.scales = sc;
                     spec.path.resize(at);
                 }
             }

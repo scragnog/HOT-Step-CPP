@@ -177,26 +177,63 @@
 #include <unordered_map>
 #include <vector>
 
+// How hard one adapter pushes, broken out by where in the model it lands.
+//
+// Mirrors MM3LmAdapterScales (minimax/mm3-lm-adapter.h) field for field, and
+// for the same reason: one number for the whole file is too blunt a dial. An
+// album adapter that carries the timbre in attention and the phrasing in the
+// MLPs can be held at full attention strength and half MLP; a run that only
+// went wrong in the late blocks can be pulled back there alone.
+//
+// Every field defaults to 1.0 and multiplies independently — `global` is the
+// master, `attn`/`mlp` pick by module kind, and `early`/`mid`/`late` pick by
+// which third of the block stack the module sits in. They are NOT derived from
+// each other, so a caller that sets only `global` gets exactly today's uniform
+// behaviour.
+struct Yue2LmAdapterScales {
+    float global = 1.0f;
+    float attn   = 1.0f;
+    float mlp    = 1.0f;
+    float early  = 1.0f;
+    float mid    = 1.0f;
+    float late   = 1.0f;
+
+    bool operator==(const Yue2LmAdapterScales & o) const {
+        return global == o.global && attn == o.attn && mlp == o.mlp && early == o.early && mid == o.mid &&
+               late == o.late;
+    }
+    bool operator!=(const Yue2LmAdapterScales & o) const { return !(*this == o); }
+};
+
 // One requested adapter. Lives here rather than in yue2-model.h so the server
 // (which parses it off the wire) and the loader (which consumes it) share one
 // definition without the server having to know how a merge works.
 struct Yue2AdapterSpec {
-    std::string path;
-    float       scale = 1.0f;
+    std::string         path;
+    Yue2LmAdapterScales scales;
 };
 
-// Canonical "path@scale; path@scale" rendering of a request. Used as the
-// CHANGE KEY by POST /yue2/select-model (a repeat selection must be a no-op,
-// a different one must force a reload) and echoed in /yue2/props, so it has to
-// be stable and total — same string in, same string out.
+// Canonical rendering of a request, one entry per adapter, "; "-joined. Used as
+// the CHANGE KEY by POST /yue2/select-model (a repeat selection must be a
+// no-op, a different one must force a reload) and echoed in /yue2/props, so it
+// has to be stable and total — same string in, same string out.
+//
+// EVERY dial is in the key, not just the master. The merge happens once at
+// load, so a scale the key does not mention is a scale that silently fails to
+// take effect until something else happens to evict the model. The Node
+// backend mirrors this format byte for byte (services/backends/yue2/index.ts,
+// yue2AdapterKey) to detect drift after an engine restart; the two have to be
+// changed together or the drift check starts firing on every poll.
 static std::string yue2_adapter_key(const std::vector<Yue2AdapterSpec> & specs) {
     std::string out;
     for (const Yue2AdapterSpec & s : specs) {
         if (!out.empty()) {
             out += "; ";
         }
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%.4f", (double) s.scale);
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%.4f,a%.4f,m%.4f,e%.4f,i%.4f,l%.4f", (double) s.scales.global,
+                 (double) s.scales.attn, (double) s.scales.mlp, (double) s.scales.early, (double) s.scales.mid,
+                 (double) s.scales.late);
         out += s.path + "@" + buf;
     }
     return out;
@@ -273,7 +310,23 @@ static const char * yue2_family_name(Yue2LoraFamily f) {
 // The FLAT sites are NAR-only and stay that way: `vae2llm`, `llm2vae` and
 // `time_embd.{0,1}` belong to the flow head and have no part in the AR forward,
 // so an AR adapter that names one is malformed (contract §2.2).
-static Yue2LoraFamily yue2_lora_site_family(const std::string & mod) {
+// Which part of a block a site sits in, for the per-group scales. FLAT is the
+// handful of NAR sites that are not in the block stack at all (vae2llm,
+// llm2vae, time_embd.*) — they have neither an attention/MLP identity nor a
+// block index, so they take the master scale and nothing else.
+enum Yue2LoraGroup { YUE2_GRP_FLAT = 0, YUE2_GRP_ATTN, YUE2_GRP_FFN };
+
+static Yue2LoraFamily yue2_lora_site_family(const std::string & mod,
+                                            Yue2LoraGroup *     grp_out = nullptr,
+                                            int *               blk_out = nullptr) {
+    // Defaults describe a site that is not in the block stack; every early
+    // return below leaves them alone, so a caller never reads a stale group.
+    if (grp_out) {
+        *grp_out = YUE2_GRP_FLAT;
+    }
+    if (blk_out) {
+        *blk_out = -1;
+    }
     if (mod == "vae2llm" || mod == "llm2vae" || mod == "time_embd.0" || mod == "time_embd.1") {
         return YUE2_FAM_NAR;
     }
@@ -290,16 +343,54 @@ static Yue2LoraFamily yue2_lora_site_family(const std::string & mod) {
     // Block index is decimal and unpadded on BOTH sides (yue2_fmt("blk.%d..."),
     // model.h:932; "blk." + std::to_string(i), graph.h:756) — the kind of thing
     // that would otherwise bite at block 10.
+    const int         blk  = atoi(mod.c_str() + d);
     const std::string tail = mod.substr(e + 1);
     if (tail == "nar_attn_q" || tail == "nar_attn_k" || tail == "nar_attn_v" || tail == "nar_attn_output" ||
         tail == "nar_ffn_gate" || tail == "nar_ffn_up" || tail == "nar_ffn_down") {
+        if (grp_out) {
+            *grp_out = yue2a_starts(tail, "nar_attn") ? YUE2_GRP_ATTN : YUE2_GRP_FFN;
+        }
+        if (blk_out) {
+            *blk_out = blk;
+        }
         return YUE2_FAM_NAR;
     }
     if (tail == "attn_q" || tail == "attn_k" || tail == "attn_v" || tail == "attn_output" ||
         tail == "ffn_gate" || tail == "ffn_up" || tail == "ffn_down") {
+        if (grp_out) {
+            *grp_out = yue2a_starts(tail, "attn") ? YUE2_GRP_ATTN : YUE2_GRP_FFN;
+        }
+        if (blk_out) {
+            *blk_out = blk;
+        }
         return YUE2_FAM_AR;
     }
     return YUE2_FAM_NONE;
+}
+
+// The per-tensor strength one adapter actually merges at.
+//
+// Same formula as MM3's MM3LmAdapter::effective (minimax/mm3-lm-adapter.h):
+// master, times the module-kind dial, times the depth-band dial. The one
+// deliberate difference is the band thresholds: MM3 hardcodes layer < 12 and
+// layer < 24 because its layer count is a compile-time constant, while YuE2's
+// block count comes off the GGUF (yue2.block_count, 28 today). Copying MM3's
+// literals here would put the whole of a 28-block model's back third in "mid",
+// so the thirds are computed from L instead.
+//
+// A flat site (block < 0) takes the master only: it is neither attention nor
+// MLP and sits in no third, so applying either dial to it would be inventing a
+// meaning the dial does not have.
+static float yue2_adapter_effective(const Yue2LmAdapterScales & s, Yue2LoraGroup grp, int block, int n_blocks) {
+    float v = s.global;
+    if (block < 0 || grp == YUE2_GRP_FLAT) {
+        return v;
+    }
+    v *= (grp == YUE2_GRP_ATTN) ? s.attn : s.mlp;
+    if (n_blocks > 0) {
+        v *= (block < n_blocks / 3) ? s.early : (block < (2 * n_blocks) / 3) ? s.mid : s.late;
+    }
+    return v;
 }
 
 // Why a key was not mapped. The caller reports these separately: an unknown
@@ -311,6 +402,8 @@ struct Yue2LoraTarget {
     std::string     gguf_name;              // empty => not merged
     Yue2LoraReject  why = YUE2_LR_UNKNOWN;
     Yue2LoraFamily  family = YUE2_FAM_NONE;  // meaningful only when gguf_name is set
+    Yue2LoraGroup   group = YUE2_GRP_FLAT;   // ditto — which dial this site answers to
+    int             block = -1;              // block index, -1 for a flat site
     bool            renamed_time_embed = false;  // came in as plan §4's `time_embed.`
 };
 
@@ -363,13 +456,17 @@ static Yue2LoraTarget yue2_lora_target(const std::string & raw_module) {
         }
     }
 
-    const Yue2LoraFamily fam = yue2_lora_site_family(m);
+    Yue2LoraGroup        grp = YUE2_GRP_FLAT;
+    int                  blk = -1;
+    const Yue2LoraFamily fam = yue2_lora_site_family(m, &grp, &blk);
     if (fam == YUE2_FAM_NONE) {
         t.why = YUE2_LR_UNKNOWN;
         return t;
     }
     t.gguf_name = m + ".weight";
     t.family    = fam;
+    t.group     = grp;
+    t.block     = blk;
     t.why       = YUE2_LR_OK;
     return t;
 }
@@ -528,11 +625,17 @@ struct Yue2LoraFactor {
     const STEntry * a     = nullptr;
     const STEntry * b     = nullptr;
     float           alpha = 0.0f;  // 0 => scaling 1.0
+    // Carried from the target so the merge loop can price each tensor without
+    // re-parsing its name: the loop iterates the gguf-name map, and the module
+    // path that classified it is long gone by then.
+    Yue2LoraGroup   group = YUE2_GRP_FLAT;
+    int             block = -1;
 };
 
 // Merge every LoRA tensor in `st` into `wctx`, which must be the YuE2 LM
 // WeightCtx after yue2_load_lm_tensors() has staged it and BEFORE wctx_alloc().
-// `scale` is the user-facing strength.
+// `scales` is the user-facing strength, priced per tensor by
+// yue2_adapter_effective (master x module kind x depth third).
 //
 // Returns the number of GGUF tensors patched, or -1 on a refusal (which writes
 // `err_out` and patches NOTHING). Zero means the adapter matched nothing; the
@@ -540,14 +643,14 @@ struct Yue2LoraFactor {
 // the half this file actually merged into ("ar" or "nar") — /yue2/props reports
 // it next to the count so a user who loaded the wrong file can see it without
 // reading stderr.
-static int yue2_adapter_merge_st(WeightCtx *         wctx,
-                                 const GGUFModel &   gf,
-                                 const STFile &      st,
-                                 const std::string & cfg_dir,
-                                 float               scale,
-                                 ggml_backend_t      backend,
-                                 std::string *       err_out,
-                                 std::string *       family_out = nullptr) {
+static int yue2_adapter_merge_st(WeightCtx *                 wctx,
+                                 const GGUFModel &           gf,
+                                 const STFile &              st,
+                                 const std::string &         cfg_dir,
+                                 const Yue2LmAdapterScales & scales,
+                                 ggml_backend_t              backend,
+                                 std::string *               err_out,
+                                 std::string *               family_out = nullptr) {
     WeightSource ws = {};
     ws.is_st        = false;
     ws.gf           = const_cast<GGUFModel *>(&gf);
@@ -693,6 +796,8 @@ static int yue2_adapter_merge_st(WeightCtx *         wctx,
         Yue2LoraFactor f;
         f.a      = kv.second;
         f.b      = bit->second;
+        f.group  = t.group;
+        f.block  = t.block;
         auto ait = alpha_by_module.find(mod);
         f.alpha  = (ait != alpha_by_module.end()) ? ait->second
                  : (md.alpha > 0.0f)              ? md.alpha
@@ -894,9 +999,26 @@ static int yue2_adapter_merge_st(WeightCtx *         wctx,
     int        verify_changed = 0;
     bool       warned_alpha   = false;
 
+    // Block count for the depth thirds, read off the same GGUF the merge is
+    // patching rather than assumed: an adapter and a base that disagree about
+    // the block count is already refused above (the "no such tensor" check), so
+    // by here this is the one true L. 0 would mean a base without the KV at
+    // all, and yue2_adapter_effective treats that as "no depth banding" rather
+    // than dividing by zero.
+    const int n_blocks = (int) gf_get_u32(gf, "yue2.block_count");
+
     for (const auto & kv : targets) {
         const std::string &    gguf_name = kv.first;
         const Yue2LoraFactor & f         = kv.second;
+
+        // Per-tensor strength. A dial set to 0 means "do not adapt this part of
+        // the model", and skipping is not just an optimisation: a merge of a
+        // zero-scaled delta still round-trips the base weight through the
+        // backend and back into a quantised type, which is a lossy no-op.
+        const float eff = yue2_adapter_effective(scales, f.group, f.block, n_blocks);
+        if (eff == 0.0f) {
+            continue;
+        }
 
         enum ggml_type ttype    = GGML_TYPE_F32;
         const void *   base_ptr = ws.data(gguf_name.c_str(), ttype);
@@ -979,7 +1101,7 @@ static int yue2_adapter_merge_st(WeightCtx *         wctx,
         // unchanged. Promoting the NAR half to F32 would cost several GB.
         const size_t base_nb = ggml_row_size(ttype, in_feat) * (size_t) out_feat;
         if (!adapter_merge_on_backend(wctx, pending_idx, base_ptr, ttype, in_feat, out_feat,
-                                      /*ds=*/nullptr, scale, backend, gguf_name.c_str(), build,
+                                      /*ds=*/nullptr, eff, backend, gguf_name.c_str(), build,
                                       /*promote_f32=*/false)) {
             // Fatal, not a skip: by this point some tensors are already
             // patched, so continuing would produce a partly adapted LM. The
@@ -1037,13 +1159,13 @@ static int yue2_adapter_merge_st(WeightCtx *         wctx,
 // Resolve an adapter path (a single safetensors file, or a directory holding
 // one), open it, and merge. Returns the number of tensors patched, or -1 on
 // failure with `err_out` set.
-static int yue2_adapter_merge(WeightCtx *       wctx,
-                              const GGUFModel & gf,
-                              const char *      path,
-                              float             scale,
-                              ggml_backend_t    backend,
-                              std::string *     err_out,
-                              std::string *     family_out = nullptr) {
+static int yue2_adapter_merge(WeightCtx *                 wctx,
+                              const GGUFModel &           gf,
+                              const char *                path,
+                              const Yue2LmAdapterScales & scales,
+                              ggml_backend_t              backend,
+                              std::string *               err_out,
+                              std::string *               family_out = nullptr) {
     // hs_stat, not stat: MSVC's narrow stat is _stat64i32, whose 32-bit st_size
     // returns -1 for any file >= 2 GiB — so a large adapter reads as MISSING
     // rather than as itself (commit ae64b19c). It is also the UTF-8-correct
@@ -1098,7 +1220,7 @@ static int yue2_adapter_merge(WeightCtx *       wctx,
 
     Timer       t;
     std::string fam;
-    const int   merged = yue2_adapter_merge_st(wctx, gf, st, cfg_dir, scale, backend, err_out, &fam);
+    const int   merged = yue2_adapter_merge_st(wctx, gf, st, cfg_dir, scales, backend, err_out, &fam);
     st_close(&st);
 
     if (merged < 0) {
@@ -1112,7 +1234,14 @@ static int yue2_adapter_merge(WeightCtx *       wctx,
     // The family is on this line on purpose: "196 tensors" alone reads the same
     // whichever half it landed on, and which half it landed on is the thing a
     // wrong file gets wrong.
-    fprintf(stderr, "[YuE2-Adapter] %s: merged %d tensor(s) into the %s half at scale %.3f in %.1f ms\n",
-            sf_path.c_str(), merged, fam.empty() ? "?" : fam.c_str(), scale, t.ms());
+    // Every dial is on this line, not just the master: a merge that came out
+    // quiet because the MLP dial sat at 0.1 reads identically to one that
+    // merged at full strength if the log only ever quotes one number.
+    fprintf(stderr,
+            "[YuE2-Adapter] %s: merged %d tensor(s) into the %s half at scale %.3f "
+            "(attn %.3f, mlp %.3f, thirds %.3f/%.3f/%.3f) in %.1f ms\n",
+            sf_path.c_str(), merged, fam.empty() ? "?" : fam.c_str(), (double) scales.global,
+            (double) scales.attn, (double) scales.mlp, (double) scales.early, (double) scales.mid,
+            (double) scales.late, t.ms());
     return merged;
 }

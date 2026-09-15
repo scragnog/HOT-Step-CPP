@@ -87,6 +87,25 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
 
     yyjson_mut_obj_add_strcpy(doc, root, "backend", "yue2");
     yyjson_mut_obj_add_bool(doc, root, "available", yue2_available(g_yue2));
+
+    // synth_ready: the LM's GGUF found and its header parsed clean, AND at
+    // least one VAE variant the same — i.e. POST /yue2/synth will get as far as
+    // loading weights. Deliberately NOT a residency or VRAM claim (that is
+    // lm_resident/vae_resident below), and the same contract as MM3's own
+    // synth_ready (minimax/mm3-server.h).
+    //
+    // This key is what the Node backend reads to decide `up` for the whole
+    // backend, and its absence is not a small thing: an omitted key parses as
+    // undefined, undefined is not true, the manifest reports up:false forever,
+    // and the UI — which refuses to cache a down manifest — falls back to
+    // showing ACE's controls for every cluster in the top bar. It was missing
+    // here until now, which is exactly what that looked like.
+    {
+        const bool vae_ok =
+            (g_yue2.vae_file[YUE2_VAE_STANDARD].found && g_yue2.vae_file[YUE2_VAE_STANDARD].probe_ok) ||
+            (g_yue2.vae_file[YUE2_VAE_LEGACY].found && g_yue2.vae_file[YUE2_VAE_LEGACY].probe_ok);
+        yyjson_mut_obj_add_bool(doc, root, "synth_ready", yue2_available(g_yue2) && vae_ok);
+    }
     yyjson_mut_obj_add_bool(doc, root, "lm_resident", g_yue2.lm_resident);
     yyjson_mut_obj_add_bool(doc, root, "vae_resident", g_yue2.vae_resident);
     yyjson_mut_obj_add_strcpy(doc, root, "vae_variant_loaded", YUE2_VAE_VARIANT_NAME[g_yue2.vae_loaded_variant]);
@@ -145,6 +164,22 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
         yyjson_mut_obj_add_uint(doc, ad, "tensors", (uint64_t) g_yue2.lm_adapter_tensors);
         yyjson_mut_obj_add_strcpy(doc, ad, "family", g_yue2.lm_adapter_family.c_str());
         yyjson_mut_obj_add_bool(doc, ad, "in_force", g_yue2.lm_resident && !g_yue2.lm_adapter_desc.empty());
+
+        // Per-adapter breakdown, in request order. The aggregate above says
+        // whether the model is adapted at all; once the picker has an AR slot
+        // and a NAR slot, "adapted" stops being one answer — a caller needs to
+        // know which of its two picks actually landed, and a combined
+        // "ar+nar" family string cannot say that one of them merged and the
+        // other is still pending.
+        yyjson_mut_val * ents = yyjson_mut_arr(doc);
+        yyjson_mut_obj_add_val(doc, ad, "entries", ents);
+        for (const auto & me : g_yue2.lm_adapter_merged) {
+            yyjson_mut_val * o = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_strcpy(doc, o, "path", me.path.c_str());
+            yyjson_mut_obj_add_strcpy(doc, o, "family", me.family.c_str());
+            yyjson_mut_obj_add_uint(doc, o, "tensors", (uint64_t) me.tensors);
+            yyjson_mut_arr_add_val(ents, o);
+        }
     }
 
     yyjson_mut_val * vram = yyjson_mut_obj(doc);
@@ -217,17 +252,24 @@ static void yue2_handle_unload(const httplib::Request &, httplib::Response & res
 //   "lm_adapter": ["a.safetensors", "b.safetensors"]  a stack, shared scale
 //   "lm_adapter": [{"path": "a.safetensors", "scale": 0.7}, ...]  per-adapter scale
 //
+// An array entry may also carry the per-group dials alongside "scale":
+// "scale_attn", "scale_mlp", "scale_early", "scale_mid", "scale_late". Each
+// defaults to 1.0 INDEPENDENTLY of "scale" (which is the master), so an entry
+// that names only "scale" behaves exactly as it did before they existed. A
+// stack covering both halves is the normal case now that the UI has an AR slot
+// and a NAR slot: two entries, each with its own six dials.
+//
 // `*given` distinguishes an OMITTED field (leave the current pick alone) from
 // an explicit "" (clear it) — the same distinction lm_type already makes, and
 // the reason it matters is that a client serialising its whole option struct
 // would otherwise clear an adapter it never meant to touch.
 static bool yue2_parse_adapter_field(yyjson_val * root, std::vector<Yue2AdapterSpec> * out, bool * given,
                                      std::string * err) {
-    *given         = false;
-    float dflt     = 1.0f;
+    *given = false;
+    Yue2LmAdapterScales dflt;
     if (yyjson_val * sv = yyjson_obj_get(root, "lm_adapter_scale")) {
         if (yyjson_is_num(sv)) {
-            dflt = (float) yyjson_get_num(sv);
+            dflt.global = (float) yyjson_get_num(sv);
         } else {
             *err = "lm_adapter_scale must be a number";
             return false;
@@ -275,14 +317,26 @@ static bool yue2_parse_adapter_field(yyjson_val * root, std::vector<Yue2AdapterS
             return false;
         }
         Yue2AdapterSpec spec;
-        spec.path = yyjson_get_str(pv);
-        spec.scale = dflt;
-        if (yyjson_val * sv = yyjson_obj_get(e, "scale")) {
+        spec.path   = yyjson_get_str(pv);
+        spec.scales = dflt;
+        struct { const char * key; float * dst; } dials[] = {
+            { "scale",       &spec.scales.global },
+            { "scale_attn",  &spec.scales.attn   },
+            { "scale_mlp",   &spec.scales.mlp    },
+            { "scale_early", &spec.scales.early  },
+            { "scale_mid",   &spec.scales.mid    },
+            { "scale_late",  &spec.scales.late   },
+        };
+        for (const auto & d : dials) {
+            yyjson_val * sv = yyjson_obj_get(e, d.key);
+            if (!sv) {
+                continue;
+            }
             if (!yyjson_is_num(sv)) {
-                *err = "lm_adapter entry \"scale\" must be a number";
+                *err = std::string("lm_adapter entry \"") + d.key + "\" must be a number";
                 return false;
             }
-            spec.scale = (float) yyjson_get_num(sv);
+            *d.dst = (float) yyjson_get_num(sv);
         }
         if (!spec.path.empty()) {
             out->push_back(spec);

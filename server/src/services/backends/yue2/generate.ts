@@ -91,11 +91,31 @@ export interface Yue2ParamMapping {
  */
 function yue2StyleForAdapter(caption: string, params: any): { style: string; notes: string[] } {
   const notes: string[] = [];
-  const adapter = yue2PersistedSelection().lm_adapter;
+  const picked = yue2PersistedSelection().adapters;
+
+  // TWO slots, ONE style sentence. The template composes a single trigger, so
+  // when both halves are loaded one of them has to drive it, and that is the
+  // NAR pick: it is the half the single-slot picker always meant, and it is the
+  // half whose trigger every render in the 2026-09-14 campaign was addressed
+  // with. The AR pick still merges and still works — it just does not get to
+  // rewrite the prompt. When the two were trained on the same dataset they
+  // share a trigger and the question does not arise; when they differ, say so
+  // rather than silently addressing one of them.
+  const adapter = picked.nar.path || picked.ar.path;
   if (!adapter) return { style: caption, notes };
+  const other = adapter === picked.nar.path ? picked.ar.path : '';
 
   const name = path.basename(adapter);
   const meta = readSafetensorsMeta(adapter);
+  if (other) {
+    const otherTrigger = (readSafetensorsMeta(other)?.trigger ?? '').normalize('NFC').trim();
+    const thisTrigger = (meta?.trigger ?? '').normalize('NFC').trim();
+    if (otherTrigger && otherTrigger !== thisTrigger) {
+      notes.push(`The AR adapter is addressed by "${otherTrigger}", which is NOT in the style prompt: `
+        + 'one sentence can only carry one trigger, and the NAR pick has it. Put the AR trigger in the '
+        + 'caption yourself if you want both.');
+    }
+  }
   // NFC for the same reason the caption gets it: the header's trigger and the
   // caption have to be the same normal form or the already-composed check
   // below compares two spellings of one word and adds a second copy.

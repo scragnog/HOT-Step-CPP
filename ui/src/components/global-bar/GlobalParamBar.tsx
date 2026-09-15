@@ -65,11 +65,27 @@ export const GlobalParamBar: React.FC = () => {
   const monitoring = useVstChainStore(s => s.monitoring);
   const { capabilities } = useCapabilities();
   const backends = useBackendStore(s => s.backends);
+  const activeBackendId = useBackendStore(s => s.activeBackendId);
+  // What to show while the active backend's manifest has not arrived.
+  //
+  // Every gate below used to default to ACE's answer whenever `capabilities`
+  // was null, on the reasoning that the null window is a brief one at first
+  // paint. It is not always brief: a manifest reporting the engine down is
+  // deliberately never cached (backendStore, issue #153), so any backend whose
+  // readiness probe answers "down" leaves this null for the whole session —
+  // and the top bar then shows ACE's models, ACE's adapter stack, ACE's
+  // sampler plugins and ACE's thinking LM while a completely different backend
+  // is the one generating. That is not a loading state, it is a lie about
+  // which engine the user is driving.
+  //
+  // So the fallback is now "ACE's shape only when ACE is actually active".
+  // Another backend with no manifest yet gets the honest empty placeholder.
+  const assumeAce = activeBackendId === 'ace';
 
   // Capability gating (docs/plans/multi-backend-architecture.md §4.5,
-  // §2 principle 2): undefined/loading capabilities default to SHOWING every
-  // cluster (ACE behavior today) — never flash-hide while /api/capabilities
-  // is in flight. Only hide once a manifest has actually loaded and says no.
+  // §2 principle 2): a loaded manifest decides; an absent one falls back to
+  // `assumeAce` above, so ACE never flash-hides its own clusters while
+  // /api/capabilities is in flight and no other backend ever borrows them.
   //
   // PostProcessingDropdown has no dedicated capability flag in the manifest
   // (BackendFeatureCapabilities has no stems/postprocess-shaped field) — it
@@ -80,7 +96,7 @@ export const GlobalParamBar: React.FC = () => {
   // Models is gated on its own `models` flag, not on `lm`: MiniMax-Music3 has
   // a selectable quant ladder but no ACE-style LM stage, and the old
   // `features.lm` gate hid its model picker entirely.
-  const showModels = !capabilities || capabilities.features.models !== false;
+  const showModels = capabilities ? capabilities.features.models !== false : assumeAce;
   // Which picker: backends that hold model choice as engine state (MM3 loads
   // and pins one quant) get the generic bucket-driven one; ACE keeps its own,
   // which writes per-request globalParams. Keyed on the capability, not on the
@@ -93,7 +109,7 @@ export const GlobalParamBar: React.FC = () => {
   // section reads as a bug. Their contents are still capability-gated inside.
   const showAdapters = true;
   const showPostProcessing = true;
-  const adaptersSupported = !capabilities || capabilities.features.adapters;
+  const adaptersSupported = capabilities ? capabilities.features.adapters : assumeAce;
   // A backend can have adapters without having ACE's adapter STACK: MM3's are
   // runtime LM LoRAs with their own strength dials and nothing else from that
   // UI (no merge/runtime modes, no per-section masking, no DiT group scales).
@@ -111,9 +127,9 @@ export const GlobalParamBar: React.FC = () => {
   // ACE's 48 kHz, so they work for any backend; only PP-VAE re-encode and
   // Spectral Lifter are genuinely ACE-model-coupled. Gate the cluster on the
   // agnostic subset and let the dropdown hide the coupled panels.
-  const postProcessingSupported = !capabilities
-    || capabilities.features.plugins
-    || capabilities.features.postProcess !== false;
+  const postProcessingSupported = capabilities
+    ? (capabilities.features.plugins || capabilities.features.postProcess !== false)
+    : assumeAce;
 
   // Generation is NOT only plugins — the seed lives here, and seed is
   // backend-agnostic. Gating the whole cluster on `plugins` left MiniMax-Music3
@@ -122,10 +138,10 @@ export const GlobalParamBar: React.FC = () => {
   // declared extension knob; the contents pick themselves below.
   const backendHasGenControls = !!capabilities &&
     (capabilities.core?.seed !== false || (capabilities.extensions?.length ?? 0) > 0);
-  const showGeneration = !capabilities || capabilities.features.plugins || backendHasGenControls;
+  const showGeneration = capabilities ? (capabilities.features.plugins || backendHasGenControls) : assumeAce;
   // ACE's dropdown is built around the Lua plugin registry; a backend without
   // it gets the generic seed + declared-extensions cluster instead.
-  const useBackendGenPicker = !!capabilities && !capabilities.features.plugins;
+  const useBackendGenPicker = !capabilities || !capabilities.features.plugins;
 
   // The LM cluster is not ACE-only. `features.lm` means "has ACE's CoT
   // metadata LM" — a stage that is optional and can be switched off. A backend
@@ -133,7 +149,7 @@ export const GlobalParamBar: React.FC = () => {
   // LM controls, and it says so by tagging declared knobs `group: 'lm'`. Both
   // get the tab; only the first gets the on/off toggle, because only there does
   // skipping mean anything.
-  const aceLm = !capabilities || capabilities.features.lm;
+  const aceLm = capabilities ? capabilities.features.lm : assumeAce;
   const backendLmParams = (capabilities?.extensions ?? []).some(p => p.group === 'lm');
   const showLm = aceLm || backendLmParams;
 

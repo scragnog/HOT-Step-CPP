@@ -335,6 +335,17 @@ struct Yue2Model {
     // precisely what loading the wrong file gets wrong — so /yue2/props reports
     // this next to the count (contract 14 §7.3).
     std::string    lm_adapter_family;
+    // Per-adapter breakdown of the same merge, in request order. The aggregate
+    // above answers "is this model adapted"; this answers "is the AR pick in
+    // force, is the NAR pick in force", which is a different question as soon
+    // as the picker has two slots. Filled by yue2_apply_adapters, cleared by
+    // yue2_unload with everything else.
+    struct MergedAdapter {
+        std::string path;
+        std::string family;   // "ar" or "nar"
+        int         tensors = 0;
+    };
+    std::vector<MergedAdapter> lm_adapter_merged;
 
     bool           backend_ref = false;
     ggml_backend_t backend     = nullptr;
@@ -1133,6 +1144,7 @@ static void yue2_unload(Yue2Model * m) {
     m->lm_adapter_desc.clear();
     m->lm_adapter_tensors = 0;
     m->lm_adapter_family.clear();
+    m->lm_adapter_merged.clear();
     if (m->backend_ref) {
         backend_release(m->backend, m->cpu_backend);
         m->backend     = nullptr;
@@ -1159,6 +1171,7 @@ static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector
     m->lm_adapter_desc.clear();
     m->lm_adapter_tensors = 0;
     m->lm_adapter_family.clear();
+    m->lm_adapter_merged.clear();
     if (m->lm_adapter_want.empty()) {
         return true;
     }
@@ -1169,7 +1182,7 @@ static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector
         std::string err;
         std::string fam;
         const int   n =
-            yue2_adapter_merge(&m->wctx_lm, gf, spec.path.c_str(), spec.scale, m->backend, &err, &fam);
+            yue2_adapter_merge(&m->wctx_lm, gf, spec.path.c_str(), spec.scales, m->backend, &err, &fam);
         if (n < 0) {
             errs->push_back("adapter " + spec.path + ": " + (err.empty() ? "merge failed" : err));
             return false;
@@ -1190,6 +1203,7 @@ static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector
         } else if (fam == "nar") {
             has_nar = true;
         }
+        m->lm_adapter_merged.push_back({ spec.path, fam, n });
         total += n;
     }
     m->lm_adapter_tensors = total;

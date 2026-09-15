@@ -88,6 +88,13 @@ export interface Yue2PropsAdapter {
    *  engines older than the AR-family loader. */
   family?: string;
   in_force?: boolean;
+  /** Per-adapter breakdown of the same merge, in request order. The fields
+   *  above answer "is this model adapted at all"; with an AR slot and a NAR
+   *  slot in the picker that stopped being one question, and a combined
+   *  'ar+nar' family string cannot say that one of the two landed while the
+   *  other is still pending. Absent from engines older than the two-slot
+   *  picker. */
+  entries?: Array<{ path?: string; family?: string; tensors?: number }>;
 }
 
 export interface Yue2Props {
@@ -95,7 +102,11 @@ export interface Yue2Props {
   model: string;                   // 'YuE2'
   available: boolean;
   loaded: boolean;
-  synth_ready: boolean;
+  /** OPTIONAL on purpose: engines built before this key existed omit it, and an
+   *  omitted key parses as undefined, which is not true — so a reader that
+   *  treats it as required reports the backend down forever. index.ts derives
+   *  readiness from `available` + the VAE files when it is missing. */
+  synth_ready?: boolean;
   models_dir?: string;
   files?: {
     lm?: Yue2PropsFile;
@@ -121,6 +132,29 @@ export interface Yue2PropsResult {
   fetchedAt: number;
 }
 
+/** How hard one adapter pushes, broken out by where in the model it lands.
+ *  Mirrors the engine's Yue2LmAdapterScales (engine/src/yue2/yue2-adapter.h)
+ *  field for field. Every dial defaults to 1.0 and multiplies independently:
+ *  `global` is the master, attn/mlp pick by module kind, and early/mid/late by
+ *  which third of the block stack a module sits in. */
+export interface Yue2AdapterScales {
+  global: number;
+  attn: number;
+  mlp: number;
+  early: number;
+  mid: number;
+  late: number;
+}
+
+/** One adapter in a stack, with its own dials. The engine merges AR and NAR
+ *  into disjoint tensor sets, so a stack of one AR file and one NAR file is
+ *  legal and is the normal case now the picker has a slot for each. */
+export interface Yue2AdapterRef {
+  /** Absolute path to the .safetensors — the engine opens it as given. */
+  path: string;
+  scales: Yue2AdapterScales;
+}
+
 /** Per-role selection. '' (or omitted) = auto/best-first. Mirrors
  *  mm3SelectModel's shape at YuE2's much smaller (two-part) scale. */
 export interface Yue2Selection {
@@ -141,10 +175,11 @@ export interface Yue2Selection {
    *  A caller that serialises its whole option struct would otherwise clear an
    *  adapter it never meant to touch, which is why yue2_parse_adapter_field
    *  tracks `given` separately from the value. */
-  lm_adapter?: string | null;
+  lm_adapter?: string | null | readonly Yue2AdapterRef[];
   /** Merge strength, default 1.0 engine-side. Only sent alongside lm_adapter —
    *  on its own it would change the key the engine compares against and force
-   *  a needless teardown. */
+   *  a needless teardown. Ignored when lm_adapter is an array: every entry
+   *  carries its own dials there. */
   lm_adapter_scale?: number;
 }
 
@@ -342,11 +377,28 @@ export async function yue2SelectModel(sel: Yue2Selection): Promise<Yue2SelectMod
     vae_variant: sel.vae_variant ?? '',
   };
   if (sel.lm_adapter !== undefined) {
-    // '' and null both clear; send null, which is the engine's documented
-    // explicit-clear spelling and cannot be mistaken for "auto".
-    body.lm_adapter = sel.lm_adapter === null || sel.lm_adapter === '' ? null : sel.lm_adapter;
-    if (typeof sel.lm_adapter_scale === 'number' && Number.isFinite(sel.lm_adapter_scale)) {
-      body.lm_adapter_scale = sel.lm_adapter_scale;
+    if (Array.isArray(sel.lm_adapter)) {
+      // A stack. Empty means clear, spelled as null rather than [] so the
+      // engine reads the same explicit-clear it documents. Order is the
+      // caller's and is load-bearing: the engine renders its change key by
+      // walking the list, so a reordered stack reads as a different one and
+      // costs a needless model reload.
+      body.lm_adapter = sel.lm_adapter.length === 0 ? null : sel.lm_adapter.map(a => ({
+        path: a.path,
+        scale: a.scales.global,
+        scale_attn: a.scales.attn,
+        scale_mlp: a.scales.mlp,
+        scale_early: a.scales.early,
+        scale_mid: a.scales.mid,
+        scale_late: a.scales.late,
+      }));
+    } else {
+      // '' and null both clear; send null, which is the engine's documented
+      // explicit-clear spelling and cannot be mistaken for "auto".
+      body.lm_adapter = sel.lm_adapter === null || sel.lm_adapter === '' ? null : sel.lm_adapter;
+      if (typeof sel.lm_adapter_scale === 'number' && Number.isFinite(sel.lm_adapter_scale)) {
+        body.lm_adapter_scale = sel.lm_adapter_scale;
+      }
     }
   }
   return yue2Post<Yue2SelectModelResult>('/yue2/select-model', body, TIMEOUT_QUICK);
