@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, Pencil, Music2, Wand2, Play, Loader2, ChevronDown, ChevronRight, Send, FileText, Headphones, Sparkles, Zap, Download } from 'lucide-react';
 import { lireekApi, streamRefine, skipThinking } from '../../services/lireekApi';
@@ -11,6 +11,12 @@ import {
   pickNearestBpmTrack, readMm3CaptionSelection, resolveMm3Caption, writeMm3CaptionSelection,
   type Mm3CaptionSelection, type Mm3SourceTrack,
 } from '../../utils/mm3CaptionSource';
+import {
+  activeYue2AdapterPath, ensureYue2SourceTracks, readYue2SongSelection, resolveYue2Caption,
+  writeYue2SongSelection, yue2TrackBpm, YUE2_BACKEND_ID,
+  pickNearestBpmTrack as pickNearestYue2Track,
+  type Yue2CaptionSelection, type Yue2SourceTrack,
+} from '../../utils/yue2CaptionSource';
 
 /**
  * Whether these lyrics have already produced a track, and whether one was kept.
@@ -66,6 +72,108 @@ const GenerationStatusBadge: React.FC<{ gen: Generation }> = ({ gen }) => {
  *
  * On ACE-Step none of this appears and the box behaves exactly as it always has.
  */
+/**
+ * The ACE-Step caption box, plus a source picker when YuE2 is the active
+ * backend.
+ *
+ * It sits on THIS box and not on the MM3 one below because YuE2 renders from
+ * this caption — MM3's three-heading Structured Caption is a different text for
+ * a different model. Same control, different home.
+ *
+ * The choice is stored per song AND per adapter (see writeYue2SongSelection):
+ * the caption list belongs to the adapter's training dataset, so a track title
+ * chosen under one artist's adapter means nothing under another's.
+ *
+ * On any other backend this renders exactly the box that was here before.
+ */
+const Yue2CaptionField: React.FC<{
+  gen: Generation;
+  yue2Mode: boolean;
+  adapterPath: string;
+  tracks: Yue2SourceTrack[];
+  onSave: (value: string) => void;
+}> = ({ gen, yue2Mode, adapterPath, tracks, onSave }) => {
+  const { t } = useTranslation();
+  const [sel, setSel] = useState<Yue2CaptionSelection>(
+    () => readYue2SongSelection(adapterPath, gen.id));
+  useEffect(() => { setSel(readYue2SongSelection(adapterPath, gen.id)); }, [adapterPath, gen.id]);
+
+  const hasTracks = yue2Mode && !!adapterPath && tracks.length > 0;
+  const resolved = hasTracks
+    ? resolveYue2Caption(gen.caption || '', gen.bpm, tracks, sel)
+    : { caption: gen.caption || '', mode: 'custom' as const, fromName: undefined };
+  const readOnly = resolved.mode !== 'custom';
+  const autoTrack = pickNearestYue2Track(tracks, gen.bpm);
+
+  const selectValue = resolved.mode === 'track' && resolved.fromName
+    ? `track:${resolved.fromName}`
+    : resolved.mode;
+
+  const onSelect = (value: string) => {
+    const next: Yue2CaptionSelection = (value === 'auto' || value === 'custom')
+      ? { mode: value }
+      : { mode: 'track', selectedName: value.slice('track:'.length) };
+    writeYue2SongSelection(adapterPath, gen.id, next);
+    setSel(next);
+  };
+
+  return (
+    <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
+      <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">
+        Caption <span className="text-zinc-600 normal-case tracking-normal">— ACE-Step</span>
+      </label>
+
+      {hasTracks && (
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider flex-shrink-0">
+            {t('lyric.yue2CaptionSource', 'Caption source')}
+          </span>
+          <select
+            value={selectValue}
+            onChange={e => onSelect(e.target.value)}
+            className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-white/5 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-cyan-500/50 transition-colors"
+          >
+            <option value="auto">
+              {t('lyric.yue2CaptionAuto', 'Automatic from dataset')}
+              {autoTrack ? ` (${t('lyric.yue2CaptionNearestTempo', 'nearest tempo')}: ${autoTrack.name})` : ''}
+            </option>
+            {tracks.map(track => (
+              <option key={track.name} value={`track:${track.name}`}>
+                {t('lyric.yue2CaptionTrack', 'Track')}: {track.name}
+                {yue2TrackBpm(track) ? ` · ${yue2TrackBpm(track)} BPM` : ''}
+              </option>
+            ))}
+            <option value="custom">{t('lyric.yue2CaptionCustom', "Custom (this song's own caption)")}</option>
+          </select>
+        </div>
+      )}
+
+      {readOnly ? (
+        <>
+          <textarea
+            key={`yue2-resolved-${gen.id}`}
+            readOnly
+            rows={4}
+            className="w-full bg-transparent text-sm font-mono text-zinc-500 dark:text-zinc-500 focus:outline-none border-b border-transparent resize-y cursor-default"
+            value={resolved.caption}
+          />
+          <p className="text-[10px] text-cyan-400/70 mt-1">
+            {t('lyric.yue2CaptionFromTrack', 'From dataset track')}: {resolved.fromName}
+          </p>
+        </>
+      ) : (
+        <textarea
+          key={`yue2-custom-${gen.id}`}
+          className="w-full bg-transparent text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none border-b border-transparent hover:border-white/20 focus:border-pink-500/50 transition-colors resize-none"
+          rows={2}
+          defaultValue={gen.caption || ''}
+          onBlur={(e) => { if (e.target.value !== (gen.caption || '')) onSave(e.target.value); }}
+        />
+      )}
+    </div>
+  );
+};
+
 const Mm3CaptionField: React.FC<{
   gen: Generation;
   mm3Mode: boolean;
@@ -188,6 +296,24 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
   // session", and the stored value (default Automatic) is read on demand.
   const mm3Mode = useBackendStore(s => s.activeBackendId) === MM3_BACKEND_ID;
   const [captionSelections, setCaptionSelections] = useState<Record<number, Mm3CaptionSelection>>({});
+
+  // ── YuE2 caption source ──
+  // The adapter is global engine state on this backend, so one lookup serves
+  // every card; the per-song CHOICE is stored per (adapter, song) instead.
+  const yue2Mode = useBackendStore(s => s.activeBackendId) === YUE2_BACKEND_ID;
+  const yue2Catalogue = useBackendStore(s => s.models[YUE2_BACKEND_ID] ?? null);
+  const fetchBackendModels = useBackendStore(s => s.fetchModels);
+  const [yue2Tracks, setYue2Tracks] = useState<Yue2SourceTrack[]>([]);
+  const yue2Adapter = yue2Mode ? activeYue2AdapterPath() : '';
+  useEffect(() => {
+    if (yue2Mode && !yue2Catalogue) void fetchBackendModels(YUE2_BACKEND_ID);
+  }, [yue2Mode, yue2Catalogue, fetchBackendModels]);
+  useEffect(() => {
+    if (!yue2Mode || !yue2Adapter) { setYue2Tracks([]); return; }
+    let live = true;
+    void ensureYue2SourceTracks(yue2Adapter).then(tr => { if (live) setYue2Tracks(tr); });
+    return () => { live = false; };
+  }, [yue2Mode, yue2Adapter]);
   const captionSelectionFor = useCallback(
     (genId: number): Mm3CaptionSelection => captionSelections[genId] ?? readMm3CaptionSelection(genId),
     [captionSelections],
@@ -521,16 +647,19 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                         </div>
                       </div>
 
-                      {/* Editable caption */}
-                      <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
-                        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Caption <span className="text-zinc-600 normal-case tracking-normal">— ACE-Step</span></label>
-                        <textarea
-                          className="w-full bg-transparent text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none border-b border-transparent hover:border-white/20 focus:border-pink-500/50 transition-colors resize-none"
-                          rows={2}
-                          defaultValue={gen.caption || ''}
-                          onBlur={(e) => { if (e.target.value !== (gen.caption || '')) handleSaveField(gen.id, 'caption', e.target.value); }}
-                        />
-                      </div>
+                      {/* Editable caption — and on YuE2 the SOURCE control lives
+                          here rather than on the MM3 box below, because YuE2
+                          renders from this caption. Its adapter was trained on
+                          whole songs under their own captions with half of them
+                          dropped, so every dataset caption is a prompt it has
+                          really seen and picking one steers toward that track. */}
+                      <Yue2CaptionField
+                        gen={gen}
+                        yue2Mode={yue2Mode}
+                        adapterPath={yue2Adapter}
+                        tracks={yue2Tracks}
+                        onSave={(value) => handleSaveField(gen.id, 'caption', value)}
+                      />
 
                       {/* MM3 caption — a genuinely different caption, not a reformatting
                           of the one above. MiniMax-Music3 was trained on a three-heading

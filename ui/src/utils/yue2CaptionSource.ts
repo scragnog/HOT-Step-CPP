@@ -255,12 +255,49 @@ export function resolveYue2Caption(
  *  Returns the song's own caption whenever nothing has been picked, so callers
  *  can use it unconditionally on this backend. */
 export function resolveYue2CaptionForGeneration(
-  gen: { bpm?: number; caption?: string | null },
+  gen: { id?: number; bpm?: number; caption?: string | null },
 ): Yue2ResolvedCaption {
   const adapter = activeYue2AdapterPath();
   const own = gen.caption || '';
   if (!adapter) return { caption: own.trim(), mode: 'custom' };
-  return resolveYue2Caption(own, gen.bpm, readYue2SourceTracks(adapter), readYue2CaptionSelection(adapter));
+  return resolveYue2Caption(
+    own, gen.bpm, readYue2SourceTracks(adapter), readYue2SongSelection(adapter, gen.id));
+}
+
+// ── Per-song choice (Lyric Studio) ───────────────────────────────────────────
+//
+// The selection above is keyed by ADAPTER, which is right for Create: one
+// caption box, one adapter in force, no song to hang the choice on. A written
+// song is different — the card shows one song and MM3 lets each song pick its
+// own source track, so YuE2 does too.
+//
+// Keyed by BOTH adapter and song. The caption list belongs to the adapter's
+// training dataset, so a choice made under one artist's adapter cannot mean
+// anything under another's; storing it per song alone would silently apply a
+// Crash Test Dummies track title to a Green Day render. Falls back to the
+// per-adapter choice when this song has never been touched, so a preference set
+// in Create still leads.
+
+function yue2SongKey(adapterPath: string, genId: number): string {
+  return `${YUE2_CAPTION_SOURCE_PREFIX}song:${genId}:${adapterPath}`;
+}
+
+export function readYue2SongSelection(adapterPath: string, genId?: number): Yue2CaptionSelection {
+  if (!adapterPath) return { mode: 'custom' };
+  if (typeof genId === 'number') {
+    const stored = _read<Yue2CaptionSelection>(yue2SongKey(adapterPath, genId));
+    if (stored && (stored.mode === 'auto' || stored.mode === 'track' || stored.mode === 'custom')) {
+      return stored;
+    }
+  }
+  return readYue2CaptionSelection(adapterPath);
+}
+
+export function writeYue2SongSelection(
+  adapterPath: string, genId: number, sel: Yue2CaptionSelection,
+): void {
+  if (!adapterPath || typeof genId !== 'number') return;
+  _write(yue2SongKey(adapterPath, genId), sel);
 }
 
 // ── Album presets ────────────────────────────────────────────────────────────
