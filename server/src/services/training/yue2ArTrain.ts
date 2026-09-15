@@ -197,12 +197,22 @@ export const YUE2_AR_DEFAULTS = {
    *  design — whole songs fit, and random crops teach that a song may begin
    *  mid-flow, which MM3 paid for twice. This also SIZES the buffers (one [H,S]
    *  F32 per layer), so lowering it is the VRAM lever. */
-  maxLen: 12288,
+  /** 9000, not the engine's 12288: the AR sequence is prefix + whole song, and
+   *  12288 sizes the per-layer F32 buffers for a length no song in a normal
+   *  album reaches. 9000 frames is 6 minutes of audio and is what every run
+   *  behind the settled recipe used; a longer song is skipped with its name,
+   *  never cropped. */
+  maxLen: 9000,
   /** exact | flash | flash-f32. Flash removes the retained [S,S,Nh] softmax —
    *  6.0 GiB at S=10,001 — and is probed at the run's real shapes with a HARD
    *  ERROR on an unsupported backend. Left at `exact` because the recipe was
    *  proven there. */
-  attn: 'exact' as Yue2ArAttn,
+  /** `flash` because the difference is 40 s/it vs 8 s/it on the same card, not
+   *  a quality trade: the fused path is gated against exact (docs/plans/yue2,
+   *  the FD gate passes under flash at 128 and 2048 frames). `exact` is the
+   *  engine's own default because it is the one that always exists; every run
+   *  behind the settled recipe used flash. */
+  attn: 'flash' as Yue2ArAttn,
   /** Supervised rows per CE chunk. */
   chunk: 256,
 
