@@ -24,6 +24,7 @@ import type { GenerationParams, GenerationJob } from '../types';
 import { resolveDuration } from '../utils/estimateDuration';
 import { createGenerationTimer, getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import { captionForBackend, MM3_BACKEND_ID } from '../utils/captionForBackend';
+import { applyYue2PresetAdapters, YUE2_BACKEND_ID } from '../utils/yue2CaptionSource';
 import { ensureMm3SourceTracks } from '../utils/mm3CaptionSource';
 import { normalizeKeyScale } from '../utils/keyScale';
 import { useLmAdapterEnabled } from '../utils/lmAdapterPref';
@@ -1456,6 +1457,17 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     const ref = preset?.mm3_adapter_path || '';
     params.mm3LmAdapter = ref;
     try { useGlobalParamsStore.getState().setBackendParam('mm3LmAdapter', ref); } catch { /* store not ready */ }
+  }
+
+  // Same guarantee for YuE2, where it matters more: its adapter is merged into
+  // the resident LM rather than passed per request, so without this every song
+  // in a queue renders through whichever album happened to be selected last —
+  // the failure the MM3 block above was written for, but persisting in the
+  // engine rather than in a param. AWAITED, not fired and forgotten: the merge
+  // has to be in force before this item is submitted, and the queue is serial,
+  // so the wait costs nothing that the model reload was not going to cost.
+  if (backendId === YUE2_BACKEND_ID) {
+    await applyYue2PresetAdapters(preset);
   }
 
   // 4) Mastering reference from album preset (does NOT force-enable — respects global toggle)

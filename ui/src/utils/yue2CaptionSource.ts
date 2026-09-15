@@ -262,3 +262,33 @@ export function resolveYue2CaptionForGeneration(
   if (!adapter) return { caption: own.trim(), mode: 'custom' };
   return resolveYue2Caption(own, gen.bpm, readYue2SourceTracks(adapter), readYue2CaptionSelection(adapter));
 }
+
+// ── Album presets ────────────────────────────────────────────────────────────
+
+/** Apply an album preset's two YuE2 halves to the engine.
+ *
+ *  NOT a request param, unlike MM3's `mm3LmAdapter`: on this backend the
+ *  adapter is merged into the resident LM at load, so the selection IS engine
+ *  state and the only way to set it is the same POST the picker makes
+ *  (Yue2LmAdapterDropdown). A preset that only wrote a param would change
+ *  nothing.
+ *
+ *  Both halves travel together, and an ABSENT half is sent as '' rather than
+ *  omitted — the same rule the MM3 path follows for the same reason: the
+ *  selection persists across sessions, so an album with no NAR would otherwise
+ *  keep rendering through the previous album's. Scales are left alone; they are
+ *  the user's dials, not the album's.
+ *
+ *  Returns true when the engine accepted the selection. Never throws. */
+export async function applyYue2PresetAdapters(
+  preset: { yue2_ar_adapter_path?: string | null; yue2_nar_adapter_path?: string | null } | null | undefined,
+): Promise<boolean> {
+  const ar = String(preset?.yue2_ar_adapter_path ?? '').trim();
+  const nar = String(preset?.yue2_nar_adapter_path ?? '').trim();
+  try {
+    return await useBackendStore.getState().selectModels(
+      { lmAdapterAr: ar, lmAdapterNar: nar }, YUE2_BACKEND_ID);
+  } catch {
+    return false;
+  }
+}

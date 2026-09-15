@@ -44,6 +44,7 @@ import { restartAceServer, stopAceServer } from '../aceEngineProcess.js';
 import { YUE2_LICENSE_NOTICE } from '../backends/yue2/index.js';
 import { aceTrainExe } from './aceTrain.js';
 import { getDataset } from './datasetsRepo.js';
+import { refreshYue2PresetsForNewRun } from './lyricStudioExport.js';
 import {
   buildYue2PreprocessArgs, buildYue2TrainArgs, missingYue2TrainModels,
   readYue2PreprocessSummary, YUE2_ADAPTER_STEM, YUE2_VRAM_MODEL,
@@ -601,6 +602,20 @@ export async function runYue2TrainJob(job: TrainingJob): Promise<void> {
       log(job, 'info',
         'The resume state was removed on the clean finish, so this run cannot be extended — start a new '
         + 'one with a higher step count instead. Its snapshots stay where they are.');
+
+      // The final export, where the AR half hands its presets a mid-ladder rung
+      // instead: the NAR's rungs were indistinguishable by ear from 2000 steps
+      // up (arms 149-151), so the last one is as good as any and needs no
+      // caveat. Writes only the NAR column — the AR's own run fills the other.
+      if (fs.existsSync(final)) {
+        const dsRow = getDataset(job.datasetId);
+        const touched = refreshYue2PresetsForNewRun(
+          { slug: dsRow?.slug || opts.datasetSlug || '', lyricsSetId: dsRow?.lyricsSetId }, 'nar', final);
+        if (touched) {
+          log(job, 'info',
+            `${touched} Lyric Studio album preset(s) now load this run's NAR adapter.`);
+        }
+      }
       finishJob(job, 'done');
     }
   } catch (err: any) {

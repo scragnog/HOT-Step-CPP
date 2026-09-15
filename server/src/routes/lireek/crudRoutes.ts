@@ -489,6 +489,8 @@ export function registerCrudRoutes(router: Router): void {
         lmAdapterPath: req.body.lm_adapter_path,
         lmAdapterScale: req.body.lm_adapter_scale,
         mm3AdapterPath: req.body.mm3_adapter_path,
+        yue2ArAdapterPath: req.body.yue2_ar_adapter_path,
+        yue2NarAdapterPath: req.body.yue2_nar_adapter_path,
       });
       res.json({ preset: hydratePreset(preset) });
     } catch (err: any) {

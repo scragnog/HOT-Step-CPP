@@ -353,6 +353,14 @@ export function initDb(): void {
     // mm3LmAdapter request param carries. ACE's lm_adapter_path above is the
     // 5 Hz planner adapter and stays separate: one preset serves both backends.
     "ALTER TABLE album_presets ADD COLUMN mm3_adapter_path TEXT",
+    // YuE2 adapters per album (2026-09-15). TWO columns, not one, because YuE2
+    // is two experts and a stack needs both: the AR plans and carries the
+    // artist likeness, the NAR renders those tokens to audio. They are trained
+    // by separate runs into separate roots and are selected in separate slots
+    // (the dual-slot picker, 58aff871), so one column could only ever hold half
+    // a preset. Absolute paths, matching what the YuE2 catalogue reports.
+    "ALTER TABLE album_presets ADD COLUMN yue2_ar_adapter_path TEXT",
+    "ALTER TABLE album_presets ADD COLUMN yue2_nar_adapter_path TEXT",
   ];
   for (const sql of lireekMigrations) {
     try { db.exec(sql); } catch { /* column already exists */ }

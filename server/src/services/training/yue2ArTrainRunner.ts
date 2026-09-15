@@ -36,6 +36,7 @@ import path from 'path';
 
 import { YUE2_LICENSE_NOTICE } from '../backends/yue2/index.js';
 import { getDataset } from './datasetsRepo.js';
+import { refreshYue2PresetsForNewRun } from './lyricStudioExport.js';
 import { missingYue2TrainModels, readYue2PreprocessSummary } from './yue2Train.js';
 import {
   YUE2_AR_ADAPTER_STEM, YUE2_AR_DEFAULTS, type ResolvedYue2ArTrainOptions,
@@ -758,6 +759,40 @@ export async function runYue2ArTrainJob(job: TrainingJob): Promise<void> {
       log(job, 'info',
         'The resume state was removed on the clean finish, so this run cannot be extended — start a new '
         + 'one with a higher step count instead. Its snapshots stay where they are.');
+
+      // THE PRESET GETS THE PICK RUNG, NOT THE FINAL ADAPTER — the one place
+      // this differs from MM3, and deliberately. The AR's likeness curve is
+      // compressed and it is possible to train past the top of it: on Green Day
+      // the ear chose 250-300 off a 400-step ladder, and the 400-step export
+      // rendered six minutes without ever reaching an ending. Pointing an album
+      // at the last file written would hand the user the one rung the campaign
+      // knows is wrong. The final export is the fallback only when the rung is
+      // missing (a run shorter than ckptPickStep, or saveEvery that skipped it).
+      // ckptPickStep is a DEFAULT, not a per-run option — the form uses it to
+      // preselect and the run itself never carries it.
+      const want = YUE2_AR_DEFAULTS.ckptPickStep;
+      const final = path.join(opts.outDir, `${YUE2_AR_ADAPTER_STEM}.safetensors`);
+      const rungs = fs.readdirSync(opts.outDir)
+        .map(f => /^.*_step(\d+)\.safetensors$/.exec(f))
+        .filter((m): m is RegExpExecArray => !!m)
+        .map(m => ({ step: Number(m[1]), file: path.join(opts.outDir, m[0]) }))
+        .sort((a, b) => a.step - b.step);
+      // Nearest rung AT OR BELOW the pick, not the final: a run whose ladder
+      // skipped the exact step should fall back DOWN the curve, since the far
+      // end is the end we know is wrong.
+      const below = rungs.filter(r => r.step <= want).pop();
+      const chosen = below?.file || (fs.existsSync(final) ? final : (rungs[0]?.file ?? ''));
+      if (chosen) {
+        const dsRow = getDataset(job.datasetId);
+        const touched = refreshYue2PresetsForNewRun(
+          { slug: dsRow?.slug || opts.datasetSlug || '', lyricsSetId: dsRow?.lyricsSetId }, 'ar', chosen);
+        if (touched) {
+          log(job, 'info',
+            `${touched} Lyric Studio album preset(s) now load this run's AR adapter `
+            + `(${path.basename(chosen)}${below ? '' : ' — no rung at or below the pick was on disk'}). `
+            + 'Change it there if the ear picks a different rung.');
+        }
+      }
       finishJob(job, 'done');
     }
   } catch (err: any) {

@@ -17,6 +17,7 @@ import { resolveDuration } from '../../utils/estimateDuration';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { captionForBackend, MM3_BACKEND_ID } from '../../utils/captionForBackend';
 import { ensureMm3SourceTracks } from '../../utils/mm3CaptionSource';
+import { applyYue2PresetAdapters, YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 import {
   MM3_CAPTION_SOURCES_KEY, clearMm3CaptionSources,
   readMm3CaptionSelection, readMm3SourceTracks,
@@ -132,6 +133,15 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     // dropdown left them, mirroring the DiT adapter semantics.
     if (backendId === MM3_BACKEND_ID) {
       gps.setBackendParam('mm3LmAdapter', preset?.mm3_adapter_path || '');
+    }
+
+    // YuE2's two halves, same intent as the MM3 line above and a different
+    // mechanism: the adapter is merged into the resident LM, so it is engine
+    // state rather than a request param and has to be POSTed like the picker
+    // does. Fire-and-forget — a preset that cannot be applied must not block a
+    // hand-off, and the picker still shows what is actually in force.
+    if (backendId === YUE2_BACKEND_ID) {
+      void applyYue2PresetAdapters(preset as Parameters<typeof applyYue2PresetAdapters>[0]);
     }
 
     // Mastering reference from album preset (does NOT force-enable — respects global toggle).

@@ -255,6 +255,7 @@ function presetDataFromRow(row: Record<string, any> | null): {
   referenceTrackPath: string | null; audioCoverStrength: number | null;
   lmAdapterPath: string | null; lmAdapterScale: number | null;
   mm3AdapterPath: string | null;
+  yue2ArAdapterPath: string | null; yue2NarAdapterPath: string | null;
 } {
   let groupScales: any = row?.adapter_group_scales ?? null;
   if (typeof groupScales === 'string') {
@@ -269,7 +270,63 @@ function presetDataFromRow(row: Record<string, any> | null): {
     lmAdapterPath: row?.lm_adapter_path ?? null,
     lmAdapterScale: row?.lm_adapter_scale ?? null,
     mm3AdapterPath: row?.mm3_adapter_path ?? null,
+    yue2ArAdapterPath: row?.yue2_ar_adapter_path ?? null,
+    yue2NarAdapterPath: row?.yue2_nar_adapter_path ?? null,
   };
+}
+
+/**
+ * A YuE2 training run on dataset `ds` just exported. Point this dataset's album
+ * presets at it, the same way refreshMm3PresetsForNewRun does for MM3.
+ *
+ * TWO HALVES, ONE PRESET, AND THEY FINISH AT DIFFERENT TIMES. The AR and the
+ * NAR are separate runs into separate roots, so this is called once by each and
+ * writes only the half it was given — passing null for the other leaves that
+ * column alone rather than clearing a perfectly good adapter the other run put
+ * there. A preset therefore fills in over two runs in whichever order they
+ * happen, which is the order the Train page's five stages actually run them.
+ *
+ * Absolute paths, unlike MM3's root-relative reference: the YuE2 catalogue
+ * reports absolute paths and the engine opens an adapter path AS GIVEN
+ * (yue2-adapter.h resolves it against nothing), so storing anything else would
+ * mean a second resolution rule that only this table knows about.
+ *
+ * Which presets: the one belonging to the lyrics set this dataset exported to,
+ * plus any whose stored YuE2 path is an OLDER run of this same dataset, so
+ * re-trainings follow. Presets pointing at another dataset are never touched.
+ * Returns the number updated; never throws (called from a job's success path).
+ */
+export function refreshYue2PresetsForNewRun(
+  ds: { slug: string; lyricsSetId?: number },
+  half: 'ar' | 'nar',
+  newPath: string,
+): number {
+  let updated = 0;
+  try {
+    const slugLower = String(ds.slug || '').toLowerCase();
+    if (!newPath || !slugLower) return 0;
+    const column = half === 'ar' ? 'yue2_ar_adapter_path' : 'yue2_nar_adapter_path';
+    const field  = half === 'ar' ? 'yue2ArAdapterPath' : 'yue2NarAdapterPath';
+    // Run dirs are `<adapters root>/<slug>-<stamp>/<file>`; the dataset is the
+    // parent directory's name up to the timestamp.
+    const runOf = (p: string) => path.basename(path.dirname(String(p ?? ''))).toLowerCase();
+    const newRun = runOf(newPath);
+    for (const preset of getAllPresets()) {
+      const stored = typeof preset[column] === 'string' ? preset[column] as string : '';
+      if (stored && normPath(stored) === normPath(newPath)) continue;
+      const direct = !!ds.lyricsSetId && preset.lyrics_set_id === ds.lyricsSetId;
+      const older  = !!stored && runOf(stored) !== newRun && runOf(stored).startsWith(slugLower + '-');
+      if (!direct && !older) continue;
+      const data = presetDataFromRow(preset) as Record<string, unknown>;
+      data[field] = newPath;
+      upsertPreset(preset.lyrics_set_id, data as Parameters<typeof upsertPreset>[1]);
+      updated++;
+      console.log(`[Training] Album preset (lyrics set ${preset.lyrics_set_id}) ${column} -> ${newPath}`);
+    }
+  } catch (err: any) {
+    console.warn(`[Training] YuE2 preset refresh after training failed: ${err?.message ?? err}`);
+  }
+  return updated;
 }
 
 /** The run directory an MM3 adapter reference belongs to: the first segment

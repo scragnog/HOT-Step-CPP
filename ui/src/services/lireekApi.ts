@@ -133,6 +133,10 @@ export interface AlbumPreset {
   /** MM3 LM adapter weights file, relative to the mm3-lm-adapters root — the
    *  reference the mm3LmAdapter backend param carries (2026-09-11). */
   mm3_adapter_path?: string;
+  /** YuE2's two halves, absolute paths (2026-09-15). Two columns because YuE2
+   *  is two experts and a stack needs both — the AR plans, the NAR renders. */
+  yue2_ar_adapter_path?: string;
+  yue2_nar_adapter_path?: string;
   created_at: string;
 }
 
@@ -336,6 +340,8 @@ export const lireekApi = {
     lm_adapter_path?: string;
     lm_adapter_scale?: number;
     mm3_adapter_path?: string;
+    yue2_ar_adapter_path?: string;
+    yue2_nar_adapter_path?: string;
   }): Promise<{ preset: AlbumPreset }> =>
     api(`/api/lireek/lyrics-sets/${lyricsSetId}/preset`, { method: 'PUT', body: params }),
 

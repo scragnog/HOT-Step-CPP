@@ -407,6 +407,10 @@ export function upsertPreset(lyricsSetId: number, data: {
   lmAdapterScale?: number | null;
   /** MM3 LM adapter weights file, relative to the mm3-lm-adapters root. */
   mm3AdapterPath?: string | null;
+  /** YuE2's two halves, absolute paths. Both or neither is the usual case, but
+   *  a stack with only one is legal and is stored as such. */
+  yue2ArAdapterPath?: string | null;
+  yue2NarAdapterPath?: string | null;
 }): Record<string, any> {
   const db = getDb();
   const existing = getPreset(lyricsSetId);
@@ -416,22 +420,24 @@ export function upsertPreset(lyricsSetId: number, data: {
     db.prepare(
       `UPDATE album_presets SET adapter_path = ?, adapter_scale = ?, adapter_group_scales = ?,
        reference_track_path = ?, audio_cover_strength = ?, lm_adapter_path = ?, lm_adapter_scale = ?,
-       mm3_adapter_path = ?
+       mm3_adapter_path = ?, yue2_ar_adapter_path = ?, yue2_nar_adapter_path = ?
        WHERE lyrics_set_id = ?`
     ).run(
       data.adapterPath ?? null, data.adapterScale ?? null, groupScalesJson,
       data.referenceTrackPath ?? null, data.audioCoverStrength ?? null,
       data.lmAdapterPath ?? null, data.lmAdapterScale ?? null,
-      data.mm3AdapterPath ?? null, lyricsSetId,
+      data.mm3AdapterPath ?? null,
+      data.yue2ArAdapterPath ?? null, data.yue2NarAdapterPath ?? null, lyricsSetId,
     );
   } else {
     db.prepare(
-      `INSERT INTO album_presets (lyrics_set_id, adapter_path, adapter_scale, adapter_group_scales, reference_track_path, audio_cover_strength, lm_adapter_path, lm_adapter_scale, mm3_adapter_path)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO album_presets (lyrics_set_id, adapter_path, adapter_scale, adapter_group_scales, reference_track_path, audio_cover_strength, lm_adapter_path, lm_adapter_scale, mm3_adapter_path, yue2_ar_adapter_path, yue2_nar_adapter_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       lyricsSetId, data.adapterPath ?? null, data.adapterScale ?? null, groupScalesJson,
       data.referenceTrackPath ?? null, data.audioCoverStrength ?? null,
       data.lmAdapterPath ?? null, data.lmAdapterScale ?? null, data.mm3AdapterPath ?? null,
+      data.yue2ArAdapterPath ?? null, data.yue2NarAdapterPath ?? null,
     );
   }
   return getPreset(lyricsSetId)!;
