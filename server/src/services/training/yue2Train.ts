@@ -354,11 +354,12 @@ export const YUE2_VRAM_MODEL = {
    *  prefix is prefilled once and every step is NAR work alone. */
   secondsPerStep: 0.065,
   /** And with per-clip codec conditioning, where a step also pays its share of
-   *  AR prefills. 0.079 measured with the working-set sampler at --clip-block
-   *  64 / --kv-cache 8; it was 0.18 under the uniform draw that preceded it.
-   *  A cache built by the AR pipeline ALWAYS carries codec ids, so this is the
-   *  number most in-app runs get and the form must not quote the other one. */
-  secondsPerStepCodec: 0.079,
+   *  AR prefills. 0.10 measured on the Crimson cache with the working-set
+   *  sampler at --clip-block 64 / --kv-cache 8 (88% cache hits); it was 0.18
+   *  under the uniform draw that preceded it, at 3%. A cache built by the AR
+   *  pipeline ALWAYS carries codec ids, so this is the number most in-app runs
+   *  get and the form must not quote the other one. */
+  secondsPerStepCodec: 0.10,
 } as const;
 
 /** Peak VRAM for a training configuration, in MB.
@@ -380,10 +381,10 @@ export function estimateYue2PreprocessMb(vaeBytes: number): number {
 
 /** Wall-clock estimate for a run, in ms.
  *
- *  Takes the regime, because it is worth about 20 minutes on a 10 000-step
- *  run: text-only is ~11 min, codec-conditioned ~13. Quoting the text-only
- *  number for a codec-conditioned cache is how the form came to promise 11
- *  minutes for a run that took 30. */
+ *  Takes the regime, because it is worth a factor on a 10 000-step run:
+ *  text-only is ~11 min, codec-conditioned ~17. Quoting the text-only number
+ *  for a codec-conditioned cache is how the form came to promise 11 minutes
+ *  for a run that took 30. */
 export function estimateYue2RunMs(steps: number, codecConditioned = false): number {
   const perStep = codecConditioned
     ? YUE2_VRAM_MODEL.secondsPerStepCodec
