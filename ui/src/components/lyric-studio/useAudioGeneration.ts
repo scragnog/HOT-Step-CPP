@@ -17,7 +17,9 @@ import { resolveDuration } from '../../utils/estimateDuration';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { captionForBackend, MM3_BACKEND_ID } from '../../utils/captionForBackend';
 import { ensureMm3SourceTracks } from '../../utils/mm3CaptionSource';
-import { applyYue2PresetAdapters, YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
+import {
+  activeYue2AdapterPath, applyYue2PresetAdapters, ensureYue2SourceTracks, YUE2_BACKEND_ID,
+} from '../../utils/yue2CaptionSource';
 import {
   MM3_CAPTION_SOURCES_KEY, clearMm3CaptionSources,
   readMm3CaptionSelection, readMm3SourceTracks,
@@ -55,6 +57,15 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     const backendId = useBackendStore.getState().activeBackendId;
     const lyricsSetId = profile?.lyrics_set_id;
     if (backendId === MM3_BACKEND_ID) await ensureMm3SourceTracks(lyricsSetId);
+    // YuE2's equivalent, and it has to happen HERE rather than in the picker:
+    // resolveYue2CaptionForGeneration reads the track list out of the cache the
+    // Create picker fills, so a song generated from Lyric Studio without that
+    // panel ever being opened resolved to the written caption and the album's own
+    // captions never reached the model.
+    if (backendId === YUE2_BACKEND_ID) {
+      const yue2Adapter = activeYue2AdapterPath();
+      if (yue2Adapter) await ensureYue2SourceTracks(yue2Adapter);
+    }
     write('hs-caption', captionForBackend(gen, backendId, lyricsSetId));
     write('hs-lyrics', gen.lyrics || '');
 

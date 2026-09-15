@@ -5,6 +5,7 @@ import { lireekApi, type Mm3PresetAdapter } from '../../services/lireekApi';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { useBackendStore } from '../../stores/backendStore';
 import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
+import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 
 interface PresetForm {
   adapter_path: string;
@@ -16,6 +17,9 @@ interface PresetForm {
   lm_adapter_path: string;
   /** MM3 LM adapter, relative to the mm3-lm-adapters root ('' = base model). */
   mm3_adapter_path: string;
+  /** YuE2's two halves, absolute paths ('' = that half runs unmerged). */
+  yue2_ar_adapter_path: string;
+  yue2_nar_adapter_path: string;
 }
 
 const DEFAULT_FORM: PresetForm = {
@@ -27,6 +31,8 @@ const DEFAULT_FORM: PresetForm = {
   reference_track_path: '',
   lm_adapter_path: '',
   mm3_adapter_path: '',
+  yue2_ar_adapter_path: '',
+  yue2_nar_adapter_path: '',
 };
 
 /** "run-stamp · ckpt-300" — the part of an MM3 adapter reference a human recognises. */
@@ -78,6 +84,15 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
   // adapters (2026-09-11): the preset row is shared, the backends' adapters
   // are not interchangeable, so each mode edits its own column.
   const mm3Mode = useBackendStore(s => s.activeBackendId) === MM3_BACKEND_ID;
+  const yue2Mode = useBackendStore(s => s.activeBackendId) === YUE2_BACKEND_ID;
+  // The installed YuE2 adapters, straight off the catalogue the global picker
+  // reads — there is no per-album lookup route for YuE2 the way there is for
+  // MM3, and the catalogue already records each file's half and trigger.
+  const yue2Catalogue = useBackendStore(s => s.models[YUE2_BACKEND_ID] ?? null);
+  const fetchBackendModels = useBackendStore(s => s.fetchModels);
+  useEffect(() => {
+    if (yue2Mode && !yue2Catalogue) void fetchBackendModels(YUE2_BACKEND_ID);
+  }, [yue2Mode, yue2Catalogue, fetchBackendModels]);
   const [mm3Adapters, setMm3Adapters] = useState<{
     datasetSlug: string | null; candidates: Mm3PresetAdapter[]; others: Mm3PresetAdapter[];
   } | null>(null);
@@ -98,6 +113,8 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
             reference_track_path: res.preset.reference_track_path || '',
             lm_adapter_path: res.preset.lm_adapter_path || '',
             mm3_adapter_path: res.preset.mm3_adapter_path || '',
+            yue2_ar_adapter_path: res.preset.yue2_ar_adapter_path || '',
+            yue2_nar_adapter_path: res.preset.yue2_nar_adapter_path || '',
           });
         } else {
           setForm(DEFAULT_FORM);
@@ -130,6 +147,8 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
         reference_track_path: form.reference_track_path || undefined,
         lm_adapter_path: stripWeightsFile(form.lm_adapter_path) || undefined,
         mm3_adapter_path: form.mm3_adapter_path || undefined,
+        yue2_ar_adapter_path: form.yue2_ar_adapter_path || undefined,
+        yue2_nar_adapter_path: form.yue2_nar_adapter_path || undefined,
       });
       showToast('Preset saved');
       onClose();
@@ -185,6 +204,66 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 text-zinc-500 animate-spin" />
               </div>
+            ) : yue2Mode ? (
+              <>
+                {/* YuE2 is TWO adapters, so the preset stores two. Both are
+                    offered because a stack needs both halves: the AR plans the
+                    song and carries the artist likeness, the NAR renders those
+                    tokens to audio. Selecting an album applies the pair to the
+                    engine — on this backend the adapter is merged into the
+                    resident LM, so it is engine state rather than a per-request
+                    field. Strengths stay in the global picker's dials. */}
+                {(['ar', 'nar'] as const).map(half => {
+                  const field = half === 'ar' ? 'yue2_ar_adapter_path' : 'yue2_nar_adapter_path';
+                  const value = form[field];
+                  const meta = yue2Catalogue?.lmAdapterMeta ?? {};
+                  const all = yue2Catalogue?.lmAdapters ?? [];
+                  // An entry whose half the server did not record is shown in
+                  // BOTH lists, for the same reason the global picker does it:
+                  // the engine's format gate is the real authority, and hiding
+                  // a file someone trained is worse than letting them try it.
+                  const paths = all.filter(p2 => {
+                    const k = (meta[p2] as { kind?: string } | undefined)?.kind;
+                    return k === undefined || k === half;
+                  });
+                  const label = (p2: string) => {
+                    const m = meta[p2];
+                    const bits = [m?.trigger || m?.runName || p2.split(/[\/]/).pop()];
+                    if (m?.steps) bits.push(`${m.steps} steps`);
+                    return bits.filter(Boolean).join(' · ');
+                  };
+                  return (
+                    <div className="space-y-3" key={half}>
+                      <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                        <Brain className="w-4 h-4 text-emerald-400" />
+                        {half === 'ar'
+                          ? t('lyric.yue2ArAdapter', 'YuE2 AR adapter (plans the song)')
+                          : t('lyric.yue2NarAdapter', 'YuE2 NAR adapter (renders the audio)')}
+                      </div>
+                      <div className="space-y-2">
+                        <select value={value}
+                          onChange={e => setForm(p2 => ({ ...p2, [field]: e.target.value }))}
+                          className="w-full bg-zinc-200 dark:bg-black/20 border border-zinc-300 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors">
+                          <option value="">{t('lyric.yue2AdapterNone', 'None — base model')}</option>
+                          {value && !paths.includes(value) && (
+                            <option value={value}>{value} ({t('lyric.yue2AdapterMissing', 'not installed')})</option>
+                          )}
+                          {paths.map(p2 => <option key={p2} value={p2}>{label(p2)}</option>)}
+                        </select>
+                        {value && (
+                          <span className="text-[10px] text-zinc-500 truncate block" title={value}>{value}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-[10px] text-zinc-600">
+                  {t('lyric.yue2AdapterHint',
+                    'A finished YuE2 training run on this album’s dataset fills these in by itself — the AR at its '
+                    + 'pick rung rather than its last, since the likeness curve can be trained past. Strength lives in the '
+                    + 'global adapter menu.')}
+                </p>
+              </>
             ) : mm3Mode ? (
               <>
                 {/* MM3 Adapter Section — the one adapter that exists for this backend */}
