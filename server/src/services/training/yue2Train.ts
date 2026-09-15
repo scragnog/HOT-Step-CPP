@@ -184,8 +184,17 @@ export const YUE2_NAR_DEFAULTS = {
   alpha: 256,
   /** nar_attn | nar_attn_mlp | nar_attn_mlp_proj. `nar_attn_mlp` is 196 LoRA
    *  sites (392 exported tensors) — attention q/k/v/output plus the FFN
-   *  gate/up/down on all 28 NAR blocks, and none of the projection heads. */
-  target: 'nar_attn_mlp' as Yue2NarTarget,
+   *  gate/up/down on all 28 NAR blocks, and none of the projection heads.
+   *  `_proj` adds the four head sites (vae2llm, llm2vae, time_embd.{0,1}),
+   *  which is 200 sites and 400 tensors.
+   *
+   *  `_proj` because that is what the campaign's renders were made under
+   *  (18 §7, "NAR rank 256 codec-conditioned nar_attn_mlp_proj, 10k steps,
+   *  merged at ~0.6"), and it is what the engine's own --fd-check promotes an
+   *  unset preset to. The VRAM model below was fitted on nar_attn_mlp, so it
+   *  now under-reads by the four head sites — 2% of the parameters, tens of
+   *  MB at rank 256, inside the slack the constant term already carries. */
+  target: 'nar_attn_mlp_proj' as Yue2NarTarget,
 
   // ── the loop ──
   lr: 1e-4,
