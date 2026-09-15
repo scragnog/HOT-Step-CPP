@@ -1228,7 +1228,7 @@ export const Yue2ArTrainCard: React.FC<{ datasetId: string; trigger?: string }> 
         <div className={CARD}>
           <JobProgress />
           {yue2ArLive && (
-            <div className="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2">
+            <div className="mt-3 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
               {[
                 { k: 'loss', v: yue2ArLive.loss ? yue2ArLive.loss.toFixed(4) : '—' },
                 { k: 'runMean', v: yue2ArLive.runMean ? yue2ArLive.runMean.toFixed(4) : '—' },
@@ -1240,6 +1240,12 @@ export const Yue2ArTrainCard: React.FC<{ datasetId: string; trigger?: string }> 
                 {
                   k: 'seqLen',
                   v: yue2ArLive.seqLen ? yue2ArLive.seqLen.toLocaleString() : '—',
+                },
+                {
+                  // Seconds, not milliseconds: AR steps run ~5 s, and "5.0 s"
+                  // is the number to compare against the recipe's expectation.
+                  k: 'stepTime',
+                  v: yue2ArLive.stepMs ? `${(yue2ArLive.stepMs / 1000).toFixed(2)} s` : '—',
                 },
                 {
                   k: 'vram',

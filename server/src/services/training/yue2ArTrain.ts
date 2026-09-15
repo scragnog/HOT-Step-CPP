@@ -220,7 +220,11 @@ export const YUE2_AR_DEFAULTS = {
   saveEvery: 50,
   ckptFrom: 50,
   evalEvery: 50,
-  logEvery: 20,
+  /** Every step. A 400-step run at ~5 s/it emits one line every five seconds,
+   *  which is not a flood — and at 20 the step counter in the UI sat still for
+   *  two minutes at a time, which reads as a hung run. The chart wants the
+   *  points too: 20 samples across a run is not a curve. */
+  logEvery: 1,
   /** Which rung the ear picked, and what a picker should preselect. It is a
    *  default, not a verdict on any particular dataset: upstream's instruction
    *  is to pick the checkpoint BY EAR, and the held-out loss does not identify
