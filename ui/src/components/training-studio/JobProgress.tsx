@@ -18,6 +18,9 @@ const PHASE_KEYS: Record<string, string> = {
   genius: 'trainingStudio.job.phaseGenius',
   llm: 'trainingStudio.job.phaseLlm',
   build: 'trainingStudio.job.phaseBuild',
+  // yue2-stems. Without this the raw phase enum is interpolated into the
+  // translated sentence and non-English users read "separating" mid-sentence.
+  separating: 'trainingStudio.job.phaseSeparating',
   // Preprocess phases (§2.7). Without these the raw kebab-case enum is
   // interpolated verbatim into the translated "{{done}}/{{total}} — {{phase}}"
   // sentence, so non-English users read "engine-stop" mid-sentence.
@@ -112,6 +115,12 @@ export const JobProgress: React.FC = () => {
   const active = job.status === 'queued' || job.status === 'running';
   const failedJob = job.status === 'failed';
   const current = job.currentSampleId ? samplesById[job.currentSampleId] : undefined;
+  // Not every job walks dataset ROWS. The YuE2 cache stages walk audio files
+  // straight off disk and report a filename here, which is not a sample id and
+  // so finds nothing in samplesById — leaving the one line that says what is
+  // being worked on blank for exactly the jobs that take longest.
+  const currentLabel = current?.filename ?? (job.currentSampleId || '');
+  const currentTitle = current?.relPath ?? (job.currentSampleId || '');
   const phaseKey = PHASE_KEYS[`${job.kind}:${job.phase}`] ?? PHASE_KEYS[job.phase];
   const phaseLabel = phaseKey ? t(phaseKey) : job.phase;
   const errorLines = jobLog.filter(l => l.level === 'error').slice(-10);
@@ -194,7 +203,7 @@ export const JobProgress: React.FC = () => {
             <Clock size={11} /> {t('trainingStudio.job.waitingEngine', { count: job.engineQueueDepth })}
           </span>
         )}
-        {current && <span className="font-mono truncate max-w-[280px]" title={current.relPath}>{current.filename}</span>}
+        {currentLabel && <span className="font-mono truncate max-w-[280px]" title={currentTitle}>{currentLabel}</span>}
       </div>
 
       {job.error && (

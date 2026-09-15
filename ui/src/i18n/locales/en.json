@@ -179,6 +179,7 @@
     "trainingStudio.job.phaseGenius": "fetching lyrics",
     "trainingStudio.job.phaseLlm": "rewriting captions",
     "trainingStudio.job.phaseBuild": "building",
+    "trainingStudio.job.phaseSeparating": "separating vocals",
     "trainingStudio.job.phaseEngineStop": "freeing VRAM",
     "trainingStudio.job.phaseLoadingModels": "loading models",
     "trainingStudio.job.phasePreprocess": "encoding",

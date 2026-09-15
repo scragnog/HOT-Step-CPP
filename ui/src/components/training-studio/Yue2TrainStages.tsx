@@ -34,6 +34,7 @@ import { useTranslation } from 'react-i18next';
 
 import { listYue2ArRuns, listYue2Runs } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { JobProgress } from './JobProgress';
 import { Yue2StemsCard, Yue2AlignCard, Yue2ArTrainStageCard, Yue2TokenizeCard } from './Yue2ArTrainCard';
 import { Yue2NarTrainCard, Yue2PreprocessCard } from './Yue2TrainCard';
 import { useYue2ArStatus } from './useYue2ArStatus';
@@ -128,6 +129,11 @@ const RunAllControl: React.FC<{
   );
 };
 
+/** The stages whose progress JobProgress should render: the ones that count
+ *  files. The two training kinds are deliberately absent — their `done` counts
+ *  optimizer steps, and they already draw a loss curve and a run-stats row. */
+const CACHE_STAGE_KINDS: string[] = ['yue2-preprocess', 'yue2-stems', 'yue2-tokenize', 'yue2-align'];
+
 export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> = ({ datasetId, trigger }) => {
   const { t } = useTranslation();
   const storeError = useTrainingStore(s => s.error);
@@ -212,6 +218,15 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
       )}
 
       {runAllControl}
+
+      {/* The four cache stages walk a corpus file by file and report done/total
+          as they go, but nothing on this page was rendering it: the two TRAINING
+          stages own live panels of their own (loss curve, run stats), and the
+          cache stages had only a spinner apiece. Separation is the longest
+          stage in the pipeline, so "no visible progress" meant staring at a
+          terminal for a quarter of an hour. The training kinds are excluded
+          here so their own panels stay the single place a run is reported. */}
+      {CACHE_STAGE_KINDS.includes(activeJob?.kind as string) && <JobProgress />}
 
       {yue2Status && <Yue2PreprocessCard status={yue2Status} onDone={reload} />}
       {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
