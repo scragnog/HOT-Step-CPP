@@ -1652,34 +1652,62 @@ enum {
 // shuffle-bucket sampling, and the same trade every dataloader with a shuffle
 // buffer makes.
 //
+// THE SET IS A WINDOW ON A SHUFFLED PERMUTATION, not a fresh random draw.
+// A random set per block gives every clip the same EXPECTED number of visits,
+// which sounds sufficient and is not: the visits are Poisson, so over a
+// 10 000-step run with four clips per 64-step block, exp(-2.5) = 8% of a
+// 249-clip album is never sampled AT ALL (29% at twice the block length).
+// Walking a permutation covers every clip exactly once per pass, so "expected"
+// becomes "guaranteed" and the tail disappears. The permutation is reshuffled
+// each pass, so the order is not the same twice.
+//
 // PURE FUNCTION OF (seed, k), exactly as the uniform draw was, which is what
-// keeps resume exact: the block index is k / block, and the set is drawn from
-// (seed, block index). Nothing accumulates across steps.
+// keeps resume exact: the block index is k / block, the window starts at
+// block * working in the concatenated stream of passes, and each pass's
+// permutation comes from (seed, pass). Nothing accumulates across steps.
+static void yue2_nt_perm(uint64_t seed, uint64_t pass, size_t n,
+                         std::vector<uint32_t> * out) {
+    out->resize(n);
+    for (size_t i = 0; i < n; i++) {
+        (*out)[i] = (uint32_t) i;
+    }
+    // Fisher-Yates, back to front, off this pass's own stream.
+    Yue2NtRng r(yue2_nt_seed_mix(seed, pass, YUE2_NT_TAG_BLOCK));
+    for (size_t i = n; i > 1; i--) {
+        size_t j = (size_t) (r.u01() * (double) i);
+        if (j >= i) {
+            j = i - 1;
+        }
+        std::swap((*out)[i - 1], (*out)[j]);
+    }
+}
+
 static void yue2_nt_block_set(uint64_t seed, uint64_t block_idx, size_t n_clips,
                               size_t working, std::vector<uint32_t> * out) {
     out->clear();
     if (working > n_clips) {
         working = n_clips;
     }
-    // Rejection sampling for distinctness. `working` is a handful against a
-    // corpus of hundreds, so collisions are rare; the loop is bounded anyway
-    // because a draw that cannot find a new index would mean working > n_clips,
-    // which is clamped above.
-    Yue2NtRng r(yue2_nt_seed_mix(seed, block_idx, YUE2_NT_TAG_BLOCK));
-    while (out->size() < working) {
-        size_t c = (size_t) (r.u01() * (double) n_clips);
-        if (c >= n_clips) {
-            c = n_clips - 1;
+    // A window of `working` entries starting at `block * working`, over passes
+    // laid end to end. A window that straddles a pass boundary takes the tail
+    // of one permutation and the head of the next, which is why the pass is
+    // recomputed per entry rather than once.
+    std::vector<uint32_t> perm;
+    uint64_t              have_pass = UINT64_MAX;
+    const uint64_t        first     = block_idx * (uint64_t) working;
+    for (uint64_t j = 0; j < (uint64_t) working; j++) {
+        const uint64_t i    = first + j;
+        const uint64_t pass = i / (uint64_t) n_clips;
+        if (pass != have_pass) {
+            yue2_nt_perm(seed, pass, n_clips, &perm);
+            have_pass = pass;
         }
-        bool dup = false;
-        for (size_t i = 0; i < out->size(); i++) {
-            if ((*out)[i] == (uint32_t) c) {
-                dup = true;
-                break;
-            }
-        }
-        if (!dup) {
-            out->push_back((uint32_t) c);
+        const uint32_t c = perm[(size_t) (i % (uint64_t) n_clips)];
+        // A straddling window can repeat a clip across the boundary. Two
+        // entries for one clip is one cache canvas, so it costs nothing but a
+        // slightly smaller set for that one block.
+        if (std::find(out->begin(), out->end(), c) == out->end()) {
+            out->push_back(c);
         }
     }
 }
