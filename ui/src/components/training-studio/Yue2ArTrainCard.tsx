@@ -342,8 +342,16 @@ export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
           + 'alignment costs seconds, and because it is worth doing once: a stem already on disk is skipped.')}
       </p>
 
+      {/* The count comes from the status fetch, which does not re-read while a
+          job runs — so mid-separation it says "2 of 12" under a live bar
+          reading 7/12. Two numbers for one thing, one of them stale. The bar
+          wins while it is on screen. */}
       <div className="text-[11px] text-zinc-600 dark:text-zinc-300 mb-3">
-        {ready > 0 ? (
+        {mine && activeJob ? (
+          <span className="text-zinc-500">
+            {t('trainingStudio.yue2ar.stemsLive', 'Separating now — the count below is live.')}
+          </span>
+        ) : ready > 0 ? (
           <span className={complete ? 'text-emerald-500' : 'text-amber-500'}>
             {t('trainingStudio.yue2ar.stemsHave', '{{ready}} of {{needed}} song(s) separated.',
               { ready, needed: needed || ready })}
@@ -412,11 +420,10 @@ export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
         )}
       </div>
 
-      {mine && jobRunning && (
-        <p className="text-[11px] text-amber-500 mt-2 flex items-center gap-1.5">
-          <Loader2 size={11} className="animate-spin" />
-          {t('trainingStudio.yue2ar.stemsRunning', 'Separating\u2026 this is the slow one, minutes a track.')}
-        </p>
+      {mine && activeJob && (
+        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
+          <JobProgress />
+        </div>
       )}
     </div>
   );

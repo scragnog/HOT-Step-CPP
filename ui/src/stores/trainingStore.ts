@@ -1265,6 +1265,13 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         set({
           activeJob: {
             ...job,
+            // A job that is reporting per-item progress is running, whatever
+            // the last status we were told was. adoptJob reads the status once,
+            // at start, and a job that was still queued at that instant stays
+            // labelled "Queued..." for its whole life if the 'job' event that
+            // would have corrected it was missed — which is how a separation
+            // sat there saying Queued at 7 of 12 tracks.
+            status: job.status === 'queued' ? 'running' : job.status,
             done: ev.done,
             total: ev.total,
             failed: ev.failed,
