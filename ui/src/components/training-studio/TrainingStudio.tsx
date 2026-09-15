@@ -19,6 +19,7 @@ import { MonitorPanel } from './MonitorPanel';
 import { PhaseStepper } from './PhaseStepper';
 import { PreprocessPanel } from './PreprocessPanel';
 import { TrainPanel } from './TrainPanel';
+import { Yue2QueuePanel } from './Yue2QueuePanel';
 
 export const TrainingStudio: React.FC = () => {
   const { t } = useTranslation();
@@ -97,6 +98,12 @@ export const TrainingStudio: React.FC = () => {
 
         <CapabilityBanner />
         <PhaseStepper />
+
+        {/* Above the phase content, not inside it: the bulk queue is started
+            from the dataset grid, runs datasets that are never opened, and
+            must stay visible wherever the user wanders while it works. Renders
+            nothing until a queue has been started this session. */}
+        <Yue2QueuePanel />
 
         {fatalError ? (
           <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-5 flex flex-col items-start gap-3">

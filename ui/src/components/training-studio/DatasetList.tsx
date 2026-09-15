@@ -4,13 +4,16 @@
 // centred card explaining what the Dataset phase does.
 
 import React, { useState } from 'react';
-import { Database, Disc3, FolderOpen, FolderPlus, GraduationCap, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Database, Disc3, FolderOpen, FolderPlus, GraduationCap, ListChecks, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { BatchImportWizard } from './BatchImportWizard';
 import { DatasetAssetChips } from './DatasetAssetChips';
 import { NewDatasetWizard } from './NewDatasetWizard';
+import { Yue2BatchTrainWizard } from './Yue2BatchTrainWizard';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 
@@ -36,8 +39,17 @@ export const DatasetList: React.FC = () => {
   const openDataset = useTrainingStore(s => s.openDataset);
   const deleteDataset = useTrainingStore(s => s.deleteDataset);
 
+  // "Train multiple…" is YuE2's own chain — the six stages, the two LoRA
+  // halves — and there is no equivalent for ACE (whose bulk path is the
+  // server-side pipeline behind "Import multiple…") or MM3. So the button
+  // appears only when YuE2 is the active backend rather than opening a modal
+  // that could not queue anything.
+  const activeBackendId = useBackendStore(s => s.activeBackendId);
+  const isYue2 = activeBackendId === YUE2_BACKEND_ID;
+
   const [wizardOpen, setWizardOpen] = useState(false);
   const [batchWizardOpen, setBatchWizardOpen] = useState(false);
+  const [yue2BatchOpen, setYue2BatchOpen] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const confirmTarget = datasets.find(d => d.id === confirmId) || null;
 
@@ -82,6 +94,16 @@ export const DatasetList: React.FC = () => {
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-bold text-zinc-900 dark:text-white">{t('trainingStudio.list.title')}</h2>
         <div className="flex items-center gap-2">
+          {isYue2 && (
+            <button
+              onClick={() => setYue2BatchOpen(true)}
+              title={t('trainingStudio.yue2.batch.ctaHint',
+                'Queue the six-stage YuE2 chain over several of these datasets, one after another.') as string}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+            >
+              <ListChecks size={14} /> {t('trainingStudio.yue2.batch.cta', 'Train multiple…')}
+            </button>
+          )}
           <button
             onClick={() => setBatchWizardOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
@@ -162,6 +184,7 @@ export const DatasetList: React.FC = () => {
 
       <NewDatasetWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
       <BatchImportWizard open={batchWizardOpen} onClose={() => setBatchWizardOpen(false)} />
+      <Yue2BatchTrainWizard open={yue2BatchOpen} onClose={() => setYue2BatchOpen(false)} />
 
       <ConfirmDialog
         isOpen={!!confirmTarget}

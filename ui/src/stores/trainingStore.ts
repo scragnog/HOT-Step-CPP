@@ -42,6 +42,39 @@ import type {
  *  URL needs, and it lives on the event rather than on the preview. */
 export type TrainingPreviewRow = TrainingPreview & { run: string };
 
+/** The six YuE2 stages, in the fixed order the chain runs them. Index + 1 is
+ *  the stage NUMBER the UI shows and `yue2RunAllStage` carries. */
+export const YUE2_STAGES = ['latents', 'codes', 'stems', 'align', 'nar', 'ar'] as const;
+export type Yue2StageKey = typeof YUE2_STAGES[number];
+/** Which stages a run is allowed to perform. A stage that is off is not
+ *  merely skipped when already done — it is never started, even if its output
+ *  is missing, which is what makes "just re-train the AR half" expressible.
+ *  The chain does NOT reorder or infer dependencies: unticking a stage a later
+ *  one needs is a real way to make that later stage fail, and the wizard says
+ *  so rather than silently ticking it back on. */
+export type Yue2StageSet = Record<Yue2StageKey, boolean>;
+export const YUE2_ALL_STAGES: Yue2StageSet =
+  { latents: true, codes: true, stems: true, align: true, nar: true, ar: true };
+
+export type Yue2QueueStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+
+/** One dataset's slot in the bulk YuE2 training queue. */
+export interface Yue2QueueItem {
+  datasetId: string;
+  /** Snapshotted at queue time so the row still names itself after the
+   *  dataset list refreshes mid-run. */
+  name: string;
+  /** The dataset's own trigger word (customTag), '' for none. Per dataset,
+   *  never one trigger for the whole queue — a queue of six albums is six
+   *  different artists. */
+  trigger: string;
+  status: Yue2QueueStatus;
+  /** 1-6 while this item is running, null otherwise. */
+  stage: number | null;
+  /** The failing stage's own message; '' unless status is 'failed'. */
+  error: string;
+}
+
 const JOB_LOG_CAP = 200;
 const EDIT_DEBOUNCE_MS = 500;
 /** Points kept for the chart's per-step layer. A 500-song LM run emits ~25 000
@@ -186,6 +219,22 @@ interface TrainingState {
   /** Which of the five YuE2 stages (1-5) the chain is currently on or waiting
    *  to finish. Null when the chain isn't running. */
   yue2RunAllStage: number | null;
+  /** The bulk queue: one row per dataset the user ticked, in run order. Kept
+   *  after the queue finishes so the outcome is still readable — clearing it
+   *  is an explicit act (`clearYue2Queue`). Empty means "never run this
+   *  session", which is what hides the progress panel. */
+  yue2Queue: Yue2QueueItem[];
+  /** True from the first dataset starting until the last one stops. Drives the
+   *  same button-disabling as `yue2RunAllActive`, which the queue also sets. */
+  yue2QueueActive: boolean;
+  /** Index into `yue2Queue` of the dataset being trained; -1 when idle. */
+  yue2QueueIndex: number;
+  /** Set by "Stop after this dataset" — the queue finishes the dataset it is
+   *  on and marks the rest cancelled. There is deliberately no mid-job kill
+   *  here: cancelling the RUNNING job is the job card's own Cancel button. */
+  yue2QueueStopping: boolean;
+  /** Which stages the running (or last) queue was told to perform. */
+  yue2QueueStages: Yue2StageSet;
 
   // preprocess
   preprocessStatus: PreprocessStatus | null;
@@ -361,7 +410,22 @@ interface TrainingState {
    *  batch-import orchestrator hardcoded to a different stage union: this
    *  chain survives SPA navigation (it is Zustand state) but not a hard
    *  reload (nothing here is persisted). */
-  runYue2AllStages(datasetId: string, trigger: string): Promise<void>;
+  runYue2AllStages(datasetId: string, trigger: string, stages?: Yue2StageSet): Promise<void>;
+  /** The same chain, run over SEVERAL datasets back to back. One dataset at a
+   *  time, strictly sequential — the engine holds one GPU and the server runs
+   *  one training job at a time, so a parallel queue would only mean two jobs
+   *  fighting over the same VRAM. A dataset that fails does NOT stop the
+   *  queue: its row is marked failed with the stage's own message and the next
+   *  dataset starts, because the common failure (one album with no lyrics) has
+   *  nothing to do with the five albums queued behind it. */
+  runYue2Queue(
+    items: Array<{ datasetId: string; name: string; trigger: string }>,
+    stages: Yue2StageSet,
+  ): Promise<void>;
+  /** Finish the dataset in flight, then stop and mark the rest cancelled. */
+  stopYue2Queue(): void;
+  /** Drop the finished queue's rows, hiding the progress panel. */
+  clearYue2Queue(): void;
   loadTrainDitStatus(q?: { variantKey?: string; adapterName?: string }): Promise<void>;
   startTrainDit(opts: TrainDitOptions): Promise<void>;
   loadAuditions(): Promise<void>;
@@ -405,6 +469,11 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   jobLog: [],
   yue2RunAllActive: false,
   yue2RunAllStage: null,
+  yue2Queue: [],
+  yue2QueueActive: false,
+  yue2QueueIndex: -1,
+  yue2QueueStopping: false,
+  yue2QueueStages: { ...YUE2_ALL_STAGES },
 
   preprocessStatus: null,
   preprocessLoading: false,
@@ -977,7 +1046,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }
   },
 
-  runYue2AllStages: async (datasetId, trigger) => {
+  runYue2AllStages: async (datasetId, trigger, stages) => {
     if (get().yue2RunAllActive) return;
     const running = get().activeJob;
     if (running && (running.status === 'queued' || running.status === 'running')) {
@@ -986,99 +1055,93 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }
     set({ yue2RunAllActive: true, yue2RunAllStage: null, error: null });
     try {
-      // Stage 1: latent cache.
-      //
-      // captionMode 'ace', not the server default of 'none'. The default is
-      // right for a NAR-only run — the clip carries no caption and the style is
-      // the trigger alone — but this chain goes on to train the AR half, and
-      // there the caption IS the prefix and the aligner reads the manifest's
-      // lyrics. A cache built with 'none' carries neither, so cursor spans skip
-      // every source for having no lyrics and AR training exports something
-      // generic with nothing saying why.
-      //
-      // And re-encode when an EXISTING cache was built that way, rather than
-      // skipping the stage because latents are present: a cache the later
-      // stages cannot read is not a stage that is done.
-      set({ yue2RunAllStage: 1 });
-      let arStatus = await trainingApi.getYue2ArStatus(datasetId);
-      if (!arStatus.stages.preprocess.done || arStatus.stages.preprocess.captionModeOk === false) {
-        const job = await startYue2JobAndAwait(set, get, {},
-          () => trainingApi.startYue2Preprocess(datasetId, { captionMode: 'ace' }));
-        if (job.status !== 'done') { set({ error: yue2StageFailure('Latent cache', job) }); return; }
-      }
+      const result = await runYue2StageChain(
+        set, get, datasetId, trigger, stages ?? YUE2_ALL_STAGES,
+        n => set({ yue2RunAllStage: n }),
+      );
+      if (!result.ok) set({ error: result.error });
+    } finally {
+      set({ yue2RunAllActive: false, yue2RunAllStage: null });
+    }
+  },
 
-      // Stage 2: codes.
-      set({ yue2RunAllStage: 2 });
-      arStatus = await trainingApi.getYue2ArStatus(datasetId);
-      if (!arStatus.stages.tokenize.done) {
-        const job = await startYue2JobAndAwait(set, get, {},
-          () => trainingApi.startYue2Tokenize(datasetId, {}));
-        if (job.status !== 'done') { set({ error: yue2StageFailure('Codes', job) }); return; }
-      }
+  runYue2Queue: async (items, stages) => {
+    if (get().yue2QueueActive || get().yue2RunAllActive) return;
+    const running = get().activeJob;
+    if (running && (running.status === 'queued' || running.status === 'running')) {
+      set({ error: 'A training job is already running — wait for it to finish first.' });
+      return;
+    }
+    if (items.length === 0) return;
 
-      // Stage 3: vocal stems.
-      //
-      // Not one of the stages anyone asks for, and the reason it is here is
-      // that the aligner does NOT produce its own input: it reads
-      // <source>/vocals.wav per song and SKIPS a source whose stem is missing,
-      // silently, exiting 0 having aligned nothing. With no stems at all,
-      // cursor spans is not merely blocked, it is a stage that would report
-      // success and leave the corpus untouched.
-      set({ yue2RunAllStage: 3 });
-      arStatus = await trainingApi.getYue2ArStatus(datasetId);
-      if (arStatus.stages.align.stemsReady <= 0) {
-        const job = await startYue2JobAndAwait(set, get, {},
-          () => trainingApi.startYue2Stems(datasetId, {}));
-        if (job.status !== 'done') { set({ error: yue2StageFailure('Vocal stems', job) }); return; }
-      }
+    const queue: Yue2QueueItem[] = items.map(it => ({
+      datasetId: it.datasetId,
+      name: it.name,
+      trigger: it.trigger,
+      status: 'pending',
+      stage: null,
+      error: '',
+    }));
+    // yue2RunAllActive rides along so every per-stage Start button in
+    // Yue2TrainStages is disabled for the whole queue, not just for the
+    // dataset currently open — a queue is running, nothing else may start.
+    set({
+      yue2Queue: queue, yue2QueueActive: true, yue2QueueIndex: -1,
+      yue2QueueStopping: false, yue2QueueStages: { ...stages },
+      yue2RunAllActive: true, yue2RunAllStage: null, error: null,
+    });
 
-      // Stage 4: lyric cursor spans.
-      set({ yue2RunAllStage: 4 });
-      arStatus = await trainingApi.getYue2ArStatus(datasetId);
-      if (!arStatus.stages.align.done) {
-        const job = await startYue2JobAndAwait(set, get, {},
-          () => trainingApi.startYue2Align(datasetId, {}));
-        if (job.status !== 'done') { set({ error: yue2StageFailure('Lyric cursor spans', job) }); return; }
-      }
+    /** Patch one row without disturbing the others — the array is replaced on
+     *  every write so React sees a new reference. */
+    const patch = (i: number, fields: Partial<Yue2QueueItem>): void => {
+      set({ yue2Queue: get().yue2Queue.map((row, idx) => (idx === i ? { ...row, ...fields } : row)) });
+    };
 
-      // Stage 5: NAR LoRA training. "Already complete" means the NEWEST run for
-      // this dataset finished cleanly — an owner decision, not a technical one:
-      // a halted or failed run does not count, and this never resumes one, it
-      // starts fresh exactly like the button does.
-      set({ yue2RunAllStage: 5 });
-      const narRuns = await trainingApi.listYue2Runs(datasetId);
-      if (narRuns.runs[0]?.outcome !== 'completed') {
-        const body: trainingApi.Yue2TrainRequest = trigger.trim()
-          ? { trigger: trigger.trim() } : { allowNoTrigger: true };
-        const job = await startYue2JobAndAwait(
-          set, get,
-          { ...blankTrainSeries(), trainMaxEpochs: 0, trainTargetLoss: 0, yue2Live: null },
-          () => trainingApi.startYue2Train(datasetId, body),
+    try {
+      for (let i = 0; i < queue.length; i++) {
+        if (get().yue2QueueStopping) {
+          // Everything from here on was never started.
+          set({
+            yue2Queue: get().yue2Queue.map((row, idx) =>
+              (idx >= i && row.status === 'pending' ? { ...row, status: 'cancelled' as const } : row)),
+          });
+          break;
+        }
+        const item = queue[i];
+        set({ yue2QueueIndex: i });
+        patch(i, { status: 'running', stage: null, error: '' });
+
+        const result = await runYue2StageChain(
+          set, get, item.datasetId, item.trigger, stages,
+          n => { patch(i, { stage: n }); set({ yue2RunAllStage: n }); },
         );
-        if (job.status !== 'done') { set({ error: yue2StageFailure('NAR LoRA training', job) }); return; }
-      }
 
-      // Stage 6: AR LoRA training. Same "newest run completed" rule as stage 4.
-      set({ yue2RunAllStage: 6 });
-      arStatus = await trainingApi.getYue2ArStatus(datasetId);
-      const arRuns = await trainingApi.listYue2ArRuns(datasetId);
-      if (arRuns.runs[0]?.outcome !== 'completed') {
-        const body: trainingApi.Yue2ArTrainRequest = {
-          ...(trigger.trim() ? { trigger: trigger.trim() } : { allowNoTrigger: true }),
-          ...(arStatus.minted.present ? {} : { allowNoMinted: true }),
-        };
-        const job = await startYue2JobAndAwait(
-          set, get,
-          { ...blankTrainSeries(), trainMaxEpochs: 0, trainTargetLoss: 0, yue2ArLive: null, yue2ArEvalSeries: [] },
-          () => trainingApi.startYue2ArTrain(datasetId, body),
-        );
-        if (job.status !== 'done') { set({ error: yue2StageFailure('AR LoRA training', job) }); return; }
+        patch(i, result.ok
+          ? { status: 'done', stage: null, error: '' }
+          : { status: 'failed', stage: null, error: result.error ?? 'Failed.' });
+
+        // The dataset list carries the asset chips this queue just changed,
+        // and refreshAfterJob only refreshes when a dataset is OPEN — from the
+        // dataset grid nothing would have re-read them.
+        void get().loadDatasets();
       }
     } catch (err) {
       set({ error: errMessage(err) });
     } finally {
-      set({ yue2RunAllActive: false, yue2RunAllStage: null });
+      set({
+        yue2QueueActive: false, yue2QueueIndex: -1, yue2QueueStopping: false,
+        yue2RunAllActive: false, yue2RunAllStage: null,
+      });
     }
+  },
+
+  stopYue2Queue: () => {
+    if (get().yue2QueueActive) set({ yue2QueueStopping: true });
+  },
+
+  clearYue2Queue: () => {
+    if (get().yue2QueueActive) return;
+    set({ yue2Queue: [], yue2QueueIndex: -1, yue2QueueStopping: false });
   },
 
   startTrainLm: async (opts) => {
@@ -1698,6 +1761,141 @@ async function startYue2JobAndAwait(
 function yue2StageFailure(label: string, job: TrainingJobSummary): string {
   const what = job.status === 'cancelled' ? 'was cancelled' : 'failed';
   return `${label} ${what}${job.error ? `: ${job.error}` : '.'}`;
+}
+
+/**
+ * The YuE2 six-stage chain for ONE dataset: 1 latent cache, 2 codes, 3 vocal
+ * stems, 4 lyric cursor spans, 5 NAR LoRA training, 6 AR LoRA training, in
+ * that order, skipping anything already complete and anything `stages` turns
+ * off. Stops at the first stage that doesn't end in 'done'.
+ *
+ * Module-level rather than a store action because BOTH callers need it and
+ * they report differently: `runYue2AllStages` puts the failure on the store's
+ * one `error` banner, while `runYue2Queue` puts it on that dataset's queue row
+ * and carries on to the next album. So this returns the outcome instead of
+ * writing it anywhere, and takes `onStage` instead of touching
+ * `yue2RunAllStage` itself.
+ *
+ * `datasetId` is threaded through every call — nothing here reads
+ * `selectedDatasetId`, which is what lets the queue train datasets the user
+ * never opened.
+ */
+async function runYue2StageChain(
+  set: (partial: Partial<TrainingState>) => void,
+  get: () => TrainingState,
+  datasetId: string,
+  trigger: string,
+  stages: Yue2StageSet,
+  onStage: (stage: number | null) => void,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    // Stage 1: latent cache.
+    //
+    // captionMode 'ace', not the server default of 'none'. The default is
+    // right for a NAR-only run — the clip carries no caption and the style is
+    // the trigger alone — but this chain goes on to train the AR half, and
+    // there the caption IS the prefix and the aligner reads the manifest's
+    // lyrics. A cache built with 'none' carries neither, so cursor spans skip
+    // every source for having no lyrics and AR training exports something
+    // generic with nothing saying why.
+    //
+    // And re-encode when an EXISTING cache was built that way, rather than
+    // skipping the stage because latents are present: a cache the later
+    // stages cannot read is not a stage that is done.
+    if (stages.latents) {
+      onStage(1);
+      const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (!arStatus.stages.preprocess.done || arStatus.stages.preprocess.captionModeOk === false) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Preprocess(datasetId, { captionMode: 'ace' }));
+        if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Latent cache', job) };
+      }
+    }
+
+    // Stage 2: codes.
+    if (stages.codes) {
+      onStage(2);
+      const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (!arStatus.stages.tokenize.done) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Tokenize(datasetId, {}));
+        if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Codes', job) };
+      }
+    }
+
+    // Stage 3: vocal stems.
+    //
+    // Not one of the stages anyone asks for, and the reason it is here is
+    // that the aligner does NOT produce its own input: it reads
+    // <source>/vocals.wav per song and SKIPS a source whose stem is missing,
+    // silently, exiting 0 having aligned nothing. With no stems at all,
+    // cursor spans is not merely blocked, it is a stage that would report
+    // success and leave the corpus untouched.
+    if (stages.stems) {
+      onStage(3);
+      const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (arStatus.stages.align.stemsReady <= 0) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Stems(datasetId, {}));
+        if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Vocal stems', job) };
+      }
+    }
+
+    // Stage 4: lyric cursor spans.
+    if (stages.align) {
+      onStage(4);
+      const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (!arStatus.stages.align.done) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Align(datasetId, {}));
+        if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Lyric cursor spans', job) };
+      }
+    }
+
+    // Stage 5: NAR LoRA training. "Already complete" means the NEWEST run for
+    // this dataset finished cleanly — an owner decision, not a technical one:
+    // a halted or failed run does not count, and this never resumes one, it
+    // starts fresh exactly like the button does.
+    if (stages.nar) {
+      onStage(5);
+      const narRuns = await trainingApi.listYue2Runs(datasetId);
+      if (narRuns.runs[0]?.outcome !== 'completed') {
+        const body: trainingApi.Yue2TrainRequest = trigger.trim()
+          ? { trigger: trigger.trim() } : { allowNoTrigger: true };
+        const job = await startYue2JobAndAwait(
+          set, get,
+          { ...blankTrainSeries(), trainMaxEpochs: 0, trainTargetLoss: 0, yue2Live: null },
+          () => trainingApi.startYue2Train(datasetId, body),
+        );
+        if (job.status !== 'done') return { ok: false, error: yue2StageFailure('NAR LoRA training', job) };
+      }
+    }
+
+    // Stage 6: AR LoRA training. Same "newest run completed" rule as stage 5.
+    if (stages.ar) {
+      onStage(6);
+      const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      const arRuns = await trainingApi.listYue2ArRuns(datasetId);
+      if (arRuns.runs[0]?.outcome !== 'completed') {
+        const body: trainingApi.Yue2ArTrainRequest = {
+          ...(trigger.trim() ? { trigger: trigger.trim() } : { allowNoTrigger: true }),
+          ...(arStatus.minted.present ? {} : { allowNoMinted: true }),
+        };
+        const job = await startYue2JobAndAwait(
+          set, get,
+          { ...blankTrainSeries(), trainMaxEpochs: 0, trainTargetLoss: 0, yue2ArLive: null, yue2ArEvalSeries: [] },
+          () => trainingApi.startYue2ArTrain(datasetId, body),
+        );
+        if (job.status !== 'done') return { ok: false, error: yue2StageFailure('AR LoRA training', job) };
+      }
+    }
+
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errMessage(err) };
+  } finally {
+    onStage(null);
+  }
 }
 
 /**

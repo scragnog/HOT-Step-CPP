@@ -36,6 +36,7 @@ import { useTranslation } from 'react-i18next';
 import { listYue2ArRuns, listYue2Runs } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Yue2StemsCard, Yue2AlignCard, Yue2ArTrainStageCard, Yue2TokenizeCard } from './Yue2ArTrainCard';
+import { Yue2BatchTrainWizard } from './Yue2BatchTrainWizard';
 import { Yue2NarTrainCard, Yue2PreprocessCard } from './Yue2TrainCard';
 import { useYue2ArStatus } from './useYue2ArStatus';
 import { useYue2Status } from './useYue2Status';
@@ -77,7 +78,8 @@ const RunAllControl: React.FC<{
   jobBusyElsewhere: boolean;
   runAllActive: boolean;
   runAllStage: number | null;
-}> = ({ datasetId, trigger, skipLabels, disabled, jobBusyElsewhere, runAllActive, runAllStage }) => {
+  onQueueMultiple: () => void;
+}> = ({ datasetId, trigger, skipLabels, disabled, jobBusyElsewhere, runAllActive, runAllStage, onQueueMultiple }) => {
   const { t } = useTranslation();
   const runYue2AllStages = useTrainingStore(s => s.runYue2AllStages);
 
@@ -125,6 +127,15 @@ const RunAllControl: React.FC<{
             'A stage is already running from its own Start button — wait for it to finish.')}
         </p>
       )}
+      {/* The same chain over SEVERAL datasets. Offered here as well as on the
+          dataset grid because this page is where someone stands when they
+          realise they have five more albums to get through. */}
+      <button
+        onClick={onQueueMultiple}
+        className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline"
+      >
+        <ListChecks size={12} /> {t('trainingStudio.yue2.batch.ctaInline', 'Queue several datasets…')}
+      </button>
     </div>
   );
 };
@@ -144,6 +155,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
   // awareness of its own, so it rides this one nonce instead of duplicating
   // that logic a third time.
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [batchOpen, setBatchOpen] = useState(false);
   const reload = () => { reloadYue2Status(); reloadArStatus(); setReloadNonce(n => n + 1); };
 
   const jobStatus = activeJob?.status;
@@ -184,6 +196,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
       jobBusyElsewhere={jobBusy}
       runAllActive={yue2RunAllActive}
       runAllStage={yue2RunAllStage}
+      onQueueMultiple={() => setBatchOpen(true)}
     />
   );
 
@@ -222,6 +235,8 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
       <Yue2ArTrainStageCard datasetId={datasetId} trigger={trigger} status={arStatus} reload={reload} />
 
       {runAllControl}
+
+      <Yue2BatchTrainWizard open={batchOpen} onClose={() => setBatchOpen(false)} />
     </div>
   );
 };
