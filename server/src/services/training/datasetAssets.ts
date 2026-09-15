@@ -23,12 +23,17 @@ import { latestRunDir, lmSizeFromSlug } from './adapterLayout.js';
 import { scanAudioFiles } from './datasetScan.js';
 import * as repo from './datasetsRepo.js';
 import { readAllLabels } from './labelStore.js';
+import { findMm3LmAdapter, findMm3LmAdaptersFor } from './mm3Runs.js';
+import { mm3CodesDir } from './mm3Train.js';
 import { countPreprocessedVariants } from './preprocessStatus.js';
 import { readTrainDitStatus } from './trainDitStatus.js';
 import { adapterLmRoot, lmArtistDirFor, safeAdapterName } from './trainLmStatus.js';
 import type {
   DatasetAssets, LmSize, TrainingAdapterHit, TrainingDatasetRow, TrainingSample,
 } from './types.js';
+import { findYue2ArAdapter, findYue2ArAdaptersFor } from './yue2ArRuns.js';
+import { findYue2NarAdapter, findYue2NarAdaptersFor } from './yue2Runs.js';
+import { yue2PreprocessManifest } from './yue2Train.js';
 
 // ── Trained-adapter lookup ───────────────────────────────────────────────
 //
@@ -89,6 +94,62 @@ function ditHitFrom(status: ReturnType<typeof readTrainDitStatus>): TrainingAdap
   };
 }
 
+// ── MM3 / YuE2 cheap stage reads ─────────────────────────────────────────
+//
+// Both blocks below are computed unconditionally on every row (GET /datasets
+// has no backend query param), so each read has to stay as cheap as the ACE
+// reads above — no readLog, no dirSize, no per-checkpoint header parse. The
+// expensive run listers (listMm3Runs/listYue2Runs/listYue2ArRuns) are never
+// called from here; findMm3LmAdapter(sFor)/findYue2NarAdapter(sFor)/
+// findYue2ArAdapter(sFor) are the cheap analogues built for this file.
+
+/** MM3's codes cache count — one readdir of `<dataset>/mm3-codes/codes`.
+ *  Mirrors the pattern GET /datasets/:id/mm3 uses (routes/training.ts). */
+function readMm3CodesCount(slug: string): number {
+  try {
+    const inner = path.join(mm3CodesDir(slug), 'codes');
+    return fs.readdirSync(inner).filter(f => f.endsWith('.codes')).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** The three YuE2 preprocess-stage flags, off ONE read of the dataset's
+ *  yue2_preprocess.json. readYue2PreprocessSummary/readYue2CodecIdsStatus/
+ *  readYue2CursorWordsStatus (yue2Train.ts/yue2Tokenize.ts/yue2Align.ts) each
+ *  reopen and reparse that same file — fine for a single status poll, not for
+ *  a per-row list loop, so this reads and parses it once and derives all
+ *  three. Never throws: no manifest yet just means nothing is ready. */
+function readYue2StageFlags(slug: string): {
+  latentsReady: boolean; clips: number; codesReady: boolean; cursorReady: boolean;
+} {
+  const empty = { latentsReady: false, clips: 0, codesReady: false, cursorReady: false };
+  let j: Record<string, unknown>;
+  try {
+    j = JSON.parse(fs.readFileSync(yue2PreprocessManifest(slug), 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return empty;
+  }
+  const nClips = Number(j.n_clips);
+  const sources = Array.isArray(j.sources) ? j.sources as Array<Record<string, unknown>> : [];
+  return {
+    latentsReady: Number.isFinite(nClips) && nClips > 0,
+    clips: Number.isFinite(nClips) ? nClips : 0,
+    codesReady: j.codec_ids_present === true,
+    cursorReady: sources.some(s => typeof s.cursor_words === 'string' && s.cursor_words !== ''),
+  };
+}
+
+function safeMm3Adapter(ds: TrainingDatasetRow): TrainingAdapterHit | null {
+  try { return findMm3LmAdapter(ds); } catch { return null; }
+}
+function safeYue2NarAdapter(ds: TrainingDatasetRow): TrainingAdapterHit | null {
+  try { return findYue2NarAdapter(ds); } catch { return null; }
+}
+function safeYue2ArAdapter(ds: TrainingDatasetRow): TrainingAdapterHit | null {
+  try { return findYue2ArAdapter(ds); } catch { return null; }
+}
+
 // ── Assets ───────────────────────────────────────────────────────────────
 
 /**
@@ -99,8 +160,20 @@ function ditHitFrom(status: ReturnType<typeof readTrainDitStatus>): TrainingAdap
  * `labeled` comes off the row's cached counter, not a fresh scan — the list
  * already shows that counter, and re-scanning N source folders to confirm it
  * would cost far more than the flag is worth.
+ *
+ * `precomputed` lets listDatasetsWithAssets() hand in the MM3/YuE2 adapter
+ * hits it already found in one pass over each adapter root, instead of this
+ * function re-scanning that root per row. Omit it (as datasetDetail.ts does,
+ * for one dataset) and it does the single-dataset lookup itself.
  */
-export function readDatasetAssets(ds: TrainingDatasetRow): DatasetAssets {
+export function readDatasetAssets(
+  ds: TrainingDatasetRow,
+  precomputed?: {
+    mm3Adapter: TrainingAdapterHit | null;
+    yue2NarAdapter: TrainingAdapterHit | null;
+    yue2ArAdapter: TrainingAdapterHit | null;
+  },
+): DatasetAssets {
   const assets: DatasetAssets = {
     labeled: ds.labeledCount > 0,
     built: ds.status === 'built' || !!ds.builtAt,
@@ -110,6 +183,8 @@ export function readDatasetAssets(ds: TrainingDatasetRow): DatasetAssets {
     ditBase: '',
     lm: null,
     dit: null,
+    mm3: { codesReady: false, codesCount: 0, lmAdapter: null },
+    yue2: { latentsReady: false, clips: 0, codesReady: false, cursorReady: false, narAdapter: null, arAdapter: null },
   };
 
   // A row that says 'built' but whose dataset.json has since been deleted is
@@ -129,6 +204,20 @@ export function readDatasetAssets(ds: TrainingDatasetRow): DatasetAssets {
   } catch { /* stays null/0 */ }
 
   try { assets.lm = findLmAdapter(ds); } catch { /* stays null */ }
+
+  const mm3CodesCount = readMm3CodesCount(ds.slug);
+  assets.mm3 = {
+    codesReady: mm3CodesCount > 0,
+    codesCount: mm3CodesCount,
+    lmAdapter: precomputed ? precomputed.mm3Adapter : safeMm3Adapter(ds),
+  };
+
+  const yue2Flags = readYue2StageFlags(ds.slug);
+  assets.yue2 = {
+    ...yue2Flags,
+    narAdapter: precomputed ? precomputed.yue2NarAdapter : safeYue2NarAdapter(ds),
+    arAdapter: precomputed ? precomputed.yue2ArAdapter : safeYue2ArAdapter(ds),
+  };
 
   return assets;
 }
@@ -245,6 +334,14 @@ export async function listDatasetsWithAssets(): Promise<TrainingDatasetRow[]> {
   const deadline = Date.now() + ALBUM_BUDGET_MS;
   const deferred: TrainingDatasetRow[] = [];
 
+  // One pass over each adapter root for the whole list, not one per row —
+  // see the finders' own headers (mm3Runs.ts/yue2Runs.ts/yue2ArRuns.ts) for
+  // why readMm3Run/readYue2Run/readYue2ArRun must never be called per row.
+  const idsAndSlugs = rows.map(r => ({ id: r.id, slug: r.slug }));
+  const mm3Adapters = findMm3LmAdaptersFor(idsAndSlugs);
+  const yue2NarAdapters = findYue2NarAdaptersFor(idsAndSlugs);
+  const yue2ArAdapters = findYue2ArAdaptersFor(idsAndSlugs);
+
   for (const ds of rows) {
     if (!ds.albumName.trim() && !probed.has(ds.id)) {
       if (Date.now() < deadline) {
@@ -253,7 +350,11 @@ export async function listDatasetsWithAssets(): Promise<TrainingDatasetRow[]> {
         deferred.push(ds);
       }
     }
-    ds.assets = readDatasetAssets(ds);
+    ds.assets = readDatasetAssets(ds, {
+      mm3Adapter: mm3Adapters.get(ds.id) ?? null,
+      yue2NarAdapter: yue2NarAdapters.get(ds.id) ?? null,
+      yue2ArAdapter: yue2ArAdapters.get(ds.id) ?? null,
+    });
   }
 
   if (deferred.length) probeInBackground(deferred);

@@ -36,6 +36,7 @@ import {
   YUE2_ADAPTER_STEM, yue2AdapterRoot,
   type ResolvedYue2TrainOptions, type Yue2CacheSummary,
 } from './yue2Train.js';
+import type { TrainingAdapterHit } from './types.js';
 
 export { yue2AdapterRoot };
 
@@ -532,6 +533,69 @@ export function listAllYue2Runs(): Yue2RunSummary[] {
     if (run) out.push(run);
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+// ── cheap per-dataset lookup, for the dataset list ──────────────────────────
+//
+// readYue2Run() above is right for a run's detail page — it parses the whole
+// train-log.jsonl and walks the run's directory size, and yue2CheckpointsIn()
+// reads every checkpoint's safetensors header on top of that. Asking for it
+// once per dataset per list request does not scale. This answers a narrower
+// question ("has this dataset got a trained NAR adapter, and when") from ONE
+// readdir of the adapter root plus, per candidate run, a manifest read and a
+// single stat on the final export — never the log, the header parse or the
+// byte walk.
+
+/** Every dataset's newest trained YuE2 NAR adapter, in ONE pass over the
+ *  adapter root. Attribution mirrors listYue2Runs(): the run's own manifest
+ *  first, then the `<slug>-YYYY-MM-DD_HH-MM-SS` directory-name fallback for
+ *  runs trained before hotstep-run.json existed — replicated here so a
+ *  pre-manifest run does not silently read back as "never trained". */
+export function findYue2NarAdaptersFor(
+  datasets: Array<{ id: string; slug: string }>,
+): Map<string, TrainingAdapterHit> {
+  const out = new Map<string, TrainingAdapterHit>();
+  const root = yue2AdapterRoot();
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  const ids = new Set(datasets.map(d => d.id));
+  const bySlug = datasets.map(ds => ({
+    id: ds.id,
+    re: new RegExp(`^${ds.slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-\\d{4}-\\d{2}-\\d{2}_`),
+  }));
+  const bestMtime = new Map<string, number>();
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const dir = path.join(root, e.name);
+    const manifest = readYue2RunManifest(dir);
+    let datasetId = manifest?.datasetId && ids.has(manifest.datasetId) ? manifest.datasetId : '';
+    if (!datasetId) {
+      const match = bySlug.find(b => b.re.test(e.name));
+      if (match) datasetId = match.id;
+    }
+    if (!datasetId) continue;
+    let mtime: number;
+    try {
+      mtime = fs.statSync(path.join(dir, `${YUE2_ADAPTER_STEM}.safetensors`)).mtimeMs;
+    } catch {
+      continue;   // no final export in this run dir — not trained-to-completion
+    }
+    const prior = bestMtime.get(datasetId);
+    if (prior !== undefined && prior >= mtime) continue;
+    bestMtime.set(datasetId, mtime);
+    out.set(datasetId, { path: dir, kind: 'yue2-nar', detail: '', trainedAt: new Date(mtime).toISOString() });
+  }
+  return out;
+}
+
+/** Single-dataset convenience over findYue2NarAdaptersFor(), for a caller
+ *  that already has exactly one dataset in hand. */
+export function findYue2NarAdapter(ds: { id: string; slug: string }): TrainingAdapterHit | null {
+  return findYue2NarAdaptersFor([ds]).get(ds.id) ?? null;
 }
 
 /** Resolve one run by name, refusing anything that is not a direct child of

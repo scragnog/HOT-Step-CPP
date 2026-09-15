@@ -261,7 +261,7 @@ export interface TrainingDatasetSummary {
 /** One trained adapter directory found on disk. */
 export interface TrainingAdapterHit {
   path: string;               // absolute adapter run dir
-  kind: 'dit' | 'lm';
+  kind: 'dit' | 'lm' | 'mm3-lm' | 'yue2-nar' | 'yue2-ar';
   detail: string;             // dit-<base> shorthand / LM size — display only
   trainedAt: string;          // ISO or ''
 }
@@ -270,16 +270,36 @@ export interface TrainingAdapterHit {
  * Per-dataset pipeline progress, read fresh off disk on every request: which
  * stages have actually left an artefact behind. Never cached — deleting a
  * tensors folder or an adapter has to show up immediately.
+ *
+ * The ACE fields (tensorVariants.. dit) and the `mm3`/`yue2` blocks are all
+ * computed unconditionally on every row — GET /datasets has no backend query
+ * param, so the response stays backend-agnostic and the UI picks which block
+ * to render (DatasetAssetChips.tsx).
  */
 export interface DatasetAssets {
-  labeled: boolean;           // at least one caption
-  built: boolean;             // dataset.json written
+  labeled: boolean;           // at least one caption — shared across backends
+  built: boolean;             // dataset.json written — shared across backends
   tensorVariants: number;     // preprocessed variant dirs
   tensorVariantKey: string;   // newest variant, '' when none
   tensorSamples: number;      // .safetensors files in that variant
   ditBase: string;            // base the newest variant was preprocessed against
   lm: TrainingAdapterHit | null;
   dit: TrainingAdapterHit | null;
+  /** MiniMax-Music3 pipeline stages. */
+  mm3?: {
+    codesReady: boolean;
+    codesCount: number;
+    lmAdapter: TrainingAdapterHit | null;
+  };
+  /** YuE2 pipeline stages. */
+  yue2?: {
+    latentsReady: boolean;
+    clips: number;
+    codesReady: boolean;
+    cursorReady: boolean;
+    narAdapter: TrainingAdapterHit | null;
+    arAdapter: TrainingAdapterHit | null;
+  };
 }
 
 export interface TrainingSample {

@@ -39,6 +39,7 @@ import path from 'path';
 
 import { config } from '../../config.js';
 import { MM3_LM_DEFAULTS, type ResolvedMm3TrainLmOptions } from './mm3Train.js';
+import type { TrainingAdapterHit } from './types.js';
 
 /** Where every MM3 LM run lives. One level above a run directory. */
 export function mm3AdapterRoot(): string {
@@ -578,6 +579,102 @@ export function listMm3Runs(datasetId: string, slug: string): Mm3RunSummary[] {
 /** The run's own recorded recipe, if it has one. */
 export function readMm3RunManifest(dir: string): Mm3RunManifest | null {
   return readJson<Mm3RunManifest>(mm3RunManifestPath(dir));
+}
+
+// ── cheap per-dataset lookup, for the dataset list ──────────────────────────
+//
+// readMm3Run() above is right for one run's detail page — it parses the whole
+// train-log.jsonl and walks the run's directory size. Asking it once per
+// dataset per list request does not scale. This section answers a narrower
+// question ("has this dataset got a trained LM adapter, and when") from ONE
+// readdir of the adapter root plus, per candidate run, a manifest read and a
+// stat — nothing that opens train-log.jsonl or sums bytes.
+
+/** The newest exported checkpoint's weights file in a run directory: the
+ *  highest `ckpt-<N>` that actually holds weights. One readdir of the run
+ *  dir, one stat — never a log parse. Mirrors what mm3TrainRunner.ts's
+ *  `finalCkpt` resolves to for the "last checkpoint any segment exported". */
+function newestMm3CheckpointWeights(dir: string): { path: string; mtime: number } | null {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  let bestStep = -1;
+  let bestName = '';
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const m = /^ckpt-(\d+)$/.exec(e.name);
+    if (!m) continue;
+    const step = Number(m[1]);
+    if (step > bestStep) { bestStep = step; bestName = e.name; }
+  }
+  if (!bestName) return null;
+  const ckptDir = path.join(dir, bestName);
+  const mtime = weightsMtimeInDir(ckptDir);
+  return mtime ? { path: ckptDir, mtime } : null;
+}
+
+function weightsMtimeInDir(dir: string): number {
+  for (const f of ['adapter_model.safetensors', 'lokr_weights.safetensors']) {
+    try { return fs.statSync(path.join(dir, f)).mtimeMs; } catch { /* next */ }
+  }
+  return 0;
+}
+
+/** Every dataset's newest trained MM3 LM adapter, in ONE pass over the
+ *  adapter root. Attribution mirrors listMm3Runs(): the run's own manifest
+ *  first, then the `<slug>-YYYY-MM-DD_HH-MM-SS` directory-name fallback for
+ *  runs trained before hotstep-run.json existed — replicated here so a
+ *  pre-manifest run does not silently read back as "never trained". */
+export function findMm3LmAdaptersFor(
+  datasets: Array<{ id: string; slug: string }>,
+): Map<string, TrainingAdapterHit> {
+  const out = new Map<string, TrainingAdapterHit>();
+  const root = mm3AdapterRoot();
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  const ids = new Set(datasets.map(d => d.id));
+  const bySlug = datasets.map(ds => ({
+    id: ds.id,
+    re: new RegExp(`^${ds.slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-\\d{4}-\\d{2}-\\d{2}_`),
+  }));
+  const bestMtime = new Map<string, number>();
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const dir = path.join(root, e.name);
+    const manifest = readMm3RunManifest(dir);
+    let datasetId = manifest?.datasetId && ids.has(manifest.datasetId) ? manifest.datasetId : '';
+    if (!datasetId) {
+      const match = bySlug.find(b => b.re.test(e.name));
+      if (match) datasetId = match.id;
+    }
+    if (!datasetId) continue;
+    const weights = newestMm3CheckpointWeights(dir);
+    if (!weights) continue;
+    const prior = bestMtime.get(datasetId);
+    if (prior !== undefined && prior >= weights.mtime) continue;
+    bestMtime.set(datasetId, weights.mtime);
+    out.set(datasetId, {
+      path: dir,
+      kind: 'mm3-lm',
+      detail: '',
+      trainedAt: new Date(weights.mtime).toISOString(),
+    });
+  }
+  return out;
+}
+
+/** Single-dataset convenience over findMm3LmAdaptersFor(), for a caller (the
+ *  dataset detail endpoint) that already has exactly one dataset in hand and
+ *  would otherwise have to build a one-item array itself. */
+export function findMm3LmAdapter(ds: { id: string; slug: string }): TrainingAdapterHit | null {
+  return findMm3LmAdaptersFor([ds]).get(ds.id) ?? null;
 }
 
 /** What a resume should replay: the manifest when the run recorded one, and

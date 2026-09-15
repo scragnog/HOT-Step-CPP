@@ -971,21 +971,39 @@ export interface TrainingDatasetSummary {
 /** One trained adapter directory found on disk. */
 export interface TrainingAdapterHit {
   path: string;               // absolute adapter run dir
-  kind: 'dit' | 'lm';
+  kind: 'dit' | 'lm' | 'mm3-lm' | 'yue2-nar' | 'yue2-ar';
   detail: string;             // dit-<base> shorthand / LM size — display only
   trainedAt: string;          // ISO or ''
 }
 
-/** Per-dataset pipeline progress, read fresh off disk on every request. */
+/** Per-dataset pipeline progress, read fresh off disk on every request. Both
+ *  the ACE fields and the `mm3`/`yue2` blocks are always present on the wire —
+ *  the server computes them unconditionally — so DatasetAssetChips.tsx picks
+ *  which block to render off the active backend. */
 export interface DatasetAssets {
-  labeled: boolean;           // at least one caption
-  built: boolean;             // dataset.json written
+  labeled: boolean;           // at least one caption — shared across backends
+  built: boolean;             // dataset.json written — shared across backends
   tensorVariants: number;     // preprocessed variant dirs
   tensorVariantKey: string;   // newest variant, '' when none
   tensorSamples: number;      // .safetensors files in that variant
   ditBase: string;            // base the newest variant was preprocessed against
   lm: TrainingAdapterHit | null;
   dit: TrainingAdapterHit | null;
+  /** MiniMax-Music3 pipeline stages. */
+  mm3?: {
+    codesReady: boolean;
+    codesCount: number;
+    lmAdapter: TrainingAdapterHit | null;
+  };
+  /** YuE2 pipeline stages. */
+  yue2?: {
+    latentsReady: boolean;
+    clips: number;
+    codesReady: boolean;
+    cursorReady: boolean;
+    narAdapter: TrainingAdapterHit | null;
+    arAdapter: TrainingAdapterHit | null;
+  };
 }
 
 export interface TrainingSample {
