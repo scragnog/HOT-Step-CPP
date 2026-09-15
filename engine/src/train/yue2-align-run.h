@@ -258,6 +258,12 @@ struct SourceRow {
     std::string stem;        // source_stem(name) — the stems dir and cursor file key
     std::string latent_rel;  // manifest sources[].latents — the unique match key
     std::string lyrics;
+    /** manifest sources[].instrumental. A track with no singing is EXCLUDED
+     *  from this stage rather than skipped by it: there is nothing to align and
+     *  nothing wrong, so it must not read as a fault and must not be what makes
+     *  the stage fail. Absent in a cache written before the field existed,
+     *  which reads as false and behaves exactly as it used to. */
+    bool        instrumental = false;
 
     // Filled by the run.
     bool        done = false;
@@ -334,6 +340,10 @@ static int yue2_align_run(const Yue2AlignArgs & a) {
             s.name       = pm_js_str(it, "name");
             s.latent_rel = pm_js_str(it, "latents");
             s.lyrics     = pm_js_str(it, "lyrics");
+            {
+                yyjson_val * iv = yyjson_obj_get(it, "instrumental");
+                s.instrumental  = iv && yyjson_is_bool(iv) && yyjson_get_bool(iv);
+            }
             s.stem       = source_stem(s.name);
             if (s.name.empty() || s.stem.empty()) {
                 fprintf(stderr, "[yue2-align] sources[%zu] has no name — refusing rather than writing a cursor "
@@ -398,7 +408,7 @@ static int yue2_align_run(const Yue2AlignArgs & a) {
 
     // ── per source ─────────────────────────────────────────────────────
     Yue2MmsfaGraph g;
-    size_t         n_done = 0, n_skipped = 0, n_failed = 0;
+    size_t         n_done = 0, n_skipped = 0, n_failed = 0, n_instrumental = 0;
     double         total_audio_s = 0.0, total_model_ms = 0.0, total_align_ms = 0.0;
 
     for (size_t pi = 0; pi < picked.size(); pi++) {
@@ -407,6 +417,15 @@ static int yue2_align_run(const Yue2AlignArgs & a) {
 
         // Both skips are loud and by name: a silently unaligned source trains
         // with no cursor loss at all, and nothing downstream says so.
+        // An instrumental is not a problem to report. It is counted apart from
+        // the skips so it cannot make the run look like it went wrong, and so
+        // an all-instrumental corpus does not fail the stage.
+        if (s.instrumental) {
+            fprintf(stderr, "[yue2-align] %zu/%zu INSTRUMENTAL %-38s excluded, nothing sung to align\n",
+                    pi + 1, picked.size(), s.name.c_str());
+            n_instrumental++;
+            continue;
+        }
         if (pm_trim(s.lyrics).empty()) {
             fprintf(stderr, "[yue2-align] %zu/%zu SKIP %-46s no lyrics in the manifest\n", pi + 1, picked.size(),
                     s.name.c_str());
@@ -495,9 +514,18 @@ static int yue2_align_run(const Yue2AlignArgs & a) {
     yue2_mmsfa_graph_free(&g);
     yue2_mmsfa_free(&m);
 
+    if (n_done == 0 && n_instrumental > 0 && n_skipped == 0 && n_failed == 0) {
+        // Every source is an instrumental. There was never anything to align,
+        // so this is a finished stage and not a failed one; failing here would
+        // stop a pipeline over a correctly labelled corpus.
+        fprintf(stderr, "[yue2-align] every source is an instrumental (%zu) - nothing to align, and nothing "
+                        "wrong. The manifest is unchanged.\n", n_instrumental);
+        return 0;
+    }
     if (n_done == 0) {
-        fprintf(stderr, "[yue2-align] nothing aligned (%zu skipped, %zu failed). The manifest is unchanged.\n",
-                n_skipped, n_failed);
+        fprintf(stderr, "[yue2-align] nothing aligned (%zu skipped, %zu failed, %zu instrumental). The manifest "
+                        "is unchanged.\n",
+                n_skipped, n_failed, n_instrumental);
         return 1;
     }
 

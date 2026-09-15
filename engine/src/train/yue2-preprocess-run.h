@@ -387,6 +387,12 @@ static std::string yp_caption_path(const std::string & audio_path) {
 // template; they never enter `caption` itself.
 struct YpStyleMeta {
     std::string genre, bpm, key;
+    /** The sidecar's own is_instrumental. A track with no singing has no lyrics
+     *  by definition, and without this the aligner cannot tell that apart from
+     *  a track whose lyrics nobody has written down yet — so it reports a skip
+     *  that reads like a fault, and a corpus of instrumentals fails the stage
+     *  outright. */
+    bool        instrumental = false;
 };
 
 static void yp_resolve_caption(const Yue2PreprocessArgs & a, const std::string & audio_path,
@@ -411,6 +417,17 @@ static void yp_resolve_caption(const Yue2PreprocessArgs & a, const std::string &
                 sm->genre = get("genre");
                 sm->bpm   = get("bpm");
                 sm->key   = get("key");
+                // The writer emits `true`/`false`; anything else is read as
+                // false, which is the safe way round — a mislabelled vocal
+                // track is aligned and reports honestly, where a mislabelled
+                // instrumental would be silently dropped from the stage.
+                {
+                    std::string v = get("is_instrumental");
+                    for (char & ch : v) {
+                        ch = (char) tolower((unsigned char) ch);
+                    }
+                    sm->instrumental = (v == "true" || v == "1" || v == "yes");
+                }
             }
         }
     } else if (a.caption_mode == "txt") {
@@ -1306,6 +1323,9 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         yyjson_mut_obj_add_strcpy(doc, so, "genre", s.sm.genre.c_str());
         yyjson_mut_obj_add_strcpy(doc, so, "bpm", s.sm.bpm.c_str());
         yyjson_mut_obj_add_strcpy(doc, so, "key", s.sm.key.c_str());
+        // Written for every source, not only the instrumentals, so a consumer
+        // can tell "this cache knows" from "this cache predates the field".
+        yyjson_mut_obj_add_bool(doc, so, "instrumental", s.sm.instrumental);
         yyjson_mut_obj_add_strcpy(doc, so, "latents", s.latent_rel.c_str());
         yyjson_mut_obj_add_int(doc, so, "frames", s.frames);
         yyjson_mut_obj_add_int(doc, so, "clips", s.clips);
