@@ -346,6 +346,7 @@ interface TrainingState {
   startYue2Tokenize(opts?: trainingApi.Yue2TokenizeRequest): Promise<void>;
   /** YuE2 cache stage 3: lyrics forced-aligned against vocal stems ->
    *  cursor_words, which is what `cursorWeight` reads. */
+  startYue2Stems(opts?: trainingApi.Yue2StemsRequest): Promise<void>;
   startYue2Align(opts?: trainingApi.Yue2AlignRequest): Promise<void>;
   /** YuE2: all three caches + a trigger word -> an AR LoRA. Returns the
    *  server's advisory warnings about a partial cache — the run has already
@@ -934,6 +935,18 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }
   },
 
+  startYue2Stems: async (opts) => {
+    const id = get().selectedDatasetId;
+    if (!id) return;
+    try {
+      const { jobId } = await trainingApi.startYue2Stems(id, opts ?? {});
+      set({ jobLog: [], error: null });
+      await adoptJob(set, get, jobId);
+    } catch (err) {
+      set({ error: errMessage(err) });
+    }
+  },
+
   startYue2Align: async (opts) => {
     const id = get().selectedDatasetId;
     if (!id) return;
@@ -991,8 +1004,24 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         if (job.status !== 'done') { set({ error: yue2StageFailure('Codes', job) }); return; }
       }
 
-      // Stage 3: lyric cursor spans.
+      // Stage 3: vocal stems.
+      //
+      // Not one of the stages anyone asks for, and the reason it is here is
+      // that the aligner does NOT produce its own input: it reads
+      // <source>/vocals.wav per song and SKIPS a source whose stem is missing,
+      // silently, exiting 0 having aligned nothing. With no stems at all,
+      // cursor spans is not merely blocked, it is a stage that would report
+      // success and leave the corpus untouched.
       set({ yue2RunAllStage: 3 });
+      arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (arStatus.stages.align.stemsReady <= 0) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Stems(datasetId, {}));
+        if (job.status !== 'done') { set({ error: yue2StageFailure('Vocal stems', job) }); return; }
+      }
+
+      // Stage 4: lyric cursor spans.
+      set({ yue2RunAllStage: 4 });
       arStatus = await trainingApi.getYue2ArStatus(datasetId);
       if (!arStatus.stages.align.done) {
         const job = await startYue2JobAndAwait(set, get, {},
@@ -1000,11 +1029,11 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         if (job.status !== 'done') { set({ error: yue2StageFailure('Lyric cursor spans', job) }); return; }
       }
 
-      // Stage 4: NAR LoRA training. "Already complete" means the NEWEST run for
+      // Stage 5: NAR LoRA training. "Already complete" means the NEWEST run for
       // this dataset finished cleanly — an owner decision, not a technical one:
       // a halted or failed run does not count, and this never resumes one, it
       // starts fresh exactly like the button does.
-      set({ yue2RunAllStage: 4 });
+      set({ yue2RunAllStage: 5 });
       const narRuns = await trainingApi.listYue2Runs(datasetId);
       if (narRuns.runs[0]?.outcome !== 'completed') {
         const body: trainingApi.Yue2TrainRequest = trigger.trim()
@@ -1017,8 +1046,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         if (job.status !== 'done') { set({ error: yue2StageFailure('NAR LoRA training', job) }); return; }
       }
 
-      // Stage 5: AR LoRA training. Same "newest run completed" rule as stage 4.
-      set({ yue2RunAllStage: 5 });
+      // Stage 6: AR LoRA training. Same "newest run completed" rule as stage 4.
+      set({ yue2RunAllStage: 6 });
       arStatus = await trainingApi.getYue2ArStatus(datasetId);
       const arRuns = await trainingApi.listYue2ArRuns(datasetId);
       if (arRuns.runs[0]?.outcome !== 'completed') {

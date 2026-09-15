@@ -30,7 +30,7 @@ export type TrainingJobKind =
   // rewrite the same manifest: 'yue2-tokenize' (codec_ids, what the next-token
   // loss is scored on) and 'yue2-align' (cursor_words, what --cursor-weight
   // reads). Each spawns ace-train, so each owns the card.
-  | 'yue2-tokenize' | 'yue2-align' | 'yue2-ar-train';
+  | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -786,6 +786,11 @@ export interface Yue2ArStatus {
        *  aligns nothing and still reports success. */
       stemsDir: string;
       stemsReady: number;
+      /** How many sources the latent cache names, i.e. how many stems a
+       *  complete separation would leave. The aligner skips a source whose stem
+       *  is missing without saying so, so the card needs the shortfall and not
+       *  just a boolean. */
+      stemsNeeded: number;
       defaults: Yue2AlignDefaults;
     };
     train: { missing: string[] };
@@ -813,6 +818,30 @@ export interface Yue2TokenizeRequest {
   /** Re-encode sources whose codes are already cached. Without it an already
    *  complete source is skipped, which is what makes a resumed run cheap. */
   force?: boolean;
+}
+
+/** POST /api/training/datasets/:id/yue2-stems
+ *
+ *  Cache stage 2a: separate every source's vocals so the aligner has something
+ *  to read. Its own stage rather than a step inside align because separation
+ *  costs minutes a track and alignment costs seconds — a failed alignment
+ *  should cost one retry, not a whole corpus of separations. */
+export interface Yue2StemsRequest {
+  /** SuperSep quality level, 0-3. 0 is the default and the fastest. */
+  level?: number;
+  /** Re-separate sources whose stem is already on disk. Without it an existing
+   *  stem is kept, which is what makes a resumed run cheap. */
+  force?: boolean;
+}
+
+export interface Yue2StemsResponse {
+  jobId: string;
+  kind: TrainingJobKind;
+  stemsDir: string;
+  /** Audio files found in the dataset's source folder. */
+  sources: number;
+  /** Stems already on disk, which a run without `force` will skip. */
+  alreadyHave: number;
 }
 
 /** POST /api/training/datasets/:id/yue2-align */
@@ -2111,6 +2140,16 @@ export async function startYue2Align(
              sources: number; stemsReady: number; aligner: string; license: string }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/yue2-align`,
+    { method: 'POST', ...jsonBody(opts) },
+  );
+}
+
+/** POST /datasets/:id/yue2-stems — separate vocals for the aligner. */
+export async function startYue2Stems(
+  id: string, opts: Yue2StemsRequest = {},
+): Promise<Yue2StemsResponse> {
+  return request(
+    `/datasets/${encodeURIComponent(id)}/yue2-stems`,
     { method: 'POST', ...jsonBody(opts) },
   );
 }

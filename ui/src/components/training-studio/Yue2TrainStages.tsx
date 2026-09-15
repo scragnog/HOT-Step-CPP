@@ -34,7 +34,7 @@ import { useTranslation } from 'react-i18next';
 
 import { listYue2ArRuns, listYue2Runs } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
-import { Yue2AlignCard, Yue2ArTrainStageCard, Yue2TokenizeCard } from './Yue2ArTrainCard';
+import { Yue2StemsCard, Yue2AlignCard, Yue2ArTrainStageCard, Yue2TokenizeCard } from './Yue2ArTrainCard';
 import { Yue2NarTrainCard, Yue2PreprocessCard } from './Yue2TrainCard';
 import { useYue2ArStatus } from './useYue2ArStatus';
 import { useYue2Status } from './useYue2Status';
@@ -84,9 +84,10 @@ const RunAllControl: React.FC<{
     switch (n) {
       case 1: return t('trainingStudio.yue2.runAllStageName1', 'latent cache');
       case 2: return t('trainingStudio.yue2.runAllStageName2', 'codes');
-      case 3: return t('trainingStudio.yue2.runAllStageName3', 'lyric cursor spans');
-      case 4: return t('trainingStudio.yue2.runAllStageName4', 'NAR LoRA training');
-      case 5: return t('trainingStudio.yue2.runAllStageName5', 'AR LoRA training');
+      case 3: return t('trainingStudio.yue2.runAllStageName3', 'vocal stems');
+      case 4: return t('trainingStudio.yue2.runAllStageName4', 'lyric cursor spans');
+      case 5: return t('trainingStudio.yue2.runAllStageName5', 'NAR LoRA training');
+      case 6: return t('trainingStudio.yue2.runAllStageName6', 'AR LoRA training');
       default: return '';
     }
   };
@@ -113,7 +114,7 @@ const RunAllControl: React.FC<{
       >
         {runAllActive ? <Loader2 size={15} className="animate-spin" /> : <ListChecks size={15} />}
         {runAllActive && runAllStage
-          ? t('trainingStudio.yue2.runAllRunning', 'Running stage {{n}} of 5: {{name}}',
+          ? t('trainingStudio.yue2.runAllRunning', 'Running stage {{n}} of 6: {{name}}',
               { n: runAllStage, name: stageName(runAllStage) })
           : t('trainingStudio.yue2.runAllStart', 'Perform all stages')}
       </button>
@@ -162,11 +163,16 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
   const skipLabels: string[] = [];
   if (arStatus?.stages.preprocess.done) skipLabels.push(t('trainingStudio.yue2.runAllStageName1', 'latent cache'));
   if (arStatus?.stages.tokenize.done) skipLabels.push(t('trainingStudio.yue2.runAllStageName2', 'codes'));
-  if (arStatus?.stages.align.done) {
-    skipLabels.push(t('trainingStudio.yue2.runAllStageName3', 'lyric cursor spans'));
+  // Stems are counted, not flagged: the stage is "done" once anything has been
+  // separated, which is the same test the chain itself applies.
+  if ((arStatus?.stages.align.stemsReady ?? 0) > 0) {
+    skipLabels.push(t('trainingStudio.yue2.runAllStageName3', 'vocal stems'));
   }
-  if (narDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName4', 'NAR LoRA training'));
-  if (arDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName5', 'AR LoRA training'));
+  if (arStatus?.stages.align.done) {
+    skipLabels.push(t('trainingStudio.yue2.runAllStageName4', 'lyric cursor spans'));
+  }
+  if (narDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName5', 'NAR LoRA training'));
+  if (arDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName6', 'AR LoRA training'));
 
   const runAllControl = (
     <RunAllControl
@@ -190,7 +196,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
       )}
 
       {/* The licence, verbatim as the server sends it, rendered exactly once
-          for all five stages. A trained adapter is a derivative of CC BY-NC
+          for all six stages. A trained adapter is a derivative of CC BY-NC
           weights and inherits the restriction, so this belongs above every
           button that makes one, not in a footnote. */}
       {yue2Status?.license && (
@@ -209,6 +215,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
 
       {yue2Status && <Yue2PreprocessCard status={yue2Status} onDone={reload} />}
       {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
+      {arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
       {arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
       <Yue2NarTrainCard datasetId={datasetId} trigger={trigger} status={yue2Status} reload={reload} />
       <Yue2ArTrainStageCard datasetId={datasetId} trigger={trigger} status={arStatus} reload={reload} />

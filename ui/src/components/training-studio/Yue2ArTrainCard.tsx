@@ -23,7 +23,7 @@
 import React, { useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Download, History, Loader2, Mic2,
-  Package, PauseCircle, Play, Waves,
+  Package, PauseCircle, Play, Scissors, Waves,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -279,6 +279,133 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
   );
 };
 
+// ── Stage 2a: vocal stems ────────────────────────────────────────
+//
+// Its own stage rather than a step inside align, for the reason the server
+// gives (routes/training.ts, POST .../yue2-stems): separation costs minutes a
+// track and alignment costs seconds, so a failed alignment should cost one
+// retry and not a whole corpus of separations.
+//
+// It had no UI at all until now — the endpoint and the job kind existed, the
+// align card told people to run it, and there was nothing anywhere to press.
+
+interface StemsForm {
+  level: number;
+  force: boolean;
+}
+
+export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
+  const { t } = useTranslation();
+  const activeJob = useTrainingStore(s => s.activeJob);
+  const startYue2Stems = useTrainingStore(s => s.startYue2Stems);
+  const [busy, setBusy] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [edits, setEdits] = useState<Partial<StemsForm>>({});
+
+  const stage = status.stages.align;
+  const form: StemsForm = { level: 0, force: false, ...edits };
+  const set = <K extends keyof StemsForm>(k: K, v: StemsForm[K]) =>
+    setEdits(e => ({ ...e, [k]: v }));
+
+  const jobRunning = activeJob?.status === 'queued' || activeJob?.status === 'running';
+  const mine = activeJob?.kind === 'yue2-stems';
+  const needsLatents = !status.stages.preprocess.done;
+  const ready = stage.stemsReady;
+  const needed = stage.stemsNeeded;
+  const complete = ready > 0 && (needed === 0 || ready >= needed);
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      await startYue2Stems({ level: form.level, force: form.force });
+    } finally {
+      setBusy(false);
+      onDone();
+    }
+  };
+
+  return (
+    <div className={CARD}>
+      <div className="flex items-center gap-2 mb-2">
+        <Scissors size={15} className="text-amber-500" />
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+          {t('trainingStudio.yue2ar.stemsTitle', 'Vocal stems')}
+        </h3>
+      </div>
+      <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
+        {t('trainingStudio.yue2ar.stemsBlurb',
+          'Separates each song\'s vocal and writes it as <source>/vocals.wav, which is the only thing the '
+          + 'aligner below reads. It is a separate stage because separation costs minutes a track while '
+          + 'alignment costs seconds, and because it is worth doing once: a stem already on disk is skipped.')}
+      </p>
+
+      <div className="text-[11px] text-zinc-600 dark:text-zinc-300 mb-3">
+        {ready > 0 ? (
+          <span className={complete ? 'text-emerald-500' : 'text-amber-500'}>
+            {t('trainingStudio.yue2ar.stemsHave', '{{ready}} of {{needed}} song(s) separated.',
+              { ready, needed: needed || ready })}
+          </span>
+        ) : (
+          t('trainingStudio.yue2ar.stemsNone', 'No stems yet.')
+        )}
+        <span className="block text-[10px] text-zinc-500 font-mono break-all mt-1">{stage.stemsDir}</span>
+      </div>
+
+      <button onClick={() => setAdvanced(a => !a)} className={`${BTN_SM} mb-3`}>
+        {advanced
+          ? t('trainingStudio.yue2ar.advancedHide', 'Hide advanced')
+          : t('trainingStudio.yue2ar.advancedShow', 'Advanced')}
+      </button>
+
+      {advanced && (
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <NumField
+            label={t('trainingStudio.yue2ar.stemsLevel', 'Quality level')}
+            value={form.level}
+            onChange={v => set('level', Math.max(0, Math.min(3, Math.round(v))))}
+            hint={t('trainingStudio.yue2ar.stemsLevelHint',
+              'SuperSep level 0-3. The aligner only ever opens vocals.wav, so a higher level buys cleaner '
+              + 'separation and costs time; 0 is the default.') as string}
+          />
+          <CheckField
+            className="col-span-2 md:col-span-1 self-end pb-1.5"
+            label={t('trainingStudio.yue2ar.stemsForce', 'Re-separate existing stems')}
+            checked={form.force}
+            onChange={v => set('force', v)}
+            hint={t('trainingStudio.yue2ar.stemsForceHint',
+              'Off, a song whose stem is already on disk is skipped, which is what makes a resumed run '
+              + 'cheap. Turn it on only after changing the source audio or the level.') as string}
+          />
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button onClick={run}
+          disabled={busy || jobRunning || needsLatents}
+          className={BTN_STAGE}>
+          {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+          {ready > 0
+            ? t('trainingStudio.yue2ar.stemsReRun', 'Separate again')
+            : t('trainingStudio.yue2ar.stemsRun', 'Separate vocals')}
+        </button>
+        {needsLatents && (
+          <span className="text-[11px] text-zinc-500">
+            {t('trainingStudio.yue2ar.stemsNeedsLatents',
+              'Encode the latents first \u2014 this stage separates the sources that manifest names.')}
+          </span>
+        )}
+      </div>
+
+      {mine && jobRunning && (
+        <p className="text-[11px] text-amber-500 mt-2 flex items-center gap-1.5">
+          <Loader2 size={11} className="animate-spin" />
+          {t('trainingStudio.yue2ar.stemsRunning', 'Separating\u2026 this is the slow one, minutes a track.')}
+        </p>
+      )}
+    </div>
+  );
+};
+
 // ── Stage 3: cursor spans ───────────────────────────────────────────────────
 
 interface AlignForm {
@@ -381,8 +508,9 @@ export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
                 {t('trainingStudio.yue2ar.alignNoStems',
                   'Separation happens outside this stage, so the stems are an input it cannot produce. It '
                   + 'wants <source stem>/vocals.wav per song and skips by name, so with none of them it '
-                  + 'would align nothing and still report success — the run is refused instead. Separate '
-                  + 'the dataset first, or point Advanced\'s stems folder at stems you already have.')}
+                  + 'would align nothing and still report success — the run is refused instead. Run the '
+                  + 'Vocal stems stage just above, or point Advanced\'s stems folder at stems you already '
+                  + 'have.')}
               </span>
             </div>
           )}
