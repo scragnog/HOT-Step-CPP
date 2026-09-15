@@ -297,6 +297,17 @@ class ModelDownloadService extends EventEmitter {
       }
     }
 
+    // yue2/minted_{manifest.json,codes.i32} — the AR trainer's regulariser pack
+    // is data, not weights, so neither extension is in the generic scan above
+    // and both would otherwise read as never-installed forever in the Model
+    // Manager even once downloaded.
+    const yue2Dir = path.join(dir, 'yue2');
+    if (fs.existsSync(yue2Dir)) {
+      for (const f of fs.readdirSync(yue2Dir)) {
+        if (f.endsWith('.json') || f.endsWith('.i32')) files.add(f);
+      }
+    }
+
     // Scan engine directory for runtime DLLs
     const engDir = this.engineDir;
     if (fs.existsSync(engDir)) {
@@ -404,9 +415,11 @@ class ModelDownloadService extends EventEmitter {
   deleteFile(filename: string): boolean {
     // Safety: only known model/runtime extensions.
     // .data / .json are StableStep (SA3) companions (sa3-dit.onnx.data,
-    // tokenizer.json etc.) living under onnx/sa3.
-    if (!filename.endsWith('.gguf') && !filename.endsWith('.onnx') && !filename.endsWith('.safetensors') && !filename.endsWith('.dll') && !filename.endsWith('.bin') && !filename.endsWith('.data') && !filename.endsWith('.json')) {
-      throw new Error('Can only delete .gguf, .onnx, .safetensors, .bin, .dll, .data, or .json files');
+    // tokenizer.json etc.) living under onnx/sa3; .i32 is the YuE2 minted
+    // regulariser's codes blob under yue2/, which is a catalogue download and
+    // so has to be deletable like any other.
+    if (!filename.endsWith('.gguf') && !filename.endsWith('.onnx') && !filename.endsWith('.safetensors') && !filename.endsWith('.dll') && !filename.endsWith('.bin') && !filename.endsWith('.data') && !filename.endsWith('.json') && !filename.endsWith('.i32')) {
+      throw new Error('Can only delete .gguf, .onnx, .safetensors, .bin, .dll, .data, .json, or .i32 files');
     }
 
     // For DLLs, check engine directory

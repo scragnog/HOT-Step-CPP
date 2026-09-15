@@ -311,6 +311,16 @@
         "yue2-lm-Q2_K-imat",
         "yue2-vae-standard-f32"
       ]
+    },
+    {
+      "id": "yue2-minted-regulariser",
+      "family": "yue2",
+      "name": "YuE2 Minted Regulariser Pack",
+      "description": "Optional training data for YuE2 artist (AR) LoRAs: mixes true YuE2 semantic codes into training so the adapter does not collapse into the encoder's adjacent-repeat defect. Not needed for generation, or for the NAR adapter trainer. About 91 MB.",
+      "fileIds": [
+        "yue2-minted-manifest",
+        "yue2-minted-codes"
+      ]
     }
   ],
   "files": [
@@ -4210,6 +4220,32 @@
           "repoPath": "LICENSE"
         }
       ]
+    },
+    {
+      "id": "yue2-minted-manifest",
+      "filename": "minted_manifest.json",
+      "repoPath": "minted/minted_manifest.json",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2 Minted Regulariser Manifest",
+      "sizeBytes": 4772219,
+      "repo": "scragnog/YuE2-GGUF",
+      "description": "Manifest half of the minted regulariser pack for AR LoRA training (ace-train yue2-ar-train --minted): 4,732 songs, 216 held out as minted_val. Converted from Mothersuperior/yue2-minted-corpus (CC BY-NC-4.0). The trainer resolves the codes blob RELATIVE TO THIS FILE, so it must sit beside minted_codes.i32. Without the pack the trainer needs --allow-no-minted and trains artist-only, which the encoder's adjacent-repeat defect makes a bad trade.",
+      "tags": []
+    },
+    {
+      "id": "yue2-minted-codes",
+      "filename": "minted_codes.i32",
+      "repoPath": "minted/minted_codes.i32",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2 Minted Regulariser Codes",
+      "sizeBytes": 86521688,
+      "repo": "scragnog/YuE2-GGUF",
+      "description": "Codes half of the minted regulariser pack: true YuE2 semantic codes as headerless little-endian int32, indexed by minted_manifest.json. Not useful alone.",
+      "tags": []
     },
     {
       "id": "whisper-large-v3-turbo",
