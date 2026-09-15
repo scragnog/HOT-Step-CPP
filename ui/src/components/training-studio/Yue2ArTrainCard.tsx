@@ -1,29 +1,29 @@
-// Yue2ArTrainCard.tsx — Training Studio phase 3, the YuE2 AR half.
+// Yue2ArTrainCard.tsx — Training Studio phase 3, the YuE2 AR half: stages 2,
+// 3 and 5.
 //
-// Sits under Yue2TrainCard when the active backend is YuE2. That card trains the
-// NAR half (the sound); this one trains the AR half (the composer), which is
-// where artist likeness lives.
-//
-// FOUR STAGES, AND ONLY THREE OF THEM ARE HERE. An AR run needs the latent
-// cache, then `codes/` (what the AR half predicts), then `cursor/` (what the
-// lyric-timing loss is measured against) — all three written into the SAME
-// yue2_preprocess.json. Stage 1 is the NAR card's latent cache directly above,
-// so this card reports it and points at it rather than shipping a second
-// encode form that would write the same manifest from two places.
+// Three of the five YuE2 stages Yue2TrainStages.tsx renders in order: stage 2
+// (Yue2TokenizeCard, `codes/` — what the AR half predicts), stage 3
+// (Yue2AlignCard, `cursor/` — what the lyric-timing loss is measured
+// against), and stage 5 (Yue2ArTrainStageCard, the AR LoRA itself — the
+// composer half, where artist likeness lives). All three read `status` as a
+// PROP from one useYue2ArStatus() call in Yue2TrainStages, which also owns
+// the loading gate and the status-fetch error banner. Stage 2 and 3 both
+// write into the SAME yue2_preprocess.json that stage 1 (Yue2TrainCard.tsx)
+// starts.
 //
 // THE DEFAULTS ARE NOT DUPLICATED HERE. Every number in the form is a view of
 // `status.defaults`, which is YUE2_AR_DEFAULTS from services/training/
 // yue2ArTrain.ts — the recipe proven by ear, with one home. None of the NAR
 // card's numbers apply: different model half, different recipe, no presets.
 //
-// NO LICENCE BANNER. The sibling card above renders YUE2_LICENSE_NOTICE
-// verbatim and the two are always mounted together; repeating the same text a
-// second time on one screen teaches people to skip it.
+// NO LICENCE BANNER. Yue2TrainStages renders YUE2_LICENSE_NOTICE once, above
+// every stage; repeating the same text a second time on one screen teaches
+// people to skip it.
 
 import React, { useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Download, History, Loader2, Mic2,
-  Package, PauseCircle, Play, Type, Waves, XCircle,
+  Package, PauseCircle, Play, Waves,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -37,7 +37,6 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
 import { JobProgress } from './JobProgress';
 import { TrainingChart } from './TrainingChart';
-import { useYue2ArStatus } from './useYue2ArStatus';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -121,7 +120,7 @@ interface TokenizeForm {
   force: boolean;
 }
 
-const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
+export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
   const { t } = useTranslation();
   const activeJob = useTrainingStore(s => s.activeJob);
   const startYue2Tokenize = useTrainingStore(s => s.startYue2Tokenize);
@@ -289,7 +288,7 @@ interface AlignForm {
   cpu: boolean;
 }
 
-const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
+export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
   const { t } = useTranslation();
   const activeJob = useTrainingStore(s => s.activeJob);
   const startYue2Align = useTrainingStore(s => s.startYue2Align);
@@ -465,7 +464,7 @@ const OUTCOME: Record<Yue2ArRunSummary['outcome'], { label: string; tone: string
  *  route, so a "continue" button would be a promise the server cannot keep.
  *  What the ladder is FOR is picking a rung by ear — copy a path into the YuE2
  *  adapter field. The suggested rung is marked, not chosen. */
-const Yue2ArRunsList: React.FC<{ datasetId: string; pickStep: number; reloadKey: unknown }> = (
+export const Yue2ArRunsList: React.FC<{ datasetId: string; pickStep: number; reloadKey: unknown }> = (
   { datasetId, pickStep, reloadKey },
 ) => {
   const { t } = useTranslation();
@@ -656,17 +655,24 @@ interface TrainForm {
   allowNoMinted: boolean;
 }
 
-export const Yue2ArTrainCard: React.FC<{ datasetId: string; trigger?: string }> = ({ datasetId, trigger }) => {
+/** Stage 5: the AR LoRA — the composer half. `status` arrives as a prop from
+ *  the one useYue2ArStatus() call Yue2TrainStages makes, which also owns the
+ *  loading gate and the status-fetch error banner (shared with stages 2 and
+ *  3, which read the same payload). The stage-readiness recap this card used
+ *  to open with is gone: Yue2TrainStages now renders stages 1-4 directly
+ *  above this one, which is the same information laid out as five separate
+ *  sections instead of summarised in a fifth. */
+export const Yue2ArTrainStageCard: React.FC<{
+  datasetId: string; trigger?: string; status: Yue2ArStatus | null; reload: () => void;
+}> = ({ datasetId, trigger, status, reload }) => {
   const { t } = useTranslation();
   const activeJob = useTrainingStore(s => s.activeJob);
   const startYue2ArTrain = useTrainingStore(s => s.startYue2ArTrain);
-  const storeError = useTrainingStore(s => s.error);
   const yue2ArLive = useTrainingStore(s => s.yue2ArLive);
   const yue2ArEvalSeries = useTrainingStore(s => s.yue2ArEvalSeries);
   const trainStepSeries = useTrainingStore(s => s.trainStepSeries);
   const trainMilestones = useTrainingStore(s => s.trainMilestones);
 
-  const { status, error: statusError, reload } = useYue2ArStatus(datasetId);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [models, setModels] = useState(false);
@@ -681,14 +687,6 @@ export const Yue2ArTrainCard: React.FC<{ datasetId: string; trigger?: string }> 
   const jobStatus = activeJob?.status;
   const jobRunning = jobStatus === 'queued' || jobStatus === 'running';
   const mine = activeJob?.kind === 'yue2-ar-train';
-
-  if (!status && !statusError) {
-    return (
-      <div className="flex items-center justify-center py-20 text-zinc-500 text-sm">
-        <Loader2 size={18} className="animate-spin mr-2" /> …
-      </div>
-    );
-  }
 
   const d = status?.defaults;
   const form: TrainForm | null = status && d ? {
@@ -734,7 +732,6 @@ export const Yue2ArTrainCard: React.FC<{ datasetId: string; trigger?: string }> 
     setEdits(e => ({ ...e, [k]: v }));
 
   const pp = status?.stages.preprocess;
-  const tk = status?.stages.tokenize;
   const al = status?.stages.align;
   const trainMissing = status?.stages.train.missing ?? [];
   const mintedMissing = !!status && !status.minted.present;
@@ -747,7 +744,6 @@ export const Yue2ArTrainCard: React.FC<{ datasetId: string; trigger?: string }> 
   const needsTrigger = !!form && !form.trigger.trim() && !form.allowNoTrigger;
   const needsMinted = mintedMissing && !!form && !form.allowNoMinted;
   const needsOvertrain = overtrain && !!form && !form.allowOvertrain;
-  const trainBlocked = trainMissing.length > 0 || !pp?.done;
 
   const startTrain = async () => {
     if (!form) return;
@@ -787,89 +783,6 @@ export const Yue2ArTrainCard: React.FC<{ datasetId: string; trigger?: string }> 
 
   return (
     <div className="flex flex-col gap-4">
-      {(statusError || storeError) && (
-        <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
-          <XCircle size={16} className="mt-0.5 flex-shrink-0" />
-          <span className="min-w-0 break-words">{statusError || storeError}</span>
-        </div>
-      )}
-
-      {status && (
-        <>
-          {/* What each stage has reached, in one line, because the thing that
-              decides whether this half can train at all is how far the shared
-              manifest has got — and three separate cards can be read three
-              times without anyone noticing the second one is empty. */}
-          <div className={CARD}>
-            <div className="flex items-center gap-2 mb-2">
-              <Type size={15} className="text-amber-500" />
-              <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-                {t('trainingStudio.yue2ar.title', 'AR LoRA — the composer half')}
-              </h3>
-            </div>
-            <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
-              {t('trainingStudio.yue2ar.blurb',
-                'The NAR half above learns how an artist sounds; this one learns how they write — phrasing, '
-                + 'form, where a line lands. It needs three caches, all written into one manifest, and the '
-                + 'stages below fill them in order.')}
-            </p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {[
-                {
-                  k: 'latents',
-                  label: t('trainingStudio.yue2ar.stage1', '1. Latents'),
-                  done: !!pp?.done,
-                  note: pp?.cache
-                    ? t('trainingStudio.yue2ar.stage1Have', '{{n}} track(s)', { n: pp.cache.sources })
-                    : t('trainingStudio.yue2ar.stage1None', 'Use the Latent cache card above'),
-                },
-                {
-                  k: 'codes',
-                  label: t('trainingStudio.yue2ar.stage2', '2. Codes'),
-                  done: !!tk?.done,
-                  note: tk?.status
-                    ? t('trainingStudio.yue2ar.stageOf', '{{done}}/{{total}} source(s)',
-                        { done: tk.status.sourcesWithCodes, total: tk.status.sources })
-                    : t('trainingStudio.yue2ar.stageEmpty', 'not run'),
-                },
-                {
-                  k: 'cursor',
-                  label: t('trainingStudio.yue2ar.stage3', '3. Cursor'),
-                  done: !!al?.done,
-                  note: al?.status
-                    ? t('trainingStudio.yue2ar.stageOf', '{{done}}/{{total}} source(s)',
-                        { done: al.status.sourcesWithCursor, total: al.status.sources })
-                    : t('trainingStudio.yue2ar.stageEmpty', 'not run'),
-                },
-                {
-                  k: 'train',
-                  label: t('trainingStudio.yue2ar.stage4', '4. Train'),
-                  done: !trainBlocked,
-                  note: trainMissing.length
-                    ? trainMissing.join(', ')
-                    : pp?.done
-                      ? t('trainingStudio.yue2ar.stage4Ready', 'ready')
-                      : t('trainingStudio.yue2ar.stage4Waiting', 'waiting on the caches'),
-                },
-              ].map(s => (
-                <div key={s.k} className="rounded-lg border border-zinc-200 dark:border-white/5 px-2.5 py-1.5">
-                  <div className="flex items-center gap-1.5">
-                    {s.done
-                      ? <Check size={12} className="text-emerald-500 shrink-0" />
-                      : <AlertTriangle size={12} className="text-zinc-400 shrink-0" />}
-                    <span className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300">{s.label}</span>
-                  </div>
-                  <div className="text-[10px] text-zinc-500 mt-0.5 break-words">{s.note}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <Yue2TokenizeCard status={status} onDone={reload} />
-          <Yue2AlignCard status={status} onDone={reload} />
-        </>
-      )}
-
       {/* ── The AR LoRA ── */}
       {status && form && (
         <div className={CARD}>
@@ -1297,5 +1210,3 @@ export const Yue2ArTrainCard: React.FC<{ datasetId: string; trigger?: string }> 
     </div>
   );
 };
-
-export default Yue2ArTrainCard;

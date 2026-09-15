@@ -1,14 +1,19 @@
-// Yue2TrainCard.tsx — Training Studio phase 3, YuE2 branch.
+// Yue2TrainCard.tsx — Training Studio phase 3, YuE2 branch: stages 1 and 4.
 //
-// Rendered instead of the ACE LM/DiT cards when the active backend is YuE2:
-// a folder of audio -> cached VAE latents -> a LoRA on the frozen NAR half.
+// Two of the five YuE2 stages Yue2TrainStages.tsx renders in order: stage 1,
+// audio -> cached VAE latents (Yue2PreprocessCard), and stage 4, latents -> a
+// LoRA on the frozen NAR half (Yue2NarTrainCard). Both read `status` as a PROP
+// from the one useYue2Status() call Yue2TrainStages makes, which is also where
+// the licence banner and the status-fetch error banner live now — a single
+// fetch shared by every stage that reads it, rather than each stage repeating
+// the same GET. Yue2RunsList (the NAR ladder) is exported for the same
+// component, kept in this file rather than its own because it is read
+// exclusively by Yue2NarTrainCard.
 //
-// BOTH STAGES LIVE HERE, unlike MM3, where the codes export is its own phase-2
-// card. That is not a style choice: `yue2-preprocess` does not read
+// STAGE 1 STANDING ALONE (rather than beside MM3's phase-2 codes card) is a
+// server fact, not a style choice: `yue2-preprocess` does not read
 // dataset.json, has no tensor-cache concept and does not touch the ACE
-// preprocess variants, so there is nothing for it to sit beside in phase 2 —
-// and the thing that decides whether training can start at all is the latent
-// cache it writes, which is one card away rather than one phase away.
+// preprocess variants, so there is nothing for it to sit beside in phase 2.
 //
 // THE DEFAULTS ARE NOT DUPLICATED HERE. Every number arrives in the `yue2`
 // status payload from services/training/yue2Train.ts, which is where the
@@ -16,16 +21,16 @@
 // estimate re-computes as rank moves without a second copy of the measurements.
 // Same rule as Mm3TrainCard.
 //
-// THE LICENCE LINE IS THE SERVER'S STRING, rendered verbatim. YuE2 weights are
-// CC BY-NC 4.0 and a trained adapter is a derivative that inherits the
-// restriction; the text is YUE2_LICENSE_NOTICE in services/backends/yue2, is
-// shipped by the status route, and is never retyped, truncated or paraphrased
-// on this side.
+// THE LICENCE LINE IS THE SERVER'S STRING, rendered verbatim by
+// Yue2TrainStages. YuE2 weights are CC BY-NC 4.0 and a trained adapter is a
+// derivative that inherits the restriction; the text is YUE2_LICENSE_NOTICE in
+// services/backends/yue2, is shipped by the status route, and is never
+// retyped, truncated or paraphrased on this side.
 
 import React, { useState } from 'react';
 import {
   AlertTriangle, ChevronDown, ChevronRight, Cpu, FileCode2, History, Loader2, PauseCircle,
-  Play, Scale, XCircle,
+  Play,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -38,7 +43,6 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import { formatDurationMs } from '../../utils/trainingEta';
 import { JobProgress } from './JobProgress';
 import { TrainingChart } from './TrainingChart';
-import { useYue2Status } from './useYue2Status';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -89,7 +93,7 @@ interface PreprocessForm {
   acknowledgeSidecarFormat: boolean;
 }
 
-const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => void }> = ({ status, onDone }) => {
+export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => void }> = ({ status, onDone }) => {
   const { t } = useTranslation();
   const activeJob = useTrainingStore(s => s.activeJob);
   const startYue2Preprocess = useTrainingStore(s => s.startYue2Preprocess);
@@ -411,7 +415,7 @@ const OUTCOME: Record<Yue2RunSummary['outcome'], { label: string; tone: string }
  *  and it is exact only within one machine and build), so a "continue" button
  *  here would be a promise the server cannot keep. What the ladder is FOR is
  *  picking which rung to load — the adapter picker takes the file path. */
-const Yue2RunsList: React.FC<{ datasetId: string; reloadKey: unknown }> = ({ datasetId, reloadKey }) => {
+export const Yue2RunsList: React.FC<{ datasetId: string; reloadKey: unknown }> = ({ datasetId, reloadKey }) => {
   const { t } = useTranslation();
   const [runs, setRuns] = useState<Yue2RunSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -574,18 +578,23 @@ interface TrainForm {
 
 const PRESET_ORDER: Yue2PresetName[] = ['balanced', 'thorough', 'fast'];
 
-export const Yue2TrainCard: React.FC<{ datasetId: string; trigger?: string }> = ({ datasetId, trigger }) => {
+/** Stage 4: the NAR LoRA. `status` arrives as a prop from ONE useYue2Status()
+ *  call in Yue2TrainStages, which also owns the loading gate, the licence
+ *  banner and the status-fetch error banner — sharing the fetch across the
+ *  five stages, rather than each stage re-requesting the same payload, is the
+ *  whole reason this card no longer calls the hook itself. */
+export const Yue2NarTrainCard: React.FC<{
+  datasetId: string; trigger?: string; status: Yue2Status | null; reload: () => void;
+}> = ({ datasetId, trigger, status, reload }) => {
   const { t } = useTranslation();
   const activeJob = useTrainingStore(s => s.activeJob);
   const startYue2Train = useTrainingStore(s => s.startYue2Train);
-  const storeError = useTrainingStore(s => s.error);
   const yue2Live = useTrainingStore(s => s.yue2Live);
   const trainStepSeries = useTrainingStore(s => s.trainStepSeries);
   const trainMilestones = useTrainingStore(s => s.trainMilestones);
   const trainLmEpochs = useTrainingStore(s => s.trainLmEpochs);
   const trainMaxEpochs = useTrainingStore(s => s.trainMaxEpochs);
 
-  const { status, error: statusError, reload } = useYue2Status(datasetId);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   // DERIVED, not seeded: server defaults underneath, the user's edits on top.
@@ -597,14 +606,6 @@ export const Yue2TrainCard: React.FC<{ datasetId: string; trigger?: string }> = 
   const jobStatus = activeJob?.status;
   const jobRunning = jobStatus === 'queued' || jobStatus === 'running';
   const mine = jobKind === 'yue2-nar-train';
-
-  if (!status && !statusError) {
-    return (
-      <div className="flex items-center justify-center py-20 text-zinc-500 text-sm">
-        <Loader2 size={18} className="animate-spin mr-2" /> …
-      </div>
-    );
-  }
 
   const d = status?.defaults;
   const form: TrainForm | null = status && d ? {
@@ -716,30 +717,6 @@ export const Yue2TrainCard: React.FC<{ datasetId: string; trigger?: string }> = 
 
   return (
     <div className="flex flex-col gap-4">
-      {(statusError || storeError) && (
-        <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
-          <XCircle size={16} className="mt-0.5 flex-shrink-0" />
-          <span className="min-w-0 break-words">{statusError || storeError}</span>
-        </div>
-      )}
-
-      {/* The licence, verbatim as the server sends it. A trained adapter is a
-          derivative of CC BY-NC weights and inherits the restriction, so this
-          belongs above the button that makes one, not in a footnote. */}
-      {status?.license && (
-        <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300">
-          <Scale size={14} className="mt-0.5 flex-shrink-0" />
-          <span className="min-w-0">
-            {status.license}
-            {' '}
-            {t('trainingStudio.yue2.licenseDerivative',
-              'An adapter trained on them is a derivative and inherits that restriction.')}
-          </span>
-        </div>
-      )}
-
-      {status && <Yue2PreprocessCard status={status} onDone={reload} />}
-
       {/* ── NAR LoRA ── */}
       <div className={CARD}>
         <div className="flex items-center gap-2 mb-2">
@@ -1022,5 +999,3 @@ export const Yue2TrainCard: React.FC<{ datasetId: string; trigger?: string }> = 
     </div>
   );
 };
-
-export default Yue2TrainCard;

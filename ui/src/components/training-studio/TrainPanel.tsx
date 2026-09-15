@@ -24,8 +24,7 @@ import { JobProgress } from './JobProgress';
 import { TrainingChart } from './TrainingChart';
 import { TrainingRunStats } from './TrainingRunStats';
 import { Mm3TrainCard } from './Mm3TrainCard';
-import { Yue2TrainCard } from './Yue2TrainCard';
-import { Yue2ArTrainCard } from './Yue2ArTrainCard';
+import { Yue2TrainStages } from './Yue2TrainStages';
 import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from './TrainDitForm';
 import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from './TrainLmForm';
 import { useTrainingStream } from './useTrainingStream';
@@ -472,17 +471,17 @@ export const TrainPanel: React.FC = () => {
   // the VAE, training needs the LM, and demanding both up here would hide the
   // encode stage from someone who has only the VAE so far.
   //
-  // TWO CARDS, in model order: the NAR half (sound) and the AR half (the
-  // composer, which is where artist likeness lives). They are siblings rather
-  // than one card with a toggle because they train different halves of the
-  // model from different caches — but they share stage 1, the latent cache the
-  // NAR card owns, which is why the AR card sits below it and points back up.
+  // FIVE STAGES, in one fixed order: 1 latent cache, 2 codes, 3 lyric cursor
+  // spans, 4 NAR LoRA training (the sound), 5 AR LoRA training (the composer,
+  // which is where artist likeness lives). Yue2TrainStages owns that order,
+  // the shared status fetches, and the "Perform all stages" chain; the five
+  // stage cards themselves live in Yue2TrainCard.tsx (1, 4) and
+  // Yue2ArTrainCard.tsx (2, 3, 5).
   if (yue2Mode) {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <Yue2TrainCard datasetId={detail.id} trigger={detail.customTag || ''} />
-        <Yue2ArTrainCard datasetId={detail.id} trigger={detail.customTag || ''} />
+        <Yue2TrainStages datasetId={detail.id} trigger={detail.customTag || ''} />
       </div>
     );
   }

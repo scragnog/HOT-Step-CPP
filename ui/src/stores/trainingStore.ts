@@ -179,6 +179,13 @@ interface TrainingState {
   // job
   activeJob: TrainingJobSummary | null;
   jobLog: Array<{ level: string; message: string; ts: number }>;   // capped at 200
+  /** YuE2 "Perform all stages": true from the click until the chain stops,
+   *  either because every stage is done/skipped or because one failed. Not
+   *  persisted — a hard reload loses it, same as `activeJob`. */
+  yue2RunAllActive: boolean;
+  /** Which of the five YuE2 stages (1-5) the chain is currently on or waiting
+   *  to finish. Null when the chain isn't running. */
+  yue2RunAllStage: number | null;
 
   // preprocess
   preprocessStatus: PreprocessStatus | null;
@@ -344,6 +351,16 @@ interface TrainingState {
    *  server's advisory warnings about a partial cache — the run has already
    *  started, so they are for the card to show, not to act on. */
   startYue2ArTrain(opts?: trainingApi.Yue2ArTrainRequest): Promise<string[]>;
+  /** YuE2 "Perform all stages": runs 1 latent cache, 2 codes, 3 lyric cursor
+   *  spans, 4 NAR LoRA training, 5 AR LoRA training in order, skipping any
+   *  stage already complete. Stops the chain the moment a stage ends in
+   *  anything but 'done' — the failed job's own error is left on `error`,
+   *  there is no separate retry-from-here. Lives here rather than in
+   *  server/src/services/training/pipelineRunner.ts, which is the ACE
+   *  batch-import orchestrator hardcoded to a different stage union: this
+   *  chain survives SPA navigation (it is Zustand state) but not a hard
+   *  reload (nothing here is persisted). */
+  runYue2AllStages(datasetId: string, trigger: string): Promise<void>;
   loadTrainDitStatus(q?: { variantKey?: string; adapterName?: string }): Promise<void>;
   startTrainDit(opts: TrainDitOptions): Promise<void>;
   loadAuditions(): Promise<void>;
@@ -385,6 +402,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
   activeJob: null,
   jobLog: [],
+  yue2RunAllActive: false,
+  yue2RunAllStage: null,
 
   preprocessStatus: null,
   preprocessLoading: false,
@@ -942,6 +961,82 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     } catch (err) {
       set({ error: errMessage(err) });
       return [];
+    }
+  },
+
+  runYue2AllStages: async (datasetId, trigger) => {
+    if (get().yue2RunAllActive) return;
+    const running = get().activeJob;
+    if (running && (running.status === 'queued' || running.status === 'running')) {
+      set({ error: 'A job is already running for this dataset — wait for it to finish first.' });
+      return;
+    }
+    set({ yue2RunAllActive: true, yue2RunAllStage: null, error: null });
+    try {
+      // Stage 1: latent cache.
+      set({ yue2RunAllStage: 1 });
+      let arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (!arStatus.stages.preprocess.done) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Preprocess(datasetId, {}));
+        if (job.status !== 'done') { set({ error: yue2StageFailure('Latent cache', job) }); return; }
+      }
+
+      // Stage 2: codes.
+      set({ yue2RunAllStage: 2 });
+      arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (!arStatus.stages.tokenize.done) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Tokenize(datasetId, {}));
+        if (job.status !== 'done') { set({ error: yue2StageFailure('Codes', job) }); return; }
+      }
+
+      // Stage 3: lyric cursor spans.
+      set({ yue2RunAllStage: 3 });
+      arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (!arStatus.stages.align.done) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Align(datasetId, {}));
+        if (job.status !== 'done') { set({ error: yue2StageFailure('Lyric cursor spans', job) }); return; }
+      }
+
+      // Stage 4: NAR LoRA training. "Already complete" means the NEWEST run for
+      // this dataset finished cleanly — an owner decision, not a technical one:
+      // a halted or failed run does not count, and this never resumes one, it
+      // starts fresh exactly like the button does.
+      set({ yue2RunAllStage: 4 });
+      const narRuns = await trainingApi.listYue2Runs(datasetId);
+      if (narRuns.runs[0]?.outcome !== 'completed') {
+        const body: trainingApi.Yue2TrainRequest = trigger.trim()
+          ? { trigger: trigger.trim() } : { allowNoTrigger: true };
+        const job = await startYue2JobAndAwait(
+          set, get,
+          { ...blankTrainSeries(), trainMaxEpochs: 0, trainTargetLoss: 0, yue2Live: null },
+          () => trainingApi.startYue2Train(datasetId, body),
+        );
+        if (job.status !== 'done') { set({ error: yue2StageFailure('NAR LoRA training', job) }); return; }
+      }
+
+      // Stage 5: AR LoRA training. Same "newest run completed" rule as stage 4.
+      set({ yue2RunAllStage: 5 });
+      arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      const arRuns = await trainingApi.listYue2ArRuns(datasetId);
+      if (arRuns.runs[0]?.outcome !== 'completed') {
+        const body: trainingApi.Yue2ArTrainRequest = {
+          ...(trigger.trim() ? { trigger: trigger.trim() } : { allowNoTrigger: true }),
+          ...(arStatus.minted.present ? {} : { allowNoMinted: true }),
+        };
+        const job = await startYue2JobAndAwait(
+          set, get,
+          { ...blankTrainSeries(), trainMaxEpochs: 0, trainTargetLoss: 0, yue2ArLive: null, yue2ArEvalSeries: [] },
+          () => trainingApi.startYue2ArTrain(datasetId, body),
+        );
+        if (job.status !== 'done') { set({ error: yue2StageFailure('AR LoRA training', job) }); return; }
+      }
+    } catch (err) {
+      set({ error: errMessage(err) });
+    } finally {
+      set({ yue2RunAllActive: false, yue2RunAllStage: null });
     }
   },
 
@@ -1515,6 +1610,46 @@ async function adoptJob(
   const job = await trainingApi.getJob(jobId);
   set({ activeJob: job });
   if (job.status !== 'queued' && job.status !== 'running') refreshAfterJob(get, job.id);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+/** Start one YuE2 job and poll it to a terminal state, the same 1500 ms cadence
+ *  server/src/services/training/pipelineRunner.ts uses for the ACE batch
+ *  pipeline. `activeJob` is updated on every poll, so JobProgress and the SSE
+ *  stream mounted off it (DatasetDetail.tsx, keyed on `activeJob`) follow the
+ *  run live exactly as they do for a single Start button.
+ *
+ *  Deliberately NOT a mode on `adoptJob`: the five single-stage startYue2*
+ *  actions above must keep resolving the instant the job is ADOPTED (their
+ *  callers' busy spinners depend on that timing), so "run one job all the way
+ *  to done" is this separate helper, used only by runYue2AllStages. */
+async function startYue2JobAndAwait(
+  set: (partial: Partial<TrainingState>) => void,
+  get: () => TrainingState,
+  seed: Partial<TrainingState>,
+  start: () => Promise<{ jobId: string }>,
+): Promise<TrainingJobSummary> {
+  set({ jobLog: [], error: null, ...seed });
+  const { jobId } = await start();
+  for (;;) {
+    const job = await trainingApi.getJob(jobId);
+    set({ activeJob: job });
+    if (job.status !== 'queued' && job.status !== 'running') {
+      refreshAfterJob(get, job.id);
+      return job;
+    }
+    await sleep(1500);
+  }
+}
+
+/** One line for the run-all chain to surface when a stage doesn't end in
+ *  'done' — the job's own error if it has one, otherwise just its status. */
+function yue2StageFailure(label: string, job: TrainingJobSummary): string {
+  const what = job.status === 'cancelled' ? 'was cancelled' : 'failed';
+  return `${label} ${what}${job.error ? `: ${job.error}` : '.'}`;
 }
 
 /**
