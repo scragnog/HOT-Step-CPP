@@ -2,12 +2,18 @@
 //
 // All four phases ship. Monitor is the batch-pipeline queue view (see
 // MonitorPanel.tsx).
+//
+// Phase 2 is absent under YuE2: its latent cache is stage 1 of the five-stage
+// flow on the Train page (Yue2TrainStages.tsx), which the "Perform all stages"
+// button drives. A second entry point onto the same cache would be two UIs free
+// to disagree about one artifact.
 
 import React from 'react';
 import { Database, Layers, Cpu, Activity, Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 
 type Phase = 'dataset' | 'preprocess' | 'train' | 'monitor';
 
@@ -25,11 +31,17 @@ export const PhaseStepper: React.FC = () => {
   // Phase 2 is a different thing per backend: ACE encodes a tensor cache,
   // MiniMax-Music3 exports RVQ codes. Same slot in the pipeline, so the chip is
   // relabelled rather than a fifth phase being invented.
-  const mm3Mode = useBackendStore(s => s.activeBackendId) === 'minimax-m3';
+  const backendId = useBackendStore(s => s.activeBackendId);
+  const mm3Mode = backendId === 'minimax-m3';
+  // YuE2 owns its preprocess on the Train page, so the slot is dropped rather
+  // than relabelled.
+  const phases = backendId === YUE2_BACKEND_ID
+    ? PHASES.filter(p => p.id !== 'preprocess')
+    : PHASES;
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      {PHASES.map((p, i) => {
+      {phases.map((p, i) => {
         const active = phase === p.id;
         return (
           <React.Fragment key={p.id}>
