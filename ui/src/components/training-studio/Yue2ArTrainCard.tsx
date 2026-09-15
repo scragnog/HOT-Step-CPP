@@ -303,7 +303,10 @@ export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
   const [edits, setEdits] = useState<Partial<StemsForm>>({});
 
   const stage = status.stages.align;
-  const form: StemsForm = { level: 0, force: false, ...edits };
+  // 4 = SUPERSEP_VOCALS_ONLY. See the server's own note (yue2Stems.ts): level 0
+  // is three model passes and five discarded stems for a stage that opens one
+  // file.
+  const form: StemsForm = { level: 4, force: false, ...edits };
   const set = <K extends keyof StemsForm>(k: K, v: StemsForm[K]) =>
     setEdits(e => ({ ...e, [k]: v }));
 
@@ -359,14 +362,27 @@ export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
 
       {advanced && (
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <NumField
-            label={t('trainingStudio.yue2ar.stemsLevel', 'Quality level')}
-            value={form.level}
-            onChange={v => set('level', Math.max(0, Math.min(3, Math.round(v))))}
-            hint={t('trainingStudio.yue2ar.stemsLevelHint',
-              'SuperSep level 0-3. The aligner only ever opens vocals.wav, so a higher level buys cleaner '
-              + 'separation and costs time; 0 is the default.') as string}
-          />
+          <label className="flex flex-col gap-1">
+            <span className={LABEL}>{t('trainingStudio.yue2ar.stemsLevel', 'Separator')}</span>
+            <select className={INPUT} value={form.level}
+              onChange={e => set('level', Number(e.target.value))}>
+              <option value={4}>
+                {t('trainingStudio.yue2ar.stemsLevelVocals', 'Vocals only, one pass (recommended)')}
+              </option>
+              <option value={5}>
+                {t('trainingStudio.yue2ar.stemsLevelLeap', 'Leap Xe pair, two passes')}
+              </option>
+              <option value={0}>
+                {t('trainingStudio.yue2ar.stemsLevelFull', 'Full six-stem split (slowest)')}
+              </option>
+            </select>
+            <span className={HINT}>
+              {t('trainingStudio.yue2ar.stemsLevelHint',
+                'The aligner opens one file, vocals.wav, so the default runs the separator with everything '
+                + 'but the vocal stem masked off. The six-stem split produces a drum kit and a piano this '
+                + 'stage then deletes, at roughly three model passes instead of one.')}
+            </span>
+          </label>
           <CheckField
             className="col-span-2 md:col-span-1 self-end pb-1.5"
             label={t('trainingStudio.yue2ar.stemsForce', 'Re-separate existing stems')}

@@ -3369,11 +3369,21 @@ router.post('/datasets/:id/yue2-stems', (req: Request, res: Response) => {
       return;
     }
 
+    // SUPERSEP_VOCALS_ONLY (4) by default, not BASIC (0). This stage wants one
+    // stem, and level 0 is the full pipeline: a Leap Xe vocal pass, a Leap Xe
+    // instrumental pass, and THEN a six-stem BS-RoFormer split of the
+    // instrumental, of which five stems are thrown away here. Level 4 is the
+    // same BS-RoFormer weights with the mask set to stem 3 alone, so the
+    // mask-multiply, iSTFT and overlap-add for the other five never run.
+    //
+    // The upper bound is SUPERSEP_STABLESTEP (5), matching the engine's own
+    // clamp (hot-step-server.cpp): 4 and 5 are the two-stem modes and clamping
+    // them down to 0 was silently the slowest possible answer.
     const levelRaw = Number(b.level);
     const job = queue.startYue2StemsJob(ds.id, {
       audioDir,
       slug: ds.slug,
-      level: Number.isFinite(levelRaw) && levelRaw >= 0 && levelRaw <= 3 ? levelRaw : 0,
+      level: Number.isFinite(levelRaw) && levelRaw >= 0 && levelRaw <= 5 ? levelRaw : 4,
       force: b.force === true,
     });
     res.json({

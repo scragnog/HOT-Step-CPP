@@ -28,6 +28,18 @@ const ACE_URL = `http://127.0.0.1:${config.aceServer.port}`;
  *  match is on the name we are given and the file we write is fixed. */
 const VOCAL_NAMES = ['vocals', 'vocal', 'lead vocals', 'lead_vocals'];
 
+/** SUPERSEP_VOCALS_ONLY. The aligner opens one file, vocals.wav, so this stage
+ *  has no use for a drum kit or a piano — and level 0 would produce them at
+ *  real cost: a Leap Xe vocal pass, a Leap Xe instrumental pass, and a six-stem
+ *  BS-RoFormer split on top, five stems of which are freed unheard. Level 4
+ *  runs the same BS-RoFormer weights with the mask pinned to the vocal stem, so
+ *  it is one pass and the other five stems never leave the frequency domain.
+ *
+ *  Its vocal is lead PLUS backing, which is the right call for lyrics: a
+ *  karaoke-style lead-only split would drop the doubled and harmonised lines
+ *  the aligner still has to place. */
+export const YUE2_STEMS_DEFAULT_LEVEL = 4;
+
 export interface Yue2StemsProgress {
   /** 1-based index of the track being separated. */
   index: number;
@@ -157,7 +169,7 @@ export async function yue2SeparateDataset(opts: {
 
     opts.onProgress?.({ index: i + 1, total: sources.length, name, fraction: null });
     try {
-      await separateOne(src, dest, opts.level ?? 0, f => {
+      await separateOne(src, dest, opts.level ?? YUE2_STEMS_DEFAULT_LEVEL, f => {
         opts.onProgress?.({ index: i + 1, total: sources.length, name, fraction: f });
       });
       out.written++;
