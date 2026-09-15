@@ -220,6 +220,15 @@ export const YUE2_NAR_DEFAULTS = {
   /** AR-prefix K/V canvases held at once, ~104 MB each at 10 s clips. A real
    *  VRAM knob; the engine default is 8 and that is what was measured. */
   kvCache: 8,
+  /** Micro-steps one working set of clips is held for. With per-clip
+   *  `codec_ids` every clip is its own conditioning, so a uniform draw hits
+   *  the K/V cache only `cap/N` of the time — 8 of 249 on a thirteen-song
+   *  album — and pays a full AR prefill on nearly every step (0.18 s/it
+   *  against 0.065 warm, with the GPU at 41%). Sampling inside a set sized to
+   *  the cache keeps it warm. 0 draws from the whole corpus, which is what the
+   *  text-only regime wants; the engine engages it only when the clips carry
+   *  codec ids, so this default is inert on a text-only cache. */
+  clipBlock: 64,
   logEvery: 10,
   /** Keep `<out>/yue2_nar_ckpt.bin` after a clean finish? The engine deletes
    *  it on a successful export (yue2-nar-train-run.h, "the run's MIDDLE, not
@@ -340,9 +349,16 @@ export const YUE2_VRAM_MODEL = {
    *  encoder is the only thing resident in that stage, so this plus the VAE
    *  file is the whole footprint. */
   encodeComputeMb: 3700,
-  /** Measured seconds per optimizer step at the anchors above. Used for the
-   *  form's ETA and nothing else. */
+  /** Measured seconds per optimizer step at the anchors above, in the
+   *  TEXT-ONLY regime — one conditioning for the whole corpus, so the AR
+   *  prefix is prefilled once and every step is NAR work alone. */
   secondsPerStep: 0.065,
+  /** And with per-clip codec conditioning, where a step also pays its share of
+   *  AR prefills. 0.079 measured with the working-set sampler at --clip-block
+   *  64 / --kv-cache 8; it was 0.18 under the uniform draw that preceded it.
+   *  A cache built by the AR pipeline ALWAYS carries codec ids, so this is the
+   *  number most in-app runs get and the form must not quote the other one. */
+  secondsPerStepCodec: 0.079,
 } as const;
 
 /** Peak VRAM for a training configuration, in MB.
@@ -362,9 +378,17 @@ export function estimateYue2PreprocessMb(vaeBytes: number): number {
   return Math.round((vaeBytes > 0 ? vaeBytes / 1048576 : 0) + YUE2_VRAM_MODEL.encodeComputeMb);
 }
 
-/** Wall-clock estimate for a run, in ms. 10 000 steps ~ 12 min, 20 000 ~ 23. */
-export function estimateYue2RunMs(steps: number): number {
-  return Math.max(0, steps) * YUE2_VRAM_MODEL.secondsPerStep * 1000;
+/** Wall-clock estimate for a run, in ms.
+ *
+ *  Takes the regime, because it is worth about 20 minutes on a 10 000-step
+ *  run: text-only is ~11 min, codec-conditioned ~13. Quoting the text-only
+ *  number for a codec-conditioned cache is how the form came to promise 11
+ *  minutes for a run that took 30. */
+export function estimateYue2RunMs(steps: number, codecConditioned = false): number {
+  const perStep = codecConditioned
+    ? YUE2_VRAM_MODEL.secondsPerStepCodec
+    : YUE2_VRAM_MODEL.secondsPerStep;
+  return Math.max(0, steps) * perStep * 1000;
 }
 
 // ── Layout ──────────────────────────────────────────────────────────────────
@@ -532,6 +556,7 @@ export interface ResolvedYue2TrainOptions {
   tSampling: 'logit-normal' | 'uniform';
   seed: number;
   kvCache: number;
+  clipBlock: number;
   /** Continue `<out>/yue2_nar_ckpt.bin`. The engine REFUSES a resume whose
    *  rank/alpha/target/grad-accum/frames/seed, or whose
    *  trigger/lyrics/t-sampling/caption-dropout, differ from the saved run; it
@@ -567,6 +592,7 @@ export function buildYue2TrainArgs(o: ResolvedYue2TrainOptions): string[] {
     '--t-sampling', o.tSampling,
     '--seed', String(o.seed),
     '--kv-cache', String(o.kvCache),
+    '--clip-block', String(o.clipBlock),
     '--log-every', String(o.logEvery),
     '--save-every', String(o.saveEvery),
   ];

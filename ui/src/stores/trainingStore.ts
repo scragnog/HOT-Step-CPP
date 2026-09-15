@@ -1323,7 +1323,15 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
             const perEpoch = get().trainStepsPerEpoch;
             // Without stepsPerEpoch the integer epoch is the best x available;
             // the layer then draws as short flat runs rather than a smooth line.
-            const epPos = perEpoch > 0 ? ev.step / perEpoch : (ev.epoch ?? 0);
+            //
+            // And with NEITHER — the YuE2 trainers publish no stepsPerEpoch and
+            // no per-step epoch, because they sample clips at random and have
+            // no epoch to report — the step number itself is the axis. Falling
+            // back to 0 put every point at x=0, which is a vertical line hard
+            // against the left edge: the chart drew correct y-bounds and no
+            // visible curve. Safe because a run with no epoch stream has no
+            // epoch layer to share the domain with.
+            const epPos = perEpoch > 0 ? ev.step / perEpoch : (ev.epoch ?? ev.step);
             const stepMs = typeof ev.stepMs === 'number' ? ev.stepMs : (typeof ev.ms === 'number' ? ev.ms : undefined);
             set({
               trainStepSeries: appendStepPoint(

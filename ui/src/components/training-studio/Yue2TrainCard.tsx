@@ -569,6 +569,7 @@ interface TrainForm {
   tSampling: 'logit-normal' | 'uniform';
   seed: number;
   kvCache: number;
+  clipBlock: number;
 }
 
 const PRESET_ORDER: Yue2PresetName[] = ['balanced', 'thorough', 'fast'];
@@ -628,6 +629,7 @@ export const Yue2TrainCard: React.FC<{ datasetId: string; trigger?: string }> = 
     tSampling: d.tSampling,
     seed: d.seed,
     kvCache: d.kvCache,
+    clipBlock: d.clipBlock,
     ...edits,
   } : null;
 
@@ -696,6 +698,7 @@ export const Yue2TrainCard: React.FC<{ datasetId: string; trigger?: string }> = 
         gradAccum: form.gradAccum, maxGradNorm: form.maxGradNorm,
         weightDecay: form.weightDecay, captionDropout: form.captionDropout,
         tSampling: form.tSampling, seed: form.seed, kvCache: form.kvCache,
+        clipBlock: form.clipBlock,
         // Sent only when there is one: the route falls back to the dataset's
         // own trigger word, and sending '' would look like an answer.
         ...(form.trigger.trim() ? { trigger: form.trigger.trim() } : {}),
@@ -924,6 +927,12 @@ export const Yue2TrainCard: React.FC<{ datasetId: string; trigger?: string }> = 
                     hint={t('trainingStudio.yue2.kvCacheHint',
                       'AR-prefix caches held at once, about 104 MB each at 10 s clips. A real VRAM '
                       + 'knob; 8 is what was measured.') as string} />
+                  <NumField label={t('trainingStudio.yue2.clipBlock', 'Clip block')} value={form.clipBlock}
+                    onChange={v => set('clipBlock', v)}
+                    hint={t('trainingStudio.yue2.clipBlockHint',
+                      'Steps one working set of clips is held for. With per-clip codec ids every clip '
+                      + 'is its own conditioning, so drawing from the whole album misses the K/V cache '
+                      + 'almost every step and re-runs the AR prefix. 0 draws from everything.') as string} />
                   <NumField label={t('trainingStudio.yue2.logEvery', 'Log every')} value={form.logEvery}
                     onChange={v => set('logEvery', v)} />
                   <label className="flex flex-col gap-1">

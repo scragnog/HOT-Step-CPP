@@ -156,6 +156,9 @@ export const TrainingChart: React.FC<Props> = ({
   const lastEpoch = epochPts.length ? epochPts[epochPts.length - 1].epoch : 0;
   const lastStepEp = stepPts.length ? stepPts[stepPts.length - 1].ep : 0;
   const xMax = Math.max(lastEpoch, lastStepEp, 1);
+  /** No epoch series at all: the step layer is carrying its own step numbers as
+   *  x (see the store's epPos fallback), so the axis is steps, not epochs. */
+  const stepAxis = epochPts.length === 0 && stepPts.length > 0;
 
   const xFor = (ep: number) => (ep / xMax) * VB;
   const yFor = (v: number) => {
@@ -206,7 +209,9 @@ export const TrainingChart: React.FC<Props> = ({
     if (stIdx >= 0) {
       const s = stepPts[stIdx];
       x = xFor(s.ep); y = yFor(s.loss);
-      lines.push(t('trainingStudio.chart.hoverStep', { step: s.step, epoch: s.ep.toFixed(2), defaultValue: 'step {{step}} · epoch {{epoch}}' }));
+      lines.push(stepAxis
+        ? t('trainingStudio.chart.hoverStepOnly', { step: s.step, defaultValue: 'step {{step}}' })
+        : t('trainingStudio.chart.hoverStep', { step: s.step, epoch: s.ep.toFixed(2), defaultValue: 'step {{step}} · epoch {{epoch}}' }));
       lines.push(t('trainingStudio.chart.hoverLoss', { loss: s.loss.toFixed(4), defaultValue: 'loss {{loss}}' }));
       if (typeof s.lr === 'number') lines.push(`lr ${fmtSci(s.lr)}`);
       if (typeof s.gradNorm === 'number') lines.push(`grad norm ${s.gradNorm.toFixed(3)}`);
@@ -383,9 +388,14 @@ export const TrainingChart: React.FC<Props> = ({
           {t('trainingStudio.chart.current', { loss: currentLoss.toFixed(4) })}
         </span>
         <span className={`${LABEL} left-1/2 -translate-x-1/2 bottom-1 text-zinc-500`}>
-          {maxEpochs > 0
-            ? t('trainingStudio.chart.epochAxis', { epoch: lastEpoch, total: maxEpochs })
-            : t('trainingStudio.chart.epochAxisOpen', { epoch: lastEpoch })}
+          {/* A run with no epoch layer is plotted against its step number, so
+              saying "epoch 0" under it would be a label for an axis that is
+              not there. */}
+          {stepAxis
+            ? t('trainingStudio.chart.stepAxis', { step: lastStepEp, defaultValue: 'step {{step}}' })
+            : maxEpochs > 0
+              ? t('trainingStudio.chart.epochAxis', { epoch: lastEpoch, total: maxEpochs })
+              : t('trainingStudio.chart.epochAxisOpen', { epoch: lastEpoch })}
         </span>
         {hasTarget && (
           <span

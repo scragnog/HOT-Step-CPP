@@ -464,6 +464,13 @@ static void print_usage(void) {
             "                [--log-every 10] [--kv-cache 8]  cached AR-prefix K/V canvases,\n"
             "                ~104 MB each at 10 s clips; over the cap the least recently used\n"
             "                one is freed and rebuilt on demand.\n"
+            "                [--clip-block 64]  micro-steps one working set of clips is held\n"
+            "                for. With per-clip codec_ids every clip is its own conditioning,\n"
+            "                so a uniform draw hits the cache only cap/N of the time and pays\n"
+            "                an AR prefill on nearly every step; sampling inside a set sized\n"
+            "                to the cache keeps it warm. 0 draws from the whole corpus, which\n"
+            "                is right for the text-only regime. Both this and --kv-cache are\n"
+            "                part of the resume signature.\n"
             "                Writes <out>/<name>.safetensors in the 08 §4 / 10 §3 key scheme\n"
             "                (yue2.blk.N.nar_*.lora_{A,B}.weight); load it through\n"
             "                /yue2/select-model's adapter field.\n"
@@ -4500,6 +4507,7 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--save-every"))  a.save_every = atoll(next("--save-every"));
         else if (!strcmp(argv[i], "--log-every"))   a.log_every  = atoll(next("--log-every"));
         else if (!strcmp(argv[i], "--kv-cache"))    a.kv_cache   = atoll(next("--kv-cache"));
+        else if (!strcmp(argv[i], "--clip-block"))  a.clip_block = atoll(next("--clip-block"));
         else if (!strcmp(argv[i], "--resume"))      a.resume     = true;
         else if (!strcmp(argv[i], "--fd-check"))    a.fd_check   = atoi(next("--fd-check"));
         else if (!strcmp(argv[i], "--fd-eps"))      a.fd_eps     = atof(next("--fd-eps"));

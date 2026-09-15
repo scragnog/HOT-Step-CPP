@@ -176,6 +176,10 @@ struct Yue2NarTrainArgs {
     // AR-prefix K/V canvases held at once. One canvas is ~104 MB at the
     // default clip length, so this is a real VRAM knob — see Yue2NtKvCache.
     int64_t     kv_cache   = 8;
+    // Micro-steps one working set of clips is held for before the next set is
+    // drawn. 0 disables it and every step draws from the whole corpus, which
+    // is what the text-only regime wants. See yue2_nt_pick_clip.
+    int64_t     clip_block = 64;
     bool        resume     = false;  // continue from <out>/yue2_nar_ckpt.bin
 
     // --fd-check N: run the gradient gate over N probes instead of training.
@@ -1625,7 +1629,60 @@ enum {
     YUE2_NT_TAG_DROPOUT = 2,
     YUE2_NT_TAG_T       = 3,
     YUE2_NT_TAG_NOISE   = 4,
+    YUE2_NT_TAG_BLOCK   = 5,
 };
+
+// ── Which clip a micro-step trains on ──────────────────────────────────────
+//
+// Uniform random over the whole corpus is the WORST POSSIBLE access pattern
+// for the LRU cache above: there is no locality to exploit, so the hit rate is
+// exactly cap/N. In the text-only regime that costs nothing, because N is the
+// number of distinct captions and the cache covers it. With per-clip codec
+// conditioning N is the CLIP COUNT — 249 on a thirteen-song album against a
+// cap of 8 — and 97% of steps paid a full AR prefill before any NAR work
+// happened. Measured: 0.18 s/it against 0.065 for the same rank with a warm
+// cache, and the GPU sat at 41% because a prefill is a serialised phase.
+//
+// So hold a WORKING SET for a block of steps and sample uniformly inside it.
+// Each clip still gets the same EXPECTED number of visits — the set is redrawn
+// from the whole corpus every block — but the visits cluster in time, which is
+// the price. Blocks are kept short (64 micro-steps by default, against a
+// working set of ~4) so a clip lands in several blocks spread across the run
+// rather than being spent in one burst at one point on the lr schedule. It is
+// shuffle-bucket sampling, and the same trade every dataloader with a shuffle
+// buffer makes.
+//
+// PURE FUNCTION OF (seed, k), exactly as the uniform draw was, which is what
+// keeps resume exact: the block index is k / block, and the set is drawn from
+// (seed, block index). Nothing accumulates across steps.
+static void yue2_nt_block_set(uint64_t seed, uint64_t block_idx, size_t n_clips,
+                              size_t working, std::vector<uint32_t> * out) {
+    out->clear();
+    if (working > n_clips) {
+        working = n_clips;
+    }
+    // Rejection sampling for distinctness. `working` is a handful against a
+    // corpus of hundreds, so collisions are rare; the loop is bounded anyway
+    // because a draw that cannot find a new index would mean working > n_clips,
+    // which is clamped above.
+    Yue2NtRng r(yue2_nt_seed_mix(seed, block_idx, YUE2_NT_TAG_BLOCK));
+    while (out->size() < working) {
+        size_t c = (size_t) (r.u01() * (double) n_clips);
+        if (c >= n_clips) {
+            c = n_clips - 1;
+        }
+        bool dup = false;
+        for (size_t i = 0; i < out->size(); i++) {
+            if ((*out)[i] == (uint32_t) c) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) {
+            out->push_back((uint32_t) c);
+        }
+    }
+}
 
 // ── Learning rate ──────────────────────────────────────────────────────────
 //
@@ -1739,6 +1796,12 @@ static uint64_t yue2_nt_cond_hash(const Yue2NarTrainArgs & a) {
     mix_str(a.lyrics);        // the fallback when a clip carries none
     mix_str(a.t_sampling);    // re-parameterises t off the same seeded stream
     mix_bytes(&a.caption_dropout, sizeof(a.caption_dropout));  // ditto, the dropout draw
+    // Both of these now steer WHICH CLIP a micro-step trains on (block
+    // sampling sizes its working set from the cache cap), so a resume across a
+    // change to either would silently continue on a different data order.
+    // --kv-cache was a pure VRAM knob before this and is not one any more.
+    mix_bytes(&a.clip_block, sizeof(a.clip_block));
+    mix_bytes(&a.kv_cache, sizeof(a.kv_cache));
     // NOT --style. It reaches the FD gate only (yue2_nar_fdcheck_main builds
     // its prefix from it); the loop builds style from --trigger + the clip's
     // own caption and never reads a.style. Fingerprinting it would refuse a
@@ -2379,6 +2442,35 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
     const int64_t          t0_ms      = ggml_time_ms();
     bool                   said_ctx   = false;
 
+    // ── the working set (see yue2_nt_block_set) ──
+    //
+    // Engaged only where it pays: per-clip codec conditioning with more clips
+    // than the cache can hold. In the text-only regime the cache already
+    // covers every distinct conditioning, so the clustering would buy nothing
+    // and cost the sampling.
+    std::vector<uint32_t> blk_sel;
+    uint64_t              blk_idx     = 0;
+    size_t                blk_working = 0;
+    if (a.clip_block > 0 && n_codec > 0) {
+        blk_working = (size_t) std::max<int64_t>(1, a.kv_cache);
+        // Dropout gives a clip TWO conditionings — with the style and without
+        // — and BOTH land in the cache. A set the full size of the cap would
+        // thrash inside the block exactly as the corpus did outside it.
+        if (a.caption_dropout > 0.0f) {
+            blk_working = std::max<size_t>(1, blk_working / 2);
+        }
+        if (blk_working >= clips.size()) {
+            blk_working = 0;  // the cache covers the corpus; nothing to gain
+        }
+    }
+    if (blk_working) {
+        fprintf(stderr,
+                "[yue2-train] sampling a working set of %zu clip(s) per %lld micro-steps "
+                "(--clip-block), so the AR prefix is prefilled about %.0f%% less often\n",
+                blk_working, (long long) a.clip_block,
+                100.0 * (1.0 - (double) blk_working / (double) a.clip_block));
+    }
+
     for (int64_t step = step0 + 1; step <= a.steps; step++) {
         const double lr_now = yue2_nt_lr_at(a, step - 1);
         C.opt.base_lr       = (float) lr_now;
@@ -2391,7 +2483,21 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
             const uint64_t k = (uint64_t) ((step - 1) * a.grad_accum + g);
 
             Yue2NtRng    r_clip(yue2_nt_seed_mix(a.seed, k, YUE2_NT_TAG_CLIP));
-            const size_t pick = (size_t) (r_clip.u01() * (double) clips.size());
+            size_t       pick;
+            if (blk_working) {
+                // The set is a pure function of the block index, so a resume
+                // that lands mid-block rebuilds the same one.
+                const uint64_t b = k / (uint64_t) a.clip_block;
+                if (blk_sel.empty() || b != blk_idx) {
+                    blk_idx = b;
+                    yue2_nt_block_set(a.seed, b, clips.size(), blk_working, &blk_sel);
+                }
+                const size_t j = std::min((size_t) (r_clip.u01() * (double) blk_sel.size()),
+                                          blk_sel.size() - 1);
+                pick           = (size_t) blk_sel[j];
+            } else {
+                pick = (size_t) (r_clip.u01() * (double) clips.size());
+            }
             const Yue2TrainClip & cl = *clips[std::min(pick, clips.size() - 1)];
             last_id                  = cl.id.c_str();
 

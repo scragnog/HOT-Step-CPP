@@ -3107,6 +3107,7 @@ router.post('/datasets/:id/yue2-train', (req: Request, res: Response) => {
         ? b.tSampling : D.tSampling,
       seed: num('seed', D.seed, 0, 2 ** 31 - 1),
       kvCache: num('kvCache', D.kvCache, 1, 256),
+      clipBlock: num('clipBlock', D.clipBlock, 0, 100000),
       // A NEW run never resumes: outDir is minted per run and holds no state.
       // Continuing an existing one is a separate ask (the engine refuses a
       // changed rank/alpha/target/trigger and is exact only within one build),
@@ -3119,7 +3120,10 @@ router.post('/datasets/:id/yue2-train', (req: Request, res: Response) => {
       jobId: job.id, kind: job.kind, runName, outDir,
       clips: cache.clips, lmType, target,
       tensors: YUE2_TARGET_TENSORS[target],
-      estimatedMs: estimateYue2RunMs(steps),
+      // Per-clip codec conditioning costs the run about 20% more per step even
+      // with the working-set sampler, so the estimate has to know which cache
+      // this is. A cache the AR pipeline has tokenized always carries codes.
+      estimatedMs: estimateYue2RunMs(steps, readYue2CodecIdsStatus(manifest)?.present === true),
       license: YUE2_LICENSE_NOTICE,
     });
   } catch (err: any) {

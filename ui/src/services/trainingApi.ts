@@ -498,6 +498,7 @@ export interface Yue2Defaults {
   tSampling: 'logit-normal' | 'uniform';
   seed: number;
   kvCache: number;
+  clipBlock: number;
   logEvery: number;
   /** The engine deletes its resume state on a clean export. Reported, not
    *  offered — there is no server-side way to keep it. */
@@ -597,6 +598,7 @@ export interface Yue2TrainRequest {
   tSampling?: 'logit-normal' | 'uniform';
   seed?: number;
   kvCache?: number;
+  clipBlock?: number;
 }
 
 /** A safetensors `__metadata__` block, as the exporter wrote it. */
