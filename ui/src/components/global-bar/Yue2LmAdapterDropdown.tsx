@@ -29,8 +29,9 @@
 // model that has been nudged and not much else — so the trigger is shown
 // large, copyable, and called out when an adapter has none.
 //
-// LICENCE: YuE2 weights are CC BY-NC 4.0 and a trained adapter inherits that.
-// The text is YUE2_LICENSE_NOTICE in the server's backends/yue2/index.ts and
+// LICENCE: YuE2 weights are CC BY-NC 4.0 — with the authors' carve-out for
+// individual creators — and a trained adapter carries the same terms. The
+// text is YUE2_LICENSE_NOTICE in the server's backends/yue2/index.ts and
 // arrives here as `capabilities.license` — rendered verbatim, never retyped.
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -461,7 +462,7 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
         <p className="text-[10px] text-amber-600 dark:text-amber-500/80 leading-relaxed border-t border-zinc-200 dark:border-white/5 pt-2">
           {license}{' '}
           {t('globalBar.yue2AdapterLicenseDerivative',
-            'An adapter trained on these weights is a derivative and inherits the same restriction.')}
+            'An adapter trained on these weights is a derivative and carries the same terms.')}
         </p>
       )}
     </div>

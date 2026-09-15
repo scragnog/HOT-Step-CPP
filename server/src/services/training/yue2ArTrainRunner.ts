@@ -697,10 +697,10 @@ export async function runYue2ArTrainJob(job: TrainingJob): Promise<void> {
 
   try {
     // The derived-weight half of the licence, as the NAR runner says it: a
-    // trained adapter is a derivative of CC BY-NC weights and inherits the
-    // restriction, so the run that produces one says so.
+    // trained adapter is a derivative of CC BY-NC weights and carries the
+    // same terms, so the run that produces one says so.
     log(job, 'warn', YUE2_LICENSE_NOTICE
-      + ' An adapter trained from them is a derivative work and inherits that restriction.');
+      + ' An adapter trained from them is a derivative work and carries the same terms.');
     if (!opts.trigger) {
       log(job, 'warn',
         'No trigger word. The adapter will have nothing to address it by at generation time, which is '

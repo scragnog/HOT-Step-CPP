@@ -32,7 +32,7 @@
 //      see yue2TrainRunner.ts.
 //
 // LICENCE: YuE2 weights are CC BY-NC 4.0 and a trained adapter is a
-// derivative, so it inherits the restriction. The notice is
+// derivative, so it carries the same terms. The notice is
 // YUE2_LICENSE_NOTICE in services/backends/yue2/index.ts and is re-exported
 // through the status route rather than retyped — one place to read it from.
 

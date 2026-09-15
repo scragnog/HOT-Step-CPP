@@ -23,7 +23,7 @@
 //
 // THE LICENCE LINE IS THE SERVER'S STRING, rendered verbatim by
 // Yue2TrainStages. YuE2 weights are CC BY-NC 4.0 and a trained adapter is a
-// derivative that inherits the restriction; the text is YUE2_LICENSE_NOTICE in
+// derivative that carries the same terms; the text is YUE2_LICENSE_NOTICE in
 // services/backends/yue2, is shipped by the status route, and is never
 // retyped, truncated or paraphrased on this side.
 

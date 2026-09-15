@@ -79,12 +79,12 @@ export interface BackendCoreCapabilities {
   /** Paired with `modelsMissing` — a short user-facing explanation (e.g. "both
    *  GGUFs (~24 GB)") shown instead of a generic fallback when present. */
   modelsMissingHint?: string;
-  /** Plain-text license line for this backend's weights, e.g. "CC BY-NC 4.0
-   *  (non-commercial)". Cosmetic only — not a legal control, just something
-   *  to surface to the user. */
+  /** Plain-text license line for this backend's weights, e.g. YuE2's "CC
+   *  BY-NC 4.0, but the authors have clarified…" notice. Cosmetic only — not
+   *  a legal control, just something to surface to the user. */
   license?: string;
-  /** Short muted notice to pair with the backend picker — e.g. a
-   *  non-commercial-use reminder with an upstream contact address. Rendered
+  /** Short muted notice to pair with the backend picker — e.g. a weights-
+   *  licence reminder with an upstream contact address. Rendered
    *  verbatim by BackendToggle.tsx: never truncated, reworded, or paraphrased. */
   notice?: string;
   // Open — backends may report extra core-ish knobs (mirrors the server-side

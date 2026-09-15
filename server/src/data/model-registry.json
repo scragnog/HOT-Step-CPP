@@ -276,7 +276,7 @@
       "id": "yue2-recommended",
       "family": "yue2",
       "name": "YuE2 Recommended",
-      "description": "YuE2 — a second generation backend, separate from ACE-Step and MiniMax-Music3: an autoregressive language model (plan/semantic/nar stages) plus a VAE decoder, producing 48 kHz stereo audio from a freeform style + lyrics prompt. Q8_0 LM (near-lossless, NAR-stage rel-L2 vs bf16 output 0.019 against bf16's own 0.013 baseline — docs/plans/yue2/07-quant-ladder.md §5) plus the standard VAE. ~4.4 GB total. License: CC BY-NC 4.0 (non-commercial) — free for personal and research use, but not for commercial products. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 — a second generation backend, separate from ACE-Step and MiniMax-Music3: an autoregressive language model (plan/semantic/nar stages) plus a VAE decoder, producing 48 kHz stereo audio from a freeform style + lyrics prompt. Q8_0 LM (near-lossless, NAR-stage rel-L2 vs bf16 output 0.019 against bf16's own 0.013 baseline — docs/plans/yue2/07-quant-ladder.md §5) plus the standard VAE. ~4.4 GB total. License: CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "fileIds": [
         "yue2-lm-q8_0",
         "yue2-vae-standard-f32"
@@ -286,7 +286,7 @@
       "id": "yue2-full-precision",
       "family": "yue2",
       "name": "YuE2 Full Precision",
-      "description": "YuE2 at source precision (BF16 LM) plus the standard VAE — the reference quality bar the whole quant ladder is measured against (docs/plans/yue2/07-quant-ladder.md). Largest download and VRAM footprint of the four YuE2 packs. ~7.8 GB total. License: CC BY-NC 4.0 (non-commercial) — free for personal and research use, but not for commercial products. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 at source precision (BF16 LM) plus the standard VAE — the reference quality bar the whole quant ladder is measured against (docs/plans/yue2/07-quant-ladder.md). Largest download and VRAM footprint of the four YuE2 packs. ~7.8 GB total. License: CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "fileIds": [
         "yue2-lm-bf16",
         "yue2-vae-standard-f32"
@@ -296,7 +296,7 @@
       "id": "yue2-compact-imatrix",
       "family": "yue2",
       "name": "YuE2 Compact (imatrix)",
-      "description": "YuE2 with the Q4_K_M-imat LM (imatrix-guided quantization; NAR-stage rel-L2 vs bf16 output 0.116 against bf16's own 0.013 baseline — docs/plans/yue2/07-quant-ladder.md §12/§14) plus the standard VAE. The usual choice for limited VRAM. ~3.0 GB total. License: CC BY-NC 4.0 (non-commercial) — free for personal and research use, but not for commercial products. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 with the Q4_K_M-imat LM (imatrix-guided quantization; NAR-stage rel-L2 vs bf16 output 0.116 against bf16's own 0.013 baseline — docs/plans/yue2/07-quant-ladder.md §12/§14) plus the standard VAE. The usual choice for limited VRAM. ~3.0 GB total. License: CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "fileIds": [
         "yue2-lm-Q4_K_M-imat",
         "yue2-vae-standard-f32"
@@ -306,7 +306,7 @@
       "id": "yue2-tiny-imatrix",
       "family": "yue2",
       "name": "YuE2 Tiny (imatrix)",
-      "description": "YuE2 with the smallest LM this ladder ships, Q2_K-imat, plus the standard VAE. WARNING: audibly degraded — NAR-stage rel-L2 vs bf16 output is 0.389 against bf16's own 0.013 baseline (docs/plans/yue2/07-quant-ladder.md §12/§14), the second-worst measurement on the whole ladder. Pick this only for the smallest possible download/VRAM footprint and expect the flow-matching output to sound rougher than every other pack. ~2.2 GB total. License: CC BY-NC 4.0 (non-commercial) — free for personal and research use, but not for commercial products. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 with the smallest LM this ladder ships, Q2_K-imat, plus the standard VAE. WARNING: audibly degraded — NAR-stage rel-L2 vs bf16 output is 0.389 against bf16's own 0.013 baseline (docs/plans/yue2/07-quant-ladder.md §12/§14), the second-worst measurement on the whole ladder. Pick this only for the smallest possible download/VRAM footprint and expect the flow-matching output to sound rougher than every other pack. ~2.2 GB total. License: CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "fileIds": [
         "yue2-lm-Q2_K-imat",
         "yue2-vae-standard-f32"
@@ -3862,7 +3862,7 @@
       "quant": "BF16",
       "sizeBytes": 7267839328,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Source precision — the reference quality bar the rest of the ladder below is measured against (NAR-stage rel-L2 0.013 vs its own output, docs/plans/yue2/07-quant-ladder.md §5). Required alongside one of the VAE decoders below; this file is ~7.3 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Source precision — the reference quality bar the rest of the ladder below is measured against (NAR-stage rel-L2 0.013 vs its own output, docs/plans/yue2/07-quant-ladder.md §5). Required alongside one of the VAE decoders below; this file is ~7.3 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -3883,7 +3883,7 @@
       "quant": "Q8_0",
       "sizeBytes": 3916164544,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Near-lossless: NAR-stage rel-L2 vs bf16 output is 0.019, next to bf16's own 0.013 baseline (docs/plans/yue2/07-quant-ladder.md §5). The recommended default. Required alongside one of the VAE decoders below; this file is ~3.9 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Near-lossless: NAR-stage rel-L2 vs bf16 output is 0.019, next to bf16's own 0.013 baseline (docs/plans/yue2/07-quant-ladder.md §5). The recommended default. Required alongside one of the VAE decoders below; this file is ~3.9 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [
         "recommended"
       ],
@@ -3906,7 +3906,7 @@
       "quant": "Q6_K",
       "sizeBytes": 3050315200,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Still very close to source: NAR-stage rel-L2 vs bf16 output is 0.056, next to bf16's own 0.013 baseline (docs/plans/yue2/07-quant-ladder.md §5). Required alongside one of the VAE decoders below; this file is ~3.1 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Still very close to source: NAR-stage rel-L2 vs bf16 output is 0.056, next to bf16's own 0.013 baseline (docs/plans/yue2/07-quant-ladder.md §5). Required alongside one of the VAE decoders below; this file is ~3.1 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -3927,7 +3927,7 @@
       "quant": "Q5_K_M",
       "sizeBytes": 2730565056,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Good quality/size balance: NAR-stage rel-L2 vs bf16 output is 0.088, next to bf16's own 0.013 baseline (docs/plans/yue2/07-quant-ladder.md §5). Required alongside one of the VAE decoders below; this file is ~2.7 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Good quality/size balance: NAR-stage rel-L2 vs bf16 output is 0.088, next to bf16's own 0.013 baseline (docs/plans/yue2/07-quant-ladder.md §5). Required alongside one of the VAE decoders below; this file is ~2.7 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -3948,7 +3948,7 @@
       "quant": "Q4_K_M-imat",
       "sizeBytes": 2429623904,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Compact; the usual choice for limited VRAM. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.116 (vs 0.154 for the same quant without an imatrix), next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~2.4 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Compact; the usual choice for limited VRAM. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.116 (vs 0.154 for the same quant without an imatrix), next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~2.4 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -3969,7 +3969,7 @@
       "quant": "Q4_K_S-imat",
       "sizeBytes": 2338332256,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Slightly smaller than Q4_K_M-imat, marginally lower quality. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.111, next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~2.3 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Slightly smaller than Q4_K_M-imat, marginally lower quality. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.111, next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~2.3 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -3990,7 +3990,7 @@
       "quant": "IQ4_XS-imat",
       "sizeBytes": 2235571808,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). i-quant alternative to Q4_K_M-imat at a similar size. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.123, next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~2.2 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). i-quant alternative to Q4_K_M-imat at a similar size. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.123, next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~2.2 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4011,7 +4011,7 @@
       "quant": "NVFP4",
       "sizeBytes": 2506878400,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). 4-bit float, fastest on Blackwell (RTX 50-series) native FP4 kernels. Experimental: NAR-stage rel-L2 vs bf16 output is 0.194, next to bf16's own 0.013 baseline — worse than the smaller Q3_K_M-imat despite landing in the same size band (docs/plans/yue2/07-quant-ladder.md §5/§7). Required alongside one of the VAE decoders below; this file is ~2.5 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). 4-bit float, fastest on Blackwell (RTX 50-series) native FP4 kernels. Experimental: NAR-stage rel-L2 vs bf16 output is 0.194, next to bf16's own 0.013 baseline — worse than the smaller Q3_K_M-imat despite landing in the same size band (docs/plans/yue2/07-quant-ladder.md §5/§7). Required alongside one of the VAE decoders below; this file is ~2.5 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4032,7 +4032,7 @@
       "quant": "MXFP4",
       "sizeBytes": 2418798016,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). 4-bit float, portable variant. Experimental: NAR-stage rel-L2 vs bf16 output is 0.283, next to bf16's own 0.013 baseline — the worst-scoring type in its own size class, occasionally behind the strictly smaller Q3_K_M-imat (docs/plans/yue2/07-quant-ladder.md §5/§7). Required alongside one of the VAE decoders below; this file is ~2.4 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). 4-bit float, portable variant. Experimental: NAR-stage rel-L2 vs bf16 output is 0.283, next to bf16's own 0.013 baseline — the worst-scoring type in its own size class, occasionally behind the strictly smaller Q3_K_M-imat (docs/plans/yue2/07-quant-ladder.md §5/§7). Required alongside one of the VAE decoders below; this file is ~2.4 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4053,7 +4053,7 @@
       "quant": "Q3_K_M-imat",
       "sizeBytes": 2055282272,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Aggressive: quality loss is audible in the flow-matching (NAR) stage, verify before relying on it. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.213, next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~2.1 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Aggressive: quality loss is audible in the flow-matching (NAR) stage, verify before relying on it. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.213, next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~2.1 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4074,7 +4074,7 @@
       "quant": "Q3_K_S-imat",
       "sizeBytes": 1949310560,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Very aggressive: expect noticeable degradation in the flow-matching (NAR) stage. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.245, next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~1.9 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). Very aggressive: expect noticeable degradation in the flow-matching (NAR) stage. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.245, next to bf16's own 0.013 baseline (§12/§14). Required alongside one of the VAE decoders below; this file is ~1.9 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4095,7 +4095,7 @@
       "quant": "IQ3_XXS-imat",
       "sizeBytes": 1734143584,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). i-quant alternative below Q3_K_S-imat's size. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.262, next to bf16's own 0.013 baseline (§12/§14). Expect noticeable degradation in the flow-matching (NAR) stage. Required alongside one of the VAE decoders below; this file is ~1.7 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). i-quant alternative below Q3_K_S-imat's size. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.262, next to bf16's own 0.013 baseline (§12/§14). Expect noticeable degradation in the flow-matching (NAR) stage. Required alongside one of the VAE decoders below; this file is ~1.7 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4116,7 +4116,7 @@
       "quant": "Q2_K-imat",
       "sizeBytes": 1690574432,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). WARNING: audibly degraded. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.389, next to bf16's own 0.013 baseline (§12/§14) — roughly halved from the same quant built without an imatrix (0.819), but still the second-worst measurement on the whole ladder. Required alongside one of the VAE decoders below; this file is ~1.7 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). WARNING: audibly degraded. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.389, next to bf16's own 0.013 baseline (§12/§14) — roughly halved from the same quant built without an imatrix (0.819), but still the second-worst measurement on the whole ladder. Required alongside one of the VAE decoders below; this file is ~1.7 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4137,7 +4137,7 @@
       "quant": "IQ2_XS-imat",
       "sizeBytes": 1368911456,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). WARNING: audibly degraded — the floor of what still runs. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.431, next to bf16's own 0.013 baseline (§12/§14) — the worst measurement on the whole ladder. Required alongside one of the VAE decoders below; this file is ~1.4 GB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2 autoregressive language model — plans the semantic/acoustic token sequence from a freeform style + lyrics prompt (plan/semantic/nar stages). WARNING: audibly degraded — the floor of what still runs. Quantized against an importance matrix collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9); NAR-stage rel-L2 vs bf16 output is 0.431, next to bf16's own 0.013 baseline (§12/§14) — the worst measurement on the whole ladder. Required alongside one of the VAE decoders below; this file is ~1.4 GB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4158,7 +4158,7 @@
       "quant": "imatrix",
       "sizeBytes": 4218528,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "Calibration data used to build the imatrix-guided quant ladder above (Q4_K_M-imat through IQ2_XS-imat) — not a model file itself, not needed to run YuE2, and not part of any starter pack. Only useful if you plan to requantize the LM yourself with quantize.exe --imatrix. Collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9). ~4.2 MB. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "Calibration data used to build the imatrix-guided quant ladder above (Q4_K_M-imat through IQ2_XS-imat) — not a model file itself, not needed to run YuE2, and not part of any starter pack. Only useful if you plan to requantize the LM yourself with quantize.exe --imatrix. Collected from 12 real generations across four languages/genres (docs/plans/yue2/07-quant-ladder.md §9). ~4.2 MB. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4179,7 +4179,7 @@
       "quant": "F32",
       "sizeBytes": 530348768,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2's standard VAE stage — decodes the LM's planned tokens to 48 kHz stereo audio. Pick either this or the legacy decoder below, not both. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2's standard VAE stage — decodes the LM's planned tokens to 48 kHz stereo audio. Pick either this or the legacy decoder below, not both. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [
         "recommended"
       ],
@@ -4202,7 +4202,7 @@
       "quant": "F32",
       "sizeBytes": 530348768,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "YuE2's legacy VAE stage, kept for parity with earlier YuE checkpoints. Pick either this or the standard decoder above, not both. Non-commercial use only: YuE2's weights are licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "YuE2's legacy VAE stage, kept for parity with earlier YuE checkpoints. Pick either this or the standard decoder above, not both. YuE2's weights are licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {
@@ -4223,7 +4223,7 @@
       "quant": "F16",
       "sizeBytes": 1211631392,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "Turns real audio into YuE2 semantic tokens — the reverse of what the LM does. Optional, and only useful for training: with it, `ace-train yue2-tokenize` fills the codec_ids slot in a YuE2 preprocess cache so a NAR adapter trains on ground-truth codes exactly as inference conditions, instead of the text-only regime. Not needed to generate music. One file holds both halves of the chain: MERT-v2-FullSong's mel frontend, ConvNext subsampler and first 21 Conformer blocks, plus Mothersuperior's 8-layer tokenizer head (docs/plans/yue2/12-tokenizer-oracle-pin.md). Non-commercial use only: derived from YuE2-3B and licensed CC BY-NC 4.0. For a commercial license, contact the upstream authors at gezhang@umich.edu.",
+      "description": "Turns real audio into YuE2 semantic tokens — the reverse of what the LM does. Optional, and only useful for training: with it, `ace-train yue2-tokenize` fills the codec_ids slot in a YuE2 preprocess cache so a NAR adapter trains on ground-truth codes exactly as inference conditions, instead of the text-only regime. Not needed to generate music. One file holds both halves of the chain: MERT-v2-FullSong's mel frontend, ConvNext subsampler and first 21 Conformer blocks, plus Mothersuperior's 8-layer tokenizer head (docs/plans/yue2/12-tokenizer-oracle-pin.md). Derived from YuE2-3B and licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {

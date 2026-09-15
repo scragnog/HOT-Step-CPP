@@ -550,8 +550,8 @@ export interface Yue2Status {
   targetTensors: Record<Yue2NarTarget, number>;
   /** The dataset's own trigger word, which the trainer defaults to. */
   trigger: string;
-  /** CC BY-NC 4.0 notice, verbatim from the backend module. Rendered as sent —
-   *  never truncated, reworded or paraphrased. */
+  /** Weights-licence notice, verbatim from the backend module. Rendered as
+   *  sent — never truncated, reworded or paraphrased. */
   license: string;
 }
 

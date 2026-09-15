@@ -188,14 +188,19 @@ CODEC_OFFSET = 151853                       # YuE2 token id = code + CODEC_OFFSE
 CODEC_SIZE = 32768
 
 # -- licence. BOTH halves are CC BY-NC 4.0, and an adapter trained through this
-# encoder inherits NC. MERT: K:/yue2/models/MERT-v2-FullSong/LICENSE. Head:
+# encoder carries the same terms -- which, per the YuE2 authors' 2026-09-15
+# clarification, leaves individual creators free to use outputs commercially
+# and only obliges companies. MERT: K:/yue2/models/MERT-v2-FullSong/LICENSE. Head:
 # HF repo Mothersuperior/yue2-mothersuperior-realaudio-tokenizer-v4, derived from
 # YuE2-3B, also CC BY-NC 4.0. ------------------------------------------------
 LICENSE_NAME = "CC BY-NC 4.0"
 LICENSE_ATTRIBUTION = (
     "Weights are CC BY-NC 4.0 (Creative Commons Attribution-NonCommercial 4.0 "
-    "International), NON-COMMERCIAL USE ONLY, and anything trained through this "
-    "encoder inherits that. Attribution: MERT2 / MERT-v2-FullSong -- "
+    "International), and anything trained through this encoder carries the same "
+    "terms. The YuE2 authors have clarified that individual creators, musicians "
+    "and researchers may use the model and its outputs freely, including "
+    "commercially; only companies need a commercial licence. "
+    "Attribution: MERT2 / MERT-v2-FullSong -- "
     "https://huggingface.co/m-a-p/MERT-v2-FullSong ; tokenizer head -- "
     "https://huggingface.co/Mothersuperior/yue2-mothersuperior-realaudio-tokenizer-v4 "
     "(derived from https://huggingface.co/m-a-p/YuE2-3B)"

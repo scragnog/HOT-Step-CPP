@@ -2785,9 +2785,9 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
 //     Option-A sidecar raw, field syntax and lyrics included, so the default
 //     is `none` (style = the trigger word alone) and `txt` is refused unless
 //     the caller opts in explicitly.
-//   * YuE2 weights are CC BY-NC 4.0 and a trained adapter inherits it. The
-//     notice is shipped by the status route, read from the backend module's
-//     exported constant rather than retyped.
+//   * YuE2 weights are CC BY-NC 4.0 and a trained adapter carries the same
+//     terms. The notice is shipped by the status route, read from the backend
+//     module's exported constant rather than retyped.
 
 /** Shared guards for both YuE2 stages: dataset exists, nothing else is running
  *  on it, ace-train is in the build. Returns the dataset or null after
@@ -2958,7 +2958,7 @@ router.get('/datasets/:id/yue2', async (req: Request, res: Response) => {
        *  Without one the adapter has no handle at generation time. */
       trigger: ds.customTag || '',
       /** Rendered verbatim. A trained adapter is a derivative of CC BY-NC
-       *  weights and inherits the restriction. */
+       *  weights and carries the same terms. */
       license: YUE2_LICENSE_NOTICE,
     });
   } catch (err: any) {

@@ -152,8 +152,10 @@ export interface BackendCapabilities {
    *  plan §4.2, §3.6). `group` splits them across the top-bar clusters. */
   extensions: BackendExtensionParam[];
   /** Plain-text licensing notice the picker/Model Manager should show
-   *  verbatim (e.g. YuE2's CC BY-NC 4.0 non-commercial notice + upstream
-   *  commercial-license contact). Optional and additive — most backends omit
+   *  verbatim (e.g. YuE2's CC BY-NC 4.0 notice, the authors' individual-use
+   *  carve-out, and the upstream contact for a company licence). The text is
+   *  the backend module's own constant — never reword it here or in the UI,
+   *  since it is a licensing claim. Optional and additive — most backends omit
    *  it. Not a substitute for MM3's own license-mandated `displayName`
    *  string (backends/minimax/index.ts), which stays as it is. */
   license?: string;

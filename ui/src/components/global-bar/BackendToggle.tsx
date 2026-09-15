@@ -44,8 +44,8 @@ export const BackendToggle: React.FC = () => {
   const active = backends.find(b => b.id === activeBackendId) || backends[0];
 
   // Optional plain-text notice a backend's manifest can carry (backendStore.ts
-  // BackendCoreCapabilities.notice) — e.g. a non-commercial-license reminder
-  // with an upstream contact address. Generic: keyed off the manifest field,
+  // BackendCoreCapabilities.notice) — e.g. a weights-licence reminder with an
+  // upstream contact address. Generic: keyed off the manifest field,
   // never a backend id. Surfaced as a tooltip rather than an extra line under
   // the picker so a notice never changes the bar's fixed height.
   const notice = typeof capabilities?.license === 'string' ? capabilities.license : (typeof capabilities?.core?.notice === 'string' ? capabilities.core.notice : undefined);

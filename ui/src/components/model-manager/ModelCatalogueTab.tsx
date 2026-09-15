@@ -119,7 +119,7 @@ const ROLE_INFO: Record<string, string> = {
   whisper: 'OpenAI Whisper models for transcribing actual sung lyrics with word-level timestamps. Enable Whisper Lyrics in Post-Processing to use.',
   moss: 'MOSS-Music-8B — the only model here that ANALYSES audio rather than generating it. It captions your own tracks locally in the Training Studio, writing what it actually hears instead of rewriting a text analysis, and emits both the ACE-Step caption format and MM3 Structured Captions from a single pass. Pick one LM (Q8_0 recommended) plus the audio tower, which is required and never quantised. Nothing else in the app depends on these — they are only used when you choose MOSS as the caption provider.',
   mm3: 'MiniMax-Music3 — a separate generation backend with its own models: a language model plus a 5-way split flow stack (depth decoder, condition encoder, DiT, vocoder — the LM and DiT are the two you must pick; the rest default to auto). All required roles load together, needing ~24 GB of VRAM. Switch to it via the Backend toggle in the top bar. A LICENSE file is fetched alongside automatically once a GGUF finishes downloading.',
-  yue2: 'YuE2 — a third generation backend: a language model plus a VAE decoder, producing 48 kHz stereo audio from a freeform style + lyrics prompt (no headed caption template). Pick the LM plus exactly one VAE (Standard or Legacy — not both). Switch to it via the Backend toggle in the top bar. Non-commercial use only: YuE2 is licensed CC BY-NC 4.0 by its upstream authors — for a commercial license, contact gezhang@umich.edu. A LICENSE file is fetched alongside automatically once a GGUF finishes downloading.',
+  yue2: 'YuE2 — a third generation backend: a language model plus a VAE decoder, producing 48 kHz stereo audio from a freeform style + lyrics prompt (no headed caption template). Pick the LM plus exactly one VAE (Standard or Legacy — not both). Switch to it via the Backend toggle in the top bar. YuE2 is licensed CC BY-NC 4.0, but its authors have clarified that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial licence (gezhang@umich.edu). A LICENSE file is fetched alongside automatically once a GGUF finishes downloading.',
   // mm3Trt is NOT here — unlike every other entry in this record, it's new
   // text (the reviewer flagged it for i18n), so it's translated at its one
   // call site via t('models.mm3Trt.info') instead of joining this
@@ -299,12 +299,13 @@ const Yue2Tab: React.FC<{
       <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 flex items-start gap-2.5">
         <ShieldCheck size={15} className="mt-0.5 flex-shrink-0 text-amber-500" />
         <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
-          Non-commercial use only — YuE2's weights are licensed{' '}
+          YuE2's weights are licensed{' '}
           <a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener noreferrer"
             className="inline-flex items-center gap-1 underline hover:no-underline">
             CC BY-NC 4.0<ExternalLink size={10} />
-          </a>{' '}
-          by its upstream authors. For a commercial license, contact{' '}
+          </a>, but the upstream authors have clarified that individual creators, musicians
+          and researchers may use the model and its outputs freely, including commercially.
+          Only companies need a commercial licence — contact{' '}
           <a href="mailto:gezhang@umich.edu" className="inline-flex items-center gap-1 underline hover:no-underline">
             gezhang@umich.edu<Mail size={10} />
           </a>.

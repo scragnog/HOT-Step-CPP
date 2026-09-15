@@ -6,12 +6,17 @@
 // the SAME ace-server process, so this module is a capability manifest + a
 // client wrapper, with the generation path in ./generate.ts.
 //
-// LICENSE NOTE: YuE2 weights are CC BY-NC 4.0 (non-commercial). This backend
-// must never be presented as unconditionally licensed for a commercial
-// product — the picker and Model Manager carry a plain notice plus the
-// upstream commercial-licence contact (gezhang@umich.edu). `licenseNotice`
-// below is additive on BackendCapabilities so the UI has one place to read it
-// from rather than hardcoding the string a second time.
+// LICENSE NOTE: YuE2 weights are stamped CC BY-NC 4.0, but on 2026-09-15 the
+// upstream authors clarified in a Hugging Face discussion on m-a-p/YuE2-3B
+// that individual creators, musicians and researchers may use the model and
+// its outputs freely, including commercially — only companies need to buy a
+// commercial licence. That is the authors' stated intent, not an amended
+// LICENSE file, so the notice names the licence AND attributes the carve-out
+// rather than presenting it as licence text. The picker, Model Manager and
+// Training Studio all carry it plus the upstream contact
+// (gezhang@umich.edu). `license` below is additive on BackendCapabilities so
+// the UI has one place to read it from rather than hardcoding the string a
+// second time.
 
 import fs from 'fs';
 import path from 'path';
@@ -44,11 +49,13 @@ import type { GenerationJob } from '../../generation/jobTypes.js';
  *  "duration ... max: 360, auto: true"). */
 const YUE2_MAX_DURATION_SEC = 360;
 
-/** CC BY-NC 4.0 — non-commercial only. See the header note above and the
- *  Model Manager entry for the same text. */
+/** CC BY-NC 4.0, with the authors' individual-use carve-out. See the header
+ *  note above and the Model Manager entry for the same text. */
 export const YUE2_LICENSE_NOTICE =
-  'YuE2 weights are licensed CC BY-NC 4.0 (non-commercial use only). '
-  + 'For a commercial license, contact the upstream authors at gezhang@umich.edu.';
+  "YuE2's weights are licensed CC BY-NC 4.0, but the upstream authors have clarified that "
+  + 'individual creators, musicians and researchers may use the model and its outputs freely, '
+  + 'including commercially. Only companies need a commercial licence — contact them at '
+  + 'gezhang@umich.edu.';
 
 const LM_TYPE_SETTING = 'yue2_lm_type';
 const VAE_VARIANT_SETTING = 'yue2_vae_variant';
