@@ -698,6 +698,7 @@
     "trainingStudio.chart.epochAxisOpen": "epoch {{epoch}}",
     "trainingStudio.chart.stepAxis": "step {{step}}",
     "trainingStudio.chart.hoverStepOnly": "step {{step}}",
+    "trainingStudio.chart.legendRunMean": "running mean",
     "trainingStudio.chart.legendStep": "per step",
     "trainingStudio.chart.legendEpoch": "epoch",
     "trainingStudio.chart.legendMa5": "5-epoch avg",

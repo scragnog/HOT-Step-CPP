@@ -170,6 +170,12 @@ export const TrainingChart: React.FC<Props> = ({
     pts.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
 
   const stepLine = line(stepPts.map(s => ({ x: xFor(s.ep), y: yFor(s.loss) })));
+  // The trainer's own running mean, when the step frames carry one. On a
+  // rectified-flow run the per-step layer is a noise band — the loss tracks the
+  // random timestep draw far more than the training — so without this there is
+  // a correct chart with no readable trend in it.
+  const trendPts  = stepPts.filter(s => typeof s.ma5 === 'number' && Number.isFinite(s.ma5));
+  const trendLine = line(trendPts.map(s => ({ x: xFor(s.ep), y: yFor(s.ma5 as number) })));
   const epochLine = line(epochPts.map(e => ({ x: xFor(e.epoch), y: yFor(e.loss) })));
   const maLine = line(epochPts.map((e, i) => ({ x: xFor(e.epoch), y: yFor(ma[i]) })));
 
@@ -272,6 +278,20 @@ export const TrainingChart: React.FC<Props> = ({
               stroke="currentColor"
               strokeWidth={0.75}
               strokeOpacity={0.55}
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+
+          {/* (a2) the trainer's running mean, drawn OVER the noise band it
+              summarises and in a colour that reads against it. */}
+          {trendPts.length >= 2 && (
+            <polyline
+              points={trendLine}
+              fill="none"
+              className="text-sky-500"
+              stroke="currentColor"
+              strokeWidth={1.75}
               strokeLinejoin="round"
               vectorEffect="non-scaling-stroke"
             />
@@ -413,6 +433,12 @@ export const TrainingChart: React.FC<Props> = ({
           <span className="flex items-center gap-1">
             <span className="w-3 h-px bg-zinc-400 dark:bg-zinc-600" />
             {t('trainingStudio.chart.legendStep')}
+          </span>
+        )}
+        {trendPts.length >= 2 && (
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-0.5 bg-sky-500" />
+            {t('trainingStudio.chart.legendRunMean', 'running mean')}
           </span>
         )}
         {/* Only advertise a series that is actually drawn. These two were

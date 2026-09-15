@@ -60,6 +60,11 @@ export interface TrainStepPoint {
   gradNorm?: number;
   /** Wall time of THIS step. */
   stepMs?: number;
+  /** The trainer's own running mean at this step. The per-step loss of a
+   *  rectified-flow run is dominated by the random timestep draw — measured
+   *  corr(t, loss) = -0.52 on a YuE2 NAR run — so the raw layer is a noise
+   *  band with the trend invisible inside it. This is the line to read. */
+  ma5?: number;
   /** Server-clock time since the first metric of this job, so the tooltip can
    *  say how long the run took to reach a point. */
   elapsedMs?: number;
@@ -1340,6 +1345,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
                   ...(typeof ev.lr === 'number' ? { lr: ev.lr } : {}),
                   ...(typeof ev.gradNorm === 'number' ? { gradNorm: ev.gradNorm } : {}),
                   ...(stepMs !== undefined ? { stepMs } : {}),
+                  ...(typeof ev.ma5 === 'number' ? { ma5: ev.ma5 } : {}),
                   ...(runStartTs > 0 && typeof ev.ts === 'number' ? { elapsedMs: Math.max(0, ev.ts - runStartTs) } : {}),
                 },
               ),
