@@ -41,6 +41,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <random>
 #include <string>
@@ -329,7 +330,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     }
 
     std::vector<int32_t> history;
-    bool                   hit_eos = false;
+    bool                   hit_eos          = false;
+    bool                   eos_by_threshold = false;
     int64_t                 step    = 0;
     for (; step < sp.max_tokens; step++) {
         if (cancel && cancel->load()) {
@@ -348,8 +350,127 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         } else {
             blended = cond_logits;
         }
+        // Ending controls (yue2-request.h). The bias lands on the raw logit
+        // BEFORE the reference's mask/penalty/temperature/top-k/top-p chain,
+        // so the chain itself is untouched; the threshold reads the chain's
+        // OUTPUT, the very distribution the draw below samples from.
+        if (req.end_bias != 0.0f && step >= (int64_t) sp.min_tokens) {
+            const float t_sec = (float) step * 0.04f;  // 25 Hz codec frames
+            float       w     = 0.0f;
+            if (t_sec >= req.end_bias_from_sec) {
+                w = req.end_bias_ramp_sec > 0.0f
+                        ? std::min(1.0f, (t_sec - req.end_bias_from_sec) / req.end_bias_ramp_sec)
+                        : 1.0f;
+            }
+            if (w > 0.0f && std::isfinite(blended[(size_t) YUE2_MUSIC_END])) {
+                blended[(size_t) YUE2_MUSIC_END] += w * req.end_bias;
+            }
+        }
+        // YUE2_END_TRACE=<path>: uncensored per-step record of MUSIC_END's
+        // probability and rank BEFORE the sampler chain (softmax over the
+        // legal ids [legal_lo,legal_hi) + END, raw logits, no penalty/temp/
+        // top-k/p) and AFTER it, plus the sampled token — the evidence for
+        // "the model reached its ending and END lost the draw". Read-only:
+        // it touches neither the scores nor the RNG.
+        static const char * end_trace_path = std::getenv("YUE2_END_TRACE");
+        double              tr_p_pre = -1.0, tr_p_post = -1.0;
+        int64_t             tr_r_pre = -1, tr_r_post = -1;
+        if (end_trace_path && *end_trace_path) {
+            auto stat = [&](const std::vector<float> & s, bool legal_only, double * p, int64_t * rank) {
+                float mx = -INFINITY;
+                for (int64_t v = 0; v < (int64_t) s.size(); v++) {
+                    const bool in = legal_only ? ((v >= legal_lo && v < legal_hi) || v == YUE2_MUSIC_END) : true;
+                    if (in && std::isfinite(s[(size_t) v]) && s[(size_t) v] > mx) {
+                        mx = s[(size_t) v];
+                    }
+                }
+                double  z = 0.0;
+                int64_t r = 0;
+                const float se = s[(size_t) YUE2_MUSIC_END];
+                for (int64_t v = 0; v < (int64_t) s.size(); v++) {
+                    const bool in = legal_only ? ((v >= legal_lo && v < legal_hi) || v == YUE2_MUSIC_END) : true;
+                    if (!in || !std::isfinite(s[(size_t) v])) {
+                        continue;
+                    }
+                    z += std::exp((double) (s[(size_t) v] - mx));
+                    if (s[(size_t) v] > se) {
+                        r++;
+                    }
+                }
+                *p    = std::isfinite(se) ? std::exp((double) (se - mx)) / z : 0.0;
+                *rank = std::isfinite(se) ? r : -1;
+            };
+            stat(blended, true, &tr_p_pre, &tr_r_pre);
+        }
         yue2_distribution(blended, sp, YUE2_MUSIC_END, legal_lo, legal_hi, history, step, legacy_off);
+        if (end_trace_path && *end_trace_path) {
+            float mx = -INFINITY;
+            for (float v : blended) {
+                if (std::isfinite(v) && v > mx) {
+                    mx = v;
+                }
+            }
+            double  z = 0.0;
+            int64_t r = 0;
+            const float se = blended[(size_t) YUE2_MUSIC_END];
+            for (float v : blended) {
+                if (!std::isfinite(v)) {
+                    continue;
+                }
+                z += std::exp((double) (v - mx));
+                if (v > se) {
+                    r++;
+                }
+            }
+            tr_p_post = std::isfinite(se) ? std::exp((double) (se - mx)) / z : 0.0;
+            tr_r_post = std::isfinite(se) ? r : -1;
+        }
+        if (req.end_threshold > 0.0f && step >= (int64_t) sp.min_tokens &&
+            std::isfinite(blended[(size_t) YUE2_MUSIC_END])) {
+            // P(END) under the post-chain distribution: logsumexp over the
+            // finite entries (masked ones are -inf and contribute nothing).
+            float mx = -INFINITY;
+            for (float v : blended) {
+                if (std::isfinite(v) && v > mx) {
+                    mx = v;
+                }
+            }
+            double z = 0.0;
+            for (float v : blended) {
+                if (std::isfinite(v)) {
+                    z += std::exp((double) (v - mx));
+                }
+            }
+            const double p_end = std::exp((double) (blended[(size_t) YUE2_MUSIC_END] - mx)) / z;
+            if (p_end >= (double) req.end_threshold) {
+                if (end_trace_path && *end_trace_path) {
+                    if (FILE * tf = fopen(end_trace_path, "a")) {
+                        fprintf(tf, "%lld\t%.2f\t%.6g\t%lld\t%.6g\t%lld\t%d\tforced_threshold\n", (long long) step,
+                                (double) step * 0.04, tr_p_pre, (long long) tr_r_pre, tr_p_post, (long long) tr_r_post,
+                                (int) YUE2_MUSIC_END);
+                        fclose(tf);
+                    }
+                }
+                hit_eos           = true;
+                eos_by_threshold  = true;
+                break;
+            }
+        }
         const int64_t tok_id = sp.temperature == 0.0f ? yue2_sample_argmax(blended) : yue2_sample_draw(blended, rng);
+        if (end_trace_path && *end_trace_path) {
+            if (FILE * tf = fopen(end_trace_path, "a")) {
+                if (step == 0) {
+                    fprintf(tf, "# semantic stage: prefix %lld ids, seed %llu, threshold %.3f, bias %.3f\n",
+                            (long long) pos_prefix.size(), (unsigned long long) req.seed, (double) req.end_threshold,
+                            (double) req.end_bias);
+                    fprintf(tf, "# step\tsec\tp_end_pre\trank_pre\tp_end_post\trank_post\tsampled\tnote\n");
+                }
+                fprintf(tf, "%lld\t%.2f\t%.6g\t%lld\t%.6g\t%lld\t%lld\t%s\n", (long long) step, (double) step * 0.04,
+                        tr_p_pre, (long long) tr_r_pre, tr_p_post, (long long) tr_r_post, (long long) tok_id,
+                        tok_id == YUE2_MUSIC_END ? "sampled_end" : "");
+                fclose(tf);
+            }
+        }
         if (progress) {
             progress({ YUE2_STAGE_SEMANTIC, step + 1, sp.max_tokens });
         }
@@ -381,7 +502,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         yue2_ar_kv_cache_free(&uncond_cache);
     }
 
-    *stage_end_reason = hit_eos ? "eos" : "limit_hit";
+    *stage_end_reason = hit_eos ? (eos_by_threshold ? "eos_threshold" : "eos") : "limit_hit";
     *stage_ms          = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     return true;
 }

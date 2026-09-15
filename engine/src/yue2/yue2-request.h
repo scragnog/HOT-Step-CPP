@@ -49,6 +49,23 @@ struct Yue2Request {
     int         ode_steps = 0;  // 0 = use the checkpoint's own GGUF default (resolved below)
     std::string ode_method;     // "" = checkpoint default ("midpoint"); only "midpoint" is implemented
 
+    // ── Ending controls, semantic stage only (2026-09-15) ────────────────
+    // Measured on the adapter ladders (_LISTENING/2026-09-14/RESULTS.md, 77/83):
+    // a trained AR reaches its ending and MUSIC_END then loses the draw to a
+    // codec token, after which the stream drones to the frame cap. Two knobs,
+    // both off by default so the stock model's behaviour is untouched:
+    //   end_threshold  in (0,1]: stop when the sampler's own distribution
+    //                  (after mask, penalty, temperature, top-k/top-p) puts at
+    //                  least this much mass on MUSIC_END. 0 = off.
+    //   end_bias       additive logit bias on MUSIC_END, applied from
+    //                  end_bias_from_sec of generated audio and ramping
+    //                  linearly to full strength over end_bias_ramp_sec. 0 = off.
+    // Both respect min_tokens (END stays blocked before it).
+    float end_threshold    = 0.0f;
+    float end_bias         = 0.0f;
+    float end_bias_from_sec = 0.0f;
+    float end_bias_ramp_sec = 0.0f;
+
     Yue2VaeVariant vae_variant = YUE2_VAE_STANDARD;
 
     // Validator-only (docs/plans/yue2/06-engine-port-plan.md §7): absent from
@@ -187,6 +204,37 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
     }
     if (present) {
         out->ode_steps = (int) num;
+    }
+
+    // Ending controls (see the struct). Range-checked here so a typo is a
+    // 400, not a silent no-op or a stream that ends at frame 200.
+    struct EndField {
+        const char * key;
+        float *      dst;
+        double       lo, hi;
+    };
+    const EndField end_fields[] = {
+        { "end_threshold", &out->end_threshold, 0.0, 1.0 },
+        { "end_bias", &out->end_bias, -50.0, 50.0 },
+        { "end_bias_from_sec", &out->end_bias_from_sec, 0.0, 3600.0 },
+        { "end_bias_ramp_sec", &out->end_bias_ramp_sec, 0.0, 3600.0 },
+    };
+    for (const EndField & f : end_fields) {
+        if (!yue2_req_num(root, f.key, &num, &present, err)) {
+            yyjson_doc_free(doc);
+            return false;
+        }
+        if (present) {
+            if (!(num >= f.lo && num <= f.hi)) {
+                if (err) {
+                    *err = std::string(f.key) + " must be within [" + std::to_string(f.lo) + ", " +
+                           std::to_string(f.hi) + "]";
+                }
+                yyjson_doc_free(doc);
+                return false;
+            }
+            *f.dst = (float) num;
+        }
     }
 
     if (!yue2_req_str(root, "ode_method", &out->ode_method, &present, err)) {
