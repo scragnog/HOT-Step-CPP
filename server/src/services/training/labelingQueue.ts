@@ -361,6 +361,7 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
     case 'yue2-preprocess':  // YuE2 VAE encode, 3.7 GB compute buffer + the VAE
     case 'yue2-nar-train':   // 19.6 GB at rank 256 with a bf16 base
     case 'yue2-tokenize':    // MERT + the tokenizer head over every source
+    case 'yue2-stems':       // SuperSep through the engine, one track at a time
     case 'yue2-align':       // MMS_FA, ~5 GB per track (CPU only with --cpu)
     case 'yue2-ar-train':    // whole songs to 12,288 tokens through a bf16 base
       return 'gpu';
@@ -1413,6 +1414,22 @@ export function startYue2TrainJob(datasetId: string, opts: unknown): TrainingJob
   enqueue(job, async (j) => {
     const { runYue2TrainJob } = await import('./yue2TrainRunner.js');
     await runYue2TrainJob(j);
+  });
+  return job;
+}
+
+/**
+ * YuE2 cache stage 2a — vocal stems for stage 3. Its own job kind rather than a
+ * step inside align, because separation is by far the most expensive part of
+ * the AR pipeline and a failed alignment should never mean separating thirteen
+ * songs again. `sampleIds` is empty for the same reason the other YuE2 stages
+ * leave it empty: the inputs are audio files, not dataset rows.
+ */
+export function startYue2StemsJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-stems', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2StemsJob } = await import('./yue2ArTrainRunner.js');
+    await runYue2StemsJob(j);
   });
   return job;
 }

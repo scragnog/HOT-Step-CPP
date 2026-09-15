@@ -34,7 +34,7 @@ export type TrainingJobKind =
   // 'yue2-tokenize' (codec_ids, what the next-token loss is scored on) and
   // 'yue2-align' (cursor_words, what --cursor-weight reads). GPU-lane like the
   // rest; each spawns ace-train, which owns the card.
-  | 'yue2-tokenize' | 'yue2-align' | 'yue2-ar-train';
+  | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 

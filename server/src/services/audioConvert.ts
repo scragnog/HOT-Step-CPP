@@ -76,7 +76,7 @@ function isEngineCompatibleWav(filePath: string): boolean {
  *
  * Converted files are cached as `<original>.engine.wav` next to the original.
  */
-export function ensureEngineFormat(filePath: string): Buffer {
+export function ensureEngineFormat(filePath: string, cacheDir?: string): Buffer {
   const ext = path.extname(filePath).toLowerCase();
 
   // MP3: always engine-compatible
@@ -91,8 +91,18 @@ export function ensureEngineFormat(filePath: string): Buffer {
 
   // Everything else needs conversion (or WAV with non-16-bit format)
 
-  // Check for cached conversion
-  const wavPath = filePath + '.engine.wav';
+  // Check for cached conversion.
+  //
+  // The cache sits beside the source by default, which is right for the two
+  // folders this was written for (data/references, data/audio) and WRONG for a
+  // user's dataset: a training run would leave a ~50 MB .engine.wav next to
+  // every track, in a folder the dataset scanner walks, so they come back as
+  // untitled unlabelled rows. Callers working outside our own data dirs pass
+  // a scratch `cacheDir` instead.
+  const wavPath = cacheDir
+    ? path.join(cacheDir, path.basename(filePath) + '.engine.wav')
+    : filePath + '.engine.wav';
+  if (cacheDir) fs.mkdirSync(cacheDir, { recursive: true });
   if (fs.existsSync(wavPath)) {
     console.log(`[audioConvert] Using cached conversion: ${path.basename(wavPath)}`);
     return fs.readFileSync(wavPath);

@@ -51,6 +51,7 @@ import {
   type ResolvedYue2AlignOptions,
 } from './yue2Align.js';
 import { log, numOr, runYue2AceTrain, type RelayState } from './yue2TrainRunner.js';
+import { yue2SeparateDataset } from './yue2Stems.js';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
 
 // ── yue2-ar-train: stderr -> events ─────────────────────────────────────────
@@ -449,6 +450,61 @@ function relayAlignLine(job: TrainingJob, line: string, st: AlignState): void {
 }
 
 // ── yue2-tokenize ───────────────────────────────────────────────────────────
+
+/**
+ * YuE2 cache stage 2a — vocal stems, so stage 3 has something to align against.
+ *
+ * This one does NOT spawn ace-train: separation is an engine HTTP call, the same
+ * one Stem Studio makes, so there is no process to relay and the progress comes
+ * from the engine's own per-track fraction. The stage exists at all because
+ * yue2-align skips by name — a dataset with no stems aligns nothing and exits 0,
+ * so without this the honest options were "refuse" or "lie".
+ */
+export async function runYue2StemsJob(job: TrainingJob): Promise<void> {
+  const opts = job.opts as { audioDir?: string; slug?: string; level?: number; force?: boolean } | undefined;
+  if (!opts?.audioDir || !opts.slug) {
+    finishJob(job, 'failed', 'yue2-stems job is missing its audio directory');
+    return;
+  }
+  if (!fs.existsSync(opts.audioDir)) {
+    finishJob(job, 'failed', `The dataset's audio folder is gone (${opts.audioDir})`);
+    return;
+  }
+
+  job.phase = 'separating';
+  try {
+    const res = await yue2SeparateDataset({
+      audioDir: opts.audioDir,
+      slug: opts.slug,
+      level: opts.level,
+      force: opts.force,
+      isCancelled: () => isCancelled(job),
+      onProgress: (p) => {
+        job.done = p.index - (p.fraction === null ? 1 : 0);
+        job.total = p.total;
+        job.currentSampleId = p.name;
+        emitProgress(job);
+      },
+    });
+
+    // A partial result is a real result here: the align stage reports its own
+    // coverage per source, so eleven stems out of thirteen is a run worth
+    // having and the two failures are named rather than folded into a count.
+    for (const f of res.failed) {
+      log(job, 'warn', `${f.name}: ${f.error}`);
+    }
+    log(job, 'info', `[yue2-stems] ${res.written} written, ${res.skipped} already present, `
+      + `${res.failed.length} failed -> ${res.stemsDir}`);
+
+    if (!res.written && !res.skipped) {
+      finishJob(job, 'failed', 'No vocal stems could be separated — see the warnings above');
+      return;
+    }
+    finishJob(job, isCancelled(job) ? 'cancelled' : 'done');
+  } catch (err) {
+    finishJob(job, 'failed', err instanceof Error ? err.message : String(err));
+  }
+}
 
 export async function runYue2TokenizeJob(job: TrainingJob): Promise<void> {
   const opts = job.opts as ResolvedYue2TokenizeOptions | undefined;

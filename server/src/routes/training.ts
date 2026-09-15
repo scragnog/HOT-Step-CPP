@@ -126,6 +126,7 @@ import {
   missingYue2AlignModels, readYue2CursorWordsStatus, resolveYue2AlignerModel,
   YUE2_ALIGN_DEFAULTS, yue2StemsDir,
 } from '../services/training/yue2Align.js';
+import { yue2StemSources } from '../services/training/yue2Stems.js';
 import {
   listYue2ArRuns, readYue2ArRunManifest, yue2ArAdapterRoot,
 } from '../services/training/yue2ArRuns.js';
@@ -3214,6 +3215,12 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
           done: !!cache && cache.clips > 0,
           cache: cache ?? null,
           missing: missingYue2TrainModels('preprocess', { vaeVariant: 'standard' }),
+          // A cache built for the NAR (or before `ace` existed) carries no
+          // caption, and the AR prefix IS the caption — it would train and
+          // export and sound generic, with nothing anywhere saying why. Name it
+          // here rather than let the run look healthy.
+          captionMode: cache?.captionMode ?? '',
+          captionModeOk: !cache || cache.captionMode === 'ace',
         },
         tokenize: {
           // `codec_ids_present` is the engine's own flag and says the stage
@@ -3237,6 +3244,9 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
            *  stage does not produce and the card has to be able to say so. */
           stemsDir,
           stemsReady: countYue2VocalStems(stemsDir),
+          // The aligner skips a source whose stem is missing, silently, so the
+          // card needs the shortfall and not just a boolean.
+          stemsNeeded: cache?.sources ?? 0,
           defaults: YUE2_ALIGN_DEFAULTS,
         },
         train: {
@@ -3331,6 +3341,48 @@ router.post('/datasets/:id/yue2-tokenize', (req: Request, res: Response) => {
 });
 
 /** POST /datasets/:id/yue2-align */
+/**
+ * POST /datasets/:id/yue2-stems — separate the dataset's vocals for the aligner.
+ *
+ * Cache stage 2a. Not folded into yue2-align because separation costs minutes a
+ * track and alignment costs seconds: a failed alignment should cost one retry,
+ * not thirteen separations. Existing stems are kept unless `force`.
+ */
+router.post('/datasets/:id/yue2-stems', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+
+    const audioDir = ds.sourceDir;
+    if (!audioDir || !fs.existsSync(audioDir)) {
+      res.status(400).json({ error: `This dataset has no audio folder on disk (${audioDir || 'unset'})` });
+      return;
+    }
+    const sources = yue2StemSources(audioDir);
+    if (!sources.length) {
+      res.status(400).json({ error: `No audio files in ${audioDir}` });
+      return;
+    }
+
+    const levelRaw = Number(b.level);
+    const job = queue.startYue2StemsJob(ds.id, {
+      audioDir,
+      slug: ds.slug,
+      level: Number.isFinite(levelRaw) && levelRaw >= 0 && levelRaw <= 3 ? levelRaw : 0,
+      force: b.force === true,
+    });
+    res.json({
+      jobId: job.id, kind: job.kind,
+      stemsDir: yue2StemsDir(ds.slug),
+      sources: sources.length,
+      alreadyHave: countYue2VocalStems(yue2StemsDir(ds.slug)),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 router.post('/datasets/:id/yue2-align', (req: Request, res: Response) => {
   try {
     const ds = yue2Preflight(req, res);
@@ -3373,7 +3425,7 @@ router.post('/datasets/:id/yue2-align', (req: Request, res: Response) => {
       res.status(400).json({
         error: `No vocal stems in ${stemsDir}. yue2-align wants <source stem>/vocals.wav per song (the `
              + 'Demucs htdemucs layout) and skips by name, so with none of them it would align nothing and '
-             + 'still report success. Separate the dataset first.',
+             + 'still report success. Run the stems stage first (POST .../yue2-stems).',
       });
       return;
     }

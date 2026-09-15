@@ -174,6 +174,16 @@ export const YUE2_AR_DEFAULTS = {
   /** One draw per micro-step: `random() < frac ? artist : minted`. */
   artistFrac: 0.5,
   captionDropout: 0.5,
+
+  /** The preprocess caption mode this trainer needs, which is NOT the NAR
+   *  default. `none` leaves every row style-less, and the AR prefix IS the
+   *  style: an adapter trained that way has no caption to condition on and
+   *  none to steer with at generation. `ace` parses the Option-A sidecar,
+   *  taking `caption:` as the style and `lyrics:` as the lyrics. Measured
+   *  2026-09-15 (_LISTENING/2026-09-14/RESULTS.md, arms 130-147): the
+   *  conditioning is the whole difference between an adapter that caps and one
+   *  that sounds like the artist. */
+  captionMode: 'ace' as const,
   /** Upstream's CUR_W. The lyric-cursor auxiliary loss, measured to matter:
    *  frame-to-lyric alignment loss 12.3 → 1.6 with it, 10.8 → 16.3 without, on
    *  the same songs. It needs `cursor_words` in the manifest, i.e. the

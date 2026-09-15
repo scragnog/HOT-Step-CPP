@@ -237,13 +237,13 @@ export const YUE2_NAR_DEFAULTS = {
 } as const;
 
 export type Yue2NarTarget = 'nar_attn' | 'nar_attn_mlp' | 'nar_attn_mlp_proj';
-export type Yue2CaptionMode = 'txt' | 'default' | 'none';
+export type Yue2CaptionMode = 'ace' | 'txt' | 'default' | 'none';
 
 export function isYue2Target(v: unknown): v is Yue2NarTarget {
   return v === 'nar_attn' || v === 'nar_attn_mlp' || v === 'nar_attn_mlp_proj';
 }
 export function isYue2CaptionMode(v: unknown): v is Yue2CaptionMode {
-  return v === 'txt' || v === 'default' || v === 'none';
+  return v === 'ace' || v === 'txt' || v === 'default' || v === 'none';
 }
 export function isYue2VaeVariant(v: unknown): v is Yue2VaeVariant {
   return v === 'standard' || v === 'legacy';
