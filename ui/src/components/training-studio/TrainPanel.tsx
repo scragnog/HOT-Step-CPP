@@ -25,6 +25,7 @@ import { TrainingChart } from './TrainingChart';
 import { TrainingRunStats } from './TrainingRunStats';
 import { Mm3TrainCard } from './Mm3TrainCard';
 import { Yue2TrainCard } from './Yue2TrainCard';
+import { Yue2ArTrainCard } from './Yue2ArTrainCard';
 import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from './TrainDitForm';
 import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from './TrainLmForm';
 import { useTrainingStream } from './useTrainingStream';
@@ -470,11 +471,18 @@ export const TrainPanel: React.FC = () => {
   // the same status payload it reads everything else out of: preprocess needs
   // the VAE, training needs the LM, and demanding both up here would hide the
   // encode stage from someone who has only the VAE so far.
+  //
+  // TWO CARDS, in model order: the NAR half (sound) and the AR half (the
+  // composer, which is where artist likeness lives). They are siblings rather
+  // than one card with a toggle because they train different halves of the
+  // model from different caches — but they share stage 1, the latent cache the
+  // NAR card owns, which is why the AR card sits below it and points back up.
   if (yue2Mode) {
     return (
       <div className="flex flex-col gap-4">
         {header}
         <Yue2TrainCard datasetId={detail.id} trigger={detail.customTag || ''} />
+        <Yue2ArTrainCard datasetId={detail.id} trigger={detail.customTag || ''} />
       </div>
     );
   }

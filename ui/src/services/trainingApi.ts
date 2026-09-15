@@ -24,7 +24,13 @@ export type TrainingJobKind =
   | 'mm3-codes' | 'mm3-train-lm'
   // YuE2 NAR LoRA. Both GPU-lane and engine-stopping: preprocess holds a 3.7 GB
   // encode buffer on top of the VAE, training peaks at 19.6 GB at rank 256.
-  | 'yue2-preprocess' | 'yue2-nar-train';
+  | 'yue2-preprocess' | 'yue2-nar-train'
+  // YuE2 AR LoRA — the composer half, the one that carries artist likeness. It
+  // needs two more cache stages on top of `yue2-preprocess`, both of which
+  // rewrite the same manifest: 'yue2-tokenize' (codec_ids, what the next-token
+  // loss is scored on) and 'yue2-align' (cursor_words, what --cursor-weight
+  // reads). Each spawns ace-train, so each owns the card.
+  | 'yue2-tokenize' | 'yue2-align' | 'yue2-ar-train';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -640,6 +646,276 @@ export interface Yue2RunSummary {
   target?: string;
   /** Present only while `yue2_nar_ckpt.bin` is still on disk, which means the
    *  run stopped BEFORE its clean finish — the engine deletes it on export. */
+  resume?: {
+    step: number;
+    savedAt: number;
+    statePath: string;
+    behindBy: number;
+    exactWithinBuildOnly: true;
+  };
+  optionsSource: 'manifest' | 'checkpoint' | 'none';
+  sizeBytes: number;
+  running?: boolean;
+}
+
+// ─── YuE2 AR LoRA training (the composer half) ────────────────────────────
+//
+// THREE CACHE STAGES, ONE MANIFEST. The NAR types above cover stage 1 only,
+// because the NAR half needs nothing else. The AR half needs `yue2-tokenize`
+// (codes) and `yue2-align` (cursor spans) as well, and all three stages write
+// into the SAME yue2_preprocess.json — so there is one manifest path throughout
+// and how far a cache has got is read off its fields, not tracked anywhere
+// else. A cache built before these stages existed is a stage-1 cache.
+//
+// As with the NAR half, every default and every threshold below arrives from
+// the server; nothing here carries its own copy of the recipe.
+
+export type Yue2ArTarget = 'attn' | 'attn_mlp';
+/** How the artist style string is built from trigger + caption. GENERATION MUST
+ *  COMPOSE THE SAME STRING, which is why it is stamped into the adapter. */
+export type Yue2StyleTemplate = 'upstream' | 'bare';
+export type Yue2ArAttn = 'exact' | 'flash' | 'flash-f32';
+export type Yue2ArLrScheduler = 'cosine' | 'constant';
+
+/** What the manifest says about the tokenize stage. */
+export interface Yue2CodecIdsStatus {
+  present: boolean;
+  /** Basename of the tokenizer that produced them — the one thing that
+   *  identifies a partially re-tokenized cache. */
+  tokenizer: string;
+  createdAt: string;
+  sources: number;
+  /** The AR trainer reads SOURCES; a source without codes is not trainable,
+   *  however many of its clips have slices. */
+  sourcesWithCodes: number;
+  clips: number;
+  clipsWithCodes: number;
+}
+
+/** What the manifest says about the align stage. No `present` flag to mirror:
+ *  the aligner stamps a path per source, so the count is the state. */
+export interface Yue2CursorWordsStatus {
+  model: string;
+  createdAt: string;
+  sources: number;
+  sourcesWithCursor: number;
+}
+
+export interface Yue2TokenizeDefaults {
+  decode: 'auto' | 'ffmpeg';
+  only: string;
+  limit: number;
+  force: boolean;
+}
+
+export interface Yue2AlignDefaults {
+  only: string;
+  limit: number;
+  /** Pin the backend to CPU. The engine sets GGML_BACKEND before any context
+   *  exists, so this cannot change mid-run. */
+  cpu: boolean;
+}
+
+/** The settled AR recipe, proven by ear, shipped rather than duplicated
+ *  client-side. NOT the NAR recipe — none of those numbers apply here. */
+export interface Yue2ArDefaults {
+  lmType: string;
+  rank: number;
+  alpha: number;
+  target: Yue2ArTarget;
+  styleTemplate: Yue2StyleTemplate;
+  lr: number;
+  lrScheduler: Yue2ArLrScheduler;
+  /** The cosine HORIZON, deliberately longer than the run: a 400-step run is
+   *  the head of a 3000-step curve, not a complete decay. Moving `steps`
+   *  without moving this changes where on the curve the run stops. */
+  schedSteps: number;
+  warmup: number;
+  steps: number;
+  gradAccum: number;
+  maxGradNorm: number;
+  weightDecay: number;
+  adamBeta1: number;
+  adamBeta2: number;
+  /** One draw per micro-step: artist song or minted regulariser song. */
+  artistFrac: number;
+  captionDropout: number;
+  /** Needs `cursor_words`, i.e. the align stage. 0 turns the term off. */
+  cursorWeight: number;
+  seed: number;
+  /** Whole songs, no crops. Also what the per-layer [H,S] buffers are sized
+   *  by, which makes it the VRAM lever. */
+  maxLen: number;
+  attn: Yue2ArAttn;
+  chunk: number;
+  saveEvery: number;
+  ckptFrom: number;
+  evalEvery: number;
+  logEvery: number;
+  /** Which rung to preselect. A default, not a verdict: upstream's instruction
+   *  is to pick the checkpoint by ear. */
+  ckptPickStep: number;
+  sidecars: boolean;
+}
+
+/** GET /api/training/datasets/:id/yue2-ar */
+export interface Yue2ArStatus {
+  manifestPath: string;
+  latentsDir: string;
+  stages: {
+    preprocess: { done: boolean; cache: Yue2CacheSummary | null; missing: string[] };
+    tokenize: {
+      /** The engine's own flag says the stage RAN; `sourcesWithCodes` says how
+       *  much of the corpus it covers. A partial run is legal, so neither is
+       *  folded into the other. */
+      done: boolean;
+      status: Yue2CodecIdsStatus | null;
+      missing: string[];
+      tokenizerFile: string;
+      defaults: Yue2TokenizeDefaults;
+    };
+    align: {
+      done: boolean;
+      status: Yue2CursorWordsStatus | null;
+      missing: string[];
+      alignerFile: string;
+      /** Separation happens elsewhere, so the stems are an INPUT this stage
+       *  does not produce — and the engine skips by name, so with no stems it
+       *  aligns nothing and still reports success. */
+      stemsDir: string;
+      stemsReady: number;
+      defaults: Yue2AlignDefaults;
+    };
+    train: { missing: string[] };
+  };
+  /** Absent is a legitimate state that needs `allowNoMinted`, not an error —
+   *  but it is a bad trade, so the file names are here to be named. */
+  minted: { present: boolean; manifestPath: string; dir: string; files: string[] };
+  bases: Yue2BaseInfo[];
+  defaults: Yue2ArDefaults;
+  /** Above this the server refuses without `allowOvertrain`. */
+  overtrainSteps: number;
+  adapterRoot: string;
+  ffmpeg: boolean;
+  trigger: string;
+  license: string;
+}
+
+/** POST /api/training/datasets/:id/yue2-tokenize */
+export interface Yue2TokenizeRequest {
+  /** Must match what preprocess used: codes and latents are only frame-aligned
+   *  because both come from identically decoded samples. */
+  decode?: 'auto' | 'ffmpeg';
+  only?: string;
+  limit?: number;
+  /** Re-encode sources whose codes are already cached. Without it an already
+   *  complete source is skipped, which is what makes a resumed run cheap. */
+  force?: boolean;
+}
+
+/** POST /api/training/datasets/:id/yue2-align */
+export interface Yue2AlignRequest {
+  /** Defaults to the dataset's own stems folder. An explicit path must exist:
+   *  the engine's answer to a wrong one is to skip every source and exit 0. */
+  stemsDir?: string;
+  /** Also the re-run mechanism, since this stage has no `force`: name the
+   *  source whose lyrics you edited. */
+  only?: string;
+  limit?: number;
+  cpu?: boolean;
+}
+
+/** POST /api/training/datasets/:id/yue2-ar-train. No preset field: the NAR
+ *  ladder belongs to the other model half and none of its numbers mean
+ *  anything here. */
+export interface Yue2ArTrainRequest {
+  lmType?: string;
+  trigger?: string;
+  allowNoTrigger?: boolean;
+  styleTemplate?: Yue2StyleTemplate;
+  /** Fallbacks for a source with no sidecar. */
+  style?: string;
+  lyrics?: string;
+  sidecars?: boolean;
+  target?: Yue2ArTarget;
+  rank?: number;
+  alpha?: number;
+  lr?: number;
+  lrScheduler?: Yue2ArLrScheduler;
+  schedSteps?: number;
+  warmup?: number;
+  steps?: number;
+  /** Required past `overtrainSteps`, where upstream says the model stops
+   *  learning the style and starts memorising the songs. */
+  allowOvertrain?: boolean;
+  gradAccum?: number;
+  maxGradNorm?: number;
+  weightDecay?: number;
+  artistFrac?: number;
+  adamBeta1?: number;
+  adamBeta2?: number;
+  captionDropout?: number;
+  attn?: Yue2ArAttn;
+  maxLen?: number;
+  chunk?: number;
+  cursorWeight?: number;
+  seed?: number;
+  ckptFrom?: number;
+  saveEvery?: number;
+  evalEvery?: number;
+  logEvery?: number;
+  /** Train artist-only, without the regulariser pack. The refusal it overrides
+   *  is the one worth reading: the pack is the counterweight to a real defect
+   *  in our semantic encoder, and it is what holds looping off. */
+  allowNoMinted?: boolean;
+}
+
+export interface Yue2ArAdapterMeta extends Yue2AdapterMeta {
+  styleTemplate?: string;
+  /** Written only when the run trained with dropout, and it is what says the
+   *  adapter can be addressed by its trigger phrase alone. */
+  captionDropout?: number;
+  /** Mean frames per SONG, not per crop — the AR analogue of the NAR header's
+   *  `clipFrames`, which is always undefined here. */
+  songFrames?: number;
+}
+
+export interface Yue2ArRunCheckpoint {
+  step: number;
+  name: string;
+  path: string;
+  bytes: number;
+  final: boolean;
+  loss?: number;
+  meta?: Yue2ArAdapterMeta;
+}
+
+export interface Yue2ArRunSummary {
+  runName: string;
+  dir: string;
+  datasetId?: string;
+  datasetName?: string;
+  startedAt?: number;
+  updatedAt: number;
+  launches: number;
+  configuredSteps: number;
+  lastStep: number;
+  lastLoss?: number;
+  outcome: 'completed' | 'halted' | 'failed' | 'unknown';
+  failure?: string;
+  checkpoints: Yue2ArRunCheckpoint[];
+  best?: { step: number; loss: number };
+  trigger?: string;
+  rank?: number;
+  alpha?: number;
+  target?: string;
+  /** Read off the newest checkpoint: an adapter copied out of its run still
+   *  says how its prompt was built. */
+  styleTemplate?: string;
+  captionDropout?: number;
+  /** Present only while `yue2_ar_ckpt.bin` is still on disk, which means the
+   *  run stopped BEFORE its clean finish. `behindBy` is the gap the state
+   *  cannot close — it is rewritten only at each checkpoint. */
   resume?: {
     step: number;
     savedAt: number;
@@ -1781,6 +2057,67 @@ export async function listYue2Runs(
 ): Promise<{ runs: Yue2RunSummary[]; busy: boolean; adapterRoot: string }> {
   return request<{ runs: Yue2RunSummary[]; busy: boolean; adapterRoot: string }>(
     `/datasets/${encodeURIComponent(id)}/yue2-runs`,
+  );
+}
+
+// ── YuE2 AR LoRA training ────────────────────────────────────────────────
+
+/** Per-stage cache state, per-stage model readiness and the defaults the form
+ *  is a view of. Cheap and never throws server-side, so it is safe to poll for
+ *  deciding what to enable. */
+export async function getYue2ArStatus(id: string): Promise<Yue2ArStatus> {
+  return request<Yue2ArStatus>(`/datasets/${encodeURIComponent(id)}/yue2-ar`);
+}
+
+/** Cache stage 2: the manifest's sources -> `codes/` (codec_ids), rewritten
+ *  into the same manifest. Takes no audio folder — the sources are whatever
+ *  preprocess already named. */
+export async function startYue2Tokenize(
+  id: string, opts: Yue2TokenizeRequest = {},
+): Promise<{ jobId: string; kind: TrainingJobKind; manifest: string; sources: number;
+             clips: number; tokenizer: string; license: string }> {
+  return request(
+    `/datasets/${encodeURIComponent(id)}/yue2-tokenize`,
+    { method: 'POST', ...jsonBody(opts) },
+  );
+}
+
+/** Cache stage 3: the manifest's lyrics forced-aligned against vocal stems ->
+ *  `cursor/` (cursor_words). `stemsReady` is echoed because a source without a
+ *  stem is skipped silently and trains with the cursor loss off. */
+export async function startYue2Align(
+  id: string, opts: Yue2AlignRequest = {},
+): Promise<{ jobId: string; kind: TrainingJobKind; manifest: string; stemsDir: string;
+             sources: number; stemsReady: number; aligner: string; license: string }> {
+  return request(
+    `/datasets/${encodeURIComponent(id)}/yue2-align`,
+    { method: 'POST', ...jsonBody(opts) },
+  );
+}
+
+/** All three caches + a trigger word -> an AR LoRA. `warnings` is advisory and
+ *  the run has already started: a cache with partial codes or partial cursor
+ *  spans trains, it just trains on less. No estimated duration — nothing has
+ *  been measured for this stage, and a plausible number would read as one. */
+export async function startYue2ArTrain(
+  id: string, opts: Yue2ArTrainRequest = {},
+): Promise<{ jobId: string; kind: TrainingJobKind; runName: string; outDir: string;
+             sources: number; clips: number; lmType: string; target: Yue2ArTarget;
+             styleTemplate: Yue2StyleTemplate; steps: number; minted: string;
+             ckptPickStep: number; warnings: string[]; license: string }> {
+  return request(
+    `/datasets/${encodeURIComponent(id)}/yue2-ar-train`,
+    { method: 'POST', ...jsonBody(opts) },
+  );
+}
+
+/** Previous AR runs and their checkpoint ladders, newest first. A separate
+ *  adapter root from the NAR runs', so a separate call. */
+export async function listYue2ArRuns(
+  id: string,
+): Promise<{ runs: Yue2ArRunSummary[]; busy: boolean; adapterRoot: string }> {
+  return request<{ runs: Yue2ArRunSummary[]; busy: boolean; adapterRoot: string }>(
+    `/datasets/${encodeURIComponent(id)}/yue2-ar-runs`,
   );
 }
 

@@ -24,6 +24,11 @@ import {
   readMm3CaptionSources, resolveMm3Caption,
   type Mm3CaptionSourcesHandoff,
 } from '../../utils/mm3CaptionSource';
+import {
+  YUE2_BACKEND_ID, ensureYue2SourceTracks, pickNearestBpmTrack as pickNearestYue2Track,
+  readYue2CaptionSelection, resolveYue2Caption, writeYue2CaptionSelection, yue2TrackBpm,
+  type Yue2CaptionSelection, type Yue2SourceTrack,
+} from '../../utils/yue2CaptionSource';
 import type { GenerationParams, Song } from '../../types';
 
 interface CreatePanelProps {
@@ -123,6 +128,65 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     clearMm3CaptionSources();
     setMm3Sources(null);
   }, []);
+
+  // ── YuE2 caption source ──
+  // The same choice as MM3's above, keyed by the selected AR adapter instead of
+  // by a song: the adapter is merged into the resident LM, so it is in force for
+  // every render until it is switched, and its training captions are the ones
+  // that are in distribution for it. Default is Custom — unlike the MM3 control,
+  // this one can appear over a caption the user typed.
+  const yue2Mode = useBackendStore(s => s.activeBackendId) === YUE2_BACKEND_ID;
+  const yue2Adapter = useBackendStore(s => String(s.models[YUE2_BACKEND_ID]?.defaults?.lmAdapter ?? ''));
+  const yue2HasCatalogue = useBackendStore(s => !!s.models[YUE2_BACKEND_ID]);
+  const fetchBackendModels = useBackendStore(s => s.fetchModels);
+  const [yue2Tracks, setYue2Tracks] = useState<Yue2SourceTrack[]>([]);
+  const [yue2Selection, setYue2Selection] = useState<Yue2CaptionSelection>({ mode: 'custom' });
+
+  // The Adapters cluster is what normally loads the catalogue, and it only
+  // mounts while that dropdown is open — so ask for it here rather than have
+  // this control depend on the user having opened an unrelated panel first.
+  useEffect(() => {
+    if (yue2Mode && !yue2HasCatalogue) void fetchBackendModels(YUE2_BACKEND_ID);
+  }, [yue2Mode, yue2HasCatalogue, fetchBackendModels]);
+
+  useEffect(() => {
+    if (!yue2Mode || !yue2Adapter) {
+      setYue2Tracks([]);
+      setYue2Selection({ mode: 'custom' });
+      return;
+    }
+    setYue2Selection(readYue2CaptionSelection(yue2Adapter));
+    let live = true;
+    void ensureYue2SourceTracks(yue2Adapter).then(tracks => { if (live) setYue2Tracks(tracks); });
+    return () => { live = false; };
+  }, [yue2Mode, yue2Adapter]);
+
+  const yue2SourcesActive = yue2Mode && yue2Tracks.length > 0;
+  const yue2Resolved = yue2SourcesActive
+    ? resolveYue2Caption(yue2Selection.customCaption ?? caption, bpm, yue2Tracks, yue2Selection)
+    : null;
+  const yue2CaptionLocked = !!yue2Resolved && yue2Resolved.mode !== 'custom';
+
+  // Same contract as the MM3 effect: the resolved caption IS the caption, so
+  // nothing on the request path needs to know a dataset track was picked.
+  useEffect(() => {
+    if (yue2CaptionLocked && yue2Resolved && yue2Resolved.caption !== caption) setCaption(yue2Resolved.caption);
+  }, [yue2CaptionLocked, yue2Resolved?.caption]);
+
+  const setYue2CaptionMode = useCallback((value: string) => {
+    if (!yue2Adapter) return;
+    const prev = readYue2CaptionSelection(yue2Adapter);
+    // Leaving Custom is the last moment the user's own caption is still in the
+    // box, so that is where it has to be stashed.
+    const customCaption = prev.mode === 'custom' ? caption : prev.customCaption;
+    const next: Yue2CaptionSelection =
+      value === 'auto' ? { mode: 'auto', customCaption }
+      : value === 'custom' ? { mode: 'custom', customCaption }
+      : { mode: 'track', selectedName: value.slice('track:'.length), customCaption };
+    writeYue2CaptionSelection(yue2Adapter, next);
+    setYue2Selection(next);
+    if (next.mode === 'custom') setCaption(customCaption ?? '');
+  }, [yue2Adapter, caption, setCaption]);
 
   // Global params context — for reuse data
   const gp = useGlobalParams();
@@ -271,7 +335,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
           introBars={introBars} onIntroBarsChange={setIntroBars}
           autoExpand={autoExpand} onAutoExpandChange={setAutoExpand}
           wildcardSeed={gp.randomSeed ? undefined : gp.seed}
-          captionReadOnly={mm3CaptionLocked}
+          captionReadOnly={mm3CaptionLocked || yue2CaptionLocked}
         />
 
         {/* MM3 only, and only for a song sent here from Lyric Studio: which
@@ -315,6 +379,46 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
             {mm3CaptionLocked && (
               <p className="text-[10px] text-cyan-400/70">
                 {t('createPanel.mm3CaptionFromTrack', 'From dataset track')}: {mm3Resolved.fromTitle}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* YuE2 only, and only when the selected adapter's dataset has captions:
+            which caption conditions the render. An AR adapter was trained on
+            whole songs under their own captions with half of them dropped, so
+            every dataset caption is a prompt it has actually seen — picking one
+            steers towards that track rather than the album's average. The
+            trigger word is not shown or typed here: generate.ts wraps whatever
+            this box holds in the adapter's own style template. */}
+        {yue2SourcesActive && yue2Resolved && (
+          <div className="pt-2 space-y-1">
+            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider block">
+              {t('createPanel.yue2CaptionSource', 'Caption source')}
+            </label>
+            <select
+              value={yue2Resolved.mode === 'track' && yue2Resolved.fromName ? `track:${yue2Resolved.fromName}` : yue2Resolved.mode}
+              onChange={e => setYue2CaptionMode(e.target.value)}
+              className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 outline-none focus:border-emerald-500/50 transition-colors"
+            >
+              <option value="custom">{t('createPanel.yue2CaptionCustom', 'Custom (the caption above)')}</option>
+              <option value="auto">
+                {t('createPanel.yue2CaptionAuto', 'Automatic from dataset')}
+                {(() => {
+                  const auto = pickNearestYue2Track(yue2Tracks, bpm);
+                  return auto ? ` (${t('createPanel.yue2CaptionNearestTempo', 'nearest tempo')}: ${auto.name})` : '';
+                })()}
+              </option>
+              {yue2Tracks.map(track => (
+                <option key={track.name} value={`track:${track.name}`}>
+                  {t('createPanel.yue2CaptionTrack', 'Track')}: {track.name}
+                  {yue2TrackBpm(track) ? ` · ${yue2TrackBpm(track)} BPM` : ''}
+                </option>
+              ))}
+            </select>
+            {yue2CaptionLocked && (
+              <p className="text-[10px] text-emerald-400/70">
+                {t('createPanel.yue2CaptionFromTrack', 'From dataset track')}: {yue2Resolved.fromName}
               </p>
             )}
           </div>

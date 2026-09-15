@@ -25,6 +25,12 @@
 // at rank 256 and preprocess holds a 3.7 GB encode buffer on top of the VAE —
 // neither is MM3's 31.7 GB, but both spawn ace-train, which owns the card.
 //
+// It also OWNS THE SPAWN MACHINERY for every YuE2 ace-train subcommand:
+// runYue2AceTrain, RelayState and log() are exported for yue2ArTrainRunner.ts,
+// which adds the AR trainer and the two remaining cache stages. Only the
+// regexes differ between the two files — the engine-stop, the two-stream
+// reader, the timeout killer and the engine restore are one implementation.
+//
 // Phase 5 of docs/plans/yue2/08-nar-lora-trainer.md.
 
 import fs from 'fs';
@@ -48,11 +54,11 @@ import {
   emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, type TrainingJob,
 } from './labelingQueue.js';
 
-function log(job: TrainingJob, level: 'info' | 'warn' | 'error', message: string): void {
+export function log(job: TrainingJob, level: 'info' | 'warn' | 'error', message: string): void {
   pushEvent(job, { type: 'log', level, message, ts: Date.now() });
 }
 
-function numOr(v: string | undefined, d?: number): number | undefined {
+export function numOr(v: string | undefined, d?: number): number | undefined {
   if (v === undefined) return d;
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
@@ -60,7 +66,7 @@ function numOr(v: string | undefined, d?: number): number | undefined {
 
 // ── stderr -> events ────────────────────────────────────────────────────────
 
-interface RelayState {
+export interface RelayState {
   fatalMessage: string;
   doneSeen: boolean;
   lastStep: number;
@@ -298,7 +304,9 @@ function relayPreprocessLine(job: TrainingJob, line: string, st: RelayState): vo
 // ── spawn ───────────────────────────────────────────────────────────────────
 
 /** Open the run's log files. The directory comes out of `--out` in the argv
- *  rather than from a parameter, so both job kinds get it for free. A log that
+ *  rather than from a parameter, so every job kind that has one gets it for
+ *  free — and the two cache stages, which rewrite a manifest in place and take
+ *  no `--out` at all, get no files rather than a special case. A log that
  *  cannot be opened is never a reason to fail a run, so every failure here is
  *  swallowed. Append mode: a resumed run re-enters this function. */
 function openRunLog(args: string[], jsonl: boolean): {
@@ -318,23 +326,37 @@ function openRunLog(args: string[], jsonl: boolean): {
   }
 }
 
-type Yue2Kind = 'yue2-preprocess' | 'yue2-nar-train';
+export type Yue2Kind =
+  | 'yue2-preprocess' | 'yue2-nar-train'
+  | 'yue2-tokenize' | 'yue2-align' | 'yue2-ar-train';
+
+/** Which kinds keep a machine-readable train-log.jsonl beside their output.
+ *  The two trainers do, because yue2Runs/yue2ArRuns read it back to reconstruct
+ *  a run; the three cache stages have no run directory to put one in. */
+function wantsJsonl(kind: Yue2Kind): boolean {
+  return kind === 'yue2-nar-train' || kind === 'yue2-ar-train';
+}
 
 /** Shared spawn + relay + engine restore. Mirrors runMm3AceTrain, including
  *  the two orderings that file learned the hard way: the runner marks the job
  *  running ITSELF (enqueue does not, and without it the UI shows "Queued…" for
  *  the whole run and every elapsed/ETA derived from startedAt never starts),
  *  and `timedOut` is checked BEFORE the exit-code branch so a killed child does
- *  not surface as "exited with code null". */
-async function runYue2AceTrain(
+ *  not surface as "exited with code null".
+ *
+ *  Generic in the state so a caller can carry its own fields through the relay
+ *  — the AR trainer tracks minted_val, the aligner tracks stem hits — without
+ *  either a cast at the callback or those fields landing on RelayState, where
+ *  they would be dead for every other kind. */
+export async function runYue2AceTrain<S extends RelayState>(
   job: TrainingJob,
   kind: Yue2Kind,
   args: string[],
   timeoutMs: number,
   verifyOutput: () => string | null,
-  onLine: (line: string, st: RelayState) => void,
-  st: RelayState,
-): Promise<RelayState> {
+  onLine: (line: string, st: S) => void,
+  st: S,
+): Promise<S> {
   const exe = aceTrainExe();
   if (!exe) {
     finishJob(job, 'failed', 'ace-train is not in this build — rebuild the engine');
@@ -365,7 +387,7 @@ async function runYue2AceTrain(
     const child = spawn(exe, args, { windowsHide: true, env: buildGpuEnv().env });
     job.child = child;
 
-    const sinks = openRunLog(args, kind === 'yue2-nar-train');
+    const sinks = openRunLog(args, wantsJsonl(kind));
     const record = (stream: fs.WriteStream | null, line: string): void => {
       if (!stream) return;
       try { stream.write(line + '\n'); } catch { /* a full disk must not kill a run */ }

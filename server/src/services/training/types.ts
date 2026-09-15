@@ -27,7 +27,14 @@ export type TrainingJobKind =
   // GPU-lane and both stop the engine: training peaks at 19.6 GB at rank 256
   // and the preprocess encode holds a 3.7 GB compute buffer, and either way
   // ace-train owns the card.
-  | 'yue2-preprocess' | 'yue2-nar-train';
+  | 'yue2-preprocess' | 'yue2-nar-train'
+  // YuE2 AR LoRA — the composer half, which is the one that carries artist
+  // likeness. It needs THREE cache stages, not one, and all three write into
+  // the same yue2_preprocess.json: yue2-preprocess (latents), then
+  // 'yue2-tokenize' (codec_ids, what the next-token loss is scored on) and
+  // 'yue2-align' (cursor_words, what --cursor-weight reads). GPU-lane like the
+  // rest; each spawns ace-train, which owns the card.
+  | 'yue2-tokenize' | 'yue2-align' | 'yue2-ar-train';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -335,6 +342,8 @@ export interface TrainingJobSummary {
   // kind==='preprocess' adds: 'engine-stop' | 'loading-models' | 'preprocess' | 'stats' | 'engine-restart'
   // kind==='train-lm'   adds: 'engine-stop' | 'loading-models' | 'extract' | 'train' | 'export' | 'engine-restart'
   // kind==='train-dit'  adds: 'engine-stop' | 'loading-models' | 'train' | 'export' | 'engine-restart'
+  // Every yue2-* kind adds 'engine-stop' | 'loading-models' | 'engine-restart' plus one of its own:
+  // 'encoding' (yue2-preprocess), 'tokenizing', 'aligning', 'training' (both trainers)
   phase: string;
   engineQueueDepth: number;   // # of ace-server jobs ahead of ours; 0 if unknown
   error: string | null;

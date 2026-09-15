@@ -360,6 +360,9 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
     case 'mm3-train-lm':   // peaks at 31.7 GB of 32 — nothing else may run
     case 'yue2-preprocess':  // YuE2 VAE encode, 3.7 GB compute buffer + the VAE
     case 'yue2-nar-train':   // 19.6 GB at rank 256 with a bf16 base
+    case 'yue2-tokenize':    // MERT + the tokenizer head over every source
+    case 'yue2-align':       // MMS_FA, ~5 GB per track (CPU only with --cpu)
+    case 'yue2-ar-train':    // whole songs to 12,288 tokens through a bf16 base
       return 'gpu';
     case 'label':
       return (job.opts as LabelOptions | undefined)?.useUnderstand === true ? 'gpu' : 'net';
@@ -1410,6 +1413,50 @@ export function startYue2TrainJob(datasetId: string, opts: unknown): TrainingJob
   enqueue(job, async (j) => {
     const { runYue2TrainJob } = await import('./yue2TrainRunner.js');
     await runYue2TrainJob(j);
+  });
+  return job;
+}
+
+/**
+ * YuE2 cache stage 2 — semantic codes for every source in an existing latent
+ * cache. `sampleIds` is empty for yue2-preprocess' reason: the inputs are the
+ * sources the manifest already names, not the dataset's rows, so there is no
+ * per-row state to mark.
+ */
+export function startYue2TokenizeJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-tokenize', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2TokenizeJob } = await import('./yue2ArTrainRunner.js');
+    await runYue2TokenizeJob(j);
+  });
+  return job;
+}
+
+/**
+ * YuE2 cache stage 3 — CTC forced alignment of each source's lyrics against its
+ * vocal stem, which is what `yue2-ar-train --cursor-weight` reads. Separation is
+ * NOT part of this stage: it wants `<stems>/<name>/vocals.wav` to already exist
+ * and skips by name when it does not.
+ */
+export function startYue2AlignJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-align', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2AlignJob } = await import('./yue2ArTrainRunner.js');
+    await runYue2AlignJob(j);
+  });
+  return job;
+}
+
+/**
+ * YuE2 AR-half LoRA training — the composer, and the half that carries artist
+ * likeness. Needs all three cache stages in the manifest; the runner refuses
+ * early when the codes or the cursor spans are absent.
+ */
+export function startYue2ArTrainJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-ar-train', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2ArTrainJob } = await import('./yue2ArTrainRunner.js');
+    await runYue2ArTrainJob(j);
   });
   return job;
 }

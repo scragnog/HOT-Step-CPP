@@ -19,7 +19,8 @@ import path from 'path';
 import { engineReady } from '../../../engineState.js';
 import { isEngineSuspended } from '../../aceEngineProcess.js';
 import { getSetting, setSetting } from '../../../db/lireekDb.js';
-import { listAllYue2Runs } from '../../training/yue2Runs.js';
+import { listAllYue2Runs, type Yue2AdapterMeta } from '../../training/yue2Runs.js';
+import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
 import { runYue2Generation } from './generate.js';
 import {
   yue2Props, yue2PropsCached, yue2SelectModel, yue2Unload,
@@ -220,8 +221,8 @@ async function capabilities(): Promise<BackendCapabilities> {
       plugins: false,
       samplerPlugins: false,
       adapters: false,
-      // NAR LoRAs trained by the Training Studio, merged into the LM at load.
-      // Not ACE's DiT stack (no masking, no group scales, no runtime mode) —
+      // AR and NAR LoRAs trained by the Training Studio, merged at load. Not
+      // ACE's DiT stack (no masking, no group scales, no runtime mode) —
       // hence lmAdapters and not `adapters`.
       lmAdapters: true,
       // ...and held as ENGINE STATE: the delta is baked into the resident
@@ -297,20 +298,62 @@ async function capabilities(): Promise<BackendCapabilities> {
   };
 }
 
-/** Every trained NAR adapter on disk, newest run first, each checkpoint
- *  labelled with what its own safetensors header records.
+/** Which half of the model an adapter trains. Not interchangeable: the engine
+ *  gates the legal tensor-name family on the file's own `format`, so an AR
+ *  adapter picked where a NAR one is wanted is REFUSED at load
+ *  (yue2-adapter.h). A flat list of both halves is a pick the user cannot get
+ *  right by reading it, which is why the kind travels with every entry. */
+export type Yue2LmAdapterKind = 'ar' | 'nar';
+
+/** A catalogue entry: the shared lmAdapterMeta shape plus the three things
+ *  only this backend has to say. They are additive rather than pushed into
+ *  BackendModels because no other backend has two halves or a style template
+ *  to report; they reach the UI as JSON on the same object. */
+export type Yue2LmAdapterEntry = NonNullable<BackendModels['lmAdapterMeta']>[string] & {
+  kind: Yue2LmAdapterKind;
+  /** The prompt shape this checkpoint was trained under — what generate.ts
+   *  composes with. */
+  styleTemplate?: string;
+  captionDropout?: number;
+};
+
+/** What the catalogue needs from a run. Structural on purpose: the AR and NAR
+ *  summaries are separate types from separate scanners (they share a directory
+ *  layout and nothing else), and both satisfy this without either knowing the
+ *  picker exists. */
+interface Yue2CataloguedRun {
+  runName: string;
+  updatedAt: number;
+  configuredSteps: number;
+  datasetName?: string;
+  trigger?: string;
+  rank?: number;
+  checkpoints: ReadonlyArray<{
+    step: number; path: string; bytes: number; final: boolean;
+    loss?: number; meta?: Yue2AdapterMeta;
+  }>;
+}
+
+/** Every trained adapter on disk, both halves, newest run first, each
+ *  checkpoint labelled with what its own safetensors header records.
  *
- *  The run directories are enumerated by training/yue2Runs.ts — the same
- *  scanner the Training Studio reads — rather than a second walk of the same
- *  tree that could disagree with it about what counts as a checkpoint. Paths
- *  are ABSOLUTE because that is what the engine needs (see Yue2Selection). */
+ *  The run directories are enumerated by training/yue2Runs.ts and
+ *  training/yue2ArRuns.ts — the same scanners the Training Studio reads —
+ *  rather than a third walk of the same tree that could disagree with them
+ *  about what counts as a checkpoint. Paths are ABSOLUTE because that is what
+ *  the engine needs (see Yue2Selection). */
 function yue2LmAdapterCatalogue(): {
   paths: string[];
-  meta: NonNullable<BackendModels['lmAdapterMeta']>;
+  meta: Record<string, Yue2LmAdapterEntry>;
 } {
   const paths: string[] = [];
-  const meta: NonNullable<BackendModels['lmAdapterMeta']> = {};
-  for (const run of listAllYue2Runs()) {
+  const meta: Record<string, Yue2LmAdapterEntry> = {};
+  const runs: Array<{ kind: Yue2LmAdapterKind; run: Yue2CataloguedRun }> = [
+    ...listAllYue2ArRuns().map(run => ({ kind: 'ar' as const, run })),
+    ...listAllYue2Runs().map(run => ({ kind: 'nar' as const, run })),
+  ].sort((a, b) => b.run.updatedAt - a.run.updatedAt);
+
+  for (const { kind, run } of runs) {
     // Newest checkpoint first within a run: the final export is what anyone
     // wants by default, and the snapshot ladder is the "it was better at 4000
     // steps" escape hatch below it.
@@ -324,11 +367,16 @@ function yue2LmAdapterCatalogue(): {
       const abs = path.resolve(ckpt.path);
       paths.push(abs);
       meta[abs] = {
+        // The half leads the label as well as riding on `kind`: a UI that has
+        // not yet split the list still shows two adapters from one dataset as
+        // the different things they are.
         label: [
+          kind.toUpperCase(),
           run.runName,
           ckpt.final ? 'final' : `step ${ckpt.step}`,
           trigger ? `"${trigger}"` : '',
         ].filter(Boolean).join(' · '),
+        kind,
         runName: run.runName,
         trigger: trigger || undefined,
         rank,
@@ -337,6 +385,8 @@ function yue2LmAdapterCatalogue(): {
         dataset: run.datasetName,
         final: ckpt.final,
         loss: ckpt.loss,
+        styleTemplate: ckpt.meta?.styleTemplate,
+        captionDropout: ckpt.meta?.captionDropout,
       };
     }
   }

@@ -26,9 +26,17 @@
  * utils/mm3CaptionSource.ts. Pass the album's `lyricsSetId` so that choice can be
  * resolved; without one this degrades to the song's own caption, i.e. the
  * behaviour above.
+ *
+ * YuE2 has the same choice for the same reason — its AR adapters are trained on
+ * whole songs under their own captions, so a training caption is an
+ * in-distribution prompt — but no caption column of its own: there is one
+ * caption and the choice is which dataset track, if any, replaces it. That
+ * choice belongs to the ADAPTER rather than to the song, so no id is passed
+ * here; see utils/yue2CaptionSource.ts.
  */
 
 import { resolveMm3CaptionForGeneration } from './mm3CaptionSource';
+import { resolveYue2CaptionForGeneration, YUE2_BACKEND_ID } from './yue2CaptionSource';
 
 /** The registered id of the MiniMax-Music3 backend (server/src/services/backends/registry.ts). */
 export const MM3_BACKEND_ID = 'minimax-m3';
@@ -40,6 +48,10 @@ export function captionForBackend(
 ): string {
   if (backendId === MM3_BACKEND_ID) {
     const resolved = resolveMm3CaptionForGeneration(gen, lyricsSetId);
+    if (resolved.caption.trim()) return resolved.caption;
+  }
+  if (backendId === YUE2_BACKEND_ID) {
+    const resolved = resolveYue2CaptionForGeneration(gen);
     if (resolved.caption.trim()) return resolved.caption;
   }
   return gen.caption || '';

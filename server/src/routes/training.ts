@@ -55,6 +55,12 @@
 //   POST   /datasets/:id/yue2-preprocess                — audio -> cached YuE2 VAE latents
 //   POST   /datasets/:id/yue2-train                     — start a YuE2 NAR LoRA training job
 //   GET    /datasets/:id/yue2-runs                      — previous YuE2 runs + their adapters
+//   GET    /datasets/:id/yue2-ar                        — per-stage AR readiness + defaults
+//   POST   /datasets/:id/yue2-tokenize                  — manifest -> codes/ (codec_ids)
+//   POST   /datasets/:id/yue2-align                     — manifest -> cursor/ (cursor_words)
+//   POST   /datasets/:id/yue2-ar-train                  — start a YuE2 AR LoRA training job
+//   GET    /datasets/:id/yue2-ar-runs                   — previous YuE2 AR runs + their adapters
+//   GET    /yue2-adapter-captions                       — a trained adapter's own dataset captions
 //   POST   /datasets/:id/train-lm                       — start an LM LoRA training job
 //   GET    /datasets/:id/train-lm                       — LM adapter / codes status
 //   POST   /datasets/:id/train-dit                      — start a DiT LoRA training job
@@ -104,10 +110,27 @@ import {
   readYue2PreprocessSummary, resolveYue2TrainModels,
   YUE2_DEFAULT_PRESET, YUE2_NAR_DEFAULTS, YUE2_PRESETS,
   YUE2_TARGET_TENSORS, YUE2_VRAM_MODEL, yue2AdapterRunDir, yue2LatentsDir,
-  yue2PreprocessManifest, yue2RunName,
+  yue2ModelDir, yue2PreprocessManifest, yue2RunName,
 } from '../services/training/yue2Train.js';
-import { listYue2Runs, yue2AdapterRoot } from '../services/training/yue2Runs.js';
+import { listYue2Runs, readYue2RunManifest, yue2AdapterRoot } from '../services/training/yue2Runs.js';
+import {
+  isYue2ArAttn, isYue2ArLrScheduler, isYue2ArTarget, isYue2StyleTemplate,
+  YUE2_AR_DEFAULTS, YUE2_AR_OVERTRAIN_STEPS, YUE2_MINTED_CODES_FILE,
+  YUE2_MINTED_MANIFEST_FILE, yue2ArAdapterRunDir, yue2ArRunName, yue2MintedManifest,
+} from '../services/training/yue2ArTrain.js';
+import {
+  missingYue2TokenizeModels, readYue2CodecIdsStatus, resolveYue2TokenizerModel,
+  YUE2_TOKENIZE_DEFAULTS,
+} from '../services/training/yue2Tokenize.js';
+import {
+  missingYue2AlignModels, readYue2CursorWordsStatus, resolveYue2AlignerModel,
+  YUE2_ALIGN_DEFAULTS, yue2StemsDir,
+} from '../services/training/yue2Align.js';
+import {
+  listYue2ArRuns, readYue2ArRunManifest, yue2ArAdapterRoot,
+} from '../services/training/yue2ArRuns.js';
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
+import { yue2StyleString } from '../services/backends/yue2/style.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
@@ -1140,7 +1163,13 @@ function pickTargets(
 // split mm3 makes: the trainer reads the latent cache and never touches a
 // caption or a sidecar, while preprocess reads the source folder the labeller
 // writes into.
-const TRAINER_KINDS = new Set<string>(['train-lm', 'train-dit', 'mm3-train-lm', 'yue2-nar-train', 'audition', 'lm-calibrate', 'dit-calibrate']);
+//
+// `yue2-tokenize` and `yue2-align` join them too, on the same test rather than
+// on being "training": both take the manifest as their only input and rewrite
+// it in place. Neither opens a sidecar — the aligner's lyrics come out of the
+// manifest, not the .txt the labeller writes — so a cloud captioner beside them
+// cannot lose an edit. `yue2-ar-train` joins for `yue2-nar-train`'s reason.
+const TRAINER_KINDS = new Set<string>(['train-lm', 'train-dit', 'mm3-train-lm', 'yue2-nar-train', 'yue2-tokenize', 'yue2-align', 'yue2-ar-train', 'audition', 'lm-calibrate', 'dit-calibrate']);
 function labelBlockedBy(datasetId: string, needsEngine: boolean): ReturnType<typeof queue.activeJobForDataset> {
   const active = queue.activeJobForDataset(datasetId);
   if (!active) return undefined;
@@ -3117,6 +3146,510 @@ router.get('/datasets/:id/yue2-runs', (req: Request, res: Response) => {
         : { ...r, running: false }
     ));
     res.json({ runs: out, busy: !!active, adapterRoot: yue2AdapterRoot() });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+// ─── YuE2 AR LoRA training (the composer half) ──────────────────────────────
+//
+//   GET  /datasets/:id/yue2-ar        what each cache stage has reached
+//   POST /datasets/:id/yue2-tokenize  manifest -> codes/   (codec_ids)
+//   POST /datasets/:id/yue2-align     manifest -> cursor/  (cursor_words)
+//   POST /datasets/:id/yue2-ar-train  all three caches + a trigger -> an AR LoRA
+//   GET  /datasets/:id/yue2-ar-runs   previous AR runs and their ladders
+//
+// THREE CACHE STAGES, ONE MANIFEST. The NAR routes above wire stage 1 only,
+// because the NAR half needs nothing else. The AR half needs two more passes
+// over the same dataset and all three write into the SAME yue2_preprocess.json,
+// so there is one manifest path throughout and how far a cache has got is READ
+// OFF ITS FIELDS rather than tracked in SQLite. A cache built before the AR
+// stages existed is therefore a stage-1 cache, correctly, with no migration.
+//
+// The two new stages take a manifest, not an audio folder, so none of the
+// preprocess route's flat-scan arithmetic applies to them: the sources are
+// whatever that file already names.
+
+/** Sources with a vocal stem where `yue2-align` looks for one —
+ *  `<stems>/<source stem>/vocals.wav`, the Demucs htdemucs layout.
+ *
+ *  Counted because the engine SKIPS BY NAME: with no stems at all the stage
+ *  runs to completion, aligns nothing and leaves a manifest that looks
+ *  untouched. Never throws. */
+function countYue2VocalStems(dir: string): number {
+  let n = 0;
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      if (fs.existsSync(path.join(dir, e.name, 'vocals.wav'))) n++;
+    }
+  } catch { /* no stems folder yet — 0 is the honest answer */ }
+  return n;
+}
+
+/** GET /datasets/:id/yue2-ar — per-stage cache state, per-stage model
+ *  readiness, the regulariser pack and the defaults the form is a view of.
+ *  Cheap and never throws: the UI polls it to decide what to enable. */
+router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) {
+      res.status(404).json({ error: 'Dataset not found' });
+      return;
+    }
+    const manifestPath = yue2PreprocessManifest(ds.slug);
+    const cache  = readYue2PreprocessSummary(manifestPath);
+    const codes  = readYue2CodecIdsStatus(manifestPath);
+    const cursor = readYue2CursorWordsStatus(manifestPath);
+    const stemsDir = yue2StemsDir(ds.slug);
+    const minted = yue2MintedManifest();
+    const tokenizer = resolveYue2TokenizerModel();
+    const aligner = resolveYue2AlignerModel();
+
+    res.json({
+      manifestPath,
+      latentsDir: yue2LatentsDir(ds.slug),
+      stages: {
+        preprocess: {
+          done: !!cache && cache.clips > 0,
+          cache: cache ?? null,
+          missing: missingYue2TrainModels('preprocess', { vaeVariant: 'standard' }),
+        },
+        tokenize: {
+          // `codec_ids_present` is the engine's own flag and says the stage
+          // ran; `sourcesWithCodes` says how much of the corpus it covers. A
+          // partial run is legal, so both are reported and neither is folded
+          // into the other.
+          done: !!codes?.present && codes.sourcesWithCodes > 0,
+          status: codes ?? null,
+          missing: missingYue2TokenizeModels(),
+          tokenizerFile: tokenizer ? path.basename(tokenizer) : '',
+          defaults: YUE2_TOKENIZE_DEFAULTS,
+        },
+        align: {
+          // No `present` flag to read here — the aligner stamps provenance and
+          // a path per source, so the count IS the state.
+          done: !!cursor && cursor.sourcesWithCursor > 0,
+          status: cursor ?? null,
+          missing: missingYue2AlignModels(),
+          alignerFile: aligner ? path.basename(aligner) : '',
+          /** Separation happens elsewhere, so the stems are an INPUT this
+           *  stage does not produce and the card has to be able to say so. */
+          stemsDir,
+          stemsReady: countYue2VocalStems(stemsDir),
+          defaults: YUE2_ALIGN_DEFAULTS,
+        },
+        train: {
+          missing: missingYue2TrainModels('train', { lmType: YUE2_AR_DEFAULTS.lmType }),
+        },
+      },
+      /** Absent is a legitimate state that needs `allowNoMinted`, not an error
+       *  — but it is a bad trade, so the card gets the file names to name. */
+      minted: {
+        present: !!minted,
+        manifestPath: minted,
+        dir: yue2ModelDir(),
+        files: [YUE2_MINTED_MANIFEST_FILE, YUE2_MINTED_CODES_FILE],
+      },
+      bases: availableYue2Bases(YUE2_AR_DEFAULTS.rank),
+      defaults: YUE2_AR_DEFAULTS,
+      /** Above this the engine refuses without `allowOvertrain`. */
+      overtrainSteps: YUE2_AR_OVERTRAIN_STEPS,
+      adapterRoot: yue2ArAdapterRoot(),
+      ffmpeg: !!getFFmpegPath(),
+      trigger: ds.customTag || '',
+      license: YUE2_LICENSE_NOTICE,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** POST /datasets/:id/yue2-tokenize */
+router.post('/datasets/:id/yue2-tokenize', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+    const num = (k: string, d: number, lo: number, hi: number): number => {
+      if (b[k] === undefined || b[k] === null) return d;
+      const v = Number(b[k]);
+      return Number.isFinite(v) && v >= lo && v <= hi ? v : d;
+    };
+    const D = YUE2_TOKENIZE_DEFAULTS;
+
+    const missing = missingYue2TokenizeModels();
+    if (missing.length) {
+      res.status(400).json({
+        error: `The tokenize stage is missing: ${missing.join(', ')}. Install it from the Model Manager `
+             + '(yue2-tok-f16) — nothing in generation needs it, so a fresh install will not have it.',
+      });
+      return;
+    }
+
+    const manifest = yue2PreprocessManifest(ds.slug);
+    const cache = readYue2PreprocessSummary(manifest);
+    if (!cache || cache.sources <= 0) {
+      res.status(400).json({
+        error: 'No YuE2 latent cache for this dataset — run the preprocess stage first. This stage reads '
+             + 'the manifest preprocess writes and re-encodes the sources it names; it does not scan a folder.',
+      });
+      return;
+    }
+
+    const decode: 'auto' | 'ffmpeg' =
+      b.decode === 'auto' || b.decode === 'ffmpeg' ? b.decode : D.decode;
+    // Only the explicit refusal is reproduced here. Preprocess already blocks a
+    // corpus it cannot decode, and a manifest with sources in it is proof those
+    // files decoded — so a second "you have no ffmpeg" guard could only fire on
+    // a corpus that has since changed, and would refuse a run over files that
+    // are already cached.
+    if (decode === 'ffmpeg' && !getFFmpegPath()) {
+      res.status(400).json({
+        error: 'Decode mode "ffmpeg" needs an ffmpeg binary and this install has none. Use "auto".',
+      });
+      return;
+    }
+
+    const job = queue.startYue2TokenizeJob(ds.id, {
+      manifest,
+      decode,
+      only: typeof b.only === 'string' ? b.only.trim() : D.only,
+      limit: num('limit', D.limit, 0, 100000),
+      force: b.force === true,
+      datasetSlug: ds.slug,
+    });
+    res.json({
+      jobId: job.id, kind: job.kind, manifest,
+      sources: cache.sources, clips: cache.clips,
+      tokenizer: path.basename(resolveYue2TokenizerModel()),
+      license: YUE2_LICENSE_NOTICE,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** POST /datasets/:id/yue2-align */
+router.post('/datasets/:id/yue2-align', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+    const num = (k: string, d: number, lo: number, hi: number): number => {
+      if (b[k] === undefined || b[k] === null) return d;
+      const v = Number(b[k]);
+      return Number.isFinite(v) && v >= lo && v <= hi ? v : d;
+    };
+    const D = YUE2_ALIGN_DEFAULTS;
+
+    const missing = missingYue2AlignModels();
+    if (missing.length) {
+      res.status(400).json({
+        error: `The align stage is missing: ${missing.join(', ')}. It has no Model Manager entry yet, so it `
+             + `has to be placed in ${yue2ModelDir()} by hand.`,
+      });
+      return;
+    }
+
+    const manifest = yue2PreprocessManifest(ds.slug);
+    const cache = readYue2PreprocessSummary(manifest);
+    if (!cache || cache.sources <= 0) {
+      res.status(400).json({
+        error: 'No YuE2 latent cache for this dataset — run the preprocess stage first. The lyrics the spans '
+             + 'are measured against come out of that manifest.',
+      });
+      return;
+    }
+
+    // An explicit stems folder is honoured, since separation happens outside
+    // the app and a user may already have stems elsewhere; it must exist,
+    // because the engine's own answer to a wrong path is to skip every source
+    // and exit 0.
+    const asked = typeof b.stemsDir === 'string' ? b.stemsDir.trim() : '';
+    const stemsDir = asked || yue2StemsDir(ds.slug);
+    const stems = countYue2VocalStems(stemsDir);
+    if (stems === 0) {
+      res.status(400).json({
+        error: `No vocal stems in ${stemsDir}. yue2-align wants <source stem>/vocals.wav per song (the `
+             + 'Demucs htdemucs layout) and skips by name, so with none of them it would align nothing and '
+             + 'still report success. Separate the dataset first.',
+      });
+      return;
+    }
+
+    const job = queue.startYue2AlignJob(ds.id, {
+      manifest,
+      stemsDir,
+      only: typeof b.only === 'string' ? b.only.trim() : D.only,
+      limit: num('limit', D.limit, 0, 100000),
+      cpu: b.cpu === true,
+      datasetSlug: ds.slug,
+    });
+    res.json({
+      jobId: job.id, kind: job.kind, manifest, stemsDir,
+      sources: cache.sources,
+      // Echoed so the card can show the shortfall the engine will not: a source
+      // without a stem is skipped silently and trains with the cursor loss off.
+      stemsReady: stems,
+      aligner: path.basename(resolveYue2AlignerModel()),
+      license: YUE2_LICENSE_NOTICE,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** POST /datasets/:id/yue2-ar-train */
+router.post('/datasets/:id/yue2-ar-train', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+    const num = (k: string, d: number, lo: number, hi: number): number => {
+      if (b[k] === undefined || b[k] === null) return d;
+      const v = Number(b[k]);
+      return Number.isFinite(v) && v >= lo && v <= hi ? v : d;
+    };
+    // No presets here. YUE2_PRESETS is the NAR half's ladder (256/256, 10 000
+    // steps) and none of its numbers mean anything to this trainer.
+    const D = YUE2_AR_DEFAULTS;
+
+    const installed = availableYue2Bases(D.rank);
+    const askedBase = String(b.lmType || '');
+    const lmType = installed.some(x => x.id === askedBase) ? askedBase : D.lmType;
+    const missing = missingYue2TrainModels('train', { lmType });
+    if (missing.length) {
+      res.status(400).json({
+        error: `YuE2 training models are missing: ${missing.join(', ')}. Install one from the Model Manager, `
+             + 'or pick a base that is already present.',
+      });
+      return;
+    }
+
+    const manifest = yue2PreprocessManifest(ds.slug);
+    const cache = readYue2PreprocessSummary(manifest);
+    if (!cache || cache.sources <= 0) {
+      res.status(400).json({
+        error: 'No YuE2 latent cache for this dataset — run the preprocess stage first.',
+      });
+      return;
+    }
+
+    // Same rule and same escape hatch as the NAR route: the engine only WARNS
+    // about a missing trigger, and a silent warning inside a long run is not a
+    // warning. The trigger is also written into the exported metadata, so half
+    // a run under a different one is a different adapter.
+    const trigger = typeof b.trigger === 'string' ? b.trigger.trim() : (ds.customTag || '');
+    if (!trigger && b.allowNoTrigger !== true) {
+      res.status(400).json({
+        error: 'A trigger word is required: it is prepended to every caption in training and is the only '
+             + 'handle the trained style has at generation time. Set the dataset\'s trigger word, or send '
+             + 'one with the request.',
+      });
+      return;
+    }
+
+    const steps = num('steps', D.steps, 1, 1000000);
+    if (steps > YUE2_AR_OVERTRAIN_STEPS && b.allowOvertrain !== true) {
+      res.status(400).json({
+        error: `${steps} steps is past ${YUE2_AR_OVERTRAIN_STEPS}, where upstream says the model stops `
+             + 'learning the style and starts memorising the songs. The settled recipe is 400 steps with the '
+             + 'ear picking a rung around 300. Resend with allowOvertrain to train it anyway.',
+      });
+      return;
+    }
+
+    const minted = yue2MintedManifest();
+    if (!minted && b.allowNoMinted !== true) {
+      res.status(400).json({
+        error: 'The minted regulariser pack is not installed, and it is the counterweight to a real defect: '
+             + 'our semantic encoder repeats adjacent codes 3.3-6.6% of the time against YuE2\'s own '
+             + '0.02-0.17%, which is out of distribution in the direction that produces LOOPING, and the '
+             + '50/50 mix of true YuE2 tokens is what holds it. Install "yue2-minted-manifest" and '
+             + `"yue2-minted-codes" from the Model Manager (both land in ${yue2ModelDir()}), or resend with `
+             + 'allowNoMinted to train artist-only.',
+      });
+      return;
+    }
+
+    const cursorWeight = num('cursorWeight', D.cursorWeight, 0, 10);
+    const cursor = readYue2CursorWordsStatus(manifest);
+    if (cursorWeight > 0 && !cursor?.sourcesWithCursor) {
+      res.status(400).json({
+        error: 'The lyric-cursor loss is on (cursorWeight > 0) but no source in the manifest has cursor '
+             + 'spans, and the engine refuses that rather than print "cursor nan" for the whole run. Run the '
+             + 'align stage, or send cursorWeight: 0 to train without it.',
+      });
+      return;
+    }
+
+    // A WARNING, not a refusal: the engine will start, and it is the trainer's
+    // own message that says the AR half has nothing to predict. Refusing here
+    // would also refuse a cache being tokenized in pieces with --only.
+    const codes = readYue2CodecIdsStatus(manifest);
+    const warnings: string[] = [];
+    if (!codes?.present || codes.sourcesWithCodes === 0) {
+      warnings.push('This cache has no codec_ids — run the tokenize stage. The AR half trains next-token '
+                  + 'loss over those codes, so without them there is nothing to predict.');
+    } else if (codes.sourcesWithCodes < codes.sources) {
+      warnings.push(`${codes.sources - codes.sourcesWithCodes} of ${codes.sources} sources have no codes `
+                  + 'and will not be trained on.');
+    }
+    if (cursor && cursor.sourcesWithCursor < cursor.sources) {
+      warnings.push(`${cursor.sources - cursor.sourcesWithCursor} of ${cursor.sources} sources have no `
+                  + 'cursor spans and will train with the cursor loss off.');
+    }
+
+    const target = isYue2ArTarget(b.target) ? b.target : D.target;
+    const styleTemplate = isYue2StyleTemplate(b.styleTemplate) ? b.styleTemplate : D.styleTemplate;
+    const runName = yue2ArRunName(ds.slug);
+    const outDir = yue2ArAdapterRunDir(runName);
+
+    const job = queue.startYue2ArTrainJob(ds.id, {
+      manifest,
+      minted,
+      // The two engine permissions are set from the guards above, not inferred
+      // from the numbers: each is only ever true because this request carried
+      // allowNoMinted / allowOvertrain and got past the refusal that says what
+      // it costs. buildYue2ArTrainArgs deliberately will not derive them.
+      allowNoMinted: !minted,
+      outDir,
+      lmType,
+      trigger,
+      styleTemplate,
+      style:  typeof b.style === 'string' ? b.style.trim() : '',
+      lyrics: typeof b.lyrics === 'string' ? b.lyrics.trim() : '',
+      sidecars: b.sidecars === undefined ? D.sidecars : b.sidecars === true,
+      target,
+      rank:  num('rank', D.rank, 1, 512),
+      alpha: num('alpha', D.alpha, 1, 2048),
+      lr:    num('lr', D.lr, 1e-7, 1e-2),
+      lrScheduler: isYue2ArLrScheduler(b.lrScheduler) ? b.lrScheduler : D.lrScheduler,
+      // The cosine HORIZON, not the run length: moving `steps` without moving
+      // this is what keeps a 400-step run the head of a 3000-step curve.
+      schedSteps: num('schedSteps', D.schedSteps, 1, 1000000),
+      warmup: num('warmup', D.warmup, 0, 100000),
+      steps,
+      allowOvertrain: steps > YUE2_AR_OVERTRAIN_STEPS,
+      gradAccum: num('gradAccum', D.gradAccum, 1, 64),
+      maxGradNorm: num('maxGradNorm', D.maxGradNorm, 0, 1000),
+      weightDecay: num('weightDecay', D.weightDecay, 0, 1),
+      artistFrac: num('artistFrac', D.artistFrac, 0, 1),
+      adamBeta1: num('adamBeta1', D.adamBeta1, 0, 1),
+      adamBeta2: num('adamBeta2', D.adamBeta2, 0, 1),
+      captionDropout: num('captionDropout', D.captionDropout, 0, 1),
+      attn: isYue2ArAttn(b.attn) ? b.attn : D.attn,
+      maxLen: num('maxLen', D.maxLen, 256, 65536),
+      chunk: num('chunk', D.chunk, 1, 8192),
+      cursorWeight,
+      seed: num('seed', D.seed, 0, 2 ** 31 - 1),
+      // Clamped to the run length, as the NAR route clamps saveEvery: a ladder
+      // whose first rung is past the last step is no ladder.
+      ckptFrom:  Math.min(num('ckptFrom', D.ckptFrom, 0, 1000000), steps),
+      saveEvery: Math.min(num('saveEvery', D.saveEvery, 1, 1000000), steps),
+      evalEvery: num('evalEvery', D.evalEvery, 0, 1000000),
+      logEvery: num('logEvery', D.logEvery, 1, 10000),
+      // A NEW run never resumes — outDir is minted per run and holds no state.
+      resume: false,
+      datasetSlug: ds.slug,
+      datasetName: ds.name || ds.slug,
+    });
+    res.json({
+      jobId: job.id, kind: job.kind, runName, outDir,
+      sources: cache.sources, clips: cache.clips,
+      lmType, target, styleTemplate, steps,
+      minted: minted || '',
+      /** Which rung to preselect once the ladder exists. A default, not a
+       *  verdict: upstream's instruction is to pick by ear. */
+      ckptPickStep: D.ckptPickStep,
+      // The card decides how loudly to say these. No estimatedMs: nothing has
+      // been measured for this stage, and a plausible number would read as one.
+      warnings,
+      license: YUE2_LICENSE_NOTICE,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** GET /datasets/:id/yue2-ar-runs — previous AR runs and their checkpoint
+ *  ladders. A separate root from the NAR runs', so a separate route. */
+router.get('/datasets/:id/yue2-ar-runs', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) {
+      res.status(404).json({ error: 'Dataset not found' });
+      return;
+    }
+    const runs = listYue2ArRuns(ds.id, ds.slug);
+    // A run whose job is live right now is not "halted", whatever its log tail
+    // says — a running job's log tail always looks like an interrupted one.
+    const active = queue.activeJobForDataset(ds.id);
+    const activeDir = active && active.kind === 'yue2-ar-train'
+      ? String((active.opts as { outDir?: string } | undefined)?.outDir || '') : '';
+    const out = runs.map(r => (
+      activeDir && path.resolve(activeDir) === path.resolve(r.dir)
+        ? { ...r, outcome: 'unknown' as const, running: true }
+        : { ...r, running: false }
+    ));
+    res.json({ runs: out, busy: !!active, adapterRoot: yue2ArAdapterRoot() });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** GET /yue2-adapter-captions?adapter=<path> — the captions the dataset behind
+ *  one trained adapter was trained on.
+ *
+ *  Not under /datasets/:id: the caller (Create's caption-source picker, see
+ *  ui/src/utils/yue2CaptionSource.ts) holds an adapter path and nothing else —
+ *  the adapter is engine state on this backend, and the catalogue entry records
+ *  a dataset NAME, not an id. The run directory the checkpoint sits in is what
+ *  closes the gap: its manifest names the exact `yue2_preprocess.json` the run
+ *  trained against, which is a stronger link than dataset -> current cache.
+ *
+ *  Every failure answers with an empty list rather than a status, because the
+ *  picker's "no tracks" state is the correct rendering of a deleted dataset, a
+ *  hand-copied adapter and a cache that has since been re-cut alike. */
+router.get('/yue2-adapter-captions', (req: Request, res: Response) => {
+  try {
+    const asked = typeof req.query.adapter === 'string' ? req.query.adapter.trim() : '';
+    const dir = asked ? path.dirname(path.resolve(asked)) : '';
+    // The path arrives from a query string, so it is read only when it is a
+    // checkpoint inside a run directory one of the two adapter roots owns.
+    const roots = [yue2ArAdapterRoot(), yue2AdapterRoot()].map(r => path.resolve(r));
+    if (!dir || !roots.some(root => path.dirname(dir) === root)) {
+      res.json({ tracks: [] });
+      return;
+    }
+    const manifestPath = readYue2ArRunManifest(dir)?.options?.manifest
+      || readYue2RunManifest(dir)?.options?.manifest || '';
+    if (!manifestPath) {
+      res.json({ tracks: [] });
+      return;
+    }
+
+    let sources: Array<Record<string, unknown>> = [];
+    try {
+      const j = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
+      sources = Array.isArray(j.sources) ? j.sources as Array<Record<string, unknown>> : [];
+    } catch { /* cache deleted or mid-write — an empty list is the honest answer */ }
+
+    const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+    const tracks = sources
+      .map(s => ({
+        name: str(s.name), caption: str(s.caption),
+        genre: str(s.genre), bpm: str(s.bpm), key: str(s.key),
+      }))
+      .filter(t => t.name && t.caption)
+      // `styled` is composed HERE, with the same function the trainer used, so
+      // the client never rebuilds that sentence — a near-miss is off
+      // distribution in exactly the way the picker exists to avoid. No trigger:
+      // the caption box holds the caption, and generate.ts wraps whatever is in
+      // it in the adapter's own template.
+      .map(t => ({ ...t, styled: yue2StyleString(t) }));
+    res.json({ tracks });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

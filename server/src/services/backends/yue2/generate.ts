@@ -42,7 +42,10 @@ import {
   startGenerationLog, logGeneration, logGenerationParams,
   finishGenerationLog, failGenerationLog,
 } from '../../logger.js';
+import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { yue2Synth, yue2FinalDetail, type Yue2SynthRequest } from './client.js';
+import { yue2PersistedSelection } from './index.js';
+import { applyYue2StyleTemplate, type Yue2StyleTemplate } from './style.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import type { GenerationAttempt } from '../types.js';
 
@@ -64,6 +67,79 @@ const DETAIL_POLL_MS = 1_500;
 export interface Yue2ParamMapping {
   req: Yue2SynthRequest;
   notes: string[];
+  /** What the user typed, before the adapter's style template wrapped it.
+   *  req.style is the prompt the MODEL needs; this is the one a human wrote,
+   *  and it is what the song row, the title and StableStep's own SA3 prompt
+   *  should show — none of them want "albumA2, in the style of albumA2." */
+  caption: string;
+}
+
+/**
+ * Compose the style prompt the selected LM adapter was actually trained under.
+ *
+ * Both YuE2 trainers only ever showed the model a trigger INSIDE the style
+ * sentence (see style.ts), so sending the caption box verbatim is
+ * off-distribution — the reason adapters capped and sang weakly until the
+ * template x adapter x seed grid of 2026-09-14 pinned it. Every good render in
+ * that campaign used a hand-composed string; this composes the same one.
+ *
+ * The adapter is ENGINE STATE on this backend rather than a request field
+ * (index.ts, lmAdapterSelectable), so where mapMinimaxParams reads
+ * params.mm3LmAdapter this reads the persisted pick the picker writes and
+ * reconcileSelection replays — the one source that says what is merged into
+ * the resident weights.
+ */
+function yue2StyleForAdapter(caption: string, params: any): { style: string; notes: string[] } {
+  const notes: string[] = [];
+  const adapter = yue2PersistedSelection().lm_adapter;
+  if (!adapter) return { style: caption, notes };
+
+  const name = path.basename(adapter);
+  const meta = readSafetensorsMeta(adapter);
+  // NFC for the same reason the caption gets it: the header's trigger and the
+  // caption have to be the same normal form or the already-composed check
+  // below compares two spellings of one word and adds a second copy.
+  const trigger = (meta?.trigger ?? '').normalize('NFC').trim();
+  if (!trigger) {
+    notes.push(`LM adapter "${name}" records no trigger — the style prompt is sent exactly as typed.`);
+    return { style: caption, notes };
+  }
+
+  // The same opt-out MM3 gives (mm3LmAdapterTrigger): composing is a default,
+  // not a cage, and anyone deliberately testing an off-template prompt says so.
+  if (params.yue2LmAdapterTrigger === false) {
+    notes.push(
+      `LM adapter trigger "${trigger}" NOT composed in (yue2LmAdapterTrigger: false) — this adapter `
+      + 'only ever saw its trigger inside the training style sentence, so likeness will be weak.',
+    );
+    return { style: caption, notes };
+  }
+
+  // Absent means a file exported before --style-template existed, and `bare`
+  // is what reproduces that build's behaviour. Both exporters write the field
+  // now, so absence is the file's age and not a default to fill in with
+  // `upstream`.
+  const template: Yue2StyleTemplate = meta?.styleTemplate === 'upstream' ? 'upstream' : 'bare';
+  // No genre/BPM/key tail: at training time those came from the dataset's own
+  // sidecars, and this backend exposes no such fields (capabilities: bpm
+  // false, keyscale false). Whatever belongs in the tail the user writes into
+  // the caption, which is exactly where it lands.
+  const style = applyYue2StyleTemplate({ trigger, caption, template });
+
+  if (!caption.trim()) {
+    // A caption-dropout run trained artist rows with the caption removed, so
+    // the trigger standing alone is a sequence this adapter has really seen.
+    notes.push(meta?.captionDropout
+      ? `Empty Style Description — rendering from the trigger "${trigger}" alone, which this adapter `
+        + `trained for (caption dropout ${meta.captionDropout}).`
+      : `Empty Style Description — sending the trigger "${trigger}" alone, which this adapter never `
+        + 'trained on (its header records no caption dropout).');
+  } else if (style === caption) {
+    notes.push(`Style prompt already carried the "${trigger}" ${template} template — left as typed.`);
+  } else {
+    notes.push(`LM adapter trigger "${trigger}" composed into the style prompt (${template} template).`);
+  }
+  return { style, notes };
 }
 
 /**
@@ -81,7 +157,10 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   // NFC normalization: the caption/lyrics text this backend's tokenizer sees
   // must match what the engine-side BPE wrapper expects
   // (docs/plans/yue2/06-engine-port-plan.md §2 — NFC before pre-tokenization).
-  const style = rawCaption.normalize('NFC');
+  const caption = rawCaption.normalize('NFC');
+  const styled = yue2StyleForAdapter(caption, params);
+  const style = styled.style;
+  notes.push(...styled.notes);
 
   const lyricsRaw: string = params.instrumental ? '' : (params.lyrics || '');
   const lyrics = lyricsRaw.normalize('NFC');
@@ -138,7 +217,7 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
     ...(seed >= 0 ? { seed } : {}),
   };
 
-  return { req, notes };
+  return { req, notes, caption };
 }
 
 /** First non-empty line of the caption, for StableStep's own SA3 prompt —
@@ -182,7 +261,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
 
   if (job.status === 'cancelled') return;
 
-  const { req, notes } = mapYue2Params(job.params);
+  const { req, notes, caption } = mapYue2Params(job.params);
 
   startGenerationLog(job.id, 'yue2-text2music');
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
@@ -299,7 +378,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     timing.push({ name: 'Save', ms: Math.round(performance.now() - saveStart) });
 
     // ── Persist ──
-    const captionLine = yue2CaptionToStyle(req.style);
+    const captionLine = yue2CaptionToStyle(caption);
     const title: string = job.params.title || captionLine.substring(0, 60) || 'Untitled';
     const style: string = job.params.caption || job.params.style || '';
     const trackParams = {
@@ -329,7 +408,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
         ppVaeReencode: false,
         spectralLifterEnabled: false,
         instrumental: sub.instrumental,
-        stableStepCaptions: [yue2CaptionToStyle(req.style)],
+        stableStepCaptions: [captionLine],
       };
       if (ppParams.postProcessingEnabled !== false) {
         const ppStart = performance.now();

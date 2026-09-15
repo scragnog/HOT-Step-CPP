@@ -201,6 +201,24 @@ interface TrainingState {
     step: number; totalSteps: number; loss: number; runMean: number; lr: number;
     gradNorm: number; stepMs: number; usedMb: number; totalMb: number;
   } | null;
+  /** YuE2 AR live run stats. A third field for the same reason the second one
+   *  exists, plus two the NAR half has no analogue for. `seqLen` is the token
+   *  length of the song THIS step drew — an AR row is a whole song, so it moves
+   *  every step and it is what the per-layer buffers are sized by. `mintedVal`
+   *  is the held-out loss on the regulariser pack, and it is the number to
+   *  watch: the artist loss falls whether the model is learning the style or
+   *  memorising the songs, and this one does not. Null until the first eval,
+   *  and it stays null for a run trained without the pack. */
+  yue2ArLive: {
+    step: number; totalSteps: number; loss: number; runMean: number; lr: number;
+    gradNorm: number; stepMs: number; seqLen: number; usedMb: number; totalMb: number;
+    mintedVal: number | null;
+  } | null;
+  /** minted_val over the run, as its own series: the AR trainer counts songs,
+   *  not epochs, so these points are in a STEP domain and cannot be merged into
+   *  trainEvalSeries, which is fractional-epoch. Empty for a run trained
+   *  without the regulariser pack — there is no held-out set to score. */
+  yue2ArEvalSeries: Array<{ step: number; loss: number }>;
   /** Held-out loss, in the same fractional-epoch x domain as the other series. */
   trainEvalSeries: Array<{ step: number; loss: number; ep: number }>;
   /** From the one `data` metric — songs skipped for exceeding max sequence
@@ -311,6 +329,16 @@ interface TrainingState {
   startYue2Preprocess(opts?: trainingApi.Yue2PreprocessRequest): Promise<void>;
   /** YuE2: cached latents + a trigger word -> a NAR LoRA. */
   startYue2Train(opts: trainingApi.Yue2TrainRequest): Promise<void>;
+  /** YuE2 cache stage 2: the manifest's sources -> codec_ids, which is what the
+   *  AR half's next-token loss is scored on. */
+  startYue2Tokenize(opts?: trainingApi.Yue2TokenizeRequest): Promise<void>;
+  /** YuE2 cache stage 3: lyrics forced-aligned against vocal stems ->
+   *  cursor_words, which is what `cursorWeight` reads. */
+  startYue2Align(opts?: trainingApi.Yue2AlignRequest): Promise<void>;
+  /** YuE2: all three caches + a trigger word -> an AR LoRA. Returns the
+   *  server's advisory warnings about a partial cache — the run has already
+   *  started, so they are for the card to show, not to act on. */
+  startYue2ArTrain(opts?: trainingApi.Yue2ArTrainRequest): Promise<string[]>;
   loadTrainDitStatus(q?: { variantKey?: string; adapterName?: string }): Promise<void>;
   startTrainDit(opts: TrainDitOptions): Promise<void>;
   loadAuditions(): Promise<void>;
@@ -362,6 +390,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   trainLmLast: null,
   mm3Live: null,
   yue2Live: null,
+  yue2ArLive: null,
+  yue2ArEvalSeries: [],
   trainEvalSeries: [],
   trainLmSkippedLong: 0,
   trainLmVram: null,
@@ -419,6 +449,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     trainLmLast: null,
     mm3Live: null,
     yue2Live: null,
+    yue2ArLive: null,
+    yue2ArEvalSeries: [],
     trainEvalSeries: [],
     trainLmSkippedLong: 0,
     trainLmVram: null,
@@ -500,6 +532,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
               trainLmLast: null,
               mm3Live: null,
               yue2Live: null,
+              yue2ArLive: null,
+              yue2ArEvalSeries: [],
               trainEvalSeries: [],
               trainLmSkippedLong: 0,
               trainLmVram: null,
@@ -864,6 +898,48 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }
   },
 
+  startYue2Tokenize: async (opts) => {
+    const id = get().selectedDatasetId;
+    if (!id) return;
+    try {
+      const { jobId } = await trainingApi.startYue2Tokenize(id, opts ?? {});
+      set({ jobLog: [], error: null });
+      await adoptJob(set, get, jobId);
+    } catch (err) {
+      set({ error: errMessage(err) });
+    }
+  },
+
+  startYue2Align: async (opts) => {
+    const id = get().selectedDatasetId;
+    if (!id) return;
+    try {
+      const { jobId } = await trainingApi.startYue2Align(id, opts ?? {});
+      set({ jobLog: [], error: null });
+      await adoptJob(set, get, jobId);
+    } catch (err) {
+      set({ error: errMessage(err) });
+    }
+  },
+
+  startYue2ArTrain: async (opts) => {
+    const id = get().selectedDatasetId;
+    if (!id) return [];
+    try {
+      const { jobId, warnings } = await trainingApi.startYue2ArTrain(id, opts ?? {});
+      // Steps, not epochs, so the epoch series stays empty and the chart draws
+      // the step layer alone. There is no target-loss mode in the YuE2 trainer,
+      // so no target line is seeded.
+      set({ jobLog: [], error: null, ...blankTrainSeries(), trainMaxEpochs: 0,
+        trainTargetLoss: 0, yue2ArLive: null, yue2ArEvalSeries: [] });
+      await adoptJob(set, get, jobId);
+      return warnings ?? [];
+    } catch (err) {
+      set({ error: errMessage(err) });
+      return [];
+    }
+  },
+
   startTrainLm: async (opts) => {
     const id = get().selectedDatasetId;
     if (!id) return;
@@ -1131,8 +1207,11 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         // trainer's stderr into these same step/milestone/data metrics
         // (services/training/yue2TrainRunner.ts), so it draws on the same
         // chart with no other change either.
+        // yue2-ar-train's relay parses a different log line into the same
+        // vocabulary (services/training/yue2ArTrainRunner.ts), so it too draws
+        // on the shared chart.
         if (chartKind === 'train-lm' || chartKind === 'train-dit' || chartKind === 'mm3-train-lm'
-          || chartKind === 'yue2-nar-train') {
+          || chartKind === 'yue2-nar-train' || chartKind === 'yue2-ar-train') {
           if (ev.metric === 'data' && typeof ev.stepsPerEpoch === 'number' && ev.stepsPerEpoch > 0) {
             set({ trainStepsPerEpoch: ev.stepsPerEpoch });
           }
@@ -1192,6 +1271,42 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
               usedMb: typeof ev.usedMb === 'number' ? ev.usedMb : (prev?.usedMb ?? 0),
               totalMb: typeof ev.totalMb === 'number' ? ev.totalMb : (prev?.totalMb ?? 0),
             } });
+          }
+          // The AR half's tiles. Same one-event-writes-everything shape as the
+          // NAR's, with the song's token length riding on `maxLen` (the relay
+          // reuses the existing sequence-length field rather than inventing a
+          // YuE2-only name) and one extra source: the minted_val eval.
+          if (chartKind === 'yue2-ar-train') {
+            const prev = get().yue2ArLive;
+            if (ev.metric === 'step') {
+              set({ yue2ArLive: {
+                step: typeof ev.step === 'number' ? ev.step : (prev?.step ?? 0),
+                totalSteps: (typeof ev.totalSteps === 'number' ? ev.totalSteps : 0)
+                  || (prev?.totalSteps ?? 0),
+                loss: typeof ev.loss === 'number' ? ev.loss : (prev?.loss ?? 0),
+                runMean: typeof ev.ma5 === 'number' ? ev.ma5 : (prev?.runMean ?? 0),
+                lr: typeof ev.lr === 'number' ? ev.lr : (prev?.lr ?? 0),
+                gradNorm: typeof ev.gradNorm === 'number' ? ev.gradNorm : (prev?.gradNorm ?? 0),
+                stepMs: typeof ev.stepMs === 'number' ? ev.stepMs : (prev?.stepMs ?? 0),
+                seqLen: typeof ev.maxLen === 'number' ? ev.maxLen : (prev?.seqLen ?? 0),
+                usedMb: typeof ev.usedMb === 'number' ? ev.usedMb : (prev?.usedMb ?? 0),
+                totalMb: typeof ev.totalMb === 'number' ? ev.totalMb : (prev?.totalMb ?? 0),
+                mintedVal: prev?.mintedVal ?? null,
+              } });
+            }
+            // The AR trainer's ONLY eval metric is minted_val — the artist
+            // hold-out is logged as text — so this series needs no
+            // disambiguation. Its own field rather than trainEvalSeries because
+            // that one is in the fractional-epoch x domain and an AR run has no
+            // epoch notion at all: it counts songs, and x here is the step.
+            // Replaced by step rather than appended: the SSE buffer replays on
+            // reconnect and the curve has to be idempotent.
+            if (ev.metric === 'eval' && typeof ev.loss === 'number' && typeof ev.step === 'number') {
+              const next = [...get().yue2ArEvalSeries.filter(e => e.step !== ev.step),
+                { step: ev.step, loss: ev.loss }].sort((x, y) => x.step - y.step);
+              set({ yue2ArEvalSeries: next,
+                ...(prev ? { yue2ArLive: { ...prev, mintedVal: ev.loss } } : {}) });
+            }
           }
           if ((ev.metric === 'epoch' || ev.metric === 'step')
             && typeof ev.epochs === 'number' && ev.epochs > 0

@@ -127,6 +127,18 @@ export interface Yue2AdapterMeta {
   clipFrames?: number;
   trigger?: string;
   baseSha?: string;
+  /** `upstream` or `bare`: which shape the training rows' style string had.
+   *  Generation has to compose the prompt the same way or the trigger lands in
+   *  a context the adapter never saw (backends/yue2/style.ts). Both exporters
+   *  write it, so ABSENT means a file from before the flag existed — which is
+   *  the `bare` behaviour, not the `upstream` default. */
+  styleTemplate?: string;
+  /** The share of artist rows trained with the caption dropped, leaving the
+   *  trigger to stand alone — which is what says the adapter can be addressed
+   *  by its trigger alone at generation time. Only the AR exporter writes it,
+   *  and only when the run used it; a NAR run records it in its manifest
+   *  instead. */
+  captionDropout?: number;
   /** Everything the header carried, unparsed, for anything added later. */
   raw: Record<string, string>;
 }
@@ -168,6 +180,8 @@ export function readSafetensorsMeta(file: string): Yue2AdapterMeta | null {
       clipFrames: num('clip_frames'),
       trigger: raw.trigger,
       baseSha: raw.base_sha,
+      styleTemplate: raw.style_template,
+      captionDropout: num('caption_dropout'),
       raw,
     };
   } catch {
@@ -297,6 +311,14 @@ export interface Yue2RunSummary {
   rank?: number;
   alpha?: number;
   target?: string;
+  /** How this run's prompts were built, for the generation path and for the
+   *  Studio to show. Off the newest checkpoint rather than the manifest,
+   *  because the exporter writes it into every file: an adapter copied out of
+   *  its run still says how its prompt was built. The dropout has no header to
+   *  come from on this half (the NAR exporter does not write it), so the
+   *  manifest's own recipe answers for it. */
+  styleTemplate?: string;
+  captionDropout?: number;
   /** Present only when `yue2_nar_ckpt.bin` is still there, which means the run
    *  stopped BEFORE its clean finish (the engine deletes it on export).
    *
@@ -438,6 +460,8 @@ export function readYue2Run(dir: string): Yue2RunSummary | null {
     rank: manifest?.options.rank ?? newest?.meta?.rank,
     alpha: manifest?.options.alpha ?? newest?.meta?.alpha,
     target: manifest?.options.target ?? newest?.meta?.targets,
+    styleTemplate: newest?.meta?.styleTemplate,
+    captionDropout: manifest?.options.captionDropout ?? newest?.meta?.captionDropout,
     optionsSource: manifest ? 'manifest' : (newest?.meta ? 'checkpoint' : 'none'),
     sizeBytes: dirSize(dir),
   };
