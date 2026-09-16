@@ -532,8 +532,17 @@ static void print_usage(void) {
             "                report rel ~= 0.5 and the gate must FAIL.\n"
             "                Weights are CC BY-NC 4.0; trained adapters inherit NC.\n"
             "  yue2-ar-train  YuE2 AR-half LoRA training: the COMPOSER. Next-token cross-\n"
-            "                entropy over the CODEC POSITIONS ONLY of a whole song, never on\n"
-            "                the prefix. Needs codec_ids, so run `yue2-tokenize` first.\n"
+            "                entropy over the CODEC POSITIONS of a whole song, never the\n"
+            "                instruction/[Tags]/style/[Lyrics] head. Needs codec_ids, so run\n"
+            "                `yue2-tokenize` first. [--abc-dropout 0.5] [--no-abc]: when a\n"
+            "                source carries a manifest `abc` (a SheetSage2 lead sheet, written\n"
+            "                by `yue2-sheet`), it trains cot=full w.p. (1 - abc_dropout) instead\n"
+            "                of cot=off -- and for `full` the sheet tokens (+ABC_END+MUSIC_START)\n"
+            "                ARE in the loss too, not just the codec span. --no-abc ignores\n"
+            "                every sheet and trains exactly as before this existed. Sources with\n"
+            "                no `abc`, and every minted row, always train off. --dump-sequence\n"
+            "                <name> <off|full> <out.json>: writes one source's ids + supervision\n"
+            "                mask and exits (G7).\n"
             "                --lm <yue2-lm-<type>.gguf> (or --models <dir>)\n"
             "                --manifest <yue2_preprocess.json>  read as SOURCES, not clips:\n"
             "                the source-level codec_ids file is the whole-song code array.\n"
@@ -593,12 +602,15 @@ static void print_usage(void) {
             "                number the run reports.\n"
             "                [--weights f32|native] default f32: mul_mat's activation backward\n"
             "                is out_prod, which is F32-only on CUDA.\n"
-            "                [--chunk 256] supervised rows per CE chunk. The loss is scored\n"
-            "                over a 32,769-row SLICE (MUSIC_END + the 32,768 codec tokens),\n"
-            "                which is exactly what the sampler draws from -- but it is a NAMED\n"
-            "                divergence from upstream's full 184,704-way softmax, so our CE\n"
-            "                numbers are not comparable to the README's. [--ce-slice] drops\n"
-            "                the full-vocab number each eval also logs for that reason.\n"
+            "                [--chunk 256] supervised rows per CE chunk. The CODEC-range loss\n"
+            "                is scored over a 32,769-row SLICE (MUSIC_END + the 32,768 codec\n"
+            "                tokens), which is exactly what the sampler draws from -- but it is\n"
+            "                a NAMED divergence from upstream's full 184,704-way softmax, so our\n"
+            "                CE numbers are not comparable to the README's. [--ce-slice] drops\n"
+            "                the full-vocab number each eval also logs for that reason. A `full`\n"
+            "                example's SHEET-token span (--abc-dropout) is the one exception:\n"
+            "                it always trains against the real full vocabulary, since its\n"
+            "                targets aren't a contiguous slice the way codec ids are.\n"
             "                [--eval-every 100] [--log-every 20]\n"
             "                [--save-every 200] [--ckpt-from 600]  upstream's ladder: pick the\n"
             "                checkpoint BY EAR, not by held-out loss.\n"
@@ -4855,6 +4867,13 @@ static int cmd_yue2_ar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--resume"))        a.resume       = true;
         else if (!strcmp(argv[i], "--cursor-weight")) a.cursor_weight = atof(next("--cursor-weight"));
         else if (!strcmp(argv[i], "--caption-dropout")) a.caption_dropout = (float) atof(next("--caption-dropout"));
+        else if (!strcmp(argv[i], "--abc-dropout"))   a.abc_dropout  = (float) atof(next("--abc-dropout"));
+        else if (!strcmp(argv[i], "--no-abc"))        a.no_abc       = true;
+        else if (!strcmp(argv[i], "--dump-sequence")) {
+            a.dump_seq_name = next("--dump-sequence");
+            a.dump_seq_mode = next("--dump-sequence");
+            a.dump_seq_out  = next("--dump-sequence");
+        }
         else if (!strcmp(argv[i], "--fd-check"))      a.fd_check     = atoi(next("--fd-check"));
         else if (!strcmp(argv[i], "--fd-eps"))        a.fd_eps       = atof(next("--fd-eps"));
         else if (!strcmp(argv[i], "--ar-layers"))     a.ar_layers    = atoi(next("--ar-layers"));

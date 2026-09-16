@@ -139,6 +139,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>  // --dump-sequence's JSON write (yue2_ar_dumpseq_main)
 #include <initializer_list>
 #include <map>
 #include <stdexcept>
@@ -205,17 +206,33 @@ struct Yue2ArTrainArgs {
     // was trained on, instead of one that appeared once beside a single song
     // (_LISTENING/2026-09-14/RESULTS.md, arms 130-133). Minted rows never drop.
     float       caption_dropout = 0.0f;
+    // --abc-dropout: contract §19/doc 19 decision 2, ai-toolkit's abc_dropout.
+    // P = probability an artist example WITH A SHEET (manifest `abc`, written
+    // by `ace-train yue2-sheet`) trains "off" instead of "full" this draw; it
+    // trains "full" with probability (1-P). A source with no sheet, or a
+    // minted row, ALWAYS trains "off" — it never enters this draw. 1.0 = never
+    // draw full (byte-identical to a run before this option existed).
+    // Independent of --caption-dropout (item 2: composes on top, not instead).
+    float       abc_dropout   = 0.5f;
+    bool        no_abc        = false;  // ignore manifest sheets entirely, as if none were present
     double      artist_frac   = 0.5;       // one draw per micro-step: random() < frac ? artist : minted
     int64_t     max_len       = 12288;     // upstream's MAXLEN
     bool        allow_overtrain = false;   // past ~1500 steps the model memorises the songs
 
     std::string attn        = "exact";  // exact | flash | flash-f32
     bool        weights_f32 = true;
-    // The TRAINING loss is always the 32,769-row slice (contract §3.3) — the
-    // label buffer is what makes the full vocabulary unaffordable, at 3.3 GB
-    // against 32 MB per chunk. `--ce-full` / `--ce-slice` control only whether
-    // each EVAL also reports the full-vocab number, which is the one that is
+    // The CODEC-RANGE training loss is always the 32,769-row slice (contract
+    // §3.3) — a dense one-hot chunk over the WHOLE codec supervised span at
+    // the full vocabulary would be unaffordable (3.3 GB at n_sup = 4501
+    // against 32 MB per chunk sliced). `--ce-full` / `--ce-slice` control only
+    // whether each EVAL also reports the full-vocab number, which is the one
     // comparable to upstream's README. Default on: evals are infrequent.
+    // (--abc-dropout's `full`-mode SHEET-TOKEN span is a separate exception:
+    // it trains against the real full vocabulary always, via its own small,
+    // chunk_text-bounded label buffer — see yue2_at_head_text_chunked. Its
+    // targets are not a contiguous slice the way codec ids are, so there is
+    // no equivalent slice to take, and the span itself is short next to a
+    // whole song's codec stream.)
     bool    eval_full_vocab = true;
     int64_t chunk           = 256;  // supervised rows per CE chunk
 
@@ -260,6 +277,14 @@ struct Yue2ArTrainArgs {
     double fd_eps    = 1e-2;
     int    ar_layers = 2;    // F32 isolation depth / stack truncation; 0 = no isolation (report only)
     int64_t fd_frames = 128;  // synthetic codec stream length for the gate
+
+    // --dump-sequence <name> <mode> <out.json>: G7. Builds the ids + loss
+    // mask this trainer would train ONE manifest source (`name`) under one
+    // mode ("off" or "full"), writes them as JSON, and exits — no training.
+    // `mode=full` requires that source to carry a manifest `abc`.
+    std::string dump_seq_name;
+    std::string dump_seq_mode;
+    std::string dump_seq_out;
 };
 
 // ── F32 isolation of the AR stack (contract §6.1) ──────────────────────────
@@ -502,6 +527,30 @@ struct Yue2ArSong {
     std::vector<int32_t> prefix_dropped;
     Yue2AtCursor         cursor_dropped;
     bool                 use_dropped = false;  // set for the duration of one micro-step
+    // --abc-dropout (contract §19/AR-trainer brief item 2): this source's
+    // SheetSage2 lead sheet, written by `ace-train yue2-sheet` into the
+    // manifest's `abc` field. `has_abc` is false for minted rows, `--no-abc`
+    // runs, and any source without a sheet — those ALWAYS train "off"
+    // (never enter the 50/50-style draw at all).
+    std::string           abc_text;    // the manifest's `abc`, verbatim
+    std::string           abc_error;   // the manifest's `abc_error`, informational only
+    bool                  has_abc = false;
+    std::vector<int32_t>  abc_ids;             // BPE-encoded abc_text, cached once
+    std::vector<int32_t>  prefix_full;         // style + abc, YUE2_COT_FULL
+    std::vector<int32_t>  prefix_full_dropped; // style_dropped + abc, YUE2_COT_FULL
+    // Row index of ABC_START in prefix_full(_dropped) — the loss-slice start
+    // for a `full` example (item 3: sheet tokens ARE in the loss).
+    int64_t               head_len_full         = 0;
+    int64_t               head_len_full_dropped = 0;
+    Yue2AtCursor          cursor_full;
+    Yue2AtCursor          cursor_full_dropped;
+    // Whether prefix_full(_dropped) + 1 codec token still fits --max-len
+    // (item 4: crop the codec TAIL, never the sheet — so a sheet that alone
+    // leaves no room falls back to "off" for that draw instead).
+    bool                  full_fits         = false;
+    bool                  full_dropped_fits = false;
+    bool                  full_len_warned   = false;  // logged the fallback once
+    bool                  use_full = false;  // set for the duration of one micro-step
     bool                 minted     = false;
     bool                 minted_val = false;
     bool                 loaded     = false;
@@ -513,6 +562,7 @@ struct Yue2ArSet {
     std::string             format;
     std::string             caption_format;
     bool                    codec_ids_present = false;
+    std::string             abc_producer;  // manifest root's `abc_producer`, copied into export metadata
 };
 
 static bool yue2_at_is_abs(const std::string & p) {
@@ -740,6 +790,7 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
     out->dir            = yue2_at_dirname(path);
     out->format         = jstr(root, { "format" });
     out->caption_format = jstr(root, { "caption_format" });
+    out->abc_producer   = jstr(root, { "abc_producer" });
     {
         yyjson_val * cp        = yyjson_obj_get(root, "codec_ids_present");
         out->codec_ids_present = cp && yyjson_is_bool(cp) && yyjson_get_bool(cp);
@@ -773,6 +824,9 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
         s.bpm                 = jstr(it, { "bpm" });
         s.key                 = jstr(it, { "key" });
         s.cursor_words        = jstr(it, { "cursor_words" });
+        s.abc_text  = jstr(it, { "abc" });
+        s.abc_error = jstr(it, { "abc_error" });
+        s.has_abc   = !want_minted && !a.no_abc && !s.abc_text.empty();
         const std::string cd  = jstr(it, { "codec_ids", "codec", "codes" });
         if (cd.empty()) {
             ferr = "source \"" + s.name + "\" carries no codec_ids — run `ace-train yue2-tokenize` over "
@@ -1093,6 +1147,7 @@ enum {
     YUE2_AT_TAG_MIX  = 1,  // artist vs minted
     YUE2_AT_TAG_SONG = 2,  // which song within the chosen pool
     YUE2_AT_TAG_CAPD = 3,  // --caption-dropout: full style, or the trigger alone
+    YUE2_AT_TAG_ABCD = 4,  // --abc-dropout: cot=full (sheet spliced in), or cot=off
 };
 
 // ── Learning rate ──────────────────────────────────────────────────────────
@@ -1198,8 +1253,11 @@ static uint64_t yue2_at_cond_hash(const Yue2ArTrainArgs & a) {
     mix_bytes(&a.max_len, sizeof(a.max_len));
     // Resuming into a different dropout would silently change the conditioning
     // half-way through a run, which is exactly the class of thing this guard
-    // exists to refuse.
+    // exists to refuse. --abc-dropout/--no-abc are the same class of knob as
+    // --caption-dropout: they decide WHAT a micro-step trains on, not how fast.
     mix_bytes(&a.caption_dropout, sizeof(a.caption_dropout));
+    mix_bytes(&a.abc_dropout, sizeof(a.abc_dropout));
+    mix_bytes(&a.no_abc, sizeof(a.no_abc));
     return h;
 }
 
@@ -1485,7 +1543,8 @@ static bool yue2_at_ckpt_load(const std::string & path, const Yue2AtCkptState & 
 static bool yue2_at_export(const Yue2AtAdapters & ad, const Yue2ArTrainArgs & a, Yue2AtTarget target,
                            int64_t steps_done, int64_t song_frames, const std::string & base_id,
                            bool minted_present, const std::string & path, std::string * err,
-                           const std::string & cursor_md = "off") {
+                           const std::string & cursor_md = "off", bool abc_possible = false,
+                           int64_t abc_sources = 0, const std::string & abc_producer = "") {
     struct Ent {
         std::string         name;
         const ggml_tensor * t;
@@ -1558,7 +1617,19 @@ static bool yue2_at_export(const Yue2AtAdapters & ad, const Yue2ArTrainArgs & a,
     // identity we actually have: the base LM file it trained against. An
     // invented hash would be worse than none.
     md.emplace_back("base_sha", base_id);
-    md.emplace_back("cot", "off");
+    md.emplace_back("cot", abc_possible ? "off,full" : "off");
+    if (abc_possible) {
+        // Generation reads this the way it already reads caption_dropout:
+        // an adapter that trained "off,full" should default to whichever it
+        // saw more of, not always to the slower cot=full mode.
+        snprintf(buf, sizeof(buf), "%.3f", (double) a.abc_dropout);
+        md.emplace_back("abc_dropout", buf);
+        snprintf(buf, sizeof(buf), "%lld", (long long) abc_sources);
+        md.emplace_back("abc_sources", buf);
+        if (!abc_producer.empty()) {
+            md.emplace_back("abc_producer", abc_producer);
+        }
+    }
     md.emplace_back("minted", minted_present ? "present" : "absent");
     md.emplace_back("cursor", cursor_md);
     // Recorded because it is a real recipe knob and adapters outlive their logs.
@@ -2598,6 +2669,43 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
                     yue2_token_prefixes(&tok, s.style_dropped, s.lyrics, YUE2_COT_OFF, nullptr);
                 s.prefix_dropped.assign(pd.begin(), pd.end());
             }
+            // --abc-dropout: the FULL-mode twin(s), sheet spliced in
+            // (yue2_token_prefixes(..., YUE2_COT_FULL, &abc_ids)). Never built
+            // for minted rows or a source with no sheet (has_abc already
+            // excludes both — manifest parser above). `head_len_full(_dropped)`
+            // is the row of ABC_START — where a `full` example's loss starts
+            // (item 3) — computed by re-tokenizing the SAME head text
+            // yue2_token_prefixes builds internally (EOD + instruction/[Tags]/
+            // style/[Lyrics]/lyrics under cot=full, whose instruction sentence
+            // DIFFERS from cot=off's, so this cannot be inferred from the
+            // off-mode prefix's length).
+            if (s.has_abc) {
+                const std::vector<int> abc = yue2_bpe_encode(&tok, s.abc_text);
+                s.abc_ids.assign(abc.begin(), abc.end());
+                s.head_len_full =
+                    1 + (int64_t) yue2_bpe_encode(&tok, yue2_assemble_text(s.style, s.lyrics, YUE2_COT_FULL))
+                            .size();
+                const std::vector<int> pf =
+                    yue2_token_prefixes(&tok, s.style, s.lyrics, YUE2_COT_FULL, &s.abc_ids);
+                s.prefix_full.assign(pf.begin(), pf.end());
+                if (a.caption_dropout > 0.0f && !s.style_dropped.empty()) {
+                    s.head_len_full_dropped =
+                        1 + (int64_t) yue2_bpe_encode(&tok,
+                                                      yue2_assemble_text(s.style_dropped, s.lyrics, YUE2_COT_FULL))
+                                .size();
+                    const std::vector<int> pfd =
+                        yue2_token_prefixes(&tok, s.style_dropped, s.lyrics, YUE2_COT_FULL, &s.abc_ids);
+                    s.prefix_full_dropped.assign(pfd.begin(), pfd.end());
+                }
+                // item 4: a sheet that alone leaves no room for a codec token
+                // makes that draw (logged once, at draw time) fall back to
+                // "off" rather than cropping the sheet.
+                auto fits = [&](const std::vector<int32_t> & pfx) {
+                    return !pfx.empty() && (int64_t) pfx.size() <= a.max_len - 2;
+                };
+                s.full_fits         = fits(s.prefix_full);
+                s.full_dropped_fits = fits(s.prefix_full_dropped);
+            }
         } catch (const std::exception & e) {
             fprintf(stderr, "[yue2-ar-train] prefix assembly failed for \"%s\": %s\n", s.name.c_str(),
                     e.what());
@@ -2667,6 +2775,36 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
                     }
                 }
             }
+            // --abc-dropout full-mode twin(s): the cursor is about WHERE the
+            // lyrics sit and how many codec FRAMES get a target, both still
+            // well-defined with a sheet spliced in between the lyrics and the
+            // codec — mirrors the dropped-caption twin above, against
+            // prefix_full(_dropped) and cot=full instead of cot=off.
+            if (s.has_abc && !s.prefix_full.empty()) {
+                Yue2AtSeq probe_f;
+                if (yue2_at_build_sequence(s.prefix_full, s.codec, a.max_len, &probe_f, &e2)) {
+                    s.cursor_full = yue2_at_cursor_build(&tok, s.style, s.lyrics, s.prefix_full,
+                                                         (int64_t) s.codec.size(), s.words5, probe_f.n_sup,
+                                                         YUE2_COT_FULL);
+                    if (!s.cursor_full.bound) {
+                        fprintf(stderr, "[yue2-ar-train] cursor: \"%s\" full-mode twin UNBOUND — %s\n",
+                                s.name.c_str(), s.cursor_full.why.c_str());
+                    }
+                }
+                if (!s.prefix_full_dropped.empty()) {
+                    Yue2AtSeq probe_fd;
+                    if (yue2_at_build_sequence(s.prefix_full_dropped, s.codec, a.max_len, &probe_fd, &e2)) {
+                        s.cursor_full_dropped =
+                            yue2_at_cursor_build(&tok, s.style_dropped, s.lyrics, s.prefix_full_dropped,
+                                                 (int64_t) s.codec.size(), s.words5, probe_fd.n_sup, YUE2_COT_FULL);
+                        if (!s.cursor_full_dropped.bound) {
+                            fprintf(stderr,
+                                    "[yue2-ar-train] cursor: \"%s\" full+dropped twin UNBOUND — %s\n",
+                                    s.name.c_str(), s.cursor_full_dropped.why.c_str());
+                        }
+                    }
+                }
+            }
             if (!s.cursor.bound) {
                 fprintf(stderr, "[yue2-ar-train] cursor: \"%s\" UNBOUND — %s\n", s.name.c_str(),
                         s.cursor.why.c_str());
@@ -2711,6 +2849,52 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             "[yue2-ar-train] artist: %zu song(s), mean %lld codec frames (%.0f s at 25 Hz), longest "
             "sequence %lld tokens\n",
             artist.songs.size(), (long long) mean_frames, (double) mean_frames / 25.0, (long long) longest);
+
+    // --abc-dropout summary: how many sources carry a sheet, its token-count
+    // spread, and the sequence lengths a `full` draw would actually train —
+    // the AR-trainer brief's item 5.
+    int64_t n_abc_sources = 0;
+    {
+        int64_t abc_min = -1, abc_max = 0, abc_sum = 0;
+        int64_t flen_min = -1, flen_max = 0, flen_sum = 0;
+        for (const Yue2ArSong & s : artist.songs) {
+            if (!s.has_abc) {
+                continue;
+            }
+            n_abc_sources++;
+            const int64_t n = (int64_t) s.abc_ids.size();
+            abc_min = abc_min < 0 ? n : std::min(abc_min, n);
+            abc_max = std::max(abc_max, n);
+            abc_sum += n;
+            if (s.full_fits) {
+                const int64_t room = a.max_len - (int64_t) s.prefix_full.size() - 1;
+                const int64_t flen =
+                    (int64_t) s.prefix_full.size() + std::min<int64_t>((int64_t) s.codec.size(), room) + 1;
+                flen_min = flen_min < 0 ? flen : std::min(flen_min, flen);
+                flen_max = std::max(flen_max, flen);
+                flen_sum += flen;
+            }
+        }
+        if (n_abc_sources > 0) {
+            fprintf(stderr,
+                    "[yue2-ar-train] abc: %lld of %zu artist source(s) carry a lead sheet (--abc-dropout %.2f, "
+                    "full w.p. %.2f); sheet tokens min/mean/max %lld/%.0f/%lld, full-mode sequence length "
+                    "min/mean/max %lld/%.0f/%lld\n",
+                    (long long) n_abc_sources, artist.songs.size(), (double) a.abc_dropout,
+                    (double) (1.0f - a.abc_dropout), (long long) abc_min, (double) abc_sum / (double) n_abc_sources,
+                    (long long) abc_max, (long long) std::max<int64_t>(flen_min, 0),
+                    (double) flen_sum / (double) n_abc_sources, (long long) flen_max);
+        } else if (a.no_abc) {
+            fprintf(stderr, "[yue2-ar-train] abc: --no-abc — every draw trains \"off\"\n");
+        } else {
+            fprintf(stderr,
+                    "[yue2-ar-train] abc: no artist source carries a lead sheet — every draw trains \"off\" "
+                    "(run `ace-train yue2-sheet` over this manifest first)\n");
+        }
+    }
+    const bool abc_possible = n_abc_sources > 0 && a.abc_dropout < 1.0f;
+    const bool want_text_head = abc_possible;
+
     if (minted_present) {
         int64_t n_val = 0;
         for (Yue2ArSong & s : minted.songs) {
@@ -2776,7 +2960,7 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     }
 
     Yue2AtState st;
-    if (!yue2_at_state_alloc(&st, &m, s_max, a.chunk, C.sched, &err, cursor_l_max)) {
+    if (!yue2_at_state_alloc(&st, &m, s_max, a.chunk, C.sched, &err, cursor_l_max, want_text_head)) {
         fprintf(stderr, "[yue2-ar-train] %s\n", err.c_str());
         return 1;
     }
@@ -2829,6 +3013,7 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     double            loss_sum = 0.0;
     int64_t           n_micro  = 0;
     int64_t           n_dropped = 0;  // artist micro-steps conditioned on the trigger alone
+    int64_t           n_full    = 0;  // artist micro-steps trained "full" (sheet spliced in)
     const std::string ckpt_path = yue2_at_ckpt_path(a.out_dir);
     if (a.resume) {
         Yue2AtCkptState got;
@@ -2947,9 +3132,13 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             fprintf(stderr, "[yue2-ar-train] %s\n", e2.c_str());
             return false;
         }
+        const bool use_full_dropped = s->use_dropped && !s->prefix_full_dropped.empty();
         const std::vector<int32_t> & pfx =
-            (s->use_dropped && !s->prefix_dropped.empty()) ? s->prefix_dropped : s->prefix;
-        if (!yue2_at_build_sequence(pfx, s->codec, a.max_len, out, &e2)) {
+            s->use_full ? (use_full_dropped ? s->prefix_full_dropped : s->prefix_full)
+                        : ((s->use_dropped && !s->prefix_dropped.empty()) ? s->prefix_dropped : s->prefix);
+        const int64_t text_head_len =
+            s->use_full ? (use_full_dropped ? s->head_len_full_dropped : s->head_len_full) : 0;
+        if (!yue2_at_build_sequence(pfx, s->codec, a.max_len, out, &e2, text_head_len)) {
             // SKIP, with the song named — never crop (contract §4.4).
             fprintf(stderr, "[yue2-ar-train] SKIPPING \"%s\": %s\n", s->name.c_str(), e2.c_str());
             return false;
@@ -3044,25 +3233,50 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             // same counter the song pick uses, so a run is reproducible. Artist
             // rows only; minted rows keep their own style verbatim.
             s->use_dropped = false;
+            s->use_full    = false;
             if (was_artist && a.caption_dropout > 0.0f && !s->prefix_dropped.empty()) {
                 Yue2NtRng rcap(yue2_at_seed_mix(a.seed, k, YUE2_AT_TAG_CAPD));
                 s->use_dropped = rcap.u01() < (double) a.caption_dropout;
             }
+            // --abc-dropout: independent draw, on top of the caption-dropout
+            // one above (item 2). `full` with probability (1 - abc_dropout)
+            // when this source carries a sheet; item 4's fallback — a sheet
+            // that alone leaves no room for a codec token inside --max-len —
+            // trains "off" instead, logged once per source.
+            if (was_artist && s->has_abc && a.abc_dropout < 1.0f) {
+                Yue2NtRng rabc(yue2_at_seed_mix(a.seed, k, YUE2_AT_TAG_ABCD));
+                if (rabc.u01() >= (double) a.abc_dropout) {
+                    const bool fits = s->use_dropped ? s->full_dropped_fits : s->full_fits;
+                    if (fits) {
+                        s->use_full = true;
+                    } else if (!s->full_len_warned) {
+                        s->full_len_warned = true;
+                        fprintf(stderr,
+                                "[yue2-ar-train] \"%s\": the full-mode prefix (sheet spliced in) leaves no "
+                                "room for a codec token inside --max-len %lld — this draw, and every future "
+                                "one, trains \"off\" instead (item 4: the sheet is never cropped)\n",
+                                s->name.c_str(), (long long) a.max_len);
+                    }
+                }
+            }
             if (!build_seq(s, &seq)) {
                 s->use_dropped = false;
+                s->use_full    = false;
                 continue;  // the skip has already been named
             }
             last_id   = s->name.c_str();
-            last_pool = was_artist ? "artist" : "minted";
+            last_pool = was_artist ? (s->use_full ? "artist full" : "artist off") : "minted";
             last_S    = (int64_t) seq.ids.size();
 
             r.forward_only = false;
             r.host_ce      = nullptr;
             // Artist songs carry targets; minted songs never do (ar_lora_cursor.py:84-86).
-            // The dropped twin has its own cursor block (its lyrics sit at a
-            // different offset); either may be unbound, and unbound means the
-            // term is simply off for this micro-step.
-            const Yue2AtCursor & cur_use = s->use_dropped ? s->cursor_dropped : s->cursor;
+            // The dropped/full twins each have their own cursor block (their
+            // lyrics or sheet sit at a different offset); any may be unbound,
+            // and unbound means the term is simply off for this micro-step.
+            const Yue2AtCursor & cur_use =
+                s->use_full ? (s->use_dropped ? s->cursor_full_dropped : s->cursor_full)
+                            : (s->use_dropped ? s->cursor_dropped : s->cursor);
             r.cur                        = (was_artist && cur_use.bound) ? &cur_use : nullptr;
             double ce = 0.0, cv = std::nan("");
             if (!yue2_at_micro_step(r, seq, /*count_loss=*/true, &ce, &err, &cv)) {
@@ -3073,6 +3287,10 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             if (s->use_dropped) {
                 n_dropped++;
                 s->use_dropped = false;  // never leaves a micro-step set
+            }
+            if (s->use_full) {
+                n_full++;
+                s->use_full = false;  // never leaves a micro-step set
             }
             step_loss += ce;
             loss_sum += ce;
@@ -3137,7 +3355,7 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
             const std::string snap =
                 a.out_dir + "/" + a.name + "_step" + std::to_string((long long) step) + ".safetensors";
             if (!yue2_at_export(C.ad, a, target, step, mean_frames, m.lm_file.path, minted_present, snap,
-                                &err, cursor_md)) {
+                                &err, cursor_md, abc_possible, n_abc_sources, artist.abc_producer)) {
                 fprintf(stderr, "[yue2-ar-train] snapshot export: %s\n", err.c_str());
                 return 1;
             }
@@ -3152,12 +3370,16 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
 
     const std::string out = a.out_dir + "/" + a.name + ".safetensors";
     if (!yue2_at_export(C.ad, a, target, a.steps, mean_frames, m.lm_file.path, minted_present, out, &err,
-                        cursor_md)) {
+                        cursor_md, abc_possible, n_abc_sources, artist.abc_producer)) {
         fprintf(stderr, "[yue2-ar-train] export: %s\n", err.c_str());
         return 1;
     }
     fprintf(stderr, "[yue2-ar-train] done: %lld steps, mean loss %.5f\n", (long long) a.steps,
             n_micro ? loss_sum / (double) n_micro : 0.0);
+    if (abc_possible) {
+        fprintf(stderr, "[yue2-ar-train] abc: %lld of %lld total micro-step(s) trained \"full\"\n",
+                (long long) n_full, (long long) n_micro);
+    }
     if (attn != YUE2_AT_FA_EXACT) {
         fprintf(stderr, "[yue2-ar-train] resolved fused-attention precision: %s (the REQUEST was --attn %s)\n",
                 dit_flash_prec_label(m.backend).c_str(), yue2_at_attn_name(attn));
@@ -3175,6 +3397,142 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     return 0;
 }
 
+// ── --dump-sequence: G7 ─────────────────────────────────────────────────────
+//
+// Writes THIS trainer's own token ids and per-row supervision mask for ONE
+// manifest source under ONE mode ("off" or "full"), as JSON, and exits — no
+// training, no optimizer, no GGML graph at all. The ids and the mask are a
+// pure host-side computation (yue2_token_prefixes + yue2_at_build_sequence),
+// which is exactly what has to agree with a Python reference built from
+// ai-toolkit's `_ar_inputs` + its label masking
+// (_experiments/yue2-sheetsage/g7_reference.py) — the GGML training math
+// itself (the two CE heads, the checkpointed backward) is exercised by
+// --fd-check and the smoke run, not by this gate.
+static int yue2_ar_dumpseq_main(const Yue2ArTrainArgs & a) {
+    std::string err;
+    if (a.manifest.empty()) {
+        fprintf(stderr, "ace-train yue2-ar-train --dump-sequence: --manifest <yue2_preprocess.json> is "
+                        "required\n");
+        return 2;
+    }
+    const bool want_full = a.dump_seq_mode == "full";
+    if (!want_full && a.dump_seq_mode != "off") {
+        fprintf(stderr,
+                "ace-train yue2-ar-train --dump-sequence: mode must be \"off\" or \"full\", got \"%s\"\n",
+                a.dump_seq_mode.c_str());
+        return 2;
+    }
+    Yue2ArSet artist;
+    if (!yue2_at_load_manifest(a.manifest, /*want_minted=*/false, a, &artist, &err)) {
+        fprintf(stderr, "[yue2-ar-dumpseq] %s\n", err.c_str());
+        return 1;
+    }
+    Yue2ArSong * found = nullptr;
+    for (Yue2ArSong & s : artist.songs) {
+        if (s.name == a.dump_seq_name) {
+            found = &s;
+            break;
+        }
+    }
+    if (!found) {
+        fprintf(stderr, "[yue2-ar-dumpseq] no source named \"%s\" in %s\n", a.dump_seq_name.c_str(),
+                a.manifest.c_str());
+        return 1;
+    }
+    Yue2ArSong & s = *found;
+    if (want_full && !s.has_abc) {
+        fprintf(stderr, "[yue2-ar-dumpseq] \"%s\" carries no manifest `abc` — cannot dump mode=full\n",
+                s.name.c_str());
+        return 1;
+    }
+
+    static Yue2Model m;
+    if (!yue2_at_open_model(&m, a, "yue2-ar-dumpseq", &err)) {
+        fprintf(stderr, "[yue2-ar-dumpseq] %s\n", err.c_str());
+        return 1;
+    }
+    BPETokenizer tok;
+    if (!yue2_tokenizer_load_from_gguf(&tok, m.lm_file.path)) {
+        fprintf(stderr, "[yue2-ar-dumpseq] tokenizer: cannot read tokenizer.ggml.* from %s\n",
+                m.lm_file.path.c_str());
+        return 1;
+    }
+    if (!yue2_at_song_codes(&s, &err)) {
+        fprintf(stderr, "[yue2-ar-dumpseq] %s\n", err.c_str());
+        return 1;
+    }
+
+    Yue2AtSeq seq;
+    try {
+        if (want_full) {
+            const std::vector<int> abc = yue2_bpe_encode(&tok, s.abc_text);
+            s.abc_ids.assign(abc.begin(), abc.end());
+            s.head_len_full =
+                1 + (int64_t) yue2_bpe_encode(&tok, yue2_assemble_text(s.style, s.lyrics, YUE2_COT_FULL)).size();
+            const std::vector<int> pf = yue2_token_prefixes(&tok, s.style, s.lyrics, YUE2_COT_FULL, &s.abc_ids);
+            s.prefix_full.assign(pf.begin(), pf.end());
+            if (!yue2_at_build_sequence(s.prefix_full, s.codec, a.max_len, &seq, &err, s.head_len_full)) {
+                fprintf(stderr, "[yue2-ar-dumpseq] %s\n", err.c_str());
+                return 1;
+            }
+        } else {
+            const std::vector<int> pre = yue2_token_prefixes(&tok, s.style, s.lyrics, YUE2_COT_OFF, nullptr);
+            s.prefix.assign(pre.begin(), pre.end());
+            if (!yue2_at_build_sequence(s.prefix, s.codec, a.max_len, &seq, &err)) {
+                fprintf(stderr, "[yue2-ar-dumpseq] %s\n", err.c_str());
+                return 1;
+            }
+        }
+    } catch (const std::exception & e) {
+        fprintf(stderr, "[yue2-ar-dumpseq] prefix assembly failed: %s\n", e.what());
+        return 1;
+    }
+
+    // mask[i] = 1 iff row i is supervised (its hidden state predicts
+    // ids[i+1]): the TEXT span [text_sup0, text_sup0+text_n_sup) — item 3's
+    // "sheet tokens ARE in the loss", empty for mode=off — and the CODEC span
+    // [prefix-1, prefix-1+n_sup), always present. This is the mask ai-toolkit's
+    // `_ar_inputs` produces by slicing rather than weighting (contract's own
+    // framing, yue2-ar-train-graph.h's sequence-assembly comment) turned into
+    // an explicit per-row array for the Python reference to compare against.
+    const int64_t     S = (int64_t) seq.ids.size();
+    std::vector<char> mask((size_t) S, 0);
+    for (int64_t i = 0; i < seq.text_n_sup; i++) {
+        mask[(size_t) (seq.text_sup0 + i)] = 1;
+    }
+    for (int64_t i = 0; i < seq.n_sup; i++) {
+        mask[(size_t) (seq.prefix - 1 + i)] = 1;
+    }
+
+    std::ofstream out(a.dump_seq_out, std::ios::binary);
+    if (!out) {
+        fprintf(stderr, "[yue2-ar-dumpseq] cannot write %s\n", a.dump_seq_out.c_str());
+        return 1;
+    }
+    out << "{\n  \"name\": \"" << s.name << "\",\n  \"mode\": \"" << a.dump_seq_mode
+        << "\",\n  \"prefix\": " << seq.prefix << ",\n  \"text_sup0\": " << seq.text_sup0
+        << ",\n  \"text_n_sup\": " << seq.text_n_sup << ",\n  \"n_sup\": " << seq.n_sup << ",\n  \"ids\": [";
+    for (int64_t i = 0; i < S; i++) {
+        if (i) {
+            out << ",";
+        }
+        out << seq.ids[(size_t) i];
+    }
+    out << "],\n  \"mask\": [";
+    for (int64_t i = 0; i < S; i++) {
+        if (i) {
+            out << ",";
+        }
+        out << (int) mask[(size_t) i];
+    }
+    out << "]\n}\n";
+    out.close();
+    fprintf(stderr, "[yue2-ar-dumpseq] \"%s\" mode=%s: S=%lld, text_n_sup=%lld, n_sup=%lld -> %s\n",
+            s.name.c_str(), a.dump_seq_mode.c_str(), (long long) S, (long long) seq.text_n_sup,
+            (long long) seq.n_sup, a.dump_seq_out.c_str());
+    return 0;
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────
 
 static int yue2_ar_train_run(const Yue2ArTrainArgs & a) {
@@ -3183,6 +3541,9 @@ static int yue2_ar_train_run(const Yue2ArTrainArgs & a) {
     }
     if (a.fwd_check > 0) {
         return yue2_ar_forwardcheck_main(a);
+    }
+    if (!a.dump_seq_out.empty()) {
+        return yue2_ar_dumpseq_main(a);
     }
     return yue2_ar_train_loop(a);
 }

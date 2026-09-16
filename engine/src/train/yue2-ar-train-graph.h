@@ -488,11 +488,19 @@ static int64_t yue2_at_param_count(const Yue2LmConfig & c, int n_layers, int64_t
 // (project-mm3-adapter-eos-suppression).
 struct Yue2AtSeq {
     std::vector<int32_t> ids;      // S token ids
-    std::vector<int32_t> rows;     // n_sup slice rows, one per supervised position
+    std::vector<int32_t> rows;     // n_sup slice rows, one per supervised position (CODEC range only)
     int64_t              prefix   = 0;  // P
-    int64_t              n_sup    = 0;  // S - P
+    int64_t              n_sup    = 0;  // S - P (codec + MUSIC_END rows only)
     bool                 truncated = false;
     bool                 has_end   = false;
+    // --abc-dropout / item 3: for a `full` example, the row range that
+    // supervises the SHEET (plus ABC_END, MUSIC_START) — the FULL-VOCAB head
+    // (yue2_at_head_text_chunked), disjoint from and immediately before the
+    // codec range above (text_sup0 + text_n_sup == prefix - 1, the codec
+    // head's own col0). text_n_sup == 0 means no text component at all — every
+    // `off`-mode sequence, and any `full` prefix built with text_head_len == 0.
+    int64_t              text_sup0  = 0;
+    int64_t              text_n_sup = 0;
 };
 
 // `codec` is RAW. `max_len` is upstream's MAXLEN. Returns false with `err` set
@@ -501,8 +509,16 @@ struct Yue2AtSeq {
 // named warning rather than cropping (contract §4.4: a random crop teaches that
 // a song may legitimately begin at position c0, which is MM3's crop-regime bug
 // reproduced from scratch).
+//
+// `text_head_len`: 0 for an `off`-mode prefix (yue2_token_prefixes(...,
+// YUE2_COT_OFF)) — no text component, seq.text_n_sup stays 0. For a `full`-mode
+// prefix (YUE2_COT_FULL, sheet spliced in), the caller's own head_len_full(_
+// dropped) — the row of ABC_START — so this can compute the text-supervised
+// span [text_head_len, P-2] that sits immediately before the codec range
+// (item 3: sheet tokens, ABC_END and MUSIC_START are IN the loss for `full`).
 static bool yue2_at_build_sequence(const std::vector<int32_t> & prefix, const std::vector<int32_t> & codec,
-                                   int64_t max_len, Yue2AtSeq * out, std::string * err) {
+                                   int64_t max_len, Yue2AtSeq * out, std::string * err,
+                                   int64_t text_head_len = 0) {
     const int64_t P = (int64_t) prefix.size();
     if (P < 1) {
         if (err) {
@@ -511,13 +527,23 @@ static bool yue2_at_build_sequence(const std::vector<int32_t> & prefix, const st
         return false;
     }
     if (prefix[(size_t) P - 1] != (int32_t) YUE2_MUSIC_START) {
-        // Loud rather than silent: cot=off's prefix ENDS with MUSIC_START, and
-        // a prefix that does not is either a different cot mode or a
-        // hand-assembled vector, both of which would train against the wrong
-        // supervised boundary and still show a falling loss.
+        // Loud rather than silent: every prefix this trainer builds (cot=off
+        // OR cot=full) ENDS with MUSIC_START, and one that does not is either
+        // a different cot mode or a hand-assembled vector, both of which would
+        // train against the wrong supervised boundary and still show a
+        // falling loss.
         if (err) {
             *err = "the prefix does not end in MUSIC_START (" + std::to_string((long long) YUE2_MUSIC_START) +
-                   ") — yue2_token_prefixes(..., YUE2_COT_OFF) is the only assembly this trainer supports";
+                   ") — yue2_token_prefixes(..., YUE2_COT_OFF|YUE2_COT_FULL) is the only assembly this trainer "
+                   "supports";
+        }
+        return false;
+    }
+    if (text_head_len < 0 || text_head_len > P - 2) {
+        if (err) {
+            *err = "text_head_len " + std::to_string((long long) text_head_len) +
+                   " does not fall strictly before the codec boundary of a " + std::to_string((long long) P) +
+                   "-token prefix";
         }
         return false;
     }
@@ -576,6 +602,15 @@ static bool yue2_at_build_sequence(const std::vector<int32_t> & prefix, const st
             return false;
         }
         out->rows[(size_t) i] = (int32_t) row;
+    }
+    if (text_head_len > 0) {
+        // [text_head_len, P-2] predicts ids[text_head_len+1 .. P-1] — the
+        // sheet, ABC_END, MUSIC_START — and butts up EXACTLY against the codec
+        // range's own col0 (P-1): row P-2 predicts ids[P-1] == MUSIC_START,
+        // row P-1 predicts ids[P] == the first codec id, so the two ranges
+        // are contiguous and disjoint, never double- or un-supervising a row.
+        out->text_sup0  = text_head_len;
+        out->text_n_sup = P - 1 - text_head_len;
     }
     return true;
 }
@@ -736,9 +771,9 @@ struct Yue2AtState {
     ggml_backend_buffer_t buf_gh1  = nullptr;
     ggml_context *        ctx_misc = nullptr;  // t_H, t_msk, t_ids, t_pos, t_gs, t_one
     ggml_backend_buffer_t buf_misc = nullptr;
-    ggml_context *        ctx_head = nullptr;  // t_head + t_headT
+    ggml_context *        ctx_head = nullptr;  // t_head + t_headT (+ t_full_headT when want_text_head)
     ggml_backend_buffer_t buf_head = nullptr;
-    ggml_context *        ctx_lab  = nullptr;  // t_labc
+    ggml_context *        ctx_lab  = nullptr;  // t_labc (+ t_labc_full when want_text_head)
     ggml_backend_buffer_t buf_lab  = nullptr;
     ggml_context *        ctx_cur  = nullptr;  // t_curT: the lyric-cursor target block
     ggml_backend_buffer_t buf_cur  = nullptr;
@@ -756,6 +791,16 @@ struct Yue2AtState {
     ggml_tensor *              t_one   = nullptr;
     ggml_tensor *              t_curT  = nullptr;  // [L_max, s_max] F32; a song uses a packed [L, nF] prefix of it
     int64_t                    cur_l_max = 0;
+
+    // --abc-dropout (item 3): the FULL-VOCAB head for a `full` example's
+    // sheet-token span. Built ONLY when want_text_head was passed to
+    // yue2_at_state_alloc (a run that could actually draw a `full` example) —
+    // t_full_headT alone is ~V*H*4 bytes (≈1.5 GB at V≈184.7k, H=2048), so a
+    // run with `--no-abc` or no sheets in its manifest pays nothing for this.
+    bool                       want_text_head = false;
+    int64_t                    chunk_text     = 64;  // rows per text-head CE chunk (V is huge; keep chunks small)
+    ggml_tensor *              t_full_headT   = nullptr;  // [V, H] F32 — the vocab-fastest transpose, for dL/dh
+    ggml_tensor *              t_labc_full    = nullptr;  // [V, chunk_text] F32 — one dense chunk of labels
 
     std::vector<uint8_t>  arena;  // one reused graph arena
     std::vector<uint16_t> mask_host;
@@ -844,21 +889,71 @@ static bool yue2_at_build_head(Yue2AtState * st, ggml_backend_sched_t sched, std
     return ok;
 }
 
+// Build the FULL-VOCAB output head's transpose, once, on the device — the
+// --abc-dropout / item 3 counterpart of yue2_at_build_head above, for the
+// sheet-token span of a `full` example.
+//
+// UNLIKE the sliced head, this builds ONLY the transpose (`t_full_headT`,
+// [V, H] F32), not a forward copy: yue2_at_head_text_chunked's forward matmul
+// reads `m.lm.output` directly in its own native dtype, exactly the way the
+// eval-only yue2_at_head_fullvocab_ce already does — nothing there needs a
+// gradient, so no F32 mirror is worth keeping around for it. Only the
+// backward's dh = mul_mat(headT, dl) needs vocab-fastest layout, which native
+// storage (H fastest) never has, hence this one-time transpose+upcast. The
+// transient intermediate (`ggml_cont(transpose(out))`, native dtype, [V, H])
+// is freed by the scheduler once this graph completes; nothing here is kept
+// beyond `t_full_headT` itself.
+static bool yue2_at_build_text_head(Yue2AtState * st, ggml_backend_sched_t sched, std::string * err) {
+    const Yue2Model & m   = *st->m;
+    ggml_tensor *     out = m.lm.output;
+    if (!out) {
+        *err = "the LM has no `output` tensor";
+        return false;
+    }
+    if (!st->t_full_headT) {
+        *err = "yue2_at_build_text_head called without a t_full_headT tensor (want_text_head was false at alloc)";
+        return false;
+    }
+    std::vector<uint8_t> arena((size_t) 16 * ggml_tensor_overhead() + ggml_graph_overhead_custom(16, false) +
+                               1024 * 1024);
+    ggml_init_params     ip  = { arena.size(), arena.data(), /*no_alloc*/ true };
+    ggml_context *       ctx = ggml_init(ip);
+    ggml_cgraph *        gf  = ggml_new_graph_custom(ctx, 16, /*grads=*/false);
+    ggml_tensor * tp = ggml_cont(ctx, ggml_transpose(ctx, out));  // [V, H], native dtype
+    ggml_build_forward_expand(gf, ggml_cpy(ctx, tp, st->t_full_headT));
+    ggml_backend_sched_reset(sched);
+    const bool ok = ggml_backend_sched_graph_compute(sched, gf) == GGML_STATUS_SUCCESS;
+    ggml_free(ctx);
+    if (!ok) {
+        *err = "building the full-vocab output head transpose failed";
+    }
+    return ok;
+}
+
 // `cursor_l_max` sizes the lyric-cursor target block: the largest lyric-token
 // span any artist song in this run carries. 0 = the cursor term is off and no
 // block is allocated, which leaves every graph byte-identical to a run that
 // never heard of it.
+//
+// `want_text_head` (item 3): whether this run could ever draw a `full`
+// example — allocates the full-vocab head's persistent buffers
+// (t_full_headT, t_labc_full) when true. false leaves every graph
+// byte-identical to a run that never heard of --abc-dropout, same as
+// cursor_l_max == 0 does for the cursor term.
 static bool yue2_at_state_alloc(Yue2AtState * st, const Yue2Model * m, int64_t s_max, int64_t chunk,
-                                ggml_backend_sched_t sched, std::string * err, int64_t cursor_l_max = 0) {
+                                ggml_backend_sched_t sched, std::string * err, int64_t cursor_l_max = 0,
+                                bool want_text_head = false) {
     const Yue2LmConfig & c = m->lm_cfg;
     const int64_t        H = (int64_t) c.embedding_length;
     const int            L = (int) c.block_count;
 
-    st->m         = m;
-    st->s_max     = s_max;
-    st->chunk     = std::max<int64_t>(1, chunk);
-    st->L         = L;
-    st->cur_l_max = std::max<int64_t>(0, cursor_l_max);
+    st->m              = m;
+    st->s_max          = s_max;
+    st->chunk          = std::max<int64_t>(1, chunk);
+    st->L              = L;
+    st->cur_l_max      = std::max<int64_t>(0, cursor_l_max);
+    st->want_text_head = want_text_head;
+    st->chunk_text     = std::min<int64_t>(st->chunk, 64);
 
     auto mkctx = [](size_t n) {
         ggml_init_params p = { n * ggml_tensor_overhead() + 4096, nullptr, /*no_alloc*/ true };
@@ -868,8 +963,8 @@ static bool yue2_at_state_alloc(Yue2AtState * st, const Yue2Model * m, int64_t s
     st->ctx_gh0  = mkctx(4);
     st->ctx_gh1  = mkctx(4);
     st->ctx_misc = mkctx(16);
-    st->ctx_head = mkctx(4);
-    st->ctx_lab  = mkctx(4);
+    st->ctx_head = mkctx(st->want_text_head ? 8 : 4);
+    st->ctx_lab  = mkctx(st->want_text_head ? 8 : 4);
     st->ctx_cur  = st->cur_l_max > 0 ? mkctx(4) : nullptr;
     if (!st->ctx_ckpt || !st->ctx_gh0 || !st->ctx_gh1 || !st->ctx_misc || !st->ctx_head || !st->ctx_lab ||
         (st->cur_l_max > 0 && !st->ctx_cur)) {
@@ -927,6 +1022,15 @@ static bool yue2_at_state_alloc(Yue2AtState * st, const Yue2Model * m, int64_t s
     st->t_labc = ggml_new_tensor_2d(st->ctx_lab, GGML_TYPE_F32, YUE2_AT_SLICE_ROWS, st->chunk);
     ggml_set_name(st->t_labc, "yue2_at_labels");
     ggml_set_input(st->t_labc);
+    if (st->want_text_head) {
+        const int64_t V     = (int64_t) c.vocab_size;
+        st->t_full_headT    = ggml_new_tensor_2d(st->ctx_head, GGML_TYPE_F32, V, H);
+        st->t_labc_full     = ggml_new_tensor_2d(st->ctx_lab, GGML_TYPE_F32, V, st->chunk_text);
+        ggml_set_name(st->t_full_headT, "yue2_at_full_headT");
+        ggml_set_name(st->t_labc_full, "yue2_at_labels_full");
+        ggml_set_input(st->t_full_headT);
+        ggml_set_input(st->t_labc_full);
+    }
     if (st->cur_l_max > 0) {
         // One block for the largest song; a smaller song packs its [L, nF]
         // targets into the front of it and views exactly that much, so the
@@ -975,6 +1079,9 @@ static bool yue2_at_state_alloc(Yue2AtState * st, const Yue2Model * m, int64_t s
         ggml_backend_tensor_set(st->t_one, &one, 0, sizeof(float));
     }
     if (!yue2_at_build_head(st, sched, err)) {
+        return false;
+    }
+    if (st->want_text_head && !yue2_at_build_text_head(st, sched, err)) {
         return false;
     }
 
@@ -1168,25 +1275,33 @@ struct Yue2AtByteDecoder {
 // Returns bound=false, with `why`, when the prefix does not reconstruct from
 // head + lyrics — upstream's own silent `return None` at :39, made loud here
 // because a run that binds nothing prints "cursor nan" forever and finishes.
+// `cot`: which instruction sentence the head text is assembled under. Every
+// existing caller trains cot=off and relies on the default; --abc-dropout's
+// full-mode cursor twins (yue2-ar-train-run.h) pass YUE2_COT_FULL because
+// `full`'s instruction sentence differs from `off`'s (yue2_instruction()), so
+// reusing off's would mismatch the actual prefix_full/prefix_full_dropped
+// this is asked to bind against. Only the INSTRUCTION differs by cot here —
+// the [Tags]/style/[Lyrics]/lyrics shape, and everything this function
+// derives from it (j0, L, per-frame word targets), is identical either way.
 static Yue2AtCursor yue2_at_cursor_build(const BPETokenizer * tok, const std::string & style,
                                          const std::string & lyrics, const std::vector<int32_t> & prefix,
                                          int64_t n_frames, const std::vector<float> & words5,
-                                         int64_t max_frames_hint = 0) {
+                                         int64_t max_frames_hint = 0, Yue2Cot cot = YUE2_COT_OFF) {
     Yue2AtCursor out;
     const int64_t nW = (int64_t) (words5.size() / 5);
     if (nW < 1) {
         out.why = "no words";
         return out;
     }
-    // head = INSTRUCTIONS['off'] + "\n[Tags]\n" + style + "\n[Lyrics]\n"   (:35)
-    std::string head = yue2_instruction(YUE2_COT_OFF);
+    // head = INSTRUCTIONS[cot] + "\n[Tags]\n" + style + "\n[Lyrics]\n"   (:35)
+    std::string head = yue2_instruction(cot);
     head += "\n[Tags]\n";
     head += style;
     head += "\n[Lyrics]\n";
     std::vector<int> ids_head, ids_full;
     try {
         ids_head = yue2_bpe_encode(tok, head);
-        ids_full = yue2_bpe_encode(tok, yue2_assemble_text(style, lyrics, YUE2_COT_OFF));
+        ids_full = yue2_bpe_encode(tok, yue2_assemble_text(style, lyrics, cot));
     } catch (const std::exception & e) {
         out.why = std::string("tokenize: ") + e.what();
         return out;
@@ -1277,21 +1392,26 @@ static Yue2AtCursor yue2_at_cursor_build(const BPETokenizer * tok, const std::st
 // one-hot at the full vocabulary would be 3.3 GB at n_sup = 4501; over the
 // slice and one chunk at a time it is 33.6 MB, and it is what
 // ggml_cross_entropy_loss's `ggml_are_same_shape(a, b)` assert requires.
+// `row_count` defaults to YUE2_AT_SLICE_ROWS for every existing (codec-head)
+// call site; yue2_at_head_text_chunked passes V (the full vocabulary) instead,
+// since its `rows` are RAW absolute token ids rather than slice-relative ones.
 struct Yue2AtLabelGuard {
     ggml_tensor *   t;
     const int32_t * rows;
     int             Sc;
+    int64_t         row_count;
 
-    Yue2AtLabelGuard(ggml_tensor * t_, const int32_t * rows_, int Sc_) : t(t_), rows(rows_), Sc(Sc_) {
+    Yue2AtLabelGuard(ggml_tensor * t_, const int32_t * rows_, int Sc_, int64_t row_count_ = YUE2_AT_SLICE_ROWS)
+        : t(t_), rows(rows_), Sc(Sc_), row_count(row_count_) {
         for (int i = 0; i < Sc; i++) {
-            const size_t off = ((size_t) i * (size_t) YUE2_AT_SLICE_ROWS + (size_t) rows[i]) * sizeof(float);
+            const size_t off = ((size_t) i * (size_t) row_count + (size_t) rows[i]) * sizeof(float);
             const float  one = 1.0f;
             ggml_backend_tensor_set(t, &one, off, sizeof(float));
         }
     }
     ~Yue2AtLabelGuard() {
         for (int i = 0; i < Sc; i++) {
-            const size_t off = ((size_t) i * (size_t) YUE2_AT_SLICE_ROWS + (size_t) rows[i]) * sizeof(float);
+            const size_t off = ((size_t) i * (size_t) row_count + (size_t) rows[i]) * sizeof(float);
             const float  z   = 0.0f;
             ggml_backend_tensor_set(t, &z, off, sizeof(float));
         }
@@ -1311,10 +1431,21 @@ struct Yue2AtLabelGuard {
 // because ggml_cross_entropy_loss_back divides by its own nrows == Sc, so the
 // product is 1 / (n_sup * grad_accum) — and therefore the trunk surrogate's
 // loss gradient is 1.0, NOT 1/grad_accum.
-static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool count_loss, double * ce_out) {
+//
+// `total_n_sup` (item 3): 0 (the default) means "scale against this head's
+// OWN seq.n_sup" — every existing call site, and every `off`-mode sequence,
+// so those are BYTE IDENTICAL to before --abc-dropout existed. A `full`
+// example's caller passes `seq.n_sup + seq.text_n_sup` here (and to
+// yue2_at_head_text_chunked) so the two heads' contributions — this one's
+// codec range, the other's sheet range — sum to ONE ordinary mean
+// cross-entropy over the whole supervised span, not two independently
+// averaged losses.
+static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool count_loss, double * ce_out,
+                                 int64_t total_n_sup = 0) {
     Yue2AtState & st    = *r.st;
     const int64_t H     = (int64_t) r.m->lm_cfg.embedding_length;
     const int64_t n_sup = seq.n_sup;
+    const int64_t TOT   = total_n_sup > 0 ? total_n_sup : n_sup;
     const int64_t CH    = st.chunk;
     const int64_t GA    = std::max<int64_t>(1, r.grad_accum);
 
@@ -1341,7 +1472,7 @@ static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool coun
         // control. The REPORTED loss (`lc`, read below) is deliberately
         // untouched by it: the control must move the gradient and nothing else,
         // or the probe's numeric arm would move with it and hide the defect.
-        const float gs = r.lossgrad * (float) Sc / ((float) n_sup * (float) GA);
+        const float gs = r.lossgrad * (float) Sc / ((float) TOT * (float) GA);
         ggml_backend_tensor_set(st.t_gs, &gs, 0, sizeof(float));
 
         Yue2AtLabelGuard guard(st.t_labc, seq.rows.data() + i, (int) Sc);
@@ -1377,7 +1508,7 @@ static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool coun
         if (ok && count_loss) {
             float lv = 0.0f;
             ggml_backend_tensor_get(lc, &lv, 0, sizeof(float));
-            ce += (double) lv * (double) Sc / (double) n_sup;
+            ce += (double) lv * (double) Sc / (double) TOT;
         }
         if (ok && r.host_ce) {
             lg_host.assign((size_t) (YUE2_AT_SLICE_ROWS * Sc), 0.0f);
@@ -1405,6 +1536,99 @@ static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool coun
     }
     if (r.host_ce) {
         *r.host_ce = ce_host / (double) n_sup;
+    }
+    return true;
+}
+
+// P5b: the chunked, FULL-VOCABULARY, TRAINABLE head for a `full` example's
+// TEXT span (item 3: sheet tokens, ABC_END, MUSIC_START — everything
+// yue2_at_build_sequence recorded as seq.text_sup0/seq.text_n_sup). Same shape
+// as yue2_at_head_chunked (P5) above — chunked CE + CE-back, dh projected and
+// copied into the SAME Gh[0] gradient buffer P5 writes, at the DISJOINT column
+// range [text_sup0, text_sup0+text_n_sup) immediately before P5's own col0 —
+// but reading the model's FULL output projection instead of the codec slice,
+// because sheet-token targets range over the whole ordinary vocabulary (BPE
+// ids of the rendered ABC text) plus two special ids (ABC_END, MUSIC_START)
+// that sit just outside it: not a contiguous span the way codec ids are.
+//
+// Forward reads `m.lm.output` in its own NATIVE dtype (no F32 mirror kept —
+// exactly the eval-only yue2_at_head_fullvocab_ce below); only the backward's
+// dh = mul_mat(headT, dl) needs a vocab-fastest copy, which is `st.t_full_headT`
+// (built once, yue2_at_build_text_head). `total_n_sup` is documented on
+// yue2_at_head_chunked above: both heads scale against the SAME total so their
+// two contributions sum to one ordinary mean CE.
+//
+// The FD gate's `sup_shift` control (contract §6.5) is NOT applied here: it
+// only ever exercises synthetic off-mode sequences (seq.text_n_sup == 0), so
+// this function is never on its path.
+static bool yue2_at_head_text_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool count_loss, int64_t total_n_sup,
+                                      double * ce_out) {
+    Yue2AtState &     st    = *r.st;
+    const Yue2Model & m     = *r.m;
+    const int64_t     H     = (int64_t) m.lm_cfg.embedding_length;
+    const int64_t     V     = (int64_t) m.lm_cfg.vocab_size;
+    const int64_t     n_txt = seq.text_n_sup;
+    const int64_t     CH    = st.chunk_text;
+    const int64_t     GA    = std::max<int64_t>(1, r.grad_accum);
+    const int64_t     TOT   = total_n_sup > 0 ? total_n_sup : n_txt;
+
+    if (!st.t_full_headT || !st.t_labc_full) {
+        return false;  // caller names the error: state wasn't allocated with want_text_head
+    }
+    const int64_t col0 = seq.text_sup0;
+    const int64_t S    = (int64_t) seq.ids.size();
+    if (n_txt < 1 || col0 < 0 || col0 + n_txt >= S) {
+        return false;
+    }
+
+    double                ce = 0.0;
+    std::vector<int32_t>  tgt;
+    for (int64_t i = 0; i < n_txt; i += CH) {
+        const int64_t Sc = std::min(CH, n_txt - i);
+        tgt.resize((size_t) Sc);
+        for (int64_t s = 0; s < Sc; s++) {
+            // RAW absolute vocab id — no slice offset: row (col0+i+s) predicts
+            // ids[col0+i+s+1], the next sheet/ABC_END/MUSIC_START token.
+            tgt[(size_t) s] = seq.ids[(size_t) (col0 + i + s + 1)];
+        }
+
+        const float gs = r.lossgrad * (float) Sc / ((float) TOT * (float) GA);
+        ggml_backend_tensor_set(st.t_gs, &gs, 0, sizeof(float));
+
+        Yue2AtLabelGuard guard(st.t_labc_full, tgt.data(), (int) Sc, V);
+
+        ggml_init_params ip  = { st.arena.size(), st.arena.data(), /*no_alloc*/ true };
+        ggml_context *   ctx = ggml_init(ip);
+        ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 256, /*grads=*/false);
+
+        const size_t  col = (size_t) (col0 + i);
+        ggml_tensor * hd  = ggml_cont(ctx, ggml_view_2d(ctx, st.t_H, H, Sc, st.t_H->nb[1], col * st.t_H->nb[1]));
+        ggml_tensor * lg  = ggml_mul_mat(ctx, m.lm.output, hd);  // [V, Sc] — native weight x F32 activation
+        ggml_tensor * lb  = ggml_view_2d(ctx, st.t_labc_full, V, Sc, st.t_labc_full->nb[1], 0);
+        ggml_tensor * lc  = ggml_cross_entropy_loss(ctx, lg, lb);
+        ggml_set_output(lc);
+        ggml_build_forward_expand(gf, lc);
+        if (!r.forward_only) {
+            ggml_tensor * dl = ggml_cross_entropy_loss_back(ctx, st.t_gs, lg, lb);
+            ggml_tensor * dh = ggml_mul_mat(ctx, st.t_full_headT, dl);  // [H, Sc]
+            ggml_tensor * gv = ggml_view_2d(ctx, st.Gh[0], H, Sc, st.Gh[0]->nb[1], col * st.Gh[0]->nb[1]);
+            ggml_build_forward_expand(gf, ggml_cpy(ctx, dh, gv));
+        }
+
+        ggml_backend_sched_reset(r.sched);
+        const bool ok = ggml_backend_sched_graph_compute(r.sched, gf) == GGML_STATUS_SUCCESS;
+        if (ok && count_loss) {
+            float lv = 0.0f;
+            ggml_backend_tensor_get(lc, &lv, 0, sizeof(float));
+            ce += (double) lv * (double) Sc / (double) TOT;
+        }
+        ggml_free(ctx);
+        if (!ok) {
+            return false;
+        }
+    }
+    if (count_loss && ce_out) {
+        *ce_out = ce;
     }
     return true;
 }
@@ -1758,12 +1982,43 @@ static bool yue2_at_micro_step(Yue2AtRun & r, const Yue2AtSeq & seq, bool count_
         ggml_backend_buffer_clear(st.buf_gh0, 0);
     }
 
-    // ── P5: the CE head ──────────────────────────────────────────────────
-    if (!yue2_at_head_chunked(r, seq, count_loss, ce_out)) {
-        if (err) {
-            *err = "P5 (CE head) failed";
+    // ── P5: the CE head(s) ───────────────────────────────────────────────
+    //
+    // `off` (seq.text_n_sup == 0): P5 alone, scaled against its own n_sup —
+    // BYTE IDENTICAL to before --abc-dropout existed. `full`: P5 (codec range)
+    // and P5b (text range, item 3's sheet-token loss) each contribute their
+    // slice of ONE combined mean CE over total_n_sup = n_sup + text_n_sup, and
+    // their dh writes land in disjoint, contiguous columns of the SAME Gh[0]
+    // P4 just cleared — see yue2_at_head_chunked's and
+    // yue2_at_head_text_chunked's own comments for the full argument.
+    {
+        const int64_t total_sup  = seq.n_sup + seq.text_n_sup;
+        double        codec_ce   = 0.0;
+        double        text_ce    = 0.0;
+        if (!yue2_at_head_chunked(r, seq, count_loss, &codec_ce, total_sup)) {
+            if (err) {
+                *err = "P5 (CE head) failed";
+            }
+            return false;
         }
-        return false;
+        if (seq.text_n_sup > 0) {
+            if (!st.t_full_headT || !st.t_labc_full) {
+                if (err) {
+                    *err = "P5b (text CE head) failed: this run's state has no full-vocab head — it was "
+                           "allocated without want_text_head, but this example draws \"full\"";
+                }
+                return false;
+            }
+            if (!yue2_at_head_text_chunked(r, seq, count_loss, total_sup, &text_ce)) {
+                if (err) {
+                    *err = "P5b (text CE head) failed";
+                }
+                return false;
+            }
+        }
+        if (count_loss && ce_out) {
+            *ce_out = codec_ce + text_ce;
+        }
     }
 
     // ── P6: the lyric-cursor term ────────────────────────────────────────
