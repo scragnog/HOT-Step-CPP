@@ -34,7 +34,12 @@ export type TrainingJobKind =
   // 'yue2-tokenize' (codec_ids, what the next-token loss is scored on) and
   // 'yue2-align' (cursor_words, what --cursor-weight reads). GPU-lane like the
   // rest; each spawns ace-train, which owns the card.
-  | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train';
+  // 'yue2-sheet' — the seventh cache stage, "Lead sheets": SheetSage2
+  // transcribes each source's own audio to abc/abc_error, which
+  // --abc-dropout on both trainers reads to draw cot=full vs cot=off. It sits
+  // in the same manifest as the other two and is independent of them (no
+  // codes or cursor spans needed), so it can run before, after or alongside.
+  | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 

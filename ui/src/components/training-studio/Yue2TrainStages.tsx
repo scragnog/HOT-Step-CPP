@@ -1,14 +1,14 @@
-// Yue2TrainStages.tsx — Training Studio phase 3, YuE2 branch: the six-stage
+// Yue2TrainStages.tsx — Training Studio phase 3, YuE2 branch: the seven-stage
 // page.
 //
-// Six stages, fixed top-to-bottom order: 1 latent cache, 2 codes, 3 vocal
-// stems, 4 lyric cursor spans, 5 NAR LoRA training, 6 AR LoRA training. Each
-// stage is its own card — exported from Yue2TrainCard.tsx (1
-// Yue2PreprocessCard, 5 Yue2NarTrainCard) or Yue2ArTrainCard.tsx (2
-// Yue2TokenizeCard, 3 Yue2StemsCard, 4 Yue2AlignCard, 6
+// Seven stages, fixed top-to-bottom order: 1 latent cache, 2 codes, 3 lead
+// sheets, 4 vocal stems, 5 lyric cursor spans, 6 NAR LoRA training, 7 AR LoRA
+// training. Each stage is its own card — exported from Yue2TrainCard.tsx (1
+// Yue2PreprocessCard, 6 Yue2NarTrainCard) or Yue2ArTrainCard.tsx (2
+// Yue2TokenizeCard, 3 Yue2SheetCard, 4 Yue2StemsCard, 5 Yue2AlignCard, 7
 // Yue2ArTrainStageCard) — and this file owns nothing about
 // any one stage's form. What it DOES own: the ONE useYue2Status() and ONE
-// useYue2ArStatus() call every stage reads from, so six cards never
+// useYue2ArStatus() call every stage reads from, so seven cards never
 // independently re-fetch the same two payloads; the licence banner and the
 // status-fetch error banner, both rendered once, above every stage; and the
 // "Perform all stages" control — identical top and bottom — that drives the
@@ -35,7 +35,9 @@ import { useTranslation } from 'react-i18next';
 
 import { listYue2ArRuns, listYue2Runs } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
-import { Yue2StemsCard, Yue2AlignCard, Yue2ArTrainStageCard, Yue2TokenizeCard } from './Yue2ArTrainCard';
+import {
+  Yue2StemsCard, Yue2AlignCard, Yue2ArTrainStageCard, Yue2SheetCard, Yue2TokenizeCard,
+} from './Yue2ArTrainCard';
 import { Yue2BatchTrainWizard } from './Yue2BatchTrainWizard';
 import { Yue2NarTrainCard, Yue2PreprocessCard } from './Yue2TrainCard';
 import { useYue2ArStatus } from './useYue2ArStatus';
@@ -87,10 +89,11 @@ const RunAllControl: React.FC<{
     switch (n) {
       case 1: return t('trainingStudio.yue2.runAllStageName1', 'latent cache');
       case 2: return t('trainingStudio.yue2.runAllStageName2', 'codes');
-      case 3: return t('trainingStudio.yue2.runAllStageName3', 'vocal stems');
-      case 4: return t('trainingStudio.yue2.runAllStageName4', 'lyric cursor spans');
-      case 5: return t('trainingStudio.yue2.runAllStageName5', 'NAR LoRA training');
-      case 6: return t('trainingStudio.yue2.runAllStageName6', 'AR LoRA training');
+      case 3: return t('trainingStudio.yue2.runAllStageName3', 'lead sheets');
+      case 4: return t('trainingStudio.yue2.runAllStageName4', 'vocal stems');
+      case 5: return t('trainingStudio.yue2.runAllStageName5', 'lyric cursor spans');
+      case 6: return t('trainingStudio.yue2.runAllStageName6', 'NAR LoRA training');
+      case 7: return t('trainingStudio.yue2.runAllStageName7', 'AR LoRA training');
       default: return '';
     }
   };
@@ -103,7 +106,7 @@ const RunAllControl: React.FC<{
               'Runs every stage below that is not already complete, in order. Already done, so skipped: '
               + '{{skip}}.', { skip: skipLabels.join(', ') })
           : t('trainingStudio.yue2.runAllPreflight',
-              'Runs all six stages below in order, from the latent cache through the AR LoRA.')}
+              'Runs all seven stages below in order, from the latent cache through the AR LoRA.')}
       </p>
       <p className="text-[10px] text-zinc-500 leading-snug mb-3">
         {t('trainingStudio.yue2.runAllReloadWarning',
@@ -117,7 +120,7 @@ const RunAllControl: React.FC<{
       >
         {runAllActive ? <Loader2 size={15} className="animate-spin" /> : <ListChecks size={15} />}
         {runAllActive && runAllStage
-          ? t('trainingStudio.yue2.runAllRunning', 'Running stage {{n}} of 6: {{name}}',
+          ? t('trainingStudio.yue2.runAllRunning', 'Running stage {{n}} of 7: {{name}}',
               { n: runAllStage, name: stageName(runAllStage) })
           : t('trainingStudio.yue2.runAllStart', 'Perform all stages')}
       </button>
@@ -176,16 +179,17 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
   const skipLabels: string[] = [];
   if (arStatus?.stages.preprocess.done) skipLabels.push(t('trainingStudio.yue2.runAllStageName1', 'latent cache'));
   if (arStatus?.stages.tokenize.done) skipLabels.push(t('trainingStudio.yue2.runAllStageName2', 'codes'));
+  if (arStatus?.stages.sheet.done) skipLabels.push(t('trainingStudio.yue2.runAllStageName3', 'lead sheets'));
   // Stems are counted, not flagged: the stage is "done" once anything has been
   // separated, which is the same test the chain itself applies.
   if ((arStatus?.stages.align.stemsReady ?? 0) > 0) {
-    skipLabels.push(t('trainingStudio.yue2.runAllStageName3', 'vocal stems'));
+    skipLabels.push(t('trainingStudio.yue2.runAllStageName4', 'vocal stems'));
   }
   if (arStatus?.stages.align.done) {
-    skipLabels.push(t('trainingStudio.yue2.runAllStageName4', 'lyric cursor spans'));
+    skipLabels.push(t('trainingStudio.yue2.runAllStageName5', 'lyric cursor spans'));
   }
-  if (narDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName5', 'NAR LoRA training'));
-  if (arDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName6', 'AR LoRA training'));
+  if (narDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName6', 'NAR LoRA training'));
+  if (arDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName7', 'AR LoRA training'));
 
   const runAllControl = (
     <RunAllControl
@@ -210,7 +214,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
       )}
 
       {/* The licence, verbatim as the server sends it, rendered exactly once
-          for all six stages. A trained adapter is a derivative of CC BY-NC
+          for all seven stages. A trained adapter is a derivative of CC BY-NC
           weights and carries the same terms, so this belongs above every
           button that makes one, not in a footnote. */}
       {yue2Status?.license && (
@@ -229,6 +233,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
 
       {yue2Status && <Yue2PreprocessCard status={yue2Status} onDone={reload} />}
       {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
+      {arStatus && <Yue2SheetCard status={arStatus} onDone={reload} />}
       {arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
       {arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
       <Yue2NarTrainCard datasetId={datasetId} trigger={trigger} status={yue2Status} reload={reload} />

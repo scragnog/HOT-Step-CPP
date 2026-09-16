@@ -329,7 +329,7 @@ function openRunLog(args: string[], jsonl: boolean): {
 
 export type Yue2Kind =
   | 'yue2-preprocess' | 'yue2-nar-train'
-  | 'yue2-tokenize' | 'yue2-align' | 'yue2-ar-train';
+  | 'yue2-tokenize' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet';
 
 /** Which kinds keep a machine-readable train-log.jsonl beside their output.
  *  The two trainers do, because yue2Runs/yue2ArRuns read it back to reconstruct

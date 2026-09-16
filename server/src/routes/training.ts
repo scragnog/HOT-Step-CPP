@@ -126,6 +126,10 @@ import {
   missingYue2AlignModels, readYue2CursorWordsStatus, resolveYue2AlignerModel,
   YUE2_ALIGN_DEFAULTS, yue2StemsDir,
 } from '../services/training/yue2Align.js';
+import {
+  missingYue2SheetModels, readYue2AbcStatus, resolveYue2SheetModel,
+  YUE2_SHEET_DEFAULTS,
+} from '../services/training/yue2Sheet.js';
 import { yue2StemSources } from '../services/training/yue2Stems.js';
 import {
   listYue2ArRuns, readYue2ArRunManifest, yue2ArAdapterRoot,
@@ -3157,6 +3161,7 @@ router.post('/datasets/:id/yue2-train', (req: Request, res: Response) => {
       maxGradNorm: num('maxGradNorm', D.maxGradNorm, 0, 1000),
       weightDecay: num('weightDecay', D.weightDecay, 0, 1),
       captionDropout: num('captionDropout', D.captionDropout, 0, 1),
+      abcDropout: num('abcDropout', D.abcDropout, 0, 1),
       tSampling: b.tSampling === 'logit-normal' || b.tSampling === 'uniform'
         ? b.tSampling : D.tSampling,
       seed: num('seed', D.seed, 0, 2 ** 31 - 1),
@@ -3260,10 +3265,12 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
     const cache  = readYue2PreprocessSummary(manifestPath);
     const codes  = readYue2CodecIdsStatus(manifestPath);
     const cursor = readYue2CursorWordsStatus(manifestPath);
+    const abc    = readYue2AbcStatus(manifestPath);
     const stemsDir = yue2StemsDir(ds.slug);
     const minted = yue2MintedManifest();
     const tokenizer = resolveYue2TokenizerModel();
     const aligner = resolveYue2AlignerModel();
+    const sheetModel = resolveYue2SheetModel();
 
     res.json({
       manifestPath,
@@ -3306,6 +3313,19 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
           // card needs the shortfall and not just a boolean.
           stemsNeeded: cache?.sources ?? 0,
           defaults: YUE2_ALIGN_DEFAULTS,
+        },
+        sheet: {
+          // `done` requires every source to carry abc OR abc_error, not just
+          // "some do" — a source with neither is untouched, and an untouched
+          // source silently trains cot=off forever, the same state as before
+          // this stage existed. A source with abc_error IS coverage (a soft
+          // failure the reference itself produces on ~4% of real tracks, per
+          // doc 23's survey), not a gap to close.
+          done: !!abc && abc.sources > 0 && (abc.sourcesWithAbc + abc.sourcesWithError) === abc.sources,
+          status: abc ?? null,
+          missing: missingYue2SheetModels(),
+          sheetModelFile: sheetModel ? path.basename(sheetModel) : '',
+          defaults: YUE2_SHEET_DEFAULTS,
         },
         train: {
           missing: missingYue2TrainModels('train', { lmType: YUE2_AR_DEFAULTS.lmType }),
@@ -3391,6 +3411,55 @@ router.post('/datasets/:id/yue2-tokenize', (req: Request, res: Response) => {
       jobId: job.id, kind: job.kind, manifest,
       sources: cache.sources, clips: cache.clips,
       tokenizer: path.basename(resolveYue2TokenizerModel()),
+      license: YUE2_LICENSE_NOTICE,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/**
+ * POST /datasets/:id/yue2-sheet — the seventh cache stage, "Lead sheets".
+ * Independent of tokenize/align: SheetSage2 reads a source's own audio, not
+ * its codes or cursor spans, so this can run before, after or alongside them.
+ */
+router.post('/datasets/:id/yue2-sheet', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+    const D = YUE2_SHEET_DEFAULTS;
+
+    const missing = missingYue2SheetModels();
+    if (missing.length) {
+      res.status(400).json({
+        error: `The lead-sheet stage is missing: ${missing.join(', ')}. Install it from the Model Manager `
+             + '(yue2-sheetsage2-f16) — nothing in generation needs it, so a fresh install will not have it.',
+      });
+      return;
+    }
+
+    const manifest = yue2PreprocessManifest(ds.slug);
+    const cache = readYue2PreprocessSummary(manifest);
+    if (!cache || cache.sources <= 0) {
+      res.status(400).json({
+        error: 'No YuE2 latent cache for this dataset — run the preprocess stage first. This stage reads '
+             + 'the manifest preprocess writes and transcribes the sources it names; it does not scan a folder.',
+      });
+      return;
+    }
+
+    const job = queue.startYue2SheetJob(ds.id, {
+      manifest,
+      only: typeof b.only === 'string' ? b.only.trim() : D.only,
+      force: b.force === true,
+      fast: b.fast === true,
+      datasetSlug: ds.slug,
+    });
+    res.json({
+      jobId: job.id, kind: job.kind, manifest,
+      sources: cache.sources,
+      sheetModel: path.basename(resolveYue2SheetModel()),
       license: YUE2_LICENSE_NOTICE,
     });
   } catch (err: any) {
@@ -3663,6 +3732,7 @@ router.post('/datasets/:id/yue2-ar-train', (req: Request, res: Response) => {
       maxLen: num('maxLen', D.maxLen, 256, 65536),
       chunk: num('chunk', D.chunk, 1, 8192),
       cursorWeight,
+      abcDropout: num('abcDropout', D.abcDropout, 0, 1),
       seed: num('seed', D.seed, 0, 2 ** 31 - 1),
       // Clamped to the run length, as the NAR route clamps saveEvery: a ladder
       // whose first rung is past the last step is no ladder.

@@ -48,6 +48,10 @@ import {
   type ResolvedYue2TokenizeOptions,
 } from './yue2Tokenize.js';
 import {
+  buildYue2SheetArgs, missingYue2SheetModels, readYue2AbcStatus,
+  type ResolvedYue2SheetOptions,
+} from './yue2Sheet.js';
+import {
   buildYue2AlignArgs, missingYue2AlignModels, readYue2CursorWordsStatus,
   type ResolvedYue2AlignOptions,
 } from './yue2Align.js';
@@ -554,6 +558,144 @@ export async function runYue2TokenizeJob(job: TrainingJob): Promise<void> {
           `Codes cached for ${s.sourcesWithCodes} of ${s.sources} source(s) (${s.clipsWithCodes} of `
           + `${s.clips} clips) via ${s.tokenizer}. The AR trainer reads the SOURCE codes; a source `
           + 'without them is not trainable however many of its clips have slices.');
+      }
+      finishJob(job, 'done');
+    }
+  } catch (err: any) {
+    if (!isCancelled(job)) finishJob(job, 'failed', err?.message || String(err));
+  }
+}
+
+// ── yue2-sheet: stderr -> events ─────────────────────────────────────────────
+
+/** `[yue2-sheet] %zu/%zu <ok|error|FAIL> %-46s …` — yue2-sheet-run.h's
+ *  per-source lines (decode FAIL, resample FAIL, transcribe ok/error). One
+ *  regex for all three verbs: they share the `i/n` prefix, which is what the
+ *  progress bar needs. `error` (lower-case, unlike the other stages' `SKIP`/
+ *  `FAIL`) is the soft-failure case — abc_error written, not a run problem. */
+const RE_SHEET_FILE = /^\[yue2-sheet\]\s+(\d+)\/(\d+)\s+(ok|error|FAIL)\b\s*(.*)$/;
+/** `[yue2-sheet] %zu of %zu source(s) match --only '%s' (%zu already have
+ *   abc/abc_error) | %zu selected for this run%s` — the run's head line. */
+const RE_SHEET_HEAD = /^\[yue2-sheet\]\s+(\d+)\s+of\s+(\d+)\s+source\(s\)\s+match\s+/;
+/** `[yue2-sheet] done: %zu ok, %zu soft-failed (abc_error), %zu infra-failed
+ *   (decode), of %zu selected (%zu already cached); manifest now shows
+ *   abc_sources_ok=%lld abc_sources_failed=%lld`. */
+const RE_SHEET_DONE = /^\[yue2-sheet\]\s+done:\s+(\d+)\s+ok,\s+(\d+)\s+soft-failed\s+\(abc_error\),\s+(\d+)\s+infra-failed\s+\(decode\),\s+of\s+(\d+)\s+selected\s+\((\d+)\s+already cached\)/;
+
+interface SheetState extends RelayState {
+  ok?: number;
+  softFailed?: number;
+  infraFailed?: number;
+}
+
+function relaySheetLine(job: TrainingJob, line: string, st: SheetState): void {
+  let m: RegExpExecArray | null;
+
+  if ((m = RE_SHEET_HEAD.exec(line))) {
+    job.total = Number(m[2]) || job.total;
+    job.phase = 'transcribing';
+    emitProgress(job);
+    log(job, 'info', line.replace(/^\[yue2-sheet\]\s+/, ''));
+    return;
+  }
+
+  if ((m = RE_SHEET_FILE.exec(line))) {
+    const verb = m[3];
+    job.done = Number(m[1]);
+    job.total = Number(m[2]) || job.total;
+    job.phase = 'transcribing';
+    if (verb === 'FAIL') job.failed = (job.failed || 0) + 1;
+    emitProgress(job);
+    // FAIL (could not even decode) is the one the user has to act on; `error`
+    // (abc_error — the reference's own soft failure, ~4% of real tracks per
+    // doc 23's survey) is expected and goes to the console log only, same
+    // reasoning as yue2-tokenize's SKIP/FAIL split.
+    if (verb === 'FAIL') {
+      log(job, 'error', `FAIL: ${m[4].trim()}`);
+    }
+    return;
+  }
+
+  if ((m = RE_SHEET_DONE.exec(line))) {
+    st.doneSeen = true;
+    st.ok = Number(m[1]);
+    st.softFailed = Number(m[2]);
+    st.infraFailed = Number(m[3]);
+    log(job, 'info',
+      `${st.ok} transcribed, ${st.softFailed} soft-failed (abc_error), ${st.infraFailed} could not be `
+      + `decoded, of ${m[4]} selected (${m[5]} already cached).`);
+    return;
+  }
+
+  if (/^\[yue2-sheet\]\s+(model |NOTE|WARNING|--model not given)/.test(line)) {
+    log(job, line.includes('WARNING') ? 'warn' : 'info', line.replace(/^\[yue2-sheet\]\s+/, ''));
+    return;
+  }
+  const bad = fatalishSheet(line);
+  if (bad) st.fatalMessage = st.fatalMessage || bad;
+}
+
+/** Same reasoning as fatalish() above, but for yue2-sheet's own openings
+ *  (ace-train.cpp:4786-4813, yue2-sheet-run.h) — NOT folded into the shared
+ *  helper, which is anchored on `yue2-(?:ar-train|tokenize|align)` and would
+ *  otherwise have to loosen in a way that risks matching the wrong tool's
+ *  prose. THE EXIT CODE IS STILL THE AUTHORITY; this only replaces "exited
+ *  with code N" with the sentence the engine actually printed. */
+function fatalishSheet(line: string): string {
+  const usage = /^ace-train yue2-sheet:\s+(.+)$/.exec(line);
+  if (usage) return usage[1];
+  const m = /^\[yue2-sheet\]\s+(cannot .+|no sheetsage2-.+|sources\[\d+\] is missing.+|FATAL .+|manifest not found:.+|SheetSage2 load failed.+)$/.exec(line);
+  return m ? m[1] : '';
+}
+
+export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
+  const opts = job.opts as ResolvedYue2SheetOptions | undefined;
+  if (!opts?.manifest) {
+    finishJob(job, 'failed', 'yue2-sheet job is missing its manifest path');
+    return;
+  }
+  // Re-checked here as well as at the route: the route's answer can be stale by
+  // the time the job reaches the head of the GPU lane.
+  const missing = missingYue2SheetModels();
+  if (missing.length) {
+    finishJob(job, 'failed', `The SheetSage2 transcriber is missing: ${missing.join(', ')}`);
+    return;
+  }
+  if (!fs.existsSync(opts.manifest)) {
+    finishJob(job, 'failed',
+      `The latent cache manifest is gone (${opts.manifest}) — run the YuE2 preprocess stage again`);
+    return;
+  }
+
+  const summary = readYue2PreprocessSummary(opts.manifest);
+  const sources = Math.max(1, summary?.sources ?? getDataset(job.datasetId)?.sampleCount ?? 1);
+  // Doc 23's G6/phase-3c tables: 3-13 minutes per track on the CPU backend
+  // (the exact-load, offline-cache path this stage runs), a few seconds on
+  // CUDA. 10 min a track with a 30 min floor covers the slow end with margin.
+  const timeoutMs = Math.max(30 * 60 * 1000, sources * 10 * 60 * 1000);
+
+  const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
+  try {
+    log(job, 'info',
+      'Transcribing every source in the latent cache to a SheetSage2 lead sheet. Roughly 4% of real '
+      + 'tracks decode fine but fail to render (abc_error) — that is expected, not a job failure; those '
+      + 'sources train cot=off on every draw. The manifest is rewritten in place after every source.');
+
+    await runYue2AceTrain(job, 'yue2-sheet', buildYue2SheetArgs(opts), timeoutMs, () => {
+      const s = readYue2AbcStatus(opts.manifest);
+      if (!s) return 'yue2-sheet finished but the manifest could not be read back';
+      return (s.sourcesWithAbc + s.sourcesWithError) > 0
+        ? null
+        : 'yue2-sheet exited cleanly but no source carries abc or abc_error';
+    }, (line, state) => relaySheetLine(job, line, state), st);
+
+    if (!isCancelled(job)) {
+      const s = readYue2AbcStatus(opts.manifest);
+      if (s) {
+        log(job, 'info',
+          `Lead sheets cached for ${s.sourcesWithAbc} of ${s.sources} source(s) (${s.sourcesWithError} `
+          + `soft-failed as abc_error). --abc-dropout reads this to draw cot=full for a source that has `
+          + 'one; a source with neither trains cot=off, same as before this stage existed.');
       }
       finishJob(job, 'done');
     }

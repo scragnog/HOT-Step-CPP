@@ -215,6 +215,13 @@ export const YUE2_NAR_DEFAULTS = {
    *  0 is not "more likeness", it is "the trigger word stops meaning
    *  anything relative to no trigger word". */
   captionDropout: 0.1,
+  /** doc 19 decision 4: when a clip's source carries `abc` (a SheetSage2 lead
+   *  sheet, written by `yue2-sheet`), the NAR prefix is built cot=full w.p.
+   *  (1 - abcDropout) instead of cot=off — sheet + ABC_END + MUSIC_START are
+   *  IN the prefix too, not just the codec span. A clip whose source has
+   *  `abc_error` or neither field always trains cot=off. 0.5 is upstream's
+   *  own split. */
+  abcDropout: 0.5,
   tSampling: 'logit-normal' as 'logit-normal' | 'uniform',
   seed: 42,
   /** AR-prefix K/V canvases held at once, ~104 MB each at 10 s clips. A real
@@ -554,6 +561,8 @@ export interface ResolvedYue2TrainOptions {
   maxGradNorm: number;
   weightDecay: number;
   captionDropout: number;
+  /** See YUE2_NAR_DEFAULTS.abcDropout. */
+  abcDropout: number;
   tSampling: 'logit-normal' | 'uniform';
   seed: number;
   kvCache: number;
@@ -590,6 +599,7 @@ export function buildYue2TrainArgs(o: ResolvedYue2TrainOptions): string[] {
     '--max-grad-norm', String(o.maxGradNorm),
     '--weight-decay', String(o.weightDecay),
     '--caption-dropout', String(o.captionDropout),
+    '--abc-dropout', String(o.abcDropout),
     '--t-sampling', o.tSampling,
     '--seed', String(o.seed),
     '--kv-cache', String(o.kvCache),

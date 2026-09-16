@@ -189,6 +189,12 @@ export const YUE2_AR_DEFAULTS = {
    *  the same songs. It needs `cursor_words` in the manifest, i.e. the
    *  `yue2-align` stage. */
   cursorWeight: 0.08,
+  /** doc 19 decision 4: when a source's manifest carries `abc` (a SheetSage2
+   *  lead sheet, written by `yue2-sheet`), the AR prefix is built cot=full
+   *  w.p. (1 - abcDropout) instead of cot=off. A source with `abc_error` or
+   *  neither field always trains cot=off, never entering this draw. 0.5 is
+   *  upstream's own split. */
+  abcDropout: 0.5,
   seed: 42,
 
   // ── shapes and cost ──
@@ -325,6 +331,8 @@ export interface ResolvedYue2ArTrainOptions {
    *  REFUSES a run where no artist song binds its `cursor_words`, which is the
    *  gate that would otherwise print "cursor nan" forever and still finish. */
   cursorWeight: number;
+  /** See YUE2_AR_DEFAULTS.abcDropout. */
+  abcDropout: number;
   seed: number;
   ckptFrom: number;
   saveEvery: number;
@@ -367,6 +375,7 @@ export function buildYue2ArTrainArgs(o: ResolvedYue2ArTrainOptions): string[] {
     '--max-len', String(o.maxLen),
     '--chunk', String(o.chunk),
     '--cursor-weight', String(o.cursorWeight),
+    '--abc-dropout', String(o.abcDropout),
     '--adam-beta1', String(o.adamBeta1),
     '--adam-beta2', String(o.adamBeta2),
     '--caption-dropout', String(o.captionDropout),

@@ -30,7 +30,7 @@ export type TrainingJobKind =
   // rewrite the same manifest: 'yue2-tokenize' (codec_ids, what the next-token
   // loss is scored on) and 'yue2-align' (cursor_words, what --cursor-weight
   // reads). Each spawns ace-train, so each owns the card.
-  | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train';
+  | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -499,6 +499,8 @@ export interface Yue2Defaults {
   maxGradNorm: number;
   weightDecay: number;
   captionDropout: number;
+  /** See Yue2ArDefaults.abcDropout — same meaning, NAR-half prefix. */
+  abcDropout: number;
   tSampling: 'logit-normal' | 'uniform';
   seed: number;
   kvCache: number;
@@ -603,6 +605,8 @@ export interface Yue2TrainRequest {
   maxGradNorm?: number;
   weightDecay?: number;
   captionDropout?: number;
+  /** See Yue2ArDefaults.abcDropout — same meaning, NAR-half prefix. */
+  abcDropout?: number;
   tSampling?: 'logit-normal' | 'uniform';
   seed?: number;
   kvCache?: number;
@@ -718,6 +722,29 @@ export interface Yue2TokenizeDefaults {
   force: boolean;
 }
 
+/** What the manifest says about the lead-sheet stage. A source with
+ *  `abc_error` is real coverage (a soft failure the reference itself produces
+ *  on ~4% of real tracks), not a gap — so it is its own count, not folded
+ *  into `sourcesWithAbc`. */
+export interface Yue2AbcStatus {
+  present: boolean;
+  /** This TOOL's identity ("ace-train yue2-sheet <version>"), distinct from
+   *  each source's own model+precision+backend tag. */
+  producer: string;
+  createdAt: string;
+  sources: number;
+  sourcesWithAbc: number;
+  sourcesWithError: number;
+}
+
+export interface Yue2SheetDefaults {
+  only: string;
+  force: boolean;
+  /** `--fast`: skip the exact-load precision fix. Off is the recommended
+   *  setting for this offline cache stage. */
+  fast: boolean;
+}
+
 export interface Yue2AlignDefaults {
   only: string;
   limit: number;
@@ -752,6 +779,11 @@ export interface Yue2ArDefaults {
   captionDropout: number;
   /** Needs `cursor_words`, i.e. the align stage. 0 turns the term off. */
   cursorWeight: number;
+  /** Chance a source WITH a manifest `abc` (the lead-sheet stage) trains
+   *  cot=off instead of cot=full this draw (cot=full w.p. 1 - abcDropout). A
+   *  source with `abc_error` or neither field always trains cot=off, never
+   *  entering this draw. */
+  abcDropout: number;
   seed: number;
   /** Whole songs, no crops. Also what the per-layer [H,S] buffers are sized
    *  by, which makes it the VRAM lever. */
@@ -810,6 +842,16 @@ export interface Yue2ArStatus {
        *  just a boolean. */
       stemsNeeded: number;
       defaults: Yue2AlignDefaults;
+    };
+    sheet: {
+      /** Requires EVERY source to carry abc OR abc_error, not just "some do"
+       *  — a source with neither is untouched and silently trains cot=off
+       *  forever, the same state as before this stage existed. */
+      done: boolean;
+      status: Yue2AbcStatus | null;
+      missing: string[];
+      sheetModelFile: string;
+      defaults: Yue2SheetDefaults;
     };
     train: { missing: string[] };
   };
@@ -874,6 +916,18 @@ export interface Yue2AlignRequest {
   cpu?: boolean;
 }
 
+/** POST /api/training/datasets/:id/yue2-sheet — the seventh cache stage,
+ *  "Lead sheets". Independent of tokenize/align: SheetSage2 reads a source's
+ *  own audio, not its codes or cursor spans. */
+export interface Yue2SheetRequest {
+  only?: string;
+  /** Re-transcribe sources that already carry abc/abc_error. Without it an
+   *  already-done source is skipped, which is what makes a resumed run cheap
+   *  — a single transcription can run minutes. */
+  force?: boolean;
+  fast?: boolean;
+}
+
 /** POST /api/training/datasets/:id/yue2-ar-train. No preset field: the NAR
  *  ladder belongs to the other model half and none of its numbers mean
  *  anything here. */
@@ -908,6 +962,7 @@ export interface Yue2ArTrainRequest {
   maxLen?: number;
   chunk?: number;
   cursorWeight?: number;
+  abcDropout?: number;
   seed?: number;
   ckptFrom?: number;
   saveEvery?: number;
@@ -2158,6 +2213,19 @@ export async function startYue2Align(
              sources: number; stemsReady: number; aligner: string; license: string }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/yue2-align`,
+    { method: 'POST', ...jsonBody(opts) },
+  );
+}
+
+/** Cache stage — lead sheets: the manifest's sources -> abc/abc_error,
+ *  rewritten into the same manifest. Independent of tokenize/align: reads a
+ *  source's own audio, not its codes or cursor spans. */
+export async function startYue2Sheet(
+  id: string, opts: Yue2SheetRequest = {},
+): Promise<{ jobId: string; kind: TrainingJobKind; manifest: string; sources: number;
+             sheetModel: string; license: string }> {
+  return request(
+    `/datasets/${encodeURIComponent(id)}/yue2-sheet`,
     { method: 'POST', ...jsonBody(opts) },
   );
 }

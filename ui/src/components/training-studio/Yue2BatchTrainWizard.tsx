@@ -2,10 +2,10 @@
 //
 // The sibling of BatchImportWizard, and deliberately NOT the same thing:
 // BatchImportWizard turns a folder of folders into datasets, this one takes
-// datasets that already exist and queues the six-stage YuE2 chain over them,
+// datasets that already exist and queues the seven-stage YuE2 chain over them,
 // one after another. It imports nothing.
 //
-// Two lists in one modal. The STAGES list is the six stages of
+// Two lists in one modal. The STAGES list is the seven stages of
 // Yue2TrainStages, all ticked by default, and it applies to every dataset in
 // the queue — the point of unticking is "these albums already have latents
 // and codes, just train the two LoRAs". The DATASETS list is the store's own
@@ -14,8 +14,8 @@
 // queue is picked with eyes open.
 //
 // WHAT THIS DOES NOT DO: reorder stages, or tick a stage back on because a
-// later one needs it. Stage 4 reads the vocal stems stage 3 writes, and stage
-// 6 reads both; unticking a stage whose output is missing is a real way to
+// later one needs it. Stage 5 reads the vocal stems stage 4 writes, and stage
+// 7 reads both; unticking a stage whose output is missing is a real way to
 // make a later stage fail. The dependency line under the stage list says so
 // rather than the modal quietly overriding the choice — a silently re-added
 // stage is a 40-minute separation run the user explicitly said no to.
@@ -34,10 +34,11 @@ import {
 const STAGE_LABELS: Record<Yue2StageKey, [key: string, fallback: string]> = {
   latents: ['trainingStudio.yue2.runAllStageName1', 'latent cache'],
   codes:   ['trainingStudio.yue2.runAllStageName2', 'codes'],
-  stems:   ['trainingStudio.yue2.runAllStageName3', 'vocal stems'],
-  align:   ['trainingStudio.yue2.runAllStageName4', 'lyric cursor spans'],
-  nar:     ['trainingStudio.yue2.runAllStageName5', 'NAR LoRA training'],
-  ar:      ['trainingStudio.yue2.runAllStageName6', 'AR LoRA training'],
+  sheet:   ['trainingStudio.yue2.runAllStageName3', 'lead sheets'],
+  stems:   ['trainingStudio.yue2.runAllStageName4', 'vocal stems'],
+  align:   ['trainingStudio.yue2.runAllStageName5', 'lyric cursor spans'],
+  nar:     ['trainingStudio.yue2.runAllStageName6', 'NAR LoRA training'],
+  ar:      ['trainingStudio.yue2.runAllStageName7', 'AR LoRA training'],
 };
 
 const CHIP_ON = 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
@@ -156,7 +157,7 @@ const Body: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
           <p className="text-[11px] text-zinc-500 leading-relaxed">
             {t('trainingStudio.yue2.batch.intro',
-              'Runs the six-stage YuE2 chain over each dataset you tick, one dataset at a time, in the '
+              'Runs the seven-stage YuE2 chain over each dataset you tick, one dataset at a time, in the '
               + 'order shown. Each one uses its own trigger word. Stages already complete for a dataset '
               + 'are skipped; a dataset that fails does not stop the ones behind it.')}
           </p>
@@ -175,7 +176,9 @@ const Body: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   {t('trainingStudio.yue2.batch.stagesAll', 'All')}
                 </button>
                 <button
-                  onClick={() => setStages({ latents: false, codes: false, stems: false, align: false, nar: true, ar: true })}
+                  onClick={() => setStages({
+                    latents: false, codes: false, sheet: false, stems: false, align: false, nar: true, ar: true,
+                  })}
                   className="text-amber-600 dark:text-amber-400 hover:underline"
                 >
                   {t('trainingStudio.yue2.batch.stagesTrainOnly', 'Training only')}

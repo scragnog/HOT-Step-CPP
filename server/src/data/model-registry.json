@@ -326,12 +326,13 @@
       "id": "yue2-ar-training",
       "family": "yue2",
       "name": "YuE2 Artist (AR) Training Pack",
-      "description": "Everything ace-train needs to train a YuE2 artist adapter beyond the base LM: the semantic tokenizer that writes the codec targets the AR learns to predict, the MMS_FA aligner behind the lyric-cursor loss, and the minted regulariser. Training only - none of it is needed to generate.",
+      "description": "Everything ace-train needs to train a YuE2 artist adapter beyond the base LM: the semantic tokenizer that writes the codec targets the AR learns to predict, the MMS_FA aligner behind the lyric-cursor loss, the minted regulariser, and the SheetSage2 lead-sheet transcriber behind the optional cot=full training mode. Training only - none of it is needed to generate.",
       "fileIds": [
         "yue2-tok-f16",
         "yue2-mms-fa",
         "yue2-minted-manifest",
-        "yue2-minted-codes"
+        "yue2-minted-codes",
+        "yue2-sheetsage2-f16"
       ]
     }
   ],
@@ -4224,6 +4225,27 @@
       "sizeBytes": 1211631392,
       "repo": "scragnog/YuE2-GGUF",
       "description": "Turns real audio into YuE2 semantic tokens — the reverse of what the LM does. Optional, and only useful for training: with it, `ace-train yue2-tokenize` fills the codec_ids slot in a YuE2 preprocess cache so a NAR adapter trains on ground-truth codes exactly as inference conditions, instead of the text-only regime. Not needed to generate music. One file holds both halves of the chain: MERT-v2-FullSong's mel frontend, ConvNext subsampler and first 21 Conformer blocks, plus Mothersuperior's 8-layer tokenizer head (docs/plans/yue2/12-tokenizer-oracle-pin.md). Derived from YuE2-3B and licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-sheetsage2-f16",
+      "filename": "sheetsage2-f16.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "SheetSage2 Lead-Sheet Transcriber (F16)",
+      "scale": null,
+      "variant": "sheetsage2",
+      "quant": "F16",
+      "sizeBytes": 1360020736,
+      "repo": "scragnog/YuE2-GGUF",
+      "description": "SheetSage2 lead-sheet transcriber for cot=full adapter training. Turns real audio into an ABC-notation lead sheet (chords + melody), which `ace-train yue2-sheet` writes into a YuE2 preprocess cache; the AR and NAR trainers' --abc-dropout then draw cot=full for a source that has one instead of the default cot=off. Optional, and only useful for training: nothing in generation calls this model. GGML port of Mothersuperior's SheetSage2, byte-exact against the reference decoder and grammar (docs/plans/yue2/23-sheetsage2-progress.md). Derived from YuE2-3B and licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {

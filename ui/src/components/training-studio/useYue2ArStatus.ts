@@ -30,7 +30,7 @@ export function useYue2ArStatus(datasetId: string): {
   const jobStatus = activeJob?.status;
   const running = jobStatus === 'queued' || jobStatus === 'running';
   const mine = kind === 'yue2-preprocess' || kind === 'yue2-tokenize'
-    || kind === 'yue2-align' || kind === 'yue2-ar-train';
+    || kind === 'yue2-align' || kind === 'yue2-sheet' || kind === 'yue2-ar-train';
   const finishedKey = mine && !running ? `${activeJob?.id ?? ''}:${jobStatus ?? ''}` : '';
 
   useEffect(() => {

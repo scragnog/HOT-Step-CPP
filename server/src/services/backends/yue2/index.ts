@@ -431,13 +431,14 @@ async function capabilities(): Promise<BackendCapabilities> {
         type: 'select',
         label: 'Chain of Thought',
         hint: 'How much of the song structure the planner writes out before generating audio. '
-            + '"full" is the reference default; "off" skips the ABC plan entirely and is the '
-            + 'fastest, least-structured mode (its CFG is on by default, unlike the other two).',
+            + '"full" is the reference default. "off" skips the lead sheet, but is NOT the fast '
+            + 'option — its default CFG of 1.01 (vs 1.0 for the other two) doubles the semantic '
+            + 'decode, so it is the slowest mode, not the fastest.',
         default: 'full',
         options: [
-          { value: 'full', label: 'Full (structure + melody)' },
-          { value: 'melody', label: 'Melody only' },
-          { value: 'off', label: 'Off (fastest, least structure)' },
+          { value: 'full', label: 'Full (lead sheet: structure + melody)' },
+          { value: 'melody', label: 'Melody only (lead sheet without chords)' },
+          { value: 'off', label: 'Off (no lead sheet; CFG on, slower)' },
         ],
       },
       {

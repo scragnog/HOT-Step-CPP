@@ -102,7 +102,7 @@ export interface Yue2StyleHalves {
 
 function yue2StyleForAdapter(
   caption: string, params: any,
-): { style: string; notes: string[]; halves: Yue2StyleHalves } {
+): { style: string; notes: string[]; halves: Yue2StyleHalves; trainedCot: string } {
   const notes: string[] = [];
   const picked = yue2PersistedSelection().adapters;
   const halfOf = (p: string) => ({
@@ -120,11 +120,15 @@ function yue2StyleForAdapter(
   // share a trigger and the question does not arise; when they differ, say so
   // rather than silently addressing one of them.
   const adapter = picked.nar.path || picked.ar.path;
-  if (!adapter) return { style: caption, notes, halves };
+  if (!adapter) return { style: caption, notes, halves, trainedCot: '' };
   const other = adapter === picked.nar.path ? picked.ar.path : '';
 
   const name = path.basename(adapter);
   const meta = readSafetensorsMeta(adapter);
+  // doc 19 decision 4: "off" (no --abc-dropout run, or no source ever had a
+  // lead sheet) or "off,full" (the run could draw cot=full at least once).
+  // Absent is a file exported before the flag existed — the "off" behaviour.
+  const trainedCot = meta?.cot ?? 'off';
   if (other) {
     const otherTrigger = (readSafetensorsMeta(other)?.trigger ?? '').normalize('NFC').trim();
     const thisTrigger = (meta?.trigger ?? '').normalize('NFC').trim();
@@ -140,7 +144,7 @@ function yue2StyleForAdapter(
   const trigger = (meta?.trigger ?? '').normalize('NFC').trim();
   if (!trigger) {
     notes.push(`LM adapter "${name}" records no trigger — the style prompt is sent exactly as typed.`);
-    return { style: caption, notes, halves };
+    return { style: caption, notes, halves, trainedCot };
   }
 
   // The same opt-out MM3 gives (mm3LmAdapterTrigger): composing is a default,
@@ -150,7 +154,7 @@ function yue2StyleForAdapter(
       `LM adapter trigger "${trigger}" NOT composed in (yue2LmAdapterTrigger: false) — this adapter `
       + 'only ever saw its trigger inside the training style sentence, so likeness will be weak.',
     );
-    return { style: caption, notes, halves };
+    return { style: caption, notes, halves, trainedCot };
   }
 
   // Absent means a file exported before --style-template existed, and `bare`
@@ -177,7 +181,7 @@ function yue2StyleForAdapter(
   } else {
     notes.push(`LM adapter trigger "${trigger}" composed into the style prompt (${template} template).`);
   }
-  return { style, notes, halves };
+  return { style, notes, halves, trainedCot };
 }
 
 /**
@@ -203,10 +207,35 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   const lyricsRaw: string = params.instrumental ? '' : (params.lyrics || '');
   const lyrics = lyricsRaw.normalize('NFC');
 
-  const cotRaw = typeof params.yue2Cot === 'string' ? params.yue2Cot : 'full';
-  const cot: Yue2SynthRequest['cot'] =
+  const cotExplicit = typeof params.yue2Cot === 'string';
+  const cotRaw = cotExplicit ? params.yue2Cot : 'full';
+  let cot: Yue2SynthRequest['cot'] =
     cotRaw === 'off' || cotRaw === 'melody' || cotRaw === 'full' ? cotRaw : 'full';
   if (cotRaw !== cot) notes.push(`Invalid yue2Cot "${cotRaw}" — falling back to "full"`);
+
+  // doc 19 decision 4 / phase 5: default the request's mode to one the
+  // selected adapter actually trained, rather than always "full" — "off" is
+  // NOT the fast mode (its default CFG 1.01 doubles the semantic decode, see
+  // index.ts's Chain of Thought hint), so silently sending an untrained
+  // adapter into "full" is exactly as wrong as silently sending it into
+  // "off" would be. `styled.trainedCot` is '' only when no adapter is
+  // selected, in which case there is nothing to check against.
+  if (styled.trainedCot) {
+    const trainedModes = styled.trainedCot.split(',').map(s => s.trim()).filter(Boolean);
+    if (trainedModes.length && !trainedModes.includes(cot)) {
+      if (!cotExplicit) {
+        const fallbackRaw = trainedModes[0];
+        const fallback: Yue2SynthRequest['cot'] =
+          fallbackRaw === 'off' || fallbackRaw === 'melody' || fallbackRaw === 'full' ? fallbackRaw : cot;
+        notes.push(`Chain of Thought defaulted to "${fallback}" — the selected LM adapter trained `
+          + `${trainedModes.join('/')}, not "${cot}".`);
+        cot = fallback;
+      } else {
+        notes.push(`Chain of Thought "${cot}" requested, but the selected LM adapter trained only `
+          + `${trainedModes.join('/')} — rendering "${cot}" anyway since it was set explicitly.`);
+      }
+    }
+  }
 
   // Blank text field = engine default (mode-dependent: 1.01 for cot=off,
   // 1.0 otherwise, per protocol.py's own SongRequest.guidance property) —

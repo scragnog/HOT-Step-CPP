@@ -591,6 +591,7 @@ interface TrainForm {
   maxGradNorm: number;
   weightDecay: number;
   captionDropout: number;
+  abcDropout: number;
   tSampling: 'logit-normal' | 'uniform';
   seed: number;
   kvCache: number;
@@ -648,6 +649,7 @@ export const Yue2NarTrainCard: React.FC<{
     maxGradNorm: d.maxGradNorm,
     weightDecay: d.weightDecay,
     captionDropout: d.captionDropout,
+    abcDropout: d.abcDropout,
     tSampling: d.tSampling,
     seed: d.seed,
     kvCache: d.kvCache,
@@ -719,6 +721,7 @@ export const Yue2NarTrainCard: React.FC<{
         saveEvery: form.saveEvery, logEvery: form.logEvery,
         gradAccum: form.gradAccum, maxGradNorm: form.maxGradNorm,
         weightDecay: form.weightDecay, captionDropout: form.captionDropout,
+        abcDropout: form.abcDropout,
         tSampling: form.tSampling, seed: form.seed, kvCache: form.kvCache,
         clipBlock: form.clipBlock,
         // Sent only when there is one: the route falls back to the dataset's
@@ -920,6 +923,12 @@ export const Yue2NarTrainCard: React.FC<{
                     hint={t('trainingStudio.yue2.captionDropoutHint',
                       'Chance of swapping in the EMPTY style prefix. 0 is not "more likeness": it is '
                       + 'the trigger word ceasing to mean anything relative to no trigger word.') as string} />
+                  <NumField label={t('trainingStudio.yue2.abcDropout', 'ABC dropout')}
+                    value={form.abcDropout} onChange={v => set('abcDropout', v)} step={0.05}
+                    hint={t('trainingStudio.yue2.abcDropoutHint',
+                      'Chance a clip whose source has a lead sheet trains cot=off instead of cot=full '
+                      + 'this draw. A source with no lead sheet always trains cot=off. 0.5 is upstream\'s '
+                      + 'own split.') as string} />
                   <NumField label={t('trainingStudio.yue2.kvCache', 'K/V canvases')} value={form.kvCache}
                     onChange={v => set('kvCache', v)}
                     hint={t('trainingStudio.yue2.kvCacheHint',

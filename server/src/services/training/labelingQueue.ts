@@ -363,6 +363,7 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
     case 'yue2-tokenize':    // MERT + the tokenizer head over every source
     case 'yue2-stems':       // SuperSep through the engine, one track at a time
     case 'yue2-align':       // MMS_FA, ~5 GB per track (CPU only with --cpu)
+    case 'yue2-sheet':       // SheetSage2 lead-sheet transcription, one track at a time
     case 'yue2-ar-train':    // whole songs to 12,288 tokens through a bf16 base
       return 'gpu';
     case 'label':
@@ -1460,6 +1461,22 @@ export function startYue2AlignJob(datasetId: string, opts: unknown): TrainingJob
   enqueue(job, async (j) => {
     const { runYue2AlignJob } = await import('./yue2ArTrainRunner.js');
     await runYue2AlignJob(j);
+  });
+  return job;
+}
+
+/**
+ * YuE2 cache stage — lead sheets. Independent of the other two: SheetSage2
+ * reads a source's own audio, not its codes or cursor spans, so this can run
+ * before, after or alongside yue2-tokenize/yue2-align. `sampleIds` is empty
+ * for the same reason as the other YuE2 stages: the inputs are the sources
+ * the manifest already names, not the dataset's rows.
+ */
+export function startYue2SheetJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-sheet', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2SheetJob } = await import('./yue2ArTrainRunner.js');
+    await runYue2SheetJob(j);
   });
   return job;
 }

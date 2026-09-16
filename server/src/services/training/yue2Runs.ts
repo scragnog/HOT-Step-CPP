@@ -140,6 +140,14 @@ export interface Yue2AdapterMeta {
    *  and only when the run used it; a NAR run records it in its manifest
    *  instead. */
   captionDropout?: number;
+  /** doc 19 decision 4: which chain-of-thought mode(s) this adapter trained,
+   *  as the exporter wrote it — "off" (no --abc-dropout run, or every source
+   *  lacked a lead sheet) or "off,full" (at least one cot=full draw was
+   *  possible). Absent means a file exported before the flag existed, which
+   *  is the "off" behaviour, not a default to fill in with "off,full". Both
+   *  trainers' exporters write it identically (yue2-ar-train-run.h's
+   *  yue2_at_export, yue2-nar-train-run.h's yue2_nt_export). */
+  cot?: string;
   /** Everything the header carried, unparsed, for anything added later. */
   raw: Record<string, string>;
 }
@@ -183,6 +191,7 @@ export function readSafetensorsMeta(file: string): Yue2AdapterMeta | null {
       baseSha: raw.base_sha,
       styleTemplate: raw.style_template,
       captionDropout: num('caption_dropout'),
+      cot: raw.cot,
       raw,
     };
   } catch {

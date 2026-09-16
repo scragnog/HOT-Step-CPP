@@ -1,15 +1,16 @@
 // Yue2ArTrainCard.tsx — Training Studio phase 3, the YuE2 AR half: stages 2,
-// 3 and 5.
+// 3, 5 and 7.
 //
-// Three of the five YuE2 stages Yue2TrainStages.tsx renders in order: stage 2
+// Four of the seven YuE2 stages Yue2TrainStages.tsx renders in order: stage 2
 // (Yue2TokenizeCard, `codes/` — what the AR half predicts), stage 3
-// (Yue2AlignCard, `cursor/` — what the lyric-timing loss is measured
-// against), and stage 5 (Yue2ArTrainStageCard, the AR LoRA itself — the
-// composer half, where artist likeness lives). All three read `status` as a
-// PROP from one useYue2ArStatus() call in Yue2TrainStages, which also owns
-// the loading gate and the status-fetch error banner. Stage 2 and 3 both
-// write into the SAME yue2_preprocess.json that stage 1 (Yue2TrainCard.tsx)
-// starts.
+// (Yue2SheetCard, `abc`/`abc_error` — the SheetSage2 lead sheet both trainers'
+// `--abc-dropout` reads), stage 5 (Yue2AlignCard, `cursor/` — what the
+// lyric-timing loss is measured against), and stage 7 (Yue2ArTrainStageCard,
+// the AR LoRA itself — the composer half, where artist likeness lives). All
+// four read `status` as a PROP from one useYue2ArStatus() call in
+// Yue2TrainStages, which also owns the loading gate and the status-fetch
+// error banner. Stage 2, 3 and 5 all write into the SAME
+// yue2_preprocess.json that stage 1 (Yue2TrainCard.tsx) starts.
 //
 // THE DEFAULTS ARE NOT DUPLICATED HERE. Every number in the form is a view of
 // `status.defaults`, which is YUE2_AR_DEFAULTS from services/training/
@@ -22,7 +23,7 @@
 
 import React, { useState } from 'react';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Download, History, Loader2, Mic2,
+  AlertTriangle, Check, ChevronDown, ChevronRight, Download, FileText, History, Loader2, Mic2,
   Package, PauseCircle, Play, Scissors, Waves,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -30,8 +31,8 @@ import { useTranslation } from 'react-i18next';
 import {
   listYue2ArRuns,
   type Yue2AlignRequest, type Yue2ArAttn, type Yue2ArLrScheduler, type Yue2ArRunSummary,
-  type Yue2ArStatus, type Yue2ArTarget, type Yue2ArTrainRequest, type Yue2StyleTemplate,
-  type Yue2TokenizeRequest,
+  type Yue2ArStatus, type Yue2ArTarget, type Yue2ArTrainRequest, type Yue2SheetRequest,
+  type Yue2StyleTemplate, type Yue2TokenizeRequest,
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
@@ -258,6 +259,152 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
               {codes && codes.sourcesWithCodes > 0
                 ? t('trainingStudio.yue2ar.tokReRun', 'Tokenize again')
                 : t('trainingStudio.yue2ar.tokRun', 'Tokenize')}
+            </button>
+            {needsLatents && (
+              <span className="text-[11px] text-zinc-500">
+                {t('trainingStudio.yue2ar.needsLatents',
+                  'Encode the latents first — this stage reads the manifest preprocess writes, not the '
+                  + 'source folder.')}
+              </span>
+            )}
+          </div>
+        </>
+      )}
+
+      {mine && activeJob && (
+        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
+          <JobProgress />
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Stage: lead sheets ────────────────────────────────────────────────────
+//
+// Independent of codes/stems/align: SheetSage2 reads a source's own audio,
+// not its codes or cursor spans. What it produces feeds --abc-dropout on
+// both trainers (Yue2NarTrainCard, Yue2ArTrainStageCard), not this card.
+
+interface SheetForm {
+  only: string;
+  force: boolean;
+  fast: boolean;
+}
+
+export const Yue2SheetCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
+  const { t } = useTranslation();
+  const activeJob = useTrainingStore(s => s.activeJob);
+  const startYue2Sheet = useTrainingStore(s => s.startYue2Sheet);
+  const [busy, setBusy] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [edits, setEdits] = useState<Partial<SheetForm>>({});
+
+  const stage = status.stages.sheet;
+  const d = stage.defaults;
+  const form: SheetForm = { only: d.only, force: d.force, fast: d.fast, ...edits };
+  const set = <K extends keyof SheetForm>(k: K, v: SheetForm[K]) =>
+    setEdits(e => ({ ...e, [k]: v }));
+
+  const jobRunning = activeJob?.status === 'queued' || activeJob?.status === 'running';
+  const mine = activeJob?.kind === 'yue2-sheet';
+  const abc = stage.status;
+  const needsLatents = !status.stages.preprocess.done;
+  const blocked = stage.missing.length > 0;
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      const body: Yue2SheetRequest = {
+        ...(form.only.trim() ? { only: form.only.trim() } : {}),
+        force: form.force,
+        fast: form.fast,
+      };
+      await startYue2Sheet(body);
+    } finally {
+      setBusy(false);
+      onDone();
+    }
+  };
+
+  return (
+    <div className={CARD}>
+      <div className="flex items-center gap-2 mb-2">
+        <FileText size={15} className="text-amber-500" />
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+          {t('trainingStudio.yue2ar.sheetTitle', 'Lead sheets')}
+        </h3>
+      </div>
+      <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
+        {t('trainingStudio.yue2ar.sheetBlurb',
+          'Transcribes each source\'s own audio into a SheetSage2 lead sheet (chords + melody), which '
+          + '--abc-dropout on both trainers reads to draw the cot=full conditioning instead of cot=off. '
+          + 'Optional: a source with no lead sheet simply always trains cot=off, same as before this '
+          + 'stage existed. Roughly 4% of real tracks decode fine but fail to render — that shows up as '
+          + '"soft-failed", not an error, and those sources also always train cot=off.')}
+      </p>
+
+      {blocked ? (
+        <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+          <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+          <span>
+            {t('trainingStudio.yue2ar.sheetMissing',
+              'Missing: {{files}}. Install it from the Model Manager (yue2-sheetsage2-f16) — nothing in '
+              + 'generation needs it, so a fresh install will not have it.',
+              { files: stage.missing.join(', ') })}
+          </span>
+        </div>
+      ) : (
+        <>
+          <div className="text-[11px] text-zinc-500 leading-relaxed mb-3">
+            {abc && (abc.sourcesWithAbc + abc.sourcesWithError) > 0 ? (
+              <span className={stage.done ? 'text-emerald-500' : 'text-amber-500'}>
+                {t('trainingStudio.yue2ar.sheetHave',
+                  '{{done}} of {{total}} source(s) have a lead sheet, {{failed}} soft-failed (abc_error).',
+                  { done: abc.sourcesWithAbc, total: abc.sources, failed: abc.sourcesWithError })}
+              </span>
+            ) : (
+              t('trainingStudio.yue2ar.sheetNone', 'No lead sheets cached yet.')
+            )}
+            {stage.sheetModelFile && ` · ${stage.sheetModelFile}`}
+          </div>
+
+          <button
+            onClick={() => setAdvanced(v => !v)}
+            className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
+          >
+            {advanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {t('trainingStudio.yue2ar.advanced', 'Advanced')}
+          </button>
+
+          {advanced && (
+            <div className="mt-3 pl-3 border-l-2 border-zinc-200 dark:border-white/10 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <TextField label={t('trainingStudio.yue2ar.only', 'Name filter')}
+                value={form.only} onChange={v => set('only', v)}
+                hint={t('trainingStudio.yue2ar.onlyHint',
+                  'Case-insensitive. Blank = every source.') as string} />
+              <CheckField className="col-span-2 md:col-span-1 self-end pb-1.5"
+                label={t('trainingStudio.yue2ar.sheetForce', 'Re-transcribe cached sources')}
+                checked={form.force} onChange={v => set('force', v)}
+                hint={t('trainingStudio.yue2ar.sheetForceHint',
+                  'Off, a source that already has abc or abc_error is skipped — which is what makes a '
+                  + 'resumed run cheap, since one transcription can run minutes.') as string} />
+              <CheckField className="col-span-2 md:col-span-1 self-end pb-1.5"
+                label={t('trainingStudio.yue2ar.sheetFast', 'Fast (less precise)')}
+                checked={form.fast} onChange={v => set('fast', v)}
+                hint={t('trainingStudio.yue2ar.sheetFastHint',
+                  'Skips the exact-load precision fix. Leave off unless you have measured that the '
+                  + 'default matters for your corpus.') as string} />
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 flex-wrap mt-3">
+            <button onClick={() => void run()} disabled={busy || jobRunning || needsLatents}
+              className={BTN_STAGE}>
+              {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+              {abc && (abc.sourcesWithAbc + abc.sourcesWithError) > 0
+                ? t('trainingStudio.yue2ar.sheetReRun', 'Transcribe again')
+                : t('trainingStudio.yue2ar.sheetRun', 'Transcribe')}
             </button>
             {needsLatents && (
               <span className="text-[11px] text-zinc-500">
@@ -813,6 +960,7 @@ interface TrainForm {
   artistFrac: number;
   captionDropout: number;
   cursorWeight: number;
+  abcDropout: number;
   seed: number;
   maxLen: number;
   attn: Yue2ArAttn;
@@ -885,6 +1033,7 @@ export const Yue2ArTrainStageCard: React.FC<{
     artistFrac: d.artistFrac,
     captionDropout: d.captionDropout,
     cursorWeight: d.cursorWeight,
+    abcDropout: d.abcDropout,
     seed: d.seed,
     maxLen: d.maxLen,
     attn: d.attn,
@@ -908,6 +1057,8 @@ export const Yue2ArTrainStageCard: React.FC<{
   const trainMissing = status?.stages.train.missing ?? [];
   const mintedMissing = !!status && !status.minted.present;
   const hasCursor = (al?.status?.sourcesWithCursor ?? 0) > 0;
+  const sh = status?.stages.sheet;
+  const hasSheet = (sh?.status?.sourcesWithAbc ?? 0) > 0;
   const overtrain = !!form && !!status && form.steps > status.overtrainSteps;
   // Each of these is a server refusal reproduced, not guessed at: the route
   // sends back 400 and a paragraph explaining what the override costs, and
@@ -941,7 +1092,7 @@ export const Yue2ArTrainStageCard: React.FC<{
         adamBeta1: form.adamBeta1, adamBeta2: form.adamBeta2,
         captionDropout: form.captionDropout,
         attn: form.attn, maxLen: form.maxLen, chunk: form.chunk,
-        cursorWeight: form.cursorWeight, seed: form.seed,
+        cursorWeight: form.cursorWeight, abcDropout: form.abcDropout, seed: form.seed,
         ckptFrom: form.ckptFrom, saveEvery: form.saveEvery,
         evalEvery: form.evalEvery, logEvery: form.logEvery,
         ...(mintedMissing ? { allowNoMinted: true } : {}),
@@ -1104,6 +1255,15 @@ export const Yue2ArTrainStageCard: React.FC<{
                         'The lyric-timing loss. 0 turns it off.') as string
                     : t('trainingStudio.yue2ar.cursorWeightNone',
                         'No source has cursor spans yet — run the align stage, or set this to 0.') as string} />
+                <NumField label={t('trainingStudio.yue2ar.abcDropout', 'ABC dropout')}
+                  value={form.abcDropout} onChange={v => set('abcDropout', v)} step={0.05}
+                  hint={hasSheet
+                    ? t('trainingStudio.yue2ar.abcDropoutHint',
+                        'Chance a source with a lead sheet trains cot=off instead of cot=full this draw. '
+                        + '0.5 is upstream\'s own split.') as string
+                    : t('trainingStudio.yue2ar.abcDropoutNone',
+                        'No source has a lead sheet yet — run the lead-sheet stage, or leave this at any '
+                        + 'value; every source trains cot=off either way.') as string} />
                 <label className="flex flex-col gap-1">
                   <span className={LABEL}>{t('trainingStudio.yue2ar.styleTemplate', 'Style template')}</span>
                   <select className={INPUT} value={form.styleTemplate}
