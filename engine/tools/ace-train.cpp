@@ -39,6 +39,13 @@
 // engine/tools/yue2-cursor-bridge.py and the torchaudio install behind it.
 // Pulls yue2/yue2-mmsfa.h and yue2/yue2-ctc-align.h in transitively.
 #include "train/yue2-align-run.h"
+// YuE2 SheetSage2 lead-sheet transcriber (docs/plans/yue2/19-sheetsage2-cot-
+// training.md "Engine plan", docs/plans/yue2/23-sheetsage2-progress.md phase
+// 3c): fills the abc/abc_error slot the cot=full AR/NAR conditioning (a
+// later phase) reads. Pulls yue2/sheetsage-pipeline.h and everything it
+// composes (encoder, decoder, grammar, tokens, events, stitch, notation) in
+// transitively.
+#include "train/yue2-sheet-run.h"
 // YuE2 AR LoRA trainer (docs/plans/yue2/14-ar-lora-contract.md). The AR half is
 // YuE2's COMPOSER — it writes the semantic token stream that fixes melody,
 // phrasing and structure — and training it needed ground-truth codec tokens for
@@ -427,6 +434,21 @@ static void print_usage(void) {
             "                Each track runs as ONE forward: MMS_FA normalises the waveform\n"
             "                per utterance, so a chunked track is a different model input.\n"
             "                Budget ~5 GB and ~100 s per 4 minutes on 16 CPU threads.\n"
+            "  yue2-sheet     Fill the abc/abc_error slot with a SheetSage2 lead-sheet\n"
+            "                transcription of each source's own audio (ABC text: key, meter,\n"
+            "                chords, melody). A source can decode fine and still fail to\n"
+            "                RENDER a sheet (an interval too short for the notation grid, no\n"
+            "                key decoded, ...) — that is written as abc_error, not a run\n"
+            "                failure; it trains cot=off only (a later phase).\n"
+            "                --manifest <yue2_preprocess.json>  rewritten in place, atomically,\n"
+            "                after EVERY source (a transcription can run minutes)\n"
+            "                --model <sheetsage2-*.gguf>  (or --models <dir> to discover one)\n"
+            "                [--only <substr>]  case-insensitive name filter\n"
+            "                [--force]  re-transcribe sources that already have abc/abc_error\n"
+            "                [--threads <n>]  pin the backend's thread count for this run\n"
+            "                [--fast]  skip the encoder's exact-precision load (default: exact,\n"
+            "                doc 23's fix for the F16-weight matmul narrowing that otherwise\n"
+            "                fails G1 on long/dense windows)\n"
             "  yue2-nar-train  YuE2 NAR-half LoRA training (rectified flow; AR stays frozen).\n"
             "                --lm <yue2-lm-<type>.gguf> (or --models <dir>)\n"
             "                --manifest <yue2_preprocess.json>  the clip set to train on\n"
@@ -4722,6 +4744,44 @@ static int cmd_yue2_align(int argc, char ** argv) {
     return yue2_align_run(a);
 }
 
+// ─── yue2-sheet ─────────────────────────────────────────────────────────────
+//
+// SheetSage2 lead-sheet transcription: fills the abc/abc_error slot the
+// cot=full AR/NAR conditioning (a later phase) reads, from each source's own
+// audio. All the detail — the soft-failure convention, why a decode failure
+// is deliberately NOT written as abc_error, and why the manifest is rewritten
+// after every source rather than once at the end — lives in
+// train/yue2-sheet-run.h's header.
+static int cmd_yue2_sheet(int argc, char ** argv) {
+    Yue2SheetArgs a;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--manifest")) a.manifest   = next("--manifest");
+        else if (!strcmp(argv[i], "--model"))    a.model_path = next("--model");
+        else if (!strcmp(argv[i], "--models"))   a.models_dir = next("--models");
+        else if (!strcmp(argv[i], "--only"))     a.only       = next("--only");
+        else if (!strcmp(argv[i], "--threads"))  a.threads    = atoi(next("--threads"));
+        else if (!strcmp(argv[i], "--force"))    a.force      = true;
+        else if (!strcmp(argv[i], "--fast"))     a.fast       = true;
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (a.manifest.empty()) {
+        fprintf(stderr, "ace-train yue2-sheet: --manifest <yue2_preprocess.json> is required\n");
+        return 2;
+    }
+    if (a.model_path.empty() && a.models_dir.empty()) {
+        fprintf(stderr, "ace-train yue2-sheet: one of --model <sheetsage2-*.gguf> or --models <dir> is required\n");
+        return 2;
+    }
+    // MANDATORY: ggml_time_ms() divides by an uninitialised frequency otherwise.
+    ggml_time_init();
+    return yue2_sheet_run(a);
+}
+
 // ─── yue2-ar-train ──────────────────────────────────────────────────────────
 //
 // YuE2 AR-half LoRA trainer — the branch that could never be trained before.
@@ -6245,6 +6305,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "yue2-align")) {
         return cmd_yue2_align(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-sheet")) {
+        return cmd_yue2_sheet(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-nar-train")) {
         return cmd_yue2_nar_train(argc - 1, argv + 1);
