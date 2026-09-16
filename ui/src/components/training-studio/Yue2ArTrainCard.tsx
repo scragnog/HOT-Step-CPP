@@ -22,6 +22,7 @@
 // people to skip it.
 
 import abcjs from 'abcjs';
+import 'abcjs/abcjs-audio.css';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Download, FileText, History, Loader2, Mic2,
@@ -450,6 +451,7 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
   const [detailError, setDetailError] = useState('');
   const [loadingDetail, setLoadingDetail] = useState(false);
   const scoreRef = useRef<HTMLDivElement | null>(null);
+  const [renderNote, setRenderNote] = useState('');
   const audioControlRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -496,7 +498,16 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
   useEffect(() => {
     if (!showDetail || !detail?.abc || !scoreRef.current) return;
     scoreRef.current.innerHTML = '';
-    const tunes = abcjs.renderAbc(scoreRef.current, detail.abc, { responsive: 'resize' });
+    let tunes: ReturnType<typeof abcjs.renderAbc> | undefined;
+    try {
+      tunes = abcjs.renderAbc(scoreRef.current, detail.abc, { responsive: 'resize' });
+    } catch (e) {
+      setRenderNote(`abcjs could not render this sheet: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    if (!tunes) return;
+    const warnings = tunes[0]?.warnings;
+    setRenderNote(warnings && warnings.length ? `abcjs warnings: ${warnings.slice(0, 3).join(' | ')}` : '');
     if (audioControlRef.current && abcjs.synth.supportsAudio() && tunes[0]) {
       audioControlRef.current.innerHTML = '';
       const synthControl = new abcjs.synth.SynthController();
@@ -566,6 +577,7 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
             ) : detail.abc ? (
               <div className="space-y-2">
                 <div ref={scoreRef} className="bg-white rounded-lg p-2 overflow-x-auto" />
+                {renderNote && <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 break-words">{renderNote}</div>}
                 <div ref={audioControlRef} className="text-xs" />
                 <div className="flex flex-col gap-1">
                   <span className={LABEL}>{t('trainingStudio.yue2ar.sheetOriginal', 'Original audio')}</span>
