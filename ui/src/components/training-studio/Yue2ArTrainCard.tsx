@@ -592,7 +592,7 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
               </div>
             ) : detail.abc ? (
               <div className="space-y-2">
-                <div ref={scoreRef} className="bg-white text-black rounded-lg p-2 max-h-[420px] overflow-auto [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500 [&_.abcjs-highlight]:stroke-amber-500" />
+                <div ref={scoreRef} style={{ maxHeight: 420 }} className="bg-white text-black rounded-lg p-2 overflow-auto [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500 [&_.abcjs-highlight]:stroke-amber-500" />
                 {renderNote && <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 break-words">{renderNote}</div>}
                 <div ref={audioControlRef} className="text-xs" />
                 <div className="flex flex-col gap-1">
