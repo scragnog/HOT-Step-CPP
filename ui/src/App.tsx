@@ -120,7 +120,14 @@ function urlForView(view: string): string {
   if (view === 'song-builder') return '/song-builder';
   if (view === 'storm') return '/storm';
   if (view === 'midi-studio') return '/midi-studio';
-  if (view === 'training-studio') return '/training-studio';
+  if (view === 'training-studio') {
+    // Restore the last deep URL (dataset/phase) if we have one
+    try {
+      const saved = localStorage.getItem('hs-lastTrainingStudioUrl');
+      if (saved) return saved;
+    } catch { /* ignore */ }
+    return '/training-studio';
+  }
   if (view === 'repaint') return '/repaint';
   if (view === 'library') return '/library';
   if (view === 'settings') return '/settings';
@@ -410,6 +417,10 @@ const AppContent: React.FC = () => {
     // Save deep Lyric Studio URL before leaving so we can restore it
     if (activeView === 'lyric-studio' && view !== 'lyric-studio') {
       try { localStorage.setItem('hs-lastLyricStudioUrl', window.location.pathname); } catch { /* ignore */ }
+    }
+    // Same idea for Training Studio: dataset/phase deep link.
+    if (activeView === 'training-studio' && view !== 'training-studio') {
+      try { localStorage.setItem('hs-lastTrainingStudioUrl', window.location.pathname); } catch { /* ignore */ }
     }
     setActiveView(view);
     const url = urlForView(view);

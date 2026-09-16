@@ -199,9 +199,14 @@ function clearTimer(key: string): void {
   if (t !== undefined) { window.clearTimeout(t); editTimers.delete(key); }
 }
 
+/** The four top-level phases of the studio (`PhaseStepper`). Exported so the
+ *  URL-sync code in `TrainingStudio.tsx` can name it without repeating the
+ *  union. */
+export type TrainingPhase = 'dataset' | 'preprocess' | 'train' | 'monitor';
+
 interface TrainingState {
   // navigation
-  phase: 'dataset' | 'preprocess' | 'train' | 'monitor';   // 'dataset' and 'preprocess' selectable
+  phase: TrainingPhase;   // 'dataset' and 'preprocess' selectable
   step: 'label' | 'review' | 'build';
   selectedDatasetId: string | null;
 

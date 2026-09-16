@@ -450,6 +450,17 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
   const [detail, setDetail] = useState<Yue2SheetSourceDetail | null>(null);
   const [detailError, setDetailError] = useState('');
   const [loadingDetail, setLoadingDetail] = useState(false);
+  // Two nested refs, not one. abcjs's `responsive: 'resize'` mode renders
+  // straight into whatever element it's given and reaches into that SAME
+  // element's inline style to install a padding-bottom aspect-ratio hack
+  // (abcjs/src/write/svg.js setResponsiveWidth: position/width/padding-bottom/
+  // overflow:hidden), so it was clobbering this component's own maxHeight +
+  // overflow-auto on that div and, independently, CSS max-height never
+  // constrains a percentage padding-bottom in the first place — the box just
+  // grew to the score's full aspect-ratio height with no scrollbar. scoreRef
+  // is the plain, unconstrained div abcjs is free to mutate; scoreOuterRef is
+  // the actual fixed-height scroll container, which abcjs never touches.
+  const scoreOuterRef = useRef<HTMLDivElement | null>(null);
   const scoreRef = useRef<HTMLDivElement | null>(null);
   const [renderNote, setRenderNote] = useState('');
   const audioControlRef = useRef<HTMLDivElement | null>(null);
@@ -592,7 +603,9 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
               </div>
             ) : detail.abc ? (
               <div className="space-y-2">
-                <div ref={scoreRef} style={{ maxHeight: 420 }} className="bg-white text-black rounded-lg p-2 overflow-auto [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500 [&_.abcjs-highlight]:stroke-amber-500" />
+                <div ref={scoreOuterRef} style={{ maxHeight: 420 }} className="bg-white rounded-lg overflow-y-auto overflow-x-hidden">
+                  <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500 [&_.abcjs-highlight]:stroke-amber-500" />
+                </div>
                 {renderNote && <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 break-words">{renderNote}</div>}
                 <div ref={audioControlRef} className="text-xs" />
                 <div className="flex flex-col gap-1">
