@@ -735,6 +735,10 @@ export interface Yue2AbcStatus {
   sources: number;
   sourcesWithAbc: number;
   sourcesWithError: number;
+  /** Sources where engine/src/yue2/sheetsage-repair.h's repair pass actually
+   *  changed something en route to the final abc/abc_error, whichever it
+   *  ended up being. */
+  sourcesWithRepair: number;
 }
 
 export interface Yue2SheetDefaults {
@@ -754,6 +758,9 @@ export interface Yue2SheetSourceStatus {
   ok: boolean;
   /** Non-empty `abc_error` — a soft failure; listed with the text, disabled. */
   error: string;
+  /** Non-empty `abc_repaired` — the picker marks these with an amber note,
+   *  whether the source ended up `ok` or still `error`. */
+  repaired: string;
   sampleId: string;
 }
 
@@ -762,6 +769,9 @@ export interface Yue2SheetSourceDetail {
   name: string;
   abc: string;
   abc_error: string;
+  /** engine/src/yue2/sheetsage-repair.h's own short description of what it
+   *  dropped en route to `abc`/`abc_error` above; "" when no repair fired. */
+  abc_repaired: string;
   abc_windows: number;
   abc_producer: string;
   sampleId: string;

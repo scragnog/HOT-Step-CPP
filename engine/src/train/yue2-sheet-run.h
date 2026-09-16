@@ -70,16 +70,25 @@
 // "sheetsage2-f16.gguf exact cuda" — model file, precision mode, backend),
 // "abc_windows" (the window count `sheetsage_transcribe` used),
 // "abc_ms" (total wall time for that one source — decode + resample +
-// transcribe, i.e. what a re-run would cost again on a cache miss).
+// transcribe, i.e. what a re-run would cost again on a cache miss), and
+// "abc_repaired" (yue2/sheetsage-repair.h's own short description of what it
+// dropped en route to the final "abc"/"abc_error" above, e.g. "beats: dropped
+// dup-beat-id row 40; melody: dropped 1 Ins note (pitch 86)" — omitted
+// entirely when no repair round ever fired, including every source that
+// rendered clean on the first attempt, and including a --no-repair run).
 // Root: "abc_present" (true once any source has been processed),
 // "abc_producer" (this TOOL's own identity, "ace-train yue2-sheet <version>",
 // distinct from the per-source model/precision/backend tag above — same
 // two-producer-fields convention yue2-tokenize-run.h uses for
 // "codec_ids_producer" vs its per-tensor tokenizer name), "abc_created_at",
-// "abc_sources_ok" / "abc_sources_failed" (recomputed by scanning every
-// source's CURRENT "abc"/"abc_error" state on every write, so these two
-// counts are always right even after a partial run, a --force re-run of one
-// song, or an --only slice).
+// "abc_sources_ok" / "abc_sources_failed" / "abc_sources_repaired"
+// (recomputed by scanning every source's CURRENT "abc"/"abc_error"/
+// "abc_repaired" state on every write, so these three counts are always
+// right even after a partial run, a --force re-run of one song, or an
+// --only slice; "abc_sources_repaired" counts sources with a non-empty
+// "abc_repaired" regardless of whether that source's FINAL state is "abc"
+// or "abc_error" — see sheetsage-repair.h's own note on what "repaired"
+// means when every repair round still ends in failure).
 
 #include "audio-resample.h"       // audio_resample (48 kHz -> 24 kHz)
 #include "hot-step-fsutf8.h"      // hs_fopen / hs_remove — UTF-8 paths, not ANSI
@@ -110,6 +119,7 @@ struct Yue2SheetArgs {
     int         threads = 0; // --threads N, forwarded to SheetSageTranscribeOptions::threads
     bool        force   = false;  // --force, re-transcribe sources that already have abc/abc_error
     bool        fast    = false;  // --fast, load_opt.exact=false (default is exact=true)
+    bool        repair  = true;   // --no-repair sets this false (sheetsage-repair.h's opt-out)
 };
 
 // ── Small helpers ────────────────────────────────────────────────────────────
@@ -193,8 +203,9 @@ struct SourceRow {
 // yue2-align-run.h), falling back to "name" otherwise.
 static bool write_source_result(const std::string & manifest_path, const std::string & latent_key,
                                  const std::string & name_key, bool ok, const std::string & abc_text,
-                                 const std::string & error_text, const std::string & producer_tag, int windows,
-                                 double ms, int64_t * out_ok, int64_t * out_failed) {
+                                 const std::string & error_text, const std::string & repaired_text,
+                                 const std::string & producer_tag, int windows, double ms, int64_t * out_ok,
+                                 int64_t * out_failed, int64_t * out_repaired) {
     yyjson_read_err rerr;
     memset(&rerr, 0, sizeof(rerr));
     yyjson_doc * doc = yyjson_read_file(manifest_path.c_str(), 0, nullptr, &rerr);
@@ -253,6 +264,10 @@ static bool write_source_result(const std::string & manifest_path, const std::st
     } else {
         yyjson_mut_obj_add_strcpy(mdoc, hit, "abc_error", error_text.c_str());
     }
+    yyjson_mut_obj_remove_str(hit, "abc_repaired");
+    if (!repaired_text.empty()) {
+        yyjson_mut_obj_add_strcpy(mdoc, hit, "abc_repaired", repaired_text.c_str());
+    }
     yyjson_mut_obj_remove_str(hit, "abc_producer");
     yyjson_mut_obj_add_strcpy(mdoc, hit, "abc_producer", producer_tag.c_str());
     yyjson_mut_obj_remove_str(hit, "abc_windows");
@@ -263,7 +278,7 @@ static bool write_source_result(const std::string & manifest_path, const std::st
     // Recompute from the manifest's OWN current state, not from an in-memory
     // running tally: a --force re-run of one --only source, or a crash that
     // left an earlier run partial, must not corrupt these two counts.
-    int64_t ok_count = 0, failed_count = 0;
+    int64_t ok_count = 0, failed_count = 0, repaired_count = 0;
     {
         size_t           i = 0, n = 0;
         yyjson_mut_val * it = nullptr;
@@ -273,10 +288,14 @@ static bool write_source_result(const std::string & manifest_path, const std::st
             }
             yyjson_mut_val * av = yyjson_mut_obj_get(it, "abc");
             yyjson_mut_val * ev = yyjson_mut_obj_get(it, "abc_error");
+            yyjson_mut_val * rv = yyjson_mut_obj_get(it, "abc_repaired");
             if (av && yyjson_mut_is_str(av) && yyjson_mut_get_len(av) > 0) {
                 ok_count++;
             } else if (ev && yyjson_mut_is_str(ev) && yyjson_mut_get_len(ev) > 0) {
                 failed_count++;
+            }
+            if (rv && yyjson_mut_is_str(rv) && yyjson_mut_get_len(rv) > 0) {
+                repaired_count++;
             }
         }
     }
@@ -291,6 +310,8 @@ static bool write_source_result(const std::string & manifest_path, const std::st
     yyjson_mut_obj_add_int(mdoc, mroot, "abc_sources_ok", ok_count);
     yyjson_mut_obj_remove_str(mroot, "abc_sources_failed");
     yyjson_mut_obj_add_int(mdoc, mroot, "abc_sources_failed", failed_count);
+    yyjson_mut_obj_remove_str(mroot, "abc_sources_repaired");
+    yyjson_mut_obj_add_int(mdoc, mroot, "abc_sources_repaired", repaired_count);
 
     size_t mlen  = 0;
     char * mjson = yyjson_mut_write(mdoc, YYJSON_WRITE_PRETTY, &mlen);
@@ -307,6 +328,9 @@ static bool write_source_result(const std::string & manifest_path, const std::st
         }
         if (out_failed) {
             *out_failed = failed_count;
+        }
+        if (out_repaired) {
+            *out_repaired = repaired_count;
         }
     }
     return wrote;
@@ -454,6 +478,7 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
     SheetSageTranscribeOptions topt;
     topt.exact   = load_opt.exact;
     topt.threads = a.threads;
+    topt.repair  = a.repair;
 
     // ── decode plumbing (the same two routes yue2-tokenize-run.h uses) ──────
     const std::string out_dir    = dirname_of(a.manifest);
@@ -463,9 +488,9 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
     const std::string ffmpeg     = "ffmpeg";
     const int64_t     MERT_SR    = (int64_t) m.mert.cfg.sample_rate;  // 24000
 
-    size_t n_ok = 0, n_soft_failed = 0, n_infra_failed = 0;
+    size_t n_ok = 0, n_soft_failed = 0, n_infra_failed = 0, n_repaired = 0;
     double total_audio_sec = 0.0, total_wall_ms = 0.0;
-    int64_t last_ok_count = 0, last_failed_count = 0;
+    int64_t last_ok_count = 0, last_failed_count = 0, last_repaired_count = 0;
 
     for (size_t pi = 0; pi < picked.size(); pi++) {
         SourceRow & s  = sources[picked[pi]];
@@ -540,7 +565,8 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
         }
 
         const bool wrote = write_source_result(a.manifest, s.latent_rel, s.name, res.ok, res.abc, res.error,
-                                                producer_tag, res.windows, ms, &last_ok_count, &last_failed_count);
+                                                res.repaired, producer_tag, res.windows, ms, &last_ok_count,
+                                                &last_failed_count, &last_repaired_count);
         if (!wrote) {
             fprintf(stderr, "[yue2-sheet] FATAL cannot write %s after transcribing %s\n", a.manifest.c_str(),
                     s.name.c_str());
@@ -553,12 +579,23 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
 
         total_audio_sec += audio_sec;
         total_wall_ms += ms;
+        if (!res.repaired.empty()) {
+            n_repaired++;
+        }
         if (res.ok) {
             n_ok++;
-            fprintf(stderr,
-                    "[yue2-sheet] %zu/%zu ok    %-46s %7.1f s audio | windows=%d abc=%zuB | %.1f s (%.2fx rt)\n",
-                    pi + 1, picked.size(), s.name.c_str(), audio_sec, res.windows, res.abc.size(), ms / 1000.0,
-                    audio_sec / (ms / 1000.0));
+            if (res.repaired.empty()) {
+                fprintf(stderr,
+                        "[yue2-sheet] %zu/%zu ok    %-46s %7.1f s audio | windows=%d abc=%zuB | %.1f s (%.2fx rt)\n",
+                        pi + 1, picked.size(), s.name.c_str(), audio_sec, res.windows, res.abc.size(), ms / 1000.0,
+                        audio_sec / (ms / 1000.0));
+            } else {
+                fprintf(stderr,
+                        "[yue2-sheet] %zu/%zu ok(repaired) %-38s %7.1f s audio | windows=%d abc=%zuB | %.1f s "
+                        "(%.2fx rt) | repaired: %s\n",
+                        pi + 1, picked.size(), s.name.c_str(), audio_sec, res.windows, res.abc.size(), ms / 1000.0,
+                        audio_sec / (ms / 1000.0), res.repaired.c_str());
+            }
         } else {
             n_soft_failed++;
             fprintf(stderr,
@@ -574,11 +611,15 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
 
     const double wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_run_start).count();
     fprintf(stderr,
-            "\n[yue2-sheet] done: %zu ok, %zu soft-failed (abc_error), %zu infra-failed (decode), of %zu "
-            "selected (%zu already cached); manifest now shows abc_sources_ok=%lld abc_sources_failed=%lld\n"
+            "\n[yue2-sheet] done: %zu ok (%zu repaired), %zu soft-failed (abc_error), %zu infra-failed (decode), "
+            "of %zu selected (%zu already cached); manifest now shows abc_sources_ok=%lld "
+            "abc_sources_failed=%lld abc_sources_repaired=%lld\n"
             "[yue2-sheet] %.2f min of audio in %.1f s wall\n",
-            n_ok, n_soft_failed, n_infra_failed, picked.size(), n_cached, (long long) last_ok_count,
-            (long long) last_failed_count, total_audio_sec / 60.0, wall_s);
+            n_ok, n_repaired, n_soft_failed, n_infra_failed, picked.size(), n_cached, (long long) last_ok_count,
+            (long long) last_failed_count, (long long) last_repaired_count, total_audio_sec / 60.0, wall_s);
+    if (!a.repair) {
+        fprintf(stderr, "[yue2-sheet] --no-repair: notation failures were never retried\n");
+    }
     if (n_infra_failed) {
         fprintf(stderr,
                 "[yue2-sheet] NOTE: %zu source(s) could not be decoded at all and were left untouched in the "

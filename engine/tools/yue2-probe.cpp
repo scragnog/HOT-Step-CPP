@@ -138,14 +138,17 @@ static void usage() {
             "        --model defaults to models/yue2/sheetsage2-f16.gguf; exit 0 iff masked argmax agrees\n"
             "        on 100%% of captured steps in every window)\n"
             "       yue2-probe --sheetsage-transcribe <fixture_dir> [--model <sheetsage2-*.gguf>] [--exact] "
-            "[--threads <n>]\n"
+            "[--threads <n>] [--repair]\n"
             "       (the whole pipeline, end to end: 00_song_mono24.f32 in, sheetsage_transcribe() out; FREE-\n"
             "        RUNNING decode (not teacher-forced) reported per window vs 08_generated_ids.i32 (first\n"
             "        divergence step, informational), stitched-event count vs 20_stitched_events.json, and\n"
             "        finally ABC vs 22_abc.txt or abc_error vs 24_abc_error.txt (the decisive gate); --model\n"
             "        defaults to models/yue2/sheetsage2-f16.gguf; --threads sets the backend's CPU thread\n"
-            "        count for this call (0 = leave as backend_init() configured it); exit 0 iff the final\n"
-            "        ABC/abc_error matches the oracle)\n"
+            "        count for this call (0 = leave as backend_init() configured it); --repair turns on\n"
+            "        sheetsage-repair.h's notation repair pass (off by default here, unlike the pipeline's\n"
+            "        own default, since the decisive gate is byte-identical ABC / matching abc_error against\n"
+            "        an oracle that never repaired anything); exit 0 iff the final ABC/abc_error matches the\n"
+            "        oracle)\n"
             "       yue2-probe --generate --cot off --style <s> --lyrics <s> --max-tokens <n> --seed <n> "
             "--models <dir>\n"
             "       yue2-probe mmsfa-stages <mms-fa.gguf> <fixture-dir> [--gelu erf|tanh|both] [--dump <dir>]\n"
@@ -4174,7 +4177,7 @@ static int run_sheetsage_decoder_parity(const std::string & fixture_dir, const s
 // pass/fail is the final ABC/error match, per doc 19's own G4/G5/G6 rows
 // ("ABC byte-identical" / "matching abc_error").
 static int run_sheetsage_transcribe(const std::string & fixture_dir, const std::string & model_path, bool exact,
-                                     int threads) {
+                                     int threads, bool repair) {
     SheetSageModel            m;
     std::string               err;
     SheetSageModelLoadOptions load_opt;
@@ -4199,6 +4202,12 @@ static int run_sheetsage_transcribe(const std::string & fixture_dir, const std::
     SheetSageTranscribeOptions opt;
     opt.exact   = exact;
     opt.threads = threads;
+    // Default false here (opposite of the pipeline's own default): this
+    // probe's decisive check is byte-identical ABC / matching abc_error
+    // against the ORACLE fixtures (doc 19 G4/G5/G6), which never repaired
+    // anything — pass --repair explicitly to exercise sheetsage-repair.h
+    // against a fixture instead.
+    opt.repair  = repair;
     SheetSageTranscribeResult res;
     const auto t0   = std::chrono::steady_clock::now();
     const bool call_ok = sheetsage_transcribe(m, song.data(), (int64_t) song.size(), opt, &res, &err);
@@ -4288,6 +4297,10 @@ static int run_sheetsage_transcribe(const std::string & fixture_dir, const std::
     }
     const std::string want_abc(abc_raw.begin(), abc_raw.end());
     const std::string want_error(err_raw.begin(), err_raw.end());
+
+    if (!res.repaired.empty()) {
+        printf("repaired: %s\n", res.repaired.c_str());
+    }
 
     bool decisive_pass;
     if (!want_abc.empty()) {
@@ -5043,6 +5056,7 @@ int main(int argc, char ** argv) {
     std::string     sheetsage_model_path;
     bool            sheetsage_encoder_exact = false;  // doc 23: --exact, encoder matmul weights forced F32
     int             sheetsage_threads       = 0;      // --threads, sheetsage-pipeline.h's SheetSageTranscribeOptions
+    bool            sheetsage_transcribe_repair = false;  // --repair, opt-in (see run_sheetsage_transcribe's note)
     bool            do_generate      = false;
     std::string     gen_style;
     std::string     gen_lyrics;
@@ -5107,6 +5121,8 @@ int main(int argc, char ** argv) {
             tok_head_keep_tf32 = true;
         } else if (!strcmp(argv[i], "--exact")) {
             sheetsage_encoder_exact = true;
+        } else if (!strcmp(argv[i], "--repair")) {
+            sheetsage_transcribe_repair = true;
         } else if (!strcmp(argv[i], "--threads") && i + 1 < argc) {
             sheetsage_threads = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--variant") && i + 1 < argc) {
@@ -5362,7 +5378,7 @@ int main(int argc, char ** argv) {
         const std::string model_path =
             sheetsage_model_path.empty() ? "models/yue2/sheetsage2-f16.gguf" : sheetsage_model_path;
         return run_sheetsage_transcribe(sheetsage_transcribe_dir, model_path, sheetsage_encoder_exact,
-                                        sheetsage_threads);
+                                        sheetsage_threads, sheetsage_transcribe_repair);
     }
     if (do_generate) {
         if (models_dir.empty()) {

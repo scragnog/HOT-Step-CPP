@@ -111,6 +111,12 @@ export interface Yue2AbcStatus {
   /** Sources carrying a non-empty `abc_error` — soft failures, trained as
    *  cot=off on every draw, never in the 50/50 pool. */
   sourcesWithError: number;
+  /** Sources carrying a non-empty `abc_repaired` (engine/src/yue2/sheetsage-
+   *  repair.h's own short description of what it dropped) — a subset of
+   *  sourcesWithAbc in the common case, but can also overlap sourcesWithError
+   *  when every repair round still ended in failure (the engine still
+   *  records what it tried). */
+  sourcesWithRepair: number;
 }
 
 /** Read that state. Null when there is no manifest, or when it is mid-write:
@@ -122,6 +128,7 @@ export function readYue2AbcStatus(manifestPath: string): Yue2AbcStatus | null {
     const sources = Array.isArray(j.sources) ? j.sources as Array<Record<string, unknown>> : [];
     const hasAbc = (r: Record<string, unknown>) => typeof r.abc === 'string' && r.abc !== '';
     const hasErr = (r: Record<string, unknown>) => typeof r.abc_error === 'string' && r.abc_error !== '';
+    const hasRepair = (r: Record<string, unknown>) => typeof r.abc_repaired === 'string' && r.abc_repaired !== '';
     return {
       present: j.abc_present === true,
       producer: typeof j.abc_producer === 'string' ? j.abc_producer : '',
@@ -129,6 +136,7 @@ export function readYue2AbcStatus(manifestPath: string): Yue2AbcStatus | null {
       sources: sources.length,
       sourcesWithAbc: sources.filter(hasAbc).length,
       sourcesWithError: sources.filter(hasErr).length,
+      sourcesWithRepair: sources.filter(hasRepair).length,
     };
   } catch {
     return null;
@@ -150,6 +158,9 @@ export interface Yue2SheetSourceStatus {
   /** Non-empty `abc_error` — the soft-failure case; the picker lists these
    *  with the text but disabled, same as an untouched source. */
   error: string;
+  /** Non-empty `abc_repaired` — the picker marks these (an amber note next to
+   *  the name), whether the source ended up `ok` or still `error`. */
+  repaired: string;
 }
 
 /** Every source the manifest names, with the lead-sheet stage's own verdict
@@ -163,6 +174,7 @@ export function listYue2SheetSources(manifestPath: string): Yue2SheetSourceStatu
       name: typeof r.name === 'string' ? r.name : '',
       ok: typeof r.abc === 'string' && r.abc !== '',
       error: typeof r.abc_error === 'string' ? r.abc_error : '',
+      repaired: typeof r.abc_repaired === 'string' ? r.abc_repaired : '',
     }));
   } catch {
     return [];
@@ -177,6 +189,10 @@ export interface Yue2SheetSourceDetail {
   name: string;
   abc: string;
   abc_error: string;
+  /** engine/src/yue2/sheetsage-repair.h's own short description of what it
+   *  dropped en route to `abc`/`abc_error` above; "" when no repair round
+   *  ever fired. */
+  abc_repaired: string;
   /** The window count `sheetsage_transcribe` used for this source, 0 when
    *  untouched. */
   abc_windows: number;
@@ -198,6 +214,7 @@ export function readYue2SheetSource(manifestPath: string, name: string): Yue2She
       name,
       abc: typeof hit.abc === 'string' ? hit.abc : '',
       abc_error: typeof hit.abc_error === 'string' ? hit.abc_error : '',
+      abc_repaired: typeof hit.abc_repaired === 'string' ? hit.abc_repaired : '',
       abc_windows: typeof hit.abc_windows === 'number' ? hit.abc_windows : 0,
       abc_producer: typeof hit.abc_producer === 'string' ? hit.abc_producer : '',
     };

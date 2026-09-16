@@ -52,6 +52,7 @@
 #include "sheetsage-grammar.h"
 #include "sheetsage-model.h"
 #include "sheetsage-notation.h"
+#include "sheetsage-repair.h"
 #include "sheetsage-stitch.h"
 #include "sheetsage-tokens.h"
 
@@ -101,12 +102,27 @@ struct SheetSageTranscribeOptions {
     // (SheetSageTranscribeResult::window_ids/stitched/timings) already cover
     // everything the yue2-probe --sheetsage-transcribe mode needs without it.
     bool want_hidden_states = false;
+
+    // Apply sheetsage-repair.h's deterministic repair pass when the FIRST
+    // notation render fails (doc 23's "Repair" note, task 2026-09-16). On by
+    // default: a repaired sheet is better training conditioning than none.
+    // The first render is always attempted untouched regardless of this flag
+    // -- G4/G6 byte-exactness on the pinned fixtures never goes through the
+    // repair path either way (see sheetsage-repair.h's own header). Set false
+    // (yue2-sheet's `--no-repair`) to get the pre-repair behavior exactly:
+    // one render, and any failure is a plain soft failure.
+    bool repair = true;
 };
 
 struct SheetSageTranscribeResult {
     bool        ok = false;
     std::string abc;
     std::string error;
+
+    // What sheetsage-repair.h changed en route to `abc`/`error` above, or ""
+    // if the first (untouched) render already succeeded or `opt.repair` was
+    // false. See sheetsage-repair.h's own Yue2SheetRepairOutcome::repaired.
+    std::string repaired;
 
     // Diagnostics -- always populated up to the point of the failure, even
     // when ok is false, so a caller (or the probe) can see how far the
@@ -169,6 +185,11 @@ struct NotationInputs {
     std::string             error;
     std::string             melody_midi_bytes;
     std::vector<Yue2SheetAbcRow> beat_rows, chord_rows, key_rows, structure_rows;
+    // Pre-MIDI raw notes, split by voice (the SAME split that produced
+    // melody_midi_bytes above) -- exposed so sheetsage-repair.h's family (d)
+    // can drop one note and rebuild the MIDI bytes on a retry, without this
+    // file duplicating yue2_sheet_notation_notes()'s own vocal/ins split.
+    std::vector<Yue2SheetRawNote> vocal_notes, ins_notes;
 };
 
 inline NotationInputs build_notation_inputs(const std::vector<Yue2SheetEvent> & events, double duration) {
@@ -227,6 +248,8 @@ inline NotationInputs build_notation_inputs(const std::vector<Yue2SheetEvent> & 
     }
     std::vector<uint8_t> midi = yue2_sheet_write_midi(vocal, ins);
     out.melody_midi_bytes.assign(midi.begin(), midi.end());
+    out.vocal_notes = std::move(vocal);
+    out.ins_notes   = std::move(ins);
 
     out.ok = true;
     return out;
@@ -458,12 +481,29 @@ inline bool sheetsage_transcribe(const SheetSageModel & m, const float * mono24,
         return true;
     }
 
-    Yue2SheetAbcResult abc_res = yue2_sheet_notation_generate(ni.melody_midi_bytes, ni.beat_rows, ni.chord_rows,
-                                                              ni.key_rows, ni.structure_rows, /*melody_only=*/false);
+    Yue2SheetAbcResult abc_res;
+    std::string        repaired;
+    if (opt.repair) {
+        Yue2SheetRepairInputs ri;
+        ri.beat_rows      = ni.beat_rows;
+        ri.chord_rows     = ni.chord_rows;
+        ri.key_rows       = ni.key_rows;
+        ri.structure_rows = ni.structure_rows;
+        ri.vocal_notes    = ni.vocal_notes;
+        ri.ins_notes      = ni.ins_notes;
+        Yue2SheetRepairOutcome ro =
+            yue2_sheet_notation_repair_and_generate(std::move(ri), /*melody_only=*/false);
+        abc_res  = ro.result;
+        repaired = ro.repaired;
+    } else {
+        abc_res = yue2_sheet_notation_generate(ni.melody_midi_bytes, ni.beat_rows, ni.chord_rows, ni.key_rows,
+                                                ni.structure_rows, /*melody_only=*/false);
+    }
     out->ms_notation = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tn0).count();
 
-    out->ok    = abc_res.ok;
-    out->abc   = abc_res.abc;
-    out->error = abc_res.error;
+    out->ok       = abc_res.ok;
+    out->abc      = abc_res.abc;
+    out->error    = abc_res.error;
+    out->repaired = repaired;
     return true;
 }

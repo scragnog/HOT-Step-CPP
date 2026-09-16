@@ -437,9 +437,11 @@ static void print_usage(void) {
             "  yue2-sheet     Fill the abc/abc_error slot with a SheetSage2 lead-sheet\n"
             "                transcription of each source's own audio (ABC text: key, meter,\n"
             "                chords, melody). A source can decode fine and still fail to\n"
-            "                RENDER a sheet (an interval too short for the notation grid, no\n"
-            "                key decoded, ...) — that is written as abc_error, not a run\n"
-            "                failure; it trains cot=off only (a later phase).\n"
+            "                RENDER a sheet (an interval too short for the notation grid, a\n"
+            "                non-consecutive beat ID, no key decoded, ...) — a narrow, known\n"
+            "                family of these is repaired and re-rendered automatically (see\n"
+            "                --no-repair); anything else is written as abc_error, not a run\n"
+            "                failure, and trains cot=off only (a later phase).\n"
             "                --manifest <yue2_preprocess.json>  rewritten in place, atomically,\n"
             "                after EVERY source (a transcription can run minutes)\n"
             "                --model <sheetsage2-*.gguf>  (or --models <dir> to discover one)\n"
@@ -449,6 +451,9 @@ static void print_usage(void) {
             "                [--fast]  skip the encoder's exact-precision load (default: exact,\n"
             "                doc 23's fix for the F16-weight matmul narrowing that otherwise\n"
             "                fails G1 on long/dense windows)\n"
+            "                [--no-repair]  disable the notation repair pass (yue2/sheetsage-\n"
+            "                repair.h): a source that fails notation is always abc_error, exactly\n"
+            "                as before that pass existed\n"
             "  yue2-nar-train  YuE2 NAR-half LoRA training (rectified flow; AR stays frozen).\n"
             "                --lm <yue2-lm-<type>.gguf> (or --models <dir>)\n"
             "                --manifest <yue2_preprocess.json>  the clip set to train on\n"
@@ -4797,6 +4802,7 @@ static int cmd_yue2_sheet(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--threads"))  a.threads    = atoi(next("--threads"));
         else if (!strcmp(argv[i], "--force"))    a.force      = true;
         else if (!strcmp(argv[i], "--fast"))     a.fast       = true;
+        else if (!strcmp(argv[i], "--no-repair")) a.repair    = false;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }

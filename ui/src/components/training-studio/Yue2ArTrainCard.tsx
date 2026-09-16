@@ -366,6 +366,13 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
                 {t('trainingStudio.yue2ar.sheetHave',
                   '{{done}} of {{total}} source(s) have a lead sheet, {{failed}} soft-failed (abc_error).',
                   { done: abc.sourcesWithAbc, total: abc.sources, failed: abc.sourcesWithError })}
+                {abc.sourcesWithRepair > 0 && (
+                  <span className="text-amber-500">
+                    {' '}
+                    {t('trainingStudio.yue2ar.sheetRepaired',
+                      '{{count}} repaired.', { count: abc.sourcesWithRepair })}
+                  </span>
+                )}
               </span>
             ) : (
               t('trainingStudio.yue2ar.sheetNone', 'No lead sheets cached yet.')
@@ -574,7 +581,9 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
                 </option>
                 {sources.map(s => (
                   <option key={s.name} value={s.name} disabled={!s.ok}>
-                    {s.ok ? s.name : `${s.name} — ${s.error || t('trainingStudio.yue2ar.sheetTrackNone', 'no lead sheet')}`}
+                    {s.ok
+                      ? `${s.name}${s.repaired ? ` (${t('trainingStudio.yue2ar.sheetRepairedTag', 'repaired')})` : ''}`
+                      : `${s.name} — ${s.error || t('trainingStudio.yue2ar.sheetTrackNone', 'no lead sheet')}`}
                   </option>
                 ))}
               </select>
@@ -600,6 +609,15 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
                 {t('trainingStudio.yue2ar.sheetSoftFail',
                   'This source soft-failed to render a lead sheet: {{error}}',
                   { error: detail.abc_error })}
+                {detail.abc_repaired && (
+                  <div className="mt-1">
+                    {t('trainingStudio.yue2ar.sheetRepairedNote', 'repaired: {{repaired}}',
+                      { repaired: detail.abc_repaired })}
+                    {' '}
+                    {t('trainingStudio.yue2ar.sheetRepairedStillFailed',
+                      '(still failed after repair)')}
+                  </div>
+                )}
               </div>
             ) : detail.abc ? (
               <div className="space-y-2">
@@ -607,6 +625,12 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
                   <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500 [&_.abcjs-highlight]:stroke-amber-500" />
                 </div>
                 {renderNote && <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 break-words">{renderNote}</div>}
+                {detail.abc_repaired && (
+                  <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 break-words">
+                    {t('trainingStudio.yue2ar.sheetRepairedNote', 'repaired: {{repaired}}',
+                      { repaired: detail.abc_repaired })}
+                  </div>
+                )}
                 <div ref={audioControlRef} className="text-xs" />
                 <div className="flex flex-col gap-1">
                   <span className={LABEL}>{t('trainingStudio.yue2ar.sheetOriginal', 'Original audio')}</span>
