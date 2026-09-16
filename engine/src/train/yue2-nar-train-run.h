@@ -103,6 +103,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>  // --dump-cond's JSON write (yue2_nar_dumpcond_main)
 #include <initializer_list>
 #include <map>
 #include <stdexcept>
@@ -182,10 +183,25 @@ struct Yue2NarTrainArgs {
     int64_t     clip_block = 64;
     bool        resume     = false;  // continue from <out>/yue2_nar_ckpt.bin
 
+    // --abc-dropout: doc 19 decision 4 / contract §19. P is the probability a
+    // clip WITH a manifest `abc` (joined from its source, see
+    // yue2_nt_load_manifest) trains "off" instead of "full" this draw (full
+    // w.p. 1-P). Mirrors the AR trainer's own knob (yue2-ar-train-run.h)
+    // exactly, including its defaults and its --no-abc escape hatch.
+    float       abc_dropout = 0.5f;
+    bool        no_abc      = false;  // ignore manifest sheets entirely, as if none were present
+
     // --fd-check N: run the gradient gate over N probes instead of training.
     int    fd_check  = 0;
     double fd_eps    = 1e-2;  // a FLOOR on the step, not the step (contract §10)
     int    nar_layers = 2;    // F32 isolation depth; 0 = no isolation (report only)
+
+    // --dump-cond <name> <off|full> <out.json>: G8. Dumps the NAR
+    // conditioning ids this trainer would build for ONE manifest source under
+    // ONE mode, no training, no GGML graph — see yue2_nar_dumpcond_main.
+    std::string dump_cond_name;
+    std::string dump_cond_mode;
+    std::string dump_cond_out;
 };
 
 // ── F32 isolation of the NAR stack ─────────────────────────────────────────
@@ -1127,6 +1143,16 @@ struct Yue2TrainClip {
     int64_t              source_frames = 0;
     int                  bits = 32;  // 32 = f32 cache (v1), 16 = f16
     std::vector<int32_t> codec_ids;  // RAW ids; empty = the text-only regime
+
+    // --abc-dropout (doc 19 decision 4): joined from this clip's SOURCE row,
+    // not written per-clip anywhere — `ace-train yue2-sheet` writes `abc`/
+    // `abc_error` once per SOURCE (yue2-sheet-run.h), and every clip cut from
+    // that source shares the same sheet. See the join in
+    // yue2_nt_load_manifest below (keyed on the resolved `latents` path,
+    // exactly like preprocess-run.h's own caption/lyrics join at
+    // yue2-preprocess-run.h:826-853).
+    std::string abc_text;      // the source's `abc`, verbatim; empty = no sheet
+    bool        has_abc = false;
 };
 
 struct Yue2TrainSet {
@@ -1137,6 +1163,7 @@ struct Yue2TrainSet {
     bool                       codec_ids_present = false;
     std::string                format;
     std::string                dir;
+    std::string                abc_producer;  // manifest root's `abc_producer`, copied into export metadata
 };
 
 static yyjson_val * yue2_nt_jsv(yyjson_val * o, std::initializer_list<const char *> keys) {
@@ -1260,7 +1287,7 @@ static bool yue2_nt_read_i32_file(const std::string & path, std::vector<int32_t>
     return true;
 }
 
-static bool yue2_nt_load_manifest(const std::string & path, Yue2TrainSet * out, std::string * err) {
+static bool yue2_nt_load_manifest(const std::string & path, bool no_abc, Yue2TrainSet * out, std::string * err) {
     yyjson_read_err rerr;
     yyjson_doc *    doc = yyjson_read_file(path.c_str(), 0, nullptr, &rerr);
     if (!doc) {
@@ -1283,6 +1310,7 @@ static bool yue2_nt_load_manifest(const std::string & path, Yue2TrainSet * out, 
         yyjson_val * cp        = yue2_nt_jsv(root, { "codec_ids_present" });
         out->codec_ids_present = cp && yyjson_is_bool(cp) && yyjson_get_bool(cp);
     }
+    out->abc_producer = yue2_nt_jstr(root, { "abc_producer" });
     if (!out->format.empty() && out->format.compare(0, 16, "yue2-preprocess-") != 0) {
         fprintf(stderr, "[yue2-train] NOTE: %s says format=\"%s\"; this reader expects a yue2-preprocess-v1 "
                         "manifest and is going on field names alone\n",
@@ -1324,6 +1352,41 @@ static bool yue2_nt_load_manifest(const std::string & path, Yue2TrainSet * out, 
     const std::string lat_dir = yue2_nt_join(out->dir, yue2_nt_jstr(root, { "latents_dir", "latentsDir",
                                                                             "cache_dir" }));
 
+    // ── abc join (doc 19 decision 4) ──
+    //
+    // `ace-train yue2-sheet` writes `abc`/`abc_error` into sources[], not
+    // clips[] — one sheet per SOURCE, shared by every clip cut from it. Join
+    // on the resolved `latents` path, the same key preprocess-run.h's own
+    // caption/lyrics join already uses (yue2-preprocess-run.h:820-822,
+    // "by_latent"), so a producer that renames or reorders sources[] between
+    // runs still matches correctly. `--no-abc` (or a manifest with no
+    // sources[] at all — an older or hand-written manifest) leaves the map
+    // empty, which is exactly "no source carries a sheet".
+    std::map<std::string, std::string> abc_by_latents;
+    if (!no_abc) {
+        yyjson_val * sarr = yue2_nt_jsv(root, { "sources", "songs" });
+        if (sarr && yyjson_is_arr(sarr)) {
+            size_t       si = 0, sn = 0;
+            yyjson_val * sit = nullptr;
+            yyjson_arr_foreach(sarr, si, sn, sit) {
+                if (!yyjson_is_obj(sit)) {
+                    continue;
+                }
+                const std::string abc = yue2_nt_jstr(sit, { "abc" });
+                if (abc.empty()) {
+                    continue;  // no sheet, or the source only has `abc_error` — same as "off"
+                }
+                const std::string slat = yue2_nt_jstr(sit, { "latents" });
+                if (slat.empty()) {
+                    continue;
+                }
+                const std::string resolved =
+                    yue2_nt_is_abs(slat) ? slat : yue2_nt_join(lat_dir.empty() ? out->dir : lat_dir, slat);
+                abc_by_latents[resolved] = abc;
+            }
+        }
+    }
+
     yyjson_val * arr = yue2_nt_jsv(root, { "clips", "samples", "items" });
     if (!arr || !yyjson_is_arr(arr)) {
         yyjson_doc_free(doc);
@@ -1353,6 +1416,13 @@ static bool yue2_nt_load_manifest(const std::string & path, Yue2TrainSet * out, 
             break;
         }
         cl.latents = yue2_nt_is_abs(lat) ? lat : yue2_nt_join(lat_dir.empty() ? out->dir : lat_dir, lat);
+        {
+            auto ait = abc_by_latents.find(cl.latents);
+            if (ait != abc_by_latents.end()) {
+                cl.abc_text = ait->second;
+                cl.has_abc  = true;
+            }
+        }
         bool got_frames = false;
         cl.offset = yue2_nt_jint(it, { "offset_frames", "offset", "start", "start_frame", "frame_offset" }, 0);
         cl.frames = yue2_nt_jint(it, { "frames", "n_frames", "num_frames", "length", "clip_frames" }, 0,
@@ -1630,6 +1700,7 @@ enum {
     YUE2_NT_TAG_T       = 3,
     YUE2_NT_TAG_NOISE   = 4,
     YUE2_NT_TAG_BLOCK   = 5,
+    YUE2_NT_TAG_ABCD    = 6,  // --abc-dropout: cot=full (sheet spliced in), or cot=off
 };
 
 // ── Which clip a micro-step trains on ──────────────────────────────────────
@@ -1759,9 +1830,9 @@ static double yue2_nt_lr_at(const Yue2NarTrainArgs & a, int64_t step0) {
 //   * What the FINGERPRINT catches, because it is everything else the CLI can
 //     change: rank, param count, layer count, target, grad-accum, frames,
 //     alpha, seed — and `cond_hash`, which folds in --trigger, --lyrics,
-//     --t-sampling and --caption-dropout. Those four looked like "just
-//     conditioning" and are not: the first two ARE the prefix the model is
-//     trained to answer to (and --trigger is written into the exported
+//     --t-sampling, --caption-dropout, --abc-dropout and --no-abc. Those
+//     looked like "just conditioning" and are not: the first two ARE the
+//     prefix the model is trained to answer to (and --trigger is written into the exported
 //     metadata, so half a run under one trigger would export as if it were all
 //     the other), and the last two re-parameterise draws off the same seeded
 //     stream, which moves the data a resume sees while leaving the loss curve
@@ -1830,6 +1901,12 @@ static uint64_t yue2_nt_cond_hash(const Yue2NarTrainArgs & a) {
     // --kv-cache was a pure VRAM knob before this and is not one any more.
     mix_bytes(&a.clip_block, sizeof(a.clip_block));
     mix_bytes(&a.kv_cache, sizeof(a.kv_cache));
+    // --abc-dropout/--no-abc (doc 19 decision 4): the SAME class of knob as
+    // --caption-dropout above — it re-parameterises which draw (full vs off)
+    // a micro-step gets off the same seeded stream, so a resume across a
+    // change would silently continue on a different conditioning.
+    mix_bytes(&a.abc_dropout, sizeof(a.abc_dropout));
+    mix_bytes(&a.no_abc, sizeof(a.no_abc));
     // NOT --style. It reaches the FD gate only (yue2_nar_fdcheck_main builds
     // its prefix from it); the loop builds style from --trigger + the clip's
     // own caption and never reads a.style. Fingerprinting it would refuse a
@@ -2124,7 +2201,8 @@ static bool yue2_nt_ckpt_load(const std::string & path, const Yue2NtCkptState & 
 // reader accepts both spellings, so a quoted number is correct here.
 static bool yue2_nt_export(const Yue2TrainAdapters & ad, const Yue2NarTrainArgs & a, Yue2NtTarget target,
                            int64_t steps_done, int64_t clip_frames, const std::string & base_id,
-                           const std::string & path, std::string * err) {
+                           const std::string & path, std::string * err, bool abc_possible = false,
+                           int64_t abc_sources = 0, const std::string & abc_producer = "") {
     struct Ent {
         std::string         name;
         const ggml_tensor * t;
@@ -2194,7 +2272,20 @@ static bool yue2_nt_export(const Yue2TrainAdapters & ad, const Yue2NarTrainArgs 
     // loader only prints it (yue2-adapter.h:504-508), so a breadcrumb is
     // exactly what it is for — and an invented hash would be worse than none.
     md.emplace_back("base_sha", base_id);
-    md.emplace_back("cot", "off");
+    // doc 19 decision 4 / contract §19, exactly the AR trainer's own
+    // convention (yue2-ar-train-run.h): "off,full" iff this run could ever
+    // draw "full" (a clip carried a sheet and --abc-dropout < 1), else the
+    // pre-existing "off" alone.
+    md.emplace_back("cot", abc_possible ? "off,full" : "off");
+    if (abc_possible) {
+        snprintf(buf, sizeof(buf), "%.3f", (double) a.abc_dropout);
+        md.emplace_back("abc_dropout", buf);
+        snprintf(buf, sizeof(buf), "%lld", (long long) abc_sources);
+        md.emplace_back("abc_sources", buf);
+        if (!abc_producer.empty()) {
+            md.emplace_back("abc_producer", abc_producer);
+        }
+    }
 
     if (!st_write_file(path.c_str(), tens, md, STW_F32)) {
         *err = "safetensors write failed for " + path;
@@ -2242,7 +2333,7 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
 
     // ── dataset ──
     Yue2TrainSet ds;
-    if (!yue2_nt_load_manifest(a.manifest, &ds, &err)) {
+    if (!yue2_nt_load_manifest(a.manifest, a.no_abc, &ds, &err)) {
         fprintf(stderr, "[yue2-train] %s\n", err.c_str());
         return 1;
     }
@@ -2293,7 +2384,7 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
     // Clips shorter than the training window are dropped, not padded: a padded
     // tail is a stretch of silence the model would be taught to render.
     std::vector<const Yue2TrainClip *> clips;
-    int64_t                            n_short = 0, n_codec = 0;
+    int64_t                            n_short = 0, n_codec = 0, n_abc = 0;
     for (const Yue2TrainClip & cl : ds.clips) {
         if (cl.frames < T) {
             n_short++;
@@ -2301,6 +2392,9 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
         }
         if (!cl.codec_ids.empty()) {
             n_codec++;
+        }
+        if (cl.has_abc) {
+            n_abc++;
         }
         clips.push_back(&cl);
     }
@@ -2322,6 +2416,21 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
         // text-only rather than guess (yue2-preprocess-run.h:126-127).
         fprintf(stderr, "[yue2-train] NOTE: the manifest sets codec_ids_present but no clip carries ids — "
                         "training in the text-only regime\n");
+    }
+    // --abc-dropout (doc 19 decision 4): summary of what the draw below can
+    // ever pick "full" for. abc_possible gates the export metadata's `cot`
+    // field the same way AR's does.
+    const bool abc_possible = n_abc > 0 && a.abc_dropout < 1.0f;
+    if (n_abc > 0) {
+        fprintf(stderr,
+                "[yue2-train] abc: %lld of %zu clip(s) carry a lead sheet (--abc-dropout %.2f, so ~%.0f%% of "
+                "those draws train \"full\")\n",
+                (long long) n_abc, clips.size(), (double) a.abc_dropout, 100.0 * (1.0 - (double) a.abc_dropout));
+    } else if (a.no_abc) {
+        fprintf(stderr, "[yue2-train] abc: --no-abc — every draw trains \"off\"\n");
+    } else {
+        fprintf(stderr, "[yue2-train] abc: no clip's source carries a lead sheet — every draw trains \"off\" "
+                        "(run `ace-train yue2-sheet` over this manifest first for --abc-dropout to do anything)\n");
     }
 
     // ── tokenizer ──
@@ -2411,11 +2520,14 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
     kvc.cap = (size_t) std::max<int64_t>(1, a.kv_cache);
 
     // ONE key for both caches, and it is the WHOLE conditioning — style,
-    // lyrics and the raw codec ids. Keying the canvas on anything smaller (the
-    // clip id, say) would hand two clips that share an id but not their codec
-    // ids each other's AR prefix, which renders and trains and is wrong.
+    // lyrics, the raw codec ids, and now the --abc-dropout draw (doc 19
+    // decision 4): a `full` and an `off` draw of the SAME clip need separate
+    // canvases, since their prefixes differ by the whole sheet span. Keying
+    // the canvas on anything smaller (the clip id, say) would hand two draws
+    // that share an id but not their prefix each other's AR prefix, which
+    // renders and trains and is wrong.
     auto cond_key = [](const std::string & style, const std::string & lyrics,
-                       const std::vector<int32_t> & codec) {
+                       const std::vector<int32_t> & codec, bool use_full, const std::string & abc_text) {
         std::string key = style;
         key += '\x01';
         key += lyrics;
@@ -2423,11 +2535,18 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
             key += '\x02';
             key.append((const char *) codec.data(), codec.size() * sizeof(int32_t));
         }
+        key += '\x03';
+        key += (use_full ? '1' : '0');
+        if (use_full) {
+            key += '\x04';
+            key += abc_text;
+        }
         return key;
     };
 
     auto cond_ids_for = [&](const std::string & key, const std::string & style, const std::string & lyrics,
-                            const std::vector<int32_t> & codec) -> const std::vector<int32_t> * {
+                            const std::vector<int32_t> & codec, bool use_full,
+                            const std::string & abc_text) -> const std::vector<int32_t> * {
         auto it = cond_ids_cache.find(key);
         if (it != cond_ids_cache.end()) {
             return &it->second;
@@ -2437,9 +2556,18 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
             // The protocol lives in yue2-tokenizer.h and is NOT reimplemented
             // here; yue2_nar_train_cond_ids then appends the codec ids (with
             // the +YUE2_CODEC_OFFSET that happens there and only there) and
-            // MUSIC_END, which is yue2-pipeline.h:447-452.
-            const std::vector<int> pre = yue2_token_prefixes(&tok, style, lyrics, YUE2_COT_OFF, nullptr);
-            cond.prefix_ids.assign(pre.begin(), pre.end());
+            // MUSIC_END, which is yue2-pipeline.h:447-452. `full` splices this
+            // clip's own sheet in exactly as yue2-pipeline.h:270 does at
+            // inference (cot=full + abc_ids); `off` is the pre-existing shape,
+            // byte for byte.
+            if (use_full) {
+                const std::vector<int> abc = yue2_bpe_encode(&tok, abc_text);
+                const std::vector<int> pre = yue2_token_prefixes(&tok, style, lyrics, YUE2_COT_FULL, &abc);
+                cond.prefix_ids.assign(pre.begin(), pre.end());
+            } else {
+                const std::vector<int> pre = yue2_token_prefixes(&tok, style, lyrics, YUE2_COT_OFF, nullptr);
+                cond.prefix_ids.assign(pre.begin(), pre.end());
+            }
         } catch (const std::exception & e) {
             fprintf(stderr, "[yue2-train] prefix assembly failed: %s\n", e.what());
             return nullptr;
@@ -2506,7 +2634,8 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
 
         double      step_loss = 0.0;
         double      last_t    = 0.0;
-        const char * last_id  = "";
+        const char * last_id   = "";
+        const char * last_mode = "off";
         for (int64_t g = 0; g < a.grad_accum; g++) {
             const uint64_t k = (uint64_t) ((step - 1) * a.grad_accum + g);
 
@@ -2538,8 +2667,24 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
                                                : yue2_style_string(a.trigger, cl.caption, cl.genre, cl.bpm, cl.key,
                                                                    a.style_template != "bare");
             const std::string lyrics = dropped ? std::string() : (cl.lyrics.empty() ? a.lyrics : cl.lyrics);
-            const std::string            key    = cond_key(style, lyrics, cl.codec_ids);
-            const std::vector<int32_t> * ar_ids = cond_ids_for(key, style, lyrics, cl.codec_ids);
+
+            // --abc-dropout (doc 19 decision 4): independent draw, on top of
+            // the caption-dropout one above. `full` with probability
+            // (1 - abc_dropout), only for a clip whose source carries a
+            // sheet; minted/sheet-less clips (cl.has_abc == false) and a
+            // caption-dropped draw never enter it — an empty style with a
+            // sheet spliced in is not a shape upstream trains, and doc 19's
+            // own minted-row rule ("always off") falls out of has_abc alone.
+            bool use_full = false;
+            if (cl.has_abc && !dropped && a.abc_dropout < 1.0f) {
+                Yue2NtRng rabc(yue2_nt_seed_mix(a.seed, k, YUE2_NT_TAG_ABCD));
+                use_full = rabc.u01() >= (double) a.abc_dropout;
+            }
+            last_mode = use_full ? "full" : "off";
+
+            const std::string            key    = cond_key(style, lyrics, cl.codec_ids, use_full, cl.abc_text);
+            const std::vector<int32_t> * ar_ids =
+                cond_ids_for(key, style, lyrics, cl.codec_ids, use_full, cl.abc_text);
             if (!ar_ids) {
                 return 1;  // cond_ids_for already said why
             }
@@ -2612,11 +2757,11 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
             const DitGpuMem gm    = dit_gpu_mem_query(m.backend);
             fprintf(stderr,
                     "[yue2-train] step %5lld/%lld  loss %.5f (win %.5f, run %.5f)  |g| %.4f  lr %.2e  "
-                    "t %.3f  %.2fs/it  vram %zu/%zu MB (%s)  [%s]\n",
+                    "t %.3f  %.2fs/it  vram %zu/%zu MB (%s)  [%s %s]\n",
                     (long long) step, (long long) a.steps, mean, window_sum / (double) window_n,
                     n_micro ? loss_sum / (double) n_micro : 0.0, (double) st.grad_norm, (double) st.lr,
                     last_t, elapsed / (double) std::max<int64_t>(1, step - step0), gm.used_mb(),
-                    gm.total_mb(), gm.source(), last_id);
+                    gm.total_mb(), gm.source(), last_mode, last_id);
             window_sum = 0.0;
             window_n   = 0;
         }
@@ -2636,7 +2781,8 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
             // truncate into a path that collides with the previous snapshot.
             const std::string snap =
                 a.out_dir + "/" + a.name + "_step" + std::to_string((long long) step) + ".safetensors";
-            if (!yue2_nt_export(C.ad, a, target, step, T, m.lm_file.path, snap, &err)) {
+            if (!yue2_nt_export(C.ad, a, target, step, T, m.lm_file.path, snap, &err, abc_possible, n_abc,
+                                ds.abc_producer)) {
                 fprintf(stderr, "[yue2-train] snapshot export: %s\n", err.c_str());
                 return 1;
             }
@@ -2647,7 +2793,8 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
 
     // ── export ──
     const std::string out = a.out_dir + "/" + a.name + ".safetensors";
-    if (!yue2_nt_export(C.ad, a, target, a.steps, T, m.lm_file.path, out, &err)) {
+    if (!yue2_nt_export(C.ad, a, target, a.steps, T, m.lm_file.path, out, &err, abc_possible, n_abc,
+                        ds.abc_producer)) {
         fprintf(stderr, "[yue2-train] export: %s\n", err.c_str());
         return 1;
     }
@@ -2669,11 +2816,170 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
     return 0;
 }
 
+// ── --dump-cond: G8 ──────────────────────────────────────────────────────────
+//
+// Writes THIS trainer's own NAR conditioning ids for ONE manifest source
+// under ONE mode ("off" or "full"), as JSON, and exits — no clip slicing, no
+// K/V prefill, no GGML graph at all. This is the same pure host computation
+// the training loop's `cond_ids_for` runs (yue2_token_prefixes +
+// yue2_nar_train_cond_ids), which is exactly what has to agree with a Python
+// reference built from ai-toolkit's NAR conditioning protocol
+// (_experiments/yue2-sheetsage/g7_reference.py's NAR extension, or a sibling
+// g8_reference.py) — see yue2_ar_dumpseq_main (yue2-ar-train-run.h) for the
+// AR trainer's own G7 twin of this gate.
+//
+// Reads `sources[]` DIRECTLY rather than going through
+// yue2_nt_load_manifest: that reader requires a `clips[]` array (the NAR
+// training loop's own per-window slices), which the G7/G8 manifest
+// (_experiments/yue2-sheetsage/g7/yue2_preprocess.json, built for the AR
+// gate) does not carry — it has sources[] only, exactly like the AR reader's
+// own manifest shape. The conditioning-ids FUNCTION is identical either way
+// (Yue2NarTrainCond doesn't know or care where its codec_ids came from), so
+// reading sources[] here validates it against real (non-synthetic) data
+// without inventing a clips[] array this gate does not need.
+static int yue2_nar_dumpcond_main(const Yue2NarTrainArgs & a) {
+    std::string err;
+    if (a.manifest.empty()) {
+        fprintf(stderr, "ace-train yue2-nar-train --dump-cond: --manifest <yue2_preprocess.json> is "
+                        "required\n");
+        return 2;
+    }
+    const bool want_full = a.dump_cond_mode == "full";
+    if (!want_full && a.dump_cond_mode != "off") {
+        fprintf(stderr, "ace-train yue2-nar-train --dump-cond: mode must be \"off\" or \"full\", got \"%s\"\n",
+                a.dump_cond_mode.c_str());
+        return 2;
+    }
+
+    yyjson_read_err rerr;
+    yyjson_doc *    doc = yyjson_read_file(a.manifest.c_str(), 0, nullptr, &rerr);
+    if (!doc) {
+        fprintf(stderr, "[yue2-nar-dumpcond] cannot parse %s: %s\n", a.manifest.c_str(),
+                rerr.msg ? rerr.msg : "unknown error");
+        return 1;
+    }
+    yyjson_val * root = yyjson_doc_get_root(doc);
+    yyjson_val * sarr = root ? yue2_nt_jsv(root, { "sources", "songs" }) : nullptr;
+    if (!sarr || !yyjson_is_arr(sarr)) {
+        fprintf(stderr, "[yue2-nar-dumpcond] %s: no sources[] array\n", a.manifest.c_str());
+        yyjson_doc_free(doc);
+        return 1;
+    }
+    yyjson_val * found = nullptr;
+    {
+        size_t       si = 0, sn = 0;
+        yyjson_val * it = nullptr;
+        yyjson_arr_foreach(sarr, si, sn, it) {
+            if (!yyjson_is_obj(it)) {
+                continue;
+            }
+            if (yue2_nt_jstr(it, { "name", "id" }) == a.dump_cond_name) {
+                found = it;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        fprintf(stderr, "[yue2-nar-dumpcond] no source named \"%s\" in %s\n", a.dump_cond_name.c_str(),
+                a.manifest.c_str());
+        yyjson_doc_free(doc);
+        return 1;
+    }
+
+    const std::string caption  = yue2_nt_jstr(found, { "caption", "style", "text", "prompt" });
+    const std::string lyrics   = yue2_nt_jstr(found, { "lyrics" });
+    const std::string genre    = yue2_nt_jstr(found, { "genre" });
+    const std::string bpm      = yue2_nt_jstr(found, { "bpm" });
+    const std::string key_sig  = yue2_nt_jstr(found, { "key" });
+    const std::string abc_text = yue2_nt_jstr(found, { "abc" });
+    if (want_full && abc_text.empty()) {
+        fprintf(stderr, "[yue2-nar-dumpcond] \"%s\" carries no manifest `abc` — cannot dump mode=full\n",
+                a.dump_cond_name.c_str());
+        yyjson_doc_free(doc);
+        return 1;
+    }
+    std::vector<int32_t> codec_ids;
+    {
+        yyjson_val * ci = yue2_nt_jsv(found, { "codec_ids", "codecIds", "codec" });
+        if (ci && yyjson_is_str(ci)) {
+            const std::string cp = yue2_nt_join(yue2_nt_dirname(a.manifest), yyjson_get_str(ci));
+            if (!yue2_nt_read_i32_file(cp, &codec_ids, &err)) {
+                fprintf(stderr, "[yue2-nar-dumpcond] %s\n", err.c_str());
+                yyjson_doc_free(doc);
+                return 1;
+            }
+        } else if (ci && yyjson_is_arr(ci)) {
+            size_t       ci_i = 0, ci_n = 0;
+            yyjson_val * cv = nullptr;
+            yyjson_arr_foreach(ci, ci_i, ci_n, cv) {
+                codec_ids.push_back((int32_t) yyjson_get_sint(cv));
+            }
+        }
+    }
+    yyjson_doc_free(doc);
+
+    static Yue2Model m;
+    if (!yue2_nt_open_model(&m, a, "yue2-nar-dumpcond", &err)) {
+        fprintf(stderr, "[yue2-nar-dumpcond] %s\n", err.c_str());
+        return 1;
+    }
+    BPETokenizer tok;
+    if (!yue2_tokenizer_load_from_gguf(&tok, m.lm_file.path)) {
+        fprintf(stderr, "[yue2-nar-dumpcond] tokenizer: cannot read tokenizer.ggml.* from %s\n",
+                m.lm_file.path.c_str());
+        return 1;
+    }
+
+    // Same style-string helper the training loop and the AR gate both use;
+    // --trigger "" --style-template bare (g7-run.bat's own convention) makes
+    // this the source's caption verbatim, for a clean Python comparison.
+    const std::string style = yue2_style_string(a.trigger, caption, genre, bpm, key_sig,
+                                                a.style_template != "bare");
+
+    Yue2NarTrainCond cond;
+    try {
+        if (want_full) {
+            const std::vector<int> abc = yue2_bpe_encode(&tok, abc_text);
+            const std::vector<int> pre = yue2_token_prefixes(&tok, style, lyrics, YUE2_COT_FULL, &abc);
+            cond.prefix_ids.assign(pre.begin(), pre.end());
+        } else {
+            const std::vector<int> pre = yue2_token_prefixes(&tok, style, lyrics, YUE2_COT_OFF, nullptr);
+            cond.prefix_ids.assign(pre.begin(), pre.end());
+        }
+    } catch (const std::exception & e) {
+        fprintf(stderr, "[yue2-nar-dumpcond] prefix assembly failed: %s\n", e.what());
+        return 1;
+    }
+    cond.codec_ids = codec_ids;
+    const std::vector<int32_t> ids = yue2_nar_train_cond_ids(cond);
+
+    std::ofstream out(a.dump_cond_out, std::ios::binary);
+    if (!out) {
+        fprintf(stderr, "[yue2-nar-dumpcond] cannot write %s\n", a.dump_cond_out.c_str());
+        return 1;
+    }
+    out << "{\n  \"name\": \"" << a.dump_cond_name << "\",\n  \"mode\": \"" << a.dump_cond_mode
+        << "\",\n  \"ids\": [";
+    for (size_t i = 0; i < ids.size(); i++) {
+        if (i) {
+            out << ",";
+        }
+        out << ids[i];
+    }
+    out << "]\n}\n";
+    fprintf(stderr, "[yue2-nar-dumpcond] \"%s\" mode=%s: %zu ids -> %s\n", a.dump_cond_name.c_str(),
+            a.dump_cond_mode.c_str(), ids.size(), a.dump_cond_out.c_str());
+    return 0;
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────
 
 static int yue2_nar_train_run(const Yue2NarTrainArgs & a) {
     if (a.fd_check > 0) {
         return yue2_nar_fdcheck_main(a);
+    }
+    if (!a.dump_cond_out.empty()) {
+        return yue2_nar_dumpcond_main(a);
     }
     return yue2_nar_train_loop(a);
 }

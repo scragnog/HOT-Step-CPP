@@ -528,6 +528,18 @@ static void print_usage(void) {
             "                --lyrics only as the fallback for a clip that states none).\n"
             "                [--vae-dir <dir>] accepted and IGNORED: latents reach the trainer\n"
             "                through the preprocess manifest, never by encoding audio here.\n"
+            "                [--abc-dropout 0.5] [--no-abc]: doc 19 decision 4, matching the AR\n"
+            "                trainer's own knob. When a clip's SOURCE carries a manifest `abc`\n"
+            "                (a SheetSage2 lead sheet, written by `yue2-sheet`), the conditioning\n"
+            "                prefix is built cot=full w.p. (1 - abc_dropout) instead of cot=off,\n"
+            "                sheet spliced in exactly as inference does (prefix + abc + codec\n"
+            "                window + MUSIC_END). --no-abc ignores every sheet and trains exactly\n"
+            "                as before this existed. Clips whose source has no `abc` always train\n"
+            "                off. Included in the resume fingerprint, like --caption-dropout.\n"
+            "                --dump-cond <name> <off|full> <out.json>: writes one manifest\n"
+            "                source's NAR conditioning ids as JSON and exits -- no training, no\n"
+            "                GGML graph. G8's gate against a Python reference of ai-toolkit's\n"
+            "                own NAR conditioning protocol.\n"
             "                YUE2_FD_LOSSGRAD=2 is the negative control: every probe must then\n"
             "                report rel ~= 0.5 and the gate must FAIL.\n"
             "                Weights are CC BY-NC 4.0; trained adapters inherit NC.\n"
@@ -4546,6 +4558,13 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--fd-check"))    a.fd_check   = atoi(next("--fd-check"));
         else if (!strcmp(argv[i], "--fd-eps"))      a.fd_eps     = atof(next("--fd-eps"));
         else if (!strcmp(argv[i], "--nar-layers"))  a.nar_layers = atoi(next("--nar-layers"));
+        else if (!strcmp(argv[i], "--abc-dropout")) a.abc_dropout = (float) atof(next("--abc-dropout"));
+        else if (!strcmp(argv[i], "--no-abc"))      a.no_abc     = true;
+        else if (!strcmp(argv[i], "--dump-cond")) {
+            a.dump_cond_name = next("--dump-cond");
+            a.dump_cond_mode = next("--dump-cond");
+            a.dump_cond_out  = next("--dump-cond");
+        }
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }

@@ -185,8 +185,8 @@
 
 // ── Conditioning seam (contract §9) ────────────────────────────────────────
 //
-// Training conditions on the cot="off" text prefix through MUSIC_START, then
-// optionally this clip's own codec ids, then MUSIC_END — the exact shape
+// Training conditions on a text prefix through MUSIC_START, then optionally
+// this clip's own codec ids, then MUSIC_END — the exact shape
 // yue2-pipeline.h:447-452 builds for inference. Upstream's text-only regime
 // (train.py:99, "AR conditioning tokens incl. MUSIC_END (no codec tokens)")
 // is just `codec_ids` empty; when the community audio -> semantic-token
@@ -194,10 +194,17 @@
 // inference does, with NO graph change (ar_len is read off the assembled
 // vector and the canvas is sized to it).
 //
+// `prefix_ids` is `yue2_token_prefixes(tok, style, lyrics, cot, abc_ids)` —
+// cot=off for the base regime, or cot=full with this clip's own lead-sheet
+// abc ids spliced in when doc 19 decision 4's --abc-dropout draw picks
+// "full" for this example (yue2-nar-train-run.h's `cond_ids_for`). Either
+// way the shape this struct wraps is identical: a prefix vector plus a codec
+// tail, so nothing below this line needs to know which cot built the prefix.
+//
 // Codec ids stay RAW (pre-offset) everywhere they are stored; `+
 // YUE2_CODEC_OFFSET` happens here and only here, as in the pipeline.
 struct Yue2NarTrainCond {
-    std::vector<int32_t> prefix_ids;  // yue2_token_prefixes(tok, style, lyrics, YUE2_COT_OFF)
+    std::vector<int32_t> prefix_ids;  // yue2_token_prefixes(tok, style, lyrics, cot, abc_ids)
     std::vector<int32_t> codec_ids;   // RAW ids for THIS clip; EMPTY = text-only regime
 };
 
