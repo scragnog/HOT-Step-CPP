@@ -18,7 +18,8 @@ import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { captionForBackend, MM3_BACKEND_ID } from '../../utils/captionForBackend';
 import { ensureMm3SourceTracks } from '../../utils/mm3CaptionSource';
 import {
-  activeYue2AdapterPath, applyYue2PresetAdapters, ensureYue2SourceTracks, YUE2_BACKEND_ID,
+  activeYue2AdapterPath, applyYue2PresetAdapters, ensureYue2SourceTracks,
+  readYue2CaptionSelection, writeYue2CaptionSelection, YUE2_BACKEND_ID,
 } from '../../utils/yue2CaptionSource';
 import {
   MM3_CAPTION_SOURCES_KEY, clearMm3CaptionSources,
@@ -57,14 +58,37 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     const backendId = useBackendStore.getState().activeBackendId;
     const lyricsSetId = profile?.lyrics_set_id;
     if (backendId === MM3_BACKEND_ID) await ensureMm3SourceTracks(lyricsSetId);
-    // YuE2's equivalent, and it has to happen HERE rather than in the picker:
-    // resolveYue2CaptionForGeneration reads the track list out of the cache the
+    // YuE2's equivalent, in the order the queue runner uses for the same reason
+    // (audioGenQueueStore._executeItem).
+    //
+    // The album's two adapter halves go first. The adapter is merged into the
+    // resident LM, so it is engine state rather than a request param and has to
+    // be POSTed like the picker does — and the caption source is keyed by
+    // ADAPTER PATH and defaults to Automatic, so resolving a caption before the
+    // album's adapter is in force would hand this song one of the PREVIOUS
+    // album's captions. Awaited for that reason, where this used to be
+    // fire-and-forget; it never throws, and a preset that cannot be applied
+    // simply leaves whatever is in force showing in the picker.
+    //
+    // Then the caption list, which has to be filled HERE rather than in the
+    // picker: resolveYue2CaptionForGeneration reads it out of the cache the
     // Create picker fills, so a song generated from Lyric Studio without that
     // panel ever being opened resolved to the written caption and the album's own
     // captions never reached the model.
     if (backendId === YUE2_BACKEND_ID) {
+      await applyYue2PresetAdapters(preset as Parameters<typeof applyYue2PresetAdapters>[0]);
       const yue2Adapter = activeYue2AdapterPath();
-      if (yue2Adapter) await ensureYue2SourceTracks(yue2Adapter);
+      if (yue2Adapter) {
+        await ensureYue2SourceTracks(yue2Adapter);
+        // Automatic writes a dataset caption into the box over there, so tell
+        // the panel what Custom should hand back: THIS song's own caption, not
+        // the dataset track's. Only when nothing is stashed — an existing stash
+        // is the user's own words and outranks ours.
+        const sel = readYue2CaptionSelection(yue2Adapter);
+        if (sel.mode !== 'custom' && sel.customCaption === undefined) {
+          writeYue2CaptionSelection(yue2Adapter, { ...sel, customCaption: gen.caption || '' });
+        }
+      }
     }
     write('hs-caption', captionForBackend(gen, backendId, lyricsSetId));
     write('hs-lyrics', gen.lyrics || '');
@@ -144,15 +168,6 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     // dropdown left them, mirroring the DiT adapter semantics.
     if (backendId === MM3_BACKEND_ID) {
       gps.setBackendParam('mm3LmAdapter', preset?.mm3_adapter_path || '');
-    }
-
-    // YuE2's two halves, same intent as the MM3 line above and a different
-    // mechanism: the adapter is merged into the resident LM, so it is engine
-    // state rather than a request param and has to be POSTed like the picker
-    // does. Fire-and-forget — a preset that cannot be applied must not block a
-    // hand-off, and the picker still shows what is actually in force.
-    if (backendId === YUE2_BACKEND_ID) {
-      void applyYue2PresetAdapters(preset as Parameters<typeof applyYue2PresetAdapters>[0]);
     }
 
     // Mastering reference from album preset (does NOT force-enable — respects global toggle).

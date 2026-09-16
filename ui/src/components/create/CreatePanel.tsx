@@ -4,7 +4,7 @@
 // have been moved to the GlobalParamBar. This panel now only handles
 // per-song content and metadata.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Zap, ListPlus, Sparkles, Radio } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
@@ -134,8 +134,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // The same choice as MM3's above, keyed by the selected AR adapter instead of
   // by a song: the adapter is merged into the resident LM, so it is in force for
   // every render until it is switched, and its training captions are the ones
-  // that are in distribution for it. Default is Custom — unlike the MM3 control,
-  // this one can appear over a caption the user typed.
+  // that are in distribution for it. Default is Automatic, as on MM3 — but
+  // unlike the MM3 control this one can appear over a caption the user typed, so
+  // the effect below stashes the box before the default takes it.
   const yue2Mode = useBackendStore(s => s.activeBackendId) === YUE2_BACKEND_ID;
   const yue2Adapter = useBackendStore(
     s => yue2CaptionAdapterPath(s.models[YUE2_BACKEND_ID]?.defaults as Record<string, unknown> | undefined));
@@ -143,6 +144,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   const fetchBackendModels = useBackendStore(s => s.fetchModels);
   const [yue2Tracks, setYue2Tracks] = useState<Yue2SourceTrack[]>([]);
   const [yue2Selection, setYue2Selection] = useState<Yue2CaptionSelection>({ mode: 'custom' });
+  // The caption as it stands right now, for the effect below — which must not
+  // re-run on every keystroke, and so cannot have it as a dependency. Synced in
+  // its own effect rather than during render, and declared FIRST so it is
+  // already current by the time the effect below reads it.
+  const captionRef = useRef(caption);
+  useEffect(() => { captionRef.current = caption; });
 
   // The Adapters cluster is what normally loads the catalogue, and it only
   // mounts while that dropdown is open — so ask for it here rather than have
@@ -157,7 +164,17 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       setYue2Selection({ mode: 'custom' });
       return;
     }
-    setYue2Selection(readYue2CaptionSelection(yue2Adapter));
+    // Automatic is the default, so selecting a captioned adapter can take over
+    // a caption box the user has already typed into. Stash what is in it the
+    // first time that happens, so Custom hands their own words back instead of
+    // the dataset track's. Only when nothing is stashed yet: a later visit must
+    // not overwrite the stash with the dataset caption now sitting in the box.
+    const sel = readYue2CaptionSelection(yue2Adapter);
+    if (sel.mode !== 'custom' && sel.customCaption === undefined) {
+      sel.customCaption = captionRef.current;
+      writeYue2CaptionSelection(yue2Adapter, sel);
+    }
+    setYue2Selection(sel);
     let live = true;
     void ensureYue2SourceTracks(yue2Adapter).then(tracks => { if (live) setYue2Tracks(tracks); });
     return () => { live = false; };

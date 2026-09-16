@@ -8,22 +8,23 @@
  * one steers the render towards that track's character rather than the album's
  * average. So the same three-way control applies:
  *
- *   auto    the dataset track whose tempo is nearest this song's. Ties go to
- *           the first in dataset order.
+ *   auto    (default) the dataset track whose tempo is nearest this song's.
+ *           Ties go to the first in dataset order.
  *   track   a specific dataset track the user picked, by name.
- *   custom  (default) the caption the user typed, exactly as before this existed.
+ *   custom  the caption the user typed, exactly as before this existed.
  *
- * Two things differ from MM3 on purpose:
+ * One thing differs from MM3 on purpose: the choice is keyed by ADAPTER PATH,
+ * not by lyrics-set or generation id. A caption list belongs to the adapter's
+ * training dataset, and the same adapter is in force across every song until it
+ * is switched — YuE2 merges the delta into the resident LM at load, so the
+ * adapter genuinely is global state (see Yue2LmAdapterDropdown).
  *
- *   1. The choice is keyed by ADAPTER PATH, not by lyrics-set or generation id.
- *      A caption list belongs to the adapter's training dataset, and the same
- *      adapter is in force across every song until it is switched — YuE2 merges
- *      the delta into the resident LM at load, so the adapter genuinely is
- *      global state (see Yue2LmAdapterDropdown).
- *   2. `custom` is the DEFAULT, where MM3 defaults to `auto`. MM3's control only
- *      appears after a Send-to-Create handoff, so it can never take a caption
- *      box the user typed into. This one appears the moment a captioned adapter
- *      is selected, and silently replacing a typed caption would be theft.
+ * `auto` is the default, as on MM3. A training caption is what reliably lands in
+ * the album's character, so it is the right thing to reach for first — but
+ * unlike MM3's control, this one can appear over a caption box the user has
+ * already typed into. So whoever applies the default stashes what was in the box
+ * first (`customCaption`), and switching to Custom hands those words back rather
+ * than leaving the user holding a dataset track's.
  *
  * The caption a track contributes is `styled`: the caption plus the
  * "<genre>, <bpm> BPM, key of <key>." tail the trainer appended to it. The
@@ -55,7 +56,7 @@ export interface Yue2SourceTrack {
   styled?: string;
 }
 
-/** The per-adapter choice. Absent from storage means `{ mode: 'custom' }`. */
+/** The per-adapter choice. Absent from storage means `{ mode: 'auto' }`. */
 export interface Yue2CaptionSelection {
   mode: Yue2CaptionMode;
   /** Only meaningful for mode 'track'. */
@@ -90,11 +91,19 @@ function _write(key: string, value: unknown): void {
   }
 }
 
+/** The choice when nothing has been stored for this adapter. Automatic, so a
+ *  freshly selected album adapter renders under its own captions without the
+ *  user having to find the picker. With no adapter there is no dataset to be
+ *  automatic about, and the caption box is the only source there is. */
+export function defaultYue2CaptionSelection(adapterPath: string): Yue2CaptionSelection {
+  return { mode: adapterPath ? 'auto' : 'custom' };
+}
+
 export function readYue2CaptionSelection(adapterPath: string): Yue2CaptionSelection {
   if (!adapterPath) return { mode: 'custom' };
   const stored = _read<Yue2CaptionSelection>(YUE2_CAPTION_SOURCE_PREFIX + adapterPath);
   if (!stored || (stored.mode !== 'auto' && stored.mode !== 'track' && stored.mode !== 'custom')) {
-    return { mode: 'custom' };
+    return defaultYue2CaptionSelection(adapterPath);
   }
   return stored;
 }
@@ -141,8 +150,10 @@ export async function fetchYue2SourceTracks(adapterPath: string): Promise<Yue2So
 }
 
 /** Cached first, server second. The cache is what lets the non-React render
- *  paths resolve a pick synchronously: a selection can only be non-custom if
- *  the picker ran, and the picker is what fills the cache. */
+ *  paths resolve a pick synchronously — and since Automatic is the default,
+ *  every render path on this backend has to fill it before resolving, whether
+ *  or not the user ever opened the picker. Both do (audioGenQueueStore,
+ *  useAudioGeneration). */
 export async function ensureYue2SourceTracks(adapterPath: string): Promise<Yue2SourceTrack[]> {
   const cached = readYue2SourceTracks(adapterPath);
   if (cached.length) return cached;
@@ -171,6 +182,27 @@ export function yue2CaptionAdapterPath(defaults: Record<string, unknown> | undef
   return pick('lmAdapterAr') || pick('lmAdapterNar') || pick('lmAdapter');
 }
 
+/** The album's own adapter, from its preset — the one the render WILL use, not
+ *  the one the engine happens to hold right now.
+ *
+ *  Both render paths apply the album preset's halves before resolving a caption
+ *  (audioGenQueueStore._executeItem, useAudioGeneration.sendToCreate), so inside
+ *  Lyric Studio this is the authority and `activeYue2AdapterPath` is not: the
+ *  engine's resident adapter is whatever album was rendered last, and asking it
+ *  offers Skunk Anansie's track list on a Reel Big Fish album. An album with no
+ *  YuE2 adapter answers '' — it renders on the base model, which has no dataset
+ *  captions to offer. */
+export function yue2PresetAdapterPath(
+  preset: { yue2_ar_adapter_path?: string | null; yue2_nar_adapter_path?: string | null } | null | undefined,
+): string {
+  const ar = String(preset?.yue2_ar_adapter_path ?? '').trim();
+  const nar = String(preset?.yue2_nar_adapter_path ?? '').trim();
+  return ar || nar;
+}
+
+/** The adapter the engine is holding RIGHT NOW. Right for Create, where there is
+ *  no album and the picker IS the selection; wrong inside Lyric Studio, where
+ *  the album owns the adapter — see yue2PresetAdapterPath. */
 export function activeYue2AdapterPath(): string {
   const catalogue = useBackendStore.getState().models[YUE2_BACKEND_ID];
   return yue2CaptionAdapterPath(catalogue?.defaults as Record<string, unknown> | undefined);
@@ -252,8 +284,8 @@ export function resolveYue2Caption(
 }
 
 /** Resolve straight from storage — the form the non-React render paths use.
- *  Returns the song's own caption whenever nothing has been picked, so callers
- *  can use it unconditionally on this backend. */
+ *  With no adapter, no cached tracks or an explicit Custom it lands on the
+ *  song's own caption, so callers can use it unconditionally on this backend. */
 export function resolveYue2CaptionForGeneration(
   gen: { id?: number; bpm?: number; caption?: string | null },
 ): Yue2ResolvedCaption {

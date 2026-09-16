@@ -1327,12 +1327,28 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   // song's own caption.
   const backendId = useBackendStore.getState().activeBackendId;
   if (backendId === MM3_BACKEND_ID) await ensureMm3SourceTracks(item.lyricsSetId);
-  // YuE2's equivalent, and it has to happen HERE rather than in the picker:
+  // YuE2's equivalent, in two parts, and the ORDER is the whole point.
+  //
+  // First the album's own adapters. YuE2 merges the delta into the resident LM
+  // rather than passing it per request, so without this every song in a queue
+  // renders through whichever album happened to be selected last — the failure
+  // the MM3 block below was written for, but persisting in the engine rather
+  // than in a param. AWAITED, not fired and forgotten: the merge has to be in
+  // force before this item is submitted, and the queue is serial, so the wait
+  // costs nothing that the model reload was not going to cost.
+  //
+  // Then the captions, which is why this moved ahead of the other adapter
+  // steps: the caption source is keyed by ADAPTER PATH and defaults to
+  // Automatic, so resolving before the album's adapter is in force would hand
+  // this song a caption out of the PREVIOUS album's dataset.
+  //
+  // The cache fill has to happen here rather than in the picker:
   // resolveYue2CaptionForGeneration reads the track list out of the cache the
   // Create picker fills, so a song generated from Lyric Studio without that
   // panel ever being opened resolved to the written caption and the album's own
   // captions never reached the model.
   if (backendId === YUE2_BACKEND_ID) {
+    await applyYue2PresetAdapters(preset);
     const yue2Adapter = activeYue2AdapterPath();
     if (yue2Adapter) await ensureYue2SourceTracks(yue2Adapter);
   }
@@ -1468,17 +1484,6 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     const ref = preset?.mm3_adapter_path || '';
     params.mm3LmAdapter = ref;
     try { useGlobalParamsStore.getState().setBackendParam('mm3LmAdapter', ref); } catch { /* store not ready */ }
-  }
-
-  // Same guarantee for YuE2, where it matters more: its adapter is merged into
-  // the resident LM rather than passed per request, so without this every song
-  // in a queue renders through whichever album happened to be selected last —
-  // the failure the MM3 block above was written for, but persisting in the
-  // engine rather than in a param. AWAITED, not fired and forgotten: the merge
-  // has to be in force before this item is submitted, and the queue is serial,
-  // so the wait costs nothing that the model reload was not going to cost.
-  if (backendId === YUE2_BACKEND_ID) {
-    await applyYue2PresetAdapters(preset);
   }
 
   // 4) Mastering reference from album preset (does NOT force-enable — respects global toggle)

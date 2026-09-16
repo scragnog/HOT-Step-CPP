@@ -761,6 +761,7 @@ export const LyricStudioV2: React.FC = () => {
                     )}
                     {activeTab === 'written-songs' && (
                       <WrittenSongsTab generations={generations} profiles={profiles}
+                        lyricsSetId={nav.selectedAlbum.id}
                         mm3SourceTracks={mm3SourceTracks}
                         onRefresh={refreshAlbumData} onGenerateAudio={handleGenerateAudio}
                         onSendToCreate={handleSendToCreate}
