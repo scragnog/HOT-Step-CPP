@@ -135,6 +135,77 @@ export function readYue2AbcStatus(manifestPath: string): Yue2AbcStatus | null {
   }
 }
 
+// ── Per-source detail (Lead-sheet preview) ──────────────────────────────────
+//
+// readYue2AbcStatus above answers "how far has the stage got"; these answer
+// "what does one source's row actually say", for the preview picker and its
+// score/audio panel. Same manifest, same fields, read a second way.
+
+/** One row of the picker list: enough to grey out a source with no lead
+ *  sheet, or to show a soft failure's `abc_error` instead of a preview. */
+export interface Yue2SheetSourceStatus {
+  name: string;
+  /** Carries a non-empty `abc` — the picker enables these. */
+  ok: boolean;
+  /** Non-empty `abc_error` — the soft-failure case; the picker lists these
+   *  with the text but disabled, same as an untouched source. */
+  error: string;
+}
+
+/** Every source the manifest names, with the lead-sheet stage's own verdict
+ *  on each. Empty on a missing/partial manifest — same "never throws"
+ *  contract as readYue2AbcStatus, since a picker list also feeds a poll. */
+export function listYue2SheetSources(manifestPath: string): Yue2SheetSourceStatus[] {
+  try {
+    const j = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
+    const sources = Array.isArray(j.sources) ? j.sources as Array<Record<string, unknown>> : [];
+    return sources.map(r => ({
+      name: typeof r.name === 'string' ? r.name : '',
+      ok: typeof r.abc === 'string' && r.abc !== '',
+      error: typeof r.abc_error === 'string' ? r.abc_error : '',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** One source's full lead-sheet row, by its manifest `name` (the flat
+ *  filename yue2-preprocess scanned it under — see routes/training.ts's own
+ *  note that this stage's audio folder is scanned flat, never recursively,
+ *  so a name never carries a path separator). */
+export interface Yue2SheetSourceDetail {
+  name: string;
+  abc: string;
+  abc_error: string;
+  /** The window count `sheetsage_transcribe` used for this source, 0 when
+   *  untouched. */
+  abc_windows: number;
+  /** This source's own tag (model file + precision mode + backend) — distinct
+   *  from the manifest-root `abc_producer` (this tool's identity) that
+   *  readYue2AbcStatus reads. */
+  abc_producer: string;
+}
+
+/** Null when the manifest is missing/partial, or the name isn't in it — the
+ *  route turns either into a 404, never a 500. */
+export function readYue2SheetSource(manifestPath: string, name: string): Yue2SheetSourceDetail | null {
+  try {
+    const j = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
+    const sources = Array.isArray(j.sources) ? j.sources as Array<Record<string, unknown>> : [];
+    const hit = sources.find(r => typeof r.name === 'string' && r.name === name);
+    if (!hit) return null;
+    return {
+      name,
+      abc: typeof hit.abc === 'string' ? hit.abc : '',
+      abc_error: typeof hit.abc_error === 'string' ? hit.abc_error : '',
+      abc_windows: typeof hit.abc_windows === 'number' ? hit.abc_windows : 0,
+      abc_producer: typeof hit.abc_producer === 'string' ? hit.abc_producer : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ── Arg building ────────────────────────────────────────────────────────────
 //
 // Every flag below is one cmd_yue2_sheet actually parses

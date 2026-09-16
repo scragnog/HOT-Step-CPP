@@ -745,6 +745,28 @@ export interface Yue2SheetDefaults {
   fast: boolean;
 }
 
+/** GET /datasets/:id/yue2-sheet — one row of the Lead-sheet preview picker.
+ *  `sampleId` is the same id `sampleAudioUrl` expects: this source's original
+ *  audio is the existing sample-audio route, not a second endpoint. */
+export interface Yue2SheetSourceStatus {
+  name: string;
+  /** Carries a rendered lead sheet — the picker enables these. */
+  ok: boolean;
+  /** Non-empty `abc_error` — a soft failure; listed with the text, disabled. */
+  error: string;
+  sampleId: string;
+}
+
+/** GET /datasets/:id/yue2-sheet/:name — one source's full lead-sheet row. */
+export interface Yue2SheetSourceDetail {
+  name: string;
+  abc: string;
+  abc_error: string;
+  abc_windows: number;
+  abc_producer: string;
+  sampleId: string;
+}
+
 export interface Yue2AlignDefaults {
   only: string;
   limit: number;
@@ -2228,6 +2250,17 @@ export async function startYue2Sheet(
     `/datasets/${encodeURIComponent(id)}/yue2-sheet`,
     { method: 'POST', ...jsonBody(opts) },
   );
+}
+
+/** The Lead-sheet preview picker: every source the manifest names, and which
+ *  ones have a lead sheet to show. */
+export async function listYue2SheetSources(id: string): Promise<{ sources: Yue2SheetSourceStatus[] }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-sheet`);
+}
+
+/** One source's rendered lead sheet (or its `abc_error`), for the preview. */
+export async function getYue2SheetSource(id: string, name: string): Promise<Yue2SheetSourceDetail> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-sheet/${encodeURIComponent(name)}`);
 }
 
 /** POST /datasets/:id/yue2-stems — separate vocals for the aligner. */

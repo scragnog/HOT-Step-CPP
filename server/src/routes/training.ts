@@ -83,7 +83,7 @@ import {
   buildSamples, loadSidecarMetadata, sampleFromParts,
   scanPreview as scanPreviewFolder, ScanLimitError,
 } from '../services/training/datasetScan.js';
-import { AUDIO_EXTENSIONS, isInside, trainingBaseDir } from '../services/training/paths.js';
+import { AUDIO_EXTENSIONS, isInside, sampleIdFor, trainingBaseDir } from '../services/training/paths.js';
 import { resolveMossPaths } from '../services/training/mossCaption.js';
 import { deleteLabel, deleteLabels, patchLabel, readLabel } from '../services/training/labelStore.js';
 import { listDatasetsWithAssets } from '../services/training/datasetAssets.js';
@@ -127,8 +127,8 @@ import {
   YUE2_ALIGN_DEFAULTS, yue2StemsDir,
 } from '../services/training/yue2Align.js';
 import {
-  missingYue2SheetModels, readYue2AbcStatus, resolveYue2SheetModel,
-  YUE2_SHEET_DEFAULTS,
+  listYue2SheetSources, missingYue2SheetModels, readYue2AbcStatus, readYue2SheetSource,
+  resolveYue2SheetModel, YUE2_SHEET_DEFAULTS,
 } from '../services/training/yue2Sheet.js';
 import { yue2StemSources } from '../services/training/yue2Stems.js';
 import {
@@ -3462,6 +3462,55 @@ router.post('/datasets/:id/yue2-sheet', (req: Request, res: Response) => {
       sheetModel: path.basename(resolveYue2SheetModel()),
       license: YUE2_LICENSE_NOTICE,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/**
+ * GET /datasets/:id/yue2-sheet — the picker list for the Lead-sheet preview:
+ * every source the manifest names, which have a lead sheet, which soft-failed
+ * with what error. `sampleId` is the SAME id `buildSamples` would compute for
+ * this source (both hash the flat filename `yue2-preprocess` scanned it
+ * under), so the UI can hand it straight to the existing
+ * `/datasets/:id/samples/:sampleId/audio` route for the original-audio
+ * player rather than a second audio endpoint.
+ */
+router.get('/datasets/:id/yue2-sheet', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) {
+      res.status(404).json({ error: 'Dataset not found' });
+      return;
+    }
+    const manifestPath = yue2PreprocessManifest(ds.slug);
+    const sources = listYue2SheetSources(manifestPath).map(s => ({ ...s, sampleId: sampleIdFor(s.name) }));
+    res.json({ sources });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/**
+ * GET /datasets/:id/yue2-sheet/:name — one source's rendered lead sheet (or
+ * its `abc_error`) for the preview panel. `name` is the manifest's own flat
+ * filename, one path segment (this stage never scans subfolders), so no
+ * query-param workaround is needed for slashes.
+ */
+router.get('/datasets/:id/yue2-sheet/:name', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) {
+      res.status(404).json({ error: 'Dataset not found' });
+      return;
+    }
+    const manifestPath = yue2PreprocessManifest(ds.slug);
+    const detail = readYue2SheetSource(manifestPath, req.params.name as string);
+    if (!detail) {
+      res.status(404).json({ error: 'That source has no row in the lead-sheet manifest.' });
+      return;
+    }
+    res.json({ ...detail, sampleId: sampleIdFor(detail.name) });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

@@ -13,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "abcjs": "^6.7.0",
     "audiomotion-analyzer": "^4.5.4",
     "i18next": "^26.0.10",
     "i18next-browser-languagedetector": "^8.2.1",

@@ -21,7 +21,8 @@
 // every stage; repeating the same text a second time on one screen teaches
 // people to skip it.
 
-import React, { useState } from 'react';
+import abcjs from 'abcjs';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Download, FileText, History, Loader2, Mic2,
   Package, PauseCircle, Play, Scissors, Waves,
@@ -29,10 +30,11 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import {
-  listYue2ArRuns,
+  getYue2SheetSource, listYue2ArRuns, listYue2SheetSources, sampleAudioUrl,
   type Yue2AlignRequest, type Yue2ArAttn, type Yue2ArLrScheduler, type Yue2ArRunSummary,
   type Yue2ArStatus, type Yue2ArTarget, type Yue2ArTrainRequest, type Yue2SheetRequest,
-  type Yue2StyleTemplate, type Yue2TokenizeRequest,
+  type Yue2SheetSourceDetail, type Yue2SheetSourceStatus, type Yue2StyleTemplate,
+  type Yue2TokenizeRequest,
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
@@ -292,7 +294,8 @@ interface SheetForm {
   fast: boolean;
 }
 
-export const Yue2SheetCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
+export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; onDone: () => void }> =
+    ({ datasetId, status, onDone }) => {
   const { t } = useTranslation();
   const activeJob = useTrainingStore(s => s.activeJob);
   const startYue2Sheet = useTrainingStore(s => s.startYue2Sheet);
@@ -422,9 +425,164 @@ export const Yue2SheetCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
           <JobProgress />
         </div>
       )}
+
+      {abc && abc.sourcesWithAbc + abc.sourcesWithError > 0 && (
+        <Yue2SheetPreview datasetId={datasetId} reloadKey={abc.sourcesWithAbc + abc.sourcesWithError} />
+      )}
     </div>
   );
 };
+
+// ── Lead sheets: score + audio preview ──────────────────────────────────────
+//
+// A collapsible section under Yue2SheetCard, not its own card: nothing here
+// starts a job, it only reads what the stage already wrote. `reloadKey`
+// changes whenever the manifest's abc/abc_error counts do (a run or re-run
+// finished), which is the cue to refetch the picker list.
+
+function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadKey: number }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [sources, setSources] = useState<Yue2SheetSourceStatus[] | null>(null);
+  const [listError, setListError] = useState('');
+  const [selected, setSelected] = useState('');
+  const [detail, setDetail] = useState<Yue2SheetSourceDetail | null>(null);
+  const [detailError, setDetailError] = useState('');
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const scoreRef = useRef<HTMLDivElement | null>(null);
+  const audioControlRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    listYue2SheetSources(datasetId)
+      .then(r => {
+        if (cancelled) return;
+        setSources(r.sources);
+        setListError('');
+        setSelected(prev => {
+          if (prev && r.sources.some(s => s.name === prev && s.ok)) return prev;
+          return r.sources.find(s => s.ok)?.name ?? '';
+        });
+      })
+      .catch(err => { if (!cancelled) setListError(err?.message || String(err)); });
+    return () => { cancelled = true; };
+  }, [open, datasetId, reloadKey]);
+
+  useEffect(() => {
+    if (!open || !selected) return;
+    let cancelled = false;
+    setLoadingDetail(true);
+    setDetailError('');
+    getYue2SheetSource(datasetId, selected)
+      .then(d => { if (!cancelled) setDetail(d); })
+      .catch(err => { if (!cancelled) { setDetail(null); setDetailError(err?.message || String(err)); } })
+      .finally(() => { if (!cancelled) setLoadingDetail(false); });
+    return () => { cancelled = true; };
+  }, [open, selected, datasetId]);
+
+  // The fetch above never clears a stale `detail` synchronously on unmount of
+  // interest (that would be a setState-in-effect lint violation) — this
+  // guards the render instead, so switching tracks never shows the PREVIOUS
+  // track's score while the new one is still loading.
+  const showDetail = detail && detail.name === selected && !loadingDetail;
+
+  // Render the score and wire the transport once a lead sheet comes back.
+  // abcjs's SynthController builds its own play/pause/progress UI inside
+  // audioControlRef; the first Play click is the user gesture the browser
+  // needs before it lets an AudioContext make sound, and that click also
+  // triggers abcjs's own soundfont fetch from its default CDN
+  // (https://paulrosen.github.io/abcjs/soundfont/) — nothing bundled here.
+  useEffect(() => {
+    if (!showDetail || !detail?.abc || !scoreRef.current) return;
+    scoreRef.current.innerHTML = '';
+    const tunes = abcjs.renderAbc(scoreRef.current, detail.abc, { responsive: 'resize' });
+    if (audioControlRef.current && abcjs.synth.supportsAudio() && tunes[0]) {
+      audioControlRef.current.innerHTML = '';
+      const synthControl = new abcjs.synth.SynthController();
+      synthControl.load(audioControlRef.current, null, {
+        displayLoop: false, displayRestart: true, displayPlay: true,
+        displayProgress: true, displayWarp: false,
+      });
+      synthControl.setTune(tunes[0], false).catch(() => { /* score still renders without audio */ });
+    }
+  }, [detail, showDetail]);
+
+  return (
+    <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {t('trainingStudio.yue2ar.sheetPreview', 'Preview a lead sheet')}
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          {listError && (
+            <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+              <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+              <span>{listError}</span>
+            </div>
+          )}
+
+          {sources && (
+            <label className="flex flex-col gap-1">
+              <span className={LABEL}>{t('trainingStudio.yue2ar.sheetTrack', 'Track')}</span>
+              <select className={INPUT} value={selected} onChange={e => setSelected(e.target.value)}>
+                <option value="" disabled>
+                  {t('trainingStudio.yue2ar.sheetTrackPick', 'Choose a source…')}
+                </option>
+                {sources.map(s => (
+                  <option key={s.name} value={s.name} disabled={!s.ok}>
+                    {s.ok ? s.name : `${s.name} — ${s.error || t('trainingStudio.yue2ar.sheetTrackNone', 'no lead sheet')}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {loadingDetail && (
+            <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+              <Loader2 size={12} className="animate-spin" /> {t('trainingStudio.yue2ar.sheetLoading', 'Loading…')}
+            </div>
+          )}
+
+          {detailError && (
+            <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+              <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+              <span>{detailError}</span>
+            </div>
+          )}
+
+          {showDetail && detail && (
+            detail.abc_error ? (
+              <div className="text-[11px] text-amber-600 dark:text-amber-400 leading-relaxed">
+                {t('trainingStudio.yue2ar.sheetSoftFail',
+                  'This source soft-failed to render a lead sheet: {{error}}',
+                  { error: detail.abc_error })}
+              </div>
+            ) : detail.abc ? (
+              <div className="space-y-2">
+                <div ref={scoreRef} className="bg-white rounded-lg p-2 overflow-x-auto" />
+                <div ref={audioControlRef} className="text-xs" />
+                <div className="flex flex-col gap-1">
+                  <span className={LABEL}>{t('trainingStudio.yue2ar.sheetOriginal', 'Original audio')}</span>
+                  <audio controls className="w-full h-8" src={sampleAudioUrl(datasetId, detail.sampleId)} />
+                </div>
+              </div>
+            ) : (
+              <span className="text-[11px] text-zinc-500">
+                {t('trainingStudio.yue2ar.sheetTrackNone', 'No lead sheet for this source.')}
+              </span>
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Stage 2a: vocal stems ────────────────────────────────────────
 //

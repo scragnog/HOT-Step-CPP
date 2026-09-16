@@ -233,7 +233,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
 
       {yue2Status && <Yue2PreprocessCard status={yue2Status} onDone={reload} />}
       {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
-      {arStatus && <Yue2SheetCard status={arStatus} onDone={reload} />}
+      {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
       {arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
       {arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
       <Yue2NarTrainCard datasetId={datasetId} trigger={trigger} status={yue2Status} reload={reload} />
