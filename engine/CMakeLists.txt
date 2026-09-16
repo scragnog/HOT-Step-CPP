@@ -673,6 +673,12 @@ link_ggml_backends(ace-midi)
 # docs/plans/2026-07-27-preprocess-implementation.md). Standalone tool: every
 # engine module it uses is header-only, so no acestep-core link is needed.
 add_executable(ace-train tools/ace-train.cpp)
+# One translation unit now carries every trainer plus the SheetSage2
+# transcriber (yue2-sheet); with the TensorRT build on, MSVC's default COFF
+# section limit overflows (C1128). /bigobj lifts it; no effect elsewhere.
+if(MSVC)
+  target_compile_options(ace-train PRIVATE /bigobj)
+endif()
 # lua54 is not used by the trainer directly. It is needed because ace-train
 # includes minimax/mm3-request.h, which reaches lua-plugin.h transitively via
 # mm3-pipeline.h -> mm3-plugins.h, and lua54 is what carries vendor/lua on its
