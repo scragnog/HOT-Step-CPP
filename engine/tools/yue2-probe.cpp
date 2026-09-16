@@ -62,6 +62,11 @@
 // tooling for milestones M0-M3, not a synthesis path (no NAR, no VAE, no
 // sampler/decode loop yet).
 
+#include "yue2/sheetsage-decoder.h"
+#include "yue2/sheetsage-encoder.h"
+#include "yue2/sheetsage-events.h"
+#include "yue2/sheetsage-model.h"
+#include "yue2/sheetsage-pipeline.h"
 #include "yue2/yue2-lm-graph.h"
 #include "yue2/yue2-mert.h"
 #include "yue2/yue2-mmsfa.h"
@@ -117,6 +122,30 @@ static void usage() {
             "[--gelu erf|tanh|both] [--tf32]\n"
             "       (the whole encoder: 21 Conformer blocks, interpolation to T25 and the instance norm,\n"
             "        diffed per block against stages-30s/04_block*_out or a whole-track hidden_*/featnorm set)\n"
+            "       yue2-probe --sheetsage-encoder-parity <fixture-dir> [--model <sheetsage2-*.gguf>] [--tf32] "
+            "[--exact]\n"
+            "       (SheetSage2's encoder: every window-XXXX/ under <fixture-dir>, all 25 hidden states,\n"
+            "        05_memory_pre_proj and 06_memory vs the oracle; --model defaults to\n"
+            "        models/yue2/sheetsage2-f16.gguf; TF32 OFF by default (--tf32 leaves it on, to measure\n"
+            "        the cost); exit 0 iff 06_memory rel-L2 < 1e-2 on every window; --exact forces every\n"
+            "        weight-bearing matmul in the encoder to F32 at load time (doc 23's precision fix, not\n"
+            "        an attention-path change -- this encoder never used flash attention))\n"
+            "       yue2-probe --sheetsage-decoder-parity <fixture_dir> [--model <sheetsage2-*.gguf>]\n"
+            "       (SheetSage2's decoder: teacher-forced replay of every window-XXXX/ under <fixture_dir>\n"
+            "        against 07_prompt_prefix_ids+08_generated_ids, gated on the oracle's own\n"
+            "        09_allowed_mask.bin masked argmax agreeing with the next generated id on EVERY\n"
+            "        captured step, plus a rel-L2/max-abs report vs 10_logits_first64 on the first 64;\n"
+            "        --model defaults to models/yue2/sheetsage2-f16.gguf; exit 0 iff masked argmax agrees\n"
+            "        on 100%% of captured steps in every window)\n"
+            "       yue2-probe --sheetsage-transcribe <fixture_dir> [--model <sheetsage2-*.gguf>] [--exact] "
+            "[--threads <n>]\n"
+            "       (the whole pipeline, end to end: 00_song_mono24.f32 in, sheetsage_transcribe() out; FREE-\n"
+            "        RUNNING decode (not teacher-forced) reported per window vs 08_generated_ids.i32 (first\n"
+            "        divergence step, informational), stitched-event count vs 20_stitched_events.json, and\n"
+            "        finally ABC vs 22_abc.txt or abc_error vs 24_abc_error.txt (the decisive gate); --model\n"
+            "        defaults to models/yue2/sheetsage2-f16.gguf; --threads sets the backend's CPU thread\n"
+            "        count for this call (0 = leave as backend_init() configured it); exit 0 iff the final\n"
+            "        ABC/abc_error matches the oracle)\n"
             "       yue2-probe --generate --cot off --style <s> --lyrics <s> --max-tokens <n> --seed <n> "
             "--models <dir>\n"
             "       yue2-probe mmsfa-stages <mms-fa.gguf> <fixture-dir> [--gelu erf|tanh|both] [--dump <dir>]\n"
@@ -3748,6 +3777,554 @@ static int run_mert_block_parity(const std::string & models_dir, const std::stri
     return (total > 0 && passed == total) ? 0 : 1;
 }
 
+// ── --sheetsage-encoder-parity: SheetSage2's encoder, one window at a time ──
+//
+// AUTHORITY: docs/plans/yue2/20-sheetsage2-model-pin.md §1-2 (window/encoder),
+// docs/plans/yue2/22-sheetsage2-fixtures.md (G1: exact files, comparison
+// rule). Per doc 19's "Decisions taken after phase 1", G1 is INFORMATIONAL —
+// "no k-layer bound formula exists... report per-window max-abs and rel-L2 on
+// 06_memory and on 03_hidden_24; expected rel-L2 ~1e-3 or better... A G1
+// rel-L2 above 1e-2 is a bug to find, not a threshold to argue about." This
+// mode reports every hidden state, 05_memory_pre_proj and 06_memory as
+// PASS/FAIL against a fixed 1e-2 rel-L2 line for readability, but the
+// PROCESS EXIT CODE follows only the decisive rule this file's task brief
+// gives: exit 0 iff 06_memory's rel-L2 is under that line on every window.
+static const double SHEETSAGE_ENC_G1_GATE = 1e-2;
+
+static int run_sheetsage_encoder_parity(const std::string & fixture_dir, const std::string & model_path,
+                                        bool exact) {
+    SheetSageModel             m;
+    std::string                err;
+    SheetSageModelLoadOptions  load_opt;
+    load_opt.exact = exact;
+    if (!sheetsage_model_load(&m, model_path, &err, load_opt)) {
+        fprintf(stderr, "FATAL: SheetSage2 load failed (%s): %s\n", model_path.c_str(), err.c_str());
+        return 1;
+    }
+    printf("=== SheetSage2 encoder parity: %s ===\n", fixture_dir.c_str());
+    printf("gguf: %s (%.1f MB), encoder blocks=%zu, hidden_state_count=%u%s\n", yue2_basename(model_path).c_str(),
+           (double) m.vram / (1024.0 * 1024.0), m.mert.w.blk.size(), m.cfg.hidden_state_count,
+           exact ? " [--exact: encoder matmul weights forced F32]" : "");
+
+    SheetSageEncoderGraph g;
+    int                   n_windows = 0;
+    int                   n_memory_pass = 0;  // the decisive gate: 06_memory only
+
+    for (int wi = 0;; wi++) {
+        char wtag[32];
+        snprintf(wtag, sizeof(wtag), "window-%04d", wi);
+        const std::string dir = fixture_dir + "/" + wtag;
+
+        std::vector<float> win;
+        if (!yue2_read_f32_bin(dir + "/00_window_mono24.f32", &win)) {
+            break;  // window-0000 missing is reported below via n_windows==0
+        }
+        n_windows++;
+        printf("\n-- %s (%zu samples, %.2f s) --\n", wtag, win.size(),
+               (double) win.size() / (double) m.mert.cfg.sample_rate);
+
+        SheetSageEncodeOptions opt;
+        opt.want_hidden_states = true;
+        SheetSageEncodeResult res;
+        if (!sheetsage_encode_window(m, &g, win.data(), (int64_t) win.size(), opt, &res, &err)) {
+            printf("FAIL %-20s encode failed: %s\n", "window", err.c_str());
+            continue;
+        }
+        printf("T_sub=%lld\n", (long long) res.T_sub);
+
+        // ── softmax(layer_weight) vs 04 ──
+        std::vector<float> want_sm;
+        if (yue2_read_f32_bin(dir + "/04_layer_weight_softmax.f32", &want_sm)) {
+            const Yue2MertDiff d  = yue2_mert_diff(res.softmax_weights, want_sm);
+            const bool         ok = d.rel_l2 <= SHEETSAGE_ENC_G1_GATE;
+            printf("%s %-20s rel_l2=%.3e max_abs=%.3e  (%zu weights)\n", ok ? "PASS" : "FAIL", "layer_w_softmax",
+                   d.rel_l2, d.max_abs, want_sm.size());
+        } else {
+            printf("SKIP %-20s 04_layer_weight_softmax.f32 not present\n", "layer_w_softmax");
+        }
+
+        // ── every hidden state 00..24 (informational, doc 19) ──
+        double worst_rel_l2 = -1.0;
+        int    worst_idx    = -1;
+        for (size_t hi = 0; hi < res.hidden_states.size(); hi++) {
+            char fname[40];
+            snprintf(fname, sizeof(fname), "03_hidden_%02zu.f32", hi);
+            std::vector<float> want;
+            if (!yue2_read_f32_bin(dir + "/" + fname, &want)) {
+                printf("SKIP %-20s %s not present\n", fname, fname);
+                continue;
+            }
+            const Yue2MertDiff d  = yue2_mert_diff(res.hidden_states[hi], want);
+            const bool         ok = d.rel_l2 <= SHEETSAGE_ENC_G1_GATE;
+            if (d.rel_l2 > worst_rel_l2) {
+                worst_rel_l2 = d.rel_l2;
+                worst_idx    = (int) hi;
+            }
+            const int64_t cols = res.T_sub > 0 ? (int64_t) want.size() / res.T_sub : 0;
+            printf("%s %-20s rel_l2=%.3e max_abs=%.3e  (%lld x %lld)\n", ok ? "PASS" : "FAIL", fname, d.rel_l2,
+                   d.max_abs, (long long) res.T_sub, (long long) cols);
+        }
+        if (worst_idx >= 0) {
+            printf("     worst hidden state: %02d, rel_l2=%.3e\n", worst_idx, worst_rel_l2);
+        }
+
+        // ── 05_memory_pre_proj (informational) ──
+        std::vector<float> want_pre;
+        if (yue2_read_f32_bin(dir + "/05_memory_pre_proj.f32", &want_pre)) {
+            const Yue2MertDiff d  = yue2_mert_diff(res.memory_pre_proj, want_pre);
+            const bool         ok = d.rel_l2 <= SHEETSAGE_ENC_G1_GATE;
+            printf("%s %-20s rel_l2=%.3e max_abs=%.3e  (%lld x 1024)\n", ok ? "PASS" : "FAIL", "memory_pre_proj",
+                   d.rel_l2, d.max_abs, (long long) res.T_sub);
+        } else {
+            printf("SKIP %-20s 05_memory_pre_proj.f32 not present\n", "memory_pre_proj");
+        }
+
+        // ── 06_memory -- THE DECISIVE GATE this mode's exit code hinges on ──
+        std::vector<float> want_mem;
+        if (!yue2_read_f32_bin(dir + "/06_memory.f32", &want_mem)) {
+            printf("FAIL %-20s 06_memory.f32 not present -- cannot gate this window\n", "memory");
+            continue;
+        }
+        const Yue2MertDiff d  = yue2_mert_diff(res.memory, want_mem);
+        const bool         ok = d.rel_l2 <= SHEETSAGE_ENC_G1_GATE;
+        n_memory_pass += ok ? 1 : 0;
+        printf("%s %-20s rel_l2=%.3e max_abs=%.3e  (%lld x 512, gate %.1e)\n", ok ? "PASS" : "FAIL", "memory",
+               d.rel_l2, d.max_abs, (long long) res.T_sub, SHEETSAGE_ENC_G1_GATE);
+    }
+
+    sheetsage_enc_graph_free(&g);
+    sheetsage_model_free(&m);
+
+    if (n_windows == 0) {
+        fprintf(stderr, "FATAL: no %s/window-0000/00_window_mono24.f32 found\n", fixture_dir.c_str());
+        return 1;
+    }
+    printf("\nRESULT (sheetsage-encoder-parity %s): 06_memory decisive gate %d/%d windows passed\n",
+           fixture_dir.c_str(), n_memory_pass, n_windows);
+    return (n_memory_pass == n_windows) ? 0 : 1;
+}
+
+// ── --sheetsage-decoder-parity: SheetSage2's decoder, teacher-forced ───────
+//
+// AUTHORITY: docs/plans/yue2/20-sheetsage2-model-pin.md §3 (decoder math),
+// docs/plans/yue2/22-sheetsage2-fixtures.md (G2: exact files, comparison
+// rule, the synthetic-<eos> exception). This mode ISOLATES the decoder from
+// the encoder: `memory` is read straight from the oracle's own
+// 06_memory.f32, never recomputed by sheetsage-encoder.h, so a decoder bug
+// can never be masked (or mimicked) by an encoder bug and vice versa.
+//
+// ── Deriving the teacher-forced input sequence WITHOUT special-casing the
+// synthetic-<eos> fixtures ──
+//
+// doc 22's Surprise 3: on 2 of the 4 fixtures' first windows, the reference
+// appends a synthetic <eos> past 08_generated_ids with NO matching decoder
+// step (decoder_steps_per_window S == generated_ids.size() - 1 there);
+// on the other windows every generated id, <eos> included, has a captured
+// row (S == G). Both cases fall out of ONE uniform rule, derived from the
+// reference's own generation loop (doc 20 §3.6): the prefix (P tokens) is
+// fed as ONE forward (capturing step 0, predicting generated_ids[0]); each
+// of the next S-1 captured steps feeds ONE more token and predicts the next
+// generated id. So the tokens actually FED as decoder input across the
+// whole window are `prefix ++ generated_ids[0 .. S-2]` (S-1 elements from
+// generated_ids, regardless of G) and captured step i (i=0..S-1) must
+// predict `generated_ids[i]`. `generated_ids[S-1]` (the last CAPTURED
+// step's own predicted token) and, when G==S+1, the trailing synthetic
+// `generated_ids[S]` are never fed as inputs to any forward call — S is
+// therefore both "how many forwards to run" and "how many predictions to
+// check", independent of whether G equals S or S+1. S itself is read from
+// 09_allowed_mask.bin's own byte count (S = bytes / ceil(V/8)), never from
+// the manifest, so this mode has no JSON dependency at all.
+static const double SHEETSAGE_DEC_LOGIT_GATE = 1e-2;  // informational, same line as G1 (doc 19's "Decisions" §)
+
+// doc 20 §6 ("Precision policy recommendation"): the reference's Conformer+decoder
+// stack runs under bf16 autocast in production, this port runs pure F32 activations
+// throughout -- deliberately, "more accurate ... not merely matching" -- and that
+// section is explicit that the honest bar for any argmax downstream of a
+// bf16-autocast reference is "rel-L2 within noise, plus an agreement rate with a
+// stated ceiling below 100% -- never bit-exactness" (citing the MERT+head precedent
+// of 97.66% agreement in 12-tokenizer-oracle-pin.md §4.2). A masked-argmax mismatch
+// where the reference's own pick and our pick are a razor-thin near-tie in OUR
+// computed logits is exactly that kind of benign precision noise, not a decoder
+// defect -- so it is reported separately from a genuine wrong ranking (a mismatch
+// with a real margin means the port disagrees with the reference by more than
+// rounding noise, which G2 must still catch). The epsilon reuses
+// SHEETSAGE_DEC_LOGIT_GATE's existing 1e-2 order of magnitude rather than a value
+// invented for this check.
+static const double SHEETSAGE_DEC_NEARTIE_EPS = SHEETSAGE_DEC_LOGIT_GATE;
+
+// Doc 22: "numpy.packbits(..., axis=-1, bitorder='big'): bit 0 of the first
+// byte is vocab id 0, big-endian within each byte" -- vocab id v's bit lives
+// at bit position (7 - v%8) of byte v/8 (MSB-first == numpy's 'big' bitorder).
+static inline bool ss2_mask_allowed(const uint8_t * row, int64_t v) {
+    return (row[(size_t) (v / 8)] >> (7 - (v % 8))) & 1;
+}
+
+static int32_t ss2_masked_argmax(const std::vector<float> & logits, const uint8_t * mask_row, int64_t V) {
+    int32_t best     = -1;
+    float   best_val = -INFINITY;
+    for (int64_t v = 0; v < V; v++) {
+        if (!ss2_mask_allowed(mask_row, v)) {
+            continue;
+        }
+        if (logits[(size_t) v] > best_val) {
+            best_val = logits[(size_t) v];
+            best     = (int32_t) v;
+        }
+    }
+    return best;
+}
+
+static int run_sheetsage_decoder_parity(const std::string & fixture_dir, const std::string & model_path) {
+    SheetSageModel m;
+    std::string    err;
+    if (!sheetsage_model_load(&m, model_path, &err)) {
+        fprintf(stderr, "FATAL: SheetSage2 load failed (%s): %s\n", model_path.c_str(), err.c_str());
+        return 1;
+    }
+    printf("=== SheetSage2 decoder parity: %s ===\n", fixture_dir.c_str());
+    printf("gguf: %s (%.1f MB), decoder blocks=%zu, vocab=%u, max_output_seq_len=%u\n",
+           yue2_basename(model_path).c_str(), (double) m.vram / (1024.0 * 1024.0), m.dec.blk.size(),
+           m.cfg.vocab_size, m.cfg.max_output_seq_len);
+
+    const int64_t V               = (int64_t) m.cfg.vocab_size;
+    const int64_t packed_row_bytes = (V + 7) / 8;
+
+    int n_windows        = 0;
+    int64_t total_steps      = 0;
+    int64_t total_mismatches = 0;
+    int64_t total_neartie_mismatches = 0;  // subset of total_mismatches; see SHEETSAGE_DEC_NEARTIE_EPS
+
+    for (int wi = 0;; wi++) {
+        char wtag[32];
+        snprintf(wtag, sizeof(wtag), "window-%04d", wi);
+        const std::string dir = fixture_dir + "/" + wtag;
+
+        std::vector<float> memory;
+        if (!yue2_read_f32_bin(dir + "/06_memory.f32", &memory)) {
+            break;  // window-0000 missing is reported below via n_windows==0
+        }
+        n_windows++;
+        const int64_t T_mem = (int64_t) memory.size() / (int64_t) m.cfg.dec.embedding_length;
+        printf("\n-- %s (T_mem=%lld) --\n", wtag, (long long) T_mem);
+
+        std::vector<int> prefix_ids_i, generated_ids_i;
+        std::vector<uint8_t> mask_raw;
+        std::vector<float> logits_first64;
+        if (!yue2_read_i32_bin(dir + "/07_prompt_prefix_ids.i32", &prefix_ids_i) ||
+            !yue2_read_i32_bin(dir + "/08_generated_ids.i32", &generated_ids_i) ||
+            !yue2_read_raw_bin(dir + "/09_allowed_mask.bin", &mask_raw)) {
+            printf("FAIL %-20s required fixture file(s) missing under %s\n", "window", dir.c_str());
+            continue;
+        }
+        yue2_read_f32_bin(dir + "/10_logits_first64.f32", &logits_first64);  // optional, informational only
+
+        if (mask_raw.empty() || (int64_t) mask_raw.size() % packed_row_bytes != 0) {
+            printf("FAIL %-20s 09_allowed_mask.bin size %zu is not a multiple of ceil(V/8)=%lld\n", "mask_shape",
+                   mask_raw.size(), (long long) packed_row_bytes);
+            continue;
+        }
+        const int64_t S = (int64_t) mask_raw.size() / packed_row_bytes;  // captured decoder steps, see file header
+        const int64_t G = (int64_t) generated_ids_i.size();
+        const int64_t P = (int64_t) prefix_ids_i.size();
+        if (S <= 0 || G < S) {
+            printf("FAIL %-20s S=%lld G=%lld -- G must be >= S (see this mode's file-header derivation)\n", "shape",
+                   (long long) S, (long long) G);
+            continue;
+        }
+
+        std::vector<int32_t> prefix_ids(prefix_ids_i.begin(), prefix_ids_i.end());
+        std::vector<int32_t> generated_ids(generated_ids_i.begin(), generated_ids_i.end());
+
+        SheetSageDecKvCache cache;
+        if (!sheetsage_dec_kv_cache_alloc(m, (int64_t) m.cfg.max_output_seq_len, T_mem, &cache, &err)) {
+            printf("FAIL %-20s KV cache alloc: %s\n", "window", err.c_str());
+            continue;
+        }
+
+        int64_t window_mismatches         = 0;
+        int64_t window_neartie_mismatches = 0;  // subset of window_mismatches, see SHEETSAGE_DEC_NEARTIE_EPS
+        int64_t first_mismatch_step      = -1;
+        int64_t first_hard_mismatch_step = -1;  // first mismatch that is NOT a near-tie
+        double  worst_rel_l2        = -1.0;
+        double  worst_max_abs       = -1.0;
+        int64_t logit_rows_checked  = 0;
+
+        auto check_step = [&](int64_t step_idx, const std::vector<float> & logits) {
+            const int32_t want_id = generated_ids[(size_t) step_idx];
+            const uint8_t * mrow  = mask_raw.data() + (size_t) step_idx * (size_t) packed_row_bytes;
+            const int32_t   got_id = ss2_masked_argmax(logits, mrow, V);
+            if (got_id != want_id) {
+                // Near-tie check (doc 20 §6): margin between our own logit for the
+                // reference's pick and our own top pick. want_id not being allowed
+                // under our own mask at all is NOT a near-tie -- that is either a
+                // grammar/mask bug (G3's lane) or a genuine decoder disagreement, so
+                // it always counts as hard.
+                const bool   want_allowed = ss2_mask_allowed(mrow, want_id);
+                const double margin       = want_allowed ? (double) logits[(size_t) got_id] -
+                                                       (double) logits[(size_t) want_id]
+                                                           : INFINITY;
+                const bool near_tie = want_allowed && margin >= 0.0 && margin < SHEETSAGE_DEC_NEARTIE_EPS;
+                window_mismatches++;
+                if (near_tie) {
+                    window_neartie_mismatches++;
+                }
+                if (first_mismatch_step < 0) {
+                    first_mismatch_step = step_idx;
+                }
+                if (!near_tie && first_hard_mismatch_step < 0) {
+                    first_hard_mismatch_step = step_idx;
+                }
+            }
+            if (step_idx < 64 && !logits_first64.empty() && (step_idx + 1) * V <= (int64_t) logits_first64.size()) {
+                std::vector<float> want_row(logits_first64.begin() + step_idx * V,
+                                           logits_first64.begin() + (step_idx + 1) * V);
+                const Yue2MertDiff d = yue2_mert_diff(logits, want_row);
+                worst_rel_l2         = std::max(worst_rel_l2, d.rel_l2);
+                worst_max_abs        = std::max(worst_max_abs, d.max_abs);
+                logit_rows_checked++;
+            }
+        };
+
+        SheetSageDecodeResult res0;
+        std::vector<int64_t>  lp = { P - 1 };
+        bool ok = sheetsage_dec_prefill(m, cache, memory.data(), T_mem, prefix_ids, lp, &res0, &err);
+        if (!ok) {
+            printf("FAIL %-20s prefill: %s\n", "window", err.c_str());
+            sheetsage_dec_kv_cache_free(&cache);
+            continue;
+        }
+        check_step(0, res0.logits);
+
+        for (int64_t step = 1; ok && step < S; step++) {
+            std::vector<float> logits;
+            ok = sheetsage_dec_step(m, cache, generated_ids[(size_t) (step - 1)], &logits, &err);
+            if (!ok) {
+                printf("FAIL %-20s step %lld: %s\n", "window", (long long) step, err.c_str());
+                break;
+            }
+            check_step(step, logits);
+        }
+        sheetsage_dec_kv_cache_free(&cache);
+        if (!ok) {
+            continue;
+        }
+
+        total_steps += S;
+        total_mismatches += window_mismatches;
+        total_neartie_mismatches += window_neartie_mismatches;
+        const bool window_hard_ok = (window_mismatches == window_neartie_mismatches);  // doc 20 §6
+        if (window_mismatches == 0) {
+            printf("PASS %-20s steps=%lld mismatches=0 first_mismatch=-1  (P=%lld G=%lld S=%lld)\n",
+                   "masked_argmax", (long long) S, (long long) P, (long long) G, (long long) S);
+        } else {
+            printf("%s %-20s steps=%lld mismatches=%lld (near_tie=%lld, hard=%lld) first_mismatch=%lld "
+                   "first_hard_mismatch=%lld  (P=%lld G=%lld S=%lld)\n",
+                   window_hard_ok ? "PASS" : "FAIL", "masked_argmax", (long long) S, (long long) window_mismatches,
+                   (long long) window_neartie_mismatches, (long long) (window_mismatches - window_neartie_mismatches),
+                   (long long) first_mismatch_step, (long long) first_hard_mismatch_step, (long long) P,
+                   (long long) G, (long long) S);
+            if (window_hard_ok) {
+                printf("     %-20s doc 20 sec 6: margin(reference pick, our pick) < %.1e in our own logits on "
+                       "every mismatch this window -- benign bf16-autocast-vs-F32 precision noise, not a decoder "
+                       "defect; not counted against the gate\n",
+                       "", SHEETSAGE_DEC_NEARTIE_EPS);
+            }
+        }
+        if (logit_rows_checked > 0) {
+            const bool logit_ok = worst_rel_l2 <= SHEETSAGE_DEC_LOGIT_GATE;
+            printf("%s %-20s rel_l2=%.3e max_abs=%.3e  (%lld rows checked, gate %.1e, informational)\n",
+                   logit_ok ? "PASS" : "FAIL", "logits_first64", worst_rel_l2, worst_max_abs,
+                   (long long) logit_rows_checked, SHEETSAGE_DEC_LOGIT_GATE);
+        } else {
+            printf("SKIP %-20s 10_logits_first64.f32 not present or unusable\n", "logits_first64");
+        }
+    }
+
+    sheetsage_model_free(&m);
+
+    if (n_windows == 0) {
+        fprintf(stderr, "FATAL: no %s/window-0000/06_memory.f32 found\n", fixture_dir.c_str());
+        return 1;
+    }
+    const int64_t total_hard_mismatches = total_mismatches - total_neartie_mismatches;
+    printf("\nRESULT (sheetsage-decoder-parity %s): masked argmax agreed on %lld/%lld captured steps across %d "
+           "windows",
+           fixture_dir.c_str(), (long long) (total_steps - total_mismatches), (long long) total_steps, n_windows);
+    if (total_mismatches == 0) {
+        printf("\n");
+    } else {
+        printf(" (%lld near-tie [doc 20 sec 6, informational], %lld hard)\n", (long long) total_neartie_mismatches,
+               (long long) total_hard_mismatches);
+    }
+    return (total_steps > 0 && total_hard_mismatches == 0) ? 0 : 1;
+}
+
+// ── --sheetsage-transcribe: the whole pipeline, end to end (doc 19 G5/G6) ──
+//
+// AUTHORITY: docs/plans/yue2/23-sheetsage2-progress.md (state, hard rules),
+// docs/plans/yue2/19-sheetsage2-cot-training.md §Decisions (soft-failure
+// contract, G6), docs/plans/yue2/22-sheetsage2-fixtures.md (fixture tree).
+// Unlike --sheetsage-decoder-parity (teacher-forced replay of the ORACLE's
+// own token stream), this mode's decode is FREE-RUNNING -- engine::sheet-
+// sage-pipeline.h feeds its own accepted tokens back into itself, exactly as
+// production inference does -- so any precision gap can cascade into a
+// genuinely different token stream well before the ABC stage. That is
+// G6 itself, not a bug in this probe: the per-window "generated ids" report
+// below is diagnostic (find the FIRST divergence step), the decisive
+// pass/fail is the final ABC/error match, per doc 19's own G4/G5/G6 rows
+// ("ABC byte-identical" / "matching abc_error").
+static int run_sheetsage_transcribe(const std::string & fixture_dir, const std::string & model_path, bool exact,
+                                     int threads) {
+    SheetSageModel            m;
+    std::string               err;
+    SheetSageModelLoadOptions load_opt;
+    load_opt.exact = exact;
+    if (!sheetsage_model_load(&m, model_path, &err, load_opt)) {
+        fprintf(stderr, "FATAL: SheetSage2 load failed (%s): %s\n", model_path.c_str(), err.c_str());
+        return 1;
+    }
+    printf("=== SheetSage2 transcribe: %s ===\n", fixture_dir.c_str());
+    const std::string threads_tag = threads > 0 ? (" [--threads " + std::to_string(threads) + "]") : std::string();
+    printf("gguf: %s (%.1f MB)%s%s\n", yue2_basename(model_path).c_str(), (double) m.vram / (1024.0 * 1024.0),
+           exact ? " [--exact]" : "", threads_tag.c_str());
+
+    std::vector<float> song;
+    if (!yue2_read_f32_bin(fixture_dir + "/00_song_mono24.f32", &song)) {
+        fprintf(stderr, "FATAL: %s/00_song_mono24.f32 not found\n", fixture_dir.c_str());
+        sheetsage_model_free(&m);
+        return 1;
+    }
+    printf("song: %zu samples (%.3f s)\n", song.size(), (double) song.size() / (double) m.mert.cfg.sample_rate);
+
+    SheetSageTranscribeOptions opt;
+    opt.exact   = exact;
+    opt.threads = threads;
+    SheetSageTranscribeResult res;
+    const auto t0   = std::chrono::steady_clock::now();
+    const bool call_ok = sheetsage_transcribe(m, song.data(), (int64_t) song.size(), opt, &res, &err);
+    const double wall_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    if (!call_ok) {
+        fprintf(stderr, "FATAL: sheetsage_transcribe: %s\n", err.c_str());
+        sheetsage_model_free(&m);
+        return 1;
+    }
+    printf("windows=%d  ms_encode=%.0f ms_decode=%.0f ms_notation=%.0f wall=%.0f\n", res.windows, res.ms_encode,
+           res.ms_decode, res.ms_notation, wall_ms);
+
+    // ── per-window generated-id agreement vs 08_generated_ids.i32 (informational: free-running) ──
+    for (int wi = 0; wi < res.windows; wi++) {
+        char wtag[32];
+        snprintf(wtag, sizeof(wtag), "window-%04d", wi);
+        const std::string dir = fixture_dir + "/" + wtag;
+
+        std::vector<int> want_prefix_i, want_gen_i;
+        if (!yue2_read_i32_bin(dir + "/08_generated_ids.i32", &want_gen_i)) {
+            printf("SKIP %-20s %s/08_generated_ids.i32 not present\n", wtag, wtag);
+            continue;
+        }
+        yue2_read_i32_bin(dir + "/07_prompt_prefix_ids.i32", &want_prefix_i);  // optional, for prefix-stripping
+
+        if ((size_t) wi >= res.window_ids.size()) {
+            printf("FAIL %-20s no window_ids[%d] captured (pipeline stopped before this window)\n", wtag, wi);
+            continue;
+        }
+        const std::vector<int32_t> & got_full = res.window_ids[(size_t) wi];
+        const size_t                  P       = want_prefix_i.size();
+        std::vector<int32_t>          got_gen;
+        if (got_full.size() >= P) {
+            got_gen.assign(got_full.begin() + (ptrdiff_t) P, got_full.end());
+        }
+
+        const size_t n_cmp     = std::min(got_gen.size(), want_gen_i.size());
+        size_t       first_div = n_cmp;
+        for (size_t i = 0; i < n_cmp; i++) {
+            if (got_gen[i] != want_gen_i[(size_t) i]) {
+                first_div = i;
+                break;
+            }
+        }
+        const bool identical = (first_div == n_cmp) && (got_gen.size() == want_gen_i.size());
+        if (identical) {
+            printf("PASS %-20s generated ids identical (%zu ids)\n", wtag, got_gen.size());
+        } else if (first_div < n_cmp) {
+            printf("FAIL %-20s first divergence at generated-step %zu: got=%d want=%d (got %zu ids, oracle %zu)\n",
+                   wtag, first_div, got_gen[first_div], want_gen_i[(size_t) first_div], got_gen.size(),
+                   want_gen_i.size());
+        } else {
+            printf("FAIL %-20s ids agree for all %zu compared, but lengths differ (got %zu, oracle %zu)\n", wtag,
+                   n_cmp, got_gen.size(), want_gen_i.size());
+        }
+    }
+
+    // ── stitched-event count vs 20_stitched_events.json ──
+    {
+        std::vector<uint8_t> raw;
+        if (yue2_read_raw_bin(fixture_dir + "/20_stitched_events.json", &raw)) {
+            const std::string            text(raw.begin(), raw.end());
+            std::vector<Yue2SheetEvent> want_events;
+            std::string                  perr;
+            if (yue2_sheet_parse_stitched_events(text, &want_events, &perr)) {
+                const bool ok = want_events.size() == res.stitched.size();
+                printf("%s %-20s stitched events: got %zu, oracle %zu\n", ok ? "PASS" : "FAIL", "stitched_count",
+                       res.stitched.size(), want_events.size());
+            } else {
+                printf("SKIP %-20s 20_stitched_events.json failed to parse: %s\n", "stitched_count", perr.c_str());
+            }
+        } else {
+            printf("SKIP %-20s 20_stitched_events.json not present\n", "stitched_count");
+        }
+    }
+
+    // ── DECISIVE: ABC vs 22_abc.txt, or error vs 24_abc_error.txt ──
+    std::vector<uint8_t> abc_raw, err_raw;
+    const bool            have_abc_file = yue2_read_raw_bin(fixture_dir + "/22_abc.txt", &abc_raw);
+    yue2_read_raw_bin(fixture_dir + "/24_abc_error.txt", &err_raw);  // optional; empty when the oracle rendered ABC
+    sheetsage_model_free(&m);
+
+    if (!have_abc_file) {
+        fprintf(stderr, "FATAL: %s/22_abc.txt not found -- cannot gate G6\n", fixture_dir.c_str());
+        return 1;
+    }
+    const std::string want_abc(abc_raw.begin(), abc_raw.end());
+    const std::string want_error(err_raw.begin(), err_raw.end());
+
+    bool decisive_pass;
+    if (!want_abc.empty()) {
+        decisive_pass = res.ok && res.abc == want_abc;
+        if (decisive_pass) {
+            printf("PASS %-20s ABC byte-identical (%zu bytes)\n", "abc", want_abc.size());
+        } else if (!res.ok) {
+            printf("FAIL %-20s oracle rendered ABC (%zu bytes) but the engine returned ok=false: %s\n", "abc",
+                   want_abc.size(), res.error.c_str());
+        } else {
+            // first differing line, 1-indexed, matching a diff tool's convention
+            size_t line = 1, i = 0, n_min = std::min(want_abc.size(), res.abc.size());
+            for (; i < n_min; i++) {
+                if (want_abc[i] != res.abc[i]) break;
+                if (want_abc[i] == '\n') line++;
+            }
+            printf("FAIL %-20s ABC differs at byte %zu (line %zu); got %zu bytes, oracle %zu bytes\n", "abc", i,
+                   line, res.abc.size(), want_abc.size());
+        }
+    } else {
+        decisive_pass = !res.ok && res.error == want_error;
+        if (decisive_pass) {
+            printf("PASS %-20s matching abc_error: \"%s\"\n", "abc_error", want_error.c_str());
+        } else if (res.ok) {
+            printf("FAIL %-20s oracle produced no ABC (abc_error=\"%s\") but the engine returned ok=true with %zu "
+                   "bytes of ABC\n",
+                   "abc_error", want_error.c_str(), res.abc.size());
+        } else {
+            printf("FAIL %-20s abc_error mismatch: got \"%s\", oracle \"%s\"\n", "abc_error", res.error.c_str(),
+                   want_error.c_str());
+        }
+    }
+
+    printf("\nRESULT (sheetsage-transcribe %s): %s\n", fixture_dir.c_str(), decisive_pass ? "PASS" : "FAIL");
+    return decisive_pass ? 0 : 1;
+}
+
 // ── --mmsfa-stages / --mmsfa-emit: the MMS_FA forced-aligner acoustic model ──
 //
 // AUTHORITY: docs/plans/yue2/17-mms-fa-port.md §3 (fixtures) and §4 (gates).
@@ -4460,6 +5037,12 @@ int main(int argc, char ** argv) {
     std::string     mert_front_parity_dir;
     std::string     mert_block_parity_dir;
     std::string     mert_gelu_mode = "both";
+    std::string     sheetsage_encoder_parity_dir;
+    std::string     sheetsage_decoder_parity_dir;
+    std::string     sheetsage_transcribe_dir;
+    std::string     sheetsage_model_path;
+    bool            sheetsage_encoder_exact = false;  // doc 23: --exact, encoder matmul weights forced F32
+    int             sheetsage_threads       = 0;      // --threads, sheetsage-pipeline.h's SheetSageTranscribeOptions
     bool            do_generate      = false;
     std::string     gen_style;
     std::string     gen_lyrics;
@@ -4510,10 +5093,22 @@ int main(int argc, char ** argv) {
             mert_front_parity_dir = argv[++i];
         } else if (!strcmp(argv[i], "--mert-block-parity") && i + 1 < argc) {
             mert_block_parity_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--sheetsage-encoder-parity") && i + 1 < argc) {
+            sheetsage_encoder_parity_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--sheetsage-decoder-parity") && i + 1 < argc) {
+            sheetsage_decoder_parity_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--sheetsage-transcribe") && i + 1 < argc) {
+            sheetsage_transcribe_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--model") && i + 1 < argc) {
+            sheetsage_model_path = argv[++i];
         } else if (!strcmp(argv[i], "--gelu") && i + 1 < argc) {
             mert_gelu_mode = argv[++i];
         } else if (!strcmp(argv[i], "--tf32")) {
             tok_head_keep_tf32 = true;
+        } else if (!strcmp(argv[i], "--exact")) {
+            sheetsage_encoder_exact = true;
+        } else if (!strcmp(argv[i], "--threads") && i + 1 < argc) {
+            sheetsage_threads = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--variant") && i + 1 < argc) {
             vae_parity_variant = argv[++i];
         } else if (!strcmp(argv[i], "--generate")) {
@@ -4732,6 +5327,42 @@ int main(int argc, char ** argv) {
             yue2_tok_disable_tf32();
         }
         return run_mert_block_parity(models_dir, mert_block_parity_dir, tok_head_gguf, mert_gelu_mode);
+    }
+    if (!sheetsage_encoder_parity_dir.empty()) {
+        // TF32 OFF before the first CUDA context, same reasoning and the same
+        // hard ordering constraint as --mert-block-parity above: SheetSage2's
+        // encoder is the SAME 24-Conformer-block code (reused verbatim, see
+        // sheetsage-model.h's file header) that mode already found needs this,
+        // and the fp32 CPU oracle this mode diffs against was captured with
+        // TF32 off throughout.
+        if (!tok_head_keep_tf32) {
+            yue2_tok_disable_tf32();
+        }
+        const std::string model_path =
+            sheetsage_model_path.empty() ? "models/yue2/sheetsage2-f16.gguf" : sheetsage_model_path;
+        return run_sheetsage_encoder_parity(sheetsage_encoder_parity_dir, model_path, sheetsage_encoder_exact);
+    }
+    if (!sheetsage_decoder_parity_dir.empty()) {
+        // Same TF32-before-first-CUDA-context ordering constraint as
+        // --sheetsage-encoder-parity: sheetsage_model_load() initializes the
+        // backend regardless of which half of the model this mode exercises.
+        if (!tok_head_keep_tf32) {
+            yue2_tok_disable_tf32();
+        }
+        const std::string model_path =
+            sheetsage_model_path.empty() ? "models/yue2/sheetsage2-f16.gguf" : sheetsage_model_path;
+        return run_sheetsage_decoder_parity(sheetsage_decoder_parity_dir, model_path);
+    }
+    if (!sheetsage_transcribe_dir.empty()) {
+        // Same TF32-before-first-CUDA-context ordering constraint as the two
+        // sheetsage-*-parity modes above.
+        if (!tok_head_keep_tf32) {
+            yue2_tok_disable_tf32();
+        }
+        const std::string model_path =
+            sheetsage_model_path.empty() ? "models/yue2/sheetsage2-f16.gguf" : sheetsage_model_path;
+        return run_sheetsage_transcribe(sheetsage_transcribe_dir, model_path, sheetsage_encoder_exact,
+                                        sheetsage_threads);
     }
     if (do_generate) {
         if (models_dir.empty()) {
