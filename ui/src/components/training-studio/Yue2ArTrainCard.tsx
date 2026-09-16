@@ -576,7 +576,7 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
               </div>
             ) : detail.abc ? (
               <div className="space-y-2">
-                <div ref={scoreRef} className="bg-white rounded-lg p-2 overflow-x-auto" />
+                <div ref={scoreRef} className="bg-white text-black rounded-lg p-2 overflow-x-auto [&_svg]:fill-current" />
                 {renderNote && <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 break-words">{renderNote}</div>}
                 <div ref={audioControlRef} className="text-xs" />
                 <div className="flex flex-col gap-1">
