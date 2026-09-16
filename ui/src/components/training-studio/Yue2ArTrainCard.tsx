@@ -500,7 +500,7 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
     scoreRef.current.innerHTML = '';
     let tunes: ReturnType<typeof abcjs.renderAbc> | undefined;
     try {
-      tunes = abcjs.renderAbc(scoreRef.current, detail.abc, { responsive: 'resize' });
+      tunes = abcjs.renderAbc(scoreRef.current, detail.abc, { responsive: 'resize', add_classes: true });
     } catch (e) {
       setRenderNote(`abcjs could not render this sheet: ${e instanceof Error ? e.message : String(e)}`);
       return;
@@ -511,7 +511,23 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
     if (audioControlRef.current && abcjs.synth.supportsAudio() && tunes[0]) {
       audioControlRef.current.innerHTML = '';
       const synthControl = new abcjs.synth.SynthController();
-      synthControl.load(audioControlRef.current, null, {
+      // Follow the playback: abcjs calls onEvent per note with the SVG
+      // elements it drew for it (add_classes above), so we tint those and
+      // keep them in view inside the scrolling paper.
+      const box = scoreRef.current;
+      let lit: Element[] = [];
+      const cursorControl = {
+        onStart() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
+        onEvent(ev: { elements?: Element[][] }) {
+          lit.forEach(el => el.classList.remove('abcjs-highlight'));
+          lit = (ev.elements ?? []).flat();
+          lit.forEach(el => el.classList.add('abcjs-highlight'));
+          const first = lit[0] as (Element & { scrollIntoView?: (o: ScrollIntoViewOptions) => void }) | undefined;
+          if (first && box) first.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        },
+        onFinished() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
+      };
+      synthControl.load(audioControlRef.current, cursorControl, {
         displayLoop: false, displayRestart: true, displayPlay: true,
         displayProgress: true, displayWarp: false,
       });
@@ -576,7 +592,7 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
               </div>
             ) : detail.abc ? (
               <div className="space-y-2">
-                <div ref={scoreRef} className="bg-white text-black rounded-lg p-2 overflow-x-auto [&_svg]:fill-current" />
+                <div ref={scoreRef} className="bg-white text-black rounded-lg p-2 max-h-[420px] overflow-auto [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500 [&_.abcjs-highlight]:stroke-amber-500" />
                 {renderNote && <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 break-words">{renderNote}</div>}
                 <div ref={audioControlRef} className="text-xs" />
                 <div className="flex flex-col gap-1">
