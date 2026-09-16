@@ -1533,9 +1533,6 @@ static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool coun
         }
         ggml_free(ctx);
         if (!ok) {
-            if (why) *why = "ggml_backend_sched_graph_compute failed on text chunk rows " + std::to_string(i)
-                          + ".." + std::to_string(i + Sc) + " of " + std::to_string(n_txt) + " (S=" + std::to_string(S)
-                          + ", V=" + std::to_string(V) + ") — usually an allocation failure; check VRAM";
             return false;
         }
     }
@@ -1634,6 +1631,9 @@ static bool yue2_at_head_text_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool
         }
         ggml_free(ctx);
         if (!ok) {
+            if (why) *why = "ggml_backend_sched_graph_compute failed on text chunk rows " + std::to_string(i)
+                          + ".." + std::to_string(i + Sc) + " of " + std::to_string(n_txt) + " (S=" + std::to_string(S)
+                          + ", V=" + std::to_string(V) + ") — usually an allocation failure; check VRAM";
             return false;
         }
     }
