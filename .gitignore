@@ -38,6 +38,9 @@ engine/build/
 engine/deps/
 engine/.cache/
 
+# Local clangd config: machine-specific CUDA toolkit path
+engine/.clangd
+
 # Binaries & compiled objects
 *.exe
 !Essentia/*.exe
