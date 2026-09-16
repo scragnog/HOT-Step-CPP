@@ -603,6 +603,11 @@ static bool yue2_at_build_sequence(const std::vector<int32_t> & prefix, const st
         }
         out->rows[(size_t) i] = (int32_t) row;
     }
+    // Reset first: `out` is reused across draws, and an `off` draw after a
+    // `full` one must not inherit the previous song's sheet range (that ran
+    // P5b on a sequence with no sheet and failed the range check).
+    out->text_sup0  = 0;
+    out->text_n_sup = 0;
     if (text_head_len > 0) {
         // [text_head_len, P-2] predicts ids[text_head_len+1 .. P-1] — the
         // sheet, ABC_END, MUSIC_START — and butts up EXACTLY against the codec
@@ -1528,6 +1533,9 @@ static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool coun
         }
         ggml_free(ctx);
         if (!ok) {
+            if (why) *why = "ggml_backend_sched_graph_compute failed on text chunk rows " + std::to_string(i)
+                          + ".." + std::to_string(i + Sc) + " of " + std::to_string(n_txt) + " (S=" + std::to_string(S)
+                          + ", V=" + std::to_string(V) + ") — usually an allocation failure; check VRAM";
             return false;
         }
     }
@@ -1562,7 +1570,7 @@ static bool yue2_at_head_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool coun
 // only ever exercises synthetic off-mode sequences (seq.text_n_sup == 0), so
 // this function is never on its path.
 static bool yue2_at_head_text_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool count_loss, int64_t total_n_sup,
-                                      double * ce_out) {
+                                      double * ce_out, std::string * why = nullptr) {
     Yue2AtState &     st    = *r.st;
     const Yue2Model & m     = *r.m;
     const int64_t     H     = (int64_t) m.lm_cfg.embedding_length;
@@ -1578,6 +1586,8 @@ static bool yue2_at_head_text_chunked(Yue2AtRun & r, const Yue2AtSeq & seq, bool
     const int64_t col0 = seq.text_sup0;
     const int64_t S    = (int64_t) seq.ids.size();
     if (n_txt < 1 || col0 < 0 || col0 + n_txt >= S) {
+        if (why) *why = "text supervision range out of the sequence: text_sup0=" + std::to_string(col0)
+                      + " text_n_sup=" + std::to_string(n_txt) + " S=" + std::to_string(S);
         return false;
     }
 
@@ -2009,9 +2019,10 @@ static bool yue2_at_micro_step(Yue2AtRun & r, const Yue2AtSeq & seq, bool count_
                 }
                 return false;
             }
-            if (!yue2_at_head_text_chunked(r, seq, count_loss, total_sup, &text_ce)) {
+            std::string why;
+            if (!yue2_at_head_text_chunked(r, seq, count_loss, total_sup, &text_ce, &why)) {
                 if (err) {
-                    *err = "P5b (text CE head) failed";
+                    *err = "P5b (text CE head) failed: " + (why.empty() ? std::string("(no detail)") : why);
                 }
                 return false;
             }
