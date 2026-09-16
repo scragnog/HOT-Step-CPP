@@ -1,3 +1,5 @@
+import { Yue2OptimizerFields } from './Yue2OptimizerFields';
+import type { Yue2OptimOptions } from '../../services/trainingApi';
 // Yue2ArTrainCard.tsx — Training Studio phase 3, the YuE2 AR half: stages 2,
 // 3, 5 and 7.
 //
@@ -1161,7 +1163,7 @@ export const Yue2ArRunsList: React.FC<{ datasetId: string; pickStep: number; rel
 
 // ── Stage 4: the AR LoRA ────────────────────────────────────────────────────
 
-interface TrainForm {
+interface TrainForm extends Yue2OptimOptions {
   lmType: string;
   trigger: string;
   allowNoTrigger: boolean;
@@ -1238,6 +1240,10 @@ export const Yue2ArTrainStageCard: React.FC<{
     // reports, and only then blank.
     trigger: trigger || status.trigger || '',
     allowNoTrigger: false,
+    optimizer: d.optimizer,
+    prodigyD0: d.prodigyD0,
+    muonLrScale: d.muonLrScale,
+    muonNsSteps: d.muonNsSteps,
     rank: d.rank,
     alpha: d.alpha,
     target: d.target,
@@ -1305,6 +1311,8 @@ export const Yue2ArTrainStageCard: React.FC<{
         sidecars: form.sidecars,
         target: form.target,
         rank: form.rank, alpha: form.alpha,
+        optimizer: form.optimizer, prodigyD0: form.prodigyD0,
+        muonLrScale: form.muonLrScale, muonNsSteps: form.muonNsSteps,
         lr: form.lr, lrScheduler: form.lrScheduler,
         schedSteps: form.schedSteps, warmup: form.warmup,
         steps: form.steps,
@@ -1434,7 +1442,7 @@ export const Yue2ArTrainStageCard: React.FC<{
                 <NumField label={t('trainingStudio.yue2ar.rank', 'Rank')} value={form.rank}
                   onChange={v => set('rank', v)} step={16}
                   hint={t('trainingStudio.yue2ar.rankHint',
-                    'Upstream\'s rank, and the gate\'s floor: below 64 the probes come back '
+                    'Defaults to 128. Below 64 the gradient probes come back '
                     + 'inconclusive.') as string} />
                 <NumField label={t('trainingStudio.yue2ar.saveEvery', 'Snapshot every')}
                   value={form.saveEvery} onChange={v => set('saveEvery', v)} step={10}
@@ -1521,12 +1529,13 @@ export const Yue2ArTrainStageCard: React.FC<{
                       + 'is not established, so the others are offered without a ranking.')}
                   </span>
                 </label>
-                <NumField label={t('trainingStudio.yue2ar.lr', 'Learning rate')} value={form.lr}
+                <Yue2OptimizerFields value={form} onChange={patch => setEdits(p => ({ ...p, ...patch }))} />
+                  {form.optimizer !== 'prodigy' && (<NumField label={t('trainingStudio.yue2ar.lr', 'Learning rate')} value={form.lr}
                   onChange={v => set('lr', v)} step={1e-5}
                   hint={t('trainingStudio.yue2ar.lrHint',
                     'Cosine over a {{h}}-step horizon that a {{n}}-step run never reaches the end of — the '
                     + 'run is the head of that curve, not a complete decay.',
-                    { h: d?.schedSteps, n: d?.steps }) as string} />
+                    { h: d?.schedSteps, n: d?.steps }) as string} />)}
               </div>
 
               <button

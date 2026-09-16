@@ -1,3 +1,4 @@
+import { yue2OptimRequest } from '../services/training/yue2Optim.js';
 // training.ts — Dataset Studio HTTP surface (Training Studio phase 1)
 //
 // Import audio → local label (/understand + Essentia) → optional cloud enhance
@@ -3138,7 +3139,11 @@ router.post('/datasets/:id/yue2-train', (req: Request, res: Response) => {
     const runName = yue2RunName(ds.slug);
     const outDir = yue2AdapterRunDir(runName);
 
+    let optim;
+    try { optim = yue2OptimRequest(b); }
+    catch (error) { res.status(400).json({ error: (error as Error).message }); return; }
     const job = queue.startYue2TrainJob(ds.id, {
+      ...optim,
       manifest,
       outDir,
       lmType,
@@ -3744,7 +3749,11 @@ router.post('/datasets/:id/yue2-ar-train', (req: Request, res: Response) => {
     const runName = yue2ArRunName(ds.slug);
     const outDir = yue2ArAdapterRunDir(runName);
 
+    let optim;
+    try { optim = yue2OptimRequest(b); }
+    catch (error) { res.status(400).json({ error: (error as Error).message }); return; }
     const job = queue.startYue2ArTrainJob(ds.id, {
+      ...optim,
       manifest,
       minted,
       // The two engine permissions are set from the guards above, not inferred

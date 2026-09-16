@@ -1,3 +1,4 @@
+import { yue2StoredOptimizer } from './yue2Optim.js';
 // training/yue2ArRuns.ts — reading a finished (or half-finished) YuE2 AR run
 // off disk. The AR twin of yue2Runs.ts, and the three sources are the same
 // three: hotstep-run.json written here on every launch, train-log.jsonl written
@@ -159,6 +160,7 @@ interface LogFacts {
   init?: Record<string, unknown>;
   lastStep: number;
   lastLoss?: number;
+  lastLossStep?: number;
   totalSteps: number;
   /** step -> loss, for the checkpoint ladder. */
   milestones: Map<number, number>;
@@ -199,6 +201,7 @@ function readLog(dir: string): LogFacts {
         const loss = num('loss');
         if (loss !== undefined) {
           facts.lastLoss = loss;
+          facts.lastLossStep = s;
           if (!facts.best || loss < facts.best.loss) facts.best = { step: s ?? facts.lastStep, loss };
         }
         facts.totalSteps = num('totalSteps') ?? facts.totalSteps;
@@ -373,6 +376,12 @@ export function readYue2ArRun(dir: string): Yue2ArRunSummary | null {
   const facts    = readLog(dir);
   const configuredSteps = manifest?.options.steps ?? facts.totalSteps ?? 0;
   const ckpts    = yue2ArCheckpointsIn(dir, facts.milestones, configuredSteps);
+  for (const checkpoint of ckpts) {
+    // Final exports do not emit a milestone; use their own final-step loss.
+    if (checkpoint.final && checkpoint.step === facts.lastLossStep && Number.isFinite(facts.lastLoss)) {
+      checkpoint.loss = facts.lastLoss;
+    }
+  }
   const statePath = yue2ArResumeStatePath(dir);
   let stateStat: fs.Stats | null = null;
   try { stateStat = fs.statSync(statePath); } catch { /* no state: finished cleanly, or never started */ }
@@ -565,5 +574,5 @@ export function resolveYue2ArRunDir(runName: string): string | null {
  *  nothing useful to say. */
 export function yue2ArResumeOptionsFor(dir: string): ResolvedYue2ArTrainOptions | null {
   const manifest = readYue2ArRunManifest(dir);
-  return manifest?.options ? { ...manifest.options, outDir: dir } : null;
+  return manifest?.options ? { ...manifest.options, ...yue2StoredOptimizer(manifest.options), outDir: dir } : null;
 }

@@ -1,3 +1,5 @@
+import { Yue2OptimizerFields } from './Yue2OptimizerFields';
+import type { Yue2OptimOptions } from '../../services/trainingApi';
 // Yue2TrainCard.tsx — Training Studio phase 3, YuE2 branch: stages 1 and 4.
 //
 // Two of the five YuE2 stages Yue2TrainStages.tsx renders in order: stage 1,
@@ -575,7 +577,7 @@ export const Yue2RunsList: React.FC<{ datasetId: string; reloadKey: unknown }> =
 
 // ── Training ────────────────────────────────────────────────────────────────
 
-interface TrainForm {
+interface TrainForm extends Yue2OptimOptions {
   lmType: string;
   trigger: string;
   rank: number;
@@ -636,6 +638,10 @@ export const Yue2NarTrainCard: React.FC<{
     // reports, and only then blank. Without one the adapter has no handle at
     // generation time and the route refuses the run.
     trigger: trigger || status.trigger || '',
+    optimizer: d.optimizer,
+    prodigyD0: d.prodigyD0,
+    muonLrScale: d.muonLrScale,
+    muonNsSteps: d.muonNsSteps,
     rank: d.rank,
     alpha: d.alpha,
     target: d.target,
@@ -681,7 +687,7 @@ export const Yue2NarTrainCard: React.FC<{
   const chosenBase = status?.bases.find(b => b.id === form?.lmType);
   const peak = (() => {
     if (!form || !status) return null;
-    const mb = estimateYue2PeakMb(chosenBase?.bytes ?? 0, form.rank, status.vramModel);
+    const mb = estimateYue2PeakMb(chosenBase?.bytes ?? 0, form.rank, status.vramModel, form.optimizer);
     const gbStr = (mb / 1024).toFixed(1);
     const total = status.gpuTotalMb || 0;
     // 0 means the engine could not be read, NOT a card with no memory. Show the
@@ -716,6 +722,8 @@ export const Yue2NarTrainCard: React.FC<{
         ...(activePreset === 'custom' ? {} : { preset: activePreset }),
         lmType: form.lmType,
         rank: form.rank, alpha: form.alpha, target: form.target,
+        optimizer: form.optimizer, prodigyD0: form.prodigyD0,
+        muonLrScale: form.muonLrScale, muonNsSteps: form.muonNsSteps,
         lr: form.lr, lrScheduler: form.lrScheduler,
         steps: form.steps, warmup: form.warmup,
         saveEvery: form.saveEvery, logEvery: form.logEvery,
@@ -896,8 +904,9 @@ export const Yue2NarTrainCard: React.FC<{
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <NumField label={t('trainingStudio.yue2.alpha', 'Alpha')} value={form.alpha}
                     onChange={v => set('alpha', v)} step={64} />
-                  <NumField label={t('trainingStudio.yue2.lr', 'Learning rate')} value={form.lr}
-                    onChange={v => set('lr', v)} step={1e-5} />
+                  <Yue2OptimizerFields value={form} onChange={patch => setEdits(p => ({ ...p, ...patch }))} />
+                  {form.optimizer !== 'prodigy' && (<NumField label={t('trainingStudio.yue2.lr', 'Learning rate')} value={form.lr}
+                    onChange={v => set('lr', v)} step={1e-5} />)}
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
                       {t('trainingStudio.yue2.lrScheduler', 'Schedule')}

@@ -149,7 +149,9 @@
 
 // ── Arguments (contract §8) ────────────────────────────────────────────────
 
-struct Yue2ArTrainArgs {
+#include "yue2-train-optim.h"
+
+struct Yue2ArTrainArgs : Yue2OptimConfig {
     // Discovery is directory-based (yue2_discover scans <dir>/yue2 then <dir>),
     // so --lm is split into a search directory and a type token and handed to
     // the normal loader rather than opening the file behind its back.
@@ -181,8 +183,8 @@ struct Yue2ArTrainArgs {
     std::string style_template = "upstream";
 
     std::string target = "attn_mlp";  // attn | attn_mlp   (attn_mlp_embed: refused, contract §2.3)
-    int64_t     rank   = 64;          // upstream's rank, and the FD gate's (contract §6.4)
-    float       alpha  = 64.0f;
+    int64_t     rank   = 128;          // application default; the FD reference uses rank 64
+    float       alpha  = 128.0f;
     uint64_t    seed   = 42;
 
     // ── the loop: upstream's numbers, unchanged, because nothing has been
@@ -1038,7 +1040,7 @@ static void yue2_at_train_ctx_free(Yue2AtTrainCtx * C) {
 static bool yue2_at_train_ctx_init(const Yue2Model & m, int n_layers, int64_t rank, float alpha,
                                    Yue2AtTarget target, uint64_t seed, float b_sigma, float lossgrad,
                                    float grad_clip, const char * tag, Yue2AtTrainCtx * C, std::string * err,
-                                   bool cursor_head = false) {
+                                   bool cursor_head = false, const Yue2OptimConfig * optim = nullptr) {
     const size_t     n_tensors = yue2_at_adapter_tensor_count(n_layers, target);
     ggml_init_params aip       = { (n_tensors + 16) * ggml_tensor_overhead(), nullptr, /*no_alloc*/ true };
     C->actx                    = ggml_init(aip);
@@ -1102,7 +1104,7 @@ static bool yue2_at_train_ctx_init(const Yue2Model & m, int n_layers, int64_t ra
         ggml_backend_tensor_set(C->t_eps, &epsv, 0, sizeof(float));
     }
 
-    C->opt.optimizer  = "adamw";
+    yue2_optim_configure(&C->opt, optim);
     C->opt.t_lossgrad = C->t_lossgrad;
     C->opt.t_adamw    = C->t_adamw;
     C->opt.t_clip     = C->t_clip;
@@ -1119,7 +1121,7 @@ static bool yue2_at_train_ctx_init(const Yue2Model & m, int n_layers, int64_t ra
     bp.cpu_backend = m.cpu_backend;
     bp.has_gpu     = m.backend != m.cpu_backend;
     C->sched       = backend_sched_new(bp, 65536);
-    C->osched      = backend_sched_new(bp, 16384);
+    C->osched      = backend_sched_new(bp, std::max(16384, C->opt.est_nodes));
     if (!C->sched || !C->osched) {
         *err = "scheduler alloc failed";
         return false;
@@ -1166,7 +1168,7 @@ enum {
 // {lr_floor 1, total 1, warmup 0} makes lm_lr_lambda identically 1.0, and
 // `base_lr`, set per step from here, carries the whole schedule exactly.
 static double yue2_at_lr_at(const Yue2ArTrainArgs & a, int64_t step1) {
-    const double lr   = (double) a.lr;
+    const double lr = a.optimizer == "prodigy" ? 1.0 : (double) a.lr;
     const double warm = (a.warmup > 0) ? std::min(1.0, (double) step1 / (double) a.warmup) : 1.0;
     if (a.lr_scheduler != "cosine") {
         return lr * warm;
@@ -1206,7 +1208,8 @@ static const char     YUE2_AT_CKPT_MAGIC[8] = { 'Y', '2', 'A', 'R', 'C', 'K', '1
 // 2: AdamW betas joined the state. They were (0.9, 0.999) by omission and are
 // now (0.9, 0.95) to match upstream, which changes the update rule — so a v1
 // state must refuse rather than resume into different optimizer dynamics.
-static const uint32_t YUE2_AT_CKPT_VERSION  = 2;
+// 3: optimizer identity, settings and complete Prodigy state. v2 remains AdamW-only.
+static const uint32_t YUE2_AT_CKPT_VERSION  = 3;
 
 struct Yue2AtCkptState {
     int32_t  rank = 0, n_params = 0, n_layers = 0, target = 0;
@@ -1323,6 +1326,7 @@ static bool yue2_at_ckpt_save(const std::string & path, const Yue2AtCkptState & 
     ok = ok && yue2_at_put(f, st.adam_beta1) && yue2_at_put(f, st.adam_beta2);
     ok = ok && yue2_at_put(f, st.steps_done) && yue2_at_put(f, st.loss_sum) && yue2_at_put(f, st.n_micro);
     ok = ok && yue2_at_put(f, st.opt_step) && yue2_at_put(f, st.opt_iter);
+    ok = ok && yue2_optim_save(f, C.opt);
     {
         const uint32_t n = (uint32_t) C.params.size();
         ok               = ok && yue2_at_put(f, n);
@@ -1331,23 +1335,11 @@ static bool yue2_at_ckpt_save(const std::string & path, const Yue2AtCkptState & 
         }
     }
     {
-        uint32_t n = 0;
-        for (size_t j = 0; j < C.opt.mom_m.size(); j++) {
-            if (C.opt.mom_m[j]) {
-                n++;
-            }
-            if (j < C.opt.mom_v.size() && C.opt.mom_v[j]) {
-                n++;
-            }
-        }
+        const auto tensors = yue2_optim_state_tensors(C.opt);
+        const uint32_t n = (uint32_t) tensors.size();
         ok = ok && yue2_at_put(f, n);
-        for (size_t j = 0; ok && j < C.opt.mom_m.size(); j++) {
-            if (C.opt.mom_m[j]) {
-                ok = ok && yue2_at_put_tensor(f, C.opt.mom_m[j], &scratch);
-            }
-            if (ok && j < C.opt.mom_v.size() && C.opt.mom_v[j]) {
-                ok = yue2_at_put_tensor(f, C.opt.mom_v[j], &scratch);
-            }
+        for (auto * t : tensors) {
+            if (ok) ok = yue2_at_put_tensor(f, t, &scratch);
         }
     }
     const uint32_t eof_marker = 0xD09EF00Du;
@@ -1386,7 +1378,7 @@ static bool yue2_at_ckpt_load(const std::string & path, const Yue2AtCkptState & 
         return fail("not a yue2-ar-train checkpoint");
     }
     uint32_t ver = 0;
-    if (!yue2_at_get(f, &ver) || ver != YUE2_AT_CKPT_VERSION) {
+    if (!yue2_at_get(f, &ver) || (ver != 2 && ver != YUE2_AT_CKPT_VERSION)) {
         return fail("checkpoint version " + std::to_string(ver) + ", this build writes " +
                     std::to_string(YUE2_AT_CKPT_VERSION));
     }
@@ -1403,6 +1395,8 @@ static bool yue2_at_ckpt_load(const std::string & path, const Yue2AtCkptState & 
     if (!ok) {
         return fail("truncated header");
     }
+    std::string optim_err;
+    if (!yue2_optim_load(f, ver, &C->opt, &optim_err)) return fail(optim_err);
     if (st.rank != want.rank || st.n_params != want.n_params || st.n_layers != want.n_layers ||
         st.target != want.target || st.grad_accum != want.grad_accum || st.seed != want.seed ||
         st.alpha != want.alpha) {
@@ -1444,16 +1438,12 @@ static bool yue2_at_ckpt_load(const std::string & path, const Yue2AtCkptState & 
     for (ggml_tensor * t : C->params) {
         live[ggml_get_name(t)] = t;
     }
-    for (size_t j = 0; j < C->opt.mom_m.size(); j++) {
-        if (C->opt.mom_m[j]) {
-            live[ggml_get_name(C->opt.mom_m[j])] = C->opt.mom_m[j];
-        }
-        if (j < C->opt.mom_v.size() && C->opt.mom_v[j]) {
-            live[ggml_get_name(C->opt.mom_v[j])] = C->opt.mom_v[j];
-        }
+    for (auto * t : yue2_optim_state_tensors(C->opt)) {
+        live[ggml_get_name(t)] = t;
     }
     std::vector<uint8_t> scratch;
     int                  restored = 0;
+    std::unordered_map<std::string, bool> seen;
     for (int block = 0; block < 2; block++) {
         uint32_t n = 0;
         if (!yue2_at_get(f, &n)) {
@@ -1465,6 +1455,8 @@ static bool yue2_at_ckpt_load(const std::string & path, const Yue2AtCkptState & 
             if (!yue2_at_get_str(f, &name) || !yue2_at_get(f, &bytes)) {
                 return fail("truncated tensor record");
             }
+            if (seen[name]) return fail("duplicate tensor record");
+            seen[name] = true;
             auto lit = live.find(name);
             if (lit == live.end()) {
                 return fail("holds tensor \"" + name + "\", which this run does not have");
@@ -2926,10 +2918,11 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     Yue2AtTrainCtx C;
     if (!yue2_at_train_ctx_init(m, n_layers, a.rank, a.alpha, target, a.seed, /*b_sigma=*/0.0f,
                                 /*lossgrad=*/1.0f, a.max_grad_norm, "yue2-ar-train", &C, &err,
-                                /*cursor_head=*/n_bound > 0)) {
+                                /*cursor_head=*/n_bound > 0, &a)) {
         fprintf(stderr, "[yue2-ar-train] %s\n", err.c_str());
         return 1;
     }
+    yue2_optim_report(C.opt);
     C.opt.weight_decay = a.weight_decay;
     // upstream's betas, not lm-optim.h's default (ar_lora_cursor.py:31:
     // `betas=(0.9,0.95)`). This used to be a known, deliberate divergence, and
@@ -3024,7 +3017,7 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
         step0    = got.steps_done;
         loss_sum = got.loss_sum;
         n_micro  = got.n_micro;
-        fprintf(stderr, "[yue2-ar-train] resumed from %s at step %lld/%lld (AdamW iter %d)\n",
+        fprintf(stderr, "[yue2-ar-train] resumed from %s at step %lld/%lld (optimizer iter %d)\n",
                 ckpt_path.c_str(), (long long) step0, (long long) a.steps, C.opt.opt_iter);
         if (step0 >= a.steps) {
             fprintf(stderr, "[yue2-ar-train] that run is already finished; nothing to do\n");

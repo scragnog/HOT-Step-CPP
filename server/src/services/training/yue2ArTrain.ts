@@ -1,3 +1,4 @@
+import { YUE2_OPTIM_DEFAULTS, yue2OptimArgs, type Yue2OptimOptions } from './yue2Optim.js';
 // training/yue2ArTrain.ts — YuE2 AR LoRA training: defaults, the regulariser
 // pack's location and the argv builder.
 //
@@ -137,16 +138,16 @@ export const YUE2_AR_OVERTRAIN_STEPS = 1500;
 // no second copy of these numbers exists on the client. Same rule as
 // YUE2_NAR_DEFAULTS and MM3_LM_DEFAULTS.
 export const YUE2_AR_DEFAULTS = {
+  ...YUE2_OPTIM_DEFAULTS,
   /** The base the recipe was proven on, and the only one an AR run has been
    *  measured against. Whether a quantized base trains here is not
    *  established. */
   lmType: 'bf16',
 
   // ── the LoRA ──
-  /** Upstream's rank, and the FD gate's: below 64 the gate's step cap sits
-   *  under the loss floor and every probe comes back INCONCLUSIVE. */
-  rank: 64,
-  alpha: 64,
+  /** Application default. The upstream reference and gradient gate use 64. */
+  rank: 128,
+  alpha: 128,
   /** qkvo + gate/up/down on all 28 layers — upstream's own group. */
   target: 'attn_mlp' as Yue2ArTarget,
   styleTemplate: 'upstream' as Yue2StyleTemplate,
@@ -277,7 +278,7 @@ export { yue2RunName as yue2ArRunName } from './yue2Train.js';
 // (engine/tools/ace-train.cpp). An unknown option is a hard exit 2, so nothing
 // speculative belongs here.
 
-export interface ResolvedYue2ArTrainOptions {
+export interface ResolvedYue2ArTrainOptions extends Partial<Yue2OptimOptions> {
   /** `<latents>/yue2_preprocess.json`, read as SOURCES rather than clips: the
    *  source-level `codec_ids` file is the whole-song code array. It must
    *  already carry codes (`yue2-tokenize`), and `cursor_words`
@@ -354,6 +355,7 @@ export function buildYue2ArTrainArgs(o: ResolvedYue2ArTrainOptions): string[] {
   const m = resolveYue2TrainModels(o.lmType);
   const args = [
     'yue2-ar-train',
+    ...yue2OptimArgs(o),
     '--lm', m.lm,
     '--manifest', o.manifest,
     '--out', o.outDir,

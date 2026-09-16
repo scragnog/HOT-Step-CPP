@@ -1,3 +1,4 @@
+import { YUE2_OPTIM_DEFAULTS, yue2OptimArgs, type Yue2OptimOptions } from './yue2Optim.js';
 // training/yue2Train.ts — YuE2 NAR LoRA training: model resolution, defaults,
 // the VRAM model and the two argv builders.
 //
@@ -171,6 +172,7 @@ export function availableYue2Bases(rank: number = YUE2_NAR_DEFAULTS.rank): Yue2B
 // second copy of these numbers exists on the client. Same rule as
 // MM3_LM_DEFAULTS.
 export const YUE2_NAR_DEFAULTS = {
+  ...YUE2_OPTIM_DEFAULTS,
   /** The only base a run has been measured on. 19.6 GB at rank 256, ~7 GB of
    *  which is the file itself. Whether a quantized base trains at all here is
    *  NOT established — see availableYue2Bases. */
@@ -347,6 +349,8 @@ export const YUE2_VRAM_MODEL = {
    *  AdamW's second moment, over the nar_attn_mlp site set. Fitted, not
    *  derived — the two anchors are the authority. */
   perRankMb: 20.3125,
+  // One F32 state buffer per rank, derived from the 28 NAR blocks and heads.
+  optimizerBufferPerRankMb: (28 * (14336 + 24576) + 10624) * 4 / 1048576,
   /** Everything that is neither the base file nor the rank: activations, the
    *  checkpoint segments, the K/V canvases and the arena. */
   constMb: 7469,
@@ -374,10 +378,12 @@ export const YUE2_VRAM_MODEL = {
  *  SHIPPED TO THE UI AS COEFFICIENTS, not just as an answer: the form
  *  re-estimates as rank moves, and a second copy of these numbers over there
  *  would drift from the measurements that produced them. */
-export function estimateYue2PeakMb(baseBytes: number, rank: number): number {
+export function estimateYue2PeakMb(baseBytes: number, rank: number, optimizer: Yue2OptimOptions['optimizer'] = YUE2_NAR_DEFAULTS.optimizer): number {
   const M = YUE2_VRAM_MODEL;
   const loaded = baseBytes > 0 ? baseBytes / 1048576 : M.fallbackBaseMb;
-  return Math.round(loaded + M.perRankMb * Math.max(0, rank) + M.constMb);
+  // Keep Muon's estimate conservative: its graph workspace is not measured.
+  const extra = optimizer === 'prodigy' ? 2 * M.optimizerBufferPerRankMb : 0;
+  return Math.round(loaded + (M.perRankMb + extra) * Math.max(0, rank) + M.constMb);
 }
 
 /** Peak VRAM for the preprocess stage, in MB. The VAE file plus the encode
@@ -537,7 +543,7 @@ export function buildYue2PreprocessArgs(o: ResolvedYue2PreprocessOptions): strin
   return args;
 }
 
-export interface ResolvedYue2TrainOptions {
+export interface ResolvedYue2TrainOptions extends Partial<Yue2OptimOptions> {
   /** `<latents>/yue2_preprocess.json`. */
   manifest: string;
   outDir: string;
@@ -584,6 +590,7 @@ export function buildYue2TrainArgs(o: ResolvedYue2TrainOptions): string[] {
   const m = resolveYue2TrainModels(o.lmType);
   const args = [
     'yue2-nar-train',
+    ...yue2OptimArgs(o),
     '--lm', m.lm,
     '--manifest', o.manifest,
     '--out', o.outDir,

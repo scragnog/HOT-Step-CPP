@@ -246,6 +246,11 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
               ].filter(Boolean).join(' · ')}
             </p>
             <p className="text-[10px] text-zinc-500 font-mono break-all">{selected}</p>
+            <p className="text-[11px] text-zinc-700 dark:text-zinc-300 tabular-nums">
+              {typeof entry?.loss === 'number' && Number.isFinite(entry.loss)
+                ? t('globalBar.yue2AdapterLoss', 'Training loss: {{loss}}', { loss: entry.loss.toFixed(4) })
+                : t('globalBar.yue2AdapterLossUnknown', 'Training loss: not recorded')}
+            </p>
             {/* Chosen vs merged: the delta is baked in at load, so a fresh pick
                 is not in force until the next generation warms the model.
                 Saying "merged" while nothing is merged would be a lie for that

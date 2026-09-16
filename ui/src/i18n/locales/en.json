@@ -1,5 +1,13 @@
 {
   "translation": {
+    "globalBar.yue2AdapterLoss": "Training loss: {{loss}}",
+    "globalBar.yue2AdapterLossUnknown": "Training loss: not recorded",
+    "trainingStudio.yue2Optim.optimizer": "Optimizer",
+    "trainingStudio.yue2Optim.prodigyHint": "Learns the effective learning rate. Warmup and schedule still apply; the base multiplier is 1.0. Uses two extra optimizer buffers compared with AdamW.",
+    "trainingStudio.yue2Optim.d0": "Initial step estimate (d0)",
+    "trainingStudio.yue2Optim.muonScale": "Muon learning-rate scale",
+    "trainingStudio.yue2Optim.muonSteps": "Orthogonalization iterations",
+    "trainingStudio.yue2Optim.muonHint": "Matrices with a short side below 16 use AdamW. The training log reports how many tensors use Muon.",
     "test": "This is a test",
     "sidebar.collapse": "Collapse",
     "sidebar.expand": "Expand",

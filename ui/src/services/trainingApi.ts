@@ -474,6 +474,7 @@ export interface Yue2BaseInfo {
 /** Coefficients for estimateYue2PeakMb, fitted to two measured anchors
  *  (rank 128 -> 17.0 GB, rank 256 -> 19.6 GB, bf16 base included in both). */
 export interface Yue2VramModel {
+  optimizerBufferPerRankMb: number;
   perRankMb: number;
   constMb: number;
   fallbackBaseMb: number;
@@ -484,7 +485,14 @@ export interface Yue2VramModel {
 }
 
 /** The measured recipe, shipped rather than duplicated client-side. */
-export interface Yue2Defaults {
+export interface Yue2OptimOptions {
+  optimizer: 'adamw' | 'prodigy' | 'muon';
+  prodigyD0: number;
+  muonLrScale: number;
+  muonNsSteps: number;
+}
+
+export interface Yue2Defaults extends Yue2OptimOptions {
   lmType: string;
   vaeVariant: Yue2VaeVariant;
   rank: number;
@@ -560,9 +568,10 @@ export interface Yue2Status {
 /** Peak VRAM in MB for a training configuration. Linear in rank, not quadratic
  *  in sequence length like MM3's: clip length is fixed by the manifest and the
  *  AR prefix is cached, so nothing scales with a crop the user can drag. */
-export function estimateYue2PeakMb(baseBytes: number, rank: number, m: Yue2VramModel): number {
+export function estimateYue2PeakMb(baseBytes: number, rank: number, m: Yue2VramModel, optimizer: Yue2OptimOptions['optimizer'] = 'prodigy'): number {
   const loaded = baseBytes > 0 ? baseBytes / 1048576 : m.fallbackBaseMb;
-  return Math.round(loaded + m.perRankMb * Math.max(0, rank) + m.constMb);
+  const extra = optimizer === 'prodigy' ? 2 * m.optimizerBufferPerRankMb : 0;
+  return Math.round(loaded + (m.perRankMb + extra) * Math.max(0, rank) + m.constMb);
 }
 
 /** POST /api/training/datasets/:id/yue2-preprocess */
@@ -585,7 +594,7 @@ export interface Yue2PreprocessRequest {
 }
 
 /** POST /api/training/datasets/:id/yue2-train */
-export interface Yue2TrainRequest {
+export interface Yue2TrainRequest extends Partial<Yue2OptimOptions> {
   /** Informational: the route lays a named preset UNDER the fields below, so
    *  sending both trains the preset with those overrides. */
   preset?: Yue2PresetName;
@@ -787,7 +796,7 @@ export interface Yue2AlignDefaults {
 
 /** The settled AR recipe, proven by ear, shipped rather than duplicated
  *  client-side. NOT the NAR recipe — none of those numbers apply here. */
-export interface Yue2ArDefaults {
+export interface Yue2ArDefaults extends Yue2OptimOptions {
   lmType: string;
   rank: number;
   alpha: number;
@@ -963,7 +972,7 @@ export interface Yue2SheetRequest {
 /** POST /api/training/datasets/:id/yue2-ar-train. No preset field: the NAR
  *  ladder belongs to the other model half and none of its numbers mean
  *  anything here. */
-export interface Yue2ArTrainRequest {
+export interface Yue2ArTrainRequest extends Partial<Yue2OptimOptions> {
   lmType?: string;
   trigger?: string;
   allowNoTrigger?: boolean;

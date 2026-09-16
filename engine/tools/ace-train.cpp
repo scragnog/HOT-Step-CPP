@@ -53,6 +53,7 @@
 // Must follow yue2-nar-train-run.h: it reuses that file's LoRA factor struct,
 // its splitmix64 RNG and its kaiming/zero adapter init verbatim.
 #include "train/yue2-ar-train-run.h"
+#include "train/yue2-optim-check.h"
 #include "model-registry.h"
 #include "train/dit-train-run.h"   // pulls in every dit-*.h (DiT LoRA trainer)
 #include "train/lm-train-run.h"    // pulls in every lm-*.h (LM LoRA trainer)
@@ -469,6 +470,10 @@ static void print_usage(void) {
             "                trained style is addressed by at generation time. Without one the\n"
             "                adapter has no handle; the loop warns.\n"
             "                [--name yue2_nar_lora]  export stem\n"
+            "                [--optimizer prodigy|adamw|muon] (default prodigy)\n"
+            "                [--prodigy-d0 1e-6] Prodigy ignores --lr; schedule base is 1.0.\n"
+            "                [--muon-lr-scale 1] [--muon-momentum 0.95] [--muon-ns-steps 5]\n"
+            "                [--muon-min-dim 16] [--muon-bucket 16] [--no-muon-nesterov]\n"
             "                [--rank 16] [--alpha 16] [--lr 1e-4] [--steps 800] [--warmup 50]\n"
             "                [--lr-scheduler cosine|constant] [--grad-accum 1]\n"
             "                [--max-grad-norm 1.0] [--weight-decay 0.01] [--seed 42]\n"
@@ -588,7 +593,11 @@ static void print_usage(void) {
             "                half-read. --trigger is NOT applied to minted styles and the\n"
             "                minted_val hold-out is excluded from training, both as upstream.\n"
             "                [--artist-frac 0.5]  one draw per micro-step.\n"
-            "                [--rank 64] [--alpha 64] [--lr 1e-4] [--steps 1600] [--warmup 50]\n"
+            "                [--optimizer prodigy|adamw|muon] (default prodigy)\n"
+            "                [--prodigy-d0 1e-6] Prodigy ignores --lr; schedule base is 1.0.\n"
+            "                [--muon-lr-scale 1] [--muon-momentum 0.95] [--muon-ns-steps 5]\n"
+            "                [--muon-min-dim 16] [--muon-bucket 16] [--no-muon-nesterov]\n"
+            "                [--rank 128] [--alpha 128] [--lr 1e-4] [--steps 1600] [--warmup 50]\n"
             "                [--sched-steps 3000]  the cosine HORIZON (upstream's SCHED_STEPS),\n"
             "                which is longer than the run, so the cosine never reaches its\n"
             "                floor of 0.2*lr. [--lr-scheduler cosine|constant]\n"
@@ -4546,6 +4555,14 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--lr"))          a.lr         = (float) atof(next("--lr"));
         else if (!strcmp(argv[i], "--steps"))       a.steps      = atoll(next("--steps"));
         else if (!strcmp(argv[i], "--warmup"))      a.warmup     = atoll(next("--warmup"));
+        else if (!strcmp(argv[i], "--optimizer")) a.optimizer = next("--optimizer");
+        else if (!strcmp(argv[i], "--prodigy-d0")) a.prodigy_d0 = (float) atof(next("--prodigy-d0"));
+        else if (!strcmp(argv[i], "--muon-lr-scale")) a.muon.lr_scale = (float) atof(next("--muon-lr-scale"));
+        else if (!strcmp(argv[i], "--muon-momentum")) a.muon.momentum = (float) atof(next("--muon-momentum"));
+        else if (!strcmp(argv[i], "--muon-ns-steps")) a.muon.ns_steps = atoi(next("--muon-ns-steps"));
+        else if (!strcmp(argv[i], "--muon-min-dim")) a.muon.min_dim = atoi(next("--muon-min-dim"));
+        else if (!strcmp(argv[i], "--muon-bucket")) a.muon.bucket = atoi(next("--muon-bucket"));
+        else if (!strcmp(argv[i], "--no-muon-nesterov")) a.muon.nesterov = false;
         else if (!strcmp(argv[i], "--lr-scheduler")) a.lr_scheduler = next("--lr-scheduler");
         else if (!strcmp(argv[i], "--grad-accum"))  a.grad_accum = atoll(next("--grad-accum"));
         else if (!strcmp(argv[i], "--t-sampling"))  a.t_sampling = next("--t-sampling");
@@ -4573,6 +4590,7 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }
+    if (!yue2_optim_valid(a)) return 2;
     if (a.lm_path.empty() && a.models_dir.empty()) {
         fprintf(stderr, "ace-train yue2-nar-train: one of --lm <yue2-lm-*.gguf> or --models <dir> "
                         "is required\n");
@@ -4868,6 +4886,14 @@ static int cmd_yue2_ar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--lr"))            a.lr         = (float) atof(next("--lr"));
         else if (!strcmp(argv[i], "--steps"))         a.steps      = atoll(next("--steps"));
         else if (!strcmp(argv[i], "--warmup"))        a.warmup     = atoll(next("--warmup"));
+        else if (!strcmp(argv[i], "--optimizer")) a.optimizer = next("--optimizer");
+        else if (!strcmp(argv[i], "--prodigy-d0")) a.prodigy_d0 = (float) atof(next("--prodigy-d0"));
+        else if (!strcmp(argv[i], "--muon-lr-scale")) a.muon.lr_scale = (float) atof(next("--muon-lr-scale"));
+        else if (!strcmp(argv[i], "--muon-momentum")) a.muon.momentum = (float) atof(next("--muon-momentum"));
+        else if (!strcmp(argv[i], "--muon-ns-steps")) a.muon.ns_steps = atoi(next("--muon-ns-steps"));
+        else if (!strcmp(argv[i], "--muon-min-dim")) a.muon.min_dim = atoi(next("--muon-min-dim"));
+        else if (!strcmp(argv[i], "--muon-bucket")) a.muon.bucket = atoi(next("--muon-bucket"));
+        else if (!strcmp(argv[i], "--no-muon-nesterov")) a.muon.nesterov = false;
         else if (!strcmp(argv[i], "--lr-scheduler"))  a.lr_scheduler = next("--lr-scheduler");
         else if (!strcmp(argv[i], "--sched-steps"))   a.sched_steps  = atoll(next("--sched-steps"));
         else if (!strcmp(argv[i], "--grad-accum"))    a.grad_accum   = atoll(next("--grad-accum"));
@@ -4908,6 +4934,7 @@ static int cmd_yue2_ar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }
+    if (!yue2_optim_valid(a)) return 2;
     if (a.lm_path.empty() && a.models_dir.empty()) {
         fprintf(stderr, "ace-train yue2-ar-train: one of --lm <yue2-lm-*.gguf> or --models <dir> "
                         "is required\n");
@@ -6352,6 +6379,10 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "yue2-sheet")) {
         return cmd_yue2_sheet(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-optim-check")) {
+        if (argc < 3) { fprintf(stderr, "usage: ace-train yue2-optim-check <output-dir> [CPU|CUDA0]\n"); return 2; }
+        return yue2_optim_check_main(argv[2], argc > 3 ? argv[3] : "CPU");
     }
     if (!strcmp(argv[1], "yue2-nar-train")) {
         return cmd_yue2_nar_train(argc - 1, argv + 1);
