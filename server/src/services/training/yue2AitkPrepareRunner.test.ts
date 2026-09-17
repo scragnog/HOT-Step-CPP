@@ -23,6 +23,11 @@ test('AITK preparation CLI keeps stable paths and repeatable model arguments', (
   ]);
 });
 
+test('AITK preparation passes the dataset trigger before native tokenization', () => {
+  assert.deepEqual(buildYue2AitkPrepareArgs({ ...options, trigger: 'artist_album' }).slice(-4),
+    ['--lyric-timing', '1', '--trigger', 'artist_album']);
+});
+
 test('request parser accepts concrete model map and repeatable model fields', () => {
   assert.deepEqual(parseYue2AitkModels({
     vae: 'v', semantic: 's', sheetsage: 'h',

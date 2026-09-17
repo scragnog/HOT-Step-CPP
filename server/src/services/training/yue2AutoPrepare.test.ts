@@ -35,6 +35,7 @@ test('automatic preparation reuses unchanged inputs, but invalidates changed set
   const first = await ensureYue2PreparedDataset(f.job(), f.o, f.prepare);
   assert.equal(await ensureYue2PreparedDataset(f.job(), f.o, f.prepare), first);
   assert.equal(f.calls(), 1);
+  assert.notEqual(await ensureYue2PreparedDataset(f.job(), { ...f.o, trigger: 'artist_album' }, f.prepare), first);
   assert.notEqual(await ensureYue2PreparedDataset(f.job(), { ...f.o, lyricTiming: false }, f.prepare), first);
   fs.appendFileSync(path.join(f.dir, 'codes'), 'new');
   await ensureYue2PreparedDataset(f.job(), { ...f.o, lyricTiming: false }, f.prepare);
@@ -42,7 +43,7 @@ test('automatic preparation reuses unchanged inputs, but invalidates changed set
   await ensureYue2PreparedDataset(f.job(), { ...f.o, lyricTiming: false }, f.prepare);
   fs.appendFileSync(f.o.legacyManifest, ' ');
   await ensureYue2PreparedDataset(f.job(), { ...f.o, lyricTiming: false }, f.prepare);
-  assert.equal(f.calls(), 5);
+  assert.equal(f.calls(), 6);
 });
 
 test('missing prepared payload is regenerated instead of reused', async () => {

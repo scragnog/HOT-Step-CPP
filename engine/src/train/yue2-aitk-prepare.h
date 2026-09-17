@@ -51,6 +51,7 @@ struct PrepareRequest {
     std::filesystem::path source_manifest;     // native manifest used by verifier
     std::filesystem::path base_checkpoint;     // exact checkpoint used by producer
     std::string verified_contract;             // explicit caller proof, nonempty
+    std::string trigger;                       // exact trigger included in each prepared style
     std::vector<ModelProvenance> models;       // tokenizer/VAE/model files actually used
     std::vector<VerifiedNativeItem> items;
 };
@@ -198,6 +199,10 @@ inline bool prepare_dataset(const PrepareRequest & request, std::string * error 
         !yyjson_mut_obj_add_strcpy(doc, root, "source_manifest_sha256", source_hash.hex().c_str()) ||
         !yyjson_mut_obj_add_strcpy(doc, root, "verified_contract", request.verified_contract.c_str()))
         return prep_fail(error, "cannot construct manifest metadata");
+    if (!request.trigger.empty() && (!prepare_detail::no_nul(request.trigger) ||
+        !yyjson_mut_obj_add_strcpy(doc, root, "trigger", request.trigger.c_str()) ||
+        !yyjson_mut_obj_add_strcpy(doc, root, "style_template", "upstream")))
+        return prep_fail(error, "cannot record trigger metadata");
     yyjson_mut_val * provenance = yyjson_mut_obj(doc);
     yyjson_mut_val * model_array = yyjson_mut_arr(doc);
     if (!provenance || !model_array || !yyjson_mut_obj_add_strcpy(doc, provenance, "source_manifest_file", "source-manifest.json") ||

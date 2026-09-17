@@ -179,6 +179,8 @@ export interface BackendModels {
     label?: string;
     runName?: string;
     trigger?: string;
+    /** Joint export fallback from the dataset setting, absent from training metadata. */
+    triggerInferred?: boolean;
     rank?: number;
     steps?: number;
     bytes?: number;

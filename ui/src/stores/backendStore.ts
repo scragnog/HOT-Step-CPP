@@ -195,6 +195,7 @@ export interface BackendModelCatalogue {
     label?: string;
     runName?: string;
     trigger?: string;
+    triggerInferred?: boolean;
     rank?: number;
     steps?: number;
     bytes?: number;

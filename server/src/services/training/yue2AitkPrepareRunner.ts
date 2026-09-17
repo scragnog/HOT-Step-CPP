@@ -19,6 +19,7 @@ export interface ResolvedYue2AitkPrepareOptions {
   output: string;
   models: Record<AitkPrepareModelName, string>;
   lyricTiming?: boolean;
+  trigger?: string;
 }
 
 /** Parse the CLI-shaped repeatable `--model name=path` request field. */
@@ -82,10 +83,12 @@ export function buildYue2AitkPrepareArgs(o: ResolvedYue2AitkPrepareOptions): str
   ];
   for (const name of MODEL_NAMES) args.push('--model', `${name}=${o.models[name]}`);
   args.push('--lyric-timing', o.lyricTiming === false ? '0' : '1');
+  if (o.trigger) args.push('--trigger', o.trigger);
   return args;
 }
 
 export function validateYue2AitkPrepareOptions(o: ResolvedYue2AitkPrepareOptions): string | null {
+  if (o.trigger !== undefined && (!o.trigger.trim() || o.trigger.length > 128 || /[\r\n\0]/.test(o.trigger))) return 'trigger must be a nonempty single-line phrase of at most 128 characters';
   const manifestError = regularFile(o.legacyManifest, 'legacy manifest', MAX_MANIFEST_BYTES);
   if (manifestError) return manifestError;
   const checkpointError = regularFile(o.checkpoint, 'raw ConvRot checkpoint');

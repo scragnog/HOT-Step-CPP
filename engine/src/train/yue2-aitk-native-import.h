@@ -37,6 +37,7 @@ struct Request {
     std::filesystem::path output_dir;             // must not exist
     std::vector<ModelInput> models;               // VAE, semantic tokenizer, SheetSage, etc.
     bool lyric_timing = false;                    // explicit opt-in; requires cursor_words for lyrical sources
+    std::string trigger;                          // Legacy-style opener, included before tokenization
 };
 
 namespace detail {
@@ -250,6 +251,11 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         } else if (caption_format == "none") {
             style.clear(); lyrics.clear();
         }
+        if (!request.trigger.empty()) {
+            if (request.trigger.size() > 128 || request.trigger.find_first_of("\r\n\0", 0, 3) != std::string::npos)
+                return fail(error, "trigger must be a single-line phrase of at most 128 bytes");
+            style = style.empty() ? request.trigger : request.trigger + ", in the style of " + request.trigger + ". " + style;
+        }
         // A failed or absent sheet uses the off prefix; audio and lyrics remain usable.
         if (!abc_error.empty() || abc.find_first_not_of(" \t\r\n") == std::string::npos) abc.clear();
         std::filesystem::path latent, semantic;
@@ -353,6 +359,7 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         return fail(error, "native import output must be fresh and have an existing parent");
     PrepareRequest prep; prep.output_dir = request.output_dir; prep.source_manifest = request.legacy_manifest;
     prep.base_checkpoint = request.raw_convrot_checkpoint; prep.verified_contract = "legacy-yue2-cache-v1;fullsong-f32-latents;raw-codec-ids;abc-bpe";
+    prep.trigger = request.trigger;
     prep.items = std::move(items);
     if (std::filesystem::is_regular_file(request.tokenizer_gguf_or_dir)) {
         prep.models.push_back({"tokenizer", request.tokenizer_gguf_or_dir});

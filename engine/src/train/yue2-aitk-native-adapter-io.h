@@ -71,13 +71,14 @@ inline bool add_pair(std::vector<STWTensor> & out, const std::string & module,
 }
 
 inline bool write_one(const char * path, const std::vector<STWTensor> & tensors,
-                      const char * expert, int64_t rank, float alpha, int64_t steps) {
+                      const char * expert, int64_t rank, float alpha, int64_t steps, const std::string & trigger) {
     if (exists(path) || tensors.empty() || !std::isfinite(alpha) || alpha <= 0.0f || rank <= 0) return false;
-    const std::vector<std::pair<std::string, std::string>> md = {
+    std::vector<std::pair<std::string, std::string>> md = {
         {"format", std::string("yue2-") + expert + "-lora-v1"},
         {"rank", std::to_string(rank)}, {"alpha", std::to_string(alpha)},
         {"steps", std::to_string(steps)}, {"yue2_adapter_layout", "native_split_v1"},
     };
+    if (!trigger.empty()) { md.push_back({"trigger", trigger}); md.push_back({"style_template", "upstream"}); }
     const std::string tmp = temp_path(path);
     if (!st_write_file(tmp.c_str(), tensors, md, STW_BF16)) { hs_remove(tmp); return false; }
     if (!publish_new(tmp, path)) { hs_remove(tmp); return false; }
@@ -90,7 +91,7 @@ inline bool write_one(const char * path, const std::vector<STWTensor> & tensors,
 // input inventory remains borrowed for the duration of this call.
 inline bool yue2_aitk_write_native_split(const std::vector<Yue2AitkNativeMatrix> & factors,
                                          int64_t rank, float alpha, int64_t steps,
-                                         const char * ar_path, const char * nar_path) {
+                                         const char * ar_path, const char * nar_path, const std::string & trigger = {}) {
     using namespace yue2_aitk_native_detail;
     constexpr int layers = 28;
     constexpr size_t expected = 2u * layers * 4u * 2u;
@@ -142,8 +143,8 @@ inline bool yue2_aitk_write_native_split(const std::vector<Yue2AitkNativeMatrix>
             }
         }
     }
-    if (!write_one(ar_path, ar, "ar", rank, alpha, steps)) return false;
-    if (!write_one(nar_path, nar, "nar", rank, alpha, steps)) {
+    if (!write_one(ar_path, ar, "ar", rank, alpha, steps, trigger)) return false;
+    if (!write_one(nar_path, nar, "nar", rank, alpha, steps, trigger)) {
         hs_remove(ar_path);
         return false;
     }

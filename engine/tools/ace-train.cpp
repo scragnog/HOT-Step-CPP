@@ -6336,7 +6336,7 @@ static int cmd_yue2_prepare_aitk(int argc, char ** argv) {
     const auto usage = []() { fprintf(stderr,
         "ace-train yue2-prepare-aitk --legacy-manifest FILE --checkpoint FILE "
         "--tokenizer GGUF_OR_DIR --output NEW_DIR --model vae=FILE "
-        "--model semantic=FILE --model sheetsage=FILE\n"); };
+        "--model semantic=FILE --model sheetsage=FILE [--trigger WORD]\n"); };
     yue2_aitk_native_import::Request request;
     std::unordered_set<std::string> seen;
     for (int i = 1; i < argc; ++i) {
@@ -6350,6 +6350,7 @@ static int cmd_yue2_prepare_aitk(int argc, char ** argv) {
         else if (arg == "--checkpoint") request.raw_convrot_checkpoint = value;
         else if (arg == "--tokenizer") request.tokenizer_gguf_or_dir = value;
         else if (arg == "--output") request.output_dir = value;
+        else if (arg == "--trigger") request.trigger = raw;
         else if (arg == "--lyric-timing") {
             if (raw != "0" && raw != "1") { usage(); return 2; }
             request.lyric_timing = raw == "1";

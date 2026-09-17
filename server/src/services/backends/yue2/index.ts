@@ -27,6 +27,7 @@ import { getSetting, setSetting } from '../../../db/lireekDb.js';
 import { listAllYue2Runs, readSafetensorsMeta, type Yue2AdapterMeta } from '../../training/yue2Runs.js';
 import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
 import { listAllYue2AitkRuns } from '../../training/yue2AitkRuns.js';
+import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import { runYue2Generation } from './generate.js';
 import {
   yue2Props, yue2PropsCached, yue2SelectModel, yue2Unload,
@@ -584,7 +585,7 @@ function yue2LmAdapterCatalogue(): {
       const add = (kind: Yue2LmAdapterKind, ref: string): void => {
         const abs = path.resolve(ref);
         const fileMeta = readSafetensorsMeta(abs);
-        const trigger = fileMeta?.trigger || '';
+        const { trigger, inferred } = yue2AdapterTrigger(abs);
         const rank = fileMeta?.rank;
         const steps = fileMeta?.steps ?? ckpt.step;
         paths.push(abs);
@@ -594,6 +595,7 @@ function yue2LmAdapterCatalogue(): {
           kind,
           runName,
           trigger: trigger || undefined,
+          triggerInferred: inferred || undefined,
           rank,
           steps: Number.isFinite(steps) && steps > 0 && steps < Number.MAX_SAFE_INTEGER ? steps : undefined,
           bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),

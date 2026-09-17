@@ -43,6 +43,7 @@ import {
   finishGenerationLog, failGenerationLog,
 } from '../../logger.js';
 import { readSafetensorsMeta } from '../../training/yue2Runs.js';
+import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import { yue2Synth, yue2FinalDetail, type Yue2SynthRequest } from './client.js';
 import { yue2PersistedSelection } from './index.js';
 import { applyYue2StyleTemplate, type Yue2StyleTemplate } from './style.js';
@@ -107,7 +108,7 @@ function yue2StyleForAdapter(
   const picked = yue2PersistedSelection().adapters;
   const halfOf = (p: string) => ({
     path: p,
-    trigger: p ? (readSafetensorsMeta(p)?.trigger ?? '').normalize('NFC').trim() : '',
+    trigger: yue2AdapterTrigger(p).trigger,
   });
   const halves: Yue2StyleHalves = { ar: halfOf(picked.ar.path), nar: halfOf(picked.nar.path) };
 
@@ -130,8 +131,8 @@ function yue2StyleForAdapter(
   // Absent is a file exported before the flag existed — the "off" behaviour.
   const trainedCot = meta?.cot ?? 'off';
   if (other) {
-    const otherTrigger = (readSafetensorsMeta(other)?.trigger ?? '').normalize('NFC').trim();
-    const thisTrigger = (meta?.trigger ?? '').normalize('NFC').trim();
+    const otherTrigger = yue2AdapterTrigger(other).trigger;
+    const thisTrigger = yue2AdapterTrigger(adapter).trigger;
     if (otherTrigger && otherTrigger !== thisTrigger) {
       notes.push(`The AR adapter is addressed by "${otherTrigger}", which is NOT in the style prompt: `
         + 'one sentence can only carry one trigger, and the NAR pick has it. Put the AR trigger in the '
@@ -141,7 +142,7 @@ function yue2StyleForAdapter(
   // NFC for the same reason the caption gets it: the header's trigger and the
   // caption have to be the same normal form or the already-composed check
   // below compares two spellings of one word and adds a second copy.
-  const trigger = (meta?.trigger ?? '').normalize('NFC').trim();
+  const { trigger, inferred } = yue2AdapterTrigger(adapter);
   if (!trigger) {
     notes.push(`LM adapter "${name}" records no trigger — the style prompt is sent exactly as typed.`);
     return { style: caption, notes, halves, trainedCot };
@@ -150,10 +151,9 @@ function yue2StyleForAdapter(
   // The same opt-out MM3 gives (mm3LmAdapterTrigger): composing is a default,
   // not a cage, and anyone deliberately testing an off-template prompt says so.
   if (params.yue2LmAdapterTrigger === false) {
-    notes.push(
-      `LM adapter trigger "${trigger}" NOT composed in (yue2LmAdapterTrigger: false) — this adapter `
-      + 'only ever saw its trigger inside the training style sentence, so likeness will be weak.',
-    );
+    notes.push(inferred
+      ? `Inferred dataset tag "${trigger}" NOT composed in (yue2LmAdapterTrigger: false); this checkpoint was trained without a trigger.`
+      : `LM adapter trigger "${trigger}" NOT composed in (yue2LmAdapterTrigger: false) — this adapter only ever saw its trigger inside the training style sentence, so likeness will be weak.`);
     return { style: caption, notes, halves, trainedCot };
   }
 
@@ -161,13 +161,16 @@ function yue2StyleForAdapter(
   // is what reproduces that build's behaviour. Both exporters write the field
   // now, so absence is the file's age and not a default to fill in with
   // `upstream`.
-  const template: Yue2StyleTemplate = meta?.styleTemplate === 'upstream' ? 'upstream' : 'bare';
+  const template: Yue2StyleTemplate = inferred || meta?.styleTemplate === 'upstream' ? 'upstream' : 'bare';
   // No genre/BPM/key tail: at training time those came from the dataset's own
   // sidecars, and this backend exposes no such fields (capabilities: bpm
   // false, keyscale false). Whatever belongs in the tail the user writes into
   // the caption, which is exactly where it lands.
   const style = applyYue2StyleTemplate({ trigger, caption, template });
 
+  if (inferred) {
+    notes.push(`Joint adapter trigger "${trigger}" was inferred from the dataset setting; this checkpoint did not record or train with the trigger phrase. Prompt injection is experimental for this run.`);
+  }
   if (!caption.trim()) {
     // A caption-dropout run trained artist rows with the caption removed, so
     // the trigger standing alone is a sequence this adapter has really seen.

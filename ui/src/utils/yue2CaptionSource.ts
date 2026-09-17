@@ -26,13 +26,10 @@
  * first (`customCaption`), and switching to Custom hands those words back rather
  * than leaving the user holding a dataset track's.
  *
- * The caption a track contributes is `styled`: the caption plus the
- * "<genre>, <bpm> BPM, key of <key>." tail the trainer appended to it. The
- * server composes it with the same function the trainer used
- * (server/src/services/backends/yue2/style.ts) — the client never rebuilds that
- * sentence, because a near-miss is off-distribution in exactly the way this
- * feature exists to avoid. The trigger word is NOT part of it: generate.ts
- * wraps whatever the caption box holds in the adapter's own style template.
+ * The caption a track contributes is `styled`: for joint adapters it is the
+ * exact prepared style, including any trained trigger opener; for Legacy it
+ * includes the trainer's genre/BPM/key tail. generate.ts avoids adding an
+ * opener twice when the selected caption already carries it.
  */
 
 import { useBackendStore } from '../stores/backendStore';

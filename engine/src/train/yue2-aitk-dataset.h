@@ -28,6 +28,8 @@ struct DatasetItem {
 
 struct Dataset {
     std::string recipe_version;
+    std::string trigger;
+    std::string style_template;
     std::string base_sha256;
     std::string source_manifest_sha256;
     std::vector<DatasetItem> items;
@@ -203,6 +205,12 @@ inline bool read_dataset(const std::string & manifest_path, Dataset * out, std::
         return bad(error, "dataset metadata is invalid");
     Dataset tmp;
     tmp.recipe_version = recipe_s;
+    yyjson_val * trigger = yyjson_obj_get(root, "trigger");
+    yyjson_val * style_template = yyjson_obj_get(root, "style_template");
+    if ((trigger && (!string_value(trigger, &tmp.trigger) || tmp.trigger.size() > 128)) ||
+        (style_template && (!string_value(style_template, &tmp.style_template) || tmp.style_template != "upstream")))
+        return bad(error, "dataset trigger metadata is invalid");
+    if (!tmp.trigger.empty() != !tmp.style_template.empty()) return bad(error, "dataset trigger/template metadata must occur together");
     tmp.base_sha256 = base_s;
     tmp.source_manifest_sha256 = source_s;
     tmp.items.reserve(yyjson_arr_size(items));

@@ -138,7 +138,8 @@ import {
 } from '../services/training/yue2ArRuns.js';
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
-import { listYue2AitkRuns, yue2JointOutputDirectory } from '../services/training/yue2AitkRuns.js';
+import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory } from '../services/training/yue2AitkRuns.js';
+import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions } from '../services/training/yue2JointPreview.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
@@ -3250,6 +3251,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       preparation = { ...prepDefaults, checkpoint, models,
         legacyManifest: prepString('legacyManifest', prepDefaults.legacyManifest),
         tokenizer: prepString('tokenizer', prepDefaults.tokenizer),
+        trigger: ds.customTag || ds.slug,
         lyricTiming: b.lyricTiming === undefined ? b.alignmentEnabled !== false : b.lyricTiming === true };
       const prepError = validateYue2AitkPrepareOptions(preparation);
       if (prepError) { res.status(400).json({ error: prepError }); return; }
@@ -3268,6 +3270,15 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         || manifest.cot !== 'full' || !Array.isArray(manifest.items)
         || typeof manifest.base_sha256 !== 'string' || typeof manifest.source_manifest_sha256 !== 'string') {
         res.status(400).json({ error: `dataset is not a validated joint-training schema1 manifest: ${dataset}. Run native dataset preparation first.` });
+        return;
+      }
+      const trigger = ds.customTag || ds.slug;
+      if (manifest.trigger !== trigger || manifest.style_template !== 'upstream'
+        || !manifest.items.every((item: unknown) => {
+          const style = item && typeof item === 'object' ? (item as Record<string, unknown>).style : undefined;
+          return typeof style === 'string' && (style === trigger || style.startsWith(`${trigger}, in the style of ${trigger}. `));
+        })) {
+        res.status(400).json({ error: 'Prepared dataset does not contain this dataset trigger in its training styles. Reprepare with the current joint trainer.' });
         return;
       }
     } catch {
@@ -3425,7 +3436,7 @@ function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
   };
   const abcProducer = typeof manifestFields.abc_producer === 'string' ? manifestFields.abc_producer : '';
   const output = path.join(path.dirname(legacyManifest), `aitk-prepared-${Date.now()}`);
-  const options: ResolvedYue2AitkPrepareOptions = { legacyManifest, checkpoint, tokenizer, output, models };
+  const options: ResolvedYue2AitkPrepareOptions = { legacyManifest, checkpoint, tokenizer, output, models, trigger: ds.customTag || ds.slug };
   const missing: string[] = [];
   if (!fs.existsSync(legacyManifest)) missing.push(`YuE2 latent manifest: ${legacyManifest}`);
   if (!fs.existsSync(checkpoint)) missing.push(`raw ConvRot checkpoint: ${checkpoint}`);
@@ -3465,6 +3476,7 @@ router.post('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) =>
       tokenizer: str('tokenizer') || defaults.options.tokenizer,
       output: str('output') || defaults.options.output,
       models,
+      trigger: ds.customTag || ds.slug,
       lyricTiming: b.lyricTiming !== false,
     };
     const error = validateYue2AitkPrepareOptions(options);
@@ -4247,10 +4259,9 @@ router.get('/datasets/:id/yue2-ar-runs', (req: Request, res: Response) => {
  *
  *  Not under /datasets/:id: the caller (Create's caption-source picker, see
  *  ui/src/utils/yue2CaptionSource.ts) holds an adapter path and nothing else —
- *  the adapter is engine state on this backend, and the catalogue entry records
- *  a dataset NAME, not an id. The run directory the checkpoint sits in is what
- *  closes the gap: its manifest names the exact `yue2_preprocess.json` the run
- *  trained against, which is a stronger link than dataset -> current cache.
+ *  the adapter is engine state on this backend. Joint checkpoint paths resolve
+ *  through the durable run index to the exact prepared style strings. Legacy
+ *  paths resolve through their run manifest to `yue2_preprocess.json`.
  *
  *  Every failure answers with an empty list rather than a status, because the
  *  picker's "no tracks" state is the correct rendering of a deleted dataset, a
@@ -4258,6 +4269,11 @@ router.get('/datasets/:id/yue2-ar-runs', (req: Request, res: Response) => {
 router.get('/yue2-adapter-captions', (req: Request, res: Response) => {
   try {
     const asked = typeof req.query.adapter === 'string' ? req.query.adapter.trim() : '';
+    const jointRun = jointRunForAdapter(asked);
+    if (jointRun) {
+      res.json({ tracks: jointCaptionTracks(jointRun) });
+      return;
+    }
     const dir = asked ? path.dirname(path.resolve(asked)) : '';
     // The path arrives from a query string, so it is read only when it is a
     // checkpoint inside a run directory one of the two adapter roots owns.

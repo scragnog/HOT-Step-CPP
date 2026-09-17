@@ -230,7 +230,13 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 </p>
               </div>
             )}
-            {entry?.trigger && (
+            {entry?.triggerInferred && (
+              <p className="text-[10px] text-amber-500/90 leading-relaxed">
+                {t('globalBar.yue2AdapterInferredTrigger',
+                  'Dataset tag inferred for this joint checkpoint. The adapter was trained without the trigger phrase; adding it to the prompt is experimental.')}
+              </p>
+            )}
+            {entry?.trigger && !entry.triggerInferred && (
               <p className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed">
                 {t('globalBar.yue2AdapterTriggerUse',
                   'Start the style prompt with this word — it is how the adapter is addressed.')}
