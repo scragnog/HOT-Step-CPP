@@ -67,6 +67,14 @@ function readStored<T>(key: string, fallback: T): T {
   } catch { return fallback; }
 }
 
+/** A form saved before a field existed is missing that key, so loading merges
+ *  the stored values over the defaults: the user's saved values win, new
+ *  fields fill in with their defaults. The persistence effect writes the
+ *  merged form back, so this self-heals on the first load after an upgrade. */
+function readStoredForm(datasetId: string): Yue2JointTrainRequest {
+  return { ...DEFAULT_FORM, ...readStored<Partial<Yue2JointTrainRequest>>(`${FORM_KEY}${datasetId}`, {}) };
+}
+
 function isJointJob(job: TrainingJobSummary, datasetId: string): boolean {
   return job.datasetId === datasetId && job.kind === 'yue2-joint-train';
 }
@@ -76,8 +84,7 @@ function isPrepareJob(job: TrainingJobSummary, datasetId: string): boolean {
 
 export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; exposeStart?: (fn: () => Promise<string | null>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, exposeStart }) => {
   const { t } = useTranslation();
-  const [form, setForm] = useState<Yue2JointTrainRequest>(() =>
-    readStored(`${FORM_KEY}${datasetId}`, DEFAULT_FORM));
+  const [form, setForm] = useState<Yue2JointTrainRequest>(() => readStoredForm(datasetId));
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
@@ -185,7 +192,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   }, [job?.id]);
 
   useEffect(() => {
-    setForm(readStored(`${FORM_KEY}${datasetId}`, DEFAULT_FORM));
+    setForm(readStoredForm(datasetId));
     setPrepare(readStored<PrepareForm>(`${PREP_KEY}${datasetId}`, {
       legacyManifest: legacyManifest ?? '', checkpoint: '', tokenizer: '', output: '',
       models: { vae: '', semantic: '', sheetsage: '' },
