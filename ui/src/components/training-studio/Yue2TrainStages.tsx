@@ -121,11 +121,21 @@ const RunAllControl: React.FC<{
   runAllActive: boolean;
   runAllStage: number | null;
   onQueueMultiple: () => void;
-}> = ({ datasetId, trigger, skipLabels, disabled, jobBusyElsewhere, runAllActive, runAllStage, onQueueMultiple }) => {
+  /** Joint Training chain: the button calls this instead of the legacy
+   *  runYue2AllStages, whose final stage is the legacy NAR/AR trainers —
+   *  the joint chain's final stage is the training card's own start. */
+  onRun?: () => void;
+  /** Joint Training's shorter stage list; overrides the legacy seven-name map. */
+  stageNames?: Record<number, string>;
+  /** Pre-flight line for the nothing-is-skipped case. */
+  preflightAll?: string;
+}> = ({ datasetId, trigger, skipLabels, disabled, jobBusyElsewhere, runAllActive, runAllStage, onQueueMultiple, onRun, stageNames, preflightAll }) => {
   const { t } = useTranslation();
   const runYue2AllStages = useTrainingStore(s => s.runYue2AllStages);
 
+  const total = stageNames ? Object.keys(stageNames).length : 7;
   const stageName = (n: number): string => {
+    if (stageNames && stageNames[n]) return stageNames[n];
     switch (n) {
       case 1: return t('trainingStudio.yue2.runAllStageName1', 'latent cache');
       case 2: return t('trainingStudio.yue2.runAllStageName2', 'codes');
@@ -145,7 +155,7 @@ const RunAllControl: React.FC<{
           ? t('trainingStudio.yue2.runAllPreflightSkip',
               'Runs every stage below that is not already complete, in order. Already done, so skipped: '
               + '{{skip}}.', { skip: skipLabels.join(', ') })
-          : t('trainingStudio.yue2.runAllPreflight',
+          : preflightAll ?? t('trainingStudio.yue2.runAllPreflight',
               'Runs all seven stages below in order, from the latent cache through the AR LoRA.')}
       </p>
       <p className="text-[10px] text-zinc-500 leading-snug mb-3">
@@ -154,14 +164,14 @@ const RunAllControl: React.FC<{
           + 'Switching between Training Studio phases is fine; closing or reloading the tab stops it.')}
       </p>
       <button
-        onClick={() => void runYue2AllStages(datasetId, trigger)}
+        onClick={() => { if (onRun) onRun(); else void runYue2AllStages(datasetId, trigger); }}
         disabled={disabled}
         className={BTN_RUNALL}
       >
         {runAllActive ? <Loader2 size={15} className="animate-spin" /> : <ListChecks size={15} />}
         {runAllActive && runAllStage
-          ? t('trainingStudio.yue2.runAllRunning', 'Running stage {{n}} of 7: {{name}}',
-              { n: runAllStage, name: stageName(runAllStage) })
+          ? t('trainingStudio.yue2.runAllRunning', 'Running stage {{n}} of {{total}}: {{name}}',
+              { n: runAllStage, total, name: stageName(runAllStage) })
           : t('trainingStudio.yue2.runAllStart', 'Perform all stages')}
       </button>
       {!runAllActive && jobBusyElsewhere && (
@@ -198,6 +208,14 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
   const activeJob = useTrainingStore(s => s.activeJob);
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
   const yue2RunAllStage = useTrainingStore(s => s.yue2RunAllStage);
+  const runYue2JointStages = useTrainingStore(s => s.runYue2JointStages);
+
+  // The Joint Training card hands its own start function out through this
+  // ref (see Yue2AitkTrainCard's exposeStart), so the joint run-all chain
+  // below can train with the card's current form instead of duplicating the
+  // request builder on this page.
+  const jointStartRef = React.useRef<(() => Promise<string | null>) | null>(null);
+  const exposeJointStart = React.useCallback((fn: () => Promise<string | null>) => { jointStartRef.current = fn; }, []);
 
   const { status: yue2Status, error: yue2StatusError, reload: reloadYue2Status } = useYue2Status(datasetId);
   const { status: arStatus, error: arStatusError, reload: reloadArStatus } = useYue2ArStatus(datasetId);
@@ -264,9 +282,60 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
   };
 
   if (method === 'aitk') {
+    // Preparation skip preview for the joint chain: stems and alignment only
+    // matter while the lyric-timing objective is on.
+    const jointSkipLabels: string[] = [];
+    if (arStatus?.stages.preprocess.done) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName1', 'latent cache'));
+    if (arStatus?.stages.tokenize.done) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName2', 'codes'));
+    if (arStatus?.stages.sheet.done) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName3', 'lead sheets'));
+    if (lyricTiming) {
+      if ((arStatus?.stages.align.stemsReady ?? 0) > 0) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName4', 'vocal stems'));
+      if (arStatus?.stages.align.done) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName5', 'lyric cursor spans'));
+    }
+    // With timing off the chain's final stage lands on the slot-4 number, so
+    // the name map agrees with the chain's own numbering.
+    const jointTrainingName = t('trainingStudio.yue2.runAllJointStageName', 'joint training');
+    const jointStageNames: Record<number, string> = lyricTiming
+      ? {
+        1: t('trainingStudio.yue2.runAllStageName1', 'latent cache'),
+        2: t('trainingStudio.yue2.runAllStageName2', 'codes'),
+        3: t('trainingStudio.yue2.runAllStageName3', 'lead sheets'),
+        4: t('trainingStudio.yue2.runAllStageName4', 'vocal stems'),
+        5: t('trainingStudio.yue2.runAllStageName5', 'lyric cursor spans'),
+        6: jointTrainingName,
+      }
+      : {
+        1: t('trainingStudio.yue2.runAllStageName1', 'latent cache'),
+        2: t('trainingStudio.yue2.runAllStageName2', 'codes'),
+        3: t('trainingStudio.yue2.runAllStageName3', 'lead sheets'),
+        4: jointTrainingName,
+      };
+    const jointRunAllControl = (
+      <RunAllControl
+        datasetId={datasetId}
+        trigger={effectiveTrigger}
+        skipLabels={jointSkipLabels}
+        disabled={yue2RunAllActive || jobBusy}
+        jobBusyElsewhere={jobBusy}
+        runAllActive={yue2RunAllActive}
+        runAllStage={yue2RunAllStage}
+        onQueueMultiple={() => setAitkBatchOpen(true)}
+        onRun={() => void runYue2JointStages(datasetId, lyricTiming,
+          () => (jointStartRef.current ? jointStartRef.current() : Promise.resolve(null)))}
+        stageNames={jointStageNames}
+        preflightAll={t('trainingStudio.yue2.runAllJointPreflight',
+          'Runs every stage below in order, ending with joint training.')}
+      />
+    );
     return (
       <div className="flex flex-col gap-4">
         <MethodSelector value={method} onChange={selectMethod} />
+        {storeError && (
+          <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
+            <XCircle size={16} className="mt-0.5 flex-shrink-0" />
+            <span className="min-w-0 break-words">{storeError}</span>
+          </div>
+        )}
         <div className={CARD}>
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -278,13 +347,16 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
             </button>
           </div>
         </div>
+        {jointRunAllControl}
         {yue2Status && <Yue2PreprocessCard status={yue2Status} onDone={reload} />}
         {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
         {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
         {lyricTiming && arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
         {lyricTiming && arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
         <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} legacyManifest={arStatus?.manifestPath || yue2Status?.manifestPath}
-          cursorReady={!!arStatus?.stages.align.done} lyricTiming={lyricTiming} onLyricTimingChange={setAitkLyricTiming} />
+          cursorReady={!!arStatus?.stages.align.done} lyricTiming={lyricTiming} onLyricTimingChange={setAitkLyricTiming}
+          exposeStart={exposeJointStart} />
+        {jointRunAllControl}
         <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
       </div>
     );

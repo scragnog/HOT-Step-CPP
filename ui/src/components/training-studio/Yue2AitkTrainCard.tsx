@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Loader2, Play, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import {
   cancelJob,
   getJob,
@@ -21,8 +22,10 @@ import {
   type Yue2JointTrainRequest,
   type Yue2JointPreviewOptions,
   type Yue2JointPreviewRecord,
+  type Yue2OptimOptions,
 } from '../../services/trainingApi';
 import { useBackendStore } from '../../stores/backendStore';
+import { useTrainingStore } from '../../stores/trainingStore';
 
 const JOB_KEY = 'hs-yue2-aitk-job:';
 const FORM_KEY = 'hs-yue2-aitk-form:';
@@ -46,6 +49,8 @@ function snapshotPresetSettings(form: Yue2JointTrainRequest): Partial<Yue2JointT
 const DEFAULT_FORM: Yue2JointTrainRequest = {
   trainingMethod: 'aitk', checkpoint: '', dataset: '', output: '',
   steps: 400, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
+  optimizer: 'prodigy', prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
+  rank: 32, alpha: 32, stopMode: 'steps',
 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
@@ -69,7 +74,7 @@ function isPrepareJob(job: TrainingJobSummary, datasetId: string): boolean {
   return job.datasetId === datasetId && job.kind === 'yue2-prepare-aitk';
 }
 
-export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange }) => {
+export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; exposeStart?: (fn: () => Promise<string | null>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, exposeStart }) => {
   const { t } = useTranslation();
   const [form, setForm] = useState<Yue2JointTrainRequest>(() =>
     readStored(`${FORM_KEY}${datasetId}`, DEFAULT_FORM));
@@ -91,6 +96,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [defaultsRevision, setDefaultsRevision] = useState(0);
   const activeBackendId = useBackendStore(s => s.activeBackendId);
   const selectModels = useBackendStore(s => s.selectModels);
+  const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
   const [aitkRuns, setAitkRuns] = useState<Yue2AitkRunRecord[]>([]);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState('');
   const [applyingCheckpoint, setApplyingCheckpoint] = useState(false);
@@ -286,6 +292,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   const set = <K extends keyof Yue2JointTrainRequest>(key: K, value: Yue2JointTrainRequest[K]) =>
     setForm(previous => ({ ...previous, [key]: value }));
+  const optimValue: Yue2OptimOptions = {
+    optimizer: form.optimizer ?? 'adamw',
+    prodigyD0: form.prodigyD0 ?? 1e-6,
+    muonLrScale: form.muonLrScale ?? 1,
+    muonNsSteps: form.muonNsSteps ?? 5,
+  };
   const savePreset = () => {
     const name = presetName.trim();
     if (!name) { setPresetError(t('trainingStudio.yue2.method.presetNameRequired', 'Give the preset a name first.')); return; }
@@ -303,8 +315,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const removePreset = (name: string) => {
     setPresets(previous => previous.filter(preset => preset.name !== name));
   };
-  const run = async () => {
+  const run = async (): Promise<string | null> => {
     setStarting(true); setError('');
+    if ((form.stopMode ?? 'steps') === 'loss' && !(typeof form.targetLoss === 'number' && form.targetLoss > 0)) {
+      setError(t('trainingStudio.yue2.method.targetLossRequired', 'Enter a target loss above 0 to train until loss.'));
+      setStarting(false);
+      return null;
+    }
     try {
       const timingWeight = lyricTiming
         ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08)
@@ -318,10 +335,20 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const result = await startYue2JointTrain(datasetId, request);
       if (typeof window !== 'undefined') window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(result.jobId));
       setJob(await getJob(result.jobId));
+      return result.jobId;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally { setStarting(false); }
   };
+  // "Perform all stages" (Yue2TrainStages) drives its final training stage
+  // through this card's own start so it always trains with the form the user
+  // sees. The card hands out the freshest `run` after every render.
+  const startRef = useRef<(() => Promise<string | null>) | null>(null);
+  useEffect(() => {
+    startRef.current = run;
+    if (exposeStart) exposeStart(() => startRef.current ? startRef.current() : Promise.resolve(null));
+  });
   const prepareDataset = async () => {
     setStarting(true); setError('');
     try {
@@ -378,7 +405,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void) => (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
-      <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={active || starting || preparing}
+      <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={active || starting || preparing || yue2RunAllActive}
         onChange={event => update ? update(event.target.value) : set(key as keyof Yue2JointTrainRequest, type === 'number' ? Number(event.target.value) : event.target.value as never)} />
     </label>
   );
@@ -392,7 +419,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {t('trainingStudio.yue2.method.autoTrainHint', 'Start training prepares the dataset automatically, then trains AR and NAR together. Unchanged prepared data is reused.')}
       </p>
       <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
-        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={lyricTiming} disabled={active || preparing || starting}
+        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={lyricTiming} disabled={active || preparing || starting || yue2RunAllActive}
           onChange={event => onLyricTimingChange(event.target.checked)} />
         <span>
           <span className="font-semibold">{t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}</span>
@@ -408,7 +435,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {(defaultsAvailable === false || missingDefaults.length > 0) && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.defaultsMissing', 'Model paths were not found automatically. Install the YuE2 training assets in Model Manager or enter their paths here.')} {missingDefaults.join('; ')}</p>}
         <details className="mt-3">
           <summary className="cursor-pointer text-[11px] font-medium text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.advancedPaths', 'Advanced paths and provenance')}</summary>
-        <button type="button" disabled={active || preparing || starting} onClick={() => setDefaultsRevision(value => value + 1)} className="mt-2 text-xs text-amber-700 dark:text-amber-300 hover:underline">{t('trainingStudio.yue2.method.refreshPaths', 'Check installed assets again')}</button>
+        <button type="button" disabled={active || preparing || starting || yue2RunAllActive} onClick={() => setDefaultsRevision(value => value + 1)} className="mt-2 text-xs text-amber-700 dark:text-amber-300 hover:underline">{t('trainingStudio.yue2.method.refreshPaths', 'Check installed assets again')}</button>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           {field(t('trainingStudio.yue2.method.legacyManifest', 'Existing YuE2 manifest'), 'legacyManifest', 'text', prepare, value => setPrepare(previous => ({ ...previous, legacyManifest: value })))}
           {field(t('trainingStudio.yue2.method.tokenizer', 'Tokenizer path'), 'tokenizer', 'text', prepare, value => setPrepare(previous => ({ ...previous, tokenizer: value })))}
@@ -421,7 +448,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           {form.resume?.trim() && field(t('trainingStudio.yue2.method.resumeDataset', 'Prepared manifest for resume'), 'dataset')}
         </div>
-        <button type="button" onClick={() => void prepareDataset()} disabled={preparing || active || starting || !prepare.legacyManifest || !prepare.checkpoint || !prepare.tokenizer || !prepare.output || !prepare.models.vae || !prepare.models.semantic || !prepare.models.sheetsage}
+        <button type="button" onClick={() => void prepareDataset()} disabled={preparing || active || starting || yue2RunAllActive || !prepare.legacyManifest || !prepare.checkpoint || !prepare.tokenizer || !prepare.output || !prepare.models.vae || !prepare.models.semantic || !prepare.models.sheetsage}
           className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
           {preparing ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.prepare', 'Prepare native dataset')}
         </button>
@@ -431,11 +458,28 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       </details>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
         {field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume')}
-        {field(t('trainingStudio.yue2.method.steps', 'Steps'), 'steps', 'number')}
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.stopMode', 'Train until')}</span>
+          <select className={input} value={form.stopMode ?? 'steps'} disabled={active || starting || preparing || yue2RunAllActive}
+            onChange={event => set('stopMode', event.target.value as 'steps' | 'loss')}>
+            <option value="steps">{t('trainingStudio.yue2.method.stopSteps', 'Step count')}</option>
+            <option value="loss">{t('trainingStudio.yue2.method.stopLoss', 'Target loss')}</option>
+          </select>
+        </label>
+        {field((form.stopMode ?? 'steps') === 'loss'
+          ? t('trainingStudio.yue2.method.maxSteps', 'Max steps')
+          : t('trainingStudio.yue2.method.steps', 'Steps'), 'steps', 'number')}
+        {(form.stopMode ?? 'steps') === 'loss' && field(t('trainingStudio.yue2.method.targetLoss', 'Target loss (composite, trailing mean)'), 'targetLoss', 'number')}
         {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number')}
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number')}
         {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device')}
+        {field(t('trainingStudio.yue2.method.rank', 'LoRA rank'), 'rank', 'number')}
+        {field(t('trainingStudio.yue2.method.alpha', 'LoRA alpha'), 'alpha', 'number')}
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
+      </div>
+      {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
+      <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
+        <Yue2OptimizerFields value={optimValue} onChange={patch => setForm(previous => ({ ...previous, ...patch }))} />
       </div>
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         <div className="flex flex-col gap-1">
@@ -444,10 +488,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </div>
         <div className="mt-2 flex items-center gap-2 flex-wrap">
           <input className={`${input} min-w-40 flex-1`} placeholder={t('trainingStudio.yue2.method.presetNamePlaceholder', 'New preset name')}
-            value={presetName} disabled={active || preparing || starting}
+            value={presetName} disabled={active || preparing || starting || yue2RunAllActive}
             onChange={event => { setPresetName(event.target.value); setPresetError(''); }}
             onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void savePreset(); } }} />
-          <button type="button" onClick={() => void savePreset()} disabled={active || preparing || starting}
+          <button type="button" onClick={() => void savePreset()} disabled={active || preparing || starting || yue2RunAllActive}
             className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
             {t('trainingStudio.yue2.method.presetSave', 'Save current settings')}
           </button>
@@ -456,7 +500,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {presets.length > 0 && <div className="mt-2 flex flex-wrap gap-2">
           {presets.map(preset => (
             <span key={preset.name} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-white/10 bg-white/60 dark:bg-zinc-900/40 pl-2.5 pr-1 py-1 text-[11px] text-zinc-700 dark:text-zinc-300">
-              <button type="button" onClick={() => loadPreset(preset)} disabled={active || preparing || starting}
+              <button type="button" onClick={() => loadPreset(preset)} disabled={active || preparing || starting || yue2RunAllActive}
                 title={t('trainingStudio.yue2.method.presetLoad', 'Load this preset into the form')}
                 className="font-medium hover:underline disabled:no-underline disabled:opacity-40">
                 {preset.name}{preset.settings.steps !== undefined && preset.settings.saveEvery !== undefined
@@ -477,7 +521,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </summary>
         <label className="mt-2 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
           <input type="checkbox" className="mt-0.5 accent-amber-500" checked={form.preview?.enabled ?? false}
-            disabled={active || preparing || starting}
+            disabled={active || preparing || starting || yue2RunAllActive}
             onChange={event => setForm(previous => ({ ...previous, preview: { ...(previous.preview ?? defaultPreview(form.saveEvery)), enabled: event.target.checked } }))} />
           <span>
             <span className="font-semibold">{t('trainingStudio.yue2.method.previewEnable', 'Render one artist sample at saved checkpoints')}</span>
@@ -491,10 +535,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           }))}
           {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })))}
           <p className="text-[11px] text-zinc-500 md:col-span-2">{t('trainingStudio.yue2.method.previewSongHint', 'The first track in this dataset is used for the preview. Caption and lyrics overrides below are optional.')}</p>
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={form.preview.baseline} disabled={active || preparing || starting} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, baseline: event.target.checked } }))} />{t('trainingStudio.yue2.method.previewBaseline', 'Include baseline')}</label>
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={form.preview.control} disabled={active || preparing || starting} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, control: event.target.checked } }))} />{t('trainingStudio.yue2.method.previewControl', 'Include control')}</label>
-          <label className="md:col-span-2 flex flex-col gap-1"><span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.previewCaption', 'Caption override (optional)')}</span><textarea className={`${input} min-h-16 resize-y`} value={form.preview.caption ?? ''} disabled={active || preparing || starting} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, caption: event.target.value } }))} /></label>
-          <label className="md:col-span-2 flex flex-col gap-1"><span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.previewLyrics', 'Lyrics override (optional)')}</span><textarea className={`${input} min-h-20 resize-y`} value={form.preview.lyrics ?? ''} disabled={active || preparing || starting} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyrics: event.target.value } }))} /></label>
+          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={form.preview.baseline} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, baseline: event.target.checked } }))} />{t('trainingStudio.yue2.method.previewBaseline', 'Include baseline')}</label>
+          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={form.preview.control} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, control: event.target.checked } }))} />{t('trainingStudio.yue2.method.previewControl', 'Include control')}</label>
+          <label className="md:col-span-2 flex flex-col gap-1"><span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.previewCaption', 'Caption override (optional)')}</span><textarea className={`${input} min-h-16 resize-y`} value={form.preview.caption ?? ''} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, caption: event.target.value } }))} /></label>
+          <label className="md:col-span-2 flex flex-col gap-1"><span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.previewLyrics', 'Lyrics override (optional)')}</span><textarea className={`${input} min-h-20 resize-y`} value={form.preview.lyrics ?? ''} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyrics: event.target.value } }))} /></label>
         </div>}
       </details>
       <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.hardware', 'Joint training requires a CUDA build and an NVIDIA GPU with BF16 support (Ampere or newer).')}</p>
@@ -502,7 +546,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       {error && <div className="mt-3 flex items-start gap-2 text-xs text-red-600 dark:text-red-400"><AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}</div>}
       {job?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{job.error}</div>}
       <div className="mt-4 flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => void run()} disabled={active || preparing || starting || (form.resume?.trim() ? !form.dataset : (!prepare.legacyManifest || !prepare.tokenizer)) || (lyricTiming && !cursorReady)}
+        <button type="button" onClick={() => void run()} disabled={active || preparing || starting || yue2RunAllActive || (form.resume?.trim() ? !form.dataset : (!prepare.legacyManifest || !prepare.tokenizer)) || (lyricTiming && !cursorReady)}
           className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
           {starting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
           {active ? (job?.phase === 'preparing' ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.running', 'Joint training is running')) : t('trainingStudio.yue2.method.start', 'Start joint training')}
@@ -525,7 +569,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <select className={input} value={selectedCheckpoint} onChange={event => { setSelectedCheckpoint(event.target.value); setApplyNote(''); }}>
             {availableCheckpoints.map(checkpoint => <option key={checkpoint.dir} value={checkpoint.dir}>step {checkpoint.step}{checkpoint.dir === availableCheckpoints[0]?.dir ? ' (latest)' : ''}</option>)}
           </select>
-          <button type="button" onClick={() => void applyCheckpoint()} disabled={activeBackendId !== 'yue2' || active || preparing || applyingCheckpoint || !selectedCheckpoint}
+          <button type="button" onClick={() => void applyCheckpoint()} disabled={activeBackendId !== 'yue2' || active || preparing || applyingCheckpoint || yue2RunAllActive || !selectedCheckpoint}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40 flex items-center gap-1.5">
             {applyingCheckpoint ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
             {t('trainingStudio.yue2.method.useCheckpoint', 'Use for generation')}

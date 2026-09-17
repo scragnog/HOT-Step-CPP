@@ -623,7 +623,7 @@ export interface Yue2TrainRequest extends Partial<Yue2OptimOptions> {
   clipBlock?: number;
 }
 
-export interface Yue2JointTrainRequest {
+export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   trainingMethod: 'aitk';
   autoPrepare?: boolean;
   preparation?: Partial<Yue2AitkPrepareRequest>;
@@ -635,6 +635,13 @@ export interface Yue2JointTrainRequest {
   seed: number;
   device: string;
   resume?: string;
+  /** LoRA rank / alpha. Engine defaults are 32 / 32.0. */
+  rank?: number;
+  alpha?: number;
+  /** 'loss' trains until the windowed composite loss reaches targetLoss;
+   *  steps stays the cap. Default is 'steps'. */
+  stopMode?: 'steps' | 'loss';
+  targetLoss?: number;
   /** Optional lyric-timing objective. Omitted by older callers; native joint
    *  training defaults this to enabled for new configurations. */
   lyricTiming?: boolean;

@@ -423,6 +423,18 @@ interface TrainingState {
    *  stage union: this chain survives SPA navigation (it is Zustand state)
    *  but not a hard reload (nothing here is persisted). */
   runYue2AllStages(datasetId: string, trigger: string, stages?: Yue2StageSet): Promise<void>;
+  /** YuE2 Joint Training "Perform all stages": the same preparation chain as
+   *  the legacy stages 1-5 (latent cache, codes, lead sheets, plus vocal
+   *  stems and lyric alignment while lyric timing is enabled), skipping what
+   *  is already complete, then hands off to `startTraining` — the card's own
+   *  start, which builds the request from the form the user configured (the
+   *  form belongs to the card, not to this chain). A returned jobId is
+   *  adopted into `activeJob` and polled like every other stage. */
+  runYue2JointStages(
+    datasetId: string,
+    lyricTiming: boolean,
+    startTraining: () => Promise<string | null>,
+  ): Promise<void>;
   /** The same chain, run over SEVERAL datasets back to back. One dataset at a
    *  time, strictly sequential — the engine holds one GPU and the server runs
    *  one training job at a time, so a parallel queue would only mean two jobs
@@ -1082,6 +1094,26 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       const result = await runYue2StageChain(
         set, get, datasetId, trigger, stages ?? YUE2_ALL_STAGES,
         n => set({ yue2RunAllStage: n }),
+      );
+      if (!result.ok) set({ error: result.error });
+    } finally {
+      set({ yue2RunAllActive: false, yue2RunAllStage: null });
+    }
+  },
+
+  runYue2JointStages: async (datasetId, lyricTiming, startTraining) => {
+    if (get().yue2RunAllActive) return;
+    const running = get().activeJob;
+    if (running && (running.status === 'queued' || running.status === 'running')) {
+      set({ error: 'A job is already running for this dataset — wait for it to finish first.' });
+      return;
+    }
+    set({ yue2RunAllActive: true, yue2RunAllStage: null, error: null });
+    try {
+      const result = await runYue2JointChain(
+        set, get, datasetId, lyricTiming,
+        n => set({ yue2RunAllStage: n }),
+        startTraining,
       );
       if (!result.ok) set({ error: result.error });
     } finally {
@@ -1930,6 +1962,114 @@ async function runYue2StageChain(
     }
 
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errMessage(err) };
+  } finally {
+    onStage(null);
+  }
+}
+
+/**
+ * The YuE2 Joint Training "perform all stages" chain for ONE dataset:
+ * 1 latent cache, 2 codes, 3 lead sheets, and — while the lyric-timing
+ * objective is on — 4 vocal stems, 5 lyric alignment. The preparation
+ * predicates are the legacy chain's own (same caches, same re-encode rule),
+ * because the joint trainer consumes the same prepared corpus. The final
+ * stage is not a job this function starts: `startTraining` is the card's own
+ * start, so the run always trains with the form the user actually sees
+ * (steps, optimizer, rank/alpha, target), and the chain only guarantees the
+ * order. A returned jobId is adopted and polled like any other stage; the
+ * card's local poller follows the same job in parallel.
+ */
+async function runYue2JointChain(
+  set: (partial: Partial<TrainingState>) => void,
+  get: () => TrainingState,
+  datasetId: string,
+  lyricTiming: boolean,
+  onStage: (stage: number | null) => void,
+  startTraining: () => Promise<string | null>,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    // Stage 1: latent cache — same captionMode 'ace' rule as the legacy chain:
+    // the aligner reads the manifest's lyrics, so a 'none' cache must be
+    // rebuilt, not skipped.
+    onStage(1);
+    {
+      const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (!arStatus.stages.preprocess.done || arStatus.stages.preprocess.captionModeOk === false) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Preprocess(datasetId, { captionMode: 'ace' }));
+        if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Latent cache', job) };
+      }
+    }
+
+    // Stage 2: codes.
+    onStage(2);
+    {
+      const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (!arStatus.stages.tokenize.done) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Tokenize(datasetId, {}));
+        if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Codes', job) };
+      }
+    }
+
+    // Stage 3: lead sheets.
+    onStage(3);
+    {
+      const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+      if (!arStatus.stages.sheet.done) {
+        const job = await startYue2JobAndAwait(set, get, {},
+          () => trainingApi.startYue2Sheet(datasetId, {}));
+        if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Lead sheets', job) };
+      }
+    }
+
+    // Stages 4-5: vocal stems, then lyric alignment — only while the
+    // timing objective is enabled; the joint trainer trains without a cursor
+    // head when it is off.
+    let nextStage = 4;
+    if (lyricTiming) {
+      onStage(4);
+      {
+        const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+        if (arStatus.stages.align.stemsReady <= 0) {
+          const job = await startYue2JobAndAwait(set, get, {},
+            () => trainingApi.startYue2Stems(datasetId, {}));
+          if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Vocal stems', job) };
+        }
+      }
+      onStage(5);
+      {
+        const arStatus = await trainingApi.getYue2ArStatus(datasetId);
+        if (!arStatus.stages.align.done) {
+          const job = await startYue2JobAndAwait(set, get, {},
+            () => trainingApi.startYue2Align(datasetId, {}));
+          if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Lyric alignment', job) };
+        }
+      }
+      nextStage = 6;
+    }
+
+    // Final stage: hand off to the card's own start and follow the job it
+    // returns to a terminal state.
+    onStage(nextStage);
+    const jobId = await startTraining();
+    if (!jobId) {
+      return { ok: false, error: 'Joint training did not start.' };
+    }
+    set({ jobLog: [], error: null });
+    for (;;) {
+      const job = await trainingApi.getJob(jobId);
+      set({ activeJob: job });
+      if (job.status !== 'queued' && job.status !== 'running') {
+        refreshAfterJob(get, job.id);
+        return job.status === 'done'
+          ? { ok: true }
+          : { ok: false, error: yue2StageFailure('Joint training', job) };
+      }
+      await sleep(1500);
+    }
   } catch (err) {
     return { ok: false, error: errMessage(err) };
   } finally {
