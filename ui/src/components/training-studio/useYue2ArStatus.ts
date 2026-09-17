@@ -5,7 +5,7 @@
 // cache stages, their model readiness and the recipe arrive as ONE shape from
 // ONE fetch, so no two stages of the card can disagree about what is on disk.
 //
-// FOUR job kinds move this answer where the NAR hook watches two. Stage 1 is the
+// Cache jobs move this answer where the NAR hook watches two. Stage 1 is the
 // latent cache the NAR card writes, so a preprocess finishing while this card is
 // on screen changes what it may offer — and tokenize and align each rewrite the
 // same manifest every other stage is read out of.
@@ -30,7 +30,7 @@ export function useYue2ArStatus(datasetId: string): {
   const jobStatus = activeJob?.status;
   const running = jobStatus === 'queued' || jobStatus === 'running';
   const mine = kind === 'yue2-preprocess' || kind === 'yue2-tokenize'
-    || kind === 'yue2-align' || kind === 'yue2-sheet' || kind === 'yue2-ar-train';
+    || kind === 'yue2-stems' || kind === 'yue2-align' || kind === 'yue2-sheet' || kind === 'yue2-ar-train';
   const finishedKey = mine && !running ? `${activeJob?.id ?? ''}:${jobStatus ?? ''}` : '';
 
   useEffect(() => {

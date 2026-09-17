@@ -719,7 +719,7 @@ export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
           reading 7/12. Two numbers for one thing, one of them stale. The bar
           wins while it is on screen. */}
       <div className="text-[11px] text-zinc-600 dark:text-zinc-300 mb-3">
-        {mine && activeJob ? (
+        {mine && jobRunning ? (
           <span className="text-zinc-500">
             {t('trainingStudio.yue2ar.stemsLive', 'Separating now — the count below is live.')}
           </span>
