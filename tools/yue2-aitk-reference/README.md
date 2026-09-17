@@ -44,6 +44,15 @@ results nor a successful engine build establishes full-model training parity.
 projection dimensions and publishes without replacing an existing file.
 `test_adapter_io.cpp` takes a new output directory and preserves its artifacts.
 
+`engine/src/train/yue2-aitk-checkpoint.h` maps and validates the base checkpoint
+without copying its tensor payloads. It checks all 229 ConvRot records,
+including the embedding, output head and NAR time/flow projections. The test
+accepts `NEW_OUTPUT_DIRECTORY [CHECKPOINT]` and preserves malformed fixtures.
+This validates the file representation; it does not yet upload the model or
+dequantize its embedding table.
+
+### Standalone ConvRot build and comparison
+
 Build from a Visual Studio x64 Developer Command Prompt at the repository root:
 
 ```bat
