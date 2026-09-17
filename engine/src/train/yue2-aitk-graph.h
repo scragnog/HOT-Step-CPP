@@ -134,9 +134,26 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
         v = ggml_reshape_4d(ctx, ggml_set(ctx, prefix_v_canvas, v, prefix_v_canvas->nb[1],
                     prefix_v_canvas->nb[2], prefix_v_canvas->nb[3], offset), D, prefix_length+S, c.kv_heads, 1);
     }
-    ggml_tensor * packed = ggml_flash_attn_train(ctx, q, k, v, mask, 1.0f/std::sqrt(float(D)));
+    // Torch math SDPA scales Q and K independently before the dot product.
+    // Post-dot scaling differs at BF16 rounding boundaries and is amplified
+    // by subsequent activation quantization. Keep these products in F32.
+    const float root_scale = std::sqrt(1.0f/std::sqrt(float(D)));
+    q = ggml_scale(ctx, ggml_cont(ctx, q), root_scale);
+    k = ggml_scale(ctx, ggml_cont(ctx, k), root_scale);
+#ifdef YUE2_AITK_DIAGNOSTIC_MATH_ATTENTION
+    // Development-only quadratic graph to isolate arithmetic differences.
+    // Never enable this diagnostic in a shipped training runtime.
+    ggml_tensor * scores = ggml_mul_mat(ctx, k, q);
+    ggml_mul_mat_set_prec(scores, GGML_PREC_F32);
+    ggml_tensor * probabilities = ggml_soft_max_ext(ctx, scores, mask, 1.0f, 0.0f);
+    ggml_tensor * weighted = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, v)), probabilities);
+    ggml_mul_mat_set_prec(weighted, GGML_PREC_F32);
+    ggml_tensor * attention = round(ctx, ggml_reshape_2d(ctx, ggml_cont(ctx, ggml_permute(ctx, weighted, 0, 2, 1, 3)), Q, S));
+#else
+    ggml_tensor * packed = ggml_flash_attn_train(ctx, q, k, v, mask, 1.0f);
     ggml_flash_attn_train_set_prec(packed, c.attention_precision);
     ggml_tensor * attention = round(ctx, ggml_reshape_2d(ctx, ggml_flash_attn_train_get_o(ctx, packed), Q, S));
+#endif
     h = round(ctx, ggml_add(ctx, h, linear(ctx, w.output, attention, adapters ? &adapters->output : nullptr)));
     n = rms(ctx, h, norms.post_attention, c.rms_eps);
     ggml_tensor * gu = linear(ctx, w.gate_up, n, adapters ? &adapters->gate_up : nullptr);

@@ -1,5 +1,4 @@
-# Proposed installed engine/src/train/aitk-runtime.cmake.
-# Exact source copies are staged under _experiments/aitk-port/staging/runtime/.
+# Native joint training kernels and command-line runtime.
 
 add_library(yue2-aitk-kernels STATIC)
 if(GGML_CUDA AND TARGET ggml-cuda)

@@ -1,4 +1,5 @@
 #pragma once
+#include "yue2-aitk-backend.h"
 
 // Staged YuE2 optimizer ownership layer. Copy beside the native training
 // sources before integration; this file intentionally does not edit engine/.
@@ -191,7 +192,7 @@ private:
     static void validate_nonnegative_vector(const std::vector<float> & values, const char * label) { for (float value : values) if (!std::isfinite(value) || value < 0) throw std::invalid_argument(std::string("YuE2 optimizer snapshot has invalid ") + label); }
     void validate_backend_specs() const {
         const ggml_backend_dev_t device = ggml_backend_get_device(backend_);
-        if (!ggml_backend_is_cuda(backend_) || !device || ggml_backend_dev_type(device) != GGML_BACKEND_DEVICE_TYPE_GPU) throw std::invalid_argument("YuE2 optimizer requires a CUDA GPU GGML backend");
+        if (!yue2_aitk_is_cuda(backend_) || !device || ggml_backend_dev_type(device) != GGML_BACKEND_DEVICE_TYPE_GPU) throw std::invalid_argument("YuE2 optimizer requires a CUDA GPU GGML backend");
         for (const auto & s : specs_) {
             if (!s.parameter->buffer || !s.gradient->buffer) throw std::invalid_argument("YuE2 optimizer tensor has no backend buffer");
             const auto parameter_type = ggml_backend_buffer_get_type(s.parameter->buffer);

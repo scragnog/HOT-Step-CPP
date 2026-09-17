@@ -1,4 +1,5 @@
 #pragma once
+#include "yue2-aitk-backend.h"
 
 // Chunked full-vocabulary AR CE + KL head helper for the native AITK trainer.
 // This is a staging seam only. It assumes yue2-aitk-model.h and
@@ -109,7 +110,7 @@ struct CudaDeviceGuard {
     bool valid = false;
 
     explicit CudaDeviceGuard(ggml_backend_t backend) {
-        if (!backend || !ggml_backend_is_cuda(backend)) return;
+        if (!backend || !yue2_aitk_is_cuda(backend)) return;
         const ggml_backend_dev_t device = ggml_backend_get_device(backend);
         const char * name = device ? ggml_backend_dev_name(device) : nullptr;
         if (!name || std::strncmp(name, "CUDA", 4) != 0) return;
@@ -141,7 +142,7 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         request.head->scales_f32->flags & GGML_TENSOR_FLAG_PARAM) {
         return fail(Status::invalid_argument, error, "invalid head-loss request");
     }
-    if (!ggml_backend_is_cuda(request.backend))
+    if (!yue2_aitk_is_cuda(request.backend))
         return fail(Status::unsupported_backend, error, "head loss requires the CUDA GGML backend");
     if (request.positions > std::numeric_limits<std::size_t>::max() / request.hidden ||
         request.positions > std::numeric_limits<std::size_t>::max() / kVocab)

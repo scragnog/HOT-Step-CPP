@@ -23,6 +23,9 @@ $previousMode = [AitkTestErrorMode]::SetErrorMode(0x8003)
 $previousPath = $env:PATH
 try {
     $env:PATH = "$dllDirectory;$previousPath"
+    # Windows PowerShell converts redirected native stderr into ErrorRecords.
+    # CUDA initialization messages are diagnostics, not invocation failures.
+    $ErrorActionPreference = 'Continue'
     & $exe @TestArguments
     $result = $LASTEXITCODE
 } finally {

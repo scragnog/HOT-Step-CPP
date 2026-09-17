@@ -1,0 +1,141 @@
+#pragma once
+
+// Public, CUDA-independent seam for the YuE2 joint trainer. The parser and
+// status contract are shared by ace-train and the CUDA runner; model loading
+// and the training loop remain in yue2-aitk-runtime.cpp.
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <limits>
+#include <string>
+#include <utility>
+#include <unordered_set>
+
+namespace yue2_aitk_runtime {
+
+struct Config {
+    std::string checkpoint;
+    std::string dataset;
+    std::string output;
+    std::string resume;
+    std::int32_t steps = 0;
+    std::int32_t save_every = 250;
+    std::uint64_t seed = 0;
+    std::int32_t cuda_index = 0;
+    bool jsonl = true;
+};
+
+enum class ParseResult { ok, help, error };
+
+inline void usage(FILE * out) {
+    std::fprintf(out,
+        "ace-train yue2-joint-train --checkpoint <ConvRot.safetensors> "
+        "--dataset <schema1-manifest.json> --output <new-run-dir> "
+        "--steps N --save-every N --seed N --device CUDA0 [--resume <record>]\n");
+}
+
+namespace detail {
+inline bool decimal_u64(const char * text, std::uint64_t * out) {
+    if (!text || !*text || !out) return false;
+    std::uint64_t value = 0;
+    for (const unsigned char * p = reinterpret_cast<const unsigned char *>(text); *p; ++p) {
+        if (*p < '0' || *p > '9') return false;
+        const std::uint64_t digit = *p - '0';
+        if (value > ((std::numeric_limits<std::uint64_t>::max)() - digit) / 10u) return false;
+        value = value * 10u + digit;
+    }
+    *out = value;
+    return true;
+}
+
+inline bool decimal_i32(const char * text, std::int32_t * out) {
+    std::uint64_t value = 0;
+    if (!decimal_u64(text, &value) || value > 0x7fffffffULL || !out) return false;
+    *out = static_cast<std::int32_t>(value);
+    return true;
+}
+
+inline bool device(const char * text, std::int32_t * index) {
+    if (!text || !index) return false;
+    std::string value(text);
+    if (value.size() < 5 || (value[0] != 'C' && value[0] != 'c') ||
+        (value[1] != 'U' && value[1] != 'u') || (value[2] != 'D' && value[2] != 'd') ||
+        (value[3] != 'A' && value[3] != 'a')) return false;
+    const char * suffix = value.c_str() + 4;
+    if (*suffix == ':') ++suffix;
+    return decimal_i32(suffix, index);
+}
+
+inline bool value(const char * option, int argc, char ** argv, int * cursor,
+                  std::string * out, std::string * error) {
+    if (*cursor + 1 >= argc) {
+        if (error) *error = std::string(option) + " needs a value";
+        return false;
+    }
+    *out = argv[++*cursor];
+    if (out->empty()) {
+        if (error) *error = std::string(option) + " cannot be empty";
+        return false;
+    }
+    return true;
+}
+} // namespace detail
+
+inline ParseResult parse(int argc, char ** argv, Config * config, std::string * error) {
+    if (!config || argc < 1) { if (error) *error = "invalid parser arguments"; return ParseResult::error; }
+    Config parsed;
+    std::unordered_set<std::string> seen;
+    for (int i = 1; i < argc; ++i) {
+        const char * arg = argv[i];
+        if (!std::strcmp(arg, "--help") || !std::strcmp(arg, "-h")) return ParseResult::help;
+        if (!seen.insert(arg).second) {
+            if (error) *error = std::string("duplicate option: ") + arg;
+            return ParseResult::error;
+        }
+        if (!std::strcmp(arg, "--checkpoint")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.checkpoint, error)) return ParseResult::error;
+        } else if (!std::strcmp(arg, "--dataset")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.dataset, error)) return ParseResult::error;
+        } else if (!std::strcmp(arg, "--output")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.output, error)) return ParseResult::error;
+        } else if (!std::strcmp(arg, "--resume")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.resume, error)) return ParseResult::error;
+        } else if (!std::strcmp(arg, "--steps")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::decimal_i32(value_text.c_str(), &parsed.steps)) { if (error) *error = "--steps must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--save-every")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::decimal_i32(value_text.c_str(), &parsed.save_every)) { if (error) *error = "--save-every must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--seed")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::decimal_u64(value_text.c_str(), &parsed.seed)) { if (error) *error = "--seed must be an unsigned decimal integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--device")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::device(value_text.c_str(), &parsed.cuda_index)) { if (error) *error = "--device must be CUDA0 or CUDA:0"; return ParseResult::error; }
+        } else {
+            if (error) *error = std::string("unknown option: ") + arg;
+            return ParseResult::error;
+        }
+    }
+    if (parsed.checkpoint.empty() || parsed.dataset.empty() || parsed.output.empty() ||
+        parsed.steps <= 0 || parsed.save_every <= 0) {
+        if (error) *error = "--checkpoint, --dataset, --output, --steps > 0, and --save-every > 0 are required";
+        return ParseResult::error;
+    }
+    *config = std::move(parsed);
+    return ParseResult::ok;
+}
+
+// SIGINT is observed only at step boundaries; it never interrupts a CUDA
+// graph or checkpoint write.
+void yue2_aitk_install_sigint_handler();
+bool yue2_aitk_cancel_requested();
+void yue2_aitk_clear_cancel();
+
+// Returns 0 on completion, 130 at a safe cancellation boundary, and 1 on a
+// runtime/data/model error. The implementation emits JSONL before CUDA
+// allocation and sets NVIDIA_TF32_OVERRIDE=0 before touching CUDA.
+int yue2_aitk_run(const Config & config, std::string * error);
+
+} // namespace yue2_aitk_runtime

@@ -53,6 +53,7 @@
 // Must follow yue2-nar-train-run.h: it reuses that file's LoRA factor struct,
 // its splitmix64 RNG and its kaiming/zero adapter init verbatim.
 #include "train/yue2-ar-train-run.h"
+#include "train/yue2-aitk-runtime.h"
 #include "train/yue2-optim-check.h"
 #include "model-registry.h"
 #include "train/dit-train-run.h"   // pulls in every dit-*.h (DiT LoRA trainer)
@@ -553,6 +554,9 @@ static void print_usage(void) {
             "                YUE2_FD_LOSSGRAD=2 is the negative control: every probe must then\n"
             "                report rel ~= 0.5 and the gate must FAIL.\n"
             "                Weights are CC BY-NC 4.0; trained adapters inherit NC.\n"
+            "  yue2-joint-train  Native YuE2 AR+NAR joint training (CUDA, ConvRot raw checkpoint).\n"
+            "                --checkpoint <file> --dataset <schema1-manifest> --output <new-dir>\n"
+            "                --steps N --save-every N --seed N --device CUDA0 [--resume <record>]\n"
             "  yue2-ar-train  YuE2 AR-half LoRA training: the COMPOSER. Next-token cross-\n"
             "                entropy over the CODEC POSITIONS of a whole song, never the\n"
             "                instruction/[Tags]/style/[Lyrics] head. Needs codec_ids, so run\n"
@@ -6320,6 +6324,28 @@ static int cmd_rec7_selftest(int argc, char ** argv) {
     return pass ? 0 : 1;
 }
 
+
+// ─── yue2-joint-train ────────────────────────────────────────────────────────
+// The runtime owns provenance checks, CUDA selection, the SIGINT boundary and
+// the actual AR/NAR loop. This front-end only parses the bounded public seam.
+static int cmd_yue2_joint_train(int argc, char ** argv) {
+    yue2_aitk_runtime::Config config;
+    std::string error;
+    const yue2_aitk_runtime::ParseResult parsed =
+        yue2_aitk_runtime::parse(argc, argv, &config, &error);
+    if (parsed == yue2_aitk_runtime::ParseResult::help) {
+        yue2_aitk_runtime::usage(stderr);
+        return 0;
+    }
+    if (parsed != yue2_aitk_runtime::ParseResult::ok) {
+        fprintf(stderr, "ace-train yue2-joint-train: %s\n", error.c_str());
+        yue2_aitk_runtime::usage(stderr);
+        return 2;
+    }
+    const int rc = yue2_aitk_runtime::yue2_aitk_run(config, &error);
+    if (rc != 0 && !error.empty()) fprintf(stderr, "ace-train yue2-joint-train: %s\n", error.c_str());
+    return rc;
+}
 int main(int argc, char ** argv) {
     if (argc < 2) {
         print_usage();
@@ -6389,6 +6415,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "yue2-ar-train")) {
         return cmd_yue2_ar_train(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-joint-train")) {
+        return cmd_yue2_joint_train(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "spike")) {
         return cmd_spike(argc - 1, argv + 1);
