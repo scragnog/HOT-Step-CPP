@@ -18,6 +18,27 @@ all 15 imported Dookie caption prefixes. Use the safe Windows launcher below.
 Native updates on real full songs and merging both native experts have passed;
 the multi-step listening qualification remains in progress.
 
+### Native training performance controls
+
+Joint training uses shared masks, reusable block workspace, device-resident
+layer checkpoints and tensor-core attention where supported. Each update logs
+`step_ms`, per-stage times, and the resolved `attention_forward` and
+`attention_backward` kernels. Step time excludes loading and checkpoint saves.
+
+For diagnostics, set an environment variable before starting the trainer:
+
+- `YUE2_AITK_STRICT_F32=1` selects strict scalar attention while retaining the
+  allocation and device-tape improvements.
+- `YUE2_AITK_HOST_TAPE=1` keeps layer checkpoints in host BF16 memory, reducing
+  device storage at the cost of transfers. Attention remains unchanged.
+- `YUE2_AITK_BASELINE=1` restores the original allocation, host-tape and strict
+  attention paths together. This is an execution comparison within the joint
+  trainer, separate from the Training Studio Legacy trainer selection.
+
+Unset these variables to use the normal fast path. Presence enables each
+diagnostic override, including a value of `0`. TF32 and strict F32 can round
+differently; exact checkpoint equivalence requires the same attention mode.
+
 ## Native ConvRot8 computation
 
 `convrot_cpu.h` and `convrot_probe.cpp` provide a scalar arithmetic oracle.

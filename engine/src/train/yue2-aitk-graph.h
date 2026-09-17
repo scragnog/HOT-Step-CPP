@@ -8,12 +8,16 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <cstdlib>
 
 struct Yue2AitkGraphConfig {
     int64_t hidden = 2048, intermediate = 6144;
     int64_t heads = 16, kv_heads = 8, head_dim = 128;
     float rms_eps = 1e-6f;
-    ggml_prec attention_precision = GGML_PREC_F32;
+    // Use the existing tensor-core training kernels. Strict scalar attention
+    // remains available for arithmetic diagnostics, not the normal trainer.
+    ggml_prec attention_precision = (std::getenv("YUE2_AITK_STRICT_F32") ||
+        std::getenv("YUE2_AITK_BASELINE")) ? GGML_PREC_F32 : GGML_PREC_DEFAULT;
 };
 
 struct Yue2AitkBlockNorms {

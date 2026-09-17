@@ -110,6 +110,9 @@ static int run_impl(const Config & config, std::string * error) {
     const auto device = ggml_backend_dev_by_name(("CUDA" + std::to_string(config.cuda_index)).c_str());
     struct Backend { ggml_backend_t value = nullptr; ~Backend() { if (value) ggml_backend_free(value); } } backend{device ? ggml_backend_dev_init(device, nullptr) : nullptr};
     if (!backend.value) { fail(error, "requested CUDA backend is unavailable"); return 1; }
+    using AttentionPrecision = const char * (*)(int);
+    const auto attention_precision = reinterpret_cast<AttentionPrecision>(ggml_backend_reg_get_proc_address(
+        ggml_backend_dev_backend_reg(device), "ggml_backend_cuda_fattn_train_last_prec"));
     try {
         event("load"); Yue2AitkModel model; Yue2AitkTrainState state;
         if (!model.load(config.checkpoint.c_str(), backend.value, yue2_aitk_load_embedding_bf16, error) ||
@@ -175,7 +178,10 @@ static int run_impl(const Config & config, std::string * error) {
             line << std::setprecision(17) << "{\"stage\":\"joint\",\"step\":" << metrics.step
                    << ",\"ar_ce\":" << metrics.ar_ce << ",\"ar_kl\":" << metrics.ar_kl
                    << ",\"nar_mse\":" << metrics.nar_mse << ",\"gradient_norm\":" << metrics.gradient_norm
-                   << ",\"step_ms\":" << step_ms << ",\"stage_ms\":{";
+                   << ",\"step_ms\":" << step_ms
+                   << ",\"attention_forward\":\"" << (attention_precision?attention_precision(0):"unknown")
+                   << "\",\"attention_backward\":\"" << (attention_precision?attention_precision(1):"unknown")
+                   << "\",\"stage_ms\":{";
             for (size_t i=0;i<stage_times.size();++i) {
                 if(i) line << ',';
                 line << '"' << stage_times[i].first << "\":" << stage_times[i].second;
