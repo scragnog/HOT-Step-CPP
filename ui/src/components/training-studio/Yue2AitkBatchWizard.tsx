@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, Play, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -6,9 +6,10 @@ import {
   getJob, getYue2ArStatus, getYue2AitkPrepare,
   startYue2Align, startYue2Preprocess, startYue2Sheet,
   startYue2Stems, startYue2Tokenize, startYue2JointTrain,
-  type Yue2JointPreviewOptions,
+  type Yue2JointPreviewOptions, type Yue2JointTrainRequest,
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { readYue2JointPresets, type Yue2JointPreset } from './yue2JointPresets';
 
 type RowState = { status: 'waiting' | 'running' | 'done' | 'failed' | 'cancelled'; phase?: string; error?: string };
 
@@ -40,6 +41,9 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
   const [saveEvery, setSaveEvery] = useState(50);
   const [seed, setSeed] = useState(42);
   const [device, setDevice] = useState('CUDA0');
+  const [presets, setPresets] = useState<Yue2JointPreset[]>([]);
+  const [presetName, setPresetName] = useState('');
+  const [formError, setFormError] = useState('');
   const [running, setRunning] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [rows, setRows] = useState<Record<string, RowState>>({});
@@ -47,6 +51,28 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
   const selected = useMemo(() => datasets.filter(d => checked[d.id]), [datasets, checked]);
   const busy = activeJob?.status === 'queued' || activeJob?.status === 'running';
   const signal = React.useRef({ cancelled: false });
+  const selectedPreset = presets.find(preset => preset.name === presetName);
+
+  useEffect(() => {
+    if (open) {
+      setPresets(readYue2JointPresets());
+      setPresetName('');
+      setFormError('');
+    }
+  }, [open]);
+
+  const choosePreset = (name: string) => {
+    setPresetName(name);
+    setFormError('');
+    const preset = presets.find(item => item.name === name);
+    const settings = preset?.settings;
+    if (!settings) return;
+    if (typeof settings.steps === 'number') setSteps(settings.steps);
+    if (typeof settings.saveEvery === 'number') setSaveEvery(settings.saveEvery);
+    if (typeof settings.seed === 'number') setSeed(settings.seed);
+    if (typeof settings.device === 'string') setDevice(settings.device);
+    if (preset.version === 2 && typeof settings.lyricTiming === 'boolean') setLyricTiming(settings.lyricTiming);
+  };
 
   const update = (id: string, next: RowState) => setRows(previous => ({ ...previous, [id]: next }));
   const runStage = async (id: string, phase: string, start: () => Promise<{ jobId: string }>) => {
@@ -59,6 +85,16 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
 
   const run = async () => {
     if (running || busy || selected.length === 0) return;
+    if (!Number.isInteger(steps) || steps < 1 || !Number.isInteger(saveEvery) || saveEvery < 1 || saveEvery > steps) {
+      setFormError('Save every must be between 1 and the total step count.');
+      return;
+    }
+    const recipe = selectedPreset?.settings ?? {};
+    if (recipe.stopMode === 'loss' && !(typeof recipe.targetLoss === 'number' && recipe.targetLoss > 0)) {
+      setFormError('The selected preset needs a target loss above 0.');
+      return;
+    }
+    setFormError('');
     signal.current = { cancelled: false };
     setCancelled(false); setRunning(true);
     for (const dataset of selected) {
@@ -88,12 +124,29 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
           throw new Error('Joint Training preparation defaults are incomplete for this dataset');
         }
         update(dataset.id, { status: 'running', phase: 'joint training' });
-        const preview: Yue2JointPreviewOptions = { enabled: false, everySteps: saveEvery, seconds: 40, seed: 424242, previewMaxFrames: 0, baseline: false, control: false };
-        const train = await startYue2JointTrain(dataset.id, {
+        // Preset preview timing is shared; caption/lyrics/song overrides belong
+        // to one dataset and must not leak into the rest of the batch.
+        const preview: Yue2JointPreviewOptions = {
+          enabled: recipe.preview?.enabled === true, everySteps: saveEvery,
+          seconds: recipe.preview?.seconds ?? 40, seed: recipe.preview?.seed ?? 424242,
+          previewMaxFrames: 1000, baseline: recipe.preview?.baseline ?? false,
+          control: recipe.preview?.control ?? false,
+        };
+        preview.previewMaxFrames = Math.max(8, Math.min(120, preview.seconds || 40)) * 25;
+        const trainOptions: Yue2JointTrainRequest = {
           trainingMethod: 'aitk', checkpoint: defaults.checkpoint, dataset: '', autoPrepare: true,
           output: '', steps, saveEvery, seed, device, lyricTiming,
-          alignmentEnabled: lyricTiming, cursorWeight: lyricTiming ? 0.08 : 0, preview,
-        });
+          alignmentEnabled: lyricTiming, cursorWeight: lyricTiming ? (recipe.cursorWeight ?? 0.08) : 0, preview,
+          ...(recipe.optimizer ? { optimizer: recipe.optimizer } : {}),
+          ...(recipe.prodigyD0 !== undefined ? { prodigyD0: recipe.prodigyD0 } : {}),
+          ...(recipe.muonLrScale !== undefined ? { muonLrScale: recipe.muonLrScale } : {}),
+          ...(recipe.muonNsSteps !== undefined ? { muonNsSteps: recipe.muonNsSteps } : {}),
+          ...(recipe.rank !== undefined ? { rank: recipe.rank } : {}),
+          ...(recipe.alpha !== undefined ? { alpha: recipe.alpha } : {}),
+          ...(recipe.stopMode ? { stopMode: recipe.stopMode } : {}),
+          ...(recipe.stopMode === 'loss' && recipe.targetLoss !== undefined ? { targetLoss: recipe.targetLoss } : {}),
+        };
+        const train = await startYue2JointTrain(dataset.id, trainOptions);
         await waitFor(train.jobId, (p: string) => update(dataset.id, { status: 'running', phase: `joint training: ${p}` }));
         if (signal.current.cancelled) throw new Error('Batch cancelled');
         update(dataset.id, { status: 'done', phase: 'complete' });
@@ -115,6 +168,24 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
           <button type="button" onClick={onClose} disabled={running}><X size={16} /></button>
         </div>
         <p className="text-[11px] text-zinc-500 mb-4">{t('trainingStudio.yue2.aitkBatch.help', 'Each dataset runs its caches, preparation, and joint AR + NAR training in order. Settings are shared; output folders are unique per dataset.')}</p>
+        <label className="block text-xs text-zinc-600 dark:text-zinc-400 mb-4">
+          {t('trainingStudio.yue2.aitkBatch.preset', 'Training preset')}
+          <select disabled={running} value={presetName} onChange={event => choosePreset(event.target.value)}
+            className="mt-1 w-full rounded-lg bg-zinc-100 dark:bg-black/20 p-2">
+            <option value="">{t('trainingStudio.yue2.aitkBatch.noPreset', 'None — use the settings below')}</option>
+            {presets.map(preset => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
+          </select>
+        </label>
+        {selectedPreset && <p className="text-[11px] text-zinc-500 mb-3">
+          {t('trainingStudio.yue2.aitkBatch.presetDetails', 'Applied to every dataset: {{optimizer}}, rank {{rank}}, alpha {{alpha}}, {{mode}} stopping, previews {{previews}}.', {
+            optimizer: selectedPreset.settings.optimizer ?? 'adamw', rank: selectedPreset.settings.rank ?? 64,
+            alpha: selectedPreset.settings.alpha ?? 64, mode: selectedPreset.settings.stopMode ?? 'steps',
+            previews: selectedPreset.settings.preview?.enabled ? 'on' : 'off',
+          })}
+        </p>}
+        {selectedPreset && selectedPreset.version !== 2 && <p className="text-[11px] text-amber-600 mb-3">
+          {t('trainingStudio.yue2.aitkBatch.oldPresetTiming', 'This older preset did not reliably save lyric timing. Check the timing box below before starting.')}
+        </p>}
         <div className="grid grid-cols-2 gap-2 mb-4">
           <label className="text-xs text-zinc-600 dark:text-zinc-400">Steps<input disabled={running} type="number" min={1} value={steps} onChange={e => setSteps(Math.max(1, Number(e.target.value) || 1))} className="mt-1 w-full rounded-lg bg-zinc-100 dark:bg-black/20 p-2" /></label>
           <label className="text-xs text-zinc-600 dark:text-zinc-400">Save every<input disabled={running} type="number" min={1} value={saveEvery} onChange={e => setSaveEvery(Math.max(1, Number(e.target.value) || 1))} className="mt-1 w-full rounded-lg bg-zinc-100 dark:bg-black/20 p-2" /></label>
@@ -122,6 +193,7 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
           <label className="text-xs text-zinc-600 dark:text-zinc-400">CUDA device<input disabled={running} value={device} onChange={e => setDevice(e.target.value || 'CUDA0')} className="mt-1 w-full rounded-lg bg-zinc-100 dark:bg-black/20 p-2" /></label>
         </div>
         <label className="flex items-center gap-2 text-xs mb-4"><input disabled={running} type="checkbox" checked={lyricTiming} onChange={e => setLyricTiming(e.target.checked)} className="accent-amber-500" /> Include lyric timing stems and alignment</label>
+        {formError && <p className="text-xs text-red-500 mb-3">{formError}</p>}
         <div className="rounded-lg border border-zinc-200 dark:border-white/10 divide-y divide-zinc-200 dark:divide-white/10 mb-4">
           {datasets.map(ds => { const row = rows[ds.id]; return <label key={ds.id} className="flex items-center gap-2 p-2 text-xs"><input type="checkbox" checked={!!checked[ds.id]} onChange={e => setChecked(previous => ({ ...previous, [ds.id]: e.target.checked }))} disabled={running} className="accent-amber-500" /><span className="flex-1 truncate">{ds.name}</span>{row && <span className={row.status === 'failed' ? 'text-red-500' : row.status === 'done' ? 'text-emerald-500' : 'text-zinc-500'}>{row.error || row.phase}</span>}</label>; })}
           {datasets.length === 0 && <div className="p-3 text-xs text-zinc-500">No datasets available.</div>}

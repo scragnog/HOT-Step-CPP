@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Loader2, Play, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
+import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
 import { TrainingChart } from './TrainingChart';
 import {
   cancelJob,
@@ -36,7 +37,6 @@ import { descentRate, formatDurationMs } from '../../utils/trainingEta';
 const JOB_KEY = 'hs-yue2-aitk-job:';
 const FORM_KEY = 'hs-yue2-aitk-form:';
 const PREP_KEY = 'hs-yue2-aitk-prepare:';
-const PRESETS_KEY = 'hs-yue2-joint-presets';
 const METRIC_CAP = 2000;
 type JointStepPoint = { step: number; loss: number; ep: number; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
 type JointMilestone = { epoch: number; loss: number; path: string };
@@ -64,16 +64,16 @@ function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string
 /** A named snapshot of the training settings. Per-run and per-machine values
  *  (dataset/checkpoint/output paths, resume record) are deliberately not part
  *  of a preset: a preset answers "how do I train", never "against which run". */
-type Yue2JointPreset = { name: string; settings: Partial<Yue2JointTrainRequest> };
 const PRESET_EXCLUDED_KEYS: ReadonlySet<keyof Yue2JointTrainRequest> = new Set([
   'trainingMethod', 'autoPrepare', 'preparation', 'checkpoint', 'dataset', 'output', 'resume', 'alignmentEnabled',
 ]);
-function snapshotPresetSettings(form: Yue2JointTrainRequest): Partial<Yue2JointTrainRequest> {
+function snapshotPresetSettings(form: Yue2JointTrainRequest, lyricTiming: boolean): Partial<Yue2JointTrainRequest> {
   const settings: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(form)) {
     if (PRESET_EXCLUDED_KEYS.has(key as keyof Yue2JointTrainRequest) || value === undefined) continue;
     settings[key] = value;
   }
+  settings.lyricTiming = lyricTiming;
   return settings as Partial<Yue2JointTrainRequest>;
 }
 const DEFAULT_FORM: Yue2JointTrainRequest = {
@@ -132,7 +132,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
-  const [presets, setPresets] = useState<Yue2JointPreset[]>(() => readStored<Yue2JointPreset[]>(PRESETS_KEY, []));
+  const [presets, setPresets] = useState<Yue2JointPreset[]>(() => readStored<Yue2JointPreset[]>(YUE2_JOINT_PRESETS_KEY, []));
   const [presetName, setPresetName] = useState('');
   const [presetError, setPresetError] = useState('');
   const [prepare, setPrepare] = useState<PrepareForm>(() => readStored(`${PREP_KEY}${datasetId}`, {
@@ -357,7 +357,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   }, [datasetId, prepare, prepareJob, prepareManifest, appliedPrepareJobId]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') window.localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+    if (typeof window !== 'undefined') window.localStorage.setItem(YUE2_JOINT_PRESETS_KEY, JSON.stringify(presets));
   }, [presets]);
 
   useEffect(() => {
@@ -411,11 +411,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       return;
     }
     setPresetError('');
-    setPresets(previous => [...previous, { name, settings: snapshotPresetSettings(form) }]);
+    setPresets(previous => [...previous, { version: 2, name, settings: snapshotPresetSettings(form, lyricTiming) }]);
     setPresetName('');
   };
   const loadPreset = (preset: Yue2JointPreset) => {
     setForm(previous => ({ ...previous, ...preset.settings }));
+    if (preset.version === 2 && typeof preset.settings.lyricTiming === 'boolean') onLyricTimingChange(preset.settings.lyricTiming);
   };
   const removePreset = (name: string) => {
     setPresets(previous => previous.filter(preset => preset.name !== name));
