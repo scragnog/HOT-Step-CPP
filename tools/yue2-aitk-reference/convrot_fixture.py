@@ -45,7 +45,7 @@ def compare(name, actual, expected, atol, rtol):
     return result
 
 
-def run_case(ref, probe, directory, name, rows, width, outputs, rotation, dtype, seed, device):
+def run_case(ref, probe, directory, name, rows, width, outputs, rotation, dtype, seed, device, no_bias=False):
     generator = torch.Generator().manual_seed(seed)
     x = torch.randn(rows, width, generator=generator).to(dtype)
     # Include a zero row to exercise its special scale = 1 contract.
@@ -63,14 +63,14 @@ def run_case(ref, probe, directory, name, rows, width, outputs, rotation, dtype,
     rotated = ref["rotate"](x, rotation)
     if device == "cuda":
         codes, act_scales = ref["quantize_int8_rows_fused"](rotated.detach())
-        expected_y = ref["_int8_linear_ste_op"](rotated, w, scales.view(torch.uint8), bias, 127,
+        expected_y = ref["_int8_linear_ste_op"](rotated, w, scales.view(torch.uint8), None if no_bias else bias, 127,
                                                str(dtype).split(".")[-1])
         expected_y.backward(grad)
         expected_dx = x.grad
     else:
         codes, act_scales = ref["quantize_int8_rows"](rotated)
         accum = codes.int() @ w.int().T
-        expected_y = (accum.float() * (act_scales[:, None] * scales[None, :]) + bias.float()).to(dtype)
+        expected_y = (accum.float() * (act_scales[:, None] * scales[None, :]) + (0 if no_bias else bias.float())).to(dtype)
         ctx = SimpleNamespace(saved_tensors=(w, scales.view(torch.uint8)))
         rotated_grad = ref["_int8_linear_ste_backward"](ctx, grad)[0]
         expected_dx = ref["rotate"](rotated_grad, rotation)
@@ -80,7 +80,10 @@ def run_case(ref, probe, directory, name, rows, width, outputs, rotation, dtype,
         file.write(struct.pack("<6I", 0x314B5441, rows, width, outputs, rotation, int(dtype == torch.bfloat16)))
         for tensor in (x.float(), w, scales, grad.float(), bias.float()):
             file.write(tensor.detach().contiguous().cpu().numpy().tobytes())
-    subprocess.run([str(probe), str(fixture), str(output)], check=True, capture_output=True, text=True)
+    command = [str(probe), str(fixture), str(output)]
+    if no_bias:
+        command.append("--no-bias")
+    subprocess.run(command, check=True, capture_output=True, text=True)
     data = output.read_bytes()
     offset = 0
 
@@ -117,6 +120,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="New output directory")
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--production-shapes", action="store_true", help="Also test YuE2 projection dimensions")
+    parser.add_argument("--no-bias", action="store_true", help="Check bias-free projections; requires the API probe")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     ref, digest = reference_functions(args.toolkit / "toolkit/util/convrot_quant.py")
@@ -129,14 +133,15 @@ def main():
     for dtype, label in ((torch.float32, "fp32"), (torch.bfloat16, "bf16")):
         for index, (width, rotation) in enumerate(((16, 1), (64, 16), (256, 256), (512, 256))):
             cases.append(run_case(ref, args.probe.resolve(), args.output, f"{label}-{width}-{rotation}",
-                                  3, width, 32, rotation, dtype, 71 + index, args.device))
+                                  3, width, 32, rotation, dtype, 71 + index, args.device, args.no_bias))
     if args.production_shapes:
         for index, (rows, width, outputs) in enumerate(((33, 2048, 4096), (3, 2048, 12288), (3, 6144, 2048))):
             cases.append(run_case(ref, args.probe.resolve(), args.output, f"bf16-production-{rows}-{width}-{outputs}",
-                                  rows, width, outputs, 256, torch.bfloat16, 81 + index, args.device))
+                                  rows, width, outputs, 256, torch.bfloat16, 81 + index, args.device, args.no_bias))
     report = {"schema": 1, "source_sha256": digest, "torch": torch.__version__,
               "scope": "Standalone native probe versus reference arithmetic; no full-model parity claim",
               "reference_device": args.device,
+              "bias": not args.no_bias,
               "reference_execution": "actual custom-op/autograd" if args.device == "cuda" else "extracted arithmetic",
               "pass": all(case["pass"] for case in cases), "cases": cases}
     (args.output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")

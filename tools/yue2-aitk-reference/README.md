@@ -61,7 +61,24 @@ Three details mattered at full dimensions:
   radix-4 sum differed at a cancellation tie. The scalar oracle is diagnostic,
   not the authority for reference GPU rounding.
 
+## Stream-ordered CUDA API
+
+The reusable CUDA operation is in `convrot_cuda_api.h/.cu`. It accepts
+caller-owned device buffers, workspace, stream and cuBLAS handle; it neither
+allocates device memory nor synchronizes. `convrot_api_probe.cpp` checks the
+same reference fixtures on a non-default stream and verifies restoration of
+the caller's cuBLAS stream, pointer mode and math mode. Pass `--no-bias` to
+`convrot_fixture.py` with this probe to test YuE2's bias-free projections.
+Both bias modes pass the 11 reference cases, including production dimensions.
+This API is not yet registered as a GGML training operation.
+
 ## Adapter interchange
+
+`test_fused_lora.cpp` tests the native header
+`engine/src/train/yue2-aitk-lora.h`: shared input factors for fused projections,
+distinct AR/NAR tensor names, and actual GGML backward accumulation checked
+against both separate branches and analytic gradients. Existing Legacy
+adapter creation is unchanged.
 
 `adapter_layout.py CHECKPOINT` validates both expert namespaces and fused LoRA
 factor shapes. Its fused/split APIs preserve shared input factors and reject
