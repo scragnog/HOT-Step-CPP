@@ -33,6 +33,27 @@ the latent, semantic-token and ABC cache stages, then prepare the joint dataset
 and train. Legacy keeps the existing separate AR/NAR workflow. The joint
 checkpoint picker applies both native adapters for generation.
 
+Training Studio enables lyric-timing supervision for new joint runs by default.
+It reuses the vocal-stem and forced-alignment stages; turning the option off
+skips those optional stages and the cursor objective. The timing weight is
+configurable and recorded with the run. Existing Legacy controls and its
+separate AR/NAR workflow are unchanged.
+
+Checkpoint previews are optional and disabled by default. They use the first
+eligible dataset track with a fixed default seed of 424242. Preview duration is
+bounded to 8–120 seconds and controls the semantic frame cap. Reaching that cap
+is a preview limit, not a natural ending. Preview audio is stored with the run
+and remains playable after reopening it. Native AR and NAR exports from the
+same checkpoint should be selected together; their generation strengths remain
+independent and default to 1/1.
+
+The AITK “Train multiple” control processes selected datasets sequentially:
+cache stages, optional timing preparation, joint preparation, then joint
+training. It uses shared recipe settings and separate output directories. The
+queue is held in browser memory, like the Legacy batch wizard, so the Training
+Studio tab must remain open until the queue finishes. A reload does not resume
+the queue automatically.
+
 The native cache preparation command reuses complete full-song caches:
 
 ```text

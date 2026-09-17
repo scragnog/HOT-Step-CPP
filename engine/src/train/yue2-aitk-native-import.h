@@ -88,7 +88,8 @@ inline bool read_words5(const std::filesystem::path & path, int64_t lyric_chars,
         const float * row = out->data() + i * 5;
         if (!std::isfinite(row[0]) || !std::isfinite(row[1]) || !std::isfinite(row[2]) ||
             !std::isfinite(row[3]) || !std::isfinite(row[4]) || row[0] < 0 || row[1] < row[0] ||
-            row[3] < 0 || row[4] < row[3] || row[4] > lyric_chars || row[0] < previous)
+            row[3] < 0 || row[4] < row[3] || row[4] > lyric_chars || std::floor(row[3]) != row[3] ||
+            std::floor(row[4]) != row[4] || row[0] < previous)
             return fail(e, "cursor_words contains an invalid time or codepoint span");
         previous = row[0];
     }
@@ -97,6 +98,48 @@ inline bool read_words5(const std::filesystem::path & path, int64_t lyric_chars,
 
 inline int64_t utf8_codepoints(const std::string & text) {
     int64_t count = 0; for (unsigned char c : text) if ((c & 0xC0) != 0x80) ++count; return count;
+}
+
+inline bool remap_words5(const std::string & original, const std::string & normalized,
+                         std::vector<float> * words, std::string * e) {
+    auto decode = [](const std::string & s, std::vector<uint32_t> * out) {
+        for (size_t i = 0; i < s.size();) {
+            const unsigned char c = static_cast<unsigned char>(s[i]); size_t n = 1; uint32_t cp = c;
+            if (c >= 0xC2 && c <= 0xDF) { n = 2; cp = c & 0x1F; }
+            else if (c >= 0xE0 && c <= 0xEF) { n = 3; cp = c & 0x0F; }
+            else if (c >= 0xF0 && c <= 0xF4) { n = 4; cp = c & 0x07; }
+            if (i + n > s.size()) return false;
+            for (size_t j = 1; j < n; ++j) {
+                const unsigned char d = static_cast<unsigned char>(s[i + j]);
+                if ((d & 0xC0) != 0x80) return false; cp = (cp << 6) | (d & 0x3F);
+            }
+            out->push_back(cp); i += n;
+        }
+        return true;
+    };
+    auto fold = [](uint32_t cp) { return cp >= 'a' && cp <= 'z' ? cp - ('a' - 'A') : cp; };
+    auto space = [](uint32_t cp) { return cp == ' ' || cp == '\t' || cp == '\r' || cp == '\n'; };
+    std::vector<uint32_t> a, b; if (!decode(original, &a) || !decode(normalized, &b)) return fail(e, "lyrics are not valid UTF-8");
+    std::vector<int64_t> boundary(a.size() + 1, -1); size_t i = 0, j = 0;
+    while (i < a.size() || j < b.size()) {
+        if (i < a.size() && j < b.size() && fold(a[i]) == fold(b[j])) {
+            boundary[i] = static_cast<int64_t>(j); ++i; ++j; boundary[i] = static_cast<int64_t>(j); continue;
+        }
+        if (i < a.size() && space(a[i])) {
+            boundary[i] = static_cast<int64_t>(j); ++i; boundary[i] = static_cast<int64_t>(j); continue;
+        }
+        return fail(e, "caption normalization changed lyric text beyond case/whitespace; re-run yue2-align");
+    }
+    boundary[a.size()] = static_cast<int64_t>(b.size());
+    for (size_t w = 0; w < words->size() / 5; ++w) {
+        const size_t c0 = static_cast<size_t>((*words)[w * 5 + 3]);
+        const size_t c1 = static_cast<size_t>((*words)[w * 5 + 4]);
+        if (c1 > a.size() || boundary[c0] < 0 || boundary[c1] < 0 || boundary[c1] <= boundary[c0])
+            return fail(e, "cursor word became empty after lyric normalization; re-run yue2-align");
+        (*words)[w * 5 + 3] = static_cast<float>(boundary[c0]);
+        (*words)[w * 5 + 4] = static_cast<float>(boundary[c1]);
+    }
+    return true;
 }
 
 inline bool lyric_token_ends(const BPETokenizer * tok, const std::vector<int> & ids,
@@ -196,6 +239,7 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         if ((caption_value && !str(caption_value, &style)) || (lyrics_value && !str(lyrics_value, &lyrics)) ||
             (abc_value && !str(abc_value, &abc)) || (abc_error_value && !str(abc_error_value, &abc_error)))
             return fail(error, "Legacy caption, lyrics, ABC and ABC error fields must be strings");
+        const std::string source_lyrics_before_normalization = lyrics;
         if (caption_format == "plain" && style.find("lyrics:") != std::string::npos)
             return fail(error, "plain caption contains a lyrics: section; rerun preprocessing with caption_mode=ace");
         if (caption_format != "none") {
@@ -243,13 +287,24 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
             auto & cm = item.prompt.cursor;
             cm.present = true; cm.enabled = request.lyric_timing; cm.instrumental = false;
             cm.lyric_codepoints = utf8_codepoints(lyrics);
-            if (!read_words5(cursor_path, cm.lyric_codepoints, &cm.words5, error)) return false;
+            const int64_t source_chars = utf8_codepoints(source_lyrics_before_normalization);
+            if (!read_words5(cursor_path, source_chars, &cm.words5, error)) return false;
+            if (source_lyrics_before_normalization != lyrics &&
+                !remap_words5(source_lyrics_before_normalization, lyrics, &cm.words5, error)) return false;
+            cm.lyric_codepoints = utf8_codepoints(lyrics);
             const std::string full_text = std::string(yue2_instruction(YUE2_COT_FULL)) + "\n[Tags]\n" + style + "\n[Lyrics]\n" + lyrics;
             const std::string off_text = std::string(yue2_instruction(YUE2_COT_OFF)) + "\n[Tags]\n" + style + "\n[Lyrics]\n" + lyrics;
             const auto full_head = yue2_bpe_encode(&tokenizer, std::string(yue2_instruction(YUE2_COT_FULL)) + "\n[Tags]\n" + style + "\n[Lyrics]\n");
             const auto off_head = yue2_bpe_encode(&tokenizer, std::string(yue2_instruction(YUE2_COT_OFF)) + "\n[Tags]\n" + style + "\n[Lyrics]\n");
             const auto full_ids = yue2_bpe_encode(&tokenizer, full_text);
             const auto off_ids = yue2_bpe_encode(&tokenizer, off_text);
+            auto head_matches = [](const std::vector<int> & full, const std::vector<int> & head) {
+                if (full.size() < head.size()) return false;
+                for (size_t k = 0; k < head.size(); ++k) if (full[k] != head[k]) return false;
+                return true;
+            };
+            if (!head_matches(full_ids, full_head) || !head_matches(off_ids, off_head))
+                return fail(error, "cursor tokenizer BPE merge crossed the lyric boundary; re-tokenize and re-align the source");
             auto prefix_matches = [](const std::vector<int32_t> & prefix, const std::vector<int> & ids) {
                 if (prefix.size() < ids.size() + 1) return false;
                 for (size_t k = 0; k < ids.size(); ++k) if (prefix[k + 1] != ids[k]) return false;

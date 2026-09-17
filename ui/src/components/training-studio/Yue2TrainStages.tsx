@@ -41,6 +41,7 @@ import {
 import { Yue2BatchTrainWizard } from './Yue2BatchTrainWizard';
 import { Yue2NarTrainCard, Yue2PreprocessCard } from './Yue2TrainCard';
 import { Yue2AitkTrainCard } from './Yue2AitkTrainCard';
+import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
 import { useYue2ArStatus } from './useYue2ArStatus';
 import { useYue2Status } from './useYue2Status';
 
@@ -49,6 +50,7 @@ const BTN_RUNALL = 'w-full px-4 py-2.5 rounded-lg text-sm font-semibold bg-amber
                   + 'hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors '
                   + 'flex items-center justify-center gap-2';
 const METHOD_KEY = 'hs-yue2-training-method';
+const LYRIC_TIMING_KEY = 'hs-yue2-aitk-lyric-timing:';
 type Yue2TrainingMethod = 'aitk' | 'legacy';
 
 const MethodSelector: React.FC<{ value: Yue2TrainingMethod; onChange: (value: Yue2TrainingMethod) => void }> = ({ value, onChange }) => {
@@ -187,6 +189,11 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
     if (typeof window === 'undefined') return 'aitk';
     return window.localStorage.getItem(METHOD_KEY) === 'legacy' ? 'legacy' : 'aitk';
   });
+  const [lyricTiming, setLyricTiming] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const saved = window.localStorage.getItem(`${LYRIC_TIMING_KEY}${datasetId}`);
+    return saved === null ? true : saved === 'true';
+  });
   const storeError = useTrainingStore(s => s.error);
   const activeJob = useTrainingStore(s => s.activeJob);
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
@@ -201,6 +208,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
   // that logic a third time.
   const [reloadNonce, setReloadNonce] = useState(0);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [aitkBatchOpen, setAitkBatchOpen] = useState(false);
   const reload = () => { reloadYue2Status(); reloadArStatus(); setReloadNonce(n => n + 1); };
 
   const jobStatus = activeJob?.status;
@@ -250,15 +258,34 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
     setMethod(next);
     window.localStorage.setItem(METHOD_KEY, next);
   };
+  const setAitkLyricTiming = (value: boolean) => {
+    setLyricTiming(value);
+    window.localStorage.setItem(`${LYRIC_TIMING_KEY}${datasetId}`, String(value));
+  };
 
   if (method === 'aitk') {
     return (
       <div className="flex flex-col gap-4">
         <MethodSelector value={method} onChange={selectMethod} />
+        <div className={CARD}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">{t('trainingStudio.yue2.aitkBatch.title', 'Train several with AI Toolkit')}</h3>
+              <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.aitkBatch.short', 'Run preparation and joint AR + NAR training for multiple datasets in sequence.')}</p>
+            </div>
+            <button type="button" onClick={() => setAitkBatchOpen(true)} className="shrink-0 rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-black hover:bg-amber-400">
+              <ListChecks size={14} className="inline mr-1" />{t('trainingStudio.yue2.aitkBatch.open', 'Train multiple')}
+            </button>
+          </div>
+        </div>
         {yue2Status && <Yue2PreprocessCard status={yue2Status} onDone={reload} />}
         {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
         {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
-        <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} legacyManifest={arStatus?.manifestPath || yue2Status?.manifestPath} />
+        {lyricTiming && arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
+        {lyricTiming && arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
+        <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} legacyManifest={arStatus?.manifestPath || yue2Status?.manifestPath}
+          cursorReady={!!arStatus?.stages.align.done} lyricTiming={lyricTiming} onLyricTimingChange={setAitkLyricTiming} />
+        <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
       </div>
     );
   }

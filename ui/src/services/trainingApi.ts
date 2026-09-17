@@ -633,6 +633,25 @@ export interface Yue2JointTrainRequest {
   seed: number;
   device: string;
   resume?: string;
+  /** Optional lyric-timing objective. Omitted by older callers; native joint
+   *  training defaults this to enabled for new configurations. */
+  lyricTiming?: boolean;
+  cursorWeight?: number;
+  alignmentEnabled?: boolean;
+  preview?: Yue2JointPreviewOptions;
+}
+
+export interface Yue2JointPreviewOptions {
+  enabled: boolean;
+  everySteps: number;
+  seconds: number;
+  seed: number;
+  previewMaxFrames: number;
+  baseline: boolean;
+  control: boolean;
+  previewSongId?: string;
+  caption?: string;
+  lyrics?: string;
 }
 
 export interface Yue2AitkCheckpointRecord {
@@ -660,12 +679,30 @@ export interface Yue2AitkRunRecord {
   checkpoints: Yue2AitkCheckpointRecord[];
 }
 
+export interface Yue2JointPreviewRecord {
+  endReason?: string;
+  stageEndReasons?: Record<string, string>;
+  id: string;
+  step: number;
+  kind: 'artist' | 'baseline' | 'control';
+  status: 'rendering' | 'done' | 'failed';
+  file?: string;
+  audioUrl?: string;
+  error?: string;
+  seconds: number;
+  seed: number;
+  previewMaxFrames: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Yue2AitkPrepareRequest {
   legacyManifest: string;
   checkpoint: string;
   tokenizer: string;
   output: string;
   models: { vae: string; semantic: string; sheetsage: string };
+  lyricTiming?: boolean;
 }
 
 /** A safetensors `__metadata__` block, as the exporter wrote it. */
@@ -2273,6 +2310,13 @@ export async function listYue2AitkRuns(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`);
 }
 
+export async function listYue2JointPreviews(
+  id: string, run?: string,
+): Promise<{ run: string; output: string; previews: Yue2JointPreviewRecord[] }> {
+  const query = run ? `?run=${encodeURIComponent(run)}` : '';
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
+}
+
 /** POST /api/training/datasets/:id/yue2-joint-prepare (CPU-only import). */
 export async function startYue2AitkPrepare(
   id: string, opts: Yue2AitkPrepareRequest,
@@ -2692,3 +2736,5 @@ export async function getTrainingDefaults(): Promise<TrainingDefaults> {
 export async function putTrainingDefaults(patch: Partial<TrainingDefaults>): Promise<TrainingDefaults> {
   return request<TrainingDefaults>('/defaults', { method: 'PUT', ...jsonBody(patch) });
 }
+
+

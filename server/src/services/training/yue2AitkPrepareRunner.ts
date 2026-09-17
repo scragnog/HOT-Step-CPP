@@ -18,6 +18,7 @@ export interface ResolvedYue2AitkPrepareOptions {
   tokenizer: string;
   output: string;
   models: Record<AitkPrepareModelName, string>;
+  lyricTiming?: boolean;
 }
 
 /** Parse the CLI-shaped repeatable `--model name=path` request field. */
@@ -80,6 +81,7 @@ export function buildYue2AitkPrepareArgs(o: ResolvedYue2AitkPrepareOptions): str
     '--checkpoint', o.checkpoint, '--tokenizer', o.tokenizer, '--output', o.output,
   ];
   for (const name of MODEL_NAMES) args.push('--model', `${name}=${o.models[name]}`);
+  args.push('--lyric-timing', o.lyricTiming === false ? '0' : '1');
   return args;
 }
 

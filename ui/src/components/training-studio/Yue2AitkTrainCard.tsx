@@ -7,6 +7,7 @@ import {
   getJob,
   getYue2AitkPrepare,
   listYue2AitkRuns,
+  listYue2JointPreviews,
   listJobs,
   jobStreamUrl,
   startYue2AitkPrepare,
@@ -18,6 +19,8 @@ import {
   type Yue2AitkCheckpointRecord,
   type Yue2AitkRunRecord,
   type Yue2JointTrainRequest,
+  type Yue2JointPreviewOptions,
+  type Yue2JointPreviewRecord,
 } from '../../services/trainingApi';
 import { useBackendStore } from '../../stores/backendStore';
 
@@ -26,9 +29,14 @@ const FORM_KEY = 'hs-yue2-aitk-form:';
 const PREP_KEY = 'hs-yue2-aitk-prepare:';
 const DEFAULT_FORM: Yue2JointTrainRequest = {
   trainingMethod: 'aitk', checkpoint: '', dataset: '', output: '',
-  steps: 3000, saveEvery: 250, seed: 0, device: 'CUDA0',
+  steps: 3000, saveEvery: 250, seed: 0, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
 };
 type PrepareForm = Yue2AitkPrepareRequest;
+
+function defaultPreview(everySteps: number): Yue2JointPreviewOptions {
+  return { enabled: false, everySteps, seconds: 40, seed: 424242,
+    previewMaxFrames: 1000, baseline: false, control: false };
+}
 
 function readStored<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -45,7 +53,7 @@ function isPrepareJob(job: TrainingJobSummary, datasetId: string): boolean {
   return job.datasetId === datasetId && job.kind === 'yue2-prepare-aitk';
 }
 
-export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string }> = ({ datasetId, legacyManifest }) => {
+export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange }) => {
   const { t } = useTranslation();
   const [form, setForm] = useState<Yue2JointTrainRequest>(() =>
     readStored(`${FORM_KEY}${datasetId}`, DEFAULT_FORM));
@@ -72,6 +80,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [liveMetric, setLiveMetric] = useState<TrainingMetricEvent | null>(null);
   const [jobLogs, setJobLogs] = useState<string[]>([]);
   const [showJobLogs, setShowJobLogs] = useState(false);
+  const [jointPreviews, setJointPreviews] = useState<Yue2JointPreviewRecord[]>([]);
 
   useEffect(() => {
     if (legacyManifest && !prepare.legacyManifest) {
@@ -114,6 +123,17 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     void refresh();
     const running = job?.status === 'queued' || job?.status === 'running';
     const timer = running ? window.setInterval(refresh, 5000) : undefined;
+    return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
+  }, [datasetId, job?.id, job?.status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => listYue2JointPreviews(datasetId, job?.id)
+      .then(result => { if (!cancelled) setJointPreviews(result.previews); })
+      .catch(() => { if (!cancelled) setJointPreviews([]); });
+    void refresh();
+    const timer = job?.status === 'queued' || job?.status === 'running'
+      ? window.setInterval(refresh, 5000) : undefined;
     return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
   }, [datasetId, job?.id, job?.status]);
 
@@ -247,7 +267,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const run = async () => {
     setStarting(true); setError('');
     try {
-      const request = form.resume?.trim() ? { ...form, resume: form.resume.trim() } : form;
+      const timingWeight = lyricTiming
+        ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08)
+        : 0;
+      const request = { ...form, lyricTiming, alignmentEnabled: lyricTiming, cursorWeight: timingWeight,
+        ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
+          everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 40)) * 25 } } : {}),
+        ...(form.resume?.trim() ? { resume: form.resume.trim() } : {}) };
       const result = await startYue2JointTrain(datasetId, request);
       if (typeof window !== 'undefined') window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(result.jobId));
       setJob(await getJob(result.jobId));
@@ -258,7 +284,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const prepareDataset = async () => {
     setStarting(true); setError('');
     try {
-      const result = await startYue2AitkPrepare(datasetId, prepare);
+      const result = await startYue2AitkPrepare(datasetId, { ...prepare, lyricTiming });
       setPrepareManifest(result.manifest);
       setAppliedPrepareJobId('');
       setPrepareJob(await getJob(result.jobId));
@@ -324,6 +350,17 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
         {t('trainingStudio.yue2.method.aitkUnavailable', 'Prepare the existing YuE2 cache stages into the native manifest, then train AR and NAR together.')}
       </p>
+      <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={lyricTiming} disabled={active || preparing || starting}
+          onChange={event => onLyricTimingChange(event.target.checked)} />
+        <span>
+          <span className="font-semibold">{t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}</span>
+          <span className="block text-[11px] text-zinc-500">{lyricTiming
+            ? t('trainingStudio.yue2.method.lyricTimingOn', 'Uses vocal stems and forced alignment before training.')
+            : t('trainingStudio.yue2.method.lyricTimingOff', 'Skips stems, alignment, and the optional cursor objective.')}</span>
+        </span>
+      </label>
+      {lyricTiming && !cursorReady && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.lyricTimingNeedsAlignment', 'Run vocal stems and lyric alignment below before starting with timing supervision enabled.')}</p>}
       <div className="mt-4 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-3">
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.prepareTitle', 'Prepare native AITK dataset')}</p>
         <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.method.prepareHint', 'This CPU step imports the completed cache stages and writes a new schema 1 manifest.')}</p>
@@ -358,6 +395,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number')}
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number')}
         {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device')}
+        {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
       <div className="mt-3 flex items-center gap-2 flex-wrap">
         <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.presets', 'Training presets')}</span>
@@ -373,6 +411,32 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </button>
         <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetHint', 'Changes only steps and save cadence; checkpoint audition is manual.')}</span>
       </div>
+      <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
+        <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+          {t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
+        </summary>
+        <label className="mt-2 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+          <input type="checkbox" className="mt-0.5 accent-amber-500" checked={form.preview?.enabled ?? false}
+            disabled={active || preparing || starting}
+            onChange={event => setForm(previous => ({ ...previous, preview: { ...(previous.preview ?? defaultPreview(form.saveEvery)), enabled: event.target.checked } }))} />
+          <span>
+            <span className="font-semibold">{t('trainingStudio.yue2.method.previewEnable', 'Render one artist sample at saved checkpoints')}</span>
+            <span className="block text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.previewManual', 'Off by default. Samples are saved for manual listening; they do not start automatically in the player.')}</span>
+          </span>
+        </label>
+        {form.preview?.enabled && <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+          {field(t('trainingStudio.yue2.method.previewSeconds', 'Preview seconds'), 'seconds', 'number', form.preview, value => setForm(previous => {
+            const seconds = Math.max(8, Math.min(120, Number(value) || 40));
+            return { ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seconds, previewMaxFrames: seconds * 25 } };
+          }))}
+          {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })))}
+          <p className="text-[11px] text-zinc-500 md:col-span-2">{t('trainingStudio.yue2.method.previewSongHint', 'The first track in this dataset is used for the preview. Caption and lyrics overrides below are optional.')}</p>
+          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={form.preview.baseline} disabled={active || preparing || starting} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, baseline: event.target.checked } }))} />{t('trainingStudio.yue2.method.previewBaseline', 'Include baseline')}</label>
+          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={form.preview.control} disabled={active || preparing || starting} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, control: event.target.checked } }))} />{t('trainingStudio.yue2.method.previewControl', 'Include control')}</label>
+          <label className="md:col-span-2 flex flex-col gap-1"><span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.previewCaption', 'Caption override (optional)')}</span><textarea className={`${input} min-h-16 resize-y`} value={form.preview.caption ?? ''} disabled={active || preparing || starting} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, caption: event.target.value } }))} /></label>
+          <label className="md:col-span-2 flex flex-col gap-1"><span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.previewLyrics', 'Lyrics override (optional)')}</span><textarea className={`${input} min-h-20 resize-y`} value={form.preview.lyrics ?? ''} disabled={active || preparing || starting} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyrics: event.target.value } }))} /></label>
+        </div>}
+      </details>
       <div className="mt-3 text-[11px] text-zinc-600 dark:text-zinc-400">
         <p className="font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.aitkNeeds', 'Before it can start, the dataset needs:')}</p>
         <ul className="list-disc pl-5 mt-1 space-y-0.5">
@@ -385,7 +449,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       {error && <div className="mt-3 flex items-start gap-2 text-xs text-red-600 dark:text-red-400"><AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}</div>}
       {job?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{job.error}</div>}
       <div className="mt-4 flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => void run()} disabled={active || preparing || starting || !form.checkpoint || !form.dataset || !form.output}
+        <button type="button" onClick={() => void run()} disabled={active || preparing || starting || !form.checkpoint || !form.dataset || !form.output || (lyricTiming && !cursorReady)}
           className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
           {starting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
           {active ? t('trainingStudio.yue2.method.running', 'Joint training is running') : t('trainingStudio.yue2.method.start', 'Start joint training')}
@@ -417,6 +481,17 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {!runsError && availableCheckpoints.length === 0 && <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.noAuditionCheckpoint', 'No complete AR/NAR checkpoint is available yet.')}</p>}
         {applyNote && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{applyNote}</p>}
       </div>}
+      {jointPreviews.length > 0 && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.previewStrip', 'Checkpoint previews')}</p>
+        <div className="mt-2 flex flex-col gap-2">
+          {jointPreviews.map(preview => <div key={preview.id} className="flex items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
+            <span className="w-20 shrink-0">step {preview.step} · {preview.kind}</span>
+            <span className="flex-1">{preview.status === 'failed' ? preview.error || 'render failed' : preview.endReason === 'preview_limit' ? t('trainingStudio.yue2.method.previewCapped', 'Preview length reached') : preview.status}</span>
+            {preview.audioUrl && preview.status === 'done' && <audio controls preload="none" src={preview.audioUrl} className="h-7 max-w-[240px]" />}
+          </div>)}
+        </div>
+      </div>}
     </div>
   );
 };
+

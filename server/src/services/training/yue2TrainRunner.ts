@@ -83,6 +83,9 @@ export interface RelayState {
   skipped?: number;
   failed?: number;
   clips?: number;
+  /** Joint trainer pause boundary (absolute optimizer step). */
+  pausedAt?: number;
+  pauseResume?: string;
   /** Written into the run's own train-log.jsonl by the caller. */
   onJsonl?: (ev: Record<string, unknown>) => void;
 }

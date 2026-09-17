@@ -74,10 +74,20 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(output, { withFileTypes: true }); } catch { return []; }
   const rows: Yue2AitkCheckpointRecord[] = [];
-  for (const e of entries) {
+  const dirs = [output];
+  const segments = entries.find(e => e.isDirectory() && e.name === 'segments');
+  if (segments) {
+    try { for (const e of fs.readdirSync(path.join(output, 'segments'), { withFileTypes: true })) {
+      if (e.isDirectory() && /^segment-\d{6}$/.test(e.name)) dirs.push(path.join(output, 'segments', e.name));
+    } } catch { /* incomplete catalogue is handled by the caller */ }
+  }
+  for (const base of dirs) {
+   let local: fs.Dirent[];
+   try { local = fs.readdirSync(base, { withFileTypes: true }); } catch { continue; }
+   for (const e of local) {
     const match = e.isDirectory() ? /^checkpoint-step(\d+)$/.exec(e.name) : null;
     if (!match) continue;
-    const dir = path.join(output, e.name);
+    const dir = path.join(base, e.name);
     const file = (name: string): string | undefined => {
       const candidate = path.join(dir, name);
       return fs.existsSync(candidate) && fs.statSync(candidate).isFile() ? candidate : undefined;
@@ -87,6 +97,7 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
       adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'),
       arPath: file('native-ar.safetensors'), narPath: file('native-nar.safetensors'),
     });
+   }
   }
   return rows.sort((a, b) => b.step - a.step);
 }

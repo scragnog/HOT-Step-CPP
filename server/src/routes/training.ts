@@ -139,6 +139,7 @@ import {
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
 import { listYue2AitkRuns } from '../services/training/yue2AitkRuns.js';
+import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions } from '../services/training/yue2JointPreview.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
@@ -187,6 +188,7 @@ import type {
   PatchSampleInput, PipelineFolderSpec, PipelineLabelOptions, PipelineStage,
   PreprocessCompat, PreprocessDtype, PreprocessNormalize, PreprocessOptions,
   TrainingCapabilities, TrainingDatasetRow, TrainingDefaults, TrainingSample,
+  Yue2AlignmentOptions,
   DitAdapterType, TrainDitOptions, TrainDitStage, TrainLmOptions, TrainLmStage,
 } from '../services/training/types.js';
 
@@ -3255,8 +3257,14 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       res.status(400).json({ error: `prepared AITK dataset manifest is not valid JSON: ${dataset}` });
       return;
     }
-    if (!outDir || fs.existsSync(outDir)) {
+    const previewRequested = !!(b.preview && typeof b.preview === 'object'
+      && (b.preview as Record<string, unknown>).enabled === true);
+    if (!outDir || (fs.existsSync(outDir) && !previewRequested)) {
       res.status(400).json({ error: `AITK output must be a new directory: ${outDir || '(empty)'}` });
+      return;
+    }
+    if (previewRequested && fs.existsSync(outDir) && fs.readdirSync(outDir).length > 0) {
+      res.status(400).json({ error: `AITK preview output directory must be empty: ${outDir}` });
       return;
     }
     if (!fs.existsSync(path.dirname(outDir))) {
@@ -3276,13 +3284,26 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       res.status(400).json({ error: `AITK resume record is missing: ${resume}` });
       return;
     }
+    // New runs default to no preview pauses. An explicit block opts in; this
+    // keeps the existing AITK recipe fast while making the checkpoint contract
+    // fully recorded for runs that choose it.
+    const preview = parseYue2JointPreviewOptions(b.preview, saveEvery);
+    const alignmentEnabled = b.lyricTiming === undefined
+      ? (b.alignmentEnabled === undefined ? true : b.alignmentEnabled === true)
+      : b.lyricTiming === true;
+    const rawCursor = Number(b.cursorWeight);
+    const cursorWeight = Number.isFinite(rawCursor) && rawCursor >= 0 && rawCursor <= 10
+      ? rawCursor : (alignmentEnabled ? 0.08 : 0);
+    const alignment: Yue2AlignmentOptions = { enabled: alignmentEnabled && cursorWeight > 0, cursorWeight };
     const job = queue.startYue2JointTrainJob(ds.id, {
       checkpoint, dataset, outDir, steps, saveEvery, seed, device,
       ...(resume ? { resume } : {}), datasetSlug: ds.slug,
       spawnEnv: buildGpuEnv().env,
       trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16',
+      preview: preview.enabled && preview.everySteps > 0 ? preview : { ...preview, enabled: false },
+      alignment,
     });
-    res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery });
+    res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }
@@ -3369,6 +3390,7 @@ router.post('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) =>
       tokenizer: str('tokenizer') || defaults.options.tokenizer,
       output: str('output') || defaults.options.output,
       models,
+      lyricTiming: b.lyricTiming !== false,
     };
     const error = validateYue2AitkPrepareOptions(options);
     if (error) { res.status(400).json({ error }); return; }
@@ -3449,6 +3471,46 @@ router.get('/datasets/:id/yue2-joint-runs', (req: Request, res: Response) => {
       runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId })),
       activeJob: activeJoint ? queue.toSummary(activeJoint) : null,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** GET /datasets/:id/yue2-joint-previews?run=<jobId|output>
+ *  Durable checkpoint preview metadata. Audio is served only through the
+ *  validated file reference returned here; missing renders remain visible as
+ *  failed records rather than disappearing from the run history. */
+router.get('/datasets/:id/yue2-joint-previews', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const runs = listYue2AitkRuns(ds.id, ds.slug);
+    const asked = typeof req.query.run === 'string' ? req.query.run.trim() : '';
+    const run = runs.find(r => !asked || r.jobId === asked || path.resolve(r.output) === path.resolve(asked));
+    if (!run) { res.status(404).json({ error: 'AITK joint run not found' }); return; }
+    const previews = listYue2JointPreviews(run.output).map(p => ({
+      ...p,
+      ...(p.file && resolveYue2JointPreview(run.output, p.file)
+        ? { audioUrl: `/api/training/datasets/${encodeURIComponent(ds.id)}/yue2-joint-previews/audio?run=${encodeURIComponent(run.jobId)}&file=${encodeURIComponent(p.file)}` }
+        : {}),
+    }));
+    res.json({ run: run.jobId, output: run.output, previews });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** GET /datasets/:id/yue2-joint-previews/audio — Range-capable WAV stream. */
+router.get('/datasets/:id/yue2-joint-previews/audio', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const asked = typeof req.query.run === 'string' ? req.query.run.trim() : '';
+    const file = typeof req.query.file === 'string' ? req.query.file.trim() : '';
+    const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === asked);
+    const resolved = run ? resolveYue2JointPreview(run.output, file) : null;
+    if (!resolved) { res.status(404).json({ error: 'Preview audio not found' }); return; }
+    res.type('audio/wav').sendFile(resolved);
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

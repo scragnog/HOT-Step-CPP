@@ -224,6 +224,27 @@ export interface TrainingPreview {
   ts: number;
 }
 
+/** Checkpoint preview controls for the YuE2 joint trainer (plan 27). */
+export interface Yue2JointPreviewOptions {
+  enabled: boolean;
+  everySteps: number;
+  seconds: number;
+  seed: number;
+  previewMaxFrames: number;
+  baseline: boolean;
+  control: boolean;
+  caption?: string;
+  lyrics?: string;
+  previewSongId?: string;
+}
+
+/** Optional lyric timing supervision. Absent on old resumes, which preserves
+ * their cursor-free behavior; new configurations resolve enabled=true. */
+export interface Yue2AlignmentOptions {
+  enabled: boolean;
+  cursorWeight: number;
+}
+
 export type SampleLabelStatus =
   | 'unlabeled'   // no sidecar caption
   | 'labeled'     // sidecar caption present

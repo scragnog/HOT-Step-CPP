@@ -234,6 +234,8 @@ export interface Yue2SynthRequest {
   vae_variant?: 'standard' | 'legacy';
   /** Validator-only per the plan; never sent by this backend's own mapping. */
   noise_source?: 'native' | 'fixture';
+  /** Preview-only semantic frame ceiling; 0 leaves normal generation limits. */
+  preview_max_frames?: number;
 }
 
 export interface Yue2SynthResponse {
@@ -250,12 +252,13 @@ export interface Yue2SynthResponse {
 }
 
 /** Named per-stage end reason, per §7's Job result contract. */
-export type Yue2StageEndReason = 'eos' | 'limit_hit' | 'skipped';
+export type Yue2StageEndReason = 'eos' | 'limit_hit' | 'preview_limit' | 'skipped';
+export type Yue2JobEndReason = 'completed' | 'cancelled' | 'engine_failed' | 'limit_hit' | 'preview_limit' | 'failed';
 
 /** The additive extras this client reads OPTIMISTICALLY off the shared GET
  *  /job status JSON once status is 'done' — see the ASSUMPTION note above. */
 export interface Yue2FinalDetail {
-  end_reason?: 'completed' | 'cancelled' | 'engine_failed' | 'limit_hit' | 'failed';
+  end_reason?: Yue2JobEndReason;
   stage_end_reasons?: Partial<Record<'plan' | 'semantic' | 'nar' | 'vae', Yue2StageEndReason>>;
   /** Human-readable decoded ABC text, if the request went through the
    *  ABC-plan stage (absent when the request supplied `abc` itself). */

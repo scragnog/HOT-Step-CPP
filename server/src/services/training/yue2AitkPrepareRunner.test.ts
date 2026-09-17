@@ -19,6 +19,7 @@ test('AITK preparation CLI keeps stable paths and repeatable model arguments', (
     '--checkpoint', 'models/yue2.safetensors', '--tokenizer', 'models/tokenizer.gguf',
     '--output', 'prepared/new-run', '--model', 'vae=models/vae.gguf',
     '--model', 'semantic=models/semantic.gguf', '--model', 'sheetsage=models/sheetsage.gguf',
+    '--lyric-timing', '1',
   ]);
 });
 

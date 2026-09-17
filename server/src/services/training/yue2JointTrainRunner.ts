@@ -6,7 +6,9 @@ import path from 'path';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
 import { buildGpuEnv } from '../gpuDevices.js';
 import { log, runYue2AceTrain, type RelayState } from './yue2TrainRunner.js';
-import { recordYue2AitkRun } from './yue2AitkRuns.js';
+import { checkpointRecords, recordYue2AitkRun } from './yue2AitkRuns.js';
+import { renderYue2JointPreview, Yue2PreviewCleanupError } from './yue2JointPreview.js';
+import { yue2Unload } from '../backends/yue2/client.js';
 
 export interface ResolvedYue2JointTrainOptions {
   checkpoint: string;
@@ -19,6 +21,9 @@ export interface ResolvedYue2JointTrainOptions {
   resume?: string;
   datasetSlug?: string;
   spawnEnv?: NodeJS.ProcessEnv;
+  preview?: import('./types.js').Yue2JointPreviewOptions;
+  alignment?: import('./types.js').Yue2AlignmentOptions;
+  pauseAt?: number;
 }
 
 export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): string[] {
@@ -28,6 +33,12 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     '--seed', String(o.seed), '--device', o.device,
   ];
   if (o.resume) args.push('--resume', o.resume);
+  if (o.alignment) {
+    args.push('--cursor-weight', String(o.alignment.enabled ? o.alignment.cursorWeight : 0));
+  }
+  if (Number.isInteger(o.pauseAt) && (o.pauseAt as number) > 0) {
+    args.push('--pause-at', String(o.pauseAt));
+  }
   return args;
 }
 
@@ -70,8 +81,13 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
 function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void {
   const event = parseYue2JointEvent(line, state.totalSteps);
   if (!event) { log(job, 'info', line); return; }
-  state.onJsonl?.(JSON.parse(line) as Record<string, unknown>);
+  const raw = JSON.parse(line) as Record<string, unknown>;
+  state.onJsonl?.(raw);
   const { stage, step } = event;
+  if (stage === 'paused' && step !== undefined) {
+    state.pausedAt = step;
+    if (typeof raw.resume === 'string') state.pauseResume = raw.resume;
+  }
   const opts = job.opts as ResolvedYue2JointTrainOptions | undefined;
   const catalogueStage = stage === 'load' || stage === 'checkpoint' || stage === 'checkpoint_stage' || stage === 'done';
   if (catalogueStage && opts) persistAitkCatalogue(job, opts, 'running');
@@ -120,8 +136,10 @@ export function parseYue2JointEvent(line: string, totalSteps: number): {
     if (!event || typeof event.stage !== 'string') return null;
     const step = typeof event.step === 'number' && Number.isInteger(event.step) && event.step >= 0 ? event.step : undefined;
     const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+    const cursor = finite(event.cursor_ce) && finite(event.cursor_weight)
+      ? event.cursor_ce * event.cursor_weight : 0;
     const loss = finite(event.ar_ce) && finite(event.ar_kl) && finite(event.nar_mse)
-      ? event.ar_ce + 0.2 * event.ar_kl + event.nar_mse : undefined;
+      ? event.ar_ce + 0.2 * event.ar_kl + event.nar_mse + cursor : undefined;
     return { stage: event.stage, ...(step === undefined ? {} : { step }),
       ...(loss === undefined ? {} : { loss }),
       ...(finite(event.gradient_norm) ? { gradNorm: event.gradient_norm } : {}), totalSteps };
@@ -133,25 +151,65 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   const error = opts ? validateOptions(opts) : 'job is missing AITK joint training options';
   if (error) { finishJob(job, 'failed', error); return; }
   const o = opts!;
-  const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: o.steps };
   let nativeAttempted = false;
   try {
     log(job, 'info', `Starting explicit AITK YuE2 joint training (${o.device})`);
     nativeAttempted = true;
-    await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs(o),
-      Math.max(30 * 60 * 1000, o.steps * 10 * 60 * 1000), () => {
-        if (!fs.existsSync(o.outDir)) return 'AITK joint trainer exited without creating its output directory';
-        const checkpoint = path.join(o.outDir, `checkpoint-step${o.steps}`);
-        if (!fs.existsSync(checkpoint)) return `AITK joint trainer exited without final checkpoint-step${o.steps}`;
-        if (['adapter.safetensors', 'optimizer.resume', 'native-ar.safetensors', 'native-nar.safetensors']
-          .some(name => !fs.existsSync(path.join(checkpoint, name)))) {
-          return `AITK checkpoint-step${o.steps} is incomplete (combined adapter, native AR/NAR exports and optimizer resume are required)`;
+    const preview = o.preview?.enabled && o.preview.everySteps > 0 ? o.preview : undefined;
+    if (preview) fs.mkdirSync(path.join(o.outDir, 'segments'), { recursive: true });
+    let resume = o.resume || '';
+    const resumeStep = resume ? Number((/checkpoint-step(\d+)/.exec(resume) || [])[1] || 0) : 0;
+    let step = resumeStep;
+    let segmentNo = 1;
+    for (;;) {
+      if (isCancelled(job)) return;
+      const segmentOut = preview ? path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`) : o.outDir;
+      const pauseAt = preview ? Math.min(o.steps, step + preview.everySteps) : 0;
+      const segment = { ...o, outDir: segmentOut, resume: resume || undefined, pauseAt: pauseAt < o.steps ? pauseAt : undefined };
+      const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: step, totalSteps: o.steps };
+      const wanted = pauseAt > 0 && pauseAt < o.steps ? pauseAt : o.steps;
+      nativeAttempted = true;
+      await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs(segment),
+        Math.max(30 * 60 * 1000, (o.steps - step) * 10 * 60 * 1000), () => {
+          if (!fs.existsSync(segmentOut)) return 'AITK joint trainer exited without creating its output directory';
+          const checkpoint = path.join(segmentOut, `checkpoint-step${wanted}`);
+          if (!fs.existsSync(checkpoint)) return `AITK checkpoint-step${wanted} is missing`;
+          if (['adapter.safetensors', 'optimizer.resume', 'native-ar.safetensors', 'native-nar.safetensors']
+            .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `AITK checkpoint-step${wanted} is incomplete`;
+          return null;
+        }, (line, current) => relayJsonLine(job, line, current), state, o.spawnEnv);
+      if (isCancelled(job)) return;
+      if (!state.pausedAt || !preview || state.pausedAt >= o.steps) break;
+      const ckpt = checkpointRecords(segmentOut).find(c => c.step === state.pausedAt);
+      if (!ckpt?.optimizerPath || !ckpt.arPath || !ckpt.narPath) throw new Error(`AITK pause at step ${state.pausedAt} has no complete paired checkpoint`);
+      job.phase = 'preview'; emitProgress(job);
+      try {
+        await renderYue2JointPreview({ output: o.outDir, step: state.pausedAt, options: preview, arAdapter: ckpt.arPath, narAdapter: ckpt.narPath, dataset: o.dataset, signal: job.controller.signal });
+      } catch (err: any) {
+        if (err instanceof Yue2PreviewCleanupError) throw err;
+        log(job, 'warn', `Preview at step ${state.pausedAt} failed; training will continue: ${err?.message || err}`);
+      }
+      if (isCancelled(job)) return;
+      // renderYue2JointPreview owns the unload/restore transaction.  Do not
+      // issue a second unload here: a failed cleanup is already surfaced as a
+      // Yue2PreviewCleanupError and must abort before the next segment.
+      resume = ckpt.optimizerPath; step = state.pausedAt; segmentNo++;
+    }
+    if (preview && !isCancelled(job)) {
+      const finalDir = path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`);
+      const final = checkpointRecords(finalDir).find(c => c.step === o.steps);
+      if (final?.arPath && final.narPath) {
+        job.phase = 'preview'; emitProgress(job);
+        try { await renderYue2JointPreview({ output: o.outDir, step: o.steps, options: preview, arAdapter: final.arPath, narAdapter: final.narPath, dataset: o.dataset, signal: job.controller.signal }); }
+        catch (err: any) {
+          if (err instanceof Yue2PreviewCleanupError) throw err;
+          log(job, 'warn', `Final preview failed; checkpoint is intact: ${err?.message || err}`);
         }
-        return null;
-      }, (line, st) => relayJsonLine(job, line, st), state, o.spawnEnv);
-    // runYue2AceTrain can fail early (for example when ace-train is absent)
-    // and marks the job failed itself. Never overwrite that terminal state.
+      }
+    }
+    /* runYue2AceTrain can fail early and marks the job failed itself. */
     if (!isCancelled(job) && job.status === 'running') finishJob(job, 'done');
+    return;
   } catch (err: unknown) {
     if (!isCancelled(job)) finishJob(job, 'failed', err instanceof Error ? err.message : String(err));
   } finally {
