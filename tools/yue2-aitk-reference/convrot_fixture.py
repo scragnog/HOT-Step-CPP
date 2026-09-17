@@ -45,7 +45,7 @@ def compare(name, actual, expected, atol, rtol):
     return result
 
 
-def run_case(ref, probe, directory, name, rows, width, outputs, rotation, dtype, seed, device, no_bias=False):
+def run_case(ref, probe, directory, name, rows, width, outputs, rotation, dtype, seed, device, no_bias=False, ggml=False):
     generator = torch.Generator().manual_seed(seed)
     x = torch.randn(rows, width, generator=generator).to(dtype)
     # Include a zero row to exercise its special scale = 1 contract.
@@ -83,7 +83,10 @@ def run_case(ref, probe, directory, name, rows, width, outputs, rotation, dtype,
     command = [str(probe), str(fixture), str(output)]
     if no_bias:
         command.append("--no-bias")
-    subprocess.run(command, check=True, capture_output=True, text=True)
+    result = subprocess.run(command, capture_output=True, text=True)
+    (directory / f"{name}.stdout.log").write_text(result.stdout, encoding="utf-8")
+    (directory / f"{name}.stderr.log").write_text(result.stderr, encoding="utf-8")
+    result.check_returncode()
     data = output.read_bytes()
     offset = 0
 
@@ -94,9 +97,10 @@ def run_case(ref, probe, directory, name, rows, width, outputs, rotation, dtype,
         offset += array.nbytes
         return torch.from_numpy(array).to(device)
 
-    native_rotated = take((rows, width), "<f4")
-    native_codes = take((rows, width), "i1")
-    native_scales = take((rows,), "<f4")
+    if not ggml:
+        native_rotated = take((rows, width), "<f4")
+        native_codes = take((rows, width), "i1")
+        native_scales = take((rows,), "<f4")
     native_y = take((rows, outputs), "<f4")
     native_dx = take((rows, width), "<f4")
     if offset != len(data):
@@ -104,11 +108,12 @@ def run_case(ref, probe, directory, name, rows, width, outputs, rotation, dtype,
     # BF16 inputs are dyadic; these test sizes keep transform sums exact in FP32.
     # FP32 transform reduction ordering can vary, so allow small accumulation error.
     tolerance = 0.0 if dtype == torch.bfloat16 else 2e-6
-    checks = [compare("rotation", native_rotated, rotated, tolerance, tolerance),
-              compare("activation_codes", native_codes, codes, 0, 0),
-              compare("activation_scales", native_scales, act_scales, tolerance, tolerance),
-              compare("forward", native_y, expected_y, tolerance, tolerance),
+    checks = [compare("forward", native_y, expected_y, tolerance, tolerance),
               compare("input_gradient", native_dx, expected_dx, tolerance, tolerance)]
+    if not ggml:
+        checks[:0] = [compare("rotation", native_rotated, rotated, tolerance, tolerance),
+                      compare("activation_codes", native_codes, codes, 0, 0),
+                      compare("activation_scales", native_scales, act_scales, tolerance, tolerance)]
     return {"case": name, "dtype": str(dtype), "shape": [rows, width, outputs],
             "rotation": rotation, "checks": checks, "pass": all(c["pass"] for c in checks)}
 
@@ -121,6 +126,7 @@ def main():
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--production-shapes", action="store_true", help="Also test YuE2 projection dimensions")
     parser.add_argument("--no-bias", action="store_true", help="Check bias-free projections; requires the API probe")
+    parser.add_argument("--ggml", action="store_true", help="Read y/dx-only output from the GGML autograd probe")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     ref, digest = reference_functions(args.toolkit / "toolkit/util/convrot_quant.py")
@@ -133,15 +139,16 @@ def main():
     for dtype, label in ((torch.float32, "fp32"), (torch.bfloat16, "bf16")):
         for index, (width, rotation) in enumerate(((16, 1), (64, 16), (256, 256), (512, 256))):
             cases.append(run_case(ref, args.probe.resolve(), args.output, f"{label}-{width}-{rotation}",
-                                  3, width, 32, rotation, dtype, 71 + index, args.device, args.no_bias))
+                                  3, width, 32, rotation, dtype, 71 + index, args.device, args.no_bias, args.ggml))
     if args.production_shapes:
         for index, (rows, width, outputs) in enumerate(((33, 2048, 4096), (3, 2048, 12288), (3, 6144, 2048))):
             cases.append(run_case(ref, args.probe.resolve(), args.output, f"bf16-production-{rows}-{width}-{outputs}",
-                                  rows, width, outputs, 256, torch.bfloat16, 81 + index, args.device, args.no_bias))
+                                  rows, width, outputs, 256, torch.bfloat16, 81 + index, args.device, args.no_bias, args.ggml))
     report = {"schema": 1, "source_sha256": digest, "torch": torch.__version__,
               "scope": "Standalone native probe versus reference arithmetic; no full-model parity claim",
               "reference_device": args.device,
               "bias": not args.no_bias,
+              "native_execution": "GGML graph/autograd" if args.ggml else "standalone operation",
               "reference_execution": "actual custom-op/autograd" if args.device == "cuda" else "extracted arithmetic",
               "pass": all(case["pass"] for case in cases), "cases": cases}
     (args.output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")

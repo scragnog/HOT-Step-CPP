@@ -6,7 +6,7 @@
 // reference trains one shared input factor for fused QKV and gate/up sites;
 // the output factor is sliced for each projection at use time.
 
-#include "../../engine/ggml/include/ggml.h"
+#include "../../ggml/include/ggml.h"
 
 #include <cmath>
 #include <cstdint>

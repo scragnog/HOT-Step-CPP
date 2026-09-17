@@ -10,7 +10,39 @@ C++/CUDA probes themselves.
 `convrot_cpu.h` and `convrot_probe.cpp` provide a scalar arithmetic oracle.
 `convrot_cuda.cu` implements rotation, activation quantization, actual int8
 cuBLAS multiplication, output scaling and straight-through input gradients.
-It is a standalone prototype; it has not been integrated into GGML autograd.
+The separate GGML integration is shipped in
+`engine/patches/zz-yue2-convrot8.patch`. Its graph probe checks explicit input
+gradients against autograd and confirms frozen parameters receive no gradients.
+Full joint training is not implemented by these probes.
+
+### Windows native test launcher
+
+Run DLL-linked tests through `run-native-test.ps1`. It adds
+`engine/build/Release` to the child process DLL search path and suppresses
+Windows loader dialogs, so a missing dependency produces a captured failure.
+
+```powershell
+powershell.exe -NoProfile -File tools/yue2-aitk-reference/run-native-test.ps1 `
+  -Executable _experiments/aitk-port/test_convrot_ggml_contract.exe
+```
+
+The contract test's negative modes exit 86 only after the expected GGML
+assertion. Exit 99 means an invalid input was incorrectly accepted.
+
+### Current graph validation limit
+
+CUDA 12.8 standalone fixtures pass all 11 cases against the pinned Toolkit.
+The CUDA 13.1 engine graph passes all forward checks, but the BF16
+33x2048-to-4096 input-gradient case differs. A CUDA 13.1 standalone build
+reproduces that difference. The graph parity gate remains open; neither these
+results nor a successful engine build establishes full-model training parity.
+
+### Native adapter export
+
+`engine/src/train/yue2-aitk-adapter-io.h` writes the complete joint adapter as
+448 BF16 factors with rank, alpha and step metadata. It validates the fused
+projection dimensions and publishes without replacing an existing file.
+`test_adapter_io.cpp` takes a new output directory and preserves its artifacts.
 
 Build from a Visual Studio x64 Developer Command Prompt at the repository root:
 
