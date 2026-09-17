@@ -1,9 +1,22 @@
 # YuE2 AI Toolkit reference tools
 
 These tools support the native YuE2 training port. They are development tools,
-not a new selectable trainer. The Legacy workflow and training default
-are unchanged. Python is required for reference comparisons, not for the native
-C++/CUDA probes themselves.
+not a Python product dependency. The native joint trainer is available through
+`ace-train yue2-joint-train` and is the Training Studio default; the old trainers
+remain selectable as Legacy. Python is required only for reference comparisons.
+
+## Integrated native workflow
+
+See [the training guide](../../docs/TRAINING.md) for cache preparation, joint
+training and resume. Each checkpoint contains a combined Toolkit-layout adapter,
+two native inference adapters, and exact optimizer/RNG resume state.
+
+The CPU fixtures `test_yue2_aitk_native_import.cpp` and
+`test_native_adapter_io.cpp` cover cache conversion and split exports.
+`test_yue2_aitk_gguf_prefix.cpp` compares the shipped GGUF tokenizer against
+all 15 imported Dookie caption prefixes. Use the safe Windows launcher below.
+Native updates on real full songs and merging both native experts have passed;
+the multi-step listening qualification remains in progress.
 
 ## Native ConvRot8 computation
 
@@ -29,13 +42,15 @@ powershell.exe -NoProfile -File tools/yue2-aitk-reference/run-native-test.ps1 `
 The contract test's negative modes exit 86 only after the expected GGML
 assertion. Exit 99 means an invalid input was incorrectly accepted.
 
-### Current graph validation limit
+### Numerical comparison limits
 
 CUDA 12.8 standalone fixtures pass all 11 cases against the pinned Toolkit.
 The CUDA 13.1 engine graph passes all forward checks, but the BF16
 33x2048-to-4096 input-gradient case differs. A CUDA 13.1 standalone build
-reproduces that difference. The graph parity gate remains open; neither these
-results nor a successful engine build establishes full-model training parity.
+reproduces that difference. Later full-model comparisons also found BF16
+rounding differences. Exact Torch/native equality is not a release claim;
+finite training, native resume, inference compatibility and listening are
+separate checks.
 
 ### Native adapter export
 

@@ -55,6 +55,7 @@
 #include "train/yue2-ar-train-run.h"
 #include "train/yue2-aitk-runtime.h"
 #include "train/yue2-aitk-import.h"
+#include "train/yue2-aitk-native-import.h"
 #include "train/yue2-optim-check.h"
 #include "model-registry.h"
 #include "train/dit-train-run.h"   // pulls in every dit-*.h (DiT LoRA trainer)
@@ -555,6 +556,7 @@ static void print_usage(void) {
             "                YUE2_FD_LOSSGRAD=2 is the negative control: every probe must then\n"
             "                report rel ~= 0.5 and the gate must FAIL.\n"
             "                Weights are CC BY-NC 4.0; trained adapters inherit NC.\n"
+            "  yue2-prepare-aitk    Prepare full native YuE2 caches for joint training.\n"
             "  yue2-import-aitk-cache  Import existing Toolkit caches without running encoders.\n"
             "  yue2-joint-train  Native YuE2 AR+NAR joint training (CUDA, ConvRot raw checkpoint).\n"
             "                --checkpoint <file> --dataset <schema1-manifest> --output <new-dir>\n"
@@ -6330,6 +6332,43 @@ static int cmd_rec7_selftest(int argc, char ** argv) {
 // ─── yue2-joint-train ────────────────────────────────────────────────────────
 // The runtime owns provenance checks, CUDA selection, the SIGINT boundary and
 // the actual AR/NAR loop. This front-end only parses the bounded public seam.
+static int cmd_yue2_prepare_aitk(int argc, char ** argv) {
+    const auto usage = []() { fprintf(stderr,
+        "ace-train yue2-prepare-aitk --legacy-manifest FILE --checkpoint FILE "
+        "--tokenizer GGUF_OR_DIR --output NEW_DIR --model vae=FILE "
+        "--model semantic=FILE --model sheetsage=FILE\n"); };
+    yue2_aitk_native_import::Request request;
+    std::unordered_set<std::string> seen;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg(argv[i]);
+        if (arg == "--help" || arg == "-h") { usage(); return 0; }
+        if (i + 1 >= argc || (arg != "--model" && !seen.insert(arg).second)) { usage(); return 2; }
+        const std::string raw(argv[++i]);
+        if (raw.empty()) { usage(); return 2; }
+        const auto value = std::filesystem::u8path(raw);
+        if (arg == "--legacy-manifest") request.legacy_manifest = value;
+        else if (arg == "--checkpoint") request.raw_convrot_checkpoint = value;
+        else if (arg == "--tokenizer") request.tokenizer_gguf_or_dir = value;
+        else if (arg == "--output") request.output_dir = value;
+        else if (arg == "--model") {
+            const auto split = raw.find('=');
+            if (split == std::string::npos || split == 0 || split + 1 == raw.size()) { usage(); return 2; }
+            request.models.push_back({raw.substr(0, split), std::filesystem::u8path(raw.substr(split + 1))});
+        } else { usage(); return 2; }
+    }
+    printf("{\"stage\":\"preparing\",\"done\":0,\"total\":1}\n"); fflush(stdout);
+    std::string error;
+    try {
+        if (!yue2_aitk_native_import::prepare_from_legacy(request, &error)) {
+            fprintf(stderr, "YuE2 native preparation: %s\n", error.c_str()); return 1;
+        }
+    } catch (const std::exception & e) {
+        fprintf(stderr, "YuE2 native preparation: %s\n", e.what()); return 1;
+    }
+    printf("{\"stage\":\"done\",\"done\":1,\"total\":1}\n");
+    return 0;
+}
+
 static int cmd_yue2_import_aitk_cache(int argc, char ** argv) {
     const auto usage = []() { fprintf(stderr,
         "ace-train yue2-import-aitk-cache --toolkit-dataset DIR --source-manifest FILE "
@@ -6448,6 +6487,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "yue2-ar-train")) {
         return cmd_yue2_ar_train(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-prepare-aitk")) {
+        return cmd_yue2_prepare_aitk(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-import-aitk-cache")) {
         return cmd_yue2_import_aitk_cache(argc - 1, argv + 1);

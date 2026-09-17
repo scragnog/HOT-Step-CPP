@@ -135,7 +135,7 @@ static int run_impl(const Config & config, std::string * error) {
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state);
-            if (metadata.empty() || !state.export_snapshot(adapter.u8string().c_str(), step, error) || !yue2_aitk::yue2_aitk_write_resume(resume.u8string().c_str(), optimizer.capture(), metadata)) return false;
+            if (metadata.empty() || !state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str()) || !yue2_aitk::yue2_aitk_write_resume(resume.u8string().c_str(), optimizer.capture(), metadata)) return false;
             std::filesystem::rename(temp_dir, final_dir, save_ec);
             if (!save_ec) { last_saved=step; event("checkpoint", step); }
             return !save_ec;

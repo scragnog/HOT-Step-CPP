@@ -31,7 +31,7 @@ export type TrainingJobKind =
   // loss is scored on) and 'yue2-align' (cursor_words, what --cursor-weight
   // reads). Each spawns ace-train, so each owns the card.
   | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet'
-  | 'yue2-joint-train';
+  | 'yue2-joint-train' | 'yue2-prepare-aitk';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -633,6 +633,39 @@ export interface Yue2JointTrainRequest {
   seed: number;
   device: string;
   resume?: string;
+}
+
+export interface Yue2AitkCheckpointRecord {
+  step: number;
+  dir: string;
+  adapterPath?: string;
+  optimizerPath?: string;
+  arPath?: string;
+  narPath?: string;
+}
+
+export interface Yue2AitkRunRecord {
+  live?: boolean;
+  version: 1;
+  jobId: string;
+  datasetId: string;
+  datasetSlug: string;
+  method: 'aitk';
+  output: string;
+  options: Record<string, unknown>;
+  status: 'running' | 'done' | 'failed' | 'cancelled';
+  createdAt: number;
+  updatedAt: number;
+  error?: string;
+  checkpoints: Yue2AitkCheckpointRecord[];
+}
+
+export interface Yue2AitkPrepareRequest {
+  legacyManifest: string;
+  checkpoint: string;
+  tokenizer: string;
+  output: string;
+  models: { vae: string; semantic: string; sheetsage: string };
 }
 
 /** A safetensors `__metadata__` block, as the exporter wrote it. */
@@ -2231,6 +2264,27 @@ export async function startYue2JointTrain(
   id: string, opts: Yue2JointTrainRequest,
 ): Promise<{ jobId: string; kind: TrainingJobKind; trainingMethod: 'aitk'; recipeVersion: string; outDir: string; steps: number; saveEvery: number }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-train`, { method: 'POST', ...jsonBody(opts) });
+}
+
+/** Native AITK joint runs and their split AR/NAR checkpoint files. */
+export async function listYue2AitkRuns(
+  id: string,
+): Promise<{ runs: Yue2AitkRunRecord[]; activeJob: TrainingJobSummary | null }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`);
+}
+
+/** POST /api/training/datasets/:id/yue2-joint-prepare (CPU-only import). */
+export async function startYue2AitkPrepare(
+  id: string, opts: Yue2AitkPrepareRequest,
+): Promise<{ jobId: string; kind: TrainingJobKind; status: TrainingJobStatus; output: string; manifest: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare`, { method: 'POST', ...jsonBody(opts) });
+}
+
+export async function getYue2AitkPrepare(
+  id: string, output?: string,
+): Promise<{ ready: boolean; manifest?: string; missing?: string[]; activeJob: TrainingJobSummary | null; jobs: TrainingJobSummary[]; defaults?: Partial<Yue2AitkPrepareRequest> & { models?: Partial<Yue2AitkPrepareRequest['models']> } }> {
+  const query = output ? `?output=${encodeURIComponent(output)}` : '';
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare${query}`);
 }
 
 /** Previous YuE2 runs and their checkpoint ladders, newest first. Read off disk

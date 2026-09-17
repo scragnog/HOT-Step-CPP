@@ -5,7 +5,7 @@
 // optimizer state and update policy outside the export contract.
 
 #include "yue2-aitk-block-executor.h"
-#include "yue2-aitk-adapter-io.h"
+#include "yue2-aitk-native-adapter-io.h"
 #include "yue2-aitk-lora.h"
 
 #include <array>
@@ -118,7 +118,7 @@ public:
 
     // Refreshes host F32 snapshots and invokes the installed 448-tensor BF16
     // writer. The writer enforces exact names/shapes and no-overwrite publish.
-    bool export_snapshot(const char * output_path, int64_t steps, std::string * error = nullptr) {
+    bool export_snapshot(const char * output_path, int64_t steps, std::string * error = nullptr, const char * ar_path = nullptr, const char * nar_path = nullptr) {
         if (!initialized_) return fail(error, "train state is not initialized");
         std::vector<Yue2AitkF32Matrix> factors; factors.reserve(slots_.size());
         for (Slot & slot : slots_) {
@@ -126,6 +126,7 @@ public:
             factors.push_back({slot.name, slot.rows, slot.cols, slot.host.data()});
         }
         if (!yue2_aitk_write_fused_lora(factors, 32, 32.0f, steps, output_path)) return fail(error, "fused-LoRA export failed");
+        if ((ar_path || nar_path) && !yue2_aitk_write_native_split(factors, 32, 32.0f, steps, ar_path, nar_path)) return fail(error, "native AR/NAR export failed");
         return true;
     }
 

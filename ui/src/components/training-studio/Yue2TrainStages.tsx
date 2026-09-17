@@ -255,7 +255,10 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
     return (
       <div className="flex flex-col gap-4">
         <MethodSelector value={method} onChange={selectMethod} />
-        <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} />
+        {yue2Status && <Yue2PreprocessCard status={yue2Status} onDone={reload} />}
+        {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
+        {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
+        <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} legacyManifest={arStatus?.manifestPath || yue2Status?.manifestPath} />
       </div>
     );
   }

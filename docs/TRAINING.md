@@ -16,8 +16,10 @@ ace-train yue2-joint-train --checkpoint base.safetensors --dataset prepared/data
 The checkpoint must be the raw YuE2 ConvRot safetensors model. The dataset must
 use the joint trainer's schema-1 manifest, including matching model and source
 hashes. Existing Legacy caches cannot be passed directly. Output must be a new
-directory. Each `checkpoint-stepN` contains `adapter.safetensors` and
-`optimizer.resume`. Resume into another new directory with `--resume` pointing
+directory. Each `checkpoint-stepN` contains the combined Toolkit-layout
+`adapter.safetensors`, native inference exports `native-ar.safetensors` and
+`native-nar.safetensors`, and `optimizer.resume`. Use both native exports for
+generation. Resume into another new directory with `--resume` pointing
 to that record; `--steps` is the total desired step count. Use the same dataset,
 model, seed and CUDA ordinal.
 
@@ -26,10 +28,27 @@ a stop at the next completed step and saves that state. The app's Windows Stop
 action currently terminates the process, so only already published checkpoints
 are guaranteed to survive it.
 
+In Training Studio, AI Toolkit-compatible training is the default. Complete
+the latent, semantic-token and ABC cache stages, then prepare the joint dataset
+and train. Legacy keeps the existing separate AR/NAR workflow. The joint
+checkpoint picker applies both native adapters for generation.
+
+The native cache preparation command reuses complete full-song caches:
+
+```text
+ace-train yue2-prepare-aitk --legacy-manifest yue2_preprocess.json --checkpoint base.safetensors --tokenizer yue2-lm-q8_0.gguf --model vae=vae.gguf --model semantic=tokenizer.gguf --model sheetsage=sheetsage.gguf --output new-prepared-directory
+```
+
+`--tokenizer` is the text tokenizer in an LM GGUF or a directory containing
+`vocab.json` and `merges.txt`. `--model semantic` is the separate audio tokenizer.
+Preparation validates geometry, payloads and captions, records model hashes,
+and publishes a new manifest without changing the source cache. For existing
+AI Toolkit caches, use `yue2-import-aitk-cache --help`.
+
 The synthetic native resume check reproduces uninterrupted training exactly.
-Native and Torch calculations have documented rounding differences; numerical
-identity, full-song memory use and audio quality are separate checks. The real
-dataset and listening qualification is still in progress.
+Real full-song updates and native adapter merging have passed. Native and Torch
+calculations have documented rounding differences; audio quality still needs
+listening qualification. This path currently requires a CUDA build.
 
 ## MiniMax-Music3 (MM3) LM adapters
 

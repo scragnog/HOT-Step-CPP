@@ -6,6 +6,7 @@ import path from 'path';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
 import { buildGpuEnv } from '../gpuDevices.js';
 import { log, runYue2AceTrain, type RelayState } from './yue2TrainRunner.js';
+import { recordYue2AitkRun } from './yue2AitkRuns.js';
 
 export interface ResolvedYue2JointTrainOptions {
   checkpoint: string;
@@ -71,6 +72,9 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void 
   if (!event) { log(job, 'info', line); return; }
   state.onJsonl?.(JSON.parse(line) as Record<string, unknown>);
   const { stage, step } = event;
+  const opts = job.opts as ResolvedYue2JointTrainOptions | undefined;
+  const catalogueStage = stage === 'load' || stage === 'checkpoint' || stage === 'checkpoint_stage' || stage === 'done';
+  if (catalogueStage && opts) persistAitkCatalogue(job, opts, 'running');
   if (step !== undefined) state.lastStep = step;
   if (stage === 'joint' && step !== undefined) {
     job.done = step; job.total = state.totalSteps; job.phase = 'training';
@@ -87,6 +91,24 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void 
     emitProgress(job);
     log(job, 'info', `AITK joint ${stage}`);
   }
+}
+
+function persistAitkCatalogue(
+  job: TrainingJob,
+  opts: ResolvedYue2JointTrainOptions,
+  status: 'running' | 'done' | 'failed' | 'cancelled',
+): void {
+  try {
+    if (!fs.statSync(opts.outDir).isDirectory()) return;
+    const { spawnEnv: _env, resume: _resume, ...persisted } = opts;
+    recordYue2AitkRun({
+      version: 1, jobId: job.id, datasetId: job.datasetId,
+      datasetSlug: opts.datasetSlug ?? '', method: 'aitk', output: opts.outDir,
+      options: persisted as Record<string, unknown>, status,
+      createdAt: job.startedAt ?? Date.now(), updatedAt: Date.now(),
+      ...(job.error ? { error: job.error } : {}), checkpoints: [],
+    });
+  } catch { /* output may not exist yet; catalogue is advisory */ }
 }
 
 /** Pure contract helper kept exportable for server-side event tests. */
@@ -112,16 +134,18 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   if (error) { finishJob(job, 'failed', error); return; }
   const o = opts!;
   const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: o.steps };
+  let nativeAttempted = false;
   try {
     log(job, 'info', `Starting explicit AITK YuE2 joint training (${o.device})`);
+    nativeAttempted = true;
     await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs(o),
       Math.max(30 * 60 * 1000, o.steps * 10 * 60 * 1000), () => {
         if (!fs.existsSync(o.outDir)) return 'AITK joint trainer exited without creating its output directory';
         const checkpoint = path.join(o.outDir, `checkpoint-step${o.steps}`);
         if (!fs.existsSync(checkpoint)) return `AITK joint trainer exited without final checkpoint-step${o.steps}`;
-        if (!fs.existsSync(path.join(checkpoint, 'adapter.safetensors'))
-          || !fs.existsSync(path.join(checkpoint, 'optimizer.resume'))) {
-          return `AITK checkpoint-step${o.steps} is incomplete (adapter.safetensors and optimizer.resume are required)`;
+        if (['adapter.safetensors', 'optimizer.resume', 'native-ar.safetensors', 'native-nar.safetensors']
+          .some(name => !fs.existsSync(path.join(checkpoint, name)))) {
+          return `AITK checkpoint-step${o.steps} is incomplete (combined adapter, native AR/NAR exports and optimizer resume are required)`;
         }
         return null;
       }, (line, st) => relayJsonLine(job, line, st), state, o.spawnEnv);
@@ -130,5 +154,14 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     if (!isCancelled(job) && job.status === 'running') finishJob(job, 'done');
   } catch (err: unknown) {
     if (!isCancelled(job)) finishJob(job, 'failed', err instanceof Error ? err.message : String(err));
+  } finally {
+    // The output directory is created by ace-train. Record only after that
+    // boundary, including failed/cancelled partial runs, and never before it.
+    let outputExists = false;
+    try { outputExists = nativeAttempted && fs.statSync(o.outDir).isDirectory(); } catch { /* child may have failed before creating output */ }
+    if (outputExists) {
+      persistAitkCatalogue(job, o,
+        job.status === 'done' ? 'done' : job.status === 'cancelled' ? 'cancelled' : 'failed');
+    }
   }
 }

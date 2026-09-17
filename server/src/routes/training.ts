@@ -138,6 +138,7 @@ import {
 } from '../services/training/yue2ArRuns.js';
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
+import { listYue2AitkRuns } from '../services/training/yue2AitkRuns.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
@@ -145,6 +146,11 @@ import { essentiaAvailable } from '../services/training/essentiaClient.js';
 import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services/training/understandClient.js';
 import { buildGpuEnv } from '../services/gpuDevices.js';
 import * as queue from '../services/training/labelingQueue.js';
+import {
+  buildYue2AitkPrepareArgs, validateYue2AitkPrepareOptions,
+  parseYue2AitkModels,
+  type ResolvedYue2AitkPrepareOptions,
+} from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
@@ -3282,6 +3288,130 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
   }
 });
 
+/** POST /datasets/:id/yue2-joint-prepare
+ *
+ * Import the already-produced HOT-Step YuE2 cache stages into the native AITK
+ * schema. This is a CPU job and does not stop ace-server or claim a GPU.
+ */
+function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
+  options: ResolvedYue2AitkPrepareOptions;
+  missing: string[];
+  provenance: Record<string, string>;
+} {
+  const legacyManifest = yue2PreprocessManifest(ds.slug);
+  const checkpoint = path.join(yue2ModelDir(), 'yue2_3b_int8_convrot.safetensors');
+  const semanticModel = resolveYue2TokenizerModel();
+  const trainModels = resolveYue2TrainModels(YUE2_NAR_DEFAULTS.lmType, 'standard');
+  // Text BPE vocabulary lives in the LM GGUF, not the audio tokenizer GGUF.
+  const tokenizer = fs.existsSync(trainModels.lm) ? trainModels.lm
+    : (fs.existsSync(yue2ModelDir()) ? fs.readdirSync(yue2ModelDir())
+      .filter(name => /^yue2-lm-.*\.gguf$/i.test(name))
+      .map(name => path.join(yue2ModelDir(), name))[0] || '' : '');
+  const sheetModel = resolveYue2SheetModel();
+  let manifestFields: Record<string, unknown> = {};
+  try {
+    if (fs.existsSync(legacyManifest) && fs.statSync(legacyManifest).size <= 16 * 1024 * 1024) {
+      const parsed = JSON.parse(fs.readFileSync(legacyManifest, 'utf8')) as Record<string, unknown>;
+      if (parsed && typeof parsed === 'object') manifestFields = parsed;
+    }
+  } catch { /* readiness reports the unresolved defaults below */ }
+  const existingPath = (key: string, fallback: string): string => {
+    const value = manifestFields[key];
+    if (typeof value !== 'string' || !value.trim()) return fallback;
+    const candidates = path.isAbsolute(value) ? [value]
+      : [path.resolve(path.dirname(legacyManifest), value), path.resolve(yue2ModelDir(), value)];
+    return candidates.find(candidate => fs.existsSync(candidate) && fs.statSync(candidate).isFile()) || fallback;
+  };
+  const models = {
+    vae: existingPath('vae_path', existingPath('vae_file', trainModels.vae)),
+    semantic: existingPath('codec_ids_tokenizer', semanticModel),
+    sheetsage: existingPath('abc_model', sheetModel),
+  };
+  const abcProducer = typeof manifestFields.abc_producer === 'string' ? manifestFields.abc_producer : '';
+  const output = path.join(path.dirname(legacyManifest), `aitk-prepared-${Date.now()}`);
+  const options: ResolvedYue2AitkPrepareOptions = { legacyManifest, checkpoint, tokenizer, output, models };
+  const missing: string[] = [];
+  if (!fs.existsSync(legacyManifest)) missing.push(`YuE2 latent manifest: ${legacyManifest}`);
+  if (!fs.existsSync(checkpoint)) missing.push(`raw ConvRot checkpoint: ${checkpoint}`);
+  if (!tokenizer) missing.push('YuE2 LM GGUF containing the text tokenizer');
+  if (!models.vae || !fs.existsSync(models.vae)) missing.push('YuE2 VAE encoder GGUF');
+  if (!models.semantic || !fs.existsSync(models.semantic)) missing.push('YuE2 semantic tokenizer GGUF');
+  if (!models.sheetsage || !fs.existsSync(models.sheetsage)) missing.push('YuE2 SheetSage model');
+  return {
+    options, missing,
+    provenance: {
+      latentManifest: legacyManifest,
+      vae: models.vae || 'missing',
+      semantic: models.semantic || 'missing',
+      sheetsage: models.sheetsage || 'missing',
+      abcProducer: abcProducer || 'not recorded in latent manifest',
+      source: 'existing HOT-Step cache stages; no encoder execution in this job',
+    },
+  };
+}
+
+router.post('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+    const defaults = yue2AitkPrepareDefaults(ds);
+    const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
+    const rawModels = b.models ?? b.model;
+    const models = rawModels === undefined ? defaults.options.models : parseYue2AitkModels(b.models, b.model);
+    if (!models) {
+      res.status(400).json({ error: 'models must provide exactly vae=FILE, semantic=FILE, and sheetsage=FILE (repeat model fields are accepted)' });
+      return;
+    }
+    const options: ResolvedYue2AitkPrepareOptions = {
+      legacyManifest: str('legacyManifest') || str('manifest') || defaults.options.legacyManifest,
+      checkpoint: str('checkpoint') || defaults.options.checkpoint,
+      tokenizer: str('tokenizer') || defaults.options.tokenizer,
+      output: str('output') || defaults.options.output,
+      models,
+    };
+    const error = validateYue2AitkPrepareOptions(options);
+    if (error) { res.status(400).json({ error }); return; }
+    const job = queue.startYue2AitkPrepareJob(ds.id, options);
+    res.status(202).json({
+      jobId: job.id, kind: job.kind, status: job.status,
+      output: options.output, manifest: path.join(options.output, 'dataset.json'),
+      args: buildYue2AitkPrepareArgs(options),
+      provenance: defaults.provenance,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** GET /datasets/:id/yue2-joint-prepare — readiness and active job. */
+router.get('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const defaults = yue2AitkPrepareDefaults(ds);
+    const active = queue.activeJobForDataset(ds.id);
+    const jobs = queue.listJobs(ds.id).filter(job => job.kind === 'yue2-prepare-aitk').slice(0, 10);
+    const output = typeof req.query.output === 'string' ? req.query.output : defaults.options.output;
+    const manifest = output ? path.join(output, 'dataset.json') : '';
+    let ready = false;
+    if (manifest && fs.existsSync(manifest)) {
+      try {
+        const st = fs.statSync(manifest);
+        if (st.isFile() && st.size <= 16 * 1024 * 1024) {
+          const value = JSON.parse(fs.readFileSync(manifest, 'utf8')) as Record<string, unknown>;
+          ready = value.schema_version === 1 && Array.isArray(value.items)
+            && value.recipe_version === 'aitk-yue2-2026-09-16';
+        }
+      } catch { /* readiness remains false */ }
+    }
+    res.json({ ready, defaults: defaults.options, missing: defaults.missing, provenance: defaults.provenance,
+      ...(manifest ? { manifest } : {}), activeJob: active?.kind === 'yue2-prepare-aitk' ? queue.toSummary(active) : null, jobs });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
 /** GET /datasets/:id/yue2-runs — previous runs and their checkpoint ladders. */
 router.get('/datasets/:id/yue2-runs', (req: Request, res: Response) => {
   try {
@@ -3302,6 +3432,23 @@ router.get('/datasets/:id/yue2-runs', (req: Request, res: Response) => {
         : { ...r, running: false }
     ));
     res.json({ runs: out, busy: !!active, adapterRoot: yue2AdapterRoot() });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** GET /datasets/:id/yue2-joint-runs — durable native AITK outputs. */
+router.get('/datasets/:id/yue2-joint-runs', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const runs = listYue2AitkRuns(ds.id, ds.slug);
+    const active = queue.activeJobForDataset(ds.id);
+    const activeJoint = active?.kind === 'yue2-joint-train' ? active : undefined;
+    res.json({
+      runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId })),
+      activeJob: activeJoint ? queue.toSummary(activeJoint) : null,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

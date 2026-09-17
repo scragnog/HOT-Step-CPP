@@ -367,6 +367,8 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
     case 'yue2-ar-train':    // whole songs to 12,288 tokens through a bf16 base
     case 'yue2-joint-train': // explicit AITK joint AR+NAR trainer
       return 'gpu';
+    case 'yue2-prepare-aitk': // native cache import; CPU-only, never stops ace-server
+      return 'net';
     case 'label':
       return (job.opts as LabelOptions | undefined)?.useUnderstand === true ? 'gpu' : 'net';
     default:
@@ -1426,6 +1428,16 @@ export function startYue2JointTrainJob(datasetId: string, opts: unknown): Traini
   enqueue(job, async (j) => {
     const { runYue2JointTrainJob } = await import('./yue2JointTrainRunner.js');
     await runYue2JointTrainJob(j);
+  });
+  return job;
+}
+
+/** CPU-only import of existing HOT-Step YuE2 caches into AITK schema 1. */
+export function startYue2AitkPrepareJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-prepare-aitk', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2AitkPrepareJob } = await import('./yue2AitkPrepareRunner.js');
+    await runYue2AitkPrepareJob(j);
   });
   return job;
 }
