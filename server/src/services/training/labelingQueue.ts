@@ -365,6 +365,7 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
     case 'yue2-align':       // MMS_FA, ~5 GB per track (CPU only with --cpu)
     case 'yue2-sheet':       // SheetSage2 lead-sheet transcription, one track at a time
     case 'yue2-ar-train':    // whole songs to 12,288 tokens through a bf16 base
+    case 'yue2-joint-train': // explicit AITK joint AR+NAR trainer
       return 'gpu';
     case 'label':
       return (job.opts as LabelOptions | undefined)?.useUnderstand === true ? 'gpu' : 'net';
@@ -1415,6 +1416,16 @@ export function startYue2TrainJob(datasetId: string, opts: unknown): TrainingJob
   enqueue(job, async (j) => {
     const { runYue2TrainJob } = await import('./yue2TrainRunner.js');
     await runYue2TrainJob(j);
+  });
+  return job;
+}
+
+/** Explicit Native AI Toolkit YuE2 joint trainer. Never aliases a Legacy job. */
+export function startYue2JointTrainJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-joint-train', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2JointTrainJob } = await import('./yue2JointTrainRunner.js');
+    await runYue2JointTrainJob(j);
   });
   return job;
 }

@@ -55,6 +55,7 @@ import { yue2OptimRequest } from '../services/training/yue2Optim.js';
 //   GET    /datasets/:id/yue2                           — YuE2 latent cache + model readiness
 //   POST   /datasets/:id/yue2-preprocess                — audio -> cached YuE2 VAE latents
 //   POST   /datasets/:id/yue2-train                     — start a YuE2 NAR LoRA training job
+//   POST   /datasets/:id/yue2-joint-train              — start explicit AITK joint training
 //   GET    /datasets/:id/yue2-runs                      — previous YuE2 runs + their adapters
 //   GET    /datasets/:id/yue2-ar                        — per-stage AR readiness + defaults
 //   POST   /datasets/:id/yue2-tokenize                  — manifest -> codes/ (codec_ids)
@@ -142,6 +143,7 @@ import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
 import { essentiaAvailable } from '../services/training/essentiaClient.js';
 import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services/training/understandClient.js';
+import { buildGpuEnv } from '../services/gpuDevices.js';
 import * as queue from '../services/training/labelingQueue.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import {
@@ -3190,6 +3192,91 @@ router.post('/datasets/:id/yue2-train', (req: Request, res: Response) => {
       estimatedMs: estimateYue2RunMs(steps, readYue2CodecIdsStatus(manifest)?.present === true),
       license: YUE2_LICENSE_NOTICE,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** POST /datasets/:id/yue2-joint-train
+ *
+ * This endpoint is intentionally separate from `/yue2-train`: the latter is
+ * the established Legacy NAR path. AITK requires a prepared schema1 manifest
+ * and a raw ConvRot checkpoint supplied explicitly by the caller.
+ */
+router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const b = (req.body || {}) as Record<string, unknown>;
+    if (b.trainingMethod !== 'aitk') {
+      res.status(400).json({ error: 'AITK joint training requires trainingMethod="aitk"; Legacy is never selected implicitly.' });
+      return;
+    }
+    const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
+    const checkpoint = str('checkpoint');
+    const dataset = str('dataset');
+    const outDir = str('output');
+    const resume = str('resume');
+    const integer = (key: string, fallback: number): number => {
+      const value = Number(b[key]);
+      return Number.isInteger(value) ? value : fallback;
+    };
+    const steps = integer('steps', 0);
+    const saveEvery = integer('saveEvery', 0);
+    const seed = integer('seed', -1);
+    const device = str('device');
+    if (!checkpoint || !fs.existsSync(checkpoint) || !fs.statSync(checkpoint).isFile()) {
+      res.status(400).json({ error: `raw ConvRot checkpoint is missing: ${checkpoint || '(empty)'}. Install the verified checkpoint before starting AITK training.` });
+      return;
+    }
+    if (!dataset || !fs.existsSync(dataset) || !fs.statSync(dataset).isFile()) {
+      res.status(400).json({ error: `prepared AITK schema1 dataset is missing: ${dataset || '(empty)'}. Run native dataset preparation first; Legacy caches are not accepted.` });
+      return;
+    }
+    try {
+      if (fs.statSync(dataset).size > 16 * 1024 * 1024) {
+        res.status(400).json({ error: `AITK dataset manifest exceeds the 16 MiB limit: ${dataset}` });
+        return;
+      }
+      const manifest = JSON.parse(fs.readFileSync(dataset, 'utf8')) as Record<string, unknown>;
+      if (manifest.schema_version !== 1 || manifest.recipe_version !== 'aitk-yue2-2026-09-16'
+        || manifest.cot !== 'full' || !Array.isArray(manifest.items)
+        || typeof manifest.base_sha256 !== 'string' || typeof manifest.source_manifest_sha256 !== 'string') {
+        res.status(400).json({ error: `dataset is not a validated AITK schema1 manifest: ${dataset}. Run native dataset preparation first.` });
+        return;
+      }
+    } catch {
+      res.status(400).json({ error: `prepared AITK dataset manifest is not valid JSON: ${dataset}` });
+      return;
+    }
+    if (!outDir || fs.existsSync(outDir)) {
+      res.status(400).json({ error: `AITK output must be a new directory: ${outDir || '(empty)'}` });
+      return;
+    }
+    if (!fs.existsSync(path.dirname(outDir))) {
+      res.status(400).json({ error: `AITK output parent directory is missing: ${path.dirname(outDir)}` });
+      return;
+    }
+    if (!Number.isInteger(steps) || steps < 1 || steps > 0x7fffffff
+      || !Number.isInteger(saveEvery) || saveEvery < 1 || saveEvery > steps) {
+      res.status(400).json({ error: 'steps and saveEvery must be positive integers, with saveEvery <= steps.' });
+      return;
+    }
+    if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff || !/^CUDA[0-9]+$/i.test(device)) {
+      res.status(400).json({ error: 'seed must fit uint32 and device must be an explicit CUDA device such as CUDA0.' });
+      return;
+    }
+    if (resume && (!fs.existsSync(resume) || !fs.statSync(resume).isFile())) {
+      res.status(400).json({ error: `AITK resume record is missing: ${resume}` });
+      return;
+    }
+    const job = queue.startYue2JointTrainJob(ds.id, {
+      checkpoint, dataset, outDir, steps, saveEvery, seed, device,
+      ...(resume ? { resume } : {}), datasetSlug: ds.slug,
+      spawnEnv: buildGpuEnv().env,
+      trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16',
+    });
+    res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

@@ -40,6 +40,7 @@ import {
 } from './Yue2ArTrainCard';
 import { Yue2BatchTrainWizard } from './Yue2BatchTrainWizard';
 import { Yue2NarTrainCard, Yue2PreprocessCard } from './Yue2TrainCard';
+import { Yue2AitkTrainCard } from './Yue2AitkTrainCard';
 import { useYue2ArStatus } from './useYue2ArStatus';
 import { useYue2Status } from './useYue2Status';
 
@@ -47,6 +48,43 @@ const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dar
 const BTN_RUNALL = 'w-full px-4 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-black '
                   + 'hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors '
                   + 'flex items-center justify-center gap-2';
+const METHOD_KEY = 'hs-yue2-training-method';
+type Yue2TrainingMethod = 'aitk' | 'legacy';
+
+const MethodSelector: React.FC<{ value: Yue2TrainingMethod; onChange: (value: Yue2TrainingMethod) => void }> = ({ value, onChange }) => {
+  const { t } = useTranslation();
+  return (
+    <div className={CARD}>
+      <div className="flex flex-col gap-1 mb-3">
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+          {t('trainingStudio.yue2.method.title', 'Training method')}
+        </h3>
+        <p className="text-[11px] text-zinc-500">
+          {t('trainingStudio.yue2.method.subtitle', 'Choose the native AI Toolkit-compatible joint trainer or keep the existing Legacy stages.')}
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {([
+          ['aitk', t('trainingStudio.yue2.method.aitk', 'AI Toolkit-compatible (new)')],
+          ['legacy', t('trainingStudio.yue2.method.legacy', 'Legacy seven-stage trainer')],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onChange(key)}
+            className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${value === key
+              ? 'border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+              : 'border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-400 hover:border-amber-500/40'}`}
+          >
+            <span className="font-semibold">{label}</span>
+            {key === 'aitk' && <span className="block mt-0.5 text-[10px] opacity-80">{t('trainingStudio.yue2.method.aitkHint', 'Joint AR + NAR updates')}</span>}
+            {key === 'legacy' && <span className="block mt-0.5 text-[10px] opacity-80">{t('trainingStudio.yue2.method.legacyHint', 'Separate preparation and adapter stages')}</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 /** The newest NAR and AR run's outcome, for the preflight line only — the
  *  store's own chain does not read this, it asks the server fresh. Its own
@@ -145,6 +183,10 @@ const RunAllControl: React.FC<{
 
 export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> = ({ datasetId, trigger }) => {
   const { t } = useTranslation();
+  const [method, setMethod] = useState<Yue2TrainingMethod>(() => {
+    if (typeof window === 'undefined') return 'aitk';
+    return window.localStorage.getItem(METHOD_KEY) === 'legacy' ? 'legacy' : 'aitk';
+  });
   const storeError = useTrainingStore(s => s.error);
   const activeJob = useTrainingStore(s => s.activeJob);
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
@@ -204,8 +246,23 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
     />
   );
 
+  const selectMethod = (next: Yue2TrainingMethod) => {
+    setMethod(next);
+    window.localStorage.setItem(METHOD_KEY, next);
+  };
+
+  if (method === 'aitk') {
+    return (
+      <div className="flex flex-col gap-4">
+        <MethodSelector value={method} onChange={selectMethod} />
+        <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      <MethodSelector value={method} onChange={selectMethod} />
       {(yue2StatusError || arStatusError || storeError) && (
         <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
           <XCircle size={16} className="mt-0.5 flex-shrink-0" />

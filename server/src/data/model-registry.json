@@ -3852,6 +3852,28 @@
       ]
     },
     {
+      "id": "yue2-aitk-convrot-checkpoint",
+      "filename": "yue2_3b_int8_convrot.safetensors",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "repoPath": "checkpoints/yue2_3b_int8_convrot.safetensors",
+      "displayName": "YuE2 AI Toolkit ConvRot Checkpoint",
+      "scale": null,
+      "variant": "aitk-joint-trainer",
+      "quant": "INT8 ConvRot",
+      "sizeBytes": 3960938800,
+      "repo": "Comfy-Org/YuE2",
+      "description": "Raw Comfy-Org YuE2 3B INT8 ConvRot safetensors checkpoint for the native AI Toolkit-compatible joint AR + NAR trainer. The checkpoint embeds the YuE2 text-tokenizer JSON; it is not a GGUF generation model and requires CUDA ConvRot support. Public file SHA256: 96fe199377309001ed8cd26a944baeee8cc31a20ba7c36d1d3c0a7e1f4149db6. Licensed CC BY-NC 4.0 by the upstream repository.",
+      "tags": [
+        "training",
+        "cuda",
+        "convrot",
+        "aitk"
+      ],
+      "companions": []
+    },
+    {
       "id": "yue2-lm-bf16",
       "filename": "yue2-lm-bf16.gguf",
       "role": "yue2",

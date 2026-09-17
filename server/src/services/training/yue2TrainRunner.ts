@@ -329,13 +329,14 @@ function openRunLog(args: string[], jsonl: boolean): {
 
 export type Yue2Kind =
   | 'yue2-preprocess' | 'yue2-nar-train'
-  | 'yue2-tokenize' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet';
+  | 'yue2-tokenize' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet'
+  | 'yue2-joint-train';
 
 /** Which kinds keep a machine-readable train-log.jsonl beside their output.
  *  The two trainers do, because yue2Runs/yue2ArRuns read it back to reconstruct
  *  a run; the three cache stages have no run directory to put one in. */
 function wantsJsonl(kind: Yue2Kind): boolean {
-  return kind === 'yue2-nar-train' || kind === 'yue2-ar-train';
+  return kind === 'yue2-nar-train' || kind === 'yue2-ar-train' || kind === 'yue2-joint-train';
 }
 
 /** Shared spawn + relay + engine restore. Mirrors runMm3AceTrain, including
@@ -357,6 +358,7 @@ export async function runYue2AceTrain<S extends RelayState>(
   verifyOutput: () => string | null,
   onLine: (line: string, st: S) => void,
   st: S,
+  spawnEnv?: NodeJS.ProcessEnv,
 ): Promise<S> {
   const exe = aceTrainExe();
   if (!exe) {
@@ -385,7 +387,7 @@ export async function runYue2AceTrain<S extends RelayState>(
     emitProgress(job);
     pushLog(`[Training] ${kind} job ${job.id}: ${exe} ${args[0]}`);
 
-    const child = spawn(exe, args, { windowsHide: true, env: buildGpuEnv().env });
+    const child = spawn(exe, args, { windowsHide: true, env: spawnEnv ?? buildGpuEnv().env });
     job.child = child;
 
     const sinks = openRunLog(args, wantsJsonl(kind));

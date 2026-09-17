@@ -30,7 +30,8 @@ export type TrainingJobKind =
   // rewrite the same manifest: 'yue2-tokenize' (codec_ids, what the next-token
   // loss is scored on) and 'yue2-align' (cursor_words, what --cursor-weight
   // reads). Each spawns ace-train, so each owns the card.
-  | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet';
+  | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet'
+  | 'yue2-joint-train';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -620,6 +621,18 @@ export interface Yue2TrainRequest extends Partial<Yue2OptimOptions> {
   seed?: number;
   kvCache?: number;
   clipBlock?: number;
+}
+
+export interface Yue2JointTrainRequest {
+  trainingMethod: 'aitk';
+  checkpoint: string;
+  dataset: string;
+  output: string;
+  steps: number;
+  saveEvery: number;
+  seed: number;
+  device: string;
+  resume?: string;
 }
 
 /** A safetensors `__metadata__` block, as the exporter wrote it. */
@@ -2211,6 +2224,13 @@ export async function startYue2Train(
     `/datasets/${encodeURIComponent(id)}/yue2-train`,
     { method: 'POST', ...jsonBody(opts) },
   );
+}
+
+/** POST /api/training/datasets/:id/yue2-joint-train */
+export async function startYue2JointTrain(
+  id: string, opts: Yue2JointTrainRequest,
+): Promise<{ jobId: string; kind: TrainingJobKind; trainingMethod: 'aitk'; recipeVersion: string; outDir: string; steps: number; saveEvery: number }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-train`, { method: 'POST', ...jsonBody(opts) });
 }
 
 /** Previous YuE2 runs and their checkpoint ladders, newest first. Read off disk

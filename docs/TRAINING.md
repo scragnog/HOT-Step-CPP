@@ -2,6 +2,35 @@
 
 *The complete map of HOT-Step's native training system (Training Studio). Written as the handoff/continuation doc: everything an agent or contributor needs to keep working on this subsystem in a fresh session. Built 2026-07-27/28; all measurements from an RTX 5090 (32 GB, sm_120).*
 
+## YuE2 joint training
+
+The native CUDA joint trainer follows AI Toolkit's YuE2 recipe. Each step trains
+both AR and NAR adapters, refreshes detached AR conditioning, clips the combined
+gradients and makes one AdamW8bit update. Existing separate YuE2 trainers remain
+available as Legacy.
+
+```text
+ace-train yue2-joint-train --checkpoint base.safetensors --dataset prepared/dataset.json --output new-run --steps 150 --save-every 50 --seed 42 --device CUDA0
+```
+
+The checkpoint must be the raw YuE2 ConvRot safetensors model. The dataset must
+use the joint trainer's schema-1 manifest, including matching model and source
+hashes. Existing Legacy caches cannot be passed directly. Output must be a new
+directory. Each `checkpoint-stepN` contains `adapter.safetensors` and
+`optimizer.resume`. Resume into another new directory with `--resume` pointing
+to that record; `--steps` is the total desired step count. Use the same dataset,
+model, seed and CUDA ordinal.
+
+The CLI emits JSON progress and records losses in `train.jsonl`. Ctrl+C requests
+a stop at the next completed step and saves that state. The app's Windows Stop
+action currently terminates the process, so only already published checkpoints
+are guaranteed to survive it.
+
+The synthetic native resume check reproduces uninterrupted training exactly.
+Native and Torch calculations have documented rounding differences; numerical
+identity, full-song memory use and audio quality are separate checks. The real
+dataset and listening qualification is still in progress.
+
 ## MiniMax-Music3 (MM3) LM adapters
 
 MM3 planner-LM adapter training is a separate pipeline from everything below

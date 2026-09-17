@@ -54,6 +54,7 @@
 // its splitmix64 RNG and its kaiming/zero adapter init verbatim.
 #include "train/yue2-ar-train-run.h"
 #include "train/yue2-aitk-runtime.h"
+#include "train/yue2-aitk-import.h"
 #include "train/yue2-optim-check.h"
 #include "model-registry.h"
 #include "train/dit-train-run.h"   // pulls in every dit-*.h (DiT LoRA trainer)
@@ -554,6 +555,7 @@ static void print_usage(void) {
             "                YUE2_FD_LOSSGRAD=2 is the negative control: every probe must then\n"
             "                report rel ~= 0.5 and the gate must FAIL.\n"
             "                Weights are CC BY-NC 4.0; trained adapters inherit NC.\n"
+            "  yue2-import-aitk-cache  Import existing Toolkit caches without running encoders.\n"
             "  yue2-joint-train  Native YuE2 AR+NAR joint training (CUDA, ConvRot raw checkpoint).\n"
             "                --checkpoint <file> --dataset <schema1-manifest> --output <new-dir>\n"
             "                --steps N --save-every N --seed N --device CUDA0 [--resume <record>]\n"
@@ -6328,6 +6330,37 @@ static int cmd_rec7_selftest(int argc, char ** argv) {
 // ─── yue2-joint-train ────────────────────────────────────────────────────────
 // The runtime owns provenance checks, CUDA selection, the SIGINT boundary and
 // the actual AR/NAR loop. This front-end only parses the bounded public seam.
+static int cmd_yue2_import_aitk_cache(int argc, char ** argv) {
+    const auto usage = []() { fprintf(stderr,
+        "ace-train yue2-import-aitk-cache --toolkit-dataset DIR --source-manifest FILE "
+        "--checkpoint FILE --tokenizer-dir DIR --output NEW_DIR\n"); };
+    yue2_aitk_import::ImportRequest request;
+    std::unordered_set<std::string> seen;
+    for (int i=1; i<argc; ++i) {
+        const std::string arg(argv[i]);
+        if (arg=="--help" || arg=="-h") { usage(); return 0; }
+        if (i+1>=argc || !seen.insert(arg).second) { usage(); return 2; }
+        const auto value=std::filesystem::u8path(argv[++i]);
+        if (arg=="--toolkit-dataset") request.toolkit_dataset_dir=value;
+        else if (arg=="--source-manifest") request.source_manifest=value;
+        else if (arg=="--checkpoint") request.base_checkpoint=value;
+        else if (arg=="--tokenizer-dir") request.tokenizer_dir=value;
+        else if (arg=="--output") request.output_dir=value;
+        else { usage(); return 2; }
+    }
+    std::string error;
+    printf("{\"stage\":\"import\"}\n"); fflush(stdout);
+    try {
+        if (!yue2_aitk_import::import_toolkit_cache(request,&error)) {
+            fprintf(stderr,"YuE2 cache import: %s\n",error.c_str()); return 1;
+        }
+    } catch (const std::exception & e) {
+        fprintf(stderr,"YuE2 cache import: %s\n",e.what()); return 1;
+    }
+    printf("{\"stage\":\"done\",\"imported_toolkit_cache\":true}\n");
+    return 0;
+}
+
 static int cmd_yue2_joint_train(int argc, char ** argv) {
     yue2_aitk_runtime::Config config;
     std::string error;
@@ -6415,6 +6448,9 @@ int main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "yue2-ar-train")) {
         return cmd_yue2_ar_train(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-import-aitk-cache")) {
+        return cmd_yue2_import_aitk_cache(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-joint-train")) {
         return cmd_yue2_joint_train(argc - 1, argv + 1);
