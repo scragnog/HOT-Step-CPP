@@ -198,6 +198,9 @@ export interface AceJobStatus {
   phase?: AceJobPhase;
   phase_step?: number;
   phase_total?: number;
+  /** Additive YuE2 completion metadata when emitted by the engine. */
+  end_reason?: string;
+  stage_end_reasons?: Record<string, string>;
 }
 
 /** Fine-grained engine phase — matches JobPhase in hot-step-server.cpp.
