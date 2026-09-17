@@ -323,6 +323,19 @@
       ]
     },
     {
+      "id": "yue2-aitk-training",
+      "family": "yue2",
+      "name": "YuE2 Joint Training Pack",
+      "description": "Models for AI Toolkit-compatible joint AR/NAR training: the raw ConvRot base, Q8_0 inference LM with text tokenizer, VAE encoder, semantic tokenizer and ABC transcriber. Requires a CUDA build and an NVIDIA GPU with BF16 support (Ampere or newer).",
+      "fileIds": [
+        "yue2-aitk-convrot-checkpoint",
+        "yue2-lm-q8_0",
+        "yue2-vae-standard-f32",
+        "yue2-tok-f16",
+        "yue2-sheetsage2-f16"
+      ]
+    },
+    {
       "id": "yue2-ar-training",
       "family": "yue2",
       "name": "YuE2 Artist (AR) Training Pack",

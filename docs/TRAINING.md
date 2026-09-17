@@ -48,7 +48,9 @@ AI Toolkit caches, use `yue2-import-aitk-cache --help`.
 The synthetic native resume check reproduces uninterrupted training exactly.
 Real full-song updates and native adapter merging have passed. Native and Torch
 calculations have documented rounding differences; audio quality still needs
-listening qualification. This path currently requires a CUDA build.
+listening qualification. This path requires a CUDA build and BF16-capable
+NVIDIA hardware (Ampere or newer). Model Manager's **YuE2 Joint Training Pack**
+contains the required weights; Legacy remains available on its supported backends.
 
 ## MiniMax-Music3 (MM3) LM adapters
 

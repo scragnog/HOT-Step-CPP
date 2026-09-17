@@ -334,6 +334,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </ul>
       </div>
       <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-3">{t('trainingStudio.yue2.method.aitkNext', 'The server validates these paths and refuses missing or Legacy-formatted assets.')}</p>
+      <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.hardware', 'Joint training requires a CUDA build and an NVIDIA GPU with BF16 support (Ampere or newer).')}</p>
       {error && <div className="mt-3 flex items-start gap-2 text-xs text-red-600 dark:text-red-400"><AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}</div>}
       {job?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{job.error}</div>}
       <div className="mt-4 flex items-center gap-3 flex-wrap">
