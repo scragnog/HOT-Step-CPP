@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Check, Loader2, Play } from 'lucide-react';
+import { AlertTriangle, Check, Loader2, Play, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -27,9 +27,25 @@ import { useBackendStore } from '../../stores/backendStore';
 const JOB_KEY = 'hs-yue2-aitk-job:';
 const FORM_KEY = 'hs-yue2-aitk-form:';
 const PREP_KEY = 'hs-yue2-aitk-prepare:';
+const PRESETS_KEY = 'hs-yue2-joint-presets';
+/** A named snapshot of the training settings. Per-run and per-machine values
+ *  (dataset/checkpoint/output paths, resume record) are deliberately not part
+ *  of a preset: a preset answers "how do I train", never "against which run". */
+type Yue2JointPreset = { name: string; settings: Partial<Yue2JointTrainRequest> };
+const PRESET_EXCLUDED_KEYS: ReadonlySet<keyof Yue2JointTrainRequest> = new Set([
+  'trainingMethod', 'autoPrepare', 'preparation', 'checkpoint', 'dataset', 'output', 'resume', 'alignmentEnabled',
+]);
+function snapshotPresetSettings(form: Yue2JointTrainRequest): Partial<Yue2JointTrainRequest> {
+  const settings: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(form)) {
+    if (PRESET_EXCLUDED_KEYS.has(key as keyof Yue2JointTrainRequest) || value === undefined) continue;
+    settings[key] = value;
+  }
+  return settings as Partial<Yue2JointTrainRequest>;
+}
 const DEFAULT_FORM: Yue2JointTrainRequest = {
   trainingMethod: 'aitk', checkpoint: '', dataset: '', output: '',
-  steps: 3000, saveEvery: 250, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
+  steps: 400, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
@@ -60,6 +76,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
+  const [presets, setPresets] = useState<Yue2JointPreset[]>(() => readStored<Yue2JointPreset[]>(PRESETS_KEY, []));
+  const [presetName, setPresetName] = useState('');
+  const [presetError, setPresetError] = useState('');
   const [prepare, setPrepare] = useState<PrepareForm>(() => readStored(`${PREP_KEY}${datasetId}`, {
     legacyManifest: legacyManifest ?? '', checkpoint: '', tokenizer: '', output: '',
     models: { vae: '', semantic: '', sheetsage: '' },
@@ -227,6 +246,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   }, [datasetId, prepare, prepareJob, prepareManifest, appliedPrepareJobId]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') window.localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+  }, [presets]);
+
+  useEffect(() => {
     if (!job || !['queued', 'running'].includes(job.status)) return;
     const id = job.id;
     const timer = window.setInterval(() => {
@@ -263,6 +286,23 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   const set = <K extends keyof Yue2JointTrainRequest>(key: K, value: Yue2JointTrainRequest[K]) =>
     setForm(previous => ({ ...previous, [key]: value }));
+  const savePreset = () => {
+    const name = presetName.trim();
+    if (!name) { setPresetError(t('trainingStudio.yue2.method.presetNameRequired', 'Give the preset a name first.')); return; }
+    if (presets.some(preset => preset.name.toLowerCase() === name.toLowerCase())) {
+      setPresetError(t('trainingStudio.yue2.method.presetExists', 'A preset with that name already exists.'));
+      return;
+    }
+    setPresetError('');
+    setPresets(previous => [...previous, { name, settings: snapshotPresetSettings(form) }]);
+    setPresetName('');
+  };
+  const loadPreset = (preset: Yue2JointPreset) => {
+    setForm(previous => ({ ...previous, ...preset.settings }));
+  };
+  const removePreset = (name: string) => {
+    setPresets(previous => previous.filter(preset => preset.name !== name));
+  };
   const run = async () => {
     setStarting(true); setError('');
     try {
@@ -397,19 +437,39 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device')}
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
-      <div className="mt-3 flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.presets', 'Training presets')}</span>
-        <button type="button" disabled={active || preparing || starting}
-          onClick={() => setForm(previous => ({ ...previous, steps: 3000, saveEvery: 250 }))}
-          className="px-2.5 py-1 rounded-lg text-[11px] border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40">
-          {t('trainingStudio.yue2.method.presetAitk', 'Joint Training · 3000 steps, save every 250')}
-        </button>
-        <button type="button" disabled={active || preparing || starting}
-          onClick={() => setForm(previous => ({ ...previous, steps: 300, saveEvery: 50 }))}
-          className="px-2.5 py-1 rounded-lg text-[11px] border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40">
-          {t('trainingStudio.yue2.method.presetDookie', 'Dookie comparison · 300 steps, save every 50')}
-        </button>
-        <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetHint', 'Changes only steps and save cadence; checkpoint audition is manual.')}</span>
+      <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.presets', 'Training presets')}</span>
+          <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetHint', 'A preset captures the training settings (steps, save cadence, seed, device, optimizer, rank/alpha and stop target) — never the dataset, checkpoint or output paths. Presets are stored in this browser.')}</span>
+        </div>
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          <input className={`${input} min-w-40 flex-1`} placeholder={t('trainingStudio.yue2.method.presetNamePlaceholder', 'New preset name')}
+            value={presetName} disabled={active || preparing || starting}
+            onChange={event => { setPresetName(event.target.value); setPresetError(''); }}
+            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void savePreset(); } }} />
+          <button type="button" onClick={() => void savePreset()} disabled={active || preparing || starting}
+            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
+            {t('trainingStudio.yue2.method.presetSave', 'Save current settings')}
+          </button>
+        </div>
+        {presetError && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{presetError}</p>}
+        {presets.length > 0 && <div className="mt-2 flex flex-wrap gap-2">
+          {presets.map(preset => (
+            <span key={preset.name} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-white/10 bg-white/60 dark:bg-zinc-900/40 pl-2.5 pr-1 py-1 text-[11px] text-zinc-700 dark:text-zinc-300">
+              <button type="button" onClick={() => loadPreset(preset)} disabled={active || preparing || starting}
+                title={t('trainingStudio.yue2.method.presetLoad', 'Load this preset into the form')}
+                className="font-medium hover:underline disabled:no-underline disabled:opacity-40">
+                {preset.name}{preset.settings.steps !== undefined && preset.settings.saveEvery !== undefined
+                  ? ` · ${preset.settings.steps} steps, save every ${preset.settings.saveEvery}` : ''}
+              </button>
+              <button type="button" onClick={() => removePreset(preset.name)}
+                title={t('trainingStudio.yue2.method.presetRemove', 'Remove this preset')}
+                className="rounded p-0.5 text-zinc-400 hover:text-red-600 dark:hover:text-red-400">
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>}
       </div>
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
