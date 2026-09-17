@@ -6,7 +6,9 @@
 // Phase 2 is absent under YuE2: its latent cache is stage 1 of the five-stage
 // flow on the Train page (Yue2TrainStages.tsx), which the "Perform all stages"
 // button drives. A second entry point onto the same cache would be two UIs free
-// to disagree about one artifact.
+// to disagree about one artifact. Monitor is absent under YuE2 too: the batch
+// pipeline it watches only runs the preprocess-based backends, and YuE2's own
+// batch queue already shows on the Train page.
 
 import React from 'react';
 import { Database, Layers, Cpu, Activity, Lock } from 'lucide-react';
@@ -34,9 +36,11 @@ export const PhaseStepper: React.FC = () => {
   const backendId = useBackendStore(s => s.activeBackendId);
   const mm3Mode = backendId === 'minimax-m3';
   // YuE2 owns its preprocess on the Train page, so the slot is dropped rather
-  // than relabelled.
+  // than relabelled. Its monitor slot is dropped too: the batch pipeline is
+  // the preprocess-based backends' unattended queue, and YuE2 has its own
+  // queue view on the same Train page.
   const phases = backendId === YUE2_BACKEND_ID
-    ? PHASES.filter(p => p.id !== 'preprocess')
+    ? PHASES.filter(p => p.id !== 'preprocess' && p.id !== 'monitor')
     : PHASES;
 
   return (

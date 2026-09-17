@@ -140,12 +140,13 @@ export const TrainingStudio: React.FC = () => {
   }, [openDataset, closeDataset, setPhase]);
 
   // PreprocessPanel is ACE's tensor cache and MM3's codes; YuE2 has neither,
-  // and its own latent stage lives on the Train page. PhaseStepper drops the
-  // chip, but a user who was standing on the phase when the backend changed
-  // would otherwise be left looking at ACE's variant list with no way back to
-  // it — so move them on rather than render something YuE2 can never consume.
+  // and its own latent stage lives on the Train page. The Monitor phase is
+  // the same story: its batch pipeline only runs the preprocess-based
+  // backends. PhaseStepper drops both chips, but a user who was standing on
+  // either phase when the backend changed would otherwise be left looking at
+  // content YuE2 can never use — so move them on rather than render it.
   useEffect(() => {
-    if (activeBackendId === YUE2_BACKEND_ID && phase === 'preprocess') setPhase('train');
+    if (activeBackendId === YUE2_BACKEND_ID && (phase === 'preprocess' || phase === 'monitor')) setPhase('train');
   }, [activeBackendId, phase, setPhase]);
 
   const fatalError = error && !detail;
