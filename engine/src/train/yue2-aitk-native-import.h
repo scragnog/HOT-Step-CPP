@@ -175,8 +175,7 @@ inline bool tokenizer_hash(const std::filesystem::path & path, sha256::digest * 
 } // namespace detail
 
 // Converts one complete existing Legacy cache. The manifest must already have
-// source-level latents, codec_ids and successful abc fields; partial caches are
-// rejected rather than silently training a different recipe.
+// source-level latents and codec_ids. Missing or failed ABC sheets use CoT off.
 inline bool prepare_from_legacy(const Request & request, std::string * error = nullptr) {
     using namespace detail;
     if (request.legacy_manifest.empty() || request.raw_convrot_checkpoint.empty() ||
@@ -251,7 +250,8 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         } else if (caption_format == "none") {
             style.clear(); lyrics.clear();
         }
-        if (!abc_error.empty() || abc.empty()) return fail(error, "AITK native import requires a successful full ABC sheet for every source");
+        // A failed or absent sheet uses the off prefix; audio and lyrics remain usable.
+        if (!abc_error.empty() || abc.find_first_not_of(" \t\r\n") == std::string::npos) abc.clear();
         std::filesystem::path latent, semantic;
         if (!safe_rel(base, latent_name, &latent, error) || !safe_rel(base, semantic_name, &semantic, error)) return false;
         const size_t n = static_cast<size_t>(yyjson_get_sint(frames));
@@ -272,7 +272,7 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         }
         item.prompt.retained_prefix_ids.assign(full.begin(), full.end());
         item.prompt.dropped_prefix_ids.assign(off.begin(), off.end());
-        item.prompt.abc_ids.assign(abc_ids.begin(), abc_ids.end()); item.prompt.retain_abc = true;
+        item.prompt.abc_ids.assign(abc_ids.begin(), abc_ids.end()); item.prompt.retain_abc = !abc_ids.empty();
         item.prompt_style = style; item.prompt_lyrics = lyrics; item.instrumental = lyrics.empty();
         std::string cursor_name;
         const yyjson_val * cursor_value = yyjson_obj_get(source, "cursor_words");
@@ -292,8 +292,8 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
             if (source_lyrics_before_normalization != lyrics &&
                 !remap_words5(source_lyrics_before_normalization, lyrics, &cm.words5, error)) return false;
             cm.lyric_codepoints = utf8_codepoints(lyrics);
-            const std::string full_text = std::string(yue2_instruction(YUE2_COT_FULL)) + "\n[Tags]\n" + style + "\n[Lyrics]\n" + lyrics;
-            const std::string off_text = std::string(yue2_instruction(YUE2_COT_OFF)) + "\n[Tags]\n" + style + "\n[Lyrics]\n" + lyrics;
+            const std::string full_text = yue2_assemble_text(style, lyrics, YUE2_COT_FULL);
+            const std::string off_text = yue2_assemble_text(style, lyrics, YUE2_COT_OFF);
             const auto full_head = yue2_bpe_encode(&tokenizer, std::string(yue2_instruction(YUE2_COT_FULL)) + "\n[Tags]\n" + style + "\n[Lyrics]\n");
             const auto off_head = yue2_bpe_encode(&tokenizer, std::string(yue2_instruction(YUE2_COT_OFF)) + "\n[Tags]\n" + style + "\n[Lyrics]\n");
             const auto full_ids = yue2_bpe_encode(&tokenizer, full_text);
@@ -315,6 +315,14 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
                 return fail(error, "cursor prefix does not match normalized tokenizer text");
             if (!lyric_token_ends(&tokenizer, full_ids, full_head.size(), &cm.full_lyric_token_end_codepoints, error) ||
                 !lyric_token_ends(&tokenizer, off_ids, off_head.size(), &cm.off_lyric_token_end_codepoints, error)) return false;
+            // The protocol adds a newline, which can merge with final punctuation.
+            // Bind actual prefix tokens, but exclude newline-only tokens from lyrics.
+            auto trim_protocol_newline = [&](std::vector<int64_t> & ends) {
+                while (ends.size() > 1 && ends[ends.size() - 2] >= cm.lyric_codepoints) ends.pop_back();
+                if (!ends.empty()) ends.back() = std::min(ends.back(), cm.lyric_codepoints);
+            };
+            trim_protocol_newline(cm.full_lyric_token_end_codepoints);
+            trim_protocol_newline(cm.off_lyric_token_end_codepoints);
             if (!bind_cursor_targets(item.prompt.retained_prefix_ids, static_cast<int64_t>(full_head.size()),
                                      cm.full_lyric_token_end_codepoints, cm.lyric_codepoints, n, cm.words5, &cm.full) ||
                 !bind_cursor_targets(item.prompt.dropped_prefix_ids, static_cast<int64_t>(off_head.size()),
@@ -367,3 +375,4 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
 //   --model role=path ... --output fresh-dir [--lyric-timing 0|1]
 
 } // namespace yue2_aitk_native_import
+

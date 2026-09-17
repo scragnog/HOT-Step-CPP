@@ -232,6 +232,7 @@ inline bool read_dataset(const std::string & manifest_path, Dataset * out, std::
         if (!ids(full, &result.prompt.retained_prefix_ids, false, error) ||
             !ids(off, &result.prompt.dropped_prefix_ids, false, error) ||
             !ids(abc, &result.prompt.abc_ids, true, error)) return false;
+        result.prompt.retain_abc = !result.prompt.abc_ids.empty();
         yyjson_val * cursor = yyjson_obj_get(item, "cursor");
         if (cursor) {
             if (!yyjson_is_obj(cursor)) return bad(error, "cursor metadata must be an object");
@@ -309,3 +310,4 @@ inline bool read_dataset(const std::string & manifest_path, Dataset * out, std::
 }
 
 } // namespace yue2_aitk
+
