@@ -36,6 +36,9 @@ struct VerifiedNativeItem {
     std::filesystem::path semantic_file; // verified little-endian int32 raw IDs
     size_t frames = 0;
     PromptInput prompt;                   // produced by installed tokenizer API
+    std::string prompt_style;
+    std::string prompt_lyrics;
+    bool instrumental = false;
 };
 
 struct ModelProvenance {
@@ -92,6 +95,42 @@ inline bool add_ids(yyjson_mut_doc * doc, yyjson_mut_val * obj, const char * key
     if (!arr) return false;
     for (int32_t id : ids) if (!yyjson_mut_arr_add_int(doc, arr, id)) return false;
     return yyjson_mut_obj_add_val(doc, obj, key, arr);
+}
+inline bool add_f32s(yyjson_mut_doc * doc, yyjson_mut_val * obj, const char * key, const std::vector<float> & values) {
+    yyjson_mut_val * arr = yyjson_mut_arr(doc); if (!arr) return false;
+    for (float value : values) if (!std::isfinite(value) || !yyjson_mut_arr_add_real(doc, arr, value)) return false;
+    return yyjson_mut_obj_add_val(doc, obj, key, arr);
+}
+inline bool add_i64s(yyjson_mut_doc * doc, yyjson_mut_val * obj, const char * key, const std::vector<int64_t> & values) {
+    yyjson_mut_val * arr = yyjson_mut_arr(doc); if (!arr) return false;
+    for (int64_t value : values) if (value < 0 || !yyjson_mut_arr_add_sint(doc, arr, value)) return false;
+    return yyjson_mut_obj_add_val(doc, obj, key, arr);
+}
+inline bool add_cursor(yyjson_mut_doc * doc, yyjson_mut_val * obj, const CursorMetadata & cursor) {
+    if (cursor.present && cursor.instrumental) {
+        yyjson_mut_val * root = yyjson_mut_obj(doc);
+        return root && yyjson_mut_obj_add_bool(doc, root, "enabled", false) &&
+               yyjson_mut_obj_add_bool(doc, root, "instrumental", true) &&
+               yyjson_mut_obj_add_val(doc, obj, "cursor", root);
+    }
+    if (!cursor.present || cursor.lyric_codepoints <= 0 || cursor.words5.empty() ||
+        cursor.full_lyric_token_end_codepoints.empty() || cursor.off_lyric_token_end_codepoints.empty() ||
+        !cursor.full.bound || !cursor.off.bound || cursor.lyrics_sha256.size() != 64 ||
+        cursor.tokenizer_sha256.size() != 64) return false;
+    yyjson_mut_val * root = yyjson_mut_obj(doc), * full = yyjson_mut_obj(doc), * off = yyjson_mut_obj(doc);
+    if (!root || !full || !off || !yyjson_mut_obj_add_strcpy(doc, root, "lyrics_sha256", cursor.lyrics_sha256.c_str()) ||
+        !yyjson_mut_obj_add_strcpy(doc, root, "tokenizer_sha256", cursor.tokenizer_sha256.c_str()) ||
+        !yyjson_mut_obj_add_bool(doc, root, "enabled", cursor.enabled) ||
+        !yyjson_mut_obj_add_bool(doc, root, "instrumental", cursor.instrumental) ||
+        !yyjson_mut_obj_add_sint(doc, root, "lyric_codepoints", cursor.lyric_codepoints) ||
+        !add_f32s(doc, root, "words5", cursor.words5) ||
+        !yyjson_mut_obj_add_sint(doc, full, "head_tokens", cursor.full_head_tokens) ||
+        !add_i64s(doc, full, "token_end_codepoints", cursor.full_lyric_token_end_codepoints) ||
+        !yyjson_mut_obj_add_sint(doc, off, "head_tokens", cursor.off_head_tokens) ||
+        !add_i64s(doc, off, "token_end_codepoints", cursor.off_lyric_token_end_codepoints) ||
+        !yyjson_mut_obj_add_val(doc, root, "full", full) || !yyjson_mut_obj_add_val(doc, root, "off", off) ||
+        !yyjson_mut_obj_add_val(doc, obj, "cursor", root)) return false;
+    return true;
 }
 
 inline std::string fnv_hex(const std::vector<uint8_t> & bytes) {
@@ -183,6 +222,9 @@ inline bool prepare_dataset(const PrepareRequest & request, std::string * error 
         const auto & item = request.items[index];
         if (item.id.empty() || !no_nul(item.id) || !ids.insert(item.id).second || item.frames == 0 || item.frames > 24576 || !token_ids(item.prompt, item.frames, error))
             return prep_fail(error, "native item metadata is invalid");
+        if (item.prompt.cursor.present &&
+            (!no_nul(item.prompt.cursor.lyrics_sha256) || !no_nul(item.prompt.cursor.tokenizer_sha256)))
+            return prep_fail(error, "cursor provenance contains embedded NUL");
         if (item.frames > std::numeric_limits<size_t>::max() / (kLatentChannels * sizeof(float)))
             return prep_fail(error, "latent size overflow");
         const size_t latent_bytes = item.frames * kLatentChannels * sizeof(float);
@@ -220,6 +262,9 @@ inline bool prepare_dataset(const PrepareRequest & request, std::string * error 
         const std::string latent_fnv = fnv_hex(latent);
         if (!obj || !yyjson_mut_obj_add_strcpy(doc, obj, "id", item.id.c_str()) ||
             !yyjson_mut_obj_add_uint(doc, obj, "frames", item.frames) ||
+            !yyjson_mut_obj_add_strcpy(doc, obj, "style", item.prompt_style.c_str()) ||
+            !yyjson_mut_obj_add_strcpy(doc, obj, "lyrics", item.prompt_lyrics.c_str()) ||
+            !yyjson_mut_obj_add_bool(doc, obj, "instrumental", item.instrumental) ||
             !yyjson_mut_obj_add_strcpy(doc, obj, "latent_file", payload_name.c_str()) ||
             !yyjson_mut_obj_add_strcpy(doc, obj, "latent_fnv1a64", latent_fnv.c_str()) ||
             !yyjson_mut_obj_add_strcpy(doc, obj, "native_latent_sha256", latent_hash.hex().c_str()) ||
@@ -227,6 +272,8 @@ inline bool prepare_dataset(const PrepareRequest & request, std::string * error 
             !add_ids(doc, obj, "semantic_tokens", semantic) || !add_ids(doc, obj, "prefix_full_ids", item.prompt.retained_prefix_ids) ||
             !add_ids(doc, obj, "prefix_off_ids", item.prompt.dropped_prefix_ids) || !add_ids(doc, obj, "abc_ids", item.prompt.abc_ids) ||
             !yyjson_mut_arr_add_val(items, obj)) return prep_fail(error, "cannot construct manifest item");
+        if (item.prompt.cursor.present && !add_cursor(doc, obj, item.prompt.cursor))
+            return prep_fail(error, "cannot serialize cursor metadata");
     }
     yyjson_mut_obj_add_val(doc, root, "items", items);
     size_t json_len = 0; char * json = yyjson_mut_write(doc, 0, &json_len);

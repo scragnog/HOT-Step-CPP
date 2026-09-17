@@ -28,7 +28,7 @@ public:
     Yue2AitkTrainState(const Yue2AitkTrainState &) = delete;
     Yue2AitkTrainState & operator=(const Yue2AitkTrainState &) = delete;
 
-    bool initialize(ggml_backend_t backend, uint32_t seed = kDefaultSeed, std::string * error = nullptr) {
+    bool initialize(ggml_backend_t backend, uint32_t seed = kDefaultSeed, std::string * error = nullptr, bool cursor = false) {
         reset();
         if (!backend) return fail(error, "backend is null");
         ggml_init_params params{}; params.mem_size = 1024*ggml_tensor_overhead()+4096; params.no_alloc = true;
@@ -41,6 +41,12 @@ public:
         }
         slots_.reserve(2u * kLayers * kSites * kFactors);
         if (!build_slots(nar_, "diffusion_model", 0, error) || !build_slots(ar_, "text_encoders", 1, error)) { reset(); return false; }
+        if (cursor) {
+            auto * parameter=ggml_new_tensor_2d(ctx_,GGML_TYPE_F32,2048,2048);
+            auto * gradient=ggml_new_tensor_2d(ctx_,GGML_TYPE_F32,2048,2048);
+            cursor_slot_=slots_.size();
+            slots_.push_back({"cursor_head.weight",parameter,gradient,2048,2048,-1,std::vector<float>(2048*2048,0)});
+        }
         buffer_ = ggml_backend_alloc_ctx_tensors(ctx_, backend_);
         if (!buffer_) { reset(); return fail(error, "failed to allocate train-state backend buffer"); }
         std::mt19937 rng(seed_);
@@ -51,6 +57,7 @@ public:
                 std::uniform_real_distribution<float> dist(-bound, bound);
                 for (float & value : slot.host) value = dist(rng);
             }
+            if (slot.factor == -1) for(size_t i=0;i<size_t(slot.rows);++i) slot.host[i*size_t(slot.cols)+i]=1.0f;
             ggml_backend_tensor_set(slot.parameter, slot.host.data(), 0, ggml_nbytes(slot.parameter));
             ggml_backend_tensor_memset(slot.gradient, 0, 0, ggml_nbytes(slot.gradient));
         }
@@ -59,7 +66,7 @@ public:
     }
 
     void reset() {
-        initialized_ = false; slots_.clear(); ar_ = {}; nar_ = {};
+        initialized_ = false; slots_.clear(); ar_ = {}; nar_ = {}; cursor_slot_=kInvalid;
         if (buffer_) { ggml_backend_buffer_free(buffer_); buffer_ = nullptr; }
         if (ctx_) { ggml_free(ctx_); ctx_ = nullptr; }
         backend_ = nullptr;
@@ -70,6 +77,11 @@ public:
     const std::string & initialization_policy() const { return init_policy_; }
     const Yue2AitkExpertAdapters & ar_adapters() const { return ar_; }
     const Yue2AitkExpertAdapters & nar_adapters() const { return nar_; }
+    ggml_tensor * cursor_head() const { return cursor_slot_==kInvalid?nullptr:slots_[cursor_slot_].parameter; }
+    ggml_tensor * cursor_gradient() const { return cursor_slot_==kInvalid?nullptr:slots_[cursor_slot_].gradient; }
+    void clear_cursor_gradient() {
+        if(auto * gradient=cursor_gradient()) ggml_backend_tensor_memset(gradient,0,0,ggml_nbytes(gradient));
+    }
     std::vector<NamedTensors> named_tensors() const {
         std::vector<NamedTensors> result; result.reserve(slots_.size());
         for (const auto & slot : slots_) result.push_back({slot.name,slot.parameter,slot.gradient});
@@ -122,6 +134,7 @@ public:
         if (!initialized_) return fail(error, "train state is not initialized");
         std::vector<Yue2AitkF32Matrix> factors; factors.reserve(slots_.size());
         for (Slot & slot : slots_) {
+            if (slot.factor == -1) continue; // auxiliary training head is resume-only
             ggml_backend_tensor_get(slot.parameter, slot.host.data(), 0, ggml_nbytes(slot.parameter));
             factors.push_back({slot.name, slot.rows, slot.cols, slot.host.data()});
         }
@@ -149,6 +162,7 @@ private:
     uint32_t seed_ = kDefaultSeed;
     std::string init_policy_ = "native-v1";
     bool initialized_ = false;
+    size_t cursor_slot_ = kInvalid;
 
     static bool fail(std::string * error, const char * message) { if (error) *error = message; return false; }
     static bool fail(std::string * error, const std::string & message) { if (error) *error = message; return false; }

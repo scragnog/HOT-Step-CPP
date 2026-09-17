@@ -4,6 +4,7 @@
 // it has no legacy-cache fallback and never mutates the destination on error.
 
 #include "yue2-aitk-batch.h"
+#include "yue2-aitk-sha256.h"
 #include "../hot-step-fsutf8.h"
 #include "yyjson.h"
 
@@ -138,6 +139,42 @@ inline bool ids(yyjson_val * v, std::vector<int32_t> * out, bool allow_empty, st
     }
     return true;
 }
+
+inline bool f32s(yyjson_val * v, std::vector<float> * out, std::string * e) {
+    if (!yyjson_is_arr(v) || yyjson_arr_size(v) == 0 || yyjson_arr_size(v) > 5u * 10000u)
+        return bad(e, "cursor words must be a nonempty numeric array");
+    size_t i = 0, max = 0; yyjson_val * x = nullptr;
+    yyjson_arr_foreach(v, i, max, x) {
+        if (!yyjson_is_num(x) || !std::isfinite(yyjson_get_num(x))) return bad(e, "cursor word value is not finite");
+        out->push_back(static_cast<float>(yyjson_get_num(x)));
+    }
+    if (out->size() % 5 != 0) return bad(e, "cursor words must contain five values per word");
+    return true;
+}
+
+inline bool i64s(yyjson_val * v, std::vector<int64_t> * out, std::string * e) {
+    if (!yyjson_is_arr(v) || yyjson_arr_size(v) == 0 || yyjson_arr_size(v) > kMaxFrames)
+        return bad(e, "cursor token offsets are invalid");
+    size_t i = 0, max = 0; yyjson_val * x = nullptr;
+    yyjson_arr_foreach(v, i, max, x) {
+        if (!yyjson_is_int(x) || yyjson_get_sint(x) < 0) return bad(e, "cursor token offset is invalid");
+        out->push_back(yyjson_get_sint(x));
+    }
+    return true;
+}
+
+inline bool cursor_side(yyjson_val * v, const std::vector<int32_t> & prefix, int64_t frames,
+                        int64_t lyric_codepoints, const std::vector<float> & words,
+                        CursorTargets * out, std::string * e) {
+    if (!yyjson_is_obj(v)) return bad(e, "cursor prefix binding is missing");
+    yyjson_val * h = yyjson_obj_get(v, "head_tokens");
+    if (!yyjson_is_int(h) || yyjson_get_sint(h) < 0) return bad(e, "cursor head_tokens is invalid");
+    std::vector<int64_t> ends;
+    if (!i64s(yyjson_obj_get(v, "token_end_codepoints"), &ends, e)) return false;
+    if (!bind_cursor_targets(prefix, yyjson_get_sint(h), ends, lyric_codepoints, frames, words, out))
+        return bad(e, out->why.c_str());
+    return true;
+}
 } // namespace dataset_detail
 
 inline bool read_dataset(const std::string & manifest_path, Dataset * out, std::string * error = nullptr) {
@@ -187,9 +224,58 @@ inline bool read_dataset(const std::string & manifest_path, Dataset * out, std::
         const size_t n = static_cast<size_t>(yyjson_get_sint(frames));
         if (yyjson_arr_size(sem) != n) return bad(error, "semantic token count does not match frames");
         DatasetItem result; result.id = std::move(id_s); result.song.latent_channels = kLatentChannels;
+        yyjson_val * style = yyjson_obj_get(item, "style"); yyjson_val * lyrics = yyjson_obj_get(item, "lyrics");
+        if (style && !string_value(style, &result.song.style)) return bad(error, "dataset style must be a UTF-8 string");
+        if (lyrics && !string_value(lyrics, &result.song.lyrics)) return bad(error, "dataset lyrics must be a UTF-8 string");
+        result.song.instrumental = yyjson_obj_get(item, "instrumental") && yyjson_is_bool(yyjson_obj_get(item, "instrumental"))
+            ? yyjson_get_bool(yyjson_obj_get(item, "instrumental")) : result.song.lyrics.empty();
         if (!ids(full, &result.prompt.retained_prefix_ids, false, error) ||
             !ids(off, &result.prompt.dropped_prefix_ids, false, error) ||
             !ids(abc, &result.prompt.abc_ids, true, error)) return false;
+        yyjson_val * cursor = yyjson_obj_get(item, "cursor");
+        if (cursor) {
+            if (!yyjson_is_obj(cursor)) return bad(error, "cursor metadata must be an object");
+            auto & cm = result.prompt.cursor;
+            cm.present = true;
+            yyjson_val * enabled = yyjson_obj_get(cursor, "enabled");
+            yyjson_val * instrumental = yyjson_obj_get(cursor, "instrumental");
+            if (enabled && !yyjson_is_bool(enabled)) return bad(error, "cursor enabled must be boolean");
+            if (instrumental && !yyjson_is_bool(instrumental)) return bad(error, "cursor instrumental must be boolean");
+            cm.enabled = enabled ? yyjson_get_bool(enabled) : true;
+            cm.instrumental = instrumental && yyjson_get_bool(instrumental);
+            if (cm.instrumental) { cm.enabled = false; }
+            yyjson_val * lh = yyjson_obj_get(cursor, "lyrics_sha256");
+            yyjson_val * th = yyjson_obj_get(cursor, "tokenizer_sha256");
+            yyjson_val * cp = yyjson_obj_get(cursor, "lyric_codepoints");
+            if (cm.instrumental) {
+                if (!result.song.lyrics.empty()) return bad(error, "instrumental cursor metadata conflicts with nonempty lyrics");
+            } else {
+            if (!string_value(lh, &cm.lyrics_sha256) || !hex256(cm.lyrics_sha256) ||
+                !string_value(th, &cm.tokenizer_sha256) || !hex256(cm.tokenizer_sha256) ||
+                !yyjson_is_int(cp) || yyjson_get_sint(cp) <= 0 || yyjson_get_sint(cp) > 10000000 ||
+                !f32s(yyjson_obj_get(cursor, "words5"), &cm.words5, error)) return bad(error, "cursor metadata is invalid");
+            const int64_t codepoints = yyjson_get_sint(cp);
+            cm.lyric_codepoints = codepoints;
+            if (sha256::bytes(result.song.lyrics.data(), result.song.lyrics.size()).hex() != cm.lyrics_sha256)
+                return bad(error, "cursor lyrics hash does not match normalized item lyrics");
+            if (!cursor_side(yyjson_obj_get(cursor, "full"), result.prompt.retained_prefix_ids, n,
+                              codepoints, cm.words5, &cm.full, error) ||
+                !cursor_side(yyjson_obj_get(cursor, "off"), result.prompt.dropped_prefix_ids, n,
+                              codepoints, cm.words5, &cm.off, error)) return false;
+            cm.j0_full = cm.full.j0; cm.j0_off = cm.off.j0; cm.L = cm.full.L;
+            if (cm.off.L != cm.L || cm.full.nF != cm.off.nF) return bad(error, "cursor full/off token geometry differs");
+            cursor_ranges(cm.full, &cm.full_frame_ranges); cursor_ranges(cm.off, &cm.off_frame_ranges);
+            cm.full.T.clear(); cm.off.T.clear(); // retain compact ranges, not a dataset-wide dense matrix
+            cm.full_lyric_token_end_codepoints.clear(); cm.off_lyric_token_end_codepoints.clear();
+            // The binding function has validated these; retain the arrays for
+            // callers that need to rebind after choosing a shorter crop.
+            yyjson_val * full_obj = yyjson_obj_get(cursor, "full");
+            yyjson_val * off_obj = yyjson_obj_get(cursor, "off");
+            if (!i64s(yyjson_obj_get(full_obj, "token_end_codepoints"), &cm.full_lyric_token_end_codepoints, error) ||
+                !i64s(yyjson_obj_get(off_obj, "token_end_codepoints"), &cm.off_lyric_token_end_codepoints, error)) return false;
+            cm.full_head_tokens = cm.full.j0 - 1; cm.off_head_tokens = cm.off.j0 - 1;
+            }
+        }
         size_t si = 0, max_sem = 0; yyjson_val * sv = nullptr; yyjson_arr_foreach(sem, si, max_sem, sv) {
             if (!yyjson_is_int(sv) || yyjson_get_sint(sv) < 0 || yyjson_get_sint(sv) >= kCodecSize)
                 return bad(error, "semantic token out of codec range");

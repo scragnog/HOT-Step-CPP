@@ -286,6 +286,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     sp.penalty_window     = (int) m.lm_cfg.semantic.penalty_window;
     sp.min_tokens          = (int) m.lm_cfg.semantic.min_tokens;
     sp.max_tokens          = (int) m.lm_cfg.semantic.max_tokens;
+    const bool preview_capped = req.preview_max_frames > 0 && req.preview_max_frames < sp.max_tokens;
+    if (preview_capped) sp.max_tokens = req.preview_max_frames;
     const bool legacy_off  = (req.cot == YUE2_COT_OFF);
     const int64_t legal_lo = YUE2_CODEC_OFFSET;
     const int64_t legal_hi = YUE2_CODEC_OFFSET + YUE2_CODEC_SIZE;
@@ -502,7 +504,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         yue2_ar_kv_cache_free(&uncond_cache);
     }
 
-    *stage_end_reason = hit_eos ? (eos_by_threshold ? "eos_threshold" : "eos") : "limit_hit";
+    *stage_end_reason = hit_eos ? (eos_by_threshold ? "eos_threshold" : "eos") :
+        (preview_capped ? "preview_limit" : "limit_hit");
     *stage_ms          = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     return true;
 }
@@ -710,6 +713,7 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
 
     const bool any_limit = out->stage_end_reason[YUE2_STAGE_PLAN] == "limit_hit" ||
                             out->stage_end_reason[YUE2_STAGE_SEMANTIC] == "limit_hit";
-    out->end_reason = any_limit ? "limit_hit" : "completed";
+    out->end_reason = any_limit ? "limit_hit" :
+        (out->stage_end_reason[YUE2_STAGE_SEMANTIC] == "preview_limit" ? "preview_limit" : "completed");
     return true;
 }

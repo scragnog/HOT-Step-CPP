@@ -11,12 +11,14 @@
 #include "yyjson.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace yue2_aitk_native_import {
@@ -34,6 +36,7 @@ struct Request {
     std::filesystem::path tokenizer_gguf_or_dir; // GGUF or vocab.json/merges.txt directory
     std::filesystem::path output_dir;             // must not exist
     std::vector<ModelInput> models;               // VAE, semantic tokenizer, SheetSage, etc.
+    bool lyric_timing = false;                    // explicit opt-in; requires cursor_words for lyrical sources
 };
 
 namespace detail {
@@ -68,6 +71,62 @@ inline bool safe_rel(const std::filesystem::path & base, const std::string & nam
     auto i = root.begin(), j = file.begin(); for (; i != root.end() && j != file.end() && *i == *j; ++i, ++j) {}
     if (i != root.end()) return fail(e, "Legacy cache payload escapes its manifest");
     *out = file; return true;
+}
+
+inline bool read_words5(const std::filesystem::path & path, int64_t lyric_chars,
+                        std::vector<float> * out, std::string * e) {
+    std::error_code ec; const auto bytes = std::filesystem::file_size(path, ec);
+    if (ec || bytes == 0 || bytes > 512u * 1024u * 1024u || bytes % 20 != 0)
+        return fail(e, "cursor_words must be a nonempty f32 [words,5] file");
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return fail(e, "cannot open cursor_words file");
+    out->resize(static_cast<size_t>(bytes / sizeof(float)));
+    if (!f.read(reinterpret_cast<char *>(out->data()), static_cast<std::streamsize>(bytes)))
+        return fail(e, "cursor_words read failed");
+    float previous = -1.0f;
+    for (size_t i = 0; i < out->size() / 5; ++i) {
+        const float * row = out->data() + i * 5;
+        if (!std::isfinite(row[0]) || !std::isfinite(row[1]) || !std::isfinite(row[2]) ||
+            !std::isfinite(row[3]) || !std::isfinite(row[4]) || row[0] < 0 || row[1] < row[0] ||
+            row[3] < 0 || row[4] < row[3] || row[4] > lyric_chars || row[0] < previous)
+            return fail(e, "cursor_words contains an invalid time or codepoint span");
+        previous = row[0];
+    }
+    return true;
+}
+
+inline int64_t utf8_codepoints(const std::string & text) {
+    int64_t count = 0; for (unsigned char c : text) if ((c & 0xC0) != 0x80) ++count; return count;
+}
+
+inline bool lyric_token_ends(const BPETokenizer * tok, const std::vector<int> & ids,
+                             size_t begin, std::vector<int64_t> * ends, std::string * e) {
+    std::string byte2str[256]; build_byte_encoder(byte2str);
+    std::unordered_map<std::string, uint8_t> byte_of;
+    for (int i = 0; i < 256; ++i) byte_of[byte2str[i]] = static_cast<uint8_t>(i);
+    int64_t cp = 0; ends->clear();
+    for (size_t i = begin; i < ids.size(); ++i) {
+        if (ids[i] < 0 || static_cast<size_t>(ids[i]) >= tok->id_to_str.size()) return fail(e, "tokenizer produced an invalid lyric token");
+        const std::string & token = tok->id_to_str[static_cast<size_t>(ids[i])];
+        for (size_t p = 0; p < token.size();) {
+            int adv = 1; utf8_codepoint(token.c_str() + p, &adv);
+            auto it = byte_of.find(token.substr(p, static_cast<size_t>(adv)));
+            if (it != byte_of.end() && ((it->second & 0xC0u) != 0x80u)) ++cp;
+            p += static_cast<size_t>(adv);
+        }
+        ends->push_back(cp);
+    }
+    return true;
+}
+
+inline bool tokenizer_hash(const std::filesystem::path & path, sha256::digest * out, std::string * e) {
+    if (std::filesystem::is_regular_file(path)) return sha256::file(path, *out, e);
+    std::vector<uint8_t> vocab, merges;
+    if (!prepare_detail::read_file(path / "vocab.json", &vocab, e) ||
+        !prepare_detail::read_file(path / "merges.txt", &merges, e)) return false;
+    std::vector<uint8_t> joined; joined.reserve(vocab.size() + merges.size());
+    joined.insert(joined.end(), vocab.begin(), vocab.end()); joined.insert(joined.end(), merges.begin(), merges.end());
+    *out = sha256::bytes(joined.data(), joined.size()); return true;
 }
 
 } // namespace detail
@@ -117,6 +176,8 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
     if (!loaded) return fail(error, "cannot load YuE2 BPE tokenizer from GGUF or vocab.json/merges.txt");
 
     const auto base = request.legacy_manifest.parent_path();
+    sha256::digest tokenizer_digest;
+    if (!tokenizer_hash(request.tokenizer_gguf_or_dir, &tokenizer_digest, error)) return false;
     std::vector<VerifiedNativeItem> items;
     size_t i = 0, max = 0; yyjson_val * source = nullptr;
     yyjson_arr_foreach(sources, i, max, source) {
@@ -159,9 +220,61 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         for (const int id : abc_ids) if (id < 0 || id >= YUE2_EOD) return fail(error, "ABC BPE ID is outside the ordinary YuE2 vocabulary");
         off.resize(off.size() - 2); // PromptInput prefixes end at ABC_START.
         VerifiedNativeItem item; item.id = id; item.latent_file = latent; item.semantic_file = semantic; item.frames = n;
+        item.prompt_style = style; item.prompt_lyrics = lyrics; item.instrumental = lyrics.empty();
+        if (request.lyric_timing && lyrics.empty()) {
+            item.prompt.cursor.present = true;
+            item.prompt.cursor.enabled = false;
+            item.prompt.cursor.instrumental = true;
+        }
         item.prompt.retained_prefix_ids.assign(full.begin(), full.end());
         item.prompt.dropped_prefix_ids.assign(off.begin(), off.end());
         item.prompt.abc_ids.assign(abc_ids.begin(), abc_ids.end()); item.prompt.retain_abc = true;
+        item.prompt_style = style; item.prompt_lyrics = lyrics; item.instrumental = lyrics.empty();
+        std::string cursor_name;
+        const yyjson_val * cursor_value = yyjson_obj_get(source, "cursor_words");
+        if (cursor_value && !str(const_cast<yyjson_val *>(cursor_value), &cursor_name, true))
+            return fail(error, "source cursor_words must be a manifest-relative path");
+        if (request.lyric_timing && !lyrics.empty() && cursor_name.empty())
+            return fail(error, "--lyric-timing requires cursor_words for every lyrical source");
+        if (request.lyric_timing && !cursor_name.empty()) {
+            if (lyrics.empty()) return fail(error, "cursor_words is invalid for an instrumental source");
+            std::filesystem::path cursor_path;
+            if (!safe_rel(base, cursor_name, &cursor_path, error)) return false;
+            auto & cm = item.prompt.cursor;
+            cm.present = true; cm.enabled = request.lyric_timing; cm.instrumental = false;
+            cm.lyric_codepoints = utf8_codepoints(lyrics);
+            if (!read_words5(cursor_path, cm.lyric_codepoints, &cm.words5, error)) return false;
+            const std::string full_text = std::string(yue2_instruction(YUE2_COT_FULL)) + "\n[Tags]\n" + style + "\n[Lyrics]\n" + lyrics;
+            const std::string off_text = std::string(yue2_instruction(YUE2_COT_OFF)) + "\n[Tags]\n" + style + "\n[Lyrics]\n" + lyrics;
+            const auto full_head = yue2_bpe_encode(&tokenizer, std::string(yue2_instruction(YUE2_COT_FULL)) + "\n[Tags]\n" + style + "\n[Lyrics]\n");
+            const auto off_head = yue2_bpe_encode(&tokenizer, std::string(yue2_instruction(YUE2_COT_OFF)) + "\n[Tags]\n" + style + "\n[Lyrics]\n");
+            const auto full_ids = yue2_bpe_encode(&tokenizer, full_text);
+            const auto off_ids = yue2_bpe_encode(&tokenizer, off_text);
+            auto prefix_matches = [](const std::vector<int32_t> & prefix, const std::vector<int> & ids) {
+                if (prefix.size() < ids.size() + 1) return false;
+                for (size_t k = 0; k < ids.size(); ++k) if (prefix[k + 1] != ids[k]) return false;
+                return true;
+            };
+            if (!prefix_matches(item.prompt.retained_prefix_ids, full_ids) ||
+                !prefix_matches(item.prompt.dropped_prefix_ids, off_ids))
+                return fail(error, "cursor prefix does not match normalized tokenizer text");
+            if (!lyric_token_ends(&tokenizer, full_ids, full_head.size(), &cm.full_lyric_token_end_codepoints, error) ||
+                !lyric_token_ends(&tokenizer, off_ids, off_head.size(), &cm.off_lyric_token_end_codepoints, error)) return false;
+            if (!bind_cursor_targets(item.prompt.retained_prefix_ids, static_cast<int64_t>(full_head.size()),
+                                     cm.full_lyric_token_end_codepoints, cm.lyric_codepoints, n, cm.words5, &cm.full) ||
+                !bind_cursor_targets(item.prompt.dropped_prefix_ids, static_cast<int64_t>(off_head.size()),
+                                     cm.off_lyric_token_end_codepoints, cm.lyric_codepoints, n, cm.words5, &cm.off))
+                return fail(error, cm.full.why.empty() ? cm.off.why.c_str() : cm.full.why.c_str());
+            cm.lyrics_sha256 = sha256::bytes(reinterpret_cast<const uint8_t *>(lyrics.data()), lyrics.size()).hex();
+            cm.tokenizer_sha256 = tokenizer_digest.hex(); cm.full_head_tokens = static_cast<int64_t>(full_head.size());
+            cm.off_head_tokens = static_cast<int64_t>(off_head.size()); cm.j0_full = cm.full.j0; cm.j0_off = cm.off.j0; cm.L = cm.full.L;
+            if (cm.off.L != cm.L) return fail(error, "cursor full/off token geometry differs");
+            for (size_t wi = 0; wi < cm.words5.size() / 5; ++wi)
+                if (cm.words5[wi * 5 + 1] > static_cast<float>(n) / 25.0f + 1.0f / 25.0f)
+                    return fail(error, "cursor_words extends beyond the source frame duration");
+            cursor_ranges(cm.full, &cm.full_frame_ranges); cursor_ranges(cm.off, &cm.off_frame_ranges);
+            cm.full.T.clear(); cm.off.T.clear();
+        }
         items.push_back(std::move(item));
     }
 
@@ -196,6 +309,6 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
 // CLI proposal:
 // ace-train yue2-prepare-aitk --legacy-manifest yue2_preprocess.json
 //   --checkpoint rawConvRot.safetensors --tokenizer vocab-or-gguf
-//   --model role=path ... --output fresh-dir
+//   --model role=path ... --output fresh-dir [--lyric-timing 0|1]
 
 } // namespace yue2_aitk_native_import

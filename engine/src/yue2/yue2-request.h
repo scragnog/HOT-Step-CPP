@@ -26,6 +26,7 @@
 #include "yyjson.h"
 
 #include <cstdint>
+#include <cmath>
 #include <random>
 #include <string>
 
@@ -42,6 +43,9 @@ struct Yue2Request {
 
     uint64_t seed         = 0;
     bool     seed_present = false;
+    // Training previews only: 0 retains the model's normal semantic limit.
+    // This bounds work rather than trimming a full-song render afterward.
+    int preview_max_frames = 0;
 
     float cfg_scale         = 0.0f;  // resolved by yue2_request_resolve_defaults if not present
     bool  cfg_scale_present = false;
@@ -204,6 +208,17 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
     }
     if (present) {
         out->ode_steps = (int) num;
+    }
+
+    if (!yue2_req_num(root, "preview_max_frames", &num, &present, err)) {
+        yyjson_doc_free(doc); return false;
+    }
+    if (present) {
+        if (!std::isfinite(num) || num < 0 || num > 9000 || std::floor(num) != num) {
+            if (err) *err = "preview_max_frames must be an integer in [0,9000]";
+            yyjson_doc_free(doc); return false;
+        }
+        out->preview_max_frames = static_cast<int>(num);
     }
 
     // Ending controls (see the struct). Range-checked here so a typo is a

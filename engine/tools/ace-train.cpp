@@ -6350,6 +6350,10 @@ static int cmd_yue2_prepare_aitk(int argc, char ** argv) {
         else if (arg == "--checkpoint") request.raw_convrot_checkpoint = value;
         else if (arg == "--tokenizer") request.tokenizer_gguf_or_dir = value;
         else if (arg == "--output") request.output_dir = value;
+        else if (arg == "--lyric-timing") {
+            if (raw != "0" && raw != "1") { usage(); return 2; }
+            request.lyric_timing = raw == "1";
+        }
         else if (arg == "--model") {
             const auto split = raw.find('=');
             if (split == std::string::npos || split == 0 || split + 1 == raw.size()) { usage(); return 2; }
@@ -6510,3 +6514,4 @@ int main(int argc, char ** argv) {
     print_usage();
     return 2;
 }
+

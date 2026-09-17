@@ -5,17 +5,21 @@
 #include "yue2-aitk-head-loss.h"
 #include "yue2-aitk-optimizer.h"
 #include "yue2-aitk-batch.h"
+#include "yue2-aitk-cursor-loss.h"
 
 // One explicit, deterministic joint update. The runner supplies sampled noise,
 // timestep and target so this seam can be compared without conflating RNGs.
 // No prefix is retained across calls, and neither expert updates before both
 // objectives have supplied all adapter gradients.
 namespace yue2_aitk_joint {
-struct Metrics { double ar_ce=0, ar_kl=0, nar_mse=0, gradient_norm=0; int step=0; };
+struct Metrics { double ar_ce=0, ar_kl=0, nar_mse=0, gradient_norm=0, cursor_ce=0; size_t cursor_frames=0; int step=0; };
 struct Input {
     const yue2_aitk::Batch * batch=nullptr;
     std::vector<float> noisy_latents, flow_target; // [crop frames,64]
     float timestep=0; // reference normalized BF16-valued timestep
+    float cursor_weight=0;
+    int64_t lyric_start=0, lyric_count=0;
+    std::vector<std::pair<int32_t,int32_t>> cursor_frames;
 };
 using Progress=std::function<void(const char *)>;
 inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
@@ -39,6 +43,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
         return fail(error,"invalid AR prediction position or target");
     const auto notify=[&](const char * stage){if(progress)progress(stage);};
     Metrics result;
+    state.clear_cursor_gradient();
     notify("AR adapted forward");
     Yue2AitkEndpointHost embeds;
     if(!Yue2AitkEndpoints::token_embedding(backend,model,batch.ar.input_ids.data(),batch.ar.input_ids.size(),&embeds,error)) return false;
@@ -73,6 +78,24 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     notify("AR transformer backward");
     for(size_t i=0;i<N;++i) for(size_t d=0;d<H;++d)
         zeros[batch.ar.prediction_positions[i]*H+d]=ggml_bf16_to_fp32(ggml_bf16_t{selected_grad[i*H+d]});
+    if(input.cursor_weight>0 && !input.cursor_frames.empty()) {
+        size_t audio_index=0;
+        while(audio_index<N && (batch.ar.target_ids[audio_index]<yue2_aitk::kCodecOffset ||
+              batch.ar.target_ids[audio_index]>=yue2_aitk::kCodecOffset+32768)) ++audio_index;
+        if(audio_index==N || input.cursor_frames.size()>N-audio_index) return fail(error,"cursor audio positions are missing");
+        for(size_t frame=0;frame<input.cursor_frames.size();++frame)
+            if(batch.ar.target_ids[audio_index+frame]<yue2_aitk::kCodecOffset ||
+               batch.ar.target_ids[audio_index+frame]>=yue2_aitk::kCodecOffset+32768)
+                return fail(error,"cursor target is not a semantic audio frame");
+        yue2_aitk_cursor_loss::Request cursor;
+        cursor.backend=backend; cursor.head=state.cursor_head(); cursor.head_gradient=state.cursor_gradient();
+        cursor.hidden=&adapted_norm.values; cursor.hidden_gradient=&zeros; cursor.sequence=ar.length;
+        cursor.lyric_start=input.lyric_start; cursor.lyric_count=input.lyric_count;
+        cursor.audio_start=batch.ar.prediction_positions[audio_index]; cursor.frame_tokens=&input.cursor_frames;
+        cursor.weight=input.cursor_weight;
+        if(!yue2_aitk_cursor_loss::compute(cursor,&result.cursor_ce,error))return false;
+        result.cursor_frames=input.cursor_frames.size();
+    }
     if(!Yue2AitkEndpoints::ar_final_norm(backend,model,ar.final_hidden.data(),zeros.data(),ar.length,&adapted_norm,error)) return false;
     if(!yue2_aitk_stack::backward(backend,model,state.ar_adapters(),ar,nullptr,std::move(adapted_norm.dx),
         [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(false,int(layer),g,why);},error)) return false;

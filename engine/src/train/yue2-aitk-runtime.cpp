@@ -45,22 +45,29 @@ std::string lower_hash(std::string value) {
 struct ResumePlan { yue2_aitk::ResumeRecord record; std::vector<size_t> order; size_t cursor = 0; int completed = 0; std::string sampler; };
 bool str_field(yyjson_val * v, std::string * out) { if (!yyjson_is_str(v) || yyjson_get_len(v) != std::strlen(yyjson_get_str(v))) return false; out->assign(yyjson_get_str(v), yyjson_get_len(v)); return true; }
 bool parse_resume_meta(const std::string & text, const std::string & checkpoint, const std::string & dataset, const std::string & source,
-                       uint64_t seed, int cuda_index, size_t item_count, ResumePlan * plan, std::string * error) {
+                       uint64_t seed, int cuda_index, size_t item_count, ResumePlan * plan, std::string * error,
+                       float * cursor_weight, bool cursor_explicit) {
     yyjson_doc * doc = yyjson_read(text.data(), text.size(), 0); if (!doc) return fail(error, "resume metadata is invalid JSON");
     struct Guard { yyjson_doc * d; ~Guard() { yyjson_doc_free(d); } } guard{doc}; yyjson_val * root = yyjson_doc_get_root(doc);
     if (!yyjson_is_obj(root) || !yue2_aitk::dataset_detail::unique_keys(root)) return fail(error, "resume metadata object is malformed");
+    auto * cursor_value=yyjson_obj_get(root,"cursor_weight");
+    const float saved_cursor=cursor_value?float(yyjson_get_num(cursor_value)):0.0f;
+    if((cursor_value&&!yyjson_is_num(cursor_value)) || !std::isfinite(saved_cursor) || saved_cursor<0 || saved_cursor>10 ||
+       (cursor_explicit&&*cursor_weight!=saved_cursor)) return fail(error,"resume lyric timing configuration mismatch");
+    *cursor_weight=saved_cursor;
     std::string recipe, cp, ds, sm, sampler;
     yyjson_val * vrecipe=yyjson_obj_get(root,"recipe"), *vcp=yyjson_obj_get(root,"checkpoint_sha256"), *vds=yyjson_obj_get(root,"dataset_sha256"), *vsm=yyjson_obj_get(root,"source_manifest_sha256"), *vseed=yyjson_obj_get(root,"seed"), *vdev=yyjson_obj_get(root,"cuda_index"), *vstep=yyjson_obj_get(root,"completed_step"), *vcursor=yyjson_obj_get(root,"order_cursor"), *vorder=yyjson_obj_get(root,"order"), *vsampler=yyjson_obj_get(root,"sampler_state");
     if (!str_field(vrecipe,&recipe) || recipe!="yue2-aitk-runtime-v1" || !str_field(vcp,&cp) || cp!=checkpoint || !str_field(vds,&ds) || ds!=dataset || !str_field(vsm,&sm) || sm!=source || !yyjson_is_uint(vseed) || yyjson_get_uint(vseed)!=seed || !yyjson_is_int(vdev) || yyjson_get_sint(vdev)!=cuda_index || !yyjson_is_int(vstep) || yyjson_get_sint(vstep)<0 || yyjson_get_sint(vstep)>INT_MAX || !yyjson_is_uint(vcursor) || !yyjson_is_arr(vorder) || yyjson_arr_size(vorder)!=item_count || !str_field(vsampler,&sampler)) return fail(error,"resume metadata binding mismatch");
     plan->completed=static_cast<int>(yyjson_get_sint(vstep)); plan->cursor=static_cast<size_t>(yyjson_get_uint(vcursor)); plan->sampler=std::move(sampler); plan->order.clear(); std::unordered_set<size_t> seen; size_t i=0,max=0; yyjson_val * x=nullptr; yyjson_arr_foreach(vorder,i,max,x) { if(!yyjson_is_uint(x) || yyjson_get_uint(x)>=item_count || !seen.insert(static_cast<size_t>(yyjson_get_uint(x))).second) return fail(error,"resume order is not a permutation"); plan->order.push_back(static_cast<size_t>(yyjson_get_uint(x))); }
     if (plan->cursor>item_count || plan->completed<0) return fail(error,"resume cursor is out of range"); return true;
 }
-std::string make_resume_meta(const std::string & cp, const std::string & ds, const std::string & sm, uint64_t seed, int device, int completed, size_t cursor, const std::vector<size_t> & order, const std::string & sampler) {
+std::string make_resume_meta(const std::string & cp, const std::string & ds, const std::string & sm, uint64_t seed, int device, int completed, size_t cursor, const std::vector<size_t> & order, const std::string & sampler, float cursor_weight) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
     if (!root || !arr) { yyjson_mut_doc_free(doc); return {}; }
     yyjson_mut_doc_set_root(doc,root);
+    if(cursor_weight>0) yyjson_mut_obj_add_real(doc,root,"cursor_weight",cursor_weight);
     yyjson_mut_obj_add_strcpy(doc,root,"recipe","yue2-aitk-runtime-v1"); yyjson_mut_obj_add_strcpy(doc,root,"checkpoint_sha256",cp.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"dataset_sha256",ds.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"source_manifest_sha256",sm.c_str()); yyjson_mut_obj_add_uint(doc,root,"seed",seed); yyjson_mut_obj_add_int(doc,root,"cuda_index",device); yyjson_mut_obj_add_int(doc,root,"completed_step",completed); yyjson_mut_obj_add_uint(doc,root,"order_cursor",cursor); for(size_t x:order) yyjson_mut_arr_add_uint(doc,arr,x); yyjson_mut_obj_add_val(doc,root,"order",arr); yyjson_mut_obj_add_strcpy(doc,root,"sampler_state",sampler.c_str()); size_t n=0; char * raw=yyjson_mut_write(doc,0,&n); std::string out=raw?std::string(raw,n):std::string(); std::free(raw); yyjson_mut_doc_free(doc); return out;
 }
 }
@@ -89,15 +96,30 @@ static int run_impl(const Config & config, std::string * error) {
     yue2_aitk::Yue2NativeSampler sampler(config.seed);
     std::vector<size_t> order(dataset.items.size()); std::iota(order.begin(), order.end(), 0);
     size_t cursor = 0; int completed = 0;
+    float cursor_weight=config.cursor_weight;
+    if(!std::isfinite(cursor_weight)||cursor_weight<0||cursor_weight>10) { fail(error,"invalid lyric timing weight"); return 1; }
     ResumePlan resume_plan;
     if (!config.resume.empty()) {
         if (!yue2_aitk::yue2_aitk_read_resume(config.resume.c_str(), &resume_plan.record)) { fail(error, "cannot read resume record"); return 1; }
-        if (!parse_resume_meta(resume_plan.record.runner_metadata, checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, dataset.items.size(), &resume_plan, error)) return 1;
+        if (!parse_resume_meta(resume_plan.record.runner_metadata, checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, dataset.items.size(), &resume_plan, error,&cursor_weight,config.cursor_weight_explicit)) return 1;
         if (resume_plan.completed > config.steps || resume_plan.completed > INT_MAX || resume_plan.record.state.step != resume_plan.completed) { fail(error, "resume completed step is invalid"); return 1; }
         if (resume_plan.cursor >= dataset.items.size()) { fail(error, "resume order cursor is out of range"); return 1; }
         if (!sampler.import_rng_state(resume_plan.sampler)) { fail(error, "resume sampler state is invalid"); return 1; }
         order = resume_plan.order; cursor = resume_plan.cursor; completed = resume_plan.completed;
     } else { sampler.rng().shuffle(order); }
+    if(cursor_weight>0) for(const auto & item:dataset.items) {
+        const auto & binding=item.prompt.cursor;
+        if(!binding.present || (!binding.instrumental && (!binding.enabled ||
+           (binding.L<=0 || binding.full_frame_ranges.size()!=item.song.semantic_tokens.size() ||
+            binding.off_frame_ranges.size()!=item.song.semantic_tokens.size())))) {
+            if(error)*error="lyric timing requires valid alignment for track "+item.id+"; prepare with alignment or use --cursor-weight 0";
+            return 1;
+        }
+    }
+    if (config.pause_at < 0 || config.pause_at > config.steps ||
+        (config.pause_at > 0 && config.pause_at <= completed)) {
+        fail(error, "pause boundary must be after the resumed step and within total steps"); return 1;
+    }
 #ifdef _WIN32
     if (_putenv_s("NVIDIA_TF32_OVERRIDE", "0") != 0) { fail(error, "cannot set NVIDIA_TF32_OVERRIDE=0"); return 1; }
 #else
@@ -116,7 +138,7 @@ static int run_impl(const Config & config, std::string * error) {
     try {
         event("load"); Yue2AitkModel model; Yue2AitkTrainState state;
         if (!model.load(config.checkpoint.c_str(), backend.value, yue2_aitk_load_embedding_bf16, error) ||
-            !state.initialize(backend.value, static_cast<uint32_t>(config.seed), error)) return 1;
+            !state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0)) return 1;
         std::vector<yue2_aitk::ParameterSpec> specs;
         for (const auto & p : state.named_tensors()) specs.push_back({p.name, p.parameter, p.gradient});
         yue2_aitk::Optimizer optimizer(backend.value, config.cuda_index, std::move(specs));
@@ -138,7 +160,7 @@ static int run_impl(const Config & config, std::string * error) {
             const auto adapter = temp_dir / "adapter.safetensors"; const auto resume = temp_dir / "optimizer.resume";
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
-            const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state);
+            const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state,cursor_weight);
             if (metadata.empty() || !state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str()) || !yue2_aitk::yue2_aitk_write_resume(resume.u8string().c_str(), optimizer.capture(), metadata)) return false;
             std::filesystem::rename(temp_dir, final_dir, save_ec);
             if (!save_ec) { last_saved=step; event("checkpoint", step); }
@@ -154,6 +176,15 @@ static int run_impl(const Config & config, std::string * error) {
             auto sampled = sampler.sample(item.song, item.prompt, 1500, schedule, 0.5f, 0, 999);
             yue2_aitk_joint::Input input; input.batch = &sampled.batch; input.noisy_latents = sampled.noisy_bf16;
             input.flow_target = sampled.target_f32; input.timestep = sampled.timestep_bf16;
+            if(cursor_weight>0 && !item.prompt.cursor.instrumental) {
+                const auto & binding=item.prompt.cursor;
+                input.cursor_weight=cursor_weight;
+                input.lyric_start=sampled.abc_retained?binding.j0_full:binding.j0_off;
+                input.lyric_count=binding.L;
+                const auto & ranges=sampled.abc_retained?binding.full_frame_ranges:binding.off_frame_ranges;
+                input.cursor_frames.reserve(ranges.size());
+                for(const auto & range:ranges) input.cursor_frames.emplace_back(range.first,range.last);
+            }
             yue2_aitk_joint::Metrics metrics;
             using Clock = std::chrono::steady_clock;
             const auto step_start = Clock::now();
@@ -178,6 +209,8 @@ static int run_impl(const Config & config, std::string * error) {
             line << std::setprecision(17) << "{\"stage\":\"joint\",\"step\":" << metrics.step
                    << ",\"ar_ce\":" << metrics.ar_ce << ",\"ar_kl\":" << metrics.ar_kl
                    << ",\"nar_mse\":" << metrics.nar_mse << ",\"gradient_norm\":" << metrics.gradient_norm
+                   << ",\"cursor_ce\":" << metrics.cursor_ce << ",\"cursor_weight\":" << cursor_weight
+                   << ",\"cursor_frames\":" << metrics.cursor_frames
                    << ",\"step_ms\":" << step_ms
                    << ",\"attention_forward\":\"" << (attention_precision?attention_precision(0):"unknown")
                    << "\",\"attention_backward\":\"" << (attention_precision?attention_precision(1):"unknown")
@@ -192,6 +225,11 @@ static int run_impl(const Config & config, std::string * error) {
             if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
             if (completed % config.save_every == 0 || completed == config.steps)
                 if (!save_checkpoint(completed)) { fail(error, "checkpoint publication failed"); return 1; }
+            if (config.pause_at > 0 && completed >= config.pause_at && completed < config.steps) {
+                if (!save_checkpoint(completed)) { fail(error, "pause checkpoint publication failed"); return 1; }
+                event("paused", completed);
+                return 0;
+            }
         }
         if (completed > 0 && !save_checkpoint(completed)) { fail(error, "final checkpoint publication failed"); return 1; }
         event("done", completed); return yue2_aitk_cancel_requested() ? 130 : 0;
@@ -206,3 +244,4 @@ int yue2_aitk_run(const Config & config, std::string * error) {
     }
 }
 } // namespace yue2_aitk_runtime
+

@@ -11,6 +11,7 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include "yue2-aitk-cursor-data.h"
 
 namespace yue2_aitk {
 
@@ -35,6 +36,9 @@ struct SongInput {
     std::vector<int32_t> semantic_tokens;
     std::vector<float> latents;
     size_t latent_channels = kLatentChannels;
+    std::string style;
+    std::string lyrics;
+    bool instrumental = false;
 };
 
 struct PromptInput {
@@ -45,6 +49,9 @@ struct PromptInput {
     std::vector<int32_t> dropped_prefix_ids;
     std::vector<int32_t> abc_ids;
     bool retain_abc = true; // stochastic decision is made by the caller
+    // Optional exact cursor binding.  When absent, schema-1 training has no
+    // cursor term and keeps the historical behavior.
+    CursorMetadata cursor;
 };
 
 struct ArSequence {

@@ -11,6 +11,8 @@
 #include <string>
 #include <utility>
 #include <unordered_set>
+#include <cstdlib>
+#include <cmath>
 
 namespace yue2_aitk_runtime {
 
@@ -21,6 +23,9 @@ struct Config {
     std::string resume;
     std::int32_t steps = 0;
     std::int32_t save_every = 250;
+    std::int32_t pause_at = 0; // absolute step; 0 disables preview pauses
+    float cursor_weight = 0.08f;
+    bool cursor_weight_explicit = false;
     std::uint64_t seed = 0;
     std::int32_t cuda_index = 0;
     bool jsonl = true;
@@ -32,7 +37,8 @@ inline void usage(FILE * out) {
     std::fprintf(out,
         "ace-train yue2-joint-train --checkpoint <ConvRot.safetensors> "
         "--dataset <schema1-manifest.json> --output <new-run-dir> "
-        "--steps N --save-every N --seed N --device CUDA0 [--resume <record>]\n");
+        "--steps N --save-every N --seed N --device CUDA0 [--resume <record>] [--pause-at N] "
+        "[--cursor-weight 0.08 (0 disables lyric timing)]\n");
 }
 
 namespace detail {
@@ -107,6 +113,16 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--save-every")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_i32(value_text.c_str(), &parsed.save_every)) { if (error) *error = "--save-every must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--cursor-weight")) {
+            std::string text; if(!detail::value(arg,argc,argv,&i,&text,error))return ParseResult::error;
+            char * end=nullptr; const float weight=std::strtof(text.c_str(),&end);
+            if(end==text.c_str() || *end || !std::isfinite(weight) || weight<0 || weight>10) {
+                if(error)*error="--cursor-weight must be finite and within [0,10]"; return ParseResult::error;
+            }
+            parsed.cursor_weight=weight; parsed.cursor_weight_explicit=true;
+        } else if (!std::strcmp(arg, "--pause-at")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::decimal_i32(value_text.c_str(), &parsed.pause_at)) { if (error) *error = "--pause-at must be a nonnegative integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--seed")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_u64(value_text.c_str(), &parsed.seed)) { if (error) *error = "--seed must be an unsigned decimal integer"; return ParseResult::error; }
@@ -119,7 +135,7 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         }
     }
     if (parsed.checkpoint.empty() || parsed.dataset.empty() || parsed.output.empty() ||
-        parsed.steps <= 0 || parsed.save_every <= 0) {
+        parsed.steps <= 0 || parsed.save_every <= 0 || parsed.pause_at > parsed.steps) {
         if (error) *error = "--checkpoint, --dataset, --output, --steps > 0, and --save-every > 0 are required";
         return ParseResult::error;
     }
