@@ -6,6 +6,8 @@ import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { TrainingChart } from './TrainingChart';
 import {
   cancelJob,
+  clearPreparedData,
+  getPreparedData,
   getJob,
   getYue2AitkPrepare,
   listYue2AitkRuns,
@@ -25,6 +27,7 @@ import {
   type Yue2JointPreviewOptions,
   type Yue2JointPreviewRecord,
   type Yue2OptimOptions,
+  type PreparedCache,
 } from '../../services/trainingApi';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
@@ -146,6 +149,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const selectModels = useBackendStore(s => s.selectModels);
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
   const [aitkRuns, setAitkRuns] = useState<Yue2AitkRunRecord[]>([]);
+  const [resumeChoice, setResumeChoice] = useState('');
+  const [clearing, setClearing] = useState(false);
+  const [cacheInfo, setCacheInfo] = useState<{ slug: string; caches: PreparedCache[]; busy: boolean } | null>(null);
+  const [clearNote, setClearNote] = useState('');
   const [selectedCheckpoint, setSelectedCheckpoint] = useState('');
   const [applyingCheckpoint, setApplyingCheckpoint] = useState(false);
   const [applyNote, setApplyNote] = useState('');
@@ -168,6 +175,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setPrepare(previous => ({ ...previous, legacyManifest }));
     }
   }, [legacyManifest, prepare.legacyManifest]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getPreparedData(datasetId).then(value => { if (!cancelled) setCacheInfo(value); })
+      .catch(() => { if (!cancelled) setCacheInfo(null); });
+    return () => { cancelled = true; };
+  }, [datasetId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -276,6 +290,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   useEffect(() => {
     setForm(readStoredForm(datasetId));
+    setResumeChoice('');
     setPrepare(readStored<PrepareForm>(`${PREP_KEY}${datasetId}`, {
       legacyManifest: legacyManifest ?? '', checkpoint: '', tokenizer: '', output: '',
       models: { vae: '', semantic: '', sheetsage: '' },
@@ -416,12 +431,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const timingWeight = lyricTiming
         ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08)
         : 0;
+      const [resumeRunId, resumeStepText] = resumeChoice.split('|');
+      const selectedResume = resumeRunId && resumeStepText ? { resumeRunId, resumeStep: Number(resumeStepText) } : {};
       const request = { ...form, lyricTiming, alignmentEnabled: lyricTiming, cursorWeight: timingWeight,
-        autoPrepare: !form.resume?.trim(), preparation: prepare,
+        autoPrepare: !resumeChoice && !form.resume?.trim(), preparation: prepare,
         checkpoint: '', output: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
           everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 40)) * 25 } } : {}),
-        ...(form.resume?.trim() ? { resume: form.resume.trim() } : {}) };
+        ...(form.resume?.trim() && !resumeChoice ? { resume: form.resume.trim() } : {}),
+        ...selectedResume };
       const result = await startYue2JointTrain(datasetId, request);
       if (typeof window !== 'undefined') window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(result.jobId));
       setJob(await getJob(result.jobId));
@@ -489,6 +507,39 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       ? t('trainingStudio.yue2.method.checkpointApplied', 'AR and NAR adapters applied for the next generation.')
       : t('trainingStudio.yue2.method.checkpointApplyFailed', 'Could not apply this checkpoint. The previous model selection is still active.'));
   };
+  const selectResume = (value: string) => {
+    setResumeChoice(value);
+    if (!value) { setForm(previous => ({ ...previous, resume: '', dataset: '' })); return; }
+    const [jobId, stepText] = value.split('|');
+    const source = aitkRuns.find(item => item.jobId === jobId);
+    const step = Number(stepText);
+    if (!source) return;
+    const saved = source.options as Partial<Yue2JointTrainRequest> & { alignment?: { enabled?: boolean; cursorWeight?: number } };
+    setForm(previous => ({ ...previous, ...saved, trainingMethod: 'aitk',
+      checkpoint: '', output: '', resume: '',
+      steps: Math.max(previous.steps, step + 400), saveEvery: saved.saveEvery ?? previous.saveEvery,
+      dataset: typeof saved.dataset === 'string' ? saved.dataset : '',
+      lyricTiming: saved.alignment?.enabled ?? previous.lyricTiming,
+      cursorWeight: saved.alignment?.cursorWeight ?? previous.cursorWeight }));
+    if (saved.alignment) onLyricTimingChange(saved.alignment.enabled === true);
+  };
+  const clearCaches = async () => {
+    if (!cacheInfo || clearing) return;
+    const summary = cacheInfo.caches.map(item => `${item.name}: ${item.files} files, ${(item.bytes / 1048576).toFixed(1)} MiB`).join('\n');
+    if (!window.confirm(`Clear all prepared data for ${cacheInfo.slug}?\n\n${summary || 'No generated caches found.'}\n\nSource tracks, sidecars, labels and adapters will remain.`)) return;
+    setClearing(true); setClearNote('');
+    try {
+      await clearPreparedData(datasetId, cacheInfo.slug);
+      setResumeChoice('');
+      setForm(previous => ({ ...previous, resume: '', dataset: '' }));
+      window.localStorage.removeItem(`${PREP_KEY}${datasetId}:manifest`);
+      window.localStorage.removeItem(`${PREP_KEY}${datasetId}:applied`);
+      window.location.reload();
+    } catch (err) {
+      setClearNote(err instanceof Error ? err.message : String(err));
+      void getPreparedData(datasetId).then(setCacheInfo).catch(() => {});
+    } finally { setClearing(false); }
+  };
   const linkCheckpointPreset = async () => {
     if (!selectedCheckpoint) return;
     setLinkingPreset(true);
@@ -510,7 +561,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void) => (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
-      <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={active || starting || preparing || yue2RunAllActive}
+      <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={(!!resumeChoice && ['seed', 'device', 'rank', 'alpha', 'saveEvery', 'cursorWeight'].includes(key)) || active || starting || preparing || yue2RunAllActive}
         onChange={event => update ? update(event.target.value) : set(key as keyof Yue2JointTrainRequest, type === 'number' ? Number(event.target.value) : event.target.value as never)} />
     </label>
   );
@@ -524,7 +575,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {t('trainingStudio.yue2.method.autoTrainHint', 'Start training prepares the dataset automatically, then trains AR and NAR together. Unchanged prepared data is reused.')}
       </p>
       <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
-        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={lyricTiming} disabled={active || preparing || starting || yue2RunAllActive}
+        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={lyricTiming} disabled={!!resumeChoice || active || preparing || starting || yue2RunAllActive}
           onChange={event => onLyricTimingChange(event.target.checked)} />
         <span>
           <span className="font-semibold">{t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}</span>
@@ -534,6 +585,26 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </span>
       </label>
       {lyricTiming && !cursorReady && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.lyricTimingNeedsAlignment', 'Run vocal stems and lyric alignment below before starting with timing supervision enabled.')}</p>}
+      <label className="mt-4 flex flex-col gap-1">
+        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Resume a previous run</span>
+        <select className={input} value={resumeChoice} disabled={active || preparing || starting || yue2RunAllActive}
+          onChange={event => selectResume(event.target.value)}>
+          <option value="">Start a new run</option>
+          {aitkRuns.map(run => run.checkpoints.filter(checkpoint => !!checkpoint.optimizerPath).map(checkpoint => (
+            <option key={`${run.jobId}|${checkpoint.step}`} value={`${run.jobId}|${checkpoint.step}`}
+              disabled={!!run.resumeError || run.live}>
+              {new Date(run.createdAt).toLocaleString()} · step {checkpoint.step} · {run.status}
+              {run.resumeError ? ` — ${run.resumeError}` : ''}{run.live ? ' — running' : ''}
+            </option>
+          )))}
+          {aitkRuns.filter(run => !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)).map(run => (
+            <option key={run.jobId} disabled value={`unavailable:${run.jobId}`}>
+              {new Date(run.createdAt).toLocaleString()} · {run.resumeError || 'No saved optimizer checkpoint'}
+            </option>
+          ))}
+        </select>
+      </label>
+      {resumeChoice && <p className="mt-1 text-[11px] text-zinc-500">The server restores the original dataset, base, optimizer and adapter settings. Set Steps to the total step you want to reach.</p>}
       <details className="mt-4 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.autoPrepareAdvanced', 'Advanced: dataset preparation and model paths')}</summary>
         <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.method.autoPrepareHint', 'Preparation runs automatically at the start of training. These controls are only needed for custom paths, manual preparation or resuming a run.')}</p>
@@ -562,7 +633,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {prepareJob?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{prepareJob.error}</div>}
       </details>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-        {field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume')}
+        {!resumeChoice && <details className="md:col-span-2"><summary className="cursor-pointer text-[11px] text-zinc-500">Manual resume path</summary>{field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume')}</details>}
         <label className="flex flex-col gap-1">
           <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.stopMode', 'Train until')}</span>
           <select className={input} value={form.stopMode ?? 'steps'} disabled={active || starting || preparing || yue2RunAllActive}
@@ -584,7 +655,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       </div>
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
-        <Yue2OptimizerFields value={optimValue} onChange={patch => setForm(previous => ({ ...previous, ...patch }))} />
+        {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
+          : <Yue2OptimizerFields value={optimValue} onChange={patch => setForm(previous => ({ ...previous, ...patch }))} />}
       </div>
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         <div className="flex flex-col gap-1">
@@ -648,10 +720,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       </details>
       <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.hardware', 'Joint training requires a CUDA build and an NVIDIA GPU with BF16 support (Ampere or newer).')}</p>
       <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.autoOutput', 'Adapters are saved in your global adapters folder under yue2-joint-adapters/triggerword_date_time.')}</p>
+      <div className="mt-4 rounded-lg border border-red-500/20 p-3">
+        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Prepared data</p>
+        <p className="mt-1 text-[11px] text-zinc-500">Clear generated latents, codes, lead sheets, alignment, stems, MM3 caches and ACE tensors for this dataset. Source files, labels and adapters are kept. Older runs may then be unavailable to resume.</p>
+        <button type="button" onClick={() => void clearCaches()}
+          disabled={!cacheInfo?.caches.length || cacheInfo.busy || active || preparing || starting || clearing || yue2RunAllActive}
+          className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-500/50 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-40">
+          {clearing ? 'Clearing…' : 'Clear all prepared data'}
+        </button>
+        {cacheInfo && <span className="ml-2 text-[11px] text-zinc-500">{cacheInfo.caches.length} cache folders · {(cacheInfo.caches.reduce((sum, item) => sum + item.bytes, 0) / 1048576).toFixed(1)} MiB</span>}
+        {clearNote && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{clearNote}</p>}
+      </div>
       {error && <div className="mt-3 flex items-start gap-2 text-xs text-red-600 dark:text-red-400"><AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}</div>}
       {job?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{job.error}</div>}
       <div className="mt-4 flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => void run()} disabled={active || preparing || starting || yue2RunAllActive || (form.resume?.trim() ? !form.dataset : (!prepare.legacyManifest || !prepare.tokenizer)) || (lyricTiming && !cursorReady)}
+        <button type="button" onClick={() => void run()} disabled={active || preparing || starting || yue2RunAllActive || (resumeChoice || form.resume?.trim() ? !form.dataset : (!prepare.legacyManifest || !prepare.tokenizer)) || (!resumeChoice && lyricTiming && !cursorReady)}
           className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
           {starting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
           {active ? (job?.phase === 'preparing' ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.running', 'Joint training is running')) : t('trainingStudio.yue2.method.start', 'Start joint training')}

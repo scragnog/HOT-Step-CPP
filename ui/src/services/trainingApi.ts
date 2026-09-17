@@ -635,6 +635,8 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   seed: number;
   device: string;
   resume?: string;
+  resumeRunId?: string;
+  resumeStep?: number;
   /** LoRA rank / alpha. Engine defaults are 32 / 32.0. */
   rank?: number;
   alpha?: number;
@@ -674,6 +676,7 @@ export interface Yue2AitkCheckpointRecord {
 
 export interface Yue2AitkRunRecord {
   live?: boolean;
+  resumeError?: string;
   version: 1;
   jobId: string;
   datasetId: string;
@@ -2317,6 +2320,15 @@ export async function listYue2AitkRuns(
   id: string,
 ): Promise<{ runs: Yue2AitkRunRecord[]; activeJob: TrainingJobSummary | null }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`);
+}
+
+export interface PreparedCache { name: string; path: string; files: number; bytes: number }
+export async function getPreparedData(id: string): Promise<{ slug: string; caches: PreparedCache[]; busy: boolean }> {
+  return request(`/datasets/${encodeURIComponent(id)}/prepared-data`);
+}
+export async function clearPreparedData(id: string, slug: string): Promise<{ cleared: PreparedCache[] }> {
+  return request(`/datasets/${encodeURIComponent(id)}/prepared-data`,
+    { method: 'DELETE', ...jsonBody({ confirm: slug }) });
 }
 
 /** Link a saved joint checkpoint's AR/NAR pair to this dataset's album preset. */

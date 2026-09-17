@@ -139,6 +139,7 @@ import {
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
 import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory } from '../services/training/yue2AitkRuns.js';
+import { clearPreparedCaches, listPreparedCaches } from '../services/training/preparedDataReset.js';
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions } from '../services/training/yue2JointPreview.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
@@ -902,6 +903,29 @@ router.delete('/datasets/:id', (req: Request, res: Response) => {
     console.error(`[Training] Delete dataset failed: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
+});
+
+/** Inspect, then explicitly clear only app-owned prepared caches for a dataset. */
+router.get('/datasets/:id/prepared-data', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    res.json({ slug: ds.slug, caches: listPreparedCaches(ds.slug, ds.sourceDir), busy: !!queue.activeJobForDataset(ds.id) || hasActivePipeline() });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
+
+router.delete('/datasets/:id/prepared-data', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    if (req.body?.confirm !== ds.slug) { res.status(400).json({ error: 'Confirm with the dataset slug shown in the dialog.' }); return; }
+    if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) {
+      res.status(409).json({ error: 'A job or pipeline is queued or running for this dataset.' }); return;
+    }
+    const cleared = clearPreparedCaches(ds.slug, ds.sourceDir);
+    console.log(`[Training] Cleared prepared caches for ${ds.slug}: ${cleared.map(c => c.name).join(', ') || 'none'}`);
+    res.json({ cleared });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
 // ── Sample edits (§2.4) ──────────────────────────────────────────────────
@@ -3218,10 +3242,35 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
   try {
     const ds = yue2Preflight(req, res);
     if (!ds) return;
-    const b = (req.body || {}) as Record<string, unknown>;
+    let b = (req.body || {}) as Record<string, unknown>;
     if (b.trainingMethod !== 'aitk') {
       res.status(400).json({ error: 'Joint training requires trainingMethod="aitk"; Legacy is never selected implicitly.' });
       return;
+    }
+    if (typeof b.resumeRunId === 'string' && b.resumeRunId) {
+      const run = listYue2AitkRuns(ds.id, ds.slug).find(item => item.jobId === b.resumeRunId);
+      const step = Number(b.resumeStep);
+      const saved = run?.options;
+      const selected = Number.isInteger(step) ? run?.checkpoints.find(item => item.step === step && item.optimizerPath) : undefined;
+      if (!run || !saved || !selected?.optimizerPath || typeof saved.dataset !== 'string'
+        || !fs.existsSync(saved.dataset)) {
+        res.status(400).json({ error: 'This run cannot be resumed: the optimizer checkpoint or prepared dataset is missing.' });
+        return;
+      }
+      // Only the stopping target and preview policy are editable. The base,
+      // seed, optimizer, adapter shape and dataset come from the indexed run.
+      b = { ...saved, trainingMethod: 'aitk', autoPrepare: false,
+        checkpoint: saved.checkpoint, dataset: saved.dataset, output: '',
+        resume: selected.optimizerPath,
+        steps: b.steps, saveEvery: saved.saveEvery,
+        stopMode: b.stopMode ?? saved.stopMode, targetLoss: b.targetLoss ?? saved.targetLoss,
+        preview: b.preview ?? saved.preview,
+        lyricTiming: (saved.alignment as { enabled?: boolean } | undefined)?.enabled === true,
+        cursorWeight: (saved.alignment as { cursorWeight?: number } | undefined)?.cursorWeight ?? 0 };
+      if (Number(b.steps) <= step) {
+        res.status(400).json({ error: `Set the total step count above checkpoint step ${step}.` });
+        return;
+      }
     }
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
     const automatic = b.autoPrepare === true && !str('resume');
@@ -3555,7 +3604,11 @@ router.get('/datasets/:id/yue2-joint-runs', (req: Request, res: Response) => {
     const active = queue.activeJobForDataset(ds.id);
     const activeJoint = active?.kind === 'yue2-joint-train' ? active : undefined;
     res.json({
-      runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId })),
+      runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId,
+        resumeError: typeof run.options.dataset !== 'string' || !fs.existsSync(run.options.dataset)
+          ? 'Prepared dataset was cleared or is missing'
+          : !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)
+            ? 'No saved optimizer checkpoint' : undefined })),
       activeJob: activeJoint ? queue.toSummary(activeJoint) : null,
     });
   } catch (err: any) {
