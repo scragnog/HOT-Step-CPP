@@ -129,7 +129,7 @@ def _state_arrays(prefix: str, state: dict[str, Any], arrays: dict[str, Any]) ->
 
 
 def export_fixture(output_dir: Path, numel: int, seed: int, steps: int, execute: bool, force: bool,
-                   bf16_diagnostic: bool, toolkit_source: Path | None) -> None:
+                   bf16_diagnostic: bool, toolkit_source: Path | None, zero_first_step: bool) -> None:
     """Export params/grads plus optimizer construction and optional CUDA state."""
     try:
         import numpy as np
@@ -192,13 +192,18 @@ def export_fixture(output_dir: Path, numel: int, seed: int, steps: int, execute:
         "gradient_sha256": _sha256_array(arrays["gradient_large_step_0"]),
         "optimizer_instantiated": True,
         "optimizer_executed": execute,
+        "zero_first_step": zero_first_step,
     }
     if execute:
         state_snapshots = []
         generator = torch.Generator(device=parameter_large.device).manual_seed(seed + 2)
         for step in range(steps):
-            grad_s = torch.randn(parameter_small.shape, generator=generator, device=parameter_small.device, dtype=torch.float32).to(dtype)
-            grad_l = torch.randn(parameter_large.shape, generator=generator, device=parameter_large.device, dtype=torch.float32).to(dtype)
+            if zero_first_step and step == 0:
+                grad_s = torch.zeros(parameter_small.shape, device=parameter_small.device, dtype=dtype)
+                grad_l = torch.zeros(parameter_large.shape, device=parameter_large.device, dtype=dtype)
+            else:
+                grad_s = torch.randn(parameter_small.shape, generator=generator, device=parameter_small.device, dtype=torch.float32).to(dtype)
+                grad_l = torch.randn(parameter_large.shape, generator=generator, device=parameter_large.device, dtype=torch.float32).to(dtype)
             arrays[f"gradient_small_step_{step}"] = _tensor_to_numpy(grad_s)
             arrays[f"gradient_large_step_{step}"] = _tensor_to_numpy(grad_l)
             parameter_small.grad, parameter_large.grad = grad_s, grad_l
@@ -230,6 +235,7 @@ def main() -> int:
     parser.add_argument("--toolkit-source", type=Path, help="path to pinned toolkit/optimizer.py for identity hashing")
     parser.add_argument("--force", action="store_true", help="allow writing into a non-empty output directory")
     parser.add_argument("--execute", action="store_true", help="run one real bnb update (CUDA only)")
+    parser.add_argument("--zero-first-step", action="store_true", help="opt in to zero gradients on the first CUDA step")
     args = parser.parse_args()
     if args.numel <= 0:
         parser.error("--numel must be positive")
@@ -239,7 +245,7 @@ def main() -> int:
         print(json.dumps(contract_metadata(), indent=2))
     if args.output_dir:
         export_fixture(args.output_dir, args.numel, args.seed, args.steps, args.execute, args.force,
-                       args.bf16_diagnostic, args.toolkit_source)
+                       args.bf16_diagnostic, args.toolkit_source, args.zero_first_step)
     return 0
 
 

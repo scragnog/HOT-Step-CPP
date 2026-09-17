@@ -101,6 +101,26 @@ reference trainer. BF16 checkpoint export does not change that contract.
 `--bf16-diagnostic` is explicitly a separate diagnostic. No native AdamW8bit
 implementation is claimed by exporting these reference trajectories.
 
+`adamw8bit_cuda.h/.cu` now provide a separate caller-owned native update API.
+`optimizer_cuda_probe.cpp` replays the actual five-step trajectories and checks
+parameters, moments, uint8 codes, block scales and both codebooks. Root replay
+passed the 4095/4096 boundary and an opt-in `--zero-first-step` fixture with
+4097 large elements, including the final one-element block. Codes and maps
+match exactly; maximum observed float errors are 1.2e-7 and 6.0e-8 respectively.
+This remains an isolated update test; it does not establish full-model parity.
+
+## Joint loss fixtures
+
+`joint_loss_fixture.py` extracts the pinned trainer's AR target construction,
+AR losses and NAR conditioning bodies. Tests check full-song targets, ABC
+dropout, the adapter-disabled teacher and detached adapted-AR conditioning.
+The CPU loss helper and `joint_loss_cuda.h/.cu` implement CE plus
+`0.2 * KL(base || adapted)` with gradients only through adapted logits.
+CUDA submissions take chunk-local logit buffers and normalize gradients by
+the total target count, then reduce per-position losses once after all chunks.
+Reference checks cover the full 184,704 vocabulary, incomplete final chunks
+and large logit offsets. These helpers still need integration with the trainer.
+
 ## Reference manifest
 
 `manifest.py` writes a deterministic JSON inventory for the pinned AI Toolkit

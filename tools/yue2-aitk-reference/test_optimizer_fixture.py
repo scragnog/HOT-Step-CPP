@@ -26,6 +26,11 @@ class OptimizerFixtureContractTests(unittest.TestCase):
         self.assertIn("state1:uint8", contract["state"]["large_tensor"])
         self.assertIn("state1:float32", contract["state"]["small_tensor"])
 
+    def test_zero_first_step_is_opt_in(self):
+        parser_text = (HERE / "optimizer_fixture.py").read_text(encoding="utf-8")
+        self.assertIn('parser.add_argument("--zero-first-step"', parser_text)
+        self.assertIn('"zero_first_step": zero_first_step', parser_text)
+
     def test_inspect_runs_without_reference_python_environment(self):
         result = subprocess.run(
             [sys.executable, str(HERE / "optimizer_fixture.py"), "--inspect"],
