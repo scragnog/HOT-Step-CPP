@@ -29,7 +29,7 @@ const FORM_KEY = 'hs-yue2-aitk-form:';
 const PREP_KEY = 'hs-yue2-aitk-prepare:';
 const DEFAULT_FORM: Yue2JointTrainRequest = {
   trainingMethod: 'aitk', checkpoint: '', dataset: '', output: '',
-  steps: 3000, saveEvery: 250, seed: 0, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
+  steps: 3000, saveEvery: 250, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
@@ -96,7 +96,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setDefaultsAvailable(!!defaults);
       setMissingDefaults(result.missing ?? []);
       if (!defaults) return;
-      setForm(previous => ({ ...previous, output: previous.output || (defaults.output ? `${defaults.output}-training` : '') }));
       setPrepare(previous => ({
         ...previous,
         ...Object.fromEntries(Object.entries(defaults).filter(([key, value]) => key !== 'models' && !previous[key as keyof PrepareForm] && typeof value === 'string')),
@@ -271,6 +270,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08)
         : 0;
       const request = { ...form, lyricTiming, alignmentEnabled: lyricTiming, cursorWeight: timingWeight,
+        autoPrepare: !form.resume?.trim(), preparation: prepare,
+        checkpoint: '', output: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
           everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 40)) * 25 } } : {}),
         ...(form.resume?.trim() ? { resume: form.resume.trim() } : {}) };
@@ -348,7 +349,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {t('trainingStudio.yue2.method.aitkTitle', 'AI Toolkit-compatible training is selected')}
       </h3>
       <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
-        {t('trainingStudio.yue2.method.aitkUnavailable', 'Prepare the existing YuE2 cache stages into the native manifest, then train AR and NAR together.')}
+        {t('trainingStudio.yue2.method.autoTrainHint', 'Start training prepares the dataset automatically, then trains AR and NAR together. Unchanged prepared data is reused.')}
       </p>
       <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
         <input type="checkbox" className="mt-0.5 accent-amber-500" checked={lyricTiming} disabled={active || preparing || starting}
@@ -361,16 +362,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </span>
       </label>
       {lyricTiming && !cursorReady && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.lyricTimingNeedsAlignment', 'Run vocal stems and lyric alignment below before starting with timing supervision enabled.')}</p>}
-      <div className="mt-4 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-3">
-        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.prepareTitle', 'Prepare native AITK dataset')}</p>
-        <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.method.prepareHint', 'This CPU step imports the completed cache stages and writes a new schema 1 manifest.')}</p>
+      <details className="mt-4 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-3">
+        <summary className="cursor-pointer text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.autoPrepareAdvanced', 'Advanced: dataset preparation and model paths')}</summary>
+        <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.method.autoPrepareHint', 'Preparation runs automatically at the start of training. These controls are only needed for custom paths, manual preparation or resuming a run.')}</p>
         {(defaultsAvailable === false || missingDefaults.length > 0) && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.defaultsMissing', 'Model paths were not found automatically. Install the YuE2 training assets in Model Manager or enter their paths here.')} {missingDefaults.join('; ')}</p>}
         <details className="mt-3">
           <summary className="cursor-pointer text-[11px] font-medium text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.advancedPaths', 'Advanced paths and provenance')}</summary>
         <button type="button" disabled={active || preparing || starting} onClick={() => setDefaultsRevision(value => value + 1)} className="mt-2 text-xs text-amber-700 dark:text-amber-300 hover:underline">{t('trainingStudio.yue2.method.refreshPaths', 'Check installed assets again')}</button>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           {field(t('trainingStudio.yue2.method.legacyManifest', 'Existing YuE2 manifest'), 'legacyManifest', 'text', prepare, value => setPrepare(previous => ({ ...previous, legacyManifest: value })))}
-          {field(t('trainingStudio.yue2.method.checkpoint', 'Raw ConvRot checkpoint'), 'checkpoint', 'text', prepare, value => setPrepare(previous => ({ ...previous, checkpoint: value })))}
           {field(t('trainingStudio.yue2.method.tokenizer', 'Tokenizer path'), 'tokenizer', 'text', prepare, value => setPrepare(previous => ({ ...previous, tokenizer: value })))}
           {field(t('trainingStudio.yue2.method.prepareOutput', 'New prepared output directory'), 'output', 'text', prepare, value => setPrepare(previous => ({ ...previous, output: value })))}
           {field(t('trainingStudio.yue2.method.vae', 'VAE model'), 'vae', 'text', prepare.models, value => setPrepare(previous => ({ ...previous, models: { ...previous.models, vae: value } })))}
@@ -378,6 +378,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {field(t('trainingStudio.yue2.method.sheetsage', 'SheetSage model'), 'sheetsage', 'text', prepare.models, value => setPrepare(previous => ({ ...previous, models: { ...previous.models, sheetsage: value } })))}
         </div>
         </details>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+          {form.resume?.trim() && field(t('trainingStudio.yue2.method.resumeDataset', 'Prepared manifest for resume'), 'dataset')}
+        </div>
         <button type="button" onClick={() => void prepareDataset()} disabled={preparing || active || starting || !prepare.legacyManifest || !prepare.checkpoint || !prepare.tokenizer || !prepare.output || !prepare.models.vae || !prepare.models.semantic || !prepare.models.sheetsage}
           className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
           {preparing ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.prepare', 'Prepare native dataset')}
@@ -385,11 +388,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {prepareJob && <span className="ml-3 text-[11px] text-zinc-600 dark:text-zinc-400">{prepareJob.status} · {prepareJob.phase || 'waiting'}</span>}
         {preparing && <button type="button" onClick={() => void stopPrepare()} className="ml-3 text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {prepareJob?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{prepareJob.error}</div>}
-      </div>
+      </details>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-        {field(t('trainingStudio.yue2.method.checkpoint', 'Raw ConvRot checkpoint'), 'checkpoint')}
-        {field(t('trainingStudio.yue2.method.dataset', 'Prepared AITK manifest'), 'dataset')}
-        {field(t('trainingStudio.yue2.method.output', 'New output directory'), 'output')}
         {field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume')}
         {field(t('trainingStudio.yue2.method.steps', 'Steps'), 'steps', 'number')}
         {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number')}
@@ -437,22 +437,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <label className="md:col-span-2 flex flex-col gap-1"><span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.previewLyrics', 'Lyrics override (optional)')}</span><textarea className={`${input} min-h-20 resize-y`} value={form.preview.lyrics ?? ''} disabled={active || preparing || starting} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyrics: event.target.value } }))} /></label>
         </div>}
       </details>
-      <div className="mt-3 text-[11px] text-zinc-600 dark:text-zinc-400">
-        <p className="font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.aitkNeeds', 'Before it can start, the dataset needs:')}</p>
-        <ul className="list-disc pl-5 mt-1 space-y-0.5">
-          <li>{t('trainingStudio.yue2.method.aitkManifest', 'A versioned full-song manifest with latents, semantic tokens and ABC provenance.')}</li>
-          <li>{t('trainingStudio.yue2.method.aitkAssets', 'The pinned YuE2 base model and tokenizer/runtime assets.')}</li>
-        </ul>
-      </div>
-      <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-3">{t('trainingStudio.yue2.method.aitkNext', 'The server validates these paths and refuses missing or Legacy-formatted assets.')}</p>
       <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.hardware', 'Joint training requires a CUDA build and an NVIDIA GPU with BF16 support (Ampere or newer).')}</p>
+      <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.autoOutput', 'Adapters are saved in your global adapters folder under yue2-joint-adapters/triggerword_date_time.')}</p>
       {error && <div className="mt-3 flex items-start gap-2 text-xs text-red-600 dark:text-red-400"><AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}</div>}
       {job?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{job.error}</div>}
       <div className="mt-4 flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => void run()} disabled={active || preparing || starting || !form.checkpoint || !form.dataset || !form.output || (lyricTiming && !cursorReady)}
+        <button type="button" onClick={() => void run()} disabled={active || preparing || starting || (form.resume?.trim() ? !form.dataset : (!prepare.legacyManifest || !prepare.tokenizer)) || (lyricTiming && !cursorReady)}
           className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
           {starting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-          {active ? t('trainingStudio.yue2.method.running', 'Joint training is running') : t('trainingStudio.yue2.method.start', 'Start joint training')}
+          {active ? (job?.phase === 'preparing' ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.running', 'Joint training is running')) : t('trainingStudio.yue2.method.start', 'Start joint training')}
         </button>
         {active && <button type="button" onClick={() => void stop()} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{progress}

@@ -9,6 +9,7 @@ import { log, runYue2AceTrain, type RelayState } from './yue2TrainRunner.js';
 import { checkpointRecords, recordYue2AitkRun } from './yue2AitkRuns.js';
 import { renderYue2JointPreview, Yue2PreviewCleanupError } from './yue2JointPreview.js';
 import { yue2Unload } from '../backends/yue2/client.js';
+import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
 
 export interface ResolvedYue2JointTrainOptions {
   checkpoint: string;
@@ -24,6 +25,7 @@ export interface ResolvedYue2JointTrainOptions {
   preview?: import('./types.js').Yue2JointPreviewOptions;
   alignment?: import('./types.js').Yue2AlignmentOptions;
   pauseAt?: number;
+  preparation?: import('./yue2AitkPrepareRunner.js').ResolvedYue2AitkPrepareOptions;
 }
 
 export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): string[] {
@@ -148,6 +150,18 @@ export function parseYue2JointEvent(line: string, totalSteps: number): {
 
 export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   const opts = job.opts as ResolvedYue2JointTrainOptions | undefined;
+  if (isCancelled(job)) return;
+  if (opts?.preparation && !opts.resume) {
+    try {
+      const manifest = await ensureYue2PreparedDataset(job, opts.preparation);
+      if (!manifest || isCancelled(job)) return;
+      opts.dataset = manifest;
+      job.done = 0; job.total = opts.steps; job.phase = 'loading'; emitProgress(job);
+    } catch (err) {
+      if (!isCancelled(job)) finishJob(job, 'failed', err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
   const error = opts ? validateOptions(opts) : 'job is missing AITK joint training options';
   if (error) { finishJob(job, 'failed', error); return; }
   const o = opts!;

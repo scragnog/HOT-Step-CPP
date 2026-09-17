@@ -138,7 +138,7 @@ import {
 } from '../services/training/yue2ArRuns.js';
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
-import { listYue2AitkRuns } from '../services/training/yue2AitkRuns.js';
+import { listYue2AitkRuns, yue2JointOutputDirectory } from '../services/training/yue2AitkRuns.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions } from '../services/training/yue2JointPreview.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
@@ -3221,9 +3221,11 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       return;
     }
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
-    const checkpoint = str('checkpoint');
+    const automatic = b.autoPrepare === true && !str('resume');
+    const prepDefaults = automatic ? yue2AitkPrepareDefaults(ds).options : undefined;
+    const checkpoint = str('checkpoint') || path.join(yue2ModelDir(), 'yue2_3b_int8_convrot.safetensors');
     const dataset = str('dataset');
-    const outDir = str('output');
+    const outDir = str('output') || yue2JointOutputDirectory(config.aceServer.adapters, ds.customTag || ds.slug);
     const resume = str('resume');
     const integer = (key: string, fallback: number): number => {
       const value = Number(b[key]);
@@ -3231,17 +3233,30 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     };
     const steps = integer('steps', 0);
     const saveEvery = integer('saveEvery', 0);
-    const seed = integer('seed', -1);
+    const seed = integer('seed', 42);
     const device = str('device');
     if (!checkpoint || !fs.existsSync(checkpoint) || !fs.statSync(checkpoint).isFile()) {
       res.status(400).json({ error: `raw ConvRot checkpoint is missing: ${checkpoint || '(empty)'}. Install the verified checkpoint before starting AITK training.` });
       return;
     }
-    if (!dataset || !fs.existsSync(dataset) || !fs.statSync(dataset).isFile()) {
+    let preparation: ResolvedYue2AitkPrepareOptions | undefined;
+    if (prepDefaults) {
+      const overrides = b.preparation && typeof b.preparation === 'object' ? b.preparation as Record<string, unknown> : {};
+      const prepString = (key: string, fallback: string): string => typeof overrides[key] === 'string' && (overrides[key] as string).trim() ? (overrides[key] as string).trim() : fallback;
+      const models = overrides.models === undefined ? prepDefaults.models : parseYue2AitkModels(overrides.models, undefined);
+      if (!models) { res.status(400).json({ error: 'Preparation requires vae, semantic and sheetsage model paths' }); return; }
+      preparation = { ...prepDefaults, checkpoint, models,
+        legacyManifest: prepString('legacyManifest', prepDefaults.legacyManifest),
+        tokenizer: prepString('tokenizer', prepDefaults.tokenizer),
+        lyricTiming: b.lyricTiming === undefined ? b.alignmentEnabled !== false : b.lyricTiming === true };
+      const prepError = validateYue2AitkPrepareOptions(preparation);
+      if (prepError) { res.status(400).json({ error: prepError }); return; }
+    }
+    if (!automatic && (!dataset || !fs.existsSync(dataset) || !fs.statSync(dataset).isFile())) {
       res.status(400).json({ error: `prepared AITK schema1 dataset is missing: ${dataset || '(empty)'}. Run native dataset preparation first; Legacy caches are not accepted.` });
       return;
     }
-    try {
+    if (!automatic) try {
       if (fs.statSync(dataset).size > 16 * 1024 * 1024) {
         res.status(400).json({ error: `AITK dataset manifest exceeds the 16 MiB limit: ${dataset}` });
         return;
@@ -3267,6 +3282,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       res.status(400).json({ error: `AITK preview output directory must be empty: ${outDir}` });
       return;
     }
+    if (!str('output')) fs.mkdirSync(path.dirname(outDir), { recursive: true });
     if (!fs.existsSync(path.dirname(outDir))) {
       res.status(400).json({ error: `AITK output parent directory is missing: ${path.dirname(outDir)}` });
       return;
@@ -3302,6 +3318,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16',
       preview: preview.enabled && preview.everySteps > 0 ? preview : { ...preview, enabled: false },
       alignment,
+      ...(preparation ? { preparation } : {}),
     });
     res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment });
   } catch (err: any) {

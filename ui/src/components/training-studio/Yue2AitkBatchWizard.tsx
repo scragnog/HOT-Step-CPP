@@ -3,8 +3,8 @@ import { Loader2, Play, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
-  getJob, getYue2ArStatus, getYue2AitkPrepare, getYue2Status,
-  startYue2Align, startYue2AitkPrepare, startYue2Preprocess, startYue2Sheet,
+  getJob, getYue2ArStatus, getYue2AitkPrepare,
+  startYue2Align, startYue2Preprocess, startYue2Sheet,
   startYue2Stems, startYue2Tokenize, startYue2JointTrain,
   type Yue2JointPreviewOptions,
 } from '../../services/trainingApi';
@@ -25,17 +25,6 @@ const waitFor = async (jobId: string, onPhase: (p: string) => void): Promise<voi
   }
 };
 
-const uniquePath = (base: string, slug: string, run: string): string => {
-  const clean = base.replace(/[\\/]+$/, '');
-  const separator = base.includes('\\') ? '\\' : '/';
-  return `${clean}${separator}${slug}-aitk-${run}`;
-};
-const parentDirectory = (path: string): string => {
-  const clean = path.replace(/[\\/]+$/, '');
-  const index = Math.max(clean.lastIndexOf('\\'), clean.lastIndexOf('/'));
-  return index > 0 ? clean.slice(0, index) : clean;
-};
-
 interface Props { open: boolean; onClose: () => void }
 
 /** AITK's own multi-dataset queue. It deliberately calls the individual
@@ -51,7 +40,6 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
   const [saveEvery, setSaveEvery] = useState(250);
   const [seed, setSeed] = useState(42);
   const [device, setDevice] = useState('CUDA0');
-  const [outputRoot, setOutputRoot] = useState('');
   const [running, setRunning] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [rows, setRows] = useState<Record<string, RowState>>({});
@@ -81,7 +69,7 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
       update(dataset.id, { status: 'running', phase: 'checking caches' });
       try {
         if (signal.current.cancelled) throw new Error('Batch cancelled');
-        const [status, ar] = await Promise.all([getYue2Status(dataset.id), getYue2ArStatus(dataset.id)]);
+        const ar = await getYue2ArStatus(dataset.id);
         if (signal.current.cancelled) throw new Error('Batch cancelled');
         if (!ar.stages.preprocess.done) await runStage(dataset.id, 'latent cache', () => startYue2Preprocess(dataset.id, {}));
         if (!ar.stages.tokenize.done) await runStage(dataset.id, 'codes', () => startYue2Tokenize(dataset.id, {}));
@@ -99,23 +87,11 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
         if (!defaults?.legacyManifest || !defaults.checkpoint || !defaults.tokenizer || !defaults.models?.vae || !defaults.models.semantic || !defaults.models.sheetsage) {
           throw new Error('AI Toolkit preparation defaults are incomplete for this dataset');
         }
-        const runTag = `${Date.now()}-${dataset.slug}`;
-        const baseDirectory = outputRoot.trim() || parentDirectory(defaults.output || status.manifestPath);
-        if (!baseDirectory) throw new Error('A writable output folder is required');
-        const prepOutput = uniquePath(baseDirectory, dataset.slug, `${runTag}-prepare`);
-        update(dataset.id, { status: 'running', phase: 'preparing' });
-        const prepared = await startYue2AitkPrepare(dataset.id, {
-          legacyManifest: defaults.legacyManifest, checkpoint: defaults.checkpoint, tokenizer: defaults.tokenizer,
-          output: prepOutput, models: { vae: defaults.models.vae, semantic: defaults.models.semantic, sheetsage: defaults.models.sheetsage }, lyricTiming,
-        });
-        await waitFor(prepared.jobId, (p: string) => update(dataset.id, { status: 'running', phase: `preparing: ${p}` }));
-        if (signal.current.cancelled) throw new Error('Batch cancelled');
-        const trainOutput = uniquePath(baseDirectory, dataset.slug, runTag);
         update(dataset.id, { status: 'running', phase: 'joint training' });
         const preview: Yue2JointPreviewOptions = { enabled: false, everySteps: saveEvery, seconds: 40, seed: 424242, previewMaxFrames: 0, baseline: false, control: false };
         const train = await startYue2JointTrain(dataset.id, {
-          trainingMethod: 'aitk', checkpoint: defaults.checkpoint, dataset: prepared.manifest || prepOutput,
-          output: trainOutput, steps, saveEvery, seed, device, lyricTiming,
+          trainingMethod: 'aitk', checkpoint: defaults.checkpoint, dataset: '', autoPrepare: true,
+          output: '', steps, saveEvery, seed, device, lyricTiming,
           alignmentEnabled: lyricTiming, cursorWeight: lyricTiming ? 0.08 : 0, preview,
         });
         await waitFor(train.jobId, (p: string) => update(dataset.id, { status: 'running', phase: `joint training: ${p}` }));
@@ -144,7 +120,6 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
           <label className="text-xs text-zinc-600 dark:text-zinc-400">Save every<input disabled={running} type="number" min={1} value={saveEvery} onChange={e => setSaveEvery(Math.max(1, Number(e.target.value) || 1))} className="mt-1 w-full rounded-lg bg-zinc-100 dark:bg-black/20 p-2" /></label>
           <label className="text-xs text-zinc-600 dark:text-zinc-400">Seed<input disabled={running} type="number" value={seed} onChange={e => setSeed(Number(e.target.value) || 0)} className="mt-1 w-full rounded-lg bg-zinc-100 dark:bg-black/20 p-2" /></label>
           <label className="text-xs text-zinc-600 dark:text-zinc-400">CUDA device<input disabled={running} value={device} onChange={e => setDevice(e.target.value || 'CUDA0')} className="mt-1 w-full rounded-lg bg-zinc-100 dark:bg-black/20 p-2" /></label>
-          <label className="text-xs text-zinc-600 dark:text-zinc-400">Output folder (optional)<input disabled={running} value={outputRoot} onChange={e => setOutputRoot(e.target.value)} placeholder="Uses server defaults" className="mt-1 w-full rounded-lg bg-zinc-100 dark:bg-black/20 p-2" /></label>
         </div>
         <label className="flex items-center gap-2 text-xs mb-4"><input disabled={running} type="checkbox" checked={lyricTiming} onChange={e => setLyricTiming(e.target.checked)} className="accent-amber-500" /> Include lyric timing stems and alignment</label>
         <div className="rounded-lg border border-zinc-200 dark:border-white/10 divide-y divide-zinc-200 dark:divide-white/10 mb-4">

@@ -118,8 +118,8 @@ function parseProgress(job: TrainingJob, line: string): void {
   }
 }
 
-export async function runYue2AitkPrepareJob(job: TrainingJob): Promise<void> {
-  const opts = job.opts as ResolvedYue2AitkPrepareOptions | undefined;
+export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: ResolvedYue2AitkPrepareOptions): Promise<void> {
+  const opts = inlineOptions ?? job.opts as ResolvedYue2AitkPrepareOptions | undefined;
   const validation = opts ? validateYue2AitkPrepareOptions(opts) : 'job is missing AITK preparation options';
   if (validation) { finishJob(job, 'failed', validation); return; }
   const o = opts!;
@@ -162,7 +162,8 @@ export async function runYue2AitkPrepareJob(job: TrainingJob): Promise<void> {
     if (error) throw new Error(`AITK preparation finished without a valid output: ${error}`);
     const value = JSON.parse(fs.readFileSync(manifest, 'utf8')) as Record<string, unknown>;
     if (value.schema_version !== 1 || !Array.isArray(value.items)) throw new Error('AITK preparation wrote an invalid schema-1 dataset manifest');
-    job.done = 1; job.phase = 'done'; emitProgress(job); finishJob(job, 'done');
+    job.done = 1; emitProgress(job);
+    if (!inlineOptions) { job.phase = 'done'; finishJob(job, 'done'); }
   } catch (err: unknown) {
     if (!isCancelled(job)) finishJob(job, 'failed', err instanceof Error ? err.message : String(err));
   } finally {

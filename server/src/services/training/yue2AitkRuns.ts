@@ -5,6 +5,12 @@
 import fs from 'fs';
 import path from 'path';
 import { trainingBaseDir } from './paths.js';
+import { runStamp } from './adapterLayout.js';
+
+export function yue2JointOutputDirectory(adaptersRoot: string, trigger: string, when = new Date()): string {
+  const name = trigger.trim().replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^[. ]+|[. ]+$/g, '').slice(0, 120) || 'dataset';
+  return path.join(adaptersRoot, 'yue2-joint-adapters', `${name}_${runStamp(when)}`);
+}
 
 const INDEX = path.join(trainingBaseDir, 'yue2-aitk-runs.json');
 const MAX_RECORDS = 256;

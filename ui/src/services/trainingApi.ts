@@ -625,6 +625,8 @@ export interface Yue2TrainRequest extends Partial<Yue2OptimOptions> {
 
 export interface Yue2JointTrainRequest {
   trainingMethod: 'aitk';
+  autoPrepare?: boolean;
+  preparation?: Partial<Yue2AitkPrepareRequest>;
   checkpoint: string;
   dataset: string;
   output: string;

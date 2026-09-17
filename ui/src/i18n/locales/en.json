@@ -1,5 +1,10 @@
 {
   "translation": {
+    "trainingStudio.yue2.method.autoOutput": "Adapters are saved in your global adapters folder under yue2-joint-adapters/triggerword_date_time.",
+    "trainingStudio.yue2.method.autoTrainHint": "Start training prepares the dataset automatically, then trains AR and NAR together. Unchanged prepared data is reused.",
+    "trainingStudio.yue2.method.autoPrepareAdvanced": "Advanced: dataset preparation and model paths",
+    "trainingStudio.yue2.method.autoPrepareHint": "Preparation runs automatically at the start of training. These controls are only needed for custom paths, manual preparation or resuming a run.",
+    "trainingStudio.yue2.method.resumeDataset": "Prepared manifest for resume",
     "globalBar.yue2AdapterLoss": "Training loss: {{loss}}",
     "globalBar.yue2AdapterLossUnknown": "Training loss: not recorded",
     "trainingStudio.yue2.method.title": "Training method",
