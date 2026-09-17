@@ -37,6 +37,10 @@ const PRESETS_KEY = 'hs-yue2-joint-presets';
 const METRIC_CAP = 2000;
 type JointStepPoint = { step: number; loss: number; ep: number; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
 type JointMilestone = { epoch: number; loss: number; path: string };
+function jointLossRate(points: JointStepPoint[]): number | null {
+  const means = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
+  return means.length >= 9 ? descentRate(means) : null;
+}
 function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string {
   const last = points[points.length - 1];
   const durations = points.map(p => p.stepMs).filter((ms): ms is number => typeof ms === 'number' && ms > 0).slice(-20);
@@ -45,11 +49,10 @@ function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string
   const remaining = Math.max(0, form.steps - last.step);
   if (form.stopMode !== 'loss' || !(form.targetLoss && form.targetLoss > 0))
     return `cap ETA ${formatDurationMs(remaining * pace)}`;
-  const stopMean = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
-  if (stopMean.length < 9) return `target ETA estimating · cap ${formatDurationMs(remaining * pace)}`;
-  const current = stopMean[stopMean.length - 1];
+  const current = last.ma20;
+  const rate = jointLossRate(points);
+  if (rate === null || current === undefined) return `target ETA estimating · cap ${formatDurationMs(remaining * pace)}`;
   if (current <= form.targetLoss) return `target reached · cap ${formatDurationMs(remaining * pace)}`;
-  const rate = descentRate(stopMean);
   if (!(rate > 0)) return `target trend stalled · cap ${formatDurationMs(remaining * pace)}`;
   const stepsToTarget = (current - form.targetLoss) / rate;
   if (stepsToTarget > remaining) return `target unlikely before cap · cap ${formatDurationMs(remaining * pace)}`;
@@ -670,6 +673,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">
             <span>MA5 {stepHistory[stepHistory.length - 1].ma5?.toFixed(4) ?? '—'}</span>
             <span>20-step stop mean {stepHistory[stepHistory.length - 1].ma20?.toFixed(4) ?? '—'}</span>
+            {jointLossRate(stepHistory) !== null && <span>loss rate {jointLossRate(stepHistory)!.toFixed(5)}/step</span>}
             <span>{stepHistory[stepHistory.length - 1].step} / {form.steps} steps</span>
             {stepHistory[stepHistory.length - 1].elapsedMs !== undefined && <span>elapsed {Math.round(stepHistory[stepHistory.length - 1].elapsedMs! / 1000)}s</span>}
             {stepHistory[stepHistory.length - 1].stepMs !== undefined && <span>pace {(stepHistory.slice(-20).reduce((sum, point) => sum + (point.stepMs ?? 0), 0) / Math.max(1, stepHistory.slice(-20).filter(point => point.stepMs !== undefined).length) / 1000).toFixed(2)}s/step</span>}
