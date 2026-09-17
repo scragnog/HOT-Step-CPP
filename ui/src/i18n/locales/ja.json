@@ -315,6 +315,8 @@
     "models.installed": "インストール済",
     "models.deleteModel": "モデルを削除",
     "models.download": "ダウンロード",
+    "models.update": "更新",
+    "models.updateAvailable": "このファイルの新しいバージョンが公開されました。ダウンロードするとディスク上のコピーを置き換えます",
     "models.resume": "再開",
     "models.allInstalled": "すべてインストール済",
     "models.downloadingFiles": "{{count}} 個のファイルをダウンロード中...",

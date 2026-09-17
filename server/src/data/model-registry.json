@@ -4262,9 +4262,10 @@
       "scale": null,
       "variant": "tok",
       "quant": "F16",
-      "sizeBytes": 1211631392,
+      "sizeBytes": 1211632224,
+      "sha256": "aaea8c9fb75bf83baf3b99bac27a0eba61029e747df703a11e91a53309695687",
       "repo": "scragnog/YuE2-GGUF",
-      "description": "Turns real audio into YuE2 semantic tokens — the reverse of what the LM does. Optional, and only useful for training: with it, `ace-train yue2-tokenize` fills the codec_ids slot in a YuE2 preprocess cache so a NAR adapter trains on ground-truth codes exactly as inference conditions, instead of the text-only regime. Not needed to generate music. One file holds both halves of the chain: MERT-v2-FullSong's mel frontend, ConvNext subsampler and first 21 Conformer blocks, plus Mothersuperior's 8-layer tokenizer head (docs/plans/yue2/12-tokenizer-oracle-pin.md). Derived from YuE2-3B and licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
+      "description": "Turns real audio into YuE2 semantic tokens — the reverse of what the LM does. Optional, and only useful for training: with it, `ace-train yue2-tokenize` fills the codec_ids slot in a YuE2 preprocess cache so a NAR adapter trains on ground-truth codes exactly as inference conditions, instead of the text-only regime. Not needed to generate music. One file holds both halves of the chain: MERT-v2-FullSong's mel frontend, ConvNext subsampler and first 21 Conformer blocks, plus Mothersuperior's 8-layer tokenizer head (docs/plans/yue2/12-tokenizer-oracle-pin.md). The head is joint_v9 (2026-09-16), which replaced joint_v4 here: same architecture and input, retrained on the 14,547-track minted corpus and then co-trained against the rendered audio rather than only the VAE latents. Measured on our own held-out YuE2 render it lifts exact top-1 from 16.1% to 19.1% and drops the adjacent-repeat rate from 6.6% to 5.4%. Codes are encoder-specific: a cache tokenized with the old head keeps its codes until you re-run yue2-tokenize with --force. Derived from YuE2-3B and licensed CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "tags": [],
       "companions": [
         {

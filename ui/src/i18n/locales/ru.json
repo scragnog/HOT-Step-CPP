@@ -315,6 +315,8 @@
     "models.installed": "Установлено",
     "models.deleteModel": "Удалить модель",
     "models.download": "Скачать",
+    "models.update": "Обновить",
+    "models.updateAvailable": "Опубликована новая версия этого файла — скачайте её, чтобы заменить копию на диске",
     "models.resume": "Продолжить",
     "models.allInstalled": "Все установлены",
     "models.downloadingFiles": "Загрузка файлов: {{count}}...",

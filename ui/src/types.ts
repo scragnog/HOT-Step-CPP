@@ -491,6 +491,10 @@ export interface RegistryFile {
   description: string;
   tags: string[];
   installed: boolean;
+  /** Installed, but not the bytes the registry now describes — the file was
+   *  republished under the same name. Only ever true for entries that declare
+   *  a sha256; everything else has no way to tell. */
+  outdated?: boolean;
   /** TensorRT builder-resource entries only: the CUDA compute capability
    *  (MAJOR*10+MINOR, e.g. 120 for Blackwell consumer) this DLL builds
    *  engines for. Matched against dit_runtime.sm to mark the one a user

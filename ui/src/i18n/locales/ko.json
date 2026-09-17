@@ -315,6 +315,8 @@
     "models.installed": "설치됨",
     "models.deleteModel": "모델 삭제",
     "models.download": "다운로드",
+    "models.update": "업데이트",
+    "models.updateAvailable": "이 파일의 새 버전이 게시되었습니다. 내려받으면 디스크의 사본을 대체합니다",
     "models.resume": "계속",
     "models.allInstalled": "모두 설치됨",
     "models.downloadingFiles": "{{count}}개 파일 다운로드 중...",

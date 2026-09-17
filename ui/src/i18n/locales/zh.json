@@ -316,6 +316,8 @@
     "models.installed": "已安装",
     "models.deleteModel": "删除模型",
     "models.download": "下载",
+    "models.update": "更新",
+    "models.updateAvailable": "此文件已发布新版本 — 下载后将替换磁盘上的副本",
     "models.resume": "继续",
     "models.allInstalled": "全部已安装",
     "models.downloadingFiles": "正在下载 {{count}} 个文件...",

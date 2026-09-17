@@ -48,7 +48,7 @@ function registryDownloads() {
   const reg = JSON.parse(fs.readFileSync(REGISTRY, 'utf-8'));
   const out = [];
   for (const f of reg.files) {
-    out.push({ id: f.id, repo: f.repo, repoPath: f.repoPath || f.filename, size: f.sizeBytes });
+    out.push({ id: f.id, repo: f.repo, repoPath: f.repoPath || f.filename, size: f.sizeBytes, sha256: f.sha256 || null });
     for (const c of f.companions || []) {
       out.push({ id: `${f.id} (companion)`, repo: f.repo, repoPath: c.repoPath || c.filename, size: null });
     }
@@ -98,7 +98,10 @@ async function repoBlobs(repo) {
   if (!res.ok) return { error: `${res.status} ${res.statusText}` };
   const json = await res.json();
   const map = new Map();
-  for (const s of json.siblings || []) map.set(s.rfilename, s.size ?? null);
+  // lfs.sha256 is the LFS object id, which is the sha256 of the file's
+  // content -- free here, and the only way to check a registry sha256
+  // without downloading gigabytes.
+  for (const s of json.siblings || []) map.set(s.rfilename, { size: s.size ?? null, sha256: s.lfs?.sha256 ?? null });
   return { map, gated: json.gated, private: json.private };
 }
 
@@ -125,8 +128,17 @@ async function checkHuggingFace() {
         continue;
       }
       const actual = info.map.get(d.repoPath);
-      if (d.size != null && actual != null && actual !== d.size) {
-        problems.push(`${d.id}: size mismatch — registry says ${d.size}, HF has ${actual}`);
+      if (d.size != null && actual.size != null && actual.size !== d.size) {
+        problems.push(`${d.id}: size mismatch — registry says ${d.size}, HF has ${actual.size}`);
+      }
+      // A declared sha256 is what tells an existing install its copy is stale
+      // (modelDownloadService._matchesRegistry). Wrong here and the update
+      // either never fires or fires forever.
+      if (d.sha256 && actual.sha256 && actual.sha256 !== d.sha256) {
+        problems.push(`${d.id}: sha256 mismatch — registry says ${d.sha256}, HF has ${actual.sha256}`);
+      }
+      if (d.sha256 && !actual.sha256) {
+        notes.push(`${d.id}: declares a sha256 but ${repo}/${d.repoPath} is not stored as LFS, so it could not be verified`);
       }
     }
     console.log(`  ${repo}: ${wanted.length} entries checked`);

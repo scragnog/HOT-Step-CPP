@@ -221,6 +221,26 @@ PINS = {
         "bytes": 171305291,
     },
 }
+
+# Heads from that repo this converter has been run against. Every one is the
+# same 103-tensor layout at the same instnorm regime, so they are drop-in weight
+# swaps; only the fixture match rate moves (v4 16.1% top-1 on minted held-out,
+# v5-and-later ~18.9%). v5+ ship as safetensors only -- there is no .pt.
+KNOWN_HEADS = {
+    "d23c4f757a05f031134b8471ec84245ec2338966516e1a9e26a17ff300a5f87e":
+        "tokenizer_head_joint_v4.pt",
+    "06440f25605c6c12c4e517ef033d7b70b8d9e961b3b06aa3848b1f8028fd7eb8":
+        "tokenizer_head_joint_v9.safetensors",
+}
+
+# Preference order when --src-head names a directory: newest known head first.
+HEAD_FILE_PREFS = (
+    "tokenizer_head_joint_v9.safetensors",
+    "tokenizer_head_joint_v8.safetensors",
+    "tokenizer_head_v5_30k.safetensors",
+    "tokenizer_head_joint_v5.safetensors",
+    "tokenizer_head_joint_v4.pt",
+)
 ORACLE_FIXTURES = "K:/yue2/fixtures/tokenizer-v1 (stages-30s, real-30s, yue2-gen)"
 
 
@@ -428,22 +448,40 @@ class TorchPtFile:
 
 
 class HeadSource:
-    """The 'model' OrderedDict of the head .pt, with expect-checked get()."""
+    """The head's tensors, with expect-checked get().
+
+    Two container formats, one interface. The v4 head is a torch .pt holding
+    {"model": state_dict, "cfg": {...}}; v5 and later ship as safetensors only,
+    a plain state_dict with the run description in the file metadata. The
+    tensor names, shapes and dtypes are identical across both, so everything
+    downstream of this class is format-blind.
+    """
 
     def __init__(self, path):
         self.path = path
-        self.pt = TorchPtFile(path)
-        obj = self.pt.obj
-        if not isinstance(obj, dict) or "model" not in obj:
-            die(f"{path}: expected a dict with a 'model' key, got {type(obj).__name__}")
-        self.state = obj["model"]
-        self.cfg = obj.get("cfg", {})
         self.consumed = set()
+        if path.endswith(".safetensors"):
+            self.pt = None
+            self.st = SafeTensorsFile(path)
+            self.state = self.st.header
+            meta = self.st.metadata
+            # ckpt_io.load_ckpt derives instnorm the same way: the flag lives in
+            # the free-text "input" field, not as a key of its own.
+            self.cfg = dict(meta)
+            self.cfg["instnorm"] = "instnorm=true" in meta.get("input", "")
+        else:
+            self.st = None
+            self.pt = TorchPtFile(path)
+            obj = self.pt.obj
+            if not isinstance(obj, dict) or "model" not in obj:
+                die(f"{path}: expected a dict with a 'model' key, got {type(obj).__name__}")
+            self.state = obj["model"]
+            self.cfg = obj.get("cfg", {})
 
     def get(self, name, expect=None):
         if name not in self.state:
             die(f"missing tensor {name} in {self.path}")
-        arr = self.pt.tensor(self.state[name])
+        arr = self.st.get(name) if self.st is not None else self.pt.tensor(self.state[name])
         self.consumed.add(name)
         if expect is not None and tuple(arr.shape) != tuple(expect):
             die(f"{name}: expected shape {tuple(expect)}, checkpoint has {tuple(arr.shape)} "
@@ -454,7 +492,7 @@ class HeadSource:
         return sorted(n for n in self.state if n not in self.consumed)
 
     def close(self):
-        self.pt.close()
+        (self.st or self.pt).close()
 
 
 class Source:
@@ -936,8 +974,8 @@ def build_mert(src_dir, b):
 def build_head(path, b):
     src = HeadSource(path)
     if len(src.state) != 103:
-        die(f"{path}: expected 103 tensors in ['model'], found {len(src.state)}")
-    log(f"head: cfg={src.cfg!r} (carries only a run name and the instnorm flag -- "
+        die(f"{path}: expected 103 head tensors, found {len(src.state)}")
+    log(f"head: cfg={src.cfg!r} (free-text provenance plus the instnorm flag -- "
         f"WIN/D/L/H/VOCAB are NOT in the file; H=8 comes from the training scripts)")
 
     # pos is (1, WIN, D) in the checkpoint; the leading 1 is a broadcast batch axis.
@@ -1002,10 +1040,11 @@ def build_head(path, b):
 
 def resolve_head_path(p):
     if os.path.isdir(p):
-        cand = os.path.join(p, "tokenizer_head_joint_v4.pt")
-        if os.path.isfile(cand):
-            return cand
-        die(f"{p} is a directory with no tokenizer_head_joint_v4.pt in it")
+        for name in HEAD_FILE_PREFS:
+            cand = os.path.join(p, name)
+            if os.path.isfile(cand):
+                return cand
+        die(f"{p} is a directory with none of {', '.join(HEAD_FILE_PREFS)} in it")
     if not os.path.isfile(p):
         die(f"head checkpoint not found: {p}")
     return p
@@ -1059,12 +1098,15 @@ def main():
 
     log(f"hashing head checkpoint {head_path} ...")
     head_sha = sha256_file(head_path)
-    if head_sha != PINS["head"]["sha256"]:
-        log(f"WARNING: head sha256 {head_sha} does not match the pinned "
-            f"{PINS['head']['sha256']} -- converting anyway, but the fixtures in "
-            f"{ORACLE_FIXTURES} were produced with the pinned file")
+    known = KNOWN_HEADS.get(head_sha)
+    if known is None:
+        log(f"WARNING: head sha256 {head_sha} is not a head this converter has been "
+            f"run against -- converting anyway, but nothing here has checked it")
     else:
-        log("head sha256 matches the pin")
+        log(f"head sha256 matches a known head: {known}")
+    if head_sha != PINS["head"]["sha256"]:
+        log(f"note: this is not the v4 head the oracle fixtures in {ORACLE_FIXTURES} "
+            f"were produced with, so expect an agreement rate against them, not parity")
 
     b = Bundle("yue2-tok")
     build_mert(args.src_mert, b)

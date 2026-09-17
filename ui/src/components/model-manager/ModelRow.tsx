@@ -68,7 +68,7 @@ export const ModelRow: React.FC<Props> = ({ file, downloadJob, onDownload, onCan
 
         {/* Actions */}
         <div className="flex items-center gap-1.5 flex-shrink-0 w-28 justify-end">
-          {file.installed && !isDownloading && (
+          {file.installed && !file.outdated && !isDownloading && (
             <>
               {confirmDelete ? (
                 <div className="flex items-center gap-1">
@@ -94,6 +94,13 @@ export const ModelRow: React.FC<Props> = ({ file, downloadJob, onDownload, onCan
                 </>
               )}
             </>
+          )}
+          {file.outdated && !isDownloading && (
+            <button onClick={() => onDownload(file.id)} title={t('models.updateAvailable')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 text-white text-xs font-medium hover:from-amber-400 hover:to-amber-500 transition-all shadow-lg shadow-amber-500/10">
+              <Download size={12} />
+              {t('models.update')}
+            </button>
           )}
           {!file.installed && !isDownloading && (
             <button onClick={() => onDownload(file.id)}

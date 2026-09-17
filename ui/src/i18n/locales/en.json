@@ -1315,6 +1315,8 @@
     "models.installed": "Installed",
     "models.deleteModel": "Delete model",
     "models.download": "Download",
+    "models.update": "Update",
+    "models.updateAvailable": "A newer version of this file has been published — download it to replace the copy on disk",
     "models.resume": "Resume",
     "models.allInstalled": "All Installed",
     "models.downloadingFiles": "Downloading {{count}} file(s)...",

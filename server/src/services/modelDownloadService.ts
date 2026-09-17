@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import http from 'http';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { config, PORTABLE_MODE, PROJECT_ROOT } from '../config.js';
 
@@ -113,6 +113,14 @@ interface RegistryFile {
   variant: string | null;
   quant: string;
   sizeBytes: number;
+  /** Optional sha256 of the published file, lowercase hex.
+   *
+   *  Declare it on any entry whose CONTENT can change under a reused
+   *  filename -- a model that gets retrained and republished at the same
+   *  name. Without it the only staleness check is the file's existence, so
+   *  an install that already holds the old bytes keeps them forever while
+   *  fresh installs get the new ones. See _matchesRegistry. */
+  sha256?: string;
   repo: string;
   description: string;
   tags: string[];
@@ -154,7 +162,7 @@ class ModelDownloadService extends EventEmitter {
 
   /** Get all files in the registry, enriched with installed status.
    *  Filters out CUDA-specific entries for non-CUDA engine variants. */
-  getRegistry(): { packs: any[]; files: (RegistryFile & { installed: boolean })[]; modelsDir: string; variant: string; cudaMajor: number } {
+  getRegistry(): { packs: any[]; files: (RegistryFile & { installed: boolean; outdated: boolean })[]; modelsDir: string; variant: string; cudaMajor: number } {
     const installed = this.getInstalledFiles();
     const isCuda = ENGINE_VARIANT === 'cuda';
     const wrongCudaTag = CUDA_MAJOR <= 12 ? 'cuda13' : 'cuda12';
@@ -168,6 +176,7 @@ class ModelDownloadService extends EventEmitter {
       .map((f: RegistryFile) => ({
         ...f,
         installed: installed.has(f.filename),
+        outdated: installed.has(f.filename) && this._isKnownStale(f),
       }));
 
     /** Ids of the files a client on THIS platform can actually see. */
@@ -483,12 +492,18 @@ class ModelDownloadService extends EventEmitter {
     const partPath = path.join(targetDir, `${file.filename}.part`);
     const finalPath = path.join(targetDir, file.filename);
 
-    // Check if already fully downloaded
+    // Check if already fully downloaded -- and, for entries that declare a
+    // sha256, that what is on disk is still what the registry describes.
     if (fs.existsSync(finalPath)) {
-      job.status = 'completed';
-      job.bytesDownloaded = job.totalBytes;
-      this.emit('progress');
-      return;
+      if (await this._matchesRegistry(finalPath, file)) {
+        job.status = 'completed';
+        job.bytesDownloaded = job.totalBytes;
+        this.emit('progress');
+        return;
+      }
+      console.log(`[ModelManager] ${file.filename} on disk does not match the registry sha256 — re-downloading`);
+      try { fs.unlinkSync(finalPath); } catch {}
+      try { fs.unlinkSync(`${finalPath}.sha256`); } catch {}
     }
 
     for (let attempt = 0; attempt < ModelDownloadService.RETRY_DELAYS.length; attempt++) {
@@ -562,6 +577,82 @@ class ModelDownloadService extends EventEmitter {
         }
       }
     }
+  }
+
+  /** Paths whose sha256 is being computed in the background right now, so a
+   *  burst of registry reads schedules each file once. */
+  private readonly _hashing = new Set<string>();
+
+  /** True when a sha256-declaring entry is installed and ALREADY KNOWN to
+   *  hold the wrong bytes -- a republished model still sitting under its old
+   *  filename. This never hashes: it answers from the <file>.sha256 sidecar
+   *  and, when there is no usable one, kicks off a background hash and says
+   *  "not stale" for now. The next registry read has the answer, and the UI
+   *  refreshes on the 'progress' event this emits when it lands. */
+  private _isKnownStale(file: RegistryFile): boolean {
+    if (!file.sha256) return false;
+    const filePath = path.join(this.getTargetDir(file), file.filename);
+    if (!fs.existsSync(filePath)) return false;
+    const cached = this._cachedSha(filePath);
+    if (cached) return cached !== file.sha256;
+    if (!this._hashing.has(filePath)) {
+      this._hashing.add(filePath);
+      void this._matchesRegistry(filePath, file)
+        .catch(() => {})
+        .finally(() => {
+          this._hashing.delete(filePath);
+          this.emit('progress');
+        });
+    }
+    return false;
+  }
+
+  /** sha256 of a file, streamed so a multi-GB model never lands in memory. */
+  private _hashFile(filePath: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const h = createHash('sha256');
+      const rs = fs.createReadStream(filePath);
+      rs.on('error', reject);
+      rs.on('data', chunk => h.update(chunk));
+      rs.on('end', () => resolve(h.digest('hex')));
+    });
+  }
+
+  /** The <file>.sha256 sidecar's hash, but only if it was computed from the
+   *  file as it is now. Returns null when there is no sidecar, it is
+   *  unreadable, or the file has changed since it was written. Never hashes. */
+  private _cachedSha(filePath: string): string | null {
+    try {
+      const stat = fs.statSync(filePath);
+      const [sha, stamp] = fs.readFileSync(`${filePath}.sha256`, 'utf8').trim().split(/\s+/);
+      return stamp === `${stat.size}:${Math.floor(stat.mtimeMs)}` ? sha : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** True when the file on disk is the one the registry entry describes.
+   *
+   *  Entries without a sha256 keep the old behaviour: present means current.
+   *  For the rest this is the only thing that can catch a republished model
+   *  sitting under its old filename -- the YuE2 tokenizer head went v4 -> v9
+   *  at the same name and 832 bytes apart, well inside the 5% tolerance
+   *  _validateDownload allows, so nothing else would ever have noticed.
+   *
+   *  Hashing gigabytes on every check would be absurd, so a verified hash is
+   *  remembered in a <file>.sha256 sidecar stamped with the size and mtime it
+   *  came from; only a file that has changed, or has never been verified,
+   *  is actually read. */
+  private async _matchesRegistry(filePath: string, file: RegistryFile): Promise<boolean> {
+    if (!file.sha256) return true;
+    const cached = this._cachedSha(filePath);
+    if (cached) return cached === file.sha256;
+    const sha = await this._hashFile(filePath);
+    try {
+      const stat = fs.statSync(filePath);
+      fs.writeFileSync(`${filePath}.sha256`, `${sha} ${stat.size}:${Math.floor(stat.mtimeMs)}\n`);
+    } catch { /* the cache is an optimisation, not a requirement */ }
+    return sha === file.sha256;
   }
 
   /** Validate a downloaded file is a real binary (not an HTML error page) */
