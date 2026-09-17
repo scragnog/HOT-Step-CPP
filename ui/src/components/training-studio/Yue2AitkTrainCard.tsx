@@ -532,6 +532,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       await clearPreparedData(datasetId, cacheInfo.slug);
       setResumeChoice('');
       setForm(previous => ({ ...previous, resume: '', dataset: '' }));
+      window.localStorage.setItem(`${FORM_KEY}${datasetId}`, JSON.stringify({ ...form, resume: '', dataset: '' }));
       window.localStorage.removeItem(`${PREP_KEY}${datasetId}:manifest`);
       window.localStorage.removeItem(`${PREP_KEY}${datasetId}:applied`);
       window.location.reload();
