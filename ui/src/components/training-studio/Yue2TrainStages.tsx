@@ -62,12 +62,12 @@ const MethodSelector: React.FC<{ value: Yue2TrainingMethod; onChange: (value: Yu
           {t('trainingStudio.yue2.method.title', 'Training method')}
         </h3>
         <p className="text-[11px] text-zinc-500">
-          {t('trainingStudio.yue2.method.subtitle', 'Choose the native AI Toolkit-compatible joint trainer or keep the existing Legacy stages.')}
+          {t('trainingStudio.yue2.method.subtitle', 'Choose the Joint Training method or keep the existing Legacy stages.')}
         </p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {([
-          ['aitk', t('trainingStudio.yue2.method.aitk', 'AI Toolkit-compatible (new)')],
+          ['aitk', t('trainingStudio.yue2.method.aitk', 'Joint Training')],
           ['legacy', t('trainingStudio.yue2.method.legacy', 'Legacy seven-stage trainer')],
         ] as const).map(([key, label]) => (
           <button
@@ -270,7 +270,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
         <div className={CARD}>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">{t('trainingStudio.yue2.aitkBatch.title', 'Train several with AI Toolkit')}</h3>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">{t('trainingStudio.yue2.aitkBatch.title', 'Train several datasets')}</h3>
               <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.aitkBatch.short', 'Run preparation and joint AR + NAR training for multiple datasets in sequence.')}</p>
             </div>
             <button type="button" onClick={() => setAitkBatchOpen(true)} className="shrink-0 rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-black hover:bg-amber-400">

@@ -3217,7 +3217,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     if (!ds) return;
     const b = (req.body || {}) as Record<string, unknown>;
     if (b.trainingMethod !== 'aitk') {
-      res.status(400).json({ error: 'AITK joint training requires trainingMethod="aitk"; Legacy is never selected implicitly.' });
+      res.status(400).json({ error: 'Joint training requires trainingMethod="aitk"; Legacy is never selected implicitly.' });
       return;
     }
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
@@ -3236,7 +3236,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     const seed = integer('seed', 42);
     const device = str('device');
     if (!checkpoint || !fs.existsSync(checkpoint) || !fs.statSync(checkpoint).isFile()) {
-      res.status(400).json({ error: `raw ConvRot checkpoint is missing: ${checkpoint || '(empty)'}. Install the verified checkpoint before starting AITK training.` });
+      res.status(400).json({ error: `raw ConvRot checkpoint is missing: ${checkpoint || '(empty)'}. Install the verified checkpoint before starting joint training.` });
       return;
     }
     let preparation: ResolvedYue2AitkPrepareOptions | undefined;
@@ -3253,38 +3253,38 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       if (prepError) { res.status(400).json({ error: prepError }); return; }
     }
     if (!automatic && (!dataset || !fs.existsSync(dataset) || !fs.statSync(dataset).isFile())) {
-      res.status(400).json({ error: `prepared AITK schema1 dataset is missing: ${dataset || '(empty)'}. Run native dataset preparation first; Legacy caches are not accepted.` });
+      res.status(400).json({ error: `prepared joint-training dataset is missing: ${dataset || '(empty)'}. Run native dataset preparation first; Legacy caches are not accepted.` });
       return;
     }
     if (!automatic) try {
       if (fs.statSync(dataset).size > 16 * 1024 * 1024) {
-        res.status(400).json({ error: `AITK dataset manifest exceeds the 16 MiB limit: ${dataset}` });
+        res.status(400).json({ error: `Joint-training dataset manifest exceeds the 16 MiB limit: ${dataset}` });
         return;
       }
       const manifest = JSON.parse(fs.readFileSync(dataset, 'utf8')) as Record<string, unknown>;
       if (manifest.schema_version !== 1 || manifest.recipe_version !== 'aitk-yue2-2026-09-16'
         || manifest.cot !== 'full' || !Array.isArray(manifest.items)
         || typeof manifest.base_sha256 !== 'string' || typeof manifest.source_manifest_sha256 !== 'string') {
-        res.status(400).json({ error: `dataset is not a validated AITK schema1 manifest: ${dataset}. Run native dataset preparation first.` });
+        res.status(400).json({ error: `dataset is not a validated joint-training schema1 manifest: ${dataset}. Run native dataset preparation first.` });
         return;
       }
     } catch {
-      res.status(400).json({ error: `prepared AITK dataset manifest is not valid JSON: ${dataset}` });
+      res.status(400).json({ error: `prepared joint-training dataset manifest is not valid JSON: ${dataset}` });
       return;
     }
     const previewRequested = !!(b.preview && typeof b.preview === 'object'
       && (b.preview as Record<string, unknown>).enabled === true);
     if (!outDir || (fs.existsSync(outDir) && !previewRequested)) {
-      res.status(400).json({ error: `AITK output must be a new directory: ${outDir || '(empty)'}` });
+      res.status(400).json({ error: `Joint-training output must be a new directory: ${outDir || '(empty)'}` });
       return;
     }
     if (previewRequested && fs.existsSync(outDir) && fs.readdirSync(outDir).length > 0) {
-      res.status(400).json({ error: `AITK preview output directory must be empty: ${outDir}` });
+      res.status(400).json({ error: `Joint-training preview output directory must be empty: ${outDir}` });
       return;
     }
     if (!str('output')) fs.mkdirSync(path.dirname(outDir), { recursive: true });
     if (!fs.existsSync(path.dirname(outDir))) {
-      res.status(400).json({ error: `AITK output parent directory is missing: ${path.dirname(outDir)}` });
+      res.status(400).json({ error: `Joint-training output parent directory is missing: ${path.dirname(outDir)}` });
       return;
     }
     if (!Number.isInteger(steps) || steps < 1 || steps > 0x7fffffff
@@ -3297,7 +3297,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       return;
     }
     if (resume && (!fs.existsSync(resume) || !fs.statSync(resume).isFile())) {
-      res.status(400).json({ error: `AITK resume record is missing: ${resume}` });
+      res.status(400).json({ error: `Joint-training resume record is missing: ${resume}` });
       return;
     }
     // New runs default to no preview pauses. An explicit block opts in; this
@@ -3504,7 +3504,7 @@ router.get('/datasets/:id/yue2-joint-previews', (req: Request, res: Response) =>
     const runs = listYue2AitkRuns(ds.id, ds.slug);
     const asked = typeof req.query.run === 'string' ? req.query.run.trim() : '';
     const run = runs.find(r => !asked || r.jobId === asked || path.resolve(r.output) === path.resolve(asked));
-    if (!run) { res.status(404).json({ error: 'AITK joint run not found' }); return; }
+    if (!run) { res.status(404).json({ error: 'Joint-training run not found' }); return; }
     const previews = listYue2JointPreviews(run.output).map(p => ({
       ...p,
       ...(p.file && resolveYue2JointPreview(run.output, p.file)

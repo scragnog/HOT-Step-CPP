@@ -54,7 +54,7 @@ function preparedManifest(pathname: string): string | null {
     if (value.schema_version !== 1 || value.recipe_version !== 'aitk-yue2-2026-09-16'
       || value.cot !== 'full' || !Array.isArray(value.items)
       || typeof value.base_sha256 !== 'string' || typeof value.source_manifest_sha256 !== 'string') {
-      return 'dataset is not a validated AITK schema1 manifest (run native preparation first)';
+      return 'dataset is not a validated joint-training schema1 manifest (run native preparation first)';
     }
   } catch {
     return 'prepared schema1 dataset manifest is not valid JSON';
@@ -66,9 +66,9 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (!o.checkpoint || !fs.existsSync(o.checkpoint) || !fs.statSync(o.checkpoint).isFile()) return `raw ConvRot checkpoint is missing or is not a file: ${o.checkpoint || '(empty)'}`;
   const manifestError = preparedManifest(o.dataset);
   if (manifestError) return `${manifestError}: ${o.dataset || '(empty)'}`;
-  if (!o.outDir) return 'AITK joint training requires a new output directory';
+  if (!o.outDir) return 'Joint training requires a new output directory';
   if (fs.existsSync(o.outDir)) return `output directory already exists; choose a new directory: ${o.outDir}`;
-  if (!fs.existsSync(path.dirname(o.outDir))) return `parent directory for AITK output is missing: ${path.dirname(o.outDir)}`;
+  if (!fs.existsSync(path.dirname(o.outDir))) return `parent directory for joint-training output is missing: ${path.dirname(o.outDir)}`;
   if (!Number.isInteger(o.steps) || o.steps < 1) return 'steps must be a positive integer';
   if (!Number.isInteger(o.saveEvery) || o.saveEvery < 1 || o.saveEvery > o.steps) return 'saveEvery must be between 1 and steps';
   if (!Number.isInteger(o.seed) || o.seed < 0) return 'seed must be a non-negative integer';
@@ -100,14 +100,14 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void 
       totalSteps: state.totalSteps, ...(event.loss === undefined ? {} : { loss: event.loss }),
       ...(event.gradNorm === undefined ? {} : { gradNorm: event.gradNorm }) });
     emitProgress(job);
-    log(job, 'info', `AITK joint step ${step}${event.loss === undefined ? '' : ` loss ${event.loss}`}`);
+    log(job, 'info', `Joint training step ${step}${event.loss === undefined ? '' : ` loss ${event.loss}`}`);
   } else if (stage === 'checkpoint' || stage === 'checkpoint_stage') {
-    log(job, 'info', `AITK joint ${stage}${step === undefined ? '' : ` at step ${step}`}`);
+    log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
   } else if (stage !== 'event') {
     if (stage === 'done') state.doneSeen = true;
     job.phase = stage;
     emitProgress(job);
-    log(job, 'info', `AITK joint ${stage}`);
+    log(job, 'info', `Joint training ${stage}`);
   }
 }
 
@@ -162,12 +162,12 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
       return;
     }
   }
-  const error = opts ? validateOptions(opts) : 'job is missing AITK joint training options';
+  const error = opts ? validateOptions(opts) : 'job is missing joint-training options';
   if (error) { finishJob(job, 'failed', error); return; }
   const o = opts!;
   let nativeAttempted = false;
   try {
-    log(job, 'info', `Starting explicit AITK YuE2 joint training (${o.device})`);
+    log(job, 'info', `Starting YuE2 joint training (${o.device})`);
     nativeAttempted = true;
     const preview = o.preview?.enabled && o.preview.everySteps > 0 ? o.preview : undefined;
     if (preview) fs.mkdirSync(path.join(o.outDir, 'segments'), { recursive: true });
@@ -185,17 +185,17 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
       nativeAttempted = true;
       await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs(segment),
         Math.max(30 * 60 * 1000, (o.steps - step) * 10 * 60 * 1000), () => {
-          if (!fs.existsSync(segmentOut)) return 'AITK joint trainer exited without creating its output directory';
+          if (!fs.existsSync(segmentOut)) return 'Joint trainer exited without creating its output directory';
           const checkpoint = path.join(segmentOut, `checkpoint-step${wanted}`);
-          if (!fs.existsSync(checkpoint)) return `AITK checkpoint-step${wanted} is missing`;
+          if (!fs.existsSync(checkpoint)) return `Joint-training checkpoint-step${wanted} is missing`;
           if (['adapter.safetensors', 'optimizer.resume', 'native-ar.safetensors', 'native-nar.safetensors']
-            .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `AITK checkpoint-step${wanted} is incomplete`;
+            .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `Joint-training checkpoint-step${wanted} is incomplete`;
           return null;
         }, (line, current) => relayJsonLine(job, line, current), state, o.spawnEnv);
       if (isCancelled(job)) return;
       if (!state.pausedAt || !preview || state.pausedAt >= o.steps) break;
       const ckpt = checkpointRecords(segmentOut).find(c => c.step === state.pausedAt);
-      if (!ckpt?.optimizerPath || !ckpt.arPath || !ckpt.narPath) throw new Error(`AITK pause at step ${state.pausedAt} has no complete paired checkpoint`);
+      if (!ckpt?.optimizerPath || !ckpt.arPath || !ckpt.narPath) throw new Error(`Joint-training pause at step ${state.pausedAt} has no complete paired checkpoint`);
       job.phase = 'preview'; emitProgress(job);
       try {
         await renderYue2JointPreview({ output: o.outDir, step: state.pausedAt, options: preview, arAdapter: ckpt.arPath, narAdapter: ckpt.narPath, dataset: o.dataset, signal: job.controller.signal });

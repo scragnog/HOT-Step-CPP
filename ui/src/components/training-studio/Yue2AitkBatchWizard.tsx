@@ -85,7 +85,7 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
         if (signal.current.cancelled) throw new Error('Batch cancelled');
         const defaults = prep.defaults;
         if (!defaults?.legacyManifest || !defaults.checkpoint || !defaults.tokenizer || !defaults.models?.vae || !defaults.models.semantic || !defaults.models.sheetsage) {
-          throw new Error('AI Toolkit preparation defaults are incomplete for this dataset');
+          throw new Error('Joint Training preparation defaults are incomplete for this dataset');
         }
         update(dataset.id, { status: 'running', phase: 'joint training' });
         const preview: Yue2JointPreviewOptions = { enabled: false, everySteps: saveEvery, seconds: 40, seed: 424242, previewMaxFrames: 0, baseline: false, control: false };
@@ -111,7 +111,7 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={e => { if (e.target === e.currentTarget && !running) onClose(); }}>
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-zinc-200 dark:border-white/10 bg-white dark:bg-suno-card p-5 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">{t('trainingStudio.yue2.aitkBatch.title', 'Train several with AI Toolkit')}</h3>
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">{t('trainingStudio.yue2.aitkBatch.title', 'Train several datasets')}</h3>
           <button type="button" onClick={onClose} disabled={running}><X size={16} /></button>
         </div>
         <p className="text-[11px] text-zinc-500 mb-4">{t('trainingStudio.yue2.aitkBatch.help', 'Each dataset runs its caches, preparation, and joint AR + NAR training in order. Settings are shared; output folders are unique per dataset.')}</p>

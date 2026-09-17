@@ -120,7 +120,7 @@ function parseProgress(job: TrainingJob, line: string): void {
 
 export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: ResolvedYue2AitkPrepareOptions): Promise<void> {
   const opts = inlineOptions ?? job.opts as ResolvedYue2AitkPrepareOptions | undefined;
-  const validation = opts ? validateYue2AitkPrepareOptions(opts) : 'job is missing AITK preparation options';
+  const validation = opts ? validateYue2AitkPrepareOptions(opts) : 'job is missing joint-training preparation options';
   if (validation) { finishJob(job, 'failed', validation); return; }
   const o = opts!;
   const exe = aceTrainExe();
@@ -132,7 +132,7 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
   job.total = 1;
   emitProgress(job);
   const args = buildYue2AitkPrepareArgs(o);
-  pushEvent(job, { type: 'log', level: 'info', message: `Starting CPU-only AITK preparation: ${exe} ${args[0]}`, ts: Date.now() });
+  pushEvent(job, { type: 'log', level: 'info', message: `Starting CPU-only preparation: ${exe} ${args[0]}`, ts: Date.now() });
 
   const child = spawn(exe, args, {
     windowsHide: true,
@@ -159,9 +159,9 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
     if (code !== 0) throw new Error(`yue2-prepare-aitk exited with code ${code === null ? 'null (killed)' : code}${tail.length ? `: ${tail.slice(-3).join(' | ')}` : ''}`);
     const manifest = path.join(o.output, 'dataset.json');
     const error = regularFile(manifest, 'prepared dataset manifest', MAX_OUTPUT_MANIFEST_BYTES);
-    if (error) throw new Error(`AITK preparation finished without a valid output: ${error}`);
+    if (error) throw new Error(`Preparation finished without a valid output: ${error}`);
     const value = JSON.parse(fs.readFileSync(manifest, 'utf8')) as Record<string, unknown>;
-    if (value.schema_version !== 1 || !Array.isArray(value.items)) throw new Error('AITK preparation wrote an invalid schema-1 dataset manifest');
+    if (value.schema_version !== 1 || !Array.isArray(value.items)) throw new Error('Preparation wrote an invalid schema-1 dataset manifest');
     job.done = 1; emitProgress(job);
     if (!inlineOptions) { job.phase = 'done'; finishJob(job, 'done'); }
   } catch (err: unknown) {

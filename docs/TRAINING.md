@@ -4,7 +4,7 @@
 
 ## YuE2 joint training
 
-The native CUDA joint trainer follows AI Toolkit's YuE2 recipe. Each step trains
+The native CUDA joint trainer follows the YuE2 recipe. Each step trains
 both AR and NAR adapters, refreshes detached AR conditioning, clips the combined
 gradients and makes one AdamW8bit update. Existing separate YuE2 trainers remain
 available as Legacy.
@@ -16,8 +16,8 @@ ace-train yue2-joint-train --checkpoint base.safetensors --dataset prepared/data
 The checkpoint must be the raw YuE2 ConvRot safetensors model. The dataset must
 use the joint trainer's schema-1 manifest, including matching model and source
 hashes. Existing Legacy caches cannot be passed directly. Output must be a new
-directory. Each `checkpoint-stepN` contains the combined Toolkit-layout
-`adapter.safetensors`, native inference exports `native-ar.safetensors` and
+directory. Each `checkpoint-stepN` contains the combined
+`adapter.safetensors` in the compatible layout, native inference exports `native-ar.safetensors` and
 `native-nar.safetensors`, and `optimizer.resume`. Use both native exports for
 generation. Resume into another new directory with `--resume` pointing
 to that record; `--steps` is the total desired step count. Use the same dataset,
@@ -28,7 +28,7 @@ a stop at the next completed step and saves that state. The app's Windows Stop
 action currently terminates the process, so only already published checkpoints
 are guaranteed to survive it.
 
-In Training Studio, AI Toolkit-compatible training is the default. Complete
+In Training Studio, Joint Training is the default. Complete
 the latent, semantic-token and ABC cache stages, then prepare the joint dataset
 and train. Legacy keeps the existing separate AR/NAR workflow. The joint
 checkpoint picker applies both native adapters for generation.
@@ -47,7 +47,7 @@ and remains playable after reopening it. Native AR and NAR exports from the
 same checkpoint should be selected together; their generation strengths remain
 independent and default to 1/1.
 
-The AITK “Train multiple” control processes selected datasets sequentially:
+The "Train multiple" control processes selected datasets sequentially:
 cache stages, optional timing preparation, joint preparation, then joint
 training. It uses shared recipe settings and separate output directories. The
 queue is held in browser memory, like the Legacy batch wizard, so the Training
@@ -63,8 +63,8 @@ ace-train yue2-prepare-aitk --legacy-manifest yue2_preprocess.json --checkpoint 
 `--tokenizer` is the text tokenizer in an LM GGUF or a directory containing
 `vocab.json` and `merges.txt`. `--model semantic` is the separate audio tokenizer.
 Preparation validates geometry, payloads and captions, records model hashes,
-and publishes a new manifest without changing the source cache. For existing
-AI Toolkit caches, use `yue2-import-aitk-cache --help`.
+and publishes a new manifest without changing the source cache. For caches
+prepared by other YuE2 training tools, use `yue2-import-aitk-cache --help`.
 
 The synthetic native resume check reproduces uninterrupted training exactly.
 Real full-song updates and native adapter merging have passed. Native and Torch

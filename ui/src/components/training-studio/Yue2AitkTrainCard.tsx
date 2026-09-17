@@ -346,7 +346,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   return (
     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5">
       <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-300">
-        {t('trainingStudio.yue2.method.aitkTitle', 'AI Toolkit-compatible training is selected')}
+        {t('trainingStudio.yue2.method.aitkTitle', 'Joint Training is selected')}
       </h3>
       <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
         {t('trainingStudio.yue2.method.autoTrainHint', 'Start training prepares the dataset automatically, then trains AR and NAR together. Unchanged prepared data is reused.')}
@@ -402,7 +402,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <button type="button" disabled={active || preparing || starting}
           onClick={() => setForm(previous => ({ ...previous, steps: 3000, saveEvery: 250 }))}
           className="px-2.5 py-1 rounded-lg text-[11px] border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40">
-          {t('trainingStudio.yue2.method.presetAitk', 'AI Toolkit · 3000 steps, save every 250')}
+          {t('trainingStudio.yue2.method.presetAitk', 'Joint Training · 3000 steps, save every 250')}
         </button>
         <button type="button" disabled={active || preparing || starting}
           onClick={() => setForm(previous => ({ ...previous, steps: 300, saveEvery: 50 }))}
