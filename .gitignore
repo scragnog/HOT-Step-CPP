@@ -77,6 +77,8 @@ models/onnx/dit-stream/
 
 # Downloaded tools (whisper.cpp, etc.)
 tools/*
+!tools/yue2-aitk-reference/
+!tools/yue2-aitk-reference/**
 !tools/onnx-export/
 !tools/mcp-lyricstudio/
 tools/mcp-lyricstudio/node_modules/
