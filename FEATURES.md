@@ -30,7 +30,7 @@ A native C++/GGML port of [MiniMax-Music3](https://huggingface.co/MiniMaxAI/Mini
 
 ## Training Studio
 
-Fine-tunes style adapters for both models on your own GPU, with no Python and no external tools.
+Fine-tunes style adapters for all three models on your own GPU, with no Python and no external tools.
 
 | Feature | Description |
 |---------|-------------|
@@ -40,6 +40,8 @@ Fine-tunes style adapters for both models on your own GPU, with no Python and no
 | **Flash-attention LM training** | The same fused attention op, ported to both planner LM trainers. On ACE-Step's, the causal mask skips roughly half its compute for free, raising the longest song a 0.6B/1.7B adapter trains on without truncation and beating the shipped per-head-block path on the 4B. On MiniMax-Music3's, it turns a quadratic-in-crop-length VRAM wall into a linear one — measured usable crop ceiling goes from ~4,300 frames to a whole album's longest track (~11,000+ frames) on a 32 GB card. Off by default on both; the exact graph is what every shipped adapter has trained on so far. |
 | **ACE-Step adapters** | Planner LM LoRA (0.6B/1.7B/4B) and DiT LoRA. |
 | **MiniMax-Music3 adapters** | Planner LM LoRA and LoKr, and flow-DiT LoRA, trained end to end in-engine from audio through RVQ codes. |
+| **YuE2 adapters** | A LoRA on each half of the YuE2 LM (AR composer and NAR flow stage), trained either by the legacy seven-stage chain or by **Joint Training**, which trains a fused AR + NAR adapter in one run. Joint training requires a CUDA build. |
+| **YuE2 joint trainer options** | Optimizer choice (Prodigy by default, plus AdamW and Muon), LoRA rank and alpha, stop on a step count or on a target loss (step count stays the default), named presets stored in the browser, and a Perform all stages button that runs the preparation stages not already done, then starts training from the on-screen settings. |
 | **Checkpoint previews** | Renders an audio preview at every checkpoint, so an adapter can be judged mid-run rather than after it. |
 | **Objective evaluation** | Calibration and evaluation passes score adapters, with the score shown in the adapter picker, so the best checkpoint is identifiable rather than assumed to be the last. |
 | **Pause, resume, survive** | Runs pause and resume, batch pipelines are restart-proof and resumable from their record, and a saved plan refuses to load against the wrong model. |

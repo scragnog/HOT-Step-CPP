@@ -15,6 +15,8 @@ Describe a song with a text caption and lyrics, and get stereo 48kHz audio gener
 >
 > It trains adapters for **all three models**. For ACE-Step that's planner LM LoRA (0.6B/1.7B/4B) and DiT LoRA. For MiniMax-Music3 it's planner LM LoRA/LoKr and flow-DiT LoRA. For YuE2 it's a LoRA on each half of the LM — the AR composer and the NAR flow stage — trained by a six-stage chain you can run end to end with one button: latent cache, codes, vocal stems, lyric cursor spans, then the two training runs.
 >
+> YuE2 also has a **Joint Training** method: one fused run that trains the AR and NAR adapters together, with your choice of optimizer (Prodigy, AdamW or Muon), LoRA rank and alpha, and a stop target of either step count or loss. Its **Perform all stages** button runs the preparation steps that are not already done (latent cache, codes, lead sheets, and vocal stems plus lyric alignment while lyric timing is on), then starts training with the settings on screen. Settings can be saved as named presets that live in the browser, and finished checkpoints can be auditioned straight from the training page.
+>
 > **It fits on a normal card.** Training against a quantized base takes the VRAM floor from 31.4 GB down to around 10 GB, which is what makes MM3 adapter training possible below a 32 GB card at all. Runs pause and resume, survive a server restart, render an audio preview at every checkpoint so you can hear an adapter mid-run, and score themselves so you can tell which checkpoint is actually best rather than assuming it is the last one.
 >
 > Still rough in places and still GPU-hungry. If you try it, we would like to hear how it goes on the Discord. Find it in the sidebar as **Training**.
@@ -45,7 +47,7 @@ Describe a song with a text caption and lyrics, and get stereo 48kHz audio gener
 >
 > **A full quant ladder.** One GGUF for the LM, one for the VAE, each selectable on its own. The recommended pack is a Q8 LM plus the F32 decoder, about 4.5 GB; everything below Q5 is built against an **importance matrix** and the ladder is scored by NAR-stage error against the BF16 reference, down to IQ2_XS at 1.37 GB. Formats include NVFP4 and MXFP4. The small end is labelled honestly — Q2 is audibly degraded and says so in the Model Manager.
 >
-> **Adapters and training work.** Training Studio trains a LoRA on each half of the YuE2 LM — the AR composer and the NAR flow stage — from your own folder of songs, and the global bar has an AR slot and a NAR slot to load them into, each with its own scale plus per-module and per-depth dials. An adapter is addressed by the trigger word it was trained under, so lead your style prompt with it.
+> **Adapters and training work.** Training Studio trains adapters from your own folder of songs, in either method: the legacy chain trains the AR composer and the NAR flow stage as separate runs, and **Joint Training** trains a fused AR + NAR adapter in one run, with optimizer choice (Prodigy, AdamW, Muon), LoRA rank/alpha, and a step-count or target-loss stop. The global bar has an AR slot and a NAR slot to load them into, each with its own scale plus per-module and per-depth dials. An adapter is addressed by the trigger word it was trained under, so lead your style prompt with it.
 >
 > Still a v1 elsewhere: text-to-music only, one take per render, and no streaming, covers, repaint or lyric timestamps on this backend yet. Post-processing, StableStep, VST effects, mastering and Whisper transcription all work on its output.
 >
@@ -102,7 +104,7 @@ HOT-Step CPP extends the base acestep.cpp engine with 100+ features across infer
 
 🎹 **Three music models, one app** — ACE-Step 1.5, MiniMax-Music3 and YuE2 all run natively in the C++/GGML engine, switchable from the toolbar. The UI hides controls that do not apply to the model you are on, so you are never adjusting a knob that does nothing.
 
-🎓 **Training Studio** — Fine-tune style adapters for ACE-Step 1.5 or MiniMax-Music3 on your own GPU, with no Python. Dataset creation, captioning, preprocessing and training all happen in-app. Training against a quantized base drops the VRAM floor from 31.4 GB to about 10 GB. Runs pause, resume, survive restarts, preview audio at every checkpoint, and score themselves so you can pick the best one.
+🎓 **Training Studio** — Fine-tune style adapters for ACE-Step 1.5, MiniMax-Music3 or YuE2 on your own GPU, with no Python. YuE2 gains a Joint Training method that trains its AR and NAR adapters in one fused run, with optimizer choice and a step-count or target-loss stop. Dataset creation, captioning, preprocessing and training all happen in-app. Training against a quantized base drops the VRAM floor from 31.4 GB to about 10 GB. Runs pause, resume, survive restarts, preview audio at every checkpoint, and score themselves so you can pick the best one.
 
 🎧 **Local audio captioning** — MOSS-Music-8B runs natively in the engine as `ace-caption`. Point it at audio, get a caption, with nothing sent anywhere. One encode produces every caption format at once, and hybrid mode pairs what the model hears with what Essentia measures so tempo and key come from analysis rather than a guess.
 
@@ -661,3 +663,10 @@ The engine component (`engine/`) is licensed under MIT. See [engine/LICENSE](eng
 If HOT-Step is useful to you, consider giving it a star — it really helps!
 
 [![Star History Chart](https://api.star-history.com/svg?repos=scragnog/HOT-Step-CPP&type=Date)](https://star-history.com/#scragnog/HOT-Step-CPP&Date)
+
+---
+
+## Acknowledgments
+
+- **AI-Toolkit**: inspiration for HOT-Step's YuE2 Joint Training method.
+- **MotherSuperior** (kytr.ai, [Hugging Face](https://huggingface.co/Mothersuperior)): the original YuE2 encoder that turns songs into the codes the YuE2 trainers learn from.
