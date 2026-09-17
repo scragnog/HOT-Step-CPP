@@ -50,7 +50,7 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   trainingMethod: 'aitk', checkpoint: '', dataset: '', output: '',
   steps: 400, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
   optimizer: 'prodigy', prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
-  rank: 32, alpha: 32, stopMode: 'steps',
+  rank: 64, alpha: 64, stopMode: 'steps',
 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
@@ -72,7 +72,17 @@ function readStored<T>(key: string, fallback: T): T {
  *  fields fill in with their defaults. The persistence effect writes the
  *  merged form back, so this self-heals on the first load after an upgrade. */
 function readStoredForm(datasetId: string): Yue2JointTrainRequest {
-  return { ...DEFAULT_FORM, ...readStored<Partial<Yue2JointTrainRequest>>(`${FORM_KEY}${datasetId}`, {}) };
+  const stored = readStored<Partial<Yue2JointTrainRequest>>(`${FORM_KEY}${datasetId}`, {});
+  const migration = `${FORM_KEY}${datasetId}:defaults-64`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(migration)) {
+    // Move values that match the former defaults; retain deliberate custom values.
+    if (stored.steps === 3000) stored.steps = 400;
+    if (stored.saveEvery === 250) stored.saveEvery = 50;
+    if (stored.rank === 32) stored.rank = 64;
+    if (stored.alpha === 32) stored.alpha = 64;
+    window.localStorage.setItem(migration, '1');
+  }
+  return { ...DEFAULT_FORM, ...stored };
 }
 
 function isJointJob(job: TrainingJobSummary, datasetId: string): boolean {

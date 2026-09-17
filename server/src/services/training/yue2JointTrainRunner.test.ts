@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildYue2JointTrainArgs, parseYue2JointEvent } from './yue2JointTrainRunner.js';
+import { buildYue2JointTrainArgs, parseYue2JointEvent, parseYue2JointStopMode } from './yue2JointTrainRunner.js';
+
+test('joint stop mode accepts the explicit step count sent by the UI', () => {
+  assert.equal(parseYue2JointStopMode('steps'), 'steps');
+  assert.equal(parseYue2JointStopMode(undefined), 'steps');
+  assert.equal(parseYue2JointStopMode('loss'), 'loss');
+  assert.equal(parseYue2JointStopMode('other'), null);
+});
 
 test('AITK native joint JSON event maps to the server metric contract', () => {
   assert.deepEqual(parseYue2JointEvent(

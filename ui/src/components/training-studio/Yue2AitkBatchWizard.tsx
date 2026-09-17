@@ -36,8 +36,8 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
   const activeJob = useTrainingStore(s => s.activeJob);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [lyricTiming, setLyricTiming] = useState(true);
-  const [steps, setSteps] = useState(3000);
-  const [saveEvery, setSaveEvery] = useState(250);
+  const [steps, setSteps] = useState(400);
+  const [saveEvery, setSaveEvery] = useState(50);
   const [seed, setSeed] = useState(42);
   const [device, setDevice] = useState('CUDA0');
   const [running, setRunning] = useState(false);

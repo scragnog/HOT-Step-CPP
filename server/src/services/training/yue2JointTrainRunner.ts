@@ -39,6 +39,11 @@ export interface ResolvedYue2JointTrainOptions {
   targetLoss?: number;
 }
 
+/** Route and native runner share the public stop-mode contract. */
+export function parseYue2JointStopMode(value: unknown): 'steps' | 'loss' | null {
+  return value === undefined || value === 'steps' ? 'steps' : value === 'loss' ? 'loss' : null;
+}
+
 export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): string[] {
   const args = [
     'yue2-joint-train', '--checkpoint', o.checkpoint, '--dataset', o.dataset,
