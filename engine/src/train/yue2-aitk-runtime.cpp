@@ -195,8 +195,12 @@ static int run_impl(const Config & config, std::string * error) {
     if (!std::filesystem::create_directory(std::filesystem::u8path(config.output), ec) || ec) { fail(error, "cannot create new training output directory"); return 1; }
     ggml_backend_load_all();
     const auto device = ggml_backend_dev_by_name(("CUDA" + std::to_string(config.cuda_index)).c_str());
+    const char * reg_name = device ? ggml_backend_reg_name(ggml_backend_dev_backend_reg(device)) : nullptr;
+    if (!reg_name || std::strncmp(reg_name, "CUDA", 4) != 0) { fail(error, "requested device is not a CUDA backend"); return 1; }
     struct Backend { ggml_backend_t value = nullptr; ~Backend() { if (value) ggml_backend_free(value); } } backend{device ? ggml_backend_dev_init(device, nullptr) : nullptr};
     if (!backend.value) { fail(error, "requested CUDA backend is unavailable"); return 1; }
+    std::fprintf(stderr, "[yue2-aitk] training device %s via %s; optimizer scheduler uses CUDA + CPU (no Vulkan compute)\n",
+                 ggml_backend_dev_name(device), reg_name);
     using AttentionPrecision = const char * (*)(int);
     const auto attention_precision = reinterpret_cast<AttentionPrecision>(ggml_backend_reg_get_proc_address(
         ggml_backend_dev_backend_reg(device), "ggml_backend_cuda_fattn_train_last_prec"));
@@ -208,11 +212,13 @@ static int run_impl(const Config & config, std::string * error) {
         struct LmOptimHolder {
             LmOptim opt;
             ggml_backend_sched_t osched = nullptr;
+            ggml_backend_t cpu_backend = nullptr;
             ggml_context * scal_ctx = nullptr;
             ggml_backend_buffer_t scal_buf = nullptr;
             ~LmOptimHolder() {
                 if (osched) ggml_backend_sched_free(osched);
                 lm_optim_free(&opt);
+                if (cpu_backend) ggml_backend_free(cpu_backend);
                 if (scal_buf) ggml_backend_buffer_free(scal_buf);
                 if (scal_ctx) ggml_free(scal_ctx);
             }
@@ -257,11 +263,16 @@ static int run_impl(const Config & config, std::string * error) {
                 for (const auto & p : named) params.push_back(p.parameter);
                 std::string lm_err;
                 if (!lm_optim_init(&o, params, backend.value, &lm_err)) { fail(error, ("optimizer init: " + lm_err).c_str()); return 1; }
-                // All optimizer tensors (params, grads, buffers, scalars) live
-                // on the single CUDA backend, so a 1-backend scheduler is enough.
-                ggml_backend_t             lm_backends[1] = { backend.value };
-                ggml_backend_buffer_type_t lm_bufts[1]    = { ggml_backend_get_default_buffer_type(backend.value) };
-                holder->osched = ggml_backend_sched_new(lm_backends, lm_bufts, 1, std::max(16384, o.est_nodes), false, true);
+                // GGML's scheduler requires a CPU backend in its final slot,
+                // even when all optimizer tensors are CUDA-resident.
+                holder->cpu_backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+                if (!holder->cpu_backend) { fail(error, "optimizer CPU scheduler fallback is unavailable"); return 1; }
+                ggml_backend_t lm_backends[2] = { backend.value, holder->cpu_backend };
+                ggml_backend_buffer_type_t lm_bufts[2] = {
+                    ggml_backend_get_default_buffer_type(backend.value),
+                    ggml_backend_get_default_buffer_type(holder->cpu_backend),
+                };
+                holder->osched = ggml_backend_sched_new(lm_backends, lm_bufts, 2, std::max(16384, o.est_nodes), false, true);
                 if (!holder->osched) { fail(error, "optimizer scheduler allocation failed"); return 1; }
                 lm = std::move(holder);
                 std::fprintf(stderr, "[yue2-aitk] optimizer %s over %zu parameters (%d on Muon)\n", config.optimizer.c_str(), params.size(), lm->opt.n_muon);

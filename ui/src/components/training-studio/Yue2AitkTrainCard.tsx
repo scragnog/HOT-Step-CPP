@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Loader2, Play, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
+import { TrainingChart } from './TrainingChart';
 import {
   cancelJob,
   getJob,
@@ -120,6 +121,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [applyNote, setApplyNote] = useState('');
   const [runsError, setRunsError] = useState('');
   const [liveMetric, setLiveMetric] = useState<TrainingMetricEvent | null>(null);
+  // AITK's joint runner emits step metrics without an epoch stream. Keep the
+  // history here in the same step-domain shape used by the legacy YuE2 chart.
+  // The job SSE endpoint replays its buffer, so this also reconstructs the
+  // curve after a reload or EventSource reconnect.
+  const [stepHistory, setStepHistory] = useState<Array<{ step: number; loss: number; ep: number }>>([]);
   const [jobLogs, setJobLogs] = useState<string[]>([]);
   const [showJobLogs, setShowJobLogs] = useState(false);
   const [jointPreviews, setJointPreviews] = useState<Yue2JointPreviewRecord[]>([]);
@@ -180,6 +186,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   useEffect(() => {
     setLiveMetric(null);
+    setStepHistory([]);
     setJobLogs([]);
     setShowJobLogs(false);
     if (!job?.id) return;
@@ -189,6 +196,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         const item = JSON.parse(event.data) as TrainingStreamEvent;
         if (item.type === 'metric' && item.metric === 'step') {
           setLiveMetric(item);
+          if (typeof item.step === 'number' && typeof item.loss === 'number'
+            && Number.isFinite(item.step) && Number.isFinite(item.loss)) {
+            setStepHistory(previous => {
+              const next = [...previous.filter(point => point.step !== item.step),
+                { step: item.step!, loss: item.loss!, ep: item.step! }];
+              next.sort((a, b) => a.step - b.step);
+              return next.slice(-2000);
+            });
+          }
         } else if (item.type === 'log') {
           const stamp = new Date(item.ts).toLocaleTimeString();
           setJobLogs(previous => [...previous, `${stamp} ${item.level}: ${item.message}`].slice(-100));
@@ -573,6 +589,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · loss ${liveMetric.loss.toFixed(4)}` : ''}`}
         </span>}
       </div>
+      {stepHistory.length > 1 && (
+        <div className="mt-3">
+          <TrainingChart
+            epochs={[]}
+            steps={stepHistory}
+            target={0}
+          />
+        </div>
+      )}
       {jobLogs.length > 0 && <details className="mt-2" open={showJobLogs} onToggle={event => setShowJobLogs(event.currentTarget.open)}>
         <summary className="cursor-pointer text-[11px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.showLogs', 'Show training log (last 100 lines)')}</summary>
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{jobLogs.join('\n')}</pre>
