@@ -8,10 +8,13 @@ import {
   getYue2AitkPrepare,
   listYue2AitkRuns,
   listJobs,
+  jobStreamUrl,
   startYue2AitkPrepare,
   startYue2JointTrain,
   type Yue2AitkPrepareRequest,
   type TrainingJobSummary,
+  type TrainingMetricEvent,
+  type TrainingStreamEvent,
   type Yue2AitkCheckpointRecord,
   type Yue2AitkRunRecord,
   type Yue2JointTrainRequest,
@@ -66,6 +69,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [applyingCheckpoint, setApplyingCheckpoint] = useState(false);
   const [applyNote, setApplyNote] = useState('');
   const [runsError, setRunsError] = useState('');
+  const [liveMetric, setLiveMetric] = useState<TrainingMetricEvent | null>(null);
+  const [jobLogs, setJobLogs] = useState<string[]>([]);
+  const [showJobLogs, setShowJobLogs] = useState(false);
 
   useEffect(() => {
     if (legacyManifest && !prepare.legacyManifest) {
@@ -94,8 +100,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   useEffect(() => {
     let cancelled = false;
     setRunsError('');
-    void listYue2AitkRuns(datasetId).then(result => {
+    const refresh = () => listYue2AitkRuns(datasetId).then(result => {
       if (cancelled) return;
+      setRunsError('');
       setAitkRuns(result.runs);
       const available = result.runs.flatMap(run => run.checkpoints)
         .filter(checkpoint => checkpoint.arPath && checkpoint.narPath);
@@ -104,8 +111,34 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     }).catch(err => {
       if (!cancelled) setRunsError(err instanceof Error ? err.message : String(err));
     });
-    return () => { cancelled = true; };
-  }, [datasetId, job?.status]);
+    void refresh();
+    const running = job?.status === 'queued' || job?.status === 'running';
+    const timer = running ? window.setInterval(refresh, 5000) : undefined;
+    return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
+  }, [datasetId, job?.id, job?.status]);
+
+  useEffect(() => {
+    setLiveMetric(null);
+    setJobLogs([]);
+    setShowJobLogs(false);
+    if (!job?.id) return;
+    const stream = new EventSource(jobStreamUrl(job.id));
+    stream.onmessage = event => {
+      try {
+        const item = JSON.parse(event.data) as TrainingStreamEvent;
+        if (item.type === 'metric' && item.metric === 'step') {
+          setLiveMetric(item);
+        } else if (item.type === 'log') {
+          const stamp = new Date(item.ts).toLocaleTimeString();
+          setJobLogs(previous => [...previous, `${stamp} ${item.level}: ${item.message}`].slice(-100));
+        } else if (item.type === 'status' && !['queued', 'running'].includes(item.status)) {
+          stream.close();
+        }
+      } catch { /* Ignore malformed replay frames; polling remains authoritative. */ }
+    };
+    stream.onerror = () => { /* EventSource reconnects; job polling handles terminal state. */ };
+    return () => stream.close();
+  }, [job?.id]);
 
   useEffect(() => {
     setForm(readStored(`${FORM_KEY}${datasetId}`, DEFAULT_FORM));
@@ -326,6 +359,20 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number')}
         {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device')}
       </div>
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.presets', 'Training presets')}</span>
+        <button type="button" disabled={active || preparing || starting}
+          onClick={() => setForm(previous => ({ ...previous, steps: 3000, saveEvery: 250 }))}
+          className="px-2.5 py-1 rounded-lg text-[11px] border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40">
+          {t('trainingStudio.yue2.method.presetAitk', 'AI Toolkit · 3000 steps, save every 250')}
+        </button>
+        <button type="button" disabled={active || preparing || starting}
+          onClick={() => setForm(previous => ({ ...previous, steps: 300, saveEvery: 50 }))}
+          className="px-2.5 py-1 rounded-lg text-[11px] border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40">
+          {t('trainingStudio.yue2.method.presetDookie', 'Dookie comparison · 300 steps, save every 50')}
+        </button>
+        <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetHint', 'Changes only steps and save cadence; checkpoint audition is manual.')}</span>
+      </div>
       <div className="mt-3 text-[11px] text-zinc-600 dark:text-zinc-400">
         <p className="font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.aitkNeeds', 'Before it can start, the dataset needs:')}</p>
         <ul className="list-disc pl-5 mt-1 space-y-0.5">
@@ -344,8 +391,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {active ? t('trainingStudio.yue2.method.running', 'Joint training is running') : t('trainingStudio.yue2.method.start', 'Start joint training')}
         </button>
         {active && <button type="button" onClick={() => void stop()} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
-        {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{progress}</span>}
+        {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{progress}
+          {liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · loss ${liveMetric.loss.toFixed(4)}` : ''}`}
+        </span>}
       </div>
+      {jobLogs.length > 0 && <details className="mt-2" open={showJobLogs} onToggle={event => setShowJobLogs(event.currentTarget.open)}>
+        <summary className="cursor-pointer text-[11px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.showLogs', 'Show training log (last 100 lines)')}</summary>
+        <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{jobLogs.join('\n')}</pre>
+      </details>}
       {job?.status === 'done' && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{t('trainingStudio.yue2.method.checkpointWritten', 'Joint checkpoints are in the selected output directory.')}</p>}
       {(aitkRuns.length > 0 || runsError) && <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.auditionTitle', 'Audition a joint checkpoint')}</p>
