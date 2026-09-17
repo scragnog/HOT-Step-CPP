@@ -1,0 +1,199 @@
+diff --git a/engine/ggml/include/ggml.h b/engine/ggml/include/ggml.h
+index e7739322..f3777398 100644
+--- a/engine/ggml/include/ggml.h
++++ b/engine/ggml/include/ggml.h
+@@ -625,6 +625,7 @@ extern "C" {
+         GGML_UNARY_OP_ROUND,
+         GGML_UNARY_OP_TRUNC,
+ 
++        GGML_UNARY_OP_BF16_ROUND,
+         GGML_UNARY_OP_COUNT,
+     };
+ 
+@@ -2615,6 +2616,10 @@ extern "C" {
+              struct ggml_tensor * a,
+              enum ggml_unary_op op);
+ 
++    GGML_API struct ggml_tensor * ggml_bf16_round(
++            struct ggml_context * ctx,
++            struct ggml_tensor  * a);
++
+     GGML_API struct ggml_tensor * ggml_unary_inplace(
+         struct ggml_context * ctx,
+         struct ggml_tensor  * a,
+diff --git a/engine/ggml/src/ggml.c b/engine/ggml/src/ggml.c
+index 4348a437..92de5e82 100644
+--- a/engine/ggml/src/ggml.c
++++ b/engine/ggml/src/ggml.c
+@@ -1258,9 +1258,10 @@ static const char * GGML_UNARY_OP_NAME[GGML_UNARY_OP_COUNT] = {
+     "CEIL",
+     "ROUND",
+     "TRUNC",
++    "BF16_ROUND",
+ };
+ 
+-static_assert(GGML_UNARY_OP_COUNT == 22, "GGML_UNARY_OP_COUNT != 22");
++static_assert(GGML_UNARY_OP_COUNT == 23, "GGML_UNARY_OP_COUNT != 23");
+ 
+ static const char * GGML_GLU_OP_NAME[GGML_GLU_OP_COUNT] = {
+     "REGLU",
+@@ -6244,6 +6245,15 @@ struct ggml_tensor * ggml_unary(
+     return ggml_unary_impl(ctx, a, op, false);
+ }
+ 
++struct ggml_tensor * ggml_bf16_round(struct ggml_context * ctx, struct ggml_tensor * a) {
++    GGML_ASSERT(a->type == GGML_TYPE_F32);
++    // The CPU/CUDA kernels are contiguous F32 elementwise operations.
++    if (!ggml_is_contiguous(a)) {
++        a = ggml_cont(ctx, a);
++    }
++    return ggml_unary(ctx, a, GGML_UNARY_OP_BF16_ROUND);
++}
++
+ struct ggml_tensor * ggml_unary_inplace(
+         struct ggml_context * ctx,
+         struct ggml_tensor  * a,
+@@ -7417,6 +7427,12 @@ static void ggml_compute_backward(
+         case GGML_OP_WIN_PART:
+         case GGML_OP_WIN_UNPART:
+         case GGML_OP_UNARY: {
++            if (ggml_get_unary_op(tensor) == GGML_UNARY_OP_BF16_ROUND) {
++                if (src0_needs_grads) {
++                    ggml_add_or_set(ctx, cgraph, isrc0, ggml_bf16_round(ctx, grad));
++                }
++                break;
++            }
+             switch (ggml_get_unary_op(tensor)) {
+                 case GGML_UNARY_OP_ABS: {
+                     if (src0_needs_grads) {
+diff --git a/engine/ggml/src/ggml-cpu/ops.cpp b/engine/ggml/src/ggml-cpu/ops.cpp
+index c6b1723e..c01ed924 100644
+--- a/engine/ggml/src/ggml-cpu/ops.cpp
++++ b/engine/ggml/src/ggml-cpu/ops.cpp
+@@ -10540,6 +10540,18 @@ void ggml_compute_forward_win_unpart(
+     }
+ }
+ 
++static void ggml_compute_forward_bf16_round(const ggml_compute_params * params, ggml_tensor * dst) {
++    const ggml_tensor * src0 = dst->src[0];
++    GGML_ASSERT(src0->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32);
++    GGML_ASSERT(ggml_is_contiguous(src0) && ggml_is_contiguous(dst));
++    const int64_t n = ggml_nelements(dst);
++    const float * src = static_cast<const float *>(src0->data);
++    float * out = static_cast<float *>(dst->data);
++    for (int64_t i = params->ith; i < n; i += params->nth) {
++        out[i] = GGML_BF16_TO_FP32(GGML_FP32_TO_BF16(src[i]));
++    }
++}
++
+ //ggml_compute_forward_unary
+ 
+ void ggml_compute_forward_unary(
+@@ -10549,6 +10561,9 @@ void ggml_compute_forward_unary(
+     const ggml_unary_op op = ggml_get_unary_op(dst);
+ 
+     switch (op) {
++        case GGML_UNARY_OP_BF16_ROUND:
++            ggml_compute_forward_bf16_round(params, dst);
++            break;
+         case GGML_UNARY_OP_ABS:
+             {
+                 ggml_compute_forward_abs(params, dst);
+diff --git a/engine/ggml/src/ggml-cpu/ggml-cpu.c b/engine/ggml/src/ggml-cpu/ggml-cpu.c
+index b9f50a91..a847e80f 100644
+--- a/engine/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/engine/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -2299,6 +2299,7 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
+                 case GGML_UNARY_OP_CEIL:
+                 case GGML_UNARY_OP_ROUND:
+                 case GGML_UNARY_OP_TRUNC:
++                case GGML_UNARY_OP_BF16_ROUND:
+                     {
+                         n_tasks = 1;
+                     } break;
+diff --git a/engine/ggml/src/ggml-cpu/ggml-cpu.cpp b/engine/ggml/src/ggml-cpu/ggml-cpu.cpp
+index b7fcf4ab..27f45da8 100644
+--- a/engine/ggml/src/ggml-cpu/ggml-cpu.cpp
++++ b/engine/ggml/src/ggml-cpu/ggml-cpu.cpp
+@@ -440,6 +440,11 @@ static bool ggml_backend_cpu_device_supports_op(ggml_backend_dev_t dev, const st
+     }
+ 
+     switch (op->op) {
++        case GGML_OP_UNARY:
++            if (ggml_get_unary_op(op) == GGML_UNARY_OP_BF16_ROUND) {
++                return op->type == GGML_TYPE_F32 && src0->type == GGML_TYPE_F32 && ggml_is_contiguous(src0);
++            }
++            return true;
+         case GGML_OP_CPY:
+         case GGML_OP_SET_ROWS:
+             return
+diff --git a/engine/ggml/src/ggml-cuda/ggml-cuda.cu b/engine/ggml/src/ggml-cuda/ggml-cuda.cu
+index 4acfcbcd..f152b86e 100644
+--- a/engine/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/engine/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -2155,6 +2155,9 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
+                 case GGML_UNARY_OP_TRUNC:
+                     ggml_cuda_op_trunc(ctx, dst);
+                     break;
++                case GGML_UNARY_OP_BF16_ROUND:
++                    ggml_cuda_op_bf16_round(ctx, dst);
++                    break;
+                 case GGML_UNARY_OP_EXPM1:
+                     ggml_cuda_op_expm1(ctx, dst);
+                     break;
+@@ -4777,6 +4780,8 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
+     switch (op->op) {
+         case GGML_OP_UNARY:
+             switch (ggml_get_unary_op(op)) {
++                case GGML_UNARY_OP_BF16_ROUND:
++                    return op->type == GGML_TYPE_F32 && op->src[0]->type == GGML_TYPE_F32 && ggml_is_contiguous(op->src[0]);
+                 case GGML_UNARY_OP_ABS:
+                 case GGML_UNARY_OP_SGN:
+                 case GGML_UNARY_OP_NEG:
+@@ -4799,7 +4804,7 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
+                 case GGML_UNARY_OP_CEIL:
+                 case GGML_UNARY_OP_ROUND:
+                 case GGML_UNARY_OP_TRUNC:
+-                    // TODO: should become:
++                // TODO: should become:
+                     //return ggml_is_contiguous_rows(op->src[0]);
+                     return ggml_is_contiguous(op->src[0]);
+                 default:
+diff --git a/engine/ggml/src/ggml-cuda/unary.cu b/engine/ggml/src/ggml-cuda/unary.cu
+index 4cb805fa..9c95bd5f 100644
+--- a/engine/ggml/src/ggml-cuda/unary.cu
++++ b/engine/ggml/src/ggml-cuda/unary.cu
+@@ -114,6 +114,10 @@ static __device__ __forceinline__ float op_trunc(float x) {
+     return trunc(x);
+ }
+ 
++static __device__ __forceinline__ float op_bf16_round(float x) {
++    return __bfloat162float(__float2bfloat16(x));
++}
++
+ template <float (*op)(float), typename T>
+ static __global__ void unary_op_kernel(const T * x, T * dst, const int k) {
+     ggml_cuda_pdl_lc();
+@@ -250,6 +254,10 @@ void ggml_cuda_op_trunc(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+     ggml_cuda_op_unary<op_trunc>(ctx, dst);
+ }
+ 
++void ggml_cuda_op_bf16_round(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
++    ggml_cuda_op_unary<op_bf16_round>(ctx, dst);
++}
++
+ void ggml_cuda_op_expm1(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+     ggml_cuda_op_unary<op_expm1>(ctx, dst);
+ }
+diff --git a/engine/ggml/src/ggml-cuda/unary.cuh b/engine/ggml/src/ggml-cuda/unary.cuh
+index 81ed873e..7fd48d1f 100644
+--- a/engine/ggml/src/ggml-cuda/unary.cuh
++++ b/engine/ggml/src/ggml-cuda/unary.cuh
+@@ -74,6 +74,7 @@ void ggml_cuda_op_ceil(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
+ void ggml_cuda_op_round(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
+ 
+ void ggml_cuda_op_trunc(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
++void ggml_cuda_op_bf16_round(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
+ 
+ void ggml_cuda_op_reglu(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
+ 

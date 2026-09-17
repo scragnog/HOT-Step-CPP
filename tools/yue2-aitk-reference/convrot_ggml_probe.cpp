@@ -84,7 +84,7 @@ Fixture load_fixture(const std::filesystem::path & path) {
     if (h[0] != kMagic) fail("input fixture has an invalid magic");
     if (h[1] == 0 || h[2] == 0 || h[3] == 0) fail("input fixture has an empty dimension");
     if (h[5] > 1) fail("input fixture has an invalid bf16 flag");
-    if (h[1] > 24576 || h[2] > 8192 || h[3] > 16384 ||
+    if (h[1] > 24576 || h[2] > 8192 || h[3] > 184704 ||
         h[2] % 16 || h[3] % 8 || (h[2] < 128 && h[3] % 16)) fail("unsupported projection dimensions");
     uint32_t rotation = h[4];
     if (!rotation || h[2] % rotation) fail("invalid rotation size");

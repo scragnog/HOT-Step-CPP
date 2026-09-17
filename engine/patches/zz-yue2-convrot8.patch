@@ -298,7 +298,7 @@ new file mode 100644
 +
 +bool convrot_cuda_validate_shape(const ConvRotCudaShape &s) {
 +    return s.rows > 0 && s.rows <= 24576 && s.input_width > 0 && s.input_width <= 8192 &&
-+        s.output_width > 0 && s.output_width <= 16384 && s.input_width % 16 == 0 &&
++        s.output_width > 0 && s.output_width <= 184704 && s.input_width % 16 == 0 &&
 +        s.output_width % 8 == 0 && (s.input_width >= 128 || s.output_width % 16 == 0) &&
 +        s.rotation > 0 && s.rotation <= 4096 && (s.rotation == 1 || convrot_is_pow4(s.rotation)) &&
 +        s.input_width % s.rotation == 0;
@@ -364,7 +364,7 @@ new file mode 100644
 +        !ggml_is_matrix(w) || !ggml_is_matrix(x) || !ggml_is_matrix(op) || !ggml_is_vector(s) ||
 +        !ggml_is_contiguous(w) || !ggml_is_contiguous(x) || !ggml_is_contiguous(s) ||
 +        !ggml_is_contiguous(op) || s->ne[0] != w->ne[1]) return false;
-+    if (w->ne[0] <= 0 || w->ne[0] > 8192 || w->ne[1] <= 0 || w->ne[1] > 16384 ||
++    if (w->ne[0] <= 0 || w->ne[0] > 8192 || w->ne[1] <= 0 || w->ne[1] > 184704 ||
 +        x->ne[1] <= 0 || x->ne[1] > 24576) return false;
 +    const int bf16 = ggml_get_op_params_i32(op, 1);
 +    if ((bf16 != 0 && bf16 != 1) || (bf16 && cc < GGML_CUDA_CC_AMPERE)) return false;

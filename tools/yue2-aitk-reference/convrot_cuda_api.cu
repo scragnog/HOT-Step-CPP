@@ -195,7 +195,7 @@ private:
 
 bool convrot_cuda_validate_shape(const ConvRotCudaShape &s) {
     return s.rows > 0 && s.rows <= 24576 && s.input_width > 0 && s.input_width <= 8192 &&
-        s.output_width > 0 && s.output_width <= 16384 && s.input_width % 16 == 0 &&
+        s.output_width > 0 && s.output_width <= 184704 && s.input_width % 16 == 0 &&
         s.output_width % 8 == 0 && (s.input_width >= 128 || s.output_width % 16 == 0) &&
         s.rotation > 0 && s.rotation <= 4096 && (s.rotation == 1 || convrot_is_pow4(s.rotation)) &&
         s.input_width % s.rotation == 0;

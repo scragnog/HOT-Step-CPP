@@ -1,7 +1,7 @@
 # YuE2 AI Toolkit reference tools
 
 These tools support the native YuE2 training port. They are development tools,
-not a new selectable trainer. The engine, Legacy workflow and training default
+not a new selectable trainer. The Legacy workflow and training default
 are unchanged. Python is required for reference comparisons, not for the native
 C++/CUDA probes themselves.
 
@@ -197,3 +197,27 @@ Run the focused malformed-header tests with:
 ```powershell
 python -m unittest discover -s tools/yue2-aitk-reference -p "test_*.py"
 ```
+## Native joint update verification
+
+The native runtime now lives in `engine/src/train/yue2-aitk-*.h`. It is an
+experimental implementation, not yet exposed as the default Training Studio
+workflow. The existing YuE2 trainers retain their behavior.
+
+The probes cover BF16 value/gradient boundaries, one fused ConvRot/LoRA block,
+detached NAR prefix conditioning, full-vocabulary CE/KL, endpoint projections,
+optimizer continuation and resume file corruption. `yue2_aitk_joint_step_probe.cpp`
+runs two synthetic updates through both complete experts and exports a combined
+adapter. `--parity-export` additionally saves full initial and updated optimizer
+states for development reference comparisons.
+
+On Windows, execute native probes through `run-native-test.ps1` so the built
+GGML DLLs are found and loader failures return errors instead of modal dialogs.
+Use the project Work GPU guard for GPU probes. Set `NVIDIA_TF32_OVERRIDE=0`
+before CUDA initialization for reference comparisons. GGML's F32 graph precision
+does not itself disable TF32 on its cuBLAS handles.
+
+Python exporters are development references only. They require the pinned AI
+Toolkit checkout and its environment; they are not a runtime training dependency.
+Block fixtures can use `--prefix-tokens 5` to exercise detached AR conditioning,
+and `--intermediates` to export diagnostic tensors. Every probe output directory
+must be new, so failed and passing evidence remains available.

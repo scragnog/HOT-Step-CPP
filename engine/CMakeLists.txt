@@ -673,6 +673,7 @@ link_ggml_backends(ace-midi)
 # docs/plans/2026-07-27-preprocess-implementation.md). Standalone tool: every
 # engine module it uses is header-only, so no acestep-core link is needed.
 add_executable(ace-train tools/ace-train.cpp)
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/train/aitk-runtime.cmake)
 # One translation unit now carries every trainer plus the SheetSage2
 # transcriber (yue2-sheet); with the TensorRT build on, MSVC's default COFF
 # section limit overflows (C1128). /bigobj lifts it; no effect elsewhere.
