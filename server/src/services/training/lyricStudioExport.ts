@@ -329,6 +329,49 @@ export function refreshYue2PresetsForNewRun(
   return updated;
 }
 
+/** Link a joint YuE2 checkpoint as one AR/NAR pair. A preset linked to this
+ * dataset is always eligible; older adapter references are eligible only when
+ * both populated halves belong to this dataset. This keeps a deliberately
+ * mixed-artist preset from being silently replaced. */
+export function refreshYue2PresetsForJointCheckpoint(
+  ds: { slug: string; lyricsSetId?: number },
+  arPath: string,
+  narPath: string,
+  knownJointPaths: readonly string[] = [],
+): number {
+  let updated = 0;
+  try {
+    if (!arPath || !narPath || !fs.statSync(arPath).isFile() || !fs.statSync(narPath).isFile()) return 0;
+    const slug = String(ds.slug || '').toLowerCase();
+    if (!slug) return 0;
+    const known = new Set(knownJointPaths.map(normPath));
+    const owned = (p: string): boolean => {
+      if (!p) return false;
+      if (known.has(normPath(p))) return true;
+      const run = path.basename(path.dirname(p)).toLowerCase();
+      return run.startsWith(`${slug}-`); // Legacy stamped runs.
+    };
+    for (const preset of getAllPresets()) {
+      const oldAr = typeof preset.yue2_ar_adapter_path === 'string' ? preset.yue2_ar_adapter_path : '';
+      const oldNar = typeof preset.yue2_nar_adapter_path === 'string' ? preset.yue2_nar_adapter_path : '';
+      const direct = !!ds.lyricsSetId && preset.lyrics_set_id === ds.lyricsSetId;
+      const older = (owned(oldAr) || owned(oldNar))
+        && (!oldAr || owned(oldAr)) && (!oldNar || owned(oldNar));
+      if (!direct && !older) continue;
+      if (oldAr && oldNar && normPath(oldAr) === normPath(arPath) && normPath(oldNar) === normPath(narPath)) continue;
+      const data = presetDataFromRow(preset);
+      data.yue2ArAdapterPath = arPath;
+      data.yue2NarAdapterPath = narPath;
+      upsertPreset(preset.lyrics_set_id, data);
+      updated++;
+      console.log(`[Training] Album preset (lyrics set ${preset.lyrics_set_id}) YuE2 joint pair -> ${arPath} + ${narPath}`);
+    }
+  } catch (err: any) {
+    console.warn(`[Training] YuE2 joint preset refresh failed: ${err?.message ?? err}`);
+  }
+  return updated;
+}
+
 /** The run directory an MM3 adapter reference belongs to: the first segment
  *  of `<run>/ckpt-N/adapter_model.safetensors`, lower-cased, either slash. */
 function mm3RunOf(ref: string): string {

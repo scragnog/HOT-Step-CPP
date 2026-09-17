@@ -9,6 +9,7 @@ import {
   getJob,
   getYue2AitkPrepare,
   listYue2AitkRuns,
+  linkYue2JointCheckpointPreset,
   listYue2JointPreviews,
   listJobs,
   jobStreamUrl,
@@ -27,11 +28,33 @@ import {
 } from '../../services/trainingApi';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { descentRate, formatDurationMs } from '../../utils/trainingEta';
 
 const JOB_KEY = 'hs-yue2-aitk-job:';
 const FORM_KEY = 'hs-yue2-aitk-form:';
 const PREP_KEY = 'hs-yue2-aitk-prepare:';
 const PRESETS_KEY = 'hs-yue2-joint-presets';
+const METRIC_CAP = 2000;
+type JointStepPoint = { step: number; loss: number; ep: number; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
+type JointMilestone = { epoch: number; loss: number; path: string };
+function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string {
+  const last = points[points.length - 1];
+  const durations = points.map(p => p.stepMs).filter((ms): ms is number => typeof ms === 'number' && ms > 0).slice(-20);
+  if (!last || !durations.length) return '';
+  const pace = durations.reduce((sum, ms) => sum + ms, 0) / durations.length;
+  const remaining = Math.max(0, form.steps - last.step);
+  if (form.stopMode !== 'loss' || !(form.targetLoss && form.targetLoss > 0))
+    return `cap ETA ${formatDurationMs(remaining * pace)}`;
+  const stopMean = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
+  if (stopMean.length < 9) return `target ETA estimating · cap ${formatDurationMs(remaining * pace)}`;
+  const current = stopMean[stopMean.length - 1];
+  if (current <= form.targetLoss) return `target reached · cap ${formatDurationMs(remaining * pace)}`;
+  const rate = descentRate(stopMean);
+  if (!(rate > 0)) return `target trend stalled · cap ${formatDurationMs(remaining * pace)}`;
+  const stepsToTarget = (current - form.targetLoss) / rate;
+  if (stepsToTarget > remaining) return `target unlikely before cap · cap ${formatDurationMs(remaining * pace)}`;
+  return `target ETA ${formatDurationMs(Math.max(1, stepsToTarget) * pace)}`;
+}
 /** A named snapshot of the training settings. Per-run and per-machine values
  *  (dataset/checkpoint/output paths, resume record) are deliberately not part
  *  of a preset: a preset answers "how do I train", never "against which run". */
@@ -85,6 +108,10 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   }
   return { ...DEFAULT_FORM, ...stored };
 }
+function writeStored(key: string, value: unknown): void {
+  if (typeof window === 'undefined') return;
+  try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage may be full or unavailable */ }
+}
 
 function isJointJob(job: TrainingJobSummary, datasetId: string): boolean {
   return job.datasetId === datasetId && job.kind === 'yue2-joint-train';
@@ -119,13 +146,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [selectedCheckpoint, setSelectedCheckpoint] = useState('');
   const [applyingCheckpoint, setApplyingCheckpoint] = useState(false);
   const [applyNote, setApplyNote] = useState('');
+  const [linkingPreset, setLinkingPreset] = useState(false);
+  const [presetLinkNote, setPresetLinkNote] = useState('');
   const [runsError, setRunsError] = useState('');
   const [liveMetric, setLiveMetric] = useState<TrainingMetricEvent | null>(null);
   // AITK's joint runner emits step metrics without an epoch stream. Keep the
   // history here in the same step-domain shape used by the legacy YuE2 chart.
   // The job SSE endpoint replays its buffer, so this also reconstructs the
   // curve after a reload or EventSource reconnect.
-  const [stepHistory, setStepHistory] = useState<Array<{ step: number; loss: number; ep: number }>>([]);
+  const [stepHistory, setStepHistory] = useState<JointStepPoint[]>([]);
+  const [milestones, setMilestones] = useState<JointMilestone[]>([]);
   const [jobLogs, setJobLogs] = useState<string[]>([]);
   const [showJobLogs, setShowJobLogs] = useState(false);
   const [jointPreviews, setJointPreviews] = useState<Yue2JointPreviewRecord[]>([]);
@@ -187,9 +217,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   useEffect(() => {
     setLiveMetric(null);
     setStepHistory([]);
+    setMilestones([]);
     setJobLogs([]);
     setShowJobLogs(false);
     if (!job?.id) return;
+    const metricKey = `${JOB_KEY}${datasetId}:metrics:${job.id}`;
+    const saved = readStored<{ steps?: JointStepPoint[]; milestones?: JointMilestone[] }>(metricKey, {});
+    if (saved.steps?.length) setStepHistory(saved.steps);
+    const savedMilestones = readStored<JointMilestone[]>(`${metricKey}:milestones`, saved.milestones ?? []);
+    if (savedMilestones.length) setMilestones(savedMilestones);
     const stream = new EventSource(jobStreamUrl(job.id));
     stream.onmessage = event => {
       try {
@@ -199,12 +235,30 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           if (typeof item.step === 'number' && typeof item.loss === 'number'
             && Number.isFinite(item.step) && Number.isFinite(item.loss)) {
             setStepHistory(previous => {
-              const next = [...previous.filter(point => point.step !== item.step),
-                { step: item.step!, loss: item.loss!, ep: item.step! }];
+              const prior = previous.filter(point => point.step !== item.step);
+              const stepMs = typeof item.stepMs === 'number' ? item.stepMs : undefined;
+              const next = [...prior, { step: item.step!, loss: item.loss!, ep: item.step!,
+                ...(typeof item.gradNorm === 'number' ? { gradNorm: item.gradNorm } : {}),
+                ...(typeof job.startedAt === 'number' && typeof item.ts === 'number'
+                  ? { elapsedMs: Math.max(0, item.ts - job.startedAt) } : {}),
+                ...(stepMs !== undefined ? { stepMs } : {}) }];
               next.sort((a, b) => a.step - b.step);
-              return next.slice(-2000);
+              const capped = next.slice(-METRIC_CAP);
+              const withMean = capped.map((point, index) => ({ ...point,
+                ma5: capped.slice(Math.max(0, index - 4), index + 1).reduce((sum, p) => sum + p.loss, 0)
+                  / Math.min(5, index + 1),
+                ...(index >= 19 ? { ma20: capped.slice(index - 19, index + 1).reduce((sum, p) => sum + p.loss, 0) / 20 } : {}) }));
+              writeStored(metricKey, { steps: withMean });
+              return withMean;
             });
           }
+        } else if (item.type === 'metric' && item.metric === 'milestone'
+          && typeof item.step === 'number' && typeof item.path === 'string') {
+          setMilestones(previous => {
+            const next = [...previous.filter(point => point.path !== item.path), { epoch: item.step!, loss: item.loss ?? 0, path: item.path! }];
+            writeStored(`${metricKey}:milestones`, next);
+            return next;
+          });
         } else if (item.type === 'log') {
           const stamp = new Date(item.ts).toLocaleTimeString();
           setJobLogs(previous => [...previous, `${stamp} ${item.level}: ${item.message}`].slice(-100));
@@ -215,7 +269,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     };
     stream.onerror = () => { /* EventSource reconnects; job polling handles terminal state. */ };
     return () => stream.close();
-  }, [job?.id]);
+  }, [job?.id, job?.startedAt]);
 
   useEffect(() => {
     setForm(readStoredForm(datasetId));
@@ -432,6 +486,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       ? t('trainingStudio.yue2.method.checkpointApplied', 'AR and NAR adapters applied for the next generation.')
       : t('trainingStudio.yue2.method.checkpointApplyFailed', 'Could not apply this checkpoint. The previous model selection is still active.'));
   };
+  const linkCheckpointPreset = async () => {
+    if (!selectedCheckpoint) return;
+    setLinkingPreset(true);
+    setPresetLinkNote('');
+    try {
+      const result = await linkYue2JointCheckpointPreset(datasetId, selectedCheckpoint);
+      setPresetLinkNote(result.updated > 0
+        ? `Linked this AR/NAR pair to ${result.updated} Lyric Studio album preset${result.updated === 1 ? '' : 's'}.`
+        : 'No Lyric Studio album preset is linked to this dataset yet. Export the dataset to Lyric Studio first.');
+    } catch (err) {
+      setPresetLinkNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLinkingPreset(false);
+    }
+  };
   const active = job?.status === 'queued' || job?.status === 'running';
   const preparing = prepareJob?.status === 'queued' || prepareJob?.status === 'running';
   const input = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-xs text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50';
@@ -594,8 +663,18 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <TrainingChart
             epochs={[]}
             steps={stepHistory}
-            target={0}
+            milestones={milestones}
+            target={form.stopMode === 'loss' ? (form.targetLoss ?? 0) : 0}
+            maxEpochs={form.steps}
           />
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">
+            <span>MA5 {stepHistory[stepHistory.length - 1].ma5?.toFixed(4) ?? '—'}</span>
+            <span>20-step stop mean {stepHistory[stepHistory.length - 1].ma20?.toFixed(4) ?? '—'}</span>
+            <span>{stepHistory[stepHistory.length - 1].step} / {form.steps} steps</span>
+            {stepHistory[stepHistory.length - 1].elapsedMs !== undefined && <span>elapsed {Math.round(stepHistory[stepHistory.length - 1].elapsedMs! / 1000)}s</span>}
+            {stepHistory[stepHistory.length - 1].stepMs !== undefined && <span>pace {(stepHistory.slice(-20).reduce((sum, point) => sum + (point.stepMs ?? 0), 0) / Math.max(1, stepHistory.slice(-20).filter(point => point.stepMs !== undefined).length) / 1000).toFixed(2)}s/step</span>}
+            {job?.status === 'running' && <span>{jointEta(stepHistory, form)}</span>}
+          </div>
         </div>
       )}
       {jobLogs.length > 0 && <details className="mt-2" open={showJobLogs} onToggle={event => setShowJobLogs(event.currentTarget.open)}>
@@ -608,7 +687,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {activeBackendId !== 'yue2' && <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.selectYue2', 'Select the YuE2 backend to use these adapters for generation.')}</p>}
         {runsError && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{runsError}</p>}
         {availableCheckpoints.length > 0 && <div className="mt-2 flex items-center gap-2 flex-wrap">
-          <select className={input} value={selectedCheckpoint} onChange={event => { setSelectedCheckpoint(event.target.value); setApplyNote(''); }}>
+          <select className={input} value={selectedCheckpoint} onChange={event => { setSelectedCheckpoint(event.target.value); setApplyNote(''); setPresetLinkNote(''); }}>
             {availableCheckpoints.map(checkpoint => <option key={checkpoint.dir} value={checkpoint.dir}>step {checkpoint.step}{checkpoint.dir === availableCheckpoints[0]?.dir ? ' (latest)' : ''}</option>)}
           </select>
           <button type="button" onClick={() => void applyCheckpoint()} disabled={activeBackendId !== 'yue2' || active || preparing || applyingCheckpoint || yue2RunAllActive || !selectedCheckpoint}
@@ -616,9 +695,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             {applyingCheckpoint ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
             {t('trainingStudio.yue2.method.useCheckpoint', 'Use for generation')}
           </button>
+          <button type="button" onClick={() => void linkCheckpointPreset()} disabled={active || preparing || linkingPreset || yue2RunAllActive || !selectedCheckpoint}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40 flex items-center gap-1.5">
+            {linkingPreset ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+            {t('trainingStudio.yue2.method.linkAlbumPreset', 'Use in Lyric Studio album preset')}
+          </button>
         </div>}
         {!runsError && availableCheckpoints.length === 0 && <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.noAuditionCheckpoint', 'No complete AR/NAR checkpoint is available yet.')}</p>}
         {applyNote && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{applyNote}</p>}
+        {presetLinkNote && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{presetLinkNote}</p>}
       </div>}
       {jointPreviews.length > 0 && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.previewStrip', 'Checkpoint previews')}</p>

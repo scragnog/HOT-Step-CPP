@@ -180,6 +180,7 @@ import {
 import { AuditionError, decodeStoredCodes } from '../services/training/auditionService.js';
 import {
   commitLyricStudioExport, LyricStudioExportError, previewLyricStudioExport,
+  refreshYue2PresetsForJointCheckpoint,
 } from '../services/training/lyricStudioExport.js';
 import { getGenerations, getLyricsSet } from '../db/lireekDb.js';
 import type {
@@ -3545,6 +3546,30 @@ router.get('/datasets/:id/yue2-joint-runs', (req: Request, res: Response) => {
       runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId })),
       activeJob: activeJoint ? queue.toSummary(activeJoint) : null,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** POST /datasets/:id/yue2-joint-preset — link one saved AR/NAR pair to this
+ * dataset's Lyric Studio album preset. Works for a stopped run as well as a
+ * completed run, but only with a checkpoint in this dataset's durable index. */
+router.post('/datasets/:id/yue2-joint-preset', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const selected = typeof req.body?.checkpointDir === 'string' ? req.body.checkpointDir.trim() : '';
+    if (!selected) { res.status(400).json({ error: 'Select a joint checkpoint' }); return; }
+    const runs = listYue2AitkRuns(ds.id, ds.slug);
+    const checkpoints = runs.flatMap(run => run.checkpoints);
+    const checkpoint = checkpoints.find(item => path.resolve(item.dir).toLowerCase() === path.resolve(selected).toLowerCase());
+    if (!checkpoint?.arPath || !checkpoint.narPath) {
+      res.status(400).json({ error: 'Select a complete joint checkpoint belonging to this dataset' }); return;
+    }
+    const knownPaths = checkpoints.flatMap(item => [item.arPath, item.narPath].filter((value): value is string => !!value));
+    const updated = refreshYue2PresetsForJointCheckpoint(
+      { slug: ds.slug, lyricsSetId: ds.lyricsSetId }, checkpoint.arPath, checkpoint.narPath, knownPaths);
+    res.json({ updated, arPath: checkpoint.arPath, narPath: checkpoint.narPath });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

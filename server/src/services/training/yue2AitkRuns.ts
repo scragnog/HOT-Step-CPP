@@ -120,3 +120,13 @@ export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2A
     .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
+
+/** Every indexed joint run, newest first, with checkpoint files re-scanned.
+ * The generation picker has no dataset filter, so it must use the same durable
+ * index and checkpoint scanner as Training Studio rather than walking a second
+ * directory tree. */
+export function listAllYue2AitkRuns(): Yue2AitkRunRecord[] {
+  return readIndex()
+    .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}

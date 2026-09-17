@@ -33,11 +33,12 @@ test('AITK run catalogue writes and rereads atomically in an isolated training r
     const script = [
       "import fs from 'node:fs';",
       "import path from 'node:path';",
-      "import { recordYue2AitkRun, listYue2AitkRuns, aitkRunIndexPath } from './src/services/training/yue2AitkRuns.js';",
+      "import { recordYue2AitkRun, listYue2AitkRuns, listAllYue2AitkRuns, aitkRunIndexPath } from './src/services/training/yue2AitkRuns.js';",
       "const out = path.join(process.env.TRAINING_DIR, 'run'); fs.mkdirSync(path.join(out, 'checkpoint-step4'), { recursive: true });",
       "fs.writeFileSync(path.join(out, 'checkpoint-step4', 'native-ar.safetensors'), 'x');",
       "recordYue2AitkRun({ version: 1, jobId: 'job-test', datasetId: 'ds-test', datasetSlug: 'slug-test', method: 'aitk', output: out, options: {}, status: 'running', createdAt: 1, updatedAt: 2, checkpoints: [] });",
       "const rows = listYue2AitkRuns('ds-test'); if (rows.length !== 1 || rows[0].checkpoints[0].arPath === undefined) throw new Error('catalogue reread failed');",
+      "const all = listAllYue2AitkRuns(); if (all.length !== 1 || all[0].jobId !== 'job-test') throw new Error('all-runs catalogue failed');",
       "if (!fs.existsSync(aitkRunIndexPath())) throw new Error('catalogue missing');",
     ].join('');
     execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {

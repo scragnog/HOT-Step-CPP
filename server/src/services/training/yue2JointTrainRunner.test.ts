@@ -15,6 +15,11 @@ test('AITK native joint JSON event maps to the server metric contract', () => {
     { stage: 'joint', step: 7, loss: 1.264, gradNorm: 2.5, totalSteps: 100 });
 });
 
+test('AITK native joint JSON forwards the measured step duration', () => {
+  assert.equal(parseYue2JointEvent(
+    '{"stage":"joint","step":3,"ar_ce":1,"ar_kl":0,"nar_mse":0,"gradient_norm":1,"step_ms":42.5}', 10)?.stepMs, 42.5);
+});
+
 test('AITK joint metric includes weighted cursor loss when present', () => {
   const event = parseYue2JointEvent('{"stage":"joint","step":2,"ar_ce":1,"ar_kl":2,"nar_mse":3,"cursor_ce":4,"cursor_weight":0.08}', 10);
   assert.ok(Math.abs((event?.loss ?? 0) - 4.72) < 1e-12);

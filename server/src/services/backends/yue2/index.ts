@@ -24,8 +24,9 @@ import path from 'path';
 import { engineReady } from '../../../engineState.js';
 import { isEngineSuspended } from '../../aceEngineProcess.js';
 import { getSetting, setSetting } from '../../../db/lireekDb.js';
-import { listAllYue2Runs, type Yue2AdapterMeta } from '../../training/yue2Runs.js';
+import { listAllYue2Runs, readSafetensorsMeta, type Yue2AdapterMeta } from '../../training/yue2Runs.js';
 import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
+import { listAllYue2AitkRuns } from '../../training/yue2AitkRuns.js';
 import { runYue2Generation } from './generate.js';
 import {
   yue2Props, yue2PropsCached, yue2SelectModel, yue2Unload,
@@ -565,6 +566,45 @@ function yue2LmAdapterCatalogue(): {
         styleTemplate: ckpt.meta?.styleTemplate,
         captionDropout: ckpt.meta?.captionDropout,
       };
+    }
+  }
+
+  // A joint AITK checkpoint is one training result with two loadable files.
+  // Only advertise complete pairs: selecting one half from an incomplete
+  // checkpoint would make the global picker look ready while the other slot
+  // still has no matching result. The combined adapter.safetensors is an
+  // output/inspection artifact and is intentionally not offered to either
+  // YuE2 slot.
+  for (const run of listAllYue2AitkRuns()) {
+    for (const ckpt of run.checkpoints) {
+      if (!ckpt.arPath || !ckpt.narPath) continue;
+      const configuredSteps = Number(run.options.steps);
+      const final = Number.isFinite(configuredSteps) && configuredSteps > 0 && ckpt.step === configuredSteps;
+      const runName = `AITK · ${run.datasetSlug || run.datasetId || run.jobId}`;
+      const add = (kind: Yue2LmAdapterKind, ref: string): void => {
+        const abs = path.resolve(ref);
+        const fileMeta = readSafetensorsMeta(abs);
+        const trigger = fileMeta?.trigger || '';
+        const rank = fileMeta?.rank;
+        const steps = fileMeta?.steps ?? ckpt.step;
+        paths.push(abs);
+        meta[abs] = {
+          label: [kind.toUpperCase(), runName, `step ${ckpt.step}`, trigger ? `"${trigger}"` : '']
+            .filter(Boolean).join(' · '),
+          kind,
+          runName,
+          trigger: trigger || undefined,
+          rank,
+          steps: Number.isFinite(steps) && steps > 0 && steps < Number.MAX_SAFE_INTEGER ? steps : undefined,
+          bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),
+          dataset: run.datasetSlug || run.datasetId || undefined,
+          final,
+          styleTemplate: fileMeta?.styleTemplate,
+          captionDropout: fileMeta?.captionDropout,
+        };
+      };
+      add('ar', ckpt.arPath);
+      add('nar', ckpt.narPath);
     }
   }
   return { paths, meta };

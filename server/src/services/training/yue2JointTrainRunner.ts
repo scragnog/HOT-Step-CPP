@@ -6,10 +6,12 @@ import path from 'path';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
 import { buildGpuEnv } from '../gpuDevices.js';
 import { log, runYue2AceTrain, type RelayState } from './yue2TrainRunner.js';
-import { checkpointRecords, recordYue2AitkRun } from './yue2AitkRuns.js';
+import { checkpointRecords, listYue2AitkRuns, recordYue2AitkRun } from './yue2AitkRuns.js';
 import { renderYue2JointPreview, Yue2PreviewCleanupError } from './yue2JointPreview.js';
 import { yue2Unload } from '../backends/yue2/client.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
+import { getDataset } from './datasetsRepo.js';
+import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 
 export interface ResolvedYue2JointTrainOptions {
   checkpoint: string;
@@ -132,12 +134,19 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void 
   if (step !== undefined) state.lastStep = step;
   if (stage === 'joint' && step !== undefined) {
     job.done = step; job.total = state.totalSteps; job.phase = 'training';
+    state.lastLoss = event.loss ?? state.lastLoss;
     pushEvent(job, { type: 'metric', metric: 'step', ts: Date.now(), step,
       totalSteps: state.totalSteps, ...(event.loss === undefined ? {} : { loss: event.loss }),
-      ...(event.gradNorm === undefined ? {} : { gradNorm: event.gradNorm }) });
+      ...(event.gradNorm === undefined ? {} : { gradNorm: event.gradNorm }),
+      ...(event.stepMs === undefined ? {} : { stepMs: event.stepMs }) });
     emitProgress(job);
     log(job, 'info', `Joint training step ${step}${event.loss === undefined ? '' : ` loss ${event.loss}`}`);
   } else if (stage === 'checkpoint' || stage === 'checkpoint_stage') {
+    if (stage === 'checkpoint' && step !== undefined && opts) {
+      const saved = checkpointRecords(opts.outDir).find(c => c.step === step && c.arPath && c.narPath);
+      if (saved) pushEvent(job, { type: 'metric', metric: 'milestone', ts: Date.now(), step,
+        loss: state.lastLoss, path: saved.dir });
+    }
     log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
   } else if (stage === 'target' && step !== undefined) {
     state.targetStopped = true;
@@ -170,7 +179,7 @@ function persistAitkCatalogue(
 
 /** Pure contract helper kept exportable for server-side event tests. */
 export function parseYue2JointEvent(line: string, totalSteps: number): {
-  stage: string; step?: number; loss?: number; gradNorm?: number; totalSteps: number;
+  stage: string; step?: number; loss?: number; gradNorm?: number; stepMs?: number; totalSteps: number;
 } | null {
   try {
     const event = JSON.parse(line) as Record<string, unknown>;
@@ -181,9 +190,11 @@ export function parseYue2JointEvent(line: string, totalSteps: number): {
       ? event.cursor_ce * event.cursor_weight : 0;
     const loss = finite(event.ar_ce) && finite(event.ar_kl) && finite(event.nar_mse)
       ? event.ar_ce + 0.2 * event.ar_kl + event.nar_mse + cursor : undefined;
+    const stepMs = finite(event.step_ms) && event.step_ms >= 0 ? event.step_ms : undefined;
     return { stage: event.stage, ...(step === undefined ? {} : { step }),
       ...(loss === undefined ? {} : { loss }),
-      ...(finite(event.gradient_norm) ? { gradNorm: event.gradient_norm } : {}), totalSteps };
+      ...(finite(event.gradient_norm) ? { gradNorm: event.gradient_norm } : {}),
+      ...(stepMs === undefined ? {} : { stepMs }), totalSteps };
   } catch { return null; }
 }
 
@@ -265,7 +276,20 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
       }
     }
     /* runYue2AceTrain can fail early and marks the job failed itself. */
-    if (!isCancelled(job) && job.status === 'running') finishJob(job, 'done');
+    if (!isCancelled(job) && job.status === 'running') {
+      // Link only a complete, paired checkpoint after a successful run. This
+      // also covers target-loss early stops and preview segmented runs: the
+      // scanner walks every segment and the highest completed step wins.
+      const final = checkpointRecords(o.outDir).find(c => c.arPath && c.narPath);
+      if (final?.arPath && final.narPath) {
+        const ds = getDataset(job.datasetId);
+        if (ds) {
+          const known = listYue2AitkRuns(job.datasetId, ds.slug).flatMap(run => run.checkpoints.flatMap(c => [c.arPath, c.narPath].filter((p): p is string => !!p)));
+          refreshYue2PresetsForJointCheckpoint(ds, final.arPath, final.narPath, known);
+        }
+      }
+      finishJob(job, 'done');
+    }
     return;
   } catch (err: unknown) {
     if (!isCancelled(job)) finishJob(job, 'failed', err instanceof Error ? err.message : String(err));

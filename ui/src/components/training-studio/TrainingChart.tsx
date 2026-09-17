@@ -104,7 +104,7 @@ interface Props {
   epochs: ChartEpochPoint[];
   /** Per-step loss — the faint noise layer. Omitted on the done-state cards,
    *  which only have the epoch series persisted to disk. */
-  steps?: TrainStepPoint[];
+  steps?: Array<TrainStepPoint & { ma20?: number }>;
   milestones?: ChartMilestone[];
   /** Target loss; <= 0 hides the target line. */
   target: number;
@@ -175,7 +175,9 @@ export const TrainingChart: React.FC<Props> = ({
   // random timestep draw far more than the training — so without this there is
   // a correct chart with no readable trend in it.
   const trendPts  = stepPts.filter(s => typeof s.ma5 === 'number' && Number.isFinite(s.ma5));
+  const stopMeanPts = stepPts.filter(s => typeof s.ma20 === 'number' && Number.isFinite(s.ma20));
   const trendLine = line(trendPts.map(s => ({ x: xFor(s.ep), y: yFor(s.ma5 as number) })));
+  const stopMeanLine = line(stopMeanPts.map(s => ({ x: xFor(s.ep), y: yFor(s.ma20 as number) })));
   const epochLine = line(epochPts.map(e => ({ x: xFor(e.epoch), y: yFor(e.loss) })));
   const maLine = line(epochPts.map((e, i) => ({ x: xFor(e.epoch), y: yFor(ma[i]) })));
 
@@ -219,6 +221,8 @@ export const TrainingChart: React.FC<Props> = ({
         ? t('trainingStudio.chart.hoverStepOnly', { step: s.step, defaultValue: 'step {{step}}' })
         : t('trainingStudio.chart.hoverStep', { step: s.step, epoch: s.ep.toFixed(2), defaultValue: 'step {{step}} · epoch {{epoch}}' }));
       lines.push(t('trainingStudio.chart.hoverLoss', { loss: s.loss.toFixed(4), defaultValue: 'loss {{loss}}' }));
+      if (typeof s.ma5 === 'number') lines.push(`ma5 ${s.ma5.toFixed(4)}`);
+      if (typeof (s as TrainStepPoint & { ma20?: number }).ma20 === 'number') lines.push(`20-step mean ${(s as TrainStepPoint & { ma20: number }).ma20.toFixed(4)}`);
       if (typeof s.lr === 'number') lines.push(`lr ${fmtSci(s.lr)}`);
       if (typeof s.gradNorm === 'number') lines.push(`grad norm ${s.gradNorm.toFixed(3)}`);
       if (typeof s.stepMs === 'number') lines.push(`${(s.stepMs / 1000).toFixed(2)} s / step`);
@@ -295,6 +299,10 @@ export const TrainingChart: React.FC<Props> = ({
               strokeLinejoin="round"
               vectorEffect="non-scaling-stroke"
             />
+          )}
+          {stopMeanPts.length >= 2 && (
+            <polyline points={stopMeanLine} fill="none" className="text-rose-500" stroke="currentColor"
+              strokeWidth={1.75} strokeDasharray="5 3" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
           )}
 
           {/* (d) target loss */}
@@ -438,7 +446,13 @@ export const TrainingChart: React.FC<Props> = ({
         {trendPts.length >= 2 && (
           <span className="flex items-center gap-1">
             <span className="w-3 h-0.5 bg-sky-500" />
-            {t('trainingStudio.chart.legendRunMean', 'running mean')}
+            {stepAxis && stopMeanPts.length > 0 ? 'MA5' : t('trainingStudio.chart.legendRunMean', 'running mean')}
+          </span>
+        )}
+        {stopMeanPts.length >= 2 && (
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-0.5 border-t border-dashed border-rose-500" />
+            {t('trainingStudio.chart.legendStopMean', '20-step stop mean')}
           </span>
         )}
         {/* Only advertise a series that is actually drawn. These two were

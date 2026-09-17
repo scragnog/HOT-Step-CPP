@@ -2319,6 +2319,14 @@ export async function listYue2AitkRuns(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`);
 }
 
+/** Link a saved joint checkpoint's AR/NAR pair to this dataset's album preset. */
+export async function linkYue2JointCheckpointPreset(
+  id: string, checkpointDir: string,
+): Promise<{ updated: number; arPath: string; narPath: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-preset`,
+    { method: 'POST', ...jsonBody({ checkpointDir }) });
+}
+
 export async function listYue2JointPreviews(
   id: string, run?: string,
 ): Promise<{ run: string; output: string; previews: Yue2JointPreviewRecord[] }> {
