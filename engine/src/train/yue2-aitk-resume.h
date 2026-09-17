@@ -173,7 +173,7 @@ inline bool yue2_aitk_write_resume(const char * path, const HostStateSnapshot & 
         if (payload.size() > kMaxFileBytes) return false;
     }
     std::vector<uint8_t> metadata(runner_metadata.begin(), runner_metadata.end());
-    std::vector<uint8_t> file; file.insert(file.end(), kMagic.begin(), kMagic.end()); put_u32(file, kVersion); put_u64(file, uint64_t(payload.size())); put_u64(file, uint64_t(metadata.size())); put_u64(file, hash_bytes(payload.data(), payload.size(), hash_bytes(metadata.data(), metadata.size()))); put_u64(file, uint64_t(metadata.size())); file.insert(file.end(), metadata.begin(), metadata.end()); file.insert(file.end(), payload.begin(), payload.end());
+    std::vector<uint8_t> file; file.insert(file.end(), kMagic.begin(), kMagic.end()); put_u32(file, 1); put_u64(file, uint64_t(payload.size())); put_u64(file, uint64_t(metadata.size())); put_u64(file, hash_bytes(payload.data(), payload.size(), hash_bytes(metadata.data(), metadata.size()))); put_u64(file, uint64_t(metadata.size())); file.insert(file.end(), metadata.begin(), metadata.end()); file.insert(file.end(), payload.begin(), payload.end());
     if (file.size() > kMaxFileBytes) return false;
     const std::string temp = temporary_path(path); FILE * output = hs_fopen(temp.c_str(), "wbx"); if (!output) return false; const bool written = std::fwrite(file.data(), 1, file.size(), output) == file.size() && std::fflush(output) == 0; const bool closed = std::fclose(output) == 0; if (!written || !closed || !publish_no_replace(temp, path)) { hs_remove(temp); return false; } return true;
 }
@@ -284,7 +284,14 @@ inline bool yue2_aitk_read_resume(const char * path, ResumeRecord * out) {
     if (metadata_size > file.size() - pos) return false; const size_t payload_offset = pos + size_t(metadata_size); if (payload_size > file.size() - payload_offset || size_t(payload_size) != file.size() - payload_offset) return false; const uint64_t actual = hash_bytes(file.data() + payload_offset, size_t(payload_size), hash_bytes(file.data() + pos, size_t(metadata_size))); if (actual != checksum) return false;
     ResumeRecord record; record.runner_metadata.assign(reinterpret_cast<const char *>(file.data() + pos), size_t(metadata_size)); record.version = int(version);
     if (version == 1 && !read_resume_v1(file, payload_offset, file.size(), &record.state)) return false;
-    if (version == 2 && !read_resume_v2(file, payload_offset, file.size(), &record.state)) return false;
+    if (version == 2 && !read_resume_v2(file, payload_offset, file.size(), &record.state)) {
+        // Older AdamW exports wrote a v1 payload under a v2 header. Their
+        // checksum is valid; accept that exact legacy layout without altering
+        // the saved checkpoint, then let the optimizer binding verify it.
+        record.state = {};
+        if (!read_resume_v1(file, payload_offset, file.size(), &record.state)) return false;
+        record.version = 1;
+    }
     *out = std::move(record); return true;
 }
 
