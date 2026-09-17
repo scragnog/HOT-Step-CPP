@@ -1,3 +1,10 @@
+// lm-common.h (pulled in through yue2-aitk-joint-step.h -> lm-optim.h)
+// forward-declares jl(); the ace-train CLI defines it against its own --jsonl
+// stream. This standalone runtime streams its own event() lines and the lm_*
+// log helpers are never called on this path, so a stub keeps the include
+// chain self-contained for the kernels translation unit.
+static void jl(const char * fmt, ...) { (void) fmt; }
+
 #include "yue2-aitk-runtime.h"
 #include "yue2-aitk-dataset.h"
 #include "yue2-aitk-sha256.h"
@@ -12,6 +19,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -44,9 +52,17 @@ std::string lower_hash(std::string value) {
 
 struct ResumePlan { yue2_aitk::ResumeRecord record; std::vector<size_t> order; size_t cursor = 0; int completed = 0; std::string sampler; };
 bool str_field(yyjson_val * v, std::string * out) { if (!yyjson_is_str(v) || yyjson_get_len(v) != std::strlen(yyjson_get_str(v))) return false; out->assign(yyjson_get_str(v), yyjson_get_len(v)); return true; }
+// LmOptim scalars that travel in the metadata JSON rather than the binary
+// record: the bias-correction counter and Prodigy's adaptive d / r.
+struct ResumeBinding {
+    int opt_iter = -1;
+    double prodigy_d = -1.0;
+    double prodigy_r = -1.0;
+};
 bool parse_resume_meta(const std::string & text, const std::string & checkpoint, const std::string & dataset, const std::string & source,
                        uint64_t seed, int cuda_index, size_t item_count, ResumePlan * plan, std::string * error,
-                       float * cursor_weight, bool cursor_explicit) {
+                       float * cursor_weight, bool cursor_explicit,
+                       const yue2_aitk_runtime::Config & config, ResumeBinding * binding) {
     yyjson_doc * doc = yyjson_read(text.data(), text.size(), 0); if (!doc) return fail(error, "resume metadata is invalid JSON");
     struct Guard { yyjson_doc * d; ~Guard() { yyjson_doc_free(d); } } guard{doc}; yyjson_val * root = yyjson_doc_get_root(doc);
     if (!yyjson_is_obj(root) || !yue2_aitk::dataset_detail::unique_keys(root)) return fail(error, "resume metadata object is malformed");
@@ -56,19 +72,55 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
        (cursor_explicit&&*cursor_weight!=saved_cursor)) return fail(error,"resume lyric timing configuration mismatch");
     *cursor_weight=saved_cursor;
     std::string recipe, cp, ds, sm, sampler;
+    // Records written before the optimizer fields existed default to the
+    // legacy constants (AdamW8bit, rank 32, alpha 32), so an old record still
+    // resumes a default-shaped run.
+    std::string rec_optimizer="adamw"; int rec_rank=32; float rec_alpha=32.0f;
+    if(yyjson_val * v=yyjson_obj_get(root,"optimizer")) { if(!str_field(v,&rec_optimizer)) return fail(error,"resume optimizer field is malformed"); }
+    if(yyjson_val * v=yyjson_obj_get(root,"rank")) { if(!yyjson_is_int(v)) return fail(error,"resume rank field is malformed"); rec_rank=int(yyjson_get_sint(v)); }
+    if(yyjson_val * v=yyjson_obj_get(root,"alpha")) { if(!yyjson_is_num(v) || !std::isfinite(float(yyjson_get_num(v)))) return fail(error,"resume alpha field is malformed"); rec_alpha=float(yyjson_get_num(v)); }
+    if(rec_optimizer!=config.optimizer || rec_rank!=config.rank || rec_alpha!=config.alpha) {
+        return fail(error,"resume optimizer, rank or alpha mismatch; start a new run");
+    }
+    // Schedule knobs that only reshape the run from here on: note, don't refuse.
+    { yyjson_val * v=yyjson_obj_get(root,"lr"); if(v&&yyjson_is_num(v)&&double(yyjson_get_num(v))!=double(config.lr)) std::fprintf(stderr,"[yue2-aitk] resume note: lr changed from %.9g to %.9g; the run continues with the new value\n", double(yyjson_get_num(v)), (double)config.lr); }
+    { yyjson_val * v=yyjson_obj_get(root,"warmup"); if(v&&yyjson_is_int(v)&&int(yyjson_get_sint(v))!=config.warmup) std::fprintf(stderr,"[yue2-aitk] resume note: warmup changed from %d to %d; the run continues with the new value\n", int(yyjson_get_sint(v)), config.warmup); }
+    { yyjson_val * v=yyjson_obj_get(root,"weight_decay"); if(v&&yyjson_is_num(v)&&double(yyjson_get_num(v))!=double(config.weight_decay)) std::fprintf(stderr,"[yue2-aitk] resume note: weight-decay changed from %.9g to %.9g; the run continues with the new value\n", double(yyjson_get_num(v)), (double)config.weight_decay); }
     yyjson_val * vrecipe=yyjson_obj_get(root,"recipe"), *vcp=yyjson_obj_get(root,"checkpoint_sha256"), *vds=yyjson_obj_get(root,"dataset_sha256"), *vsm=yyjson_obj_get(root,"source_manifest_sha256"), *vseed=yyjson_obj_get(root,"seed"), *vdev=yyjson_obj_get(root,"cuda_index"), *vstep=yyjson_obj_get(root,"completed_step"), *vcursor=yyjson_obj_get(root,"order_cursor"), *vorder=yyjson_obj_get(root,"order"), *vsampler=yyjson_obj_get(root,"sampler_state");
     if (!str_field(vrecipe,&recipe) || recipe!="yue2-aitk-runtime-v1" || !str_field(vcp,&cp) || cp!=checkpoint || !str_field(vds,&ds) || ds!=dataset || !str_field(vsm,&sm) || sm!=source || !yyjson_is_uint(vseed) || yyjson_get_uint(vseed)!=seed || !yyjson_is_int(vdev) || yyjson_get_sint(vdev)!=cuda_index || !yyjson_is_int(vstep) || yyjson_get_sint(vstep)<0 || yyjson_get_sint(vstep)>INT_MAX || !yyjson_is_uint(vcursor) || !yyjson_is_arr(vorder) || yyjson_arr_size(vorder)!=item_count || !str_field(vsampler,&sampler)) return fail(error,"resume metadata binding mismatch");
     plan->completed=static_cast<int>(yyjson_get_sint(vstep)); plan->cursor=static_cast<size_t>(yyjson_get_uint(vcursor)); plan->sampler=std::move(sampler); plan->order.clear(); std::unordered_set<size_t> seen; size_t i=0,max=0; yyjson_val * x=nullptr; yyjson_arr_foreach(vorder,i,max,x) { if(!yyjson_is_uint(x) || yyjson_get_uint(x)>=item_count || !seen.insert(static_cast<size_t>(yyjson_get_uint(x))).second) return fail(error,"resume order is not a permutation"); plan->order.push_back(static_cast<size_t>(yyjson_get_uint(x))); }
-    if (plan->cursor>item_count || plan->completed<0) return fail(error,"resume cursor is out of range"); return true;
+    if (plan->cursor>item_count || plan->completed<0) return fail(error,"resume cursor is out of range");
+    if (config.optimizer!="adamw" && binding) {
+        yyjson_val * vopt=yyjson_obj_get(root,"opt_iter");
+        if(!vopt || !yyjson_is_int(vopt) || yyjson_get_sint(vopt)<0) return fail(error,"resume record is missing the optimizer iteration counter");
+        binding->opt_iter=int(yyjson_get_sint(vopt));
+        if (config.optimizer=="prodigy") {
+            yyjson_val * vd=yyjson_obj_get(root,"prodigy_d"), *vr=yyjson_obj_get(root,"prodigy_r");
+            if(!vd || !yyjson_is_num(vd) || !std::isfinite(double(yyjson_get_num(vd))) || double(yyjson_get_num(vd))<=0.0 ||
+               !vr || !yyjson_is_num(vr) || !std::isfinite(double(yyjson_get_num(vr)))) return fail(error,"resume record is missing Prodigy state");
+            binding->prodigy_d=double(yyjson_get_num(vd)); binding->prodigy_r=double(yyjson_get_num(vr));
+        }
+    }
+    return true;
 }
-std::string make_resume_meta(const std::string & cp, const std::string & ds, const std::string & sm, uint64_t seed, int device, int completed, size_t cursor, const std::vector<size_t> & order, const std::string & sampler, float cursor_weight) {
+std::string make_resume_meta(const std::string & cp, const std::string & ds, const std::string & sm, uint64_t seed, int device, int completed, size_t cursor, const std::vector<size_t> & order, const std::string & sampler, float cursor_weight,
+                             const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
     if (!root || !arr) { yyjson_mut_doc_free(doc); return {}; }
     yyjson_mut_doc_set_root(doc,root);
     if(cursor_weight>0) yyjson_mut_obj_add_real(doc,root,"cursor_weight",cursor_weight);
-    yyjson_mut_obj_add_strcpy(doc,root,"recipe","yue2-aitk-runtime-v1"); yyjson_mut_obj_add_strcpy(doc,root,"checkpoint_sha256",cp.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"dataset_sha256",ds.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"source_manifest_sha256",sm.c_str()); yyjson_mut_obj_add_uint(doc,root,"seed",seed); yyjson_mut_obj_add_int(doc,root,"cuda_index",device); yyjson_mut_obj_add_int(doc,root,"completed_step",completed); yyjson_mut_obj_add_uint(doc,root,"order_cursor",cursor); for(size_t x:order) yyjson_mut_arr_add_uint(doc,arr,x); yyjson_mut_obj_add_val(doc,root,"order",arr); yyjson_mut_obj_add_strcpy(doc,root,"sampler_state",sampler.c_str()); size_t n=0; char * raw=yyjson_mut_write(doc,0,&n); std::string out=raw?std::string(raw,n):std::string(); std::free(raw); yyjson_mut_doc_free(doc); return out;
+    yyjson_mut_obj_add_strcpy(doc,root,"recipe","yue2-aitk-runtime-v1"); yyjson_mut_obj_add_strcpy(doc,root,"checkpoint_sha256",cp.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"dataset_sha256",ds.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"source_manifest_sha256",sm.c_str()); yyjson_mut_obj_add_uint(doc,root,"seed",seed); yyjson_mut_obj_add_int(doc,root,"cuda_index",device); yyjson_mut_obj_add_int(doc,root,"completed_step",completed); yyjson_mut_obj_add_uint(doc,root,"order_cursor",cursor); for(size_t x:order) yyjson_mut_arr_add_uint(doc,arr,x); yyjson_mut_obj_add_val(doc,root,"order",arr); yyjson_mut_obj_add_strcpy(doc,root,"sampler_state",sampler.c_str());
+    yyjson_mut_obj_add_strcpy(doc,root,"optimizer",config.optimizer.c_str()); yyjson_mut_obj_add_int(doc,root,"rank",config.rank); yyjson_mut_obj_add_real(doc,root,"alpha",config.alpha); yyjson_mut_obj_add_real(doc,root,"lr",config.lr); yyjson_mut_obj_add_int(doc,root,"warmup",config.warmup); yyjson_mut_obj_add_real(doc,root,"weight_decay",config.weight_decay); yyjson_mut_obj_add_real(doc,root,"prodigy_d0",config.prodigy_d0); yyjson_mut_obj_add_real(doc,root,"muon_lr_scale",config.muon_lr_scale); yyjson_mut_obj_add_int(doc,root,"muon_ns_steps",config.muon_ns_steps);
+    if (config.optimizer!="adamw") {
+        yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
+        if (config.optimizer=="prodigy") {
+            yyjson_mut_obj_add_real(doc,root,"prodigy_d",float(prodigy_d));
+            yyjson_mut_obj_add_real(doc,root,"prodigy_r",float(prodigy_r));
+        }
+    }
+    size_t n=0; char * raw=yyjson_mut_write(doc,0,&n); std::string out=raw?std::string(raw,n):std::string(); std::free(raw); yyjson_mut_doc_free(doc); return out;
 }
 }
 
@@ -82,6 +134,18 @@ static int run_impl(const Config & config, std::string * error) {
     if (!fresh_output(std::filesystem::u8path(config.output), error)) return 1;
     if (config.seed > UINT32_MAX) { fail(error, "native-v1 runtime seed must fit uint32_t"); return 1; }
     if (config.steps <= 0 || config.save_every <= 0 || config.cuda_index < 0 || config.cuda_index > 127) { fail(error, "invalid runtime configuration"); return 1; }
+    if (config.rank < 1 || config.rank > 65536 || !std::isfinite(config.alpha) || config.alpha <= 0.0f || config.alpha > 1e6f ||
+        (config.optimizer != "adamw" && config.optimizer != "prodigy" && config.optimizer != "muon") ||
+        !std::isfinite(config.lr) || config.lr <= 0.0f ||
+        config.warmup < 0 || config.warmup > config.steps ||
+        !std::isfinite(config.weight_decay) || config.weight_decay < 0.0f ||
+        !std::isfinite(config.prodigy_d0) || config.prodigy_d0 <= 0.0f ||
+        !std::isfinite(config.muon_lr_scale) || config.muon_lr_scale <= 0.0f ||
+        config.muon_ns_steps < 1 || config.muon_ns_steps > 20 ||
+        !std::isfinite(config.target_loss) || config.target_loss < 0.0f ||
+        config.target_loss_window < 1) {
+        fail(error, "invalid runtime configuration"); return 1;
+    }
     event("preflight");
     yue2_aitk::Dataset dataset;
     if (!yue2_aitk::read_dataset(config.dataset, &dataset, error)) return 1;
@@ -99,9 +163,10 @@ static int run_impl(const Config & config, std::string * error) {
     float cursor_weight=config.cursor_weight;
     if(!std::isfinite(cursor_weight)||cursor_weight<0||cursor_weight>10) { fail(error,"invalid lyric timing weight"); return 1; }
     ResumePlan resume_plan;
+    ResumeBinding resume_binding;
     if (!config.resume.empty()) {
         if (!yue2_aitk::yue2_aitk_read_resume(config.resume.c_str(), &resume_plan.record)) { fail(error, "cannot read resume record"); return 1; }
-        if (!parse_resume_meta(resume_plan.record.runner_metadata, checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, dataset.items.size(), &resume_plan, error,&cursor_weight,config.cursor_weight_explicit)) return 1;
+        if (!parse_resume_meta(resume_plan.record.runner_metadata, checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, dataset.items.size(), &resume_plan, error,&cursor_weight,config.cursor_weight_explicit,config,&resume_binding)) return 1;
         if (resume_plan.completed > config.steps || resume_plan.completed > INT_MAX || resume_plan.record.state.step != resume_plan.completed) { fail(error, "resume completed step is invalid"); return 1; }
         if (resume_plan.cursor >= dataset.items.size()) { fail(error, "resume order cursor is out of range"); return 1; }
         if (!sampler.import_rng_state(resume_plan.sampler)) { fail(error, "resume sampler state is invalid"); return 1; }
@@ -138,15 +203,146 @@ static int run_impl(const Config & config, std::string * error) {
     try {
         event("load"); Yue2AitkModel model; Yue2AitkTrainState state;
         if (!model.load(config.checkpoint.c_str(), backend.value, yue2_aitk_load_embedding_bf16, error) ||
-            !state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0)) return 1;
-        std::vector<yue2_aitk::ParameterSpec> specs;
-        for (const auto & p : state.named_tensors()) specs.push_back({p.name, p.parameter, p.gradient});
-        yue2_aitk::Optimizer optimizer(backend.value, config.cuda_index, std::move(specs));
+            !state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0,config.rank,config.alpha)) return 1;
+        const bool use_lm = (config.optimizer != "adamw");
+        struct LmOptimHolder {
+            LmOptim opt;
+            ggml_backend_sched_t osched = nullptr;
+            ggml_context * scal_ctx = nullptr;
+            ggml_backend_buffer_t scal_buf = nullptr;
+            ~LmOptimHolder() {
+                if (osched) ggml_backend_sched_free(osched);
+                lm_optim_free(&opt);
+                if (scal_buf) ggml_backend_buffer_free(scal_buf);
+                if (scal_ctx) ggml_free(scal_ctx);
+            }
+        };
+        std::unique_ptr<LmOptimHolder> lm;
+        std::unique_ptr<yue2_aitk::Optimizer> adamw;
+        {
+            const auto named = state.named_tensors();
+            if (use_lm) {
+                auto holder = std::make_unique<LmOptimHolder>();
+                LmOptim & o = holder->opt;
+                o.optimizer = config.optimizer;
+                // LmOptim's built-in schedule is neutralised: {floor 1, total 1,
+                // warmup 0} makes lm_lr_lambda identically 1.0, and base_lr is
+                // set per step below, exactly as the Legacy YuE2 trainers do.
+                o.lr_floor = 1.0f; o.total_steps = 1; o.warmup_steps = 0;
+                o.weight_decay = config.weight_decay;
+                o.grad_clip = 0.0f;  // state.clip_gradients(1.0) is the only clipper
+                o.adam_beta1 = 0.9f; o.adam_beta2 = 0.999f;
+                o.prodigy_d0 = config.prodigy_d0;
+                o.muon.lr_scale = config.muon_lr_scale;
+                o.muon.ns_steps = config.muon_ns_steps;
+                o.base_lr = config.optimizer == "prodigy" ? 1.0f : config.lr;
+                ggml_init_params sp = { 8 * ggml_tensor_overhead(), nullptr, /*no_alloc*/ true };
+                holder->scal_ctx = ggml_init(sp);
+                if (!holder->scal_ctx) { fail(error, "optimizer scalar context failed"); return 1; }
+                o.t_lossgrad = ggml_new_tensor_1d(holder->scal_ctx, GGML_TYPE_F32, 1);
+                o.t_adamw = ggml_new_tensor_1d(holder->scal_ctx, GGML_TYPE_F32, 7);
+                o.t_clip = ggml_new_tensor_1d(holder->scal_ctx, GGML_TYPE_F32, 1);
+                o.t_eps = ggml_new_tensor_1d(holder->scal_ctx, GGML_TYPE_F32, 1);
+                o.t_gnorm2 = ggml_new_tensor_1d(holder->scal_ctx, GGML_TYPE_F32, 1);
+                if (!o.t_lossgrad || !o.t_adamw || !o.t_clip || !o.t_eps || !o.t_gnorm2) { fail(error, "optimizer scalar allocation failed"); return 1; }
+                ggml_set_name(o.t_lossgrad, "lossgrad"); ggml_set_name(o.t_adamw, "adamw_params"); ggml_set_name(o.t_clip, "grad_clip"); ggml_set_name(o.t_eps, "eps"); ggml_set_name(o.t_gnorm2, "gnorm2");
+                holder->scal_buf = ggml_backend_alloc_ctx_tensors(holder->scal_ctx, backend.value);
+                if (!holder->scal_buf) { fail(error, "optimizer scalar buffer allocation failed"); return 1; }
+                const float one = 1.0f, eps = 1e-6f;
+                ggml_backend_tensor_set(o.t_lossgrad, &one, 0, sizeof(one));
+                ggml_backend_tensor_set(o.t_clip, &one, 0, sizeof(one));
+                ggml_backend_tensor_set(o.t_eps, &eps, 0, sizeof(eps));
+                std::vector<ggml_tensor *> params;
+                params.reserve(named.size());
+                for (const auto & p : named) params.push_back(p.parameter);
+                std::string lm_err;
+                if (!lm_optim_init(&o, params, backend.value, &lm_err)) { fail(error, ("optimizer init: " + lm_err).c_str()); return 1; }
+                // All optimizer tensors (params, grads, buffers, scalars) live
+                // on the single CUDA backend, so a 1-backend scheduler is enough.
+                ggml_backend_t             lm_backends[1] = { backend.value };
+                ggml_backend_buffer_type_t lm_bufts[1]    = { ggml_backend_get_default_buffer_type(backend.value) };
+                holder->osched = ggml_backend_sched_new(lm_backends, lm_bufts, 1, std::max(16384, o.est_nodes), false, true);
+                if (!holder->osched) { fail(error, "optimizer scheduler allocation failed"); return 1; }
+                lm = std::move(holder);
+                std::fprintf(stderr, "[yue2-aitk] optimizer %s over %zu parameters (%d on Muon)\n", config.optimizer.c_str(), params.size(), lm->opt.n_muon);
+            } else {
+                std::vector<yue2_aitk::ParameterSpec> specs;
+                specs.reserve(named.size());
+                for (const auto & p : named) specs.push_back({p.name, p.parameter, p.gradient});
+                adamw = std::make_unique<yue2_aitk::Optimizer>(backend.value, config.cuda_index, std::move(specs));
+            }
+        }
         if (!config.resume.empty()) {
-            try { optimizer.restore(resume_plan.record.state); }
-            catch (const std::exception & exception) { if (error) *error = exception.what(); return 1; }
-            if (optimizer.step() != resume_plan.completed) { fail(error, "resume optimizer step does not match completed step"); return 1; }
-            resume_plan.record = {};
+            if (use_lm) {
+                if (resume_plan.record.version != 2) { fail(error, ("resume record format is not compatible with --optimizer " + config.optimizer).c_str()); return 1; }
+                const auto & snap = resume_plan.record.state;
+                const auto named = state.named_tensors();
+                if (snap.names.size() != named.size() || snap.step != resume_plan.completed) { fail(error, "resume record does not match the run shape"); return 1; }
+                const bool want_v = (config.optimizer == "prodigy");
+                const bool want_s = (config.optimizer == "prodigy");
+                auto slot_valid = [](const std::vector<float> & fp32, const std::vector<uint8_t> & u8, const std::vector<float> & absmax, size_t n, bool required, bool * present_out) {
+                    const bool f = !fp32.empty(), q = !u8.empty();
+                    if (f && q) return false;
+                    *present_out = f || q;
+                    if (!*present_out) return !required;
+                    if (f) {
+                        if (n >= 4096 || fp32.size() != n) return false;
+                        for (float v : fp32) if (!std::isfinite(v)) return false;
+                        return true;
+                    }
+                    if (n < 4096 || u8.size() != n || absmax.size() != (n + 255) / 256) return false;
+                    for (float v : absmax) if (!std::isfinite(v) || v < 0) return false;
+                    return true;
+                };
+                for (size_t i = 0; i < named.size(); ++i) {
+                    const size_t n = (size_t) ggml_nelements(named[i].parameter);
+                    if (snap.names[i] != named[i].name || snap.elements[i] != n || snap.parameters[i].size() != n) { fail(error, "resume record shape mismatch"); return 1; }
+                    for (float v : snap.parameters[i]) if (!std::isfinite(v)) { fail(error, "resume record has non-finite parameters"); return 1; }
+                    bool p1 = false, p2 = false, p3 = false, p4 = false;
+                    if (!slot_valid(snap.state1_fp32[i], snap.state1_u8[i], snap.absmax1[i], n, true, &p1) ||
+                        !slot_valid(snap.state2_fp32[i], snap.state2_u8[i], snap.absmax2[i], n, want_v, &p2) ||
+                        !slot_valid(snap.state3_fp32[i], snap.state3_u8[i], snap.absmax3[i], n, want_s, &p3) ||
+                        !slot_valid(snap.state4_fp32[i], snap.state4_u8[i], snap.absmax4[i], n, want_s, &p4)) {
+                        fail(error, "resume optimizer state mismatch"); return 1;
+                    }
+                }
+                const LmOptim & o = lm->opt;
+                ggml_backend_synchronize(backend.value);
+                auto store_state = [&](ggml_tensor * t, const std::vector<float> & fp32, const std::vector<uint8_t> & u8, const std::vector<float> & absmax) -> bool {
+                    if (!t) return true;
+                    const size_t n = (size_t) ggml_nelements(t);
+                    std::vector<float> values;
+                    if (!u8.empty()) {
+                        if (!yue2_aitk::resume_detail::dequantize_f32(u8, absmax, &values)) return false;
+                    } else {
+                        values = fp32;
+                    }
+                    if (values.size() != n) return false;
+                    ggml_backend_tensor_set(t, values.data(), 0, values.size() * sizeof(float));
+                    return true;
+                };
+                for (size_t i = 0; i < named.size(); ++i) {
+                    const size_t n = (size_t) ggml_nelements(named[i].parameter);
+                    ggml_backend_tensor_set(named[i].parameter, snap.parameters[i].data(), 0, n * sizeof(float));
+                    if (!store_state(o.mom_m[i], snap.state1_fp32[i], snap.state1_u8[i], snap.absmax1[i]) ||
+                        !store_state(o.mom_v[i], snap.state2_fp32[i], snap.state2_u8[i], snap.absmax2[i]) ||
+                        !store_state(o.pg_s.empty() ? nullptr : o.pg_s[i], snap.state3_fp32[i], snap.state3_u8[i], snap.absmax3[i]) ||
+                        !store_state(o.pg_x0.empty() ? nullptr : o.pg_x0[i], snap.state4_fp32[i], snap.state4_u8[i], snap.absmax4[i])) {
+                        fail(error, "resume optimizer state restore failed"); return 1;
+                    }
+                }
+                lm->opt.opt_step = resume_plan.completed;
+                lm->opt.opt_iter = resume_binding.opt_iter;
+                if (config.optimizer == "prodigy") { lm->opt.prodigy_d = resume_binding.prodigy_d; lm->opt.prodigy_r = resume_binding.prodigy_r; }
+                std::fprintf(stderr, "[yue2-aitk] resumed %s optimizer at step %d (iteration %d)\n", config.optimizer.c_str(), lm->opt.opt_step, lm->opt.opt_iter);
+                resume_plan.record = {};
+            } else {
+                if (resume_plan.record.version != 1) { fail(error, "resume record format is not compatible with --optimizer adamw"); return 1; }
+                try { adamw->restore(resume_plan.record.state); }
+                catch (const std::exception & exception) { if (error) *error = exception.what(); return 1; }
+                if (adamw->step() != resume_plan.completed) { fail(error, "resume optimizer step does not match completed step"); return 1; }
+                resume_plan.record = {};
+            }
         }
         std::ofstream jsonl(std::filesystem::u8path(config.output) / "train.jsonl", std::ios::binary);
         if (!jsonl) { fail(error, "cannot create training JSONL"); return 1; }
@@ -160,12 +356,61 @@ static int run_impl(const Config & config, std::string * error) {
             const auto adapter = temp_dir / "adapter.safetensors"; const auto resume = temp_dir / "optimizer.resume";
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
-            const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state,cursor_weight);
-            if (metadata.empty() || !state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str()) || !yue2_aitk::yue2_aitk_write_resume(resume.u8string().c_str(), optimizer.capture(), metadata)) return false;
+            const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0);
+            if (metadata.empty()) return false;
+            if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str())) return false;
+            if (use_lm) {
+                yue2_aitk::HostStateSnapshot snap; snap.step = step;
+                const auto named = state.named_tensors();
+                snap.names.resize(named.size()); snap.elements.resize(named.size()); snap.parameters.resize(named.size());
+                snap.state1_fp32.resize(named.size()); snap.state2_fp32.resize(named.size()); snap.state3_fp32.resize(named.size()); snap.state4_fp32.resize(named.size());
+                snap.state1_u8.resize(named.size()); snap.state2_u8.resize(named.size()); snap.state3_u8.resize(named.size()); snap.state4_u8.resize(named.size());
+                snap.absmax1.resize(named.size()); snap.absmax2.resize(named.size()); snap.absmax3.resize(named.size()); snap.absmax4.resize(named.size());
+                const LmOptim & o = lm->opt;
+                for (size_t i = 0; i < named.size(); ++i) {
+                    const size_t n = (size_t) ggml_nelements(named[i].parameter);
+                    snap.names[i] = named[i].name; snap.elements[i] = n;
+                    snap.parameters[i].resize(n);
+                    ggml_backend_synchronize(backend.value);
+                    ggml_backend_tensor_get(named[i].parameter, snap.parameters[i].data(), 0, n * sizeof(float));
+                    auto store = [&](int slot, ggml_tensor * t) -> bool {
+                        if (!t) return true;
+                        std::vector<float> values(n);
+                        ggml_backend_tensor_get(t, values.data(), 0, values.size() * sizeof(float));
+                        ggml_backend_synchronize(backend.value);
+                        for (float v : values) if (!std::isfinite(v)) return false;
+                        if (n >= 4096) {
+                            std::vector<uint8_t> q; std::vector<float> am;
+                            if (!yue2_aitk::resume_detail::quantize_f32(values, &q, &am)) return false;
+                            switch (slot) {
+                                case 1: snap.state1_u8[i] = std::move(q); snap.absmax1[i] = std::move(am); break;
+                                case 2: snap.state2_u8[i] = std::move(q); snap.absmax2[i] = std::move(am); break;
+                                case 3: snap.state3_u8[i] = std::move(q); snap.absmax3[i] = std::move(am); break;
+                                default: snap.state4_u8[i] = std::move(q); snap.absmax4[i] = std::move(am); break;
+                            }
+                        } else {
+                            switch (slot) {
+                                case 1: snap.state1_fp32[i] = std::move(values); break;
+                                case 2: snap.state2_fp32[i] = std::move(values); break;
+                                case 3: snap.state3_fp32[i] = std::move(values); break;
+                                default: snap.state4_fp32[i] = std::move(values); break;
+                            }
+                        }
+                        return true;
+                    };
+                    if (!store(1, o.mom_m[i]) || !store(2, o.mom_v[i]) || !store(3, o.pg_s.empty() ? nullptr : o.pg_s[i]) || !store(4, o.pg_x0.empty() ? nullptr : o.pg_x0[i])) return false;
+                }
+                if (!yue2_aitk::yue2_aitk_write_resume_v2(resume.u8string().c_str(), snap, metadata)) return false;
+            } else {
+                if (!yue2_aitk::yue2_aitk_write_resume(resume.u8string().c_str(), adamw->capture(), metadata)) return false;
+            }
             std::filesystem::rename(temp_dir, final_dir, save_ec);
             if (!save_ec) { last_saved=step; event("checkpoint", step); }
             return !save_ec;
         };
+        std::vector<double> loss_window;
+        loss_window.reserve(config.target_loss_window);
         while (completed < config.steps) {
             if (yue2_aitk_cancel_requested()) {
                 if (completed > 0 && !save_checkpoint(completed)) { fail(error, "cancel checkpoint publication failed"); return 1; }
@@ -197,8 +442,23 @@ static int run_impl(const Config & config, std::string * error) {
                     std::chrono::duration<double,std::milli>(now-stage_start).count());
                 stage_start = now;
             };
-            if (!yue2_aitk_joint::run(backend.value, model, state, optimizer, input, &metrics, error,
-                [&](const char * stage) { finish_stage(); previous_stage=stage; event(stage, completed + 1); })) return 1;
+            if (use_lm) {
+                // Linear warmup, then cosine to zero. Prodigy's base_lr is the
+                // schedule multiplier on its own d (gamma), as in the Legacy
+                // trainers; with warmup 0 the cosine starts at full value.
+                double lr = (config.optimizer == "prodigy") ? 1.0 : (double) config.lr;
+                if (config.warmup > 0 && completed < config.warmup) {
+                    lr *= (double)(completed + 1) / (double)config.warmup;
+                } else {
+                    const double denom = (double)std::max<int32_t>(1, config.steps - config.warmup);
+                    const double ratio = std::min(1.0, (double)(completed - config.warmup) / denom);
+                    lr *= 0.5 * (1.0 + std::cos(3.14159265358979 * ratio));
+                }
+                lm->opt.base_lr = (float)lr;
+            }
+            if (!yue2_aitk_joint::run(backend.value, model, state, use_lm ? nullptr : adamw.get(), input, &metrics, error,
+                [&](const char * stage) { finish_stage(); previous_stage=stage; event(stage, completed + 1); },
+                use_lm ? &lm->opt : nullptr, use_lm ? lm->osched : nullptr)) return 1;
             ggml_backend_synchronize(backend.value);
             finish_stage();
             const double step_ms=std::chrono::duration<double,std::milli>(Clock::now()-step_start).count();
@@ -223,6 +483,24 @@ static int run_impl(const Config & config, std::string * error) {
             jsonl << line.str();
             std::cout << line.str() << std::flush;
             if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
+            if (config.target_loss > 0.0f) {
+                // Same composite the server reports: AR CE + weighted KL + NAR
+                // MSE + weighted cursor CE. The window must be full before a
+                // stop, so the earliest stop is at step target_loss_window.
+                const double composite = metrics.ar_ce + 0.2 * metrics.ar_kl + metrics.nar_mse + metrics.cursor_ce * (double) cursor_weight;
+                loss_window.push_back(composite);
+                if (static_cast<int>(loss_window.size()) > config.target_loss_window) loss_window.erase(loss_window.begin());
+                if (static_cast<int>(loss_window.size()) == config.target_loss_window) {
+                    double sum = 0.0;
+                    for (double v : loss_window) sum += v;
+                    if (sum / (double) config.target_loss_window <= (double) config.target_loss) {
+                        if (!save_checkpoint(completed)) { fail(error, "target checkpoint publication failed"); return 1; }
+                        event("target", completed);
+                        event("done", completed);
+                        return 0;
+                    }
+                }
+            }
             if (completed % config.save_every == 0 || completed == config.steps)
                 if (!save_checkpoint(completed)) { fail(error, "checkpoint publication failed"); return 1; }
             if (config.pause_at > 0 && completed >= config.pause_at && completed < config.steps) {

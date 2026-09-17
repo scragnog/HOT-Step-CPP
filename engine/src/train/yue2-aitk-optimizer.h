@@ -70,6 +70,15 @@ struct HostStateSnapshot {
     std::vector<std::vector<uint8_t>> state2_u8;
     std::vector<std::vector<float>> absmax1;
     std::vector<std::vector<float>> absmax2;
+    // State slots 3 and 4 are carried only by the version-2 (LmOptim) resume
+    // format: Prodigy's s and x0 buffers. The AdamW8bit optimizer never fills
+    // them, and the v1 writer refuses snapshots that do.
+    std::vector<std::vector<float>> state3_fp32;
+    std::vector<std::vector<float>> state4_fp32;
+    std::vector<std::vector<uint8_t>> state3_u8;
+    std::vector<std::vector<uint8_t>> state4_u8;
+    std::vector<std::vector<float>> absmax3;
+    std::vector<std::vector<float>> absmax4;
 };
 
 class DeviceGuard {
@@ -148,6 +157,7 @@ public:
         HostStateSnapshot out; out.step = step_;
         out.parameters.resize(slots_.size()); out.state1_fp32.resize(slots_.size()); out.state2_fp32.resize(slots_.size());
         out.state1_u8.resize(slots_.size()); out.state2_u8.resize(slots_.size()); out.absmax1.resize(slots_.size()); out.absmax2.resize(slots_.size());
+        out.state3_fp32.resize(slots_.size()); out.state4_fp32.resize(slots_.size()); out.state3_u8.resize(slots_.size()); out.state4_u8.resize(slots_.size()); out.absmax3.resize(slots_.size()); out.absmax4.resize(slots_.size());
         for (size_t i = 0; i < slots_.size(); ++i) {
             const auto & s = slots_[i]; out.names.push_back(specs_[i].name); out.elements.push_back(s.elements);
             out.parameters[i].resize(s.elements); copy_to_host(out.parameters[i], specs_[i].parameter->data);
@@ -161,12 +171,13 @@ public:
         DeviceGuard device(device_index_);
         validate_specs(specs_);
         validate_backend_specs();
-        if (snap.step < 0 || snap.step > INT_MAX || snap.names.size() != slots_.size() || snap.elements.size() != slots_.size() || snap.parameters.size() != slots_.size() || snap.state1_fp32.size() != slots_.size() || snap.state2_fp32.size() != slots_.size() || snap.state1_u8.size() != slots_.size() || snap.state2_u8.size() != slots_.size() || snap.absmax1.size() != slots_.size() || snap.absmax2.size() != slots_.size()) throw std::invalid_argument("YuE2 optimizer snapshot metadata mismatch");
+        if (snap.step < 0 || snap.step > INT_MAX || snap.names.size() != slots_.size() || snap.elements.size() != slots_.size() || snap.parameters.size() != slots_.size() || snap.state1_fp32.size() != slots_.size() || snap.state2_fp32.size() != slots_.size() || snap.state1_u8.size() != slots_.size() || snap.state2_u8.size() != slots_.size() || snap.absmax1.size() != slots_.size() || snap.absmax2.size() != slots_.size() || snap.state3_fp32.size() != slots_.size() || snap.state4_fp32.size() != slots_.size() || snap.state3_u8.size() != slots_.size() || snap.state4_u8.size() != slots_.size() || snap.absmax3.size() != slots_.size() || snap.absmax4.size() != slots_.size()) throw std::invalid_argument("YuE2 optimizer snapshot metadata mismatch");
         // Complete validation happens before the first device copy. A malformed
         // later slot must never leave an earlier parameter partially restored.
         for (size_t i = 0; i < slots_.size(); ++i) {
             const auto & s = slots_[i];
             if (snap.names[i] != specs_[i].name || snap.elements[i] != s.elements || snap.parameters[i].size() != s.elements) throw std::invalid_argument("YuE2 optimizer snapshot shape/name mismatch");
+            if (!snap.state3_fp32[i].empty() || !snap.state4_fp32[i].empty() || !snap.state3_u8[i].empty() || !snap.state4_u8[i].empty() || !snap.absmax3[i].empty() || !snap.absmax4[i].empty()) throw std::invalid_argument("YuE2 optimizer snapshot carries LmOptim state; resume with the matching --optimizer");
             if (s.quantized) {
                 if (snap.state1_u8[i].size() != s.elements || snap.state2_u8[i].size() != s.elements || snap.absmax1[i].size() != s.blocks || snap.absmax2[i].size() != s.blocks) throw std::invalid_argument("YuE2 quantized snapshot state mismatch");
                 if (!snap.state1_fp32[i].empty() || !snap.state2_fp32[i].empty()) throw std::invalid_argument("YuE2 quantized snapshot has FP32 state");

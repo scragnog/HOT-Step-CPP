@@ -1,4 +1,5 @@
 #pragma once
+#include "lm-optim.h"
 #include "yue2-aitk-stack.h"
 #include "yue2-aitk-endpoints.h"
 #include "yue2-aitk-train-state.h"
@@ -22,11 +23,18 @@ struct Input {
     std::vector<std::pair<int32_t,int32_t>> cursor_frames;
 };
 using Progress=std::function<void(const char *)>;
+// `optimizer` is the native CUDA AdamW8bit; `lm`/`osched` select the shared
+// LmOptim path (prodigy/muon). Exactly one of the two is used per run.
 inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
-                Yue2AitkTrainState & state, yue2_aitk::Optimizer & optimizer,
+                Yue2AitkTrainState & state, yue2_aitk::Optimizer * optimizer,
                 const Input & input, Metrics * metrics, std::string * error,
-                const Progress & progress={}) {
+                const Progress & progress={}, LmOptim * lm=nullptr, ggml_backend_sched_t osched=nullptr) {
     using yue2_aitk_executor_detail::fail;
+    if (lm) {
+        if (!osched) return fail(error, "LmOptim path requires an optimizer scheduler");
+    } else if (!optimizer) {
+        return fail(error, "no optimizer is bound to the joint update");
+    }
     constexpr size_t H=2048,C=64;
     if (!input.batch || !metrics || !state.initialized() || !std::isfinite(input.timestep) ||
         input.timestep<0 || input.timestep>1) return fail(error,"invalid joint update input");
@@ -125,12 +133,31 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     if(!yue2_aitk_stack::backward(backend,model,state.nar_adapters(),nar,&prefix,std::move(prediction.dx),
         [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(true,int(layer),g,why);},error)) return false;
     if(!std::isfinite(result.ar_ce)||!std::isfinite(result.ar_kl)||!std::isfinite(result.nar_mse)) return fail(error,"nonfinite joint loss");
-    notify("Joint clipping and AdamW8bit update");
+    notify("Joint clipping and optimizer update");
     if(!state.clip_gradients(1.0f,&result.gradient_norm,error)) return false;
     ggml_backend_synchronize(backend);
-    try { optimizer.step_once(yue2_aitk::StepConfig{}); }
-    catch(const std::exception & e){return fail(error,e.what());}
-    result.step=optimizer.step(); *metrics=result;
+    if (lm) {
+        // The state's host gradients are the clipped, authoritative values;
+        // fill LmOptim's accumulators (own buffer) and step on its scheduler.
+        if (!state.fill_host_gradients(lm->acc, error)) return false;
+        LmStepStats step_stats{};
+        if (!lm_optim_step(lm, osched, &step_stats)) return fail(error, "optimizer step failed");
+        result.step = lm->opt_step;
+    } else {
+        try { optimizer->step_once(yue2_aitk::StepConfig{}); }
+        catch(const std::exception & e){return fail(error,e.what());}
+        result.step=optimizer->step();
+    }
+    *metrics=result;
     return true;
+}
+
+// Reference overload for call sites that bind the native AdamW8bit optimizer
+// by name; forwards to the dispatching overload above.
+inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
+                Yue2AitkTrainState & state, yue2_aitk::Optimizer & optimizer,
+                const Input & input, Metrics * metrics, std::string * error,
+                const Progress & progress={}) {
+    return run(backend, model, state, &optimizer, input, metrics, error, progress);
 }
 } // namespace yue2_aitk_joint

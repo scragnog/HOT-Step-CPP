@@ -28,15 +28,18 @@ public:
     Yue2AitkTrainState(const Yue2AitkTrainState &) = delete;
     Yue2AitkTrainState & operator=(const Yue2AitkTrainState &) = delete;
 
-    bool initialize(ggml_backend_t backend, uint32_t seed = kDefaultSeed, std::string * error = nullptr, bool cursor = false) {
+    bool initialize(ggml_backend_t backend, uint32_t seed = kDefaultSeed, std::string * error = nullptr, bool cursor = false,
+                    int64_t rank = 32, float alpha = 32.0f) {
         reset();
         if (!backend) return fail(error, "backend is null");
+        if (rank < 1 || rank > 65536) return fail(error, "rank must be within [1, 65536]");
+        if (!std::isfinite(alpha) || alpha <= 0.0f) return fail(error, "alpha must be finite and positive");
         ggml_init_params params{}; params.mem_size = 1024*ggml_tensor_overhead()+4096; params.no_alloc = true;
         ctx_ = ggml_init(params); if (!ctx_) return fail(error, "failed to create train-state context");
-        backend_ = backend; seed_ = seed; init_policy_ = "native-v1";
+        backend_ = backend; seed_ = seed; init_policy_ = "native-v1"; rank_ = rank; alpha_ = alpha;
         const Yue2AitkDims dims{2048, 2048, 1024, 6144};
-        if (!yue2_aitk_make_expert_adapters(ctx_, dims, kLayers, 32, 32.0f, &ar_, "ar") ||
-            !yue2_aitk_make_expert_adapters(ctx_, dims, kLayers, 32, 32.0f, &nar_, "nar")) {
+        if (!yue2_aitk_make_expert_adapters(ctx_, dims, kLayers, rank, alpha, &ar_, "ar") ||
+            !yue2_aitk_make_expert_adapters(ctx_, dims, kLayers, rank, alpha, &nar_, "nar")) {
             reset(); return fail(error, "failed to allocate AR/NAR adapters");
         }
         slots_.reserve(2u * kLayers * kSites * kFactors);
@@ -75,6 +78,8 @@ public:
     bool initialized() const { return initialized_; }
     uint32_t seed() const { return seed_; }
     const std::string & initialization_policy() const { return init_policy_; }
+    int64_t rank() const { return rank_; }
+    float alpha() const { return alpha_; }
     const Yue2AitkExpertAdapters & ar_adapters() const { return ar_; }
     const Yue2AitkExpertAdapters & nar_adapters() const { return nar_; }
     ggml_tensor * cursor_head() const { return cursor_slot_==kInvalid?nullptr:slots_[cursor_slot_].parameter; }
@@ -128,6 +133,22 @@ public:
         return true;
     }
 
+    // Upload every slot's current host gradient (clipped by clip_gradients)
+    // into F32 tensors of matching shape. The LmOptim path uses this to fill
+    // its persistent accumulators, which live in a buffer this class does not
+    // own and must never be treated as its own gradient buffer.
+    bool fill_host_gradients(std::vector<ggml_tensor *> & targets, std::string * error = nullptr) const {
+        if (!initialized_ || targets.size() != slots_.size()) return fail(error, "gradient target count does not match slot count");
+        for (size_t i = 0; i < slots_.size(); ++i) {
+            const Slot & slot = slots_[i];
+            ggml_tensor * target = targets[i];
+            if (!target || target->type != GGML_TYPE_F32 || !ggml_is_contiguous(target)) return fail(error, "gradient target must be contiguous F32");
+            for (int d = 0; d < GGML_MAX_DIMS; ++d) if (target->ne[d] != slot.parameter->ne[d]) return fail(error, "gradient target shape mismatch");
+            ggml_backend_tensor_set(target, slot.host.data(), 0, ggml_nbytes(target));
+        }
+        return true;
+    }
+
     // Refreshes host F32 snapshots and invokes the installed 448-tensor BF16
     // writer. The writer enforces exact names/shapes and no-overwrite publish.
     bool export_snapshot(const char * output_path, int64_t steps, std::string * error = nullptr, const char * ar_path = nullptr, const char * nar_path = nullptr) {
@@ -138,8 +159,8 @@ public:
             ggml_backend_tensor_get(slot.parameter, slot.host.data(), 0, ggml_nbytes(slot.parameter));
             factors.push_back({slot.name, slot.rows, slot.cols, slot.host.data()});
         }
-        if (!yue2_aitk_write_fused_lora(factors, 32, 32.0f, steps, output_path)) return fail(error, "fused-LoRA export failed");
-        if ((ar_path || nar_path) && !yue2_aitk_write_native_split(factors, 32, 32.0f, steps, ar_path, nar_path)) return fail(error, "native AR/NAR export failed");
+        if (!yue2_aitk_write_fused_lora(factors, rank_, alpha_, steps, output_path)) return fail(error, "fused-LoRA export failed");
+        if ((ar_path || nar_path) && !yue2_aitk_write_native_split(factors, rank_, alpha_, steps, ar_path, nar_path)) return fail(error, "native AR/NAR export failed");
         return true;
     }
 
@@ -163,6 +184,8 @@ private:
     std::string init_policy_ = "native-v1";
     bool initialized_ = false;
     size_t cursor_slot_ = kInvalid;
+    int64_t rank_ = 32;
+    float alpha_ = 32.0f;
 
     static bool fail(std::string * error, const char * message) { if (error) *error = message; return false; }
     static bool fail(std::string * error, const std::string & message) { if (error) *error = message; return false; }
