@@ -48,8 +48,13 @@ projection dimensions and publishes without replacing an existing file.
 without copying its tensor payloads. It checks all 229 ConvRot records,
 including the embedding, output head and NAR time/flow projections. The test
 accepts `NEW_OUTPUT_DIRECTORY [CHECKPOINT]` and preserves malformed fixtures.
-This validates the file representation; it does not yet upload the model or
-dequantize its embedding table.
+`engine/src/train/yue2-aitk-model.h` builds metadata and uploads the raw base
+without expanding the quantized linears to F32. `test_model_metadata.cpp`
+checks dimensions and cleanup; its `--upload-cpu CHECKPOINT` mode compares
+all 228 linears and 232 ordinary tensors byte for byte after upload. Run it
+through the Windows launcher above. Embedding dequantization is supplied by
+a callback and remains explicitly pending when no callback is provided.
+This loader is not yet a complete training path.
 
 ### Standalone ConvRot build and comparison
 
