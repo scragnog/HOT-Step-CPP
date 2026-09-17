@@ -3296,6 +3296,53 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       res.status(400).json({ error: 'seed must fit uint32 and device must be an explicit CUDA device such as CUDA0.' });
       return;
     }
+    const optimizerRaw = b.optimizer;
+    const optimizer = optimizerRaw === undefined ? 'adamw'
+      : optimizerRaw === 'adamw' || optimizerRaw === 'prodigy' || optimizerRaw === 'muon' ? optimizerRaw as 'adamw' | 'prodigy' | 'muon'
+      : null;
+    if (optimizerRaw !== undefined && optimizer === null) {
+      res.status(400).json({ error: 'optimizer must be adamw, prodigy or muon.' });
+      return;
+    }
+    const rank = integer('rank', 32);
+    if (rank < 1 || rank > 65536) {
+      res.status(400).json({ error: 'rank must be an integer between 1 and 65536.' });
+      return;
+    }
+    const alphaRaw = b.alpha === undefined ? 32 : Number(b.alpha);
+    if (!Number.isFinite(alphaRaw) || alphaRaw <= 0) {
+      res.status(400).json({ error: 'alpha must be a positive finite number.' });
+      return;
+    }
+    const prodigyD0 = b.prodigyD0 === undefined ? undefined : Number(b.prodigyD0);
+    if (prodigyD0 !== undefined && (!Number.isFinite(prodigyD0) || prodigyD0 <= 0)) {
+      res.status(400).json({ error: 'prodigyD0 must be a positive finite number.' });
+      return;
+    }
+    const muonLrScale = b.muonLrScale === undefined ? undefined : Number(b.muonLrScale);
+    if (muonLrScale !== undefined && (!Number.isFinite(muonLrScale) || muonLrScale <= 0)) {
+      res.status(400).json({ error: 'muonLrScale must be a positive finite number.' });
+      return;
+    }
+    const muonNsSteps = b.muonNsSteps === undefined ? undefined : integer('muonNsSteps', 0);
+    if (muonNsSteps !== undefined && (muonNsSteps < 1 || muonNsSteps > 20)) {
+      res.status(400).json({ error: 'muonNsSteps must be an integer between 1 and 20.' });
+      return;
+    }
+    const stopMode = b.stopMode === 'loss' ? 'loss' : b.stopMode === undefined ? 'steps' : null;
+    if (stopMode === null) {
+      res.status(400).json({ error: 'stopMode must be steps or loss.' });
+      return;
+    }
+    let targetLoss: number | undefined;
+    if (stopMode === 'loss') {
+      const rawTargetLoss = Number(b.targetLoss);
+      if (!Number.isFinite(rawTargetLoss) || rawTargetLoss < 0) {
+        res.status(400).json({ error: 'targetLoss must be a non-negative finite number when stopMode is loss.' });
+        return;
+      }
+      targetLoss = rawTargetLoss;
+    }
     if (resume && (!fs.existsSync(resume) || !fs.statSync(resume).isFile())) {
       res.status(400).json({ error: `Joint-training resume record is missing: ${resume}` });
       return;
@@ -3318,9 +3365,18 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16',
       preview: preview.enabled && preview.everySteps > 0 ? preview : { ...preview, enabled: false },
       alignment,
+      rank, alpha: alphaRaw,
+      ...(optimizer === 'prodigy' || optimizer === 'muon' ? { optimizer } : {}),
+      ...(prodigyD0 !== undefined ? { prodigyD0 } : {}),
+      ...(muonLrScale !== undefined ? { muonLrScale } : {}),
+      ...(muonNsSteps !== undefined ? { muonNsSteps } : {}),
+      stopMode,
+      ...(targetLoss !== undefined ? { targetLoss } : {}),
       ...(preparation ? { preparation } : {}),
     });
-    res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment });
+    res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment,
+      optimizer, rank, alpha: alphaRaw, stopMode,
+      ...(targetLoss !== undefined ? { targetLoss } : {}) });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

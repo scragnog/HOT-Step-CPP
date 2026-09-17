@@ -37,3 +37,44 @@ test('paused JSON event is recognized without becoming terminal done', () => {
   assert.deepEqual(parseYue2JointEvent('{"stage":"paused","step":50,"resume":"optimizer.resume"}', 100),
     { stage: 'paused', step: 50, totalSteps: 100 });
 });
+
+test('target-loss event carries its step for the post-exit validator', () => {
+  const ev = parseYue2JointEvent('{"stage":"target","step":212,"ar_ce":0.4,"ar_kl":0.1,"nar_mse":0.01}', 400);
+  assert.equal(ev?.stage, 'target');
+  assert.equal(ev?.step, 212);
+  assert.equal(ev?.totalSteps, 400);
+  assert.ok(ev && Math.abs((ev.loss ?? 0) - 0.43) < 1e-12);
+});
+
+test('prodigy run carries optimizer, rank/alpha and target-loss flags', () => {
+  assert.deepEqual(buildYue2JointTrainArgs({
+    checkpoint: 'base.gguf', dataset: 'dataset.json', outDir: 'run-new',
+    steps: 400, saveEvery: 50, seed: 3, device: 'CUDA0',
+    optimizer: 'prodigy', prodigyD0: 1e-6, rank: 16, alpha: 32,
+    stopMode: 'loss', targetLoss: 0.9,
+  }), [
+    'yue2-joint-train', '--checkpoint', 'base.gguf', '--dataset', 'dataset.json',
+    '--output', 'run-new', '--steps', '400', '--save-every', '50', '--seed', '3',
+    '--device', 'CUDA0', '--rank', '16', '--alpha', '32',
+    '--optimizer', 'prodigy', '--prodigy-d0', '0.000001', '--target-loss', '0.9',
+  ]);
+});
+
+test('muon run carries lr-scale and Newton-Schulz step count, adamw adds no optimizer flag', () => {
+  assert.deepEqual(buildYue2JointTrainArgs({
+    checkpoint: 'b', dataset: 'd', outDir: 'run-new',
+    steps: 100, saveEvery: 10, seed: 3, device: 'CUDA0',
+    optimizer: 'muon', muonLrScale: 1.2, muonNsSteps: 7,
+  }), [
+    'yue2-joint-train', '--checkpoint', 'b', '--dataset', 'd', '--output', 'run-new',
+    '--steps', '100', '--save-every', '10', '--seed', '3', '--device', 'CUDA0',
+    '--optimizer', 'muon', '--muon-lr-scale', '1.2', '--muon-ns-steps', '7',
+  ]);
+  assert.deepEqual(buildYue2JointTrainArgs({
+    checkpoint: 'b', dataset: 'd', outDir: 'run-new',
+    steps: 100, saveEvery: 10, seed: 3, device: 'CUDA0', optimizer: 'adamw',
+  }), [
+    'yue2-joint-train', '--checkpoint', 'b', '--dataset', 'd', '--output', 'run-new',
+    '--steps', '100', '--save-every', '10', '--seed', '3', '--device', 'CUDA0',
+  ]);
+});

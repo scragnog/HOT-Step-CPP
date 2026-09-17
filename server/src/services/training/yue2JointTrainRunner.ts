@@ -26,6 +26,17 @@ export interface ResolvedYue2JointTrainOptions {
   alignment?: import('./types.js').Yue2AlignmentOptions;
   pauseAt?: number;
   preparation?: import('./yue2AitkPrepareRunner.js').ResolvedYue2AitkPrepareOptions;
+  /** Optimizer: native CUDA AdamW8bit (default) or the shared LmOptim path. */
+  optimizer?: 'adamw' | 'prodigy' | 'muon';
+  prodigyD0?: number;
+  muonLrScale?: number;
+  muonNsSteps?: number;
+  /** LoRA rank / alpha; engine defaults are 32 / 32.0. */
+  rank?: number;
+  alpha?: number;
+  /** 'loss' trains until the windowed composite loss <= targetLoss (steps is the cap). */
+  stopMode?: 'steps' | 'loss';
+  targetLoss?: number;
 }
 
 export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): string[] {
@@ -34,6 +45,18 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     '--output', o.outDir, '--steps', String(o.steps), '--save-every', String(o.saveEvery),
     '--seed', String(o.seed), '--device', o.device,
   ];
+  if (o.rank !== undefined) args.push('--rank', String(o.rank));
+  if (o.alpha !== undefined) args.push('--alpha', String(o.alpha));
+  const optimizer = o.optimizer ?? 'adamw';
+  if (optimizer !== 'adamw') {
+    args.push('--optimizer', optimizer);
+    if (optimizer === 'prodigy' && o.prodigyD0 !== undefined) args.push('--prodigy-d0', String(o.prodigyD0));
+    if (optimizer === 'muon') {
+      if (o.muonLrScale !== undefined) args.push('--muon-lr-scale', String(o.muonLrScale));
+      if (o.muonNsSteps !== undefined) args.push('--muon-ns-steps', String(o.muonNsSteps));
+    }
+  }
+  if (o.stopMode === 'loss' && o.targetLoss !== undefined) args.push('--target-loss', String(o.targetLoss));
   if (o.resume) args.push('--resume', o.resume);
   if (o.alignment) {
     args.push('--cursor-weight', String(o.alignment.enabled ? o.alignment.cursorWeight : 0));
@@ -75,6 +98,14 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (o.seed > 0xffffffff) return 'seed must fit uint32';
   if (o.steps > 0x7fffffff) return 'steps must fit int32';
   if (!/^CUDA[0-9]+$/i.test(o.device)) return 'device must be an explicit CUDA device such as CUDA0';
+  if (o.optimizer && o.optimizer !== 'adamw' && o.optimizer !== 'prodigy' && o.optimizer !== 'muon') return 'optimizer must be adamw, prodigy or muon';
+  if (o.rank !== undefined && (!Number.isInteger(o.rank) || o.rank < 1 || o.rank > 65536)) return 'rank must be an integer between 1 and 65536';
+  if (o.alpha !== undefined && (!Number.isFinite(o.alpha) || o.alpha <= 0)) return 'alpha must be a positive finite number';
+  if (o.prodigyD0 !== undefined && (!Number.isFinite(o.prodigyD0) || o.prodigyD0 <= 0)) return 'prodigyD0 must be a positive finite number';
+  if (o.muonLrScale !== undefined && (!Number.isFinite(o.muonLrScale) || o.muonLrScale <= 0)) return 'muonLrScale must be a positive finite number';
+  if (o.muonNsSteps !== undefined && (!Number.isInteger(o.muonNsSteps) || o.muonNsSteps < 1 || o.muonNsSteps > 20)) return 'muonNsSteps must be an integer between 1 and 20';
+  if (o.stopMode && o.stopMode !== 'steps' && o.stopMode !== 'loss') return 'stopMode must be steps or loss';
+  if (o.stopMode === 'loss' && (o.targetLoss === undefined || !Number.isFinite(o.targetLoss) || o.targetLoss < 0)) return 'targetLoss must be a non-negative finite number when stopMode is loss';
   if (o.resume && (!fs.existsSync(o.resume) || !fs.statSync(o.resume).isFile())) return `resume record is missing: ${o.resume}`;
   if (!o.spawnEnv) o.spawnEnv = buildGpuEnv().env;
   return null;
@@ -103,6 +134,9 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void 
     log(job, 'info', `Joint training step ${step}${event.loss === undefined ? '' : ` loss ${event.loss}`}`);
   } else if (stage === 'checkpoint' || stage === 'checkpoint_stage') {
     log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
+  } else if (stage === 'target' && step !== undefined) {
+    state.targetStopped = true;
+    log(job, 'info', `Target loss reached at step ${step}; stopping early`);
   } else if (stage !== 'event') {
     if (stage === 'done') state.doneSeen = true;
     job.phase = stage;
@@ -180,16 +214,20 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
       const segmentOut = preview ? path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`) : o.outDir;
       const pauseAt = preview ? Math.min(o.steps, step + preview.everySteps) : 0;
       const segment = { ...o, outDir: segmentOut, resume: resume || undefined, pauseAt: pauseAt < o.steps ? pauseAt : undefined };
-      const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: step, totalSteps: o.steps };
-      const wanted = pauseAt > 0 && pauseAt < o.steps ? pauseAt : o.steps;
+      const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: step, targetStopped: false, totalSteps: o.steps };
+      // A target-loss stop ends the run early: the engine checkpoints the
+      // last completed step, so the validator must accept that step, not o.steps.
+      const wanted = () => state.targetStopped && state.lastStep > step
+        ? state.lastStep : (pauseAt > 0 && pauseAt < o.steps ? pauseAt : o.steps);
       nativeAttempted = true;
       await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs(segment),
         Math.max(30 * 60 * 1000, (o.steps - step) * 10 * 60 * 1000), () => {
           if (!fs.existsSync(segmentOut)) return 'Joint trainer exited without creating its output directory';
-          const checkpoint = path.join(segmentOut, `checkpoint-step${wanted}`);
-          if (!fs.existsSync(checkpoint)) return `Joint-training checkpoint-step${wanted} is missing`;
+          const expect = wanted();
+          const checkpoint = path.join(segmentOut, `checkpoint-step${expect}`);
+          if (!fs.existsSync(checkpoint)) return `Joint-training checkpoint-step${expect} is missing`;
           if (['adapter.safetensors', 'optimizer.resume', 'native-ar.safetensors', 'native-nar.safetensors']
-            .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `Joint-training checkpoint-step${wanted} is incomplete`;
+            .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `Joint-training checkpoint-step${expect} is incomplete`;
           return null;
         }, (line, current) => relayJsonLine(job, line, current), state, o.spawnEnv);
       if (isCancelled(job)) return;
