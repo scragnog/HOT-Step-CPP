@@ -3,6 +3,7 @@
 #include "st-write.h"
 #include <cstring>
 #include <functional>
+#include <cstdlib>
 
 // Layer-by-layer recomputation keeps one block graph resident. Checkpoints are
 // host BF16 values; this is an initial bounded-memory execution path, not yet
@@ -19,6 +20,7 @@ struct Yue2AitkStackTape {
 };
 
 namespace yue2_aitk_stack {
+inline bool fast_execution() { return std::getenv("YUE2_AITK_BASELINE") == nullptr; }
 inline std::vector<float> widen(const std::vector<uint16_t> & source) {
     std::vector<float> result(source.size());
     for (size_t i=0; i<source.size(); ++i) {
@@ -97,6 +99,11 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
     if (capture_prefix) { capture_prefix->length=length; capture_prefix->keys.clear(); capture_prefix->values.clear(); }
     std::vector<float> cosine,sine;
     trig(c,length,prefix?prefix->length:0,cosine,sine);
+    Yue2AitkBlockConstants constants;
+    Yue2AitkBlockWorkspace workspace;
+    const bool fast = fast_execution();
+    if (fast && !constants.make(backend,c,length,prefix?prefix->length:0,
+            nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,cosine.data(),sine.data(),error)) return false;
     std::vector<float> hidden=initial;
     for (size_t layer=0;layer<expert.layers.size();++layer) {
         if (save_tape) tape->layer_inputs.push_back(pack(hidden));
@@ -108,7 +115,8 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
         if (!Yue2AitkBlockExecutor::forward(backend,c,expert.layers[layer],layer_norms,
                 adapters?&adapters->layers[layer]:nullptr,hidden.data(),length,cosine.data(),sine.data(),
                 nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
-                prefix?prefix->length:0,error)) return false;
+                prefix?prefix->length:0,error,!fast || capture_prefix != nullptr,
+                fast?&constants:nullptr,fast?&workspace:nullptr)) return false;
         hidden=std::move(out.hidden);
         if (capture_prefix) { capture_prefix->keys.push_back(std::move(out.key)); capture_prefix->values.push_back(std::move(out.value)); }
     }
@@ -128,6 +136,11 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
         gradient.size()!=size_t(tape.length*c.hidden)) return fail(error,"invalid expert backward tape");
     std::vector<float> cosine,sine;
     trig(c,tape.length,prefix?prefix->length:0,cosine,sine);
+    Yue2AitkBlockConstants constants;
+    Yue2AitkBlockWorkspace workspace;
+    const bool fast = fast_execution();
+    if (fast && !constants.make(backend,c,tape.length,prefix?prefix->length:0,
+            tape.nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,cosine.data(),sine.data(),error)) return false;
     for (size_t end=expert.layers.size();end>0;--end) {
         const size_t layer=end-1;
         auto input=widen(tape.layer_inputs[layer]);
@@ -139,7 +152,7 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
         if (!Yue2AitkBlockExecutor::backward(backend,c,expert.layers[layer],layer_norms,
                 &adapters.layers[layer],input.data(),gradient.data(),tape.length,cosine.data(),sine.data(),
                 tape.nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
-                prefix?prefix->length:0,error)) return false;
+                prefix?prefix->length:0,error,fast?&constants:nullptr,fast?&workspace:nullptr)) return false;
         if (!store(layer,out,error)) return false;
         gradient=std::move(out.dx);
     }

@@ -11,6 +11,7 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include "ggml-alloc.h"
 
 enum class Yue2AitkMaskMode { causal, noncausal };
 
@@ -110,6 +111,36 @@ inline bool setup_inputs(ggml_backend_t backend, ggml_tensor * h, ggml_tensor * 
 }
 } // namespace yue2_aitk_executor_detail
 
+// One allocation plan and one set of constants per stack, shared by its layers.
+struct Yue2AitkBlockWorkspace {
+    ggml_gallocr_t allocator = nullptr;
+    ~Yue2AitkBlockWorkspace() { if (allocator) ggml_gallocr_free(allocator); }
+    bool allocate(ggml_backend_t backend, ggml_cgraph * graph, std::string * error) {
+        if (!allocator) allocator = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend));
+        return (allocator && ggml_gallocr_alloc_graph(allocator, graph)) ||
+            yue2_aitk_executor_detail::fail(error, "block workspace allocation failed");
+    }
+};
+struct Yue2AitkBlockConstants {
+    yue2_aitk_executor_detail::Runtime runtime;
+    ggml_tensor * cosine = nullptr, * sine = nullptr, * mask = nullptr;
+    bool make(ggml_backend_t backend, const Yue2AitkGraphConfig & c,
+              int64_t count, int64_t prefix, Yue2AitkMaskMode mode,
+              const float * cos_data, const float * sin_data, std::string * error) {
+        using namespace yue2_aitk_executor_detail;
+        if (!make_runtime(backend, 4*ggml_tensor_overhead()+1024, &runtime, error)) return false;
+        cosine = ggml_new_tensor_4d(runtime.ctx, GGML_TYPE_F32, c.head_dim/2, 1, count, 1);
+        sine = ggml_new_tensor_4d(runtime.ctx, GGML_TYPE_F32, c.head_dim/2, 1, count, 1);
+        std::vector<uint16_t> host;
+        mask = make_mask(runtime.ctx, count, prefix, mode, &host, error);
+        if (!mask || !cosine || !sine || !allocate(&runtime, backend, error)) return false;
+        ggml_backend_tensor_set(cosine, cos_data, 0, ggml_nbytes(cosine));
+        ggml_backend_tensor_set(sine, sin_data, 0, ggml_nbytes(sine));
+        ggml_backend_tensor_set(mask, host.data(), 0, ggml_nbytes(mask));
+        return true;
+    }
+};
+
 class Yue2AitkBlockExecutor {
 public:
     static bool forward(ggml_backend_t backend, const Yue2AitkGraphConfig & config,
@@ -118,25 +149,33 @@ public:
                         int64_t sequence, const float * cosine, const float * sine,
                         Yue2AitkMaskMode mask_mode, Yue2AitkBlockForwardHost * result,
                         ggml_tensor * prefix_k_canvas = nullptr, ggml_tensor * prefix_v_canvas = nullptr,
-                        int64_t prefix_length = 0, std::string * error = nullptr) {
+                        int64_t prefix_length = 0, std::string * error = nullptr,
+                        bool capture_kv = true, Yue2AitkBlockConstants * constants = nullptr,
+                        Yue2AitkBlockWorkspace * workspace = nullptr) {
         using namespace yue2_aitk_executor_detail;
         if (!result) return fail(error, "forward result is null");
         if ((prefix_k_canvas == nullptr) != (prefix_v_canvas == nullptr)) return fail(error, "prefix canvases must be paired");
         if (!validate_inputs(backend, config, x, cosine, sine, sequence, error)) return false;
         Runtime r; if (!make_runtime(backend, 64ull*1024ull*1024ull, &r, error)) return false;
         ggml_tensor * h = ggml_new_tensor_2d(r.ctx, GGML_TYPE_F32, config.hidden, sequence);
-        ggml_tensor * cos_t = ggml_new_tensor_4d(r.ctx, GGML_TYPE_F32, config.head_dim/2, 1, sequence, 1);
-        ggml_tensor * sin_t = ggml_new_tensor_4d(r.ctx, GGML_TYPE_F32, config.head_dim/2, 1, sequence, 1);
-        std::vector<uint16_t> mask_data; ggml_tensor * mask = make_mask(r.ctx, sequence, prefix_length, mask_mode, &mask_data, error);
+        ggml_tensor * cos_t = constants ? constants->cosine : ggml_new_tensor_4d(r.ctx, GGML_TYPE_F32, config.head_dim/2, 1, sequence, 1);
+        ggml_tensor * sin_t = constants ? constants->sine : ggml_new_tensor_4d(r.ctx, GGML_TYPE_F32, config.head_dim/2, 1, sequence, 1);
+        std::vector<uint16_t> mask_data; ggml_tensor * mask = constants ? constants->mask : make_mask(r.ctx, sequence, prefix_length, mask_mode, &mask_data, error);
         if (!h || !cos_t || !sin_t || !mask) return fail(error, "forward tensor allocation failed");
         Yue2AitkBlockResult out = yue2_aitk_graph::block(r.ctx, config, weights, norms, adapters, h, cos_t, sin_t, mask, prefix_k_canvas, prefix_v_canvas, prefix_length);
         ggml_cgraph * graph = ggml_new_graph_custom(r.ctx, 32768, true); if (!graph) return fail(error, "forward graph allocation failed");
-        ggml_tensor * key_cont = out.key ? ggml_cont(r.ctx, out.key) : nullptr;
-        ggml_tensor * value_cont = out.value ? ggml_cont(r.ctx, out.value) : nullptr;
+        ggml_tensor * key_cont = capture_kv && out.key ? ggml_cont(r.ctx, out.key) : nullptr;
+        ggml_tensor * value_cont = capture_kv && out.value ? ggml_cont(r.ctx, out.value) : nullptr;
         ggml_build_forward_expand(graph, out.hidden); if (key_cont) ggml_build_forward_expand(graph, key_cont); if (value_cont) ggml_build_forward_expand(graph, value_cont);
         if (!supports_all(backend, graph, error)) return false;
-        if (!allocate(&r, backend, error)) return false;
-        setup_inputs(backend, h, cos_t, sin_t, mask, x, cosine, sine, mask_data);
+        if (workspace) {
+            ggml_set_input(h); ggml_set_output(out.hidden);
+            if (key_cont) ggml_set_output(key_cont);
+            if (value_cont) ggml_set_output(value_cont);
+            if (!workspace->allocate(backend, graph, error)) return false;
+        } else if (!allocate(&r, backend, error)) return false;
+        if (constants) ggml_backend_tensor_set(h, x, 0, ggml_nbytes(h));
+        else setup_inputs(backend, h, cos_t, sin_t, mask, x, cosine, sine, mask_data);
         if (ggml_backend_graph_compute(backend, graph) != GGML_STATUS_SUCCESS) return fail(error, "forward graph compute failed");
         result->hidden.resize(static_cast<size_t>(config.hidden*sequence)); ggml_backend_tensor_get(out.hidden, result->hidden.data(), 0, ggml_nbytes(out.hidden));
         result->key.clear(); result->value.clear();
@@ -150,7 +189,9 @@ public:
                          int64_t sequence, const float * cosine, const float * sine,
                          Yue2AitkMaskMode mask_mode, Yue2AitkBlockBackwardHost * result,
                          ggml_tensor * prefix_k_canvas = nullptr, ggml_tensor * prefix_v_canvas = nullptr,
-                         int64_t prefix_length = 0, std::string * error = nullptr) {
+                         int64_t prefix_length = 0, std::string * error = nullptr,
+                         Yue2AitkBlockConstants * constants = nullptr,
+                         Yue2AitkBlockWorkspace * workspace = nullptr) {
         using namespace yue2_aitk_executor_detail;
         if (!result || !adapters) return fail(error, "backward result/adapters is null");
         size_t hs=0; if (!checked_count(config.hidden, sequence, &hs) || !finite_all(dy, hs)) return fail(error, "invalid/non-finite upstream gradient");
@@ -158,13 +199,28 @@ public:
         if (!validate_inputs(backend, config, x, cosine, sine, sequence, error)) return false;
         Runtime r; if (!make_runtime(backend, 64ull*1024ull*1024ull, &r, error)) return false;
         ggml_tensor * h=ggml_new_tensor_2d(r.ctx,GGML_TYPE_F32,config.hidden,sequence), * upstream=ggml_new_tensor_2d(r.ctx,GGML_TYPE_F32,config.hidden,sequence);
-        std::vector<uint16_t> mask_data; ggml_tensor * cos_t=ggml_new_tensor_4d(r.ctx,GGML_TYPE_F32,config.head_dim/2,1,sequence,1), * sin_t=ggml_new_tensor_4d(r.ctx,GGML_TYPE_F32,config.head_dim/2,1,sequence,1), * mask=make_mask(r.ctx,sequence,prefix_length,mask_mode,&mask_data,error);
+        std::vector<uint16_t> mask_data;
+        ggml_tensor * cos_t=constants ? constants->cosine : ggml_new_tensor_4d(r.ctx,GGML_TYPE_F32,config.head_dim/2,1,sequence,1);
+        ggml_tensor * sin_t=constants ? constants->sine : ggml_new_tensor_4d(r.ctx,GGML_TYPE_F32,config.head_dim/2,1,sequence,1);
+        ggml_tensor * mask=constants ? constants->mask : make_mask(r.ctx,sequence,prefix_length,mask_mode,&mask_data,error);
         if(!h||!upstream||!cos_t||!sin_t||!mask) return fail(error,"backward tensor allocation failed");
         ggml_set_param(h);
         Yue2AitkBlockResult out=yue2_aitk_graph::block(r.ctx,config,weights,norms,adapters,h,cos_t,sin_t,mask,prefix_k_canvas,prefix_v_canvas,prefix_length);
         ggml_tensor * loss=ggml_sum(r.ctx,ggml_mul(r.ctx,out.hidden,upstream)); ggml_cgraph * graph=ggml_new_graph_custom(r.ctx,65536,true); if(!loss||!graph) return fail(error,"backward graph allocation failed");
         ggml_build_forward_expand(graph,loss); ggml_set_loss(loss); ggml_build_backward_expand(r.ctx,graph,nullptr); if(!supports_all(backend,graph,error)) return false;
-        if(!allocate(&r,backend,error)) return false; setup_inputs(backend,h,cos_t,sin_t,mask,x,cosine,sine,mask_data); ggml_backend_tensor_set(upstream,dy,0,ggml_nbytes(upstream)); ggml_graph_reset(graph);
+        if (workspace) {
+            ggml_set_input(h); ggml_set_input(upstream);
+            for (ggml_tensor * p : {h, adapters->qkv.a, adapters->qkv.b, adapters->output.a, adapters->output.b,
+                                    adapters->gate_up.a, adapters->gate_up.b, adapters->down.a, adapters->down.b}) {
+                ggml_tensor * g = ggml_graph_get_grad(graph, p);
+                if (!g) return fail(error, "missing block gradient");
+                ggml_set_output(g);
+            }
+            if (!workspace->allocate(backend, graph, error)) return false;
+        } else if(!allocate(&r,backend,error)) return false;
+        if (constants) ggml_backend_tensor_set(h,x,0,ggml_nbytes(h));
+        else setup_inputs(backend,h,cos_t,sin_t,mask,x,cosine,sine,mask_data);
+        ggml_backend_tensor_set(upstream,dy,0,ggml_nbytes(upstream)); ggml_graph_reset(graph);
         if(ggml_backend_graph_compute(backend,graph)!=GGML_STATUS_SUCCESS) return fail(error,"backward graph compute failed");
         auto get=[&](ggml_tensor*t,std::vector<float>&v,const char*n)->bool{ggml_tensor*g=ggml_graph_get_grad(graph,t);if(!g)return fail(error,std::string("missing gradient: ")+n);v.resize(ggml_nbytes(g)/sizeof(float));ggml_backend_tensor_get(g,v.data(),0,ggml_nbytes(g));return true;};
         if(!get(h,result->dx,"x")||!get(adapters->qkv.a,result->qkv_dA,"qkv A")||!get(adapters->qkv.b,result->qkv_dB,"qkv B")||!get(adapters->output.a,result->output_dA,"output A")||!get(adapters->output.b,result->output_dB,"output B")||!get(adapters->gate_up.a,result->gate_up_dA,"gate_up A")||!get(adapters->gate_up.b,result->gate_up_dB,"gate_up B")||!get(adapters->down.a,result->down_dA,"down A")||!get(adapters->down.b,result->down_dB,"down B")) return false;

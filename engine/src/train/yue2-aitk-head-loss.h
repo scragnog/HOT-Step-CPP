@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdlib>
 #include "yue2-aitk-backend.h"
 
 // Chunked full-vocabulary AR CE + KL head helper for the native AITK trainer.
@@ -130,6 +131,62 @@ struct CudaDeviceGuard {
     }
 };
 
+// One graph/context/buffer per chunk shape. Full chunks are reused for every
+// 128-position batch; a second cache is created only when a tail exists.
+struct ChunkWorkspace {
+    Temporary tmp;
+    std::size_t count = 0;
+    ggml_tensor * adapted = nullptr;
+    ggml_tensor * base = nullptr;
+    ggml_tensor * targets = nullptr;
+    ggml_tensor * adapted_logits = nullptr;
+    ggml_tensor * base_logits = nullptr;
+    ggml_tensor * logit_grad = nullptr;
+    ggml_tensor * hidden_grad = nullptr;
+    ggml_tensor * per_ce_t = nullptr;
+    ggml_tensor * per_kl_t = nullptr;
+    ggml_cgraph * forward = nullptr;
+    ggml_cgraph * backward = nullptr;
+
+    Status init(const Request & request, std::size_t requested_count, std::string * error) {
+        if (tmp.ctx) return Status::success;
+        count = requested_count;
+        ggml_init_params params{};
+        params.mem_size = 2 * ggml_graph_overhead_custom(64, false) +
+                          ggml_tensor_overhead() * 64 + 4096;
+        params.no_alloc = true;
+        tmp.ctx = ggml_init(params);
+        if (!tmp.ctx) return fail(Status::allocation_failure, error, "head-loss GGML context allocation failed");
+        adapted = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
+        base = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
+        targets = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_I32, count);
+        adapted_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, adapted,
+            request.head->scales_f32, nullptr, request.head->rotation, true);
+        base_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, base,
+            request.head->scales_f32, nullptr, request.head->rotation, true);
+        logit_grad = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, kVocab, count);
+        hidden_grad = ggml_convrot8_back(tmp.ctx, logit_grad, adapted_logits);
+        // The loss kernel indexes these buffers by the global position offset;
+        // retain total-position storage even though the graph is chunk-sized.
+        per_ce_t = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_F32, request.positions);
+        per_kl_t = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_F32, request.positions);
+        if (!adapted || !base || !targets || !adapted_logits || !base_logits || !logit_grad ||
+            !hidden_grad || !per_ce_t || !per_kl_t)
+            return fail(Status::allocation_failure, error, "head-loss graph tensor allocation failed");
+        forward = ggml_new_graph_custom(tmp.ctx, 64, false);
+        backward = ggml_new_graph_custom(tmp.ctx, 64, false);
+        if (!forward || !backward) return fail(Status::graph_failure, error, "head-loss graph allocation failed");
+        ggml_build_forward_expand(forward, adapted_logits);
+        ggml_build_forward_expand(forward, base_logits);
+        ggml_build_forward_expand(backward, hidden_grad);
+        if (!validate_nodes(request.backend, forward, error) || !validate_nodes(request.backend, backward, error))
+            return fail(Status::graph_failure, error, "head-loss graph contains an unsupported CUDA node");
+        tmp.buffer = ggml_backend_alloc_ctx_tensors(tmp.ctx, request.backend);
+        if (!tmp.buffer) return fail(Status::allocation_failure, error, "head-loss backend buffer allocation failed");
+        return Status::success;
+    }
+};
+
 inline Status compute(const Request & request, std::string * error = nullptr) {
     if (!request.backend || !request.head || !request.adapted_hidden || !request.base_hidden ||
         !request.targets || !request.adapted_hidden_grad_bf16 || !request.ce_sum || !request.kl_sum ||
@@ -161,45 +218,30 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
 
     std::vector<float> chunk_grad(kArChunk * request.hidden);
     std::vector<float> per_ce(request.positions), per_kl(request.positions);
+    ChunkWorkspace full_workspace;
+    ChunkWorkspace tail_workspace;
     *request.ce_sum = 0.0f;
     *request.kl_sum = 0.0f;
 
     for (std::size_t offset = 0; offset < request.positions; offset += kArChunk) {
         const std::size_t count = (request.positions - offset < kArChunk) ?
             request.positions - offset : kArChunk;
-        Temporary tmp;
-        ggml_init_params params{};
-        params.mem_size = 2 * ggml_graph_overhead_custom(64, false) +
-                          ggml_tensor_overhead() * 64 + 4096;
-        params.no_alloc = true;
-        tmp.ctx = ggml_init(params);
-        if (!tmp.ctx) return fail(Status::allocation_failure, error, "head-loss GGML context allocation failed");
-
-        ggml_tensor * adapted = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
-        ggml_tensor * base = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
-        ggml_tensor * targets = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_I32, count);
-        ggml_tensor * adapted_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, adapted,
-            request.head->scales_f32, nullptr, request.head->rotation, true);
-        ggml_tensor * base_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, base,
-            request.head->scales_f32, nullptr, request.head->rotation, true);
-        ggml_tensor * logit_grad = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, kVocab, count);
-        ggml_tensor * hidden_grad = ggml_convrot8_back(tmp.ctx, logit_grad, adapted_logits);
-        ggml_tensor * per_ce_t = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_F32, request.positions);
-        ggml_tensor * per_kl_t = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_F32, request.positions);
-        if (!adapted || !base || !targets || !adapted_logits || !base_logits || !logit_grad ||
-            !hidden_grad || !per_ce_t || !per_kl_t)
-            return fail(Status::allocation_failure, error, "head-loss GGML tensor allocation failed");
-
-        ggml_cgraph * forward = ggml_new_graph_custom(tmp.ctx, 64, false);
-        ggml_cgraph * backward = ggml_new_graph_custom(tmp.ctx, 64, false);
-        if (!forward || !backward) return fail(Status::graph_failure, error, "head-loss graph allocation failed");
-        ggml_build_forward_expand(forward, adapted_logits);
-        ggml_build_forward_expand(forward, base_logits);
-        ggml_build_forward_expand(backward, hidden_grad);
-        if (!validate_nodes(request.backend, forward, error)) return Status::graph_failure;
-        if (!validate_nodes(request.backend, backward, error)) return Status::graph_failure;
-        tmp.buffer = ggml_backend_alloc_ctx_tensors(tmp.ctx, request.backend);
-        if (!tmp.buffer) return fail(Status::allocation_failure, error, "head-loss backend buffer allocation failed");
+        ChunkWorkspace uncached_workspace;
+        ChunkWorkspace & workspace = std::getenv("YUE2_AITK_BASELINE") ? uncached_workspace :
+            (count == kArChunk ? full_workspace : tail_workspace);
+        const Status init_status = workspace.init(request, count, error);
+        if (init_status != Status::success) return init_status;
+        ggml_tensor * adapted = workspace.adapted;
+        ggml_tensor * base = workspace.base;
+        ggml_tensor * targets = workspace.targets;
+        ggml_tensor * adapted_logits = workspace.adapted_logits;
+        ggml_tensor * base_logits = workspace.base_logits;
+        ggml_tensor * logit_grad = workspace.logit_grad;
+        ggml_tensor * hidden_grad = workspace.hidden_grad;
+        ggml_tensor * per_ce_t = workspace.per_ce_t;
+        ggml_tensor * per_kl_t = workspace.per_kl_t;
+        ggml_cgraph * forward = workspace.forward;
+        ggml_cgraph * backward = workspace.backward;
         ggml_backend_tensor_set(adapted, request.adapted_hidden + offset * request.hidden, 0, ggml_nbytes(adapted));
         ggml_backend_tensor_set(base, request.base_hidden + offset * request.hidden, 0, ggml_nbytes(base));
         ggml_backend_tensor_set(targets, request.targets + offset, 0, ggml_nbytes(targets));

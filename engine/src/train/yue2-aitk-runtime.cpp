@@ -18,6 +18,7 @@
 #include <unordered_set>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include "yyjson.h"
 
 namespace {
@@ -151,15 +152,35 @@ static int run_impl(const Config & config, std::string * error) {
             yue2_aitk_joint::Input input; input.batch = &sampled.batch; input.noisy_latents = sampled.noisy_bf16;
             input.flow_target = sampled.target_f32; input.timestep = sampled.timestep_bf16;
             yue2_aitk_joint::Metrics metrics;
+            using Clock = std::chrono::steady_clock;
+            const auto step_start = Clock::now();
+            auto stage_start = step_start;
+            std::string previous_stage;
+            std::vector<std::pair<std::string,double>> stage_times;
+            const auto finish_stage = [&]() {
+                const auto now = Clock::now();
+                if (!previous_stage.empty()) stage_times.emplace_back(previous_stage,
+                    std::chrono::duration<double,std::milli>(now-stage_start).count());
+                stage_start = now;
+            };
             if (!yue2_aitk_joint::run(backend.value, model, state, optimizer, input, &metrics, error,
-                [&](const char * stage) { event(stage, completed + 1); })) return 1;
+                [&](const char * stage) { finish_stage(); previous_stage=stage; event(stage, completed + 1); })) return 1;
+            ggml_backend_synchronize(backend.value);
+            finish_stage();
+            const double step_ms=std::chrono::duration<double,std::milli>(Clock::now()-step_start).count();
             ++completed;
             if (metrics.step != completed) { fail(error, "optimizer update count mismatch"); return 1; }
             if (++cursor == order.size()) { sampler.rng().shuffle(order); cursor=0; }
             std::ostringstream line;
             line << std::setprecision(17) << "{\"stage\":\"joint\",\"step\":" << metrics.step
                    << ",\"ar_ce\":" << metrics.ar_ce << ",\"ar_kl\":" << metrics.ar_kl
-                   << ",\"nar_mse\":" << metrics.nar_mse << ",\"gradient_norm\":" << metrics.gradient_norm << "}\n";
+                   << ",\"nar_mse\":" << metrics.nar_mse << ",\"gradient_norm\":" << metrics.gradient_norm
+                   << ",\"step_ms\":" << step_ms << ",\"stage_ms\":{";
+            for (size_t i=0;i<stage_times.size();++i) {
+                if(i) line << ',';
+                line << '"' << stage_times[i].first << "\":" << stage_times[i].second;
+            }
+            line << "}}\n";
             jsonl << line.str();
             std::cout << line.str() << std::flush;
             if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }

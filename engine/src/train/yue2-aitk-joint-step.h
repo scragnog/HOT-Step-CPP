@@ -70,6 +70,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     notify("AR CE and KL backward");
     if(yue2_aitk_head_loss::compute(head,error)!=yue2_aitk_head_loss::Status::success) return false;
     result.ar_ce=double(ce)/N;result.ar_kl=double(kl)/N;
+    notify("AR transformer backward");
     for(size_t i=0;i<N;++i) for(size_t d=0;d<H;++d)
         zeros[batch.ar.prediction_positions[i]*H+d]=ggml_bf16_to_fp32(ggml_bf16_t{selected_grad[i*H+d]});
     if(!Yue2AitkEndpoints::ar_final_norm(backend,model,ar.final_hidden.data(),zeros.data(),ar.length,&adapted_norm,error)) return false;
