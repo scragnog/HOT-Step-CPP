@@ -94,7 +94,7 @@ diff --git a/engine/ggml/src/ggml-cuda/convrot8.cu b/engine/ggml/src/ggml-cuda/c
 new file mode 100644
 --- /dev/null
 +++ b/engine/ggml/src/ggml-cuda/convrot8.cu
-@@ -0,0 +1,323 @@
+@@ -0,0 +1,420 @@
 +#include "convrot8.cuh"
 +
 +
@@ -103,6 +103,7 @@ new file mode 100644
 +
 +#include <cmath>
 +#include <cstdint>
++#include <cstdlib>
 +#include <limits>
 +
 +namespace aitk_reference {
@@ -225,6 +226,55 @@ new file mode 100644
 +    }
 +}
 +
++// Keep an entire activation row in shared memory across the Hadamard transform,
++// rowwise maximum, and INT8 quantization. The separate path launches a CTA per
++// rotation group, writes the full rotated row, then reads it in another kernel.
++__global__ void rotate_quantize_rows(float *rotated, int8_t *codes, float *scales,
++                                     const float *in, int width, int group, bool use_bf16) {
++    const int row = static_cast<int>(blockIdx.x);
++    const size_t base = static_cast<size_t>(row) * width;
++    extern __shared__ float values[];
++    __shared__ float partial[kThreads];
++    for (int i = threadIdx.x; i < width; i += blockDim.x) {
++        values[i] = use_bf16 ? bf16_cast(in[base + i]) : in[base + i];
++    }
++    __syncthreads();
++    for (int stride = 1; stride < group; stride *= 4) {
++        const int block_width = stride * 4;
++        for (int offset = threadIdx.x; offset < width; offset += blockDim.x) {
++            const int off = offset % block_width;
++            if (off < stride) {
++                float * p = values + (offset / block_width) * block_width + off;
++                const float x0 = p[0], x1 = p[stride], x2 = p[2 * stride], x3 = p[3 * stride];
++                p[0] = x0 + x1 + x2 - x3; p[stride] = x0 + x1 - x2 + x3;
++                p[2 * stride] = x0 - x1 + x2 + x3; p[3 * stride] = -x0 + x1 + x2 + x3;
++            }
++        }
++        __syncthreads();
++    }
++    const float norm = rsqrtf(static_cast<float>(group));
++    float local = 0.0f;
++    for (int i = threadIdx.x; i < width; i += blockDim.x) {
++        const float raw = values[i] * norm;
++        const float value = use_bf16 ? bf16_cast(raw) : raw;
++        values[i] = value;
++        rotated[base + i] = value;
++        local = fmaxf(local, fabsf(value));
++    }
++    partial[threadIdx.x] = local;
++    __syncthreads();
++    for (int step = blockDim.x / 2; step; step /= 2) {
++        if (threadIdx.x < step) partial[threadIdx.x] = fmaxf(partial[threadIdx.x], partial[threadIdx.x + step]);
++        __syncthreads();
++    }
++    const float scale = partial[0] > 0 ? div_full(partial[0], 127.0f) : 1.0f;
++    if (threadIdx.x == 0) scales[row] = scale;
++    for (int i = threadIdx.x; i < width; i += blockDim.x) {
++        const int q = max(-127, min(127, round_even(div_full(values[i], scale))));
++        codes[base + i] = static_cast<int8_t>(q);
++    }
++}
++
 +__global__ void forward_epilogue(const int32_t *acc, const float *scales, const float *weight_scales, const float *bias, float *out, int rows, int width, bool use_bf16) {
 +    const size_t index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 +    if (index >= static_cast<size_t>(rows) * width) return;
@@ -233,6 +283,34 @@ new file mode 100644
 +    const float scaled = __fmul_rn(scales[row], weight_scales[col]);
 +    const float value = __fmaf_rn(static_cast<float>(acc[index]), scaled, b);
 +    out[index] = use_bf16 ? bf16_cast(value) : value;
++}
++
++// A single AR token must not be expanded to 32 identical GEMM rows. Four warps
++// each reduce one output dot product over packed signed INT8 values, then apply
++// the same scale/FMA/BF16 epilogue as forward_epilogue.
++__global__ void forward_m1_gemv(const int8_t *codes, const int8_t *weights,
++                                const float *scales, const float *weight_scales,
++                                const float *bias, float *out, int input_width,
++                                int output_width, bool use_bf16) {
++    const int warp = threadIdx.x / 32;
++    const int lane = threadIdx.x % 32;
++    const int col = static_cast<int>(blockIdx.x) * 4 + warp;
++    if (col >= output_width) return;
++    const int * x4 = reinterpret_cast<const int *>(codes);
++    const int * w4 = reinterpret_cast<const int *>(weights + static_cast<size_t>(col) * input_width);
++    int sum = 0;
++    for (int k = lane; k < input_width / 4; k += 32) {
++        sum = __dp4a(x4[k], w4[k], sum);
++    }
++    for (int delta = 16; delta > 0; delta /= 2) {
++        sum += __shfl_down_sync(0xffffffff, sum, delta);
++    }
++    if (lane == 0) {
++        const float b = bias ? (use_bf16 ? bf16_cast(bias[col]) : bias[col]) : 0.0f;
++        const float scaled = __fmul_rn(scales[0], weight_scales[col]);
++        const float value = __fmaf_rn(static_cast<float>(sum), scaled, b);
++        out[col] = use_bf16 ? bf16_cast(value) : value;
++    }
 +}
 +
 +__global__ void dequant_weights(const int8_t *codes, const float *scales, float *out, __nv_bfloat16 *out_bf16, int width, size_t total, bool use_bf16) {
@@ -307,7 +385,7 @@ new file mode 100644
 +size_t convrot_cuda_forward_workspace_bytes(const ConvRotCudaShape &s) { return bytes_for(s, false); }
 +size_t convrot_cuda_input_backward_workspace_bytes(const ConvRotCudaShape &s) { return bytes_for(s, true); }
 +
-+ConvRotCudaStatus convrot_cuda_forward(const ConvRotCudaShape &s, const float *input, const int8_t *weights, const float *weight_scales, const float *bias, float *rotated, int8_t *activation_codes, float *activation_scales, float *output, void *workspace, size_t workspace_bytes, cudaStream_t stream, cublasHandle_t handle) {
++ConvRotCudaStatus convrot_cuda_forward(const ConvRotCudaShape &s, const float *input, const int8_t *weights, const float *weight_scales, const float *bias, float *rotated, int8_t *activation_codes, float *activation_scales, float *output, void *workspace, size_t workspace_bytes, cudaStream_t stream, cublasHandle_t handle, bool export_activations) {
 +    if (!convrot_cuda_validate_shape(s) || !input || !weights || !weight_scales || !rotated || !activation_codes || !activation_scales || !output || !workspace || !handle) return ConvRotCudaStatus::invalid_argument;
 +    const size_t need = convrot_cuda_forward_workspace_bytes(s); if (workspace_bytes < need) return ConvRotCudaStatus::insufficient_workspace;
 +    Workspace w{static_cast<char *>(workspace), workspace_bytes};
@@ -318,12 +396,30 @@ new file mode 100644
 +    StreamGuard guard(handle, stream); if (guard.status() != CUBLAS_STATUS_SUCCESS) return ConvRotCudaStatus::cublas_error;
 +    MathGuard math_guard(handle); if (math_guard.status() != CUBLAS_STATUS_SUCCESS) return ConvRotCudaStatus::cublas_error;
 +    PointerModeGuard pointer_guard(handle); if (pointer_guard.status() != CUBLAS_STATUS_SUCCESS) return ConvRotCudaStatus::cublas_error;
++    static const bool disable_m1 = std::getenv("YUE2_CONVROT_DISABLE_M1") != nullptr;
++    if (s.rows == 1 && !disable_m1) {
++        rotate_rows<<<s.input_width / s.rotation, kThreads, static_cast<size_t>(s.rotation) * sizeof(float), stream>>>(rotated, input, 1, s.input_width, s.rotation, s.use_bf16);
++        cudaError_t ce = cudaGetLastError(); if (ce != cudaSuccess) return cuda_status(ce);
++        quantize_rows<<<1, kThreads, 0, stream>>>(rotated, activation_codes, activation_scales, 1, s.input_width);
++        ce = cudaGetLastError(); if (ce != cudaSuccess) return cuda_status(ce);
++        forward_m1_gemv<<<(s.output_width + 3) / 4, 128, 0, stream>>>(activation_codes, weights,
++            activation_scales, weight_scales, bias, output, s.input_width, s.output_width, s.use_bf16);
++        ce = cudaGetLastError(); return cuda_status(ce);
++    }
 +    const size_t padded_codes = padded_rows(s) * s.input_width;
 +    cudaError_t ce = cudaMemsetAsync(codes, 0, padded_codes * sizeof(int8_t), stream); if (ce != cudaSuccess) return cuda_status(ce);
-+    rotate_rows<<<s.rows * (s.input_width / s.rotation), kThreads, static_cast<size_t>(s.rotation) * sizeof(float), stream>>>(rotated, input, s.rows, s.input_width, s.rotation, s.use_bf16); ce = cudaGetLastError(); if (ce != cudaSuccess) return cuda_status(ce);
-+    quantize_rows<<<s.rows, kThreads, 0, stream>>>(rotated, codes, scales, s.rows, s.input_width); ce = cudaGetLastError(); if (ce != cudaSuccess) return cuda_status(ce);
-+    ce = cudaMemcpy2DAsync(activation_codes, static_cast<size_t>(s.input_width) * sizeof(int8_t), codes, static_cast<size_t>(s.input_width) * sizeof(int8_t), static_cast<size_t>(s.input_width) * sizeof(int8_t), s.rows, cudaMemcpyDeviceToDevice, stream); if (ce != cudaSuccess) return cuda_status(ce);
-+    ce = cudaMemcpyAsync(activation_scales, scales, static_cast<size_t>(s.rows) * sizeof(float), cudaMemcpyDeviceToDevice, stream); if (ce != cudaSuccess) return cuda_status(ce);
++    static const bool disable_fused_rows = std::getenv("YUE2_CONVROT_DISABLE_FUSED_ROWS") != nullptr;
++    if (disable_fused_rows) {
++        rotate_rows<<<s.rows * (s.input_width / s.rotation), kThreads, static_cast<size_t>(s.rotation) * sizeof(float), stream>>>(rotated, input, s.rows, s.input_width, s.rotation, s.use_bf16); ce = cudaGetLastError(); if (ce != cudaSuccess) return cuda_status(ce);
++        quantize_rows<<<s.rows, kThreads, 0, stream>>>(rotated, codes, scales, s.rows, s.input_width); ce = cudaGetLastError(); if (ce != cudaSuccess) return cuda_status(ce);
++    } else {
++        rotate_quantize_rows<<<s.rows, kThreads, static_cast<size_t>(s.input_width) * sizeof(float), stream>>>(rotated, codes, scales, input, s.input_width, s.rotation, s.use_bf16);
++        ce = cudaGetLastError(); if (ce != cudaSuccess) return cuda_status(ce);
++    }
++    if (export_activations) {
++        ce = cudaMemcpy2DAsync(activation_codes, static_cast<size_t>(s.input_width) * sizeof(int8_t), codes, static_cast<size_t>(s.input_width) * sizeof(int8_t), static_cast<size_t>(s.input_width) * sizeof(int8_t), s.rows, cudaMemcpyDeviceToDevice, stream); if (ce != cudaSuccess) return cuda_status(ce);
++        ce = cudaMemcpyAsync(activation_scales, scales, static_cast<size_t>(s.rows) * sizeof(float), cudaMemcpyDeviceToDevice, stream); if (ce != cudaSuccess) return cuda_status(ce);
++    }
 +    const int32_t one = 1, zero = 0; cublasStatus_t cs = cublasGemmEx(handle, CUBLAS_OP_T, CUBLAS_OP_N, s.output_width, static_cast<int>(padded_rows(s)), s.input_width, &one, weights, CUDA_R_8I, s.input_width, codes, CUDA_R_8I, s.input_width, &zero, acc, CUDA_R_32I, s.output_width, CUBLAS_COMPUTE_32I, CUBLAS_GEMM_DEFAULT); if (cs != CUBLAS_STATUS_SUCCESS) return cublas_status(cs);
 +    forward_epilogue<<<static_cast<unsigned>((static_cast<size_t>(s.rows) * s.output_width + kThreads - 1) / kThreads), kThreads, 0, stream>>>(acc, scales, weight_scales, bias, output, s.rows, s.output_width, s.use_bf16); ce = cudaGetLastError(); return cuda_status(ce);
 +}
@@ -411,7 +507,8 @@ new file mode 100644
 +        ? aitk_reference::convrot_cuda_forward(shape,
 +            (const float *) x->data, (const int8_t *) weight->data, (const float *) scales->data,
 +            bias ? (const float *) bias->data : nullptr, rotated.get(), activation_codes.get(), activation_scales.get(),
-+            (float *) dst->data, scratch.get(), bytes, ctx.stream(), ctx.cublas_handle())
++            (float *) dst->data, scratch.get(), bytes, ctx.stream(), ctx.cublas_handle(),
++            std::getenv("YUE2_CONVROT_SKIP_COPIES") == nullptr)
 +        : aitk_reference::convrot_cuda_input_backward(shape,
 +            (const int8_t *) weight->data, (const float *) scales->data,
 +            (const float *) dst->src[1]->data, (float *) dst->data, scratch.get(), bytes,
@@ -422,7 +519,7 @@ diff --git a/engine/ggml/src/ggml-cuda/convrot8.cuh b/engine/ggml/src/ggml-cuda/
 new file mode 100644
 --- /dev/null
 +++ b/engine/ggml/src/ggml-cuda/convrot8.cuh
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,81 @@
 +#pragma once
 +
 +// Stream-ordered ConvRot8 operation API. All tensor pointers are device
@@ -483,7 +580,8 @@ new file mode 100644
 +    void *workspace,
 +    size_t workspace_bytes,
 +    cudaStream_t stream,
-+    cublasHandle_t cublas);
++    cublasHandle_t cublas,
++    bool export_activations = true);
 +
 +ConvRotCudaStatus convrot_cuda_input_backward(
 +    const ConvRotCudaShape &shape,
