@@ -2,8 +2,7 @@
 // yue2/sheetsage-repair.h — deterministic post-failure repair pass for the
 // SheetSage2 notation stage.
 //
-// HOT-Step file (no acestep.cpp analog; no upstream Python analog either —
-// the reference just fails these sources outright, doc 21 §7.1). Rob's
+// HOT-Step file (no acestep.cpp analog). Rob's
 // decision (2026-09-16): on a real dataset, a handful of sources hit one of
 // a small, well-understood family of notation errors — a duplicated beat ID
 // inside one measure, a non-increasing beat time, a chord/key interval too
@@ -13,8 +12,7 @@
 // than none, so this file re-renders after dropping exactly the offending
 // row/note, up to a few rounds, and reports what it dropped. Every other
 // notation failure (an unencodable chord quality, no key at all, an
-// unmappable melody track, ...) is untouched — this file recognizes exactly
-// four error shapes and refuses to guess at anything else.
+// unmappable melody track, ...) is untouched.
 //
 // SCOPE. This file is invoked ONLY after sheetsage-notation.h's own
 // `yue2_sheet_notation_generate()` has already failed once on the untouched
@@ -23,7 +21,7 @@
 // through this file: a fixture that is SUPPOSED to succeed on the first
 // render never reaches here, and a fixture that is supposed to reproduce a
 // specific `abc_error` string only reaches here if a future test happens to
-// feed it a source shaped like one of the four families below (none of the
+// feed it a source shaped like one of the families below (none of the
 // doc 19/22 fixtures are).
 //
 // FAMILIES (doc 21 §7.1's AbcRebuildError hierarchy; error TEXT is the only
@@ -37,6 +35,9 @@
 //       EVERY measure in one round (not just the one measure named in the
 //       error) -- real files can carry several bad measures, and fixing one
 //       row per round hit the round cap on real data.
+//   (a2) The same error with unique but skipped/reordered beat IDs -> renumber
+//       each affected downbeat span in timestamp order. This keeps every beat
+//       and its timing; duplicate IDs still use family (a).
 //   (b) BeatGridError "beats:LINE: beat times must be strictly increasing"
 //       -> a single sweep of the WHOLE beat list, keeping a row only if its
 //       time is strictly greater than the last KEPT row's time, dropping
@@ -60,7 +61,7 @@
 // Every other AbcRebuildError/BeatGridError/ChordSymbolError/MelodyVoiceError
 // text — "overlapping quantized melody notes", "Cannot encode portable ABC
 // key", "No key was decoded", an unmappable melody track, etc — matches none
-// of the four regexes below and the loop stops on the FIRST round that finds
+// of the regexes below and the loop stops on the FIRST round that finds
 // nothing to fix, exactly the pre-existing soft-failure behavior.
 
 #include "sheetsage-events.h"
@@ -92,7 +93,9 @@ struct Yue2SheetRepairOutcome {
 
 namespace yue2_sheet_repair_detail {
 
-constexpr int kMaxRepairRounds = 4;
+// Beat sweeps consume the first three rounds on some real sources; several
+// independent short intervals or melody notes may then need separate retries.
+constexpr int kMaxRepairRounds = 16;
 
 inline bool parse_double(const std::string & s, double & out) {
     try {
@@ -177,6 +180,69 @@ inline bool repair_dup_beat_id(const std::string & error, std::vector<Yue2SheetA
     note = "beats: dropped " + std::to_string(drop_idx.size()) + " dup-beat-id row" +
            (drop_idx.size() == 1 ? "" : "s") + " across " + std::to_string(measures_touched) + " measure" +
            (measures_touched == 1 ? "" : "s");
+    return true;
+}
+
+// Family (a2): Infirmary contains unique beat IDs out of time order. The
+// duplicate-row sweep above cannot change them. Check that the error still
+// names the current rows, then sweep every downbeat span in one round (the
+// same reason as family a). Renumber only spans with unique, positive IDs,
+// a uniform meter, and no more rows than the declared numerator. A skipped
+// ID may yield a shorter inferred measure; timestamps remain unchanged.
+inline bool repair_permuted_beat_ids(const std::string & error, std::vector<Yue2SheetAbcRow> & beat_rows,
+                                      std::string & note) {
+    static const std::regex re(R"(^Measure ([0-9]+) \(beat rows ([0-9]+)-([0-9]+)\): non-consecutive beat IDs \[([0-9, ]+)\]$)");
+    std::smatch match;
+    if (!std::regex_match(error, match, re)) return false;
+    const int first = std::atoi(match[2].str().c_str());
+    const int last  = std::atoi(match[3].str().c_str());
+    const int count = last - first + 1;
+    if (first < 1 || count < 2 || count > 16 || last > (int) beat_rows.size()) return false;
+
+    std::vector<int> reported_ids;
+    static const std::regex number_re(R"([0-9]+)");
+    const std::string reported = match[4].str();
+    for (std::sregex_iterator it(reported.begin(), reported.end(), number_re), end; it != end; ++it) {
+        reported_ids.push_back(std::atoi(it->str().c_str()));
+    }
+    if ((int) reported_ids.size() != count) return false;
+
+    for (int i = 0; i < count; ++i) {
+        const auto & row = beat_rows[(size_t) (first - 1 + i)];
+        if (row.size() < 3 || std::atoi(row[1].c_str()) != reported_ids[(size_t) i]) return false;
+    }
+    if (reported_ids.front() != 1) return false;
+
+    std::vector<std::pair<int, int>> replacements;  // row index, corrected ID
+    int spans_touched = 0;
+    for (int start = 0; start < (int) beat_rows.size();) {
+        if (beat_rows[(size_t) start].size() < 3) return false;
+        int end = start + 1;
+        while (end < (int) beat_rows.size() && std::atoi(beat_rows[(size_t) end][1].c_str()) != 1) ++end;
+        const int span_count = end - start;
+        const int numerator = std::atoi(beat_rows[(size_t) start][2].c_str());
+        if (numerator < span_count || numerator > 16) return false;
+        std::unordered_map<int, int> seen;
+        bool touched = false;
+        for (int i = start; i < end; ++i) {
+            const auto & row = beat_rows[(size_t) i];
+            if (row.size() < 3 || std::atoi(row[2].c_str()) != numerator) return false;
+            const int id = std::atoi(row[1].c_str());
+            if (id < 1 || seen.find(id) != seen.end()) return false;
+            seen[id] = 1;
+            const int corrected = i - start + 1;
+            if (id != corrected) {
+                replacements.push_back({ i, corrected });
+                touched = true;
+            }
+        }
+        if (touched) ++spans_touched;
+        start = end;
+    }
+    if (replacements.empty() || replacements.size() * 5 > beat_rows.size()) return false;
+    for (const auto & fix : replacements) beat_rows[(size_t) fix.first][1] = std::to_string(fix.second);
+    note = "beats: renumbered " + std::to_string(replacements.size()) + " beat IDs across " +
+           std::to_string(spans_touched) + " measure" + (spans_touched == 1 ? "" : "s");
     return true;
 }
 
@@ -353,12 +419,13 @@ inline Yue2SheetRepairOutcome yue2_sheet_notation_repair_and_generate(Yue2SheetR
         const std::string & error = outcome.result.error;
         std::string          note;
         const bool changed = repair_dup_beat_id(error, inputs.beat_rows, note) ||
+                              repair_permuted_beat_ids(error, inputs.beat_rows, note) ||
                               repair_non_increasing_time(error, inputs.beat_rows, note) ||
                               repair_short_interval(error, inputs.chord_rows, inputs.key_rows,
                                                      inputs.structure_rows, note) ||
                               repair_ungriddable_note(error, inputs.vocal_notes, inputs.ins_notes, note);
         if (!changed) {
-            break;  // outside the four families: remains a soft failure, exactly as before this file existed
+            break;  // outside the recognized families: remains a soft failure
         }
         notes.push_back(note);
         melody_midi_bytes = build_midi();
