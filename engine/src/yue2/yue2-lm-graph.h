@@ -80,8 +80,10 @@
 #include "hot-step-build-flags.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -91,6 +93,38 @@
 // it) + up to 30 hidden-tap gathers + embed/head-gather/logits plumbing.
 // Loose on purpose, same posture as MM3_LM_MAX_NODES.
 #define YUE2_LM_MAX_NODES 4096
+
+struct Yue2ArStepProfile {
+    int64_t calls = 0;
+    double graph_ms = 0.0;
+    double alloc_ms = 0.0;
+    double upload_ms = 0.0;
+    double compute_ms = 0.0;
+    double readback_ms = 0.0;
+    double cleanup_ms = 0.0;
+};
+
+static thread_local Yue2ArStepProfile g_yue2_ar_step_profile;
+
+static bool yue2_ar_step_profile_enabled() {
+    static const bool enabled = [] {
+        const char * e = std::getenv("YUE2_AR_PROFILE");
+        return e && e[0] && e[0] != '0';
+    }();
+    return enabled;
+}
+
+static void yue2_ar_step_profile_reset() {
+    if (yue2_ar_step_profile_enabled()) g_yue2_ar_step_profile = {};
+}
+
+static void yue2_ar_step_profile_log(const char * stage) {
+    if (!yue2_ar_step_profile_enabled()) return;
+    const auto & p = g_yue2_ar_step_profile;
+    fprintf(stderr, "[YuE2-AR-Profile] %s calls=%lld graph=%.1f alloc=%.1f upload=%.1f compute=%.1f readback=%.1f cleanup=%.1f ms\n",
+            stage, (long long) p.calls, p.graph_ms, p.alloc_ms, p.upload_ms, p.compute_ms,
+            p.readback_ms, p.cleanup_ms);
+}
 
 // YUE2_LM_NO_FLASH=1 forces the manual F32 soft_max attention path — a
 // parity-debug escape hatch (mirrors MM3_LM_NO_FLASH), not a production knob.
@@ -559,12 +593,34 @@ static bool yue2_ar_forward(const Yue2Model & m, const Yue2ArForwardRequest & re
 // two separate `Yue2ArKvCache` instances, never one shared cache with a
 // batch axis.
 
+struct Yue2ArDecodeGraph {
+    int64_t bucket = 0;
+    uint8_t * gbuf = nullptr;
+    ggml_context * ctx = nullptr;
+    ggml_cgraph * gf = nullptr;
+    ggml_backend_sched_t sched = nullptr;
+    ggml_tensor * in_ids = nullptr;
+    ggml_tensor * in_pos = nullptr;
+    ggml_tensor * in_rows = nullptr;
+    ggml_tensor * in_mask = nullptr;
+    ggml_tensor * out_logits = nullptr;
+    std::vector<uint16_t> mask_host;
+};
+
+static void yue2_ar_decode_graph_free(Yue2ArDecodeGraph * d) {
+    if (d->sched) ggml_backend_sched_free(d->sched);
+    if (d->ctx) ggml_free(d->ctx);
+    free(d->gbuf);
+    *d = {};
+}
+
 struct Yue2ArKvCache {
     int64_t                    capacity = 0;  // total rows this cache can ever hold
     int64_t                    filled   = 0;  // rows [0,filled) are valid/written
     ggml_context *              ctx      = nullptr;
     ggml_backend_buffer_t       buf      = nullptr;
     std::vector<ggml_tensor *> k, v;          // one F16 [D,capacity,Nkv,1] tensor per layer
+    Yue2ArDecodeGraph dec;                   // stable within each power-of-two KV span
 };
 
 static bool yue2_ar_kv_cache_alloc(const Yue2Model & m, int64_t capacity, Yue2ArKvCache * out, std::string * err) {
@@ -615,6 +671,7 @@ static bool yue2_ar_kv_cache_alloc(const Yue2Model & m, int64_t capacity, Yue2Ar
 }
 
 static void yue2_ar_kv_cache_free(Yue2ArKvCache * c) {
+    yue2_ar_decode_graph_free(&c->dec);
     if (c->buf) {
         ggml_backend_buffer_free(c->buf);
         c->buf = nullptr;
@@ -862,6 +919,14 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
 // this call's own position predicts. Advances `cache.filled` by 1 on success.
 static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int32_t token_id,
                                 std::vector<float> * logits_out, std::string * err) {
+    const bool profile = yue2_ar_step_profile_enabled();
+    auto tick_start = std::chrono::steady_clock::now();
+    auto tick = [&](double & ms) {
+        if (!profile) return;
+        const auto now = std::chrono::steady_clock::now();
+        ms += std::chrono::duration<double, std::milli>(now - tick_start).count();
+        tick_start = now;
+    };
     if (!m.lm_resident) {
         if (err) {
             *err = "YuE2 LM is not resident (yue2_load_parts(want_lm=true) first)";
@@ -875,94 +940,103 @@ static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int3
         return false;
     }
     const int64_t         pos      = cache.filled;
-    const int64_t         n_kv_pad = pos + 1;
+    int64_t               n_kv_pad = 1;
+    // Padded buckets may alter sampling through small attention differences.
+    // Exact span remains available for numerical comparisons.
+    static const bool exact_span = std::getenv("YUE2_AR_EXACT_SPAN") != nullptr;
+    if (exact_span) {
+        n_kv_pad = pos + 1;
+    } else {
+        while (n_kv_pad < pos + 1 && n_kv_pad < cache.capacity) n_kv_pad *= 2;
+        static const bool odd_bucket = std::getenv("YUE2_AR_BUCKET_ODD") != nullptr;
+        if (odd_bucket && n_kv_pad < cache.capacity) ++n_kv_pad;
+        n_kv_pad = std::min(n_kv_pad, cache.capacity);
+    }
     const Yue2LmConfig & c        = m.lm_cfg;
     const int64_t         V        = (int64_t) c.vocab_size;
     const int             L        = (int) c.block_count;
-
-    const size_t ctx_bytes =
-        ggml_tensor_overhead() * (YUE2_LM_MAX_NODES + 256) + ggml_graph_overhead_custom(YUE2_LM_MAX_NODES, false);
-    uint8_t * gbuf = (uint8_t *) malloc(ctx_bytes);
-    if (!gbuf) {
-        if (err) {
-            *err = "out of host memory allocating the YuE2 decode-step compute graph context";
+    Yue2ArDecodeGraph & d = cache.dec;
+    static const bool no_reuse = std::getenv("YUE2_AR_NO_REUSE") != nullptr;
+    if (no_reuse) yue2_ar_decode_graph_free(&d);
+    if (d.bucket != n_kv_pad) {
+        yue2_ar_decode_graph_free(&d);
+        const size_t ctx_bytes =
+            ggml_tensor_overhead() * (YUE2_LM_MAX_NODES + 256) + ggml_graph_overhead_custom(YUE2_LM_MAX_NODES, false);
+        d.gbuf = (uint8_t *) malloc(ctx_bytes);
+        if (!d.gbuf) {
+            if (err) *err = "out of host memory allocating the YuE2 decode-step compute graph context";
+            return false;
         }
-        return false;
-    }
-    ggml_init_params ip  = { ctx_bytes, gbuf, /*no_alloc*/ true };
-    ggml_context *   ctx = ggml_init(ip);
-    if (!ctx) {
-        free(gbuf);
-        if (err) {
-            *err = "ggml_init failed for the YuE2 decode-step compute graph context";
+        ggml_init_params ip = { ctx_bytes, d.gbuf, /*no_alloc*/ true };
+        d.ctx = ggml_init(ip);
+        if (!d.ctx) {
+            yue2_ar_decode_graph_free(&d);
+            if (err) *err = "ggml_init failed for the YuE2 decode-step compute graph context";
+            return false;
         }
-        return false;
-    }
-    ggml_cgraph * gf = ggml_new_graph_custom(ctx, YUE2_LM_MAX_NODES, false);
+        d.gf = ggml_new_graph_custom(d.ctx, YUE2_LM_MAX_NODES, false);
+        d.in_ids = ggml_new_tensor_1d(d.ctx, GGML_TYPE_I32, 1);
+        ggml_set_input(d.in_ids);
+        d.in_pos = ggml_new_tensor_1d(d.ctx, GGML_TYPE_I32, 1);
+        ggml_set_input(d.in_pos);
+        d.in_rows = ggml_new_tensor_1d(d.ctx, GGML_TYPE_I64, 1);
+        ggml_set_input(d.in_rows);
+        // Padding remains invisible until its row is written by a later step.
+        d.in_mask = ggml_new_tensor_2d(d.ctx, GGML_TYPE_F16, n_kv_pad, 1);
+        ggml_set_input(d.in_mask);
 
-    ggml_tensor * in_ids = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 1);
-    ggml_set_input(in_ids);
-    ggml_tensor * in_pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 1);
-    ggml_set_input(in_pos);
-    ggml_tensor * in_rows = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, 1);
-    ggml_set_input(in_rows);
-    // [n_kv_pad, 1] -- one query row, fully visible over [0,pos] (every key
-    // position this view exposes IS <= pos by construction: n_kv_pad==pos+1
-    // and the view always starts at row 0 of the cache), so an all-zero mask
-    // is already correct -- no upper-triangular restriction is needed for a
-    // single trailing query row.
-    ggml_tensor * in_mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, n_kv_pad, 1);
-    ggml_set_input(in_mask);
-
-    ggml_tensor * h = ggml_get_rows(ctx, m.lm.token_embd, in_ids);  // [H,1]
-    const bool use_flash = yue2_lm_use_flash(m.backend);
-    for (int i = 0; i < L; i++) {
-        h = yue2_ar_block(ctx, gf, c, m.lm.blk[(size_t) i], h, in_pos, in_mask, in_rows, cache.k[(size_t) i],
-                          cache.v[(size_t) i], n_kv_pad, use_flash,
-                          &m, i);
-    }
-    ggml_tensor * h_final    = yue2_lm_rms(ctx, h, m.lm.output_norm, c.rms_eps);
-    ggml_tensor * out_logits = m.convrot ? yue2_convrot_linear(ctx, m.convrot->lm_head(), h_final) :
-                                        ggml_mul_mat(ctx, m.lm.output, h_final);  // [V,1]
-    ggml_set_output(out_logits);
-    ggml_build_forward_expand(gf, out_logits);
-
-    BackendPair           bp    = { m.backend, m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
-    ggml_backend_sched_t sched = backend_sched_new(bp, YUE2_LM_MAX_NODES);
-    bool                 ok    = sched && ggml_backend_sched_alloc_graph(sched, gf);
-    if (!ok) {
-        if (sched) {
-            ggml_backend_sched_free(sched);
+        ggml_tensor * h = ggml_get_rows(d.ctx, m.lm.token_embd, d.in_ids);
+        const bool use_flash = yue2_lm_use_flash(m.backend);
+        for (int i = 0; i < L; i++) {
+            h = yue2_ar_block(d.ctx, d.gf, c, m.lm.blk[(size_t) i], h, d.in_pos, d.in_mask, d.in_rows,
+                              cache.k[(size_t) i], cache.v[(size_t) i], n_kv_pad, use_flash, &m, i);
         }
-        ggml_free(ctx);
-        free(gbuf);
-        if (err) {
-            *err = "YuE2 decode-step graph allocation failed (out of VRAM?) at pos=" + std::to_string((long long) pos);
+        ggml_tensor * h_final = yue2_lm_rms(d.ctx, h, m.lm.output_norm, c.rms_eps);
+        d.out_logits = m.convrot ? yue2_convrot_linear(d.ctx, m.convrot->lm_head(), h_final) :
+                                    ggml_mul_mat(d.ctx, m.lm.output, h_final);
+        ggml_set_output(d.out_logits);
+        ggml_build_forward_expand(d.gf, d.out_logits);
+        d.mask_host.resize((size_t) n_kv_pad);
+        d.bucket = n_kv_pad;
+        tick(g_yue2_ar_step_profile.graph_ms);
+
+        BackendPair bp = { m.backend, m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
+        d.sched = backend_sched_new(bp, YUE2_LM_MAX_NODES);
+        if (!d.sched || !ggml_backend_sched_alloc_graph(d.sched, d.gf)) {
+            yue2_ar_decode_graph_free(&d);
+            if (err) *err = "YuE2 decode-step graph allocation failed (out of VRAM?) at pos=" +
+                             std::to_string((long long) pos);
+            return false;
         }
-        return false;
+        tick(g_yue2_ar_step_profile.alloc_ms);
     }
-    yue2_imatrix_hook(sched);
 
     const int32_t id32 = token_id;
-    ggml_backend_tensor_set(in_ids, &id32, 0, sizeof(int32_t));
+    ggml_backend_tensor_set(d.in_ids, &id32, 0, sizeof(int32_t));
     const int32_t pos32 = (int32_t) pos;
-    ggml_backend_tensor_set(in_pos, &pos32, 0, sizeof(int32_t));
+    ggml_backend_tensor_set(d.in_pos, &pos32, 0, sizeof(int32_t));
     const int64_t row64 = pos;
-    ggml_backend_tensor_set(in_rows, &row64, 0, sizeof(int64_t));
-    std::vector<uint16_t> mask_host((size_t) n_kv_pad, ggml_fp32_to_fp16(0.0f));
-    ggml_backend_tensor_set(in_mask, mask_host.data(), 0, (size_t) n_kv_pad * sizeof(uint16_t));
+    ggml_backend_tensor_set(d.in_rows, &row64, 0, sizeof(int64_t));
+    const uint16_t zero = ggml_fp32_to_fp16(0.0f);
+    const uint16_t hidden = ggml_fp32_to_fp16(-INFINITY);
+    std::fill(d.mask_host.begin(), d.mask_host.begin() + (size_t) (pos + 1), zero);
+    std::fill(d.mask_host.begin() + (size_t) (pos + 1), d.mask_host.end(), hidden);
+    ggml_backend_tensor_set(d.in_mask, d.mask_host.data(), 0, (size_t) n_kv_pad * sizeof(uint16_t));
+    tick(g_yue2_ar_step_profile.upload_ms);
 
-    ok = ggml_backend_sched_graph_compute(sched, gf) == GGML_STATUS_SUCCESS;
+    yue2_imatrix_hook(d.sched);
+    bool ok = ggml_backend_sched_graph_compute(d.sched, d.gf) == GGML_STATUS_SUCCESS;
+    tick(g_yue2_ar_step_profile.compute_ms);
     if (ok) {
         cache.filled = pos + 1;
         logits_out->assign((size_t) V, 0.0f);
-        ggml_backend_tensor_get(out_logits, logits_out->data(), 0, (size_t) V * sizeof(float));
+        ggml_backend_tensor_get(d.out_logits, logits_out->data(), 0, (size_t) V * sizeof(float));
+        tick(g_yue2_ar_step_profile.readback_ms);
     } else if (err) {
         *err = "YuE2 decode-step graph compute failed";
     }
 
-    ggml_backend_sched_free(sched);
-    ggml_free(ctx);
-    free(gbuf);
+    tick(g_yue2_ar_step_profile.cleanup_ms);
+    if (profile && ok) g_yue2_ar_step_profile.calls++;
     return ok;
 }

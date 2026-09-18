@@ -80,11 +80,6 @@
 //   full-a, full-cfg) captures exactly ONE chunk, so the multi-chunk driving
 //   loop lives in yue2-probe.cpp's --nar-parity handler (still generic over
 //   N chunks, just not yet exercised against a multi-chunk fixture).
-// - `yue2_nar_velocity()` rebuilds its ggml graph from scratch on every call
-//   (64 times per chunk) — correct, and the established posture for this
-//   codebase's bring-up tooling (yue2_ar_forward does the same), but not a
-//   production perf design; a real decode loop would want to build the graph
-//   once per chunk and only re-upload the state/time/position inputs.
 // - The NAR-side `nar_cond_end>0` "codec dropout" attention-visibility
 //   restriction (03 §3.1/§3.3) is unreachable from the shipped pipeline and
 //   is not implemented — `visible_length == ar_length` unconditionally here,
@@ -116,11 +111,33 @@
 // ── Per-chunk state: the AR-prefix KV cache, reused across all 64 velocity
 //    evaluations of that chunk's ODE solve ──────────────────────────────────
 
+struct Yue2NarVelocityGraph {
+    uint8_t * gbuf = nullptr;
+    ggml_context * ctx = nullptr;
+    ggml_cgraph * gf = nullptr;
+    ggml_backend_sched_t sched = nullptr;
+    ggml_tensor * in_x_nar = nullptr;
+    ggml_tensor * in_time_feat = nullptr;
+    ggml_tensor * in_local_idx = nullptr;
+    ggml_tensor * in_rope_pos = nullptr;
+    ggml_tensor * in_content_idx = nullptr;
+    ggml_tensor * x_embed_tap = nullptr;
+    ggml_tensor * velocity_out = nullptr;
+};
+
+static void yue2_nar_velocity_graph_free(Yue2NarVelocityGraph * g) {
+    if (g->sched) ggml_backend_sched_free(g->sched);
+    if (g->ctx) ggml_free(g->ctx);
+    free(g->gbuf);
+    *g = {};
+}
+
 struct Yue2NarChunk {
     int64_t       ar_length  = 0;  // this chunk's AR-prefix length (prefix+codec+MUSIC_END)
     int64_t       chunk_len  = 0;  // content latent frames in this chunk
     int64_t       nar_length = 0;  // chunk_len + 2 (the two zero-padded boundary rows)
     Yue2ArKvCache ar_cache;        // persistent, filled == ar_length after init
+    mutable Yue2NarVelocityGraph velocity_graph; // serial ODE calls share one shape
 };
 
 // Builds this chunk's AR-prefix KV via a fresh causal prefill (yue2_ar_prefill,
@@ -165,6 +182,7 @@ static bool yue2_nar_chunk_init(const Yue2Model & m, const std::vector<int32_t> 
 }
 
 static void yue2_nar_chunk_free(Yue2NarChunk * c) {
+    yue2_nar_velocity_graph_free(&c->velocity_graph);
     yue2_ar_kv_cache_free(&c->ar_cache);
     c->ar_length = c->chunk_len = c->nar_length = 0;
 }
@@ -457,40 +475,39 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
         content_idx_host[(size_t) t] = (int32_t) (t + 1);  // skip the front boundary row
     }
 
-    // ── compute graph ──
+    // ── compute graph: its shape and model inputs are fixed for this chunk ──
+    Yue2NarVelocityGraph & g = chunk.velocity_graph;
+    if (!g.gf) {
     const size_t ctx_bytes =
         ggml_tensor_overhead() * (YUE2_NAR_MAX_NODES + 256) + ggml_graph_overhead_custom(YUE2_NAR_MAX_NODES, false);
-    uint8_t * gbuf = (uint8_t *) malloc(ctx_bytes);
-    if (!gbuf) {
-        if (err) {
-            *err = "out of host memory allocating the YuE2 NAR compute graph context";
-        }
+    g.gbuf = (uint8_t *) malloc(ctx_bytes);
+    if (!g.gbuf) {
+        if (err) *err = "out of host memory allocating the YuE2 NAR compute graph context";
         return false;
     }
-    ggml_init_params ip  = { ctx_bytes, gbuf, /*no_alloc*/ true };
-    ggml_context *   ctx = ggml_init(ip);
-    if (!ctx) {
-        free(gbuf);
-        if (err) {
-            *err = "ggml_init failed for the YuE2 NAR compute graph context";
-        }
+    ggml_init_params ip = { ctx_bytes, g.gbuf, /*no_alloc*/ true };
+    g.ctx = ggml_init(ip);
+    if (!g.ctx) {
+        yue2_nar_velocity_graph_free(&g);
+        if (err) *err = "ggml_init failed for the YuE2 NAR compute graph context";
         return false;
     }
-    ggml_cgraph * gf = ggml_new_graph_custom(ctx, YUE2_NAR_MAX_NODES, false);
+    ggml_context * ctx = g.ctx;
+    ggml_cgraph * gf = g.gf = ggml_new_graph_custom(ctx, YUE2_NAR_MAX_NODES, false);
 
-    ggml_tensor * in_x_nar = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, LD, nar_len);
+    ggml_tensor * in_x_nar = g.in_x_nar = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, LD, nar_len);
     ggml_set_name(in_x_nar, "yue2_nar_x_nar");
     ggml_set_input(in_x_nar);
-    ggml_tensor * in_time_feat = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 256);
+    ggml_tensor * in_time_feat = g.in_time_feat = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 256);
     ggml_set_name(in_time_feat, "yue2_nar_time_feat");
     ggml_set_input(in_time_feat);
-    ggml_tensor * in_local_idx = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, nar_len);
+    ggml_tensor * in_local_idx = g.in_local_idx = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, nar_len);
     ggml_set_name(in_local_idx, "yue2_nar_local_idx");
     ggml_set_input(in_local_idx);
-    ggml_tensor * in_rope_pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, nar_len);
+    ggml_tensor * in_rope_pos = g.in_rope_pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, nar_len);
     ggml_set_name(in_rope_pos, "yue2_nar_rope_pos");
     ggml_set_input(in_rope_pos);
-    ggml_tensor * in_content_idx = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, chunk_len);
+    ggml_tensor * in_content_idx = g.in_content_idx = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, chunk_len);
     ggml_set_name(in_content_idx, "yue2_nar_content_idx");
     ggml_set_input(in_content_idx);
 
@@ -515,12 +532,9 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
     ggml_tensor * x = ggml_add(ctx, ggml_add(ctx, ve, t2),
                                yue2_lm_match_type(ctx, ve, pos_emb));
 
-    ggml_tensor * x_embed_tap = nullptr;
-    if (want_input_embedding) {
-        x_embed_tap = x;
-        ggml_set_output(x_embed_tap);
-        ggml_build_forward_expand(gf, x_embed_tap);
-    }
+    g.x_embed_tap = x;
+    ggml_set_output(g.x_embed_tap);
+    ggml_build_forward_expand(gf, g.x_embed_tap);
 
     const bool use_flash = yue2_lm_use_flash(m.backend);
     for (int i = 0; i < L; i++) {
@@ -536,52 +550,44 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
         ggml_mul_mat(ctx, m.lm.llm2vae_w, h_final);
     ggml_tensor * out_full = ggml_add(ctx, out_linear,
         yue2_lm_match_type(ctx, out_linear, m.lm.llm2vae_b));
-    ggml_tensor * velocity_out = ggml_get_rows(ctx, out_full, in_content_idx);  // [LD, chunk_len] — drops both boundary rows
+    ggml_tensor * velocity_out = g.velocity_out = ggml_get_rows(ctx, out_full, in_content_idx);  // [LD, chunk_len] — drops both boundary rows
     ggml_set_name(velocity_out, "yue2_nar_velocity");
     ggml_set_output(velocity_out);
     ggml_build_forward_expand(gf, velocity_out);
 
-    BackendPair           bp    = { m.backend, m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
-    ggml_backend_sched_t sched = backend_sched_new(bp, YUE2_NAR_MAX_NODES);
-    bool                 ok    = sched && ggml_backend_sched_alloc_graph(sched, gf);
-    if (!ok) {
-        if (sched) {
-            ggml_backend_sched_free(sched);
-        }
-        ggml_free(ctx);
-        free(gbuf);
+    BackendPair bp = { m.backend, m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
+    g.sched = backend_sched_new(bp, YUE2_NAR_MAX_NODES);
+    if (!g.sched || !ggml_backend_sched_alloc_graph(g.sched, g.gf)) {
+        yue2_nar_velocity_graph_free(&g);
         if (err) {
             *err = "YuE2 NAR velocity graph allocation failed (out of VRAM?) at nar_len=" +
                    std::to_string((long long) nar_len);
         }
         return false;
     }
-    yue2_imatrix_hook(sched);
+    }
 
-    ggml_backend_tensor_set(in_x_nar, x_nar_host.data(), 0, x_nar_host.size() * sizeof(float));
-    ggml_backend_tensor_set(in_time_feat, time_feat.data(), 0, time_feat.size() * sizeof(float));
-    ggml_backend_tensor_set(in_local_idx, local_idx_host.data(), 0, local_idx_host.size() * sizeof(int32_t));
-    ggml_backend_tensor_set(in_rope_pos, rope_pos_host.data(), 0, rope_pos_host.size() * sizeof(int32_t));
-    ggml_backend_tensor_set(in_content_idx, content_idx_host.data(), 0, content_idx_host.size() * sizeof(int32_t));
+    ggml_backend_tensor_set(g.in_x_nar, x_nar_host.data(), 0, x_nar_host.size() * sizeof(float));
+    ggml_backend_tensor_set(g.in_time_feat, time_feat.data(), 0, time_feat.size() * sizeof(float));
+    ggml_backend_tensor_set(g.in_local_idx, local_idx_host.data(), 0, local_idx_host.size() * sizeof(int32_t));
+    ggml_backend_tensor_set(g.in_rope_pos, rope_pos_host.data(), 0, rope_pos_host.size() * sizeof(int32_t));
+    ggml_backend_tensor_set(g.in_content_idx, content_idx_host.data(), 0, content_idx_host.size() * sizeof(int32_t));
 
-    ok = ggml_backend_sched_graph_compute(sched, gf) == GGML_STATUS_SUCCESS;
+    yue2_imatrix_hook(g.sched);
+    bool ok = ggml_backend_sched_graph_compute(g.sched, g.gf) == GGML_STATUS_SUCCESS;
     if (!ok) {
         if (err) {
             *err = "YuE2 NAR velocity graph compute failed";
         }
     } else {
         out->velocity.assign((size_t) (chunk_len * LD), 0.0f);
-        ggml_backend_tensor_get(velocity_out, out->velocity.data(), 0, (size_t) (chunk_len * LD) * sizeof(float));
-        if (want_input_embedding && x_embed_tap) {
+        ggml_backend_tensor_get(g.velocity_out, out->velocity.data(), 0, (size_t) (chunk_len * LD) * sizeof(float));
+        if (want_input_embedding) {
             out->input_embedding.assign((size_t) (nar_len * H), 0.0f);
-            ggml_backend_tensor_get(x_embed_tap, out->input_embedding.data(), 0,
+            ggml_backend_tensor_get(g.x_embed_tap, out->input_embedding.data(), 0,
                                     (size_t) (nar_len * H) * sizeof(float));
         }
     }
-
-    ggml_backend_sched_free(sched);
-    ggml_free(ctx);
-    free(gbuf);
     return ok;
 }
 

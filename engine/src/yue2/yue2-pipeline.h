@@ -163,6 +163,14 @@ static std::vector<std::pair<int64_t, int64_t>> yue2_chunk_ranges(int64_t frames
 }
 
 // ── Stage 1: plan (ABC) ──────────────────────────────────────────────────────
+static uint64_t yue2_token_hash(const std::vector<int32_t> & ids) {
+    uint64_t hash = UINT64_C(14695981039346656037);
+    for (int32_t id : ids) {
+        hash ^= (uint32_t) id;
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
 //
 // Skipped entirely for cot=="off" (no ABC span exists at all) and whenever
 // the request supplies `abc` externally (the model call is skipped; the
@@ -174,6 +182,7 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
                                  std::vector<int32_t> * abc_ids_out, std::string * score_abc_out,
                                  std::string * stage_end_reason, double * stage_ms, std::string * err) {
     const auto t0 = std::chrono::steady_clock::now();
+    yue2_ar_step_profile_reset();
     abc_ids_out->clear();
     score_abc_out->clear();
 
@@ -251,8 +260,11 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
 
     *abc_ids_out       = history;
     *score_abc_out     = yue2_bpe_decode(&tok, history);
+    fprintf(stderr, "[YuE2-AR-Tokens] plan n=%zu hash=%016llx\n", history.size(),
+            (unsigned long long) yue2_token_hash(history));
     *stage_end_reason = hit_eos ? "eos" : "limit_hit";
     *stage_ms          = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    yue2_ar_step_profile_log("plan");
     return true;
 }
 
@@ -263,6 +275,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                                      std::vector<int32_t> * prefix_ids_out, std::vector<int32_t> * codec_ids_out,
                                      std::string * stage_end_reason, double * stage_ms, std::string * err) {
     const auto                  t0      = std::chrono::steady_clock::now();
+    yue2_ar_step_profile_reset();
     const std::vector<int32_t> * abc_ptr = have_abc ? &abc_ids : nullptr;
 
     std::vector<int32_t> pos_prefix;
@@ -506,7 +519,10 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
 
     *stage_end_reason = hit_eos ? (eos_by_threshold ? "eos_threshold" : "eos") :
         (preview_capped ? "preview_limit" : "limit_hit");
+    fprintf(stderr, "[YuE2-AR-Tokens] semantic n=%zu hash=%016llx\n", codec_ids_out->size(),
+            (unsigned long long) yue2_token_hash(*codec_ids_out));
     *stage_ms          = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    yue2_ar_step_profile_log("semantic");
     return true;
 }
 
