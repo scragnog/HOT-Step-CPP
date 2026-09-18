@@ -123,11 +123,12 @@ Solvers (17), schedulers (9), guidance modes, and postprocess are **hot-loadable
 
 ## Agent work coordination
 
-**Only when the user has explicitly asked for concurrent agent work.** Do not
-join a work channel, reserve resources or call any `work_*` / `collab_*` tool on
-your own initiative — a solo session needs none of it, and the polling costs
-tokens. When the user does ask, the channel is `HOT-Step` and the rules
-(catch-up, reservations, `work-run.ps1`, context corrections) live in
+**Only when the user explicitly requests Lyric Studio MCP or the HOT-Step Work
+channel.** A request for sub-agents, parallel work, or coordination does not
+authorize this connector. Do not join a work channel, reserve resources, or
+call any Lyric Studio `work_*` / `collab_*` tool otherwise. When the user does
+explicitly request it, the channel is `HOT-Step` and the rules (catch-up,
+reservations, `work-run.ps1`, context corrections) live in
 [work channel usage](tools/mcp-lyricstudio/README.md#work-channels).
 
 ## Discord transcripts
