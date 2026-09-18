@@ -231,8 +231,15 @@ static inline void yue2_distribution(std::vector<float> & scores, const Yue2Samp
     // entry (`cumsum - probabilities > top_p`, sampling.py:48-49), force-keep
     // the top-1 (top-3 under legacy_off) regardless of cumulative mass.
     if (sp.top_p < 1.0f) {
-        std::vector<int64_t> idx((size_t) V);
-        std::iota(idx.begin(), idx.end(), (int64_t) 0);
+        // Masked entries have zero softmax mass and remain -inf after top-p.
+        // Sorting them wastes nearly all of the work for a 184,704-token
+        // vocabulary when top-k leaves only a small set of candidates.
+        std::vector<int64_t> idx;
+        idx.reserve((size_t) (sp.top_k > 0 ? std::min<int64_t>(sp.top_k, V) : V));
+        for (int64_t v = 0; v < V; v++) {
+            if (std::isfinite(scores[(size_t) v])) idx.push_back(v);
+        }
+        if (idx.empty()) return;
         // Reference sort is UNSTABLE among exact ties (torch's own
         // `stable=False` default) — 02-fixture-schema.md §9's tied-group
         // policy explicitly allows any deterministic tie-break here as long
@@ -241,10 +248,11 @@ static inline void yue2_distribution(std::vector<float> & scores, const Yue2Samp
         // score (ties broken by ascending id) is one such valid choice.
         std::stable_sort(idx.begin(), idx.end(),
                           [&](int64_t a, int64_t b) { return scores[(size_t) a] > scores[(size_t) b]; });
-        const double max_v = std::isfinite(scores[(size_t) idx[0]]) ? (double) scores[(size_t) idx[0]] : 0.0;
-        std::vector<double> probs((size_t) V);
+        const double max_v = (double) scores[(size_t) idx[0]];
+        const int64_t n_candidates = (int64_t) idx.size();
+        std::vector<double> probs((size_t) n_candidates);
         double               sum = 0.0;
-        for (int64_t i = 0; i < V; i++) {
+        for (int64_t i = 0; i < n_candidates; i++) {
             const float  sv = scores[(size_t) idx[(size_t) i]];
             const double p  = std::isfinite(sv) ? std::exp((double) sv - max_v) : 0.0;
             probs[(size_t) i] = p;
@@ -252,7 +260,7 @@ static inline void yue2_distribution(std::vector<float> & scores, const Yue2Samp
         }
         const int64_t keep_floor = legacy_off ? 3 : 1;
         double        cum        = 0.0;
-        for (int64_t i = 0; i < V; i++) {
+        for (int64_t i = 0; i < n_candidates; i++) {
             const double before = cum;  // cumulative mass BEFORE this entry
             cum += sum > 0.0 ? probs[(size_t) i] / sum : 0.0;
             const bool removed = (i >= keep_floor) && (before > (double) sp.top_p);
@@ -291,21 +299,25 @@ static inline int64_t yue2_sample_draw(const std::vector<float> & scores, std::m
     }
     double  max_v    = -INFINITY;
     int64_t arg_best = 0;
+    std::vector<int64_t> candidates;
+    candidates.reserve(128);
     for (int64_t v = 0; v < V; v++) {
-        if (scores[(size_t) v] > max_v) {
-            max_v    = scores[(size_t) v];
+        const float score = scores[(size_t) v];
+        if (score > max_v) {
+            max_v    = score;
             arg_best = v;
         }
+        if (std::isfinite(score)) candidates.push_back(v);
     }
     if (!std::isfinite(max_v)) {
         return arg_best;  // fully-masked row -- degenerate, fall back to argmax
     }
-    std::vector<double> p((size_t) V);
+    std::vector<double> p;
+    p.reserve(candidates.size());
     double               sum = 0.0;
-    for (int64_t v = 0; v < V; v++) {
-        const float  sv = scores[(size_t) v];
-        const double e  = std::isfinite(sv) ? std::exp((double) sv - max_v) : 0.0;
-        p[(size_t) v]   = e;
+    for (int64_t v : candidates) {
+        const double e = std::exp((double) scores[(size_t) v] - max_v);
+        p.push_back(e);
         sum += e;
     }
     if (!(sum > 0.0)) {
@@ -313,10 +325,10 @@ static inline int64_t yue2_sample_draw(const std::vector<float> & scores, std::m
     }
     const double u   = std::uniform_real_distribution<double>(0.0, 1.0)(rng) * sum;
     double       acc = 0.0;
-    for (int64_t v = 0; v < V; v++) {
-        acc += p[(size_t) v];
+    for (size_t i = 0; i < candidates.size(); i++) {
+        acc += p[i];
         if (acc > u) {
-            return v;
+            return candidates[i];
         }
     }
     return arg_best;
