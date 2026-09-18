@@ -283,6 +283,17 @@
       ]
     },
     {
+      "id": "yue2-convrot-generation",
+      "family": "yue2",
+      "name": "YuE2 INT8 ConvRot (CUDA)",
+      "description": "YuE2 ConvRot checkpoint for generation and Joint Training, plus a Q8_0 GGUF used for configuration and text tokenization and the standard VAE. Requires a CUDA build and an NVIDIA GPU with BF16 support (Ampere or newer). The GGUF remains a separate selectable generation option. ConvRot speed and audio quality should be compared on your hardware before choosing it as a default.",
+      "fileIds": [
+        "yue2-aitk-convrot-checkpoint",
+        "yue2-lm-q8_0",
+        "yue2-vae-standard-f32"
+      ]
+    },
+    {
       "id": "yue2-full-precision",
       "family": "yue2",
       "name": "YuE2 Full Precision",
@@ -3871,15 +3882,16 @@
       "family": "yue2",
       "subdir": "yue2",
       "repoPath": "checkpoints/yue2_3b_int8_convrot.safetensors",
-      "displayName": "YuE2 Joint Training ConvRot Checkpoint",
+      "displayName": "YuE2 INT8 ConvRot Checkpoint",
       "scale": null,
       "variant": "aitk-joint-trainer",
       "quant": "INT8 ConvRot",
       "sizeBytes": 3960938800,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "Unchanged mirror of Comfy-Org's YuE2 3B INT8 ConvRot safetensors checkpoint for the native Joint Training AR + NAR trainer. Credit to the M-A-P YuE2 authors and Comfy-Org. The checkpoint embeds the YuE2 text-tokenizer JSON; it is not a GGUF generation model and requires CUDA ConvRot support. Public file SHA256: 96fe199377309001ed8cd26a944baeee8cc31a20ba7c36d1d3c0a7e1f4149db6. Licensed CC BY-NC 4.0 by the upstream repository.",
+      "description": "Unchanged mirror of Comfy-Org's YuE2 3B INT8 ConvRot safetensors checkpoint for native Joint Training and CUDA generation. Credit to the M-A-P YuE2 authors and Comfy-Org. Generation currently also needs a YuE2 LM GGUF for configuration and text tokenization, plus a VAE GGUF for audio decoding. Public file SHA256: 96fe199377309001ed8cd26a944baeee8cc31a20ba7c36d1d3c0a7e1f4149db6. Licensed CC BY-NC 4.0 by the upstream repository.",
       "tags": [
         "training",
+        "generation",
         "cuda",
         "convrot",
         "aitk"

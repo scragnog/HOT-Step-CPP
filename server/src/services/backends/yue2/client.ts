@@ -54,12 +54,9 @@ export interface Yue2PropsFile {
   [k: string]: unknown;
 }
 
-/** One yue2-lm-<type>.gguf found on disk. v1 scope is bf16/f16/f32 dtype only
- *  (docs/plans/yue2/06-engine-port-plan.md §1: "quantized variants ... are
- *  explicitly out of scope for the converter in this pass") — `type` is the
- *  dtype token, not a quant ladder entry the way MM3's `quant` is. */
+/** One installed YuE2 LM variant: a GGUF quant or the CUDA ConvRot checkpoint. */
 export interface Yue2VariantFile {
-  type: string;       // 'bf16' | 'f16' | 'f32'
+  type: string;
   filename: string;
   bytes: number;
 }
@@ -110,6 +107,7 @@ export interface Yue2Props {
   models_dir?: string;
   files?: {
     lm?: Yue2PropsFile;
+    convrot?: Yue2PropsFile;
     vae_standard?: Yue2PropsFile;
     vae_legacy?: Yue2PropsFile;
   };

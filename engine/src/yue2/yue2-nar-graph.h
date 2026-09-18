@@ -317,7 +317,9 @@ static bool yue2_nar_pos_emb_lookup(const Yue2Model & m, int64_t nar_len, std::v
 // header). h [H,nar_len] -> [H,nar_len].
 static ggml_tensor * yue2_nar_block(ggml_context * ctx, const Yue2LmConfig & c, const Yue2NarLayer & w,
                                     ggml_tensor * h, ggml_tensor * rope_pos, ggml_tensor * ar_k, ggml_tensor * ar_v,
-                                    bool use_flash) {
+                                    bool use_flash, const Yue2Model * cm = nullptr, int layer = -1) {
+    const Yue2AitkLayerWeights * cw = cm && cm->convrot && layer >= 0 ?
+        &cm->convrot->nar().layers[(size_t) layer] : nullptr;
     const int64_t H    = (int64_t) c.embedding_length;
     const int64_t D    = (int64_t) c.key_length;
     const int64_t Nh   = (int64_t) c.head_count;
@@ -326,14 +328,23 @@ static ggml_tensor * yue2_nar_block(ggml_context * ctx, const Yue2LmConfig & c, 
 
     ggml_tensor * n = yue2_lm_rms(ctx, h, w.attn_norm, c.rms_eps);
 
-    ggml_tensor * q = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.attn_q, n), D, Nh, T, 1);
-    ggml_tensor * k = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.attn_k, n), D, Nkv, T, 1);
-    ggml_tensor * v = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.attn_v, n), D, Nkv, T, 1);
+    ggml_tensor * qkv = cw ? yue2_convrot_linear(ctx, cw->qkv, n) : nullptr;
+    ggml_tensor * q0 = cw ? yue2_convrot_rows(ctx, qkv, 0, H) : ggml_mul_mat(ctx, w.attn_q, n);
+    ggml_tensor * k0 = cw ? yue2_convrot_rows(ctx, qkv, H, D*Nkv) : ggml_mul_mat(ctx, w.attn_k, n);
+    ggml_tensor * v0 = cw ? yue2_convrot_rows(ctx, qkv, H+D*Nkv, D*Nkv) : ggml_mul_mat(ctx, w.attn_v, n);
+    if (cw) {
+        q0 = yue2_convrot_adapt(ctx, cm, layer, true, YUE2_CR_Q, n, q0);
+        k0 = yue2_convrot_adapt(ctx, cm, layer, true, YUE2_CR_K, n, k0);
+        v0 = yue2_convrot_adapt(ctx, cm, layer, true, YUE2_CR_V, n, v0);
+    }
+    ggml_tensor * q = ggml_reshape_4d(ctx, q0, D, Nh, T, 1);
+    ggml_tensor * k = ggml_reshape_4d(ctx, k0, D, Nkv, T, 1);
+    ggml_tensor * v = ggml_reshape_4d(ctx, v0, D, Nkv, T, 1);
 
     // Per-head QK RMSNorm before RoPE, no norm on V — identical convention to
     // the AR path's own project_qkv (same Attention class, separate weights).
-    q = ggml_mul(ctx, ggml_rms_norm(ctx, q, c.rms_eps), w.attn_q_norm);
-    k = ggml_mul(ctx, ggml_rms_norm(ctx, k, c.rms_eps), w.attn_k_norm);
+    q = yue2_lm_rms(ctx, q, w.attn_q_norm, c.rms_eps);
+    k = yue2_lm_rms(ctx, k, w.attn_k_norm, c.rms_eps);
 
     // GLOBAL RoPE positions (ar_length + local_index) — see file header on
     // why this must not be conflated with the pos-embedding's LOCAL index.
@@ -367,12 +378,27 @@ static ggml_tensor * yue2_nar_block(ggml_context * ctx, const Yue2LmConfig & c, 
     }
     attn = ggml_reshape_2d(ctx, attn, H, T);
 
-    h = ggml_add(ctx, h, ggml_mul_mat(ctx, w.attn_output, attn));
+    ggml_tensor * projected = cw ? yue2_convrot_linear(ctx, cw->output, attn) :
+                                   ggml_mul_mat(ctx, w.attn_output, attn);
+    if (cw) projected = yue2_convrot_adapt(ctx, cm, layer, true, YUE2_CR_O, attn, projected);
+    h = ggml_add(ctx, h, projected);
 
     ggml_tensor * n2   = yue2_lm_rms(ctx, h, w.ffn_norm, c.rms_eps);
-    ggml_tensor * gate = ggml_silu(ctx, ggml_mul_mat(ctx, w.ffn_gate, n2));
-    ggml_tensor * up   = ggml_mul_mat(ctx, w.ffn_up, n2);
-    return ggml_add(ctx, h, ggml_mul_mat(ctx, w.ffn_down, ggml_mul(ctx, gate, up)));
+    ggml_tensor * gate_up = cw ? yue2_convrot_linear(ctx, cw->gate_up, n2) : nullptr;
+    ggml_tensor * gate0 = cw ? yue2_convrot_rows(ctx, gate_up, 0, c.feed_forward_length) :
+                              ggml_mul_mat(ctx, w.ffn_gate, n2);
+    ggml_tensor * up = cw ? yue2_convrot_rows(ctx, gate_up, c.feed_forward_length, c.feed_forward_length) :
+                            ggml_mul_mat(ctx, w.ffn_up, n2);
+    if (cw) {
+        gate0 = yue2_convrot_adapt(ctx, cm, layer, true, YUE2_CR_GATE, n2, gate0);
+        up = yue2_convrot_adapt(ctx, cm, layer, true, YUE2_CR_UP, n2, up);
+    }
+    ggml_tensor * gate = ggml_silu(ctx, gate0);
+    ggml_tensor * activated = ggml_mul(ctx, gate, up);
+    ggml_tensor * down = cw ? yue2_convrot_linear(ctx, cw->down, activated) :
+                              ggml_mul_mat(ctx, w.ffn_down, activated);
+    if (cw) down = yue2_convrot_adapt(ctx, cm, layer, true, YUE2_CR_DOWN, activated, down);
+    return ggml_add(ctx, h, down);
 }
 
 // ── velocity(): one full NAR forward, one ODE network evaluation ───────────
@@ -469,15 +495,25 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
     ggml_set_input(in_content_idx);
 
     // Input embedding: vae2llm(padded state) + time_embedder(shifted t) + pos_emb[local_idx].
-    ggml_tensor * ve = ggml_add(ctx, ggml_mul_mat(ctx, m.lm.vae2llm_w, in_x_nar), m.lm.vae2llm_b);  // [H, nar_len]
+    ggml_tensor * ve_linear = ggml_mul_mat(ctx, m.lm.vae2llm_w, in_x_nar);
+    ggml_tensor * ve = ggml_add(ctx, ve_linear, yue2_lm_match_type(ctx, ve_linear, m.lm.vae2llm_b));
 
     ggml_tensor * t0 = ggml_reshape_2d(ctx, in_time_feat, 256, 1);
-    ggml_tensor * t1 = ggml_silu(ctx, ggml_add(ctx, ggml_mul_mat(ctx, m.lm.time_embd_w[0], t0), m.lm.time_embd_b[0]));
-    ggml_tensor * t2 = ggml_add(ctx, ggml_mul_mat(ctx, m.lm.time_embd_w[1], t1), m.lm.time_embd_b[1]);  // [H, 1]
+    ggml_tensor * t1_linear = m.convrot ?
+        yue2_convrot_linear(ctx, m.convrot->time0(), t0) :
+        ggml_mul_mat(ctx, m.lm.time_embd_w[0], t0);
+    ggml_tensor * t1 = ggml_silu(ctx, ggml_add(ctx, t1_linear,
+        yue2_lm_match_type(ctx, t1_linear, m.lm.time_embd_b[0])));
+    ggml_tensor * t2_linear = m.convrot ?
+        yue2_convrot_linear(ctx, m.convrot->time2(), t1) :
+        ggml_mul_mat(ctx, m.lm.time_embd_w[1], t1);
+    ggml_tensor * t2 = ggml_add(ctx, t2_linear,
+        yue2_lm_match_type(ctx, t2_linear, m.lm.time_embd_b[1]));
 
     ggml_tensor * pos_emb = ggml_get_rows(ctx, m.lm.latent_pos_embed, in_local_idx);  // [H, nar_len]
 
-    ggml_tensor * x = ggml_add(ctx, ggml_add(ctx, ve, t2), pos_emb);  // [H, nar_len], t2 broadcasts over nar_len
+    ggml_tensor * x = ggml_add(ctx, ggml_add(ctx, ve, t2),
+                               yue2_lm_match_type(ctx, ve, pos_emb));
 
     ggml_tensor * x_embed_tap = nullptr;
     if (want_input_embedding) {
@@ -489,11 +525,17 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
     const bool use_flash = yue2_lm_use_flash(m.backend);
     for (int i = 0; i < L; i++) {
         x = yue2_nar_block(ctx, c, m.lm.nar_blk[(size_t) i], x, in_rope_pos, chunk.ar_cache.k[(size_t) i],
-                           chunk.ar_cache.v[(size_t) i], use_flash);
+                           chunk.ar_cache.v[(size_t) i], use_flash,
+                           &m, i);
     }
 
-    ggml_tensor * h_final = yue2_lm_rms(ctx, x, m.lm.output_norm, c.rms_eps);  // shared AR/NAR final norm
-    ggml_tensor * out_full = ggml_add(ctx, ggml_mul_mat(ctx, m.lm.llm2vae_w, h_final), m.lm.llm2vae_b);  // [LD, nar_len]
+    ggml_tensor * h_final = yue2_lm_rms(ctx, x, m.convrot ? m.convrot->nar().final_norm :
+                                                     m.lm.output_norm, c.rms_eps);
+    ggml_tensor * out_linear = m.convrot ?
+        yue2_convrot_linear(ctx, m.convrot->llm2vae(), h_final) :
+        ggml_mul_mat(ctx, m.lm.llm2vae_w, h_final);
+    ggml_tensor * out_full = ggml_add(ctx, out_linear,
+        yue2_lm_match_type(ctx, out_linear, m.lm.llm2vae_b));
     ggml_tensor * velocity_out = ggml_get_rows(ctx, out_full, in_content_idx);  // [LD, chunk_len] — drops both boundary rows
     ggml_set_name(velocity_out, "yue2_nar_velocity");
     ggml_set_output(velocity_out);

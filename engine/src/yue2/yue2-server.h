@@ -114,6 +114,15 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
     yyjson_mut_val * files = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_val(doc, root, "files", files);
     yue2_json_add_file(doc, files, "lm", g_yue2.lm_file);
+    {
+        Yue2FileInfo convrot_file;
+        convrot_file.found = !g_yue2.convrot_path.empty();
+        convrot_file.probe_ok = g_yue2.convrot_probe_ok;
+        convrot_file.name = convrot_file.found ? yue2_basename(g_yue2.convrot_path) : "";
+        convrot_file.file_bytes = convrot_file.found ? yue2_file_size(g_yue2.convrot_path) : 0;
+        convrot_file.probe_error = g_yue2.convrot_probe_error;
+        yue2_json_add_file(doc, files, "convrot", convrot_file);
+    }
     yue2_json_add_file(doc, files, "vae_standard", g_yue2.vae_file[YUE2_VAE_STANDARD]);
     yue2_json_add_file(doc, files, "vae_legacy", g_yue2.vae_file[YUE2_VAE_LEGACY]);
 
@@ -142,6 +151,7 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
                 selected = v.type;
             }
         }
+        if (g_yue2.lm_type_want == "convrot" && g_yue2.convrot_probe_ok) selected = "convrot";
         yyjson_mut_obj_add_strcpy(doc, lm_v, "selected", selected.c_str());
         yyjson_mut_obj_add_strcpy(doc, lm_v, "requested", g_yue2.lm_type_want.c_str());
     }

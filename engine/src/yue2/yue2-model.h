@@ -46,6 +46,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,9 @@
 #include "gguf-weights.h"
 #include "weight-ctx.h"
 #include "yue2-adapter.h"  // NAR LoRA merge-at-load (Yue2AdapterSpec lives there)
+#include "yue2-convrot-adapter.h"
+#include "../train/yue2-aitk-model.h"
+#include "../train/yue2-aitk-embedding-dequant.h"
 
 #ifdef _WIN32
 #    include <windows.h>
@@ -284,6 +288,9 @@ struct Yue2Model {
     std::string               models_dir;
     std::vector<std::string>  search_dirs;
     Yue2FileInfo               lm_file;
+    std::string                convrot_path;
+    bool                       convrot_probe_ok = false;
+    std::string                convrot_probe_error;
     Yue2FileInfo               vae_file[YUE2_VAE_VARIANT_COUNT];
     Yue2LmConfig               lm_cfg;
     Yue2VaeConfig              vae_cfg;  // config of whichever variant is currently loaded/probed
@@ -359,6 +366,8 @@ struct Yue2Model {
     double load_ms  = 0.0;
 
     Yue2LmWeights  lm;
+    std::unique_ptr<Yue2AitkModel> convrot;
+    std::vector<std::unique_ptr<Yue2ConvRotAdapter>> convrot_adapters;
     Yue2VaeWeights vae;
 
     // name -> tensor, per file. Introspection only.
@@ -847,10 +856,14 @@ static bool yue2_weights_present(const char * models_dir) {
 // not always the best one on disk. nullptr/empty preserves the normal
 // best-first behavior for every other caller.
 static void yue2_discover(Yue2Model * m, const char * models_dir, const char * lm_type_override = nullptr) {
+    m->lm_type_want = lm_type_override ? lm_type_override : "";
     m->models_dir = models_dir ? models_dir : "";
     m->search_dirs.clear();
     m->meta_errors.clear();
     m->lm_file = Yue2FileInfo{};
+    m->convrot_path.clear();
+    m->convrot_probe_ok = false;
+    m->convrot_probe_error.clear();
     for (int v = 0; v < YUE2_VAE_VARIANT_COUNT; v++) {
         m->vae_file[v] = Yue2FileInfo{};
     }
@@ -864,7 +877,19 @@ static void yue2_discover(Yue2Model * m, const char * models_dir, const char * l
 
     std::string lm_path;
     bool        have_lm_path = false;
-    if (lm_type_override && lm_type_override[0]) {
+    if (lm_type_override && strcmp(lm_type_override, "convrot") == 0) {
+        have_lm_path = yue2_find_variant(m->search_dirs, "lm", &lm_path);
+        for (const auto & dir : m->search_dirs) {
+            const std::string candidate = dir + YUE2_SEP "yue2_3b_int8_convrot.safetensors";
+            if (yue2_file_exists(candidate)) { m->convrot_path = candidate; break; }
+        }
+        if (m->convrot_path.empty()) {
+            m->meta_errors.push_back("ConvRot checkpoint yue2_3b_int8_convrot.safetensors not installed");
+        }
+        if (!have_lm_path) {
+            m->meta_errors.push_back("ConvRot generation currently needs a YuE2 LM GGUF for config and tokenizer");
+        }
+    } else if (lm_type_override && lm_type_override[0]) {
         const std::string want = std::string("yue2-lm-") + lm_type_override + ".gguf";
         for (const auto & dir : m->search_dirs) {
             const std::string candidate = dir + YUE2_SEP + want;
@@ -885,6 +910,22 @@ static void yue2_discover(Yue2Model * m, const char * models_dir, const char * l
         yue2_probe_file(lm_path, &m->lm_file, /*is_lm=*/true, &m->lm_cfg, nullptr, &m->meta_errors);
     }
     yue2_enumerate_lm(*m, &m->lm_variants);
+    if (m->convrot_path.empty()) {
+        for (const auto & dir : m->search_dirs) {
+            const std::string candidate = dir + YUE2_SEP "yue2_3b_int8_convrot.safetensors";
+            if (yue2_file_exists(candidate)) { m->convrot_path = candidate; break; }
+        }
+    }
+    if (!m->convrot_path.empty()) {
+        Yue2AitkCheckpoint checkpoint;
+        m->convrot_probe_ok = checkpoint.open(m->convrot_path.c_str(), &m->convrot_probe_error);
+        if (!m->convrot_probe_ok && lm_type_override && strcmp(lm_type_override, "convrot") == 0)
+            m->meta_errors.push_back(m->convrot_probe_error);
+    }
+    if (!m->convrot_path.empty()) {
+        m->lm_variants.push_back({"convrot", m->convrot_path,
+                                  yue2_basename(m->convrot_path), yue2_file_size(m->convrot_path)});
+    }
     for (int v = 0; v < YUE2_VAE_VARIANT_COUNT; v++) {
         std::string path;
         const std::string stem = std::string("vae-") + YUE2_VAE_VARIANT_NAME[v];
@@ -896,7 +937,8 @@ static void yue2_discover(Yue2Model * m, const char * models_dir, const char * l
 }
 
 static bool yue2_available(const Yue2Model & m) {
-    return m.lm_file.found && m.lm_file.probe_ok;
+    return m.lm_file.found && m.lm_file.probe_ok &&
+           (m.lm_type_want != "convrot" || m.convrot_probe_ok);
 }
 
 // ── Weight loading ────────────────────────────────────────────────────────
@@ -1127,6 +1169,8 @@ static void yue2_unload(Yue2Model * m) {
     if (!m->backend_ref && !m->lm_resident && !m->vae_resident && !m->wctx_lm.ctx && !m->wctx_vae.ctx) {
         return;
     }
+    m->convrot_adapters.clear();
+    m->convrot.reset();
     wctx_free(&m->wctx_lm);
     wctx_free(&m->wctx_vae);
     m->lm    = Yue2LmWeights{};
@@ -1152,6 +1196,59 @@ static void yue2_unload(Yue2Model * m) {
         m->backend_ref = false;
     }
     fprintf(stderr, "[YuE2] Unloaded\n");
+}
+
+// Bind the already-uploaded ConvRot checkpoint to the inference weight view.
+// The fused projection sites stay in Yue2AitkModel; the graph selects those
+// explicitly. Only ordinary tensors are mapped to the legacy named slots.
+static bool yue2_bind_convrot_lm(Yue2Model * m, std::vector<std::string> * errs) {
+    const auto & a = *m->convrot;
+    auto ordinary = [&](const std::string & name) -> ggml_tensor * {
+        ggml_tensor * t = a.ordinary(name.c_str());
+        if (!t) errs->push_back("ConvRot tensor missing: " + name);
+        return t;
+    };
+    m->lm = Yue2LmWeights{};
+    m->lm.token_embd = a.embedding();
+    m->lm.output_norm = a.ar().final_norm;
+    m->lm.vae2llm_w = ordinary("model.diffusion_model.vae2llm.weight");
+    m->lm.vae2llm_b = ordinary("model.diffusion_model.vae2llm.bias");
+    m->lm.llm2vae_b = ordinary("model.diffusion_model.llm2vae.bias");
+    m->lm.time_embd_b[0] = ordinary("model.diffusion_model.time_embedder.mlp.0.bias");
+    m->lm.time_embd_b[1] = ordinary("model.diffusion_model.time_embedder.mlp.2.bias");
+    m->lm.latent_pos_embed = ordinary("model.diffusion_model.latent_pos_embed.pe");
+    const int n = (int) m->lm_cfg.block_count;
+    m->lm.blk.resize(n);
+    m->lm.nar_blk.resize(n);
+    for (int i = 0; i < n; ++i) {
+        const std::string ar = "text_encoders.model.layers." + std::to_string(i) + ".";
+        auto & b = m->lm.blk[(size_t) i];
+        b.attn_norm = ordinary(ar + "input_layernorm.weight");
+        b.ffn_norm = ordinary(ar + "post_attention_layernorm.weight");
+        b.attn_q_norm = ordinary(ar + "self_attn.q_norm.weight");
+        b.attn_k_norm = ordinary(ar + "self_attn.k_norm.weight");
+        const std::string nar = "model.diffusion_model.model.layers." + std::to_string(i) + ".";
+        auto & nb = m->lm.nar_blk[(size_t) i];
+        nb.attn_norm = ordinary(nar + "input_layernorm.weight");
+        nb.ffn_norm = ordinary(nar + "post_attention_layernorm.weight");
+        nb.attn_q_norm = ordinary(nar + "self_attn.q_norm.weight");
+        nb.attn_k_norm = ordinary(nar + "self_attn.k_norm.weight");
+    }
+    return errs->empty() && m->lm.token_embd && m->lm.output_norm;
+}
+
+static bool yue2_convrot_backend_supported(ggml_backend_t backend) {
+    if (!backend) return false;
+    ggml_init_params ip = { ggml_tensor_overhead() * 8 + 1024, nullptr, true };
+    ggml_context * ctx = ggml_init(ip);
+    if (!ctx) return false;
+    ggml_tensor * weight = ggml_new_tensor_2d(ctx, GGML_TYPE_I8, 2048, 2048);
+    ggml_tensor * input = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 2048, 1);
+    ggml_tensor * scales = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 2048);
+    ggml_tensor * op = ggml_convrot8(ctx, weight, input, scales, nullptr, 256, true);
+    const bool supported = op && ggml_backend_supports_op(backend, op);
+    ggml_free(ctx);
+    return supported;
 }
 
 // Merge every requested NAR LoRA into the LM's staged weights. Call site is
@@ -1244,7 +1341,7 @@ static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeV
 
     if (need_lm && !yue2_available(*m)) {
         if (err_out) {
-            *err_out = m->meta_errors.empty() ? "YuE2 LM GGUF not found or metadata probe failed"
+            *err_out = m->meta_errors.empty() ? "YuE2 LM checkpoint or GGUF metadata unavailable"
                                               : m->meta_errors[0];
         }
         return false;
@@ -1269,30 +1366,61 @@ static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeV
     bool                     ok = true;
 
     if (need_lm) {
-        GGUFModel gf = {};
-        ok           = gf_load(&gf, m->lm_file.path.c_str());
-        if (!ok) {
-            errs.push_back("cannot open " + m->lm_file.path);
-        } else {
-            ok = yue2_load_lm_tensors(m, gf, &errs);
-            if (ok) {
-                // Adapter merge goes HERE — between staging and upload, the
-                // same seam MM3 uses (mm3-model.h:1766) and ACE uses in dit.h,
-                // and inside the `gf` lifetime because the staged pointers are
-                // into its mmap. VAE-only loads never reach this branch, which
-                // is the whole of "adapters apply to the LM part only": the
-                // VAE part has no adaptable tensors and a vae_variant switch
-                // (the early-out at the top of this function) frees only
-                // wctx_vae, leaving an already-merged wctx_lm untouched.
-                ok = yue2_apply_adapters(m, gf, &errs);
-            }
-            if (ok) {
-                ok = wctx_alloc(&m->wctx_lm, m->backend);
-                if (!ok) {
-                    errs.push_back("backend buffer allocation failed for the LM (out of VRAM?)");
+        if (m->lm_type_want == "convrot") {
+            if (!yue2_convrot_backend_supported(m->backend)) {
+                ok = false;
+                errs.push_back("YuE2 ConvRot inference requires compiled CUDA INT8 ConvRot with BF16 support (Ampere or newer)");
+            } else {
+                m->convrot = std::make_unique<Yue2AitkModel>();
+                std::string why;
+                ok = m->convrot->load(m->convrot_path.c_str(), m->backend,
+                                      yue2_aitk_load_embedding_bf16, &why);
+                if (!ok) errs.push_back(why);
+                if (ok) ok = yue2_bind_convrot_lm(m, &errs);
+                if (ok) {
+                    bool has_ar = false, has_nar = false;
+                    for (const auto & spec : m->lm_adapter_want) {
+                        auto adapter = std::make_unique<Yue2ConvRotAdapter>();
+                        if (!adapter->load(spec, m->backend, &why)) {
+                            ok = false;
+                            errs.push_back(why);
+                            break;
+                        }
+                        const bool nar = adapter->nar();
+                        has_nar |= nar;
+                        has_ar |= !nar;
+                        m->lm_adapter_merged.push_back({spec.path, nar ? "nar" : "ar", 196});
+                        m->lm_adapter_tensors += 196;
+                        m->vram_lm += adapter->bytes();
+                        m->convrot_adapters.push_back(std::move(adapter));
+                    }
+                    if (ok) {
+                        m->lm_adapter_desc = yue2_adapter_key(m->lm_adapter_want);
+                        m->lm_adapter_family = has_ar && has_nar ? "ar+nar" :
+                                               has_ar ? "ar" : has_nar ? "nar" : "";
+                    }
                 }
             }
-            gf_close(&gf);
+        } else {
+            GGUFModel gf = {};
+            ok           = gf_load(&gf, m->lm_file.path.c_str());
+            if (!ok) {
+                errs.push_back("cannot open " + m->lm_file.path);
+            } else {
+                ok = yue2_load_lm_tensors(m, gf, &errs);
+                if (ok) {
+                    // Merge GGUF adapters while staged pointers still refer to gf's mmap.
+                    // VAE-only loads do not touch the resident LM or its adapters.
+                    ok = yue2_apply_adapters(m, gf, &errs);
+                }
+                if (ok) {
+                    ok = wctx_alloc(&m->wctx_lm, m->backend);
+                    if (!ok) {
+                        errs.push_back("backend buffer allocation failed for the LM (out of VRAM?)");
+                    }
+                }
+                gf_close(&gf);
+            }
         }
     }
 
@@ -1336,7 +1464,8 @@ static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeV
     }
 
     if (need_lm) {
-        m->vram_lm    = m->wctx_lm.buffer ? ggml_backend_buffer_get_size(m->wctx_lm.buffer) : 0;
+        m->vram_lm   += m->convrot ? ggml_backend_buffer_get_size(m->convrot->buffer()) :
+                                    m->wctx_lm.buffer ? ggml_backend_buffer_get_size(m->wctx_lm.buffer) : 0;
         m->lm_resident = true;
     }
     if (need_vae) {

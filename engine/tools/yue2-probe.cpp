@@ -3055,6 +3055,7 @@ static int run_generate_cli(const std::string & models_dir, const std::string & 
                             const std::string & style, const std::string & lyrics, const std::string & cot_s,
                             int max_tokens_cli, unsigned long long seed) {
     Yue2Model m;
+    m.lm_adapter_want = g_yue2_probe_adapters;
     yue2_discover(&m, models_dir.c_str(), g_yue2_lm_type.empty() ? nullptr : g_yue2_lm_type.c_str());
     if (!yue2_available(m)) {
         fprintf(stderr, "FATAL: YuE2 LM GGUF not found/probe failed under %s\n", models_dir.c_str());

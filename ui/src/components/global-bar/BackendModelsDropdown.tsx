@@ -131,14 +131,13 @@ export const BackendModelsDropdown: React.FC = () => {
               value={current}
               onChange={(v) => void onPick(bucket, v)}
               options={options}
-              // Every MM3 weight file is a GGUF; the default sniffer reads the
-              // option string as a file name and these are quant tokens.
-              formatOf={() => 'gguf'}
+              formatOf={(opt) => activeBackendId === 'yue2' && bucket === 'lm' && opt === 'convrot'
+                ? 'safetensors' : 'gguf'}
               // Short, fixed list — a filter box would be furniture.
               filterable={false}
               disabled={busy !== null || !catalogue.selectable}
               formatLabel={(opt) =>
-                `${opt}${meta[opt]?.bytes ? ` — ${formatBytes(meta[opt].bytes)}` : ''}`}
+                `${opt === 'convrot' ? 'INT8 ConvRot (CUDA)' : opt}${meta[opt]?.bytes ? ` — ${formatBytes(meta[opt].bytes)}` : ''}`}
               placeholder={busy === bucket ? 'Switching…' : 'Select model…'}
             />
             {meta[current]?.label && (

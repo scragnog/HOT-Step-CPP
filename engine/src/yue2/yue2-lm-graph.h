@@ -108,8 +108,45 @@ static inline bool yue2_lm_use_flash(ggml_backend_t backend) {
     return !disabled_env;
 }
 
+static ggml_tensor * yue2_lm_match_type(ggml_context * ctx, ggml_tensor * x, ggml_tensor * w) {
+    return x->type == w->type ? w : ggml_cast(ctx, w, x->type);
+}
+
 static ggml_tensor * yue2_lm_rms(ggml_context * ctx, ggml_tensor * x, ggml_tensor * w, float eps) {
-    return ggml_mul(ctx, ggml_rms_norm(ctx, x, eps), w);
+    ggml_tensor * normalized = ggml_rms_norm(ctx, x, eps);
+    return ggml_mul(ctx, normalized, yue2_lm_match_type(ctx, normalized, w));
+}
+
+static ggml_tensor * yue2_convrot_linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
+                                          ggml_tensor * x) {
+    if (x->type != GGML_TYPE_F32) x = ggml_cast(ctx, x, GGML_TYPE_F32);
+    return ggml_convrot8(ctx, w.weight_i8, x, w.scales_f32, nullptr, w.rotation, true);
+}
+
+static ggml_tensor * yue2_convrot_rows(ggml_context * ctx, ggml_tensor * fused,
+                                        int64_t first, int64_t count) {
+    GGML_ASSERT(fused->type == GGML_TYPE_F32 && first >= 0 && first + count <= fused->ne[0]);
+    return ggml_cont(ctx, ggml_view_2d(ctx, fused, count, fused->ne[1], fused->nb[1],
+                                        (size_t) first * sizeof(float)));
+}
+
+static ggml_tensor * yue2_convrot_adapt(ggml_context * ctx, const Yue2Model * model,
+                                        int layer, bool nar, Yue2ConvRotSite site,
+                                        ggml_tensor * x, ggml_tensor * base) {
+    if (!model || model->convrot_adapters.empty()) return base;
+    ggml_tensor * result = base;
+    ggml_tensor * input = x->type == GGML_TYPE_F32 ? x : ggml_cast(ctx, x, GGML_TYPE_F32);
+    input = ggml_bf16_round(ctx, input);
+    for (const auto & adapter : model->convrot_adapters) {
+        if (adapter->nar() != nar) continue;
+        const Yue2ConvRotLora & lora = adapter->site(layer, site);
+        if (lora.scale == 0.0f) continue;
+        ggml_tensor * ax = ggml_mul_mat(ctx, lora.a, input);
+        ggml_tensor * delta = ggml_mul_mat(ctx, lora.b, ax);
+        delta = ggml_bf16_round(ctx, ggml_scale(ctx, delta, lora.scale));
+        result = ggml_bf16_round(ctx, ggml_add(ctx, result, delta));
+    }
+    return result;
 }
 
 // Manual F32 attention fallback. q [D,T,Nh,1], k/v [D,n_kv,Nkv,1] (cache
@@ -136,7 +173,9 @@ static ggml_tensor * yue2_lm_attn_f32(ggml_context * ctx, ggml_tensor * q, ggml_
 static ggml_tensor * yue2_ar_block(ggml_context * ctx, ggml_cgraph * gf, const Yue2LmConfig & c,
                                    const Yue2LmLayer & w, ggml_tensor * h, ggml_tensor * positions, ggml_tensor * mask,
                                    ggml_tensor * rows, ggml_tensor * kcache, ggml_tensor * vcache, int64_t n_kv_pad,
-                                   bool use_flash) {
+                                   bool use_flash, const Yue2Model * cm = nullptr, int layer = -1) {
+    const Yue2AitkLayerWeights * cw = cm && cm->convrot && layer >= 0 ?
+        &cm->convrot->ar().layers[(size_t) layer] : nullptr;
     const int64_t H   = (int64_t) c.embedding_length;
     const int64_t D   = (int64_t) c.key_length;
     const int64_t Nh  = (int64_t) c.head_count;
@@ -145,14 +184,23 @@ static ggml_tensor * yue2_ar_block(ggml_context * ctx, ggml_cgraph * gf, const Y
 
     ggml_tensor * n = yue2_lm_rms(ctx, h, w.attn_norm, c.rms_eps);
 
-    ggml_tensor * q = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.attn_q, n), D, Nh, T, 1);   // [D,Nh,T,1]
-    ggml_tensor * k = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.attn_k, n), D, Nkv, T, 1);  // [D,Nkv,T,1]
-    ggml_tensor * v = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.attn_v, n), D, Nkv, T, 1);
+    ggml_tensor * qkv = cw ? yue2_convrot_linear(ctx, cw->qkv, n) : nullptr;
+    ggml_tensor * q0 = cw ? yue2_convrot_rows(ctx, qkv, 0, H) : ggml_mul_mat(ctx, w.attn_q, n);
+    ggml_tensor * k0 = cw ? yue2_convrot_rows(ctx, qkv, H, D*Nkv) : ggml_mul_mat(ctx, w.attn_k, n);
+    ggml_tensor * v0 = cw ? yue2_convrot_rows(ctx, qkv, H+D*Nkv, D*Nkv) : ggml_mul_mat(ctx, w.attn_v, n);
+    if (cw) {
+        q0 = yue2_convrot_adapt(ctx, cm, layer, false, YUE2_CR_Q, n, q0);
+        k0 = yue2_convrot_adapt(ctx, cm, layer, false, YUE2_CR_K, n, k0);
+        v0 = yue2_convrot_adapt(ctx, cm, layer, false, YUE2_CR_V, n, v0);
+    }
+    ggml_tensor * q = ggml_reshape_4d(ctx, q0, D, Nh, T, 1);
+    ggml_tensor * k = ggml_reshape_4d(ctx, k0, D, Nkv, T, 1);
+    ggml_tensor * v = ggml_reshape_4d(ctx, v0, D, Nkv, T, 1);
 
     // Per-head QK RMSNorm (dim=head_dim=128, eps 1e-6), strictly BEFORE RoPE.
     // No norm on V (03-reference-numerics.md §2.2, Attention.project_qkv).
-    q = ggml_mul(ctx, ggml_rms_norm(ctx, q, c.rms_eps), w.attn_q_norm);
-    k = ggml_mul(ctx, ggml_rms_norm(ctx, k, c.rms_eps), w.attn_k_norm);
+    q = yue2_lm_rms(ctx, q, w.attn_q_norm, c.rms_eps);
+    k = yue2_lm_rms(ctx, k, w.attn_k_norm, c.rms_eps);
 
     // NeoX half-split rotation (x1=first half, x2=second half — the
     // reference's own convention, §2.2's _apply_rotary), theta = rope_freq_base
@@ -189,13 +237,28 @@ static ggml_tensor * yue2_ar_block(ggml_context * ctx, ggml_cgraph * gf, const Y
     }
     attn = ggml_reshape_2d(ctx, attn, H, T);  // [D,Nh,T,1] -> [H,T]
 
-    h = ggml_add(ctx, h, ggml_mul_mat(ctx, w.attn_output, attn));
+    ggml_tensor * projected = cw ? yue2_convrot_linear(ctx, cw->output, attn) :
+                                   ggml_mul_mat(ctx, w.attn_output, attn);
+    if (cw) projected = yue2_convrot_adapt(ctx, cm, layer, false, YUE2_CR_O, attn, projected);
+    h = ggml_add(ctx, h, projected);
 
     // SwiGLU: down(silu(gate) * up). No bias anywhere (03-reference-numerics.md §2.2).
     ggml_tensor * n2   = yue2_lm_rms(ctx, h, w.ffn_norm, c.rms_eps);
-    ggml_tensor * gate = ggml_silu(ctx, ggml_mul_mat(ctx, w.ffn_gate, n2));
-    ggml_tensor * up   = ggml_mul_mat(ctx, w.ffn_up, n2);
-    return ggml_add(ctx, h, ggml_mul_mat(ctx, w.ffn_down, ggml_mul(ctx, gate, up)));
+    ggml_tensor * gate_up = cw ? yue2_convrot_linear(ctx, cw->gate_up, n2) : nullptr;
+    ggml_tensor * gate0 = cw ? yue2_convrot_rows(ctx, gate_up, 0, c.feed_forward_length) :
+                              ggml_mul_mat(ctx, w.ffn_gate, n2);
+    ggml_tensor * up = cw ? yue2_convrot_rows(ctx, gate_up, c.feed_forward_length, c.feed_forward_length) :
+                            ggml_mul_mat(ctx, w.ffn_up, n2);
+    if (cw) {
+        gate0 = yue2_convrot_adapt(ctx, cm, layer, false, YUE2_CR_GATE, n2, gate0);
+        up = yue2_convrot_adapt(ctx, cm, layer, false, YUE2_CR_UP, n2, up);
+    }
+    ggml_tensor * gate = ggml_silu(ctx, gate0);
+    ggml_tensor * activated = ggml_mul(ctx, gate, up);
+    ggml_tensor * down = cw ? yue2_convrot_linear(ctx, cw->down, activated) :
+                              ggml_mul_mat(ctx, w.ffn_down, activated);
+    if (cw) down = yue2_convrot_adapt(ctx, cm, layer, false, YUE2_CR_DOWN, activated, down);
+    return ggml_add(ctx, h, down);
 }
 
 // ── Public API ───────────────────────────────────────────────────────────
@@ -343,7 +406,8 @@ static bool yue2_ar_forward(const Yue2Model & m, const Yue2ArForwardRequest & re
     const bool use_flash = yue2_lm_use_flash(m.backend);
     for (int i = 0; i < L; i++) {
         h        = yue2_ar_block(ctx, gf, c, m.lm.blk[(size_t) i], h, in_pos, in_mask, in_rows, kv_k[(size_t) i],
-                                 kv_v[(size_t) i], T, use_flash);
+                                 kv_v[(size_t) i], T, use_flash,
+                                 &m, i);
         taps[(size_t) i + 1] = h;
     }
     ggml_tensor * h_final = yue2_lm_rms(ctx, h, m.lm.output_norm, c.rms_eps);
@@ -363,7 +427,8 @@ static bool yue2_ar_forward(const Yue2Model & m, const Yue2ArForwardRequest & re
     ggml_tensor * out_logits = nullptr;
     if (Kl > 0) {
         ggml_tensor * gathered = ggml_get_rows(ctx, h_final, in_lidx);       // [H,Kl]
-        out_logits             = ggml_mul_mat(ctx, m.lm.output, gathered);  // [V,Kl] — norm already applied to
+        out_logits             = m.convrot ? yue2_convrot_linear(ctx, m.convrot->lm_head(), gathered) :
+                                            ggml_mul_mat(ctx, m.lm.output, gathered);  // [V,Kl]
                                                                              // the FULL sequence before this
                                                                              // gather, matching Backbone.forward()
                                                                              // returning self.norm(x) over every
@@ -679,7 +744,8 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
     const bool use_flash = yue2_lm_use_flash(m.backend);
     for (int i = 0; i < L; i++) {
         h = yue2_ar_block(ctx, gf, c, m.lm.blk[(size_t) i], h, in_pos, in_mask, in_rows, cache.k[(size_t) i],
-                          cache.v[(size_t) i], T, use_flash);
+                          cache.v[(size_t) i], T, use_flash,
+                          &m, i);
         taps[(size_t) i + 1] = h;
     }
     ggml_tensor * h_final = yue2_lm_rms(ctx, h, m.lm.output_norm, c.rms_eps);
@@ -698,7 +764,8 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
     ggml_tensor * out_logits = nullptr;
     if (Kl > 0) {
         ggml_tensor * gathered = ggml_get_rows(ctx, h_final, in_lidx);
-        out_logits             = ggml_mul_mat(ctx, m.lm.output, gathered);
+        out_logits             = m.convrot ? yue2_convrot_linear(ctx, m.convrot->lm_head(), gathered) :
+                                            ggml_mul_mat(ctx, m.lm.output, gathered);
         ggml_set_output(out_logits);
         ggml_build_forward_expand(gf, out_logits);
     }
@@ -851,10 +918,12 @@ static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int3
     const bool use_flash = yue2_lm_use_flash(m.backend);
     for (int i = 0; i < L; i++) {
         h = yue2_ar_block(ctx, gf, c, m.lm.blk[(size_t) i], h, in_pos, in_mask, in_rows, cache.k[(size_t) i],
-                          cache.v[(size_t) i], n_kv_pad, use_flash);
+                          cache.v[(size_t) i], n_kv_pad, use_flash,
+                          &m, i);
     }
     ggml_tensor * h_final    = yue2_lm_rms(ctx, h, m.lm.output_norm, c.rms_eps);
-    ggml_tensor * out_logits = ggml_mul_mat(ctx, m.lm.output, h_final);  // [V,1]
+    ggml_tensor * out_logits = m.convrot ? yue2_convrot_linear(ctx, m.convrot->lm_head(), h_final) :
+                                        ggml_mul_mat(ctx, m.lm.output, h_final);  // [V,1]
     ggml_set_output(out_logits);
     ggml_build_forward_expand(gf, out_logits);
 
