@@ -27,6 +27,26 @@ test('AITK checkpoint discovery exposes combined and native AR/NAR outputs', () 
   }
 });
 
+test('AITK checkpoints use the composite loss from their exact step and segment', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-loss-'));
+  try {
+    for (const [segment, step, arCe] of [[1, 50, 2], [2, 100, 3]] as const) {
+      const dir = path.join(root, 'segments', `segment-${String(segment).padStart(6, '0')}`);
+      fs.mkdirSync(path.join(dir, `checkpoint-step${step}`), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'train.jsonl'), [
+        JSON.stringify({ stage: 'joint', step, ar_ce: arCe, ar_kl: 0.5, nar_mse: 1, cursor_ce: 0.25, cursor_weight: 0.08 }),
+        '{incomplete',
+      ].join('\n'));
+    }
+    const rows = checkpointRecords(root);
+    assert.deepEqual(rows.map(row => row.step), [100, 50]);
+    assert.ok(Math.abs((rows[0].loss ?? 0) - 4.12) < 1e-10);
+    assert.ok(Math.abs((rows[1].loss ?? 0) - 3.12) < 1e-10);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('AITK run catalogue writes and rereads atomically in an isolated training root', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-index-'));
   try {

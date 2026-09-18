@@ -19,6 +19,7 @@ const MAX_INDEX_BYTES = 4 * 1024 * 1024;
 export interface Yue2AitkCheckpointRecord {
   step: number;
   dir: string;
+  loss?: number;
   adapterPath?: string;
   optimizerPath?: string;
   arPath?: string;
@@ -61,6 +62,7 @@ function isRunRecord(value: unknown): value is Yue2AitkRunRecord {
     && Array.isArray(r.checkpoints) && r.checkpoints.length <= 1024
     && r.checkpoints.every(c => !!c && Number.isInteger(c.step) && c.step >= 0
       && typeof c.dir === 'string' && c.dir.length <= 32768
+      && (c.loss === undefined || (typeof c.loss === 'number' && Number.isFinite(c.loss)))
       && ['adapterPath', 'optimizerPath', 'arPath', 'narPath'].every(k => {
         const v = c[k as keyof Yue2AitkCheckpointRecord];
         return v === undefined || (typeof v === 'string' && v.length <= 32768);
@@ -88,6 +90,24 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
     } } catch { /* incomplete catalogue is handled by the caller */ }
   }
   for (const base of dirs) {
+   const losses = new Map<number, number>();
+   try {
+     const log = path.join(base, 'train.jsonl');
+     if (fs.statSync(log).size <= 8 * 1024 * 1024) {
+       for (const line of fs.readFileSync(log, 'utf8').split(/\r?\n/)) {
+         try {
+           const event = JSON.parse(line) as Record<string, unknown>;
+           if (event.stage !== 'joint' || !Number.isInteger(event.step)) continue;
+           const { ar_ce, ar_kl, nar_mse, cursor_ce, cursor_weight } = event;
+           if (![ar_ce, ar_kl, nar_mse].every(v => typeof v === 'number' && Number.isFinite(v))) continue;
+           const cursor = typeof cursor_ce === 'number' && Number.isFinite(cursor_ce)
+             && typeof cursor_weight === 'number' && Number.isFinite(cursor_weight)
+             ? cursor_ce * cursor_weight : 0;
+           losses.set(event.step as number, (ar_ce as number) + 0.2 * (ar_kl as number) + (nar_mse as number) + cursor);
+         } catch { /* an incomplete log line does not invalidate other steps */ }
+       }
+     }
+   } catch { /* an unfinished segment may not have its JSONL log yet */ }
    let local: fs.Dirent[];
    try { local = fs.readdirSync(base, { withFileTypes: true }); } catch { continue; }
    for (const e of local) {
@@ -100,6 +120,7 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
     };
     rows.push({
       step: Number(match[1]), dir,
+      ...(losses.has(Number(match[1])) ? { loss: losses.get(Number(match[1])) } : {}),
       adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'),
       arPath: file('native-ar.safetensors'), narPath: file('native-nar.safetensors'),
     });

@@ -601,6 +601,7 @@ function yue2LmAdapterCatalogue(): {
           bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),
           dataset: run.datasetSlug || run.datasetId || undefined,
           final,
+          loss: ckpt.loss,
           styleTemplate: fileMeta?.styleTemplate,
           captionDropout: fileMeta?.captionDropout,
         };
