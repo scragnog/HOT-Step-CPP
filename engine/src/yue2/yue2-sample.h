@@ -215,9 +215,21 @@ static inline void yue2_distribution(std::vector<float> & scores, const Yue2Samp
     const int64_t k = sp.top_k > 0 ? std::min<int64_t>(sp.top_k, V) : V;
     float         threshold = -INFINITY;
     if (k < V) {
-        std::vector<float> sel(scores);
-        std::nth_element(sel.begin(), sel.begin() + (size_t) (k - 1), sel.end(), std::greater<float>());
-        threshold = sel[(size_t) (k - 1)];
+        std::vector<float> sel;
+        sel.reserve((size_t) std::min<int64_t>(k, std::max<int64_t>(0, legal_hi - legal_lo)));
+        const int64_t lo = std::max<int64_t>(0, legal_lo);
+        const int64_t hi = std::min<int64_t>(V, legal_hi);
+        for (int64_t v = lo; v < hi; v++) {
+            if (std::isfinite(scores[(size_t) v])) sel.push_back(scores[(size_t) v]);
+        }
+        if (eos_id >= 0 && eos_id < V && (eos_id < lo || eos_id >= hi) &&
+            std::isfinite(scores[(size_t) eos_id])) {
+            sel.push_back(scores[(size_t) eos_id]);
+        }
+        if ((int64_t) sel.size() >= k) {
+            std::nth_element(sel.begin(), sel.begin() + (size_t) (k - 1), sel.end(), std::greater<float>());
+            threshold = sel[(size_t) (k - 1)];
+        }
     }
     if (std::isfinite(threshold)) {
         for (int64_t v = 0; v < V; v++) {
