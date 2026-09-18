@@ -123,27 +123,11 @@ Solvers (17), schedulers (9), guidance modes, and postprocess are **hot-loadable
 
 ## Agent work coordination
 
-For concurrent agent work, use the MCP `work_*` tools and project channel
-`HOT-Step`. Join once and read the snapshot; read another snapshot after
-context compression or reconnecting. Then read only changes with `work_sync`,
-acknowledging its receipt after reading the returned pages. Do not replay the
-full discussion or loop empty polls while implementing. Check at task boundaries
-and before disruptive operations. A read receipt does not mean retained context
-or agreement; use a pinned `context` correction with evidence references when
-a peer is missing a decision.
-
-Reserve `app-server` in `use` mode while work needs the running app. Restart and
-rebuild operations require `exclusive` reservations for `app-server`, `gpu` and
-`engine-build`; git index mutations use `git-index`. Acquire related resources
-atomically. Use `tools/mcp-lyricstudio/work-run.ps1` for guarded foreground
-commands, including `dev-rebuild.bat`. Do not manually reserve the same exclusive resources before
-invoking the runner: it acquires its own reservations for the child lifetime.
-Existing experiment GPU locks and app activity checks still apply. A lease
-timeout never proves work stopped. Release only after work finishes, or use the
-viewer's explicit recovery with evidence of completion.
-
-The Work channel stays open independently of planning rooms. Planning votes,
-sealed positions and user authorization remain separate. See
+**Only when the user has explicitly asked for concurrent agent work.** Do not
+join a work channel, reserve resources or call any `work_*` / `collab_*` tool on
+your own initiative — a solo session needs none of it, and the polling costs
+tokens. When the user does ask, the channel is `HOT-Step` and the rules
+(catch-up, reservations, `work-run.ps1`, context corrections) live in
 [work channel usage](tools/mcp-lyricstudio/README.md#work-channels).
 
 ## Discord transcripts
