@@ -139,8 +139,8 @@ inline bool v2_slot_valid(const V2Slot & s, size_t n) {
 // Size of one v2 slot's file payload (length prefix included).
 inline bool v2_slot_bytes(const V2Slot & s, size_t n, size_t * out) {
     size_t bytes = 4;
-    if (!s.fp32->empty()) { if (!mul_size(n, 4, out)) return false; return add_size(bytes, *out, out); }
-    if (!s.u8->empty()) { size_t partial = 0; if (!mul_size(n, 1, &partial)) return false; size_t am = 0; if (!mul_size((n + kQuantizeBlock - 1) / kQuantizeBlock, 4, &am)) return false; if (!add_size(partial, am, out)) return false; return add_size(bytes, *out, out); }
+    if (s.fp32 && !s.fp32->empty()) { if (!mul_size(n, 4, out)) return false; return add_size(bytes, *out, out); }
+    if (s.u8 && !s.u8->empty()) { size_t partial = 0; if (!mul_size(n, 1, &partial)) return false; size_t am = 0; if (!mul_size((n + kQuantizeBlock - 1) / kQuantizeBlock, 4, &am)) return false; if (!add_size(partial, am, out)) return false; return add_size(bytes, *out, out); }
     *out = bytes;
     return true;
 }
