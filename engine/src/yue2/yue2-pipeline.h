@@ -592,19 +592,28 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, const std
         ar_prefix_ids.push_back(YUE2_MUSIC_END);
 
         Yue2NarChunk chunk;
+        const auto nar_init_start = std::chrono::steady_clock::now();
         if (!yue2_nar_chunk_init(m, ar_prefix_ids, chunk_len, &chunk, err)) {
             return false;
         }
+        const double nar_init_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - nar_init_start).count();
 
         std::vector<float> noise_slice(noise.begin() + (size_t) (a * LD), noise.begin() + (size_t) (b * LD));
         Yue2NarSolveResult solve;
+        const auto nar_solve_start = std::chrono::steady_clock::now();
         const bool ok = yue2_nar_solve_midpoint(m, chunk, noise_slice, req.ode_steps, {}, false, &solve, err);
+        const double nar_solve_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - nar_solve_start).count();
         yue2_nar_chunk_free(&chunk);
         if (!ok) {
             return false;
         }
 
         song_latents_out->insert(song_latents_out->end(), solve.final_latents.begin(), solve.final_latents.end());
+        fprintf(stderr, "[YuE2-NAR-Chunk] index=%zu frames=%lld prefix_tokens=%zu init_ms=%.1f solve_ms=%.1f velocity_ms=%.1f calls=%d\n",
+                ci, (long long) chunk_len, ar_prefix_ids.size(), nar_init_ms, nar_solve_ms,
+                solve.total_velocity_ms, solve.velocity_calls);
         if (progress) {
             progress({ YUE2_STAGE_NAR, (int64_t) ci + 1, (int64_t) ranges.size() });
         }

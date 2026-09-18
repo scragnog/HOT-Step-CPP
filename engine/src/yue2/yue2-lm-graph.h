@@ -947,7 +947,14 @@ static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int3
     if (exact_span) {
         n_kv_pad = pos + 1;
     } else {
-        while (n_kv_pad < pos + 1 && n_kv_pad < cache.capacity) n_kv_pad *= 2;
+        static const bool power_of_two_bucket = std::getenv("YUE2_AR_BUCKET_POW2") != nullptr;
+        if (!power_of_two_bucket) {
+            // GGML flash attention's KV stride is 256. Fixed-width buckets keep
+            // CUDA graph replay while reducing masked work at long positions.
+            n_kv_pad = ((pos + 256) / 256) * 256;
+        } else {
+            while (n_kv_pad < pos + 1 && n_kv_pad < cache.capacity) n_kv_pad *= 2;
+        }
         static const bool odd_bucket = std::getenv("YUE2_AR_BUCKET_ODD") != nullptr;
         if (odd_bucket && n_kv_pad < cache.capacity) ++n_kv_pad;
         n_kv_pad = std::min(n_kv_pad, cache.capacity);
