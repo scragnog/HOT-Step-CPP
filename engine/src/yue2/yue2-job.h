@@ -175,6 +175,9 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
 
     job_set_phase(*job, JobPhase::DONE);
     job->status.store(1);
+    fprintf(stderr, "[YuE2-Job] %s: stage_ms plan=%.1f semantic=%.1f nar=%.1f vae=%.1f\n",
+            job->id.c_str(), result.stage_ms[YUE2_STAGE_PLAN], result.stage_ms[YUE2_STAGE_SEMANTIC],
+            result.stage_ms[YUE2_STAGE_NAR], result.stage_ms[YUE2_STAGE_VAE]);
     fprintf(stderr, "[YuE2-Job] %s: done (%lld frames, %lld samples, end_reason=%s)\n", job->id.c_str(),
             (long long) result.total_frames, (long long) result.samples, result.end_reason.c_str());
 }
