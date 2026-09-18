@@ -110,12 +110,24 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
         if (!ar.stages.preprocess.done) await runStage(dataset.id, 'latent cache', () => startYue2Preprocess(dataset.id, {}));
         if (!ar.stages.tokenize.done) await runStage(dataset.id, 'codes', () => startYue2Tokenize(dataset.id, {}));
         if (!ar.stages.sheet.done) await runStage(dataset.id, 'lead sheets', () => startYue2Sheet(dataset.id, {}));
-        if (lyricTiming && ar.stages.align.stemsReady < ar.stages.align.stemsNeeded) {
-          await runStage(dataset.id, 'vocal stems', () => startYue2Stems(dataset.id, {}));
-        }
-        const refreshed = lyricTiming ? await getYue2ArStatus(dataset.id) : ar;
-        if (lyricTiming && !refreshed.stages.align.done) {
-          await runStage(dataset.id, 'lyric alignment', () => startYue2Align(dataset.id, {}));
+        if (lyricTiming) {
+          // Before preprocessing, stemsNeeded is zero. The status captured at
+          // the start of this loop cannot decide whether stems may be skipped.
+          let refreshed = await getYue2ArStatus(dataset.id);
+          const needed = refreshed.stages.align.stemsNeeded;
+          if (needed < 1) throw new Error('The latent cache contains no songs to align.');
+          if (refreshed.stages.align.stemsReady < needed) {
+            await runStage(dataset.id, 'vocal stems', () => startYue2Stems(dataset.id, {}));
+            refreshed = await getYue2ArStatus(dataset.id);
+          }
+          if (refreshed.stages.align.stemsReady < needed) {
+            throw new Error(`Vocal stems are incomplete (${refreshed.stages.align.stemsReady}/${needed}); retry separation before alignment.`);
+          }
+          if (!refreshed.stages.align.done) {
+            await runStage(dataset.id, 'lyric alignment', () => startYue2Align(dataset.id, {}));
+            refreshed = await getYue2ArStatus(dataset.id);
+          }
+          if (!refreshed.stages.align.done) throw new Error('Lyric alignment produced no cursor spans.');
         }
         const prep = await getYue2AitkPrepare(dataset.id);
         if (signal.current.cancelled) throw new Error('Batch cancelled');

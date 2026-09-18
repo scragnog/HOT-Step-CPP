@@ -3705,7 +3705,18 @@ router.get('/datasets/:id/yue2-joint-previews/audio', (req: Request, res: Respon
  *  Counted because the engine SKIPS BY NAME: with no stems at all the stage
  *  runs to completion, aligns nothing and leaves a manifest that looks
  *  untouched. Never throws. */
-function countYue2VocalStems(dir: string): number {
+function yue2CachedSourceNames(manifest: string): string[] {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifest, 'utf8')) as { sources?: Array<{ name?: unknown }> };
+    return Array.isArray(parsed.sources)
+      ? parsed.sources.flatMap(source => typeof source.name === 'string' && source.name ? [source.name] : [])
+      : [];
+  } catch { return []; }
+}
+
+function countYue2VocalStems(dir: string, sourceNames?: string[]): number {
+  if (sourceNames?.length) return sourceNames.filter(name =>
+    fs.existsSync(path.join(dir, path.parse(name).name, 'vocals.wav'))).length;
   let n = 0;
   try {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -3773,7 +3784,7 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
           /** Separation happens elsewhere, so the stems are an INPUT this
            *  stage does not produce and the card has to be able to say so. */
           stemsDir,
-          stemsReady: countYue2VocalStems(stemsDir),
+          stemsReady: countYue2VocalStems(stemsDir, yue2CachedSourceNames(manifestPath)),
           // The aligner skips a source whose stem is missing, silently, so the
           // card needs the shortfall and not just a boolean.
           stemsNeeded: cache?.sources ?? 0,
@@ -4027,7 +4038,7 @@ router.post('/datasets/:id/yue2-stems', (req: Request, res: Response) => {
       jobId: job.id, kind: job.kind,
       stemsDir: yue2StemsDir(ds.slug),
       sources: sources.length,
-      alreadyHave: countYue2VocalStems(yue2StemsDir(ds.slug)),
+      alreadyHave: countYue2VocalStems(yue2StemsDir(ds.slug), yue2CachedSourceNames(yue2PreprocessManifest(ds.slug))),
     });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
@@ -4071,7 +4082,7 @@ router.post('/datasets/:id/yue2-align', (req: Request, res: Response) => {
     // and exit 0.
     const asked = typeof b.stemsDir === 'string' ? b.stemsDir.trim() : '';
     const stemsDir = asked || yue2StemsDir(ds.slug);
-    const stems = countYue2VocalStems(stemsDir);
+    const stems = countYue2VocalStems(stemsDir, yue2CachedSourceNames(manifest));
     if (stems === 0) {
       res.status(400).json({
         error: `No vocal stems in ${stemsDir}. yue2-align wants <source stem>/vocals.wav per song (the `
