@@ -43,6 +43,7 @@ import {
   finishGenerationLog, failGenerationLog,
 } from '../../logger.js';
 import { readSafetensorsMeta } from '../../training/yue2Runs.js';
+import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import { yue2Synth, yue2FinalDetail, type Yue2SynthRequest } from './client.js';
 import { yue2PersistedSelection } from './index.js';
@@ -126,10 +127,24 @@ function yue2StyleForAdapter(
 
   const name = path.basename(adapter);
   const meta = readSafetensorsMeta(adapter);
-  // doc 19 decision 4: "off" (no --abc-dropout run, or no source ever had a
-  // lead sheet) or "off,full" (the run could draw cot=full at least once).
-  // Absent is a file exported before the flag existed — the "off" behaviour.
-  const trainedCot = meta?.cot ?? 'off';
+  // Legacy exports record cot directly. Joint exports currently omit it, but
+  // their prepared dataset records which sources could draw full with the
+  // native trainer's 50% ABC dropout. Do not call a joint run "off only"
+  // merely because its safetensors header lacks the legacy field.
+  const jointRun = meta?.cot ? undefined : jointRunForAdapter(adapter);
+  let trainedCot = meta?.cot ?? (jointRun ? '' : 'off');
+  if (jointRun) {
+    const manifest = jointRun.options.dataset;
+    if (typeof manifest === 'string') {
+      try {
+        if (fs.statSync(manifest).size <= 16 * 1024 * 1024) {
+          const data = JSON.parse(fs.readFileSync(manifest, 'utf8')) as { items?: Array<{ abc_ids?: unknown[] }> };
+          if (Array.isArray(data.items)) trainedCot = data.items.some(item => Array.isArray(item.abc_ids) && item.abc_ids.length > 0)
+            ? 'off,full' : 'off';
+        }
+      } catch { /* missing prepared data leaves joint CoT capability unknown */ }
+    }
+  }
   if (other) {
     const otherTrigger = yue2AdapterTrigger(other).trigger;
     const thisTrigger = yue2AdapterTrigger(adapter).trigger;
