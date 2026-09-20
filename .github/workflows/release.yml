@@ -889,7 +889,7 @@ jobs:
           NODE_MAC_VERSION="${{ env.NODE_VERSION }}"
           NODE_URL="https://nodejs.org/dist/v${NODE_MAC_VERSION}/node-v${NODE_MAC_VERSION}-darwin-arm64.tar.gz"
           mkdir -p /tmp/node-portable
-          curl -sL "$NODE_URL" | tar -xz -C /tmp/node-portable --strip-components=1
+          curl -sL --fail --retry 3 --retry-all-errors "$NODE_URL" | tar -xz -C /tmp/node-portable --strip-components=1
 
       - name: Fetch the Essentia bundle
         uses: actions/download-artifact@v4
@@ -1271,7 +1271,7 @@ jobs:
         run: |
           NODE_URL="https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-linux-x64.tar.gz"
           mkdir -p release/.node-cache
-          curl -sL "$NODE_URL" | tar -xz -C release/.node-cache --strip-components=0
+          curl -sL --fail --retry 3 --retry-all-errors "$NODE_URL" | tar -xz -C release/.node-cache --strip-components=0
 
       # ── Build Engine ───────────────────────────────────────────
       - name: Install Ninja build system
