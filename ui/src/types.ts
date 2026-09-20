@@ -132,6 +132,9 @@ export interface GenerationParams {
   lmDryMinLen?: number;
   useCotCaption: boolean;
   skipLrc?: boolean;  // Skip LRC (timed-lyrics) generation
+  /** YuE2: a lead sheet the user previewed and approved. The engine skips its
+   *  own plan stage and renders this score (needs cot melody/full). */
+  yue2Abc?: string;
 
   // DiT settings
   inferenceSteps: number;

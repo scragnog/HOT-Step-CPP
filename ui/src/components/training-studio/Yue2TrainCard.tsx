@@ -250,6 +250,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
               <select className={INPUT} value={form.captionMode}
                 onChange={e => set('captionMode', e.target.value as Yue2CaptionMode)}>
                 <option value="ace">{t('trainingStudio.yue2.captionAce', 'Read the sidecars: caption and lyrics')}</option>
+                <option value="yue2">{t('trainingStudio.yue2.captionYue2', 'Sidecar lyrics, with the one-sentence YuE2 caption (.yue2.txt) as the style')}</option>
                 <option value="none">{t('trainingStudio.yue2.captionNone', 'Nothing: the trigger word is the whole style')}</option>
                 <option value="default">{t('trainingStudio.yue2.captionDefault', 'One caption I type here, on every clip')}</option>
                 <option value="txt">{t('trainingStudio.yue2.captionTxt', 'The raw sidecar file, field names and all')}</option>

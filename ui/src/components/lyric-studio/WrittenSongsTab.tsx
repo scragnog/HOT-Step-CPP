@@ -270,6 +270,26 @@ const Mm3CaptionField: React.FC<{
   );
 };
 
+/** The YuE2 PLANNER caption: one sentence, fixed order. Plain editable text —
+ *  no source control here, because a song that HAS one no longer borrows a
+ *  dataset track's caption (captionForBackend prefers it over the source pick
+ *  in Yue2CaptionField above). */
+const Yue2PlannerCaptionField: React.FC<{ gen: Generation; onSave: (value: string) => void }> = ({ gen, onSave }) => (
+  <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
+    <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">
+      YuE2 Caption <span className="text-zinc-600 normal-case tracking-normal">— one sentence: language → genre → vocal → instruments → mood → production → BPM. When present it is what a YuE2 render is prompted with.</span>
+    </label>
+    <textarea
+      key={`yue2-${gen.id}`}
+      className="w-full bg-transparent text-xs font-mono text-zinc-700 dark:text-zinc-300 focus:outline-none border-b border-transparent hover:border-white/20 focus:border-cyan-500/50 transition-colors resize-y"
+      rows={gen.caption_yue2 ? 3 : 2}
+      placeholder="None — written before this field existed, or the YuE2 caption call failed. A YuE2 render falls back to a dataset-track caption."
+      defaultValue={gen.caption_yue2 || ''}
+      onBlur={e => { if (e.target.value !== (gen.caption_yue2 || '')) onSave(e.target.value); }}
+    />
+  </div>
+);
+
 interface WrittenSongsTabProps {
   generations: Generation[];
   profiles: Profile[];
@@ -701,6 +721,10 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                         onSelectionChange={sel => setCaptionSelectionFor(gen.id, sel)}
                         onSaveCustom={value => handleSaveField(gen.id, 'caption_mm3', value)}
                       />
+
+                      {/* YuE2 caption — the third format: one sentence in the
+                          planner's own field order. */}
+                      <Yue2PlannerCaptionField gen={gen} onSave={value => handleSaveField(gen.id, 'caption_yue2', value)} />
 
                       {/* Action buttons */}
                       <div className="flex items-center gap-2 flex-wrap">

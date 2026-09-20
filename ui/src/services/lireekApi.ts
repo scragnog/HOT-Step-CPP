@@ -68,6 +68,8 @@ export interface SongLyric {
   caption?: string;
   /** MM3 Structured Caption (Global Metadata / Vocal Details / Arrangement), when a MOSS run wrote one. */
   mm3Caption?: string;
+  /** YuE2 planner caption (one sentence, fixed order), when a YuE2 caption run wrote one. */
+  yue2Caption?: string;
   genre?: string;
   bpm?: number;
   key?: string;
@@ -97,6 +99,11 @@ export interface Generation {
    *  caption used when the MM3 backend is active. Empty on generations written
    *  before this field existed; consumers fall back to `caption`. */
   caption_mm3?: string;
+  /** YuE2 planner caption — ONE sentence in the fixed order language → genre →
+   *  vocal → instruments → mood → production → BPM. Empty on older
+   *  generations; the YuE2 backend then falls back to the dataset-track pick
+   *  or `caption`. */
+  caption_yue2?: string;
   bpm?: number;
   key?: string;
   duration?: number;

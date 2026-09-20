@@ -149,6 +149,15 @@ function toStoredSong(s: TrainingSample, ds: TrainingDatasetRow, setAlbum: strin
       if (mm3) song.mm3Caption = mm3;
     }
   } catch { /* a caption we cannot read is a caption we do not export */ }
+  // Same for the YuE2 planner caption (<stem>.yue2.txt) — the third caption
+  // format, written by the YuE2 caption job.
+  try {
+    const yue2Path = `${s.audioPath.replace(/\.[^.\\/]+$/, '')}.yue2.txt`;
+    if (fs.existsSync(yue2Path)) {
+      const yue2 = fs.readFileSync(yue2Path, 'utf8').trim();
+      if (yue2) song.yue2Caption = yue2;
+    }
+  } catch { /* as above */ }
   if (s.genre.trim()) song.genre = s.genre.trim();
   if (typeof s.bpm === 'number' && Number.isFinite(s.bpm) && s.bpm > 0) song.bpm = s.bpm;
   if (s.key.trim()) song.key = s.key.trim();

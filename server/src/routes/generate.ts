@@ -26,6 +26,7 @@ import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { translateParams } from '../services/generation/translateParams.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
 import { noteEnqueued, noteFinished } from '../services/generation/residency.js';
+import { runYue2PlanPreview } from '../services/backends/yue2/generate.js';
 import type {
   GenerationAttempt,
   GenerationEndReason,
@@ -205,6 +206,40 @@ function enqueueGeneration(job: GenerationJob): void {
 }
 
 // POST /api/generate — start a generation job
+// ── YuE2 score preview ────────────────────────────────────────────────────
+// Plan the lead sheet only and hand it back (seconds), so the user can look
+// at it before committing to a render (minutes). Runs on the GPU lane like a
+// generation so it never overlaps one; the approved score comes back in as
+// `yue2Abc` on an ordinary POST / with the seed pinned.
+router.post('/yue2/plan', async (req, res) => {
+  if (isEngineSuspended()) {
+    res.status(503).json({ error: 'Engine is paused for training preprocessing — try again when the job finishes' });
+    return;
+  }
+  if (!engineReady) {
+    res.status(503).json({ error: `Engine not ready: ${engineBootStatus}` });
+    return;
+  }
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+  if (getActiveBackendId() !== 'yue2') {
+    res.status(400).json({ error: 'Score preview is a YuE2 feature — switch the active backend to YuE2' });
+    return;
+  }
+  const params = { ...(req.body ?? {}), backend: 'yue2' };
+  const abort = new AbortController();
+  req.on('close', () => abort.abort());
+  try {
+    noteEnqueued('yue2');
+    const preview = await runOnGpuLane(() => runYue2PlanPreview(params, abort.signal), { label: 'yue2 score preview', family: 'yue2' });
+    res.json(preview);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  } finally {
+    noteFinished('yue2');
+  }
+});
+
 router.post('/', (req, res) => {
   // The engine is deliberately stopped while a training preprocess job owns the
   // GPU — say so instead of the generic "not ready" boot message.

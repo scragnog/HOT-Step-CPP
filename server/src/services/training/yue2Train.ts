@@ -264,13 +264,17 @@ export const YUE2_NAR_DEFAULTS = {
 } as const;
 
 export type Yue2NarTarget = 'nar_attn' | 'nar_attn_mlp' | 'nar_attn_mlp_proj';
-export type Yue2CaptionMode = 'ace' | 'txt' | 'default' | 'none';
+/** `yue2` = `ace` (sidecar lyrics + metadata) with the style sentence taken
+ *  from `<stem>.yue2.txt` when that file exists — the one-sentence planner
+ *  caption the YuE2 caption job writes. Tracks without one keep the ACE
+ *  caption. */
+export type Yue2CaptionMode = 'ace' | 'yue2' | 'txt' | 'default' | 'none';
 
 export function isYue2Target(v: unknown): v is Yue2NarTarget {
   return v === 'nar_attn' || v === 'nar_attn_mlp' || v === 'nar_attn_mlp_proj';
 }
 export function isYue2CaptionMode(v: unknown): v is Yue2CaptionMode {
-  return v === 'ace' || v === 'txt' || v === 'default' || v === 'none';
+  return v === 'ace' || v === 'yue2' || v === 'txt' || v === 'default' || v === 'none';
 }
 export function isYue2VaeVariant(v: unknown): v is Yue2VaeVariant {
   return v === 'standard' || v === 'legacy';

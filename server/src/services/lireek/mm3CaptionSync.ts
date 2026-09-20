@@ -45,22 +45,31 @@ export function refreshMm3CaptionsFromDataset(set: Record<string, any>): Record<
     if (!Array.isArray(samples) || samples.length === 0) return set;
     const dir = path.dirname(ds.datasetJsonPath);
 
-    // lyrics text -> caption file path, for every sample that has one.
-    const byLyrics = new Map<string, string>();
+    // lyrics text -> caption file path, for every sample that has one. Two
+    // sidecar formats live beside the audio: <stem>.mm3.txt (MM3) and
+    // <stem>.yue2.txt (the one-sentence YuE2 planner caption, 2026-09-20).
+    const SIDECARS: Array<{ suffix: string; field: string }> = [
+      { suffix: '.mm3.txt', field: 'mm3Caption' },
+      { suffix: '.yue2.txt', field: 'yue2Caption' },
+    ];
+    const byLyrics = new Map<string, Partial<Record<string, string>>>();
     for (const s of samples) {
       const audio = String(s?.audio_path ?? s?.audioPath ?? '');
       const filename = String(s?.filename ?? path.basename(audio));
       if (!filename) continue;
       const stem = filename.replace(/\.[^.]+$/, '');
-      const candidates = [
-        audio ? audio.replace(/\.[^.\\/]+$/, '') + '.mm3.txt' : '',
-        path.join(ds.sourceDir || dir, stem + '.mm3.txt'),
-        path.join(dir, stem + '.mm3.txt'),
-      ].filter(Boolean);
-      const file = candidates.find(p => fs.existsSync(p));
-      if (!file) continue;
       const key = norm(s?.lyrics) || norm(s?.raw_lyrics);
-      if (key) byLyrics.set(key, file);
+      if (!key) continue;
+      for (const { suffix, field } of SIDECARS) {
+        const candidates = [
+          audio ? audio.replace(/\.[^.\\/]+$/, '') + suffix : '',
+          path.join(ds.sourceDir || dir, stem + suffix),
+          path.join(dir, stem + suffix),
+        ].filter(Boolean);
+        const file = candidates.find(p => fs.existsSync(p));
+        if (!file) continue;
+        byLyrics.set(key, { ...(byLyrics.get(key) ?? {}), [field]: file });
+      }
     }
     if (byLyrics.size === 0) return set;
 
@@ -68,18 +77,21 @@ export function refreshMm3CaptionsFromDataset(set: Record<string, any>): Record<
       : (typeof set.songs === 'string' ? JSON.parse(set.songs) : []);
     let changed = false;
     for (const song of songs) {
-      const file = byLyrics.get(norm(song?.lyrics));
-      if (!file) continue;
-      let text = '';
-      try { text = fs.readFileSync(file, 'utf-8').replace(/^﻿/, '').trim(); } catch { continue; }
-      if (text && text !== (song.mm3Caption || '')) {
-        song.mm3Caption = text;
-        changed = true;
+      const files = byLyrics.get(norm(song?.lyrics));
+      if (!files) continue;
+      for (const [field, file] of Object.entries(files)) {
+        if (!file) continue;
+        let text = '';
+        try { text = fs.readFileSync(file, 'utf-8').replace(/^﻿/, '').trim(); } catch { continue; }
+        if (text && text !== (song[field] || '')) {
+          song[field] = text;
+          changed = true;
+        }
       }
     }
     if (changed) {
       updateLyricsSetSongs(setId, songs);
-      console.log(`[Lireek] MM3 captions refreshed from ${ds.slug} for lyrics set ${setId}`);
+      console.log(`[Lireek] MM3/YuE2 captions refreshed from ${ds.slug} for lyrics set ${setId}`);
     }
     return { ...set, songs };
   } catch (err: any) {

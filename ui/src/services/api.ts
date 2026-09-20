@@ -213,6 +213,11 @@ function withTimeout(params: GenerationParams): GenerationParams {
 export const generateApi = {
   submit: (params: GenerationParams, token: string) =>
     post<{ jobId: string; status: string }>('/generate', withTimeout(params), token),
+  /** YuE2 score preview: plan the lead sheet only and return it, no audio.
+   *  `seed` is the one the plan used, so the follow-up render can pin it. */
+  yue2Plan: (params: Partial<GenerationParams>, token: string) =>
+    post<{ abc: string; seed: number; end_reason: string; health: { verdict: string; reason: string; bars: number; estSeconds?: number; sections: string[] } }>(
+      '/generate/yue2/plan', params, token),
   status: (jobId: string) => get<GenerationJob>(`/generate/status/${jobId}`),
   cancel: (jobId: string) => post<{ success: boolean }>(`/generate/cancel/${jobId}`),
   cancelAll: () => post<{ success: boolean; cancelled: number }>('/generate/cancel-all'),

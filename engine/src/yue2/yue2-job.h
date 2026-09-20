@@ -108,7 +108,8 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
 
     job_set_phase(*job, JobPhase::LOADING_DIT);
     std::string err;
-    if (!yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/true, req.vae_variant, /*want_encoder=*/false,
+    // A plan-only job never decodes, so it never needs the VAE resident.
+    if (!yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req.plan_only, req.vae_variant, /*want_encoder=*/false,
                          &err)) {
         job->result_body = err.empty() ? "YuE2 load failed" : err;
         job->result_mime  = "text/plain";
@@ -148,9 +149,17 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
         return;
     }
 
-    job->result_body        = audio_encode_wav_s16(result.audio_planar.data(), (int) result.samples,
-                                                    result.sample_rate);
-    job->result_mime         = "audio/wav";
+    if (req.plan_only) {
+        // The score IS the result body; it is also spliced into the status
+        // JSON (result_abc) so a poller gets it without a second fetch.
+        job->result_body = result.score_abc;
+        job->result_mime  = "text/plain; charset=utf-8";
+    } else {
+        job->result_body = audio_encode_wav_s16(result.audio_planar.data(), (int) result.samples,
+                                                result.sample_rate);
+        job->result_mime  = "audio/wav";
+    }
+    job->result_abc         = result.score_abc;
     job->result_end_reason  = result.end_reason;
     {
         yyjson_mut_doc * doc  = yyjson_mut_doc_new(NULL);

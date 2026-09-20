@@ -16,7 +16,7 @@ export type MergePolicy =
   | 'overwrite_all';
 
 export type TrainingJobKind =
-  | 'label' | 'enhance-genius' | 'enhance-caption' | 'build'
+  | 'label' | 'enhance-genius' | 'enhance-caption' | 'enhance-yue2-caption' | 'build'
   | 'preprocess' | 'train-lm' | 'train-dit'
   | 'audition' | 'lm-calibrate' | 'dit-calibrate'
   // MiniMax-Music3 (docs/plans/2026-08-20-mm3-training-server-design.md §2.1).

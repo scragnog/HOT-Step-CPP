@@ -21,6 +21,12 @@ struct Input {
     float cursor_weight=0;
     int64_t lyric_start=0, lyric_count=0;
     std::vector<std::pair<int32_t,int32_t>> cursor_frames;
+    // Planner KL anchor weight (--kl-weight). 0.2 was the hardcoded value.
+    float kl_weight=0.2f;
+    // Native AdamW8bit step config (--lr / --weight-decay). Ignored on the
+    // LmOptim path, whose schedule lives on lm->opt.base_lr.
+    float adamw_lr=1e-4f;
+    float adamw_weight_decay=1e-4f;
 };
 using Progress=std::function<void(const char *)>;
 // `optimizer` is the native CUDA AdamW8bit; `lm`/`osched` select the shared
@@ -79,7 +85,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     yue2_aitk_head_loss::Request head;
     head.backend=backend;head.head=&model.lm_head();head.adapted_hidden=selected.data();
     head.base_hidden=selected_base.data();head.targets=targets.data();head.positions=N;
-    head.hidden=H;head.kl_weight=0.2f;head.adapted_hidden_grad_bf16=selected_grad.data();head.ce_sum=&ce;head.kl_sum=&kl;
+    head.hidden=H;head.kl_weight=input.kl_weight;head.adapted_hidden_grad_bf16=selected_grad.data();head.ce_sum=&ce;head.kl_sum=&kl;
     notify("AR CE and KL backward");
     if(yue2_aitk_head_loss::compute(head,error)!=yue2_aitk_head_loss::Status::success) return false;
     result.ar_ce=double(ce)/N;result.ar_kl=double(kl)/N;
@@ -144,7 +150,9 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
         if (!lm_optim_step(lm, osched, &step_stats)) return fail(error, "optimizer step failed");
         result.step = lm->opt_step;
     } else {
-        try { optimizer->step_once(yue2_aitk::StepConfig{}); }
+        yue2_aitk::StepConfig cfg;
+        cfg.learning_rate=input.adamw_lr; cfg.weight_decay=input.adamw_weight_decay;
+        try { optimizer->step_once(cfg); }
         catch(const std::exception & e){return fail(error,e.what());}
         result.step=optimizer->step();
     }

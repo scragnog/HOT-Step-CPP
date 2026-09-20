@@ -696,6 +696,29 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       </div>
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+          {t('trainingStudio.yue2.method.advancedTitle', 'Advanced: planner and optimizer')}
+        </summary>
+        <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.advancedHint', 'Blank = the engine default. These are the knobs the reference AITK recipe exposes; the defaults are what every run so far has used.')}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+          {([
+            ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), 'default 1e-4 · AdamW only (Prodigy learns its own; Muon uses its scale)'],
+            ['weightDecay', t('trainingStudio.yue2.method.weightDecay', 'Weight decay'), 'default 1e-4'],
+            ['plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner learning-rate scale'), 'default 1.0 · the AR half trains at lr × this; the reference recipe uses 0.6'],
+            ['klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor to base (planner)'), 'default 0.2 · higher keeps the planner closer to the base model'],
+            ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), 'default 0.5 · share of lead-sheet examples trained without their sheet, so one adapter serves cot on and off'],
+          ] as const).map(([key, label, hint]) => (
+            <label key={key} className="flex flex-col gap-1">
+              <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
+              <input className={input} type="number" step="any" placeholder="engine default"
+                value={form[key] ?? ''} disabled={active || starting || preparing || yue2RunAllActive}
+                onChange={event => set(key, event.target.value === '' ? undefined : Number(event.target.value))} />
+              <span className="text-[10px] text-zinc-500">{hint}</span>
+            </label>
+          ))}
+        </div>
+      </details>
+      <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
+        <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
           {t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
         </summary>
         <label className="mt-2 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">

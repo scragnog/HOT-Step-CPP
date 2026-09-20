@@ -113,6 +113,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if(cursor_weight>0) yyjson_mut_obj_add_real(doc,root,"cursor_weight",cursor_weight);
     yyjson_mut_obj_add_strcpy(doc,root,"recipe","yue2-aitk-runtime-v1"); yyjson_mut_obj_add_strcpy(doc,root,"checkpoint_sha256",cp.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"dataset_sha256",ds.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"source_manifest_sha256",sm.c_str()); yyjson_mut_obj_add_uint(doc,root,"seed",seed); yyjson_mut_obj_add_int(doc,root,"cuda_index",device); yyjson_mut_obj_add_int(doc,root,"completed_step",completed); yyjson_mut_obj_add_uint(doc,root,"order_cursor",cursor); for(size_t x:order) yyjson_mut_arr_add_uint(doc,arr,x); yyjson_mut_obj_add_val(doc,root,"order",arr); yyjson_mut_obj_add_strcpy(doc,root,"sampler_state",sampler.c_str());
     yyjson_mut_obj_add_strcpy(doc,root,"optimizer",config.optimizer.c_str()); yyjson_mut_obj_add_int(doc,root,"rank",config.rank); yyjson_mut_obj_add_real(doc,root,"alpha",config.alpha); yyjson_mut_obj_add_real(doc,root,"lr",config.lr); yyjson_mut_obj_add_int(doc,root,"warmup",config.warmup); yyjson_mut_obj_add_real(doc,root,"weight_decay",config.weight_decay); yyjson_mut_obj_add_real(doc,root,"prodigy_d0",config.prodigy_d0); yyjson_mut_obj_add_real(doc,root,"muon_lr_scale",config.muon_lr_scale); yyjson_mut_obj_add_int(doc,root,"muon_ns_steps",config.muon_ns_steps);
+    yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale);
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
@@ -143,7 +144,10 @@ static int run_impl(const Config & config, std::string * error) {
         !std::isfinite(config.muon_lr_scale) || config.muon_lr_scale <= 0.0f ||
         config.muon_ns_steps < 1 || config.muon_ns_steps > 20 ||
         !std::isfinite(config.target_loss) || config.target_loss < 0.0f ||
-        config.target_loss_window < 1) {
+        config.target_loss_window < 1 ||
+        !std::isfinite(config.kl_weight) || config.kl_weight < 0.0f ||
+        !std::isfinite(config.abc_dropout) || config.abc_dropout < 0.0f || config.abc_dropout > 1.0f ||
+        !std::isfinite(config.planner_lr_scale) || config.planner_lr_scale <= 0.0f) {
         fail(error, "invalid runtime configuration"); return 1;
     }
     event("preflight");
@@ -279,8 +283,17 @@ static int run_impl(const Config & config, std::string * error) {
             } else {
                 std::vector<yue2_aitk::ParameterSpec> specs;
                 specs.reserve(named.size());
-                for (const auto & p : named) specs.push_back({p.name, p.parameter, p.gradient});
+                // The planner's adapters are the "text_encoders." slots
+                // (yue2-aitk-train-state.h build_slots); everything else is the
+                // decoder and trains at --lr itself.
+                for (const auto & p : named) {
+                    const bool planner = p.name.rfind("text_encoders.", 0) == 0;
+                    specs.push_back({p.name, p.parameter, p.gradient, planner ? config.planner_lr_scale : 1.0f});
+                }
                 adamw = std::make_unique<yue2_aitk::Optimizer>(backend.value, config.cuda_index, std::move(specs));
+                if (config.planner_lr_scale != 1.0f)
+                    std::fprintf(stderr, "[yue2-aitk] planner lr %.3g (x%.3g), decoder lr %.3g\n",
+                                 (double) config.lr * config.planner_lr_scale, (double) config.planner_lr_scale, (double) config.lr);
             }
         }
         if (!config.resume.empty()) {
@@ -429,9 +442,20 @@ static int run_impl(const Config & config, std::string * error) {
             }
             const std::vector<float> schedule = sampler.sigmoid_schedule(1000);
             const auto & item = dataset.items[order[cursor]];
-            auto sampled = sampler.sample(item.song, item.prompt, 1500, schedule, 0.5f, 0, 999);
+            auto sampled = sampler.sample(item.song, item.prompt, 1500, schedule, config.abc_dropout, 0, 999);
             yue2_aitk_joint::Input input; input.batch = &sampled.batch; input.noisy_latents = sampled.noisy_bf16;
             input.flow_target = sampled.target_f32; input.timestep = sampled.timestep_bf16;
+            input.kl_weight = config.kl_weight;
+            // AdamW: constant rate after an optional linear warmup. No cosine
+            // here on purpose — the LmOptim branch below has always decayed and
+            // this branch has always been flat; keeping it flat means a run
+            // that never passed --warmup is byte-identical to before.
+            {
+                double lr = (double) config.lr;
+                if (config.warmup > 0 && completed < config.warmup) lr *= (double)(completed + 1) / (double)config.warmup;
+                input.adamw_lr = (float) lr;
+                input.adamw_weight_decay = config.weight_decay;
+            }
             if(cursor_weight>0 && !item.prompt.cursor.instrumental) {
                 const auto & binding=item.prompt.cursor;
                 input.cursor_weight=cursor_weight;
@@ -498,7 +522,7 @@ static int run_impl(const Config & config, std::string * error) {
                 // Same composite the server reports: AR CE + weighted KL + NAR
                 // MSE + weighted cursor CE. The window must be full before a
                 // stop, so the earliest stop is at step target_loss_window.
-                const double composite = metrics.ar_ce + 0.2 * metrics.ar_kl + metrics.nar_mse + metrics.cursor_ce * (double) cursor_weight;
+                const double composite = metrics.ar_ce + (double) config.kl_weight * metrics.ar_kl + metrics.nar_mse + metrics.cursor_ce * (double) cursor_weight;
                 loss_window.push_back(composite);
                 if (static_cast<int>(loss_window.size()) > config.target_loss_window) loss_window.erase(loss_window.begin());
                 if (static_cast<int>(loss_window.size()) == config.target_loss_window) {

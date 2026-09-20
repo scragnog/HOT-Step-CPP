@@ -702,6 +702,15 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
                              &out->stage_end_reason[YUE2_STAGE_PLAN], &out->stage_ms[YUE2_STAGE_PLAN], err)) {
         return false;
     }
+    if (req.plan_only) {
+        // Score preview: the plan is the whole result. No audio, no
+        // semantic ids; the stage terminator is the job's end reason so a
+        // caller can tell a runaway plan (limit_hit) from a finished one.
+        // The VAE may not be resident on this path, so sample_rate keeps its
+        // default; nothing reads it without audio.
+        out->end_reason = out->stage_end_reason[YUE2_STAGE_PLAN] == "limit_hit" ? "limit_hit" : "completed";
+        return true;
+    }
     const bool have_abc = (req.cot != YUE2_COT_OFF);  // off never has an ABC span; melody/full always do (sampled or supplied)
 
     std::vector<int32_t> prefix_ids;

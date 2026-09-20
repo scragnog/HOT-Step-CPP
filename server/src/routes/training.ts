@@ -1479,6 +1479,56 @@ router.post('/datasets/:id/enhance/caption', async (req: Request, res: Response)
   }
 });
 
+/** POST /datasets/:id/enhance/yue2-caption — write `<stem>.yue2.txt`, the
+ *  one-sentence YuE2 planner caption, from each track's label facts and ACE
+ *  caption. Text-only rewrite through a chat provider; MOSS has no such mode. */
+router.post('/datasets/:id/enhance/yue2-caption', async (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) {
+      res.status(404).json({ error: 'Dataset not found' });
+      return;
+    }
+    const body = (req.body || {}) as { sampleIds?: string[]; provider?: string; model?: string; temperature?: number };
+    const providerName = body.provider || config.lireek.defaultProvider;
+    if (providerName === 'moss') {
+      res.status(400).json({ error: 'The YuE2 caption is a text rewrite of the existing label — pick a chat provider (Gemini, OpenAI, a local LLM); MOSS has no such mode.' });
+      return;
+    }
+    const blocker = labelBlockedBy(ds.id, false);
+    if (blocker) {
+      res.status(409).json({ error: 'A job is already running for this dataset' });
+      return;
+    }
+    let provider;
+    try {
+      provider = getProvider(providerName);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    if (!provider.isAvailable()) {
+      res.status(503).json({ error: `Provider ${providerName} is not available. Check API keys in Settings → AI Services.` });
+      return;
+    }
+    const samples = await buildSamples(ds);
+    const targets = pickTargets(samples, body.sampleIds, 'all');
+    if (targets.length === 0) {
+      res.status(400).json({ error: 'Nothing to caption' });
+      return;
+    }
+    const job = queue.startYue2CaptionJob(ds.id, targets, {
+      provider: providerName,
+      ...(body.model ? { model: body.model } : {}),
+      ...(typeof body.temperature === 'number' ? { temperature: body.temperature } : {}),
+    });
+    res.status(202).json({ jobId: job.id });
+  } catch (err: any) {
+    console.error(`[Training] YuE2 caption start failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Build (§2.7) ─────────────────────────────────────────────────────────
 
 router.post('/datasets/:id/build', async (req: Request, res: Response) => {
@@ -3396,6 +3446,22 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       res.status(400).json({ error: 'stopMode must be steps or loss.' });
       return;
     }
+    // Advanced knobs: absent means the engine default. Ranges mirror the
+    // trainer's own validation so a bad value fails here, not 20 s into a run.
+    const advanced: { lr?: number; weightDecay?: number; klWeight?: number; abcDropout?: number; plannerLrScale?: number } = {};
+    const advancedSpec: Array<[keyof typeof advanced, number, number, boolean]> = [
+      ['lr', 0, 1, false], ['weightDecay', 0, 10, true], ['klWeight', 0, 100, true],
+      ['abcDropout', 0, 1, true], ['plannerLrScale', 0, 100, false],
+    ];
+    for (const [key, lo, hi, zeroOk] of advancedSpec) {
+      if (b[key] === undefined || b[key] === null || b[key] === '') continue;
+      const value = Number(b[key]);
+      if (!Number.isFinite(value) || value > hi || (zeroOk ? value < lo : value <= lo)) {
+        res.status(400).json({ error: `${key} must be a finite number ${zeroOk ? 'in' : 'above'} ${lo}${zeroOk ? `..${hi}` : ` and at most ${hi}`}.` });
+        return;
+      }
+      advanced[key] = value;
+    }
     let targetLoss: number | undefined;
     if (stopMode === 'loss') {
       const rawTargetLoss = Number(b.targetLoss);
@@ -3434,10 +3500,11 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(muonNsSteps !== undefined ? { muonNsSteps } : {}),
       stopMode,
       ...(targetLoss !== undefined ? { targetLoss } : {}),
+      ...advanced,
       ...(preparation ? { preparation } : {}),
     });
     res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment,
-      optimizer, rank, alpha: alphaRaw, stopMode,
+      optimizer, rank, alpha: alphaRaw, stopMode, ...advanced,
       ...(targetLoss !== undefined ? { targetLoss } : {}) });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });

@@ -380,6 +380,7 @@ interface TrainingState {
   startLabel(opts: LabelOptions): Promise<void>;
   startGenius(opts: GeniusOptions): Promise<void>;
   startCaption(opts: CaptionOptions): Promise<void>;
+  startYue2Caption(opts: { sampleIds?: string[]; provider?: string; model?: string }): Promise<void>;
   startBuild(outputPath?: string): Promise<void>;
   loadPreprocessStatus(): Promise<void>;
   startPreprocess(opts: PreprocessOptions): Promise<void>;
@@ -853,6 +854,18 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     if (!id) return;
     try {
       const { jobId } = await trainingApi.startCaption(id, opts);
+      set({ jobLog: [], error: null });
+      await adoptJob(set, get, jobId);
+    } catch (err) {
+      set({ error: errMessage(err) });
+    }
+  },
+
+  startYue2Caption: async (opts) => {
+    const id = get().selectedDatasetId;
+    if (!id) return;
+    try {
+      const { jobId } = await trainingApi.startYue2Caption(id, opts);
       set({ jobLog: [], error: null });
       await adoptJob(set, get, jobId);
     } catch (err) {

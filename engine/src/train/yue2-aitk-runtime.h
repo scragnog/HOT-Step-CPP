@@ -45,6 +45,17 @@ struct Config {
     // at or below the target finishes the run early (steps remain the cap).
     float target_loss = 0.0f;
     std::int32_t target_loss_window = 20;
+    // Planner (AR) objective: weight of the KL term that anchors the adapted
+    // planner to the frozen base (AITK's ar_kl_weight), and the probability
+    // that a cot=full example is trained WITHOUT its lead sheet so the same
+    // adapter serves cot=off prompts (AITK's abc_dropout). Defaults match what
+    // the runtime hardcoded before they were flags.
+    float kl_weight = 0.2f;
+    float abc_dropout = 0.5f;
+    // AdamW only: the planner's learning rate as a multiple of --lr. The
+    // decoder (NAR) half always trains at --lr itself. 1.0 = one rate for
+    // both halves, which is what every run before this flag did.
+    float planner_lr_scale = 1.0f;
 };
 
 enum class ParseResult { ok, help, error };
@@ -57,7 +68,8 @@ inline void usage(FILE * out) {
         "[--cursor-weight 0.08 (0 disables lyric timing)] [--rank N] [--alpha F] "
         "[--optimizer adamw|prodigy|muon] [--lr F] [--warmup N] [--weight-decay F] "
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
-        "[--target-loss F (0 disables)] [--target-loss-window N]\n");
+        "[--target-loss F (0 disables)] [--target-loss-window N] "
+        "[--kl-weight 0.2] [--abc-dropout 0.5] [--planner-lr-scale 1.0 (adamw only)]\n");
 }
 
 namespace detail {
@@ -195,6 +207,15 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--target-loss-window")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_i32(value_text.c_str(), &parsed.target_loss_window)) { if (error) *error = "--target-loss-window must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--kl-weight")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.kl_weight)) { if (error) *error = "--kl-weight must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--abc-dropout")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.abc_dropout)) { if (error) *error = "--abc-dropout must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--planner-lr-scale")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.planner_lr_scale)) { if (error) *error = "--planner-lr-scale must be a finite number"; return ParseResult::error; }
         } else {
             if (error) *error = std::string("unknown option: ") + arg;
             return ParseResult::error;

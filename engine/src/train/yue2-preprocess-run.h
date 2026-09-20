@@ -233,7 +233,7 @@ struct Yue2PreprocessArgs {
     // A path also supplies --models when that was not given.
     std::string vae_arg = "standard";
 
-    std::string caption_mode    = "txt";  // ace | txt | default | none
+    std::string caption_mode    = "txt";  // ace | yue2 | txt | default | none
     std::string default_caption;          // --default-caption, used by caption-mode=default
     std::string only;                     // --only <substr>, case-insensitive, on the basename
     std::string ffmpeg = "ffmpeg";        // --ffmpeg, "" disables the non-WAV/MP3 route
@@ -404,7 +404,7 @@ static void yp_resolve_caption(const Yue2PreprocessArgs & a, const std::string &
     if (sm) {
         *sm = YpStyleMeta{};
     }
-    if (a.caption_mode == "ace") {
+    if (a.caption_mode == "ace" || a.caption_mode == "yue2") {
         std::string raw;
         if (yp_read_text(yp_caption_path(audio_path), &raw)) {
             std::map<std::string, std::string> meta;
@@ -430,6 +430,18 @@ static void yp_resolve_caption(const Yue2PreprocessArgs & a, const std::string &
                 }
             }
         }
+        // "yue2": the ACE sidecar still supplies lyrics and metadata, but the
+        // style sentence comes from <stem>.yue2.txt — the one-line
+        // language→genre→vocal→instruments→mood→production→BPM caption the
+        // planner is prompted with at inference. A track without one keeps
+        // its ACE caption, so a half-captioned dataset still preprocesses.
+        if (a.caption_mode == "yue2") {
+            std::string yue2_cap;
+            const std::string base = yp_caption_path(audio_path);
+            if (yp_read_text(base.substr(0, base.size() - 4) + ".yue2.txt", &yue2_cap) && !pm_trim(yue2_cap).empty()) {
+                *caption = pm_trim(yue2_cap);
+            }
+        }
     } else if (a.caption_mode == "txt") {
         std::string cap;
         if (yp_read_text(yp_caption_path(audio_path), &cap)) {
@@ -447,7 +459,7 @@ static void yp_resolve_caption(const Yue2PreprocessArgs & a, const std::string &
 // whole sidecar fed in as a style is the one mistake nothing downstream can
 // catch (yue2-ar-train-run.h's yue2_at_load_manifest).
 static const char * yp_caption_format(const std::string & caption_mode) {
-    if (caption_mode == "ace") {
+    if (caption_mode == "ace" || caption_mode == "yue2") {
         return "ace-sidecar";
     }
     if (caption_mode == "none") {
@@ -727,9 +739,9 @@ static int yue2_preprocess_captions_only(const Yue2PreprocessArgs & a) {
         fprintf(stderr, "[yue2-preprocess] --captions-only needs --out <dir> (the cache holding the manifest)\n");
         return 1;
     }
-    if (a.caption_mode != "ace" && a.caption_mode != "txt" && a.caption_mode != "default" &&
-        a.caption_mode != "none") {
-        fprintf(stderr, "[yue2-preprocess] --caption-mode must be ace, txt, default or none\n");
+    if (a.caption_mode != "ace" && a.caption_mode != "yue2" && a.caption_mode != "txt" &&
+        a.caption_mode != "default" && a.caption_mode != "none") {
+        fprintf(stderr, "[yue2-preprocess] --caption-mode must be ace, yue2, txt, default or none\n");
         return 1;
     }
     if (a.caption_mode == "default" && pm_trim(a.default_caption).empty()) {
@@ -904,9 +916,9 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         fprintf(stderr, "[yue2-preprocess] --out <dir> is required\n");
         return 1;
     }
-    if (a.caption_mode != "ace" && a.caption_mode != "txt" && a.caption_mode != "default" &&
-        a.caption_mode != "none") {
-        fprintf(stderr, "[yue2-preprocess] --caption-mode must be ace, txt, default or none\n");
+    if (a.caption_mode != "ace" && a.caption_mode != "yue2" && a.caption_mode != "txt" &&
+        a.caption_mode != "default" && a.caption_mode != "none") {
+        fprintf(stderr, "[yue2-preprocess] --caption-mode must be ace, yue2, txt, default or none\n");
         return 1;
     }
     if (a.decode != "auto" && a.decode != "ffmpeg") {

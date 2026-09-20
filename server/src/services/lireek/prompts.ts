@@ -399,6 +399,9 @@ export interface AlbumEnrichment {
   genres: string[];             // unique tags (comma-split), most-frequent first
   signatures: string[];         // unique, most-frequent first
   captionExamples: string[];    // up to 3 verbatim training captions
+  /** Up to 3 of the album's own one-sentence YuE2 captions (`<stem>.yue2.txt`),
+   *  when the dataset has been captioned for YuE2. Empty otherwise. */
+  yue2CaptionExamples: string[];
   enrichedSongs: number;        // songs carrying at least one enriched field
   totalSongs: number;
   /** This artist's measured vocal pacing: median words-per-second over songs
@@ -459,6 +462,7 @@ export function computeAlbumEnrichment(
   const genres: string[] = [];
   const signatures: string[] = [];
   const captions: string[] = [];
+  const yue2Captions: string[] = [];
   const paceRates: number[] = [];
   let enriched = 0;
 
@@ -469,6 +473,7 @@ export function computeAlbumEnrichment(
     const genre = typeof s.genre === 'string' ? s.genre.trim() : '';
     const signature = typeof s.signature === 'string' ? s.signature.trim() : '';
     const caption = typeof s.caption === 'string' ? s.caption.trim() : '';
+    if (typeof s.yue2Caption === 'string' && s.yue2Caption.trim()) yue2Captions.push(s.yue2Caption.trim());
     // Vocal pacing needs BOTH real lyrics and a real duration on the same song.
     const dur = Number(s.duration);
     if (Number.isFinite(dur) && dur > 30 && typeof s.lyrics === 'string') {
@@ -513,6 +518,7 @@ export function computeAlbumEnrichment(
     // captions back at ~520 chars with no structure at all. Leave it generous
     // until the corpus is fully recaptioned.
     captionExamples: [...new Set(captions)].slice(0, 3).map(c => c.slice(0, CAPTION_EXAMPLE_MAX_CHARS)),
+    yue2CaptionExamples: [...new Set(yue2Captions)].slice(0, 3),
     enrichedSongs: enriched,
     totalSongs: songs.length,
     wordsPerSec,
@@ -2087,4 +2093,129 @@ export function buildProfilePrompt(
 export function buildSubjectAnalysisPrompt(songs: Array<{ title: string; lyrics: string }>): string {
   const songList = songs.map(s => `--- ${s.title} ---\n${s.lyrics.substring(0, 500)}`).join('\n\n');
   return `Analyse the subjects of these ${songs.length} songs:\n\n${songList}`;
+}
+
+// ── YuE2 planner caption ────────────────────────────────────────────────────
+//
+// The YuE2 planner is prompted with ONE sentence in a fixed order — language,
+// genre, vocal, instruments, mood, production, BPM — because that is the order
+// its training captions take (becausereasons' CNZN model card, September 2026:
+// "This order matches planner training data. Tag lists produce odd plans.").
+// Our own dataset captions for YuE2 (`<stem>.yue2.txt`) follow the same shape,
+// so a song that carries one of these no longer has to borrow a training
+// track's caption to stay in distribution.
+//
+// It is a THIRD caption, not a trimming of the ACE one: the ACE caption is
+// 2-9 sentences with no fixed order and no BPM; the MM3 one is a thirteen-field
+// structured block. Neither is what the planner saw.
+
+export const YUE2_CAPTION_ORDER: ReadonlyArray<string> = [
+  'language', 'genre', 'vocal', 'instruments', 'mood', 'production', 'BPM',
+];
+
+export const YUE2_CAPTION_SYSTEM_PROMPT = `You write the style caption for the YuE2 music planner. The planner reads ONE descriptive sentence and writes the song's lead sheet from it, so the caption decides genre, voice, arrangement and tempo.
+
+Return exactly ONE sentence, plain text, no line breaks, no quotes, no label, nothing before or after it. Build it in THIS order, each part a short comma-separated phrase, and keep the order even when a part is brief:
+
+  1. language      — the language the vocal is sung in ("English", "Italian"). For an instrumental write "instrumental" here and skip the vocal part.
+  2. genre         — the specific style, with era words where they help ("early 90s pop punk", "classic Sanremo ballad", "dark synth-pop"). Never a bare umbrella like "rock" or "pop".
+  3. vocal         — register, gender and delivery of the lead voice ("nasal male tenor lead vocal with gang-vocal shouts"), or what carries the lead line if instrumental.
+  4. instruments   — the instruments actually present, named concretely ("distorted power-chord guitars, driving eighth-note bass, punchy live drums").
+  5. mood          — two to four plain words ("restless, sarcastic and buoyant").
+  6. production    — the mix and era character ("tight dry mid-90s rock mix with little reverb").
+  7. BPM           — the number followed by " BPM" ("168 BPM"). This is the ONLY place a number appears.
+
+Rules:
+- One sentence. Roughly 35-70 words. Every part present, in order.
+- Concrete nouns, not review copy: "LinnDrum", "gated snare", "arpeggiated synth bass" — never "lush soundscapes" or "keeps you moving".
+- Do not name the artist, the band, the song title, the key, or the time signature. Do not quote or summarise the lyrics.
+- The genre must agree with the evidence you are given; do not collapse it to an umbrella term.
+- Output the sentence and NOTHING else.`;
+
+export interface Yue2CaptionContext {
+  /** The ACE-Step caption for the same song — evidence of the intended sound. */
+  aceCaption?: string;
+  subject?: string;
+  bpm?: number;
+  key?: string;
+  lyrics: string;
+  instrumental?: boolean;
+  /** Language the lyrics are in, when known ("en"/"English"). */
+  language?: string;
+}
+
+/** Everything the YuE2 caption call knows about the song. The album's own
+ *  YuE2 captions, when the dataset has them, are the strongest evidence of the
+ *  dialect: they are literally what the adapter trained on. */
+export function buildYue2CaptionPrompt(profile: PromptProfile, ctx: Yue2CaptionContext): string {
+  const enrich = profile.audio_enrichment as AlbumEnrichment | undefined;
+  const lines: string[] = [];
+  lines.push(`Artist style: ${profile.artist_name ?? profile.artist ?? ''}${profile.album ? ` — ${profile.album}` : ''}`.trim(), '');
+  if (enrich?.yue2CaptionExamples?.length) {
+    lines.push(
+      "HOUSE DIALECT — YuE2 captions written for this album's own recordings. Match their order, density and vocabulary; do not copy one verbatim:",
+      ...enrich.yue2CaptionExamples.slice(0, 3).map((c, i) => `  ${i + 1}. ${c}`),
+      '',
+    );
+  }
+  if (ctx.aceCaption) {
+    lines.push(
+      'EVIDENCE — how this song is meant to sound (an ACE-Step caption for the same track; source material, not a template):',
+      `  "${ctx.aceCaption}"`,
+      '',
+    );
+  } else if (enrich?.captionExamples?.length) {
+    lines.push(
+      "EVIDENCE — captions describing this album's actual recordings:",
+      ...enrich.captionExamples.slice(0, 2).map((c, i) => `  ${i + 1}. "${c}"`),
+      '',
+    );
+  }
+  if (enrich?.genres?.length) lines.push(`Measured genres on this album: ${enrich.genres.slice(0, 4).join(', ')}`);
+  if (profile.tone_and_mood) lines.push(`Tone & mood of this artist: ${profile.tone_and_mood}`);
+  if (ctx.subject) lines.push(`What this song is about (context only — never state it): ${ctx.subject}`);
+  lines.push('');
+  lines.push(`Language: ${ctx.instrumental ? 'instrumental (no vocal)' : (ctx.language || 'English')}`);
+  if (ctx.bpm) lines.push(`BPM: ${Math.round(ctx.bpm)} — end the sentence with exactly "${Math.round(ctx.bpm)} BPM".`);
+  if (ctx.instrumental) lines.push('This track is INSTRUMENTAL: write "instrumental" as the language part and name the lead instrument in the vocal part.');
+  lines.push('');
+  const tags = extractSectionTags(ctx.lyrics);
+  if (tags.length) lines.push(`Section structure (evidence of the arrangement only): ${tags.join(' ')}`, '');
+  lines.push('Write the one-sentence YuE2 caption now.');
+  return lines.join('\n');
+}
+
+/** Strip the things a model adds anyway (quotes, labels, fences, line breaks)
+ *  and rebuild the BPM tail from the number we hold exactly. */
+export function normalizeYue2Caption(raw: string, facts: { bpm?: number } = {}): string {
+  let text = String(raw ?? '');
+  const fence = text.match(/```(?:[a-z]*)\n([\s\S]*?)```/i);
+  if (fence) text = fence[1];
+  text = text
+    .replace(/^\s*(caption|yue2 caption|style)\s*:\s*/i, '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\*\*/g, '')
+    .replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (facts.bpm && facts.bpm > 0) {
+    const bpm = Math.round(facts.bpm);
+    text = text.replace(/,?\s*(?:at\s+|around\s+|~\s*)?\d{2,3}\s*bpm\.?\s*$/i, '').replace(/[.,;\s]+$/, '');
+    text = `${text}, ${bpm} BPM`;
+  }
+  return text;
+}
+
+export function validateYue2Caption(caption: string): string[] {
+  const issues: string[] = [];
+  const text = String(caption ?? '').trim();
+  if (!text) return ['empty'];
+  if (/[\r\n]/.test(text)) issues.push('contains a line break (must be one sentence)');
+  const words = text.split(/\s+/).filter(Boolean).length;
+  if (words < 20) issues.push(`too short (${words} words; expect roughly 35-70)`);
+  if (words > 110) issues.push(`too long (${words} words; expect roughly 35-70)`);
+  if (!/\d{2,3}\s*bpm\s*\.?$/i.test(text)) issues.push('must END with the tempo as "<N> BPM"');
+  if ((text.match(/\d{2,3}\s*bpm/gi) ?? []).length > 1) issues.push('states BPM more than once');
+  if (/^#{1,6}\s/m.test(text) || text.includes('**')) issues.push('contains markdown');
+  return issues;
 }

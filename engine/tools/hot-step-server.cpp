@@ -353,6 +353,10 @@ struct Job {
     // nothing (ACE/MM3 jobs never touch either field).
     std::string       result_end_reason;
     std::string       result_stage_end_reasons;
+    // YuE2: the decoded plan-stage ABC score, emitted as "abc" in the status
+    // JSON once the job is done. Empty for every other family and for a
+    // cot=off render (no plan stage).
+    std::string       result_abc;
     std::atomic<bool> cancel{ false };
 
     // Phase tracking (advisory, independent of `status`). phase_step/phase_total
@@ -3634,13 +3638,27 @@ int main(int argc, char ** argv) {
         // their response is byte-identical to before). Read only meaningful
         // once status != running, same convention as result_body/result_mime.
         std::string body = phase_buf;
-        if (!job->result_end_reason.empty() || !job->result_stage_end_reasons.empty()) {
+        if (!job->result_end_reason.empty() || !job->result_stage_end_reasons.empty() || !job->result_abc.empty()) {
             body.pop_back();  // drop the closing '}'
             if (!job->result_end_reason.empty()) {
                 body += ",\"end_reason\":\"" + job->result_end_reason + "\"";
             }
             if (!job->result_stage_end_reasons.empty()) {
                 body += ",\"stage_end_reasons\":" + job->result_stage_end_reasons;
+            }
+            if (!job->result_abc.empty()) {
+                // ABC is free text (quotes, backslashes, newlines) — let
+                // yyjson escape it rather than hand-rolling it here.
+                yyjson_mut_doc * adoc = yyjson_mut_doc_new(NULL);
+                yyjson_mut_val * aroot = yyjson_mut_obj(adoc);
+                yyjson_mut_doc_set_root(adoc, aroot);
+                yyjson_mut_obj_add_strn(adoc, aroot, "abc", job->result_abc.c_str(), job->result_abc.size());
+                if (char * ajson = yyjson_mut_write(adoc, 0, NULL)) {
+                    std::string frag = ajson;  // {"abc":"..."}
+                    body += "," + frag.substr(1, frag.size() - 2);
+                    free(ajson);
+                }
+                yyjson_mut_doc_free(adoc);
             }
             body += "}";
         }

@@ -408,6 +408,7 @@ export function registerCrudRoutes(router: Router): void {
         key: gen.key,
         caption: gen.caption,
         captionMm3: gen.caption_mm3,
+        captionYue2: gen.caption_yue2,
         duration: gen.duration,
         subject: gen.subject,
         extraInstructions: gen.extra_instructions,

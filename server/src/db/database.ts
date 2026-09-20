@@ -341,6 +341,11 @@ export function initDb(): void {
     // want genuinely different text and neither works in the other's slot.
     "ALTER TABLE generations ADD COLUMN caption_mm3 TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE generations ADD COLUMN duration INTEGER NOT NULL DEFAULT 0",
+    // YuE2 planner caption (2026-09-20): ONE sentence in the fixed order
+    // language → genre → vocal → instruments → mood → production → BPM, the
+    // shape the planner's own training captions take. A third caption, not a
+    // trimming of `caption`.
+    "ALTER TABLE generations ADD COLUMN caption_yue2 TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE generations ADD COLUMN parent_generation_id INTEGER REFERENCES generations(id) ON DELETE SET NULL",
     "ALTER TABLE artists ADD COLUMN image_url TEXT",
     "ALTER TABLE artists ADD COLUMN genius_id INTEGER",

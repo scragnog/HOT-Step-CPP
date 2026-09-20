@@ -25,9 +25,10 @@ export const EnhancePanel: React.FC<EnhancePanelProps> = ({ selectedSampleIds, d
   const caps = useTrainingStore(s => s.capabilities);
   const startGenius = useTrainingStore(s => s.startGenius);
   const startCaption = useTrainingStore(s => s.startCaption);
+  const startYue2Caption = useTrainingStore(s => s.startYue2Caption);
 
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<'genius' | 'caption' | null>(null);
+  const [busy, setBusy] = useState<'genius' | 'caption' | 'yue2' | null>(null);
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
 
@@ -60,6 +61,19 @@ export const EnhancePanel: React.FC<EnhancePanelProps> = ({ selectedSampleIds, d
     setBusy('caption');
     try {
       await startCaption({
+        ...scoped,
+        provider: activeProvider?.id,
+        model: model || activeProvider?.defaultModel,
+      });
+    } finally { setBusy(null); }
+  };
+
+  // Text-only rewrite of the label facts + ACE caption into the planner's
+  // one-sentence shape. Any chat provider; MOSS has no such mode.
+  const runYue2Caption = async () => {
+    setBusy('yue2');
+    try {
+      await startYue2Caption({
         ...scoped,
         provider: activeProvider?.id,
         model: model || activeProvider?.defaultModel,
@@ -156,8 +170,20 @@ export const EnhancePanel: React.FC<EnhancePanelProps> = ({ selectedSampleIds, d
                     {busy === 'caption' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
                     {t('trainingStudio.enhance.caption')}
                   </button>
+                  <button
+                    onClick={() => void runYue2Caption()}
+                    disabled={disabled || busy !== null || isMoss}
+                    title={isMoss
+                      ? t('trainingStudio.enhance.yue2CaptionMossBlocked', 'The YuE2 caption is a text rewrite of the existing label; pick a chat provider (MOSS has no such mode).')
+                      : t('trainingStudio.enhance.yue2CaptionTitle', 'Write <stem>.yue2.txt: one sentence in the YuE2 planner\'s order — language, genre, vocal, instruments, mood, production, BPM')}
+                    className={`${btn} bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20`}
+                  >
+                    {busy === 'yue2' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                    {t('trainingStudio.enhance.yue2Caption', 'YuE2 caption')}
+                  </button>
                 </div>
                 <span className="text-[11px] text-zinc-500">{t('trainingStudio.enhance.captionHint')}</span>
+                <span className="text-[11px] text-zinc-500">{t('trainingStudio.enhance.yue2CaptionHint', 'YuE2 caption: rewrites each track\'s facts and ACE caption into the planner\'s one-sentence format (needs the ACE caption first). Preprocess with clip captions set to the YuE2 mode to train on them.')}</span>
               </>
             ) : (
               <div className="text-[11px] text-zinc-500 px-3 py-2 rounded-lg border border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-black/20">

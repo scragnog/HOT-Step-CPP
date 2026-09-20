@@ -39,6 +39,14 @@ export interface ResolvedYue2JointTrainOptions {
   /** 'loss' trains until the windowed composite loss <= targetLoss (steps is the cap). */
   stopMode?: 'steps' | 'loss';
   targetLoss?: number;
+  /** Advanced planner/optimizer knobs. Every one is optional and, when
+   *  omitted, the engine's own default applies (lr 1e-4, weight decay 1e-4,
+   *  KL 0.2, ABC dropout 0.5, planner scale 1.0). */
+  lr?: number;
+  weightDecay?: number;
+  klWeight?: number;
+  abcDropout?: number;
+  plannerLrScale?: number;
 }
 
 /** Route and native runner share the public stop-mode contract. */
@@ -64,6 +72,11 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     }
   }
   if (o.stopMode === 'loss' && o.targetLoss !== undefined) args.push('--target-loss', String(o.targetLoss));
+  if (o.lr !== undefined) args.push('--lr', String(o.lr));
+  if (o.weightDecay !== undefined) args.push('--weight-decay', String(o.weightDecay));
+  if (o.klWeight !== undefined) args.push('--kl-weight', String(o.klWeight));
+  if (o.abcDropout !== undefined) args.push('--abc-dropout', String(o.abcDropout));
+  if (o.plannerLrScale !== undefined) args.push('--planner-lr-scale', String(o.plannerLrScale));
   if (o.resume) args.push('--resume', o.resume);
   if (o.alignment) {
     args.push('--cursor-weight', String(o.alignment.enabled ? o.alignment.cursorWeight : 0));

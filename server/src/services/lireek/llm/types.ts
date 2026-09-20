@@ -27,6 +27,10 @@ export interface GenerationResponse {
    *  caption for the MM3 backend. '' when the MM3 caption call failed or the
    *  stage does not run (refinement). Never a substitute for `caption`. */
   caption_mm3: string;
+  /** YuE2 planner caption — one sentence, fixed order (language → genre →
+   *  vocal → instruments → mood → production → BPM). '' when the call failed
+   *  or the stage does not run. Never a substitute for `caption`. */
+  caption_yue2?: string;
   duration: number;
   system_prompt: string;
   user_prompt: string;

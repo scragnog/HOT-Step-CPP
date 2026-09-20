@@ -8,7 +8,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Zap, ListPlus, Sparkles, Radio } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useGlobalParams, useGlobalParamsStore } from '../../context/GlobalParamsContext';
+import { useAuth } from '../../context/AuthContext';
+import { generateApi } from '../../services/api';
+import { Yue2ScorePreviewModal, type Yue2ScorePreviewData } from './Yue2ScorePreviewModal';
 import { ContentSection } from './ContentSection';
 import { MetadataSection } from './MetadataSection';
 import { LatentImport } from '../shared/LatentImport';
@@ -210,6 +213,32 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // Global params context — for reuse data
   const gp = useGlobalParams();
 
+  // ── YuE2 score preview ──
+  // The "Preview the score first" toggle is a YuE2 backend extension, so it
+  // lives in backendParams like the other YuE2 knobs. When it is on, Generate
+  // plans the lead sheet first, shows it, and only enqueues the render once
+  // the user says Continue — with THAT score and THAT seed pinned.
+  const { token } = useAuth();
+  const yue2PreviewScore = useGlobalParamsStore((s: any) => !!s.backendParams?.yue2PreviewScore);
+  const [scorePreview, setScorePreview] = useState<{ open: boolean; params: Partial<GenerationParams> | null; data: Yue2ScorePreviewData | null; error: string | null }>(
+    { open: false, params: null, data: null, error: null });
+  const planScore = useCallback(async (params: Partial<GenerationParams>, freshSeed: boolean) => {
+    if (!token) return;
+    setScorePreview({ open: true, params, data: null, error: null });
+    try {
+      // The plan and the render must share a seed for the render to be
+      // reproducible from the sheet the user approved. Retry asks for a new
+      // draw; the first attempt honours the global seed control.
+      const seedParams = freshSeed
+        ? { ...params, randomSeed: true, seed: -1 }
+        : { ...params, randomSeed: gp.randomSeed, seed: gp.seed };
+      const data = await generateApi.yue2Plan(seedParams, token);
+      setScorePreview(prev => (prev.open ? { ...prev, data } : prev));
+    } catch (err) {
+      setScorePreview(prev => (prev.open ? { ...prev, error: err instanceof Error ? err.message : String(err) } : prev));
+    }
+  }, [token, gp.randomSeed, gp.seed]);
+
   // ── Reuse data (Edit) — restores ALL generation params for full reproducibility ──
   useEffect(() => {
     if (!reuseData) return;
@@ -319,6 +348,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     // if (streamMode) {
     //   (params as any).streamMode = true;
     // }
+    if (yue2Mode && yue2PreviewScore) {
+      void planScore(params, false);
+      return;
+    }
     onGenerate(params);
   };
 
@@ -547,6 +580,22 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
         isOpen={aiModalOpen}
         onClose={() => setAiModalOpen(false)}
         onResult={handleAiResult}
+      />
+
+      {/* YuE2 lead-sheet preview: continue renders the approved score with
+          its seed pinned; retry plans again with a fresh seed. */}
+      <Yue2ScorePreviewModal
+        open={scorePreview.open}
+        data={scorePreview.data}
+        error={scorePreview.error}
+        onCancel={() => setScorePreview({ open: false, params: null, data: null, error: null })}
+        onRetry={() => { if (scorePreview.params) void planScore(scorePreview.params, true); }}
+        onContinue={() => {
+          const { params, data } = scorePreview;
+          setScorePreview({ open: false, params: null, data: null, error: null });
+          if (!params || !data) return;
+          onGenerate({ ...params, yue2Abc: data.abc, seed: data.seed, randomSeed: false } as Partial<GenerationParams>);
+        }}
       />
     </div>
   );

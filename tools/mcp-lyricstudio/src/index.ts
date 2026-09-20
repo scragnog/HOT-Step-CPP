@@ -344,6 +344,66 @@ server.tool(
   }
 );
 
+// ── prepare_yue2_caption ────────────────────────────────────────────────────
+//
+// The YuE2 planner is prompted with ONE sentence in a fixed order (language →
+// genre → vocal → instruments → mood → production → BPM) — the order its
+// training captions take. A third caption, next to the ACE and MM3 ones.
+// Called after the lyrics exist, like MM3's, because the section tags are
+// evidence of the arrangement.
+
+server.tool(
+  'prepare_yue2_caption',
+  'Prepare the prompts for writing this song\'s YuE2 planner caption: ONE sentence in the fixed order language → genre → vocal → instruments → mood → production → BPM. Call this AFTER writing the lyrics and BEFORE save_generation; pass the result to save_generation as caption_yue2.',
+  {
+    profile_id: z.number().describe('Profile ID'),
+    lyrics: z.string().describe('The FINISHED lyrics, including their section tags'),
+    bpm: z.number().optional().describe('BPM from metadata generation — the sentence must end with it'),
+    key: z.string().optional().describe('Musical key (not stated in the caption; context only)'),
+    caption: z.string().optional().describe('The ACE-Step caption planned for this song — evidence of the intended sound'),
+    subject: z.string().optional().describe('Song subject'),
+  },
+  async ({ profile_id, lyrics, bpm, key, caption, subject }) => {
+    const profile = db.getProfile(profile_id);
+    if (!profile) {
+      return { content: [{ type: 'text', text: `Profile ${profile_id} not found.` }] };
+    }
+    const pd = profile.profile_data;
+    const set = db.getLyricsSet(profile.lyrics_set_id);
+    if (set) pd.audio_enrichment = prompts.computeAlbumEnrichment(set.songs);
+    const language = set?.songs?.find((s: any) => s?.language)?.language;
+
+    const userPrompt = prompts.buildYue2CaptionPrompt(pd, {
+      lyrics, aceCaption: caption, subject, bpm, key, language,
+      instrumental: !lyrics.trim(),
+    });
+
+    const text = [
+      `# YuE2 Caption: ${profile.artist_name}`,
+      `**Profile ID:** ${profile_id}`,
+      '',
+      '---',
+      '',
+      '## System Prompt',
+      '```',
+      prompts.YUE2_CAPTION_SYSTEM_PROMPT,
+      '```',
+      '',
+      '## User Prompt',
+      '```',
+      userPrompt,
+      '```',
+      '',
+      '---',
+      '',
+      'Write the one sentence, then call `save_generation` with it as the `caption_yue2` param ' +
+      '(alongside `caption` and `caption_mm3`). The trailing "<N> BPM" is rebuilt from the stored bpm on save.',
+    ].join('\n');
+
+    return { content: [{ type: 'text', text }] };
+  }
+);
+
 // ── save_generation ─────────────────────────────────────────────────────────
 
 server.tool(
@@ -359,9 +419,10 @@ server.tool(
     key: z.string().optional().describe('Musical key (e.g. "C Major")'),
     caption: z.string().optional().describe('Audio style caption for the ACE-Step backend'),
     caption_mm3: z.string().optional().describe('MiniMax-Music3 Structured Caption, from prepare_mm3_caption. A SEPARATE caption in MM3\'s own three-heading format — never a copy of `caption`.'),
+    caption_yue2: z.string().optional().describe('YuE2 planner caption, from prepare_yue2_caption: ONE sentence, fixed order (language → genre → vocal → instruments → mood → production → BPM). Never a copy of `caption`.'),
     duration: z.number().optional().describe('Duration in seconds'),
   },
-  async ({ profile_id, lyrics, title, model, subject, bpm, key, caption, caption_mm3, duration }) => {
+  async ({ profile_id, lyrics, title, model, subject, bpm, key, caption, caption_mm3, caption_yue2, duration }) => {
     const profile = db.getProfile(profile_id);
     if (!profile) {
       return { content: [{ type: 'text', text: `Profile ${profile_id} not found.` }] };
@@ -411,6 +472,20 @@ server.tool(
       mm3Note = '\n⚠ No MM3 caption supplied — this song cannot be generated well on the MiniMax-Music3 backend. Call prepare_mm3_caption and re-save.';
     }
 
+    // The YuE2 sentence: same deterministic tidy-up as the in-app path, with
+    // the BPM tail rebuilt from the number we hold.
+    let yue2Note = '';
+    let captionYue2 = '';
+    if (caption_yue2 && caption_yue2.trim()) {
+      captionYue2 = prompts.normalizeYue2Caption(caption_yue2, { bpm });
+      const issues = prompts.validateYue2Caption(captionYue2);
+      yue2Note = issues.length
+        ? `\n⚠ YuE2 caption saved WITH FORMAT ISSUES: ${issues.join('; ')}`
+        : `\n🎼 YuE2 caption saved (${captionYue2.split(/\s+/).length} words, format OK)`;
+    } else {
+      yue2Note = '\nℹ No YuE2 caption supplied — a YuE2 render will fall back to a dataset-track caption. Call prepare_yue2_caption and re-save to give it one of its own.';
+    }
+
     const saved = db.saveGeneration({
       profileId: profile_id,
       provider: 'mcp',
@@ -422,6 +497,7 @@ server.tool(
       key,
       caption,
       captionMm3,
+      captionYue2,
       duration,
     });
 
@@ -439,6 +515,7 @@ server.tool(
           introNote,
           durationNote,
           mm3Note,
+          yue2Note,
           '',
           'The generation is now visible in the Lyric Studio UI.',
         ].join('\n'),

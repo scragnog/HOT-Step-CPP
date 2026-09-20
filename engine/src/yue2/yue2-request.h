@@ -40,6 +40,10 @@ struct Yue2Request {
 
     std::string abc;               // externally-supplied ABC text; skips the plan stage's model call
     bool        abc_provided = false;
+    // Stop after the plan stage and return only the ABC score (no semantic/
+    // NAR/VAE work, no audio). The score-preview flow: plan once, let the
+    // user look at it, then re-submit the same request with `abc` set.
+    bool        plan_only = false;
 
     uint64_t seed         = 0;
     bool     seed_present = false;
@@ -182,6 +186,31 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         return false;
     }
     out->abc_provided = present && !out->abc.empty();
+
+    if (yyjson_val * v = yyjson_obj_get(root, "plan_only")) {
+        if (!yyjson_is_bool(v) && !yyjson_is_null(v)) {
+            if (err) {
+                *err = "\"plan_only\" must be a boolean";
+            }
+            yyjson_doc_free(doc);
+            return false;
+        }
+        out->plan_only = yyjson_is_bool(v) && yyjson_get_bool(v);
+    }
+    if (out->plan_only && out->cot == YUE2_COT_OFF) {
+        if (err) {
+            *err = "\"plan_only\" needs \"cot\" melody or full -- cot=off has no plan stage";
+        }
+        yyjson_doc_free(doc);
+        return false;
+    }
+    if (out->plan_only && out->abc_provided) {
+        if (err) {
+            *err = "\"plan_only\" and \"abc\" are exclusive -- the score is already known";
+        }
+        yyjson_doc_free(doc);
+        return false;
+    }
 
     double num = 0.0;
     if (!yue2_req_num(root, "seed", &num, &present, err)) {

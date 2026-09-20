@@ -46,6 +46,7 @@ import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import { yue2Synth, yue2FinalDetail, type Yue2SynthRequest } from './client.js';
+import { classifyYue2Score, type Yue2ScoreHealth } from './scoreHealth.js';
 import { yue2PersistedSelection } from './index.js';
 import { applyYue2StyleTemplate, type Yue2StyleTemplate } from './style.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
@@ -291,10 +292,18 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
     ? -1
     : (typeof params.seed === 'number' && params.seed >= 0 ? params.seed : -1);
 
+  // A previewed-and-approved lead sheet (score preview flow): the engine
+  // renders this score instead of planning one. Meaningless under cot=off,
+  // which has no plan stage — dropped with a note rather than sent.
+  const abcRaw = typeof params.yue2Abc === 'string' ? params.yue2Abc.trim() : '';
+  const abc = abcRaw && cot !== 'off' ? abcRaw : undefined;
+  if (abcRaw && !abc) notes.push('A previewed score was supplied but Chain of Thought is "off" — the score was ignored.');
+
   const req: Yue2SynthRequest = {
     style,
     lyrics: lyrics || undefined,
     cot,
+    ...(abc ? { abc } : {}),
     ...(cfg_scale !== undefined ? { cfg_scale } : {}),
     ode_steps,
     ode_method: 'midpoint',
@@ -445,9 +454,19 @@ ${req.lyrics}`);
     // note in client.ts. Every field here is optional; an engine build that
     // doesn't populate them yet just yields an empty object.
     const finalDetail = await yue2FinalDetail(sub.job_id);
+    // Healthy-but-long vs runaway: the score says which, when there is one
+    // (cot=off renders have no plan stage and no score to read).
+    const scoreHealth = finalDetail.abc ? classifyYue2Score(finalDetail.abc, finalDetail.end_reason) : undefined;
+    if (scoreHealth) {
+      log(scoreHealth.verdict === 'runaway' ? 'WARNING' : 'INFO',
+        `[YuE2] Score: ${scoreHealth.verdict} — ${scoreHealth.reason}`);
+    }
     if (finalDetail.end_reason === 'limit_hit') {
-      log('WARNING', '[YuE2] Render hit its frame/token limit before reaching a natural ending '
-        + '(end_reason: limit_hit) — the song may cut off rather than resolve.');
+      log('WARNING', scoreHealth?.verdict === 'long'
+        ? '[YuE2] Render hit the frame cap, but the score itself is healthy — the song is longer than '
+          + 'the cap, not broken. Shorten the lyric or raise the cap.'
+        : '[YuE2] Render hit its frame/token limit before reaching a natural ending '
+          + '(end_reason: limit_hit) — the song may cut off rather than resolve.');
     } else if (finalDetail.stage_end_reasons) {
       const eosStages = Object.entries(finalDetail.stage_end_reasons)
         .filter(([, r]) => r === 'eos').map(([s]) => s);
@@ -510,6 +529,9 @@ ${req.lyrics}`);
         instrumental: sub.instrumental,
         end_reason: finalDetail.end_reason,
         stage_end_reasons: finalDetail.stage_end_reasons,
+        duration_s: measured > 0 ? Math.round(measured * 10) / 10 : undefined,
+        abc_supplied: !!req.abc,
+        ...(scoreHealth ? { score_health: scoreHealth } : {}),
       },
     };
 
@@ -664,4 +686,56 @@ ${req.lyrics}`);
   } finally {
     if (detailTimer) clearInterval(detailTimer);
   }
+}
+
+// ── Score preview ──────────────────────────────────────────────────────────
+//
+// Plan only: the same request mapping the render uses (adapter trigger,
+// caption template, cot), sent with `plan_only` so the engine stops after the
+// lead sheet. Seconds rather than minutes, and the classifier says whether the
+// plan is a song or a runaway before any audio exists. The caller then
+// re-submits an ordinary generation with `yue2Abc` set to the approved score
+// and the seed pinned to the one echoed here.
+
+export interface Yue2PlanPreview {
+  abc: string;
+  seed: number;
+  end_reason: string;
+  health: Yue2ScoreHealth;
+  notes: string[];
+}
+
+export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Promise<Yue2PlanPreview> {
+  const { req, notes } = mapYue2Params(params);
+  if (!req.style.trim()) throw new Error('YuE2 needs a caption — the Style Description field is empty');
+  if (req.cot === 'off') throw new Error('Score preview needs Chain of Thought "melody" or "full" — cot=off has no lead sheet to preview');
+  const planReq: Yue2SynthRequest = { ...req, plan_only: true };
+  delete planReq.abc;
+
+  const sub = await yue2Synth(planReq);
+  const started = Date.now();
+  // ponytail: 10-minute ceiling on a stage that takes seconds; the shared
+  // pollUntilDone watchdog is built around a GenerationJob this call has none of.
+  for (;;) {
+    if (signal?.aborted) {
+      await aceClient.cancelJob(sub.job_id).catch(() => {});
+      throw new Error('Score preview cancelled');
+    }
+    const status = await aceClient.pollJob(sub.job_id);
+    if (status.status === 'done') break;
+    if (status.status === 'failed' || status.status === 'cancelled') {
+      const detail = (status as { error?: string }).error;
+      throw new Error(`YuE2 plan ${status.status}${detail ? `: ${detail}` : ''}`);
+    }
+    if (Date.now() - started > 10 * 60_000) {
+      await aceClient.cancelJob(sub.job_id).catch(() => {});
+      throw new Error('YuE2 plan stage timed out after 10 minutes');
+    }
+    await new Promise(r => setTimeout(r, 750));
+  }
+  const detail = await yue2FinalDetail(sub.job_id);
+  const abc = (detail.abc ?? '').trim();
+  if (!abc) throw new Error('YuE2 returned no score for the plan stage');
+  const end_reason = detail.end_reason ?? 'completed';
+  return { abc, seed: sub.seed, end_reason, health: classifyYue2Score(abc, end_reason), notes };
 }

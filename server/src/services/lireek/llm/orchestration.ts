@@ -11,6 +11,7 @@ import {
   REFINEMENT_SYSTEM_PROMPT,
   TITLE_DERIVATION_PROMPT,
   MM3_CAPTION_SYSTEM_PROMPT,
+  YUE2_CAPTION_SYSTEM_PROMPT,
   buildMetadataPrompt,
   buildGenerationPrompt,
   buildRefinementPrompt,
@@ -18,6 +19,9 @@ import {
   buildMm3CaptionPrompt,
   normalizeMm3Caption,
   validateMm3Caption,
+  buildYue2CaptionPrompt,
+  normalizeYue2Caption,
+  validateYue2Caption,
   reconcileDurationToLyrics,
   ensureInstrumentalIntro,
 } from '../prompts.js';
@@ -325,12 +329,60 @@ export async function generateLyricsStreaming(
     providerName, effectiveModel, onChunk, callOptions,
   );
 
+  // The YuE2 planner caption: one sentence, fixed order. Cheap (a short
+  // completion) and, like MM3's, never fatal.
+  if (onPhase) onPhase("Writing YuE2 caption…");
+  const caption_yue2 = await writeYue2Caption(
+    profile,
+    { lyrics: raw, aceCaption: metadata.caption, subject: metadata.subject, bpm: metadata.bpm, key: metadata.key },
+    providerName, effectiveModel, onChunk, callOptions,
+  );
+
   return {
     lyrics: raw, provider: providerName, model: effectiveModel, title,
     subject: metadata.subject, bpm: metadata.bpm, key: metadata.key,
-    caption: metadata.caption, caption_mm3, duration,
+    caption: metadata.caption, caption_mm3, caption_yue2, duration,
     system_prompt: GENERATION_SYSTEM_PROMPT, user_prompt: userPrompt
   };
+}
+
+/**
+ * Write the YuE2 planner caption for a finished song: ONE sentence in the
+ * order language → genre → vocal → instruments → mood → production → BPM,
+ * which is the shape the planner's training captions take (and what our own
+ * `.yue2.txt` dataset captions follow). Validated and retried once, like the
+ * MM3 caption; '' on failure so a lyric set is never lost to a caption.
+ */
+async function writeYue2Caption(
+  profile: LyricsProfile,
+  ctx: { lyrics: string; aceCaption?: string; subject?: string; bpm?: number; key?: string },
+  providerName: string,
+  modelName: string,
+  onChunk?: ChunkCallback,
+  callOptions?: CallOptions,
+): Promise<string> {
+  const provider = getProvider(providerName);
+  const userPrompt = buildYue2CaptionPrompt(profile, { ...ctx, instrumental: !ctx.lyrics.trim() });
+  const attempt = async (prompt: string): Promise<string> => {
+    const raw = await provider.call(cacheBustPrompt(YUE2_CAPTION_SYSTEM_PROMPT), prompt, modelName, onChunk, callOptions);
+    return normalizeYue2Caption(stripThinkingBlocks(raw), { bpm: ctx.bpm });
+  };
+  try {
+    let caption = await attempt(userPrompt);
+    let issues = validateYue2Caption(caption);
+    if (issues.length) {
+      console.warn(`[LLM] YuE2 caption failed validation: ${issues.join('; ')}. Retrying once.`);
+      const retry = await attempt([userPrompt, '', `Your previous attempt was REJECTED for: ${issues.join('; ')}.`,
+        'Write it again: one sentence, the fixed order, nothing else.'].join('\n'));
+      const retryIssues = validateYue2Caption(retry);
+      if (retryIssues.length < issues.length) { caption = retry; issues = retryIssues; }
+    }
+    if (issues.length) console.warn(`[LLM] YuE2 caption saved with issues: ${issues.join('; ')}`);
+    return caption;
+  } catch (err: any) {
+    console.warn(`[LLM] YuE2 caption failed (${err?.message || err}) — generation saved without one`);
+    return '';
+  }
 }
 
 export async function refineLyricsStreaming(

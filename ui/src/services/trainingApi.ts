@@ -16,7 +16,7 @@ export type MergePolicy =
   | 'overwrite_all';
 
 export type TrainingJobKind =
-  | 'label' | 'enhance-genius' | 'enhance-caption' | 'build'
+  | 'label' | 'enhance-genius' | 'enhance-caption' | 'enhance-yue2-caption' | 'build'
   | 'preprocess' | 'train-lm' | 'train-dit'
   | 'audition' | 'lm-calibrate' | 'dit-calibrate'
   // MiniMax-Music3. Both GPU-lane and engine-stopping — an MM3 training step
@@ -650,6 +650,15 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   cursorWeight?: number;
   alignmentEnabled?: boolean;
   preview?: Yue2JointPreviewOptions;
+  /** Advanced (optional — undefined means the engine default). AdamW learning
+   *  rate and weight decay; the planner's KL anchor to the base model; the
+   *  chance a lead-sheet example trains without its sheet; and the planner's
+   *  learning rate as a multiple of `lr` (AdamW only). */
+  lr?: number;
+  weightDecay?: number;
+  klWeight?: number;
+  abcDropout?: number;
+  plannerLrScale?: number;
 }
 
 export interface Yue2JointPreviewOptions {
@@ -2204,6 +2213,15 @@ export async function startGenius(id: string, opts: GeniusOptions): Promise<{ jo
 
 export async function startCaption(id: string, opts: CaptionOptions): Promise<{ jobId: string }> {
   return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/caption`, { method: 'POST', ...jsonBody(opts) });
+}
+
+/** Write the one-sentence YuE2 planner caption (`<stem>.yue2.txt`) for each
+ *  track from its existing label facts and ACE caption. Text-only: any chat
+ *  provider, never MOSS. */
+export async function startYue2Caption(
+  id: string, opts: { sampleIds?: string[]; provider?: string; model?: string; temperature?: number },
+): Promise<{ jobId: string }> {
+  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/yue2-caption`, { method: 'POST', ...jsonBody(opts) });
 }
 
 export async function startBuild(id: string, outputPath?: string): Promise<{ jobId: string }> {

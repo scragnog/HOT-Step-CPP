@@ -42,7 +42,7 @@ import { resolveYue2CaptionForGeneration, YUE2_BACKEND_ID } from './yue2CaptionS
 export const MM3_BACKEND_ID = 'minimax-m3';
 
 export function captionForBackend(
-  gen: { id?: number; bpm?: number; caption?: string | null; caption_mm3?: string | null },
+  gen: { id?: number; bpm?: number; caption?: string | null; caption_mm3?: string | null; caption_yue2?: string | null },
   backendId: string | undefined,
   lyricsSetId?: number,
 ): string {
@@ -51,6 +51,12 @@ export function captionForBackend(
     if (resolved.caption.trim()) return resolved.caption;
   }
   if (backendId === YUE2_BACKEND_ID) {
+    // A song that carries its own YuE2 caption (2026-09-20) is prompted with
+    // it: that sentence is the shape the planner's training captions take, so
+    // it no longer needs to borrow a dataset track's caption to stay in
+    // distribution. The dataset-track pick remains the fallback for songs
+    // written before the field existed.
+    if ((gen.caption_yue2 || '').trim()) return (gen.caption_yue2 || '').trim();
     const resolved = resolveYue2CaptionForGeneration(gen);
     if (resolved.caption.trim()) return resolved.caption;
   }

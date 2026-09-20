@@ -40,6 +40,7 @@ import * as audioMeta from './audioMeta.js';
 import { getDataset, updateCounters, updateDataset } from './datasetsRepo.js';
 import type { AceRequest } from '../aceClient.js';
 import { arbitrateSidecarGenre, prepareMossBatch, clearMossBatch } from './mossCaption.js';
+import { captionSampleForYue2, writeYue2Sidecar } from './yue2CaptionJob.js';
 import type {
   BuildOptions, CaptionOptions, FieldSource, GeniusOptions, LabelOptions, MergePolicy,
   TrainingDatasetRow, TrainingJobKind, TrainingJobStatus, TrainingJobSummary,
@@ -1327,6 +1328,78 @@ export function startCaptionJob(
 ): TrainingJob {
   const job = createJob('enhance-caption', datasetId, sampleIds, opts);
   enqueue(job, runCaptionJob);
+  return job;
+}
+
+// ── YuE2 caption job ──────────────────────────────────────────────────────
+//
+// Writes `<stem>.yue2.txt` — the one-sentence planner caption — from each
+// track's label facts and ACE caption (yue2CaptionJob.ts). Network lane, text
+// only; it never touches the sidecar fields or the label sources, so a
+// re-run replaces the sentence and nothing else.
+
+export interface Yue2CaptionJobOptions {
+  provider: string;
+  model?: string;
+  temperature?: number;
+}
+
+async function runYue2CaptionJob(job: TrainingJob): Promise<void> {
+  if (isCancelled(job)) return;
+  const ds = getDataset(job.datasetId);
+  if (!ds) { finishJob(job, 'failed', 'Dataset not found'); return; }
+  const opts = (job.opts || {}) as Yue2CaptionJobOptions;
+
+  job.status = 'running';
+  job.startedAt = Date.now();
+  job.phase = 'llm';
+  emitJob(job);
+
+  try {
+    const { targets } = await loadTargets(job, ds);
+    job.total = targets.length;
+    markPending(job, ds, targets);
+    pushLog(`[Training] YuE2 caption job ${job.id} started — ${job.total} files (${opts.provider})`);
+    emitProgress(job);
+
+    await runPooled(job, targets, captionLimiter.spec.concurrency, async (sample) => {
+      job.currentSampleId = sample.sampleId;
+      markProcessing(job, ds, sample);
+      try {
+        if (!sample.caption.trim() && sample.lyrics.trim()) {
+          throw new Error('no ACE caption to rewrite — run the caption step first');
+        }
+        const text = await captionLimiter.run(() => captionSampleForYue2(sample, ds, {
+          provider: opts.provider, model: opts.model, temperature: opts.temperature,
+          signal: job.controller.signal,
+          log: (level, message) => emitLog(job, level, `${sample.filename}: ${message}`),
+        }));
+        if (!text) throw new Error('LLM returned nothing usable');
+        const written = writeYue2Sidecar(sample.audioPath, text);
+        emitLog(job, 'info', `${sample.filename}: wrote ${written} — ${text}`);
+        // The label itself is untouched (sources, status); only the sidecar
+        // beside the audio changed, so refresh the row rather than re-label it.
+        clearTransientStatus(job.datasetId, sample.sampleId);
+        const fresh = refreshSample(ds, sample);
+        pushEvent(job, { type: 'sample', sampleId: sample.sampleId, status: fresh.labelStatus, sample: fresh });
+        job.done++;
+      } catch (err: any) {
+        markError(job, ds, sample, err?.message || 'YuE2 caption failed');
+      }
+      emitProgress(job);
+    });
+
+    if (isCancelled(job)) return;
+    finishJob(job, 'done');
+  } catch (err: any) {
+    if (isCancelled(job)) return;
+    finishJob(job, 'failed', err?.message || 'YuE2 caption job failed');
+  }
+}
+
+export function startYue2CaptionJob(datasetId: string, sampleIds: string[], opts: Yue2CaptionJobOptions): TrainingJob {
+  const job = createJob('enhance-yue2-caption', datasetId, sampleIds, opts);
+  enqueue(job, runYue2CaptionJob);
   return job;
 }
 

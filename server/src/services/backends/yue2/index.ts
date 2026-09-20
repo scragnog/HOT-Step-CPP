@@ -473,6 +473,16 @@ async function capabilities(): Promise<BackendCapabilities> {
           { value: 'legacy', label: 'Legacy' },
         ],
       },
+      {
+        key: 'yue2PreviewScore',
+        type: 'toggle',
+        label: 'Preview the score first',
+        hint: 'Plan the lead sheet only, show it (with playback) before any audio is rendered, '
+            + 'and let you continue, re-plan with a new seed, or cancel. Needs Chain of Thought '
+            + 'melody or full; a runaway plan is visible here in seconds instead of after a '
+            + 'six-minute render.',
+        default: false,
+      },
     ],
   };
 }
