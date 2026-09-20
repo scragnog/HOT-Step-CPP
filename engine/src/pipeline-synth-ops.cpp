@@ -689,12 +689,17 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
                                      nullptr, 0,
                                      s.timbre_feats.data(), s.S_ref_timbre, neg_enc, &neg_enc_S);
                 if (neg_enc_S > 0 && !neg_enc.empty()) {
-                    s.null_cond_vec.assign(H_cond, 0.0f);
+                    // Full sequence for the uncond branch; pooled for legacy
+                    // broadcast consumers. null_cond_vec stays pristine (it
+                    // pads the COND sequences — see GGML path comment).
+                    s.neg_pooled.assign(H_cond, 0.0f);
                     for (int si = 0; si < neg_enc_S; si++)
                         for (int h = 0; h < H_cond; h++)
-                            s.null_cond_vec[h] += neg_enc[(size_t)si * H_cond + h];
+                            s.neg_pooled[h] += neg_enc[(size_t)si * H_cond + h];
                     float inv = 1.0f / (float)neg_enc_S;
-                    for (int h = 0; h < H_cond; h++) s.null_cond_vec[h] *= inv;
+                    for (int h = 0; h < H_cond; h++) s.neg_pooled[h] *= inv;
+                    s.neg_enc_S   = neg_enc_S;
+                    s.neg_enc_seq = std::move(neg_enc);
                     fprintf(stderr, "[Encode-Text] negative_prompt encoded (ORT): enc_S=%d\n", neg_enc_S);
                 }
             }
@@ -914,7 +919,12 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
             memcpy(s.null_cond_vec.data(), ctx->meta->null_cond_cpu.data(), H_cond * sizeof(float));
         }
 
-        // NEGATIVE PROMPT Phase B: cond-encode neg text, mean-pool into null_cond_vec
+        // NEGATIVE PROMPT Phase B: cond-encode neg text. Keep the FULL encoded
+        // sequence for the uncond CFG branch (orthodox negative prompting) and
+        // a mean-pooled vector for legacy broadcast consumers (TRT path).
+        // s.null_cond_vec is NOT touched: it pads the COND sequences, and
+        // overwriting it with the pooled negative leaked negative content into
+        // the conditional branch's padding (the old behavior).
         if (!s.neg_text_hidden.empty() && s.neg_S_text > 0) {
             std::vector<float> neg_enc;
             int                neg_enc_S = 0;
@@ -922,12 +932,14 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
                               nullptr, 0,
                               s.timbre_feats.data(), s.S_ref_timbre, neg_enc, &neg_enc_S);
             if (neg_enc_S > 0 && !neg_enc.empty()) {
-                s.null_cond_vec.assign(H_cond, 0.0f);
+                s.neg_pooled.assign(H_cond, 0.0f);
                 for (int si = 0; si < neg_enc_S; si++)
                     for (int h = 0; h < H_cond; h++)
-                        s.null_cond_vec[h] += neg_enc[(size_t)si * H_cond + h];
+                        s.neg_pooled[h] += neg_enc[(size_t)si * H_cond + h];
                 float inv = 1.0f / (float)neg_enc_S;
-                for (int h = 0; h < H_cond; h++) s.null_cond_vec[h] *= inv;
+                for (int h = 0; h < H_cond; h++) s.neg_pooled[h] *= inv;
+                s.neg_enc_S   = neg_enc_S;
+                s.neg_enc_seq = std::move(neg_enc);
                 fprintf(stderr, "[Encode-Text] negative_prompt encoded: enc_S=%d\n", neg_enc_S);
             }
         }
@@ -1436,7 +1448,7 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
             /*real_S=*/nullptr, s.per_enc_S.data(), s.enc_hidden_nc.empty() ? nullptr : s.enc_hidden_nc.data(),
             s.per_enc_S_nc_final.empty() ? nullptr : s.per_enc_S_nc_final.data(), /*use_sde=*/false, s.seeds.data(),
             ctx->params.use_batch_cfg,
-            s.null_cond_vec.empty() ? nullptr : s.null_cond_vec.data());
+            !s.neg_pooled.empty() ? s.neg_pooled.data() : (s.null_cond_vec.empty() ? nullptr : s.null_cond_vec.data()) /* pooled negative, else pristine null (TRT CFG requires non-null) */);
         if (dit_rc != 0) {
             return -1;
         }
@@ -1568,7 +1580,9 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
             ubc,
             /*repaint_src=*/nullptr, /*repaint_t0=*/0, /*repaint_t1=*/0,
             /*repaint_injection_ratio=*/0.5f, /*repaint_crossfade_frames=*/0,
-            /*neg_enc_data=*/s.null_cond_vec.empty() ? nullptr : s.null_cond_vec.data());
+            /*neg_enc_data=*/s.neg_pooled.empty() ? nullptr : s.neg_pooled.data(),
+            /*neg_enc_seq=*/s.neg_enc_seq.empty() ? nullptr : s.neg_enc_seq.data(),
+            /*neg_enc_seq_S=*/s.neg_enc_S);
         if (dit_rc != 0) {
             return -1;
         }

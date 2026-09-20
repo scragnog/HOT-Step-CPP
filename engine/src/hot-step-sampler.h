@@ -68,6 +68,8 @@ static int dit_ggml_generate(DiTGGML *           model,
                              float           repaint_injection_ratio  = 0.5f,
                              int             repaint_crossfade_frames = 0,
                              const float *   neg_enc_data             = nullptr,
+                             const float *   neg_enc_seq              = nullptr,
+                             int             neg_enc_seq_S            = 0,
                              const char *    solver_name              = "euler",
                              const char *    guidance_mode            = "apg",
                               float           apg_momentum             = 0.75f,
@@ -669,12 +671,26 @@ static int dit_ggml_generate(DiTGGML *           model,
             debug_dump_1d(dbg, "null_condition_emb", null_emb.data(), emb_n);
         }
 
-        // Broadcast [H_enc] to [H_enc, enc_S] then fill uncond destination
-        // Use neg_enc_data if provided (negative_prompt encoded upstream)
+        // Fill the uncond destination [H_enc, enc_S]:
+        //  - neg_enc_seq (full encoded negative sequence): install it verbatim as
+        //    the uncond branch (orthodox negative prompting), truncated to enc_S,
+        //    positions past its length padded with the PRISTINE null embedding.
+        //  - else neg_enc_data (legacy pooled vector): broadcast to all positions.
+        //  - else: broadcast the null embedding (plain unconditional CFG).
         std::vector<float> null_enc_single(H_enc * enc_S);
-        const float * uncond_src = (neg_enc_data != nullptr) ? neg_enc_data : null_emb.data();
-        for (int s = 0; s < enc_S; s++) {
-            memcpy(&null_enc_single[s * H_enc], uncond_src, H_enc * sizeof(float));
+        if (neg_enc_seq != nullptr && neg_enc_seq_S > 0) {
+            int n_copy = neg_enc_seq_S < enc_S ? neg_enc_seq_S : enc_S;
+            memcpy(null_enc_single.data(), neg_enc_seq, (size_t) n_copy * H_enc * sizeof(float));
+            for (int s = n_copy; s < enc_S; s++) {
+                memcpy(&null_enc_single[(size_t) s * H_enc], null_emb.data(), H_enc * sizeof(float));
+            }
+            fprintf(stderr, "[DiT] uncond branch = negative_prompt encoding (S=%d/%d, null-padded)\n",
+                    n_copy, enc_S);
+        } else {
+            const float * uncond_src = (neg_enc_data != nullptr) ? neg_enc_data : null_emb.data();
+            for (int s = 0; s < enc_S; s++) {
+                memcpy(&null_enc_single[s * H_enc], uncond_src, H_enc * sizeof(float));
+            }
         }
         if (dbg && dbg->enabled) {
             debug_dump_2d(dbg, "null_enc_hidden", null_enc_single.data(), enc_S, H_enc);
@@ -750,9 +766,19 @@ static int dit_ggml_generate(DiTGGML *           model,
             } else {
                 ggml_backend_tensor_get(model->null_condition_emb, null_emb.data(), 0, emb_n * sizeof(float));
             }
-            const float * uncond_src_ps = (neg_enc_data != nullptr) ? neg_enc_data : null_emb.data();
-            for (int s = 0; s < enc_S; s++) {
-                memcpy(&null_enc_ps[s * H_enc], uncond_src_ps, H_enc * sizeof(float));
+            if (neg_enc_seq != nullptr && neg_enc_seq_S > 0) {
+                int n_copy = neg_enc_seq_S < enc_S ? neg_enc_seq_S : enc_S;
+                memcpy(null_enc_ps.data(), neg_enc_seq, (size_t) n_copy * H_enc * sizeof(float));
+                for (int s = n_copy; s < enc_S; s++) {
+                    memcpy(&null_enc_ps[(size_t) s * H_enc], null_emb.data(), H_enc * sizeof(float));
+                }
+                fprintf(stderr, "[DiT] uncond branch = negative_prompt encoding (S=%d/%d, null-padded)\n",
+                        n_copy, enc_S);
+            } else {
+                const float * uncond_src_ps = (neg_enc_data != nullptr) ? neg_enc_data : null_emb.data();
+                for (int s = 0; s < enc_S; s++) {
+                    memcpy(&null_enc_ps[s * H_enc], uncond_src_ps, H_enc * sizeof(float));
+                }
             }
         }
         for (int b = 0; b < N_graph; b++) {

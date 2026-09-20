@@ -138,6 +138,9 @@ struct SynthState {
     std::vector<float> null_cond_vec;
     std::vector<float> neg_text_hidden;  // Phase A: text encoder output for negative prompt
     int                neg_S_text = 0;   // token count for negative text
+    std::vector<float> neg_enc_seq;      // Phase B: FULL cond-encoded negative sequence [H_cond x neg_enc_S]
+    int                neg_enc_S = 0;    // sequence length of neg_enc_seq
+    std::vector<float> neg_pooled;       // mean-pooled negative (legacy consumers, e.g. TRT broadcast)
 
     // DiT context
     std::vector<float> context;
