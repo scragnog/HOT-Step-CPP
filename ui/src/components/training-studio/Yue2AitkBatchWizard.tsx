@@ -90,6 +90,10 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
       return;
     }
     const recipe = selectedPreset?.settings ?? {};
+    if (recipe.stopMode === 'kl' && !(typeof recipe.targetKl === 'number' && recipe.targetKl > 0)) {
+      setFormError('The selected preset needs an AR KL target above 0.');
+      return;
+    }
     if (recipe.stopMode === 'loss' && !(typeof recipe.targetLoss === 'number' && recipe.targetLoss > 0)) {
       setFormError('The selected preset needs a target loss above 0.');
       return;
@@ -164,6 +168,15 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
           ...(recipe.alpha !== undefined ? { alpha: recipe.alpha } : {}),
           ...(recipe.stopMode ? { stopMode: recipe.stopMode } : {}),
           ...(recipe.stopMode === 'loss' && recipe.targetLoss !== undefined ? { targetLoss: recipe.targetLoss } : {}),
+          ...(recipe.stopMode === 'kl' && recipe.targetKl !== undefined ? { targetKl: recipe.targetKl } : {}),
+          // The recipe IS these knobs; without them a batch trains at the
+          // engine's flat defaults whatever the preset says.
+          ...(recipe.lr !== undefined ? { lr: recipe.lr } : {}),
+          ...(recipe.weightDecay !== undefined ? { weightDecay: recipe.weightDecay } : {}),
+          ...(recipe.plannerLrScale !== undefined ? { plannerLrScale: recipe.plannerLrScale } : {}),
+          ...(recipe.klWeight !== undefined ? { klWeight: recipe.klWeight } : {}),
+          ...(recipe.abcDropout !== undefined ? { abcDropout: recipe.abcDropout } : {}),
+          ...(recipe.captionDropout !== undefined ? { captionDropout: recipe.captionDropout } : {}),
         };
         const train = await startYue2JointTrain(dataset.id, trainOptions);
         await waitFor(train.jobId, (p: string) => update(dataset.id, { status: 'running', phase: `joint training: ${p}` }));
