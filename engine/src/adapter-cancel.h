@@ -23,3 +23,13 @@ inline bool adapter_cancel_requested() {
     const std::atomic<bool> * flag = g_adapter_cancel.load(std::memory_order_acquire);
     return flag != nullptr && flag->load(std::memory_order_relaxed);
 }
+
+// Progress of the active adapter delta precompute: the delta index the loop
+// is currently on, or -1 when no precompute is running. Written by the
+// precompute loops in adapter-runtime.h every iteration; read by the /job
+// status handler so external watchdogs see a moving heartbeat during the
+// multi-minute cold precompute (otherwise they kill the job at their
+// no-progress threshold and the load never completes). A single synth
+// pipeline runs at a time, so one process-global is unambiguous enough
+// for heartbeat purposes.
+inline std::atomic<int> g_adapter_progress{ -1 };

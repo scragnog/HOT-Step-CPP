@@ -3634,12 +3634,19 @@ int main(int argc, char ** argv) {
         // default: return status JSON. Now includes phase + phase_step/total so
         // the wrapper can distinguish "stalled in the ~17 s adapter precompute"
         // from "actually failed" without parsing the /logs SSE stream.
-        char phase_buf[256];
+        // adapter_progress is the live delta index of an in-flight adapter
+        // precompute (-1 when none) — the DiT reload can happen lazily at
+        // inference time (EVICT_NEVER adapter swap), where phase_step is the
+        // denoising step counter and stays 0 for the whole multi-minute load.
+        // Without this field the wrapper watchdog sees no movement and kills
+        // the job mid-precompute.
+        char phase_buf[320];
         int  step  = job->phase_step.load(std::memory_order_relaxed);
         int  total = job->phase_total.load(std::memory_order_relaxed);
+        int  aprog = g_adapter_progress.load(std::memory_order_relaxed);
         snprintf(phase_buf, sizeof(phase_buf),
-                 "{\"status\":\"%s\",\"phase\":\"%s\",\"phase_step\":%d,\"phase_total\":%d}",
-                 job_status_str(job->status.load()), job_phase_str(job->phase.load()), step, total);
+                 "{\"status\":\"%s\",\"phase\":\"%s\",\"phase_step\":%d,\"phase_total\":%d,\"adapter_progress\":%d}",
+                 job_status_str(job->status.load()), job_phase_str(job->phase.load()), step, total, aprog);
         // HOT-Step: additive YuE2 terminal fields, spliced in only when a
         // family actually populated them (ACE/MM3 jobs leave both empty, so
         // their response is byte-identical to before). Read only meaningful
