@@ -3116,7 +3116,13 @@ router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
       }
     }
 
-    const captionMode = isYue2CaptionMode(b.captionMode) ? b.captionMode : D.captionMode;
+    // No mode in the body (the batch pipeline posts `{}`): same rule as the
+    // form's defaults above — a corpus that ships captions or lyrics reads
+    // them. Falling back to `none` here built a cache with neither, and the
+    // align stage then skipped every source of a bulk run.
+    const sidecarsForMode = isYue2CaptionMode(b.captionMode) ? undefined : countYue2Sidecars(ds.sourceDir);
+    const captionMode = isYue2CaptionMode(b.captionMode) ? b.captionMode
+      : sidecarsForMode && (sidecarsForMode.withLyrics > 0 || sidecarsForMode.withCaption > 0) ? 'ace' : D.captionMode;
     const defaultCaption = typeof b.defaultCaption === 'string' ? b.defaultCaption.trim() : '';
     if (captionMode === 'default' && !defaultCaption) {
       res.status(400).json({ error: 'Caption mode "default" needs a caption to use for every clip.' });
