@@ -46,6 +46,9 @@ export interface ResolvedYue2JointTrainOptions {
   weightDecay?: number;
   klWeight?: number;
   abcDropout?: number;
+  /** Trigger-only style with this probability. Needs a dataset prepared after
+   *  2026-09-20 (trigger-only prefixes); the engine refuses otherwise. */
+  captionDropout?: number;
   plannerLrScale?: number;
 }
 
@@ -76,6 +79,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   if (o.weightDecay !== undefined) args.push('--weight-decay', String(o.weightDecay));
   if (o.klWeight !== undefined) args.push('--kl-weight', String(o.klWeight));
   if (o.abcDropout !== undefined) args.push('--abc-dropout', String(o.abcDropout));
+  if (o.captionDropout !== undefined) args.push('--caption-dropout', String(o.captionDropout));
   if (o.plannerLrScale !== undefined) args.push('--planner-lr-scale', String(o.plannerLrScale));
   if (o.resume) args.push('--resume', o.resume);
   if (o.alignment) {

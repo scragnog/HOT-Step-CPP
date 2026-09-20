@@ -241,6 +241,13 @@ inline bool read_dataset(const std::string & manifest_path, Dataset * out, std::
             !ids(off, &result.prompt.dropped_prefix_ids, false, error) ||
             !ids(abc, &result.prompt.abc_ids, true, error)) return false;
         result.prompt.retain_abc = !result.prompt.abc_ids.empty();
+        // Optional --caption-dropout twins (datasets prepared before them
+        // simply have none; the trainer refuses caption dropout on those).
+        yyjson_val * full_nocap = yyjson_obj_get(item, "prefix_full_nocap_ids");
+        yyjson_val * off_nocap = yyjson_obj_get(item, "prefix_off_nocap_ids");
+        if (!!full_nocap != !!off_nocap) return bad(error, "caption-dropout prefixes must come as a pair");
+        if (full_nocap && (!ids(full_nocap, &result.prompt.retained_nocap_prefix_ids, false, error) ||
+                           !ids(off_nocap, &result.prompt.dropped_nocap_prefix_ids, false, error))) return false;
         yyjson_val * cursor = yyjson_obj_get(item, "cursor");
         if (cursor) {
             if (!yyjson_is_obj(cursor)) return bad(error, "cursor metadata must be an object");
@@ -275,6 +282,23 @@ inline bool read_dataset(const std::string & manifest_path, Dataset * out, std::
             if (cm.off.L != cm.L || cm.full.nF != cm.off.nF) return bad(error, "cursor full/off token geometry differs");
             cursor_ranges(cm.full, &cm.full_frame_ranges); cursor_ranges(cm.off, &cm.off_frame_ranges);
             cm.full.T.clear(); cm.off.T.clear(); // retain compact ranges, not a dataset-wide dense matrix
+            // The caption-dropout twins bind against their own (shorter) prefixes.
+            yyjson_val * full_nocap_obj = yyjson_obj_get(cursor, "full_nocap");
+            yyjson_val * off_nocap_obj = yyjson_obj_get(cursor, "off_nocap");
+            if (!!full_nocap_obj != !!off_nocap_obj) return bad(error, "caption-dropout cursor bindings must come as a pair");
+            if (full_nocap_obj) {
+                if (!result.prompt.has_nocap()) return bad(error, "caption-dropout cursor bindings without their prefixes");
+                if (!cursor_side(full_nocap_obj, result.prompt.retained_nocap_prefix_ids, n, codepoints, cm.words5, &cm.full_nocap, error) ||
+                    !cursor_side(off_nocap_obj, result.prompt.dropped_nocap_prefix_ids, n, codepoints, cm.words5, &cm.off_nocap, error)) return false;
+                if (cm.full_nocap.L != cm.L || cm.off_nocap.L != cm.L || cm.full_nocap.nF != cm.full.nF || cm.off_nocap.nF != cm.full.nF)
+                    return bad(error, "caption-dropout cursor token geometry differs from the captioned one");
+                cm.j0_full_nocap = cm.full_nocap.j0; cm.j0_off_nocap = cm.off_nocap.j0;
+                cursor_ranges(cm.full_nocap, &cm.full_nocap_frame_ranges); cursor_ranges(cm.off_nocap, &cm.off_nocap_frame_ranges);
+                cm.full_nocap.T.clear(); cm.off_nocap.T.clear();
+                if (!i64s(yyjson_obj_get(full_nocap_obj, "token_end_codepoints"), &cm.full_nocap_lyric_token_end_codepoints, error) ||
+                    !i64s(yyjson_obj_get(off_nocap_obj, "token_end_codepoints"), &cm.off_nocap_lyric_token_end_codepoints, error)) return false;
+                cm.full_nocap_head_tokens = cm.full_nocap.j0 - 1; cm.off_nocap_head_tokens = cm.off_nocap.j0 - 1;
+            }
             cm.full_lyric_token_end_codepoints.clear(); cm.off_lyric_token_end_codepoints.clear();
             // The binding function has validated these; retain the arrays for
             // callers that need to rebind after choosing a shorter crop.

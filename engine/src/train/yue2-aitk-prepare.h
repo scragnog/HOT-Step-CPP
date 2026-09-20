@@ -37,6 +37,7 @@ struct VerifiedNativeItem {
     size_t frames = 0;
     PromptInput prompt;                   // produced by installed tokenizer API
     std::string prompt_style;
+    std::string prompt_style_nocap;       // the trigger alone; what --caption-dropout trains on
     std::string prompt_lyrics;
     bool instrumental = false;
 };
@@ -74,8 +75,10 @@ inline bool read_file(const std::filesystem::path & path, std::vector<uint8_t> *
 
 inline bool token_ids(const PromptInput & p, size_t frames, std::string * e) {
     if (p.retained_prefix_ids.empty() || p.dropped_prefix_ids.empty()) return prep_fail(e, "verified prefixes cannot be empty");
-    for (const auto & ids : {std::cref(p.retained_prefix_ids), std::cref(p.dropped_prefix_ids), std::cref(p.abc_ids)})
+    for (const auto & ids : {std::cref(p.retained_prefix_ids), std::cref(p.dropped_prefix_ids), std::cref(p.abc_ids),
+                             std::cref(p.retained_nocap_prefix_ids), std::cref(p.dropped_nocap_prefix_ids)})
         for (int32_t id : ids.get()) if (id < 0 || id >= kVocabSize) return prep_fail(e, "prompt token outside vocabulary");
+    if (p.retained_nocap_prefix_ids.empty() != p.dropped_nocap_prefix_ids.empty()) return prep_fail(e, "trigger-only prefixes must come as a pair");
     const size_t crop = std::min(frames, size_t(1500));
     if (p.retained_prefix_ids.size() + p.abc_ids.size() + 2 * crop + 5 > 24576 ||
         p.dropped_prefix_ids.size() + p.abc_ids.size() + 2 * crop + 5 > 24576)
@@ -129,8 +132,17 @@ inline bool add_cursor(yyjson_mut_doc * doc, yyjson_mut_val * obj, const CursorM
         !add_i64s(doc, full, "token_end_codepoints", cursor.full_lyric_token_end_codepoints) ||
         !yyjson_mut_obj_add_sint(doc, off, "head_tokens", cursor.off_head_tokens) ||
         !add_i64s(doc, off, "token_end_codepoints", cursor.off_lyric_token_end_codepoints) ||
-        !yyjson_mut_obj_add_val(doc, root, "full", full) || !yyjson_mut_obj_add_val(doc, root, "off", off) ||
-        !yyjson_mut_obj_add_val(doc, obj, "cursor", root)) return false;
+        !yyjson_mut_obj_add_val(doc, root, "full", full) || !yyjson_mut_obj_add_val(doc, root, "off", off)) return false;
+    if (cursor.has_nocap()) {
+        yyjson_mut_val * full_nocap = yyjson_mut_obj(doc), * off_nocap = yyjson_mut_obj(doc);
+        if (!full_nocap || !off_nocap ||
+            !yyjson_mut_obj_add_sint(doc, full_nocap, "head_tokens", cursor.full_nocap_head_tokens) ||
+            !add_i64s(doc, full_nocap, "token_end_codepoints", cursor.full_nocap_lyric_token_end_codepoints) ||
+            !yyjson_mut_obj_add_sint(doc, off_nocap, "head_tokens", cursor.off_nocap_head_tokens) ||
+            !add_i64s(doc, off_nocap, "token_end_codepoints", cursor.off_nocap_lyric_token_end_codepoints) ||
+            !yyjson_mut_obj_add_val(doc, root, "full_nocap", full_nocap) || !yyjson_mut_obj_add_val(doc, root, "off_nocap", off_nocap)) return false;
+    }
+    if (!yyjson_mut_obj_add_val(doc, obj, "cursor", root)) return false;
     return true;
 }
 
@@ -277,6 +289,11 @@ inline bool prepare_dataset(const PrepareRequest & request, std::string * error 
             !add_ids(doc, obj, "semantic_tokens", semantic) || !add_ids(doc, obj, "prefix_full_ids", item.prompt.retained_prefix_ids) ||
             !add_ids(doc, obj, "prefix_off_ids", item.prompt.dropped_prefix_ids) || !add_ids(doc, obj, "abc_ids", item.prompt.abc_ids) ||
             !yyjson_mut_arr_add_val(items, obj)) return prep_fail(error, "cannot construct manifest item");
+        if (item.prompt.has_nocap() &&
+            (!yyjson_mut_obj_add_strcpy(doc, obj, "style_nocap", item.prompt_style_nocap.c_str()) ||
+             !add_ids(doc, obj, "prefix_full_nocap_ids", item.prompt.retained_nocap_prefix_ids) ||
+             !add_ids(doc, obj, "prefix_off_nocap_ids", item.prompt.dropped_nocap_prefix_ids)))
+            return prep_fail(error, "cannot construct manifest caption-dropout prefixes");
         if (item.prompt.cursor.present && !add_cursor(doc, obj, item.prompt.cursor))
             return prep_fail(error, "cannot serialize cursor metadata");
     }

@@ -658,6 +658,7 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   weightDecay?: number;
   klWeight?: number;
   abcDropout?: number;
+  captionDropout?: number;
   plannerLrScale?: number;
 }
 

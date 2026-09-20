@@ -280,6 +280,20 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         item.prompt.dropped_prefix_ids.assign(off.begin(), off.end());
         item.prompt.abc_ids.assign(abc_ids.begin(), abc_ids.end()); item.prompt.retain_abc = !abc_ids.empty();
         item.prompt_style = style; item.prompt_lyrics = lyrics; item.instrumental = lyrics.empty();
+        // --caption-dropout twins: the style reduced to the trigger alone, which
+        // is exactly what yue2_style_string / applyYue2StyleTemplate produce
+        // for an empty caption at generation time. Same lyrics, same sheet.
+        // Always emitted (cheap); the trainer only draws on them when asked.
+        const std::string style_nocap = request.trigger;
+        auto full_nocap = yue2_token_prefixes(&tokenizer, style_nocap, lyrics, YUE2_COT_FULL, nullptr);
+        auto off_nocap = yue2_token_prefixes(&tokenizer, style_nocap, lyrics, YUE2_COT_OFF, nullptr);
+        if (full_nocap.empty() || full_nocap.back() != YUE2_ABC_START || off_nocap.size() < 3 ||
+            off_nocap[off_nocap.size() - 2] != YUE2_ABC_END || off_nocap.back() != YUE2_MUSIC_START)
+            return fail(error, "YuE2 tokenizer produced an unexpected trigger-only prefix tail");
+        off_nocap.resize(off_nocap.size() - 2);
+        item.prompt_style_nocap = style_nocap;
+        item.prompt.retained_nocap_prefix_ids.assign(full_nocap.begin(), full_nocap.end());
+        item.prompt.dropped_nocap_prefix_ids.assign(off_nocap.begin(), off_nocap.end());
         std::string cursor_name;
         const yyjson_val * cursor_value = yyjson_obj_get(source, "cursor_words");
         if (cursor_value && !str(const_cast<yyjson_val *>(cursor_value), &cursor_name, true))
@@ -343,6 +357,38 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
                     return fail(error, "cursor_words extends beyond the source frame duration");
             cursor_ranges(cm.full, &cm.full_frame_ranges); cursor_ranges(cm.off, &cm.off_frame_ranges);
             cm.full.T.clear(); cm.off.T.clear();
+            // Bind the caption-dropout twins the same way against their own
+            // heads. The lyric tokens must come out identical (same text,
+            // merges checked not to cross the boundary), so L and nF match.
+            {
+                const std::string full_nocap_text = yue2_assemble_text(style_nocap, lyrics, YUE2_COT_FULL);
+                const std::string off_nocap_text = yue2_assemble_text(style_nocap, lyrics, YUE2_COT_OFF);
+                const auto full_nocap_head = yue2_bpe_encode(&tokenizer, std::string(yue2_instruction(YUE2_COT_FULL)) + "\n[Tags]\n" + style_nocap + "\n[Lyrics]\n");
+                const auto off_nocap_head = yue2_bpe_encode(&tokenizer, std::string(yue2_instruction(YUE2_COT_OFF)) + "\n[Tags]\n" + style_nocap + "\n[Lyrics]\n");
+                const auto full_nocap_ids = yue2_bpe_encode(&tokenizer, full_nocap_text);
+                const auto off_nocap_ids = yue2_bpe_encode(&tokenizer, off_nocap_text);
+                if (!head_matches(full_nocap_ids, full_nocap_head) || !head_matches(off_nocap_ids, off_nocap_head))
+                    return fail(error, "cursor tokenizer BPE merge crossed the lyric boundary on the trigger-only prefix");
+                if (!prefix_matches(item.prompt.retained_nocap_prefix_ids, full_nocap_ids) ||
+                    !prefix_matches(item.prompt.dropped_nocap_prefix_ids, off_nocap_ids))
+                    return fail(error, "trigger-only cursor prefix does not match normalized tokenizer text");
+                if (!lyric_token_ends(&tokenizer, full_nocap_ids, full_nocap_head.size(), &cm.full_nocap_lyric_token_end_codepoints, error) ||
+                    !lyric_token_ends(&tokenizer, off_nocap_ids, off_nocap_head.size(), &cm.off_nocap_lyric_token_end_codepoints, error)) return false;
+                trim_protocol_newline(cm.full_nocap_lyric_token_end_codepoints);
+                trim_protocol_newline(cm.off_nocap_lyric_token_end_codepoints);
+                if (!bind_cursor_targets(item.prompt.retained_nocap_prefix_ids, static_cast<int64_t>(full_nocap_head.size()),
+                                         cm.full_nocap_lyric_token_end_codepoints, cm.lyric_codepoints, n, cm.words5, &cm.full_nocap) ||
+                    !bind_cursor_targets(item.prompt.dropped_nocap_prefix_ids, static_cast<int64_t>(off_nocap_head.size()),
+                                         cm.off_nocap_lyric_token_end_codepoints, cm.lyric_codepoints, n, cm.words5, &cm.off_nocap))
+                    return fail(error, cm.full_nocap.why.empty() ? cm.off_nocap.why.c_str() : cm.full_nocap.why.c_str());
+                if (cm.full_nocap.L != cm.L || cm.off_nocap.L != cm.L)
+                    return fail(error, "trigger-only cursor token geometry differs from the captioned prefix");
+                cm.full_nocap_head_tokens = static_cast<int64_t>(full_nocap_head.size());
+                cm.off_nocap_head_tokens = static_cast<int64_t>(off_nocap_head.size());
+                cm.j0_full_nocap = cm.full_nocap.j0; cm.j0_off_nocap = cm.off_nocap.j0;
+                cursor_ranges(cm.full_nocap, &cm.full_nocap_frame_ranges); cursor_ranges(cm.off_nocap, &cm.off_nocap_frame_ranges);
+                cm.full_nocap.T.clear(); cm.off_nocap.T.clear();
+            }
         }
         items.push_back(std::move(item));
     }

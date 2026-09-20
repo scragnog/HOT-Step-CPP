@@ -52,6 +52,11 @@ struct Config {
     // the runtime hardcoded before they were flags.
     float kl_weight = 0.2f;
     float abc_dropout = 0.5f;
+    // Probability that an example trains with its style reduced to the
+    // trigger alone (the legacy AR trainer's --caption-dropout; 0.5 is the
+    // measured recipe, arms 137-140 of 2026-09-15). Needs a dataset prepared
+    // with the trigger-only prefixes. 0 = off, byte-identical to before.
+    float caption_dropout = 0.0f;
     // AdamW only: the planner's learning rate as a multiple of --lr. The
     // decoder (NAR) half always trains at --lr itself. 1.0 = one rate for
     // both halves, which is what every run before this flag did.
@@ -69,7 +74,7 @@ inline void usage(FILE * out) {
         "[--optimizer adamw|prodigy|muon] [--lr F] [--warmup N] [--weight-decay F] "
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
         "[--target-loss F (0 disables)] [--target-loss-window N] "
-        "[--kl-weight 0.2] [--abc-dropout 0.5] [--planner-lr-scale 1.0 (adamw only)]\n");
+        "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (adamw only)]\n");
 }
 
 namespace detail {
@@ -213,6 +218,9 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--abc-dropout")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.abc_dropout)) { if (error) *error = "--abc-dropout must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--caption-dropout")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.caption_dropout)) { if (error) *error = "--caption-dropout must be a finite number"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--planner-lr-scale")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.planner_lr_scale)) { if (error) *error = "--planner-lr-scale must be a finite number"; return ParseResult::error; }

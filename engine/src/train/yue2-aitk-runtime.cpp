@@ -113,7 +113,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if(cursor_weight>0) yyjson_mut_obj_add_real(doc,root,"cursor_weight",cursor_weight);
     yyjson_mut_obj_add_strcpy(doc,root,"recipe","yue2-aitk-runtime-v1"); yyjson_mut_obj_add_strcpy(doc,root,"checkpoint_sha256",cp.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"dataset_sha256",ds.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"source_manifest_sha256",sm.c_str()); yyjson_mut_obj_add_uint(doc,root,"seed",seed); yyjson_mut_obj_add_int(doc,root,"cuda_index",device); yyjson_mut_obj_add_int(doc,root,"completed_step",completed); yyjson_mut_obj_add_uint(doc,root,"order_cursor",cursor); for(size_t x:order) yyjson_mut_arr_add_uint(doc,arr,x); yyjson_mut_obj_add_val(doc,root,"order",arr); yyjson_mut_obj_add_strcpy(doc,root,"sampler_state",sampler.c_str());
     yyjson_mut_obj_add_strcpy(doc,root,"optimizer",config.optimizer.c_str()); yyjson_mut_obj_add_int(doc,root,"rank",config.rank); yyjson_mut_obj_add_real(doc,root,"alpha",config.alpha); yyjson_mut_obj_add_real(doc,root,"lr",config.lr); yyjson_mut_obj_add_int(doc,root,"warmup",config.warmup); yyjson_mut_obj_add_real(doc,root,"weight_decay",config.weight_decay); yyjson_mut_obj_add_real(doc,root,"prodigy_d0",config.prodigy_d0); yyjson_mut_obj_add_real(doc,root,"muon_lr_scale",config.muon_lr_scale); yyjson_mut_obj_add_int(doc,root,"muon_ns_steps",config.muon_ns_steps);
-    yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale);
+    yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"caption_dropout",config.caption_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale);
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
@@ -147,12 +147,25 @@ static int run_impl(const Config & config, std::string * error) {
         config.target_loss_window < 1 ||
         !std::isfinite(config.kl_weight) || config.kl_weight < 0.0f ||
         !std::isfinite(config.abc_dropout) || config.abc_dropout < 0.0f || config.abc_dropout > 1.0f ||
+        !std::isfinite(config.caption_dropout) || config.caption_dropout < 0.0f || config.caption_dropout > 1.0f ||
         !std::isfinite(config.planner_lr_scale) || config.planner_lr_scale <= 0.0f) {
         fail(error, "invalid runtime configuration"); return 1;
     }
     event("preflight");
     yue2_aitk::Dataset dataset;
     if (!yue2_aitk::read_dataset(config.dataset, &dataset, error)) return 1;
+    if (config.caption_dropout > 0.0f) {
+        // Refuse up front rather than at the first draw, a model load later:
+        // a dataset prepared before the trigger-only prefixes existed cannot
+        // train with caption dropout and must be re-prepared.
+        for (const auto & item : dataset.items) {
+            if (!item.prompt.has_nocap()) { fail(error, "--caption-dropout needs trigger-only prefixes for every item; this dataset was prepared before they existed — re-run preparation"); return 1; }
+            if (config.cursor_weight > 0.0f && item.prompt.cursor.present && !item.prompt.cursor.instrumental && item.prompt.cursor.enabled && !item.prompt.cursor.has_nocap()) {
+                fail(error, "--caption-dropout with lyric timing needs trigger-only cursor bindings; re-run preparation"); return 1;
+            }
+        }
+        std::fprintf(stderr, "[yue2-aitk] caption dropout %.2f: trigger-only style on that share of steps\n", (double) config.caption_dropout);
+    }
     yue2_aitk::sha256::digest checkpoint_hash, dataset_hash;
     if (!yue2_aitk::sha256::file(std::filesystem::u8path(config.checkpoint), checkpoint_hash, error)) return 1;
     if (checkpoint_hash.hex() != lower_hash(dataset.base_sha256)) { fail(error, "checkpoint SHA-256 does not match dataset base_sha256"); return 1; }
@@ -383,7 +396,7 @@ static int run_impl(const Config & config, std::string * error) {
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
                 config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0);
             if (metadata.empty()) return false;
-            if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger)) return false;
+            if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout)) return false;
             if (use_lm) {
                 yue2_aitk::HostStateSnapshot snap; snap.step = step;
                 const auto named = state.named_tensors();
@@ -442,7 +455,7 @@ static int run_impl(const Config & config, std::string * error) {
             }
             const std::vector<float> schedule = sampler.sigmoid_schedule(1000);
             const auto & item = dataset.items[order[cursor]];
-            auto sampled = sampler.sample(item.song, item.prompt, 1500, schedule, config.abc_dropout, 0, 999);
+            auto sampled = sampler.sample(item.song, item.prompt, 1500, schedule, config.abc_dropout, 0, 999, config.caption_dropout);
             yue2_aitk_joint::Input input; input.batch = &sampled.batch; input.noisy_latents = sampled.noisy_bf16;
             input.flow_target = sampled.target_f32; input.timestep = sampled.timestep_bf16;
             input.kl_weight = config.kl_weight;
@@ -459,9 +472,14 @@ static int run_impl(const Config & config, std::string * error) {
             if(cursor_weight>0 && !item.prompt.cursor.instrumental) {
                 const auto & binding=item.prompt.cursor;
                 input.cursor_weight=cursor_weight;
-                input.lyric_start=sampled.abc_retained?binding.j0_full:binding.j0_off;
+                // Four prefixes, four lyric-start columns: the head length is
+                // what moves j0, and the trigger-only heads are shorter.
+                if (sampled.caption_retained) input.lyric_start=sampled.abc_retained?binding.j0_full:binding.j0_off;
+                else input.lyric_start=sampled.abc_retained?binding.j0_full_nocap:binding.j0_off_nocap;
                 input.lyric_count=binding.L;
-                const auto & ranges=sampled.abc_retained?binding.full_frame_ranges:binding.off_frame_ranges;
+                const auto & ranges=sampled.caption_retained
+                    ? (sampled.abc_retained?binding.full_frame_ranges:binding.off_frame_ranges)
+                    : (sampled.abc_retained?binding.full_nocap_frame_ranges:binding.off_nocap_frame_ranges);
                 input.cursor_frames.reserve(ranges.size());
                 for(const auto & range:ranges) input.cursor_frames.emplace_back(range.first,range.last);
             }

@@ -43,6 +43,7 @@ struct SampledBatch {
     Batch batch;
     FrameRange crop;
     bool abc_retained = false;
+    bool caption_retained = true;
     float timestep = 0.0f;
     float timestep_bf16 = 0.0f;
     std::vector<float> clean_f32, noise_f32, target_f32, noisy_f32, noisy_bf16;
@@ -55,8 +56,9 @@ public:
     explicit Yue2NativeSampler(uint64_t seed) : rng_(seed) {}
     NativeRng & rng() { return rng_; }
     std::vector<float> sigmoid_schedule(size_t count) { if (!count) throw std::invalid_argument("timestep schedule is empty"); std::vector<float> values; values.reserve(count); for (size_t i = 0; i < count; ++i) values.push_back(float((1.0 - (1.0 / (1.0 + std::exp(-rng_.normal01())))) * 1000.0)); std::sort(values.begin(), values.end(), std::greater<float>()); schedule_ = values; schedule_cursor_ = 0; return values; }
-    SampledBatch sample(const SongInput & song, const PromptInput & prompt, size_t train_window_frames, const std::vector<float> & timesteps, float abc_dropout = .5f, size_t ar_token_limit = 0, size_t eligible_timestep_count = 0) {
-        if (timesteps.empty() || train_window_frames > 1500 || !(abc_dropout >= 0 && abc_dropout <= 1)) throw std::invalid_argument("invalid native sampler configuration");
+    SampledBatch sample(const SongInput & song, const PromptInput & prompt, size_t train_window_frames, const std::vector<float> & timesteps, float abc_dropout = .5f, size_t ar_token_limit = 0, size_t eligible_timestep_count = 0, float caption_dropout = 0.0f) {
+        if (timesteps.empty() || train_window_frames > 1500 || !(abc_dropout >= 0 && abc_dropout <= 1) || !(caption_dropout >= 0 && caption_dropout <= 1)) throw std::invalid_argument("invalid native sampler configuration");
+        if (caption_dropout > 0 && !prompt.has_nocap()) throw std::invalid_argument("caption dropout needs a dataset prepared with trigger-only prefixes; re-run preparation");
         const size_t eligible = eligible_timestep_count ? eligible_timestep_count : timesteps.size();
         if (!eligible || eligible > timesteps.size()) throw std::invalid_argument("invalid eligible timestep count");
         for (float timestep : timesteps) if (!std::isfinite(timestep) || timestep < 0 || timestep > 1000) throw std::invalid_argument("timestep is outside [0,1000]");
@@ -64,9 +66,12 @@ public:
         for (float value : song.latents) if (!std::isfinite(value)) throw std::invalid_argument("song latent is nonfinite");
         const size_t frames = song.semantic_tokens.size(); FrameRange crop{0, frames}; if (train_window_frames && frames > train_window_frames) { crop.end = train_window_frames; crop.start = rng_.uniform_index(frames - train_window_frames + 1); crop.end += crop.start; }
         PromptInput selected = prompt; selected.retain_abc = prompt.retain_abc && rng_.uniform01() >= abc_dropout;
+        // Drawn AFTER the abc draw and only when enabled, so a run with
+        // caption_dropout 0 consumes exactly the RNG stream it always did.
+        selected.retain_caption = caption_dropout <= 0 || rng_.uniform01() >= caption_dropout;
         const size_t timestep_index = rng_.uniform_index(eligible);
         ++schedule_cursor_;
-        SampledBatch out; out.crop = crop; out.abc_retained = selected.retain_abc; out.timestep = timesteps[timestep_index]; out.timestep_bf16 = bf16_round_f32(out.timestep / 1000.0f);
+        SampledBatch out; out.crop = crop; out.abc_retained = selected.retain_abc; out.caption_retained = selected.retain_caption; out.timestep = timesteps[timestep_index]; out.timestep_bf16 = bf16_round_f32(out.timestep / 1000.0f);
         std::string error; if (!build(selected, song, crop, ar_token_limit, &out.batch, &error)) throw std::invalid_argument(error);
         // YuE2 cached latents and get_noise are cast to the recipe training
         // dtype before add_noise. This reference models the BF16 recipe:

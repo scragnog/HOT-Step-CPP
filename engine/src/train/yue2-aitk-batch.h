@@ -47,8 +47,23 @@ struct PromptInput {
     // prefix_head_ids(..., cot="off") from yue2_model.py:540-545.
     std::vector<int32_t> retained_prefix_ids;
     std::vector<int32_t> dropped_prefix_ids;
+    // --caption-dropout twins: the same two prefixes with the style reduced to
+    // the trigger alone (yue2_style_string with an empty caption). Empty when
+    // the dataset was prepared before they existed; the trainer refuses a
+    // caption-dropout run on such a dataset rather than silently training
+    // without it. Measured 2026-09-15 (arms 137-140): without this an adapter
+    // binds to each song's own caption and only a borrowed training caption
+    // stays in distribution; with it the full-caption prompt generalises.
+    std::vector<int32_t> retained_nocap_prefix_ids;
+    std::vector<int32_t> dropped_nocap_prefix_ids;
     std::vector<int32_t> abc_ids;
-    bool retain_abc = true; // stochastic decision is made by the caller
+    bool retain_abc = true;     // stochastic decision is made by the caller
+    bool retain_caption = true; // likewise; false selects the *_nocap_ prefix
+    bool has_nocap() const { return !retained_nocap_prefix_ids.empty() && !dropped_nocap_prefix_ids.empty(); }
+    const std::vector<int32_t> & selected_prefix() const {
+        if (retain_caption) return retain_abc ? retained_prefix_ids : dropped_prefix_ids;
+        return retain_abc ? retained_nocap_prefix_ids : dropped_nocap_prefix_ids;
+    }
     // Optional exact cursor binding.  When absent, schema-1 training has no
     // cursor term and keeps the historical behavior.
     CursorMetadata cursor;
@@ -104,7 +119,7 @@ inline ArSequence make_ar_sequence(const PromptInput & prompt,
                                    const std::vector<int32_t> & song_tokens,
                                    bool append_music_end) {
     ArSequence out;
-    out.prefix_ids = prompt.retain_abc ? prompt.retained_prefix_ids : prompt.dropped_prefix_ids;
+    out.prefix_ids = prompt.selected_prefix();
     if (prompt.retain_abc)
         out.suffix_ids.insert(out.suffix_ids.end(), prompt.abc_ids.begin(), prompt.abc_ids.end());
     out.suffix_ids.push_back(kAbcEnd);
@@ -141,7 +156,8 @@ inline bool build(const PromptInput & prompt, const SongInput & song,
     if (!out) return fail(error, "output batch is null");
     if (!validate_song(song, error)) return false;
     if (!validate_range(nar_range, song.semantic_tokens.size(), error)) return false;
-    const auto & prefix = prompt.retain_abc ? prompt.retained_prefix_ids : prompt.dropped_prefix_ids;
+    if (!prompt.retain_caption && !prompt.has_nocap()) return fail(error, "caption dropout selected but the item has no trigger-only prefixes");
+    const auto & prefix = prompt.selected_prefix();
     if (prefix.empty()) return fail(error, "selected prompt prefix is empty");
     for (int32_t id : prefix)
         if (id < 0 || id >= kVocabSize) return fail(error, "prompt prefix token is outside the vocabulary");

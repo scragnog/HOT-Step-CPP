@@ -50,6 +50,20 @@ struct CursorMetadata {
     int64_t L = 0;
     std::vector<CursorTokenRange> full_frame_ranges;
     std::vector<CursorTokenRange> off_frame_ranges;
+    // --caption-dropout twins (trigger-only style). The lyric tokens are the
+    // same, so L and the frame ranges match; only the head is shorter, which
+    // moves j0. Unbound when the dataset predates them.
+    int64_t full_nocap_head_tokens = 0;
+    int64_t off_nocap_head_tokens = 0;
+    std::vector<int64_t> full_nocap_lyric_token_end_codepoints;
+    std::vector<int64_t> off_nocap_lyric_token_end_codepoints;
+    CursorTargets full_nocap;
+    CursorTargets off_nocap;
+    int64_t j0_full_nocap = 0;
+    int64_t j0_off_nocap = 0;
+    std::vector<CursorTokenRange> full_nocap_frame_ranges;
+    std::vector<CursorTokenRange> off_nocap_frame_ranges;
+    bool has_nocap() const { return full_nocap.bound && off_nocap.bound; }
 };
 
 using CursorBinding = CursorMetadata;

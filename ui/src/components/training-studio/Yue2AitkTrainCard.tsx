@@ -706,6 +706,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner learning-rate scale'), 'default 1.0 · the AR half trains at lr × this; the reference recipe uses 0.6'],
             ['klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor to base (planner)'), 'default 0.2 · higher keeps the planner closer to the base model'],
             ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), 'default 0.5 · share of lead-sheet examples trained without their sheet, so one adapter serves cot on and off'],
+            ['captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'), 'default 0 · share of steps trained on the trigger alone instead of the song\'s caption. 0.5 is the measured recipe: it stops the adapter binding to each track\'s caption, so a NEW caption generalises. Needs a dataset prepared after 2026-09-20.'],
           ] as const).map(([key, label, hint]) => (
             <label key={key} className="flex flex-col gap-1">
               <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
