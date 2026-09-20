@@ -464,6 +464,36 @@ static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx)
     lua_setglobal(L, "model_context");
 }
 
+// Seed a plugin's Lua RNG deterministically from the job seed.
+//
+// WHY: Lua 5.4 seeds math.random from the clock + an address at lua_State
+// creation ("a weak attempt at randomness"), and each plugin's lua_State lives
+// for the whole ace-server process. A plugin that calls math.random() therefore
+// draws from a stream that depends on process start time AND on how many numbers
+// every previous generation consumed — so two renders of an identical payload
+// with an identical seed produced different audio (md_storm_V4's look-back
+// jitter, plugins/solvers/md_storm_core_V4.lua). Re-seeding from the job seed at
+// the start of every generation makes math.random() a pure function of the seed
+// while leaving its distribution (xoshiro256**) untouched.
+static void lua_seed_plugin_rng(lua_State * L, int64_t seed, const char * plugin_name) {
+    if (!L) return;
+    lua_getglobal(L, "math");
+    if (!lua_istable(L, -1)) { lua_pop(L, 1); return; }
+    lua_getfield(L, -1, "randomseed");
+    if (!lua_isfunction(L, -1)) { lua_pop(L, 2); return; }
+    lua_pushinteger(L, (lua_Integer) seed);
+    if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+        fprintf(stderr, "[Plugins] WARNING: math.randomseed(%lld) failed for '%s': %s\n",
+                (long long) seed, plugin_name ? plugin_name : "?", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        lua_pop(L, 1);  // math
+        return;
+    }
+    lua_pop(L, 1);  // math
+    fprintf(stderr, "[Plugins] solver '%s' RNG seeded from job seed %lld\n",
+            plugin_name ? plugin_name : "?", (long long) seed);
+}
+
 // Call a Lua solver's step() function
 static void lua_call_solver_step(LuaPlugin & plugin,
                                  float * xt, const float * vt,
@@ -479,6 +509,12 @@ static void lua_call_solver_step(LuaPlugin & plugin,
     lua_inject_params(L, params, plugin.name);
     lua_inject_model_context(L, model_ctx);
 
+    // Job seed: batch item 0 (one Lua state serves the whole flattened batch).
+    const int64_t job_seed = state.seeds ? state.seeds[0] : 0;
+
+    // Re-seed once per generation, then let the stream run across the steps.
+    if (state.step_index == 0) lua_seed_plugin_rng(L, job_seed, plugin.name.c_str());
+
     // Set state globals
     lua_pushinteger(L, state.step_index);
     lua_setglobal(L, "step_index");
@@ -486,6 +522,8 @@ static void lua_call_solver_step(LuaPlugin & plugin,
     lua_setglobal(L, "batch_n");
     lua_pushinteger(L, state.n_per);
     lua_setglobal(L, "n_per");
+    lua_pushinteger(L, (lua_Integer) job_seed);
+    lua_setglobal(L, "seed");
 
     // Push step function
     lua_getglobal(L, "step");
@@ -571,7 +609,8 @@ static void lua_call_solver_loop(
     LoopModelFn  model_fn,
     LoopOnStepFn on_step_fn,
     const std::unordered_map<std::string, std::string> & params,
-    const LuaModelContext & model_ctx = LuaModelContext{})
+    const LuaModelContext & model_ctx = LuaModelContext{},
+    int64_t      seed = 0)
 {
     lua_State * L = plugin.L;
     if (!L) return;
@@ -579,10 +618,14 @@ static void lua_call_solver_loop(
     lua_inject_params(L, params, plugin.name);
     lua_inject_model_context(L, model_ctx);
 
+    // Deterministic RNG for this generation (see lua_seed_plugin_rng).
+    lua_seed_plugin_rng(L, seed, plugin.name.c_str());
+
     // Set globals
     lua_pushinteger(L, num_steps);  lua_setglobal(L, "num_steps");
     lua_pushinteger(L, N);          lua_setglobal(L, "batch_n");
     lua_pushinteger(L, T * Oc);     lua_setglobal(L, "n_per");
+    lua_pushinteger(L, (lua_Integer) seed); lua_setglobal(L, "seed");
 
     // Register on_step global closure
     lua_pushlightuserdata(L, &on_step_fn);
