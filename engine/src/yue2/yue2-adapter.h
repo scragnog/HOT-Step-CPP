@@ -1159,6 +1159,46 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
 // Resolve an adapter path (a single safetensors file, or a directory holding
 // one), open it, and merge. Returns the number of tensors patched, or -1 on
 // failure with `err_out` set.
+// Which half a LoRA file targets, read WITHOUT merging: "ar", "nar", or ""
+// when the file does not say (no __metadata__.format and no key names either
+// way). yue2_apply_adapters uses it to hand each adapter to the half that is
+// actually being loaded (doc 30 #5) — a merge against a half that is not
+// staged is fatal by design. Accepts the same path shapes yue2_adapter_merge
+// does (a file, or a directory holding one of the exporters' default names).
+static std::string yue2_adapter_probe_family(const std::string & path) {
+    HS_STAT_T sb;
+    if (hs_stat(path, &sb) != 0) return "";
+    std::string sf_path = path;
+    if (S_ISDIR(sb.st_mode)) {
+        const char * cands[] = { "/adapter_model.safetensors", "/yue2-nar-lora.safetensors",
+                                 "/yue2-ar-lora.safetensors" };
+        sf_path.clear();
+        for (const char * c : cands) {
+            if (hs_stat(path + c, &sb) == 0) {
+                sf_path = path + c;
+                break;
+            }
+        }
+        if (sf_path.empty()) return "";
+    }
+    STFile st = {};
+    if (!st_open(&st, sf_path.c_str())) return "";
+    std::string fam;
+    const Yue2AdapterMeta md = yue2_adapter_read_meta(st);
+    if (yue2a_starts(md.format, "yue2-nar-lora")) fam = "nar";
+    else if (yue2a_starts(md.format, "yue2-ar-lora")) fam = "ar";
+    else {
+        bool has_nar = false, has_ar = false;
+        for (const STEntry & e : st.entries) {
+            if (e.name.find(".nar_") != std::string::npos) has_nar = true;
+            else if (e.name.find(".attn_") != std::string::npos || e.name.find(".ffn_") != std::string::npos) has_ar = true;
+        }
+        if (has_nar != has_ar) fam = has_nar ? "nar" : "ar";
+    }
+    st_close(&st);
+    return fam;
+}
+
 static int yue2_adapter_merge(WeightCtx *                 wctx,
                               const GGUFModel &           gf,
                               const char *                path,

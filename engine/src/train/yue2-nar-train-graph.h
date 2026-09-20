@@ -322,7 +322,7 @@ static bool yue2_nt_kv_from_chunk(const Yue2Model & m, const Yue2NarChunk & chun
         }
         return false;
     }
-    if (chunk.ar_cache.filled != chunk.ar_length || chunk.ar_length <= 0) {
+    if (chunk.ar_cache.filled.empty() || chunk.ar_cache.filled[0] != chunk.ar_length || chunk.ar_length <= 0) {
         if (err) {
             *err = "yue2_nt_kv_from_chunk: the chunk's AR prefill is missing or partial";
         }

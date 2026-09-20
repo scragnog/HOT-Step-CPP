@@ -94,9 +94,10 @@ static JobPhase yue2_job_phase_for_stage(Yue2Stage s) {
 }
 
 // The one worker function, run on the shared work_push() GPU-serializing
-// thread. Single-take, non-streaming (v1 scope) — no ensemble takes, no
-// AR-cache replay, no Play-While-Rendering (docs/plans/yue2/
-// 06-engine-port-plan.md §7's explicit v1 exclusions).
+// thread. Non-streaming; a request may carry lm_batch_size songs x
+// synth_batch_size noise variations (doc 30 #6), which come back song-major
+// as multipart/mixed — the same shape ACE's own batch path emits
+// (hot-step-server.cpp), plus a per-track "tracks" array on the status JSON.
 static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
     if (job->cancel.load()) {
         job_set_phase(*job, JobPhase::CANCELLED);
@@ -108,9 +109,15 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
 
     job_set_phase(*job, JobPhase::LOADING_DIT);
     std::string err;
-    // A plan-only job never decodes, so it never needs the VAE resident.
-    if (!yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req.plan_only, req.vae_variant, /*want_encoder=*/false,
-                         &err)) {
+    // Residency (doc 30 #5): with "keep models loaded" off — ACE's own
+    // EVICT_STRICT default — the pipeline walks the AR half, the NAR half and
+    // the VAE through VRAM one at a time and loads each itself; with it on,
+    // everything is brought up here and stays. A plan-only job never decodes,
+    // so it never needs the VAE resident.
+    const bool evict_strict = !g_keep_loaded;
+    if (!evict_strict &&
+        !yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req.plan_only, req.vae_variant,
+                         /*want_encoder=*/false, &err)) {
         job->result_body = err.empty() ? "YuE2 load failed" : err;
         job->result_mime  = "text/plain";
         job_set_phase(*job, JobPhase::FAILED);
@@ -130,7 +137,7 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
     };
 
     Yue2PipelineResult result;
-    const bool ok = yue2_pipeline_run(g_yue2, g_yue2_tok, req, progress, &job->cancel, &result, &err);
+    const bool ok = yue2_pipeline_run(g_yue2, g_yue2_tok, req, progress, &job->cancel, &result, &err, evict_strict);
 
     // Post-run residency: mirrors ACE's own EVICT_STRICT default / mm3-job.h's
     // release_if_transient posture. arbitratesResidencyInEngine=false means
@@ -148,38 +155,86 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
         job->status.store(cancelled ? 3 : 2);
         return;
     }
-
-    if (req.plan_only) {
-        // The score IS the result body; it is also spliced into the status
-        // JSON (result_abc) so a poller gets it without a second fetch.
-        job->result_body = result.score_abc;
-        job->result_mime  = "text/plain; charset=utf-8";
-    } else {
-        job->result_body = audio_encode_wav_s16(result.audio_planar.data(), (int) result.samples,
-                                                result.sample_rate);
-        job->result_mime  = "audio/wav";
+    if (result.tracks.empty()) {
+        job->result_body = "YuE2 pipeline returned no tracks";
+        job->result_mime  = "text/plain";
+        job_set_phase(*job, JobPhase::FAILED);
+        job->status.store(2);
+        return;
     }
-    job->result_abc         = result.score_abc;
-    job->result_end_reason  = result.end_reason;
-    {
+
+    // Per-track stage reasons as a JSON object string: only plan/semantic
+    // carry a meaningful terminator/limit value (06-engine-port-plan.md §7) —
+    // nar/vae stay absent, never a fabricated "completed" value.
+    auto stage_reasons_json = [](const Yue2TrackResult & tr) -> std::string {
         yyjson_mut_doc * doc  = yyjson_mut_doc_new(NULL);
         yyjson_mut_val * root = yyjson_mut_obj(doc);
         yyjson_mut_doc_set_root(doc, root);
-        // Only plan/semantic carry a meaningful per-stage terminator/limit
-        // value (docs/plans/yue2/06-engine-port-plan.md §7) — nar/vae stay
-        // absent (omitted), never a fabricated "completed" value.
         for (int s = 0; s < 2; s++) {
-            if (!result.stage_end_reason[s].empty()) {
-                yyjson_mut_obj_add_strcpy(doc, root, yue2_stage_name((Yue2Stage) s),
-                                          result.stage_end_reason[s].c_str());
+            if (!tr.stage_end_reason[s].empty()) {
+                yyjson_mut_obj_add_strcpy(doc, root, yue2_stage_name((Yue2Stage) s), tr.stage_end_reason[s].c_str());
             }
         }
-        char * json = yyjson_mut_write(doc, 0, NULL);
-        job->result_stage_end_reasons = json ? json : "{}";
+        char *      json = yyjson_mut_write(doc, 0, NULL);
+        std::string out  = json ? json : "{}";
         yyjson_mut_doc_free(doc);
-        if (json) {
-            free(json);
+        if (json) free(json);
+        return out;
+    };
+
+    const Yue2TrackResult & first = result.tracks[0];
+    if (req.plan_only) {
+        // The score IS the result body; it is also spliced into the status
+        // JSON (result_abc) so a poller gets it without a second fetch.
+        job->result_body = first.score_abc;
+        job->result_mime  = "text/plain; charset=utf-8";
+    } else if (result.tracks.size() == 1) {
+        job->result_body = audio_encode_wav_s16(first.audio_planar.data(), (int) first.samples, result.sample_rate);
+        job->result_mime  = "audio/wav";
+    } else {
+        // multiple tracks: multipart/mixed, each part is raw audio, song-major
+        const std::string boundary = "yue2-batch-boundary";
+        std::string       body;
+        for (const Yue2TrackResult & tr : result.tracks) {
+            body += "--" + boundary + "\r\n";
+            body += "Content-Type: audio/wav\r\n\r\n";
+            body += audio_encode_wav_s16(tr.audio_planar.data(), (int) tr.samples, result.sample_rate);
+            body += "\r\n";
         }
+        body += "--" + boundary + "--\r\n";
+        job->result_body = std::move(body);
+        job->result_mime  = "multipart/mixed; boundary=" + boundary;
+    }
+    job->result_abc               = first.score_abc;
+    job->result_end_reason        = result.end_reason;
+    job->result_stage_end_reasons = stage_reasons_json(first);
+    {
+        // "tracks": one entry per part, in part order, so the Node side can
+        // pair each WAV with the seeds it consumed and its own end reason.
+        yyjson_mut_doc * doc = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val * arr = yyjson_mut_arr(doc);
+        yyjson_mut_doc_set_root(doc, arr);
+        for (const Yue2TrackResult & tr : result.tracks) {
+            yyjson_mut_val * o = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_int(doc, o, "song", tr.song);
+            yyjson_mut_obj_add_int(doc, o, "variation", tr.variation);
+            yyjson_mut_obj_add_uint(doc, o, "seed", tr.seed);
+            yyjson_mut_obj_add_uint(doc, o, "noise_seed", tr.noise_seed);
+            yyjson_mut_obj_add_strcpy(doc, o, "end_reason", tr.end_reason.c_str());
+            yyjson_mut_obj_add_int(doc, o, "frames", (int) tr.total_frames);
+            const std::string sr = stage_reasons_json(tr);
+            yyjson_doc * srd = yyjson_read(sr.data(), sr.size(), 0);
+            if (srd) {
+                yyjson_mut_obj_add_val(doc, o, "stage_end_reasons", yyjson_val_mut_copy(doc, yyjson_doc_get_root(srd)));
+                yyjson_doc_free(srd);
+            }
+            if (!tr.score_abc.empty()) yyjson_mut_obj_add_strn(doc, o, "abc", tr.score_abc.c_str(), tr.score_abc.size());
+            yyjson_mut_arr_add_val(arr, o);
+        }
+        char * json = yyjson_mut_write(doc, 0, NULL);
+        job->result_tracks = json ? json : "[]";
+        yyjson_mut_doc_free(doc);
+        if (json) free(json);
     }
 
     job_set_phase(*job, JobPhase::DONE);
@@ -187,6 +242,7 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
     fprintf(stderr, "[YuE2-Job] %s: stage_ms plan=%.1f semantic=%.1f nar=%.1f vae=%.1f\n",
             job->id.c_str(), result.stage_ms[YUE2_STAGE_PLAN], result.stage_ms[YUE2_STAGE_SEMANTIC],
             result.stage_ms[YUE2_STAGE_NAR], result.stage_ms[YUE2_STAGE_VAE]);
-    fprintf(stderr, "[YuE2-Job] %s: done (%lld frames, %lld samples, end_reason=%s)\n", job->id.c_str(),
-            (long long) result.total_frames, (long long) result.samples, result.end_reason.c_str());
+    fprintf(stderr, "[YuE2-Job] %s: done (%zu track(s), %lld frames, %lld samples, end_reason=%s)\n", job->id.c_str(),
+            result.tracks.size(), (long long) first.total_frames, (long long) first.samples,
+            result.end_reason.c_str());
 }

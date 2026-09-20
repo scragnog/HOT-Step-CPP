@@ -174,8 +174,11 @@ struct Yue2NarLayer {
 
 struct Yue2LmWeights {
     ggml_tensor * token_embd  = nullptr;  // [H,V]
-    ggml_tensor * output_norm = nullptr;  // [H] — shared AR/NAR final norm ("model.norm")
+    ggml_tensor * output_norm = nullptr;  // [H] — shared AR/NAR final norm ("model.norm"), AR half's copy
     ggml_tensor * output      = nullptr;  // [H,V] — tie_word_embeddings=false, distinct from token_embd
+    // The NAR half's own copy of output_norm (same GGUF tensor, staged into
+    // wctx_nar) so the NAR graph never reads an evicted AR buffer.
+    ggml_tensor * nar_output_norm = nullptr;
 
     std::vector<Yue2LmLayer>  blk;      // AR path, block_count entries
     std::vector<Yue2NarLayer> nar_blk;  // NAR path, block_count entries
@@ -301,8 +304,12 @@ struct Yue2Model {
     // yue2_discover(), same lifecycle as lm_file.
     std::vector<Yue2Variant>  lm_variants;
 
-    // residency — two parts only, per file-header note above.
+    // residency. lm_resident = the AR half (token_embd/output/output_norm/
+    // blk.*) is in VRAM; nar_resident = the NAR half (nar_blk.*, flow heads,
+    // latent_pos_embed) is. yue2_load_parts(want_lm=true) loads both; the
+    // pipeline swaps them under EVICT_STRICT (doc 30 #5).
     bool           lm_resident  = false;
+    bool           nar_resident = false;
     bool           vae_resident = false;
     Yue2VaeVariant vae_loaded_variant = YUE2_VAE_STANDARD;
     // "" = auto/best-first (yue2_quant_rank order); otherwise pins discovery
@@ -358,10 +365,12 @@ struct Yue2Model {
     ggml_backend_t backend     = nullptr;
     ggml_backend_t cpu_backend = nullptr;
 
-    WeightCtx wctx_lm  = {};
+    WeightCtx wctx_lm  = {};  // AR half
+    WeightCtx wctx_nar = {};  // NAR half
     WeightCtx wctx_vae = {};
 
-    size_t vram_lm  = 0;
+    size_t vram_lm  = 0;  // AR half (ConvRot: the whole blob)
+    size_t vram_nar = 0;  // NAR half
     size_t vram_vae = 0;
     double load_ms  = 0.0;
 
@@ -943,7 +952,8 @@ static bool yue2_available(const Yue2Model & m) {
 
 // ── Weight loading ────────────────────────────────────────────────────────
 
-static bool yue2_load_lm_tensors(Yue2Model * m, const GGUFModel & gf, std::vector<std::string> * errs) {
+static bool yue2_load_lm_tensors(Yue2Model * m, const GGUFModel & gf, std::vector<std::string> * errs,
+                                 bool ar = true, bool nar = true) {
     const Yue2LmConfig & c = m->lm_cfg;
     const int64_t        H = c.embedding_length;
     const int64_t        V = c.vocab_size;
@@ -955,24 +965,32 @@ static bool yue2_load_lm_tensors(Yue2Model * m, const GGUFModel & gf, std::vecto
     const int64_t         MF = c.max_latent_frames;
     const int             L  = (int) c.block_count;
 
-    // Budget: 3 (embed/norm/output) + 4 (flow2, vae2llm+llm2vae) + 4 (time_embd)
-    // + 1 (latent_pos_embed) + L * (11 AR + 11 NAR).
-    wctx_init(&m->wctx_lm, 12 + L * 22);
+    // Two weight contexts, one per half, so either can leave VRAM on its own
+    // (doc 30 #5). AR budget: 3 (embed/norm/output) + L * 11. NAR budget:
+    // 1 (its own output_norm) + 4 (vae2llm+llm2vae) + 4 (time_embd) + 1
+    // (latent_pos_embed) + L * 11.
+    if (ar) wctx_init(&m->wctx_lm, 3 + L * 11);
+    if (nar) wctx_init(&m->wctx_nar, 10 + L * 11);
     Yue2Loader ld{ &m->wctx_lm, &gf, &m->tmap_lm, errs };
+    Yue2Loader ldn{ &m->wctx_nar, &gf, &m->tmap_lm, errs };
 
-    m->lm.token_embd  = ld.req("token_embd.weight", H, V);
-    m->lm.output_norm = ld.req("output_norm.weight", H);
-    m->lm.output      = ld.req("output.weight", H, V);  // distinct tensor: not tied to token_embd
-
-    m->lm.vae2llm_w      = ld.req("vae2llm.weight", LD, H);
-    m->lm.vae2llm_b      = ld.req("vae2llm.bias", H);
-    m->lm.llm2vae_w      = ld.req("llm2vae.weight", H, LD);
-    m->lm.llm2vae_b      = ld.req("llm2vae.bias", LD);
-    m->lm.time_embd_w[0] = ld.req("time_embd.0.weight", 256, H);
-    m->lm.time_embd_b[0] = ld.req("time_embd.0.bias", H);
-    m->lm.time_embd_w[1] = ld.req("time_embd.1.weight", H, H);
-    m->lm.time_embd_b[1] = ld.req("time_embd.1.bias", H);
-    m->lm.latent_pos_embed = ld.req("latent_pos_embed.weight", H, MF);
+    if (ar) {
+        m->lm.token_embd  = ld.req("token_embd.weight", H, V);
+        m->lm.output_norm = ld.req("output_norm.weight", H);
+        m->lm.output      = ld.req("output.weight", H, V);  // distinct tensor: not tied to token_embd
+    }
+    if (nar) {
+        m->lm.nar_output_norm = ldn.req("output_norm.weight", H);
+        m->lm.vae2llm_w      = ldn.req("vae2llm.weight", LD, H);
+        m->lm.vae2llm_b      = ldn.req("vae2llm.bias", H);
+        m->lm.llm2vae_w      = ldn.req("llm2vae.weight", H, LD);
+        m->lm.llm2vae_b      = ldn.req("llm2vae.bias", LD);
+        m->lm.time_embd_w[0] = ldn.req("time_embd.0.weight", 256, H);
+        m->lm.time_embd_b[0] = ldn.req("time_embd.0.bias", H);
+        m->lm.time_embd_w[1] = ldn.req("time_embd.1.weight", H, H);
+        m->lm.time_embd_b[1] = ldn.req("time_embd.1.bias", H);
+        m->lm.latent_pos_embed = ldn.req("latent_pos_embed.weight", H, MF);
+    }
 
     // TRAP (05-gguf-layout.md §3.3): latent_pos_embed must never be
     // block-quantized -- it is read by a plain ggml_get_rows index gather
@@ -1008,9 +1026,10 @@ static bool yue2_load_lm_tensors(Yue2Model * m, const GGUFModel & gf, std::vecto
         }
     }
 
-    m->lm.blk.assign((size_t) L, Yue2LmLayer{});
-    m->lm.nar_blk.assign((size_t) L, Yue2NarLayer{});
+    if (ar) m->lm.blk.assign((size_t) L, Yue2LmLayer{});
+    if (nar) m->lm.nar_blk.assign((size_t) L, Yue2NarLayer{});
     for (int i = 0; i < L; i++) {
+        if (ar) {
         Yue2LmLayer & b = m->lm.blk[(size_t) i];
         b.attn_norm    = ld.req(yue2_fmt("blk.%d.attn_norm.weight", i), H);
         b.attn_q       = ld.req(yue2_fmt("blk.%d.attn_q.weight", i), H, Q);
@@ -1023,19 +1042,22 @@ static bool yue2_load_lm_tensors(Yue2Model * m, const GGUFModel & gf, std::vecto
         b.ffn_gate     = ld.req(yue2_fmt("blk.%d.ffn_gate.weight", i), H, F);
         b.ffn_up       = ld.req(yue2_fmt("blk.%d.ffn_up.weight", i), H, F);
         b.ffn_down     = ld.req(yue2_fmt("blk.%d.ffn_down.weight", i), F, H);
+        }
 
+        if (nar) {
         Yue2NarLayer & nb = m->lm.nar_blk[(size_t) i];
-        nb.attn_norm    = ld.req(yue2_fmt("blk.%d.nar_attn_norm.weight", i), H);
-        nb.attn_q       = ld.req(yue2_fmt("blk.%d.nar_attn_q.weight", i), H, Q);
-        nb.attn_k       = ld.req(yue2_fmt("blk.%d.nar_attn_k.weight", i), H, K);
-        nb.attn_v       = ld.req(yue2_fmt("blk.%d.nar_attn_v.weight", i), H, K);
-        nb.attn_output  = ld.req(yue2_fmt("blk.%d.nar_attn_output.weight", i), Q, H);
-        nb.attn_q_norm  = ld.req(yue2_fmt("blk.%d.nar_attn_q_norm.weight", i), D);
-        nb.attn_k_norm  = ld.req(yue2_fmt("blk.%d.nar_attn_k_norm.weight", i), D);
-        nb.ffn_norm     = ld.req(yue2_fmt("blk.%d.nar_ffn_norm.weight", i), H);
-        nb.ffn_gate     = ld.req(yue2_fmt("blk.%d.nar_ffn_gate.weight", i), H, F);
-        nb.ffn_up       = ld.req(yue2_fmt("blk.%d.nar_ffn_up.weight", i), H, F);
-        nb.ffn_down     = ld.req(yue2_fmt("blk.%d.nar_ffn_down.weight", i), F, H);
+        nb.attn_norm    = ldn.req(yue2_fmt("blk.%d.nar_attn_norm.weight", i), H);
+        nb.attn_q       = ldn.req(yue2_fmt("blk.%d.nar_attn_q.weight", i), H, Q);
+        nb.attn_k       = ldn.req(yue2_fmt("blk.%d.nar_attn_k.weight", i), H, K);
+        nb.attn_v       = ldn.req(yue2_fmt("blk.%d.nar_attn_v.weight", i), H, K);
+        nb.attn_output  = ldn.req(yue2_fmt("blk.%d.nar_attn_output.weight", i), Q, H);
+        nb.attn_q_norm  = ldn.req(yue2_fmt("blk.%d.nar_attn_q_norm.weight", i), D);
+        nb.attn_k_norm  = ldn.req(yue2_fmt("blk.%d.nar_attn_k_norm.weight", i), D);
+        nb.ffn_norm     = ldn.req(yue2_fmt("blk.%d.nar_ffn_norm.weight", i), H);
+        nb.ffn_gate     = ldn.req(yue2_fmt("blk.%d.nar_ffn_gate.weight", i), H, F);
+        nb.ffn_up       = ldn.req(yue2_fmt("blk.%d.nar_ffn_up.weight", i), H, F);
+        nb.ffn_down     = ldn.req(yue2_fmt("blk.%d.nar_ffn_down.weight", i), F, H);
+        }
 
         if (!errs->empty()) {
             break;  // one bad layer means the file is wrong; don't spam 28 copies
@@ -1162,25 +1184,106 @@ static bool yue2_load_vae_tensors(Yue2Model * m, const GGUFModel & gf, bool want
 // ── Load / unload ────────────────────────────────────────────────────────
 
 static size_t yue2_vram_bytes(const Yue2Model & m) {
-    return m.vram_lm + m.vram_vae;
+    return m.vram_lm + m.vram_nar + m.vram_vae;
+}
+
+// Which merged-adapter entries belong to a half: "ar" rows to the AR half,
+// "nar" rows to the NAR half. Used by the half-eviction below and by
+// yue2_apply_adapters so a re-merge of one half never double-counts.
+static void yue2_forget_merged(Yue2Model * m, bool ar, bool nar) {
+    auto & v = m->lm_adapter_merged;
+    v.erase(std::remove_if(v.begin(), v.end(),
+                           [&](const Yue2Model::MergedAdapter & e) {
+                               return (ar && e.family == "ar") || (nar && e.family == "nar");
+                           }),
+            v.end());
+    bool has_ar = false, has_nar = false;
+    int  total  = 0;
+    for (const auto & e : v) {
+        total += e.tensors;
+        has_ar |= e.family == "ar";
+        has_nar |= e.family == "nar";
+    }
+    m->lm_adapter_tensors = total;
+    m->lm_adapter_family  = (has_ar && has_nar) ? "ar+nar" : has_ar ? "ar" : has_nar ? "nar" : "";
+    if (v.empty()) m->lm_adapter_desc.clear();
+}
+
+// Drop one or both halves of the LM from VRAM, leaving the backend, the VAE
+// and the other half alone (doc 30 #5: AR runs plan+semantic, then makes room
+// for NAR, which makes room for the VAE). ConvRot models load as one blob and
+// cannot be split; they are left resident. The merged-adapter bookkeeping for
+// the evicted half goes with it — the next load of that half re-merges.
+static void yue2_evict_half(Yue2Model * m, bool ar, bool nar) {
+    if (m->convrot) return;
+    const int L = (int) m->lm_cfg.block_count;
+    if (ar && m->lm_resident) {
+        wctx_free(&m->wctx_lm);
+        m->wctx_lm = {};
+        m->lm.token_embd = m->lm.output_norm = m->lm.output = nullptr;
+        m->lm.blk.clear();
+        for (int i = 0; i < L; i++) {
+            const char * sites[] = { "attn_norm", "attn_q", "attn_k", "attn_v", "attn_output", "attn_q_norm",
+                                     "attn_k_norm", "ffn_norm", "ffn_gate", "ffn_up", "ffn_down" };
+            for (const char * s : sites) m->tmap_lm.erase("blk." + std::to_string(i) + "." + s + ".weight");
+        }
+        m->tmap_lm.erase("token_embd.weight");
+        m->tmap_lm.erase("output.weight");
+        if (!m->nar_resident) m->tmap_lm.erase("output_norm.weight");
+        m->vram_lm     = 0;
+        m->lm_resident = false;
+        fprintf(stderr, "[YuE2] Evicted the AR half\n");
+    }
+    if (nar && m->nar_resident) {
+        wctx_free(&m->wctx_nar);
+        m->wctx_nar = {};
+        m->lm.nar_output_norm = nullptr;
+        m->lm.vae2llm_w = m->lm.vae2llm_b = m->lm.llm2vae_w = m->lm.llm2vae_b = nullptr;
+        m->lm.time_embd_w[0] = m->lm.time_embd_w[1] = m->lm.time_embd_b[0] = m->lm.time_embd_b[1] = nullptr;
+        m->lm.latent_pos_embed = nullptr;
+        m->lm.nar_blk.clear();
+        for (int i = 0; i < L; i++) {
+            const char * sites[] = { "nar_attn_norm", "nar_attn_q", "nar_attn_k", "nar_attn_v", "nar_attn_output",
+                                     "nar_attn_q_norm", "nar_attn_k_norm", "nar_ffn_norm", "nar_ffn_gate",
+                                     "nar_ffn_up", "nar_ffn_down" };
+            for (const char * s : sites) m->tmap_lm.erase("blk." + std::to_string(i) + "." + s + ".weight");
+        }
+        for (const char * n : { "vae2llm.weight", "vae2llm.bias", "llm2vae.weight", "llm2vae.bias",
+                                "time_embd.0.weight", "time_embd.0.bias", "time_embd.1.weight", "time_embd.1.bias",
+                                "latent_pos_embed.weight" }) {
+            m->tmap_lm.erase(n);
+        }
+        if (!m->lm_resident) m->tmap_lm.erase("output_norm.weight");
+        m->vram_nar     = 0;
+        m->nar_resident = false;
+        fprintf(stderr, "[YuE2] Evicted the NAR half\n");
+    }
+    yue2_forget_merged(m, ar, nar);
 }
 
 static void yue2_unload(Yue2Model * m) {
-    if (!m->backend_ref && !m->lm_resident && !m->vae_resident && !m->wctx_lm.ctx && !m->wctx_vae.ctx) {
+    if (!m->backend_ref && !m->lm_resident && !m->nar_resident && !m->vae_resident && !m->wctx_lm.ctx &&
+        !m->wctx_nar.ctx && !m->wctx_vae.ctx) {
         return;
     }
     m->convrot_adapters.clear();
     m->convrot.reset();
     wctx_free(&m->wctx_lm);
+    wctx_free(&m->wctx_nar);
     wctx_free(&m->wctx_vae);
+    m->wctx_lm  = {};
+    m->wctx_nar = {};
+    m->wctx_vae = {};
     m->lm    = Yue2LmWeights{};
     m->vae   = Yue2VaeWeights{};
     m->tmap_lm.clear();
     m->tmap_vae.clear();
     m->vram_lm     = 0;
+    m->vram_nar    = 0;
     m->vram_vae    = 0;
     m->load_ms     = 0.0;
     m->lm_resident  = false;
+    m->nar_resident = false;
     m->vae_resident = false;
     // The merged-adapter description belongs to the RESIDENT weights, which
     // have just gone away. lm_adapter_want (the request) deliberately
@@ -1211,6 +1314,7 @@ static bool yue2_bind_convrot_lm(Yue2Model * m, std::vector<std::string> * errs)
     m->lm = Yue2LmWeights{};
     m->lm.token_embd = a.embedding();
     m->lm.output_norm = a.ar().final_norm;
+    m->lm.nar_output_norm = a.nar().final_norm;
     m->lm.vae2llm_w = ordinary("model.diffusion_model.vae2llm.weight");
     m->lm.vae2llm_b = ordinary("model.diffusion_model.vae2llm.bias");
     m->lm.llm2vae_b = ordinary("model.diffusion_model.llm2vae.bias");
@@ -1264,22 +1368,32 @@ static bool yue2_convrot_backend_supported(ggml_backend_t backend) {
 // silently got the base model has no way to tell, and the whole point of the
 // quantized-base guard in yue2-adapter.h is not to ship a wrong-but-quiet
 // model. yue2_load_parts's own all-or-nothing contract then unloads.
-static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector<std::string> * errs) {
-    m->lm_adapter_desc.clear();
-    m->lm_adapter_tensors = 0;
-    m->lm_adapter_family.clear();
-    m->lm_adapter_merged.clear();
+static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector<std::string> * errs,
+                                bool ar = true, bool nar = true) {
+    yue2_forget_merged(m, ar, nar);
     if (m->lm_adapter_want.empty()) {
         return true;
     }
 
-    int  total  = 0;
-    bool has_ar = false, has_nar = false;
     for (const Yue2AdapterSpec & spec : m->lm_adapter_want) {
         std::string err;
         std::string fam;
-        const int   n =
-            yue2_adapter_merge(&m->wctx_lm, gf, spec.path.c_str(), spec.scales, m->backend, &err, &fam);
+        // A half-load merges only the adapters of that half: the merge patches
+        // staged PendingCopies by name and treats a target it cannot find as
+        // fatal, so an AR-only load must never see a NAR file (doc 30 #5).
+        const std::string probe = yue2_adapter_probe_family(spec.path);
+        WeightCtx * wctx = nullptr;
+        if (probe == "ar" && ar) wctx = &m->wctx_lm;
+        else if (probe == "nar" && nar) wctx = &m->wctx_nar;
+        else if (probe.empty() && ar && nar) wctx = &m->wctx_lm;  // unlabelled: legacy whole-LM path decides
+        else if (probe.empty()) {
+            errs->push_back("adapter " + spec.path + " carries no family (__metadata__.format) and this load "
+                            "brings up one half of the LM only — export it with a format, or keep models loaded");
+            return false;
+        } else {
+            continue;  // the other half's adapter; merged when that half loads
+        }
+        const int n = yue2_adapter_merge(wctx, gf, spec.path.c_str(), spec.scales, m->backend, &err, &fam);
         if (n < 0) {
             errs->push_back("adapter " + spec.path + ": " + (err.empty() ? "merge failed" : err));
             return false;
@@ -1295,23 +1409,15 @@ static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector
                             "yue2.blk.N.attn_q/ffn_*.lora_A.weight for an AR one)");
             return false;
         }
-        if (fam == "ar") {
-            has_ar = true;
-        } else if (fam == "nar") {
-            has_nar = true;
-        }
         m->lm_adapter_merged.push_back({ spec.path, fam, n });
-        total += n;
     }
-    m->lm_adapter_tensors = total;
-    m->lm_adapter_desc    = yue2_adapter_key(m->lm_adapter_want);
-    // A stack covering both halves is legal and disjoint, so say so rather than
-    // picking one — the AR and NAR blocks share no weights (this file's own
-    // Mixture-of-Transformers note), which is what makes an AR + NAR pair merge
-    // into two non-overlapping sets of tensors.
-    m->lm_adapter_family = (has_ar && has_nar) ? "ar+nar" : has_ar ? "ar" : has_nar ? "nar" : "";
-    fprintf(stderr, "[YuE2-Adapter] %d tensor(s) patched across %zu adapter(s) [%s]\n", total,
-            m->lm_adapter_want.size(),
+    // Recompute the aggregate from the merged list (both halves' entries): a
+    // stack covering both halves is legal and disjoint — the AR and NAR blocks
+    // share no weights (this file's own Mixture-of-Transformers note).
+    yue2_forget_merged(m, false, false);
+    m->lm_adapter_desc = yue2_adapter_key(m->lm_adapter_want);
+    fprintf(stderr, "[YuE2-Adapter] %d tensor(s) patched across %zu adapter(s) [%s]\n", m->lm_adapter_tensors,
+            m->lm_adapter_merged.size(),
             m->lm_adapter_family.empty() ? "?" : m->lm_adapter_family.c_str());
     return true;
 }
@@ -1323,8 +1429,18 @@ static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector
 // `variant` selects which VAE file to load when want_vae is set; loading a
 // different variant while one is already resident frees the old one first
 // (only one VAE variant is ever resident at a time, per the file header note).
+static bool yue2_load_parts(Yue2Model * m, bool want_ar, bool want_nar, bool want_vae, Yue2VaeVariant variant,
+                            bool want_encoder, std::string * err_out);
+
+// Legacy shape: want_lm brings up BOTH halves (the trainers, the probe and
+// every warm path want the whole LM).
 static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeVariant variant, bool want_encoder,
                             std::string * err_out) {
+    return yue2_load_parts(m, want_lm, want_lm, want_vae, variant, want_encoder, err_out);
+}
+
+static bool yue2_load_parts(Yue2Model * m, bool want_ar, bool want_nar, bool want_vae, Yue2VaeVariant variant,
+                            bool want_encoder, std::string * err_out) {
     if (want_vae && m->vae_resident && m->vae_loaded_variant != variant) {
         wctx_free(&m->wctx_vae);
         m->vae             = Yue2VaeWeights{};
@@ -1333,7 +1449,9 @@ static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeV
         m->vae_resident    = false;
     }
 
-    const bool need_lm  = want_lm && !m->lm_resident;
+    const bool need_ar  = want_ar && !m->lm_resident;
+    const bool need_nar = want_nar && !m->nar_resident;
+    const bool need_lm  = need_ar || need_nar;
     const bool need_vae = want_vae && !m->vae_resident;
     if (!need_lm && !need_vae) {
         return true;
@@ -1407,16 +1525,22 @@ static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeV
             if (!ok) {
                 errs.push_back("cannot open " + m->lm_file.path);
             } else {
-                ok = yue2_load_lm_tensors(m, gf, &errs);
+                ok = yue2_load_lm_tensors(m, gf, &errs, need_ar, need_nar);
                 if (ok) {
                     // Merge GGUF adapters while staged pointers still refer to gf's mmap.
                     // VAE-only loads do not touch the resident LM or its adapters.
-                    ok = yue2_apply_adapters(m, gf, &errs);
+                    ok = yue2_apply_adapters(m, gf, &errs, need_ar, need_nar);
                 }
-                if (ok) {
+                if (ok && need_ar) {
                     ok = wctx_alloc(&m->wctx_lm, m->backend);
                     if (!ok) {
-                        errs.push_back("backend buffer allocation failed for the LM (out of VRAM?)");
+                        errs.push_back("backend buffer allocation failed for the AR half (out of VRAM?)");
+                    }
+                }
+                if (ok && need_nar) {
+                    ok = wctx_alloc(&m->wctx_nar, m->backend);
+                    if (!ok) {
+                        errs.push_back("backend buffer allocation failed for the NAR half (out of VRAM?)");
                     }
                 }
                 gf_close(&gf);
@@ -1463,10 +1587,21 @@ static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeV
         return false;
     }
 
-    if (need_lm) {
-        m->vram_lm   += m->convrot ? ggml_backend_buffer_get_size(m->convrot->buffer()) :
-                                    m->wctx_lm.buffer ? ggml_backend_buffer_get_size(m->wctx_lm.buffer) : 0;
-        m->lm_resident = true;
+    if (m->convrot) {
+        if (need_lm) {
+            m->vram_lm     += ggml_backend_buffer_get_size(m->convrot->buffer());
+            m->lm_resident  = true;
+            m->nar_resident = true;
+        }
+    } else {
+        if (need_ar) {
+            m->vram_lm     = m->wctx_lm.buffer ? ggml_backend_buffer_get_size(m->wctx_lm.buffer) : 0;
+            m->lm_resident = true;
+        }
+        if (need_nar) {
+            m->vram_nar     = m->wctx_nar.buffer ? ggml_backend_buffer_get_size(m->wctx_nar.buffer) : 0;
+            m->nar_resident = true;
+        }
     }
     if (need_vae) {
         m->vram_vae         = m->wctx_vae.buffer ? ggml_backend_buffer_get_size(m->wctx_vae.buffer) : 0;
@@ -1475,8 +1610,9 @@ static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeV
     }
     m->load_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 
-    fprintf(stderr, "[YuE2] Loaded%s%s: LM %.2f + VAE(%s) %.2f = %.2f GB in %.0f ms\n", need_lm ? " lm" : "",
-            need_vae ? " vae" : "", (double) m->vram_lm / (1024.0 * 1024.0 * 1024.0),
+    fprintf(stderr, "[YuE2] Loaded%s%s%s: AR %.2f + NAR %.2f + VAE(%s) %.2f = %.2f GB in %.0f ms\n",
+            need_ar ? " ar" : "", need_nar ? " nar" : "", need_vae ? " vae" : "",
+            (double) m->vram_lm / (1024.0 * 1024.0 * 1024.0), (double) m->vram_nar / (1024.0 * 1024.0 * 1024.0),
             YUE2_VAE_VARIANT_NAME[m->vae_loaded_variant], (double) m->vram_vae / (1024.0 * 1024.0 * 1024.0),
             (double) yue2_vram_bytes(*m) / (1024.0 * 1024.0 * 1024.0), m->load_ms);
     return true;

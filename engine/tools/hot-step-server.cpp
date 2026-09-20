@@ -357,6 +357,13 @@ struct Job {
     // JSON once the job is done. Empty for every other family and for a
     // cot=off render (no plan stage).
     std::string       result_abc;
+    // YuE2 batches (docs/plans/yue2/30-upstream-backports.md #6): one entry
+    // per track of a multipart result, song-major, as a pre-built JSON array
+    // string — [{"song":0,"variation":0,"seed":..,"noise_seed":..,
+    // "end_reason":..,"stage_end_reasons":{..},"abc":..}, ..]. Emitted as
+    // "tracks" in the status JSON; empty for a single-track job and for every
+    // other family.
+    std::string       result_tracks;
     std::atomic<bool> cancel{ false };
 
     // Phase tracking (advisory, independent of `status`). phase_step/phase_total
@@ -3638,13 +3645,17 @@ int main(int argc, char ** argv) {
         // their response is byte-identical to before). Read only meaningful
         // once status != running, same convention as result_body/result_mime.
         std::string body = phase_buf;
-        if (!job->result_end_reason.empty() || !job->result_stage_end_reasons.empty() || !job->result_abc.empty()) {
+        if (!job->result_end_reason.empty() || !job->result_stage_end_reasons.empty() || !job->result_abc.empty() ||
+            !job->result_tracks.empty()) {
             body.pop_back();  // drop the closing '}'
             if (!job->result_end_reason.empty()) {
                 body += ",\"end_reason\":\"" + job->result_end_reason + "\"";
             }
             if (!job->result_stage_end_reasons.empty()) {
                 body += ",\"stage_end_reasons\":" + job->result_stage_end_reasons;
+            }
+            if (!job->result_tracks.empty()) {
+                body += ",\"tracks\":" + job->result_tracks;
             }
             if (!job->result_abc.empty()) {
                 // ABC is free text (quotes, backslashes, newlines) — let

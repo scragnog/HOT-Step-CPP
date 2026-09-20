@@ -157,10 +157,17 @@ static inline void yue2_cfg_blend(const std::vector<float> & cond, const std::ve
 //   step        the AR loop's own counter; step == history.size() at every
 //               call the real reference decode loop ever makes.
 //   legacy_off  cot=="off" — see file header.
+//   base        vocab id of scores[0] (doc 30 #1: the engine returns only the
+//               lm_head rows a stage samples from). eos_id/legal_lo/legal_hi/
+//               history stay ABSOLUTE ids; this function shifts them. A draw
+//               from the returned scores is a relative index — add `base`.
 static inline void yue2_distribution(std::vector<float> & scores, const Yue2SamplingParams & sp, int64_t eos_id,
                                      int64_t legal_lo, int64_t legal_hi, const std::vector<int32_t> & history,
-                                     int64_t step, bool legacy_off) {
+                                     int64_t step, bool legacy_off, int64_t base = 0) {
     const int64_t V = (int64_t) scores.size();
+    eos_id   -= base;
+    legal_lo -= base;
+    legal_hi -= base;
 
     // legal-token mask (additive, TRUE -inf) + EOS whitelist + min_tokens re-block.
     for (int64_t v = 0; v < V; v++) {
@@ -185,7 +192,7 @@ static inline void yue2_distribution(std::vector<float> & scores, const Yue2Samp
             freq[history[(size_t) i]]++;
         }
         for (const auto & kv : freq) {
-            const int64_t id = kv.first;
+            const int64_t id = (int64_t) kv.first - base;
             if (id < 0 || id >= V) {
                 continue;
             }

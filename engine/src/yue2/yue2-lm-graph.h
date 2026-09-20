@@ -201,20 +201,32 @@ static ggml_tensor * yue2_lm_attn_f32(ggml_context * ctx, ggml_tensor * q, ggml_
 }
 
 // One AR transformer block (blk.N.* — the shared AR half, never the nar_*
-// twin). h [H,T] -> [H,T]. Copy of mm3_lm_block's math (mm3-lm-graph.h),
-// stripped of runtime adapters, the ensemble/CFG batch axis, and the
-// mul-fold-rows decode optimization — none of it exists (or applies) here.
+// twin). Copy of mm3_lm_block's math (mm3-lm-graph.h), stripped of runtime
+// adapters and the mul-fold-rows decode optimization.
+//
+// Two layouts share this function (doc 30 §core):
+//   batched == false  prefill/one-shot: h [H,T] is T consecutive tokens of ONE
+//                     cache set (`set`); K/V land in rows `rows[T]` of that
+//                     set's view and the block attends over rows [0,n_kv) of it.
+//   batched == true   lockstep decode: h [H,S] is ONE token per set for every
+//                     set of the cache; positions/rows/mask are per set, K/V
+//                     land at rows[1,1,S] of the full [D,cap,Nkv,S] cache and
+//                     each set attends over its own rows [0,n_kv) under its
+//                     own mask column ([n_kv,1,1,S]). At S=1 this is the exact
+//                     tensor shape the single-row decode always used.
 static ggml_tensor * yue2_ar_block(ggml_context * ctx, ggml_cgraph * gf, const Yue2LmConfig & c,
                                    const Yue2LmLayer & w, ggml_tensor * h, ggml_tensor * positions, ggml_tensor * mask,
-                                   ggml_tensor * rows, ggml_tensor * kcache, ggml_tensor * vcache, int64_t n_kv_pad,
-                                   bool use_flash, const Yue2Model * cm = nullptr, int layer = -1) {
+                                   ggml_tensor * rows, ggml_tensor * kcache, ggml_tensor * vcache, int64_t n_kv,
+                                   bool use_flash, const Yue2Model * cm = nullptr, int layer = -1,
+                                   int64_t set = 0, bool batched = false) {
     const Yue2AitkLayerWeights * cw = cm && cm->convrot && layer >= 0 ?
         &cm->convrot->ar().layers[(size_t) layer] : nullptr;
     const int64_t H   = (int64_t) c.embedding_length;
     const int64_t D   = (int64_t) c.key_length;
     const int64_t Nh  = (int64_t) c.head_count;
     const int64_t Nkv = (int64_t) c.head_count_kv;
-    const int64_t T   = h->ne[1];
+    const int64_t T   = h->ne[1];  // tokens (prefill) or sets (batched decode)
+    const int64_t S   = batched ? T : 1;
 
     ggml_tensor * n = yue2_lm_rms(ctx, h, w.attn_norm, c.rms_eps);
 
@@ -238,26 +250,42 @@ static ggml_tensor * yue2_ar_block(ggml_context * ctx, ggml_cgraph * gf, const Y
 
     // NeoX half-split rotation (x1=first half, x2=second half — the
     // reference's own convention, §2.2's _apply_rotary), theta = rope_freq_base
-    // (1e6). Position_ids == cache_position always in this one-shot,
-    // non-CFG-batched forward (§2.2's own "unexercised padding branch" note —
-    // there is no padding here, so this is exactly the traced behavior, not an
-    // approximation of it).
+    // (1e6). `positions` has one entry per token (prefill) or per set
+    // (batched decode) — which is what lets cond and uncond sets sit at
+    // different absolute positions in one graph.
     q = ggml_rope_ext(ctx, q, positions, NULL, (int) D, GGML_ROPE_TYPE_NEOX, 0, c.rope_freq_base, 1.0f, 0.0f, 1.0f,
                        0.0f, 0.0f);
     k = ggml_rope_ext(ctx, k, positions, NULL, (int) D, GGML_ROPE_TYPE_NEOX, 0, c.rope_freq_base, 1.0f, 0.0f, 1.0f,
                        0.0f, 0.0f);
 
-    ggml_tensor * k_w = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));  // [D,T,Nkv,1]
-    ggml_tensor * v_w = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3));
-    ggml_build_forward_expand(gf, ggml_set_rows(ctx, kcache, k_w, rows));
-    ggml_build_forward_expand(gf, ggml_set_rows(ctx, vcache, v_w, rows));
-
-    ggml_tensor * k_win =
-        ggml_view_4d(ctx, kcache, D, n_kv_pad, Nkv, 1, kcache->nb[1], kcache->nb[2], kcache->nb[3], 0);
-    ggml_tensor * v_win =
-        ggml_view_4d(ctx, vcache, D, n_kv_pad, Nkv, 1, vcache->nb[1], vcache->nb[2], vcache->nb[3], 0);
-
-    ggml_tensor * q4 = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));  // [D,T,Nh,1]
+    ggml_tensor * k_win;
+    ggml_tensor * v_win;
+    ggml_tensor * q4;
+    if (!batched) {
+        // [D,T,Nkv,1] into rows `rows` of set `set`.
+        ggml_tensor * k_w = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
+        ggml_tensor * v_w = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3));
+        ggml_tensor * k_set = ggml_view_4d(ctx, kcache, D, kcache->ne[1], Nkv, 1, kcache->nb[1], kcache->nb[2],
+                                           kcache->nb[3], (size_t) set * kcache->nb[3]);
+        ggml_tensor * v_set = ggml_view_4d(ctx, vcache, D, vcache->ne[1], Nkv, 1, vcache->nb[1], vcache->nb[2],
+                                           vcache->nb[3], (size_t) set * vcache->nb[3]);
+        ggml_build_forward_expand(gf, ggml_set_rows(ctx, k_set, k_w, rows));
+        ggml_build_forward_expand(gf, ggml_set_rows(ctx, v_set, v_w, rows));
+        k_win = ggml_view_4d(ctx, kcache, D, n_kv, Nkv, 1, kcache->nb[1], kcache->nb[2], kcache->nb[3],
+                             (size_t) set * kcache->nb[3]);
+        v_win = ggml_view_4d(ctx, vcache, D, n_kv, Nkv, 1, vcache->nb[1], vcache->nb[2], vcache->nb[3],
+                             (size_t) set * vcache->nb[3]);
+        q4 = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));  // [D,T,Nh,1]
+    } else {
+        // [D,Nkv,S,1] -> [D,1,Nkv,S]: one row per set, set on the batch axis.
+        ggml_tensor * k_w = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 3, 1));
+        ggml_tensor * v_w = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 3, 1));
+        ggml_build_forward_expand(gf, ggml_set_rows(ctx, kcache, k_w, rows));  // rows [1,1,S]
+        ggml_build_forward_expand(gf, ggml_set_rows(ctx, vcache, v_w, rows));
+        k_win = ggml_view_4d(ctx, kcache, D, n_kv, Nkv, S, kcache->nb[1], kcache->nb[2], kcache->nb[3], 0);
+        v_win = ggml_view_4d(ctx, vcache, D, n_kv, Nkv, S, vcache->nb[1], vcache->nb[2], vcache->nb[3], 0);
+        q4 = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 3, 1));  // [D,1,Nh,S]
+    }
 
     // yue2.attention.softmax_scale KV, already 128^-0.5 (03-reference-numerics.md
     // §2.8 — no call site overrides PyTorch's default in either model).
@@ -269,7 +297,7 @@ static ggml_tensor * yue2_ar_block(ggml_context * ctx, ggml_cgraph * gf, const Y
     } else {
         attn = yue2_lm_attn_f32(ctx, q4, k_win, v_win, mask, scale);
     }
-    attn = ggml_reshape_2d(ctx, attn, H, T);  // [D,Nh,T,1] -> [H,T]
+    attn = ggml_reshape_2d(ctx, attn, H, T);  // [D,Nh,T,1] or [D,Nh,1,S] -> [H,T]
 
     ggml_tensor * projected = cw ? yue2_convrot_linear(ctx, cw->output, attn) :
                                    ggml_mul_mat(ctx, w.attn_output, attn);
@@ -293,6 +321,25 @@ static ggml_tensor * yue2_ar_block(ggml_context * ctx, ggml_cgraph * gf, const Y
                               ggml_mul_mat(ctx, w.ffn_down, activated);
     if (cw) down = yue2_convrot_adapt(ctx, cm, layer, false, YUE2_CR_DOWN, activated, down);
     return ggml_add(ctx, h, down);
+}
+
+// The lm_head, optionally restricted to vocab rows [head_lo, head_lo+head_n)
+// (doc 30 #1 / upstream 4a1de08f): a stage only ever samples from its own
+// content range plus its end token, which sit next to each other in the
+// vocabulary, so the rest of the 184704-row matmul and its readback are
+// wasted. A whole-row range of a contiguous [H,V] weight is itself contiguous,
+// so mul_mat takes the view as-is. head_n == 0 means the full vocabulary.
+// ConvRot heads are never sliced (int8 + rotation layout), and neither is a
+// head under imatrix collection (the hook matches weights by name).
+static ggml_tensor * yue2_lm_head(ggml_context * ctx, const Yue2Model & m, ggml_tensor * x, int64_t head_lo,
+                                  int64_t head_n) {
+    if (m.convrot) return yue2_convrot_linear(ctx, m.convrot->lm_head(), x);
+    ggml_tensor * w = m.lm.output;
+    if (head_n > 0 && !g_yue2_imatrix.armed) {
+        GGML_ASSERT(head_lo >= 0 && head_lo + head_n <= w->ne[1]);
+        w = ggml_view_2d(ctx, w, w->ne[0], head_n, w->nb[1], (size_t) head_lo * w->nb[1]);
+    }
+    return ggml_mul_mat(ctx, w, x);
 }
 
 // ── Public API ───────────────────────────────────────────────────────────
@@ -562,39 +609,41 @@ static bool yue2_ar_forward(const Yue2Model & m, const Yue2ArForwardRequest & re
     return ok;
 }
 
-// ── Persistent KV-cache decode (M4) ─────────────────────────────────────────
+// ── Persistent KV-cache decode (M4, batched since doc 30) ───────────────────
 //
 // yue2_ar_forward() above is a ONE-SHOT full-sequence forward: it allocates a
 // KV cache sized exactly to that one call's T and throws it away at the end
 // — correct for teacher-forced parity checking (M2/M3), but not the shape a
 // real incremental generation loop uses. This section adds the other half:
 // a KV cache that SURVIVES across calls (`Yue2ArKvCache`), a multi-token
-// `yue2_ar_prefill()` that writes the first N rows of it, and a single-token
-// `yue2_ar_decode_step()` that appends one row at a time — the actual
-// production decode shape (prefill the prompt once, then one token per
-// step), teacher-forceable for parity against M2's one-shot forward and
-// against the fixture's own `StaticKVCache` dump (kv_layer0/kv_layer27,
-// docs/plans/yue2/02-fixture-schema.md §5 step 7), or free-running for
-// engine/tools/yue2-probe.cpp's --generate smoke test.
+// `yue2_ar_prefill()` that appends N rows to one set of it, and a lockstep
+// `yue2_ar_decode_batch()` that appends one row to EVERY set in one graph.
 //
-// Layout: `[D, capacity, Nkv, 1]` per layer, F16, exactly like
-// yue2_ar_forward's own throwaway cache — contiguous, so a head's first `n`
-// rows are a single contiguous span at byte offset `h*nb[2]`, which is what
-// `yue2_ar_kv_cache_dump_layer` below relies on to reproduce the fixture's
-// `[num_kv_heads, seq, head_dim]` (head-major) flatten order with a single
-// `ggml_backend_tensor_get` per head — no transpose needed, because ggml's
-// own `[D,T,Nkv,1]` axis order already puts head_dim fastest, then seq, then
-// kv-head slowest, which IS `StaticKVCache`'s head-major convention
-// (03-reference-numerics.md §2.6) read back linearly.
+// Layout: `[D, capacity, Nkv, S]` per layer, F16. S "sets" are S independent
+// sequences (docs/plans/yue2/30-upstream-backports.md): the cond/uncond
+// pair of a guided decode, or the B songs of a batch, or both. Each set has
+// its own `filled[s]` row count and its own absolute positions, so sets of
+// different prompt lengths decode in the same graph — the constraint that
+// made this file's header reject a batch axis for CFG (yue2_negative_prefix
+// drops the whole lyric block, so the two branches never sit at the same
+// position) is gone: positions are per set, not per graph.
 //
-// One cache instance is only ever used by ONE branch (positive or negative)
-// — CFG's two independent forward calls (yue2-lm-graph.h's file header, and
-// engine-port-plan.md §3 design 2) means a caller doing CFG'd decode owns
-// two separate `Yue2ArKvCache` instances, never one shared cache with a
-// batch axis.
+// Within one set, a head's first `n` rows are one contiguous span at byte
+// offset `s*nb[3] + h*nb[2]`, which is what `yue2_ar_kv_cache_dump_layer`
+// relies on to reproduce the fixture's `[num_kv_heads, seq, head_dim]`
+// (head-major) flatten order with a single `ggml_backend_tensor_get` per
+// head.
+//
+// `filled[s]` may be lowered (`yue2_ar_kv_cache_trim`): rows past it stay
+// allocated and masked out, and the next prefill on that set overwrites
+// them. That is how an acoustic chunk keeps the prompt rows it shares with
+// the semantic stage and forwards only the tail it is missing (doc 30 #2).
 
 struct Yue2ArDecodeGraph {
-    int64_t bucket = 0;
+    int64_t bucket  = 0;
+    int64_t n_sets  = 0;
+    int64_t head_lo = -1;
+    int64_t head_n  = -1;
     uint8_t * gbuf = nullptr;
     ggml_context * ctx = nullptr;
     ggml_cgraph * gf = nullptr;
@@ -615,24 +664,31 @@ static void yue2_ar_decode_graph_free(Yue2ArDecodeGraph * d) {
 }
 
 struct Yue2ArKvCache {
-    int64_t                    capacity = 0;  // total rows this cache can ever hold
-    int64_t                    filled   = 0;  // rows [0,filled) are valid/written
+    int64_t                    capacity = 0;  // rows per set
+    int64_t                    n_sets   = 0;
+    std::vector<int64_t>       filled;        // per set: rows [0,filled[s]) are valid
+    // lm_head window applied by prefill/decode on this cache (doc 30 #1).
+    // 0 = full vocabulary. Logits come back as [head_n] per set, indexed from
+    // head_lo; the sampler is told the same base.
+    int64_t                    head_lo  = 0;
+    int64_t                    head_n   = 0;
     ggml_context *              ctx      = nullptr;
     ggml_backend_buffer_t       buf      = nullptr;
-    std::vector<ggml_tensor *> k, v;          // one F16 [D,capacity,Nkv,1] tensor per layer
-    Yue2ArDecodeGraph dec;                   // stable within each power-of-two KV span
+    std::vector<ggml_tensor *> k, v;          // one F16 [D,capacity,Nkv,S] tensor per layer
+    Yue2ArDecodeGraph dec;                   // stable within each (bucket, S, head window)
 };
 
-static bool yue2_ar_kv_cache_alloc(const Yue2Model & m, int64_t capacity, Yue2ArKvCache * out, std::string * err) {
+static bool yue2_ar_kv_cache_alloc(const Yue2Model & m, int64_t capacity, Yue2ArKvCache * out, std::string * err,
+                                   int64_t n_sets = 1) {
     if (!m.lm_resident) {
         if (err) {
             *err = "YuE2 LM is not resident (yue2_load_parts(want_lm=true) first)";
         }
         return false;
     }
-    if (capacity <= 0) {
+    if (capacity <= 0 || n_sets <= 0) {
         if (err) {
-            *err = "yue2_ar_kv_cache_alloc: capacity must be > 0";
+            *err = "yue2_ar_kv_cache_alloc: capacity and n_sets must be > 0";
         }
         return false;
     }
@@ -652,8 +708,8 @@ static bool yue2_ar_kv_cache_alloc(const Yue2Model & m, int64_t capacity, Yue2Ar
     out->k.assign((size_t) L, nullptr);
     out->v.assign((size_t) L, nullptr);
     for (int i = 0; i < L; i++) {
-        out->k[(size_t) i] = ggml_new_tensor_4d(out->ctx, GGML_TYPE_F16, D, capacity, Nkv, 1);
-        out->v[(size_t) i] = ggml_new_tensor_4d(out->ctx, GGML_TYPE_F16, D, capacity, Nkv, 1);
+        out->k[(size_t) i] = ggml_new_tensor_4d(out->ctx, GGML_TYPE_F16, D, capacity, Nkv, n_sets);
+        out->v[(size_t) i] = ggml_new_tensor_4d(out->ctx, GGML_TYPE_F16, D, capacity, Nkv, n_sets);
     }
     out->buf = ggml_backend_alloc_ctx_tensors(out->ctx, m.backend);
     if (!out->buf) {
@@ -666,7 +722,10 @@ static bool yue2_ar_kv_cache_alloc(const Yue2Model & m, int64_t capacity, Yue2Ar
     }
     ggml_backend_buffer_clear(out->buf, 0);  // defensive — every row gets written before any read, same posture as yue2_ar_forward's cache
     out->capacity = capacity;
-    out->filled   = 0;
+    out->n_sets   = n_sets;
+    out->filled.assign((size_t) n_sets, 0);
+    out->head_lo  = 0;
+    out->head_n   = 0;
     return true;
 }
 
@@ -683,18 +742,86 @@ static void yue2_ar_kv_cache_free(Yue2ArKvCache * c) {
     c->k.clear();
     c->v.clear();
     c->capacity = 0;
-    c->filled   = 0;
+    c->n_sets   = 0;
+    c->filled.clear();
 }
 
-// Reads back rows [0,n) of layer `layer`'s cached K/V, widened to f32, in
-// StaticKVCache's own head-major flatten order ([num_kv_heads, n, head_dim],
-// h slowest / t / d fastest) — directly comparable to the fixture's
-// kv_layer{0,27}_{k,v}.bin after that file's own bf16-widen (both are the
-// same flatten order; see the file-header note on why no transpose is
-// needed). `n` must be <= cache.filled.
+// Forget rows [n, filled[set]) of one set. Nothing is freed or zeroed: the
+// rows stay masked until the next prefill on this set overwrites them.
+static inline void yue2_ar_kv_cache_trim(Yue2ArKvCache & c, int64_t set, int64_t n) {
+    GGML_ASSERT(set >= 0 && set < c.n_sets && n >= 0 && n <= c.filled[(size_t) set]);
+    c.filled[(size_t) set] = n;
+}
+
+// Replicate rows [0,n) of set `src_set` of `src` into set `dst_set` of `dst`
+// on the device (one ggml_cpy per layer tensor, no host round trip) and mark
+// the destination set filled to n. Both caches may be the same object. A
+// prefix shared by two sets — the prompt of B songs, the cond and uncond
+// halves of a guided plan, a song's prompt and each of its acoustic chunks —
+// costs one prefill this way instead of one per set.
+static bool yue2_ar_kv_cache_copy_rows(const Yue2Model & m, const Yue2ArKvCache & src, int64_t src_set,
+                                       Yue2ArKvCache & dst, int64_t dst_set, int64_t n, std::string * err) {
+    if (src_set < 0 || dst_set < 0 || src_set >= src.n_sets || dst_set >= dst.n_sets ||
+        (&src == &dst && src_set == dst_set) || n <= 0 || n > src.filled[(size_t) src_set] || n > dst.capacity ||
+        src.k.size() != dst.k.size()) {
+        if (err) *err = "yue2_ar_kv_cache_copy_rows: bad set index or row count";
+        return false;
+    }
+    const int L = (int) src.k.size();
+    const size_t ctx_bytes = ggml_tensor_overhead() * (size_t) (L * 8 + 16) + ggml_graph_overhead_custom((size_t) L * 4 + 16, false);
+    std::vector<uint8_t> gbuf(ctx_bytes);
+    ggml_init_params ip = { ctx_bytes, gbuf.data(), /*no_alloc*/ true };
+    ggml_context * ctx = ggml_init(ip);
+    if (!ctx) {
+        if (err) *err = "yue2_ar_kv_cache_copy_rows: ggml_init failed";
+        return false;
+    }
+    ggml_cgraph * gf = ggml_new_graph_custom(ctx, (size_t) L * 4 + 16, false);
+    for (int i = 0; i < L; i++) {
+        ggml_tensor * st[2] = { src.k[(size_t) i], src.v[(size_t) i] };
+        ggml_tensor * dt[2] = { dst.k[(size_t) i], dst.v[(size_t) i] };
+        for (int j = 0; j < 2; j++) {
+            ggml_tensor * x = st[j];
+            ggml_tensor * y = dt[j];
+            ggml_tensor * a = ggml_view_4d(ctx, x, x->ne[0], n, x->ne[2], 1, x->nb[1], x->nb[2], x->nb[3],
+                                           (size_t) src_set * x->nb[3]);
+            ggml_tensor * b = ggml_view_4d(ctx, y, y->ne[0], n, y->ne[2], 1, y->nb[1], y->nb[2], y->nb[3],
+                                           (size_t) dst_set * y->nb[3]);
+            ggml_build_forward_expand(gf, ggml_cpy(ctx, a, b));
+        }
+    }
+    // Through the scheduler, not ggml_backend_graph_compute: gallocr is what
+    // gives the cache views a buffer (ggml_backend_view_init), and CUDA's
+    // graph runner dereferences src->buffer.
+    BackendPair bp = { m.backend, m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
+    ggml_backend_sched_t sched = backend_sched_new(bp, (int) ((size_t) L * 4 + 16));
+    bool ok = sched && ggml_backend_sched_alloc_graph(sched, gf) &&
+              ggml_backend_sched_graph_compute(sched, gf) == GGML_STATUS_SUCCESS;
+    if (sched) ggml_backend_sched_free(sched);
+    ggml_free(ctx);
+    if (!ok) {
+        if (err) *err = "yue2_ar_kv_cache_copy_rows: graph compute failed";
+        return false;
+    }
+    dst.filled[(size_t) dst_set] = n;
+    return true;
+}
+
+static inline bool yue2_ar_kv_cache_copy_set(const Yue2Model & m, Yue2ArKvCache & c, int64_t src, int64_t dst,
+                                             int64_t n, std::string * err) {
+    return yue2_ar_kv_cache_copy_rows(m, c, src, c, dst, n, err);
+}
+
+// Reads back rows [0,n) of layer `layer`'s cached K/V for set `set`, widened
+// to f32, in StaticKVCache's own head-major flatten order ([num_kv_heads, n,
+// head_dim], h slowest / t / d fastest) — directly comparable to the
+// fixture's kv_layer{0,27}_{k,v}.bin after that file's own bf16-widen (both
+// are the same flatten order; see the section note on why no transpose is
+// needed). `n` must be <= cache.filled[set].
 static bool yue2_ar_kv_cache_dump_layer(const Yue2ArKvCache & cache, int layer, int64_t n, std::vector<float> * k_out,
-                                        std::vector<float> * v_out) {
-    if (layer < 0 || (size_t) layer >= cache.k.size() || n <= 0 || n > cache.filled) {
+                                        std::vector<float> * v_out, int64_t set = 0) {
+    if (layer < 0 || (size_t) layer >= cache.k.size() || set < 0 || set >= cache.n_sets || n <= 0 ||
+        n > cache.filled[(size_t) set]) {
         return false;
     }
     ggml_tensor * kt  = cache.k[(size_t) layer];
@@ -705,11 +832,13 @@ static bool yue2_ar_kv_cache_dump_layer(const Yue2ArKvCache & cache, int layer, 
     v_out->resize((size_t) (Nkv * n * D));
     std::vector<uint16_t> tmp((size_t) (n * D));
     for (int64_t h = 0; h < Nkv; h++) {
-        ggml_backend_tensor_get(kt, tmp.data(), (size_t) h * kt->nb[2], (size_t) (n * D) * sizeof(uint16_t));
+        ggml_backend_tensor_get(kt, tmp.data(), (size_t) set * kt->nb[3] + (size_t) h * kt->nb[2],
+                                (size_t) (n * D) * sizeof(uint16_t));
         for (size_t i = 0; i < tmp.size(); i++) {
             (*k_out)[(size_t) (h * n * D) + i] = ggml_fp16_to_fp32(*(const ggml_fp16_t *) &tmp[i]);
         }
-        ggml_backend_tensor_get(vt, tmp.data(), (size_t) h * vt->nb[2], (size_t) (n * D) * sizeof(uint16_t));
+        ggml_backend_tensor_get(vt, tmp.data(), (size_t) set * vt->nb[3] + (size_t) h * vt->nb[2],
+                                (size_t) (n * D) * sizeof(uint16_t));
         for (size_t i = 0; i < tmp.size(); i++) {
             (*v_out)[(size_t) (h * n * D) + i] = ggml_fp16_to_fp32(*(const ggml_fp16_t *) &tmp[i]);
         }
@@ -719,40 +848,46 @@ static bool yue2_ar_kv_cache_dump_layer(const Yue2ArKvCache & cache, int layer, 
 
 // Multi-token prefill: runs `ids.size()` tokens through the full causal AR
 // stack exactly like yue2_ar_forward()'s body, EXCEPT the K/V it writes land
-// in `cache` (rows [0,ids.size())) instead of a throwaway per-call buffer,
-// and `cache.filled` is advanced on success so a later yue2_ar_decode_step()
-// call knows where to continue. Requested logit/hidden positions must be
-// row indices into `ids` (same convention as Yue2ArForwardRequest). Must be
-// the FIRST call made against a freshly-allocated `cache` (filled must be 0).
+// in set `set` of `cache` at rows [filled[set], filled[set]+T) — absolute
+// positions continue from filled[set] — and `filled[set]` advances on
+// success so a later decode step knows where to continue. On an empty set
+// this is the classic whole-prompt prefill; on a non-empty one it appends
+// (doc 30 #2). Requested logit/hidden positions are row indices into `ids`
+// (same convention as Yue2ArForwardRequest); logits are [Kl, head_n or V]
+// under the cache's head window.
 static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const std::vector<int32_t> & ids,
                             const std::vector<int64_t> & logit_positions,
                             const std::vector<int64_t> & hidden_positions, Yue2ArForwardResult * out,
-                            std::string * err) {
+                            std::string * err, int64_t set = 0) {
     if (!m.lm_resident) {
         if (err) {
             *err = "YuE2 LM is not resident (yue2_load_parts(want_lm=true) first)";
         }
         return false;
     }
-    if (cache.filled != 0) {
+    if (set < 0 || set >= cache.n_sets) {
         if (err) {
-            *err = "yue2_ar_prefill: cache is not empty (filled != 0) -- prefill must be the first call";
+            *err = "yue2_ar_prefill: set index out of range";
         }
         return false;
     }
-    const int64_t T = (int64_t) ids.size();
-    if (T <= 0 || T > cache.capacity) {
+    const int64_t base = cache.filled[(size_t) set];
+    const int64_t T    = (int64_t) ids.size();
+    if (T <= 0 || base + T > cache.capacity) {
         if (err) {
-            *err = "yue2_ar_prefill: ids.size() must be in (0, cache.capacity]";
+            *err = "yue2_ar_prefill: ids.size() must be in (0, cache.capacity - filled]";
         }
         return false;
     }
+    const int64_t n_kv = base + T;
     const Yue2LmConfig & c   = m.lm_cfg;
     const int64_t         H   = (int64_t) c.embedding_length;
     const int64_t         V   = (int64_t) c.vocab_size;
     const int             L   = (int) c.block_count;
     const int64_t         Kh  = (int64_t) hidden_positions.size();
     const int64_t         Kl  = (int64_t) logit_positions.size();
+    const int64_t         head_n = (cache.head_n > 0 && !m.convrot && !g_yue2_imatrix.armed) ? cache.head_n : V;
+    const int64_t         head_lo = head_n == V ? 0 : cache.head_lo;
 
     const size_t ctx_bytes =
         ggml_tensor_overhead() * (YUE2_LM_MAX_NODES + 256) + ggml_graph_overhead_custom(YUE2_LM_MAX_NODES, false);
@@ -780,7 +915,7 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
     ggml_set_input(in_pos);
     ggml_tensor * in_rows = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, T);
     ggml_set_input(in_rows);
-    ggml_tensor * in_mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, T, T);  // [n_kv=T, T], causal
+    ggml_tensor * in_mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, n_kv, T);  // [n_kv, T], causal over the whole set
     ggml_set_input(in_mask);
 
     ggml_tensor * in_hidx = nullptr;
@@ -801,8 +936,7 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
     const bool use_flash = yue2_lm_use_flash(m.backend);
     for (int i = 0; i < L; i++) {
         h = yue2_ar_block(ctx, gf, c, m.lm.blk[(size_t) i], h, in_pos, in_mask, in_rows, cache.k[(size_t) i],
-                          cache.v[(size_t) i], T, use_flash,
-                          &m, i);
+                          cache.v[(size_t) i], n_kv, use_flash, &m, i, set, /*batched=*/false);
         taps[(size_t) i + 1] = h;
     }
     ggml_tensor * h_final = yue2_lm_rms(ctx, h, m.lm.output_norm, c.rms_eps);
@@ -821,8 +955,7 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
     ggml_tensor * out_logits = nullptr;
     if (Kl > 0) {
         ggml_tensor * gathered = ggml_get_rows(ctx, h_final, in_lidx);
-        out_logits             = m.convrot ? yue2_convrot_linear(ctx, m.convrot->lm_head(), gathered) :
-                                            ggml_mul_mat(ctx, m.lm.output, gathered);
+        out_logits             = yue2_lm_head(ctx, m, gathered, head_lo, head_n);
         ggml_set_output(out_logits);
         ggml_build_forward_expand(gf, out_logits);
     }
@@ -847,19 +980,21 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
     std::vector<int32_t> pos_host((size_t) T);
     std::vector<int64_t> rows_host((size_t) T);
     for (int64_t i = 0; i < T; i++) {
-        pos_host[(size_t) i]  = (int32_t) i;
-        rows_host[(size_t) i] = i;
+        pos_host[(size_t) i]  = (int32_t) (base + i);
+        rows_host[(size_t) i] = base + i;
     }
     ggml_backend_tensor_set(in_pos, pos_host.data(), 0, (size_t) T * sizeof(int32_t));
     ggml_backend_tensor_set(in_rows, rows_host.data(), 0, (size_t) T * sizeof(int64_t));
 
-    std::vector<uint16_t> mask_host((size_t) (T * T));
-    for (int64_t i = 0; i < T; i++) {
-        for (int64_t j = 0; j < T; j++) {
-            mask_host[(size_t) (i * T + j)] = ggml_fp32_to_fp16(j <= i ? 0.0f : -INFINITY);
+    std::vector<uint16_t> mask_host((size_t) (n_kv * T));
+    const uint16_t zero = ggml_fp32_to_fp16(0.0f);
+    const uint16_t hidden = ggml_fp32_to_fp16(-INFINITY);
+    for (int64_t i = 0; i < T; i++) {          // i = query row (absolute position base+i)
+        for (int64_t j = 0; j < n_kv; j++) {   // j = key position
+            mask_host[(size_t) (i * n_kv + j)] = j <= base + i ? zero : hidden;
         }
     }
-    ggml_backend_tensor_set(in_mask, mask_host.data(), 0, (size_t) (T * T) * sizeof(uint16_t));
+    ggml_backend_tensor_set(in_mask, mask_host.data(), 0, (size_t) (n_kv * T) * sizeof(uint16_t));
 
     if (in_hidx) {
         std::vector<int32_t> hidx((size_t) Kh);
@@ -882,7 +1017,7 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
             *err = "YuE2 prefill graph compute failed";
         }
     } else {
-        cache.filled = T;
+        cache.filled[(size_t) set] = n_kv;
         out->T       = T;
         if (Kh > 0) {
             out->H = H;
@@ -899,9 +1034,9 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
             }
         }
         if (Kl > 0) {
-            out->V = V;
-            out->logits.assign((size_t) (Kl * V), 0.0f);
-            ggml_backend_tensor_get(out_logits, out->logits.data(), 0, (size_t) (Kl * V) * sizeof(float));
+            out->V = head_n;
+            out->logits.assign((size_t) (Kl * head_n), 0.0f);
+            ggml_backend_tensor_get(out_logits, out->logits.data(), 0, (size_t) (Kl * head_n) * sizeof(float));
         }
     }
 
@@ -911,14 +1046,16 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
     return ok;
 }
 
-// Single-token decode step: feeds ONE token at absolute position
-// `cache.filled` (the next unfilled slot), attends over cache rows
-// `[0,cache.filled]` inclusive (its own row is written before the attention
-// call runs, matching the reference's own scatter-before-attend convention,
-// 03-reference-numerics.md §2.7), and returns the full 184704-wide logits row
-// this call's own position predicts. Advances `cache.filled` by 1 on success.
-static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int32_t token_id,
-                                std::vector<float> * logits_out, std::string * err) {
+// Lockstep decode: feeds ONE token per set (`ids[s]` at absolute position
+// `filled[s]`, the set's next unfilled slot), each set attending over its own
+// rows `[0,filled[s]]` inclusive (its own row is written before the attention
+// runs, matching the reference's scatter-before-attend convention,
+// 03-reference-numerics.md §2.7), and returns the logits row every set's own
+// position predicts: `logits_out` is [S, head_n] (head_n == V without a head
+// window). Advances every `filled[s]` by 1 on success. The graph is built
+// once per (KV bucket, S, head window) and replayed with new inputs.
+static bool yue2_ar_decode_batch(const Yue2Model & m, Yue2ArKvCache & cache, const int32_t * ids,
+                                 std::vector<float> * logits_out, std::string * err) {
     const bool profile = yue2_ar_step_profile_enabled();
     auto tick_start = std::chrono::steady_clock::now();
     auto tick = [&](double & ms) {
@@ -933,27 +1070,31 @@ static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int3
         }
         return false;
     }
-    if (cache.filled >= cache.capacity) {
-        if (err) {
-            *err = "yue2_ar_decode_step: cache is full (filled == capacity)";
+    const int64_t S = cache.n_sets;
+    int64_t pos_max = 0;
+    for (int64_t s = 0; s < S; s++) {
+        if (cache.filled[(size_t) s] >= cache.capacity) {
+            if (err) {
+                *err = "yue2_ar_decode_batch: cache set is full (filled == capacity)";
+            }
+            return false;
         }
-        return false;
+        pos_max = std::max(pos_max, cache.filled[(size_t) s]);
     }
-    const int64_t         pos      = cache.filled;
-    int64_t               n_kv_pad = 1;
+    int64_t n_kv_pad = 1;
     // Padded buckets may alter sampling through small attention differences.
     // Exact span remains available for numerical comparisons.
     static const bool exact_span = std::getenv("YUE2_AR_EXACT_SPAN") != nullptr;
     if (exact_span) {
-        n_kv_pad = pos + 1;
+        n_kv_pad = pos_max + 1;
     } else {
         static const bool power_of_two_bucket = std::getenv("YUE2_AR_BUCKET_POW2") != nullptr;
         if (!power_of_two_bucket) {
             // GGML flash attention's KV stride is 256. Fixed-width buckets keep
             // CUDA graph replay while reducing masked work at long positions.
-            n_kv_pad = ((pos + 256) / 256) * 256;
+            n_kv_pad = ((pos_max + 256) / 256) * 256;
         } else {
-            while (n_kv_pad < pos + 1 && n_kv_pad < cache.capacity) n_kv_pad *= 2;
+            while (n_kv_pad < pos_max + 1 && n_kv_pad < cache.capacity) n_kv_pad *= 2;
         }
         static const bool odd_bucket = std::getenv("YUE2_AR_BUCKET_ODD") != nullptr;
         if (odd_bucket && n_kv_pad < cache.capacity) ++n_kv_pad;
@@ -962,10 +1103,12 @@ static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int3
     const Yue2LmConfig & c        = m.lm_cfg;
     const int64_t         V        = (int64_t) c.vocab_size;
     const int             L        = (int) c.block_count;
+    const int64_t         head_n   = (cache.head_n > 0 && !m.convrot && !g_yue2_imatrix.armed) ? cache.head_n : V;
+    const int64_t         head_lo  = head_n == V ? 0 : cache.head_lo;
     Yue2ArDecodeGraph & d = cache.dec;
     static const bool no_reuse = std::getenv("YUE2_AR_NO_REUSE") != nullptr;
     if (no_reuse) yue2_ar_decode_graph_free(&d);
-    if (d.bucket != n_kv_pad) {
+    if (d.bucket != n_kv_pad || d.n_sets != S || d.head_lo != head_lo || d.head_n != head_n) {
         yue2_ar_decode_graph_free(&d);
         const size_t ctx_bytes =
             ggml_tensor_overhead() * (YUE2_LM_MAX_NODES + 256) + ggml_graph_overhead_custom(YUE2_LM_MAX_NODES, false);
@@ -982,29 +1125,33 @@ static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int3
             return false;
         }
         d.gf = ggml_new_graph_custom(d.ctx, YUE2_LM_MAX_NODES, false);
-        d.in_ids = ggml_new_tensor_1d(d.ctx, GGML_TYPE_I32, 1);
+        d.in_ids = ggml_new_tensor_1d(d.ctx, GGML_TYPE_I32, S);
         ggml_set_input(d.in_ids);
-        d.in_pos = ggml_new_tensor_1d(d.ctx, GGML_TYPE_I32, 1);
+        d.in_pos = ggml_new_tensor_1d(d.ctx, GGML_TYPE_I32, S);
         ggml_set_input(d.in_pos);
-        d.in_rows = ggml_new_tensor_1d(d.ctx, GGML_TYPE_I64, 1);
+        d.in_rows = ggml_new_tensor_3d(d.ctx, GGML_TYPE_I64, 1, 1, S);  // one destination row per set
         ggml_set_input(d.in_rows);
         // Padding remains invisible until its row is written by a later step.
-        d.in_mask = ggml_new_tensor_2d(d.ctx, GGML_TYPE_F16, n_kv_pad, 1);
+        // One mask column per set: sets sit at different positions.
+        d.in_mask = ggml_new_tensor_4d(d.ctx, GGML_TYPE_F16, n_kv_pad, 1, 1, S);
         ggml_set_input(d.in_mask);
 
-        ggml_tensor * h = ggml_get_rows(d.ctx, m.lm.token_embd, d.in_ids);
+        ggml_tensor * h = ggml_get_rows(d.ctx, m.lm.token_embd, d.in_ids);  // [H,S]
         const bool use_flash = yue2_lm_use_flash(m.backend);
         for (int i = 0; i < L; i++) {
             h = yue2_ar_block(d.ctx, d.gf, c, m.lm.blk[(size_t) i], h, d.in_pos, d.in_mask, d.in_rows,
-                              cache.k[(size_t) i], cache.v[(size_t) i], n_kv_pad, use_flash, &m, i);
+                              cache.k[(size_t) i], cache.v[(size_t) i], n_kv_pad, use_flash, &m, i, 0,
+                              /*batched=*/true);
         }
         ggml_tensor * h_final = yue2_lm_rms(d.ctx, h, m.lm.output_norm, c.rms_eps);
-        d.out_logits = m.convrot ? yue2_convrot_linear(d.ctx, m.convrot->lm_head(), h_final) :
-                                    ggml_mul_mat(d.ctx, m.lm.output, h_final);
+        d.out_logits = yue2_lm_head(d.ctx, m, h_final, head_lo, head_n);  // [head_n, S]
         ggml_set_output(d.out_logits);
         ggml_build_forward_expand(d.gf, d.out_logits);
-        d.mask_host.resize((size_t) n_kv_pad);
-        d.bucket = n_kv_pad;
+        d.mask_host.resize((size_t) (n_kv_pad * S));
+        d.bucket  = n_kv_pad;
+        d.n_sets  = S;
+        d.head_lo = head_lo;
+        d.head_n  = head_n;
         tick(g_yue2_ar_step_profile.graph_ms);
 
         BackendPair bp = { m.backend, m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
@@ -1012,32 +1159,37 @@ static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int3
         if (!d.sched || !ggml_backend_sched_alloc_graph(d.sched, d.gf)) {
             yue2_ar_decode_graph_free(&d);
             if (err) *err = "YuE2 decode-step graph allocation failed (out of VRAM?) at pos=" +
-                             std::to_string((long long) pos);
+                             std::to_string((long long) pos_max);
             return false;
         }
         tick(g_yue2_ar_step_profile.alloc_ms);
     }
 
-    const int32_t id32 = token_id;
-    ggml_backend_tensor_set(d.in_ids, &id32, 0, sizeof(int32_t));
-    const int32_t pos32 = (int32_t) pos;
-    ggml_backend_tensor_set(d.in_pos, &pos32, 0, sizeof(int32_t));
-    const int64_t row64 = pos;
-    ggml_backend_tensor_set(d.in_rows, &row64, 0, sizeof(int64_t));
+    std::vector<int32_t> pos_host((size_t) S);
+    std::vector<int64_t> rows_host((size_t) S);
     const uint16_t zero = ggml_fp32_to_fp16(0.0f);
     const uint16_t hidden = ggml_fp32_to_fp16(-INFINITY);
-    std::fill(d.mask_host.begin(), d.mask_host.begin() + (size_t) (pos + 1), zero);
-    std::fill(d.mask_host.begin() + (size_t) (pos + 1), d.mask_host.end(), hidden);
-    ggml_backend_tensor_set(d.in_mask, d.mask_host.data(), 0, (size_t) n_kv_pad * sizeof(uint16_t));
+    for (int64_t s = 0; s < S; s++) {
+        const int64_t pos = cache.filled[(size_t) s];
+        pos_host[(size_t) s]  = (int32_t) pos;
+        rows_host[(size_t) s] = pos;
+        auto col = d.mask_host.begin() + (size_t) (s * n_kv_pad);
+        std::fill(col, col + (size_t) (pos + 1), zero);
+        std::fill(col + (size_t) (pos + 1), col + (size_t) n_kv_pad, hidden);
+    }
+    ggml_backend_tensor_set(d.in_ids, ids, 0, (size_t) S * sizeof(int32_t));
+    ggml_backend_tensor_set(d.in_pos, pos_host.data(), 0, (size_t) S * sizeof(int32_t));
+    ggml_backend_tensor_set(d.in_rows, rows_host.data(), 0, (size_t) S * sizeof(int64_t));
+    ggml_backend_tensor_set(d.in_mask, d.mask_host.data(), 0, d.mask_host.size() * sizeof(uint16_t));
     tick(g_yue2_ar_step_profile.upload_ms);
 
     yue2_imatrix_hook(d.sched);
     bool ok = ggml_backend_sched_graph_compute(d.sched, d.gf) == GGML_STATUS_SUCCESS;
     tick(g_yue2_ar_step_profile.compute_ms);
     if (ok) {
-        cache.filled = pos + 1;
-        logits_out->assign((size_t) V, 0.0f);
-        ggml_backend_tensor_get(d.out_logits, logits_out->data(), 0, (size_t) V * sizeof(float));
+        for (int64_t s = 0; s < S; s++) cache.filled[(size_t) s] += 1;
+        logits_out->assign((size_t) (S * head_n), 0.0f);
+        ggml_backend_tensor_get(d.out_logits, logits_out->data(), 0, (size_t) (S * head_n) * sizeof(float));
         tick(g_yue2_ar_step_profile.readback_ms);
     } else if (err) {
         *err = "YuE2 decode-step graph compute failed";
@@ -1046,4 +1198,15 @@ static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int3
     tick(g_yue2_ar_step_profile.cleanup_ms);
     if (profile && ok) g_yue2_ar_step_profile.calls++;
     return ok;
+}
+
+// Single-set convenience (the probe, the trainers, every S=1 caller): one
+// token into set 0, one logits row back.
+static bool yue2_ar_decode_step(const Yue2Model & m, Yue2ArKvCache & cache, int32_t token_id,
+                                std::vector<float> * logits_out, std::string * err) {
+    if (cache.n_sets != 1) {
+        if (err) *err = "yue2_ar_decode_step: cache has more than one set — use yue2_ar_decode_batch";
+        return false;
+    }
+    return yue2_ar_decode_batch(m, cache, &token_id, logits_out, err);
 }

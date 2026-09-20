@@ -107,7 +107,12 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
         yyjson_mut_obj_add_bool(doc, root, "synth_ready", yue2_available(g_yue2) && vae_ok);
     }
     yyjson_mut_obj_add_bool(doc, root, "lm_resident", g_yue2.lm_resident);
+    yyjson_mut_obj_add_bool(doc, root, "nar_resident", g_yue2.nar_resident);
     yyjson_mut_obj_add_bool(doc, root, "vae_resident", g_yue2.vae_resident);
+    // Batch ceilings the request parser enforces (yue2-request.h), so the
+    // Node side sizes its controls from the engine instead of a constant.
+    yyjson_mut_obj_add_int(doc, root, "max_lm_batch", YUE2_MAX_LM_BATCH);
+    yyjson_mut_obj_add_int(doc, root, "max_synth_batch", YUE2_MAX_SYNTH_BATCH);
     yyjson_mut_obj_add_strcpy(doc, root, "vae_variant_loaded", YUE2_VAE_VARIANT_NAME[g_yue2.vae_loaded_variant]);
     yyjson_mut_obj_add_strcpy(doc, root, "models_dir", g_yue2.models_dir.c_str());
 
@@ -194,7 +199,7 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
 
     yyjson_mut_val * vram = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_val(doc, root, "vram", vram);
-    yyjson_mut_obj_add_uint(doc, vram, "lm_bytes", g_yue2.vram_lm);
+    yyjson_mut_obj_add_uint(doc, vram, "lm_bytes", g_yue2.vram_lm + g_yue2.vram_nar);
     yyjson_mut_obj_add_uint(doc, vram, "vae_bytes", g_yue2.vram_vae);
     yyjson_mut_obj_add_uint(doc, vram, "total_bytes", yue2_vram_bytes(g_yue2));
     yyjson_mut_obj_add_real(doc, vram, "total_mb", (double) yue2_vram_bytes(g_yue2) / (1024.0 * 1024.0));

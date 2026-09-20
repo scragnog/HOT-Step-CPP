@@ -33,6 +33,12 @@
 
 enum Yue2NoiseSource { YUE2_NOISE_NATIVE = 0, YUE2_NOISE_FIXTURE = 1 };
 
+// Batch ceilings. Songs decode in lockstep, so B multiplies every AR step's
+// KV traffic; variations solve in one NAR graph, so M multiplies the latent
+// block. Same caps upstream ships (--max-batch 4, variations 9).
+static constexpr int YUE2_MAX_LM_BATCH    = 4;
+static constexpr int YUE2_MAX_SYNTH_BATCH = 9;
+
 struct Yue2Request {
     std::string id = "yue2";
     std::string style;
@@ -48,6 +54,16 @@ struct Yue2Request {
 
     uint64_t seed         = 0;
     bool     seed_present = false;
+    // ── Batching (doc 30 #6, upstream 2d21090f's shape) ─────────────────
+    // lm_batch_size songs render from one request, song i drawing its plan
+    // and its semantic stream with seed + i; synth_batch_size noise
+    // variations per song, variation j drawing its NAR noise with
+    // noise_seed + j. Tracks come out song-major; each carries the seeds it
+    // consumed so a single-track replay ({seed, noise_seed}) reproduces it.
+    int      lm_batch_size      = 1;  // 1..YUE2_MAX_LM_BATCH
+    int      synth_batch_size   = 1;  // 1..YUE2_MAX_SYNTH_BATCH
+    uint64_t noise_seed         = 0;  // resolved to `seed` when absent
+    bool     noise_seed_present = false;
     // Training previews only: 0 retains the model's normal semantic limit.
     // This bounds work rather than trimming a full-song render afterward.
     int preview_max_frames = 0;
@@ -226,6 +242,38 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         out->seed_present = true;
     }
 
+    if (!yue2_req_num(root, "noise_seed", &num, &present, err)) {
+        yyjson_doc_free(doc);
+        return false;
+    }
+    if (present) {
+        out->noise_seed         = (uint64_t) num;
+        out->noise_seed_present = true;
+    }
+    struct BatchField {
+        const char * key;
+        int *        dst;
+        int          hi;
+    };
+    const BatchField batch_fields[] = {
+        { "lm_batch_size", &out->lm_batch_size, YUE2_MAX_LM_BATCH },
+        { "synth_batch_size", &out->synth_batch_size, YUE2_MAX_SYNTH_BATCH },
+    };
+    for (const BatchField & f : batch_fields) {
+        if (!yue2_req_num(root, f.key, &num, &present, err)) {
+            yyjson_doc_free(doc);
+            return false;
+        }
+        if (present) {
+            if (!std::isfinite(num) || num < 1 || num > f.hi || std::floor(num) != num) {
+                if (err) *err = std::string(f.key) + " must be an integer in [1, " + std::to_string(f.hi) + "]";
+                yyjson_doc_free(doc);
+                return false;
+            }
+            *f.dst = (int) num;
+        }
+    }
+
     if (!yue2_req_num(root, "cfg_scale", &num, &present, err)) {
         yyjson_doc_free(doc);
         return false;
@@ -381,6 +429,16 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         yyjson_doc_free(doc);
         return false;
     }
+    if (out->noise_source == YUE2_NOISE_FIXTURE && (out->lm_batch_size != 1 || out->synth_batch_size != 1)) {
+        if (err) {
+            *err = "noise_source=\"fixture\" renders one track (lm_batch_size and synth_batch_size must be 1)";
+        }
+        yyjson_doc_free(doc);
+        return false;
+    }
+    if (out->plan_only && out->synth_batch_size != 1) {
+        out->synth_batch_size = 1;  // no NAR runs, so variations mean nothing
+    }
 
     yyjson_doc_free(doc);
     return true;
@@ -407,5 +465,9 @@ static void yue2_request_resolve_defaults(Yue2Request * req, const Yue2LmConfig 
         std::random_device rd;
         req->seed         = (uint64_t) rd() | ((uint64_t) rd() << 32);
         req->seed_present = true;
+    }
+    if (!req->noise_seed_present) {
+        req->noise_seed         = req->seed;
+        req->noise_seed_present = true;
     }
 }
