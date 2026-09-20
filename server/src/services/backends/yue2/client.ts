@@ -232,6 +232,10 @@ export interface Yue2SynthRequest {
   cfg_scale?: number;
   ode_steps?: number;
   ode_method?: 'midpoint';
+  /** Optional NAR Lua overrides. Absent fields keep the checkpoint's midpoint path. */
+  infer_method?: 'md_wasserstein_yue2';
+  scheduler?: 'md_ht_scheduler V3';
+  plugin_params?: Record<string, string | number | boolean>;
   vae_variant?: 'standard' | 'legacy';
   /** Validator-only per the plan; never sent by this backend's own mapping. */
   noise_source?: 'native' | 'fixture';

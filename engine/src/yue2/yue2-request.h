@@ -29,6 +29,7 @@
 #include <cmath>
 #include <random>
 #include <string>
+#include <unordered_map>
 
 enum Yue2NoiseSource { YUE2_NOISE_NATIVE = 0, YUE2_NOISE_FIXTURE = 1 };
 
@@ -56,6 +57,9 @@ struct Yue2Request {
 
     int         ode_steps = 0;  // 0 = use the checkpoint's own GGUF default (resolved below)
     std::string ode_method;     // "" = checkpoint default ("midpoint"); only "midpoint" is implemented
+    std::string nar_solver;     // optional Lua solver; empty preserves native midpoint
+    std::string nar_scheduler;  // optional Lua scheduler; empty preserves uniform grid
+    std::unordered_map<std::string, std::string> plugin_params;
 
     // ── Ending controls, semantic stage only (2026-09-15) ────────────────
     // Measured on the adapter ladders (_LISTENING/2026-09-14/RESULTS.md, 77/83):
@@ -291,6 +295,44 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         }
         yyjson_doc_free(doc);
         return false;
+    }
+    if (!yue2_req_str(root, "infer_method", &out->nar_solver, &present, err) ||
+        !yue2_req_str(root, "scheduler", &out->nar_scheduler, &present, err)) {
+        yyjson_doc_free(doc);
+        return false;
+    }
+    // Keep the initial YuE2 bridge deliberately narrow. Other Lua plugins may
+    // need model callbacks, channel conventions, or their own loop contract.
+    if ((!out->nar_solver.empty() && out->nar_solver != "md_wasserstein_yue2") ||
+        (!out->nar_scheduler.empty() && out->nar_scheduler != "md_ht_scheduler V3")) {
+        if (err) *err = "unsupported YuE2 NAR solver or scheduler plugin";
+        yyjson_doc_free(doc);
+        return false;
+    }
+    yyjson_val * pp_obj = yyjson_obj_get(root, "plugin_params");
+    if (pp_obj && !yyjson_is_null(pp_obj)) {
+        if (!yyjson_is_obj(pp_obj)) {
+            if (err) *err = "\"plugin_params\" must be an object";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        yyjson_obj_iter it;
+        yyjson_obj_iter_init(pp_obj, &it);
+        yyjson_val * k;
+        while ((k = yyjson_obj_iter_next(&it))) {
+            yyjson_val * v = yyjson_obj_iter_get_val(k);
+            std::string value;
+            if (yyjson_is_str(v)) value = yyjson_get_str(v);
+            else if (yyjson_is_real(v)) value = std::to_string(yyjson_get_real(v));
+            else if (yyjson_is_int(v)) value = std::to_string(yyjson_get_int(v));
+            else if (yyjson_is_bool(v)) value = yyjson_get_bool(v) ? "true" : "false";
+            else {
+                if (err) *err = "plugin_params values must be string, number, or boolean";
+                yyjson_doc_free(doc);
+                return false;
+            }
+            out->plugin_params[yyjson_get_str(k)] = value;
+        }
     }
 
     if (!yue2_req_str(root, "vae_variant", &s, &present, err)) {

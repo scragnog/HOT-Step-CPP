@@ -269,6 +269,48 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   const odeRaw = Number(params.yue2OdeSteps);
   const ode_steps = Number.isFinite(odeRaw) && odeRaw > 0 ? Math.round(odeRaw) : 32;
 
+  const narSolver = params.yue2NarSolver === 'wasserstein' ? 'md_wasserstein_yue2' : undefined;
+  const narScheduler = params.yue2NarScheduler === 'ht_v3' ? 'md_ht_scheduler V3' : undefined;
+  const plugin_params: NonNullable<Yue2SynthRequest['plugin_params']> = {};
+  const copyNumbers = (plugin: string, fields: Record<string, string>) => {
+    for (const [field, key] of Object.entries(fields)) {
+      if (params[field] === undefined) continue;
+      const value = Number(params[field]);
+      if (Number.isFinite(value)) plugin_params[`${plugin}:${key}`] = value;
+      else notes.push(`Invalid ${field} — using the plugin default`);
+    }
+  };
+  if (narSolver) {
+    copyNumbers(narSolver, {
+      yue2WassTau: 'tau', yue2WassSpectral: 'spectral_weight',
+      yue2WassRmsWeight: 'rms_weight', yue2WassRmsTarget: 'rms_target',
+      yue2WassGate: 'sigma_gate', yue2WassIterations: 'prox_iterations',
+      yue2WassLatentRms: 'latent_rms',
+    });
+    if (typeof params.yue2WassProject === 'boolean') {
+      plugin_params[`${narSolver}:orthogonal_proj`] = params.yue2WassProject;
+    }
+  }
+  if (narScheduler) {
+    copyNumbers(narScheduler, {
+      yue2HtKinetic: 'kinetic_energy', yue2HtDamping: 'damping_friction',
+      yue2HtCritical: 'critical_temp', yue2HtIntensity: 'phase_intensity',
+      yue2HtWell: 'well_width', yue2HtFloor: 'density_floor',
+      yue2HtPoly: 'poly_slope', yue2HtBlend: 'uniform_blend',
+      yue2HtSmooth: 'smooth_window', yue2HtDense: 'dense_steps',
+      yue2HtShift: 'shift',
+    });
+    if (typeof params.yue2HtSnr === 'boolean') {
+      plugin_params[`${narScheduler}:snr_space`] = params.yue2HtSnr;
+    }
+  }
+  if (params.yue2NarSolver && params.yue2NarSolver !== 'stock' && !narSolver) {
+    notes.push(`Unknown YuE2 NAR solver "${params.yue2NarSolver}" — using midpoint`);
+  }
+  if (params.yue2NarScheduler && params.yue2NarScheduler !== 'stock' && !narScheduler) {
+    notes.push(`Unknown YuE2 NAR scheduler "${params.yue2NarScheduler}" — using uniform steps`);
+  }
+
   const vaeRaw = typeof params.yue2VaeVariant === 'string' ? params.yue2VaeVariant : 'standard';
   const vae_variant: Yue2SynthRequest['vae_variant'] = vaeRaw === 'legacy' ? 'legacy' : 'standard';
 
@@ -307,6 +349,9 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
     ...(cfg_scale !== undefined ? { cfg_scale } : {}),
     ode_steps,
     ode_method: 'midpoint',
+    ...(narSolver ? { infer_method: narSolver } : {}),
+    ...(narScheduler ? { scheduler: narScheduler } : {}),
+    ...(Object.keys(plugin_params).length ? { plugin_params } : {}),
     vae_variant,
     ...(seed >= 0 ? { seed } : {}),
   };

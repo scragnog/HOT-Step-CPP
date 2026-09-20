@@ -94,6 +94,7 @@
 #include "backend.h"
 #include "ggml.h"
 #include "hot-step-build-flags.h"
+#include "lua-plugin-registry.h"
 
 #include <algorithm>
 #include <chrono>
@@ -101,7 +102,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // 28 layers x ~25 nodes (concat/cast/rope/norm/matmul per layer, no
@@ -730,6 +733,107 @@ static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & ch
         state = std::move(new_state);
     }
 
+    out->final_latents = std::move(state);
+    return true;
+}
+
+// Optional YuE2 NAR Lua path. The native midpoint function above remains the
+// untouched default and continues to serve the forced-replay parity harness.
+// A scheduler may be selected on its own (variable-step midpoint), or with
+// the single-evaluation Wasserstein solver. The plugin scheduler returns N
+// source timesteps; this loop owns the final destination t=0, so N means N
+// actual updates and the denoise trajectory always reaches zero.
+static bool yue2_nar_solve_plugins(
+    const Yue2Model & m, const Yue2NarChunk & chunk,
+    const std::vector<float> & initial_noise, int steps,
+    const std::string & solver_name, const std::string & scheduler_name,
+    const std::unordered_map<std::string, std::string> & plugin_params,
+    Yue2NarSolveResult * out, std::string * err) {
+    if (steps <= 0 || initial_noise.size() != (size_t) (chunk.chunk_len * m.lm_cfg.latent_dim)) {
+        if (err) *err = "YuE2 NAR plugin solve: invalid steps or noise shape";
+        return false;
+    }
+    auto & registry = PluginRegistry::instance();
+    LuaPlugin * solver = solver_name.empty() ? nullptr : registry.solver_lookup(solver_name.c_str());
+    LuaPlugin * scheduler = scheduler_name.empty() ? nullptr : registry.scheduler_lookup(scheduler_name.c_str());
+    if ((!solver_name.empty() && !solver) || (!scheduler_name.empty() && !scheduler)) {
+        if (err) *err = "YuE2 NAR plugin was not loaded; check the plugin startup log";
+        return false;
+    }
+    if (solver && (solver->owns_loop || solver->needs_model)) {
+        if (err) *err = "YuE2 NAR supports only single-evaluation step() solvers";
+        return false;
+    }
+
+    std::vector<float> times((size_t) steps + 1, 0.0f);
+    if (scheduler) {
+        std::vector<float> emitted((size_t) steps, std::numeric_limits<float>::quiet_NaN());
+        LuaModelContext ctx;
+        ctx.model_id = "yue2";
+        lua_call_scheduler(*scheduler, emitted.data(), steps, 1.0f, plugin_params, ctx);
+        for (int i = 0; i < steps; i++) times[(size_t) i] = emitted[(size_t) i];
+    } else {
+        for (int i = 0; i < steps; i++) {
+            times[(size_t) i] = 1.0f - (float) i / (float) steps;
+        }
+    }
+    times[(size_t) steps] = 0.0f;
+    if (!std::isfinite(times[0]) || std::abs(times[0] - 1.0f) > 1e-5f) {
+        if (err) *err = "YuE2 NAR scheduler must start at t=1";
+        return false;
+    }
+    for (int i = 0; i < steps; i++) {
+        if (!std::isfinite(times[(size_t) i]) ||
+            !(times[(size_t) i] > times[(size_t) i + 1]) ||
+            times[(size_t) i] > 1.0f || times[(size_t) i + 1] < 0.0f) {
+            if (err) *err = "YuE2 NAR scheduler emitted an invalid or non-descending timestep";
+            return false;
+        }
+    }
+
+    fprintf(stderr, "[YuE2-NAR-Plugins] solver=%s scheduler=%s steps=%d\n",
+            solver ? solver->name.c_str() : "midpoint",
+            scheduler ? scheduler->name.c_str() : "uniform", steps);
+    std::vector<float> state = initial_noise;
+    const int n = (int) state.size();
+    SolverState solver_state;
+    solver_state.batch_n = 1;
+    solver_state.n_per = n;
+    LuaModelContext ctx;
+    ctx.model_id = "yue2";
+    auto eval = [&](const std::vector<float> & s, float t, Yue2NarVelocityResult * result) -> bool {
+        const auto start = std::chrono::steady_clock::now();
+        const bool ok = yue2_nar_velocity(m, chunk, s, yue2_nar_logit_clamped(t), false, result, err);
+        out->total_velocity_ms += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count();
+        out->velocity_calls++;
+        return ok;
+    };
+
+    for (int step = 0; step < steps; step++) {
+        const float t = times[(size_t) step];
+        const float next_t = times[(size_t) step + 1];
+        const float dt = t - next_t;
+        Yue2NarVelocityResult first;
+        if (!eval(state, t, &first)) return false;
+        if (solver) {
+            solver_state.step_index = step;
+            lua_call_solver_step(*solver, state.data(), first.velocity.data(), t, next_t, n,
+                                 solver_state, SolverModelFn{}, nullptr, plugin_params, ctx);
+        } else {
+            std::vector<float> mid((size_t) n);
+            for (int i = 0; i < n; i++) mid[(size_t) i] = state[(size_t) i] - first.velocity[(size_t) i] * (dt * 0.5f);
+            Yue2NarVelocityResult second;
+            if (!eval(mid, t - dt * 0.5f, &second)) return false;
+            for (int i = 0; i < n; i++) state[(size_t) i] -= second.velocity[(size_t) i] * dt;
+        }
+        for (float x : state) {
+            if (!std::isfinite(x)) {
+                if (err) *err = "YuE2 NAR plugin produced non-finite latents";
+                return false;
+            }
+        }
+    }
     out->final_latents = std::move(state);
     return true;
 }

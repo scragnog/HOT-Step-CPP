@@ -602,7 +602,10 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, const std
         std::vector<float> noise_slice(noise.begin() + (size_t) (a * LD), noise.begin() + (size_t) (b * LD));
         Yue2NarSolveResult solve;
         const auto nar_solve_start = std::chrono::steady_clock::now();
-        const bool ok = yue2_nar_solve_midpoint(m, chunk, noise_slice, req.ode_steps, {}, false, &solve, err);
+        const bool ok = (req.nar_solver.empty() && req.nar_scheduler.empty())
+            ? yue2_nar_solve_midpoint(m, chunk, noise_slice, req.ode_steps, {}, false, &solve, err)
+            : yue2_nar_solve_plugins(m, chunk, noise_slice, req.ode_steps,
+                                     req.nar_solver, req.nar_scheduler, req.plugin_params, &solve, err);
         const double nar_solve_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - nar_solve_start).count();
         yue2_nar_chunk_free(&chunk);
