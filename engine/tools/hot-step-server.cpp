@@ -388,6 +388,47 @@ static inline void job_set_phase(Job & job, JobPhase p, int step = 0, int total 
     job.phase.store(p, std::memory_order_release);
 }
 
+// Heartbeat ticker for long synchronous loads (DiT / adapter precompute).
+// Bumps phase_step every ~5 s while the current phase is one of the load
+// phases, giving the Node wrapper's no-progress watchdog
+// (HOT-Step-CPP/server STALE_TIMEOUT_MS = 120 s) a fresh heartbeat token
+// so it doesn't kill an in-flight 8-min reload. Scope tightly around the
+// load call so it stops before DIT_INFERENCE starts emitting its own step
+// counter:  { LoadProgressTicker tick(*job); ctx = ace_synth_load(...); }
+struct LoadProgressTicker {
+    Job &             job;
+    std::atomic<bool> stop_flag{ false };
+    std::thread       th;
+
+    explicit LoadProgressTicker(Job & j) : job(j) {
+        th = std::thread([this]() {
+            int step = 0;
+            while (!stop_flag.load(std::memory_order_acquire)) {
+                JobPhase p = job.phase.load(std::memory_order_acquire);
+                // Tick during EVERY long-load phase, not just DiT/adapter.
+                // CondEnc and TextEnc loads can also exceed 120 s on cold
+                // start and would otherwise trip the wrapper watchdog.
+                if (p == JobPhase::LOADING_TEXT_ENC ||
+                    p == JobPhase::LOADING_COND_ENC ||
+                    p == JobPhase::LOADING_DIT ||
+                    p == JobPhase::LOADING_ADAPTER ||
+                    p == JobPhase::ADAPTER_PRECOMPUTE ||
+                    p == JobPhase::LOADING_VAE) {
+                    job.phase_step.store(++step, std::memory_order_relaxed);
+                }
+                // Sleep in 100ms slices so the destructor joins within ~1 s.
+                for (int i = 0; i < 50 && !stop_flag.load(std::memory_order_acquire); ++i) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            }
+        });
+    }
+    ~LoadProgressTicker() {
+        stop_flag.store(true, std::memory_order_release);
+        if (th.joinable()) th.join();
+    }
+};
+
 static std::mutex                                            mtx_jobs;
 static std::unordered_map<std::string, std::shared_ptr<Job>> g_jobs;
 static std::deque<std::string>                               g_job_order;
@@ -1538,7 +1579,13 @@ static void synth_worker(std::shared_ptr<Job>    job,
         ~AdapterCancelGuard() { g_adapter_cancel.store(nullptr, std::memory_order_release); }
     } adapter_cancel_guard;
 
-    AceSynth * ctx = ace_synth_load(g_store, &p);
+    AceSynth * ctx = nullptr;
+    {
+        // Tick phase_step every ~5 s during the load so the wrapper watchdog
+        // doesn't kill an 8-min cold reload at the 120 s no-progress mark.
+        LoadProgressTicker load_tick(*job);
+        ctx = ace_synth_load(g_store, &p);
+    }
     if (!ctx) {
         fprintf(stderr, "[Server] FATAL: synth load failed\n");
         free(src_interleaved);
@@ -2934,7 +2981,13 @@ static void warm_worker(std::shared_ptr<Job> job, WarmRequest wr) {
         ~WarmCancelGuard() { g_adapter_cancel.store(nullptr, std::memory_order_release); }
     } warm_cancel_guard;
 
-    AceSynth * ctx = ace_synth_load(g_store, &p);
+    AceSynth * ctx = nullptr;
+    {
+        // Heartbeat phase_step every ~5 s during /warm load (same rationale
+        // as /synth — keeps the wrapper watchdog from killing the 8-min reload).
+        LoadProgressTicker warm_tick(*job);
+        ctx = ace_synth_load(g_store, &p);
+    }
     if (!ctx) {
         fprintf(stderr, "[Server] warm: synth load failed\n");
         bool cancelled = job->cancel.load();
