@@ -45,6 +45,11 @@ struct Config {
     // at or below the target finishes the run early (steps remain the cap).
     float target_loss = 0.0f;
     std::int32_t target_loss_window = 20;
+    // 0 disables the AR-KL stop; with it set, the run finishes once the
+    // windowed mean of ar_kl (planner divergence from the frozen base) reaches
+    // the target. Unlike ar_ce it means the same thing for every artist:
+    // likeness starts near 1.25, planner damage near 1.9. Shares the window.
+    float target_kl = 0.0f;
     // Planner (AR) objective: weight of the KL term that anchors the adapted
     // planner to the frozen base (AITK's ar_kl_weight), and the probability
     // that a cot=full example is trained WITHOUT its lead sheet so the same
@@ -73,7 +78,7 @@ inline void usage(FILE * out) {
         "[--cursor-weight 0.08 (0 disables lyric timing)] [--rank N] [--alpha F] "
         "[--optimizer adamw|prodigy|muon] [--lr F] [--warmup N] [--weight-decay F] "
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
-        "[--target-loss F (0 disables)] [--target-loss-window N] "
+        "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] "
         "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (adamw only)]\n");
 }
 
@@ -209,6 +214,9 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--target-loss")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.target_loss)) { if (error) *error = "--target-loss must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--target-kl")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.target_kl)) { if (error) *error = "--target-kl must be a finite number"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--target-loss-window")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_i32(value_text.c_str(), &parsed.target_loss_window)) { if (error) *error = "--target-loss-window must be a nonnegative integer"; return ParseResult::error; }

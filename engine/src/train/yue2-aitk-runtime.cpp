@@ -113,7 +113,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if(cursor_weight>0) yyjson_mut_obj_add_real(doc,root,"cursor_weight",cursor_weight);
     yyjson_mut_obj_add_strcpy(doc,root,"recipe","yue2-aitk-runtime-v1"); yyjson_mut_obj_add_strcpy(doc,root,"checkpoint_sha256",cp.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"dataset_sha256",ds.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"source_manifest_sha256",sm.c_str()); yyjson_mut_obj_add_uint(doc,root,"seed",seed); yyjson_mut_obj_add_int(doc,root,"cuda_index",device); yyjson_mut_obj_add_int(doc,root,"completed_step",completed); yyjson_mut_obj_add_uint(doc,root,"order_cursor",cursor); for(size_t x:order) yyjson_mut_arr_add_uint(doc,arr,x); yyjson_mut_obj_add_val(doc,root,"order",arr); yyjson_mut_obj_add_strcpy(doc,root,"sampler_state",sampler.c_str());
     yyjson_mut_obj_add_strcpy(doc,root,"optimizer",config.optimizer.c_str()); yyjson_mut_obj_add_int(doc,root,"rank",config.rank); yyjson_mut_obj_add_real(doc,root,"alpha",config.alpha); yyjson_mut_obj_add_real(doc,root,"lr",config.lr); yyjson_mut_obj_add_int(doc,root,"warmup",config.warmup); yyjson_mut_obj_add_real(doc,root,"weight_decay",config.weight_decay); yyjson_mut_obj_add_real(doc,root,"prodigy_d0",config.prodigy_d0); yyjson_mut_obj_add_real(doc,root,"muon_lr_scale",config.muon_lr_scale); yyjson_mut_obj_add_int(doc,root,"muon_ns_steps",config.muon_ns_steps);
-    yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"caption_dropout",config.caption_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale);
+    yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"caption_dropout",config.caption_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale); yyjson_mut_obj_add_real(doc,root,"target_kl",config.target_kl);
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
@@ -144,6 +144,7 @@ static int run_impl(const Config & config, std::string * error) {
         !std::isfinite(config.muon_lr_scale) || config.muon_lr_scale <= 0.0f ||
         config.muon_ns_steps < 1 || config.muon_ns_steps > 20 ||
         !std::isfinite(config.target_loss) || config.target_loss < 0.0f ||
+        !std::isfinite(config.target_kl) || config.target_kl < 0.0f ||
         config.target_loss_window < 1 ||
         !std::isfinite(config.kl_weight) || config.kl_weight < 0.0f ||
         !std::isfinite(config.abc_dropout) || config.abc_dropout < 0.0f || config.abc_dropout > 1.0f ||
@@ -448,6 +449,8 @@ static int run_impl(const Config & config, std::string * error) {
         };
         std::vector<double> loss_window;
         loss_window.reserve(config.target_loss_window);
+        std::vector<double> kl_window;
+        kl_window.reserve(config.target_loss_window);
         while (completed < config.steps) {
             if (yue2_aitk_cancel_requested()) {
                 if (completed > 0 && !save_checkpoint(completed)) { fail(error, "cancel checkpoint publication failed"); return 1; }
@@ -547,6 +550,23 @@ static int run_impl(const Config & config, std::string * error) {
                     double sum = 0.0;
                     for (double v : loss_window) sum += v;
                     if (sum / (double) config.target_loss_window <= (double) config.target_loss) {
+                        if (!save_checkpoint(completed)) { fail(error, "target checkpoint publication failed"); return 1; }
+                        event("target", completed);
+                        event("done", completed);
+                        return 0;
+                    }
+                }
+            }
+            if (config.target_kl > 0.0f) {
+                // Same window as the composite stop, on the planner's KL to
+                // base alone. The stop is "at or above": the adapter has moved
+                // as far from the base as the recipe allows.
+                kl_window.push_back(metrics.ar_kl);
+                if (static_cast<int>(kl_window.size()) > config.target_loss_window) kl_window.erase(kl_window.begin());
+                if (static_cast<int>(kl_window.size()) == config.target_loss_window) {
+                    double sum = 0.0;
+                    for (double v : kl_window) sum += v;
+                    if (sum / (double) config.target_loss_window >= (double) config.target_kl) {
                         if (!save_checkpoint(completed)) { fail(error, "target checkpoint publication failed"); return 1; }
                         event("target", completed);
                         event("done", completed);

@@ -13,6 +13,7 @@
 // soundfont from its default CDN. Nothing is bundled.
 
 import React, { useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, X } from 'lucide-react';
 import abcjs from 'abcjs';
@@ -60,13 +61,15 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
         lit.forEach(el => el.classList.remove('abcjs-highlight'));
         lit = (ev.elements ?? []).flat();
         lit.forEach(el => el.classList.add('abcjs-highlight'));
-        (lit[0] as Element & { scrollIntoView?: (o: ScrollIntoViewOptions) => void } | undefined)
-          ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-        void box;
+        const first = lit[0] as (Element & { scrollIntoView?: (o: ScrollIntoViewOptions) => void }) | undefined;
+        if (first && box) first.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
       },
       onFinished() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
     }, { displayLoop: false, displayRestart: true, displayPlay: true, displayProgress: true, displayWarp: false });
     control.setTune(tunes[0], false).catch(() => { /* the score still renders without audio */ });
+    // Continue/Cancel/Retry all close or replace the sheet; the synth keeps
+    // playing on its own AudioContext unless it is told to stop.
+    return () => { try { control.pause(); } catch { /* nothing was playing */ } };
   }, [open, data?.abc]);
 
   if (!open) return null;
@@ -76,8 +79,8 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
     : verdict === 'long' ? 'text-amber-600 dark:text-amber-400'
     : 'text-emerald-600 dark:text-emerald-400';
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" data-portal-layer>
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" data-portal-layer>
       <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 shadow-2xl">
         <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-200 dark:border-white/10">
           <div>
@@ -115,10 +118,14 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
                   {data.health.sections.length ? ` · ${data.health.sections.join(' → ')}` : ''}
                 </span>
               </div>
-              <div ref={audioRef} className="abcjs-audio-wrap" />
-              <div className="rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-950/40 max-h-[50vh] overflow-auto p-2">
-                <div ref={scoreRef} />
+              {/* Same paper as the Training Studio sheet viewer: white, black
+                  ink, the playing note lit amber. Two nested divs on purpose —
+                  abcjs's responsive mode rewrites the inline style of the div
+                  it renders into, so the scroll box must be its parent. */}
+              <div className="bg-white rounded-lg border border-zinc-200 dark:border-white/10 overflow-y-auto overflow-x-hidden" style={{ maxHeight: '50vh' }}>
+                <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500 [&_.abcjs-highlight]:stroke-amber-500" />
               </div>
+              <div ref={audioRef} className="text-xs" />
               <details className="text-[11px] text-zinc-500">
                 <summary className="cursor-pointer">{t('createPanel.yue2ScoreRaw', 'Raw ABC')}</summary>
                 <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[10px] text-zinc-600 dark:text-zinc-400">{data.abc}</pre>
@@ -142,6 +149,7 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };

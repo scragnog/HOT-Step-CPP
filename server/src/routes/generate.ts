@@ -228,7 +228,9 @@ router.post('/yue2/plan', async (req, res) => {
   }
   const params = { ...(req.body ?? {}), backend: 'yue2' };
   const abort = new AbortController();
-  req.on('close', () => abort.abort());
+  // res 'close' fires on client disconnect; req 'close' fires as soon as the
+  // body is consumed on Node 16+, which cancelled every preview immediately.
+  res.on('close', () => { if (!res.writableFinished) abort.abort(); });
   try {
     noteEnqueued('yue2');
     const preview = await runOnGpuLane(() => runYue2PlanPreview(params, abort.signal), { label: 'yue2 score preview', family: 'yue2' });

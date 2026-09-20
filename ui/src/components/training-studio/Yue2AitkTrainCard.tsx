@@ -38,7 +38,7 @@ const JOB_KEY = 'hs-yue2-aitk-job:';
 const FORM_KEY = 'hs-yue2-aitk-form:';
 const PREP_KEY = 'hs-yue2-aitk-prepare:';
 const METRIC_CAP = 2000;
-type JointStepPoint = { step: number; loss: number; ep: number; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
+type JointStepPoint = { step: number; loss: number; ep: number; arKl?: number; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
 type JointMilestone = { epoch: number; loss: number; path: string };
 function jointLossRate(points: JointStepPoint[]): number | null {
   const means = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
@@ -50,6 +50,19 @@ function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string
   if (!last || !durations.length) return '';
   const pace = durations.reduce((sum, ms) => sum + ms, 0) / durations.length;
   const remaining = Math.max(0, form.steps - last.step);
+  if (form.stopMode === 'kl' && form.targetKl && form.targetKl > 0) {
+    const kls = points.slice(-20).map(p => p.arKl).filter((v): v is number => typeof v === 'number');
+    if (kls.length < 20) return `AR KL warming up · cap ${formatDurationMs(remaining * pace)}`;
+    const mean = kls.reduce((s, v) => s + v, 0) / kls.length;
+    if (mean >= form.targetKl) return `KL target reached · cap ${formatDurationMs(remaining * pace)}`;
+    const older = points.slice(-40, -20).map(p => p.arKl).filter((v): v is number => typeof v === 'number');
+    const rate = older.length === 20 ? (mean - older.reduce((s, v) => s + v, 0) / 20) / 20 : 0;
+    if (!(rate > 0)) return `AR KL ${mean.toFixed(2)} of ${form.targetKl} · cap ${formatDurationMs(remaining * pace)}`;
+    const stepsToTarget = (form.targetKl - mean) / rate;
+    return stepsToTarget > remaining
+      ? `KL ${mean.toFixed(2)} · target unlikely before cap · cap ${formatDurationMs(remaining * pace)}`
+      : `KL ${mean.toFixed(2)} · target ETA ${formatDurationMs(Math.max(1, stepsToTarget) * pace)}`;
+  }
   if (form.stopMode !== 'loss' || !(form.targetLoss && form.targetLoss > 0))
     return `cap ETA ${formatDurationMs(remaining * pace)}`;
   const current = last.ma20;
@@ -78,9 +91,12 @@ function snapshotPresetSettings(form: Yue2JointTrainRequest, lyricTiming: boolea
 }
 const DEFAULT_FORM: Yue2JointTrainRequest = {
   trainingMethod: 'aitk', checkpoint: '', dataset: '', output: '',
-  steps: 400, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
-  optimizer: 'prodigy', prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
-  rank: 64, alpha: 64, stopMode: 'steps',
+  // Recipe A (2026-09-20): AdamW 1e-4 with the planner at 0.6x, rank 32, and
+  // a stop on the planner's KL to base rather than a step count. 500 is a cap;
+  // an artist that has not reached KL 1.4 by then is not going to.
+  steps: 500, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
+  optimizer: 'adamw', prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
+  rank: 32, alpha: 32, stopMode: 'kl', targetKl: 1.4, lr: 1e-4, plannerLrScale: 0.6,
 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
@@ -111,6 +127,20 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.rank === 32) stored.rank = 64;
     if (stored.alpha === 32) stored.alpha = 64;
     window.localStorage.setItem(migration, '1');
+  }
+  // Recipe A (2026-09-20): values still sitting on the old defaults move to
+  // the new ones; anything the user changed on purpose stays.
+  const recipeA = `${FORM_KEY}${datasetId}:defaults-recipe-a`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(recipeA)) {
+    if (stored.rank === 64) stored.rank = 32;
+    if (stored.alpha === 64) stored.alpha = 32;
+    if (stored.steps === 400) stored.steps = 500;
+    if (stored.optimizer === 'prodigy') stored.optimizer = 'adamw';
+    if (stored.stopMode === undefined || stored.stopMode === 'steps') { stored.stopMode = 'kl'; stored.targetKl = 1.4; }
+    if (stored.lr === undefined) stored.lr = 1e-4;
+    if (stored.plannerLrScale === undefined) stored.plannerLrScale = 0.6;
+    if (stored.preview?.enabled) stored.preview = { ...stored.preview, enabled: false };
+    window.localStorage.setItem(recipeA, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
@@ -255,6 +285,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               const prior = previous.filter(point => point.step !== item.step);
               const stepMs = typeof item.stepMs === 'number' ? item.stepMs : undefined;
               const next = [...prior, { step: item.step!, loss: item.loss!, ep: item.step!,
+                ...(typeof item.arKl === 'number' ? { arKl: item.arKl } : {}),
                 ...(typeof item.gradNorm === 'number' ? { gradNorm: item.gradNorm } : {}),
                 ...(typeof job.startedAt === 'number' && typeof item.ts === 'number'
                   ? { elapsedMs: Math.max(0, item.ts - job.startedAt) } : {}),
@@ -423,6 +454,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   };
   const run = async (): Promise<string | null> => {
     setStarting(true); setError('');
+    if ((form.stopMode ?? 'steps') === 'kl' && !(typeof form.targetKl === 'number' && form.targetKl > 0)) {
+      setError(t('trainingStudio.yue2.method.targetKlRequired', 'Enter an AR KL target above 0 to train until KL.'));
+      setStarting(false);
+      return null;
+    }
     if ((form.stopMode ?? 'steps') === 'loss' && !(typeof form.targetLoss === 'number' && form.targetLoss > 0)) {
       setError(t('trainingStudio.yue2.method.targetLossRequired', 'Enter a target loss above 0 to train until loss.'));
       setStarting(false);
@@ -639,15 +675,17 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <label className="flex flex-col gap-1">
           <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.stopMode', 'Train until')}</span>
           <select className={input} value={form.stopMode ?? 'steps'} disabled={active || starting || preparing || yue2RunAllActive}
-            onChange={event => set('stopMode', event.target.value as 'steps' | 'loss')}>
+            onChange={event => set('stopMode', event.target.value as 'steps' | 'loss' | 'kl')}>
+            <option value="kl">{t('trainingStudio.yue2.method.stopKl', 'AR KL target')}</option>
             <option value="steps">{t('trainingStudio.yue2.method.stopSteps', 'Step count')}</option>
             <option value="loss">{t('trainingStudio.yue2.method.stopLoss', 'Target loss')}</option>
           </select>
         </label>
-        {field((form.stopMode ?? 'steps') === 'loss'
+        {field((form.stopMode ?? 'steps') !== 'steps'
           ? t('trainingStudio.yue2.method.maxSteps', 'Max steps')
           : t('trainingStudio.yue2.method.steps', 'Steps'), 'steps', 'number')}
         {(form.stopMode ?? 'steps') === 'loss' && field(t('trainingStudio.yue2.method.targetLoss', 'Target loss (composite, trailing mean)'), 'targetLoss', 'number')}
+        {(form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.targetKl', 'AR KL target (trailing mean)'), 'targetKl', 'number')}
         {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number')}
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number')}
         {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device')}
@@ -655,6 +693,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {field(t('trainingStudio.yue2.method.alpha', 'LoRA alpha'), 'alpha', 'number')}
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
+      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. Likeness starts near 1.25; planner damage (looping outros) near 1.9. Training stops once the trailing 20-step mean reaches the target; steps is the cap.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
@@ -824,6 +863,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {jointPreviews.map(preview => <div key={preview.id} className="flex items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
             <span className="w-20 shrink-0">step {preview.step} · {preview.kind}</span>
             <span className="flex-1">{preview.status === 'failed' ? preview.error || 'render failed' : preview.endReason === 'preview_limit' ? t('trainingStudio.yue2.method.previewCapped', 'Preview length reached') : preview.status}</span>
+            {preview.score && <span title={preview.score.reason} className={`shrink-0 font-semibold uppercase tracking-wider ${preview.score.verdict === 'healthy' ? 'text-emerald-500' : preview.score.verdict === 'long' ? 'text-amber-500' : 'text-red-500'}`}>
+              {preview.score.verdict} · {preview.score.bars} bars · {Math.round(preview.score.vocalShare * 100)}% vocal
+            </span>}
             {preview.audioUrl && preview.status === 'done' && <audio controls preload="none" src={preview.audioUrl} className="h-7 max-w-[240px]" />}
           </div>)}
         </div>

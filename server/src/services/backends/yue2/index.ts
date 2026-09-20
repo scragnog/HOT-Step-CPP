@@ -536,6 +536,16 @@ async function capabilities(): Promise<BackendCapabilities> {
         ],
       },
       {
+        key: 'yue2AutoReplan',
+        type: 'toggle',
+        label: 'Re-plan runaway scores',
+        hint: 'Plan the lead sheet first (seconds), and if it is a runaway — normal sections, then an '
+            + 'outro that never ends — draw a new seed and plan again, up to three tries, before any '
+            + 'audio is rendered. Needs Chain of Thought melody or full. Off = render whatever the '
+            + 'planner writes.',
+        default: true,
+      },
+      {
         key: 'yue2PreviewScore',
         type: 'toggle',
         label: 'Preview the score first',

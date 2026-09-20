@@ -448,6 +448,44 @@ ${req.lyrics}`);
       throw new Error('YuE2 needs a caption — the Style Description field is empty');
     }
 
+    // ── Auto-replan ──
+    // A runaway plan (normal sections, then an outro that never ends) is
+    // seed-dependent and costs a six-minute render to discover. Plan first
+    // (seconds), classify, redraw the seed on a runaway verdict, then render
+    // exactly the approved score. Skipped when the user already approved a
+    // score in the preview modal, under cot=off (no plan stage), or when the
+    // toggle is off.
+    let autoReplan: { attempts: Array<{ seed: number; verdict: string; reason: string }>; accepted: boolean } | undefined;
+    if (job.params.yue2AutoReplan !== false && req.cot !== 'off' && !req.abc) {
+      autoReplan = { attempts: [], accepted: false };
+      const maxAttempts = 3;
+      let chosen: { abc: string; seed: number } | undefined;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if ((job.status as string) === 'cancelled') break;
+        job.status = 'running';
+        job.stage = attempt === 1 ? 'YuE2: planning the score...' : `YuE2: re-planning (attempt ${attempt} of ${maxAttempts})...`;
+        job.progress = 1;
+        let plan: Awaited<ReturnType<typeof runYue2PlanPreview>>;
+        try {
+          plan = await runYue2PlanPreview(attempt === 1 ? job.params : { ...job.params, randomSeed: true, seed: -1 });
+        } catch (err: any) {
+          log('WARNING', `[YuE2] Auto-replan attempt ${attempt} failed (${err?.message || err}); rendering with the engine's own plan`);
+          autoReplan = undefined;
+          break;
+        }
+        autoReplan.attempts.push({ seed: plan.seed, verdict: plan.health.verdict, reason: plan.health.reason });
+        log('INFO', `[YuE2] Plan attempt ${attempt}: seed ${plan.seed}, ${plan.health.verdict} — ${plan.health.reason}`);
+        chosen = { abc: plan.abc, seed: plan.seed };
+        if (plan.health.verdict !== 'runaway') { autoReplan.accepted = true; break; }
+      }
+      if (autoReplan && chosen) {
+        req.abc = chosen.abc;
+        req.seed = chosen.seed;
+        if (!autoReplan.accepted) log('WARNING', `[YuE2] Every plan attempt was a runaway; rendering the last one (seed ${chosen.seed})`);
+        else if (autoReplan.attempts.length > 1) log('INFO', `[YuE2] Runaway plan replaced after ${autoReplan.attempts.length} attempts`);
+      }
+    }
+
     // ── Submit ──
     job.status = 'running';
     job.stage = 'YuE2: submitting...';
@@ -577,6 +615,7 @@ ${req.lyrics}`);
         duration_s: measured > 0 ? Math.round(measured * 10) / 10 : undefined,
         abc_supplied: !!req.abc,
         ...(scoreHealth ? { score_health: scoreHealth } : {}),
+        ...(autoReplan ? { auto_replan: autoReplan } : {}),
       },
     };
 

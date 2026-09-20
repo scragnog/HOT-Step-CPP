@@ -641,9 +641,11 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   rank?: number;
   alpha?: number;
   /** 'loss' trains until the windowed composite loss reaches targetLoss;
-   *  steps stays the cap. Default is 'steps'. */
-  stopMode?: 'steps' | 'loss';
+   *  'kl' until the planner's trailing AR KL to base reaches targetKl. steps
+   *  stays the cap either way. */
+  stopMode?: 'steps' | 'loss' | 'kl';
   targetLoss?: number;
+  targetKl?: number;
   /** Optional lyric-timing objective. Omitted by older callers; native joint
    *  training defaults this to enabled for new configurations. */
   lyricTiming?: boolean;
@@ -704,6 +706,7 @@ export interface Yue2AitkRunRecord {
 export interface Yue2JointPreviewRecord {
   endReason?: string;
   stageEndReasons?: Record<string, string>;
+  score?: { verdict: string; reason: string; bars: number; vocalShare: number; sections: string[] };
   id: string;
   step: number;
   kind: 'artist' | 'baseline' | 'control';
@@ -1793,6 +1796,7 @@ export interface TrainingMetricEvent {
   totalSteps?: number;
   loss?: number;
   lr?: number;
+  arKl?: number;
   gradNorm?: number;
   clipScale?: number;
   /** Wall time of THIS step, not elapsed. The direct spill signal. */

@@ -36,9 +36,11 @@ export interface ResolvedYue2JointTrainOptions {
   /** LoRA rank / alpha; engine defaults are 32 / 32.0. */
   rank?: number;
   alpha?: number;
-  /** 'loss' trains until the windowed composite loss <= targetLoss (steps is the cap). */
-  stopMode?: 'steps' | 'loss';
+  /** 'loss' trains until the windowed composite loss <= targetLoss; 'kl' until
+   *  the windowed AR KL to base >= targetKl. steps is the cap either way. */
+  stopMode?: 'steps' | 'loss' | 'kl';
   targetLoss?: number;
+  targetKl?: number;
   /** Advanced planner/optimizer knobs. Every one is optional and, when
    *  omitted, the engine's own default applies (lr 1e-4, weight decay 1e-4,
    *  KL 0.2, ABC dropout 0.5, planner scale 1.0). */
@@ -53,8 +55,8 @@ export interface ResolvedYue2JointTrainOptions {
 }
 
 /** Route and native runner share the public stop-mode contract. */
-export function parseYue2JointStopMode(value: unknown): 'steps' | 'loss' | null {
-  return value === undefined || value === 'steps' ? 'steps' : value === 'loss' ? 'loss' : null;
+export function parseYue2JointStopMode(value: unknown): 'steps' | 'loss' | 'kl' | null {
+  return value === undefined || value === 'steps' ? 'steps' : value === 'loss' ? 'loss' : value === 'kl' ? 'kl' : null;
 }
 
 export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): string[] {
@@ -75,6 +77,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     }
   }
   if (o.stopMode === 'loss' && o.targetLoss !== undefined) args.push('--target-loss', String(o.targetLoss));
+  if (o.stopMode === 'kl' && o.targetKl !== undefined) args.push('--target-kl', String(o.targetKl));
   if (o.lr !== undefined) args.push('--lr', String(o.lr));
   if (o.weightDecay !== undefined) args.push('--weight-decay', String(o.weightDecay));
   if (o.klWeight !== undefined) args.push('--kl-weight', String(o.klWeight));
@@ -128,8 +131,9 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (o.prodigyD0 !== undefined && (!Number.isFinite(o.prodigyD0) || o.prodigyD0 <= 0)) return 'prodigyD0 must be a positive finite number';
   if (o.muonLrScale !== undefined && (!Number.isFinite(o.muonLrScale) || o.muonLrScale <= 0)) return 'muonLrScale must be a positive finite number';
   if (o.muonNsSteps !== undefined && (!Number.isInteger(o.muonNsSteps) || o.muonNsSteps < 1 || o.muonNsSteps > 20)) return 'muonNsSteps must be an integer between 1 and 20';
-  if (o.stopMode && o.stopMode !== 'steps' && o.stopMode !== 'loss') return 'stopMode must be steps or loss';
+  if (o.stopMode && o.stopMode !== 'steps' && o.stopMode !== 'loss' && o.stopMode !== 'kl') return 'stopMode must be steps, loss or kl';
   if (o.stopMode === 'loss' && (o.targetLoss === undefined || !Number.isFinite(o.targetLoss) || o.targetLoss < 0)) return 'targetLoss must be a non-negative finite number when stopMode is loss';
+  if (o.stopMode === 'kl' && (o.targetKl === undefined || !Number.isFinite(o.targetKl) || o.targetKl <= 0)) return 'targetKl must be a positive finite number when stopMode is kl';
   if (o.resume && (!fs.existsSync(o.resume) || !fs.statSync(o.resume).isFile())) return `resume record is missing: ${o.resume}`;
   if (!o.spawnEnv) o.spawnEnv = buildGpuEnv().env;
   return null;
@@ -154,6 +158,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void 
     state.lastLoss = event.loss ?? state.lastLoss;
     pushEvent(job, { type: 'metric', metric: 'step', ts: Date.now(), step,
       totalSteps: state.totalSteps, ...(event.loss === undefined ? {} : { loss: event.loss }),
+      ...(event.arKl === undefined ? {} : { arKl: event.arKl }),
       ...(event.gradNorm === undefined ? {} : { gradNorm: event.gradNorm }),
       ...(event.stepMs === undefined ? {} : { stepMs: event.stepMs }) });
     emitProgress(job);
@@ -167,7 +172,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void 
     log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
   } else if (stage === 'target' && step !== undefined) {
     state.targetStopped = true;
-    log(job, 'info', `Target loss reached at step ${step}; stopping early`);
+    log(job, 'info', `Stop target reached at step ${step}; stopping early`);
   } else if (stage !== 'event') {
     if (stage === 'done') state.doneSeen = true;
     job.phase = stage;
@@ -196,7 +201,7 @@ function persistAitkCatalogue(
 
 /** Pure contract helper kept exportable for server-side event tests. */
 export function parseYue2JointEvent(line: string, totalSteps: number): {
-  stage: string; step?: number; loss?: number; gradNorm?: number; stepMs?: number; totalSteps: number;
+  stage: string; step?: number; loss?: number; arKl?: number; gradNorm?: number; stepMs?: number; totalSteps: number;
 } | null {
   try {
     const event = JSON.parse(line) as Record<string, unknown>;
@@ -210,6 +215,7 @@ export function parseYue2JointEvent(line: string, totalSteps: number): {
     const stepMs = finite(event.step_ms) && event.step_ms >= 0 ? event.step_ms : undefined;
     return { stage: event.stage, ...(step === undefined ? {} : { step }),
       ...(loss === undefined ? {} : { loss }),
+      ...(finite(event.ar_kl) ? { arKl: event.ar_kl } : {}),
       ...(finite(event.gradient_norm) ? { gradNorm: event.gradient_norm } : {}),
       ...(stepMs === undefined ? {} : { stepMs }), totalSteps };
   } catch { return null; }

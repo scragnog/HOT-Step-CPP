@@ -463,6 +463,8 @@ export interface TrainingMetricEvent {
   totalSteps?: number;
   loss?: number;
   lr?: number;
+  /** YuE2 joint: the planner's KL to base for this step (the kl stop target). */
+  arKl?: number;
   gradNorm?: number;
   clipScale?: number;
   /** Wall time of THIS step, not elapsed. The direct spill signal. */

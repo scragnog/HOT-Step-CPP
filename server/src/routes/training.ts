@@ -3443,7 +3443,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     }
     const stopMode = parseYue2JointStopMode(b.stopMode);
     if (stopMode === null) {
-      res.status(400).json({ error: 'stopMode must be steps or loss.' });
+      res.status(400).json({ error: 'stopMode must be steps, loss or kl.' });
       return;
     }
     // Advanced knobs: absent means the engine default. Ranges mirror the
@@ -3470,6 +3470,15 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         return;
       }
       targetLoss = rawTargetLoss;
+    }
+    let targetKl: number | undefined;
+    if (stopMode === 'kl') {
+      const rawTargetKl = Number(b.targetKl);
+      if (!Number.isFinite(rawTargetKl) || rawTargetKl <= 0 || rawTargetKl > 100) {
+        res.status(400).json({ error: 'targetKl must be a positive finite number when stopMode is kl.' });
+        return;
+      }
+      targetKl = rawTargetKl;
     }
     if (resume && (!fs.existsSync(resume) || !fs.statSync(resume).isFile())) {
       res.status(400).json({ error: `Joint-training resume record is missing: ${resume}` });
@@ -3500,12 +3509,13 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(muonNsSteps !== undefined ? { muonNsSteps } : {}),
       stopMode,
       ...(targetLoss !== undefined ? { targetLoss } : {}),
+      ...(targetKl !== undefined ? { targetKl } : {}),
       ...advanced,
       ...(preparation ? { preparation } : {}),
     });
     res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment,
       optimizer, rank, alpha: alphaRaw, stopMode, ...advanced,
-      ...(targetLoss !== undefined ? { targetLoss } : {}) });
+      ...(targetLoss !== undefined ? { targetLoss } : {}), ...(targetKl !== undefined ? { targetKl } : {}) });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

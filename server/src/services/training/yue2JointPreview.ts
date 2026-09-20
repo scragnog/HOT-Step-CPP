@@ -9,6 +9,7 @@ import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
 import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, type Yue2Selection } from '../backends/yue2/client.js';
+import { classifyYue2Score } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
   enabled: false, everySteps: 0, seconds: 40, seed: 424242,
@@ -29,6 +30,10 @@ export interface Yue2JointPreviewRecord {
   lyrics?: string;
   endReason?: string;
   stageEndReasons?: Record<string, string>;
+  /** Render-free planner health: the preview's own lead sheet, classified.
+   *  This is where AR over-training shows first (looping sections, no vocal),
+   *  so a run can be judged checkpoint by checkpoint without listening. */
+  score?: { verdict: string; reason: string; bars: number; vocalShare: number; sections: string[] };
   createdAt: number;
   updatedAt: number;
 }
@@ -174,6 +179,12 @@ export async function renderYue2JointPreview(input: {
           activeTerminal = true;
           if (typeof status.end_reason === 'string') record.endReason = status.end_reason;
           if (status.stage_end_reasons && typeof status.stage_end_reasons === 'object') record.stageEndReasons = status.stage_end_reasons;
+          const abc = (status as { abc?: unknown }).abc;
+          if (typeof abc === 'string' && abc.trim()) {
+            const h = classifyYue2Score(abc, status.end_reason);
+            record.score = { verdict: h.verdict, reason: h.reason, bars: h.bars, vocalShare: h.vocalShare, sections: h.sections };
+            try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `step-${input.step}-${kind}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
+          }
           break;
         }
         if (status.status === 'failed' || status.status === 'cancelled') { activeTerminal = true; throw new Error(`preview engine job ${status.status}`); }
