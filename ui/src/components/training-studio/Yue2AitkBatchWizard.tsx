@@ -107,7 +107,14 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
         if (signal.current.cancelled) throw new Error('Batch cancelled');
         const ar = await getYue2ArStatus(dataset.id);
         if (signal.current.cancelled) throw new Error('Batch cancelled');
-        if (!ar.stages.preprocess.done) await runStage(dataset.id, 'latent cache', () => startYue2Preprocess(dataset.id, {}));
+        // Same rule as the Training Studio stage chain: the cache must carry
+        // the sidecar captions and lyrics (mode 'ace'), and one built without
+        // them is rebuilt, not skipped — latents are cache hits, only the text
+        // is refilled. A cache with no lyrics makes the align stage skip every
+        // source and the AR train on empty prefixes.
+        if (!ar.stages.preprocess.done || ar.stages.preprocess.captionModeOk === false) {
+          await runStage(dataset.id, 'latent cache', () => startYue2Preprocess(dataset.id, { captionMode: 'ace' }));
+        }
         if (!ar.stages.tokenize.done) await runStage(dataset.id, 'codes', () => startYue2Tokenize(dataset.id, {}));
         if (!ar.stages.sheet.done) await runStage(dataset.id, 'lead sheets', () => startYue2Sheet(dataset.id, {}));
         if (lyricTiming) {
