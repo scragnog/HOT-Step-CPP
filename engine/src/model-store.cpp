@@ -21,6 +21,7 @@
 #include "timer.h"
 #include "weight-source.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -688,10 +689,39 @@ static void del_sa3_ort(void * p) {
     delete static_cast<Sa3Refine *>(p);
 }
 
+// A failed SA3 load is remembered for the rest of the process. Nothing else in
+// the store caches a FAILURE, and for every other model kind that is right —
+// a retry is cheap. This one is not. Building the five ONNX graphs means a
+// from-scratch TensorRT engine build asking for 2 GB of workspace each
+// (sa3-refine.h), and post-processing calls it once per TAKE. In #156 two
+// takes' loads failed, were caught, and were reported as a non-fatal 500; the
+// third attempt took ace-server down with it (exit 0xC000013A, no C++
+// exception, nothing logged) — three full TRT builds back to back, interleaved
+// with SuperSep's own CUDA load/unload cycles. A load that failed once in this
+// process will not succeed on the next take, and retrying only repeats the
+// allocation burst that preceded every observed crash.
+//
+// ponytail: process-lifetime, no cooldown — installing the missing models
+// needs an engine restart to clear it, which is what the Model Manager already
+// does on install. Give it a TTL if that ever stops being true.
+static bool sa3_load_failed_before(const std::string & key, bool record) {
+    static std::mutex                 mtx;
+    static std::vector<std::string>   failed;   // one entry in practice
+    std::lock_guard<std::mutex>       lock(mtx);
+    const bool seen = std::find(failed.begin(), failed.end(), key) != failed.end();
+    if (record && !seen) failed.push_back(key);
+    return record ? true : seen;
+}
+
 Sa3Refine * store_require_sa3_ort(ModelStore * s, const ModelKey & k) {
     std::lock_guard<std::mutex> lock(s->mtx);
     if (auto * hit = cache_hit<Sa3Refine>(s, k)) {
         return hit;
+    }
+    if (sa3_load_failed_before("ort:" + k.path, false)) {
+        fprintf(stderr, "[Store] SA3-Refine-ORT load failed earlier this session for %s - not retrying\n",
+                k.path.c_str());
+        return nullptr;
     }
     if (s->policy == EVICT_STRICT) {
         evict_all_except(s, k);
@@ -700,6 +730,7 @@ Sa3Refine * store_require_sa3_ort(ModelStore * s, const ModelKey & k) {
     Sa3Refine * m = new Sa3Refine();
     if (!sa3_load(m, k.path.c_str())) {  // k.path = directory holding the 5 graphs
         delete m;
+        sa3_load_failed_before("ort:" + k.path, true);
         return nullptr;
     }
     // ORT manages its own VRAM — report 0 bytes to the store budget.
