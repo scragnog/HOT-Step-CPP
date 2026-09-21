@@ -1,0 +1,28 @@
+diff --git a/engine/ggml/src/ggml-metal/ggml-metal-ops.cpp b/engine/ggml/src/ggml-metal/ggml-metal-ops.cpp
+index c716f118..32cacbe7 100644
+--- a/engine/ggml/src/ggml-metal/ggml-metal-ops.cpp
++++ b/engine/ggml/src/ggml-metal/ggml-metal-ops.cpp
+@@ -3273,7 +3273,22 @@ int ggml_metal_op_bin(ggml_metal_op_t ctx, int idx) {
+     if (pipeline.cnt) {
+         ggml_metal_encoder_dispatch_threadgroups(enc, args.ne0, ggml_nrows(op), 1, 1, 1, 1);
+     } else {
+-        const int nth_max = MIN(256, ggml_metal_pipeline_max_theads_per_threadgroup(pipeline));
++        // HOT-Step patch: metal-bin-threadgroup-cap - see engine/patches/metal-bin-threadgroup-cap.patch
++        //
++        // Was `MIN(256, ...)`. For ops with few rows (ne01) but a huge ne0
++        // -- e.g. a VAE decoder's late residual/bias adds, which run at only
++        // ~64 channels but multi-million-sample length -- the 256 cap left
++        // both the threadgroup count (bound by ne01) AND the per-threadgroup
++        // thread count under-provisioned, with no register-pressure reason
++        // for the cap (this is a plain elementwise add/mul, no shared
++        // memory). Using the pipeline's real max lets the doubling loop
++        // below scale nth further when ne0 warrants it and the hardware
++        // allows it; ops with small ne0 are unaffected, since the
++        // `2*nth < args.ne0` condition already stops the loop early for
++        // them. Shared code: ggml_metal_op_bin serves every backend that
++        // runs elementwise binary ops on Metal, not just one music-
++        // generation backend -- re-test broadly after touching this.
++        const int nth_max = ggml_metal_pipeline_max_theads_per_threadgroup(pipeline);
+ 
+         int nth = 1;
+ 
