@@ -44,6 +44,7 @@ LAUNCH.bat → Node server (Express :3001)
 
 - **Windows 11 + PowerShell.** This repo's primary dev environment is Windows. Your harness (Claude Code, Codex) may also give you a Bash (POSIX) tool — each takes its own syntax. In PowerShell use `;` not `&&`.
 - **Node 18–22 LTS only.** Node 24+ breaks dependencies (`engines` field enforces `<24`).
+- **Call `.bat`/`.cmd` by absolute path.** Some agent shells run with `NoDefaultCurrentDirectoryInExePath=1`, so `cmd.exe` will not resolve `build.cmd` from the working directory — you get `'build.cmd' is not recognized` even though it is right there. Worse, `cmd.exe /c "script.bat"` can return **exit 0 having run nothing**, so never take a batch exit code as proof it ran: check the output for the script's own first line.
 
 ## Build & run rules (IMPORTANT — learned the hard way)
 
@@ -59,6 +60,7 @@ LAUNCH.bat → Node server (Express :3001)
 
 - **All work on `master`. No feature branches, ever.**
 - **Never `git add -A`** (re-adds gitignored dirs: `.agents/`, `checkpoints/`, `node_modules/`, etc.). **Never `git add -f`** on gitignored paths. Stage explicit paths.
+- **Never `git reset --hard`.** This checkout sets `submodule.recurse=true`, so a hard reset in the superproject **also resets `engine/ggml`** and silently wipes the whole `engine/patches/` stack out of its tracked files. The next build looks like a broken engine change, not a git accident: CMake re-applies the stack, but the two patches that *create* files (`flash-attn-train`, `zz-yue2-convrot8`) fail with "already exists in working directory" — their `.cu`/`.cuh` are untracked, so the reset left them behind. You then get hundreds of CUDA errors about undefined `GGML_OP_CONVROT8` / `ggml_flash_attn_train_*`, because the orphaned kernels reference ops that are no longer declared. To undo an unwanted working-tree change, use `git checkout -- <path>` or `git restore <path>` on explicit paths. To recover from a hard reset: delete `engine/ggml/src/ggml-cuda/{convrot8,fattn-train}.{cu,cuh}`, re-apply those two patches, then run `engine/verify-hooks.ps1`.
 - **Push requires explicit user approval — always ask first.**
 - Commit to local git **often** (data has been lost before to uncommitted files).
 - **Releases:** push a `vX.Y.Z` tag → the `Release` workflow builds all platforms and drafts a GitHub Release. **Any pushed `v*` tag triggers a build** — use a `-CI-Test` suffix for throwaway compile checks, and don't push local feature tags matching `v*`. Full process + gotchas: [docs/RELEASING.md](docs/RELEASING.md).
@@ -98,7 +100,9 @@ The C++ engine is a patched fork of acestep.cpp. Three upstream files carry HOT-
 | `model-store.h` | `hot-step-params.h` | compile error |
 | `dit.h` | `adapter-merge.h` + `adapter-runtime.h` | compile error |
 
-After any sync: run `engine/verify-hooks.ps1`. Full process: `docs/plans/upstream-sync-workflow.md` *(local, gitignored)*.
+After any sync: run `engine/verify-hooks.ps1`. `build.cmd` also runs it before every compile and stops the build if a hook or ggml patch is missing — a missing op costs ten seconds to spot there and twenty minutes of CUDA compile to spot the other way.
+
+**The ggml patch stack has no reliable "already applied" check.** CMake tests it with `git apply --reverse --check`, which cannot work for patches that touch the same lines: `flash-attn-train` and `zz-yue2-convrot8` both add to the same enum in `ggml.h`, so once both are applied neither reverses in isolation. CMake logs "neither applies nor reverses" for `flash-attn-train` on **every healthy build** — that warning is expected and is not evidence of anything. `verify-hooks.ps1` greps for the symbols themselves and is the only trustworthy answer.
 
 ## UI / browser verification
 

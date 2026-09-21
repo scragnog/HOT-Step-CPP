@@ -146,6 +146,30 @@ if not exist "CMakeCache.txt" (
         cmake .. -DGGML_CUDA=ON -DGGML_CUDA_GRAPHS=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;120a" -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_BACKEND_DL=ON
     )
 )
+
+REM Gate the compile on the integration hooks and the ggml patch stack being
+REM intact. CMake's own "already applied" test (git apply --reverse --check)
+REM CANNOT be trusted: patches that touch the same lines -- flash-attn-train
+REM and zz-yue2-convrot8 both add to one enum in ggml.h -- stop reversing in
+REM isolation once both are applied, so CMake warns on a perfectly healthy
+REM tree and stays silent in some broken ones. verify-hooks.ps1 greps for the
+REM symbols themselves, which is the only answer that holds.
+REM Worth the ten seconds: a `git reset --hard` (submodule.recurse=true resets
+REM engine/ggml too) silently unpatches ggml, and without this gate you find
+REM out twenty minutes into a CUDA compile, via hundreds of errors about an
+REM undefined GGML_OP_CONVROT8 that look like a broken engine change.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-hooks.ps1"
+if errorlevel 1 (
+    echo.
+    echo [build] ABORTED: engine hooks or ggml patches are missing ^(see above^).
+    echo [build] If you ran `git reset --hard`, that reset engine/ggml too. Recover with:
+    echo [build]   del engine\ggml\src\ggml-cuda\convrot8.* engine\ggml\src\ggml-cuda\fattn-train.*
+    echo [build]   git apply --ignore-whitespace engine\patches\flash-attn-train.patch
+    echo [build]   git apply --ignore-whitespace engine\patches\zz-yue2-convrot8.patch
+    cd ..
+    exit /b 1
+)
+
 cmake --build . --config Release -j %NUMBER_OF_PROCESSORS%
 set BUILD_RC=%ERRORLEVEL%
 
