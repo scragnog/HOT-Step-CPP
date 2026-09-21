@@ -30,15 +30,19 @@ export function useCapabilities(): UseCapabilitiesResult {
     // Already cached for this backend — don't refetch on every mount, only on
     // an actual backend switch (fetchCapabilities is called explicitly there
     // too, from switchBackend, so this covers first-use and page reload).
-    if (useBackendStore.getState().capabilities[activeBackendId]) return;
+    const cachedUp = (): boolean => useBackendStore.getState().capabilities[activeBackendId]?.up === true;
+    if (cachedUp()) return;
     void fetchCapabilities(activeBackendId);
 
-    // A probe made while the engine is down or still loading caches nothing,
-    // so retry until one lands. The engine takes tens of seconds to come up
-    // after a restart, and without this the manifest stayed missing for the
-    // rest of the session (issue #153).
+    // A probe made while the engine is down or still loading gives a manifest
+    // with `up: false`, so retry until a live one lands. The engine takes tens
+    // of seconds to come up after a restart, and without this the manifest
+    // stayed missing for the rest of the session (issue #153). The condition
+    // is `up`, not mere presence: a down manifest is now cached so the UI can
+    // explain itself (#157), and stopping on it would strand the panel in the
+    // down state until a page reload — the very bug #153 was.
     const iv = setInterval(() => {
-      if (useBackendStore.getState().capabilities[activeBackendId]) {
+      if (cachedUp()) {
         clearInterval(iv);
         return;
       }

@@ -278,8 +278,19 @@ export const useBackendStore = create<BackendState>((set, get) => ({
       // but an `up: false` manifest reads as "this backend can do nothing" —
       // which is how restarting the engine emptied the post-processing menu
       // and left it empty until the page was reloaded (issue #153).
-      if (data && data.up === false) {
-        console.warn(`[Backends] capabilities for "${backendId}" report the engine down — not caching`);
+      //
+      // But only when there is something better to fall back TO. Discarding
+      // the FIRST manifest a backend ever reports leaves the UI with no
+      // manifest at all, which every consumer reads as "still loading" and
+      // renders the generic ACE-shaped controls — so switching to a YuE2 whose
+      // weights are missing showed ACE's model list and no Chain of Thought
+      // control, with nothing on screen saying why (#157, #159). The down
+      // manifest carries core.modelsMissing / modelsMissingHint, which is
+      // exactly the diagnosis the user needed and which this branch threw
+      // away. Keep a cached manifest over a down one; cache a down one when
+      // that is all we have.
+      if (data && data.up === false && get().capabilities[backendId]) {
+        console.warn(`[Backends] capabilities for "${backendId}" report the engine down — keeping the cached manifest`);
         return;
       }
       set({ capabilities: { ...get().capabilities, [backendId]: data } });
