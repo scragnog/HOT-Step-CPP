@@ -136,6 +136,18 @@ struct LmOptim {
     double        prodigy_d = 1e-6;  // the step-size estimate; never decreases
     double        prodigy_r = 0.0;   // the running numerator
     float         prodigy_d0 = 1e-6f;
+    // Adam-style bias correction on the weight update (the reference's
+    // use_bias_correction=True). Without it the normalised update m/sqrt(v)
+    // is inflated by (1-b1^t)/sqrt(1-b2^t): 4.5x at step 50, 2.7x at 150, 2x
+    // at 300, only washing out after ~1000 steps — longer than any adapter
+    // run here. The reference defaults this OFF and gets away with it because
+    // d is still tiny while the factor is large; our d reaches full size in
+    // ~20 steps, so the inflated steps landed at full rate. Measured on YuE2
+    // joint (2026-09-21): the NAR's lora_B norm at step 50 was 5x AdamW's at
+    // the same nominal rate, and the decoder rendered noise. AdamW's
+    // ggml_opt_step_adamw has always corrected both moments, so this is what
+    // makes a Prodigy-vs-AdamW comparison mean anything.
+    bool          prodigy_bias_correction = true;
 
     // ── Per-parameter learning-rate groups (P1b, 2026-09-03) ───────────────
     //
@@ -700,7 +712,17 @@ static bool lm_optim_step_prodigy(LmOptim * o, ggml_backend_sched_t sched, float
         const float deps = (float) d_new * eps;
         ggml_backend_tensor_set(o->t_pdeps, &deps, 0, sizeof(float));
     }
-    const float step = lr_now * (float) d_new;
+    float step = lr_now * (float) d_new;
+    if (o->prodigy_bias_correction) {
+        // opt_iter is incremented at the end of this step, so this step is
+        // number opt_iter+1 — 1-based, like ggml-opt's iter for AdamW.
+        const double t = (double) o->opt_iter + 1.0;
+        step *= (float) (std::sqrt(1.0 - std::pow((double) b2, t)) / (1.0 - std::pow((double) b1, t)));
+    }
+    // ponytail: the correction is applied to the weight update only, not to
+    // the d estimate (r and s). The reference threads its dlr through both;
+    // this d estimator is already a validated variant of the reference's and
+    // gets left alone. Revisit if d plateaus differently from the reference.
     // Per-parameter LR groups, the same `lr_mul` the AdamW path applies through
     // its alt tensors. Only the WEIGHT UPDATE is scaled: `d` stays a single
     // global estimate driven by the unscaled gamma, which is what the reference
