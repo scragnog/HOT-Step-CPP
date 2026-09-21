@@ -24,6 +24,8 @@
 #  include <dlfcn.h>
 #  include <string>
 #  include <unistd.h>
+#elif defined(__APPLE__)
+#  include <sys/sysctl.h>
 #endif
 
 struct BackendPair {
@@ -43,12 +45,32 @@ inline int         g_backend_refs  = 0;
 // Physical core count heuristic (logical / 2 for HT/SMT).
 // Used for GGML CPU thread count: GEMM shares SIMD units across hyperthreads,
 // so one thread per physical core is optimal.
+//
+// Apple Silicon has no hyperthreading -- every logical core IS a physical
+// core -- so the /2 below is not a P/E-core split, just an accident that
+// happens to undershoot 8 on the specific 8P+2E layout of M1/M2/M3/M4 Max
+// (hardware_concurrency()=10 -> 5 threads). On a bigger die (e.g. M2 Ultra,
+// 16P+8E, hardware_concurrency()=24) the same heuristic gives 12 and DOES
+// spill onto the slower efficiency cores, which stall a barrier-synchronized
+// ggml thread pool at the slowest thread. Ask macOS for the real performance-
+// core count instead (hw.perflevel0 = performance, hw.perflevel1 =
+// efficiency); Intel Macs have no perflevel split and sysctlbyname simply
+// fails there, so this falls through to the /2 heuristic unchanged.
 static int backend_cpu_n_threads(void) {
     const char * env = std::getenv("GGML_N_THREADS");
     if (env) {
         int n = atoi(env);
         if (n > 0) return n;
     }
+#ifdef __APPLE__
+    {
+        int    perf_cores = 0;
+        size_t sz         = sizeof(perf_cores);
+        if (sysctlbyname("hw.perflevel0.physicalcpu", &perf_cores, &sz, NULL, 0) == 0 && perf_cores > 0) {
+            return perf_cores;
+        }
+    }
+#endif
     int n = (int) std::thread::hardware_concurrency() / 2;
     return n > 0 ? n : 1;
 }
