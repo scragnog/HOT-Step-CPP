@@ -32,7 +32,7 @@ cd /d "%~dp0server"
 echo Starting server...
 
 REM Open browser if no existing tab is found
-start /MIN "" powershell -ExecutionPolicy Bypass -File "%~dp0open-browser-if-needed.ps1" "http://localhost:3001/" 4
+start /MIN "" powershell -ExecutionPolicy Bypass -File "%~dp0open-browser-if-needed.ps1" "http://localhost:3001/"
 
 :loop
 call npx tsx src/index.ts

@@ -402,6 +402,24 @@ const AppContent: React.FC = () => {
   const [isShutdown, setIsShutdown] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
 
+  // Presence beacon: the launcher asks /api/health whether any tab is already
+  // open before opening a new one. SSE reconnects at the network layer, so a
+  // background tab (whose timers Chrome throttles) still re-registers within
+  // seconds of the server coming back. A non-200 (Vite proxy error while the
+  // server is down) closes an EventSource for good, hence the manual reopen.
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let retry: number | undefined;
+    const open = () => {
+      es = new EventSource('/api/health/presence');
+      es.onerror = () => {
+        if (es?.readyState === EventSource.CLOSED) retry = window.setTimeout(open, 3000);
+      };
+    };
+    open();
+    return () => { window.clearTimeout(retry); es?.close(); };
+  }, []);
+
   // Settings' own "Restart now" button posts to /api/shutdown/restart from deep
   // inside the panel and cannot reach this state directly, so it announces the
   // restart instead. Without this the page sat there against a dead server and

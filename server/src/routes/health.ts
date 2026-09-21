@@ -7,6 +7,21 @@ import { engineReady, engineBootStatus } from '../engineState.js';
 
 const router = Router();
 
+// Open browser tabs hold this SSE stream (App.tsx). open-browser-if-needed.ps1
+// reads `clients` from /api/health to decide whether to open a new tab.
+let presence = 0;
+router.get('/presence', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('retry: 2000\n\n');
+  presence++;
+  req.on('close', () => { presence--; });
+});
+
 // GET /api/health — overall system health
 router.get('/', async (_req, res) => {
   let aceStatus = 'disconnected';
@@ -38,6 +53,7 @@ router.get('/', async (_req, res) => {
       port: config.server.port,
       uptime: process.uptime(),
     },
+    clients: presence,
     engine: {
       ready: engineReady,
       bootStatus: engineBootStatus,

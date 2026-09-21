@@ -12,6 +12,16 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
+        // When the Node server dies mid-response (in-app restart, tsx watch
+        // reload), http-proxy leaves the browser's connection open: pipe()
+        // only ends the client response on a clean upstream 'end'. An
+        // EventSource (the /api/health/presence beacon, the terminal log
+        // stream) then sits on a dead stream forever instead of reconnecting.
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes, _req, res) => {
+            proxyRes.on('close', () => { if (!res.writableEnded) res.destroy() })
+          })
+        },
       },
       '/audio': {
         target: 'http://127.0.0.1:3001',

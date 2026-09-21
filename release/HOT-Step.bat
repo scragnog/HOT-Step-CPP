@@ -13,7 +13,7 @@ REM Create models directory if it doesn't exist (first run)
 if not exist "%~dp0models" mkdir "%~dp0models"
 
 REM Open browser if no existing tab is found
-start /MIN "" powershell -ExecutionPolicy Bypass -File "%~dp0open-browser-if-needed.ps1" "http://localhost:3001/" 5
+start /MIN "" powershell -ExecutionPolicy Bypass -File "%~dp0open-browser-if-needed.ps1" "http://localhost:3001/"
 
 REM ── Restart loop ──────────────────────────────────────────
 REM The server writes .restart-requested when the user clicks

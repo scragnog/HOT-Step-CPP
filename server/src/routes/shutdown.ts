@@ -1,13 +1,11 @@
 // shutdown.ts — Graceful shutdown and restart endpoints
 //
-// POST /api/shutdown — gracefully stops Node server + ace-server child
-// POST /api/restart  — stops and relaunches (writes marker for loop wrapper)
-// Platform-aware: uses taskkill on Windows, targeted SIGTERM on macOS/Linux.
+// POST /api/shutdown — stops ace-server, Vite (dev only) and the Node process tree
+// POST /api/restart  — stops and relaunches (writes marker for the loop wrapper)
 //
-// SAFETY: We only kill processes we own (our PID and our child ace-server).
-// We NEVER kill by port on macOS — that can destroy unrelated services.
-// On Windows, port-based kill is used for ace-server because we don't
-// have the child PID available in this module.
+// SAFETY: we only kill processes we own — the ace-server child (via
+// stopAceServer), the dev Vite server on :3000 (only when dev.bat set
+// HOT_STEP_DEV), and our own parent on Windows (tsx / tsx watch).
 
 import { Router } from 'express';
 import { execSync, spawn } from 'child_process';
@@ -15,71 +13,19 @@ import fs from 'fs';
 import path from 'path';
 import { PROJECT_ROOT, PORTABLE_MODE } from '../config.js';
 import { killActiveChildren } from '../services/training/labelingQueue.js';
+import { stopAceServer } from '../services/aceEngineProcess.js';
 
 const router = Router();
 
-/** Reap spawned training children (ace-train + its ffmpeg) before we exit.
- *  Only the Windows /api/shutdown path used to clean these up, and only as a
- *  side effect of taskkill /T on our own tree — portable /api/restart and every
- *  non-Windows path orphaned a GPU-resident process. */
+/** Reap spawned training children (ace-train + its ffmpeg) before we exit. */
 function killTrainingChildren(): void {
   try { killActiveChildren(); } catch (err) { console.error('[Shutdown] killActiveChildren failed:', err); }
 }
 
-/** Kill the ace-server child process safely (cross-platform). */
-function killAceServer(): void {
-  try {
-    if (process.platform === 'win32') {
-      // Windows: netstat + taskkill (port-based, needed because we don't have the child PID here)
-      const output = execSync(
-        `netstat -ano | findstr ":8085" | findstr "LISTENING"`,
-        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-      );
-      const pids = new Set<string>();
-      for (const line of output.split('\n')) {
-        const parts = line.trim().split(/\s+/);
-        const pid = parts[parts.length - 1];
-        if (pid && /^\d+$/.test(pid) && pid !== '0') {
-          pids.add(pid);
-        }
-      }
-      for (const pid of pids) {
-        try {
-          execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
-          console.log(`[Shutdown] Killed ace-server PID ${pid}`);
-        } catch {
-          // Process may already be dead
-        }
-      }
-    } else {
-      // macOS/Linux: find ace-server processes that are children of us
-      try {
-        const output = execSync(
-          `pgrep -P ${process.pid} -f ace-server 2>/dev/null || true`,
-          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-        ).trim();
-        if (output) {
-          for (const pid of output.split('\n').filter(Boolean)) {
-            try {
-              process.kill(parseInt(pid, 10), 'SIGTERM');
-              console.log(`[Shutdown] Sent SIGTERM to ace-server child PID ${pid}`);
-            } catch {
-              // Already dead
-            }
-          }
-        }
-      } catch {
-        // No matching processes
-      }
-    }
-  } catch {
-    // No process found — that's fine
-  }
-}
-
-/** Kill the Vite dev server by port (Windows only, used during full shutdown). */
+/** Kill the Vite dev server by port. Only when dev.bat started it (HOT_STEP_DEV),
+ *  or a LAUNCH.bat user with something unrelated on :3000 loses it on Quit. */
 function killVite(): void {
-  if (process.platform !== 'win32') return; // macOS: Vite isn't our child in production
+  if (process.platform !== 'win32' || !process.env.HOT_STEP_DEV) return;
   try {
     const output = execSync(
       `netstat -ano | findstr ":3000" | findstr "LISTENING"`,
@@ -87,95 +33,67 @@ function killVite(): void {
     );
     const pids = new Set<string>();
     for (const line of output.split('\n')) {
-      const parts = line.trim().split(/\s+/);
-      const pid = parts[parts.length - 1];
-      if (pid && /^\d+$/.test(pid) && pid !== '0') {
-        pids.add(pid);
-      }
+      const pid = line.trim().split(/\s+/).pop();
+      if (pid && /^\d+$/.test(pid) && pid !== '0') pids.add(pid);
     }
     for (const pid of pids) {
       try {
         execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
         console.log(`[Shutdown] Killed Vite PID ${pid} (port 3000)`);
-      } catch {
-        // Process may already be dead
-      }
+      } catch { /* already dead */ }
     }
-  } catch {
-    // No process found on port 3000 — that's fine
-  }
+  } catch { /* nothing on :3000 */ }
 }
 
 /** Kill our own process tree from outside (Windows).
- *  Chain: cmd.exe → npx → tsx watch → node (us)
- *  Killing the parent tsx/npx with /T kills everything, and
- *  cmd.exe /c exits because its command finished.
- *  On macOS/Linux, process.exit() is sufficient because launch.sh
- *  uses exec (replaces shell with node, no orphan parents). */
+ *  Chain: cmd.exe → npx → tsx [watch] → node (us). A plain process.exit()
+ *  leaves `tsx watch` alive waiting for a file change, so the restart loop
+ *  never sees us exit and Quit leaves a Node process behind. Killing the
+ *  parent with /T takes the whole tree; cmd.exe /c then finishes its command.
+ *  Uses process.ppid — the old `wmic` lookup no longer exists on Windows 11
+ *  24H2+, which silently broke both Restart and Quit.
+ *  On macOS/Linux, process.exit() is enough: launch.sh uses exec. */
 function killSelf(): void {
-  if (process.platform !== 'win32') return; // macOS doesn't need this
-  try {
-    const output = execSync(
-      `wmic process where processid=${process.pid} get parentprocessid /value`,
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-    const match = output.match(/ParentProcessId=(\d+)/i);
-    if (match) {
-      const parentPid = match[1];
-      console.log(`[Shutdown] Killing parent PID ${parentPid} (our process tree)`);
-
-      // Spawn taskkill directly after a Node-side delay. Do NOT use the
-      // `cmd /c ping -n 2 ... & taskkill` sleep idiom: ping can hang forever
-      // (observed 2026-07-17 — hung PING.EXE processes meant taskkill never
-      // ran, tsx watch survived, and the restart-loop marker was never
-      // consumed, leaving the server dead after an in-app restart).
-      setTimeout(() => {
-        try {
-          const killer = spawn('taskkill', ['/PID', parentPid, '/T', '/F'], {
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: true,
-          });
-          killer.unref();
-        } catch {
-          // Fallback: our own process.exit still runs
-        }
-      }, 700);
-    }
-  } catch {
-    // Fallback: just exit
-  }
+  if (process.platform !== 'win32') return;
+  const parentPid = process.ppid;
+  if (!parentPid) return;
+  console.log(`[Shutdown] Killing parent PID ${parentPid} (our process tree)`);
+  // Delay so the HTTP response has flushed. Do NOT use `cmd /c ping` as the
+  // sleep: PING.EXE can hang forever (observed 2026-07-17).
+  setTimeout(() => {
+    try {
+      spawn('taskkill', ['/PID', String(parentPid), '/T', '/F'], {
+        detached: true, stdio: 'ignore', windowsHide: true,
+      }).unref();
+    } catch { /* fallback: process.exit below still runs */ }
+  }, 500);
 }
 
-// POST /api/shutdown — terminate everything gracefully
+async function stopEverything(restart: boolean): Promise<void> {
+  killTrainingChildren();
+  // Through the owning module so the exit handler knows this was deliberate —
+  // the old port-based taskkill made it log "crash 1/3, restarting in 3 s".
+  await stopAceServer(restart ? 'Server restarting' : 'Server shutting down', 15_000, { suspend: false });
+  if (!restart) killVite();
+  // Portable restart: HOT-Step.bat runs node directly, so our parent IS the
+  // restart loop — exiting is enough there. Every other case needs the tree kill.
+  if (!restart || !PORTABLE_MODE) killSelf();
+  setTimeout(() => {
+    console.log(restart ? '[Server] Exiting for restart.' : '[Server] Exiting.');
+    process.exit(0);
+  }, 1000);
+}
+
+// POST /api/shutdown — terminate everything
 router.post('/', (_req, res) => {
   console.log('[Server] Shutdown requested via API');
   res.json({ success: true, message: 'Shutting down...' });
-
-  setTimeout(() => {
-    console.log('[Server] Shutting down...');
-    killTrainingChildren();
-    killAceServer();
-    killVite();
-
-    // On Windows: kill our process tree from outside (needed for dev-rebuild workflow)
-    // On macOS: process.exit() is sufficient
-    killSelf();
-
-    // Fallback exit
-    setTimeout(() => {
-      console.log('[Server] Exiting.');
-      process.exit(0);
-    }, 1000);
-  }, 300);
+  setTimeout(() => void stopEverything(false), 300);
 });
 
 // POST /api/restart — restart server (loop wrapper relaunches)
 router.post('/restart', (_req, res) => {
   console.log('[Server] Restart requested via API');
-
-  // Write marker file so the loop wrapper (launch.bat / launch.sh)
-  // knows to re-launch instead of exiting
   const markerPath = path.join(PROJECT_ROOT, '.restart-requested');
   try {
     fs.writeFileSync(markerPath, new Date().toISOString(), 'utf8');
@@ -183,29 +101,8 @@ router.post('/restart', (_req, res) => {
   } catch (err: any) {
     console.error(`[Server] Failed to write restart marker: ${err.message}`);
   }
-
   res.json({ success: true, message: 'Restarting...' });
-
-  setTimeout(() => {
-    console.log('[Server] Restarting — stopping ace-server and self...');
-    killTrainingChildren();
-    killAceServer();
-
-    // Do NOT kill Vite (port 3000) — leave it running for dev mode
-
-    // In portable mode, the bat file has a restart loop that checks
-    // .restart-requested after node exits — just exit cleanly.
-    // In dev mode, kill our process tree so tsx watch relaunches us.
-    if (!PORTABLE_MODE) {
-      killSelf();
-    }
-
-    // Exit — portable bat loop will relaunch, dev tsx watch will relaunch
-    setTimeout(() => {
-      console.log('[Server] Exiting for restart.');
-      process.exit(0);
-    }, 1000);
-  }, 300);
+  setTimeout(() => void stopEverything(true), 300);
 });
 
 export default router;
