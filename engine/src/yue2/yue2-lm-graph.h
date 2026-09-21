@@ -768,7 +768,12 @@ static bool yue2_ar_kv_cache_copy_rows(const Yue2Model & m, const Yue2ArKvCache 
         return false;
     }
     const int L = (int) src.k.size();
-    const size_t ctx_bytes = ggml_tensor_overhead() * (size_t) (L * 8 + 16) + ggml_graph_overhead_custom((size_t) L * 4 + 16, false);
+    // Per layer: two source views, two destination views, two cpy nodes — six
+    // graph nodes, not two (a view is a node once the graph expands it) — and
+    // the scheduler's hash set must also hold the leaves: both caches' K and V
+    // tensors when src and dst differ (4 per layer).
+    const size_t n_nodes   = (size_t) L * 16 + 64;
+    const size_t ctx_bytes = ggml_tensor_overhead() * (n_nodes + 16) + ggml_graph_overhead_custom(n_nodes, false);
     std::vector<uint8_t> gbuf(ctx_bytes);
     ggml_init_params ip = { ctx_bytes, gbuf.data(), /*no_alloc*/ true };
     ggml_context * ctx = ggml_init(ip);
@@ -776,7 +781,7 @@ static bool yue2_ar_kv_cache_copy_rows(const Yue2Model & m, const Yue2ArKvCache 
         if (err) *err = "yue2_ar_kv_cache_copy_rows: ggml_init failed";
         return false;
     }
-    ggml_cgraph * gf = ggml_new_graph_custom(ctx, (size_t) L * 4 + 16, false);
+    ggml_cgraph * gf = ggml_new_graph_custom(ctx, n_nodes, false);
     for (int i = 0; i < L; i++) {
         ggml_tensor * st[2] = { src.k[(size_t) i], src.v[(size_t) i] };
         ggml_tensor * dt[2] = { dst.k[(size_t) i], dst.v[(size_t) i] };
@@ -794,7 +799,7 @@ static bool yue2_ar_kv_cache_copy_rows(const Yue2Model & m, const Yue2ArKvCache 
     // gives the cache views a buffer (ggml_backend_view_init), and CUDA's
     // graph runner dereferences src->buffer.
     BackendPair bp = { m.backend, m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
-    ggml_backend_sched_t sched = backend_sched_new(bp, (int) ((size_t) L * 4 + 16));
+    ggml_backend_sched_t sched = backend_sched_new(bp, (int) n_nodes);
     bool ok = sched && ggml_backend_sched_alloc_graph(sched, gf) &&
               ggml_backend_sched_graph_compute(sched, gf) == GGML_STATUS_SUCCESS;
     if (sched) ggml_backend_sched_free(sched);

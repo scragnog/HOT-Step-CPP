@@ -1624,7 +1624,7 @@ static bool yue2_check_array(const std::string & label, const std::vector<float>
 // readback order differs here.
 static bool yue2_nar_kv_dump_token_major(const Yue2ArKvCache & cache, int layer, int64_t n,
                                          std::vector<float> * k_out, std::vector<float> * v_out) {
-    if (layer < 0 || (size_t) layer >= cache.k.size() || n <= 0 || n > cache.filled) {
+    if (layer < 0 || (size_t) layer >= cache.k.size() || n <= 0 || n > cache.filled[0]) {
         return false;
     }
     ggml_tensor * kt  = cache.k[(size_t) layer];
@@ -3071,6 +3071,136 @@ static int run_generate_cli(const std::string & models_dir, const std::string & 
     const int rc = run_generate(m, models_dir, tokenizer_dir_arg, style, lyrics, cot_s, max_tokens_cli, seed);
     yue2_unload(&m);
     return rc;
+}
+
+// ── --batch-parity: the multi-set decode graph against the single-set one ──
+//
+// docs/plans/yue2/30-upstream-backports.md. Token hashes cannot tell a bug in
+// the batched decode from ordinary numerics (a GEMV at N=1 and a GEMM at N=2
+// do not accumulate identically, and a 2000-token sample amplifies an ulp),
+// so this compares LOGITS at the first decode steps instead:
+//   A  S=1: prefill cond, decode k fixed tokens                   (reference)
+//   B  S=2: set 0 = neg prefix, set 1 = cond prefix, lockstep     (set 1 vs A)
+//   C  S=2: set 0 = cond, set 1 = neg                             (set 0 vs A)
+//   D  S=2: set 0 = cond prefill, set 1 = copy_set of set 0       (set 1 vs set 0, bit-exact)
+// The tokens fed are the argmax of A's own logits each step, so every run
+// sees the same ids. Reports max |diff|, max relative diff and whether the
+// argmax agrees; a wrong position, mask or row write shows up as O(1)
+// differences, numerics as O(1e-3).
+static int run_batch_parity_cli(const std::string & models_dir, const std::string & tokenizer_dir_arg,
+                                const std::string & style, const std::string & lyrics, int n_steps) {
+    Yue2Model m;
+    m.lm_adapter_want = g_yue2_probe_adapters;
+    yue2_discover(&m, models_dir.c_str(), g_yue2_lm_type.empty() ? nullptr : g_yue2_lm_type.c_str());
+    if (!yue2_available(m)) {
+        fprintf(stderr, "FATAL: YuE2 LM GGUF not found/probe failed under %s\n", models_dir.c_str());
+        return 1;
+    }
+    std::string err;
+    if (!yue2_load_parts(&m, /*want_lm=*/true, /*want_vae=*/false, YUE2_VAE_STANDARD, /*want_encoder=*/false, &err)) {
+        fprintf(stderr, "FATAL: LM load failed: %s\n", err.c_str());
+        return 1;
+    }
+    BPETokenizer tok;
+    std::string  source;
+    if (!yue2_probe_load_tokenizer(models_dir, tokenizer_dir_arg, &tok, &source)) {
+        fprintf(stderr, "FATAL: could not load a tokenizer\n");
+        yue2_unload(&m);
+        return 1;
+    }
+    std::vector<int> cond_i = yue2_token_prefixes(&tok, style, lyrics, YUE2_COT_OFF, nullptr);
+    std::vector<int> neg_i  = yue2_negative_prefix(&tok, YUE2_COT_OFF, nullptr);
+    std::vector<int32_t> cond(cond_i.begin(), cond_i.end()), neg(neg_i.begin(), neg_i.end());
+    printf("cond prefix %zu ids, neg prefix %zu ids, %d decode steps, LM %s\n", cond.size(), neg.size(), n_steps,
+           m.lm_file.name.c_str());
+    const int64_t capacity = (int64_t) std::max(cond.size(), neg.size()) + n_steps + 4;
+    const int64_t V = (int64_t) m.lm_cfg.vocab_size;
+    if (n_steps < 1) n_steps = 1;
+
+    auto prefill = [&](Yue2ArKvCache & c, const std::vector<int32_t> & ids, int64_t set, std::vector<float> * logits) {
+        Yue2ArForwardResult out;
+        if (!yue2_ar_prefill(m, c, ids, { (int64_t) ids.size() - 1 }, {}, &out, &err, set)) {
+            fprintf(stderr, "FATAL: prefill failed: %s\n", err.c_str());
+            return false;
+        }
+        if (logits) *logits = out.logits;
+        return true;
+    };
+    auto compare = [&](const char * label, const float * a, const float * b) {
+        double max_abs = 0.0, max_rel = 0.0;
+        int64_t arg_a = 0, arg_b = 0;
+        for (int64_t v = 0; v < V; v++) {
+            const double d = std::fabs((double) a[v] - (double) b[v]);
+            max_abs = std::max(max_abs, d);
+            max_rel = std::max(max_rel, d / (std::fabs((double) a[v]) + 1e-6));
+            if (a[v] > a[arg_a]) arg_a = v;
+            if (b[v] > b[arg_b]) arg_b = v;
+        }
+        printf("  %-28s max|diff|=%.3e max_rel=%.3e argmax %s (%lld vs %lld)\n", label, max_abs, max_rel,
+               arg_a == arg_b ? "same" : "DIFFERENT", (long long) arg_a, (long long) arg_b);
+        return max_abs;
+    };
+
+    // A: single set reference, fixed token stream = argmax of its own logits.
+    Yue2ArKvCache a;
+    std::vector<std::vector<float>> ref;   // per step: logits after decoding tokens[0..s]
+    std::vector<int32_t>            toks;  // token fed at step s
+    if (!yue2_ar_kv_cache_alloc(m, capacity, &a, &err, 1)) { fprintf(stderr, "FATAL: %s\n", err.c_str()); return 1; }
+    std::vector<float> l;
+    if (!prefill(a, cond, 0, &l)) return 1;
+    for (int s = 0; s < n_steps; s++) {
+        const int32_t t = (int32_t) (std::max_element(l.begin(), l.end()) - l.begin());
+        toks.push_back(t);
+        if (!yue2_ar_decode_step(m, a, t, &l, &err)) { fprintf(stderr, "FATAL: %s\n", err.c_str()); return 1; }
+        ref.push_back(l);
+    }
+    yue2_ar_kv_cache_free(&a);
+
+    double worst = 0.0;
+    // B and C: cond beside neg in either slot; neg follows its own argmax.
+    for (int cond_slot = 1; cond_slot >= 0; cond_slot--) {
+        printf("%s: cond in set %d, neg in set %d\n", cond_slot ? "B" : "C", cond_slot, 1 - cond_slot);
+        Yue2ArKvCache c;
+        if (!yue2_ar_kv_cache_alloc(m, capacity, &c, &err, 2)) { fprintf(stderr, "FATAL: %s\n", err.c_str()); return 1; }
+        std::vector<float> lc, ln;
+        if (!prefill(c, cond, cond_slot, &lc) || !prefill(c, neg, 1 - cond_slot, &ln)) return 1;
+        std::vector<float> batch;
+        for (int s = 0; s < n_steps; s++) {
+            int32_t ids[2];
+            ids[cond_slot]     = toks[(size_t) s];
+            ids[1 - cond_slot] = (int32_t) (std::max_element(ln.begin(), ln.end()) - ln.begin());
+            if (!yue2_ar_decode_batch(m, c, ids, &batch, &err)) { fprintf(stderr, "FATAL: %s\n", err.c_str()); return 1; }
+            lc.assign(batch.begin() + (size_t) cond_slot * (size_t) V, batch.begin() + (size_t) (cond_slot + 1) * (size_t) V);
+            ln.assign(batch.begin() + (size_t) (1 - cond_slot) * (size_t) V, batch.begin() + (size_t) (2 - cond_slot) * (size_t) V);
+            char label[64];
+            snprintf(label, sizeof(label), "step %d cond vs A", s);
+            worst = std::max(worst, compare(label, ref[(size_t) s].data(), lc.data()));
+        }
+        yue2_ar_kv_cache_free(&c);
+    }
+
+    // D: copy_set must be bit-exact between the two sets given identical inputs.
+    {
+        printf("D: set 1 = copy of set 0, same token both\n");
+        Yue2ArKvCache c;
+        if (!yue2_ar_kv_cache_alloc(m, capacity, &c, &err, 2)) { fprintf(stderr, "FATAL: %s\n", err.c_str()); return 1; }
+        if (!prefill(c, cond, 0, nullptr)) return 1;
+        if (!yue2_ar_kv_cache_copy_set(m, c, 0, 1, c.filled[0], &err)) { fprintf(stderr, "FATAL: %s\n", err.c_str()); return 1; }
+        std::vector<float> batch;
+        for (int s = 0; s < n_steps; s++) {
+            int32_t ids[2] = { toks[(size_t) s], toks[(size_t) s] };
+            if (!yue2_ar_decode_batch(m, c, ids, &batch, &err)) { fprintf(stderr, "FATAL: %s\n", err.c_str()); return 1; }
+            char label[64];
+            snprintf(label, sizeof(label), "step %d set1 vs set0", s);
+            compare(label, batch.data(), batch.data() + (size_t) V);
+            snprintf(label, sizeof(label), "step %d set0 vs A", s);
+            worst = std::max(worst, compare(label, ref[(size_t) s].data(), batch.data()));
+        }
+        yue2_ar_kv_cache_free(&c);
+    }
+    printf("worst cond-vs-single max|diff| = %.3e\n", worst);
+    yue2_unload(&m);
+    return 0;
 }
 
 // ── --mert-front-parity: MERT's mel frontend + ConvNext subsampling + RoPE ──
@@ -5059,6 +5189,8 @@ int main(int argc, char ** argv) {
     int             sheetsage_threads       = 0;      // --threads, sheetsage-pipeline.h's SheetSageTranscribeOptions
     bool            sheetsage_transcribe_repair = false;  // --repair, opt-in (see run_sheetsage_transcribe's note)
     bool            do_generate      = false;
+    bool            do_batch_parity  = false;  // --batch-parity [--steps n]: multi-set decode vs single-set logits
+    int             batch_steps      = 4;
     std::string     gen_style;
     std::string     gen_lyrics;
     std::string     gen_cot          = "off";
@@ -5128,6 +5260,10 @@ int main(int argc, char ** argv) {
             sheetsage_threads = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--variant") && i + 1 < argc) {
             vae_parity_variant = argv[++i];
+        } else if (!strcmp(argv[i], "--batch-parity")) {
+            do_batch_parity = true;
+        } else if (!strcmp(argv[i], "--steps") && i + 1 < argc) {
+            batch_steps = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--generate")) {
             do_generate = true;
         } else if (!strcmp(argv[i], "--style") && i + 1 < argc) {
@@ -5392,6 +5528,11 @@ int main(int argc, char ** argv) {
         }
         return run_generate_cli(models_dir, tokenizer_dir_arg, gen_style, gen_lyrics, gen_cot, gen_max_tokens,
                                 gen_seed);
+    }
+    if (do_batch_parity) {
+        if (gen_style.empty()) gen_style = "indie rock, male vocal, driving drums";
+        if (gen_lyrics.empty()) gen_lyrics = "[verse]\nStreetlights hum on the empty road\n";
+        return run_batch_parity_cli(models_dir, tokenizer_dir_arg, gen_style, gen_lyrics, batch_steps);
     }
 
     if (models_dir.empty() || (!do_info && !do_load)) {

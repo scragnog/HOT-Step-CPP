@@ -383,7 +383,9 @@ async function capabilities(): Promise<BackendCapabilities> {
       bpm: false,
       keyscale: false,
       negativePrompt: false,
-      batch: { max: 1 },
+      // Songs per request; the engine decodes them in lockstep (doc 30 #6).
+      // Older engines never report the cap and render one track.
+      batch: { max: Math.max(1, Number(props?.max_lm_batch) || 1) },
       seed: true,
       captionFormat: 'freeform',
       timeSignature: false,
@@ -524,6 +526,18 @@ async function capabilities(): Promise<BackendCapabilities> {
         visible_when: { key: 'yue2NarScheduler', equals: 'ht_v3' } },
       { key: 'yue2HtShift', type: 'slider', label: 'HT Shift Warp', default: 1, min: 0.5, max: 8, step: 0.1,
         visible_when: { key: 'yue2NarScheduler', equals: 'ht_v3' } },
+      {
+        key: 'yue2Variations',
+        type: 'slider',
+        label: 'Noise Variations',
+        hint: 'Renders of the same composed song from different NAR noise, solved together in one '
+            + 'pass (cheaper than separate renders). Each comes back as its own track with the noise '
+            + 'seed it used. Multiplies with Batch Size: songs x variations tracks.',
+        default: 1,
+        min: 1,
+        max: Math.max(1, Number(props?.max_synth_batch) || 1),
+        step: 1,
+      },
       {
         key: 'yue2VaeVariant',
         type: 'select',

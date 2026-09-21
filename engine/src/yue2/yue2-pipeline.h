@@ -197,7 +197,9 @@ struct Yue2SongState {
     std::vector<int32_t> prefix_ids;   // the positive semantic prompt (what NAR prefixes with)
     std::vector<int32_t> codec_ids;    // CODEC_OFFSET already subtracted
     std::string          stage_end_reason[4];
-    int64_t              cond_set = 0;  // set of the semantic cache holding this song's positive stream
+    int64_t              cond_set  = 0;   // set of the semantic cache holding this song's positive stream
+    int64_t              neg_set   = -1;  // its negative (guidance) stream, -1 without guidance
+    int64_t              pair_base = 0;   // first set of this song's pair (cond/neg in either order)
 };
 
 // Vocab windows the two AR stages sample from (doc 30 #1). The legal range
@@ -366,7 +368,13 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     const auto t0 = std::chrono::steady_clock::now();
     yue2_ar_step_profile_reset();
     const int  B       = (int) songs.size();
-    const bool use_cfg = req.cfg_scale != 1.0f;
+    // YUE2_CFG_FORCE_SETS=1 keeps the negative set alive at guidance 1.0 and
+    // YUE2_CFG_SWAP=1 puts the positive stream in the pair's SECOND set:
+    // together they check that a stream decoded next to another set reproduces
+    // the single-set tokens (the blend at guidance 1.0 returns cond untouched).
+    static const bool force_sets = std::getenv("YUE2_CFG_FORCE_SETS") != nullptr;
+    static const bool swap_sets  = std::getenv("YUE2_CFG_SWAP") != nullptr;
+    const bool use_cfg = req.cfg_scale != 1.0f || force_sets;
     const int  per     = use_cfg ? 2 : 1;
     const int  S       = B * per;
 
@@ -384,7 +392,9 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             }
             return false;
         }
-        sg.cond_set = b * per;
+        sg.pair_base = b * per;
+        sg.cond_set  = sg.pair_base + ((use_cfg && swap_sets) ? 1 : 0);
+        sg.neg_set   = use_cfg ? sg.pair_base + ((swap_sets) ? 0 : 1) : -1;
         sg.codec_ids.clear();
         max_prefix = std::max<int64_t>(max_prefix, (int64_t) sg.prefix_ids.size());
         if (use_cfg) max_prefix = std::max<int64_t>(max_prefix, (int64_t) neg_prefix[(size_t) b].size());
@@ -419,12 +429,12 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     std::vector<float> logits;  // [S, W]
     for (int s = 0; s < S; s++) {
         const int  b   = s / per;
-        const bool neg = use_cfg && (s % per == 1);
+        const bool neg = use_cfg && (s == songs[(size_t) b].neg_set);
         const std::vector<int32_t> & ids = neg ? neg_prefix[(size_t) b] : songs[(size_t) b].prefix_ids;
         int twin = -1;
         for (int t = 0; t < s; t++) {
             const int  tb   = t / per;
-            const bool tneg = use_cfg && (t % per == 1);
+            const bool tneg = use_cfg && (t == songs[(size_t) tb].neg_set);
             const std::vector<int32_t> & tids = tneg ? neg_prefix[(size_t) tb] : songs[(size_t) tb].prefix_ids;
             if (tids == ids) {
                 twin = t;
@@ -469,14 +479,15 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         for (int b = 0; b < B; b++) {
             Yue2SongState & sg = songs[(size_t) b];
             if (done[(size_t) b]) {
-                for (int k = 0; k < per; k++) next_ids[(size_t) (sg.cond_set + k)] = YUE2_MUSIC_END;
+                for (int k = 0; k < per; k++) next_ids[(size_t) (sg.pair_base + k)] = YUE2_MUSIC_END;
                 continue;
             }
             const float * cond_row = logits.data() + (size_t) sg.cond_set * (size_t) W;
             std::vector<float> blended;
             if (use_cfg) {
+                const float * neg_row = logits.data() + (size_t) sg.neg_set * (size_t) W;
                 const std::vector<float> cond(cond_row, cond_row + W);
-                const std::vector<float> uncond(cond_row + W, cond_row + 2 * W);
+                const std::vector<float> uncond(neg_row, neg_row + W);
                 yue2_cfg_blend(cond, uncond, req.cfg_scale, &blended);
             } else {
                 blended.assign(cond_row, cond_row + W);
@@ -552,7 +563,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                     }
                     done[(size_t) b]         = true;
                     by_threshold[(size_t) b] = true;
-                    for (int k = 0; k < per; k++) next_ids[(size_t) (sg.cond_set + k)] = YUE2_MUSIC_END;
+                    for (int k = 0; k < per; k++) next_ids[(size_t) (sg.pair_base + k)] = YUE2_MUSIC_END;
                     continue;
                 }
             }
@@ -574,12 +585,12 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             }
             if (tok_id == YUE2_MUSIC_END) {
                 done[(size_t) b] = true;
-                for (int k = 0; k < per; k++) next_ids[(size_t) (sg.cond_set + k)] = YUE2_MUSIC_END;
+                for (int k = 0; k < per; k++) next_ids[(size_t) (sg.pair_base + k)] = YUE2_MUSIC_END;
                 continue;
             }
             history[(size_t) b].push_back((int32_t) tok_id);
             sg.codec_ids.push_back((int32_t) (tok_id - YUE2_CODEC_OFFSET));
-            for (int k = 0; k < per; k++) next_ids[(size_t) (sg.cond_set + k)] = (int32_t) tok_id;
+            for (int k = 0; k < per; k++) next_ids[(size_t) (sg.pair_base + k)] = (int32_t) tok_id;
             n_active++;
         }
         if (progress) {

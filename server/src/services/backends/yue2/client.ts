@@ -117,6 +117,10 @@ export interface Yue2Props {
   adapter?: Yue2PropsAdapter;
   vram?: Record<string, number>;
   errors?: string[];
+  /** Batch ceilings the engine's request parser enforces; absent on older engines (single track). */
+  max_lm_batch?: number;
+  max_synth_batch?: number;
+  nar_resident?: boolean;
   [k: string]: unknown;
 }
 
@@ -241,6 +245,25 @@ export interface Yue2SynthRequest {
   noise_source?: 'native' | 'fixture';
   /** Preview-only semantic frame ceiling; 0 leaves normal generation limits. */
   preview_max_frames?: number;
+  /** Songs per request (seeds seed+i), 1..props.max_lm_batch. Omitted at 1. */
+  lm_batch_size?: number;
+  /** Noise variations per song (NAR noise seeds noise_seed+j), 1..props.max_synth_batch. Omitted at 1. */
+  synth_batch_size?: number;
+  /** NAR noise seed; defaults to `seed`. Set from a track's echoed noise_seed to replay one variation. */
+  noise_seed?: number;
+}
+
+/** One track of a batch, as the engine reports it on the status JSON
+ *  (`tracks`, part order == multipart part order, song-major). */
+export interface Yue2TrackDetail {
+  song: number;
+  variation: number;
+  seed: number;
+  noise_seed: number;
+  end_reason?: Yue2JobEndReason;
+  frames?: number;
+  stage_end_reasons?: Partial<Record<'plan' | 'semantic' | 'nar' | 'vae', Yue2StageEndReason>>;
+  abc?: string;
 }
 
 export interface Yue2SynthResponse {
@@ -270,6 +293,8 @@ export interface Yue2FinalDetail {
   abc?: string;
   /** Raw semantic (codec) id array, if the engine returned it. */
   semantic_ids?: number[];
+  /** Per-track detail for a batched render; absent (or one entry) for a single track. */
+  tracks?: Yue2TrackDetail[];
 }
 
 // ── Helpers ──

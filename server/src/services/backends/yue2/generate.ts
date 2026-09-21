@@ -45,7 +45,7 @@ import {
 import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
-import { yue2Synth, yue2FinalDetail, type Yue2SynthRequest } from './client.js';
+import { yue2Synth, yue2FinalDetail, yue2PropsCached, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { classifyYue2Score, type Yue2ScoreHealth } from './scoreHealth.js';
 import { yue2PersistedSelection } from './index.js';
 import { applyYue2StyleTemplate, type Yue2StyleTemplate } from './style.js';
@@ -341,10 +341,30 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   const abc = abcRaw && cot !== 'off' ? abcRaw : undefined;
   if (abcRaw && !abc) notes.push('A previewed score was supplied but Chain of Thought is "off" — the score was ignored.');
 
+  // Batching (docs/plans/yue2/30-upstream-backports.md #6): the shared Batch
+  // Size control is songs (own plan, own seed); yue2Variations is NAR noise
+  // variations per song. Both omitted at 1 so a plain render's wire request
+  // is unchanged. The engine's caps come from /yue2/props via the manifest;
+  // clamp here too so a stale UI cannot 400 the request.
+  const propsNow = yue2PropsCached();
+  const maxSongs = Math.max(1, Number(propsNow?.max_lm_batch) || 1);
+  const maxVars = Math.max(1, Number(propsNow?.max_synth_batch) || 1);
+  const askedSongs = Math.max(1, Math.round(Number(params.batchSize) || 1));
+  const askedVars = Math.max(1, Math.round(Number(params.yue2Variations) || 1));
+  const lm_batch_size = Math.min(askedSongs, maxSongs);
+  const synth_batch_size = Math.min(askedVars, maxVars);
+  if (askedSongs > maxSongs) notes.push(`batchSize ${askedSongs} requested — this engine renders at most ${maxSongs} song(s) per job`);
+  if (askedVars > maxVars) notes.push(`yue2Variations ${askedVars} requested — this engine renders at most ${maxVars} variation(s) per song`);
+  const noiseSeedRaw = Number(params.yue2NoiseSeed);
+  const noise_seed = Number.isFinite(noiseSeedRaw) && noiseSeedRaw >= 0 ? Math.floor(noiseSeedRaw) : undefined;
+
   const req: Yue2SynthRequest = {
     style,
     lyrics: lyrics || undefined,
     cot,
+    ...(lm_batch_size > 1 ? { lm_batch_size } : {}),
+    ...(synth_batch_size > 1 ? { synth_batch_size } : {}),
+    ...(noise_seed !== undefined ? { noise_seed } : {}),
     ...(abc ? { abc } : {}),
     ...(cfg_scale !== undefined ? { cfg_scale } : {}),
     ode_steps,
@@ -405,6 +425,29 @@ function yue2StageText(phase: string | undefined, step: number, total: number): 
   const within = total > 0 ? (step / total) / order.length : 0;
   const progress = Math.min(99, Math.round((base + within) * 100));
   return { stage, progress };
+}
+
+/** Split a `multipart/mixed` body into its raw parts (the engine's batch
+ *  result: one WAV per part, no per-part headers worth reading). */
+function splitMultipartMixed(body: Buffer, contentType: string): Buffer[] {
+  const m = /boundary=([^;]+)/.exec(contentType);
+  if (!m) return [body];
+  const boundary = Buffer.from(`--${m[1].trim()}`);
+  const parts: Buffer[] = [];
+  let pos = body.indexOf(boundary);
+  while (pos !== -1) {
+    const lineEnd = pos + boundary.length;
+    if (body[lineEnd] === 0x2d && body[lineEnd + 1] === 0x2d) break;  // closing "--boundary--"
+    const headerEnd = body.indexOf('\r\n\r\n', lineEnd);
+    if (headerEnd === -1) break;
+    const dataStart = headerEnd + 4;
+    const next = body.indexOf(boundary, dataStart);
+    if (next === -1) break;
+    // Each part's data is followed by "\r\n" before the next boundary line.
+    parts.push(body.subarray(dataStart, next - 2));
+    pos = next;
+  }
+  return parts;
 }
 
 export async function runYue2Generation(job: GenerationJob, deps: Yue2GenerationDeps): Promise<void> {
@@ -562,69 +605,67 @@ ${req.lyrics}`);
       throw new Error('YuE2 returned an empty audio body');
     }
     const contentType = audioRes.headers.get('content-type') || 'audio/wav';
-    const ext = contentType.includes('wav') ? 'wav' : 'bin';
-    const filename = `${uuidv4()}.${ext}`;
-    const filepath = path.join(config.data.audioDir, filename);
-    fs.writeFileSync(filepath, audioBuffer);
-    const audioUrl = `/audio/${filename}`;
+    // One WAV, or multipart/mixed with one WAV part per track, song-major
+    // (yue2-job.h) — the same shape ACE's batch path emits.
+    const parts = contentType.startsWith('multipart/mixed')
+      ? splitMultipartMixed(audioBuffer, contentType)
+      : [audioBuffer];
+    if (parts.length === 0) throw new Error('YuE2 returned a multipart body with no parts');
+    const trackDetails: Yue2TrackDetail[] = finalDetail.tracks && finalDetail.tracks.length === parts.length
+      ? finalDetail.tracks
+      : parts.map((_, i) => ({ song: i, variation: 0, seed: Number(sub.seed), noise_seed: Number(sub.seed) }));
 
-    // Artifacts: score.abc (decoded ABC text) and semantic ids, saved beside
-    // the WAV as sidecars when the engine returned them. Never fatal.
-    if (finalDetail.abc) {
-      try {
-        fs.writeFileSync(path.join(config.data.audioDir, filename.replace(/\.[^.]+$/, '.score.abc')), finalDetail.abc);
-      } catch (e: any) {
-        log('WARNING', `[YuE2] Failed to save score.abc sidecar (non-fatal): ${e?.message ?? e}`);
-      }
-    }
-    if (finalDetail.semantic_ids?.length) {
-      try {
-        fs.writeFileSync(
-          path.join(config.data.audioDir, filename.replace(/\.[^.]+$/, '.semantic.json')),
-          JSON.stringify(finalDetail.semantic_ids),
-        );
-      } catch (e: any) {
-        log('WARNING', `[YuE2] Failed to save semantic-ids sidecar (non-fatal): ${e?.message ?? e}`);
-      }
-    }
-
-    // 48 kHz native (yue2vae.sample_rate) — read from the WAV header rather
-    // than assumed, same as every other backend.
-    const measured = wavDurationSec(filepath);
-    const duration = measured > 0 ? Math.round(measured) : 0;
-
-    log('INFO', `[YuE2] Saved ${filename} (${(audioBuffer.length / 1024).toFixed(0)} KB, ${duration}s)`);
-    timing.push({ name: 'Save', ms: Math.round(performance.now() - saveStart) });
-
-    // ── Persist ──
     const captionLine = yue2CaptionToStyle(caption);
     const title: string = job.params.title || captionLine.substring(0, 60) || 'Untitled';
     const style: string = job.params.caption || job.params.style || '';
-    const trackParams = {
-      ...job.params,
-      backend: 'yue2',
-      seed: sub.seed_str ?? sub.seed,
-      yue2Request: req,
-      yue2: {
-        ode_steps: sub.ode_steps ?? req.ode_steps,
-        cfg_scale: sub.cfg_scale ?? req.cfg_scale,
-        vae_variant: sub.vae_variant ?? req.vae_variant,
-        instrumental: sub.instrumental,
-        end_reason: finalDetail.end_reason,
-        stage_end_reasons: finalDetail.stage_end_reasons,
-        duration_s: measured > 0 ? Math.round(measured * 10) / 10 : undefined,
-        abc_supplied: !!req.abc,
-        ...(scoreHealth ? { score_health: scoreHealth } : {}),
-        ...(autoReplan ? { auto_replan: autoReplan } : {}),
-      },
-    };
+
+    const audioUrls: string[] = [];
+    const filepaths: string[] = [];
+    const durations: number[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      const filename = `${uuidv4()}.wav`;
+      const filepath = path.join(config.data.audioDir, filename);
+      fs.writeFileSync(filepath, parts[i]);
+      audioUrls.push(`/audio/${filename}`);
+      filepaths.push(filepath);
+      const td = trackDetails[i];
+
+      // Artifacts: score.abc (decoded ABC text) and semantic ids, saved beside
+      // the WAV as sidecars when the engine returned them. Never fatal.
+      const abcText = td.abc ?? (parts.length === 1 ? finalDetail.abc : undefined);
+      if (abcText) {
+        try {
+          fs.writeFileSync(path.join(config.data.audioDir, filename.replace(/\.[^.]+$/, '.score.abc')), abcText);
+        } catch (e: any) {
+          log('WARNING', `[YuE2] Failed to save score.abc sidecar (non-fatal): ${e?.message ?? e}`);
+        }
+      }
+      if (parts.length === 1 && finalDetail.semantic_ids?.length) {
+        try {
+          fs.writeFileSync(
+            path.join(config.data.audioDir, filename.replace(/\.[^.]+$/, '.semantic.json')),
+            JSON.stringify(finalDetail.semantic_ids),
+          );
+        } catch (e: any) {
+          log('WARNING', `[YuE2] Failed to save semantic-ids sidecar (non-fatal): ${e?.message ?? e}`);
+        }
+      }
+
+      // 48 kHz native (yue2vae.sample_rate) — read from the WAV header rather
+      // than assumed, same as every other backend.
+      const measured = wavDurationSec(filepath);
+      durations.push(measured);
+      log('INFO', `[YuE2] Saved ${filename} (${(parts[i].length / 1024).toFixed(0)} KB, ${Math.round(measured)}s)`
+        + (parts.length > 1 ? ` — song ${td.song + 1}, variation ${td.variation + 1}, seed ${td.seed}, noise ${td.noise_seed}` : ''));
+    }
+    timing.push({ name: 'Save', ms: Math.round(performance.now() - saveStart) });
 
     // ── Post-processing (the model-agnostic chain, in full) ────────────────
     // YuE2 renders native 48 kHz stereo, so unlike MM3's v1 (44.1 kHz,
     // whole-chain skip) nothing here needs a rate audit. ppVaeReencode and the
     // Spectral Lifter stay excluded regardless — both are ACE-VAE-coupled,
     // not rate-coupled.
-    let masteredUrl = '';
+    let masteredUrls: string[] = [];
     try {
       const ppParams: PostProcessParams = {
         ...job.params,
@@ -636,12 +677,12 @@ ${req.lyrics}`);
       if (ppParams.postProcessingEnabled !== false) {
         const ppStart = performance.now();
         const ppResult = await runPostProcessingChain(
-          [audioUrl], ppParams, 1, job.id,
+          audioUrls, ppParams, audioUrls.length, job.id,
           log, (stage) => { job.stage = stage; },
         );
-        masteredUrl = ppResult.masteredUrls?.[0] || '';
+        masteredUrls = ppResult.masteredUrls ?? [];
         const ppMs = Math.round(performance.now() - ppStart);
-        if (masteredUrl) log('INFO', `[YuE2] Post-processing produced ${masteredUrl} in ${ppMs} ms`);
+        if (masteredUrls.some(Boolean)) log('INFO', `[YuE2] Post-processing produced ${masteredUrls.filter(Boolean).length} file(s) in ${ppMs} ms`);
         timing.push({ name: 'Post-processing', ms: ppMs });
       }
     } catch (ppErr: any) {
@@ -665,21 +706,23 @@ ${req.lyrics}`);
         } else if (!findWhisperModel(job.params.whisperModel)) {
           log('WARNING', '[Whisper] no Whisper model installed — skipping');
         } else {
-          log('INFO', '[Whisper] transcribing YuE2 render...');
-          const wr = await transcribeWithWhisper(filepath, req.lyrics || '', {
-            model: job.params.whisperModel,
-            language: job.params.whisperLanguage || 'auto',
-            beamSize: job.params.whisperBeamSize || 5,
-          });
-          if (wr && wr.segments?.length > 0) {
-            const lyricsJson = reconcileLyrics(wr, req.lyrics || '', job.params.whisperModel || 'auto', false);
-            const lyricsPath = path.join(config.data.audioDir, filename.replace(/\.[^.]+$/, '.lyrics.json'));
-            fs.writeFileSync(lyricsPath, JSON.stringify(lyricsJson, null, 2));
-            const words = lyricsJson.lines.reduce((n: number, l: any) => n + l.words.length, 0);
-            log('INFO', `[Whisper] saved ${path.basename(lyricsPath)} `
-              + `(${lyricsJson.lines.length} lines, ${words} words, ${Math.round(performance.now() - wStart)} ms)`);
-          } else {
-            log('WARNING', '[Whisper] no segments returned');
+          for (let i = 0; i < filepaths.length; i++) {
+            log('INFO', `[Whisper] transcribing YuE2 render${filepaths.length > 1 ? ` ${i + 1}/${filepaths.length}` : ''}...`);
+            const wr = await transcribeWithWhisper(filepaths[i], req.lyrics || '', {
+              model: job.params.whisperModel,
+              language: job.params.whisperLanguage || 'auto',
+              beamSize: job.params.whisperBeamSize || 5,
+            });
+            if (wr && wr.segments?.length > 0) {
+              const lyricsJson = reconcileLyrics(wr, req.lyrics || '', job.params.whisperModel || 'auto', false);
+              const lyricsPath = filepaths[i].replace(/\.[^.]+$/, '.lyrics.json');
+              fs.writeFileSync(lyricsPath, JSON.stringify(lyricsJson, null, 2));
+              const words = lyricsJson.lines.reduce((n: number, l: any) => n + l.words.length, 0);
+              log('INFO', `[Whisper] saved ${path.basename(lyricsPath)} `
+                + `(${lyricsJson.lines.length} lines, ${words} words)`);
+            } else {
+              log('WARNING', '[Whisper] no segments returned');
+            }
           }
         }
       } catch (wErr: any) {
@@ -688,41 +731,74 @@ ${req.lyrics}`);
       timing.push({ name: 'Whisper', ms: Math.round(performance.now() - wStart) });
     }
 
-    const songId = uuidv4();
-    getDb().prepare(`
-      INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
-                         duration, bpm, key_scale, time_signature, tags, dit_model,
-                         generation_params, mastered_audio_url, latent_url, quality_scores,
-                         noadapter_audio_url, backend)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      songId, job.userId, title, req.lyrics || '', style, req.style,
-      audioUrl, duration, 0, '', '',
-      JSON.stringify([]), 'yue2', JSON.stringify(trackParams),
-      masteredUrl, '', '',
-      '', 'yue2',
-    );
+    // ── Persist: one song row per track ──
+    const songIds: string[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      const td = trackDetails[i];
+      const measured = durations[i];
+      const duration = measured > 0 ? Math.round(measured) : 0;
+      const trackParams = {
+        ...job.params,
+        backend: 'yue2',
+        seed: td.seed,
+        yue2Request: { ...req, seed: td.seed, noise_seed: td.noise_seed, lm_batch_size: undefined, synth_batch_size: undefined },
+        yue2: {
+          ode_steps: sub.ode_steps ?? req.ode_steps,
+          cfg_scale: sub.cfg_scale ?? req.cfg_scale,
+          vae_variant: sub.vae_variant ?? req.vae_variant,
+          instrumental: sub.instrumental,
+          end_reason: td.end_reason ?? finalDetail.end_reason,
+          stage_end_reasons: td.stage_end_reasons ?? finalDetail.stage_end_reasons,
+          duration_s: measured > 0 ? Math.round(measured * 10) / 10 : undefined,
+          abc_supplied: !!req.abc,
+          ...(parts.length > 1 ? { song: td.song, variation: td.variation, noise_seed: td.noise_seed } : {}),
+          ...(scoreHealth ? { score_health: scoreHealth } : {}),
+          ...(autoReplan ? { auto_replan: autoReplan } : {}),
+        },
+      };
+      const songId = uuidv4();
+      const trackTitle = parts.length > 1 ? `${title} (${td.song + 1}.${td.variation + 1})` : title;
+      getDb().prepare(`
+        INSERT INTO songs (id, user_id, title, lyrics, style, caption, audio_url,
+                           duration, bpm, key_scale, time_signature, tags, dit_model,
+                           generation_params, mastered_audio_url, latent_url, quality_scores,
+                           noadapter_audio_url, backend)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        songId, job.userId, trackTitle, req.lyrics || '', style, req.style,
+        audioUrls[i], duration, 0, '', '',
+        JSON.stringify([]), 'yue2', JSON.stringify(trackParams),
+        masteredUrls[i] || '', '', '',
+        '', 'yue2',
+      );
+      songIds.push(songId);
+    }
 
-    // ── Cover art (backend-agnostic) ──
+    // ── Cover art (backend-agnostic): one image for the batch, linked to every row ──
     if (job.params.coverArtEnabled) {
       const coverStart = performance.now();
       try {
-        const { generateCoverArt, getCoverArtReadiness } = await import('../../coverArt/coverArtService.js');
+        const { generateCoverArt, getCoverArtReadiness, linkCoverToSong } = await import('../../coverArt/coverArtService.js');
         const readiness = getCoverArtReadiness();
         if (readiness.installed) {
           job.stage = 'Generating cover art...';
           job.progress = 97;
-          await generateCoverArt({
-            songId,
+          const cover: any = await generateCoverArt({
+            songId: songIds[0],
             title,
             style: style || captionLine,
             lyrics: req.lyrics || '',
             subject: job.params.coverArtSubject || job.params.subject || '',
           });
-          log('INFO', `[CoverArt] Generated cover for song ${songId}`);
+          log('INFO', `[CoverArt] Generated cover for song ${songIds[0]}`);
+          if (cover?.coverUrl) {
+            for (let i = 1; i < songIds.length; i++) linkCoverToSong(cover.coverUrl, songIds[i]);
+          }
           if (job.params.coverArtSubject) {
-            getDb().prepare('UPDATE songs SET cover_art_subject = ? WHERE id = ?')
-              .run(job.params.coverArtSubject, songId);
+            for (const id of songIds) {
+              getDb().prepare('UPDATE songs SET cover_art_subject = ? WHERE id = ?')
+                .run(job.params.coverArtSubject, id);
+            }
           }
         } else {
           log('DEBUG', `[CoverArt] Skipped — not installed (missing: ${readiness.missingFiles.join(', ')})`);
@@ -741,14 +817,14 @@ ${req.lyrics}`);
     job.progress = 100;
     job.stage = 'Complete!';
     job.result = {
-      audioUrls: [masteredUrl || audioUrl],
-      songIds: [songId],
-      duration,
+      audioUrls: audioUrls.map((u, i) => masteredUrls[i] || u),
+      songIds,
+      duration: durations[0] > 0 ? Math.round(durations[0]) : 0,
       timing,
       totalMs,
     };
 
-    log('INFO', `[Result] 1 audio file saved, 1 song created (backend=yue2)`);
+    log('INFO', `[Result] ${audioUrls.length} audio file(s) saved, ${songIds.length} song(s) created (backend=yue2)`);
     console.log(`[Generate] Job ${job.id} (yue2) completed in ${(totalMs / 1000).toFixed(1)}s`);
     finishGenerationLog(job.id, 'yue2-text2music');
 
