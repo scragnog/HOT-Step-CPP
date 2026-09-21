@@ -113,6 +113,26 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
     // Node side sizes its controls from the engine instead of a constant.
     yyjson_mut_obj_add_int(doc, root, "max_lm_batch", YUE2_MAX_LM_BATCH);
     yyjson_mut_obj_add_int(doc, root, "max_synth_batch", YUE2_MAX_SYNTH_BATCH);
+    // The checkpoint's own sampler defaults per stage, so the LM tab can show
+    // and reset to them (yue2.sampling.<stage>.* in the GGUF).
+    if (g_yue2.lm_file.probe_ok) {
+        yyjson_mut_val * sampling = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_val(doc, root, "sampling", sampling);
+        const struct { const char * name; const Yue2LmConfig::Stage * st; } stages[] = {
+            { "plan", &g_yue2.lm_cfg.abc }, { "semantic", &g_yue2.lm_cfg.semantic }
+        };
+        for (const auto & e : stages) {
+            yyjson_mut_val * o = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_val(doc, sampling, e.name, o);
+            yyjson_mut_obj_add_real(doc, o, "temperature", e.st->temperature);
+            yyjson_mut_obj_add_real(doc, o, "top_p", e.st->top_p);
+            yyjson_mut_obj_add_int(doc, o, "top_k", (int) e.st->top_k);
+            yyjson_mut_obj_add_real(doc, o, "repetition_penalty", e.st->repetition_penalty);
+            yyjson_mut_obj_add_int(doc, o, "penalty_window", (int) e.st->penalty_window);
+            yyjson_mut_obj_add_int(doc, o, "min_tokens", (int) e.st->min_tokens);
+            yyjson_mut_obj_add_int(doc, o, "max_tokens", (int) e.st->max_tokens);
+        }
+    }
     yyjson_mut_obj_add_strcpy(doc, root, "vae_variant_loaded", YUE2_VAE_VARIANT_NAME[g_yue2.vae_loaded_variant]);
     yyjson_mut_obj_add_strcpy(doc, root, "models_dir", g_yue2.models_dir.c_str());
 

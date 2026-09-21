@@ -360,10 +360,32 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   const noiseSeedRaw = Number(params.yue2NoiseSeed);
   const noise_seed = Number.isFinite(noiseSeedRaw) && noiseSeedRaw >= 0 ? Math.floor(noiseSeedRaw) : undefined;
 
+  // LM tab: forward only what the UI actually sent (an untouched control is
+  // absent), so the engine keeps its checkpoint value otherwise.
+  const lmFields: Array<[string, keyof Yue2SynthRequest]> = [
+    ['yue2PlanTemperature', 'plan_temperature'], ['yue2PlanTopP', 'plan_top_p'], ['yue2PlanTopK', 'plan_top_k'],
+    ['yue2PlanRepPenalty', 'plan_repetition_penalty'], ['yue2PlanRepWindow', 'plan_penalty_window'],
+    ['yue2PlanMaxTokens', 'plan_max_tokens'],
+    ['yue2SemTemperature', 'semantic_temperature'], ['yue2SemTopP', 'semantic_top_p'], ['yue2SemTopK', 'semantic_top_k'],
+    ['yue2SemRepPenalty', 'semantic_repetition_penalty'], ['yue2SemRepWindow', 'semantic_penalty_window'],
+    ['yue2SemMinTokens', 'semantic_min_tokens'], ['yue2SemMaxTokens', 'semantic_max_tokens'],
+    ['yue2EndThreshold', 'end_threshold'], ['yue2EndBias', 'end_bias'],
+    ['yue2EndBiasFrom', 'end_bias_from_sec'], ['yue2EndBiasRamp', 'end_bias_ramp_sec'],
+  ];
+  const lmOverrides: Record<string, number> = {};
+  for (const [uiKey, wireKey] of lmFields) {
+    if (params[uiKey] === undefined || params[uiKey] === null || params[uiKey] === '') continue;
+    const v = Number(params[uiKey]);
+    if (Number.isFinite(v)) lmOverrides[wireKey] = v;
+    else notes.push(`Invalid ${uiKey} — using the checkpoint default`);
+  }
+  if (Object.keys(lmOverrides).length) notes.push(`LM overrides: ${Object.entries(lmOverrides).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+
   const req: Yue2SynthRequest = {
     style,
     lyrics: lyrics || undefined,
     cot,
+    ...(lmOverrides as Partial<Yue2SynthRequest>),
     ...(lm_batch_size > 1 ? { lm_batch_size } : {}),
     ...(synth_batch_size > 1 ? { synth_batch_size } : {}),
     ...(noise_seed !== undefined ? { noise_seed } : {}),

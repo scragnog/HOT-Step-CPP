@@ -121,6 +121,8 @@ export interface Yue2Props {
   max_lm_batch?: number;
   max_synth_batch?: number;
   nar_resident?: boolean;
+  /** The checkpoint's sampler defaults per stage (GGUF yue2.sampling.*). */
+  sampling?: { plan?: Yue2StageDefaults; semantic?: Yue2StageDefaults };
   [k: string]: unknown;
 }
 
@@ -251,6 +253,33 @@ export interface Yue2SynthRequest {
   synth_batch_size?: number;
   /** NAR noise seed; defaults to `seed`. Set from a track's echoed noise_seed to replay one variation. */
   noise_seed?: number;
+  /** LM tab: per-stage sampler overrides. Absent = the checkpoint's own
+   *  yue2.sampling.<stage>.* value (props.sampling shows them). */
+  plan_temperature?: number;
+  plan_top_p?: number;
+  plan_top_k?: number;
+  plan_repetition_penalty?: number;
+  plan_penalty_window?: number;
+  plan_max_tokens?: number;
+  semantic_temperature?: number;
+  semantic_top_p?: number;
+  semantic_top_k?: number;
+  semantic_repetition_penalty?: number;
+  semantic_penalty_window?: number;
+  semantic_min_tokens?: number;
+  semantic_max_tokens?: number;
+  /** Ending controls (semantic stage): stop once P(END) reaches end_threshold;
+   *  add end_bias to END's logit from end_bias_from_sec, ramping over
+   *  end_bias_ramp_sec. 0 = off. */
+  end_threshold?: number;
+  end_bias?: number;
+  end_bias_from_sec?: number;
+  end_bias_ramp_sec?: number;
+}
+
+export interface Yue2StageDefaults {
+  temperature: number; top_p: number; top_k: number; repetition_penalty: number;
+  penalty_window: number; min_tokens: number; max_tokens: number;
 }
 
 /** One track of a batch, as the engine reports it on the status JSON

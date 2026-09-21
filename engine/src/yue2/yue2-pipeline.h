@@ -211,6 +211,21 @@ static constexpr int64_t YUE2_SEM_HEAD_LO  = std::min<int64_t>(YUE2_MUSIC_END, Y
 static constexpr int64_t YUE2_SEM_HEAD_N   = std::max<int64_t>(YUE2_MUSIC_END + 1, YUE2_CODEC_OFFSET + YUE2_CODEC_SIZE) -
                                              YUE2_SEM_HEAD_LO;                                       // 32769
 
+// The checkpoint's per-stage sampler defaults with the request's overrides
+// (the LM tab) laid over them. Fields the request left at -1 keep the GGUF
+// value, so an untouched tab reproduces the locked defaults exactly.
+static Yue2SamplingParams yue2_stage_params(const Yue2LmConfig::Stage & st, const Yue2StageOverride & o) {
+    Yue2SamplingParams sp;
+    sp.temperature        = o.temperature >= 0.0f ? o.temperature : st.temperature;
+    sp.top_p               = o.top_p >= 0.0f ? o.top_p : st.top_p;
+    sp.top_k               = o.top_k >= 0 ? o.top_k : (int) st.top_k;
+    sp.repetition_penalty = o.repetition_penalty >= 0.0f ? o.repetition_penalty : st.repetition_penalty;
+    sp.penalty_window     = o.penalty_window >= 0 ? o.penalty_window : (int) st.penalty_window;
+    sp.min_tokens          = o.min_tokens >= 0 ? o.min_tokens : (int) st.min_tokens;
+    sp.max_tokens          = o.max_tokens > 0 ? o.max_tokens : (int) st.max_tokens;
+    return sp;
+}
+
 // ── Stage 1: plan (ABC) ──────────────────────────────────────────────────────
 //
 // Skipped entirely for cot=="off" (no ABC span exists at all) and whenever
@@ -259,14 +274,7 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
 
     const std::vector<int32_t> prefix = yue2_token_prefixes(&tok, req.style, req.lyrics, req.cot, nullptr);
 
-    Yue2SamplingParams sp;
-    sp.temperature        = m.lm_cfg.abc.temperature;
-    sp.top_p               = m.lm_cfg.abc.top_p;
-    sp.top_k               = (int) m.lm_cfg.abc.top_k;
-    sp.repetition_penalty = m.lm_cfg.abc.repetition_penalty;
-    sp.penalty_window     = (int) m.lm_cfg.abc.penalty_window;
-    sp.min_tokens          = (int) m.lm_cfg.abc.min_tokens;
-    sp.max_tokens          = (int) m.lm_cfg.abc.max_tokens;
+    Yue2SamplingParams sp = yue2_stage_params(m.lm_cfg.abc, req.plan);
 
     Yue2ArKvCache cache;
     const int64_t capacity = (int64_t) prefix.size() + sp.max_tokens + 4;
@@ -400,14 +408,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         if (use_cfg) max_prefix = std::max<int64_t>(max_prefix, (int64_t) neg_prefix[(size_t) b].size());
     }
 
-    Yue2SamplingParams sp;
-    sp.temperature        = m.lm_cfg.semantic.temperature;
-    sp.top_p               = m.lm_cfg.semantic.top_p;
-    sp.top_k               = (int) m.lm_cfg.semantic.top_k;
-    sp.repetition_penalty = m.lm_cfg.semantic.repetition_penalty;
-    sp.penalty_window     = (int) m.lm_cfg.semantic.penalty_window;
-    sp.min_tokens          = (int) m.lm_cfg.semantic.min_tokens;
-    sp.max_tokens          = (int) m.lm_cfg.semantic.max_tokens;
+    Yue2SamplingParams sp = yue2_stage_params(m.lm_cfg.semantic, req.semantic);
     const bool preview_capped = req.preview_max_frames > 0 && req.preview_max_frames < sp.max_tokens;
     if (preview_capped) sp.max_tokens = req.preview_max_frames;
     const bool legacy_off  = (req.cot == YUE2_COT_OFF);

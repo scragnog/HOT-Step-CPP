@@ -26,6 +26,7 @@
 #include "yyjson.h"
 
 #include <cstdint>
+#include <cstring>
 #include <cmath>
 #include <random>
 #include <string>
@@ -39,8 +40,24 @@ enum Yue2NoiseSource { YUE2_NOISE_NATIVE = 0, YUE2_NOISE_FIXTURE = 1 };
 static constexpr int YUE2_MAX_LM_BATCH    = 4;
 static constexpr int YUE2_MAX_SYNTH_BATCH = 9;
 
+// Per-stage sampler overrides (the LM tab). -1 = keep the checkpoint's own
+// GGUF-declared value (yue2.sampling.<stage>.*), which the pipeline reads
+// first; only fields the request set replace it. Wire keys are
+// plan_<field> / semantic_<field>.
+struct Yue2StageOverride {
+    float temperature        = -1.0f;
+    float top_p              = -1.0f;
+    int   top_k              = -1;
+    float repetition_penalty = -1.0f;
+    int   penalty_window     = -1;
+    int   min_tokens         = -1;
+    int   max_tokens         = -1;
+};
+
 struct Yue2Request {
     std::string id = "yue2";
+    Yue2StageOverride plan;      // ABC / lead-sheet stage
+    Yue2StageOverride semantic;  // codec stage
     std::string style;
     std::string lyrics;
     Yue2Cot     cot = YUE2_COT_OFF;
@@ -240,6 +257,48 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
     if (present) {
         out->seed         = (uint64_t) num;
         out->seed_present = true;
+    }
+
+    // LM tab: per-stage sampler overrides. Range-checked so a typo is a 400.
+    struct StageField {
+        const char * suffix;
+        double       lo, hi;
+        bool         integer;
+    };
+    const StageField stage_fields[] = {
+        { "temperature", 0.0, 5.0, false },   { "top_p", 0.0, 1.0, false },
+        { "top_k", 0.0, 200000.0, true },     { "repetition_penalty", 0.5, 3.0, false },
+        { "penalty_window", 0.0, 16384.0, true }, { "min_tokens", 0.0, 16384.0, true },
+        { "max_tokens", 1.0, 16384.0, true },
+    };
+    struct StageSlot {
+        const char *        prefix;
+        Yue2StageOverride * dst;
+    };
+    const StageSlot slots[] = { { "plan_", &out->plan }, { "semantic_", &out->semantic } };
+    for (const StageSlot & slot : slots) {
+        for (const StageField & f : stage_fields) {
+            const std::string key = std::string(slot.prefix) + f.suffix;
+            if (!yue2_req_num(root, key.c_str(), &num, &present, err)) {
+                yyjson_doc_free(doc);
+                return false;
+            }
+            if (!present) continue;
+            if (!std::isfinite(num) || num < f.lo || num > f.hi || (f.integer && std::floor(num) != num)) {
+                if (err) *err = key + " must be " + (f.integer ? "an integer" : "a number") + " in [" +
+                                std::to_string(f.lo) + ", " + std::to_string(f.hi) + "]";
+                yyjson_doc_free(doc);
+                return false;
+            }
+            Yue2StageOverride & o = *slot.dst;
+            if (!strcmp(f.suffix, "temperature")) o.temperature = (float) num;
+            else if (!strcmp(f.suffix, "top_p")) o.top_p = (float) num;
+            else if (!strcmp(f.suffix, "top_k")) o.top_k = (int) num;
+            else if (!strcmp(f.suffix, "repetition_penalty")) o.repetition_penalty = (float) num;
+            else if (!strcmp(f.suffix, "penalty_window")) o.penalty_window = (int) num;
+            else if (!strcmp(f.suffix, "min_tokens")) o.min_tokens = (int) num;
+            else if (!strcmp(f.suffix, "max_tokens")) o.max_tokens = (int) num;
+        }
     }
 
     if (!yue2_req_num(root, "noise_seed", &num, &present, err)) {
