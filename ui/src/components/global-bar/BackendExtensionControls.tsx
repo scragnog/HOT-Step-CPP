@@ -140,7 +140,17 @@ export const BackendExtensionControls: React.FC<{
   const flat = params.filter((p) => !p.section);
   const sections: string[] = [];
   for (const p of params) if (p.section && !sections.includes(p.section)) sections.push(p.section);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  // Open/closed state survives reloads (per backend + cluster + section).
+  const backendId = capabilities?.backend ?? 'backend';
+  const storageKey = `hs-ext-sections:${backendId}:${group}`;
+  const [open, setOpenState] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem(storageKey) || '{}') as Record<string, boolean>; } catch { return {}; }
+  });
+  const setOpen = (next: Record<string, boolean>) => {
+    setOpenState(next);
+    try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* private mode etc. */ }
+  };
+  const hintOf = (name: string) => params.find((p) => p.section === name && p.section_hint)?.section_hint;
   const changedIn = (name: string) => params.filter((p) => p.section === name && (() => {
     const v = gp.backendParams?.[p.key];
     return !(v === undefined || v === null || v === '' || v === p.default);
@@ -156,12 +166,15 @@ export const BackendExtensionControls: React.FC<{
           <div key={name} className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
             <button
               type="button"
-              onClick={() => setOpen((o) => ({ ...o, [name]: !isOpen }))}
+              onClick={() => setOpen({ ...open, [name]: !isOpen })}
               className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors"
             >
               <div className="flex items-center gap-2">
                 <ChevronDown size={12} className={`text-zinc-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-                <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">{name}</span>
+                <div onClick={(e) => e.stopPropagation()}>
+                  <ParamLabel label={name} underline={false} info={hintOf(name)}
+                    className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider" />
+                </div>
               </div>
               <span className="text-[10px] text-zinc-500 font-mono">{changed ? `${changed} changed` : 'default'}</span>
             </button>

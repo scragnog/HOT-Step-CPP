@@ -155,6 +155,7 @@ export interface BackendExtensionParam {
   group?: BackendExtensionGroup;
   /** Accordion inside the cluster; absent = rendered flat above the sections. */
   section?: string;
+  section_hint?: string;
   type: 'slider' | 'select' | 'toggle' | 'text';
   label: string;
   hint?: string;

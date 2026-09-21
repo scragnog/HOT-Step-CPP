@@ -440,7 +440,9 @@ async function capabilities(): Promise<BackendCapabilities> {
       // Defaults are the checkpoint's own (props.sampling); the UI sends
       // nothing for an untouched control, so the engine keeps its GGUF value.
       {
-        key: 'yue2PlanTemperature', group: 'lm', section: 'Planner (lead sheet)', type: 'slider', label: 'Plan Temperature',
+        key: 'yue2PlanTemperature', group: 'lm', section: 'Planner (lead sheet)',
+        section_hint: "The first stage: writes the song's lead sheet (structure, chords, melody) as ABC notation before any audio exists. Only runs with Chain of Thought melody or full. These knobs shape how adventurous or conservative that score is.",
+        type: 'slider', label: 'Plan Temperature',
         hint: 'Sampling temperature for the lead-sheet (ABC) planner. The checkpoint ships '
             + `${sd('plan', 'temperature', 0.7)}. Lower = safer, more conventional scores.`,
         default: sd('plan', 'temperature', 0.7), min: 0.1, max: 2, step: 0.05,
@@ -473,7 +475,8 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: sd('plan', 'max_tokens', 4096), min: 256, max: 4096, step: 64,
       },
       {
-        key: 'yue2SemTemperature', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Temperature',
+        key: 'yue2SemTemperature', group: 'lm', section: 'Composer (song)',
+        section_hint: 'The second stage: turns the lead sheet, style and lyrics into the codec frames the song is rendered from (25 per second) and decides where it ends. Sampling knobs plus the ending controls live here.', type: 'slider', label: 'Composer Temperature',
         hint: 'Sampling temperature for the codec (semantic) stage that writes the song itself. '
             + `Checkpoint: ${sd('semantic', 'temperature', 1.0)}.`,
         default: sd('semantic', 'temperature', 1.0), min: 0.1, max: 2, step: 0.05,

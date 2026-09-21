@@ -41,13 +41,16 @@ export const BackendLmDropdown: React.FC = () => {
     );
   }
 
+  // A backend that folds its knobs into sections titles them itself; a
+  // second "Planner" heading above two accordions was one label too many.
+  const sectioned = params.some((p) => p.section);
   return (
     <div className="space-y-3">
-      <ParamLabel label="Planner" underline={false}
+      {!sectioned && <ParamLabel label="Planner" underline={false}
         className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider"
         info={`${displayName ?? 'This backend'} plans the whole song as a token stream before a `
           + `single sample is rendered — these are that planner's controls. It always runs; `
-          + `there is no render without it.`} />
+          + `there is no render without it.`} />}
       <BackendExtensionControls group="lm" accentColor="purple" />
     </div>
   );

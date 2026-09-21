@@ -146,6 +146,9 @@ export interface BackendExtensionParam extends PluginParamSchema {
    *  the sections. Keeps a backend with many knobs from showing them all at
    *  once. */
   section?: string;
+  /** Hover text for the section header; the first knob in a section that
+   *  carries one wins. */
+  section_hint?: string;
 }
 
 export interface BackendCapabilities {
