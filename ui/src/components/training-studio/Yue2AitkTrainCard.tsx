@@ -91,12 +91,21 @@ function snapshotPresetSettings(form: Yue2JointTrainRequest, lyricTiming: boolea
 }
 const DEFAULT_FORM: Yue2JointTrainRequest = {
   trainingMethod: 'aitk', checkpoint: '', dataset: '', output: '',
-  // Recipe A (2026-09-20): AdamW 1e-4 with the planner at 0.6x, rank 32, and
-  // a stop on the planner's KL to base rather than a step count. 500 is a cap;
-  // an artist that has not reached KL 1.4 by then is not going to.
-  steps: 500, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
+  // NAR budget recipe (2026-09-21): the run still ends on the planner's KL to
+  // base, but the decoder gets twice the learning rate on the way there.
+  // lr 2e-4 with the planner at 0.3x leaves the planner's ABSOLUTE rate at
+  // 6e-5 — the same 1e-4 x 0.6 Recipe A used — so the AR walks an unchanged
+  // path to KL 1.4 while the decoder, which is where likeness lives, moves
+  // twice as far per step. The two halves are independent: the NAR's
+  // conditioning prefix is a detached recompute and NAR backward only ever
+  // uploads to the NAR adapters (yue2-aitk-joint-step.h), so the decoder's
+  // rate cannot perturb the planner's KL. Gen-time NAR strength 2.0 was
+  // beating 1.0 by ear; this is that, trained in rather than dialled in.
+  // 750 is a cap, not a target — an artist that has not reached KL 1.4 by
+  // then is not going to.
+  steps: 750, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
   optimizer: 'adamw', prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
-  rank: 32, alpha: 32, stopMode: 'kl', targetKl: 1.4, lr: 1e-4, plannerLrScale: 0.6,
+  rank: 64, alpha: 64, stopMode: 'kl', targetKl: 1.4, lr: 2e-4, plannerLrScale: 0.3,
 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
@@ -141,6 +150,17 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.plannerLrScale === undefined) stored.plannerLrScale = 0.6;
     if (stored.preview?.enabled) stored.preview = { ...stored.preview, enabled: false };
     window.localStorage.setItem(recipeA, '1');
+  }
+  // NAR budget (2026-09-21): forms still sitting on Recipe A's values move to
+  // the new defaults; anything the user set deliberately stays put.
+  const narBudget = `${FORM_KEY}${datasetId}:defaults-nar-budget`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(narBudget)) {
+    if (stored.rank === 32) stored.rank = 64;
+    if (stored.alpha === 32) stored.alpha = 64;
+    if (stored.steps === 500) stored.steps = 750;
+    if (stored.lr === 1e-4) stored.lr = 2e-4;
+    if (stored.plannerLrScale === 0.6) stored.plannerLrScale = 0.3;
+    window.localStorage.setItem(narBudget, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
@@ -766,7 +786,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {([
             ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), 'default 1e-4 · AdamW only (Prodigy learns its own; Muon uses its scale)'],
             ['weightDecay', t('trainingStudio.yue2.method.weightDecay', 'Weight decay'), 'default 1e-4'],
-            ['plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner learning-rate scale'), 'default 1.0 · the AR half trains at lr × this; the reference recipe uses 0.6'],
+            ['plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner learning-rate scale'), 'default 1.0 · the AR half trains at lr × this. This card ships 0.3, which holds the planner at 6e-5 while the decoder trains at 2e-4'],
             ['klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor to base (planner)'), 'default 0.2 · higher keeps the planner closer to the base model'],
             ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), 'default 0.5 · share of lead-sheet examples trained without their sheet, so one adapter serves cot on and off'],
             ['captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'), 'default 0 · share of steps trained on the trigger alone instead of the song\'s caption. 0.5 is the measured recipe: it stops the adapter binding to each track\'s caption, so a NEW caption generalises. Needs a dataset prepared after 2026-09-20.'],
