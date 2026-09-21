@@ -29,7 +29,8 @@ import {
 } from '../../utils/mm3CaptionSource';
 import {
   YUE2_BACKEND_ID, ensureYue2SourceTracks, pickNearestBpmTrack as pickNearestYue2Track,
-  readYue2CaptionSelection, resolveYue2Caption, writeYue2CaptionSelection, yue2CaptionAdapterPath,
+  hasStoredYue2CaptionSelection, readYue2CaptionSelection, resolveYue2Caption,
+  writeYue2CaptionSelection, yue2CaptionAdapterPath,
   yue2TrackBpm,
   type Yue2CaptionSelection, type Yue2SourceTrack,
 } from '../../utils/yue2CaptionSource';
@@ -172,7 +173,16 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     // first time that happens, so Custom hands their own words back instead of
     // the dataset track's. Only when nothing is stashed yet: a later visit must
     // not overwrite the stash with the dataset caption now sitting in the box.
-    const sel = readYue2CaptionSelection(yue2Adapter);
+    // ...but not over a prompt that is already written. Automatic being the
+    // default meant switching the backend to YuE2 silently replaced the
+    // caption the user was looking at with a dataset track's and greyed the
+    // box out, with the picker that undoes it sitting below the fold (#163).
+    // Automatic still wins on an empty box — the case it is the default for.
+    const sel = hasStoredYue2CaptionSelection(yue2Adapter)
+      ? readYue2CaptionSelection(yue2Adapter)
+      : (captionRef.current || '').trim()
+        ? { mode: 'custom' as const }
+        : readYue2CaptionSelection(yue2Adapter);
     if (sel.mode !== 'custom' && sel.customCaption === undefined) {
       sel.customCaption = captionRef.current;
       writeYue2CaptionSelection(yue2Adapter, sel);

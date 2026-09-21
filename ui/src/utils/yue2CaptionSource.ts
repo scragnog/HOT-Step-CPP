@@ -96,6 +96,15 @@ export function defaultYue2CaptionSelection(adapterPath: string): Yue2CaptionSel
   return { mode: adapterPath ? 'auto' : 'custom' };
 }
 
+/** True when this adapter has a stored choice, i.e. the user has been through
+ *  the picker. Lets a caller tell "chose Automatic" from "never chose", which
+ *  `readYue2CaptionSelection` collapses into the same answer. */
+export function hasStoredYue2CaptionSelection(adapterPath: string): boolean {
+  if (!adapterPath) return false;
+  const stored = _read<Yue2CaptionSelection>(YUE2_CAPTION_SOURCE_PREFIX + adapterPath);
+  return !!stored && (stored.mode === 'auto' || stored.mode === 'track' || stored.mode === 'custom');
+}
+
 export function readYue2CaptionSelection(adapterPath: string): Yue2CaptionSelection {
   if (!adapterPath) return { mode: 'custom' };
   const stored = _read<Yue2CaptionSelection>(YUE2_CAPTION_SOURCE_PREFIX + adapterPath);
