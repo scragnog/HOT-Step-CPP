@@ -184,9 +184,15 @@ export const BarSection: React.FC<BarSectionProps> = ({
       onMouseLeave={handleMouseLeave}
     >
       {/* Header */}
-      <button
+      {/* A div, not a <button>: headerToggle is itself a <button>, and a
+          button inside a button is invalid HTML (React logs a hydration
+          error for every render). */}
+      <div
         id={`global-bar-${id}`}
+        role="button"
+        tabIndex={0}
         onClick={handleClick}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(); } }}
         className={`
           absolute inset-0 w-full px-3 pt-1 flex items-center gap-2 transition-all duration-150 cursor-pointer
           border-b-2 ${isOpen ? `${accent.bgHover} ${accent.border}` : `${accent.bg} border-transparent hover:${accent.bgHover}`}
@@ -209,7 +215,7 @@ export const BarSection: React.FC<BarSectionProps> = ({
         <div className="flex-1 min-w-0 flex justify-end">
           {badge}
         </div>
-      </button>
+      </div>
 
       {/* Dropdown — matches section width.
           data-hovercard-boundary tells ParamLabel to float its help card beside
