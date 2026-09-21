@@ -3356,7 +3356,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         checkpoint: saved.checkpoint, dataset: saved.dataset, output: '',
         resume: selected.optimizerPath,
         steps: b.steps, saveEvery: saved.saveEvery,
-        stopMode: b.stopMode ?? saved.stopMode, targetLoss: b.targetLoss ?? saved.targetLoss,
+        stopMode: b.stopMode ?? saved.stopMode, targetLoss: b.targetLoss ?? saved.targetLoss, targetKl: b.targetKl ?? saved.targetKl,
         preview: b.preview ?? saved.preview,
         lyricTiming: (saved.alignment as { enabled?: boolean } | undefined)?.enabled === true,
         cursorWeight: (saved.alignment as { cursorWeight?: number } | undefined)?.cursorWeight ?? 0 };

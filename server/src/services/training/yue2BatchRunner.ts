@@ -20,6 +20,7 @@ import { config } from '../../config.js';
 import * as repo from './datasetsRepo.js';
 import * as queue from './labelingQueue.js';
 import { trainingBaseDir } from './paths.js';
+import { listYue2AitkRuns } from './yue2AitkRuns.js';
 
 export type Yue2BatchStage = 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
@@ -32,6 +33,10 @@ export interface Yue2BatchStageResult {
   error: string | null;
   startedAt: number | null;
   finishedAt: number | null;
+  /** The training job a crash or failure interrupted. On resume the train
+   *  stage continues from that run's last optimizer checkpoint instead of
+   *  starting over. */
+  resumeJobId?: string;
 }
 
 export interface Yue2BatchItem {
@@ -108,7 +113,7 @@ function recoverStaleBatches(): void {
   for (const snap of readSnapshots()) {
     if (!isActive(snap.status)) continue;
     for (const item of snap.items) {
-      for (const s of item.stages) if (s.status === 'running') { s.status = 'pending'; s.jobId = ''; s.startedAt = null; }
+      for (const s of item.stages) if (s.status === 'running') { if (s.jobId) s.resumeJobId = s.jobId; s.status = 'pending'; s.jobId = ''; s.startedAt = null; }
       if (item.status === 'running') { item.status = 'pending'; item.currentStage = null; }
     }
     snap.status = 'paused'; snap.pauseRequested = false; snap.currentDatasetId = null;
@@ -176,7 +181,7 @@ export function resumeBatch(id: string): 'ok' | 'not_found' | 'busy' {
   for (const item of snap.items) {
     if (item.status === 'done') continue;
     item.status = 'pending'; item.currentStage = null; item.error = null;
-    for (const s of item.stages) if (s.status !== 'done') { s.status = 'pending'; s.jobId = ''; s.error = null; s.startedAt = null; s.finishedAt = null; }
+    for (const s of item.stages) if (s.status !== 'done') { if (s.jobId && s.stage === 'train') s.resumeJobId = s.jobId; s.status = 'pending'; s.jobId = ''; s.error = null; s.startedAt = null; s.finishedAt = null; }
   }
   const state: BatchState = { ...snap, status: 'running', finishedAt: null, pauseRequested: false, currentDatasetId: null, cancelRequested: false };
   batches.set(state.id, state);
@@ -275,7 +280,12 @@ async function errorTextOf(r: Response): Promise<string> {
 
 /** What each stage needs already true to be skipped, and the body it posts.
  *  `null` body = the stage is already done for this dataset. */
-async function stageRequest(state: BatchState, item: Yue2BatchItem, stage: Yue2BatchStage): Promise<Record<string, unknown> | null> {
+async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2BatchStageResult): Promise<Record<string, unknown> | null> {
+  const stage = result.stage;
+  if (stage === 'train' && result.resumeJobId) {
+    const resumed = resumeTrainingBody(state, item, result.resumeJobId);
+    if (resumed !== undefined) return resumed;
+  }
   const st = await readStatus(item.datasetId);
   switch (stage) {
     case 'cache': return st.stages.preprocess.done && st.stages.preprocess.captionModeOk !== false ? null : { captionMode: 'ace' };
@@ -297,6 +307,30 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, stage: Yue2B
   }
 }
 
+/** Continue an interrupted joint run from its last optimizer checkpoint.
+ *  `undefined` = nothing to resume (no indexed run, no optimizer checkpoint),
+ *  so the stage starts from scratch; `null` = the run already reached the
+ *  step cap, so the stage is done. */
+function resumeTrainingBody(state: BatchState, item: Yue2BatchItem, jobId: string): Record<string, unknown> | null | undefined {
+  // The interrupted job's own run, or — when that job died before it was
+  // indexed (a resume that itself crashed) — the newest run this batch made
+  // for the dataset that still has an optimizer checkpoint.
+  const runs = listYue2AitkRuns(item.datasetId);
+  const withCheckpoint = (r: typeof runs[number]) => r.checkpoints.filter(c => !!c.optimizerPath).sort((a, b) => b.step - a.step)[0];
+  const run = runs.find(r => r.jobId === jobId && withCheckpoint(r))
+    ?? runs.filter(r => r.createdAt >= state.createdAt && withCheckpoint(r)).sort((a, b) => b.createdAt - a.createdAt)[0];
+  if (!run) return undefined;
+  const last = withCheckpoint(run)!;
+  const cap = Number(state.recipe.steps ?? run.options.steps);
+  if (Number.isFinite(cap) && last.step >= cap) return null;
+  console.log(`[Training] yue2 batch ${state.id}: resuming ${item.name} from step ${last.step} of run ${run.jobId}`);
+  // The route rebuilds the recipe from the indexed run; only the cap, stop
+  // policy and previews are read from the body.
+  return { trainingMethod: 'aitk', resumeRunId: run.jobId, resumeStep: last.step,
+    steps: cap, stopMode: state.recipe.stopMode, targetLoss: state.recipe.targetLoss, targetKl: state.recipe.targetKl,
+    preview: state.recipe.preview };
+}
+
 async function runStage(state: BatchState, item: Yue2BatchItem, result: Yue2BatchStageResult): Promise<void> {
   result.status = 'running'; result.startedAt = Date.now(); item.currentStage = result.stage; persist(state);
   const deadline = Date.now() + IDLE_WAIT_MS;
@@ -304,7 +338,7 @@ async function runStage(state: BatchState, item: Yue2BatchItem, result: Yue2Batc
   if (state.cancelRequested) { finishStage(state, result, 'cancelled', null); return; }
 
   let body: Record<string, unknown> | null;
-  try { body = await stageRequest(state, item, result.stage); }
+  try { body = await stageRequest(state, item, result); }
   catch (err: any) { finishStage(state, result, 'failed', err?.message || String(err)); return; }
   if (body === null) { finishStage(state, result, 'done', null); return; }
 
@@ -323,7 +357,7 @@ async function runStage(state: BatchState, item: Yue2BatchItem, result: Yue2Batc
   } catch { /* handled below */ }
   if (!jobId && skipped) { finishStage(state, result, 'done', null); return; }
   if (!jobId) { finishStage(state, result, 'failed', 'Stage returned no jobId'); return; }
-  result.jobId = jobId; persist(state);
+  result.jobId = jobId; result.resumeJobId = undefined; persist(state);
 
   for (;;) {
     if (state.cancelRequested) queue.cancelJob(jobId);
