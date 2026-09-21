@@ -701,6 +701,12 @@ static bool lm_optim_step_prodigy(LmOptim * o, ggml_backend_sched_t sched, float
         ggml_backend_tensor_set(o->t_pdeps, &deps, 0, sizeof(float));
     }
     const float step = lr_now * (float) d_new;
+    // Per-parameter LR groups, the same `lr_mul` the AdamW path applies through
+    // its alt tensors. Only the WEIGHT UPDATE is scaled: `d` stays a single
+    // global estimate driven by the unscaled gamma, which is what the reference
+    // Prodigy does with param groups (one d for the run, per-group lr on top).
+    // ponytail: d is global on purpose — a per-group d would need its own
+    // numerator/s pair per group, and nothing here has asked for that.
     for (size_t lo = 0; lo < n; lo += GROUP) {
         const size_t hi = std::min(n, lo + GROUP);
         ggml_init_params ip  = { o->arena.size(), o->arena.data(), true };
@@ -710,14 +716,15 @@ static bool lm_optim_step_prodigy(LmOptim * o, ggml_backend_sched_t sched, float
         }
         ggml_cgraph * go = ggml_new_graph_custom(ctx, 4096, false);
         for (size_t j = lo; j < hi; j++) {
+            const float step_j = step * o->lr_mul[j];
             // t_pdeps is [1] and broadcasts (ggml_add1 is deprecated in favour
             // of exactly this).
             ggml_tensor * den = ggml_add(ctx, ggml_sqrt(ctx, o->mom_v[j]), o->t_pdeps);
             ggml_tensor * upd = ggml_div(ctx, o->mom_m[j], den);
             ggml_tensor * cur = (o->weight_decay > 0.0f)
-                                    ? ggml_scale(ctx, o->params[j], 1.0f - step * o->weight_decay)
+                                    ? ggml_scale(ctx, o->params[j], 1.0f - step_j * o->weight_decay)
                                     : o->params[j];
-            ggml_build_forward_expand(go, ggml_cpy(ctx, ggml_sub(ctx, cur, ggml_scale(ctx, upd, step)), o->params[j]));
+            ggml_build_forward_expand(go, ggml_cpy(ctx, ggml_sub(ctx, cur, ggml_scale(ctx, upd, step_j)), o->params[j]));
         }
         ggml_backend_sched_reset(sched);
         const bool ok = ggml_backend_sched_graph_compute(sched, go) == GGML_STATUS_SUCCESS;

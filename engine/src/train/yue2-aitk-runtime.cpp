@@ -152,6 +152,12 @@ static int run_impl(const Config & config, std::string * error) {
         !std::isfinite(config.planner_lr_scale) || config.planner_lr_scale <= 0.0f) {
         fail(error, "invalid runtime configuration"); return 1;
     }
+    if (config.optimizer == "muon" && config.planner_lr_scale != 1.0f) {
+        // Muon's update is bucketed by shape and scaled once per bucket
+        // (lm-optim.h), so lr_mul would apply to the AdamW-ruled parameters
+        // only — a HALF-honoured split is worse than a refused one.
+        fail(error, "--planner-lr-scale is not supported with --optimizer muon"); return 1;
+    }
     event("preflight");
     yue2_aitk::Dataset dataset;
     if (!yue2_aitk::read_dataset(config.dataset, &dataset, error)) return 1;
@@ -281,6 +287,21 @@ static int run_impl(const Config & config, std::string * error) {
                 for (const auto & p : named) params.push_back(p.parameter);
                 std::string lm_err;
                 if (!lm_optim_init(&o, params, backend.value, &lm_err)) { fail(error, ("optimizer init: " + lm_err).c_str()); return 1; }
+                // Same split the AdamW path makes below: the planner's adapters
+                // are the "text_encoders." slots. lm_optim_init is what sizes
+                // lr_mul, so this cannot move above it.
+                if (config.planner_lr_scale != 1.0f) {
+                    size_t scaled = 0;
+                    for (const auto & p : named) {
+                        if (p.name.rfind("text_encoders.", 0) != 0) continue;
+                        if (!lm_optim_set_lr_mul(&o, p.parameter, config.planner_lr_scale)) {
+                            fail(error, "planner lr scale: a planner parameter is not registered with the optimizer"); return 1;
+                        }
+                        ++scaled;
+                    }
+                    std::fprintf(stderr, "[yue2-aitk] planner lr x%.3g over %zu of %zu parameters (%s)\n",
+                                 (double) config.planner_lr_scale, scaled, params.size(), config.optimizer.c_str());
+                }
                 // GGML's scheduler requires a CPU backend in its final slot,
                 // even when all optimizer tensors are CUDA-resident.
                 holder->cpu_backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);

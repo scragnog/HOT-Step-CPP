@@ -97,6 +97,88 @@ static bool yue2_optim_check_half(const char * half, const std::string & dir, co
     return true;
 }
 
+// Per-parameter LR groups, which is what --planner-lr-scale rides on: a
+// parameter at lr_mul 0.5 must move EXACTLY half as far as the same parameter
+// at 1.0, given the same gradients and the same step, and a parameter left at
+// 1.0 must not move at all differently for having a scaled neighbour. Muon is
+// refused by validation (one rate per shape bucket), so it is not checked here.
+template<class Context, class Init, class Free>
+static bool yue2_optim_check_lr_mul(const Yue2Model & m, Init init, Free free_ctx) {
+    for (const char * name : { "adamw", "prodigy" }) {
+        Yue2OptimConfig cfg;
+        cfg.optimizer = name;
+        cfg.prodigy_d0 = 1e-2f;
+        Context a, b;
+        std::string err;
+        auto fail = [&](const std::string & why) {
+            fprintf(stderr, "[yue2-optim-check] FAIL lr_mul/%s: %s\n", name, why.c_str());
+            free_ctx(&a); free_ctx(&b);
+            return false;
+        };
+        // Same seed both sides: the only difference is the multiplier.
+        if (!init(m, cfg, 42, &a, &err) || !init(m, cfg, 42, &b, &err)) return fail(err);
+        for (auto * c : { &a, &b }) {
+            c->opt.base_lr = cfg.optimizer == "prodigy" ? 1.0f : 1e-1f;
+            c->opt.lr_floor = 1.0f;
+            c->opt.warmup_steps = 0;
+            c->opt.total_steps = 8;
+        }
+        if (a.params.size() < 2) return fail("too few parameters to split");
+        for (size_t j = 0; j < b.params.size(); j += 2)
+            if (!lm_optim_set_lr_mul(&b.opt, b.params[j], 0.5f)) return fail("set_lr_mul rejected a parameter");
+        auto read = [](Context & c, std::vector<std::vector<float>> * out) {
+            out->resize(c.params.size());
+            for (size_t j = 0; j < c.params.size(); ++j) {
+                (*out)[j].resize((size_t) ggml_nelements(c.params[j]));
+                ggml_backend_tensor_get(c.params[j], (*out)[j].data(), 0, (*out)[j].size() * sizeof(float));
+            }
+        };
+        std::vector<std::vector<float>> a0, b0, a1, b1;
+        read(a, &a0); read(b, &b0);
+        for (size_t j = 0; j < a0.size(); ++j)
+            if (a0[j] != b0[j]) return fail("same seed produced different initial weights");
+        for (auto * c : { &a, &b })
+            for (size_t j = 0; j < c->opt.acc.size(); ++j) {
+                auto * g = c->opt.acc[j];
+                std::vector<float> v((size_t) ggml_nelements(g));
+                for (size_t i = 0; i < v.size(); ++i) v[i] = 0.01f * std::sin((float) (i + j * 7));
+                ggml_backend_tensor_set(g, v.data(), 0, v.size() * sizeof(float));
+            }
+        LmStepStats sa{}, sb{};
+        if (!lm_optim_step(&a.opt, a.osched, &sa) || !lm_optim_step(&b.opt, b.osched, &sb))
+            return fail("optimizer step");
+        read(a, &a1); read(b, &b1);
+        // Every delta is rounded into an fp32 parameter, so one element's
+        // halving is only good to ~1 ulp of that parameter's value (0.4% on a
+        // delta of 1e-6). Compare the SUMS instead: rounding cancels, and a
+        // multiplier that was ignored entirely still shows up as 0.5.
+        double sum_err = 0.0, sum_ref = 0.0;
+        for (size_t j = 0; j < a1.size(); ++j) {
+            const bool scaled = (j % 2) == 0;
+            for (size_t i = 0; i < a1[j].size(); ++i) {
+                const double da = (double) a1[j][i] - (double) a0[j][i];
+                const double db = (double) b1[j][i] - (double) b0[j][i];
+                if (!std::isfinite(da) || !std::isfinite(db)) return fail("nonfinite update");
+                if (!scaled) {
+                    // An unscaled parameter must be untouched by its neighbour's
+                    // multiplier — which for Prodigy also means the global d did
+                    // not move, since d is estimated before any scaling.
+                    if (a1[j][i] != b1[j][i]) return fail("unscaled parameter changed with a scaled neighbour");
+                    continue;
+                }
+                sum_err += std::fabs(da * 0.5 - db);
+                sum_ref += std::fabs(da);
+            }
+        }
+        if (sum_ref <= 0.0) return fail("scaled parameters did not move at all");
+        const double rel = sum_err / sum_ref;  // 0.5 if the multiplier is ignored
+        if (rel > 1e-3) return fail("lr_mul 0.5 did not halve the update (relative error " + std::to_string(rel) + ")");
+        fprintf(stderr, "[yue2-optim-check] PASS lr_mul/%s: 0.5x halves the update, neighbours untouched\n", name);
+        free_ctx(&a); free_ctx(&b);
+    }
+    return true;
+}
+
 static int yue2_optim_check_main(const std::string & dir, const char * backend_name = "CPU") {
     ggml_time_init();
     ggml_backend_load_all();
@@ -122,7 +204,11 @@ static int yue2_optim_check_main(const std::string & dir, const char * backend_n
         [](const Yue2Model & model, const Yue2OptimConfig & cfg, uint64_t seed, Yue2AtTrainCtx * c, std::string * err) {
             return yue2_at_train_ctx_init(model, 1, 16, 16, YUE2_AT_T_ATTN_MLP, seed, 0, 1, 1, "check", c, err, true, &cfg);
         }, yue2_at_ckpt_save, yue2_at_ckpt_load, yue2_at_train_ctx_free);
+    const bool mul = ar && yue2_optim_check_lr_mul<Yue2NtTrainCtx>(m,
+        [](const Yue2Model & model, const Yue2OptimConfig & cfg, uint64_t seed, Yue2NtTrainCtx * c, std::string * err) {
+            return yue2_nt_train_ctx_init(model, 1, 16, 16, YUE2_NT_ATTN_MLP_PROJ, seed, 0, 1, 1, "check", c, err, &cfg);
+        }, yue2_nt_train_ctx_free);
     if (m.cpu_backend != backend) ggml_backend_free(m.cpu_backend);
     ggml_backend_free(backend);
-    return ar ? 0 : 1;
+    return mul ? 0 : 1;
 }
