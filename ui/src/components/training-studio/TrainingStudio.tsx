@@ -20,6 +20,7 @@ import { PhaseStepper } from './PhaseStepper';
 import { PreprocessPanel } from './PreprocessPanel';
 import { TrainPanel } from './TrainPanel';
 import { Yue2QueuePanel } from './Yue2QueuePanel';
+import { Yue2BatchPanel } from './Yue2BatchPanel';
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
 //
@@ -197,6 +198,7 @@ export const TrainingStudio: React.FC = () => {
             must stay visible wherever the user wanders while it works. Renders
             nothing until a queue has been started this session. */}
         <Yue2QueuePanel />
+        <Yue2BatchPanel />
 
         {fatalError ? (
           <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-5 flex flex-col items-start gap-3">

@@ -156,6 +156,7 @@ import {
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { parseYue2JointStopMode } from '../services/training/yue2JointTrainRunner.js';
+import { cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
   findRegCorpora, getModelSnapshot, pickBf16, pickDitBaseFor, pickLmFor, refreshModelSnapshot,
@@ -695,6 +696,42 @@ router.post('/pipeline/:id/resume', (req: Request, res: Response) => {
     console.error(`[Training] Pipeline resume failed: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── YuE2 batch (server-owned, resumable; yue2BatchRunner.ts) ─────────────
+router.post('/yue2-batch', (req: Request, res: Response) => {
+  try {
+    const b = (req.body || {}) as Record<string, unknown>;
+    const datasetIds = Array.isArray(b.datasetIds) ? b.datasetIds.filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
+    const recipe = b.recipe && typeof b.recipe === 'object' ? b.recipe as Record<string, unknown> : {};
+    const result = startYue2Batch({ datasetIds, lyricTiming: b.lyricTiming !== false, recipe });
+    if ('error' in result) { res.status(result.error.includes('already running') ? 409 : 400).json({ error: result.error }); return; }
+    res.status(202).json({ batch: result });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
+router.get('/yue2-batch', (_req: Request, res: Response) => {
+  try { res.json({ batches: listYue2Batches() }); } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
+router.get('/yue2-batch/:id', (req: Request, res: Response) => {
+  const batch = getYue2Batch(req.params.id as string);
+  if (!batch) { res.status(404).json({ error: 'Batch not found' }); return; }
+  res.json(batch);
+});
+router.delete('/yue2-batch/:id', (req: Request, res: Response) => {
+  if (!cancelYue2Batch(req.params.id as string)) { res.status(404).json({ error: 'Batch not found' }); return; }
+  res.json({ ok: true });
+});
+router.post('/yue2-batch/:id/pause', (req: Request, res: Response) => {
+  const r = pauseYue2Batch(req.params.id as string);
+  if (r === 'not_found') { res.status(404).json({ error: 'Batch not found' }); return; }
+  if (r === 'not_active') { res.status(409).json({ error: 'Batch is not running' }); return; }
+  res.json({ ok: true });
+});
+router.post('/yue2-batch/:id/resume', (req: Request, res: Response) => {
+  const r = resumeYue2Batch(req.params.id as string);
+  if (r === 'not_found') { res.status(404).json({ error: 'Batch not found' }); return; }
+  if (r === 'busy') { res.status(409).json({ error: 'A YuE2 batch is already running' }); return; }
+  res.json({ ok: true });
 });
 
 // ── Stage defaults (batch-pipeline §2.2) ─────────────────────────────────

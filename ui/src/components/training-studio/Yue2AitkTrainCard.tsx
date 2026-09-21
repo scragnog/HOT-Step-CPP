@@ -178,6 +178,30 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const activeBackendId = useBackendStore(s => s.activeBackendId);
   const selectModels = useBackendStore(s => s.selectModels);
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
+  const batchDraft = useTrainingStore(s => s.yue2BatchDraft);
+  const datasets = useTrainingStore(s => s.datasets);
+  const setBatchDraft = useTrainingStore(s => s.setYue2BatchDraft);
+  const startBatch = useTrainingStore(s => s.startYue2Batch);
+  const setPhase = useTrainingStore(s => s.setPhase);
+  const [batchStarting, setBatchStarting] = useState(false);
+  // A batch draft turns this card into the recipe editor for N datasets: the
+  // form is the same, Start sends it to the server-side batch instead of one
+  // run, and the per-dataset paths are resolved per item by the runner.
+  const runBatch = async () => {
+    if (!batchDraft?.length) return;
+    setBatchStarting(true); setError('');
+    try {
+      const timingWeight = lyricTiming
+        ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08) : 0;
+      const recipe = { ...form, cursorWeight: timingWeight, dataset: '', output: '', resume: '',
+        ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
+          everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 40)) * 25 } } : {}) };
+      await startBatch({ datasetIds: batchDraft, lyricTiming, recipe });
+      setPhase('train');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally { setBatchStarting(false); }
+  };
   const [aitkRuns, setAitkRuns] = useState<Yue2AitkRunRecord[]>([]);
   const [resumeChoice, setResumeChoice] = useState('');
   const [clearing, setClearing] = useState(false);
@@ -798,8 +822,27 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       </div>
       {error && <div className="mt-3 flex items-start gap-2 text-xs text-red-600 dark:text-red-400"><AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}</div>}
       {job?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{job.error}</div>}
+      {batchDraft && batchDraft.length > 0 && <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+        <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+          {t('trainingStudio.yue2.aitkBatch.draftTitle', 'Batch: these settings apply to {{count}} dataset(s)', { count: batchDraft.length })}
+        </p>
+        <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-400 break-words">
+          {batchDraft.map(id => datasets.find(d => d.id === id)?.name ?? id).join(' · ')}
+        </p>
+        <p className="mt-1 text-[11px] text-zinc-500">
+          {t('trainingStudio.yue2.aitkBatch.draftHint', 'Each dataset runs its caches, lead sheets, timing (when enabled), preparation and joint training in order with this recipe. The batch runs on the server; the page follows the dataset being trained.')}
+        </p>
+        <div className="mt-2 flex items-center gap-3">
+          <button type="button" onClick={() => void runBatch()} disabled={batchStarting || yue2RunAllActive}
+            className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
+            {batchStarting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+            {t('trainingStudio.yue2.aitkBatch.start', 'Start batch ({{count}})', { count: batchDraft.length })}
+          </button>
+          <button type="button" onClick={() => setBatchDraft(null)} className="text-xs text-zinc-500 hover:underline">{t('trainingStudio.yue2.aitkBatch.discard', 'Discard batch')}</button>
+        </div>
+      </div>}
       <div className="mt-4 flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => void run()} disabled={active || preparing || starting || yue2RunAllActive || (resumeChoice || form.resume?.trim() ? !form.dataset : (!prepare.legacyManifest || !prepare.tokenizer)) || (!resumeChoice && lyricTiming && !cursorReady)}
+        <button type="button" onClick={() => void run()} disabled={!!batchDraft?.length || active || preparing || starting || yue2RunAllActive || (resumeChoice || form.resume?.trim() ? !form.dataset : (!prepare.legacyManifest || !prepare.tokenizer)) || (!resumeChoice && lyricTiming && !cursorReady)}
           className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
           {starting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
           {active ? (job?.phase === 'preparing' ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.running', 'Joint training is running')) : t('trainingStudio.yue2.method.start', 'Start joint training')}

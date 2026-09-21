@@ -2777,6 +2777,34 @@ export async function resumePipeline(id: string): Promise<void> {
   await request<{ ok: boolean }>(`/pipeline/${encodeURIComponent(id)}/resume`, { method: 'POST' });
 }
 
+// ── YuE2 batch (server-owned, resumable) ───────────────────────────────
+export type Yue2BatchStage = 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train';
+export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+export interface Yue2BatchStageResult { stage: Yue2BatchStage; jobId: string; status: Yue2BatchItemStatus; error: string | null; startedAt: number | null; finishedAt: number | null }
+export interface Yue2BatchItem { datasetId: string; name: string; status: Yue2BatchItemStatus; currentStage: Yue2BatchStage | null; stages: Yue2BatchStageResult[]; error: string | null }
+export interface Yue2BatchSummary {
+  id: string;
+  status: 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
+  items: Yue2BatchItem[];
+  currentDatasetId: string | null;
+  lyricTiming: boolean;
+  recipe: Partial<Yue2JointTrainRequest>;
+  createdAt: number;
+  finishedAt: number | null;
+  pauseRequested?: boolean;
+}
+export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; recipe: Partial<Yue2JointTrainRequest> }): Promise<Yue2BatchSummary> {
+  const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch', { method: 'POST', ...jsonBody(input) });
+  return data.batch;
+}
+export async function listYue2Batches(): Promise<Yue2BatchSummary[]> {
+  const data = await request<{ batches: Yue2BatchSummary[] }>('/yue2-batch');
+  return data.batches;
+}
+export async function pauseYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/pause`, { method: 'POST' }); }
+export async function resumeYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/resume`, { method: 'POST' }); }
+export async function cancelYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+
 export async function cancelPipeline(id: string): Promise<void> {
   await request<{ ok: boolean }>(`/pipeline/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }

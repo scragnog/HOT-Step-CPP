@@ -223,6 +223,12 @@ interface TrainingState {
   /** YuE2 "Perform all stages": true from the click until the chain stops,
    *  either because every stage is done/skipped or because one failed. Not
    *  persisted — a hard reload loses it, same as `activeJob`. */
+  /** Datasets ticked for a server-side YuE2 batch, waiting for the user to
+   *  configure the recipe on the training card and press Start. */
+  yue2BatchDraft: string[] | null;
+  yue2Batches: trainingApi.Yue2BatchSummary[];
+  /** Open the dataset the running batch is on whenever it moves. */
+  yue2BatchFollow: boolean;
   yue2RunAllActive: boolean;
   /** Which of the five YuE2 stages (1-5) the chain is currently on or waiting
    *  to finish. Null when the chain isn't running. */
@@ -459,6 +465,13 @@ interface TrainingState {
   cancelJob(): Promise<void>;
   applyStreamEvent(ev: TrainingStreamEvent): void;   // called by useTrainingStream
   loadPipelines(): Promise<void>;
+  setYue2BatchDraft(ids: string[] | null): void;
+  setYue2BatchFollow(follow: boolean): void;
+  loadYue2Batches(): Promise<void>;
+  startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; recipe: Partial<trainingApi.Yue2JointTrainRequest> }): Promise<trainingApi.Yue2BatchSummary>;
+  pauseYue2Batch(id: string): Promise<void>;
+  resumeYue2Batch(id: string): Promise<void>;
+  cancelYue2Batch(id: string): Promise<void>;
   startPipeline(input: StartPipelineInput): Promise<PipelineSummary>;
   cancelPipeline(id: string): Promise<void>;
   pausePipeline(id: string): Promise<void>;
@@ -492,6 +505,9 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
   activeJob: null,
   jobLog: [],
+  yue2BatchDraft: null,
+  yue2Batches: [],
+  yue2BatchFollow: true,
   yue2RunAllActive: false,
   yue2RunAllStage: null,
   yue2Queue: [],
@@ -1352,6 +1368,28 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       console.warn('[Training] pipelines failed:', errMessage(err));
       set({ pipelinesLoading: false });
     }
+  },
+
+  setYue2BatchDraft: (ids) => set({ yue2BatchDraft: ids && ids.length ? ids : null }),
+  setYue2BatchFollow: (follow) => set({ yue2BatchFollow: follow }),
+  loadYue2Batches: async () => {
+    try { set({ yue2Batches: await trainingApi.listYue2Batches() }); }
+    catch (err) { console.warn('[Training] yue2 batches failed:', errMessage(err)); }
+  },
+  startYue2Batch: async (input) => {
+    const batch = await trainingApi.startYue2Batch(input);
+    set({ yue2BatchDraft: null });
+    await get().loadYue2Batches();
+    return batch;
+  },
+  pauseYue2Batch: async (id) => {
+    try { await trainingApi.pauseYue2Batch(id); await get().loadYue2Batches(); } catch (err) { set({ error: errMessage(err) }); }
+  },
+  resumeYue2Batch: async (id) => {
+    try { await trainingApi.resumeYue2Batch(id); await get().loadYue2Batches(); } catch (err) { set({ error: errMessage(err) }); }
+  },
+  cancelYue2Batch: async (id) => {
+    try { await trainingApi.cancelYue2Batch(id); await get().loadYue2Batches(); } catch (err) { set({ error: errMessage(err) }); }
   },
 
   startPipeline: async (input) => {
