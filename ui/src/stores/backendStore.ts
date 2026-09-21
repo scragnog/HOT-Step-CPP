@@ -153,6 +153,8 @@ export interface BackendExtensionParam {
   /** Top-bar cluster this knob renders in. Optional: older manifests have no
    *  such field and every knob falls back to the Generation panel. */
   group?: BackendExtensionGroup;
+  /** Accordion inside the cluster; absent = rendered flat above the sections. */
+  section?: string;
   type: 'slider' | 'select' | 'toggle' | 'text';
   label: string;
   hint?: string;

@@ -440,97 +440,97 @@ async function capabilities(): Promise<BackendCapabilities> {
       // Defaults are the checkpoint's own (props.sampling); the UI sends
       // nothing for an untouched control, so the engine keeps its GGUF value.
       {
-        key: 'yue2PlanTemperature', group: 'lm', type: 'slider', label: 'Plan Temperature',
+        key: 'yue2PlanTemperature', group: 'lm', section: 'Planner (lead sheet)', type: 'slider', label: 'Plan Temperature',
         hint: 'Sampling temperature for the lead-sheet (ABC) planner. The checkpoint ships '
             + `${sd('plan', 'temperature', 0.7)}. Lower = safer, more conventional scores.`,
         default: sd('plan', 'temperature', 0.7), min: 0.1, max: 2, step: 0.05,
       },
       {
-        key: 'yue2PlanTopP', group: 'lm', type: 'slider', label: 'Plan Top-P',
+        key: 'yue2PlanTopP', group: 'lm', section: 'Planner (lead sheet)', type: 'slider', label: 'Plan Top-P',
         hint: `Nucleus mass kept when sampling the score. Checkpoint: ${sd('plan', 'top_p', 0.9)}.`,
         default: sd('plan', 'top_p', 0.9), min: 0.5, max: 1, step: 0.01,
       },
       {
-        key: 'yue2PlanTopK', group: 'lm', type: 'slider', label: 'Plan Top-K',
+        key: 'yue2PlanTopK', group: 'lm', section: 'Planner (lead sheet)', type: 'slider', label: 'Plan Top-K',
         hint: `Candidates kept per score token. Checkpoint: ${sd('plan', 'top_k', 30)}.`,
         default: sd('plan', 'top_k', 30), min: 1, max: 500, step: 1,
       },
       {
-        key: 'yue2PlanRepPenalty', group: 'lm', type: 'slider', label: 'Plan Repetition Penalty',
+        key: 'yue2PlanRepPenalty', group: 'lm', section: 'Planner (lead sheet)', type: 'slider', label: 'Plan Repetition Penalty',
         hint: 'Frequency penalty over the recent score window; breaks bars that repeat verbatim. '
             + `1.0 = off. Checkpoint: ${sd('plan', 'repetition_penalty', 1.005)}.`,
         default: sd('plan', 'repetition_penalty', 1.005), min: 1, max: 1.5, step: 0.005,
       },
       {
-        key: 'yue2PlanRepWindow', group: 'lm', type: 'slider', label: 'Plan Repetition Window',
+        key: 'yue2PlanRepWindow', group: 'lm', section: 'Planner (lead sheet)', type: 'slider', label: 'Plan Repetition Window',
         hint: `How many recent score tokens the penalty counts. Checkpoint: ${sd('plan', 'penalty_window', 100)}.`,
         default: sd('plan', 'penalty_window', 100), min: 0, max: 2000, step: 10,
       },
       {
-        key: 'yue2PlanMaxTokens', group: 'lm', type: 'slider', label: 'Plan Max Tokens',
+        key: 'yue2PlanMaxTokens', group: 'lm', section: 'Planner (lead sheet)', type: 'slider', label: 'Plan Max Tokens',
         hint: 'Cap on the lead sheet\'s length in tokens; a plan that hits it reports limit_hit. '
             + `Checkpoint: ${sd('plan', 'max_tokens', 4096)}.`,
         default: sd('plan', 'max_tokens', 4096), min: 256, max: 4096, step: 64,
       },
       {
-        key: 'yue2SemTemperature', group: 'lm', type: 'slider', label: 'Composer Temperature',
+        key: 'yue2SemTemperature', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Temperature',
         hint: 'Sampling temperature for the codec (semantic) stage that writes the song itself. '
             + `Checkpoint: ${sd('semantic', 'temperature', 1.0)}.`,
         default: sd('semantic', 'temperature', 1.0), min: 0.1, max: 2, step: 0.05,
       },
       {
-        key: 'yue2SemTopP', group: 'lm', type: 'slider', label: 'Composer Top-P',
+        key: 'yue2SemTopP', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Top-P',
         hint: `Nucleus mass kept per codec frame. Checkpoint: ${sd('semantic', 'top_p', 0.95)}.`,
         default: sd('semantic', 'top_p', 0.95), min: 0.5, max: 1, step: 0.01,
       },
       {
-        key: 'yue2SemTopK', group: 'lm', type: 'slider', label: 'Composer Top-K',
+        key: 'yue2SemTopK', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Top-K',
         hint: `Candidates kept per codec frame. Checkpoint: ${sd('semantic', 'top_k', 100)}.`,
         default: sd('semantic', 'top_k', 100), min: 1, max: 500, step: 1,
       },
       {
-        key: 'yue2SemRepPenalty', group: 'lm', type: 'slider', label: 'Composer Repetition Penalty',
+        key: 'yue2SemRepPenalty', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Repetition Penalty',
         hint: 'Frequency penalty over recent codec frames — the "same bar forever" guard. '
             + `1.0 = off. Checkpoint: ${sd('semantic', 'repetition_penalty', 1.2)}.`,
         default: sd('semantic', 'repetition_penalty', 1.2), min: 1, max: 1.5, step: 0.005,
       },
       {
-        key: 'yue2SemRepWindow', group: 'lm', type: 'slider', label: 'Composer Repetition Window',
+        key: 'yue2SemRepWindow', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Repetition Window',
         hint: `Recent codec frames the penalty counts (25 per second). Checkpoint: ${sd('semantic', 'penalty_window', 50)}.`,
         default: sd('semantic', 'penalty_window', 50), min: 0, max: 2000, step: 10,
       },
       {
-        key: 'yue2SemMinTokens', group: 'lm', type: 'slider', label: 'Composer Min Frames',
+        key: 'yue2SemMinTokens', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Min Frames',
         hint: `END is blocked before this many codec frames (25 per second). Checkpoint: ${sd('semantic', 'min_tokens', 200)}.`,
         default: sd('semantic', 'min_tokens', 200), min: 0, max: 3000, step: 25,
       },
       {
-        key: 'yue2SemMaxTokens', group: 'lm', type: 'slider', label: 'Composer Max Frames',
+        key: 'yue2SemMaxTokens', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Max Frames',
         hint: 'Cap on the song in codec frames (25 per second; 9000 = 6 min). A render that hits it '
             + `reports limit_hit. Checkpoint: ${sd('semantic', 'max_tokens', 9000)}.`,
         default: sd('semantic', 'max_tokens', 9000), min: 200, max: 9000, step: 100,
       },
       {
-        key: 'yue2EndThreshold', group: 'lm', type: 'slider', label: 'End Threshold',
+        key: 'yue2EndThreshold', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'End Threshold',
         hint: 'Stop the song once the sampler puts at least this much probability on END, instead of '
             + 'waiting for END to win the draw. 0 = off. Useful with adapters that reach their ending '
             + 'and then drone on (measured on the 2026-09-14 adapter ladders).',
         default: 0, min: 0, max: 1, step: 0.01,
       },
       {
-        key: 'yue2EndBias', group: 'lm', type: 'slider', label: 'End Bias',
+        key: 'yue2EndBias', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'End Bias',
         hint: 'Added to END\'s logit before sampling, from End Bias From onwards, ramping to full '
             + 'strength over End Bias Ramp. 0 = off. Positive nudges songs to finish; negative holds them open.',
         default: 0, min: -20, max: 20, step: 0.5,
       },
       {
-        key: 'yue2EndBiasFrom', group: 'lm', type: 'slider', label: 'End Bias From (s)',
+        key: 'yue2EndBiasFrom', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'End Bias From (s)',
         hint: 'Seconds of song before the bias starts applying.',
         default: 0, min: 0, max: 360, step: 5,
         visible_when: { key: 'yue2EndBias', not_equals: '0' },
       },
       {
-        key: 'yue2EndBiasRamp', group: 'lm', type: 'slider', label: 'End Bias Ramp (s)',
+        key: 'yue2EndBiasRamp', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'End Bias Ramp (s)',
         hint: 'Seconds over which the bias ramps from 0 to full strength.',
         default: 0, min: 0, max: 120, step: 5,
         visible_when: { key: 'yue2EndBias', not_equals: '0' },

@@ -140,6 +140,12 @@ export type BackendExtensionGroup = 'generation' | 'lm';
  *  serves both), plus the cluster it belongs to. */
 export interface BackendExtensionParam extends PluginParamSchema {
   group?: BackendExtensionGroup;
+  /** Optional accordion inside the cluster. Knobs sharing a section render
+   *  together under one collapsible header (collapsed by default), in the
+   *  order the section first appears; knobs without one render flat above
+   *  the sections. Keeps a backend with many knobs from showing them all at
+   *  once. */
+  section?: string;
 }
 
 export interface BackendCapabilities {

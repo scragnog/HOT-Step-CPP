@@ -10,7 +10,8 @@
 // own group — so a new knob lands in the right panel by declaring where it
 // goes, with no UI change at all.
 
-import React from 'react';
+import React, { useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { Slider } from '../shared/Slider';
@@ -62,9 +63,7 @@ export const BackendExtensionControls: React.FC<{
     return cur === vw.equals;
   });
 
-  return (
-    <>
-      {params.map((p) => {
+  const renderParam = (p: BackendExtensionParam): React.ReactNode => {
         const value = gp.backendParams?.[p.key] ?? p.default;
         if (p.type === 'slider') {
           return (
@@ -128,6 +127,49 @@ export const BackendExtensionControls: React.FC<{
               value={String(value ?? '')}
               onChange={(e) => gp.setBackendParam?.(p.key, e.target.value)}
             />
+          </div>
+        );
+  };
+
+  // Sections (`section` on the schema): knobs without one render flat, as
+  // before; the rest fold under one collapsible header per section, collapsed
+  // by default so a backend with many planner knobs shows a couple of
+  // headers rather than the whole list. The header counts how many of its
+  // knobs sit off their default, so a folded section still says whether it
+  // is doing anything.
+  const flat = params.filter((p) => !p.section);
+  const sections: string[] = [];
+  for (const p of params) if (p.section && !sections.includes(p.section)) sections.push(p.section);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const changedIn = (name: string) => params.filter((p) => p.section === name && (() => {
+    const v = gp.backendParams?.[p.key];
+    return !(v === undefined || v === null || v === '' || v === p.default);
+  })()).length;
+
+  return (
+    <>
+      {flat.map(renderParam)}
+      {sections.map((name) => {
+        const isOpen = !!open[name];
+        const changed = changedIn(name);
+        return (
+          <div key={name} className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setOpen((o) => ({ ...o, [name]: !isOpen }))}
+              className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <ChevronDown size={12} className={`text-zinc-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+                <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">{name}</span>
+              </div>
+              <span className="text-[10px] text-zinc-500 font-mono">{changed ? `${changed} changed` : 'default'}</span>
+            </button>
+            {isOpen && (
+              <div className="px-3 pb-3 space-y-3">
+                {params.filter((p) => p.section === name).map(renderParam)}
+              </div>
+            )}
           </div>
         );
       })}
