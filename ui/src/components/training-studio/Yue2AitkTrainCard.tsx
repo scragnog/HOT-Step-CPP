@@ -886,7 +886,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             <span>20-step stop mean {stepHistory[stepHistory.length - 1].ma20?.toFixed(4) ?? '—'}</span>
             {jointLossRate(stepHistory) !== null && <span>loss rate {jointLossRate(stepHistory)!.toFixed(5)}/step</span>}
             <span>{stepHistory[stepHistory.length - 1].step} / {form.steps} steps</span>
-            {stepHistory[stepHistory.length - 1].elapsedMs !== undefined && <span>elapsed {Math.round(stepHistory[stepHistory.length - 1].elapsedMs! / 1000)}s</span>}
+            {stepHistory[stepHistory.length - 1].elapsedMs !== undefined && <span>elapsed {formatDurationMs(stepHistory[stepHistory.length - 1].elapsedMs!)}</span>}
             {stepHistory[stepHistory.length - 1].stepMs !== undefined && <span>pace {(stepHistory.slice(-20).reduce((sum, point) => sum + (point.stepMs ?? 0), 0) / Math.max(1, stepHistory.slice(-20).filter(point => point.stepMs !== undefined).length) / 1000).toFixed(2)}s/step</span>}
             {job?.status === 'running' && <span>{jointEta(stepHistory, form)}</span>}
           </div>
