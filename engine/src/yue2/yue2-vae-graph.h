@@ -65,6 +65,7 @@
 #include "ggml.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -545,23 +546,56 @@ static bool yue2_vae_ensure_graph(const Yue2Model & m, Yue2VaeGraph * g, int64_t
 // Run one full decode. `src` points at 64*T contiguous F32, channel-major
 // (memory index = c*T + t — see file header). `dst` receives S*2 floats
 // planar (ch0 then ch1), S read back from the graph's own output shape.
+// YUE2_VAE_PROFILE=1 splits each call into ensure_graph() (graph build/
+// alloc when the tile width changes, ~free on a cache hit) vs the actual
+// upload/compute/readback, so a slow tile can be attributed to one or the
+// other instead of guessed at. Added to settle whether the VAE stage's
+// poor measured GFLOPS/GB-s utilization is compute-bound or just paying
+// for a fresh multi-GB compute-buffer allocation on every tile-width
+// change (yue2_vae_ensure_graph logs a fresh build separately already).
+static bool yue2_vae_step_profile_enabled() {
+    static const bool enabled = [] {
+        const char * e = std::getenv("YUE2_VAE_PROFILE");
+        return e && e[0] && e[0] != '0';
+    }();
+    return enabled;
+}
+
 static bool yue2_vae_run(const Yue2Model & m, Yue2VaeGraph * g, const float * src, int64_t T,
                          std::vector<float> * dst, int64_t * out_samples, std::string * err) {
+    const bool profile = yue2_vae_step_profile_enabled();
+    const bool was_cached = profile && g->graph && g->graph_T == T;
+    auto t0 = std::chrono::steady_clock::now();
+
     if (!yue2_vae_ensure_graph(m, g, T, err)) {
         return false;
     }
+    const auto t1 = std::chrono::steady_clock::now();
+
     ggml_backend_tensor_set(g->input, src, 0, ggml_nbytes(g->input));
+    const auto t2 = std::chrono::steady_clock::now();
     if (ggml_backend_sched_graph_compute(g->sched, g->graph) != GGML_STATUS_SUCCESS) {
         if (err) {
             *err = "VAE graph compute failed";
         }
         return false;
     }
+    const auto t3 = std::chrono::steady_clock::now();
     const int64_t S = g->output->ne[0];
     dst->resize((size_t) (2 * S));
     ggml_backend_tensor_get(g->output, dst->data(), 0, (size_t) (2 * S) * sizeof(float));
+    const auto t4 = std::chrono::steady_clock::now();
     if (out_samples) {
         *out_samples = S;
+    }
+    if (profile) {
+        const auto ms = [](std::chrono::steady_clock::time_point a, std::chrono::steady_clock::time_point b) {
+            return std::chrono::duration<double, std::milli>(b - a).count();
+        };
+        fprintf(stderr,
+                "[YuE2-Vae-Profile] T=%lld cached=%s ensure_ms=%.1f upload_ms=%.1f compute_ms=%.1f readback_ms=%.1f total_ms=%.1f\n",
+                (long long) T, was_cached ? "true" : "false", ms(t0, t1), ms(t1, t2), ms(t2, t3), ms(t3, t4),
+                ms(t0, t4));
     }
     return true;
 }
