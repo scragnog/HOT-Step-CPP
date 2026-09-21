@@ -658,6 +658,21 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 1,
       },
       {
+        key: 'yue2NarCacheRatio',
+        type: 'slider',
+        label: 'NAR Cache Ratio',
+        hint: '0 = off (every NAR step computed for real, full reference quality). Above 0, a '
+            + 'fraction of the middle midpoint-solver steps reuse the previous step\'s velocity '
+            + 'instead of recomputing it -- first/last 2 steps are always computed. Never touches '
+            + 'the AR/semantic stage or its RNG, so re-rendering the same seed at 0 reproduces the '
+            + 'same composition at full quality. A/B-tested: 0.5 is the quality ceiling for '
+            + 'full-quality renders; 0.7 and up is a good tradeoff for fast drafts.',
+        default: 0,
+        min: 0,
+        max: 0.9,
+        step: 0.05,
+      },
+      {
         key: 'yue2VaeVariant',
         type: 'select',
         label: 'VAE Variant',

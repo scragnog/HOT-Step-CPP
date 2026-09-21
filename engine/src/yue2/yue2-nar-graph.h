@@ -100,6 +100,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -734,7 +735,7 @@ struct Yue2NarSolveResult {
 static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & chunk,
                                     const std::vector<float> & initial_noise, int steps,
                                     const std::vector<int64_t> & pinned_steps, bool want_input_embedding_step0,
-                                    Yue2NarSolveResult * out, std::string * err) {
+                                    Yue2NarSolveResult * out, std::string * err, float cache_ratio = 0.0f) {
     if (steps <= 0) {
         if (err) {
             *err = "yue2_nar_solve_midpoint: steps must be > 0";
@@ -752,8 +753,53 @@ static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & ch
         return std::find(pinned_steps.begin(), pinned_steps.end(), s) != pinned_steps.end();
     };
 
+    // ── Step-level velocity caching (ported from hot-step-sampler.h's own
+    // cache_ratio for ACE-Step's DiT solver -- same idea: skip the full
+    // predictor+corrector network evaluation for a fraction of the middle
+    // ODE steps and just re-use the last real step's corrector velocity to
+    // advance the state instead. First/last 2 steps and any pinned step
+    // (parity capture needs a real compute) always run for real.
+    // cache_ratio=0 (default) reproduces the original behaviour exactly --
+    // every step computed for real, no caller change required. Unvalidated
+    // quality tradeoff, off by default. ─────────────────────────────────
+    std::vector<bool> step_computes((size_t) steps, true);
+    if (cache_ratio > 0.0f && steps > 4) {
+        const int protect      = 2;
+        const int middle_start = protect;
+        const int middle_end   = steps - protect;
+        const int middle_len   = middle_end - middle_start;
+        if (middle_len > 1) {
+            const int target_cached  = std::min(middle_len - 1, (int) roundf(cache_ratio * (float) middle_len));
+            const int target_compute = middle_len - target_cached;
+            if (target_compute > 0 && target_cached > 0) {
+                for (int s = middle_start; s < middle_end; s++) {
+                    step_computes[(size_t) s] = false;
+                }
+                for (int ci = 0; ci < target_compute; ci++) {
+                    int idx = middle_start + (int) roundf((float) ci * (float) middle_len / (float) target_compute);
+                    if (idx < middle_end) {
+                        step_computes[(size_t) idx] = true;
+                    }
+                }
+            }
+        }
+        for (int64_t p : pinned_steps) {
+            if (p >= 0 && p < steps) {
+                step_computes[(size_t) p] = true;
+            }
+        }
+        int cached_count = 0;
+        for (int s = 0; s < steps; s++) {
+            if (!step_computes[(size_t) s]) cached_count++;
+        }
+        fprintf(stderr, "[YuE2-NAR] Velocity cache: ratio=%.2f, %d/%d steps cached, %d computed\n",
+                cache_ratio, cached_count, steps, steps - cached_count);
+    }
+
     const double dt = 1.0 / (double) steps;
     std::vector<float> state = initial_noise;
+    std::vector<float> v_cached;
+    bool have_cached_v = false;
 
     auto eval = [&](const std::vector<float> & s, double raw_t, bool want_emb, Yue2NarVelocityResult * r) -> bool {
         const auto t0 = std::chrono::steady_clock::now();
@@ -766,6 +812,17 @@ static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & ch
     for (int step = 0; step < steps; step++) {
         const double t   = 1.0 - (double) step * dt;
         const double raw = yue2_nar_logit_clamped(t);
+
+        if (!step_computes[(size_t) step] && have_cached_v) {
+            // Cached step: no network call at all, just advance the state
+            // with the last real step's corrector velocity.
+            std::vector<float> new_state((size_t) n);
+            for (int64_t i = 0; i < n; i++) {
+                new_state[(size_t) i] = state[(size_t) i] - v_cached[(size_t) i] * (float) dt;
+            }
+            state = std::move(new_state);
+            continue;
+        }
 
         Yue2NarVelocityResult first;
         const bool want_emb0 = want_input_embedding_step0 && step == 0;
@@ -800,7 +857,10 @@ static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & ch
             p.state_after    = new_state;
             out->pinned.push_back(std::move(p));
         }
-        state = std::move(new_state);
+
+        v_cached      = second.velocity;
+        have_cached_v = true;
+        state         = std::move(new_state);
     }
 
     out->final_latents = std::move(state);

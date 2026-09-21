@@ -553,6 +553,7 @@ static void yue2_handle_tokenize_check(const httplib::Request & req, httplib::Re
     yyjson_mut_obj_add_strcpy(doc, root, "cot", yue2_cot_name(preq.cot));
     yyjson_mut_obj_add_real(doc, root, "cfg_scale", preq.cfg_scale);
     yyjson_mut_obj_add_int(doc, root, "ode_steps", preq.ode_steps);
+    yyjson_mut_obj_add_real(doc, root, "nar_cache_ratio", preq.nar_cache_ratio);
     char * json = yyjson_mut_write(doc, 0, NULL);
     res.set_content(json ? json : "{}", "application/json");
     yyjson_mut_doc_free(doc);

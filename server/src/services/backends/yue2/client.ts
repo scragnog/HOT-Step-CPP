@@ -237,6 +237,12 @@ export interface Yue2SynthRequest {
    *  (1.01 for cot=off, 1.0 otherwise, per protocol.py's own SongRequest). */
   cfg_scale?: number;
   ode_steps?: number;
+  /** NAR midpoint-solver step-level velocity caching (0 = off/default,
+   *  every ODE step computed for real; higher = faster, lower quality).
+   *  Exposed in the UI as the "NAR Cache Ratio" slider (yue2NarCacheRatio
+   *  extension, index.ts). A/B-tested at 0.3/0.5/0.7: 0.5 is the quality
+   *  ceiling for full-quality renders, 0.7+ is fine for quick drafts. */
+  nar_cache_ratio?: number;
   ode_method?: 'midpoint';
   /** Optional NAR Lua overrides. Absent fields keep the checkpoint's midpoint path. */
   infer_method?: 'md_wasserstein_yue2';
@@ -302,6 +308,7 @@ export interface Yue2SynthResponse {
   seed_str?: string;
   duration?: number;
   ode_steps?: number;
+  nar_cache_ratio?: number;
   cfg_scale?: number;
   vae_variant?: string;
   instrumental?: boolean;

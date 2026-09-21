@@ -94,6 +94,13 @@ struct Yue2Request {
     std::string nar_scheduler;  // optional Lua scheduler; empty preserves uniform grid
     std::unordered_map<std::string, std::string> plugin_params;
 
+    // Step-level velocity caching for the NAR midpoint solver (mirrors
+    // hot-step-params.h's cache_ratio for ACE-Step's DiT sampler): skip the
+    // network evaluation for a fraction of the middle ODE steps and reuse the
+    // last real step's velocity instead. 0 = off (every step computed for
+    // real, default/original behaviour). Unvalidated quality tradeoff.
+    float nar_cache_ratio = 0.0f;
+
     // ── Ending controls, semantic stage only (2026-09-15) ────────────────
     // Measured on the adapter ladders (_LISTENING/2026-09-14/RESULTS.md, 77/83):
     // a trained AR reaches its ending and MUSIC_END then loses the draw to a
@@ -348,6 +355,14 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
     }
     if (present) {
         out->ode_steps = (int) num;
+    }
+
+    if (!yue2_req_num(root, "nar_cache_ratio", &num, &present, err)) {
+        yyjson_doc_free(doc);
+        return false;
+    }
+    if (present) {
+        out->nar_cache_ratio = (float) num;
     }
 
     if (!yue2_req_num(root, "preview_max_frames", &num, &present, err)) {

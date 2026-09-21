@@ -310,6 +310,14 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   if (params.yue2NarScheduler && params.yue2NarScheduler !== 'stock' && !narScheduler) {
     notes.push(`Unknown YuE2 NAR scheduler "${params.yue2NarScheduler}" — using uniform steps`);
   }
+  // Step-level velocity caching for the NAR midpoint solver (see
+  // yue2-nar-graph.h). 0/unset = off, every step computed for real -- the
+  // UI slider (index.ts's yue2NarCacheRatio extension) clamps to [0, 0.9],
+  // this just guards a directly-posted value too.
+  const narCacheRaw = Number(params.yue2NarCacheRatio);
+  const nar_cache_ratio = Number.isFinite(narCacheRaw) && narCacheRaw > 0
+    ? Math.min(narCacheRaw, 0.9)
+    : undefined;
 
   const vaeRaw = typeof params.yue2VaeVariant === 'string' ? params.yue2VaeVariant : 'standard';
   const vae_variant: Yue2SynthRequest['vae_variant'] = vaeRaw === 'legacy' ? 'legacy' : 'standard';
@@ -392,6 +400,7 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
     ...(abc ? { abc } : {}),
     ...(cfg_scale !== undefined ? { cfg_scale } : {}),
     ode_steps,
+    ...(nar_cache_ratio !== undefined ? { nar_cache_ratio } : {}),
     ode_method: 'midpoint',
     ...(narSolver ? { infer_method: narSolver } : {}),
     ...(narScheduler ? { scheduler: narScheduler } : {}),
