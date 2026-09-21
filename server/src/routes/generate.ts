@@ -114,7 +114,6 @@ async function runGeneration(
     lease,
     signal,
     pollUntilDone,
-    stageProfile: backend.stageProfile ?? (() => ({ stallMs: 900_000 })),
     hooks: { onEngineJob() {}, onStage() {}, onArtifact() {} },
   });
 }

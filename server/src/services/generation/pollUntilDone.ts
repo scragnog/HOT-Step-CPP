@@ -26,8 +26,15 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
   // wall-clock timeout below remains the backstop for a genuine hang.
   const STALE_TIMEOUT_QUIET_MS = STALE_TIMEOUT_VAE_MS;
   const isTickingStage = (s: unknown): boolean => typeof s === 'string' && /: Step \d+/.test(s);
+  // A failing poll means "I can't see the job", not "the job stopped". The
+  // engine stops answering HTTP while a single long op holds its request
+  // thread, and counting that blind time as no-progress is what cancelled a
+  // YuE2 run that had already finished (#158). While blind, the wall-clock
+  // timeout below is the only backstop — which is what it is for.
+  const BLIND_GRACE_MS = 10_000;
   const startedAt = Date.now();
   let lastProgressAt = Date.now();
+  let lastPollOkAt = Date.now();
   let lastStage = job.stage;
   let lastProgress = job.progress;
 
@@ -49,12 +56,22 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
     const inVaeDecode = typeof lastStage === 'string' && lastStage.startsWith('Decoding audio (VAE)');
     const staleLimit = inVaeDecode ? STALE_TIMEOUT_VAE_MS
                      : isTickingStage(lastStage) ? STALE_TIMEOUT_MS : STALE_TIMEOUT_QUIET_MS;
-    if (stalledFor > staleLimit) {
-      await aceClient.cancelJob(aceJobId).catch(() => {});
-      throw new Error(
-        `Generation stalled — no progress for ${Math.round(stalledFor / 1000)}s ` +
-        `(last stage: "${lastStage}")`
-      );
+    if (stalledFor > staleLimit && Date.now() - lastPollOkAt < BLIND_GRACE_MS) {
+      // Never let the watchdog destroy work the engine has already finished.
+      // A ticking stage that stops ticking is as often a stage that ENDED —
+      // the stage string goes stale at exactly the moment the next, quiet
+      // phase begins — as one that died. Confirm with the engine before
+      // cancelling: #158 and #96 both ended with a completed track thrown
+      // away because this branch fired on a job that was already done.
+      const final = await aceClient.pollJob(aceJobId).catch(() => null);
+      if (final?.status === 'done') return;
+      if (final?.status !== 'failed' && final?.status !== 'cancelled') {
+        await aceClient.cancelJob(aceJobId).catch(() => {});
+        throw new Error(
+          `Generation stalled — no progress for ${Math.round(stalledFor / 1000)}s ` +
+          `(last stage: "${lastStage}")`
+        );
+      }
     }
 
     // Absolute wall-clock timeout
@@ -67,6 +84,7 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
     // (e.g. ace-server busy mid-DiT-step) don't kill the loop
     try {
       const status = await aceClient.pollJob(aceJobId);
+      lastPollOkAt = Date.now();
       // Surface the engine's fine-grained phase + step counter so /status can
       // return ace_phase / ace_phase_progress. Optional on the wire (older
       // ace-server builds omit them), so guard.

@@ -19,7 +19,6 @@ import type {
   GenerationOperation,
   GenerationOutcome,
   ResolvedRequest,
-  StageProfile,
 } from '../types.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 
@@ -167,11 +166,6 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
   };
 }
 
-function stageProfile(stage: string | undefined): StageProfile {
-  const text = stage ?? '';
-  return { stallMs: text.startsWith('Decoding audio (VAE)') || !/: Step \d+/.test(text) ? 900_000 : 120_000 };
-}
-
 function outcomeFromJob(job: GenerationJob): GenerationOutcome {
   const result = job.result;
   const artifacts: GenerationArtifact[] = (result?.audioUrls ?? []).map((url, trackIndex) => ({
@@ -224,7 +218,6 @@ export const aceBackend: EngineBackend = {
     await runAceGeneration(job, { pollUntilDone: ctx.pollUntilDone, signal: ctx.signal });
     return outcomeFromJob(job);
   },
-  stageProfile,
   arbitratesResidencyInEngine: false,
   /** Model-residency arbitration (plan §4.4). Evicts every resident, not
    *  in-use ACE module so the other family isn't fighting it for VRAM. Uses

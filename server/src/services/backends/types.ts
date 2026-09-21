@@ -291,8 +291,6 @@ export interface CancelAck {
   waitedMs: number;
 }
 
-export interface StageProfile { stallMs: number; }
-
 export interface GenerationHooks {
   onEngineJob(engineJobId: string): void;
   onStage(stage: string, progress?: number): void;
@@ -313,7 +311,6 @@ export interface GenerationContext {
   lease: LaneLease;
   signal: AbortSignal;
   pollUntilDone: PollUntilDone;
-  stageProfile: (stage: string | undefined) => StageProfile;
   hooks: GenerationHooks;
 }
 
@@ -371,8 +368,6 @@ export interface EngineBackend {
   resolveRequest(submission: Readonly<Record<string, unknown>>): ResolvedRequest;
   /** Run one attempt using the shared step 4 context. */
   generate(job: GenerationJob, ctx: GenerationContext): Promise<GenerationOutcome>;
-  /** ACE supplies its existing stage windows; MM3 uses the shared default. */
-  stageProfile?(stage: string | undefined): StageProfile;
   /** Optional until the residency redesign wires engine-side arbitration. */
   arbitratesResidencyInEngine?: boolean;
   /** Release this backend's GPU residency WITHOUT stopping it (plan §4.4:
