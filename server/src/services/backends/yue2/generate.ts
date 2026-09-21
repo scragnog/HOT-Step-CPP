@@ -349,7 +349,9 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   const propsNow = yue2PropsCached();
   const maxSongs = Math.max(1, Number(propsNow?.max_lm_batch) || 1);
   const maxVars = Math.max(1, Number(propsNow?.max_synth_batch) || 1);
-  const askedSongs = Math.max(1, Math.round(Number(params.batchSize) || 1));
+  // yue2BatchSize is the YuE2 panel's own control; batchSize is the ACE
+  // Generation dropdown's, kept as a fallback for API callers.
+  const askedSongs = Math.max(1, Math.round(Number(params.yue2BatchSize ?? params.batchSize) || 1));
   const askedVars = Math.max(1, Math.round(Number(params.yue2Variations) || 1));
   const lm_batch_size = Math.min(askedSongs, maxSongs);
   const synth_batch_size = Math.min(askedVars, maxVars);

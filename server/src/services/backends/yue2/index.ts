@@ -527,6 +527,17 @@ async function capabilities(): Promise<BackendCapabilities> {
       { key: 'yue2HtShift', type: 'slider', label: 'HT Shift Warp', default: 1, min: 0.5, max: 8, step: 0.1,
         visible_when: { key: 'yue2NarScheduler', equals: 'ht_v3' } },
       {
+        key: 'yue2BatchSize',
+        type: 'slider',
+        label: 'Batch Size',
+        hint: 'Songs per render, each with its own plan, seed (seed + i) and lyrics take, composed '
+            + 'together in one pass. Multiplies with Noise Variations: songs x variations tracks.',
+        default: 1,
+        min: 1,
+        max: Math.max(1, Number(props?.max_lm_batch) || 1),
+        step: 1,
+      },
+      {
         key: 'yue2Variations',
         type: 'slider',
         label: 'Noise Variations',
