@@ -166,7 +166,19 @@ export async function generateCoverImage(opts: GenerateCoverImageOpts): Promise<
   } catch (err: any) {
     // Clean up partial output
     try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
-    throw new Error(`sd-cli failed: ${err.message}`);
+    // execFile's `message` is only "Command failed: <the whole command line>",
+    // so re-echoing it told a reporter nothing they did not already know and
+    // left the actual failure invisible (#161). sd-cli writes its real
+    // diagnosis — the missing file, the CUDA/Metal error, the OOM — to stderr,
+    // and the exit code distinguishes a crash from our own timeout.
+    const tail = String(err.stderr || err.stdout || '')
+      .split('\n').map((l: string) => l.trim()).filter(Boolean).slice(-15);
+    for (const line of tail) console.error(`[CoverArt] sd-cli: ${line}`);
+    const why = err.killed && err.signal
+      ? `killed by ${err.signal} after ${Math.round(GEN_TIMEOUT_MS / 1000)}s`
+      : typeof err.code === 'number' ? `exit ${err.code}`
+      : err.code ? String(err.code) : 'no exit code';
+    throw new Error(`sd-cli failed (${why})${tail.length ? `: ${tail[tail.length - 1]}` : ''}`);
   }
 
   // Verify output was created
