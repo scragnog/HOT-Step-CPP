@@ -1,0 +1,179 @@
+diff --git a/engine/ggml/src/ggml-metal/ggml-metal-device.cpp b/engine/ggml/src/ggml-metal/ggml-metal-device.cpp
+index 270c1411..74c21eb0 100644
+--- a/engine/ggml/src/ggml-metal/ggml-metal-device.cpp
++++ b/engine/ggml/src/ggml-metal/ggml-metal-device.cpp
+@@ -1791,6 +1791,30 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_im2col(ggml_meta
+     return res;
+ }
+ 
++// HOT-Step patch: metal-im2col-ic - see engine/patches/metal-im2col-ic.patch
++//
++// Separate from ggml_metal_library_get_pipeline_im2col above by design --
++// zero risk to that existing, widely-used path. See kernel_im2col_ic's own
++// comment in ggml-metal.metal and its dispatch gating (default-on,
++// GGML_METAL_IM2COL_IC=0 to opt out) in ggml_metal_op_im2col
++// (ggml-metal-ops.cpp).
++ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_im2col_ic(ggml_metal_library_t lib, const ggml_tensor * op) {
++    assert(op->op == GGML_OP_IM2COL);
++
++    char base[256];
++    char name[256];
++
++    snprintf(base, 256, "kernel_im2col_ic_%s", ggml_type_name(op->type));
++    snprintf(name, 256, "%s", base);
++
++    ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
++    if (!res.pipeline) {
++        res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
++    }
++
++    return res;
++}
++
+ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_conv_transpose_1d(ggml_metal_library_t lib, const ggml_tensor * op) {
+     assert(op->op == GGML_OP_CONV_TRANSPOSE_1D);
+ 
+diff --git a/engine/ggml/src/ggml-metal/ggml-metal-device.h b/engine/ggml/src/ggml-metal/ggml-metal-device.h
+index b36fa811..355beedd 100644
+--- a/engine/ggml/src/ggml-metal/ggml-metal-device.h
++++ b/engine/ggml/src/ggml-metal/ggml-metal-device.h
+@@ -148,6 +148,7 @@ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_group_nor
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_norm              (ggml_metal_library_t lib, const struct ggml_tensor * op, int32_t n_fuse);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_rope              (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_im2col            (ggml_metal_library_t lib, const struct ggml_tensor * op);
++struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_im2col_ic         (ggml_metal_library_t lib, const struct ggml_tensor * op);  // HOT-Step patch: metal-im2col-ic, default path for N==1 1D convs (see ggml-metal.metal's kernel_im2col_ic)
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_conv_transpose_1d (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_conv_transpose_2d (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_col2im_1d         (ggml_metal_library_t lib, const struct ggml_tensor * op);
+diff --git a/engine/ggml/src/ggml-metal/ggml-metal-ops.cpp b/engine/ggml/src/ggml-metal/ggml-metal-ops.cpp
+index c716f118..ee5bf69d 100644
+--- a/engine/ggml/src/ggml-metal/ggml-metal-ops.cpp
++++ b/engine/ggml/src/ggml-metal/ggml-metal-ops.cpp
+@@ -12,6 +12,7 @@
+ #include <algorithm>
+ #include <limits>
+ #include <cmath>
++#include <cstdlib>
+ 
+ static ggml_metal_buffer_id ggml_metal_get_buffer_id(const ggml_tensor * t) {
+     if (!t) {
+@@ -3696,6 +3697,43 @@ int ggml_metal_op_im2col(ggml_metal_op_t ctx, int idx) {
+ 
+     auto pipeline = ggml_metal_library_get_pipeline_im2col(lib, op);
+ 
++    // HOT-Step patch: metal-im2col-ic - see engine/patches/metal-im2col-ic.patch
++    //
++    // Fast path for N==1, 1D convs -- see kernel_im2col_ic's own comment in
++    // ggml-metal.metal. The branch below (kernel_im2col) parallelizes its
++    // per-threadgroup thread count over the batch dim N, which is fine for
++    // batch>1 but collapses to just KH*KW threads when N==1 -- every Conv1d
++    // run at inference time in practice (VAE/vocoder decode across several
++    // music-generation backends) has N==1, confirmed via a real Xcode GPU
++    // capture on an M1 Max: only 7/32 SIMD lanes active for a k=7 conv.
++    // Verified bit-exact (byte-identical decoded PCM against the path below,
++    // same seed) and measured ~3.3-3.7x faster on one backend's VAE decode
++    // stage (28-31s -> 8.5s) before being made the default -- see
++    // engine/patches/README.md for the full writeup. Uses a separate
++    // pipeline/kernel from the path below, so GGML_METAL_IM2COL_IC=0 is kept
++    // as an escape hatch back to the old behavior if a regression ever shows
++    // up in a path this wasn't tested against.
++    static const bool use_ic_path = [] {
++        const char * e = getenv("GGML_METAL_IM2COL_IC");
++        return !(e && e[0] == '0' && e[1] == '\0');
++    }();
++
++    if (use_ic_path && !is_2D && N == 1 && KH*KW <= ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)) {
++        auto pipeline_ic = ggml_metal_library_get_pipeline_im2col_ic(lib, op);
++
++        const uint64_t icptg     = std::min(ggml_metal_pipeline_max_theads_per_threadgroup(pipeline_ic) / (uint64_t) (KH*KW), (uint64_t) IC);
++        const uint64_t ic_groups = ((uint64_t) IC + icptg - 1) / icptg;
++
++        ggml_metal_encoder_set_pipeline(enc, pipeline_ic);
++        ggml_metal_encoder_set_bytes   (enc, &args, sizeof(args), 0);
++        ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[1]), 1);
++        ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op),         2);
++
++        ggml_metal_encoder_dispatch_threadgroups(enc, ic_groups, OH, OW, icptg, KH, KW);
++
++        return 1;
++    }
++
+     if (KH*KW <= ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)) {
+         const uint64_t ntptg0 = std::min(ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)/(KH*KW), N);
+ 
+diff --git a/engine/ggml/src/ggml-metal/ggml-metal.metal b/engine/ggml/src/ggml-metal/ggml-metal.metal
+index 969fddfa..370b4790 100644
+--- a/engine/ggml/src/ggml-metal/ggml-metal.metal
++++ b/engine/ggml/src/ggml-metal/ggml-metal.metal
+@@ -4928,6 +4928,71 @@ kernel void kernel_im2col(
+ template [[host_name("kernel_im2col_f32")]] kernel im2col_t kernel_im2col<float>;
+ template [[host_name("kernel_im2col_f16")]] kernel im2col_t kernel_im2col<half>;
+ 
++// HOT-Step patch: metal-im2col-ic - see engine/patches/metal-im2col-ic.patch
++//
++// N==1 / 1D specialization of kernel_im2col, used by default for N==1 1D
++// convs (see ggml_metal_op_im2col in ggml-metal-ops.cpp;
++// GGML_METAL_IM2COL_IC=0 is kept as an escape hatch back to kernel_im2col
++// above, in case a regression ever turns up in an untested caller).
++//
++// kernel_im2col parallelizes its extra per-threadgroup threads over the
++// batch dim N (see its while(in<args.N) loop) -- fine for batch>1 training
++// workloads, but every Conv1d run at inference time in practice (VAE/vocoder
++// decode across several music-generation backends) has N==1, which collapses
++// that to just KH*KW threads (e.g. 7/32 SIMD lanes for a k=7 conv --
++// confirmed via a real Xcode GPU capture on an M1 Max). This variant
++// parallelizes over IC (input channels) instead, which is always plentiful
++// (64+ in every conv this engine runs). Bit-for-bit equivalent to
++// kernel_im2col when N==1: the N-indexed terms in kernel_im2col's offset math
++// (in*OH*OW*CHW for dst, in*args.ofs0 for src) are simply 0 when in==0, which
++// is the only value N==1 ever takes -- this kernel drops those terms and uses
++// that freed thread axis for IC instead.
++template <typename T>
++kernel void kernel_im2col_ic(
++        constant ggml_metal_kargs_im2col & args,
++        device const float * x,
++        device        char * dst,
++        uint3 tgpig[[threadgroup_position_in_grid]],
++        uint3  tgpg[[threadgroups_per_grid]],
++        uint3 tpitg[[thread_position_in_threadgroup]],
++        uint3   ntg[[threads_per_threadgroup]]) {
++    const int64_t OH = tgpg[1];
++    const int64_t OW = tgpg[2];
++
++    const int64_t KH = ntg[1];
++    const int64_t KW = ntg[2];
++
++    const int64_t IC = args.CHW / args.KHW;
++
++    const int64_t iic = tgpig[0]*ntg[0] + tpitg[0];
++    const int64_t ikh = tpitg[1];
++    const int64_t ikw = tpitg[2];
++
++    const int64_t ioh = tgpig[1];
++    const int64_t iow = tgpig[2];
++
++    if (iic >= IC) {
++        return;
++    }
++
++    const int64_t iiw = iow*args.s0 + ikw*args.d0 - args.p0;
++    const int64_t iih = ioh*args.s1 + ikh*args.d1 - args.p1;
++
++    const int64_t offset_dst = (ioh*OW + iow)*args.CHW + (iic*(KH*KW) + ikh*KW + ikw);
++
++    device T * pdst = (device T *) (dst);
++
++    if (iih < 0 || iih >= args.IH || iiw < 0 || iiw >= args.IW) {
++        pdst[offset_dst] = 0.0f;
++    } else {
++        const int64_t offset_src = iic*args.ofs1 + iih*args.IW + iiw;
++        pdst[offset_dst] = x[offset_src];
++    }
++}
++
++template [[host_name("kernel_im2col_ic_f32")]] kernel im2col_t kernel_im2col_ic<float>;
++template [[host_name("kernel_im2col_ic_f16")]] kernel im2col_t kernel_im2col_ic<half>;
++
+ // TODO: optimize
+ typedef void (im2col_ext_t)(
+         constant ggml_metal_kargs_im2col & args,
