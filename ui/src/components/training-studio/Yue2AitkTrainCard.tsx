@@ -103,8 +103,16 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // beating 1.0 by ear; this is that, trained in rather than dialled in.
   // 750 is a cap, not a target — an artist that has not reached KL 1.4 by
   // then is not going to.
+  //
+  // Prodigy by default (2026-09-21, later the same day): once its weight
+  // update was bias-corrected (lm-optim.h) it beat this AdamW recipe by ear
+  // AND by clock on the same album — KL 1.4 in 214 steps against AdamW's
+  // 308, d settling at ~1e-3 where AdamW had been told 2e-4. `lr` is ignored
+  // under Prodigy (base_lr is gamma = 1.0); the planner scale still applies,
+  // now on top of d. The pre-fix Prodigy history — "learns too fast,
+  // corrupts the AR" — was the missing bias correction, not the optimizer.
   steps: 750, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
-  optimizer: 'adamw', prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
+  optimizer: 'prodigy', prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
   rank: 64, alpha: 64, stopMode: 'kl', targetKl: 1.4, lr: 2e-4, plannerLrScale: 0.3,
 };
 type PrepareForm = Yue2AitkPrepareRequest;
@@ -161,6 +169,13 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.lr === 1e-4) stored.lr = 2e-4;
     if (stored.plannerLrScale === 0.6) stored.plannerLrScale = 0.3;
     window.localStorage.setItem(narBudget, '1');
+  }
+  // Prodigy default (2026-09-21): Recipe A had moved everyone to adamw, so a
+  // stored adamw is the old default, not a choice, and moves with it.
+  const prodigy = `${FORM_KEY}${datasetId}:defaults-prodigy`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(prodigy)) {
+    if (stored.optimizer === 'adamw') stored.optimizer = 'prodigy';
+    window.localStorage.setItem(prodigy, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
