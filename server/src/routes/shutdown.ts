@@ -22,8 +22,36 @@ function killTrainingChildren(): void {
   try { killActiveChildren(); } catch (err) { console.error('[Shutdown] killActiveChildren failed:', err); }
 }
 
+/** A process's image name and full command line, or null if it is gone or
+ *  cannot be read. `wmic` was removed in Windows 11 24H2, so this goes through
+ *  CIM. Used to check WHAT a pid is before force-killing it. */
+function describeProcess(pid: number | string): { name: string; cmdline: string } | null {
+  try {
+    const out = execSync(
+      'powershell -NoProfile -NonInteractive -Command ' +
+      `"$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction SilentlyContinue; ` +
+      `if ($p) { $p.Name + '|' + $p.CommandLine }"`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 }
+    ).trim();
+    if (!out) return null;
+    const sep = out.indexOf('|');
+    return { name: (sep < 0 ? out : out.slice(0, sep)).trim(), cmdline: sep < 0 ? '' : out.slice(sep + 1) };
+  } catch {
+    return null;
+  }
+}
+
 /** Kill the Vite dev server by port. Only when dev.bat started it (HOT_STEP_DEV),
- *  or a LAUNCH.bat user with something unrelated on :3000 loses it on Quit. */
+ *  or a LAUNCH.bat user with something unrelated on :3000 loses it on Quit.
+ *
+ *  The HOT_STEP_DEV guard is NOT enough on its own. Listening on :3000 does not
+ *  make a process ours, and this used to `taskkill /T /F` every pid it found
+ *  there — so a dev-mode Quit took down whatever else happened to hold the
+ *  port, along with its entire child tree. That is not hypothetical: it killed
+ *  an unrelated editor mid-session on 2026-09-21. Confirm the pid really is a
+ *  Node process running Vite before killing it; anything else is left alone and
+ *  logged, because the honest failure (port still held) is far cheaper than
+ *  force-killing a stranger's process. */
 function killVite(): void {
   if (process.platform !== 'win32' || !process.env.HOT_STEP_DEV) return;
   try {
@@ -37,6 +65,15 @@ function killVite(): void {
       if (pid && /^\d+$/.test(pid) && pid !== '0') pids.add(pid);
     }
     for (const pid of pids) {
+      const proc = describeProcess(pid);
+      if (!proc) continue;  // already gone
+      const isVite = /^node(\.exe)?$/i.test(proc.name) && /\bvite\b/i.test(proc.cmdline);
+      if (!isVite) {
+        console.warn(
+          `[Shutdown] PID ${pid} holds port 3000 but is not Vite (${proc.name}) — leaving it alone`
+        );
+        continue;
+      }
       try {
         execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
         console.log(`[Shutdown] Killed Vite PID ${pid} (port 3000)`);
@@ -57,7 +94,25 @@ function killSelf(): void {
   if (process.platform !== 'win32') return;
   const parentPid = process.ppid;
   if (!parentPid) return;
-  console.log(`[Shutdown] Killing parent PID ${parentPid} (our process tree)`);
+  // process.ppid is a NUMBER, not a handle: if our launcher already exited,
+  // Windows is free to hand that number to something else, and `/T /F` would
+  // then force-kill a stranger and its children. Check what the pid is now
+  // before touching it. The launcher chain is cmd.exe -> npx -> tsx -> node,
+  // so anything outside that set means the pid has been recycled and the tree
+  // kill must not run; process.exit() below still ends us cleanly.
+  const parent = describeProcess(parentPid);
+  if (!parent) {
+    console.log(`[Shutdown] Parent PID ${parentPid} already gone — exiting without a tree kill`);
+    return;
+  }
+  if (!/^(cmd|node|npm|npx|powershell|pwsh)(\.exe)?$/i.test(parent.name)) {
+    console.warn(
+      `[Shutdown] Parent PID ${parentPid} is ${parent.name}, not our launcher — ` +
+      `pid was recycled, skipping the tree kill`
+    );
+    return;
+  }
+  console.log(`[Shutdown] Killing parent PID ${parentPid} (${parent.name}, our process tree)`);
   // Delay so the HTTP response has flushed. Do NOT use `cmd /c ping` as the
   // sleep: PING.EXE can hang forever (observed 2026-07-17).
   setTimeout(() => {
