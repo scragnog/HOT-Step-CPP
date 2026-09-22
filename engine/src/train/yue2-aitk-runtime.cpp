@@ -345,7 +345,11 @@ static int run_impl(Config config, std::string * error) {
                     ggml_backend_get_default_buffer_type(backend.value),
                     ggml_backend_get_default_buffer_type(holder->cpu_backend),
                 };
-                holder->osched = ggml_backend_sched_new(lm_backends, lm_bufts, 2, std::max(16384, o.est_nodes), false, true);
+                // Same headroom lm_optim_step gives its own graph cap when a modifier is
+                // on: the unfused AdamW form is ~30 nodes per parameter, and the
+                // scheduler's hash set must hold every node and leaf of that graph.
+                const int sched_nodes = o.est_nodes + (o.cautious ? (int) params.size() * 48 + (int) o.muon_buckets.size() * 8 : 0);
+                holder->osched = ggml_backend_sched_new(lm_backends, lm_bufts, 2, std::max(16384, sched_nodes), false, true);
                 if (!holder->osched) { fail(error, "optimizer scheduler allocation failed"); return 1; }
                 lm = std::move(holder);
                 std::fprintf(stderr, "[yue2-aitk] optimizer %s%s over %zu parameters (%d on Muon)\n", config.optimizer.c_str(), config.cautious ? " (cautious)" : "", params.size(), lm->opt.n_muon);
