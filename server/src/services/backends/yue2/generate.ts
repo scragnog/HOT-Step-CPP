@@ -45,7 +45,8 @@ import {
 import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
-import { yue2Synth, yue2FinalDetail, yue2PropsCached, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
+import { yue2Align, yue2Synth, yue2FinalDetail, yue2PropsCached, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
+import { yue2LyricsJson } from './align.js';
 import { classifyYue2Score, type Yue2ScoreHealth } from './scoreHealth.js';
 import { yue2PersistedSelection } from './index.js';
 import { applyYue2StyleTemplate, type Yue2StyleTemplate } from './style.js';
@@ -724,9 +725,13 @@ ${req.lyrics}`);
 
     // ── Whisper transcription ────────────────────────────────────────────
     // Backend-agnostic (whisper-cli takes a file path and resamples
-    // internally). This is YuE2's only route to word timings in v1 — its DiT
-    // has no lyric-alignment head (capabilities().features.lyricTimestamps =
-    // false), so there is no LRC path the way ACE/MM3 have one.
+    // internally). YuE2's DiT has no lyric-alignment head
+    // (capabilities().features.lyricTimestamps = false), so there is no LRC
+    // path the way ACE/MM3 have one — but this is no longer the only route to
+    // word timings: the forced aligner below is the accurate one, and it
+    // writes the same file. Whisper still earns its place on a render whose
+    // lyrics you do not have (a cover, an import) or to hear what was really
+    // sung rather than what was asked for.
     if (job.params.whisperLyricsEnabled && !sub.instrumental) {
       const wStart = performance.now();
       try {
@@ -762,6 +767,38 @@ ${req.lyrics}`);
         log('WARNING', `[Whisper] failed (non-fatal): ${wErr?.message || wErr}`);
       }
       timing.push({ name: 'Whisper', ms: Math.round(performance.now() - wStart) });
+    }
+
+    // ── Forced alignment (opt-in) ─────────────────────────────────────────
+    // YuE2's answer to "where is each word". It runs LAST, after Whisper, so
+    // that with both switched on the better source wins the `.lyrics.json`:
+    // this one is scored against the lyrics the user actually supplied and
+    // cannot invent a word, where a transcriber can and does.
+    //
+    // The spans come back as codepoint offsets into the lyrics we sent, so
+    // align.ts maps every word to its line and [Section] by lookup — no
+    // reconciliation, and no chance of a line landing under the wrong header.
+    if (job.params.yue2AlignLyrics && !sub.instrumental && req.lyrics) {
+      const alStart = performance.now();
+      const prevStage = job.stage;
+      try {
+        for (let i = 0; i < filepaths.length; i++) {
+          job.stage = `Aligning lyrics${filepaths.length > 1 ? ` ${i + 1}/${filepaths.length}` : ''}`;
+          const aligned = await yue2Align(fs.readFileSync(filepaths[i]), req.lyrics);
+          const lyricsJson = yue2LyricsJson(req.lyrics, aligned.words);
+          const lyricsPath = filepaths[i].replace(/\.[^.]+$/, '.lyrics.json');
+          fs.writeFileSync(lyricsPath, JSON.stringify(lyricsJson, null, 2));
+          const words = lyricsJson.lines.reduce((n, l) => n + l.words.length, 0);
+          log('INFO', `[Align] saved ${path.basename(lyricsPath)} `
+            + `(${lyricsJson.lines.length} lines, ${words} words, ${aligned.model})`);
+        }
+      } catch (alErr: any) {
+        // Never fatal, for the reason Whisper's own failure is not: the song
+        // is rendered and saved, and a missing karaoke bar is not a lost take.
+        log('WARNING', `[Align] forced alignment failed (non-fatal): ${alErr?.message || alErr}`);
+      }
+      job.stage = prevStage;
+      timing.push({ name: 'Align', ms: Math.round(performance.now() - alStart) });
     }
 
     // ── Persist: one song row per track ──

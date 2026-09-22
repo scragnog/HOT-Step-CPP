@@ -283,6 +283,11 @@ export const PostProcessingDropdown: React.FC = () => {
   // cross-attention, which MiniMax-Music3's DiT does not have.
   const whisperOk = !capabilities || capabilities.features.whisper !== false;
   const lrcOk = !capabilities || capabilities.features.lyricTimestamps !== false;
+  // Backends whose model cannot time its own lyrics, but that can force-align
+  // the finished render against them afterwards (YuE2, via the MMS_FA aligner
+  // it trains its lyric cursor with). Opt-in, unlike the LRC toggle above: it
+  // is a second model and a second forward over the whole track.
+  const alignOk = !!capabilities?.features.forcedAlignment;
 
   // PP-VAE availability — auto-detect from models directory
   const [ppVaeAvailable, setPpVaeAvailable] = useState(false);
@@ -369,6 +374,21 @@ export const PostProcessingDropdown: React.FC = () => {
           </div>
         </div>
         <ToggleSwitch checked={!gp.skipLrc} onChange={v => gp.setSkipLrc(!v)} accentColor="sky" />
+      </div>
+      )}
+
+      {/* Forced alignment — the same row, for a backend that gets its lyric
+          timestamps after the render instead of during it. */}
+      {alignOk && (
+      <div className="flex items-center justify-between px-1 py-1.5">
+        <div className="flex items-center gap-2">
+          <AudioWaveform size={14} className={gp.yue2AlignLyrics ? 'text-sky-400' : 'text-zinc-500'} />
+          <div className="flex flex-col">
+            <span className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">Lyric Timestamps (Forced Alignment)</span>
+            <span className="text-[10px] text-zinc-500 leading-tight">Aligns the render against your own lyrics for karaoke playback and section markers. Adds a pass per track; needs the YuE2 Lyric Aligner from the Model Manager.</span>
+          </div>
+        </div>
+        <ToggleSwitch checked={gp.yue2AlignLyrics} onChange={gp.setYue2AlignLyrics} accentColor="sky" />
       </div>
       )}
 
@@ -1238,7 +1258,7 @@ export const PostProcessingDropdown: React.FC = () => {
 // ── Badge ───────────────────────────────────────────────────────
 
 export const PostProcessingBadge: React.FC = () => {
-  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, stableStepOn, coverArtEnabled, vocalNaturalizerEnabled, gainOffsetDb, qualityEvalEnabled, postprocessEnabled, postprocessPlugin, whisperLyricsEnabled, lufsEnabled, lufsTarget } = useGlobalParams();
+  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, stableStepOn, coverArtEnabled, vocalNaturalizerEnabled, gainOffsetDb, qualityEvalEnabled, postprocessEnabled, postprocessPlugin, whisperLyricsEnabled, yue2AlignLyrics, lufsEnabled, lufsTarget } = useGlobalParams();
   const { chain } = useVstChainStore();
   const vstEnabled = chain.filter(p => p.enabled).length;
 
@@ -1255,6 +1275,7 @@ export const PostProcessingBadge: React.FC = () => {
   if (coverArtEnabled) parts.push('Cover');
   if (qualityEvalEnabled) parts.push('QE');
   if (whisperLyricsEnabled) parts.push('Whisper');
+  if (yue2AlignLyrics) parts.push('Align');
 
   if (parts.length === 0) return null;
 

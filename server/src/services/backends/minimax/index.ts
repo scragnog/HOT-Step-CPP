@@ -359,6 +359,7 @@ async function capabilities(): Promise<BackendCapabilities> {
       // the LM's own decode attention over the lyric span (engine
       // minimax/mm3-align.h). Line-level, ~1 s — the granularity ACE ships.
       lyricTimestamps: true,
+      forcedAlignment: false,
       cover: false,
       repaint: false,
       lego: false,

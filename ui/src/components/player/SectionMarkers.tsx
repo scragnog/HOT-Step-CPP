@@ -1,9 +1,14 @@
 // SectionMarkers.tsx — Thin row of song structure markers positioned above the waveform
 // Parses section markers from LRC files and displays them at their proportional position.
 // Ported from hot-step-9000.
+//
+// Backends without engine-side lyric alignment (YuE2, MM3 without an LRC) never
+// write a .lrc, but Whisper's .lyrics.json carries the same [Section] labels per
+// line — so fall back to that, exactly as LyricsBar already does.
 
-import React, { useMemo, useState, useEffect } from 'react';
-import { parseSectionMarkers } from '../../utils/lrcUtils';
+import React, { useState, useEffect } from 'react';
+import { parseSectionMarkers, type SectionMarker } from '../../utils/lrcUtils';
+import { fetchLyricsJson } from '../../utils/wordLrcUtils';
 
 interface SectionMarkersProps {
   audioUrl?: string;
@@ -11,20 +16,38 @@ interface SectionMarkersProps {
 }
 
 export const SectionMarkers: React.FC<SectionMarkersProps> = ({ audioUrl, duration }) => {
-  const [fetchedLrc, setFetchedLrc] = useState<string | null>(null);
+  const [markers, setMarkers] = useState<SectionMarker[]>([]);
 
   useEffect(() => {
-    if (!audioUrl) { setFetchedLrc(null); return; }
+    if (!audioUrl) { setMarkers([]); return; }
     let cancelled = false;
-    const lrcUrl = audioUrl.replace(/\.\w+$/, '.lrc');
-    fetch(lrcUrl)
-      .then(res => { if (!res.ok) throw new Error('No LRC'); return res.text(); })
-      .then(text => { if (!cancelled && text.includes('[')) setFetchedLrc(text); })
-      .catch(() => { if (!cancelled) setFetchedLrc(null); });
+
+    (async () => {
+      try {
+        const res = await fetch(audioUrl.replace(/\.\w+$/, '.lrc'));
+        if (res.ok) {
+          const text = await res.text();
+          if (cancelled) return;
+          if (text.includes('[')) {
+            const fromLrc = parseSectionMarkers(text);
+            if (fromLrc.length) { setMarkers(fromLrc); return; }
+          }
+        }
+      } catch { /* no LRC — try the word-level lyrics below */ }
+
+      const json = await fetchLyricsJson(audioUrl);
+      if (cancelled) return;
+      const fromJson: SectionMarker[] = [];
+      for (const line of json?.lines ?? []) {
+        if (line.section && line.section !== fromJson[fromJson.length - 1]?.label) {
+          fromJson.push({ time: line.start, label: line.section });
+        }
+      }
+      setMarkers(fromJson);
+    })();
+
     return () => { cancelled = true; };
   }, [audioUrl]);
-
-  const markers = useMemo(() => fetchedLrc ? parseSectionMarkers(fetchedLrc) : [], [fetchedLrc]);
 
   if (markers.length === 0 || !duration) return null;
 

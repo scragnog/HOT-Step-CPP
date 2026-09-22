@@ -129,6 +129,10 @@ export interface BackendFeatureCapabilities {
   whisper: boolean;
   /** LRC timestamps from the model's own generation-time attention. */
   lyricTimestamps: boolean;
+  /** The render is force-aligned against its own lyrics afterwards, for a
+   *  backend whose model cannot time them itself (YuE2). Opt-in per render —
+   *  gp.yue2AlignLyrics. */
+  forcedAlignment: boolean;
   cover: boolean;
   repaint: boolean;
   lego: boolean;

@@ -99,6 +99,7 @@ export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
     fields: [
       'coverArtEnabled', 'coverArtSubject', 'qualityEvalEnabled', 'qualityEvalTarget',
       'whisperLyricsEnabled', 'whisperModel', 'whisperLanguage', 'whisperBeamSize', 'whisperIsolateVocals',
+      'yue2AlignLyrics',
     ],
   },
 ];

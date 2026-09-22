@@ -419,8 +419,14 @@ async function capabilities(): Promise<BackendCapabilities> {
       stableStep: true,
       whisper: true,
       // YuE2's DiT (the NAR/flow stack) has no lyric cross-attention or
-      // decode-alignment head yet — no route to per-line timestamps in v1.
+      // decode-alignment head — no route to per-line timestamps DURING a
+      // render, the way ACE reads its own attention.
       lyricTimestamps: false,
+      // It gets them afterwards instead, from the MMS_FA forced aligner that
+      // upstream itself uses for lyric-cursor prep (POST /yue2/align). Needs
+      // mms-fa-f32.gguf from the Model Manager; the engine says so by name
+      // when it is missing.
+      forcedAlignment: true,
       cover: false,
       repaint: false,
       lego: false,

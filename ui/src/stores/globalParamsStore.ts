@@ -327,6 +327,11 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   whisperBeamSize: readKey("hs-whisperBeam", 5),
   whisperIsolateVocals: readKey("hs-whisperIsolate", false),
 
+  // YuE2 forced alignment (capabilities.features.forcedAlignment). Off by
+  // default: it is a second model (1.26 GB) and a second forward over the
+  // whole track, which nobody should pay for without asking.
+  yue2AlignLyrics: readKey("hs-yue2AlignLyrics", false),
+
   // Postprocess plugin (replaces built-in VAE tiled decoder)
   postprocessEnabled: readKey('hs-postprocessEnabled', false),
   postprocessPlugin: readKey('hs-postprocessPlugin', ''),
@@ -515,6 +520,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setWhisperLanguage: (v: any) => { set({ whisperLanguage: v }); writeKey("hs-whisperLang", v); },
   setWhisperBeamSize: (v: any) => { set({ whisperBeamSize: v }); writeKey("hs-whisperBeam", v); },
   setWhisperIsolateVocals: (v: any) => { set({ whisperIsolateVocals: v }); writeKey("hs-whisperIsolate", v); },
+  setYue2AlignLyrics: (v: any) => { set({ yue2AlignLyrics: v }); writeKey("hs-yue2AlignLyrics", v); },
   setPostprocessEnabled: (v: any) => { set({ postprocessEnabled: v }); writeKey("hs-postprocessEnabled", v); },
   setPostprocessPlugin: (v: any) => { set({ postprocessPlugin: v }); writeKey("hs-postprocessPlugin", v); },
   setUseOrtVae: (v: any) => { set({ useOrtVae: v }); writeKey('hs-useOrtVae', v); },
@@ -815,6 +821,10 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       whisperLanguage: s.whisperLyricsEnabled ? s.whisperLanguage : undefined,
       whisperBeamSize: s.whisperLyricsEnabled ? s.whisperBeamSize : undefined,
       whisperIsolateVocals: s.whisperLyricsEnabled ? s.whisperIsolateVocals : undefined,
+      // Sent unconditionally: the backend that ignores it does not read it,
+      // and gating it on the active backend here would drop it on a render
+      // queued while the manifest is still loading.
+      yue2AlignLyrics: s.yue2AlignLyrics || undefined,
     };
   },
 }));

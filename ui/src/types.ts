@@ -355,6 +355,7 @@ export interface GenerationParams {
 
   // Whisper Lyrics Transcription
   whisperLyricsEnabled?: boolean;
+  yue2AlignLyrics?: boolean;
   whisperModel?: string;
   whisperLanguage?: string;
   whisperBeamSize?: number;

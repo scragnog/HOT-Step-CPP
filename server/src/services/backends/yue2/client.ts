@@ -38,6 +38,7 @@
 // matching minimax/client.ts's own workaround.
 
 import { config } from '../../../config.js';
+import type { Yue2AlignWord } from './align.js';
 
 const base = () => config.aceServer.url;
 
@@ -503,4 +504,47 @@ export async function yue2FinalDetail(jobId: string): Promise<Yue2FinalDetail> {
   } catch {
     return {};
   }
+}
+
+// ── Forced alignment ──
+
+/** POST /yue2/align's result: one span per sung word, `char0`/`char1` being a
+ *  half-open CODEPOINT span in the lyrics that were sent. `align.ts` turns
+ *  these into the `.lyrics.json` the player reads. */
+export interface Yue2AlignResult {
+  audio_s: number;
+  frames: number;
+  model: string;
+  words: Yue2AlignWord[];
+}
+
+/**
+ * POST /yue2/align — force-align a finished render against its own lyrics.
+ *
+ * multipart/form-data, because the two parts are one binary and one long
+ * string and neither belongs in a query: raw-body-plus-query (the /supersep
+ * shape) cannot carry a lyric sheet, and base64 in JSON would inflate a
+ * four-minute WAV by a third for nothing.
+ *
+ * `lyrics` MUST be the exact string the render was given — the returned
+ * offsets index into it.
+ *
+ * The timeout is generous on purpose: this is one wav2vec2-large forward over
+ * the WHOLE track (the model layer-normalises across its entire input, so it
+ * cannot be chunked) plus a CTC Viterbi, and on CPU that is ~100 s per four
+ * minutes. It runs once, at the end of a render that already took longer.
+ */
+export async function yue2Align(
+  audio: Buffer, lyrics: string, timeoutMs = 900_000,
+): Promise<Yue2AlignResult> {
+  const form = new FormData();
+  form.append('audio', new Blob([new Uint8Array(audio)], { type: 'audio/wav' }), 'render.wav');
+  form.append('lyrics', lyrics);
+  const res = await fetch(`${base()}/yue2/align`, {
+    method: 'POST',
+    body: form,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(await yue2ErrorMessage(res, 'POST /yue2/align'));
+  return await res.json() as Yue2AlignResult;
 }

@@ -67,6 +67,8 @@ async function capabilities(): Promise<BackendCapabilities> {
       stableStep: true,
       whisper: true,
       lyricTimestamps: true,
+      // The DiT already reports where every word is — nothing to align after.
+      forcedAlignment: false,
       cover: true,
       repaint: true,
       lego: true,

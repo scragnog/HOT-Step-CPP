@@ -26,6 +26,9 @@
 //   POST /yue2/tokenize-check   <- yue2_handle_tokenize_check (bring-up, cheap)
 //   POST /yue2/synth            <- yue2_handle_synth          (production; returns the
 //                                   shared engine job id — poll/fetch via GET/POST /job)
+//   POST /yue2/align          <- yue2_handle_align        (forced alignment of a finished
+//                                   render against its own lyrics: the per-word spans the
+//                                   karaoke bar and the section markers are built from)
 //   POST /yue2/imatrix          <- yue2_handle_imatrix        (arm/disarm/save activation-
 //                                   importance collection for quantize --imatrix; mirrors
 //                                   minimax/mm3-server.h's POST /mm3/imatrix — see
@@ -39,8 +42,12 @@
 // equivalents were not built this pass since nothing in the M10 gate
 // (POST /yue2/synth end-to-end) needs them.
 
+#include "audio-io.h"        // audio_read_buf — WAV/MP3 from a buffer, planar stereo
+#include "audio-resample.h"  // audio_resample — the engine's Kaiser polyphase
+#include "yue2-ctc-align.h"  // yue2_cursor_align — the CPU half of the aligner, no model
 #include "yue2-imatrix.h"
 #include "yue2-job.h"
+#include "yue2-mmsfa.h"      // the MMS_FA acoustic model behind POST /yue2/align
 #include "yue2-model.h"
 #include "yue2-request.h"
 #include "yue2-tokenizer.h"
@@ -48,8 +55,11 @@
 #include "httplib.h"
 #include "yyjson.h"
 
+#include <algorithm>
+#include <chrono>
 #include <mutex>
 #include <string>
+#include <vector>
 
 static void yue2_json_error(httplib::Response & res, int code, const std::string & msg) {
     res.status = code;
@@ -727,6 +737,189 @@ static void yue2_handle_imatrix(const httplib::Request & req, httplib::Response 
     }
 }
 
+// ── POST /yue2/align — forced alignment of the rendered audio to its lyrics ──
+//
+// The inference-side half of `ace-train yue2-align` (train/yue2-align-run.h):
+// the SAME MMS_FA port and the SAME CTC Viterbi, handed a finished render and
+// the lyrics it was sung from instead of a dataset manifest. Read that file's
+// header for what the two stages are and what they were gated against; the
+// only things that differ here are where the audio comes from (an HTTP part,
+// not a Demucs stem on disk) and where the spans go (JSON, not the .f32 the AR
+// trainer reads).
+//
+// It exists because YuE2's DiT has no lyric-alignment head, so there is no
+// attention to read the way ACE reads its own — this is what YuE2 has instead,
+// and it is the aligner upstream itself uses for cursor prep. The spans are
+// scored against the lyrics the user actually supplied, so a word is never
+// invented the way a transcriber can invent one.
+//
+// WHOLE TRACK, ONE FORWARD — the trainer's rule, for the trainer's reason:
+// MMS_FA layer-normalises the waveform once over its entire input, so a track
+// aligned in pieces is a different model input in every piece.
+//
+// The model is loaded per request and freed again. It is 1.26 GB of F32 that
+// nothing else in a render wants resident, and alignment happens once per
+// track at the very end, after the LM and the VAE are done with the card.
+// ponytail: load/free per request; make it resident if batch alignment ever
+// becomes a thing.
+static std::mutex g_yue2_align_mutex;
+
+// `mms-fa-f32.gguf` in the YuE2 search dirs, else any `mms-fa-*.gguf` — the
+// same preference in the same order as the Node side's
+// resolveYue2AlignerModel(): F32 by name because the port's stage gates were
+// measured in fp32, and the glob so an F16 build can be dropped in later
+// without a code change.
+static std::string yue2_find_mmsfa(const Yue2Model & m) {
+    for (const auto & dir : m.search_dirs) {
+        const std::string preferred = dir + YUE2_SEP "mms-fa-f32.gguf";
+        if (yue2_file_exists(preferred)) {
+            return preferred;
+        }
+        std::vector<std::string> names;
+        yue2_list_dir(dir, &names);
+        std::sort(names.begin(), names.end());
+        for (const auto & n : names) {
+            if (n.size() > 12 && n.compare(0, 7, "mms-fa-") == 0 && n.compare(n.size() - 5, 5, ".gguf") == 0) {
+                return dir + YUE2_SEP + n;
+            }
+        }
+    }
+    return "";
+}
+
+// multipart/form-data: file part `audio` (WAV or MP3, any rate), text part
+// `lyrics` (the EXACT string the render was given — the char offsets below
+// index into it, so a re-wrapped or re-cased copy misplaces every word).
+static void yue2_handle_align(const httplib::Request & req, httplib::Response & res) {
+    if (!req.form.has_file("audio")) {
+        yue2_json_error(res, 400, "POST multipart/form-data with an `audio` file part and a `lyrics` text part");
+        return;
+    }
+    const std::string & audio  = req.form.get_file("audio").content;
+    const std::string   lyrics = req.form.get_field("lyrics");
+    if (audio.empty()) {
+        yue2_json_error(res, 400, "the `audio` part is empty");
+        return;
+    }
+    if (lyrics.find_first_not_of(" \t\r\n") == std::string::npos) {
+        yue2_json_error(res, 400, "the `lyrics` part is empty — there is nothing to align to");
+        return;
+    }
+
+    std::string model_path;
+    {
+        std::lock_guard<std::mutex> lock(g_yue2_mutex);
+        model_path = yue2_find_mmsfa(g_yue2);
+    }
+    if (model_path.empty()) {
+        yue2_json_error(res, 404,
+                        "the MMS_FA aligner is not installed — install \"YuE2 Lyric Aligner\" (mms-fa-f32.gguf) "
+                        "from the Model Manager");
+        return;
+    }
+
+    // One at a time: the forward wants ~5 GB of compute buffer, and the
+    // Viterbi lattice is T x (2N+1) doubles on top of it.
+    std::lock_guard<std::mutex> lock(g_yue2_align_mutex);
+
+    // Decode to mono at the model's 16 kHz, exactly as read_stem_16k does.
+    int     n_in = 0, sr_in = 0;
+    float * planar = audio_read_buf((const uint8_t *) audio.data(), audio.size(), &n_in, &sr_in);
+    if (!planar || n_in <= 0 || sr_in <= 0) {
+        free(planar);
+        yue2_json_error(res, 400, "cannot decode the `audio` part (WAV and MP3 are the formats this reader knows)");
+        return;
+    }
+    std::vector<float> mono((size_t) n_in);
+    for (int i = 0; i < n_in; i++) {
+        mono[(size_t) i] = 0.5f * (planar[i] + planar[n_in + i]);
+    }
+    free(planar);
+
+    std::vector<float> pcm;
+    if (sr_in == 16000) {
+        pcm = std::move(mono);
+    } else {
+        int     n16 = 0;
+        float * r   = audio_resample(mono.data(), n_in, sr_in, 16000, 1, &n16);
+        if (!r || n16 <= 0) {
+            free(r);
+            yue2_json_error(res, 500, "resample to 16 kHz failed");
+            return;
+        }
+        pcm.assign(r, r + n16);
+        free(r);
+    }
+    const double audio_s = (double) pcm.size() / 16000.0;
+
+    // static for the reason train/yue2-align-run.h gives: the backend handles
+    // and the weight context do not belong on a request thread's stack.
+    // Serialised by g_yue2_align_mutex above.
+    static Yue2MmsfaModel m;
+    std::string           err;
+    const auto            t0 = std::chrono::steady_clock::now();
+    if (!yue2_mmsfa_load(&m, model_path, &err)) {
+        yue2_json_error(res, 500, err.empty() ? "cannot load the MMS_FA aligner" : err);
+        return;
+    }
+    const int C = (int) m.cfg.n_labels;
+    if (C <= 1 || m.cfg.labels.size() != (size_t) C) {
+        yue2_mmsfa_free(&m);
+        yue2_json_error(res, 500, "the aligner GGUF does not declare its CTC labels");
+        return;
+    }
+
+    Yue2MmsfaGraph     g;
+    std::vector<float> em;
+    bool ok = yue2_mmsfa_emissions(m, &g, pcm.data(), (int64_t) pcm.size(), &em, Yue2MmsfaOptions{}, nullptr, &err);
+    const auto         t1     = std::chrono::steady_clock::now();
+    const int64_t      frames = ok ? (int64_t) em.size() / C : 0;
+    std::vector<float> rows5;
+    if (ok) {
+        ok = yue2_cursor_align(em.data(), frames, C, audio_s, m.cfg.labels, lyrics, &rows5, &err);
+    }
+    const auto t2 = std::chrono::steady_clock::now();
+    yue2_mmsfa_graph_free(&g);
+    yue2_mmsfa_free(&m);
+    if (!ok) {
+        yue2_json_error(res, 500, err.empty() ? "alignment failed" : err);
+        return;
+    }
+
+    const size_t n_words = rows5.size() / 5;
+    fprintf(stderr, "[YUE2-ALIGN] %.1f s of audio, %lld frames, %zu words | model %.0f ms, viterbi %.0f ms\n", audio_s,
+            (long long) frames, n_words, std::chrono::duration<double, std::milli>(t1 - t0).count(),
+            std::chrono::duration<double, std::milli>(t2 - t1).count());
+
+    yyjson_mut_doc * doc  = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val * root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_mut_obj_add_real(doc, root, "audio_s", audio_s);
+    yyjson_mut_obj_add_int(doc, root, "frames", (int64_t) frames);
+    yyjson_mut_obj_add_strcpy(doc, root, "model", yue2_basename(model_path).c_str());
+    yyjson_mut_val * words = yyjson_mut_arr(doc);
+    yyjson_mut_obj_add_val(doc, root, "words", words);
+    for (size_t i = 0; i < n_words; i++) {
+        const float *    r = rows5.data() + i * 5;
+        yyjson_mut_val * w = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_real(doc, w, "start", r[0]);
+        yyjson_mut_obj_add_real(doc, w, "end", r[1]);
+        yyjson_mut_obj_add_real(doc, w, "score", r[2]);
+        // CODEPOINT offsets into the `lyrics` part, not bytes — see
+        // yue2_cursor_words_of. They are what makes a word's line and its
+        // [Section] recoverable without matching any text.
+        yyjson_mut_obj_add_int(doc, w, "char0", (int64_t) r[3]);
+        yyjson_mut_obj_add_int(doc, w, "char1", (int64_t) r[4]);
+        yyjson_mut_arr_add_val(words, w);
+    }
+    char * json = yyjson_mut_write(doc, 0, NULL);
+    yyjson_mut_doc_free(doc);
+    res.set_content(json ? json : "{}", "application/json");
+    if (json) {
+        free(json);
+    }
+}
+
 // POST /yue2/synth — the production endpoint. Parses the request, creates a
 // job on the SHARED job system, and hands the render to the one GPU worker
 // thread; returns immediately with the job id (same shape ACE/MM3 already
@@ -755,6 +948,7 @@ static void yue2_register_routes(httplib::Server & svr, const char * models_dir)
     svr.Post("/yue2/tokenize-check", yue2_handle_tokenize_check);
     svr.Post("/yue2/synth", yue2_handle_synth);
     svr.Post("/yue2/imatrix", yue2_handle_imatrix);
+    svr.Post("/yue2/align", yue2_handle_align);
     fprintf(stderr, "[Server] YuE2 routes registered (models_dir=%s, available=%s)\n", models_dir,
             yue2_available(g_yue2) ? "yes" : "no");
 }

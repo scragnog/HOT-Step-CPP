@@ -4317,7 +4317,7 @@
       "displayName": "YuE2 Lyric Aligner (MMS_FA, F32)",
       "sizeBytes": 1261892736,
       "repo": "scragnog/YuE2-GGUF",
-      "description": "Meta's MMS forced aligner, converted to GGUF (CC BY-NC-4.0 upstream). Training-only: ace-train yue2-align uses it to write per-word lyric spans into the preprocess manifest, which is what the AR trainer's --cursor-weight supervises. F32 because the port's stage gates were measured in fp32. Not used at generation.",
+      "description": "Meta's MMS forced aligner, converted to GGUF (CC BY-NC-4.0 upstream). Two jobs, same model: ace-train yue2-align writes per-word lyric spans into the preprocess manifest for the AR trainer's --cursor-weight, and POST /yue2/align times a finished YuE2 render against its own lyrics so the player can show the current line and the section markers (Post-Processing > Lyric Timestamps). Optional for both - YuE2 generates without it. F32 because the port's stage gates were measured in fp32.",
       "tags": []
     },
     {

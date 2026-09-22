@@ -112,6 +112,13 @@ export interface BackendFeatureCapabilities {
    *  DiT has no cross-attention and never sees lyrics, so this is false there
    *  until the LM-attention route (MM3_ALIGN_DUMP findings) is wired up. */
   lyricTimestamps: boolean;
+  /** Lyric timestamps recovered AFTER the render by force-aligning the audio
+   *  against the lyrics it was given, for backends whose model cannot supply
+   *  them itself. YuE2 has this: the MMS_FA aligner it trains its own lyric
+   *  cursor with, exposed as POST /yue2/align. Opt-in per render (it is a
+   *  second model and a second forward), which is why it is a toggle in the
+   *  post-processing dropdown and not simply always on. */
+  forcedAlignment: boolean;
   cover: boolean;
   repaint: boolean;
   lego: boolean;

@@ -197,6 +197,8 @@ export interface GlobalParams {
   whisperLanguage: string; setWhisperLanguage: (v: string) => void;
   whisperBeamSize: number; setWhisperBeamSize: (v: number) => void;
   whisperIsolateVocals: boolean; setWhisperIsolateVocals: (v: boolean) => void;
+  // YuE2 forced alignment
+  yue2AlignLyrics: boolean; setYue2AlignLyrics: (v: boolean) => void;
   // Derived
   getGlobalParams: (overrides?: Record<string, any>) => Partial<GenerationParams>;
 }

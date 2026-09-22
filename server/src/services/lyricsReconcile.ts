@@ -30,7 +30,7 @@ export interface LyricsLine {
 
 export interface LyricsJson {
   version: 1;
-  method: 'whisper';
+  method: 'whisper' | 'mms-fa';
   whisperModel: string;
   vocalsIsolated: boolean;
   lines: LyricsLine[];
