@@ -90,6 +90,11 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
     if(rec_adapter!=config.adapter_type || (config.adapter_type=="lokr" && (rec_lokr_dim!=config.lokr_dim || rec_lokr_factor!=config.lokr_factor))) {
         return fail(error,"resume adapter type or LoKr shape mismatch; start a new run");
     }
+    // Same rule as the optimizer name: a modifier changes the update rule, so
+    // a run resumed under a different one is a different experiment.
+    bool rec_cautious=false;
+    if(yyjson_val * v=yyjson_obj_get(root,"cautious")) { if(!yyjson_is_bool(v)) return fail(error,"resume cautious field is malformed"); rec_cautious=yyjson_get_bool(v); }
+    if(rec_cautious!=config.cautious) return fail(error,"resume optimizer modifier (cautious) mismatch; start a new run");
     // Schedule knobs that only reshape the run from here on: note, don't refuse.
     { yyjson_val * v=yyjson_obj_get(root,"lr"); if(v&&yyjson_is_num(v)&&double(yyjson_get_num(v))!=double(config.lr)) std::fprintf(stderr,"[yue2-aitk] resume note: lr changed from %.9g to %.9g; the run continues with the new value\n", double(yyjson_get_num(v)), (double)config.lr); }
     { yyjson_val * v=yyjson_obj_get(root,"warmup"); if(v&&yyjson_is_int(v)&&int(yyjson_get_sint(v))!=config.warmup) std::fprintf(stderr,"[yue2-aitk] resume note: warmup changed from %d to %d; the run continues with the new value\n", int(yyjson_get_sint(v)), config.warmup); }
@@ -124,6 +129,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     // Only LoKr records carry these keys, so a LoRA record is byte-identical
     // to one written before LoKr existed (the reader defaults to lora).
     if (config.adapter_type=="lokr") { yyjson_mut_obj_add_strcpy(doc,root,"adapter_type","lokr"); yyjson_mut_obj_add_int(doc,root,"lokr_dim",config.lokr_dim); yyjson_mut_obj_add_int(doc,root,"lokr_factor",config.lokr_factor); }
+    if (config.cautious) yyjson_mut_obj_add_bool(doc,root,"cautious",true);
     yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"caption_dropout",config.caption_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale); yyjson_mut_obj_add_real(doc,root,"target_kl",config.target_kl);
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
@@ -147,7 +153,7 @@ static int run_impl(Config config, std::string * error) {
     if (config.seed > UINT32_MAX) { fail(error, "native-v1 runtime seed must fit uint32_t"); return 1; }
     if (config.steps <= 0 || config.save_every <= 0 || config.cuda_index < 0 || config.cuda_index > 127) { fail(error, "invalid runtime configuration"); return 1; }
     if (config.rank < 1 || config.rank > 65536 || !std::isfinite(config.alpha) || config.alpha <= 0.0f || config.alpha > 1e6f ||
-        (config.optimizer != "adamw" && config.optimizer != "prodigy" && config.optimizer != "muon") ||
+        (config.optimizer != "adamw" && config.optimizer != "adamw-lm" && config.optimizer != "prodigy" && config.optimizer != "muon") ||
         !std::isfinite(config.lr) || config.lr <= 0.0f ||
         config.warmup < 0 || config.warmup > config.steps ||
         !std::isfinite(config.weight_decay) || config.weight_decay < 0.0f ||
@@ -168,6 +174,9 @@ static int run_impl(Config config, std::string * error) {
         // (lm-optim.h), so lr_mul would apply to the AdamW-ruled parameters
         // only — a HALF-honoured split is worse than a refused one.
         fail(error, "--planner-lr-scale is not supported with --optimizer muon"); return 1;
+    }
+    if (config.cautious && config.optimizer == "adamw") {
+        fail(error, "--cautious needs an LmOptim optimizer: --optimizer adamw-lm, prodigy or muon (the native AdamW8bit kernel has no update tensor to mask)"); return 1;
     }
     const bool lokr = config.adapter_type == "lokr";
     if (!lokr && config.adapter_type != "lora") { fail(error, "invalid runtime configuration"); return 1; }
@@ -278,7 +287,8 @@ static int run_impl(Config config, std::string * error) {
             if (use_lm) {
                 auto holder = std::make_unique<LmOptimHolder>();
                 LmOptim & o = holder->opt;
-                o.optimizer = config.optimizer;
+                o.optimizer = config.optimizer == "adamw-lm" ? "adamw" : config.optimizer;
+                o.cautious  = config.cautious;
                 // LmOptim's built-in schedule is neutralised: {floor 1, total 1,
                 // warmup 0} makes lm_lr_lambda identically 1.0, and base_lr is
                 // set per step below, exactly as the Legacy YuE2 trainers do.
@@ -338,7 +348,7 @@ static int run_impl(Config config, std::string * error) {
                 holder->osched = ggml_backend_sched_new(lm_backends, lm_bufts, 2, std::max(16384, o.est_nodes), false, true);
                 if (!holder->osched) { fail(error, "optimizer scheduler allocation failed"); return 1; }
                 lm = std::move(holder);
-                std::fprintf(stderr, "[yue2-aitk] optimizer %s over %zu parameters (%d on Muon)\n", config.optimizer.c_str(), params.size(), lm->opt.n_muon);
+                std::fprintf(stderr, "[yue2-aitk] optimizer %s%s over %zu parameters (%d on Muon)\n", config.optimizer.c_str(), config.cautious ? " (cautious)" : "", params.size(), lm->opt.n_muon);
             } else {
                 std::vector<yue2_aitk::ParameterSpec> specs;
                 specs.reserve(named.size());

@@ -57,6 +57,11 @@ public:
         if (cursor) {
             auto * parameter=ggml_new_tensor_2d(ctx_,GGML_TYPE_F32,2048,2048);
             auto * gradient=ggml_new_tensor_2d(ctx_,GGML_TYPE_F32,2048,2048);
+            // Trainable like the adapter factors: ggml_opt_step_adamw (the
+            // adamw-lm path) asserts the flag. The cursor loss graph forms its
+            // own gradient explicitly and never builds a backward, so the flag
+            // changes nothing there.
+            ggml_set_param(parameter);
             cursor_slot_=slots_.size();
             slots_.push_back({"cursor_head.weight",parameter,gradient,2048,2048,-1,std::vector<float>(2048*2048,0)});
         }

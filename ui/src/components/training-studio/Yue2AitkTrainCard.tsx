@@ -492,6 +492,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     prodigyD0: form.prodigyD0 ?? 1e-6,
     muonLrScale: form.muonLrScale ?? 1,
     muonNsSteps: form.muonNsSteps ?? 5,
+    cautious: form.cautious === true,
   };
   const savePreset = () => {
     const name = presetName.trim();
@@ -779,7 +780,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
-          : <Yue2OptimizerFields value={optimValue} onChange={patch => setForm(previous => ({ ...previous, ...patch }))} />}
+          : <Yue2OptimizerFields joint value={optimValue} onChange={patch => setForm(previous => ({ ...previous, ...patch }))} />}
       </div>
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         <div className="flex flex-col gap-1">

@@ -3453,10 +3453,15 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     }
     const optimizerRaw = b.optimizer;
     const optimizer = optimizerRaw === undefined ? 'adamw'
-      : optimizerRaw === 'adamw' || optimizerRaw === 'prodigy' || optimizerRaw === 'muon' ? optimizerRaw as 'adamw' | 'prodigy' | 'muon'
+      : optimizerRaw === 'adamw' || optimizerRaw === 'adamw-lm' || optimizerRaw === 'prodigy' || optimizerRaw === 'muon' ? optimizerRaw as 'adamw' | 'adamw-lm' | 'prodigy' | 'muon'
       : null;
     if (optimizerRaw !== undefined && optimizer === null) {
-      res.status(400).json({ error: 'optimizer must be adamw, prodigy or muon.' });
+      res.status(400).json({ error: 'optimizer must be adamw, adamw-lm, prodigy or muon.' });
+      return;
+    }
+    const cautious = b.cautious === true;
+    if (cautious && optimizer === 'adamw') {
+      res.status(400).json({ error: 'cautious needs optimizer adamw-lm, prodigy or muon.' });
       return;
     }
     const rank = integer('rank', 64);
@@ -3565,7 +3570,8 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       alignment,
       rank, alpha: alphaRaw,
       ...(adapterType === 'lokr' ? { adapterType, ...(lokrDim !== undefined ? { lokrDim } : {}), ...(lokrFactor !== undefined ? { lokrFactor } : {}) } : {}),
-      ...(optimizer === 'prodigy' || optimizer === 'muon' ? { optimizer } : {}),
+      ...(optimizer !== 'adamw' ? { optimizer } : {}),
+      ...(cautious ? { cautious } : {}),
       ...(prodigyD0 !== undefined ? { prodigyD0 } : {}),
       ...(muonLrScale !== undefined ? { muonLrScale } : {}),
       ...(muonNsSteps !== undefined ? { muonNsSteps } : {}),
@@ -3576,7 +3582,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(preparation ? { preparation } : {}),
     });
     res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment,
-      optimizer, rank, alpha: alphaRaw, adapterType, ...(adapterType === 'lokr' ? { lokrDim, lokrFactor } : {}), stopMode, ...advanced,
+      optimizer, cautious, rank, alpha: alphaRaw, adapterType, ...(adapterType === 'lokr' ? { lokrDim, lokrFactor } : {}), stopMode, ...advanced,
       ...(targetLoss !== undefined ? { targetLoss } : {}), ...(targetKl !== undefined ? { targetKl } : {}) });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });

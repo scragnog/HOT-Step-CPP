@@ -812,12 +812,23 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
         const float g_k = o->base_lr * lm_lr_lambda(o->opt_step, o->total_steps, o->warmup_steps, o->lr_floor);
         return lm_optim_step_prodigy(o, sched, g_k, out);
     }
+    // The modifiers can be switched on after init, and the unfused AdamW form
+    // is ~30 nodes per parameter against the fused op's 1, so the cap and the
+    // arena are re-derived here rather than trusted from init.
+    size_t cap = (size_t) (o->est_nodes > 0 ? o->est_nodes : 8192);
+    if (o->cautious || o->adamw_unfused) {
+        cap += o->acc.size() * 40 + o->muon_buckets.size() * 8;
+        const size_t bytes = ggml_graph_overhead_custom(cap, false) + cap * (ggml_tensor_overhead() + 64) + (4u << 20);
+        if (o->arena.size() < bytes) {
+            o->arena.resize(bytes);
+        }
+    }
     ggml_init_params ip  = { o->arena.size(), o->arena.data(), true };
     ggml_context *   ctx = ggml_init(ip);
     if (!ctx) {
         return false;
     }
-    ggml_cgraph * go = ggml_new_graph_custom(ctx, (size_t) (o->est_nodes > 0 ? o->est_nodes : 8192), /*grads=*/false);
+    ggml_cgraph * go = ggml_new_graph_custom(ctx, cap, /*grads=*/false);
 
     // Assign each DISTINCT non-1 multiplier an alt tensor, before any node is
     // built, so the choice below is stable and the fill after the graph agrees.

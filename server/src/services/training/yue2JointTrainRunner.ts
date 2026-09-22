@@ -28,8 +28,12 @@ export interface ResolvedYue2JointTrainOptions {
   alignment?: import('./types.js').Yue2AlignmentOptions;
   pauseAt?: number;
   preparation?: import('./yue2AitkPrepareRunner.js').ResolvedYue2AitkPrepareOptions;
-  /** Optimizer: native CUDA AdamW8bit (default) or the shared LmOptim path. */
-  optimizer?: 'adamw' | 'prodigy' | 'muon';
+  /** Optimizer: native CUDA AdamW8bit (default) or the shared LmOptim path
+   *  ('adamw-lm' is AdamW on that path: fp32 moments, warmup+cosine). */
+  optimizer?: 'adamw' | 'adamw-lm' | 'prodigy' | 'muon';
+  /** Cautious update mask (LmOptim optimizers only; the engine refuses it
+   *  under the native adamw). */
+  cautious?: boolean;
   prodigyD0?: number;
   muonLrScale?: number;
   muonNsSteps?: number;
@@ -83,6 +87,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   const optimizer = o.optimizer ?? 'adamw';
   if (optimizer !== 'adamw') {
     args.push('--optimizer', optimizer);
+    if (o.cautious) args.push('--cautious');
     if (optimizer === 'prodigy' && o.prodigyD0 !== undefined) args.push('--prodigy-d0', String(o.prodigyD0));
     if (optimizer === 'muon') {
       if (o.muonLrScale !== undefined) args.push('--muon-lr-scale', String(o.muonLrScale));
@@ -138,7 +143,8 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (o.seed > 0xffffffff) return 'seed must fit uint32';
   if (o.steps > 0x7fffffff) return 'steps must fit int32';
   if (!/^CUDA[0-9]+$/i.test(o.device)) return 'device must be an explicit CUDA device such as CUDA0';
-  if (o.optimizer && o.optimizer !== 'adamw' && o.optimizer !== 'prodigy' && o.optimizer !== 'muon') return 'optimizer must be adamw, prodigy or muon';
+  if (o.optimizer && o.optimizer !== 'adamw' && o.optimizer !== 'adamw-lm' && o.optimizer !== 'prodigy' && o.optimizer !== 'muon') return 'optimizer must be adamw, adamw-lm, prodigy or muon';
+  if (o.cautious && (o.optimizer ?? 'adamw') === 'adamw') return 'cautious needs optimizer adamw-lm, prodigy or muon';
   if (o.rank !== undefined && (!Number.isInteger(o.rank) || o.rank < 1 || o.rank > 65536)) return 'rank must be an integer between 1 and 65536';
   if (o.alpha !== undefined && (!Number.isFinite(o.alpha) || o.alpha <= 0)) return 'alpha must be a positive finite number';
   if (o.adapterType !== undefined && o.adapterType !== 'lora' && o.adapterType !== 'lokr') return 'adapterType must be lora or lokr';

@@ -43,7 +43,12 @@ struct Config {
     // adamw keeps the native CUDA AdamW8bit optimizer; prodigy and muon run
     // through the shared ggml-graph LmOptim (same optimizer the Legacy
     // trainers use) with the trainer's external clip as the only clipper.
+    // adamw-lm is AdamW on that LmOptim path (fp32 moments, the LmOptim
+    // warmup+cosine schedule): a different implementation, not a refactor,
+    // and the one the update modifiers below can act on.
     std::string optimizer = "adamw";
+    // Cautious update mask (lm-optim.h): needs an LmOptim optimizer.
+    bool cautious = false;
     float lr = 1e-4f;
     std::int32_t warmup = 0;
     float weight_decay = 1e-4f;
@@ -86,7 +91,7 @@ inline void usage(FILE * out) {
         "--steps N --save-every N --seed N --device CUDA0 [--resume <record>] [--pause-at N] "
         "[--cursor-weight 0.08 (0 disables lyric timing)] [--rank N] [--alpha F] "
         "[--adapter-type lora|lokr] [--lokr-dim 32] [--lokr-factor 8] "
-        "[--optimizer adamw|prodigy|muon] [--lr F] [--warmup N] [--weight-decay F] "
+        "[--optimizer adamw|adamw-lm|prodigy|muon] [--cautious] [--lr F] [--warmup N] [--weight-decay F] "
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
         "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] "
         "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (not muon)]\n");
@@ -212,10 +217,12 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
                 !detail::decimal_i32(value_text.c_str(), &parsed.lokr_factor)) { if (error) *error = "--lokr-factor must be a nonnegative integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--optimizer")) {
             if (!detail::value(arg, argc, argv, &i, &parsed.optimizer, error)) return ParseResult::error;
-            if (parsed.optimizer != "adamw" && parsed.optimizer != "prodigy" && parsed.optimizer != "muon") {
-                if (error) *error = "--optimizer must be adamw, prodigy or muon";
+            if (parsed.optimizer != "adamw" && parsed.optimizer != "adamw-lm" && parsed.optimizer != "prodigy" && parsed.optimizer != "muon") {
+                if (error) *error = "--optimizer must be adamw, adamw-lm, prodigy or muon";
                 return ParseResult::error;
             }
+        } else if (!std::strcmp(arg, "--cautious")) {
+            parsed.cautious = true;
         } else if (!std::strcmp(arg, "--lr")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.lr)) { if (error) *error = "--lr must be a finite number"; return ParseResult::error; }

@@ -487,10 +487,13 @@ export interface Yue2VramModel {
 
 /** The measured recipe, shipped rather than duplicated client-side. */
 export interface Yue2OptimOptions {
-  optimizer: 'adamw' | 'prodigy' | 'muon';
+  /** 'adamw-lm' and `cautious` are joint-trainer only (Yue2OptimizerFields
+   *  shows them under `joint`); the legacy trainers reject both. */
+  optimizer: 'adamw' | 'adamw-lm' | 'prodigy' | 'muon';
   prodigyD0: number;
   muonLrScale: number;
   muonNsSteps: number;
+  cautious?: boolean;
 }
 
 export interface Yue2Defaults extends Yue2OptimOptions {
