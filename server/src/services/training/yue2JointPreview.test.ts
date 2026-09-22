@@ -16,7 +16,7 @@ test('preview options default off and clamp bounded values', () => {
   assert.equal(d.everySteps, 50);
   const p = parseYue2JointPreviewOptions({ enabled: true, everySteps: 10, seconds: 999,
     previewMaxFrames: 9000, seed: 3, caption: '  song  ' }, 50);
-  assert.deepEqual({ enabled: true, everySteps: 10, seconds: 40,
+  assert.deepEqual({ enabled: true, everySteps: 10, seconds: 90,
     previewMaxFrames: 9000, seed: 3, baseline: false, control: false,
     caption: 'song' }, p);
 });

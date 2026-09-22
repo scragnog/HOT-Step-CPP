@@ -12,8 +12,8 @@ import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, type Yue2Selection } 
 import { classifyYue2Score } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
-  enabled: false, everySteps: 0, seconds: 40, seed: 424242,
-  previewMaxFrames: 1000, baseline: false, control: false,
+  enabled: false, everySteps: 0, seconds: 90, seed: 424242,
+  previewMaxFrames: 2250, baseline: false, control: false,
 };
 
 export interface Yue2JointPreviewRecord {
@@ -59,9 +59,9 @@ export function parseYue2JointPreviewOptions(raw: unknown, everySteps: number): 
   return {
     enabled,
     everySteps: integer('everySteps', everySteps, 0, 100000),
-    seconds: integer('seconds', 40, 8, 120),
+    seconds: integer('seconds', 90, 8, 120),
     seed: integer('seed', 424242, 0, 0xffffffff),
-    previewMaxFrames: integer('previewMaxFrames', 1000, 0, 9000),
+    previewMaxFrames: integer('previewMaxFrames', 2250, 0, 9000),
     baseline: bool('baseline', false), control: bool('control', false),
     ...(text('caption') ? { caption: text('caption') } : {}),
     ...(text('lyrics') ? { lyrics: text('lyrics') } : {}),
