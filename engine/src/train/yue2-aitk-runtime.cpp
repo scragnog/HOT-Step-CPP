@@ -58,7 +58,21 @@ struct ResumeBinding {
     int opt_iter = -1;
     double prodigy_d = -1.0;
     double prodigy_r = -1.0;
+    // The stop windows' recent values. Without them every preview resume
+    // restarted the windows empty, so no target stop could fire for the first
+    // window's worth of steps of each segment: up to 20 steps of overshoot.
+    std::vector<double> kl_history, loss_history;
 };
+// Steps in the KL trend fit. Kept in step with Yue2AitkTrainCard's chart.
+constexpr int kKlTrendWindow = 30;
+// A least-squares line through `v`, read at its last point.
+double trend_at_end(const std::vector<double> & v) {
+    const double n = (double) v.size(), xm = (n - 1.0) / 2.0;
+    double ym = 0.0; for (double y : v) ym += y; ym /= n;
+    double sxy = 0.0, sxx = 0.0;
+    for (size_t i = 0; i < v.size(); ++i) { const double dx = (double) i - xm; sxy += dx * (v[i] - ym); sxx += dx * dx; }
+    return ym + (sxx > 0.0 ? sxy / sxx : 0.0) * (n - 1.0 - xm);
+}
 bool parse_resume_meta(const std::string & text, const std::string & checkpoint, const std::string & dataset, const std::string & source,
                        uint64_t seed, int cuda_index, size_t item_count, ResumePlan * plan, std::string * error,
                        float * cursor_weight, bool cursor_explicit,
@@ -103,6 +117,14 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
     if (!str_field(vrecipe,&recipe) || recipe!="yue2-aitk-runtime-v1" || !str_field(vcp,&cp) || cp!=checkpoint || !str_field(vds,&ds) || ds!=dataset || !str_field(vsm,&sm) || sm!=source || !yyjson_is_uint(vseed) || yyjson_get_uint(vseed)!=seed || !yyjson_is_int(vdev) || yyjson_get_sint(vdev)!=cuda_index || !yyjson_is_int(vstep) || yyjson_get_sint(vstep)<0 || yyjson_get_sint(vstep)>INT_MAX || !yyjson_is_uint(vcursor) || !yyjson_is_arr(vorder) || yyjson_arr_size(vorder)!=item_count || !str_field(vsampler,&sampler)) return fail(error,"resume metadata binding mismatch");
     plan->completed=static_cast<int>(yyjson_get_sint(vstep)); plan->cursor=static_cast<size_t>(yyjson_get_uint(vcursor)); plan->sampler=std::move(sampler); plan->order.clear(); std::unordered_set<size_t> seen; size_t i=0,max=0; yyjson_val * x=nullptr; yyjson_arr_foreach(vorder,i,max,x) { if(!yyjson_is_uint(x) || yyjson_get_uint(x)>=item_count || !seen.insert(static_cast<size_t>(yyjson_get_uint(x))).second) return fail(error,"resume order is not a permutation"); plan->order.push_back(static_cast<size_t>(yyjson_get_uint(x))); }
     if (plan->cursor>item_count || plan->completed<0) return fail(error,"resume cursor is out of range");
+    if (binding) {
+        auto history=[&](const char * key, std::vector<double> * out) {
+            yyjson_val * a=yyjson_obj_get(root,key); if(!yyjson_is_arr(a)) return;
+            size_t hi=0, hmax=0; yyjson_val * hv=nullptr;
+            yyjson_arr_foreach(a,hi,hmax,hv) if(yyjson_is_num(hv) && std::isfinite(yyjson_get_num(hv))) out->push_back(yyjson_get_num(hv));
+        };
+        history("kl_history",&binding->kl_history); history("loss_history",&binding->loss_history);
+    }
     if (config.optimizer!="adamw" && binding) {
         yyjson_val * vopt=yyjson_obj_get(root,"opt_iter");
         if(!vopt || !yyjson_is_int(vopt) || yyjson_get_sint(vopt)<0) return fail(error,"resume record is missing the optimizer iteration counter");
@@ -117,7 +139,8 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
     return true;
 }
 std::string make_resume_meta(const std::string & cp, const std::string & ds, const std::string & sm, uint64_t seed, int device, int completed, size_t cursor, const std::vector<size_t> & order, const std::string & sampler, float cursor_weight,
-                             const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r) {
+                             const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r,
+                             const std::vector<double> & kl_history, const std::vector<double> & loss_history) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
@@ -131,6 +154,12 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if (config.adapter_type=="lokr") { yyjson_mut_obj_add_strcpy(doc,root,"adapter_type","lokr"); yyjson_mut_obj_add_int(doc,root,"lokr_dim",config.lokr_dim); yyjson_mut_obj_add_int(doc,root,"lokr_factor",config.lokr_factor); }
     if (config.cautious) yyjson_mut_obj_add_bool(doc,root,"cautious",true);
     yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"caption_dropout",config.caption_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale); yyjson_mut_obj_add_real(doc,root,"target_kl",config.target_kl);
+    // Only runs with a target stop carry these, so other records are unchanged.
+    for (auto [key, hist] : { std::pair<const char *, const std::vector<double> *>{"kl_history",&kl_history}, {"loss_history",&loss_history} }) {
+        if (hist->empty()) continue;
+        yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:*hist) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,key,a);
+    }
+    if (config.target_kl_mode!="mean") yyjson_mut_obj_add_strcpy(doc,root,"target_kl_mode",config.target_kl_mode.c_str());
     if (config.nar_lr_scale!=1.0f) yyjson_mut_obj_add_real(doc,root,"nar_lr_scale",config.nar_lr_scale);  // absent = 1.0, keeps old records byte-identical
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
@@ -449,6 +478,10 @@ static int run_impl(Config config, std::string * error) {
         std::ofstream jsonl(std::filesystem::u8path(config.output) / "train.jsonl", std::ios::binary);
         if (!jsonl) { fail(error, "cannot create training JSONL"); return 1; }
         int last_saved = -1;
+        // Declared before save_checkpoint, which writes them into the resume
+        // record; seeded from it so a resumed segment can stop at once.
+        std::vector<double> loss_window = config.target_loss > 0.0f ? resume_binding.loss_history : std::vector<double>{};
+        std::vector<double> kl_window = config.target_kl > 0.0f ? resume_binding.kl_history : std::vector<double>{};
         auto save_checkpoint = [&](int step) -> bool {
             if (step == last_saved) return true;
             event("checkpoint_stage", step);
@@ -459,7 +492,7 @@ static int run_impl(Config config, std::string * error) {
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
-                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0);
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window);
             if (metadata.empty()) return false;
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout)) return false;
             if (use_lm) {
@@ -511,10 +544,6 @@ static int run_impl(Config config, std::string * error) {
             if (!save_ec) { last_saved=step; event("checkpoint", step); }
             return !save_ec;
         };
-        std::vector<double> loss_window;
-        loss_window.reserve(config.target_loss_window);
-        std::vector<double> kl_window;
-        kl_window.reserve(config.target_loss_window);
         while (completed < config.steps) {
             if (yue2_aitk_cancel_requested()) {
                 if (completed > 0 && !save_checkpoint(completed)) { fail(error, "cancel checkpoint publication failed"); return 1; }
@@ -609,7 +638,7 @@ static int run_impl(Config config, std::string * error) {
                 // stop, so the earliest stop is at step target_loss_window.
                 const double composite = metrics.ar_ce + (double) config.kl_weight * metrics.ar_kl + metrics.nar_mse + metrics.cursor_ce * (double) cursor_weight;
                 loss_window.push_back(composite);
-                if (static_cast<int>(loss_window.size()) > config.target_loss_window) loss_window.erase(loss_window.begin());
+                while (static_cast<int>(loss_window.size()) > config.target_loss_window) loss_window.erase(loss_window.begin());
                 if (static_cast<int>(loss_window.size()) == config.target_loss_window) {
                     double sum = 0.0;
                     for (double v : loss_window) sum += v;
@@ -626,11 +655,14 @@ static int run_impl(Config config, std::string * error) {
                 // base alone. The stop is "at or above": the adapter has moved
                 // as far from the base as the recipe allows.
                 kl_window.push_back(metrics.ar_kl);
-                if (static_cast<int>(kl_window.size()) > config.target_loss_window) kl_window.erase(kl_window.begin());
-                if (static_cast<int>(kl_window.size()) == config.target_loss_window) {
+                const bool trend = config.target_kl_mode == "trend";
+                const int keep = trend ? kKlTrendWindow : config.target_loss_window;
+                while (static_cast<int>(kl_window.size()) > keep) kl_window.erase(kl_window.begin());
+                if (static_cast<int>(kl_window.size()) == keep) {
                     double sum = 0.0;
                     for (double v : kl_window) sum += v;
-                    if (sum / (double) config.target_loss_window >= (double) config.target_kl) {
+                    const double reading = trend ? trend_at_end(kl_window) : sum / (double) keep;
+                    if (reading >= (double) config.target_kl) {
                         if (!save_checkpoint(completed)) { fail(error, "target checkpoint publication failed"); return 1; }
                         event("target", completed);
                         event("done", completed);

@@ -67,6 +67,9 @@ export interface ResolvedYue2JointTrainOptions {
   /** The decoder (NAR) half's lr multiple. LoKr ships 0.5: under Prodigy the
    *  NAR otherwise overcooks before the AR reaches its KL target. */
   narLrScale?: number;
+  /** How the KL stop reads ar_kl: the engine's 20-step mean (default) or a
+   *  30-step least-squares trend read at the current step (no lag). */
+  targetKlMode?: 'mean' | 'trend';
 }
 
 /** Route and native runner share the public stop-mode contract. */
@@ -99,6 +102,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   }
   if (o.stopMode === 'loss' && o.targetLoss !== undefined) args.push('--target-loss', String(o.targetLoss));
   if (o.stopMode === 'kl' && o.targetKl !== undefined) args.push('--target-kl', String(o.targetKl));
+  if (o.stopMode === 'kl' && o.targetKlMode === 'trend') args.push('--target-kl-mode', 'trend');
   if (o.lr !== undefined) args.push('--lr', String(o.lr));
   if (o.weightDecay !== undefined) args.push('--weight-decay', String(o.weightDecay));
   if (o.klWeight !== undefined) args.push('--kl-weight', String(o.klWeight));

@@ -674,6 +674,7 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   captionDropout?: number;
   plannerLrScale?: number;
   narLrScale?: number;
+  targetKlMode?: 'mean' | 'trend';
 }
 
 export interface Yue2JointPreviewOptions {

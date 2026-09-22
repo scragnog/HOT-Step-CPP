@@ -59,7 +59,7 @@ export interface ChartMilestone {
 
 /** What a step point may carry beyond the store's own shape: the 20-step stop
  *  mean (computed by the AITK card) and the AR KL term of a joint run. */
-export type ChartStepPoint = TrainStepPoint & { ma20?: number; arKl?: number };
+export type ChartStepPoint = TrainStepPoint & { ma20?: number; arKl?: number; klStop?: number };
 
 const VB = 100;
 /** Vertical breathing room so the target line and the extremes clear the edges. */
@@ -140,6 +140,8 @@ interface Metric {
   dashed?: boolean;
   /** Hidden until the user asks for it in the legend. */
   offByDefault?: boolean;
+  /** Draw on another metric's scale (and skip an axis of its own). */
+  axis?: string;
 }
 
 interface Props {
@@ -157,10 +159,14 @@ interface Props {
   evals?: Array<{ ep: number; loss: number }>;
   /** Epoch cap, for the x-axis caption. 0 = unknown. */
   maxEpochs?: number;
+  /** AR KL stop target; > 0 draws it on the ar_kl axis, beside the stop
+   *  reading (`klStop` on the steps) that is compared against it. */
+  klTarget?: number;
+  klStopLabel?: string;
 }
 
 export const TrainingChart: React.FC<Props> = ({
-  epochs, steps = [], milestones = [], target, maxEpochs = 0, evals = [],
+  epochs, steps = [], milestones = [], target, maxEpochs = 0, evals = [], klTarget = 0, klStopLabel,
 }) => {
   const { t } = useTranslation();
   /** Cursor position as a fraction of the plot width, null when not hovering. */
@@ -232,6 +238,20 @@ export const TrainingChart: React.FC<Props> = ({
       }
     }
 
+    // The KL stop reading, on the ar_kl axis so it and the target line are
+    // comparable by height with the raw KL.
+    {
+      const stop = stepPts
+        .filter(s => typeof s.klStop === 'number' && Number.isFinite(s.klStop))
+        .map(s => ({ x: s.ep, v: s.klStop as number }));
+      if (stop.length >= 2 && out.some(m => m.key === 'arKl')) {
+        out.push({
+          key: 'klStop', label: klStopLabel ?? t('trainingStudio.chart.mKlStop', 'KL stop reading'),
+          raw: [], trend: stop, colour: '#ea580c', trendColour: '#ea580c', dashed: true, axis: 'arKl',
+        });
+      }
+    }
+
     if (epochPts.length >= 2) {
       const raw = epochPts.map(e => ({ x: e.epoch, v: e.loss }));
       const ma = movingAverage(epochLosses);
@@ -250,7 +270,7 @@ export const TrainingChart: React.FC<Props> = ({
       });
     }
     return out;
-  }, [epochPts, stepPts, evalPts, t]);
+  }, [epochPts, stepPts, evalPts, t, klStopLabel]);
 
   /** On unless the user said otherwise — `flipped` holds the exceptions, so a
    *  metric that appears mid-run (the first eval, say) arrives at its default. */
@@ -277,6 +297,7 @@ export const TrainingChart: React.FC<Props> = ({
   // a learning rate of 1.5e-4 and a loss of 5.0 both fill the band.
   const scales = new Map<string, { lo: number; hi: number }>();
   for (const m of metrics) {
+    if (m.axis) continue;
     const vs = m.raw.concat(m.trend).map(p => p.v);
     let lo = Math.min(...vs);
     let hi = Math.max(...vs);
@@ -285,12 +306,14 @@ export const TrainingChart: React.FC<Props> = ({
     if (hasTarget && (m.key === 'loss' || m.key === 'epochLoss')) {
       lo = Math.min(lo, target); hi = Math.max(hi, target);
     }
+    if (klTarget > 0 && m.key === 'arKl') { lo = Math.min(lo, klTarget); hi = Math.max(hi, klTarget); }
     const span = hi - lo;
     if (span > 0) { lo -= span * 0.08; hi += span * 0.08; } else { lo -= 0.5; hi += 0.5; }
     scales.set(m.key, { lo, hi });
   }
+  const axisOf = new Map(metrics.filter(m => m.axis).map(m => [m.key, m.axis!]));
   const yIn = (key: string, v: number): number => {
-    const s = scales.get(key)!;
+    const s = scales.get(axisOf.get(key) ?? key)!;
     const f = (v - s.lo) / (s.hi - s.lo);
     return VB - PAD_B - Math.min(1, Math.max(0, f)) * (VB - PAD_T - PAD_B);
   };
@@ -306,7 +329,7 @@ export const TrainingChart: React.FC<Props> = ({
 
   // ── axis gutters ──────────────────────────────────────────────────────
   // Alternating so a four-metric run reads two a side, like the run viewers.
-  const axisMetrics = visible.filter(m => m.key !== 'stopMean');
+  const axisMetrics = visible.filter(m => m.key !== 'stopMean' && !m.axis);
   const leftAxes = axisMetrics.filter((_, i) => i % 2 === 0);
   const rightAxes = axisMetrics.filter((_, i) => i % 2 === 1);
   const padL = Math.max(AXIS_W, leftAxes.length * AXIS_W);
@@ -316,6 +339,7 @@ export const TrainingChart: React.FC<Props> = ({
   const targetVisible = hasTarget
     && visible.some(m => m.key === 'loss' || m.key === 'epochLoss');
   const targetKey = visible.some(m => m.key === 'epochLoss') ? 'epochLoss' : 'loss';
+  const klTargetVisible = klTarget > 0 && visible.some(m => m.key === 'arKl' || m.key === 'klStop');
 
   // ── hover: snap to the nearest sample and read every visible metric ────
   // Cumulative epoch wall time, for the elapsed readout when no step carries a
@@ -413,6 +437,15 @@ export const TrainingChart: React.FC<Props> = ({
               <line
                 x1={0} y1={yIn(targetKey, target)} x2={VB} y2={yIn(targetKey, target)}
                 stroke="#10b981" strokeWidth={1} strokeDasharray="4 3"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+
+            {/* AR KL stop target, on the ar_kl axis */}
+            {klTargetVisible && (
+              <line
+                x1={0} y1={yIn('arKl', klTarget)} x2={VB} y2={yIn('arKl', klTarget)}
+                stroke="#ea580c" strokeWidth={1} strokeDasharray="2 2"
                 vectorEffect="non-scaling-stroke"
               />
             )}
@@ -570,6 +603,12 @@ export const TrainingChart: React.FC<Props> = ({
           <span className="flex items-center gap-1">
             <span className="w-3 border-t border-dashed" style={{ borderColor: '#10b981' }} />
             {t('trainingStudio.chart.legendTarget')}
+          </span>
+        )}
+        {klTargetVisible && (
+          <span className="flex items-center gap-1">
+            <span className="w-3 border-t border-dotted" style={{ borderColor: '#ea580c' }} />
+            {t('trainingStudio.chart.legendKlTarget', { value: klTarget, defaultValue: 'KL target {{value}}' })}
           </span>
         )}
         {ticks.length > 0 && (

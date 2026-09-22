@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, Loader2, Play, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -44,6 +44,23 @@ function jointLossRate(points: JointStepPoint[]): number | null {
   const means = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
   return means.length >= 9 ? descentRate(means) : null;
 }
+/** Steps in the KL trend fit; the engine's kKlTrendWindow (yue2-aitk-runtime.cpp). */
+const KL_TREND_WINDOW = 30;
+/** What the engine's KL stop reads at the last of `kls`: a least-squares line
+ *  through the last 30 read at its end (trend), or the 20-step mean. null until
+ *  the window is full, as in the engine. `slope` is per step (trend only). */
+function klStopReading(kls: number[], mode: 'mean' | 'trend'): { value: number; slope?: number } | null {
+  const n = mode === 'trend' ? KL_TREND_WINDOW : 20;
+  if (kls.length < n) return null;
+  const v = kls.slice(-n);
+  const ym = v.reduce((s, x) => s + x, 0) / n;
+  if (mode === 'mean') return { value: ym };
+  const xm = (n - 1) / 2;
+  let sxy = 0, sxx = 0;
+  v.forEach((y, i) => { sxy += (i - xm) * (y - ym); sxx += (i - xm) ** 2; });
+  const slope = sxy / sxx;
+  return { value: ym + slope * (n - 1 - xm), slope };
+}
 function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string {
   const last = points[points.length - 1];
   const durations = points.map(p => p.stepMs).filter((ms): ms is number => typeof ms === 'number' && ms > 0).slice(-20);
@@ -51,12 +68,13 @@ function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string
   const pace = durations.reduce((sum, ms) => sum + ms, 0) / durations.length;
   const remaining = Math.max(0, form.steps - last.step);
   if (form.stopMode === 'kl' && form.targetKl && form.targetKl > 0) {
-    const kls = points.slice(-20).map(p => p.arKl).filter((v): v is number => typeof v === 'number');
-    if (kls.length < 20) return `AR KL warming up · cap ${formatDurationMs(remaining * pace)}`;
-    const mean = kls.reduce((s, v) => s + v, 0) / kls.length;
+    const all = points.map(p => p.arKl).filter((v): v is number => typeof v === 'number');
+    const reading = klStopReading(all, form.targetKlMode ?? 'mean');
+    if (!reading) return `AR KL warming up · cap ${formatDurationMs(remaining * pace)}`;
+    const mean = reading.value;
     if (mean >= form.targetKl) return `KL target reached · cap ${formatDurationMs(remaining * pace)}`;
     const older = points.slice(-40, -20).map(p => p.arKl).filter((v): v is number => typeof v === 'number');
-    const rate = older.length === 20 ? (mean - older.reduce((s, v) => s + v, 0) / 20) / 20 : 0;
+    const rate = reading.slope ?? (older.length === 20 ? (mean - older.reduce((s, v) => s + v, 0) / 20) / 20 : 0);
     if (!(rate > 0)) return `AR KL ${mean.toFixed(2)} of ${form.targetKl} · cap ${formatDurationMs(remaining * pace)}`;
     const stepsToTarget = (form.targetKl - mean) / rate;
     return stepsToTarget > remaining
@@ -120,15 +138,17 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // LoKr under Prodigy (Rob's ear tests, 2026-09-22): LoRA's KL 1.4 overcooks
   // both halves; KL 1.0 with the planner at 0.6 and the decoder at 1.0 is the
   // tested recipe. LoRA keeps KL 1.4 with the planner at 0.3 (LORA_STOP).
-  stopMode: 'kl', targetKl: 1.0, lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
+  // Trend (2026-09-22): the 20-step mean lagged the KL trend by ~10 steps.
+  stopMode: 'kl', targetKl: 1.0, targetKlMode: 'trend', lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
 };
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
 const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
 function defaultPreview(everySteps: number): Yue2JointPreviewOptions {
-  return { enabled: false, everySteps, seconds: 40, seed: 424242,
-    previewMaxFrames: 1000, baseline: false, control: false };
+  // 90 s (2026-09-22): 40 s often ended inside the intro, before any vocal.
+  return { enabled: false, everySteps, seconds: 90, seed: 424242,
+    previewMaxFrames: 2250, baseline: false, control: false };
 }
 
 function readStored<T>(key: string, fallback: T): T {
@@ -223,6 +243,12 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.adapterType === 'lokr' && stored.targetKl === 0.9) stored.targetKl = LOKR_STOP.targetKl;
     window.localStorage.setItem(lokrRecipe3, '1');
   }
+  // Preview 90 s (2026-09-22): a form still on the old 40 s default moves.
+  const preview90 = `${FORM_KEY}${datasetId}:defaults-preview-90`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(preview90)) {
+    if (stored.preview && stored.preview.seconds === 40) stored.preview = { ...stored.preview, seconds: 90, previewMaxFrames: 2250 };
+    window.localStorage.setItem(preview90, '1');
+  }
   return { ...DEFAULT_FORM, ...stored };
 }
 function writeStored(key: string, value: unknown): void {
@@ -276,7 +302,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08) : 0;
       const recipe = { ...form, cursorWeight: timingWeight, dataset: '', output: '', resume: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
-          everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 40)) * 25 } } : {}) };
+          everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 90)) * 25 } } : {}) };
       await startBatch({ datasetIds: batchDraft, lyricTiming, recipe });
       setPhase('train');
     } catch (err) {
@@ -300,6 +326,17 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // The job SSE endpoint replays its buffer, so this also reconstructs the
   // curve after a reload or EventSource reconnect.
   const [stepHistory, setStepHistory] = useState<JointStepPoint[]>([]);
+  // The KL stop reading at every step, for the chart: the same computation the
+  // engine makes, so the line crosses the target where the run stops.
+  const klMode = form.targetKlMode ?? 'mean';
+  const chartSteps = useMemo(() => {
+    const kls: number[] = [];
+    return stepHistory.map(point => {
+      if (typeof point.arKl === 'number') kls.push(point.arKl);
+      const reading = typeof point.arKl === 'number' ? klStopReading(kls, klMode) : null;
+      return reading ? { ...point, klStop: reading.value } : point;
+    });
+  }, [stepHistory, klMode]);
   const [milestones, setMilestones] = useState<JointMilestone[]>([]);
   const [jobLogs, setJobLogs] = useState<string[]>([]);
   const [showJobLogs, setShowJobLogs] = useState(false);
@@ -585,7 +622,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         autoPrepare: !resumeChoice && !form.resume?.trim(), preparation: prepare,
         checkpoint: '', output: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
-          everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 40)) * 25 } } : {}),
+          everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 90)) * 25 } } : {}),
         ...(form.resume?.trim() && !resumeChoice ? { resume: form.resume.trim() } : {}),
         ...selectedResume };
       const result = await startYue2JointTrain(datasetId, request);
@@ -796,7 +833,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           ? t('trainingStudio.yue2.method.maxSteps', 'Max steps')
           : t('trainingStudio.yue2.method.steps', 'Steps'), 'steps', 'number')}
         {(form.stopMode ?? 'steps') === 'loss' && field(t('trainingStudio.yue2.method.targetLoss', 'Target loss (composite, trailing mean)'), 'targetLoss', 'number')}
-        {(form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.targetKl', 'AR KL target (trailing mean)'), 'targetKl', 'number')}
+        {(form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.targetKl', 'AR KL target'), 'targetKl', 'number')}
+        {(form.stopMode ?? 'steps') === 'kl' && <label className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.targetKlMode', 'KL reading')}</span>
+          <select className={input} value={form.targetKlMode ?? 'mean'} disabled={active || starting || preparing || yue2RunAllActive}
+            onChange={event => setForm(previous => ({ ...previous, targetKlMode: event.target.value === 'trend' ? 'trend' : 'mean' }))}>
+            <option value="trend">{t('trainingStudio.yue2.method.targetKlTrend', '30-step trend line (no lag)')}</option>
+            <option value="mean">{t('trainingStudio.yue2.method.targetKlMean', '20-step mean (lags ~10 steps)')}</option>
+          </select>
+        </label>}
         {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number')}
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number')}
         {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device')}
@@ -907,7 +952,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </label>
         {form.preview?.enabled && <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           {field(t('trainingStudio.yue2.method.previewSeconds', 'Preview seconds'), 'seconds', 'number', form.preview, value => setForm(previous => {
-            const seconds = Math.max(8, Math.min(120, Number(value) || 40));
+            const seconds = Math.max(8, Math.min(120, Number(value) || 90));
             return { ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seconds, previewMaxFrames: seconds * 25 } };
           }))}
           {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })))}
@@ -967,9 +1012,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <div className="mt-3">
           <TrainingChart
             epochs={[]}
-            steps={stepHistory}
+            steps={chartSteps}
             milestones={milestones}
             target={form.stopMode === 'loss' ? (form.targetLoss ?? 0) : 0}
+            klTarget={form.stopMode === 'kl' ? (form.targetKl ?? 0) : 0}
+            klStopLabel={(form.targetKlMode ?? 'mean') === 'trend' ? 'KL trend (stop reading)' : 'KL 20-step mean (stop reading)'}
             maxEpochs={form.steps}
           />
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">

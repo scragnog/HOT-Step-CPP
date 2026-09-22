@@ -64,6 +64,12 @@ struct Config {
     // the target. Unlike ar_ce it means the same thing for every artist:
     // likeness starts near 1.25, planner damage near 1.9. Shares the window.
     float target_kl = 0.0f;
+    // How the KL stop reads the noisy per-step ar_kl. "mean": the trailing
+    // mean over target_loss_window, which lags the trend by half a window.
+    // "trend": a least-squares line through the last kKlTrendWindow steps,
+    // read at the current step, so there is no lag (2026-09-22). The UI draws
+    // the same line.
+    std::string target_kl_mode = "mean";
     // Planner (AR) objective: weight of the KL term that anchors the adapted
     // planner to the frozen base (AITK's ar_kl_weight), and the probability
     // that a cot=full example is trained WITHOUT its lead sheet so the same
@@ -98,7 +104,7 @@ inline void usage(FILE * out) {
         "[--adapter-type lora|lokr] [--lokr-dim 32] [--lokr-factor 8] "
         "[--optimizer adamw|adamw-lm|prodigy|muon] [--cautious] [--lr F] [--warmup N] [--weight-decay F] "
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
-        "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] "
+        "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] [--target-kl-mode mean|trend] "
         "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (not muon)] [--nar-lr-scale 1.0 (not muon)]\n");
 }
 
@@ -252,6 +258,9 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--target-kl")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.target_kl)) { if (error) *error = "--target-kl must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--target-kl-mode")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.target_kl_mode, error)) return ParseResult::error;
+            if (parsed.target_kl_mode != "mean" && parsed.target_kl_mode != "trend") { if (error) *error = "--target-kl-mode must be mean or trend"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--target-loss-window")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_i32(value_text.c_str(), &parsed.target_loss_window)) { if (error) *error = "--target-loss-window must be a nonnegative integer"; return ParseResult::error; }
