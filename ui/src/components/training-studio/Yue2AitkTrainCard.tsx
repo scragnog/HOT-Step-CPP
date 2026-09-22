@@ -117,14 +117,13 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // alpha/dim = 4, all four sites factorized, ~106 MB for the AR+NAR pair.
   // rank stays 64 so switching back to LoRA restores the LoRA recipe.
   rank: 64, alpha: 256, adapterType: 'lokr', lokrDim: 64, lokrFactor: 4,
-  // LoKr under Prodigy (greenday ear test, 2026-09-22): the best pair was AR
-  // step ~200-225 with NAR step ~100-125, and AR KL ~0.9 at that AR step. The
-  // NAR runs at half rate so one checkpoint lands both halves there. LoRA's
-  // recipe is KL 1.4 at NAR x1 (see LORA_STOP / LOKR_STOP).
-  stopMode: 'kl', targetKl: 0.9, lr: 2e-4, plannerLrScale: 0.3, narLrScale: 0.5,
+  // LoKr under Prodigy (Rob's ear tests, 2026-09-22): LoRA's KL 1.4 overcooks
+  // both halves; KL 0.9 with the planner at 0.6 and the decoder at 1.0 is the
+  // tested recipe. LoRA keeps KL 1.4 with the planner at 0.3 (LORA_STOP).
+  stopMode: 'kl', targetKl: 0.9, lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
 };
-const LORA_STOP = { targetKl: 1.4, narLrScale: undefined };
-const LOKR_STOP = { targetKl: 0.9, narLrScale: 0.5 };
+const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
+const LOKR_STOP = { targetKl: 0.9, plannerLrScale: 0.6, narLrScale: 1 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
 function defaultPreview(everySteps: number): Yue2JointPreviewOptions {
@@ -207,6 +206,16 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
       if (stored.narLrScale === undefined) stored.narLrScale = LOKR_STOP.narLrScale;
     }
     window.localStorage.setItem(lokrStop, '1');
+  }
+  // LoKr recipe 2 (2026-09-22): planner 0.3 -> 0.6, decoder 0.5 -> 1.0, for
+  // LoKr forms still on the first recipe's values.
+  const lokrRecipe2 = `${FORM_KEY}${datasetId}:defaults-lokr-recipe-2`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(lokrRecipe2)) {
+    if (stored.adapterType === 'lokr') {
+      if (stored.plannerLrScale === undefined || stored.plannerLrScale === 0.3) stored.plannerLrScale = LOKR_STOP.plannerLrScale;
+      if (stored.narLrScale === undefined || stored.narLrScale === 0.5) stored.narLrScale = LOKR_STOP.narLrScale;
+    }
+    window.localStorage.setItem(lokrRecipe2, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
@@ -861,8 +870,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {([
             ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), 'default 1e-4 · AdamW only (Prodigy learns its own; Muon uses its scale)'],
             ['weightDecay', t('trainingStudio.yue2.method.weightDecay', 'Weight decay'), 'default 1e-4'],
-            ['plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner learning-rate scale'), 'default 1.0 · the AR half trains at lr × this. This card ships 0.3, which holds the planner at 6e-5 while the decoder trains at 2e-4'],
-            ['narLrScale', t('trainingStudio.yue2.method.narLrScale', 'Decoder (NAR) learning-rate scale'), 'default 1.0 · the NAR half trains at lr × this. LoKr ships 0.5: under Prodigy the NAR garbles words and audio long before the planner reaches its KL target'],
+            ['plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner learning-rate scale'), 'default 1.0 · the AR half trains at lr × this. This card ships 0.6 for LoKr and 0.3 for LoRA'],
+            ['narLrScale', t('trainingStudio.yue2.method.narLrScale', 'Decoder (NAR) learning-rate scale'), 'default 1.0 · the NAR half trains at lr × this. Lower it if renders garble words or lose audio quality before the planner reaches its KL target'],
             ['klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor to base (planner)'), 'default 0.2 · higher keeps the planner closer to the base model'],
             ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), 'default 0.5 · share of lead-sheet examples trained without their sheet, so one adapter serves cot on and off'],
             ['captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'), 'default 0 · share of steps trained on the trigger alone instead of the song\'s caption. 0.5 is the measured recipe: it stops the adapter binding to each track\'s caption, so a NEW caption generalises. Needs a dataset prepared after 2026-09-20.'],
