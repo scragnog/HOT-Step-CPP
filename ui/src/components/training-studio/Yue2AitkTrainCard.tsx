@@ -658,7 +658,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void) => (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
-      <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={(!!resumeChoice && ['seed', 'device', 'rank', 'alpha', 'saveEvery', 'cursorWeight'].includes(key)) || active || starting || preparing || yue2RunAllActive}
+      <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={(!!resumeChoice && ['seed', 'device', 'rank', 'alpha', 'adapterType', 'lokrDim', 'lokrFactor', 'saveEvery', 'cursorWeight'].includes(key)) || active || starting || preparing || yue2RunAllActive}
         onChange={event => update ? update(event.target.value) : set(key as keyof Yue2JointTrainRequest, type === 'number' ? Number(event.target.value) : event.target.value as never)} />
     </label>
   );
@@ -748,10 +748,33 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number')}
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number')}
         {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device')}
-        {field(t('trainingStudio.yue2.method.rank', 'LoRA rank'), 'rank', 'number')}
-        {field(t('trainingStudio.yue2.method.alpha', 'LoRA alpha'), 'alpha', 'number')}
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.adapterType', 'Adapter type')}</span>
+          <select className={input} value={form.adapterType ?? 'lora'}
+            disabled={!!resumeChoice || active || starting || preparing || yue2RunAllActive}
+            onChange={event => {
+              const adapterType = event.target.value === 'lokr' ? 'lokr' : 'lora';
+              // LoKr's scale is alpha/dim, so alpha follows the dim by default
+              // (LyCORIS scale 1); LoRA gets its rank/alpha defaults back.
+              setForm(previous => adapterType === 'lokr'
+                ? { ...previous, adapterType, lokrDim: previous.lokrDim ?? 32, lokrFactor: previous.lokrFactor ?? 8, alpha: previous.lokrDim ?? 32 }
+                : { ...previous, adapterType, alpha: previous.rank ?? DEFAULT_FORM.alpha });
+            }}>
+            <option value="lora">{t('trainingStudio.yue2.method.adapterLora', 'LoRA')}</option>
+            <option value="lokr">{t('trainingStudio.yue2.method.adapterLokr', 'LoKr (experimental)')}</option>
+          </select>
+        </label>
+        {(form.adapterType ?? 'lora') === 'lokr' ? <>
+          {field(t('trainingStudio.yue2.method.lokrDim', 'LoKr dim'), 'lokrDim', 'number')}
+          {field(t('trainingStudio.yue2.method.lokrFactor', 'LoKr factor'), 'lokrFactor', 'number')}
+          {field(t('trainingStudio.yue2.method.lokrAlpha', 'LoKr alpha'), 'alpha', 'number')}
+        </> : <>
+          {field(t('trainingStudio.yue2.method.rank', 'LoRA rank'), 'rank', 'number')}
+          {field(t('trainingStudio.yue2.method.alpha', 'LoRA alpha'), 'alpha', 'number')}
+        </>}
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
+      {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Untested for quality on YuE2: dim 32 / factor 8 is 14 MB against 224 MB for the rank-64 LoRA. Alpha equal to dim is scale 1; the DiT defaults (512 / 6) come out larger than the LoRA here.')}</p>}
       {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. Likeness starts near 1.25; planner damage (looping outros) near 1.9. Training stops once the trailing 20-step mean reaches the target; steps is the cap.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">

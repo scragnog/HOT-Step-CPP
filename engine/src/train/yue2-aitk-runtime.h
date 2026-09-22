@@ -31,6 +31,15 @@ struct Config {
     bool jsonl = true;
     std::int32_t rank = 32;
     float alpha = 32.0f;
+    bool alpha_explicit = false;
+    // "lora" (A/B pairs, the only value before 2026-09-22) or "lokr" (kron
+    // factors, lokr-apply.h). Under lokr, --rank is unused and --alpha is the
+    // LoKr alpha, defaulting to --lokr-dim (scale 1) when not given. The DiT
+    // defaults (dim 512 / factor 6) are a trap at YuE2's dims: larger than a
+    // rank-64 LoRA. dim 32 / factor 8 is 14 MB.
+    std::string adapter_type = "lora";
+    std::int32_t lokr_dim = 32;
+    std::int32_t lokr_factor = 8;
     // adamw keeps the native CUDA AdamW8bit optimizer; prodigy and muon run
     // through the shared ggml-graph LmOptim (same optimizer the Legacy
     // trainers use) with the trainer's external clip as the only clipper.
@@ -76,6 +85,7 @@ inline void usage(FILE * out) {
         "--dataset <schema1-manifest.json> --output <new-run-dir> "
         "--steps N --save-every N --seed N --device CUDA0 [--resume <record>] [--pause-at N] "
         "[--cursor-weight 0.08 (0 disables lyric timing)] [--rank N] [--alpha F] "
+        "[--adapter-type lora|lokr] [--lokr-dim 32] [--lokr-factor 8] "
         "[--optimizer adamw|prodigy|muon] [--lr F] [--warmup N] [--weight-decay F] "
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
         "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] "
@@ -187,6 +197,19 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--alpha")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.alpha)) { if (error) *error = "--alpha must be a finite number"; return ParseResult::error; }
+            parsed.alpha_explicit = true;
+        } else if (!std::strcmp(arg, "--adapter-type")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.adapter_type, error)) return ParseResult::error;
+            if (parsed.adapter_type != "lora" && parsed.adapter_type != "lokr") {
+                if (error) *error = "--adapter-type must be lora or lokr";
+                return ParseResult::error;
+            }
+        } else if (!std::strcmp(arg, "--lokr-dim")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::decimal_i32(value_text.c_str(), &parsed.lokr_dim)) { if (error) *error = "--lokr-dim must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--lokr-factor")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::decimal_i32(value_text.c_str(), &parsed.lokr_factor)) { if (error) *error = "--lokr-factor must be a nonnegative integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--optimizer")) {
             if (!detail::value(arg, argc, argv, &i, &parsed.optimizer, error)) return ParseResult::error;
             if (parsed.optimizer != "adamw" && parsed.optimizer != "prodigy" && parsed.optimizer != "muon") {

@@ -3474,6 +3474,24 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       res.status(400).json({ error: 'prodigyD0 must be a positive finite number.' });
       return;
     }
+    // LoKr sites (kron factors) instead of LoRA pairs. Only forwarded when
+    // asked for, so a request without it trains exactly as before.
+    const adapterType = b.adapterType === undefined || b.adapterType === 'lora' ? 'lora'
+      : b.adapterType === 'lokr' ? 'lokr' : null;
+    if (adapterType === null) {
+      res.status(400).json({ error: 'adapterType must be lora or lokr.' });
+      return;
+    }
+    const lokrDim = b.lokrDim === undefined ? undefined : integer('lokrDim', 0);
+    if (lokrDim !== undefined && (lokrDim < 1 || lokrDim > 65536)) {
+      res.status(400).json({ error: 'lokrDim must be an integer between 1 and 65536.' });
+      return;
+    }
+    const lokrFactor = b.lokrFactor === undefined ? undefined : integer('lokrFactor', 0);
+    if (lokrFactor !== undefined && (lokrFactor < 1 || lokrFactor > 65536)) {
+      res.status(400).json({ error: 'lokrFactor must be an integer between 1 and 65536.' });
+      return;
+    }
     const muonLrScale = b.muonLrScale === undefined ? undefined : Number(b.muonLrScale);
     if (muonLrScale !== undefined && (!Number.isFinite(muonLrScale) || muonLrScale <= 0)) {
       res.status(400).json({ error: 'muonLrScale must be a positive finite number.' });
@@ -3546,6 +3564,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       preview: preview.enabled && preview.everySteps > 0 ? preview : { ...preview, enabled: false },
       alignment,
       rank, alpha: alphaRaw,
+      ...(adapterType === 'lokr' ? { adapterType, ...(lokrDim !== undefined ? { lokrDim } : {}), ...(lokrFactor !== undefined ? { lokrFactor } : {}) } : {}),
       ...(optimizer === 'prodigy' || optimizer === 'muon' ? { optimizer } : {}),
       ...(prodigyD0 !== undefined ? { prodigyD0 } : {}),
       ...(muonLrScale !== undefined ? { muonLrScale } : {}),
@@ -3557,7 +3576,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(preparation ? { preparation } : {}),
     });
     res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment,
-      optimizer, rank, alpha: alphaRaw, stopMode, ...advanced,
+      optimizer, rank, alpha: alphaRaw, adapterType, ...(adapterType === 'lokr' ? { lokrDim, lokrFactor } : {}), stopMode, ...advanced,
       ...(targetLoss !== undefined ? { targetLoss } : {}), ...(targetKl !== undefined ? { targetKl } : {}) });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });

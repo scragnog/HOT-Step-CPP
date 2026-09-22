@@ -82,6 +82,14 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
     if(rec_optimizer!=config.optimizer || rec_rank!=config.rank || rec_alpha!=config.alpha) {
         return fail(error,"resume optimizer, rank or alpha mismatch; start a new run");
     }
+    // Records written before LoKr existed carry no adapter_type: they are LoRA.
+    std::string rec_adapter="lora"; int rec_lokr_dim=0, rec_lokr_factor=0;
+    if(yyjson_val * v=yyjson_obj_get(root,"adapter_type")) { if(!str_field(v,&rec_adapter)) return fail(error,"resume adapter_type field is malformed"); }
+    if(yyjson_val * v=yyjson_obj_get(root,"lokr_dim")) { if(!yyjson_is_int(v)) return fail(error,"resume lokr_dim field is malformed"); rec_lokr_dim=int(yyjson_get_sint(v)); }
+    if(yyjson_val * v=yyjson_obj_get(root,"lokr_factor")) { if(!yyjson_is_int(v)) return fail(error,"resume lokr_factor field is malformed"); rec_lokr_factor=int(yyjson_get_sint(v)); }
+    if(rec_adapter!=config.adapter_type || (config.adapter_type=="lokr" && (rec_lokr_dim!=config.lokr_dim || rec_lokr_factor!=config.lokr_factor))) {
+        return fail(error,"resume adapter type or LoKr shape mismatch; start a new run");
+    }
     // Schedule knobs that only reshape the run from here on: note, don't refuse.
     { yyjson_val * v=yyjson_obj_get(root,"lr"); if(v&&yyjson_is_num(v)&&double(yyjson_get_num(v))!=double(config.lr)) std::fprintf(stderr,"[yue2-aitk] resume note: lr changed from %.9g to %.9g; the run continues with the new value\n", double(yyjson_get_num(v)), (double)config.lr); }
     { yyjson_val * v=yyjson_obj_get(root,"warmup"); if(v&&yyjson_is_int(v)&&int(yyjson_get_sint(v))!=config.warmup) std::fprintf(stderr,"[yue2-aitk] resume note: warmup changed from %d to %d; the run continues with the new value\n", int(yyjson_get_sint(v)), config.warmup); }
@@ -113,6 +121,9 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if(cursor_weight>0) yyjson_mut_obj_add_real(doc,root,"cursor_weight",cursor_weight);
     yyjson_mut_obj_add_strcpy(doc,root,"recipe","yue2-aitk-runtime-v1"); yyjson_mut_obj_add_strcpy(doc,root,"checkpoint_sha256",cp.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"dataset_sha256",ds.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"source_manifest_sha256",sm.c_str()); yyjson_mut_obj_add_uint(doc,root,"seed",seed); yyjson_mut_obj_add_int(doc,root,"cuda_index",device); yyjson_mut_obj_add_int(doc,root,"completed_step",completed); yyjson_mut_obj_add_uint(doc,root,"order_cursor",cursor); for(size_t x:order) yyjson_mut_arr_add_uint(doc,arr,x); yyjson_mut_obj_add_val(doc,root,"order",arr); yyjson_mut_obj_add_strcpy(doc,root,"sampler_state",sampler.c_str());
     yyjson_mut_obj_add_strcpy(doc,root,"optimizer",config.optimizer.c_str()); yyjson_mut_obj_add_int(doc,root,"rank",config.rank); yyjson_mut_obj_add_real(doc,root,"alpha",config.alpha); yyjson_mut_obj_add_real(doc,root,"lr",config.lr); yyjson_mut_obj_add_int(doc,root,"warmup",config.warmup); yyjson_mut_obj_add_real(doc,root,"weight_decay",config.weight_decay); yyjson_mut_obj_add_real(doc,root,"prodigy_d0",config.prodigy_d0); yyjson_mut_obj_add_real(doc,root,"muon_lr_scale",config.muon_lr_scale); yyjson_mut_obj_add_int(doc,root,"muon_ns_steps",config.muon_ns_steps);
+    // Only LoKr records carry these keys, so a LoRA record is byte-identical
+    // to one written before LoKr existed (the reader defaults to lora).
+    if (config.adapter_type=="lokr") { yyjson_mut_obj_add_strcpy(doc,root,"adapter_type","lokr"); yyjson_mut_obj_add_int(doc,root,"lokr_dim",config.lokr_dim); yyjson_mut_obj_add_int(doc,root,"lokr_factor",config.lokr_factor); }
     yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"caption_dropout",config.caption_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale); yyjson_mut_obj_add_real(doc,root,"target_kl",config.target_kl);
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
@@ -131,7 +142,7 @@ void yue2_aitk_install_sigint_handler() { std::signal(SIGINT, on_sigint); }
 bool yue2_aitk_cancel_requested() { return g_cancel != 0; }
 void yue2_aitk_clear_cancel() { g_cancel = 0; }
 
-static int run_impl(const Config & config, std::string * error) {
+static int run_impl(Config config, std::string * error) {
     if (!fresh_output(std::filesystem::u8path(config.output), error)) return 1;
     if (config.seed > UINT32_MAX) { fail(error, "native-v1 runtime seed must fit uint32_t"); return 1; }
     if (config.steps <= 0 || config.save_every <= 0 || config.cuda_index < 0 || config.cuda_index > 127) { fail(error, "invalid runtime configuration"); return 1; }
@@ -157,6 +168,16 @@ static int run_impl(const Config & config, std::string * error) {
         // (lm-optim.h), so lr_mul would apply to the AdamW-ruled parameters
         // only — a HALF-honoured split is worse than a refused one.
         fail(error, "--planner-lr-scale is not supported with --optimizer muon"); return 1;
+    }
+    const bool lokr = config.adapter_type == "lokr";
+    if (!lokr && config.adapter_type != "lora") { fail(error, "invalid runtime configuration"); return 1; }
+    if (lokr) {
+        if (config.lokr_dim < 1 || config.lokr_dim > 65536 || config.lokr_factor < 1 || config.lokr_factor > 65536) {
+            fail(error, "--lokr-dim and --lokr-factor must be within [1, 65536]"); return 1;
+        }
+        // LyCORIS convention: alpha == dim is scale 1. Resolved here so the
+        // resume record and the export carry the number actually trained with.
+        if (!config.alpha_explicit) config.alpha = (float) config.lokr_dim;
     }
     event("preflight");
     yue2_aitk::Dataset dataset;
@@ -231,7 +252,10 @@ static int run_impl(const Config & config, std::string * error) {
     try {
         event("load"); Yue2AitkModel model; Yue2AitkTrainState state;
         if (!model.load(config.checkpoint.c_str(), backend.value, yue2_aitk_load_embedding_bf16, error) ||
-            !state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0,config.rank,config.alpha)) return 1;
+            !state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0,config.rank,config.alpha,
+                              lokr ? config.lokr_dim : 0, lokr ? config.lokr_factor : 0)) return 1;
+        if (lokr) std::fprintf(stderr, "[yue2-aitk] adapter lokr: dim %d factor %d alpha %.4g, %zu trainable parameters\n",
+                               config.lokr_dim, config.lokr_factor, (double) config.alpha, state.parameter_count());
         const bool use_lm = (config.optimizer != "adamw");
         struct LmOptimHolder {
             LmOptim opt;

@@ -27,21 +27,32 @@ public:
     Yue2AitkTrainState(const Yue2AitkTrainState &) = delete;
     Yue2AitkTrainState & operator=(const Yue2AitkTrainState &) = delete;
 
+    // lokr_dim > 0 selects LoKr sites (kron factors, lokr-apply.h) in place of
+    // LoRA pairs; rank is then unused and alpha is the LoKr alpha.
     bool initialize(ggml_backend_t backend, uint32_t seed = kDefaultSeed, std::string * error = nullptr, bool cursor = false,
-                    int64_t rank = 32, float alpha = 32.0f) {
+                    int64_t rank = 32, float alpha = 32.0f, int lokr_dim = 0, int lokr_factor = 0) {
         reset();
         if (!backend) return fail(error, "backend is null");
         if (rank < 1 || rank > 65536) return fail(error, "rank must be within [1, 65536]");
         if (!std::isfinite(alpha) || alpha <= 0.0f) return fail(error, "alpha must be finite and positive");
-        ggml_init_params params{}; params.mem_size = 1024*ggml_tensor_overhead()+4096; params.no_alloc = true;
+        if (lokr_dim < 0 || lokr_dim > 65536) return fail(error, "lokr dim must be within [1, 65536]");
+        ggml_init_params params{}; params.mem_size = 2048*ggml_tensor_overhead()+4096; params.no_alloc = true;
         ctx_ = ggml_init(params); if (!ctx_) return fail(error, "failed to create train-state context");
         backend_ = backend; seed_ = seed; init_policy_ = "native-v1"; rank_ = rank; alpha_ = alpha;
+        lokr_dim_ = lokr_dim; lokr_factor_ = lokr_factor;
         const Yue2AitkDims dims{2048, 2048, 1024, 6144};
-        if (!yue2_aitk_make_expert_adapters(ctx_, dims, kLayers, rank, alpha, &ar_, "ar") ||
-            !yue2_aitk_make_expert_adapters(ctx_, dims, kLayers, rank, alpha, &nar_, "nar")) {
+        if (lokr_dim > 0) {
+            std::string why;
+            if (!yue2_aitk_lokr_slices_ok(dims, lokr_factor, &why)) { reset(); return fail(error, why); }
+            if (!yue2_aitk_make_expert_adapters_lokr(ctx_, dims, kLayers, lokr_dim, lokr_factor, alpha, &ar_, "ar") ||
+                !yue2_aitk_make_expert_adapters_lokr(ctx_, dims, kLayers, lokr_dim, lokr_factor, alpha, &nar_, "nar")) {
+                reset(); return fail(error, "failed to allocate AR/NAR LoKr adapters");
+            }
+        } else if (!yue2_aitk_make_expert_adapters(ctx_, dims, kLayers, rank, alpha, &ar_, "ar") ||
+                   !yue2_aitk_make_expert_adapters(ctx_, dims, kLayers, rank, alpha, &nar_, "nar")) {
             reset(); return fail(error, "failed to allocate AR/NAR adapters");
         }
-        slots_.reserve(2u * kLayers * kSites * 2u);
+        slots_.reserve(2u * kLayers * kSites * 3u);
         if (!build_slots(nar_, "diffusion_model", 0, error) || !build_slots(ar_, "text_encoders", 1, error)) { reset(); return false; }
         if (cursor) {
             auto * parameter=ggml_new_tensor_2d(ctx_,GGML_TYPE_F32,2048,2048);
@@ -79,6 +90,14 @@ public:
     const std::string & initialization_policy() const { return init_policy_; }
     int64_t rank() const { return rank_; }
     float alpha() const { return alpha_; }
+    bool is_lokr() const { return lokr_dim_ > 0; }
+    int lokr_dim() const { return lokr_dim_; }
+    int lokr_factor() const { return lokr_factor_; }
+    size_t parameter_count() const {
+        size_t n = 0;
+        for (const Slot & slot : slots_) if (slot.factor != -1) n += slot.host.size();
+        return n;
+    }
     const Yue2AitkExpertAdapters & ar_adapters() const { return ar_; }
     const Yue2AitkExpertAdapters & nar_adapters() const { return nar_; }
     ggml_tensor * cursor_head() const { return cursor_slot_==kInvalid?nullptr:slots_[cursor_slot_].parameter; }
@@ -158,6 +177,11 @@ public:
             ggml_backend_tensor_get(slot.parameter, slot.host.data(), 0, ggml_nbytes(slot.parameter));
             factors.push_back({slot.name, slot.rows, slot.cols, slot.host.data()});
         }
+        if (is_lokr()) {
+            if (!yue2_aitk_write_fused_lokr(factors, lokr_dim_, lokr_factor_, alpha_, steps, output_path)) return fail(error, "fused-LoKr export failed");
+            if ((ar_path || nar_path) && !yue2_aitk_write_native_split_lokr(factors, lokr_dim_, lokr_factor_, alpha_, steps, ar_path, nar_path, trigger, caption_dropout)) return fail(error, "native AR/NAR LoKr export failed");
+            return true;
+        }
         if (!yue2_aitk_write_fused_lora(factors, rank_, alpha_, steps, output_path)) return fail(error, "fused-LoRA export failed");
         if ((ar_path || nar_path) && !yue2_aitk_write_native_split(factors, rank_, alpha_, steps, ar_path, nar_path, trigger, caption_dropout)) return fail(error, "native AR/NAR export failed");
         return true;
@@ -188,6 +212,8 @@ private:
     size_t cursor_slot_ = kInvalid;
     int64_t rank_ = 32;
     float alpha_ = 32.0f;
+    int lokr_dim_ = 0;     // 0 = LoRA sites
+    int lokr_factor_ = 0;
 
     static bool fail(std::string * error, const char * message) { if (error) *error = message; return false; }
     static bool fail(std::string * error, const std::string & message) { if (error) *error = message; return false; }

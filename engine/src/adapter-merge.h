@@ -1396,6 +1396,24 @@ static bool adapter_merge_loha(WeightCtx *          wctx,
     return merged > 0;
 }
 
+// kron(w1, w2) as a ggml graph, the recipe adapter_merge_lokr below builds
+// inline (2026-09-22: shared with yue2/yue2-adapter.h). Inputs in ggml layout:
+// tw1 [b, a] (torch w1 [a, b]), tw2 [d, c] (torch W2 [c, d], monolithic or
+// already w2_a @ w2_b). Result [b*d, a*c] = the torch [a*c, b*d] delta, row
+// l*c + k, column m*d + n = w1[l,m] * W2[k,n]. Apply any scale to tw1 first:
+// it is the tiny side.
+static inline struct ggml_tensor * adapter_lokr_kron_delta(struct ggml_context * ctx, struct ggml_tensor * tw1,
+                                                          struct ggml_tensor * tw2, int64_t a, int64_t b, int64_t c,
+                                                          int64_t d) {
+    struct ggml_tensor * tw1_flat  = ggml_reshape_2d(ctx, tw1, 1, a * b);
+    struct ggml_tensor * tw2_flat  = ggml_reshape_2d(ctx, tw2, 1, c * d);
+    struct ggml_tensor * touter    = ggml_mul_mat(ctx, tw1_flat, tw2_flat);
+    struct ggml_tensor * touter_4d = ggml_reshape_4d(ctx, touter, b, a, d, c);
+    struct ggml_tensor * tkron_p   = ggml_permute(ctx, touter_4d, 1, 3, 0, 2);
+    struct ggml_tensor * tkron_c   = ggml_cont(ctx, tkron_p);
+    return ggml_reshape_2d(ctx, tkron_c, b * d, a * c);
+}
+
 static bool adapter_merge_lokr(WeightCtx *          wctx,
                                const WeightSource & ws,
                                const STFile &    st,

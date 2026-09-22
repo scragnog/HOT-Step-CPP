@@ -33,9 +33,17 @@ export interface ResolvedYue2JointTrainOptions {
   prodigyD0?: number;
   muonLrScale?: number;
   muonNsSteps?: number;
-  /** LoRA rank / alpha; engine defaults are 32 / 32.0. */
+  /** LoRA rank / alpha; engine defaults are 32 / 32.0. Under adapterType
+   *  'lokr', rank is unused and alpha is the LoKr alpha (engine default: the
+   *  LoKr dim, i.e. scale 1). */
   rank?: number;
   alpha?: number;
+  /** 'lora' (default) or 'lokr': kron-factor sites, dim/factor as in the DiT
+   *  trainer. Engine defaults dim 32 / factor 8 (the DiT's 512/6 is larger
+   *  than a rank-64 LoRA at YuE2's dims). */
+  adapterType?: 'lora' | 'lokr';
+  lokrDim?: number;
+  lokrFactor?: number;
   /** 'loss' trains until the windowed composite loss <= targetLoss; 'kl' until
    *  the windowed AR KL to base >= targetKl. steps is the cap either way. */
   stopMode?: 'steps' | 'loss' | 'kl';
@@ -67,6 +75,11 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   ];
   if (o.rank !== undefined) args.push('--rank', String(o.rank));
   if (o.alpha !== undefined) args.push('--alpha', String(o.alpha));
+  if (o.adapterType === 'lokr') {
+    args.push('--adapter-type', 'lokr');
+    if (o.lokrDim !== undefined) args.push('--lokr-dim', String(o.lokrDim));
+    if (o.lokrFactor !== undefined) args.push('--lokr-factor', String(o.lokrFactor));
+  }
   const optimizer = o.optimizer ?? 'adamw';
   if (optimizer !== 'adamw') {
     args.push('--optimizer', optimizer);
@@ -128,6 +141,9 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (o.optimizer && o.optimizer !== 'adamw' && o.optimizer !== 'prodigy' && o.optimizer !== 'muon') return 'optimizer must be adamw, prodigy or muon';
   if (o.rank !== undefined && (!Number.isInteger(o.rank) || o.rank < 1 || o.rank > 65536)) return 'rank must be an integer between 1 and 65536';
   if (o.alpha !== undefined && (!Number.isFinite(o.alpha) || o.alpha <= 0)) return 'alpha must be a positive finite number';
+  if (o.adapterType !== undefined && o.adapterType !== 'lora' && o.adapterType !== 'lokr') return 'adapterType must be lora or lokr';
+  if (o.lokrDim !== undefined && (!Number.isInteger(o.lokrDim) || o.lokrDim < 1 || o.lokrDim > 65536)) return 'lokrDim must be an integer between 1 and 65536';
+  if (o.lokrFactor !== undefined && (!Number.isInteger(o.lokrFactor) || o.lokrFactor < 1 || o.lokrFactor > 65536)) return 'lokrFactor must be an integer between 1 and 65536';
   if (o.prodigyD0 !== undefined && (!Number.isFinite(o.prodigyD0) || o.prodigyD0 <= 0)) return 'prodigyD0 must be a positive finite number';
   if (o.muonLrScale !== undefined && (!Number.isFinite(o.muonLrScale) || o.muonLrScale <= 0)) return 'muonLrScale must be a positive finite number';
   if (o.muonNsSteps !== undefined && (!Number.isInteger(o.muonNsSteps) || o.muonNsSteps < 1 || o.muonNsSteps > 20)) return 'muonNsSteps must be an integer between 1 and 20';

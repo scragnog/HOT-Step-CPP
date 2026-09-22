@@ -637,9 +637,15 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   resume?: string;
   resumeRunId?: string;
   resumeStep?: number;
-  /** LoRA rank / alpha. Engine defaults are 32 / 32.0. */
+  /** LoRA rank / alpha. Engine defaults are 32 / 32.0. Under 'lokr', rank is
+   *  unused and alpha is the LoKr alpha (engine default = lokrDim, scale 1). */
   rank?: number;
   alpha?: number;
+  /** 'lora' (default) or 'lokr' (kron-factor sites). Engine defaults for LoKr
+   *  are dim 32 / factor 8; the DiT's 512/6 is a trap at YuE2's dims. */
+  adapterType?: 'lora' | 'lokr';
+  lokrDim?: number;
+  lokrFactor?: number;
   /** 'loss' trains until the windowed composite loss reaches targetLoss;
    *  'kl' until the planner's trailing AR KL to base reaches targetKl. steps
    *  stays the cap either way. */

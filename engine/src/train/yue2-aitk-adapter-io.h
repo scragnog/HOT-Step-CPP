@@ -149,3 +149,43 @@ inline bool yue2_aitk_write_fused_lora(
     if (!published) hs_remove(temporary);
     return published;
 }
+
+// The LoKr twin. No reference trainer defines a fused LoKr layout, so this
+// writes the trainer's own slot inventory verbatim (`<expert>.model.layers.N.
+// <site>.lokr_w1` / `.lokr_w2` / `.lokr_w2_a` / `.lokr_w2_b`) so a checkpoint
+// directory keeps its adapter.safetensors either way. The loadable files are
+// the native split ones (yue2-aitk-native-adapter-io.h).
+inline bool yue2_aitk_write_fused_lokr(
+    const std::vector<Yue2AitkF32Matrix> &factors,
+    int                                  dim,
+    int                                  factor,
+    float                                alpha,
+    int64_t                              steps,
+    const char *                         output_path) {
+    using namespace yue2_aitk_adapter_io_detail;
+    if (!output_path || !*output_path || output_exists(output_path) || factors.empty() ||
+        dim <= 0 || factor == 0 || steps < 0 || !std::isfinite(alpha) || alpha <= 0.0f) return false;
+    std::unordered_set<std::string> seen;
+    std::vector<STWTensor> tensors;
+    tensors.reserve(factors.size());
+    for (const Yue2AitkF32Matrix &f : factors) {
+        if (!f.data || f.rows <= 0 || f.cols <= 0 || f.name.find(".lokr_w") == std::string::npos ||
+            !seen.insert(f.name).second) return false;
+        tensors.push_back({f.name, {f.rows, f.cols}, f.data, -1});
+    }
+    const std::vector<std::pair<std::string, std::string>> metadata = {
+        {"format", "yue2-aitk-fused-lokr-v1"},
+        {"lokr_dim", std::to_string(dim)},
+        {"lokr_factor", std::to_string(factor)},
+        {"alpha", alpha_string(alpha)},
+        {"steps", std::to_string(steps)},
+    };
+    const std::string temporary = unique_sibling(output_path);
+    if (!st_write_file(temporary.c_str(), tensors, metadata, STW_BF16)) {
+        hs_remove(temporary);
+        return false;
+    }
+    const bool published = publish_no_replace(temporary, output_path);
+    if (!published) hs_remove(temporary);
+    return published;
+}

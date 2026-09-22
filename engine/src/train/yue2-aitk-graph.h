@@ -61,6 +61,14 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
     ggml_tensor * base = ggml_convrot8(ctx, w.weight_i8, x, w.scales_f32,
                                       bias ? f32(ctx, bias) : nullptr, w.rotation, true);
     if (!adapter) return base;
+    if (adapter->is_lokr()) {
+        // Same boundary as the LoRA branch: BF16-rounded input, F32 factor
+        // maths (lokr-apply.h, shared with the DiT trainer), BF16 delta.
+        // [out_k, out_l*S] is the same bytes as [out, S].
+        ggml_tensor * d = lokr_apply_delta(ctx, round(ctx, x), adapter->lokr);
+        ggml_tensor * delta = round(ctx, ggml_reshape_2d(ctx, d, base->ne[0], base->ne[1]));
+        return round(ctx, ggml_add(ctx, base, delta));
+    }
     // FP32 trainables and FP32 LoRA math; only the branch output is BF16.
     ggml_tensor * ax = ggml_mul_mat(ctx, adapter->a, round(ctx, x));
     ggml_mul_mat_set_prec(ax, GGML_PREC_F32);

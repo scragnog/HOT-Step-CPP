@@ -284,6 +284,22 @@ static bool yue2a_starts(const std::string & s, const char * p) {
     return s.size() >= n && s.compare(0, n, p) == 0;
 }
 
+// LoKr factor suffixes (the joint trainer's native split export,
+// train/yue2-aitk-native-adapter-io.h): 1 = w1, 2 = w2 (monolithic),
+// 3 = w2_a, 4 = w2_b, 0 = not a LoKr key. Same module-path convention as the
+// LoRA suffixes above, so yue2_lora_target classifies both alike.
+static int yue2_lokr_suffix(const std::string & key, std::string & module_out) {
+    static const char * sfx[] = { ".lokr_w1", ".lokr_w2", ".lokr_w2_a", ".lokr_w2_b" };
+    for (int i = 0; i < 4; i++) {
+        const size_t n = strlen(sfx[i]);
+        if (key.size() > n && key.compare(key.size() - n, n, sfx[i]) == 0) {
+            module_out = key.substr(0, key.size() - n);
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
 // Which trainable half a site belongs to. YUE2_FAM_NONE is "not a site we
 // merge"; YUE2_FAM_ANY is only ever a REQUEST (an adapter that declares no
 // format), never the answer for a concrete module.
@@ -624,6 +640,13 @@ static size_t yue2a_elem_size(const std::string & dtype) {
 struct Yue2LoraFactor {
     const STEntry * a     = nullptr;
     const STEntry * b     = nullptr;
+    // LoKr (w1 set, a/b null): delta = scale * kron(w1, w2) with w2 either the
+    // monolithic tensor or w2_a @ w2_b. Never both w2 and w2_a/w2_b.
+    const STEntry * w1    = nullptr;
+    const STEntry * w2    = nullptr;
+    const STEntry * w2a   = nullptr;
+    const STEntry * w2b   = nullptr;
+    bool            lokr() const { return w1 != nullptr; }
     float           alpha = 0.0f;  // 0 => scaling 1.0
     // Carried from the target so the merge loop can price each tensor without
     // re-parsing its name: the loop iterates the gguf-name map, and the module
@@ -673,15 +696,15 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
     if (md.format.empty()) {
         fprintf(stderr, "[YuE2-Adapter] NOTE: no `format` in __metadata__ — merging on the strength of the "
                         "key names alone, and refusing the file if it names both halves\n");
-    } else if (yue2a_starts(md.format, "yue2-nar-lora")) {
+    } else if (yue2a_starts(md.format, "yue2-nar-lora") || yue2a_starts(md.format, "yue2-nar-lokr")) {
         want_fam = YUE2_FAM_NAR;
-    } else if (yue2a_starts(md.format, "yue2-ar-lora")) {
+    } else if (yue2a_starts(md.format, "yue2-ar-lora") || yue2a_starts(md.format, "yue2-ar-lokr")) {
         want_fam = YUE2_FAM_AR;
     } else if (!yue2a_starts(md.format, "yue2-")) {
         // Not ours at all. Refuse by name rather than by an empty merge.
         if (err_out) {
             *err_out = "adapter __metadata__ says format=\"" + md.format +
-                       "\"; this loader merges yue2-nar-lora-v1 / yue2-ar-lora-v1 files only";
+                       "\"; this loader merges yue2-{nar,ar}-{lora,lokr}-v1 files only";
         }
         return -1;
     } else {
@@ -720,8 +743,10 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
         }
     }
 
-    // Pass 2: the A/B factors.
+    // Pass 2: the A/B factors, and the LoKr factor sets.
     std::map<std::string, const STEntry *> a_by_module, b_by_module;
+    struct LokrEntry { const STEntry * w1 = nullptr, * w2 = nullptr, * w2a = nullptr, * w2b = nullptr; };
+    std::map<std::string, LokrEntry>       lokr_by_module;
     for (const auto & e : st.entries) {
         std::string mod;
         const char  which = yue2_lora_suffix(e.name, mod);
@@ -729,6 +754,14 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
             a_by_module[mod] = &e;
         } else if (which == 'B') {
             b_by_module[mod] = &e;
+        } else if (which == 0) {
+            switch (yue2_lokr_suffix(e.name, mod)) {
+                case 1: lokr_by_module[mod].w1  = &e; break;
+                case 2: lokr_by_module[mod].w2  = &e; break;
+                case 3: lokr_by_module[mod].w2a = &e; break;
+                case 4: lokr_by_module[mod].w2b = &e; break;
+                default: break;
+            }
         }
     }
 
@@ -741,18 +774,10 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
     // can act on.
     std::string                           first_ar, first_nar;
 
-    for (const auto & kv : a_by_module) {
-        const std::string & mod = kv.first;
-        auto                bit = b_by_module.find(mod);
-        if (bit == b_by_module.end()) {
-            // A LoRA factor can only ever be exported in pairs, so a lone A
-            // means a truncated or interrupted write. Refusing beats merging
-            // the 199 modules that did survive.
-            if (orphan.empty()) {
-                orphan = mod;
-            }
-            continue;
-        }
+    // Classify one module and bind its factors (`f` arrives with a/b or the
+    // LoKr set filled). false = refusal with err_out set; a module that is not
+    // a merge site is counted and skipped without failing.
+    auto bind = [&](const std::string & mod, Yue2LoraFactor f) -> bool {
         const Yue2LoraTarget t = yue2_lora_target(mod);
         if (t.gguf_name.empty()) {
             switch (t.why) {
@@ -760,7 +785,7 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
                 case YUE2_LR_FOREIGN:   n_foreign++; break;
                 default:                n_unknown++; break;
             }
-            continue;
+            return true;
         }
         if (t.renamed_time_embed) {
             n_time_embed++;
@@ -776,7 +801,7 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
                            "). Merging it would adapt the half the trainer never touched, which is the exact "
                            "failure this check exists to prevent — refusing the whole file";
             }
-            return -1;
+            return false;
         }
         if (t.family == YUE2_FAM_AR && first_ar.empty()) {
             first_ar = mod;
@@ -791,11 +816,8 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
                 *err_out = "two adapter modules target " + t.gguf_name + " (one of them is \"" + mod +
                            "\") — ambiguous, refusing rather than picking one";
             }
-            return -1;
+            return false;
         }
-        Yue2LoraFactor f;
-        f.a      = kv.second;
-        f.b      = bit->second;
         f.group  = t.group;
         f.block  = t.block;
         auto ait = alpha_by_module.find(mod);
@@ -803,12 +825,60 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
                  : (md.alpha > 0.0f)              ? md.alpha
                                                   : (float) cfg_alpha;
         targets[t.gguf_name] = f;
+        return true;
+    };
+
+    for (const auto & kv : a_by_module) {
+        const std::string & mod = kv.first;
+        auto                bit = b_by_module.find(mod);
+        if (bit == b_by_module.end()) {
+            // A LoRA factor can only ever be exported in pairs, so a lone A
+            // means a truncated or interrupted write. Refusing beats merging
+            // the 199 modules that did survive.
+            if (orphan.empty()) {
+                orphan = mod;
+            }
+            continue;
+        }
+        Yue2LoraFactor f;
+        f.a = kv.second;
+        f.b = bit->second;
+        if (!bind(mod, f)) {
+            return -1;
+        }
+    }
+    for (const auto & kv : lokr_by_module) {
+        const std::string & mod = kv.first;
+        const LokrEntry &   e   = kv.second;
+        // w1 plus exactly one of {w2} / {w2_a, w2_b}; anything else is a
+        // truncated write or a foreign layout.
+        if (!e.w1 || ((e.w2 != nullptr) == (e.w2a && e.w2b)) || (!e.w2 && (!e.w2a || !e.w2b))) {
+            if (orphan.empty()) {
+                orphan = mod;
+            }
+            continue;
+        }
+        if (a_by_module.count(mod) || b_by_module.count(mod)) {
+            if (err_out) {
+                *err_out = "adapter module \"" + mod + "\" carries both LoRA and LoKr factors";
+            }
+            return -1;
+        }
+        Yue2LoraFactor f;
+        f.w1  = e.w1;
+        f.w2  = e.w2;
+        f.w2a = e.w2a;
+        f.w2b = e.w2b;
+        if (!bind(mod, f)) {
+            return -1;
+        }
     }
 
     if (!orphan.empty()) {
         if (err_out) {
             *err_out = "adapter module \"" + orphan +
-                       "\" has an A factor with no matching B (truncated or half-written export)";
+                       "\" has an incomplete factor set (a lone A, or LoKr without w1 / w2 / w2_a+w2_b) — a "
+                       "truncated or half-written export";
         }
         return -1;
     }
@@ -900,6 +970,51 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
             ws.data(name.c_str(), ttype);
             ws.shape(name.c_str(), n_dims, ne);
 
+            if (f.lokr()) {
+                // torch shapes: w1 [a, b]; w2 [c, d] or w2_a [c, r] + w2_b [r, d].
+                // kron(w1, W2) is [a*c, b*d] and must equal [out, in] exactly.
+                const STEntry * w2c = f.w2 ? f.w2 : f.w2a;
+                const bool two_d = f.w1->n_dims == 2 && w2c->n_dims == 2 && (!f.w2b || f.w2b->n_dims == 2);
+                const int64_t a = f.w1->shape[0], b = f.w1->shape[1], c = w2c->shape[0];
+                const int64_t d = f.w2 ? f.w2->shape[1] : f.w2b->shape[1];
+                const int64_t r = f.w2 ? 0 : f.w2a->shape[1];
+                if (!two_d || a <= 0 || b <= 0 || c <= 0 || d <= 0 || a * c != ne[1] || b * d != ne[0] ||
+                    (!f.w2 && (r <= 0 || f.w2b->shape[0] != r))) {
+                    char buf[320];
+                    snprintf(buf, sizeof(buf),
+                             "%s: LoKr factors do not fit the base tensor (w1 [%lld,%lld], w2 [%lld,%lld]%s -> kron "
+                             "[%lld,%lld] vs base out=%lld in=%lld)",
+                             name.c_str(), (long long) a, (long long) b, (long long) c, (long long) d,
+                             f.w2 ? "" : " factorized", (long long) (a * c), (long long) (b * d), (long long) ne[1],
+                             (long long) ne[0]);
+                    if (err_out) {
+                        *err_out = buf;
+                    }
+                    return -1;
+                }
+                for (const STEntry * e : { f.w1, f.w2, f.w2a, f.w2b }) {
+                    if (!e) {
+                        continue;
+                    }
+                    if (e->dtype != "F32" && e->dtype != "BF16" && e->dtype != "F16") {
+                        if (err_out) {
+                            *err_out = name + ": unsupported LoKr factor dtype " + e->dtype + " (" + e->name +
+                                       "), expected F32/BF16/F16";
+                        }
+                        return -1;
+                    }
+                }
+                const bool extents_ok = yue2a_extent_ok(st, *f.w1, a * b, yue2a_elem_size(f.w1->dtype)) &&
+                    (f.w2 ? yue2a_extent_ok(st, *f.w2, c * d, yue2a_elem_size(f.w2->dtype))
+                          : (yue2a_extent_ok(st, *f.w2a, c * r, yue2a_elem_size(f.w2a->dtype)) &&
+                             yue2a_extent_ok(st, *f.w2b, r * d, yue2a_elem_size(f.w2b->dtype))));
+                if (!extents_ok) {
+                    if (err_out) {
+                        *err_out = name + ": LoKr factor data is outside the file — a truncated or interrupted export";
+                    }
+                    return -1;
+                }
+            } else {
             // safetensors shapes are PyTorch order: A is [rank, in], B is
             // [out, rank]. Compared against the ACTUAL base shape, never
             // against an assumed square — nar_attn_q is [2048, 2048] but
@@ -946,6 +1061,7 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
                 }
                 return -1;
             }
+            }  // LoRA-shaped checks
 
             if (ggml_quantize_requires_imatrix(ttype)) {
                 if (err_out) {
@@ -1042,11 +1158,78 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
         // Shapes, dtypes and byte extents were all validated in the preflight
         // above, which is why nothing in this loop can bail out half way and
         // leave a partly adapted LM — and why the reads below are in-bounds.
+        std::function<adapter_delta_build(struct ggml_context *)> build;
+        // Host copies the build lambda uploads; declared out here so they
+        // outlive the merge call whichever branch fills them.
+        std::vector<float> av, bv, w1v, w2v, w2av, w2bv;
+
+        if (f.lokr()) {
+            // torch w1 [a, b], W2 [c, d] (= w2_a [c, r] @ w2_b [r, d] when
+            // factorized). delta = scale * kron(w1, W2), the same graph
+            // adapter-merge.h's LyCORIS path builds (adapter_lokr_kron_delta).
+            // scale = alpha / dim, forced to 1 where w2 is monolithic — LyCORIS
+            // K6, and exactly what the joint trainer applied
+            // (train/yue2-aitk-lora.h make_lokr_site).
+            const int64_t a = f.w1->shape[0], b = f.w1->shape[1];
+            const int64_t c = f.w2 ? f.w2->shape[0] : f.w2a->shape[0];
+            const int64_t d = f.w2 ? f.w2->shape[1] : f.w2b->shape[1];
+            const int64_t r = f.w2 ? 0 : f.w2a->shape[1];
+            w1v.resize((size_t) (a * b));
+            bool conv = adapter_to_f32(st_data(st, *f.w1), w1v.data(), a * b, f.w1->dtype);
+            if (f.w2) {
+                w2v.resize((size_t) (c * d));
+                conv = conv && adapter_to_f32(st_data(st, *f.w2), w2v.data(), c * d, f.w2->dtype);
+            } else {
+                w2av.resize((size_t) (c * r));
+                w2bv.resize((size_t) (r * d));
+                conv = conv && adapter_to_f32(st_data(st, *f.w2a), w2av.data(), c * r, f.w2a->dtype) &&
+                       adapter_to_f32(st_data(st, *f.w2b), w2bv.data(), r * d, f.w2b->dtype);
+            }
+            if (!conv) {
+                if (err_out) {
+                    *err_out = gguf_name + ": LoKr factor conversion failed";
+                }
+                return -1;
+            }
+            const float scaling = f.w2 ? 1.0f : ((f.alpha > 0.0f) ? (f.alpha / (float) r) : 1.0f);
+            if (!f.w2 && f.alpha <= 0.0f && !warned_alpha) {
+                warned_alpha = true;
+                fprintf(stderr, "[YuE2-Adapter] NOTE: no alpha found for a factorized LoKr module — using "
+                                "scaling 1.0, i.e. alpha == dim\n");
+            }
+            const bool mono = f.w2 != nullptr;
+            build = [=, &w1v, &w2v, &w2av, &w2bv](struct ggml_context * ctx) {
+                struct ggml_tensor * tw1 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, b, a);
+                struct ggml_tensor * tw2 = nullptr, * tw2a = nullptr, * tw2b = nullptr, * tW2 = nullptr;
+                if (mono) {
+                    tw2 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, d, c);
+                    tW2 = tw2;
+                } else {
+                    tw2a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, r, c);
+                    tw2b = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, d, r);
+                    // rank onto ne0 of both operands so mul_mat contracts it
+                    tW2  = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, tw2b)), tw2a);
+                }
+                struct ggml_tensor * tw1_s = (scaling == 1.0f) ? tw1 : ggml_scale(ctx, tw1, scaling);
+                adapter_delta_build db;
+                db.tdelta = adapter_lokr_kron_delta(ctx, tw1_s, tW2, a, b, c, d);
+                db.upload = [=, &w1v, &w2v, &w2av, &w2bv]() {
+                    ggml_backend_tensor_set(tw1, w1v.data(), 0, w1v.size() * sizeof(float));
+                    if (mono) {
+                        ggml_backend_tensor_set(tw2, w2v.data(), 0, w2v.size() * sizeof(float));
+                    } else {
+                        ggml_backend_tensor_set(tw2a, w2av.data(), 0, w2av.size() * sizeof(float));
+                        ggml_backend_tensor_set(tw2b, w2bv.data(), 0, w2bv.size() * sizeof(float));
+                    }
+                };
+                return db;
+            };
+        } else {
         // A is [rank, in] and B is [out, rank] in PyTorch order.
         const int64_t rank = f.a->shape[0];
 
-        std::vector<float> av((size_t) (rank * in_feat));
-        std::vector<float> bv((size_t) (out_feat * rank));
+        av.resize((size_t) (rank * in_feat));
+        bv.resize((size_t) (out_feat * rank));
         if (!adapter_to_f32(st_data(st, *f.a), av.data(), rank * in_feat, f.a->dtype) ||
             !adapter_to_f32(st_data(st, *f.b), bv.data(), out_feat * rank, f.b->dtype)) {
             if (err_out) {
@@ -1067,7 +1250,7 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
                             "alpha, no adapter_config.json) — using scaling 1.0, i.e. alpha == rank\n");
         }
 
-        auto build = [&](struct ggml_context * ctx) {
+        build = [=, &av, &bv](struct ggml_context * ctx) {
             // The (tensor, data) pairs are captured EXPLICITLY rather than
             // re-derived at upload time. A is [rank, in] and B is [out, rank],
             // so on a SQUARE weight — nar_attn_q and nar_attn_output are both
@@ -1094,6 +1277,7 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
             };
             return db;
         };
+        }  // LoRA build
 
         // promote_f32 = false, for the same reason MM3 gives (mm3-adapter.h:508-512):
         // the shipped bases are BF16/Q8_0, CUDA can encode F32 -> both, so the
@@ -1185,8 +1369,8 @@ static std::string yue2_adapter_probe_family(const std::string & path) {
     if (!st_open(&st, sf_path.c_str())) return "";
     std::string fam;
     const Yue2AdapterMeta md = yue2_adapter_read_meta(st);
-    if (yue2a_starts(md.format, "yue2-nar-lora")) fam = "nar";
-    else if (yue2a_starts(md.format, "yue2-ar-lora")) fam = "ar";
+    if (yue2a_starts(md.format, "yue2-nar-lora") || yue2a_starts(md.format, "yue2-nar-lokr")) fam = "nar";
+    else if (yue2a_starts(md.format, "yue2-ar-lora") || yue2a_starts(md.format, "yue2-ar-lokr")) fam = "ar";
     else {
         bool has_nar = false, has_ar = false;
         for (const STEntry & e : st.entries) {
