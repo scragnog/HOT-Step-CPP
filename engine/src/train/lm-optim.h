@@ -149,6 +149,24 @@ struct LmOptim {
     // makes a Prodigy-vs-AdamW comparison mean anything.
     bool          prodigy_bias_correction = true;
 
+    // ── Update modifiers (2026-09-22) ───────────────────────────────────────
+    //
+    // `cautious` (C-AdamW / Cautious Optimizers, Liang et al. 2024): zero the
+    // update wherever it disagrees in sign with the raw gradient, then rescale
+    // the survivors by 1/mean(mask) so the step size is preserved. Off by
+    // default and applied only where an explicit update tensor exists in the
+    // graph: Prodigy (pass 3), Muon (the orthogonalised bucket), and AdamW via
+    // the UNFUSED graph below. The fused ggml_opt_step_adamw has no update
+    // tensor to mask, so setting `cautious` under AdamW switches that
+    // parameter's step to the unfused form.
+    //
+    // `adamw_unfused` forces the unfused AdamW graph with no modifier, which
+    // exists so the two forms can be compared (yue2-optim-check). Neither flag
+    // changes anything for a run that leaves them at their defaults: the fused
+    // op is still the AdamW path and is bit-identical to before.
+    bool          cautious      = false;
+    bool          adamw_unfused = false;
+
     // ── Per-parameter learning-rate groups (P1b, 2026-09-03) ───────────────
     //
     // ggml_opt_step_adamw reads alpha from a [7] tensor per call, so one shared
@@ -594,6 +612,19 @@ struct LmStepStats {
 // intermediates per parameter where AdamW has a single fused node, and 504
 // parameters in one graph exhausts ggml-alloc's free-block list
 // (MAX_FREE_BLOCKS) long before the node cap matters.
+// Cautious mask: upd * mask / clamp(mean(mask), 1e-3, 1) with mask = 1 where
+// sign(upd) == sign(g). ggml has no sign op, but step(upd * g) is exactly that
+// mask (1 where the product is positive, 0 where it is zero or negative — a
+// zero update or zero gradient contributes nothing either way). The mean is a
+// per-tensor [1] scalar; ggml_div broadcasts it. `g` must be the SAME gradient
+// the update was formed from (clipped, if the rule clips).
+static ggml_tensor * lm_cautious(ggml_context * ctx, ggml_tensor * upd, ggml_tensor * g) {
+    ggml_tensor * mask = ggml_step(ctx, ggml_mul(ctx, upd, g));
+    ggml_tensor * mean = ggml_scale(ctx, ggml_sum(ctx, mask), 1.0f / (float) ggml_nelements(mask));
+    mean               = ggml_clamp(ctx, mean, 1e-3f, 1.0f);
+    return ggml_div(ctx, ggml_mul(ctx, upd, mask), mean);
+}
+
 static bool lm_optim_step_prodigy(LmOptim * o, ggml_backend_sched_t sched, float lr_now, LmStepStats * out) {
     const float  b1  = 0.9f;
     const float  b2  = 0.999f;
@@ -743,6 +774,12 @@ static bool lm_optim_step_prodigy(LmOptim * o, ggml_backend_sched_t sched, float
             // of exactly this).
             ggml_tensor * den = ggml_add(ctx, ggml_sqrt(ctx, o->mom_v[j]), o->t_pdeps);
             ggml_tensor * upd = ggml_div(ctx, o->mom_m[j], den);
+            if (o->cautious) {
+                // acc[j] still holds this step's gradient (zeroed only at the
+                // end of the step); clipf is the same host factor pass 2 used.
+                ggml_tensor * g = (clipf != 1.0f) ? ggml_scale(ctx, o->acc[j], clipf) : o->acc[j];
+                upd             = lm_cautious(ctx, upd, g);
+            }
             ggml_tensor * cur = (o->weight_decay > 0.0f)
                                     ? ggml_scale(ctx, o->params[j], 1.0f - step_j * o->weight_decay)
                                     : o->params[j];
@@ -845,6 +882,38 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
         ggml_tensor * g = c ? ggml_mul(ctx, o->acc[j], c) : o->acc[j];  // [1] broadcasts
 
         if (o->rule[j] != LM_RULE_MUON) {
+            if (o->cautious || o->adamw_unfused) {
+                // Unfused AdamW: the same recipe as ggml_opt_step_adamw
+                // (ggml-cpu/ops.cpp opt_step_adamw), written as ordinary nodes
+                // so the update exists as a tensor the modifiers can act on.
+                // Constants are baked per step — the graph is rebuilt every
+                // step anyway — and lr_mul folds straight into alpha, so this
+                // path needs no alt tensors. WRITE-AFTER-READ: m_new/v_new are
+                // ancestors of every write below, so nothing can overwrite
+                // mom_m/mom_v while a node still reads the old value.
+                const int   it   = o->opt_iter + 1;  // incremented below, 1-based like the fused path
+                const float lr_j = lr_now * o->lr_mul[j];
+                const float b1   = o->adam_beta1, b2 = o->adam_beta2;
+                const float b1h  = 1.0f / (1.0f - powf(b1, (float) it));
+                const float b2h  = 1.0f / (1.0f - powf(b2, (float) it));
+                ggml_tensor * m_new = ggml_add(ctx, ggml_scale(ctx, o->mom_m[j], b1), ggml_scale(ctx, g, 1.0f - b1));
+                ggml_tensor * v_new = ggml_add(ctx, ggml_scale(ctx, o->mom_v[j], b2), ggml_scale(ctx, ggml_sqr(ctx, g), 1.0f - b2));
+                ggml_tensor * mh    = ggml_scale(ctx, m_new, b1h);
+                // The fused op's eps is 1e-8 (p7[3] below); t_eps is 1e-6 by
+                // this struct's contract, so 0.01 * t_eps is that scalar
+                // without another caller-allocated tensor.
+                ggml_tensor * vh    = ggml_add(ctx, ggml_sqrt(ctx, ggml_scale(ctx, v_new, b2h)), ggml_scale(ctx, o->t_eps, 1e-2f));
+                ggml_tensor * upd   = ggml_div(ctx, mh, vh);
+                if (o->cautious) {
+                    upd = lm_cautious(ctx, upd, g);
+                }
+                ggml_tensor * cur = (o->weight_decay > 0.0f) ? ggml_scale(ctx, o->params[j], 1.0f - lr_j * o->weight_decay)
+                                                             : o->params[j];
+                ggml_build_forward_expand(go, ggml_cpy(ctx, ggml_sub(ctx, cur, ggml_scale(ctx, upd, lr_j)), o->params[j]));
+                ggml_build_forward_expand(go, ggml_cpy(ctx, m_new, o->mom_m[j]));
+                ggml_build_forward_expand(go, ggml_cpy(ctx, v_new, o->mom_v[j]));
+                continue;
+            }
             ggml_tensor * pa = o->t_adamw;
             if (o->lr_mul[j] != 1.0f) {
                 for (int k = 0; k < o->n_alt; k++) {
@@ -888,6 +957,12 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
         ggml_tensor * m_new = ggml_add(ctx, ggml_scale(ctx, M, o->muon.momentum), G);
         ggml_tensor * u     = o->muon.nesterov ? ggml_add(ctx, G, ggml_scale(ctx, m_new, o->muon.momentum)) : m_new;
         ggml_tensor * ortho = lm_muon_ns_batched(ctx, u, o->muon.ns_steps, o->t_eps);
+        if (o->cautious) {
+            // Masked against the clipped gradient of the SAME bucket: G and
+            // ortho share the [ne0, ne1, N] layout, and the mask mean is taken
+            // over the whole bucket — one Newton-Schulz, one mask.
+            ortho = lm_cautious(ctx, ortho, G);
+        }
 
         // Reference scale sqrt(max(1, rows/cols)) — identical for every member of
         // the bucket, since a bucket is one exact shape, so it folds into a
