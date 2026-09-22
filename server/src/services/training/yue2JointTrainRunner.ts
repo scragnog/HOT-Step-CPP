@@ -64,6 +64,9 @@ export interface ResolvedYue2JointTrainOptions {
    *  2026-09-20 (trigger-only prefixes); the engine refuses otherwise. */
   captionDropout?: number;
   plannerLrScale?: number;
+  /** The decoder (NAR) half's lr multiple. LoKr ships 0.5: under Prodigy the
+   *  NAR otherwise overcooks before the AR reaches its KL target. */
+  narLrScale?: number;
 }
 
 /** Route and native runner share the public stop-mode contract. */
@@ -102,6 +105,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   if (o.abcDropout !== undefined) args.push('--abc-dropout', String(o.abcDropout));
   if (o.captionDropout !== undefined) args.push('--caption-dropout', String(o.captionDropout));
   if (o.plannerLrScale !== undefined) args.push('--planner-lr-scale', String(o.plannerLrScale));
+  if (o.narLrScale !== undefined && o.narLrScale !== 1 && optimizer !== 'muon') args.push('--nar-lr-scale', String(o.narLrScale));
   if (o.resume) args.push('--resume', o.resume);
   if (o.alignment) {
     args.push('--cursor-weight', String(o.alignment.enabled ? o.alignment.cursorWeight : 0));

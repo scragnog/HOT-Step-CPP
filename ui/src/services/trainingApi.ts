@@ -673,6 +673,7 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   abcDropout?: number;
   captionDropout?: number;
   plannerLrScale?: number;
+  narLrScale?: number;
 }
 
 export interface Yue2JointPreviewOptions {

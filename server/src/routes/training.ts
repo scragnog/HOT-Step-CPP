@@ -3540,10 +3540,11 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     }
     // Advanced knobs: absent means the engine default. Ranges mirror the
     // trainer's own validation so a bad value fails here, not 20 s into a run.
-    const advanced: { lr?: number; weightDecay?: number; klWeight?: number; abcDropout?: number; captionDropout?: number; plannerLrScale?: number } = {};
+    const advanced: { lr?: number; weightDecay?: number; klWeight?: number; abcDropout?: number; captionDropout?: number; plannerLrScale?: number; narLrScale?: number } = {};
     const advancedSpec: Array<[keyof typeof advanced, number, number, boolean]> = [
       ['lr', 0, 1, false], ['weightDecay', 0, 10, true], ['klWeight', 0, 100, true],
       ['abcDropout', 0, 1, true], ['captionDropout', 0, 1, true], ['plannerLrScale', 0, 100, false],
+      ['narLrScale', 0, 100, false],
     ];
     for (const [key, lo, hi, zeroOk] of advancedSpec) {
       if (b[key] === undefined || b[key] === null || b[key] === '') continue;

@@ -131,6 +131,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if (config.adapter_type=="lokr") { yyjson_mut_obj_add_strcpy(doc,root,"adapter_type","lokr"); yyjson_mut_obj_add_int(doc,root,"lokr_dim",config.lokr_dim); yyjson_mut_obj_add_int(doc,root,"lokr_factor",config.lokr_factor); }
     if (config.cautious) yyjson_mut_obj_add_bool(doc,root,"cautious",true);
     yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"caption_dropout",config.caption_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale); yyjson_mut_obj_add_real(doc,root,"target_kl",config.target_kl);
+    if (config.nar_lr_scale!=1.0f) yyjson_mut_obj_add_real(doc,root,"nar_lr_scale",config.nar_lr_scale);  // absent = 1.0, keeps old records byte-identical
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
@@ -166,14 +167,15 @@ static int run_impl(Config config, std::string * error) {
         !std::isfinite(config.kl_weight) || config.kl_weight < 0.0f ||
         !std::isfinite(config.abc_dropout) || config.abc_dropout < 0.0f || config.abc_dropout > 1.0f ||
         !std::isfinite(config.caption_dropout) || config.caption_dropout < 0.0f || config.caption_dropout > 1.0f ||
-        !std::isfinite(config.planner_lr_scale) || config.planner_lr_scale <= 0.0f) {
+        !std::isfinite(config.planner_lr_scale) || config.planner_lr_scale <= 0.0f ||
+        !std::isfinite(config.nar_lr_scale) || config.nar_lr_scale <= 0.0f) {
         fail(error, "invalid runtime configuration"); return 1;
     }
-    if (config.optimizer == "muon" && config.planner_lr_scale != 1.0f) {
+    if (config.optimizer == "muon" && (config.planner_lr_scale != 1.0f || config.nar_lr_scale != 1.0f)) {
         // Muon's update is bucketed by shape and scaled once per bucket
         // (lm-optim.h), so lr_mul would apply to the AdamW-ruled parameters
         // only — a HALF-honoured split is worse than a refused one.
-        fail(error, "--planner-lr-scale is not supported with --optimizer muon"); return 1;
+        fail(error, "--planner-lr-scale / --nar-lr-scale are not supported with --optimizer muon"); return 1;
     }
     if (config.cautious && config.optimizer == "adamw") {
         fail(error, "--cautious needs an LmOptim optimizer: --optimizer adamw-lm, prodigy or muon (the native AdamW8bit kernel has no update tensor to mask)"); return 1;
@@ -324,17 +326,19 @@ static int run_impl(Config config, std::string * error) {
                 // Same split the AdamW path makes below: the planner's adapters
                 // are the "text_encoders." slots. lm_optim_init is what sizes
                 // lr_mul, so this cannot move above it.
-                if (config.planner_lr_scale != 1.0f) {
+                if (config.planner_lr_scale != 1.0f || config.nar_lr_scale != 1.0f) {
                     size_t scaled = 0;
                     for (const auto & p : named) {
-                        if (p.name.rfind("text_encoders.", 0) != 0) continue;
-                        if (!lm_optim_set_lr_mul(&o, p.parameter, config.planner_lr_scale)) {
-                            fail(error, "planner lr scale: a planner parameter is not registered with the optimizer"); return 1;
+                        const bool planner = p.name.rfind("text_encoders.", 0) == 0;
+                        const float mul = planner ? config.planner_lr_scale : config.nar_lr_scale;
+                        if (mul == 1.0f) continue;
+                        if (!lm_optim_set_lr_mul(&o, p.parameter, mul)) {
+                            fail(error, "lr scale: an adapter parameter is not registered with the optimizer"); return 1;
                         }
                         ++scaled;
                     }
-                    std::fprintf(stderr, "[yue2-aitk] planner lr x%.3g over %zu of %zu parameters (%s)\n",
-                                 (double) config.planner_lr_scale, scaled, params.size(), config.optimizer.c_str());
+                    std::fprintf(stderr, "[yue2-aitk] planner lr x%.3g, decoder lr x%.3g, %zu of %zu parameters scaled (%s)\n",
+                                 (double) config.planner_lr_scale, (double) config.nar_lr_scale, scaled, params.size(), config.optimizer.c_str());
                 }
                 // GGML's scheduler requires a CPU backend in its final slot,
                 // even when all optimizer tensors are CUDA-resident.
@@ -361,12 +365,13 @@ static int run_impl(Config config, std::string * error) {
                 // decoder and trains at --lr itself.
                 for (const auto & p : named) {
                     const bool planner = p.name.rfind("text_encoders.", 0) == 0;
-                    specs.push_back({p.name, p.parameter, p.gradient, planner ? config.planner_lr_scale : 1.0f});
+                    specs.push_back({p.name, p.parameter, p.gradient, planner ? config.planner_lr_scale : config.nar_lr_scale});
                 }
                 adamw = std::make_unique<yue2_aitk::Optimizer>(backend.value, config.cuda_index, std::move(specs));
-                if (config.planner_lr_scale != 1.0f)
-                    std::fprintf(stderr, "[yue2-aitk] planner lr %.3g (x%.3g), decoder lr %.3g\n",
-                                 (double) config.lr * config.planner_lr_scale, (double) config.planner_lr_scale, (double) config.lr);
+                if (config.planner_lr_scale != 1.0f || config.nar_lr_scale != 1.0f)
+                    std::fprintf(stderr, "[yue2-aitk] planner lr %.3g (x%.3g), decoder lr %.3g (x%.3g)\n",
+                                 (double) config.lr * config.planner_lr_scale, (double) config.planner_lr_scale,
+                                 (double) config.lr * config.nar_lr_scale, (double) config.nar_lr_scale);
             }
         }
         if (!config.resume.empty()) {

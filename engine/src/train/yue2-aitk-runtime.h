@@ -80,6 +80,11 @@ struct Config {
     // decoder (NAR) half always trains at --lr itself. 1.0 = one rate for
     // both halves, which is what every run before this flag did.
     float planner_lr_scale = 1.0f;
+    // The decoder (NAR) half's rate as a multiple of --lr, the mirror of
+    // planner_lr_scale. LoKr under Prodigy overcooks the NAR long before the
+    // AR reaches its KL target (greenday ear test, 2026-09-22: AR 200 + NAR 100
+    // beat any single checkpoint). 1.0 = unchanged.
+    float nar_lr_scale = 1.0f;
 };
 
 enum class ParseResult { ok, help, error };
@@ -94,7 +99,7 @@ inline void usage(FILE * out) {
         "[--optimizer adamw|adamw-lm|prodigy|muon] [--cautious] [--lr F] [--warmup N] [--weight-decay F] "
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
         "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] "
-        "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (not muon)]\n");
+        "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (not muon)] [--nar-lr-scale 1.0 (not muon)]\n");
 }
 
 namespace detail {
@@ -262,6 +267,9 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--planner-lr-scale")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.planner_lr_scale)) { if (error) *error = "--planner-lr-scale must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--nar-lr-scale")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.nar_lr_scale)) { if (error) *error = "--nar-lr-scale must be a finite number"; return ParseResult::error; }
         } else {
             if (error) *error = std::string("unknown option: ") + arg;
             return ParseResult::error;

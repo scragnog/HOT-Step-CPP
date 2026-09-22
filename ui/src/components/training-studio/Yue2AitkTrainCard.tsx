@@ -117,8 +117,14 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // alpha/dim = 4, all four sites factorized, ~106 MB for the AR+NAR pair.
   // rank stays 64 so switching back to LoRA restores the LoRA recipe.
   rank: 64, alpha: 256, adapterType: 'lokr', lokrDim: 64, lokrFactor: 4,
-  stopMode: 'kl', targetKl: 1.4, lr: 2e-4, plannerLrScale: 0.3,
+  // LoKr under Prodigy (greenday ear test, 2026-09-22): the best pair was AR
+  // step ~200-225 with NAR step ~100-125, and AR KL ~0.9 at that AR step. The
+  // NAR runs at half rate so one checkpoint lands both halves there. LoRA's
+  // recipe is KL 1.4 at NAR x1 (see LORA_STOP / LOKR_STOP).
+  stopMode: 'kl', targetKl: 0.9, lr: 2e-4, plannerLrScale: 0.3, narLrScale: 0.5,
 };
+const LORA_STOP = { targetKl: 1.4, narLrScale: undefined };
+const LOKR_STOP = { targetKl: 0.9, narLrScale: 0.5 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
 function defaultPreview(everySteps: number): Yue2JointPreviewOptions {
@@ -191,6 +197,16 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
       if (stored.alpha === undefined || stored.alpha === 64) stored.alpha = 256;
     }
     window.localStorage.setItem(lokrDefault, '1');
+  }
+  // LoKr stop recipe (2026-09-22): a LoKr form still on LoRA's KL 1.4 moves to
+  // the LoKr pair; a deliberately edited target stays.
+  const lokrStop = `${FORM_KEY}${datasetId}:defaults-lokr-stop`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(lokrStop)) {
+    if (stored.adapterType === 'lokr') {
+      if (stored.targetKl === undefined || stored.targetKl === 1.4) stored.targetKl = LOKR_STOP.targetKl;
+      if (stored.narLrScale === undefined) stored.narLrScale = LOKR_STOP.narLrScale;
+    }
+    window.localStorage.setItem(lokrStop, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
@@ -526,7 +542,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const loadPreset = (preset: Yue2JointPreset) => {
     // A preset saved before adapter types existed was a LoRA recipe; without
     // this it would load its LoRA alpha onto the LoKr default.
-    setForm(previous => ({ ...previous, adapterType: 'lora', ...preset.settings }));
+    setForm(previous => ({ ...previous, adapterType: 'lora', ...LORA_STOP, ...preset.settings }));
     if (preset.version === 2 && typeof preset.settings.lyricTiming === 'boolean') onLyricTimingChange(preset.settings.lyricTiming);
   };
   const removePreset = (name: string) => {
@@ -778,8 +794,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               // LoKr's scale is alpha/dim, so alpha follows the dim by default
               // (LyCORIS scale 1); LoRA gets its rank/alpha defaults back.
               setForm(previous => adapterType === 'lokr'
-                ? { ...previous, adapterType, lokrDim: previous.lokrDim ?? 64, lokrFactor: previous.lokrFactor ?? 4, alpha: 4 * (previous.lokrDim ?? 64) }
-                : { ...previous, adapterType, alpha: previous.rank ?? 64 });
+                ? { ...previous, adapterType, lokrDim: previous.lokrDim ?? 64, lokrFactor: previous.lokrFactor ?? 4, alpha: 4 * (previous.lokrDim ?? 64), ...LOKR_STOP }
+                : { ...previous, adapterType, alpha: previous.rank ?? 64, ...LORA_STOP });
             }}>
             <option value="lora">{t('trainingStudio.yue2.method.adapterLora', 'LoRA')}</option>
             <option value="lokr">{t('trainingStudio.yue2.method.adapterLokr', 'LoKr (experimental)')}</option>
@@ -796,7 +812,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
       {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
-      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. Likeness starts near 1.25; planner damage (looping outros) near 1.9. Training stops once the trailing 20-step mean reaches the target; steps is the cap.')}</p>}
+      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 0.9. Training stops once the trailing 20-step mean reaches the target; steps is the cap.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
@@ -846,6 +862,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), 'default 1e-4 · AdamW only (Prodigy learns its own; Muon uses its scale)'],
             ['weightDecay', t('trainingStudio.yue2.method.weightDecay', 'Weight decay'), 'default 1e-4'],
             ['plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner learning-rate scale'), 'default 1.0 · the AR half trains at lr × this. This card ships 0.3, which holds the planner at 6e-5 while the decoder trains at 2e-4'],
+            ['narLrScale', t('trainingStudio.yue2.method.narLrScale', 'Decoder (NAR) learning-rate scale'), 'default 1.0 · the NAR half trains at lr × this. LoKr ships 0.5: under Prodigy the NAR garbles words and audio long before the planner reaches its KL target'],
             ['klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor to base (planner)'), 'default 0.2 · higher keeps the planner closer to the base model'],
             ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), 'default 0.5 · share of lead-sheet examples trained without their sheet, so one adapter serves cot on and off'],
             ['captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'), 'default 0 · share of steps trained on the trigger alone instead of the song\'s caption. 0.5 is the measured recipe: it stops the adapter binding to each track\'s caption, so a NEW caption generalises. Needs a dataset prepared after 2026-09-20.'],
